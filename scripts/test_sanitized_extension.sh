@@ -72,6 +72,16 @@ run_sql "mode must be 'overlap' or 'contain'" \
   "CREATE TABLE cgr_san(chrom VARCHAR,start BIGINT,stop BIGINT); INSERT INTO cgr_san VALUES ('chr1',0,1); SELECT duckhts_cgranges_from_query('cgr_san_idx','SELECT * FROM cgr_san','chrom','start','stop'); SELECT * FROM duckhts_cgranges_overlaps('cgr_san_idx','chr1',0,1,mode:='bad');"
 run_sql "read_bcf: failed to read or parse BCF/VCF record" \
   "SELECT count(*) FROM read_bcf('test/data/malformed_bad_pos.vcf',tidy_format:=true);"
+run_sql "region list: empty item" \
+  "SELECT count(*) FROM read_bam('test/data/range.bam',region:=',,');"
+run_sql "region list: invalid item" \
+  "SELECT count(*) FROM read_bcf('test/data/region_union.bcf',region:='chr1:1-20,chr1:20-10');"
+run_sql "region list: empty item" \
+  "SELECT count(*) FROM read_fasta('test/data/ce.fa',region:='CHROMOSOME_I:1-10,');"
+run_sql "region list: invalid item" \
+  "SELECT count(*) FROM read_tabix('test/data/gff_file.gff.gz',region:='X:20-10');"
+run_sql "" \
+  "SELECT CASE WHEN count(*)=4 AND count(*) FILTER (WHERE ID='long_ref')=2 AND count(*) FILTER (WHERE ID='long_end')=2 THEN true ELSE error('BCF long-record region union') END FROM read_bcf('test/data/region_union.bcf',region:='chr1:19-19,chr1:11-11,chr1:19-19',tidy_format:=true); SELECT CASE WHEN count(*)=4 THEN true ELSE error('VCF stored duplicates') END FROM read_bcf('test/data/region_union.vcf.gz',region:='chr1:18-18,chr1:18-18',tidy_format:=true) WHERE ID='duplicate';"
 run_sql "read_bam: failed to read SAM/BAM/CRAM record" \
   "SELECT QNAME FROM read_bam('test/data/bam_scan_malformed.sam',scan_mode:='sequential',decompression_threads:=0);"
 run_sql "" \
@@ -107,5 +117,12 @@ if [ "$sanitizer" = asan ]; then
     LD_PRELOAD="$(${CC:-cc} -print-file-name=libasan.so)" "$tmp/reference_cache_test" "$tmp"
 else
   "${runtime[@]}" "$tmp/reference_cache_test" "$tmp"
+fi
+cmake --build "$build_dir" --target duckhts_region_list_test -j2
+if [ "$sanitizer" = asan ]; then
+  ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+    LD_PRELOAD="$(${CC:-cc} -print-file-name=libasan.so)" "$build_dir/duckhts_region_list_test"
+else
+  "${runtime[@]}" "$build_dir/duckhts_region_list_test"
 fi
 echo "$sanitizer complete-extension gates: OK"

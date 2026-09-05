@@ -10,6 +10,10 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 knitr::opts_knit$set(root.dir = normalizePath(".."))
 ```
 
+Historical experiment: `read_bcf_appender` is removed from the public extension.
+The recorded measurements are retained, not relabeled as canonical-reader
+performance. Reproduction requires an explicitly selected pre-retirement binary.
+
 This report measures `read_bcf_appender(...)` after making `region_threads`
 partition work by primary contig. Each contig keeps its complete interval set
 in one htslib 1.24 multi-region iterator, so repeated and overlapping intervals
@@ -24,11 +28,13 @@ which measures native iterator decoding without appender materialization.
 
 ## Reproduction
 
-Build and install the current `Rduckhts` tarball, then render with the process
+Build an extension revision containing the experiment, then render with the process
 allowed on all CPUs named below. The script pins the serial run to one CPU and
 the four-job run to four CPUs.
 
 ```bash
+DUCKHTS_APPENDER_EXTENSION=/path/to/old/duckhts.duckdb_extension \
+DUCKHTS_APPENDER_REVISION=408fbcb5bc7c \
 DUCKHTS_BENCH_SERIAL_CPU=16 \
 DUCKHTS_BENCH_PARALLEL_CPUS=16-19 \
 taskset -c 16-19 Rscript -e "rmarkdown::render('benchmarks/benchmark_bcf_appender_contigs.Rmd', output_format = 'github_document')"
@@ -45,7 +51,6 @@ and commit.
 suppressPackageStartupMessages({
   library(DBI)
   library(duckdb)
-  library(Rduckhts)
 })
 
 sql_string <- function(x) {
@@ -65,11 +70,9 @@ set_affinity <- function(cpus) {
   cpus
 }
 
-git_revision <- command_output("git", c("rev-parse", "--short=12", "HEAD"))
-dirty <- length(system2(
-  "git", c("status", "--porcelain", "--untracked-files=no"), stdout = TRUE
-)) > 0L
-source_state <- if (dirty) paste0(git_revision, " + report-source changes") else git_revision
+extension <- Sys.getenv("DUCKHTS_APPENDER_EXTENSION")
+source_state <- Sys.getenv("DUCKHTS_APPENDER_REVISION")
+stopifnot(nzchar(extension), file.exists(extension), nzchar(source_state))
 
 serial_cpu <- Sys.getenv("DUCKHTS_BENCH_SERIAL_CPU", "16")
 parallel_cpus <- Sys.getenv("DUCKHTS_BENCH_PARALLEL_CPUS", "16-19")
@@ -119,7 +122,10 @@ stopifnot(system2(
 stopifnot(system2("bcftools", c("index", "-f", bcf_path)) == 0L)
 
 con <- dbConnect(duckdb(config = list(allow_unsigned_extensions = "true")))
-invisible(rduckhts_load(con))
+invisible(dbExecute(con, sprintf("LOAD %s", sql_string(normalizePath(extension)))))
+stopifnot(dbGetQuery(con, paste(
+  "SELECT count(*) AS n FROM duckdb_functions()",
+  "WHERE function_name = 'read_bcf_appender'"))$n[[1]] == 1)
 invisible(dbExecute(con, "PRAGMA threads=1"))
 
 appender_sql <- function(target, region_threads) {

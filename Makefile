@@ -143,6 +143,11 @@ test_debug: test-cache-paths test-duckvep-kernel test-simd-kernels test-liftover
 test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release
 test_release: test-reference-cache
 
+.PHONY: test-region-list
+test-region-list:
+	cmake --build cmake_build/release --target duckhts_region_list_test
+	./cmake_build/release/duckhts_region_list_test
+
 .PHONY: test-reference-cache test-reference-cache-asan test-reference-cache-ubsan test-reference-cache-tsan
 define run_reference_cache_test
 	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \

@@ -10,207 +10,146 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 knitr::opts_knit$set(root.dir = normalizePath(".."))
 ```
 
-This report measures the htslib 1.24 native multi-region iterator used by
-`read_bcf(...)`. The same generated records are read from indexed BCF, which
-uses `bcf_itr_regarray(...)`, and indexed VCF text, which uses
-`tbx_itr_regarray(...)`. The requested intervals overlap by design; each query
-must emit every matching VCF record once.
+This compares the canonical `read_bcf` indexed region path before and after
+shared region-list validation and retirement of the appender experiment.
+HTSlib 1.24 still owns interval union and record visitation: BCF uses
+`bcf_itr_regarray`, and indexed VCF text uses `tbx_itr_regarray`.
 
-There is no earlier checked-in multi-region reader benchmark with the same
-workload. The full-file `read_bcf(...)` measurements in
-[`benchmark_variantkey_conformance.md`](benchmark_variantkey_conformance.md)
-are the nearest reader baseline, but they are not directly comparable because
-they do not create indexed region iterators.
+The same-run baseline and candidate read identical cached files, with equal
+schema, record and aggregate-output denominators. The nearest identical logical
+workload was recorded at `2abd25645223` on July 18, 2026: 0.086 s BCF and
+0.284 s VCF.gz medians, one DuckDB thread and no HTSlib workers. That historical
+run used different compression tools; it is context, not an environment-matched
+regression comparison. The old rendered report remains in git history.
 
-## Reproduction
+## Reproduction and identity
 
-Build and install the current `Rduckhts` tarball, then render on one allowed
-CPU. For example:
+Build the two named revisions separately. Set `DUCKHTS_REGION_BASELINE_EXTENSION`
+and `DUCKHTS_REGION_BASELINE_REVISION` to the pre-fix binary and commit.
+`DUCKHTS_EXTENSION` selects the candidate (default: release build).
+Render on one allowed CPU, for example:
 
 ```bash
-taskset -c 2 Rscript -e "rmarkdown::render('benchmarks/benchmark_multi_region_readers.Rmd', output_format = 'github_document')"
+taskset -c 2 Rscript -e "rmarkdown::render('benchmarks/benchmark_multi_region_readers.Rmd')"
 ```
 
-The fixture is generated locally and deterministically. Fixture creation,
-BGZF compression, indexing, connection setup, and warm-up are outside the
-timed interval.
+The network-free `duckhts_bench_stage_multi_region()` stage resolves the
+synthetic VCF and its derived BCF/BGZF/index artifacts through the benchmark
+registry. It regenerates the exact consecutive-SNV workload before timing;
+creation, compression, indexing, connection setup and warm-up are excluded.
+Each build uses a separate in-memory database connection, with baseline first.
 
 ```{r benchmark, echo=FALSE}
 suppressPackageStartupMessages({
   library(DBI)
   library(duckdb)
-  library(Rduckhts)
 })
-
-sql_string <- function(x) {
-  sprintf("'%s'", gsub("'", "''", x, fixed = TRUE))
+Sys.setenv(DUCKHTSBENCH_REGISTRY = "r/duckhtsbench/inst/benchmark_registry.tsv")
+for (name in c("registry", "stage", "multi_region")) {
+  source(file.path("r/duckhtsbench/R", paste0(name, ".R")))
 }
-
-command_output <- function(command, args = character()) {
-  paste(system2(command, args, stdout = TRUE, stderr = TRUE), collapse = " ")
-}
-
-git_revision <- command_output("git", c("rev-parse", "--short=12", "HEAD"))
-dirty <- length(system2(
-  "git", c("status", "--porcelain", "--untracked-files=no"), stdout = TRUE
-)) > 0L
-source_state <- if (dirty) paste0(git_revision, " + report-source changes") else git_revision
-
-row_count <- as.integer(Sys.getenv("DUCKHTS_MULTI_REGION_ROWS", "2000000"))
+paths <- duckhts_bench_stage_multi_region()
+row_count <- as.integer(duckhts_bench_identity_fields(
+  duckhts_bench_stage_plan("multi-region-readers")$supplier_identity[[1]]
+)[["records"]])
 region_count <- 64L
 region_width <- 50000L
 region_step <- 25000L
-region_starts <- 1L + (seq_len(region_count) - 1L) * region_step
-region_ends <- region_starts + region_width - 1L
-stopifnot(max(region_ends) <= row_count)
-regions <- sprintf("1:%d-%d", region_starts, region_ends)
-region_spec <- paste(regions, collapse = ",")
-
-fixture_dir <- tempfile("duckhts-multi-region-")
-invisible(dir.create(fixture_dir))
-vcf_path <- file.path(fixture_dir, "variants.vcf")
-vcf_gz_path <- paste0(vcf_path, ".gz")
-bcf_path <- file.path(fixture_dir, "variants.bcf")
-
-out <- file(vcf_path, open = "wt")
-writeLines(c(
-  "##fileformat=VCFv4.3",
-  sprintf("##contig=<ID=1,length=%d>", row_count),
-  "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO"
-), out)
-chunk_size <- 100000L
-for (first in seq.int(1L, row_count, by = chunk_size)) {
-  last <- min(row_count, first + chunk_size - 1L)
-  pos <- seq.int(first, last)
-  writeLines(sprintf("1\t%d\t.\tA\tC\t.\tPASS\t.", pos), out)
+starts <- 1L + (seq_len(region_count) - 1L) * region_step
+ends <- starts + region_width - 1L
+stopifnot(max(ends) <= row_count)
+region_spec <- paste(sprintf("1:%d-%d", starts, ends), collapse = ",")
+expected_rows <- as.double(max(ends) - min(starts) + 1L)
+expected_sum <- expected_rows * (min(starts) + max(ends)) / 2
+sql_string <- function(x) sprintf("'%s'", gsub("'", "''", x, fixed = TRUE))
+command_output <- function(command, args = character()) {
+  paste(system2(command, args, stdout = TRUE, stderr = TRUE), collapse = " ")
 }
-close(out)
+baseline <- Sys.getenv("DUCKHTS_REGION_BASELINE_EXTENSION")
+baseline_revision <- Sys.getenv("DUCKHTS_REGION_BASELINE_REVISION")
+candidate <- Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension")
+stopifnot(nzchar(baseline_revision), file.exists(baseline), file.exists(candidate))
+stopifnot(length(system2("git", c("diff", "--name-only", "HEAD", "--", "src"), stdout = TRUE)) == 0L)
+revision <- command_output("git", c("rev-parse", "HEAD"))
+source_tree <- command_output("git", c("rev-parse", "HEAD:src"))
 
-status <- system2("bgzip", c("-@", "1", "-c", vcf_path), stdout = vcf_gz_path)
-stopifnot(status == 0L)
-stopifnot(system2("tabix", c("-f", "-p", "vcf", vcf_gz_path)) == 0L)
-stopifnot(system2("bcftools", c("view", "--no-version", "-Ob", "-o", bcf_path, vcf_gz_path)) == 0L)
-stopifnot(system2("bcftools", c("index", "-f", bcf_path)) == 0L)
-
-con <- dbConnect(duckdb(config = list(allow_unsigned_extensions = "true")))
-invisible(rduckhts_load(con))
-invisible(dbExecute(con, "PRAGMA threads=1"))
-
-query_for <- function(path) {
-  sprintf(
-    paste0(
-      "SELECT count(*) AS rows, sum(POS)::HUGEINT AS position_sum ",
-      "FROM read_bcf(%s, region := %s, decompression_threads := 0)"
-    ),
-    sql_string(path), sql_string(region_spec)
-  )
-}
-
-expected_rows <- as.double(max(region_ends) - min(region_starts) + 1L)
-expected_sum <- expected_rows * (min(region_starts) + max(region_ends)) / 2
-raw_region_hits <- as.double(region_count) * region_width
-
-measure <- function(format, path, repetitions = 9L) {
-  sql <- query_for(path)
-  for (i in seq_len(2L)) DBI::dbGetQuery(con, sql)
-  seconds <- numeric(repetitions)
-  answer <- NULL
-  for (i in seq_len(repetitions)) {
-    elapsed <- system.time(answer <- DBI::dbGetQuery(con, sql))[["elapsed"]]
-    seconds[[i]] <- elapsed
+measure_build <- function(build, extension) {
+  con <- dbConnect(duckdb(config = list(allow_unsigned_extensions = "true")))
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  dbExecute(con, sprintf("LOAD %s", sql_string(normalizePath(extension))))
+  dbExecute(con, "SET threads=1")
+  measure <- function(format, path) {
+    sql <- sprintf(paste(
+      "SELECT count(*) AS rows, sum(POS)::HUGEINT AS position_sum",
+      "FROM read_bcf(%s, region := %s, decompression_threads := 0)"),
+      sql_string(path), sql_string(region_spec))
+    check <- function(answer) {
+      stopifnot(as.double(answer$rows[[1]]) == expected_rows,
+                as.double(answer$position_sum[[1]]) == expected_sum)
+    }
+    for (i in seq_len(2L)) check(dbGetQuery(con, sql))
+    seconds <- numeric(9L)
+    for (i in seq_along(seconds)) {
+      seconds[[i]] <- system.time(answer <- dbGetQuery(con, sql))[["elapsed"]]
+      check(answer)
+    }
+    data.frame(build = build, format = format, runs = length(seconds),
+               reader_rows = expected_rows, sql_output_rows = 1L,
+               min_seconds = min(seconds), median_seconds = median(seconds),
+               max_seconds = max(seconds))
   }
-  stopifnot(as.double(answer$rows[[1]]) == expected_rows)
-  stopifnot(as.double(answer$position_sum[[1]]) == expected_sum)
-  data.frame(
-    format = format,
-    repetitions = repetitions,
-    unique_output_rows = expected_rows,
-    min_seconds = min(seconds),
-    median_seconds = stats::median(seconds),
-    max_seconds = max(seconds),
-    median_rows_per_second = expected_rows / stats::median(seconds),
-    stringsAsFactors = FALSE
-  )
+  rbind(measure("BCF + CSI", paths[["bcf"]]),
+        measure("VCF.gz + TBI", paths[["vcf_gz"]]))
 }
-
-results <- rbind(
-  measure("BCF + CSI (bcf_itr_regarray)", bcf_path),
-  measure("VCF.gz + TBI (tbx_itr_regarray)", vcf_gz_path)
-)
-
-cpu_model <- sub(
-  "^model name[[:space:]]*:[[:space:]]*", "",
-  grep("^model name", readLines("/proc/cpuinfo"), value = TRUE)[[1]]
-)
-affinity <- command_output("taskset", c("-pc", Sys.getpid()))
-
+results <- rbind(measure_build("baseline", baseline), measure_build("candidate", candidate))
 metadata <- data.frame(
-  item = c(
-    "source revision", "run date", "DuckDB version", "htslib version",
-    "CPU", "process affinity", "DuckDB threads", "htslib decompression threads",
-    "input records per format", "requested intervals", "interval width",
-    "interval step", "raw interval-record hits", "unique output records",
-    "overlap work factor", "uncompressed VCF bytes", "VCF.gz bytes", "BCF bytes",
-    "bgzip version", "tabix version", "bcftools version"
-  ),
-  value = c(
-    source_state,
-    as.character(Sys.Date()),
-    as.character(DBI::dbGetQuery(con, "SELECT version() AS version")$version[[1]]),
-    trimws(readLines("third_party/htslib/VERSION", n = 1L)),
-    cpu_model,
-    affinity,
-    "1",
-    "0",
-    format(row_count, big.mark = ",", scientific = FALSE),
-    as.character(region_count),
-    format(region_width, big.mark = ",", scientific = FALSE),
-    format(region_step, big.mark = ",", scientific = FALSE),
-    format(raw_region_hits, big.mark = ",", scientific = FALSE),
-    format(expected_rows, big.mark = ",", scientific = FALSE),
-    sprintf("%.3f", raw_region_hits / expected_rows),
-    format(file.info(vcf_path)$size, big.mark = ",", scientific = FALSE),
-    format(file.info(vcf_gz_path)$size, big.mark = ",", scientific = FALSE),
-    format(file.info(bcf_path)$size, big.mark = ",", scientific = FALSE),
-    command_output("bgzip", "--version"),
-    command_output("tabix", "--version"),
-    command_output("bcftools", "--version")
-  ),
-  stringsAsFactors = FALSE
+  property = c("baseline revision", "candidate revision", "candidate src tree",
+               "baseline binary MD5", "candidate binary MD5", "run date",
+               "DuckDB R package", "HTSlib", "CPU", "CPU affinity",
+               "DuckDB threads", "HTSlib workers per handle", "input records per format",
+               "requested intervals", "interval width", "interval step",
+               "raw interval-record hits", "unique reader rows", "SQL aggregate rows",
+               "bgzip version", "tabix version", "bcftools version"),
+  value = c(baseline_revision, revision, source_tree,
+            unname(tools::md5sum(baseline)), unname(tools::md5sum(candidate)),
+            as.character(Sys.Date()), as.character(packageVersion("duckdb")),
+            readLines("third_party/htslib/VERSION", n = 1),
+            sub("^model name[[:space:]]*:[[:space:]]*", "",
+                grep("^model name", readLines("/proc/cpuinfo"), value = TRUE)[[1]]),
+            command_output("taskset", c("-pc", Sys.getpid())),
+            1, 0, row_count, region_count, region_width, region_step,
+            region_count * region_width, expected_rows, 1,
+            command_output("bgzip", "--version"), command_output("tabix", "--version"),
+            command_output("bcftools", "--version"))
 )
-
-knitr::kable(metadata, col.names = c("Property", "Recorded value"))
-invisible(dbDisconnect(con, shutdown = TRUE))
-invisible(unlink(fixture_dir, recursive = TRUE))
+knitr::kable(metadata)
+knitr::kable(data.frame(artifact = names(paths), bytes = file.info(paths)$size,
+                       md5 = unname(tools::md5sum(paths))), row.names = FALSE)
 ```
 
 ## Results
 
-The denominator is unique VCF records returned after htslib merges the 64
-overlapping intervals. `raw interval-record hits` is what independent
-per-region scans would encounter before duplicate removal. Both formats are
-validated against the exact expected row count and position checksum on every
-timed run.
+The reader-row denominator is the 1,625,000 stored records returned after
+HTSlib unions 64 overlapping intervals, from 2,000,000 input records per format.
+Independent interval scans would encounter 3,200,000 record hits. Each SQL query
+returns one aggregate row. All nine timed runs validate both count and position
+checksum; separate SQL/R tests cover long REF/END spans, missing targets and
+physical duplicate records.
 
 ```{r results, echo=FALSE}
-display_results <- results
-display_results$unique_output_rows <- format(
-  display_results$unique_output_rows, big.mark = ",", scientific = FALSE
-)
-for (column in c("min_seconds", "median_seconds", "max_seconds")) {
-  display_results[[column]] <- sprintf("%.3f", display_results[[column]])
-}
-display_results$median_rows_per_second <- format(
-  round(display_results$median_rows_per_second), big.mark = ",", scientific = FALSE
-)
-names(display_results) <- c(
-  "Format and native iterator", "Runs", "Unique rows", "Minimum seconds",
-  "Median seconds", "Maximum seconds", "Median unique rows/s"
-)
-knitr::kable(display_results, align = c("l", "r", "r", "r", "r", "r", "r"))
+knitr::kable(results, digits = 3, row.names = FALSE)
+comparison <- merge(results[results$build == "baseline", c("format", "median_seconds")],
+                    results[results$build == "candidate", c("format", "median_seconds")],
+                    by = "format", suffixes = c("_baseline", "_candidate"))
+comparison$percent_change <- 100 * (comparison$median_seconds_candidate /
+                                     comparison$median_seconds_baseline - 1)
+knitr::kable(comparison, digits = 3, row.names = FALSE)
 ```
 
-This is a warm-page-cache, one-core iterator/decode measurement. It does not
-measure cold storage, remote object-store latency, rich INFO/FORMAT decoding,
-or DuckDB materialization of every returned column. It specifically protects
-the indexed overlapping-region path changed by the htslib 1.24 integration.
+This is a warm-page-cache, one-core iterator/decode measurement, including
+region parsing and initialization. It does not measure remote seeks, cold
+storage, rich INFO/FORMAT decoding, every-column materialization, BAM/tabix/FASTA
+reader performance, or staged pipelining. The removed appender cannot be
+benchmarked at this revision; its historical narrow-row timings in
+[benchmark_bcf_appender_contigs.md](benchmark_bcf_appender_contigs.md) are not
+canonical-reader throughput measurements.

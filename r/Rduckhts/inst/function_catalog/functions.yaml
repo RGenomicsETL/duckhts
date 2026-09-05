@@ -342,22 +342,9 @@
       "signature": "read_bcf(path, region := NULL, index_path := NULL, tidy_format := FALSE, additional_csq_column_types := NULL, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null')",
       "returns": "table",
       "r_wrapper": "rduckhts_bcf",
-      "description": "Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, optional bcftools-style CSQ type overrides, explicit scan_mode control ('auto' or full-file 'sequential'), optional htslib decompression worker threads via decompression_threads (default 0 for single-threaded reads), and decode_error_policy ('null', 'warn', or 'error') for corrupt BCF header-vs-payload decode mismatches. The reader retains worker-owned INFO/FORMAT/GT buffers and record-owned annotation across output chunks; tidy sample rows repeat the complete record annotation. Comma-separated indexed regions use htslib's native multi-region iterator and emit a record once when requested regions overlap.",
+      "description": "Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, optional bcftools-style CSQ type overrides, explicit scan_mode control ('auto' or full-file 'sequential'), optional htslib decompression worker threads via decompression_threads (default 0 for single-threaded reads), and decode_error_policy ('null', 'warn', or 'error') for corrupt BCF header-vs-payload decode mismatches. The reader retains worker-owned INFO/FORMAT/GT buffers and record-owned annotation across output chunks; tidy sample rows repeat the complete record annotation. Comma-separated indexed regions use htslib's native multi-region iterator and emit a record once when requested regions overlap. NULL or an empty region string means no filter; empty comma-separated items and malformed known-contig intervals are errors. Unknown contigs retain HTSlib's skip policy.",
       "examples": [
         "SELECT CHROM, POS, REF, ALT FROM read_bcf('vcf_file.bcf') LIMIT 5;"
-      ]
-    },
-    {
-      "name": "read_bcf_appender",
-      "kind": "table",
-      "category": "Readers",
-      "signature": "read_bcf_appender(path, target_table, region := NULL, tidy_format := TRUE, overwrite := TRUE, include_file_offset := FALSE, region_threads := 1, decompression_threads := 0, decode_error_policy := 'null')",
-      "returns": "table",
-      "r_wrapper": "",
-      "description": "Experimental side-effecting benchmark helper that reads BCF/VCF with htslib and appends a narrow scalar tidy table through DuckDB's chunk appender API. The target table is created in the default schema with columns CHROM, POS, REF, ALT, SAMPLE_ID, and FORMAT_GT; set include_file_offset := TRUE to add FILE_OFFSET as a file-order token. Comma-separated regions use htslib's native deduplicating multi-region iterators. region_threads controls at most 16 worker handles claiming primary-contig jobs iteratively: every contig keeps its complete requested interval set in one native iterator, so repeated, overlapping, or record-spanning intervals produce the same target schema and row multiset for every thread count. Header contig count does not create worker threads or open handles, and a request limited to one contig uses one iterator. Parallel row arrival is unordered; use ORDER BY FILE_OFFSET when file order matters. decompression_threads configures htslib workers per open region-worker handle, so total helper threads can scale as region workers times decompression workers. The operation runs inside an internal transaction and surfaces malformed-record errors as DuckDB errors; decode_error_policy controls corrupt BCF FORMAT/GT header-vs-payload mismatches with 'null', 'warn', or 'error'. target_table must be an unqualified SQL identifier. This is intended to compare appender-based materialization against read_bcf(...) query pipelines, not as a full replacement for the typed read_bcf surface.",
-      "examples": [
-        "SELECT * FROM read_bcf_appender('vcf_file.bcf', 'bcf_app', region := '1:1-1000000');",
-        "SELECT count(*) FROM bcf_app;"
       ]
     },
     {
@@ -367,7 +354,7 @@
       "signature": "read_bam(path, standard_tags := FALSE, auxiliary_tags := FALSE, region := NULL, index_path := NULL, reference := NULL, sequence_encoding := 'string', quality_representation := 'string', cigar_representation := 'string', scan_mode := 'auto', decompression_threads := 2)",
       "returns": "table",
       "r_wrapper": "rduckhts_bam",
-      "description": "Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps. Use sequence_encoding := 'nt16' to return SEQ as UTINYINT[], quality_representation := 'phred' to return QUAL as UTINYINT[], and cigar_representation := 'binary' to return packed BAM CIGAR operations as UINTEGER[] instead of SAM text. scan_mode := 'sequential' forces a full-file streaming scan instead of index-backed count/parallel paths and is incompatible with region. decompression_threads controls per-file htslib worker threads and defaults to 2; use 0 to disable worker threads.",
+      "description": "Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps. Use sequence_encoding := 'nt16' to return SEQ as UTINYINT[], quality_representation := 'phred' to return QUAL as UTINYINT[], and cigar_representation := 'binary' to return packed BAM CIGAR operations as UINTEGER[] instead of SAM text. scan_mode := 'sequential' forces a full-file streaming scan instead of index-backed count/parallel paths and is incompatible with region. decompression_threads controls per-file htslib worker threads and defaults to 2; use 0 to disable worker threads. NULL or an empty region string means no filter; empty comma-separated items and malformed known-contig intervals are errors. Unknown contigs retain HTSlib's skip policy.",
       "examples": [
         "SELECT QNAME, FLAG, RNAME, POS FROM read_bam('range.bam') LIMIT 5;"
       ]
@@ -439,7 +426,7 @@
       "signature": "read_fasta(path, region := NULL, index_path := NULL, gzi_path := NULL, sequence_encoding := 'string', scan_mode := 'auto')",
       "returns": "table",
       "r_wrapper": "rduckhts_fasta",
-      "description": "Read FASTA records or indexed FASTA regions as sequence rows. Use sequence_encoding := 'nt16' to return SEQUENCE as UTINYINT[] (htslib nt16 4-bit codes) instead of VARCHAR. For bgzipped FASTA, gzi_path may point to an explicit .gzi sidecar when it is not colocated with the FASTA. scan_mode := 'sequential' forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.",
+      "description": "Read FASTA records or indexed FASTA regions as sequence rows. Use sequence_encoding := 'nt16' to return SEQUENCE as UTINYINT[] (htslib nt16 4-bit codes) instead of VARCHAR. For bgzipped FASTA, gzi_path may point to an explicit .gzi sidecar when it is not colocated with the FASTA. scan_mode := 'sequential' forces full-file streaming/counting instead of index-backed count paths and is incompatible with region. NULL or an empty region string means no filter; empty comma-separated items are errors. Repeated FASTA requests retain one row per requested interval.",
       "examples": [
         "SELECT NAME, length(SEQUENCE) FROM read_fasta('ce.fa');"
       ]
@@ -656,7 +643,7 @@
       "signature": "read_gff(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, strict := FALSE, region := NULL, index_path := NULL, scan_mode := 'auto')",
       "returns": "table",
       "r_wrapper": "rduckhts_gff",
-      "description": "Read GFF annotations with optional raw scalar and richer list/pair parsed attribute columns, strict GFF3 structural validation, and indexed region filtering. Comma-separated indexed regions use htslib's native multi-region iterator and emit a row once when requested regions overlap. scan_mode := 'sequential' forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.",
+      "description": "Read GFF annotations with optional raw scalar and richer list/pair parsed attribute columns, strict GFF3 structural validation, and indexed region filtering. Comma-separated indexed regions use htslib's native multi-region iterator and emit a row once when requested regions overlap. scan_mode := 'sequential' forces full-file streaming/counting instead of index-backed count paths and is incompatible with region. NULL or an empty region string means no filter; empty comma-separated items and malformed known-contig intervals are errors. Unknown contigs retain HTSlib's skip policy.",
       "examples": [
         "SELECT seqname, feature, start, \"end\" FROM read_gff('gff_file.gff.gz') LIMIT 5;"
       ]
@@ -668,7 +655,7 @@
       "signature": "read_gtf(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, region := NULL, index_path := NULL, scan_mode := 'auto')",
       "returns": "table",
       "r_wrapper": "rduckhts_gtf",
-      "description": "Read GTF annotations with optional raw scalar and richer list/pair parsed attribute columns and indexed region filtering. Comma-separated indexed regions use htslib's native multi-region iterator and emit a row once when requested regions overlap. scan_mode := 'sequential' forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.",
+      "description": "Read GTF annotations with optional raw scalar and richer list/pair parsed attribute columns and indexed region filtering. Comma-separated indexed regions use htslib's native multi-region iterator and emit a row once when requested regions overlap. scan_mode := 'sequential' forces full-file streaming/counting instead of index-backed count paths and is incompatible with region. NULL or an empty region string means no filter; empty comma-separated items and malformed known-contig intervals are errors. Unknown contigs retain HTSlib's skip policy.",
       "examples": [
         "SELECT seqname, feature, start, \"end\" FROM read_gtf('annotations.gtf.gz') LIMIT 5;"
       ]
@@ -680,7 +667,7 @@
       "signature": "read_tabix(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, region := NULL, index_path := NULL, scan_mode := 'auto')",
       "returns": "table",
       "r_wrapper": "rduckhts_tabix",
-      "description": "Read generic tabix-indexed text data with optional header handling and type inference. Comma-separated indexed regions use htslib's native multi-region iterator and emit a row once when requested regions overlap. scan_mode := 'sequential' forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.",
+      "description": "Read generic tabix-indexed text data with optional header handling and type inference. Comma-separated indexed regions use htslib's native multi-region iterator and emit a row once when requested regions overlap. scan_mode := 'sequential' forces full-file streaming/counting instead of index-backed count paths and is incompatible with region. NULL or an empty region string means no filter; empty comma-separated items and malformed known-contig intervals are errors. Unknown contigs retain HTSlib's skip policy.",
       "examples": [
         "SELECT * FROM read_tabix('meta_tabix.tsv.gz') LIMIT 5;"
       ]

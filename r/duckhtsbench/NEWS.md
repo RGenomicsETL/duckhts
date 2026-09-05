@@ -1,5 +1,8 @@
 # duckhtsbench 0.0.0.9000
 
+- register and stage the deterministic multi-region VCF, BCF and indexes without
+  network access, with a small reconstruction and exact-position test
+
 - register and stage the HPRC v2 African-four, Sniffles2 1KGP, and dbVar GRCh38
   chr22 DuckVEP corpora with pinned raw-source identities, source indexes and
   manifests, deterministic derived VCF/index checksums, atomic publication,

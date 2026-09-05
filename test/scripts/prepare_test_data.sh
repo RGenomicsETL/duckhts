@@ -71,6 +71,15 @@ if [[ "$MODE" == "--duckvep-only" ]]; then
 fi
 
 # ---- BAM (copy + index) ----
+# Synthetic region-union authority is the committed VCF, including its two
+# identical physical records and REF/END spans across disjoint requests.
+bgzip -c "$DST/region_union.vcf" > "$DST/region_union.vcf.gz"
+tabix -f -p vcf "$DST/region_union.vcf.gz"
+bcftools view --no-version -Ob -o "$DST/region_union.bcf" "$DST/region_union.vcf"
+bcftools index -f "$DST/region_union.bcf"
+cp "$DST/region_union.vcf" "$DST/region_union.vcf.gz" "$DST/region_union.vcf.gz.tbi" \
+   "$DST/region_union.bcf" "$DST/region_union.bcf.csi" "$PKG_DST/"
+
 (cd "$REPO_ROOT" && Rscript test/scripts/prepare_bam_scan_fixtures.R)
 cp "$SRC/range.bam" "$DST/range.bam"
 samtools index "$DST/range.bam"

@@ -1,0 +1,12 @@
+##fileformat=VCFv4.3
+##contig=<ID=chr1,length=100>
+##INFO=<ID=END,Number=1,Type=Integer,Description="End coordinate">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1	S2
+chr1	5	long_ref	ACGTACGTACGTACGTACGT	A	50	PASS	.	GT	0/1	1/1
+chr1	8	long_end	N	<DEL>	40	PASS	END=25	GT	0/1	0/0
+chr1	12	same_c	A	C	30	PASS	.	GT	0/1	1/1
+chr1	12	same_g	A	G	20	PASS	.	GT	1/1	0/0
+chr1	18	duplicate	G	A	10	PASS	.	GT	0/1	0/1
+chr1	18	duplicate	G	A	10	PASS	.	GT	0/1	0/1
+chr1	30	outside	A	T	60	PASS	.	GT	0/0	0/1

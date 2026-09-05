@@ -1,6 +1,21 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- reject empty region-list items and malformed known-contig intervals instead
+  of silently widening or partially executing a request. Share one checked,
+  host-neutral list parser across BAM, BCF, FASTA, and tabix readers; retain
+  HTSlib coordinate semantics, unknown-contig handling, native record-union
+  iteration, and FASTA's repeated-request rows. NULL/empty-string selection
+  remains the no-filter API; list-allocation failure is a query error
+
+- register the synthetic multi-region benchmark inputs and their network-free
+  staging/test path; compare both reader revisions on the same staged artifacts
+
+- remove experimental `read_bcf_appender` and its private connection,
+  transaction, row formatter, and thread scheduler. Materialize `read_bcf`
+  through DuckDB `CREATE TABLE AS`, `INSERT SELECT`, or `COPY`; retain canonical
+  record/chunk ownership, sequential scanning, and native region semantics
+
 - retain no-coordinate BAM/CRAM reads exactly once in automatic full-file
   contig scans, including across output chunks. Keep explicit region filtering
   unchanged; report read/iterator failures instead of silently ending a scan,

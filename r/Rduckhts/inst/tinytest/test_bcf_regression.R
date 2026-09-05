@@ -95,30 +95,12 @@ test_bcf_malformed_record_errors <- function() {
     pattern = "read_bcf: failed to read or parse BCF/VCF record"
   )
 
-  DBI::dbExecute(con, "DROP TABLE IF EXISTS bcf_appender_malformed_bad_pos")
-  expect_error(
-    dbGetQuery(
-      con,
-      sprintf(
-        paste0(
-          "SELECT rows_written FROM read_bcf_appender(",
-          "%s, 'bcf_appender_malformed_bad_pos', tidy_format := true, overwrite := true)"
-        ),
-        quoted_bcf
-      )
-    ),
-    pattern = "read_bcf_appender: failed to read or parse BCF/VCF record"
-  )
-  appender_tables <- dbGetQuery(
-    con,
-    paste0(
-      "SELECT count(*) AS n FROM information_schema.tables ",
-      "WHERE table_name = 'bcf_appender_malformed_bad_pos'"
-    )
-  )
-  expect_equal(appender_tables$n[1], 0)
-
-  DBI::dbExecute(con, "DROP TABLE IF EXISTS bcf_appender_malformed_bad_pos")
+  expect_error(dbExecute(con, sprintf(
+    "CREATE TABLE bcf_malformed_materialized AS SELECT * FROM read_bcf(%s, tidy_format := true)",
+    quoted_bcf)), pattern = "read_bcf: failed to read or parse BCF/VCF record")
+  expect_equal(dbGetQuery(con, paste(
+    "SELECT count(*) AS n FROM information_schema.tables",
+    "WHERE table_name = 'bcf_malformed_materialized'"))$n[[1]], 0)
 }
 
 test_bcf_type_clash_errors <- function() {

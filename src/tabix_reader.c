@@ -44,6 +44,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/kstring.h>
 
 #include "include/hts_io_tuning.h"
+#include "include/region_list.h"
 
 /* ================================================================
  * Constants
@@ -144,12 +145,7 @@ static void tabix_bind_data_destroy(void *data) {
         free(bd->file_path);
         free(bd->index_path);
         free(bd->region);
-        if (bd->regions) {
-            for (unsigned int i = 0; i < bd->n_regions; i++) {
-                free(bd->regions[i]);
-            }
-            free(bd->regions);
-        }
+        free(bd->regions); /* one region-list allocation, including strings */
         if (bd->header_names) {
             for (int i = 0; i < bd->header_names_count; i++) {
                 free(bd->header_names[i]);
@@ -650,49 +646,8 @@ static int parse_header_names(const char *line, char ***out_names) {
     return n;
 }
 
-static void parse_regions(const char *region_str, char ***out_regions, unsigned int *out_count) {
-    *out_regions = NULL;
-    *out_count = 0;
-    if (!region_str || region_str[0] == '\0') return;
-
-    unsigned int count = 1;
-    for (const char *p = region_str; *p; p++) {
-        if (*p == ',') count++;
-    }
-
-    char **arr = (char **)malloc(sizeof(char *) * count);
-    if (!arr) return;
-
-    char *dup = strdup(region_str);
-    if (!dup) {
-        free(arr);
-        return;
-    }
-
-    unsigned int idx = 0;
-    char *tok = strtok(dup, ",");
-    while (tok && idx < count) {
-        while (*tok == ' ' || *tok == '\t') tok++;
-        int len = (int)strlen(tok);
-        while (len > 0 && (tok[len - 1] == ' ' || tok[len - 1] == '\t')) {
-            tok[--len] = '\0';
-        }
-        if (len > 0) {
-            arr[idx] = strdup(tok);
-            if (!arr[idx]) {
-                for (unsigned int i = 0; i < idx; i++) free(arr[i]);
-                free(arr);
-                free(dup);
-                return;
-            }
-            idx++;
-        }
-        tok = strtok(NULL, ",");
-    }
-
-    free(dup);
-    *out_regions = arr;
-    *out_count = idx;
+static int tabix_region_name2id(void *tbx, const char *name) {
+    return tbx_name2id((tbx_t *)tbx, name);
 }
 
 static int tabix_parse_scan_mode(const char *mode, int *scan_sequential) {
@@ -1097,13 +1052,33 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
     if (val) {
         if (duckdb_get_type_id(duckdb_get_value_type(val)) == DUCKDB_TYPE_VARCHAR) {
             const char *r = duckdb_get_varchar(val);
+            if (!r && !duckdb_is_null_value(val)) {
+                duckdb_destroy_value(&val);
+                duckdb_bind_set_error(info, "region list: out of memory reading region");
+                tabix_bind_data_destroy(bd);
+                return;
+            }
             if (r && r[0]) {
                 bd->region = strdup(r);
-                parse_regions(bd->region, &bd->regions, &bd->n_regions);
+                if (!bd->region) {
+                    duckdb_free((void *)r);
+                    duckdb_destroy_value(&val);
+                    duckdb_bind_set_error(info, "region list: out of memory");
+                    tabix_bind_data_destroy(bd);
+                    return;
+                }
             }
             duckdb_free((void *)r);
         }
         duckdb_destroy_value(&val);
+    }
+
+    char region_error[256];
+    if (!duckhts_region_list_parse(bd->region, &bd->regions, &bd->n_regions,
+                                   region_error, sizeof(region_error))) {
+        duckdb_bind_set_error(info, region_error);
+        tabix_bind_data_destroy(bd);
+        return;
     }
 
     /* named param: explicit index path */
@@ -1474,6 +1449,14 @@ static void tabix_init(duckdb_init_info info) {
                      "Region query requested but no tabix index found for: %s",
                      bd->file_path);
             duckdb_init_set_error(info, msg);
+            tabix_init_data_destroy(id);
+            return;
+        }
+        char region_error[256];
+        if (!duckhts_region_list_validate(bd->regions, bd->n_regions,
+                                          tabix_region_name2id, id->tbx,
+                                          region_error, sizeof(region_error))) {
+            duckdb_init_set_error(info, region_error);
             tabix_init_data_destroy(id);
             return;
         }

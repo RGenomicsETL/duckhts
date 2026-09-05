@@ -25,53 +25,19 @@ FROM read_bcf(
 ----
 2	chr1
 
-# The appender's parallel region scheduler must also advance iteratively past
-# empty indexed contigs.  It must not create one worker or open handle per
-# header contig, and it must retain the serial native-iterator row multiset.
+# Leading empty targets must not terminate a native multi-region request.
 query I
-SELECT rows_written
-FROM read_bcf_appender(
-  '__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.bcf',
-  'parallel_empty_contigs_appender_serial',
-  region := 'empty1,empty2,empty3,empty4,empty5,empty6,empty7,empty8,chr1',
-  tidy_format := true,
-  overwrite := true,
-  include_file_offset := true,
-  region_threads := 1
-);
-----
-2
-
-query I
-SELECT rows_written
-FROM read_bcf_appender(
-  '__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.bcf',
-  'parallel_empty_contigs_appender_parallel',
-  region := 'empty1,empty2,empty3,empty4,empty5,empty6,empty7,empty8,chr1',
-  tidy_format := true,
-  overwrite := true,
-  include_file_offset := true,
-  region_threads := 4
-);
-----
-2
-
-query II
-SELECT count(*), count(DISTINCT FILE_OFFSET)
-FROM parallel_empty_contigs_appender_parallel;
-----
-2	2
-
-query I
-SELECT count(*)
-FROM (
-  (SELECT * FROM parallel_empty_contigs_appender_serial
-   EXCEPT ALL
-   SELECT * FROM parallel_empty_contigs_appender_parallel)
-  UNION ALL
-  (SELECT * FROM parallel_empty_contigs_appender_parallel
-   EXCEPT ALL
-   SELECT * FROM parallel_empty_contigs_appender_serial)
+SELECT count(*) FROM (
+ (SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.bcf', region := 'empty1,empty2,empty3,empty4,empty5,empty6,empty7,empty8,chr1', tidy_format := true)
+  EXCEPT ALL SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.bcf', scan_mode := 'sequential', tidy_format := true))
+ UNION ALL
+ (SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.bcf', scan_mode := 'sequential', tidy_format := true)
+  EXCEPT ALL SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.bcf', region := 'empty1,empty2,empty3,empty4,empty5,empty6,empty7,empty8,chr1', tidy_format := true))
 );
 ----
 0
+
+query IT
+SELECT count(*), min(CHROM) FROM read_bcf('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.vcf.gz', region := 'empty1,empty2,empty3,empty4,empty5,empty6,empty7,empty8,chr1');
+----
+2	chr1

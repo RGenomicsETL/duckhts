@@ -13,21 +13,15 @@ SELECT sum(POS) FROM read_bcf('__WORKING_DIRECTORY__/test/data/malformed_bad_pos
 ----
 read_bcf: failed to read or parse BCF/VCF record
 
-statement ok
-DROP TABLE IF EXISTS bcf_appender_malformed_bad_pos;
-
 statement error
-SELECT rows_written FROM read_bcf_appender('__WORKING_DIRECTORY__/test/data/malformed_bad_pos.vcf', 'bcf_appender_malformed_bad_pos', tidy_format := true, overwrite := true);
+CREATE TABLE bcf_malformed_materialized AS SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/malformed_bad_pos.vcf', tidy_format := true);
 ----
-read_bcf_appender: failed to read or parse BCF/VCF record
+read_bcf: failed to read or parse BCF/VCF record
 
 query I
-SELECT count(*) FROM information_schema.tables WHERE table_name = 'bcf_appender_malformed_bad_pos';
+SELECT count(*) FROM information_schema.tables WHERE table_name = 'bcf_malformed_materialized';
 ----
 0
-
-statement ok
-DROP TABLE IF EXISTS bcf_appender_malformed_bad_pos;
 
 query T
 SELECT INFO_DP IS NULL FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_info_type_clash.bcf');

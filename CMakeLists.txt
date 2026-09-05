@@ -472,6 +472,14 @@ endif()
 
 message(STATUS "htslib link libs: ${HTSLIB_LINK_LIBS}")
 
+# Host-neutral region parsing probe: real HTSlib, no DuckDB headers or runtime.
+if(NOT DUCKDB_WASM_EXTENSION)
+    add_executable(duckhts_region_list_test EXCLUDE_FROM_ALL test/scripts/region_list_test.c)
+    target_compile_features(duckhts_region_list_test PRIVATE c_std_11)
+    target_include_directories(duckhts_region_list_test PRIVATE ${HTSLIB_SRC_DIR})
+    target_link_libraries(duckhts_region_list_test PRIVATE ${HTSLIB_LINK_LIBS})
+endif()
+
 target_link_libraries(${EXTENSION_NAME} PRIVATE
     ${HTSLIB_LINK_LIBS}
 )
