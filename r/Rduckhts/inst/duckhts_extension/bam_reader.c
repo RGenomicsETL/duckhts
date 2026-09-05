@@ -321,7 +321,9 @@ static int ensure_seq_buf(bam_local_init_data_t *l, int seq_len) {
  * across growth. The previous allocation remains owned on failure. */
 static int bam_reserve_text(char **buffer, size_t *capacity, size_t required) {
     if (required <= *capacity) return 1;
-    size_t next = required <= SIZE_MAX / 2 ? required * 2 : required;
+    size_t next = required;
+    /* Amortize small growth, but do not double a new record's worst-case bound. */
+    if (*capacity <= SIZE_MAX / 2 && *capacity * 2 > next) next = *capacity * 2;
     char *data = duckdb_malloc(next);
     if (!data) return 0;
     if (*buffer) duckdb_free(*buffer);

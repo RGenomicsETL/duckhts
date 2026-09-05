@@ -106,6 +106,16 @@ int main(void) {
     uint8_t oversized[] = {'B', 'I', 255, 255, 255, 255, 0, 0, 0, 0};
     assert(!duckhts_bam_aux_capacity(unterminated, unterminated + sizeof(unterminated), &capacity));
     assert(!duckhts_bam_aux_capacity(oversized, oversized + sizeof(oversized), &capacity));
+    /* Planning a large ML-style byte array must not use the float/int64 bound.
+     * No heap allocation or full-array formatting is needed to test its size. */
+    static uint8_t large[10000006];
+    memcpy(large, (uint8_t[]){'B', 'C', 0x80, 0x96, 0x98, 0}, 6);
+    assert(duckhts_bam_aux_capacity(large, large + sizeof(large), &capacity));
+    assert(capacity == 40000002);
+    large[1] = 'c';
+    assert(duckhts_bam_aux_capacity(large, large + sizeof(large), &capacity));
+    assert(capacity == 50000002);
+    puts("large AUX byte-array capacity: 4 bytes/unsigned or 5 bytes/signed element, plus subtype/NUL: OK");
     printf("bounded BAM formatting: %u CIGAR cases, %u AUX fields, %u short buffers, %u injected printf errors: OK\n",
            cigar_cases, aux_fields, short_buffers, failed_formats);
     return 0;

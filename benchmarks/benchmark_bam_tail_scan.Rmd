@@ -16,16 +16,15 @@ There are no unplaced reads in this performance input, so both builds do equal w
 The separate SQL/R regression corpus tests retained no-coordinate records,
 physical duplicates, BAI/CSI, CRAM, and output chunks.
 
-The nearest checked-in SEQ/GC workload is this report's previous rendering
-at `e87b9f3ee5e27068964e4e57e107bacd7b5def3e`: source `8b057efe41f865831b00b217ede522c61137fdc0`,
-186 records / 249,110 bases, 1 or 4 DuckDB workers and 2 HTSlib workers per handle.
-Its candidate medians without `FILE_OFFSET` were 1.296 ms and 1.857 ms respectively;
-with `FILE_OFFSET`, 1.314 ms and 1.857 ms.
-That run used Python/DuckDB; its frontend timings are not directly comparable to
-this R/DBI run. Both binaries below are measured with the same R driver.
-The unchanged baseline binary below contains that same reader source. This is
-the first rendered all-column text/numeric materialization measurement; its
-same-run baseline uses the pre-fix binary, not an invented historical workload.
+The nearest identical R/DBI workload is this report's
+[previous rendering](https://github.com/RGenomicsETL/duckhts/blob/c9cfce7f69aeef97a492578f17a905900ac542ee/benchmarks/benchmark_bam_tail_scan.md):
+source `a1509946e9f7d425ce9af755b3dad4d41f03dba3`, 186 records / 249,110 bases,
+1 or 4 DuckDB workers and 2 HTSlib workers per handle. Its candidate medians for
+full text materialization were 3.431 ms and 3.508 ms respectively; numeric
+materialization, 3.886 ms and 4.000 ms. The comparison below retains the same
+pre-fix baseline binary at `e87b9f3ee5e27068964e4e57e107bacd7b5def3e` and measures
+both binaries with the same R driver after correcting AUX scratch amplification.
+Older Python-host SEQ/GC timings are not directly comparable to this R/DBI host.
 
 The older larger-input report is
 [`benchmark_simd_bam_gc.md` at the baseline revision](https://github.com/RGenomicsETL/duckhts/blob/e87b9f3ee5e27068964e4e57e107bacd7b5def3e/benchmarks/benchmark_simd_bam_gc.md), whose historical run used

@@ -32,19 +32,23 @@ static inline int duckhts_bam_aux_capacity(const uint8_t *aux, const uint8_t *en
         }
         case 'B': {
             if (end - aux < 6) return 0;
-            size_t width;
+            size_t width, text_width; /* Encoded bytes, then comma + decimal text. */
             switch (aux[1]) {
-                case 'c': case 'C': width = 1; break;
-                case 's': case 'S': width = 2; break;
-                case 'i': case 'I': case 'f': width = 4; break;
+                case 'c': width = 1; text_width = 5; break;
+                case 'C': width = 1; text_width = 4; break;
+                case 's': width = 2; text_width = 7; break;
+                case 'S': width = 2; text_width = 6; break;
+                case 'i': width = 4; text_width = 12; break;
+                case 'I': width = 4; text_width = 11; break;
+                case 'f': width = 4; text_width = 32; break;
                 default: return 0;
             }
             uint32_t count = bam_auxB_len(aux);
             if (count > (size_t)(end - aux - 6) / width) return 0;
-            /* Comma plus signed integer or six-significant-digit %g text;
-             * reserve 32 bytes/value, plus subtype and NUL. */
-            if (count && (SIZE_MAX - 2) / count < 32) return 0;
-            *capacity = (size_t)count * 32 + 2;
+            /* Integer bounds follow the encoded subtype, not int64_t.
+             * Keep a conservative %g bound only for floats; add subtype/NUL. */
+            if (count && (SIZE_MAX - 2) / count < text_width) return 0;
+            *capacity = (size_t)count * text_width + 2;
             return 1;
         }
         default: return 0;

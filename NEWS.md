@@ -8,7 +8,8 @@
 - report BAM CIGAR/AUX formatting and output-list growth failures as query
   errors instead of publishing missing, partial, or unwritable values. Share
   checked list growth and use reusable caller-owned text scratch with bounded
-  native formatters; preserve genuine missing CIGAR/QUAL/tags and empty AUX strings
+  native formatters with subtype-sized integer-array scratch; preserve genuine
+  missing CIGAR/QUAL/tags and empty AUX strings
 
 - restrict `read_bam` FILE_OFFSET to BGZF-compressed BAM: it is the virtual
   position immediately after the record, not its start. SAM (including compressed
