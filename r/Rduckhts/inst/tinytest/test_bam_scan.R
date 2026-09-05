@@ -27,11 +27,11 @@ test_bam_full_scan <- function() {
         counts <- dbGetQuery(con, sprintf("SELECT count(*) AS n, count(QNAME) AS projected FROM %s", source))
         expect_equal(as.integer(counts$n), expected_counts[[name]])
         expect_equal(as.integer(counts$projected), expected_counts[[name]])
-        # FILE_OFFSET is a transport diagnostic, not a SAM field or CRAM locator.
-        automatic <- dbGetQuery(con, sprintf("SELECT * EXCLUDE(FILE_OFFSET) FROM %s ORDER BY QNAME, POS", source))
+        # Same-file scans agree on every column, including BAM offsets / CRAM NULLs.
+        automatic <- dbGetQuery(con, sprintf("SELECT * FROM %s ORDER BY QNAME, POS, FILE_OFFSET", source))
         sequential <- dbGetQuery(con, sprintf(paste(
-          "SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam(%s,",
-          "scan_mode := 'sequential', decompression_threads := 0) ORDER BY QNAME, POS"), quoted))
+          "SELECT * FROM read_bam(%s,",
+          "scan_mode := 'sequential', decompression_threads := 0) ORDER BY QNAME, POS, FILE_OFFSET"), quoted))
         expect_equal(automatic, sequential)
         if (name == "mixed") {
           expect_equal(automatic$QNAME, c("mapped1", "mapped2", "placed_unmapped", "unplaced", "unplaced"))

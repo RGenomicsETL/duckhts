@@ -274,7 +274,6 @@ typedef struct {
     int needs_next_contig;
     int count_only;
     int need_seq_buffers;
-    int need_file_offset;
     uint64_t count_remaining;
 
     idx_t column_count;
@@ -786,8 +785,6 @@ static void bam_read_local_init(duckdb_init_info info) {
             local->column_ids[i] = duckdb_init_get_column_index(info, i);
             if (local->column_ids[i] == BAM_COL_SEQ || local->column_ids[i] == BAM_COL_QUAL) {
                 local->need_seq_buffers = 1;
-            } else if (local->column_ids[i] == BAM_COL_FILE_OFFSET) {
-                local->need_file_offset = 1;
             }
         }
     }
@@ -1011,16 +1008,6 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
 
         bam1_t *b = local->rec;
         int seq_len = 0;
-        uint64_t file_offset = 0;
-
-        if (local->need_file_offset) {
-            /* Capture virtual file offset after reading this record.
-             * For indexed scans, itr->curr_off holds the next read's offset;
-             * for sequential scans, bgzf_tell gives the same. */
-            file_offset = (local->fp && local->fp->fp.bgzf)
-                ? (uint64_t)bgzf_tell(local->fp->fp.bgzf)
-                : 0;
-        }
 
         if (local->need_seq_buffers) {
             seq_len = b->core.l_qseq;
@@ -1241,8 +1228,16 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
             }
 
             case BAM_COL_FILE_OFFSET: {
+                /* Only BGZF BAM has a per-record virtual position here. SAM
+                 * may read ahead; CRAM uses another fp union member. is_bgzf
+                 * selects the handle, not the compression (e.g. naked BAM). */
+                const htsFormat *format = hts_get_format(local->fp);
+                if (!local->fp->is_bgzf || format->format != bam || format->compression != bgzf) {
+                    set_null(vec, row_count);
+                    break;
+                }
                 uint64_t *data = (uint64_t *)duckdb_vector_get_data(vec);
-                data[row_count] = file_offset;
+                data[row_count] = (uint64_t)bgzf_tell(local->fp->fp.bgzf);
                 break;
             }
 

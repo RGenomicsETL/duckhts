@@ -63,12 +63,6 @@ def main():
     try:
         for name, relation in cases.items():
             for projection in ("*", "count(*)"):
-                # FILE_OFFSET currently misreads non-BGZF SAM/CRAM handles.
-                # https://github.com/RGenomicsETL/duckhts/issues/194
-                # That separate transport defect is not a recovery oracle;
-                # retain every biological field, including SAMPLE_ID.
-                if name in ("cram-indexed", "bam-read-groups") and projection == "*":
-                    projection = "* EXCLUDE(FILE_OFFSET)"
                 sql = f"SELECT {projection} FROM {relation}"
                 assert probe.reader_alloc_arm(0) == 0
                 expected = read(sql)

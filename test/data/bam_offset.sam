@@ -1,0 +1,9 @@
+@HD	VN:1.6	SO:coordinate
+@SQ	SN:chr1	LN:1000
+@SQ	SN:empty	LN:1000
+@SQ	SN:chr2	LN:1000
+mapped1	0	chr1	10	60	1M	*	0	0	A	I
+placed_unmapped	4	chr1	20	0	*	*	0	0	C	I
+mapped2	0	chr2	30	60	1M	*	0	0	T	I
+unplaced	4	*	0	0	*	*	0	0	G	I
+unplaced	4	*	0	0	*	*	0	0	G	I

@@ -1,0 +1,107 @@
+# name: test/sql/bam_file_offset.test
+# description: FILE_OFFSET is a post-record BGZF BAM position, NULL for other transports
+# group: [duckhts]
+
+require duckhts
+
+# Independent expected positions come from physical BGZF/BAM length prefixes,
+# not this reader (test/scripts/prepare_bam_offset_fixtures.py).
+statement ok
+CREATE TEMP TABLE record_ends AS
+SELECT * FROM read_csv('__WORKING_DIRECTORY__/test/data/bam_record_ends.tsv');
+
+statement ok
+SET threads=4;
+
+statement ok
+CREATE TEMP TABLE bam_offsets AS
+SELECT 'bam_scan_mixed.bam' AS file, QNAME, FILE_OFFSET FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam')
+UNION ALL
+SELECT 'nanopore.bam', QNAME, FILE_OFFSET FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam');
+
+# Five synthetic records include physical duplicates and a BGZF block end;
+# 186 long-read records exercise positions across many compressed blocks.
+query II
+SELECT (SELECT count(*) FROM bam_offsets), count(*) FROM (
+ (SELECT * FROM bam_offsets EXCEPT ALL SELECT * FROM record_ends)
+ UNION ALL
+ (SELECT * FROM record_ends EXCEPT ALL SELECT * FROM bam_offsets));
+----
+191	0
+
+statement ok
+CREATE TEMP TABLE bam_offsets_sequential AS
+SELECT 'bam_scan_mixed.bam' AS file, QNAME, FILE_OFFSET FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0)
+UNION ALL
+SELECT 'nanopore.bam', QNAME, FILE_OFFSET FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', scan_mode := 'sequential', decompression_threads := 0);
+
+query I
+SELECT count(*) FROM (
+ (SELECT * FROM bam_offsets_sequential EXCEPT ALL SELECT * FROM record_ends)
+ UNION ALL
+ (SELECT * FROM record_ends EXCEPT ALL SELECT * FROM bam_offsets_sequential));
+----
+0
+
+# Native region union keeps the same per-record offsets, regardless of request order.
+query TI
+SELECT QNAME, FILE_OFFSET FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', region := 'chr1:20-20,chr1:1-30,chr1:20-20') ORDER BY FILE_OFFSET;
+----
+mapped1	7536690
+placed_unmapped	7536744
+
+# is_bgzf alone is not enough: compressed SAM, gzip BAM, and naked BAM also
+# use BGZF handles. All six unsupported transport variants must return NULL.
+statement ok
+CREATE TEMP VIEW unsupported_offsets AS
+SELECT 'sam' AS transport, * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_offset.sam')
+UNION ALL
+SELECT 'sam-gzip', * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_offset.sam.gz')
+UNION ALL
+SELECT 'sam-bgzf', * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_offset.sam.bgz')
+UNION ALL
+SELECT 'bam-naked', * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_offset_uncompressed.bam')
+UNION ALL
+SELECT 'bam-gzip', * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_offset_gzip.bam')
+UNION ALL
+SELECT 'cram', * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram');
+
+query TIII rowsort
+SELECT transport, count(*), count(FILE_OFFSET), count(*) FILTER (WHERE QNAME='unplaced')
+FROM unsupported_offsets GROUP BY transport;
+----
+bam-gzip	5	0	2
+bam-naked	5	0	2
+cram	5	0	2
+sam	5	0	2
+sam-bgzf	5	0	2
+sam-gzip	5	0	2
+
+# Repeated queries compare all columns, including the now-defined diagnostic.
+statement ok
+CREATE TEMP TABLE first_read AS SELECT * FROM unsupported_offsets;
+
+query I
+SELECT count(*) FROM (
+ (SELECT * FROM first_read EXCEPT ALL SELECT * FROM unsupported_offsets)
+ UNION ALL
+ (SELECT * FROM unsupported_offsets EXCEPT ALL SELECT * FROM first_read));
+----
+0
+
+# Every biological field and physical duplicate survives the transport change.
+query I
+SELECT count(*) FROM (
+ (SELECT * EXCLUDE(transport, FILE_OFFSET) FROM first_read
+  EXCEPT ALL SELECT b.* EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam') b CROSS JOIN range(6))
+ UNION ALL
+ (SELECT b.* EXCLUDE(FILE_OFFSET) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam') b CROSS JOIN range(6)
+  EXCEPT ALL SELECT * EXCLUDE(transport, FILE_OFFSET) FROM first_read));
+----
+0
+
+query III
+SELECT count(*), count(FILE_OFFSET), count(*) FILTER (WHERE QNAME='placed_unmapped')
+FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram', region := 'chr1:20-20,chr1:1-30,chr1:20-20');
+----
+2	0	1

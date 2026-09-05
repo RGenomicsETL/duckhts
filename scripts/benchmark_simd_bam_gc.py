@@ -2,9 +2,10 @@
 """Benchmark DuckHTS seq_gc_content() on real BAM read sequences.
 
 This complements the synthetic seq_gc_content SIMD benchmark with a BAM-backed
-workload.  It reports two measurements per backend request:
+workload. It supports these measurements per backend request:
 
 * bam_scan: read BAM records and compute seq_gc_content(SEQ) in the same query.
+* bam_scan_offset: the same query, also requiring non-NULL FILE_OFFSET values.
 * materialized_seq: materialize BAM SEQ strings once, then time only the real
   BAM sequence strings flowing through seq_gc_content().
 
@@ -28,8 +29,10 @@ def sql_string(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def source_sql(bam: str, max_reads: int) -> str:
+def source_sql(bam: str, max_reads: int, file_offset: bool = False) -> str:
     base = f"SELECT SEQ FROM read_bam({sql_string(bam)}) WHERE SEQ IS NOT NULL"
+    if file_offset:
+        base += " AND FILE_OFFSET IS NOT NULL"
     if max_reads > 0:
         base += f" LIMIT {max_reads}"
     return f"({base})"
@@ -150,11 +153,12 @@ def worker(args: argparse.Namespace) -> int:
     src = source_sql(args.bam, args.max_reads)
     records: list[dict[str, Any]] = []
 
-    if "bam_scan" in modes:
-        result, timings = benchmark_query(con, aggregate_sql(src), args.iterations)
+    for mode in (m for m in modes if m in ("bam_scan", "bam_scan_offset")):
+        scan_src = source_sql(args.bam, args.max_reads, file_offset=mode == "bam_scan_offset")
+        result, timings = benchmark_query(con, aggregate_sql(scan_src), args.iterations)
         records.append(
             make_record(
-                benchmark="bam_scan",
+                benchmark=mode,
                 args=args,
                 requested=requested,
                 selected=selected,

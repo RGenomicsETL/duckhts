@@ -92,6 +92,14 @@ run_sql "" \
   "SET threads=4; SELECT CASE WHEN count(QNAME)=2053 THEN true ELSE error('legacy BAM tail ownership') END FROM read_bam('test/data/bam_scan_all_unplaced.bam',index_path:='test/data/bam_scan_all_unplaced.bam.legacy.bai',decompression_threads:=0);"
 run_sql "" \
   "SET threads=4; SELECT CASE WHEN count(QNAME)=5 AND count(*) FILTER (WHERE QNAME='unplaced')=2 THEN true ELSE error('BAM tail ownership') END FROM read_bam('test/data/bam_scan_mixed.bam',decompression_threads:=0); SELECT CASE WHEN count(QNAME)=2053 THEN true ELSE error('CRAM tail ownership') END FROM read_bam('test/data/bam_scan_all_unplaced.cram',decompression_threads:=0);"
+for input in bam_offset.sam bam_offset.sam.gz bam_offset.sam.bgz bam_offset_uncompressed.bam bam_offset_gzip.bam bam_scan_mixed.cram; do
+  for mode in auto sequential; do
+    run_sql "" \
+      "SET threads=4; SELECT CASE WHEN count(*)=5 AND count(FILE_OFFSET)=0 AND count(*) FILTER (WHERE QNAME='unplaced')=2 THEN true ELSE error('unsupported FILE_OFFSET transport') END FROM read_bam('test/data/$input',scan_mode:='$mode');"
+  done
+done
+run_sql "" \
+  "SET threads=4; CREATE TEMP TABLE actual AS SELECT QNAME,FILE_OFFSET FROM read_bam('test/data/nanopore.bam'); CREATE TEMP TABLE expected AS SELECT QNAME,FILE_OFFSET FROM read_csv('test/data/bam_record_ends.tsv') WHERE file='nanopore.bam'; SELECT CASE WHEN count(*)=0 AND (SELECT count(*) FROM actual)=186 THEN true ELSE error('BAM post-record offset') END FROM ((SELECT * FROM actual EXCEPT ALL SELECT * FROM expected) UNION ALL (SELECT * FROM expected EXCEPT ALL SELECT * FROM actual));"
 run_sql "precision_digits must be between 0 and 18" \
   "SELECT * FROM duckhts_mosdepth('$tmp/mosdepth','test/data/range.bam',precision_digits:=-1,overwrite:=true);"
 run_sql "" \

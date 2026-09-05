@@ -1,6 +1,12 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- restrict `read_bam` FILE_OFFSET to BGZF-compressed BAM: it is the virtual
+  position immediately after the record, not its start. SAM (including compressed
+  SAM), CRAM, and non-BGZF BAM return NULL instead of invalid transport-dependent
+  values. Explicit ORDER BY FILE_OFFSET orders records within one unchanged BAM;
+  scan arrival order is not guaranteed
+
 - report allocation failures while constructing BAM/BCF/FASTA/FASTQ readers
   instead of crashing the host or publishing incomplete BCF schemas. Check
   array sizes and make partial cleanup safe, including FORMAT projection groups.
