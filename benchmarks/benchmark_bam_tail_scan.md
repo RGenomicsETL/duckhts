@@ -13,18 +13,17 @@ performance input, so both builds do equal work. The separate SQL/R
 regression corpus tests retained no-coordinate records, physical
 duplicates, BAI/CSI, CRAM, and output chunks.
 
-The nearest checked-in SEQ/GC workload is this report’s previous
-rendering at `e87b9f3ee5e27068964e4e57e107bacd7b5def3e`: source
-`8b057efe41f865831b00b217ede522c61137fdc0`, 186 records / 249,110 bases,
-1 or 4 DuckDB workers and 2 HTSlib workers per handle. Its candidate
-medians without `FILE_OFFSET` were 1.296 ms and 1.857 ms respectively;
-with `FILE_OFFSET`, 1.314 ms and 1.857 ms. That run used Python/DuckDB;
-its frontend timings are not directly comparable to this R/DBI run. Both
-binaries below are measured with the same R driver. The unchanged
-baseline binary below contains that same reader source. This is the
-first rendered all-column text/numeric materialization measurement; its
-same-run baseline uses the pre-fix binary, not an invented historical
-workload.
+The nearest identical R/DBI workload is this report’s [previous
+rendering](https://github.com/RGenomicsETL/duckhts/blob/c9cfce7f69aeef97a492578f17a905900ac542ee/benchmarks/benchmark_bam_tail_scan.md):
+source `a1509946e9f7d425ce9af755b3dad4d41f03dba3`, 186 records / 249,110
+bases, 1 or 4 DuckDB workers and 2 HTSlib workers per handle. Its
+candidate medians for full text materialization were 3.431 ms and 3.508
+ms respectively; numeric materialization, 3.886 ms and 4.000 ms. The
+comparison below retains the same pre-fix baseline binary at
+`e87b9f3ee5e27068964e4e57e107bacd7b5def3e` and measures both binaries
+with the same R driver after correcting AUX scratch amplification. Older
+Python-host SEQ/GC timings are not directly comparable to this R/DBI
+host.
 
 The older larger-input report is [`benchmark_simd_bam_gc.md` at the
 baseline
@@ -46,10 +45,10 @@ binary. The R driver uses `callr`, `duckdb`, `DBI`, and `digest`.
 | property             | value                                                                 |
 |:---------------------|:----------------------------------------------------------------------|
 | baseline revision    | e87b9f3ee5e27068964e4e57e107bacd7b5def3e                              |
-| candidate revision   | a1509946e9f7d425ce9af755b3dad4d41f03dba3                              |
-| candidate src tree   | 346d710310f00739fa0361f0119a23cc69fc40e8                              |
+| candidate revision   | 482240ad2c11021b271d59769c890c0f2c3e108b                              |
+| candidate src tree   | 81d3f5fc831d9adb40d50ef711efe9c39b1fa120                              |
 | baseline binary MD5  | 0eed0f04a038542f0c97b130c0fc928c                                      |
-| candidate binary MD5 | cb5a8d25a505cb50ed5fadf496040190                                      |
+| candidate binary MD5 | 5296739913e78217f12229647f5299a5                                      |
 | input                | test/data/nanopore.bam                                                |
 | input MD5            | 850dc34ada8d7023ee7146c7953da90b                                      |
 | input bytes          | 283081                                                                |
@@ -57,27 +56,27 @@ binary. The R driver uses `callr`, `duckdb`, `DBI`, and `digest`.
 | host                 | Linux                                                                 |
 | R                    | R version 4.6.0 (2026-04-24)                                          |
 | DuckDB R package     | 1.5.3                                                                 |
-| CPU affinity         | pid 847456’s current affinity list: 0,2,4,6                           |
+| CPU affinity         | pid 881564’s current affinity list: 0,2,4,6                           |
 | repetitions          | 9 per build/thread setting after warm-up; fresh R process per setting |
 
 | build     | workload                | duckdb_workers | htslib_workers_per_handle | input_records | decoded_sequence_rows | input_bases | sql_output_rows |   gc_sum | backend | median_seconds | min_seconds | max_seconds |
 |:----------|:------------------------|---------------:|--------------------------:|--------------:|----------------------:|------------:|----------------:|---------:|:--------|---------------:|------------:|------------:|
-| baseline  | bam_scan                |              1 |                         2 |           186 |                   186 |      249110 |               1 | 75.87703 | avx2    |       0.001746 |    0.001666 |    0.001945 |
-| baseline  | bam_scan_offset         |              1 |                         2 |           186 |                   186 |      249110 |               1 | 75.87703 | avx2    |       0.001832 |    0.001709 |    0.001913 |
-| baseline  | bam_materialize_text    |              1 |                         2 |           186 |                   186 |      249110 |             186 | 75.87703 | avx2    |       0.003503 |    0.003134 |    0.003731 |
-| baseline  | bam_materialize_numeric |              1 |                         2 |           186 |                   186 |      249110 |             186 | 75.87703 | avx2    |       0.004378 |    0.003674 |    0.006364 |
-| candidate | bam_scan                |              1 |                         2 |           186 |                   186 |      249110 |               1 | 75.87703 | avx2    |       0.001779 |    0.001629 |    0.001972 |
-| candidate | bam_scan_offset         |              1 |                         2 |           186 |                   186 |      249110 |               1 | 75.87703 | avx2    |       0.001712 |    0.001671 |    0.001857 |
-| candidate | bam_materialize_text    |              1 |                         2 |           186 |                   186 |      249110 |             186 | 75.87703 | avx2    |       0.003431 |    0.003262 |    0.004255 |
-| candidate | bam_materialize_numeric |              1 |                         2 |           186 |                   186 |      249110 |             186 | 75.87703 | avx2    |       0.003886 |    0.003611 |    0.004093 |
-| baseline  | bam_scan                |              4 |                         2 |           186 |                   186 |      249110 |               1 | 75.87703 | avx2    |       0.002269 |    0.002139 |    0.002527 |
-| baseline  | bam_scan_offset         |              4 |                         2 |           186 |                   186 |      249110 |               1 | 75.87703 | avx2    |       0.002182 |    0.002016 |    0.005234 |
-| baseline  | bam_materialize_text    |              4 |                         2 |           186 |                   186 |      249110 |             186 | 75.87703 | avx2    |       0.003378 |    0.003242 |    0.003917 |
-| baseline  | bam_materialize_numeric |              4 |                         2 |           186 |                   186 |      249110 |             186 | 75.87703 | avx2    |       0.003926 |    0.003495 |    0.004133 |
-| candidate | bam_scan                |              4 |                         2 |           186 |                   186 |      249110 |               1 | 75.87703 | avx2    |       0.002418 |    0.002175 |    0.003792 |
-| candidate | bam_scan_offset         |              4 |                         2 |           186 |                   186 |      249110 |               1 | 75.87703 | avx2    |       0.002343 |    0.002171 |    0.003561 |
-| candidate | bam_materialize_text    |              4 |                         2 |           186 |                   186 |      249110 |             186 | 75.87703 | avx2    |       0.003508 |    0.003175 |    0.007134 |
-| candidate | bam_materialize_numeric |              4 |                         2 |           186 |                   186 |      249110 |             186 | 75.87703 | avx2    |       0.004000 |    0.003764 |    0.004395 |
+| baseline  | bam_scan                |              1 |                         2 |           186 |                   186 |      249110 |               1 | 75.87703 | avx2    |       0.001758 |    0.001627 |    0.001878 |
+| baseline  | bam_scan_offset         |              1 |                         2 |           186 |                   186 |      249110 |               1 | 75.87703 | avx2    |       0.001892 |    0.001721 |    0.003895 |
+| baseline  | bam_materialize_text    |              1 |                         2 |           186 |                   186 |      249110 |             186 | 75.87703 | avx2    |       0.003307 |    0.003193 |    0.003779 |
+| baseline  | bam_materialize_numeric |              1 |                         2 |           186 |                   186 |      249110 |             186 | 75.87703 | avx2    |       0.003702 |    0.003495 |    0.004075 |
+| candidate | bam_scan                |              1 |                         2 |           186 |                   186 |      249110 |               1 | 75.87703 | avx2    |       0.001718 |    0.001693 |    0.001841 |
+| candidate | bam_scan_offset         |              1 |                         2 |           186 |                   186 |      249110 |               1 | 75.87703 | avx2    |       0.001726 |    0.001686 |    0.001870 |
+| candidate | bam_materialize_text    |              1 |                         2 |           186 |                   186 |      249110 |             186 | 75.87703 | avx2    |       0.003498 |    0.003235 |    0.003756 |
+| candidate | bam_materialize_numeric |              1 |                         2 |           186 |                   186 |      249110 |             186 | 75.87703 | avx2    |       0.003913 |    0.003519 |    0.007694 |
+| baseline  | bam_scan                |              4 |                         2 |           186 |                   186 |      249110 |               1 | 75.87703 | avx2    |       0.002255 |    0.001923 |    0.003590 |
+| baseline  | bam_scan_offset         |              4 |                         2 |           186 |                   186 |      249110 |               1 | 75.87703 | avx2    |       0.002394 |    0.002153 |    0.003902 |
+| baseline  | bam_materialize_text    |              4 |                         2 |           186 |                   186 |      249110 |             186 | 75.87703 | avx2    |       0.003424 |    0.003195 |    0.003798 |
+| baseline  | bam_materialize_numeric |              4 |                         2 |           186 |                   186 |      249110 |             186 | 75.87703 | avx2    |       0.003942 |    0.003634 |    0.004311 |
+| candidate | bam_scan                |              4 |                         2 |           186 |                   186 |      249110 |               1 | 75.87703 | avx2    |       0.002242 |    0.002156 |    0.005382 |
+| candidate | bam_scan_offset         |              4 |                         2 |           186 |                   186 |      249110 |               1 | 75.87703 | avx2    |       0.002322 |    0.002132 |    0.005479 |
+| candidate | bam_materialize_text    |              4 |                         2 |           186 |                   186 |      249110 |             186 | 75.87703 | avx2    |       0.003516 |    0.003242 |    0.008073 |
+| candidate | bam_materialize_numeric |              4 |                         2 |           186 |                   186 |      249110 |             186 | 75.87703 | avx2    |       0.003942 |    0.003516 |    0.004472 |
 
 |     | workload                | row_multiset_sha256                                              |
 |:----|:------------------------|:-----------------------------------------------------------------|
