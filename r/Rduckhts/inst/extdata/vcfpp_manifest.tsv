@@ -5,8 +5,9 @@ mapping	mapping_number_families.vcf	Representative Number=1/A/R/G/. mappings acr
 mapping	parallel_empty_contigs.vcf	Indexed parallel-scan regression with leading empty contigs before live records
 mapping	phased_genotype_fields.vcf	Phased and arbitrary-ploidy GT plus PL/GP/DS/PS FORMAT fields for normalization/liftover contract tests
 mapping	genotype_ploidy_edge_cases.vcf	Compact GT-only haploid/phased/polyploid/large-allele fixture for read_bcf projection tests
-mapping	tidy_chunk_boundary.vcf	Single-record 2053-sample fixture that exercises tidy read_bcf emission across DuckDB chunk boundaries
+mapping	tidy_chunk_boundary.vcf	Single-record 2053-sample fixture that exercises GT and CSQ record ownership across DuckDB output chunks
 mapping	test_vep_tidy.vcf	Compact CSQ plus two-sample FORMAT fixture for read_bcf VEP-cache reuse across tidy sample rows
 regression	bcf_filter_list_regression.vcf	read_bcf FILTER list-materialization regression for multi-entry and PASS values
 regression	malformed_bad_pos.vcf	Valid first record followed by malformed POS to verify BCF/VCF scan errors are surfaced instead of treated as EOF
+regression	bcf_cache_lifecycle.vcf	Synthetic three-record cache reset, missing fields, growing FORMAT arrays, ploidy and CSQ descriptor reuse
 spec	spec_standard_corrections.vcf	Intentionally misdeclared standard tags that should be corrected by spec-aware bind logic

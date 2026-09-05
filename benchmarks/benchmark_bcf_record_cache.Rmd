@@ -3,7 +3,7 @@ title: "DuckHTS BCF record-cache ownership"
 output: github_document
 ---
 
-<!-- benchmark_bcf_record_cache.md is generated from this Rmd. -->
+<!-- Reports are generated from benchmark_bcf_record_cache.Rmd. -->
 
 This paired workload materializes **every declared column** of the registered
 GIAB HG002 GRCh38 NIST v4.2.1 benchmark VCF with `read_bcf`, in wide and tidy
@@ -168,6 +168,7 @@ neither universal performance parity nor a fastest-reader claim.
 The independent SQL/R regression fixtures separately exercise two-sample CSQ
 replication, all 2,053 sample rows of a record crossing an output chunk, missing
 annotations and FORMAT values, growing list/string buffers, and changing ploidy.
-The pre-change legacy reader returns incorrect CSQ rows; that incorrect output
-is not used as a valid throughput baseline here. Reader names, scan defaults,
-sample-selection policies, and output ordering guarantees remain unchanged.
+This workload has no CSQ: its timings do not establish annotation correctness.
+The paired revisions above identify the actual comparison; experimental API
+retirement and canonical record-cache correctness are separate changes. No
+incorrect annotation output is accepted as a throughput oracle.

@@ -2652,8 +2652,8 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
             vep_rec = init->vep_rec;
         }
 
-        // Decode each projected FORMAT field once for this record before
-        // filling all sample rows in the current tidy run.
+        // Decode each projected FORMAT field once per input record; later
+        // tidy samples borrow the loaded values.
         for (int group_idx = 0; group_idx < init->n_format_groups; group_idx++) {
             bcf_format_group_t *group = &init->format_groups[group_idx];
             if (group->column_count == 0) {
@@ -3028,7 +3028,7 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
         row_count++;
         init->current_row++;
 
-        // In tidy mode, advance by the emitted sample run (or mark record as consumed)
+        // Advance the tidy sample, or mark the record as consumed.
         if (tidy_mode) {
             init->tidy_current_sample++;
             if (init->tidy_current_sample >= bind->n_samples) {

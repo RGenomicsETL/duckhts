@@ -162,6 +162,11 @@ test_bcf_projection_sql <- function() {
   expect_equal(out$max_pos[1], 100)
   expect_equal(out$fmt_s[1], "a")
 
+  expect_equal(dbGetQuery(con, paste(
+    "SELECT count(*) AS n FROM duckdb_functions()",
+    "WHERE function_name = 'read_bcf_v2'"
+  ))$n[[1]], 0)
+
   vep_tidy_path <- system.file(
     "extdata",
     "test_vep_tidy.vcf",
@@ -328,10 +333,6 @@ test_bcf_appender <- function() {
 
   quoted_path <- DBI::dbQuoteString(con, bcf_path)
 
-  expect_equal(dbGetQuery(con, paste(
-    "SELECT count(*) AS n FROM duckdb_functions()",
-    "WHERE function_name = 'read_bcf_v2'"
-  ))$n[[1]], 0)
   out <- DBI::dbGetQuery(
     con,
     sprintf(

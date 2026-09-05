@@ -1,5 +1,5 @@
 # name: test/sql/bcf_format_string_list.test
-# description: read_bcf handle string FORMAT lists and variable Number fields
+# description: read_bcf handles string FORMAT lists and variable Number fields
 # group: [duckhts]
 
 require duckhts
