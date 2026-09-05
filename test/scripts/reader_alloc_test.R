@@ -27,11 +27,8 @@ test_installed_reader_allocations <- function(probe_path) {
     path <- system.file("extdata", fixtures[[reader]], package = "Rduckhts")
     stopifnot(nzchar(path))
     options <- if (reader == "read_bam") ", decompression_threads := 0" else ""
-    # Non-BGZF FILE_OFFSET is a separate transport defect, not a SAM field.
-    # https://github.com/RGenomicsETL/duckhts/issues/194
-    projection <- if (reader == "read_bam") "* EXCLUDE(FILE_OFFSET)" else "*"
-    sql <- sprintf("SELECT %s FROM %s(%s, scan_mode := 'sequential'%s)",
-                   projection, reader, dbQuoteString(con, path), options)
+    sql <- sprintf("SELECT * FROM %s(%s, scan_mode := 'sequential'%s)",
+                   reader, dbQuoteString(con, path), options)
     arm(0L)
     expected <- dbGetQuery(con, sql)
     dbGetQuery(con, "SELECT 4242")

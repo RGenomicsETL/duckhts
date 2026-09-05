@@ -1,7 +1,8 @@
 # Tests for FILE_OFFSET column in read_bam()
 #
 # FILE_OFFSET is a UBIGINT column that exposes the BGZF virtual file offset
-# after each record.  It enables ORDER BY FILE_OFFSET in SQL window functions
+# after each BGZF BAM record, not its start. Other transports return NA.
+# It enables ORDER BY FILE_OFFSET within one unchanged BAM in SQL window functions
 # to reproduce exact BAM file order, required for streaming dedup algorithms
 # such as WisecondorX's larp/larp2 state machine.
 library(tinytest)
@@ -50,7 +51,7 @@ test_file_offset <- function() {
   )
   expect_true(
     all(diff(sort(offsets)) > 0L),
-    info = "FILE_OFFSET values are strictly increasing in scan order"
+    info = "FILE_OFFSET values are strictly increasing when explicitly sorted"
   )
 
   # ---- Window function: LAG(FILE_OFFSET) usable without errors ----
@@ -90,6 +91,53 @@ test_file_offset <- function() {
     0L,
     info = "no order violations: FILE_OFFSET strictly increases"
   )
+
+  extdata <- function(name) {
+    path <- system.file("extdata", name, package = "Rduckhts")
+    expect_true(nzchar(path))
+    path
+  }
+  oracle <- read.delim(extdata("bam_record_ends.tsv"), stringsAsFactors = FALSE)
+  unsupported <- c("bam_scan_mixed.cram", "bam_offset.sam", "bam_offset.sam.gz",
+                   "bam_offset.sam.bgz", "bam_offset_uncompressed.bam", "bam_offset_gzip.bam")
+  biological <- dbGetQuery(con, sprintf(paste(
+    "SELECT * EXCLUDE(FILE_OFFSET) FROM read_bam(%s)",
+    "ORDER BY QNAME, POS"), dbQuoteString(con, extdata("bam_scan_mixed.bam"))))
+  for (workers in c(1L, 4L)) {
+    dbExecute(con, sprintf("SET threads=%d", workers))
+    for (decompression in c(0L, 2L)) {
+      for (mode in c("auto", "sequential")) {
+        for (name in c("bam_scan_mixed.bam", "nanopore.bam", unsupported)) {
+          sql <- sprintf(paste(
+            "SELECT * FROM read_bam(%s, scan_mode := '%s', decompression_threads := %d)",
+            "ORDER BY QNAME, POS, FILE_OFFSET"), dbQuoteString(con, extdata(name)), mode, decompression)
+          rows <- dbGetQuery(con, sql)
+          expect_equal(dbGetQuery(con, sql), rows, info = paste(name, mode, "repeat query"))
+          if (name %in% unsupported) {
+            expect_true(all(is.na(rows$FILE_OFFSET)), info = name)
+            expect_equal(rows[names(rows) != "FILE_OFFSET"], biological, info = name)
+          } else {
+            expected <- oracle[oracle$file == name, c("QNAME", "FILE_OFFSET")]
+            expected <- expected[order(expected$QNAME, expected$FILE_OFFSET), ]
+            expect_equal(rows$QNAME, expected$QNAME, info = name)
+            expect_equal(as.numeric(rows$FILE_OFFSET), expected$FILE_OFFSET, info = name)
+          }
+        }
+      }
+    }
+    for (name in c("bam_scan_mixed.bam", "bam_scan_mixed.cram")) {
+      rows <- dbGetQuery(con, sprintf(paste(
+        "SELECT QNAME, FILE_OFFSET FROM read_bam(%s,",
+        "region := 'chr1:20-20,chr1:1-30,chr1:20-20') ORDER BY QNAME"),
+        dbQuoteString(con, extdata(name))))
+      expect_equal(rows$QNAME, c("mapped1", "placed_unmapped"))
+      if (endsWith(name, ".cram")) {
+        expect_true(all(is.na(rows$FILE_OFFSET)))
+      } else {
+        expect_equal(as.numeric(rows$FILE_OFFSET), c(7536690, 7536744))
+      }
+    }
+  }
 }
 
 test_file_offset()
