@@ -547,11 +547,11 @@ Show generated function catalog
 </h3>
 <table class="table">
 <colgroup>
-<col width="2%">
+<col width="1%">
 <col width="1%">
 <col width="0%">
-<col width="15%">
-<col width="80%">
+<col width="12%">
+<col width="83%">
 </colgroup>
 <thead><tr class="header">
 <th>Function</th>
@@ -573,7 +573,7 @@ Show generated function catalog
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_bam</code></td>
-<td>Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps. Use sequence_encoding := ‘nt16’ to return SEQ as UTINYINT[], quality_representation := ‘phred’ to return QUAL as UTINYINT[], and cigar_representation := ‘binary’ to return packed BAM CIGAR operations as UINTEGER[] instead of SAM text. scan_mode := ‘sequential’ forces a full-file streaming scan instead of index-backed count/parallel paths and is incompatible with region. decompression_threads controls per-file htslib worker threads and defaults to 2; use 0 to disable worker threads. NULL or an empty region string means no filter; empty comma-separated items and malformed known-contig intervals are errors. Unknown contigs retain HTSlib’s skip policy.</td>
+<td>Read SAM, BAM, and CRAM alignments with optional typed SAMtags and auxiliary tag maps. Use sequence_encoding := ‘nt16’ to return SEQ as UTINYINT[], quality_representation := ‘phred’ to return QUAL as UTINYINT[], and cigar_representation := ‘binary’ to return packed BAM CIGAR operations as UINTEGER[] instead of SAM text. FILE_OFFSET is the BGZF virtual position immediately after each BGZF-compressed BAM record, not its start; SAM (including compressed SAM), CRAM, and non-BGZF BAM return NULL. Explicit ORDER BY FILE_OFFSET orders records within one unchanged BGZF BAM; scan arrival order is not guaranteed and offsets are not comparable across files. scan_mode := ‘sequential’ forces a full-file streaming scan instead of index-backed count/parallel paths and is incompatible with region. decompression_threads controls per-file htslib worker threads and defaults to 2; use 0 to disable worker threads. NULL or an empty region string means no filter; empty comma-separated items and malformed known-contig intervals are errors. Unknown contigs retain HTSlib’s skip policy.</td>
 </tr>
 <tr class="odd">
 <td><code>read_fasta</code></td>
@@ -2216,7 +2216,7 @@ Show generated function catalog
 <span>  overwrite <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span>
 <span><span class="va">bgzip_meta</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"success"</span>, <span class="st">"output_path"</span>, <span class="st">"bytes_out"</span><span class="op">)</span><span class="op">]</span></span>
-<span><span class="co">#&gt;   success                                          output_path bytes_out</span></span>
+<span><span class="co">#&gt;   success                                         output_path bytes_out</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;       169</span></span>
 <span></span>
 <span><span class="va">bgunzip_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_bgunzip.html">rduckhts_bgunzip</a></span><span class="op">(</span></span>
@@ -2256,7 +2256,7 @@ Show generated function catalog
 <span>  threads <span class="op">=</span> <span class="fl">1</span></span>
 <span><span class="op">)</span></span>
 <span><span class="va">tabix_meta</span></span>
-<span><span class="co">#&gt;   success                                               index_path index_format</span></span>
+<span><span class="co">#&gt;   success                                              index_path index_format</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;          TBI</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_bed.html">rduckhts_bed</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"targets_idx"</span>, <span class="va">tmp_bgz</span>, region <span class="op">=</span> <span class="st">"CHROMOSOME_I:1-20"</span>, index_path <span class="op">=</span> <span class="va">tmp_tbi</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>

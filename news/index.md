@@ -2,6 +2,11 @@
 
 ## Rduckhts 1.5.1.9000-0.1.5
 
+- return NA for bundled `read_bam` FILE_OFFSET on SAM, CRAM, and
+  non-BGZF BAM. BGZF-compressed BAM retains its post-record virtual
+  offset (not the record start); use explicit SQL ORDER BY within one
+  unchanged BAM when order matters
+
 - make bundled BAM/BCF/FASTA/FASTQ reader-state allocation failures
   query errors with safe partial cleanup, rather than host crashes or
   incomplete BCF schemas. BAM SAMPLE_ID lookup/cache failures now raise
