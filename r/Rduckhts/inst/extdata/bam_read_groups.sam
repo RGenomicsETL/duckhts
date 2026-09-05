@@ -1,0 +1,14 @@
+@HD	VN:1.6	SO:unknown
+@SQ	SN:chr1	LN:100
+@RG	ID:one	SM:sample_one
+@RG	ID:missing
+@RG	ID:three	SM:sample_three
+@CO	DuckHTS synthetic fixture: repeated, missing, unknown, and changing read groups.
+r1	0	chr1	1	60	1M	*	0	0	A	I	RG:Z:one
+r2	0	chr1	2	60	1M	*	0	0	C	I	RG:Z:one
+r3	0	chr1	3	60	1M	*	0	0	G	I	RG:Z:missing
+r4	0	chr1	4	60	1M	*	0	0	T	I	RG:Z:missing
+r5	0	chr1	5	60	1M	*	0	0	A	I	RG:Z:three
+r6	0	chr1	6	60	1M	*	0	0	C	I
+r7	0	chr1	7	60	1M	*	0	0	G	I	RG:Z:unknown
+r8	0	chr1	8	60	1M	*	0	0	T	I	RG:Z:one

@@ -1,6 +1,13 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- report allocation failures while constructing BAM/BCF/FASTA/FASTQ readers
+  instead of crashing the host or publishing incomplete BCF schemas. Check
+  array sizes and make partial cleanup safe, including FORMAT projection groups.
+  Remove the redundant BAM sample-string copy and report failed SAMPLE_ID
+  cache/HTSlib lookups instead of silently substituting NULL; genuinely absent
+  samples remain NULL. Add isolated first-party allocation-failure/recovery tests
+
 - reject empty region-list items and malformed known-contig intervals instead
   of silently widening or partially executing a request. Share one checked,
   host-neutral list parser across BAM, BCF, FASTA, and tabix readers; retain

@@ -22,8 +22,11 @@ Rscript -e 'rmarkdown::render("benchmarks/benchmark_bcf_record_cache.Rmd", knit_
 ```
 
 The earlier `benchmark_bcf_record_cache.md` records the experiment at its named
-source revisions. Preserve that report when measuring retirement: render this
-Rmd with `output_file = "benchmark_bcf_reader_retirement.md"`. Set
+source revisions. Preserve historical reports when measuring subsequent changes:
+render this Rmd with a change-specific output file (for allocation-error handling,
+`output_file = "benchmark_reader_allocations.md"`). The paired pre-change binary
+provides the identical-workload baseline. This workload exercises BCF construction
+and materialization, not BAM SAMPLE_ID caching or FASTA/FASTQ throughput. Set
 `BCF_CACHE_READERS=read_bcf,read_bcf_v2` only to reproduce the historical comparison
 with two old binaries that both expose the experimental reader.
 

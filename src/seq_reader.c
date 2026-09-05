@@ -45,6 +45,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/kstring.h>
 
 #include "include/hts_io_tuning.h"
+#include "include/duckdb_alloc.h"
 #include "include/region_list.h"
 #include "include/seq_encoding.h"
 #include "include/quality_encoding.h"
@@ -448,8 +449,12 @@ static void seq_read_bind(duckdb_bind_info info, int is_fastq) {
     }
     sam_close(fp);
 
-    seq_bind_data_t *bind = (seq_bind_data_t *)duckdb_malloc(sizeof(seq_bind_data_t));
-    memset(bind, 0, sizeof(seq_bind_data_t));
+    seq_bind_data_t *bind = duckhts_alloc_array(1, sizeof(*bind));
+    if (!bind) {
+        duckdb_bind_set_error(info, "FASTA/FASTQ: out of memory allocating bind state");
+        duckdb_free(file_path);
+        return;
+    }
     bind->file_path = file_path;
     bind->is_fastq = is_fastq;
     bind->direct_fastq = is_fastq && fmt == fastq_format;
@@ -656,13 +661,21 @@ static void fastq_read_bind(duckdb_bind_info info) { seq_read_bind(info, 1); }
 static void seq_read_init(duckdb_init_info info) {
     seq_bind_data_t *bind = (seq_bind_data_t *)duckdb_init_get_bind_data(info);
 
-    seq_init_data_t *init = (seq_init_data_t *)duckdb_malloc(sizeof(seq_init_data_t));
-    memset(init, 0, sizeof(seq_init_data_t));
+    seq_init_data_t *init = duckhts_alloc_array(1, sizeof(*init));
+    if (!init) {
+        duckdb_init_set_error(info, "FASTA/FASTQ: out of memory allocating worker state");
+        return;
+    }
 
     /* Projection pushdown: record which columns DuckDB actually needs */
     init->column_count = duckdb_init_get_column_count(info);
     if (init->column_count > 0) {
-        init->column_ids = (idx_t *)duckdb_malloc(sizeof(idx_t) * init->column_count);
+        init->column_ids = duckhts_alloc_array(init->column_count, sizeof(*init->column_ids));
+        if (!init->column_ids) {
+            duckdb_init_set_error(info, "FASTA/FASTQ: out of memory allocating projected columns");
+            destroy_seq_init(init);
+            return;
+        }
         for (idx_t i = 0; i < init->column_count; i++)
             init->column_ids[i] = duckdb_init_get_column_index(info, i);
     }
@@ -785,6 +798,11 @@ static void seq_read_init(duckdb_init_info info) {
     }
 
     init->rec = bam_init1();
+    if (!init->rec) {
+        duckdb_init_set_error(info, "FASTA/FASTQ: out of memory allocating sequence record");
+        destroy_seq_init(init);
+        return;
+    }
 
     if (bind->paired) {
         init->fp_mate = sam_open(bind->mate_path, "r");
@@ -802,6 +820,11 @@ static void seq_read_init(duckdb_init_info info) {
             return;
         }
         init->rec_mate = bam_init1();
+        if (!init->rec_mate) {
+            duckdb_init_set_error(info, "read_fastq: out of memory allocating mate record");
+            destroy_seq_init(init);
+            return;
+        }
     }
 
     if (!bind->is_fastq && bind->n_regions > 0) {

@@ -142,6 +142,21 @@ test: test_debug
 test_debug: test-cache-paths test-duckvep-kernel test-simd-kernels test-liftover-property test-liftover-fuzz-debug test-sqllogictest-debug
 test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release
 test_release: test-reference-cache
+ifeq ($(shell uname -s),Linux)
+test_release: test-reader-alloc
+endif
+
+.PHONY: test-reader-alloc
+test-reader-alloc:
+	cmake --build cmake_build/release --target duckhts_reader_alloc_probe
+	./configure/venv/bin/python3 test/scripts/reader_alloc_test.py \
+		--extension build/release/duckhts.duckdb_extension \
+		--probe cmake_build/release/libduckhts_reader_alloc_probe.so
+
+.PHONY: test-reader-alloc-r
+test-reader-alloc-r:
+	cmake --build cmake_build/release --target duckhts_reader_alloc_probe
+	Rscript test/scripts/reader_alloc_test.R cmake_build/release/libduckhts_reader_alloc_probe.so
 
 .PHONY: test-region-list
 test-region-list:

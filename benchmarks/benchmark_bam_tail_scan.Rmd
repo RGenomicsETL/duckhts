@@ -1,11 +1,11 @@
 ---
-title: "Automatic BAM tail ownership: small-fixture scan cost"
+title: "Automatic BAM full-file scan: small-fixture cost"
 output:
   github_document:
     html_preview: false
 ---
 
-This compares the automatic BAM scan before and after the no-coordinate tail fix,
+This compares automatic BAM scans at two named reader revisions,
 using the existing `benchmark_simd_bam_gc.py` workload on its committed nanopore
 fixture. It exercises many empty contig claims and full `SEQ` decoding, but this
 186-record fixture is dominated by setup cost: it is not a WGS throughput benchmark.
@@ -23,7 +23,7 @@ Remote I/O, large-input throughput, and CRAM performance remain unmeasured.
 ## Reproduction and identity
 
 Build each named source revision separately. Set `BAM_SCAN_BASELINE_EXTENSION` to
-the pre-fix binary, `BAM_SCAN_BASELINE_REVISION` to its revision, then render this
+the baseline binary, `BAM_SCAN_BASELINE_REVISION` to its revision, then render this
 report from the repository root. `DUCKHTS_EXTENSION` selects the candidate binary;
 `PYTHON` selects the Python environment with DuckDB installed.
 

@@ -129,4 +129,14 @@ if [ "$sanitizer" = asan ]; then
 else
   "${runtime[@]}" "$build_dir/duckhts_region_list_test"
 fi
+cmake --build "$build_dir" --target duckhts_reader_alloc_probe -j2
+python_runtime=("${runtime[@]}")
+if [ "$sanitizer" = asan ]; then
+  # Python does not link C++; load it at startup so ASan can resolve
+  # __cxa_throw before DuckDB is imported and exercises query errors.
+  python_runtime=(env "ASAN_OPTIONS=detect_leaks=0:halt_on_error=1"
+    "LD_PRELOAD=$(${CC:-cc} -print-file-name=libasan.so):$(${CXX:-c++} -print-file-name=libstdc++.so)")
+fi
+"${python_runtime[@]}" ./configure/venv/bin/python3 test/scripts/reader_alloc_test.py \
+  --extension "$extension" --probe "$build_dir/libduckhts_reader_alloc_probe.so"
 echo "$sanitizer complete-extension gates: OK"
