@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- retain no-coordinate reads in bundled `read_bam` automatic BAM/CRAM full-file
+  scans, with unchanged region filtering. Failed reads, iterators, or worker
+  index reloads now raise query errors instead of losing or duplicating rows
+
 - remove experimental `read_bcf_v2` from the bundled extension. Use `read_bcf`
   with ordinary SQL projection and `scan_mode := 'sequential'` when needed;
   experimental sample/schema selectors are removed, not transferred to the

@@ -72,6 +72,10 @@ run_sql "mode must be 'overlap' or 'contain'" \
   "CREATE TABLE cgr_san(chrom VARCHAR,start BIGINT,stop BIGINT); INSERT INTO cgr_san VALUES ('chr1',0,1); SELECT duckhts_cgranges_from_query('cgr_san_idx','SELECT * FROM cgr_san','chrom','start','stop'); SELECT * FROM duckhts_cgranges_overlaps('cgr_san_idx','chr1',0,1,mode:='bad');"
 run_sql "read_bcf: failed to read or parse BCF/VCF record" \
   "SELECT count(*) FROM read_bcf('test/data/malformed_bad_pos.vcf',tidy_format:=true);"
+run_sql "read_bam: failed to read SAM/BAM/CRAM record" \
+  "SELECT QNAME FROM read_bam('test/data/bam_scan_malformed.sam',scan_mode:='sequential',decompression_threads:=0);"
+run_sql "" \
+  "SET threads=4; SELECT CASE WHEN count(QNAME)=5 AND count(*) FILTER (WHERE QNAME='unplaced')=2 THEN true ELSE error('BAM tail ownership') END FROM read_bam('test/data/bam_scan_mixed.bam',decompression_threads:=0); SELECT CASE WHEN count(QNAME)=2053 THEN true ELSE error('CRAM tail ownership') END FROM read_bam('test/data/bam_scan_all_unplaced.cram',decompression_threads:=0);"
 run_sql "precision_digits must be between 0 and 18" \
   "SELECT * FROM duckhts_mosdepth('$tmp/mosdepth','test/data/range.bam',precision_digits:=-1,overwrite:=true);"
 run_sql "" \

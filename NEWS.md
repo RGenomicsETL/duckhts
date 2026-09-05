@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- retain no-coordinate BAM/CRAM reads exactly once in automatic full-file
+  contig scans, including across output chunks. Keep explicit region filtering
+  unchanged; report read/iterator failures instead of silently ending a scan,
+  and reject a lost worker index instead of duplicating sequential scans
+
 - remove the experimental `read_bcf_v2` SQL function and its generation-specific
   sample/schema selectors, text-only counting, and sample-run paths. Use
   `read_bcf`, SQL projection, and explicit `scan_mode := 'sequential'` for streaming;
