@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- cache Fedora Clang R dependencies under the exact build-profile inputs and
+  use an explicit CRAN mirror for the Windows ARM64 dependency cache. Populate
+  default-branch caches on main pushes; continue building and checking each
+  current Rduckhts source tarball regardless of cache hits
+
 - preserve CSQ/ANN/BCSQ values on every `read_bcf` tidy sample row, including
   records split across output chunks. Both BCF readers now retain one worker-owned
   decode cache; remove the duplicate per-chunk allocation/cleanup path and make

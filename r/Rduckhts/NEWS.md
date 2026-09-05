@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- reuse profile-specific Fedora Clang build dependencies and select an explicit
+  CRAN mirror for Windows ARM64 dependency caching in package CI; current-source
+  tarball installation, strict diagnostics, and package checks still run
+
 - fix missing consequence fields after the first tidy sample in bundled
   `read_bcf` results. Keep record-owned annotation and decode buffers across
   output chunks, with unchanged wrapper arguments and scan defaults
