@@ -2,7 +2,7 @@
 # Synthetic SAM records below are the source authority; samtools supplies BAM,
 # BAI/CSI and reference-free CRAM/CRAI encoding. Run from the repository root.
 # Originally generated with samtools 1.23 / HTSlib 1.23; no external reference.
-stopifnot(file.exists("src/bam_reader.c"), nzchar(Sys.which("samtools")))
+stopifnot(file.exists("src/bam_reader.c"), nzchar(Sys.which("samtools")), nzchar(Sys.which("bgzip")))
 
 prepare_bam_scan_fixtures <- function() {
   tmp <- tempfile("bam-scan-fixtures-")
@@ -31,6 +31,24 @@ prepare_bam_scan_fixtures <- function() {
     run(c("view", "--no-PG", "-b", "-o", bam, sam))
     run(c("index", "-b", bam))
     run(c("index", "-c", bam))
+    # BAI/CSI allow omission of the final uint64 no-coordinate count.
+    # Remove only those eight bytes, leaving all contig/chunk metadata intact.
+    for (index in c("bai", "csi")) {
+      indexed <- paste0(bam, ".", index)
+      handle <- if (index == "csi") gzfile(indexed, "rb") else file(indexed, "rb")
+      bytes <- readBin(handle, "raw", n = 100000L)
+      close(handle)
+      stopifnot(length(bytes) > 8L)
+      plain <- file.path(tmp, paste0("legacy.", index))
+      writeBin(head(bytes, -8L), plain)
+      legacy <- paste0(bam, ".legacy.", index)
+      if (index == "csi") {
+        stopifnot(system2("bgzip", c("-c", shQuote(plain)), stdout = legacy) == 0L)
+      } else {
+        stopifnot(file.copy(plain, legacy, overwrite = TRUE))
+      }
+      stopifnot(file.copy(legacy, "r/Rduckhts/inst/extdata", overwrite = TRUE))
+    }
     run(c("view", "--no-PG", "-C", "--output-fmt-option", "no_ref=1", "-o", cram, sam))
     run(c("index", cram))
     # The decoded SAM fields, including duplicate physical records, must survive.

@@ -8,7 +8,7 @@ test_bam_full_scan <- function() {
   for (threads in c(1L, 4L)) {
     dbExecute(con, sprintf("SET threads=%d", threads))
     for (name in names(expected_counts)) {
-      for (index in c("bai", "csi", "crai")) {
+      for (index in c("bai", "csi", "legacy.bai", "legacy.csi", "crai")) {
         format <- if (index == "crai") "cram" else "bam"
         path <- system.file("extdata", paste0("bam_scan_", name, ".", format), package = "Rduckhts")
         expect_true(nzchar(path))

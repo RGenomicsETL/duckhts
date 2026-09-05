@@ -441,11 +441,16 @@ static int bam_try_get_index_row_count(hts_idx_t *idx, uint64_t *out_total) {
 
     int nseq = hts_idx_nseq(idx);
     uint64_t total = hts_idx_get_n_no_coor(idx);
+    /* Zero also means the optional trailing count was absent in an older
+     * BAI/CSI. Only a nonzero count proves this statistic was supplied. */
+    if (total == 0) return 0;
     for (int tid = 0; tid < nseq; tid++) {
         uint64_t mapped = 0, unmapped = 0;
         if (hts_idx_get_stat(idx, tid, &mapped, &unmapped) != 0) {
             return 0;
         }
+        if (mapped > UINT64_MAX - total || unmapped > UINT64_MAX - total - mapped)
+            return 0;
         total += mapped + unmapped;
     }
 
@@ -901,13 +906,16 @@ static int claim_next_contig(bam_local_init_data_t *local,
     errno = 0;
     local->itr = sam_itr_queryi(local->idx, tid, 0, HTS_POS_MAX);
     if (!local->itr) {
-        /* HTSlib returns NULL without errno when an empty BAM index has no
-         * tail offset. Allocation failures set errno and must remain errors.
-         * Empty named contigs and CRAM tails have a finished iterator. */
+        /* Without a mapped chunk or optional count, HTSlib cannot distinguish
+         * an empty BAM from an all-unplaced BAM. No named-contig iterator can
+         * have read/searched this handle in that case: it is still immediately
+         * after the header. The unique tail owner streams the remaining file.
+         * Allocation failures set errno and must not trigger this fallback. */
         if (tid == HTS_IDX_NOCOOR && hts_get_format(local->fp)->format == bam &&
-            errno == 0 && hts_idx_get_n_no_coor(local->idx) == 0)
-            return 0;
-        return -1;
+            errno == 0 && hts_idx_get_n_no_coor(local->idx) == 0) {
+            local->itr = sam_itr_queryi(NULL, HTS_IDX_REST, 0, 0);
+        }
+        if (!local->itr) return -1;
     }
     local->needs_next_contig = 0;
     return 1;
