@@ -396,9 +396,10 @@ samples <- sprintf("S%04d", seq_len(2053))
 lines <- c(
   "##fileformat=VCFv4.3",
   "##contig=<ID=chr1,length=1000>",
+  "##INFO=<ID=CSQ,Number=.,Type=String,Description=\"Consequence annotations from Ensembl VEP. Format: Allele|Consequence|SYMBOL|DISTANCE\">",
   "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">",
   paste(c("#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT", samples), collapse = "\t"),
-  paste(c("chr1", "10", "tidy_chunk", "A", "C", ".", "PASS", ".", "GT", rep("0/1", length(samples))), collapse = "\t")
+  paste(c("chr1", "10", "tidy_chunk", "A", "C", ".", "PASS", "CSQ=C|missense_variant|GENE1|12", "GT", rep("0/1", length(samples))), collapse = "\t")
 )
 for (path in args) writeLines(lines, path)
 RS

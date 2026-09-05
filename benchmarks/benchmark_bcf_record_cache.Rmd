@@ -120,7 +120,7 @@ cat("R:", R.version.string, "; DuckDB:", as.character(packageVersion("duckdb")),
 cat(system2("uname", "-srmo", stdout = TRUE), "\n")
 cat(system2("clang", "--version", stdout = TRUE)[1], "\n")
 cat(system2("bcftools", "--version", stdout = TRUE)[1:2], sep = "\n")
-cat("\n", system2("taskset", c("-pc", Sys.getpid()), stdout = TRUE), "\n")
+cat(system2("taskset", c("-pc", Sys.getpid()), stdout = TRUE), "\n")
 cat(system2("sh", c("-c", shQuote("lscpu | sed -n '/Model name:/p'")), stdout = TRUE), "\n")
 ```
 

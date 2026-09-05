@@ -49,7 +49,7 @@ Rscript -e 'rmarkdown::render("benchmarks/benchmark_bcf_record_cache.Rmd", knit_
     ## bcftools 1.23.1-70-g6dbd8fef
     ## Using htslib 1.22.1
 
-    ## 
+    ##
     ##  pid 13250's current affinity list: 0,2,4,6
 
     ## Model name:                           13th Gen Intel(R) Core(TM) i5-13500 BIOS Model name:                      13th Gen Intel(R) Core(TM) i5-13500 To Be Filled By O.E.M. CPU @ 2.4GHz
