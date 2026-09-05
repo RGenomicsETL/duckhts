@@ -146,17 +146,22 @@ ifneq ($(filter linux_%,$(or $(DUCKDB_PLATFORM),$(shell sed -n '1p' configure/pl
 test_release: test-reader-alloc
 endif
 
-.PHONY: test-reader-alloc
-test-reader-alloc:
-	cmake --build cmake_build/release --target duckhts_reader_alloc_probe
-	./configure/venv/bin/python3 test/scripts/reader_alloc_test.py \
-		--extension build/release/duckhts.duckdb_extension \
-		--probe cmake_build/release/libduckhts_reader_alloc_probe.so
+# Distribution CI tests the same binary inside and outside Docker. Its CMake
+# cache contains container-absolute paths, so build this host-only shim afresh.
+define run_reader_alloc_test
+	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+		$(CC) -std=c11 -O1 -g -Wall -Wextra -Werror -fPIC -shared \
+			-Iduckdb_capi -Isrc/include test/scripts/reader_alloc_probe.c -ldl \
+			-o "$$tmp/reader_alloc_probe.so"; \
+		$(1) "$$tmp/reader_alloc_probe.so"
+endef
 
-.PHONY: test-reader-alloc-r
+.PHONY: test-reader-alloc test-reader-alloc-r
+test-reader-alloc:
+	$(call run_reader_alloc_test,./configure/venv/bin/python3 test/scripts/reader_alloc_test.py --extension build/release/duckhts.duckdb_extension --probe)
+
 test-reader-alloc-r:
-	cmake --build cmake_build/release --target duckhts_reader_alloc_probe
-	Rscript test/scripts/reader_alloc_test.R cmake_build/release/libduckhts_reader_alloc_probe.so
+	$(call run_reader_alloc_test,Rscript test/scripts/reader_alloc_test.R)
 
 .PHONY: test-region-list
 test-region-list:
