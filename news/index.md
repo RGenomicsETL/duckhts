@@ -2,6 +2,12 @@
 
 ## Rduckhts 1.5.1.9000-0.1.5
 
+- make bundled BAM/BCF/FASTA/FASTQ reader-state allocation failures
+  query errors with safe partial cleanup, rather than host crashes or
+  incomplete BCF schemas. BAM SAMPLE_ID lookup/cache failures now raise
+  errors instead of losing sample values; genuinely missing sample
+  annotations still return NA through DBI
+
 - reject empty region-list items in bundled BAM/BCF/FASTA/tabix readers
   and malformed known-contig BAM/BCF/tabix intervals. Region-list parse
   failures no longer become full-file or partial scans;
