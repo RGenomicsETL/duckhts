@@ -519,6 +519,10 @@ static int bcf_region_name2id(void *hdr, const char *name) {
     return bcf_hdr_name2id((bcf_hdr_t *)hdr, name);
 }
 
+static int bcf_tabix_region_name2id(void *tbx, const char *name) {
+    return tbx_name2id((tbx_t *)tbx, name);
+}
+
 /* Open one htslib iterator for the complete requested region set.  HTSlib
  * 1.24's multi-region iterators merge overlapping chunks and return a record
  * once even when several requested regions overlap it. */
@@ -1493,10 +1497,7 @@ static void bcf_read_bind(duckdb_bind_info info) {
     bind->decode_error_policy = decode_error_policy;
     char region_error[256];
     if (!duckhts_region_list_parse(region, &bind->regions, &bind->n_regions,
-                                   region_error, sizeof(region_error)) ||
-        !duckhts_region_list_validate(bind->regions, bind->n_regions,
-                                      bcf_region_name2id, hdr,
-                                      region_error, sizeof(region_error))) {
+                                   region_error, sizeof(region_error))) {
         duckdb_bind_set_error(info, region_error);
         bcf_hdr_destroy(hdr);
         hts_close(fp);
@@ -1996,6 +1997,17 @@ static void bcf_read_local_init(duckdb_init_info info) {
             return;
         }
 
+        /* VCF indexes can name contigs absent from the text header, especially
+         * with an explicit non-colocated index. Use the iterator's dictionary. */
+        char region_error[256];
+        if (!duckhts_region_list_validate(bind->regions, bind->n_regions,
+                                          local->idx ? bcf_region_name2id : bcf_tabix_region_name2id,
+                                          local->idx ? (void *)local->hdr : (void *)local->tbx,
+                                          region_error, sizeof(region_error))) {
+            duckdb_init_set_error(info, region_error);
+            destroy_init_data(local);
+            return;
+        }
         local->itr = bcf_open_region_iterator(local->idx, local->hdr, local->tbx,
                                                bind->regions, bind->n_regions);
 

@@ -79,6 +79,11 @@ bcftools view --no-version -Ob -o "$DST/region_union.bcf" "$DST/region_union.vcf
 bcftools index -f "$DST/region_union.bcf"
 cp "$DST/region_union.vcf" "$DST/region_union.vcf.gz" "$DST/region_union.vcf.gz.tbi" \
    "$DST/region_union.bcf" "$DST/region_union.bcf.csi" "$PKG_DST/"
+# VCF may omit contig declarations; only this explicit index knows its targets.
+sed '/^##contig=/d' "$DST/region_union.vcf" | bgzip -c > "$DST/region_union_no_contig.vcf.gz"
+tabix -f -p vcf "$DST/region_union_no_contig.vcf.gz"
+mv "$DST/region_union_no_contig.vcf.gz.tbi" "$DST/region_union_no_contig.index.tbi"
+cp "$DST/region_union_no_contig.vcf.gz" "$DST/region_union_no_contig.index.tbi" "$PKG_DST/"
 
 (cd "$REPO_ROOT" && Rscript test/scripts/prepare_bam_scan_fixtures.R)
 cp "$SRC/range.bam" "$DST/range.bam"

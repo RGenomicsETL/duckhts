@@ -5,6 +5,12 @@ test_region_lists <- function() {
   con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE))
   file <- function(name) dbQuoteString(con, system.file("extdata", name, package = "Rduckhts"))
+  explicit_index <- sprintf("read_bcf(%s, index_path := %s, region := %%s)",
+                           file("region_union_no_contig.vcf.gz"), file("region_union_no_contig.index.tbi"))
+  expect_error(dbGetQuery(con, paste("SELECT count(*) FROM",
+    sprintf(explicit_index, "'chr1:10-20,chr1:20-10'"))), pattern = "region list: invalid item")
+  expect_equal(dbGetQuery(con, paste("SELECT count(*) AS n FROM",
+    sprintf(explicit_index, "'chr1:11-11,chr1:19-19'")))$n[[1]], 2)
   readers <- c(read_bcf = "vcf_file.bcf", read_bam = "range.bam",
                read_tabix = "gff_file.gff.gz", read_fasta = "ce.fa")
   contigs <- c("1", "CHROMOSOME_I", "X", "CHROMOSOME_I")

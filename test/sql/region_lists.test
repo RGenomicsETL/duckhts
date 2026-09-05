@@ -5,6 +5,16 @@
 require duckhts
 
 statement error
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union_no_contig.vcf.gz', index_path := '__WORKING_DIRECTORY__/test/data/region_union_no_contig.index.tbi', region := 'chr1:10-20,chr1:20-10');
+----
+region list: invalid item
+
+query I
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union_no_contig.vcf.gz', index_path := '__WORKING_DIRECTORY__/test/data/region_union_no_contig.index.tbi', region := 'chr1:11-11,chr1:19-19');
+----
+2
+
+statement error
 SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', region := ',');
 ----
 region list: empty item

@@ -76,6 +76,8 @@ run_sql "region list: empty item" \
   "SELECT count(*) FROM read_bam('test/data/range.bam',region:=',,');"
 run_sql "region list: invalid item" \
   "SELECT count(*) FROM read_bcf('test/data/region_union.bcf',region:='chr1:1-20,chr1:20-10');"
+run_sql "region list: invalid item" \
+  "SELECT count(*) FROM read_bcf('test/data/region_union_no_contig.vcf.gz',index_path:='test/data/region_union_no_contig.index.tbi',region:='chr1:1-20,chr1:20-10');"
 run_sql "region list: empty item" \
   "SELECT count(*) FROM read_fasta('test/data/ce.fa',region:='CHROMOSOME_I:1-10,');"
 run_sql "region list: invalid item" \
