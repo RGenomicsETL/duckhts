@@ -4,7 +4,9 @@
 - retain no-coordinate BAM/CRAM reads exactly once in automatic full-file
   contig scans, including across output chunks. Keep explicit region filtering
   unchanged; report read/iterator failures instead of silently ending a scan,
-  and reject a lost worker index instead of duplicating sequential scans
+  and reject a lost worker index instead of duplicating sequential scans.
+  Stream the tail when older BAI/CSI files omit its count and cannot locate it;
+  do not use an ambiguous zero no-coordinate count for index-only counting
 
 - remove the experimental `read_bcf_v2` SQL function and its generation-specific
   sample/schema selectors, text-only counting, and sample-run paths. Use
