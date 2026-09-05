@@ -4,6 +4,15 @@ library(DBI)
 test_bam_full_scan <- function() {
   con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE))
+  read_groups <- system.file("extdata", "bam_read_groups.sam", package = "Rduckhts")
+  expect_true(nzchar(read_groups))
+  groups <- dbGetQuery(con, sprintf(paste(
+    "SELECT QNAME, READ_GROUP_ID, SAMPLE_ID FROM read_bam(%s,",
+    "scan_mode := 'sequential', decompression_threads := 0) ORDER BY QNAME"),
+    dbQuoteString(con, read_groups)))
+  expect_equal(groups$QNAME, paste0("r", 1:8))
+  expect_equal(groups$READ_GROUP_ID, c("one", "one", "missing", "missing", "three", NA, "unknown", "one"))
+  expect_equal(groups$SAMPLE_ID, c("sample_one", "sample_one", NA, NA, "sample_three", NA, NA, "sample_one"))
   expected_counts <- c(mixed = 5L, single = 3L, all_unplaced = 2053L, empty = 0L)
   for (threads in c(1L, 4L)) {
     dbExecute(con, sprintf("SET threads=%d", threads))

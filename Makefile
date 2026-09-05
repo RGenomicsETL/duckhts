@@ -142,6 +142,26 @@ test: test_debug
 test_debug: test-cache-paths test-duckvep-kernel test-simd-kernels test-liftover-property test-liftover-fuzz-debug test-sqllogictest-debug
 test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release
 test_release: test-reference-cache
+ifneq ($(filter linux_%,$(or $(DUCKDB_PLATFORM),$(shell sed -n '1p' configure/platform.txt 2>/dev/null))),)
+test_release: test-reader-alloc
+endif
+
+# Distribution CI tests the same binary inside and outside Docker. Its CMake
+# cache contains container-absolute paths, so build this host-only shim afresh.
+define run_reader_alloc_test
+	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+		$(CC) -std=c11 -O1 -g -Wall -Wextra -Werror -fPIC -shared \
+			-Iduckdb_capi -Isrc/include test/scripts/reader_alloc_probe.c -ldl \
+			-o "$$tmp/reader_alloc_probe.so"; \
+		$(1) "$$tmp/reader_alloc_probe.so"
+endef
+
+.PHONY: test-reader-alloc test-reader-alloc-r
+test-reader-alloc:
+	$(call run_reader_alloc_test,./configure/venv/bin/python3 test/scripts/reader_alloc_test.py --extension build/release/duckhts.duckdb_extension --probe)
+
+test-reader-alloc-r:
+	$(call run_reader_alloc_test,Rscript test/scripts/reader_alloc_test.R)
 
 .PHONY: test-region-list
 test-region-list:

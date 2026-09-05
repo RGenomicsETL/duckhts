@@ -50,6 +50,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/kstring.h>
 
 #include "include/hts_io_tuning.h"
+#include "include/duckdb_alloc.h"
 #include "include/region_list.h"
 
 // =============================================================================
@@ -428,48 +429,33 @@ static int bcf_decode_cache_init(bcf_init_data_t *init, const bcf_bind_data_t *b
 
     if (bind->n_format_fields > 0) {
         size_t nfmt = (size_t)bind->n_format_fields;
-        init->fmt_loaded = (int *)duckdb_malloc(nfmt * sizeof(int));
-        init->fmt_ret = (int *)duckdb_malloc(nfmt * sizeof(int));
-        init->fmt_n_values = (int *)duckdb_malloc(nfmt * sizeof(int));
-        init->fmt_i32 = (int32_t **)duckdb_malloc(nfmt * sizeof(int32_t *));
-        init->fmt_f32 = (float **)duckdb_malloc(nfmt * sizeof(float *));
-        init->fmt_str = (char ***)duckdb_malloc(nfmt * sizeof(char **));
-        /* Cleanup must see only initialized element pointers after any
-         * allocation failure, including a partially constructed cache. */
-        if (init->fmt_i32) memset(init->fmt_i32, 0, nfmt * sizeof(int32_t *));
-        if (init->fmt_f32) memset(init->fmt_f32, 0, nfmt * sizeof(float *));
-        if (init->fmt_str) memset(init->fmt_str, 0, nfmt * sizeof(char **));
+        init->fmt_loaded = duckhts_alloc_array(nfmt, sizeof(*init->fmt_loaded));
+        init->fmt_ret = duckhts_alloc_array(nfmt, sizeof(*init->fmt_ret));
+        init->fmt_n_values = duckhts_alloc_array(nfmt, sizeof(*init->fmt_n_values));
+        init->fmt_i32 = duckhts_alloc_array(nfmt, sizeof(*init->fmt_i32));
+        init->fmt_f32 = duckhts_alloc_array(nfmt, sizeof(*init->fmt_f32));
+        init->fmt_str = duckhts_alloc_array(nfmt, sizeof(*init->fmt_str));
         if (!init->fmt_loaded || !init->fmt_ret || !init->fmt_n_values ||
             !init->fmt_i32 || !init->fmt_f32 || !init->fmt_str) {
             bcf_decode_cache_free(init);
             return 0;
         }
-        memset(init->fmt_loaded, 0, nfmt * sizeof(int));
-        memset(init->fmt_ret, 0, nfmt * sizeof(int));
-        memset(init->fmt_n_values, 0, nfmt * sizeof(int));
     }
 
     if (bind->n_info_fields > 0) {
         size_t ninfo = (size_t)bind->n_info_fields;
-        init->info_loaded = (int *)duckdb_malloc(ninfo * sizeof(int));
-        init->info_ret = (int *)duckdb_malloc(ninfo * sizeof(int));
-        init->info_n_values = (int *)duckdb_malloc(ninfo * sizeof(int));
-        init->info_flag = (int *)duckdb_malloc(ninfo * sizeof(int));
-        init->info_i32 = (int32_t **)duckdb_malloc(ninfo * sizeof(int32_t *));
-        init->info_f32 = (float **)duckdb_malloc(ninfo * sizeof(float *));
-        init->info_str = (char **)duckdb_malloc(ninfo * sizeof(char *));
-        if (init->info_i32) memset(init->info_i32, 0, ninfo * sizeof(int32_t *));
-        if (init->info_f32) memset(init->info_f32, 0, ninfo * sizeof(float *));
-        if (init->info_str) memset(init->info_str, 0, ninfo * sizeof(char *));
+        init->info_loaded = duckhts_alloc_array(ninfo, sizeof(*init->info_loaded));
+        init->info_ret = duckhts_alloc_array(ninfo, sizeof(*init->info_ret));
+        init->info_n_values = duckhts_alloc_array(ninfo, sizeof(*init->info_n_values));
+        init->info_flag = duckhts_alloc_array(ninfo, sizeof(*init->info_flag));
+        init->info_i32 = duckhts_alloc_array(ninfo, sizeof(*init->info_i32));
+        init->info_f32 = duckhts_alloc_array(ninfo, sizeof(*init->info_f32));
+        init->info_str = duckhts_alloc_array(ninfo, sizeof(*init->info_str));
         if (!init->info_loaded || !init->info_ret || !init->info_n_values ||
             !init->info_flag || !init->info_i32 || !init->info_f32 || !init->info_str) {
             bcf_decode_cache_free(init);
             return 0;
         }
-        memset(init->info_loaded, 0, ninfo * sizeof(int));
-        memset(init->info_ret, 0, ninfo * sizeof(int));
-        memset(init->info_n_values, 0, ninfo * sizeof(int));
-        memset(init->info_flag, 0, ninfo * sizeof(int));
     }
 
     return 1;
@@ -506,14 +492,6 @@ static void destroy_init_data(void* data) {
 // =============================================================================
 // String Utilities
 // =============================================================================
-
-static char* strdup_duckdb(const char* s) {
-    if (!s) return NULL;
-    size_t len = strlen(s) + 1;
-    char* copy = (char*)duckdb_malloc(len);
-    if (copy) memcpy(copy, s, len);
-    return copy;
-}
 
 static int bcf_region_name2id(void *hdr, const char *name) {
     return bcf_hdr_name2id((bcf_hdr_t *)hdr, name);
@@ -873,13 +851,11 @@ static int bcf_projected_columns_init(bcf_init_data_t *local, const bcf_bind_dat
 
     const char *reader_name = "read_bcf";
 
-    local->projected_cols = (bcf_projected_col_t *)duckdb_malloc(
-        (size_t)local->column_count * sizeof(bcf_projected_col_t));
+    local->projected_cols = duckhts_alloc_array(local->column_count, sizeof(*local->projected_cols));
     if (!local->projected_cols) {
         snprintf(err, err_size, "%s: out of memory allocating projected column descriptors", reader_name);
         return 0;
     }
-    memset(local->projected_cols, 0, (size_t)local->column_count * sizeof(bcf_projected_col_t));
 
     int tidy_mode = bind->tidy_format && bind->n_samples > 0;
 
@@ -987,12 +963,11 @@ static int bcf_projected_columns_init(bcf_init_data_t *local, const bcf_bind_dat
 
     int *format_counts = NULL;
     if (bind->n_format_fields > 0) {
-        format_counts = (int *)duckdb_malloc((size_t)bind->n_format_fields * sizeof(int));
+        format_counts = duckhts_alloc_array(bind->n_format_fields, sizeof(*format_counts));
         if (!format_counts) {
             snprintf(err, err_size, "%s: out of memory allocating FORMAT projection counts", reader_name);
             return 0;
         }
-        memset(format_counts, 0, (size_t)bind->n_format_fields * sizeof(int));
     }
 
     for (idx_t i = 0; i < local->column_count; i++) {
@@ -1010,8 +985,7 @@ static int bcf_projected_columns_init(bcf_init_data_t *local, const bcf_bind_dat
     }
 
     if (local->site_column_count > 0) {
-        local->site_column_indices = (idx_t *)duckdb_malloc(
-            (size_t)local->site_column_count * sizeof(idx_t));
+        local->site_column_indices = duckhts_alloc_array(local->site_column_count, sizeof(*local->site_column_indices));
         if (!local->site_column_indices) {
             snprintf(err, err_size, "%s: out of memory allocating site column descriptors", reader_name);
             if (format_counts) duckdb_free(format_counts);
@@ -1022,10 +996,9 @@ static int bcf_projected_columns_init(bcf_init_data_t *local, const bcf_bind_dat
     int *format_group_for_field = NULL;
     int *format_group_offsets = NULL;
     if (local->n_format_groups > 0) {
-        local->format_groups = (bcf_format_group_t *)duckdb_malloc(
-            (size_t)local->n_format_groups * sizeof(bcf_format_group_t));
-        format_group_for_field = (int *)duckdb_malloc((size_t)bind->n_format_fields * sizeof(int));
-        format_group_offsets = (int *)duckdb_malloc((size_t)local->n_format_groups * sizeof(int));
+        local->format_groups = duckhts_alloc_array(local->n_format_groups, sizeof(*local->format_groups));
+        format_group_for_field = duckhts_alloc_array(bind->n_format_fields, sizeof(*format_group_for_field));
+        format_group_offsets = duckhts_alloc_array(local->n_format_groups, sizeof(*format_group_offsets));
         if (!local->format_groups || !format_group_for_field || !format_group_offsets) {
             snprintf(err, err_size, "%s: out of memory allocating FORMAT projection groups", reader_name);
             if (format_counts) duckdb_free(format_counts);
@@ -1033,11 +1006,9 @@ static int bcf_projected_columns_init(bcf_init_data_t *local, const bcf_bind_dat
             if (format_group_offsets) duckdb_free(format_group_offsets);
             return 0;
         }
-        memset(local->format_groups, 0, (size_t)local->n_format_groups * sizeof(bcf_format_group_t));
         for (int i = 0; i < bind->n_format_fields; i++) {
             format_group_for_field[i] = -1;
         }
-        memset(format_group_offsets, 0, (size_t)local->n_format_groups * sizeof(int));
 
         int group_idx = 0;
         for (int field_idx = 0; field_idx < bind->n_format_fields; field_idx++) {
@@ -1048,8 +1019,7 @@ static int bcf_projected_columns_init(bcf_init_data_t *local, const bcf_bind_dat
             group->field_idx = field_idx;
             group->kind = bcf_projected_format_kind(&bind->format_fields[field_idx]);
             group->column_count = (idx_t)format_counts[field_idx];
-            group->projected_indices = (idx_t *)duckdb_malloc(
-                (size_t)group->column_count * sizeof(idx_t));
+            group->projected_indices = duckhts_alloc_array(group->column_count, sizeof(*group->projected_indices));
             if (!group->projected_indices) {
                 snprintf(err, err_size, "%s: out of memory allocating FORMAT projection group", reader_name);
                 if (format_counts) duckdb_free(format_counts);
@@ -1485,9 +1455,10 @@ static void bcf_read_bind(duckdb_bind_info info) {
     }
 
 
-    // Create bind data
-    bcf_bind_data_t* bind = (bcf_bind_data_t*)duckdb_malloc(sizeof(bcf_bind_data_t));
-    memset(bind, 0, sizeof(bcf_bind_data_t));
+    duckdb_logical_type varchar_type = NULL, bigint_type = NULL;
+    duckdb_logical_type double_type = NULL, varchar_list_type = NULL;
+    bcf_bind_data_t* bind = duckhts_alloc_array(1, sizeof(*bind));
+    if (!bind) goto bind_oom;
     bind->file_path = file_path;
     bind->index_path = index_path;
     bind->region = region;
@@ -1499,10 +1470,7 @@ static void bcf_read_bind(duckdb_bind_info info) {
     if (!duckhts_region_list_parse(region, &bind->regions, &bind->n_regions,
                                    region_error, sizeof(region_error))) {
         duckdb_bind_set_error(info, region_error);
-        bcf_hdr_destroy(hdr);
-        hts_close(fp);
-        destroy_bind_data(bind);
-        return;
+        goto bind_error;
     }
     bind->n_samples = bcf_hdr_nsamples(hdr);
     bind->tidy_format = tidy_format;
@@ -1516,17 +1484,19 @@ static void bcf_read_bind(duckdb_bind_info info) {
 
     // Copy sample names
     if (bind->n_samples > 0) {
-        bind->sample_names = (char**)duckdb_malloc(bind->n_samples * sizeof(char*));
+        bind->sample_names = duckhts_alloc_array(bind->n_samples, sizeof(*bind->sample_names));
+        if (!bind->sample_names) goto bind_oom;
         for (int i = 0; i < bind->n_samples; i++) {
-            bind->sample_names[i] = strdup_duckdb(hdr->samples[i]);
+            bind->sample_names[i] = duckhts_copy_string(hdr->samples[i]);
+            if (!bind->sample_names[i]) goto bind_oom;
         }
     }
 
     // Create logical types for schema
-    duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
-    duckdb_logical_type bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
-    duckdb_logical_type double_type = duckdb_create_logical_type(DUCKDB_TYPE_DOUBLE);
-    duckdb_logical_type varchar_list_type = duckdb_create_list_type(varchar_type);
+    varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
+    double_type = duckdb_create_logical_type(DUCKDB_TYPE_DOUBLE);
+    varchar_list_type = duckdb_create_list_type(varchar_type);
 
     int col_idx = 0;
 
@@ -1568,6 +1538,7 @@ static void bcf_read_bind(duckdb_bind_info info) {
     bind->vep_schema = vep_schema_parse(hdr, NULL, bind->additional_csq_column_types);
     if (bind->vep_schema) {
         bind->n_vep_fields = bind->vep_schema->n_fields;
+        if (bind->n_vep_fields > INT_MAX - col_idx) goto bind_too_many_columns;
         bind->vep_col_start = col_idx;
         for (int v = 0; v < bind->vep_schema->n_fields; v++) {
             const vep_field_t* field = vep_schema_get_field(bind->vep_schema, v);
@@ -1602,9 +1573,10 @@ static void bcf_read_bind(duckdb_bind_info info) {
         }
     }
 
+    if (bind->n_info_fields > INT_MAX - col_idx) goto bind_too_many_columns;
     if (bind->n_info_fields > 0) {
-        bind->info_fields = (field_meta_t*)duckdb_malloc(bind->n_info_fields * sizeof(field_meta_t));
-        memset(bind->info_fields, 0, bind->n_info_fields * sizeof(field_meta_t));
+        bind->info_fields = duckhts_alloc_array(bind->n_info_fields, sizeof(*bind->info_fields));
+        if (!bind->info_fields) goto bind_oom;
 
         int info_idx = 0;
         for (int i = 0; i < hdr->n[BCF_DT_ID] && info_idx < bind->n_info_fields; i++) {
@@ -1623,7 +1595,8 @@ static void bcf_read_bind(duckdb_bind_info info) {
                                                                  &corrected_type, &corrected_count);
 
                 field_meta_t* field = &bind->info_fields[info_idx];
-                field->name = strdup_duckdb(field_name);
+                field->name = duckhts_copy_string(field_name);
+                if (!field->name) goto bind_oom;
                 field->header_id = i;
                 field->header_type = header_type;
                 field->schema_type = header_type;  // Use header type for data
@@ -1667,12 +1640,17 @@ static void bcf_read_bind(duckdb_bind_info info) {
         if (bind->n_format_fields == 0 && header_format_count == 0) {
             bind->n_format_fields = 1;
         }
+        uint64_t format_columns = bind->tidy_format
+            ? (uint64_t)bind->n_format_fields + 1
+            : (uint64_t)bind->n_format_fields * (uint64_t)bind->n_samples;
+        if (format_columns > (uint64_t)(INT_MAX - col_idx)) goto bind_too_many_columns;
 
         if (bind->n_format_fields == 1 && header_format_count == 0) {
             // Add GT as default for old header-light fixtures.
-            bind->format_fields = (field_meta_t*)duckdb_malloc(sizeof(field_meta_t));
-            memset(bind->format_fields, 0, sizeof(field_meta_t));
-            bind->format_fields[0].name = strdup_duckdb("GT");
+            bind->format_fields = duckhts_alloc_array(1, sizeof(*bind->format_fields));
+            if (!bind->format_fields) goto bind_oom;
+            bind->format_fields[0].name = duckhts_copy_string("GT");
+            if (!bind->format_fields[0].name) goto bind_oom;
             bind->format_fields[0].header_type = BCF_HT_STR;
             bind->format_fields[0].schema_type = BCF_HT_STR;
             bind->format_fields[0].vl_type = BCF_VL_FIXED;
@@ -1680,8 +1658,8 @@ static void bcf_read_bind(duckdb_bind_info info) {
             bind->format_fields[0].is_list = 0;
         }
         if (!bind->format_fields && bind->n_format_fields > 0) {
-            bind->format_fields = (field_meta_t*)duckdb_malloc(bind->n_format_fields * sizeof(field_meta_t));
-            memset(bind->format_fields, 0, bind->n_format_fields * sizeof(field_meta_t));
+            bind->format_fields = duckhts_alloc_array(bind->n_format_fields, sizeof(*bind->format_fields));
+            if (!bind->format_fields) goto bind_oom;
 
             int fmt_idx = 0;
             for (int i = 0; i < hdr->n[BCF_DT_ID] && fmt_idx < bind->n_format_fields; i++) {
@@ -1700,7 +1678,8 @@ static void bcf_read_bind(duckdb_bind_info info) {
                                                                        &corrected_type, &corrected_count);
 
                     field_meta_t* field = &bind->format_fields[fmt_idx];
-                    field->name = strdup_duckdb(field_name);
+                    field->name = duckhts_copy_string(field_name);
+                    if (!field->name) goto bind_oom;
                     field->header_id = i;
                     field->header_type = header_type;
                     field->schema_type = header_type;
@@ -1801,24 +1780,42 @@ static void bcf_read_bind(duckdb_bind_info info) {
             bind->index_row_count_valid = bcf_try_get_index_row_count(idx ? idx : tbx->idx,
                                                                       row_multiplier,
                                                                       &bind->index_row_count);
+            if (idx) hts_idx_destroy(idx);
+            if (tbx) tbx_destroy(tbx);
 
             // Get contig names for automatic parallel contig scans.
             int n_seqs = hdr->n[BCF_DT_CTG];
             if (n_seqs > 0) {
                 bind->n_contigs = n_seqs;
-                bind->contig_names = (char**)duckdb_malloc(n_seqs * sizeof(char*));
+                bind->contig_names = duckhts_alloc_array(n_seqs, sizeof(*bind->contig_names));
+                if (!bind->contig_names) goto bind_oom;
 
                 for (int i = 0; i < n_seqs; i++) {
-                    bind->contig_names[i] = strdup_duckdb(hdr->id[BCF_DT_CTG][i].key);
+                    bind->contig_names[i] = duckhts_copy_string(hdr->id[BCF_DT_CTG][i].key);
+                    if (!bind->contig_names[i]) goto bind_oom;
                 }
             }
-
-            if (idx) hts_idx_destroy(idx);
-            if (tbx) tbx_destroy(tbx);
         }
     }
 
-    // Cleanup
+    goto bind_cleanup;
+
+bind_too_many_columns:
+    duckdb_bind_set_error(info, "read_bcf: header exceeds the supported column count");
+    goto bind_error;
+bind_oom:
+    duckdb_bind_set_error(info, "read_bcf: out of memory allocating bind schema");
+bind_error:
+    if (bind) {
+        destroy_bind_data(bind);
+        bind = NULL;
+    } else {
+        duckdb_free(file_path);
+        if (index_path) duckdb_free(index_path);
+        if (region) duckdb_free(region);
+        if (additional_csq_column_types) duckdb_free(additional_csq_column_types);
+    }
+bind_cleanup:
     duckdb_destroy_logical_type(&varchar_type);
     duckdb_destroy_logical_type(&bigint_type);
     duckdb_destroy_logical_type(&double_type);
@@ -1827,7 +1824,7 @@ static void bcf_read_bind(duckdb_bind_info info) {
     bcf_hdr_destroy(hdr);
     hts_close(fp);
 
-    duckdb_bind_set_bind_data(info, bind, destroy_bind_data);
+    if (bind) duckdb_bind_set_bind_data(info, bind, destroy_bind_data);
 }
 
 // =============================================================================
@@ -1838,8 +1835,11 @@ static void bcf_read_global_init(duckdb_init_info info) {
     bcf_bind_data_t* bind = (bcf_bind_data_t*)duckdb_init_get_bind_data(info);
     idx_t column_count = duckdb_init_get_column_count(info);
 
-    bcf_global_init_data_t* global = (bcf_global_init_data_t*)duckdb_malloc(sizeof(bcf_global_init_data_t));
-    memset(global, 0, sizeof(bcf_global_init_data_t));
+    bcf_global_init_data_t* global = duckhts_alloc_array(1, sizeof(*global));
+    if (!global) {
+        duckdb_init_set_error(info, "read_bcf: out of memory allocating global state");
+        return;
+    }
 
     global->current_contig = 0;
     global->has_region = (bind->n_regions > 0);
@@ -1878,12 +1878,20 @@ static void bcf_read_local_init(duckdb_init_info info) {
     bcf_bind_data_t* bind = (bcf_bind_data_t*)duckdb_init_get_bind_data(info);
     const char *reader_name = "read_bcf";
 
-    bcf_init_data_t* local = (bcf_init_data_t*)duckdb_malloc(sizeof(bcf_init_data_t));
-    memset(local, 0, sizeof(bcf_init_data_t));
+    bcf_init_data_t* local = duckhts_alloc_array(1, sizeof(*local));
+    if (!local) {
+        duckdb_init_set_error(info, "read_bcf: out of memory allocating worker state");
+        return;
+    }
 
     local->column_count = duckdb_init_get_column_count(info);
     if (local->column_count > 0) {
-        local->column_ids = (idx_t*)duckdb_malloc(sizeof(idx_t) * local->column_count);
+        local->column_ids = duckhts_alloc_array(local->column_count, sizeof(*local->column_ids));
+        if (!local->column_ids) {
+            duckdb_init_set_error(info, "read_bcf: out of memory allocating projected columns");
+            destroy_init_data(local);
+            return;
+        }
         for (idx_t i = 0; i < local->column_count; i++) {
             local->column_ids[i] = duckdb_init_get_column_index(info, i);
         }
@@ -2500,7 +2508,9 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
     // Cache vector pointers to reduce repeated calls
     duckdb_vector* vectors = NULL;
     if (init->column_count > 0) {
-        vectors = (duckdb_vector*)duckdb_malloc(init->column_count * sizeof(duckdb_vector));
+        if (init->column_count <= SIZE_MAX / sizeof(*vectors)) {
+            vectors = duckdb_malloc((size_t)init->column_count * sizeof(*vectors));
+        }
         if (!vectors) {
             duckdb_function_set_error(info, "read_bcf: out of memory allocating output vector pointers");
             duckdb_data_chunk_set_size(output, 0);

@@ -36,6 +36,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/kstring.h>
 
 #include "include/hts_io_tuning.h"
+#include "include/duckdb_alloc.h"
 #include "include/region_list.h"
 #include "include/seq_encoding.h"
 #include "include/quality_encoding.h"
@@ -290,7 +291,7 @@ typedef struct {
 
     /* Read group caching */
     char *last_rg_id;
-    char *last_sample_id;
+    int has_sample;
     kstring_t rg_tmp;
 } bam_local_init_data_t;
 
@@ -324,8 +325,7 @@ static void destroy_bam_local(void *data) {
     if (l->column_ids) duckdb_free(l->column_ids);
     if (l->seq_buf) free(l->seq_buf);
     if (l->qual_buf) free(l->qual_buf);
-    if (l->last_rg_id) free(l->last_rg_id);
-    if (l->last_sample_id) free(l->last_sample_id);
+    if (l->last_rg_id) duckdb_free(l->last_rg_id);
     ks_free(&l->rg_tmp);
     ks_free(&l->cigar_tmp);
     ks_free(&l->aux_tmp);
@@ -345,7 +345,8 @@ static int bam_region_name2id(void *hdr, const char *name) {
  * ================================================================ */
 
 static int ensure_seq_buf(bam_local_init_data_t *l, int seq_len) {
-    size_t need = (size_t)(seq_len + 1);
+    if (seq_len < 0 || (uint64_t)seq_len >= SIZE_MAX / 2) return 0;
+    size_t need = (size_t)seq_len + 1;
     if (need > l->seq_buf_cap) {
         size_t new_cap = need * 2;
         char *new_seq = (char *)realloc(l->seq_buf, new_cap);
@@ -525,8 +526,17 @@ static void bam_read_bind(duckdb_bind_info info) {
         return;
     }
 
-    bam_bind_data_t *bind = (bam_bind_data_t *)duckdb_malloc(sizeof(bam_bind_data_t));
-    memset(bind, 0, sizeof(bam_bind_data_t));
+    bam_bind_data_t *bind = duckhts_alloc_array(1, sizeof(*bind));
+    if (!bind) {
+        duckdb_bind_set_error(info, "read_bam: out of memory allocating bind state");
+        sam_hdr_destroy(hdr);
+        sam_close(fp);
+        duckdb_free(file_path);
+        if (index_path) duckdb_free(index_path);
+        if (region) duckdb_free(region);
+        if (reference) duckdb_free(reference);
+        return;
+    }
     bind->file_path = file_path;
     bind->index_path = index_path;
     bind->reference = reference;
@@ -722,9 +732,11 @@ static void bam_read_global_init(duckdb_init_info info) {
     bam_bind_data_t *bind = (bam_bind_data_t *)duckdb_init_get_bind_data(info);
     idx_t column_count = duckdb_init_get_column_count(info);
 
-    bam_global_init_data_t *global = (bam_global_init_data_t *)duckdb_malloc(
-        sizeof(bam_global_init_data_t));
-    memset(global, 0, sizeof(bam_global_init_data_t));
+    bam_global_init_data_t *global = duckhts_alloc_array(1, sizeof(*global));
+    if (!global) {
+        duckdb_init_set_error(info, "read_bam: out of memory allocating global state");
+        return;
+    }
 
     global->current_partition = 0;
     global->has_region = (bind->n_regions > 0);
@@ -756,13 +768,20 @@ static void bam_read_global_init(duckdb_init_info info) {
 static void bam_read_local_init(duckdb_init_info info) {
     bam_bind_data_t *bind = (bam_bind_data_t *)duckdb_init_get_bind_data(info);
 
-    bam_local_init_data_t *local = (bam_local_init_data_t *)duckdb_malloc(
-        sizeof(bam_local_init_data_t));
-    memset(local, 0, sizeof(bam_local_init_data_t));
+    bam_local_init_data_t *local = duckhts_alloc_array(1, sizeof(*local));
+    if (!local) {
+        duckdb_init_set_error(info, "read_bam: out of memory allocating worker state");
+        return;
+    }
 
     local->column_count = duckdb_init_get_column_count(info);
     if (local->column_count > 0) {
-        local->column_ids = (idx_t *)duckdb_malloc(sizeof(idx_t) * local->column_count);
+        local->column_ids = duckhts_alloc_array(local->column_count, sizeof(*local->column_ids));
+        if (!local->column_ids) {
+            duckdb_init_set_error(info, "read_bam: out of memory allocating projected columns");
+            destroy_bam_local(local);
+            return;
+        }
         for (idx_t i = 0; i < local->column_count; i++) {
             local->column_ids[i] = duckdb_init_get_column_index(info, i);
             if (local->column_ids[i] == BAM_COL_SEQ || local->column_ids[i] == BAM_COL_QUAL) {
@@ -790,7 +809,7 @@ static void bam_read_local_init(duckdb_init_info info) {
     local->fp = sam_open(bind->file_path, "r");
     if (!local->fp) {
         duckdb_init_set_error(info, "Failed to open SAM/BAM/CRAM file");
-        duckdb_free(local);
+        destroy_bam_local(local);
         return;
     }
     duckhts_apply_remote_hts_tuning(
@@ -804,8 +823,7 @@ static void bam_read_local_init(duckdb_init_info info) {
     if (bind->reference) {
         if (hts_set_opt(local->fp, CRAM_OPT_REFERENCE, bind->reference) < 0) {
             duckdb_init_set_error(info, "Failed to set CRAM reference");
-            sam_close(local->fp);
-            duckdb_free(local);
+            destroy_bam_local(local);
             return;
         }
     }
@@ -822,17 +840,18 @@ static void bam_read_local_init(duckdb_init_info info) {
     /* Read header — each thread needs its own copy */
     local->hdr = sam_hdr_read(local->fp);
     if (!local->hdr) {
-        sam_close(local->fp); local->fp = NULL;
         duckdb_init_set_error(info, "Failed to read SAM/BAM/CRAM header");
-        duckdb_free(local);
+        destroy_bam_local(local);
         return;
     }
 
     /* Allocate a reusable bam1_t record */
     local->rec = bam_init1();
-    local->rg_tmp.l = 0;
-    local->rg_tmp.m = 0;
-    local->rg_tmp.s = NULL;
+    if (!local->rec) {
+        duckdb_init_set_error(info, "read_bam: out of memory allocating alignment record");
+        destroy_bam_local(local);
+        return;
+    }
 
     /* Load index if needed for parallel scanning or region queries */
     if (is_parallel || bind->n_regions > 0) {
@@ -1192,18 +1211,29 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                     break;
                 }
                 if (!local->last_rg_id || strcmp(local->last_rg_id, rg) != 0) {
-                    free(local->last_rg_id);
-                    free(local->last_sample_id);
-                    local->last_rg_id = strdup(rg);
-                    local->last_sample_id = NULL;
-                    local->rg_tmp.l = 0;
-                    if (sam_hdr_find_tag_id(local->hdr, "RG", "ID", rg, "SM", &local->rg_tmp) == 0 &&
-                        local->rg_tmp.s && local->rg_tmp.l > 0) {
-                        local->last_sample_id = strdup(local->rg_tmp.s);
+                    char *next_rg = duckhts_copy_string(rg);
+                    if (!next_rg) {
+                        duckdb_function_set_error(info, "read_bam: out of memory caching SAMPLE_ID read group");
+                        local->done = 1;
+                        duckdb_data_chunk_set_size(output, 0);
+                        return;
                     }
+                    local->rg_tmp.l = 0;
+                    int status = sam_hdr_find_tag_id(local->hdr, "RG", "ID", rg, "SM", &local->rg_tmp);
+                    if (status < -1) {
+                        duckdb_free(next_rg);
+                        duckdb_function_set_error(info, "read_bam: HTSlib failed to resolve SAMPLE_ID");
+                        local->done = 1;
+                        duckdb_data_chunk_set_size(output, 0);
+                        return;
+                    }
+                    if (local->last_rg_id) duckdb_free(local->last_rg_id);
+                    local->last_rg_id = next_rg;
+                    local->has_sample = status == 0 && local->rg_tmp.l > 0;
                 }
-                if (local->last_sample_id) {
-                    duckdb_vector_assign_string_element(vec, row_count, local->last_sample_id);
+                if (local->has_sample) {
+                    /* DuckDB copies the worker-owned lookup string. */
+                    duckdb_vector_assign_string_element_len(vec, row_count, local->rg_tmp.s, local->rg_tmp.l);
                 } else {
                     set_null(vec, row_count);
                 }

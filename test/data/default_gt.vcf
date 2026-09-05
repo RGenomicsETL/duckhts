@@ -1,0 +1,5 @@
+##fileformat=VCFv4.3
+##source=DuckHTS_synthetic_header_light_GT_fallback
+##contig=<ID=chr1,length=100>
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1
+chr1	1	fallback	A	C	.	PASS	.	GT	0/1

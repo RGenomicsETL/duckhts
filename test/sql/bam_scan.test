@@ -4,6 +4,22 @@
 
 require duckhts
 
+# Missing SM, absent/unknown RG, and cache transitions are distinct from OOM.
+query TTT
+SELECT QNAME, READ_GROUP_ID, SAMPLE_ID
+FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_read_groups.sam',
+              scan_mode := 'sequential', decompression_threads := 0)
+ORDER BY QNAME;
+----
+r1	one	sample_one
+r2	one	sample_one
+r3	missing	NULL
+r4	missing	NULL
+r5	three	sample_three
+r6	NULL	NULL
+r7	unknown	NULL
+r8	one	sample_one
+
 statement ok
 SET threads=1;
 

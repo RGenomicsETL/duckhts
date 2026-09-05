@@ -472,6 +472,15 @@ endif()
 
 message(STATUS "htslib link libs: ${HTSLIB_LINK_LIBS}")
 
+# Test-only copied-API interposition; never linked into the extension/package.
+if(UNIX AND NOT DUCKDB_WASM_EXTENSION)
+    add_library(duckhts_reader_alloc_probe SHARED EXCLUDE_FROM_ALL test/scripts/reader_alloc_probe.c)
+    target_compile_features(duckhts_reader_alloc_probe PRIVATE c_std_11)
+    target_compile_options(duckhts_reader_alloc_probe PRIVATE -fvisibility=default)
+    target_include_directories(duckhts_reader_alloc_probe PRIVATE duckdb_capi src/include)
+    target_link_libraries(duckhts_reader_alloc_probe PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
 # Host-neutral region parsing probe: real HTSlib, no DuckDB headers or runtime.
 if(NOT DUCKDB_WASM_EXTENSION)
     add_executable(duckhts_region_list_test EXCLUDE_FROM_ALL test/scripts/region_list_test.c)
