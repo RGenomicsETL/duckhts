@@ -21,6 +21,13 @@ separate event keys. Each set is repeated eight times with distinct
 keys. These tiny warm models are a reproducible adapter workload, not a
 genome-scale annotation or file-ingestion benchmark.
 
+The `withheld_sequence` workload retains the forward model’s CDS
+coordinates but supplies NULL CDS sequence, genetic code and flanks, as
+an importer may do for unsupported sequence edits. It checks that all
+codon and amino-acid fields remain NULL. This is a benchmark/property
+case, not a GFF oracle comparison: the reference is available to VEP. It
+has no identical earlier timing baseline.
+
 Each model/worker-count pair runs in a fresh R process. Peak RSS is the
 Linux process high-water mark, including model preparation and
 verification; it is not isolated DuckDB workspace usage. Output bytes
@@ -51,6 +58,14 @@ NULLs. It must match across passes and worker counts.
 | 4dd341a8cf61    | reverse           |       4 |         10112 |                    10112 |       10112 |         4603562 |          3 |          0.031 |       0.030 |       0.031 |      279027712 |
 | 4dd341a8cf61    | three_exon_phase2 |       1 |         11112 |                    11112 |       11112 |         5056410 |          3 |          0.049 |       0.049 |       0.051 |      246554624 |
 | 4dd341a8cf61    | three_exon_phase2 |       4 |         11112 |                    11112 |       11112 |         5056410 |          3 |          0.033 |       0.032 |       0.034 |      274251776 |
+| 41c000abfd72    | forward           |       1 |         10144 |                    10144 |       10144 |         4618058 |          3 |          0.048 |       0.045 |       0.048 |      258699264 |
+| 41c000abfd72    | forward           |       4 |         10144 |                    10144 |       10144 |         4618058 |          3 |          0.031 |       0.031 |       0.032 |      289402880 |
+| 41c000abfd72    | reverse           |       1 |         10112 |                    10112 |       10112 |         4603562 |          3 |          0.047 |       0.046 |       0.048 |      258428928 |
+| 41c000abfd72    | reverse           |       4 |         10112 |                    10112 |       10112 |         4603562 |          3 |          0.033 |       0.032 |       0.035 |      288890880 |
+| 41c000abfd72    | three_exon_phase2 |       1 |         11112 |                    11112 |       11112 |         5056410 |          3 |          0.051 |       0.050 |       0.051 |      243417088 |
+| 41c000abfd72    | three_exon_phase2 |       4 |         11112 |                    11112 |       11112 |         5056410 |          3 |          0.032 |       0.032 |       0.033 |      280113152 |
+| 41c000abfd72    | withheld_sequence |       1 |         10144 |                    10144 |       10144 |         4589514 |          3 |          0.028 |       0.028 |       0.029 |      224993280 |
+| 41c000abfd72    | withheld_sequence |       4 |         10144 |                    10144 |       10144 |         4589514 |          3 |          0.021 |       0.021 |       0.022 |      260194304 |
 
 ## Identity and complete output
 
@@ -59,12 +74,14 @@ NULLs. It must match across passes and worker counts.
 | 1   | f0184155b0faa2486937c8b774648ce897c88f2f | 420e6d1b14a2831384117d2bec74cba72732769a4349ff9866eeb409d526c7d9 | htslib_distclean_make_release | Linux 6.8.0-78-generic x86_64 Ubuntu-2404-noble-amd64-base | 13th Gen Intel(R) Core(TM) i5-13500 | 1.5.3          |
 | 7   | 20b2902c4672fb0401616a7f09ff8fc0e703909e | 420e6d1b14a2831384117d2bec74cba72732769a4349ff9866eeb409d526c7d9 | htslib_distclean_make_release | Linux 6.8.0-78-generic x86_64 Ubuntu-2404-noble-amd64-base | 13th Gen Intel(R) Core(TM) i5-13500 | 1.5.3          |
 | 13  | 4dd341a8cf6124035e326145b9783cfec33767f8 | 420e6d1b14a2831384117d2bec74cba72732769a4349ff9866eeb409d526c7d9 | htslib_distclean_make_release | Linux 6.8.0-78-generic x86_64 Ubuntu-2404-noble-amd64-base | 13th Gen Intel(R) Core(TM) i5-13500 | 1.5.3          |
+| 19  | 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | 61cef15e2360ab1ca45ef0d55cafdd5d36f47bc98c23580caae6dda14f56452d | htslib_distclean_make_release | Linux 6.8.0-78-generic x86_64 Ubuntu-2404-noble-amd64-base | 13th Gen Intel(R) Core(TM) i5-13500 | 1.5.3          |
 
 |     | case              | input_vcf_sha256                                                 | model_gff_sha256                                                 | reference_sha256                                                 | output_sha256                                                    |
 |:----|:------------------|:-----------------------------------------------------------------|:-----------------------------------------------------------------|:-----------------------------------------------------------------|:-----------------------------------------------------------------|
 | 1   | forward           | 3f79dffd03a5d552e89d15a3eb393c0dd2428ef86cf2f02ce32cf8ddbd1dfe3e | 41defe13bfea82d43afc45dd1016c678fc199e634eab215309477ee0bc821685 | 01d1f025213063a747cb0c53cdcbea67262f32ab1dbdb56aa4131d72142e6d26 | aa92aa02feb723b06fea518580209008730d8e7c11992341a1030f787c980e52 |
 | 3   | reverse           | da6bbb2e1cd5c354a62a831aa37bcbef417dbefcfe4f55260650be03dc72cb7f | 7a30f5acd27936582d7a1856e95baea8b92de01e2a6c93312c915a7d16fb8c02 | 01d1f025213063a747cb0c53cdcbea67262f32ab1dbdb56aa4131d72142e6d26 | 3f297fdf19db2876b614b01cc77077aa82394810fd38fc17eacc2a686c1f5a3a |
 | 5   | three_exon_phase2 | d7d75e06f61766d825b288f4846e827db1cedd7193c9ce722e59d0bb27d756ae | 4e554456fd7f761f54ea25ac8def4bcfd92dc8810e69ea8058e2d7c2917c6dbc | 01d1f025213063a747cb0c53cdcbea67262f32ab1dbdb56aa4131d72142e6d26 | 4c983975b15fe4d200158a9c1d87f25ce874345bdaeba45431679338744e4ce5 |
+| 25  | withheld_sequence | 3f79dffd03a5d552e89d15a3eb393c0dd2428ef86cf2f02ce32cf8ddbd1dfe3e | 41defe13bfea82d43afc45dd1016c678fc199e634eab215309477ee0bc821685 | 01d1f025213063a747cb0c53cdcbea67262f32ab1dbdb56aa4131d72142e6d26 | 1e00b0c3afefe1a03e0f07e0888a5a00eb8a41304d3330ba79acbd8d7a11ba82 |
 
 The first `f0184155b0fa` runs establish this complete-contract baseline.
 Later rows retain that measurement rather than replace it. The following
@@ -74,12 +91,12 @@ DuckDB version and machine agree.
 
 | case              | threads | baseline_revision | current_revision | baseline_seconds | current_seconds | current_over_baseline |
 |:------------------|--------:|:------------------|:-----------------|-----------------:|----------------:|----------------------:|
-| forward           |       1 | 20b2902c4672      | 4dd341a8cf61     |            0.046 |           0.049 |              1.065217 |
-| forward           |       4 | 20b2902c4672      | 4dd341a8cf61     |            0.032 |           0.031 |              0.968750 |
-| reverse           |       1 | 20b2902c4672      | 4dd341a8cf61     |            0.046 |           0.047 |              1.021739 |
-| reverse           |       4 | 20b2902c4672      | 4dd341a8cf61     |            0.032 |           0.031 |              0.968750 |
-| three_exon_phase2 |       1 | 20b2902c4672      | 4dd341a8cf61     |            0.050 |           0.049 |              0.980000 |
-| three_exon_phase2 |       4 | 20b2902c4672      | 4dd341a8cf61     |            0.033 |           0.033 |              1.000000 |
+| forward           |       1 | 4dd341a8cf61      | 41c000abfd72     |            0.049 |           0.048 |             0.9795918 |
+| forward           |       4 | 4dd341a8cf61      | 41c000abfd72     |            0.031 |           0.031 |             1.0000000 |
+| reverse           |       1 | 4dd341a8cf61      | 41c000abfd72     |            0.047 |           0.047 |             1.0000000 |
+| reverse           |       4 | 4dd341a8cf61      | 41c000abfd72     |            0.031 |           0.033 |             1.0645161 |
+| three_exon_phase2 |       1 | 4dd341a8cf61      | 41c000abfd72     |            0.049 |           0.051 |             1.0408163 |
+| three_exon_phase2 |       4 | 4dd341a8cf61      | 41c000abfd72     |            0.033 |           0.032 |             0.9696970 |
 
 The [sorted-stream throughput report](duckvep_throughput.md) instead
 measures consequence/HGVS output and is not an identical comparator. No
@@ -165,6 +182,38 @@ detailed artifacts remain in the run directory.
 | 4dd341a8cf6124035e326145b9783cfec33767f8 | noncoding                   | 20260906 |               128 |          1198 |           1198 |         1198 |          0 |                54 |
 | 4dd341a8cf6124035e326145b9783cfec33767f8 | noncoding_first_exon_phase1 | 20260906 |               128 |          1389 |           1389 |         1389 |          0 |                63 |
 | 4dd341a8cf6124035e326145b9783cfec33767f8 | noncoding_first_exon_phase2 | 20260906 |               128 |          1389 |           1389 |         1389 |          0 |                63 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | forward                     |      173 |                10 |          1268 |           1268 |         1268 |          0 |                62 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | reverse                     |      173 |                10 |          1264 |           1264 |         1264 |          0 |                62 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | three_exon_phase2           |      173 |                10 |          1389 |           1389 |         1389 |          0 |                62 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | partial_cds_end             |      173 |                10 |          1385 |           1385 |         1385 |          0 |                62 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | noncoding_first_exon        |      173 |                10 |          1389 |           1389 |         1389 |          0 |                62 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | noncoding                   |      173 |                10 |          1198 |           1198 |         1198 |          0 |                54 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | noncoding_first_exon_phase1 |      173 |                10 |          1389 |           1389 |         1389 |          0 |                63 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | noncoding_first_exon_phase2 |      173 |                10 |          1389 |           1389 |         1389 |          0 |                63 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | forward                     | 20260906 |                10 |          1268 |           1268 |         1268 |          0 |                62 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | reverse                     | 20260906 |                10 |          1264 |           1264 |         1264 |          0 |                62 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | three_exon_phase2           | 20260906 |                10 |          1389 |           1389 |         1389 |          0 |                62 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | partial_cds_end             | 20260906 |                10 |          1385 |           1385 |         1385 |          0 |                62 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | noncoding_first_exon        | 20260906 |                10 |          1389 |           1389 |         1389 |          0 |                62 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | noncoding                   | 20260906 |                10 |          1198 |           1198 |         1198 |          0 |                54 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | noncoding_first_exon_phase1 | 20260906 |                10 |          1389 |           1389 |         1389 |          0 |                63 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | noncoding_first_exon_phase2 | 20260906 |                10 |          1389 |           1389 |         1389 |          0 |                63 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | forward                     |      173 |               128 |          1268 |           1268 |         1268 |          0 |                62 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | reverse                     |      173 |               128 |          1264 |           1264 |         1264 |          0 |                62 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | three_exon_phase2           |      173 |               128 |          1389 |           1389 |         1389 |          0 |                62 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | partial_cds_end             |      173 |               128 |          1385 |           1385 |         1385 |          0 |                62 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | noncoding_first_exon        |      173 |               128 |          1389 |           1389 |         1389 |          0 |                62 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | noncoding                   |      173 |               128 |          1198 |           1198 |         1198 |          0 |                54 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | noncoding_first_exon_phase1 |      173 |               128 |          1389 |           1389 |         1389 |          0 |                63 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | noncoding_first_exon_phase2 |      173 |               128 |          1389 |           1389 |         1389 |          0 |                63 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | forward                     | 20260906 |               128 |          1268 |           1268 |         1268 |          0 |                62 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | reverse                     | 20260906 |               128 |          1264 |           1264 |         1264 |          0 |                62 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | three_exon_phase2           | 20260906 |               128 |          1389 |           1389 |         1389 |          0 |                62 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | partial_cds_end             | 20260906 |               128 |          1385 |           1385 |         1385 |          0 |                62 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | noncoding_first_exon        | 20260906 |               128 |          1389 |           1389 |         1389 |          0 |                62 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | noncoding                   | 20260906 |               128 |          1198 |           1198 |         1198 |          0 |                54 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | noncoding_first_exon_phase1 | 20260906 |               128 |          1389 |           1389 |         1389 |          0 |                63 |
+| 41c000abfd72c8c5e005d6dba0ae57b2fa22b3c8 | noncoding_first_exon_phase2 | 20260906 |               128 |          1389 |           1389 |         1389 |          0 |                63 |
 
 The oracle sources are Ensembl VEP
 `57ea5c52340acc1f156267f810ad162e26597082` and Variation
@@ -178,6 +227,13 @@ not represented as positive GFF oracle coverage. Symbolic structural and
 phased events are outside this function’s literal-allele contract;
 existing consequence/HGVS/phased acceptance histories and generator
 settings are unchanged.
+
+These field comparisons do not certify the native consequence masks. A
+separate diagnostic found supported and unresolved SO disagreements on
+later partial-CDS models; [issue
+213](https://github.com/RGenomicsETL/duckhts/issues/213) retains the
+witnesses and full denominators. Presentation equality must not be
+reported as native consequence conformance.
 
 Reproduce from a clean source revision with an extension build receipt:
 
