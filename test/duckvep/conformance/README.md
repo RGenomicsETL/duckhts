@@ -374,6 +374,23 @@ Paired BNDs have their own generated mode because one event has two loci and can
 represented as one structural span. It crosses same- and cross-chromosome endpoint pairs
 with all four bracket orientations and keeps raw ALT and orientation in the sampled VCF:
 
+For source VCFs, the runner uses `duckvep_breakend_geometry()` for mate coordinates
+and orientation instead of a separate regular-expression parser. The allocation-free
+native parser follows [VCF 4.5 section 5.4](https://github.com/samtools/hts-specs/blob/e821e4f02ae25c2175f9a366edca1322d6a2de72/VCFv4.5.tex).
+It preserves the replacement sequence (including retained local bases), exact contig
+names and terminal coordinates. Annotation still requires a paired, positive,
+model-addressable mate; parsing a single breakend or telomeric zero does not make that
+event annotatable. `MATEID`, phase, reference validation and fusion reconstruction remain
+separate from ALT syntax. `functions.yaml` defines the public result fields.
+
+`data/breakend_default_witnesses.vcf` retains the seed-31 first-intron-base
+counterexample and an ordinary intron control in all four orientations. With the
+default minimal model, run `corpus_differential.R --event-mode breakend --vcf
+test/duckvep/conformance/data/breakend_default_witnesses.vcf --corpus
+bnd_default_witnesses --sample-per-shape 0` from the repo root. All eight pairs
+must match, including the mate's default intergenic term in the four splice-site
+cases; neither the pair union nor the report may suppress that term.
+
 ```sh
 make duckvep-corpus-differential DUCKVEP_DIFFERENTIAL_ARGS="\
   --event-mode breakend \

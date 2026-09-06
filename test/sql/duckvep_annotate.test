@@ -4,6 +4,72 @@
 
 require duckhts
 
+query T
+SELECT typeof(duckvep_breakend_geometry('N[chr:1['));
+----
+STRUCT(mate_chrom VARCHAR, mate_position UBIGINT, local_join_after BOOLEAN, mate_extends_right BOOLEAN, replacement_sequence VARCHAR)
+
+# VCF 4.5 section 5.4: both placement and bracket orientation are independent.
+# Replacement bases include the retained local sequence, not only an insertion.
+query TIIIT
+SELECT g.mate_chrom, g.mate_position, g.local_join_after::INTEGER,
+       g.mate_extends_right::INTEGER, g.replacement_sequence
+FROM (SELECT i, duckvep_breakend_geometry(alt) g FROM (VALUES
+  (1, 'C[2:321682['), (2, 'G]17:198982]'),
+  (3, ']13:123456]T'), (4, '[17:198983[A'),
+  (5, 'TCC.'), (6, '.TGCA'),
+  (7, 'a[chr:alt;1:000['), (8, ']<ctg1>:329]aN')) v(i, alt))
+ORDER BY i;
+----
+2	321682	1	1	C
+17	198982	1	0	G
+13	123456	0	0	T
+17	198983	0	1	A
+NULL	NULL	1	NULL	TCC
+NULL	NULL	0	NULL	TGCA
+chr:alt;1	0	1	1	a
+<ctg1>	329	0	0	aN
+
+query I
+SELECT count(*) FROM (VALUES (NULL), ('.'), ('*'), ('<DEL>'), ('ACGTN')) v(alt)
+WHERE duckvep_breakend_geometry(alt) IS NULL;
+----
+5
+
+query T
+SELECT (duckvep_breakend_geometry('A[chr:18446744073709551615[')).mate_position::VARCHAR;
+----
+18446744073709551615
+
+statement error
+SELECT duckvep_breakend_geometry('A[chr:18446744073709551616[');
+----
+mate position exceeds UBIGINT
+
+statement error
+SELECT duckvep_breakend_geometry('A[chr:12]');
+----
+malformed BND ALT
+
+statement error
+SELECT duckvep_breakend_geometry('A..');
+----
+malformed BND ALT
+
+# More than one DuckDB vector, with single, paired and NULL fields interleaved.
+query III
+WITH parsed AS (
+  SELECT i, duckvep_breakend_geometry(CASE i % 3
+    WHEN 0 THEN 'A.' WHEN 1 THEN 'A[chr:' || i::VARCHAR || '[' ELSE '.' END) g
+  FROM range(10000) r(i)
+)
+SELECT count(*) FILTER (WHERE g IS NULL),
+       count(*) FILTER (WHERE g.mate_chrom IS NULL AND g IS NOT NULL),
+       count(*) FILTER (WHERE g.mate_position = i AND g.mate_chrom = 'chr')
+FROM parsed;
+----
+3333	3334	3333
+
 # One native geometry authority separates uploaded REF, VEP feature, and
 # minimized semantic edit coordinates. All reported intervals are 0-based,
 # half-open; insertions are explicit interbase sites rather than fake bases.
@@ -709,6 +775,37 @@ LATERAL unnest(_duckvep_annotate_breakend_rich(
 )) AS u(annotation);
 ----
 bnd-1	feature_truncation&intron_variant	intron	supported
+
+# Raw ALT preparation composes with an explicit contig-name relation. The
+# seed-31 executable VEP witness at POS 150 / mate 251 needs the default term
+# from the mate allele as well as local truncation. Exercise all orientations,
+# both sides of the fixed 5000-base admission limit, and ordinary intron terms.
+query IITI
+WITH raw AS (
+  SELECT position, mate, CASE orientation
+    WHEN 0 THEN 'N[chrDuck:' || mate || '['
+    WHEN 1 THEN 'N]chrDuck:' || mate || ']'
+    WHEN 2 THEN ']chrDuck:' || mate || ']N'
+    ELSE '[chrDuck:' || mate || '[N' END AS alternate
+  FROM (VALUES (150::UBIGINT, 251::UBIGINT), (150, 5250), (150, 5251),
+               (150, 170), (159, 251)) e(position, mate), range(4) r(orientation)
+), prepared AS (
+  SELECT *, duckvep_breakend_geometry(alternate) AS geometry FROM raw
+)
+SELECT position, mate, annotation.consequence, count(*)::INTEGER
+FROM prepared
+JOIN (VALUES ('chrDuck', 1::UINTEGER)) regions(name, seq_region)
+  ON geometry.mate_chrom = regions.name,
+LATERAL unnest(_duckvep_annotate_breakend_rich(
+  'structural', 1::UINTEGER, position, seq_region, geometry.mate_position, 0::UBIGINT
+)) u(annotation)
+GROUP BY ALL ORDER BY position, mate;
+----
+150	170	feature_truncation	4
+150	251	feature_truncation&intergenic_variant	4
+150	5250	feature_truncation&intergenic_variant	4
+150	5251	feature_truncation	4
+159	251	feature_truncation&intron_variant	4
 
 query IIIII
 SELECT annotation.consequence_mask, annotation.region_mask,

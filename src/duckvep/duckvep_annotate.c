@@ -9,6 +9,7 @@ DUCKDB_EXTENSION_EXTERN
 #include "kernel/src/duckvep_event.h"
 #include "kernel/src/duckvep_hgvs.h"
 #include "kernel/src/duckvep_projection.h"
+#include "kernel/src/duckvep_sv.h"
 #include "kernel/src/duckvep_transcript_edit.h"
 #include "kernel/src/duckvep_workspace_internal.h"
 #include "kernel/include/duckvep_kernel.h"
@@ -597,6 +598,87 @@ duckvep_allele_geometry_scalar(duckdb_function_info info,
 		    fields[DUCKVEP_GEOMETRY_ALT_DIFF_LENGTH]))[row] =
 		    event.alt_diff_length;
 	}
+}
+
+static void
+duckvep_breakend_geometry_scalar(duckdb_function_info info,
+	duckdb_data_chunk input, duckdb_vector output)
+{
+	duckdb_vector source = duckdb_data_chunk_get_vector(input, 0);
+	duckdb_string_t *alternates = duckdb_vector_get_data(source);
+	duckdb_vector fields[5];
+	idx_t rows = duckdb_data_chunk_get_size(input), row;
+	size_t field;
+
+	duckdb_vector_ensure_validity_writable(output);
+	for (field = 0; field < 5; field++) {
+		fields[field] = duckdb_struct_vector_get_child(output, field);
+		duckdb_vector_ensure_validity_writable(fields[field]);
+	}
+	for (row = 0; row < rows; row++) {
+		duckvep_breakend_t parsed;
+		duckvep_breakend_status_t status;
+
+		if (duckvep_validity_is_null(duckdb_vector_get_validity(source), row)) {
+			duckdb_validity_set_row_invalid(duckdb_vector_get_validity(output), row);
+			continue;
+		}
+		status = duckvep_breakend_parse(
+		    (const uint8_t *)duckdb_string_t_data(&alternates[row]),
+		    (size_t)duckdb_string_t_length(alternates[row]), &parsed);
+		if (status == DUCKVEP_BREAKEND_NOT_BREAKEND) {
+			duckdb_validity_set_row_invalid(duckdb_vector_get_validity(output), row);
+			continue;
+		}
+		if (status != DUCKVEP_BREAKEND_OK) {
+			duckdb_scalar_function_set_error(info,
+			    status == DUCKVEP_BREAKEND_POSITION_OVERFLOW
+			    ? "duckvep_breakend_geometry: mate position exceeds UBIGINT"
+			    : "duckvep_breakend_geometry: malformed BND ALT; expected two matching brackets around chrom:position, or a single leading/trailing dot, with non-empty A/C/G/T/N replacement sequence");
+			return;
+		}
+		duckdb_validity_set_row_valid(duckdb_vector_get_validity(output), row);
+		for (field = 0; field < 5; field++)
+			duckdb_validity_set_row_valid(duckdb_vector_get_validity(fields[field]), row);
+		if (parsed.has_mate) {
+			duckdb_vector_assign_string_element_len(fields[0], row,
+			    (const char *)parsed.mate_chrom, parsed.mate_chrom_length);
+			((uint64_t *)duckdb_vector_get_data(fields[1]))[row] = parsed.mate_position;
+			((bool *)duckdb_vector_get_data(fields[3]))[row] = parsed.mate_extends_right != 0u;
+		} else {
+			duckdb_validity_set_row_invalid(duckdb_vector_get_validity(fields[0]), row);
+			duckdb_validity_set_row_invalid(duckdb_vector_get_validity(fields[1]), row);
+			duckdb_validity_set_row_invalid(duckdb_vector_get_validity(fields[3]), row);
+		}
+		((bool *)duckdb_vector_get_data(fields[2]))[row] = parsed.local_join_after != 0u;
+		duckdb_vector_assign_string_element_len(fields[4], row,
+		    (const char *)parsed.replacement, parsed.replacement_length);
+	}
+}
+
+static void
+duckvep_register_breakend_geometry_scalar(duckdb_connection connection)
+{
+	const char *names[] = {"mate_chrom", "mate_position", "local_join_after",
+	    "mate_extends_right", "replacement_sequence"};
+	duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+	duckdb_logical_type position_type = duckdb_create_logical_type(DUCKDB_TYPE_UBIGINT);
+	duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
+	duckdb_logical_type fields[] = {varchar_type, position_type, bool_type, bool_type, varchar_type};
+	duckdb_logical_type result = duckdb_create_struct_type(fields, names, 5);
+	duckdb_scalar_function scalar = duckdb_create_scalar_function();
+
+	duckdb_scalar_function_set_name(scalar, "duckvep_breakend_geometry");
+	duckdb_scalar_function_add_parameter(scalar, varchar_type);
+	duckdb_scalar_function_set_return_type(scalar, result);
+	duckdb_scalar_function_set_special_handling(scalar);
+	duckdb_scalar_function_set_function(scalar, duckvep_breakend_geometry_scalar);
+	(void)duckdb_register_scalar_function(connection, scalar);
+	duckdb_destroy_scalar_function(&scalar);
+	duckdb_destroy_logical_type(&result);
+	duckdb_destroy_logical_type(&bool_type);
+	duckdb_destroy_logical_type(&position_type);
+	duckdb_destroy_logical_type(&varchar_type);
 }
 
 static void
@@ -3773,6 +3855,7 @@ register_duckvep_functions(duckdb_connection connection,
 		return;
 	duckvep_register_model_functions(connection, registry);
 	duckvep_register_allele_geometry_scalar(connection);
+	duckvep_register_breakend_geometry_scalar(connection);
 
 	varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
 	uinteger_type = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);

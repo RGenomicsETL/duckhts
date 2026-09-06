@@ -4,6 +4,82 @@
 
 #include <string.h>
 
+duckvep_breakend_status_t duckvep_breakend_parse(
+    const uint8_t *alternate, size_t length, duckvep_breakend_t *out) {
+
+    duckvep_breakend_t parsed = {0};
+    size_t first = length, second = length, colon = length;
+    size_t i, sequence_start, sequence_end;
+
+    if (out == NULL) return DUCKVEP_BREAKEND_INVALID;
+    memset(out, 0, sizeof *out);
+    if (alternate == NULL || length == 0u) return DUCKVEP_BREAKEND_INVALID;
+    for (i = 0u; i < length; i++) {
+        if (alternate[i] != '[' && alternate[i] != ']') continue;
+        if (first == length) first = i;
+        else if (second == length) second = i;
+        else return DUCKVEP_BREAKEND_INVALID;
+    }
+    if (first == length) {
+        if (length == 1u && alternate[0] == '.') return DUCKVEP_BREAKEND_NOT_BREAKEND;
+        if (alternate[0] == '.') {
+            sequence_start = 1u;
+            sequence_end = length;
+        } else if (alternate[length - 1u] == '.') {
+            sequence_start = 0u;
+            sequence_end = length - 1u;
+            parsed.local_join_after = 1u;
+        } else {
+            return DUCKVEP_BREAKEND_NOT_BREAKEND;
+        }
+    } else {
+        if (second == length || alternate[first] != alternate[second])
+            return DUCKVEP_BREAKEND_INVALID;
+        if (first == 0u && second < length - 1u) {
+            sequence_start = second + 1u;
+            sequence_end = length;
+        } else if (first > 0u && second == length - 1u) {
+            sequence_start = 0u;
+            sequence_end = first;
+            parsed.local_join_after = 1u;
+        } else return DUCKVEP_BREAKEND_INVALID;
+
+        /* Split at the last colon: VCF contig identifiers may contain colons.
+         * Angle-bracketed assembly-contig identifiers remain byte-exact. */
+        for (i = first + 1u; i < second; i++) {
+            uint8_t c = alternate[i];
+            if (c <= 32u || c == 127u || c == ',')
+                return DUCKVEP_BREAKEND_INVALID;
+            if (c == ':') colon = i;
+        }
+        if (colon == length || colon == first + 1u || colon == second - 1u)
+            return DUCKVEP_BREAKEND_INVALID;
+        for (i = colon + 1u; i < second; i++) {
+            uint8_t c = alternate[i];
+            if (c < '0' || c > '9') return DUCKVEP_BREAKEND_INVALID;
+            uint64_t digit = (uint64_t)(c - '0');
+            if (parsed.mate_position > (UINT64_MAX - digit) / 10u)
+                return DUCKVEP_BREAKEND_POSITION_OVERFLOW;
+            parsed.mate_position = parsed.mate_position * 10u + digit;
+        }
+        parsed.mate_chrom = alternate + first + 1u;
+        parsed.mate_chrom_length = colon - first - 1u;
+        parsed.mate_extends_right = alternate[first] == '[';
+        parsed.has_mate = 1u;
+    }
+    if (sequence_start == sequence_end) return DUCKVEP_BREAKEND_INVALID;
+    for (i = sequence_start; i < sequence_end; i++) {
+        uint8_t c = alternate[i];
+        if (c >= 'a' && c <= 'z') c = (uint8_t)(c - ('a' - 'A'));
+        if (c != 'A' && c != 'C' && c != 'G' && c != 'T' && c != 'N')
+            return DUCKVEP_BREAKEND_INVALID;
+    }
+    parsed.replacement = alternate + sequence_start;
+    parsed.replacement_length = sequence_end - sequence_start;
+    *out = parsed;
+    return DUCKVEP_BREAKEND_OK;
+}
+
 static int sv_span_overlaps(uint32_t start1, uint32_t end1,
                             uint32_t other_start1, uint32_t other_end1) {
     return end1 >= other_start1 && start1 <= other_end1;

@@ -241,6 +241,16 @@ defaults to `intergenic_variant`; an intragenic mate independently contributes
 the same mate contributes only `feature_truncation`. Testing only the shared 5000-base
 default hides this state.
 
+The default also applies to the mate allele. In the minimal two-exon model,
+raw `chrDuck:150 N[chrDuck:251[` shifts the local feature to the first intron
+base, where the structural consequence program has no ordinary term. The local
+allele truncates the transcript; the mate at 251 is just outside it and defaults
+to intergenic. The union is `feature_truncation&intergenic_variant` in all four
+orientations. A mate 5001 bases outside the transcript creates no allele, so it
+cannot contribute that default. Assigning defaults only after unioning endpoint
+predicates loses this state. The seed-31 minimal-model executable witness and
+native, SQL and R cases retain it.
+
 The converse is equally non-obvious. If the mate creates the overlap object, predicates
 on that mate allele still receive the local `StructuralVariationFeature`. A caller window
 wider than 5000 bases can therefore emit a local upstream/downstream term even when the

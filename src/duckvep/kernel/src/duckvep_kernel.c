@@ -1900,7 +1900,6 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     int breakend_local_in_directional_window = 0;
     int breakend_mate_close = 0;
     int breakend_mate_admits = 0;
-    int breakend_local_defaults_intergenic = 0;
 
     if (c->status != DUCKVEP_OK) return 0;
 
@@ -1928,9 +1927,6 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
                 tx, (size_t)tx_idx, event->mate_chrom_id, event->mate_pos1,
                 c->options);
         if (!local_admits && !breakend_mate_admits) return 1;
-        breakend_local_defaults_intergenic = breakend_local_close &&
-            !breakend_local_in_directional_window &&
-            breakend_mate_admits;
     }
     pos = event->start1;
     topology_start1 = event->feature_start1;
@@ -2158,7 +2154,6 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
                    : event->feature_start1 - tx->end1[tx_idx];
         if (dist > c->options->upstream_dist) {
             if (!breakend || !breakend_mate_admits) return 1;
-            breakend_local_defaults_intergenic = breakend_local_close;
             ectx.pre_bits &= ~DUCKVEP_PRE(DUCKVEP_PRE_UPSTREAM);
             ectx.region &= ~(uint32_t)DUCKVEP_REGION_UPSTREAM;
             ectx.region_state.region_mask &=
@@ -2169,7 +2164,6 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
                    : tx->start1[tx_idx] - event->feature_end1;
         if (dist > c->options->downstream_dist) {
             if (!breakend || !breakend_mate_admits) return 1;
-            breakend_local_defaults_intergenic = breakend_local_close;
             ectx.pre_bits &= ~DUCKVEP_PRE(DUCKVEP_PRE_DOWNSTREAM);
             ectx.region &= ~(uint32_t)DUCKVEP_REGION_DOWNSTREAM;
             ectx.region_state.region_mask &=
@@ -2273,14 +2267,20 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     cmask = kind == DUCKVEP_KIND_SV
         ? duckvep_effect_eval_structural(ectx.pre_bits)
         : duckvep_effect_eval(ectx.pre_bits);
-    /* StructuralVariationOverlap evaluates every endpoint admitted by its
-     * fixed 5000-base rule as a separate overlap allele. If the shifted local
-     * endpoint is admitted but its directional predicate was disabled by the
-     * caller's narrower upstream/downstream window, that local allele falls
-     * back to intergenic even when the mate allele independently contributes
-     * feature_truncation. The public row is the union of those allele rows. */
-    if (breakend_local_defaults_intergenic) {
-        cmask |= DUCKVEP_SO(DUCKVEP_SO_INTERGENIC);
+    /* Ordinary BND predicates are shared by all admitted endpoint alleles;
+     * only truncation depends on the allele's own point. If truncation is the
+     * sole term, an admitted extragenic endpoint has an empty predicate set and
+     * defaults to intergenic BEFORE the allele union. This applies to either
+     * endpoint, including a mate beside an intragenic local splice-site point. */
+    if (breakend && cmask == DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION)) {
+        if ((breakend_local_close &&
+             (event->feature_start1 < tx->start1[tx_idx] ||
+              event->feature_start1 > tx->end1[tx_idx])) ||
+            (breakend_mate_close &&
+             (event->mate_pos1 < tx->start1[tx_idx] ||
+              event->mate_pos1 > tx->end1[tx_idx]))) {
+            cmask |= DUCKVEP_SO(DUCKVEP_SO_INTERGENIC);
+        }
     }
     /* BaseVariationFeatureOverlapAllele::get_all_OverlapConsequences assigns
      * VEP 116's default intergenic consequence when a real overlap allele has

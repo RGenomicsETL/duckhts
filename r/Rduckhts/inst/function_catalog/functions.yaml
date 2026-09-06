@@ -310,6 +310,18 @@
       ]
     },
     {
+      "name": "duckvep_breakend_geometry",
+      "kind": "scalar",
+      "category": "Variant Annotation",
+      "signature": "duckvep_breakend_geometry(alternate)",
+      "returns": "STRUCT(mate_chrom VARCHAR, mate_position UBIGINT, local_join_after BOOLEAN, mate_extends_right BOOLEAN, replacement_sequence VARCHAR)",
+      "r_wrapper": "",
+      "description": "Parse one VCF 4.5 breakend ALT into typed preparation facts without reference lookup or allocation of native scratch. The four paired forms t[p[, t]p], ]p]t, and [p[t retain the exact mate contig name, one-based mate position, and replacement sequence t. local_join_after is TRUE for a bracket pair after t; mate_extends_right is TRUE for square opening brackets. The joined mate piece is reverse-complemented when those two booleans differ. Replacement sequence includes retained local bases and must not be mislabeled as inserted sequence; case is preserved. Single breakends t. and .t retain replacement sequence and local_join_after with all mate fields NULL. NULL input and non-breakend ALT (including plain ., *, and symbolic alleles) return NULL; malformed bracket forms or leading/trailing-dot forms raise an error. Call once per ALT after multiallelic expansion. Mate positions from zero through UBIGINT maximum are retained with checked decimal parsing; zero can denote a virtual telomeric mate. Annotation still requires model-addressable positive UINTEGER coordinates: parsing does not authorize annotating telomeres or unknown assembly contigs. Mate names may contain colons and are split from position at the last colon; no alias stripping is performed. Join names to the declared model region relation and pass the resulting paired coordinates to duckvep_annotate. Keep source ID, INFO/MATEID, EVENT, confidence intervals, REF, raw ALT, and these orientation/payload fields beside the annotation: ALT alone cannot establish mate record identity, reciprocal agreement, phase, or fusion HGVS. This helper does not merge reciprocal records or reconstruct a rearranged sequence.",
+      "examples": [
+        "SELECT (duckvep_breakend_geometry('C[2:321682[')).*;"
+      ]
+    },
+    {
       "name": "duckvep_annotate",
       "kind": "table",
       "category": "Variant Annotation",

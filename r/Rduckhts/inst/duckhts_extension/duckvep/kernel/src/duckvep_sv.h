@@ -13,6 +13,36 @@
 
 #include <stdint.h>
 
+typedef enum duckvep_breakend_status {
+    DUCKVEP_BREAKEND_OK = 0,
+    DUCKVEP_BREAKEND_NOT_BREAKEND,
+    DUCKVEP_BREAKEND_INVALID,
+    DUCKVEP_BREAKEND_POSITION_OVERFLOW
+} duckvep_breakend_status_t;
+
+/* Borrowed spans into one ALT (not a comma-separated allele list). VCF 4.5
+ * section 5.4 defines the four bracket forms and the two single-breakend forms.
+ * Replacement sequence includes the local retained bases: it is not necessarily
+ * an inserted sequence. Mate identity/reciprocity needs INFO/MATEID and a join.
+ * Coordinates are one-based, with zero retained for a virtual telomeric mate.
+ * A single breakend has no mate. Parsing never validates against a reference,
+ * guesses chromosome aliases, changes case, or allocates storage. */
+typedef struct duckvep_breakend {
+    const uint8_t *mate_chrom;
+    size_t mate_chrom_length;
+    uint64_t mate_position;
+    const uint8_t *replacement;
+    size_t replacement_length;
+    uint8_t local_join_after;
+    uint8_t mate_extends_right;
+    uint8_t has_mate;
+} duckvep_breakend_t;
+
+/* Non-BND alleles return NOT_BREAKEND; malformed bracket or terminal-dot forms fail.
+ * `out` is zeroed on failure, and borrows `alternate` only on success. */
+duckvep_breakend_status_t duckvep_breakend_parse(
+    const uint8_t *alternate, size_t length, duckvep_breakend_t *out);
+
 typedef struct duckvep_sv_effect {
     uint8_t deletion;
     uint8_t insertion;
