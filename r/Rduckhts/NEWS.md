@@ -1,5 +1,11 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- expose bundled `duckvep_breakend_geometry()` through DBI for typed BND ALT
+  preparation, including orientation, exact mate names and replacement sequence
+
+- preserve the bundled DuckVEP paired-BND endpoint consequence union when one
+  endpoint contributes truncation and the other defaults to intergenic
+
 - add bundled-model regression coverage for rejecting short CDS sequences
   before registry publication and continuing to use valid models afterward
 

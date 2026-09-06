@@ -1,0 +1,13 @@
+##fileformat=VCFv4.5
+##source=DuckHTS_minimal_model_seed31_exon_end_downstream_flank_counterexample
+##contig=<ID=chrDuck,length=260>
+##INFO=<ID=SVTYPE,Number=1,Type=String,Description="Structural variant type">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chrDuck	150	default_after_right	N	N[chrDuck:251[	.	PASS	SVTYPE=BND
+chrDuck	150	default_after_left	N	N]chrDuck:251]	.	PASS	SVTYPE=BND
+chrDuck	150	default_before_left	N	]chrDuck:251]N	.	PASS	SVTYPE=BND
+chrDuck	150	default_before_right	N	[chrDuck:251[N	.	PASS	SVTYPE=BND
+chrDuck	159	intron_after_right	N	N[chrDuck:251[	.	PASS	SVTYPE=BND
+chrDuck	159	intron_after_left	N	N]chrDuck:251]	.	PASS	SVTYPE=BND
+chrDuck	159	intron_before_left	N	]chrDuck:251]N	.	PASS	SVTYPE=BND
+chrDuck	159	intron_before_right	N	[chrDuck:251[N	.	PASS	SVTYPE=BND

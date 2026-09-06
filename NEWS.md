@@ -1,6 +1,17 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- add `duckvep_breakend_geometry()` for lossless typed preparation of paired
+  and single BND ALT alleles, preserving contig names, orientation, replacement
+  sequence and telomeric mate coordinates with checked decimal parsing
+
+- preserve VEP's per-endpoint default intergenic consequence when unioning
+  paired BND transcript rows, including a close extragenic mate beside a local
+  splice-site point with no ordinary structural consequence
+
+- extend the R throughput driver with a raw BND ALT preparation workload,
+  including the explicit mate-contig join and paired annotation in the timer
+
 - bound native DuckVEP CDS projection by the borrowed transcript sequence
   slice before reading REF or insertion anchors, including hinted fallbacks.
   Add SQL/R checks for pre-publication rejection of short CDS models and feed

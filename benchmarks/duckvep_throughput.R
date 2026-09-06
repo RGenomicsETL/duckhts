@@ -61,6 +61,14 @@ op <- add_option(
 )
 op <- add_option(
   op,
+  "--fixture-breakend-alt",
+  dest = "fixture_breakend_alt",
+  action = "store_true",
+  default = FALSE,
+  help = "include raw ALT parsing and contig-name join in the native BND fixture timer"
+)
+op <- add_option(
+  op,
   "--variants-database",
   dest = "variants_database",
   default = "",
@@ -213,6 +221,14 @@ if (identical(opt$api_surface, "public") && opt$input_partitions != 1L) {
 production <- nzchar(opt$database)
 if (isTRUE(opt$fixture_indels) && (production || opt$event_mode != "small")) {
   die("--fixture-indels requires the small-event fixture (no --database)")
+}
+if (
+  isTRUE(opt$fixture_breakend_alt) &&
+    (production || opt$event_mode != "breakend" || opt$api_surface != "native")
+) {
+  die(
+    "--fixture-breakend-alt requires --event-mode breakend --api-surface native, no --database"
+  )
 }
 if (isTRUE(opt$regulatory) && !production) {
   die("--regulatory requires a production --database")
@@ -676,6 +692,12 @@ if (production) {
   if (isTRUE(opt$fixture_indels)) {
     workload <- "fixture_one_transcript_sorted_indels"
   }
+  if (opt$event_mode == "breakend") {
+    workload <- "fixture_one_transcript_sorted_breakend"
+    if (isTRUE(opt$fixture_breakend_alt)) {
+      workload <- paste0(workload, "_raw_alt")
+    }
+  }
   region_count <- 1
   transcript_count <- 1
   exon_count <- 2
@@ -772,6 +794,21 @@ annotation_input <- function(begin, count) {
        ORDER BY input_variant_index"
     )
   } else if (identical(opt$event_mode, "breakend")) {
+    if (isTRUE(opt$fixture_breakend_alt)) {
+      return(glue(
+        "SELECT i::UBIGINT AS input_variant_index,
+                1::UINTEGER AS seq_region, 159::UBIGINT AS position,
+                regions.seq_region AS mate_seq_region, g.mate_position
+         FROM (
+           SELECT i, duckvep_breakend_geometry(CASE i % 4
+             WHEN 0 THEN 'N[chrDuck:170[' WHEN 1 THEN 'N]chrDuck:170]'
+             WHEN 2 THEN ']chrDuck:170]N' ELSE '[chrDuck:170[N' END) AS g
+           FROM range({begin_sql}, {end_sql}) r(i)
+         ) raw_events
+         JOIN duckvep_sequence_regions regions ON regions.name = g.mate_chrom
+         ORDER BY i"
+      ))
+    }
     glue(
       "SELECT i::UBIGINT AS input_variant_index,
               1::UINTEGER AS seq_region, 159::UBIGINT AS \"position\",

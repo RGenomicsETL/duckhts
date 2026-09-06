@@ -27,6 +27,7 @@
 #include "duckvep_coding.h"
 #include "duckvep_haplotype.h"
 #include "duckvep_carriers.h"
+#include "duckvep_sv.h"
 #include "duckvep_annotation_internal.h"
 #include "duckvep_workspace_internal.h"
 
@@ -630,6 +631,126 @@ TEST seeded_sweep_matches_bruteforce_for_any_scene(void) {
  *   variants:    v0 chr0@150 -> {t0}   v1 chr0@650 -> {t1}   v2 chr1@150 -> {t2}
  * Expected exactly (v0,t0),(v1,t1),(v2,t2). Also exercises chrom boundaries and
  * the evict-then-emit ordering (t0 is admitted then evicted before v1 emits). */
+TEST breakend_parser_checks_shapes_and_limits(void) {
+    const char *invalid[] = {"", "[chr:1]A", "A[chr:1]", "A[chr:1[A",
+        "[chr:1[", "A[:1[", "A[chr:[", "A[chr:-1[", "A[chr:+1[",
+        "A[chr:1x[", "A[chr:1[[", "A[chr 1:2[", "A[chr,1:2[", "A[",
+        "A..", "..A", "A.T.", "U[chr:1[", "[chr:1[R"};
+    duckvep_breakend_t out, zero = {0};
+    for (size_t i = 0u; i < sizeof invalid / sizeof invalid[0]; i++) {
+        memset(&out, 0xa5, sizeof out);
+        ASSERT_EQ(DUCKVEP_BREAKEND_INVALID, duckvep_breakend_parse(
+            (const uint8_t *)invalid[i], strlen(invalid[i]), &out));
+        ASSERT_MEM_EQ(&zero, &out, sizeof out);
+    }
+    const char *ordinary[] = {".", "*", "<DUP>", "<ctg.1>", "ACGTN"};
+    for (size_t i = 0u; i < sizeof ordinary / sizeof ordinary[0]; i++) {
+        ASSERT_EQ(DUCKVEP_BREAKEND_NOT_BREAKEND, duckvep_breakend_parse(
+            (const uint8_t *)ordinary[i], strlen(ordinary[i]), &out));
+        ASSERT_MEM_EQ(&zero, &out, sizeof out);
+    }
+    const char maximum[] = "a[chr:with:semicolon;:18446744073709551615[";
+    ASSERT_EQ(DUCKVEP_BREAKEND_OK, duckvep_breakend_parse(
+        (const uint8_t *)maximum, sizeof maximum - 1u, &out));
+    ASSERT_EQ(UINT64_MAX, out.mate_position);
+    ASSERT_EQ(19u, out.mate_chrom_length);
+    ASSERT_MEM_EQ("chr:with:semicolon;", out.mate_chrom, 19u);
+    const char overflow[] = "a[chr:18446744073709551616[";
+    ASSERT_EQ(DUCKVEP_BREAKEND_POSITION_OVERFLOW, duckvep_breakend_parse(
+        (const uint8_t *)overflow, sizeof overflow - 1u, &out));
+    ASSERT_MEM_EQ(&zero, &out, sizeof out);
+    const uint8_t embedded_nul[] = {'A','[','c',0,':','1','['};
+    ASSERT_EQ(DUCKVEP_BREAKEND_INVALID, duckvep_breakend_parse(
+        embedded_nul, sizeof embedded_nul, &out));
+    const char telomere[] = "]<ctg:1>:000]tN";
+    ASSERT_EQ(DUCKVEP_BREAKEND_OK, duckvep_breakend_parse(
+        (const uint8_t *)telomere, sizeof telomere - 1u, &out));
+    ASSERT_EQ(0u, out.mate_position);
+    ASSERT_EQ(7u, out.mate_chrom_length);
+    ASSERT_MEM_EQ("<ctg:1>", out.mate_chrom, 7u);
+    ASSERT_EQ(0u, out.local_join_after);
+    ASSERT_EQ(0u, out.mate_extends_right);
+    ASSERT_EQ(2u, out.replacement_length);
+    ASSERT_MEM_EQ("tN", out.replacement, 2u);
+    ASSERT_EQ(DUCKVEP_BREAKEND_INVALID, duckvep_breakend_parse(NULL, 1u, &out));
+    ASSERT_EQ(DUCKVEP_BREAKEND_INVALID, duckvep_breakend_parse(embedded_nul, 1u, NULL));
+    PASS();
+}
+
+struct kprop_breakend {
+    char chrom[40], replacement[40];
+    uint64_t position;
+    unsigned form;
+};
+
+static enum theft_alloc_res kprop_breakend_alloc(struct theft *t, void *env, void **instance) {
+    static const char bases[] = "ACGTNacgtn";
+    static const char name_bytes[] = "ACGT0123456789:;._-";
+    struct kprop_breakend *b = calloc(1u, sizeof *b);
+    (void)env;
+    if (b == NULL) return THEFT_ALLOC_ERROR;
+    size_t n = (size_t)kprop_bounded(t, 32u) + 1u;
+    for (size_t i = 0u; i < n; i++)
+        b->replacement[i] = bases[kprop_bounded(t, sizeof bases - 1u)];
+    n = (size_t)kprop_bounded(t, 32u) + 1u;
+    for (size_t i = 0u; i < n; i++)
+        b->chrom[i] = name_bytes[kprop_bounded(t, sizeof name_bytes - 1u)];
+    b->position = theft_random_bits(t, 64u);
+    b->form = (unsigned)kprop_bounded(t, 6u);
+    *instance = b;
+    return THEFT_ALLOC_OK;
+}
+
+static enum theft_trial_res prop_breakend_recovers_constructed_components(struct theft *t, void *arg) {
+    const struct kprop_breakend *b = arg;
+    char rendered[128];
+    int length;
+    int after = b->form < 2u || b->form == 4u;
+    int right = b->form == 0u || b->form == 3u;
+    int paired = b->form < 4u;
+    (void)t;
+    if (!paired) {
+        length = snprintf(rendered, sizeof rendered, after ? "%s." : ".%s", b->replacement);
+    } else {
+        char bracket = right ? '[' : ']';
+        length = after
+            ? snprintf(rendered, sizeof rendered, "%s%c%s:%" PRIu64 "%c",
+                b->replacement, bracket, b->chrom, b->position, bracket)
+            : snprintf(rendered, sizeof rendered, "%c%s:%" PRIu64 "%c%s",
+                bracket, b->chrom, b->position, bracket, b->replacement);
+    }
+    if (length < 1 || (size_t)length >= sizeof rendered) return THEFT_TRIAL_ERROR;
+    /* Exact, unterminated allocation catches accidental strlen/strchr reads. */
+    uint8_t *bytes = malloc((size_t)length);
+    if (bytes == NULL) return THEFT_TRIAL_ERROR;
+    memcpy(bytes, rendered, (size_t)length);
+    duckvep_breakend_t parsed;
+    int ok = duckvep_breakend_parse(bytes, (size_t)length, &parsed) == DUCKVEP_BREAKEND_OK;
+    if (ok) {
+        ok = parsed.local_join_after == after && parsed.has_mate == paired &&
+            parsed.replacement_length == strlen(b->replacement) &&
+            memcmp(parsed.replacement, b->replacement, parsed.replacement_length) == 0;
+        if (paired) ok = ok && parsed.mate_extends_right == right &&
+            parsed.mate_position == b->position && parsed.mate_chrom_length == strlen(b->chrom) &&
+            memcmp(parsed.mate_chrom, b->chrom, parsed.mate_chrom_length) == 0;
+        else ok = ok && parsed.mate_chrom == NULL && parsed.mate_chrom_length == 0u;
+    }
+    free(bytes);
+    return ok ? THEFT_TRIAL_PASS : THEFT_TRIAL_FAIL;
+}
+
+TEST breakend_parser_recovers_constructed_components(void) {
+    struct theft_type_info type = {.alloc = kprop_breakend_alloc, .free = theft_generic_free_cb};
+    struct theft_run_config cfg = {0};
+    cfg.name = "breakend_parser_recovers_constructed_components";
+    cfg.prop1 = prop_breakend_recovers_constructed_components;
+    cfg.type_info[0] = &type;
+    cfg.trials = kprop_env_u64("DUCKVEP_PROP_TRIALS", KPROP_DEFAULT_TRIALS);
+    cfg.seed = (theft_seed)kprop_env_u64("DUCKVEP_PROP_SEED", KPROP_DEFAULT_SEED);
+    ASSERT_EQ(THEFT_RUN_PASS, theft_run(&cfg));
+    PASS();
+}
+
 TEST event_load_without_variant_kind_uses_supplied_interval(void) {
     static const uint16_t chrom[1] = {7u};
     static const uint32_t pos[1] = {100u};
@@ -11077,28 +11198,41 @@ TEST annotate_breakend_pairs_keep_local_topology_and_mate_truncation(void) {
     static const uint32_t cds_e[2] = {280u, 0u};
     static const uint32_t es[3] = {100u, 250u, 400u};
     static const uint32_t ee[3] = {150u, 300u, 500u};
-    static const uint16_t vchrom[2] = {0u, 0u};
-    static const uint32_t vpos[2] = {99u, 300u};
-    static const uint32_t vend[2] = {99u, 300u};
-    static const uint16_t mate_chrom[2] = {0u, 1u};
-    static const uint32_t mate_pos[2] = {180u, 450u};
-    static const uint8_t kind[2] = {DUCKVEP_KIND_SV, DUCKVEP_KIND_SV};
-    static const uint8_t sv_type[2] = {
-        DUCKVEP_SV_BREAKEND, DUCKVEP_SV_BREAKEND
+    static const uint16_t vchrom[6] = {0u, 0u, 0u, 0u, 0u, 0u};
+    static const uint32_t vpos[6] = {99u, 150u, 150u, 150u, 179u, 300u};
+    static const uint32_t vend[6] = {99u, 150u, 150u, 150u, 179u, 300u};
+    static const uint16_t mate_chrom[6] = {0u, 0u, 0u, 0u, 0u, 1u};
+    static const uint32_t mate_pos[6] = {180u, 301u, 5301u, 250u, 301u, 450u};
+    static const uint8_t kind[6] = {
+        DUCKVEP_KIND_SV, DUCKVEP_KIND_SV, DUCKVEP_KIND_SV,
+        DUCKVEP_KIND_SV, DUCKVEP_KIND_SV, DUCKVEP_KIND_SV
     };
-    static const uint8_t copy_change[2] = {
-        DUCKVEP_COPY_CHANGE_UNKNOWN, DUCKVEP_COPY_CHANGE_UNKNOWN
+    static const uint8_t sv_type[6] = {
+        DUCKVEP_SV_BREAKEND, DUCKVEP_SV_BREAKEND, DUCKVEP_SV_BREAKEND,
+        DUCKVEP_SV_BREAKEND, DUCKVEP_SV_BREAKEND, DUCKVEP_SV_BREAKEND
     };
-    static const uint32_t pair_variant[3] = {0u, 1u, 1u};
-    static const uint32_t pair_tx[3] = {0u, 0u, 1u};
-    static const uint64_t expected[3] = {
+    static const uint8_t copy_change[6] = {0u, 0u, 0u, 0u, 0u, 0u};
+    static const uint32_t pair_variant[7] = {0u, 1u, 2u, 3u, 4u, 5u, 5u};
+    static const uint32_t pair_tx[7] = {0u, 0u, 0u, 0u, 0u, 0u, 1u};
+    /* At the first intron base, structural predicates have no ordinary term.
+     * A close extragenic mate defaults to intergenic before the allele union.
+     * A distant mate, an intragenic mate, or a shared intron term must not. */
+    static const uint64_t expected[7] = {
         DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION) |
             DUCKVEP_SO(DUCKVEP_SO_5_PRIME_UTR),
+        DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION) | DUCKVEP_SO(DUCKVEP_SO_INTERGENIC),
+        DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION),
+        DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION),
+        DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION) | DUCKVEP_SO(DUCKVEP_SO_INTRON),
         DUCKVEP_SO(DUCKVEP_SO_DOWNSTREAM_GENE),
         DUCKVEP_SO(DUCKVEP_SO_FEATURE_TRUNCATION)
     };
-    static const uint32_t expected_region[3] = {
+    static const uint32_t expected_region[7] = {
         DUCKVEP_REGION_UTR,
+        DUCKVEP_REGION_INTRON | DUCKVEP_REGION_SPLICE,
+        DUCKVEP_REGION_INTRON | DUCKVEP_REGION_SPLICE,
+        DUCKVEP_REGION_INTRON | DUCKVEP_REGION_SPLICE,
+        DUCKVEP_REGION_INTRON,
         DUCKVEP_REGION_DOWNSTREAM,
         0u
     };
@@ -11109,7 +11243,7 @@ TEST annotate_breakend_pairs_keep_local_topology_and_mate_truncation(void) {
     duckvep_model_t *model = NULL;
     duckvep_options_t *options = NULL;
     duckvep_workspace_t *workspace = NULL;
-    duckvep_consequence_t rows[3];
+    duckvep_consequence_t rows[7];
     duckvep_result_builder_t results;
     duckvep_error_t error;
     size_t row;
@@ -11127,14 +11261,14 @@ TEST annotate_breakend_pairs_keep_local_topology_and_mate_truncation(void) {
     variants.chrom_id = vchrom; variants.pos1 = vpos; variants.end1 = vend;
     variants.mate_chrom_id = mate_chrom; variants.mate_pos1 = mate_pos;
     variants.variant_kind = kind; variants.sv_type = sv_type;
-    variants.copy_change = copy_change; variants.count = 2u;
-    pairs.variant_idx = pair_variant; pairs.tx_idx = pair_tx; pairs.count = 3u;
+    variants.copy_change = copy_change; variants.count = 6u;
+    pairs.variant_idx = pair_variant; pairs.tx_idx = pair_tx; pairs.count = 7u;
 
     ASSERT_EQ(DUCKVEP_OK, duckvep_model_open(&tx, &ex, NULL, &model, &error));
     ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(NULL, &options, &error));
     ASSERT_EQ(DUCKVEP_OK,
               duckvep_workspace_open(model, &workspace, &error));
-    duckvep_result_builder_init(&results, rows, 3u);
+    duckvep_result_builder_init(&results, rows, 7u);
     ASSERT_EQ(DUCKVEP_ERR_UNSUPPORTED,
               duckvep_annotate_tile(model, &variants, options, workspace,
                                     &results, &error));
@@ -11142,8 +11276,8 @@ TEST annotate_breakend_pairs_keep_local_topology_and_mate_truncation(void) {
     ASSERT_EQ(DUCKVEP_OK,
               duckvep_annotate_pairs(model, &variants, &pairs, options,
                                      workspace, &results, &error));
-    ASSERT_EQ(3u, duckvep_result_builder_count(&results));
-    for (row = 0u; row < 3u; row++) {
+    ASSERT_EQ(7u, duckvep_result_builder_count(&results));
+    for (row = 0u; row < 7u; row++) {
         ASSERT_EQ(pair_variant[row], rows[row].variant_idx);
         ASSERT_EQ(pair_tx[row], rows[row].tx_idx);
         ASSERT_EQ(expected[row], rows[row].consequence_mask);
@@ -25280,6 +25414,8 @@ int main(int argc, char **argv) {
     RUN_TEST(cds_edit_builder_projects_exon_boundary_insertions_on_both_strands);
     RUN_TEST(cds_edit_builder_known_scene);
     RUN_TEST(cds_edit_builder_checks_borrowed_sequence_extent);
+    RUN_TEST(breakend_parser_checks_shapes_and_limits);
+    RUN_TEST(breakend_parser_recovers_constructed_components);
     RUN_TEST(coding_context_known_scene);
     RUN_TEST(variant_coding_context_known_scene);
     RUN_TEST(coding_context_delta_known_scene);

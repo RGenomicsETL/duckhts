@@ -1875,28 +1875,21 @@ structural_source_sql <- if (generate_structural) {
        'BND' AS source_svtype,
        'BND' AS structural_type,
        'source' AS event_state,
-       regexp_extract(ALT[1], '([A-Za-z0-9_.-]+):([0-9]+)', 1) AS mate_chrom,
-       CAST(regexp_extract(ALT[1], '([A-Za-z0-9_.-]+):([0-9]+)', 2) AS UBIGINT)
-         AS mate_position,
+       bnd.mate_chrom AS mate_chrom,
+       bnd.mate_position AS mate_position,
        CASE
-         WHEN regexp_full_match(
-           ALT[1], '[^\\[\\]]+\\][^\\[\\]]+:[0-9]+\\]'
-         ) THEN 'N]M]'
-         WHEN regexp_full_match(
-           ALT[1], '[^\\[\\]]+\\[[^\\[\\]]+:[0-9]+\\['
-         ) THEN 'N[M['
-         WHEN regexp_full_match(
-           ALT[1], '\\][^\\[\\]]+:[0-9]+\\][^\\[\\]]+'
-         ) THEN ']M]N'
-         WHEN regexp_full_match(
-           ALT[1], '\\[[^\\[\\]]+:[0-9]+\\[[^\\[\\]]+'
-         ) THEN '[M[N'
-         ELSE 'source'
+         WHEN bnd.local_join_after AND bnd.mate_extends_right THEN 'N[M['
+         WHEN bnd.local_join_after THEN 'N]M]'
+         WHEN bnd.mate_extends_right THEN '[M[N'
+         ELSE ']M]N'
        END AS orientation
      FROM read_bcf({sql_q(normalizePath(source_vcf))}, scan_mode := 'sequential')
+     CROSS JOIN LATERAL (
+       SELECT CASE WHEN len(ALT) = 1 THEN duckvep_breakend_geometry(ALT[1]) END AS bnd
+     ) prepared
      WHERE len(ALT) = 1
        AND (upper(INFO_SVTYPE) = 'BND' OR regexp_matches(ALT[1], '[\\[\\]]'))
-       AND regexp_matches(ALT[1], '[A-Za-z0-9_.-]+:[0-9]+')
+       AND bnd.mate_chrom IS NOT NULL
        {chrom_filter}"
   )
 } else {

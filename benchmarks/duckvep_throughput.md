@@ -181,6 +181,9 @@ insertion order; they remain only as historical measurements.
 | 2026-09-06 | fc67aef3 | fixture_one_transcript_sorted                                    | rich        |       1 |                1 |                5000 | 10,000,000 | 1           | 2         | 0                   | 10,000,000     |      3 |       3.316 |          3.333 |       3.339 |             3000300 |          333.3 | 13th Gen Intel(R) Core(TM) i5-13500 | 0-19         | 3,000,300              |
 | 2026-09-06 | e5f1f269 | fixture_one_transcript_sorted_indels                             | hgvs        |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       1.239 |          1.242 |       1.254 |              805153 |         1242.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 805,153                |
 | 2026-09-06 | 10320db6 | fixture_one_transcript_sorted_indels                             | hgvs        |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       1.233 |          1.240 |       1.249 |              806452 |         1240.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 806,452                |
+| 2026-09-06 | 60a15f21 | fixture_one_transcript_sorted_breakend                           | compact     |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       0.266 |          0.267 |       0.272 |             3745318 |          267.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 3,745,318              |
+| 2026-09-06 | 9ed772f7 | fixture_one_transcript_sorted_breakend                           | compact     |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       0.266 |          0.270 |       0.272 |             3703704 |          270.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 3,703,704              |
+| 2026-09-06 | 9ed772f7 | fixture_one_transcript_sorted_breakend_raw_alt                   | compact     |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       0.394 |          0.396 |       0.402 |             2525253 |          396.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 2,525,253              |
 
 Each pass consumes every staged input and checks output cardinality plus
 either the rendered consequence-byte total or the numeric
@@ -497,6 +500,43 @@ traversal and the extra output together; it is not an isolated
 interval-lookup microbenchmark.
 
 ## Paired breakends
+
+### Raw ALT preparation and endpoint-union correction
+
+The 2026-09-06 fixture comparison uses source
+`60a15f2121c5674fcae7bba6a8ff22d0298988f8` (benchmark-only baseline) and
+`9ed772f71376b9ee47fcac03ba3e010fb2bfc973` (native ALT parser and
+endpoint-union fix). Each run repeats **1,000,000 input BND events into
+1,000,000 compact transcript rows**, using one DuckDB thread pinned to
+logical CPU 2 of the same i5-13500, DuckDB 1.5.3, five timed passes, a
+100,000-event warmup, and a 5,000-base transcript window. Both revisions
+are clean, in-tree release rebuilds.
+
+| revision | workload                                       | min_seconds | median_seconds | max_seconds |
+|:---------|:-----------------------------------------------|------------:|---------------:|------------:|
+| 60a15f21 | fixture_one_transcript_sorted_breakend         |       0.266 |          0.267 |       0.272 |
+| 9ed772f7 | fixture_one_transcript_sorted_breakend         |       0.266 |          0.270 |       0.272 |
+| 9ed772f7 | fixture_one_transcript_sorted_breakend_raw_alt |       0.394 |          0.396 |       0.402 |
+
+The identical typed-endpoint control changes from **0.267 s to 0.270 s**
+(+1.1% median; both observed ranges 0.266–0.272 s). Adding
+`--fixture-breakend-alt` measures **0.396 s** (0.394–0.402 s), including
+all four raw bracket forms, `duckvep_breakend_geometry()`, the explicit
+mate-name join, ordering, annotation, unnesting and aggregation. It is
+additional preparation work, not a before/after implementation
+comparison. The untimed full compact-row fingerprints match for all
+three runs; no consequence, status, coordinate or input-identity field
+is dropped from those fingerprints.
+
+The model is the checked-in one-transcript, two-exon fixture, with local
+position 159 and mate position 170. This is a paired-adapter floor, not
+a measurement of large raw records, high-fan-out models, fusion
+reconstruction, or phased work. It does not measure the newly corrected
+empty-endpoint predicate state; fixed native/SQL/R witnesses and
+executable VEP differentials cover that state. No prior checked-in
+workload measured raw ALT preparation. The production BND baseline below
+(200,000 events / 18,766,240 transcript rows) has a different model and
+fan-out and is not a same-workload comparator for this fixture.
 
 | lane                                     | revision | paired_events | consequence_rows | rows_per_event | median_seconds | paired_events_per_second | consequence_rows_per_second |
 |:-----------------------------------------|:---------|:--------------|:-----------------|---------------:|---------------:|:-------------------------|:----------------------------|

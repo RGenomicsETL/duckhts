@@ -5,6 +5,59 @@ local({
   con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
 
+  bnd <- dbGetQuery(
+    con,
+    paste(
+      "SELECT i, g.* FROM (SELECT i, duckvep_breakend_geometry(alt) g",
+      "FROM (VALUES (1, 'C[2:321682['), (2, 'G]17:198982]'),",
+      "(3, ']13:123456]T'), (4, '[17:198983[A'),",
+      "(5, 'TCC.'), (6, '.TGCA'), (7, 'a[chr:alt;1:0[')) v(i, alt)) ORDER BY i"
+    )
+  )
+  expect_identical(
+    bnd$mate_chrom,
+    c("2", "17", "13", "17", NA, NA, "chr:alt;1")
+  )
+  expect_equal(bnd$mate_position, c(321682, 198982, 123456, 198983, NA, NA, 0))
+  expect_identical(
+    bnd$local_join_after,
+    c(TRUE, TRUE, FALSE, FALSE, TRUE, FALSE, TRUE)
+  )
+  expect_identical(
+    bnd$mate_extends_right,
+    c(TRUE, FALSE, FALSE, TRUE, NA, NA, TRUE)
+  )
+  expect_identical(
+    bnd$replacement_sequence,
+    c("C", "G", "T", "A", "TCC", "TGCA", "a")
+  )
+  for (alt in c("A[chr:1]", "A[:1[", "[chr:1[", "A..", "", "A[chr:-1[")) {
+    expect_error(
+      dbGetQuery(
+        con,
+        paste0(
+          "SELECT duckvep_breakend_geometry(",
+          dbQuoteString(con, alt),
+          ")"
+        )
+      ),
+      pattern = "malformed BND ALT"
+    )
+  }
+  expect_error(
+    dbGetQuery(
+      con,
+      "SELECT duckvep_breakend_geometry('A[chr:18446744073709551616[')"
+    ),
+    pattern = "mate position exceeds UBIGINT"
+  )
+  expect_true(
+    dbGetQuery(
+      con,
+      "SELECT duckvep_breakend_geometry(NULL) IS NULL AS missing"
+    )$missing
+  )
+
   geometry <- dbGetQuery(
     con,
     paste(
@@ -1713,6 +1766,39 @@ local({
     c("feature_truncation&intergenic_variant", "feature_truncation")
   )
   expect_true(all(is.na(breakend_zero_window$region)))
+
+  # Raw ALT -> exact contig-name join -> paired annotation, with the default
+  # consequence assigned per endpoint before unioning the transcript row.
+  breakend_raw <- dbGetQuery(
+    con,
+    paste(
+      "WITH raw AS (SELECT position, mate, CASE orientation",
+      "WHEN 0 THEN 'N[chrDuck:' || mate || '['",
+      "WHEN 1 THEN 'N]chrDuck:' || mate || ']'",
+      "WHEN 2 THEN ']chrDuck:' || mate || ']N'",
+      "ELSE '[chrDuck:' || mate || '[N' END AS alternate",
+      "FROM (VALUES (150::UBIGINT, 251::UBIGINT), (150, 5250), (150, 5251),",
+      "(150, 170), (159, 251)) e(position, mate), range(4) r(orientation)),",
+      "prepared AS (SELECT *, duckvep_breakend_geometry(alternate) g FROM raw)",
+      "SELECT position, mate, a.consequence, count(*)::INTEGER AS n FROM prepared",
+      "JOIN (VALUES ('chrDuck', 1::UINTEGER)) regions(name, seq_region)",
+      "ON g.mate_chrom = regions.name,",
+      "LATERAL unnest(_duckvep_annotate_breakend_rich(",
+      "'r-test', 1::UINTEGER, position, seq_region, g.mate_position, 0::UBIGINT)) u(a)",
+      "GROUP BY ALL ORDER BY position, mate"
+    )
+  )
+  expect_equal(breakend_raw$n, rep(4, 5))
+  expect_identical(
+    breakend_raw$consequence,
+    c(
+      "feature_truncation",
+      "feature_truncation&intergenic_variant",
+      "feature_truncation&intergenic_variant",
+      "feature_truncation",
+      "feature_truncation&intron_variant"
+    )
+  )
 
   expect_error(
     dbGetQuery(
