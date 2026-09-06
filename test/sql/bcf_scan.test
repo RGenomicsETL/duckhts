@@ -1,5 +1,5 @@
 # name: test/sql/bcf_scan.test
-# description: BCF/VCF contig dictionaries and index-dependent scan failures
+# description: BCF/VCF contig dictionaries and bind-time index snapshots
 # group: [duckhts]
 
 require duckhts
@@ -33,15 +33,19 @@ SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.
 statement ok
 COPY (SELECT 'broken index') TO '__WORKING_DIRECTORY__/test_bcf_reload.csi' (FORMAT CSV, HEADER FALSE);
 
-statement error
+query I rowsort
 EXECUTE bcf_reload;
 ----
-read_bcf: failed to reload index for parallel scan
+10
+20
+20
+20
+40
 
-statement error
+query I
 EXECUTE bcf_reload_count;
 ----
-read_bcf: failed to reload index for parallel scan
+5
 
 # A new bind with no usable index still selects ordinary sequential fallback.
 query I rowsort
@@ -60,7 +64,7 @@ SELECT success FROM bcf_index('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.
 ----
 1
 
-# Re-executing the same prepared query recovers after restoring the index.
+# Rebuilding identical contents does not invalidate the pinned plan.
 query I rowsort
 EXECUTE bcf_reload;
 ----
@@ -93,15 +97,19 @@ SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.
 statement ok
 COPY (SELECT 'broken index') TO '__WORKING_DIRECTORY__/test_vcf_reload.tbi' (FORMAT CSV, HEADER FALSE);
 
-statement error
+query I rowsort
 EXECUTE vcf_reload;
 ----
-read_bcf: failed to reload index for parallel scan
+10
+20
+20
+20
+40
 
-statement error
+query I
 EXECUTE vcf_reload_count;
 ----
-read_bcf: failed to reload index for parallel scan
+5
 
 query I rowsort
 SELECT POS FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.full.vcf.gz',
@@ -142,6 +150,88 @@ INSERT INTO bcf_scan_expected VALUES
   ('chr3',20,'duplicate','G',['T'],50,['PASS'],8,'./1','0/0'),
   ('chr3',20,'allele','G',['A'],30,['PASS'],9,'1/1','./.'),
   ('chr3',40,'last','T',['G'],NULL,['PASS'],NULL,'1','0|1');
+
+# Pin full typed rows, not merely the metadata counts. Both replacements below
+# are valid indexes; shifted has identical names/counts but different offsets.
+statement ok
+PREPARE bcf_snapshot_rows AS
+WITH observed AS MATERIALIZED (
+  SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.bcf',
+    index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', decompression_threads := 0)
+)
+SELECT count(*) FROM (
+  (SELECT * FROM observed EXCEPT ALL SELECT * FROM bcf_scan_expected)
+  UNION ALL (SELECT * FROM bcf_scan_expected EXCEPT ALL SELECT * FROM observed));
+
+statement ok
+PREPARE vcf_snapshot_region AS
+WITH observed AS MATERIALIZED (
+  SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.full.vcf.gz',
+    index_path := '__WORKING_DIRECTORY__/test_vcf_reload.tbi',
+    region := 'chr3:20-40,chr3:20-20', decompression_threads := 0)
+), expected AS (SELECT * FROM bcf_scan_expected WHERE CHROM='chr3')
+SELECT count(*) FROM (
+  (SELECT * FROM observed EXCEPT ALL SELECT * FROM expected)
+  UNION ALL (SELECT * FROM expected EXCEPT ALL SELECT * FROM observed));
+
+statement ok
+PREPARE bcf_snapshot_stats AS SELECT count(*) FROM read_bcf(
+  '__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.bcf',
+  index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', tidy_format := true);
+
+query I
+SELECT success FROM bcf_index('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.empty.bcf',
+  index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', threads := 1);
+----
+1
+
+query I
+SELECT success FROM bcf_index('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.empty.vcf.gz',
+  index_path := '__WORKING_DIRECTORY__/test_vcf_reload.tbi', threads := 1);
+----
+1
+
+query I
+EXECUTE bcf_snapshot_rows;
+----
+0
+
+query I
+EXECUTE vcf_snapshot_region;
+----
+0
+
+query I
+EXECUTE bcf_snapshot_stats;
+----
+10
+
+query I
+SELECT success FROM bcf_index('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.shifted.bcf',
+  index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', threads := 1);
+----
+1
+
+query I
+SELECT success FROM bcf_index('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.shifted.vcf.gz',
+  index_path := '__WORKING_DIRECTORY__/test_vcf_reload.tbi', threads := 1);
+----
+1
+
+query I
+EXECUTE bcf_snapshot_rows;
+----
+0
+
+query I
+EXECUTE vcf_snapshot_region;
+----
+0
+
+query I
+EXECUTE bcf_snapshot_stats;
+----
+10
 
 statement ok
 CREATE MACRO bcf_scan_difference(header_kind, index_kind, mode) AS TABLE

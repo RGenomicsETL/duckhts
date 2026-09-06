@@ -373,51 +373,81 @@ test_bcf_record_cache <- function() {
   expect_equal(out$correct[[1]], 2053)
 }
 
-test_bcf_index_reload <- function() {
+test_bcf_index_snapshot <- function() {
   con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE))
-  index <- tempfile("duckhts-bcf-index-")
-  hidden <- paste0(index, ".hidden")
-  on.exit(unlink(c(index, hidden)), add = TRUE)
-  # Both formats have two occupied contigs, so losing the worker index tests
-  # an index-dependent plan, not a single-contig sequential fallback.
-  for (file in c("bcf_scan_contigs.bcf", "bcf_scan_contigs.full.vcf.gz")) {
-    path <- system.file("extdata", file, package = "Rduckhts")
-    expect_true(nzchar(path))
-    build <- sprintf("SELECT * FROM bcf_index(%s, index_path := %s, threads := 1)",
-                     dbQuoteString(con, path), dbQuoteString(con, index))
-    for (workers in c(1L, 4L)) for (tidy in c(FALSE, TRUE)) for (damage in c("missing", "corrupt")) {
+  directory <- tempfile("duckhts-bcf-snapshot-")
+  dir.create(directory)
+  on.exit(unlink(directory, recursive = TRUE), add = TRUE)
+  bcf_scan_expected_tables(con)
+  fixture <- function(suffix) system.file("extdata", paste0("bcf_scan_contigs.", suffix),
+                                         package = "Rduckhts", mustWork = TRUE)
+  quote <- function(value) as.character(dbQuoteString(con, value))
+  # Both formats have two occupied contigs. Exercise auto discovery and explicit
+  # paths, full/region/sequential scans, complete wide/tidy rows and index counts.
+  for (kind in c("bcf", "tbi", "csi")) for (explicit in c(FALSE, TRUE)) {
+    suffix <- if (kind == "bcf") "bcf" else "full.vcf.gz"
+    index_suffix <- if (kind == "bcf") "csi" else kind
+    path <- file.path(directory, paste0("input.", suffix))
+    expect_true(file.copy(fixture(suffix), path, overwrite = TRUE))
+    index <- if (explicit) file.path(directory, "private.index") else paste0(path, ".", index_suffix)
+    hidden <- paste0(index, ".hidden")
+    build <- sprintf("SELECT * FROM bcf_index(%s,index_path:=%s,min_shift:=%d,threads:=1)",
+                     quote(path), quote(index), if (kind == "tbi") 0L else 14L)
+    for (workers in c(1L, 4L)) for (tidy in c(FALSE, TRUE)) for (mode in c("auto", "region", "sequential")) {
       dbExecute(con, sprintf("SET threads=%d", workers))
       dbGetQuery(con, build)
-      source <- sprintf("read_bcf(%s, index_path := %s, tidy_format := %s, decompression_threads := 0",
-                        dbQuoteString(con, path), dbQuoteString(con, index), tolower(tidy))
+      source <- sprintf("read_bcf(%s,tidy_format:=%s,decompression_threads:=0%s%s)",
+        quote(path), tolower(tidy), if (explicit) paste0(",index_path:=", quote(index)) else "",
+        switch(mode, auto = "", region = ",region:='chr3:20-40,chr3:20-20'",
+               sequential = ",scan_mode:='sequential'"))
       # R DuckDB's EXECUTE bookkeeping coerces the first column to numeric.
       # Keep POS first while retaining every column for exact row comparison.
       projection <- "SELECT POS, * EXCLUDE (POS) FROM "
-      sql <- paste0(projection, source, ") ORDER BY ALL")
-      expected <- dbGetQuery(con, sql)
-      expect_equal(nrow(expected), if (tidy) 10L else 5L)
+      sql <- paste0(projection, source, " ORDER BY ALL")
+      expected <- dbGetQuery(con, paste0(projection, if (tidy) "expected_tidy" else "expected_sites",
+        if (mode == "region") " WHERE CHROM='chr3'" else "", " ORDER BY ALL"))
+      expect_equal(dbGetQuery(con, sql), expected)
       dbExecute(con, paste("PREPARE index_scan AS", sql))
-      if (damage == "missing") {
-        expect_true(file.rename(index, hidden))
-      } else writeLines("broken index", index)
-      expect_error(dbGetQuery(con, "EXECUTE index_scan"),
-                   pattern = "read_bcf: failed to reload index for parallel scan")
-      expect_equal(dbGetQuery(con, "SELECT 4242 AS n")$n, 4242L)
-      expect_equal(dbGetQuery(con, sql), expected) # New bind: no-index fallback.
-      sequential <- paste0(projection, source, ", scan_mode := 'sequential') ORDER BY ALL")
-      expect_equal(dbGetQuery(con, sequential), expected)
-      dbGetQuery(con, build)
-      expect_equal(dbGetQuery(con, "EXECUTE index_scan"), expected)
+      dbExecute(con, paste("PREPARE index_count AS SELECT count(*) AS n FROM", source))
+      for (damage in c("missing", "corrupt", "empty", "shifted", "identical")) {
+        if (damage == "missing") expect_true(file.rename(index, hidden))
+        else if (damage == "corrupt") writeLines("broken index", index)
+        else if (damage == "identical") dbGetQuery(con, build)
+        else {
+          replacement <- paste0(damage, ".", if (kind == "bcf") "bcf.csi" else paste0("vcf.gz.index.", kind))
+          expect_true(file.copy(fixture(replacement), index, overwrite = TRUE))
+        }
+        # After bind, all mutations retain the original exact rows, including
+        # valid unrelated indexes and matching counts with different offsets.
+        expect_equal(dbGetQuery(con, "EXECUTE index_scan"), expected)
+        expect_equal(dbGetQuery(con, "EXECUTE index_count")$n[[1]], nrow(expected))
+        expect_equal(dbGetQuery(con, "SELECT 4242 AS n")$n, 4242L)
+        if (damage %in% c("missing", "corrupt")) {
+          if (mode == "region") expect_error(dbGetQuery(con, sql), pattern = "region query requires an index")
+          else expect_equal(dbGetQuery(con, sql), expected) # New bind: streaming fallback.
+        }
+      }
       dbExecute(con, "DEALLOCATE index_scan")
+      dbExecute(con, "DEALLOCATE index_count")
       if (file.exists(hidden)) unlink(hidden)
     }
+    # A replacement data+index pair supplied before bind defines a new plan.
+    expect_true(file.copy(fixture(paste0("shifted.", if (kind == "bcf") "bcf" else "vcf.gz")),
+                          path, overwrite = TRUE))
+    dbGetQuery(con, build)
+    expect_equal(dbGetQuery(con, sql), expected)
+    auto_sql <- sub(",scan_mode:='sequential'", "", sql, fixed = TRUE)
+    expect_equal(dbGetQuery(con, auto_sql), expected)
+    region_sql <- sub(",scan_mode:='sequential'", ",region:='chr3:20-40,chr3:20-20'", sql, fixed = TRUE)
+    expected_region <- expected[expected$CHROM == "chr3", ]
+    rownames(expected_region) <- NULL
+    expect_equal(dbGetQuery(con, region_sql), expected_region)
+    unlink(c(path, index))
   }
 }
 
-test_bcf_contig_dictionary <- function() {
-  con <- rduckhts_connect()
-  on.exit(dbDisconnect(con, shutdown = TRUE))
+bcf_scan_expected_tables <- function(con) {
   dbExecute(con, "CREATE TABLE expected_sites(CHROM VARCHAR, POS BIGINT, ID VARCHAR, REF VARCHAR,
     ALT VARCHAR[], QUAL DOUBLE, FILTER VARCHAR[], INFO_DP INTEGER,
     FORMAT_GT_S1 VARCHAR, FORMAT_GT_S2 VARCHAR)")
@@ -431,6 +461,12 @@ test_bcf_contig_dictionary <- function() {
     SELECT CHROM,POS,ID,REF,ALT,QUAL,FILTER,INFO_DP,SAMPLE_ID,FORMAT_GT
     FROM expected_sites, LATERAL (VALUES ('S1',FORMAT_GT_S1),('S2',FORMAT_GT_S2))
     AS samples(SAMPLE_ID,FORMAT_GT)")
+}
+
+test_bcf_contig_dictionary <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  bcf_scan_expected_tables(con)
   for (threads in c(1L, 4L)) for (tidy in c(FALSE, TRUE)) {
     dbExecute(con, sprintf("SET threads=%d", threads))
     expected_table <- if (tidy) "expected_tidy" else "expected_sites"
@@ -479,7 +515,7 @@ test_bcf_contig_dictionary <- function() {
 }
 
 test_bcf_contig_dictionary()
-test_bcf_index_reload()
+test_bcf_index_snapshot()
 test_bcf_record_cache()
 test_bcf_string_format_lists()
 test_bcf_projection_sql()
