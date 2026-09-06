@@ -1,5 +1,9 @@
 # duckhtsbench 0.0.0.9000
 
+- stage complete VEP-116 GRCh38 chromosome-21 cache shards and all root metadata
+  by streaming the pinned upstream archive, without storing the full compressed
+  archive; verify transfer identity and publish a canonical acquisition receipt
+
 - share network-free committed-fixture staging between BCF scan and DuckVEP
   projection workloads, retaining registry byte identities and provenance
 

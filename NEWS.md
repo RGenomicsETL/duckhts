@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- add registry-owned streaming acquisition of the complete VEP-116 GRCh38
+  chromosome-21 cache for ClinVar acceptance campaigns, retaining all region
+  shards and root metadata without storing the full upstream archive
+
 - reuse validated DuckVEP indel CDS positions when the VEP feature selects the
   same genomic interval, avoiding repeated endpoint projection in consequence
   and HGVS context construction. One checked scalar phase converter serves
