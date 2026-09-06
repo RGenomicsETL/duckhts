@@ -26,6 +26,7 @@
 #include "duckvep_codon.h"
 #include "duckvep_coding.h"
 #include "duckvep_haplotype.h"
+#include "duckvep_carriers.h"
 #include "duckvep_annotation_internal.h"
 #include "duckvep_workspace_internal.h"
 
@@ -8487,6 +8488,324 @@ TEST haplotype_edit_geometry_agrees_in_both_orders(void) {
             }
         }
     }
+    PASS();
+}
+
+struct carrier_test_pool {
+    duckvep_carrier_transcript_t transcripts[3];
+    duckvep_carrier_call_t calls[16];
+    duckvep_carrier_prefix_t prefixes[64];
+    uint32_t active[3];
+    duckvep_carrier_bucket_t tx_index[8], call_index[32], prefix_index[128];
+};
+
+static duckvep_carrier_buffers_t carrier_test_buffers(struct carrier_test_pool *pool) {
+    duckvep_carrier_buffers_t b = {pool->transcripts, pool->calls, pool->prefixes,
+        pool->active, pool->tx_index, pool->call_index, pool->prefix_index,
+        3u, 16u, 64u, 8u, 32u, 128u};
+    return b;
+}
+
+static duckvep_carrier_key_t carrier_test_key(uint32_t sample) {
+    duckvep_carrier_key_t key = {sample, sample % 3u == 2u ? -5 : 0,
+        (uint16_t)(sample % 4u + 1u), 4u, (uint8_t)(sample % 3u != 0u)};
+    return key;
+}
+
+/* An independent dense bit matrix is the oracle, not the prefix index. Each
+ * bit names a carried event; the empty mask is an implicit reference path. */
+static int carrier_test_drain(duckvep_carriers_t *s, uint32_t tx,
+                              const uint8_t masks[8], uint64_t event_base) {
+    uint64_t seen_paths = 0u;
+    unsigned seen_samples = 0u;
+    duckvep_carrier_leaf_t leaf;
+    duckvep_carriers_status_t status;
+    while ((status = duckvep_carriers_next_leaf(s, &leaf)) == DUCKVEP_CARRIERS_OK) {
+        uint64_t events[6], before[6];
+        size_t required = 0u;
+        memset(events, 0xa5, sizeof events);
+        memcpy(before, events, sizeof before);
+        if (leaf.transcript_index != tx || !leaf.event_count || !leaf.call_count ||
+            duckvep_carriers_leaf_events(s, leaf.id, events, 0u, &required) !=
+                DUCKVEP_CARRIERS_OUTPUT_FULL || required != leaf.event_count ||
+            memcmp(events, before, sizeof before) != 0 ||
+            duckvep_carriers_leaf_events(s, leaf.id, events, 6u, &required) !=
+                DUCKVEP_CARRIERS_OK) return 0;
+        unsigned mask = 0u;
+        for (size_t i = 0u; i < required; i++) {
+            if (events[i] < event_base || events[i] >= event_base + 6u ||
+                (i && events[i] <= events[i - 1u])) return 0;
+            mask |= 1u << (unsigned)(events[i] - event_base);
+        }
+        if (!mask || (seen_paths & (UINT64_C(1) << mask))) return 0;
+        seen_paths |= UINT64_C(1) << mask;
+        uint32_t count = 0u;
+        for (uint32_t id = leaf.first_call; id;) {
+            const duckvep_carrier_call_t *call = duckvep_carriers_call(s, id);
+            if (!call || ++count > 8u || call->key.sample_index >= 8u) return 0;
+            uint32_t sample = call->key.sample_index;
+            duckvep_carrier_key_t key = carrier_test_key(sample);
+            if ((seen_samples & (1u << sample)) || masks[sample] != mask ||
+                call->key.lane != key.lane || call->key.ploidy != key.ploidy ||
+                call->key.phase_set != key.phase_set ||
+                call->key.phase_set_present != key.phase_set_present) return 0;
+            seen_samples |= 1u << sample;
+            id = call->next_leaf;
+        }
+        if (count != leaf.call_count) return 0;
+    }
+    if (status != DUCKVEP_CARRIERS_DONE) return 0;
+    for (unsigned sample = 0u; sample < 8u; sample++) {
+        if (!!(seen_samples & (1u << sample)) != !!masks[sample]) return 0;
+    }
+    return duckvep_carriers_release(s) == DUCKVEP_CARRIERS_OK;
+}
+
+TEST carrier_stream_lifetime_keys_and_capacity(void) {
+    uint16_t chrom[] = {1u, 1u, 2u};
+    uint32_t end[] = {3u, 8u, 4u};
+    duckvep_transcript_model_t model = {0};
+    model.transcript_count = 3u; model.chrom_id = chrom; model.end1 = end;
+    struct carrier_test_pool pool, before_pool;
+    duckvep_carrier_buffers_t b = carrier_test_buffers(&pool);
+    duckvep_carriers_t s, before;
+    uint32_t completed;
+    duckvep_carrier_key_t key = carrier_test_key(0u);
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_init(&s, &model, &b));
+    ASSERT_EQ(DUCKVEP_CARRIERS_INVALID_ARG, duckvep_carriers_push(&s, 0u, &key));
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_advance(&s, 1u, 1u, 10u, &completed));
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_push(&s, 0u, &key));
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_push(&s, 1u, &key));
+    /* NULL PS and an explicitly present zero are different carrier keys. */
+    key.phase_set_present = 1u;
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_push(&s, 0u, &key));
+    ASSERT_EQ(3u, s.call_count);
+    ASSERT_EQ(2u, s.prefix_count);
+    before = s; memcpy(&before_pool, &pool, sizeof pool);
+    ASSERT_EQ(DUCKVEP_CARRIERS_DUPLICATE_CALL, duckvep_carriers_push(&s, 0u, &key));
+    key.ploidy = 2u;
+    ASSERT_EQ(DUCKVEP_CARRIERS_PLOIDY_CONFLICT, duckvep_carriers_push(&s, 0u, &key));
+    ASSERT_EQ(0, memcmp(&before, &s, sizeof s));
+    ASSERT_EQ(0, memcmp(&before_pool, &pool, sizeof pool));
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_advance(&s, 1u, 3u, 11u, &completed));
+    ASSERT_EQ(DUCKVEP_CARRIERS_TRANSCRIPT_READY,
+              duckvep_carriers_advance(&s, 1u, 4u, 12u, &completed));
+    ASSERT_EQ(0u, completed);
+    ASSERT_EQ(DUCKVEP_CARRIERS_INPUT_ORDER,
+              duckvep_carriers_advance(&s, 1u, 5u, 12u, &completed));
+    ASSERT_EQ(DUCKVEP_CARRIERS_INVALID_ARG, duckvep_carriers_release(&s));
+    duckvep_carrier_leaf_t leaf;
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_next_leaf(&s, &leaf));
+    ASSERT_EQ(2u, leaf.call_count);
+    ASSERT_EQ(DUCKVEP_CARRIERS_DONE, duckvep_carriers_next_leaf(&s, &leaf));
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_release(&s));
+    ASSERT_EQ(1u, s.transcript_count); ASSERT_EQ(1u, s.call_count); ASSERT_EQ(1u, s.prefix_count);
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_advance(&s, 1u, 4u, 12u, &completed));
+    ASSERT_EQ(DUCKVEP_CARRIERS_INPUT_ORDER,
+              duckvep_carriers_advance(&s, 1u, 4u, 11u, &completed));
+    ASSERT_EQ(DUCKVEP_CARRIERS_TRANSCRIPT_READY,
+              duckvep_carriers_advance(&s, 2u, 1u, 13u, &completed));
+    ASSERT_EQ(1u, completed);
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_next_leaf(&s, &leaf));
+    ASSERT_EQ(DUCKVEP_CARRIERS_DONE, duckvep_carriers_next_leaf(&s, &leaf));
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_release(&s));
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_advance(&s, 2u, 1u, 13u, &completed));
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_push(&s, 2u, &key));
+    ASSERT_EQ(DUCKVEP_CARRIERS_TRANSCRIPT_READY, duckvep_carriers_finish(&s, &completed));
+    ASSERT_EQ(2u, completed);
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_next_leaf(&s, &leaf));
+    ASSERT_EQ(DUCKVEP_CARRIERS_DONE, duckvep_carriers_next_leaf(&s, &leaf));
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_release(&s));
+    ASSERT_EQ(DUCKVEP_CARRIERS_DONE, duckvep_carriers_finish(&s, &completed));
+    ASSERT_EQ(DUCKVEP_CARRIERS_DONE, duckvep_carriers_finish(&s, &completed));
+    ASSERT_EQ(DUCKVEP_CARRIERS_INPUT_ORDER,
+              duckvep_carriers_advance(&s, 2u, 2u, 14u, &completed));
+    ASSERT_EQ(0u, s.transcript_count); ASSERT_EQ(0u, s.call_count); ASSERT_EQ(0u, s.prefix_count);
+
+    b.transcript_capacity = 1u; b.transcript_buckets = 2u;
+    b.call_capacity = 2u; b.call_buckets = 4u;
+    b.prefix_capacity = 2u; b.prefix_buckets = 4u;
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_init(&s, &model, &b));
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_advance(&s, 1u, 1u, 1u, &completed));
+    for (uint32_t sample = 0u; sample < 2u; sample++) {
+        key = carrier_test_key(sample);
+        ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_push(&s, 0u, &key));
+    }
+    before = s; memcpy(&before_pool, &pool, sizeof pool);
+    key = carrier_test_key(2u);
+    ASSERT_EQ(DUCKVEP_CARRIERS_CALL_FULL, duckvep_carriers_push(&s, 0u, &key));
+    ASSERT_EQ(DUCKVEP_CARRIERS_TRANSCRIPT_FULL, duckvep_carriers_push(&s, 1u, &key));
+    ASSERT_EQ(0, memcmp(&before, &s, sizeof s));
+    ASSERT_EQ(0, memcmp(&before_pool, &pool, sizeof pool));
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_advance(&s, 1u, 2u, 2u, &completed));
+    for (uint32_t sample = 0u; sample < 2u; sample++) {
+        key = carrier_test_key(sample);
+        ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_push(&s, 0u, &key));
+    }
+    ASSERT_EQ(2u, s.prefix_count); /* Reuse succeeds even when no slot is free. */
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_advance(&s, 1u, 3u, 3u, &completed));
+    before = s; memcpy(&before_pool, &pool, sizeof pool);
+    ASSERT_EQ(DUCKVEP_CARRIERS_PREFIX_FULL, duckvep_carriers_push(&s, 0u, &key));
+    ASSERT_EQ(0, memcmp(&before, &s, sizeof s));
+    ASSERT_EQ(0, memcmp(&before_pool, &pool, sizeof pool));
+    b.call_capacity = 0u; b.call_buckets = 0u;
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_init(&s, &model, &b));
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_advance(&s, 1u, 1u, 1u, &completed));
+    ASSERT_EQ(DUCKVEP_CARRIERS_CALL_FULL, duckvep_carriers_push(&s, 0u, &key));
+    ASSERT_EQ(0u, s.transcript_count); ASSERT_EQ(0u, s.prefix_count);
+    b.transcript_buckets = 3u;
+    ASSERT_EQ(DUCKVEP_CARRIERS_INVALID_ARG, duckvep_carriers_init(&s, &model, &b));
+    PASS();
+}
+
+struct carrier_matrix_case { uint8_t masks[2][8]; };
+
+TEST carrier_stream_reuses_slots_after_many_transcripts(void) {
+    enum { TRANSCRIPTS = 1000 };
+    uint16_t chrom[TRANSCRIPTS] = {0};
+    uint32_t end[TRANSCRIPTS];
+    for (unsigned i = 0u; i < TRANSCRIPTS; i++) end[i] = i + 1u;
+    duckvep_transcript_model_t model = {0};
+    model.transcript_count = TRANSCRIPTS; model.chrom_id = chrom; model.end1 = end;
+    struct carrier_test_pool pool;
+    duckvep_carrier_buffers_t b = carrier_test_buffers(&pool);
+    b.transcript_capacity = 1u; b.transcript_buckets = 2u;
+    b.call_capacity = 8u; b.call_buckets = 16u;
+    b.prefix_capacity = 1u; b.prefix_buckets = 2u;
+    duckvep_carriers_t s;
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_init(&s, &model, &b));
+    for (uint32_t tx = 0u; tx <= TRANSCRIPTS; tx++) {
+        uint32_t completed;
+        duckvep_carriers_status_t status = tx == TRANSCRIPTS
+            ? duckvep_carriers_finish(&s, &completed)
+            : duckvep_carriers_advance(&s, 0u, tx + 1u, UINT64_MAX - tx, &completed);
+        if (tx) {
+            ASSERT_EQ(DUCKVEP_CARRIERS_TRANSCRIPT_READY, status);
+            ASSERT_EQ(tx - 1u, completed);
+            duckvep_carrier_leaf_t leaf;
+            ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_next_leaf(&s, &leaf));
+            ASSERT_EQ(8u, leaf.call_count);
+            uint64_t event;
+            size_t required;
+            ASSERT_EQ(DUCKVEP_CARRIERS_OK,
+                      duckvep_carriers_leaf_events(&s, leaf.id, &event, 1u, &required));
+            ASSERT_EQ(1u, required);
+            ASSERT_EQ(UINT64_MAX - (tx - 1u), event);
+            unsigned seen = 0u;
+            for (uint32_t id = leaf.first_call; id;) {
+                const duckvep_carrier_call_t *call = duckvep_carriers_call(&s, id);
+                ASSERT(call != NULL);
+                uint32_t sample = call->key.sample_index - (tx - 1u) * 8u;
+                ASSERT(sample < 8u);
+                ASSERT(!(seen & (1u << sample)));
+                seen |= 1u << sample;
+                ASSERT_EQ(sample == 7u ? UINT16_MAX : sample + 1u, call->key.ploidy);
+                ASSERT_EQ(call->key.ploidy, call->key.lane);
+                id = call->next_leaf;
+            }
+            ASSERT_EQ(255u, seen);
+            ASSERT_EQ(DUCKVEP_CARRIERS_DONE, duckvep_carriers_next_leaf(&s, &leaf));
+            ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_release(&s));
+            ASSERT_EQ(0u, s.transcript_count); ASSERT_EQ(0u, s.call_count); ASSERT_EQ(0u, s.prefix_count);
+            status = tx == TRANSCRIPTS ? duckvep_carriers_finish(&s, &completed)
+                : duckvep_carriers_advance(&s, 0u, tx + 1u, UINT64_MAX - tx, &completed);
+        }
+        if (tx == TRANSCRIPTS) {
+            ASSERT_EQ(DUCKVEP_CARRIERS_DONE, status);
+            break;
+        }
+        ASSERT_EQ(DUCKVEP_CARRIERS_OK, status);
+        for (uint32_t sample = 0u; sample < 8u; sample++) {
+            duckvep_carrier_key_t key = carrier_test_key(tx * 8u + sample);
+            key.ploidy = sample == 7u ? UINT16_MAX : (uint16_t)(sample + 1u);
+            key.lane = key.ploidy;
+            ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_push(&s, tx, &key));
+        }
+    }
+    ASSERT_EQ(1u, s.peak_transcripts); ASSERT_EQ(8u, s.peak_calls); ASSERT_EQ(1u, s.peak_prefixes);
+    PASS();
+}
+
+static enum theft_alloc_res carrier_matrix_alloc(struct theft *t, void *env, void **instance) {
+    (void)env;
+    struct carrier_matrix_case *c = malloc(sizeof(*c));
+    if (!c) return THEFT_ALLOC_ERROR;
+    for (unsigned tx = 0u; tx < 2u; tx++) for (unsigned sample = 0u; sample < 8u; sample++) {
+        c->masks[tx][sample] = (uint8_t)kprop_bounded(t, tx ? 64u : 16u);
+    }
+    /* Include cohort prefix sharing on every trial, not just by chance. */
+    for (unsigned tx = 0u; tx < 2u; tx++) c->masks[tx][7] = c->masks[tx][0];
+    *instance = c;
+    return THEFT_ALLOC_OK;
+}
+
+static void carrier_matrix_free(void *instance, void *env) {
+    (void)env;
+    free(instance);
+}
+
+static enum theft_trial_res prop_carrier_stream_matches_dense_matrix(struct theft *t, void *arg) {
+    (void)t;
+    const struct carrier_matrix_case *c = arg;
+    uint16_t chrom[2][2] = {{1u, 1u}, {2u, 2u}};
+    uint32_t end[2][2] = {{3u, 6u}, {4u, 6u}};
+    duckvep_transcript_model_t models[2] = {{0}, {0}};
+    uint8_t expected[2][2][8];
+    struct carrier_test_pool pools[2];
+    duckvep_carriers_t streams[2];
+    const uint64_t base = UINT64_MAX - 6u;
+    for (unsigned run = 0u; run < 2u; run++) {
+        models[run].transcript_count = 2u;
+        models[run].chrom_id = chrom[run]; models[run].end1 = end[run];
+        memcpy(expected[run], c->masks, sizeof c->masks);
+        for (unsigned sample = 0u; sample < 8u; sample++) expected[run][0][sample] &= run ? 15u : 7u;
+        duckvep_carrier_buffers_t b = carrier_test_buffers(&pools[run]);
+        if (duckvep_carriers_init(&streams[run], &models[run], &b) != DUCKVEP_CARRIERS_OK)
+            return THEFT_TRIAL_ERROR;
+    }
+    /* Interleave different models with identical local ordinals but different
+     * contigs/transcript endpoints. One also resumes between every carrier row. */
+    for (uint32_t pos = 1u; pos <= 6u; pos++) for (unsigned run = 0u; run < 2u; run++) {
+        duckvep_carriers_t *s = &streams[run];
+        uint32_t tx;
+        duckvep_carriers_status_t status;
+        while ((status = duckvep_carriers_advance(s, (uint16_t)(run + 1u), pos, base + pos - 1u, &tx)) ==
+                   DUCKVEP_CARRIERS_TRANSCRIPT_READY) {
+            if (!carrier_test_drain(s, tx, expected[run][tx], base)) return THEFT_TRIAL_FAIL;
+        }
+        if (status != DUCKVEP_CARRIERS_OK) return THEFT_TRIAL_FAIL;
+        for (tx = 0u; tx < 2u; tx++) for (uint32_t sample = 0u; sample < 8u; sample++) {
+            if (!(expected[run][tx][sample] & (1u << (pos - 1u)))) continue;
+            uint32_t completed;
+            if (run && duckvep_carriers_advance(s, (uint16_t)(run + 1u), pos, base + pos - 1u, &completed) !=
+                           DUCKVEP_CARRIERS_OK) return THEFT_TRIAL_FAIL;
+            duckvep_carrier_key_t key = carrier_test_key(sample);
+            if (duckvep_carriers_push(s, tx, &key) != DUCKVEP_CARRIERS_OK) return THEFT_TRIAL_FAIL;
+        }
+    }
+    for (unsigned run = 0u; run < 2u; run++) {
+        duckvep_carriers_t *s = &streams[run];
+        uint32_t tx;
+        duckvep_carriers_status_t status;
+        while ((status = duckvep_carriers_finish(s, &tx)) == DUCKVEP_CARRIERS_TRANSCRIPT_READY) {
+            if (!carrier_test_drain(s, tx, expected[run][tx], base)) return THEFT_TRIAL_FAIL;
+        }
+        if (status != DUCKVEP_CARRIERS_DONE || s->transcript_count || s->call_count || s->prefix_count ||
+            s->peak_transcripts > 2u || s->peak_calls > 16u || s->peak_prefixes > 64u)
+            return THEFT_TRIAL_FAIL;
+    }
+    return THEFT_TRIAL_PASS;
+}
+
+TEST carrier_stream_matches_dense_matrix_across_batches(void) {
+    struct theft_type_info type = {.alloc = carrier_matrix_alloc, .free = carrier_matrix_free};
+    struct theft_run_config cfg = {0};
+    cfg.name = "sparse carrier paths == dense event matrix across input batches";
+    cfg.prop1 = prop_carrier_stream_matches_dense_matrix;
+    cfg.type_info[0] = &type;
+    cfg.trials = kprop_env_u64("DUCKVEP_PROP_TRIALS", KPROP_DEFAULT_TRIALS);
+    cfg.seed = (theft_seed)kprop_env_u64("DUCKVEP_PROP_SEED", KPROP_DEFAULT_SEED);
+    ASSERT_EQ(THEFT_RUN_PASS, theft_run(&cfg));
     PASS();
 }
 
@@ -24933,6 +25252,9 @@ int main(int argc, char **argv) {
     RUN_TEST(coding_snv_from_cds_known_cases);
     RUN_TEST(coding_snv_from_cds_matches_oracle_for_any_valid_snv);
     RUN_TEST(haplotype_edit_geometry_agrees_in_both_orders);
+    RUN_TEST(carrier_stream_lifetime_keys_and_capacity);
+    RUN_TEST(carrier_stream_reuses_slots_after_many_transcripts);
+    RUN_TEST(carrier_stream_matches_dense_matrix_across_batches);
     RUN_TEST(haplotype_partition_known_cases);
     RUN_TEST(haplotype_partition_preserves_interactions_for_any_valid_edit_set);
     RUN_TEST(haplotype_apply_and_translate_known_cases);

@@ -101,6 +101,7 @@ main <- function() {
     c(
       "test/duckvep/conformance/haplotype_probe.c",
       "src/duckvep/kernel/src/duckvep_haplotype.c",
+      "src/duckvep/kernel/src/duckvep_carriers.c",
       "src/duckvep/kernel/src/duckvep_codon.c"
     )
   )
@@ -118,6 +119,8 @@ main <- function() {
         "-shared",
         "-I",
         shQuote(file.path(root, "src/duckvep/kernel/src")),
+        "-I",
+        shQuote(file.path(root, "src/duckvep/kernel/include")),
         shQuote(sources),
         "-o",
         shQuote(shared)
@@ -130,6 +133,10 @@ main <- function() {
   dll <- dyn.load(shared)
   on.exit(dyn.unload(shared), add = TRUE)
   symbol <- getNativeSymbolInfo("duckhts_test_haplotype", PACKAGE = dll)
+  carrier_symbol <- getNativeSymbolInfo(
+    "duckhts_test_carrier_haplotypes",
+    PACKAGE = dll
+  )
   reverse_complement <- function(x) {
     paste(rev(strsplit(chartr("ACGT", "TGCA", x), "")[[1L]]), collapse = "")
   }
@@ -314,6 +321,7 @@ main <- function() {
       shape = shape,
       strand = strand,
       cds = cds,
+      positions = variants$pos,
       edits = edits
     )
   }
@@ -418,6 +426,77 @@ main <- function() {
       contributors = sort(edits$id)
     )
   }
+  stream_edits <- function(case) {
+    edits <- case$edits
+    n <- nrow(edits)
+    capacity <- nchar(case$cds) + sum(nchar(edits$alt)) + 1L
+    lanes <- rbind(
+      rep(1L, n),
+      1L + as.integer(seq_len(n) %% 2L == 0L),
+      rep(1L, n)
+    )
+    answer <- .C(
+      carrier_symbol,
+      charToRaw(case$cds),
+      as.integer(nchar(case$cds)),
+      case$strand,
+      as.integer(case$positions),
+      as.integer(edits$start),
+      edits$ref,
+      edits$alt,
+      as.integer(n),
+      as.integer(order(case$positions, seq_len(n)) - 1L),
+      as.integer(lanes),
+      as.integer(capacity),
+      cds = raw(6L * capacity),
+      protein = raw(6L * capacity),
+      cds_lengths = integer(6L),
+      protein_lengths = integer(6L),
+      flags = integer(6L),
+      contributors = integer(6L * n),
+      contributor_counts = integer(6L),
+      metrics = double(6L),
+      status = integer(1L)
+    )
+    if (answer$status != 0L) {
+      saveRDS(
+        list(input = case, output = answer),
+        file.path(out, "carrier_failure.rds")
+      )
+      stop("carrier index failed for ", case$transcript, ": ", answer$status)
+    }
+    paths <- lapply(seq_len(6L), function(slot) {
+      offset <- (slot - 1L) * capacity
+      contributors <- answer$contributors[
+        (slot - 1L) * n + seq_len(answer$contributor_counts[slot])
+      ]
+      list(
+        cds = rawToChar(answer$cds[offset + seq_len(answer$cds_lengths[slot])]),
+        protein = rawToChar(answer$protein[
+          offset + seq_len(answer$protein_lengths[slot])
+        ]),
+        flags = sort(c("indel", "frameshift", "resolved_frameshift")[
+          bitwAnd(answer$flags[slot], c(1L, 2L, 4L)) != 0L
+        ]),
+        contributors = sort(edits$id[contributors + 1L]),
+        sample = rep(c("cis", "trans", "shared"), each = 2L)[slot]
+      )
+    })
+    list(
+      paths = paths,
+      metrics = data.frame(
+        transcript = case$transcript,
+        input_events = n,
+        input_carriers = 3L * n,
+        peak_transcripts = answer$metrics[1L],
+        peak_calls = answer$metrics[2L],
+        peak_prefixes = answer$metrics[3L],
+        completed_event_paths = answer$metrics[4L],
+        translated_bases = answer$metrics[5L],
+        completed_carriers = answer$metrics[6L]
+      )
+    )
+  }
   compare_haplotypes <- function(expected, oracle) {
     groups <- split(expected, vapply(expected, `[[`, "", "cds"))
     checks <- logical()
@@ -476,6 +555,7 @@ main <- function() {
   failures <- list()
   comparisons <- 0L
   native <- vector("list", length(cases))
+  carrier_metrics <- vector("list", length(cases))
   names(native) <- vapply(cases, `[[`, "", "transcript")
   for (case in cases) {
     expected <- list()
@@ -491,8 +571,20 @@ main <- function() {
         expected[[length(expected) + 1L]] <- haplotype
       }
     }
-    native[[case$transcript]] <- expected
-    checks <- compare_haplotypes(expected, observed[[case$transcript]])
+    streamed <- stream_edits(case)
+    if (!identical(expected, streamed$paths)) {
+      saveRDS(
+        list(input = case, direct = expected, streamed = streamed),
+        file.path(out, "carrier_failure.rds")
+      )
+      stop(
+        "carrier index disagrees with direct edit sets for ",
+        case$transcript
+      )
+    }
+    native[[case$transcript]] <- streamed$paths
+    carrier_metrics[[match(case$transcript, names(native))]] <- streamed$metrics
+    checks <- compare_haplotypes(streamed$paths, observed[[case$transcript]])
     comparisons <- comparisons + length(checks)
     if (any(!checks)) {
       failures[[length(failures) + 1L]] <- data.frame(
@@ -514,6 +606,11 @@ main <- function() {
     )
   }
   saveRDS(native, file.path(out, "native.rds"))
+  write.csv(
+    do.call(rbind, carrier_metrics),
+    file.path(out, "carrier_metrics.csv"),
+    row.names = FALSE
+  )
   write.csv(failures, file.path(out, "failures.csv"), row.names = FALSE)
   # Exercise every comparison axis with a deliberate corruption. These seven
   # verifier controls are separate from the engine-comparison denominators.
@@ -586,6 +683,8 @@ main <- function() {
       c(
         "scripts/duckvep_evidence.R",
         "src/duckvep/kernel/src/duckvep_haplotype.h",
+        "src/duckvep/kernel/src/duckvep_carriers.h",
+        "src/duckvep/kernel/include/duckvep_kernel.h",
         "src/duckvep/kernel/src/duckvep_codon.h",
         "src/duckvep/kernel/src/duckvep_dna.h"
       )
@@ -601,6 +700,7 @@ main <- function() {
         "carriers.vcf",
         "inputs.rds",
         "native.rds",
+        "carrier_metrics.csv",
         "oracle.jsonl",
         "summary.csv",
         "failures.csv",
@@ -613,7 +713,7 @@ main <- function() {
   hashes <- vapply(identities, duckvep_evidence_sha256, "")
   jsonlite::write_json(
     list(
-      scope = "diploid_edit_set_mechanics_not_public_phased_execution",
+      scope = "diploid_carrier_prefix_and_edit_mechanics_not_public_phased_execution",
       source_revision = system2("git", c("rev-parse", "HEAD"), stdout = TRUE),
       dirty_worktree = length(system2(
         "git",
