@@ -468,7 +468,7 @@ main <- function() {
       contributors = sort(edits$id)
     )
   }
-  stream_edits <- function(case, calls = NULL) {
+  stream_edits <- function(case, calls = NULL, failure_file = "carrier_failure.rds") {
     edits <- case$edits
     n <- nrow(edits)
     exons <- case$exons[
@@ -481,6 +481,7 @@ main <- function() {
       rep(1L, n)
     )
     variants <- case$variants
+    event_order <- order(variants$pos, seq_len(n))
     if (!is.null(calls)) {
       # This campaign has one biallelic ALT copy in each diploid genotype.
       # Validate the declared subset, never repair an omitted/duplicate call.
@@ -509,6 +510,8 @@ main <- function() {
       variants <- data.frame(pos = as.integer(sites$POS), ref = sites$REF,
                               alt = vapply(sites$ALT, `[[`, "", 1L))
       stopifnot(!anyNA(variants$pos), all(variants$pos > 0L))
+      # Preserve the reader's observed order; do not silently sort bad input.
+      event_order <- order(sites$record_index)
     }
     answer <- .C(
       carrier_symbol,
@@ -522,7 +525,7 @@ main <- function() {
       variants$ref,
       variants$alt,
       as.integer(n),
-      as.integer(order(variants$pos, seq_len(n)) - 1L),
+      as.integer(event_order - 1L),
       as.integer(lanes),
       as.integer(capacity),
       cds = raw(6L * capacity),
@@ -538,7 +541,7 @@ main <- function() {
     if (answer$status != 0L) {
       saveRDS(
         list(input = case, output = answer),
-        file.path(out, "carrier_failure.rds")
+        file.path(out, failure_file)
       )
       stop("carrier index failed for ", case$transcript, ": ", answer$status)
     }
@@ -707,7 +710,7 @@ main <- function() {
   # missing/duplicate calls must not be replaced by generator assignments.
   witness <- cases[[1L]]
   original_calls <- do.call(rbind, calls_by_id[witness$edits$id])
-  routing_controls <- data.frame(field = c("allele_slot", "alternate", "missing_call", "duplicate_call", "chromosome"),
+  routing_controls <- data.frame(field = c("allele_slot", "alternate", "missing_call", "duplicate_call", "chromosome", "record_order"),
                                   rejected = FALSE)
   for (i in seq_len(nrow(routing_controls))) {
     mutant <- original_calls
@@ -720,14 +723,18 @@ main <- function() {
       },
       missing_call = { mutant <- mutant[-1L, ] },
       duplicate_call = { mutant <- rbind(mutant, mutant[1L, ]) },
-      chromosome = { mutant$CHROM <- "not_the_model_chromosome" }
+      chromosome = { mutant$CHROM <- "not_the_model_chromosome" },
+      record_order = { mutant$record_index <- max(mutant$record_index) - mutant$record_index }
     )
     routing_controls$rejected[i] <- if (i <= 2L) {
       !identical(stream_edits(witness, mutant)$paths, native[[1L]])
     } else tryCatch({
-      stream_edits(witness, mutant)
+      stream_edits(witness, mutant,
+                   failure_file = paste0("genotype_control_", routing_controls$field[i], ".rds"))
       FALSE
-    }, error = function(e) grepl("nrow\\(calls\\)|anyDuplicated\\(key\\)|calls\\$CHROM", conditionMessage(e)))
+    }, error = function(e) grepl(
+      "nrow\\(calls\\)|anyDuplicated\\(key\\)|calls\\$CHROM|carrier index failed .*: 104$",
+      conditionMessage(e)))
   }
   write.csv(routing_controls, file.path(out, "genotype_routing_controls.csv"), row.names = FALSE)
   write.csv(failures, file.path(out, "failures.csv"), row.names = FALSE)

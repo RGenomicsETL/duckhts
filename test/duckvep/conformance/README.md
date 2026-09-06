@@ -529,9 +529,10 @@ The campaign also loads the built extension (`--extension`) and reads the genera
 VCF through `read_geno()` and `read_bcf_samples()`. This third path derives allele
 slots, sample identity and variant alleles from decoded calls, then runs the same
 native projector/carrier/rebuild pipeline. Both generator-fed paths remain separate
-checks, and the existing Haplosaurus verifier controls are unchanged. Five additional
+checks, and the existing Haplosaurus verifier controls are unchanged. Six additional
 routing controls require valid changed allele slots/ALT to change the haplotype and
-missing/duplicate calls or a different model chromosome to fail. The complete typed
+missing/duplicate calls, a different model chromosome or reversed record order to fail.
+The genotype path retains reader ordinals instead of sorting incorrect input. The complete typed
 calls, metrics and controls are retained with the extension's SHA-256. Supplying
 `--extension-receipt` validates the
 existing clean-revision release-build receipt; runs without one are explicitly
