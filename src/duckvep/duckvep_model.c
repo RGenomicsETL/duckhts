@@ -1985,7 +1985,7 @@ duckvep_model_load_queries(duckdb_connection connection,
 		}
 	}
 	memset(&kernel_error, 0, sizeof(kernel_error));
-	if (duckvep_model_open_with_interval_features(&model->transcripts,
+	if (duckvep_model_open(&model->transcripts,
 	    &model->exons, &model->sequences, &model->interval_features,
 	    &model->kernel, &kernel_error) != DUCKVEP_OK) {
 		(void)snprintf(error, error_size, "invalid transcript model: %s",

@@ -304,7 +304,7 @@ enum {
     DVW_ANN_FEATURE_PAIR_ORDER = 78u
 };
 
-duckvep_status_t duckvep_model_open_with_interval_features(
+duckvep_status_t duckvep_model_open(
     const duckvep_transcript_model_t       *transcripts,
     const duckvep_exon_model_t             *exons,
     const duckvep_sequence_pool_t          *seq,
@@ -886,17 +886,6 @@ duckvep_status_t duckvep_model_open_with_interval_features(
     }
     *out_model = m;
     return DUCKVEP_OK;
-}
-
-duckvep_status_t duckvep_model_open(
-    const duckvep_transcript_model_t *transcripts,
-    const duckvep_exon_model_t       *exons,
-    const duckvep_sequence_pool_t    *seq,
-    duckvep_model_t                 **out_model,
-    duckvep_error_t                  *error) {
-
-    return duckvep_model_open_with_interval_features(
-        transcripts, exons, seq, NULL, out_model, error);
 }
 
 void duckvep_model_close(duckvep_model_t *model) {

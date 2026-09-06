@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- remove the redundant DuckVEP kernel model constructor in kernel 0.19.0: `duckvep_model_open`
+  now accepts the optional interval-feature view directly. Native callers pass
+  NULL for transcript-only models; model validation and SQL loading are unchanged
+
 - share read-only projections of registry-built nested DuckVEP models between
   the conformance runner and FastVEP benchmark worker, removing their dependence
   on separately persisted flat views without rewriting model artifacts

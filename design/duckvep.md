@@ -826,9 +826,10 @@ is added.
 
 The implemented internal layer makes that ownership explicit:
 
-- `duckvep_model_open(...)` owns the canonical prepared transcript, exon, and sequence
-  views used by both consequence and HGVS. It derives the first complete reference stop
-  once per coding transcript, or validates a supplied immutable cache, so per-row HGVSp
+- `duckvep_model_open(...)` is the single constructor for prepared transcript, exon,
+  sequence and optional interval-feature views used by consequence and HGVS. It derives
+  the first complete reference stop once per coding transcript, or validates a supplied
+  immutable cache, so per-row HGVSp
   does not rescan an unchanged CDS;
 - consequence evaluation and HGVS both consume the same prepared allele and CDS edit-set
   helpers; the hot consequence path does not construct a wider formatting object;

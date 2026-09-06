@@ -1,5 +1,8 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- bundle DuckVEP kernel 0.19.0 with a unified model constructor for transcript and
+  regulatory-feature models; R and SQL model-loading behavior is unchanged
+
 - avoid redundant genomic projection in bundled DuckVEP indel annotation and
   HGVS context construction, while retaining physical REF validation and full
   projection for features whose span differs from the validated edit
