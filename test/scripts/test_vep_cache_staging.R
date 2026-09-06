@@ -110,7 +110,10 @@ local({
   fake_bin <- file.path(temporary, "failing hash")
   dir.create(fake_bin)
   fake_hash <- file.path(fake_bin, "sha256sum")
-  writeLines(c("#!/usr/bin/env bash", "cat > /dev/null",
+  writeLines(c("#!/usr/bin/env bash",
+    paste0("if (($#)) && [[ \"$1\" != ", shQuote(archive), " ]]; then"),
+    paste("  exec", shQuote(Sys.which("sha256sum")), '"$@"'), "fi",
+    "cat > /dev/null",
     paste("printf '%s  -\\n'", shQuote(archive_sha256)), "exit 23"), fake_hash)
   Sys.chmod(fake_hash, "0755")
   original_path <- Sys.getenv("PATH")
@@ -118,6 +121,10 @@ local({
   Sys.setenv(PATH = paste(fake_bin, original_path, sep = .Platform$path.sep),
     DUCKHTS_CACHE_DIR = file.path(temporary, "failed digest process"))
   expect_error(duckhts_bench_stage_vep_cache(repo, curl = fake_curl), "acquisition/extraction failed")
+  stopifnot(!file.exists(duckhts_bench_artifact_path("vep116_grch38_cache_chr21")))
+  Sys.setenv(DUCKHTS_CACHE_DIR = file.path(temporary, "failed local digest process"))
+  expect_error(duckhts_bench_stage_vep_cache(repo, archive = archive),
+    "supplier checksum command failed")
   stopifnot(!file.exists(duckhts_bench_artifact_path("vep116_grch38_cache_chr21")))
   Sys.setenv(PATH = original_path)
 

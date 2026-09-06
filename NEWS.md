@@ -7,7 +7,9 @@
 
 - require a pinned content checksum for VEP cache acquisition and verify the
   full compressed stream before publication; ETag/byte matches cannot substitute
-  for content verification, and digest-process failures reject staging
+  for content verification, and digest-process failures reject staging. Shared
+  local-artifact SHA-256 and BSD-sum verification also requires a successful
+  checksum process, even when failed commands print matching values
 
 - share read-only projections of registry-built nested DuckVEP models between
   the conformance runner and FastVEP benchmark worker, removing their dependence

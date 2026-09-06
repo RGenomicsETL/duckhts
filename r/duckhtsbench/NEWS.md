@@ -1,7 +1,9 @@
 # duckhtsbench 0.0.0.9000
 
 - verify streamed VEP archives against a pinned SHA-256 or MD5, require the
-  digest subprocess to succeed, and reject HTTP-metadata-only cache identities
+  digest subprocess to succeed, and reject HTTP-metadata-only cache identities;
+  shared local-artifact SHA-256/BSD-sum verification also rejects failed checksum
+  commands that print matching values
 
 - expose the canonical nested model tables through shared read-only flat SQL
   projections for conformance and benchmark consumers, preserving every exon,

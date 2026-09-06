@@ -277,4 +277,38 @@ writeLines(c(
 ), identity_registry)
 Sys.setenv(DUCKHTSBENCH_REGISTRY = identity_registry)
 expect_true(duckhts_bench_validate_identity("sha256_fixture", identity_file))
+local({
+  checksum_bin <- file.path(tmp, "checksum commands")
+  dir.create(checksum_bin)
+  checksum_path <- Sys.getenv("PATH")
+  on.exit(Sys.setenv(PATH = checksum_path), add = TRUE)
+  Sys.setenv(PATH = paste(checksum_bin, checksum_path, sep = .Platform$path.sep))
+  for (algorithm in c("sha256", "sum")) {
+    identity <- if (algorithm == "sha256") paste0("sha256=", identity_sha256) else "sum=123;blocks=1"
+    expected_output <- if (algorithm == "sha256") paste(identity_sha256, "file") else "123 1 file"
+    writeLines(c(paste(names(registry), collapse = "\t"),
+      paste(c("checksum_fixture", "fixture", "fixture", "test", "file:///dev/null",
+        "public", "unused", "direct_download", "tinytest", "1", identity), collapse = "\t")
+    ), identity_registry)
+    checksum_command <- file.path(checksum_bin, if (algorithm == "sha256") "sha256sum" else "sum")
+    for (command_status in c(0L, 23L)) {
+      writeLines(c("#!/bin/sh", paste("printf '%s\\n'", shQuote(expected_output)),
+        paste("exit", command_status)), checksum_command)
+      Sys.chmod(checksum_command, "0755")
+      if (command_status == 0L) {
+        expect_true(duckhts_bench_validate_identity("checksum_fixture", identity_file))
+      } else {
+        expect_error(duckhts_bench_validate_identity("checksum_fixture", identity_file),
+          "supplier checksum command failed")
+      }
+    }
+    for (output_lines in list(character(), c(expected_output, expected_output))) {
+      writeLines(c("#!/bin/sh", if (length(output_lines))
+        paste("printf '%s\\n'", shQuote(output_lines)), "exit 0"), checksum_command)
+      Sys.chmod(checksum_command, "0755")
+      expect_error(duckhts_bench_validate_identity("checksum_fixture", identity_file),
+        "supplier checksum command failed")
+    }
+  }
+})
 if (is.na(old_registry)) Sys.unsetenv("DUCKHTSBENCH_REGISTRY") else Sys.setenv(DUCKHTSBENCH_REGISTRY = old_registry)
