@@ -337,6 +337,7 @@ main <- function() {
     vcf[[i]] <- variants$row[order(variants$pos)]
     cases[[i]] <- list(
       transcript = transcript,
+      chrom = chrom,
       shape = shape,
       strand = strand,
       cds = cds,
@@ -485,6 +486,7 @@ main <- function() {
       # Validate the declared subset, never repair an omitted/duplicate call.
       stopifnot(nrow(calls) == 3L * n,
                 setequal(calls$ID, edits$id),
+                all(calls$CHROM == case$chrom),
                 all(lengths(calls$ALT) == 1L),
                 all(lengths(calls$alleles) == 2L),
                 all(vapply(calls$phase_before, identical, TRUE, c(TRUE, TRUE))),
@@ -705,7 +707,7 @@ main <- function() {
   # missing/duplicate calls must not be replaced by generator assignments.
   witness <- cases[[1L]]
   original_calls <- do.call(rbind, calls_by_id[witness$edits$id])
-  routing_controls <- data.frame(field = c("allele_slot", "alternate", "missing_call", "duplicate_call"),
+  routing_controls <- data.frame(field = c("allele_slot", "alternate", "missing_call", "duplicate_call", "chromosome"),
                                   rejected = FALSE)
   for (i in seq_len(nrow(routing_controls))) {
     mutant <- original_calls
@@ -717,14 +719,15 @@ main <- function() {
         mutant$ALT[mutant$ID == mutant$ID[[1L]]] <- list(changed)
       },
       missing_call = { mutant <- mutant[-1L, ] },
-      duplicate_call = { mutant <- rbind(mutant, mutant[1L, ]) }
+      duplicate_call = { mutant <- rbind(mutant, mutant[1L, ]) },
+      chromosome = { mutant$CHROM <- "not_the_model_chromosome" }
     )
     routing_controls$rejected[i] <- if (i <= 2L) {
       !identical(stream_edits(witness, mutant)$paths, native[[1L]])
     } else tryCatch({
       stream_edits(witness, mutant)
       FALSE
-    }, error = function(e) grepl("nrow\\(calls\\)|anyDuplicated\\(key\\)", conditionMessage(e)))
+    }, error = function(e) grepl("nrow\\(calls\\)|anyDuplicated\\(key\\)|calls\\$CHROM", conditionMessage(e)))
   }
   write.csv(routing_controls, file.path(out, "genotype_routing_controls.csv"), row.names = FALSE)
   write.csv(failures, file.path(out, "failures.csv"), row.names = FALSE)

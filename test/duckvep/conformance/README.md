@@ -529,10 +529,11 @@ The campaign also loads the built extension (`--extension`) and reads the genera
 VCF through `read_geno()` and `read_bcf_samples()`. This third path derives allele
 slots, sample identity and variant alleles from decoded calls, then runs the same
 native projector/carrier/rebuild pipeline. Both generator-fed paths remain separate
-checks, and the existing Haplosaurus verifier controls are unchanged. Four additional
+checks, and the existing Haplosaurus verifier controls are unchanged. Five additional
 routing controls require valid changed allele slots/ALT to change the haplotype and
-missing/duplicate calls to fail. The complete typed calls, metrics and controls are
-retained with the extension's SHA-256. Supplying `--extension-receipt` validates the
+missing/duplicate calls or a different model chromosome to fail. The complete typed
+calls, metrics and controls are retained with the extension's SHA-256. Supplying
+`--extension-receipt` validates the
 existing clean-revision release-build receipt; runs without one are explicitly
 `diagnostic_unbound`, not source-bound release evidence.
 
@@ -555,7 +556,8 @@ Seven deliberate corruptions exercise each comparison field; their rejection cou
 are reported separately from the real engine comparisons.
 
 This is **not** a public phased-executor certificate: the R harness materializes
-decoded calls, and it does not test native DuckDB carrier streaming, strict phase/PS interpretation, compound SO/HGVS, structural
+decoded calls, and it does not test native DuckDB carrier streaming, strict phase/PS
+interpretation, compound SO/HGVS, structural
 composition or arbitrary ploidy. Haplosaurus exposes sequence differences and frame
 flags, not a compound SO/HGVS oracle. Its offline container also defaults to two lanes
 without inferring VCF ploidy; that behavior must not silently define DuckVEP's ploidy
