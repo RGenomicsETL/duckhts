@@ -233,17 +233,22 @@ SELECT * FROM duckvep_ensembl_transcripts(
   'duckvep_core', 'duckvep_reference_chunks', 'GRCh38'
 );
 
-query IITTITIITI
+query IITITIITI
 SELECT transcript_index, transcript_flags, CAST(cds_sequence AS VARCHAR),
-       CAST(post_cds_bases AS VARCHAR),
        octet_length(pre_cds_sequence),
        CAST(post_cds_sequence AS VARCHAR), cds_start, cds_end,
        sequence_withheld_reason, length(exons)
 FROM duckvep_prepared_transcripts ORDER BY transcript_index;
 ----
-0	22019	ATGAAAGGGTAA	CC	0	CC	1	16	NULL	2
-1	8197	ATGCCCTAA	AGG	0	AGG	24	32	NULL	1
-2	259	NULL	NULL	NULL	NULL	24	32	rna_edit	1
+0	22019	ATGAAAGGGTAA	0	CC	1	16	NULL	2
+1	8197	ATGCCCTAA	0	AGG	24	32	NULL	1
+2	259	NULL	NULL	NULL	24	32	rna_edit	1
+
+query I
+SELECT count(*) FROM information_schema.columns
+WHERE table_name = 'duckvep_prepared_transcripts' AND column_name = 'post_cds_bases';
+----
+0
 
 query II
 SELECT transcript_index, codon_table
@@ -868,8 +873,8 @@ FROM (
   SELECT * FROM duckvep_grch37_receipt
 ) ORDER BY assembly;
 ----
-GRCh37	0a11b81b8c9ac0c0550e153cc8903650c91b305e826c4d844394c2df2f92b007	all current transcripts on MT and GL000201.1
-GRCh38	d5e9d7efe42f561ffe3a7ab9e7871bdd510c603871ac3699874cabc46b82f9db	all current transcripts and funcgen features on MT, KI270395.1, and HG2047_PATCH
+GRCh37	de042a5650929ba7dca9c64b487e45463e71a0492b3df686f9365e40b6bda4e9	all current transcripts on MT and GL000201.1
+GRCh38	6d9f79077e8dfcca418ef82fffcc49f7c44f939eea83045a49bc1139e66b037b	all current transcripts and funcgen features on MT, KI270395.1, and HG2047_PATCH
 
 query I
 SELECT loaded FROM duckvep_model_load(

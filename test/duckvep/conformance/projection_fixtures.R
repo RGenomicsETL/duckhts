@@ -122,7 +122,7 @@ duckvep_projection_fixture <- function(con, root, inputs, case, directory) {
       FROM duckvep_exons GROUP BY transcript_index) e USING(transcript_index)")
   loaded <- DBI::dbGetQuery(con, "SELECT * FROM duckvep_model_load('projection',
     'SELECT seq_region FROM duckvep_sequence_regions ORDER BY seq_region',
-    'SELECT * EXCLUDE(post_cds_bases) FROM duckvep_transcripts ORDER BY seq_region, transcript_start',
+    'SELECT * FROM duckvep_transcripts ORDER BY seq_region, transcript_start',
     'SELECT * FROM duckvep_exons ORDER BY transcript_index, exon_cdna_start')")
   stopifnot(isTRUE(loaded[[1L]]))
   gff_path

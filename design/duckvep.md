@@ -324,8 +324,7 @@ The resident model stores CDS bytes and both non-coding transcript flanks in two
 byte pools with offsets and lengths per transcript. The flank pool has no per-transcript
 allocation or padding and is cold on ordinary coding rows. It is read only when a VEP
 predicate rebuilds the 5-prime-UTR-plus-CDS or CDS-plus-3-prime-UTR string. The prepared
-relation retains the old three-base `post_cds_bases` projection for compatibility, but
-production models load the complete flanks.
+relation and resident model use the complete flanks; no short-tail projection is stored.
 
 Peptide edits and mature miRNA ranges are prepared once, not remapped for every variant.
 Peptide edits are packed by transcript and protein position and consulted only for an
@@ -437,18 +436,17 @@ model-side key collision before joining. The Ensembl model compiler continues to
 an exact same-name, same-length reference-region match, so a convenience join key cannot
 silently substitute sequence from another assembly or region.
 
-The transcript query accepts 11 CDS-only columns, a 12-column partial-tail form ending in
-three `post_cds_bases`, or the complete 13-column form ending in `pre_cds_sequence` and
-`post_cds_sequence`. Only the complete form may resolve length-changing edits crossing a
-CDS boundary. Incomplete sequence inputs return `missing_transcript_flank` when the
-required transcript bases are absent; these input forms are not alpha API preservation
-obligations.
+The transcript query accepts 11 CDS-only columns or the complete 13-column form ending in
+`pre_cds_sequence` and `post_cds_sequence`. The CDS-only form represents unavailable
+transcript flanks, not a short-tail approximation. Only the complete form may resolve
+length-changing edits crossing the CDS start or end. Incomplete sequence inputs return
+`missing_transcript_flank` when the required transcript bases are absent.
 
 The optional `mature_mirna_query` has three columns: transcript ordinal, inclusive genomic
 start, and inclusive genomic end. Rows must be ordered by transcript and start. The loader
 proves that each range belongs to a miRNA transcript, stays inside one of its exons, and is
-ordered before publishing the model. Omitting the query preserves compatibility for
-models that do not carry these Ensembl attributes; it does not invent mature regions.
+ordered before publishing the model. Models without these Ensembl attributes omit the
+query; the loader does not invent mature regions.
 
 The optional `peptide_edit_query` has transcript ordinal, one-based protein position, and
 one uppercase replacement amino acid. Rows must be unique and ordered by transcript and

@@ -240,7 +240,6 @@ local({
     con,
     paste(
       "SELECT CAST(cds_sequence AS VARCHAR) cds_sequence,",
-      "CAST(post_cds_bases AS VARCHAR) post_cds_bases,",
       "CAST(pre_cds_sequence AS VARCHAR) pre_cds_sequence,",
       "CAST(post_cds_sequence AS VARCHAR) post_cds_sequence,",
       "transcript_flags, mane_select_refseq, exons[1].phase phase",
@@ -249,7 +248,7 @@ local({
     )
   )
   expect_identical(ensembl_model$cds_sequence, "ATGAAATAA")
-  expect_identical(ensembl_model$post_cds_bases, "CCC")
+  expect_false("post_cds_bases" %in% dbListFields(con, "duckvep_r_ensembl_transcripts"))
   expect_identical(ensembl_model$pre_cds_sequence, "")
   expect_identical(ensembl_model$post_cds_sequence, "CCC")
   expect_equal(ensembl_model$transcript_flags, 1027)
@@ -2347,39 +2346,40 @@ local({
   dbExecute(
     con,
     paste(
-      "CREATE TABLE duckvep_r_transcripts_legacy_tail AS",
+      "CREATE TABLE duckvep_r_transcripts_short_tail AS",
       "SELECT * EXCLUDE (pre_cds_sequence, post_cds_sequence),",
       "'ACG'::BLOB AS post_cds_bases FROM duckvep_r_transcripts"
     )
   )
-  legacy_queries <- queries
-  legacy_queries[2] <- sub(
+  short_tail_queries <- queries
+  short_tail_queries[2] <- sub(
     "duckvep_r_transcripts",
-    "duckvep_r_transcripts_legacy_tail",
-    legacy_queries[2],
+    "duckvep_r_transcripts_short_tail",
+    short_tail_queries[2],
     fixed = TRUE
   )
-  legacy_queries[2] <- sub(
+  short_tail_queries[2] <- sub(
     "pre_cds_sequence, post_cds_sequence",
     "post_cds_bases",
-    legacy_queries[2],
+    short_tail_queries[2],
     fixed = TRUE
   )
-  expect_true(load_model("r-legacy-tail", legacy_queries)$loaded)
-  legacy_boundary <- dbGetQuery(
+  expect_error(load_model("r-short-tail", short_tail_queries),
+    "transcript query must return 11 CDS-only columns or 13 with complete")
+  missing_flank <- dbGetQuery(
     con,
     paste(
       "SELECT a.consequence, a.status, a.reason FROM unnest(_duckvep_annotate_small_rich(",
-      "'r-legacy-tail', 1::UINTEGER, 117::UBIGINT, 'ACGA', 'A', 0::UBIGINT",
+      "'r-no-tail', 1::UINTEGER, 117::UBIGINT, 'ACGA', 'A', 0::UBIGINT",
       ")) u(a)"
     )
   )
   expect_identical(
-    legacy_boundary$consequence,
+    missing_flank$consequence,
     "coding_sequence_variant&5_prime_UTR_variant"
   )
-  expect_identical(legacy_boundary$status, "unresolved")
-  expect_identical(legacy_boundary$reason, "missing_transcript_flank")
+  expect_identical(missing_flank$status, "unresolved")
+  expect_identical(missing_flank$reason, "missing_transcript_flank")
 
   prepared_events <- dbGetQuery(
     con,
@@ -2884,10 +2884,10 @@ local({
   expect_true(
     dbGetQuery(con, "SELECT duckvep_model_drop('r-no-tail') AS dropped")$dropped
   )
-  expect_true(
+  expect_false(
     dbGetQuery(
       con,
-      "SELECT duckvep_model_drop('r-legacy-tail') AS dropped"
+      "SELECT duckvep_model_drop('r-short-tail') AS dropped"
     )$dropped
   )
   expect_true(
