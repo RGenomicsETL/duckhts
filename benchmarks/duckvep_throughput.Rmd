@@ -206,6 +206,27 @@ and genomic carrier differential. Their median difference is
 This narrow valid-model workload does not measure malformed-model rejection,
 file ingestion, cohort state, sort-plus-phased execution, or peak memory.
 
+```{r terminal-codon-window-control}
+terminal_window <- history[history$source_revision ==
+  "35bfb85896200b9dd5319ca49147076de511f878" &
+  history$workload == "fixture_one_transcript_sorted_indels", ]
+stopifnot(nrow(terminal_window) == 1L,
+  all(vapply(same_workload, function(field)
+    identical(terminal_window[[field]], cds_guard[[field]][2L]), TRUE)))
+```
+
+The codon-window correction at `r terminal_window$revision` reran this identical
+one-million-input/one-million-output indel/HGVS workload: five passes, one DuckDB
+thread pinned to CPU 2, `r terminal_window$checksum_value` rendered HGVS/status
+bytes. Its median was `r sprintf("%.3f", terminal_window$median_seconds)` seconds
+(range `r sprintf("%.3f", terminal_window$min_seconds)`–`r sprintf("%.3f", terminal_window$max_seconds)`),
+`r sprintf("%+.2f%%", 100 * (terminal_window$median_seconds / cds_guard$median_seconds[2L] - 1))`
+versus the nearest identical recorded workload at `10320db`. This is an observed
+single-run comparison, not a no-regression claim or attribution to one intervening
+change. It exercises CDS edits and HGVS but not the newly corrected terminal
+partial-codon/UTR sites; a targeted throughput measurement for those sites is still
+missing. The byte total is not a full-row fingerprint.
+
 ## Annotation-dense transcript distance and ordered parallel partitions
 
 ```{r dense-threading}

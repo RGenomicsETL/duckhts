@@ -186,6 +186,7 @@ insertion order; they remain only as historical measurements.
 | 2026-09-06 | 9ed772f7 | fixture_one_transcript_sorted_breakend_raw_alt                   | compact     |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       0.394 |          0.396 |       0.402 |             2525253 |          396.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 2,525,253              |
 | 2026-09-06 | 25477d3b | fixture_one_transcript_sorted                                    | rich        |       1 |                1 |                5000 | 10,000,000 | 1           | 2         | 0                   | 10,000,000     |      3 |       3.308 |          3.321 |       3.334 |             3011141 |          332.1 | 13th Gen Intel(R) Core(TM) i5-13500 | 0-19         | 3,011,141              |
 | 2026-09-06 | da0c16d4 | fixture_one_transcript_sorted                                    | rich        |       1 |                1 |                5000 | 10,000,000 | 1           | 2         | 0                   | 10,000,000     |      3 |       3.386 |          3.394 |       3.440 |             2946376 |          339.4 | 13th Gen Intel(R) Core(TM) i5-13500 | 0-19         | 2,946,376              |
+| 2026-09-06 | 35bfb858 | fixture_one_transcript_sorted_indels                             | hgvs        |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       1.255 |          1.262 |       1.270 |              792393 |         1262.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 792,393                |
 
 Each pass consumes every staged input and checks output cardinality plus
 either the rendered consequence-byte total or the numeric
@@ -216,6 +217,17 @@ case; the second commit adds the borrowed-slice checks and genomic
 carrier differential. Their median difference is -0.16%. This narrow
 valid-model workload does not measure malformed-model rejection, file
 ingestion, cohort state, sort-plus-phased execution, or peak memory.
+
+The codon-window correction at 35bfb858 reran this identical
+one-million-input/one-million-output indel/HGVS workload: five passes,
+one DuckDB thread pinned to CPU 2, 26000000 rendered HGVS/status bytes.
+Its median was 1.262 seconds (range 1.255–1.270), +1.77% versus the
+nearest identical recorded workload at `10320db`. This is an observed
+single-run comparison, not a no-regression claim or attribution to one
+intervening change. It exercises CDS edits and HGVS but not the newly
+corrected terminal partial-codon/UTR sites; a targeted throughput
+measurement for those sites is still missing. The byte total is not a
+full-row fingerprint.
 
 ## Annotation-dense transcript distance and ordered parallel partitions
 
