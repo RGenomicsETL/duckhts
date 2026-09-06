@@ -1,15 +1,18 @@
 #!/usr/bin/env Rscript
 # Executable Haplosaurus comparison for the existing edit-set mechanics.
 # Direct edit-set mutation uses CDS coordinates; the carrier pipeline projects
-# genomic VCF alleles through ranked exons, and Haplosaurus independently parses
-# VCF/GFF. This does not certify SQL grouping, strict phase, compound SO/HGVS,
-# or arbitrary-ploidy compatibility.
+# genomic VCF alleles through ranked exons. A separate read_geno path obtains
+# alleles and carriers from that same VCF; Haplosaurus independently parses
+# VCF/GFF. This does not certify a public phased SQL executor, strict phase,
+# compound SO/HGVS, or arbitrary-ploidy compatibility.
 
 main <- function() {
   opt <- optparse::parse_args(optparse::OptionParser(
     option_list = list(
       optparse::make_option("--cases", type = "integer", default = 128L),
       optparse::make_option("--seed", type = "integer", default = 173L),
+      optparse::make_option("--extension", default = "build/release/duckhts.duckdb_extension"),
+      optparse::make_option("--extension-receipt", dest = "extension_receipt", default = NULL),
       optparse::make_option(
         "--vep-prefix",
         dest = "vep_prefix",
@@ -37,6 +40,16 @@ main <- function() {
     stdout = TRUE
   ))
   source(file.path(root, "scripts/duckvep_evidence.R"), local = TRUE)
+  source_revision <- duckvep_evidence_revision(root)
+  extension <- normalizePath(opt$extension, mustWork = TRUE)
+  extension_sha256 <- duckvep_evidence_sha256(extension)
+  build_binding <- "diagnostic_unbound"
+  if (!is.null(opt$extension_receipt)) {
+    duckvep_evidence_assert_checkout(root, source_revision)
+    build_binding <- duckvep_evidence_read_extension_receipt(
+      opt$extension_receipt, root, extension, source_revision
+    )$binding
+  }
   results <- file.path(root, "test/duckvep/conformance/results")
   dir.create(results, showWarnings = FALSE)
   out <- tempfile(paste0("haplotype_seed", opt$seed, "_"), tmpdir = results)
@@ -324,6 +337,7 @@ main <- function() {
     vcf[[i]] <- variants$row[order(variants$pos)]
     cases[[i]] <- list(
       transcript = transcript,
+      chrom = chrom,
       shape = shape,
       strand = strand,
       cds = cds,
@@ -349,6 +363,27 @@ main <- function() {
     file.path(out, "carriers.vcf")
   )
   saveRDS(list(seed = opt$seed, cases = cases), file.path(out, "inputs.rds"))
+  # Read the actual serialized input, not the generator's lane assignments.
+  # Keep the whole typed call relation as evidence; no GT-string round trip.
+  con <- DBI::dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  DBI::dbExecute(con, paste("LOAD", DBI::dbQuoteString(con, extension)))
+  DBI::dbExecute(con, "SET threads=1")
+  input_path <- DBI::dbQuoteString(con, file.path(out, "carriers.vcf"))
+  catalog <- DBI::dbGetQuery(con, paste0(
+    "SELECT * FROM read_bcf_samples(", input_path, ") ORDER BY sample_index"
+  ))
+  stopifnot(identical(catalog$sample_name, c("cis", "trans", "shared")),
+            identical(as.numeric(catalog$sample_index), as.numeric(0:2)))
+  typed_calls <- DBI::dbGetQuery(con, paste0(
+    "SELECT * FROM (SELECT record_index,CHROM,POS,ID,REF,ALT,unnest(calls,recursive:=true) ",
+    "FROM read_geno(", input_path, ",decode_error_policy:='error')) ORDER BY record_index,sample_index"
+  ))
+  stopifnot(nrow(typed_calls) == 3L * length(vcf),
+            length(unique(typed_calls$record_index)) == length(vcf),
+            sum(lengths(typed_calls$alleles)) == 6L * length(vcf))
+  saveRDS(list(samples = catalog, calls = typed_calls), file.path(out, "genotypes.rds"))
+  calls_by_id <- split(typed_calls, typed_calls$ID)
   stopifnot(
     system2("samtools", c("faidx", shQuote(file.path(out, "reference.fa")))) ==
       0L,
@@ -433,7 +468,7 @@ main <- function() {
       contributors = sort(edits$id)
     )
   }
-  stream_edits <- function(case) {
+  stream_edits <- function(case, calls = NULL, failure_file = "carrier_failure.rds") {
     edits <- case$edits
     n <- nrow(edits)
     exons <- case$exons[
@@ -445,6 +480,39 @@ main <- function() {
       1L + as.integer(seq_len(n) %% 2L == 0L),
       rep(1L, n)
     )
+    variants <- case$variants
+    event_order <- order(variants$pos, seq_len(n))
+    if (!is.null(calls)) {
+      # This campaign has one biallelic ALT copy in each diploid genotype.
+      # Validate the declared subset, never repair an omitted/duplicate call.
+      stopifnot(nrow(calls) == 3L * n,
+                setequal(calls$ID, edits$id),
+                all(calls$CHROM == case$chrom),
+                all(lengths(calls$ALT) == 1L),
+                all(lengths(calls$alleles) == 2L),
+                all(vapply(calls$phase_before, identical, TRUE, c(TRUE, TRUE))),
+                all(!is.na(calls$phase_set) & calls$phase_set == 10))
+      lane <- vapply(calls$alleles, function(gt) {
+        stopifnot(identical(sort(gt), 0:1))
+        which(gt == 1L)
+      }, 1L)
+      key <- paste(calls$ID, calls$sample_index)
+      expected_key <- paste(rep(edits$id, each = 3L), rep(0:2, n))
+      stopifnot(!anyDuplicated(key), setequal(key, expected_key))
+      calls <- calls[match(expected_key, key), ]
+      lanes <- matrix(lane[match(expected_key, key)], nrow = 3L)
+      sites <- calls[seq(1L, nrow(calls), by = 3L), ]
+      # Every sample cell must refer to the same physical site's complete data.
+      for (column in c("record_index", "CHROM", "POS", "REF", "ALT")) {
+        stopifnot(identical(unname(calls[[column]]),
+                            unname(rep(sites[[column]], each = 3L))))
+      }
+      variants <- data.frame(pos = as.integer(sites$POS), ref = sites$REF,
+                              alt = vapply(sites$ALT, `[[`, "", 1L))
+      stopifnot(!anyNA(variants$pos), all(variants$pos > 0L))
+      # Preserve the reader's observed order; do not silently sort bad input.
+      event_order <- order(sites$record_index)
+    }
     answer <- .C(
       carrier_symbol,
       charToRaw(case$cds),
@@ -453,11 +521,11 @@ main <- function() {
       as.integer(exons$start),
       as.integer(exons$end),
       as.integer(nrow(exons)),
-      as.integer(case$variants$pos),
-      case$variants$ref,
-      case$variants$alt,
+      as.integer(variants$pos),
+      variants$ref,
+      variants$alt,
       as.integer(n),
-      as.integer(order(case$variants$pos, seq_len(n)) - 1L),
+      as.integer(event_order - 1L),
       as.integer(lanes),
       as.integer(capacity),
       cds = raw(6L * capacity),
@@ -473,7 +541,7 @@ main <- function() {
     if (answer$status != 0L) {
       saveRDS(
         list(input = case, output = answer),
-        file.path(out, "carrier_failure.rds")
+        file.path(out, failure_file)
       )
       stop("carrier index failed for ", case$transcript, ": ", answer$status)
     }
@@ -568,6 +636,8 @@ main <- function() {
   comparisons <- 0L
   native <- vector("list", length(cases))
   carrier_metrics <- vector("list", length(cases))
+  genotype_metrics <- vector("list", length(cases))
+  genotype_comparisons <- 0L
   names(native) <- vapply(cases, `[[`, "", "transcript")
   for (case in cases) {
     expected <- list()
@@ -597,6 +667,17 @@ main <- function() {
     native[[case$transcript]] <- streamed$paths
     carrier_metrics[[match(case$transcript, names(native))]] <- streamed$metrics
     checks <- compare_haplotypes(streamed$paths, observed[[case$transcript]])
+    calls <- do.call(rbind, calls_by_id[case$edits$id])
+    decoded <- stream_edits(case, calls)
+    if (!identical(expected, decoded$paths)) {
+      saveRDS(list(input = case, calls = calls, direct = expected, decoded = decoded),
+              file.path(out, "genotype_failure.rds"))
+      stop("decoded genotypes disagree with direct edit sets for ", case$transcript)
+    }
+    genotype_metrics[[match(case$transcript, names(native))]] <- decoded$metrics
+    genotype_checks <- compare_haplotypes(decoded$paths, observed[[case$transcript]])
+    genotype_comparisons <- genotype_comparisons + length(genotype_checks)
+    stopifnot(identical(genotype_checks, checks))
     comparisons <- comparisons + length(checks)
     if (any(!checks)) {
       failures[[length(failures) + 1L]] <- data.frame(
@@ -623,6 +704,39 @@ main <- function() {
     file.path(out, "carrier_metrics.csv"),
     row.names = FALSE
   )
+  write.csv(do.call(rbind, genotype_metrics), file.path(out, "genotype_metrics.csv"), row.names = FALSE)
+  # Routing controls are additional to the seven unchanged Haplosaurus-output
+  # corruptions below. Valid changed GT/ALT must change the produced haplotype;
+  # missing/duplicate calls must not be replaced by generator assignments.
+  witness <- cases[[1L]]
+  original_calls <- do.call(rbind, calls_by_id[witness$edits$id])
+  routing_controls <- data.frame(field = c("allele_slot", "alternate", "missing_call", "duplicate_call", "chromosome", "record_order"),
+                                  rejected = FALSE)
+  for (i in seq_len(nrow(routing_controls))) {
+    mutant <- original_calls
+    switch(routing_controls$field[i],
+      allele_slot = { mutant$alleles[[1L]] <- rev(mutant$alleles[[1L]]) },
+      alternate = {
+        changed <- setdiff(c("A", "C", "G", "T"),
+                          c(mutant$REF[[1L]], mutant$ALT[[1L]]))[[1L]]
+        mutant$ALT[mutant$ID == mutant$ID[[1L]]] <- list(changed)
+      },
+      missing_call = { mutant <- mutant[-1L, ] },
+      duplicate_call = { mutant <- rbind(mutant, mutant[1L, ]) },
+      chromosome = { mutant$CHROM <- "not_the_model_chromosome" },
+      record_order = { mutant$record_index <- max(mutant$record_index) - mutant$record_index }
+    )
+    routing_controls$rejected[i] <- if (i <= 2L) {
+      !identical(stream_edits(witness, mutant)$paths, native[[1L]])
+    } else tryCatch({
+      stream_edits(witness, mutant,
+                   failure_file = paste0("genotype_control_", routing_controls$field[i], ".rds"))
+      FALSE
+    }, error = function(e) grepl(
+      "nrow\\(calls\\)|anyDuplicated\\(key\\)|calls\\$CHROM|carrier index failed .*: 104$",
+      conditionMessage(e)))
+  }
+  write.csv(routing_controls, file.path(out, "genotype_routing_controls.csv"), row.names = FALSE)
   write.csv(failures, file.path(out, "failures.csv"), row.names = FALSE)
   # Exercise every comparison axis with a deliberate corruption. These seven
   # verifier controls are separate from the engine-comparison denominators.
@@ -682,8 +796,10 @@ main <- function() {
     input_allele_slots = 6L * length(vcf),
     haplotype_lanes = 6L * length(cases),
     comparisons = comparisons,
+    genotype_comparisons = genotype_comparisons,
     failures = nrow(failures),
-    verifier_controls_rejected = sum(controls$rejected)
+    verifier_controls_rejected = sum(controls$rejected),
+    genotype_routing_controls_rejected = sum(routing_controls$rejected)
   )
   write.csv(summary, file.path(out, "summary.csv"), row.names = FALSE)
   identities <- c(
@@ -718,6 +834,9 @@ main <- function() {
         "inputs.rds",
         "native.rds",
         "carrier_metrics.csv",
+        "genotypes.rds",
+        "genotype_metrics.csv",
+        "genotype_routing_controls.csv",
         "oracle.jsonl",
         "summary.csv",
         "failures.csv",
@@ -725,13 +844,19 @@ main <- function() {
         "environment.txt"
       )
     ),
-    shared
+    shared,
+    extension,
+    opt$extension_receipt
   )
+  stopifnot(identical(duckvep_evidence_sha256(extension), extension_sha256))
+  stopifnot(identical(duckvep_evidence_revision(root), source_revision))
+  if (!is.null(opt$extension_receipt)) duckvep_evidence_assert_checkout(root, source_revision)
   hashes <- vapply(identities, duckvep_evidence_sha256, "")
   jsonlite::write_json(
     list(
-      scope = "diploid_genomic_projection_carrier_prefix_and_edit_mechanics_not_public_phased_execution",
-      source_revision = system2("git", c("rev-parse", "HEAD"), stdout = TRUE),
+      scope = "diploid_genotypes_genomic_projection_carrier_prefix_and_edit_mechanics_not_public_phased_execution",
+      source_revision = source_revision,
+      extension_build_binding = build_binding,
       dirty_worktree = length(system2(
         "git",
         c("status", "--porcelain"),
@@ -750,6 +875,9 @@ main <- function() {
   print(summary, row.names = FALSE)
   if (!all(controls$rejected)) {
     stop("Haplosaurus comparison controls failed; inspect ", out, call. = FALSE)
+  }
+  if (!all(routing_controls$rejected)) {
+    stop("Genotype routing controls failed; inspect ", out, call. = FALSE)
   }
   if (nrow(failures)) {
     stop(
