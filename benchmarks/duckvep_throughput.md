@@ -191,6 +191,7 @@ insertion order; they remain only as historical measurements.
 | 2026-09-06 | 979bee0c | fixture_one_transcript_sorted_indels                             | hgvs        |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       1.242 |          1.251 |       1.254 |              799361 |         1251.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 799,361                |
 | 2026-09-06 | 89f97c2e | fixture_one_transcript_sorted_indels                             | hgvs        |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       1.283 |          1.297 |       1.300 |              771010 |         1297.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 771,010                |
 | 2026-09-06 | af782880 | fixture_one_transcript_sorted_indels                             | hgvs        |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       1.287 |          1.301 |       1.306 |              768640 |         1301.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 768,640                |
+| 2026-09-06 | 9b1ded85 | fixture_one_transcript_sorted_indels                             | hgvs        |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       1.253 |          1.264 |       1.270 |              791139 |         1264.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 791,139                |
 
 Each pass consumes every staged input and checks output cardinality plus
 either the rendered consequence-byte total or the numeric
@@ -235,15 +236,20 @@ workload; the first uses `10320db` above.
 | 979bee0c | MNV feature phase                 | 1.251          | 1.242–1.254   | -0.71%          |
 | 89f97c2e | Indel feature/cDNA coordinates    | 1.297          | 1.283–1.300   | +3.68%          |
 | af782880 | Shared substitution codon windows | 1.301          | 1.287–1.306   | +0.31%          |
+| 9b1ded85 | Reuse validated indel positions   | 1.264          | 1.253–1.270   | -2.84%          |
 
-These single-run comparisons do not establish a speedup, no regression,
-or causal attribution. Performance follow-up remains open for the
-increase following the indel-coordinate correction. No checked-in
-throughput benchmark exercises terminal partial-codon, UTR-spanning MNV,
-or later-phase substitution/indel sites. This ordinary CDS edit/HGVS
-control does not measure those corrections; targeted and
-production-density throughput remain unmeasured. The byte total is not a
-full-row fingerprint.
+The validated-position change reuses the physical edit’s CDS position
+only when the feature selects that exact genomic interval. Full uploaded
+substitutions and mapper-gap features retain endpoint projection. The
+same checked scalar phase converter serves both routes; physical REF
+validation is unchanged. Its median is 2.84% lower than the preceding
+shared-window revision, and +1.04% relative to the earlier MNV-phase
+control. These single-run comparisons do not establish a speedup, no
+regression, or causal attribution. No checked-in throughput benchmark
+exercises terminal partial-codon, UTR-spanning MNV, or later-phase
+substitution/indel sites. This ordinary CDS edit/HGVS control does not
+measure those corrections; targeted and production-density throughput
+remain unmeasured. The byte total is not a full-row fingerprint.
 
 ## Annotation-dense transcript distance and ordered parallel partitions
 

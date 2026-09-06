@@ -217,7 +217,8 @@ correction_revisions <- c(
   "99a0c816d1e9a30331a6fef9a48860ed53e2e17f",
   "979bee0c14a1e4fc88c6e53bcfd94cb6600b42c5",
   "89f97c2eb9950f5f003888d1ad0a4f583e5ec13f",
-  "af78288081652e4b57312a050e14821c17d9baf9"
+  "af78288081652e4b57312a050e14821c17d9baf9",
+  "9b1ded85df0baacaf080fcc91608af242c612ca1"
 )
 corrections <- history[history$source_revision %in% correction_revisions &
   history$workload == "fixture_one_transcript_sorted_indels", ]
@@ -231,16 +232,23 @@ prior_medians <- c(cds_guard$median_seconds[2L], head(corrections$median_seconds
 knitr::kable(data.frame(
   revision = corrections$revision,
   correction = c("Terminal codon windows", "UTR/CDS substitutions", "MNV feature phase",
-    "Indel feature/cDNA coordinates", "Shared substitution codon windows"),
+    "Indel feature/cDNA coordinates", "Shared substitution codon windows",
+    "Reuse validated indel positions"),
   median_seconds = sprintf("%.3f", corrections$median_seconds),
   range_seconds = sprintf("%.3f–%.3f", corrections$min_seconds, corrections$max_seconds),
   change_vs_prior = sprintf("%+.2f%%", 100 * (corrections$median_seconds / prior_medians - 1))
 ), row.names = FALSE)
 ```
 
-These single-run comparisons do not establish a speedup, no regression, or causal
-attribution. Performance follow-up remains open for the increase following the
-indel-coordinate correction.
+The validated-position change reuses the physical edit's CDS position only when
+the feature selects that exact genomic interval. Full uploaded substitutions and
+mapper-gap features retain endpoint projection. The same checked scalar phase
+converter serves both routes; physical REF validation is unchanged.
+Its median is `r sprintf("%.2f%%", 100 * (1 - tail(corrections$median_seconds, 1L) / tail(prior_medians, 1L)))`
+lower than the preceding shared-window revision, and
+`r sprintf("%+.2f%%", 100 * (tail(corrections$median_seconds, 1L) / corrections$median_seconds[3L] - 1))`
+relative to the earlier MNV-phase control. These single-run comparisons do not
+establish a speedup, no regression, or causal attribution.
 No checked-in throughput benchmark exercises terminal
 partial-codon, UTR-spanning MNV, or later-phase substitution/indel sites. This ordinary CDS
 edit/HGVS control does not measure those corrections; targeted and production-density
