@@ -34,7 +34,8 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="1.5.1.9000-0.1.5" id="rduckhts-1519000-015">Rduckhts 1.5.1.9000-0.1.5<a class="anchor" aria-label="anchor" href="#rduckhts-1519000-015"></a></h2>
-<ul><li><p>add <code><a href="../reference/rduckhts_geno.html">rduckhts_geno()</a></code> for bundled typed GT/PS calls and <code><a href="../reference/rduckhts_bcf_samples.html">rduckhts_bcf_samples()</a></code> for their original-header sample catalog. Add per-call sample selection to single-file and multi-file BCF wrappers; sparse genotype scans retain variant records while omitting calls without a called ALT</p></li>
+<ul><li><p>expose bundled <code>duckvep_transcript_projection()</code> through DBI for typed transcript ranges, exon/intron ordinals, distance, quality flags and variable-length codon/amino-acid display from annotated literal alleles; withheld coding sequence preserves NULL codon and amino-acid fields</p></li>
+<li><p>add <code><a href="../reference/rduckhts_geno.html">rduckhts_geno()</a></code> for bundled typed GT/PS calls and <code><a href="../reference/rduckhts_bcf_samples.html">rduckhts_bcf_samples()</a></code> for their original-header sample catalog. Add per-call sample selection to single-file and multi-file BCF wrappers; sparse genotype scans retain variant records while omitting calls without a called ALT</p></li>
 <li><p>report bundled BCF list-allocation and GT-formatting failures without publishing partial fields, while keeping the DBI connection recoverable</p></li>
 <li><p>preserve VCF 4.4 leading GT phase markers in bundled <code>read_bcf()</code> output</p></li>
 <li><p>expose bundled <code>duckvep_breakend_geometry()</code> through DBI for typed BND ALT preparation, including orientation, exact mate names and replacement sequence</p></li>
