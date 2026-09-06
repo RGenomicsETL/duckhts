@@ -514,6 +514,44 @@ test_bcf_contig_dictionary <- function() {
                dbGetQuery(con, "SELECT * FROM expected_sites ORDER BY ALL"))
 }
 
+test_bcf_literal_contigs <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  dbExecute(con, "CREATE TABLE expected(CHROM VARCHAR, POS BIGINT, ID VARCHAR, REF VARCHAR,
+    ALT VARCHAR[], QUAL DOUBLE, FILTER VARCHAR[], FORMAT_GT_S1 VARCHAR)")
+  dbExecute(con, "INSERT INTO expected VALUES
+    ('chr1',150,'ordinary','A',['C'],60,['PASS'],'0/1'),
+    ('chr1:100-200',10,'literal','G',['T'],50,['PASS'],'1|1'),
+    ('chr1:100-200',10,'literal','G',['T'],50,['PASS'],'1|1')")
+  dbExecute(con, "CREATE VIEW expected_tidy AS SELECT * EXCLUDE(FORMAT_GT_S1),
+    'S1' AS SAMPLE_ID, FORMAT_GT_S1 AS FORMAT_GT FROM expected")
+  for (threads in c(1L, 4L)) for (tidy in c(FALSE, TRUE)) {
+    dbExecute(con, sprintf("SET threads=%d", threads))
+    expected <- dbGetQuery(con, paste("SELECT * FROM", if (tidy) "expected_tidy" else "expected",
+                                     "ORDER BY ALL"))
+    selected <- expected[expected$CHROM == "chr1:100-200", ]
+    rownames(selected) <- NULL
+    for (suffix in c("bcf", "vcf.gz")) {
+      path <- system.file("extdata", paste0("bcf_literal_contigs.", suffix),
+                          package = "Rduckhts", mustWork = TRUE)
+      source <- sprintf("read_bcf(%s,tidy_format:=%s,decompression_threads:=0",
+                        dbQuoteString(con, path), tolower(tidy))
+      for (mode in c("auto", "sequential")) {
+        reader <- paste0(source, ",scan_mode:=", dbQuoteString(con, mode), ")")
+        expect_equal(dbGetQuery(con, paste("SELECT * FROM", reader, "ORDER BY ALL")), expected)
+        expect_equal(dbGetQuery(con, paste("SELECT count(*) AS n FROM", reader))$n[[1]], 3)
+        expect_equal(dbGetQuery(con, paste("SELECT CHROM,POS FROM", reader, "ORDER BY ALL")),
+                     expected[c("CHROM", "POS")])
+      }
+      reader <- paste0(source, ",region:='{chr1:100-200}:1-20,{chr1:100-200}:10-10')")
+      expect_equal(dbGetQuery(con, paste("SELECT * FROM", reader, "ORDER BY ALL")), selected)
+      expect_error(dbGetQuery(con, paste0("SELECT * FROM ", source, ",region:='chr1:100-200')")),
+                   pattern = "region list: invalid item")
+    }
+  }
+}
+
+test_bcf_literal_contigs()
 test_bcf_contig_dictionary()
 test_bcf_index_snapshot()
 test_bcf_record_cache()

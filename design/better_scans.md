@@ -26,6 +26,14 @@ worker-owned; loaded values and parsed CSQ remain valid until the next input rec
 even when one record's tidy samples span several DuckDB output chunks. Reuse is not
 sealed allocation: HTSlib decode buffers and annotation storage can still grow.
 
+`bcf_scan.h` is the host-neutral authority for file/header/iterator ownership,
+physical record advancement and decode diagnostics. The DuckDB adapter owns scan
+scheduling, projection, null/warn/error policy and output materialization. A scan
+borrows its immutable parsed index; its caller owns the pending `bcf1_t`. Changing
+the output chunk does not advance that record. Indexed full-file tasks select
+literal contig IDs, not region expressions; explicit user regions retain HTSlib
+parsing and brace quoting. Native tests use this same scanner without DuckDB.
+
 An automatic or explicit-region `read_bcf` plan retains its bind-time parsed
 CSI/TBI index until the plan is destroyed. This applies to automatic index
 discovery and `index_path`, locally and remotely. Removal, in-place corruption,

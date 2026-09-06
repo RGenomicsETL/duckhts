@@ -139,15 +139,15 @@ else
   "${runtime[@]}" "$tmp/reference_cache_test" "$tmp"
 fi
 cmake --build "$build_dir" --target duckhts_region_list_test -j2
-cmake --build "$build_dir" --target duckhts_bcf_index_snapshot_test -j2
+cmake --build "$build_dir" --target duckhts_bcf_scan_test -j2
 if [ "$sanitizer" = asan ]; then
   ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
     LD_PRELOAD="$(${CC:-cc} -print-file-name=libasan.so)" "$build_dir/duckhts_region_list_test"
   ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
-    LD_PRELOAD="$(${CC:-cc} -print-file-name=libasan.so)" "$build_dir/duckhts_bcf_index_snapshot_test" "$tmp"
+    LD_PRELOAD="$(${CC:-cc} -print-file-name=libasan.so)" "$build_dir/duckhts_bcf_scan_test" "$tmp"
 else
   "${runtime[@]}" "$build_dir/duckhts_region_list_test"
-  "${runtime[@]}" "$build_dir/duckhts_bcf_index_snapshot_test" "$tmp"
+  "${runtime[@]}" "$build_dir/duckhts_bcf_scan_test" "$tmp"
 fi
 cmake --build "$build_dir" --target duckhts_reader_alloc_probe -j2
 ${CC:-cc} -std=c11 -UNDEBUG -Wall -Wextra -Werror "${compile_flags[@]}" \

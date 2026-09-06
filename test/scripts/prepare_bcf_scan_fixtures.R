@@ -51,6 +51,24 @@ prepare_bcf_scan_fixtures <- function() {
   stopifnot(identical(system2("bcftools", c("view", "-H", bcf), stdout = TRUE), records))
   outputs <- c(outputs, bcf, paste0(bcf, ".csi"))
   stopifnot(all(file.copy(outputs, "r/Rduckhts/inst/extdata", overwrite = TRUE)))
+
+  # HTSlib accepts colon-bearing contig names and braces disambiguate explicit
+  # regions. Full-file tasks already know the literal dictionary entry.
+  source <- "test/data/bcf_literal_contigs.vcf"
+  records <- readLines(source)
+  records <- records[!startsWith(records, "#")]
+  stopifnot(length(records) == 3L, sum(duplicated(records)) == 1L)
+  bcf <- sub("vcf$", "bcf", source)
+  vcf <- paste0(source, ".gz")
+  run(c("view", "--no-version", "-Ob", "-o", bcf, source))
+  run(c("index", "-f", bcf))
+  stopifnot(system2("bgzip", c("-c", shQuote(source)), stdout = vcf) == 0L)
+  run(c("index", "-f", "-t", vcf))
+  for (path in c(bcf, vcf)) {
+    stopifnot(identical(system2("bcftools", c("view", "-H", path), stdout = TRUE), records))
+  }
+  stopifnot(all(file.copy(c(source, bcf, paste0(bcf, ".csi"), vcf, paste0(vcf, ".tbi")),
+                         "r/Rduckhts/inst/extdata", overwrite = TRUE)))
 }
 
 prepare_bcf_scan_fixtures()

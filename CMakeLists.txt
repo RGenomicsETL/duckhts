@@ -474,11 +474,12 @@ message(STATUS "htslib link libs: ${HTSLIB_LINK_LIBS}")
 
 # Test-only copied-API interposition; never linked into the extension/package.
 if(UNIX AND NOT DUCKDB_WASM_EXTENSION)
-    add_executable(duckhts_bcf_index_snapshot_test EXCLUDE_FROM_ALL test/scripts/bcf_index_snapshot_test.c)
-    target_compile_features(duckhts_bcf_index_snapshot_test PRIVATE c_std_11)
-    target_compile_options(duckhts_bcf_index_snapshot_test PRIVATE -UNDEBUG)
-    target_include_directories(duckhts_bcf_index_snapshot_test PRIVATE ${HTSLIB_SRC_DIR})
-    target_link_libraries(duckhts_bcf_index_snapshot_test PRIVATE ${HTSLIB_LINK_LIBS})
+    add_executable(duckhts_bcf_scan_test EXCLUDE_FROM_ALL
+        test/scripts/bcf_scan_test.c src/bcf_scan.c src/region_list.c)
+    target_compile_features(duckhts_bcf_scan_test PRIVATE c_std_11)
+    target_compile_options(duckhts_bcf_scan_test PRIVATE -UNDEBUG)
+    target_include_directories(duckhts_bcf_scan_test PRIVATE ${HTSLIB_SRC_DIR})
+    target_link_libraries(duckhts_bcf_scan_test PRIVATE ${HTSLIB_LINK_LIBS})
     add_library(duckhts_reader_alloc_probe SHARED EXCLUDE_FROM_ALL test/scripts/reader_alloc_probe.c)
     target_compile_features(duckhts_reader_alloc_probe PRIVATE c_std_11)
     target_compile_options(duckhts_reader_alloc_probe PRIVATE -fvisibility=default)

@@ -7,6 +7,37 @@ require duckhts
 statement ok
 SET threads=4;
 
+# Full-file contig tasks use dictionary IDs; a colon-bearing name is not an
+# explicit region expression. Physical duplicate rows must both survive.
+query TITTTTTT rowsort
+SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_literal_contigs.bcf', decompression_threads:=0);
+----
+chr1	150	ordinary	A	[C]	60.0	[PASS]	0/1
+chr1:100-200	10	literal	G	[T]	50.0	[PASS]	1|1
+chr1:100-200	10	literal	G	[T]	50.0	[PASS]	1|1
+
+query TITTTTTT rowsort
+SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_literal_contigs.vcf.gz', decompression_threads:=0);
+----
+chr1	150	ordinary	A	[C]	60.0	[PASS]	0/1
+chr1:100-200	10	literal	G	[T]	50.0	[PASS]	1|1
+chr1:100-200	10	literal	G	[T]	50.0	[PASS]	1|1
+
+# User-supplied regions still use HTSlib's brace quoting and native union.
+query TI rowsort
+SELECT CHROM, POS FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_literal_contigs.bcf',
+  region:='{chr1:100-200}:1-20,{chr1:100-200}:10-10');
+----
+chr1:100-200	10
+chr1:100-200	10
+
+query TI rowsort
+SELECT CHROM, POS FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_literal_contigs.vcf.gz',
+  region:='{chr1:100-200}:1-20,{chr1:100-200}:10-10');
+----
+chr1:100-200	10
+chr1:100-200	10
+
 # Only generated indexes are overwritten; original fixture indexes are untouched.
 # Two occupied contigs keep both formats on an index-dependent plan; the
 # separate parallel_empty_contigs corpus still tests hundreds of empty headers.

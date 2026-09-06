@@ -1,0 +1,10 @@
+##fileformat=VCFv4.2
+##FILTER=<ID=PASS,Description="All filters passed">
+##source=duckhts/test/scripts/vcfpp.R
+##contig=<ID=chr1>
+##contig=<ID=chr1:100-200>
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1
+chr1	150	ordinary	A	C	60	PASS	.	GT	0/1
+chr1:100-200	10	literal	G	T	50	PASS	.	GT	1|1
+chr1:100-200	10	literal	G	T	50	PASS	.	GT	1|1

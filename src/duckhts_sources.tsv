@@ -6,6 +6,7 @@ src/simd/duckhts_simd_avx512.c|simd/duckhts_simd_avx512.c
 src/simd/duckhts_simd_neon.c|simd/duckhts_simd_neon.c
 src/simd/duckhts_simd_wasm_simd128.c|simd/duckhts_simd_wasm_simd128.c
 src/bcf_reader.c|bcf_reader.c
+src/bcf_scan.c|bcf_scan.c
 src/region_list.c|region_list.c
 src/bam_reader.c|bam_reader.c
 src/bam_pileup.c|bam_pileup.c

@@ -264,6 +264,20 @@ manifest[[length(manifest) + 1]] <- render_fixture(
 )
 
 manifest[[length(manifest) + 1]] <- render_fixture(
+  filename = "bcf_literal_contigs.vcf",
+  section = "mapping",
+  purpose = "Indexed full scans use literal contig IDs rather than ambiguous region expressions",
+  contigs = c("chr1", "chr1:100-200"),
+  format_defs = list(tag_def("GT", "1", "String", "Genotype")),
+  samples = "S1",
+  records = c(
+    "chr1\t150\tordinary\tA\tC\t60\tPASS\t.\tGT\t0/1",
+    "chr1:100-200\t10\tliteral\tG\tT\t50\tPASS\t.\tGT\t1|1",
+    "chr1:100-200\t10\tliteral\tG\tT\t50\tPASS\t.\tGT\t1|1"
+  )
+)
+
+manifest[[length(manifest) + 1]] <- render_fixture(
   filename = "phased_genotype_fields.vcf",
   section = "mapping",
   purpose = "Phased and arbitrary-ploidy GT plus PL/GP/DS/PS FORMAT fields for normalization/liftover contract tests",
