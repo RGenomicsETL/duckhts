@@ -386,11 +386,18 @@ is an observed file receipt, not an assertion that the two engines write
 identical text. FastVEP produced the same bytes in all six checked
 thread/repeat observations. DuckVEP produced multiple byte orders across
 6 observations because the final relational join has no output
-`ORDER BY`; a same-parser order-independent fingerprint over all
-47,629,345 rows was identical in all 6 runs checked for multiset
-stability. Its checked fingerprint is XOR 15135830789387217416,
+`ORDER BY`. The historical receipt’s `hash(COLUMNS(*))` expression
+expanded into separate column hashes, and its aggregate consumed only
+the first, `Uploaded_variation`. That first-field order-independent
+fingerprint over all 47,629,345 rows was identical in all 6 runs checked
+for ID-multiset stability; it does not prove equality of the other 16
+fields. Its first-field fingerprint is XOR 15135830789387217416,
 low-32-bit sum 102267960154848972, and high-32-bit sum
-102341672868090308.
+102341672868090308. The current collector hashes `row(*COLUMNS(*))` and
+labels its scope `full_row`. Mutation controls require sensitivity to
+every field, NULLs and duplicate rows, while row permutation must
+preserve the fingerprint. Historical receipt rows are retained
+unchanged, not relabelled as full-row checks.
 
 The FastVEP cache contains 645,457 transcripts; the exact VEP-filtered
 DuckVEP model contains 644,427. The 1,030-transcript difference remains
@@ -569,6 +576,48 @@ not establish distance-invariant performance. DuckVEP’s separate
 50,000-base measurements and row fingerprints so this end-to-end
 workload does not become the only performance authority.
 
+## Model rebuild acceptance (2026-09-06)
+
+The alpha short-tail interface deletion removes `post_cds_bases` from
+prepared models and their logical fingerprint. The registry therefore
+pins a new hash and uses it in the model’s cache filename. A fresh build
+from the same checksum-pinned Ensembl-116 core/funcgen dumps and primary
+FASTA validated 194 regions, 644,427 transcripts, 5,068,416 exon
+memberships and 1,383,580 regulatory/motif features. The previous model
+file and receipt were left intact.
+
+The existing worker then consumed the full registered GIAB input with
+the new model. This single fresh-process pass includes model loading,
+sequential decoding, sorting, annotation, the unchanged 17-field
+projection and a real TSV file. It uses DuckDB 1.5.3 on the same
+i5-13500, one thread pinned to CPU 2, distance 5,000 and a 4 GB DuckDB
+memory limit. Model compilation and output-receipt calculation are
+outside this elapsed time. The 512 source ALT alleles outside the
+declared literal/non-reference subset remain counted in the source
+denominator.
+
+| revision | source_records | source_ALT | eligible_ALT | output_rows | output_bytes | threads | passes | elapsed_seconds | peak_RSS_KiB |
+|:---------|:---------------|:-----------|:-------------|:------------|:-------------|:--------|:-------|:----------------|:-------------|
+| 5cc99b89 | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 64.14           | 5730396      |
+
+The nearest recorded complete-GIAB control above, source `2a1c37cf`, has
+a one-core median of 64.54 s (three passes, 63.75–66.44 s). It produced
+the same 47,629,345 rows but 12 fewer bytes. Its model receipt and
+intervening consequence implementation differ, and it does not have a
+full-row multiset certificate. This rebuild acceptance is not a speedup,
+no-regression or output-equality claim against that historical control.
+
+The new output’s full-file SHA-256 is
+6f1bd987b8a144822dda1ef2939bb42870711f86ac8797f2ce1ef3db1b5143d9; its
+full-row XOR is 7884817531533516516, with low/high-32-bit sums
+102287041565538772 / 102283789823111554. The extension SHA-256 is
+07cc3a4ba4cbadd4af5f9e0d3a47310ecb028a1504c18488997dca7d83bb411b and the
+model logical hash is
+38da573cf9968c58e5ff42b8edddd0de952cc51cdb37c1ca03b481c7aea0853f. These
+are separate from the unchanged historical observations. The receipt
+mutation test detects the old first-column-only implementation on
+`Location`, the second output field.
+
 ## Revisions and input receipts
 
 | item                                | receipt                                                          |
@@ -576,7 +625,7 @@ workload does not become the only performance authority.
 | DuckHTS measured checkout           | 2a1c37cf2938e8226a078f19ca429ffeff84de73                         |
 | DuckHTS extension binary            | 53af1444f11bd22092001fe361e36f89bd397f7fcb52af927fefb69378c5281b |
 | DuckVEP measured worker revision    | 44f3e3533c957a798939bda6106c828f0bbea75c                         |
-| DuckVEP current reproduction worker | 819a3c8a6c4ec2ec0b8489c0910ceb7e20deb9f3cdf2399ce794e7b65068195d |
+| DuckVEP current reproduction worker | 9f32e4c045219da4ca89bb1e066b91f4e7ff99e6172d58237f72f839e9fbc472 |
 | FastVEP checkout                    | 7038e7c17708e7d2226149e78e0bb297bcc6d1d6                         |
 | FastVEP native binary               | b4cb538537646a4eaa494e0ab29978e8ead73009f643e369b4f8ee447e392d5a |
 | FastVEP rebuilt transcript cache    | 00a3357ea30325c9d93f53ce0dabc81cb6542a0fd6d8741e895331935f89f962 |
@@ -619,13 +668,37 @@ env RUSTFLAGS='-C target-cpu=native' cargo build \
   --manifest-path .sync/fastVEP/Cargo.toml --release --locked
 ```
 
+The following shell setup resolves declared provider inputs through the
+selected benchmark registry (and respects `DUCKHTSBENCH_REGISTRY`
+relocations):
+
+``` bash
+eval "$(Rscript - <<'RS'
+if (!nzchar(Sys.getenv("DUCKHTSBENCH_REGISTRY", unset = ""))) {
+  Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath("r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+}
+source("r/duckhtsbench/R/registry.R")
+inputs <- c(
+  DUCKVEP_MODEL = "duckvep_ensembl116_model",
+  CLINVAR_VCF = "variantkey_clinvar_20260706",
+  GIAB_VCF = "variantkey_giab_hg002_v421",
+  ENSEMBL_GFF3 = "ensembl116_grch38_gff3",
+  ENSEMBL_FASTA = "ensembl116_grch38_fasta_fa"
+)
+for (name in names(inputs)) {
+  cat(name, "=", shQuote(duckhts_bench_artifact_path(inputs[[name]])), "\n", sep = "")
+}
+RS
+)"
+```
+
 The supplementary comparison first builds fastSA from the same ClinVar
 release:
 
 ``` bash
 .sync/fastVEP/target/release/fastvep sa-build \
   --source clinvar \
-  --input /root/duckvep/data/corpora/clinvar/20260706/clinvar_20260706.vcf.gz \
+  --input "$CLINVAR_VCF" \
   --output /tmp/duckvep-fastsa/clinvar_20260706_grch38 \
   --assembly GRCh38 --no-progress
 ```
@@ -692,22 +765,22 @@ test ! -e "$cache"
 .sync/fastVEP/target/release/fastvep annotate \
   --input benchmarks/data/duckvep_fastvep/clinvar_chr21_seed113.vcf \
   --output /dev/null --output-format tab --no-progress \
-  --gff3 /root/duckvep/data/reference/ensembl-116/Homo_sapiens.GRCh38.116.gff3.gz \
-  --fasta /root/duckvep/data/reference/ensembl-116/Homo_sapiens.GRCh38.dna.primary_assembly.fa \
+  --gff3 "$ENSEMBL_GFF3" \
+  --fasta "$ENSEMBL_FASTA" \
   --transcript-cache "$cache"
 test "$(sha256sum "$cache" | cut -d' ' -f1)" = \
   00a3357ea30325c9d93f53ce0dabc81cb6542a0fd6d8741e895331935f89f962
 ```
 
-The single-core invocations were:
+To repeat the single-core workload using the registered model:
 
 ``` bash
 /usr/bin/time -v \
   -o /tmp/duckvep-fastvep-benchmark/duckvep_giab_1_final.time \
   taskset -c 2 Rscript benchmarks/benchmark_duckvep_fastvep_worker.R \
   --extension build/release/duckhts.duckdb_extension \
-  --model /root/duckvep/data/models/homo_sapiens_116_GRCh38_final.duckdb \
-  --input /root/duckvep/data/benchmark/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz \
+  --model "$DUCKVEP_MODEL" \
+  --input "$GIAB_VCF" \
   --output /tmp/duckvep-fastvep-benchmark/duckvep_giab_1_final.tab \
   --threads 1 --distance 5000 --memory-limit 4GB
 
@@ -715,10 +788,10 @@ The single-core invocations were:
   -o /tmp/duckvep-fastvep-benchmark/fastvep_giab_1.time \
   taskset -c 2 env RAYON_NUM_THREADS=1 \
   .sync/fastVEP/target/release/fastvep annotate \
-  --input /root/duckvep/data/benchmark/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz \
+  --input "$GIAB_VCF" \
   --output /tmp/duckvep-fastvep-benchmark/fastvep_giab_1.tab \
   --output-format tab --distance 5000 --no-progress \
-  --transcript-cache /root/duckvep/data/cache/fastvep/homo_sapiens_grch38_116_7038e7c.cache
+  --transcript-cache ${DUCKHTS_CACHE_DIR:-$HOME/.cache/duckhts}/benchmarks/fastvep/homo_sapiens_grch38_116_7038e7c.cache
 
 Rscript benchmarks/benchmark_duckvep_fastvep_receipt.R \
   --input /tmp/duckvep-fastvep-benchmark/duckvep_giab_1_final.tab \
@@ -745,16 +818,16 @@ and timing destinations distinguish the three repetitions:
   taskset -c 2,4,6,8 \
   Rscript benchmarks/benchmark_duckvep_fastvep_worker.R \
   --extension build/release/duckhts.duckdb_extension \
-  --model /root/duckvep/data/models/homo_sapiens_116_GRCh38_final.duckdb \
-  --input /root/duckvep/data/benchmark/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz \
+  --model "$DUCKVEP_MODEL" \
+  --input "$GIAB_VCF" \
   --output /tmp/duckvep-fastvep-benchmark/duckvep_giab_4.tab \
   --threads 4 --distance 5000 --memory-limit 4GB
 
 taskset -c 2,4,6,8 \
   Rscript benchmarks/benchmark_duckvep_fastvep_worker.R \
   --extension build/release/duckhts.duckdb_extension \
-  --model /root/duckvep/data/models/homo_sapiens_116_GRCh38_final.duckdb \
-  --input /root/duckvep/data/benchmark/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz \
+  --model "$DUCKVEP_MODEL" \
+  --input "$GIAB_VCF" \
   --output /tmp/duckvep-fastvep-benchmark/duckvep_giab_4_profile.tab \
   --threads 4 --distance 5000 --memory-limit 4GB \
   --profile-json /tmp/duckvep-fastvep-benchmark/duckvep_giab_4_profile.json
@@ -766,8 +839,10 @@ cp /tmp/duckvep-fastvep-benchmark/duckvep_giab_4_profile.json \
 The same receipt command is run before an output is replaced. Its
 per-run rows are retained in
 `benchmarks/data/duckvep_fastvep/output_observations.csv`; the render
-derives observed-run counts, byte-order stability, and multiset
-stability from those rows rather than from an aggregate assertion.
+derives observed-run counts and byte-order stability from those rows.
+Their historical first-field-only scope is stated above; new full-row
+receipts must not be mixed with them as if the fingerprints had the same
+definition.
 
 `benchmarks/benchmark_duckvep_fastvep_conformance.R` collects the
 VEP-oracle comparison without dropping missing or extra transcript keys.
@@ -778,15 +853,15 @@ with:
 out=/tmp/duckvep-fastvep-benchmark/conformance200.CCg7sP
 Rscript test/duckvep/conformance/corpus_differential.R \
   --corpus clinvar_chr21_seed113 \
-  --vcf /root/duckvep/data/corpora/clinvar/20260706/clinvar_20260706.vcf.gz \
+  --vcf "$CLINVAR_VCF" \
   --source-version 20260706 \
   --source-checksum sha256:59a83b34d425daf58cd0dd463d6f2952f0a833ddf8fe6698fd30010642e5e1e9 \
-  --cache-dir /root/duckvep/data/vep_cache \
-  --cache-info /root/duckvep/data/vep_cache/homo_sapiens/116_GRCh38/info.txt \
-  --cache-receipt /root/duckvep/data/receipts/homo_sapiens-116-GRCh38.tsv \
+  --cache-dir ${DUCKHTS_CACHE_DIR:-$HOME/.cache/duckhts}/vep/cache \
+  --cache-info ${DUCKHTS_CACHE_DIR:-$HOME/.cache/duckhts}/vep/cache/homo_sapiens/116_GRCh38/info.txt \
+  --cache-receipt ${DUCKHTS_CACHE_DIR:-$HOME/.cache/duckhts}/vep/receipts/homo_sapiens-116-GRCh38.tsv \
   --assembly GRCh38 --species homo_sapiens \
-  --fasta /root/duckvep/data/reference/ensembl-116/Homo_sapiens.GRCh38.dna.primary_assembly.fa \
-  --database /root/duckvep/data/models/homo_sapiens_116_GRCh38_final.duckdb \
+  --fasta "$ENSEMBL_FASTA" \
+  --database ${DUCKHTS_CACHE_DIR:-$HOME/.cache/duckhts}/models/duckvep/ensembl-116-grch38.duckdb \
   --model-sql= --model-name fastvep_conformance \
   --sample-per-shape 200 --max-allele-length 50 --seed 113 --chrom 21 \
   --distance 5000 --hgvs --fork 8 --vep-buffer-size 5000 \
@@ -803,8 +878,8 @@ taskset -c 2 env RAYON_NUM_THREADS=1 \
   .sync/fastVEP/target/release/fastvep annotate \
   --input "$out/clinvar_chr21_seed113.vcf" --output "$out/fastvep.vcf" \
   --output-format vcf --hgvs --distance 5000 --no-progress \
-  --fasta /root/duckvep/data/reference/ensembl-116/Homo_sapiens.GRCh38.dna.primary_assembly.fa \
-  --transcript-cache /root/duckvep/data/cache/fastvep/homo_sapiens_grch38_116_7038e7c.cache
+  --fasta "$ENSEMBL_FASTA" \
+  --transcript-cache ${DUCKHTS_CACHE_DIR:-$HOME/.cache/duckhts}/benchmarks/fastvep/homo_sapiens_grch38_116_7038e7c.cache
 
 Rscript benchmarks/benchmark_duckvep_fastvep_conformance.R \
   --extension build/release/duckhts.duckdb_extension \

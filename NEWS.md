@@ -11,6 +11,11 @@
   receipt and give it a logical-hash-qualified cache path. Staging builds the newly
   registered artifact while leaving the previous cached model and provenance intact
 
+- fix the DuckVEP/FastVEP benchmark receipt to hash each entire 17-field row;
+  the previous COLUMNS expansion hashed only Uploaded_variation in its aggregate.
+  Keep historical observations but limit their multiset claim to that first field;
+  add all-field mutation, NULL, duplicate and row-order controls
+
 - remove the redundant DuckVEP kernel model constructor in kernel 0.19.0: `duckvep_model_open`
   now accepts the optional interval-feature view directly. Native callers pass
   NULL for transcript-only models; model validation and SQL loading are unchanged
