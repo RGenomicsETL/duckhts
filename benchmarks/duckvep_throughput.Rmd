@@ -166,6 +166,46 @@ separate measurements and should not be compared as if only the engine changed.
 records an externally pinned run, while a range records a scheduler-visible CPU
 set.
 
+## Borrowed-CDS projection bounds check
+
+The `--fixture-indels` workload alternates `T>TAC` insertions and `TA>T`
+deletions at position 124 of the checked-in one-transcript model and FASTA.
+Unlike the single-SNV adapter control, these length-changing alleles exercise
+CDS edit projection and HGVS construction. They remain independent events,
+not one compound haplotype. Model loading and input generation are untimed.
+
+```{r cds-slice-guard}
+cds_guard <- history[
+  history$workload == "fixture_one_transcript_sorted_indels" &
+    history$source_revision %in% c(
+      "e5f1f2690264fe76d0cc9b9ee6134dd76c77dab8",
+      "10320db65b6494de2753fcd766d1754fbcc3a647"
+    ),
+]
+cds_guard <- cds_guard[match(c("e5f1f26", "10320db"), substr(cds_guard$revision, 1L, 7L)), ]
+stopifnot(nrow(cds_guard) == 2L, !anyNA(cds_guard$source_revision))
+same_workload <- c(
+  "host", "cpu", "cpu_affinity", "duckdb_version", "workload", "output_mode",
+  "variants", "annotated_rows", "threads", "input_partitions", "transcript_distance",
+  "passes", "warmup_variants", "reference_fasta_sha256", "reference_fai_sha256",
+  "checksum_kind", "checksum_value"
+)
+stopifnot(all(vapply(cds_guard[same_workload], function(x) length(unique(x)) == 1L, TRUE)))
+knitr::kable(cds_guard[, c(
+  "revision", "variants", "annotated_rows", "threads", "passes",
+  "min_seconds", "median_seconds", "max_seconds", "checksum_value"
+)], row.names = FALSE)
+```
+
+Both clean in-tree builds use DuckDB `r cds_guard$duckdb_version[[1L]]` on
+`r cds_guard$cpu[[1L]]`, pinned to CPU `r cds_guard$cpu_affinity[[1L]]`, with
+100,000 warm-up events and a 5,000-base transcript halo. The baseline commit
+adds only the benchmark case; the second commit adds the borrowed-slice checks
+and genomic carrier differential. Their median difference is
+`r sprintf("%+.2f%%", 100 * (cds_guard$median_seconds[[2L]] / cds_guard$median_seconds[[1L]] - 1))`.
+This narrow valid-model workload does not measure malformed-model rejection,
+file ingestion, cohort state, sort-plus-phased execution, or peak memory.
+
 ## Annotation-dense transcript distance and ordered parallel partitions
 
 ```{r dense-threading}
