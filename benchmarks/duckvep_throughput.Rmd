@@ -206,47 +206,40 @@ and genomic carrier differential. Their median difference is
 This narrow valid-model workload does not measure malformed-model rejection,
 file ingestion, cohort state, sort-plus-phased execution, or peak memory.
 
-```{r terminal-codon-window-control}
-terminal_window <- history[history$source_revision ==
-  "35bfb85896200b9dd5319ca49147076de511f878" &
+The following corrections reran this identical one-million-input/one-million-output
+indel/HGVS control: five passes, one DuckDB thread pinned to CPU 2, 26,000,000 rendered
+HGVS/status bytes. Each comparison uses the nearest preceding identical recorded
+workload; the first uses `10320db` above.
+
+```{r consequence-correction-controls}
+correction_revisions <- c(
+  "35bfb85896200b9dd5319ca49147076de511f878",
+  "99a0c816d1e9a30331a6fef9a48860ed53e2e17f",
+  "979bee0c14a1e4fc88c6e53bcfd94cb6600b42c5"
+)
+corrections <- history[history$source_revision %in% correction_revisions &
   history$workload == "fixture_one_transcript_sorted_indels", ]
-stopifnot(nrow(terminal_window) == 1L,
+stopifnot(nrow(corrections) == length(correction_revisions),
+  !anyDuplicated(corrections$source_revision))
+corrections <- corrections[match(correction_revisions, corrections$source_revision), ]
+stopifnot(!anyNA(corrections$source_revision),
   all(vapply(same_workload, function(field)
-    identical(terminal_window[[field]], cds_guard[[field]][2L]), TRUE)))
+    all(corrections[[field]] == cds_guard[[field]][2L]), TRUE)))
+prior_medians <- c(cds_guard$median_seconds[2L], head(corrections$median_seconds, -1L))
+knitr::kable(data.frame(
+  revision = corrections$revision,
+  correction = c("Terminal codon windows", "UTR/CDS substitutions", "MNV feature phase"),
+  median_seconds = sprintf("%.3f", corrections$median_seconds),
+  range_seconds = sprintf("%.3f–%.3f", corrections$min_seconds, corrections$max_seconds),
+  change_vs_prior = sprintf("%+.2f%%", 100 * (corrections$median_seconds / prior_medians - 1))
+), row.names = FALSE)
 ```
 
-The codon-window correction at `r terminal_window$revision` reran this identical
-one-million-input/one-million-output indel/HGVS workload: five passes, one DuckDB
-thread pinned to CPU 2, `r terminal_window$checksum_value` rendered HGVS/status
-bytes. Its median was `r sprintf("%.3f", terminal_window$median_seconds)` seconds
-(range `r sprintf("%.3f", terminal_window$min_seconds)`–`r sprintf("%.3f", terminal_window$max_seconds)`),
-`r sprintf("%+.2f%%", 100 * (terminal_window$median_seconds / cds_guard$median_seconds[2L] - 1))`
-versus the nearest identical recorded workload at `10320db`. This is an observed
-single-run comparison, not a no-regression claim or attribution to one intervening
-change. It exercises CDS edits and HGVS but not the newly corrected terminal
-partial-codon/UTR sites; a targeted throughput measurement for those sites is still
-missing. The byte total is not a full-row fingerprint.
-
-```{r utr-substitution-control}
-utr_substitution <- history[history$source_revision ==
-  "99a0c816d1e9a30331a6fef9a48860ed53e2e17f" &
-  history$workload == "fixture_one_transcript_sorted_indels", ]
-stopifnot(nrow(utr_substitution) == 1L,
-  all(vapply(same_workload, function(field)
-    identical(utr_substitution[[field]], terminal_window[[field]]), TRUE)))
-```
-
-The shared UTR/CDS substitution evaluator at `r utr_substitution$revision` reran
-the same one-million-input/one-million-output indel/HGVS control: five passes,
-one DuckDB thread pinned to CPU 2, `r utr_substitution$checksum_value` rendered
-HGVS/status bytes. Median time was `r sprintf("%.3f", utr_substitution$median_seconds)`
-seconds (range `r sprintf("%.3f", utr_substitution$min_seconds)`–`r sprintf("%.3f", utr_substitution$max_seconds)`),
-`r sprintf("%+.2f%%", 100 * (utr_substitution$median_seconds / terminal_window$median_seconds - 1))`
-against the nearest identical workload at `35bfb85`. This observed single-run
-comparison does not establish a speedup or no regression. No checked-in throughput
-benchmark exercises UTR-spanning MNVs: this is an ordinary CDS edit/HGVS control,
-not a measurement of the corrected start-codon predicates. Targeted UTR-spanning
-and production-density throughput remain unmeasured.
+These observed single-run comparisons do not establish a speedup, no regression,
+or causal attribution. No checked-in throughput benchmark exercises terminal
+partial-codon, UTR-spanning MNV, or later-phase MNV sites. This ordinary CDS
+edit/HGVS control does not measure those corrections; targeted and production-density
+throughput remain unmeasured. The byte total is not a full-row fingerprint.
 
 ## Annotation-dense transcript distance and ordered parallel partitions
 
