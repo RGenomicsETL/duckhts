@@ -8175,7 +8175,7 @@ TEST coding_snv_from_cds_known_cases(void) {
     memset(&p, 0, sizeof p);
     p.cds_pos = 4u; p.codon_start_cds = 4u; p.protein_pos = 2u; p.codon_offset = 0u;
     ASSERT_EQ(DUCKVEP_CODING_SNV_OK,
-              duckvep_coding_snv_from_cds((const uint8_t *)"ATGGCTTGG", 9u, &p,
+              duckvep_coding_snv_from_cds((const uint8_t *)"ATGGCTTGG", 9u, &p, p.cds_pos,
                                           'G', 'A', (int8_t)1, STD, &r));
     ASSERT_STR_EQ("GCT", r.ref_codon);
     ASSERT_STR_EQ("ACT", r.alt_codon);
@@ -8187,7 +8187,7 @@ TEST coding_snv_from_cds_known_cases(void) {
     memset(&p, 0, sizeof p);
     p.cds_pos = 3u; p.codon_start_cds = 1u; p.protein_pos = 1u; p.codon_offset = 2u;
     ASSERT_EQ(DUCKVEP_CODING_SNV_OK,
-              duckvep_coding_snv_from_cds((const uint8_t *)"TGG", 3u, &p,
+              duckvep_coding_snv_from_cds((const uint8_t *)"TGG", 3u, &p, p.cds_pos,
                                           'C', 'A', (int8_t)-1, STD, &r));
     ASSERT_STR_EQ("TGG", r.ref_codon);
     ASSERT_STR_EQ("TGT", r.alt_codon);
@@ -8196,17 +8196,17 @@ TEST coding_snv_from_cds_known_cases(void) {
 
     /* Codon table still matters after sequence-backed edit: TGG->TGA. */
     ASSERT_EQ(DUCKVEP_CODING_SNV_OK,
-              duckvep_coding_snv_from_cds((const uint8_t *)"TGG", 3u, &p,
+              duckvep_coding_snv_from_cds((const uint8_t *)"TGG", 3u, &p, p.cds_pos,
                                           'G', 'A', (int8_t)1, STD, &r));
     ASSERT_STR_EQ("TGA", r.alt_codon);
     ASSERT_EQ((uint32_t)DUCKVEP_CODON_STOP_GAINED, r.change);
     ASSERT_EQ(DUCKVEP_CODING_SNV_OK,
-              duckvep_coding_snv_from_cds((const uint8_t *)"TGG", 3u, &p,
+              duckvep_coding_snv_from_cds((const uint8_t *)"TGG", 3u, &p, p.cds_pos,
                                           'G', 'A', (int8_t)1, MITO, &r));
     ASSERT_EQ((uint32_t)DUCKVEP_CODON_SYNONYMOUS, r.change);
 
     ASSERT_EQ(DUCKVEP_CODING_SNV_REF_MISMATCH,
-              duckvep_coding_snv_from_cds((const uint8_t *)"AAA", 3u, &p,
+              duckvep_coding_snv_from_cds((const uint8_t *)"AAA", 3u, &p, p.cds_pos,
                                           'C', 'G', (int8_t)1, STD, &r));
     ASSERT_EQ('\0', r.ref_codon[0]);
     ASSERT_EQ((uint32_t)DUCKVEP_CODON_INVALID, r.change);
@@ -8214,38 +8214,63 @@ TEST coding_snv_from_cds_known_cases(void) {
 
     p.codon_start_cds = 2u; p.cds_pos = 2u; p.codon_offset = 0u; p.protein_pos = 1u;
     ASSERT_EQ(DUCKVEP_CODING_SNV_INVALID_ARG,
-              duckvep_coding_snv_from_cds((const uint8_t *)"AAAAAA", 6u, &p,
+              duckvep_coding_snv_from_cds((const uint8_t *)"AAAAAA", 6u, &p, p.cds_pos,
                                           'A', 'G', (int8_t)1, STD, &r));
     ASSERT_EQ('\0', r.ref_codon[0]);
 
     p.codon_start_cds = 4u; p.cds_pos = 4u; p.codon_offset = 0u; p.protein_pos = 2u;
     ASSERT_EQ(DUCKVEP_CODING_SNV_CODON_OUT_OF_RANGE,
-              duckvep_coding_snv_from_cds((const uint8_t *)"AAAAA", 5u, &p,
+              duckvep_coding_snv_from_cds((const uint8_t *)"AAAAA", 5u, &p, p.cds_pos,
                                           'A', 'G', (int8_t)1, STD, &r));
     ASSERT_EQ('\0', r.ref_codon[0]);
 
     p.codon_start_cds = 1u; p.cds_pos = 3u; p.codon_offset = 2u; p.protein_pos = 1u;
     ASSERT_EQ(DUCKVEP_CODING_SNV_INVALID_BASE,
-              duckvep_coding_snv_from_cds((const uint8_t *)"AAA", 3u, &p,
+              duckvep_coding_snv_from_cds((const uint8_t *)"AAA", 3u, &p, p.cds_pos,
                                           'A', 'N', (int8_t)1, STD, &r));
     ASSERT_EQ('\0', r.ref_codon[0]);
 
     ASSERT_EQ(DUCKVEP_CODING_SNV_INVALID_ARG,
-              duckvep_coding_snv_from_cds((const uint8_t *)"AAA", 3u, &p,
+              duckvep_coding_snv_from_cds((const uint8_t *)"AAA", 3u, &p, p.cds_pos,
                                           'A', 'G', (int8_t)0, STD, &r));
     p.protein_pos = 99u;
     ASSERT_EQ(DUCKVEP_CODING_SNV_INVALID_ARG,
-              duckvep_coding_snv_from_cds((const uint8_t *)"AAA", 3u, &p,
+              duckvep_coding_snv_from_cds((const uint8_t *)"AAA", 3u, &p, p.cds_pos,
                                           'A', 'G', (int8_t)1, STD, &r));
     p.protein_pos = 1u;
 
     /* N in non-edited phase-padding positions is allowed but classifies invalid. */
     ASSERT_EQ(DUCKVEP_CODING_SNV_OK,
-              duckvep_coding_snv_from_cds((const uint8_t *)"NNA", 3u, &p,
+              duckvep_coding_snv_from_cds((const uint8_t *)"NNA", 3u, &p, p.cds_pos,
                                           'A', 'G', (int8_t)1, STD, &r));
     ASSERT_STR_EQ("NNA", r.ref_codon);
     ASSERT_STR_EQ("NNG", r.alt_codon);
     ASSERT_EQ((uint32_t)DUCKVEP_CODON_INVALID, r.change);
+
+    /* VEP edits CDS position one on a later phase-2 CDS, but genomic REF is
+     * still the physical C at position three. Padding is not the REF oracle. */
+    p.cds_pos = 1u; p.codon_offset = 0u;
+    ASSERT_EQ(DUCKVEP_CODING_SNV_OK,
+              duckvep_coding_snv_from_cds((const uint8_t *)"NNC", 3u, &p, 3u,
+                                          'C', 'A', 1, STD, &r));
+    ASSERT_STR_EQ("NNC", r.ref_codon);
+    ASSERT_STR_EQ("ANC", r.alt_codon);
+    ASSERT_EQ(DUCKVEP_CODING_SNV_OK,
+              duckvep_coding_snv_from_cds((const uint8_t *)"NNC", 3u, &p, 3u,
+                                          'G', 'T', -1, STD, &r));
+    ASSERT_STR_EQ("ANC", r.alt_codon);
+    ASSERT_EQ(DUCKVEP_CODING_SNV_REF_MISMATCH,
+              duckvep_coding_snv_from_cds((const uint8_t *)"NNC", 3u, &p, 3u,
+                                          'T', 'A', 1, STD, &r));
+    ASSERT_EQ(DUCKVEP_CODING_SNV_INVALID_ARG,
+              duckvep_coding_snv_from_cds((const uint8_t *)"NNC", 3u, &p, 0u,
+                                          'C', 'A', 1, STD, &r));
+    ASSERT_EQ(DUCKVEP_CODING_SNV_CODON_OUT_OF_RANGE,
+              duckvep_coding_snv_from_cds((const uint8_t *)"NNC", 3u, &p, 4u,
+                                          'C', 'A', 1, STD, &r));
+    ASSERT_EQ(DUCKVEP_CODING_SNV_INVALID_BASE,
+              duckvep_coding_snv_from_cds((const uint8_t *)"NNC", 3u, &p, 1u,
+                                          'C', 'A', 1, STD, &r));
     PASS();
 }
 
@@ -8306,7 +8331,7 @@ static enum theft_trial_res prop_coding_snv_matches_oracle(struct theft *t, void
     duckvep_coding_snv_result_t r;
     duckvep_codon_result_t cr;
     (void)t;
-    if (duckvep_coding_snv_from_cds(s->seq, s->len, &s->p, s->genomic_ref, s->genomic_alt,
+    if (duckvep_coding_snv_from_cds(s->seq, s->len, &s->p, s->p.cds_pos, s->genomic_ref, s->genomic_alt,
                                     s->strand, s->table, &r) != DUCKVEP_CODING_SNV_OK) {
         return THEFT_TRIAL_FAIL;
     }
@@ -16060,6 +16085,12 @@ TEST sequence_delta_snv_start_test_precedes_unknown_peptide(void) {
     static const uint8_t unpadded[] = "CGTACGTACGTACGTACGTACGTTACGTACGTACGTACTGGTAA";
     static const uint32_t cdna_start[] = {1u, 27u, 58u};
     static const uint32_t cdna_end[] = {26u, 57u, 88u};
+    /* Same retained VEP campaign: body, stop, and final physical CDS base.
+     * 0=missense, 1=synonymous, 2=stop gained, 3=stop lost, 4=partial codon. */
+    static const uint32_t positions[] = {162u, 162u, 238u, 240u};
+    static const char references[] = "CCTA";
+    static const char alternates[] = "ATAC";
+    static const uint8_t consequences[3][4] = {{0,0,1,4}, {1,0,2,3}, {0,1,1,0}};
     uint8_t cds[sizeof unpadded + 2u];
     uint8_t flanks[44];
     uint64_t pre_offset = 0u, post_offset = 34u;
@@ -16123,6 +16154,96 @@ TEST sequence_delta_snv_start_test_precedes_unknown_peptide(void) {
                 &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, s.vpos, strand, NULL, NULL, &delta);
             ASSERT(!delta.valid && !delta.start_lost);
             ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_REFERENCE_MISMATCH, delta.sequence_status);
+
+            for (i = 0u; i < 4u; i++) {
+                uint8_t expected = consequences[phase][i];
+                const char *wrong_ref = "ACGT";
+                s.vpos = strand > 0 ? positions[i] : 350u - positions[i];
+                s.vend = s.vpos;
+                s.abytes[0] = (uint8_t)coding_test_genomic_from_tx(references[i], strand);
+                s.abytes[1] = (uint8_t)coding_test_genomic_from_tx(alternates[i], strand);
+                {
+                    duckvep_coding_projection_t display;
+                    duckvep_event_t event;
+                    uint32_t expected_cds = positions[i] <= 180u
+                        ? positions[i] - 157u : positions[i] - 196u;
+                    uint32_t first, last;
+                    ASSERT(duckvep_project_coding_base(&s.tx, &s.ex, 0u, s.vpos, &projection));
+                    ASSERT_EQ(expected_cds + (uint32_t)phase, projection.cds_pos);
+                    ASSERT(duckvep_project_vep_coding_position(&s.tx, &s.ex, 0u,
+                        &projection, &display));
+                    ASSERT_EQ(expected_cds, display.cds_pos);
+                    ASSERT_EQ((expected_cds - 1u) / 3u + 1u, display.protein_pos);
+                    ASSERT_EQ((expected_cds - 1u) % 3u, display.codon_offset);
+                    ASSERT_EQ(0u, display.phase_offset);
+                    ASSERT_EQ(projection.cdna_pos, display.cdna_pos);
+                    duckvep_event_load(&s.v, 0u, &event);
+                    ASSERT(duckvep_project_feature_translation_start(&s.tx, &s.ex, 0u,
+                        &event, &display));
+                    ASSERT_EQ(expected_cds, display.cds_pos);
+                    ASSERT(duckvep_project_complete_feature_translation_bounds(
+                        &s.tx, &s.ex, 0u, &event, 0u, &first, &last));
+                    ASSERT_EQ(expected_cds, first); ASSERT_EQ(expected_cds, last);
+                    ASSERT(duckvep_project_feature_to_cds(&s.tx, &s.ex, 0u, &event, &first, &last));
+                    ASSERT_EQ(expected_cds, first); ASSERT_EQ(expected_cds, last);
+                    ASSERT(duckvep_project_event_to_cds(&s.tx, &s.ex, 0u, &event, &first, &last));
+                    ASSERT_EQ(projection.cds_pos, first); ASSERT_EQ(projection.cds_pos, last);
+                }
+                duckvep_sequence_delta_fill_for_annotation(DUCKVEP_KIND_SNV,
+                    &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, s.vpos, strand, NULL, NULL, &delta);
+                ASSERT(delta.valid && !delta.start_lost && !delta.start_retained &&
+                       !delta.stop_retained && !delta.frameshift);
+                ASSERT_EQ(expected == 0u, delta.missense);
+                ASSERT_EQ(expected == 1u, delta.synonymous);
+                ASSERT_EQ(expected == 2u, delta.stop_gained);
+                ASSERT_EQ(expected == 3u, delta.stop_lost);
+                ASSERT_EQ(expected == 4u, delta.partial_codon);
+                ASSERT_EQ(expected == 4u, delta.coding_unknown);
+                ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_RESOLVED, delta.sequence_status);
+                /* The displayed codon's original byte can differ from genomic
+                 * REF. It must never become the physical reference oracle. */
+                while (*wrong_ref == references[i] || *wrong_ref == alternates[i]) wrong_ref++;
+                s.abytes[0] = (uint8_t)coding_test_genomic_from_tx(*wrong_ref, strand);
+                duckvep_sequence_delta_fill_for_annotation(DUCKVEP_KIND_SNV,
+                    &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, s.vpos, strand, NULL, NULL, &delta);
+                ASSERT(!delta.valid);
+                ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_REFERENCE_MISMATCH, delta.sequence_status);
+            }
+            {
+                duckvep_event_t event;
+                duckvep_coding_projection_t display;
+                uint32_t first, last;
+                uint32_t expected_insert = strand > 0 ? 6u : 5u;
+
+                s.vpos = strand > 0 ? 162u : 188u; s.vend = s.vpos;
+                s.vkind = (uint8_t)DUCKVEP_KIND_INS; s.alen = 2u;
+                s.abytes[0] = strand > 0 ? 'C' : 'G';
+                s.abytes[1] = s.abytes[0]; s.abytes[2] = 'A';
+                duckvep_event_load(&s.v, 0u, &event);
+                ASSERT(duckvep_project_event_to_cds(&s.tx, &s.ex, 0u, &event, &first, &last));
+                ASSERT_EQ(expected_insert + (uint32_t)phase, first);
+                ASSERT_EQ(first, last);
+                ASSERT(duckvep_project_feature_to_cds(&s.tx, &s.ex, 0u, &event, &first, &last));
+                ASSERT_EQ(expected_insert, first); ASSERT_EQ(first - 1u, last);
+                ASSERT(duckvep_project_complete_feature_translation_bounds(
+                    &s.tx, &s.ex, 0u, &event, 0u, &first, &last));
+                ASSERT_EQ(expected_insert, first); ASSERT_EQ(first - 1u, last);
+
+                /* Rephasing rejects malformed phases and checked-add overflow;
+                 * failures zero the output even for an in-place conversion. */
+                ASSERT(duckvep_project_coding_base(&s.tx, &s.ex, 0u, s.vpos, &projection));
+                phases[0] = 3;
+                ASSERT(!duckvep_project_vep_coding_position(&s.tx, &s.ex, 0u, &projection, &display));
+                ASSERT_EQ(0u, display.cds_pos);
+                phases[0] = -2;
+                ASSERT(!duckvep_project_vep_coding_position(&s.tx, &s.ex, 0u, &projection, &display));
+                phases[0] = 2;
+                projection.cds_pos = UINT32_MAX; projection.phase_offset = 0u;
+                ASSERT(!duckvep_project_vep_coding_position(&s.tx, &s.ex, 0u, &projection, &projection));
+                ASSERT_EQ(0u, projection.cds_pos);
+                phases[0] = -1;
+                ASSERT(!duckvep_project_vep_coding_position(&s.tx, &s.ex, 0u, &projection, &display));
+            }
         }
     }
     PASS();
@@ -16999,7 +17120,7 @@ static enum theft_trial_res prop_annotate_codon_matches_kernel(struct theft *t, 
 
     /* Oracle: the tested kernels invoked directly. */
     if (!duckvep_project_coding_base(&s->tx, &s->ex, 0u, s->vpos, &proj)) { tr = THEFT_TRIAL_FAIL; goto done; }
-    if (duckvep_coding_snv_from_cds(s->cds, (size_t)s->cds_lenv, &proj,
+    if (duckvep_coding_snv_from_cds(s->cds, (size_t)s->cds_lenv, &proj, proj.cds_pos,
                                     (char)s->abytes[0], (char)s->abytes[1], 1,
                                     DUCKVEP_CODON_TABLE_STANDARD, &res) != DUCKVEP_CODING_SNV_OK) {
         tr = THEFT_TRIAL_FAIL; goto done;
@@ -17058,7 +17179,7 @@ static enum theft_trial_res prop_annotate_start_lost_matches_oracle(struct theft
 
     if (!duckvep_project_coding_base(&s->tx, &s->ex, 0u, s->vpos, &proj)) { tr = THEFT_TRIAL_FAIL; goto done; }
     if (proj.codon_start_cds != 1u || proj.protein_pos != 1u) { tr = THEFT_TRIAL_FAIL; goto done; }
-    if (duckvep_coding_snv_from_cds(s->cds, (size_t)s->cds_lenv, &proj,
+    if (duckvep_coding_snv_from_cds(s->cds, (size_t)s->cds_lenv, &proj, proj.cds_pos,
                                     (char)s->abytes[0], (char)s->abytes[1], 1,
                                     DUCKVEP_CODON_TABLE_STANDARD, &res) != DUCKVEP_CODING_SNV_OK) {
         tr = THEFT_TRIAL_FAIL; goto done;

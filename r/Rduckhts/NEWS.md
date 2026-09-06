@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- correct bundled DuckVEP SNV body/stop and terminal-codon results when CDS
+  phase padding starts after a noncoding first exon; genomic reference checks
+  still use the physical sequence position, independently of VEP codon mapping
+
 - preserve bundled DuckVEP start-loss results for SNVs in phase-padded start
   codons even when the peptide is unknown; reference mismatches remain explicit
   unresolved results

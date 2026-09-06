@@ -5181,6 +5181,7 @@ static void sequence_delta_fill_snv(
 
     duckvep_event_t loaded_event;
     const duckvep_event_t *event;
+    duckvep_coding_projection_t physical;
     duckvep_coding_projection_t proj;
     duckvep_coding_snv_result_t res;
     const uint8_t *cds_seq;
@@ -5214,8 +5215,13 @@ static void sequence_delta_fill_snv(
     pos = event->start1;
     if (!delta_project_prepared_coding_base(
             transcripts, exons, seq, tx_idx, cds_len,
-            exon_hint, pos, &proj) &&
-        !duckvep_project_coding_base(transcripts, exons, tx_idx, pos, &proj)) {
+            exon_hint, pos, &physical) &&
+        !duckvep_project_coding_base(transcripts, exons, tx_idx, pos, &physical)) {
+        delta->sequence_status = (uint8_t)DUCKVEP_SEQUENCE_INVALID_PROJECTION;
+        return;
+    }
+    if (!duckvep_project_vep_coding_position(transcripts, exons, tx_idx, &physical, &proj) ||
+        (size_t)physical.cds_pos > cds_len) {
         delta->sequence_status = (uint8_t)DUCKVEP_SEQUENCE_INVALID_PROJECTION;
         return;
     }
@@ -5231,7 +5237,7 @@ static void sequence_delta_fill_snv(
      * partial-codon and coding-unknown facts. */
     if (duckvep_cds_position_is_partial_codon(cds_len, proj.cds_pos)) {
         char cds_base = delta_norm_base(
-            (char)cds_seq[(size_t)proj.cds_pos - 1u]);
+            (char)cds_seq[(size_t)physical.cds_pos - 1u]);
         char ref_tx = delta_orient_genomic_base(gref, strand);
         char alt_tx = delta_orient_genomic_base(galt, strand);
 
@@ -5253,12 +5259,12 @@ static void sequence_delta_fill_snv(
         delta->valid = 1u;
         delta_partial_codon_finalize(delta);
         delta->sequence_status = (uint8_t)DUCKVEP_SEQUENCE_RESOLVED;
-        delta_snv_start_offset_facts(cds_seq, cds_len, &proj,
+        delta_snv_start_offset_facts(cds_seq, cds_len, &physical,
             transcripts->flags[tx_idx], galt, strand, delta);
         return;
     }
 
-    status = duckvep_coding_snv_from_cds(cds_seq, cds_len, &proj, gref, galt,
+    status = duckvep_coding_snv_from_cds(cds_seq, cds_len, &proj, physical.cds_pos, gref, galt,
                                          strand, table, &res);
     delta->sequence_status = delta_sequence_status_from_snv(status);
     if (status != DUCKVEP_CODING_SNV_OK) {
@@ -5279,7 +5285,7 @@ static void sequence_delta_fill_snv(
         delta->coding_unknown = 1u;
         delta->valid = 1u;
         delta->sequence_status = (uint8_t)DUCKVEP_SEQUENCE_RESOLVED;
-        delta_snv_start_offset_facts(cds_seq, cds_len, &proj,
+        delta_snv_start_offset_facts(cds_seq, cds_len, &physical,
             transcripts->flags[tx_idx], galt, strand, delta);
         return;
     }
@@ -5292,7 +5298,7 @@ static void sequence_delta_fill_snv(
                              res.aa_alt, res.alt_codon, delta);
     if (delta->valid) {
         delta->sequence_status = (uint8_t)DUCKVEP_SEQUENCE_RESOLVED;
-        delta_snv_start_offset_facts(cds_seq, cds_len, &proj,
+        delta_snv_start_offset_facts(cds_seq, cds_len, &physical,
             transcripts->flags[tx_idx], galt, strand, delta);
     }
 }

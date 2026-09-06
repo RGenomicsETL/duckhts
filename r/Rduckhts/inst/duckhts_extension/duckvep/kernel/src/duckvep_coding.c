@@ -43,6 +43,7 @@ duckvep_coding_snv_status_t duckvep_coding_snv_from_cds(
     const uint8_t                      *cds_seq,
     size_t                              cds_len,
     const duckvep_coding_projection_t  *projection,
+    uint32_t                            reference_cds_position1,
     char                                genomic_ref,
     char                                genomic_alt,
     int8_t                              transcript_strand,
@@ -50,7 +51,6 @@ duckvep_coding_snv_status_t duckvep_coding_snv_from_cds(
     duckvep_coding_snv_result_t        *out) {
 
     size_t codon_idx;
-    size_t edit_idx;
     size_t i;
     char ref_tx;
     char alt_tx;
@@ -66,6 +66,7 @@ duckvep_coding_snv_status_t duckvep_coding_snv_from_cds(
     }
     if (projection->codon_offset > 2u || projection->codon_start_cds == 0u ||
         projection->cds_pos == 0u || projection->protein_pos == 0u ||
+        reference_cds_position1 == 0u ||
         (transcript_strand != (int8_t)1 && transcript_strand != (int8_t)-1)) {
         return fail_result(out, DUCKVEP_CODING_SNV_INVALID_ARG);
     }
@@ -80,8 +81,8 @@ duckvep_coding_snv_status_t duckvep_coding_snv_from_cds(
     }
 
     codon_idx = (size_t)projection->codon_start_cds - 1u;
-    edit_idx = (size_t)projection->cds_pos - 1u;
-    if (codon_idx > cds_len || cds_len - codon_idx < 3u || edit_idx >= cds_len) {
+    if (codon_idx > cds_len || cds_len - codon_idx < 3u ||
+        (size_t)reference_cds_position1 > cds_len) {
         return fail_result(out, DUCKVEP_CODING_SNV_CODON_OUT_OF_RANGE);
     }
 
@@ -104,8 +105,8 @@ duckvep_coding_snv_status_t duckvep_coding_snv_from_cds(
     out->protein_pos = projection->protein_pos;
     out->codon_offset = projection->codon_offset;
 
-    seq_ref = out->ref_codon[projection->codon_offset];
-    if (seq_ref == 'N') return fail_result(out, DUCKVEP_CODING_SNV_INVALID_BASE);
+    seq_ref = norm_seq_base_or_n(cds_seq[(size_t)reference_cds_position1 - 1u]);
+    if (seq_ref == '\0' || seq_ref == 'N') return fail_result(out, DUCKVEP_CODING_SNV_INVALID_BASE);
     if (seq_ref != ref_tx) return fail_result(out, DUCKVEP_CODING_SNV_REF_MISMATCH);
 
     out->alt_codon[projection->codon_offset] = alt_tx;

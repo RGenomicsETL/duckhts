@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- separate DuckVEP's physical CDS reference checks from VEP feature/codon
+  coordinates when a noncoding first exon precedes a phase-padded CDS. Correct
+  native SNV body/stop consequences and terminal-codon admission without
+  changing physical CDS edits or the SQL presentation reference
+
 - retain DuckVEP's independent SNV start-codon predicate when phase-padded CDS
   sequence produces an unknown peptide, preserving physical REF validation.
   Add an opt-in native SO/status check to the R projection differential that

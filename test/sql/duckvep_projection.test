@@ -261,6 +261,19 @@ FROM duckvep_annotate('projection_start_event', 'later-phase', rich := true);
 ----
 1	supported
 
+# The last physical CDS base belongs to VEP's complete second codon, even
+# though padding makes the stored CDS end in an incomplete third codon.
+statement ok
+CREATE TABLE projection_tail_event AS SELECT * REPLACE(30::UBIGINT AS position,
+  'A' AS reference, 'C' AS alternate) FROM projection_later_event;
+
+query IT
+SELECT (consequence_mask=(SELECT consequence_mask FROM duckvep_so_terms()
+  WHERE consequence='synonymous_variant'))::INTEGER, duckvep_status
+FROM duckvep_annotate('projection_tail_event', 'later-phase', rich := true);
+----
+1	supported
+
 query I
 SELECT duckvep_model_drop('later-phase');
 ----
@@ -297,6 +310,13 @@ query IT
 SELECT (consequence_mask=(SELECT sum(consequence_mask)::UBIGINT FROM duckvep_so_terms()
   WHERE consequence IN ('start_lost','splice_region_variant')))::INTEGER, duckvep_status
 FROM duckvep_annotate('projection_start_event', 'later-phase', rich := true);
+----
+1	supported
+
+query IT
+SELECT (consequence_mask=(SELECT consequence_mask FROM duckvep_so_terms()
+  WHERE consequence='synonymous_variant'))::INTEGER, duckvep_status
+FROM duckvep_annotate('projection_tail_event', 'later-phase', rich := true);
 ----
 1	supported
 

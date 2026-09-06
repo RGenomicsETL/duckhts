@@ -1533,6 +1533,22 @@ local({
       "duckvep_annotate('duckvep_r_phase_start_events', 'r-projection-phase', rich := true)"
     ))
     expect_identical(start_result, data.frame(start_lost=TRUE, status="supported"))
+    dbExecute(con, paste(
+      "CREATE OR REPLACE TABLE duckvep_r_phase_tail_events AS SELECT e.* REPLACE(",
+      "v.i::UBIGINT AS event_index, v.pos::UBIGINT AS position, v.ref AS reference,",
+      "v.alt AS alternate) FROM duckvep_r_projection_events e,",
+      "(VALUES (1,238,'T','A'), (2,240,'A','C')) v(i,pos,ref,alt) WHERE e.event_index=1"
+    ))
+    tail_result <- dbGetQuery(con, paste(
+      "SELECT a.event_index, t.consequence, a.duckvep_status FROM",
+      "duckvep_annotate('duckvep_r_phase_tail_events', 'r-projection-phase', rich := true) a",
+      "LEFT JOIN duckvep_so_terms() t ON a.consequence_mask=t.consequence_mask",
+      "ORDER BY a.event_index"
+    ))
+    expect_equal(tail_result$event_index, 1:2)
+    expect_identical(tail_result$consequence, if (phase == 1L)
+      c("stop_gained", "stop_lost") else c("synonymous_variant", "missense_variant"))
+    expect_identical(tail_result$duckvep_status, rep("supported", 2L))
     expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-projection-phase') dropped")$dropped)
   }
   dbExecute(con, paste(

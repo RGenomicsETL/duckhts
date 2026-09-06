@@ -889,6 +889,19 @@ can yield `start_lost` with `X/X` peptide alleles. The retained later-CDS witnes
 pin this ordering. Physical genomic REF validation still uses the padding-adjusted
 position; the start-offset string view must not replace that reference check.
 
+For consequence codons, `BaseTranscriptVariation::cds_start` adds the first
+*transcript* exon phase, while core `Transcript::translateable_seq` pads with the
+first *coding* exon phase. `TranscriptVariationAllele::_get_alternate_cds` edits
+that padded string at the feature's CDS coordinate. For the later phase-1 model,
+`chrDuck:162 C>A` therefore displays `tAc/tAc`, yielding synonymous even though
+the genomic REF is C. The same allele in phase 2 displays `gTa/gAa` and is
+missense. At `chrDuck:240 A>C`, phase 2 uses the complete `gTa/gCa` codon rather
+than the final physical partial codon. The shared VEP feature projector owns
+this coordinate conversion; genomic REF checks and semantic edit sets retain
+the physical projection. Native fixed tests mirror these witnesses on both
+strands, and the full record-preserving executable differential retains indels
+and unresolved pairs as well as SNVs.
+
 The same independence applies to `inframe_insertion`. VEP suppresses that term for a
 start-retaining insertion only when the complete reference peptide is the *suffix* of the
 alternate peptide, meaning that new residues were added before translation began. When the
