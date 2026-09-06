@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- correct bundled DuckVEP multi-base substitutions spanning 5-prime UTR and
+  phase-padded CDS. Missing required UTR sequence now produces an unresolved
+  result instead of a clipped-CDS approximation; retained UTR REF is checked
+
 - correct bundled DuckVEP consequences for insertions between terminal partial
   codon bases; codon-start insertions and the retained ClinVar HGVS case keep
   their distinct VEP-compatible results. ALT codon windows now include available

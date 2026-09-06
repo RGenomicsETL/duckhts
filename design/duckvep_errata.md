@@ -835,11 +835,10 @@ special-case term substitution cannot satisfy conformance.
 ## A five-prime boundary feature selects only the start codon
 
 VEP 116 treats the opposite CDS boundary asymmetrically. When an equal-length uploaded
-feature begins in the 5-prime UTR and continues into CDS, it does not suppress all peptide
-predicates as the CDS-to-3-prime-UTR mapping gap does. Instead, the feature reaches the
-start predicates, while the peptide view used there is limited to the first translated
-codon. Coding bases later in the same uploaded feature do not produce an additional
-missense or stop term through this path.
+feature begins in the 5-prime UTR and continues into CDS, its start predicates edit
+UTR+translateable sequence at the unpadded cDNA offset. They do not need ordinary
+peptide alleles. Coding bases later in the same uploaded feature do not produce an
+additional missense or stop term through this path.
 
 Four real VEP-116 witnesses separate the states:
 
@@ -852,16 +851,23 @@ Four real VEP-116 witnesses separate the states:
 
 The last two rows are the important guards: classifying the complete altered CDS would
 add a coding or stop consequence that VEP does not emit. Conversely, treating the feature
-like the 3-prime mapping gap would lose the start term. DuckVEP therefore retains the
-uploaded topology, applies its contiguous CDS slice through the shared edit/context
-engine, and selects codon one as the VEP peptide window. This is still one substitution
-authority; there is no separate UTR consequence classifier.
+like the 3-prime mapping gap would lose the start term. DuckVEP uses the same borrowed
+transcript-string evaluator as length-changing UTR/CDS edits, with substitution-specific
+start predicates. Physical REF validation uses the unpadded transcript; the predicate
+edits the stored phase-padded CDS after the UTR, matching VEP's string operations.
+Missing required UTR sequence is an explicit unresolved result, never permission to
+retry a clipped CDS-only edit.
+
+The `projection_fixtures.R` later-coding-start models pin this distinction for phase
+0, 1 and 2: `chrDuck:157 ACG>ATT` is start-lost, while `ACGT>AATG` is start-retained.
+All retain the 5-prime UTR term. Native tests mirror both strands and reject an incorrect
+retained UTR REF base even when the smaller semantic coding edit is unchanged.
 
 Source anchors: Ensembl Variation 116
 `BaseTranscriptVariation.pm::translation_coords`,
 `TranscriptVariationAllele.pm::codon` / `::peptide`, and
 `VariationEffect.pm::start_lost`, `::start_retained_variant`,
-`::_snp_start_altered`. The fixed cases are generated and adjudicated by the real VEP
+`::_snp_start_altered`, `::_inv_start_altered`. The fixed cases are generated and adjudicated by the real VEP
 executable; randomized distributions remain the regression guard against overfitting.
 
 ## A length-changing start edit can be both lost and retained

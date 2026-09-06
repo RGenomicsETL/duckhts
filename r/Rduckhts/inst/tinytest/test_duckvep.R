@@ -2156,6 +2156,47 @@ local({
   )
   expect_identical(utr5_start_boundary$status, rep("supported", 4))
 
+  # The pinned chrDuck:157 substitutions cross UTR into a later coding exon.
+  # Required UTR is validated physically; VEP edits at the unpadded cDNA offset.
+  for (phase in 0:2) {
+    mnv_queries <- c(queries[1], sprintf(paste(
+      "SELECT 0::UINTEGER transcript_index, 1::UINTEGER seq_region,",
+      "100::UBIGINT transcript_start, 250::UBIGINT transcript_end,",
+      "1::TINYINT strand, 0::UINTEGER gene_index, 3::UBIGINT transcript_flags,",
+      "158::UBIGINT cds_start, 240::UBIGINT cds_end,",
+      "('%sCGTACGTACGTACGTACGTACGTTACGTACGTACGTACTGGTAA')::BLOB cds_sequence,",
+      "1::UTINYINT codon_table, repeat('A',34)::BLOB pre_cds_sequence,",
+      "repeat('A',10)::BLOB post_cds_sequence"
+    ), strrep("N", phase)), sprintf(paste(
+      "SELECT * FROM (VALUES",
+      "(0::UINTEGER,100::UBIGINT,125::UBIGINT,1::UBIGINT,26::UBIGINT,-1::TINYINT,-1::TINYINT),",
+      "(0,150,180,27,57,%d,%d),(0,220,250,58,88,%d,%d))",
+      "e(transcript_index,exon_start,exon_end,exon_cdna_start,exon_cdna_end,phase,end_phase)"
+    ), phase, (phase+23L) %% 3L, (phase+23L) %% 3L, (phase+23L) %% 3L))
+    expect_true(load_model("r-mnv-start", mnv_queries)$loaded)
+    mnv_sql <- paste(
+      "WITH variants(ord, reference, alternate) AS (VALUES",
+      "(1,'ACG','ATT'),(2,'ACGT','AATG'),(3,'CCG','CTT'))",
+      "SELECT ord, a.consequence, a.status, a.reason FROM variants,",
+      "LATERAL unnest(_duckvep_annotate_small_rich('r-mnv-start',",
+      "1::UINTEGER,157::UBIGINT,reference,alternate,0::UBIGINT)) u(a) ORDER BY ord"
+    )
+    mnv <- dbGetQuery(con, mnv_sql)
+    expect_equal(mnv$ord, 1:3)
+    expect_identical(mnv$consequence, c("start_lost&5_prime_UTR_variant",
+      "start_retained_variant&5_prime_UTR_variant", "coding_sequence_variant&5_prime_UTR_variant"))
+    expect_identical(mnv$status, c("supported", "supported", "unresolved"))
+    expect_identical(mnv$reason, c(NA_character_, NA_character_, "reference_mismatch"))
+    expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-mnv-start') dropped")$dropped)
+    mnv_queries[2] <- paste("SELECT * EXCLUDE(pre_cds_sequence,post_cds_sequence) FROM (",
+      mnv_queries[2], ")")
+    expect_true(load_model("r-mnv-start", mnv_queries)$loaded)
+    mnv <- dbGetQuery(con, mnv_sql)
+    expect_identical(mnv$status, rep("unresolved", 3))
+    expect_identical(mnv$reason, rep("missing_transcript_flank", 3))
+    expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-mnv-start') dropped")$dropped)
+  }
+
   length_changing_boundaries <- dbGetQuery(
     con,
     paste(

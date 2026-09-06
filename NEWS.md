@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- unify multi-base substitutions spanning 5-prime UTR and CDS with the shared
+  transcript-string evaluator, correcting phase-padded start-loss/retention.
+  Delete the clipped-CDS fallback and its start-only peptide mode: required
+  missing UTR sequence is unresolved, and retained UTR REF bases are validated
+
 - remove DuckVEP's insertion-only peptide special case inside a terminal
   partial codon. Keep codon-start insertions distinct from insertions between
   partial bases, correcting stop, insertion and protein-altering consequences

@@ -29,6 +29,12 @@ remain open.
 VEP 116 is the behavioral authority; pure-C properties and bcftools csq supply independent
 checks for mechanics and phased edit state.
 
+DuckVEP is alpha: its own interfaces and intermediate representations may be changed
+or deleted when a shared authority replaces them. Incorrect approximations are not
+backward-compatibility contracts. Preserve the pinned oracle, physical input records,
+comparison denominators and failure controls; document deliberate result changes and
+test missing evidence explicitly instead of retaining a second implementation.
+
 ## Mental model
 
 DuckVEP does two different jobs at two different times.

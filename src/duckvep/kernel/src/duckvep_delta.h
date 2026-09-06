@@ -573,11 +573,12 @@ duckvep_variant_coding_context_build_prepared(
     size_t                            alt_peptide_cap,
     duckvep_coding_context_t         *ctx);
 
-/* VEP maps an equal-length uploaded multi-base feature as one peptide window,
+/* VEP maps an equal-length uploaded multi-base CDS feature as one peptide window,
  * even when semantic allele trimming leaves a smaller substitution.  This is
  * the shared representation-sensitive path used by both consequence facts and
  * independent-event HGVSp.  NOT_APPLICABLE means the caller should use the
- * ordinary semantic edit set.  DELTA_ONLY means the uploaded feature was
+ * ordinary semantic edit set after UTR/CDS-spanning shapes have been handled
+ * by the transcript-string evaluator. DELTA_ONLY means the uploaded feature was
  * authoritative but no reusable peptide context exists (for example, a
  * partial terminal codon or an explicit sequence/projection failure).
  * CONTEXT_READY returns both the exact consequence delta and its borrowed

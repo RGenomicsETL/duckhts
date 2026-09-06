@@ -325,6 +325,77 @@ SELECT duckvep_model_drop('later-phase');
 ----
 true
 
+# Pinned later-coding-start MNV witnesses for all three phases. A retained UTR
+# base is still part of physical REF validation, even if minimization drops it.
+statement ok
+CREATE TABLE projection_mnv_transcripts AS SELECT p::UINTEGER transcript_index,
+  1::UINTEGER seq_region, 100::UBIGINT transcript_start, 250::UBIGINT transcript_end,
+  1::TINYINT strand, p::UINTEGER gene_index, 3::UBIGINT transcript_flags,
+  158::UBIGINT cds_start, 240::UBIGINT cds_end,
+  (repeat('N',p) || 'CGTACGTACGTACGTACGTACGTTACGTACGTACGTACTGGTAA')::BLOB cds_sequence,
+  1::UTINYINT codon_table, repeat('A',34)::BLOB pre_cds_sequence,
+  repeat('A',10)::BLOB post_cds_sequence FROM range(3) t(p);
+
+statement ok
+CREATE TABLE projection_mnv_exons AS SELECT transcript_index,
+  s::UBIGINT exon_start, e::UBIGINT exon_end,
+  c::UBIGINT exon_cdna_start, d::UBIGINT exon_cdna_end,
+  CASE WHEN c=1 THEN -1 WHEN c=27 THEN transcript_index ELSE (transcript_index+23)%3 END::TINYINT phase,
+  CASE WHEN c=1 THEN -1 ELSE (transcript_index+23)%3 END::TINYINT end_phase
+FROM projection_mnv_transcripts CROSS JOIN (VALUES (100,125,1,26),
+  (150,180,27,57), (220,250,58,88)) e(s,e,c,d)
+ORDER BY transcript_index, exon_cdna_start;
+
+query I
+SELECT * FROM duckvep_model_load('mnv-start', 'SELECT * FROM projection_regions',
+  'SELECT * FROM projection_mnv_transcripts ORDER BY transcript_index',
+  'SELECT * FROM projection_mnv_exons ORDER BY transcript_index, exon_cdna_start');
+----
+true
+
+statement ok
+CREATE TABLE projection_mnv_events AS SELECT event_index::UBIGINT event_index,
+  1::UINTEGER seq_region, 157::UBIGINT AS position, reference, alternate,
+  NULL::UBIGINT end_position, NULL::VARCHAR structural_type, NULL::VARCHAR copy_change,
+  NULL::UINTEGER mate_seq_region, NULL::UBIGINT mate_position
+FROM (VALUES (1,'ACG','ATT'), (2,'ACGT','AATG'), (3,'CCG','CTT')) e(event_index,reference,alternate);
+
+query ITTI
+SELECT event_index, duckvep_status, duckvep_reason,
+  count(*) FILTER (WHERE consequence_mask=(SELECT sum(consequence_mask)::UBIGINT
+    FROM duckvep_so_terms() WHERE consequence='5_prime_UTR_variant' OR
+      consequence=CASE event_index WHEN 1 THEN 'start_lost'
+        WHEN 2 THEN 'start_retained_variant' ELSE 'coding_sequence_variant' END))
+FROM duckvep_annotate('projection_mnv_events', 'mnv-start', rich := true)
+GROUP BY ALL ORDER BY event_index;
+----
+1	supported	NULL	3
+2	supported	NULL	3
+3	unresolved	reference_mismatch	3
+
+query I
+SELECT duckvep_model_drop('mnv-start');
+----
+true
+
+query I
+SELECT * FROM duckvep_model_load('mnv-start', 'SELECT * FROM projection_regions',
+  'SELECT * EXCLUDE(pre_cds_sequence, post_cds_sequence) FROM projection_mnv_transcripts ORDER BY transcript_index',
+  'SELECT * FROM projection_mnv_exons ORDER BY transcript_index, exon_cdna_start');
+----
+true
+
+query TTI
+SELECT duckvep_status, duckvep_reason, count(*)
+FROM duckvep_annotate('projection_mnv_events', 'mnv-start', rich := true) GROUP BY ALL;
+----
+unresolved	missing_transcript_flank	9
+
+query I
+SELECT duckvep_model_drop('mnv-start');
+----
+true
+
 # NMD's <=101 rule uses VEP feature CDS coordinates, not the physical
 # phase-padded edit fact cached by the ordinary indel path.
 query I

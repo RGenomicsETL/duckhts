@@ -13927,6 +13927,11 @@ TEST annotate_equal_length_utr5_start_boundary_both_strands_known_scene(void) {
     };
     static const uint64_t cds_off[2] = {0u, 9u};
     static const uint32_t cds_len[2] = {9u, 9u};
+    static const uint8_t flank_bytes[] = "ACGAGC";
+    static const uint64_t pre_off[2] = {0u, 3u};
+    static const uint64_t post_off[2] = {3u, 6u};
+    static const uint32_t pre_len[2] = {3u, 3u};
+    static const uint32_t post_len[2] = {0u, 0u};
     static const uint8_t cds_tab[2] = {
         (uint8_t)DUCKVEP_CODON_TABLE_STANDARD,
         (uint8_t)DUCKVEP_CODON_TABLE_STANDARD
@@ -14003,6 +14008,10 @@ TEST annotate_equal_length_utr5_start_boundary_both_strands_known_scene(void) {
     seq.cds_bytes = cds_bytes; seq.cds_bytes_len = sizeof cds_bytes;
     seq.cds_offset = cds_off; seq.cds_length = cds_len; seq.codon_table = cds_tab;
     seq.transcript_count = 2u;
+    seq.flank_bytes = flank_bytes; seq.flank_bytes_len = sizeof flank_bytes - 1u;
+    seq.pre_cds_offset = pre_off; seq.pre_cds_length = pre_len;
+    seq.post_cds_offset = post_off; seq.post_cds_length = post_len;
+    seq.flanks_complete = 1u;
     v.chrom_id = vchrom; v.pos1 = vpos; v.end1 = vend; v.variant_kind = vkind;
     v.allele_bytes = abytes; v.allele_bytes_len = sizeof abytes;
     v.ref_offset = roff; v.alt_offset = aoff;
@@ -14024,7 +14033,7 @@ TEST annotate_equal_length_utr5_start_boundary_both_strands_known_scene(void) {
     }
     stats = duckvep_workspace_delta_route_stats(ws);
     ASSERT(stats != NULL);
-    ASSERT_EQ(7u, stats->substitution_context);
+    ASSERT_EQ(7u, stats->boundary_context);
 
     duckvep_workspace_delta_route_stats_reset(ws);
     ASSERT_EQ(DUCKVEP_OK,
@@ -14047,9 +14056,28 @@ TEST annotate_equal_length_utr5_start_boundary_both_strands_known_scene(void) {
     }
     stats = duckvep_workspace_delta_route_stats(ws);
     ASSERT(stats != NULL);
-    ASSERT_EQ(7u, stats->substitution_context);
+    ASSERT_EQ(7u, stats->boundary_context);
 
     duckvep_annotate_cursor_close(cursor);
+    duckvep_workspace_close(ws);
+    duckvep_options_close(opts);
+    duckvep_model_close(model);
+    /* Withheld UTR is missing evidence, not permission to reinterpret the
+     * same uploaded features as clipped CDS-only substitutions. */
+    seq.flanks_complete = 0u;
+    ASSERT_EQ(DUCKVEP_OK, duckvep_model_open(&tx, &exons, &seq, &model, &err));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(NULL, &opts, &err));
+    ASSERT_EQ(DUCKVEP_OK, duckvep_workspace_open(model, &ws, &err));
+    duckvep_result_builder_init(&rb, rows, 7u);
+    ASSERT_EQ(DUCKVEP_OK, duckvep_annotate_tile(model, &v, opts, ws, &rb, &err));
+    ASSERT_EQ(7u, duckvep_result_builder_count(&rb));
+    for (i = 0u; i < 7u; i++) {
+        ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_MISSING_TRANSCRIPT_FLANK,
+                  rows[i].sequence_status);
+        ASSERT(rows[i].flags & (uint32_t)DUCKVEP_CONSEQUENCE_FLAG_SEQUENCE_UNRESOLVED);
+        ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_5_PRIME_UTR) |
+                  DUCKVEP_SO(DUCKVEP_SO_CODING_SEQUENCE), rows[i].consequence_mask);
+    }
     duckvep_workspace_close(ws);
     duckvep_options_close(opts);
     duckvep_model_close(model);
@@ -16300,6 +16328,48 @@ TEST sequence_delta_snv_start_test_precedes_unknown_peptide(void) {
                 ASSERT_EQ(0u, projection.cds_pos);
                 phases[0] = -1;
                 ASSERT(!duckvep_project_vep_coding_position(&s.tx, &s.ex, 0u, &projection, &display));
+            }
+            {
+                /* Same pinned physical campaign, chrDuck:157 ACG>ATT and
+                 * ACGT>AATG: edit the full UTR+CDS string at cDNA 34, not a
+                 * phase-adjusted/clipped CDS replacement. */
+                static const char *refs[] = {"ACG", "ACGT"};
+                static const char *alts[] = {"ATT", "AATG"};
+                size_t j;
+                s.vkind = (uint8_t)DUCKVEP_KIND_MNV;
+                for (j = 0u; j < 2u; j++) {
+                    size_t n = strlen(refs[j]);
+                    size_t b;
+                    s.rlen = (uint16_t)n; s.alen = (uint16_t)n;
+                    s.aoff = (uint32_t)n;
+                    s.vpos = strand > 0 ? 157u : 350u - (156u + (uint32_t)n);
+                    s.vend = s.vpos + (uint32_t)n - 1u;
+                    for (b = 0u; b < n; b++) {
+                        size_t oriented = strand > 0 ? b : n - 1u - b;
+                        s.abytes[b] = (uint8_t)coding_test_genomic_from_tx(refs[j][oriented], strand);
+                        s.abytes[n + b] = (uint8_t)coding_test_genomic_from_tx(alts[j][oriented], strand);
+                    }
+                    duckvep_sequence_delta_fill_for_annotation(DUCKVEP_KIND_MNV,
+                        &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, s.vpos, strand, NULL, NULL, &delta);
+                    ASSERT(delta.valid && !delta.coding_unknown && !delta.missense &&
+                           !delta.synonymous && !delta.stop_gained && !delta.stop_lost &&
+                           !delta.stop_retained && !delta.frameshift && !delta.protein_altering);
+                    ASSERT_EQ(j == 0u, delta.start_lost);
+                    ASSERT_EQ(j == 1u, delta.start_retained);
+                    ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_RESOLVED, delta.sequence_status);
+                    /* Retained UTR REF must also match the physical transcript.
+                     * The smaller semantic CDS edit is unchanged by this mutation. */
+                    b = strand > 0 ? 0u : n - 1u;
+                    s.abytes[b] = s.abytes[n + b] =
+                        (uint8_t)coding_test_genomic_from_tx('C', strand);
+                    duckvep_sequence_delta_fill_for_annotation(DUCKVEP_KIND_MNV,
+                        &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, s.vpos, strand, NULL, NULL, &delta);
+                    if (delta.valid) fprintf(stderr,
+                        "[MNV retained UTR REF] strand=%d phase=%d case=%zu status=%u\n",
+                        strand, phase, j, delta.sequence_status);
+                    ASSERT(!delta.valid && !delta.start_lost && !delta.start_retained);
+                    ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_REFERENCE_MISMATCH, delta.sequence_status);
+                }
             }
         }
     }
