@@ -473,6 +473,9 @@ for out_dir in "$DST" "$PKG_DST"; do
 done
 echo "  parallel_empty_contigs.vcf.gz + .tbi and .bcf + .csi"
 
+# Synthetic multi-contig VCF dictionary variants and BCF share the vcfpp source.
+(cd "$REPO_ROOT" && Rscript test/scripts/prepare_bcf_scan_fixtures.R)
+
 # ---- bcftools_score multi-summary list / directory / generated-name collision fixtures ----
 # List entries intentionally use repo-root-relative paths to match upstream
 # bcftools +score --summaries list-file semantics (entries are not resolved

@@ -311,6 +311,33 @@ static int bcf_parse_scan_mode(const char* mode, int* scan_sequential) {
     return 0;
 }
 
+/* The work list must use the iterator's dictionary. VCF headers need not list
+ * every Tabix contig, especially when index_path is not colocated with the file.
+ * BCF record IDs remain tied to the header. Bind owns the copied names. */
+static int bcf_bind_contig_names(bcf_bind_data_t *bind, bcf_hdr_t *hdr, tbx_t *tbx) {
+    int count = hdr->n[BCF_DT_CTG];
+    const char **names = NULL;
+    if (tbx) {
+        names = tbx_seqnames(tbx, &count); /* free array; names borrow the index */
+        if (!names) return 0;
+    }
+    int ok = 0;
+    if (count < 0) goto cleanup;
+    bind->n_contigs = count;
+    if (count > 0) {
+        bind->contig_names = duckhts_alloc_array(count, sizeof(*bind->contig_names));
+        if (!bind->contig_names) goto cleanup;
+        for (int i = 0; i < count; i++) {
+            bind->contig_names[i] = duckhts_copy_string(names ? names[i] : hdr->id[BCF_DT_CTG][i].key);
+            if (!bind->contig_names[i]) goto cleanup;
+        }
+    }
+    ok = 1;
+cleanup:
+    free(names);
+    return ok;
+}
+
 // =============================================================================
 // Memory Management
 // =============================================================================
@@ -1780,21 +1807,10 @@ static void bcf_read_bind(duckdb_bind_info info) {
             bind->index_row_count_valid = bcf_try_get_index_row_count(idx ? idx : tbx->idx,
                                                                       row_multiplier,
                                                                       &bind->index_row_count);
+            int contigs_ok = bcf_bind_contig_names(bind, hdr, tbx);
             if (idx) hts_idx_destroy(idx);
             if (tbx) tbx_destroy(tbx);
-
-            // Get contig names for automatic parallel contig scans.
-            int n_seqs = hdr->n[BCF_DT_CTG];
-            if (n_seqs > 0) {
-                bind->n_contigs = n_seqs;
-                bind->contig_names = duckhts_alloc_array(n_seqs, sizeof(*bind->contig_names));
-                if (!bind->contig_names) goto bind_oom;
-
-                for (int i = 0; i < n_seqs; i++) {
-                    bind->contig_names[i] = duckhts_copy_string(hdr->id[BCF_DT_CTG][i].key);
-                    if (!bind->contig_names[i]) goto bind_oom;
-                }
-            }
+            if (!contigs_ok) goto bind_oom;
         }
     }
 

@@ -72,9 +72,13 @@ run_sql "mode must be 'overlap' or 'contain'" \
   "CREATE TABLE cgr_san(chrom VARCHAR,start BIGINT,stop BIGINT); INSERT INTO cgr_san VALUES ('chr1',0,1); SELECT duckhts_cgranges_from_query('cgr_san_idx','SELECT * FROM cgr_san','chrom','start','stop'); SELECT * FROM duckhts_cgranges_overlaps('cgr_san_idx','chr1',0,1,mode:='bad');"
 run_sql "read_bcf: failed to read or parse BCF/VCF record" \
   "SELECT count(*) FROM read_bcf('test/data/malformed_bad_pos.vcf',tidy_format:=true);"
-for format in bcf vcf.gz; do
+for format in bcf full.vcf.gz; do
   run_sql "read_bcf: failed to reload index for parallel scan" \
-    "SET threads=4; SELECT * FROM bcf_index('test/data/parallel_empty_contigs.$format',index_path:='$tmp/reload.$format.index',threads:=1); PREPARE scan AS SELECT POS FROM read_bcf('test/data/parallel_empty_contigs.$format',index_path:='$tmp/reload.$format.index',decompression_threads:=0); COPY (SELECT 'broken index') TO '$tmp/reload.$format.index' (FORMAT CSV,HEADER FALSE); EXECUTE scan;"
+    "SET threads=4; SELECT * FROM bcf_index('test/data/bcf_scan_contigs.$format',index_path:='$tmp/reload.$format.index',threads:=1); PREPARE scan AS SELECT POS FROM read_bcf('test/data/bcf_scan_contigs.$format',index_path:='$tmp/reload.$format.index',decompression_threads:=0); COPY (SELECT 'broken index') TO '$tmp/reload.$format.index' (FORMAT CSV,HEADER FALSE); EXECUTE scan;"
+done
+for header in full partial none; do
+  run_sql "" \
+    "SET threads=4; CREATE TABLE scanned AS SELECT * FROM read_bcf('test/data/bcf_scan_contigs.$header.vcf.gz',index_path:='test/data/bcf_scan_contigs.$header.vcf.gz.index.tbi',decompression_threads:=0); SELECT CASE WHEN count(*)=5 AND count(DISTINCT CHROM)=2 THEN true ELSE error('lost contig records') END FROM scanned;"
 done
 run_sql "region list: empty item" \
   "SELECT count(*) FROM read_bam('test/data/range.bam',region:=',,');"

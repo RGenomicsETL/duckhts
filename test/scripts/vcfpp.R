@@ -247,6 +247,23 @@ manifest[[length(manifest) + 1]] <- render_fixture(
 )
 
 manifest[[length(manifest) + 1]] <- render_fixture(
+  filename = "bcf_scan_contigs.vcf",
+  section = "mapping",
+  purpose = "Multi-contig scan, duplicate records, and header/index dictionary order regression",
+  contigs = c("empty", "chr3", "chr1"),
+  info_defs = list(tag_def("DP", "1", "Integer", "Site depth")),
+  format_defs = list(tag_def("GT", "1", "String", "Genotype")),
+  samples = c("S1", "S2"),
+  records = c(
+    "chr1\t10\tknown\tA\tC\t60\tPASS\tDP=7\tGT\t0/1\t1/1",
+    "chr3\t20\tduplicate\tG\tT\t50\tPASS\tDP=8\tGT\t./1\t0/0",
+    "chr3\t20\tduplicate\tG\tT\t50\tPASS\tDP=8\tGT\t./1\t0/0",
+    "chr3\t20\tallele\tG\tA\t30\tPASS\tDP=9\tGT\t1/1\t./.",
+    "chr3\t40\tlast\tT\tG\t.\tPASS\tDP=.\tGT\t1\t0|1"
+  )
+)
+
+manifest[[length(manifest) + 1]] <- render_fixture(
   filename = "phased_genotype_fields.vcf",
   section = "mapping",
   purpose = "Phased and arbitrary-ploidy GT plus PL/GP/DS/PS FORMAT fields for normalization/liftover contract tests",

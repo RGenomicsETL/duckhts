@@ -5,9 +5,12 @@ surface. Explicit `scan_mode := 'sequential'` is implemented for supported reade
 
 ## Current scan ownership
 
-Indexed full-file scans in `read_bam(...)` and `read_bcf(...)` claim each
-contig once in header order; automatic BAM/CRAM scans also claim the no-coordinate tail
-once. Region scans, native multi-region scans, sequential scans, and
+Indexed full-file scans claim each contig once: BAM/CRAM and BCF use the header
+dictionary, while Tabix-backed VCF uses the index dictionary. VCF headers may omit
+indexed contigs or name empty contigs absent from the index, especially with a
+non-colocated `index_path`; the work list must use the iterator's dictionary.
+Automatic BAM/CRAM scans also claim the no-coordinate tail once.
+Region scans, native multi-region scans, sequential scans, and
 index-backed zero-column counts are separate paths and must keep their existing semantics.
 
 Parallel scans do not promise physical output order. A downstream workflow that needs a
@@ -98,8 +101,8 @@ The design constraints are:
 
 - retain one-owner-per-contig iteration and the existing atomic claim model;
 - derive weights from index statistics when they are available;
-- sort by descending weight with original contig ordinal as the deterministic tie-break;
-- fall back to header order when statistics cannot be read reliably;
+- sort by descending weight with the scan dictionary's contig ordinal as the tie-break;
+- fall back to that dictionary's order when statistics cannot be read reliably;
 - do not split contigs into overlapping region strings; and
 - do not extend this change to explicit or chained region scans.
 

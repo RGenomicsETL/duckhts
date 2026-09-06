@@ -1,5 +1,5 @@
 # name: test/sql/bcf_scan.test
-# description: Index-dependent BCF/VCF scans fail when a worker loses its index
+# description: BCF/VCF contig dictionaries and index-dependent scan failures
 # group: [duckhts]
 
 require duckhts
@@ -8,25 +8,27 @@ statement ok
 SET threads=4;
 
 # Only generated indexes are overwritten; original fixture indexes are untouched.
+# Two occupied contigs keep both formats on an index-dependent plan; the
+# separate parallel_empty_contigs corpus still tests hundreds of empty headers.
 query I
-SELECT success FROM bcf_index('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.bcf',
+SELECT success FROM bcf_index('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.bcf',
   index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', threads := 1);
 ----
 1
 
 statement ok
-PREPARE bcf_reload AS SELECT POS FROM read_bcf('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.bcf',
+PREPARE bcf_reload AS SELECT POS FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.bcf',
   index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', decompression_threads := 0);
 
 statement ok
-PREPARE bcf_reload_count AS SELECT count(POS) FROM read_bcf('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.bcf',
+PREPARE bcf_reload_count AS SELECT count(POS) FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.bcf',
   index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', decompression_threads := 0);
 
 query I
-SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.bcf',
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.bcf',
   index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', decompression_threads := 0);
 ----
-2
+5
 
 statement ok
 COPY (SELECT 'broken index') TO '__WORKING_DIRECTORY__/test_bcf_reload.csi' (FORMAT CSV, HEADER FALSE);
@@ -43,14 +45,17 @@ read_bcf: failed to reload index for parallel scan
 
 # A new bind with no usable index still selects ordinary sequential fallback.
 query I rowsort
-SELECT POS FROM read_bcf('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.bcf',
+SELECT POS FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.bcf',
   index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', decompression_threads := 0);
 ----
 10
+20
+20
+20
 40
 
 query I
-SELECT success FROM bcf_index('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.bcf',
+SELECT success FROM bcf_index('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.bcf',
   index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', threads := 1);
 ----
 1
@@ -60,27 +65,30 @@ query I rowsort
 EXECUTE bcf_reload;
 ----
 10
+20
+20
+20
 40
 
 query I
-SELECT success FROM bcf_index('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.vcf.gz',
+SELECT success FROM bcf_index('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.full.vcf.gz',
   index_path := '__WORKING_DIRECTORY__/test_vcf_reload.tbi', threads := 1);
 ----
 1
 
 statement ok
-PREPARE vcf_reload AS SELECT POS FROM read_bcf('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.vcf.gz',
+PREPARE vcf_reload AS SELECT POS FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.full.vcf.gz',
   index_path := '__WORKING_DIRECTORY__/test_vcf_reload.tbi', decompression_threads := 0);
 
 statement ok
-PREPARE vcf_reload_count AS SELECT count(POS) FROM read_bcf('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.vcf.gz',
+PREPARE vcf_reload_count AS SELECT count(POS) FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.full.vcf.gz',
   index_path := '__WORKING_DIRECTORY__/test_vcf_reload.tbi', decompression_threads := 0);
 
 query I
-SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.vcf.gz',
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.full.vcf.gz',
   index_path := '__WORKING_DIRECTORY__/test_vcf_reload.tbi', decompression_threads := 0);
 ----
-2
+5
 
 statement ok
 COPY (SELECT 'broken index') TO '__WORKING_DIRECTORY__/test_vcf_reload.tbi' (FORMAT CSV, HEADER FALSE);
@@ -96,14 +104,17 @@ EXECUTE vcf_reload_count;
 read_bcf: failed to reload index for parallel scan
 
 query I rowsort
-SELECT POS FROM read_bcf('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.vcf.gz',
+SELECT POS FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.full.vcf.gz',
   index_path := '__WORKING_DIRECTORY__/test_vcf_reload.tbi', decompression_threads := 0);
 ----
 10
+20
+20
+20
 40
 
 query I
-SELECT success FROM bcf_index('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.vcf.gz',
+SELECT success FROM bcf_index('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.full.vcf.gz',
   index_path := '__WORKING_DIRECTORY__/test_vcf_reload.tbi', threads := 1);
 ----
 1
@@ -112,4 +123,117 @@ query I rowsort
 EXECUTE vcf_reload;
 ----
 10
+20
+20
+20
 40
+
+# Five physical records; equal-position distinct alleles and exact duplicates
+# must survive both scan modes. These literal rows are independent of the reader.
+statement ok
+CREATE TABLE bcf_scan_expected(CHROM VARCHAR, POS BIGINT, ID VARCHAR, REF VARCHAR,
+  ALT VARCHAR[], QUAL DOUBLE, FILTER VARCHAR[], INFO_DP INTEGER,
+  FORMAT_GT_S1 VARCHAR, FORMAT_GT_S2 VARCHAR);
+
+statement ok
+INSERT INTO bcf_scan_expected VALUES
+  ('chr1',10,'known','A',['C'],60,['PASS'],7,'0/1','1/1'),
+  ('chr3',20,'duplicate','G',['T'],50,['PASS'],8,'./1','0/0'),
+  ('chr3',20,'duplicate','G',['T'],50,['PASS'],8,'./1','0/0'),
+  ('chr3',20,'allele','G',['A'],30,['PASS'],9,'1/1','./.'),
+  ('chr3',40,'last','T',['G'],NULL,['PASS'],NULL,'1','0|1');
+
+statement ok
+CREATE MACRO bcf_scan_difference(header_kind, index_kind, mode) AS TABLE
+WITH observed AS MATERIALIZED (
+  SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.' || header_kind || '.vcf.gz',
+    index_path := '__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.' || header_kind || '.vcf.gz.index.' || index_kind,
+    scan_mode := mode, decompression_threads := 0)
+)
+(SELECT * FROM observed EXCEPT ALL SELECT * FROM bcf_scan_expected)
+UNION ALL
+(SELECT * FROM bcf_scan_expected EXCEPT ALL SELECT * FROM observed);
+
+statement ok
+SET threads=1;
+
+query I
+SELECT count(*) FROM (
+  SELECT * FROM bcf_scan_difference('partial','tbi','auto') UNION ALL
+  SELECT * FROM bcf_scan_difference('none','tbi','auto') UNION ALL
+  SELECT * FROM bcf_scan_difference('full','tbi','auto') UNION ALL
+  SELECT * FROM bcf_scan_difference('partial','csi','auto') UNION ALL
+  SELECT * FROM bcf_scan_difference('none','csi','auto') UNION ALL
+  SELECT * FROM bcf_scan_difference('full','csi','auto')
+);
+----
+0
+
+statement ok
+SET threads=4;
+
+query I
+SELECT count(*) FROM (
+  SELECT * FROM bcf_scan_difference('partial','tbi','auto') UNION ALL
+  SELECT * FROM bcf_scan_difference('none','tbi','auto') UNION ALL
+  SELECT * FROM bcf_scan_difference('full','tbi','auto') UNION ALL
+  SELECT * FROM bcf_scan_difference('partial','csi','auto') UNION ALL
+  SELECT * FROM bcf_scan_difference('none','csi','auto') UNION ALL
+  SELECT * FROM bcf_scan_difference('full','csi','auto')
+);
+----
+0
+
+query I
+SELECT count(*) FROM (
+  SELECT * FROM bcf_scan_difference('partial','tbi','sequential') UNION ALL
+  SELECT * FROM bcf_scan_difference('none','tbi','sequential') UNION ALL
+  SELECT * FROM bcf_scan_difference('full','tbi','sequential') UNION ALL
+  SELECT * FROM bcf_scan_difference('partial','csi','sequential') UNION ALL
+  SELECT * FROM bcf_scan_difference('none','csi','sequential') UNION ALL
+  SELECT * FROM bcf_scan_difference('full','csi','sequential')
+);
+----
+0
+
+query TTTTTT rowsort
+DESCRIBE SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.partial.vcf.gz',
+  index_path := '__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.partial.vcf.gz.index.tbi');
+----
+ALT	VARCHAR[]	YES	NULL	NULL	NULL
+CHROM	VARCHAR	YES	NULL	NULL	NULL
+FILTER	VARCHAR[]	YES	NULL	NULL	NULL
+FORMAT_GT_S1	VARCHAR	YES	NULL	NULL	NULL
+FORMAT_GT_S2	VARCHAR	YES	NULL	NULL	NULL
+ID	VARCHAR	YES	NULL	NULL	NULL
+INFO_DP	INTEGER	YES	NULL	NULL	NULL
+POS	BIGINT	YES	NULL	NULL	NULL
+QUAL	DOUBLE	YES	NULL	NULL	NULL
+REF	VARCHAR	YES	NULL	NULL	NULL
+
+query TITT rowsort
+SELECT CHROM, POS, ID, FORMAT_GT_S1
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.partial.vcf.gz',
+  index_path := '__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.partial.vcf.gz.index.csi',
+  region := 'chr3:20-40,chr3:20-20');
+----
+chr3	20	allele	1/1
+chr3	20	duplicate	./1
+chr3	20	duplicate	./1
+chr3	40	last	1
+
+query I
+SELECT count(POS) FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.full.vcf.gz',
+  index_path := '__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.full.vcf.gz.index.tbi', region := 'empty');
+----
+0
+
+# A header-only VCF has an empty Tabix dictionary, not an allocation failure.
+query II
+SELECT
+  (SELECT count(POS) FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.empty.vcf.gz',
+    index_path := '__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.empty.vcf.gz.index.tbi')),
+  (SELECT count(POS) FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.empty.vcf.gz',
+    index_path := '__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.empty.vcf.gz.index.csi'));
+----
+0	0
