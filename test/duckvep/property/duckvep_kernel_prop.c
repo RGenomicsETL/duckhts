@@ -16043,6 +16043,63 @@ TEST nmd_early_cds_fact_matches_exhaustive_projection_known_scene(void) {
     PASS();
 }
 
+TEST nmd_later_phase_cds_does_not_reuse_physical_early_fact(void) {
+    uint8_t cds[122];
+    struct kprop_coding s;
+    uint32_t starts[] = {90u, 1000u}, ends[] = {99u, 1119u};
+    uint32_t cdna_starts[] = {1u, 11u}, cdna_ends[] = {10u, 130u};
+    int8_t phases[] = {-1, 2}, end_phases[] = {-1, 2};
+    duckvep_haplotype_edit_t edit;
+    duckvep_delta_scratch_t scratch;
+    duckvep_sequence_delta_t delta;
+    duckvep_sequence_delta_route_t route;
+    duckvep_event_t event;
+    duckvep_nmd_result_t cached, exhaustive;
+    int8_t strand, phase;
+
+    for (strand = -1; strand <= 1; strand += 2) {
+        for (phase = 0; phase <= 2; phase++) {
+            memset(&s, 0, sizeof s);
+            memset(cds, 'A', sizeof cds); memset(cds, 'N', (size_t)phase);
+            phases[1] = phase; end_phases[1] = phase;
+            starts[0] = strand > 0 ? 90u : 2000u; ends[0] = strand > 0 ? 99u : 2009u;
+            starts[1] = strand > 0 ? 1000u : 980u; ends[1] = strand > 0 ? 1119u : 1099u;
+            s.cds = cds; s.strand = strand;
+            s.tstart = strand > 0 ? 90u : 980u; s.tend = strand > 0 ? 1119u : 2009u;
+            s.cds_s = starts[1]; s.cds_e = ends[1];
+            s.excnt = 2u; s.vpos = strand > 0 ? 1099u : 998u; s.vend = s.vpos + 1u;
+            s.vkind = (uint8_t)DUCKVEP_KIND_DEL;
+            s.aoff = 2u; s.rlen = 2u; s.alen = 1u;
+            memset(s.abytes, strand > 0 ? 'A' : 'T', 3u);
+            kprop_wire_coding_scene(&s, 120u + (uint32_t)phase);
+            s.ex.start1 = starts; s.ex.end1 = ends;
+            s.ex.cdna_start1 = cdna_starts; s.ex.cdna_end1 = cdna_ends;
+            s.ex.phase = phases; s.ex.end_phase = end_phases; s.ex.exon_count = 2u;
+            memset(&scratch, 0, sizeof scratch);
+            scratch.edits = &edit; scratch.edits_cap = 1u;
+            duckvep_event_load(&s.v, 0u, &event);
+            duckvep_sequence_delta_fill_for_annotation_trace(
+                DUCKVEP_KIND_DEL, &s.tx, &s.ex, &s.seq, &s.v,
+                0u, 0u, s.vpos, s.strand, &scratch, &event,
+                (uint32_t)DUCKVEP_REGION_CDS, 1u, &route, &delta);
+            ASSERT_EQ(DUCKVEP_DELTA_ROUTE_SIMPLE_INDEL, route);
+            ASSERT(delta.valid && delta.frameshift);
+            /* Physical CDS 101+phase is VEP feature CDS 101: the cache's physical test
+             * cannot decide whether the NMD plugin's <=101 escape rule applies. */
+            ASSERT_EQ(phase > 0 ? DUCKVEP_NMD_EARLY_CDS_ENDS_AFTER_101 :
+                DUCKVEP_NMD_EARLY_CDS_ENDS_THROUGH_101, delta.nmd_early_cds_fact);
+            duckvep_nmd_predict(&s.tx, &s.ex, 0u, &event,
+                DUCKVEP_SO(DUCKVEP_SO_FRAMESHIFT), NULL, &exhaustive);
+            ASSERT(exhaustive.escape_reasons & DUCKVEP_NMD_ESCAPE_EARLY_CDS);
+            duckvep_nmd_predict(&s.tx, &s.ex, 0u, &event,
+                DUCKVEP_SO(DUCKVEP_SO_FRAMESHIFT), &delta, &cached);
+            ASSERT_EQ(exhaustive.prediction, cached.prediction);
+            ASSERT_EQ(exhaustive.escape_reasons, cached.escape_reasons);
+        }
+    }
+    PASS();
+}
+
 /* VEP's coding_unknown predicate wins when either local peptide allele contains
  * X. Incomplete-start models carry N padding in the first codon; equal X/X
  * peptide bytes are not evidence for a synonymous consequence. */
@@ -25648,6 +25705,7 @@ int main(int argc, char **argv) {
     RUN_TEST(sequence_delta_annotation_exon_hint_matches_unhinted);
     RUN_TEST(sequence_delta_simple_indel_route_matches_generalized_context);
     RUN_TEST(nmd_early_cds_fact_matches_exhaustive_projection_known_scene);
+    RUN_TEST(nmd_later_phase_cds_does_not_reuse_physical_early_fact);
     RUN_TEST(sequence_delta_snv_x_peptide_is_coding_unknown_known_scene);
     RUN_TEST(sequence_delta_snv_start_test_precedes_unknown_peptide);
     RUN_TEST(coding_context_incomplete_start_mnv_is_unknown_and_missense_known_scene);

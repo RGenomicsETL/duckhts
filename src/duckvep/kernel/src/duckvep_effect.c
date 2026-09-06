@@ -18,6 +18,7 @@ void duckvep_nmd_predict(
     uint32_t variant_end1;
     uint32_t variant_cds_start;
     uint32_t variant_cds_end;
+    uint32_t coding_first1;
     int early_cds_escape;
     uint8_t reasons = 0u;
 
@@ -43,8 +44,22 @@ void duckvep_nmd_predict(
         out->prediction = (uint8_t)DUCKVEP_NMD_UNRESOLVED;
         return;
     }
+    exon_offset = transcripts->exon_offset[tx_idx];
+    exon_count = transcripts->exon_count[tx_idx];
+    if (exon_count == 0u || exon_offset > exons->exon_count ||
+        (size_t)exon_count > exons->exon_count - exon_offset) {
+        out->prediction = (uint8_t)DUCKVEP_NMD_UNRESOLVED;
+        return;
+    }
+    coding_first1 = transcripts->strand[tx_idx] < 0
+        ? transcripts->cds_end1[tx_idx] : transcripts->cds_start1[tx_idx];
 
+    /* Cached edit facts use physical CDS padding. They are also feature
+     * coordinates when coding begins in the first transcript exon. For a
+     * later CDS start, let the shared VEP mapper resolve the feature phase. */
     if (sequence_delta != NULL && sequence_delta->valid != 0u &&
+        coding_first1 >= exons->start1[exon_offset] &&
+        coding_first1 <= exons->end1[exon_offset] &&
         sequence_delta->nmd_early_cds_fact !=
             (uint8_t)DUCKVEP_NMD_EARLY_CDS_UNKNOWN) {
         early_cds_escape = sequence_delta->nmd_early_cds_fact ==
@@ -68,13 +83,6 @@ void duckvep_nmd_predict(
         reasons |= (uint8_t)DUCKVEP_NMD_ESCAPE_EARLY_CDS;
     }
 
-    exon_offset = transcripts->exon_offset[tx_idx];
-    exon_count = transcripts->exon_count[tx_idx];
-    if (exon_count == 0u || exon_offset > exons->exon_count ||
-        (size_t)exon_count > exons->exon_count - exon_offset) {
-        out->prediction = (uint8_t)DUCKVEP_NMD_UNRESOLVED;
-        return;
-    }
     if (exon_count == 1u) {
         reasons |= (uint8_t)DUCKVEP_NMD_ESCAPE_INTRONLESS;
     }

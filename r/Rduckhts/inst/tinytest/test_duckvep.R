@@ -2383,6 +2383,28 @@ local({
       all(!nmd_prediction$nmd_escape_last_exon)
   )
 
+  nmd_phase_queries <- c(queries[1], paste(
+    "SELECT 0::UINTEGER transcript_index, 1::UINTEGER seq_region,",
+    "90::UBIGINT transcript_start, 1119::UBIGINT transcript_end,",
+    "1::TINYINT strand, 0::UINTEGER gene_index, 3::UBIGINT transcript_flags,",
+    "1000::UBIGINT cds_start, 1119::UBIGINT cds_end,",
+    "('NN' || repeat('A',120))::BLOB cds_sequence, 1::UTINYINT codon_table"
+  ), paste(
+    "SELECT * FROM (VALUES",
+    "(0::UINTEGER,90::UBIGINT,99::UBIGINT,1::UBIGINT,10::UBIGINT,-1::TINYINT,-1::TINYINT),",
+    "(0::UINTEGER,1000::UBIGINT,1119::UBIGINT,11::UBIGINT,130::UBIGINT,2::TINYINT,2::TINYINT))",
+    "e(transcript_index,exon_start,exon_end,exon_cdna_start,exon_cdna_end,phase,end_phase)"
+  ))
+  expect_true(load_model("r-nmd-later-phase", nmd_phase_queries)$loaded)
+  nmd_phase <- dbGetQuery(con, paste(
+    "SELECT a.nmd_prediction, a.nmd_escape_early_cds, a.status_code=0 AS supported FROM",
+    "unnest(_duckvep_annotate_small_rich('r-nmd-later-phase', 1::UINTEGER,",
+    "1099::UBIGINT, 'AA', 'A', 0::UBIGINT)) u(a)"
+  ))
+  expect_identical(nmd_phase, data.frame(nmd_prediction="escaping",
+    nmd_escape_early_cds=TRUE, supported=TRUE))
+  expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-nmd-later-phase') dropped")$dropped)
+
   fixture_root <- system.file(
     "extdata",
     "duckvep",

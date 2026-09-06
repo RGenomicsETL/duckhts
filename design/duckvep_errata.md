@@ -1197,8 +1197,7 @@ nonzero, then treats the zero CDS end as an early-CDS escape.
 
 DuckVEP consequently retains two projections:
 
-- the minimized edit projection for REF validation, sequence application, translation,
-  and core consequence predicates; and
+- the minimized physical edit projection for REF validation and sequence application; and
 - the full uploaded-feature projection for the NMD plugin's early-CDS, last-exon, and
   penultimate-exon-end rules.
 
@@ -1206,6 +1205,11 @@ A cached early-CDS fact from consequence prediction is reusable only when the fu
 and minimized edit cover identical genomic spans. Equal-length padded features and pure
 insertions must use the full-feature projector. Broadening that cache condition changes
 valid VEP results even when the underlying sequence edit is identical.
+
+The physical cache also needs the same phase as the feature mapper. When CDS begins
+in a later exon, DuckVEP uses the shared full-feature projector instead: physical
+CDS 103 can be VEP feature CDS 101, which changes the plugin's early-CDS escape.
+The cache-versus-projector test covers both strands and phases 0–2.
 
 Source authority: VEP Plugins release/116 `NMD.pm`, commit
 `0082591268417af618e03850c5ffdc7c09998a5d`, together with VEP 116

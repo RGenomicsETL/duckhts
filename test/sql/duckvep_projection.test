@@ -325,6 +325,34 @@ SELECT duckvep_model_drop('later-phase');
 ----
 true
 
+# NMD's <=101 rule uses VEP feature CDS coordinates, not the physical
+# phase-padded edit fact cached by the ordinary indel path.
+query I
+SELECT * FROM duckvep_model_load('later-nmd', 'SELECT * FROM projection_regions',
+  'SELECT 0::UINTEGER transcript_index, 1::UINTEGER seq_region,
+    90::UBIGINT transcript_start, 1119::UBIGINT transcript_end,
+    1::TINYINT strand, 0::UINTEGER gene_index, 3::UBIGINT transcript_flags,
+    1000::UBIGINT cds_start, 1119::UBIGINT cds_end,
+    (''NN'' || repeat(''A'',120))::BLOB cds_sequence, 1::UTINYINT codon_table',
+  'SELECT * FROM (VALUES
+    (0::UINTEGER,90::UBIGINT,99::UBIGINT,1::UBIGINT,10::UBIGINT,-1::TINYINT,-1::TINYINT),
+    (0::UINTEGER,1000::UBIGINT,1119::UBIGINT,11::UBIGINT,130::UBIGINT,2::TINYINT,2::TINYINT))
+    e(transcript_index,exon_start,exon_end,exon_cdna_start,exon_cdna_end,phase,end_phase)');
+----
+true
+
+query TII
+SELECT a.nmd_prediction, a.nmd_escape_early_cds, a.status_code=0
+FROM unnest(_duckvep_annotate_small_rich('later-nmd', 1::UINTEGER,
+  1099::UBIGINT, 'AA', 'A', 0::UBIGINT)) u(a);
+----
+escaping	true	true
+
+query I
+SELECT duckvep_model_drop('later-nmd');
+----
+true
+
 statement ok
 CREATE TABLE projection_gap_event AS SELECT * REPLACE(18::UBIGINT AS position,
   'CAA' AS reference, 'GTT' AS alternate) FROM projection_events WHERE event_index=1;

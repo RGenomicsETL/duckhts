@@ -4,7 +4,8 @@
 - separate DuckVEP's physical CDS reference checks from VEP feature/codon
   coordinates when a noncoding first exon precedes a phase-padded CDS. Correct
   native SNV body/stop consequences and terminal-codon admission without
-  changing physical CDS edits or the SQL presentation reference
+  changing physical CDS edits or the SQL presentation reference. Do not reuse
+  physical early-CDS NMD cache facts across a later coding-start phase
 
 - retain DuckVEP's independent SNV start-codon predicate when phase-padded CDS
   sequence produces an unknown peptide, preserving physical REF validation.
