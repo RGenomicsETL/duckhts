@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- fail index-dependent BCF/VCF parallel scans when a worker cannot reload its
+  index, instead of silently returning zero rows. Preserve sequential fallback
+  when no index was available at bind, and same-connection recovery after errors
+
 - replace the BAM SIMD benchmark's Python driver with a shared R driver and
   fresh R/DuckDB processes per backend; retain workload controls and result
   checks, and invalidate cached measurements when binaries or inputs change

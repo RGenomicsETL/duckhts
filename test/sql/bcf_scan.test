@@ -1,0 +1,115 @@
+# name: test/sql/bcf_scan.test
+# description: Index-dependent BCF/VCF scans fail when a worker loses its index
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+SET threads=4;
+
+# Only generated indexes are overwritten; original fixture indexes are untouched.
+query I
+SELECT success FROM bcf_index('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.bcf',
+  index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', threads := 1);
+----
+1
+
+statement ok
+PREPARE bcf_reload AS SELECT POS FROM read_bcf('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.bcf',
+  index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', decompression_threads := 0);
+
+statement ok
+PREPARE bcf_reload_count AS SELECT count(POS) FROM read_bcf('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.bcf',
+  index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', decompression_threads := 0);
+
+query I
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.bcf',
+  index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', decompression_threads := 0);
+----
+2
+
+statement ok
+COPY (SELECT 'broken index') TO '__WORKING_DIRECTORY__/test_bcf_reload.csi' (FORMAT CSV, HEADER FALSE);
+
+statement error
+EXECUTE bcf_reload;
+----
+read_bcf: failed to reload index for parallel scan
+
+statement error
+EXECUTE bcf_reload_count;
+----
+read_bcf: failed to reload index for parallel scan
+
+# A new bind with no usable index still selects ordinary sequential fallback.
+query I rowsort
+SELECT POS FROM read_bcf('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.bcf',
+  index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', decompression_threads := 0);
+----
+10
+40
+
+query I
+SELECT success FROM bcf_index('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.bcf',
+  index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', threads := 1);
+----
+1
+
+# Re-executing the same prepared query recovers after restoring the index.
+query I rowsort
+EXECUTE bcf_reload;
+----
+10
+40
+
+query I
+SELECT success FROM bcf_index('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.vcf.gz',
+  index_path := '__WORKING_DIRECTORY__/test_vcf_reload.tbi', threads := 1);
+----
+1
+
+statement ok
+PREPARE vcf_reload AS SELECT POS FROM read_bcf('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.vcf.gz',
+  index_path := '__WORKING_DIRECTORY__/test_vcf_reload.tbi', decompression_threads := 0);
+
+statement ok
+PREPARE vcf_reload_count AS SELECT count(POS) FROM read_bcf('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.vcf.gz',
+  index_path := '__WORKING_DIRECTORY__/test_vcf_reload.tbi', decompression_threads := 0);
+
+query I
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.vcf.gz',
+  index_path := '__WORKING_DIRECTORY__/test_vcf_reload.tbi', decompression_threads := 0);
+----
+2
+
+statement ok
+COPY (SELECT 'broken index') TO '__WORKING_DIRECTORY__/test_vcf_reload.tbi' (FORMAT CSV, HEADER FALSE);
+
+statement error
+EXECUTE vcf_reload;
+----
+read_bcf: failed to reload index for parallel scan
+
+statement error
+EXECUTE vcf_reload_count;
+----
+read_bcf: failed to reload index for parallel scan
+
+query I rowsort
+SELECT POS FROM read_bcf('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.vcf.gz',
+  index_path := '__WORKING_DIRECTORY__/test_vcf_reload.tbi', decompression_threads := 0);
+----
+10
+40
+
+query I
+SELECT success FROM bcf_index('__WORKING_DIRECTORY__/test/data/parallel_empty_contigs.vcf.gz',
+  index_path := '__WORKING_DIRECTORY__/test_vcf_reload.tbi', threads := 1);
+----
+1
+
+query I rowsort
+EXECUTE vcf_reload;
+----
+10
+40

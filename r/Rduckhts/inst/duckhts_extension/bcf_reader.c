@@ -1992,6 +1992,15 @@ static void bcf_read_local_init(duckdb_init_info info) {
         }
     }
 
+    /* Bind already chose one-owner-per-contig scanning. Without the worker's
+     * index, every contig would look empty; streaming fallback would duplicate
+     * the file across workers. Fail this plan instead. */
+    if (is_parallel && !local->idx && !local->tbx) {
+        duckdb_init_set_error(info, "read_bcf: failed to reload index for parallel scan");
+        destroy_init_data(local);
+        return;
+    }
+
     // Set up region query if user specified a region (non-parallel case)
     if (!is_parallel && bind->n_regions > 0) {
         // First check if we have an index
