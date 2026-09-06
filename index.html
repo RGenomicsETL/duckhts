@@ -557,8 +557,8 @@ Show generated function catalog
 <col width="1%">
 <col width="0%">
 <col width="0%">
-<col width="9%">
-<col width="87%">
+<col width="8%">
+<col width="89%">
 </colgroup>
 <thead><tr class="header">
 <th>Function</th>
@@ -573,7 +573,21 @@ Show generated function catalog
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_bcf</code></td>
-<td>Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, optional bcftools-style CSQ type overrides, explicit scan_mode control (‘auto’ or full-file ‘sequential’), optional htslib decompression worker threads via decompression_threads (default 0 for single-threaded reads), and decode_error_policy (‘null’, ‘warn’, or ‘error’) for corrupt BCF header-vs-payload decode mismatches. The reader retains worker-owned INFO/FORMAT/GT buffers and record-owned annotation across output chunks; tidy sample rows repeat the complete record annotation. Comma-separated indexed regions use htslib’s native multi-region iterator and emit a record once when requested regions overlap. NULL or an empty region string means no filter; empty comma-separated items and malformed known-contig intervals are errors. Unknown contigs retain HTSlib’s skip policy. Automatic and region plans retain the parsed bind-time index, including remote and explicit index_path inputs: later index removal, corruption, or replacement leaves the original scan offsets and counts unchanged. Supply a matching initial data/index pair and keep data/header contents unchanged for the prepared plan’s lifetime; this is not a data-file snapshot or validation of an initially unrelated index. Reprepare to use a new index. With no usable index at bind, auto streams and region queries error. Sequential mode does not load an index; index-only counts do not validate file contents.</td>
+<td>Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, optional bcftools-style CSQ type overrides, explicit scan_mode control (‘auto’ or full-file ‘sequential’), optional htslib decompression worker threads via decompression_threads (default 0 for single-threaded reads), and decode_error_policy (‘null’, ‘warn’, or ‘error’) for corrupt BCF header-vs-payload decode mismatches. The reader retains worker-owned INFO/FORMAT/GT buffers and record-owned annotation across output chunks; tidy sample rows repeat the complete record annotation. Comma-separated indexed regions use htslib’s native multi-region iterator and emit a record once when requested regions overlap. NULL or an empty region string means no filter; empty comma-separated items and malformed known-contig intervals are errors. Unknown contigs retain HTSlib’s skip policy. Automatic and region plans retain the parsed bind-time index, including remote and explicit index_path inputs: later index removal, corruption, or replacement leaves the original scan offsets and counts unchanged. Supply a matching initial data/index pair and keep data/header contents unchanged for the prepared plan’s lifetime; this is not a data-file snapshot or validation of an initially unrelated index. Reprepare to use a new index. With no usable index at bind, auto streams and region queries error. Sequential mode does not load an index; index-only counts do not validate file contents. samples uses HTSlib selectors: NULL or ‘-’ keeps all, an empty string keeps none, comma-separated names include samples, and a leading ‘^’ excludes names. Unknown names error; selection is pushed into each worker header before record decoding and retains header order. read_bcf_samples() maps original-header sample indices to names.</td>
+</tr>
+<tr class="even">
+<td><code>read_geno</code></td>
+<td>table</td>
+<td>table</td>
+<td><code>rduckhts_geno</code></td>
+<td>Read one typed genotype row per VCF/BCF record: record_index UBIGINT, CHROM, POS, ID, REF, ALT VARCHAR[], and calls STRUCT(sample_index UINTEGER, alleles INTEGER[], phase_before BOOLEAN[], phase_set BIGINT)[]. Sample indices are zero-based original-header positions; join read_bcf_samples() from the same unchanged file for names. GT preserves arbitrary ploidy, nullable missing allele slots and HTSlib’s decoded per-slot phase flags, including its leading-slot convention for VCF versions before 4.4. Absent GT has NULL allele and phase lists; absent PS is NULL. FORMAT/PS must declare Number=1,Type=Integer; header/type/width mismatches follow decode_error_policy, while physical read errors and OOM always fail. non_reference_only removes calls with no called ALT, never records, and does not infer phase. samples shares read_bcf’s HTSlib comma-list/exclusion selectors. Full scans stream in input order independent of index availability, with one scan worker and separately configured htslib decompression threads. record_index is a zero-based scan-local ordinal, not a persistent file locator; indexed region unions restart at zero in HTSlib iterator order. Use explicit ORDER BY record_index when consuming order. Comma-separated overlapping regions visit a physical record once while preserving distinct duplicate records. Sequential mode rejects regions. Only projected calls decode GT/PS; zero selected samples yields an empty calls list on every row.</td>
+</tr>
+<tr class="odd">
+<td><code>read_bcf_samples</code></td>
+<td>table</td>
+<td>table</td>
+<td><code>rduckhts_bcf_samples</code></td>
+<td>Read the typed VCF/BCF sample catalog as sample_index UINTEGER and sample_name VARCHAR without reading records. Indices are zero-based positions in the original header, remain stable under selection and join read_geno calls from the same unchanged file. NULL or ‘-’ selects all; an empty string selects none; comma-separated names include samples; ‘^’ excludes them. Names are validated by HTSlib, selected rows retain header order, and unknown names error.</td>
 </tr>
 <tr class="even">
 <td><code>read_bam</code></td>
@@ -2118,7 +2132,7 @@ Show generated function catalog
 <span>  <span class="st">"ACGTACGTAA"</span></span>
 <span><span class="op">)</span>, <span class="va">munge_fasta</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">munge_fasta</span>, index_path <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">munge_fasta</span>, <span class="st">".fai"</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   success                                          index_path</span></span>
+<span><span class="co">#&gt;   success                                         index_path</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
 <span></span>
 <span><span class="va">munge_out</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_munge.html">rduckhts_munge</a></span><span class="op">(</span></span>
@@ -2223,7 +2237,7 @@ Show generated function catalog
 <span>  overwrite <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span>
 <span><span class="va">bgzip_meta</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"success"</span>, <span class="st">"output_path"</span>, <span class="st">"bytes_out"</span><span class="op">)</span><span class="op">]</span></span>
-<span><span class="co">#&gt;   success                                          output_path bytes_out</span></span>
+<span><span class="co">#&gt;   success                                           output_path bytes_out</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;       169</span></span>
 <span></span>
 <span><span class="va">bgunzip_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_bgunzip.html">rduckhts_bgunzip</a></span><span class="op">(</span></span>
@@ -2263,8 +2277,10 @@ Show generated function catalog
 <span>  threads <span class="op">=</span> <span class="fl">1</span></span>
 <span><span class="op">)</span></span>
 <span><span class="va">tabix_meta</span></span>
-<span><span class="co">#&gt;   success                                               index_path index_format</span></span>
-<span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;          TBI</span></span>
+<span><span class="co">#&gt;   success                                                index_path</span></span>
+<span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
+<span><span class="co">#&gt;   index_format</span></span>
+<span><span class="co">#&gt; 1          TBI</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_bed.html">rduckhts_bed</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"targets_idx"</span>, <span class="va">tmp_bgz</span>, region <span class="op">=</span> <span class="st">"CHROMOSOME_I:1-20"</span>, index_path <span class="op">=</span> <span class="va">tmp_tbi</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT * FROM targets_idx"</span><span class="op">)</span></span>

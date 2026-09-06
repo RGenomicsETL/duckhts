@@ -2,6 +2,21 @@
 
 ## Rduckhts 1.5.1.9000-0.1.5
 
+- add
+  [`rduckhts_geno()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_geno.md)
+  for bundled typed GT/PS calls and
+  [`rduckhts_bcf_samples()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf_samples.md)
+  for their original-header sample catalog. Add per-call sample
+  selection to single-file and multi-file BCF wrappers; sparse genotype
+  scans retain variant records while omitting calls without a called ALT
+
+- report bundled BCF list-allocation and GT-formatting failures without
+  publishing partial fields, while keeping the DBI connection
+  recoverable
+
+- preserve VCF 4.4 leading GT phase markers in bundled `read_bcf()`
+  output
+
 - expose bundled `duckvep_breakend_geometry()` through DBI for typed BND
   ALT preparation, including orientation, exact mate names and
   replacement sequence

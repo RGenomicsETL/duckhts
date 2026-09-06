@@ -18,7 +18,8 @@ rduckhts_bcf(
   scan_mode = NULL,
   decompression_threads = 0,
   decode_error_policy = "null",
-  overwrite = FALSE
+  overwrite = FALSE,
+  samples = NULL
 )
 ```
 
@@ -75,6 +76,13 @@ rduckhts_bcf(
 - overwrite:
 
   Logical. If TRUE, overwrites existing table
+
+- samples:
+
+  Optional HTSlib sample selector: \`NULL\` or \`"-"\` keeps all, \`""\`
+  keeps none, comma-separated names include samples, and a leading
+  \`"^"\` excludes them. Unknown names error; selected samples retain
+  header order.
 
 ## Value
 

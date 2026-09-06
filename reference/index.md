@@ -38,6 +38,8 @@
   : Build VCF or BCF Index
 - [`rduckhts_bcf_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf_multi.md)
   : Read multiple VCF/BCF files into a DuckDB table
+- [`rduckhts_bcf_samples()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf_samples.md)
+  : Read the VCF/BCF Sample Catalog
 - [`rduckhts_bcftools_norm()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcftools_norm.md)
   : Normalize Variant Alleles with bcftools-style Semantics
 - [`rduckhts_bed()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bed.md)
@@ -68,6 +70,8 @@
   : Read multiple FASTQ files into a DuckDB table
 - [`rduckhts_functions()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_functions.md)
   : List DuckHTS Extension Functions
+- [`rduckhts_geno()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_geno.md)
+  : Read Record-Major Genotypes
 - [`rduckhts_gff()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gff.md)
   : Create GFF3 Table
 - [`rduckhts_gff_convert_parquet()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gff_convert_parquet.md)

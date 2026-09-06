@@ -18,7 +18,8 @@ rduckhts_bcf_multi(
   scan_mode = NULL,
   decompression_threads = 0,
   .params = NULL,
-  overwrite = FALSE
+  overwrite = FALSE,
+  samples = NULL
 )
 ```
 
@@ -68,6 +69,10 @@ rduckhts_bcf_multi(
 - overwrite:
 
   Logical; if `TRUE`, replace an existing table.
+
+- samples:
+
+  Optional HTSlib sample-selector string, as in \[rduckhts_bcf()\].
 
 ## Value
 

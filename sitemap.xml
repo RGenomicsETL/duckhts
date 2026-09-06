@@ -24,6 +24,7 @@
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf_convert_parquet.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf_index.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf_multi.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcf_samples.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bcftools_norm.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bed.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_bed_multi.html</loc></url>
@@ -39,6 +40,7 @@
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fastq.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_fastq_multi.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_functions.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_geno.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gff.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gff_convert_parquet.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gff_multi.html</loc></url>
