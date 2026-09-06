@@ -88,6 +88,47 @@ static int valid_pool(const void *slots, uint32_t capacity, size_t size,
         bucket_count >= 2u * capacity && (bucket_count & (bucket_count - 1u)) == 0u;
 }
 
+/* The active array is an expiry min-heap. Input advances inspect only its
+ * earliest transcript; opening/closing one path updates O(log active) slots. */
+static int expires_before(const duckvep_carriers_t *s, uint32_t left, uint32_t right) {
+    uint32_t a = s->buffers.transcripts[left - 1u].transcript_index;
+    uint32_t b = s->buffers.transcripts[right - 1u].transcript_index;
+    if (s->model->chrom_id[a] != s->model->chrom_id[b])
+        return s->model->chrom_id[a] < s->model->chrom_id[b];
+    if (s->model->end1[a] != s->model->end1[b]) return s->model->end1[a] < s->model->end1[b];
+    return a < b;
+}
+
+static void open_transcript(duckvep_carriers_t *s, uint32_t id) {
+    uint32_t at = s->transcript_count++;
+    while (at) {
+        uint32_t parent = (at - 1u) / 2u;
+        uint32_t parent_id = s->buffers.active_transcripts[parent];
+        if (!expires_before(s, id, parent_id)) break;
+        s->buffers.active_transcripts[at] = parent_id;
+        at = parent;
+    }
+    s->buffers.active_transcripts[at] = id;
+}
+
+static void close_transcript(duckvep_carriers_t *s) {
+    uint32_t count = --s->transcript_count;
+    uint32_t last = s->buffers.active_transcripts[count];
+    s->buffers.active_transcripts[count] = 0u;
+    if (!count) return;
+    uint32_t at = 0u;
+    while (2u * at + 1u < count) {
+        uint32_t child = 2u * at + 1u;
+        if (child + 1u < count && expires_before(s, s->buffers.active_transcripts[child + 1u],
+                                                s->buffers.active_transcripts[child])) child++;
+        uint32_t child_id = s->buffers.active_transcripts[child];
+        if (!expires_before(s, child_id, last)) break;
+        s->buffers.active_transcripts[at] = child_id;
+        at = child;
+    }
+    s->buffers.active_transcripts[at] = last;
+}
+
 duckvep_carriers_status_t duckvep_carriers_init(
     duckvep_carriers_t *s, const duckvep_transcript_model_t *model,
     const duckvep_carrier_buffers_t *b) {
@@ -152,8 +193,8 @@ static duckvep_carriers_status_t advance(
         *completed = s->buffers.transcripts[s->closing - 1u].transcript_index;
         return DUCKVEP_CARRIERS_TRANSCRIPT_READY;
     }
-    for (uint32_t i = 0u; i < s->transcript_count; i++) {
-        uint32_t id = s->buffers.active_transcripts[i];
+    if (s->transcript_count) {
+        uint32_t id = s->buffers.active_transcripts[0];
         const duckvep_carrier_transcript_t *tx = &s->buffers.transcripts[id - 1u];
         uint32_t ordinal = tx->transcript_index;
         if (eof || s->model->chrom_id[ordinal] < chrom ||
@@ -216,8 +257,7 @@ duckvep_carriers_status_t duckvep_carriers_push(
         s->free_transcript = tx->next_free;
         memset(tx, 0, sizeof(*tx));
         tx->transcript_index = tx_index;
-        tx->active_pos = s->transcript_count;
-        s->buffers.active_transcripts[s->transcript_count++] = tx_id;
+        open_transcript(s, tx_id);
         s->buffers.transcript_index[tx_at] = (duckvep_carrier_bucket_t){mix(tx_index), tx_id};
     }
     if (!prefix_id) {
@@ -342,9 +382,7 @@ duckvep_carriers_status_t duckvep_carriers_release(duckvep_carriers_t *s) {
     }
     (void)find_transcript(s, tx->transcript_index, &at);
     remove_bucket(s->buffers.transcript_index, s->buffers.transcript_buckets, at);
-    uint32_t last = s->buffers.active_transcripts[--s->transcript_count];
-    s->buffers.active_transcripts[tx->active_pos] = last;
-    s->buffers.transcripts[last - 1u].active_pos = tx->active_pos;
+    close_transcript(s);
     tx->next_free = s->free_transcript;
     s->free_transcript = tx_id;
     s->closing = 0u;

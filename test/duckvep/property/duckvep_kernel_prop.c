@@ -8726,6 +8726,90 @@ TEST carrier_stream_reuses_slots_after_many_transcripts(void) {
     PASS();
 }
 
+TEST carrier_stream_expiry_heap_matches_dense_active_set(void) {
+    enum { TRANSCRIPTS = 256, SLOTS = 64 };
+    uint16_t chrom[TRANSCRIPTS] = {0};
+    uint32_t end[TRANSCRIPTS], start[TRANSCRIPTS], active[SLOTS];
+    uint8_t live[TRANSCRIPTS] = {0};
+    duckvep_carrier_transcript_t transcripts[SLOTS];
+    duckvep_carrier_call_t calls[SLOTS];
+    duckvep_carrier_prefix_t prefixes[SLOTS];
+    duckvep_carrier_bucket_t tx_index[2 * SLOTS], call_index[2 * SLOTS], prefix_index[2 * SLOTS];
+    duckvep_carrier_buffers_t b = {transcripts, calls, prefixes, active,
+        tx_index, call_index, prefix_index, SLOTS, SLOTS, SLOTS,
+        2 * SLOTS, 2 * SLOTS, 2 * SLOTS};
+    /* Model ordinals are not opening order. First fill every slot with tied
+     * ends; then interleave openings and expiry with up to 64 live positions. */
+    for (uint32_t pos = 1u; pos <= TRANSCRIPTS; pos++) {
+        uint32_t tx = (pos * 73u) % TRANSCRIPTS;
+        start[tx] = pos;
+        end[tx] = pos <= SLOTS ? SLOTS : pos + (tx * 29u) % SLOTS;
+    }
+    duckvep_transcript_model_t model = {0};
+    model.transcript_count = TRANSCRIPTS; model.chrom_id = chrom; model.end1 = end;
+    duckvep_carriers_t s;
+    ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_init(&s, &model, &b));
+    uint32_t drained = 0u;
+    for (uint32_t pos = 1u; pos <= TRANSCRIPTS + 1u; pos++) {
+        int eof = pos > TRANSCRIPTS;
+        for (;;) {
+            uint32_t expected = UINT32_MAX, completed;
+            for (uint32_t tx = 0u; tx < TRANSCRIPTS; tx++) {
+                if (live[tx] && (expected == UINT32_MAX || end[tx] < end[expected])) expected = tx;
+            }
+            duckvep_carriers_status_t status = eof ? duckvep_carriers_finish(&s, &completed)
+                : duckvep_carriers_advance(&s, 0u, pos, pos, &completed);
+            if (expected == UINT32_MAX || (!eof && end[expected] >= pos)) {
+                ASSERT_EQ(eof ? DUCKVEP_CARRIERS_DONE : DUCKVEP_CARRIERS_OK, status);
+                break;
+            }
+            ASSERT_EQ(DUCKVEP_CARRIERS_TRANSCRIPT_READY, status);
+            ASSERT_EQ(expected, completed);
+            duckvep_carrier_leaf_t leaf;
+            ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_next_leaf(&s, &leaf));
+            ASSERT_EQ(expected, leaf.transcript_index);
+            ASSERT_EQ(1u, leaf.call_count);
+            uint64_t event;
+            size_t required;
+            ASSERT_EQ(DUCKVEP_CARRIERS_OK,
+                      duckvep_carriers_leaf_events(&s, leaf.id, &event, 1u, &required));
+            ASSERT_EQ(1u, required); ASSERT_EQ(start[expected], event);
+            const duckvep_carrier_call_t *call = duckvep_carriers_call(&s, leaf.first_call);
+            ASSERT(call != NULL); ASSERT_EQ(expected, call->key.sample_index);
+            ASSERT_EQ(0u, call->next_leaf);
+            ASSERT_EQ(DUCKVEP_CARRIERS_DONE, duckvep_carriers_next_leaf(&s, &leaf));
+            ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_release(&s));
+            live[expected] = 0u;
+            drained++;
+        }
+        if (!eof) {
+            uint32_t tx = (pos * 73u) % TRANSCRIPTS, completed;
+            duckvep_carrier_key_t key = carrier_test_key(tx);
+            ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_push(&s, tx, &key));
+            live[tx] = 1u;
+            ASSERT_EQ(DUCKVEP_CARRIERS_OK, duckvep_carriers_advance(&s, 0u, pos, pos, &completed));
+        }
+        uint32_t live_count = 0u, earliest = UINT32_MAX;
+        for (uint32_t tx = 0u; tx < TRANSCRIPTS; tx++) if (live[tx]) {
+            live_count++;
+            if (earliest == UINT32_MAX || end[tx] < end[earliest]) earliest = tx;
+        }
+        ASSERT_EQ(live_count, s.transcript_count);
+        ASSERT_EQ(live_count, s.call_count); ASSERT_EQ(live_count, s.prefix_count);
+        if (live_count) {
+            ASSERT_EQ(earliest, transcripts[active[0] - 1u].transcript_index);
+            for (uint32_t child = 1u; child < live_count; child++) {
+                uint32_t a = transcripts[active[(child - 1u) / 2u] - 1u].transcript_index;
+                uint32_t z = transcripts[active[child] - 1u].transcript_index;
+                ASSERT(end[a] < end[z] || (end[a] == end[z] && a < z));
+            }
+        }
+    }
+    ASSERT_EQ(TRANSCRIPTS, drained);
+    ASSERT_EQ(SLOTS, s.peak_transcripts); ASSERT_EQ(SLOTS, s.peak_calls); ASSERT_EQ(SLOTS, s.peak_prefixes);
+    PASS();
+}
+
 static enum theft_alloc_res carrier_matrix_alloc(struct theft *t, void *env, void **instance) {
     (void)env;
     struct carrier_matrix_case *c = malloc(sizeof(*c));
@@ -25254,6 +25338,7 @@ int main(int argc, char **argv) {
     RUN_TEST(haplotype_edit_geometry_agrees_in_both_orders);
     RUN_TEST(carrier_stream_lifetime_keys_and_capacity);
     RUN_TEST(carrier_stream_reuses_slots_after_many_transcripts);
+    RUN_TEST(carrier_stream_expiry_heap_matches_dense_active_set);
     RUN_TEST(carrier_stream_matches_dense_matrix_across_batches);
     RUN_TEST(haplotype_partition_known_cases);
     RUN_TEST(haplotype_partition_preserves_interactions_for_any_valid_edit_set);

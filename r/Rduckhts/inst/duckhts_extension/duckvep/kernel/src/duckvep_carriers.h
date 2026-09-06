@@ -48,7 +48,7 @@ typedef struct {
 } duckvep_carrier_bucket_t;
 
 typedef struct {
-    uint32_t transcript_index, active_pos;
+    uint32_t transcript_index;
     uint32_t first_call, first_prefix, next_free;
 } duckvep_carrier_transcript_t;
 
@@ -66,7 +66,7 @@ typedef struct {
     duckvep_carrier_transcript_t *transcripts;
     duckvep_carrier_call_t *calls;
     duckvep_carrier_prefix_t *prefixes;
-    uint32_t *active_transcripts;
+    uint32_t *active_transcripts;   /* Min-heap by model chromosome, end, ordinal. */
     duckvep_carrier_bucket_t *transcript_index, *call_index, *prefix_index;
     uint32_t transcript_capacity, call_capacity, prefix_capacity;
     uint32_t transcript_buckets, call_buckets, prefix_buckets;
