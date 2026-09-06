@@ -65,8 +65,17 @@ test_record_major_genotypes <- function() {
     }
   }
 
-  # Indexing sample cells and allele slots are independent: one record may
-  # contain more samples than a DuckDB output chunk contains record rows.
+  # Missing fields and changing ploidy recur across several output chunks.
+  repeated <- tempfile("geno-chunks-", fileext = ".vcf")
+  on.exit(unlink(repeated), add = TRUE)
+  seed <- readLines(fixture("geno_calls.vcf"))
+  writeLines(c(seed[startsWith(seed, "#")], rep(seed[!startsWith(seed, "#")], 1000L)), repeated)
+  rduckhts_geno(con, "repeated_calls", repeated, decode_error_policy = "error")
+  expected_repeated <- expected[rep(seq_len(nrow(expected)), 1000L), ]
+  expected_repeated$record_index <- rep(0:5999, each = 2L)
+  rownames(expected_repeated) <- NULL
+  expect_equal(flatten("repeated_calls"), expected_repeated)
+  # One record can contain more sample cells than an output chunk has rows.
   rduckhts_geno(con, "many_samples", fixture("tidy_chunk_boundary.vcf"))
   expect_equal(dbGetQuery(con, paste(
     "SELECT len(calls)::INTEGER AS n, calls[2053].sample_index AS last_sample,",

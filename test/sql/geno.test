@@ -163,6 +163,35 @@ FROM read_geno('__WORKING_DIRECTORY__/test/data/bcf_filter_list_regression.vcf')
 ----
 5000	0	4999	5000
 
+# Cycle through missing fields and changing ploidy over several output chunks.
+statement ok
+COPY (
+ WITH lines AS (
+   SELECT unnest(string_split(trim(content,E'\n'),E'\n')) AS line,
+          generate_subscripts(string_split(trim(content,E'\n'),E'\n'),1) AS ordinal
+   FROM read_text('__WORKING_DIRECTORY__/test/data/geno_calls.vcf')
+ )
+ SELECT line FROM (
+   SELECT -1 AS repetition,ordinal,line FROM lines WHERE starts_with(line,'#')
+   UNION ALL
+   SELECT i AS repetition,ordinal,line FROM lines,range(1000) r(i) WHERE NOT starts_with(line,'#')
+ ) ORDER BY repetition,ordinal
+) TO '__WORKING_DIRECTORY__/test_geno_chunks.vcf' (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+# Repeated missing GT/PS, changing ploidy and sparse lists cross output chunks;
+# compare every allele, flag and sample index, not just a count or checksum.
+query I
+WITH observed AS (
+ SELECT record_index, unnest(calls,recursive:=true) FROM read_geno('__WORKING_DIRECTORY__/test_geno_chunks.vcf')
+), expected AS (
+ SELECT (e.record_index+6*r.i)::UBIGINT AS record_index, sample_index, alleles,phase_before,phase_set
+ FROM geno_expected e,range(1000) r(i)
+)
+SELECT count(*) FROM ((SELECT * FROM observed EXCEPT ALL SELECT * FROM expected)
+ UNION ALL (SELECT * FROM expected EXCEPT ALL SELECT * FROM observed));
+----
+0
+
 # One record's sample list crosses the usual output vector size.
 query III
 SELECT count(*), len(first(calls)), first(calls)[2053].sample_index
