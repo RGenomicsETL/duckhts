@@ -384,8 +384,18 @@ build. The table retains complete
 SHA-256 receipts for the extension, model, FASTA and index, source VCF, exact
 sampled VCF passed to VEP, and pair-level Parquet; shortened digests are
 rendered above.
-Legacy HGVS rows recorded before build receipts were introduced remain in the
+Historical HGVS rows recorded before build receipts were introduced remain in the
 append-only CSV but are not presented as checked evidence.
+
+The `b7c7237ee686` ClinVar HGVS and NMD runs use a freshly acquired
+`vep116_grch38_cache_chr21`. Its complete 27,644,657,162-byte source archive was
+verified against registry SHA-256
+`014c7dd9bb5ad06665866d62eb80f31ca761197bcb9b59280300676f996e600d` before
+publication. The cache contains 98 files / 326,767,268 bytes; every retained file
+matches the preserved earlier cache byte-for-byte. Earlier HTTP-identity-only
+acquisition receipts remain historical observations, not content-checksum
+evidence. The refreshed HGVS run retains the same 1,864-variant input and all
+56,998 transcript pairs, with no unresolved, missing, extra or discordant pairs.
 
 ## Paired-breakend differential
 
@@ -968,14 +978,16 @@ release/116 `NMD.pm`. It compares `triggering`, `escaping`, and `unresolved`
 for every eligible transcript pair; it does not infer NMD from the core
 `NMD_transcript_variant` biotype consequence.
 
-The `a84ff1500149` run uses registered `variantkey_clinvar_20260706` on
+The `b7c7237ee686` run uses registered `variantkey_clinvar_20260706` on
 chromosome 21: 49,937 source records yield 49,781 eligible alleles under the
 existing 50-base limit, with no duplicate eligible alleles removed. The oracle
 uses registered `vep116_grch38_cache_chr21`, containing every chromosome-21
 cache file and root metadata; the native model is `duckvep_ensembl116_model`.
 Its 1,353,288 native pairs all match. The 70,521 NMD classifications include
-29,954 unresolved by both engines, not resolved predictions. These denominators
-differ from the historical NMD run; this is not an identical-workload comparison.
+29,954 unresolved by both engines, not resolved predictions. These reproduce
+the `a84ff1500149` counts with the checksum-verified cache. The older run with
+1,331,664 native pairs and 68,554 NMD classifications has different denominators;
+comparison with that run is not an identical-workload comparison.
 
 ```{r nmd-summary}
 if (!is.null(latest_nmd_run_ids) && nrow(latest_nmd_run_ids)) {
