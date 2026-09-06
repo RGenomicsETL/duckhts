@@ -79,6 +79,21 @@ undefined-behaviour safety for the exercised states, not biological or VEP equiv
 The strict profile is never selected implicitly and is not exposed as a SQL option in the
 VEP-116 release surface.
 
+The SQL-only `duckvep_transcript_projection` reference is likewise specifically a
+VEP-116 presentation contract, not a strict-profile kernel entry point. Its alternate
+codon slice reproduces `TranscriptVariationAllele::_get_alternate_cds` calling
+`_trim_incomplete_codon`: the latter's assignment in the condition retains an alternate
+CDS of at least three bases, then the caller appends the post-CDS sequence. Trimming
+that sequence to a multiple of three would change frameshift and terminal-partial
+codon displays. The explicit SQL length test is the reference relation's expression
+of this same named incomplete-codon assignment behavior; it does not change the C
+profile inventory. `test/sql/duckvep_projection.test` pins variable-length displays
+and a partial-CDS endpoint; `projection_differential.R` compares every typed display
+field with the pinned executable on both strands and a partial-CDS model. GFF input
+does not carry the full Ensembl transcript-quality/translation-edit attribute set:
+positive `cds_*_NF` and peptide-edit tests are model-attribute properties, not a claim
+of GFF-based oracle coverage for those attributes.
+
 The remaining entries in this ledger describe VEP's declared coordinate, mapper,
 predicate-order, cache, or output semantics. They are implemented as typed facts and
 generated consequence rules, not hidden formatter switches. Examples include the

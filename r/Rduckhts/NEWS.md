@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- expose bundled `duckvep_transcript_projection()` through DBI for typed
+  transcript ranges, exon/intron ordinals, distance, quality flags and
+  variable-length codon/amino-acid display from annotated literal alleles
+
 - add `rduckhts_geno()` for bundled typed GT/PS calls and
   `rduckhts_bcf_samples()` for their original-header sample catalog. Add per-call
   sample selection to single-file and multi-file BCF wrappers; sparse genotype

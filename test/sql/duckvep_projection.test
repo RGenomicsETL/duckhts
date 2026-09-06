@@ -1,0 +1,345 @@
+# name: test/sql/duckvep_projection.test
+# description: SQL reference for typed, independent transcript presentation
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+CREATE TABLE projection_regions AS SELECT 1::UINTEGER AS seq_region;
+
+statement ok
+CREATE TABLE projection_transcripts AS SELECT
+  0::UINTEGER AS transcript_index, 1::UINTEGER AS seq_region,
+  10::UBIGINT AS transcript_start, 30::UBIGINT AS transcript_end,
+  1::TINYINT AS strand, 0::UINTEGER AS gene_index, 3::UBIGINT AS transcript_flags,
+  10::UBIGINT AS cds_start, 30::UBIGINT AS cds_end,
+  'ATGAAACCCGGGTAA'::BLOB AS cds_sequence, 1::UTINYINT AS codon_table,
+  ''::BLOB AS pre_cds_sequence, ''::BLOB AS post_cds_sequence,
+  [struct_pack(exon_start := 10::UBIGINT, exon_end := 18::UBIGINT,
+    exon_cdna_start := 1::UBIGINT, exon_cdna_end := 9::UBIGINT,
+    phase := 0::TINYINT, end_phase := 0::TINYINT),
+   struct_pack(exon_start := 25::UBIGINT, exon_end := 30::UBIGINT,
+    exon_cdna_start := 10::UBIGINT, exon_cdna_end := 15::UBIGINT,
+    phase := 0::TINYINT, end_phase := 0::TINYINT)] AS exons,
+  []::STRUCT(protein_position UINTEGER, alternate_amino_acid VARCHAR, edit_code VARCHAR)[] AS peptide_edits;
+
+query I
+SELECT * FROM duckvep_model_load('projection',
+  'SELECT * FROM projection_regions',
+  'SELECT * EXCLUDE(exons, peptide_edits) FROM projection_transcripts',
+  'SELECT transcript_index, exon.exon_start, exon.exon_end,
+    exon.exon_cdna_start, exon.exon_cdna_end, exon.phase, exon.end_phase
+    FROM projection_transcripts, unnest(exons) u(exon) ORDER BY exon.exon_cdna_start');
+----
+true
+
+statement ok
+CREATE TABLE projection_events AS SELECT event_index::UBIGINT AS event_index,
+  1::UINTEGER AS seq_region, position::UBIGINT AS position, reference, alternate,
+  NULL::UBIGINT AS end_position, NULL::VARCHAR AS structural_type,
+  NULL::VARCHAR AS copy_change, NULL::UINTEGER AS mate_seq_region, NULL::UBIGINT AS mate_position
+FROM (VALUES (1,13,'A','G'), (2,13,'AAA','GTT'), (3,12,'G','GAAA'),
+  (4,12,'GAAA','G'), (5,13,'A','AT'), (6,17,'CCAAAAAAGG','A'),
+  (7,5,'A','C'), (8,18,'C','CA')) e(event_index,position,reference,alternate)
+ORDER BY position,event_index;
+
+statement ok
+CREATE TABLE projection_annotations AS SELECT * FROM duckvep_annotate('projection_events', 'projection');
+
+statement ok
+CREATE TABLE projection_result AS SELECT * FROM duckvep_transcript_projection(
+  'projection_events', 'projection_annotations', 'projection_transcripts');
+
+# Codon/peptide fields remain separate typed strings, including empty codons,
+# frame-changing partial peptides and an edit spanning an intron.
+query IITTTT
+SELECT event_index, interbase::INTEGER, reference_amino_acids, alternate_amino_acids,
+  reference_codons, alternate_codons FROM projection_result ORDER BY event_index;
+----
+1	0	K	E	Aaa	Gaa
+2	0	K	V	AAA	GTT
+3	1	-	K	-	AAA
+4	0	K	-	AAA	-
+5	1	K	IX	aaa	aTaa
+6	0	PG	Q	cCCGGG	cAg
+7	0	NULL	NULL	NULL	NULL
+8	1	-	X	-	A
+
+query IIIIIII
+SELECT event_index, cdna_start, cdna_end, cds_start, cds_end, protein_start, protein_end
+FROM projection_result ORDER BY event_index;
+----
+1	4	4	4	4	2	2
+2	4	6	4	6	2	2
+3	3	4	3	4	1	2
+4	4	6	4	6	2	2
+5	4	5	4	5	2	2
+6	8	11	8	11	3	4
+7	NULL	NULL	NULL	NULL	NULL	NULL
+8	9	10	9	10	3	4
+
+query ITIIIIIII
+SELECT event_index, output_allele, exon_first, exon_last, exon_total,
+  intron_first, intron_last, intron_total, transcript_distance
+FROM projection_result ORDER BY event_index;
+----
+1	G	1	1	2	NULL	NULL	1	NULL
+2	GTT	1	1	2	NULL	NULL	1	NULL
+3	AAA	1	1	2	NULL	NULL	1	NULL
+4	-	1	1	2	NULL	NULL	1	NULL
+5	T	1	1	2	NULL	NULL	1	NULL
+6	A	1	2	2	1	1	1	NULL
+7	C	NULL	NULL	2	NULL	NULL	1	5
+8	A	NULL	NULL	2	NULL	NULL	1	NULL
+
+# Quality flags are model attributes, independent of consequence severity.
+# A reference peptide edit changes the reference display, not the ALT peptide.
+statement ok
+CREATE TABLE projection_edited AS SELECT * REPLACE(
+  (transcript_flags | 16 | 32)::UBIGINT AS transcript_flags,
+  [struct_pack(protein_position := 2::UINTEGER, alternate_amino_acid := 'U', edit_code := '_selenocysteine')]
+    AS peptide_edits) FROM projection_transcripts;
+
+query IITT
+SELECT cds_start_nf::INTEGER, cds_end_nf::INTEGER, reference_amino_acids, alternate_amino_acids
+FROM duckvep_transcript_projection('projection_events', 'projection_annotations', 'projection_edited')
+WHERE event_index = 1;
+----
+1	1	U	E
+
+# No hidden deduplication: preserve repeated annotation rows and absent transcript
+# identities. The caller retains the original status/reason in its annotation table.
+statement ok
+CREATE TABLE projection_repeated AS SELECT * FROM projection_annotations
+UNION ALL SELECT * FROM projection_annotations WHERE event_index = 1
+UNION ALL SELECT * REPLACE(NULL::UINTEGER AS transcript_index) FROM projection_annotations WHERE event_index = 7;
+
+query III
+SELECT count(*), count(*) FILTER (WHERE event_index = 1),
+  count(*) FILTER (WHERE transcript_index IS NULL AND cdna_start IS NULL
+    AND exon_total IS NULL AND intron_total IS NULL AND cds_start_nf IS NULL)
+FROM duckvep_transcript_projection('projection_events', 'projection_repeated', 'projection_transcripts');
+----
+10	2	1
+
+# Negative-strand ranges and codon casing are transcript-oriented; the output
+# allele stays in the submitted reference orientation.
+statement ok
+CREATE TABLE projection_reverse AS SELECT * REPLACE(-1::TINYINT AS strand,
+  seq_revcomp(decode(cds_sequence))::BLOB AS cds_sequence,
+  list_reverse(list_transform(exons, e -> struct_pack(exon_start := e.exon_start,
+    exon_end := e.exon_end, exon_cdna_start := (16-e.exon_cdna_end)::UBIGINT,
+    exon_cdna_end := (16-e.exon_cdna_start)::UBIGINT, phase := e.phase,
+    end_phase := e.end_phase))) AS exons) FROM projection_transcripts;
+
+query TIIIIITTTT
+SELECT output_allele, cdna_start, cdna_end, cds_start, protein_start, exon_first,
+  reference_amino_acids, alternate_amino_acids, reference_codons, alternate_codons
+FROM duckvep_transcript_projection('projection_events', 'projection_annotations', 'projection_reverse')
+WHERE event_index=1;
+----
+G	12	12	12	4	2	F	F	ttT	ttC
+
+# Both endpoint gaps remain NULL independently. A noncoding model retains cDNA
+# and exon facts, but supplies neither coding coordinates nor peptide displays.
+statement ok
+CREATE TABLE projection_noncoding AS SELECT * REPLACE(0::UBIGINT AS transcript_flags,
+  NULL::UBIGINT AS cds_start, NULL::UBIGINT AS cds_end, NULL::BLOB AS cds_sequence,
+  NULL::BLOB AS pre_cds_sequence, NULL::BLOB AS post_cds_sequence,
+  NULL::UTINYINT AS codon_table) FROM projection_transcripts;
+
+query IIIITT
+SELECT cdna_start, cdna_end, cds_start, protein_start, reference_amino_acids, reference_codons
+FROM duckvep_transcript_projection('projection_events', 'projection_annotations', 'projection_noncoding')
+WHERE event_index=1;
+----
+4	4	NULL	NULL	NULL	NULL
+
+statement ok
+CREATE TABLE projection_empty AS SELECT * FROM projection_annotations WHERE false;
+
+query I
+SELECT count(*) FROM duckvep_transcript_projection('projection_events', 'projection_empty', 'projection_transcripts');
+----
+0
+
+# The same genetic-code authority as the kernel: no private translation tables.
+statement ok
+CREATE TABLE projection_mito AS SELECT * REPLACE(2::UTINYINT AS codon_table,
+  'ATGTGACCCGGGTAA'::BLOB AS cds_sequence) FROM projection_transcripts;
+
+statement ok
+CREATE TABLE projection_mito_event AS SELECT * REPLACE(14::UBIGINT AS position,
+  'G' AS reference, 'A' AS alternate) FROM projection_events WHERE event_index=1;
+
+statement ok
+CREATE TABLE projection_one_annotation AS SELECT * FROM projection_annotations WHERE event_index=1;
+
+query TTTT
+SELECT reference_amino_acids, alternate_amino_acids, reference_codons, alternate_codons
+FROM duckvep_transcript_projection('projection_mito_event', 'projection_one_annotation', 'projection_mito')
+WHERE event_index=1;
+----
+W	*	tGa	tAa
+
+statement ok
+CREATE TABLE projection_gap_event AS SELECT * REPLACE(18::UBIGINT AS position,
+  'CAA' AS reference, 'GTT' AS alternate) FROM projection_events WHERE event_index=1;
+
+query IIIIIITT
+SELECT cdna_start, cdna_end, cds_start, cds_end, protein_start, protein_end,
+  reference_amino_acids, reference_codons FROM duckvep_transcript_projection(
+    'projection_gap_event', 'projection_one_annotation', 'projection_transcripts');
+----
+9	NULL	9	NULL	3	NULL	NULL	NULL
+
+statement ok
+CREATE TABLE projection_three AS SELECT * REPLACE(
+  [exons[1], struct_pack(exon_start := 20::UBIGINT, exon_end := 21::UBIGINT,
+    exon_cdna_start := 10::UBIGINT, exon_cdna_end := 11::UBIGINT,
+    phase := -1::TINYINT, end_phase := -1::TINYINT),
+   struct_pack(exon_start := 25::UBIGINT, exon_end := 30::UBIGINT,
+    exon_cdna_start := 12::UBIGINT, exon_cdna_end := 17::UBIGINT,
+    phase := -1::TINYINT, end_phase := -1::TINYINT)] AS exons) FROM projection_noncoding;
+
+statement ok
+CREATE TABLE projection_long_event AS SELECT * REPLACE(17::UBIGINT AS position,
+  'CCAAAAAAGGG' AS reference, 'A' AS alternate) FROM projection_events WHERE event_index=1;
+
+query IIIIIIII
+SELECT cdna_start, cdna_end, exon_first, exon_last, exon_total,
+  intron_first, intron_last, intron_total FROM duckvep_transcript_projection(
+    'projection_long_event', 'projection_one_annotation', 'projection_three');
+----
+8	14	1	3	3	1	2	2
+
+# An insertion directly after the CDS is wholly outside its coordinate map.
+statement ok
+CREATE TABLE projection_partial AS SELECT * REPLACE(29::UBIGINT AS cds_end,
+  substring(decode(cds_sequence),1,14)::BLOB AS cds_sequence,
+  35::UBIGINT AS transcript_flags) FROM projection_transcripts;
+
+statement ok
+CREATE TABLE projection_cds_end_event AS SELECT * REPLACE(29::UBIGINT AS position,
+  'A' AS reference, 'AT' AS alternate) FROM projection_events WHERE event_index=1;
+
+query IIIIIIT
+SELECT cdna_start, cdna_end, cds_start, cds_end, protein_start, cds_end_nf::INTEGER,
+  reference_codons FROM duckvep_transcript_projection(
+    'projection_cds_end_event', 'projection_one_annotation', 'projection_partial');
+----
+14	15	NULL	NULL	NULL	1	NULL
+
+statement ok
+CREATE TABLE projection_invalid_code AS SELECT * REPLACE(255::UTINYINT AS codon_table)
+FROM projection_transcripts;
+
+statement error
+SELECT * FROM duckvep_transcript_projection('projection_events', 'projection_annotations', 'projection_invalid_code');
+----
+unsupported genetic code
+
+# Cold metadata joins must not multiply transcript rows or redefine VEP FLAGS.
+statement ok
+CREATE TABLE projection_cold AS SELECT 0::UINTEGER transcript_index,
+  10 source_transcript_id, 20 source_gene_id, 'protein_coding' transcript_biotype,
+  'NM_TEST.1' mane_select_refseq, 4096::UBIGINT transcript_flags;
+
+statement ok
+CREATE TABLE projection_gene AS SELECT 20 gene_id, 10 canonical_transcript_id;
+
+statement ok
+CREATE TABLE projection_attributes AS SELECT * FROM (VALUES
+  (10,'CCDS1'),(10,'CCDS2'),(10,'CCDS1')) a(transcript_id,value);
+
+query IIIIITT
+WITH ccds AS (SELECT transcript_id, list(DISTINCT value ORDER BY value) ccds_ids
+  FROM projection_attributes GROUP BY transcript_id)
+SELECT p.event_index, (g.canonical_transcript_id=t.source_transcript_id)::INTEGER,
+  p.cds_start_nf::INTEGER, p.cds_end_nf::INTEGER,
+  ((t.transcript_flags & 4096)<>0)::INTEGER, t.mane_select_refseq,
+  array_to_string(c.ccds_ids, ',')
+FROM projection_result p LEFT JOIN projection_cold t USING(transcript_index)
+LEFT JOIN projection_gene g ON g.gene_id=t.source_gene_id
+LEFT JOIN ccds c ON c.transcript_id=t.source_transcript_id WHERE p.event_index=1;
+----
+1	1	0	0	1	NM_TEST.1	CCDS1,CCDS2
+
+statement ok
+CREATE TABLE projection_bad_events AS SELECT * FROM projection_events UNION ALL SELECT * FROM projection_events;
+
+statement error
+SELECT * FROM duckvep_transcript_projection('projection_bad_events', 'projection_annotations', 'projection_transcripts');
+----
+event_index must be unique
+
+statement ok
+CREATE OR REPLACE TABLE projection_bad_events AS SELECT * FROM projection_events WHERE event_index != 1;
+
+statement error
+SELECT * FROM duckvep_transcript_projection('projection_bad_events', 'projection_annotations', 'projection_transcripts');
+----
+annotation needs a source event
+
+statement ok
+CREATE OR REPLACE TABLE projection_bad_events AS SELECT * REPLACE(2::UINTEGER AS seq_region) FROM projection_events;
+
+statement error
+SELECT * FROM duckvep_transcript_projection('projection_bad_events', 'projection_annotations', 'projection_transcripts');
+----
+source region must match the model
+
+statement ok
+CREATE TABLE projection_bad_model AS SELECT * REPLACE(1::UINTEGER AS transcript_index) FROM projection_transcripts;
+
+statement error
+SELECT * FROM duckvep_transcript_projection('projection_events', 'projection_annotations', 'projection_bad_model');
+----
+annotation transcript and source region must match the model
+
+statement ok
+CREATE OR REPLACE TABLE projection_bad_model AS SELECT * FROM projection_transcripts UNION ALL SELECT * FROM projection_transcripts;
+
+statement error
+SELECT * FROM duckvep_transcript_projection('projection_events', 'projection_annotations', 'projection_bad_model');
+----
+transcript_index must be non-null and unique
+
+# Multiple DuckDB vectors and workers must preserve the complete typed multiset.
+statement ok
+CREATE TABLE projection_many_events AS SELECT e.* REPLACE((event_index + 8*i)::UBIGINT AS event_index)
+FROM projection_events e, range(600) r(i);
+
+statement ok
+CREATE TABLE projection_many_annotations AS SELECT a.* REPLACE((event_index + 8*i)::UBIGINT AS event_index)
+FROM projection_annotations a, range(600) r(i);
+
+statement ok
+SET threads=1;
+
+statement ok
+CREATE TABLE projection_one_thread AS SELECT * FROM duckvep_transcript_projection(
+  'projection_many_events', 'projection_many_annotations', 'projection_transcripts');
+
+statement ok
+SET threads=4;
+
+query III
+WITH expected AS (SELECT p.* REPLACE((event_index+8*i)::UBIGINT AS event_index)
+  FROM projection_result p, range(600) r(i)), actual AS (
+  SELECT * FROM duckvep_transcript_projection('projection_many_events', 'projection_many_annotations', 'projection_transcripts'))
+SELECT (SELECT count(*) FROM actual),
+  (SELECT count(*) FROM ((SELECT * FROM actual EXCEPT ALL SELECT * FROM expected)
+    UNION ALL (SELECT * FROM expected EXCEPT ALL SELECT * FROM actual))),
+  (SELECT count(*) FROM ((SELECT * FROM actual EXCEPT ALL SELECT * FROM projection_one_thread)
+    UNION ALL (SELECT * FROM projection_one_thread EXCEPT ALL SELECT * FROM actual)));
+----
+4800	0	0
+
+statement ok
+SET threads=1;
+
+query I
+SELECT duckvep_model_drop('projection');
+----
+true

@@ -1,0 +1,76 @@
+---
+title: "DuckVEP SQL transcript presentation"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+root <- normalizePath(Sys.getenv("DUCKHTS_REPO_ROOT", getwd()), mustWork = TRUE)
+runs <- read.csv(file.path(root, "benchmarks/data/duckvep_projection.csv"),
+  stringsAsFactors = FALSE, check.names = FALSE)
+stopifnot(all(runs$build_binding != "diagnostic_unbound"))
+```
+
+This measures the complete 23-column result of
+`duckvep_transcript_projection(events, annotations, transcripts)` as a DuckDB
+temporary table. It is the SQL reference, not a fused native implementation.
+The literal alleles and consequence rows are prepared before timing. The timer
+includes the macro's validation, joins, coordinate projection, codon/peptide
+calculation and complete output materialization. One warm-up precedes the
+reported measured passes; preparation and full-output verification are excluded
+from those timings.
+
+The raw FASTA, index and minimal GFF are pinned in `r/duckhtsbench` under the
+`duckvep-projection` workload. `projection_fixtures.R` derives a forward model,
+a reverse model, and a three-exon model with two-base CDS phase padding from
+those inputs. The unchanged independent-event generator adds 1,000 seed-173
+random alleles to its targeted witnesses. Only record IDs are relabelled so
+repeated source alleles retain separate event keys. Each set is repeated eight
+times with distinct keys. These tiny warm models are a reproducible adapter
+workload, not a genome-scale annotation or file-ingestion benchmark.
+
+Each model/worker-count pair runs in a fresh R process. Peak RSS is the Linux
+process high-water mark, including model preparation and verification; it is
+not isolated DuckDB workspace usage. Output bytes are the sum of the UTF-8
+lengths of the complete rows serialized as JSON, not DuckDB physical storage
+size. The SHA-256 covers the schema and every typed row sorted by all columns,
+including duplicates and NULLs. It must match across passes and worker counts.
+
+## Measured materialization
+
+```{r timings}
+table <- runs[c("source_revision", "case", "threads", "input_alleles",
+  "expanded_transcript_rows", "output_rows", "json_utf8_bytes", "iterations",
+  "median_seconds", "min_seconds", "max_seconds", "peak_rss_bytes")]
+table$source_revision <- substr(table$source_revision, 1L, 12L)
+knitr::kable(table)
+```
+
+## Identity and complete output
+
+```{r identity}
+knitr::kable(unique(runs[c("source_revision", "extension_sha256", "build_binding",
+  "machine", "cpu", "duckdb_version")]))
+knitr::kable(unique(runs[c("case", "input_vcf_sha256", "model_gff_sha256",
+  "reference_sha256", "output_sha256")]))
+```
+
+The nearest existing [sorted-stream throughput report](duckvep_throughput.md)
+measures consequence/HGVS output, not this complete presentation contract.
+There is no identical earlier workload and no fused implementation measured
+here, so these results establish a baseline rather than prove a speedup or
+absence of regression. A production-density model and comparison with a future
+fused implementation remain unmeasured.
+
+Reproduce from a clean source revision with an extension build receipt:
+
+```{r reproduce, eval=FALSE, echo=TRUE}
+source("scripts/benchmark_duckvep_projection.R")
+benchmark_duckvep_projection(
+  normalizePath("."), "build/release/duckhts.duckdb_extension",
+  "benchmarks/data/duckvep_projection.csv",
+  extension_receipt = Sys.getenv("DUCKHTS_EXTENSION_RECEIPT")
+)
+rmarkdown::render("benchmarks/benchmark_duckvep_projection.Rmd",
+  knit_root_dir = normalizePath("."))
+```

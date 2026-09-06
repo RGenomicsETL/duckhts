@@ -1,5 +1,8 @@
 # duckhtsbench 0.0.0.9000
 
+- share network-free committed-fixture staging between BCF scan and DuckVEP
+  projection workloads, retaining registry byte identities and provenance
+
 - stage an all-sample HPRC regional genotype cohort as matching VCF.gz/BCF
   representations, with source-version provenance and network-free staging tests
 

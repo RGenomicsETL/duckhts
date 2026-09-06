@@ -310,6 +310,18 @@
       ]
     },
     {
+      "name": "duckvep_transcript_projection",
+      "kind": "table_macro",
+      "category": "Variant Annotation",
+      "signature": "duckvep_transcript_projection(events_table, annotations_table, transcripts_table)",
+      "returns": "TABLE(event_index UBIGINT, transcript_index UINTEGER, output_allele VARCHAR, interbase BOOLEAN, cdna_start BIGINT, cdna_end BIGINT, cds_start BIGINT, cds_end BIGINT, protein_start BIGINT, protein_end BIGINT, exon_first UINTEGER, exon_last UINTEGER, exon_total UINTEGER, intron_first UINTEGER, intron_last UINTEGER, intron_total UINTEGER, transcript_distance BIGINT, cds_start_nf BOOLEAN, cds_end_nf BOOLEAN, reference_amino_acids VARCHAR, alternate_amino_acids VARCHAR, reference_codons VARCHAR, alternate_codons VARCHAR)",
+      "r_wrapper": "",
+      "description": "Project independent literal alleles into typed, unshifted VEP-116 transcript presentation facts using transparent DuckDB SQL. events_table supplies unique event_index UBIGINT, seq_region UINTEGER, position UBIGINT, reference VARCHAR and alternate VARCHAR. annotations_table supplies event_index, nullable transcript_index and consequence_mask from duckvep_annotate. transcripts_table is the same validated, immutable prepared transcript relation used to load the annotation model, with seq_region, transcript spans, strand, transcript_flags, CDS spans/sequence, codon_table, complete post_cds_sequence, transcript-ordered nested exons and peptide_edits as produced by duckvep_ensembl_transcripts. Missing events, duplicate event/model keys, missing transcripts and source/model region disagreement fail. One row is preserved per input annotation, including duplicates and transcript-free rows; no arrival order is promised. output_allele uses the VEP feature allele, with '-' for an empty alternate, rather than the uploaded or universally minimized ALT. Nullable one-based cDNA/CDS/protein start/end fields retain independent missing endpoints; insertion ranges are presented in ascending flank order and interbase remains explicit. Exon/intron first/last ordinals are transcript-oriented; totals describe the model even when no ordinal overlaps. Distance is the shortest distance from VEP feature endpoints to transcript endpoints and is present only for upstream/downstream consequences. Codon strings retain VEP changed-base casing and variable-length indel forms; amino-acid fields are separate reference/alternate strings, including multi-residue edits. Genetic codes reuse the kernel's immutable tables, and reference peptide edits come from the prepared model. This adds no consequence engine, FASTA handle, phased execution, structural projection, or HGVS shifting. Join event_index/transcript_index back to source annotations and cold source/model relations for stable identifiers, canonical, MANE, CCDS, GENCODE and biotype attributes; transcript-quality cds_start_nf/cds_end_nf must not be conflated with canonical flags.",
+      "examples": [
+        "SELECT p.* FROM duckvep_transcript_projection('events', 'annotations', 'grch38_transcripts') p;"
+      ]
+    },
+    {
       "name": "duckvep_breakend_geometry",
       "kind": "scalar",
       "category": "Variant Annotation",

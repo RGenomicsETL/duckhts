@@ -1437,6 +1437,52 @@ local({
   expect_equal(breakend_mixed_vectors$regulation_count, c(2, 2))
 
   loaded <- load_model("r-test", queries)
+  # Presentation composes existing annotations with their cold model relation.
+  dbExecute(con, paste(
+    "CREATE TABLE duckvep_r_projection_model AS SELECT t.*, e.exons,",
+    "[]::STRUCT(protein_position UINTEGER, alternate_amino_acid VARCHAR, edit_code VARCHAR)[] peptide_edits",
+    "FROM duckvep_r_transcripts t JOIN (SELECT transcript_index,",
+    "list(struct_pack(exon_start := exon_start, exon_end := exon_end,",
+    "exon_cdna_start := exon_cdna_start, exon_cdna_end := exon_cdna_end,",
+    "phase := phase, end_phase := end_phase) ORDER BY exon_cdna_start) exons",
+    "FROM duckvep_r_exons GROUP BY transcript_index) e USING(transcript_index)"
+  ))
+  dbExecute(con, paste(
+    "CREATE TABLE duckvep_r_projection_events AS SELECT event_index::UBIGINT AS event_index,",
+    "1::UINTEGER AS seq_region, position::UBIGINT AS position, reference, alternate,",
+    "NULL::UBIGINT AS end_position, NULL::VARCHAR AS structural_type,",
+    "NULL::VARCHAR AS copy_change, NULL::UINTEGER AS mate_seq_region, NULL::UBIGINT AS mate_position",
+    "FROM (VALUES (1,120,'A','C'), (2,123,'GTA','AAA'),",
+    "(3,122,'G','GAAA'), (4,122,'GGTA','G')) e(event_index,position,reference,alternate)",
+    "ORDER BY position,event_index"
+  ))
+  dbExecute(con, paste(
+    "CREATE TABLE duckvep_r_projection_annotations AS SELECT * FROM",
+    "duckvep_annotate('duckvep_r_projection_events', 'r-test')"
+  ))
+  projected <- dbGetQuery(con, paste(
+    "SELECT * FROM duckvep_transcript_projection('duckvep_r_projection_events',",
+    "'duckvep_r_projection_annotations', 'duckvep_r_projection_model') ORDER BY event_index"
+  ))
+  expect_equal(projected$event_index, 1:4)
+  expect_identical(projected$output_allele, c("C", "AAA", "AAA", "-"))
+  expect_equal(projected$cds_start, c(1, 4, 3, 4))
+  expect_equal(projected$cds_end, c(1, 6, 4, 6))
+  expect_identical(projected$reference_amino_acids, c("M", "V", "-", "V"))
+  expect_identical(projected$alternate_amino_acids, c("L", "K", "K", "-"))
+  expect_identical(projected$reference_codons, c("Atg", "GTA", "-", "GTA"))
+  expect_identical(projected$alternate_codons, c("Ctg", "AAA", "AAA", "-"))
+  expect_identical(projected$interbase, c(FALSE, FALSE, TRUE, FALSE))
+  expect_true(all(!projected$cds_start_nf & !projected$cds_end_nf))
+  dbExecute(con, paste(
+    "CREATE TABLE duckvep_r_projection_missing AS SELECT * FROM",
+    "duckvep_r_projection_events WHERE event_index != 1"
+  ))
+  expect_error(dbGetQuery(con, paste(
+    "SELECT * FROM duckvep_transcript_projection('duckvep_r_projection_missing',",
+    "'duckvep_r_projection_annotations', 'duckvep_r_projection_model')"
+  )), pattern = "annotation needs a source event")
+  expect_equal(dbGetQuery(con, "SELECT 42 AS value")$value, 42L)
   expect_true(loaded$loaded)
 
   dbExecute(

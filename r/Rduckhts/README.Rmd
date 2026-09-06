@@ -496,6 +496,20 @@ dbGetQuery(con, "
 dbGetQuery(con, "SELECT duckvep_model_drop('readme') AS dropped")
 ```
 
+The bundled extension also exposes
+`duckvep_transcript_projection(events, annotations, transcripts)` through DBI.
+It is the SQL reference for full cDNA/CDS/protein ranges, transcript-oriented
+codon and amino-acid strings, exon/intron ordinal ranges, distance, and CDS
+quality flags for literal independent alleles. Supply the same validated
+prepared model relation used for annotation, with transcript-ordered nested
+exons and peptide edits. NULL range endpoints remain independent; insertions
+retain an explicit `interbase` flag. Duplicate annotation rows are preserved.
+Canonical/MANE/CCDS/GENCODE/biotype attributes remain relational joins, not
+extra hot consequence payload; canonical status is not a VEP quality flag.
+The [DuckHTS projection example](https://github.com/RGenomicsETL/duckhts#canonical-event-relation-and-output-choices)
+shows those joins and the literal-allele scope. No additional R wrapper or
+reference handle is needed.
+
 ### Interval + reference helpers
 
 ```{r}

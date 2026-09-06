@@ -356,6 +356,58 @@ direction may be zero or any supported `UINTEGER` distance. Audit columns named
 `duckvep_status` and `duckvep_reason` explain unresolved computation (for example
 missing sequence or a reference mismatch); they are not Ensembl CSQ fields.
 
+`duckvep_transcript_projection(events, annotations, transcripts)` adds complete
+typed presentation facts for **literal, independent alleles** as a SQL reference.
+Pass the same validated prepared transcript snapshot used to load the resident
+model, including its transcript-ordered nested `exons`, `peptide_edits`, CDS and
+post-CDS sequences. Event keys must be unique. Annotation rows are preserved,
+including repeated pairs and NULL transcript keys; the function promises no row
+order. It does not validate the reference allele against FASTA or replace the
+annotation's status/reason, and it does not support symbolic SVs, breakends,
+phased edit sets or HGVS shifting.
+
+Ranges use 1-based transcript coordinates with independent NULL endpoints for
+mapper gaps. An insertion reports its two ascending flanks plus `interbase`;
+that flag must be retained when formatting an empty interval. Exon/intron
+ordinals follow transcript order. Membership, distance and the output allele
+use VEP feature geometry, not the uploaded REF span or fully minimized edit.
+Reference and alternate codon/peptide strings remain separate, including `-`
+for an empty string and VEP's changed-base codon casing. Genetic-code lookup
+shares the kernel's pinned tables; this is not a new consequence implementation.
+
+Cold attributes remain joins. For example, after preparing literal events and
+their transcript consequences against `grch38_transcripts`:
+
+```sql
+WITH ccds AS (
+  SELECT ta.transcript_id,
+         list(DISTINCT ta.value ORDER BY ta.value) AS ccds_ids
+  FROM core.transcript_attrib ta
+  JOIN core.attrib_type aty USING (attrib_type_id)
+  WHERE aty.code = 'ccds_transcript'
+  GROUP BY ta.transcript_id
+)
+SELECT p.*, t.transcript_stable_id, t.transcript_biotype,
+       t.mane_select_refseq, t.mane_plus_clinical_refseq,
+       g.canonical_transcript_id = t.source_transcript_id AS canonical,
+       (t.transcript_flags & 4096) <> 0 AS gencode_basic,
+       (t.transcript_flags & 8192) <> 0 AS gencode_primary,
+       c.ccds_ids
+FROM duckvep_transcript_projection(
+  'literal_events', 'transcript_consequences', 'grch38_transcripts'
+) p
+LEFT JOIN grch38_transcripts t USING (transcript_index)
+LEFT JOIN core.gene g ON g.gene_id = t.source_gene_id
+LEFT JOIN ccds c ON c.transcript_id = t.source_transcript_id;
+```
+
+VEP `FLAGS` is a final projection of `cds_start_nf`/`cds_end_nf`, not the
+`canonical` attribute. FastVEP's native tab column named `FLAGS` uses a
+different contract and does not redefine these biological facts.
+`Existing_variation` remains an exact-allele provider join. The
+[SQL presentation benchmark](benchmarks/benchmark_duckvep_projection.md) measures
+this complete output independently of the consequence-only throughput path.
+
 #### Real human annotation and supplementary providers
 
 The following is the production shape, using the public HG002 40x PCR-free
