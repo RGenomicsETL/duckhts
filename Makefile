@@ -571,9 +571,9 @@ test-duckvep-differential: release
 		--extension build/release/duckhts.duckdb_extension \
 		--sample-per-shape 0 --hgvs
 
-# Independent Haplosaurus oracle for the existing native edit-set mechanics.
-# No DuckDB build or public phased-execution claim is involved.
-test-duckvep-haplotype-mechanics:
+# Independent Haplosaurus oracle for native edit-set mechanics, including calls
+# decoded by the extension. This does not certify public phased execution.
+test-duckvep-haplotype-mechanics: release
 	VEP_PREFIX=$(VEP_PREFIX) Rscript test/duckvep/conformance/haplotype_differential.R \
 		$(DUCKVEP_HAPLOTYPE_ARGS)
 

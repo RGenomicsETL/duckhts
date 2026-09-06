@@ -513,7 +513,8 @@ edit grouping, same-codon interactions, open frameshifts, and restored frameshif
 Haplosaurus differential belongs with the public phased input surface rather than being
 faked in this runner.
 
-`make test-duckvep-haplotype-mechanics` runs the narrower executable prerequisite:
+`make test-duckvep-haplotype-mechanics` builds the release extension and runs the
+narrower executable prerequisite:
 the existing pure-C edit application/translation helpers against the pinned Haplosaurus
 parser, genomic-to-CDS mapper and transcript container. It generates two-exon transcripts
 on both strands, ordinary genomic VCF records, cis/trans diploid carriers and shared
