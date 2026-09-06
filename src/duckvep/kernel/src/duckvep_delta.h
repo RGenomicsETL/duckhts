@@ -406,7 +406,9 @@ DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t duckvep_variant_cds_edit_build(
 /* Project one already prepared semantic allele into the common CDS edit IR.
  * This is the shared entry point for uploaded variants, HGVS-shifted alleles,
  * and later phased transcript edit sets. It validates the shifted REF against
- * the prepared CDS and does not trim, normalize, or move the event. */
+ * the prepared CDS and does not trim, normalize, or move the event. Projected
+ * coordinates beyond the borrowed CDS slice return OUT_OF_CDS before reading
+ * sequence bytes, even when the model geometry maps those coordinates. */
 DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t
 duckvep_cds_edit_build_prepared_allele(
     const duckvep_transcript_model_t *transcripts,

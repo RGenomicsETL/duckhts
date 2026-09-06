@@ -1523,6 +1523,23 @@ local({
   )
   expect_identical(noncoding_boundary$status, "supported")
 
+  short_cds_queries <- queries
+  short_cds_queries[2] <- paste0(
+    "SELECT * REPLACE ('A'::BLOB AS cds_sequence) FROM (",
+    queries[2],
+    ")"
+  )
+  expect_error(
+    load_model("r-short-cds", short_cds_queries),
+    pattern = "prepared CDS length or codon table is inconsistent"
+  )
+  expect_false(
+    dbGetQuery(
+      con,
+      "SELECT duckvep_model_drop('r-short-cds') AS dropped"
+    )$dropped
+  )
+
   invalid_queries <- queries
   invalid_queries[2] <- paste0(
     "SELECT * REPLACE (99::UBIGINT AS transcript_start) FROM (",

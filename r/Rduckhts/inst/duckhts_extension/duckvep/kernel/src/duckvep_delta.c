@@ -1378,6 +1378,9 @@ duckvep_cds_edit_build_prepared_allele(
                 exon_hint, projected_pos, &proj) ||
             duckvep_project_coding_base(transcripts, exons, tx_idx,
                                         projected_pos, &proj)) {
+            if (proj.cds_pos == 0u || (size_t)proj.cds_pos > cds_len) {
+                return DUCKVEP_CDS_EDIT_OUT_OF_CDS;
+            }
             char expected_anchor = delta_feature_allele_base(
                 allele->anchor_ref, 1u, 0u, allele_orientation);
             char observed_anchor = delta_norm_base(
@@ -1416,7 +1419,8 @@ duckvep_cds_edit_build_prepared_allele(
         } else {
             return DUCKVEP_CDS_EDIT_INVALID_EVENT;
         }
-        if (out->cds_start == 0u || (uint64_t)out->cds_start > (uint64_t)cds_len + 1u) {
+        if (proj.cds_pos == 0u || (size_t)proj.cds_pos > cds_len ||
+            out->cds_start == 0u || (uint64_t)out->cds_start > (uint64_t)cds_len + 1u) {
             return DUCKVEP_CDS_EDIT_OUT_OF_CDS;
         }
         out->ref_len = 0u;
@@ -1433,6 +1437,13 @@ duckvep_cds_edit_build_prepared_allele(
             exon_hint, event, &min_cds, &max_cds) &&
         !duckvep_project_event_to_cds(
             transcripts, exons, tx_idx, event, &min_cds, &max_cds)) {
+        return DUCKVEP_CDS_EDIT_OUT_OF_CDS;
+    }
+    /* Genomic/CDS projection proves model geometry, not the extent of a
+     * separately borrowed sequence slice. Validate that slice before REF
+     * reads, including when the hinted fast path fell back to projection. */
+    if (min_cds == 0u || (size_t)min_cds > cds_len ||
+        (size_t)allele->ref_length > cds_len - ((size_t)min_cds - 1u)) {
         return DUCKVEP_CDS_EDIT_OUT_OF_CDS;
     }
     for (j = 0u; j < allele->ref_length; j++) {

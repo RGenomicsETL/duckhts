@@ -135,6 +135,23 @@ SELECT loaded FROM duckvep_model_load(
 ----
 1
 
+# A separately supplied sequence must cover its complete mapped CDS. Reject
+# the mismatch before publication; subsequent queries still use the valid model.
+statement error
+SELECT * FROM duckvep_model_load(
+  'short_cds',
+  'SELECT * FROM duckvep_test_regions ORDER BY seq_region',
+  'SELECT * REPLACE (''A''::BLOB AS cds_sequence) FROM duckvep_test_transcripts ORDER BY seq_region, transcript_start',
+  'SELECT * FROM duckvep_test_exons ORDER BY transcript_index, exon_start'
+);
+----
+prepared CDS length or codon table is inconsistent
+
+query I
+SELECT duckvep_model_drop('short_cds');
+----
+0
+
 # CDS_END_NF may leave one or two CDS bases beyond the last complete codon.
 # VEP evaluates ordinary length changes against its synthetic trailing X;
 # the incomplete tail does not make a body edit a compound event.

@@ -1,8 +1,9 @@
 #!/usr/bin/env Rscript
 # Executable Haplosaurus comparison for the existing edit-set mechanics.
-# The declared model supplies CDS coordinates to C; Haplosaurus independently
-# parses the VCF and projects it through GFF. This does not certify SQL carrier
-# grouping, strict phase, compound SO/HGVS, or arbitrary-ploidy compatibility.
+# Direct edit-set mutation uses CDS coordinates; the carrier pipeline projects
+# genomic VCF alleles through ranked exons, and Haplosaurus independently parses
+# VCF/GFF. This does not certify SQL grouping, strict phase, compound SO/HGVS,
+# or arbitrary-ploidy compatibility.
 
 main <- function() {
   opt <- optparse::parse_args(optparse::OptionParser(
@@ -102,7 +103,10 @@ main <- function() {
       "test/duckvep/conformance/haplotype_probe.c",
       "src/duckvep/kernel/src/duckvep_haplotype.c",
       "src/duckvep/kernel/src/duckvep_carriers.c",
-      "src/duckvep/kernel/src/duckvep_codon.c"
+      "src/duckvep/kernel/src/duckvep_codon.c",
+      "src/duckvep/kernel/src/duckvep_coding.c",
+      "src/duckvep/kernel/src/duckvep_projection.c",
+      "src/duckvep/kernel/src/duckvep_delta.c"
     )
   )
   compiler <- Sys.getenv("CC", "cc")
@@ -262,8 +266,8 @@ main <- function() {
         edits$alt[j] <- dna(edits$alt_len[j])
       }
     }
-    # C sees unanchored edits in original-CDS coordinates, with genomic-strand
-    # alleles. Haplosaurus sees ordinary left-anchored genomic VCF records.
+    # The independent direct-mutation oracle sees original-CDS edits. The
+    # carrier pipeline and Haplosaurus both see genomic VCF alleles.
     if (strand == -1L) {
       edits$ref <- vapply(edits$ref, reverse_complement, "")
       edits$alt <- vapply(edits$alt, reverse_complement, "")
@@ -295,6 +299,8 @@ main <- function() {
       stopifnot(substring(genome, pos, pos + nchar(ref) - 1L) == ref)
       variants[[j]] <- data.frame(
         pos = pos,
+        ref = ref,
+        alt = alt,
         row = paste(
           c(
             chrom,
@@ -321,7 +327,8 @@ main <- function() {
       shape = shape,
       strand = strand,
       cds = cds,
-      positions = variants$pos,
+      variants = variants[c("pos", "ref", "alt")],
+      exons = features[features$feature == "exon", c("start", "end")],
       edits = edits
     )
   }
@@ -429,6 +436,9 @@ main <- function() {
   stream_edits <- function(case) {
     edits <- case$edits
     n <- nrow(edits)
+    exons <- case$exons[
+      order(case$exons$start, decreasing = case$strand < 0L),
+    ]
     capacity <- nchar(case$cds) + sum(nchar(edits$alt)) + 1L
     lanes <- rbind(
       rep(1L, n),
@@ -440,12 +450,14 @@ main <- function() {
       charToRaw(case$cds),
       as.integer(nchar(case$cds)),
       case$strand,
-      as.integer(case$positions),
-      as.integer(edits$start),
-      edits$ref,
-      edits$alt,
+      as.integer(exons$start),
+      as.integer(exons$end),
+      as.integer(nrow(exons)),
+      as.integer(case$variants$pos),
+      case$variants$ref,
+      case$variants$alt,
       as.integer(n),
-      as.integer(order(case$positions, seq_len(n)) - 1L),
+      as.integer(order(case$variants$pos, seq_len(n)) - 1L),
       as.integer(lanes),
       as.integer(capacity),
       cds = raw(6L * capacity),
@@ -684,6 +696,11 @@ main <- function() {
         "scripts/duckvep_evidence.R",
         "src/duckvep/kernel/src/duckvep_haplotype.h",
         "src/duckvep/kernel/src/duckvep_carriers.h",
+        "src/duckvep/kernel/src/duckvep_coding.h",
+        "src/duckvep/kernel/src/duckvep_projection.h",
+        "src/duckvep/kernel/src/duckvep_delta.h",
+        "src/duckvep/kernel/src/duckvep_event.h",
+        "src/duckvep/kernel/src/duckvep_compat.h",
         "src/duckvep/kernel/include/duckvep_kernel.h",
         "src/duckvep/kernel/src/duckvep_codon.h",
         "src/duckvep/kernel/src/duckvep_dna.h"
@@ -713,7 +730,7 @@ main <- function() {
   hashes <- vapply(identities, duckvep_evidence_sha256, "")
   jsonlite::write_json(
     list(
-      scope = "diploid_carrier_prefix_and_edit_mechanics_not_public_phased_execution",
+      scope = "diploid_genomic_projection_carrier_prefix_and_edit_mechanics_not_public_phased_execution",
       source_revision = system2("git", c("rev-parse", "HEAD"), stdout = TRUE),
       dirty_worktree = length(system2(
         "git",

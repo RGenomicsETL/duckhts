@@ -179,6 +179,8 @@ insertion order; they remain only as historical measurements.
 | 2026-07-23 | 0eb1b440 | ensembl116_grch38_giab_hg002_v4_2_1_full_literal_public_relation | rich_hgvs   |       4 |                1 |                5000 | 4,095,611  | 644,427     | 5,068,416 | 1,383,580           | 47,835,851     |      5 |       6.410 |          6.602 |       6.608 |              620359 |         1612.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2,4,6,8      | 7,245,661              |
 | 2026-09-06 | 41e84614 | fixture_one_transcript_sorted                                    | rich        |       1 |                1 |                5000 | 10,000,000 | 1           | 2         | 0                   | 10,000,000     |      3 |       3.320 |          3.321 |       3.346 |             3011141 |          332.1 | 13th Gen Intel(R) Core(TM) i5-13500 | 0-19         | 3,011,141              |
 | 2026-09-06 | fc67aef3 | fixture_one_transcript_sorted                                    | rich        |       1 |                1 |                5000 | 10,000,000 | 1           | 2         | 0                   | 10,000,000     |      3 |       3.316 |          3.333 |       3.339 |             3000300 |          333.3 | 13th Gen Intel(R) Core(TM) i5-13500 | 0-19         | 3,000,300              |
+| 2026-09-06 | e5f1f269 | fixture_one_transcript_sorted_indels                             | hgvs        |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       1.239 |          1.242 |       1.254 |              805153 |         1242.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 805,153                |
+| 2026-09-06 | 10320db6 | fixture_one_transcript_sorted_indels                             | hgvs        |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       1.233 |          1.240 |       1.249 |              806452 |         1240.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 806,452                |
 
 Each pass consumes every staged input and checks output cardinality plus
 either the rendered consequence-byte total or the numeric
@@ -187,6 +189,28 @@ count, host, or variant count are separate measurements and should not
 be compared as if only the engine changed. `cpu_affinity` is read from
 the benchmark process itself; a single integer records an externally
 pinned run, while a range records a scheduler-visible CPU set.
+
+## Borrowed-CDS projection bounds check
+
+The `--fixture-indels` workload alternates `T>TAC` insertions and `TA>T`
+deletions at position 124 of the checked-in one-transcript model and
+FASTA. Unlike the single-SNV adapter control, these length-changing
+alleles exercise CDS edit projection and HGVS construction. They remain
+independent events, not one compound haplotype. Model loading and input
+generation are untimed.
+
+| revision | variants | annotated_rows | threads | passes | min_seconds | median_seconds | max_seconds | checksum_value |
+|:---------|---------:|---------------:|--------:|-------:|------------:|---------------:|------------:|:---------------|
+| e5f1f269 |    1e+06 |          1e+06 |       1 |      5 |       1.239 |          1.242 |       1.254 | 26000000       |
+| 10320db6 |    1e+06 |          1e+06 |       1 |      5 |       1.233 |          1.240 |       1.249 | 26000000       |
+
+Both clean in-tree builds use DuckDB v1.5.3 on 13th Gen Intel(R)
+Core(TM) i5-13500, pinned to CPU 2, with 100,000 warm-up events and a
+5,000-base transcript halo. The baseline commit adds only the benchmark
+case; the second commit adds the borrowed-slice checks and genomic
+carrier differential. Their median difference is -0.16%. This narrow
+valid-model workload does not measure malformed-model rejection, file
+ingestion, cohort state, sort-plus-phased execution, or peak memory.
 
 ## Annotation-dense transcript distance and ordered parallel partitions
 
