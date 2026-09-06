@@ -13,6 +13,7 @@
 	test-duckvep-witnesses test-duckvep-differential \
 	test-duckvep-gvcf-differential \
 	test-duckvep-haplotype-mechanics \
+	test-duckvep-projection \
 	test-duckvep-state-exploration \
 	test-duckvep-release-vcf \
 	duckvep-corpus-differential duckvep-statistical-report \
@@ -573,6 +574,10 @@ test-duckvep-differential: release
 
 # Independent Haplosaurus oracle for native edit-set mechanics, including calls
 # decoded by the extension. This does not certify public phased execution.
+test-duckvep-projection: release
+	Rscript test/duckvep/conformance/test_projection_differential.R
+	Rscript test/duckvep/conformance/projection_differential.R $(ARGS)
+
 test-duckvep-haplotype-mechanics: release
 	VEP_PREFIX=$(VEP_PREFIX) Rscript test/duckvep/conformance/haplotype_differential.R \
 		$(DUCKVEP_HAPLOTYPE_ARGS)

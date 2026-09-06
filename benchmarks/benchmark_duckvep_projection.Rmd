@@ -1,0 +1,154 @@
+---
+title: "DuckVEP SQL transcript presentation"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+root <- normalizePath(Sys.getenv("DUCKHTS_REPO_ROOT", getwd()), mustWork = TRUE)
+runs <- read.csv(file.path(root, "benchmarks/data/duckvep_projection.csv"),
+  stringsAsFactors = FALSE, check.names = FALSE)
+stopifnot(all(runs$build_binding != "diagnostic_unbound"))
+conformance <- read.csv(file.path(root, "benchmarks/data/duckvep_projection_conformance.csv"),
+  stringsAsFactors = FALSE, check.names = FALSE)
+stopifnot(all(conformance$build_binding != "diagnostic_unbound"),
+  all(conformance$mismatches == 0L), all(conformance$actual_pairs == conformance$expected_pairs))
+```
+
+This measures the complete 23-column result of
+`duckvep_transcript_projection(events, annotations, transcripts)` as a DuckDB
+temporary table. It is the SQL reference, not a fused native implementation.
+The literal alleles and consequence rows are prepared before timing. The timer
+includes the macro's validation, joins, coordinate projection, codon/peptide
+calculation and complete output materialization. One warm-up precedes the
+reported measured passes; preparation and full-output verification are excluded
+from those timings.
+
+The raw FASTA, index and minimal GFF are pinned in `r/duckhtsbench` under the
+`duckvep-projection` workload. `projection_fixtures.R` derives a forward model,
+a reverse model, and a three-exon model with two-base CDS phase padding from
+those inputs. The unchanged independent-event generator adds 1,000 seed-173
+random alleles to its targeted witnesses. Only record IDs are relabelled so
+repeated source alleles retain separate event keys. Each set is repeated eight
+times with distinct keys. These tiny warm models are a reproducible adapter
+workload, not a genome-scale annotation or file-ingestion benchmark.
+
+The `withheld_sequence` workload retains the forward model's CDS coordinates
+but supplies NULL CDS sequence, genetic code and flanks, as an importer may do
+for unsupported sequence edits. It checks that all codon and amino-acid fields
+remain NULL. This is a benchmark/property case, not a GFF oracle comparison:
+the reference is available to VEP. It has no identical earlier timing baseline.
+
+Each model/worker-count pair runs in a fresh R process. Peak RSS is the Linux
+process high-water mark, including model preparation and verification; it is
+not isolated DuckDB workspace usage. Output bytes are the sum of the UTF-8
+lengths of the complete rows serialized as JSON, not DuckDB physical storage
+size. The SHA-256 covers the schema and every typed row sorted by all columns,
+including duplicates and NULLs. It must match across passes and worker counts.
+
+## Measured materialization
+
+```{r timings}
+table <- runs[c("source_revision", "case", "threads", "input_alleles",
+  "expanded_transcript_rows", "output_rows", "json_utf8_bytes", "iterations",
+  "median_seconds", "min_seconds", "max_seconds", "peak_rss_bytes")]
+table$source_revision <- substr(table$source_revision, 1L, 12L)
+knitr::kable(table)
+```
+
+## Identity and complete output
+
+```{r identity}
+knitr::kable(unique(runs[c("source_revision", "extension_sha256", "build_binding",
+  "machine", "cpu", "duckdb_version")]))
+knitr::kable(unique(runs[c("case", "input_vcf_sha256", "model_gff_sha256",
+  "reference_sha256", "output_sha256")]))
+```
+
+The first `f0184155b0fa` runs establish this complete-contract baseline. Later
+rows retain that measurement rather than replace it. The following comparison
+pairs the latest run with its nearest recorded predecessor only when input hash, model, output hash,
+copy count, worker count, DuckDB version and machine agree.
+
+```{r comparison}
+keys <- c("case", "threads", "input_vcf_sha256", "model_gff_sha256", "reference_sha256",
+  "output_sha256", "copies", "input_alleles", "duckdb_version", "machine", "cpu")
+groups <- split(runs, do.call(paste, c(runs[keys], sep = "|")))
+comparison <- lapply(groups, function(rows) {
+  if (nrow(rows) < 2L) return(NULL)
+  first <- rows[nrow(rows)-1L, ]
+  last <- rows[nrow(rows), ]
+  data.frame(case = last$case, threads = last$threads,
+    baseline_revision = substr(first$source_revision, 1L, 12L),
+    current_revision = substr(last$source_revision, 1L, 12L),
+    baseline_seconds = first$median_seconds, current_seconds = last$median_seconds,
+    current_over_baseline = last$median_seconds / first$median_seconds)
+})
+knitr::kable(do.call(rbind, comparison), row.names = FALSE)
+```
+
+The [sorted-stream throughput report](duckvep_throughput.md) instead measures
+consequence/HGVS output and is not an identical comparator. No fused
+implementation is measured here. A production-density model and comparison
+with a future fused implementation remain unmeasured; small timing differences
+on this warm adapter workload are not proof of a speedup or absence of regression.
+
+## Pinned VEP field differential
+
+The separate differential checks all 21 presentation fields, plus the complete
+event/transcript key set, against VEP 116 JSON. The initial six models add a
+partial-CDS end, a noncoding first exon and a noncoding transcript to the three
+timed models. Subsequent runs add later coding-exon phases 1 and 2 after a
+noncoding first exon. Those runs also require a deliberately wrong phase
+substitution to fail: VEP display coordinates use the first transcript exon,
+while CDS sequence padding uses the translation-start exon.
+Each seed runs the unchanged generator's targeted cases plus 1,000 random cases;
+the 128-base differing-allele campaign supplements the default 10-base campaign
+to exercise longer exon/intron spans. Every physical input record is retained,
+including duplicate alleles. Missing or duplicate keys, changed fields, and
+changes to/from NULL must all trip deliberate verifier controls. Actual and
+expected tables, original and relabelled VCFs, GFFs and oracle JSON have separate
+hashes in the checked-in CSV; detailed artifacts remain in the run directory.
+
+```{r conformance}
+knitr::kable(conformance[c("source_revision", "case", "seed", "max_random_length",
+  "input_alleles", "expected_pairs", "actual_pairs", "mismatches", "detected_controls")])
+```
+
+The oracle sources are Ensembl VEP
+`57ea5c52340acc1f156267f810ad162e26597082` and Variation
+`2fb834b987ede3824e200197a838ce11e91aeb4b`, with the exact package set in
+`test/duckvep/upstream/receipts/vep116_2026-07-22.conda-explicit.txt`.
+GFF input does not import the full core transcript-quality and translation-edit
+attributes. Positive CDS quality flags and reference peptide edits are therefore
+tested as SQL model-attribute properties, not represented as positive GFF oracle
+coverage. Symbolic structural and phased events are outside this function's
+literal-allele contract; existing consequence/HGVS/phased acceptance histories
+and generator settings are unchanged.
+
+These field comparisons do not certify the native consequence masks. A
+separate diagnostic found supported and unresolved SO disagreements on later
+partial-CDS models; [issue 213](https://github.com/RGenomicsETL/duckhts/issues/213)
+retains the witnesses and full denominators. Presentation equality must not be
+reported as native consequence conformance.
+
+Reproduce from a clean source revision with an extension build receipt:
+
+```{r reproduce, eval=FALSE, echo=TRUE}
+source("scripts/benchmark_duckvep_projection.R")
+benchmark_duckvep_projection(
+  normalizePath("."), "build/release/duckhts.duckdb_extension",
+  "benchmarks/data/duckvep_projection.csv",
+  extension_receipt = Sys.getenv("DUCKHTS_EXTENSION_RECEIPT")
+)
+rmarkdown::render("benchmarks/benchmark_duckvep_projection.Rmd",
+  knit_root_dir = normalizePath("."))
+```
+
+For each reported seed and maximum length, record conformance separately:
+
+```bash
+make test-duckvep-projection ARGS="--seed 173 --random-cases 1000 --max-random-length 10 --extension-receipt $DUCKHTS_EXTENSION_RECEIPT --summary-output benchmarks/data/duckvep_projection_conformance.csv"
+```
+
+`VEP_PREFIX` names the environment matching the checked-in package lock.

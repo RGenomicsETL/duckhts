@@ -1,3 +1,31 @@
+#' Stage a registry workload of committed fixtures without network access.
+#'
+#' @param repo DuckHTS checkout containing the registered fixture bytes.
+#' @param workload Registry staging workload.
+#' @return Named cache paths, indexed by artifact ID.
+#' @export
+duckhts_bench_stage_repository_fixtures <- function(repo, workload) {
+  repo <- normalizePath(repo, winslash = "/", mustWork = TRUE)
+  plan <- duckhts_bench_stage_plan(workload)
+  stopifnot(all(plan$transform == "copy_committed_fixture"),
+            all(grepl("^repo:test/data/[A-Za-z0-9._/-]+$", plan$locator)),
+            !any(grepl("(^|/)\\.\\.?(/|$)", plan$locator)))
+  paths <- stats::setNames(vapply(plan$id, duckhts_bench_artifact_path, character(1)), plan$id)
+  for (i in seq_len(nrow(plan))) {
+    source <- file.path(repo, sub("^repo:", "", plan$locator[[i]]))
+    if (!file.exists(source)) stop("missing registered fixture: ", source, call. = FALSE)
+    if (!startsWith(normalizePath(source, winslash = "/"), paste0(repo, "/test/data/"))) {
+      stop("registered fixture resolves outside test/data: ", source, call. = FALSE)
+    }
+    duckhts_bench_validate_identity(plan$id[[i]], source)
+    dir.create(dirname(paths[[i]]), recursive = TRUE, showWarnings = FALSE)
+    stopifnot(file.copy(source, paths[[i]], overwrite = TRUE))
+    duckhts_bench_validate_identity(plan$id[[i]], paths[[i]])
+    duckhts_bench_write_provenance(plan$id[[i]], paths[[i]])
+  }
+  paths
+}
+
 duckhts_bench_identity_fields <- function(identity) {
   identity <- as.character(identity)
   if (!length(identity) || is.na(identity) || !nzchar(identity)) return(character())

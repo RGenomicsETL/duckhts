@@ -9,6 +9,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <string.h>
 
 #include "duckvep_so.h"
+#include "duckvep_codon.h"
 #include "duckvep_sql.h"
 
 typedef struct {
@@ -369,9 +370,251 @@ duckvep_register_annotate_relation(duckdb_connection connection)
 	    sizeof(sql) / sizeof(sql[0]));
 }
 
+/* SQL presentation uses the kernel's immutable genetic-code authority. The
+ * string is indexed by T/C/A/G at each of the three codon positions. */
+static void
+duckvep_projection_code(duckdb_function_info info, duckdb_data_chunk input,
+	duckdb_vector output)
+{
+	duckdb_vector vector = duckdb_data_chunk_get_vector(input, 0);
+	const uint8_t *codes = duckdb_vector_get_data(vector);
+	uint64_t *validity = duckdb_vector_get_validity(vector);
+	idx_t count = duckdb_data_chunk_get_size(input);
+
+	duckdb_vector_ensure_validity_writable(output);
+	for (idx_t row = 0; row < count; row++) {
+		const char *amino_acids;
+
+		if (validity != NULL && !duckdb_validity_row_is_valid(validity, row)) {
+			duckdb_validity_set_row_invalid(duckdb_vector_get_validity(output), row);
+			continue;
+		}
+		amino_acids = duckvep_codon_table_amino_acids((duckvep_codon_table_t)codes[row]);
+		if (amino_acids == NULL) {
+			duckdb_scalar_function_set_error(info,
+			    "duckvep_transcript_projection: unsupported genetic code");
+			return;
+		}
+		duckdb_vector_assign_string_element_len(output, row, amino_acids, 64);
+	}
+}
+
+static bool
+duckvep_register_projection_code(duckdb_connection connection)
+{
+	duckdb_scalar_function function = duckdb_create_scalar_function();
+	duckdb_logical_type code_type = duckdb_create_logical_type(DUCKDB_TYPE_UTINYINT);
+	duckdb_logical_type text_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+	duckdb_state state;
+
+	duckdb_scalar_function_set_name(function, "__duckvep_projection_code");
+	duckdb_scalar_function_add_parameter(function, code_type);
+	duckdb_scalar_function_set_return_type(function, text_type);
+	duckdb_scalar_function_set_function(function, duckvep_projection_code);
+	state = duckdb_register_scalar_function(connection, function);
+	duckdb_destroy_scalar_function(&function);
+	duckdb_destroy_logical_type(&code_type);
+	duckdb_destroy_logical_type(&text_type);
+	return state == DuckDBSuccess;
+}
+
+static bool
+duckvep_register_projection_relation(duckdb_connection connection)
+{
+	static const char *const sql[] = {
+		"CREATE OR REPLACE MACRO __duckvep_projection_base(exons, strand, pos1) AS\n",
+		"  list_transform(list_filter(exons, e -> pos1 BETWEEN e.exon_start AND e.exon_end),\n",
+		"    e -> e.exon_cdna_start::BIGINT + CASE WHEN strand > 0\n",
+		"      THEN pos1::BIGINT - e.exon_start::BIGINT\n",
+		"      ELSE e.exon_end::BIGINT - pos1::BIGINT END)[1];\n",
+		"\n",
+		"CREATE OR REPLACE MACRO __duckvep_projection_peptide(dna, genetic_code) AS (\n",
+		"  WITH triplets AS (\n",
+		"    SELECT i, substring(upper(dna), 3*i+1, 3) AS triplet\n",
+		"    FROM range(length(dna) // 3) r(i)\n",
+		"  ), amino_acids AS (\n",
+		"    SELECT i, CASE WHEN count(DISTINCT substring(genetic_code, j+1, 1)) = 1\n",
+		"      THEN min(substring(genetic_code, j+1, 1)) ELSE 'X' END AS aa\n",
+		"    FROM triplets LEFT JOIN range(64) r(j) ON\n",
+		"      (triplet[1] = 'N' OR triplet[1] = substring('TCAG', j // 16 + 1, 1)) AND\n",
+		"      (triplet[2] = 'N' OR triplet[2] = substring('TCAG', (j // 4) % 4 + 1, 1)) AND\n",
+		"      (triplet[3] = 'N' OR triplet[3] = substring('TCAG', j % 4 + 1, 1))\n",
+		"    GROUP BY i\n",
+		"  ), peptide AS (\n",
+		"    SELECT coalesce(string_agg(aa, '' ORDER BY i), '') AS aa FROM amino_acids\n",
+		"  ) SELECT CASE WHEN dna IS NULL THEN NULL ELSE\n",
+		"    coalesce(nullif(aa || CASE WHEN length(dna) % 3 != 0 AND aa != '*'\n",
+		"      THEN 'X' ELSE '' END, ''), '-') END FROM peptide\n",
+		");\n",
+		"\n",
+		"CREATE OR REPLACE MACRO duckvep_transcript_projection(\n",
+		"  events_table, annotations_table, transcripts_table\n",
+		") AS TABLE\n",
+		"WITH events AS MATERIALIZED (\n",
+		"  SELECT event_index::UBIGINT AS event_index, seq_region::UINTEGER AS seq_region,\n",
+		"    position::UBIGINT AS position, reference::VARCHAR AS reference,\n",
+		"    alternate::VARCHAR AS alternate FROM query_table(events_table)\n",
+		"), annotations AS MATERIALIZED (\n",
+		"  SELECT event_index::UBIGINT AS event_index, transcript_index::UINTEGER AS transcript_index,\n",
+		"    consequence_mask::UBIGINT AS consequence_mask FROM query_table(annotations_table)\n",
+		"), transcripts AS MATERIALIZED (\n",
+		"  SELECT transcript_index, seq_region, transcript_start, transcript_end, cds_start, cds_end,\n",
+		"    strand, exons, transcript_flags, peptide_edits, cds_sequence, post_cds_sequence, codon_table\n",
+		"  FROM query_table(transcripts_table)\n",
+		"), validation AS MATERIALIZED (\n",
+		"  SELECT CASE\n",
+		"    WHEN EXISTS (SELECT 1 FROM events WHERE event_index IS NULL OR seq_region IS NULL\n",
+		"      OR position IS NULL OR position = 0 OR reference IS NULL OR alternate IS NULL)\n",
+		"      THEN error('duckvep_transcript_projection: event keys, position and literal alleles are required')\n",
+		"    WHEN EXISTS (SELECT event_index FROM events GROUP BY event_index HAVING count(*) != 1)\n",
+		"      THEN error('duckvep_transcript_projection: event_index must be unique')\n",
+		"    WHEN EXISTS (SELECT transcript_index FROM transcripts GROUP BY transcript_index\n",
+		"      HAVING count(*) != 1 OR transcript_index IS NULL)\n",
+		"      THEN error('duckvep_transcript_projection: transcript_index must be non-null and unique')\n",
+		"    WHEN EXISTS (SELECT 1 FROM annotations a LEFT JOIN events e USING(event_index)\n",
+		"      WHERE e.event_index IS NULL OR a.consequence_mask IS NULL)\n",
+		"      THEN error('duckvep_transcript_projection: annotation needs a source event and consequence mask')\n",
+		"    WHEN EXISTS (SELECT 1 FROM annotations a JOIN events e USING(event_index)\n",
+		"      LEFT JOIN transcripts t USING(transcript_index)\n",
+		"      WHERE a.transcript_index IS NOT NULL AND\n",
+		"        (t.transcript_index IS NULL OR e.seq_region IS DISTINCT FROM t.seq_region))\n",
+		"      THEN error('duckvep_transcript_projection: annotation transcript and source region must match the model')\n",
+		"    ELSE true END AS valid\n",
+		"), joined AS MATERIALIZED (\n",
+		"  SELECT a.event_index, a.transcript_index, a.consequence_mask,\n",
+		"    e.reference, e.alternate, e.position,\n",
+		"    t.transcript_start::BIGINT AS tx_start, t.transcript_end::BIGINT AS tx_end,\n",
+		"    t.cds_start::BIGINT AS tx_cds_start, t.cds_end::BIGINT AS tx_cds_end,\n",
+		"    t.strand, t.exons, t.transcript_flags, t.peptide_edits,\n",
+		"    upper(decode(t.cds_sequence)) AS cds_sequence,\n",
+		"    upper(decode(t.post_cds_sequence)) AS post_cds_sequence,\n",
+		"    __duckvep_projection_code(t.codon_table) AS genetic_code,\n",
+		"    duckvep_allele_geometry(e.position, e.reference, e.alternate) AS geometry\n",
+		"  FROM annotations a JOIN events e USING (event_index)\n",
+		"  LEFT JOIN transcripts t USING (transcript_index)\n",
+		"  CROSS JOIN validation WHERE validation.valid\n",
+		"), features AS (\n",
+		"  SELECT *, geometry.feature_start0::BIGINT + 1 AS vf_start,\n",
+		"    geometry.feature_end0::BIGINT AS vf_end,\n",
+		"    upper(CASE WHEN length(reference) = length(alternate) THEN reference\n",
+		"      ELSE substring(reference, geometry.reference_difference_offset + 1,\n",
+		"        geometry.reference_difference_length) END) AS feature_reference,\n",
+		"    upper(CASE WHEN length(reference) = length(alternate) THEN alternate\n",
+		"      ELSE substring(alternate, geometry.alternate_difference_offset + 1,\n",
+		"        geometry.alternate_difference_length) END) AS feature_alternate,\n",
+		"    __duckvep_projection_base(exons, strand,\n",
+		"      CASE WHEN strand > 0 THEN tx_cds_start ELSE tx_cds_end END) AS coding_cdna_start,\n",
+		"    __duckvep_projection_base(exons, strand,\n",
+		"      CASE WHEN strand > 0 THEN tx_cds_end ELSE tx_cds_start END) AS coding_cdna_end,\n",
+		/* VEP BaseTranscriptVariation and TranscriptMapper use the first
+		 * transcript exon here. CDS sequence padding separately uses the
+		 * translation-start exon; substituting that phase changes VEP output. */
+		"    greatest(exons[1].phase::BIGINT, 0) AS phase_offset\n",
+		"  FROM joined\n",
+		"), mapped AS (\n",
+		"  SELECT *, vf_end >= tx_start AND vf_start <= tx_end AS within_transcript,\n",
+		"    __duckvep_projection_base(exons, strand,\n",
+		"      CASE WHEN strand > 0 THEN vf_start ELSE vf_end END) AS first_cdna,\n",
+		"    __duckvep_projection_base(exons, strand,\n",
+		"      CASE WHEN strand > 0 THEN vf_end ELSE vf_start END) AS last_cdna,\n",
+		"    list_filter(range(1, length(exons)+1), i ->\n",
+		"      vf_start <= exons[i].exon_end AND vf_end >= exons[i].exon_start) AS exon_hits,\n",
+		"    list_filter(range(1, length(exons)), i ->\n",
+		"      vf_start <= greatest(exons[i].exon_start, exons[i+1].exon_start)::BIGINT - 1 AND\n",
+		"      vf_end >= least(exons[i].exon_end, exons[i+1].exon_end)::BIGINT + 1) AS intron_hits,\n",
+		"    CASE WHEN strand > 0 THEN feature_alternate ELSE seq_revcomp(feature_alternate) END\n",
+		"      AS transcript_alternate\n",
+		"  FROM features\n",
+		"), cdna AS (\n",
+		"  SELECT *, CASE WHEN within_transcript THEN CASE WHEN vf_start > vf_end\n",
+		"      THEN coalesce(first_cdna, last_cdna + 1) ELSE first_cdna END END AS raw_cdna_start,\n",
+		"    CASE WHEN within_transcript THEN CASE WHEN vf_start > vf_end\n",
+		"      THEN coalesce(last_cdna, first_cdna - 1) ELSE last_cdna END END AS raw_cdna_end\n",
+		"  FROM mapped\n",
+		"), coding AS (\n",
+		"  SELECT *, CASE WHEN raw_cdna_start BETWEEN coding_cdna_start AND coding_cdna_end\n",
+		"      AND NOT (vf_start > vf_end AND (raw_cdna_start > coding_cdna_end OR raw_cdna_end < coding_cdna_start))\n",
+		"      THEN raw_cdna_start - coding_cdna_start + phase_offset + 1 END AS raw_cds_start,\n",
+		"    CASE WHEN raw_cdna_end BETWEEN coding_cdna_start AND coding_cdna_end\n",
+		"      AND NOT (vf_start > vf_end AND (raw_cdna_start > coding_cdna_end OR raw_cdna_end < coding_cdna_start))\n",
+		"      THEN raw_cdna_end - coding_cdna_start + phase_offset + 1 END AS raw_cds_end\n",
+		"  FROM cdna\n",
+		"), protein AS (\n",
+		"  SELECT *, (raw_cds_start + 2) // 3 AS raw_protein_start,\n",
+		"    (raw_cds_end + 2) // 3 AS raw_protein_end,\n",
+		"    substring(cds_sequence, 1, raw_cds_start - 1) || transcript_alternate ||\n",
+		"      substring(cds_sequence, raw_cds_end + 1) AS alternate_cds\n",
+		"  FROM coding\n",
+		"), codons AS (\n",
+		"  SELECT *, CASE WHEN raw_cds_start IS NOT NULL AND raw_cds_end IS NOT NULL\n",
+		"    THEN substring(cds_sequence, raw_protein_start * 3 - 2,\n",
+		"      greatest((raw_protein_end - raw_protein_start + 1) * 3, 0)) END AS ref_codons,\n",
+		"    CASE WHEN raw_cds_start IS NOT NULL AND raw_cds_end IS NOT NULL\n",
+		"    THEN substring((CASE WHEN alternate_cds IS NULL THEN NULL\n",
+		"      WHEN length(alternate_cds) >= 3 THEN alternate_cds ELSE '' END)\n",
+		"      || coalesce(post_cds_sequence, ''), raw_protein_start * 3 - 2,\n",
+		"      greatest((raw_protein_end - raw_protein_start + 1) * 3 + length(feature_alternate)\n",
+		"        - (raw_cds_end - raw_cds_start + 1), 0)) END AS alt_codons,\n",
+		"    (raw_cds_start - 1) % 3 AS changed_offset\n",
+		"  FROM protein\n",
+		"), translated_raw AS (\n",
+		"  SELECT *, CASE WHEN regexp_full_match(feature_reference, '[ACGT]*')\n",
+		"      THEN __duckvep_projection_peptide(ref_codons, genetic_code) END AS ref_peptide,\n",
+		"    CASE WHEN regexp_full_match(feature_alternate, '[ACGT]*')\n",
+		"      THEN __duckvep_projection_peptide(alt_codons, genetic_code) END AS alt_peptide\n",
+		"  FROM codons\n",
+		"), translated AS (\n",
+		"  SELECT * EXCLUDE(ref_peptide), CASE WHEN ref_peptide IS NULL OR ref_peptide = '-'\n",
+		"      THEN ref_peptide ELSE array_to_string(list_transform(range(length(ref_peptide)), i ->\n",
+		"        coalesce(list_transform(list_filter(peptide_edits, edit ->\n",
+		"          edit.protein_position = least(raw_protein_start, raw_protein_end) + i),\n",
+		"          edit -> edit.alternate_amino_acid)[1], substring(ref_peptide, i+1, 1))), '')\n",
+		"    END AS ref_peptide\n",
+		"  FROM translated_raw\n",
+		")\n",
+		"SELECT event_index, transcript_index,\n",
+		"  coalesce(nullif(feature_alternate, ''), '-') AS output_allele,\n",
+		"  geometry.interbase AS interbase,\n",
+		"  CASE WHEN raw_cdna_start > raw_cdna_end THEN raw_cdna_end ELSE raw_cdna_start END AS cdna_start,\n",
+		"  CASE WHEN raw_cdna_start > raw_cdna_end THEN raw_cdna_start ELSE raw_cdna_end END AS cdna_end,\n",
+		"  CASE WHEN raw_cds_start > raw_cds_end THEN raw_cds_end ELSE raw_cds_start END AS cds_start,\n",
+		"  CASE WHEN raw_cds_start > raw_cds_end THEN raw_cds_start ELSE raw_cds_end END AS cds_end,\n",
+		"  CASE WHEN raw_protein_start > raw_protein_end THEN raw_protein_end ELSE raw_protein_start END AS protein_start,\n",
+		"  CASE WHEN raw_protein_start > raw_protein_end THEN raw_protein_start ELSE raw_protein_end END AS protein_end,\n",
+		"  exon_hits[1]::UINTEGER AS exon_first, exon_hits[-1]::UINTEGER AS exon_last,\n",
+		"  length(exons)::UINTEGER AS exon_total,\n",
+		"  intron_hits[1]::UINTEGER AS intron_first, intron_hits[-1]::UINTEGER AS intron_last,\n",
+		"  CASE WHEN transcript_index IS NOT NULL THEN greatest(length(exons) - 1, 0)::UINTEGER END AS intron_total,\n",
+		"  CASE WHEN (consequence_mask & (SELECT bit_or(consequence_mask) FROM duckvep_so_terms()\n",
+		"    WHERE consequence IN ('upstream_gene_variant', 'downstream_gene_variant'))) != 0\n",
+		"    THEN least(abs(vf_start - tx_start), abs(vf_start - tx_end),\n",
+		"      abs(vf_end - tx_start), abs(vf_end - tx_end)) END AS transcript_distance,\n",
+		"  (transcript_flags & 16) != 0 AS cds_start_nf,\n",
+		"  (transcript_flags & 32) != 0 AS cds_end_nf,\n",
+		"  CASE WHEN alt_peptide IS NOT NULL THEN ref_peptide END AS reference_amino_acids,\n",
+		"  CASE WHEN ref_peptide IS NOT NULL THEN alt_peptide END AS alternate_amino_acids,\n",
+		"  CASE WHEN ref_codons = '' THEN '-' ELSE\n",
+		"    lower(substring(ref_codons, 1, changed_offset)) ||\n",
+		"    substring(ref_codons, changed_offset + 1, length(feature_reference)) ||\n",
+		"    lower(substring(ref_codons, changed_offset + length(feature_reference) + 1)) END\n",
+		"    AS reference_codons,\n",
+		"  CASE WHEN alt_codons = '' THEN '-' ELSE\n",
+		"    lower(substring(alt_codons, 1, changed_offset)) ||\n",
+		"    substring(alt_codons, changed_offset + 1, length(feature_alternate)) ||\n",
+		"    lower(substring(alt_codons, changed_offset + length(feature_alternate) + 1)) END\n",
+		"    AS alternate_codons\n",
+		"FROM translated;\n"
+	};
+
+	return duckvep_register_sql_parts(connection, sql,
+	    sizeof(sql) / sizeof(sql[0]));
+}
+
 bool
 register_duckvep_sql_functions(duckdb_connection connection)
 {
 	return duckvep_register_so_terms(connection) &&
-	    duckvep_register_annotate_relation(connection);
+	    duckvep_register_projection_code(connection) &&
+	    duckvep_register_annotate_relation(connection) &&
+	    duckvep_register_projection_relation(connection);
 }
