@@ -20827,13 +20827,12 @@ TEST coding_context_delta_cds_end_nf_known_scene(void) {
         ASSERT(delta.valid && delta.partial_codon && delta.inframe_insertion &&
                delta.coding_unknown && !delta.frameshift);
 
-        /* ClinVar chromosome-1 witness C>CTAG on ENST00000650713: a
-         * three-base insertion between the two bases of a CDS_END_NF terminal
-         * codon has VEP reference/alternate codons "-" and "TAG", and
-         * reference/alternate peptides "-" and "*". The absent reference
-         * codon must not be synthesized as X, so stop_gained and
-         * inframe_insertion do not acquire coding_unknown. */
-        edit.cds_start = 14u;
+        /* ClinVar 1:45013701:C:CTAG on ENST00000650713 inserts before CDS
+         * base 280, the first base of its partial codon (not between bases
+         * 280 and 281). VEP's consequence codons are "-/TAG" and peptides
+         * empty reference peptide versus stop. The smaller CDS preserves
+         * that codon-start placement. */
+        edit.cds_start = 13u;
         edit.alt = insert_tag;
         edit.alt_len = sizeof insert_tag;
         ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
@@ -20858,10 +20857,29 @@ TEST coding_context_delta_cds_end_nf_known_scene(void) {
         ASSERT(!delta.coding_unknown);
         ASSERT(!delta.frameshift);
 
-        /* The same internal site with a fourth trailing base still has VEP's
-         * insertion-only alternate peptide "*", not "*X". Deriving the
-         * synthetic-X decision from the codon-rounded edited CDS instead would
-         * inspect TTA here and incorrectly add coding_unknown. */
+        /* Retain the distinct internal site: pinned VEP instead spells
+         * "tt/tTAGt" and "X/LX", with no stop_gained. */
+        edit.cds_start = 14u;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      cds_mod2, sizeof cds_mod2, &edit_set, strand,
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_cds, sizeof alt_cds,
+                      ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
+        ASSERT(duckvep_coding_context_peptide_window_open(&ctx, &peptide_window));
+        ASSERT_EQ(1u, peptide_window.ref_length);
+        ASSERT_EQ(2u, peptide_window.alt_length);
+        ASSERT_EQ((uint8_t)'L', duckvep_coding_context_peptide_window_base(
+            &ctx, &peptide_window, 1, 0u));
+        ASSERT_EQ((uint8_t)'X', duckvep_coding_context_peptide_window_base(
+            &ctx, &peptide_window, 1, 1u));
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(
+                      &ctx, (uint64_t)DUCKVEP_TX_CDS_END_NF, &delta));
+        ASSERT(delta.valid && delta.partial_codon && delta.inframe_insertion &&
+               delta.coding_unknown && !delta.stop_gained && !delta.frameshift);
+
+        /* An internal TAGA payload gives "tt/tTAGAt" and "X/LD":
+         * protein_altering replaces the insertion-only stop prediction. */
         edit.alt = insert_taga;
         edit.alt_len = sizeof insert_taga;
         ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
@@ -20871,20 +20889,53 @@ TEST coding_context_delta_cds_end_nf_known_scene(void) {
                       ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
         ASSERT(duckvep_coding_context_peptide_window_open(
             &ctx, &peptide_window));
-        ASSERT_EQ(0u, peptide_window.ref_length);
-        ASSERT_EQ(1u, peptide_window.alt_whole_length);
+        ASSERT_EQ(1u, peptide_window.ref_length);
+        ASSERT_EQ(2u, peptide_window.alt_whole_length);
         ASSERT_EQ(0u, peptide_window.alt_partial_x);
-        ASSERT_EQ(1u, peptide_window.alt_length);
-        ASSERT_EQ((uint8_t)'*',
+        ASSERT_EQ(2u, peptide_window.alt_length);
+        ASSERT_EQ((uint8_t)'L',
                   duckvep_coding_context_peptide_window_base(
                       &ctx, &peptide_window, 1, 0u));
         ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
                   duckvep_coding_context_delta_fill(
                       &ctx, (uint64_t)DUCKVEP_TX_CDS_END_NF, &delta));
         ASSERT(delta.valid && delta.partial_codon &&
-               delta.stop_gained && delta.inframe_insertion &&
+               !delta.stop_gained && !delta.inframe_insertion &&
                !delta.coding_unknown && !delta.frameshift &&
-               !delta.inframe_deletion && !delta.protein_altering);
+               !delta.inframe_deletion && delta.protein_altering);
+
+        /* A 3-prime UTR participates in TVA's ALT codon slice, independently
+         * of the shorter reference slice. tt/tAt becomes tt/tAta when the
+         * first UTR base is A: X/YX, not X/Y. Physical CDS APIs still stop
+         * at the edited CDS endpoint. */
+        edit.alt = replace_t_a;
+        edit.alt_len = sizeof replace_t_a;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+                  duckvep_coding_context_build(
+                      cds_mod2, sizeof cds_mod2, &edit_set, strand,
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_cds, sizeof alt_cds,
+                      ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep, &ctx));
+        ctx.post_cds_bases = replace_t_a;
+        ctx.post_cds_length = sizeof replace_t_a;
+        ctx.post_cds_complete = 1u;
+        ASSERT(duckvep_coding_context_peptide_window_open(&ctx, &peptide_window));
+        ASSERT_EQ(2u, peptide_window.ref_nt_length);
+        ASSERT_EQ(4u, peptide_window.alt_nt_length);
+        ASSERT_EQ(2u, peptide_window.alt_length);
+        ASSERT_EQ((uint8_t)'Y', duckvep_coding_context_peptide_window_base(
+            &ctx, &peptide_window, 1, 0u));
+        ASSERT_EQ((uint8_t)'X', duckvep_coding_context_peptide_window_base(
+            &ctx, &peptide_window, 1, 1u));
+        ASSERT_EQ('\0', duckvep_coding_context_cds_base(&ctx, 1, ctx.alt_cds_len));
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK, duckvep_coding_context_delta_fill(
+            &ctx, (uint64_t)DUCKVEP_TX_CDS_END_NF, &delta));
+        ASSERT(delta.valid && delta.partial_codon && delta.inframe_insertion &&
+               delta.coding_unknown && !delta.stop_gained && !delta.protein_altering);
+        ctx.post_cds_length = SIZE_MAX;
+        ASSERT(!duckvep_coding_context_peptide_window_open(&ctx, &peptide_window));
+        ctx.post_cds_length = 1u;
+        ctx.post_cds_bases = NULL;
+        ASSERT(!duckvep_coding_context_peptide_window_open(&ctx, &peptide_window));
 
         /* HGVS 3-prime placement rotates the same insertion to AGT. VEP's
          * protein path independently rounds the edited CDS from the preceding
@@ -20901,8 +20952,8 @@ TEST coding_context_delta_cds_end_nf_known_scene(void) {
         ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
                   duckvep_coding_context_delta_fill(
                       &ctx, (uint64_t)DUCKVEP_TX_CDS_END_NF, &delta));
-        ASSERT(delta.valid && delta.partial_codon &&
-               delta.inframe_insertion);
+        ASSERT(delta.valid && delta.partial_codon && delta.stop_gained &&
+               delta.coding_unknown && !delta.inframe_insertion);
         ASSERT_EQ(DUCKVEP_HGVS_OK,
                   duckvep_hgvs_protein_fact_build(
                       &ctx, &delta, &protein_fact));
@@ -20913,13 +20964,19 @@ TEST coding_context_delta_cds_end_nf_known_scene(void) {
                       &protein_hgvs_required));
         ASSERT_EQ(0, strcmp("p.Ter5=", protein_hgvs));
 
-        /* Strict mode consumes the canonical coding-context peptide view.
-         * Without VEP's later codon-rounded replay this terminal insertion
-         * has no two-residue protein insertion locus and is not printable. */
+        /* Strict mode keeps the internal site's X reference residue instead
+         * of VEP's Xaa-to-Ter normalization. It is a substitution, not the
+         * empty-reference insertion previously inferred at this site. */
         ctx.compatibility_profile = (uint8_t)DUCKVEP_COMPAT_STRICT;
-        ASSERT_EQ(DUCKVEP_HGVS_NOT_APPLICABLE,
+        ASSERT_EQ(DUCKVEP_HGVS_OK,
                   duckvep_hgvs_protein_fact_build(
                       &ctx, &delta, &protein_fact));
+        ASSERT_EQ(DUCKVEP_HGVS_PROTEIN_SUBSTITUTION, protein_fact.shape);
+        ASSERT_EQ(DUCKVEP_HGVS_OK,
+                  duckvep_hgvs_protein_render(
+                      &protein_fact, 0, protein_hgvs, sizeof protein_hgvs,
+                      &protein_hgvs_required));
+        ASSERT_EQ(0, strcmp("p.Xaa5Ter", protein_hgvs));
 
         /* Removing the two-base partial codon is protein-altering in VEP, not
          * a frameshift or an in-frame deletion. */
@@ -21037,9 +21094,17 @@ static enum theft_trial_res prop_partial_terminal_insertion_strata(
     uint8_t alt_cds[32];
     uint8_t ref_peptide[16];
     uint8_t alt_peptide[16];
+    uint8_t expected_peptide[8];
+    size_t expected_ref_nt = s->site_offset == 0u ? 0u : s->tail_length;
+    size_t expected_alt_nt = expected_ref_nt + s->insertion_length;
+    size_t expected_whole = expected_alt_nt / 3u;
+    size_t expected_ref_length = expected_ref_nt != 0u ? 1u : 0u;
+    size_t expected_alt_length;
     size_t i;
     int saw_stop = 0;
-    uint8_t first_alt = 0u;
+    int expected_insertion;
+    int expected_protein_altering;
+    int expected_unknown;
     uint8_t expected_partial_x;
     (void)t;
 
@@ -21066,9 +21131,10 @@ static enum theft_trial_res prop_partial_terminal_insertion_strata(
         return THEFT_TRIAL_FAIL;
     }
     if (!duckvep_coding_context_peptide_window_open(&context, &window) ||
-        window.ref_nt_length != 0u || window.ref_length != 0u ||
-        window.alt_nt_length != (size_t)s->insertion_length ||
-        window.alt_whole_length != (size_t)s->insertion_length / 3u) {
+        window.ref_nt_length != expected_ref_nt ||
+        window.ref_length != expected_ref_length ||
+        window.alt_nt_length != expected_alt_nt ||
+        window.alt_whole_length != expected_whole) {
         fprintf(stderr,
                 "\n[terminal-partial failure] window tail=%u site=%u len=%u "
                 "table=%u strand=%d ref_nt=%zu ref=%zu alt_nt=%zu whole=%zu\n",
@@ -21078,13 +21144,25 @@ static enum theft_trial_res prop_partial_terminal_insertion_strata(
                 window.alt_nt_length, window.alt_whole_length);
         return THEFT_TRIAL_FAIL;
     }
-    for (i = 0u; i < window.alt_whole_length; i++) {
+    /* TranscriptMapper::genomic2pep rounds the reversed insertion endpoints
+     * independently. Only a codon-start insertion has zero reference codons.
+     * For internal sites, splice the oriented payload between the retained T
+     * bases; this oracle does not read the implementation's alternate CDS. */
+    for (i = 0u; i < expected_whole; i++) {
         char codon[4];
         uint8_t expected;
         size_t b;
         for (b = 0u; b < 3u; b++) {
-            codon[b] = (char)kprop_partial_terminal_oriented_base(
-                s, i * 3u + b);
+            size_t position = i * 3u + b;
+            if (s->site_offset == 0u) {
+                codon[b] = (char)kprop_partial_terminal_oriented_base(s, position);
+            } else if (position < s->site_offset ||
+                       position >= s->site_offset + s->insertion_length) {
+                codon[b] = 'T';
+            } else {
+                codon[b] = (char)kprop_partial_terminal_oriented_base(
+                    s, position - s->site_offset);
+            }
         }
         codon[3] = '\0';
         expected = (uint8_t)duckvep_translate_codon(
@@ -21100,14 +21178,16 @@ static enum theft_trial_res prop_partial_terminal_insertion_strata(
                         &context, &window, 1, i), expected);
             return THEFT_TRIAL_FAIL;
         }
-        if (i == 0u) first_alt = expected;
+        expected_peptide[i] = expected;
         if (expected == (uint8_t)'*') saw_stop = 1;
     }
     expected_partial_x = (uint8_t)(
-        (s->insertion_length % 3u) != 0u &&
-        !(window.alt_whole_length == 1u && first_alt == (uint8_t)'*'));
+        (expected_alt_nt % 3u) != 0u &&
+        !(expected_whole == 1u && expected_peptide[0] == (uint8_t)'*'));
+    expected_alt_length = expected_whole + expected_partial_x;
+    if (expected_partial_x) expected_peptide[expected_whole] = (uint8_t)'X';
     if (window.alt_partial_x != expected_partial_x ||
-        window.alt_length != window.alt_whole_length + expected_partial_x) {
+        window.alt_length != expected_alt_length) {
         fprintf(stderr,
                 "\n[terminal-partial failure] peptide-shape tail=%u site=%u "
                 "len=%u table=%u strand=%d whole=%zu partial_x=%u/%u "
@@ -21118,6 +21198,13 @@ static enum theft_trial_res prop_partial_terminal_insertion_strata(
                 expected_partial_x, window.alt_length);
         return THEFT_TRIAL_FAIL;
     }
+    expected_insertion = expected_ref_length == 0u ||
+        (!saw_stop && expected_partial_x);
+    expected_protein_altering = expected_ref_length != expected_alt_length &&
+        expected_ref_length != 0u && expected_peptide[0] != (uint8_t)'*' &&
+        !expected_partial_x;
+    expected_unknown = !expected_protein_altering &&
+        (expected_ref_length != 0u || expected_partial_x);
     delta_status = duckvep_coding_context_delta_fill(
         &context, (uint64_t)DUCKVEP_TX_CDS_END_NF, &delta);
     if (s->site_offset == s->tail_length) {
@@ -21131,13 +21218,20 @@ static enum theft_trial_res prop_partial_terminal_insertion_strata(
         }
     } else if (delta_status != DUCKVEP_CONTEXT_DELTA_OK ||
                !delta.valid || !delta.partial_codon || delta.frameshift ||
-               delta.inframe_deletion || !delta.inframe_insertion ||
+               delta.inframe_deletion ||
+               delta.inframe_insertion != (uint8_t)expected_insertion ||
                delta.stop_gained != (uint8_t)saw_stop ||
-               delta.coding_unknown != expected_partial_x ||
+               delta.coding_unknown != (uint8_t)expected_unknown ||
                delta.stop_lost || delta.stop_retained || delta.start_lost ||
-               delta.start_retained || delta.protein_altering ||
-               delta.synonymous || delta.missense || delta.ref_aa != 0u ||
-               delta.alt_aa != 0u ||
+               delta.start_retained ||
+               delta.protein_altering != (uint8_t)expected_protein_altering ||
+               delta.synonymous || delta.missense ||
+               delta.ref_aa != (uint8_t)(
+                   !expected_insertion && !expected_protein_altering &&
+                   expected_ref_length == 1u ? 'X' : 0u) ||
+               delta.alt_aa != (uint8_t)(
+                   !expected_insertion && !expected_protein_altering &&
+                   expected_alt_length == 1u ? expected_peptide[0] : 0u) ||
                delta.protein_pos != (int32_t)(window.peptide_offset + 1u)) {
         fprintf(stderr,
                 "\n[terminal-partial failure] delta tail=%u site=%u len=%u "
@@ -21150,7 +21244,7 @@ static enum theft_trial_res prop_partial_terminal_insertion_strata(
                 delta.partial_codon, delta.frameshift,
                 delta.inframe_deletion, delta.inframe_insertion,
                 delta.stop_gained, saw_stop, delta.coding_unknown,
-                expected_partial_x, delta.protein_altering,
+                (unsigned)expected_unknown, delta.protein_altering,
                 delta.protein_pos, window.peptide_offset + 1u);
         return THEFT_TRIAL_FAIL;
     }
@@ -21185,7 +21279,7 @@ TEST partial_terminal_insertion_covers_generated_vep_strata(void) {
     memset(&g_partial_terminal_insertion_cov, 0,
            sizeof g_partial_terminal_insertion_cov);
     cfg.name =
-        "terminal partial-codon insertion == insertion-only translation oracle";
+        "terminal partial-codon insertion == codon-rounded VEP translation oracle";
     cfg.prop1 = prop_partial_terminal_insertion_strata;
     cfg.type_info[0] = &kprop_partial_terminal_insertion_info;
     cfg.trials = kprop_env_u64("DUCKVEP_PROP_TRIALS", KPROP_DEFAULT_TRIALS);

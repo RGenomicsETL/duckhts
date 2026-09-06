@@ -265,10 +265,10 @@ typedef struct duckvep_coding_context {
     uint32_t alt_first_changed_codon, alt_last_changed_codon;
 } duckvep_coding_context_t;
 
-/* One authority for the non-obvious single-edit state consumed by both the
- * consequence peptide view and the HGVS peptide view.  The two consumers may
- * deliberately render different VEP-116 views, but they must not rediscover
- * the state with duplicate predicates. */
+/* Terminal partial-codon state selecting VEP's later HGVS peptide replay.
+ * Consequence windows independently round the insertion's CDS endpoints:
+ * insertion-only translation applies at a codon start, not every site
+ * admitted by this HGVS predicate. */
 DUCKVEP_INTERNAL_API int
 duckvep_coding_context_is_terminal_partial_insertion(
     const duckvep_coding_context_t *context);
@@ -301,9 +301,10 @@ typedef struct duckvep_coding_peptide_window {
     uint8_t alt_partial_x;
 } duckvep_coding_peptide_window_t;
 
-/* Open the exact codon-rounded local peptide window consumed by VEP 116 for a
- * supported single edit. Consequence predicates currently use it for
- * length-changing alleles; HGVS also uses it for equal-length edits. */
+/* Open the codon-rounded local peptide window for a supported single edit.
+ * REF and ALT requests are independently clamped; ALT includes the borrowed
+ * 3-prime UTR without extending physical CDS storage. Consequence predicates
+ * use this for length-changing alleles; HGVS also uses it for equal-length edits. */
 DUCKVEP_INTERNAL_API int duckvep_coding_context_peptide_window_open(
     const duckvep_coding_context_t  *ctx,
     duckvep_coding_peptide_window_t *window);

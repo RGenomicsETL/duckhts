@@ -1637,6 +1637,40 @@ local({
   expect_identical(partial_tail_deletion$status, "supported")
   expect_true(is.na(partial_tail_deletion$reason))
 
+  # Pinned VEP 116 distinguishes insertion before and inside the final TT.
+  # Keep the exact internal TAG/TAGA/AGT counterexamples, not just the
+  # codon-start ClinVar placement that originally motivated this path.
+  partial_insertions <- dbGetQuery(con, "WITH cases(site,payload) AS (VALUES
+    (0,'TAG'),(0,'TAGA'),(1,'TAG'),(1,'TAGA'),(1,'AGT'),(1,'ATG'),(1,'A'),(1,'AC'))
+    SELECT site,payload,(SELECT string_agg(s.consequence,'&' ORDER BY s.consequence)
+      FROM duckvep_so_terms() s WHERE (a.consequence_mask & s.consequence_mask)!=0) terms,
+      a.status,a.reason
+    FROM cases, unnest(_duckvep_annotate_small_rich('r-partial-cds-end',1::UINTEGER,
+      (111+site)::UBIGINT, CASE WHEN site=0 THEN 'G' ELSE 'T' END,
+      (CASE WHEN site=0 THEN 'G' ELSE 'T' END)||payload,0::UBIGINT)) u(a)
+    ORDER BY site,payload")
+  expect_identical(partial_insertions$terms, c(
+    "incomplete_terminal_codon_variant&inframe_insertion&stop_gained",
+    "incomplete_terminal_codon_variant&inframe_insertion&stop_gained",
+    "coding_sequence_variant&incomplete_terminal_codon_variant",
+    "coding_sequence_variant&incomplete_terminal_codon_variant&inframe_insertion",
+    "coding_sequence_variant&incomplete_terminal_codon_variant&stop_gained",
+    "coding_sequence_variant&incomplete_terminal_codon_variant&inframe_insertion",
+    "coding_sequence_variant&incomplete_terminal_codon_variant&inframe_insertion",
+    "incomplete_terminal_codon_variant&protein_altering_variant"))
+  expect_identical(partial_insertions$status, rep("supported", 8L))
+  expect_true(all(is.na(partial_insertions$reason)))
+  dbExecute(con, "UPDATE duckvep_r_partial_cds_transcripts SET transcript_end=114,
+    post_cds_sequence='A'::BLOB")
+  dbExecute(con, "UPDATE duckvep_r_partial_cds_exons SET exon_end=114, exon_cdna_end=15")
+  expect_true(load_model("r-partial-cds-end-utr", partial_cds_queries)$loaded)
+  partial_insertion_utr <- dbGetQuery(con, "SELECT a.consequence,a.status
+    FROM unnest(_duckvep_annotate_small_rich('r-partial-cds-end-utr',1::UINTEGER,
+      112::UBIGINT,'T','TA',0::UBIGINT)) u(a)")
+  expect_identical(partial_insertion_utr$consequence,
+    "inframe_insertion&incomplete_terminal_codon_variant&coding_sequence_variant")
+  expect_identical(partial_insertion_utr$status, "supported")
+
   dbExecute(
     con,
     paste(

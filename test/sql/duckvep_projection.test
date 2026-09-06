@@ -401,6 +401,77 @@ SELECT cdna_start, cdna_end, cds_start, cds_end, protein_start, cds_end_nf::INTE
 ----
 14	15	NULL	NULL	NULL	1	NULL
 
+# Pinned VEP 116, CDS ATGAAACCCGGGTT with no UTR: the first partial-codon
+# insertion site has empty reference codons, while the internal site retains
+# tt. The same transcript-oriented cases must agree on both strands.
+statement ok
+CREATE TABLE projection_partial_insertions AS SELECT
+  (seq_region-1)::UINTEGER transcript_index, seq_region::UINTEGER seq_region,
+  100::UBIGINT transcript_start, 113::UBIGINT transcript_end,
+  strand::TINYINT strand, 0::UINTEGER gene_index, 35::UBIGINT transcript_flags,
+  100::UBIGINT cds_start, 113::UBIGINT cds_end,
+  'ATGAAACCCGGGTT'::BLOB cds_sequence, 1::UTINYINT codon_table,
+  ''::BLOB pre_cds_sequence, ''::BLOB post_cds_sequence
+FROM (VALUES (1,1), (2,-1)) t(seq_region,strand);
+
+query I
+SELECT loaded FROM duckvep_model_load('partial-insertions',
+  'SELECT seq_region FROM projection_partial_insertions ORDER BY seq_region',
+  'SELECT * FROM projection_partial_insertions ORDER BY seq_region',
+  'SELECT transcript_index, 100::UBIGINT exon_start, 113::UBIGINT exon_end,
+     1::UBIGINT exon_cdna_start, 14::UBIGINT exon_cdna_end,
+     0::TINYINT phase, 2::TINYINT end_phase
+   FROM projection_partial_insertions ORDER BY transcript_index');
+----
+true
+
+query III
+WITH cases(site,payload,terms) AS (VALUES
+  (0,'TAG','incomplete_terminal_codon_variant&inframe_insertion&stop_gained'),
+  (0,'TAGA','incomplete_terminal_codon_variant&inframe_insertion&stop_gained'),
+  (1,'TAG','coding_sequence_variant&incomplete_terminal_codon_variant&inframe_insertion'),
+  (1,'TAGA','incomplete_terminal_codon_variant&protein_altering_variant'),
+  (1,'AGT','coding_sequence_variant&incomplete_terminal_codon_variant&stop_gained'),
+  (1,'ATG','coding_sequence_variant&incomplete_terminal_codon_variant&inframe_insertion'),
+  (1,'A','coding_sequence_variant&incomplete_terminal_codon_variant'),
+  (1,'AC','coding_sequence_variant&incomplete_terminal_codon_variant&inframe_insertion')
+), observed AS (
+  SELECT terms, a.* FROM cases, projection_partial_insertions m,
+  unnest(_duckvep_annotate_small_rich('partial-insertions', m.seq_region,
+    (CASE WHEN strand=1 THEN 111+site ELSE 101-site END)::UBIGINT,
+    CASE WHEN strand=1 THEN CASE WHEN site=0 THEN 'G' ELSE 'T' END ELSE 'A' END,
+    CASE WHEN strand=1 THEN (CASE WHEN site=0 THEN 'G' ELSE 'T' END)||payload
+      ELSE 'A'||seq_revcomp(payload) END, 0::UBIGINT)) u(a)
+)
+SELECT count(*), count(*) FILTER (WHERE status_code=0),
+  count(*) FILTER (WHERE terms=(SELECT string_agg(s.consequence,'&' ORDER BY s.consequence)
+    FROM duckvep_so_terms() s WHERE (observed.consequence_mask & s.consequence_mask)!=0))
+FROM observed;
+----
+16	16	16
+
+# One UTR base extends the requested ALT codon without extending the REF.
+statement ok
+UPDATE projection_partial_insertions SET transcript_end=114, post_cds_sequence='A'::BLOB
+WHERE seq_region=1;
+
+query I
+SELECT loaded FROM duckvep_model_load('partial-insertions-utr',
+  'SELECT seq_region FROM projection_partial_insertions WHERE seq_region=1',
+  'SELECT * FROM projection_partial_insertions WHERE seq_region=1',
+  'SELECT 0::UINTEGER transcript_index, 100::UBIGINT exon_start, 114::UBIGINT exon_end,
+     1::UBIGINT exon_cdna_start, 15::UBIGINT exon_cdna_end,
+     0::TINYINT phase, 2::TINYINT end_phase');
+----
+true
+
+query TT
+SELECT a.consequence, a.status
+FROM unnest(_duckvep_annotate_small_rich('partial-insertions-utr',1::UINTEGER,
+  112::UBIGINT,'T','TA',0::UBIGINT)) u(a);
+----
+inframe_insertion&incomplete_terminal_codon_variant&coding_sequence_variant	supported
+
 statement ok
 CREATE TABLE projection_invalid_code AS SELECT * REPLACE(255::UTINYINT AS codon_table)
 FROM projection_transcripts;

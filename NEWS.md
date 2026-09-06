@@ -1,6 +1,12 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- remove DuckVEP's insertion-only peptide special case inside a terminal
+  partial codon. Keep codon-start insertions distinct from insertions between
+  partial bases, correcting stop, insertion and protein-altering consequences
+  while preserving the exact ClinVar HGVS witness. Codon windows include the
+  borrowed 3-prime UTR and clamp REF and ALT requests independently
+
 - separate DuckVEP's physical CDS reference checks from VEP feature/codon
   coordinates when a noncoding first exon precedes a phase-padded CDS. Correct
   native SNV body/stop consequences and terminal-codon admission without

@@ -1,5 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- correct bundled DuckVEP consequences for insertions between terminal partial
+  codon bases; codon-start insertions and the retained ClinVar HGVS case keep
+  their distinct VEP-compatible results. ALT codon windows now include available
+  3-prime UTR bases without changing the physical CDS edit
+
 - correct bundled DuckVEP SNV body/stop and terminal-codon results when CDS
   phase padding starts after a noncoding first exon; genomic reference checks
   still use the physical sequence position, independently of VEP codon mapping.

@@ -50,8 +50,8 @@ The implementation and test authorities are deliberately small:
   VEP-116 and strict table-2 results.
 - `duckvep_coding_context_is_terminal_partial_insertion()` is the sole predicate for the
   terminal-partial insertion state. `coding_context_delta_cds_end_nf_known_scene` pins
-  the distinct VEP consequence/HGVS views and strict rejection of the later VEP-only
-  view, while
+  codon-start versus internal insertion placement, the distinct VEP consequence/HGVS
+  views and strict Xaa rendering, while
   `partial_terminal_insertion_covers_generated_vep_strata` explores both terminal-tail
   lengths, all insertion-length residues modulo three, both strands, and standard and
   mitochondrial translation tables.
@@ -1148,7 +1148,7 @@ Source anchors: Ensembl Variation 116 `VariationEffect.pm::start_lost`,
 
 ## Terminal partial-codon insertions use distinct consequence and HGVS peptide views
 
-For a pure insertion inside an incomplete terminal codon, VEP 116 does not feed one
+For a pure insertion at the start of an incomplete terminal codon, VEP 116 does not feed one
 peptide representation to consequence classification and protein HGVS. The consequence
 predicates can observe an empty reference codon allele and translate the inserted allele
 directly. The later HGVSp replay instead uses the codon-rounded edited CDS, including the
@@ -1161,21 +1161,46 @@ The GRCh38 ClinVar event `1:45013701:C:CTAG` on `ENST00000650713` has a 281-base
 `c.280_281insAGT`; the HGVS-specific codon-rounded replay compares the incomplete
 reference residue with a translated stop and VEP renders `p.Ter94=`.
 
+The unshifted event inserts before CDS base 280, the first base of the partial codon;
+only the later HGVS placement is between bases 280 and 281. This does **not** imply
+insertion-only consequence translation at every site in the partial codon. With a
+14-base `ATGAAACCCGGGTT` CDS and no UTR, pinned VEP 116 gives `-/TAG` before base 13,
+but `tt/tTAGt` and `X/LX` before base 14. The latter has insertion and coding-unknown
+terms without stop-gained. An internal `TAGA` instead gives `tt/tTAGAt`, `X/LD` and
+protein-altering; an internal `AGT` gives `tt/tAGTt`, `X/*` and stop-gained plus
+coding-unknown. Both strands have the same transcript-oriented results.
+
+The former handwritten insertion-only property generalized the ClinVar placement
+incorrectly. Its generator, seeds, trial count and all site strata are retained; its
+expected peptide now splices the oriented payload between the partial bases and uses
+VEP's independently rounded insertion endpoints. The executable projection differential
+remains unchanged. Codon rounding, not a terminal-insertion special case, owns the
+consequence peptide window.
+
+`TranscriptVariationAllele::codon` applies the rounded reference request and its
+length-adjusted alternate request independently; it does not shorten the ALT request
+when Perl `substr` clips the reference to the partial CDS tail. The alternate view
+includes the borrowed 3-prime UTR. For example, internal `A` in the same terminal `TT`
+gives `tt/tAt` without a UTR, but `tt/tAta` when its first UTR base is `A`. The latter
+retains `X/YX` and an insertion term. Physical CDS mutation and its byte/peptide accessors
+remain unchanged; only the consequence codon view reads beyond the edited CDS.
+
 DuckVEP therefore retains the codon-rounded edited-CDS cache for HGVS while exposing the
-empty-reference/insertion-only peptide window to consequence predicates. Treating the
+empty-reference/insertion-only consequence window at the unshifted codon-start site. Treating the
 synthetic incomplete reference residue as consequence-level `X` invents
 `coding_sequence_variant`; reusing the consequence-only insertion peptide for HGVSp loses
 `p.Ter94=`. Fixed C, SQL, and R witnesses assert both views and the exact consequence,
 HGVSc, HGVSp, and shift; the strict executable corpus differential remains the independent
 acceptance gate.
 
-Compatibility policy: the state predicate is
-`duckvep_coding_context_is_terminal_partial_insertion()` for every consumer.
+Compatibility policy: the HGVS state predicate is
+`duckvep_coding_context_is_terminal_partial_insertion()`.
 `DUCKVEP_COMPAT_HGVS_TERMINAL_PARTIAL_INSERTION` selects only VEP's later
 codon-rounded HGVSp view; disabling it leaves the canonical coding-context peptide view.
 There is no second terminal-partial predicate in the formatter.
 
-Source anchors: Ensembl Variation 116 `VariationEffect.pm::partial_codon`,
+Source anchors: Ensembl core 116 `TranscriptMapper.pm::genomic2pep`, Ensembl Variation
+116 `TranscriptVariationAllele.pm::codon`, `VariationEffect.pm::partial_codon`,
 `::inframe_insertion`, `::stop_gained`, `::coding_unknown`, and
 `TranscriptVariationAllele.pm::hgvs_protein`.
 
