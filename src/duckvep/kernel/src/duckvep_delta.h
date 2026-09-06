@@ -260,6 +260,7 @@ typedef struct duckvep_coding_context {
     uint8_t ref_first_stop_known;
     uint8_t compatibility_profile; /* duckvep_compat_profile_t */
     uint8_t feature_length_relation; /* duckvep_feature_length_relation_t */
+    uint8_t cds_phase_padding; /* Known synthetic N prefix, not unknown genomic REF. */
     uint32_t ref_first_stop_position1;
     uint32_t ref_first_changed_codon, ref_last_changed_codon;
     uint32_t alt_first_changed_codon, alt_last_changed_codon;

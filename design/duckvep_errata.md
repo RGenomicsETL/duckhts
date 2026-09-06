@@ -787,10 +787,10 @@ Source anchors: Ensembl Variation 116 `VariationEffect.pm::within_5_prime_utr`,
 ## Retained feature bases participate in peptide predicates
 
 When an equal-length uploaded feature maps wholly into CDS, VEP 116 uses every codon
-covered by that feature as the local peptide window. Common-prefix and suffix trimming
-still identifies the bases to apply, but it does not shrink the window used by the start,
-stop, synonymous, and missense predicates. Two records with the same changed CDS base can
-therefore receive different consequences.
+covered by that feature as the local peptide window and applies the complete feature ALT
+at the feature CDS offset. The independently retained minimized edit does not replace
+either representation. Two records with the same changed genomic base can therefore
+receive different start, stop, synonymous, and missense consequences.
 
 Paired VEP-116 witnesses isolate three forms of this representation dependence:
 
@@ -808,15 +808,34 @@ stop-lost, stop-retained, or stop-gained predicates succeeds and `missense_varia
 remains.
 
 Keep one substitution evaluator over an explicitly selected peptide window. The uploaded
-feature selects that window; the trimmed edit supplies the replacement bases. Do not
+feature selects both that window and its replacement allele. Do not
 normalize the uploaded identity inside the consequence kernel or implement separate
 start/stop rule copies for MNV-shaped input.
 
 The complete feature is also the reference-validation contract. Every retained REF base
-must agree with the transcript CDS, and an ambiguous or incomplete codon anywhere in the selected
-window suppresses the specific peptide predicate. Once that window is authoritative,
-DuckVEP must preserve `reference_mismatch`, ambiguous-sequence, or `coding_sequence_variant`
-state; retrying the smaller trimmed edit would annotate a different input representation.
+must agree with the physical transcript CDS before feature-coordinate conversion or
+partial-codon admission. Synthetic phase padding in the selected VEP codon is not unknown
+genomic REF: its `X` peptide still reaches the independent start predicates. Once the
+uploaded window is authoritative, a sequence failure must not retry the smaller trimmed
+edit, which would annotate a different input representation.
+
+The later-coding-start models in `projection_fixtures.R` distinguish physical and feature
+positions for MNVs as well as SNVs. These pinned executable results include:
+
+| Uploaded MNV | Coding phase 0 | Coding phase 1 | Coding phase 2 |
+| --- | --- | --- | --- |
+| `chrDuck:158 CG>GC` | start-lost | start-lost | start-lost |
+| `chrDuck:165 AC>TG` | missense | synonymous | missense |
+| `chrDuck:235 TG>AC` | missense | stop-gained | synonymous |
+| `chrDuck:239 AA>CA` | partial-codon + coding-unknown | stop-lost | missense |
+
+At phase 2, `235 TG>AC` replaces feature-CDS bases that already contain `AC`; VEP's
+codons are `gtACtg/gtACtg` and peptides `VL/VL`. An unchanged consequence view must still
+reach synonymous/retained-stop predicates, even though the physical REF and ALT differ.
+At phase 1, `160 TA>AT` produces identical `XY/XY` peptides but is start-lost through
+the independent UTR+CDS offset test. Native tests mirror these scenes on both strands;
+SQL/R tests retain complete SO sets, and incorrect retained REF remains unresolved even
+for the partial terminal-codon case.
 
 Prepared CDS can prove that complete contract without genomic FASTA only when the complete
 uploaded REF is also the minimized differing REF. If prefix/suffix trimming retained an
@@ -827,9 +846,10 @@ never observed. The regression `POS=124 REF=AA ALT=AC` over a transcript whose t
 are `TA` is deliberately unresolved without FASTA and becomes an auditable mismatch only
 when a reference provider is present.
 
-Source anchors: Ensembl Variation 116 `VariationEffect.pm::start_lost`,
-`::start_retained`, `::stop_lost`, `::stop_retained`, `::stop_gained`, and
-`::missense`. Fixed witnesses must remain paired with large held-out differentials so a
+Source anchors: Ensembl Variation 116 `TranscriptVariationAllele.pm::_get_alternate_cds`,
+`VariationEffect.pm::start_lost`, `::start_retained_variant`, `::stop_lost`,
+`::stop_retained`, `::stop_gained`, and `::missense_variant`.
+Fixed witnesses must remain paired with large held-out differentials so a
 special-case term substitution cannot satisfy conformance.
 
 ## A five-prime boundary feature selects only the start codon

@@ -16371,6 +16371,78 @@ TEST sequence_delta_snv_start_test_precedes_unknown_peptide(void) {
                     ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_REFERENCE_MISMATCH, delta.sequence_status);
                 }
             }
+            {
+                /* Complete uploaded CDS spans from the same pinned campaign:
+                 * start, two-codon start, body, and physical CDS endpoint. */
+                static const uint32_t mnv_positions[] = {158u, 160u, 165u, 239u, 235u};
+                static const char *refs[] = {"CG", "TA", "AC", "AA", "TG"};
+                static const char *alts[] = {"GC", "AT", "TG", "CA", "AC"};
+                uint8_t alt_cds[64], ref_peptide[32], alt_peptide[32];
+                duckvep_delta_scratch_t scratch;
+                size_t j;
+                memset(&scratch, 0, sizeof scratch);
+                scratch.alt_cds = alt_cds; scratch.alt_cds_cap = sizeof alt_cds;
+                scratch.ref_peptide = ref_peptide; scratch.ref_peptide_cap = sizeof ref_peptide;
+                scratch.alt_peptide = alt_peptide; scratch.alt_peptide_cap = sizeof alt_peptide;
+                s.vkind = (uint8_t)DUCKVEP_KIND_MNV;
+                s.rlen = s.alen = 2u; s.aoff = 2u;
+                for (j = 0u; j < 5u; j++) {
+                    duckvep_event_t event;
+                    duckvep_coding_context_t context;
+                    duckvep_sequence_delta_t routed;
+                    duckvep_feature_substitution_result_t result;
+                    uint32_t unpadded = mnv_positions[j] <= 180u
+                        ? mnv_positions[j] - 157u : mnv_positions[j] - 196u;
+                    size_t b;
+                    s.vpos = strand > 0 ? mnv_positions[j] : 349u - mnv_positions[j];
+                    s.vend = s.vpos + 1u;
+                    for (b = 0u; b < 2u; b++) {
+                        size_t oriented = strand > 0 ? b : 1u - b;
+                        s.abytes[b] = (uint8_t)coding_test_genomic_from_tx(refs[j][oriented], strand);
+                        s.abytes[2u + b] = (uint8_t)coding_test_genomic_from_tx(alts[j][oriented], strand);
+                    }
+                    duckvep_event_load(&s.v, 0u, &event);
+                    result = duckvep_feature_substitution_context_fill(
+                        &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, strand,
+                        &scratch, &event, UINT32_MAX, &context, &delta);
+                    ASSERT_EQ(j == 3u && phase == 0
+                        ? DUCKVEP_FEATURE_SUBSTITUTION_DELTA_ONLY
+                        : DUCKVEP_FEATURE_SUBSTITUTION_CONTEXT_READY, result);
+                    ASSERT(delta.valid && !delta.start_retained &&
+                           !delta.stop_retained && !delta.frameshift && !delta.protein_altering);
+                    ASSERT_EQ(j < 2u, delta.start_lost);
+                    ASSERT_EQ((j == 2u && phase == 1) || (j == 4u && phase == 2), delta.synonymous);
+                    ASSERT_EQ((j == 2u && phase != 1) || (j == 3u && phase == 2) ||
+                              (j == 4u && phase == 0), delta.missense);
+                    ASSERT_EQ(j == 4u && phase == 1, delta.stop_gained);
+                    ASSERT_EQ(j == 3u && phase == 1, delta.stop_lost);
+                    ASSERT_EQ(j == 3u && phase == 0, delta.partial_codon);
+                    ASSERT_EQ(j == 3u && phase == 0, delta.coding_unknown);
+                    ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_RESOLVED, delta.sequence_status);
+                    if (result == DUCKVEP_FEATURE_SUBSTITUTION_CONTEXT_READY) {
+                        ASSERT_EQ(unpadded, context.single_edit_cds_start);
+                        ASSERT_EQ((uint8_t)phase, context.cds_phase_padding);
+                        ASSERT_EQ(2u, context.single_edit_ref_len);
+                        if (j == 4u && phase == 2) ASSERT_EQ(0u, context.cds_changed);
+                    }
+                    duckvep_sequence_delta_fill_for_annotation(DUCKVEP_KIND_MNV,
+                        &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, s.vpos, strand,
+                        &scratch, NULL, &routed);
+                    ASSERT_EQ(0, memcmp(&delta, &routed, sizeof delta));
+                    /* Even partial-codon admission must not bypass REF. For
+                     * AA>CA mutate the retained A in both alleles, preserving
+                     * the smaller semantic edit while making REF wrong. */
+                    b = strand > 0 ? 1u : 0u;
+                    s.abytes[b] = (uint8_t)coding_test_genomic_from_tx(
+                        refs[j][1] == 'A' ? 'G' : 'A', strand);
+                    if (j == 3u) s.abytes[b + 2u] = s.abytes[b];
+                    duckvep_sequence_delta_fill_for_annotation(DUCKVEP_KIND_MNV,
+                        &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, s.vpos, strand,
+                        &scratch, NULL, &delta);
+                    ASSERT(!delta.valid && !delta.partial_codon);
+                    ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_REFERENCE_MISMATCH, delta.sequence_status);
+                }
+            }
         }
     }
     PASS();

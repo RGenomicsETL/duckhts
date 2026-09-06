@@ -373,6 +373,46 @@ GROUP BY ALL ORDER BY event_index;
 2	supported	NULL	3
 3	unresolved	reference_mismatch	3
 
+statement ok
+CREATE TABLE projection_coding_mnv_events AS SELECT e.* REPLACE(
+  v.event_index::UBIGINT AS event_index, v.position::UBIGINT AS position,
+  v.reference AS reference, v.alternate AS alternate)
+FROM projection_events e CROSS JOIN (VALUES (1,158,'CG','GC'), (2,160,'TA','AT'),
+  (3,165,'AC','TG'), (4,239,'AA','CA'), (5,235,'TG','AC'),
+  (6,239,'AG','CG')) v(event_index,position,reference,alternate)
+WHERE e.event_index=1 ORDER BY position,event_index;
+
+query IITT
+SELECT event_index, transcript_index, duckvep_status,
+  (SELECT string_agg(consequence,'&' ORDER BY consequence)
+   FROM duckvep_so_terms() t WHERE (a.consequence_mask & t.consequence_mask)<>0)
+FROM duckvep_annotate('projection_coding_mnv_events', 'mnv-start', rich := true) a
+WHERE event_index<=5 ORDER BY event_index,transcript_index;
+----
+1	0	supported	start_lost
+1	1	supported	start_lost
+1	2	supported	start_lost
+2	0	supported	start_lost
+2	1	supported	start_lost
+2	2	supported	start_lost
+3	0	supported	missense_variant
+3	1	supported	synonymous_variant
+3	2	supported	missense_variant
+4	0	supported	coding_sequence_variant&incomplete_terminal_codon_variant
+4	1	supported	stop_lost
+4	2	supported	missense_variant
+5	0	supported	missense_variant
+5	1	supported	stop_gained
+5	2	supported	synonymous_variant
+
+# The retained G is incorrect physical REF even in the partial-codon model.
+query TTI
+SELECT duckvep_status, duckvep_reason, count(*)
+FROM duckvep_annotate('projection_coding_mnv_events', 'mnv-start', rich := true)
+WHERE event_index=6 GROUP BY ALL;
+----
+unresolved	reference_mismatch	3
+
 query I
 SELECT duckvep_model_drop('mnv-start');
 ----

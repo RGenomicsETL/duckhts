@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- separate complete MNV physical REF validation from VEP's feature-phase CDS
+  edit, including retained bases and partial terminal codons. Share the
+  independent start-offset test with SNVs and classify unchanged VEP peptide
+  windows even when physical REF and ALT differ
+
 - unify multi-base substitutions spanning 5-prime UTR and CDS with the shared
   transcript-string evaluator, correcting phase-padded start-loss/retention.
   Delete the clipped-CDS fallback and its start-only peptide mode: required

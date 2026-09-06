@@ -2187,6 +2187,22 @@ local({
       "start_retained_variant&5_prime_UTR_variant", "coding_sequence_variant&5_prime_UTR_variant"))
     expect_identical(mnv$status, c("supported", "supported", "unresolved"))
     expect_identical(mnv$reason, c(NA_character_, NA_character_, "reference_mismatch"))
+    coding_mnv <- dbGetQuery(con, paste(
+      "WITH variants(ord, position, reference, alternate) AS (VALUES",
+      "(1,158::UBIGINT,'CG','GC'),(2,160::UBIGINT,'TA','AT'),",
+      "(3,165::UBIGINT,'AC','TG'),(4,239::UBIGINT,'AA','CA'),",
+      "(5,235::UBIGINT,'TG','AC'),(6,239::UBIGINT,'AG','CG'))",
+      "SELECT ord, a.consequence, a.status, a.reason FROM variants,",
+      "LATERAL unnest(_duckvep_annotate_small_rich('r-mnv-start',",
+      "1::UINTEGER,position,reference,alternate,0::UBIGINT)) u(a) ORDER BY ord"
+    ))
+    expect_equal(coding_mnv$ord, 1:6)
+    expect_identical(coding_mnv$consequence[1:5], c("start_lost", "start_lost",
+      if (phase == 1) "synonymous_variant" else "missense_variant",
+      c("incomplete_terminal_codon_variant&coding_sequence_variant", "stop_lost", "missense_variant")[phase+1L],
+      c("missense_variant", "stop_gained", "synonymous_variant")[phase+1L]))
+    expect_identical(coding_mnv$status, c(rep("supported", 5), "unresolved"))
+    expect_identical(coding_mnv$reason, c(rep(NA_character_, 5), "reference_mismatch"))
     expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-mnv-start') dropped")$dropped)
     mnv_queries[2] <- paste("SELECT * EXCLUDE(pre_cds_sequence,post_cds_sequence) FROM (",
       mnv_queries[2], ")")

@@ -1,5 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- correct bundled DuckVEP multi-base coding substitutions when stored CDS
+  padding and VEP feature coordinates differ. Validate the full physical REF
+  before partial-codon classification, and preserve synonymous results when
+  a physically different allele leaves VEP's edited peptide unchanged
+
 - correct bundled DuckVEP multi-base substitutions spanning 5-prime UTR and
   phase-padded CDS. Missing required UTR sequence now produces an unresolved
   result instead of a clipped-CDS approximation; retained UTR REF is checked
