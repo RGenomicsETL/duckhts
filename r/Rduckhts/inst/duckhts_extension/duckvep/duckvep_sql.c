@@ -506,6 +506,9 @@ duckvep_register_projection_relation(duckdb_connection connection)
 		"      CASE WHEN strand > 0 THEN tx_cds_start ELSE tx_cds_end END) AS coding_cdna_start,\n",
 		"    __duckvep_projection_base(exons, strand,\n",
 		"      CASE WHEN strand > 0 THEN tx_cds_end ELSE tx_cds_start END) AS coding_cdna_end,\n",
+		/* VEP BaseTranscriptVariation and TranscriptMapper use the first
+		 * transcript exon here. CDS sequence padding separately uses the
+		 * translation-start exon; substituting that phase changes VEP output. */
 		"    greatest(exons[1].phase::BIGINT, 0) AS phase_offset\n",
 		"  FROM joined\n",
 		"), mapped AS (\n",

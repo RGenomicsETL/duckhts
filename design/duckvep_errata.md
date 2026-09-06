@@ -94,6 +94,25 @@ does not carry the full Ensembl transcript-quality/translation-edit attribute se
 positive `cds_*_NF` and peptide-edit tests are model-attribute properties, not a claim
 of GFF-based oracle coverage for those attributes.
 
+### Presentation phase is not CDS sequence padding
+
+VEP 116 `BaseTranscriptVariation::cds_start` uses
+`transcript->start_Exon->phase`, and the pinned core `TranscriptMapper` initializes
+its protein-coordinate shift from `get_all_Exons()->[0]->phase`. Both refer to
+the first **transcript** exon. Separately, `Transcript::translateable_seq` pads
+the sequence with the phase of `translation->start_Exon`, the first **coding**
+exon. These phases can differ when a partial CDS begins after a noncoding exon.
+The SQL VEP presentation relation must retain that distinction rather than use
+the kernel's biological CDS-padding offset for displayed CDS/protein positions.
+This is the direct pinned VEP mapper contract, not a new strict-profile policy.
+
+`projection_differential.R` includes later coding-exon phases 1 and 2, with an
+initial noncoding exon of phase -1. Every projected field is compared against
+the unchanged pinned VEP executable. Deliberately substituting the coding-exon
+phase must produce CDS-coordinate mismatches. `duckvep_projection.test` also
+pins a three-base CDS position whose protein position would change under that
+substitution.
+
 The remaining entries in this ledger describe VEP's declared coordinate, mapper,
 predicate-order, cache, or output semantics. They are implemented as typed facts and
 generated consequence rules, not hidden formatter switches. Examples include the

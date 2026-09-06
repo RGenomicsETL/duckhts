@@ -194,6 +194,26 @@ main <- function() {
     }
     detected <- vapply(mutations, function(corrupt)
       nrow(duckvep_projection_compare(corrupt, expected)) > 0L, logical(1L))
+    if (case %in% c("noncoding_first_exon_phase1", "noncoding_first_exon_phase2")) {
+      # Deliberately substitute the translation-start phase for VEP's first-
+      # transcript-exon display phase. This is a wrong-policy control, not an
+      # alteration of the oracle or the valid model loaded by the kernel.
+      DBI::dbExecute(con, "CREATE OR REPLACE TABLE wrong_projection_phase AS
+        SELECT * REPLACE(list_transform(exons, e -> struct_pack(
+          exon_start := e.exon_start, exon_end := e.exon_end,
+          exon_cdna_start := e.exon_cdna_start, exon_cdna_end := e.exon_cdna_end,
+          phase := CASE WHEN e.exon_cdna_start=1 THEN exons[2].phase ELSE e.phase END,
+          end_phase := e.end_phase)) AS exons) FROM projection_transcripts")
+      wrong <- DBI::dbGetQuery(con, "SELECT p.* EXCLUDE(event_index, transcript_index), e.ID,
+        n.transcript_id FROM duckvep_transcript_projection(
+          'projection_events', 'projection_annotations', 'wrong_projection_phase') p
+        JOIN projection_events e USING(event_index)
+        LEFT JOIN duckvep_transcript_names n USING(transcript_index)")
+      wrong <- as.data.frame(lapply(wrong[names(expected)], as.character), stringsAsFactors = FALSE)
+      wrong_comparison <- duckvep_projection_compare(wrong, expected)
+      utils::write.csv(wrong_comparison, file.path(directory, paste0(case, ".wrong-phase.csv")), row.names = FALSE)
+      detected <- c(detected, coding_exon_phase_substitution = any(wrong_comparison$field == "cds_start"))
+    }
     stopifnot(all(detected), nrow(duckvep_projection_compare(expected, expected)) == 0L)
     controls[[case]] <- data.frame(case, control = names(detected), detected)
     DBI::dbGetQuery(con, "SELECT duckvep_model_drop('projection')")

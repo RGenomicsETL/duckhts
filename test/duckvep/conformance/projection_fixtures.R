@@ -3,7 +3,8 @@
 # projection_reference, projection_reference_fai and projection_model_gff.
 # These transformations are test fixtures, not a second general GFF importer.
 duckvep_projection_cases <- c("forward", "reverse", "three_exon_phase2",
-  "partial_cds_end", "noncoding_first_exon", "noncoding")
+  "partial_cds_end", "noncoding_first_exon", "noncoding",
+  "noncoding_first_exon_phase1", "noncoding_first_exon_phase2")
 
 # The unchanged generator may emit the same allele/ID more than once. Give each
 # physical record a comparison key; retain its original file alongside this copy.
@@ -40,15 +41,22 @@ duckvep_projection_fixture <- function(con, root, inputs, case, directory) {
       post_cds_sequence = seq_revcomp(decode(pre_cds_sequence))::BLOB")
     execute("UPDATE duckvep_exons SET exon_cdna_start = 103 - exon_cdna_end,
       exon_cdna_end = 103 - exon_cdna_start")
-  } else if (case %in% c("three_exon_phase2", "partial_cds_end", "noncoding_first_exon")) {
+  } else if (case %in% c("three_exon_phase2", "partial_cds_end") ||
+             startsWith(case, "noncoding_first_exon")) {
+    later_cds <- startsWith(case, "noncoding_first_exon")
+    later_phase <- if (endsWith(case, "phase1")) 1L else if (endsWith(case, "phase2")) 2L else 0L
     starts <- c(100L, 150L, 220L)
     ends <- c(125L, 180L, 250L)
-    coding_start <- if (case == "noncoding_first_exon") 158L else 108L
+    coding_start <- if (later_cds) 158L else 108L
     coding_end <- if (case == "partial_cds_end") 239L else 240L
     # Ensembl phase 2 is GFF phase 1. The first, noncoding exon uses -1.
-    phases <- if (case == "noncoding_first_exon") c(-1L, 0L, 1L) else c(2L, 2L, 0L)
-    end_phases <- if (case == "noncoding_first_exon") c(-1L, 1L, 1L) else
+    phases <- if (later_cds) c(-1L, later_phase, 1L) else c(2L, 2L, 0L)
+    end_phases <- if (later_cds) c(-1L, 1L, 1L) else
       c(2L, 0L, if (case == "partial_cds_end") 2L else 0L)
+    if (later_cds && later_phase > 0L) {
+      phases[[3L]] <- (later_phase + 23L) %% 3L
+      end_phases[2:3] <- phases[[3L]]
+    }
     gff <- gff[1:2, ]
     cdna <- 1L
     execute("DELETE FROM duckvep_exons")
@@ -82,7 +90,7 @@ duckvep_projection_fixture <- function(con, root, inputs, case, directory) {
         starts[[i]], ends[[i]], cdna, cdna+n-1L, phases[[i]], end_phases[[i]]))
       cdna <- cdna + n
     }
-    padding <- if (case == "noncoding_first_exon") "" else "NN"
+    padding <- if (later_cds) strrep("N", later_phase) else "NN"
     execute(paste0("UPDATE duckvep_transcripts SET cds_start=", coding_start,
       ", cds_end=", coding_end, ", cds_sequence=", quote(paste0(padding, paste(cds, collapse = ""))),
       "::BLOB, pre_cds_sequence=", quote(paste(pre, collapse = "")),

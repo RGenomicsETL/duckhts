@@ -1483,6 +1483,46 @@ local({
     "'duckvep_r_projection_annotations', 'duckvep_r_projection_model')"
   )), pattern = "annotation needs a source event")
   expect_equal(dbGetQuery(con, "SELECT 42 AS value")$value, 42L)
+  # A later coding exon pads the sequence; VEP's displayed coordinates still
+  # use the first transcript exon's phase. Keep those ownership rules separate.
+  phase_queries <- queries
+  phase_queries[[2L]] <- sub("duckvep_r_transcripts", "duckvep_r_projection_phase_model",
+    phase_queries[[2L]], fixed = TRUE)
+  phase_queries[[3L]] <- paste(
+    "SELECT transcript_index, e.exon_start, e.exon_end, e.exon_cdna_start,",
+    "e.exon_cdna_end, e.phase, e.end_phase FROM duckvep_r_projection_phase_model,",
+    "unnest(exons) u(e) ORDER BY transcript_index, e.exon_cdna_start"
+  )
+  for (phase in 1:2) {
+    dbExecute(con, sprintf(paste(
+      "CREATE OR REPLACE TABLE duckvep_r_projection_phase_model AS SELECT * REPLACE(",
+      "200::UBIGINT AS cds_start,",
+      "(repeat('N', %d) || substring(decode(cds_sequence),32))::BLOB AS cds_sequence,",
+      "(decode(pre_cds_sequence) || substring(decode(cds_sequence),1,31))::BLOB AS pre_cds_sequence,",
+      "list_transform(exons, e -> struct_pack(exon_start := e.exon_start, exon_end := e.exon_end,",
+      "exon_cdna_start := e.exon_cdna_start, exon_cdna_end := e.exon_cdna_end,",
+      "phase := CASE WHEN e.exon_cdna_start=1 THEN -1::TINYINT ELSE %d::TINYINT END,",
+      "end_phase := e.end_phase)) AS exons) FROM duckvep_r_projection_model"
+    ), phase, phase))
+    expect_true(load_model("r-projection-phase", phase_queries)$loaded)
+    dbExecute(con, paste(
+      "CREATE OR REPLACE TABLE duckvep_r_projection_phase_events AS SELECT e.* REPLACE(",
+      "202::UBIGINT AS position, substring(decode(m.cds_sequence),34,1) AS reference,",
+      "CASE WHEN substring(decode(m.cds_sequence),34,1)='A' THEN 'G' ELSE 'A' END AS alternate)",
+      "FROM duckvep_r_projection_events e, duckvep_r_projection_model m WHERE event_index=1"
+    ))
+    dbExecute(con, paste(
+      "CREATE OR REPLACE TABLE duckvep_r_projection_phase_annotations AS SELECT * FROM",
+      "duckvep_annotate('duckvep_r_projection_phase_events', 'r-projection-phase')"
+    ))
+    phase_result <- dbGetQuery(con, paste(
+      "SELECT cdna_start, cds_start, cds_end, protein_start FROM duckvep_transcript_projection(",
+      "'duckvep_r_projection_phase_events', 'duckvep_r_projection_phase_annotations',",
+      "'duckvep_r_projection_phase_model')"
+    ))
+    expect_equal(phase_result, data.frame(cdna_start=54, cds_start=3, cds_end=3, protein_start=1))
+    expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-projection-phase') dropped")$dropped)
+  }
   expect_true(loaded$loaded)
 
   dbExecute(

@@ -182,6 +182,77 @@ WHERE event_index=1;
 ----
 W	*	tGa	tAa
 
+# VEP's display phase uses the first transcript exon, even if a later coding
+# exon contributes N padding to the stored sequence. These are different facts.
+statement ok
+CREATE TABLE projection_later_phase AS SELECT * REPLACE(25::UBIGINT AS cds_start,
+  'NGGGTAA'::BLOB AS cds_sequence, 'ATGAAACCC'::BLOB AS pre_cds_sequence,
+  list_transform(exons, e -> struct_pack(exon_start := e.exon_start, exon_end := e.exon_end,
+    exon_cdna_start := e.exon_cdna_start, exon_cdna_end := e.exon_cdna_end,
+    phase := CASE WHEN e.exon_cdna_start=1 THEN -1::TINYINT ELSE 1::TINYINT END,
+    end_phase := -1::TINYINT)) AS exons) FROM projection_transcripts;
+
+query I
+SELECT * FROM duckvep_model_load('later-phase',
+  'SELECT * FROM projection_regions',
+  'SELECT * EXCLUDE(exons, peptide_edits) FROM projection_later_phase',
+  'SELECT transcript_index, exon.exon_start, exon.exon_end,
+    exon.exon_cdna_start, exon.exon_cdna_end, exon.phase, exon.end_phase
+    FROM projection_later_phase, unnest(exons) u(exon) ORDER BY exon.exon_cdna_start');
+----
+true
+
+statement ok
+CREATE TABLE projection_later_event AS SELECT * REPLACE(27::UBIGINT AS position,
+  'G' AS reference, 'A' AS alternate) FROM projection_events WHERE event_index=1;
+
+statement ok
+CREATE TABLE projection_later_annotation AS SELECT * FROM duckvep_annotate('projection_later_event', 'later-phase');
+
+query IIIITTTT
+SELECT cdna_start, cds_start, cds_end, protein_start, reference_codons, alternate_codons,
+  reference_amino_acids, alternate_amino_acids FROM duckvep_transcript_projection(
+    'projection_later_event', 'projection_later_annotation', 'projection_later_phase');
+----
+12	3	3	1	ngG	ngA	X	X
+
+query I
+SELECT duckvep_model_drop('later-phase');
+----
+true
+
+statement ok
+UPDATE projection_later_phase SET cds_sequence='NNGGGTAA'::BLOB,
+  exons=list_transform(exons, e -> struct_pack(exon_start := e.exon_start, exon_end := e.exon_end,
+    exon_cdna_start := e.exon_cdna_start, exon_cdna_end := e.exon_cdna_end,
+    phase := CASE WHEN e.exon_cdna_start=1 THEN -1::TINYINT ELSE 2::TINYINT END,
+    end_phase := -1::TINYINT));
+
+query I
+SELECT * FROM duckvep_model_load('later-phase',
+  'SELECT * FROM projection_regions',
+  'SELECT * EXCLUDE(exons, peptide_edits) FROM projection_later_phase',
+  'SELECT transcript_index, exon.exon_start, exon.exon_end,
+    exon.exon_cdna_start, exon.exon_cdna_end, exon.phase, exon.end_phase
+    FROM projection_later_phase, unnest(exons) u(exon) ORDER BY exon.exon_cdna_start');
+----
+true
+
+statement ok
+CREATE OR REPLACE TABLE projection_later_annotation AS SELECT * FROM duckvep_annotate('projection_later_event', 'later-phase');
+
+query IIIITTTT
+SELECT cdna_start, cds_start, cds_end, protein_start, reference_codons, alternate_codons,
+  reference_amino_acids, alternate_amino_acids FROM duckvep_transcript_projection(
+    'projection_later_event', 'projection_later_annotation', 'projection_later_phase');
+----
+12	3	3	1	nnG	nnA	X	X
+
+query I
+SELECT duckvep_model_drop('later-phase');
+----
+true
+
 statement ok
 CREATE TABLE projection_gap_event AS SELECT * REPLACE(18::UBIGINT AS position,
   'CAA' AS reference, 'GTT' AS alternate) FROM projection_events WHERE event_index=1;

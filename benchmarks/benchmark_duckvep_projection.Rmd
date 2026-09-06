@@ -90,8 +90,12 @@ on this warm adapter workload are not proof of a speedup or absence of regressio
 ## Pinned VEP field differential
 
 The separate differential checks all 21 presentation fields, plus the complete
-event/transcript key set, against VEP 116 JSON. Six models add a partial-CDS end,
-a noncoding first exon and a noncoding transcript to the three timed models.
+event/transcript key set, against VEP 116 JSON. The initial six models add a
+partial-CDS end, a noncoding first exon and a noncoding transcript to the three
+timed models. Subsequent runs add later coding-exon phases 1 and 2 after a
+noncoding first exon. Those runs also require a deliberately wrong phase
+substitution to fail: VEP display coordinates use the first transcript exon,
+while CDS sequence padding uses the translation-start exon.
 Each seed runs the unchanged generator's targeted cases plus 1,000 random cases;
 the 128-base differing-allele campaign supplements the default 10-base campaign
 to exercise longer exon/intron spans. Every physical input record is retained,
