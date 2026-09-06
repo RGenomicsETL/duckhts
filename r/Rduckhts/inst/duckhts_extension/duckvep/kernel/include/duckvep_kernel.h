@@ -310,8 +310,8 @@ typedef struct duckvep_sequence_pool {
     /* Cold transcript-oriented sequence outside the CDS. Pre- and post-CDS
      * slices share one byte pool; offsets and lengths are per transcript. A
      * complete pool contains the entire spliced transcript flank on both sides.
-     * A partial pool may contain a short post-CDS prefix for legacy terminal-
-     * codon evaluation, but cannot resolve general CDS-boundary edits. */
+     * An incomplete pool cannot resolve edits requiring unavailable transcript
+     * sequence across the CDS start or end. */
     const uint8_t  *flank_bytes;
     size_t          flank_bytes_len;
     const uint64_t *pre_cds_offset;

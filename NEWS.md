@@ -1,6 +1,12 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- delete DuckVEP's 12-column short-tail model interface and the redundant
+  `post_cds_bases` column from the Ensembl builder and model fingerprint. Models
+  use complete pre-/post-CDS sequence or explicitly lack transcript flanks;
+  missing sequence still produces unresolved results. Rebuilt model receipts
+  have new hashes; existing model artifacts and historical evidence are not rewritten
+
 - remove the redundant DuckVEP kernel model constructor in kernel 0.19.0: `duckvep_model_open`
   now accepts the optional interval-feature view directly. Native callers pass
   NULL for transcript-only models; model validation and SQL loading are unchanged
