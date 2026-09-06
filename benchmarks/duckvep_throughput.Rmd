@@ -216,7 +216,8 @@ correction_revisions <- c(
   "35bfb85896200b9dd5319ca49147076de511f878",
   "99a0c816d1e9a30331a6fef9a48860ed53e2e17f",
   "979bee0c14a1e4fc88c6e53bcfd94cb6600b42c5",
-  "89f97c2eb9950f5f003888d1ad0a4f583e5ec13f"
+  "89f97c2eb9950f5f003888d1ad0a4f583e5ec13f",
+  "af78288081652e4b57312a050e14821c17d9baf9"
 )
 corrections <- history[history$source_revision %in% correction_revisions &
   history$workload == "fixture_one_transcript_sorted_indels", ]
@@ -230,16 +231,16 @@ prior_medians <- c(cds_guard$median_seconds[2L], head(corrections$median_seconds
 knitr::kable(data.frame(
   revision = corrections$revision,
   correction = c("Terminal codon windows", "UTR/CDS substitutions", "MNV feature phase",
-    "Indel feature/cDNA coordinates"),
+    "Indel feature/cDNA coordinates", "Shared substitution codon windows"),
   median_seconds = sprintf("%.3f", corrections$median_seconds),
   range_seconds = sprintf("%.3f–%.3f", corrections$min_seconds, corrections$max_seconds),
   change_vs_prior = sprintf("%+.2f%%", 100 * (corrections$median_seconds / prior_medians - 1))
 ), row.names = FALSE)
 ```
 
-The latest run is 3.68% slower than the preceding identical workload;
-performance follow-up remains open. These single-run comparisons
-do not establish a speedup, no regression, or causal attribution.
+These single-run comparisons do not establish a speedup, no regression, or causal
+attribution. Performance follow-up remains open for the increase following the
+indel-coordinate correction.
 No checked-in throughput benchmark exercises terminal
 partial-codon, UTR-spanning MNV, or later-phase substitution/indel sites. This ordinary CDS
 edit/HGVS control does not measure those corrections; targeted and production-density
