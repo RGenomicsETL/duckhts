@@ -59,12 +59,33 @@ knitr::kable(unique(runs[c("case", "input_vcf_sha256", "model_gff_sha256",
   "reference_sha256", "output_sha256")]))
 ```
 
-The nearest existing [sorted-stream throughput report](duckvep_throughput.md)
-measures consequence/HGVS output, not this complete presentation contract.
-There is no identical earlier workload and no fused implementation measured
-here, so these results establish a baseline rather than prove a speedup or
-absence of regression. A production-density model and comparison with a future
-fused implementation remain unmeasured.
+The first `f0184155b0fa` runs establish this complete-contract baseline. Later
+rows retain that measurement rather than replace it. The following comparison
+pairs the first and last recorded runs only when input hash, model, output hash,
+copy count, worker count, DuckDB version and machine agree.
+
+```{r comparison}
+keys <- c("case", "threads", "input_vcf_sha256", "model_gff_sha256", "reference_sha256",
+  "output_sha256", "copies", "input_alleles", "duckdb_version", "machine", "cpu")
+groups <- split(runs, do.call(paste, c(runs[keys], sep = "|")))
+comparison <- lapply(groups, function(rows) {
+  if (nrow(rows) < 2L) return(NULL)
+  first <- rows[1L, ]
+  last <- rows[nrow(rows), ]
+  data.frame(case = last$case, threads = last$threads,
+    baseline_revision = substr(first$source_revision, 1L, 12L),
+    current_revision = substr(last$source_revision, 1L, 12L),
+    baseline_seconds = first$median_seconds, current_seconds = last$median_seconds,
+    current_over_baseline = last$median_seconds / first$median_seconds)
+})
+knitr::kable(do.call(rbind, comparison), row.names = FALSE)
+```
+
+The [sorted-stream throughput report](duckvep_throughput.md) instead measures
+consequence/HGVS output and is not an identical comparator. No fused
+implementation is measured here. A production-density model and comparison
+with a future fused implementation remain unmeasured; small timing differences
+on this warm adapter workload are not proof of a speedup or absence of regression.
 
 ## Pinned VEP field differential
 

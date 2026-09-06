@@ -102,6 +102,8 @@ benchmark_duckvep_projection <- function(root, extension, output, extension_rece
   results <- cbind(run_date = as.character(Sys.Date()), source_revision = revision,
     build_binding = binding, extension_sha256 = extension_hash, results)
   dir.create(dirname(output), recursive = TRUE, showWarnings = FALSE)
-  utils::write.csv(results, output, row.names = FALSE)
+  history <- if (file.exists(output)) rbind(
+    utils::read.csv(output, stringsAsFactors = FALSE), results) else results
+  utils::write.csv(history, output, row.names = FALSE)
   invisible(results)
 }
