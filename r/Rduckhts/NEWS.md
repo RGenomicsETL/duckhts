@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- preserve records on literal colon-bearing contigs in bundled indexed BCF/VCF
+  full scans, including duplicate records. Explicit region requests still use
+  HTSlib brace quoting to distinguish contig names from coordinates
+
 - pin bundled BCF/VCF indexes at preparation for full and region scans. Removing
   or replacing an index afterward preserves the original complete rows instead
   of raising a worker-reload error or losing records. Keep data/header contents

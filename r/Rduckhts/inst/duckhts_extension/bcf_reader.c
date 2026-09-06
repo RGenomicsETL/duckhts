@@ -1,25 +1,6 @@
 /**
- * DuckDB BCF/VCF Reader Extension
- *
- * A properly-typed VCF/BCF reader for DuckDB that matches the type system
- * of the nanoarrow vcf_arrow_stream implementation.
- *
- * Features:
- *   - VCF spec-compliant type validation with warnings
- *   - Proper DuckDB types: INT32, INT64, FLOAT, DOUBLE, VARCHAR, LIST, STRUCT
- *   - Boolean support for FLAG fields
- *   - Nullable fields with validity tracking
- *   - Parallel scan support for indexed files (CSI/TBI)
- *   - Region filtering
- *   - Projection pushdown
- *
- * Usage:
- *   LOAD 'bcf_reader.duckdb_extension';
- *   SELECT * FROM bcf_read('path/to/file.vcf.gz');
- *   SELECT * FROM bcf_read('path/to/file.bcf', region := 'chr1:1000-2000');
- *
- * Build:
- *   make (uses package htslib from RBCFTools)
+ * Header-faithful read_bcf binding, scan scheduling and DuckDB materialization.
+ * Transport and decode validation are shared with the host-neutral BCF scanner.
  *
  * Copyright (c) 2026 RBCFTools Authors
  * Licensed under MIT License
@@ -36,8 +17,6 @@ DUCKDB_EXTENSION_EXTERN
 #include <stdio.h>
 #include <math.h>
 #include <stdbool.h>
-#include <time.h>
-#include <inttypes.h>
 #include <limits.h>
 #include <strings.h>
 
@@ -45,26 +24,20 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/vcf.h>
 #include <htslib/hts.h>
 #include <htslib/hts_log.h>
-#include <htslib/synced_bcf_reader.h>
 #include <htslib/tbx.h>
 #include <htslib/kstring.h>
 
 #include "include/hts_io_tuning.h"
 #include "include/duckdb_alloc.h"
 #include "include/region_list.h"
-#include "include/bcf_index_snapshot.h"
+#include "include/bcf_scan.h"
 
 // =============================================================================
 // Constants
 // =============================================================================
 
-#define BCF_READER_DEFAULT_BATCH_SIZE 2048
 #define VEP_TRANSCRIPT_ALL 0
 #define VEP_TRANSCRIPT_FIRST 1
-
-// Debug/progress tracking
-#define BCF_READER_PROGRESS_INTERVAL 100000  // Print progress every N records
-#define BCF_READER_ENABLE_PROGRESS 0
 
 // Decode policy for dirty/corrupt BCF header-vs-payload mismatches.
 typedef enum {
@@ -201,17 +174,10 @@ typedef struct {
 // =============================================================================
 
 typedef struct {
-    htsFile* fp;
-    bcf_hdr_t* hdr;
-    bcf1_t* rec;
-
-    // Index support
-    const duckhts_bcf_index_t *index; // Borrowed from bind; never destroy locally
-    hts_itr_t* itr;           // Iterator
-    kstring_t kstr;           // String buffer for VCF text parsing
+    duckhts_bcf_scan_t scan; // Worker-owned transport; immutable index borrowed from bind.
+    bcf1_t* rec;             // Owned pending record, retained across tidy output chunks
     kstring_t gt_kstr;        // Thread-local reusable GT formatter buffer
 
-    int64_t current_row;
     int done;
 
     // Projection pushdown
@@ -229,18 +195,10 @@ typedef struct {
 
     // Parallel scan state
     int is_parallel;
-    int assigned_contig;       // Which contig this thread is scanning (-1 = all)
-    const char* contig_name;   // Name of assigned contig (reference, don't free)
     int needs_next_contig;     // Flag to request next contig assignment
     // Tidy format state: tracks which sample we're emitting for current record
     int tidy_current_sample;   // Current sample index in tidy mode (-1 = need to read next record)
     int tidy_record_valid;     // Whether we have a valid record buffered for tidy mode
-
-    // Debug/progress tracking
-    int64_t total_records_processed;  // Total records processed by this thread
-    struct timespec batch_start_time;  // Start time for performance measurement
-    struct timespec last_progress_time;  // Last time progress was logged
-    int timing_initialized;           // Flag to indicate timing is set up
 
     // Worker-owned decode buffers. Loaded values and CSQ descriptors belong to
     // the current record, including when tidy samples span output chunks.
@@ -495,10 +453,8 @@ static void destroy_init_data(void* data) {
     if (!init) return;
 
     bcf_decode_cache_free(init);
-    if (init->itr) hts_itr_destroy(init->itr);
     if (init->rec) bcf_destroy(init->rec);
-    if (init->hdr) bcf_hdr_destroy(init->hdr);
-    if (init->fp) hts_close(init->fp);
+    duckhts_bcf_scan_close(&init->scan);
     if (init->column_ids) duckdb_free(init->column_ids);
     if (init->projected_cols) duckdb_free(init->projected_cols);
     if (init->site_column_indices) duckdb_free(init->site_column_indices);
@@ -510,7 +466,6 @@ static void destroy_init_data(void* data) {
         }
         duckdb_free(init->format_groups);
     }
-    ks_free(&init->kstr);
     ks_free(&init->gt_kstr);
 
     duckdb_free(init);
@@ -519,35 +474,6 @@ static void destroy_init_data(void* data) {
 // =============================================================================
 // String Utilities
 // =============================================================================
-
-static int bcf_region_name2id(void *hdr, const char *name) {
-    return bcf_hdr_name2id((bcf_hdr_t *)hdr, name);
-}
-
-static int bcf_tabix_region_name2id(void *tbx, const char *name) {
-    return tbx_name2id((tbx_t *)tbx, name);
-}
-
-/* Open one htslib iterator for the complete requested region set.  HTSlib
- * 1.24's multi-region iterators merge overlapping chunks and return a record
- * once even when several requested regions overlap it. */
-static hts_itr_t *bcf_open_region_iterator(const hts_idx_t *idx, bcf_hdr_t *hdr,
-                                           tbx_t *tbx, char **regions,
-                                           unsigned int n_regions) {
-    if (!regions || n_regions == 0) return NULL;
-
-    if (idx) {
-        return n_regions == 1
-            ? bcf_itr_querys(idx, hdr, regions[0])
-            : bcf_itr_regarray(idx, hdr, regions, n_regions);
-    }
-    if (tbx) {
-        return n_regions == 1
-            ? tbx_itr_querys(tbx, regions[0])
-            : tbx_itr_regarray(tbx, regions, n_regions);
-    }
-    return NULL;
-}
 
 static void free_bcf_format_string_array(char **values) {
     if (!values) return;
@@ -644,143 +570,19 @@ static int bcf_reader_input_is_bcf(htsFile *fp) {
     return fmt && fmt->format == bcf;
 }
 
-static const char *bcf_encoded_type_name(int type) {
-    switch (type) {
-    case BCF_BT_NULL: return "NULL";
-    case BCF_BT_INT8: return "INT8";
-    case BCF_BT_INT16: return "INT16";
-    case BCF_BT_INT32: return "INT32";
-    case BCF_BT_INT64: return "INT64";
-    case BCF_BT_FLOAT: return "FLOAT";
-    case BCF_BT_CHAR: return "CHAR";
-    default: return "unknown";
-    }
-}
-
-static const char *bcf_header_type_name(int type) {
-    switch (type) {
-    case BCF_HT_FLAG: return "Flag";
-    case BCF_HT_INT: return "Integer";
-    case BCF_HT_REAL: return "Float";
-    case BCF_HT_STR: return "String";
-    default: return "unknown";
-    }
-}
-
-static void bcf_record_location(bcf_hdr_t *hdr, bcf1_t *rec, char *buf, size_t buf_size) {
-    if (!buf || buf_size == 0) return;
-    const char *chrom = (hdr && rec && rec->rid >= 0) ? bcf_hdr_id2name(hdr, rec->rid) : NULL;
-    if (!chrom) chrom = "?";
-    long long pos = rec ? (long long)rec->pos + 1 : 0;
-    snprintf(buf, buf_size, "%s:%lld", chrom, pos);
-}
-
-static int bcf_encoded_type_matches_header(int header_type, int encoded_type) {
-    switch (header_type) {
-    case BCF_HT_INT:
-        return encoded_type == BCF_BT_INT8 ||
-               encoded_type == BCF_BT_INT16 ||
-               encoded_type == BCF_BT_INT32;
-    case BCF_HT_REAL:
-        return encoded_type == BCF_BT_FLOAT;
-    case BCF_HT_STR:
-        return encoded_type == BCF_BT_CHAR;
-    default:
-        return 1;
-    }
-}
-
-static int bcf_encoded_type_matches_format_kind(bcf_out_kind_t kind, int encoded_type) {
-    switch (kind) {
-    case BCF_OUT_FORMAT_GT:
-    case BCF_OUT_FORMAT_INT:
-        return encoded_type == BCF_BT_INT8 ||
-               encoded_type == BCF_BT_INT16 ||
-               encoded_type == BCF_BT_INT32;
-    case BCF_OUT_FORMAT_FLOAT:
-        return encoded_type == BCF_BT_FLOAT;
-    case BCF_OUT_FORMAT_STRING:
-        return encoded_type == BCF_BT_CHAR;
-    default:
-        return 1;
-    }
-}
-
-static int bcf_check_decode_ret(const char *reader_name,
-                                const char *field_class,
-                                const char *tag,
-                                bcf_hdr_t *hdr,
-                                bcf1_t *rec,
-                                int ret,
-                                bcf_decode_error_policy_t policy,
-                                char *err,
-                                size_t err_size) {
-    if (ret >= 0 || ret == -3) {
-        return 1;
-    }
-
-    char loc[128];
-    bcf_record_location(hdr, rec, loc, sizeof(loc));
-    const char *name = reader_name ? reader_name : "read_bcf";
-    const char *klass = field_class ? field_class : "field";
-    const char *field = tag ? tag : "?";
-    char msg[512];
-
-    if (ret == -1) {
-        snprintf(msg, sizeof(msg), "%s: %s/%s is not defined in the BCF/VCF header at %s", name, klass, field, loc);
-    } else if (ret == -2) {
-        snprintf(msg, sizeof(msg), "%s: %s/%s encoded BCF type does not match the header at %s", name, klass, field, loc);
-        if (policy == BCF_DECODE_ERROR_NULL) {
-            return 1;
-        }
-        if (policy == BCF_DECODE_ERROR_WARN) {
-            vcf_emit_warning(msg);
-            return 1;
-        }
-    } else if (ret == -4) {
-        snprintf(msg, sizeof(msg), "%s: out of memory decoding %s/%s at %s", name, klass, field, loc);
-    } else {
-        snprintf(msg, sizeof(msg), "%s: failed to decode %s/%s at %s (htslib return %d)", name, klass, field, loc, ret);
-    }
-    if (err && err_size > 0) {
-        snprintf(err, err_size, "%s", msg);
-    }
-    return 0;
-}
-
 static int bcf_handle_decode_diagnostic(bcf_decode_error_policy_t policy, const char *msg) {
-    if (policy == BCF_DECODE_ERROR_ERROR) {
-        return 0;
-    }
-    if (policy == BCF_DECODE_ERROR_WARN && msg && msg[0]) {
-        vcf_emit_warning(msg);
-    }
+    if (policy == BCF_DECODE_ERROR_ERROR) return 0;
+    if (policy == BCF_DECODE_ERROR_WARN && msg && msg[0]) vcf_emit_warning(msg);
     return 1;
 }
 
-static int bcf_check_format_width(const char *reader_name,
-                                  const char *tag,
-                                  bcf_hdr_t *hdr,
-                                  bcf1_t *rec,
-                                  int ret,
-                                  int n_samples,
-                                  char *err,
-                                  size_t err_size) {
-    if (ret <= 0) {
-        return 1;
-    }
-    if (n_samples <= 0 || ret % n_samples == 0) {
-        return 1;
-    }
-
-    char loc[128];
-    bcf_record_location(hdr, rec, loc, sizeof(loc));
-    snprintf(err, err_size,
-             "%s: FORMAT/%s decoded value count %d is not divisible by sample count %d at %s",
-             reader_name ? reader_name : "read_bcf",
-             tag ? tag : "?",
-             ret, n_samples, loc);
-    return 0;
+static int bcf_check_decode_ret(const char *reader_name, const char *field_class,
+                                const char *tag, bcf_hdr_t *hdr, bcf1_t *rec, int ret,
+                                bcf_decode_error_policy_t policy, char *err, size_t err_size) {
+    duckhts_bcf_decode_status_t status = duckhts_bcf_decode_status(
+        reader_name, field_class, tag, hdr, rec, ret, err, err_size);
+    return status == DUCKHTS_BCF_DECODE_OK ||
+        (status == DUCKHTS_BCF_DECODE_TYPE_MISMATCH && bcf_handle_decode_diagnostic(policy, err));
 }
 
 static int bcf_handle_format_width(const char *reader_name,
@@ -792,7 +594,7 @@ static int bcf_handle_format_width(const char *reader_name,
                                    bcf_decode_error_policy_t policy,
                                    char *err,
                                    size_t err_size) {
-    if (!ret || bcf_check_format_width(reader_name, tag, hdr, rec, *ret, n_samples, err, err_size)) {
+    if (!ret || duckhts_bcf_check_format_width(reader_name, tag, hdr, rec, *ret, n_samples, err, err_size)) {
         return 1;
     }
     if (!bcf_handle_decode_diagnostic(policy, err)) {
@@ -800,74 +602,6 @@ static int bcf_handle_format_width(const char *reader_name,
     }
     *ret = -3;
     return 1;
-}
-
-static int bcf_preflight_info_encoded_type(bcf_hdr_t *hdr,
-                                           bcf1_t *rec,
-                                           const field_meta_t *field,
-                                           const char *reader_name,
-                                           char *err,
-                                           size_t err_size) {
-    if (!hdr || !rec || !field || !bcf_record_has_info_field(rec, field)) {
-        return 1;
-    }
-    if (field->header_type == BCF_HT_FLAG) {
-        return 1;
-    }
-
-    bcf_unpack(rec, BCF_UN_INFO);
-    bcf_info_t *info = bcf_get_info_id(rec, field->header_id);
-    if (!info || !info->vptr) {
-        return 1;
-    }
-    if (bcf_encoded_type_matches_header(field->header_type, info->type)) {
-        return 1;
-    }
-
-    char loc[128];
-    bcf_record_location(hdr, rec, loc, sizeof(loc));
-    snprintf(err, err_size,
-             "%s: INFO/%s encoded BCF type %s does not match header Type=%s at %s",
-             reader_name ? reader_name : "read_bcf",
-             field->name ? field->name : "?",
-             bcf_encoded_type_name(info->type),
-             bcf_header_type_name(field->header_type),
-             loc);
-    return 0;
-}
-
-static int bcf_preflight_format_encoded_type(bcf_hdr_t *hdr,
-                                             bcf1_t *rec,
-                                             int header_id,
-                                             const char *tag,
-                                             bcf_out_kind_t kind,
-                                             int header_type,
-                                             const char *reader_name,
-                                             char *err,
-                                             size_t err_size) {
-    if (!hdr || !rec || header_id < 0) {
-        return 1;
-    }
-
-    bcf_unpack(rec, BCF_UN_FMT);
-    bcf_fmt_t *fmt = bcf_get_fmt_id(rec, header_id);
-    if (!fmt || !fmt->p) {
-        return 1;
-    }
-    if (bcf_encoded_type_matches_format_kind(kind, fmt->type)) {
-        return 1;
-    }
-
-    char loc[128];
-    bcf_record_location(hdr, rec, loc, sizeof(loc));
-    snprintf(err, err_size,
-             "%s: FORMAT/%s encoded BCF type %s does not match header Type=%s at %s",
-             reader_name ? reader_name : "read_bcf",
-             tag ? tag : "?",
-             bcf_encoded_type_name(fmt->type),
-             kind == BCF_OUT_FORMAT_GT ? "String/GT-encoded-integer" : bcf_header_type_name(header_type),
-             loc);
-    return 0;
 }
 
 static int bcf_projected_columns_init(bcf_init_data_t *local, const bcf_bind_data_t *bind,
@@ -1455,32 +1189,20 @@ static void bcf_read_bind(duckdb_bind_info info) {
     }
     if (dthreads_val) duckdb_destroy_value(&dthreads_val);
 
-    // Open the file to read header
-    htsFile* fp = hts_open(file_path, "r");
-    if (!fp) {
-        char err[512];
-        snprintf(err, sizeof(err), "%s: failed to open BCF/VCF file: %s", reader_name, file_path);
-        duckdb_bind_set_error(info, err);
+    duckhts_bcf_scan_t metadata = {0};
+    char open_error[512];
+    if (!duckhts_bcf_scan_open(&metadata, file_path, NULL, 0,
+                               DUCKHTS_HTS_IO_PROFILE_METADATA, reader_name,
+                               open_error, sizeof(open_error))) {
+        duckdb_bind_set_error(info, open_error);
         duckdb_free(file_path);
         if (index_path) duckdb_free(index_path);
         if (region) duckdb_free(region);
         if (additional_csq_column_types) duckdb_free(additional_csq_column_types);
         return;
     }
-
-    bcf_hdr_t* hdr = bcf_hdr_read(fp);
-    if (!hdr) {
-        char err[128];
-        hts_close(fp);
-        snprintf(err, sizeof(err), "%s: failed to read BCF/VCF header", reader_name);
-        duckdb_bind_set_error(info, err);
-        duckdb_free(file_path);
-        if (index_path) duckdb_free(index_path);
-        if (region) duckdb_free(region);
-        if (additional_csq_column_types) duckdb_free(additional_csq_column_types);
-        return;
-    }
-
+    htsFile *fp = metadata.fp;
+    bcf_hdr_t *hdr = metadata.hdr;
 
     duckdb_logical_type varchar_type = NULL, bigint_type = NULL;
     duckdb_logical_type double_type = NULL, varchar_list_type = NULL;
@@ -1833,8 +1555,7 @@ bind_cleanup:
     duckdb_destroy_logical_type(&double_type);
     duckdb_destroy_logical_type(&varchar_list_type);
 
-    bcf_hdr_destroy(hdr);
-    hts_close(fp);
+    duckhts_bcf_scan_close(&metadata);
 
     if (bind) duckdb_bind_set_bind_data(info, bind, destroy_bind_data);
 }
@@ -1895,7 +1616,6 @@ static void bcf_read_local_init(duckdb_init_info info) {
         duckdb_init_set_error(info, "read_bcf: out of memory allocating worker state");
         return;
     }
-    local->index = &bind->index;
 
     local->column_count = duckdb_init_get_column_count(info);
     if (local->column_count > 0) {
@@ -1939,43 +1659,16 @@ static void bcf_read_local_init(duckdb_init_info info) {
 
     // Initialize parallel scan state
     local->is_parallel = is_parallel;
-    local->assigned_contig = -1;
-    local->contig_name = NULL;
     local->needs_next_contig = is_parallel;  // Start by requesting first contig
 
-    // Open file (each thread gets its own file handle)
-    local->fp = hts_open(bind->file_path, "r");
-    if (!local->fp) {
-        char err[512];
-        snprintf(err, sizeof(err), "%s: failed to open BCF/VCF file: %s", reader_name, bind->file_path);
-        duckdb_init_set_error(info, err);
-        destroy_init_data(local);
-        return;
-    }
-    duckhts_apply_remote_hts_tuning(
-        local->fp,
-        bind->file_path,
-        (is_parallel || bind->n_regions > 0)
-            ? DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION
-            : DUCKHTS_HTS_IO_PROFILE_STREAMING
-    );
-
-    if (bind->decompression_threads > 0 &&
-        hts_get_format(local->fp)->compression != no_compression &&
-        hts_set_threads(local->fp, bind->decompression_threads) < 0) {
-        char err[160];
-        snprintf(err, sizeof(err), "%s: failed to configure BCF/VCF decompression threads", reader_name);
-        duckdb_init_set_error(info, err);
-        destroy_init_data(local);
-        return;
-    }
-
-    // Read header
-    local->hdr = bcf_hdr_read(local->fp);
-    if (!local->hdr) {
-        char err[128];
-        snprintf(err, sizeof(err), "%s: failed to read BCF/VCF header", reader_name);
-        duckdb_init_set_error(info, err);
+    char open_error[512];
+    if (!duckhts_bcf_scan_open(&local->scan, bind->file_path, &bind->index,
+                               bind->decompression_threads,
+                               is_parallel || bind->n_regions > 0
+                                   ? DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION
+                                   : DUCKHTS_HTS_IO_PROFILE_STREAMING,
+                               reader_name, open_error, sizeof(open_error))) {
+        duckdb_init_set_error(info, open_error);
         destroy_init_data(local);
         return;
     }
@@ -1992,35 +1685,22 @@ static void bcf_read_local_init(duckdb_init_info info) {
 
     // Set up region query if user specified a region (non-parallel case)
     if (!is_parallel && bind->n_regions > 0) {
-        /* VCF indexes can name contigs absent from the text header, especially
-         * with an explicit non-colocated index. Use the iterator's dictionary. */
         char region_error[256];
-        if (!duckhts_region_list_validate(bind->regions, bind->n_regions,
-                                          bind->index.bcf ? bcf_region_name2id : bcf_tabix_region_name2id,
-                                          bind->index.bcf ? (void *)local->hdr : (void *)bind->index.tabix,
-                                          region_error, sizeof(region_error))) {
+        if (!duckhts_bcf_scan_regions(&local->scan, bind->regions, bind->n_regions,
+                                      region_error, sizeof(region_error))) {
             duckdb_init_set_error(info, region_error);
             destroy_init_data(local);
             return;
         }
-        local->itr = bcf_open_region_iterator(bind->index.bcf, local->hdr, bind->index.tabix,
-                                               bind->regions, bind->n_regions);
 
-        if (!local->itr) {
+        if (!local->scan.itr) {
             local->done = 1;
             duckdb_init_set_init_data(info, local, destroy_init_data);
             return;
         }
     }
 
-    local->current_row = 0;
     local->done = 0;
-
-// Initialize debug/progress tracking
-    local->total_records_processed = 0;
-    memset(&local->batch_start_time, 0, sizeof(local->batch_start_time));
-    memset(&local->last_progress_time, 0, sizeof(local->last_progress_time));
-    local->timing_initialized = 0;
 
     // Store as local init data
     duckdb_init_set_init_data(info, local, destroy_init_data);
@@ -2108,92 +1788,21 @@ static void process_comma_separated_list(duckdb_vector vec, idx_t row, const cha
     list_data[row] = entry;
 }
 
-#if BCF_READER_ENABLE_PROGRESS
-// =============================================================================
-// Helper: Print debug progress
-// =============================================================================
-
-static void print_progress(bcf_init_data_t* init, const char* context) {
-    if (init->total_records_processed % BCF_READER_PROGRESS_INTERVAL == 0) {
-        // Calculate records per second if we have timing
-        double records_per_sec = 0.0;
-        if (init->timing_initialized) {
-            struct timespec now;
-            clock_gettime(CLOCK_MONOTONIC, &now);
-
-            // Calculate elapsed time since last progress report
-            double elapsed = (now.tv_sec - init->last_progress_time.tv_sec) +
-                          (now.tv_nsec - init->last_progress_time.tv_nsec) / 1e9;
-
-            // Calculate rate - for very fast processing, use total elapsed time
-            if (elapsed > 0.001) {  // Only calculate after 1ms to avoid division by zero
-                records_per_sec = BCF_READER_PROGRESS_INTERVAL / elapsed;
-            } else {
-                // If processing is very fast (<1ms per 100 records), use total time
-                double total_elapsed = (now.tv_sec - init->batch_start_time.tv_sec) +
-                                     (now.tv_nsec - init->batch_start_time.tv_nsec) / 1e9;
-                if (total_elapsed > 0.001) {
-                    records_per_sec = init->total_records_processed / total_elapsed;
-                }
-            }
-
-            // Update last progress time
-            init->last_progress_time = now;
-
-            // Debug: print elapsed time for first few intervals
-            if (init->total_records_processed <= 300) {
-                fprintf(stderr, "[bcf_reader] DEBUG: elapsed=%.6f sec, timing_initialized=%d\n",
-                        elapsed, init->timing_initialized);
-            }
-        }
-
-        fprintf(stderr, "[bcf_reader] %s: Processed %" PRId64 " records (%.0f rec/s)\n",
-                context, init->total_records_processed, records_per_sec);
-    }
-}
-#endif
-
 // =============================================================================
 // Helper: Claim next contig for parallel scanning
-// Returns 1 if a new contig was claimed, 0 if no more contigs
+// Returns 1 for a claimed contig, 0 when exhausted, -1 on iterator failure.
 // =============================================================================
 
-static int claim_next_contig(bcf_init_data_t* init, bcf_global_init_data_t* global) {
-    if (!init->is_parallel || !global || global->n_contigs == 0) {
-        return 0;
+static int claim_next_contig(bcf_init_data_t *init, bcf_global_init_data_t *global,
+                              char *error, size_t error_size) {
+    if (!init->is_parallel || !global || global->n_contigs == 0) return 0;
+    int next = __sync_fetch_and_add(&global->current_contig, 1);
+    if (next >= global->n_contigs) return 0;
+    if (!duckhts_bcf_scan_contig(&init->scan, global->contig_names[next], error, error_size)) {
+        return -1;
     }
-
-    // Destroy old iterator if exists
-    if (init->itr) {
-        hts_itr_destroy(init->itr);
-        init->itr = NULL;
-    }
-
-    for (;;) {
-        // Atomically claim next contig using fetch-and-add.
-        int next = __sync_fetch_and_add(&global->current_contig, 1);
-        if (next >= global->n_contigs) {
-            return 0;  // No more contigs
-        }
-
-        // Set up iterator for this contig.
-        const char* contig = global->contig_names[next];
-        init->assigned_contig = next;
-        init->contig_name = contig;
-
-        if (init->index->bcf) {
-            init->itr = bcf_itr_querys(init->index->bcf, init->hdr, contig);
-        } else if (init->index->tabix) {
-            init->itr = tbx_itr_querys(init->index->tabix, contig);
-        }
-
-        if (init->itr) {
-            init->needs_next_contig = 0;
-            return 1;
-        }
-
-        // Empty contig: keep claiming until we find a live iterator.
-    }
+    init->needs_next_contig = 0;
+    return 1;
 }
 
 static int bcf_decode_format_projected_field(bcf_init_data_t *init,
@@ -2214,112 +1823,110 @@ static int bcf_decode_format_projected_field(bcf_init_data_t *init,
     const char *tag = proj_col->field->name;
     const char *reader_name = "read_bcf";
     bcf_decode_error_policy_t policy = bind->decode_error_policy;
+    duckhts_bcf_field_class_t field_class = proj_col->kind == BCF_OUT_FORMAT_GT
+        ? DUCKHTS_BCF_FIELD_GT : DUCKHTS_BCF_FIELD_FORMAT;
 
     switch (proj_col->kind) {
     case BCF_OUT_FORMAT_INT:
         if (fmt_loaded && !fmt_loaded[field_idx]) {
             if (!bcf_record_has_format_field(init->rec, proj_col->field)) {
                 fmt_ret[field_idx] = -3;
-            } else if (bcf_reader_input_is_bcf(init->fp) &&
-                       !bcf_preflight_format_encoded_type(init->hdr, init->rec,
-                                                          proj_col->field->header_id,
-                                                          tag, proj_col->kind,
-                                                          proj_col->field->header_type,
-                                                          reader_name, err, err_size)) {
+            } else if (bcf_reader_input_is_bcf(init->scan.fp) &&
+                       !duckhts_bcf_check_field_type(init->scan.hdr, init->rec,
+                           field_class,
+                           proj_col->field->header_id, proj_col->field->header_type,
+                           reader_name, err, err_size)) {
                 if (!bcf_handle_decode_diagnostic(policy, err)) {
                     return 0;
                 }
                 fmt_ret[field_idx] = -3;
             } else {
-                fmt_ret[field_idx] = bcf_get_format_int32(init->hdr, init->rec, tag,
+                fmt_ret[field_idx] = bcf_get_format_int32(init->scan.hdr, init->rec, tag,
                                                            &fmt_i32[field_idx],
                                                            &fmt_n_values[field_idx]);
             }
             fmt_loaded[field_idx] = 1;
         }
-        if (!bcf_check_decode_ret(reader_name, "FORMAT", tag, init->hdr, init->rec,
+        if (!bcf_check_decode_ret(reader_name, "FORMAT", tag, init->scan.hdr, init->rec,
                                   fmt_ret[field_idx], policy, err, err_size)) {
             return 0;
         }
-        return bcf_handle_format_width(reader_name, tag, init->hdr, init->rec,
+        return bcf_handle_format_width(reader_name, tag, init->scan.hdr, init->rec,
                                        &fmt_ret[field_idx], bind->n_samples,
                                        policy, err, err_size);
     case BCF_OUT_FORMAT_FLOAT:
         if (fmt_loaded && !fmt_loaded[field_idx]) {
             if (!bcf_record_has_format_field(init->rec, proj_col->field)) {
                 fmt_ret[field_idx] = -3;
-            } else if (bcf_reader_input_is_bcf(init->fp) &&
-                       !bcf_preflight_format_encoded_type(init->hdr, init->rec,
-                                                          proj_col->field->header_id,
-                                                          tag, proj_col->kind,
-                                                          proj_col->field->header_type,
-                                                          reader_name, err, err_size)) {
+            } else if (bcf_reader_input_is_bcf(init->scan.fp) &&
+                       !duckhts_bcf_check_field_type(init->scan.hdr, init->rec,
+                           field_class,
+                           proj_col->field->header_id, proj_col->field->header_type,
+                           reader_name, err, err_size)) {
                 if (!bcf_handle_decode_diagnostic(policy, err)) {
                     return 0;
                 }
                 fmt_ret[field_idx] = -3;
             } else {
-                fmt_ret[field_idx] = bcf_get_format_float(init->hdr, init->rec, tag,
+                fmt_ret[field_idx] = bcf_get_format_float(init->scan.hdr, init->rec, tag,
                                                            &fmt_f32[field_idx],
                                                            &fmt_n_values[field_idx]);
             }
             fmt_loaded[field_idx] = 1;
         }
-        if (!bcf_check_decode_ret(reader_name, "FORMAT", tag, init->hdr, init->rec,
+        if (!bcf_check_decode_ret(reader_name, "FORMAT", tag, init->scan.hdr, init->rec,
                                   fmt_ret[field_idx], policy, err, err_size)) {
             return 0;
         }
-        return bcf_handle_format_width(reader_name, tag, init->hdr, init->rec,
+        return bcf_handle_format_width(reader_name, tag, init->scan.hdr, init->rec,
                                        &fmt_ret[field_idx], bind->n_samples,
                                        policy, err, err_size);
     case BCF_OUT_FORMAT_GT:
         if (gt_loaded && !*gt_loaded) {
             if (!bcf_record_has_format_field(init->rec, proj_col->field)) {
                 *gt_ret = -3;
-            } else if (bcf_reader_input_is_bcf(init->fp) &&
-                       !bcf_preflight_format_encoded_type(init->hdr, init->rec,
-                                                          proj_col->field->header_id,
-                                                          tag, proj_col->kind,
-                                                          proj_col->field->header_type,
-                                                          reader_name, err, err_size)) {
+            } else if (bcf_reader_input_is_bcf(init->scan.fp) &&
+                       !duckhts_bcf_check_field_type(init->scan.hdr, init->rec,
+                           field_class,
+                           proj_col->field->header_id, proj_col->field->header_type,
+                           reader_name, err, err_size)) {
                 if (!bcf_handle_decode_diagnostic(policy, err)) {
                     return 0;
                 }
                 *gt_ret = -3;
             } else {
-                *gt_ret = bcf_get_genotypes(init->hdr, init->rec, gt_arr, gt_n_values);
+                *gt_ret = bcf_get_genotypes(init->scan.hdr, init->rec, gt_arr, gt_n_values);
             }
             *gt_loaded = 1;
         }
-        if (!bcf_check_decode_ret(reader_name, "FORMAT", tag, init->hdr, init->rec,
+        if (!bcf_check_decode_ret(reader_name, "FORMAT", tag, init->scan.hdr, init->rec,
                                   *gt_ret, policy, err, err_size)) {
             return 0;
         }
-        return bcf_handle_format_width(reader_name, tag, init->hdr, init->rec,
+        return bcf_handle_format_width(reader_name, tag, init->scan.hdr, init->rec,
                                        gt_ret, bind->n_samples,
                                        policy, err, err_size);
     case BCF_OUT_FORMAT_STRING:
         if (fmt_loaded && !fmt_loaded[field_idx]) {
             if (!bcf_record_has_format_field(init->rec, proj_col->field)) {
                 fmt_ret[field_idx] = -3;
-            } else if (bcf_reader_input_is_bcf(init->fp) &&
-                       !bcf_preflight_format_encoded_type(init->hdr, init->rec,
-                                                          proj_col->field->header_id,
-                                                          tag, proj_col->kind,
-                                                          proj_col->field->header_type,
-                                                          reader_name, err, err_size)) {
+            } else if (bcf_reader_input_is_bcf(init->scan.fp) &&
+                       !duckhts_bcf_check_field_type(init->scan.hdr, init->rec,
+                           field_class,
+                           proj_col->field->header_id, proj_col->field->header_type,
+                           reader_name, err, err_size)) {
                 if (!bcf_handle_decode_diagnostic(policy, err)) {
                     return 0;
                 }
                 fmt_ret[field_idx] = -3;
             } else {
-                fmt_ret[field_idx] = bcf_get_format_string(init->hdr, init->rec, tag,
+                fmt_ret[field_idx] = bcf_get_format_string(init->scan.hdr, init->rec, tag,
                                                             &fmt_str[field_idx],
                                                             &fmt_n_values[field_idx]);
             }
             fmt_loaded[field_idx] = 1;
         }
-        return bcf_check_decode_ret(reader_name, "FORMAT", tag, init->hdr, init->rec,
+        return bcf_check_decode_ret(reader_name, "FORMAT", tag, init->scan.hdr, init->rec,
                                     fmt_ret[field_idx], policy, err, err_size);
     default:
         break;
@@ -2481,7 +2088,10 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
 
     // For parallel scans, claim first/next contig if needed
     if (init->needs_next_contig) {
-        if (!claim_next_contig(init, global)) {
+        char error[256];
+        int claimed = claim_next_contig(init, global, error, sizeof(error));
+        if (claimed <= 0) {
+            if (claimed < 0) duckdb_function_set_error(info, error);
             // No more contigs to process
             init->done = 1;
             duckdb_data_chunk_set_size(output, 0);
@@ -2547,23 +2157,7 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
         }
 
         if (need_read) {
-            int ret;
-
-            if (init->itr) {
-                if (init->index->tabix) {
-                    // VCF with tabix: read text line then parse.
-                    ret = tbx_itr_next(init->fp, init->index->tabix, init->itr, &init->kstr);
-                    if (ret >= 0) {
-                        ret = vcf_parse1(&init->kstr, init->hdr, init->rec);
-                        init->kstr.l = 0;
-                    }
-                } else {
-                    // BCF with index
-                    ret = bcf_itr_next(init->fp, init->itr, init->rec);
-                }
-            } else {
-                ret = bcf_read(init->fp, init->hdr, init->rec);
-            }
+            int ret = duckhts_bcf_scan_next(&init->scan, init->rec);
 
             if (ret < -1) {
                 char err[256];
@@ -2578,7 +2172,10 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 // End of current contig/file
                 if (init->is_parallel) {
                     // Try to claim next contig
-                    if (claim_next_contig(init, global)) {
+                    char error[256];
+                    int claimed = claim_next_contig(init, global, error, sizeof(error));
+                    if (claimed < 0) duckdb_function_set_error(info, error);
+                    if (claimed > 0) {
                         continue;  // Continue reading from new contig
                     }
                 }
@@ -2597,15 +2194,6 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 current_sample = 0;
             }
 
-            // Update debug/progress counters (only when reading a new record)
-#if BCF_READER_ENABLE_PROGRESS
-            if (!init->timing_initialized) {
-                // First record - start timing
-                clock_gettime(CLOCK_MONOTONIC, &init->batch_start_time);
-                init->last_progress_time = init->batch_start_time;
-                init->timing_initialized = 1;
-            }
-#endif
             if (bind->n_format_fields > 0) {
                 memset(fmt_loaded, 0, (size_t)bind->n_format_fields * sizeof(int));
             }
@@ -2624,7 +2212,7 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
         vep_record_t* vep_rec = NULL;
         if (init->need_vep) {
             if (!init->vep_loaded) {
-                init->vep_rec = vep_record_parse_bcf(bind->vep_schema, init->hdr, init->rec);
+                init->vep_rec = vep_record_parse_bcf(bind->vep_schema, init->scan.hdr, init->rec);
                 init->vep_loaded = 1;
             }
             vep_rec = init->vep_rec;
@@ -2665,7 +2253,7 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
 
             switch (proj_col->kind) {
             case BCF_OUT_CHROM: {
-                const char* chrom = bcf_hdr_id2name(init->hdr, init->rec->rid);
+                const char* chrom = bcf_hdr_id2name(init->scan.hdr, init->rec->rid);
                 duckdb_vector_assign_string_element(vec, row_idx, chrom ? chrom : ".");
                 break;
             }
@@ -2744,7 +2332,7 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                     duckdb_list_vector_reserve(vec, entry.offset + entry.length);
                     duckdb_list_vector_set_size(vec, entry.offset + entry.length);
                     for (int f = 0; f < init->rec->d.n_flt; f++) {
-                        const char* flt_name = bcf_hdr_int2id(init->hdr, BCF_DT_ID,
+                        const char* flt_name = bcf_hdr_int2id(init->scan.hdr, BCF_DT_ID,
                                                               init->rec->d.flt[f]);
                         duckdb_vector_assign_string_element(child_vec, entry.offset + f,
                                                             flt_name ? flt_name : ".");
@@ -2848,7 +2436,7 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                         } else {
                             int* dummy = NULL;
                             int ndummy = 0;
-                            info_ret[field_idx] = bcf_get_info_flag(init->hdr, init->rec, tag, &dummy, &ndummy);
+                            info_ret[field_idx] = bcf_get_info_flag(init->scan.hdr, init->rec, tag, &dummy, &ndummy);
                             if (dummy) free(dummy);  // Only free if allocated
                         }
                         info_flag[field_idx] = (info_ret[field_idx] == 1);
@@ -2862,10 +2450,9 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                     if (!info_loaded[field_idx]) {
                         if (!bcf_record_has_info_field(init->rec, field)) {
                             info_ret[field_idx] = -3;
-                        } else if (bcf_reader_input_is_bcf(init->fp) &&
-                                   !bcf_preflight_info_encoded_type(init->hdr, init->rec, field,
-                                                                   "read_bcf",
-                                                                   scan_err, sizeof(scan_err))) {
+                        } else if (bcf_reader_input_is_bcf(init->scan.fp) &&
+                                   !duckhts_bcf_check_field_type(init->scan.hdr, init->rec, DUCKHTS_BCF_FIELD_INFO,
+                                       field->header_id, field->header_type, "read_bcf", scan_err, sizeof(scan_err))) {
                             if (!bcf_handle_decode_diagnostic(bind->decode_error_policy, scan_err)) {
                                 duckdb_function_set_error(info, scan_err[0] ? scan_err : "read_bcf: failed to decode INFO field");
                                 init->done = 1;
@@ -2874,7 +2461,7 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                             }
                             info_ret[field_idx] = -3;
                         } else {
-                            info_ret[field_idx] = bcf_get_info_int32(init->hdr, init->rec, tag,
+                            info_ret[field_idx] = bcf_get_info_int32(init->scan.hdr, init->rec, tag,
                                                                       &info_i32[field_idx],
                                                                       &info_n_values[field_idx]);
                         }
@@ -2882,7 +2469,7 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                     }
                     values = info_i32[field_idx];
                     ret_info = info_ret[field_idx];
-                    if (!bcf_check_decode_ret("read_bcf", "INFO", tag, init->hdr, init->rec,
+                    if (!bcf_check_decode_ret("read_bcf", "INFO", tag, init->scan.hdr, init->rec,
                                               ret_info, bind->decode_error_policy, scan_err, sizeof(scan_err))) {
                         duckdb_function_set_error(info, scan_err[0] ? scan_err : "read_bcf: failed to decode INFO field");
                         init->done = 1;
@@ -2898,10 +2485,9 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                     if (!info_loaded[field_idx]) {
                         if (!bcf_record_has_info_field(init->rec, field)) {
                             info_ret[field_idx] = -3;
-                        } else if (bcf_reader_input_is_bcf(init->fp) &&
-                                   !bcf_preflight_info_encoded_type(init->hdr, init->rec, field,
-                                                                   "read_bcf",
-                                                                   scan_err, sizeof(scan_err))) {
+                        } else if (bcf_reader_input_is_bcf(init->scan.fp) &&
+                                   !duckhts_bcf_check_field_type(init->scan.hdr, init->rec, DUCKHTS_BCF_FIELD_INFO,
+                                       field->header_id, field->header_type, "read_bcf", scan_err, sizeof(scan_err))) {
                             if (!bcf_handle_decode_diagnostic(bind->decode_error_policy, scan_err)) {
                                 duckdb_function_set_error(info, scan_err[0] ? scan_err : "read_bcf: failed to decode INFO field");
                                 init->done = 1;
@@ -2910,7 +2496,7 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                             }
                             info_ret[field_idx] = -3;
                         } else {
-                            info_ret[field_idx] = bcf_get_info_float(init->hdr, init->rec, tag,
+                            info_ret[field_idx] = bcf_get_info_float(init->scan.hdr, init->rec, tag,
                                                                       &info_f32[field_idx],
                                                                       &info_n_values[field_idx]);
                         }
@@ -2918,7 +2504,7 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                     }
                     values = info_f32[field_idx];
                     ret_info = info_ret[field_idx];
-                    if (!bcf_check_decode_ret("read_bcf", "INFO", tag, init->hdr, init->rec,
+                    if (!bcf_check_decode_ret("read_bcf", "INFO", tag, init->scan.hdr, init->rec,
                                               ret_info, bind->decode_error_policy, scan_err, sizeof(scan_err))) {
                         duckdb_function_set_error(info, scan_err[0] ? scan_err : "read_bcf: failed to decode INFO field");
                         init->done = 1;
@@ -2935,10 +2521,9 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                     if (!info_loaded[field_idx]) {
                         if (!bcf_record_has_info_field(init->rec, field)) {
                             info_ret[field_idx] = -3;
-                        } else if (bcf_reader_input_is_bcf(init->fp) &&
-                                   !bcf_preflight_info_encoded_type(init->hdr, init->rec, field,
-                                                                   "read_bcf",
-                                                                   scan_err, sizeof(scan_err))) {
+                        } else if (bcf_reader_input_is_bcf(init->scan.fp) &&
+                                   !duckhts_bcf_check_field_type(init->scan.hdr, init->rec, DUCKHTS_BCF_FIELD_INFO,
+                                       field->header_id, field->header_type, "read_bcf", scan_err, sizeof(scan_err))) {
                             if (!bcf_handle_decode_diagnostic(bind->decode_error_policy, scan_err)) {
                                 duckdb_function_set_error(info, scan_err[0] ? scan_err : "read_bcf: failed to decode INFO field");
                                 init->done = 1;
@@ -2947,7 +2532,7 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                             }
                             info_ret[field_idx] = -3;
                         } else {
-                            info_ret[field_idx] = bcf_get_info_string(init->hdr, init->rec, tag,
+                            info_ret[field_idx] = bcf_get_info_string(init->scan.hdr, init->rec, tag,
                                                                        &info_str[field_idx],
                                                                        &info_n_values[field_idx]);
                         }
@@ -2955,7 +2540,7 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                     }
                     value = info_str[field_idx];
                     ret_info = info_ret[field_idx];
-                    if (!bcf_check_decode_ret("read_bcf", "INFO", tag, init->hdr, init->rec,
+                    if (!bcf_check_decode_ret("read_bcf", "INFO", tag, init->scan.hdr, init->rec,
                                               ret_info, bind->decode_error_policy, scan_err, sizeof(scan_err))) {
                         duckdb_function_set_error(info, scan_err[0] ? scan_err : "read_bcf: failed to decode INFO field");
                         init->done = 1;
@@ -3004,7 +2589,6 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
         }
 
         row_count++;
-        init->current_row++;
 
         // Advance the tidy sample, or mark the record as consumed.
         if (tidy_mode) {
@@ -3012,24 +2596,9 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
             if (init->tidy_current_sample >= bind->n_samples) {
                 // All samples emitted for this record - next iteration will read new record
                 init->tidy_record_valid = 0;
-                init->total_records_processed++;
             }
-        } else {
-            init->total_records_processed++;
         }
 
-        // Print progress every N records (only count actual VCF records, not per-sample rows)
-#if BCF_READER_ENABLE_PROGRESS
-        if (!tidy_mode || !init->tidy_record_valid) {
-            if (init->is_parallel && init->contig_name) {
-                char context[256];
-                snprintf(context, sizeof(context), "scan (contig: %s)", init->contig_name);
-                print_progress(init, context);
-            } else {
-                print_progress(init, "scan");
-            }
-        }
-#endif
     }
 
     duckdb_free(vectors);

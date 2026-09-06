@@ -4,6 +4,7 @@ mapping	fixed_count_arrays.vcf	Exact fixed-cardinality INFO/FORMAT arrays for Nu
 mapping	mapping_number_families.vcf	Representative Number=1/A/R/G/. mappings across INFO and FORMAT fields
 mapping	parallel_empty_contigs.vcf	Indexed parallel-scan regression with leading empty contigs before live records
 mapping	bcf_scan_contigs.vcf	Multi-contig scan, duplicate records, and header/index dictionary order regression
+mapping	bcf_literal_contigs.vcf	Indexed full scans use literal contig IDs rather than ambiguous region expressions
 mapping	phased_genotype_fields.vcf	Phased and arbitrary-ploidy GT plus PL/GP/DS/PS FORMAT fields for normalization/liftover contract tests
 mapping	genotype_ploidy_edge_cases.vcf	Compact GT-only haploid/phased/polyploid/large-allele fixture for read_bcf projection tests
 mapping	tidy_chunk_boundary.vcf	Single-record 2053-sample fixture that exercises GT and CSQ record ownership across DuckDB output chunks

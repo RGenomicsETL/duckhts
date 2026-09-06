@@ -5,8 +5,9 @@ output:
     html_preview: false
 ---
 
-This paired measurement exercises automatic full-file scan planning and complete
-materialization on committed BCF/VCF fixtures staged through duckhtsbench's registry.
+This paired measurement exercises automatic full-file scan planning, complete and
+projected materialization, metadata counts and overlapping indexed regions on
+committed BCF/VCF fixtures staged through duckhtsbench's registry.
 The registry pins encoded file bytes; staging is a network-free verified copy,
 not fixture reconstruction. The original two-record inputs have
 one occupied contig and 256 empty header contigs. A second five-record corpus has
@@ -18,19 +19,20 @@ not cohort throughput.
 Both builds plan VCF work using the Tabix dictionary. The one-occupied-contig VCF
 therefore selects a single full-file stream instead of 257 indexed contig tasks;
 the five-record VCFs use two contig tasks irrespective of header completeness.
-BCF retains its header dictionary. This is a deliberate scheduling change, not a
-promise that the requested DuckDB thread limit equals the number of active workers.
-The candidate retains the parsed index at bind and removes worker index reloads;
-the baseline reloads an independent index in each indexed scan worker. Data and
-indexes remain unchanged during this timing workload.
+BCF retains its header dictionary. The requested DuckDB thread limit is not a
+promise about the number of active workers. Both builds retain parsed indexes at
+bind. The candidate shares its file/header/iterator and decode-validation code
+with a host-neutral scanner. Data and indexes remain unchanged during timing.
 
 The nearest larger full-column report is
 [`benchmark_reader_allocations.md`](benchmark_reader_allocations.md):
 4,048,342 GIAB HG002 records in wide/tidy form, one sequential scan handle and
 zero HTSlib decompression workers. It does not exercise automatic parallel
 index reloads and is not an identical-workload baseline. The previous identical
-two/five-record workload is retained at
-[`40c2b52:benchmark_bcf_scan_init.md`](https://github.com/RGenomicsETL/duckhts/blob/40c2b52793740064956709e44b825553efe76cd3/benchmarks/benchmark_bcf_scan_init.md).
+two/five-record full-materialization workload is retained at
+[`4929162:benchmark_bcf_scan_init.md`](https://github.com/RGenomicsETL/duckhts/blob/4929162aa103fe703c848a9b87bfc062cd53aa15/benchmarks/benchmark_bcf_scan_init.md).
+Count-only, projected and explicit-region cases below are new paired workloads;
+they do not have a previous identical recorded baseline.
 This report measures the pre-fix binary alongside the candidate on the same host.
 
 ## Reproduction and identity
@@ -63,7 +65,7 @@ identity <- data.frame(
             R.version.string, as.character(packageVersion("duckdb")),
             readLines("third_party/htslib/VERSION", n = 1),
             system2("taskset", c("-pc", Sys.getpid()), stdout = TRUE),
-            "9 timed calls after warm-up; fresh R process per build/input/thread setting")
+            "9 timed calls after warm-up; fresh R process per build/input/thread/workload setting")
 )
 knitr::kable(identity)
 paths <- duckhtsbench::duckhts_bench_stage_bcf_scan(".")
@@ -87,9 +89,10 @@ knitr::kable(data.frame(file = basename(files), bytes = file.info(files)$size,
                         md5 = unname(tools::md5sum(files))))
 results <- list()
 oracles <- list()
-for (i in seq_len(nrow(cases))) for (threads in c(1L, 4L)) for (build in c("baseline", "candidate")) {
+for (i in seq_len(nrow(cases))) for (threads in c(1L, 4L))
+  for (workload in c("full", "count", "projected", "regions")) for (build in c("baseline", "candidate")) {
   case <- cases[i, ]
-  measured <- callr::r(function(extension, input, index, explicit_index, oracle, threads, build, input_records) {
+  measured <- callr::r(function(extension, input, index, explicit_index, oracle, threads, input_records, workload) {
     con <- DBI::dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
     on.exit(DBI::dbDisconnect(con, shutdown = TRUE))
     DBI::dbExecute(con, paste("LOAD", DBI::dbQuoteString(con, extension)))
@@ -98,9 +101,26 @@ for (i in seq_len(nrow(cases))) for (threads in c(1L, 4L)) for (build in c("base
       "SELECT * FROM read_bcf(%s,scan_mode:='sequential',decompression_threads:=0) ORDER BY ALL",
       DBI::dbQuoteString(con, oracle)))
     stopifnot(nrow(reference) == input_records)
+    physical_reference <- reference
+    selected_records <- input_records
     index_option <- if (explicit_index) paste0(",index_path:=", DBI::dbQuoteString(con, index)) else ""
-    sql <- sprintf("CREATE OR REPLACE TEMP TABLE scanned AS SELECT * FROM read_bcf(%s%s,decompression_threads:=0)",
-                   DBI::dbQuoteString(con, input), index_option)
+    projection <- "*"
+    region_option <- ""
+    if (workload == "count") {
+      projection <- "count(*) AS n"
+      reference <- data.frame(n = bit64::as.integer64(input_records))
+    } else if (workload == "projected") {
+      projection <- "CHROM,POS,REF,ALT"
+      reference <- reference[c("CHROM", "POS", "REF", "ALT")]
+    } else if (workload == "regions") {
+      region_option <- ",region:='chr1:1-20,chr1:10-30,chr1:1-20'"
+      reference <- reference[reference$CHROM == "chr1" & reference$POS <= 30, ]
+      rownames(reference) <- NULL
+      selected_records <- nrow(reference)
+      stopifnot(selected_records == 1L)
+    }
+    sql <- sprintf("CREATE OR REPLACE TEMP TABLE scanned AS SELECT %s FROM read_bcf(%s%s%s,decompression_threads:=0)",
+                   projection, DBI::dbQuoteString(con, input), index_option, region_option)
     DBI::dbExecute(con, sql)
     expected <- DBI::dbGetQuery(con, "SELECT * FROM scanned ORDER BY ALL")
     exact <- identical(expected, reference)
@@ -112,19 +132,21 @@ for (i in seq_len(nrow(cases))) for (threads in c(1L, 4L)) for (build in c("base
       timings[i] <- as.numeric(difftime(Sys.time(), start, units = "secs"))
       stopifnot(identical(DBI::dbGetQuery(con, "SELECT * FROM scanned ORDER BY ALL"), expected))
     }
-    list(rows = expected, reference = reference, exact = exact, timings = timings)
+    list(rows = expected, reference = physical_reference, selected_records = selected_records,
+         exact = exact, timings = timings)
   }, args = list(extension = normalizePath(if (build == "baseline") baseline else candidate),
                  input = normalizePath(case$input), index = normalizePath(case$index),
                  explicit_index = case$explicit_index,
-                 oracle = normalizePath(case$oracle), threads = threads, build = build,
-                 input_records = case$input_records))
+                 oracle = normalizePath(case$oracle), threads = threads,
+                 input_records = case$input_records, workload = workload))
   if (is.null(oracles[[case$oracle]])) oracles[[case$oracle]] <- measured$reference
   stopifnot(identical(oracles[[case$oracle]], measured$reference))
   stopifnot(measured$exact) # Never compare an incomplete materialization.
   results[[length(results) + 1L]] <- data.frame(
-    build, format = case$format, header = case$header,
+    build, workload, format = case$format, header = case$header,
     duckdb_threads = threads, htslib_workers_per_handle = 0L,
     header_contigs = case$header_contigs, input_records = case$input_records,
+    selected_records = measured$selected_records,
     materialized_rows = nrow(measured$rows), materialized_columns = ncol(measured$rows),
     exact_rows = measured$exact,
     median_ms = if (measured$exact) 1000 * median(measured$timings) else NA_real_,
@@ -135,14 +157,19 @@ for (i in seq_len(nrow(cases))) for (threads in c(1L, 4L)) for (build in c("base
 knitr::kable(do.call(rbind, results), digits = 3)
 ```
 
-Each timed `CREATE OR REPLACE TEMP TABLE AS SELECT *` materializes all columns,
-not merely a count. The output denominator is two or five complete rows on both
-builds, including partial-header scans fixed by the preceding change.
+Each timed `CREATE OR REPLACE TEMP TABLE AS SELECT` materializes the requested
+result. Full/projected cases return two or five rows, regions return one selected
+record, and count returns one aggregate row representing two or five records.
+Count may read only index statistics; it is not a physical decode throughput test.
 Elapsed `Sys.time()` includes the DBI call;
 connection creation, warm-up, and complete typed-row verification are outside the
 timer. Every candidate result and every valid baseline agrees exactly with the
 complete BCF sequential rows, including GT, ALT and physical duplicate multiplicity,
 without asserting scan arrival order. The BCF oracle also agrees across builds.
+
+There is no public sample-selection option on canonical `read_bcf`; retired
+experimental selectors are not reinstated to produce a timing. Native selected
+sample tests are correctness evidence, not a selected-cohort benchmark.
 
 This does not measure the latency of an index failure, remote I/O, large-cohort
 throughput, RSS, or maximum worker concurrency. Thread settings are DuckDB's

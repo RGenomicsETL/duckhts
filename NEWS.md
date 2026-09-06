@@ -1,6 +1,12 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- preserve literal colon-bearing contig names in indexed BCF/VCF full scans;
+  internal contig tasks no longer parse dictionary names as region expressions.
+  Share file/header/iterator ownership and decode diagnostics in a host-neutral
+  scanner used by read_bcf and standalone tests, retaining worker-local mutable
+  state and pending records across tidy output chunks
+
 - stage the small BCF scan benchmark's committed inputs through duckhtsbench's
   registry, with pinned byte identities and a network-free cache-staging test
 
