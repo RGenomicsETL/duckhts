@@ -582,8 +582,8 @@ duckvep_variant_feature_coding_context_build_prepared(
  * independent-event HGVSp.  NOT_APPLICABLE means the caller should use the
  * ordinary semantic edit set after UTR/CDS-spanning shapes have been handled
  * by the transcript-string evaluator. DELTA_ONLY means the uploaded feature was
- * authoritative but no reusable peptide context exists (for example, a
- * partial terminal codon or an explicit sequence/projection failure).
+ * authoritative but no reusable peptide context exists (for example, an
+ * outer mapper gap or an explicit sequence/projection failure).
  * CONTEXT_READY returns both the exact consequence delta and its borrowed
  * coding context; the context remains valid until caller scratch is reused. */
 typedef enum duckvep_feature_substitution_result {
@@ -608,12 +608,16 @@ duckvep_feature_substitution_context_fill(
     duckvep_sequence_delta_t         *delta_out);
 
 /* Classify a CodingContext into sequence-delta facts. The classifier handles
- * length-preserving substitutions across complete codon windows and guarded
+ * length-preserving substitutions across codon-rounded windows and guarded
  * single-edit frameshift, in-frame insertion, deletion, and delins contexts.
- * Ambiguous bases, incomplete codons, length-changing multi-edit contexts, and cases
+ * Terminal partial codons share independent REF/ALT clipping and borrowed UTR
+ * translation with the length-changing path. Ambiguous bases, length-changing
+ * multi-edit contexts, and cases
  * requiring an incomplete compound consequence return UNSUPPORTED with `delta`
- * invalid. Length-preserving multi-edit substitutions use the same complete-CDS
- * comparison as one uploaded MNV. The raw dispatcher has no shape-specific fallback. */
+ * invalid. Length-preserving edit sets select their changed codons; the uploaded
+ * feature producer selects the full feature's codons without minimizing retained
+ * bases. Both selections use the same substitution interpreter. The raw dispatcher
+ * has no shape-specific fallback. */
 DUCKVEP_INTERNAL_API duckvep_context_delta_status_t duckvep_coding_context_delta_fill(
     const duckvep_coding_context_t *ctx,
     uint64_t                        tx_flags,

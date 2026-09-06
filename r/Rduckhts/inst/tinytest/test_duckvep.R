@@ -2244,6 +2244,41 @@ local({
     expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-mnv-start') dropped")$dropped)
   }
 
+  # Terminal substitutions borrow the same 3-prime UTR codon bytes as indels.
+  # These reduced pinned-VEP witnesses retain both genomic orientations.
+  for (strand in c(1L, -1L)) for (shape in 0:1) {
+    terminal_queries <- c(queries[1], sprintf(paste(
+      "SELECT 0::UINTEGER transcript_index, 1::UINTEGER seq_region,",
+      "100::UBIGINT transcript_start, 111::UBIGINT transcript_end,",
+      "%d::TINYINT strand, 0::UINTEGER gene_index, 3::UBIGINT transcript_flags,",
+      "%d::UBIGINT cds_start, %d::UBIGINT cds_end, '%s'::BLOB cds_sequence,",
+      "1::UTINYINT codon_table, ''::BLOB pre_cds_sequence, 'A'::BLOB post_cds_sequence"
+    ), strand, if (strand == 1L) 100L else 101L, if (strand == 1L) 110L else 111L,
+      c("ATGCCCTGGTA", "ATGCCCGGTAA")[shape+1L]), paste(
+      "SELECT 0::UINTEGER transcript_index, 100::UBIGINT exon_start,",
+      "111::UBIGINT exon_end, 1::UBIGINT exon_cdna_start, 12::UBIGINT exon_cdna_end,",
+      "0::TINYINT phase, 2::TINYINT end_phase"))
+    expect_true(load_model("r-terminal-substitution", terminal_queries)$loaded)
+    terminal <- dbGetQuery(con, sprintf(paste(
+      "WITH variants(shape,ord,cds_start,reference,alternate) AS (VALUES",
+      "(0,1,9,'GT','TT'),(0,2,11,'A','G'),(1,1,9,'TA','AT'),(1,2,10,'A','T'))",
+      "SELECT ord, a.consequence, a.status, a.reason FROM variants,",
+      "LATERAL unnest(_duckvep_annotate_small_rich('r-terminal-substitution', 1::UINTEGER,",
+      "CASE WHEN %d=1 THEN 99+cds_start ELSE 113-cds_start-length(reference) END::UBIGINT,",
+      "CASE WHEN %d=1 THEN reference ELSE seq_revcomp(reference) END,",
+      "CASE WHEN %d=1 THEN alternate ELSE seq_revcomp(alternate) END, 0::UBIGINT)) u(a)",
+      "WHERE shape=%d ORDER BY ord"
+    ), strand, strand, strand, shape))
+    expect_equal(terminal$ord, 1:2)
+    expect_identical(vapply(strsplit(terminal$consequence, "&", fixed=TRUE),
+      function(x) paste(sort(x), collapse="&"), ""), c(
+      if (shape == 0L) "coding_sequence_variant&stop_gained" else "stop_retained_variant",
+      "coding_sequence_variant&incomplete_terminal_codon_variant&stop_gained"))
+    expect_identical(terminal$status, rep("supported", 2))
+    expect_true(all(is.na(terminal$reason)))
+    expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-terminal-substitution') dropped")$dropped)
+  }
+
   length_changing_boundaries <- dbGetQuery(
     con,
     paste(

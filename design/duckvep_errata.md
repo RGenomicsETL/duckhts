@@ -569,9 +569,12 @@ this occurs in real mitochondrial and nuclear models.
 Three nearby states must remain distinct:
 
 - an edit beginning inside the one- or two-base terminal codon is
-  `coding_sequence_variant&incomplete_terminal_codon_variant`;
+  `coding_sequence_variant&incomplete_terminal_codon_variant`, with stop-gained
+  independently possible when the alternate codon completes using 3-prime UTR;
 - an edit beginning in a complete codon and continuing into the partial tail classifies
-  the complete peptide prefix and independently records the trailing `X`;
+  the entire local peptide pair, not just the complete reference prefix. REF and ALT
+  requests are codon-rounded and clipped independently; the reference can end in `X`
+  while the alternate borrows UTR and ends in a known amino acid or stop;
 - an equal-length feature that continues beyond the transcript's 3-prime edge still
   exposes its first mapped coding piece through `genomic2pep`, so the partial-codon term
   survives the outer mapper gap.
@@ -581,6 +584,35 @@ It does not promote every edit touching the final rounded codon to partial, and 
 not suppress the term just because one feature endpoint is a mapper gap. Fixed C cases
 cover both strands, with and without `cds_end_NF`, and both internal and outer 3-prime
 boundaries.
+
+The substitution and indel interpreters share that codon-window construction. VEP 116
+`VariationEffect::stop_lost` and `stop_retained` reject partial-codon starts, but
+`stop_gained` does not. `ref_eq_alt_sequence` also recognizes an unchanged complete
+reference peptide followed by a stop, even when the local reference allele includes
+an incomplete-codon `X` that is absent from the full peptide. The full-peptide splice
+must clamp the replaced reference span just as Perl `substr` does.
+
+Executable `projection_differential.R` witnesses at the fixed chrDuck reference:
+
+| Model / uploaded feature | Local peptides | Native SO terms |
+| --- | --- | --- |
+| `partial_cds_end`, `237 GT>TT` | `WX/C*` | coding-sequence + stop-gained |
+| `partial_cds_end`, `239 A>G` | `X/*` | coding-sequence + incomplete-terminal-codon + stop-gained |
+| `noncoding_first_exon`, `238 TA>AT` | `GX/G*` | stop-retained |
+| `noncoding_first_exon`, `239 A>T` | `X/*` | coding-sequence + incomplete-terminal-codon + stop-gained |
+
+`sequence_delta_terminal_substitution_borrows_utr` reduces these sequence shapes and
+checks both genomic strands, present versus empty UTR, physical REF rejection and
+the distinction between an uploaded feature and minimized edit-set mechanics. The
+SQL/R fixtures exercise the same four shapes through the bundled extension.
+`annotate_partial_codon_cds_to_utr3_mapping_gap_known_scene` retains a mitochondrial
+control with CDS `ATGAAACCCGG` and UTR `AAA`: CDS `8 CCG>AAA` is `PX/Q*`
+(coding-sequence + stop-gained), and `9 CG>TA` is `PX/P*` (stop-retained).
+The transcript-oriented `9 CG>TA` in its reverse standard-code control is `PX/PR`
+(coding-sequence + missense). These pinned executable results replace the former
+complete-reference-prefix-only expectations; generators and comparison oracles are
+unchanged. The native scalar protein-position slot is absent for a multi-residue
+window; rich presentation retains its separately projected start/end range.
 
 ## A leading unknown codon does not suppress the frameshift predicate
 

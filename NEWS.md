@@ -1,6 +1,12 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- share DuckVEP's codon-rounded REF/ALT translation windows across substitutions
+  and indels. Terminal SNVs/MNVs now borrow available 3-prime UTR bases for ALT,
+  preserving independent partial-codon and stop-gained facts and recognizing
+  stop retention when the full reference peptide is extended by a stop.
+  Remove partial-substitution shortcuts and complete-codon-only clipping
+
 - separate DuckVEP indel REF validation, VEP feature-CDS mutation, and unpadded
   cDNA start/stop predicates. Correct later-exon phase padding, known synthetic
   N codons, CDS-to-UTR edits and terminal-stop reconstruction on partial CDS.

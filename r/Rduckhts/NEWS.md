@@ -1,5 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- correct bundled DuckVEP terminal-codon substitutions by including available
+  3-prime UTR bases in alternate codon translation. Partial-codon and coding-unknown
+  terms can coexist with stop-gained; a preserved full peptide plus a new stop
+  is stop-retained. Both genomic strands have SQL and package regression coverage
+
 - correct bundled DuckVEP indel start/stop and in-frame consequences when a
   later coding exon supplies CDS phase padding. CDS-to-UTR edits and partial-CDS
   terminal-stop tests use VEP's feature coordinates without weakening physical
