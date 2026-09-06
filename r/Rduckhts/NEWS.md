@@ -1,5 +1,11 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- pin bundled BCF/VCF indexes at preparation for full and region scans. Removing
+  or replacing an index afterward preserves the original complete rows instead
+  of raising a worker-reload error or losing records. Keep data/header contents
+  unchanged and supply a matching initial index; reprepare to use a new index.
+  Explicit sequential mode continues to stream without an index
+
 - preserve bundled VCF records on undeclared contigs when index_path points to
   a non-colocated Tabix index. Full scans use the index's contig dictionary,
   retain duplicate records and avoid tasks for header-only empty contigs

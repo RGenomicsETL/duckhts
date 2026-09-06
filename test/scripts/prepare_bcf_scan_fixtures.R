@@ -14,13 +14,16 @@ prepare_bcf_scan_fixtures <- function() {
   stopifnot(length(records) == 5L, sum(duplicated(records)) == 1L)
   run <- function(args) stopifnot(system2("bcftools", shQuote(args)) == 0L)
   outputs <- source
-  for (header in c("full", "partial", "none", "empty")) {
+  for (header in c("full", "partial", "none", "empty", "shifted")) {
     selected <- switch(header,
       full = lines,
       partial = lines[!startsWith(lines, "##contig=<ID=chr3,") &
                       lines != "##contig=<ID=chr3>"],
       none = lines[!startsWith(lines, "##contig=")],
-      empty = lines[startsWith(lines, "#")])
+      empty = lines[startsWith(lines, "#")],
+      # Same dictionary, records and index counts, but different virtual offsets.
+      shifted = append(lines, paste0("##padding=", strrep("A", 70000L)),
+                       after = which(startsWith(lines, "#CHROM")) - 1L))
     text <- file.path(directory, "input.vcf")
     writeLines(selected, text)
     path <- paste0("test/data/bcf_scan_contigs.", header, ".vcf.gz")
@@ -33,6 +36,14 @@ prepare_bcf_scan_fixtures <- function() {
     decoded <- system2("bcftools", c("view", "-H", shQuote(path)), stdout = TRUE)
     stopifnot(identical(decoded, if (header == "empty") character() else records))
     outputs <- c(outputs, path)
+    if (header %in% c("empty", "shifted")) {
+      bcf <- paste0("test/data/bcf_scan_contigs.", header, ".bcf")
+      run(c("view", "--no-version", "-Ob", "-o", bcf, text))
+      run(c("index", "-f", bcf))
+      stopifnot(identical(system2("bcftools", c("view", "-H", bcf), stdout = TRUE),
+                          if (header == "empty") character() else records))
+      outputs <- c(outputs, bcf, paste0(bcf, ".csi"))
+    }
   }
   bcf <- "test/data/bcf_scan_contigs.bcf"
   run(c("view", "--no-version", "-Ob", "-o", bcf, source))

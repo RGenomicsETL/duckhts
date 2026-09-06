@@ -73,8 +73,8 @@ run_sql "mode must be 'overlap' or 'contain'" \
 run_sql "read_bcf: failed to read or parse BCF/VCF record" \
   "SELECT count(*) FROM read_bcf('test/data/malformed_bad_pos.vcf',tidy_format:=true);"
 for format in bcf full.vcf.gz; do
-  run_sql "read_bcf: failed to reload index for parallel scan" \
-    "SET threads=4; SELECT * FROM bcf_index('test/data/bcf_scan_contigs.$format',index_path:='$tmp/reload.$format.index',threads:=1); PREPARE scan AS SELECT POS FROM read_bcf('test/data/bcf_scan_contigs.$format',index_path:='$tmp/reload.$format.index',decompression_threads:=0); COPY (SELECT 'broken index') TO '$tmp/reload.$format.index' (FORMAT CSV,HEADER FALSE); EXECUTE scan;"
+  run_sql "" \
+    "SET threads=4; SELECT * FROM bcf_index('test/data/bcf_scan_contigs.$format',index_path:='$tmp/reload.$format.index',threads:=1); PREPARE scan AS SELECT CASE WHEN list(POS ORDER BY POS)=[10,20,20,20,40] THEN true ELSE error('index snapshot lost rows') END FROM read_bcf('test/data/bcf_scan_contigs.$format',index_path:='$tmp/reload.$format.index',decompression_threads:=0); COPY (SELECT 'broken index') TO '$tmp/reload.$format.index' (FORMAT CSV,HEADER FALSE); EXECUTE scan;"
 done
 for header in full partial none; do
   run_sql "" \
@@ -139,11 +139,15 @@ else
   "${runtime[@]}" "$tmp/reference_cache_test" "$tmp"
 fi
 cmake --build "$build_dir" --target duckhts_region_list_test -j2
+cmake --build "$build_dir" --target duckhts_bcf_index_snapshot_test -j2
 if [ "$sanitizer" = asan ]; then
   ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
     LD_PRELOAD="$(${CC:-cc} -print-file-name=libasan.so)" "$build_dir/duckhts_region_list_test"
+  ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+    LD_PRELOAD="$(${CC:-cc} -print-file-name=libasan.so)" "$build_dir/duckhts_bcf_index_snapshot_test" "$tmp"
 else
   "${runtime[@]}" "$build_dir/duckhts_region_list_test"
+  "${runtime[@]}" "$build_dir/duckhts_bcf_index_snapshot_test" "$tmp"
 fi
 cmake --build "$build_dir" --target duckhts_reader_alloc_probe -j2
 ${CC:-cc} -std=c11 -UNDEBUG -Wall -Wextra -Werror "${compile_flags[@]}" \

@@ -26,6 +26,25 @@ worker-owned; loaded values and parsed CSQ remain valid until the next input rec
 even when one record's tidy samples span several DuckDB output chunks. Reuse is not
 sealed allocation: HTSlib decode buffers and annotation storage can still grow.
 
+An automatic or explicit-region `read_bcf` plan retains its bind-time parsed
+CSI/TBI index until the plan is destroyed. This applies to automatic index
+discovery and `index_path`, locally and remotely. Removal, in-place corruption,
+or replacement of the index after bind cannot change that plan's offsets or
+metadata counts; identical rebuilding also leaves the plan valid. Reprepare to
+resolve a new index. Without a usable index at bind, auto mode streams and a
+region query errors. Sequential mode does not load an index.
+
+The caller must supply an initially matching data/index pair and keep the data
+and header contents unchanged for the plan's lifetime, including remote objects.
+This is parsed-index retention, not data-file snapshotting or validation of an
+unrelated index supplied before bind. Count statistics do not prove association.
+Every worker owns its file handle, mutable header, record, iterator and decoding
+storage. Only parsed index state is shared: HTSlib 1.24's index queries are const,
+and the Tabix dictionary is fully initialized before publication so query/read
+lookups do not lazily allocate it. The shared helper and standalone concurrent
+tests own this contract. HTSlib's VCF header reader can still probe a colocated
+index independently; retaining the scan index does not promise zero index I/O.
+
 The experiment does not justify changing these independent policies together:
 
 - Full-file streaming is `scan_mode := 'sequential'`; removing the experiment does

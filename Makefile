@@ -157,7 +157,7 @@ define run_reader_alloc_test
 endef
 
 .PHONY: test-reader-alloc test-reader-alloc-r
-test-reader-alloc: test-bam-format
+test-reader-alloc: test-bam-format test-bcf-index-snapshot
 	$(call run_reader_alloc_test,./configure/venv/bin/python3 test/scripts/reader_alloc_test.py --extension build/release/duckhts.duckdb_extension --probe)
 
 test-reader-alloc-r:
@@ -175,6 +175,14 @@ test-bam-format:
 test-region-list:
 	cmake --build cmake_build/release --target duckhts_region_list_test
 	./cmake_build/release/duckhts_region_list_test
+
+.PHONY: test-bcf-index-snapshot
+test-bcf-index-snapshot:
+	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+		$(CC) -std=c11 -O1 -g -UNDEBUG -Wall -Wextra -Werror \
+			-Ithird_party/htslib test/scripts/bcf_index_snapshot_test.c \
+			-Lbuild/release -Wl,-rpath,$(PROJ_DIR)build/release -lduckhts -pthread \
+			-o "$$tmp/bcf_index_snapshot_test"; "$$tmp/bcf_index_snapshot_test" "$$tmp"
 
 .PHONY: test-reference-cache test-reference-cache-asan test-reference-cache-ubsan test-reference-cache-tsan
 define run_reference_cache_test

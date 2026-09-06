@@ -52,6 +52,7 @@ DUCKDB_EXTENSION_EXTERN
 #include "include/hts_io_tuning.h"
 #include "include/duckdb_alloc.h"
 #include "include/region_list.h"
+#include "include/bcf_index_snapshot.h"
 
 // =============================================================================
 // Constants
@@ -176,8 +177,8 @@ typedef struct {
     // Total column count
     int total_columns;
 
-    // Parallel scan info (populated if index exists)
-    int has_index;             // Whether an index was found
+    // Index memory is immutable after bind and outlives every local iterator.
+    duckhts_bcf_index_t index;
     int n_contigs;             // Number of contigs for parallel scan
     char** contig_names;       // Contig names (owned)
     uint64_t index_row_count;
@@ -205,8 +206,7 @@ typedef struct {
     bcf1_t* rec;
 
     // Index support
-    hts_idx_t* idx;           // BCF index (CSI)
-    tbx_t* tbx;               // VCF tabix index (TBI)
+    const duckhts_bcf_index_t *index; // Borrowed from bind; never destroy locally
     hts_itr_t* itr;           // Iterator
     kstring_t kstr;           // String buffer for VCF text parsing
     kstring_t gt_kstr;        // Thread-local reusable GT formatter buffer
@@ -386,6 +386,8 @@ static void destroy_bind_data(void* data) {
         vep_schema_destroy(bind->vep_schema);
     }
 
+    duckhts_bcf_index_destroy(&bind->index);
+
     duckdb_free(bind);
 }
 
@@ -494,8 +496,6 @@ static void destroy_init_data(void* data) {
 
     bcf_decode_cache_free(init);
     if (init->itr) hts_itr_destroy(init->itr);
-    if (init->tbx) tbx_destroy(init->tbx);
-    if (init->idx) hts_idx_destroy(init->idx);
     if (init->rec) bcf_destroy(init->rec);
     if (init->hdr) bcf_hdr_destroy(init->hdr);
     if (init->fp) hts_close(init->fp);
@@ -531,7 +531,7 @@ static int bcf_tabix_region_name2id(void *tbx, const char *name) {
 /* Open one htslib iterator for the complete requested region set.  HTSlib
  * 1.24's multi-region iterators merge overlapping chunks and return a record
  * once even when several requested regions overlap it. */
-static hts_itr_t *bcf_open_region_iterator(hts_idx_t *idx, bcf_hdr_t *hdr,
+static hts_itr_t *bcf_open_region_iterator(const hts_idx_t *idx, bcf_hdr_t *hdr,
                                            tbx_t *tbx, char **regions,
                                            unsigned int n_regions) {
     if (!regions || n_regions == 0) return NULL;
@@ -1079,7 +1079,7 @@ static int bcf_projected_columns_init(bcf_init_data_t *local, const bcf_bind_dat
     return 1;
 }
 
-static int bcf_try_get_index_row_count(hts_idx_t *idx, uint64_t row_multiplier, uint64_t *out_total) {
+static int bcf_try_get_index_row_count(const hts_idx_t *idx, uint64_t row_multiplier, uint64_t *out_total) {
     if (!idx || !out_total || row_multiplier == 0) {
         return 0;
     }
@@ -1769,12 +1769,12 @@ static void bcf_read_bind(duckdb_bind_info info) {
     // Check for index and extract contig names for parallel scanning
     // -------------------------------------------------------------------------
 
-    bind->has_index = 0;
     bind->n_contigs = 0;
     bind->contig_names = NULL;
 
-    // Only set up parallel scan if no user-specified region
-    if (bind->n_regions == 0 && !bind->scan_sequential) {
+    // Pin the parsed index for this plan, including explicit region queries.
+    // Workers never resolve a potentially replaced index for their scan.
+    if (!bind->scan_sequential) {
         // Try to load index using *_load3 with minimal flags to avoid network timeouts
         // Only use HTS_IDX_SAVE_REMOTE for actual remote protocols
         int is_remote = (strncmp(file_path, "http://", 7) == 0 ||
@@ -1783,34 +1783,30 @@ static void bcf_read_bind(duckdb_bind_info info) {
                          strncmp(file_path, "s3://", 5) == 0 ||
                          strncmp(file_path, "gs://", 5) == 0);
 
-        hts_idx_t* idx = NULL;
-        tbx_t* tbx = NULL;
         enum htsExactFormat fmt = hts_get_format(fp)->format;
         int flags = HTS_IDX_SILENT_FAIL;
         if (is_remote) {
             flags |= HTS_IDX_SAVE_REMOTE;
         }
 
-        if (fmt == bcf) {
-            idx = bcf_index_load3(file_path, index_path, flags);
-        } else {
-            tbx = tbx_index_load3(file_path, index_path, flags);
-            if (!tbx) {
-                idx = bcf_index_load3(file_path, index_path, flags);
-            }
+        int loaded = duckhts_bcf_index_load(&bind->index, fmt, file_path, index_path, flags);
+        if (loaded < 0) goto bind_oom;
+        if (!loaded && bind->n_regions > 0) {
+            char err[512];
+            snprintf(err, sizeof(err),
+                     "%s: region query requires an index file (.tbi or .csi). Region: %s",
+                     reader_name, bind->region);
+            duckdb_bind_set_error(info, err);
+            goto bind_error;
         }
-
-        if (idx || tbx) {
-            bind->has_index = 1;
+        if (loaded && bind->n_regions == 0) {
+            const hts_idx_t *idx = bind->index.bcf ? bind->index.bcf : bind->index.tabix->idx;
             int tidy_rows = bind->tidy_format && bind->n_samples > 0;
             uint64_t row_multiplier = tidy_rows ? (uint64_t)bind->n_samples : 1;
-            bind->index_row_count_valid = bcf_try_get_index_row_count(idx ? idx : tbx->idx,
+            bind->index_row_count_valid = bcf_try_get_index_row_count(idx,
                                                                       row_multiplier,
                                                                       &bind->index_row_count);
-            int contigs_ok = bcf_bind_contig_names(bind, hdr, tbx);
-            if (idx) hts_idx_destroy(idx);
-            if (tbx) tbx_destroy(tbx);
-            if (!contigs_ok) goto bind_oom;
+            if (!bcf_bind_contig_names(bind, hdr, bind->index.tabix)) goto bind_oom;
         }
     }
 
@@ -1868,7 +1864,7 @@ static void bcf_read_global_init(duckdb_init_info info) {
         global->n_contigs = 0;
         global->contig_names = NULL;
         duckdb_init_set_max_threads(info, 1);
-    } else if (!bind->scan_sequential && bind->has_index && bind->n_contigs > 1 && !global->has_region) {
+    } else if (!bind->scan_sequential && bind->n_contigs > 1 && !global->has_region) {
         global->n_contigs = bind->n_contigs;
         global->contig_names = bind->contig_names;  // Reference only
 
@@ -1899,6 +1895,7 @@ static void bcf_read_local_init(duckdb_init_info info) {
         duckdb_init_set_error(info, "read_bcf: out of memory allocating worker state");
         return;
     }
+    local->index = &bind->index;
 
     local->column_count = duckdb_init_get_column_count(info);
     if (local->column_count > 0) {
@@ -1938,7 +1935,7 @@ static void bcf_read_local_init(duckdb_init_info info) {
     }
 
     // Check if we're in parallel mode based on bind data
-    int is_parallel = (!bind->scan_sequential && bind->has_index && bind->n_contigs > 1 && bind->n_regions == 0);
+    int is_parallel = (!bind->scan_sequential && bind->n_contigs > 1 && bind->n_regions == 0);
 
     // Initialize parallel scan state
     local->is_parallel = is_parallel;
@@ -1993,55 +1990,20 @@ static void bcf_read_local_init(duckdb_init_info info) {
         return;
     }
 
-    // Load index for parallel scanning or region queries
-    // Use *_load3 with HTS_IDX_SAVE_REMOTE for remote file support
-    if (is_parallel || bind->n_regions > 0) {
-        enum htsExactFormat fmt = hts_get_format(local->fp)->format;
-
-        if (fmt == bcf) {
-            local->idx = bcf_index_load3(bind->file_path, bind->index_path, HTS_IDX_SAVE_REMOTE | HTS_IDX_SILENT_FAIL);
-        } else {
-            local->tbx = tbx_index_load3(bind->file_path, bind->index_path, HTS_IDX_SAVE_REMOTE | HTS_IDX_SILENT_FAIL);
-            if (!local->tbx) {
-                local->idx = bcf_index_load3(bind->file_path, bind->index_path, HTS_IDX_SAVE_REMOTE | HTS_IDX_SILENT_FAIL);
-            }
-        }
-    }
-
-    /* Bind already chose one-owner-per-contig scanning. Without the worker's
-     * index, every contig would look empty; streaming fallback would duplicate
-     * the file across workers. Fail this plan instead. */
-    if (is_parallel && !local->idx && !local->tbx) {
-        duckdb_init_set_error(info, "read_bcf: failed to reload index for parallel scan");
-        destroy_init_data(local);
-        return;
-    }
-
     // Set up region query if user specified a region (non-parallel case)
     if (!is_parallel && bind->n_regions > 0) {
-        // First check if we have an index
-        if (!local->idx && !local->tbx) {
-            char err[512];
-            snprintf(err, sizeof(err),
-                     "%s: region query requires an index file (.tbi or .csi). Region: %s",
-                     reader_name, bind->region);
-            duckdb_init_set_error(info, err);
-            destroy_init_data(local);
-            return;
-        }
-
         /* VCF indexes can name contigs absent from the text header, especially
          * with an explicit non-colocated index. Use the iterator's dictionary. */
         char region_error[256];
         if (!duckhts_region_list_validate(bind->regions, bind->n_regions,
-                                          local->idx ? bcf_region_name2id : bcf_tabix_region_name2id,
-                                          local->idx ? (void *)local->hdr : (void *)local->tbx,
+                                          bind->index.bcf ? bcf_region_name2id : bcf_tabix_region_name2id,
+                                          bind->index.bcf ? (void *)local->hdr : (void *)bind->index.tabix,
                                           region_error, sizeof(region_error))) {
             duckdb_init_set_error(info, region_error);
             destroy_init_data(local);
             return;
         }
-        local->itr = bcf_open_region_iterator(local->idx, local->hdr, local->tbx,
+        local->itr = bcf_open_region_iterator(bind->index.bcf, local->hdr, bind->index.tabix,
                                                bind->regions, bind->n_regions);
 
         if (!local->itr) {
@@ -2219,10 +2181,10 @@ static int claim_next_contig(bcf_init_data_t* init, bcf_global_init_data_t* glob
         init->assigned_contig = next;
         init->contig_name = contig;
 
-        if (init->idx) {
-            init->itr = bcf_itr_querys(init->idx, init->hdr, contig);
-        } else if (init->tbx) {
-            init->itr = tbx_itr_querys(init->tbx, contig);
+        if (init->index->bcf) {
+            init->itr = bcf_itr_querys(init->index->bcf, init->hdr, contig);
+        } else if (init->index->tabix) {
+            init->itr = tbx_itr_querys(init->index->tabix, contig);
         }
 
         if (init->itr) {
@@ -2588,9 +2550,9 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
             int ret;
 
             if (init->itr) {
-                if (init->tbx) {
+                if (init->index->tabix) {
                     // VCF with tabix: read text line then parse.
-                    ret = tbx_itr_next(init->fp, init->tbx, init->itr, &init->kstr);
+                    ret = tbx_itr_next(init->fp, init->index->tabix, init->itr, &init->kstr);
                     if (ret >= 0) {
                         ret = vcf_parse1(&init->kstr, init->hdr, init->rec);
                         init->kstr.l = 0;

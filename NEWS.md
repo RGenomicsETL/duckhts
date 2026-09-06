@@ -1,6 +1,16 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- stage the small BCF scan benchmark's committed inputs through duckhtsbench's
+  registry, with pinned byte identities and a network-free cache-staging test
+
+- retain parsed BCF/VCF indexes for the prepared plan, including region scans,
+  instead of reloading them in workers. Index removal, corruption or valid
+  replacement after bind now preserves the original rows and metadata counts.
+  This supersedes the worker-reload error below; data and headers must remain
+  unchanged, and the initial index must match the data. Reprepare to use a new
+  index; sequential mode neither loads nor pins one
+
 - plan indexed VCF full scans from the Tabix contig dictionary, preserving
   records on contigs absent from a partial header with a non-colocated index.
   Keep physical duplicate records and BCF header-ID semantics; VCF header-only

@@ -1,5 +1,8 @@
 # duckhtsbench 0.0.0.9000
 
+- pin and stage committed small BCF/VCF scan benchmark fixtures and indexes
+  through the registry, with byte/hash validation and network-free staging tests
+
 - register and stage the deterministic multi-region VCF, BCF and indexes without
   network access, with a small reconstruction and exact-position test
 
