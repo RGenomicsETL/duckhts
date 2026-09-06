@@ -215,6 +215,11 @@ static void genotype_values(void) {
     assert(!duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_NULL, error, sizeof(error)));
     assert(strstr(error, "exceeds the supported decoded-value capacity"));
     format->n = width;
+    assert(bcf_update_format_string(header, record, "GT", strings, 2) == 0);
+    assert(!duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_ERROR, error, sizeof(error)));
+    assert(strstr(error, "encoded BCF type CHAR"));
+    assert(duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_NULL, error, sizeof(error)));
+    assert(values.gt_stride == 0 && values.ps_present);
     duckhts_bcf_samples_t selection = {0};
     assert(duckhts_bcf_samples_build(&selection, header, "S2", error, sizeof(error)));
     char *reversed[] = {"S2", "S1"};

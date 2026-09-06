@@ -35,6 +35,14 @@ prepare_geno_fixtures <- function() {
     run(c("view", "--no-version", "-Ob", "-o", binary, text))
     outputs <- c(outputs, text, binary)
   }
+  # Reheader changes only the declared PS type, retaining the CHAR payload in
+  # the BCF blocks. This must not reach HTSlib's integer convenience decoder.
+  temporary_header <- tempfile("geno-payload-header-", fileext = ".vcf")
+  on.exit(unlink(temporary_header), add = TRUE)
+  writeLines(header, temporary_header)
+  payload <- "test/data/geno_ps_payload.bcf"
+  run(c("reheader", "-h", temporary_header, "-o", payload, "test/data/geno_ps_type.bcf"))
+  outputs <- c(outputs, payload)
   stopifnot(all(file.copy(outputs, "r/Rduckhts/inst/extdata", overwrite = TRUE)))
   # Explicit VCF 4.4 phase-prefix witnesses stay textual: the locally installed
   # bcftools encoder may implement an older VCF version than bundled HTSlib.

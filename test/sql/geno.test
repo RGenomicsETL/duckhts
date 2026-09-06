@@ -206,6 +206,21 @@ SELECT * FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_calls.bcf', sample
 selector item 1 is not in the header
 
 statement error
+SELECT calls FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_ps_payload.bcf', decode_error_policy:='error');
+----
+FORMAT/PS encoded BCF type CHAR
+
+foreach policy null warn
+
+query TT
+SELECT calls[1].alleles::VARCHAR, calls[1].phase_set IS NULL
+FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_ps_payload.bcf', decode_error_policy:='${policy}');
+----
+[0, 1]	true
+
+endloop
+
+statement error
 SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/geno_calls.bcf', samples:='^unknown');
 ----
 selector item 1 is not in the header

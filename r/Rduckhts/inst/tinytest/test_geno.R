@@ -93,6 +93,13 @@ test_record_major_genotypes <- function() {
     }
   }
   path <- fixture("geno_calls.bcf")
+  payload <- fixture("geno_ps_payload.bcf")
+  expect_error(rduckhts_geno(con, path = payload, decode_error_policy = "error"), pattern = "encoded BCF type CHAR")
+  for (policy in c("null", "warn")) {
+    rduckhts_geno(con, "bad_payload", payload, decode_error_policy = policy, overwrite = TRUE)
+    expect_equal(dbGetQuery(con, "SELECT calls[1].alleles::VARCHAR AS gt, calls[1].phase_set IS NULL AS missing FROM bad_payload"),
+                 data.frame(gt = "[0, 1]", missing = TRUE))
+  }
   phase_path <- fixture("geno_vcf44.vcf")
   explicit <- dbGetQuery(con, paste0(
     "SELECT calls[1].phase_before::VARCHAR AS first, calls[2].phase_before::VARCHAR AS second ",
