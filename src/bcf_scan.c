@@ -5,6 +5,119 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <strings.h>
+
+int duckhts_bcf_parse_decode_policy(const char *text, duckhts_bcf_decode_policy_t *policy) {
+    *policy = DUCKHTS_BCF_DECODE_NULL;
+    if (!text || !*text || strcasecmp(text, "null") == 0) return 1;
+    if (strcasecmp(text, "warn") == 0) *policy = DUCKHTS_BCF_DECODE_WARN;
+    else if (strcasecmp(text, "error") == 0) *policy = DUCKHTS_BCF_DECODE_ERROR;
+    else return 0;
+    return 1;
+}
+
+int duckhts_bcf_parse_scan_mode(const char *text, int *sequential) {
+    *sequential = 0;
+    if (!text || !*text || strcasecmp(text, "auto") == 0) return 1;
+    if (strcasecmp(text, "sequential") != 0 && strcasecmp(text, "streaming") != 0 &&
+        strcasecmp(text, "stream") != 0 && strcasecmp(text, "seq") != 0) return 0;
+    *sequential = 1;
+    return 1;
+}
+
+void duckhts_bcf_samples_destroy(duckhts_bcf_samples_t *samples) {
+    if (!samples) return;
+    if (samples->names) {
+        for (int i = 0; i < samples->count; i++) free(samples->names[i]);
+    }
+    free(samples->names);
+    free(samples->indices);
+    free(samples->selector);
+    memset(samples, 0, sizeof(*samples));
+}
+
+int duckhts_bcf_samples_build(duckhts_bcf_samples_t *samples, const bcf_hdr_t *header,
+                              const char *selector, char *error, size_t error_size) {
+    bcf_hdr_t *subset = NULL;
+    const bcf_hdr_t *selected = header;
+    samples->original_count = bcf_hdr_nsamples(header);
+    if (selector) {
+        samples->selector = strdup(selector);
+        if (!samples->selector) goto oom;
+    }
+    if (selector && strcmp(selector, "-") != 0) {
+        if (!samples->original_count) {
+            if (*selector) {
+                snprintf(error, error_size, "BCF samples: selector item 1 is not in the header");
+                goto fail;
+            }
+        } else {
+            subset = bcf_hdr_dup(header);
+            if (!subset) goto oom;
+            selected = subset;
+            int ret = bcf_hdr_set_samples(subset, *selector ? selector : NULL, 0);
+            if (ret < 0) goto oom;
+            if (ret > 0) {
+                snprintf(error, error_size, "BCF samples: selector item %d is not in the header", ret);
+                goto fail;
+            }
+        }
+    }
+    samples->count = bcf_hdr_nsamples(selected);
+    if (samples->count > 0) {
+        if ((size_t)samples->count > SIZE_MAX / sizeof(*samples->names) ||
+            (size_t)samples->count > SIZE_MAX / sizeof(*samples->indices)) goto oom;
+        samples->names = calloc((size_t)samples->count, sizeof(*samples->names));
+        samples->indices = calloc((size_t)samples->count, sizeof(*samples->indices));
+        if (!samples->names || !samples->indices) goto oom;
+        for (int i = 0; i < samples->count; i++) {
+            int original = bcf_hdr_id2int(header, BCF_DT_SAMPLE, selected->samples[i]);
+            if (original < 0 || original >= samples->original_count) {
+                snprintf(error, error_size, "BCF samples: selected name is not in the original header");
+                goto fail;
+            }
+            samples->indices[i] = (uint32_t)original;
+            samples->names[i] = strdup(selected->samples[i]);
+            if (!samples->names[i]) goto oom;
+        }
+    }
+    if (subset) bcf_hdr_destroy(subset);
+    return 1;
+oom:
+    snprintf(error, error_size, "BCF samples: out of memory preparing sample selection");
+fail:
+    if (subset) bcf_hdr_destroy(subset);
+    duckhts_bcf_samples_destroy(samples);
+    return 0;
+}
+
+int duckhts_bcf_samples_apply(const duckhts_bcf_samples_t *samples, bcf_hdr_t *header,
+                              char *error, size_t error_size) {
+    if (bcf_hdr_nsamples(header) != samples->original_count) goto changed;
+    for (int i = 0; i < samples->count; i++) {
+        if (samples->indices[i] >= (uint32_t)samples->original_count ||
+            strcmp(header->samples[samples->indices[i]], samples->names[i]) != 0) goto changed;
+    }
+    if (samples->count == samples->original_count) return 1;
+    /* HTSlib 1.24 drops keep_samples when an exclusion list selects zero.
+     * Its explicit NULL selector retains the empty bitmap needed to strip
+     * FORMAT in bcf_read and indexed bcf_subset_format. */
+    const char *selector = samples->count == 0 ? NULL
+        : samples->selector ? samples->selector : "-";
+    int ret = bcf_hdr_set_samples(header, selector, 0);
+    if (ret < 0) {
+        snprintf(error, error_size, "BCF samples: out of memory applying sample selection");
+        return 0;
+    }
+    if (ret > 0 || bcf_hdr_nsamples(header) != samples->count) goto changed;
+    for (int i = 0; i < samples->count; i++) {
+        if (strcmp(header->samples[i], samples->names[i]) != 0) goto changed;
+    }
+    return 1;
+changed:
+    snprintf(error, error_size, "BCF samples: header sample dictionary changed since bind");
+    return 0;
+}
 
 void duckhts_bcf_scan_close(duckhts_bcf_scan_t *scan) {
     if (!scan) return;

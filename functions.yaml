@@ -351,12 +351,36 @@
       "name": "read_bcf",
       "kind": "table",
       "category": "Readers",
-      "signature": "read_bcf(path, region := NULL, index_path := NULL, tidy_format := FALSE, additional_csq_column_types := NULL, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null')",
+      "signature": "read_bcf(path, region := NULL, index_path := NULL, tidy_format := FALSE, additional_csq_column_types := NULL, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null', samples := NULL)",
       "returns": "table",
       "r_wrapper": "rduckhts_bcf",
-      "description": "Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, optional bcftools-style CSQ type overrides, explicit scan_mode control ('auto' or full-file 'sequential'), optional htslib decompression worker threads via decompression_threads (default 0 for single-threaded reads), and decode_error_policy ('null', 'warn', or 'error') for corrupt BCF header-vs-payload decode mismatches. The reader retains worker-owned INFO/FORMAT/GT buffers and record-owned annotation across output chunks; tidy sample rows repeat the complete record annotation. Comma-separated indexed regions use htslib's native multi-region iterator and emit a record once when requested regions overlap. NULL or an empty region string means no filter; empty comma-separated items and malformed known-contig intervals are errors. Unknown contigs retain HTSlib's skip policy. Automatic and region plans retain the parsed bind-time index, including remote and explicit index_path inputs: later index removal, corruption, or replacement leaves the original scan offsets and counts unchanged. Supply a matching initial data/index pair and keep data/header contents unchanged for the prepared plan's lifetime; this is not a data-file snapshot or validation of an initially unrelated index. Reprepare to use a new index. With no usable index at bind, auto streams and region queries error. Sequential mode does not load an index; index-only counts do not validate file contents.",
+      "description": "Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, optional bcftools-style CSQ type overrides, explicit scan_mode control ('auto' or full-file 'sequential'), optional htslib decompression worker threads via decompression_threads (default 0 for single-threaded reads), and decode_error_policy ('null', 'warn', or 'error') for corrupt BCF header-vs-payload decode mismatches. The reader retains worker-owned INFO/FORMAT/GT buffers and record-owned annotation across output chunks; tidy sample rows repeat the complete record annotation. Comma-separated indexed regions use htslib's native multi-region iterator and emit a record once when requested regions overlap. NULL or an empty region string means no filter; empty comma-separated items and malformed known-contig intervals are errors. Unknown contigs retain HTSlib's skip policy. Automatic and region plans retain the parsed bind-time index, including remote and explicit index_path inputs: later index removal, corruption, or replacement leaves the original scan offsets and counts unchanged. Supply a matching initial data/index pair and keep data/header contents unchanged for the prepared plan's lifetime; this is not a data-file snapshot or validation of an initially unrelated index. Reprepare to use a new index. With no usable index at bind, auto streams and region queries error. Sequential mode does not load an index; index-only counts do not validate file contents. samples uses HTSlib selectors: NULL or '-' keeps all, an empty string keeps none, comma-separated names include samples, and a leading '^' excludes names. Unknown names error; selection is pushed into each worker header before record decoding and retains header order. read_bcf_samples() maps original-header sample indices to names.",
       "examples": [
         "SELECT CHROM, POS, REF, ALT FROM read_bcf('vcf_file.bcf') LIMIT 5;"
+      ]
+    },
+    {
+      "name": "read_geno",
+      "kind": "table",
+      "category": "Readers",
+      "signature": "read_geno(path, region := NULL, index_path := NULL, samples := NULL, non_reference_only := FALSE, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null')",
+      "returns": "table",
+      "r_wrapper": "rduckhts_geno",
+      "description": "Read one typed genotype row per VCF/BCF record: record_index UBIGINT, CHROM, POS, ID, REF, ALT VARCHAR[], and calls STRUCT(sample_index UINTEGER, alleles INTEGER[], phase_before BOOLEAN[], phase_set BIGINT)[]. Sample indices are zero-based original-header positions; join read_bcf_samples() from the same unchanged file for names. GT preserves arbitrary ploidy, nullable missing allele slots and HTSlib's decoded per-slot phase flags, including its leading-slot convention for VCF versions before 4.4. Absent GT has NULL allele and phase lists; absent PS is NULL. FORMAT/PS must declare Number=1,Type=Integer; header/type/width mismatches follow decode_error_policy, while physical read errors and OOM always fail. non_reference_only removes calls with no called ALT, never records, and does not infer phase. samples shares read_bcf's HTSlib comma-list/exclusion selectors. Full scans stream in input order independent of index availability, with one scan worker and separately configured htslib decompression threads. record_index is a zero-based scan-local ordinal, not a persistent file locator; indexed region unions restart at zero in HTSlib iterator order. Use explicit ORDER BY record_index when consuming order. Comma-separated overlapping regions visit a physical record once while preserving distinct duplicate records. Sequential mode rejects regions. Only projected calls decode GT/PS; zero selected samples yields an empty calls list on every row.",
+      "examples": [
+        "SELECT record_index, CHROM, POS, unnest(calls) AS call FROM read_geno('geno_calls.bcf', non_reference_only := TRUE) ORDER BY record_index;"
+      ]
+    },
+    {
+      "name": "read_bcf_samples",
+      "kind": "table",
+      "category": "Readers",
+      "signature": "read_bcf_samples(path, samples := NULL)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_bcf_samples",
+      "description": "Read the typed VCF/BCF sample catalog as sample_index UINTEGER and sample_name VARCHAR without reading records. Indices are zero-based positions in the original header, remain stable under selection and join read_geno calls from the same unchanged file. NULL or '-' selects all; an empty string selects none; comma-separated names include samples; '^' excludes them. Names are validated by HTSlib, selected rows retain header order, and unknown names error.",
+      "examples": [
+        "SELECT * FROM read_bcf_samples('geno_calls.bcf', samples := '^S1') ORDER BY sample_index;"
       ]
     },
     {

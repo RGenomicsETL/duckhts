@@ -1,5 +1,8 @@
 # duckhtsbench 0.0.0.9000
 
+- stage an all-sample HPRC regional genotype cohort as matching VCF.gz/BCF
+  representations, with source-version provenance and network-free staging tests
+
 - pin and stage committed small BCF/VCF scan benchmark fixtures and indexes
   through the registry, with byte/hash validation and network-free staging tests
 

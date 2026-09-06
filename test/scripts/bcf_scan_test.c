@@ -7,6 +7,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "../../src/include/bcf_scan.h"
+#include "../../src/include/bcf_genotypes.h"
 
 static const char *rows[] = {
     "chr1\t10\tknown\tA\tC\t60\tPASS\tDP=7\tGT\t0/1\t1/1\n",
@@ -73,13 +74,18 @@ static void genotypes(const char *path, const duckhts_bcf_index_t *index) {
         {{2,4},{4,4}}, {{0,4},{2,2}}, {{4,4},{0,0}}, {{5,0},{3,5}}
     };
     const char *ids[] = {"known", "duplicate", "allele", "last"};
-    const char *samples[] = {"-", "S1", "S2", NULL};
-    for (int selection = 0; selection < 4; selection++) for (int indexed = 0; indexed < 2; indexed++) {
+    const char *samples[] = {"-", "S1", "S2", "", "^S1,S2", "S2,S1,S2", "^S1", NULL};
+    const int selected_counts[] = {2, 1, 1, 0, 0, 2, 1, 2};
+    for (int selection = 0; selection < 8; selection++) for (int indexed = 0; indexed < 2; indexed++) {
         duckhts_bcf_scan_t reader = {0};
         char error[512];
         assert(duckhts_bcf_scan_open(&reader, path, index, 0,
             DUCKHTS_HTS_IO_PROFILE_METADATA, "test", error, sizeof(error)));
-        assert(bcf_hdr_set_samples(reader.hdr, samples[selection], 0) == 0);
+        duckhts_bcf_samples_t selected = {0};
+        assert(duckhts_bcf_samples_build(&selected, reader.hdr, samples[selection], error, sizeof(error)));
+        assert(selected.original_count == 2 && selected.count == selected_counts[selection]);
+        assert(bcf_hdr_nsamples(reader.hdr) == 2); // Building a plan does not mutate its input.
+        assert(duckhts_bcf_samples_apply(&selected, reader.hdr, error, sizeof(error)));
         if (indexed) {
             char *regions[] = {"chr1", "chr3", "chr3:20-20"};
             assert(duckhts_bcf_scan_regions(&reader, regions, 3, error, sizeof(error)));
@@ -87,6 +93,7 @@ static void genotypes(const char *path, const duckhts_bcf_index_t *index) {
         bcf1_t *record = bcf_init();
         assert(record);
         int32_t *gt = NULL;
+        duckhts_bcf_genotypes_t typed = {0};
         int capacity = 0, ret;
         unsigned counts[4] = {0};
         while ((ret = duckhts_bcf_scan_next(&reader, record)) >= 0) {
@@ -96,7 +103,7 @@ static void genotypes(const char *path, const duckhts_bcf_index_t *index) {
             assert(row < 4);
             counts[row]++;
             int nsamples = bcf_hdr_nsamples(reader.hdr);
-            assert(nsamples == (selection == 0 ? 2 : selection == 3 ? 0 : 1));
+            assert(nsamples == selected_counts[selection]);
             assert(record->n_sample == (unsigned)nsamples);
             if (!nsamples) continue; // A site still exists with no selected calls.
             int header_id = bcf_hdr_id2int(reader.hdr, BCF_DT_ID, "GT");
@@ -104,11 +111,18 @@ static void genotypes(const char *path, const duckhts_bcf_index_t *index) {
                 header_id, BCF_HT_STR, "test", error, sizeof(error)));
             int values = bcf_get_genotypes(reader.hdr, record, &gt, &capacity);
             assert(values > 0 && values % nsamples == 0);
+            assert(duckhts_bcf_genotypes_decode(&typed, reader.hdr, record,
+                DUCKHTS_BCF_DECODE_ERROR, error, sizeof(error)));
+            assert(typed.samples == nsamples && !typed.ps_present);
+            assert(typed.gt_stride == values / nsamples);
+            assert(memcmp(typed.gt, gt, (size_t)values * sizeof(*gt)) == 0);
             assert(duckhts_bcf_check_format_width("test", "GT", reader.hdr, record,
                 values, nsamples, error, sizeof(error)));
             int stride = values / nsamples;
             for (int sample = 0; sample < nsamples; sample++) {
-                int original = selection == 0 ? sample : selection - 1;
+                int original = selected_counts[selection] == 2 ? sample : selection == 1 ? 0 : 1;
+                assert(selected.indices[sample] == (unsigned)original);
+                assert(strcmp(selected.names[sample], original ? "S2" : "S1") == 0);
                 assert(strcmp(reader.hdr->samples[sample], original ? "S2" : "S1") == 0);
                 int slots = row == 3 && original == 0 ? 1 : 2;
                 assert(stride >= slots);
@@ -127,9 +141,101 @@ static void genotypes(const char *path, const duckhts_bcf_index_t *index) {
         }
         assert(ret == -1 && counts[0] == 1 && counts[1] == 2 && counts[2] == 1 && counts[3] == 1);
         free(gt);
+        duckhts_bcf_genotypes_destroy(&typed);
         bcf_destroy(record);
         duckhts_bcf_scan_close(&reader);
+        duckhts_bcf_samples_destroy(&selected);
+        duckhts_bcf_samples_destroy(&selected);
     }
+}
+
+static void genotype_values(void) {
+    bcf_hdr_t *header = bcf_hdr_init("w");
+    bcf1_t *record = bcf_init();
+    assert(header && record);
+    assert(bcf_hdr_append(header, "##contig=<ID=chrG,length=100>") == 0);
+    assert(bcf_hdr_append(header, "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">") == 0);
+    assert(bcf_hdr_append(header, "##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set\">") == 0);
+    assert(bcf_hdr_add_sample(header, "S1") == 0 && bcf_hdr_add_sample(header, "S2") == 0);
+    assert(bcf_hdr_add_sample(header, NULL) == 0 && bcf_hdr_sync(header) == 0);
+    record->rid = 0;
+    record->pos = 0;
+    kstring_t alleles = KS_INITIALIZE;
+    assert(kputc('A', &alleles) >= 0);
+    for (int i = 1; i <= 20000; i++) assert(ksprintf(&alleles, ",<ALT%d>", i) >= 0);
+    assert(bcf_update_alleles_str(header, record, alleles.s) == 0);
+    ks_free(&alleles);
+    int32_t gt[] = {bcf_gt_phased(20000), 1, bcf_gt_unphased(1), bcf_gt_unphased(0),
+                    bcf_gt_phased(1), bcf_int32_vector_end, bcf_int32_vector_end, bcf_int32_vector_end};
+    int32_t ps[] = {INT32_MAX, bcf_int32_missing};
+    assert(bcf_update_genotypes(header, record, gt, 8) == 0);
+    assert(bcf_update_format_int32(header, record, "PS", ps, 2) == 0);
+    assert(bcf_get_fmt(header, record, "GT")->type == BCF_BT_INT32);
+    duckhts_bcf_genotypes_t values = {0};
+    char error[512];
+    assert(duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_ERROR, error, sizeof(error)));
+    assert(values.samples == 2 && values.gt_stride == 4 && values.ps_present);
+    assert(memcmp(values.gt, gt, sizeof(gt)) == 0 && memcmp(values.ps, ps, sizeof(ps)) == 0);
+    assert(duckhts_bcf_genotype_ploidy(values.gt, 4) == 4);
+    assert(duckhts_bcf_genotype_ploidy(values.gt + 4, 4) == 1);
+    assert(duckhts_bcf_genotype_has_alt(values.gt, 4));
+    int32_t no_alt[] = {0, 1, bcf_gt_unphased(0)};
+    assert(!duckhts_bcf_genotype_has_alt(no_alt, 3));
+    int32_t wide_ps[] = {10, 11, 20, bcf_int32_vector_end};
+    assert(bcf_update_format_int32(header, record, "PS", wide_ps, 4) == 0);
+    assert(!duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_ERROR, error, sizeof(error)));
+    assert(strstr(error, "one value per sample"));
+    assert(duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_NULL, error, sizeof(error)));
+    assert(values.gt_stride == 4 && !values.ps_present);
+    const char *strings[] = {"10", "20"};
+    assert(bcf_update_format_string(header, record, "PS", strings, 2) == 0);
+    assert(!duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_ERROR, error, sizeof(error)));
+    assert(strstr(error, "encoded BCF type CHAR"));
+    assert(duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_NULL, error, sizeof(error)));
+    assert(values.gt_stride == 4 && !values.ps_present);
+    assert(bcf_update_format_int32(header, record, "PS", ps, 2) == 0);
+    // bcf_get_format_values() stops at the first vector-end and fills the
+    // remaining decoded slots with vector-end, even if raw padding has values.
+    // The typed view follows that HTSlib contract, not a second raw decoder.
+    gt[1] = bcf_int32_vector_end;
+    assert(bcf_update_genotypes(header, record, gt, 8) == 0);
+    assert(duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_ERROR, error, sizeof(error)));
+    assert(values.gt_stride == 4 && duckhts_bcf_genotype_ploidy(values.gt, 4) == 1);
+    assert(values.gt[1] == bcf_int32_vector_end && values.gt[2] == bcf_int32_vector_end &&
+           values.gt[3] == bcf_int32_vector_end);
+    gt[0] = bcf_gt_phased(20001); // Index outside this record's ALT dictionary.
+    assert(bcf_update_genotypes(header, record, gt, 8) == 0);
+    assert(!duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_ERROR, error, sizeof(error)));
+    assert(strstr(error, "invalid FORMAT/GT allele"));
+    assert(duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_NULL, error, sizeof(error)));
+    assert(values.gt_stride == 0 && values.ps_present);
+    bcf_fmt_t *format = bcf_get_fmt(header, record, "GT");
+    int width = format->n;
+    format->n = INT32_MAX; // Refuse signed count multiplication before HTSlib decoding.
+    assert(!duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_NULL, error, sizeof(error)));
+    assert(strstr(error, "exceeds the supported decoded-value capacity"));
+    format->n = width;
+    assert(bcf_update_format_string(header, record, "GT", strings, 2) == 0);
+    assert(!duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_ERROR, error, sizeof(error)));
+    assert(strstr(error, "encoded BCF type CHAR"));
+    assert(duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_NULL, error, sizeof(error)));
+    assert(values.gt_stride == 0 && values.ps_present);
+    duckhts_bcf_samples_t selection = {0};
+    assert(duckhts_bcf_samples_build(&selection, header, "S2", error, sizeof(error)));
+    char *reversed[] = {"S2", "S1"};
+    int mapping[2];
+    bcf_hdr_t *changed = bcf_hdr_subset(header, 2, reversed, mapping);
+    assert(changed && !duckhts_bcf_samples_apply(&selection, changed, error, sizeof(error)));
+    assert(strstr(error, "dictionary changed since bind"));
+    bcf_hdr_destroy(changed);
+    duckhts_bcf_samples_destroy(&selection);
+    assert(!duckhts_bcf_samples_build(&selection, header, "S2,absent", error, sizeof(error)));
+    assert(strstr(error, "selector item 2 is not in the header"));
+    assert(!selection.names && !selection.indices && !selection.selector);
+    duckhts_bcf_genotypes_destroy(&values);
+    duckhts_bcf_genotypes_destroy(&values);
+    bcf_destroy(record);
+    bcf_hdr_destroy(header);
 }
 
 static void literal_contigs(void) {
@@ -309,6 +415,7 @@ int main(int argc, char **argv) {
         assert(unlink(index_path) == 0);
     }
     decode_errors();
+    genotype_values();
     literal_contigs();
     puts("BCF scanner: CSI/TBI, shifted offsets, 7200 concurrent exact-row scans, selected raw GT and decode errors: OK");
     return 0;

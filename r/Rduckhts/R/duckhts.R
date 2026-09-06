@@ -25,6 +25,9 @@
 #'   \code{"warn"} emits a DuckHTS warning and returns NULL, and
 #'   \code{"error"} raises a DuckDB/R error.
 #' @param overwrite Logical. If TRUE, overwrites existing table
+#' @param samples Optional HTSlib sample selector: `NULL` or `"-"` keeps all,
+#'   `""` keeps none, comma-separated names include samples, and a leading
+#'   `"^"` excludes them. Unknown names error; selected samples retain header order.
 #'
 #' @return Invisible TRUE on success
 #'
@@ -50,7 +53,8 @@ rduckhts_bcf <- function(
   scan_mode = NULL,
   decompression_threads = 0,
   decode_error_policy = "null",
-  overwrite = FALSE
+  overwrite = FALSE,
+  samples = NULL
 ) {
   if (!missing(table_name) && !is.null(table_name)) {
     if (DBI::dbExistsTable(con, table_name) && !overwrite) {
@@ -66,6 +70,7 @@ rduckhts_bcf <- function(
   }
 
   params <- list()
+  if (!is.null(samples)) params$samples <- sql_quote_string(con, samples)
   if (!is.null(region)) {
     params$region <- sql_quote_string(con, region)
   }
@@ -2850,6 +2855,7 @@ rduckhts_bam_multi <- function(
 #' @param scan_mode Optional scan mode (`"auto"` or `"sequential"`).
 #' @param .params Optional data.frame with per-file parameter overrides.
 #' @param overwrite Logical; if \code{TRUE}, replace an existing table.
+#' @param samples Optional HTSlib sample-selector string, as in [rduckhts_bcf()].
 #' @return Invisible \code{TRUE} on success.
 #' @export
 rduckhts_bcf_multi <- function(
@@ -2863,9 +2869,14 @@ rduckhts_bcf_multi <- function(
   scan_mode = NULL,
   decompression_threads = 0,
   .params = NULL,
-  overwrite = FALSE
+  overwrite = FALSE,
+  samples = NULL
 ) {
   params <- list()
+  if (!is.null(samples)) {
+    sql_quote_string(con, samples) # Validate before composing per-file SQL.
+    params$samples <- samples
+  }
   if (!is.null(region)) {
     params$region <- region
   }

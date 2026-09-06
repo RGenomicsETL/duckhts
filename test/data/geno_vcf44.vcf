@@ -1,0 +1,9 @@
+##fileformat=VCFv4.4
+##source=DuckHTS_synthetic_explicit_phase_markers
+##contig=<ID=chrG,length=1000>
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1	S2
+chrG	10	prefix	A	C	.	PASS	.	GT	/0|1	|0/1
+chrG	20	haploid	A	C	.	PASS	.	GT	/0	|1
+chrG	30	missing	A	C	.	PASS	.	GT	|./1	/.|1
+chrG	40	polyploid	A	C	.	PASS	.	GT	|0/1|.	/1|0|1

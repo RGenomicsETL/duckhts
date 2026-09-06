@@ -1,0 +1,13 @@
+##fileformat=VCFv4.2
+##FILTER=<ID=PASS,Description="All filters passed">
+##source=duckhts/test/scripts/vcfpp.R
+##contig=<ID=chrG>
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=PS,Number=1,Type=Integer,Description="Phase set">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1	S2
+chrG	10	mixed	A	C,G,T	.	PASS	.	GT:PS	0|1/2|.:10	./1:.
+chrG	20	missing	G	T	.	PASS	.	GT	.|.	0/0
+chrG	20	missing	G	T	.	PASS	.	GT	.|.	0/0
+chrG	30	absent_gt	C	A	.	PASS	.	PS	30	.
+chrG	40	absent_format	T	.	.	PASS	.	.	.	.
+chrG	50	large	A	C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T,C,G,T	.	PASS	.	GT:PS	200|1:2147483647	1:-1

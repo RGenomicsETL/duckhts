@@ -475,7 +475,7 @@ message(STATUS "htslib link libs: ${HTSLIB_LINK_LIBS}")
 # Test-only copied-API interposition; never linked into the extension/package.
 if(UNIX AND NOT DUCKDB_WASM_EXTENSION)
     add_executable(duckhts_bcf_scan_test EXCLUDE_FROM_ALL
-        test/scripts/bcf_scan_test.c src/bcf_scan.c src/region_list.c)
+        test/scripts/bcf_scan_test.c src/bcf_scan.c src/bcf_genotypes.c src/region_list.c)
     target_compile_features(duckhts_bcf_scan_test PRIVATE c_std_11)
     target_compile_options(duckhts_bcf_scan_test PRIVATE -UNDEBUG)
     target_include_directories(duckhts_bcf_scan_test PRIVATE ${HTSLIB_SRC_DIR})

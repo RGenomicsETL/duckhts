@@ -22,6 +22,7 @@ test_installed_reader_allocations <- function(probe_path) {
   disarm <- function() invisible(.C("reader_alloc_disarm", PACKAGE = shim[["name"]]))
   fixtures <- c(read_bcf = "bcf_cache_lifecycle.vcf", read_bam = "bam_read_groups.sam",
                 read_bcf_indexed = "bcf_scan_contigs.partial.vcf.gz",
+                read_geno = "geno_calls.bcf", read_bcf_samples = "geno_calls.vcf.gz",
                 read_bam_materialize = "bam_materialize.sam",
                 read_fasta = "region_names.fa", read_fastq = "r1.fq")
   failures <- 0L
@@ -36,8 +37,9 @@ test_installed_reader_allocations <- function(probe_path) {
     mode <- if (reader == "read_bcf_indexed") "auto" else "sequential"
     if (reader == "read_bcf_indexed")
       options <- paste0(options, ", index_path := ", dbQuoteString(con, paste0(path, ".index.tbi")))
-    sql <- sprintf("SELECT * FROM %s(%s, scan_mode := '%s'%s) ORDER BY ALL",
-                   function_name, dbQuoteString(con, path), mode, options)
+    scan_option <- if (function_name == "read_bcf_samples") "" else sprintf(", scan_mode := '%s'", mode)
+    sql <- sprintf("SELECT * FROM %s(%s%s%s) ORDER BY ALL",
+                   function_name, dbQuoteString(con, path), scan_option, options)
     arm(0L)
     expected <- dbGetQuery(con, sql)
     dbGetQuery(con, "SELECT 4242")
@@ -74,10 +76,19 @@ test_installed_reader_allocations <- function(probe_path) {
                              unsafe_access = 0L, PACKAGE = shim[["name"]])
   list_disarm <- function() invisible(.C("reader_list_disarm", PACKAGE = shim[["name"]]))
   on.exit(list_disarm(), add = TRUE, after = FALSE)
+  queries <- vapply(seq_along(projections), function(i)
+    sprintf("SELECT %s FROM read_bam(%s, %s, decompression_threads := 0)",
+            projections[[i]], path, options[[i]]), character(1))
+  for (fixture in c("geno_calls.bcf", "bcf_cache_lifecycle.vcf", "mapping_number_families.vcf")) {
+    path <- dbQuoteString(con, system.file("extdata", fixture, package = "Rduckhts"))
+    queries <- c(queries, sprintf("SELECT * FROM read_bcf(%s, scan_mode := 'sequential')", path),
+                 sprintf("SELECT * FROM read_bcf(%s, tidy_format := true, scan_mode := 'sequential')", path))
+    if (fixture == "geno_calls.bcf") for (projection in c("ALT", "calls", "*")) {
+      queries <- c(queries, sprintf("SELECT %s FROM read_geno(%s)", projection, path))
+    }
+  }
   failures <- 0L
-  for (i in seq_along(projections)) {
-    sql <- sprintf("SELECT %s FROM read_bam(%s, %s, decompression_threads := 0)",
-                   projections[[i]], path, options[[i]])
+  for (sql in queries) {
     for (kind in 1:2) {
       list_arm(kind, 0L)
       expected <- dbGetQuery(con, sql)
@@ -97,7 +108,8 @@ test_installed_reader_allocations <- function(probe_path) {
       }
     }
   }
-  cat("Installed R BAM list failures:", failures, "errors, no post-failure data access, exact DBI recovery: OK\n")
+  cat("Installed R BAM/BCF/genotype list failures:", failures,
+      "errors, no post-failure data access, exact DBI recovery: OK\n")
 }
 
 args <- commandArgs(trailingOnly = TRUE)

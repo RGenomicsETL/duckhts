@@ -328,6 +328,25 @@ manifest[[length(manifest) + 1]] <- render_fixture(
 # ---------------------------------------------------------------------------
 
 manifest[[length(manifest) + 1]] <- render_fixture(
+  filename = "geno_calls.vcf",
+  section = "mapping",
+  purpose = "Record-major GT/PS with mixed phase, partial missing, absent GT, duplicate sites and wide allele indices",
+  contigs = "chrG",
+  format_defs = list(tag_def("GT", "1", "String", "Genotype"),
+                     tag_def("PS", "1", "Integer", "Phase set")),
+  samples = c("S1", "S2"),
+  records = c(
+    "chrG\t10\tmixed\tA\tC,G,T\t.\tPASS\t.\tGT:PS\t0|1/2|.:10\t./1:.",
+    "chrG\t20\tmissing\tG\tT\t.\tPASS\t.\tGT\t.|.\t0/0",
+    "chrG\t20\tmissing\tG\tT\t.\tPASS\t.\tGT\t.|.\t0/0",
+    "chrG\t30\tabsent_gt\tC\tA\t.\tPASS\t.\tPS\t30\t.",
+    "chrG\t40\tabsent_format\tT\t.\t.\tPASS\t.\t.\t.\t.",
+    paste0("chrG\t50\tlarge\tA\t", paste(rep(c("C", "G", "T"), 70L), collapse = ","),
+           "\t.\tPASS\t.\tGT:PS\t200|1:2147483647\t1:-1")
+  )
+)
+
+manifest[[length(manifest) + 1]] <- render_fixture(
   filename = "bcf_filter_list_regression.vcf",
   section = "regression",
   purpose = "read_bcf FILTER list-materialization regression for multi-entry and PASS values",
