@@ -34,7 +34,9 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="1.5.1.9000-0.1.5" id="rduckhts-1519000-015">Rduckhts 1.5.1.9000-0.1.5<a class="anchor" aria-label="anchor" href="#rduckhts-1519000-015"></a></h2>
-<ul><li><p>add bundled-model regression coverage for rejecting short CDS sequences before registry publication and continuing to use valid models afterward</p></li>
+<ul><li><p>expose bundled <code>duckvep_breakend_geometry()</code> through DBI for typed BND ALT preparation, including orientation, exact mate names and replacement sequence</p></li>
+<li><p>preserve the bundled DuckVEP paired-BND endpoint consequence union when one endpoint contributes truncation and the other defaults to intergenic</p></li>
+<li><p>add bundled-model regression coverage for rejecting short CDS sequences before registry publication and continuing to use valid models afterward</p></li>
 <li><p>preserve records on literal colon-bearing contigs in bundled indexed BCF/VCF full scans, including duplicate records. Explicit region requests still use HTSlib brace quoting to distinguish contig names from coordinates</p></li>
 <li><p>pin bundled BCF/VCF indexes at preparation for full and region scans. Removing or replacing an index afterward preserves the original complete rows instead of raising a worker-reload error or losing records. Keep data/header contents unchanged and supply a matching initial index; reprepare to use a new index. Explicit sequential mode continues to stream without an index</p></li>
 <li><p>preserve bundled VCF records on undeclared contigs when index_path points to a non-colocated Tabix index. Full scans use the index’s contig dictionary, retain duplicate records and avoid tasks for header-only empty contigs</p></li>
