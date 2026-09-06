@@ -254,6 +254,43 @@ partial-codon, UTR-spanning MNV, or later-phase substitution/indel sites. This o
 edit/HGVS control does not measure those corrections; targeted and production-density
 throughput remain unmeasured. The byte total is not a full-row fingerprint.
 
+## Unified kernel constructor control
+
+Kernel 0.19.0 removes the forwarding model constructor and retains one entry point
+with an optional interval-feature view. It does not change the validator body or
+annotation logic. The ordinary indel/HGVS workload above was rerun with the same
+inputs, output denominator, thread count, affinity and declared software environment.
+
+```{r model-constructor-controls}
+constructor_revisions <- c("9b1ded85df0baacaf080fcc91608af242c612ca1",
+  "1175272537a8a6cc0842565f7cd6164cf4deb3e2", "c57100b9c82a36f7e6f761a4b3d2f79838cdd132")
+constructor_controls <- history[history$source_revision %in% constructor_revisions &
+  history$workload == "fixture_one_transcript_sorted_indels", ]
+stopifnot(nrow(constructor_controls) == 3L,
+  !anyDuplicated(constructor_controls$source_revision))
+constructor_controls <- constructor_controls[match(constructor_revisions,
+  constructor_controls$source_revision), ]
+stopifnot(nrow(constructor_controls) == 3L, !anyNA(constructor_controls$source_revision),
+  all(vapply(same_workload, function(field)
+    all(constructor_controls[[field]] == cds_guard[[field]][2L]), TRUE)),
+  constructor_controls$extension_sha256[[2L]] == constructor_controls$extension_sha256[[3L]])
+knitr::kable(data.frame(
+  revision = constructor_controls$revision,
+  archive_pin_acquisition = c("not running", "running", "not running"),
+  median_seconds = sprintf("%.3f", constructor_controls$median_seconds),
+  range_seconds = sprintf("%.3f–%.3f", constructor_controls$min_seconds, constructor_controls$max_seconds),
+  change_vs_9b1ded = sprintf("%+.2f%%", 100 *
+    (constructor_controls$median_seconds / constructor_controls$median_seconds[[1L]] - 1))
+), row.names = FALSE)
+```
+
+The `11752725` run overlapped a complete upstream cache transfer and hash calculation.
+The single `c57100b9` follow-up ran after that process ended and before cache restaging
+started. Both observations are retained; those two revisions produce the identical
+extension SHA-256. The background I/O differs, so their timing difference is not a code
+speedup or a no-regression certificate. Model loading is untimed: this control does not
+measure constructor cost, cache acquisition throughput or peak memory.
+
 ## Annotation-dense transcript distance and ordered parallel partitions
 
 ```{r dense-threading}

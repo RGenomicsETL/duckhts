@@ -192,6 +192,8 @@ insertion order; they remain only as historical measurements.
 | 2026-09-06 | 89f97c2e | fixture_one_transcript_sorted_indels                             | hgvs        |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       1.283 |          1.297 |       1.300 |              771010 |         1297.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 771,010                |
 | 2026-09-06 | af782880 | fixture_one_transcript_sorted_indels                             | hgvs        |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       1.287 |          1.301 |       1.306 |              768640 |         1301.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 768,640                |
 | 2026-09-06 | 9b1ded85 | fixture_one_transcript_sorted_indels                             | hgvs        |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       1.253 |          1.264 |       1.270 |              791139 |         1264.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 791,139                |
+| 2026-09-06 | 11752725 | fixture_one_transcript_sorted_indels                             | hgvs        |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       1.285 |          1.289 |       1.292 |              775795 |         1289.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 775,795                |
+| 2026-09-06 | c57100b9 | fixture_one_transcript_sorted_indels                             | hgvs        |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       1.256 |          1.261 |       1.273 |              793021 |         1261.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 793,021                |
 
 Each pass consumes every staged input and checks output cardinality plus
 either the rendered consequence-byte total or the numeric
@@ -250,6 +252,29 @@ exercises terminal partial-codon, UTR-spanning MNV, or later-phase
 substitution/indel sites. This ordinary CDS edit/HGVS control does not
 measure those corrections; targeted and production-density throughput
 remain unmeasured. The byte total is not a full-row fingerprint.
+
+## Unified kernel constructor control
+
+Kernel 0.19.0 removes the forwarding model constructor and retains one
+entry point with an optional interval-feature view. It does not change
+the validator body or annotation logic. The ordinary indel/HGVS workload
+above was rerun with the same inputs, output denominator, thread count,
+affinity and declared software environment.
+
+| revision | archive_pin_acquisition | median_seconds | range_seconds | change_vs_9b1ded |
+|:---------|:------------------------|:---------------|:--------------|:-----------------|
+| 9b1ded85 | not running             | 1.264          | 1.253–1.270   | +0.00%           |
+| 11752725 | running                 | 1.289          | 1.285–1.292   | +1.98%           |
+| c57100b9 | not running             | 1.261          | 1.256–1.273   | -0.24%           |
+
+The `11752725` run overlapped a complete upstream cache transfer and
+hash calculation. The single `c57100b9` follow-up ran after that process
+ended and before cache restaging started. Both observations are
+retained; those two revisions produce the identical extension SHA-256.
+The background I/O differs, so their timing difference is not a code
+speedup or a no-regression certificate. Model loading is untimed: this
+control does not measure constructor cost, cache acquisition throughput
+or peak memory.
 
 ## Annotation-dense transcript distance and ordered parallel partitions
 
