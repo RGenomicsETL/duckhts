@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- add a seeded executable Haplosaurus differential for native multi-edit CDS
+  mutation and translation, comparing complete sequences, frame flags and
+  contributor/sample counts. This developer gate does not certify the pending
+  public phased executor, compound SO/HGVS or arbitrary-ploidy compatibility
+
 - preserve literal colon-bearing contig names in indexed BCF/VCF full scans;
   internal contig tasks no longer parse dictionary names as region expressions.
   Share file/header/iterator ownership and decode diagnostics in a host-neutral
