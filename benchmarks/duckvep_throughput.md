@@ -187,6 +187,7 @@ insertion order; they remain only as historical measurements.
 | 2026-09-06 | 25477d3b | fixture_one_transcript_sorted                                    | rich        |       1 |                1 |                5000 | 10,000,000 | 1           | 2         | 0                   | 10,000,000     |      3 |       3.308 |          3.321 |       3.334 |             3011141 |          332.1 | 13th Gen Intel(R) Core(TM) i5-13500 | 0-19         | 3,011,141              |
 | 2026-09-06 | da0c16d4 | fixture_one_transcript_sorted                                    | rich        |       1 |                1 |                5000 | 10,000,000 | 1           | 2         | 0                   | 10,000,000     |      3 |       3.386 |          3.394 |       3.440 |             2946376 |          339.4 | 13th Gen Intel(R) Core(TM) i5-13500 | 0-19         | 2,946,376              |
 | 2026-09-06 | 35bfb858 | fixture_one_transcript_sorted_indels                             | hgvs        |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       1.255 |          1.262 |       1.270 |              792393 |         1262.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 792,393                |
+| 2026-09-06 | 99a0c816 | fixture_one_transcript_sorted_indels                             | hgvs        |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       1.252 |          1.260 |       1.265 |              793651 |         1260.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 793,651                |
 
 Each pass consumes every staged input and checks output cardinality plus
 either the rendered consequence-byte total or the numeric
@@ -228,6 +229,17 @@ intervening change. It exercises CDS edits and HGVS but not the newly
 corrected terminal partial-codon/UTR sites; a targeted throughput
 measurement for those sites is still missing. The byte total is not a
 full-row fingerprint.
+
+The shared UTR/CDS substitution evaluator at 99a0c816 reran the same
+one-million-input/one-million-output indel/HGVS control: five passes,
+one DuckDB thread pinned to CPU 2, 26000000 rendered HGVS/status bytes.
+Median time was 1.260 seconds (range 1.252–1.265), -0.16% against the
+nearest identical workload at `35bfb85`. This observed single-run
+comparison does not establish a speedup or no regression. No checked-in
+throughput benchmark exercises UTR-spanning MNVs: this is an ordinary
+CDS edit/HGVS control, not a measurement of the corrected start-codon
+predicates. Targeted UTR-spanning and production-density throughput
+remain unmeasured.
 
 ## Annotation-dense transcript distance and ordered parallel partitions
 

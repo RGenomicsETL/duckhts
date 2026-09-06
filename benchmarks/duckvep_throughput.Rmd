@@ -227,6 +227,27 @@ change. It exercises CDS edits and HGVS but not the newly corrected terminal
 partial-codon/UTR sites; a targeted throughput measurement for those sites is still
 missing. The byte total is not a full-row fingerprint.
 
+```{r utr-substitution-control}
+utr_substitution <- history[history$source_revision ==
+  "99a0c816d1e9a30331a6fef9a48860ed53e2e17f" &
+  history$workload == "fixture_one_transcript_sorted_indels", ]
+stopifnot(nrow(utr_substitution) == 1L,
+  all(vapply(same_workload, function(field)
+    identical(utr_substitution[[field]], terminal_window[[field]]), TRUE)))
+```
+
+The shared UTR/CDS substitution evaluator at `r utr_substitution$revision` reran
+the same one-million-input/one-million-output indel/HGVS control: five passes,
+one DuckDB thread pinned to CPU 2, `r utr_substitution$checksum_value` rendered
+HGVS/status bytes. Median time was `r sprintf("%.3f", utr_substitution$median_seconds)`
+seconds (range `r sprintf("%.3f", utr_substitution$min_seconds)`–`r sprintf("%.3f", utr_substitution$max_seconds)`),
+`r sprintf("%+.2f%%", 100 * (utr_substitution$median_seconds / terminal_window$median_seconds - 1))`
+against the nearest identical workload at `35bfb85`. This observed single-run
+comparison does not establish a speedup or no regression. No checked-in throughput
+benchmark exercises UTR-spanning MNVs: this is an ordinary CDS edit/HGVS control,
+not a measurement of the corrected start-codon predicates. Targeted UTR-spanning
+and production-density throughput remain unmeasured.
+
 ## Annotation-dense transcript distance and ordered parallel partitions
 
 ```{r dense-threading}
