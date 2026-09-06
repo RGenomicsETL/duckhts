@@ -1,0 +1,182 @@
+---
+title: "Record-major genotypes and carrier expansion on an HPRC cohort"
+output:
+  github_document:
+    html_preview: false
+---
+
+The registered HPRC v2.0 GRCh38 cohort region `chr22:20000000-21000000`
+retains every source sample and allele. This is not the consequence-only,
+split-allele corpus. Stage explicitly with
+`duckhtsbench::duckhts_bench_stage_genotypes()` before rendering; rendering is
+network-free. BCF and VCF.gz contain the same complete records, verified by
+the staging test and full HTSlib text comparison.
+
+This compares `read_geno()` with the canonical `read_bcf(..., tidy_format:=true)`
+GT projection. The experiment named `read_bcf_v2` in the original request was
+deleted; it is not reintroduced as a benchmark dependency. Full cohorts, the
+first eight header samples, sparse non-reference calls, and downstream typed
+carrier expansion have separate denominators. The input has GT but no PS;
+these timings do not measure PS decoding, which SQL/R/native fixtures test.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
+knitr::opts_knit$set(root.dir=normalizePath(".."))
+library(DBI)
+library(duckhtsbench)
+source("benchmarks/genotype_reader_run.R")
+extension <- normalizePath(Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension"), mustWork=TRUE)
+stopifnot(system2("git", c("diff", "--quiet", "HEAD", "--", "src")) == 0L)
+revision <- system2("git", c("rev-parse", "HEAD"), stdout=TRUE)
+src_tree <- system2("git", c("rev-parse", "HEAD:src"), stdout=TRUE)
+paths <- c(VCF = duckhts_bench_artifact_path("geno_hprc_vcfgz"), BCF = duckhts_bench_artifact_path("geno_hprc_bcf"))
+identities <- list()
+for (i in seq_along(paths)) {
+  id <- c("geno_hprc_vcfgz", "geno_hprc_bcf")[[i]]
+  duckhts_bench_validate_identity(id, paths[[i]])
+  receipt <- read.delim(paste0(paths[[i]], ".provenance.tsv"))
+  values <- setNames(receipt$value, receipt$field)
+  stopifnot(identical(unname(tools::md5sum(paths[[i]])), values[["observed_md5"]]))
+  identities[[i]] <- data.frame(format=names(paths)[i], artifact=id,
+                                bytes=file.info(paths[[i]])$size, md5=values[["observed_md5"]])
+}
+identities <- do.call(rbind, identities)
+bcftools <- function(args) {
+  result <- system2("bcftools", shQuote(args), stdout=TRUE)
+  stopifnot(is.null(attr(result,"status")))
+  result
+}
+samples <- bcftools(c("query","-l",paths[[1]]))
+header <- bcftools(c("view","-h",paths[[1]]))
+stopifnot("##fileformat=VCFv4.2" %in% header,
+          sum(startsWith(header,"##FORMAT=")) == 1L,
+          any(startsWith(header,"##FORMAT=<ID=GT,")), length(samples) >= 8L)
+gt_lines <- bcftools(c("query","-f","[%GT\t]\n",paths[[1]]))
+input_records <- length(gt_lines)
+# Independent HTSlib GT strings supply all workload denominators. No optimized
+# reader count path, dropped records or changed oracle is used for a rate.
+denominators <- lapply(c("full","selected","sparse","carriers"), function(workload) {
+  selected <- if (workload == "selected") seq_len(8L) else seq_along(samples)
+  sums <- vapply(strsplit(gt_lines,"\t",fixed=TRUE), function(gt) {
+    stopifnot(length(gt) == length(samples))
+    gt <- gt[selected]
+    slots <- nchar(gsub("[^|/]","",gt)) + 1L
+    nonref <- grepl("(^|[|/])[1-9][0-9]*($|[|/])",gt)
+    alt <- lengths(regmatches(gt, gregexpr("(^|[|/])[1-9][0-9]*",gt)))
+    c(calls=length(gt), slots=sum(slots), nonref=sum(nonref),
+      sparse_slots=sum(slots[nonref]), alt_slots=sum(alt))
+  }, numeric(5))
+  total <- rowSums(sums)
+  data.frame(workload, input_records, selected_samples=length(selected),
+             selected_calls=total[["calls"]], selected_slots=total[["slots"]],
+             non_reference_calls=total[["nonref"]], sparse_slots=total[["sparse_slots"]],
+             alt_slots=total[["alt_slots"]])
+})
+denominators <- do.call(rbind,denominators)
+rm(gt_lines)
+repetitions <- as.integer(Sys.getenv("GENO_BENCH_RUNS","3"))
+stopifnot(repetitions > 0L)
+directory <- tempfile("duckhts-genotype-report-")
+dir.create(directory)
+results <- comparisons <- list()
+con <- dbConnect(duckdb::duckdb())
+dbExecute(con,"SET threads=1")
+dbExecute(con,"SET memory_limit='8GB'")
+for (format in names(paths)) for (workload in denominators$workload) {
+  expected <- denominators[denominators$workload==workload,]
+  snapshots <- c()
+  for (repetition in seq_len(repetitions)) {
+    readers <- if (repetition %% 2L) c("read_bcf","read_geno") else c("read_geno","read_bcf")
+    for (reader in readers) {
+      snapshot <- if (repetition==1L) file.path(directory,paste(format,workload,reader,"parquet",sep=".")) else ""
+      if (nzchar(snapshot)) snapshots[reader] <- snapshot
+      observed <- callr::r(genotype_reader_run, args=list(extension=extension, input=paths[[format]],
+        reader=reader, workload=workload,
+        selector=if(workload=="selected") paste(samples[seq_len(8L)],collapse=",") else "",
+        sample_names=samples, snapshot=snapshot, threads=1L))
+      if (workload=="carriers") stopifnot(observed$output_rows==expected$alt_slots)
+      else {
+        stopifnot(observed$output_calls==if(workload=="sparse") expected$non_reference_calls else expected$selected_calls,
+                  observed$output_slots==if(workload=="sparse") expected$sparse_slots else expected$selected_slots,
+                  observed$output_rows==if(reader=="read_geno") input_records else observed$output_calls)
+      }
+      results[[length(results)+1L]] <- cbind(format, repetition, observed)
+    }
+  }
+  reference <- paste0("read_parquet(",dbQuoteString(con,snapshots[["read_bcf"]]),")")
+  candidate <- paste0("read_parquet(",dbQuoteString(con,snapshots[["read_geno"]]),")")
+  sql <- sprintf(paste("SELECT count(*) AS n FROM ((SELECT * FROM %s EXCEPT ALL SELECT * FROM %s)",
+    "UNION ALL (SELECT * FROM %s EXCEPT ALL SELECT * FROM %s))"),reference,candidate,candidate,reference)
+  difference <- as.numeric(dbGetQuery(con,sql)$n)
+  stopifnot(difference==0)
+  comparisons[[length(comparisons)+1L]] <- data.frame(format,workload,different_typed_rows=difference)
+  unlink(snapshots)
+}
+dbDisconnect(con,shutdown=TRUE)
+unlink(directory,recursive=TRUE)
+results <- do.call(rbind,results)
+comparisons <- do.call(rbind,comparisons)
+for (key in split(results,interaction(results$format,results$reader,results$workload)))
+  stopifnot(length(unique(key$checksum))==1L)
+```
+
+## Source and workload identity
+
+```{r identity}
+cat("Source revision:",revision,"\nSource tree:",src_tree,"\n")
+cat("Extension MD5:",unname(tools::md5sum(extension)),"\n")
+cat("R:",R.version.string,"; DuckDB:",as.character(packageVersion("duckdb")),"\n")
+cat(system2("uname","-srmo",stdout=TRUE),"\n")
+cat(system2("taskset",c("-pc",Sys.getpid()),stdout=TRUE),"\n")
+cat(system2("sh",c("-c",shQuote("lscpu | sed -n '/Model name:/p'")),stdout=TRUE),"\n")
+cat("DuckDB threads: 1; scan handles: 1; HTSlib decompression workers: 0; repetitions:",repetitions,"\n")
+knitr::kable(identities)
+knitr::kable(denominators)
+```
+
+## Materialization and carrier expansion
+
+Timing includes binding, decoding, selected output vectors and `CREATE TABLE AS`.
+Carrier timing also includes allele-slot expansion and ALT selection. Every
+measurement uses a fresh R/DuckDB process; source data is warm in the OS cache.
+Startup, independent counting, checksums, checkpoint, snapshots and exact output
+comparison are outside timing. RSS is the process high-water mark immediately
+after materialization. Materialized database bytes are measured after checkpoint
+and include the tiny sample catalog and database overhead; they are physical
+compressed storage, not vector-memory bytes. The fixed DuckDB memory limit is
+8 GiB; these are not sealed/static-allocation measurements.
+
+```{r timing}
+summary <- aggregate(cbind(elapsed,peak_rss_kib,materialized_database_bytes) ~ format+reader+workload,results,median)
+summary <- merge(summary,denominators,by="workload",sort=FALSE)
+summary$records_per_second <- summary$input_records/summary$elapsed
+summary$calls_per_second <- summary$selected_calls/summary$elapsed
+summary$allele_slots_per_second <- summary$selected_slots/summary$elapsed
+summary$input_bytes_per_second <- identities$bytes[match(summary$format,identities$format)]/summary$elapsed
+knitr::kable(summary[c("format","reader","workload","elapsed","records_per_second","calls_per_second",
+                      "allele_slots_per_second","input_bytes_per_second","peak_rss_kib","materialized_database_bytes")],digits=3)
+knitr::kable(results[c("format","reader","workload","repetition","output_rows","output_calls","output_slots","elapsed","cpu")],digits=3)
+```
+
+## Complete output comparison
+
+First-run results are normalized outside the timer to typed variant identity,
+original-header sample index, every allele slot, every phase flag and phase set.
+For the VCF 4.2 source, the comparison reconstructs the leading phase flag from
+HTSlib's string representation; VCF 4.4 explicit-prefix semantics are tested in
+the committed SQL/R witnesses, not inferred from this dataset. Every field and
+duplicate contributes to `EXCEPT ALL` in both directions. Carrier comparisons
+retain variant identity, sample, allele slot/index, selected ALT, phase and PS.
+Each repetition separately checks the complete materialized-row checksum.
+
+```{r agreement}
+knitr::kable(comparisons)
+```
+
+The nearest earlier full-materialization report is
+[the shared BCF scanner report](benchmark_bcf_shared_scan.md): a single-sample
+GIAB workload, not an identical cohort baseline. This report compares the two
+current interfaces, not pre-change and post-change revisions. The separately
+rendered paired BCF regression workload measures changes to the existing reader.
+These results do not establish universal fastest-reader performance, remote-I/O
+throughput, multi-worker scaling, PS throughput, or phased annotation correctness.

@@ -37,6 +37,27 @@ int duckhts_bcf_scan_contig(duckhts_bcf_scan_t *scan, const char *name,
  * output materialization beyond that required by the format reader. */
 int duckhts_bcf_scan_next(duckhts_bcf_scan_t *scan, bcf1_t *record);
 
+/* Immutable sample selection, built before scanning. Indices refer to the
+ * original header (zero-based); selected names remain in header order. NULL
+ * or "-" selects all, "" selects none, other strings use HTSlib's comma-list
+ * / ^exclusion syntax. No sample-file interpretation or silent unknown names.
+ * Zero-initialize before build; destroy owns all malloc-family storage. */
+typedef struct {
+    char *selector;
+    int original_count;
+    int count;
+    uint32_t *indices;
+    char **names;
+} duckhts_bcf_samples_t;
+
+int duckhts_bcf_samples_build(duckhts_bcf_samples_t *samples, const bcf_hdr_t *header,
+                              const char *selector, char *error, size_t error_size);
+void duckhts_bcf_samples_destroy(duckhts_bcf_samples_t *samples);
+/* Apply once to a fresh worker header, before any records are read. Validates
+ * that selected names still occupy their bind-time original sample indices. */
+int duckhts_bcf_samples_apply(const duckhts_bcf_samples_t *samples, bcf_hdr_t *header,
+                              char *error, size_t error_size);
+
 typedef enum {
     DUCKHTS_BCF_FIELD_INFO,
     DUCKHTS_BCF_FIELD_FORMAT,
@@ -59,6 +80,15 @@ typedef enum {
     DUCKHTS_BCF_DECODE_TYPE_MISMATCH,
     DUCKHTS_BCF_DECODE_FATAL
 } duckhts_bcf_decode_status_t;
+
+typedef enum {
+    DUCKHTS_BCF_DECODE_NULL,
+    DUCKHTS_BCF_DECODE_WARN,
+    DUCKHTS_BCF_DECODE_ERROR
+} duckhts_bcf_decode_policy_t;
+
+int duckhts_bcf_parse_decode_policy(const char *text, duckhts_bcf_decode_policy_t *policy);
+int duckhts_bcf_parse_scan_mode(const char *text, int *sequential);
 
 /* Classify bcf_get_* return codes. The caller chooses null/warn/error for a
  * type mismatch; undefined header fields and OOM always remain fatal. */

@@ -68,7 +68,8 @@ expect_identical(
     "scan_mode",
     "decompression_threads",
     "decode_error_policy",
-    "overwrite"
+    "overwrite",
+    "samples"
   )
 )
 expect_identical(
@@ -675,7 +676,8 @@ expect_identical(
     "scan_mode",
     "decompression_threads",
     ".params",
-    "overwrite"
+    "overwrite",
+    "samples"
   )
 )
 expect_identical(

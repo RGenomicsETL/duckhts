@@ -1,6 +1,21 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- add record-major `read_geno()` with typed arbitrary-ploidy GT/PS calls,
+  per-allele phase flags and sparse non-reference calls. Share HTSlib sample
+  selection with `read_bcf()` and expose stable original-header indices through
+  `read_bcf_samples()`. Full genotype scans assign input-order, zero-based
+  query-local ordinals; indexed region unions preserve physical duplicates
+
+- check BCF output-list growth before accessing child storage and fail GT
+  formatting on allocation errors instead of publishing a truncated genotype
+
+- delegate BCF GT string formatting to HTSlib, retaining VCF 4.4 leading
+  phase markers that the previous private formatter silently discarded
+
+- stage an all-sample HPRC regional genotype cohort in VCF.gz and BCF through
+  the benchmark registry, without changing consequence-only corpus derivations
+
 - add `duckvep_breakend_geometry()` for lossless typed preparation of paired
   and single BND ALT alleles, preserving contig names, orientation, replacement
   sequence and telomeric mate coordinates with checked decimal parsing

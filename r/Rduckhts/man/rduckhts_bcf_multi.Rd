@@ -15,7 +15,8 @@ rduckhts_bcf_multi(
   scan_mode = NULL,
   decompression_threads = 0,
   .params = NULL,
-  overwrite = FALSE
+  overwrite = FALSE,
+  samples = NULL
 )
 }
 \arguments{
@@ -41,6 +42,8 @@ threads per file handle. Default `0`.}
 \item{.params}{Optional data.frame with per-file parameter overrides.}
 
 \item{overwrite}{Logical; if \code{TRUE}, replace an existing table.}
+
+\item{samples}{Optional HTSlib sample-selector string, as in [rduckhts_bcf()].}
 }
 \value{
 Invisible \code{TRUE} on success.

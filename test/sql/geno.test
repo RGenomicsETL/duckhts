@@ -1,0 +1,246 @@
+# name: test/sql/geno.test
+# description: Record-major typed GT/PS, sample identity and carrier expansion
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+SET threads=4;
+
+query TT
+SELECT typeof(record_index), typeof(calls) FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_calls.bcf') LIMIT 1;
+----
+UBIGINT	STRUCT(sample_index UINTEGER, alleles INTEGER[], phase_before BOOLEAN[], phase_set BIGINT)[]
+
+query IT
+SELECT * FROM read_bcf_samples('__WORKING_DIRECTORY__/test/data/geno_calls.bcf', samples:='S2,S1,S2');
+----
+0	S1
+1	S2
+
+query IT
+SELECT * FROM read_bcf_samples('__WORKING_DIRECTORY__/test/data/geno_calls.vcf.gz', samples:='^S1');
+----
+1	S2
+
+query I
+SELECT count(*) FROM read_bcf_samples('__WORKING_DIRECTORY__/test/data/geno_calls.bcf', samples:='^S1,S2');
+----
+0
+
+statement ok
+CREATE TEMP TABLE geno_expected(record_index UBIGINT, sample_index UINTEGER, alleles INTEGER[], phase_before BOOLEAN[], phase_set BIGINT);
+
+# Literal HTSlib 1.24 decoded encodings, including leading-slot phase convention
+# for VCF 4.2. Missing GT has unknown ploidy (NULL arrays), not a fabricated ./.
+statement ok
+INSERT INTO geno_expected VALUES
+ (0,0,[0,1,2,NULL],[false,true,false,true],10),
+ (0,1,[NULL,1],[false,false],NULL),
+ (1,0,[NULL,NULL],[true,true],NULL), (1,1,[0,0],[false,false],NULL),
+ (2,0,[NULL,NULL],[true,true],NULL), (2,1,[0,0],[false,false],NULL),
+ (3,0,NULL,NULL,30), (3,1,NULL,NULL,NULL),
+ (4,0,NULL,NULL,NULL), (4,1,NULL,NULL,NULL),
+ (5,0,[200,1],[true,true],2147483647), (5,1,[1],[true],-1);
+
+foreach ext vcf bcf vcf.gz
+
+statement ok
+CREATE OR REPLACE TEMP TABLE geno_actual AS
+SELECT record_index, unnest(calls, recursive:=true) FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_calls.${ext}', decode_error_policy:='error');
+
+query I
+SELECT count(*) FROM ((SELECT * FROM geno_actual EXCEPT ALL SELECT * FROM geno_expected)
+ UNION ALL (SELECT * FROM geno_expected EXCEPT ALL SELECT * FROM geno_actual));
+----
+0
+
+query II
+SELECT count(*), sum(len(calls)) FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_calls.${ext}', samples:='^S1,S2', scan_mode:='sequential');
+----
+6	0
+
+query II
+SELECT count(*), sum(len(calls)) FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_calls.${ext}', non_reference_only:=true);
+----
+6	4
+
+query II
+SELECT record_index, len(calls) FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_calls.${ext}', samples:='');
+----
+0	0
+1	0
+2	0
+3	0
+4	0
+5	0
+
+# Every retained call equals the dense version; the filter does not renumber samples.
+query I
+SELECT count(*) FROM (
+ SELECT record_index, unnest(calls, recursive:=true) FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_calls.${ext}', samples:='S2')
+ EXCEPT ALL SELECT * FROM geno_expected WHERE sample_index=1);
+----
+0
+
+# Native index choice must not change the full-scan ordinal.
+query I
+SELECT count(*) FROM (
+ SELECT * FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_calls.${ext}', scan_mode:='sequential')
+ EXCEPT ALL SELECT * FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_calls.${ext}'));
+----
+0
+
+endloop
+
+foreach ext bcf vcf.gz
+
+# Overlapping region requests deduplicate visits, not physical duplicate records.
+query ITI
+SELECT record_index, ID, len(calls) FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_calls.${ext}',
+ region:='chrG:20-30,chrG:20-20', samples:='S2') ORDER BY record_index;
+----
+0	missing	1
+1	missing	1
+2	absent_gt	1
+
+query I
+SELECT count(*) FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_calls.${ext}', region:='unknown:1-20');
+----
+0
+
+query I
+SELECT count(*) FROM (
+ SELECT POS, FORMAT_GT_S2 FROM read_bcf('__WORKING_DIRECTORY__/test/data/geno_calls.${ext}', samples:='^S1')
+ EXCEPT ALL SELECT POS, FORMAT_GT_S2 FROM read_bcf('__WORKING_DIRECTORY__/test/data/geno_calls.${ext}'));
+----
+0
+
+endloop
+
+# Expand allele slots relationally; preserve the slot-specific phase flag.
+query IIITI
+WITH records AS (
+ SELECT record_index, ALT, unnest(calls) AS call
+ FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_calls.bcf', non_reference_only:=true)
+), slots AS (
+ SELECT record_index, ALT, call.sample_index AS sample_index,
+ unnest(call.alleles) AS allele, unnest(call.phase_before) AS phase,
+ generate_subscripts(call.alleles,1)-1 AS slot FROM records
+)
+SELECT record_index,sample_index,slot,phase,allele FROM slots WHERE allele>0 ORDER BY ALL;
+----
+0	0	1	true	1
+0	0	2	false	2
+0	1	1	false	1
+5	0	0	true	200
+5	0	1	true	1
+5	1	0	true	1
+
+# More records than a DuckDB vector, including repeated child NULL/reset state.
+query TTTT
+SELECT calls[1].alleles::VARCHAR, calls[1].phase_before::VARCHAR,
+       calls[2].alleles::VARCHAR, calls[2].phase_before::VARCHAR
+FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_vcf44.vcf') ORDER BY record_index;
+----
+[0, 1]	[false, true]	[0, 1]	[true, false]
+[0]	[false]	[1]	[true]
+[NULL, 1]	[true, false]	[NULL, 1]	[false, true]
+[0, 1, NULL]	[true, false, true]	[1, 0, 1]	[false, true, true]
+
+# Canonical string output delegates VCF 4.4 spelling to HTSlib too.
+query TT
+SELECT FORMAT_GT_S1, FORMAT_GT_S2 FROM read_bcf('__WORKING_DIRECTORY__/test/data/geno_vcf44.vcf') ORDER BY POS;
+----
+/0|1	|0/1
+/0	1
+|./1	/.|1
+|0/1|.	/1|0|1
+
+query IIII
+SELECT count(*), min(record_index), max(record_index), sum(len(calls))
+FROM read_geno('__WORKING_DIRECTORY__/test/data/bcf_filter_list_regression.vcf');
+----
+5000	0	4999	5000
+
+# One record's sample list crosses the usual output vector size.
+query III
+SELECT count(*), len(first(calls)), first(calls)[2053].sample_index
+FROM read_geno('__WORKING_DIRECTORY__/test/data/tidy_chunk_boundary.vcf');
+----
+1	2053	2052
+
+foreach ext vcf bcf
+
+foreach bad ps_type ps_number ps_width
+
+statement error
+SELECT calls FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_${bad}.${ext}', decode_error_policy:='error');
+----
+FORMAT/PS
+
+query TT
+SELECT calls[1].alleles::VARCHAR, calls[1].phase_set IS NULL
+FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_${bad}.${ext}', decode_error_policy:='null');
+----
+[0, 1]	true
+
+endloop
+
+statement error
+SELECT calls FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_gt_allele.${ext}', decode_error_policy:='error');
+----
+invalid FORMAT/GT allele
+
+query TI
+SELECT calls[1].alleles IS NULL, calls[1].phase_set
+FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_gt_allele.${ext}');
+----
+true	10
+
+endloop
+
+statement error
+SELECT * FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_calls.bcf', samples:='unknown');
+----
+selector item 1 is not in the header
+
+statement error
+SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/geno_calls.bcf', samples:='^unknown');
+----
+selector item 1 is not in the header
+
+statement error
+SELECT * FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_calls.bcf', scan_mode:='sequential', region:='chrG');
+----
+incompatible with region
+
+statement error
+SELECT * FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_calls.vcf', region:='chrG');
+----
+requires an index
+
+statement error
+SELECT * FROM read_geno('__WORKING_DIRECTORY__/test/data/malformed_bad_pos.vcf');
+----
+failed to read BCF/VCF record
+
+statement error
+SELECT * FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_calls.bcf', decompression_threads:=-1);
+----
+between 0 and INT_MAX
+
+statement error
+SELECT * FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_calls.bcf', scan_mode:='random');
+----
+scan_mode must
+
+statement error
+SELECT * FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_calls.bcf', decode_error_policy:='ignore');
+----
+decode_error_policy must
+
+query I
+SELECT 42;
+----
+42
