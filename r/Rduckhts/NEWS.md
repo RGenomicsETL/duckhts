@@ -1,5 +1,12 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- correct bundled DuckVEP indel start/stop and in-frame consequences when a
+  later coding exon supplies CDS phase padding. CDS-to-UTR edits and partial-CDS
+  terminal-stop tests use VEP's feature coordinates without weakening physical
+  REF validation; known synthetic padding is not treated as missing sequence.
+  Partial-CDS-to-UTR edits now validate REF and report missing required flanks
+  before returning positional consequence facts
+
 - correct bundled DuckVEP multi-base coding substitutions when stored CDS
   padding and VEP feature coordinates differ. Validate the full physical REF
   before partial-codon classification, and preserve synonymous results when

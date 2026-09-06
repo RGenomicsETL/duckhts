@@ -2166,7 +2166,7 @@ local({
       "158::UBIGINT cds_start, 240::UBIGINT cds_end,",
       "('%sCGTACGTACGTACGTACGTACGTTACGTACGTACGTACTGGTAA')::BLOB cds_sequence,",
       "1::UTINYINT codon_table, repeat('A',34)::BLOB pre_cds_sequence,",
-      "repeat('A',10)::BLOB post_cds_sequence"
+      "'ACGTACGTAC'::BLOB post_cds_sequence"
     ), strrep("N", phase)), sprintf(paste(
       "SELECT * FROM (VALUES",
       "(0::UINTEGER,100::UBIGINT,125::UBIGINT,1::UBIGINT,26::UBIGINT,-1::TINYINT,-1::TINYINT),",
@@ -2203,6 +2203,32 @@ local({
       c("missense_variant", "stop_gained", "synonymous_variant")[phase+1L]))
     expect_identical(coding_mnv$status, c(rep("supported", 5), "unresolved"))
     expect_identical(coding_mnv$reason, c(rep(NA_character_, 5), "reference_mismatch"))
+    coding_indel <- dbGetQuery(con, paste(
+      "WITH variants(ord, position, reference, alternate) AS (VALUES",
+      "(1,158::UBIGINT,'C','CT'),(2,160::UBIGINT,'T','AC'),",
+      "(3,165::UBIGINT,'A','AATG'),(4,165::UBIGINT,'ACGT','A'),",
+      "(5,235::UBIGINT,'TGGT','T'),(6,238::UBIGINT,'T','TAGGT'),",
+      "(7,239::UBIGINT,'AA','A'),(8,239::UBIGINT,'AAAC','A'),",
+      "(9,235::UBIGINT,'TCGT','T'),(10,239::UBIGINT,'AAAT','A'))",
+      "SELECT ord, a.consequence, a.status, a.reason FROM variants,",
+      "LATERAL unnest(_duckvep_annotate_small_rich('r-mnv-start',",
+      "1::UINTEGER,position,reference,alternate,0::UBIGINT)) u(a) ORDER BY ord"
+    ))
+    expect_equal(coding_indel$ord, 1:10)
+    expect_identical(vapply(strsplit(coding_indel$consequence[1:8], "&", fixed=TRUE),
+      function(x) paste(sort(x), collapse="&"), ""), c(
+      "frameshift_variant&start_lost", "frameshift_variant&start_lost",
+      c("stop_gained", "inframe_insertion&stop_gained", "inframe_insertion")[phase+1L],
+      if (phase == 0) "inframe_deletion&stop_gained" else "inframe_deletion",
+      "inframe_deletion",
+      if (phase == 0) "coding_sequence_variant&incomplete_terminal_codon_variant&inframe_insertion"
+        else "frameshift_variant&stop_lost",
+      c("coding_sequence_variant&incomplete_terminal_codon_variant",
+        "stop_retained_variant", "frameshift_variant&stop_lost")[phase+1L],
+      if (phase == 0) "3_prime_UTR_variant&coding_sequence_variant&incomplete_terminal_codon_variant"
+        else "3_prime_UTR_variant&stop_lost"))
+    expect_identical(coding_indel$status, c(rep("supported", 8), rep("unresolved", 2)))
+    expect_identical(coding_indel$reason, c(rep(NA_character_, 8), rep("reference_mismatch", 2)))
     expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-mnv-start') dropped")$dropped)
     mnv_queries[2] <- paste("SELECT * EXCLUDE(pre_cds_sequence,post_cds_sequence) FROM (",
       mnv_queries[2], ")")
@@ -2210,6 +2236,11 @@ local({
     mnv <- dbGetQuery(con, mnv_sql)
     expect_identical(mnv$status, rep("unresolved", 3))
     expect_identical(mnv$reason, rep("missing_transcript_flank", 3))
+    incomplete_indel <- dbGetQuery(con, paste(
+      "SELECT a.status, a.reason FROM unnest(_duckvep_annotate_small_rich('r-mnv-start',",
+      "1::UINTEGER,239::UBIGINT,'AAAC','A',0::UBIGINT)) u(a)"))
+    expect_identical(incomplete_indel$status, "unresolved")
+    expect_identical(incomplete_indel$reason, "missing_transcript_flank")
     expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-mnv-start') dropped")$dropped)
   }
 

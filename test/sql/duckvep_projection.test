@@ -334,7 +334,7 @@ CREATE TABLE projection_mnv_transcripts AS SELECT p::UINTEGER transcript_index,
   158::UBIGINT cds_start, 240::UBIGINT cds_end,
   (repeat('N',p) || 'CGTACGTACGTACGTACGTACGTTACGTACGTACGTACTGGTAA')::BLOB cds_sequence,
   1::UTINYINT codon_table, repeat('A',34)::BLOB pre_cds_sequence,
-  repeat('A',10)::BLOB post_cds_sequence FROM range(3) t(p);
+  'ACGTACGTAC'::BLOB post_cds_sequence FROM range(3) t(p);
 
 statement ok
 CREATE TABLE projection_mnv_exons AS SELECT transcript_index,
@@ -413,6 +413,57 @@ WHERE event_index=6 GROUP BY ALL;
 ----
 unresolved	reference_mismatch	3
 
+# Length-changing edits validate physical REF, mutate at VEP feature positions,
+# and use unpadded cDNA positions for independent start/stop overlap tests.
+statement ok
+CREATE TABLE projection_coding_indel_events AS SELECT e.* REPLACE(
+  v.event_index::UBIGINT AS event_index, v.position::UBIGINT AS position,
+  v.reference AS reference, v.alternate AS alternate)
+FROM projection_events e CROSS JOIN (VALUES (1,158,'C','CT'), (2,160,'T','AC'),
+  (3,165,'A','AATG'), (4,165,'ACGT','A'), (5,235,'TGGT','T'),
+  (6,238,'T','TAGGT'), (7,239,'AA','A'), (8,239,'AAAC','A'),
+  (9,235,'TCGT','T'), (10,239,'AAAT','A')) v(event_index,position,reference,alternate)
+WHERE e.event_index=1 ORDER BY position,event_index;
+
+query IITT
+SELECT event_index, transcript_index, duckvep_status,
+  (SELECT string_agg(consequence,'&' ORDER BY consequence)
+   FROM duckvep_so_terms() t WHERE (a.consequence_mask & t.consequence_mask)<>0)
+FROM duckvep_annotate('projection_coding_indel_events', 'mnv-start', rich := true) a
+WHERE event_index<=8 ORDER BY event_index,transcript_index;
+----
+1	0	supported	frameshift_variant&start_lost
+1	1	supported	frameshift_variant&start_lost
+1	2	supported	frameshift_variant&start_lost
+2	0	supported	frameshift_variant&start_lost
+2	1	supported	frameshift_variant&start_lost
+2	2	supported	frameshift_variant&start_lost
+3	0	supported	stop_gained
+3	1	supported	inframe_insertion&stop_gained
+3	2	supported	inframe_insertion
+4	0	supported	inframe_deletion&stop_gained
+4	1	supported	inframe_deletion
+4	2	supported	inframe_deletion
+5	0	supported	inframe_deletion
+5	1	supported	inframe_deletion
+5	2	supported	inframe_deletion
+6	0	supported	coding_sequence_variant&incomplete_terminal_codon_variant&inframe_insertion
+6	1	supported	frameshift_variant&stop_lost
+6	2	supported	frameshift_variant&stop_lost
+7	0	supported	coding_sequence_variant&incomplete_terminal_codon_variant
+7	1	supported	stop_retained_variant
+7	2	supported	frameshift_variant&stop_lost
+8	0	supported	3_prime_UTR_variant&coding_sequence_variant&incomplete_terminal_codon_variant
+8	1	supported	3_prime_UTR_variant&stop_lost
+8	2	supported	3_prime_UTR_variant&stop_lost
+
+query TTI
+SELECT duckvep_status, duckvep_reason, count(*)
+FROM duckvep_annotate('projection_coding_indel_events', 'mnv-start', rich := true)
+WHERE event_index>=9 GROUP BY ALL;
+----
+unresolved	reference_mismatch	6
+
 query I
 SELECT duckvep_model_drop('mnv-start');
 ----
@@ -430,6 +481,13 @@ SELECT duckvep_status, duckvep_reason, count(*)
 FROM duckvep_annotate('projection_mnv_events', 'mnv-start', rich := true) GROUP BY ALL;
 ----
 unresolved	missing_transcript_flank	9
+
+query TTI
+SELECT duckvep_status, duckvep_reason, count(*)
+FROM duckvep_annotate('projection_coding_indel_events', 'mnv-start', rich := true)
+WHERE event_index=8 GROUP BY ALL;
+----
+unresolved	missing_transcript_flank	3
 
 query I
 SELECT duckvep_model_drop('mnv-start');

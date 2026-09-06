@@ -253,6 +253,9 @@ typedef struct duckvep_coding_context {
     uint32_t flags;
     size_t applied_edits;
     uint32_t single_edit_cds_start, single_edit_ref_len, single_edit_alt_len;
+    /* Start relative to the unpadded CDS, for cDNA start/stop predicates.
+     * single_edit_cds_start instead selects the sequence mutation position. */
+    uint32_t single_edit_unpadded_start1;
     uint8_t has_single_edit;
     uint8_t cds_changed;
     uint8_t pre_cds_complete;
@@ -523,14 +526,13 @@ duckvep_model_coding_context_build(
     size_t                            alt_peptide_cap,
     duckvep_coding_context_t         *ctx);
 
-/* Compose one small variant directly into a CodingContext: build the
- * edit set, borrow the transcript CDS from `seq`, and call duckvep_coding_context_build.
- * This is not an SO emitter; it is reached by explicit scratch-aware direct calls
- * and by the annotation wrapper for supported MNV/DEL/INS/INDEL contexts.
+/* Materialize the physical CDS edit set of one small variant. This is the
+ * sequence-edit reference for kernel properties, not a VEP feature projection.
+ * Independent annotation uses the feature-coordinate producer below.
  * `ctx` is zeroed on entry and remains all-zero on failure. On success, `ctx->ref_cds`
  * borrows from `seq`; alternate CDS and peptides borrow caller scratch. `ctx`, sequence
  * storage, and all scratch buffers must be non-overlapping. */
-DUCKVEP_INTERNAL_API duckvep_variant_coding_context_status_t duckvep_variant_coding_context_build(
+DUCKVEP_INTERNAL_API duckvep_variant_coding_context_status_t duckvep_variant_physical_coding_context_build(
     const duckvep_transcript_model_t *transcripts,
     const duckvep_exon_model_t       *exons,
     const duckvep_sequence_pool_t    *seq,
@@ -548,13 +550,13 @@ DUCKVEP_INTERNAL_API duckvep_variant_coding_context_status_t duckvep_variant_cod
     size_t                            alt_peptide_cap,
     duckvep_coding_context_t         *ctx);
 
-/* Prepared-event form used when the annotation cursor has already interpreted
- * REF/ALT once. `exon_hint` is an absolute model exon index or UINT32_MAX.
- * The helper may retain the model-backed virtual single-edit representation;
- * all consumers must use the coding-context peptide accessors rather than
- * assuming complete alternate buffers were materialized. */
+/* Validate the physical edit, then open VEP's single feature-coordinate edit
+ * without mutating that physical edit set. `exon_hint` is an absolute model exon
+ * index or UINT32_MAX. Context accessors select the borrowed virtual CDS and
+ * local peptide cache; unpadded cDNA-relative positions remain separate facts.
+ * Equal-length multi-base features use the full-feature producer below. */
 DUCKVEP_INTERNAL_API duckvep_variant_coding_context_status_t
-duckvep_variant_coding_context_build_prepared(
+duckvep_variant_feature_coding_context_build_prepared(
     const duckvep_transcript_model_t *transcripts,
     const duckvep_exon_model_t       *exons,
     const duckvep_sequence_pool_t    *seq,

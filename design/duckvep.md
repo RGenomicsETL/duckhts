@@ -437,11 +437,12 @@ model-side key collision before joining. The Ensembl model compiler continues to
 an exact same-name, same-length reference-region match, so a convenience join key cannot
 silently substitute sequence from another assembly or region.
 
-The transcript query accepts the original 11 columns, the legacy 12-column form ending in
+The transcript query accepts 11 CDS-only columns, a 12-column partial-tail form ending in
 three `post_cds_bases`, or the complete 13-column form ending in `pre_cds_sequence` and
 `post_cds_sequence`. Only the complete form may resolve length-changing edits crossing a
-CDS boundary. Older models remain loadable and return `missing_transcript_flank` rather
-than guessing when such a predicate is reached.
+CDS boundary. Incomplete sequence inputs return `missing_transcript_flank` when the
+required transcript bases are absent; these input forms are not alpha API preservation
+obligations.
 
 The optional `mature_mirna_query` has three columns: transcript ordinal, inclusive genomic
 start, and inclusive genomic end. Rows must be ordered by transcript and start. The loader

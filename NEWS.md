@@ -1,6 +1,13 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- separate DuckVEP indel REF validation, VEP feature-CDS mutation, and unpadded
+  cDNA start/stop predicates. Correct later-exon phase padding, known synthetic
+  N codons, CDS-to-UTR edits and terminal-stop reconstruction on partial CDS.
+  Standalone scratch calls now use the annotation dispatcher; physical edit
+  arrays remain unchanged for sequence-edit and phased mechanics. CDS-to-UTR
+  partial-codon shortcuts no longer bypass REF or required-flank validation
+
 - separate complete MNV physical REF validation from VEP's feature-phase CDS
   edit, including retained bases and partial terminal codons. Share the
   independent start-offset test with SNVs and classify unchanged VEP peptide

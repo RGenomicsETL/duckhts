@@ -113,6 +113,31 @@ phase must produce CDS-coordinate mismatches. `duckvep_projection.test` also
 pins a three-base CDS position whose protein position would change under that
 substitution.
 
+The distinction also governs sequence mutation, not just displayed positions.
+`TranscriptVariationAllele::_get_alternate_cds` edits the padded sequence at the
+feature-CDS offset. Start predicates instead edit UTR+CDS at the unpadded cDNA
+offset. `_overlaps_stop_codon` tests unpadded cDNA, whereas
+`_ins_del_stop_altered` edits CDS+UTR at the feature-CDS offset and inspects the
+last three stored CDS positions, even when they are not an in-frame codon.
+Validating REF at the feature offset, adding physical padding to the start
+predicate, or requiring a codon-aligned stored CDS endpoint changes VEP results.
+
+The kernel's physical edit array is not mutated when opening an independent
+feature-coordinate context. The context retains a separate unpadded edit start
+and the model's physical padding count. Known padding N bytes, including their
+shifted positions after an indel, represent exact VEP X residues; genomic or
+allele ambiguity remains unresolved. Standalone scratch calls use the same
+annotation dispatcher. Physical materialization remains an explicitly named
+sequence-edit reference, not a second independent-consequence implementation.
+
+Pinned later-coding-start witnesses include `chrDuck:165 A>AATG` (stop-gained at
+phase 0, insertion plus stop-gained at phase 1, insertion at phase 2),
+`235 TGGT>T` (in-frame deletion at every phase), and `239 AAAC>A` (partial-codon
+plus coding-unknown at phase 0, stop-lost at phases 1/2, with 3-prime UTR overlap
+throughout). SQL and R retain complete SO/status sets; native tests additionally
+mirror the same feature with a reverse-genomic VCF anchor and check that wrong
+physical REF fails before feature-coordinate mutation.
+
 The remaining entries in this ledger describe VEP's declared coordinate, mapper,
 predicate-order, cache, or output semantics. They are implemented as typed facts and
 generated consequence rules, not hidden formatter switches. Examples include the

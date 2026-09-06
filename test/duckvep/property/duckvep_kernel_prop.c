@@ -16112,10 +16112,9 @@ TEST nmd_later_phase_cds_does_not_reuse_physical_early_fact(void) {
                 (uint32_t)DUCKVEP_REGION_CDS, 1u, &route, &delta);
             ASSERT_EQ(DUCKVEP_DELTA_ROUTE_SIMPLE_INDEL, route);
             ASSERT(delta.valid && delta.frameshift);
-            /* Physical CDS 101+phase is VEP feature CDS 101: the cache's physical test
-             * cannot decide whether the NMD plugin's <=101 escape rule applies. */
-            ASSERT_EQ(phase > 0 ? DUCKVEP_NMD_EARLY_CDS_ENDS_AFTER_101 :
-                DUCKVEP_NMD_EARLY_CDS_ENDS_THROUGH_101, delta.nmd_early_cds_fact);
+            /* Physical CDS 101+phase is VEP feature CDS 101. The producer now
+             * caches the feature-coordinate fact, like the exhaustive mapper. */
+            ASSERT_EQ(DUCKVEP_NMD_EARLY_CDS_ENDS_THROUGH_101, delta.nmd_early_cds_fact);
             duckvep_nmd_predict(&s.tx, &s.ex, 0u, &event,
                 DUCKVEP_SO(DUCKVEP_SO_FRAMESHIFT), NULL, &exhaustive);
             ASSERT(exhaustive.escape_reasons & DUCKVEP_NMD_ESCAPE_EARLY_CDS);
@@ -16123,6 +16122,15 @@ TEST nmd_later_phase_cds_does_not_reuse_physical_early_fact(void) {
                 DUCKVEP_SO(DUCKVEP_SO_FRAMESHIFT), &delta, &cached);
             ASSERT_EQ(exhaustive.prediction, cached.prediction);
             ASSERT_EQ(exhaustive.escape_reasons, cached.escape_reasons);
+            /* Retain the negative control: a stale physical-coordinate cache
+             * must not override exhaustive NMD projection in a rephased model. */
+            if (phase > 0) {
+                delta.nmd_early_cds_fact = DUCKVEP_NMD_EARLY_CDS_ENDS_AFTER_101;
+                duckvep_nmd_predict(&s.tx, &s.ex, 0u, &event,
+                    DUCKVEP_SO(DUCKVEP_SO_FRAMESHIFT), &delta, &cached);
+                ASSERT_EQ(exhaustive.prediction, cached.prediction);
+                ASSERT_EQ(exhaustive.escape_reasons, cached.escape_reasons);
+            }
         }
     }
     PASS();
@@ -16163,7 +16171,7 @@ TEST sequence_delta_snv_x_peptide_is_coding_unknown_known_scene(void) {
     PASS();
 }
 
-TEST sequence_delta_snv_start_test_precedes_unknown_peptide(void) {
+TEST sequence_delta_later_cds_phase_uses_feature_edits(void) {
     /* Pinned executable witness: projection_fixtures.R's later CDS start,
      * chrDuck:158 C>A. VEP's UTR+CDS test precedes its X-peptide rejection.
      * Mirror the same transcript-oriented model for the reverse-strand control. */
@@ -16184,6 +16192,7 @@ TEST sequence_delta_snv_start_test_precedes_unknown_peptide(void) {
     int8_t phase;
 
     memset(flanks, 'A', sizeof flanks);
+    memcpy(flanks + 34u, "ACGTACGTAC", 10u);
     for (strand = -1; strand <= 1; strand += 2) {
         for (phase = 0; phase <= 2; phase++) {
             struct kprop_coding s;
@@ -16368,6 +16377,116 @@ TEST sequence_delta_snv_start_test_precedes_unknown_peptide(void) {
                         "[MNV retained UTR REF] strand=%d phase=%d case=%zu status=%u\n",
                         strand, phase, j, delta.sequence_status);
                     ASSERT(!delta.valid && !delta.start_lost && !delta.start_retained);
+                    ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_REFERENCE_MISMATCH, delta.sequence_status);
+                }
+            }
+            {
+                /* Pinned VEP indels: independent start, codon shape, terminal
+                 * stop, and CDS-to-UTR edits. The physical edit must survive
+                 * opening the differently phased consequence view unchanged. */
+                static const uint32_t positions[] = {158u,160u,165u,165u,235u,238u,239u,239u};
+                static const char *refs[] = {"C","T","A","ACGT","TGGT","T","AA","AAAC"};
+                static const char *alts[] = {"CT","AC","AATG","A","T","TAGGT","A","A"};
+                static const uint32_t unpadded_starts[] = {2u,3u,9u,9u,40u,43u,44u};
+                static const uint8_t kinds[] = {DUCKVEP_KIND_INS,DUCKVEP_KIND_INDEL,
+                    DUCKVEP_KIND_INS,DUCKVEP_KIND_DEL,DUCKVEP_KIND_DEL,DUCKVEP_KIND_INS,
+                    DUCKVEP_KIND_DEL,DUCKVEP_KIND_DEL};
+                duckvep_haplotype_edit_t physical[2];
+                uint8_t alt_cds[64], ref_peptide[32], alt_peptide[32];
+                duckvep_delta_scratch_t scratch;
+                size_t j;
+                memset(&scratch, 0, sizeof scratch);
+                scratch.edits = physical; scratch.edits_cap = 2u;
+                scratch.alt_cds = alt_cds; scratch.alt_cds_cap = sizeof alt_cds;
+                scratch.ref_peptide = ref_peptide; scratch.ref_peptide_cap = sizeof ref_peptide;
+                scratch.alt_peptide = alt_peptide; scratch.alt_peptide_cap = sizeof alt_peptide;
+                for (j = 0u; j < 8u; j++) {
+                    duckvep_event_t event;
+                    duckvep_coding_context_t context;
+                    duckvep_sequence_delta_t standalone;
+                    size_t rlen = strlen(refs[j]), alen = strlen(alts[j]);
+                    size_t b;
+                    s.vkind = kinds[j]; s.rlen = (uint16_t)rlen;
+                    s.alen = (uint16_t)alen; s.aoff = (uint32_t)rlen;
+                    s.vpos = strand > 0 ? positions[j] : 351u - positions[j] - (uint32_t)rlen;
+                    s.vend = s.vpos + (uint32_t)rlen - 1u;
+                    for (b = 0u; b < rlen; b++) s.abytes[b] =
+                        (uint8_t)coding_test_genomic_from_tx(refs[j][strand > 0 ? b : rlen-1u-b], strand);
+                    for (b = 0u; b < alen; b++) s.abytes[rlen+b] =
+                        (uint8_t)coding_test_genomic_from_tx(alts[j][strand > 0 ? b : alen-1u-b], strand);
+                    if (strand < 0 && kinds[j] != DUCKVEP_KIND_INDEL) {
+                        /* A reverse VCF needs its own left genomic anchor.
+                         * Naively reversing TGGT>T or T>TAGGT lets prefix-first
+                         * trimming choose the other retained T, a different
+                         * VEP feature even though the biological edit agrees. */
+                        uint32_t after = positions[j] + (uint32_t)rlen;
+                        char anchor = after > 240u ? "ACGTACGTAC"[after-241u]
+                            : (char)unpadded[after <= 180u ? after-158u : after-197u];
+                        s.vpos = 350u - after; s.vend = s.vpos + (uint32_t)rlen - 1u;
+                        s.abytes[0] = s.abytes[rlen] = (uint8_t)coding_test_genomic_from_tx(anchor, strand);
+                        for (b = 1u; b < rlen; b++) s.abytes[b] =
+                            (uint8_t)coding_test_genomic_from_tx(refs[j][rlen-b], strand);
+                        for (b = 1u; b < alen; b++) s.abytes[rlen+b] =
+                            (uint8_t)coding_test_genomic_from_tx(alts[j][alen-b], strand);
+                    }
+                    duckvep_event_load(&s.v, 0u, &event);
+                    if (j < 7u) {
+                        ASSERT_EQ(DUCKVEP_VARIANT_CODING_CONTEXT_OK,
+                            duckvep_variant_feature_coding_context_build_prepared(
+                                &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, strand, &event,
+                                UINT32_MAX, physical, 2u, alt_cds, sizeof alt_cds,
+                                ref_peptide, sizeof ref_peptide, alt_peptide, sizeof alt_peptide, &context));
+                        if (physical[0].cds_start != unpadded_starts[j] + (uint32_t)phase)
+                            fprintf(stderr, "[indel coordinate] case=%zu phase=%d strand=%d physical=%u feature=%u\n",
+                                j, phase, strand, physical[0].cds_start, context.single_edit_cds_start);
+                        ASSERT_EQ(unpadded_starts[j] + (uint32_t)phase, physical[0].cds_start);
+                        ASSERT_EQ(unpadded_starts[j], context.single_edit_cds_start);
+                        ASSERT_EQ(unpadded_starts[j], context.single_edit_unpadded_start1);
+                        ASSERT_EQ((uint8_t)phase, context.cds_phase_padding);
+                    }
+                    duckvep_sequence_delta_fill_for_annotation((duckvep_variant_kind_t)s.vkind,
+                        &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, s.vpos, strand, &scratch, &event, &delta);
+                    if (!delta.valid) fprintf(stderr, "[later-CDS indel] case=%zu phase=%d strand=%d status=%u\n",
+                        j, phase, strand, delta.sequence_status);
+                    ASSERT(delta.valid && !delta.synonymous && !delta.missense &&
+                        !delta.start_retained && !delta.protein_altering);
+                    ASSERT_EQ(j < 2u, delta.start_lost);
+                    ASSERT_EQ((j == 2u && phase < 2) || (j == 3u && phase == 0), delta.stop_gained);
+                    ASSERT_EQ((j == 2u && phase > 0) || (j == 5u && phase == 0), delta.inframe_insertion);
+                    ASSERT_EQ(j == 3u || j == 4u, delta.inframe_deletion);
+                    ASSERT_EQ(j < 2u || (j == 5u && phase > 0) || (j == 6u && phase == 2), delta.frameshift);
+                    ASSERT_EQ((j == 5u && phase > 0) || (j == 6u && phase == 2) ||
+                        (j == 7u && phase > 0), delta.stop_lost);
+                    ASSERT_EQ(j == 6u && phase == 1, delta.stop_retained);
+                    ASSERT_EQ(j >= 5u && phase == 0, delta.partial_codon);
+                    ASSERT_EQ(j >= 5u && phase == 0, delta.coding_unknown);
+                    ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_RESOLVED, delta.sequence_status);
+                    duckvep_sequence_delta_fill_with_scratch((duckvep_variant_kind_t)s.vkind,
+                        &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, s.vpos, strand, &scratch, &standalone);
+                    ASSERT_EQ(0, memcmp(&delta, &standalone, sizeof delta));
+                    if (j == 1u) {
+                        uint8_t saved = cds[(size_t)phase];
+                        /* Genuine N immediately after the synthetic prefix is
+                         * not known padding, even outside the validated REF. */
+                        cds[(size_t)phase] = 'N';
+                        duckvep_sequence_delta_fill_with_scratch((duckvep_variant_kind_t)s.vkind,
+                            &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, s.vpos, strand, &scratch, &delta);
+                        ASSERT(!delta.valid);
+                        cds[(size_t)phase] = saved;
+                    }
+                    /* Wrong anchor or changed REF must fail before rephasing. */
+                    b = kinds[j] == DUCKVEP_KIND_DEL ? 1u : 0u;
+                    s.abytes[b] = s.abytes[b] == 'A' ? 'C' : 'A';
+                    if (kinds[j] == DUCKVEP_KIND_INS) s.abytes[rlen] = s.abytes[0];
+                    if (kinds[j] == DUCKVEP_KIND_INDEL) s.abytes[0] = strand > 0 ? 'G' : 'C';
+                    duckvep_sequence_delta_fill_with_scratch((duckvep_variant_kind_t)s.vkind,
+                        &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, s.vpos, strand, &scratch, &delta);
+                    if (delta.valid) fprintf(stderr, "[indel accepted bad REF] case=%zu phase=%d strand=%d\n",
+                        j, phase, strand);
+                    ASSERT(!delta.valid);
+                    if (delta.sequence_status != (uint8_t)DUCKVEP_SEQUENCE_REFERENCE_MISMATCH)
+                        fprintf(stderr, "[indel bad REF] case=%zu phase=%d strand=%d status=%u\n",
+                            j, phase, strand, delta.sequence_status);
                     ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_REFERENCE_MISMATCH, delta.sequence_status);
                 }
             }
@@ -18463,7 +18582,7 @@ TEST variant_coding_context_known_scene(void) {
     ctx.ref_cds = cds;
     ctx.ref_cds_len = 99u;
     ASSERT_EQ(DUCKVEP_VARIANT_CODING_CONTEXT_EDIT_BUFFER_TOO_SMALL,
-              duckvep_variant_coding_context_build(&s.tx, &s.ex, &s.seq, &s.v,
+              duckvep_variant_physical_coding_context_build(&s.tx, &s.ex, &s.seq, &s.v,
                                                    0u, 0u, s.strand,
                                                    edit_scratch, 2u,
                                                    alt_cds, sizeof alt_cds,
@@ -18475,7 +18594,7 @@ TEST variant_coding_context_known_scene(void) {
     memset(ref_pep, 0xA5, sizeof ref_pep);
     memset(alt_pep, 0x5A, sizeof alt_pep);
     ASSERT_EQ(DUCKVEP_VARIANT_CODING_CONTEXT_OK,
-              duckvep_variant_coding_context_build(&s.tx, &s.ex, &s.seq, &s.v,
+              duckvep_variant_physical_coding_context_build(&s.tx, &s.ex, &s.seq, &s.v,
                                                    0u, 0u, s.strand,
                                                    edit_scratch, 3u,
                                                    alt_cds, sizeof alt_cds,
@@ -18516,7 +18635,7 @@ TEST variant_coding_context_known_scene(void) {
         s.abytes[0] = ref_base[0]; s.abytes[1] = alt_base[0];
         s.roff = 0u; s.aoff = 1u; s.rlen = 1u; s.alen = 1u;
         ASSERT_EQ(DUCKVEP_VARIANT_CODING_CONTEXT_OK,
-                  duckvep_variant_coding_context_build(&s.tx, &s.ex, &s.seq, &s.v,
+                  duckvep_variant_physical_coding_context_build(&s.tx, &s.ex, &s.seq, &s.v,
                                                        0u, 0u, s.strand,
                                                        edit_scratch, 1u,
                                                        alt_cds, sizeof alt_cds,
@@ -19686,7 +19805,7 @@ static enum theft_trial_res prop_hgvs_frameshift_matches_extended_translation(
                SAFE_CODONS[kprop_bounded(t, 4u)], 3u);
     }
     memcpy(tail + tail_codons * 3u, STOP_CODON, 3u);
-    if (duckvep_variant_coding_context_build(
+    if (duckvep_variant_physical_coding_context_build(
             &s->tx, &s->ex, &s->seq, &s->v, 0u, 0u, s->strand,
             edits, sizeof edits / sizeof edits[0],
             alt_cds, sizeof alt_cds,
@@ -20081,7 +20200,7 @@ static enum theft_trial_res prop_variant_coding_context_matches_oracles(struct t
                                            &expected_set) != DUCKVEP_CDS_EDIT_OK) {
         return THEFT_TRIAL_FAIL;
     }
-    if (duckvep_variant_coding_context_build(&s->tx, &s->ex, &s->seq, &s->v,
+    if (duckvep_variant_physical_coding_context_build(&s->tx, &s->ex, &s->seq, &s->v,
                                              0u, 0u, s->strand, edit_scratch, 8u,
                                              alt_cds, sizeof alt_cds,
                                              ref_pep, sizeof ref_pep,
@@ -20135,7 +20254,7 @@ static enum theft_trial_res prop_variant_coding_context_matches_oracles(struct t
 
     {
         duckvep_coding_context_t fail_ctx;
-        if (duckvep_variant_coding_context_build(&s->tx, &s->ex, &s->seq, &s->v,
+        if (duckvep_variant_physical_coding_context_build(&s->tx, &s->ex, &s->seq, &s->v,
                                                  0u, 0u, s->strand, NULL, 0u,
                                                  alt_cds, sizeof alt_cds,
                                                  ref_pep, sizeof ref_pep,
@@ -20149,7 +20268,7 @@ static enum theft_trial_res prop_variant_coding_context_matches_oracles(struct t
     }
     if (ctx.alt_cds_len > 0u) {
         duckvep_coding_context_t fail_ctx;
-        if (duckvep_variant_coding_context_build(&s->tx, &s->ex, &s->seq, &s->v,
+        if (duckvep_variant_physical_coding_context_build(&s->tx, &s->ex, &s->seq, &s->v,
                                                  0u, 0u, s->strand, edit_scratch, 8u,
                                                  alt_cds, ctx.alt_cds_len - 1u,
                                                  ref_pep, sizeof ref_pep,
@@ -20163,7 +20282,7 @@ static enum theft_trial_res prop_variant_coding_context_matches_oracles(struct t
     }
     if (ctx.ref_peptide_len > 0u) {
         duckvep_coding_context_t fail_ctx;
-        if (duckvep_variant_coding_context_build(&s->tx, &s->ex, &s->seq, &s->v,
+        if (duckvep_variant_physical_coding_context_build(&s->tx, &s->ex, &s->seq, &s->v,
                                                  0u, 0u, s->strand, edit_scratch, 8u,
                                                  alt_cds, sizeof alt_cds,
                                                  ref_pep, ctx.ref_peptide_len,
@@ -20177,7 +20296,7 @@ static enum theft_trial_res prop_variant_coding_context_matches_oracles(struct t
     }
     if (ctx.alt_peptide_len > 0u) {
         duckvep_coding_context_t fail_ctx;
-        if (duckvep_variant_coding_context_build(&s->tx, &s->ex, &s->seq, &s->v,
+        if (duckvep_variant_physical_coding_context_build(&s->tx, &s->ex, &s->seq, &s->v,
                                                  0u, 0u, s->strand, edit_scratch, 8u,
                                                  alt_cds, sizeof alt_cds,
                                                  ref_pep, sizeof ref_pep,
@@ -20261,7 +20380,7 @@ static enum theft_trial_res prop_context_delta_matches_codon_oracle(struct theft
     uint32_t j;
     (void)t;
 
-    if (duckvep_variant_coding_context_build(&s->tx, &s->ex, &s->seq, &s->v,
+    if (duckvep_variant_physical_coding_context_build(&s->tx, &s->ex, &s->seq, &s->v,
                                              0u, 0u, s->strand,
                                              edit_scratch, 4u,
                                              alt_cds, sizeof alt_cds,
@@ -22205,7 +22324,7 @@ TEST coding_context_delta_inframe_insertion_known_scene(void) {
         }
         s.roff = 0u; s.aoff = 1u; s.rlen = 1u; s.alen = 4u;
         ASSERT_EQ(DUCKVEP_VARIANT_CODING_CONTEXT_OK,
-                  duckvep_variant_coding_context_build(&s.tx, &s.ex, &s.seq, &s.v,
+                  duckvep_variant_physical_coding_context_build(&s.tx, &s.ex, &s.seq, &s.v,
                                                        0u, 0u, s.strand,
                                                        edits, 4u, alt_cds, sizeof alt_cds,
                                                        ref_pep, sizeof ref_pep,
@@ -22573,7 +22692,7 @@ TEST coding_context_delta_delins_known_scene(void) {
         kprop_fill_variant_alt_from_tx(&s, 3u, alt6, 6u);
         s.roff = 0u; s.aoff = 3u; s.rlen = 3u; s.alen = 6u;
         ASSERT_EQ(DUCKVEP_VARIANT_CODING_CONTEXT_OK,
-                  duckvep_variant_coding_context_build(&s.tx, &s.ex, &s.seq, &s.v,
+                  duckvep_variant_physical_coding_context_build(&s.tx, &s.ex, &s.seq, &s.v,
                                                        0u, 0u, s.strand,
                                                        edits, 4u, alt_cds, sizeof alt_cds,
                                                        ref_pep, sizeof ref_pep,
@@ -22594,7 +22713,7 @@ TEST coding_context_delta_delins_known_scene(void) {
         kprop_fill_variant_alt_from_tx(&s, 6u, alt3, 3u);
         s.roff = 0u; s.aoff = 6u; s.rlen = 6u; s.alen = 3u;
         ASSERT_EQ(DUCKVEP_VARIANT_CODING_CONTEXT_OK,
-                  duckvep_variant_coding_context_build(&s.tx, &s.ex, &s.seq, &s.v,
+                  duckvep_variant_physical_coding_context_build(&s.tx, &s.ex, &s.seq, &s.v,
                                                        0u, 0u, s.strand,
                                                        edits, 4u, alt_cds, sizeof alt_cds,
                                                        ref_pep, sizeof ref_pep,
@@ -23191,7 +23310,7 @@ TEST workspace_delta_scratch_builds_lengthening_context(void) {
     ASSERT(ws_scratch->alt_cds_cap >= (size_t)s.cds_lenv + (size_t)UINT16_MAX);
     ASSERT(ws_scratch->alt_peptide_cap >= ws_scratch->alt_cds_cap / 3u + 1u);
     ASSERT_EQ(DUCKVEP_VARIANT_CODING_CONTEXT_OK,
-              duckvep_variant_coding_context_build(&s.tx, &s.ex, &s.seq, &s.v,
+              duckvep_variant_physical_coding_context_build(&s.tx, &s.ex, &s.seq, &s.v,
                                                    0u, 0u, s.strand,
                                                    ws_scratch->edits,
                                                    ws_scratch->edits_cap,
@@ -24306,7 +24425,9 @@ static enum theft_trial_res prop_delta_scratch_mnv_matches_codon_oracle(struct t
     scratch.alt_peptide = alt_pep; scratch.alt_peptide_cap = sizeof alt_pep;
 
     too_small = scratch;
-    too_small.edits_cap = 0u;
+    /* Full-feature MNVs borrow the uploaded allele, not a materialized edit
+     * array. Exhaust the local ALT storage that this producer actually uses. */
+    too_small.alt_cds_cap = 0u;
     duckvep_sequence_delta_fill_with_scratch((duckvep_variant_kind_t)s->vkind,
                                              &s->tx, &s->ex, &s->seq, &s->v,
                                              0u, 0u, s->vpos, s->strand,
@@ -24720,7 +24841,7 @@ static enum theft_trial_res prop_annotate_frameshift_indel_matches_oracle(struct
      * table the standard-stop enumeration does not apply, so require the frameshift bit and
      * allow at most the stop composite. */
     {
-        int have_ctx = duckvep_variant_coding_context_build(
+        int have_ctx = duckvep_variant_physical_coding_context_build(
                            &s->tx, &s->ex, &s->seq, &s->v, 0u, 0u, s->strand, edit_scratch, 8u,
                            alt_cds, sizeof alt_cds, ref_pep, sizeof ref_pep,
                            alt_pep, sizeof alt_pep, &fsctx) ==
@@ -25213,7 +25334,7 @@ static enum theft_trial_res prop_context_inframe_deletion_matches_oracle(struct 
     uint32_t j;
     (void)t;
 
-    if (duckvep_variant_coding_context_build(&s->tx, &s->ex, &s->seq, &s->v,
+    if (duckvep_variant_physical_coding_context_build(&s->tx, &s->ex, &s->seq, &s->v,
                                              0u, 0u, s->strand,
                                              edits, 4u, alt_cds, sizeof alt_cds,
                                              ref_pep, sizeof ref_pep,
@@ -25275,7 +25396,7 @@ static enum theft_trial_res prop_context_inframe_insertion_matches_oracle(struct
     uint32_t before_cds;
     (void)t;
 
-    if (duckvep_variant_coding_context_build(&s->tx, &s->ex, &s->seq, &s->v,
+    if (duckvep_variant_physical_coding_context_build(&s->tx, &s->ex, &s->seq, &s->v,
                                              0u, 0u, s->strand,
                                              edits, 4u, alt_cds, sizeof alt_cds,
                                              ref_pep, sizeof ref_pep,
@@ -25343,7 +25464,7 @@ static enum theft_trial_res prop_context_delins_shape_matches_oracle(struct thef
     int32_t protein_pos;
     (void)t;
 
-    if (duckvep_variant_coding_context_build(&s->tx, &s->ex, &s->seq, &s->v,
+    if (duckvep_variant_physical_coding_context_build(&s->tx, &s->ex, &s->seq, &s->v,
                                              0u, 0u, s->strand,
                                              edits, 4u, alt_cds, sizeof alt_cds,
                                              ref_pep, sizeof ref_pep,
@@ -25437,7 +25558,7 @@ static enum theft_trial_res prop_delta_scratch_indel_matches_oracle(struct theft
     scratch.ref_peptide = ref_pep; scratch.ref_peptide_cap = sizeof ref_pep;
     scratch.alt_peptide = alt_pep; scratch.alt_peptide_cap = sizeof alt_pep;
 
-    if (duckvep_variant_coding_context_build(&s->tx, &s->ex, &s->seq, &s->v,
+    if (duckvep_variant_physical_coding_context_build(&s->tx, &s->ex, &s->seq, &s->v,
                                              0u, 0u, s->strand,
                                              edits, 4u, alt_cds, sizeof alt_cds,
                                              ref_pep, sizeof ref_pep,
@@ -25734,7 +25855,7 @@ static enum theft_trial_res prop_annotate_protein_altering_insertion_matches_ora
      * suffix rule. A non-boundary insertion is inframe_insertion when the flanking residues are
      * preserved (empty ref window, or ref window prefix/suffix of alt) and protein_altering when
      * the junction residue also changes. */
-    if (duckvep_variant_coding_context_build(&s->tx, &s->ex, &s->seq, &s->v, 0u, 0u, s->strand,
+    if (duckvep_variant_physical_coding_context_build(&s->tx, &s->ex, &s->seq, &s->v, 0u, 0u, s->strand,
                                              edit_scratch, 4u, alt_cds, sizeof alt_cds,
                                              ref_pep, sizeof ref_pep, alt_pep, sizeof alt_pep,
                                              &ctx) != DUCKVEP_VARIANT_CODING_CONTEXT_OK) {
@@ -25943,7 +26064,7 @@ int main(int argc, char **argv) {
     RUN_TEST(nmd_early_cds_fact_matches_exhaustive_projection_known_scene);
     RUN_TEST(nmd_later_phase_cds_does_not_reuse_physical_early_fact);
     RUN_TEST(sequence_delta_snv_x_peptide_is_coding_unknown_known_scene);
-    RUN_TEST(sequence_delta_snv_start_test_precedes_unknown_peptide);
+    RUN_TEST(sequence_delta_later_cds_phase_uses_feature_edits);
     RUN_TEST(coding_context_incomplete_start_mnv_is_unknown_and_missense_known_scene);
     RUN_TEST(annotate_cursor_padded_snv_matches_tile_for_any_output_split);
     RUN_TEST(annotate_cursor_cross_codon_mnv_route_matches_tile_for_any_output_split);
