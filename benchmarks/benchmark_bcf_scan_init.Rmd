@@ -108,7 +108,7 @@ for (i in seq_len(nrow(cases))) for (threads in c(1L, 4L))
     region_option <- ""
     if (workload == "count") {
       projection <- "count(*) AS n"
-      reference <- data.frame(n = bit64::as.integer64(input_records))
+      reference <- DBI::dbGetQuery(con, sprintf("SELECT %d::BIGINT AS n", input_records))
     } else if (workload == "projected") {
       projection <- "CHROM,POS,REF,ALT"
       reference <- reference[c("CHROM", "POS", "REF", "ALT")]
@@ -124,7 +124,8 @@ for (i in seq_len(nrow(cases))) for (threads in c(1L, 4L))
     DBI::dbExecute(con, sql)
     expected <- DBI::dbGetQuery(con, "SELECT * FROM scanned ORDER BY ALL")
     exact <- identical(expected, reference)
-    stopifnot(exact)
+    if (!exact) stop(basename(input), "/", workload, ": ",
+                    paste(all.equal(expected, reference), collapse = "; "))
     timings <- numeric(9)
     for (i in seq_along(timings)) {
       start <- Sys.time()
