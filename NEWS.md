@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- connect the Haplosaurus differential to actual `read_geno()` calls while
+  retaining both native comparison paths, the original verifier controls and
+  source-bound build receipts; this is not a public phased-executor certificate
+
 - add record-major `read_geno()` with typed arbitrary-ploidy GT/PS calls,
   per-allele phase flags and sparse non-reference calls. Share HTSlib sample
   selection with `read_bcf()` and expose stable original-header indices through
