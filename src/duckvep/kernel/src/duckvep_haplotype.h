@@ -80,7 +80,10 @@ duckvep_haplotype_status_t duckvep_haplotype_partition(
 
 /* Apply edits to `ref_cds`, writing the mutated CDS to `cds_out` and its length
  * to `cds_len_out`. Edits must be sorted by descending original CDS coordinate
- * and must not overlap in original CDS space; this mirrors Ensembl's reverse
+ * and must not overlap in original CDS space, including two insertions at the
+ * same interbase site. Such edits require prior conflict resolution with their
+ * source provenance; input order must not choose the inserted sequence.
+ * This mirrors Ensembl's reverse
  * mapping order and permits one linear rebuild without allocation or sorting.
  * `ref_cds == cds_out` remains supported for compatibility, but distinct input
  * and output buffers are the linear streaming path. Exact aliasing requires

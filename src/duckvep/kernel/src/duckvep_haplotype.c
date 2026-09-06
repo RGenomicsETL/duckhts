@@ -268,7 +268,6 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
     size_t peak_len = ref_cds_len;
     size_t i;
     uint32_t prev_start = UINT32_MAX;
-    uint32_t prev_ref_len = 0u;
     int saw_frameshift_edit = 0;
     int64_t total_diff = 0;
     uint32_t flags = 0u;
@@ -306,19 +305,12 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
         }
         effective_end = e->ref_len == 0u ? e->cds_start :
             e->cds_start + e->ref_len - 1u;
-        if (i > 0u) {
-            if (e->cds_start > prev_start) {
-                return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_EDIT_ORDER);
-            }
-            if (e->ref_len > 0u && effective_end >= prev_start) {
-                return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_EDIT_ORDER);
-            }
-            if (e->ref_len == 0u && e->cds_start == prev_start && prev_ref_len > 0u) {
-                return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_EDIT_ORDER);
-            }
+        /* The same occupied-site test as the ascending partitioner: an
+         * insertion has no REF bases but still owns its interbase site. */
+        if (i > 0u && effective_end >= prev_start) {
+            return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_EDIT_ORDER);
         }
         prev_start = e->cds_start;
-        prev_ref_len = e->ref_len;
 
         start0 = (size_t)e->cds_start - 1u;
         if (start0 > ref_cds_len ||

@@ -8427,6 +8427,69 @@ TEST haplotype_apply_and_translate_known_cases(void) {
     PASS();
 }
 
+TEST haplotype_edit_geometry_agrees_in_both_orders(void) {
+    const uint8_t reference[] = "AAAAAAAAAAAA";
+    uint8_t output[32], before[32];
+    duckvep_haplotype_edit_t ascending[2], descending[2];
+    duckvep_haplotype_block_t blocks[2];
+    duckvep_haplotype_result_t result;
+
+    /* Exhaust every pair of in-range replacement spans and interbase sites.
+     * Alleles match by construction, so geometry is the only possible error.
+     * Include both transcript orientations, distinct scratch and exact alias,
+     * CDS starts/ends, adjacent edits, and coincident zero-length insertions. */
+    for (uint32_t left = 1u; left <= sizeof reference; left++) {
+        for (uint32_t right = left; right <= sizeof reference; right++) {
+            for (uint32_t left_len = 0u; left_len <= sizeof reference - left; left_len++) {
+                for (uint32_t right_len = 0u; right_len <= sizeof reference - right; right_len++) {
+                    for (int strand = -1; strand <= 1; strand += 2) {
+                        ascending[0] = (duckvep_haplotype_edit_t){
+                            left, left_len, reference, 1u, (const uint8_t *)"C", (int8_t)strand
+                        };
+                        ascending[1] = (duckvep_haplotype_edit_t){
+                            right, right_len, reference, 1u, (const uint8_t *)"G", (int8_t)strand
+                        };
+                        descending[0] = ascending[1];
+                        descending[1] = ascending[0];
+                        /* A point insertion occupies its interbase site for
+                         * conflict detection; two unordered edits cannot own it. */
+                        uint32_t occupied = left_len ? left_len : 1u;
+                        duckvep_haplotype_status_t expected = right - left >= occupied
+                            ? DUCKVEP_HAPLOTYPE_OK : DUCKVEP_HAPLOTYPE_EDIT_ORDER;
+                        size_t required = 999u;
+                        ASSERT_EQ(expected == DUCKVEP_HAPLOTYPE_OK,
+                                  duckvep_haplotype_partition(ascending, 2u, blocks, 2u,
+                                                              &required) == DUCKVEP_HAPLOTYPE_OK);
+                        for (int alias = 0; alias < 2; alias++) {
+                            memset(output, 0xa5, sizeof output);
+                            if (alias) memcpy(output, reference, sizeof reference);
+                            memcpy(before, output, sizeof before);
+                            size_t output_len = 999u;
+                            memset(&result, 0xa5, sizeof result);
+                            ASSERT_EQ(expected, duckvep_haplotype_apply_cds_edits(
+                                alias ? output : reference, sizeof reference - 1u,
+                                descending, 2u, (int8_t)strand, output, sizeof output,
+                                &output_len, &result));
+                            if (expected == DUCKVEP_HAPLOTYPE_EDIT_ORDER) {
+                                ASSERT_EQ(0u, required);
+                                ASSERT_EQ(0u, output_len);
+                                ASSERT_EQ(0u, result.applied_edits);
+                                ASSERT_EQ(0u, result.flags);
+                                ASSERT_EQ(0, memcmp(before, output, sizeof output));
+                            } else {
+                                ASSERT_EQ(2u, result.applied_edits);
+                                ASSERT_EQ(sizeof reference - 1u - left_len - right_len + 2u,
+                                          output_len);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    PASS();
+}
+
 TEST haplotype_partition_known_cases(void) {
     duckvep_haplotype_edit_t edits[2];
     duckvep_haplotype_block_t blocks[2];
@@ -24869,6 +24932,7 @@ int main(int argc, char **argv) {
     RUN_TEST(codon_change_consistent_with_translation);
     RUN_TEST(coding_snv_from_cds_known_cases);
     RUN_TEST(coding_snv_from_cds_matches_oracle_for_any_valid_snv);
+    RUN_TEST(haplotype_edit_geometry_agrees_in_both_orders);
     RUN_TEST(haplotype_partition_known_cases);
     RUN_TEST(haplotype_partition_preserves_interactions_for_any_valid_edit_set);
     RUN_TEST(haplotype_apply_and_translate_known_cases);
