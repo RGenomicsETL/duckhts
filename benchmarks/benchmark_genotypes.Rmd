@@ -22,6 +22,9 @@ these timings do not measure PS decoding, which SQL/R/native fixtures test.
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
 knitr::opts_knit$set(root.dir=normalizePath(".."))
+```
+
+```{r measurement, include=FALSE}
 library(DBI)
 library(duckhtsbench)
 source("benchmarks/genotype_reader_run.R")
