@@ -373,6 +373,47 @@ test_bcf_record_cache <- function() {
   expect_equal(out$correct[[1]], 2053)
 }
 
+test_bcf_index_reload <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  index <- tempfile("duckhts-bcf-index-")
+  hidden <- paste0(index, ".hidden")
+  on.exit(unlink(c(index, hidden)), add = TRUE)
+  for (file in c("parallel_empty_contigs.bcf", "parallel_empty_contigs.vcf.gz")) {
+    path <- system.file("extdata", file, package = "Rduckhts")
+    expect_true(nzchar(path))
+    build <- sprintf("SELECT * FROM bcf_index(%s, index_path := %s, threads := 1)",
+                     dbQuoteString(con, path), dbQuoteString(con, index))
+    for (workers in c(1L, 4L)) for (tidy in c(FALSE, TRUE)) for (damage in c("missing", "corrupt")) {
+      dbExecute(con, sprintf("SET threads=%d", workers))
+      dbGetQuery(con, build)
+      source <- sprintf("read_bcf(%s, index_path := %s, tidy_format := %s, decompression_threads := 0",
+                        dbQuoteString(con, path), dbQuoteString(con, index), tolower(tidy))
+      # R DuckDB's EXECUTE bookkeeping coerces the first column to numeric.
+      # Keep POS first while retaining every column for exact row comparison.
+      projection <- "SELECT POS, * EXCLUDE (POS) FROM "
+      sql <- paste0(projection, source, ") ORDER BY CHROM, POS")
+      expected <- dbGetQuery(con, sql)
+      expect_equal(nrow(expected), 2L)
+      dbExecute(con, paste("PREPARE index_scan AS", sql))
+      if (damage == "missing") {
+        expect_true(file.rename(index, hidden))
+      } else writeLines("broken index", index)
+      expect_error(dbGetQuery(con, "EXECUTE index_scan"),
+                   pattern = "read_bcf: failed to reload index for parallel scan")
+      expect_equal(dbGetQuery(con, "SELECT 4242 AS n")$n, 4242L)
+      expect_equal(dbGetQuery(con, sql), expected) # New bind: no-index fallback.
+      sequential <- paste0(projection, source, ", scan_mode := 'sequential') ORDER BY CHROM, POS")
+      expect_equal(dbGetQuery(con, sequential), expected)
+      dbGetQuery(con, build)
+      expect_equal(dbGetQuery(con, "EXECUTE index_scan"), expected)
+      dbExecute(con, "DEALLOCATE index_scan")
+      if (file.exists(hidden)) unlink(hidden)
+    }
+  }
+}
+
+test_bcf_index_reload()
 test_bcf_record_cache()
 test_bcf_string_format_lists()
 test_bcf_projection_sql()
