@@ -164,4 +164,7 @@ if [ "$sanitizer" = asan ]; then
 fi
 "${python_runtime[@]}" ./configure/venv/bin/python3 test/scripts/reader_alloc_test.py \
   --extension "$extension" --probe "$build_dir/libduckhts_reader_alloc_probe.so"
+# Reuse the complete typed oracle for nested output as well as the native decoder.
+"${python_runtime[@]}" ./configure/venv/bin/python3 scripts/run_sqllogictest.py \
+  --test-dir test/sql --file-path test/sql/geno.test --external-extension "$extension"
 echo "$sanitizer complete-extension gates: OK"
