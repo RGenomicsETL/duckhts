@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- make the internal DuckVEP CDS rebuild reject coincident insertion sites,
+  matching interaction partitioning instead of choosing ALT order from input.
+  Exhaustive native tests compare both edit orders, both transcript strands,
+  distinct scratch and exact-alias output, including unchanged buffers on conflict
+
 - add a seeded executable Haplosaurus differential for native multi-edit CDS
   mutation and translation, comparing complete sequences, frame flags and
   contributor/sample counts. This developer gate does not certify the pending
