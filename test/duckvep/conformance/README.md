@@ -47,6 +47,11 @@ The validation gates have independent jobs:
 - `make test-duckvep-differential` generates boundary, splice, codon, and allele-shape
   witnesses, runs both engines on the same GFF and FASTA, and compares the exact SO term
   set for every `(variant, transcript)` pair.
+- `make test-duckvep-projection ARGS='--vep-prefix /path/to/vep --consequences'`
+  compares the typed presentation fields and, separately, native SO terms/status/reason
+  on the derived transcript fixtures. Every physical VCF record is retained, including
+  repeated alleles. Native pair artifacts and `consequence_summary.csv` remain available
+  on failure; passing presentation fields alone do not certify native consequences.
 - `make test-duckvep-gvcf-differential` splits each ALT from a fixed mixed gVCF
   fixture into the same single-allele records given to DuckVEP, then compares
   those records with executable VEP 116. Both `T,<*>` and `<*>,T` source orders

@@ -5123,6 +5123,47 @@ static void delta_apply_codon_change(
     delta->valid = 1u;
 }
 
+/* VEP's start-offset string test uses cDNA coordinates in UTR+translateable
+ * sequence, without adding synthetic CDS phase padding to the edit offset.
+ * It is independent of peptide availability and also runs for ordinary SNVs.
+ * The unchanged UTR cancels out of both SNV string views, so only its presence
+ * and a borrowed CDS edit are needed. Genomic REF was already checked against
+ * the physical (padding-adjusted) CDS position before this function is called. */
+static void delta_snv_start_offset_facts(
+    const uint8_t                     *cds,
+    size_t                             cds_len,
+    const duckvep_coding_projection_t *projection,
+    uint64_t                           tx_flags,
+    char                               genomic_alt,
+    int8_t                             strand,
+    duckvep_sequence_delta_t          *delta) {
+
+    delta_sequence_edit_view_t edited;
+    uint32_t unpadded_position;
+    uint8_t alternate = (uint8_t)genomic_alt;
+    int alternate_start_is_atg;
+
+    if ((tx_flags & (uint64_t)DUCKVEP_TX_CDS_START_NF) != 0u ||
+        projection->cds_pos <= projection->phase_offset) return;
+    unpadded_position = projection->cds_pos - projection->phase_offset;
+    if (unpadded_position > 3u) return;
+    if (!delta_sequence_edit_view_open(NULL, 0u, cds, cds_len,
+            &alternate, 1u, 1u, (size_t)unpadded_position - 1u,
+            strand, &edited)) {
+        delta->valid = 0u;
+        delta->sequence_status = (uint8_t)DUCKVEP_SEQUENCE_INVALID_PROJECTION;
+        return;
+    }
+    alternate_start_is_atg = delta_sequence_start_codon_is_atg(&edited, 0u);
+    delta->start_retained = (uint8_t)alternate_start_is_atg;
+    if (projection->cdna_pos > unpadded_position && !alternate_start_is_atg) {
+        delta->start_lost = 1u;
+    }
+    if (delta->start_lost) delta->missense = 0u;
+    if (delta->start_retained) delta->synonymous = 0u;
+    if (delta->start_lost || delta->start_retained) delta->coding_unknown = 0u;
+}
+
 /* SNV fast path: ref_len==alt_len==1, the count==1 case of the edit set. Kept
  * private; callers enter through duckvep_sequence_delta_fill. */
 static void sequence_delta_fill_snv(
@@ -5212,6 +5253,8 @@ static void sequence_delta_fill_snv(
         delta->valid = 1u;
         delta_partial_codon_finalize(delta);
         delta->sequence_status = (uint8_t)DUCKVEP_SEQUENCE_RESOLVED;
+        delta_snv_start_offset_facts(cds_seq, cds_len, &proj,
+            transcripts->flags[tx_idx], galt, strand, delta);
         return;
     }
 
@@ -5236,6 +5279,8 @@ static void sequence_delta_fill_snv(
         delta->coding_unknown = 1u;
         delta->valid = 1u;
         delta->sequence_status = (uint8_t)DUCKVEP_SEQUENCE_RESOLVED;
+        delta_snv_start_offset_facts(cds_seq, cds_len, &proj,
+            transcripts->flags[tx_idx], galt, strand, delta);
         return;
     }
 
@@ -5247,6 +5292,8 @@ static void sequence_delta_fill_snv(
                              res.aa_alt, res.alt_codon, delta);
     if (delta->valid) {
         delta->sequence_status = (uint8_t)DUCKVEP_SEQUENCE_RESOLVED;
+        delta_snv_start_offset_facts(cds_seq, cds_len, &proj,
+            transcripts->flags[tx_idx], galt, strand, delta);
     }
 }
 

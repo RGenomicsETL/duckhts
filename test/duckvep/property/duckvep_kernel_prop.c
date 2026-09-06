@@ -16053,6 +16053,81 @@ TEST sequence_delta_snv_x_peptide_is_coding_unknown_known_scene(void) {
     PASS();
 }
 
+TEST sequence_delta_snv_start_test_precedes_unknown_peptide(void) {
+    /* Pinned executable witness: projection_fixtures.R's later CDS start,
+     * chrDuck:158 C>A. VEP's UTR+CDS test precedes its X-peptide rejection.
+     * Mirror the same transcript-oriented model for the reverse-strand control. */
+    static const uint8_t unpadded[] = "CGTACGTACGTACGTACGTACGTTACGTACGTACGTACTGGTAA";
+    static const uint32_t cdna_start[] = {1u, 27u, 58u};
+    static const uint32_t cdna_end[] = {26u, 57u, 88u};
+    uint8_t cds[sizeof unpadded + 2u];
+    uint8_t flanks[44];
+    uint64_t pre_offset = 0u, post_offset = 34u;
+    uint32_t pre_length = 34u, post_length = 10u;
+    int8_t strand;
+    int8_t phase;
+
+    memset(flanks, 'A', sizeof flanks);
+    for (strand = -1; strand <= 1; strand += 2) {
+        for (phase = 0; phase <= 2; phase++) {
+            struct kprop_coding s;
+            duckvep_sequence_delta_t delta;
+            duckvep_coding_projection_t projection;
+            uint32_t starts[] = {100u, 150u, 220u};
+            uint32_t ends[] = {125u, 180u, 250u};
+            int8_t phases[] = {-1, phase, (int8_t)((phase + 23) % 3)};
+            int8_t end_phases[] = {-1, phases[2], phases[2]};
+            size_t i;
+
+            memset(&s, 0, sizeof s);
+            memset(cds, 'N', (size_t)phase);
+            memcpy(cds + phase, unpadded, sizeof unpadded - 1u);
+            s.cds = cds; s.strand = strand;
+            s.tstart = 100u; s.tend = 250u;
+            s.cds_s = strand > 0 ? 158u : 110u;
+            s.cds_e = strand > 0 ? 240u : 192u;
+            s.excnt = 3u;
+            s.vpos = strand > 0 ? 158u : 192u; s.vend = s.vpos;
+            s.vkind = (uint8_t)DUCKVEP_KIND_SNV;
+            s.abytes[0] = strand > 0 ? 'C' : 'G';
+            s.abytes[1] = strand > 0 ? 'A' : 'T';
+            s.aoff = 1u; s.rlen = 1u; s.alen = 1u;
+            kprop_wire_coding_scene(&s, (uint32_t)(sizeof unpadded - 1u + phase));
+            if (strand < 0) for (i = 0u; i < 3u; i++) {
+                uint32_t start = starts[i];
+                starts[i] = 350u - ends[i]; ends[i] = 350u - start;
+            }
+            s.ex.start1 = starts; s.ex.end1 = ends;
+            s.ex.cdna_start1 = cdna_start; s.ex.cdna_end1 = cdna_end;
+            s.ex.phase = phases; s.ex.end_phase = end_phases; s.ex.exon_count = 3u;
+            s.seq.flank_bytes = flanks; s.seq.flank_bytes_len = sizeof flanks;
+            s.seq.pre_cds_offset = &pre_offset; s.seq.pre_cds_length = &pre_length;
+            s.seq.post_cds_offset = &post_offset; s.seq.post_cds_length = &post_length;
+            s.seq.flanks_complete = 1u;
+
+            ASSERT(duckvep_project_coding_base(&s.tx, &s.ex, 0u, s.vpos, &projection));
+            ASSERT_EQ((uint32_t)phase + 1u, projection.cds_pos);
+            ASSERT_EQ('C', cds[projection.cds_pos - 1u]);
+            duckvep_sequence_delta_fill_for_annotation(DUCKVEP_KIND_SNV,
+                &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, s.vpos, strand, NULL, NULL, &delta);
+            ASSERT(delta.valid && delta.start_lost && !delta.coding_unknown && !delta.missense);
+            ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_RESOLVED, delta.sequence_status);
+
+            s.flags = (uint64_t)DUCKVEP_TX_CDS_START_NF;
+            duckvep_sequence_delta_fill_for_annotation(DUCKVEP_KIND_SNV,
+                &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, s.vpos, strand, NULL, NULL, &delta);
+            ASSERT(delta.valid && !delta.start_lost && !delta.start_retained);
+            s.flags = 0u;
+            s.abytes[0] = strand > 0 ? 'G' : 'C';
+            duckvep_sequence_delta_fill_for_annotation(DUCKVEP_KIND_SNV,
+                &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, s.vpos, strand, NULL, NULL, &delta);
+            ASSERT(!delta.valid && !delta.start_lost);
+            ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_REFERENCE_MISMATCH, delta.sequence_status);
+        }
+    }
+    PASS();
+}
+
 /* VEP's missense and coding_unknown predicates are independent. An equal-length
  * replacement on a CDS_START_NF transcript can preserve the leading X while
  * changing later amino acids, yielding both facts. This is the reduced form of
@@ -25453,6 +25528,7 @@ int main(int argc, char **argv) {
     RUN_TEST(sequence_delta_simple_indel_route_matches_generalized_context);
     RUN_TEST(nmd_early_cds_fact_matches_exhaustive_projection_known_scene);
     RUN_TEST(sequence_delta_snv_x_peptide_is_coding_unknown_known_scene);
+    RUN_TEST(sequence_delta_snv_start_test_precedes_unknown_peptide);
     RUN_TEST(coding_context_incomplete_start_mnv_is_unknown_and_missense_known_scene);
     RUN_TEST(annotate_cursor_padded_snv_matches_tile_for_any_output_split);
     RUN_TEST(annotate_cursor_cross_codon_mnv_route_matches_tile_for_any_output_split);

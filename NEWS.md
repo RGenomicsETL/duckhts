@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- retain DuckVEP's independent SNV start-codon predicate when phase-padded CDS
+  sequence produces an unknown peptide, preserving physical REF validation.
+  Add an opt-in native SO/status check to the R projection differential that
+  retains every physical input record, including repeated alleles
+
 - add SQL-first `duckvep_transcript_projection()` for typed VEP feature alleles,
   cDNA/CDS/protein ranges, exon/intron ordinals, transcript distance, quality
   flags and variable-length codon/amino-acid display from existing annotations

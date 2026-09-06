@@ -248,6 +248,19 @@ SELECT cdna_start, cds_start, cds_end, protein_start, reference_codons, alternat
 ----
 12	3	3	1	ngG	ngA	X	X
 
+# Native start predicates remain observable even when the peptide is unknown.
+# Here the first coding base is also the first base of the second exon.
+statement ok
+CREATE TABLE projection_start_event AS SELECT * REPLACE(25::UBIGINT AS position)
+FROM projection_later_event;
+
+query IT
+SELECT (consequence_mask=(SELECT sum(consequence_mask)::UBIGINT FROM duckvep_so_terms()
+  WHERE consequence IN ('start_lost','splice_region_variant')))::INTEGER, duckvep_status
+FROM duckvep_annotate('projection_start_event', 'later-phase', rich := true);
+----
+1	supported
+
 query I
 SELECT duckvep_model_drop('later-phase');
 ----
@@ -279,6 +292,13 @@ SELECT cdna_start, cds_start, cds_end, protein_start, reference_codons, alternat
     'projection_later_event', 'projection_later_annotation', 'projection_later_phase');
 ----
 12	3	3	1	nnG	nnA	X	X
+
+query IT
+SELECT (consequence_mask=(SELECT sum(consequence_mask)::UBIGINT FROM duckvep_so_terms()
+  WHERE consequence IN ('start_lost','splice_region_variant')))::INTEGER, duckvep_status
+FROM duckvep_annotate('projection_start_event', 'later-phase', rich := true);
+----
+1	supported
 
 query I
 SELECT duckvep_model_drop('later-phase');

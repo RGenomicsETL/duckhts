@@ -880,6 +880,15 @@ separately over one allocation-free edited-sequence view. Do not collapse them i
 boolean or “correct” the combination. Models without complete transcript flanks return
 `missing_transcript_flank`.
 
+For an SNV, the unchanged UTR cancels out of the string comparison. The edit
+offset is the unpadded cDNA offset within the CDS, even when `translateable_seq`
+starts with synthetic phase-padding bases. This start test runs before the
+unknown-peptide guard: a nonempty UTR and a reconstructed non-ATG initial codon
+can yield `start_lost` with `X/X` peptide alleles. The retained later-CDS witness
+`chrDuck:158 C>A` and `sequence_delta_snv_start_test_precedes_unknown_peptide`
+pin this ordering. Physical genomic REF validation still uses the padding-adjusted
+position; the start-offset string view must not replace that reference check.
+
 The same independence applies to `inframe_insertion`. VEP suppresses that term for a
 start-retaining insertion only when the complete reference peptide is the *suffix* of the
 alternate peptide, meaning that new residues were added before translation began. When the

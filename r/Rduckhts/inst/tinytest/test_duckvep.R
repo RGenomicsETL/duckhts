@@ -1521,6 +1521,18 @@ local({
       "'duckvep_r_projection_phase_model')"
     ))
     expect_equal(phase_result, data.frame(cdna_start=54, cds_start=3, cds_end=3, protein_start=1))
+    dbExecute(con, paste(
+      "CREATE OR REPLACE TABLE duckvep_r_phase_start_events AS SELECT e.* REPLACE(",
+      "200::UBIGINT AS position, substring(decode(m.cds_sequence),32,1) AS reference,",
+      "CASE WHEN substring(decode(m.cds_sequence),32,1)='C' THEN 'G' ELSE 'C' END AS alternate)",
+      "FROM duckvep_r_projection_events e, duckvep_r_projection_model m WHERE event_index=1"
+    ))
+    start_result <- dbGetQuery(con, paste(
+      "SELECT consequence_mask=(SELECT sum(consequence_mask)::UBIGINT FROM duckvep_so_terms()",
+      "WHERE consequence IN ('start_lost','splice_region_variant')) start_lost, duckvep_status status FROM",
+      "duckvep_annotate('duckvep_r_phase_start_events', 'r-projection-phase', rich := true)"
+    ))
+    expect_identical(start_result, data.frame(start_lost=TRUE, status="supported"))
     expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-projection-phase') dropped")$dropped)
   }
   dbExecute(con, paste(
