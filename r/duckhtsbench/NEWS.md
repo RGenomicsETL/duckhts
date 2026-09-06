@@ -1,5 +1,9 @@
 # duckhtsbench 0.0.0.9000
 
+- expose the canonical nested model tables through shared read-only flat SQL
+  projections for conformance and benchmark consumers, preserving every exon,
+  mature-miRNA segment, peptide edit, transcript label and sequence byte
+
 - stage complete VEP-116 GRCh38 chromosome-21 cache shards and all root metadata
   by streaming the pinned upstream archive, without storing the full compressed
   archive; verify transfer identity and publish a canonical acquisition receipt

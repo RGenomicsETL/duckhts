@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- share read-only projections of registry-built nested DuckVEP models between
+  the conformance runner and FastVEP benchmark worker, removing their dependence
+  on separately persisted flat views without rewriting model artifacts
+
 - add registry-owned streaming acquisition of the complete VEP-116 GRCh38
   chromosome-21 cache for ClinVar acceptance campaigns, retaining all region
   shards and root metadata without storing the full upstream archive

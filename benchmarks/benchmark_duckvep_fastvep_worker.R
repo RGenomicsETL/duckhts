@@ -87,11 +87,13 @@ invisible(dbExecute(
   con,
   glue("ATTACH {sql_q(model)} AS duckvep_bench_model (READ_ONLY)")
 ))
+source(file.path(root, "r/duckhtsbench/R/duckvep_relations.R"), local = TRUE)
+model_relations <- duckhts_bench_duckvep_relations(con, "duckvep_bench_model")
 invisible(dbExecute(
   con,
-  "CREATE TEMP TABLE duckvep_bench_regions AS
+  glue("CREATE TEMP TABLE duckvep_bench_regions AS
    SELECT seq_region, name
-   FROM duckvep_bench_model.duckvep_sequence_regions"
+   FROM {model_relations[['duckvep_sequence_regions']]}")
 ))
 invisible(dbExecute(
   con,
@@ -102,30 +104,30 @@ invisible(dbExecute(
 
 region_query <- paste(
   "SELECT seq_region, sequence_length",
-  "FROM duckvep_bench_model.duckvep_sequence_regions",
+  "FROM", model_relations[["duckvep_sequence_regions"]],
   "ORDER BY seq_region"
 )
 transcript_query <- paste(
   "SELECT transcript_index, seq_region, transcript_start, transcript_end,",
   "strand, gene_index, transcript_flags, cds_start, cds_end, cds_sequence,",
   "codon_table, pre_cds_sequence, post_cds_sequence",
-  "FROM duckvep_bench_model.duckvep_transcripts",
+  "FROM", model_relations[["duckvep_transcripts"]],
   "ORDER BY seq_region, transcript_start, transcript_index"
 )
 exon_query <- paste(
   "SELECT transcript_index, exon_start, exon_end, exon_cdna_start,",
   "exon_cdna_end, phase, end_phase",
-  "FROM duckvep_bench_model.duckvep_exons",
+  "FROM", model_relations[["duckvep_exons"]],
   "ORDER BY transcript_index, exon_cdna_start"
 )
 mature_mirna_query <- paste(
   "SELECT transcript_index, mature_mirna_start, mature_mirna_end",
-  "FROM duckvep_bench_model.duckvep_mature_mirna",
+  "FROM", model_relations[["duckvep_mature_mirna"]],
   "ORDER BY transcript_index, mature_mirna_start"
 )
 peptide_edit_query <- paste(
   "SELECT transcript_index, protein_position, alternate_amino_acid",
-  "FROM duckvep_bench_model.duckvep_peptide_edits",
+  "FROM", model_relations[["duckvep_peptide_edits"]],
   "ORDER BY transcript_index, protein_position"
 )
 

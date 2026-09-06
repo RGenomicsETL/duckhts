@@ -239,7 +239,14 @@ For a large VCF, prepare an ordinary DuckDB database containing
 `duckvep_transcript_names`. When the model carries Ensembl mature-miRNA
 attributes, also provide `duckvep_mature_mirna` with transcript index and
 inclusive genomic start/end columns. The runner loads that packed side relation
-automatically. Then run, for example:
+automatically. Registry-built models instead store `model_regions` and nested
+`model_transcripts`; shared read-only SQL projections expose the same flat
+relations, including every exon, mature-miRNA segment and peptide edit. They do
+not rewrite the artifact or recompute biological fields. Model-load queries
+refer directly to the attached catalog so they also work from separate DuckDB
+connections. The FastVEP benchmark worker uses the same projections.
+
+Then run, for example:
 
 ```sh
 make duckvep-corpus-differential DUCKVEP_DIFFERENTIAL_ARGS="\
