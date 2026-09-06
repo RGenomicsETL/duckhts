@@ -111,14 +111,14 @@ assembly-specific frontier.
 
 | revision | corpus                          | model        | metric | exact           | match | both_absent | discordant |
 |:---------|:--------------------------------|:-------------|:-------|:----------------|------:|------------:|-----------:|
-| c977cba1 | clinvar_chr21_hgvs_seed113      | differential | HGVSC  | 56,998/56,998   | 44871 |       12127 |          0 |
-| c977cba1 | clinvar_chr21_hgvs_seed113      | differential | HGVSP  | 56,998/56,998   | 20782 |       36216 |          0 |
+| a84ff150 | clinvar_chr21_hgvs_seed113      | differential | HGVSC  | 56,998/56,998   | 44871 |       12127 |          0 |
+| a84ff150 | clinvar_chr21_hgvs_seed113      | differential | HGVSP  | 56,998/56,998   | 20782 |       36216 |          0 |
 | 05620047 | state_exploration_seed_31415927 | differential | HGVSC  | 100,268/100,268 | 99146 |        1122 |          0 |
 | 05620047 | state_exploration_seed_31415927 | differential | HGVSP  | 100,268/100,268 | 31021 |       69247 |          0 |
 
 | revision | corpus                          | extension_build               | extension    | model_kind | model        | reference    | reference_index | source_vcf   | input_vcf    | pair_artifact |
 |:---------|:--------------------------------|:------------------------------|:-------------|:-----------|:-------------|:-------------|:----------------|:-------------|:-------------|:--------------|
-| c977cba1 | clinvar_chr21_hgvs_seed113      | htslib_distclean_make_release | 53af1444f11b | duckdb     | 4c2077c83958 | 1e74081a49ce | 0998f61682f4    | 7ecec9a75071 | 7ecec9a75071 | 326379827c7d  |
+| a84ff150 | clinvar_chr21_hgvs_seed113      | htslib_distclean_make_release | 70158780e020 | duckdb     | 9ffea3c63a0f | 1e74081a49ce | 0998f61682f4    | 7ecec9a75071 | 7ecec9a75071 | bfbf8f89fb4b  |
 | 05620047 | state_exploration_seed_31415927 | htslib_distclean_make_release | e5585991c613 | sql        | 8c42a1377020 | 01d1f0252130 | 154cbe440869    | 1c5cbf73b5f6 | beab52a9d117 | 4ad71d6042fd  |
 
 This is exact string agreement for independent transcript events with
@@ -268,6 +268,8 @@ recorded.
 | 2026-07-20 | e25c1513        | sv_confidence_grch38                                     | differential               |     466 |         466 |          0 |        466 |                   0 | 100.00%    | 0.79%                                 |
 | 2026-07-20 | e25c1513        | witnesses                                                | differential               |     268 |         268 |          0 |        268 |                   0 | 100.00%    | 1.37%                                 |
 | 2026-07-22 | 05620047        | state_exploration_seed_31415927                          | differential               |  100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                                 |
+| 2026-09-06 | a84ff150        | clinvar_chr21_hgvs_seed113                               | differential               |   56998 |       56998 |          0 |      56998 |                   0 | 100.00%    | 0.01%                                 |
+| 2026-09-06 | a84ff150        | nmd_clinvar_chr21                                        | ensembl116-grch38-final    | 1353288 |     1353288 |          0 |    1353288 |                   0 | 100.00%    | 0.00%                                 |
 
 ## Randomized executable-VEP state exploration
 
@@ -565,18 +567,28 @@ Plugins release/116 `NMD.pm`. It compares `triggering`, `escaping`, and
 `unresolved` for every eligible transcript pair; it does not infer NMD
 from the core `NMD_transcript_variant` biotype consequence.
 
+The `a84ff1500149` run uses registered `variantkey_clinvar_20260706` on
+chromosome 21: 49,937 source records yield 49,781 eligible alleles under
+the existing 50-base limit, with no duplicate eligible alleles removed.
+The oracle uses registered `vep116_grch38_cache_chr21`, containing every
+chromosome-21 cache file and root metadata; the native model is
+`duckvep_ensembl116_model`. Its 1,353,288 native pairs all match. The
+70,521 NMD classifications include 29,954 unresolved by both engines,
+not resolved predictions. These denominators differ from the historical
+NMD run; this is not an identical-workload comparison.
+
 | revision | corpus            | model                   | exact       | mismatches | not comparable | VEP unresolved | DuckVEP unresolved | descriptive independent-pair upper 95% |
 |:---------|:------------------|:------------------------|:------------|-----------:|---------------:|---------------:|-------------------:|:---------------------------------------|
-| c361346f | nmd_clinvar_chr21 | ensembl116-grch38-final | 68554/68554 |          0 |              0 |          29416 |              29416 | 0.01%                                  |
+| a84ff150 | nmd_clinvar_chr21 | ensembl116-grch38-final | 70521/70521 |          0 |              0 |          29954 |              29954 | 0.01%                                  |
 
 The ledger keeps the prediction confusion matrix rather than only the
 total:
 
 | revision | corpus            | VEP_prediction | DuckVEP_prediction |     n |
 |:---------|:------------------|:---------------|:-------------------|------:|
-| c361346f | nmd_clinvar_chr21 | escaping       | escaping           |  6937 |
-| c361346f | nmd_clinvar_chr21 | triggering     | triggering         | 32201 |
-| c361346f | nmd_clinvar_chr21 | unresolved     | unresolved         | 29416 |
+| a84ff150 | nmd_clinvar_chr21 | escaping       | escaping           |  7175 |
+| a84ff150 | nmd_clinvar_chr21 | triggering     | triggering         | 33392 |
+| a84ff150 | nmd_clinvar_chr21 | unresolved     | unresolved         | 29954 |
 
 VEP projects the complete uploaded `VariationFeature` for the plugin’s
 CDS and exon-position rules. DuckVEP therefore retains both geometries:

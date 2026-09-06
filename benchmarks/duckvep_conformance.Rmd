@@ -968,6 +968,15 @@ release/116 `NMD.pm`. It compares `triggering`, `escaping`, and `unresolved`
 for every eligible transcript pair; it does not infer NMD from the core
 `NMD_transcript_variant` biotype consequence.
 
+The `a84ff1500149` run uses registered `variantkey_clinvar_20260706` on
+chromosome 21: 49,937 source records yield 49,781 eligible alleles under the
+existing 50-base limit, with no duplicate eligible alleles removed. The oracle
+uses registered `vep116_grch38_cache_chr21`, containing every chromosome-21
+cache file and root metadata; the native model is `duckvep_ensembl116_model`.
+Its 1,353,288 native pairs all match. The 70,521 NMD classifications include
+29,954 unresolved by both engines, not resolved predictions. These denominators
+differ from the historical NMD run; this is not an identical-workload comparison.
+
 ```{r nmd-summary}
 if (!is.null(latest_nmd_run_ids) && nrow(latest_nmd_run_ids)) {
   latest_nmd <- merge(
