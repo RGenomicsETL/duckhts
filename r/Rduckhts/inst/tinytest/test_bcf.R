@@ -437,6 +437,12 @@ test_bcf_index_snapshot <- function() {
                           path, overwrite = TRUE))
     dbGetQuery(con, build)
     expect_equal(dbGetQuery(con, sql), expected)
+    auto_sql <- sub(",scan_mode:='sequential'", "", sql, fixed = TRUE)
+    expect_equal(dbGetQuery(con, auto_sql), expected)
+    region_sql <- sub(",scan_mode:='sequential'", ",region:='chr3:20-40,chr3:20-20'", sql, fixed = TRUE)
+    expected_region <- expected[expected$CHROM == "chr3", ]
+    rownames(expected_region) <- NULL
+    expect_equal(dbGetQuery(con, region_sql), expected_region)
     unlink(c(path, index))
   }
 }
