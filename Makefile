@@ -12,6 +12,7 @@
 	duckvep-so-spec duckvep-so-spec-check \
 	test-duckvep-witnesses test-duckvep-differential \
 	test-duckvep-gvcf-differential \
+	test-duckvep-haplotype-mechanics \
 	test-duckvep-state-exploration \
 	test-duckvep-release-vcf \
 	duckvep-corpus-differential duckvep-statistical-report \
@@ -568,6 +569,12 @@ test-duckvep-differential: release
 	VEP_PREFIX=$(VEP_PREFIX) Rscript test/duckvep/conformance/corpus_differential.R \
 		--extension build/release/duckhts.duckdb_extension \
 		--sample-per-shape 0 --hgvs
+
+# Independent Haplosaurus oracle for the existing native edit-set mechanics.
+# No DuckDB build or public phased-execution claim is involved.
+test-duckvep-haplotype-mechanics:
+	VEP_PREFIX=$(VEP_PREFIX) Rscript test/duckvep/conformance/haplotype_differential.R \
+		$(DUCKVEP_HAPLOTYPE_ARGS)
 
 # VEP receives one single-ALT record for each expanded input allele. This pins
 # both ALT orders in mixed gVCF records without asking either engine to infer

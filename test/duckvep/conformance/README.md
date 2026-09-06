@@ -495,3 +495,33 @@ The corpus runner currently compares independent alleles. The pure C tests cover
 edit grouping, same-codon interactions, open frameshifts, and restored frameshifts; a VEP
 Haplosaurus differential belongs with the public phased input surface rather than being
 faked in this runner.
+
+`make test-duckvep-haplotype-mechanics` runs the narrower executable prerequisite:
+the existing pure-C edit application/translation helpers against the pinned Haplosaurus
+parser, genomic-to-CDS mapper and transcript container. It generates two-exon transcripts
+on both strands, ordinary genomic VCF records, cis/trans diploid carriers and shared
+haplotypes. Same-codon substitutions, open/restored frameshifts, in-frame edits and seeded
+random edit sets are compared by complete alternate CDS/protein sequence, frame flags,
+every CDS contributor, per-sample counts and total carrier counts. For a larger campaign:
+
+```sh
+make test-duckvep-haplotype-mechanics DUCKVEP_HAPLOTYPE_ARGS="--cases 1000 --seed 173"
+```
+
+The R driver supplies known original-CDS coordinates to a test-only `.C` bridge;
+Haplosaurus independently parses and projects the same genomic alleles. The Perl observer
+changes only serialization. Clean exact-commit VEP/Variation mirrors and the existing
+exact-package environment lock are required. Generated inputs, both engines' complete
+observations, mismatch rows, counts and byte receipts remain in a unique directory under
+`results/`, including after a failed comparison. These diagnostic receipts do not update
+release conformance histories or the `not_implemented` phased transition.
+Seven deliberate corruptions exercise each comparison field; their rejection counts
+are reported separately from the real engine comparisons.
+
+This is **not** a public phased-executor certificate: it does not test DuckDB carrier
+streaming, strict phase/PS grouping, sparse-prefix ownership, compound SO/HGVS, structural
+composition or arbitrary ploidy. Haplosaurus exposes sequence differences and frame
+flags, not a compound SO/HGVS oracle. Its offline container also defaults to two lanes
+without inferring VCF ploidy; that behavior must not silently define DuckVEP's ploidy
+contract. The existing independent-event and pure-C property campaigns remain separate
+and unchanged.
