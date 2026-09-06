@@ -87,6 +87,10 @@ Source headers, transfer log, full-archive digest and extracted member list are 
 Existing caches are validated, not overwritten. The network-free acquisition tests also
 exercise nested shards, incomplete transfers, bad source identity and cache mutation.
 
+The archive SHA-256 is a maintainer-recorded digest of a complete HTTPS transfer
+checked against Ensembl's published BSD `sum` and block count, not a claimed
+publisher-supplied SHA-256. Subsequent acquisitions must match that fixed content pin.
+
 Other already acquired caches can use `make duckvep-cache-receipt` with their verified
 source URL and identity. Supported identities are `sha256:HEX`, `md5:HEX`,
 `bsd-sum:SUM:BLOCKS`, or `http-etag:ETAG:BYTES`. Acquisition and extraction stay outside
