@@ -157,6 +157,13 @@ for (group in c("core", "funcgen")) {
 }
 DBI::dbDisconnect(con, shutdown = TRUE)
 
+# A model from a previous logical schema must not prevent staging the newly
+# registered identity, or be overwritten when its replacement is compiled.
+previous_model <- file.path(cache_dir, "models/duckvep/ensembl-116-grch38.duckdb")
+dir.create(dirname(previous_model), recursive = TRUE, showWarnings = FALSE)
+writeLines("previous model retained", previous_model)
+stopifnot(file.path(cache_dir, registry$cache_relpath[registry$id == "duckvep_ensembl116_model"]) != previous_model)
+
 for (id in registry$id[registry$transform == "direct_download"]) {
   registry$locator[registry$id == id] <- paste0("file://", source_map[[id]])
 }
@@ -170,11 +177,13 @@ printf 'stale parquet' >"$CACHE_DIR/benchmarks/variantkey-providers/raw/revel_gr
 PATH="$FAKE_BIN:$PATH" DUCKHTS_CACHE_DIR="$CACHE_DIR" DUCKHTSBENCH_REGISTRY="$REGISTRY" \
   Rscript "$ROOT_DIR/r/duckhtsbench/scripts/stage_variantkey_providers.R" >/dev/null
 
-Rscript - "$CACHE_DIR/models/duckvep/ensembl-116-grch38.duckdb" <<'RS'
+Rscript - "$REGISTRY" "$CACHE_DIR" <<'RS'
 args <- commandArgs(trailingOnly = TRUE)
+registry <- utils::read.delim(args[[1L]], stringsAsFactors = FALSE, check.names = FALSE)
+model <- file.path(args[[2L]], registry$cache_relpath[registry$id == "duckvep_ensembl116_model"])
 suppressPackageStartupMessages(library(DBI))
 suppressPackageStartupMessages(library(duckdb))
-con <- DBI::dbConnect(duckdb::duckdb(), args[[1L]])
+con <- DBI::dbConnect(duckdb::duckdb(), model)
 invisible(DBI::dbExecute(con, "UPDATE model_transcripts SET transcript_flags = transcript_flags + 1 WHERE transcript_index = 0"))
 DBI::dbDisconnect(con, shutdown = TRUE)
 RS
@@ -188,6 +197,8 @@ Rscript - "$REGISTRY" "$CACHE_DIR" <<'RS'
 args <- commandArgs(trailingOnly = TRUE)
 registry <- utils::read.delim(args[[1]], stringsAsFactors = FALSE, check.names = FALSE)
 paths <- file.path(args[[2]], registry$cache_relpath)
+stopifnot(identical(readLines(file.path(args[[2]], "models/duckvep/ensembl-116-grch38.duckdb")),
+  "previous model retained"))
 expected <- registry$id[registry$workload == "variantkey-providers"]
 for (id in expected) {
   output <- paths[registry$id == id]
@@ -198,6 +209,7 @@ suppressPackageStartupMessages(library(DBI))
 suppressPackageStartupMessages(library(duckdb))
 model <- paths[registry$id == "duckvep_ensembl116_model"]
 model_con <- DBI::dbConnect(duckdb::duckdb(), model, read_only = TRUE)
+stopifnot(!"post_cds_bases" %in% DBI::dbListFields(model_con, "model_transcripts"))
 metadata <- DBI::dbGetQuery(model_con, "SELECT source_release, vep_release, species, species_id, assembly FROM model_metadata")
 stopifnot(
   nrow(metadata) == 1L,
