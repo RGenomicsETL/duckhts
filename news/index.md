@@ -2,6 +2,11 @@
 
 ## Rduckhts 1.5.1.9000-0.1.5
 
+- make a missing or corrupt worker index a bundled BCF/VCF query error
+  when bind selected parallel scanning; preserve ordinary no-index
+  fallback and same-connection recovery rather than silently losing
+  records
+
 - make bundled BAM formatting and list-growth failures DBI query errors,
   preserving same-connection recovery and genuine missing/empty values
   instead of returning fabricated CIGAR or partial auxiliary tags. Size
