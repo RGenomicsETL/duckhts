@@ -1,6 +1,12 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- add a caller-owned native carrier index for phased-execution development:
+  preserve explicit sample/phase-set/lane keys, share event prefixes, drain
+  distinct occupied paths and recycle slots at transcript completion. Dense
+  matrix properties and the Haplosaurus mechanics gate exercise the index;
+  no public phased SQL function or genotype phase policy is introduced
+
 - make the internal DuckVEP CDS rebuild reject coincident insertion sites,
   matching interaction partitioning instead of choosing ALT order from input.
   Exhaustive native tests compare both edit orders, both transcript strands,

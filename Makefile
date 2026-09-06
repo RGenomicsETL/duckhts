@@ -449,7 +449,8 @@ DUCKVEP_KERNEL_SOURCES = \
 	src/duckvep/kernel/src/duckvep_hgvs.c \
 	src/duckvep/kernel/src/duckvep_codon.c \
 	src/duckvep/kernel/src/duckvep_coding.c \
-	src/duckvep/kernel/src/duckvep_haplotype.c
+	src/duckvep/kernel/src/duckvep_haplotype.c \
+	src/duckvep/kernel/src/duckvep_carriers.c
 DUCKVEP_PROPERTY_DRIVER = test/duckvep/property/duckvep_kernel_prop.c
 DUCKVEP_THEFT_PATCH = test/duckvep/vendor/patches/theft-mingw-no-fork.patch
 DUCKVEP_PROPERTY_CPPFLAGS ?=

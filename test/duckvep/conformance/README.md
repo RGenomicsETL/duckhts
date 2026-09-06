@@ -508,8 +508,14 @@ every CDS contributor, per-sample counts and total carrier counts. For a larger 
 make test-duckvep-haplotype-mechanics DUCKVEP_HAPLOTYPE_ARGS="--cases 1000 --seed 173"
 ```
 
-The R driver supplies known original-CDS coordinates to a test-only `.C` bridge;
-Haplosaurus independently parses and projects the same genomic alleles. The Perl observer
+The R driver supplies known original-CDS coordinates to test-only `.C` bridges.
+One applies each independently grouped edit set; the other feeds explicit carrier rows
+through the native sparse prefix index, resumes between every carrier row, and rebuilds
+and translates each occupied event path once. Their complete lane outputs must agree
+before comparison with Haplosaurus. `carrier_metrics.csv` records input events/carriers,
+peak active slots, completed event paths and translated bases; it is diagnostic work
+accounting, not an execution-time or cohort-memory benchmark. Haplosaurus independently
+parses and projects the same genomic alleles. The Perl observer
 changes only serialization. Clean exact-commit VEP/Variation mirrors and the existing
 exact-package environment lock are required. Generated inputs, both engines' complete
 observations, mismatch rows, counts and byte receipts remain in a unique directory under
@@ -519,7 +525,7 @@ Seven deliberate corruptions exercise each comparison field; their rejection cou
 are reported separately from the real engine comparisons.
 
 This is **not** a public phased-executor certificate: it does not test DuckDB carrier
-streaming, strict phase/PS grouping, sparse-prefix ownership, compound SO/HGVS, structural
+streaming, strict phase/PS interpretation, compound SO/HGVS, structural
 composition or arbitrary ploidy. Haplosaurus exposes sequence differences and frame
 flags, not a compound SO/HGVS oracle. Its offline container also defaults to two lanes
 without inferring VCF ploidy; that behavior must not silently define DuckVEP's ploidy

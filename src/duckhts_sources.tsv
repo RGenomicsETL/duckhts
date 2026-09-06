@@ -37,6 +37,7 @@ src/duckvep/kernel/src/duckvep_hgvs.c|duckvep/kernel/src/duckvep_hgvs.c
 src/duckvep/kernel/src/duckvep_codon.c|duckvep/kernel/src/duckvep_codon.c
 src/duckvep/kernel/src/duckvep_coding.c|duckvep/kernel/src/duckvep_coding.c
 src/duckvep/kernel/src/duckvep_haplotype.c|duckvep/kernel/src/duckvep_haplotype.c
+src/duckvep/kernel/src/duckvep_carriers.c|duckvep/kernel/src/duckvep_carriers.c
 src/duckvep/duckvep_model.c|duckvep/duckvep_model.c
 src/duckvep/duckvep_annotate.c|duckvep/duckvep_annotate.c
 src/duckvep/duckvep_ensembl.c|duckvep/duckvep_ensembl.c
