@@ -2,7 +2,8 @@
 #'
 #' The archive is streamed through GNU tar; only registered region subtrees and
 #' every top-level metadata file are retained. No variant or transcript selection
-#' occurs here. Publication requires a complete transfer and successful extraction.
+#' occurs here. Publication requires a pinned content checksum, a complete transfer
+#' and successful extraction.
 #'
 #' @param repo DuckHTS checkout supplying the canonical cache receipt functions.
 #' @param id Derived cache artifact in the benchmark registry.
@@ -34,13 +35,15 @@ duckhts_bench_stage_vep_cache <- function(
   prefix <- paste(scope[["species"]], paste(scope[["cache_version"]],
     scope[["assembly"]], sep = "_"), sep = "/")
   identity <- duckhts_bench_identity_fields(source_row$supplier_identity)
-  source_identity <- if ("sha256" %in% names(identity)) {
-    paste0("sha256:", identity[["sha256"]])
-  } else if ("md5" %in% names(identity)) {
-    paste0("md5:", identity[["md5"]])
-  } else if (all(c("etag", "bytes") %in% names(identity))) {
-    paste0("http-etag:", identity[["etag"]], ":", identity[["bytes"]])
-  } else stop("VEP archive needs a checksum or ETag/byte identity", call. = FALSE)
+  algorithm <- intersect(c("sha256", "md5"), names(identity))
+  if (length(algorithm) != 1L) {
+    stop("VEP archive requires a registry-pinned SHA-256 or MD5 content checksum (exactly one)", call. = FALSE)
+  }
+  digest_length <- if (algorithm == "sha256") 64L else 32L
+  if (!grepl(paste0("^[0-9a-f]{", digest_length, "}$"), identity[[algorithm]])) {
+    stop("VEP archive requires a registry-pinned SHA-256 or MD5 content checksum", call. = FALSE)
+  }
+  source_identity <- paste0(algorithm, ":", identity[[algorithm]])
   evidence <- new.env(parent = baseenv())
   sys.source(file.path(normalizePath(repo), "scripts", "duckvep_evidence.R"), evidence)
   output <- duckhts_bench_artifact_path(id)
@@ -72,20 +75,20 @@ duckhts_bench_stage_vep_cache <- function(
   headers_path <- file.path(staging, "source.headers")
   log_path <- file.path(staging, "acquisition.log")
   members_path <- file.path(staging, "archive-members.txt")
+  digest_path <- file.path(staging, "archive.digest")
   tar_args <- c("--extract", "--gzip", "--verbose", "--ignore-zeros",
     "--no-same-owner", "--no-same-permissions", "--keep-old-files",
     "--directory", staging, "--file", if (is.null(archive)) "-" else normalizePath(archive),
     "--no-recursion", "--wildcards", "--no-wildcards-match-slash", paste0(prefix, "/*"),
     "--wildcards-match-slash", paste0(prefix, "/", region, "/*"))
   if (!is.null(archive)) {
-    if (!any(c("sha256", "md5") %in% names(identity))) {
-      stop("a local VEP archive requires a registry-pinned content checksum", call. = FALSE)
-    }
     duckhts_bench_validate_identity(source_id, archive)
     status <- system2(tar, shQuote(tar_args), stdout = members_path, stderr = log_path)
   } else {
-    if (any(c("sha256", "md5") %in% names(identity))) {
-      stop("supply a checksum-pinned archive locally; streaming verifies ETag/bytes", call. = FALSE)
+    digest <- Sys.which(paste0(algorithm, "sum"))
+    tee <- Sys.which("tee")
+    if (!nzchar(digest) || !nzchar(tee)) {
+      stop("streaming VEP acquisition requires tee and ", algorithm, "sum", call. = FALSE)
     }
     if (!all(c("etag", "bytes") %in% names(identity)) ||
         !grepl("^[0-9a-fA-F-]+$", identity[["etag"]]) ||
@@ -98,11 +101,25 @@ duckhts_bench_stage_vep_cache <- function(
       "--max-time", "7200", "--header", paste0('If-Match: "', identity[["etag"]], '"'),
       "--dump-header", headers_path, "--write-out",
       "%{stderr}\nduckhts_cache_bytes=%{size_download}\n", source_row$locator)
-    command <- paste(paste(shQuote(c(curl, curl_args)), collapse = " "), "|",
-      paste(shQuote(c(tar, tar_args)), collapse = " "))
+    # Keep the digest consumer's PID: pipefail alone does not cover process
+    # substitution, including a consumer that emits a hash then exits nonzero.
+    command <- paste(
+      "exec 3> >(", shQuote(digest), ">", shQuote(digest_path), ")\n",
+      "cache_digest_pid=$!\n",
+      paste(shQuote(c(curl, curl_args)), collapse = " "), "|",
+      shQuote(tee), "/dev/fd/3 |", paste(shQuote(c(tar, tar_args)), collapse = " "), "\n",
+      "cache_transfer_status=$?\nexec 3>&-\n",
+      "wait \"$cache_digest_pid\"\ncache_digest_status=$?\n",
+      "(( cache_transfer_status == 0 && cache_digest_status == 0 ))"
+    )
     status <- system2(Sys.which("bash"), c("-o", "pipefail", "-c", shQuote(command)),
       stdout = members_path, stderr = log_path)
     if (status == 0L) {
+      observed_digest <- readLines(digest_path, warn = FALSE)
+      if (length(observed_digest) != 1L ||
+          !identical(sub("[[:space:]].*$", "", observed_digest), identity[[algorithm]])) {
+        stop("VEP archive content checksum differs from the registered pin", call. = FALSE)
+      }
       headers <- readLines(headers_path, warn = FALSE)
       etags <- trimws(sub("^[^:]+:", "", headers[grepl("^ETag:", headers, ignore.case = TRUE)]))
       etags <- sub('^"(.*)"$', "\\1", etags)

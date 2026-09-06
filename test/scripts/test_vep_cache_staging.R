@@ -56,11 +56,14 @@ local({
     "done",
     "test \"$conditional\" = 'If-Match: \"abcd-1234\"'",
     "printf 'HTTP/1.1 200 OK\\r\\nETag: \"%s\"\\r\\n\\r\\n' \"${VEP_TEST_ETAG:-abcd-1234}\" > \"$headers\"",
-    paste("cat", shQuote(archive)),
+    paste0("cat \"${VEP_TEST_ARCHIVE:-", archive, "}\""),
     paste0("printf '\\nduckhts_cache_bytes=%s\\n' \"${VEP_TEST_BYTES:-", file.info(archive)$size, "}\" >&2"),
     "exit \"${VEP_TEST_EXIT:-0}\""), fake_curl)
   Sys.chmod(fake_curl, "0755")
-  plan$supplier_identity[[1L]] <- paste0("etag=abcd-1234;bytes=", file.info(archive)$size)
+  archive_sha256 <- strsplit(system2("sha256sum", shQuote(archive), stdout = TRUE), " ")[[1L]][[1L]]
+  stream_identity <- paste0("sha256=", archive_sha256,
+    ";etag=abcd-1234;bytes=", file.info(archive)$size)
+  plan$supplier_identity[[1L]] <- stream_identity
   save_registry()
   Sys.setenv(DUCKHTS_CACHE_DIR = file.path(temporary, "stream cache"))
   streamed <- duckhts_bench_stage_vep_cache(repo, curl = fake_curl)
@@ -77,12 +80,55 @@ local({
     Sys.unsetenv(c("VEP_TEST_EXIT", "VEP_TEST_ETAG", "VEP_TEST_BYTES"))
   }
 
-  plan$supplier_identity[[1L]] <- paste0(plan$supplier_identity[[1L]],
-    ";md5=", unname(tools::md5sum(archive)))
+  # HTTP metadata is never sufficient, including when a previous cache exists.
+  plan$supplier_identity[[1L]] <- paste0("etag=abcd-1234;bytes=", file.info(archive)$size)
   save_registry()
-  Sys.setenv(DUCKHTS_CACHE_DIR = file.path(temporary, "unverified checksum"))
+  Sys.setenv(DUCKHTS_CACHE_DIR = file.path(temporary, "stream cache"))
   expect_error(duckhts_bench_stage_vep_cache(repo, curl = fake_curl),
-    "supply a checksum-pinned archive locally")
+    "requires a registry-pinned SHA-256 or MD5")
+  plan$supplier_identity[[1L]] <- paste0(stream_identity, ";md5=", strrep("0", 32L))
+  save_registry()
+  expect_error(duckhts_bench_stage_vep_cache(repo, curl = fake_curl), "exactly one")
+  plan$supplier_identity[[1L]] <- stream_identity
+  save_registry()
+
+  # Change the gzip mtime byte: a valid archive with identical length, extracted
+  # contents, HTTP ETag and byte count must still fail the full-stream checksum.
+  changed <- file.path(temporary, "changed.tar.gz")
+  input <- file(archive, "rb")
+  bytes <- readBin(input, "raw", n = file.info(archive)$size)
+  close(input)
+  bytes[[5L]] <- as.raw(bitwXor(as.integer(bytes[[5L]]), 1L))
+  writeBin(bytes, changed)
+  stopifnot(system2("tar", shQuote(c("-tzf", changed)), stdout = FALSE) == 0L)
+  Sys.setenv(DUCKHTS_CACHE_DIR = file.path(temporary, "changed stream"), VEP_TEST_ARCHIVE = changed)
+  expect_error(duckhts_bench_stage_vep_cache(repo, curl = fake_curl), "content checksum differs")
+  stopifnot(!file.exists(duckhts_bench_artifact_path("vep116_grch38_cache_chr21")))
+  Sys.unsetenv("VEP_TEST_ARCHIVE")
+
+  # A digest consumer must succeed, not merely print the expected checksum.
+  fake_bin <- file.path(temporary, "failing hash")
+  dir.create(fake_bin)
+  fake_hash <- file.path(fake_bin, "sha256sum")
+  writeLines(c("#!/usr/bin/env bash", "cat > /dev/null",
+    paste("printf '%s  -\\n'", shQuote(archive_sha256)), "exit 23"), fake_hash)
+  Sys.chmod(fake_hash, "0755")
+  original_path <- Sys.getenv("PATH")
+  on.exit(Sys.setenv(PATH = original_path), add = TRUE)
+  Sys.setenv(PATH = paste(fake_bin, original_path, sep = .Platform$path.sep),
+    DUCKHTS_CACHE_DIR = file.path(temporary, "failed digest process"))
+  expect_error(duckhts_bench_stage_vep_cache(repo, curl = fake_curl), "acquisition/extraction failed")
+  stopifnot(!file.exists(duckhts_bench_artifact_path("vep116_grch38_cache_chr21")))
+  Sys.setenv(PATH = original_path)
+
+  # A checksum-pinned MD5 source also uses the bounded stream path.
+  plan$supplier_identity[[1L]] <- paste0("md5=", unname(tools::md5sum(archive)),
+    ";etag=abcd-1234;bytes=", file.info(archive)$size)
+  save_registry()
+  Sys.setenv(DUCKHTS_CACHE_DIR = file.path(temporary, "MD5 stream"))
+  md5_streamed <- duckhts_bench_stage_vep_cache(repo, curl = fake_curl)
+  stopifnot(identical(sort(list.files(file.path(md5_streamed[["cache"]], prefix), recursive = TRUE,
+    all.files = TRUE)), sort(kept)))
 
   # A valid checksum does not excuse an invalid/truncated gzip archive.
   truncated <- file.path(temporary, "truncated.tar.gz")
@@ -104,7 +150,7 @@ local({
   expect_error(duckhts_bench_stage_vep_cache(repo, archive = archive), "acquisition.tsv")
   stopifnot(identical(readLines(file.path(output, "user-data")), "preserve"))
   Sys.setenv(DUCKHTS_CACHE_DIR = file.path(temporary, "stream cache"))
-  plan$supplier_identity[[1L]] <- paste0("etag=abcd-1234;bytes=", file.info(archive)$size)
+  plan$supplier_identity[[1L]] <- stream_identity
   plan$supplier_identity[[2L]] <- sub("regions=21", "regions=22", plan$supplier_identity[[2L]])
   save_registry()
   expect_error(duckhts_bench_stage_vep_cache(repo, curl = fake_curl), "registered source or scope")
@@ -121,5 +167,5 @@ local({
   output <- duckhts_bench_artifact_path("vep116_grch38_cache_chr21")
   stopifnot(identical(sort(list.files(file.path(output, prefix), recursive = TRUE, all.files = TRUE)),
     sort(kept)))
-  cat("VEP regional cache staging: exact complete region/metadata, reuse, mutation, transfer failures, truncation and preserved destinations: OK\n")
+  cat("VEP regional cache staging: pinned content, exact region/metadata, reuse, mutation, transfer/digest failures, truncation and preserved destinations: OK\n")
 })

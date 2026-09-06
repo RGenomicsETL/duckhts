@@ -74,13 +74,16 @@ benchmark registry without storing the full compressed release archive:
 Rscript r/duckhtsbench/scripts/stage_vep_cache.R
 ```
 
-The registry owns the exact release URL, ETag/byte identity, region selection and cache
+The registry owns the exact release URL, content checksum, ETag/byte identity, region selection and cache
 destination. Streaming still transfers the entire archive, but extracts every file below
 the registered region plus all root metadata. It does not select variants, transcripts or
 annotation windows. A successful full transfer, tar extraction and canonical inventory
-receipt are required before atomic publication. The printed cache, info and receipt paths
+receipt are required before atomic publication. The full compressed stream is hashed
+against its pinned SHA-256 or MD5 before publication; HTTP metadata alone is rejected.
+The digest process must exit successfully as well as emit the expected hash.
+The printed cache, info and receipt paths
 are inputs for `--chrom 21` campaigns; this artifact is not a whole-genome VEP cache.
-Source headers, transfer log and extracted member list are retained beside the cache leaf.
+Source headers, transfer log, full-archive digest and extracted member list are retained beside the cache leaf.
 Existing caches are validated, not overwritten. The network-free acquisition tests also
 exercise nested shards, incomplete transfers, bad source identity and cache mutation.
 
