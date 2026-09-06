@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- bound native DuckVEP CDS projection by the borrowed transcript sequence
+  slice before reading REF or insertion anchors, including hinted fallbacks.
+  Add SQL/R checks for pre-publication rejection of short CDS models and feed
+  genomic VCF alleles through the real projector in the carrier differential
+
 - add a caller-owned native carrier index for phased-execution development:
   preserve explicit sample/phase-set/lane keys, share event prefixes, drain
   distinct occupied paths and recycle slots at transcript completion. Dense

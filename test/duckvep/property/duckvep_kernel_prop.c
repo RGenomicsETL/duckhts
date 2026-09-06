@@ -17437,6 +17437,70 @@ TEST cds_edit_builder_projects_exon_boundary_insertions_on_both_strands(void) {
     PASS();
 }
 
+TEST cds_edit_builder_checks_borrowed_sequence_extent(void) {
+    uint8_t full_cds[12];
+    memset(full_cds, 'A', sizeof full_cds);
+    for (int strand = 1; strand >= -1; strand -= 2) {
+        for (uint32_t length = 1u; length <= sizeof full_cds; length++) {
+            /* A valid pool slice need not cover the borrowed model's mapped
+             * CDS. Check both physical allocation ends and neighbouring bytes
+             * that belong to another transcript in a larger sequence pool. */
+            for (int padded = 0; padded < 2; padded++) {
+                size_t bytes = padded ? sizeof full_cds : length;
+                uint8_t *cds = malloc(bytes);
+                ASSERT(cds != NULL);
+                memset(cds, 'A', bytes);
+                struct kprop_coding s = {0};
+                s.cds = full_cds; s.strand = (int8_t)strand;
+                s.tstart = s.cds_s = s.es = 1000u;
+                s.tend = s.cds_e = s.ee = 1011u;
+                s.ecds = 1u; s.ecde = 12u; s.excnt = 1u;
+                kprop_wire_coding_scene(&s, length);
+                s.seq.cds_bytes = cds; s.seq.cds_bytes_len = bytes;
+                for (int insertion = 0; insertion < 2; insertion++) {
+                    for (uint32_t width = 1u; width <= (insertion ? 1u : 3u); width++) {
+                        for (uint32_t first = 1u; first + width - 1u <= 12u; first++) {
+                            uint32_t coordinate = strand > 0 || insertion ? first : first + width - 1u;
+                            s.vpos = strand > 0 ? s.es + coordinate - 1u : s.ee - coordinate + 1u;
+                            s.vend = s.vpos + width - 1u;
+                            s.vkind = insertion ? DUCKVEP_KIND_INS
+                                : width == 1u ? DUCKVEP_KIND_SNV : DUCKVEP_KIND_MNV;
+                            s.roff = 0u; s.rlen = (uint16_t)width;
+                            s.aoff = width; s.alen = insertion ? 2u : (uint16_t)width;
+                            memset(s.abytes, strand > 0 ? 'A' : 'T', width);
+                            memset(s.abytes + width, 'C', s.alen);
+                            if (insertion) s.abytes[width] = s.abytes[0];
+                            duckvep_haplotype_edit_t edit;
+                            duckvep_cds_edit_status_t status = duckvep_variant_cds_edit_build(
+                                &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, s.strand, &edit);
+                            ASSERT_EQ(first + width - 1u <= length
+                                ? DUCKVEP_CDS_EDIT_OK : DUCKVEP_CDS_EDIT_OUT_OF_CDS, status);
+                            duckvep_event_t event = {0};
+                            ASSERT(duckvep_event_prepare_small(s.vpos, s.abytes, s.rlen,
+                                s.abytes + s.aoff, s.alen, &event));
+                            duckvep_prepared_cds_allele_t allele = {&event,
+                                s.abytes + event.ref_diff_offset,
+                                s.abytes + s.aoff + event.alt_diff_offset,
+                                s.abytes + event.anchor_ref_offset,
+                                event.ref_diff_length, event.alt_diff_length, 1};
+                            duckvep_haplotype_edit_t hinted;
+                            ASSERT_EQ(status, duckvep_cds_edit_build_prepared_allele(
+                                &s.tx, &s.ex, &s.seq, 0u, s.strand, &allele, 0u, &hinted));
+                            if (status == DUCKVEP_CDS_EDIT_OK) {
+                                ASSERT_EQ(first + (insertion && strand > 0), edit.cds_start);
+                                ASSERT_EQ(insertion ? 0u : width, edit.ref_len);
+                                ASSERT(kprop_cds_edits_equal(&edit, &hinted));
+                            }
+                        }
+                    }
+                }
+                free(cds);
+            }
+        }
+    }
+    PASS();
+}
+
 TEST cds_edit_builder_known_scene(void) {
     static uint8_t plus_cds[12] = {'A','T','G','A','A','A','C','C','C','T','A','A'};
     static uint8_t minus_cds[12] = {'A','T','G','A','A','A','C','C','C','T','A','A'};
@@ -25215,6 +25279,7 @@ int main(int argc, char **argv) {
     RUN_TEST(annotate_cross_codon_mnv_missense_matches_oracle);
     RUN_TEST(cds_edit_builder_projects_exon_boundary_insertions_on_both_strands);
     RUN_TEST(cds_edit_builder_known_scene);
+    RUN_TEST(cds_edit_builder_checks_borrowed_sequence_extent);
     RUN_TEST(coding_context_known_scene);
     RUN_TEST(variant_coding_context_known_scene);
     RUN_TEST(coding_context_delta_known_scene);

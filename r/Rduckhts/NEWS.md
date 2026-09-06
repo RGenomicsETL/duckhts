@@ -1,5 +1,8 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- add bundled-model regression coverage for rejecting short CDS sequences
+  before registry publication and continuing to use valid models afterward
+
 - preserve records on literal colon-bearing contigs in bundled indexed BCF/VCF
   full scans, including duplicate records. Explicit region requests still use
   HTSlib brace quoting to distinguish contig names from coordinates

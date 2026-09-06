@@ -3,6 +3,7 @@
  * These are not SQL adapters and do not decode GT or choose a phase policy. */
 #include "duckvep_haplotype.h"
 #include "duckvep_carriers.h"
+#include "duckvep_delta.h"
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
@@ -60,13 +61,15 @@ static int descending_edit(const void *a, const void *b) {
 }
 
 /* Exercise the real sparse index with the same three diploid fixture samples.
- * R supplies the allele-slot assignments that generated the VCF, not grouped
- * haplotypes. The bridge owns bounded test scratch and adapts each distinct
- * completed event path to the existing mutation/translation kernel once.
- * No genomic projection or phase-policy inference is implemented here. */
+ * R supplies genomic VCF alleles, ranked all-coding exons, and the allele-slot
+ * assignments that generated the VCF, not projected CDS edit coordinates or
+ * grouped haplotypes. Existing event/CDS projection authorities run once per
+ * event, then each distinct completed path is rebuilt and translated once.
+ * The bridge owns bounded test scratch; it does not infer a phase policy. */
 void duckhts_test_carrier_haplotypes(
-    uint8_t *reference, int *reference_length, int *strand, int *positions,
-    int *starts, char **refs, char **alts, int *edit_count, int *order, int *lanes,
+    uint8_t *reference, int *reference_length, int *strand,
+    int *exon_starts, int *exon_ends, int *exon_count, int *positions,
+    char **refs, char **alts, int *edit_count, int *order, int *lanes,
     int *capacity, uint8_t *cds, uint8_t *protein, int *cds_lengths,
     int *protein_lengths, int *flags, int *contributors, int *contributor_counts,
     double *metrics, int *status) {
@@ -74,21 +77,30 @@ void duckhts_test_carrier_haplotypes(
     duckvep_carriers_t stream;
     duckvep_haplotype_edit_t *all_edits = NULL, *leaf_edits = NULL;
     uint64_t *events = NULL;
+    uint32_t *exon_storage = NULL;
     uint8_t *cds_scratch = NULL, *protein_scratch = NULL;
     uint16_t chrom = 0u;
-    uint32_t end1 = UINT32_MAX, completed, active;
+    uint32_t start1 = UINT32_MAX, end1 = 0u, completed, active, zero = 0u;
+    uint16_t model_exon_count;
+    uint64_t cds_offset = 0u;
+    uint32_t cds_length;
+    int8_t model_strand;
     duckvep_transcript_model_t model = {0};
+    duckvep_exon_model_t exons = {0};
+    duckvep_sequence_pool_t sequences = {0};
     duckvep_carrier_transcript_t transcript;
     duckvep_carrier_bucket_t transcript_index[2];
     duckvep_carriers_status_t stream_status;
     *status = DUCKVEP_HAPLOTYPE_INVALID_ARG;
     memset(metrics, 0, 6u * sizeof(*metrics));
-    if (*reference_length < 0 || *edit_count < 1 || *edit_count > 1000000 ||
+    if (*reference_length < 1 || *edit_count < 1 || *edit_count > 1000000 ||
+        *exon_count < 1 || *exon_count > UINT16_MAX ||
         *capacity < 1 || *capacity > INT_MAX / 6 || (*strand != -1 && *strand != 1)) return;
     size_t count = (size_t)*edit_count;
     all_edits = calloc(count, sizeof(*all_edits));
     leaf_edits = calloc(count, sizeof(*leaf_edits));
     events = calloc(count, sizeof(*events));
+    exon_storage = calloc(4u * (size_t)*exon_count, sizeof(*exon_storage));
     cds_scratch = malloc((size_t)*capacity);
     protein_scratch = malloc((size_t)*capacity);
     b.transcripts = &transcript;
@@ -103,16 +115,60 @@ void duckhts_test_carrier_haplotypes(
     b.call_index = calloc(b.call_buckets, sizeof(*b.call_index));
     b.prefixes = calloc(b.prefix_capacity, sizeof(*b.prefixes));
     b.prefix_index = calloc(b.prefix_buckets, sizeof(*b.prefix_index));
-    if (!all_edits || !leaf_edits || !events || !cds_scratch || !protein_scratch ||
+    if (!all_edits || !leaf_edits || !events || !exon_storage || !cds_scratch || !protein_scratch ||
         !b.calls || !b.call_index || !b.prefixes || !b.prefix_index) goto cleanup;
+    model_exon_count = (uint16_t)*exon_count;
+    model_strand = (int8_t)*strand;
+    cds_length = (uint32_t)*reference_length;
+    uint32_t cdna = 0u;
+    for (size_t i = 0u; i < model_exon_count; i++) {
+        if (exon_starts[i] < 1 || exon_ends[i] < exon_starts[i] ||
+            (i && (*strand > 0 ? exon_starts[i] <= exon_ends[i - 1u]
+                               : exon_ends[i] >= exon_starts[i - 1u]))) goto cleanup;
+        uint32_t es = (uint32_t)exon_starts[i], ee = (uint32_t)exon_ends[i];
+        uint32_t length = ee - es + 1u;
+        if (length > UINT32_MAX - cdna) goto cleanup;
+        exon_storage[i] = es;
+        exon_storage[model_exon_count + i] = ee;
+        exon_storage[2u * model_exon_count + i] = cdna + 1u;
+        cdna += length;
+        exon_storage[3u * model_exon_count + i] = cdna;
+        if (es < start1) start1 = es;
+        if (ee > end1) end1 = ee;
+    }
+    if (cdna != cds_length) goto cleanup;
+    model.transcript_count = 1u; model.chrom_id = &chrom;
+    model.start1 = model.cds_start1 = &start1;
+    model.end1 = model.cds_end1 = &end1;
+    model.strand = &model_strand;
+    model.exon_offset = &zero; model.exon_count = &model_exon_count;
+    exons.exon_count = model_exon_count; exons.start1 = exon_storage;
+    exons.end1 = exon_storage + model_exon_count;
+    exons.cdna_start1 = exon_storage + 2u * model_exon_count;
+    exons.cdna_end1 = exon_storage + 3u * model_exon_count;
+    sequences.cds_bytes = reference; sequences.cds_bytes_len = cds_length;
+    sequences.cds_offset = &cds_offset; sequences.cds_length = &cds_length;
+    sequences.transcript_count = 1u;
     for (size_t i = 0u; i < count; i++) {
         size_t ref_len = strlen(refs[i]), alt_len = strlen(alts[i]);
-        if (starts[i] < 1 || positions[i] < 1 || ref_len > UINT32_MAX || alt_len > UINT32_MAX ||
+        if (positions[i] < 1 || ref_len > UINT16_MAX || alt_len > UINT16_MAX ||
             order[i] < 0 || (size_t)order[i] >= count) goto cleanup;
-        all_edits[i] = (duckvep_haplotype_edit_t){(uint32_t)starts[i], (uint32_t)ref_len,
-            (const uint8_t *)refs[i], (uint32_t)alt_len, (const uint8_t *)alts[i], 1};
+        duckvep_event_t event = {0};
+        if (!duckvep_event_prepare_small((uint32_t)positions[i],
+                (const uint8_t *)refs[i], (uint16_t)ref_len,
+                (const uint8_t *)alts[i], (uint16_t)alt_len, &event)) goto cleanup;
+        duckvep_prepared_cds_allele_t allele = {&event,
+            (const uint8_t *)refs[i] + event.ref_diff_offset,
+            (const uint8_t *)alts[i] + event.alt_diff_offset,
+            (const uint8_t *)refs[i] + event.anchor_ref_offset,
+            event.ref_diff_length, event.alt_diff_length, 1};
+        duckvep_cds_edit_status_t projected = duckvep_cds_edit_build_prepared_allele(
+            &model, &exons, &sequences, 0u, model_strand, &allele, UINT32_MAX, &all_edits[i]);
+        if (projected != DUCKVEP_CDS_EDIT_OK) {
+            *status = 200 + (int)projected;
+            goto cleanup;
+        }
     }
-    model.transcript_count = 1u; model.chrom_id = &chrom; model.end1 = &end1;
     stream_status = duckvep_carriers_init(&stream, &model, &b);
     if (stream_status != DUCKVEP_CARRIERS_OK) goto stream_error;
     for (size_t i = 0u; i < count; i++) {
@@ -198,7 +254,7 @@ invalid:
 stream_error:
     *status = 100 + (int)stream_status;
 cleanup:
-    free(all_edits); free(leaf_edits); free(events);
+    free(all_edits); free(leaf_edits); free(events); free(exon_storage);
     free(cds_scratch); free(protein_scratch);
     free(b.calls); free(b.call_index); free(b.prefixes); free(b.prefix_index);
 }
