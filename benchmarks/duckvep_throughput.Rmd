@@ -1144,6 +1144,55 @@ an isolated interval-lookup microbenchmark.
 
 ## Paired breakends
 
+### Raw ALT preparation and endpoint-union correction
+
+The 2026-09-06 fixture comparison uses source
+`60a15f2121c5674fcae7bba6a8ff22d0298988f8` (benchmark-only baseline) and
+`9ed772f71376b9ee47fcac03ba3e010fb2bfc973` (native ALT parser and endpoint-union fix).
+Each run repeats **1,000,000 input BND events into 1,000,000 compact transcript
+rows**, using one DuckDB thread pinned to logical CPU 2 of the same i5-13500,
+DuckDB 1.5.3, five timed passes, a 100,000-event warmup, and a 5,000-base
+transcript window. Both revisions are clean, in-tree release rebuilds.
+
+```{r breakend-fixture-preparation}
+bnd_fixture <- history[
+  history$source_revision %in% c(
+    "60a15f2121c5674fcae7bba6a8ff22d0298988f8",
+    "9ed772f71376b9ee47fcac03ba3e010fb2bfc973"
+  ) & grepl("^fixture_one_transcript_sorted_breakend", history$workload),
+  , drop = FALSE
+]
+stopifnot(
+  nrow(bnd_fixture) == 3L,
+  all(bnd_fixture$variants == 1000000),
+  all(bnd_fixture$annotated_rows == 1000000),
+  all(bnd_fixture$checksum_value == "268435460000000"),
+  length(unique(bnd_fixture$fingerprint_xor_hash)) == 1L,
+  length(unique(bnd_fixture$fingerprint_sum_hash)) == 1L
+)
+knitr::kable(bnd_fixture[, c(
+  "revision", "workload", "min_seconds", "median_seconds", "max_seconds"
+)], row.names = FALSE, digits = 3)
+```
+
+The identical typed-endpoint control changes from **0.267 s to 0.270 s**
+(+1.1% median; both observed ranges 0.266–0.272 s). Adding
+`--fixture-breakend-alt` measures **0.396 s** (0.394–0.402 s), including all four
+raw bracket forms, `duckvep_breakend_geometry()`, the explicit mate-name join,
+ordering, annotation, unnesting and aggregation. It is additional preparation
+work, not a before/after implementation comparison. The untimed full compact-row
+fingerprints match for all three runs; no consequence, status, coordinate or
+input-identity field is dropped from those fingerprints.
+
+The model is the checked-in one-transcript, two-exon fixture, with local position
+159 and mate position 170. This is a paired-adapter floor, not a measurement of
+large raw records, high-fan-out models, fusion reconstruction, or phased work.
+It does not measure the newly corrected empty-endpoint predicate state; fixed
+native/SQL/R witnesses and executable VEP differentials cover that state. No
+prior checked-in workload measured raw ALT preparation. The production BND
+baseline below (200,000 events / 18,766,240 transcript rows) has a different model
+and fan-out and is not a same-workload comparator for this fixture.
+
 ```{r paired-breakend-throughput}
 breakend_controls <- history[
   history$workload == "ensembl116_grch38_final_breakend_200k" &
