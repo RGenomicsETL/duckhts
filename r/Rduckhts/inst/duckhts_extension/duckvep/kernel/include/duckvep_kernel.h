@@ -29,7 +29,7 @@ extern "C" {
 #endif
 
 #define DUCKVEP_KERNEL_VERSION_MAJOR 0
-#define DUCKVEP_KERNEL_VERSION_MINOR 18
+#define DUCKVEP_KERNEL_VERSION_MINOR 19
 #define DUCKVEP_KERNEL_VERSION_PATCH 0
 
 /* --------------------------------------------------------------- status -- */
@@ -471,20 +471,11 @@ const char *duckvep_kernel_version(void);
 /* Prepare an immutable model from borrowed SoA views. Validates ALL offsets and
  * counts ONCE (exon slices in range, cds within transcript span, transcripts
  * sorted ascending by (chrom_id, start1) for the sweep, sequence-pool lengths
- * consistent). `seq` may be NULL (structural-only / non-coding model). On OK,
- * *out_model is a heap handle that BORROWS the view pointers — the caller must
- * keep the underlying arrays alive until duckvep_model_close. */
+ * consistent). `seq` may be NULL (structural-only / non-coding model).
+ * `interval_features` may be NULL when no RegulatoryFeature/MotifFeature
+ * relation is supplied. On OK, *out_model is a heap handle that BORROWS the
+ * view pointers — keep the underlying arrays alive until duckvep_model_close. */
 duckvep_status_t duckvep_model_open(
-    const duckvep_transcript_model_t *transcripts,
-    const duckvep_exon_model_t       *exons,
-    const duckvep_sequence_pool_t    *seq,
-    duckvep_model_t                 **out_model,
-    duckvep_error_t                  *error);
-
-/* Extended model constructor for a VEP model that also owns the release's
- * RegulatoryFeature/MotifFeature relation. The legacy constructor is exactly
- * equivalent to passing interval_features=NULL. */
-duckvep_status_t duckvep_model_open_with_interval_features(
     const duckvep_transcript_model_t       *transcripts,
     const duckvep_exon_model_t             *exons,
     const duckvep_sequence_pool_t          *seq,

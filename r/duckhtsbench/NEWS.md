@@ -1,5 +1,18 @@
 # duckhtsbench 0.0.0.9000
 
+- verify streamed VEP archives against a pinned SHA-256 or MD5, require the
+  digest subprocess to succeed, and reject HTTP-metadata-only cache identities;
+  shared local-artifact SHA-256/BSD-sum verification also rejects failed checksum
+  commands that print matching values
+
+- expose the canonical nested model tables through shared read-only flat SQL
+  projections for conformance and benchmark consumers, preserving every exon,
+  mature-miRNA segment, peptide edit, transcript label and sequence byte
+
+- stage complete VEP-116 GRCh38 chromosome-21 cache shards and all root metadata
+  by streaming the pinned upstream archive, without storing the full compressed
+  archive; verify transfer identity and publish a canonical acquisition receipt
+
 - share network-free committed-fixture staging between BCF scan and DuckVEP
   projection workloads, retaining registry byte identities and provenance
 

@@ -67,22 +67,34 @@ prefix must likewise be immutable/read-only. The workflow tracks its explicit pa
 lock and `conda-meta/history`, and the runner verifies the installed package URL set and
 uses a clean process environment, but it does not hash every installed package file.
 
-For example, the release-116 GRCh38 archive currently exposes an immutable HTTP ETag and
-byte length rather than a cryptographic sidecar:
+The chromosome-21 ClinVar campaigns can acquire their complete cache region through the
+benchmark registry without storing the full compressed release archive:
 
 ```sh
-make duckvep-cache-receipt DUCKVEP_CACHE_RECEIPT_ARGS="\
-  --cache-dir /data/vep-cache \
-  --species homo_sapiens --cache-version 116 --assembly GRCh38 \
-  --source-url https://ftp.ensembl.org/pub/release-116/variation/indexed_vep_cache/homo_sapiens_vep_116_GRCh38.tar.gz \
-  --source-identity http-etag:66fbffe0a-64efc55395049:27644657162 \
-  --output /data/receipts/homo_sapiens-116-GRCh38.tsv"
+Rscript r/duckhtsbench/scripts/stage_vep_cache.R
 ```
 
-If the acquisition source publishes SHA-256, MD5, or BSD `CHECKSUMS`, use
-`sha256:HEX`, `md5:HEX`, or `bsd-sum:SUM:BLOCKS` instead. This command inventories an
-already installed cache; the download/extraction step remains explicitly outside the
-network-free extension build.
+The registry owns the exact release URL, content checksum, ETag/byte identity, region selection and cache
+destination. Streaming still transfers the entire archive, but extracts every file below
+the registered region plus all root metadata. It does not select variants, transcripts or
+annotation windows. A successful full transfer, tar extraction and canonical inventory
+receipt are required before atomic publication. The full compressed stream is hashed
+against its pinned SHA-256 or MD5 before publication; HTTP metadata alone is rejected.
+The digest process must exit successfully as well as emit the expected hash.
+The printed cache, info and receipt paths
+are inputs for `--chrom 21` campaigns; this artifact is not a whole-genome VEP cache.
+Source headers, transfer log, full-archive digest and extracted member list are retained beside the cache leaf.
+Existing caches are validated, not overwritten. The network-free acquisition tests also
+exercise nested shards, incomplete transfers, bad source identity and cache mutation.
+
+The archive SHA-256 is a maintainer-recorded digest of a complete HTTPS transfer
+checked against Ensembl's published BSD `sum` and block count, not a claimed
+publisher-supplied SHA-256. Subsequent acquisitions must match that fixed content pin.
+
+Other already acquired caches can use `make duckvep-cache-receipt` with their verified
+source URL and identity. Supported identities are `sha256:HEX`, `md5:HEX`,
+`bsd-sum:SUM:BLOCKS`, or `http-etag:ETAG:BYTES`. Acquisition and extraction stay outside
+the network-free extension build.
 
 `gff_index_policy` defaults to `ignore`, which always restages and indexes the declared
 GFF. Set it to `require` only when the manifest intentionally declares the existing `.tbi`

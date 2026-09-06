@@ -29,6 +29,12 @@ remain open.
 VEP 116 is the behavioral authority; pure-C properties and bcftools csq supply independent
 checks for mechanics and phased edit state.
 
+DuckVEP is alpha: its own interfaces and intermediate representations may be changed
+or deleted when a shared authority replaces them. Incorrect approximations are not
+backward-compatibility contracts. Preserve the pinned oracle, physical input records,
+comparison denominators and failure controls; document deliberate result changes and
+test missing evidence explicitly instead of retaining a second implementation.
+
 ## Mental model
 
 DuckVEP does two different jobs at two different times.
@@ -431,11 +437,12 @@ model-side key collision before joining. The Ensembl model compiler continues to
 an exact same-name, same-length reference-region match, so a convenience join key cannot
 silently substitute sequence from another assembly or region.
 
-The transcript query accepts the original 11 columns, the legacy 12-column form ending in
+The transcript query accepts 11 CDS-only columns, a 12-column partial-tail form ending in
 three `post_cds_bases`, or the complete 13-column form ending in `pre_cds_sequence` and
 `post_cds_sequence`. Only the complete form may resolve length-changing edits crossing a
-CDS boundary. Older models remain loadable and return `missing_transcript_flank` rather
-than guessing when such a predicate is reached.
+CDS boundary. Incomplete sequence inputs return `missing_transcript_flank` when the
+required transcript bases are absent; these input forms are not alpha API preservation
+obligations.
 
 The optional `mature_mirna_query` has three columns: transcript ordinal, inclusive genomic
 start, and inclusive genomic end. Rows must be ordered by transcript and start. The loader
@@ -819,9 +826,10 @@ is added.
 
 The implemented internal layer makes that ownership explicit:
 
-- `duckvep_model_open(...)` owns the canonical prepared transcript, exon, and sequence
-  views used by both consequence and HGVS. It derives the first complete reference stop
-  once per coding transcript, or validates a supplied immutable cache, so per-row HGVSp
+- `duckvep_model_open(...)` is the single constructor for prepared transcript, exon,
+  sequence and optional interval-feature views used by consequence and HGVS. It derives
+  the first complete reference stop once per coding transcript, or validates a supplied
+  immutable cache, so per-row HGVSp
   does not rescan an unchanged CDS;
 - consequence evaluation and HGVS both consume the same prepared allele and CDS edit-set
   helpers; the hot consequence path does not construct a wider formatting object;

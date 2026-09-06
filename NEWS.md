@@ -1,6 +1,69 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- remove the redundant DuckVEP kernel model constructor in kernel 0.19.0: `duckvep_model_open`
+  now accepts the optional interval-feature view directly. Native callers pass
+  NULL for transcript-only models; model validation and SQL loading are unchanged
+
+- require a pinned content checksum for VEP cache acquisition and verify the
+  full compressed stream before publication; ETag/byte matches cannot substitute
+  for content verification, and digest-process failures reject staging. Shared
+  local-artifact SHA-256 and BSD-sum verification also requires a successful
+  checksum process, even when failed commands print matching values
+
+- share read-only projections of registry-built nested DuckVEP models between
+  the conformance runner and FastVEP benchmark worker, removing their dependence
+  on separately persisted flat views without rewriting model artifacts
+
+- add registry-owned streaming acquisition of the complete VEP-116 GRCh38
+  chromosome-21 cache for ClinVar acceptance campaigns, retaining all region
+  shards and root metadata without storing the full upstream archive
+
+- reuse validated DuckVEP indel CDS positions when the VEP feature selects the
+  same genomic interval, avoiding repeated endpoint projection in consequence
+  and HGVS context construction. One checked scalar phase converter serves
+  base projections and indel positions; wider features retain full projection
+
+- share DuckVEP's codon-rounded REF/ALT translation windows across substitutions
+  and indels. Terminal SNVs/MNVs now borrow available 3-prime UTR bases for ALT,
+  preserving independent partial-codon and stop-gained facts and recognizing
+  stop retention when the full reference peptide is extended by a stop.
+  Remove partial-substitution shortcuts and complete-codon-only clipping
+
+- separate DuckVEP indel REF validation, VEP feature-CDS mutation, and unpadded
+  cDNA start/stop predicates. Correct later-exon phase padding, known synthetic
+  N codons, CDS-to-UTR edits and terminal-stop reconstruction on partial CDS.
+  Standalone scratch calls now use the annotation dispatcher; physical edit
+  arrays remain unchanged for sequence-edit and phased mechanics. CDS-to-UTR
+  partial-codon shortcuts no longer bypass REF or required-flank validation
+
+- separate complete MNV physical REF validation from VEP's feature-phase CDS
+  edit, including retained bases and partial terminal codons. Share the
+  independent start-offset test with SNVs and classify unchanged VEP peptide
+  windows even when physical REF and ALT differ
+
+- unify multi-base substitutions spanning 5-prime UTR and CDS with the shared
+  transcript-string evaluator, correcting phase-padded start-loss/retention.
+  Delete the clipped-CDS fallback and its start-only peptide mode: required
+  missing UTR sequence is unresolved, and retained UTR REF bases are validated
+
+- remove DuckVEP's insertion-only peptide special case inside a terminal
+  partial codon. Keep codon-start insertions distinct from insertions between
+  partial bases, correcting stop, insertion and protein-altering consequences
+  while preserving the exact ClinVar HGVS witness. Codon windows include the
+  borrowed 3-prime UTR and clamp REF and ALT requests independently
+
+- separate DuckVEP's physical CDS reference checks from VEP feature/codon
+  coordinates when a noncoding first exon precedes a phase-padded CDS. Correct
+  native SNV body/stop consequences and terminal-codon admission without
+  changing physical CDS edits or the SQL presentation reference. Do not reuse
+  physical early-CDS NMD cache facts across a later coding-start phase
+
+- retain DuckVEP's independent SNV start-codon predicate when phase-padded CDS
+  sequence produces an unknown peptide, preserving physical REF validation.
+  Add an opt-in native SO/status check to the R projection differential that
+  retains every physical input record, including repeated alleles
+
 - add SQL-first `duckvep_transcript_projection()` for typed VEP feature alleles,
   cDNA/CDS/protein ranges, exon/intron ordinals, transcript distance, quality
   flags and variable-length codon/amino-acid display from existing annotations

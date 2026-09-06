@@ -1,5 +1,47 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- bundle DuckVEP kernel 0.19.0 with a unified model constructor for transcript and
+  regulatory-feature models; R and SQL model-loading behavior is unchanged
+
+- avoid redundant genomic projection in bundled DuckVEP indel annotation and
+  HGVS context construction, while retaining physical REF validation and full
+  projection for features whose span differs from the validated edit
+
+- correct bundled DuckVEP terminal-codon substitutions by including available
+  3-prime UTR bases in alternate codon translation. Partial-codon and coding-unknown
+  terms can coexist with stop-gained; a preserved full peptide plus a new stop
+  is stop-retained. Both genomic strands have SQL and package regression coverage
+
+- correct bundled DuckVEP indel start/stop and in-frame consequences when a
+  later coding exon supplies CDS phase padding. CDS-to-UTR edits and partial-CDS
+  terminal-stop tests use VEP's feature coordinates without weakening physical
+  REF validation; known synthetic padding is not treated as missing sequence.
+  Partial-CDS-to-UTR edits now validate REF and report missing required flanks
+  before returning positional consequence facts
+
+- correct bundled DuckVEP multi-base coding substitutions when stored CDS
+  padding and VEP feature coordinates differ. Validate the full physical REF
+  before partial-codon classification, and preserve synonymous results when
+  a physically different allele leaves VEP's edited peptide unchanged
+
+- correct bundled DuckVEP multi-base substitutions spanning 5-prime UTR and
+  phase-padded CDS. Missing required UTR sequence now produces an unresolved
+  result instead of a clipped-CDS approximation; retained UTR REF is checked
+
+- correct bundled DuckVEP consequences for insertions between terminal partial
+  codon bases; codon-start insertions and the retained ClinVar HGVS case keep
+  their distinct VEP-compatible results. ALT codon windows now include available
+  3-prime UTR bases without changing the physical CDS edit
+
+- correct bundled DuckVEP SNV body/stop and terminal-codon results when CDS
+  phase padding starts after a noncoding first exon; genomic reference checks
+  still use the physical sequence position, independently of VEP codon mapping.
+  NMD early-CDS escape checks also use the feature-coordinate phase
+
+- preserve bundled DuckVEP start-loss results for SNVs in phase-padded start
+  codons even when the peptide is unknown; reference mismatches remain explicit
+  unresolved results
+
 - expose bundled `duckvep_transcript_projection()` through DBI for typed
   transcript ranges, exon/intron ordinals, distance, quality flags and
   variable-length codon/amino-acid display from annotated literal alleles;

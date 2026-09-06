@@ -866,6 +866,7 @@ if (isTRUE(opt$hgvs)) {
   ))
 }
 
+model_source_relations <- character()
 if (external_model_database) {
   invisible(dbExecute(
     con,
@@ -874,22 +875,15 @@ if (external_model_database) {
       "AS duckvep_model_source (READ_ONLY)"
     )
   ))
-  model_relations <- dbGetQuery(
-    con,
-    "SELECT table_name
-     FROM information_schema.tables
-     WHERE table_catalog = 'duckvep_model_source'
-       AND table_schema = 'main'
-       AND table_name LIKE 'duckvep_%'
-     ORDER BY table_name"
-  )$table_name
-  for (relation in model_relations) {
+  source(file.path(root, "r/duckhtsbench/R/duckvep_relations.R"), local = TRUE)
+  model_source_relations <- duckhts_bench_duckvep_relations(con, "duckvep_model_source")
+  for (relation in names(model_source_relations)) {
     relation_id <- as.character(dbQuoteIdentifier(con, relation))
     invisible(dbExecute(
       con,
       glue(
         "CREATE TEMP VIEW {relation_id} AS SELECT * FROM ",
-        "duckvep_model_source.main.{relation_id}"
+        "{model_source_relations[[relation]]}"
       )
     ))
   }
@@ -968,7 +962,7 @@ model_sequence_length_sql <- if (complete_coverage) {
 model_query_relation <- function(relation) {
   relation_id <- as.character(dbQuoteIdentifier(con, relation))
   if (external_model_database) {
-    return(glue("duckvep_model_source.main.{relation_id}"))
+    return(model_source_relations[[relation]])
   }
   relation_id
 }

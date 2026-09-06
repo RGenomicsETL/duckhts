@@ -10,10 +10,11 @@
  * Implements the coordinate convention audited from Ensembl/VEP's
  * TranscriptMapper path (`BaseTranscriptVariation.pm`) and VEP's GFF/GTF loader
  * (`BaseGXF.pm`). This unit is still a structural arithmetic kernel, not proof
- * of full VEP differential conformance. In particular, CDS coordinates include
- * the first coding exon's positive Ensembl phase offset (cds_start_NF /
- * incomplete start handling): phase 0 starts at CDS 1, phase 1 starts at CDS 2,
- * phase 2 starts at CDS 3.
+ * of full VEP differential conformance. Physical CDS coordinates include the
+ * first coding exon's positive phase, matching translateable-sequence padding.
+ * VEP's feature/peptide mapper instead uses the first transcript exon's phase;
+ * these differ when a noncoding exon precedes a positive-phase CDS start.
+ * Keep the physical view for genomic REF validation and semantic CDS edits.
  *
  * Exons are expected in TRANSCRIPT ORDER in the model slice, with cDNA starts
  * and ends precomputed by the adapter. For '-' transcripts this means genomic
@@ -39,7 +40,7 @@ typedef struct duckvep_coding_projection {
     uint32_t codon_start_cds; /* 1-based CDS coordinate of codon start */
     uint32_t exon_idx;        /* absolute exon index in duckvep_exon_model_t */
     uint8_t  codon_offset;    /* 0,1,2 within codon using phase-adjusted CDS */
-    uint8_t  phase_offset;    /* positive Ensembl phase on the translation-start exon */
+    uint8_t  phase_offset;    /* positive phase selected by the producing projector */
 } duckvep_coding_projection_t;
 
 /* Map a genomic base to cDNA. Returns 1 if the position is exonic for tx_idx,
@@ -123,12 +124,37 @@ int duckvep_project_complete_feature_translation_bounds(
 
 /* Full coding projection for a single genomic base. Returns 1 only when the
  * position is exonic AND inside the transcript's coding interval; otherwise 0.
- * The result is ready to identify the affected codon/protein residue. */
+ * This physical CDS view includes sequence padding; VEP consequence codons
+ * additionally need the feature-coordinate conversion below. */
 int duckvep_project_coding_base(
     const duckvep_transcript_model_t *transcripts,
     const duckvep_exon_model_t       *exons,
     size_t                            tx_idx,
     uint32_t                          genomic_pos,
+    duckvep_coding_projection_t      *out);
+
+/* Rephase a validated physical CDS position, including an insertion-before
+ * position, using the first transcript exon phase. This is scalar coordinate
+ * arithmetic, not genomic projection or REF validation. Both outputs are required
+ * and are zero on failure. The physical phase is the stored CDS's leading padding. */
+int duckvep_project_vep_cds_position(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint32_t                          physical_position1,
+    uint8_t                           physical_phase,
+    uint32_t                         *position_out,
+    uint8_t                          *phase_out);
+
+/* Convert an already validated physical CDS projection to VEP's feature/codon
+ * coordinates, using the first transcript exon phase. No genomic lookup or
+ * sequence access. `physical` and `out` may alias; a failed conversion zeros
+ * `out`. The converted position is not a genomic REF-validation coordinate. */
+int duckvep_project_vep_coding_position(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    const duckvep_coding_projection_t *physical,
     duckvep_coding_projection_t      *out);
 
 /* Return VEP's BaseTranscriptVariation::translation_start projection for a

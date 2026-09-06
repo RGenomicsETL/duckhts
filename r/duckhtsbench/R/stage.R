@@ -94,12 +94,16 @@ duckhts_bench_fetch <- function(id, overwrite = FALSE, output = duckhts_bench_ar
   invisible(output)
 }
 
-#' Write the registry receipt adjacent to one staged artifact.
-#'
-#' @param id Artifact identifier.
-#' @param output Staged file path.
-#' @return The receipt path, invisibly.
-#' @export
+duckhts_bench_checksum_fields <- function(command, args, id) {
+  output <- suppressWarnings(system2(command, args, stdout = TRUE))
+  status <- attr(output, "status")
+  if ((!is.null(status) && status != 0L) || length(output) != 1L ||
+      !nzchar(trimws(output))) {
+    stop("supplier checksum command failed: ", id, call. = FALSE)
+  }
+  strsplit(trimws(output), "[[:space:]]+")[[1L]]
+}
+
 #' Validate a staged file against supplier-published identity metadata.
 #'
 #' @param id Artifact identifier.
@@ -126,13 +130,13 @@ duckhts_bench_validate_identity <- function(id, output = duckhts_bench_artifact_
       sha256_args <- c("-a", "256", shQuote(output))
     }
     if (!nzchar(sha256_bin)) stop("sha256sum or shasum is required to validate supplier checksum: ", id, call. = FALSE)
-    actual_sha256 <- strsplit(trimws(system2(sha256_bin, sha256_args, stdout = TRUE)), "[[:space:]]+")[[1L]][[1L]]
+    actual_sha256 <- duckhts_bench_checksum_fields(sha256_bin, sha256_args, id)[[1L]]
     if (actual_sha256 != values[["sha256"]]) stop("supplier SHA-256 identity does not match cached artifact: ", id, call. = FALSE)
   }
   if ("sum" %in% names(values) && "blocks" %in% names(values)) {
     sum_bin <- Sys.which("sum")
     if (!nzchar(sum_bin)) stop("sum is required to validate supplier checksum: ", id, call. = FALSE)
-    fields <- strsplit(trimws(system2(sum_bin, c("-r", shQuote(output)), stdout = TRUE)), "[[:space:]]+")[[1L]]
+    fields <- duckhts_bench_checksum_fields(sum_bin, c("-r", shQuote(output)), id)
     if (length(fields) < 2L || as.integer(fields[[1L]]) != as.integer(values[["sum"]]) ||
         as.integer(fields[[2L]]) != as.integer(values[["blocks"]])) {
       stop("supplier sum identity does not match cached artifact: ", id, call. = FALSE)

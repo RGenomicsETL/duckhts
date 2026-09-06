@@ -272,6 +272,8 @@ test-cache-paths:
 	bash test/scripts/test_conformance_plugin_cache.sh
 
 test-benchmark-registry: test-variantkey-provider-staging test-duckvep-corpus-staging
+	Rscript test/scripts/test_vep_cache_staging.R
+	Rscript test/scripts/test_duckvep_model_relations.R
 	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
 	(cd "$$tmp" && R CMD build --no-build-vignettes --no-manual "$(PROJ_DIR)r/duckhtsbench"); \
 	R CMD INSTALL -l "$$tmp" "$$tmp"/duckhtsbench_*.tar.gz; \

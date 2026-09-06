@@ -248,6 +248,32 @@ SELECT cdna_start, cds_start, cds_end, protein_start, reference_codons, alternat
 ----
 12	3	3	1	ngG	ngA	X	X
 
+# Native start predicates remain observable even when the peptide is unknown.
+# Here the first coding base is also the first base of the second exon.
+statement ok
+CREATE TABLE projection_start_event AS SELECT * REPLACE(25::UBIGINT AS position)
+FROM projection_later_event;
+
+query IT
+SELECT (consequence_mask=(SELECT sum(consequence_mask)::UBIGINT FROM duckvep_so_terms()
+  WHERE consequence IN ('start_lost','splice_region_variant')))::INTEGER, duckvep_status
+FROM duckvep_annotate('projection_start_event', 'later-phase', rich := true);
+----
+1	supported
+
+# The last physical CDS base belongs to VEP's complete second codon, even
+# though padding makes the stored CDS end in an incomplete third codon.
+statement ok
+CREATE TABLE projection_tail_event AS SELECT * REPLACE(30::UBIGINT AS position,
+  'A' AS reference, 'C' AS alternate) FROM projection_later_event;
+
+query IT
+SELECT (consequence_mask=(SELECT consequence_mask FROM duckvep_so_terms()
+  WHERE consequence='synonymous_variant'))::INTEGER, duckvep_status
+FROM duckvep_annotate('projection_tail_event', 'later-phase', rich := true);
+----
+1	supported
+
 query I
 SELECT duckvep_model_drop('later-phase');
 ----
@@ -280,8 +306,277 @@ SELECT cdna_start, cds_start, cds_end, protein_start, reference_codons, alternat
 ----
 12	3	3	1	nnG	nnA	X	X
 
+query IT
+SELECT (consequence_mask=(SELECT sum(consequence_mask)::UBIGINT FROM duckvep_so_terms()
+  WHERE consequence IN ('start_lost','splice_region_variant')))::INTEGER, duckvep_status
+FROM duckvep_annotate('projection_start_event', 'later-phase', rich := true);
+----
+1	supported
+
+query IT
+SELECT (consequence_mask=(SELECT consequence_mask FROM duckvep_so_terms()
+  WHERE consequence='synonymous_variant'))::INTEGER, duckvep_status
+FROM duckvep_annotate('projection_tail_event', 'later-phase', rich := true);
+----
+1	supported
+
 query I
 SELECT duckvep_model_drop('later-phase');
+----
+true
+
+# Pinned later-coding-start MNV witnesses for all three phases. A retained UTR
+# base is still part of physical REF validation, even if minimization drops it.
+statement ok
+CREATE TABLE projection_mnv_transcripts AS SELECT p::UINTEGER transcript_index,
+  1::UINTEGER seq_region, 100::UBIGINT transcript_start, 250::UBIGINT transcript_end,
+  1::TINYINT strand, p::UINTEGER gene_index, 3::UBIGINT transcript_flags,
+  158::UBIGINT cds_start, 240::UBIGINT cds_end,
+  (repeat('N',p) || 'CGTACGTACGTACGTACGTACGTTACGTACGTACGTACTGGTAA')::BLOB cds_sequence,
+  1::UTINYINT codon_table, repeat('A',34)::BLOB pre_cds_sequence,
+  'ACGTACGTAC'::BLOB post_cds_sequence FROM range(3) t(p);
+
+statement ok
+CREATE TABLE projection_mnv_exons AS SELECT transcript_index,
+  s::UBIGINT exon_start, e::UBIGINT exon_end,
+  c::UBIGINT exon_cdna_start, d::UBIGINT exon_cdna_end,
+  CASE WHEN c=1 THEN -1 WHEN c=27 THEN transcript_index ELSE (transcript_index+23)%3 END::TINYINT phase,
+  CASE WHEN c=1 THEN -1 ELSE (transcript_index+23)%3 END::TINYINT end_phase
+FROM projection_mnv_transcripts CROSS JOIN (VALUES (100,125,1,26),
+  (150,180,27,57), (220,250,58,88)) e(s,e,c,d)
+ORDER BY transcript_index, exon_cdna_start;
+
+query I
+SELECT * FROM duckvep_model_load('mnv-start', 'SELECT * FROM projection_regions',
+  'SELECT * FROM projection_mnv_transcripts ORDER BY transcript_index',
+  'SELECT * FROM projection_mnv_exons ORDER BY transcript_index, exon_cdna_start');
+----
+true
+
+statement ok
+CREATE TABLE projection_mnv_events AS SELECT event_index::UBIGINT event_index,
+  1::UINTEGER seq_region, 157::UBIGINT AS position, reference, alternate,
+  NULL::UBIGINT end_position, NULL::VARCHAR structural_type, NULL::VARCHAR copy_change,
+  NULL::UINTEGER mate_seq_region, NULL::UBIGINT mate_position
+FROM (VALUES (1,'ACG','ATT'), (2,'ACGT','AATG'), (3,'CCG','CTT')) e(event_index,reference,alternate);
+
+query ITTI
+SELECT event_index, duckvep_status, duckvep_reason,
+  count(*) FILTER (WHERE consequence_mask=(SELECT sum(consequence_mask)::UBIGINT
+    FROM duckvep_so_terms() WHERE consequence='5_prime_UTR_variant' OR
+      consequence=CASE event_index WHEN 1 THEN 'start_lost'
+        WHEN 2 THEN 'start_retained_variant' ELSE 'coding_sequence_variant' END))
+FROM duckvep_annotate('projection_mnv_events', 'mnv-start', rich := true)
+GROUP BY ALL ORDER BY event_index;
+----
+1	supported	NULL	3
+2	supported	NULL	3
+3	unresolved	reference_mismatch	3
+
+statement ok
+CREATE TABLE projection_coding_mnv_events AS SELECT e.* REPLACE(
+  v.event_index::UBIGINT AS event_index, v.position::UBIGINT AS position,
+  v.reference AS reference, v.alternate AS alternate)
+FROM projection_events e CROSS JOIN (VALUES (1,158,'CG','GC'), (2,160,'TA','AT'),
+  (3,165,'AC','TG'), (4,239,'AA','CA'), (5,235,'TG','AC'),
+  (6,239,'AG','CG')) v(event_index,position,reference,alternate)
+WHERE e.event_index=1 ORDER BY position,event_index;
+
+query IITT
+SELECT event_index, transcript_index, duckvep_status,
+  (SELECT string_agg(consequence,'&' ORDER BY consequence)
+   FROM duckvep_so_terms() t WHERE (a.consequence_mask & t.consequence_mask)<>0)
+FROM duckvep_annotate('projection_coding_mnv_events', 'mnv-start', rich := true) a
+WHERE event_index<=5 ORDER BY event_index,transcript_index;
+----
+1	0	supported	start_lost
+1	1	supported	start_lost
+1	2	supported	start_lost
+2	0	supported	start_lost
+2	1	supported	start_lost
+2	2	supported	start_lost
+3	0	supported	missense_variant
+3	1	supported	synonymous_variant
+3	2	supported	missense_variant
+4	0	supported	coding_sequence_variant&incomplete_terminal_codon_variant
+4	1	supported	stop_lost
+4	2	supported	missense_variant
+5	0	supported	missense_variant
+5	1	supported	stop_gained
+5	2	supported	synonymous_variant
+
+# The retained G is incorrect physical REF even in the partial-codon model.
+query TTI
+SELECT duckvep_status, duckvep_reason, count(*)
+FROM duckvep_annotate('projection_coding_mnv_events', 'mnv-start', rich := true)
+WHERE event_index=6 GROUP BY ALL;
+----
+unresolved	reference_mismatch	3
+
+# Terminal substitutions share the indel codon-window authority: independently
+# clipped REF and ALT requests, with ALT borrowing the available 3-prime UTR.
+statement ok
+CREATE TABLE projection_terminal_transcripts AS SELECT i::UINTEGER transcript_index,
+  (i+1)::UINTEGER seq_region, 100::UBIGINT transcript_start, 111::UBIGINT transcript_end,
+  CASE WHEN i<2 THEN 1 ELSE -1 END::TINYINT strand, i::UINTEGER gene_index,
+  3::UBIGINT transcript_flags,
+  CASE WHEN i<2 THEN 100 ELSE 101 END::UBIGINT cds_start,
+  CASE WHEN i<2 THEN 110 ELSE 111 END::UBIGINT cds_end,
+  CASE WHEN i%2=0 THEN 'ATGCCCTGGTA' ELSE 'ATGCCCGGTAA' END::BLOB cds_sequence,
+  1::UTINYINT codon_table, ''::BLOB pre_cds_sequence, 'A'::BLOB post_cds_sequence
+FROM range(4) t(i);
+
+query I
+SELECT * FROM duckvep_model_load('terminal-substitution',
+  'SELECT seq_region FROM projection_terminal_transcripts ORDER BY seq_region',
+  'SELECT * FROM projection_terminal_transcripts ORDER BY transcript_index',
+  'SELECT transcript_index, transcript_start exon_start, transcript_end exon_end,
+    1::UBIGINT exon_cdna_start, 12::UBIGINT exon_cdna_end,
+    0::TINYINT phase, 2::TINYINT end_phase FROM projection_terminal_transcripts
+    ORDER BY transcript_index');
+----
+true
+
+statement ok
+CREATE TABLE projection_terminal_events AS SELECT e.* REPLACE(
+  (2*t.transcript_index+v.ord)::UBIGINT AS event_index, t.seq_region AS seq_region,
+  CASE WHEN strand=1 THEN 99+v.cds_start
+    ELSE 113-v.cds_start-length(v.reference) END::UBIGINT AS position,
+  CASE WHEN strand=1 THEN v.reference ELSE seq_revcomp(v.reference) END AS reference,
+  CASE WHEN strand=1 THEN v.alternate ELSE seq_revcomp(v.alternate) END AS alternate)
+FROM projection_events e CROSS JOIN projection_terminal_transcripts t
+JOIN (VALUES (0,1,9,'GT','TT'), (0,2,11,'A','G'),
+  (1,1,9,'TA','AT'), (1,2,10,'A','T')) v(shape,ord,cds_start,reference,alternate)
+ON t.transcript_index%2=v.shape WHERE e.event_index=1
+ORDER BY seq_region,position,event_index;
+
+query ITT
+SELECT event_index, duckvep_status,
+  (SELECT string_agg(consequence,'&' ORDER BY consequence)
+    FROM duckvep_so_terms() t WHERE (a.consequence_mask & t.consequence_mask)<>0)
+FROM duckvep_annotate('projection_terminal_events', 'terminal-substitution', rich := true) a
+ORDER BY event_index;
+----
+1	supported	coding_sequence_variant&stop_gained
+2	supported	coding_sequence_variant&incomplete_terminal_codon_variant&stop_gained
+3	supported	stop_retained_variant
+4	supported	coding_sequence_variant&incomplete_terminal_codon_variant&stop_gained
+5	supported	coding_sequence_variant&stop_gained
+6	supported	coding_sequence_variant&incomplete_terminal_codon_variant&stop_gained
+7	supported	stop_retained_variant
+8	supported	coding_sequence_variant&incomplete_terminal_codon_variant&stop_gained
+
+query I
+SELECT duckvep_model_drop('terminal-substitution');
+----
+true
+
+# Length-changing edits validate physical REF, mutate at VEP feature positions,
+# and use unpadded cDNA positions for independent start/stop overlap tests.
+statement ok
+CREATE TABLE projection_coding_indel_events AS SELECT e.* REPLACE(
+  v.event_index::UBIGINT AS event_index, v.position::UBIGINT AS position,
+  v.reference AS reference, v.alternate AS alternate)
+FROM projection_events e CROSS JOIN (VALUES (1,158,'C','CT'), (2,160,'T','AC'),
+  (3,165,'A','AATG'), (4,165,'ACGT','A'), (5,235,'TGGT','T'),
+  (6,238,'T','TAGGT'), (7,239,'AA','A'), (8,239,'AAAC','A'),
+  (9,235,'TCGT','T'), (10,239,'AAAT','A')) v(event_index,position,reference,alternate)
+WHERE e.event_index=1 ORDER BY position,event_index;
+
+query IITT
+SELECT event_index, transcript_index, duckvep_status,
+  (SELECT string_agg(consequence,'&' ORDER BY consequence)
+   FROM duckvep_so_terms() t WHERE (a.consequence_mask & t.consequence_mask)<>0)
+FROM duckvep_annotate('projection_coding_indel_events', 'mnv-start', rich := true) a
+WHERE event_index<=8 ORDER BY event_index,transcript_index;
+----
+1	0	supported	frameshift_variant&start_lost
+1	1	supported	frameshift_variant&start_lost
+1	2	supported	frameshift_variant&start_lost
+2	0	supported	frameshift_variant&start_lost
+2	1	supported	frameshift_variant&start_lost
+2	2	supported	frameshift_variant&start_lost
+3	0	supported	stop_gained
+3	1	supported	inframe_insertion&stop_gained
+3	2	supported	inframe_insertion
+4	0	supported	inframe_deletion&stop_gained
+4	1	supported	inframe_deletion
+4	2	supported	inframe_deletion
+5	0	supported	inframe_deletion
+5	1	supported	inframe_deletion
+5	2	supported	inframe_deletion
+6	0	supported	coding_sequence_variant&incomplete_terminal_codon_variant&inframe_insertion
+6	1	supported	frameshift_variant&stop_lost
+6	2	supported	frameshift_variant&stop_lost
+7	0	supported	coding_sequence_variant&incomplete_terminal_codon_variant
+7	1	supported	stop_retained_variant
+7	2	supported	frameshift_variant&stop_lost
+8	0	supported	3_prime_UTR_variant&coding_sequence_variant&incomplete_terminal_codon_variant
+8	1	supported	3_prime_UTR_variant&stop_lost
+8	2	supported	3_prime_UTR_variant&stop_lost
+
+query TTI
+SELECT duckvep_status, duckvep_reason, count(*)
+FROM duckvep_annotate('projection_coding_indel_events', 'mnv-start', rich := true)
+WHERE event_index>=9 GROUP BY ALL;
+----
+unresolved	reference_mismatch	6
+
+query I
+SELECT duckvep_model_drop('mnv-start');
+----
+true
+
+query I
+SELECT * FROM duckvep_model_load('mnv-start', 'SELECT * FROM projection_regions',
+  'SELECT * EXCLUDE(pre_cds_sequence, post_cds_sequence) FROM projection_mnv_transcripts ORDER BY transcript_index',
+  'SELECT * FROM projection_mnv_exons ORDER BY transcript_index, exon_cdna_start');
+----
+true
+
+query TTI
+SELECT duckvep_status, duckvep_reason, count(*)
+FROM duckvep_annotate('projection_mnv_events', 'mnv-start', rich := true) GROUP BY ALL;
+----
+unresolved	missing_transcript_flank	9
+
+query TTI
+SELECT duckvep_status, duckvep_reason, count(*)
+FROM duckvep_annotate('projection_coding_indel_events', 'mnv-start', rich := true)
+WHERE event_index=8 GROUP BY ALL;
+----
+unresolved	missing_transcript_flank	3
+
+query I
+SELECT duckvep_model_drop('mnv-start');
+----
+true
+
+# NMD's <=101 rule uses VEP feature CDS coordinates, not the physical
+# phase-padded edit fact cached by the ordinary indel path.
+query I
+SELECT * FROM duckvep_model_load('later-nmd', 'SELECT * FROM projection_regions',
+  'SELECT 0::UINTEGER transcript_index, 1::UINTEGER seq_region,
+    90::UBIGINT transcript_start, 1119::UBIGINT transcript_end,
+    1::TINYINT strand, 0::UINTEGER gene_index, 3::UBIGINT transcript_flags,
+    1000::UBIGINT cds_start, 1119::UBIGINT cds_end,
+    (''NN'' || repeat(''A'',120))::BLOB cds_sequence, 1::UTINYINT codon_table',
+  'SELECT * FROM (VALUES
+    (0::UINTEGER,90::UBIGINT,99::UBIGINT,1::UBIGINT,10::UBIGINT,-1::TINYINT,-1::TINYINT),
+    (0::UINTEGER,1000::UBIGINT,1119::UBIGINT,11::UBIGINT,130::UBIGINT,2::TINYINT,2::TINYINT))
+    e(transcript_index,exon_start,exon_end,exon_cdna_start,exon_cdna_end,phase,end_phase)');
+----
+true
+
+query TII
+SELECT a.nmd_prediction, a.nmd_escape_early_cds, a.status_code=0
+FROM unnest(_duckvep_annotate_small_rich('later-nmd', 1::UINTEGER,
+  1099::UBIGINT, 'AA', 'A', 0::UBIGINT)) u(a);
+----
+escaping	true	true
+
+query I
+SELECT duckvep_model_drop('later-nmd');
 ----
 true
 
@@ -332,6 +627,77 @@ SELECT cdna_start, cdna_end, cds_start, cds_end, protein_start, cds_end_nf::INTE
     'projection_cds_end_event', 'projection_one_annotation', 'projection_partial');
 ----
 14	15	NULL	NULL	NULL	1	NULL
+
+# Pinned VEP 116, CDS ATGAAACCCGGGTT with no UTR: the first partial-codon
+# insertion site has empty reference codons, while the internal site retains
+# tt. The same transcript-oriented cases must agree on both strands.
+statement ok
+CREATE TABLE projection_partial_insertions AS SELECT
+  (seq_region-1)::UINTEGER transcript_index, seq_region::UINTEGER seq_region,
+  100::UBIGINT transcript_start, 113::UBIGINT transcript_end,
+  strand::TINYINT strand, 0::UINTEGER gene_index, 35::UBIGINT transcript_flags,
+  100::UBIGINT cds_start, 113::UBIGINT cds_end,
+  'ATGAAACCCGGGTT'::BLOB cds_sequence, 1::UTINYINT codon_table,
+  ''::BLOB pre_cds_sequence, ''::BLOB post_cds_sequence
+FROM (VALUES (1,1), (2,-1)) t(seq_region,strand);
+
+query I
+SELECT loaded FROM duckvep_model_load('partial-insertions',
+  'SELECT seq_region FROM projection_partial_insertions ORDER BY seq_region',
+  'SELECT * FROM projection_partial_insertions ORDER BY seq_region',
+  'SELECT transcript_index, 100::UBIGINT exon_start, 113::UBIGINT exon_end,
+     1::UBIGINT exon_cdna_start, 14::UBIGINT exon_cdna_end,
+     0::TINYINT phase, 2::TINYINT end_phase
+   FROM projection_partial_insertions ORDER BY transcript_index');
+----
+true
+
+query III
+WITH cases(site,payload,terms) AS (VALUES
+  (0,'TAG','incomplete_terminal_codon_variant&inframe_insertion&stop_gained'),
+  (0,'TAGA','incomplete_terminal_codon_variant&inframe_insertion&stop_gained'),
+  (1,'TAG','coding_sequence_variant&incomplete_terminal_codon_variant&inframe_insertion'),
+  (1,'TAGA','incomplete_terminal_codon_variant&protein_altering_variant'),
+  (1,'AGT','coding_sequence_variant&incomplete_terminal_codon_variant&stop_gained'),
+  (1,'ATG','coding_sequence_variant&incomplete_terminal_codon_variant&inframe_insertion'),
+  (1,'A','coding_sequence_variant&incomplete_terminal_codon_variant'),
+  (1,'AC','coding_sequence_variant&incomplete_terminal_codon_variant&inframe_insertion')
+), observed AS (
+  SELECT terms, a.* FROM cases, projection_partial_insertions m,
+  unnest(_duckvep_annotate_small_rich('partial-insertions', m.seq_region,
+    (CASE WHEN strand=1 THEN 111+site ELSE 101-site END)::UBIGINT,
+    CASE WHEN strand=1 THEN CASE WHEN site=0 THEN 'G' ELSE 'T' END ELSE 'A' END,
+    CASE WHEN strand=1 THEN (CASE WHEN site=0 THEN 'G' ELSE 'T' END)||payload
+      ELSE 'A'||seq_revcomp(payload) END, 0::UBIGINT)) u(a)
+)
+SELECT count(*), count(*) FILTER (WHERE status_code=0),
+  count(*) FILTER (WHERE terms=(SELECT string_agg(s.consequence,'&' ORDER BY s.consequence)
+    FROM duckvep_so_terms() s WHERE (observed.consequence_mask & s.consequence_mask)!=0))
+FROM observed;
+----
+16	16	16
+
+# One UTR base extends the requested ALT codon without extending the REF.
+statement ok
+UPDATE projection_partial_insertions SET transcript_end=114, post_cds_sequence='A'::BLOB
+WHERE seq_region=1;
+
+query I
+SELECT loaded FROM duckvep_model_load('partial-insertions-utr',
+  'SELECT seq_region FROM projection_partial_insertions WHERE seq_region=1',
+  'SELECT * FROM projection_partial_insertions WHERE seq_region=1',
+  'SELECT 0::UINTEGER transcript_index, 100::UBIGINT exon_start, 114::UBIGINT exon_end,
+     1::UBIGINT exon_cdna_start, 15::UBIGINT exon_cdna_end,
+     0::TINYINT phase, 2::TINYINT end_phase');
+----
+true
+
+query TT
+SELECT a.consequence, a.status
+FROM unnest(_duckvep_annotate_small_rich('partial-insertions-utr',1::UINTEGER,
+  112::UBIGINT,'T','TA',0::UBIGINT)) u(a);
+----
+inframe_insertion&incomplete_terminal_codon_variant&coding_sequence_variant	supported
 
 statement ok
 CREATE TABLE projection_invalid_code AS SELECT * REPLACE(255::UTINYINT AS codon_table)

@@ -253,6 +253,9 @@ typedef struct duckvep_coding_context {
     uint32_t flags;
     size_t applied_edits;
     uint32_t single_edit_cds_start, single_edit_ref_len, single_edit_alt_len;
+    /* Start relative to the unpadded CDS, for cDNA start/stop predicates.
+     * single_edit_cds_start instead selects the sequence mutation position. */
+    uint32_t single_edit_unpadded_start1;
     uint8_t has_single_edit;
     uint8_t cds_changed;
     uint8_t pre_cds_complete;
@@ -260,15 +263,16 @@ typedef struct duckvep_coding_context {
     uint8_t ref_first_stop_known;
     uint8_t compatibility_profile; /* duckvep_compat_profile_t */
     uint8_t feature_length_relation; /* duckvep_feature_length_relation_t */
+    uint8_t cds_phase_padding; /* Known synthetic N prefix, not unknown genomic REF. */
     uint32_t ref_first_stop_position1;
     uint32_t ref_first_changed_codon, ref_last_changed_codon;
     uint32_t alt_first_changed_codon, alt_last_changed_codon;
 } duckvep_coding_context_t;
 
-/* One authority for the non-obvious single-edit state consumed by both the
- * consequence peptide view and the HGVS peptide view.  The two consumers may
- * deliberately render different VEP-116 views, but they must not rediscover
- * the state with duplicate predicates. */
+/* Terminal partial-codon state selecting VEP's later HGVS peptide replay.
+ * Consequence windows independently round the insertion's CDS endpoints:
+ * insertion-only translation applies at a codon start, not every site
+ * admitted by this HGVS predicate. */
 DUCKVEP_INTERNAL_API int
 duckvep_coding_context_is_terminal_partial_insertion(
     const duckvep_coding_context_t *context);
@@ -301,9 +305,10 @@ typedef struct duckvep_coding_peptide_window {
     uint8_t alt_partial_x;
 } duckvep_coding_peptide_window_t;
 
-/* Open the exact codon-rounded local peptide window consumed by VEP 116 for a
- * supported single edit. Consequence predicates currently use it for
- * length-changing alleles; HGVS also uses it for equal-length edits. */
+/* Open the codon-rounded local peptide window for a supported single edit.
+ * REF and ALT requests are independently clamped; ALT includes the borrowed
+ * 3-prime UTR without extending physical CDS storage. Consequence predicates
+ * use this for length-changing alleles; HGVS also uses it for equal-length edits. */
 DUCKVEP_INTERNAL_API int duckvep_coding_context_peptide_window_open(
     const duckvep_coding_context_t  *ctx,
     duckvep_coding_peptide_window_t *window);
@@ -521,14 +526,13 @@ duckvep_model_coding_context_build(
     size_t                            alt_peptide_cap,
     duckvep_coding_context_t         *ctx);
 
-/* Compose one small variant directly into a CodingContext: build the
- * edit set, borrow the transcript CDS from `seq`, and call duckvep_coding_context_build.
- * This is not an SO emitter; it is reached by explicit scratch-aware direct calls
- * and by the annotation wrapper for supported MNV/DEL/INS/INDEL contexts.
+/* Materialize the physical CDS edit set of one small variant. This is the
+ * sequence-edit reference for kernel properties, not a VEP feature projection.
+ * Independent annotation uses the feature-coordinate producer below.
  * `ctx` is zeroed on entry and remains all-zero on failure. On success, `ctx->ref_cds`
  * borrows from `seq`; alternate CDS and peptides borrow caller scratch. `ctx`, sequence
  * storage, and all scratch buffers must be non-overlapping. */
-DUCKVEP_INTERNAL_API duckvep_variant_coding_context_status_t duckvep_variant_coding_context_build(
+DUCKVEP_INTERNAL_API duckvep_variant_coding_context_status_t duckvep_variant_physical_coding_context_build(
     const duckvep_transcript_model_t *transcripts,
     const duckvep_exon_model_t       *exons,
     const duckvep_sequence_pool_t    *seq,
@@ -546,13 +550,13 @@ DUCKVEP_INTERNAL_API duckvep_variant_coding_context_status_t duckvep_variant_cod
     size_t                            alt_peptide_cap,
     duckvep_coding_context_t         *ctx);
 
-/* Prepared-event form used when the annotation cursor has already interpreted
- * REF/ALT once. `exon_hint` is an absolute model exon index or UINT32_MAX.
- * The helper may retain the model-backed virtual single-edit representation;
- * all consumers must use the coding-context peptide accessors rather than
- * assuming complete alternate buffers were materialized. */
+/* Validate the physical edit, then open VEP's single feature-coordinate edit
+ * without mutating that physical edit set. `exon_hint` is an absolute model exon
+ * index or UINT32_MAX. Context accessors select the borrowed virtual CDS and
+ * local peptide cache; unpadded cDNA-relative positions remain separate facts.
+ * Equal-length multi-base features use the full-feature producer below. */
 DUCKVEP_INTERNAL_API duckvep_variant_coding_context_status_t
-duckvep_variant_coding_context_build_prepared(
+duckvep_variant_feature_coding_context_build_prepared(
     const duckvep_transcript_model_t *transcripts,
     const duckvep_exon_model_t       *exons,
     const duckvep_sequence_pool_t    *seq,
@@ -572,13 +576,14 @@ duckvep_variant_coding_context_build_prepared(
     size_t                            alt_peptide_cap,
     duckvep_coding_context_t         *ctx);
 
-/* VEP maps an equal-length uploaded multi-base feature as one peptide window,
+/* VEP maps an equal-length uploaded multi-base CDS feature as one peptide window,
  * even when semantic allele trimming leaves a smaller substitution.  This is
  * the shared representation-sensitive path used by both consequence facts and
  * independent-event HGVSp.  NOT_APPLICABLE means the caller should use the
- * ordinary semantic edit set.  DELTA_ONLY means the uploaded feature was
- * authoritative but no reusable peptide context exists (for example, a
- * partial terminal codon or an explicit sequence/projection failure).
+ * ordinary semantic edit set after UTR/CDS-spanning shapes have been handled
+ * by the transcript-string evaluator. DELTA_ONLY means the uploaded feature was
+ * authoritative but no reusable peptide context exists (for example, an
+ * outer mapper gap or an explicit sequence/projection failure).
  * CONTEXT_READY returns both the exact consequence delta and its borrowed
  * coding context; the context remains valid until caller scratch is reused. */
 typedef enum duckvep_feature_substitution_result {
@@ -603,12 +608,16 @@ duckvep_feature_substitution_context_fill(
     duckvep_sequence_delta_t         *delta_out);
 
 /* Classify a CodingContext into sequence-delta facts. The classifier handles
- * length-preserving substitutions across complete codon windows and guarded
+ * length-preserving substitutions across codon-rounded windows and guarded
  * single-edit frameshift, in-frame insertion, deletion, and delins contexts.
- * Ambiguous bases, incomplete codons, length-changing multi-edit contexts, and cases
+ * Terminal partial codons share independent REF/ALT clipping and borrowed UTR
+ * translation with the length-changing path. Ambiguous bases, length-changing
+ * multi-edit contexts, and cases
  * requiring an incomplete compound consequence return UNSUPPORTED with `delta`
- * invalid. Length-preserving multi-edit substitutions use the same complete-CDS
- * comparison as one uploaded MNV. The raw dispatcher has no shape-specific fallback. */
+ * invalid. Length-preserving edit sets select their changed codons; the uploaded
+ * feature producer selects the full feature's codons without minimizing retained
+ * bases. Both selections use the same substitution interpreter. The raw dispatcher
+ * has no shape-specific fallback. */
 DUCKVEP_INTERNAL_API duckvep_context_delta_status_t duckvep_coding_context_delta_fill(
     const duckvep_coding_context_t *ctx,
     uint64_t                        tx_flags,

@@ -1521,6 +1521,34 @@ local({
       "'duckvep_r_projection_phase_model')"
     ))
     expect_equal(phase_result, data.frame(cdna_start=54, cds_start=3, cds_end=3, protein_start=1))
+    dbExecute(con, paste(
+      "CREATE OR REPLACE TABLE duckvep_r_phase_start_events AS SELECT e.* REPLACE(",
+      "200::UBIGINT AS position, substring(decode(m.cds_sequence),32,1) AS reference,",
+      "CASE WHEN substring(decode(m.cds_sequence),32,1)='C' THEN 'G' ELSE 'C' END AS alternate)",
+      "FROM duckvep_r_projection_events e, duckvep_r_projection_model m WHERE event_index=1"
+    ))
+    start_result <- dbGetQuery(con, paste(
+      "SELECT consequence_mask=(SELECT sum(consequence_mask)::UBIGINT FROM duckvep_so_terms()",
+      "WHERE consequence IN ('start_lost','splice_region_variant')) start_lost, duckvep_status status FROM",
+      "duckvep_annotate('duckvep_r_phase_start_events', 'r-projection-phase', rich := true)"
+    ))
+    expect_identical(start_result, data.frame(start_lost=TRUE, status="supported"))
+    dbExecute(con, paste(
+      "CREATE OR REPLACE TABLE duckvep_r_phase_tail_events AS SELECT e.* REPLACE(",
+      "v.i::UBIGINT AS event_index, v.pos::UBIGINT AS position, v.ref AS reference,",
+      "v.alt AS alternate) FROM duckvep_r_projection_events e,",
+      "(VALUES (1,238,'T','A'), (2,240,'A','C')) v(i,pos,ref,alt) WHERE e.event_index=1"
+    ))
+    tail_result <- dbGetQuery(con, paste(
+      "SELECT a.event_index, t.consequence, a.duckvep_status FROM",
+      "duckvep_annotate('duckvep_r_phase_tail_events', 'r-projection-phase', rich := true) a",
+      "LEFT JOIN duckvep_so_terms() t ON a.consequence_mask=t.consequence_mask",
+      "ORDER BY a.event_index"
+    ))
+    expect_equal(tail_result$event_index, 1:2)
+    expect_identical(tail_result$consequence, if (phase == 1L)
+      c("stop_gained", "stop_lost") else c("synonymous_variant", "missense_variant"))
+    expect_identical(tail_result$duckvep_status, rep("supported", 2L))
     expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-projection-phase') dropped")$dropped)
   }
   dbExecute(con, paste(
@@ -1608,6 +1636,40 @@ local({
   expect_identical(partial_tail_deletion$consequence, "inframe_deletion")
   expect_identical(partial_tail_deletion$status, "supported")
   expect_true(is.na(partial_tail_deletion$reason))
+
+  # Pinned VEP 116 distinguishes insertion before and inside the final TT.
+  # Keep the exact internal TAG/TAGA/AGT counterexamples, not just the
+  # codon-start ClinVar placement that originally motivated this path.
+  partial_insertions <- dbGetQuery(con, "WITH cases(site,payload) AS (VALUES
+    (0,'TAG'),(0,'TAGA'),(1,'TAG'),(1,'TAGA'),(1,'AGT'),(1,'ATG'),(1,'A'),(1,'AC'))
+    SELECT site,payload,(SELECT string_agg(s.consequence,'&' ORDER BY s.consequence)
+      FROM duckvep_so_terms() s WHERE (a.consequence_mask & s.consequence_mask)!=0) terms,
+      a.status,a.reason
+    FROM cases, unnest(_duckvep_annotate_small_rich('r-partial-cds-end',1::UINTEGER,
+      (111+site)::UBIGINT, CASE WHEN site=0 THEN 'G' ELSE 'T' END,
+      (CASE WHEN site=0 THEN 'G' ELSE 'T' END)||payload,0::UBIGINT)) u(a)
+    ORDER BY site,payload")
+  expect_identical(partial_insertions$terms, c(
+    "incomplete_terminal_codon_variant&inframe_insertion&stop_gained",
+    "incomplete_terminal_codon_variant&inframe_insertion&stop_gained",
+    "coding_sequence_variant&incomplete_terminal_codon_variant",
+    "coding_sequence_variant&incomplete_terminal_codon_variant&inframe_insertion",
+    "coding_sequence_variant&incomplete_terminal_codon_variant&stop_gained",
+    "coding_sequence_variant&incomplete_terminal_codon_variant&inframe_insertion",
+    "coding_sequence_variant&incomplete_terminal_codon_variant&inframe_insertion",
+    "incomplete_terminal_codon_variant&protein_altering_variant"))
+  expect_identical(partial_insertions$status, rep("supported", 8L))
+  expect_true(all(is.na(partial_insertions$reason)))
+  dbExecute(con, "UPDATE duckvep_r_partial_cds_transcripts SET transcript_end=114,
+    post_cds_sequence='A'::BLOB")
+  dbExecute(con, "UPDATE duckvep_r_partial_cds_exons SET exon_end=114, exon_cdna_end=15")
+  expect_true(load_model("r-partial-cds-end-utr", partial_cds_queries)$loaded)
+  partial_insertion_utr <- dbGetQuery(con, "SELECT a.consequence,a.status
+    FROM unnest(_duckvep_annotate_small_rich('r-partial-cds-end-utr',1::UINTEGER,
+      112::UBIGINT,'T','TA',0::UBIGINT)) u(a)")
+  expect_identical(partial_insertion_utr$consequence,
+    "inframe_insertion&incomplete_terminal_codon_variant&coding_sequence_variant")
+  expect_identical(partial_insertion_utr$status, "supported")
 
   dbExecute(
     con,
@@ -2094,6 +2156,129 @@ local({
   )
   expect_identical(utr5_start_boundary$status, rep("supported", 4))
 
+  # The pinned chrDuck:157 substitutions cross UTR into a later coding exon.
+  # Required UTR is validated physically; VEP edits at the unpadded cDNA offset.
+  for (phase in 0:2) {
+    mnv_queries <- c(queries[1], sprintf(paste(
+      "SELECT 0::UINTEGER transcript_index, 1::UINTEGER seq_region,",
+      "100::UBIGINT transcript_start, 250::UBIGINT transcript_end,",
+      "1::TINYINT strand, 0::UINTEGER gene_index, 3::UBIGINT transcript_flags,",
+      "158::UBIGINT cds_start, 240::UBIGINT cds_end,",
+      "('%sCGTACGTACGTACGTACGTACGTTACGTACGTACGTACTGGTAA')::BLOB cds_sequence,",
+      "1::UTINYINT codon_table, repeat('A',34)::BLOB pre_cds_sequence,",
+      "'ACGTACGTAC'::BLOB post_cds_sequence"
+    ), strrep("N", phase)), sprintf(paste(
+      "SELECT * FROM (VALUES",
+      "(0::UINTEGER,100::UBIGINT,125::UBIGINT,1::UBIGINT,26::UBIGINT,-1::TINYINT,-1::TINYINT),",
+      "(0,150,180,27,57,%d,%d),(0,220,250,58,88,%d,%d))",
+      "e(transcript_index,exon_start,exon_end,exon_cdna_start,exon_cdna_end,phase,end_phase)"
+    ), phase, (phase+23L) %% 3L, (phase+23L) %% 3L, (phase+23L) %% 3L))
+    expect_true(load_model("r-mnv-start", mnv_queries)$loaded)
+    mnv_sql <- paste(
+      "WITH variants(ord, reference, alternate) AS (VALUES",
+      "(1,'ACG','ATT'),(2,'ACGT','AATG'),(3,'CCG','CTT'))",
+      "SELECT ord, a.consequence, a.status, a.reason FROM variants,",
+      "LATERAL unnest(_duckvep_annotate_small_rich('r-mnv-start',",
+      "1::UINTEGER,157::UBIGINT,reference,alternate,0::UBIGINT)) u(a) ORDER BY ord"
+    )
+    mnv <- dbGetQuery(con, mnv_sql)
+    expect_equal(mnv$ord, 1:3)
+    expect_identical(mnv$consequence, c("start_lost&5_prime_UTR_variant",
+      "start_retained_variant&5_prime_UTR_variant", "coding_sequence_variant&5_prime_UTR_variant"))
+    expect_identical(mnv$status, c("supported", "supported", "unresolved"))
+    expect_identical(mnv$reason, c(NA_character_, NA_character_, "reference_mismatch"))
+    coding_mnv <- dbGetQuery(con, paste(
+      "WITH variants(ord, position, reference, alternate) AS (VALUES",
+      "(1,158::UBIGINT,'CG','GC'),(2,160::UBIGINT,'TA','AT'),",
+      "(3,165::UBIGINT,'AC','TG'),(4,239::UBIGINT,'AA','CA'),",
+      "(5,235::UBIGINT,'TG','AC'),(6,239::UBIGINT,'AG','CG'))",
+      "SELECT ord, a.consequence, a.status, a.reason FROM variants,",
+      "LATERAL unnest(_duckvep_annotate_small_rich('r-mnv-start',",
+      "1::UINTEGER,position,reference,alternate,0::UBIGINT)) u(a) ORDER BY ord"
+    ))
+    expect_equal(coding_mnv$ord, 1:6)
+    expect_identical(coding_mnv$consequence[1:5], c("start_lost", "start_lost",
+      if (phase == 1) "synonymous_variant" else "missense_variant",
+      c("incomplete_terminal_codon_variant&coding_sequence_variant", "stop_lost", "missense_variant")[phase+1L],
+      c("missense_variant", "stop_gained", "synonymous_variant")[phase+1L]))
+    expect_identical(coding_mnv$status, c(rep("supported", 5), "unresolved"))
+    expect_identical(coding_mnv$reason, c(rep(NA_character_, 5), "reference_mismatch"))
+    coding_indel <- dbGetQuery(con, paste(
+      "WITH variants(ord, position, reference, alternate) AS (VALUES",
+      "(1,158::UBIGINT,'C','CT'),(2,160::UBIGINT,'T','AC'),",
+      "(3,165::UBIGINT,'A','AATG'),(4,165::UBIGINT,'ACGT','A'),",
+      "(5,235::UBIGINT,'TGGT','T'),(6,238::UBIGINT,'T','TAGGT'),",
+      "(7,239::UBIGINT,'AA','A'),(8,239::UBIGINT,'AAAC','A'),",
+      "(9,235::UBIGINT,'TCGT','T'),(10,239::UBIGINT,'AAAT','A'))",
+      "SELECT ord, a.consequence, a.status, a.reason FROM variants,",
+      "LATERAL unnest(_duckvep_annotate_small_rich('r-mnv-start',",
+      "1::UINTEGER,position,reference,alternate,0::UBIGINT)) u(a) ORDER BY ord"
+    ))
+    expect_equal(coding_indel$ord, 1:10)
+    expect_identical(vapply(strsplit(coding_indel$consequence[1:8], "&", fixed=TRUE),
+      function(x) paste(sort(x), collapse="&"), ""), c(
+      "frameshift_variant&start_lost", "frameshift_variant&start_lost",
+      c("stop_gained", "inframe_insertion&stop_gained", "inframe_insertion")[phase+1L],
+      if (phase == 0) "inframe_deletion&stop_gained" else "inframe_deletion",
+      "inframe_deletion",
+      if (phase == 0) "coding_sequence_variant&incomplete_terminal_codon_variant&inframe_insertion"
+        else "frameshift_variant&stop_lost",
+      c("coding_sequence_variant&incomplete_terminal_codon_variant",
+        "stop_retained_variant", "frameshift_variant&stop_lost")[phase+1L],
+      if (phase == 0) "3_prime_UTR_variant&coding_sequence_variant&incomplete_terminal_codon_variant"
+        else "3_prime_UTR_variant&stop_lost"))
+    expect_identical(coding_indel$status, c(rep("supported", 8), rep("unresolved", 2)))
+    expect_identical(coding_indel$reason, c(rep(NA_character_, 8), rep("reference_mismatch", 2)))
+    expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-mnv-start') dropped")$dropped)
+    mnv_queries[2] <- paste("SELECT * EXCLUDE(pre_cds_sequence,post_cds_sequence) FROM (",
+      mnv_queries[2], ")")
+    expect_true(load_model("r-mnv-start", mnv_queries)$loaded)
+    mnv <- dbGetQuery(con, mnv_sql)
+    expect_identical(mnv$status, rep("unresolved", 3))
+    expect_identical(mnv$reason, rep("missing_transcript_flank", 3))
+    incomplete_indel <- dbGetQuery(con, paste(
+      "SELECT a.status, a.reason FROM unnest(_duckvep_annotate_small_rich('r-mnv-start',",
+      "1::UINTEGER,239::UBIGINT,'AAAC','A',0::UBIGINT)) u(a)"))
+    expect_identical(incomplete_indel$status, "unresolved")
+    expect_identical(incomplete_indel$reason, "missing_transcript_flank")
+    expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-mnv-start') dropped")$dropped)
+  }
+
+  # Terminal substitutions borrow the same 3-prime UTR codon bytes as indels.
+  # These reduced pinned-VEP witnesses retain both genomic orientations.
+  for (strand in c(1L, -1L)) for (shape in 0:1) {
+    terminal_queries <- c(queries[1], sprintf(paste(
+      "SELECT 0::UINTEGER transcript_index, 1::UINTEGER seq_region,",
+      "100::UBIGINT transcript_start, 111::UBIGINT transcript_end,",
+      "%d::TINYINT strand, 0::UINTEGER gene_index, 3::UBIGINT transcript_flags,",
+      "%d::UBIGINT cds_start, %d::UBIGINT cds_end, '%s'::BLOB cds_sequence,",
+      "1::UTINYINT codon_table, ''::BLOB pre_cds_sequence, 'A'::BLOB post_cds_sequence"
+    ), strand, if (strand == 1L) 100L else 101L, if (strand == 1L) 110L else 111L,
+      c("ATGCCCTGGTA", "ATGCCCGGTAA")[shape+1L]), paste(
+      "SELECT 0::UINTEGER transcript_index, 100::UBIGINT exon_start,",
+      "111::UBIGINT exon_end, 1::UBIGINT exon_cdna_start, 12::UBIGINT exon_cdna_end,",
+      "0::TINYINT phase, 2::TINYINT end_phase"))
+    expect_true(load_model("r-terminal-substitution", terminal_queries)$loaded)
+    terminal <- dbGetQuery(con, sprintf(paste(
+      "WITH variants(shape,ord,cds_start,reference,alternate) AS (VALUES",
+      "(0,1,9,'GT','TT'),(0,2,11,'A','G'),(1,1,9,'TA','AT'),(1,2,10,'A','T'))",
+      "SELECT ord, a.consequence, a.status, a.reason FROM variants,",
+      "LATERAL unnest(_duckvep_annotate_small_rich('r-terminal-substitution', 1::UINTEGER,",
+      "CASE WHEN %d=1 THEN 99+cds_start ELSE 113-cds_start-length(reference) END::UBIGINT,",
+      "CASE WHEN %d=1 THEN reference ELSE seq_revcomp(reference) END,",
+      "CASE WHEN %d=1 THEN alternate ELSE seq_revcomp(alternate) END, 0::UBIGINT)) u(a)",
+      "WHERE shape=%d ORDER BY ord"
+    ), strand, strand, strand, shape))
+    expect_equal(terminal$ord, 1:2)
+    expect_identical(vapply(strsplit(terminal$consequence, "&", fixed=TRUE),
+      function(x) paste(sort(x), collapse="&"), ""), c(
+      if (shape == 0L) "coding_sequence_variant&stop_gained" else "stop_retained_variant",
+      "coding_sequence_variant&incomplete_terminal_codon_variant&stop_gained"))
+    expect_identical(terminal$status, rep("supported", 2))
+    expect_true(all(is.na(terminal$reason)))
+    expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-terminal-substitution') dropped")$dropped)
+  }
+
   length_changing_boundaries <- dbGetQuery(
     con,
     paste(
@@ -2354,6 +2539,28 @@ local({
       all(!nmd_prediction$nmd_escape_early_cds) &&
       all(!nmd_prediction$nmd_escape_last_exon)
   )
+
+  nmd_phase_queries <- c(queries[1], paste(
+    "SELECT 0::UINTEGER transcript_index, 1::UINTEGER seq_region,",
+    "90::UBIGINT transcript_start, 1119::UBIGINT transcript_end,",
+    "1::TINYINT strand, 0::UINTEGER gene_index, 3::UBIGINT transcript_flags,",
+    "1000::UBIGINT cds_start, 1119::UBIGINT cds_end,",
+    "('NN' || repeat('A',120))::BLOB cds_sequence, 1::UTINYINT codon_table"
+  ), paste(
+    "SELECT * FROM (VALUES",
+    "(0::UINTEGER,90::UBIGINT,99::UBIGINT,1::UBIGINT,10::UBIGINT,-1::TINYINT,-1::TINYINT),",
+    "(0::UINTEGER,1000::UBIGINT,1119::UBIGINT,11::UBIGINT,130::UBIGINT,2::TINYINT,2::TINYINT))",
+    "e(transcript_index,exon_start,exon_end,exon_cdna_start,exon_cdna_end,phase,end_phase)"
+  ))
+  expect_true(load_model("r-nmd-later-phase", nmd_phase_queries)$loaded)
+  nmd_phase <- dbGetQuery(con, paste(
+    "SELECT a.nmd_prediction, a.nmd_escape_early_cds, a.status_code=0 AS supported FROM",
+    "unnest(_duckvep_annotate_small_rich('r-nmd-later-phase', 1::UINTEGER,",
+    "1099::UBIGINT, 'AA', 'A', 0::UBIGINT)) u(a)"
+  ))
+  expect_identical(nmd_phase, data.frame(nmd_prediction="escaping",
+    nmd_escape_early_cds=TRUE, supported=TRUE))
+  expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-nmd-later-phase') dropped")$dropped)
 
   fixture_root <- system.file(
     "extdata",

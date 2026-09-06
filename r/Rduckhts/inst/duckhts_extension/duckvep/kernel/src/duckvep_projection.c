@@ -421,6 +421,77 @@ int duckvep_project_feature_has_coding_precondition_unshifted(
     return 0;
 }
 
+int duckvep_project_vep_cds_position(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint32_t                          physical_position1,
+    uint8_t                           physical_phase,
+    uint32_t                         *position_out,
+    uint8_t                          *phase_out) {
+
+    size_t offset;
+    size_t count;
+    int8_t phase;
+    uint32_t unpadded_position;
+
+    if (position_out != NULL) *position_out = 0u;
+    if (phase_out != NULL) *phase_out = 0u;
+    if (position_out == NULL || phase_out == NULL) return 0;
+    if (!valid_tx_exon_slice(transcripts, exons, tx_idx, &offset, &count) ||
+        physical_phase > 2u || physical_position1 <= physical_phase) return 0;
+    phase = exons->phase == NULL ? 0 : exons->phase[offset];
+    if (phase < -1 || phase > 2) return 0;
+    unpadded_position = physical_position1 - physical_phase;
+    phase = phase > 0 ? phase : 0;
+    if (unpadded_position > UINT32_MAX - (uint32_t)phase) return 0;
+    *phase_out = (uint8_t)phase;
+    *position_out = unpadded_position + *phase_out;
+    return 1;
+}
+
+int duckvep_project_vep_coding_position(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    const duckvep_coding_projection_t *physical,
+    duckvep_coding_projection_t      *out) {
+
+    duckvep_coding_projection_t result;
+    uint8_t physical_phase;
+
+    if (out == NULL) return 0;
+    if (physical == NULL) {
+        memset(out, 0, sizeof *out);
+        return 0;
+    }
+    result = *physical;
+    physical_phase = result.phase_offset;
+    memset(out, 0, sizeof *out);
+    if (!duckvep_project_vep_cds_position(transcripts, exons, tx_idx,
+            result.cds_pos, physical_phase, &result.cds_pos, &result.phase_offset)) return 0;
+    if (result.phase_offset == physical_phase) {
+        *out = result;
+        return 1;
+    }
+    result.protein_pos = (result.cds_pos - 1u) / 3u + 1u;
+    result.codon_offset = (uint8_t)((result.cds_pos - 1u) % 3u);
+    result.codon_start_cds = result.cds_pos - result.codon_offset;
+    *out = result;
+    return 1;
+}
+
+static int project_vep_coding_base(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint32_t                          genomic_pos,
+    duckvep_coding_projection_t      *out) {
+
+    return duckvep_project_coding_base(transcripts, exons, tx_idx, genomic_pos, out) &&
+        duckvep_project_vep_coding_position(transcripts, exons, tx_idx, out, out);
+}
+
 int duckvep_project_complete_feature_translation_bounds(
     const duckvep_transcript_model_t *transcripts,
     const duckvep_exon_model_t       *exons,
@@ -492,9 +563,9 @@ int duckvep_project_complete_feature_translation_bounds(
         (void)last_cdna;
         (void)first_exon;
         (void)last_exon;
-        first_coding = duckvep_project_coding_base(
+        first_coding = project_vep_coding_base(
             transcripts, exons, tx_idx, first_genomic, &first);
-        last_coding = duckvep_project_coding_base(
+        last_coding = project_vep_coding_base(
             transcripts, exons, tx_idx, last_genomic, &last);
         if ((first_exonic && last_exonic &&
              (!first_coding || !last_coding)) ||
@@ -515,9 +586,9 @@ int duckvep_project_complete_feature_translation_bounds(
         }
         return 1;
     }
-    if (!duckvep_project_coding_base(
+    if (!project_vep_coding_base(
             transcripts, exons, tx_idx, first_genomic, &first) ||
-        !duckvep_project_coding_base(
+        !project_vep_coding_base(
             transcripts, exons, tx_idx, last_genomic, &last)) {
         return 0;
     }
@@ -600,7 +671,7 @@ int duckvep_project_feature_translation_start(
      * transcript. Its first item is therefore the high genomic endpoint. */
     first_genomic1 = transcripts->strand[tx_idx] >= 0
         ? event->feature_start1 : event->feature_end1;
-    return duckvep_project_coding_base(
+    return project_vep_coding_base(
         transcripts, exons, tx_idx, first_genomic1, out);
 }
 
@@ -733,6 +804,10 @@ int duckvep_project_feature_to_cds(
     if (event->interbase) {
         uint32_t cds_boundary;
         uint32_t ignored_end;
+        uint32_t coding_start_cdna;
+        uint32_t coding_end_cdna;
+        uint8_t physical_phase;
+        uint8_t feature_phase;
 
         if (feature_start1 == 0u || feature_end1 == UINT32_MAX ||
             feature_start1 != feature_end1 + 1u) {
@@ -747,6 +822,12 @@ int duckvep_project_feature_to_cds(
                 &cds_boundary, &ignored_end) || cds_boundary == 0u) {
             return 0;
         }
+        if (!duckvep_project_coding_cdna_bounds(transcripts, exons, tx_idx,
+                &coding_start_cdna, &coding_end_cdna, NULL, &physical_phase) ||
+            !duckvep_project_vep_cds_position(transcripts, exons, tx_idx,
+                cds_boundary, physical_phase, &cds_boundary, &feature_phase)) {
+            return 0;
+        }
         *cds_start_out = cds_boundary;
         *cds_end_out = cds_boundary - 1u;
         return 1;
@@ -755,9 +836,9 @@ int duckvep_project_feature_to_cds(
         feature_end1 < feature_start1) {
         return 0;
     }
-    if (!duckvep_project_coding_base(
+    if (!project_vep_coding_base(
             transcripts, exons, tx_idx, feature_start1, &first) ||
-        !duckvep_project_coding_base(
+        !project_vep_coding_base(
             transcripts, exons, tx_idx, feature_end1, &last)) {
         return 0;
     }

@@ -47,6 +47,11 @@ The validation gates have independent jobs:
 - `make test-duckvep-differential` generates boundary, splice, codon, and allele-shape
   witnesses, runs both engines on the same GFF and FASTA, and compares the exact SO term
   set for every `(variant, transcript)` pair.
+- `make test-duckvep-projection ARGS='--vep-prefix /path/to/vep --consequences'`
+  compares the typed presentation fields and, separately, native SO terms/status/reason
+  on the derived transcript fixtures. Every physical VCF record is retained, including
+  repeated alleles. Native pair artifacts and `consequence_summary.csv` remain available
+  on failure; passing presentation fields alone do not certify native consequences.
 - `make test-duckvep-gvcf-differential` splits each ALT from a fixed mixed gVCF
   fixture into the same single-allele records given to DuckVEP, then compares
   those records with executable VEP 116. Both `T,<*>` and `<*>,T` source orders
@@ -234,7 +239,14 @@ For a large VCF, prepare an ordinary DuckDB database containing
 `duckvep_transcript_names`. When the model carries Ensembl mature-miRNA
 attributes, also provide `duckvep_mature_mirna` with transcript index and
 inclusive genomic start/end columns. The runner loads that packed side relation
-automatically. Then run, for example:
+automatically. Registry-built models instead store `model_regions` and nested
+`model_transcripts`; shared read-only SQL projections expose the same flat
+relations, including every exon, mature-miRNA segment and peptide edit. They do
+not rewrite the artifact or recompute biological fields. Model-load queries
+refer directly to the attached catalog so they also work from separate DuckDB
+connections. The FastVEP benchmark worker uses the same projections.
+
+Then run, for example:
 
 ```sh
 make duckvep-corpus-differential DUCKVEP_DIFFERENTIAL_ARGS="\

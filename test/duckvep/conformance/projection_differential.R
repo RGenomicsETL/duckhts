@@ -42,6 +42,19 @@ duckvep_projection_expected <- function(path, gff) {
   as.data.frame(do.call(rbind, rows), stringsAsFactors = FALSE, check.names = FALSE)
 }
 
+duckvep_projection_consequences_expected <- function(path) {
+  records <- lapply(readLines(path), jsonlite::fromJSON, simplifyVector = FALSE)
+  rows <- lapply(records, function(record) {
+    stopifnot(length(record$transcript_consequences) == 1L)
+    tx <- record$transcript_consequences[[1L]]
+    data.frame(ID = strsplit(record$input, "\t", fixed = TRUE)[[1L]][[3L]],
+      transcript_id = tx$transcript_id,
+      consequence_terms = paste(sort(unlist(tx$consequence_terms)), collapse = "&"),
+      status = "supported", reason = NA_character_)
+  })
+  do.call(rbind, rows)
+}
+
 duckvep_projection_compare <- function(actual, expected) {
   keys <- c("ID", "transcript_id")
   stopifnot(identical(names(actual), names(expected)))
@@ -79,6 +92,8 @@ main <- function() {
     optparse::make_option("--random-cases", dest = "random_cases", type = "integer", default = 1000L),
     optparse::make_option("--max-random-length", dest = "max_random_length", type = "integer", default = 10L),
     optparse::make_option("--seed", type = "integer", default = 173L),
+    optparse::make_option("--consequences", action = "store_true", default = FALSE,
+      help = "also require native SO/status agreement on every retained record/transcript pair"),
     optparse::make_option("--extension", default = "build/release/duckhts.duckdb_extension"),
     optparse::make_option("--extension-receipt", dest = "extension_receipt", default = NULL),
     optparse::make_option("--summary-output", dest = "summary_output", default = NULL),
@@ -135,7 +150,7 @@ main <- function() {
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
   DBI::dbExecute(con, paste("LOAD", DBI::dbQuoteString(con, extension)))
   DBI::dbExecute(con, "SET threads=1")
-  summaries <- controls <- list()
+  summaries <- controls <- consequence_summaries <- list()
   for (case in duckvep_projection_cases) {
     gff <- duckvep_projection_fixture(con, root, inputs, case, directory)
     vcf <- file.path(directory, paste0(case, ".vcf"))
@@ -169,6 +184,30 @@ main <- function() {
       input_alleles = input_count,
       expected_pairs = nrow(expected), actual_pairs = nrow(actual), mismatches = nrow(mismatch))
     print(summaries[[case]])
+    if (opt$consequences) {
+      expected_so <- duckvep_projection_consequences_expected(json)
+      actual_so <- DBI::dbGetQuery(con, "SELECT e.ID, n.transcript_id,
+        coalesce((SELECT string_agg(s.consequence, '&' ORDER BY s.consequence)
+          FROM duckvep_so_terms() s
+          WHERE (a.consequence_mask & s.consequence_mask) != 0), '') consequence_terms,
+        a.duckvep_status status, a.duckvep_reason reason
+        FROM duckvep_annotate('projection_events', 'projection', rich := true) a
+        JOIN projection_events e USING(event_index)
+        LEFT JOIN duckvep_transcript_names n USING(transcript_index)")
+      so_mismatch <- duckvep_projection_compare(actual_so, expected_so)
+      for (name in c("actual", "expected", "mismatch")) {
+        value <- switch(name, actual = actual_so, expected = expected_so,
+          mismatch = so_mismatch)
+        utils::write.csv(value, file.path(directory, paste0(case, ".consequence.", name, ".csv")),
+          row.names = FALSE)
+      }
+      consequence_summaries[[case]] <- data.frame(case, input_alleles = input_count,
+        expected_pairs = nrow(expected_so), actual_pairs = nrow(actual_so),
+        mismatched_pairs = length(unique(so_mismatch$ID)),
+        mismatched_fields = nrow(so_mismatch),
+        unresolved_pairs = sum(is.na(actual_so$status) | actual_so$status != "supported"))
+      print(consequence_summaries[[case]])
+    }
     # A valid comparison must fail on every changed field, lost/extra pair and
     # duplicate key, and on changing a value to or from NULL. Errors do not pass.
     mutations <- lapply(names(expected), function(field) {
@@ -221,6 +260,9 @@ main <- function() {
   summary <- do.call(rbind, summaries)
   utils::write.csv(summary, file.path(directory, "summary.csv"), row.names = FALSE)
   utils::write.csv(do.call(rbind, controls), file.path(directory, "controls.csv"), row.names = FALSE)
+  consequence_summary <- do.call(rbind, consequence_summaries)
+  if (opt$consequences) utils::write.csv(consequence_summary,
+    file.path(directory, "consequence_summary.csv"), row.names = FALSE)
   artifacts <- c(inputs, lock, file.path(root, c("test/duckvep/conformance/projection_differential.R",
     "test/duckvep/conformance/projection_fixtures.R", "test/duckvep/conformance/minimal_model.sql",
     "test/duckvep/conformance/generate_witnesses.R", "scripts/duckvep_evidence.R")),
@@ -233,12 +275,18 @@ main <- function() {
     input_alleles = sum(summary$input_alleles),
     expected_pairs = sum(summary$expected_pairs), actual_pairs = sum(summary$actual_pairs),
     mismatches = sum(summary$mismatches))
+  if (opt$consequences) receipt <- c(receipt, native_consequences = TRUE,
+    consequence_mismatched_pairs = sum(consequence_summary$mismatched_pairs),
+    consequence_mismatched_fields = sum(consequence_summary$mismatched_fields),
+    consequence_unresolved_pairs = sum(consequence_summary$unresolved_pairs))
   utils::write.table(data.frame(field = names(receipt), value = unname(receipt)),
     file.path(directory, "receipt.tsv"), sep = "\t", row.names = FALSE, quote = FALSE)
   check_oracle()
   stopifnot(identical(extension_hash, duckvep_evidence_sha256(extension)))
   if (!is.null(opt$extension_receipt)) duckvep_evidence_assert_checkout(root, revision, allowed_outputs)
   stopifnot(sum(summary$mismatches) == 0L)
+  if (opt$consequences) stopifnot(sum(consequence_summary$mismatched_fields) == 0L,
+    sum(consequence_summary$unresolved_pairs) == 0L)
   if (!is.null(opt$summary_output)) {
     evidence <- cbind(source_revision = revision, build_binding = binding,
       extension_sha256 = extension_hash, summary)

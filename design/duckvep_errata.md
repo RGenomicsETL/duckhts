@@ -50,8 +50,8 @@ The implementation and test authorities are deliberately small:
   VEP-116 and strict table-2 results.
 - `duckvep_coding_context_is_terminal_partial_insertion()` is the sole predicate for the
   terminal-partial insertion state. `coding_context_delta_cds_end_nf_known_scene` pins
-  the distinct VEP consequence/HGVS views and strict rejection of the later VEP-only
-  view, while
+  codon-start versus internal insertion placement, the distinct VEP consequence/HGVS
+  views and strict Xaa rendering, while
   `partial_terminal_insertion_covers_generated_vep_strata` explores both terminal-tail
   lengths, all insertion-length residues modulo three, both strands, and standard and
   mitochondrial translation tables.
@@ -112,6 +112,31 @@ the unchanged pinned VEP executable. Deliberately substituting the coding-exon
 phase must produce CDS-coordinate mismatches. `duckvep_projection.test` also
 pins a three-base CDS position whose protein position would change under that
 substitution.
+
+The distinction also governs sequence mutation, not just displayed positions.
+`TranscriptVariationAllele::_get_alternate_cds` edits the padded sequence at the
+feature-CDS offset. Start predicates instead edit UTR+CDS at the unpadded cDNA
+offset. `_overlaps_stop_codon` tests unpadded cDNA, whereas
+`_ins_del_stop_altered` edits CDS+UTR at the feature-CDS offset and inspects the
+last three stored CDS positions, even when they are not an in-frame codon.
+Validating REF at the feature offset, adding physical padding to the start
+predicate, or requiring a codon-aligned stored CDS endpoint changes VEP results.
+
+The kernel's physical edit array is not mutated when opening an independent
+feature-coordinate context. The context retains a separate unpadded edit start
+and the model's physical padding count. Known padding N bytes, including their
+shifted positions after an indel, represent exact VEP X residues; genomic or
+allele ambiguity remains unresolved. Standalone scratch calls use the same
+annotation dispatcher. Physical materialization remains an explicitly named
+sequence-edit reference, not a second independent-consequence implementation.
+
+Pinned later-coding-start witnesses include `chrDuck:165 A>AATG` (stop-gained at
+phase 0, insertion plus stop-gained at phase 1, insertion at phase 2),
+`235 TGGT>T` (in-frame deletion at every phase), and `239 AAAC>A` (partial-codon
+plus coding-unknown at phase 0, stop-lost at phases 1/2, with 3-prime UTR overlap
+throughout). SQL and R retain complete SO/status sets; native tests additionally
+mirror the same feature with a reverse-genomic VCF anchor and check that wrong
+physical REF fails before feature-coordinate mutation.
 
 The remaining entries in this ledger describe VEP's declared coordinate, mapper,
 predicate-order, cache, or output semantics. They are implemented as typed facts and
@@ -544,9 +569,12 @@ this occurs in real mitochondrial and nuclear models.
 Three nearby states must remain distinct:
 
 - an edit beginning inside the one- or two-base terminal codon is
-  `coding_sequence_variant&incomplete_terminal_codon_variant`;
+  `coding_sequence_variant&incomplete_terminal_codon_variant`, with stop-gained
+  independently possible when the alternate codon completes using 3-prime UTR;
 - an edit beginning in a complete codon and continuing into the partial tail classifies
-  the complete peptide prefix and independently records the trailing `X`;
+  the entire local peptide pair, not just the complete reference prefix. REF and ALT
+  requests are codon-rounded and clipped independently; the reference can end in `X`
+  while the alternate borrows UTR and ends in a known amino acid or stop;
 - an equal-length feature that continues beyond the transcript's 3-prime edge still
   exposes its first mapped coding piece through `genomic2pep`, so the partial-codon term
   survives the outer mapper gap.
@@ -556,6 +584,35 @@ It does not promote every edit touching the final rounded codon to partial, and 
 not suppress the term just because one feature endpoint is a mapper gap. Fixed C cases
 cover both strands, with and without `cds_end_NF`, and both internal and outer 3-prime
 boundaries.
+
+The substitution and indel interpreters share that codon-window construction. VEP 116
+`VariationEffect::stop_lost` and `stop_retained` reject partial-codon starts, but
+`stop_gained` does not. `ref_eq_alt_sequence` also recognizes an unchanged complete
+reference peptide followed by a stop, even when the local reference allele includes
+an incomplete-codon `X` that is absent from the full peptide. The full-peptide splice
+must clamp the replaced reference span just as Perl `substr` does.
+
+Executable `projection_differential.R` witnesses at the fixed chrDuck reference:
+
+| Model / uploaded feature | Local peptides | Native SO terms |
+| --- | --- | --- |
+| `partial_cds_end`, `237 GT>TT` | `WX/C*` | coding-sequence + stop-gained |
+| `partial_cds_end`, `239 A>G` | `X/*` | coding-sequence + incomplete-terminal-codon + stop-gained |
+| `noncoding_first_exon`, `238 TA>AT` | `GX/G*` | stop-retained |
+| `noncoding_first_exon`, `239 A>T` | `X/*` | coding-sequence + incomplete-terminal-codon + stop-gained |
+
+`sequence_delta_terminal_substitution_borrows_utr` reduces these sequence shapes and
+checks both genomic strands, present versus empty UTR, physical REF rejection and
+the distinction between an uploaded feature and minimized edit-set mechanics. The
+SQL/R fixtures exercise the same four shapes through the bundled extension.
+`annotate_partial_codon_cds_to_utr3_mapping_gap_known_scene` retains a mitochondrial
+control with CDS `ATGAAACCCGG` and UTR `AAA`: CDS `8 CCG>AAA` is `PX/Q*`
+(coding-sequence + stop-gained), and `9 CG>TA` is `PX/P*` (stop-retained).
+The transcript-oriented `9 CG>TA` in its reverse standard-code control is `PX/PR`
+(coding-sequence + missense). These pinned executable results replace the former
+complete-reference-prefix-only expectations; generators and comparison oracles are
+unchanged. The native scalar protein-position slot is absent for a multi-residue
+window; rich presentation retains its separately projected start/end range.
 
 ## A leading unknown codon does not suppress the frameshift predicate
 
@@ -787,10 +844,10 @@ Source anchors: Ensembl Variation 116 `VariationEffect.pm::within_5_prime_utr`,
 ## Retained feature bases participate in peptide predicates
 
 When an equal-length uploaded feature maps wholly into CDS, VEP 116 uses every codon
-covered by that feature as the local peptide window. Common-prefix and suffix trimming
-still identifies the bases to apply, but it does not shrink the window used by the start,
-stop, synonymous, and missense predicates. Two records with the same changed CDS base can
-therefore receive different consequences.
+covered by that feature as the local peptide window and applies the complete feature ALT
+at the feature CDS offset. The independently retained minimized edit does not replace
+either representation. Two records with the same changed genomic base can therefore
+receive different start, stop, synonymous, and missense consequences.
 
 Paired VEP-116 witnesses isolate three forms of this representation dependence:
 
@@ -808,15 +865,34 @@ stop-lost, stop-retained, or stop-gained predicates succeeds and `missense_varia
 remains.
 
 Keep one substitution evaluator over an explicitly selected peptide window. The uploaded
-feature selects that window; the trimmed edit supplies the replacement bases. Do not
+feature selects both that window and its replacement allele. Do not
 normalize the uploaded identity inside the consequence kernel or implement separate
 start/stop rule copies for MNV-shaped input.
 
 The complete feature is also the reference-validation contract. Every retained REF base
-must agree with the transcript CDS, and an ambiguous or incomplete codon anywhere in the selected
-window suppresses the specific peptide predicate. Once that window is authoritative,
-DuckVEP must preserve `reference_mismatch`, ambiguous-sequence, or `coding_sequence_variant`
-state; retrying the smaller trimmed edit would annotate a different input representation.
+must agree with the physical transcript CDS before feature-coordinate conversion or
+partial-codon admission. Synthetic phase padding in the selected VEP codon is not unknown
+genomic REF: its `X` peptide still reaches the independent start predicates. Once the
+uploaded window is authoritative, a sequence failure must not retry the smaller trimmed
+edit, which would annotate a different input representation.
+
+The later-coding-start models in `projection_fixtures.R` distinguish physical and feature
+positions for MNVs as well as SNVs. These pinned executable results include:
+
+| Uploaded MNV | Coding phase 0 | Coding phase 1 | Coding phase 2 |
+| --- | --- | --- | --- |
+| `chrDuck:158 CG>GC` | start-lost | start-lost | start-lost |
+| `chrDuck:165 AC>TG` | missense | synonymous | missense |
+| `chrDuck:235 TG>AC` | missense | stop-gained | synonymous |
+| `chrDuck:239 AA>CA` | partial-codon + coding-unknown | stop-lost | missense |
+
+At phase 2, `235 TG>AC` replaces feature-CDS bases that already contain `AC`; VEP's
+codons are `gtACtg/gtACtg` and peptides `VL/VL`. An unchanged consequence view must still
+reach synonymous/retained-stop predicates, even though the physical REF and ALT differ.
+At phase 1, `160 TA>AT` produces identical `XY/XY` peptides but is start-lost through
+the independent UTR+CDS offset test. Native tests mirror these scenes on both strands;
+SQL/R tests retain complete SO sets, and incorrect retained REF remains unresolved even
+for the partial terminal-codon case.
 
 Prepared CDS can prove that complete contract without genomic FASTA only when the complete
 uploaded REF is also the minimized differing REF. If prefix/suffix trimming retained an
@@ -827,19 +903,19 @@ never observed. The regression `POS=124 REF=AA ALT=AC` over a transcript whose t
 are `TA` is deliberately unresolved without FASTA and becomes an auditable mismatch only
 when a reference provider is present.
 
-Source anchors: Ensembl Variation 116 `VariationEffect.pm::start_lost`,
-`::start_retained`, `::stop_lost`, `::stop_retained`, `::stop_gained`, and
-`::missense`. Fixed witnesses must remain paired with large held-out differentials so a
+Source anchors: Ensembl Variation 116 `TranscriptVariationAllele.pm::_get_alternate_cds`,
+`VariationEffect.pm::start_lost`, `::start_retained_variant`, `::stop_lost`,
+`::stop_retained`, `::stop_gained`, and `::missense_variant`.
+Fixed witnesses must remain paired with large held-out differentials so a
 special-case term substitution cannot satisfy conformance.
 
 ## A five-prime boundary feature selects only the start codon
 
 VEP 116 treats the opposite CDS boundary asymmetrically. When an equal-length uploaded
-feature begins in the 5-prime UTR and continues into CDS, it does not suppress all peptide
-predicates as the CDS-to-3-prime-UTR mapping gap does. Instead, the feature reaches the
-start predicates, while the peptide view used there is limited to the first translated
-codon. Coding bases later in the same uploaded feature do not produce an additional
-missense or stop term through this path.
+feature begins in the 5-prime UTR and continues into CDS, its start predicates edit
+UTR+translateable sequence at the unpadded cDNA offset. They do not need ordinary
+peptide alleles. Coding bases later in the same uploaded feature do not produce an
+additional missense or stop term through this path.
 
 Four real VEP-116 witnesses separate the states:
 
@@ -852,16 +928,23 @@ Four real VEP-116 witnesses separate the states:
 
 The last two rows are the important guards: classifying the complete altered CDS would
 add a coding or stop consequence that VEP does not emit. Conversely, treating the feature
-like the 3-prime mapping gap would lose the start term. DuckVEP therefore retains the
-uploaded topology, applies its contiguous CDS slice through the shared edit/context
-engine, and selects codon one as the VEP peptide window. This is still one substitution
-authority; there is no separate UTR consequence classifier.
+like the 3-prime mapping gap would lose the start term. DuckVEP uses the same borrowed
+transcript-string evaluator as length-changing UTR/CDS edits, with substitution-specific
+start predicates. Physical REF validation uses the unpadded transcript; the predicate
+edits the stored phase-padded CDS after the UTR, matching VEP's string operations.
+Missing required UTR sequence is an explicit unresolved result, never permission to
+retry a clipped CDS-only edit.
+
+The `projection_fixtures.R` later-coding-start models pin this distinction for phase
+0, 1 and 2: `chrDuck:157 ACG>ATT` is start-lost, while `ACGT>AATG` is start-retained.
+All retain the 5-prime UTR term. Native tests mirror both strands and reject an incorrect
+retained UTR REF base even when the smaller semantic coding edit is unchanged.
 
 Source anchors: Ensembl Variation 116
 `BaseTranscriptVariation.pm::translation_coords`,
 `TranscriptVariationAllele.pm::codon` / `::peptide`, and
 `VariationEffect.pm::start_lost`, `::start_retained_variant`,
-`::_snp_start_altered`. The fixed cases are generated and adjudicated by the real VEP
+`::_snp_start_altered`, `::_inv_start_altered`. The fixed cases are generated and adjudicated by the real VEP
 executable; randomized distributions remain the regression guard against overfitting.
 
 ## A length-changing start edit can be both lost and retained
@@ -879,6 +962,28 @@ keeps the complete spliced pre-CDS sequence and why the kernel evaluates the two
 separately over one allocation-free edited-sequence view. Do not collapse them into one
 boolean or “correct” the combination. Models without complete transcript flanks return
 `missing_transcript_flank`.
+
+For an SNV, the unchanged UTR cancels out of the string comparison. The edit
+offset is the unpadded cDNA offset within the CDS, even when `translateable_seq`
+starts with synthetic phase-padding bases. This start test runs before the
+unknown-peptide guard: a nonempty UTR and a reconstructed non-ATG initial codon
+can yield `start_lost` with `X/X` peptide alleles. The retained later-CDS witness
+`chrDuck:158 C>A` and `sequence_delta_snv_start_test_precedes_unknown_peptide`
+pin this ordering. Physical genomic REF validation still uses the padding-adjusted
+position; the start-offset string view must not replace that reference check.
+
+For consequence codons, `BaseTranscriptVariation::cds_start` adds the first
+*transcript* exon phase, while core `Transcript::translateable_seq` pads with the
+first *coding* exon phase. `TranscriptVariationAllele::_get_alternate_cds` edits
+that padded string at the feature's CDS coordinate. For the later phase-1 model,
+`chrDuck:162 C>A` therefore displays `tAc/tAc`, yielding synonymous even though
+the genomic REF is C. The same allele in phase 2 displays `gTa/gAa` and is
+missense. At `chrDuck:240 A>C`, phase 2 uses the complete `gTa/gCa` codon rather
+than the final physical partial codon. The shared VEP feature projector owns
+this coordinate conversion; genomic REF checks and semantic edit sets retain
+the physical projection. Native fixed tests mirror these witnesses on both
+strands, and the full record-preserving executable differential retains indels
+and unresolved pairs as well as SNVs.
 
 The same independence applies to `inframe_insertion`. VEP suppresses that term for a
 start-retaining insertion only when the complete reference peptide is the *suffix* of the
@@ -1126,7 +1231,7 @@ Source anchors: Ensembl Variation 116 `VariationEffect.pm::start_lost`,
 
 ## Terminal partial-codon insertions use distinct consequence and HGVS peptide views
 
-For a pure insertion inside an incomplete terminal codon, VEP 116 does not feed one
+For a pure insertion at the start of an incomplete terminal codon, VEP 116 does not feed one
 peptide representation to consequence classification and protein HGVS. The consequence
 predicates can observe an empty reference codon allele and translate the inserted allele
 directly. The later HGVSp replay instead uses the codon-rounded edited CDS, including the
@@ -1139,21 +1244,46 @@ The GRCh38 ClinVar event `1:45013701:C:CTAG` on `ENST00000650713` has a 281-base
 `c.280_281insAGT`; the HGVS-specific codon-rounded replay compares the incomplete
 reference residue with a translated stop and VEP renders `p.Ter94=`.
 
+The unshifted event inserts before CDS base 280, the first base of the partial codon;
+only the later HGVS placement is between bases 280 and 281. This does **not** imply
+insertion-only consequence translation at every site in the partial codon. With a
+14-base `ATGAAACCCGGGTT` CDS and no UTR, pinned VEP 116 gives `-/TAG` before base 13,
+but `tt/tTAGt` and `X/LX` before base 14. The latter has insertion and coding-unknown
+terms without stop-gained. An internal `TAGA` instead gives `tt/tTAGAt`, `X/LD` and
+protein-altering; an internal `AGT` gives `tt/tAGTt`, `X/*` and stop-gained plus
+coding-unknown. Both strands have the same transcript-oriented results.
+
+The former handwritten insertion-only property generalized the ClinVar placement
+incorrectly. Its generator, seeds, trial count and all site strata are retained; its
+expected peptide now splices the oriented payload between the partial bases and uses
+VEP's independently rounded insertion endpoints. The executable projection differential
+remains unchanged. Codon rounding, not a terminal-insertion special case, owns the
+consequence peptide window.
+
+`TranscriptVariationAllele::codon` applies the rounded reference request and its
+length-adjusted alternate request independently; it does not shorten the ALT request
+when Perl `substr` clips the reference to the partial CDS tail. The alternate view
+includes the borrowed 3-prime UTR. For example, internal `A` in the same terminal `TT`
+gives `tt/tAt` without a UTR, but `tt/tAta` when its first UTR base is `A`. The latter
+retains `X/YX` and an insertion term. Physical CDS mutation and its byte/peptide accessors
+remain unchanged; only the consequence codon view reads beyond the edited CDS.
+
 DuckVEP therefore retains the codon-rounded edited-CDS cache for HGVS while exposing the
-empty-reference/insertion-only peptide window to consequence predicates. Treating the
+empty-reference/insertion-only consequence window at the unshifted codon-start site. Treating the
 synthetic incomplete reference residue as consequence-level `X` invents
 `coding_sequence_variant`; reusing the consequence-only insertion peptide for HGVSp loses
 `p.Ter94=`. Fixed C, SQL, and R witnesses assert both views and the exact consequence,
 HGVSc, HGVSp, and shift; the strict executable corpus differential remains the independent
 acceptance gate.
 
-Compatibility policy: the state predicate is
-`duckvep_coding_context_is_terminal_partial_insertion()` for every consumer.
+Compatibility policy: the HGVS state predicate is
+`duckvep_coding_context_is_terminal_partial_insertion()`.
 `DUCKVEP_COMPAT_HGVS_TERMINAL_PARTIAL_INSERTION` selects only VEP's later
 codon-rounded HGVSp view; disabling it leaves the canonical coding-context peptide view.
 There is no second terminal-partial predicate in the formatter.
 
-Source anchors: Ensembl Variation 116 `VariationEffect.pm::partial_codon`,
+Source anchors: Ensembl core 116 `TranscriptMapper.pm::genomic2pep`, Ensembl Variation
+116 `TranscriptVariationAllele.pm::codon`, `VariationEffect.pm::partial_codon`,
 `::inframe_insertion`, `::stop_gained`, `::coding_unknown`, and
 `TranscriptVariationAllele.pm::hgvs_protein`.
 
@@ -1175,8 +1305,7 @@ nonzero, then treats the zero CDS end as an early-CDS escape.
 
 DuckVEP consequently retains two projections:
 
-- the minimized edit projection for REF validation, sequence application, translation,
-  and core consequence predicates; and
+- the minimized physical edit projection for REF validation and sequence application; and
 - the full uploaded-feature projection for the NMD plugin's early-CDS, last-exon, and
   penultimate-exon-end rules.
 
@@ -1184,6 +1313,11 @@ A cached early-CDS fact from consequence prediction is reusable only when the fu
 and minimized edit cover identical genomic spans. Equal-length padded features and pure
 insertions must use the full-feature projector. Broadening that cache condition changes
 valid VEP results even when the underlying sequence edit is identical.
+
+The physical cache also needs the same phase as the feature mapper. When CDS begins
+in a later exon, DuckVEP uses the shared full-feature projector instead: physical
+CDS 103 can be VEP feature CDS 101, which changes the plugin's early-CDS escape.
+The cache-versus-projector test covers both strands and phases 0–2.
 
 Source authority: VEP Plugins release/116 `NMD.pm`, commit
 `0082591268417af618e03850c5ffdc7c09998a5d`, together with VEP 116

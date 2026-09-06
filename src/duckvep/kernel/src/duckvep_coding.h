@@ -8,11 +8,9 @@
  * transcript strand, apply it to the codon, and delegate translation/classifying
  * to duckvep_codon_change().
  *
- * Scope is deliberately small: SNVs/MNV-at-one-base only. In-frame indels,
- * frameshifts, start/stop-retained subtleties, and haplotype-combined edits land
- * in later kernels. The caller provides `cds_seq` such that cds_seq[0]
- * corresponds to CDS position 1; if the transcript has a positive Ensembl phase,
- * the adapter may include the phase-padding bases at the front (often `N`).
+ * The caller provides the physical transcript-oriented CDS, including any
+ * phase-padding bases, and separately identifies the reference-validation and
+ * consequence-edit positions. This helper handles one-base substitutions only.
  */
 #ifndef DUCKVEP_CODING_H
 #define DUCKVEP_CODING_H
@@ -53,13 +51,17 @@ typedef struct duckvep_coding_snv_result {
  *
  * `transcript_strand` is +1/-1; negative-strand genomic REF/ALT are reverse-
  * complemented before codon edit. Returns a status rather than silently producing
- * a consequence on ref mismatch or codon boundary overflow. On non-OK, `out` is
+ * a consequence on ref mismatch or codon overflow. `reference_cds_position1`
+ * identifies the physical base to validate, independently of the consequence
+ * codon/edit projection (VEP's mapper phase can differ from CDS padding).
+ * On non-OK, `out` is
  * still zeroed and `change` is DUCKVEP_CODON_INVALID when `out != NULL`.
  */
 duckvep_coding_snv_status_t duckvep_coding_snv_from_cds(
     const uint8_t                      *cds_seq,
     size_t                              cds_len,
     const duckvep_coding_projection_t  *projection,
+    uint32_t                            reference_cds_position1,
     char                                genomic_ref,
     char                                genomic_alt,
     int8_t                              transcript_strand,
