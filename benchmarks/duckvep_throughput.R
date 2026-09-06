@@ -53,6 +53,14 @@ op <- add_option(
 op <- add_option(op, "--database", default = "")
 op <- add_option(
   op,
+  "--fixture-indels",
+  dest = "fixture_indels",
+  action = "store_true",
+  default = FALSE,
+  help = "alternate fixture insertion T>TAC and deletion TA>T at position 124"
+)
+op <- add_option(
+  op,
   "--variants-database",
   dest = "variants_database",
   default = "",
@@ -203,6 +211,9 @@ if (identical(opt$api_surface, "public") && opt$input_partitions != 1L) {
   die("--api-surface public uses DuckDB parallelism; set --input-partitions 1")
 }
 production <- nzchar(opt$database)
+if (isTRUE(opt$fixture_indels) && (production || opt$event_mode != "small")) {
+  die("--fixture-indels requires the small-event fixture (no --database)")
+}
 if (isTRUE(opt$regulatory) && !production) {
   die("--regulatory requires a production --database")
 }
@@ -662,6 +673,9 @@ if (production) {
   ))
   variant_count <- opt$variants
   workload <- "fixture_one_transcript_sorted"
+  if (isTRUE(opt$fixture_indels)) {
+    workload <- "fixture_one_transcript_sorted_indels"
+  }
   region_count <- 1
   transcript_count <- 1
   exon_count <- 2
@@ -765,11 +779,21 @@ annotation_input <- function(begin, count) {
        FROM range({begin_sql}, {end_sql}) r(i)"
     )
   } else {
+    reference_sql <- if (isTRUE(opt$fixture_indels)) {
+      "CASE WHEN i % 2 = 0 THEN 'T' ELSE 'TA' END"
+    } else {
+      "'T'"
+    }
+    alternate_sql <- if (isTRUE(opt$fixture_indels)) {
+      "CASE WHEN i % 2 = 0 THEN 'TAC' ELSE 'T' END"
+    } else {
+      "CASE WHEN i % 2 = 0 THEN 'C' ELSE 'G' END"
+    }
     glue(
       "SELECT i::UBIGINT AS input_variant_index,
               1::UINTEGER AS seq_region, 124::UBIGINT AS \"position\",
-              'T' AS \"reference\",
-              CASE WHEN i % 2 = 0 THEN 'C' ELSE 'G' END AS \"alternate\"
+              {reference_sql} AS \"reference\",
+              {alternate_sql} AS \"alternate\"
        FROM range({begin_sql}, {end_sql}) r(i)"
     )
   }
