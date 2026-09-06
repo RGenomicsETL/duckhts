@@ -372,7 +372,8 @@ that flag must be retained when formatting an empty interval. Exon/intron
 ordinals follow transcript order. Membership, distance and the output allele
 use VEP feature geometry, not the uploaded REF span or fully minimized edit.
 Reference and alternate codon/peptide strings remain separate, including `-`
-for an empty string and VEP's changed-base codon casing. Genetic-code lookup
+for an empty string and VEP's changed-base codon casing. Unavailable coding
+sequence leaves codon and amino-acid fields NULL, not `-`. Genetic-code lookup
 shares the kernel's pinned tables; this is not a new consequence implementation.
 
 Cold attributes remain joins. For example, after preparing literal events and

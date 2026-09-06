@@ -23,7 +23,7 @@ duckvep_projection_label_records <- function(input, output) {
 }
 
 duckvep_projection_fixture <- function(con, root, inputs, case, directory) {
-  stopifnot(case %in% duckvep_projection_cases)
+  stopifnot(case %in% c(duckvep_projection_cases, "withheld_sequence"))
   quote <- function(x) as.character(DBI::dbQuoteString(con, x))
   execute <- function(sql) invisible(DBI::dbExecute(con, sql))
   execute(paste(readLines(file.path(root,
@@ -95,6 +95,11 @@ duckvep_projection_fixture <- function(con, root, inputs, case, directory) {
       ", cds_end=", coding_end, ", cds_sequence=", quote(paste0(padding, paste(cds, collapse = ""))),
       "::BLOB, pre_cds_sequence=", quote(paste(pre, collapse = "")),
       "::BLOB, post_cds_sequence=", quote(paste(post, collapse = "")), "::BLOB"))
+  } else if (case == "withheld_sequence") {
+    # Benchmark/property input only: the available GFF/FASTA oracle would not
+    # withhold these bases, so this is not an executable-VEP differential case.
+    execute("UPDATE duckvep_transcripts SET codon_table=NULL, cds_sequence=NULL::BLOB,
+      pre_cds_sequence=NULL::BLOB, post_cds_sequence=NULL::BLOB")
   } else if (case == "noncoding") {
     gff <- gff[gff$V3 != "CDS", ]
     gff$V3[gff$V3 == "mRNA"] <- "ncRNA"

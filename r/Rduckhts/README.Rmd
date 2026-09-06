@@ -504,6 +504,7 @@ quality flags for literal independent alleles. Supply the same validated
 prepared model relation used for annotation, with transcript-ordered nested
 exons and peptide edits. NULL range endpoints remain independent; insertions
 retain an explicit `interbase` flag. Duplicate annotation rows are preserved.
+Unavailable coding sequence leaves codon and amino-acid fields NULL, not `-`.
 Canonical/MANE/CCDS/GENCODE/biotype attributes remain relational joins, not
 extra hot consequence payload; canonical status is not a VEP quality flag.
 The [DuckHTS projection example](https://github.com/RGenomicsETL/duckhts#canonical-event-relation-and-output-choices)

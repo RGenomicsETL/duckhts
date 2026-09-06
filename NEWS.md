@@ -4,7 +4,8 @@
 - add SQL-first `duckvep_transcript_projection()` for typed VEP feature alleles,
   cDNA/CDS/protein ranges, exon/intron ordinals, transcript distance, quality
   flags and variable-length codon/amino-acid display from existing annotations
-  and their prepared model; genetic-code tables remain kernel-owned
+  and their prepared model; genetic-code tables remain kernel-owned and withheld
+  coding sequence remains NULL rather than an empty-codon display
 
 - connect the Haplosaurus differential to actual `read_geno()` calls while
   retaining both native comparison paths, the original verifier controls and

@@ -1523,6 +1523,29 @@ local({
     expect_equal(phase_result, data.frame(cdna_start=54, cds_start=3, cds_end=3, protein_start=1))
     expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-projection-phase') dropped")$dropped)
   }
+  dbExecute(con, paste(
+    "CREATE TABLE duckvep_r_projection_withheld AS SELECT * REPLACE(NULL::BLOB AS cds_sequence,",
+    "NULL::UTINYINT AS codon_table, NULL::BLOB AS pre_cds_sequence,",
+    "NULL::BLOB AS post_cds_sequence) FROM duckvep_r_projection_model"
+  ))
+  withheld_queries <- queries
+  withheld_queries[[2L]] <- sub("duckvep_r_transcripts", "duckvep_r_projection_withheld",
+    withheld_queries[[2L]], fixed=TRUE)
+  expect_true(load_model("r-projection-withheld", withheld_queries)$loaded)
+  dbExecute(con, paste(
+    "CREATE TABLE duckvep_r_projection_withheld_annotations AS SELECT * FROM",
+    "duckvep_annotate('duckvep_r_projection_events', 'r-projection-withheld')"
+  ))
+  withheld <- dbGetQuery(con, paste(
+    "SELECT cds_start, cds_end, reference_codons, alternate_codons, reference_amino_acids,",
+    "alternate_amino_acids FROM duckvep_transcript_projection('duckvep_r_projection_events',",
+    "'duckvep_r_projection_withheld_annotations', 'duckvep_r_projection_withheld') ORDER BY event_index"
+  ))
+  expect_equal(withheld$cds_start, projected$cds_start)
+  expect_equal(withheld$cds_end, projected$cds_end)
+  expect_true(all(is.na(withheld[c("reference_codons", "alternate_codons",
+    "reference_amino_acids", "alternate_amino_acids")])))
+  expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-projection-withheld') dropped")$dropped)
   expect_true(loaded$loaded)
 
   dbExecute(

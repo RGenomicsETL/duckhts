@@ -33,6 +33,12 @@ repeated source alleles retain separate event keys. Each set is repeated eight
 times with distinct keys. These tiny warm models are a reproducible adapter
 workload, not a genome-scale annotation or file-ingestion benchmark.
 
+The `withheld_sequence` workload retains the forward model's CDS coordinates
+but supplies NULL CDS sequence, genetic code and flanks, as an importer may do
+for unsupported sequence edits. It checks that all codon and amino-acid fields
+remain NULL. This is a benchmark/property case, not a GFF oracle comparison:
+the reference is available to VEP. It has no identical earlier timing baseline.
+
 Each model/worker-count pair runs in a fresh R process. Peak RSS is the Linux
 process high-water mark, including model preparation and verification; it is
 not isolated DuckDB workspace usage. Output bytes are the sum of the UTF-8
@@ -119,6 +125,12 @@ tested as SQL model-attribute properties, not represented as positive GFF oracle
 coverage. Symbolic structural and phased events are outside this function's
 literal-allele contract; existing consequence/HGVS/phased acceptance histories
 and generator settings are unchanged.
+
+These field comparisons do not certify the native consequence masks. A
+separate diagnostic found supported and unresolved SO disagreements on later
+partial-CDS models; [issue 213](https://github.com/RGenomicsETL/duckhts/issues/213)
+retains the witnesses and full denominators. Presentation equality must not be
+reported as native consequence conformance.
 
 Reproduce from a clean source revision with an extension build receipt:
 

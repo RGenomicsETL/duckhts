@@ -2,7 +2,7 @@
 # Input staging and annotation are outside the timer; no fused comparator exists.
 benchmark_duckvep_projection <- function(root, extension, output, extension_receipt = NULL,
                                         copies = 8L, iterations = 3L, threads = c(1L, 4L),
-                                        cases = c("forward", "reverse", "three_exon_phase2")) {
+                                        cases = c("forward", "reverse", "three_exon_phase2", "withheld_sequence")) {
   root <- normalizePath(root, mustWork = TRUE)
   extension <- normalizePath(extension, mustWork = TRUE)
   source(file.path(root, "scripts/duckvep_evidence.R"), local = TRUE)
@@ -67,6 +67,9 @@ benchmark_duckvep_projection <- function(root, extension, output, extension_rece
       denominators <- DBI::dbGetQuery(con, "SELECT count(*) output_rows,
         sum(octet_length(encode(to_json(m)))) json_utf8_bytes FROM measured m")
       stopifnot(denominators$output_rows == expanded)
+      if (case == "withheld_sequence") stopifnot(DBI::dbGetQuery(con,
+        "SELECT count(*) n FROM measured WHERE reference_codons IS NOT NULL OR alternate_codons IS NOT NULL
+          OR reference_amino_acids IS NOT NULL OR alternate_amino_acids IS NOT NULL")$n == 0)
       # Linux kernel process high-water mark includes setup and verification.
       # This is not a claim about DuckDB-only memory or materialization-only RSS.
       status <- readLines("/proc/self/status")

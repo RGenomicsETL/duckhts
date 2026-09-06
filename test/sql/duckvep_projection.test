@@ -155,6 +155,38 @@ WHERE event_index=1;
 ----
 4	4	NULL	NULL	NULL	NULL
 
+# A validated coding model may withhold sequence while retaining its CDS span.
+# Unknown codons are NULL, not the '-' encoding of an empty/deleted codon.
+statement ok
+CREATE TABLE projection_withheld AS SELECT * REPLACE(NULL::BLOB AS cds_sequence,
+  NULL::UTINYINT AS codon_table, NULL::BLOB AS pre_cds_sequence,
+  NULL::BLOB AS post_cds_sequence) FROM projection_transcripts;
+
+query I
+SELECT * FROM duckvep_model_load('withheld',
+  'SELECT * FROM projection_regions',
+  'SELECT * EXCLUDE(exons, peptide_edits) FROM projection_withheld',
+  'SELECT transcript_index, exon.exon_start, exon.exon_end,
+    exon.exon_cdna_start, exon.exon_cdna_end, exon.phase, exon.end_phase
+    FROM projection_withheld, unnest(exons) u(exon) ORDER BY exon.exon_cdna_start');
+----
+true
+
+statement ok
+CREATE TABLE projection_withheld_annotations AS SELECT * FROM duckvep_annotate('projection_events', 'withheld');
+
+query IIITTTT
+SELECT cds_start, cds_end, protein_start, reference_codons, alternate_codons,
+  reference_amino_acids, alternate_amino_acids FROM duckvep_transcript_projection(
+    'projection_events', 'projection_withheld_annotations', 'projection_withheld') WHERE event_index=1;
+----
+4	4	2	NULL	NULL	NULL	NULL
+
+query I
+SELECT duckvep_model_drop('withheld');
+----
+true
+
 statement ok
 CREATE TABLE projection_empty AS SELECT * FROM projection_annotations WHERE false;
 
