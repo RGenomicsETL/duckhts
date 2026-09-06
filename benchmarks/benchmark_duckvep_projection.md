@@ -45,6 +45,12 @@ NULLs. It must match across passes and worker counts.
 | 20b2902c4672    | reverse           |       4 |         10112 |                    10112 |       10112 |         4603562 |          3 |          0.032 |       0.031 |       0.032 |      273793024 |
 | 20b2902c4672    | three_exon_phase2 |       1 |         11112 |                    11112 |       11112 |         5056410 |          3 |          0.050 |       0.050 |       0.051 |      245338112 |
 | 20b2902c4672    | three_exon_phase2 |       4 |         11112 |                    11112 |       11112 |         5056410 |          3 |          0.033 |       0.032 |       0.033 |      283779072 |
+| 4dd341a8cf61    | forward           |       1 |         10144 |                    10144 |       10144 |         4618058 |          3 |          0.049 |       0.045 |       0.050 |      254869504 |
+| 4dd341a8cf61    | forward           |       4 |         10144 |                    10144 |       10144 |         4618058 |          3 |          0.031 |       0.030 |       0.031 |      278728704 |
+| 4dd341a8cf61    | reverse           |       1 |         10112 |                    10112 |       10112 |         4603562 |          3 |          0.047 |       0.047 |       0.048 |      257974272 |
+| 4dd341a8cf61    | reverse           |       4 |         10112 |                    10112 |       10112 |         4603562 |          3 |          0.031 |       0.030 |       0.031 |      279027712 |
+| 4dd341a8cf61    | three_exon_phase2 |       1 |         11112 |                    11112 |       11112 |         5056410 |          3 |          0.049 |       0.049 |       0.051 |      246554624 |
+| 4dd341a8cf61    | three_exon_phase2 |       4 |         11112 |                    11112 |       11112 |         5056410 |          3 |          0.033 |       0.032 |       0.034 |      274251776 |
 
 ## Identity and complete output
 
@@ -52,6 +58,7 @@ NULLs. It must match across passes and worker counts.
 |:----|:-----------------------------------------|:-----------------------------------------------------------------|:------------------------------|:-----------------------------------------------------------|:------------------------------------|:---------------|
 | 1   | f0184155b0faa2486937c8b774648ce897c88f2f | 420e6d1b14a2831384117d2bec74cba72732769a4349ff9866eeb409d526c7d9 | htslib_distclean_make_release | Linux 6.8.0-78-generic x86_64 Ubuntu-2404-noble-amd64-base | 13th Gen Intel(R) Core(TM) i5-13500 | 1.5.3          |
 | 7   | 20b2902c4672fb0401616a7f09ff8fc0e703909e | 420e6d1b14a2831384117d2bec74cba72732769a4349ff9866eeb409d526c7d9 | htslib_distclean_make_release | Linux 6.8.0-78-generic x86_64 Ubuntu-2404-noble-amd64-base | 13th Gen Intel(R) Core(TM) i5-13500 | 1.5.3          |
+| 13  | 4dd341a8cf6124035e326145b9783cfec33767f8 | 420e6d1b14a2831384117d2bec74cba72732769a4349ff9866eeb409d526c7d9 | htslib_distclean_make_release | Linux 6.8.0-78-generic x86_64 Ubuntu-2404-noble-amd64-base | 13th Gen Intel(R) Core(TM) i5-13500 | 1.5.3          |
 
 |     | case              | input_vcf_sha256                                                 | model_gff_sha256                                                 | reference_sha256                                                 | output_sha256                                                    |
 |:----|:------------------|:-----------------------------------------------------------------|:-----------------------------------------------------------------|:-----------------------------------------------------------------|:-----------------------------------------------------------------|
@@ -61,18 +68,18 @@ NULLs. It must match across passes and worker counts.
 
 The first `f0184155b0fa` runs establish this complete-contract baseline.
 Later rows retain that measurement rather than replace it. The following
-comparison pairs the first and last recorded runs only when input hash,
-model, output hash, copy count, worker count, DuckDB version and machine
-agree.
+comparison pairs the latest run with its nearest recorded predecessor
+only when input hash, model, output hash, copy count, worker count,
+DuckDB version and machine agree.
 
 | case              | threads | baseline_revision | current_revision | baseline_seconds | current_seconds | current_over_baseline |
 |:------------------|--------:|:------------------|:-----------------|-----------------:|----------------:|----------------------:|
-| forward           |       1 | f0184155b0fa      | 20b2902c4672     |            0.045 |           0.046 |              1.022222 |
-| forward           |       4 | f0184155b0fa      | 20b2902c4672     |            0.030 |           0.032 |              1.066667 |
-| reverse           |       1 | f0184155b0fa      | 20b2902c4672     |            0.046 |           0.046 |              1.000000 |
-| reverse           |       4 | f0184155b0fa      | 20b2902c4672     |            0.032 |           0.032 |              1.000000 |
-| three_exon_phase2 |       1 | f0184155b0fa      | 20b2902c4672     |            0.049 |           0.050 |              1.020408 |
-| three_exon_phase2 |       4 | f0184155b0fa      | 20b2902c4672     |            0.033 |           0.033 |              1.000000 |
+| forward           |       1 | 20b2902c4672      | 4dd341a8cf61     |            0.046 |           0.049 |              1.065217 |
+| forward           |       4 | 20b2902c4672      | 4dd341a8cf61     |            0.032 |           0.031 |              0.968750 |
+| reverse           |       1 | 20b2902c4672      | 4dd341a8cf61     |            0.046 |           0.047 |              1.021739 |
+| reverse           |       4 | 20b2902c4672      | 4dd341a8cf61     |            0.032 |           0.031 |              0.968750 |
+| three_exon_phase2 |       1 | 20b2902c4672      | 4dd341a8cf61     |            0.050 |           0.049 |              0.980000 |
+| three_exon_phase2 |       4 | 20b2902c4672      | 4dd341a8cf61     |            0.033 |           0.033 |              1.000000 |
 
 The [sorted-stream throughput report](duckvep_throughput.md) instead
 measures consequence/HGVS output and is not an identical comparator. No
@@ -84,44 +91,80 @@ speedup or absence of regression.
 ## Pinned VEP field differential
 
 The separate differential checks all 21 presentation fields, plus the
-complete event/transcript key set, against VEP 116 JSON. Six models add
-a partial-CDS end, a noncoding first exon and a noncoding transcript to
-the three timed models. Each seed runs the unchanged generator’s
-targeted cases plus 1,000 random cases; the 128-base differing-allele
-campaign supplements the default 10-base campaign to exercise longer
-exon/intron spans. Every physical input record is retained, including
-duplicate alleles. Missing or duplicate keys, changed fields, and
-changes to/from NULL must all trip deliberate verifier controls. Actual
-and expected tables, original and relabelled VCFs, GFFs and oracle JSON
-have separate hashes in the checked-in CSV; detailed artifacts remain in
-the run directory.
+complete event/transcript key set, against VEP 116 JSON. The initial six
+models add a partial-CDS end, a noncoding first exon and a noncoding
+transcript to the three timed models. Subsequent runs add later
+coding-exon phases 1 and 2 after a noncoding first exon. Those runs also
+require a deliberately wrong phase substitution to fail: VEP display
+coordinates use the first transcript exon, while CDS sequence padding
+uses the translation-start exon. Each seed runs the unchanged
+generator’s targeted cases plus 1,000 random cases; the 128-base
+differing-allele campaign supplements the default 10-base campaign to
+exercise longer exon/intron spans. Every physical input record is
+retained, including duplicate alleles. Missing or duplicate keys,
+changed fields, and changes to/from NULL must all trip deliberate
+verifier controls. Actual and expected tables, original and relabelled
+VCFs, GFFs and oracle JSON have separate hashes in the checked-in CSV;
+detailed artifacts remain in the run directory.
 
-| source_revision                          | case                 |     seed | max_random_length | input_alleles | expected_pairs | actual_pairs | mismatches | detected_controls |
-|:-----------------------------------------|:---------------------|---------:|------------------:|--------------:|---------------:|-------------:|-----------:|------------------:|
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | forward              |      173 |                10 |          1268 |           1268 |         1268 |          0 |                62 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | reverse              |      173 |                10 |          1264 |           1264 |         1264 |          0 |                62 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | three_exon_phase2    |      173 |                10 |          1389 |           1389 |         1389 |          0 |                62 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | partial_cds_end      |      173 |                10 |          1385 |           1385 |         1385 |          0 |                62 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | noncoding_first_exon |      173 |                10 |          1389 |           1389 |         1389 |          0 |                62 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | noncoding            |      173 |                10 |          1198 |           1198 |         1198 |          0 |                54 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | forward              | 20260906 |                10 |          1268 |           1268 |         1268 |          0 |                62 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | reverse              | 20260906 |                10 |          1264 |           1264 |         1264 |          0 |                62 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | three_exon_phase2    | 20260906 |                10 |          1389 |           1389 |         1389 |          0 |                62 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | partial_cds_end      | 20260906 |                10 |          1385 |           1385 |         1385 |          0 |                62 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | noncoding_first_exon | 20260906 |                10 |          1389 |           1389 |         1389 |          0 |                62 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | noncoding            | 20260906 |                10 |          1198 |           1198 |         1198 |          0 |                54 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | forward              |      173 |               128 |          1268 |           1268 |         1268 |          0 |                62 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | reverse              |      173 |               128 |          1264 |           1264 |         1264 |          0 |                62 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | three_exon_phase2    |      173 |               128 |          1389 |           1389 |         1389 |          0 |                62 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | partial_cds_end      |      173 |               128 |          1385 |           1385 |         1385 |          0 |                62 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | noncoding_first_exon |      173 |               128 |          1389 |           1389 |         1389 |          0 |                62 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | noncoding            |      173 |               128 |          1198 |           1198 |         1198 |          0 |                54 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | forward              | 20260906 |               128 |          1268 |           1268 |         1268 |          0 |                62 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | reverse              | 20260906 |               128 |          1264 |           1264 |         1264 |          0 |                62 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | three_exon_phase2    | 20260906 |               128 |          1389 |           1389 |         1389 |          0 |                62 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | partial_cds_end      | 20260906 |               128 |          1385 |           1385 |         1385 |          0 |                62 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | noncoding_first_exon | 20260906 |               128 |          1389 |           1389 |         1389 |          0 |                62 |
-| 20b2902c4672fb0401616a7f09ff8fc0e703909e | noncoding            | 20260906 |               128 |          1198 |           1198 |         1198 |          0 |                54 |
+| source_revision                          | case                        |     seed | max_random_length | input_alleles | expected_pairs | actual_pairs | mismatches | detected_controls |
+|:-----------------------------------------|:----------------------------|---------:|------------------:|--------------:|---------------:|-------------:|-----------:|------------------:|
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | forward                     |      173 |                10 |          1268 |           1268 |         1268 |          0 |                62 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | reverse                     |      173 |                10 |          1264 |           1264 |         1264 |          0 |                62 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | three_exon_phase2           |      173 |                10 |          1389 |           1389 |         1389 |          0 |                62 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | partial_cds_end             |      173 |                10 |          1385 |           1385 |         1385 |          0 |                62 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | noncoding_first_exon        |      173 |                10 |          1389 |           1389 |         1389 |          0 |                62 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | noncoding                   |      173 |                10 |          1198 |           1198 |         1198 |          0 |                54 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | forward                     | 20260906 |                10 |          1268 |           1268 |         1268 |          0 |                62 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | reverse                     | 20260906 |                10 |          1264 |           1264 |         1264 |          0 |                62 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | three_exon_phase2           | 20260906 |                10 |          1389 |           1389 |         1389 |          0 |                62 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | partial_cds_end             | 20260906 |                10 |          1385 |           1385 |         1385 |          0 |                62 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | noncoding_first_exon        | 20260906 |                10 |          1389 |           1389 |         1389 |          0 |                62 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | noncoding                   | 20260906 |                10 |          1198 |           1198 |         1198 |          0 |                54 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | forward                     |      173 |               128 |          1268 |           1268 |         1268 |          0 |                62 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | reverse                     |      173 |               128 |          1264 |           1264 |         1264 |          0 |                62 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | three_exon_phase2           |      173 |               128 |          1389 |           1389 |         1389 |          0 |                62 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | partial_cds_end             |      173 |               128 |          1385 |           1385 |         1385 |          0 |                62 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | noncoding_first_exon        |      173 |               128 |          1389 |           1389 |         1389 |          0 |                62 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | noncoding                   |      173 |               128 |          1198 |           1198 |         1198 |          0 |                54 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | forward                     | 20260906 |               128 |          1268 |           1268 |         1268 |          0 |                62 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | reverse                     | 20260906 |               128 |          1264 |           1264 |         1264 |          0 |                62 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | three_exon_phase2           | 20260906 |               128 |          1389 |           1389 |         1389 |          0 |                62 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | partial_cds_end             | 20260906 |               128 |          1385 |           1385 |         1385 |          0 |                62 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | noncoding_first_exon        | 20260906 |               128 |          1389 |           1389 |         1389 |          0 |                62 |
+| 20b2902c4672fb0401616a7f09ff8fc0e703909e | noncoding                   | 20260906 |               128 |          1198 |           1198 |         1198 |          0 |                54 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | forward                     |      173 |                10 |          1268 |           1268 |         1268 |          0 |                62 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | reverse                     |      173 |                10 |          1264 |           1264 |         1264 |          0 |                62 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | three_exon_phase2           |      173 |                10 |          1389 |           1389 |         1389 |          0 |                62 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | partial_cds_end             |      173 |                10 |          1385 |           1385 |         1385 |          0 |                62 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | noncoding_first_exon        |      173 |                10 |          1389 |           1389 |         1389 |          0 |                62 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | noncoding                   |      173 |                10 |          1198 |           1198 |         1198 |          0 |                54 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | noncoding_first_exon_phase1 |      173 |                10 |          1389 |           1389 |         1389 |          0 |                63 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | noncoding_first_exon_phase2 |      173 |                10 |          1389 |           1389 |         1389 |          0 |                63 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | forward                     | 20260906 |                10 |          1268 |           1268 |         1268 |          0 |                62 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | reverse                     | 20260906 |                10 |          1264 |           1264 |         1264 |          0 |                62 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | three_exon_phase2           | 20260906 |                10 |          1389 |           1389 |         1389 |          0 |                62 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | partial_cds_end             | 20260906 |                10 |          1385 |           1385 |         1385 |          0 |                62 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | noncoding_first_exon        | 20260906 |                10 |          1389 |           1389 |         1389 |          0 |                62 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | noncoding                   | 20260906 |                10 |          1198 |           1198 |         1198 |          0 |                54 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | noncoding_first_exon_phase1 | 20260906 |                10 |          1389 |           1389 |         1389 |          0 |                63 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | noncoding_first_exon_phase2 | 20260906 |                10 |          1389 |           1389 |         1389 |          0 |                63 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | forward                     |      173 |               128 |          1268 |           1268 |         1268 |          0 |                62 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | reverse                     |      173 |               128 |          1264 |           1264 |         1264 |          0 |                62 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | three_exon_phase2           |      173 |               128 |          1389 |           1389 |         1389 |          0 |                62 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | partial_cds_end             |      173 |               128 |          1385 |           1385 |         1385 |          0 |                62 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | noncoding_first_exon        |      173 |               128 |          1389 |           1389 |         1389 |          0 |                62 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | noncoding                   |      173 |               128 |          1198 |           1198 |         1198 |          0 |                54 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | noncoding_first_exon_phase1 |      173 |               128 |          1389 |           1389 |         1389 |          0 |                63 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | noncoding_first_exon_phase2 |      173 |               128 |          1389 |           1389 |         1389 |          0 |                63 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | forward                     | 20260906 |               128 |          1268 |           1268 |         1268 |          0 |                62 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | reverse                     | 20260906 |               128 |          1264 |           1264 |         1264 |          0 |                62 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | three_exon_phase2           | 20260906 |               128 |          1389 |           1389 |         1389 |          0 |                62 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | partial_cds_end             | 20260906 |               128 |          1385 |           1385 |         1385 |          0 |                62 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | noncoding_first_exon        | 20260906 |               128 |          1389 |           1389 |         1389 |          0 |                62 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | noncoding                   | 20260906 |               128 |          1198 |           1198 |         1198 |          0 |                54 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | noncoding_first_exon_phase1 | 20260906 |               128 |          1389 |           1389 |         1389 |          0 |                63 |
+| 4dd341a8cf6124035e326145b9783cfec33767f8 | noncoding_first_exon_phase2 | 20260906 |               128 |          1389 |           1389 |         1389 |          0 |                63 |
 
 The oracle sources are Ensembl VEP
 `57ea5c52340acc1f156267f810ad162e26597082` and Variation
