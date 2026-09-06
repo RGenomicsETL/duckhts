@@ -379,7 +379,9 @@ test_bcf_index_reload <- function() {
   index <- tempfile("duckhts-bcf-index-")
   hidden <- paste0(index, ".hidden")
   on.exit(unlink(c(index, hidden)), add = TRUE)
-  for (file in c("parallel_empty_contigs.bcf", "parallel_empty_contigs.vcf.gz")) {
+  # Both formats have two occupied contigs, so losing the worker index tests
+  # an index-dependent plan, not a single-contig sequential fallback.
+  for (file in c("bcf_scan_contigs.bcf", "bcf_scan_contigs.full.vcf.gz")) {
     path <- system.file("extdata", file, package = "Rduckhts")
     expect_true(nzchar(path))
     build <- sprintf("SELECT * FROM bcf_index(%s, index_path := %s, threads := 1)",
@@ -392,9 +394,9 @@ test_bcf_index_reload <- function() {
       # R DuckDB's EXECUTE bookkeeping coerces the first column to numeric.
       # Keep POS first while retaining every column for exact row comparison.
       projection <- "SELECT POS, * EXCLUDE (POS) FROM "
-      sql <- paste0(projection, source, ") ORDER BY CHROM, POS")
+      sql <- paste0(projection, source, ") ORDER BY ALL")
       expected <- dbGetQuery(con, sql)
-      expect_equal(nrow(expected), 2L)
+      expect_equal(nrow(expected), if (tidy) 10L else 5L)
       dbExecute(con, paste("PREPARE index_scan AS", sql))
       if (damage == "missing") {
         expect_true(file.rename(index, hidden))
@@ -403,7 +405,7 @@ test_bcf_index_reload <- function() {
                    pattern = "read_bcf: failed to reload index for parallel scan")
       expect_equal(dbGetQuery(con, "SELECT 4242 AS n")$n, 4242L)
       expect_equal(dbGetQuery(con, sql), expected) # New bind: no-index fallback.
-      sequential <- paste0(projection, source, ", scan_mode := 'sequential') ORDER BY CHROM, POS")
+      sequential <- paste0(projection, source, ", scan_mode := 'sequential') ORDER BY ALL")
       expect_equal(dbGetQuery(con, sequential), expected)
       dbGetQuery(con, build)
       expect_equal(dbGetQuery(con, "EXECUTE index_scan"), expected)
@@ -413,6 +415,70 @@ test_bcf_index_reload <- function() {
   }
 }
 
+test_bcf_contig_dictionary <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  dbExecute(con, "CREATE TABLE expected_sites(CHROM VARCHAR, POS BIGINT, ID VARCHAR, REF VARCHAR,
+    ALT VARCHAR[], QUAL DOUBLE, FILTER VARCHAR[], INFO_DP INTEGER,
+    FORMAT_GT_S1 VARCHAR, FORMAT_GT_S2 VARCHAR)")
+  dbExecute(con, "INSERT INTO expected_sites VALUES
+    ('chr1',10,'known','A',['C'],60,['PASS'],7,'0/1','1/1'),
+    ('chr3',20,'duplicate','G',['T'],50,['PASS'],8,'./1','0/0'),
+    ('chr3',20,'duplicate','G',['T'],50,['PASS'],8,'./1','0/0'),
+    ('chr3',20,'allele','G',['A'],30,['PASS'],9,'1/1','./.'),
+    ('chr3',40,'last','T',['G'],NULL,['PASS'],NULL,'1','0|1')")
+  dbExecute(con, "CREATE VIEW expected_tidy AS
+    SELECT CHROM,POS,ID,REF,ALT,QUAL,FILTER,INFO_DP,SAMPLE_ID,FORMAT_GT
+    FROM expected_sites, LATERAL (VALUES ('S1',FORMAT_GT_S1),('S2',FORMAT_GT_S2))
+    AS samples(SAMPLE_ID,FORMAT_GT)")
+  for (threads in c(1L, 4L)) for (tidy in c(FALSE, TRUE)) {
+    dbExecute(con, sprintf("SET threads=%d", threads))
+    expected_table <- if (tidy) "expected_tidy" else "expected_sites"
+    expected <- dbGetQuery(con, paste("SELECT * FROM", expected_table, "ORDER BY ALL"))
+    expected_region <- dbGetQuery(con, paste("SELECT * FROM", expected_table,
+                                            "WHERE CHROM='chr3' ORDER BY ALL"))
+    projection <- if (tidy) "CHROM,POS,ID,SAMPLE_ID,FORMAT_GT" else "CHROM,POS,ID,FORMAT_GT_S1"
+    expected_projection <- dbGetQuery(con, paste("SELECT", projection, "FROM", expected_table, "ORDER BY ALL"))
+    for (header in c("full", "partial", "none")) {
+      path <- system.file("extdata", paste0("bcf_scan_contigs.", header, ".vcf.gz"), package = "Rduckhts")
+      expect_true(nzchar(path))
+      expect_false(file.exists(paste0(path, ".tbi")) || file.exists(paste0(path, ".csi")))
+      source <- sprintf("read_bcf(%s, tidy_format:=%s, decompression_threads:=0",
+                        dbQuoteString(con, path), tolower(tidy))
+      # No-index auto fallback must have the same complete rows.
+      expect_equal(dbGetQuery(con, paste0("SELECT * FROM ", source, ") ORDER BY ALL")), expected)
+      for (kind in c("tbi", "csi")) {
+        index <- paste0(path, ".index.", kind)
+        expect_true(file.exists(index))
+        indexed <- paste0(source, ", index_path:=", dbQuoteString(con, index))
+        for (mode in c("auto", "sequential")) {
+          sql <- paste0(indexed, ", scan_mode:=", dbQuoteString(con, mode), ")")
+          expect_equal(dbGetQuery(con, paste("SELECT * FROM", sql, "ORDER BY ALL")), expected)
+          expect_equal(dbGetQuery(con, paste("SELECT", projection, "FROM", sql, "ORDER BY ALL")),
+                       expected_projection)
+        }
+        region <- paste0(indexed, ", region:='chr3:20-40,chr3:20-20')")
+        expect_equal(dbGetQuery(con, paste("SELECT * FROM", region, "ORDER BY ALL")), expected_region)
+      }
+    }
+    bcf <- system.file("extdata", "bcf_scan_contigs.bcf", package = "Rduckhts")
+    expect_equal(dbGetQuery(con, sprintf("SELECT * FROM read_bcf(%s,tidy_format:=%s) ORDER BY ALL",
+                                         dbQuoteString(con, bcf), tolower(tidy))), expected)
+    empty <- system.file("extdata", "bcf_scan_contigs.empty.vcf.gz", package = "Rduckhts")
+    for (kind in c("tbi", "csi")) {
+      result <- dbGetQuery(con, sprintf("SELECT * FROM read_bcf(%s,index_path:=%s,tidy_format:=%s)",
+        dbQuoteString(con, empty), dbQuoteString(con, paste0(empty, ".index.", kind)), tolower(tidy)))
+      expect_equal(result, expected[FALSE, ])
+    }
+  }
+  path <- system.file("extdata", "bcf_scan_contigs.partial.vcf.gz", package = "Rduckhts")
+  expect_silent(rduckhts_bcf(con, "partial_vcf", path,
+                            index_path = paste0(path, ".index.tbi"), overwrite = TRUE))
+  expect_equal(dbGetQuery(con, "SELECT * FROM partial_vcf ORDER BY ALL"),
+               dbGetQuery(con, "SELECT * FROM expected_sites ORDER BY ALL"))
+}
+
+test_bcf_contig_dictionary()
 test_bcf_index_reload()
 test_bcf_record_cache()
 test_bcf_string_format_lists()

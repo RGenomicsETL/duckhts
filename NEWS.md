@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- plan indexed VCF full scans from the Tabix contig dictionary, preserving
+  records on contigs absent from a partial header with a non-colocated index.
+  Keep physical duplicate records and BCF header-ID semantics; VCF header-only
+  empty contigs no longer create scan tasks
+
 - fail index-dependent BCF/VCF parallel scans when a worker cannot reload its
   index, instead of silently returning zero rows. Preserve sequential fallback
   when no index was available at bind, and same-connection recovery after errors

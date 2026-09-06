@@ -21,18 +21,23 @@ test_installed_reader_allocations <- function(probe_path) {
                          failed = 0L, PACKAGE = shim[["name"]])
   disarm <- function() invisible(.C("reader_alloc_disarm", PACKAGE = shim[["name"]]))
   fixtures <- c(read_bcf = "bcf_cache_lifecycle.vcf", read_bam = "bam_read_groups.sam",
+                read_bcf_indexed = "bcf_scan_contigs.partial.vcf.gz",
                 read_bam_materialize = "bam_materialize.sam",
                 read_fasta = "region_names.fa", read_fastq = "r1.fq")
   failures <- 0L
   for (reader in names(fixtures)) {
     path <- system.file("extdata", fixtures[[reader]], package = "Rduckhts")
     stopifnot(nzchar(path))
-    function_name <- if (reader == "read_bam_materialize") "read_bam" else reader
+    function_name <- switch(reader, read_bam_materialize = "read_bam",
+                            read_bcf_indexed = "read_bcf", reader)
     options <- if (function_name == "read_bam") ", decompression_threads := 0" else ""
     if (reader == "read_bam_materialize")
       options <- paste0(options, ", standard_tags := true, auxiliary_tags := true")
-    sql <- sprintf("SELECT * FROM %s(%s, scan_mode := 'sequential'%s)",
-                   function_name, dbQuoteString(con, path), options)
+    mode <- if (reader == "read_bcf_indexed") "auto" else "sequential"
+    if (reader == "read_bcf_indexed")
+      options <- paste0(options, ", index_path := ", dbQuoteString(con, paste0(path, ".index.tbi")))
+    sql <- sprintf("SELECT * FROM %s(%s, scan_mode := '%s'%s) ORDER BY ALL",
+                   function_name, dbQuoteString(con, path), mode, options)
     arm(0L)
     expected <- dbGetQuery(con, sql)
     dbGetQuery(con, "SELECT 4242")

@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- preserve bundled VCF records on undeclared contigs when index_path points to
+  a non-colocated Tabix index. Full scans use the index's contig dictionary,
+  retain duplicate records and avoid tasks for header-only empty contigs
+
 - make a missing or corrupt worker index a bundled BCF/VCF query error when
   bind selected parallel scanning; preserve ordinary no-index fallback and
   same-connection recovery rather than silently losing records
