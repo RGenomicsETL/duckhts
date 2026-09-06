@@ -77,14 +77,17 @@ duckvep_projection_compare <- function(actual, expected) {
 main <- function() {
   opt <- optparse::parse_args(optparse::OptionParser(option_list = list(
     optparse::make_option("--random-cases", dest = "random_cases", type = "integer", default = 1000L),
+    optparse::make_option("--max-random-length", dest = "max_random_length", type = "integer", default = 10L),
     optparse::make_option("--seed", type = "integer", default = 173L),
     optparse::make_option("--extension", default = "build/release/duckhts.duckdb_extension"),
     optparse::make_option("--extension-receipt", dest = "extension_receipt", default = NULL),
+    optparse::make_option("--summary-output", dest = "summary_output", default = NULL),
     optparse::make_option("--vep-prefix", dest = "vep_prefix", default = Sys.getenv("VEP_PREFIX")),
     optparse::make_option("--vep-git", dest = "vep_git", default = ".sync/ensembl-vep"),
     optparse::make_option("--variation-git", dest = "variation_git", default = ".sync/ensembl-variation")
   )))
-  stopifnot(!is.na(opt$random_cases), opt$random_cases >= 0L, !is.na(opt$seed))
+  stopifnot(!is.na(opt$random_cases), opt$random_cases >= 0L, !is.na(opt$seed),
+    !is.na(opt$max_random_length), opt$max_random_length >= 1L, opt$max_random_length <= 65534L)
   root <- normalizePath(system2("git", c("rev-parse", "--show-toplevel"), stdout = TRUE))
   source(file.path(root, "scripts/duckvep_evidence.R"), local = TRUE)
   source(file.path(root, "test/duckvep/conformance/projection_fixtures.R"), local = TRUE)
@@ -92,8 +95,11 @@ main <- function() {
   extension <- normalizePath(opt$extension, mustWork = TRUE)
   extension_hash <- duckvep_evidence_sha256(extension)
   binding <- "diagnostic_unbound"
+  allowed_outputs <- if (is.null(opt$summary_output)) character() else opt$summary_output
+  if (length(allowed_outputs) && is.null(opt$extension_receipt))
+    stop("--summary-output requires a source-bound extension receipt")
   if (!is.null(opt$extension_receipt)) {
-    duckvep_evidence_assert_checkout(root, revision)
+    duckvep_evidence_assert_checkout(root, revision, allowed_outputs)
     binding <- duckvep_evidence_read_extension_receipt(opt$extension_receipt, root,
       extension, revision)$binding
   }
@@ -137,7 +143,8 @@ main <- function() {
     json <- file.path(directory, paste0(case, ".json"))
     command("Rscript", c(file.path(root, "test/duckvep/conformance/generate_witnesses.R"),
       "--gff", gff, "--fasta", inputs[["projection_reference"]], "--ext", extension,
-      "--out", generated, "--random-cases", opt$random_cases, "--seed", opt$seed))
+      "--out", generated, "--random-cases", opt$random_cases, "--seed", opt$seed,
+      "--max-random-length", opt$max_random_length))
     duckvep_projection_label_records(generated, vcf)
     status <- system2("bgzip", c("-c", shQuote(gff)), stdout = paste0(gff, ".gz"))
     stopifnot(status == 0L)
@@ -152,11 +159,14 @@ main <- function() {
     expected <- duckvep_projection_expected(json, gff)
     actual <- DBI::dbGetQuery(con, "SELECT * EXCLUDE(event_index, transcript_index) FROM projection_actual")
     actual <- as.data.frame(lapply(actual[names(expected)], as.character), stringsAsFactors = FALSE)
+    utils::write.csv(actual, file.path(directory, paste0(case, ".actual.csv")), row.names = FALSE)
+    utils::write.csv(expected, file.path(directory, paste0(case, ".expected.csv")), row.names = FALSE)
     input_count <- DBI::dbGetQuery(con, "SELECT count(*) n FROM projection_events")$n
     stopifnot(input_count == nrow(expected))
     mismatch <- duckvep_projection_compare(actual, expected)
     utils::write.csv(mismatch, file.path(directory, paste0(case, ".mismatch.csv")), row.names = FALSE)
-    summaries[[case]] <- data.frame(case, seed = opt$seed, input_alleles = input_count,
+    summaries[[case]] <- data.frame(case, seed = opt$seed, max_random_length = opt$max_random_length,
+      input_alleles = input_count,
       expected_pairs = nrow(expected), actual_pairs = nrow(actual), mismatches = nrow(mismatch))
     print(summaries[[case]])
     # A valid comparison must fail on every changed field, lost/extra pair and
@@ -199,15 +209,30 @@ main <- function() {
     sha256 = vapply(artifacts, duckvep_evidence_sha256, character(1L))),
     file.path(directory, "artifacts.tsv"), sep = "\t", row.names = FALSE, quote = FALSE)
   receipt <- c(source_revision = revision, build_binding = binding, extension_sha256 = extension_hash,
-    revisions, seed = opt$seed, random_cases = opt$random_cases, input_alleles = sum(summary$input_alleles),
+    revisions, seed = opt$seed, random_cases = opt$random_cases, max_random_length = opt$max_random_length,
+    input_alleles = sum(summary$input_alleles),
     expected_pairs = sum(summary$expected_pairs), actual_pairs = sum(summary$actual_pairs),
     mismatches = sum(summary$mismatches))
   utils::write.table(data.frame(field = names(receipt), value = unname(receipt)),
     file.path(directory, "receipt.tsv"), sep = "\t", row.names = FALSE, quote = FALSE)
   check_oracle()
   stopifnot(identical(extension_hash, duckvep_evidence_sha256(extension)))
-  if (!is.null(opt$extension_receipt)) duckvep_evidence_assert_checkout(root, revision)
+  if (!is.null(opt$extension_receipt)) duckvep_evidence_assert_checkout(root, revision, allowed_outputs)
   stopifnot(sum(summary$mismatches) == 0L)
+  if (!is.null(opt$summary_output)) {
+    evidence <- cbind(source_revision = revision, build_binding = binding,
+      extension_sha256 = extension_hash, summary)
+    evidence$detected_controls <- vapply(controls, nrow, integer(1L))
+    for (artifact in c("gff3", "generated.vcf", "vcf", "json", "actual.csv", "expected.csv")) {
+      evidence[[paste0(gsub("\\.", "_", artifact), "_sha256")]] <- vapply(summary$case,
+        function(case) duckvep_evidence_sha256(file.path(directory, paste0(case, ".", artifact))),
+        character(1L))
+    }
+    if (file.exists(opt$summary_output)) evidence <- rbind(
+      utils::read.csv(opt$summary_output, stringsAsFactors = FALSE), evidence)
+    dir.create(dirname(opt$summary_output), recursive = TRUE, showWarnings = FALSE)
+    utils::write.csv(evidence, opt$summary_output, row.names = FALSE)
+  }
 }
 
 if (sys.nframe() == 0L) main()
