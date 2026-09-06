@@ -133,6 +133,19 @@ int duckvep_project_coding_base(
     uint32_t                          genomic_pos,
     duckvep_coding_projection_t      *out);
 
+/* Rephase a validated physical CDS position, including an insertion-before
+ * position, using the first transcript exon phase. This is scalar coordinate
+ * arithmetic, not genomic projection or REF validation. Both outputs are required
+ * and are zero on failure. The physical phase is the stored CDS's leading padding. */
+int duckvep_project_vep_cds_position(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    size_t                            tx_idx,
+    uint32_t                          physical_position1,
+    uint8_t                           physical_phase,
+    uint32_t                         *position_out,
+    uint8_t                          *phase_out);
+
 /* Convert an already validated physical CDS projection to VEP's feature/codon
  * coordinates, using the first transcript exon phase. No genomic lookup or
  * sequence access. `physical` and `out` may alias; a failed conversion zeros

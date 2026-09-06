@@ -2629,8 +2629,33 @@ static int delta_edit_project_feature(
 
     uint32_t start;
     uint32_t end;
-    if (edit == NULL ||
-        !duckvep_project_feature_to_cds(transcripts, exons, tx_idx, event, &start, &end) ||
+    uint32_t coding_start_cdna;
+    uint32_t coding_end_cdna;
+    uint8_t physical_phase;
+    uint8_t feature_phase;
+    int same_feature;
+
+    if (edit == NULL || event == NULL) return 0;
+    /* The physical builder already proved genomic/CDS contiguity and checked
+     * REF. Reuse its coordinate only when VEP selects that exact interval;
+     * full uploaded substitutions and mapper-gap features still project their
+     * own endpoints below. */
+    same_feature = event->interbase
+        ? edit->ref_len == 0u &&
+          (uint64_t)event->feature_start1 == (uint64_t)event->insertion_boundary0 + 1u &&
+          event->feature_end1 == event->insertion_boundary0
+        : event->feature_start1 == event->start1 &&
+          (uint64_t)event->feature_end1 + 1u ==
+              (uint64_t)event->start1 + (uint64_t)edit->ref_len;
+    if (same_feature) {
+        if (!duckvep_project_coding_cdna_bounds(transcripts, exons, tx_idx,
+                &coding_start_cdna, &coding_end_cdna, NULL, &physical_phase) ||
+            !duckvep_project_vep_cds_position(transcripts, exons, tx_idx,
+                edit->cds_start, physical_phase, &start, &feature_phase)) return 0;
+        edit->cds_start = start;
+        return 1;
+    }
+    if (!duckvep_project_feature_to_cds(transcripts, exons, tx_idx, event, &start, &end) ||
         (uint64_t)end + 1u != (uint64_t)start + (uint64_t)edit->ref_len) return 0;
     edit->cds_start = start;
     return 1;

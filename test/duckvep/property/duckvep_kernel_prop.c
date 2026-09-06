@@ -16412,6 +16412,7 @@ TEST sequence_delta_later_cds_phase_uses_feature_edits(void) {
                 duckvep_coding_projection_t display;
                 uint32_t first, last;
                 uint32_t expected_insert = strand > 0 ? 6u : 5u;
+                uint8_t feature_phase = 99u;
 
                 s.vpos = strand > 0 ? 162u : 188u; s.vend = s.vpos;
                 s.vkind = (uint8_t)DUCKVEP_KIND_INS; s.alen = 2u;
@@ -16421,6 +16422,10 @@ TEST sequence_delta_later_cds_phase_uses_feature_edits(void) {
                 ASSERT(duckvep_project_event_to_cds(&s.tx, &s.ex, 0u, &event, &first, &last));
                 ASSERT_EQ(expected_insert + (uint32_t)phase, first);
                 ASSERT_EQ(first, last);
+                ASSERT(duckvep_project_vep_cds_position(&s.tx, &s.ex, 0u,
+                    first, (uint8_t)phase, &first, &feature_phase));
+                ASSERT_EQ(expected_insert, first);
+                ASSERT_EQ(0u, feature_phase);
                 ASSERT(duckvep_project_feature_to_cds(&s.tx, &s.ex, 0u, &event, &first, &last));
                 ASSERT_EQ(expected_insert, first); ASSERT_EQ(first - 1u, last);
                 ASSERT(duckvep_project_complete_feature_translation_bounds(
@@ -16431,15 +16436,36 @@ TEST sequence_delta_later_cds_phase_uses_feature_edits(void) {
                  * failures zero the output even for an in-place conversion. */
                 ASSERT(duckvep_project_coding_base(&s.tx, &s.ex, 0u, s.vpos, &projection));
                 phases[0] = 3;
+                ASSERT(!duckvep_project_vep_cds_position(&s.tx, &s.ex, 0u,
+                    10u, 0u, &first, &feature_phase));
+                ASSERT_EQ(0u, first); ASSERT_EQ(0u, feature_phase);
                 ASSERT(!duckvep_project_vep_coding_position(&s.tx, &s.ex, 0u, &projection, &display));
                 ASSERT_EQ(0u, display.cds_pos);
                 phases[0] = -2;
                 ASSERT(!duckvep_project_vep_coding_position(&s.tx, &s.ex, 0u, &projection, &display));
                 phases[0] = 2;
+                ASSERT(duckvep_project_vep_cds_position(&s.tx, &s.ex, 0u,
+                    (uint32_t)phase + 5u, (uint8_t)phase, &first, &feature_phase));
+                ASSERT_EQ(7u, first); ASSERT_EQ(2u, feature_phase);
+                ASSERT(!duckvep_project_vep_cds_position(&s.tx, &s.ex, 0u,
+                    UINT32_MAX, 0u, &first, &feature_phase));
+                ASSERT_EQ(0u, first); ASSERT_EQ(0u, feature_phase);
                 projection.cds_pos = UINT32_MAX; projection.phase_offset = 0u;
                 ASSERT(!duckvep_project_vep_coding_position(&s.tx, &s.ex, 0u, &projection, &projection));
                 ASSERT_EQ(0u, projection.cds_pos);
                 phases[0] = -1;
+                ASSERT(!duckvep_project_vep_cds_position(&s.tx, &s.ex, 0u,
+                    2u, 2u, &first, &feature_phase));
+                ASSERT(!duckvep_project_vep_cds_position(&s.tx, &s.ex, 0u,
+                    10u, 3u, &first, &feature_phase));
+                first = 99u;
+                ASSERT(!duckvep_project_vep_cds_position(&s.tx, &s.ex, 0u,
+                    10u, 0u, &first, NULL));
+                ASSERT_EQ(0u, first);
+                feature_phase = 99u;
+                ASSERT(!duckvep_project_vep_cds_position(&s.tx, &s.ex, 0u,
+                    10u, 0u, NULL, &feature_phase));
+                ASSERT_EQ(0u, feature_phase);
                 ASSERT(!duckvep_project_vep_coding_position(&s.tx, &s.ex, 0u, &projection, &display));
             }
             {

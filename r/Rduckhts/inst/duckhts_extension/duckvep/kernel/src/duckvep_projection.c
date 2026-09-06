@@ -421,7 +421,7 @@ int duckvep_project_feature_has_coding_precondition_unshifted(
     return 0;
 }
 
-static int project_vep_cds_position(
+int duckvep_project_vep_cds_position(
     const duckvep_transcript_model_t *transcripts,
     const duckvep_exon_model_t       *exons,
     size_t                            tx_idx,
@@ -435,13 +435,17 @@ static int project_vep_cds_position(
     int8_t phase;
     uint32_t unpadded_position;
 
+    if (position_out != NULL) *position_out = 0u;
+    if (phase_out != NULL) *phase_out = 0u;
+    if (position_out == NULL || phase_out == NULL) return 0;
     if (!valid_tx_exon_slice(transcripts, exons, tx_idx, &offset, &count) ||
         physical_phase > 2u || physical_position1 <= physical_phase) return 0;
     phase = exons->phase == NULL ? 0 : exons->phase[offset];
     if (phase < -1 || phase > 2) return 0;
     unpadded_position = physical_position1 - physical_phase;
-    *phase_out = phase > 0 ? (uint8_t)phase : 0u;
-    if (unpadded_position > UINT32_MAX - *phase_out) return 0;
+    phase = phase > 0 ? phase : 0;
+    if (unpadded_position > UINT32_MAX - (uint32_t)phase) return 0;
+    *phase_out = (uint8_t)phase;
     *position_out = unpadded_position + *phase_out;
     return 1;
 }
@@ -464,7 +468,7 @@ int duckvep_project_vep_coding_position(
     result = *physical;
     physical_phase = result.phase_offset;
     memset(out, 0, sizeof *out);
-    if (!project_vep_cds_position(transcripts, exons, tx_idx,
+    if (!duckvep_project_vep_cds_position(transcripts, exons, tx_idx,
             result.cds_pos, physical_phase, &result.cds_pos, &result.phase_offset)) return 0;
     if (result.phase_offset == physical_phase) {
         *out = result;
@@ -820,7 +824,7 @@ int duckvep_project_feature_to_cds(
         }
         if (!duckvep_project_coding_cdna_bounds(transcripts, exons, tx_idx,
                 &coding_start_cdna, &coding_end_cdna, NULL, &physical_phase) ||
-            !project_vep_cds_position(transcripts, exons, tx_idx,
+            !duckvep_project_vep_cds_position(transcripts, exons, tx_idx,
                 cds_boundary, physical_phase, &cds_boundary, &feature_phase)) {
             return 0;
         }

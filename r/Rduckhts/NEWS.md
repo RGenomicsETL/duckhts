@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- avoid redundant genomic projection in bundled DuckVEP indel annotation and
+  HGVS context construction, while retaining physical REF validation and full
+  projection for features whose span differs from the validated edit
+
 - correct bundled DuckVEP terminal-codon substitutions by including available
   3-prime UTR bases in alternate codon translation. Partial-codon and coding-unknown
   terms can coexist with stop-gained; a preserved full peptide plus a new stop

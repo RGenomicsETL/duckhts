@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- reuse validated DuckVEP indel CDS positions when the VEP feature selects the
+  same genomic interval, avoiding repeated endpoint projection in consequence
+  and HGVS context construction. One checked scalar phase converter serves
+  base projections and indel positions; wider features retain full projection
+
 - share DuckVEP's codon-rounded REF/ALT translation windows across substitutions
   and indels. Terminal SNVs/MNVs now borrow available 3-prime UTR bases for ALT,
   preserving independent partial-codon and stop-gained facts and recognizing
