@@ -1425,14 +1425,19 @@ contig-join denominator were checked after timing; all 4,095,611 eligible allele
 joined. Output receipts are also outside the timer.
 
 ```{r shared-translation-validation}
-translation <- read.csv(file.path(data_dir, "shared_translation_validation.csv"),
+translation_history <- read.csv(file.path(data_dir, "shared_translation_validation.csv"),
                         colClasses = "character")
+translation <- translation_history[1L, , drop = FALSE]
+consensus <- translation_history[2L, , drop = FALSE]
+row.names(consensus) <- NULL
 same_contract <- c("model_sha256", "input_registry_id", "model_registry_id",
   "source_records", "source_alt_alleles", "eligible_alt_alleles", "output_rows",
   "output_bytes", "threads", "affinity", "full_row_xor", "full_row_low32_sum",
   "full_row_high32_sum")
-stopifnot(identical(rebuild[same_contract], translation[same_contract]))
-translation_comparison <- rbind(rebuild, translation)
+stopifnot(nrow(translation_history) == 2L,
+  identical(rebuild[same_contract], translation[same_contract]),
+  identical(translation[same_contract], consensus[same_contract]))
+translation_comparison <- rbind(rebuild, translation, consensus)
 knitr::kable(data.frame(
   revision = substr(translation_comparison$source_revision, 1, 8),
   source_records = translation_comparison$source_records,
@@ -1462,6 +1467,19 @@ promise final row order. Matching fingerprints are evidence about the complete
 17-field projection, not a collision-free proof or conformance for unprojected
 HGVS/structural fields. Extension SHA-256 is `r translation$extension_sha256`;
 the model logical hash remains `r translation$model_sha256`.
+
+Source `r consensus$source_revision` adds explicit N-ambiguity policies to that
+same translator. Phased proteins resolve a common amino acid across all nucleotide
+expansions; independent coding predicates keep conservative unknown codons. The
+unchanged independent-event worker took `r consensus$elapsed_seconds` s and
+`r consensus$maximum_rss_kib` KiB peak RSS, versus 62.76 s and 5,731,168 KiB for
+the nearest identical recorded workload above. All input/output denominators,
+model identity and full-row fingerprints match. This is another single pass,
+not evidence of a speedup or a statistical no-regression claim. Extension SHA-256
+is `r consensus$extension_sha256`; output SHA-256 is `r consensus$output_sha256`.
+Disk availability again became tight during sorting/output. The worker and
+receipt checks succeeded; only its newly generated 6.17 GB TSV was removed after
+validation. This workload does not measure the phased N-consensus path itself.
 
 The phased executor still needs separate sorted-native and sort-included
 throughput/memory measurements. This independent-event run does not measure

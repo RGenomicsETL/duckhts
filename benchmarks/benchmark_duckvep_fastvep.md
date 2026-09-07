@@ -641,6 +641,7 @@ eligible alleles joined. Output receipts are also outside the timer.
 |:---------|:---------------|:-----------|:-------------|:------------|:-------------|:--------|:-------|:----------------|:-------------|
 | 5cc99b89 | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 64.14           | 5730396      |
 | e3269389 | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 62.76           | 5731168      |
+| fbe38c3a | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 62.73           | 5728276      |
 
 The observed pass is 62.76 s versus 64.14 s for the nearest identical
 recorded workload, with 5,731,168 versus 5,730,396 KiB peak RSS. Single
@@ -662,6 +663,23 @@ SHA-256 is
 fc23f76b0ac9257d035d8b9e8d198c2eb5a940d8b538cc5072e2f7548bbe45e5; the
 model logical hash remains
 38da573cf9968c58e5ff42b8edddd0de952cc51cdb37c1ca03b481c7aea0853f.
+
+Source fbe38c3aa736fe6a6d14bd7788e7c68e0cb0c3a9 adds explicit
+N-ambiguity policies to that same translator. Phased proteins resolve a
+common amino acid across all nucleotide expansions; independent coding
+predicates keep conservative unknown codons. The unchanged
+independent-event worker took 62.73 s and 5728276 KiB peak RSS, versus
+62.76 s and 5,731,168 KiB for the nearest identical recorded workload
+above. All input/output denominators, model identity and full-row
+fingerprints match. This is another single pass, not evidence of a
+speedup or a statistical no-regression claim. Extension SHA-256 is
+fa7c08ce0fae5cc113a7457e057667da857994b8390e8b46fe1255c97f9c8874; output
+SHA-256 is
+6f1bd987b8a144822dda1ef2939bb42870711f86ac8797f2ce1ef3db1b5143d9. Disk
+availability again became tight during sorting/output. The worker and
+receipt checks succeeded; only its newly generated 6.17 GB TSV was
+removed after validation. This workload does not measure the phased
+N-consensus path itself.
 
 The phased executor still needs separate sorted-native and sort-included
 throughput/memory measurements. This independent-event run does not
