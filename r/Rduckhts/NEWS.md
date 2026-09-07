@@ -1,5 +1,8 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- test that bundled phased replay preserves restoring-indel provenance and
+  frame flags when CDS/protein differences are empty, under both phase policies
+
 - preserve bundled phased CDS/protein replay with carried UTR/intronic events
   outside coding sequence. All contributors remain visible; coding projection
   failures and incomplete phase evidence still return unavailable sequence

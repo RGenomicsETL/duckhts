@@ -140,6 +140,22 @@ local({
   expect_equal(lengths(blocks$event_indices), c(2, 1))
   expect_equal(blocks$event_indices, list(c(1, 2), 3))
   expect_equal(nrow(restored$contributors[[1]]), 3L)
+  identical_indels <- paste("SELECT * REPLACE('AA' AS alternate) FROM (", indels,
+    ") WHERE event_index=1 UNION ALL SELECT * FROM (", indels, ") WHERE event_index=2")
+  for (policy in c("strict", "vep116_compat")) {
+    identity <- rduckhts_haplotypes(con, identical_indels, "haps", phase_policy = policy)
+    expect_equal(identity$cds, "AAAAAAAAAAAA")
+    expect_equal(identity$edit_count, 2)
+    expect_equal(identity$sequence_flags, 5)
+    expect_equal(identity$contributors[[1]]$event_index, c(1, 2))
+    expect_equal(nrow(identity$cds_differences[[1]]), 0L)
+    expect_equal(nrow(identity$protein_differences[[1]]), 0L)
+    blocks <- identity$coding_blocks[[1]]
+    expect_equal(nrow(blocks), 1L)
+    expect_equal(blocks$reference, blocks$alternate)
+    expect_equal(blocks$sequence_flags, 5)
+    expect_equal(blocks$event_indices[[1]], c(1, 2))
+  }
   reverse_tx <- paste("SELECT * REPLACE(1::UINTEGER AS transcript_index,-1::TINYINT AS strand,",
     "'TTTTTTTTTTTT'::BLOB AS cds_sequence) FROM (", tx, ")")
   reverse_exons <- paste("SELECT * REPLACE(1::UINTEGER AS transcript_index) FROM (", exons, ")")

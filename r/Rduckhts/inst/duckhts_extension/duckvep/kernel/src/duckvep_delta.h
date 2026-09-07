@@ -656,7 +656,9 @@ DUCKVEP_INTERNAL_API duckvep_context_delta_status_t duckvep_coding_context_delta
  * called in-frame. Start/terminal-CDS strings borrow this block's rebuilt bases
  * between unchanged reference flanks, with explicit missing-flank errors.
  * Single-record genomic insertion-length reach is not inferred from CDS spans.
- * Equal-length strings never erase physical frame excursions. Failure leaves the
+ * Equal-length or identical strings never erase physical frame excursions;
+ * restoring indels can yield synonymous local facts with both edits retained.
+ * Identity substitution blocks remain unsupported. Failure leaves the
  * entire delta zeroed. These local facts are not a complete haplotype SO set:
  * earlier-stop reachability, contributor topology and unsupported blocks remain
  * separate. No context field or shared prefix is changed. */

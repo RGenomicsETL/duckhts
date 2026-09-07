@@ -21998,6 +21998,73 @@ TEST haplotype_substitution_blocks_reuse_local_coding_predicates(void) {
     PASS();
 }
 
+TEST haplotype_restoring_indels_can_recreate_reference_sequence(void) {
+    static const uint8_t bases[] = "ACGT";
+    static const uint32_t widths[] = {1u, 2u, 4u, 5u};
+    size_t cases = 0u;
+    for (size_t base = 0u; base < 4u; base++) {
+        uint8_t reference[28] = "ATG";
+        memset(reference + 3u, bases[base], 18u);
+        memcpy(reference + 21u, "CCCTAA", 6u);
+        for (size_t width = 0u; width < 4u; width++) {
+            uint32_t n = widths[width];
+            for (uint32_t deleted = 4u; deleted <= 12u; deleted++) {
+                for (uint32_t restored = deleted + n; restored <= 21u; restored++) {
+                    for (int strand = -1; strand <= 1; strand += 2) {
+                        uint8_t allele[5];
+                        memset(allele, strand > 0 ? bases[base]
+                            : (uint8_t)kprop_complement_base((char)bases[base]), n);
+                        duckvep_haplotype_edit_t ascending[2] = {
+                            {deleted, n, allele, 0u, NULL, 1},
+                            {restored, 0u, NULL, n, allele, 1}};
+                        duckvep_haplotype_edit_t descending[2] = {ascending[1], ascending[0]};
+                        duckvep_edit_set_t set = {descending, 2u};
+                        duckvep_coding_context_t ctx;
+                        uint8_t cds[40], rp[16], ap[16];
+                        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK, duckvep_coding_context_build(
+                            reference, sizeof reference - 1u, &set, (int8_t)strand,
+                            DUCKVEP_CODON_TABLE_STANDARD, cds, sizeof cds,
+                            rp, sizeof rp, ap, sizeof ap, &ctx));
+                        ASSERT_EQ(sizeof reference - 1u, ctx.alt_cds_len);
+                        ASSERT_MEM_EQ(reference, cds, sizeof reference - 1u);
+                        ASSERT_MEM_EQ(rp, ap, ctx.ref_peptide_len);
+                        ASSERT(!ctx.cds_changed);
+                        ASSERT_EQ(2u, ctx.applied_edits);
+                        ASSERT_EQ(DUCKVEP_HAPLOTYPE_FLAG_INDEL |
+                            DUCKVEP_HAPLOTYPE_FLAG_RESOLVED_FRAMESHIFT, ctx.flags);
+                        duckvep_haplotype_block_t blocks[2];
+                        size_t count;
+                        ASSERT_EQ(DUCKVEP_HAPLOTYPE_OK,
+                            duckvep_haplotype_partition(ascending, 2u, blocks, 2u, &count));
+                        ASSERT_EQ(1u, count);
+                        ASSERT_EQ(2u, blocks[0].edit_count);
+                        ASSERT_EQ(ctx.flags, blocks[0].flags);
+                        ASSERT_EQ(0, blocks[0].length_diff);
+                        duckvep_coding_context_t saved = ctx;
+                        duckvep_sequence_delta_t delta;
+                        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                            duckvep_coding_context_block_delta_fill(
+                                &ctx, ascending, 2u, blocks, 0u, &delta));
+                        ASSERT(delta.valid && delta.synonymous && !delta.missense &&
+                            !delta.frameshift && !delta.inframe_deletion &&
+                            !delta.inframe_insertion && !delta.protein_altering &&
+                            !delta.stop_gained && !delta.stop_lost && !delta.stop_retained);
+                        ASSERT_MEM_EQ(&saved, &ctx, sizeof ctx);
+                        /* Sequence equality does not license the forbidden
+                         * whole-context substitution approximation. */
+                        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_UNSUPPORTED,
+                            duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+                        ASSERT(!delta.valid);
+                        cases++;
+                    }
+                }
+            }
+        }
+    }
+    ASSERT_EQ(3168u, cases);
+    PASS();
+}
+
 TEST haplotype_indel_blocks_reuse_local_coding_predicates(void) {
     static const uint8_t bases[] = "ACGT";
     size_t cases = 0u;
@@ -28495,6 +28562,7 @@ int main(int argc, char **argv) {
     RUN_TEST(haplotype_apply_matches_rebuild_oracle_for_any_valid_edit_set);
     RUN_TEST(haplotype_block_windows_keep_both_peptide_axes);
     RUN_TEST(haplotype_substitution_blocks_reuse_local_coding_predicates);
+    RUN_TEST(haplotype_restoring_indels_can_recreate_reference_sequence);
     RUN_TEST(haplotype_indel_blocks_reuse_local_coding_predicates);
     RUN_TEST(haplotype_endpoint_deletions_match_independent_span);
     RUN_TEST(haplotype_endpoint_frames_follow_physical_edits);

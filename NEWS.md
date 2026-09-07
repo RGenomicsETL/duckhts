@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- let native compound-block coding predicates classify restoring indels that
+  recreate reference sequence. Keep physical edits and frame flags even when
+  CDS/protein differences are empty; combined SO/HGVS remains unfinished
+
 - record clean-build, two-seed phased replay conformance with retained intronic
   contributors: 24,000 carrier comparisons across two policies. These are
   literal-sequence checks, not combined SO/HGVS or performance evidence

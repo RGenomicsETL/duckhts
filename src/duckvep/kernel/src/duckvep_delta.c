@@ -4471,7 +4471,11 @@ duckvep_context_delta_status_t duckvep_coding_context_block_delta_fill(
         return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
     }
     size_t start0 = (size_t)block->cds_start - 1u;
-    if (block->length_diff == 0 &&
+    /* A physical deletion/insertion pair can recreate the reference bytes.
+     * Its frame excursion and edit provenance still require the indel path.
+     * Only an identity substitution has no coding change to classify. */
+    if ((block->flags & DUCKVEP_HAPLOTYPE_FLAG_INDEL) == 0u &&
+        block->length_diff == 0 &&
         delta_context_cds_ranges_equal(ctx, start0, block->alt_start0, block->ref_len)) {
         return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
     }

@@ -711,7 +711,10 @@ facts from separate blocks without manufacturing an input record or replaying ed
 Complete 5-prime sequence and sufficient or explicitly complete 3-prime sequence remain
 required when the predicate reads them. Single-record genomic insertion-length reach
 is retained separately; a CDS span cannot infer that distance across introns.
-Equal-length strings do not erase physical indels or transient frame changes.
+Equal-length or identical strings do not erase physical indels or transient frame
+changes. Restoring indels that recreate reference CDS retain their physical block
+and can have synonymous local coding facts; an identity substitution is not a
+coding change. Empty CDS/protein differences do not remove source provenance.
 Neither local facts nor a net-zero
 CDS diff constitute a whole-haplotype consequence set. The whole-context compound-indel
 substitution shortcut remains forbidden. Leaf-specific facts never mutate shared

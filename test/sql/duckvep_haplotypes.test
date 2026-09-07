@@ -702,6 +702,23 @@ ORDER BY transcript_index,b.cds_start;
 1	15	[2]
 1	18	[1]
 
+# Restoring indels can recreate the reference sequence without erasing their
+# physical edits, frame excursion or source identities.
+query IIIIIII
+SELECT transcript_index,edit_count,sequence_flags,len(contributors),
+ len(cds_differences),len(protein_differences),
+ coding_blocks[1].reference=coding_blocks[1].alternate AND
+ coding_blocks[1].sequence_flags=5 AND len(coding_blocks[1].event_indices)=2
+ FROM duckvep_haplotypes(
+ 'SELECT event_index,0 seq_region,position,reference,alternate,1 alt_index,t.transcript_index,
+  0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set
+  FROM (VALUES (1,103,''A'',''AA''),(2,109,''AA'',''A'')) e(event_index,position,reference,alternate)
+  CROSS JOIN (VALUES (0),(1)) t(transcript_index)','hap_blocks')
+ ORDER BY transcript_index;
+----
+0	2	5	2	0	0	true
+1	2	5	2	0	0	true
+
 # One uploaded MNV contributes several physical islands in separate blocks;
 # intervening SNVs preserve both their own identity and CDS order on each strand.
 query IIT
