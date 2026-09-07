@@ -73,6 +73,12 @@ main <- function() {
   cases <- readRDS(inputs[1L])$cases
   native <- readRDS(inputs[2L])
   rows <- vector("list", 6L * length(cases))
+  block_rows <- vector("list", length(rows))
+  block_columns <- c("status", "valid", "synonymous", "missense", "stop_gained", "stop_lost",
+    "stop_retained", "start_lost", "start_retained", "frameshift", "inframe_deletion",
+    "inframe_insertion", "protein_altering", "coding_unknown", "partial_codon",
+    "upstream_stop", "indel", "shifted", "cds_start", "ref_len", "alt_start0", "alt_len",
+    "edit_begin", "edit_count")
   at <- 0L
   for (case in cases) {
     paths <- native[[case$transcript]]
@@ -85,7 +91,8 @@ main <- function() {
       capacity <- as.integer(nchar(case$cds) + sum(edits$alt_len) + 2L)
       x <- .C(symbol, case$cds, case$strand, as.integer(edits$start), edits$ref, edits$alt,
         as.integer(nrow(edits)), capacity, cds = raw(capacity), protein = raw(capacity),
-        statuses = integer(2L), facts = integer(22L), lengths = integer(2L))
+        statuses = integer(2L), facts = integer(22L), lengths = integer(2L),
+        block_facts = integer(length(block_columns) * nrow(edits)))
       actual_cds <- rawToChar(x$cds[seq_len(x$lengths[1L])])
       full_protein <- rawToChar(x$protein[seq_len(x$lengths[2L])])
       displayed <- sub("(\\*).*", "\\1", full_protein)
@@ -97,6 +104,11 @@ main <- function() {
       key <- paste(case$transcript, path$sample, (slot - 1L) %% 2L + 1L, sep = "/")
       matched <- which(csq$key == key)
       at <- at + 1L
+      blocks <- as.data.frame(matrix(x$block_facts, ncol = length(block_columns), byrow = TRUE))
+      names(blocks) <- block_columns
+      blocks <- blocks[seq_len(x$facts[["block_count"]]), , drop = FALSE]
+      block_rows[[at]] <- cbind(data.frame(key = rep(key, nrow(blocks)),
+        block = seq_len(nrow(blocks))), blocks)
       rows[[at]] <- cbind(data.frame(key, shape = case$shape, strand = case$strand,
         occupied = nrow(edits) > 0L, edit_count = nrow(edits),
         net_length = sum(edits$alt_len - edits$ref_len),
@@ -111,7 +123,10 @@ main <- function() {
   }
   stopifnot(at == length(rows))
   rows <- do.call(rbind, rows)
+  blocks <- do.call(rbind, block_rows)
   stopifnot(!anyDuplicated(rows$key))
+  stopifnot(nrow(blocks) == sum(rows$block_count), !anyDuplicated(blocks[c("key", "block")]))
+  write.csv(blocks, file.path(out, "blocks.csv"), row.names = FALSE)
   extra <- csq[!csq$key %in% rows$key, , drop = FALSE]
   write.csv(rows, file.path(out, "lanes.csv"), row.names = FALSE)
   write.csv(extra, file.path(out, "extra-bcftools-rows.csv"), row.names = FALSE)
@@ -124,6 +139,10 @@ main <- function() {
     block_windows = sum(rows$block_count), shifted_windows = sum(rows$shifted_windows),
     failed_windows = sum(rows$block_count - rows$opened_windows),
     invalid_window_residues = sum(rows$invalid_window_residues),
+    supported_substitution_blocks = sum(blocks$status == 0L & blocks$valid == 1L & blocks$indel == 0L),
+    unsupported_blocks = sum(blocks$status == 2L),
+    blocks_after_stop = sum(blocks$upstream_stop),
+    falsely_supported_indel_blocks = sum(blocks$indel != 0L & (blocks$status == 0L | blocks$valid != 0L)),
     unsupported = sum(rows$delta_status == 2L), compound_indels = sum(rows$compound_indel),
     falsely_supported_compound_indels = sum(false_support), bcftools_exit_status = bcftools_status,
     # Noncoding/splice consequences have four fields; strand and peptide are optional.
@@ -133,7 +152,7 @@ main <- function() {
       grepl("stop_gained&frameshift", rows$bcftools_terms, fixed = TRUE)))
   write.csv(summary, file.path(out, "summary.csv"), row.names = FALSE)
   identities <- c(inputs, file.path(artifact, "receipt.json"), code, archive, bcftools, shared,
-    file.path(out, c("bcftools-csq.tsv", "bcftools-rows.csv", "lanes.csv", "summary.csv",
+    file.path(out, c("bcftools-csq.tsv", "bcftools-rows.csv", "lanes.csv", "blocks.csv", "summary.csv",
       "extra-bcftools-rows.csv", "bcftools-stderr.log", "bcftools-build.log")))
   jsonlite::write_json(list(source_revision = revision, source_binding = "diagnostic_unbound",
     scope = "coding_context_support_audit_and_complementary_bcftools_observation_not_compound_so_conformance",
@@ -148,6 +167,7 @@ main <- function() {
     !any(false_support), all(rows$build_status == 0L), all(rows$cds_match & rows$protein_match),
     all(rows$block_count == rows$opened_windows), all(rows$first_failed_window == 0L),
     all(rows$invalid_window_residues == 0L),
+    summary$falsely_supported_indel_blocks == 0L,
     bcftools_status == 0L, summary$incomplete_bcftools_rows == 0L,
     summary$missing_occupied == 0L, nrow(extra) == 0L)
 }

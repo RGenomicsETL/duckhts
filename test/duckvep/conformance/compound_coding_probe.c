@@ -9,7 +9,7 @@
 void duckhts_test_compound_coding(
     char **reference, int *strand, int *starts, char **refs, char **alts,
     int *count, int *capacity, uint8_t *cds, uint8_t *protein,
-    int *statuses, int *facts, int *lengths) {
+    int *statuses, int *facts, int *lengths, int *block_facts) {
     duckvep_haplotype_edit_t *edits = NULL;
     duckvep_haplotype_block_t *blocks = NULL;
     uint8_t *ref_protein = NULL;
@@ -63,8 +63,23 @@ void duckhts_test_compound_coding(
         goto cleanup;
     }
     facts[17] = (int)block_count;
+    size_t first_stop = 0u;
+    while (first_stop < context.alt_peptide_len && protein[first_stop] != '*') first_stop++;
     for (size_t b = 0u; b < block_count; b++) {
         duckvep_coding_peptide_window_t view;
+        duckvep_sequence_delta_t local;
+        int local_status = duckvep_coding_context_block_delta_fill(&context, blocks + b, 0u, &local);
+        int block_observed[] = {local_status, local.valid, local.synonymous, local.missense,
+            local.stop_gained, local.stop_lost, local.stop_retained, local.start_lost,
+            local.start_retained, local.frameshift, local.inframe_deletion, local.inframe_insertion,
+            local.protein_altering, local.coding_unknown, local.partial_codon,
+            first_stop < blocks[b].alt_start0 / 3u,
+            (blocks[b].flags & DUCKVEP_HAPLOTYPE_FLAG_INDEL) != 0u,
+            (size_t)blocks[b].cds_start - 1u != blocks[b].alt_start0,
+            (int)blocks[b].cds_start, (int)blocks[b].ref_len,
+            (int)blocks[b].alt_start0, (int)blocks[b].alt_len,
+            (int)blocks[b].edit_begin, (int)blocks[b].edit_count};
+        memcpy(block_facts + 24u * b, block_observed, sizeof block_observed);
         if (!duckvep_coding_context_block_window_open(&context, blocks + b, &view)) {
             if (!facts[21]) facts[21] = (int)b + 1;
             continue;

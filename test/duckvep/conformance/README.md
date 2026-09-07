@@ -629,6 +629,12 @@ API and checks its residues against the complete translated context. Separate
 reference/alternate peptide offsets preserve earlier in-frame shifts; the local
 length request uses the block's change, not the complete path's. Failed windows,
 shifted-axis coverage and residue differences are retained as separate counters.
+`blocks.csv` additionally retains every block's local predicate/support result,
+physical span and earlier-stop observation. Substitution blocks reuse the
+independent coding interpreter on their actual reference/alternate coordinates;
+indel-bearing blocks stay unsupported. A later local missense predicate is not
+evidence that translation reached that block. Neither local predicates nor
+unsupported results are collapsed into a whole-haplotype consequence set.
 
 The additional `bcftools csq -p a` observation builds bcftools/HTSlib 1.23 from
 the exact `src/bcftools-1.23` tree in RBCFTools commit

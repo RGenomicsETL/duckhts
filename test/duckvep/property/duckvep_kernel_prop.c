@@ -21711,6 +21711,155 @@ TEST haplotype_block_windows_keep_both_peptide_axes(void) {
     PASS();
 }
 
+TEST haplotype_substitution_blocks_reuse_local_coding_predicates(void) {
+    static const uint8_t bases[] = "ACGT";
+    size_t cases = 0u, with_stop_before = 0u;
+    size_t synonymous = 0u, missense = 0u, gained = 0u, lost = 0u, retained = 0u;
+    /* Every distinct reference/alternate codon, with a preceding -3/0/+3 edit
+     * and both allele orientations. The independent comparator is one actual
+     * substitution of the same codon; production receives the physical SNVs,
+     * not that test-only equivalent MNV. Stops in the prefix do not erase local
+     * predicates: they are a separate path fact for the eventual SO consumer. */
+    for (unsigned r = 0u; r < 64u; r++) {
+        for (unsigned a = 0u; a < 64u; a++) {
+            if (r == a) continue;
+            uint8_t reference[] = "ATGGGGCCCAAACCCTAA";
+            uint8_t alternate[3];
+            for (unsigned i = 0u; i < 3u; i++) {
+                reference[9u + i] = bases[(r >> (4u - 2u * i)) & 3u];
+                alternate[i] = bases[(a >> (4u - 2u * i)) & 3u];
+            }
+            for (int shift = -3; shift <= 3; shift += 3) {
+                for (int strand = -1; strand <= 1; strand += 2) {
+                    uint8_t ref[4][3] = {{0}}, alt[4][3] = {{0}}, mref[3], malt[3];
+                    uint8_t cds[32], rp[12], ap[12], mcds[32], mrp[12], map[12];
+                    duckvep_haplotype_edit_t ascending[4], descending[4];
+                    size_t n = 1u;
+                    ascending[0] = (duckvep_haplotype_edit_t){4u,
+                        shift > 0 ? 0u : 3u, ref[0], shift < 0 ? 0u : 3u, alt[0], 1};
+                    for (size_t i = 0u; i < 3u; i++) {
+                        if (reference[9u + i] == alternate[i]) continue;
+                        ascending[n] = (duckvep_haplotype_edit_t){(uint32_t)(10u + i),
+                            1u, ref[n], 1u, alt[n], 1};
+                        ref[n][0] = reference[9u + i];
+                        alt[n][0] = alternate[i];
+                        n++;
+                    }
+                    memcpy(ref[0], "GGG", 3u); memcpy(alt[0], "TGA", 3u);
+                    memcpy(mref, reference + 9u, 3u); memcpy(malt, alternate, 3u);
+                    if (strand < 0) {
+                        for (size_t e = 0u; e < n; e++) {
+                            uint8_t saved_ref[3], saved_alt[3];
+                            memcpy(saved_ref, ref[e], 3u); memcpy(saved_alt, alt[e], 3u);
+                            for (size_t i = 0u; i < ascending[e].ref_len; i++)
+                                ref[e][i] = (uint8_t)kprop_complement_base(
+                                    (char)saved_ref[ascending[e].ref_len - 1u - i]);
+                            for (size_t i = 0u; i < ascending[e].alt_len; i++)
+                                alt[e][i] = (uint8_t)kprop_complement_base(
+                                    (char)saved_alt[ascending[e].alt_len - 1u - i]);
+                        }
+                        for (size_t i = 0u; i < 3u; i++) {
+                            mref[i] = (uint8_t)kprop_complement_base((char)reference[11u - i]);
+                            malt[i] = (uint8_t)kprop_complement_base((char)alternate[2u - i]);
+                        }
+                    }
+                    for (size_t i = 0u; i < n; i++) descending[i] = ascending[n - 1u - i];
+                    duckvep_edit_set_t set = {descending, n};
+                    duckvep_coding_context_t ctx, independent;
+                    ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK, duckvep_coding_context_build(
+                        reference, sizeof reference - 1u, &set, (int8_t)strand,
+                        DUCKVEP_CODON_TABLE_STANDARD, cds, sizeof cds,
+                        rp, sizeof rp, ap, sizeof ap, &ctx));
+                    duckvep_haplotype_edit_t mnv = {10u, 3u, mref, 3u, malt, 1};
+                    set = (duckvep_edit_set_t){&mnv, 1u};
+                    ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK, duckvep_coding_context_build(
+                        reference, sizeof reference - 1u, &set, (int8_t)strand,
+                        DUCKVEP_CODON_TABLE_STANDARD, mcds, sizeof mcds,
+                        mrp, sizeof mrp, map, sizeof map, &independent));
+                    duckvep_haplotype_block_t blocks[4];
+                    size_t count;
+                    ASSERT_EQ(DUCKVEP_HAPLOTYPE_OK,
+                        duckvep_haplotype_partition(ascending, n, blocks, 4u, &count));
+                    ASSERT_EQ(2u, count);
+                    ASSERT_EQ(0u, blocks[1].flags);
+                    ASSERT_EQ(n - 1u, blocks[1].edit_count);
+                    ASSERT_EQ((int64_t)blocks[1].cds_start - 1 + shift,
+                              (int64_t)blocks[1].alt_start0);
+                    duckvep_sequence_delta_t actual, expected;
+                    duckvep_coding_context_t saved = ctx;
+                    ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                        duckvep_coding_context_block_delta_fill(&ctx, blocks + 1u, 0u, &actual));
+                    ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                        duckvep_coding_context_delta_fill(&independent, 0u, &expected));
+                    ASSERT_MEM_EQ(&expected, &actual, sizeof actual);
+                    ASSERT_MEM_EQ(&saved, &ctx, sizeof ctx);
+                    ASSERT_EQ(4, actual.protein_pos);
+                    synonymous += actual.synonymous; missense += actual.missense;
+                    gained += actual.stop_gained; lost += actual.stop_lost;
+                    retained += actual.stop_retained;
+                    size_t first_stop = 0u;
+                    while (first_stop < ctx.alt_peptide_len && ap[first_stop] != '*') first_stop++;
+                    with_stop_before += first_stop < blocks[1].alt_start0 / 3u;
+                    for (unsigned bad = 0u; bad < 4u; bad++) {
+                        duckvep_haplotype_block_t invalid = blocks[1];
+                        duckvep_sequence_delta_t empty = {0};
+                        if (bad == 0u) invalid.flags |= DUCKVEP_HAPLOTYPE_FLAG_INDEL;
+                        if (bad == 1u) invalid.length_diff = 3;
+                        if (bad == 2u) invalid.alt_start0 = SIZE_MAX;
+                        if (bad == 3u) invalid.edit_count = n + 1u;
+                        memset(&actual, 0xff, sizeof actual);
+                        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_UNSUPPORTED,
+                            duckvep_coding_context_block_delta_fill(&ctx, &invalid, 0u, &actual));
+                        ASSERT_MEM_EQ(&empty, &actual, sizeof actual);
+                    }
+                    cases++;
+                }
+            }
+        }
+    }
+    ASSERT_EQ(24192u, cases);
+    ASSERT_EQ(16128u, with_stop_before);
+    ASSERT_EQ(1044u, synonymous); ASSERT_EQ(20916u, missense);
+    ASSERT_EQ(1098u, gained); ASSERT_EQ(1098u, lost); ASSERT_EQ(36u, retained);
+    duckvep_sequence_delta_t delta, empty = {0};
+    duckvep_coding_context_t ctx = {0};
+    duckvep_haplotype_block_t block = {0};
+    memset(&delta, 0xff, sizeof delta);
+    ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_INVALID_ARG,
+        duckvep_coding_context_block_delta_fill(NULL, &block, 0u, &delta));
+    ASSERT_MEM_EQ(&empty, &delta, sizeof delta);
+    memset(&delta, 0xff, sizeof delta);
+    ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_INVALID_ARG,
+        duckvep_coding_context_block_delta_fill(&ctx, NULL, 0u, &delta));
+    ASSERT_MEM_EQ(&empty, &delta, sizeof delta);
+    ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_INVALID_ARG,
+        duckvep_coding_context_block_delta_fill(&ctx, &block, 0u, NULL));
+    /* A changed prefix does not turn a later identity edit into a substitution. */
+    const uint8_t reference[] = "ATGGGGCCCAAACCCTAA";
+    const uint8_t inserted[] = "TGA";
+    uint8_t cds[24], rp[8], ap[8];
+    duckvep_haplotype_edit_t edits[2] = {
+        {10u, 3u, reference + 9u, 3u, reference + 9u, 1},
+        {4u, 0u, NULL, 3u, inserted, 1}
+    };
+    duckvep_edit_set_t set = {edits, 2u};
+    ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK, duckvep_coding_context_build(
+        reference, sizeof reference - 1u, &set, 1, DUCKVEP_CODON_TABLE_STANDARD,
+        cds, sizeof cds, rp, sizeof rp, ap, sizeof ap, &ctx));
+    duckvep_haplotype_edit_t ascending[2] = {edits[1], edits[0]};
+    duckvep_haplotype_block_t blocks[2];
+    size_t count;
+    ASSERT_EQ(DUCKVEP_HAPLOTYPE_OK,
+        duckvep_haplotype_partition(ascending, 2u, blocks, 2u, &count));
+    ASSERT_EQ(2u, count);
+    ASSERT(ctx.cds_changed);
+    memset(&delta, 0xff, sizeof delta);
+    ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_UNSUPPORTED,
+        duckvep_coding_context_block_delta_fill(&ctx, blocks + 1u, 0u, &delta));
+    ASSERT_MEM_EQ(&empty, &delta, sizeof delta);
+    PASS();
+}
+
 TEST haplotype_compound_indels_are_not_substitution_facts(void) {
     /* Unchanged Haplosaurus generator seed 173, DHT000002: genomic 211 G>GA
      * and 180 AC>A on the reverse strand. The frame returns to zero at CDS 40,
@@ -27814,6 +27963,7 @@ int main(int argc, char **argv) {
     RUN_TEST(haplotype_apply_rejects_overlapping_inputs);
     RUN_TEST(haplotype_apply_matches_rebuild_oracle_for_any_valid_edit_set);
     RUN_TEST(haplotype_block_windows_keep_both_peptide_axes);
+    RUN_TEST(haplotype_substitution_blocks_reuse_local_coding_predicates);
     RUN_TEST(haplotype_compound_indels_are_not_substitution_facts);
     RUN_TEST(haplotype_snv_set_matches_equivalent_mnv_coding_facts);
     GREATEST_MAIN_END();

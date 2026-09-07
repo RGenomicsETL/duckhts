@@ -681,9 +681,13 @@ complete materialized path: earlier closed blocks can shift the alternate by who
 codons, while the local length request uses this block's change, not the path's
 total change. Window access retains reference peptide edits and terminal partial
 codons without reapplying edits, inventing a single edit, or truncating the complete
-context at a stop. These sequence operands are not compound consequence facts;
-multi-edit indel classification remains explicitly unsupported until its predicates
-consume actual interaction state. Leaf-specific result facts must not mutate shared
+context at a stop. Substitution-only blocks feed those operands into the same
+local predicate interpreter as independent events, even when an earlier closed
+indel shifted the alternate protein. Those local predicates do not decide whether
+an earlier stop prevents expression: the complete path retains that separate fact.
+Indel-bearing blocks remain explicitly unsupported, including net-zero sets;
+local substitution facts are not a complete compound consequence or an aggregate
+of independent record labels. Leaf-specific result facts must not mutate shared
 carrier prefixes or immutable model sequence.
 Carrier-prefix identity includes per-event called/missing/unphased evidence. An uncertain
 path cannot share the result of a fully known path merely because their called edits agree.

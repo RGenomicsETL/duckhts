@@ -4273,10 +4273,10 @@ typedef enum {
  * Ordinary edits select the changed CDS codons. A wholly-CDS uploaded feature may
  * select a wider window because VEP does not minimize substitutions by default.
  * UTR/CDS-spanning features use the complete transcript-string evaluator instead. */
-static duckvep_context_delta_status_t delta_context_substitution_window(
+static duckvep_context_delta_status_t delta_context_substitution_predicates(
     const duckvep_coding_context_t *ctx,
-    size_t                          lo_codon,
-    size_t                          hi_codon,
+    const duckvep_coding_peptide_window_t *selected,
+    size_t                          selected_codons,
     uint64_t                        tx_flags,
     delta_substitution_window_t     window,
     duckvep_sequence_delta_t       *delta) {
@@ -4291,7 +4291,7 @@ static duckvep_context_delta_status_t delta_context_substitution_window(
     int overlaps_start;
     int uploaded_feature_window;
 
-    if (ctx == NULL || delta == NULL || ctx->ref_cds == NULL ||
+    if (ctx == NULL || selected == NULL || delta == NULL || ctx->ref_cds == NULL ||
         (!ctx->virtual_single_edit &&
          (ctx->alt_cds == NULL || ctx->ref_peptide == NULL ||
           ctx->alt_peptide == NULL))) {
@@ -4303,18 +4303,18 @@ static duckvep_context_delta_status_t delta_context_substitution_window(
     }
     uploaded_feature_window = window != DELTA_SUBSTITUTION_EDIT_WINDOW;
     memset(delta, 0, sizeof *delta);
-    if (ctx->ref_cds_len == 0u || ctx->ref_cds_len != ctx->alt_cds_len ||
-        ctx->ref_peptide_len != ctx->alt_peptide_len ||
-        hi_codon < lo_codon ||
-        hi_codon >= (size_t)INT32_MAX ||
-        !delta_context_codon_window_open(
-            ctx, lo_codon, lo_codon, hi_codon - lo_codon + 1u, ctx->length_diff, &view)) {
+    view = *selected;
+    if (ctx->ref_cds_len == 0u || selected_codons == 0u ||
+        view.ref_peptide_offset >= (size_t)INT32_MAX ||
+        selected_codons > (size_t)INT32_MAX - view.ref_peptide_offset ||
+        view.ref_peptide_offset > SIZE_MAX / 3u ||
+        view.alt_peptide_offset > SIZE_MAX / 3u) {
         return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
     }
-    nt_offset = view.ref_peptide_offset * 3u;
     for (alternate = 0; alternate <= 1; alternate++) {
         size_t length = alternate ? view.alt_nt_length : view.ref_nt_length;
         size_t b;
+        nt_offset = (alternate ? view.alt_peptide_offset : view.ref_peptide_offset) * 3u;
         for (b = 0u; b < length; b++) {
             size_t position = nt_offset + b;
             char base = delta_context_codon_base(ctx, alternate, position);
@@ -4339,9 +4339,10 @@ static duckvep_context_delta_status_t delta_context_substitution_window(
     delta_context_vep_local_scan(ctx, &view, 1, &alt_scan);
     peptide_equal = delta_context_vep_local_equal(ctx, &view);
     peptide_unknown = ref_scan.has_x || alt_scan.has_x;
+    nt_offset = view.ref_peptide_offset * 3u;
     delta->partial_codon = (uint8_t)(ctx->ref_cds_len - nt_offset < 3u);
 
-    overlaps_start = lo_codon == 0u &&
+    overlaps_start = view.ref_peptide_offset == 0u && view.alt_peptide_offset == 0u &&
         (tx_flags & (uint64_t)DUCKVEP_TX_CDS_START_NF) == 0u;
     /* Physical REF/ALT can differ while the VEP feature-phase edit leaves
      * the selected CDS bytes unchanged. Its uploaded peptide window still
@@ -4414,8 +4415,8 @@ static duckvep_context_delta_status_t delta_context_substitution_window(
 
     delta->cdna_pos = -1;
     delta->cds_pos = -1;
-    if (hi_codon == lo_codon) {
-        delta->protein_pos = (int32_t)(lo_codon + 1u);
+    if (selected_codons == 1u) {
+        delta->protein_pos = (int32_t)(view.ref_peptide_offset + 1u);
         delta->ref_aa = duckvep_coding_context_peptide_window_base(ctx, &view, 0, 0u);
         delta->alt_aa = duckvep_coding_context_peptide_window_base(ctx, &view, 1, 0u);
     } else {
@@ -4424,6 +4425,58 @@ static duckvep_context_delta_status_t delta_context_substitution_window(
     delta_partial_codon_finalize(delta);
     delta->valid = 1u;
     return DUCKVEP_CONTEXT_DELTA_OK;
+}
+
+/* Independent-event selectors retain their complete-CDS equal-length contract.
+ * Phased blocks instead supply local operands on their two actual peptide axes. */
+static duckvep_context_delta_status_t delta_context_substitution_window(
+    const duckvep_coding_context_t *ctx,
+    size_t                          lo_codon,
+    size_t                          hi_codon,
+    uint64_t                        tx_flags,
+    delta_substitution_window_t     window,
+    duckvep_sequence_delta_t       *delta) {
+
+    duckvep_coding_peptide_window_t view;
+    if (delta == NULL) return DUCKVEP_CONTEXT_DELTA_INVALID_ARG;
+    memset(delta, 0, sizeof *delta);
+    if (ctx == NULL) return DUCKVEP_CONTEXT_DELTA_INVALID_ARG;
+    if (ctx->ref_cds_len != ctx->alt_cds_len ||
+        ctx->ref_peptide_len != ctx->alt_peptide_len ||
+        hi_codon < lo_codon || hi_codon >= (size_t)INT32_MAX ||
+        !delta_context_codon_window_open(ctx, lo_codon, lo_codon,
+            hi_codon - lo_codon + 1u, ctx->length_diff, &view)) {
+        return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
+    }
+    return delta_context_substitution_predicates(
+        ctx, &view, hi_codon - lo_codon + 1u, tx_flags, window, delta);
+}
+
+duckvep_context_delta_status_t duckvep_coding_context_block_delta_fill(
+    const duckvep_coding_context_t  *ctx,
+    const duckvep_haplotype_block_t *block,
+    uint64_t                         tx_flags,
+    duckvep_sequence_delta_t        *delta) {
+
+    duckvep_coding_peptide_window_t view;
+    duckvep_sequence_delta_t facts;
+    if (delta == NULL) return DUCKVEP_CONTEXT_DELTA_INVALID_ARG;
+    memset(delta, 0, sizeof *delta);
+    if (ctx == NULL || block == NULL) return DUCKVEP_CONTEXT_DELTA_INVALID_ARG;
+    if (block->length_diff != 0 || block->ref_len == 0u ||
+        (block->flags & DUCKVEP_HAPLOTYPE_FLAG_INDEL) != 0u ||
+        !duckvep_coding_context_block_window_open(ctx, block, &view)) {
+        return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
+    }
+    size_t start0 = (size_t)block->cds_start - 1u;
+    if (delta_context_cds_ranges_equal(ctx, start0, block->alt_start0, block->ref_len)) {
+        return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
+    }
+    size_t codons = (start0 + block->ref_len - 1u) / 3u - start0 / 3u + 1u;
+    duckvep_context_delta_status_t status = delta_context_substitution_predicates(
+        ctx, &view, codons, tx_flags, DELTA_SUBSTITUTION_EDIT_WINDOW, &facts);
+    if (status == DUCKVEP_CONTEXT_DELTA_OK) *delta = facts;
+    return status;
 }
 
 DUCKVEP_INTERNAL_API duckvep_context_delta_status_t duckvep_coding_context_delta_fill(

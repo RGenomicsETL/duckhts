@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- share local substitution predicate evaluation in the bundled coding kernel
+  without changing independent annotation or HGVS output. Phased SQL output
+  remains sequence/provenance data, not complete compound consequences
+
 - use explicit reference and alternate peptide coordinates in the bundled
   coding/HGVS kernel, preserving independent-event HGVS output while sharing
   window access with phased native analysis. No SQL signature or wrapper changes

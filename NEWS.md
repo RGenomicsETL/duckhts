@@ -1,6 +1,13 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- share the existing coding-substitution predicates with actual phased
+  interaction blocks, including alternate protein coordinates shifted by
+  earlier closed indels. Local predicates do not erase an earlier stop or
+  classify indel-bearing blocks as substitutions. The complete-lane diagnostic
+  now retains per-block facts, support status and earlier-stop observations;
+  this is not yet complete phased SO/HGVS annotation
+
 - replace the single peptide-window offset with explicit reference and alternate
   coordinates shared by coding and HGVS kernels. Phased interaction blocks open
   their actual sequence windows without inventing a single edit or reapplying

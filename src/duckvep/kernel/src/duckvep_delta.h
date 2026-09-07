@@ -645,6 +645,20 @@ DUCKVEP_INTERNAL_API duckvep_context_delta_status_t duckvep_coding_context_delta
     uint64_t                        tx_flags,
     duckvep_sequence_delta_t       *delta);
 
+/* Local coding predicates for an actual partitioned substitution block, using
+ * the same interpreter as independent events. Earlier closed indels may shift
+ * ALT by whole codons. The block must belong to this complete materialized
+ * context; no context field or shared prefix is changed. Indel-bearing blocks
+ * remain unsupported, even when their net length change is zero. Failure leaves
+ * the entire delta zeroed. These are local predicates, not a complete haplotype
+ * consequence: the caller must separately retain any earlier translated stop,
+ * contributor topology and unsupported blocks. */
+DUCKVEP_INTERNAL_API duckvep_context_delta_status_t duckvep_coding_context_block_delta_fill(
+    const duckvep_coding_context_t  *ctx,
+    const duckvep_haplotype_block_t *block,
+    uint64_t                         tx_flags,
+    duckvep_sequence_delta_t        *delta);
+
 /* Pure-C reference dispatcher for one (variant, transcript) CDS-bucket candidate. The
  * property suite calls this directly; production annotation calls
  * duckvep_sequence_delta_fill_for_annotation instead. Passing scratch exercises the shared
