@@ -425,15 +425,23 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
         if (offset > seq->cds_bytes_len || length > seq->cds_bytes_len - offset)
             return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INTERNAL_ERROR);
         sort_edits_descending(b->edits, leaf.edit_count);
-        duckvep_haplotype_result_t applied, translated;
+        duckvep_haplotype_result_t applied;
         leaf.sequence_status = duckvep_haplotype_apply_cds_edits(seq->cds_bytes + (size_t)offset,
             length, b->edits, leaf.edit_count, s->carriers.model->strand[tx], b->cds, b->cds_capacity,
             &leaf.cds_length, &applied);
         if (leaf.sequence_status == DUCKVEP_HAPLOTYPE_OK) {
             duckvep_codon_table_t table = seq->codon_table
                 ? (duckvep_codon_table_t)seq->codon_table[tx] : DUCKVEP_CODON_TABLE_STANDARD;
-            leaf.sequence_status = duckvep_haplotype_translate_cds(b->cds, leaf.cds_length,
-                table, b->protein, b->protein_capacity, &leaf.protein_length, &translated);
+            duckvep_translation_status_t translation = duckvep_translate_cds(b->cds,
+                leaf.cds_length, table, b->protein, b->protein_capacity, &leaf.translation);
+            switch (translation) {
+            case DUCKVEP_TRANSLATION_OK: break;
+            case DUCKVEP_TRANSLATION_BUFFER_TOO_SMALL:
+                return fail(s, DUCKVEP_HAPLOTYPE_STREAM_SEQUENCE_FULL);
+            case DUCKVEP_TRANSLATION_INVALID_BASE:
+                leaf.sequence_status = DUCKVEP_HAPLOTYPE_INVALID_BASE; break;
+            default: leaf.sequence_status = DUCKVEP_HAPLOTYPE_INVALID_ARG; break;
+            }
             if (leaf.sequence_status == DUCKVEP_HAPLOTYPE_OK) {
                 /* Replay consumes descending coordinates; interaction discovery
                  * consumes ascending coordinates. Reverse descriptors, not bases,
@@ -459,7 +467,11 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
                 leaf.reference_cds = seq->cds_bytes + (size_t)offset;
                 leaf.cds = b->cds;
                 leaf.protein = b->protein;
-                leaf.flags = applied.flags | translated.flags;
+                leaf.protein_length = leaf.translation.first_stop_position1
+                    ? leaf.translation.first_stop_position1 : leaf.translation.length;
+                leaf.flags = applied.flags;
+                if (leaf.protein_length < leaf.translation.length)
+                    leaf.flags |= DUCKVEP_HAPLOTYPE_FLAG_STOP_TRUNCATED;
                 if (leaf.cds_length > UINT64_MAX - s->translated_bases)
                     return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INTERNAL_ERROR);
                 s->translated_bases += leaf.cds_length;

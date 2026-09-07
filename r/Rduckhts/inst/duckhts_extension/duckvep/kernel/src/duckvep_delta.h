@@ -106,9 +106,9 @@ DUCKVEP_INTERNAL_API int duckvep_transcript_has_partial_terminal_codon(
  * (predictor.rs:248-253), so comparisons must account for that +1 convention.
  *
  * Apply/translate split: mutate via duckvep_haplotype_apply_cds_edits, then translate.
- * duckvep_haplotype_translate_cds truncates after the first stop for haplotype protein
- * output. VEP coding predicates instead use the full codon-window translation in
- * duckvep_coding_context_build (predictor.rs build_coding_context:1138). */
+ * duckvep_translate_cds retains all residues and records the first stop. Haplotype
+ * output selects that prefix; VEP coding predicates consume the full codon-window
+ * translation in duckvep_coding_context_build (predictor.rs build_coding_context:1138). */
 typedef struct duckvep_edit_set {
     const duckvep_haplotype_edit_t *edits; /* borrowed; variant_strand orientation     */
     size_t                          count; /* N edits; shared by one allele or haplotype */

@@ -50,7 +50,6 @@ typedef struct duckvep_haplotype_edit {
 
 typedef struct duckvep_haplotype_result {
     size_t  cds_len;
-    size_t  protein_len;
     int64_t length_diff;
     uint32_t flags;
     size_t  applied_edits;
@@ -112,19 +111,6 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
     size_t                           *cds_len_out,
     duckvep_haplotype_result_t       *result);
 
-/* Translate a mutated CDS once and truncate after the first stop, matching the
- * Haplosaurus container's post-translation behavior that keeps the first '*'
- * and drops later amino acids. `protein_out` is NUL-terminated on success.
- * `result` is overwritten with translation-side lengths/flags; callers that
- * need apply+translate aggregate flags should OR the two result flag fields. */
-duckvep_haplotype_status_t duckvep_haplotype_translate_cds(
-    const uint8_t                    *cds,
-    size_t                            cds_len,
-    duckvep_codon_table_t             table,
-    uint8_t                          *protein_out,
-    size_t                            protein_cap,
-    size_t                           *protein_len_out,
-    duckvep_haplotype_result_t       *result);
 
 #ifdef __cplusplus
 }

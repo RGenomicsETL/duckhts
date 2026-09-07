@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- use one native CDS translator for independent coding contexts and phased
+  replay, deleting the separate stop-truncating implementation. Full translated
+  residues and the first-stop position share one pass; phased SQL output still
+  returns the protein prefix through its first stop and preserves later contributors
+
 - materialize typed GT/phase list elements before native phase preparation.
   A whole-list cast of `[NULL,NULL]` could leave a constant child vector and
   misread later missing slots as known alleles or phase, exposed by Windows CI.

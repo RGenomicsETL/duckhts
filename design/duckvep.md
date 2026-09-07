@@ -660,6 +660,12 @@ behind a longer-lived transcript; capacity failures latch instead of dropping pa
 Projected equal-length edits use the same differing-island decomposition as independent
 annotation: unchanged internal MNV bases do not mask or conflict with another carried edit.
 Source-record count and physical-edit count remain separate, with raw alleles preserved.
+One shared CDS translator serves independent coding contexts and phased replay. It
+retains every complete codon's residue and the first-stop position in one pass;
+the public haplotype protein is a length-delimited prefix through that stop. Later
+residues stay in worker storage for coding-context consumption, and later source
+events remain in contributor provenance. Full and stop-truncated translation do
+not have separate biological implementations.
 Carrier-prefix identity includes per-event called/missing/unphased evidence. An uncertain
 path cannot share the result of a fully known path merely because their called edits agree.
 The native stream accepts complete decoded calls for a candidate transcript and uses the

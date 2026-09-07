@@ -105,7 +105,8 @@ typedef struct {
     const duckvep_haplotype_block_t *blocks; /* Ascending reference CDS order. */
     size_t block_count;
     const uint8_t *reference_cds; /* Model-owned; block spans borrow this and cds. */
-    const uint8_t *cds, *protein;
+    const uint8_t *cds, *protein; /* Length-delimited views; protein excludes residues after first stop. */
+    duckvep_translation_t translation; /* Full translation remains in protein storage for coding facts. */
     size_t cds_length, protein_length;
     uint32_t flags;
     uint8_t evidence_flags; /* OR of contributor evidence, distinct from sequence flags. */

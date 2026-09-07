@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- bundle the shared CDS translator used by independent annotation and phased
+  replay. `rduckhts_haplotypes()` retains the same first-stop protein output,
+  with downstream contributing events and coding blocks preserved
+
 - preserve every missing GT/phase slot when DBI supplies an all-NULL list to
   `duckvep_phase_call()`. Element-wise typing avoids a constant-child-vector
   misread observed in Windows package tests; NULL flags never supply phase

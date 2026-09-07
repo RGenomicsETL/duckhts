@@ -40,6 +40,30 @@ int duckvep_codon_table_supported(duckvep_codon_table_t table);
  * the bulk-translation path after bases and table id have been validated. */
 const char *duckvep_codon_table_amino_acids(duckvep_codon_table_t table);
 
+typedef enum duckvep_translation_status {
+    DUCKVEP_TRANSLATION_OK = 0,
+    DUCKVEP_TRANSLATION_INVALID_ARG,
+    DUCKVEP_TRANSLATION_BUFFER_TOO_SMALL,
+    DUCKVEP_TRANSLATION_INVALID_BASE
+} duckvep_translation_status_t;
+
+typedef struct duckvep_translation {
+    size_t length; /* Every complete codon, including residues after internal stops. */
+    size_t first_stop_position1; /* Zero means no stop; otherwise also the visible protein length. */
+    uint8_t unambiguous; /* All CDS bases, including a trailing partial codon, are A/C/G/T/U. */
+} duckvep_translation_t;
+
+/* Translate once into distinct caller storage of at least cds_length/3 + 1
+ * bytes. Full peptide output is NUL-terminated; callers select the prefix
+ * through first_stop_position1 when they need the stop-truncated protein.
+ * A/C/G/T/U and N are case-insensitive; N-containing codons produce X. Validate
+ * every input base, including partial codons and sequence beyond the first stop.
+ * No allocation. Result is zero on failure; bytes may be partial on invalid
+ * input. Result storage must not overlap either byte span. */
+duckvep_translation_status_t duckvep_translate_cds(
+    const uint8_t *cds, size_t cds_length, duckvep_codon_table_t table,
+    uint8_t *peptide, size_t peptide_capacity, duckvep_translation_t *result);
+
 /* Return the first raw-CDS stop as a one-based peptide position, or zero when
  * no complete codon is a stop. N-containing codons translate to X. The return
  * value is false only for an invalid base, unsupported table, or NULL output. */

@@ -235,7 +235,24 @@ FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap_noncoding') GROUP BY proj
 ----
 outside_cds	3	3	4
 
-# Recursive query preparation must error, not deadlock the database connection.
+# A premature stop truncates displayed protein, not downstream event provenance.
+query I
+SELECT loaded FROM duckvep_model_load('hap_stops','SELECT 0::UINTEGER seq_region',
+ 'SELECT * REPLACE(''ATGAAATAACCC''::BLOB AS cds_sequence) FROM hap_tx',
+ 'SELECT * FROM hap_exons');
+----
+1
+
+query TTIIT
+SELECT cds,protein,sequence_flags,len(coding_blocks),
+ list_transform(contributors,c -> c.event_index)::VARCHAR
+FROM duckvep_haplotypes('SELECT event_index,0 seq_region,position,reference,alternate,
+ 1 alt_index,0 transcript_index,0 sample_index,[1] alleles,[true] phase_before,
+ NULL::BIGINT phase_set FROM (VALUES (1,103,''A'',''G''),(2,109,''C'',''A''))
+ v(event_index,position,reference,alternate)','hap_stops');
+----
+ATGGAATAAACC	ME*	8	2	[1, 2]
+
 query I
 SELECT bool_and(coding_blocks IS NULL)
 FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap_noncoding');

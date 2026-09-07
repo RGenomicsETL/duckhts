@@ -9,13 +9,24 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Keep the R bridge's existing failure categories during the native API change. */
+static duckvep_haplotype_status_t translation_status(duckvep_translation_status_t status) {
+    switch (status) {
+    case DUCKVEP_TRANSLATION_OK: return DUCKVEP_HAPLOTYPE_OK;
+    case DUCKVEP_TRANSLATION_BUFFER_TOO_SMALL: return DUCKVEP_HAPLOTYPE_BUFFER_TOO_SMALL;
+    case DUCKVEP_TRANSLATION_INVALID_BASE: return DUCKVEP_HAPLOTYPE_INVALID_BASE;
+    default: return DUCKVEP_HAPLOTYPE_INVALID_ARG;
+    }
+}
+
 void duckhts_test_haplotype(
     uint8_t *reference, int *reference_length, int *strand,
     int *starts, char **refs, char **alts, int *edit_count,
     uint8_t *cds, int *cds_capacity, uint8_t *protein, int *protein_capacity,
     int *status, int *cds_length, int *protein_length, int *flags) {
     duckvep_haplotype_edit_t *edits = NULL;
-    duckvep_haplotype_result_t applied, translated;
+    duckvep_haplotype_result_t applied;
+    duckvep_translation_t translated;
     size_t cds_len = 0, protein_len = 0;
     *status = DUCKVEP_HAPLOTYPE_INVALID_ARG;
     *cds_length = *protein_length = *flags = 0;
@@ -40,17 +51,20 @@ void duckhts_test_haplotype(
         edits, (size_t)*edit_count, (int8_t)*strand, cds, (size_t)*cds_capacity,
         &cds_len, &applied);
     if (*status != DUCKVEP_HAPLOTYPE_OK) goto cleanup;
-    *status = duckvep_haplotype_translate_cds(cds, cds_len,
-        DUCKVEP_CODON_TABLE_STANDARD, protein, (size_t)*protein_capacity,
-        &protein_len, &translated);
+    duckvep_translation_status_t tst = duckvep_translate_cds(cds, cds_len,
+        DUCKVEP_CODON_TABLE_STANDARD, protein, (size_t)*protein_capacity, &translated);
+    *status = translation_status(tst);
     if (*status != DUCKVEP_HAPLOTYPE_OK) goto cleanup;
+    protein_len = translated.first_stop_position1 ? translated.first_stop_position1 : translated.length;
+    protein[protein_len] = 0u;
     if (cds_len > INT_MAX || protein_len > INT_MAX) {
         *status = DUCKVEP_HAPLOTYPE_OUT_OF_RANGE;
         goto cleanup;
     }
     *cds_length = (int)cds_len;
     *protein_length = (int)protein_len;
-    *flags = (int)(applied.flags | translated.flags);
+    *flags = (int)applied.flags;
+    if (protein_len < translated.length) *flags |= DUCKVEP_HAPLOTYPE_FLAG_STOP_TRUNCATED;
 cleanup:
     free(edits);
 }
@@ -193,18 +207,22 @@ void duckhts_test_carrier_haplotypes(
      * materializes them from one shared reference translation for comparison
      * with Haplosaurus, which reports all six lanes. */
     size_t cds_len, protein_len;
-    duckvep_haplotype_result_t applied, translated;
+    duckvep_haplotype_result_t applied;
+    duckvep_translation_t translated;
     *status = duckvep_haplotype_apply_cds_edits(reference, (size_t)*reference_length,
         NULL, 0u, (int8_t)*strand, cds_scratch, (size_t)*capacity, &cds_len, &applied);
     if (*status != DUCKVEP_HAPLOTYPE_OK) goto cleanup;
-    *status = duckvep_haplotype_translate_cds(cds_scratch, cds_len, DUCKVEP_CODON_TABLE_STANDARD,
-        protein_scratch, (size_t)*capacity, &protein_len, &translated);
+    duckvep_translation_status_t tst = duckvep_translate_cds(cds_scratch, cds_len,
+        DUCKVEP_CODON_TABLE_STANDARD, protein_scratch, (size_t)*capacity, &translated);
+    *status = translation_status(tst);
     if (*status != DUCKVEP_HAPLOTYPE_OK) goto cleanup;
+    protein_len = translated.first_stop_position1 ? translated.first_stop_position1 : translated.length;
     for (size_t slot = 0u; slot < 6u; slot++) {
         memcpy(cds + slot * (size_t)*capacity, cds_scratch, cds_len);
         memcpy(protein + slot * (size_t)*capacity, protein_scratch, protein_len);
         cds_lengths[slot] = (int)cds_len; protein_lengths[slot] = (int)protein_len;
-        flags[slot] = (int)(applied.flags | translated.flags);
+        flags[slot] = (int)applied.flags;
+        if (protein_len < translated.length) flags[slot] |= DUCKVEP_HAPLOTYPE_FLAG_STOP_TRUNCATED;
         contributor_counts[slot] = 0;
     }
     stream_status = duckvep_haplotype_stream_finish(&stream);

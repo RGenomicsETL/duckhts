@@ -66,6 +66,19 @@ local({
   expect_equal(blocks$sequence_flags, c(5, 0))
   expect_equal(blocks$edit_count, c(2, 1))
   expect_equal(nrow(restored$contributors[[1]]), 3L)
+  stop_tx <- paste("SELECT * REPLACE('ATGAAATAACCC'::BLOB AS cds_sequence) FROM (", tx, ")")
+  expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('stops',",
+    dbQuoteString(con, "SELECT 0::UINTEGER seq_region"), ",",
+    dbQuoteString(con, stop_tx), ",", dbQuoteString(con, exons), ")"))$loaded)
+  stop_calls <- paste("SELECT event_index,0 seq_region,position,reference,alternate,1 alt_index,",
+    "0 transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set",
+    "FROM (VALUES (1,103,'A','G'),(2,109,'C','A')) v(event_index,position,reference,alternate)")
+  stopped <- rduckhts_haplotypes(con, stop_calls, "stops")
+  expect_equal(stopped$cds, "ATGGAATAAACC")
+  expect_equal(stopped$protein, "ME*")
+  expect_equal(stopped$sequence_flags, 8)
+  expect_equal(nrow(stopped$coding_blocks[[1]]), 2L)
+  expect_equal(stopped$contributors[[1]]$event_index, 1:2)
   expect_error(rduckhts_haplotypes(con, calls, "haps", max_ploidy = 1), pattern = "max_ploidy")
   expect_error(rduckhts_haplotypes(con, calls, "haps", workspace_limit = 1), pattern = "workspace")
   expect_error(rduckhts_haplotypes(con, calls, "missing"), pattern = "loaded model")

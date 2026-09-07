@@ -10,6 +10,7 @@
 #include "duckvep_dna.h"
 
 #include <stddef.h>
+#include <string.h>
 
 static const char *const AA_TABLES[32] = {
     [1]  = "FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG",
@@ -37,6 +38,43 @@ static const char *const AA_TABLES[32] = {
     [30] = "FFLLSSSSYYEECC*WLLLAPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG",
     [31] = "FFLLSSSSYYEECCWWLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG"
 };
+
+duckvep_translation_status_t duckvep_translate_cds(
+    const uint8_t *cds, size_t cds_length, duckvep_codon_table_t table,
+    uint8_t *peptide, size_t peptide_capacity, duckvep_translation_t *result) {
+    if (!result) return DUCKVEP_TRANSLATION_INVALID_ARG;
+    memset(result, 0, sizeof(*result));
+    const char *amino_acids = duckvep_codon_table_amino_acids(table);
+    if (!cds || !peptide || !amino_acids) return DUCKVEP_TRANSLATION_INVALID_ARG;
+    size_t codons = cds_length / 3u;
+    if (peptide_capacity < codons + 1u) return DUCKVEP_TRANSLATION_BUFFER_TOO_SMALL;
+    uintptr_t src = (uintptr_t)cds, dst = (uintptr_t)peptide;
+    if (cds_length && (src <= dst ? dst - src < cds_length : src - dst < peptide_capacity))
+        return DUCKVEP_TRANSLATION_INVALID_ARG;
+    duckvep_translation_t translated = {codons, 0u, 1u};
+    static const uint8_t normalized_code[8] = {0u, 2u, 0u, 1u, 0u, 0u, 0u, 3u};
+    for (size_t i = 0u; i < codons; i++) {
+        uint8_t code = 0u, has_n = 0u;
+        for (size_t j = 0u; j < 3u; j++) {
+            char base = duckvep_dna_normalize((char)cds[i * 3u + j], 1);
+            if (!base) return DUCKVEP_TRANSLATION_INVALID_BASE;
+            if (base == 'N') has_n = 1u;
+            code = (uint8_t)((code << 2u) | normalized_code[(unsigned char)base & 7u]);
+        }
+        if (has_n) translated.unambiguous = 0u;
+        uint8_t aa = has_n ? (uint8_t)'X' : (uint8_t)amino_acids[code];
+        peptide[i] = aa;
+        if (aa == '*' && !translated.first_stop_position1) translated.first_stop_position1 = i + 1u;
+    }
+    for (size_t i = codons * 3u; i < cds_length; i++) {
+        char base = duckvep_dna_normalize((char)cds[i], 1);
+        if (!base) return DUCKVEP_TRANSLATION_INVALID_BASE;
+        if (base == 'N') translated.unambiguous = 0u;
+    }
+    peptide[codons] = 0u;
+    *result = translated;
+    return DUCKVEP_TRANSLATION_OK;
+}
 
 static int base2bit(char c) {
     return duckvep_dna_codon_code(c);

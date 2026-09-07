@@ -1810,66 +1810,14 @@ static duckvep_coding_context_status_t delta_context_status_from_haplo(
     }
 }
 
-static duckvep_coding_context_status_t delta_translate_cds_full(
-    const uint8_t        *cds,
-    size_t                cds_len,
-    duckvep_codon_table_t table,
-    uint8_t              *pep,
-    size_t                pep_cap,
-    size_t               *pep_len_out,
-    uint8_t              *unambiguous_out,
-    duckvep_coding_context_status_t cap_status) {
-
-    size_t codons;
-    size_t i;
-    const char *amino_acids;
-    static const uint8_t normalized_code[8] = {
-        0u, 2u, 0u, 1u, 0u, 0u, 0u, 3u
-    };
-
-    if (pep_len_out != NULL) *pep_len_out = 0u;
-    if (unambiguous_out != NULL) *unambiguous_out = 1u;
-    if (cds == NULL || pep == NULL || pep_len_out == NULL) {
-        return DUCKVEP_CODING_CONTEXT_INVALID_ARG;
+static duckvep_coding_context_status_t delta_context_from_translation(
+    duckvep_translation_status_t status, duckvep_coding_context_status_t capacity_status) {
+    switch (status) {
+    case DUCKVEP_TRANSLATION_OK: return DUCKVEP_CODING_CONTEXT_OK;
+    case DUCKVEP_TRANSLATION_BUFFER_TOO_SMALL: return capacity_status;
+    case DUCKVEP_TRANSLATION_INVALID_BASE: return DUCKVEP_CODING_CONTEXT_INVALID_BASE;
+    default: return DUCKVEP_CODING_CONTEXT_INVALID_ARG;
     }
-    codons = cds_len / 3u;
-    if (pep_cap < codons + 1u) return cap_status;
-    amino_acids = duckvep_codon_table_amino_acids(table);
-    if (amino_acids == NULL) return DUCKVEP_CODING_CONTEXT_INVALID_ARG;
-    for (i = 0u; i < codons; i++) {
-        char codon[4];
-        uint32_t j;
-        int has_n = 0;
-        for (j = 0u; j < 3u; j++) {
-            char b = delta_norm_base((char)cds[i * 3u + (size_t)j]);
-            if (b == '\0') return DUCKVEP_CODING_CONTEXT_INVALID_BASE;
-            if (b == 'N') {
-                has_n = 1;
-                if (unambiguous_out != NULL) *unambiguous_out = 0u;
-            }
-            codon[j] = b;
-        }
-        codon[3] = '\0';
-        if (has_n) {
-            pep[i] = (uint8_t)'X';
-        } else {
-            uint8_t code = (uint8_t)(
-                (normalized_code[(unsigned char)codon[0] & 7u] << 4u) |
-                (normalized_code[(unsigned char)codon[1] & 7u] << 2u) |
-                 normalized_code[(unsigned char)codon[2] & 7u]);
-            pep[i] = (uint8_t)amino_acids[code];
-        }
-    }
-    if (unambiguous_out != NULL) {
-        for (i = codons * 3u; i < cds_len; i++) {
-            char b = delta_norm_base((char)cds[i]);
-            if (b == '\0') return DUCKVEP_CODING_CONTEXT_INVALID_BASE;
-            if (b == 'N') *unambiguous_out = 0u;
-        }
-    }
-    pep[codons] = (uint8_t)'\0';
-    *pep_len_out = codons;
-    return DUCKVEP_CODING_CONTEXT_OK;
 }
 
 static duckvep_coding_context_status_t delta_cds_changed(
@@ -1984,15 +1932,17 @@ DUCKVEP_INTERNAL_API duckvep_coding_context_status_t duckvep_coding_context_buil
                                             &alt_cds_len, &apply_result);
     if (hst != DUCKVEP_HAPLOTYPE_OK) return delta_context_status_from_haplo(hst);
 
-    cst = delta_translate_cds_full(ref_cds, ref_cds_len, table, ref_peptide_scratch,
-                                   ref_peptide_cap, &ref_pep_len, NULL,
-                                   DUCKVEP_CODING_CONTEXT_REF_PEPTIDE_BUFFER_TOO_SMALL);
+    duckvep_translation_t translated;
+    cst = delta_context_from_translation(duckvep_translate_cds(ref_cds, ref_cds_len,
+        table, ref_peptide_scratch, ref_peptide_cap, &translated),
+        DUCKVEP_CODING_CONTEXT_REF_PEPTIDE_BUFFER_TOO_SMALL);
     if (cst != DUCKVEP_CODING_CONTEXT_OK) return cst;
-    cst = delta_translate_cds_full(alt_cds_scratch, alt_cds_len, table,
-                                   alt_peptide_scratch, alt_peptide_cap,
-                                   &alt_pep_len, NULL,
-                                   DUCKVEP_CODING_CONTEXT_ALT_PEPTIDE_BUFFER_TOO_SMALL);
+    ref_pep_len = translated.length;
+    cst = delta_context_from_translation(duckvep_translate_cds(alt_cds_scratch, alt_cds_len,
+        table, alt_peptide_scratch, alt_peptide_cap, &translated),
+        DUCKVEP_CODING_CONTEXT_ALT_PEPTIDE_BUFFER_TOO_SMALL);
     if (cst != DUCKVEP_CODING_CONTEXT_OK) return cst;
+    alt_pep_len = translated.length;
     cst = delta_cds_changed(ref_cds, ref_cds_len, alt_cds_scratch, alt_cds_len,
                             &cds_changed);
     if (cst != DUCKVEP_CODING_CONTEXT_OK) return cst;
@@ -2227,18 +2177,18 @@ static duckvep_coding_context_status_t delta_coding_context_open_validated_edit(
         if (base == 'N') tmp.local_alt_unambiguous = 0u;
         local_alt_cds[cursor - nt_offset] = (uint8_t)base;
     }
-    cst = delta_translate_cds_full(
-        ref_cds + nt_offset, ref_nt_length, table,
-        local_ref_peptide, local_ref_peptide_cap,
-        &ref_local_peptide_len, &tmp.local_ref_unambiguous,
-        DUCKVEP_CODING_CONTEXT_REF_PEPTIDE_BUFFER_TOO_SMALL);
+    duckvep_translation_t translated;
+    cst = delta_context_from_translation(duckvep_translate_cds(
+        ref_cds + nt_offset, ref_nt_length, table, local_ref_peptide, local_ref_peptide_cap,
+        &translated), DUCKVEP_CODING_CONTEXT_REF_PEPTIDE_BUFFER_TOO_SMALL);
     if (cst != DUCKVEP_CODING_CONTEXT_OK) return cst;
-    cst = delta_translate_cds_full(
-        local_alt_cds, alt_nt_length, table,
-        local_alt_peptide, local_alt_peptide_cap,
-        &alt_local_peptide_len, NULL,
-        DUCKVEP_CODING_CONTEXT_ALT_PEPTIDE_BUFFER_TOO_SMALL);
+    ref_local_peptide_len = translated.length;
+    tmp.local_ref_unambiguous = translated.unambiguous;
+    cst = delta_context_from_translation(duckvep_translate_cds(
+        local_alt_cds, alt_nt_length, table, local_alt_peptide, local_alt_peptide_cap,
+        &translated), DUCKVEP_CODING_CONTEXT_ALT_PEPTIDE_BUFFER_TOO_SMALL);
     if (cst != DUCKVEP_CODING_CONTEXT_OK) return cst;
+    alt_local_peptide_len = translated.length;
     tmp.local_alt_cds = local_alt_cds;
     tmp.local_ref_peptide = local_ref_peptide;
     tmp.local_alt_peptide = local_alt_peptide;

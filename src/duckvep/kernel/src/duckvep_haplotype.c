@@ -35,11 +35,9 @@ static void haplo_result_init(duckvep_haplotype_result_t *result) {
 
 static duckvep_haplotype_status_t haplo_fail(duckvep_haplotype_result_t *result,
                                              size_t *cds_len_out,
-                                             size_t *protein_len_out,
                                              duckvep_haplotype_status_t status) {
     haplo_result_init(result);
     if (cds_len_out != NULL) *cds_len_out = 0u;
-    if (protein_len_out != NULL) *protein_len_out = 0u;
     return status;
 }
 
@@ -266,47 +264,47 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
             (e->alt_len > 0u && e->alt == NULL) ||
             haplo_overlaps_output(e->ref, e->ref_len, cds_out, cds_cap) ||
             haplo_overlaps_output(e->alt, e->alt_len, cds_out, cds_cap)) {
-            return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_INVALID_ARG);
+            return haplo_fail(result, cds_len_out, DUCKVEP_HAPLOTYPE_INVALID_ARG);
         }
 
         if (e->ref_len != 0u &&
             e->ref_len - 1u > UINT32_MAX - e->cds_start) {
-            return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_OUT_OF_RANGE);
+            return haplo_fail(result, cds_len_out, DUCKVEP_HAPLOTYPE_OUT_OF_RANGE);
         }
         effective_end = e->ref_len == 0u ? e->cds_start :
             e->cds_start + e->ref_len - 1u;
         /* The same occupied-site test as the ascending partitioner: an
          * insertion has no REF bases but still owns its interbase site. */
         if (i > 0u && effective_end >= prev_start) {
-            return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_EDIT_ORDER);
+            return haplo_fail(result, cds_len_out, DUCKVEP_HAPLOTYPE_EDIT_ORDER);
         }
         prev_start = e->cds_start;
 
         start0 = (size_t)e->cds_start - 1u;
         if (start0 > ref_cds_len ||
             (size_t)e->ref_len > ref_cds_len - start0) {
-            return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_OUT_OF_RANGE);
+            return haplo_fail(result, cds_len_out, DUCKVEP_HAPLOTYPE_OUT_OF_RANGE);
         }
 
         reverse = (e->variant_strand != transcript_strand);
         for (j = 0u; j < e->ref_len; j++) {
             char expected = haplo_oriented_base(e->ref, e->ref_len, j, reverse);
             char observed = haplo_norm_cds_base(ref_cds[start0 + (size_t)j]);
-            if (expected == '\0') return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_INVALID_BASE);
-            if (observed == '\0') return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_INVALID_BASE);
+            if (expected == '\0') return haplo_fail(result, cds_len_out, DUCKVEP_HAPLOTYPE_INVALID_BASE);
+            if (observed == '\0') return haplo_fail(result, cds_len_out, DUCKVEP_HAPLOTYPE_INVALID_BASE);
             if (observed == 'N' || observed != expected) {
-                return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_REF_MISMATCH);
+                return haplo_fail(result, cds_len_out, DUCKVEP_HAPLOTYPE_REF_MISMATCH);
             }
         }
         for (j = 0u; j < e->alt_len; j++) {
             if (haplo_oriented_base(e->alt, e->alt_len, j, reverse) == '\0') {
-                return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_INVALID_BASE);
+                return haplo_fail(result, cds_len_out, DUCKVEP_HAPLOTYPE_INVALID_BASE);
             }
         }
 
         d = (int64_t)e->alt_len - (int64_t)e->ref_len;
         if (!haplo_add_i64(total_diff, d, &total_diff)) {
-            return haplo_fail(result, cds_len_out, NULL,
+            return haplo_fail(result, cds_len_out,
                               DUCKVEP_HAPLOTYPE_OUT_OF_RANGE);
         }
         if (d != 0) flags |= DUCKVEP_HAPLOTYPE_FLAG_INDEL;
@@ -316,11 +314,11 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
 
     if (!haplo_shift_coordinate(ref_cds_len, total_diff, &measured_len) ||
         measured_len > SIZE_MAX) {
-        return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_OUT_OF_RANGE);
+        return haplo_fail(result, cds_len_out, DUCKVEP_HAPLOTYPE_OUT_OF_RANGE);
     }
     final_len = (size_t)measured_len;
     if (final_len > cds_cap) {
-        return haplo_fail(result, cds_len_out, NULL,
+        return haplo_fail(result, cds_len_out,
                           DUCKVEP_HAPLOTYPE_BUFFER_TOO_SMALL);
     }
 
@@ -339,19 +337,19 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
             int reverse = e->variant_strand != transcript_strand;
 
             if (ref_end > src_cursor) {
-                return haplo_fail(result, cds_len_out, NULL,
+                return haplo_fail(result, cds_len_out,
                                   DUCKVEP_HAPLOTYPE_EDIT_ORDER);
             }
             suffix_len = src_cursor - ref_end;
             if (suffix_len > dst_cursor ||
                 (size_t)e->alt_len > dst_cursor - suffix_len) {
-                return haplo_fail(result, cds_len_out, NULL,
+                return haplo_fail(result, cds_len_out,
                                   DUCKVEP_HAPLOTYPE_OUT_OF_RANGE);
             }
             while (src_cursor > ref_end) {
                 char b = haplo_norm_cds_base(ref_cds[--src_cursor]);
                 if (b == '\0') {
-                    return haplo_fail(result, cds_len_out, NULL,
+                    return haplo_fail(result, cds_len_out,
                                       DUCKVEP_HAPLOTYPE_INVALID_BASE);
                 }
                 cds_out[--dst_cursor] = (uint8_t)b;
@@ -363,19 +361,19 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
             }
         }
         if (src_cursor > dst_cursor) {
-            return haplo_fail(result, cds_len_out, NULL,
+            return haplo_fail(result, cds_len_out,
                               DUCKVEP_HAPLOTYPE_OUT_OF_RANGE);
         }
         while (src_cursor > 0u) {
             char b = haplo_norm_cds_base(ref_cds[--src_cursor]);
             if (b == '\0') {
-                return haplo_fail(result, cds_len_out, NULL,
+                return haplo_fail(result, cds_len_out,
                                   DUCKVEP_HAPLOTYPE_INVALID_BASE);
             }
             cds_out[--dst_cursor] = (uint8_t)b;
         }
         if (dst_cursor != 0u) {
-            return haplo_fail(result, cds_len_out, NULL,
+            return haplo_fail(result, cds_len_out,
                               DUCKVEP_HAPLOTYPE_OUT_OF_RANGE);
         }
         *cds_len_out = final_len;
@@ -391,58 +389,6 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
         result->length_diff = total_diff;
         result->flags = flags;
         result->applied_edits = edit_count;
-    }
-    return DUCKVEP_HAPLOTYPE_OK;
-}
-
-duckvep_haplotype_status_t duckvep_haplotype_translate_cds(
-    const uint8_t                    *cds,
-    size_t                            cds_len,
-    duckvep_codon_table_t             table,
-    uint8_t                          *protein_out,
-    size_t                            protein_cap,
-    size_t                           *protein_len_out,
-    duckvep_haplotype_result_t       *result) {
-
-    size_t codon_count;
-    size_t i;
-    size_t out_len = 0u;
-    uint32_t flags = 0u;
-
-    haplo_result_init(result);
-    if (protein_len_out != NULL) *protein_len_out = 0u;
-    if (cds == NULL || protein_out == NULL || protein_len_out == NULL ||
-        protein_cap == 0u || !duckvep_codon_table_supported(table)) {
-        return DUCKVEP_HAPLOTYPE_INVALID_ARG;
-    }
-    codon_count = cds_len / 3u;
-
-    for (i = 0u; i < codon_count; i++) {
-        char codon[4];
-        char aa;
-        if (out_len + 1u >= protein_cap) {
-            return haplo_fail(result, NULL, protein_len_out, DUCKVEP_HAPLOTYPE_BUFFER_TOO_SMALL);
-        }
-        codon[0] = haplo_norm_cds_base(cds[i * 3u]);
-        codon[1] = haplo_norm_cds_base(cds[i * 3u + 1u]);
-        codon[2] = haplo_norm_cds_base(cds[i * 3u + 2u]);
-        codon[3] = '\0';
-        if (codon[0] == '\0' || codon[1] == '\0' || codon[2] == '\0') {
-            return haplo_fail(result, NULL, protein_len_out, DUCKVEP_HAPLOTYPE_INVALID_BASE);
-        }
-        aa = duckvep_translate_codon(codon, table);
-        protein_out[out_len++] = (uint8_t)aa;
-        if (aa == '*') {
-            if (i + 1u < codon_count) flags |= DUCKVEP_HAPLOTYPE_FLAG_STOP_TRUNCATED;
-            break;
-        }
-    }
-    protein_out[out_len] = (uint8_t)'\0';
-    *protein_len_out = out_len;
-    if (result != NULL) {
-        result->cds_len = cds_len;
-        result->protein_len = out_len;
-        result->flags = flags;
     }
     return DUCKVEP_HAPLOTYPE_OK;
 }
