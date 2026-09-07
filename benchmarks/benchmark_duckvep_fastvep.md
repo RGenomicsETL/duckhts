@@ -642,6 +642,7 @@ eligible alleles joined. Output receipts are also outside the timer.
 | 5cc99b89 | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 64.14           | 5730396      |
 | e3269389 | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 62.76           | 5731168      |
 | fbe38c3a | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 62.73           | 5728276      |
+| c03c4879 | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 63.49           | 5732112      |
 
 The observed pass is 62.76 s versus 64.14 s for the nearest identical
 recorded workload, with 5,731,168 versus 5,730,396 KiB peak RSS. Single
@@ -680,6 +681,30 @@ availability again became tight during sorting/output. The worker and
 receipt checks succeeded; only its newly generated 6.17 GB TSV was
 removed after validation. This workload does not measure the phased
 N-consensus path itself.
+
+Source c03c4879f42447d15bc84b043a79b108157eec1d separates
+reference/alternate window selection from the shared substitution
+predicates and lets actual phased substitution blocks consume that
+interpreter. Compound-indel blocks remain unsupported. The
+independent-event worker, registry inputs, model, one-core placement,
+memory setting and 17-field output contract are unchanged. The clean
+source-bound extension took 63.49 s and 5732112 KiB peak RSS. The
+nearest identical recorded workload is the 62.73 s pass above: this pass
+is 0.76 s (1.21%) slower, not a no-regression or speedup claim.
+
+All source/ALT/joined-allele and output denominators match; the model
+still contains 644,427 transcripts. All three full-row multiset
+fingerprints and the full-file SHA-256 match that baseline. The
+extension SHA-256 is
+ac9bcb98509095493aa5de9fb47c764ba1a2705a8853e8901befbb633f691149; output
+SHA-256 is
+6f1bd987b8a144822dda1ef2939bb42870711f86ac8797f2ce1ef3db1b5143d9. The
+checked GNU time file retains the exact command and exit status. Disk
+availability was tight again; the worker and separate output/input
+receipt checks succeeded. Only this run’s new 6.17 GB TSV was removed
+after verification, retaining its receipts. This measures the shared
+independent-event path, not block classification, phased state,
+alignment, HGVS or structural composition.
 
 The phased executor still needs separate sorted-native and sort-included
 throughput/memory measurements. This independent-event run does not

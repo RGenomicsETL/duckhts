@@ -1430,14 +1430,21 @@ translation_history <- read.csv(file.path(data_dir, "shared_translation_validati
 translation <- translation_history[1L, , drop = FALSE]
 consensus <- translation_history[2L, , drop = FALSE]
 row.names(consensus) <- NULL
+block_predicates <- translation_history[3L, , drop = FALSE]
+row.names(block_predicates) <- NULL
+block_timing <- read_gnu_time(
+  file.path(data_dir, "coding_blocks_giab_threads1.time"), "DuckVEP", 1L, 1L)
 same_contract <- c("model_sha256", "input_registry_id", "model_registry_id",
   "source_records", "source_alt_alleles", "eligible_alt_alleles", "output_rows",
   "output_bytes", "threads", "affinity", "full_row_xor", "full_row_low32_sum",
   "full_row_high32_sum")
-stopifnot(nrow(translation_history) == 2L,
+stopifnot(nrow(translation_history) == 3L,
   identical(rebuild[same_contract], translation[same_contract]),
-  identical(translation[same_contract], consensus[same_contract]))
-translation_comparison <- rbind(rebuild, translation, consensus)
+  identical(translation[same_contract], consensus[same_contract]),
+  identical(consensus[same_contract], block_predicates[same_contract]),
+  as.numeric(block_predicates$elapsed_seconds) == block_timing$elapsed_seconds,
+  as.numeric(block_predicates$maximum_rss_kib) == block_timing$maximum_rss_kib)
+translation_comparison <- rbind(rebuild, translation, consensus, block_predicates)
 knitr::kable(data.frame(
   revision = substr(translation_comparison$source_revision, 1, 8),
   source_records = translation_comparison$source_records,
@@ -1480,6 +1487,27 @@ is `r consensus$extension_sha256`; output SHA-256 is `r consensus$output_sha256`
 Disk availability again became tight during sorting/output. The worker and
 receipt checks succeeded; only its newly generated 6.17 GB TSV was removed after
 validation. This workload does not measure the phased N-consensus path itself.
+
+Source `r block_predicates$source_revision` separates reference/alternate
+window selection from the shared substitution predicates and lets actual
+phased substitution blocks consume that interpreter. Compound-indel blocks
+remain unsupported. The independent-event worker, registry inputs, model,
+one-core placement, memory setting and 17-field output contract are unchanged.
+The clean source-bound extension took `r block_predicates$elapsed_seconds` s
+and `r block_predicates$maximum_rss_kib` KiB peak RSS. The nearest identical
+recorded workload is the `r consensus$elapsed_seconds` s pass above: this pass
+is 0.76 s (1.21%) slower, not a no-regression or speedup claim.
+
+All source/ALT/joined-allele and output denominators match; the model still
+contains 644,427 transcripts. All three full-row multiset fingerprints and
+the full-file SHA-256 match that baseline. The extension SHA-256 is
+`r block_predicates$extension_sha256`; output SHA-256 is
+`r block_predicates$output_sha256`. The checked GNU time file retains the
+exact command and exit status. Disk availability was tight again; the worker
+and separate output/input receipt checks succeeded. Only this run's new
+6.17 GB TSV was removed after verification, retaining its receipts.
+This measures the shared independent-event path, not block classification,
+phased state, alignment, HGVS or structural composition.
 
 The phased executor still needs separate sorted-native and sort-included
 throughput/memory measurements. This independent-event run does not measure

@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- record the current-code complete GIAB independent-annotation workload after
+  the shared block-predicate refactor: 63.49 seconds on one core versus the
+  nearest identical 62.73-second pass, with identical full output fingerprints.
+  This single-pass comparison does not certify phased performance or no regression
+
 - share the existing coding-substitution predicates with actual phased
   interaction blocks, including alternate protein coordinates shifted by
   earlier closed indels. Local predicates do not erase an earlier stop or
