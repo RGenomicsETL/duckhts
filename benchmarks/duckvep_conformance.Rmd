@@ -1044,8 +1044,8 @@ knitr::kable(phase_counts, row.names = FALSE)
 Source `r phase_revision` records a **failing raw-input compatibility audit**:
 `r sum(phase_counts$disagreements)` disagreements in `r sum(phase_counts$cases)`
 profiles. It is not a population error rate or a replacement for the passing
-literal-sequence corpus. Runtime extension sources are unchanged from the preceding
-local-coding-block implementation; this audit exposes gaps in the compatibility target.
+literal-sequence corpus. Public phased replay still consumes decoded calls; this
+audit exposes gaps in the compatibility target.
 
 The [R driver](../test/duckvep/conformance/haplotype_phase_differential.R) enumerates
 every GT over `0`, `1`, `2`, `.` at ploidies 1–4, every intervening separator pattern,
@@ -1078,6 +1078,25 @@ call as biologically known. Exact raw-input emulation needs retained source GT a
 source-record allele context, with upstream conditional sequence explicitly
 distinguished from strict-phase evidence. Whole-haplotype SO/HGVS and typed
 structural composition remain separate unfinished requirements.
+
+```{r raw-genotype-parser}
+parser_calls <- sum(phase_current$raw_parser_calls)
+parser_disagreements <- sum(phase_current$raw_parser_disagreements)
+stopifnot(parser_calls == 2L * sum(phase_counts$cases),
+  all(phase_current$raw_parser_controls_rejected == 7L))
+```
+
+The constant-space native raw-GT parser separately records
+**`r parser_disagreements` disagreements across `r parser_calls` source calls**.
+An optional observer sidecar reads actual Haplosaurus genotype objects and its
+file-profile ploidy; it does not override parsing or sequence construction.
+The comparison checks retained/omitted calls, parsed slot counts, the two consumed
+allele ordinals, source ploidy and missingness, with seven rejected field corruptions.
+The original observer output remains unchanged on the 1,000-transcript seed-173
+corpus, and all 7,020 full-replay comparison objects match the preceding audit.
+Parser code, bridge, compiler identity, binary and observations are hashed in the
+same clean-build receipt. This parser is not yet connected to public replay and
+does not apply upstream undefined-slot deletions. No full-replay failure is waived.
 
 ## Individual Sequence Ontology terms
 

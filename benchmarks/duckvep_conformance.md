@@ -652,12 +652,11 @@ masks. Whole-haplotype SO/HGVS remains unfinished.
 |      3 |   768 |           768 |         1536 |         2304 |                        1332 |
 |      4 |  6144 |          6144 |        12288 |        24576 |                       16800 |
 
-Source 5b4d4fbe517c53047f05826dde1eb7b0f4ae62d6 records a **failing
+Source 02d8a798d04b8d7852590bb5cfbbe8d44b929fb2 records a **failing
 raw-input compatibility audit**: 6990 disagreements in 7020 profiles. It
 is not a population error rate or a replacement for the passing
-literal-sequence corpus. Runtime extension sources are unchanged from
-the preceding local-coding-block implementation; this audit exposes gaps
-in the compatibility target.
+literal-sequence corpus. Public phased replay still consumes decoded
+calls; this audit exposes gaps in the compatibility target.
 
 The [R
 driver](../test/duckvep/conformance/haplotype_phase_differential.R)
@@ -695,6 +694,20 @@ emulation needs retained source GT and source-record allele context,
 with upstream conditional sequence explicitly distinguished from
 strict-phase evidence. Whole-haplotype SO/HGVS and typed structural
 composition remain separate unfinished requirements.
+
+The constant-space native raw-GT parser separately records **0
+disagreements across 14040 source calls**. An optional observer sidecar
+reads actual Haplosaurus genotype objects and its file-profile ploidy;
+it does not override parsing or sequence construction. The comparison
+checks retained/omitted calls, parsed slot counts, the two consumed
+allele ordinals, source ploidy and missingness, with seven rejected
+field corruptions. The original observer output remains unchanged on the
+1,000-transcript seed-173 corpus, and all 7,020 full-replay comparison
+objects match the preceding audit. Parser code, bridge, compiler
+identity, binary and observations are hashed in the same clean-build
+receipt. This parser is not yet connected to public replay and does not
+apply upstream undefined-slot deletions. No full-replay failure is
+waived.
 
 ## Individual Sequence Ontology terms
 
