@@ -111,6 +111,7 @@ main <- function() {
         block = seq_len(nrow(blocks))), blocks)
       rows[[at]] <- cbind(data.frame(key, shape = case$shape, strand = case$strand,
         occupied = nrow(edits) > 0L, edit_count = nrow(edits),
+        reference_cds_length = nchar(case$cds),
         net_length = sum(edits$alt_len - edits$ref_len),
         compound_indel = nrow(edits) > 1L && any(edits$alt_len != edits$ref_len),
         build_status = x$statuses[1L], delta_status = x$statuses[2L],
@@ -133,6 +134,18 @@ main <- function() {
   # This gate checks a declared support limit, NOT agreement between VEP and BCSQ.
   # Unsupported results stay in the denominator and are never counted as SO matches.
   false_support <- with(rows, compound_indel & (delta_status == 0L | valid != 0L))
+  block_context <- rows[match(blocks$key, rows$key), ]
+  # The whole-context indel approximation remains forbidden above. The block
+  # interpreter now supports actual interior indel windows, but does not claim
+  # compound start/terminal reconstruction or complete haplotype consequences.
+  interior <- blocks$cds_start > 3L &
+    blocks$cds_start - 1L + blocks$ref_len <= block_context$reference_cds_length - 3L
+  supported <- blocks$status == 0L & blocks$valid == 1L
+  invalid_indel_support <- blocks$indel != 0L & supported &
+    block_context$applied_edits > 1L & !interior
+  fact_columns <- c("valid", "synonymous", "missense", "stop_gained", "stop_lost", "stop_retained",
+    "start_lost", "start_retained", "frameshift", "inframe_deletion", "inframe_insertion",
+    "protein_altering", "coding_unknown", "partial_codon")
   summary <- data.frame(seed = original$seed, transcripts = length(cases), lanes = nrow(rows),
     occupied = sum(rows$occupied), context_failures = sum(rows$build_status != 0L),
     sequence_failures = sum(!rows$cds_match | !rows$protein_match),
@@ -140,11 +153,15 @@ main <- function() {
     failed_windows = sum(rows$block_count - rows$opened_windows),
     invalid_window_residues = sum(rows$invalid_window_residues),
     supported_substitution_blocks = sum(blocks$status == 0L & blocks$valid == 1L & blocks$indel == 0L),
+    supported_indel_blocks = sum(supported & blocks$indel != 0L),
     unsupported_blocks = sum(blocks$status == 2L),
     blocks_after_stop = sum(blocks$upstream_stop),
     frame_geometry_errors = sum(blocks$frame_status != 0L),
     stops_in_frame_displacement = sum(blocks$stop_overlaps_displacement),
-    falsely_supported_indel_blocks = sum(blocks$indel != 0L & (blocks$status == 0L | blocks$valid != 0L)),
+    falsely_supported_indel_blocks = sum(invalid_indel_support),
+    partial_facts_on_failure = sum(rowSums(blocks[blocks$status != 0L, fact_columns, drop = FALSE]) != 0L),
+    frameshift_inframe_conflicts = sum(blocks$frameshift != 0L &
+      (blocks$inframe_deletion != 0L | blocks$inframe_insertion != 0L | blocks$protein_altering != 0L)),
     unsupported = sum(rows$delta_status == 2L), compound_indels = sum(rows$compound_indel),
     falsely_supported_compound_indels = sum(false_support), bcftools_exit_status = bcftools_status,
     # Noncoding/splice consequences have four fields; strand and peptide are optional.
@@ -170,6 +187,7 @@ main <- function() {
     all(rows$block_count == rows$opened_windows), all(rows$first_failed_window == 0L),
     all(rows$invalid_window_residues == 0L),
     summary$falsely_supported_indel_blocks == 0L,
+    summary$partial_facts_on_failure == 0L, summary$frameshift_inframe_conflicts == 0L,
     summary$frame_geometry_errors == 0L,
     bcftools_status == 0L, summary$incomplete_bcftools_rows == 0L,
     summary$missing_occupied == 0L, nrow(extra) == 0L)

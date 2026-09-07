@@ -68,7 +68,8 @@ void duckhts_test_compound_coding(
     for (size_t b = 0u; b < block_count; b++) {
         duckvep_coding_peptide_window_t view;
         duckvep_sequence_delta_t local;
-        int local_status = duckvep_coding_context_block_delta_fill(&context, blocks + b, 0u, &local);
+        int local_status = duckvep_coding_context_block_delta_fill(
+            &context, edits, (size_t)*count, blocks + b, 0u, &local);
         int stop_in_frame = 0;
         int has_stop = first_stop < context.alt_peptide_len;
         int frame_status = duckvep_haplotype_block_frame_intersects(edits, (size_t)*count,

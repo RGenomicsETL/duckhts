@@ -1,6 +1,12 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- share length-changing coding predicates between independent events and actual
+  interior haplotype blocks, including separate reference/alternate coordinates
+  and stops inside transient frame displacement. Single-record start/stop rules
+  remain isolated; compound CDS-start/terminal interactions and whole-haplotype
+  SO/HGVS are not yet implemented. Invalid blocks publish no partial facts
+
 - expose `stop_in_displaced_frame` in phased replay: a shared native edit-geometry
   check distinguishes a first stop within displaced CDS bases from one after
   frame restoration. Unavailable sequences return NULL. Raw frame flags and

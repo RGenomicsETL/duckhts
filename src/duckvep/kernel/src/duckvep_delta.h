@@ -226,6 +226,9 @@ typedef struct duckvep_coding_context {
     const uint8_t *alt_cds;     size_t alt_cds_len;
     const uint8_t *ref_peptide; size_t ref_peptide_len;
     const uint8_t *alt_peptide; size_t alt_peptide_len;
+    /* Recorded by the complete translator; virtual single-edit contexts do
+     * not materialize this path-wide fact. Zero means no translated stop. */
+    size_t alt_first_stop_position1;
     /* A model-backed single edit can expose the alternate CDS as a borrowed
      * view instead of copying and translating the complete transcript. The
      * accessors in duckvep_delta.c preserve the same coding predicates; the
@@ -645,16 +648,20 @@ DUCKVEP_INTERNAL_API duckvep_context_delta_status_t duckvep_coding_context_delta
     uint64_t                        tx_flags,
     duckvep_sequence_delta_t       *delta);
 
-/* Local coding predicates for an actual partitioned substitution block, using
- * the same interpreter as independent events. Earlier closed indels may shift
- * ALT by whole codons. The block must belong to this complete materialized
- * context; no context field or shared prefix is changed. Indel-bearing blocks
- * remain unsupported, even when their net length change is zero. Failure leaves
- * the entire delta zeroed. These are local predicates, not a complete haplotype
- * consequence: the caller must separately retain any earlier translated stop,
- * contributor topology and unsupported blocks. */
+/* Local coding predicates for an actual partition of ascending physical edits
+ * in this complete materialized context. The edit slice validates block/frame
+ * geometry; earlier closed blocks may shift ALT by whole codons. Substitutions
+ * and interior indel blocks share the independent predicate interpreters. A
+ * first stop inside displaced bases prevents a restored indel block being
+ * called in-frame. Compound start/terminal-CDS interactions remain unsupported;
+ * they cannot borrow single-record endpoint reconstruction. Failure leaves the
+ * entire delta zeroed. These local facts are not a complete haplotype SO set:
+ * earlier-stop reachability, contributor topology and unsupported blocks remain
+ * separate. No context field or shared prefix is changed. */
 DUCKVEP_INTERNAL_API duckvep_context_delta_status_t duckvep_coding_context_block_delta_fill(
     const duckvep_coding_context_t  *ctx,
+    const duckvep_haplotype_edit_t  *edits,
+    size_t                           edit_count,
     const duckvep_haplotype_block_t *block,
     uint64_t                         tx_flags,
     duckvep_sequence_delta_t        *delta);

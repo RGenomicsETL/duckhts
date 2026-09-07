@@ -696,9 +696,16 @@ context at a stop. Substitution-only blocks feed those operands into the same
 local predicate interpreter as independent events, even when an earlier closed
 indel shifted the alternate protein. Those local predicates do not decide whether
 an earlier stop prevents expression: the complete path retains that separate fact.
-Indel-bearing blocks remain explicitly unsupported, including net-zero sets;
-local substitution facts are not a complete compound consequence or an aggregate
-of independent record labels. Leaf-specific result facts must not mutate shared
+Interior indel blocks use the same length-change predicate interpreter as
+independent events, with actual block geometry validated against their physical
+edit slice. The complete translation retains its first stop; intersection with
+frame-displaced bases prevents a DNA-restoring block being called in-frame when
+translation has already stopped. Reference and alternate nucleotide comparisons
+use their separate codon offsets. Compound start/terminal-CDS blocks still need
+compound-aware reconstruction and remain unsupported; VEP's single-record endpoint
+rules cannot be applied by fabricating one record. Neither local facts nor a net-zero
+CDS diff constitute a whole-haplotype consequence set. The whole-context compound-indel
+substitution shortcut remains forbidden. Leaf-specific facts never mutate shared
 carrier prefixes or immutable model sequence.
 Carrier-prefix identity includes per-event called/missing/unphased evidence. An uncertain
 path cannot share the result of a fully known path merely because their called edits agree.

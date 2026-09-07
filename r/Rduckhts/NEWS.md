@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- use the shared indel-window interpreter in the bundled coding kernel,
+  preserving independent annotation while supporting native interior compound
+  block facts. Phased SQL output still does not claim complete SO/HGVS annotation
+
 - return `stop_in_displaced_frame` through `rduckhts_haplotypes()` and bundled SQL.
   It identifies a first translated stop overlapping frame-displaced CDS bases,
   separately from DNA frame restoration. Unavailable sequences return NA in R;

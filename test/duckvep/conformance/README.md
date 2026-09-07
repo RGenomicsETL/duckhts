@@ -632,7 +632,13 @@ shifted-axis coverage and residue differences are retained as separate counters.
 `blocks.csv` additionally retains every block's local predicate/support result,
 physical span and earlier-stop observation. Substitution blocks reuse the
 independent coding interpreter on their actual reference/alternate coordinates;
-indel-bearing blocks stay unsupported. A later local missense predicate is not
+interior indel blocks now reuse the independent length-change interpreter with
+actual frame/stop geometry. Single-edit blocks keep the independent endpoint
+rules; compound start/terminal blocks remain unsupported. The support audit
+records supported indel blocks separately and rejects unsupported endpoint
+support, partial facts on failure and contradictory frame/in-frame facts.
+The whole-context compound-indel substitution guard remains unchanged.
+A later local missense predicate is not
 evidence that translation reached that block. Neither local predicates nor
 unsupported results are collapsed into a whole-haplotype consequence set.
 Each block also records the full translation's `first_stop_position1` (zero when
