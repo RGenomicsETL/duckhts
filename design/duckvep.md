@@ -661,7 +661,20 @@ Projected equal-length edits use the same differing-island decomposition as inde
 annotation: unchanged internal MNV bases do not mask or conflict with another carried edit.
 Source-record count and physical-edit count remain separate, with raw alleles preserved.
 
-The public SQL executor and phase-policy interpretation remain unimplemented. Native
+`duckvep_phase_call` prepares decoded GT/PS calls through a constant-space native reducer.
+It observes the complete genotype before assigning slots. Strict assignments respect
+decoded per-allele phase, with unphased slots resolved only when permutation cannot change
+the called allele. Homozygous calls and haploid calls apply across every phase set;
+they must not be put into an isolated NULL-PS bucket. Missing alleles and unresolved
+heterozygous slots remain explicit and must affect whether a completed sequence is known.
+The named VEP-116 profile ranks called alleles after omitting missing entries, matching
+the upstream parser's input to Haplosaurus; the output still retains those missing input
+slots with no assigned lane. Separators and PS do not affect compatibility assignments.
+This is decoded-call interpretation, not emulation of VEP's raw mixed/prefixed-separator
+parsing. This helper consumes a declared GT/PS phasing source;
+PSL/PSO or producer-specific phase identities require a separate explicit adapter.
+
+The public SQL haplotype executor remains unimplemented. Native
 sequence/indel flags are not combined SO or compound HGVS, and the literal replay stream
 does not yet compose typed structural events. Existing executable Haplosaurus comparisons
 exercise the native replay through a test bridge, not a public phased SQL surface.

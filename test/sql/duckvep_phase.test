@@ -1,0 +1,148 @@
+require duckhts
+
+# Explicit typed genotype preparation, not compound annotation.
+query IIIITTT
+SELECT a.input_slot, a.allele_index, a.haplotype_lane, a.ploidy,
+       a.phase_set::VARCHAR, a.phase_scope, a.status
+FROM (SELECT unnest(duckvep_phase_call([0,1,NULL], [true,false,false], phase_set := 10)) a)
+ORDER BY a.input_slot
+----
+1	0	1	3	10	phase_set	called
+2	1	NULL	3	NULL	unresolved	unphased
+3	NULL	NULL	3	NULL	unresolved	missing
+
+# A whole-genotype homozygote applies across PS labels, not just absent PS.
+query IIITT
+SELECT a.input_slot, a.haplotype_lane, a.phase_set, a.phase_scope, a.status
+FROM (SELECT unnest(duckvep_phase_call([1,1,1], [false,true,false], phase_set := 42)) a)
+ORDER BY a.input_slot
+----
+1	1	NULL	all_phase_sets	called
+2	2	NULL	all_phase_sets	called
+3	3	NULL	all_phase_sets	called
+
+# Only unphased-slot permutations matter within this phase set.
+query IIITT
+SELECT a.input_slot, a.haplotype_lane, a.phase_set, a.phase_scope, a.status
+FROM (SELECT unnest(duckvep_phase_call([2,1,1], [true,false,false], phase_set := -1)) a)
+ORDER BY a.input_slot
+----
+1	1	-1	phase_set	called
+2	2	-1	phase_set	called
+3	3	-1	phase_set	called
+
+query IIITT
+SELECT a.input_slot, a.haplotype_lane, a.phase_set, a.phase_scope, a.status
+FROM (SELECT unnest(duckvep_phase_call([0,1,NULL], [false,false,false],
+                                    phase_set := 42, phase_policy := 'vep116_compat')) a)
+ORDER BY a.input_slot
+----
+1	1	NULL	allele_slot	called
+2	2	NULL	allele_slot	called
+3	NULL	NULL	allele_slot	missing
+
+# VEP's parser compacts called alleles before container lane assignment.
+query IIT
+SELECT a.input_slot, a.haplotype_lane, a.status
+FROM (SELECT unnest(duckvep_phase_call([NULL,1,NULL,2], NULL,
+                                    phase_policy := 'vep116_compat')) a)
+ORDER BY a.input_slot
+----
+1	NULL	missing
+2	1	called
+3	NULL	missing
+4	2	called
+
+# Absent GT differs from missing alleles; absent phase is not invented.
+query III
+SELECT duckvep_phase_call(NULL, NULL) IS NULL,
+       duckvep_phase_call([NULL], NULL)[1].status = 'missing',
+       duckvep_phase_call([0,1], NULL)[1].haplotype_lane IS NULL
+----
+true	true	true
+
+query II
+SELECT duckvep_phase_call([0,1], [true,true])[1].phase_set IS NULL,
+       duckvep_phase_call([0,1], [true,true], phase_set := 0)[1].phase_set
+----
+true	0
+
+# Actual HTSlib leading-slot flags, missing cells and arbitrary ploidy.
+query IIIITT
+SELECT record_index, c.sample_index, a.input_slot, a.haplotype_lane, a.phase_scope, a.status
+FROM (SELECT record_index, c, unnest(duckvep_phase_call(c.alleles, c.phase_before)) a
+      FROM (SELECT record_index, unnest(calls) c FROM read_geno('test/data/geno_vcf44.vcf')))
+ORDER BY record_index, c.sample_index, a.input_slot
+----
+0	0	1	1	phase_set	called
+0	0	2	2	phase_set	called
+0	1	1	1	phase_set	called
+0	1	2	2	phase_set	called
+1	0	1	1	all_phase_sets	called
+1	1	1	1	all_phase_sets	called
+2	0	1	1	phase_set	missing
+2	0	2	2	phase_set	called
+2	1	1	1	phase_set	missing
+2	1	2	2	phase_set	called
+3	0	1	1	phase_set	called
+3	0	2	2	phase_set	called
+3	0	3	3	phase_set	missing
+3	1	1	1	phase_set	called
+3	1	2	2	phase_set	called
+3	1	3	3	phase_set	called
+
+# Different list offsets/lengths and policies recur across output vectors.
+query III
+WITH inputs AS (
+ SELECT i, CASE WHEN i%2=0 THEN [0,1,NULL] ELSE [1,1] END gt,
+        CASE WHEN i%2=0 THEN [false,false,false] ELSE [true,true] END phased
+ FROM range(5000) r(i)
+), prepared AS (
+ SELECT i, unnest(duckvep_phase_call(gt, phased, phase_set := i,
+      phase_policy := CASE WHEN i%2=0 THEN 'vep116_compat' ELSE 'strict' END)) a FROM inputs
+)
+SELECT count(*), count(*) FILTER (WHERE a.status='missing'),
+       count(*) FILTER (WHERE a.phase_scope='all_phase_sets') FROM prepared
+----
+12500	2500	5000
+
+query III
+SELECT len(a), a[65535].input_slot, a[65535].haplotype_lane
+FROM (SELECT duckvep_phase_call(list_transform(range(65535), x -> 1), NULL) a)
+----
+65535	65535	65535
+
+statement error
+SELECT duckvep_phase_call([0,1], [true]);
+----
+equal length
+
+statement error
+SELECT duckvep_phase_call(NULL, [true]);
+----
+equal length
+
+statement error
+SELECT duckvep_phase_call([], []);
+----
+ploidy
+
+statement error
+SELECT duckvep_phase_call(list_transform(range(65536), x -> 1), NULL);
+----
+ploidy
+
+statement error
+SELECT duckvep_phase_call([0,-1], [true,true]);
+----
+non-negative
+
+statement error
+SELECT duckvep_phase_call([0,1], [true,true], phase_policy := 'guess');
+----
+phase_policy
+
+query I
+SELECT 42
+----
+42

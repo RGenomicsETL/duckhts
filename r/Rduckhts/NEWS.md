@@ -1,5 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- expose bundled `duckvep_phase_call(...)` through DBI for typed genotype/phase
+  preparation, including per-call strict/VEP-116 policies, missing alleles and
+  unresolved phase. SQL results distinguish phase-set assignments from
+  phase-invariant calls; this is not yet a public phased annotation executor
+
 - bundle one immutable-reference CDS rebuild implementation, removing the unused
   in-place mutation path and rejecting overlapping native input/output storage.
   R and SQL annotation behavior is unchanged

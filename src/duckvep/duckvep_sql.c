@@ -614,6 +614,7 @@ bool
 register_duckvep_sql_functions(duckdb_connection connection)
 {
 	return duckvep_register_so_terms(connection) &&
+	    duckvep_register_phase_call(connection) &&
 	    duckvep_register_projection_code(connection) &&
 	    duckvep_register_annotate_relation(connection) &&
 	    duckvep_register_projection_relation(connection);

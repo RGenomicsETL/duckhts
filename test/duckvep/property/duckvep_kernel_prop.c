@@ -14,6 +14,7 @@
  *   make test-duckvep-kernel-statistical
  */
 #include "duckvep_kernel.h"
+#include "duckvep_phase.h"
 #include "duckvep_sweep.h"
 #include "duckvep_classify.h"
 #include "duckvep_effect.h"
@@ -8696,6 +8697,105 @@ TEST haplotype_apply_rejects_overlapping_inputs(void) {
         duckvep_haplotype_apply_cds_edits(reference, 12u, &edit,
             SIZE_MAX / sizeof edit + 1u, (int8_t)1, storage, sizeof storage, &length, &result));
     ASSERT_EQ(0u, length);
+    PASS();
+}
+
+/* Exhaust actual slot permutations, independently of the reducer's equality
+ * shortcut. A missing allele permits every allele in this finite alphabet. */
+static int phase_next_permutation(uint8_t *order, uint16_t count) {
+    int left = (int)count - 2;
+    while (left >= 0 && order[left] >= order[left + 1]) left--;
+    if (left < 0) return 0;
+    int right = (int)count - 1;
+    while (order[right] <= order[left]) right--;
+    uint8_t tmp = order[left]; order[left] = order[right]; order[right] = tmp;
+    for (int a = left + 1, b = (int)count - 1; a < b; a++, b--) {
+        tmp = order[a]; order[a] = order[b]; order[b] = tmp;
+    }
+    return 1;
+}
+
+TEST phase_assignments_match_all_permitted_slot_permutations(void) {
+    uint32_t cases = 0u;
+    for (uint16_t ploidy = 1u; ploidy <= 5u; ploidy++) {
+        uint32_t genotypes = UINT32_C(1) << (2u * ploidy);
+        for (uint32_t genotype = 0u; genotype < genotypes; genotype++) {
+            for (uint32_t bits = 0u; bits < (UINT32_C(1) << ploidy); bits++) {
+                cases++;
+                int32_t alleles[5];
+                uint8_t phase[5], order[5], possible[5] = {0};
+                uint8_t global = 0u;
+                uint16_t unphased = 0u;
+                duckvep_phase_summary_t summary = {0};
+                for (uint16_t i = 0u; i < ploidy; i++) {
+                    alleles[i] = (int32_t)((genotype >> (2u * i)) & 3u) - 1;
+                    phase[i] = (uint8_t)((bits >> i) & 1u);
+                    order[i] = (uint8_t)i;
+                    if (!phase[i]) unphased++;
+                    global |= alleles[i] < 0 ? 7u : (uint8_t)(1u << alleles[i]);
+                    ASSERT_EQ(DUCKVEP_PHASE_OK, duckvep_phase_observe(&summary, alleles[i], phase[i]));
+                }
+                do {
+                    int allowed = 1;
+                    for (uint16_t i = 0u; i < ploidy; i++)
+                        if (phase[i] && order[i] != i) allowed = 0;
+                    if (!allowed) continue;
+                    for (uint16_t i = 0u; i < ploidy; i++) {
+                        int32_t value = alleles[order[i]];
+                        possible[i] |= value < 0 ? 7u : (uint8_t)(1u << value);
+                    }
+                } while (phase_next_permutation(order, ploidy));
+                int invariant = ploidy == 1u || (global & (global - 1u)) == 0u;
+                uint16_t called_before = 0u;
+                for (uint16_t i = 0u; i < ploidy; i++) {
+                    duckvep_phase_assignment_t out;
+                    int resolved = invariant || phase[i] || unphased == 1u ||
+                        (possible[i] & (possible[i] - 1u)) == 0u;
+                    ASSERT_EQ(DUCKVEP_PHASE_OK, duckvep_phase_assign(&summary, i + 1u, called_before,
+                        alleles[i], phase[i], DUCKVEP_PHASE_STRICT, &out));
+                    ASSERT_EQ(resolved ? i + 1u : 0u, out.lane);
+                    ASSERT_EQ(invariant ? DUCKVEP_PHASE_ALL_SETS :
+                        resolved ? DUCKVEP_PHASE_SET : DUCKVEP_PHASE_UNRESOLVED, out.scope);
+                    ASSERT_EQ(alleles[i] < 0 ? DUCKVEP_PHASE_MISSING :
+                        resolved ? DUCKVEP_PHASE_CALLED : DUCKVEP_PHASE_UNPHASED, out.status);
+                    ASSERT_EQ(DUCKVEP_PHASE_OK, duckvep_phase_assign(&summary, i + 1u, called_before,
+                        alleles[i], phase[i], DUCKVEP_PHASE_VEP116_COMPAT, &out));
+                    ASSERT_EQ(alleles[i] < 0 ? 0u : called_before + 1u, out.lane);
+                    ASSERT_EQ(DUCKVEP_PHASE_ALLELE_SLOT, out.scope);
+                    duckvep_phase_call_status_t expected_status = alleles[i] < 0
+                        ? DUCKVEP_PHASE_MISSING : DUCKVEP_PHASE_CALLED;
+                    ASSERT_EQ(expected_status, out.status);
+                    if (alleles[i] >= 0) called_before++;
+                }
+            }
+        }
+    }
+    ASSERT_EQ(37448u, cases);
+    PASS();
+}
+
+TEST phase_ploidy_and_invalid_observations_are_checked(void) {
+    duckvep_phase_summary_t summary = {0}, before;
+    duckvep_phase_assignment_t out;
+    ASSERT_EQ(DUCKVEP_PHASE_INVALID_ARG,
+        duckvep_phase_assign(&summary, 1u, 0u, 0, 0u, DUCKVEP_PHASE_STRICT, &out));
+    for (uint32_t i = 0u; i < UINT16_MAX; i++)
+        ASSERT_EQ(DUCKVEP_PHASE_OK, duckvep_phase_observe(&summary, INT32_MAX, 0u));
+    before = summary;
+    ASSERT_EQ(DUCKVEP_PHASE_PLOIDY_LIMIT, duckvep_phase_observe(&summary, 1, 1u));
+    ASSERT_EQ(0, memcmp(&before, &summary, sizeof summary));
+    ASSERT_EQ(DUCKVEP_PHASE_OK, duckvep_phase_assign(&summary, UINT16_MAX, UINT16_MAX - 1u,
+        INT32_MAX, 0u, DUCKVEP_PHASE_STRICT, &out));
+    ASSERT_EQ(UINT16_MAX, out.lane);
+    ASSERT_EQ(DUCKVEP_PHASE_ALL_SETS, out.scope);
+    ASSERT_EQ(DUCKVEP_PHASE_INVALID_ARG, duckvep_phase_observe(&summary, -2, 0u));
+    ASSERT_EQ(DUCKVEP_PHASE_INVALID_ARG, duckvep_phase_observe(&summary, 0, 2u));
+    ASSERT_EQ(0, memcmp(&before, &summary, sizeof summary));
+    ASSERT_EQ(DUCKVEP_PHASE_INVALID_ARG, duckvep_phase_observe(NULL, 0, 0u));
+    ASSERT_EQ(DUCKVEP_PHASE_INVALID_ARG, duckvep_phase_assign(&summary, 0u, 0u,
+        INT32_MAX, 0u, DUCKVEP_PHASE_STRICT, &out));
+    ASSERT_EQ(DUCKVEP_PHASE_INVALID_ARG, duckvep_phase_assign(&summary, 1u, 0u,
+        INT32_MAX, 0u, (duckvep_phase_policy_t)99, &out));
     PASS();
 }
 
@@ -26729,6 +26829,8 @@ int main(int argc, char **argv) {
     RUN_TEST(coding_snv_from_cds_known_cases);
     RUN_TEST(coding_snv_from_cds_matches_oracle_for_any_valid_snv);
     RUN_TEST(haplotype_edit_geometry_agrees_in_both_orders);
+    RUN_TEST(phase_assignments_match_all_permitted_slot_permutations);
+    RUN_TEST(phase_ploidy_and_invalid_observations_are_checked);
     RUN_TEST(carrier_stream_lifetime_keys_and_capacity);
     RUN_TEST(carrier_stream_reuses_slots_after_many_transcripts);
     RUN_TEST(carrier_stream_expiry_heap_matches_dense_active_set);

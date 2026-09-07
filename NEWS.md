@@ -1,6 +1,13 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- add `duckvep_phase_call(...)` over typed decoded GT/PS calls, backed by a
+  host-neutral constant-space phase reducer. Per-call `strict` and
+  `vep116_compat` policies preserve every allele slot, missing calls and explicit
+  ambiguity, and distinguish phase-set lanes from phase-invariant calls that
+  must apply across all phase sets. This prepares carrier input; it does not
+  yet expose the phased haplotype executor or compound consequence/HGVS output
+
 - delete DuckVEP's compatibility-only in-place CDS rebuild. The native kernel
   now has one linear immutable-input/scratch-output implementation and rejects
   overlapping reference, edit or allele storage before writing sequence bytes.

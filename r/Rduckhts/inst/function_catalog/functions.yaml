@@ -334,6 +334,19 @@
       ]
     },
     {
+      "name": "duckvep_phase_call",
+      "kind": "scalar",
+      "category": "Variant Annotation",
+      "signature": "duckvep_phase_call(alleles, phase_before, phase_set := NULL, phase_policy := 'strict')",
+      "returns": "STRUCT(input_slot USMALLINT, allele_index INTEGER, haplotype_lane USMALLINT, ploidy USMALLINT, phase_set BIGINT, phase_scope VARCHAR, status VARCHAR)[]",
+      "r_wrapper": "",
+      "description": "Prepare one typed GT call for phased execution without parsing genotype strings or allocating native scratch. Consume read_geno calls.alleles and calls.phase_before before ALT expansion; retain record/sample/model identity and raw GT/PS beside the result. One output entry preserves each one-based input_slot, source allele_index (0 REF, positive source ALT ordinal, NULL missing) and ploidy, limited to 1..65535. A NULL GT returns NULL, not reference or an empty carrier list. NULL phase list or flags mean unavailable phase; otherwise lists must have equal length. Empty GT lists and negative called allele indices fail. strict preserves explicitly phased lanes and resolves remaining unphased slots only if their assignment cannot change under permutation. Homozygous called GTs and haploid calls have all_phase_sets scope: their facts apply across phase sets, not merely the NULL-PS set. phase_set scope retains the supplied signed BIGINT identity; NULL denotes the default set and differs from present zero. The input is decoded data, not VCF PS schema validation. Scope is always local to the caller's sample and chromosome. Unresolved heterozygous slots have NULL haplotype_lane, unresolved scope and unphased status; missing alleles keep missing status even when a lane is known. vep116_compat ignores separators/PS and assigns allele_slot lanes after removing missing entries, matching the pinned VEP parser's input to Haplosaurus. Missing input entries remain explicit with NULL lane. Decoded ploidy is preserved; this helper does not emulate VEP's raw mixed/prefixed-separator parsing or its container's ploidy inference. NULL policy means strict; unknown policy fails. Do not discard missing/unresolved entries or treat all_phase_sets as a separate ordinary PS when constructing haplotypes. This GT/PS-only helper does not interpret PSL/PSO/PID, phase records, verify ALT bounds against a source record, build haplotypes, or emit combined SO/HGVS. Only use it with a declared GT/PS phasing source; alternative phase encodings require their own explicit adapter.",
+      "examples": [
+        "SELECT unnest(duckvep_phase_call([0, 1], [true, true], phase_set := 10)) AS allele;",
+        "SELECT record_index, c.sample_index, unnest(duckvep_phase_call(c.alleles, c.phase_before, phase_set := c.phase_set)) AS allele FROM (SELECT record_index, unnest(calls) AS c FROM read_geno('geno_calls.bcf')) ORDER BY record_index, sample_index, allele.input_slot;"
+      ]
+    },
+    {
       "name": "duckvep_annotate",
       "kind": "table",
       "category": "Variant Annotation",
