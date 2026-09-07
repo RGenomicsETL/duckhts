@@ -8547,7 +8547,7 @@ TEST haplotype_full_translation_matches_every_supported_codon_table(void) {
     for (unsigned table = 0u; table < 32u; table++) {
         if (!duckvep_codon_table_supported((duckvep_codon_table_t)table)) {
             ASSERT_EQ(DUCKVEP_TRANSLATION_INVALID_ARG,
-                duckvep_translate_cds(cds, sizeof(cds), (duckvep_codon_table_t)table,
+                duckvep_translate_cds(cds, sizeof(cds), (duckvep_codon_table_t)table, DUCKVEP_TRANSLATION_N_UNKNOWN,
                     peptide, sizeof(peptide), &result));
             continue;
         }
@@ -8566,7 +8566,7 @@ TEST haplotype_full_translation_matches_every_supported_codon_table(void) {
                             if (expected[i] == '*' && !first_stop) first_stop = i + 1u;
                         }
                         ASSERT_EQ(DUCKVEP_TRANSLATION_OK,
-                            duckvep_translate_cds(cds, sizeof(cds), (duckvep_codon_table_t)table,
+                            duckvep_translate_cds(cds, sizeof(cds), (duckvep_codon_table_t)table, DUCKVEP_TRANSLATION_N_UNKNOWN,
                                 peptide, 5u, &result));
                         ASSERT_EQ(4u, result.length);
                         ASSERT_EQ(0, memcmp(peptide, expected, sizeof(expected)));
@@ -8582,30 +8582,77 @@ TEST haplotype_full_translation_matches_every_supported_codon_table(void) {
     /* A complete output allocation is checked before writing any peptide. */
     memset(peptide, 0xa5, sizeof(peptide));
     ASSERT_EQ(DUCKVEP_TRANSLATION_BUFFER_TOO_SMALL,
-        duckvep_translate_cds(cds, sizeof(cds), STD, peptide, 4u, &result));
+        duckvep_translate_cds(cds, sizeof(cds), STD, DUCKVEP_TRANSLATION_N_UNKNOWN, peptide, 4u, &result));
     for (size_t i = 0u; i < sizeof(peptide); i++) ASSERT_EQ(0xa5u, peptide[i]);
     ASSERT_EQ(0u, result.length); ASSERT_EQ(0u, result.first_stop_position1);
     ASSERT_EQ(0u, result.unambiguous);
     ASSERT_EQ(DUCKVEP_TRANSLATION_BUFFER_TOO_SMALL,
-        duckvep_translate_cds(cds, SIZE_MAX, STD, peptide, sizeof(peptide), &result));
+        duckvep_translate_cds(cds, SIZE_MAX, STD, DUCKVEP_TRANSLATION_N_UNKNOWN, peptide, sizeof(peptide), &result));
     ASSERT_EQ(DUCKVEP_TRANSLATION_INVALID_ARG,
-        duckvep_translate_cds(cds, sizeof(cds), STD, cds, sizeof(cds), &result));
+        duckvep_translate_cds(cds, sizeof(cds), STD, DUCKVEP_TRANSLATION_N_UNKNOWN, cds, sizeof(cds), &result));
     ASSERT_EQ(DUCKVEP_TRANSLATION_INVALID_ARG,
-        duckvep_translate_cds(cds, sizeof(cds), STD, peptide, sizeof(peptide), NULL));
+        duckvep_translate_cds(cds, sizeof(cds), STD, DUCKVEP_TRANSLATION_N_UNKNOWN, peptide, sizeof(peptide), NULL));
     /* Invalid bytes after an internal stop and in the trailing partial codon
      * must be rejected too. No valid result may describe a partial translation. */
     memcpy(cds, "ATGTAAGCCGCCT", sizeof(cds));
     for (size_t at = 0u; at < sizeof(cds); at++) {
         uint8_t before = cds[at]; cds[at] = '?';
         ASSERT_EQ(DUCKVEP_TRANSLATION_INVALID_BASE,
-            duckvep_translate_cds(cds, sizeof(cds), STD, peptide, sizeof(peptide), &result));
+            duckvep_translate_cds(cds, sizeof(cds), STD, DUCKVEP_TRANSLATION_N_UNKNOWN, peptide, sizeof(peptide), &result));
         ASSERT_EQ(0u, result.length); ASSERT_EQ(0u, result.first_stop_position1);
         cds[at] = before;
     }
     ASSERT_EQ(DUCKVEP_TRANSLATION_OK,
-        duckvep_translate_cds(cds, 0u, STD, peptide, 1u, &result));
+        duckvep_translate_cds(cds, 0u, STD, DUCKVEP_TRANSLATION_N_UNKNOWN, peptide, 1u, &result));
     ASSERT_EQ(0u, result.length); ASSERT_EQ(0u, result.first_stop_position1);
     ASSERT_EQ(1u, result.unambiguous); ASSERT_EQ(0u, peptide[0]);
+    PASS();
+}
+
+TEST haplotype_consensus_translation_matches_all_n_expansions(void) {
+    const char alphabet[] = "ACGTNacgtn", literal[] = "ACGT";
+    uint8_t cds[4], peptide[2];
+    duckvep_translation_t result;
+    for (unsigned table = 1u; table < 32u; table++) {
+        if (!duckvep_codon_table_supported((duckvep_codon_table_t)table)) continue;
+        for (size_t a = 0u; a < 10u; a++) for (size_t b = 0u; b < 10u; b++)
+            for (size_t c = 0u; c < 10u; c++) {
+                cds[0] = (uint8_t)alphabet[a]; cds[1] = (uint8_t)alphabet[b];
+                cds[2] = (uint8_t)alphabet[c]; cds[3] = 'N';
+                unsigned char amino_acids[128] = {0};
+                for (size_t x = 0u; x < 4u; x++) for (size_t y = 0u; y < 4u; y++)
+                    for (size_t z = 0u; z < 4u; z++) {
+                        char expansion[4] = {literal[x], literal[y], literal[z], 0};
+                        int match = 1;
+                        for (size_t i = 0u; i < 3u; i++) {
+                            char base = (char)(cds[i] & 0xdfu);
+                            if (base != 'N' && base != expansion[i]) match = 0;
+                        }
+                        if (match) amino_acids[(unsigned char)duckvep_translate_codon(
+                            expansion, (duckvep_codon_table_t)table)] = 1u;
+                    }
+                unsigned count = 0u; uint8_t expected = 'X';
+                for (unsigned i = 0u; i < 128u; i++) if (amino_acids[i]) {
+                    count++; expected = (uint8_t)i;
+                }
+                if (count == 2u && amino_acids['D'] && amino_acids['N']) expected = 'B';
+                else if (count == 2u && amino_acids['E'] && amino_acids['Q']) expected = 'Z';
+                else if (count > 1u) expected = 'X';
+                for (size_t length = 3u; length <= 4u; length++) {
+                    ASSERT_EQ(DUCKVEP_TRANSLATION_OK, duckvep_translate_cds(cds, length,
+                        (duckvep_codon_table_t)table, DUCKVEP_TRANSLATION_N_CONSENSUS,
+                        peptide, sizeof(peptide), &result));
+                    ASSERT_EQ(expected, peptide[0]); ASSERT_EQ(0u, peptide[1]);
+                    ASSERT_EQ(1u, result.length);
+                    ASSERT_EQ(expected == '*', result.first_stop_position1);
+                    ASSERT_EQ(length == 3u && a % 5u != 4u && b % 5u != 4u && c % 5u != 4u,
+                        result.unambiguous);
+                }
+            }
+    }
+    ASSERT_EQ(DUCKVEP_TRANSLATION_INVALID_ARG, duckvep_translate_cds(cds, 3u, STD,
+        (duckvep_translation_ambiguity_t)2, peptide, sizeof(peptide), &result));
+    ASSERT_EQ(0u, result.length);
     PASS();
 }
 
@@ -8628,7 +8675,7 @@ TEST haplotype_apply_and_translate_known_cases(void) {
     ASSERT_EQ(9u, cds_len);
     ASSERT_STR_EQ("TGGAAATAA", (const char *)cds);
     ASSERT_EQ(DUCKVEP_TRANSLATION_OK,
-              duckvep_translate_cds(cds, cds_len, STD, protein, sizeof protein, &translated));
+              duckvep_translate_cds(cds, cds_len, STD, DUCKVEP_TRANSLATION_N_UNKNOWN, protein, sizeof protein, &translated));
     ASSERT_STR_EQ("WK*", (const char *)protein);
     ASSERT_EQ(3u, translated.first_stop_position1);
 
@@ -8641,7 +8688,7 @@ TEST haplotype_apply_and_translate_known_cases(void) {
                                                 edits, 1u, (int8_t)-1, cds, sizeof cds, &cds_len, &r));
     ASSERT_STR_EQ("ATGTCTTAA", (const char *)cds);
     ASSERT_EQ(DUCKVEP_TRANSLATION_OK,
-              duckvep_translate_cds(cds, cds_len, STD, protein, sizeof protein, &translated));
+              duckvep_translate_cds(cds, cds_len, STD, DUCKVEP_TRANSLATION_N_UNKNOWN, protein, sizeof protein, &translated));
     ASSERT_STR_EQ("MS*", (const char *)protein);
 
     /* Two non-triplet edits with net length diff 0 are a resolved frameshift. */
@@ -8667,7 +8714,7 @@ TEST haplotype_apply_and_translate_known_cases(void) {
     {
         duckvep_translation_t fresh_result;
         ASSERT_EQ(DUCKVEP_TRANSLATION_OK,
-                  duckvep_translate_cds(cds, cds_len, STD, protein, sizeof protein, &fresh_result));
+                  duckvep_translate_cds(cds, cds_len, STD, DUCKVEP_TRANSLATION_N_UNKNOWN, protein, sizeof protein, &fresh_result));
         ASSERT_EQ(3u, fresh_result.first_stop_position1);
         ASSERT_EQ(0, memcmp(protein, "MK*", fresh_result.first_stop_position1));
         ASSERT_EQ(4u, fresh_result.length);
@@ -19700,7 +19747,7 @@ TEST coding_context_known_scene(void) {
         ASSERT_EQ(3u, ctx.alt_last_changed_codon);
         ASSERT_EQ(DUCKVEP_TRANSLATION_OK,
                   duckvep_translate_cds(ctx.alt_cds, ctx.alt_cds_len,
-                      DUCKVEP_CODON_TABLE_STANDARD, alt_pep, sizeof alt_pep, &hres));
+                      DUCKVEP_CODON_TABLE_STANDARD, DUCKVEP_TRANSLATION_N_UNKNOWN, alt_pep, sizeof alt_pep, &hres));
         trunc_len = hres.first_stop_position1 ? hres.first_stop_position1 : hres.length;
         ASSERT_EQ((size_t)2u, trunc_len);
         ASSERT(memcmp(alt_pep, "M*", 2u) == 0);
@@ -27427,6 +27474,7 @@ int main(int argc, char **argv) {
     RUN_TEST(haplotype_block_spans_reconstruct_every_generated_edit_set);
     RUN_TEST(haplotype_apply_and_translate_known_cases);
     RUN_TEST(haplotype_full_translation_matches_every_supported_codon_table);
+    RUN_TEST(haplotype_consensus_translation_matches_all_n_expansions);
     RUN_TEST(haplotype_differences_match_full_matrix_exhaustively);
     RUN_TEST(haplotype_differences_bound_alignment_work_and_report_limits);
     RUN_TEST(haplotype_apply_rejects_overlapping_inputs);

@@ -666,6 +666,13 @@ the public haplotype protein is a length-delimited prefix through that stop. Lat
 residues stay in worker storage for coding-context consumption, and later source
 events remain in contributor provenance. Full and stop-truncated translation do
 not have separate biological implementations.
+Ambiguity is an explicit input policy to that translator: independent coding
+predicates conservatively retain `X` for N-containing codons, while phased replay
+uses BioPerl's amino-acid consensus over every A/C/G/T expansion of N. A resolved
+residue does not clear the input's `unambiguous` fact. Both modes validate every
+base, including trailing partial codons and sequence after a stop. This raw
+translation is not Ensembl's reference peptide: reference start-methionine,
+terminal-stop and curated peptide-edit rules must precede protein comparison.
 Carrier-prefix identity includes per-event called/missing/unphased evidence. An uncertain
 path cannot share the result of a fully known path merely because their called edits agree.
 The native stream accepts complete decoded calls for a candidate transcript and uses the

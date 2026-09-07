@@ -433,7 +433,8 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
             duckvep_codon_table_t table = seq->codon_table
                 ? (duckvep_codon_table_t)seq->codon_table[tx] : DUCKVEP_CODON_TABLE_STANDARD;
             duckvep_translation_status_t translation = duckvep_translate_cds(b->cds,
-                leaf.cds_length, table, b->protein, b->protein_capacity, &leaf.translation);
+                leaf.cds_length, table, DUCKVEP_TRANSLATION_N_CONSENSUS,
+                b->protein, b->protein_capacity, &leaf.translation);
             switch (translation) {
             case DUCKVEP_TRANSLATION_OK: break;
             case DUCKVEP_TRANSLATION_BUFFER_TOO_SMALL:

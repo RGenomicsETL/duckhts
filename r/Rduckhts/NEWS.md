@@ -1,5 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- resolve unambiguous amino acids from `N`-containing codons in
+  `rduckhts_haplotypes()` and the bundled SQL function, matching BioPerl.
+  For example `GCN` translates to alanine; genuinely ambiguous codons remain `X`.
+  Independent annotation keeps its conservative handling of uncertain codons
+
 - return aligned `cds_differences` from `rduckhts_haplotypes()`, with explicit
   sequence/alignment coordinates and empty spans for gaps. Per-call
   `max_alignment_cells` and `max_leaf_differences` report capacity failures;

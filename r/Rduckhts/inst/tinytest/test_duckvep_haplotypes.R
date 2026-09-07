@@ -22,6 +22,19 @@ local({
     "(VALUES (1,100,'C',[1,1],NULL),(2,101,'G',[1,0],10),(3,102,'C',[0,1],20))",
     "v(event_index,position,alternate,alleles,phase_set)")
   actual <- rduckhts_haplotypes(con, calls, "haps")
+  n_tx <- sub("AAAAAAAAAAAA", "ATGGCNTGNGCC", tx, fixed = TRUE)
+  expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('n_codons',",
+    dbQuoteString(con, "SELECT 0::UINTEGER seq_region"), ",", dbQuoteString(con, n_tx), ",",
+    dbQuoteString(con, exons), ")"))$loaded)
+  n_call <- paste("SELECT 1 event_index,0 seq_region,102 AS position,'G' AS reference,'A' alternate,",
+    "1 alt_index,0 transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set")
+  for (policy in c("strict", "vep116_compat")) {
+    n_result <- rduckhts_haplotypes(con, n_call, "n_codons", phase_policy = policy)
+    expect_equal(n_result$cds, "ATAGCNTGNGCC")
+    expect_equal(n_result$protein, "IAXA")
+    expect_equal(n_result$sequence_status, "ok")
+    expect_equal(nrow(n_result$contributors[[1L]]), 1L)
+  }
   expect_equal(sort(actual$cds), c("CAAAAAAAAAAA", "CACAAAAAAAAA", "CGAAAAAAAAAA"))
   expect_equal(sort(actual$carrier_count), c(1,1,2))
   expect_equal(sort(actual$protein), c("HKKK", "QKKK", "RKKK"))

@@ -39,13 +39,38 @@ static const char *const AA_TABLES[32] = {
     [31] = "FFLLSSSSYYEECCWWLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG"
 };
 
+/* Expand at most 64 codons. The shared literal table remains the only amino
+ * acid authority; this is BioPerl 1.7.8 _translate_ambiguous_codon over ACGTN. */
+static uint8_t codon_n_consensus(const uint8_t *codon, const char *amino_acids) {
+    uint8_t masks[3];
+    for (size_t i = 0u; i < 3u; i++) {
+        char base = duckvep_dna_normalize((char)codon[i], 1);
+        masks[i] = base == 'N' ? 15u : (uint8_t)(1u << duckvep_dna_codon_code(base));
+    }
+    uint32_t seen = 0u;
+    for (unsigned a = 0u; a < 4u; a++) if (masks[0] & (1u << a))
+        for (unsigned b = 0u; b < 4u; b++) if (masks[1] & (1u << b))
+            for (unsigned c = 0u; c < 4u; c++) if (masks[2] & (1u << c)) {
+                uint8_t aa = (uint8_t)amino_acids[(a << 4u) | (b << 2u) | c];
+                seen |= UINT32_C(1) << (aa == '*' ? 26u : (unsigned)(aa - 'A'));
+            }
+    if (seen == ((UINT32_C(1) << ('D' - 'A')) | (UINT32_C(1) << ('N' - 'A')))) return 'B';
+    if (seen == ((UINT32_C(1) << ('E' - 'A')) | (UINT32_C(1) << ('Q' - 'A')))) return 'Z';
+    if (seen & (seen - 1u)) return 'X';
+    for (unsigned i = 0u; i <= 26u; i++) if (seen == (UINT32_C(1) << i))
+        return i == 26u ? (uint8_t)'*' : (uint8_t)('A' + i);
+    return 'X';
+}
+
 duckvep_translation_status_t duckvep_translate_cds(
     const uint8_t *cds, size_t cds_length, duckvep_codon_table_t table,
+    duckvep_translation_ambiguity_t ambiguity,
     uint8_t *peptide, size_t peptide_capacity, duckvep_translation_t *result) {
     if (!result) return DUCKVEP_TRANSLATION_INVALID_ARG;
     memset(result, 0, sizeof(*result));
     const char *amino_acids = duckvep_codon_table_amino_acids(table);
-    if (!cds || !peptide || !amino_acids) return DUCKVEP_TRANSLATION_INVALID_ARG;
+    if (!cds || !peptide || !amino_acids || (ambiguity != DUCKVEP_TRANSLATION_N_UNKNOWN &&
+        ambiguity != DUCKVEP_TRANSLATION_N_CONSENSUS)) return DUCKVEP_TRANSLATION_INVALID_ARG;
     size_t codons = cds_length / 3u;
     if (peptide_capacity < codons + 1u) return DUCKVEP_TRANSLATION_BUFFER_TOO_SMALL;
     uintptr_t src = (uintptr_t)cds, dst = (uintptr_t)peptide;
@@ -63,6 +88,8 @@ duckvep_translation_status_t duckvep_translate_cds(
         }
         if (has_n) translated.unambiguous = 0u;
         uint8_t aa = has_n ? (uint8_t)'X' : (uint8_t)amino_acids[code];
+        if (has_n && ambiguity == DUCKVEP_TRANSLATION_N_CONSENSUS)
+            aa = codon_n_consensus(cds + i * 3u, amino_acids);
         peptide[i] = aa;
         if (aa == '*' && !translated.first_stop_position1) translated.first_stop_position1 = i + 1u;
     }

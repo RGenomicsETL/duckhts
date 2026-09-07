@@ -34,6 +34,30 @@ CREATE TABLE hap_calls AS SELECT event_index, 0::UINTEGER seq_region, position,
 FROM (VALUES (1::UBIGINT,100::UBIGINT,'C',[1,1],NULL::BIGINT),
              (2,101,'G',[1,0],10), (3,102,'C',[0,1],20)) v(event_index,position,alternate,alleles,phase_set);
 
+# BioPerl resolves a codon only when its N expansions agree. GCN is A;
+# TGN has multiple amino acids and remains X. Neither policy invents phase.
+query I
+SELECT loaded FROM duckvep_model_load('hap_n','SELECT 0::UINTEGER seq_region',
+ 'SELECT * REPLACE(''ATGGCNTGNGCC''::BLOB AS cds_sequence) FROM hap_tx','SELECT * FROM hap_exons');
+----
+1
+
+statement ok
+CREATE TABLE hap_n_calls AS SELECT 1 event_index,0 seq_region,102 AS position,'G' AS reference,
+ 'A' alternate,1 alt_index,0 transcript_index,0 sample_index,[1] alleles,
+ [true] phase_before,NULL::BIGINT phase_set;
+
+query TTTIII
+SELECT cds,protein,sequence_status,sequence_flags,len(contributors),len(cds_differences)
+ FROM duckvep_haplotypes('SELECT * FROM hap_n_calls','hap_n');
+----
+ATAGCNTGNGCC	IAXA	ok	0	1	1
+
+query T
+SELECT protein FROM duckvep_haplotypes('SELECT * FROM hap_n_calls','hap_n',phase_policy := 'vep116_compat');
+----
+IAXA
+
 query TTIT
 SELECT cds, protein, carrier_count, list_transform(contributors, c -> c.event_index)::VARCHAR
 FROM duckvep_haplotypes('SELECT * FROM hap_calls ORDER BY event_index DESC', 'hap') ORDER BY cds;

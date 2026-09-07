@@ -1,6 +1,12 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- resolve `N`-containing codons in phased proteins when every nucleotide expansion
+  gives the same amino acid, matching BioPerl (for example `GCN` gives alanine).
+  Unresolved codons remain `X`; the native input-ambiguity fact stays explicit.
+  Independent coding predicates retain their conservative `N` handling through
+  an explicit policy in the shared translator
+
 - expose aligned `cds_differences` from phased replay through a host-neutral
   sequence kernel, with VEP-116 pure-Perl global-alignment scoring and tie order.
   Per-call `max_alignment_cells` and `max_leaf_differences` bound traceback and

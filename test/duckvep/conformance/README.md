@@ -601,6 +601,22 @@ not reference-peptide model construction, public protein differences, compound
 SO or HGVS. The pure-C suite separately compares the exact band against a full
 matrix on exhaustive short pairs and exercises all declared allocation limits.
 
+`reference_translation_differential.R` is a separate reference-peptide
+investigation over all 125 ACGTN triplets in start/internal/terminal positions,
+all 24 supported tables, all three trailing-partial lengths, and 13 explicit
+start, stop, ambiguity, case and peptide-edit witnesses (27,013 cases). Real
+Ensembl single-exon models feed `Transcript::translate`, `Translation::seq`
+and `TranscriptHaplotypeContainer`; only the input slice's table attribute is
+supplied without a database. No translation or container method is overridden.
+The lane compares native consensus translation with complete and stop-truncated
+alternate proteins, and separately tests the raw-translation-as-reference
+hypothesis. That hypothesis is not the implemented reference-peptide contract:
+the lane deliberately exits nonzero while reference differences remain. It
+retains all pairs, reference and alternate failure categories, exact module
+hashes, package lock, source identity and missing/extra/sequence corruption
+controls. Original Haplosaurus inputs and expectations are not changed. This
+lane does not certify public protein differences, compound SO or HGVS.
+
 This is **not** a public phased-executor certificate: the R harness materializes
 decoded calls, and it does not test native DuckDB carrier streaming, strict phase/PS
 interpretation, compound SO/HGVS, structural

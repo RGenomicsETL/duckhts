@@ -1934,12 +1934,12 @@ DUCKVEP_INTERNAL_API duckvep_coding_context_status_t duckvep_coding_context_buil
 
     duckvep_translation_t translated;
     cst = delta_context_from_translation(duckvep_translate_cds(ref_cds, ref_cds_len,
-        table, ref_peptide_scratch, ref_peptide_cap, &translated),
+        table, DUCKVEP_TRANSLATION_N_UNKNOWN, ref_peptide_scratch, ref_peptide_cap, &translated),
         DUCKVEP_CODING_CONTEXT_REF_PEPTIDE_BUFFER_TOO_SMALL);
     if (cst != DUCKVEP_CODING_CONTEXT_OK) return cst;
     ref_pep_len = translated.length;
     cst = delta_context_from_translation(duckvep_translate_cds(alt_cds_scratch, alt_cds_len,
-        table, alt_peptide_scratch, alt_peptide_cap, &translated),
+        table, DUCKVEP_TRANSLATION_N_UNKNOWN, alt_peptide_scratch, alt_peptide_cap, &translated),
         DUCKVEP_CODING_CONTEXT_ALT_PEPTIDE_BUFFER_TOO_SMALL);
     if (cst != DUCKVEP_CODING_CONTEXT_OK) return cst;
     alt_pep_len = translated.length;
@@ -2179,14 +2179,14 @@ static duckvep_coding_context_status_t delta_coding_context_open_validated_edit(
     }
     duckvep_translation_t translated;
     cst = delta_context_from_translation(duckvep_translate_cds(
-        ref_cds + nt_offset, ref_nt_length, table, local_ref_peptide, local_ref_peptide_cap,
-        &translated), DUCKVEP_CODING_CONTEXT_REF_PEPTIDE_BUFFER_TOO_SMALL);
+        ref_cds + nt_offset, ref_nt_length, table, DUCKVEP_TRANSLATION_N_UNKNOWN,
+        local_ref_peptide, local_ref_peptide_cap, &translated), DUCKVEP_CODING_CONTEXT_REF_PEPTIDE_BUFFER_TOO_SMALL);
     if (cst != DUCKVEP_CODING_CONTEXT_OK) return cst;
     ref_local_peptide_len = translated.length;
     tmp.local_ref_unambiguous = translated.unambiguous;
     cst = delta_context_from_translation(duckvep_translate_cds(
-        local_alt_cds, alt_nt_length, table, local_alt_peptide, local_alt_peptide_cap,
-        &translated), DUCKVEP_CODING_CONTEXT_ALT_PEPTIDE_BUFFER_TOO_SMALL);
+        local_alt_cds, alt_nt_length, table, DUCKVEP_TRANSLATION_N_UNKNOWN,
+        local_alt_peptide, local_alt_peptide_cap, &translated), DUCKVEP_CODING_CONTEXT_ALT_PEPTIDE_BUFFER_TOO_SMALL);
     if (cst != DUCKVEP_CODING_CONTEXT_OK) return cst;
     alt_local_peptide_len = translated.length;
     tmp.local_alt_cds = local_alt_cds;

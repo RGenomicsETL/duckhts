@@ -53,15 +53,24 @@ typedef struct duckvep_translation {
     uint8_t unambiguous; /* All CDS bases, including a trailing partial codon, are A/C/G/T/U. */
 } duckvep_translation_t;
 
+typedef enum duckvep_translation_ambiguity {
+    DUCKVEP_TRANSLATION_N_UNKNOWN = 0, /* Conservative independent coding predicates. */
+    DUCKVEP_TRANSLATION_N_CONSENSUS   /* BioPerl: resolve all A/C/G/T expansions of N. */
+} duckvep_translation_ambiguity_t;
+
 /* Translate once into distinct caller storage of at least cds_length/3 + 1
  * bytes. Full peptide output is NUL-terminated; callers select the prefix
  * through first_stop_position1 when they need the stop-truncated protein.
- * A/C/G/T/U and N are case-insensitive; N-containing codons produce X. Validate
+ * A/C/G/T/U and N are case-insensitive. N_UNKNOWN emits X for any N-containing
+ * codon; N_CONSENSUS emits the common amino acid of its expansions, B for D/N,
+ * Z for E/Q, and X otherwise. The unambiguous input fact remains false even when
+ * the amino acid is resolved. Validate
  * every input base, including partial codons and sequence beyond the first stop.
  * No allocation. Result is zero on failure; bytes may be partial on invalid
  * input. Result storage must not overlap either byte span. */
 duckvep_translation_status_t duckvep_translate_cds(
     const uint8_t *cds, size_t cds_length, duckvep_codon_table_t table,
+    duckvep_translation_ambiguity_t ambiguity,
     uint8_t *peptide, size_t peptide_capacity, duckvep_translation_t *result);
 
 /* Return the first raw-CDS stop as a one-based peptide position, or zero when
