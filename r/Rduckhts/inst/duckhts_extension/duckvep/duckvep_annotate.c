@@ -2176,8 +2176,11 @@ duckvep_scalar_seed_index(duckvep_scalar_state_t *state,
 	for (hit = 0; hit < hit_count; hit++)
 		state->seed_transcripts[hit] = (uint32_t)cr_label(
 		    index, state->interval_hits[hit]);
-	qsort(state->seed_transcripts, (size_t)hit_count,
-	    sizeof(*state->seed_transcripts), duckvep_scalar_u32_compare);
+	/* An empty lookup may have no seed storage; libc requires a non-NULL
+	 * qsort base even when the element count is zero. */
+	if (hit_count > 1)
+		qsort(state->seed_transcripts, (size_t)hit_count,
+		    sizeof(*state->seed_transcripts), duckvep_scalar_u32_compare);
 	memset(&kernel_error, 0, sizeof(kernel_error));
 	if ((interval_features ?
 	    duckvep_annotate_cursor_seed_interval_features(cursor,

@@ -16,7 +16,8 @@
 
 - omit empty contigs from DuckVEP's cgranges accelerators, avoiding invalid
   indexing when known regions have no transcript or regulatory intervals.
-  The model's separate known-region relation remains authoritative
+  Skip sorting zero-hit seed lists without storage. The model's separate
+  known-region relation remains authoritative
 
 - add `duckvep_phase_call(...)` over typed decoded GT/PS calls, backed by a
   host-neutral constant-space phase reducer. Per-call `strict` and

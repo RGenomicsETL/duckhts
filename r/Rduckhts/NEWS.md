@@ -11,7 +11,8 @@
   concurrent callers may retry, and completed scans retain independent state
 
 - avoid invalid cgranges indexing when a loaded model has known regions without
-  transcript or regulatory intervals; known-region identity is unchanged
+  transcript or regulatory intervals, and avoid passing empty unallocated seed
+  lists to libc sorting. Known-region identity and annotation results are unchanged
 
 - expose bundled `duckvep_phase_call(...)` through DBI for typed genotype/phase
   preparation, including per-call strict/VEP-116 policies, missing alleles and

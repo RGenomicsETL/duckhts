@@ -13,6 +13,10 @@ local({
   expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('haps',",
     dbQuoteString(con, "SELECT 0::UINTEGER seq_region"), ",",
     dbQuoteString(con, tx), ",", dbQuoteString(con, exons), ")"))$loaded)
+  empty <- dbGetQuery(con, paste("SELECT a.consequence,a.status,a.reason FROM",
+    "unnest(_duckvep_annotate_small_rich('haps',0::UINTEGER,1::UBIGINT,'A','C',0::UBIGINT)) u(a)"))
+  expect_identical(empty, data.frame(consequence = "sequence_variant", status = "unresolved",
+    reason = "no_feature_in_loaded_model"))
   calls <- paste("SELECT event_index,0 seq_region,position,'A' reference,alternate,1 alt_index,",
     "0 transcript_index,0 sample_index,alleles,[true,true] phase_before,phase_set FROM",
     "(VALUES (1,100,'C',[1,1],NULL),(2,101,'G',[1,0],10),(3,102,'C',[0,1],20))",

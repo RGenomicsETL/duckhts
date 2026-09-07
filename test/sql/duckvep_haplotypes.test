@@ -17,6 +17,14 @@ SELECT loaded FROM duckvep_model_load('hap', 'SELECT i::UINTEGER seq_region FROM
 ----
 1
 
+# First annotation on this connection has zero transcript and feature hits:
+# the shared model lookup must work before any seed buffer has been allocated.
+query TTT
+SELECT a.consequence,a.status,a.reason FROM unnest(_duckvep_annotate_small_rich(
+ 'hap',1::UINTEGER,100::UBIGINT,'A','C',0::UBIGINT)) u(a);
+----
+sequence_variant	unresolved	no_feature_in_loaded_model
+
 # Flat event x transcript x sample calls. The early homozygote must reach
 # phase set 20, which is first encountered at the third source event.
 statement ok
