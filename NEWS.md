@@ -1,6 +1,9 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- compute phased-input event identity and transcript/sample ploidy checks once
+  per group, retaining duplicate-call rejection and complete phase domains
+
 - add a registry-staged phased-replay benchmark for initialized native execution
   and public SQL sort/materialization, with full carrier checks, explicit
   active-pool counts and separate native-workspace/process-memory measurements

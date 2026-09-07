@@ -1,5 +1,8 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- reuse grouped input validation in bundled phased replay, preserving source
+  identity, duplicate-call, ploidy and phase-domain checks
+
 - test that bundled phased replay preserves restoring-indel provenance and
   frame flags when CDS/protein differences are empty, under both phase policies
 

@@ -269,8 +269,30 @@ SELECT * FROM duckvep_haplotypes('SELECT * FROM hap_calls UNION ALL SELECT * FRO
 ----
 duplicate call
 
+# REF-only duplicates must fail too; they never create occupied native paths.
+statement error
+SELECT * FROM duckvep_haplotypes('SELECT * REPLACE([0,0] AS alleles) FROM hap_calls UNION ALL SELECT * REPLACE([0,0] AS alleles) FROM hap_calls', 'hap');
+----
+duplicate call
+
+# Source identity spans samples, not just the per-sample duplicate-call key.
+statement error
+SELECT * FROM duckvep_haplotypes('SELECT * FROM hap_calls UNION ALL SELECT * REPLACE(1 AS sample_index,position+1 AS position) FROM hap_calls', 'hap');
+----
+inconsistent event identity
+
+statement error
+SELECT * FROM duckvep_haplotypes('SELECT * FROM hap_calls UNION ALL SELECT * REPLACE(1 AS sample_index,2 AS alt_index) FROM hap_calls', 'hap', phase_policy := 'vep116_compat');
+----
+inconsistent event identity
+
 statement error
 SELECT * FROM duckvep_haplotypes('SELECT * REPLACE(NULL::UINTEGER AS sample_index) FROM hap_calls', 'hap');
+----
+required input
+
+statement error
+SELECT * FROM duckvep_haplotypes('SELECT * REPLACE(NULL::UBIGINT AS event_index) FROM hap_calls', 'hap');
 ----
 required input
 
@@ -278,6 +300,12 @@ statement error
 SELECT * FROM duckvep_haplotypes('SELECT * REPLACE(CASE WHEN event_index=3 THEN [1] ELSE alleles END AS alleles, NULL::BOOLEAN[] AS phase_before) FROM hap_calls', 'hap');
 ----
 ploidy
+
+# Ploidy belongs to each transcript/sample domain, not the whole event/cohort.
+query I
+SELECT sum(carrier_count) FROM duckvep_haplotypes('SELECT * FROM hap_calls UNION ALL SELECT * REPLACE(1 AS sample_index,[1] AS alleles,[true] AS phase_before) FROM hap_calls', 'hap');
+----
+5
 
 statement error
 SELECT * FROM duckvep_haplotypes('SELECT * FROM hap_calls', 'hap', workspace_limit := 1);

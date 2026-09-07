@@ -22,6 +22,35 @@ local({
     "(VALUES (1,100,'C',[1,1],NULL),(2,101,'G',[1,0],10),(3,102,'C',[0,1],20))",
     "v(event_index,position,alternate,alleles,phase_set)")
   actual <- rduckhts_haplotypes(con, calls, "haps")
+  for (policy in c("strict", "vep116_compat")) {
+    # Changing any source ALT identity across samples must fail even without
+    # duplicate (event, transcript, sample) keys. Input order cannot hide it.
+    for (replacement in c("1 AS seq_region", "position+1 AS position", "'T' AS reference",
+                          "'T' AS alternate", "2 AS alt_index")) {
+      inconsistent <- paste("SELECT * FROM (", calls, ") UNION ALL SELECT * REPLACE(",
+        "1 AS sample_index,", replacement, ") FROM (", calls, ") ORDER BY sample_index DESC")
+      expect_error(rduckhts_haplotypes(con, inconsistent, "haps", phase_policy = policy),
+        pattern = "inconsistent event identity")
+    }
+    for (column in c("event_index", "transcript_index", "sample_index")) {
+      null_key <- paste("SELECT * REPLACE(NULL AS", column, ") FROM (", calls, ")")
+      expect_error(rduckhts_haplotypes(con, null_key, "haps", phase_policy = policy),
+        pattern = "required input")
+    }
+    ref_only <- paste("SELECT * REPLACE([0,0] AS alleles) FROM (", calls, ")")
+    expect_error(rduckhts_haplotypes(con, paste(ref_only, "UNION ALL", ref_only),
+      "haps", phase_policy = policy), pattern = "duplicate call")
+    changed_ploidy <- paste("SELECT * REPLACE(CASE WHEN event_index=3 THEN [1] ELSE alleles END",
+      "AS alleles,NULL::BOOLEAN[] AS phase_before) FROM (", calls, ")")
+    expect_error(rduckhts_haplotypes(con, changed_ploidy, "haps", phase_policy = policy),
+      pattern = "ploidy")
+    cohort <- paste("SELECT * FROM (", calls, ") UNION ALL SELECT * REPLACE(",
+      "1 AS sample_index,[1] AS alleles,[true] AS phase_before) FROM (", calls, ")")
+    mixed <- rduckhts_haplotypes(con, cohort, "haps", phase_policy = policy)
+    carriers <- do.call(rbind, mixed$carriers)
+    expect_equal(sum(mixed$carrier_count), if (policy == "strict") 5 else 3)
+    expect_true(all(carriers$ploidy == ifelse(carriers$sample_index == 0, 2, 1)))
+  }
   n_tx <- sub("AAAAAAAAAAAA", "ATGGCNTGNGCC", tx, fixed = TRUE)
   expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('n_codons',",
     dbQuoteString(con, "SELECT 0::UINTEGER seq_region"), ",", dbQuoteString(con, n_tx), ",",

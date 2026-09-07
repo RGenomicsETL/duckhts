@@ -258,12 +258,16 @@ static int input_open(haplotype_state_t *s, const haplotype_bind_t *b, char *err
     const char *domain = b->policy == DUCKVEP_PHASE_STRICT ?
         "coalesce(list(DISTINCT phase_set ORDER BY phase_set NULLS FIRST) FILTER(WHERE scoped), [NULL]::BIGINT[]) AS domain_sets " :
         "[NULL]::BIGINT[] AS domain_sets ";
+    /* Validate each identity/domain once, then attach its facts to every call.
+     * Duplicate calls remain visible, including calls carrying only REF. */
     static const char suffix[] =
-        "FROM calls GROUP BY transcript_index,sample_index) SELECT c.* EXCLUDE(scoped), d.domain_sets, "
-        "count(*) OVER(PARTITION BY event_index,transcript_index,sample_index) copies, "
-        "count(DISTINCT (seq_region,position,reference,alternate,alt_index)) OVER(PARTITION BY event_index) versions, "
-        "count(DISTINCT len(alleles)) OVER(PARTITION BY transcript_index,sample_index) ploidies "
+        ",count(DISTINCT len(alleles)) ploidies FROM calls GROUP BY transcript_index,sample_index), "
+        "event_versions AS (SELECT event_index, "
+        "count(DISTINCT (seq_region,position,reference,alternate,alt_index)) versions FROM raw GROUP BY event_index) "
+        "SELECT c.* EXCLUDE(scoped), d.domain_sets, "
+        "count(*) OVER(PARTITION BY c.event_index,transcript_index,sample_index) copies, v.versions, d.ploidies "
         "FROM calls c LEFT JOIN domains d USING(transcript_index,sample_index) "
+        "LEFT JOIN event_versions v USING(event_index) "
         "ORDER BY seq_region,position,event_index,transcript_index,sample_index";
     size_t qlen = strlen(b->query), overhead = sizeof(prefix) + sizeof(middle) + strlen(domain) + sizeof(suffix);
     if (qlen > SIZE_MAX - overhead || qlen + overhead > b->limits[LIMIT_WORKSPACE] - s->workspace_bytes) {
