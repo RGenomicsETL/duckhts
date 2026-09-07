@@ -49,7 +49,8 @@ duckvep_raw_gt_status_t duckvep_phase_parse_vep116_raw(
 
 typedef enum {
     DUCKVEP_PHASE_STRICT,
-    DUCKVEP_PHASE_VEP116_COMPAT
+    DUCKVEP_PHASE_VEP116_COMPAT,
+    DUCKVEP_PHASE_VEP116_RAW
 } duckvep_phase_policy_t;
 
 typedef enum {

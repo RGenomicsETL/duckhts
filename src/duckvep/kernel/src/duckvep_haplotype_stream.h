@@ -4,7 +4,7 @@
  * interprets a decoded GT. Candidate and phase-domain discovery and output
  * materialization belong to the host query plan.
  *
- * Input is sorted by (chrom_id, pos1, event_id). begin may report a transcript
+ * Input is sorted by (chrom_id, pos1, event_id, allele_index). begin may report a transcript
  * ready before consuming the input: drain next until DONE, then retry begin with
  * the same input. finish uses the same drain protocol. Each next result borrows
  * scratch until the next next/begin/finish call; its carrier list stays valid
@@ -44,6 +44,11 @@ typedef struct {
     const uint8_t *ref, *alt;
     uint32_t pos1;
     uint16_t chrom_id, ref_len, alt_len;
+    /* With source_record set, event_id identifies a source record and this is
+     * its REF (zero), positive ALT ordinal, or UINT32_MAX for the undefined
+     * file-slot interpretation (empty ALT, complete source REF deletion). */
+    uint32_t allele_index;
+    uint8_t source_record;
 } duckvep_haplotype_source_t;
 
 typedef struct {
@@ -121,7 +126,9 @@ typedef struct {
     /* First failed coding projection, or edit/rebuild status when projection is OK.
      * Proven noncoding contributors keep their own OUT_OF_CDS status but do not
      * suppress a coding transcript's literal CDS. This does not predict splicing.
-     * Failed paths have no CDS/protein/blocks; all contributors/carriers remain. */
+     * Failed paths have no CDS/protein/blocks; all contributors/carriers remain.
+     * CONDITIONAL has sequence with explicitly interpreted source evidence;
+     * INPUT_INCOMPLETE has no sequence. Projection failures override both. */
     duckvep_cds_edit_status_t projection_status;
     duckvep_haplotype_status_t sequence_status;
 } duckvep_haplotype_leaf_t;
@@ -135,7 +142,7 @@ typedef struct {
     uint32_t current_event, closing;
     size_t allele_begin, allele_count;
     uint64_t serial, last_event_id;
-    uint32_t last_pos1;
+    uint32_t last_pos1, last_allele_index;
     uint16_t last_chrom;
     uint8_t have_input, have_current, initialized;
     uint8_t have_phase_policy;
@@ -157,7 +164,9 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_init(
 
 /* The owner may discard input alleles after OK; input must not alias workspace
  * storage. Event IDs need only
- * be unique, with increasing IDs used to order events at the same coordinate. */
+ * be unique, with increasing IDs used to order events at the same coordinate.
+ * Interpretations of one source record share its ID and geometry and arrive in
+ * increasing allele_index order; UINT32_MAX is last, never a real ALT. */
 duckvep_haplotype_stream_status_t duckvep_haplotype_stream_begin(
     duckvep_haplotype_stream_t *stream, const duckvep_haplotype_source_t *event);
 
@@ -196,6 +205,18 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_push_call(
     duckvep_haplotype_stream_t *stream, uint32_t transcript_index,
     const duckvep_haplotype_call_t *call,
     const duckvep_haplotype_phase_set_t *phase_sets, size_t phase_set_count);
+
+/* Route a validated raw-parser result to this source-record interpretation in
+ * one candidate transcript. The host supplies every selected ALT interpretation
+ * once, plus an empty-ALT interpretation if a retained call has an undefined
+ * file slot. A REF interpretation retains missing REF/omitted-call observations
+ * without adding an edit; known REF remains implicit. File ploidy is two and PS is
+ * ignored; the input source ploidy remains in the parser result, not the key.
+ * Missing-source or undefined-slot sequences are explicitly CONDITIONAL, not
+ * known strict-phase sequences. Mixing raw and decoded policies is an error. */
+duckvep_haplotype_stream_status_t duckvep_haplotype_stream_push_raw_call(
+    duckvep_haplotype_stream_t *stream, uint32_t transcript_index,
+    uint32_t sample_index, const duckvep_raw_gt_t *call);
 
 duckvep_haplotype_stream_status_t duckvep_haplotype_stream_finish(
     duckvep_haplotype_stream_t *stream);

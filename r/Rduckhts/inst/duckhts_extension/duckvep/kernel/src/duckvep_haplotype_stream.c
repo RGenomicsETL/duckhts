@@ -82,16 +82,36 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_begin(
     if (!s || !s->initialized) return DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG;
     if (s->error) return s->error;
     if (!source || !source->pos1 || !source->ref || !source->alt ||
-        !source->ref_len || !source->alt_len || s->serial == UINT64_MAX ||
+        !source->ref_len || source->source_record > 1u ||
+        (!source->source_record && (!source->alt_len || source->allele_index)) ||
+        (source->source_record && ((source->allele_index == UINT32_MAX) != !source->alt_len)) ||
+        (source->source_record && source->allele_index != UINT32_MAX && source->allele_index > INT32_MAX) ||
+        s->serial == UINT64_MAX ||
         (uint32_t)source->ref_len - 1u > UINT32_MAX - source->pos1)
         return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
     if (s->have_input && (source->chrom_id < s->last_chrom ||
         (source->chrom_id == s->last_chrom && (source->pos1 < s->last_pos1 ||
-         (source->pos1 == s->last_pos1 && source->event_id <= s->last_event_id)))))
+         (source->pos1 == s->last_pos1 && (source->event_id < s->last_event_id ||
+          (source->event_id == s->last_event_id && (!source->source_record ||
+           source->allele_index <= s->last_allele_index))))))))
         return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INPUT_ORDER);
+    if (s->have_input && source->chrom_id == s->last_chrom && source->pos1 == s->last_pos1 &&
+        source->event_id == s->last_event_id) {
+        const duckvep_haplotype_source_t *previous = &s->buffers.events[s->current_event].source;
+        if (!s->have_current || !previous->source_record || previous->ref_len != source->ref_len ||
+            memcmp(previous->ref, source->ref, source->ref_len))
+            return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
+    }
+    if (source->source_record && !source->allele_index &&
+        (source->ref_len != source->alt_len || memcmp(source->ref, source->alt, source->ref_len)))
+        return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
     duckvep_event_t prepared;
-    if (!duckvep_event_prepare_small(source->pos1, source->ref, source->ref_len,
-                                     source->alt, source->alt_len, &prepared))
+    int valid = source->source_record
+        ? duckvep_event_prepare_replacement(source->pos1, source->ref, source->ref_len,
+            source->alt, source->alt_len, &prepared)
+        : duckvep_event_prepare_small(source->pos1, source->ref, source->ref_len,
+            source->alt, source->alt_len, &prepared);
+    if (!valid)
         return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
     prepared.chrom_id = source->chrom_id;
     uint32_t completed;
@@ -135,6 +155,7 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_begin(
     s->have_current = s->have_input = 1u;
     s->serial++;
     s->last_event_id = source->event_id;
+    s->last_allele_index = source->allele_index;
     s->last_pos1 = source->pos1;
     s->last_chrom = source->chrom_id;
     s->input_events++;
@@ -207,10 +228,15 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_push(
     if (s->error) return s->error;
     if (!s->have_input || s->closing || s->carriers.pending || s->carriers.finished || !key ||
         !key->lane || key->lane > key->ploidy || key->phase_set_present > 1u ||
-        !evidence || (evidence & ~(DUCKVEP_CARRIER_CALLED | DUCKVEP_CARRIER_MISSING | DUCKVEP_CARRIER_UNPHASED)))
+        !evidence || (evidence & ~(DUCKVEP_CARRIER_CALLED | DUCKVEP_CARRIER_MISSING |
+                                  DUCKVEP_CARRIER_UNPHASED | DUCKVEP_CARRIER_CONDITIONAL)))
         return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
     if (!s->have_current) return DUCKVEP_HAPLOTYPE_STREAM_OK;
     const duckvep_haplotype_stored_event_t *event = &s->buffers.events[s->current_event];
+    if (((evidence & DUCKVEP_CARRIER_CONDITIONAL) && !event->source.source_record) ||
+        (event->source.source_record && event->source.allele_index == UINT32_MAX &&
+         (!(evidence & DUCKVEP_CARRIER_CONDITIONAL) || (evidence & DUCKVEP_CARRIER_CALLED))))
+        return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
     for (uint32_t i = 0u; i < event->projection_count; i++) {
         size_t at = ring_add(event->projection_begin, i, s->buffers.projection_capacity);
         duckvep_carriers_status_t status = duckvep_carriers_push(&s->carriers,
@@ -283,6 +309,7 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_push_call(
     if (!s->have_current || s->closing || s->carriers.pending || s->carriers.finished ||
         !call || !call->alleles || !call->ploidy || !call->alt_index ||
         call->alt_index > INT32_MAX || call->phase_set.present > 1u ||
+        s->buffers.events[s->current_event].source.source_record ||
         (call->policy != DUCKVEP_PHASE_STRICT && call->policy != DUCKVEP_PHASE_VEP116_COMPAT) ||
         (s->have_phase_policy && s->phase_policy != call->policy) ||
         (set_count && !sets) || set_count > SIZE_MAX / sizeof(*sets) ||
@@ -365,6 +392,56 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_push_call(
     return DUCKVEP_HAPLOTYPE_STREAM_OK;
 }
 
+duckvep_haplotype_stream_status_t duckvep_haplotype_stream_push_raw_call(
+    duckvep_haplotype_stream_t *s, uint32_t tx, uint32_t sample, const duckvep_raw_gt_t *call) {
+    if (!s || !s->initialized) return DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG;
+    if (s->error) return s->error;
+    if (!s->have_current || s->closing || s->carriers.pending || s->carriers.finished ||
+        !call || !call->source_ploidy || call->source_has_missing > 1u ||
+        call->disposition < DUCKVEP_RAW_GT_OMITTED_REFERENCE ||
+        call->disposition > DUCKVEP_RAW_GT_RETAINED ||
+        (s->have_phase_policy && s->phase_policy != DUCKVEP_PHASE_VEP116_RAW))
+        return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
+    const duckvep_haplotype_stored_event_t *event = &s->buffers.events[s->current_event];
+    if (!event->source.source_record || !find_projection(s, event, tx))
+        return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
+    if (call->disposition == DUCKVEP_RAW_GT_RETAINED) {
+        if (!call->parsed_slots || call->parsed_slots > (uint32_t)call->source_ploidy + 1u ||
+            call->allele_index[0] > INT32_MAX ||
+            (call->parsed_slots == 1u ? call->allele_index[1] != UINT32_MAX
+                                     : call->allele_index[1] > INT32_MAX))
+            return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
+    } else if (call->parsed_slots || call->allele_index[0] != UINT32_MAX ||
+               call->allele_index[1] != UINT32_MAX ||
+               call->source_has_missing != (call->disposition == DUCKVEP_RAW_GT_OMITTED_EMPTY)) {
+        return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
+    }
+    s->phase_policy = DUCKVEP_PHASE_VEP116_RAW;
+    s->have_phase_policy = 1u;
+    uint32_t allele = event->source.allele_index;
+    if (call->disposition == DUCKVEP_RAW_GT_OMITTED_REFERENCE) return DUCKVEP_HAPLOTYPE_STREAM_OK;
+    for (uint16_t lane = 1u; lane <= 2u; lane++) {
+        uint8_t evidence = 0u;
+        if (call->disposition == DUCKVEP_RAW_GT_OMITTED_EMPTY) {
+            /* No upstream edit, but an omitted missing call is not proof of REF.
+             * Retain its conditional no-op observation on both occupied paths. */
+            if (allele) continue;
+            evidence = DUCKVEP_CARRIER_MISSING | DUCKVEP_CARRIER_CONDITIONAL;
+        } else {
+            if (call->allele_index[lane - 1u] != allele) continue;
+            if (allele == UINT32_MAX) evidence = DUCKVEP_CARRIER_CONDITIONAL;
+            else if (allele) evidence = DUCKVEP_CARRIER_CALLED;
+            if (call->source_has_missing)
+                evidence |= DUCKVEP_CARRIER_MISSING | DUCKVEP_CARRIER_CONDITIONAL;
+            if (!evidence) continue; /* Known reference remains implicit. */
+        }
+        duckvep_carrier_key_t key = {sample, 0, lane, 2u, 0u};
+        duckvep_carriers_status_t status = duckvep_carriers_push(&s->carriers, tx, &key, evidence);
+        if (status != DUCKVEP_CARRIERS_OK) return carrier_fail(s, status);
+    }
+    return DUCKVEP_HAPLOTYPE_STREAM_OK;
+}
+
 static void sift_edit_min(duckvep_haplotype_edit_t *edits, uint64_t *ids,
     size_t root, size_t count) {
     duckvep_haplotype_edit_t value = edits[root];
@@ -427,9 +504,16 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
         uint8_t evidence = b->leaf_events[i].evidence_flags;
         b->contributors[i] = (duckvep_haplotype_contributor_t){e->source, p->status, evidence, &e->prepared};
         leaf.evidence_flags |= evidence;
+        if ((evidence & (DUCKVEP_CARRIER_MISSING | DUCKVEP_CARRIER_UNPHASED)) &&
+            !(evidence & DUCKVEP_CARRIER_CONDITIONAL))
+            leaf.sequence_status = DUCKVEP_HAPLOTYPE_INPUT_INCOMPLETE;
         if (leaf.projection_status == DUCKVEP_CDS_EDIT_OK && !p->cds_unaffected)
             leaf.projection_status = p->status;
-        if (p->status == DUCKVEP_CDS_EDIT_OK && (evidence & DUCKVEP_CARRIER_CALLED)) {
+        if (p->status == DUCKVEP_CDS_EDIT_OK &&
+            (evidence & (DUCKVEP_CARRIER_CALLED | DUCKVEP_CARRIER_CONDITIONAL)) &&
+            !(e->source.source_record && !e->source.allele_index)) {
+            /* An explicit REF observation was validated by projection but has
+             * no physical differing island. Keep its evidence/provenance. */
             duckvep_edit_set_t edits;
             duckvep_cds_edit_status_t split = duckvep_projected_cds_edit_set_build(&p->edit,
                 s->carriers.model->strand[tx], b->edits + leaf.edit_count,
@@ -446,8 +530,6 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
     }
     leaf.contributors = b->contributors;
     leaf.contributor_count = count;
-    if (leaf.evidence_flags & (DUCKVEP_CARRIER_MISSING | DUCKVEP_CARRIER_UNPHASED))
-        leaf.sequence_status = DUCKVEP_HAPLOTYPE_INPUT_INCOMPLETE;
     if (leaf.projection_status == DUCKVEP_CDS_EDIT_OK && leaf.sequence_status == DUCKVEP_HAPLOTYPE_OK) {
         const duckvep_sequence_pool_t *seq = s->sequences;
         uint64_t offset = seq->cds_offset[tx];
@@ -527,6 +609,8 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
             return fail(s, DUCKVEP_HAPLOTYPE_STREAM_SEQUENCE_FULL);
         if (leaf.sequence_status != DUCKVEP_HAPLOTYPE_OK)
             leaf.cds_length = leaf.protein_length = 0u;
+        else if (leaf.evidence_flags & DUCKVEP_CARRIER_CONDITIONAL)
+            leaf.sequence_status = DUCKVEP_HAPLOTYPE_CONDITIONAL;
     }
     s->completed_leaves++;
     *out = leaf;

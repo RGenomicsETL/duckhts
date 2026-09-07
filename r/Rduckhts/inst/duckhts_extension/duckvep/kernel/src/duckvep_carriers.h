@@ -43,7 +43,8 @@ typedef struct {
 enum {
     DUCKVEP_CARRIER_CALLED = 1u,
     DUCKVEP_CARRIER_MISSING = 2u,
-    DUCKVEP_CARRIER_UNPHASED = 4u
+    DUCKVEP_CARRIER_UNPHASED = 4u,
+    DUCKVEP_CARRIER_CONDITIONAL = 8u /* Explicit interpretation, not proof of a called allele. */
 };
 
 typedef struct {

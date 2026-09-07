@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- add source-record interpretations to native phased replay, including explicit
+  conditional undefined-slot deletions and missing-call REF observations.
+  Public SQL/R replay still consumes decoded calls
+
 - add a constant-space native raw-GT parser with direct Haplosaurus-object
   differential tests. This covers parsing only; public phased replay still
   consumes decoded calls and does not emulate upstream undefined-slot deletions

@@ -158,7 +158,7 @@ void duckhts_bench_haplotype_stream(char **reference, int *transcripts, int *sam
                 duckvep_haplotype_source_t source = {(uint64_t)cluster * 4u + event + 1u,
                     (const uint8_t *)refs[event], (const uint8_t *)alts[event],
                     cluster * 1000u + 99u + (uint32_t)positions[event], 0u,
-                    (uint16_t)strlen(refs[event]), (uint16_t)strlen(alts[event])};
+                    (uint16_t)strlen(refs[event]), (uint16_t)strlen(alts[event]), 0u, 0u};
                 duckvep_haplotype_stream_status_t status;
                 while ((status = duckvep_haplotype_stream_begin(&stream, &source)) ==
                         DUCKVEP_HAPLOTYPE_STREAM_TRANSCRIPT_READY)

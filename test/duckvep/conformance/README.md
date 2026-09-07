@@ -606,7 +606,15 @@ the standalone native raw-GT parser on all 14,040 source calls: retained/omitted
 parsed slot count, the two consumed allele ordinals, source ploidy and missingness.
 Seven field-corruption controls guard that comparison. Parser results and failures
 are retained separately; parser agreement does not turn full-replay failures into passes.
-The native parser does not yet feed public phased replay or apply undefined-slot deletions.
+The native record-replay lane consumes the parser result and complete source alleles.
+It compares CDS/protein multisets, counts and physical-edit source records with
+Haplosaurus, and independently checks all 28,080 per-lane record observations against
+the upstream genotype sidecar. Missing REF/omitted calls have conditional no-op
+observations; undefined slots have conditional full-REF deletions. Four deliberate
+observation corruptions guard source identity, evidence and sequence status. The
+public decoded-call lane has its own verdict; its failures remain in the receipt.
+This two-site, single-exon grammar does not certify overlapping source replacements,
+splicing, combined SO/HGVS, or a public raw-record interface.
 
 ```sh
 Rscript test/duckvep/conformance/haplotype_phase_differential.R --max-ploidy 2

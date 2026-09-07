@@ -640,7 +640,7 @@ static duckvep_haplotype_stream_status_t consume_call(haplotype_state_t *s,
         !alt_len || alt_len > UINT16_MAX) return DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG;
     duckvep_haplotype_source_t source = {((uint64_t *)duckdb_vector_get_data(v[0]))[row],
         (const uint8_t *)duckdb_string_t_data(&ref), (const uint8_t *)duckdb_string_t_data(&alt),
-        (uint32_t)pos, (uint16_t)chrom, (uint16_t)ref_len, (uint16_t)alt_len};
+        (uint32_t)pos, (uint16_t)chrom, (uint16_t)ref_len, (uint16_t)alt_len, 0u, 0u};
     uint32_t tx = ((uint32_t *)duckdb_vector_get_data(v[6]))[row];
     duckvep_haplotype_stream_status_t status;
     int new_event = !s->stream.have_input || source.event_id != s->stream.last_event_id;

@@ -29,7 +29,8 @@ typedef enum duckvep_haplotype_status {
     DUCKVEP_HAPLOTYPE_INVALID_BASE,
     DUCKVEP_HAPLOTYPE_REF_MISMATCH,
     DUCKVEP_HAPLOTYPE_EDIT_ORDER,
-    DUCKVEP_HAPLOTYPE_INPUT_INCOMPLETE
+    DUCKVEP_HAPLOTYPE_INPUT_INCOMPLETE,
+    DUCKVEP_HAPLOTYPE_CONDITIONAL /* Rebuilt sequence exists, but depends on interpreted input. */
 } duckvep_haplotype_status_t;
 
 enum {

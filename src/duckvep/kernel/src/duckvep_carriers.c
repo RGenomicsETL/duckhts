@@ -235,7 +235,8 @@ duckvep_carriers_status_t duckvep_carriers_push(
     if (!s || !s->initialized || !key || !s->have_event || s->finished || s->pending ||
         tx_index >= s->model->transcript_count || !key->lane || key->lane > key->ploidy ||
         key->phase_set_present > 1u || !evidence ||
-        (evidence & ~(DUCKVEP_CARRIER_CALLED | DUCKVEP_CARRIER_MISSING | DUCKVEP_CARRIER_UNPHASED)) ||
+        (evidence & ~(DUCKVEP_CARRIER_CALLED | DUCKVEP_CARRIER_MISSING |
+                      DUCKVEP_CARRIER_UNPHASED | DUCKVEP_CARRIER_CONDITIONAL)) ||
         s->model->chrom_id[tx_index] != s->chrom ||
         s->model->end1[tx_index] < s->pos1) return DUCKVEP_CARRIERS_INVALID_ARG;
     uint32_t tx_id = find_transcript(s, tx_index, &tx_at);

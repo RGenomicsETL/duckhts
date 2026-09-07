@@ -756,9 +756,11 @@ can give them different Haplosaurus sequences. Exact raw-input compatibility the
 requires retained source GT and source-record allele context; reconstructing text from
 decoded calls cannot recover it. The finite raw-GT audit retains these collisions and
 missing-call/ploidy disagreements separately from the certified literal-replay cases.
-The native raw-GT parser resolves retained source ordinals separately from decoded
-phase assignment. An undefined file-profile slot is not REF or a source ALT; replay
-must retain its conditional interpretation and source-record identity before using it.
+Native raw-record replay uses source record IDs plus REF/ALT ordinals. An undefined
+file slot is an explicit empty-ALT interpretation of the complete source REF span;
+its sequence is conditional. Missing REF and omitted-call observations retain source
+evidence with zero physical edits. A projection failure still makes sequence unavailable.
+Public SQL/R replay consumes decoded calls; raw-record input is a native interface.
 
 `duckvep_haplotypes` consumes flat event/transcript/sample calls. DuckDB derives phase
 domains and materializes sorted input; native event ingestion and candidate projection

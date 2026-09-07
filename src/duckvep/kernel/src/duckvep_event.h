@@ -183,12 +183,9 @@ static inline void duckvep_event_load_raw_interval(
         (uint8_t)DUCKVEP_FEATURE_LENGTH_UNKNOWN;
 }
 
-/* Decode one ordinary REF/ALT pair into its lossless effect geometry. This is
- * representation interpretation, not left alignment or canonical rewriting.
- * In particular, VCF permits a right padding base at contig position 1. The
- * explicit boundary and anchor side preserve that case without inventing a
- * genomic base zero. */
-static inline int duckvep_event_prepare_small(
+/* Literal replacement of a nonempty reference span. REF identity and an empty
+ * ALT are valid interpretations here, not necessarily called VCF alternatives. */
+static inline int duckvep_event_prepare_replacement(
     uint32_t         pos1,
     const uint8_t   *ref,
     uint16_t         ref_len,
@@ -196,16 +193,8 @@ static inline int duckvep_event_prepare_small(
     uint16_t         alt_len,
     duckvep_event_t *event) {
 
-    uint16_t prefix = 0u;
-    uint16_t suffix = 0u;
-    uint16_t ref_rem;
-    uint16_t alt_rem;
-    uint16_t ref_diff_len;
-    uint16_t alt_diff_len;
-    uint32_t diff_start;
-
     if (event == NULL || ref == NULL || alt == NULL || pos1 == 0u ||
-        ref_len == 0u || alt_len == 0u ||
+        ref_len == 0u ||
         (uint32_t)(ref_len - 1u) > UINT32_MAX - pos1) {
         return 0;
     }
@@ -215,14 +204,14 @@ static inline int duckvep_event_prepare_small(
     event->feature_start1 = pos1;
     event->feature_end1 = event->raw_end1;
     event->start1 = pos1;
-    event->end1 = pos1;
+    event->end1 = event->raw_end1;
     event->insertion_boundary0 = 0u;
     event->ref_diff_offset = 0u;
     event->alt_diff_offset = 0u;
     event->anchor_ref_offset = 0u;
     event->feature_allele_offset = 0u;
-    event->ref_diff_length = 0u;
-    event->alt_diff_length = 0u;
+    event->ref_diff_length = ref_len;
+    event->alt_diff_length = alt_len;
     event->interbase = 0u;
     event->anchor_side = (uint8_t)DUCKVEP_EVENT_ANCHOR_NONE;
     event->feature_length_relation =
@@ -231,6 +220,22 @@ static inline int duckvep_event_prepare_small(
         : alt_len > ref_len
             ? (uint8_t)DUCKVEP_FEATURE_LENGTH_INCREASE
             : (uint8_t)DUCKVEP_FEATURE_LENGTH_DECREASE;
+    event->kind = !alt_len ? (uint8_t)DUCKVEP_KIND_DEL : ref_len == alt_len
+        ? (ref_len == 1u ? (uint8_t)DUCKVEP_KIND_SNV : (uint8_t)DUCKVEP_KIND_MNV)
+        : (uint8_t)DUCKVEP_KIND_INDEL;
+    return 1;
+}
+
+/* Ordinary uploaded alleles retain VCF's nonempty REF/ALT contract and its
+ * anchor interpretation, including right padding at contig position one.
+ * This is not left alignment or canonical rewriting. */
+static inline int duckvep_event_prepare_small(
+    uint32_t pos1, const uint8_t *ref, uint16_t ref_len,
+    const uint8_t *alt, uint16_t alt_len, duckvep_event_t *event) {
+    if (!alt_len || !duckvep_event_prepare_replacement(pos1, ref, ref_len, alt, alt_len, event))
+        return 0;
+    uint16_t prefix = 0u, suffix = 0u, ref_rem, alt_rem, ref_diff_len, alt_diff_len;
+    uint32_t diff_start;
 
     while (prefix < ref_len && prefix < alt_len &&
            duckvep_event_ascii_upper(ref[prefix]) ==

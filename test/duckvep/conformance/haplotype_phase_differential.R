@@ -150,11 +150,12 @@ main <- function() {
   }))
   raw_gt <- as.vector(rbind(cases$GT, vapply(cases$ploidy,
     function(n) paste(rep("1", n), collapse = "|"), "")))
-  probe_sources <- c("test/duckvep/conformance/phase_probe.c", "src/duckvep/kernel/src/duckvep_phase.c")
+  probe_sources <- c("test/duckvep/conformance/phase_probe.c", paste0("src/duckvep/kernel/src/duckvep_",
+    c("phase", "haplotype", "carriers", "haplotype_stream", "classify", "codon", "coding", "projection", "delta"), ".c"))
   probe <- file.path(out, paste0("phase_probe", .Platform$dynlib.ext))
   compiler <- Sys.getenv("CC", "cc")
   run(compiler, c("-std=c99", "-O2", "-Wall", "-Wextra", "-Werror", "-fPIC", "-shared",
-    "-Isrc/duckvep/kernel/src", probe_sources, "-o", probe), "phase_compile")
+    "-Isrc/duckvep/kernel/src", "-Isrc/duckvep/kernel/include", probe_sources, "-o", probe), "phase_compile")
   writeLines(duckvep_evidence_command(compiler, "--version", "phase compiler"),
     file.path(out, "phase_compiler.txt"))
   dll <- dyn.load(probe)
@@ -163,7 +164,6 @@ main <- function() {
     disposition = integer(length(raw_gt)), ploidy = integer(length(raw_gt)),
     missing = integer(length(raw_gt)), slots = integer(length(raw_gt)),
     first = integer(length(raw_gt)), second = integer(length(raw_gt)))
-  dyn.unload(dll[["path"]])
   observed_phase <- as.data.frame(parsed[c("status", "ploidy", "missing", "slots", "first", "second")])
   observed_phase$retained <- parsed$disposition == 3L
   observed_phase <- observed_phase[names(expected_phase)]
@@ -184,6 +184,69 @@ main <- function() {
   stopifnot(all(phase_rejected))
   write.csv(data.frame(control = names(phase_rejected), rejected = phase_rejected),
     file.path(out, "phase_controls.csv"), row.names = FALSE)
+
+  # Raw-record native replay and public decoded-call replay have independent
+  # verdicts. The bridge binds the two source sites verbatim.
+  nlanes <- 2L * nrow(cases)
+  capacity <- 512L
+  replay <- .C(getNativeSymbolInfo("duckhts_test_raw_phase_haplotypes", dll), as.character(cds),
+    11L, raw_gt, c(41L, 44L), c("G", "G"), c("A", "T", "C"), c(2L, 1L),
+    as.integer(nrow(cases)), capacity, cds = raw(nlanes * capacity), protein = raw(nlanes * capacity),
+    cds_lengths = integer(nlanes), protein_lengths = integer(nlanes),
+    sequence_status = integer(nlanes), evidence = integer(nlanes), edit_masks = integer(nlanes),
+    source_indices = integer(2L * nlanes), source_evidence = integer(2L * nlanes), errors = integer(nrow(cases)))
+  dyn.unload(dll[["path"]])
+  raw_sequences <- lapply(seq_len(nlanes), function(i) list(
+    cds = rawToChar(replay$cds[(i - 1L) * capacity + seq_len(replay$cds_lengths[i])]),
+    protein = rawToChar(replay$protein[(i - 1L) * capacity + seq_len(replay$protein_lengths[i])]),
+    count = 1, contributors = c("a", "b")[bitwAnd(replay$edit_masks[i], c(1L, 2L)) != 0L]))
+  raw_comparisons <- lapply(seq_len(nrow(cases)), function(i) {
+    expected <- canonical(oracle[[cases$transcript[i]]]$haplotypes)
+    observed <- canonical(raw_sequences[2L * i - c(1L, 0L)])
+    list(expected = expected, observed = observed,
+      equal = replay$errors[i] == 0L && identical(expected, observed))
+  })
+  raw_matches <- vapply(raw_comparisons, `[[`, TRUE, "equal")
+  # Expected record observations come from the upstream object sidecar, not
+  # the native parser. Missing omissions retain a conditional REF observation;
+  # only physical edits participate in upstream's contributing-variant list.
+  expected_sources <- rep(-2L, 2L * nlanes)
+  expected_evidence <- integer(2L * nlanes)
+  for (i in seq_len(nrow(cases))) for (lane in 1:2) for (record in 1:2) {
+    call <- expected_phase[2L * (i - 1L) + record, ]
+    at <- (2L * (i - 1L) + lane - 1L) * 2L + record
+    if (!call$retained) {
+      if (call$missing) { expected_sources[at] <- 0L; expected_evidence[at] <- 10L }
+      next
+    }
+    allele <- if (lane == 1L) call$first else call$second
+    if (allele == 0L && !call$missing) next
+    expected_sources[at] <- allele
+    expected_evidence[at] <- if (allele == -1L) 8L else if (allele > 0L) 1L else 0L
+    if (call$missing) expected_evidence[at] <- bitwOr(expected_evidence[at], 10L)
+  }
+  expected_lane_evidence <- bitwOr(expected_evidence[seq(1L, 2L * nlanes, 2L)],
+    expected_evidence[seq(2L, 2L * nlanes, 2L)])
+  expected_semantics <- data.frame(source_indices = expected_sources, source_evidence = expected_evidence,
+    evidence = rep(expected_lane_evidence, each = 2L),
+    sequence_status = rep(ifelse(bitwAnd(expected_lane_evidence, 8L) != 0L, 8L, 0L), each = 2L))
+  observed_semantics <- data.frame(source_indices = replay$source_indices,
+    source_evidence = replay$source_evidence, evidence = rep(replay$evidence, each = 2L),
+    sequence_status = rep(replay$sequence_status, each = 2L))
+  semantics_matches <- phase_equal(expected_semantics, observed_semantics)
+  raw_rejected <- vapply(names(expected_semantics), function(field) {
+    corrupt <- expected_semantics
+    corrupt[[field]][1L] <- corrupt[[field]][1L] + 1L
+    !all(phase_equal(expected_semantics, corrupt))
+  }, TRUE)
+  stopifnot(all(raw_rejected))
+  saveRDS(list(output = replay, comparisons = raw_comparisons,
+    expected_semantics = expected_semantics, observed_semantics = observed_semantics),
+    file.path(out, "raw_replay.rds"))
+  write.csv(data.frame(control = names(raw_rejected), rejected = raw_rejected),
+    file.path(out, "raw_replay_controls.csv"), row.names = FALSE)
+  write.csv(cbind(cases[setdiff(names(cases), "cds")], equal = raw_matches, error = replay$errors),
+    file.path(out, "raw_replay_summary.csv"), row.names = FALSE)
 
   con <- DBI::dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE))
@@ -259,7 +322,8 @@ main <- function() {
   collisions <- split(summary, summary$decoded_gt)
   collisions <- collisions[vapply(collisions, function(x) length(unique(x$oracle_signature)) > 1L, TRUE)]
   saveRDS(collisions, file.path(out, "decoded_collisions.rds"))
-  inputs <- c(paths, extension, probe_sources, "src/duckvep/kernel/src/duckvep_phase.h",
+  inputs <- c(paths, extension, probe_sources,
+    list.files("src/duckvep/kernel", pattern = "\\.(h|inc|def)$", recursive = TRUE, full.names = TRUE),
     "test/duckvep/conformance/haplotype_phase_differential.R",
     "test/duckvep/conformance/haplotype_oracle.pl", file.path(prefix,
       "share/ensembl-vep-116.0-0/Bio/EnsEMBL/IO/Parser/BaseVCF4.pm"))
@@ -269,6 +333,10 @@ main <- function() {
     decoded_collision_groups = length(collisions), controls_rejected = sum(rejected),
     raw_parser_calls = length(raw_gt), raw_parser_disagreements = sum(!phase_matches),
     raw_parser_controls_rejected = sum(phase_rejected),
+    raw_replay_cases = length(raw_matches), raw_replay_disagreements = sum(!raw_matches),
+    raw_replay_record_observations = length(semantics_matches),
+    raw_replay_record_disagreements = sum(!semantics_matches),
+    raw_replay_controls_rejected = sum(raw_rejected),
     input_records = nrow(records), source_alt_events = 3L * nrow(cases),
     input_genotype_calls = nrow(records), input_allele_slots = 2L * sum(cases$ploidy),
     candidate_alt_calls = nrow(calls), native_leaves = nrow(actual),
@@ -281,7 +349,11 @@ main <- function() {
     ploidy + prefix + missing + mixed, data = summary, FUN = sum), row.names = FALSE)
   message("Decoded-equivalence collision groups: ", length(collisions))
   message("Raw parser: ", sum(!phase_matches), " disagreements / ", length(raw_gt), " calls")
+  message("Raw native replay: ", sum(!raw_matches), " disagreements / ", length(raw_matches), " profiles")
+  message("Raw record observations: ", sum(!semantics_matches), " disagreements / ", length(semantics_matches))
   if (any(!phase_matches)) stop("Raw parser disagreements retained: ", out, call. = FALSE)
+  if (any(!raw_matches)) stop("Raw native replay disagreements retained: ", out, call. = FALSE)
+  if (any(!semantics_matches)) stop("Raw record observations disagree: ", out, call. = FALSE)
   if (any(!summary$equal)) stop("Raw-GT compatibility disagreements retained: ", out, call. = FALSE)
 }
 main()

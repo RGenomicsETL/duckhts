@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Keep the R bridge's existing failure categories during the native API change. */
+/* Map translation errors to the bridge's mutation-status result. */
 static duckvep_haplotype_status_t translation_status(duckvep_translation_status_t status) {
     switch (status) {
     case DUCKVEP_TRANSLATION_OK: return DUCKVEP_HAPLOTYPE_OK;
@@ -188,7 +188,7 @@ void duckhts_test_carrier_haplotypes(
         duckvep_haplotype_source_t source = {event + 1u,
             (const uint8_t *)refs[event], (const uint8_t *)alts[event],
             (uint32_t)positions[event], 0u,
-            (uint16_t)strlen(refs[event]), (uint16_t)strlen(alts[event])};
+            (uint16_t)strlen(refs[event]), (uint16_t)strlen(alts[event]), 0u, 0u};
         stream_status = duckvep_haplotype_stream_begin(&stream, &source);
         if (stream_status != DUCKVEP_HAPLOTYPE_STREAM_OK) goto stream_error;
         stream_status = duckvep_haplotype_stream_project(&stream, zero);

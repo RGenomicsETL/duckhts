@@ -8,6 +8,31 @@ VEP compatibility describes an observed result, not an endorsement of the underl
 biology or API design. When VEP's predicate ordering produces an unusual combination of
 terms, DuckVEP must reproduce that state before offering a separately named alternative.
 
+## Evidence required to call an upstream result wrong
+
+A discrepancy is initially unclassified: it may be a DuckVEP defect, a different
+input/model/configuration, or a deliberate upstream convention. Compatibility witnesses
+prove observed behaviour, not biological incorrectness. A proposed defect claim needs:
+
+- a minimized input and exact executable, dependency, reference and transcript-model
+  identities, with both outputs retained and matching coordinate/allele conventions;
+- an independently checkable violated contract: for example a cited HGVS rule, or a
+  CDS reconstruction and translation derived from the pinned reference and transcript,
+  including strand, phase, codon table and model sequence edits;
+- controls that exclude our parser, projection, normalization and test comparator as
+  the cause, plus the affected scope and counterexamples to any proposed general rule;
+- a distinction between observed evidence, our inference and upstream acknowledgement.
+  Another tool's agreement or a ClinVar classification alone does not prove the claim.
+
+Even a supported erratum does not remove mismatches from a VEP-conformance denominator
+or silently change the selected compatibility profile. Any alternative needs explicit
+semantics and separate validation. Unresolved cases remain unresolved.
+
+Candidate witnesses: [fastVEP's divergence report at
+99b1275](https://github.com/Huang-lab/fastVEP/blob/99b1275fb114ecdff4b1b824a4284aa5058f8cef/docs/VEP_DIVERGENCE.md)
+describes VEP-115.1 observations. Establishing a VEP-116 defect or validating a
+DuckVEP alternative requires the evidence above for that exact version and contract.
+
 ## Executable compatibility policy
 
 Executable-language leaks are named in
