@@ -1407,6 +1407,66 @@ is `r rebuild$model_sha256`. These are separate from the unchanged historical
 observations. The receipt mutation test detects the old first-column-only
 implementation on `Location`, the second output field.
 
+## Shared CDS translation acceptance (2026-09-07)
+
+Source `e3269389d01ad98888eab494bdb1a9ef4dc68d73` deletes the separate
+independent-context and phased-replay CDS translators. One allocation-free kernel
+now produces every complete translated codon, the first-stop position and sequence
+ambiguity. Public phased protein output selects the first-stop prefix without
+discarding the downstream sequence or contributing events.
+
+The unchanged timed worker consumed the same registry-resolved GIAB input and
+Ensembl-116 model as the model-rebuild acceptance above. This is the independent
+consequence path, not phased execution. The fresh-process workload still includes
+model loading, sequential VCF decoding, ALT expansion, sorting, annotation and
+the same 17-field real TSV output. Machine, DuckDB 1.5.3, one thread pinned to
+CPU 2, distance 5,000 and 4 GB memory limit are unchanged. Source counts and the
+contig-join denominator were checked after timing; all 4,095,611 eligible alleles
+joined. Output receipts are also outside the timer.
+
+```{r shared-translation-validation}
+translation <- read.csv(file.path(data_dir, "shared_translation_validation.csv"),
+                        colClasses = "character")
+same_contract <- c("model_sha256", "input_registry_id", "model_registry_id",
+  "source_records", "source_alt_alleles", "eligible_alt_alleles", "output_rows",
+  "output_bytes", "threads", "affinity", "full_row_xor", "full_row_low32_sum",
+  "full_row_high32_sum")
+stopifnot(identical(rebuild[same_contract], translation[same_contract]))
+translation_comparison <- rbind(rebuild, translation)
+knitr::kable(data.frame(
+  revision = substr(translation_comparison$source_revision, 1, 8),
+  source_records = translation_comparison$source_records,
+  source_ALT = translation_comparison$source_alt_alleles,
+  eligible_ALT = translation_comparison$eligible_alt_alleles,
+  output_rows = translation_comparison$output_rows,
+  output_bytes = translation_comparison$output_bytes,
+  threads = translation_comparison$threads,
+  passes = translation_comparison$passes,
+  elapsed_seconds = translation_comparison$elapsed_seconds,
+  peak_RSS_KiB = translation_comparison$maximum_rss_kib
+))
+```
+
+The observed pass is 62.76 s versus 64.14 s for the nearest identical recorded
+workload, with 5,731,168 versus 5,730,396 KiB peak RSS. Single passes do not establish
+a speedup or a no-regression confidence interval. Temporary sort and output files
+briefly exhausted ordinary-user disk availability; the timed worker nevertheless
+completed with exit status zero. Its generated TSV was removed after validation to
+recover 6.17 GB; input/model files and timing/output receipts were retained.
+
+Output rows, bytes and all three full-row multiset fingerprints match the previous
+receipt: XOR `r translation$full_row_xor`, low/high-32-bit sums
+`r translation$full_row_low32_sum` / `r translation$full_row_high32_sum`. The
+full-file SHA-256 differs (`r translation$output_sha256`): the projection does not
+promise final row order. Matching fingerprints are evidence about the complete
+17-field projection, not a collision-free proof or conformance for unprojected
+HGVS/structural fields. Extension SHA-256 is `r translation$extension_sha256`;
+the model logical hash remains `r translation$model_sha256`.
+
+The phased executor still needs separate sorted-native and sort-included
+throughput/memory measurements. This independent-event run does not measure
+phase preparation, carrier sharing or combined haplotype consequences.
+
 ## Revisions and input receipts
 
 ```{r receipt-table}

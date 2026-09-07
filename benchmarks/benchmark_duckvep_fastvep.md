@@ -618,6 +618,56 @@ are separate from the unchanged historical observations. The receipt
 mutation test detects the old first-column-only implementation on
 `Location`, the second output field.
 
+## Shared CDS translation acceptance (2026-09-07)
+
+Source `e3269389d01ad98888eab494bdb1a9ef4dc68d73` deletes the separate
+independent-context and phased-replay CDS translators. One
+allocation-free kernel now produces every complete translated codon, the
+first-stop position and sequence ambiguity. Public phased protein output
+selects the first-stop prefix without discarding the downstream sequence
+or contributing events.
+
+The unchanged timed worker consumed the same registry-resolved GIAB
+input and Ensembl-116 model as the model-rebuild acceptance above. This
+is the independent consequence path, not phased execution. The
+fresh-process workload still includes model loading, sequential VCF
+decoding, ALT expansion, sorting, annotation and the same 17-field real
+TSV output. Machine, DuckDB 1.5.3, one thread pinned to CPU 2, distance
+5,000 and 4 GB memory limit are unchanged. Source counts and the
+contig-join denominator were checked after timing; all 4,095,611
+eligible alleles joined. Output receipts are also outside the timer.
+
+| revision | source_records | source_ALT | eligible_ALT | output_rows | output_bytes | threads | passes | elapsed_seconds | peak_RSS_KiB |
+|:---------|:---------------|:-----------|:-------------|:------------|:-------------|:--------|:-------|:----------------|:-------------|
+| 5cc99b89 | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 64.14           | 5730396      |
+| e3269389 | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 62.76           | 5731168      |
+
+The observed pass is 62.76 s versus 64.14 s for the nearest identical
+recorded workload, with 5,731,168 versus 5,730,396 KiB peak RSS. Single
+passes do not establish a speedup or a no-regression confidence
+interval. Temporary sort and output files briefly exhausted
+ordinary-user disk availability; the timed worker nevertheless completed
+with exit status zero. Its generated TSV was removed after validation to
+recover 6.17 GB; input/model files and timing/output receipts were
+retained.
+
+Output rows, bytes and all three full-row multiset fingerprints match
+the previous receipt: XOR 7884817531533516516, low/high-32-bit sums
+102287041565538772 / 102283789823111554. The full-file SHA-256 differs
+(3bc65e115eff6ddbd9048cbe3c84268d61768b50d1539b631aa528124b31232b): the
+projection does not promise final row order. Matching fingerprints are
+evidence about the complete 17-field projection, not a collision-free
+proof or conformance for unprojected HGVS/structural fields. Extension
+SHA-256 is
+fc23f76b0ac9257d035d8b9e8d198c2eb5a940d8b538cc5072e2f7548bbe45e5; the
+model logical hash remains
+38da573cf9968c58e5ff42b8edddd0de952cc51cdb37c1ca03b481c7aea0853f.
+
+The phased executor still needs separate sorted-native and sort-included
+throughput/memory measurements. This independent-event run does not
+measure phase preparation, carrier sharing or combined haplotype
+consequences.
+
 ## Revisions and input receipts
 
 | item                                | receipt                                                          |
