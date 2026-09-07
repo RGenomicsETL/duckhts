@@ -1789,3 +1789,37 @@ creates false terminal annotations.
 Source anchors: Ensembl Variation 116 `TranscriptVariationAllele::hgvs_transcript`,
 `TranscriptVariationAllele::_genomic_shift`, `hgvs_variant_notation`, and its duplication
 check before insertion formatting.
+
+## Haplosaurus reference and alternate proteins use different stop rules
+
+Ensembl-116 core `Transcript::translate` drops a stop at the last complete codon,
+forces a legitimate start to methionine (any expansion for an ambiguous start),
+and applies translation SeqEdits without truncating internal stops. Haplosaurus
+then appends `*` only when the original CDS ends with the exact uppercase bytes
+`TAA`, `TAG` or `TGA`. That last check ignores codon table, reading frame and case
+normalization. Alternate translation has no reference SeqEdits or start override
+and is displayed only through its first stop. These conventions can produce a
+protein difference without a causal edit at the differing amino acid.
+
+| CDS / table | Reference protein | No-edit alternate translation |
+| --- | --- | --- |
+| `CTGGCCTAA` / 1 | `MA*` | `LA*` |
+| `ATGTGAGCCTAA`, peptide position 2 = U / 1 | `MUA*` | `M*` |
+| `ATGGCCTAA`, peptide position 3 = W / 1 | `MAW*` | `MA*` |
+| `ATGGCCTGA` / 2 | `MAW*` | `MAW` |
+| `ATGGCCAGA` / 2 | `MA` | `MA*` |
+| `ATGGCCTAAA` or `atggcctaa` / 1 | `MA` | `MA*` |
+
+The terminal SeqEdit restores a residue removed by core translation; the
+container can append an additional stop after it. Reference scratch must allow
+`floor(CDS_length/3) + 1` residues plus NUL. A model reference is immutable;
+uppercase CDS alignment and the exact reference-protein spelling rule are
+separate views. `reference_translation_oracle.pl` observes the real pinned core
+and container methods over these witnesses and the complete ACGTN/table matrix.
+SQL/R haplotype tests retain contributor geometry rather than attributing a
+reference-curation difference to a new genomic position.
+
+Source anchors: core `Transcript::translate`, `Translation::modify_translation`,
+`SeqEdit::apply_edit`, and Ensembl Variation 116
+`TranscriptHaplotypeContainer::_init` / `_mutate_sequences`. The reference
+translation receipt hashes the core modules from the pinned VEP distribution.

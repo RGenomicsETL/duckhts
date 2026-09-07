@@ -35,6 +35,11 @@ typedef enum duckvep_codon_table {
 
 int duckvep_codon_table_supported(duckvep_codon_table_t table);
 
+/* BioPerl 1.7.8 start predicate: true when ANY A/C/G/T expansion is a start.
+ * Three borrowed A/C/G/T/U/N bytes, case-insensitive; invalid input/table is false.
+ * This predicate is distinct from ordinary translation of the same codon. */
+int duckvep_codon_is_start(const uint8_t *codon3, duckvep_codon_table_t table);
+
 /* Borrow the immutable 64-amino-acid translation table for a supported NCBI
  * table id. The caller retains no ownership; NULL means unsupported. This is
  * the bulk-translation path after bases and table id have been validated. */

@@ -1,6 +1,12 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- expose `protein_differences` from phased replay using the shared bounded
+  alignment kernel. A native reference-peptide builder applies Ensembl-116
+  start, stop and curated peptide-edit rules once per closing transcript.
+  CDS/protein differences reuse traceback and descriptor storage; unknown
+  protein comparisons remain NULL, with complete contributors preserved
+
 - resolve `N`-containing codons in phased proteins when every nucleotide expansion
   gives the same amino acid, matching BioPerl (for example `GCN` gives alanine).
   Unresolved codons remain `X`; the native input-ambiguity fact stays explicit.

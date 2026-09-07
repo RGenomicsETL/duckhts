@@ -39,14 +39,61 @@ static const char *const AA_TABLES[32] = {
     [31] = "FFLLSSSSYYEECCWWLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG"
 };
 
+/* BioPerl 1.7.8 STARTS entries marked M, with the same TCAG codon indexing.
+ * Start identity is not implied by ordinary translation to methionine. */
+static const uint64_t START_CODONS[32] = {
+    [1] = UINT64_C(0x0000000800080008),
+    [2] = UINT64_C(0x0008000f00000000),
+    [3] = UINT64_C(0x0000000c00000000),
+    [4] = UINT64_C(0x0008000f0008000c),
+    [5] = UINT64_C(0x0008000f00000008),
+    [6] = UINT64_C(0x0000000800000000),
+    [9] = UINT64_C(0x0008000800000000),
+    [10] = UINT64_C(0x0000000800000000),
+    [11] = UINT64_C(0x0008000f00080008),
+    [12] = UINT64_C(0x0000000800080000),
+    [13] = UINT64_C(0x0008000c00000008),
+    [14] = UINT64_C(0x0000000800000000),
+    [16] = UINT64_C(0x0000000800000000),
+    [21] = UINT64_C(0x0008000800000000),
+    [22] = UINT64_C(0x0000000800000000),
+    [23] = UINT64_C(0x0008000900000000),
+    [24] = UINT64_C(0x0008000800080008),
+    [25] = UINT64_C(0x0008000800000008),
+    [26] = UINT64_C(0x0000000800080000),
+    [27] = UINT64_C(0x0000000800000000),
+    [28] = UINT64_C(0x0000000800000000),
+    [29] = UINT64_C(0x0000000800000000),
+    [30] = UINT64_C(0x0000000800000000),
+    [31] = UINT64_C(0x0000000800000000)
+};
+
+static int codon_base_masks(const uint8_t *codon, uint8_t masks[3]) {
+    if (!codon) return 0;
+    for (size_t i = 0u; i < 3u; i++) {
+        char base = duckvep_dna_normalize((char)codon[i], 1);
+        if (!base) return 0;
+        masks[i] = base == 'N' ? 15u : (uint8_t)(1u << duckvep_dna_codon_code(base));
+    }
+    return 1;
+}
+
+int duckvep_codon_is_start(const uint8_t *codon3, duckvep_codon_table_t table) {
+    uint8_t masks[3];
+    if (!duckvep_codon_table_supported(table) || !codon_base_masks(codon3, masks)) return 0;
+    uint64_t starts = START_CODONS[(unsigned)table];
+    for (unsigned a = 0u; a < 4u; a++) if (masks[0] & (1u << a))
+        for (unsigned b = 0u; b < 4u; b++) if (masks[1] & (1u << b))
+            for (unsigned c = 0u; c < 4u; c++) if (masks[2] & (1u << c))
+                if (starts & (UINT64_C(1) << ((a << 4u) | (b << 2u) | c))) return 1;
+    return 0;
+}
+
 /* Expand at most 64 codons. The shared literal table remains the only amino
  * acid authority; this is BioPerl 1.7.8 _translate_ambiguous_codon over ACGTN. */
 static uint8_t codon_n_consensus(const uint8_t *codon, const char *amino_acids) {
     uint8_t masks[3];
-    for (size_t i = 0u; i < 3u; i++) {
-        char base = duckvep_dna_normalize((char)codon[i], 1);
-        masks[i] = base == 'N' ? 15u : (uint8_t)(1u << duckvep_dna_codon_code(base));
-    }
+    if (!codon_base_masks(codon, masks)) return 'X';
     uint32_t seen = 0u;
     for (unsigned a = 0u; a < 4u; a++) if (masks[0] & (1u << a))
         for (unsigned b = 0u; b < 4u; b++) if (masks[1] & (1u << b))

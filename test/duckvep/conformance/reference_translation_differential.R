@@ -29,9 +29,9 @@ main <- function() {
       duckvep_evidence_explicit_packages(readLines(
         "test/duckvep/upstream/receipts/vep116_2026-07-22.conda-explicit.txt"))))
   sources <- c("test/duckvep/conformance/reference_translation_probe.c",
-    "src/duckvep/kernel/src/duckvep_codon.c")
+    "src/duckvep/kernel/src/duckvep_codon.c", "src/duckvep/kernel/src/duckvep_haplotype.c")
   code <- c(sources, "src/duckvep/kernel/src/duckvep_codon.h",
-    "src/duckvep/kernel/src/duckvep_dna.h",
+    "src/duckvep/kernel/src/duckvep_dna.h", "src/duckvep/kernel/src/duckvep_haplotype.h",
     "test/duckvep/conformance/reference_translation_oracle.pl",
     "test/duckvep/conformance/reference_translation_differential.R", "scripts/duckvep_evidence.R")
   code_hashes <- vapply(code, duckvep_evidence_sha256, "")
@@ -45,12 +45,23 @@ main <- function() {
   dll <- dyn.load(shared)
   on.exit(dyn.unload(shared), add = TRUE)
   symbol <- getNativeSymbolInfo("duckhts_test_raw_translation", PACKAGE = dll)
+  reference_symbol <- getNativeSymbolInfo("duckhts_test_reference_protein", PACKAGE = dll)
   translate <- function(cds, table) {
     x <- .C(symbol, as.character(cds), as.integer(table), peptide = raw(nchar(cds) %/% 3L + 1L),
       as.integer(nchar(cds) %/% 3L + 1L), status = integer(1L), facts = double(3L))
     stopifnot(x$status == 0L)
     full <- rawToChar(x$peptide[seq_len(x$facts[1L])])
     list(full = full, visible = substr(full, 1L, if (x$facts[2L]) x$facts[2L] else nchar(full)))
+  }
+  reference_protein <- function(cds, table, edits) {
+    positions <- vapply(edits, `[[`, 1L, "position1")
+    alternates <- charToRaw(paste0(vapply(edits, `[[`, "", "alternate"), collapse = ""))
+    capacity <- nchar(cds) %/% 3L + 2L
+    x <- .C(reference_symbol, as.character(cds), as.integer(table), positions, alternates,
+      as.integer(length(edits)), peptide = raw(capacity), as.integer(capacity),
+      status = integer(1L), length = double(1L))
+    stopifnot(x$status == 0L)
+    rawToChar(x$peptide[seq_len(x$length)])
   }
   # Exhaustive ACGTN triplets in each codon role, every supported table and
   # trailing-partial length. The matrix is declared independently of C tables.
@@ -111,13 +122,16 @@ main <- function() {
   rows <- lapply(seq_along(cases), function(i) {
     case <- cases[[i]]; expected <- oracle[[i]]
     actual <- translate(expected$prepared_cds, case$table)
+    reference <- reference_protein(expected$prepared_cds, case$table, case$edits)
     data.frame(id = case$id, family = case$family, table = case$table,
       cds = case$cds, prepared_cds = expected$prepared_cds,
       core_reference = expected$core_reference, expected_reference = expected$reference,
-      raw_reference = actual$full, expected_alternate_full = expected$alternate_full,
+      raw_reference = actual$full, actual_reference = reference,
+      expected_alternate_full = expected$alternate_full,
       actual_alternate_full = actual$full, expected_alternate = expected$alternate,
       actual_alternate = actual$visible,
-      reference_failure = !identical(actual$full, expected$reference),
+      reference_failure = !identical(reference, expected$reference),
+      raw_reference_hypothesis_failure = !identical(actual$full, expected$reference),
       alternate_full_failure = !identical(actual$full, expected$alternate_full),
       alternate_failure = !identical(actual$visible, expected$alternate))
   })
@@ -125,11 +139,11 @@ main <- function() {
   write.csv(pairs, file.path(out, "pairs.csv"), row.names = FALSE)
   write.csv(pairs[pairs$family == "witness", ], file.path(out, "witnesses.csv"), row.names = FALSE)
   summary <- aggregate(cbind(cases = rep(1L, nrow(pairs)), reference_failures = pairs$reference_failure,
+    raw_reference_hypothesis_failures = pairs$raw_reference_hypothesis_failure,
     alternate_full_failures = pairs$alternate_full_failure, alternate_failures = pairs$alternate_failure),
     pairs[c("family")], sum)
   write.csv(summary, file.path(out, "summary.csv"), row.names = FALSE)
-  # A deliberately corrupt result must fail the complete identity/sequence comparison,
-  # even though the current implementation already has genuine biological failures.
+  # Deliberate corruption must fail the complete identity/sequence comparison.
   expected <- pairs[c("id", "expected_reference", "expected_alternate_full", "expected_alternate")]
   equal <- function(x) identical(x, expected)
   controls <- c(missing = !equal(expected[-1L, ]), duplicate = !equal(rbind(expected, expected[1L, ])))
@@ -146,11 +160,11 @@ main <- function() {
     file.path(out, c("cases.jsonl", "oracle.jsonl", "pairs.csv", "witnesses.csv", "summary.csv", "controls.csv", "environment.txt")))
   jsonlite::write_json(list(source_revision = revision, source_binding = binding,
     oracle_revisions = revisions, cases = length(cases),
-    scope = "raw_CDS_translation_vs_actual_Ensembl_reference_and_Haplosaurus_alternate_not_public_protein_differences",
+    scope = "native_reference_and_alternate_proteins_vs_actual_Ensembl_not_public_protein_differences",
     sha256 = as.list(vapply(identities, duckvep_evidence_sha256, ""))), file.path(out, "receipt.json"),
     pretty = TRUE, auto_unbox = TRUE)
   print(summary)
-  print(pairs[pairs$family == "witness", c("id", "expected_reference", "raw_reference", "expected_alternate", "actual_alternate")])
+  print(pairs[pairs$family == "witness", c("id", "expected_reference", "actual_reference", "expected_alternate", "actual_alternate")])
   stopifnot(all(controls), identical(code_hashes, vapply(code, duckvep_evidence_sha256, "")),
     identical(revision, duckvep_evidence_revision(root)))
   # This is deliberately not a passing certificate until all three comparisons pass.

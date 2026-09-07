@@ -28,6 +28,16 @@
 #' exact traceback band and `max_leaf_differences` bounds output runs; exhaustion
 #' is an error, not approximate alignment or discarded differences.
 #'
+#' `protein_differences` has the same span fields and alignment mode, with
+#' positions in amino acids. Its reference follows Ensembl-116 start-methionine,
+#' terminal-stop and curated single-residue peptide-edit rules. Haplosaurus then
+#' appends `*` only for an exact uppercase TAA/TAG/TGA raw-CDS suffix, including
+#' nonstandard-table and partial-CDS cases. The alternate is the displayed
+#' first-stop prefix without reference peptide edits. Unknown paths and reference
+#' CDS shorter than one codon have NULL protein differences; identical known
+#' proteins have an empty list. Both difference axes reuse the same native
+#' scratch and are separately subject to the alignment-cell and run limits.
+#'
 #' This alpha interface returns sequence mechanics, not combined SO consequences,
 #' compound HGVS or structural-event composition. Input must contain one row per
 #' `event_index`, `transcript_index`, `sample_index`, with columns `seq_region`,

@@ -1,5 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- return `protein_differences` through `rduckhts_haplotypes()`, with zero-based
+  amino-acid positions and Ensembl-116 reference-peptide rules. Both difference
+  axes share bounded native storage and retain all contributing events;
+  unavailable protein comparisons are NULL, not empty known results
+
 - resolve unambiguous amino acids from `N`-containing codons in
   `rduckhts_haplotypes()` and the bundled SQL function, matching BioPerl.
   For example `GCN` translates to alanine; genuinely ambiguous codons remain `X`.

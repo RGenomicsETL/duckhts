@@ -25,6 +25,102 @@ SELECT a.consequence,a.status,a.reason FROM unnest(_duckvep_annotate_small_rich(
 ----
 sequence_variant	unresolved	no_feature_in_loaded_model
 
+# Curated reference proteins are not raw translations of the uploaded path.
+statement ok
+CREATE TABLE hap_protein_tx AS SELECT i::UINTEGER transcript_index,0::UINTEGER seq_region,
+ (100+20*i)::UBIGINT transcript_start,(99+20*i+len(cds))::UBIGINT transcript_end,
+ 1::TINYINT strand,0::UINTEGER gene_index,3::UBIGINT transcript_flags,
+ transcript_start cds_start,transcript_end cds_end,cds::BLOB cds_sequence,code::UTINYINT codon_table
+ FROM (VALUES (0,'CTGGCCTAA',1),(1,'ATGTGAGCCTAA',1),(2,'ATGGCCTAA',1),
+ (3,'ATGGCCTGA',2),(4,'ctggcctaa',1),(5,'AT',1)) v(i,cds,code);
+
+query I
+SELECT loaded FROM duckvep_model_load('hap_proteins','SELECT 0::UINTEGER seq_region',
+ 'SELECT * FROM hap_protein_tx',
+ 'SELECT transcript_index,transcript_start exon_start,transcript_end exon_end,
+  1::UBIGINT exon_cdna_start,(transcript_end-transcript_start+1)::UBIGINT exon_cdna_end,
+  0::TINYINT phase,0::TINYINT end_phase FROM hap_protein_tx',
+ peptide_edit_query := 'SELECT * FROM (VALUES (1::UINTEGER,2::UINTEGER,''U''::VARCHAR),
+  (2::UINTEGER,3::UINTEGER,''W''::VARCHAR)) e(transcript_index,protein_position,alternate_amino_acid)');
+----
+1
+
+statement ok
+CREATE TABLE hap_protein_calls AS SELECT transcript_index+1 event_index,0 seq_region,
+ transcript_start+CASE transcript_index WHEN 1 THEN 8 WHEN 5 THEN 1 ELSE 5 END AS position,
+ CASE transcript_index WHEN 5 THEN 'T' ELSE 'C' END AS reference,
+ CASE transcript_index WHEN 5 THEN 'C' ELSE 'T' END alternate,1 alt_index,transcript_index,
+ 0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set FROM hap_protein_tx;
+
+query ITI
+SELECT transcript_index,protein,len(protein_differences) FROM
+ duckvep_haplotypes('SELECT * FROM hap_protein_calls','hap_proteins') ORDER BY transcript_index;
+----
+0	LA*	1
+1	M*	2
+2	MA*	2
+3	MAW	1
+4	LA*	2
+5	(empty)	NULL
+
+query IIITTI
+SELECT transcript_index,d.ref_start0,d.alt_start0,'['||d.reference||']',
+ '['||d.alternate||']',d.alignment_start0 FROM (
+ SELECT transcript_index,unnest(protein_differences) d FROM
+ duckvep_haplotypes('SELECT * FROM hap_protein_calls','hap_proteins'))
+ ORDER BY transcript_index,d.alignment_start0;
+----
+0	0	0	[M]	[L]	0
+1	1	1	[U]	[*]	1
+1	2	2	[A*]	[]	2
+2	2	2	[W]	[*]	2
+2	3	3	[*]	[]	3
+3	3	3	[*]	[]	3
+4	0	0	[M]	[L]	0
+4	2	2	[]	[*]	2
+
+# CDS has one run but protein has two: the shared per-axis descriptor limit
+# must report protein exhaustion without truncating either difference list.
+statement error
+SELECT * FROM duckvep_haplotypes('SELECT * FROM hap_protein_calls WHERE transcript_index=1',
+ 'hap_proteins',max_leaf_differences := 1);
+----
+protein difference status 4, max_leaf_differences=1, required=2 at transcript 1
+
+query II
+SELECT len(cds_differences),len(contributors) FROM duckvep_haplotypes(
+ 'SELECT * FROM hap_protein_calls WHERE transcript_index=5','hap_proteins');
+----
+1	1
+
+# Restored identical CDS needs no trace, while its curated reference protein
+# still requires the full 5x5 alignment. Both axes honor the same cell limit.
+query I
+SELECT loaded FROM duckvep_model_load('hap_protein_alignment','SELECT 0::UINTEGER seq_region',
+ 'SELECT * FROM hap_tx','SELECT * FROM hap_exons',
+ peptide_edit_query := 'SELECT 0::UINTEGER transcript_index,(i+1)::UINTEGER protein_position,
+ ''G''::VARCHAR alternate_amino_acid FROM range(4) r(i) ORDER BY protein_position');
+----
+1
+
+statement ok
+CREATE TABLE hap_protein_alignment_calls AS SELECT event_index,0 seq_region,position,reference,alternate,
+ 1 alt_index,0 transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set
+ FROM (VALUES (1,101,'A','AA'),(2,108,'AA','A')) v(event_index,position,reference,alternate);
+
+query IITTI
+SELECT len(cds_differences),len(protein_differences),protein_differences[1].reference,
+ protein_differences[1].alternate,len(contributors) FROM duckvep_haplotypes(
+ 'SELECT * FROM hap_protein_alignment_calls','hap_protein_alignment',max_alignment_cells := 25);
+----
+0	1	GGGG	KKKK	2
+
+statement error
+SELECT * FROM duckvep_haplotypes('SELECT * FROM hap_protein_alignment_calls','hap_protein_alignment',
+ max_alignment_cells := 24);
+----
+protein difference status 3, max_alignment_cells=24, required=25
+
 # Flat event x transcript x sample calls. The early homozygote must reach
 # phase set 20, which is first encountered at the third source event.
 statement ok
@@ -151,7 +247,7 @@ GROUP BY ALL;
 incomplete_input	true	6
 
 query I
-SELECT bool_and(coding_blocks IS NULL AND cds_differences IS NULL)
+SELECT bool_and(coding_blocks IS NULL AND cds_differences IS NULL AND protein_differences IS NULL)
 FROM duckvep_haplotypes('SELECT * REPLACE([NULL,NULL]::INTEGER[] AS alleles) FROM hap_calls','hap');
 ----
 true
@@ -229,6 +325,15 @@ FROM duckvep_haplotypes('SELECT * FROM hap_many_calls ORDER BY event_index DESC'
 5000	5000	5000	2500	2500
 
 # Two pinned models remain distinct in the same process.
+query I
+SELECT count(*) FROM duckvep_haplotypes('SELECT * FROM hap_many_calls','hap_many',
+ max_active_events := 1,max_active_transcripts := 1,max_active_projections := 1,
+ max_active_carriers := 1,max_active_prefixes := 1,max_allele_bytes := 2,max_leaf_differences := 1)
+ WHERE protein_differences[1].reference='K' AND protein_differences[1].alternate='Q'
+ AND protein_differences[1].ref_start0=0 AND len(protein_differences)=1;
+----
+5000
+
 query I
 SELECT count(*) FROM duckvep_haplotypes('SELECT * FROM hap_many_calls','hap_many',
  max_active_events := 1,max_active_transcripts := 1,max_active_projections := 1,

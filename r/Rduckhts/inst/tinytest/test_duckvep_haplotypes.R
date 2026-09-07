@@ -115,7 +115,57 @@ local({
     "FROM (VALUES (1,101,'A','AA'),(2,108,'AA','A')) v(event_index,position,reference,alternate)")
   unchanged <- rduckhts_haplotypes(con, cancelling, "haps", max_alignment_cells = 1, max_leaf_differences = 1)
   expect_equal(nrow(unchanged$cds_differences[[1]]), 0L)
+  expect_equal(nrow(unchanged$protein_differences[[1]]), 0L)
   expect_equal(nrow(unchanged$contributors[[1]]), 2L)
+  ref_edits <- paste("SELECT 0::UINTEGER transcript_index,(i+1)::UINTEGER protein_position,",
+    "'G'::VARCHAR alternate_amino_acid FROM range(4) r(i) ORDER BY protein_position")
+  expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('reference_limit',",
+    dbQuoteString(con, "SELECT 0::UINTEGER seq_region"), ",", dbQuoteString(con, tx), ",",
+    dbQuoteString(con, exons), ",peptide_edit_query := ", dbQuoteString(con, ref_edits), ")"))$loaded)
+  reference_aligned <- rduckhts_haplotypes(con, cancelling, "reference_limit", max_alignment_cells = 25)
+  expect_equal(nrow(reference_aligned$cds_differences[[1L]]), 0L)
+  expect_equal(reference_aligned$protein_differences[[1L]]$reference, "GGGG")
+  expect_equal(reference_aligned$protein_differences[[1L]]$alternate, "KKKK")
+  expect_error(rduckhts_haplotypes(con, cancelling, "reference_limit", max_alignment_cells = 24),
+    pattern = "protein difference status 3, max_alignment_cells=24, required=25")
+
+  dbWriteTable(con, "reference_protein_source", data.frame(i = 0:5,
+    cds = c("CTGGCCTAA", "ATGTGAGCCTAA", "ATGGCCTAA", "ATGGCCTGA", "ctggcctaa", "AT"),
+    code = c(1L, 1L, 1L, 2L, 1L, 1L)))
+  p_tx <- paste("SELECT i::UINTEGER transcript_index,0::UINTEGER seq_region,",
+    "(100+20*i)::UBIGINT transcript_start,(99+20*i+len(cds))::UBIGINT transcript_end,",
+    "1::TINYINT strand,0::UINTEGER gene_index,3::UBIGINT transcript_flags,",
+    "transcript_start cds_start,transcript_end cds_end,cds::BLOB cds_sequence,",
+    "code::UTINYINT codon_table FROM reference_protein_source")
+  p_exons <- paste("SELECT transcript_index,transcript_start exon_start,transcript_end exon_end,",
+    "1::UBIGINT exon_cdna_start,(transcript_end-transcript_start+1)::UBIGINT exon_cdna_end,",
+    "0::TINYINT phase,0::TINYINT end_phase FROM (", p_tx, ")")
+  p_edits <- paste("SELECT * FROM (VALUES (1::UINTEGER,2::UINTEGER,'U'::VARCHAR),",
+    "(2::UINTEGER,3::UINTEGER,'W'::VARCHAR)) e(transcript_index,protein_position,alternate_amino_acid)")
+  expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('reference_proteins',",
+    dbQuoteString(con, "SELECT 0::UINTEGER seq_region"), ",", dbQuoteString(con, p_tx), ",",
+    dbQuoteString(con, p_exons), ",peptide_edit_query := ", dbQuoteString(con, p_edits), ")"))$loaded)
+  p_calls <- paste("SELECT transcript_index+1 event_index,0 seq_region,transcript_start+",
+    "CASE transcript_index WHEN 1 THEN 8 WHEN 5 THEN 1 ELSE 5 END AS position,",
+    "CASE transcript_index WHEN 5 THEN 'T' ELSE 'C' END AS reference,",
+    "CASE transcript_index WHEN 5 THEN 'C' ELSE 'T' END alternate,1 alt_index,transcript_index,",
+    "0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set FROM (", p_tx, ")")
+  for (policy in c("strict", "vep116_compat")) {
+    p <- rduckhts_haplotypes(con, p_calls, "reference_proteins", phase_policy = policy)
+    p <- p[order(p$transcript_index), ]
+    expect_equal(p$protein, c("LA*", "M*", "MA*", "MAW", "LA*", ""))
+    expect_true(is.null(p$protein_differences[[6L]]))
+    expect_equal(vapply(p$protein_differences[1:5], nrow, 1L), c(1L, 2L, 2L, 1L, 2L))
+    differences <- do.call(rbind, p$protein_differences[1:5])
+    expect_equal(differences$reference, c("M", "U", "A*", "W", "*", "*", "M", ""))
+    expect_equal(differences$alternate, c("L", "*", "", "*", "", "", "L", "*"))
+    expect_equal(differences$ref_start0, c(0, 1, 2, 2, 3, 3, 0, 2))
+    expect_equal(differences$alignment_start0, differences$ref_start0)
+    expect_true(all(vapply(p$contributors, nrow, 1L) == 1L))
+  }
+  expect_error(rduckhts_haplotypes(con, paste("SELECT * FROM (", p_calls,
+    ") WHERE transcript_index=1"), "reference_proteins", max_leaf_differences = 1),
+    pattern = "protein difference status 4, max_leaf_differences=1, required=2")
   expect_error(rduckhts_haplotypes(con, calls, "haps", max_ploidy = 1), pattern = "max_ploidy")
   expect_error(rduckhts_haplotypes(con, calls, "haps", workspace_limit = 1), pattern = "workspace")
   expect_error(rduckhts_haplotypes(con, calls, "missing"), pattern = "loaded model")

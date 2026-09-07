@@ -592,13 +592,13 @@ The additional observer supplies the already validated reference/alternate
 sequence operands; it does not replace the original parser/mapper/container
 observer. The explicit environment must lack `Bio::Ext::Align`: this contract is
 the release-116 pure-Perl NW score and tie order, not its optional alternative.
-Public `cds_differences` from both policies must match the same complete expected
+Public `cds_differences` and `protein_differences` from both policies must match the same complete expected
 run lists. Missing/extra pairs and runs, either sequence coordinate, the alignment
 coordinate, and either allele are corruption controls. Receipts retain every
 pair and mismatch; no sampling or alteration of prior denominators occurs.
-This proves alignment for the supplied sequences and public CDS differences,
-not reference-peptide model construction, public protein differences, compound
-SO or HGVS. The pure-C suite separately compares the exact band against a full
+This proves alignment and public differences for the supplied standard,
+uncurated generated transcripts, not general reference-peptide construction,
+compound SO or HGVS. The pure-C suite separately compares the exact band against a full
 matrix on exhaustive short pairs and exercises all declared allocation limits.
 
 `reference_translation_differential.R` is a separate reference-peptide
@@ -608,13 +608,14 @@ start, stop, ambiguity, case and peptide-edit witnesses (27,013 cases). Real
 Ensembl single-exon models feed `Transcript::translate`, `Translation::seq`
 and `TranscriptHaplotypeContainer`; only the input slice's table attribute is
 supplied without a database. No translation or container method is overridden.
-The lane compares native consensus translation with complete and stop-truncated
-alternate proteins, and separately tests the raw-translation-as-reference
-hypothesis. That hypothesis is not the implemented reference-peptide contract:
-the lane deliberately exits nonzero while reference differences remain. It
+The lane compares native reference-peptide preparation and complete/stop-truncated
+alternate proteins against those methods. It separately retains the rejected
+raw-translation-as-reference hypothesis and its mismatches; these are not
+substituted for the actual native-reference comparison. The lane
 retains all pairs, reference and alternate failure categories, exact module
 hashes, package lock, source identity and missing/extra/sequence corruption
-controls. Original Haplosaurus inputs and expectations are not changed. This
+controls, and fails if any native reference or alternate comparison differs.
+Original Haplosaurus inputs and expectations are not changed. This
 lane does not certify public protein differences, compound SO or HGVS.
 
 This is **not** a public phased-executor certificate: the R harness materializes

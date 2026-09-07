@@ -121,16 +121,19 @@ main <- function() {
   public_checks <- list()
   for (policy in c("strict", "vep116_compat")) {
     leaves <- readRDS(file.path(public, paste0(policy, ".rds")))$leaves
-    checks <- vapply(seq_len(nrow(leaves)), function(i) {
-      case <- cases[[as.integer(leaves$transcript_index[i]) + 1L]]
-      paths <- native[[case$transcript]]
-      same <- which(vapply(paths, function(p) p$cds == leaves$cds[i] &&
-        ("indel" %in% p$flags) == (bitwAnd(as.integer(leaves$sequence_flags[i]), 1L) != 0L), TRUE))
-      if (!length(same)) return(FALSE)
-      wanted <- expected[[paste(case$transcript, same[1L], "cds", sep = "/")]]
-      identical(canonical(leaves$cds_differences[[i]]), wanted)
-    }, TRUE)
-    public_checks[[policy]] <- data.frame(policy, leaves = nrow(leaves), failures = sum(!checks))
+    for (axis in c("cds", "protein")) {
+      checks <- vapply(seq_len(nrow(leaves)), function(i) {
+        case <- cases[[as.integer(leaves$transcript_index[i]) + 1L]]
+        paths <- native[[case$transcript]]
+        same <- which(vapply(paths, function(p) p$cds == leaves$cds[i] &&
+          ("indel" %in% p$flags) == (bitwAnd(as.integer(leaves$sequence_flags[i]), 1L) != 0L), TRUE))
+        if (!length(same)) return(FALSE)
+        wanted <- expected[[paste(case$transcript, same[1L], axis, sep = "/")]]
+        identical(canonical(leaves[[paste0(axis, "_differences")]][[i]]), wanted)
+      }, TRUE)
+      public_checks[[paste(policy, axis)]] <- data.frame(policy, axis,
+        leaves = nrow(leaves), failures = sum(!checks))
+    }
   }
   summary <- data.frame(seed = original$seed, transcripts = length(cases), sequence_pairs = length(pairs),
     difference_runs = sum(vapply(expected, nrow, 1L)), native_failures = sum(failures),
@@ -142,7 +145,7 @@ main <- function() {
     file.path(public, "receipt.json"), code,
     file.path(out, c("pairs.jsonl", "oracle.jsonl", "pairs.rds", "summary.csv", "public.csv", "controls.csv", "environment.txt")))
   jsonlite::write_json(list(source_revision = revision, source_binding = binding, oracle_revisions = revisions,
-    scope = "exact_sequence_alignment_given_receipted_pairs_and_public_cds_differences_not_hgvs_or_combined_so",
+    scope = "exact_sequence_alignment_given_receipted_pairs_and_public_cds_and_protein_differences_not_hgvs_or_combined_so",
     source_receipt = file.path(artifact, "receipt.json"), public_receipt = file.path(public, "receipt.json"),
     sha256 = as.list(vapply(identities, duckvep_evidence_sha256, ""))), file.path(out, "receipt.json"),
     pretty = TRUE, auto_unbox = TRUE)

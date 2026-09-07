@@ -670,9 +670,11 @@ Ambiguity is an explicit input policy to that translator: independent coding
 predicates conservatively retain `X` for N-containing codons, while phased replay
 uses BioPerl's amino-acid consensus over every A/C/G/T expansion of N. A resolved
 residue does not clear the input's `unambiguous` fact. Both modes validate every
-base, including trailing partial codons and sequence after a stop. This raw
-translation is not Ensembl's reference peptide: reference start-methionine,
-terminal-stop and curated peptide-edit rules must precede protein comparison.
+base, including trailing partial codons and sequence after a stop. Reference
+protein preparation uses that same translator, then applies Ensembl's distinct
+start-methionine, terminal-stop and curated peptide-edit rules before comparison.
+It retains internal stops and applies single-residue edits to the complete
+reference; the displayed alternate still selects its first-stop prefix.
 Carrier-prefix identity includes per-event called/missing/unphased evidence. An uncertain
 path cannot share the result of a fully known path merely because their called edits agree.
 The native stream accepts complete decoded calls for a candidate transcript and uses the
@@ -726,6 +728,16 @@ the equivalent nonnegative cost (substitution 4, gap 3); every optimum lies with
 therefore preserve exact global tie placement without allocating in execution.
 `max_alignment_cells` and `max_leaf_differences` are independent per-call limits
 within `workspace_limit`; exceeding either is an error, never approximate output.
+`protein_differences` uses the same alignment and span contract in amino-acid
+coordinates. The reference peptide is prepared once per closing transcript in
+worker storage of at most `max_sequence_bases/3 + 2` bytes: a terminal curated
+edit can restore a removed residue, and Haplosaurus can append another stop.
+CDS and protein axes sequentially reuse the same traceback and descriptor arrays;
+DuckDB copies each list before the next axis resets those arrays. Limits apply
+separately to each axis. A reference CDS shorter than a complete codon has an
+unavailable protein comparison (NULL), not a known empty reference. Known equal
+proteins produce an empty list. The exact raw-suffix stop convention is recorded
+in [the compatibility errata](duckvep_errata.md#haplosaurus-reference-and-alternate-proteins-use-different-stop-rules).
 The registry owns one valid retained query connection: its extension-load database handle
 must not be retained. Only preparation/materialization uses that connection. A busy slot
 returns an error, including recursive preparation, while completed scan results and native
