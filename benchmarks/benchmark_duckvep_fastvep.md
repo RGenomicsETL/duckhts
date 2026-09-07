@@ -499,11 +499,11 @@ the real VEP 116 executable.
 
 <img src="benchmark_duckvep_fastvep_files/figure-gfm/plot-fuzz-1.png" alt="Checked randomized property trials and generated VEP differential pairs, both with zero observed failures or differences." width="1120" />
 
-At tested ancestor 6eebf9b0, 52 randomized properties completed
-5,100,500 trials with zero failures. They compare optimized sweeps,
+At tested ancestor cc1993fd, 55 randomized properties completed
+5,500,000 trials with zero failures. They compare optimized sweeps,
 projection, sequence editing, translation, HGVS, regulation/BND, and
 multi-edit mechanics with independent or deliberately slower oracles. At
-tested ancestor 05620047, generated state-exploration seed 31415927
+tested ancestor cc1993fd, generated state-exploration seed 31415927
 produced 100,268 variant/transcript comparisons against executable VEP
 116: all exact, with no unresolved, missing, or extra rows.
 
@@ -539,7 +539,7 @@ silently charged to only one tool.
     explicit sort and real output.
 2.  **The speed result survives a compatibility check.** DuckVEP is
     exact on all 56,998 held-out VEP transcript pairs, consequence sets,
-    HGVSc suffixes, and HGVSp suffixes, then adds 5.1 million randomized
+    HGVSc suffixes, and HGVSp suffixes, then adds 5,500,000 randomized
     property trials and 100,268 generated VEP pair comparisons with no
     observed failure. FastVEP’s speed result does not imply the same
     HGVS contract.

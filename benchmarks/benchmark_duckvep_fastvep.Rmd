@@ -220,17 +220,12 @@ conformance <- read.csv(
   check.names = FALSE
 )
 
-is_tested_ancestor <- function(revision) {
-  identical(
-    system2(
-      "git",
-      c("-C", root, "merge-base", "--is-ancestor", revision, "HEAD"),
-      stdout = FALSE,
-      stderr = FALSE
-    ),
-    0L
-  )
-}
+revision_ancestry <- system2(
+  "git",
+  c("-C", shQuote(root), "rev-list", "--topo-order", "HEAD"),
+  stdout = TRUE
+)
+stopifnot(is.null(attr(revision_ancestry, "status")), length(revision_ancestry) > 0L)
 
 property_history <- read.csv(
   file.path(
@@ -239,12 +234,11 @@ property_history <- read.csv(
   stringsAsFactors = FALSE,
   check.names = FALSE
 )
-property_revisions <- unique(property_history$source_revision)
-property_revisions <- property_revisions[vapply(
-  property_revisions, is_tested_ancestor, logical(1)
-)]
+property_revisions <- revision_ancestry[
+  revision_ancestry %in% property_history$source_revision
+]
 stopifnot(length(property_revisions) > 0L)
-property_revision <- tail(property_revisions, 1L)
+property_revision <- property_revisions[[1L]]
 property_run <- property_history[
   property_history$source_revision == property_revision,
   ,
@@ -270,12 +264,11 @@ generated_differentials <- differential_history[
   ,
   drop = FALSE
 ]
-differential_revisions <- unique(generated_differentials$source_revision)
-differential_revisions <- differential_revisions[vapply(
-  differential_revisions, is_tested_ancestor, logical(1)
-)]
+differential_revisions <- revision_ancestry[
+  revision_ancestry %in% generated_differentials$source_revision
+]
 stopifnot(length(differential_revisions) > 0L)
-differential_revision <- tail(differential_revisions, 1L)
+differential_revision <- differential_revisions[[1L]]
 generated_differential <- tail(
   generated_differentials[
     generated_differentials$source_revision == differential_revision,
@@ -1284,7 +1277,7 @@ ggplot(fuzz_evidence, aes(campaign, observations / 1e6, fill = campaign)) +
   theme_bench
 ```
 
-At tested ancestor `r substr(property_revision, 1L, 8L)`, 52 randomized
+At tested ancestor `r substr(property_revision, 1L, 8L)`, `r nrow(property_run)` randomized
 properties completed `r format(sum(property_run$trials), big.mark = ",")`
 trials with zero failures. They compare optimized sweeps, projection, sequence
 editing, translation, HGVS, regulation/BND, and multi-edit mechanics with
@@ -1327,7 +1320,8 @@ of being silently charged to only one tool.
    sort and real output.
 2. **The speed result survives a compatibility check.** DuckVEP is exact on all
    56,998 held-out VEP transcript pairs, consequence sets, HGVSc suffixes, and
-   HGVSp suffixes, then adds 5.1 million randomized property trials and 100,268
+   HGVSp suffixes, then adds `r format(sum(property_run$trials), big.mark = ",")`
+   randomized property trials and `r format(generated_differential$n, big.mark = ",")`
    generated VEP pair comparisons with no observed failure. FastVEP's speed
    result does not imply the same HGVS contract.
 3. **SQL supplementary annotation is measured, not aspirational.** The

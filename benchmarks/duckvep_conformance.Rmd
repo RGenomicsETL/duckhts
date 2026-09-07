@@ -649,8 +649,8 @@ if (nrow(latest_state_runs)) {
 ```
 
 The same campaign covered the following SO terms. Counts are term memberships,
-not distinct transcript pairs, because one pair may carry several terms and the
-four seeds deliberately retain the same fixed witnesses.
+not distinct transcript pairs, because one pair may carry several terms and seed
+runs deliberately retain the same fixed witnesses.
 
 ```{r state-exploration-so}
 if (nrow(latest_state_runs)) {
@@ -692,8 +692,9 @@ if (nrow(latest_state_runs)) {
 }
 ```
 
-This distribution deliberately stresses local allele and boundary states on one
-engineered transcript. It does not replace the indexed-cache corpora, which add
+This distribution deliberately stresses local alleles and positions near exon,
+splice-site, and CDS endpoints on one engineered transcript. It does not replace
+the indexed-cache corpora, which add
 real transcript density, imported flags, exceptional peptide edits, codon tables,
 assemblies, and species. The revision is shown explicitly because this expensive
 campaign is not silently attributed to later code.
@@ -797,7 +798,14 @@ knitr::kable(property_runs, row.names = FALSE)
 ```
 
 ```{r property-targets}
-last_property <- property_history[nrow(property_history), , drop = FALSE]
+property_ancestry <- revision_ancestry[
+  revision_ancestry %in% property_history$source_revision
+]
+stopifnot(length(property_ancestry) > 0L)
+last_property <- tail(property_history[
+  property_history$source_revision == property_ancestry[[1L]],
+  , drop = FALSE
+], 1L)
 latest_properties <- property_history[
   property_history$source_revision == last_property$source_revision &
     property_history$seed == last_property$seed &
@@ -833,6 +841,19 @@ latest_coverage <- property_coverage_history[
   drop = FALSE
 ]
 if (nrow(latest_coverage)) {
+  coverage_requirements <- read.delim(file.path(
+    root, "test", "duckvep", "conformance", "data",
+    "property_coverage_requirements.tsv"
+  ))
+  coverage_check <- merge(
+    coverage_requirements, latest_coverage,
+    by = c("coverage", "metric"), all = TRUE
+  )
+  required_coverage <- coverage_check$requirement == "statistical_required"
+  stopifnot(
+    !anyNA(coverage_check),
+    all(coverage_check$count[required_coverage] > 0)
+  )
   latest_coverage$count <- format(
     latest_coverage$count,
     big.mark = ",",
@@ -855,6 +876,12 @@ if (nrow(latest_coverage)) {
   cat("No distribution-counter ledger has been recorded for the latest run yet.\n")
 }
 ```
+
+The run observed all `r sum(required_coverage)` required nonzero counters.
+The other `r sum(coverage_check$requirement == "fixed_witness")` counters have named
+fixed witnesses in the coverage manifest; their absence from a random draw is not
+counted as statistical coverage. These counters describe the declared generators,
+not an exhaustive enumeration of biological configurations.
 
 ## Individual Sequence Ontology terms
 

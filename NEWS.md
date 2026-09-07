@@ -1,6 +1,12 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- refresh independent-event state-exploration evidence on the shared coding
+  implementation: the unchanged seed-31415927 corpus matches all 100,268
+  executable-VEP consequence and HGVS pairs, and 5.5 million C property trials
+  satisfy all 255 required nonzero coverage counters. Historical failures remain
+  recorded; this does not certify compound SO/HGVS or refresh other corpus campaigns
+
 - record the complete GIAB independent-annotation workload after sharing indel
   predicates: 65.69 seconds on one core versus the nearest identical 63.49-second
   pass, with identical full output fingerprints. This single-pass slowdown is
