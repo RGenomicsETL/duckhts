@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- fix transcript-end HGVS multiplication handling found by fresh-seed VEP
+  conformance: only a two-copy duplication bypasses allele clipping. Larger
+  copies follow the insertion projection and return no HGVS when its coordinates
+  leave the transcript; remove the incorrect native repeat-formatting path
+
 - record current-code endpoint-refactor evidence: the original 100,268-pair
   VEP/HGVS campaign and 5.5 million property trials pass. The identical one-core
   GIAB workload takes 67.35 seconds versus 65.69 seconds, with matching complete

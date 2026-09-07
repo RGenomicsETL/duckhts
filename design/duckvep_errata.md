@@ -1777,14 +1777,23 @@ Complete-feature clamping can also make a duplication reachable after minimizati
 the semantic differing base outside the transcript. On the positive-strand minimal
 fixture, uploaded terminal `chrDuck:250 CG>CC` minimizes to `G>C` at position 251, but
 `_var2transcript_slice_coords` first clamps the complete two-base feature to the terminal
-transcript base. Allele clipping then leaves an inserted `C`, which matches that terminal
-reference base and renders `c.*10dup`. The same geometry with a non-copy (`CG>CA`) remains
+transcript base. `hgvs_variant_notation` recognizes the two-copy `dup` before
+`hgvs_transcript` skips allele clipping for that type, retaining `c.*10dup`.
+The same geometry with a non-copy (`CG>CA`) remains
 absent. The complete feature must clamp to exactly that one terminal base: uploaded
 `chrDuck:249 ACG>ACC` retains two in-transcript bases before clipping and VEP leaves its
 resulting out-of-range insertion absent, even though the remaining `C` is a terminal copy.
 Rejecting the minimized event before retaining the overlapping complete feature loses the
 positive VEP state; admitting every outside minimized event or every terminal-copy suffix
 creates false terminal annotations.
+
+Only type `dup` skips `_clip_alleles`, not the other multiplication types from
+`hgvs_variant_notation`. The unchanged seed-27182818 campaign exposed terminal
+`chrDuck:250 CGT>CCC`: clamping gives `C>CCC`, but the intermediate `[3]` type is
+then clipped to an insertion with one coordinate past the transcript. VEP returns
+no HGVSc. Treating every multiplication as printable repeat syntax incorrectly
+emitted `c.*10[3]`. The fixed VCF `test/data/duckvep/hgvs_terminal_multiplication.vcf`
+retains this counterexample, two-copy duplication and larger-copy controls.
 
 Source anchors: Ensembl Variation 116 `TranscriptVariationAllele::hgvs_transcript`,
 `TranscriptVariationAllele::_genomic_shift`, `hgvs_variant_notation`, and its duplication

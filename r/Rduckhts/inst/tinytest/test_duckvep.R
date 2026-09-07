@@ -1168,6 +1168,32 @@ local({
   )
   expect_true(all(is.na(hgvs_directional$transcript_hgvs_reason)))
 
+  # The unchanged seed-27182818 VEP differential found CGT>CCC at the
+  # last transcript base. Only two-copy 'dup' bypasses VEP allele clipping.
+  expect_true(load_model(
+    "r-hgvs-multiplication",
+    c("SELECT 1::UINTEGER seq_region, 260::UBIGINT sequence_length, 'chrDuck' seq_region_name",
+      queries[2:3]),
+    reference_fasta = system.file("extdata", "duckvep_minimal.fa",
+      package = "Rduckhts", mustWork = TRUE)
+  )$loaded)
+  hgvs_multiplication <- dbGetQuery(con, paste(
+    "WITH variants(ord, reference, alternate) AS (VALUES",
+    "(1, 'CG', 'CC'), (2, 'CGT', 'CCC'), (3, 'CGTA', 'CCCC'))",
+    "SELECT ord, a.transcript_hgvs, a.transcript_hgvs_status,",
+    "a.transcript_hgvs_reason, a.protein_hgvs_status",
+    "FROM variants, LATERAL unnest(_duckvep_annotate_small_hgvs(",
+    "'r-hgvs-multiplication', 1::UINTEGER, 250::UBIGINT,",
+    "reference, alternate, 0::UBIGINT)) u(a) ORDER BY ord"
+  ))
+  expect_identical(hgvs_multiplication$transcript_hgvs, c("c.*10dup", NA, NA))
+  expect_identical(hgvs_multiplication$transcript_hgvs_status,
+    c("supported", "not_applicable", "not_applicable"))
+  expect_true(all(is.na(hgvs_multiplication$transcript_hgvs_reason)))
+  expect_identical(hgvs_multiplication$protein_hgvs_status, rep("not_applicable", 3))
+  expect_true(dbGetQuery(con,
+    "SELECT duckvep_model_drop('r-hgvs-multiplication') dropped")$dropped)
+
   hgvs_terminal_insertion <- dbGetQuery(
     con,
     paste(

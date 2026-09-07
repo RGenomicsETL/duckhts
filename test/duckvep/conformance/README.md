@@ -47,6 +47,11 @@ The validation gates have independent jobs:
 - `make test-duckvep-differential` generates boundary, splice, codon, and allele-shape
   witnesses, runs both engines on the same GFF and FASTA, and compares the exact SO term
   set for every `(variant, transcript)` pair.
+- `test/data/duckvep/hgvs_terminal_multiplication.vcf` retains the seed-27182818
+  terminal `CGT>CCC` HGVS counterexample and copy-count controls. Run it with
+  `corpus_differential.R --vcf test/data/duckvep/hgvs_terminal_multiplication.vcf
+  --corpus hgvs_terminal_multiplication --sample-per-shape 0 --hgvs` on the
+  default minimal model; do not add it to or change the frozen random generator.
 - `make test-duckvep-projection ARGS='--vep-prefix /path/to/vep --consequences'`
   compares the typed presentation fields and, separately, native SO terms/status/reason
   on the derived transcript fixtures. Every physical VCF record is retained, including

@@ -66,7 +66,7 @@ typedef struct duckvep_hgvs_coordinate {
 
 /* Initial edit shape. REPLACEMENT is the VEP delins default for any non-empty
  * multi-base or unequal-length REF/ALT pair. Sequence-aware refinement may
- * later prove inversion, duplication, or repeat syntax without changing the
+ * later prove inversion or duplication without changing the
  * underlying transcript edit. */
 typedef enum duckvep_hgvs_dna_shape {
     DUCKVEP_HGVS_DNA_SUBSTITUTION = 1,
@@ -74,8 +74,7 @@ typedef enum duckvep_hgvs_dna_shape {
     DUCKVEP_HGVS_DNA_INSERTION = 3,
     DUCKVEP_HGVS_DNA_REPLACEMENT = 4,
     DUCKVEP_HGVS_DNA_INVERSION = 5,
-    DUCKVEP_HGVS_DNA_DUPLICATION = 6,
-    DUCKVEP_HGVS_DNA_REPEAT = 7
+    DUCKVEP_HGVS_DNA_DUPLICATION = 6
 } duckvep_hgvs_dna_shape_t;
 
 typedef struct duckvep_hgvs_dna_fact {
@@ -91,7 +90,6 @@ typedef struct duckvep_hgvs_dna_fact {
     const uint8_t *alt;
     uint16_t ref_length;
     uint16_t alt_length;
-    uint32_t repeat_count;
     int32_t shift_offset;
     int8_t transcript_strand;
     uint8_t numbering; /* duckvep_hgvs_numbering_t */

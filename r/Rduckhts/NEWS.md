@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- fix bundled HGVS output for transcript-end replacements that resemble three
+  or more copies after transcript clipping. Unprojectable insertions now return
+  NA with `not_applicable` status, matching VEP 116; two-copy duplications remain
+
 - bundle the shared start/terminal-CDS interpreter for native compound blocks,
   retaining independent annotation and explicit missing-flank failures. The
   phased SQL/R relations still expose sequence/provenance, not complete SO/HGVS

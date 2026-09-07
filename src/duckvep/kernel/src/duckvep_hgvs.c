@@ -507,7 +507,7 @@ static duckvep_hgvs_status_t hgvs_dna_fact_build_clamped_feature(
     uint32_t                               shift_offset,
     duckvep_hgvs_dna_fact_t               *out) {
 
-    duckvep_hgvs_dna_fact_t result;
+    duckvep_hgvs_dna_fact_t result = {0};
     duckvep_transcript_coordinate_t first_transcript;
     duckvep_transcript_coordinate_t last_transcript;
     duckvep_hgvs_status_t status;
@@ -523,7 +523,7 @@ static duckvep_hgvs_status_t hgvs_dna_fact_build_clamped_feature(
     uint32_t genomic_high1;
     uint32_t genomic_first1;
     uint32_t genomic_last1;
-    uint32_t repeat_count = 0u;
+    int duplication = 0;
     int8_t strand;
 
     if (out == NULL) return DUCKVEP_HGVS_INVALID_ARG;
@@ -588,18 +588,17 @@ static duckvep_hgvs_status_t hgvs_dna_fact_build_clamped_feature(
     alternate_allele = edit->feature_alt;
 
     /* hgvs_variant_notation() tests multiplication before _clip_alleles().
+     * Only exactly two copies (type 'dup') bypass transcript allele clipping;
+     * larger multiples become insertions and must project their clipped ends.
      * That order matters for a feature clamped at a transcript endpoint:
      * terminal CG>CC is a direct C>CC duplication, while CGT>CAC first
      * becomes an insertion only after clipping and then has no projectable
      * second coordinate.  Do not promote the latter from insAC to a
      * duplication merely because AC happens to copy terminal sequence. */
-    if (reference_length != 0u &&
-        alternate_length > reference_length &&
-        alternate_length % reference_length == 0u) {
+    if (reference_length != 0u && alternate_length == 2u * reference_length) {
         size_t i;
-        int repeated = 1;
+        duplication = 1;
 
-        repeat_count = (uint32_t)(alternate_length / reference_length);
         for (i = 0u; i < alternate_length; i++) {
             uint8_t reference_base;
             uint8_t alternate_base;
@@ -613,13 +612,12 @@ static duckvep_hgvs_status_t hgvs_dna_fact_build_clamped_feature(
                 &alternate_base);
             if (status != DUCKVEP_HGVS_OK) return status;
             if (reference_base != alternate_base) {
-                repeated = 0;
+                duplication = 0;
                 break;
             }
         }
-        if (!repeated) repeat_count = 0u;
     }
-    if (repeat_count >= 2u) {
+    if (duplication) {
         status = hgvs_project_genomic_pair(
             transcripts, exons, edit->tx_idx, genomic_low1, genomic_high1,
             strand, &result.first, &result.last);
@@ -636,10 +634,7 @@ static duckvep_hgvs_status_t hgvs_dna_fact_build_clamped_feature(
         result.alt = alternate_allele;
         result.ref_length = (uint16_t)reference_length;
         result.alt_length = (uint16_t)alternate_length;
-        result.repeat_count = repeat_count;
-        result.shape = repeat_count == 2u
-            ? (uint8_t)DUCKVEP_HGVS_DNA_DUPLICATION
-            : (uint8_t)DUCKVEP_HGVS_DNA_REPEAT;
+        result.shape = (uint8_t)DUCKVEP_HGVS_DNA_DUPLICATION;
         result.transcript_strand = strand;
         result.shift_offset = (int32_t)shift_offset;
         result.placed_start1 = genomic_low1;
@@ -1646,18 +1641,6 @@ duckvep_hgvs_status_t duckvep_hgvs_dna_render_basic(
                     &writer,
                     fact->shape == (uint8_t)DUCKVEP_HGVS_DNA_INVERSION
                         ? "inv" : "dup")) {
-                return DUCKVEP_HGVS_INVALID_PROJECTION;
-            }
-            break;
-        case DUCKVEP_HGVS_DNA_REPEAT:
-            if (fact->repeat_count < 2u ||
-                !hgvs_writer_coordinate(&writer, &fact->first) ||
-                (!same_coordinate &&
-                 (!hgvs_writer_char(&writer, '_') ||
-                  !hgvs_writer_coordinate(&writer, &fact->last))) ||
-                !hgvs_writer_char(&writer, '[') ||
-                !hgvs_writer_uint64(&writer, fact->repeat_count) ||
-                !hgvs_writer_char(&writer, ']')) {
                 return DUCKVEP_HGVS_INVALID_PROJECTION;
             }
             break;

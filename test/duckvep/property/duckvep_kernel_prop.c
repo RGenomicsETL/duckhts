@@ -6597,20 +6597,17 @@ TEST hgvs_clamped_feature_preserves_vep_preclip_multiplication_order(void) {
                   &fact, rendered, sizeof rendered, &required));
     ASSERT_EQ(0, strcmp("c.*3dup", rendered));
 
-    /* The same pre-clip rule represents C>CCC as a three-copy repeat. */
+    /* Only type 'dup' bypasses TranscriptVariationAllele::_clip_alleles.
+     * Three copies are clipped to an insertion past the transcript end;
+     * executable VEP 116 emits no HGVSc (seed-27182818 CGT>CCC witness). */
     edit.alt = alt_ccc + 1u;
     edit.alt_length = 2u;
     edit.feature_alt = alt_ccc;
     edit.feature_alt_length = 3u;
-    ASSERT_EQ(DUCKVEP_HGVS_OK,
+    ASSERT_EQ(DUCKVEP_HGVS_NOT_APPLICABLE,
               duckvep_hgvs_dna_fact_build_genomic_shifted_with_lookup(
                   &s.tx, &s.ex, NULL, &reference, &edit, &fact));
-    ASSERT_EQ(DUCKVEP_HGVS_DNA_REPEAT, fact.shape);
-    ASSERT_EQ(3u, fact.repeat_count);
-    ASSERT_EQ(DUCKVEP_HGVS_OK,
-              duckvep_hgvs_dna_render_basic(
-                  &fact, rendered, sizeof rendered, &required));
-    ASSERT_EQ(0, strcmp("c.*3[3]", rendered));
+    ASSERT_EQ(0u, fact.shape);
 
     /* ACG>ACC and CGT>CAC become insertions only after clipping. Their
      * insertion coordinates fall beyond this transcript, so VEP emits no
@@ -6654,6 +6651,66 @@ TEST hgvs_clamped_feature_preserves_vep_preclip_multiplication_order(void) {
     ASSERT_EQ(DUCKVEP_HGVS_NOT_APPLICABLE,
               duckvep_hgvs_dna_fact_build_genomic_shifted_with_lookup(
                   &s.tx, &s.ex, NULL, &reference, &edit, &fact));
+    PASS();
+}
+
+TEST hgvs_clamped_multiplication_projects_clipped_ends_on_both_strands(void) {
+    /* Source-derived VEP-116 rule: type 'dup' alone skips allele clipping.
+     * Cross every nucleotide, strand, and copy count without altering the
+     * random generator that discovered the terminal CGT>CCC counterexample. */
+    for (unsigned base = 0u; base < 4u; base++) {
+        for (int strand = -1; strand <= 1; strand += 2) {
+            for (uint16_t copies = 2u; copies <= 16u; copies++) {
+                struct kprop_proj_scene s = {0};
+                uint8_t genome[40], alleles[32];
+                uint16_t chrom = 0u;
+                uint32_t pos = strand > 0 ? 103u : 101u - copies;
+                uint32_t end = pos + copies - 1u, ref_offset = 0u, alt_offset = 16u;
+                uint8_t kind = copies == 2u ? DUCKVEP_KIND_SNV : DUCKVEP_KIND_MNV;
+                duckvep_variant_batch_t batch = {0};
+                duckvep_transcript_edit_t edit;
+                duckvep_hgvs_dna_fact_t fact;
+                duckvep_hgvs_reference_window_t reference = {0};
+                memset(genome, 'A', sizeof genome);
+                memset(alleles, "ACGT"[base], sizeof alleles);
+                size_t terminal = strand > 0 ? 20u : 17u;
+                genome[terminal] = "ACGT"[base];
+                for (size_t j = 1u; j < copies; j++)
+                    genome[strand > 0 ? terminal + j : terminal - j] = "ACGT"[(base + 1u) % 4u];
+                s.chrom = chrom; s.tstart = 100u; s.tend = 103u; s.strand = (int8_t)strand;
+                s.excnt = 1u; s.es[0] = 100u; s.ee[0] = 103u;
+                s.cs[0] = 1u; s.ce[0] = 4u; s.phase[0] = -1;
+                kprop_proj_scene_finish(&s);
+                batch.count = 1u; batch.chrom_id = &chrom; batch.pos1 = &pos;
+                memcpy(alleles, genome + pos - 83u, copies);
+                batch.variant_kind = &kind; batch.end1 = &end;
+                batch.ref_offset = &ref_offset; batch.alt_offset = &alt_offset;
+                batch.ref_length = &copies; batch.alt_length = &copies;
+                batch.allele_bytes = alleles; batch.allele_bytes_len = 16u + copies;
+                reference.bases = genome; reference.length = sizeof genome;
+                reference.start1 = 83u; reference.chrom_id = chrom;
+                duckvep_transcript_edit_status_t projected = duckvep_transcript_edit_build(
+                    &s.tx, &s.ex, NULL, &batch, 0u, 0u, NULL, 0u, &edit);
+                if (projected != DUCKVEP_TRANSCRIPT_EDIT_OK)
+                    fprintf(stderr, "multiplication base=%u strand=%d copies=%u projection=%d\n",
+                        base, strand, copies, projected);
+                ASSERT_EQ(DUCKVEP_TRANSCRIPT_EDIT_OK, projected);
+                memset(&fact, 0xa5, sizeof fact);
+                duckvep_hgvs_status_t status = duckvep_hgvs_dna_fact_build_genomic_shifted_with_lookup(
+                    &s.tx, &s.ex, NULL, &reference, &edit, &fact);
+                if (copies == 2u) {
+                    ASSERT_EQ(DUCKVEP_HGVS_OK, status);
+                    ASSERT_EQ(DUCKVEP_HGVS_DNA_DUPLICATION, fact.shape);
+                    ASSERT_EQ(4, fact.first.base);
+                    ASSERT_EQ(4, fact.last.base);
+                } else {
+                    duckvep_hgvs_dna_fact_t empty = {0};
+                    ASSERT_EQ(DUCKVEP_HGVS_NOT_APPLICABLE, status);
+                    ASSERT_EQ(0, memcmp(&empty, &fact, sizeof fact));
+                }
+            }
+        }
+    }
     PASS();
 }
 
@@ -28306,6 +28363,7 @@ int main(int argc, char **argv) {
     RUN_TEST(hgvs_large_duplication_uses_lookup_beyond_shift_slice);
     RUN_TEST(hgvs_genomic_shift_matches_reference_oracle_for_any_indel);
     RUN_TEST(hgvs_clamped_feature_preserves_vep_preclip_multiplication_order);
+    RUN_TEST(hgvs_clamped_multiplication_projects_clipped_ends_on_both_strands);
     RUN_TEST(hgvs_true_feature_inversion_is_not_delins);
     RUN_TEST(hgvs_single_residue_sidecar_matches_core_shapes);
     RUN_TEST(hgvs_sidecar_requires_frameshift_proof_for_length_change);

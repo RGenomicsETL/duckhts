@@ -592,7 +592,9 @@ WITH variants(ord, position, reference, alternate) AS (
     (2, 250::UBIGINT, 'C', 'A'),
     (3, 250::UBIGINT, 'CG', 'GC'),
     (4, 250::UBIGINT, 'CG', 'CC'),
-    (5, 249::UBIGINT, 'ACG', 'ACC')
+    (5, 249::UBIGINT, 'ACG', 'ACC'),
+    (6, 250::UBIGINT, 'CGT', 'CCC'),
+    (7, 250::UBIGINT, 'CGTA', 'CCCC')
 )
 SELECT ord,
        coalesce(annotation.transcript_hgvs, '-'),
@@ -610,6 +612,8 @@ ORDER BY ord;
 3	c.*10_*9insG	supported	not_applicable
 4	c.*10dup	supported	not_applicable
 5	-	not_applicable	not_applicable
+6	-	not_applicable	not_applicable
+7	-	not_applicable	not_applicable
 
 # A 3-prime shift can move an insertion from the terminal codon to the first
 # 3-prime UTR base. VEP keeps HGVSc but has no peptide allele to format.
