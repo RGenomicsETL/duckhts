@@ -22,6 +22,61 @@ local({
     "(VALUES (1,100,'C',[1,1],NULL),(2,101,'G',[1,0],10),(3,102,'C',[0,1],20))",
     "v(event_index,position,alternate,alleles,phase_set)")
   actual <- rduckhts_haplotypes(con, calls, "haps")
+  raw_calls <- paste("SELECT i event_index,0 seq_region,99+i AS position,'A' AS reference,",
+    "CASE i WHEN 1 THEN ['C','T'] ELSE ['G'] END alternates,0 transcript_index,0 sample_index,",
+    "CASE i WHEN 1 THEN '.|1' ELSE '1|1' END gt FROM range(1,3) r(i)")
+  raw <- rduckhts_haplotypes(con, raw_calls, "haps", "vep116_compat", input_mode = "source_records")
+  raw <- raw[order(raw$cds), ]
+  expect_equal(raw$cds, c("CGAAAAAAAAAA", "GAAAAAAAAAA"))
+  expect_equal(raw$protein, c("RKKK", "EKK"))
+  expect_equal(raw$sequence_status, rep("conditional", 2L))
+  expect_equal(raw$evidence_flags, c(11L, 11L))
+  expect_equal(raw$edit_count, c(2, 2))
+  expect_equal(raw$carrier_count, c(1L, 1L))
+  expect_equal(raw$contributors[[1]]$alt_index, c(1L, 1L))
+  expect_equal(raw$contributors[[2]]$alt_index, c(NA_integer_, 1L))
+  expect_equal(raw$contributors[[2]]$evidence_flags, c(10L, 1L))
+  expect_equal(raw$contributors[[2]]$alternate, c("", "G"))
+  expect_equal(raw$contributors[[2]]$event_index, c(1, 2))
+  expect_equal(do.call(rbind, raw$carriers)$haplotype_lane, 1:2)
+  expect_true(all(is.na(do.call(rbind, raw$carriers)$phase_set)))
+  for (spelling in c("0|1", "|0|1", ".", "1")) {
+    result <- rduckhts_haplotypes(con, sub(".|1", spelling, raw_calls, fixed = TRUE), "haps",
+      "vep116_compat", input_mode = "source_records")
+    expect_equal(sum(result$carrier_count), 2L)
+    expect_equal(nrow(result), if (spelling %in% c("0|1", "1")) 2L else 1L)
+  }
+  for (replacement in c("NULL AS alternates", "['C',NULL] AS alternates", "[''] AS alternates",
+                        "NULL AS gt", "'3|1' AS gt", "'1||1' AS gt")) {
+    malformed <- paste("SELECT * REPLACE(", replacement, ") FROM (", raw_calls, ")")
+    expect_error(rduckhts_haplotypes(con, malformed, "haps", "vep116_compat",
+      input_mode = "source_records"))
+  }
+  for (name in c("event_index", "seq_region", "position", "reference", "transcript_index", "sample_index")) {
+    null_input <- paste("SELECT * REPLACE(NULL AS", name, ") FROM (", raw_calls, ")")
+    expect_error(rduckhts_haplotypes(con, null_input, "haps", "vep116_compat",
+      input_mode = "source_records"), pattern = "required input")
+  }
+  for (replacement in c("'T' AS reference", "['T','C'] AS alternates", "101 AS position")) {
+    inconsistent <- paste("SELECT * FROM (", raw_calls, ") UNION ALL SELECT * REPLACE(",
+      "1 AS sample_index,", replacement, ") FROM (", raw_calls, ")")
+    expect_error(rduckhts_haplotypes(con, inconsistent, "haps", "vep116_compat",
+      input_mode = "source_records"), pattern = "inconsistent source record identity")
+  }
+  different_gt <- paste("SELECT * FROM (", raw_calls, ") UNION ALL SELECT * REPLACE(",
+    "1 AS transcript_index,'1|1' AS gt) FROM (", raw_calls, ")")
+  expect_error(rduckhts_haplotypes(con, different_gt, "haps", "vep116_compat",
+    input_mode = "source_records"), pattern = "source GT")
+  expect_error(rduckhts_haplotypes(con, paste(raw_calls, "UNION ALL", raw_calls), "haps",
+    "vep116_compat", input_mode = "source_records"), pattern = "duplicate call")
+  expect_error(rduckhts_haplotypes(con, raw_calls, "haps", input_mode = "source_records"),
+    pattern = "requires phase_policy")
+  expect_error(rduckhts_haplotypes(con, raw_calls, "haps", "vep116_compat", input_mode = "unknown"))
+  expect_error(rduckhts_haplotypes(con, raw_calls, "haps", "vep116_compat",
+    input_mode = "source_records", max_ploidy = 1), pattern = "max_ploidy")
+  rduckhts_haplotypes(con, raw_calls, "haps", "vep116_compat", input_mode = "source_records",
+    table_name = "raw_haplotypes")
+  expect_equal(dbGetQuery(con, "SELECT sum(carrier_count) n FROM raw_haplotypes")$n, 2)
   for (policy in c("strict", "vep116_compat")) {
     # Changing any source ALT identity across samples must fail even without
     # duplicate (event, transcript, sample) keys. Input order cannot hide it.

@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- expose source-record phased replay through `duckvep_haplotypes` with an
+  explicit input mode, original GT text, complete ALT lists, contributor allele
+  ordinals and conditional missing-slot sequence status
+
 - record clean-build native raw-record replay evidence for 7,020 finite GT
   profiles and matched six-workload performance evidence. Preserve the public
   decoded-call audit's 6,990 disagreements and all earlier evidence rows

@@ -293,6 +293,76 @@ main <- function() {
       native_unavailable_carriers = sum(a$carrier_count[is.na(a$cds)]))
   })
   saveRDS(comparisons, file.path(out, "comparisons.rds"))
+  # Retain the VCF's exact GT spelling. This declared fixture has FORMAT GT:PS;
+  # decoded arrays are not a source from which the raw spelling can be recovered.
+  text_records <- read.delim(file.path(out, "calls.vcf"), header = FALSE, comment.char = "#",
+    col.names = c("chrom", "position", "id", "ref", "alt", "qual", "filter", "info", "format", "sample"),
+    colClasses = "character", quote = "")
+  stopifnot(all(text_records$format == "GT:PS"), nrow(text_records) == nrow(records))
+  text_records$gt <- sub(":.*$", "", text_records$sample)
+  DBI::dbWriteTable(con, "source_genotypes", text_records)
+  DBI::dbExecute(con, "CREATE TABLE source_calls AS SELECT r.record_index event_index,
+    m.seq_region,r.POS AS position,r.REF reference,r.ALT alternates,m.transcript_index,
+    0::UINTEGER sample_index,g.gt FROM records r JOIN models m ON m.chrom=r.CHROM
+    JOIN source_genotypes g ON g.chrom=r.CHROM AND g.position::UBIGINT=r.POS AND g.id=r.ID")
+  stopifnot(DBI::dbGetQuery(con, "SELECT count(*) n FROM source_calls")$n == nrow(records))
+  public_raw <- DBI::dbGetQuery(con, "SELECT * FROM duckvep_haplotypes('SELECT * FROM source_calls',
+    'phase',phase_policy:='vep116_compat',input_mode:='source_records')")
+  saveRDS(public_raw, file.path(out, "public_raw_output.rds"))
+  public_raw_comparisons <- lapply(seq_len(nrow(cases)), function(i) {
+    a <- public_raw[public_raw$transcript_index == cases$transcript_index[i], ]
+    observed <- lapply(seq_len(nrow(a)), function(j) {
+      ids <- unlist(a$coding_blocks[[j]]$event_indices, use.names = FALSE)
+      list(cds = a$cds[j], protein = a$protein[j], count = a$carrier_count[j],
+        contributors = records$ID[match(ids, records$record_index)])
+    })
+    expected <- canonical(oracle[[cases$transcript[i]]]$haplotypes)
+    observed <- canonical(observed)
+    list(expected = expected, observed = observed, equal = identical(expected, observed))
+  })
+  public_semantics <- data.frame(source_indices = rep(-2L, 4L * nrow(cases)),
+    source_evidence = 0L, evidence = 0L, sequence_status = 0L)
+  seen <- logical(2L * nrow(cases))
+  for (i in seq_len(nrow(public_raw))) {
+    a <- public_raw[i, ]
+    stopifnot(a$carrier_count == nrow(a$carriers[[1L]]),
+      all(a$carriers[[1L]]$sample_index == 0L), all(a$carriers[[1L]]$ploidy == 2L),
+      all(is.na(a$carriers[[1L]]$phase_set)))
+    for (lane in a$carriers[[1L]]$haplotype_lane) {
+      key <- 2L * a$transcript_index + lane
+      stopifnot(lane %in% 1:2, !seen[key]); seen[key] <- TRUE
+      at <- 2L * (key - 1L) + 1:2
+      public_semantics$evidence[at] <- a$evidence_flags
+      public_semantics$sequence_status[at] <- match(a$sequence_status, c("ok", "conditional")) * 8L - 8L
+      contributors <- a$contributors[[1L]]
+      source_rows <- match(contributors$event_index, records$record_index)
+      stopifnot(!anyNA(source_rows),
+        all(records$CHROM[source_rows] == cases$chrom[a$transcript_index + 1L]),
+        all(contributors$seq_region == cases$seq_region[a$transcript_index + 1L]),
+        all(contributors$position == records$POS[source_rows]),
+        identical(contributors$reference, records$REF[source_rows]))
+      for (j in seq_len(nrow(contributors))) {
+        ordinal <- contributors$alt_index[j]
+        expected_alt <- if (is.na(ordinal)) "" else if (ordinal == 0L) records$REF[source_rows[j]]
+          else records$ALT[[source_rows[j]]][ordinal]
+        stopifnot(identical(contributors$alternate[j], expected_alt))
+      }
+      record <- match(records$ID[source_rows], c("a", "b"))
+      stopifnot(!anyNA(record), !anyDuplicated(record))
+      public_semantics$source_indices[at[record]] <- ifelse(is.na(contributors$alt_index), -1L,
+        as.integer(contributors$alt_index))
+      public_semantics$source_evidence[at[record]] <- contributors$evidence_flags
+    }
+  }
+  stopifnot(all(seen))
+  public_matches <- vapply(public_raw_comparisons, `[[`, TRUE, "equal")
+  public_semantics_matches <- phase_equal(expected_semantics, public_semantics)
+  public_semantics_matches[is.na(public_semantics_matches)] <- FALSE
+  saveRDS(list(actual = public_raw, comparisons = public_raw_comparisons,
+    expected_semantics = expected_semantics, observed_semantics = public_semantics),
+    file.path(out, "public_raw_replay.rds"))
+  write.csv(cbind(cases[setdiff(names(cases), "cds")], equal = public_matches),
+    file.path(out, "public_raw_replay_summary.csv"), row.names = FALSE)
   summary <- cases[setdiff(names(cases), "cds")]
   for (name in c("equal", "oracle_lanes", "native_lanes", "native_unknown", "native_unavailable_carriers"))
     summary[[name]] <- vapply(comparisons, `[[`, if (name == "equal") TRUE else 0, name)
@@ -337,6 +407,10 @@ main <- function() {
     raw_replay_record_observations = length(semantics_matches),
     raw_replay_record_disagreements = sum(!semantics_matches),
     raw_replay_controls_rejected = sum(raw_rejected),
+    public_raw_replay_cases = length(public_matches),
+    public_raw_replay_disagreements = sum(!public_matches),
+    public_raw_record_observations = length(public_semantics_matches),
+    public_raw_record_disagreements = sum(!public_semantics_matches),
     input_records = nrow(records), source_alt_events = 3L * nrow(cases),
     input_genotype_calls = nrow(records), input_allele_slots = 2L * sum(cases$ploidy),
     candidate_alt_calls = nrow(calls), native_leaves = nrow(actual),
@@ -348,12 +422,17 @@ main <- function() {
   print(aggregate(cbind(cases = rep(1L, nrow(summary)), disagreements = as.integer(!summary$equal)) ~
     ploidy + prefix + missing + mixed, data = summary, FUN = sum), row.names = FALSE)
   message("Decoded-equivalence collision groups: ", length(collisions))
+  message("Public raw-record replay: ", sum(!public_matches), "/", length(public_matches),
+    " disagreements; source-record observations: ", sum(!public_semantics_matches), "/",
+    length(public_semantics_matches))
   message("Raw parser: ", sum(!phase_matches), " disagreements / ", length(raw_gt), " calls")
   message("Raw native replay: ", sum(!raw_matches), " disagreements / ", length(raw_matches), " profiles")
   message("Raw record observations: ", sum(!semantics_matches), " disagreements / ", length(semantics_matches))
   if (any(!phase_matches)) stop("Raw parser disagreements retained: ", out, call. = FALSE)
   if (any(!raw_matches)) stop("Raw native replay disagreements retained: ", out, call. = FALSE)
   if (any(!semantics_matches)) stop("Raw record observations disagree: ", out, call. = FALSE)
+  if (any(!public_matches)) stop("Public raw replay disagreements retained: ", out, call. = FALSE)
+  if (any(!public_semantics_matches)) stop("Public raw record observations disagree: ", out, call. = FALSE)
   if (any(!summary$equal)) stop("Raw-GT compatibility disagreements retained: ", out, call. = FALSE)
 }
 main()

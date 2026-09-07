@@ -760,14 +760,17 @@ Native raw-record replay uses source record IDs plus REF/ALT ordinals. An undefi
 file slot is an explicit empty-ALT interpretation of the complete source REF span;
 its sequence is conditional. Missing REF and omitted-call observations retain source
 evidence with zero physical edits. A projection failure still makes sequence unavailable.
-Public SQL/R replay consumes decoded calls; raw-record input is a native interface.
+SQL/R selects this raw-record interface with `input_mode := 'source_records'` and
+`phase_policy := 'vep116_compat'`. The default `alt_events` input is the decoded-call
+contract; it cannot emulate lexical distinctions absent from those arrays.
 
 `duckvep_haplotypes` consumes flat event/transcript/sample calls. DuckDB derives phase
 domains and materializes sorted input; native event ingestion and candidate projection
 are separate operations, so an entire event's cohort is never copied into a first-party
 call matrix. Output pauses retain the transcript drain cursor and reuse worker scratch.
 
-The input SELECT supplies these named columns; DuckDB casts them before execution:
+For `input_mode := 'alt_events'`, the SELECT supplies these named columns;
+DuckDB casts them before execution:
 
 ```text
 event_index UBIGINT       seq_region UINTEGER        position UBIGINT
@@ -786,6 +789,43 @@ Evidence bits are 1 called, 2 missing and 4 unphased. Per-call capacities name a
 pools, leaves, sequences, genotypes and phase domains; `workspace_limit` sums native
 allocations, excluding DuckDB input/sort/output memory. Neither result order nor
 carrier-list order is a SQL ordering guarantee.
+
+For `input_mode := 'source_records'`, the required columns are:
+
+```text
+event_index UBIGINT       seq_region UINTEGER        position UBIGINT
+reference VARCHAR        alternates VARCHAR[]       gt VARCHAR
+transcript_index UINTEGER sample_index UINTEGER
+```
+
+Here `event_index` identifies one whole source record, not a decomposed ALT.
+`gt` is original VCF spelling, and `alternates` preserves every ALT in source
+order. Candidate selection remains explicit. Required cells, ALT items and
+allele strings cannot be NULL; source allele strings are nonempty. An empty ALT
+list represents a REF-only record. Duplicate record/transcript/sample calls,
+inconsistent record geometry/ALT lists, or conflicting GT spellings for the same
+record/sample across candidates fail before replay. The parser rejects invalid
+GT grammar and out-of-range allele indices, including slots beyond the two used
+by the file profile. `max_ploidy` bounds source ploidy and the two file lanes;
+PS is ignored, and the decoded-only `max_phase_sets` workspace is not allocated.
+
+DuckDB expands source REF, ALT and undefined-slot interpretations and sorts them
+by region, position, record ID, allele ordinal, transcript and sample. Each
+interpretation/candidate is projected once; calls stream without a native cohort
+matrix. These interpretations share the named active-event/projection/allele
+limits, including unused interpretations. Original record/GT relations remain
+the cold provenance authority.
+
+Source-record contributors append nullable `alt_index` to their struct: 0 means
+REF, a positive value is the source ALT ordinal, and NULL means the undefined
+file-slot interpretation. The latter has empty alternate and deletes the complete
+source REF span. Evidence bit 8 and `sequence_status = 'conditional'` distinguish
+missing/undefined-slot replay from a known called sequence; bit 2 additionally
+retains explicit missing-source evidence. Missing REF observations have no physical
+edit. Projection failures still withhold sequence. Blocks, differences and local
+coding facts describe the displayed conditional sequence, not proven biology.
+Raw overlapping replacements retain explicit edit-conflict behavior; broad
+Haplosaurus overlap compatibility is not established by the finite GT audit.
 
 Each known leaf exposes `coding_blocks` in ascending reference CDS order. The same
 partitioner used by the independent interaction property groups same-alternate-codon

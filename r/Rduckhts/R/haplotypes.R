@@ -58,6 +58,18 @@
 #' their source-record mapping. Transcript ordinals belong to the named model.
 #' Candidate selection is explicit in this input relation.
 #'
+#' With `input_mode = "source_records"`, the required columns are `event_index`,
+#' `seq_region`, `position`, `reference`, `alternates` (a character list),
+#' `transcript_index`, `sample_index`, and `gt` (original VCF text).
+#' Here `event_index` identifies the whole source record. This mode requires
+#' `vep116_compat`: the pinned file profile consumes two slots and ignores PS.
+#' Missing calls and undefined slots can yield `conditional` sequence with
+#' evidence bit 8; this is not known phase or biological rescue. Contributor
+#' `alt_index` is 0 for REF, a positive source ALT ordinal, or NA for an undefined
+#' slot's full-REF deletion. Source ALT strings must be nonempty and nonmissing.
+#' Projection failures still withhold sequence. Raw spelling must be retained at
+#' ingestion; it cannot be reconstructed losslessly from decoded GT arrays.
+#'
 #' Preparation reads committed objects on the registry's retained connection;
 #' caller-local temporary objects and uncommitted changes are not visible. One
 #' preparation may run per registry at a time. Nested or concurrent preparation
@@ -67,8 +79,10 @@
 #' @param calls_query One nonempty SELECT query supplying the call relation.
 #' @param model_name Name of an already loaded DuckVEP model.
 #' @param phase_policy Strict GT/PS interpretation or VEP-116 called-slot order.
-#'   Missing calls remain incomplete under both policies; the compatibility
-#'   policy does not reproduce upstream conditional missing-call sequences.
+#'   Decoded missing calls remain incomplete; source-record input uses the
+#'   pinned raw parser and explicitly conditional missing-slot interpretation.
+#' @param input_mode `alt_events` for decoded per-ALT calls, or `source_records`
+#'   for raw GT and complete source ALT lists under `vep116_compat`.
 #' @param ... Named positive integer workspace capacities accepted by
 #'   `duckvep_haplotypes`, such as `max_active_events`, `max_active_carriers`,
 #'   `max_sequence_bases`, `max_ploidy`, `max_phase_sets`, and `workspace_limit`.
@@ -76,7 +90,8 @@
 #' @export
 rduckhts_haplotypes <- function(con, calls_query, model_name,
                                phase_policy = c("strict", "vep116_compat"),
-                               ..., table_name = NULL, overwrite = FALSE) {
+                               ..., input_mode = c("alt_events", "source_records"),
+                               table_name = NULL, overwrite = FALSE) {
   for (name in c("calls_query", "model_name")) {
     value <- get(name)
     if (!is.character(value) || length(value) != 1L || is.na(value) || !nzchar(value)) {
@@ -84,12 +99,17 @@ rduckhts_haplotypes <- function(con, calls_query, model_name,
     }
   }
   phase_policy <- match.arg(phase_policy)
+  input_mode <- match.arg(input_mode)
+  if (input_mode == "source_records" && phase_policy != "vep116_compat") {
+    stop("source_records requires phase_policy='vep116_compat'", call. = FALSE)
+  }
   limits <- list(...)
   if (length(limits) && (is.null(names(limits)) || anyDuplicated(names(limits)) ||
       any(!grepl("^[a-z][a-z_]*$", names(limits))))) {
     stop("capacities must have unique SQL parameter names", call. = FALSE)
   }
-  params <- list(phase_policy = sql_quote_string(con, phase_policy))
+  params <- list(phase_policy = sql_quote_string(con, phase_policy),
+                 input_mode = sql_quote_string(con, input_mode))
   for (name in names(limits)) {
     value <- limits[[name]]
     if (!is.numeric(value) || length(value) != 1L || !is.finite(value) ||

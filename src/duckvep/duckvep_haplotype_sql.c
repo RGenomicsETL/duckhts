@@ -32,6 +32,7 @@ typedef struct {
     duckvep_model_entry_t *entry;
     char *query;
     duckvep_phase_policy_t policy;
+    int source_records;
     size_t limits[LIMIT_COUNT];
 } haplotype_bind_t;
 
@@ -120,6 +121,15 @@ static void haplotype_bind(duckdb_bind_info info) {
         duckdb_bind_set_error(info, "duckvep_haplotypes: phase_policy must be 'strict' or 'vep116_compat'");
         haplotype_bind_destroy(b); return;
     }
+    value = duckdb_bind_get_named_parameter(info, "input_mode");
+    name = value && !duckdb_is_null_value(value) ? duckdb_get_varchar(value) : NULL;
+    valid = !value || (name && (!strcmp(name, "alt_events") || !strcmp(name, "source_records")));
+    b->source_records = name && !strcmp(name, "source_records");
+    duckdb_free(name); duckdb_destroy_value(&value);
+    if (!valid || (b->source_records && b->policy != DUCKVEP_PHASE_VEP116_COMPAT)) {
+        duckdb_bind_set_error(info, "duckvep_haplotypes: input_mode must be 'alt_events' or 'source_records'; source_records requires phase_policy='vep116_compat'");
+        haplotype_bind_destroy(b); return;
+    }
     for (unsigned i = 0u; i < LIMIT_COUNT; i++) {
         value = duckdb_bind_get_named_parameter(info, limit_names[i]);
         uint64_t n = value && !duckdb_is_null_value(value) ? duckdb_get_uint64(value) : limit_defaults[i];
@@ -146,9 +156,10 @@ static void haplotype_bind(duckdb_bind_info info) {
     const duckdb_type carrier_ids[] = {DUCKDB_TYPE_UINTEGER, DUCKDB_TYPE_BIGINT,
         DUCKDB_TYPE_USMALLINT, DUCKDB_TYPE_USMALLINT};
     const char *const event_names[] = {"event_index", "seq_region", "position", "reference", "alternate",
-        "evidence_flags", "projection_status"};
+        "evidence_flags", "projection_status", "alt_index"};
     const duckdb_type event_ids[] = {DUCKDB_TYPE_UBIGINT, DUCKDB_TYPE_UINTEGER, DUCKDB_TYPE_UBIGINT,
-        DUCKDB_TYPE_VARCHAR, DUCKDB_TYPE_VARCHAR, DUCKDB_TYPE_UTINYINT, DUCKDB_TYPE_VARCHAR};
+        DUCKDB_TYPE_VARCHAR, DUCKDB_TYPE_VARCHAR, DUCKDB_TYPE_UTINYINT, DUCKDB_TYPE_VARCHAR,
+        DUCKDB_TYPE_UINTEGER};
     const char *const block_names[] = {"cds_start", "reference", "alternate", "alt_start0",
         "length_change", "sequence_flags", "coding_status", "local_consequence_mask",
         "after_first_stop", "event_indices"};
@@ -156,7 +167,7 @@ static void haplotype_bind(duckdb_bind_info info) {
         DUCKDB_TYPE_UBIGINT, DUCKDB_TYPE_BIGINT, DUCKDB_TYPE_UINTEGER, DUCKDB_TYPE_VARCHAR,
         DUCKDB_TYPE_UBIGINT, DUCKDB_TYPE_BOOLEAN, DUCKDB_TYPE_UBIGINT};
     bind_record_list(info, "carriers", carrier_names, carrier_ids, 4u, 0);
-    bind_record_list(info, "contributors", event_names, event_ids, 7u, 0);
+    bind_record_list(info, "contributors", event_names, event_ids, b->source_records ? 8u : 7u, 0);
     bind_record_list(info, "coding_blocks", block_names, block_ids, HAPLOTYPE_BLOCK_FIELDS, 1);
     const char *const difference_names[] = {"ref_start0", "alt_start0", "reference", "alternate",
         "alignment_start0"};
@@ -234,7 +245,9 @@ static int workspace_allocate(haplotype_state_t *s, const haplotype_bind_t *bind
     X(s->difference_reference, n[LIMIT_SEQUENCE]) \
     X(s->reference_protein, s->reference_protein_capacity) \
     X(s->reference_coding_protein, s->reference_protein_capacity) \
-    X(s->gt, n[LIMIT_PLOIDY]) X(s->phase, n[LIMIT_PLOIDY]) X(s->sets, n[LIMIT_PHASE_SETS])
+    X(s->gt, bind->source_records ? 0u : n[LIMIT_PLOIDY]) \
+    X(s->phase, bind->source_records ? 0u : n[LIMIT_PLOIDY]) \
+    X(s->sets, bind->source_records ? 0u : n[LIMIT_PHASE_SETS])
 #define COUNT(p, count) \
     if ((count) > (n[LIMIT_WORKSPACE] - s->workspace_bytes) / sizeof(*(p))) return 0; \
     s->workspace_bytes += (count) * sizeof(*(p));
@@ -242,7 +255,7 @@ static int workspace_allocate(haplotype_state_t *s, const haplotype_bind_t *bind
     if (s->workspace_bytes > n[LIMIT_WORKSPACE]) return 0;
     ARRAYS(COUNT)
 #undef COUNT
-#define ALLOCATE(p, count) if (!((p) = malloc((count) * sizeof(*(p))))) return 0;
+#define ALLOCATE(p, count) if ((count) && !((p) = malloc((count) * sizeof(*(p))))) return 0;
     ARRAYS(ALLOCATE)
 #undef ALLOCATE
 #undef ARRAYS
@@ -254,12 +267,12 @@ static int input_open(haplotype_state_t *s, const haplotype_bind_t *b, char *err
      * Only query preparation/materialization is serialized. The returned result
      * is owned by this scan and fetched without the registry mutex. TEMP objects
      * and uncommitted writes on the caller's connection are not visible here. */
-    static const char prefix[] =
+    const char *prefix =
         "WITH raw AS MATERIALIZED (SELECT event_index::UBIGINT event_index, seq_region::UINTEGER seq_region, "
         "position::UBIGINT AS position, reference::VARCHAR AS reference, alternate::VARCHAR AS alternate, "
         "alt_index::UINTEGER alt_index, transcript_index::UINTEGER transcript_index, sample_index::UINTEGER sample_index, "
         "alleles::INTEGER[] alleles, phase_before::BOOLEAN[] phase_before, phase_set::BIGINT phase_set FROM (";
-    static const char middle[] =
+    const char *middle =
         ") source), calls AS MATERIALIZED (SELECT *, "
         "list_contains(list_transform(duckvep_phase_call(alleles,phase_before,phase_set := phase_set), "
         "a -> a.phase_scope), 'phase_set') scoped FROM raw), domains AS (SELECT transcript_index, sample_index, ";
@@ -268,7 +281,7 @@ static int input_open(haplotype_state_t *s, const haplotype_bind_t *b, char *err
         "[NULL]::BIGINT[] AS domain_sets ";
     /* Validate each identity/domain once, then attach its facts to every call.
      * Duplicate calls remain visible, including calls carrying only REF. */
-    static const char suffix[] =
+    const char *suffix =
         ",count(DISTINCT len(alleles)) ploidies FROM calls GROUP BY transcript_index,sample_index), "
         "event_versions AS (SELECT event_index, "
         "count(DISTINCT (seq_region,position,reference,alternate,alt_index)) versions FROM raw GROUP BY event_index) "
@@ -277,7 +290,29 @@ static int input_open(haplotype_state_t *s, const haplotype_bind_t *b, char *err
         "FROM calls c LEFT JOIN domains d USING(transcript_index,sample_index) "
         "LEFT JOIN event_versions v USING(event_index) "
         "ORDER BY seq_region,position,event_index,transcript_index,sample_index";
-    size_t qlen = strlen(b->query), overhead = sizeof(prefix) + sizeof(middle) + strlen(domain) + sizeof(suffix);
+    if (b->source_records) {
+        prefix = "WITH raw AS MATERIALIZED (SELECT event_index::UBIGINT event_index, "
+            "seq_region::UINTEGER seq_region, position::UBIGINT AS position, reference::VARCHAR AS reference, "
+            "alternates::VARCHAR[] alternates, transcript_index::UINTEGER transcript_index, "
+            "sample_index::UINTEGER sample_index, gt::VARCHAR gt FROM (";
+        middle = ") source), versions AS (SELECT event_index, "
+            "count(DISTINCT (seq_region,position,reference,alternates)) versions FROM raw GROUP BY event_index), "
+            "genotypes AS (SELECT event_index,sample_index,count(DISTINCT gt) gt_versions "
+            "FROM raw GROUP BY event_index,sample_index), calls AS MATERIALIZED (SELECT *, "
+            "count(*) OVER(PARTITION BY event_index,transcript_index,sample_index) copies, "
+            "CASE WHEN alternates IS NULL OR len(alternates)>2147483647 OR "
+            "len(list_filter(alternates,a -> a IS NULL OR len(a)=0 OR len(a)>65535))>0 "
+            "THEN error('duckvep_haplotypes: invalid source ALT list') ELSE len(alternates) END alt_count "
+            "FROM raw) SELECT c.event_index,seq_region,position,reference, "
+            "CASE WHEN a.i=0 THEN reference WHEN a.i>alt_count THEN '' ELSE alternates[a.i] END alternate, "
+            "(CASE WHEN a.i>alt_count THEN 4294967295 ELSE a.i END)::UINTEGER alt_index, "
+            "transcript_index,c.sample_index,gt,NULL::BOOLEAN[] phase_before,NULL::BIGINT phase_set, "
+            "alt_count,copies,versions,gt_versions FROM calls c LEFT JOIN versions v USING(event_index) "
+            "LEFT JOIN genotypes g USING(event_index,sample_index),range(0,alt_count+2) a(i) "
+            "ORDER BY seq_region,position,event_index,alt_index,transcript_index,sample_index";
+        domain = ""; suffix = "";
+    }
+    size_t qlen = strlen(b->query), overhead = strlen(prefix) + strlen(middle) + strlen(domain) + strlen(suffix) + 1u;
     if (qlen > SIZE_MAX - overhead || qlen + overhead > b->limits[LIMIT_WORKSPACE] - s->workspace_bytes) {
         duckvep_sql_set_error(error, error_size, "duckvep_haplotypes: workspace_limit exceeded by calls query text");
         return 0;
@@ -339,6 +374,7 @@ static const char *projection_name(duckvep_cds_edit_status_t status) {
 static const char *sequence_name(duckvep_haplotype_status_t status) {
     switch (status) {
     case DUCKVEP_HAPLOTYPE_OK: return "ok";
+    case DUCKVEP_HAPLOTYPE_CONDITIONAL: return "conditional";
     case DUCKVEP_HAPLOTYPE_INPUT_INCOMPLETE: return "incomplete_input";
     case DUCKVEP_HAPLOTYPE_EDIT_ORDER: return "edit_conflict";
     case DUCKVEP_HAPLOTYPE_REF_MISMATCH: return "reference_mismatch";
@@ -526,7 +562,7 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
         ((bool *)duckdb_vector_get_data(v[HAPLOTYPE_STOP_COLUMN]))[row] = leaf->stop_in_displaced_frame != 0u;
     else null_cell(v[HAPLOTYPE_STOP_COLUMN], row);
     const size_t counts[] = {leaf->carriers.call_count, leaf->contributor_count, leaf->block_count};
-    const unsigned field_counts[] = {4u, 7u, HAPLOTYPE_BLOCK_FIELDS};
+    const unsigned field_counts[] = {4u, bind->source_records ? 8u : 7u, HAPLOTYPE_BLOCK_FIELDS};
     for (unsigned list = 0u; list < 3u; list++) {
         duckdb_vector vector = v[HAPLOTYPE_LIST_COLUMN + list];
         idx_t base = duckdb_list_vector_get_size(vector);
@@ -581,6 +617,10 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
                 duckdb_vector_assign_string_element_len(fields[4], at, (const char *)c->source.alt, c->source.alt_len);
                 ((uint8_t *)duckdb_vector_get_data(fields[5]))[at] = c->evidence_flags;
                 duckdb_vector_assign_string_element(fields[6], at, projection_name(c->projection_status));
+                if (bind->source_records) {
+                    if (c->source.allele_index == UINT32_MAX) null_cell(fields[7], at);
+                    else ((uint32_t *)duckdb_vector_get_data(fields[7]))[at] = c->source.allele_index;
+                }
             } else if (list == 2u) {
                 const duckvep_haplotype_block_t *block = &leaf->blocks[i];
                 ((uint32_t *)duckdb_vector_get_data(fields[0]))[at] = block->cds_start;
@@ -628,7 +668,9 @@ static duckvep_haplotype_stream_status_t consume_call(haplotype_state_t *s,
     if (((int64_t *)duckdb_vector_get_data(v[12]))[row] != 1 ||
         ((int64_t *)duckdb_vector_get_data(v[13]))[row] != 1 ||
         ((int64_t *)duckdb_vector_get_data(v[14]))[row] != 1) {
-        duckvep_sql_set_error(error, error_size, "duckvep_haplotypes: duplicate call, inconsistent event identity or changed sample/transcript ploidy");
+        duckvep_sql_set_error(error, error_size, bind->source_records
+            ? "duckvep_haplotypes: duplicate call, inconsistent source record identity or source GT"
+            : "duckvep_haplotypes: duplicate call, inconsistent event identity or changed sample/transcript ploidy");
         return DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG;
     }
     uint32_t chrom = ((uint32_t *)duckdb_vector_get_data(v[1]))[row];
@@ -636,14 +678,18 @@ static duckvep_haplotype_stream_status_t consume_call(haplotype_state_t *s,
     duckdb_string_t ref = ((duckdb_string_t *)duckdb_vector_get_data(v[3]))[row];
     duckdb_string_t alt = ((duckdb_string_t *)duckdb_vector_get_data(v[4]))[row];
     uint32_t ref_len = duckdb_string_t_length(ref), alt_len = duckdb_string_t_length(alt);
+    uint32_t allele_index = ((uint32_t *)duckdb_vector_get_data(v[5]))[row];
     if (chrom > UINT16_MAX || !pos || pos > UINT32_MAX || !ref_len || ref_len > UINT16_MAX ||
-        !alt_len || alt_len > UINT16_MAX) return DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG;
+        (!alt_len && !(bind->source_records && allele_index == UINT32_MAX)) || alt_len > UINT16_MAX)
+        return DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG;
     duckvep_haplotype_source_t source = {((uint64_t *)duckdb_vector_get_data(v[0]))[row],
         (const uint8_t *)duckdb_string_t_data(&ref), (const uint8_t *)duckdb_string_t_data(&alt),
-        (uint32_t)pos, (uint16_t)chrom, (uint16_t)ref_len, (uint16_t)alt_len, 0u, 0u};
+        (uint32_t)pos, (uint16_t)chrom, (uint16_t)ref_len, (uint16_t)alt_len,
+        bind->source_records ? allele_index : 0u, (uint8_t)bind->source_records};
     uint32_t tx = ((uint32_t *)duckdb_vector_get_data(v[6]))[row];
     duckvep_haplotype_stream_status_t status;
-    int new_event = !s->stream.have_input || source.event_id != s->stream.last_event_id;
+    int new_event = !s->stream.have_input || source.event_id != s->stream.last_event_id ||
+        source.allele_index != s->stream.last_allele_index;
     if (new_event) {
         status = duckvep_haplotype_stream_begin(&s->stream, &source);
         if (status != DUCKVEP_HAPLOTYPE_STREAM_OK) return status;
@@ -652,6 +698,32 @@ static duckvep_haplotype_stream_status_t consume_call(haplotype_state_t *s,
     if (!s->have_call || tx != s->last_tx) {
         status = duckvep_haplotype_stream_project(&s->stream, tx);
         if (status != DUCKVEP_HAPLOTYPE_STREAM_OK) return status;
+    }
+    if (bind->source_records) {
+        duckdb_string_t text = ((duckdb_string_t *)duckdb_vector_get_data(v[8]))[row];
+        uint64_t alt_count = (uint64_t)((int64_t *)duckdb_vector_get_data(v[11]))[row];
+        duckvep_raw_gt_t call;
+        duckvep_raw_gt_status_t parsed = alt_count <= INT32_MAX
+            ? duckvep_phase_parse_vep116_raw((const uint8_t *)duckdb_string_t_data(&text),
+                duckdb_string_t_length(text), (uint32_t)alt_count, &call)
+            : DUCKVEP_RAW_GT_ALLELE_OUT_OF_RANGE;
+        if (parsed != DUCKVEP_RAW_GT_OK) {
+            snprintf(error, error_size, "duckvep_haplotypes: raw GT status %u at event %llu, sample %u",
+                (unsigned)parsed, (unsigned long long)source.event_id,
+                ((uint32_t *)duckdb_vector_get_data(v[7]))[row]);
+            return DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG;
+        }
+        if (call.source_ploidy > bind->limits[LIMIT_PLOIDY] || bind->limits[LIMIT_PLOIDY] < 2u) {
+            snprintf(error, error_size, "duckvep_haplotypes: max_ploidy=%zu exceeded by raw source/file ploidy",
+                bind->limits[LIMIT_PLOIDY]);
+            return DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG;
+        }
+        status = duckvep_haplotype_stream_push_raw_call(&s->stream, tx,
+            ((uint32_t *)duckdb_vector_get_data(v[7]))[row], &call);
+        if (status == DUCKVEP_HAPLOTYPE_STREAM_OK) {
+            s->have_call = 1; s->last_tx = tx; s->row++;
+        }
+        return status;
     }
     duckdb_list_entry gt = ((duckdb_list_entry *)duckdb_vector_get_data(v[8]))[row];
     int have_phase = !duckvep_row_is_null(v[9], row);
@@ -755,6 +827,7 @@ void duckvep_register_haplotypes(duckdb_connection connection, duckvep_registry_
     duckdb_table_function_add_parameter(function, string);
     duckdb_table_function_add_parameter(function, string);
     duckdb_table_function_add_named_parameter(function, "phase_policy", string);
+    duckdb_table_function_add_named_parameter(function, "input_mode", string);
     for (unsigned i = 0u; i < LIMIT_COUNT; i++)
         duckdb_table_function_add_named_parameter(function, limit_names[i], integer);
     duckvep_registry_retain(registry);

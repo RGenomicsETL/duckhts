@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- add `input_mode = "source_records"` to `rduckhts_haplotypes` for original GT
+  spelling and complete ALT lists. Bundled replay exposes source allele ordinals
+  and labels missing-slot sequences as conditional
+
 - return local coding-block SO masks, explicit coding status and after-first-stop
   flags in bundled phased replay. Unresolved effects remain NA without hiding
   known sequence or contributors; this is not complete whole-haplotype SO/HGVS
