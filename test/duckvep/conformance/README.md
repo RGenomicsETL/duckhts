@@ -630,6 +630,28 @@ exit nonzero with retained compatibility disagreements. `--extension-receipt` us
 the same clean-build binding as the other drivers. Byte-level VEP parser behavior
 cannot be certified from typed GT alone when distinct raw spellings decode identically.
 
+`haplotype_record_differential.R` checks source-record geometry independently of
+the raw-GT grammar audit. It uses the registered 180-base CDS, 144 fixed profiles
+(12 record geometries × 6 GT patterns × 2 strands) and a declared seeded set of
+overlapping pairs. Every profile has a separate homozygous anchor so both file
+lanes are occupied. Full REF spans, equal-position file order, retained MNV bases,
+insertions/deletions and known REF slots are part of the input, not normalized away.
+Haplosaurus receives the exact VCF/GFF/FASTA; bcftools validates every REF first.
+The public raw-record executor consumes the matching source relation. Full
+CDS/protein multisets, carrier counts and physical-edit source provenance are
+compared with no excluded disagreements. Counts distinguish unavailable paths
+from sequence differences where every path is available. Four corruptions guard
+the comparator; disjoint and adjacent records are positive controls.
+
+```sh
+Rscript test/duckvep/conformance/haplotype_record_differential.R --seed 173 --random-cases 512
+```
+
+Use `--extension-receipt` for clean-build evidence. All inputs, outputs, comparisons
+and failures are retained in the reported artifact directory; a mismatch exits
+nonzero. This is a single-exon source-replacement audit, not whole-haplotype SO/HGVS,
+splice prediction, population error rates or a claim that upstream behavior is wrong.
+
 Add `--noncoding-contributors` to run a separately receipted augmented corpus after
 the original gate passes. It adds one homozygous deep-intronic allele per transcript,
 reruns the pinned executable Haplosaurus, and requires its complete observation to
