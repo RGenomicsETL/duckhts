@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- materialize typed GT/phase list elements before native phase preparation.
+  A whole-list cast of `[NULL,NULL]` could leave a constant child vector and
+  misread later missing slots as known alleles or phase, exposed by Windows CI.
+  Missing evidence and all original conformance expectations remain intact
+
 - expose typed `coding_blocks` from phased replay, grouping same-codon edits and
   frame-displacing/restoring indels. Reference and rebuilt-CDS spans borrow the
   sequences already held by the kernel; block storage shares the explicit

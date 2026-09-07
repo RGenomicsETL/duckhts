@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- preserve every missing GT/phase slot when DBI supplies an all-NULL list to
+  `duckvep_phase_call()`. Element-wise typing avoids a constant-child-vector
+  misread observed in Windows package tests; NULL flags never supply phase
+
 - return typed `coding_blocks` through `rduckhts_haplotypes()` and the bundled
   SQL function: transcript-oriented composite reference/alternate spans, both
   CDS coordinate axes, physical edit counts and frame-interaction flags. Unknown

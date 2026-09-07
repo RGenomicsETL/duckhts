@@ -164,10 +164,16 @@ bool duckvep_register_phase_call(duckdb_connection connection) {
     duckdb_destroy_logical_type(&boolean);
     duckdb_destroy_logical_type(&integer);
     if (state != DuckDBSuccess) return false;
+    /* A list-wise cast of SQLNULL[] can leave a constant NULL child under a
+     * flat parent. The stable C callback only flattens that parent in this
+     * case, so indexing the child's validity mask treats later NULLs as valid.
+     * Element-wise casts materialize typed child slots, including every NULL;
+     * the native reducer must never infer phase from uninitialized payload. */
     const char *sql[] = {
         "CREATE OR REPLACE MACRO duckvep_phase_call(alleles, phase_before, ",
         "phase_set := NULL, phase_policy := 'strict') AS ",
-        "_duckvep_phase_call(CAST(alleles AS INTEGER[]), CAST(phase_before AS BOOLEAN[]), ",
+        "_duckvep_phase_call(list_transform(alleles, a -> CAST(a AS INTEGER)), ",
+        "list_transform(phase_before, p -> CAST(p AS BOOLEAN)), ",
         "CAST(phase_set AS BIGINT), CAST(phase_policy AS VARCHAR))"
     };
     return duckvep_register_sql_parts(connection, sql, sizeof(sql) / sizeof(sql[0]));

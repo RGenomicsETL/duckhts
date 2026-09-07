@@ -1,5 +1,27 @@
 require duckhts
 
+# SQLNULL[] casts must materialize every child validity bit, not expose one
+# constant NULL slot as though the remaining slots contained valid data.
+query IITTT
+SELECT a.input_slot,a.allele_index,a.haplotype_lane,a.phase_scope,a.status
+FROM (SELECT unnest(duckvep_phase_call([0,1],[NULL,NULL])) a) ORDER BY a.input_slot;
+----
+1	0	NULL	unresolved	unphased
+2	1	NULL	unresolved	unphased
+
+query IITTT
+SELECT a.input_slot,a.allele_index,a.haplotype_lane,a.phase_scope,a.status
+FROM (SELECT unnest(duckvep_phase_call([NULL,NULL],[true,true])) a) ORDER BY a.input_slot;
+----
+1	NULL	1	phase_set	missing
+2	NULL	2	phase_set	missing
+
+query II
+SELECT count(*),count(*) FILTER(WHERE a.haplotype_lane IS NULL AND a.status='unphased')
+FROM (SELECT unnest(duckvep_phase_call([0,1],[NULL,NULL])) a FROM range(5000));
+----
+10000	10000
+
 # Explicit typed genotype preparation, not compound annotation.
 query IIIITTT
 SELECT a.input_slot, a.allele_index, a.haplotype_lane, a.ploidy,

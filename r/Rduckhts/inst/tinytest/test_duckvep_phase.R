@@ -44,6 +44,14 @@ test_phase_preparation <- function() {
   expect_equal(prepared("[2,2,2]", "NULL", ps = "99")$phase_scope, rep("all_phase_sets", 3))
   expect_equal(prepared("[2,1,1]", "[true,false,false]", ps = "-1")$ps, rep("-1", 3))
   expect_true(all(is.na(prepared("[0,1]", "[NULL,NULL]")$lane)))
+  expect_equal(prepared("[0,1]", "[NULL,NULL]"), data.frame(slot = 1:2, allele = 0:1,
+    lane = NA_integer_, ps = NA_character_, phase_scope = "unresolved", status = "unphased"))
+  expect_equal(prepared("[NULL,NULL]", "[true,true]"), data.frame(slot = 1:2,
+    allele = NA_integer_, lane = 1:2, ps = NA_character_, phase_scope = "phase_set", status = "missing"))
+  null_slots <- prepared("list_resize([NULL], 65535)", "NULL")
+  expect_equal(nrow(null_slots), 65535L)
+  expect_true(all(is.na(null_slots$allele)) && all(is.na(null_slots$lane)) &&
+    all(null_slots$status == "missing"))
   expect_true(dbGetQuery(con, "SELECT duckvep_phase_call(NULL,NULL) IS NULL ok")$ok)
   expect_equal(dbGetQuery(con, paste(
     "SELECT count(*) n, count(*) FILTER(WHERE a.status='unphased') ambiguous",
