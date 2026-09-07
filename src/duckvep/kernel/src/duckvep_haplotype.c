@@ -244,6 +244,77 @@ static duckvep_haplotype_status_t haplo_partition_pass(
     return DUCKVEP_HAPLOTYPE_OK;
 }
 
+duckvep_haplotype_status_t duckvep_haplotype_block_frame_intersects(
+    const duckvep_haplotype_edit_t  *edits,
+    size_t                          edit_count,
+    const duckvep_haplotype_block_t *block,
+    size_t                          alt_start0,
+    size_t                          alt_length,
+    int                            *intersects) {
+
+    if (intersects) *intersects = 0;
+    if (!edits || !block || !intersects || !block->edit_count || !block->cds_start ||
+        block->edit_begin > edit_count || block->edit_count > edit_count - block->edit_begin) {
+        return DUCKVEP_HAPLOTYPE_INVALID_ARG;
+    }
+    if (alt_length > SIZE_MAX - alt_start0 || block->alt_start0 > INT64_MAX) {
+        return DUCKVEP_HAPLOTYPE_OUT_OF_RANGE;
+    }
+    size_t end0 = alt_start0 + alt_length;
+    int found = 0, open = 0, saw_displacement = 0;
+    uint64_t open_start0 = 0u, previous_end1 = 0u, last_ref_end0 = 0u, last_alt_end0 = 0u;
+    int64_t difference = 0;
+    int64_t shift = (int64_t)block->alt_start0 - ((int64_t)block->cds_start - 1);
+    uint32_t flags = 0u;
+    if (shift % 3 != 0 || edits[block->edit_begin].cds_start != block->cds_start) {
+        return DUCKVEP_HAPLOTYPE_INVALID_ARG;
+    }
+    for (size_t i = 0u; i < block->edit_count; i++) {
+        const duckvep_haplotype_edit_t *edit = edits + block->edit_begin + i;
+        if (!edit->cds_start || (edit->ref_len && !edit->ref) ||
+            (edit->alt_len && !edit->alt) ||
+            (edit->variant_strand != 1 && edit->variant_strand != -1)) {
+            return DUCKVEP_HAPLOTYPE_INVALID_ARG;
+        }
+        if (i && edit->cds_start <= previous_end1) return DUCKVEP_HAPLOTYPE_EDIT_ORDER;
+        last_ref_end0 = (uint64_t)edit->cds_start - 1u + edit->ref_len;
+        if (last_ref_end0 > UINT32_MAX) return DUCKVEP_HAPLOTYPE_OUT_OF_RANGE;
+        previous_end1 = edit->ref_len ? last_ref_end0 : edit->cds_start;
+        uint64_t edit_start0;
+        if (!haplo_shift_coordinate((uint64_t)edit->cds_start - 1u, shift, &edit_start0) ||
+            edit_start0 > SIZE_MAX || edit->alt_len > SIZE_MAX - edit_start0) {
+            return DUCKVEP_HAPLOTYPE_OUT_OF_RANGE;
+        }
+        last_alt_end0 = edit_start0 + edit->alt_len;
+        int64_t change = (int64_t)edit->alt_len - edit->ref_len;
+        if (!haplo_add_i64(difference, change, &difference) ||
+            !haplo_add_i64(shift, change, &shift)) {
+            return DUCKVEP_HAPLOTYPE_OUT_OF_RANGE;
+        }
+        if (change) flags |= DUCKVEP_HAPLOTYPE_FLAG_INDEL;
+        if (change % 3) saw_displacement = 1;
+        if (!open && difference % 3) {
+            open_start0 = edit_start0;
+            open = 1;
+        } else if (open && difference % 3 == 0) {
+            if (alt_length && last_alt_end0 > open_start0 &&
+                (uint64_t)alt_start0 < last_alt_end0 &&
+                (uint64_t)end0 > open_start0) found = 1;
+            open = 0;
+        }
+    }
+    if (saw_displacement) flags |= difference % 3
+        ? DUCKVEP_HAPLOTYPE_FLAG_FRAMESHIFT : DUCKVEP_HAPLOTYPE_FLAG_RESOLVED_FRAMESHIFT;
+    if (difference != block->length_diff || flags != block->flags ||
+        last_ref_end0 - ((uint64_t)block->cds_start - 1u) != block->ref_len ||
+        last_alt_end0 < block->alt_start0 || last_alt_end0 - block->alt_start0 != block->alt_len) {
+        return DUCKVEP_HAPLOTYPE_INVALID_ARG;
+    }
+    if (open && alt_length && (uint64_t)end0 > open_start0) found = 1;
+    *intersects = found;
+    return DUCKVEP_HAPLOTYPE_OK;
+}
+
 duckvep_haplotype_status_t duckvep_haplotype_partition(
     const duckvep_haplotype_edit_t *edits,
     size_t edit_count,

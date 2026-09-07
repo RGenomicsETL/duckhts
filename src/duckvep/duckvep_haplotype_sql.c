@@ -17,7 +17,7 @@ DUCKDB_EXTENSION_EXTERN
 enum { LIMIT_EVENTS, LIMIT_TRANSCRIPTS, LIMIT_CARRIERS, LIMIT_PREFIXES, LIMIT_PROJECTIONS,
     LIMIT_ALLELES, LIMIT_LEAF_EVENTS, LIMIT_LEAF_EDITS, LIMIT_SEQUENCE, LIMIT_PLOIDY,
     LIMIT_PHASE_SETS, LIMIT_ALIGNMENT, LIMIT_DIFFERENCES, LIMIT_WORKSPACE, LIMIT_COUNT };
-enum { HAPLOTYPE_LIST_COLUMN = 9, HAPLOTYPE_OUTPUT_COLUMNS = 14 };
+enum { HAPLOTYPE_LIST_COLUMN = 9, HAPLOTYPE_STOP_COLUMN = 14, HAPLOTYPE_OUTPUT_COLUMNS = 15 };
 static const char *const limit_names[] = {"max_active_events", "max_active_transcripts",
     "max_active_carriers", "max_active_prefixes", "max_active_projections", "max_allele_bytes",
     "max_leaf_events", "max_leaf_edits", "max_sequence_bases", "max_ploidy", "max_phase_sets",
@@ -158,6 +158,9 @@ static void haplotype_bind(duckdb_bind_info info) {
         DUCKDB_TYPE_VARCHAR, DUCKDB_TYPE_VARCHAR, DUCKDB_TYPE_UBIGINT};
     bind_record_list(info, "cds_differences", difference_names, difference_ids, 5u, 0);
     bind_record_list(info, "protein_differences", difference_names, difference_ids, 5u, 0);
+    duckdb_logical_type stop_in_frame_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
+    duckdb_bind_add_result_column(info, "stop_in_displaced_frame", stop_in_frame_type);
+    duckdb_destroy_logical_type(&stop_in_frame_type);
     duckdb_bind_set_bind_data(info, b, haplotype_bind_destroy);
 }
 
@@ -472,6 +475,9 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
         ? sequence_name(leaf->sequence_status) : "unavailable_projection");
     ((uint64_t *)duckdb_vector_get_data(v[7]))[row] = leaf->edit_count;
     ((uint32_t *)duckdb_vector_get_data(v[8]))[row] = leaf->carriers.call_count;
+    if (leaf->cds)
+        ((bool *)duckdb_vector_get_data(v[HAPLOTYPE_STOP_COLUMN]))[row] = leaf->stop_in_displaced_frame != 0u;
+    else null_cell(v[HAPLOTYPE_STOP_COLUMN], row);
     const size_t counts[] = {leaf->carriers.call_count, leaf->contributor_count, leaf->block_count};
     const unsigned field_counts[] = {4u, 7u, 7u};
     for (unsigned list = 0u; list < 3u; list++) {
@@ -626,7 +632,7 @@ static void haplotype_scan(duckdb_function_info info, duckdb_data_chunk output) 
     idx_t rows = 0u, capacity = duckdb_vector_size();
     for (unsigned i = 0u; i < HAPLOTYPE_OUTPUT_COLUMNS; i++)
         duckdb_vector_ensure_validity_writable(duckdb_data_chunk_get_vector(output, i));
-    for (unsigned i = HAPLOTYPE_LIST_COLUMN; i < HAPLOTYPE_OUTPUT_COLUMNS; i++)
+    for (unsigned i = HAPLOTYPE_LIST_COLUMN; i < HAPLOTYPE_STOP_COLUMN; i++)
         if (duckdb_list_vector_set_size(duckdb_data_chunk_get_vector(output, i), 0u) != DuckDBSuccess) {
             duckdb_function_set_error(info, "duckvep_haplotypes: cannot reset output list"); return;
         }

@@ -99,6 +99,24 @@ duckvep_haplotype_status_t duckvep_haplotype_partition(
     size_t                          block_capacity,
     size_t                         *required_blocks);
 
+/* Test whether a half-open span on the rebuilt CDS intersects this block's
+ * frame displacement. The edit array is ascending and the block is one of its
+ * actual partitions. A displacement starts at the first frame-changing edit
+ * and ends after the ALT bases of the restoring edit; a final open frame
+ * continues downstream. Inserted/replacement bases belong to the displaced
+ * span when either the entering or leaving frame is displaced. Earlier closed
+ * blocks may shift ALT by whole codons. This is geometry, not a consequence or
+ * an assertion that a restored frame rescues a protein. In particular, a caller
+ * can query the three bases of an already translated stop. No allocation;
+ * failure leaves intersects zero, and an empty query never intersects. */
+duckvep_haplotype_status_t duckvep_haplotype_block_frame_intersects(
+    const duckvep_haplotype_edit_t  *edits,
+    size_t                          edit_count,
+    const duckvep_haplotype_block_t *block,
+    size_t                          alt_start0,
+    size_t                          alt_length,
+    int                            *intersects);
+
 /* Apply edits to `ref_cds`, writing the mutated CDS to `cds_out` and its length
  * to `cds_len_out`. Edits must be sorted by descending original CDS coordinate
  * and must not overlap in original CDS space, including two insertions at the

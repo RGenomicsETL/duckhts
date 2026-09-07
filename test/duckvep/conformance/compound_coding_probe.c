@@ -69,6 +69,10 @@ void duckhts_test_compound_coding(
         duckvep_coding_peptide_window_t view;
         duckvep_sequence_delta_t local;
         int local_status = duckvep_coding_context_block_delta_fill(&context, blocks + b, 0u, &local);
+        int stop_in_frame = 0;
+        int has_stop = first_stop < context.alt_peptide_len;
+        int frame_status = duckvep_haplotype_block_frame_intersects(edits, (size_t)*count,
+            blocks + b, has_stop ? first_stop * 3u : 0u, has_stop ? 3u : 0u, &stop_in_frame);
         int block_observed[] = {local_status, local.valid, local.synonymous, local.missense,
             local.stop_gained, local.stop_lost, local.stop_retained, local.start_lost,
             local.start_retained, local.frameshift, local.inframe_deletion, local.inframe_insertion,
@@ -78,8 +82,9 @@ void duckhts_test_compound_coding(
             (size_t)blocks[b].cds_start - 1u != blocks[b].alt_start0,
             (int)blocks[b].cds_start, (int)blocks[b].ref_len,
             (int)blocks[b].alt_start0, (int)blocks[b].alt_len,
-            (int)blocks[b].edit_begin, (int)blocks[b].edit_count};
-        memcpy(block_facts + 24u * b, block_observed, sizeof block_observed);
+            (int)blocks[b].edit_begin, (int)blocks[b].edit_count,
+            has_stop ? (int)first_stop + 1 : 0, frame_status, stop_in_frame};
+        memcpy(block_facts + 27u * b, block_observed, sizeof block_observed);
         if (!duckvep_coding_context_block_window_open(&context, blocks + b, &view)) {
             if (!facts[21]) facts[21] = (int)b + 1;
             continue;

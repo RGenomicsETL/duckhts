@@ -471,6 +471,9 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
                     b->edits, leaf.edit_count, b->blocks, b->edit_capacity, &leaf.block_count);
                 if (partition != DUCKVEP_HAPLOTYPE_OK)
                     return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INTERNAL_ERROR);
+                size_t first_stop = leaf.translation.first_stop_position1;
+                if (first_stop > leaf.cds_length / 3u)
+                    return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INTERNAL_ERROR);
                 for (size_t i = 0u; i < leaf.block_count; i++) {
                     const duckvep_haplotype_block_t *block = &b->blocks[i];
                     size_t start0 = (size_t)block->cds_start - 1u;
@@ -478,6 +481,14 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
                         block->alt_start0 > leaf.cds_length ||
                         block->alt_len > leaf.cds_length - block->alt_start0)
                         return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INTERNAL_ERROR);
+                    if (first_stop) {
+                        int intersects;
+                        if (duckvep_haplotype_block_frame_intersects(b->edits,
+                                leaf.edit_count, block, (first_stop - 1u) * 3u, 3u,
+                                &intersects) != DUCKVEP_HAPLOTYPE_OK)
+                            return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INTERNAL_ERROR);
+                        leaf.stop_in_displaced_frame |= (uint8_t)intersects;
+                    }
                 }
                 leaf.blocks = b->blocks;
                 leaf.edit_event_ids = b->edit_event_ids;

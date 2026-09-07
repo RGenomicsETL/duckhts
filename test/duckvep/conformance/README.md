@@ -635,6 +635,16 @@ independent coding interpreter on their actual reference/alternate coordinates;
 indel-bearing blocks stay unsupported. A later local missense predicate is not
 evidence that translation reached that block. Neither local predicates nor
 unsupported results are collapsed into a whole-haplotype consequence set.
+Each block also records the full translation's `first_stop_position1` (zero when
+absent), `frame_status`, and `stop_overlaps_displacement`. The last fact intersects
+that stop's three alternate CDS bases with actual frame-changing/restoring edit
+spans. A stop after restoration is distinct from one inside displaced bases;
+these observations do not classify SO terms or establish protein rescue.
+The public `haplotype_sql_differential.R` lane separately compares
+`stop_in_displaced_frame` to rebuilt per-base coordinate markers for every occupied
+carrier in both policies. Its original sequence/oracle assertions and denominators
+are unchanged; frame comparisons, failures and a flipped-fact rejection control
+are additional metrics, not VEP compound-consequence agreement.
 
 The additional `bcftools csq -p a` observation builds bcftools/HTSlib 1.23 from
 the exact `src/bcftools-1.23` tree in RBCFTools commit

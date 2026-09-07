@@ -78,7 +78,7 @@ main <- function() {
     "stop_retained", "start_lost", "start_retained", "frameshift", "inframe_deletion",
     "inframe_insertion", "protein_altering", "coding_unknown", "partial_codon",
     "upstream_stop", "indel", "shifted", "cds_start", "ref_len", "alt_start0", "alt_len",
-    "edit_begin", "edit_count")
+    "edit_begin", "edit_count", "first_stop_position1", "frame_status", "stop_overlaps_displacement")
   at <- 0L
   for (case in cases) {
     paths <- native[[case$transcript]]
@@ -142,6 +142,8 @@ main <- function() {
     supported_substitution_blocks = sum(blocks$status == 0L & blocks$valid == 1L & blocks$indel == 0L),
     unsupported_blocks = sum(blocks$status == 2L),
     blocks_after_stop = sum(blocks$upstream_stop),
+    frame_geometry_errors = sum(blocks$frame_status != 0L),
+    stops_in_frame_displacement = sum(blocks$stop_overlaps_displacement),
     falsely_supported_indel_blocks = sum(blocks$indel != 0L & (blocks$status == 0L | blocks$valid != 0L)),
     unsupported = sum(rows$delta_status == 2L), compound_indels = sum(rows$compound_indel),
     falsely_supported_compound_indels = sum(false_support), bcftools_exit_status = bcftools_status,
@@ -168,6 +170,7 @@ main <- function() {
     all(rows$block_count == rows$opened_windows), all(rows$first_failed_window == 0L),
     all(rows$invalid_window_residues == 0L),
     summary$falsely_supported_indel_blocks == 0L,
+    summary$frame_geometry_errors == 0L,
     bcftools_status == 0L, summary$incomplete_bcftools_rows == 0L,
     summary$missing_occupied == 0L, nrow(extra) == 0L)
 }

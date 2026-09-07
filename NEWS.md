@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- expose `stop_in_displaced_frame` in phased replay: a shared native edit-geometry
+  check distinguishes a first stop within displaced CDS bases from one after
+  frame restoration. Unavailable sequences return NULL. Raw frame flags and
+  complete contributors remain intact; this is not combined SO/HGVS annotation
+
 - record the current-code complete GIAB independent-annotation workload after
   the shared block-predicate refactor: 63.49 seconds on one core versus the
   nearest identical 62.73-second pass, with identical full output fingerprints.

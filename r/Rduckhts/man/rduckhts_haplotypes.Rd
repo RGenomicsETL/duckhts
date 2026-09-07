@@ -50,8 +50,8 @@ displace then restore the reading frame. Each block gives one-based reference
 `alt_start0` in the rebuilt CDS, `length_change`, `sequence_flags` and
 `event_indices`: one source event ID per physical edit in ascending CDS order.
 An ID can repeat for several differing islands, within or across blocks;
-the list length is the physical edit count. This replaces the count-only block
-field. Join IDs to `contributors` for raw alleles and input provenance.
+the list length is the physical edit count.
+Join IDs to `contributors` for raw alleles and input provenance.
 Spans include retained bases between edits; they are not aligned
 differences or HGVS normalization. An insertion has empty reference; a deletion
 has empty alternate. Unknown sequences have NULL blocks, not an empty known
@@ -79,6 +79,14 @@ first-stop prefix without reference peptide edits. Unknown paths and reference
 CDS shorter than one codon have NULL protein differences; identical known
 proteins have an empty list. Both difference axes reuse the same native
 scratch and are separately subject to the alignment-cell and run limits.
+
+`stop_in_displaced_frame` reports whether any of the first translated stop
+codon's three bases overlaps a frame-displaced span of the rebuilt CDS.
+Displacement starts at a frame-changing edit and ends after the alternate
+bases of the restoring edit, or continues downstream if unrestored.
+It is FALSE for no stop or a stop after frame restoration, and NA when
+sequence is unavailable. It is a sequence fact, not a combined SO consequence
+or a claim that a restored DNA frame rescues the protein.
 
 This alpha interface returns sequence mechanics, not combined SO consequences,
 compound HGVS or structural-event composition. Input must contain one row per

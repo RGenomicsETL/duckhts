@@ -1,6 +1,35 @@
 #!/usr/bin/env Rscript
 # Additional public-SQL lane over unchanged, receipted Haplosaurus artifacts.
 # No generation, sampling, oracle modification or replacement of prior results.
+frame_stop_from_base_positions <- function(case, path) {
+  edits <- case$edits[match(path$contributors, case$edits$id), , drop = FALSE]
+  stopifnot(!anyNA(edits))
+  edits <- edits[order(edits$start), , drop = FALSE]
+  displaced <- logical(nchar(path$cds))
+  ref <- alt <- 1L
+  for (i in seq_len(nrow(edits))) {
+    e <- edits[i, ]
+    retained <- e$start - ref
+    stopifnot(retained >= 0L)
+    if (retained) {
+      ref_positions <- ref - 1L + seq_len(retained)
+      alt_positions <- alt - 1L + seq_len(retained)
+      displaced[alt_positions] <- (alt_positions - ref_positions) %% 3L != 0L
+      ref <- ref + retained
+      alt <- alt + retained
+    }
+    if (e$alt_len) displaced[alt - 1L + seq_len(e$alt_len)] <-
+      (alt - ref) %% 3L != 0L || (alt + e$alt_len - ref - e$ref_len) %% 3L != 0L
+    ref <- ref + e$ref_len
+    alt <- alt + e$alt_len
+  }
+  retained <- nchar(case$cds) - ref + 1L
+  stopifnot(retained >= 0L, alt + retained - 1L == nchar(path$cds))
+  if (retained) displaced[alt - 1L + seq_len(retained)] <- (alt - ref) %% 3L != 0L
+  first_stop <- regexpr("*", path$protein, fixed = TRUE)[[1L]]
+  first_stop > 0L && any(displaced[(first_stop - 1L) * 3L + 1:3])
+}
+
 main <- function() {
   opt <- optparse::parse_args(optparse::OptionParser(option_list = list(
     optparse::make_option("--artifacts", type = "character"),
@@ -29,6 +58,12 @@ main <- function() {
   cases <- readRDS(files[1L])$cases
   inputs <- readRDS(files[2L])
   native <- readRDS(files[3L])
+  frame_expected <- do.call(rbind, lapply(seq_along(cases), function(i) {
+    paths <- native[[cases[[i]]$transcript]]
+    data.frame(transcript_index = i - 1L, sample_index = rep(0:2, each = 2L), lane = rep(1:2, 3L),
+      stop_in_displaced_frame = vapply(paths, function(path)
+        frame_stop_from_base_positions(cases[[i]], path), TRUE))
+  }))
   oracle <- lapply(readLines(files[4L]), jsonlite::fromJSON, simplifyVector = FALSE)
   names(oracle) <- vapply(oracle, `[[`, "", "transcript")
   con <- DBI::dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
@@ -77,7 +112,7 @@ main <- function() {
     DBI::dbExecute(con, paste0("CREATE OR REPLACE TABLE hap_output AS SELECT * FROM duckvep_haplotypes(",
       DBI::dbQuoteString(con, calls_query), ",'public_hap',phase_policy:=", DBI::dbQuoteString(con, policy), ")"))
     leaves <- DBI::dbGetQuery(con, "SELECT * FROM hap_output")
-    rows <- DBI::dbGetQuery(con, paste("SELECT transcript_index,cds,protein,sequence_flags,projection_status,sequence_status,",
+    rows <- DBI::dbGetQuery(con, paste("SELECT transcript_index,cds,protein,sequence_flags,projection_status,sequence_status,stop_in_displaced_frame,",
       "c.sample_index,c.phase_set,c.haplotype_lane,c.ploidy,",
       "list_transform(contributors,x -> x.event_index) event_ids FROM hap_output,unnest(carriers) u(c)"))
     saveRDS(list(leaves = leaves, carriers = rows), file.path(out, paste0(policy, ".rds")))
@@ -114,6 +149,14 @@ main <- function() {
         if (policy == "strict") all(actual$phase_set == 10) else all(is.na(actual$phase_set))
     }
     mechanics_equal <- equal(rows)
+    frame_matches <- function(actual) {
+      wanted <- frame_expected$stop_in_displaced_frame[match(key(convert(actual)), key(frame_expected))]
+      !is.na(actual$stop_in_displaced_frame) & !is.na(wanted) & actual$stop_in_displaced_frame == wanted
+    }
+    frame_checks <- frame_matches(rows)
+    wrong_frame <- rows
+    wrong_frame$stop_in_displaced_frame[1L] <- !wrong_frame$stop_in_displaced_frame[1L]
+    frame_control_rejected <- !all(frame_matches(wrong_frame))
     checks <- logical()
     reconstructed <- rbind(expected[!nzchar(expected$events), ], convert(rows))
     for (i in seq_along(cases)) {
@@ -145,7 +188,9 @@ main <- function() {
       input_call_rows = nrow(inputs$calls), input_allele_slots = sum(lengths(inputs$calls$alleles)),
       complete_lanes = nrow(expected), occupied_carriers = nrow(rows), output_leaves = nrow(leaves),
       native_paths_equal = mechanics_equal, oracle_comparisons = length(checks),
-      oracle_failures = sum(!checks), controls_rejected = sum(rejected))
+      oracle_failures = sum(!checks), controls_rejected = sum(rejected),
+      frame_comparisons = length(frame_checks), frame_failures = sum(!frame_checks),
+      frame_stops = sum(rows$stop_in_displaced_frame), frame_control_rejected = frame_control_rejected)
   }
   summary <- do.call(rbind, summaries)
   write.csv(summary, file.path(out, "summary.csv"), row.names = FALSE)
@@ -160,6 +205,7 @@ main <- function() {
   print(summary, row.names = FALSE)
   stopifnot(all(summary$native_paths_equal), all(summary$oracle_failures == 0L), all(summary$controls_rejected == 6L),
     identical(hashes, vapply(files,duckvep_evidence_sha256,"")), identical(revision,duckvep_evidence_revision(root)))
+  stopifnot(all(summary$frame_failures == 0L), all(summary$frame_control_rejected))
   if (!is.null(opt$extension_receipt)) duckvep_evidence_assert_checkout(root,revision)
 }
 main()

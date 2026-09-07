@@ -1,5 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- return `stop_in_displaced_frame` through `rduckhts_haplotypes()` and bundled SQL.
+  It identifies a first translated stop overlapping frame-displaced CDS bases,
+  separately from DNA frame restoration. Unavailable sequences return NA in R;
+  raw sequence flags and complete contributor provenance remain unchanged
+
 - share local substitution predicate evaluation in the bundled coding kernel
   without changing independent annotation or HGVS output. Phased SQL output
   remains sequence/provenance data, not complete compound consequences

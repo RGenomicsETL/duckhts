@@ -21860,6 +21860,101 @@ TEST haplotype_substitution_blocks_reuse_local_coding_predicates(void) {
     PASS();
 }
 
+TEST haplotype_frame_spans_match_rebuilt_base_markers(void) {
+    const uint8_t bases[] = "AAAA";
+    size_t cases = 0u, queries = 0u, displaced = 0u;
+    for (int prefix = -3; prefix <= 3; prefix += 3) {
+        for (uint32_t second = 10u; second <= 18u; second++) {
+            for (uint32_t r1 = 0u; r1 <= 3u; r1++) {
+                for (uint32_t a1 = 0u; a1 <= 4u; a1++) {
+                    if (r1 == 0u && a1 == 0u) continue;
+                    for (uint32_t r2 = 0u; r2 <= 3u; r2++) {
+                        for (uint32_t a2 = 0u; a2 <= 4u; a2++) {
+                            if (r2 == 0u && a2 == 0u) continue;
+                            duckvep_haplotype_edit_t edits[3];
+                            size_t n = 0u;
+                            if (prefix) edits[n++] = (duckvep_haplotype_edit_t){1u,
+                                prefix < 0 ? 3u : 0u, bases, prefix > 0 ? 3u : 0u, bases, 1};
+                            edits[n++] = (duckvep_haplotype_edit_t){7u, r1, bases, a1, bases, 1};
+                            edits[n++] = (duckvep_haplotype_edit_t){second, r2, bases, a2, bases, -1};
+                            /* Independent per-base sidecar reconstruction: an unchanged
+                             * base's two coordinates give its frame. Replacement bases
+                             * retain either the entering or leaving displaced frame. */
+                            uint8_t marker[64] = {0};
+                            size_t read = 0u, out = 0u;
+                            for (size_t e = 0u; e < n; e++) {
+                                size_t start0 = edits[e].cds_start - 1u;
+                                while (read < start0) {
+                                    marker[out] = ((int64_t)out - (int64_t)read) % 3 != 0;
+                                    read++; out++;
+                                }
+                                int before = ((int64_t)out - (int64_t)read) % 3 != 0;
+                                int after = ((int64_t)out + edits[e].alt_len -
+                                    (int64_t)read - edits[e].ref_len) % 3 != 0;
+                                for (size_t a = 0u; a < edits[e].alt_len; a++)
+                                    marker[out++] = (uint8_t)(before || after);
+                                read += edits[e].ref_len;
+                            }
+                            while (read < 42u) {
+                                marker[out] = ((int64_t)out - (int64_t)read) % 3 != 0;
+                                read++; out++;
+                            }
+                            duckvep_haplotype_block_t blocks[3];
+                            size_t count;
+                            ASSERT_EQ(DUCKVEP_HAPLOTYPE_OK,
+                                duckvep_haplotype_partition(edits, n, blocks, 3u, &count));
+                            for (size_t b = 0u; b < count; b++) {
+                                size_t end = b + 1u < count ? blocks[b + 1u].alt_start0 : out;
+                                for (size_t p = blocks[b].alt_start0; p <= end; p++) {
+                                    for (size_t length = 0u; length <= 3u && length <= end - p; length++) {
+                                        int expected = 0, observed = -1;
+                                        for (size_t i = p; i < p + length; i++) expected |= marker[i];
+                                        ASSERT_EQ(DUCKVEP_HAPLOTYPE_OK,
+                                            duckvep_haplotype_block_frame_intersects(
+                                                edits, n, blocks + b, p, length, &observed));
+                                        ASSERT_EQ(expected, observed);
+                                        queries++; displaced += (size_t)observed;
+                                    }
+                                }
+                                int observed = 1;
+                                ASSERT_EQ(DUCKVEP_HAPLOTYPE_OUT_OF_RANGE,
+                                    duckvep_haplotype_block_frame_intersects(
+                                        edits, n, blocks + b, SIZE_MAX, 1u, &observed));
+                                ASSERT_EQ(0, observed);
+                                duckvep_haplotype_block_t invalid = blocks[b];
+                                invalid.flags ^= DUCKVEP_HAPLOTYPE_FLAG_INDEL;
+                                observed = 1;
+                                ASSERT_EQ(DUCKVEP_HAPLOTYPE_INVALID_ARG,
+                                    duckvep_haplotype_block_frame_intersects(
+                                        edits, n, &invalid, 0u, out, &observed));
+                                ASSERT_EQ(0, observed);
+                            }
+                            cases++;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    ASSERT_EQ(9747u, cases); ASSERT(queries > 1000000u); ASSERT(displaced > 0u);
+    /* Adjacent 1-base and 2-base deletions restore the frame without leaving
+     * any alternate bases inside the displacement. A spanning codon query
+     * must not mistake the empty interval for a translated excursion. */
+    duckvep_haplotype_edit_t deletions[2] = {
+        {4u, 1u, bases, 0u, NULL, 1}, {5u, 2u, bases, 0u, NULL, 1}};
+    duckvep_haplotype_block_t block;
+    size_t count;
+    int observed;
+    ASSERT_EQ(DUCKVEP_HAPLOTYPE_OK,
+        duckvep_haplotype_partition(deletions, 2u, &block, 1u, &count));
+    ASSERT_EQ(1u, count);
+    ASSERT(block.flags & DUCKVEP_HAPLOTYPE_FLAG_RESOLVED_FRAMESHIFT);
+    ASSERT_EQ(DUCKVEP_HAPLOTYPE_OK,
+        duckvep_haplotype_block_frame_intersects(deletions, 2u, &block, 2u, 3u, &observed));
+    ASSERT_EQ(0, observed);
+    PASS();
+}
+
 TEST haplotype_compound_indels_are_not_substitution_facts(void) {
     /* Unchanged Haplosaurus generator seed 173, DHT000002: genomic 211 G>GA
      * and 180 AC>A on the reverse strand. The frame returns to zero at CDS 40,
@@ -27964,6 +28059,7 @@ int main(int argc, char **argv) {
     RUN_TEST(haplotype_apply_matches_rebuild_oracle_for_any_valid_edit_set);
     RUN_TEST(haplotype_block_windows_keep_both_peptide_axes);
     RUN_TEST(haplotype_substitution_blocks_reuse_local_coding_predicates);
+    RUN_TEST(haplotype_frame_spans_match_rebuilt_base_markers);
     RUN_TEST(haplotype_compound_indels_are_not_substitution_facts);
     RUN_TEST(haplotype_snv_set_matches_equivalent_mnv_coding_facts);
     GREATEST_MAIN_END();

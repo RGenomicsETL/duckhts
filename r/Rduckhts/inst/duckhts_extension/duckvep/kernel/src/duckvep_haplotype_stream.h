@@ -115,6 +115,7 @@ typedef struct {
     size_t cds_length, protein_length;
     uint32_t flags;
     uint8_t evidence_flags; /* OR of contributor evidence, distinct from sequence flags. */
+    uint8_t stop_in_displaced_frame; /* First translated stop intersects a frame excursion. */
     /* First failed projection, or edit/rebuild status when projection is OK.
      * Failed paths have no CDS/protein/blocks; all contributors/carriers remain. */
     duckvep_cds_edit_status_t projection_status;

@@ -648,6 +648,10 @@ every transcript follows one universal NMD rule.
 
 ## Phased edits
 
+DuckVEP is alpha: its interfaces and internal representations may be replaced
+without compatibility shims. Pinned biological semantics and independent evidence
+remain correctness contracts, not reasons to retain an obsolete API.
+
 The pure C mutation core rebuilds a CDS from several non-overlapping edits in one
 reverse-coordinate pass, translates once, and partitions interactions while the frame is
 displaced or the next edit touches the same alternate codon. The model-scoped carrier index
@@ -666,6 +670,13 @@ the public haplotype protein is a length-delimited prefix through that stop. Lat
 residues stay in worker storage for coding-context consumption, and later source
 events remain in contributor provenance. Full and stop-truncated translation do
 not have separate biological implementations.
+The leaf's `stop_in_displaced_frame` fact intersects the first stop's three rebuilt
+CDS bases with physical frame excursions. An excursion starts at a frame-changing
+edit and ends after the restoring edit's alternate bases, or continues downstream
+if unrestored. A zero-base excursion cannot intersect a codon. A stop after frame
+restoration and a sequence with no stop both return false; unavailable sequence
+returns NULL. The shared edit geometry does not modify raw frame flags or imply
+protein rescue, SO classification, or removal of downstream contributors.
 Ambiguity is an explicit input policy to that translator: independent coding
 predicates conservatively retain `X` for N-containing codons, while phased replay
 uses BioPerl's amino-acid consensus over every A/C/G/T expansion of N. A resolved

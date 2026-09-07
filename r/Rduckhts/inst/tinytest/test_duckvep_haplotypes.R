@@ -32,6 +32,7 @@ local({
     n_result <- rduckhts_haplotypes(con, n_call, "n_codons", phase_policy = policy)
     expect_equal(n_result$cds, "ATAGCNTGNGCC")
     expect_equal(n_result$protein, "IAXA")
+    expect_identical(n_result$stop_in_displaced_frame, FALSE)
     expect_equal(n_result$sequence_status, "ok")
     expect_equal(nrow(n_result$contributors[[1L]]), 1L)
   }
@@ -39,6 +40,7 @@ local({
   expect_equal(sort(actual$carrier_count), c(1,1,2))
   expect_equal(sort(actual$protein), c("HKKK", "QKKK", "RKKK"))
   expect_true(all(actual$sequence_status == "ok"))
+  expect_identical(actual$stop_in_displaced_frame, rep(FALSE, nrow(actual)))
   expect_true(all(actual$projection_status == "ok"))
   expect_equal(sum(lengths(lapply(actual$contributors, function(x) x$event_index))), 5L)
   blocks <- do.call(rbind, actual$coding_blocks)
@@ -58,6 +60,7 @@ local({
     dbQuoteString(con, "SELECT 0::UINTEGER seq_region"), ",",
     dbQuoteString(con, noncoding), ",", dbQuoteString(con, exons), ")"))$loaded)
   unavailable <- rduckhts_haplotypes(con, calls, "noncoding")
+  expect_true(all(is.na(unavailable$stop_in_displaced_frame)))
   expect_true(nrow(unavailable) == 3L && sum(unavailable$carrier_count) == 4L &&
     all(unavailable$projection_status == "outside_cds") &&
     all(is.na(unavailable$cds)) && all(is.na(unavailable$protein)))
@@ -115,11 +118,26 @@ local({
   expect_equal(stopped$cds, "ATGGAATAAACC")
   expect_equal(stopped$protein, "ME*")
   expect_equal(stopped$sequence_flags, 8)
+  expect_identical(stopped$stop_in_displaced_frame, FALSE)
   expect_equal(nrow(stopped$coding_blocks[[1]]), 2L)
   expect_equal(stopped$contributors[[1]]$event_index, 1:2)
   expect_equal(stopped$cds_differences[[1]]$ref_start0, c(3, 9))
   expect_equal(stopped$cds_differences[[1]]$reference, c("A", "C"))
   expect_equal(stopped$cds_differences[[1]]$alternate, c("G", "A"))
+  after_frame_calls <- paste("SELECT event_index,0 seq_region,position,reference,alternate,1 alt_index,",
+    "0 transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set",
+    "FROM (VALUES (1,103,'A','AC'),(2,104,'AA','A')) v(event_index,position,reference,alternate)")
+  for (policy in c("strict", "vep116_compat")) {
+    after_frame <- rduckhts_haplotypes(con, after_frame_calls, "stops", phase_policy = policy)
+    expect_equal(after_frame$cds, "ATGACATAACCC")
+    expect_equal(after_frame$protein, "MT*")
+    expect_equal(after_frame$sequence_flags, 13)
+    expect_identical(after_frame$stop_in_displaced_frame, FALSE)
+  }
+  missing_calls <- sub("alleles,[true,true]", "[NULL,NULL]::INTEGER[] alleles,[true,true]", calls, fixed = TRUE)
+  missing_frame <- rduckhts_haplotypes(con, missing_calls, "haps")
+  expect_true(all(is.na(missing_frame$stop_in_displaced_frame)))
+  expect_true(all(missing_frame$sequence_status == "incomplete_input"))
   # The DNA frame restores after translation has already reached a stop. These
   # are the unchanged seed-173 DHT000002 edits, also expressed on the forward strand.
   early_cds <- paste0("ATGGGCTTGCCTAGCTTAAAACACTTGGTAAACTTTCTCGTGGTTACAACCTCGTTAGGGCTGCAT",
@@ -146,6 +164,7 @@ local({
     expect_equal(early$protein, c("MGLS*", "MGLS*"))
     expect_equal(nchar(early$cds), c(180L, 180L))
     expect_equal(early$sequence_flags, c(13, 13))
+    expect_identical(early$stop_in_displaced_frame, c(TRUE, TRUE))
     expect_equal(lapply(early$contributors, function(x) x$event_index), list(c(1, 2), c(3, 4)))
     expect_equal(lapply(early$coding_blocks, function(x) x$event_indices), list(list(c(1, 2)), list(c(4, 3))))
     expect_equal(vapply(early$coding_blocks, function(x) x$length_change, 0), c(0, 0))

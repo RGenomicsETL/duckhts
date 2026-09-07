@@ -252,6 +252,18 @@ FROM duckvep_haplotypes('SELECT * REPLACE([NULL,NULL]::INTEGER[] AS alleles) FRO
 ----
 true
 
+query I
+SELECT bool_and(stop_in_displaced_frame IS NULL)
+FROM duckvep_haplotypes('SELECT * REPLACE([NULL,NULL]::INTEGER[] AS alleles) FROM hap_calls','hap');
+----
+true
+
+query TI
+SELECT typeof(stop_in_displaced_frame),bool_and(NOT stop_in_displaced_frame)
+FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap') GROUP BY ALL;
+----
+BOOLEAN	true
+
 statement error
 SELECT * FROM duckvep_haplotypes('SELECT * FROM hap_calls UNION ALL SELECT * FROM hap_calls', 'hap');
 ----
@@ -323,6 +335,15 @@ FROM duckvep_haplotypes('SELECT * FROM hap_many_calls ORDER BY event_index DESC'
  max_active_carriers := 1, max_active_prefixes := 1, max_allele_bytes := 2);
 ----
 5000	5000	5000	2500	2500
+
+# Scalar validity must survive list resets and known/unknown leaves across chunks.
+query III
+SELECT count(*),count(*) FILTER(WHERE stop_in_displaced_frame IS NULL),
+ count(*) FILTER(WHERE stop_in_displaced_frame=false)
+FROM duckvep_haplotypes('SELECT * REPLACE(CASE WHEN transcript_index%2=0
+ THEN [NULL,0]::INTEGER[] ELSE alleles END AS alleles) FROM hap_many_calls','hap_many');
+----
+5000	2500	2500
 
 # Two pinned models remain distinct in the same process.
 query I
@@ -453,6 +474,45 @@ FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap_noncoding');
 ----
 true
 
+query I
+SELECT bool_and(stop_in_displaced_frame IS NULL)
+FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap_noncoding');
+----
+true
+
+# The first stop is after the restoring deletion, not inside displaced bases.
+# A stop in an unchanged frame is also false; an open frame without a stop is false.
+statement ok
+CREATE TABLE hap_frame_stop_calls AS SELECT event_index,0 seq_region,position,reference,alternate,
+ 1 alt_index,0 transcript_index,sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set
+ FROM (VALUES (1,0,103,'A','AC'),(2,0,104,'AA','A'),(3,1,103,'A','G'))
+ v(event_index,sample_index,position,reference,alternate);
+
+query TTII
+SELECT cds,protein,sequence_flags,stop_in_displaced_frame FROM
+ duckvep_haplotypes('SELECT * FROM hap_frame_stop_calls','hap_stops') ORDER BY cds;
+----
+ATGACATAACCC	MT*	13	false
+ATGGAATAACCC	ME*	8	false
+
+query TII
+SELECT protein,sequence_flags,stop_in_displaced_frame FROM duckvep_haplotypes(
+ 'SELECT event_index,0 seq_region,100 AS position,''A'' AS reference,alternate,
+  1 alt_index,0 transcript_index,sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set
+  FROM (VALUES (1,0,''TA''),(2,1,''AT'')) v(event_index,sample_index,alternate)','hap') ORDER BY protein;
+----
+*	11	true
+IKKK	3	false
+
+# Conflicting physical edits cannot supply a known frame/stop fact.
+query TI
+SELECT sequence_status,stop_in_displaced_frame IS NULL FROM duckvep_haplotypes(
+ 'SELECT event_index,0 seq_region,100 AS position,''A'' AS reference,alternate,
+  1 alt_index,0 transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set
+  FROM (VALUES (1,''C''),(2,''G'')) v(event_index,alternate)','hap');
+----
+edit_conflict	true
+
 # A restored DNA frame is not a rescued protein: the seed-173 DHT000002
 # insertion/deletion pair reaches MGLS* before the restoring deletion. Keep
 # both physical contributors and the complete CDS on either strand.
@@ -497,6 +557,19 @@ SELECT transcript_index,protein,len(cds),sum(len(b.event_indices))
 ----
 0	MGLS*	180	2
 1	MGLS*	180	2
+
+query III
+SELECT transcript_index,stop_in_displaced_frame,coding_blocks[1].sequence_flags FROM
+ duckvep_haplotypes('SELECT * FROM hap_early_stop_calls','hap_early_stop') ORDER BY transcript_index;
+----
+0	true	5
+1	true	5
+
+query I
+SELECT bool_and(stop_in_displaced_frame) FROM
+ duckvep_haplotypes('SELECT * FROM hap_early_stop_calls','hap_early_stop',phase_policy := 'vep116_compat');
+----
+true
 
 # Interacting indels restore the frame. An earlier in-frame insertion shifts
 # later alternate spans; the reverse transcript must expose transcript-oriented
