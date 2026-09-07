@@ -643,6 +643,59 @@ workspace and process memory. The current SQL benchmark includes local
 coding-block SO; these Haplosaurus comparisons do not certify those
 masks. Whole-haplotype SO/HGVS remains unfinished.
 
+## Raw genotype compatibility audit
+
+| ploidy | cases | disagreements | oracle_lanes | native_lanes | native_unavailable_carriers |
+|-------:|------:|--------------:|-------------:|-------------:|----------------------------:|
+|      1 |    12 |            12 |           24 |           12 |                           3 |
+|      2 |    96 |            66 |          192 |          192 |                          84 |
+|      3 |   768 |           768 |         1536 |         2304 |                        1332 |
+|      4 |  6144 |          6144 |        12288 |        24576 |                       16800 |
+
+Source 5b4d4fbe517c53047f05826dde1eb7b0f4ae62d6 records a **failing
+raw-input compatibility audit**: 6990 disagreements in 7020 profiles. It
+is not a population error rate or a replacement for the passing
+literal-sequence corpus. Runtime extension sources are unchanged from
+the preceding local-coding-block implementation; this audit exposes gaps
+in the compatibility target.
+
+The [R
+driver](../test/duckvep/conformance/haplotype_phase_differential.R)
+enumerates every GT over `0`, `1`, `2`, `.` at ploidies 1–4, every
+intervening separator pattern, and absent, `/`, or `|` leading prefixes.
+No profile is sampled or excluded. Each has one multiallelic site plus a
+homozygous second site in a different phase set, using the registered
+180-base reference. There are 14,040 source records/genotype calls,
+21,060 source ALT events/candidate calls, and 54,168 input allele slots.
+Every REF is checked before execution. These are correctness
+denominators, not timing measurements.
+
+The pinned, unmodified Haplosaurus runner and public `vep116_compat`
+executor consume the same VCF/GFF/FASTA. Comparisons retain complete
+CDS/protein multisets, source-record contributors and carrier counts.
+Eighteen ordinary called diploid profiles agree; four deliberate
+sequence/protein/provenance/duplicate corruptions are rejected. All
+other disagreements remain failures, including missing-input NULL
+sequences and the difference between explicit source ploidy and
+Haplosaurus’s file-input diploid fallback. The command exits nonzero
+after writing full observations, comparisons and source-bound receipts.
+
+There are 1471 groups in which distinct raw GT spellings have
+**identical HTSlib alleles and phase flags but different Haplosaurus
+outputs**. A witness is `0|1` versus `|0|1`: both decode to alleles
+`[0,1]`, phase flags `[true,true]`. VEP-116’s parser retains a leading
+empty split field as REF before the container consumes its allele slots,
+changing the result. The same model, remaining call and phase sets are
+used on both sides.
+
+Thus raw-parser compatibility cannot be recovered from typed calls
+alone. This does not justify changing HTSlib-faithful genotype decoding
+or treating an unknown call as biologically known. Exact raw-input
+emulation needs retained source GT and source-record allele context,
+with upstream conditional sequence explicitly distinguished from
+strict-phase evidence. Whole-haplotype SO/HGVS and typed structural
+composition remain separate unfinished requirements.
+
 ## Individual Sequence Ontology terms
 
 For each transcript pair, this compares the union of terms emitted by

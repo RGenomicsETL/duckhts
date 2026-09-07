@@ -196,7 +196,7 @@ main <- function() {
     "test/duckvep/conformance/haplotype_oracle.pl", file.path(prefix,
       "share/ensembl-vep-116.0-0/Bio/EnsEMBL/IO/Parser/BaseVCF4.pm"))
   jsonlite::write_json(list(source_revision = revision, extension_build_binding = binding,
-    oracle_revisions = pins, scope = "raw_GT_finite_phase_audit_not_conformance",
+    oracle_revisions = as.list(pins), scope = "raw_GT_finite_phase_audit_not_conformance",
     max_ploidy = opt$max_ploidy, cases = nrow(summary), disagreements = sum(!summary$equal),
     decoded_collision_groups = length(collisions), controls_rejected = sum(rejected),
     input_records = nrow(records), source_alt_events = 3L * nrow(cases),

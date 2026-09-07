@@ -1025,6 +1025,60 @@ native and public SQL execution separately, with workspace and process memory.
 The current SQL benchmark includes local coding-block SO; these Haplosaurus
 comparisons do not certify those masks. Whole-haplotype SO/HGVS remains unfinished.
 
+## Raw genotype compatibility audit
+
+```{r raw-genotype-audit}
+phase <- read.csv(file.path(root, "test/duckvep/conformance/data/haplotype_phase_history.csv"),
+  colClasses = c(source_revision = "character"))
+stopifnot(all(phase$extension_build_binding == "htslib_distclean_make_release"),
+  all(phase$controls_rejected == 4L),
+  !anyDuplicated(phase[c("source_revision", "ploidy", "prefix", "missing", "mixed")]))
+phase_revision <- tail(unique(phase$source_revision), 1L)
+phase_current <- subset(phase, source_revision == phase_revision)
+phase_counts <- aggregate(cbind(cases, disagreements, oracle_lanes, native_lanes,
+  native_unavailable_carriers) ~ ploidy, data = phase_current, FUN = sum)
+stopifnot(sum(phase_counts$cases) == 3 * sum(4^(1:4) * 2^(0:3)))
+knitr::kable(phase_counts, row.names = FALSE)
+```
+
+Source `r phase_revision` records a **failing raw-input compatibility audit**:
+`r sum(phase_counts$disagreements)` disagreements in `r sum(phase_counts$cases)`
+profiles. It is not a population error rate or a replacement for the passing
+literal-sequence corpus. Runtime extension sources are unchanged from the preceding
+local-coding-block implementation; this audit exposes gaps in the compatibility target.
+
+The [R driver](../test/duckvep/conformance/haplotype_phase_differential.R) enumerates
+every GT over `0`, `1`, `2`, `.` at ploidies 1–4, every intervening separator pattern,
+and absent, `/`, or `|` leading prefixes. No profile is sampled or excluded. Each
+has one multiallelic site plus a homozygous second site in a different phase set,
+using the registered 180-base reference. There are 14,040 source records/genotype
+calls, 21,060 source ALT events/candidate calls, and 54,168 input allele slots.
+Every REF is checked before execution. These are correctness denominators, not
+timing measurements.
+
+The pinned, unmodified Haplosaurus runner and public `vep116_compat` executor consume
+the same VCF/GFF/FASTA. Comparisons retain complete CDS/protein multisets, source-record
+contributors and carrier counts. Eighteen ordinary called diploid profiles agree;
+four deliberate sequence/protein/provenance/duplicate corruptions are rejected.
+All other disagreements remain failures, including missing-input NULL sequences
+and the difference between explicit source ploidy and Haplosaurus's file-input
+diploid fallback. The command exits nonzero after writing full observations,
+comparisons and source-bound receipts.
+
+There are `r unique(phase_current$decoded_collision_groups)` groups in which distinct
+raw GT spellings have **identical HTSlib alleles and phase flags but different
+Haplosaurus outputs**. A witness is `0|1` versus `|0|1`: both decode to alleles
+`[0,1]`, phase flags `[true,true]`. VEP-116's parser retains a leading empty split
+field as REF before the container consumes its allele slots, changing the result.
+The same model, remaining call and phase sets are used on both sides.
+
+Thus raw-parser compatibility cannot be recovered from typed calls alone. This
+does not justify changing HTSlib-faithful genotype decoding or treating an unknown
+call as biologically known. Exact raw-input emulation needs retained source GT and
+source-record allele context, with upstream conditional sequence explicitly
+distinguished from strict-phase evidence. Whole-haplotype SO/HGVS and typed
+structural composition remain separate unfinished requirements.
+
 ## Individual Sequence Ontology terms
 
 For each transcript pair, this compares the union of terms emitted by either
