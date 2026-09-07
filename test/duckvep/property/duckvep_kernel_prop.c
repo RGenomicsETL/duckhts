@@ -27,6 +27,7 @@
 #include "duckvep_codon.h"
 #include "duckvep_coding.h"
 #include "duckvep_haplotype.h"
+#include "duckvep_sequence_diff.h"
 #include "duckvep_carriers.h"
 #include "duckvep_haplotype_stream.h"
 #include "duckvep_sv.h"
@@ -8442,6 +8443,101 @@ static int haplo_oracle_rebuild(const uint8_t *ref, size_t ref_len,
     *length_diff = diff_total;
     *flags = f;
     return 1;
+}
+
+/* Deliberately full-matrix, signed-score, gapped-string oracle. Production
+ * instead uses nonnegative costs, a proved band and ungapped output spans. */
+static size_t difference_alignment_oracle(const uint8_t *a, size_t n,
+    const uint8_t *b, size_t m, int align, uint8_t *oa, uint8_t *ob) {
+    int score[8][8], direction[8][8];
+    for (size_t i = 0u; i <= n; i++) { score[i][0] = -(int)i; direction[i][0] = 1; }
+    for (size_t j = 0u; j <= m; j++) { score[0][j] = -(int)j; direction[0][j] = -1; }
+    for (size_t i = 1u; i <= n; i++) for (size_t j = 1u; j <= m; j++) {
+        int sub = score[i - 1u][j - 1u] + (a[i - 1u] == b[j - 1u] ? 1 : -1);
+        int del = score[i][j - 1u] - 1, ins = score[i - 1u][j] - 1;
+        if (sub > del && sub > ins) { score[i][j] = sub; direction[i][j] = 0; }
+        else if (del > ins) { score[i][j] = del; direction[i][j] = -1; }
+        else { score[i][j] = ins; direction[i][j] = 1; }
+    }
+    size_t length = 0u, i = n, j = m;
+    while (i || j) {
+        int step = align ? direction[i][j] : i == j ? 0 : i > j ? 1 : -1;
+        oa[length] = step == -1 ? '-' : a[--i];
+        ob[length++] = step == 1 ? '-' : b[--j];
+    }
+    for (size_t k = 0u; k < length / 2u; k++) {
+        uint8_t swap = oa[k]; oa[k] = oa[length - 1u - k]; oa[length - 1u - k] = swap;
+        swap = ob[k]; ob[k] = ob[length - 1u - k]; ob[length - 1u - k] = swap;
+    }
+    return length;
+}
+
+TEST haplotype_differences_match_full_matrix_exhaustively(void) {
+    uint8_t a[7], b[7], oa[14], ob[14], trace[64];
+    uint64_t scores[16];
+    duckvep_sequence_difference_t actual[14], expected[14];
+    duckvep_sequence_diff_scratch_t scratch = {scores, 16u, trace, sizeof(trace)};
+    for (size_t n = 0u; n <= 6u; n++) for (size_t m = 0u; m <= 6u; m++) {
+        for (unsigned x = 0u; x < (1u << n); x++) for (unsigned y = 0u; y < (1u << m); y++) {
+            for (size_t i = 0u; i < n; i++) a[i] = (x >> i) & 1u ? 'A' : 'C';
+            for (size_t j = 0u; j < m; j++) b[j] = (y >> j) & 1u ? 'A' : 'C';
+            for (int align = 0; align <= 1; align++) {
+                size_t length = difference_alignment_oracle(a, n, b, m, align, oa, ob);
+                size_t count = 0u, ri = 0u, ai = 0u;
+                for (size_t col = 0u; col < length;) {
+                    if (oa[col] == ob[col]) { ri++; ai++; col++; continue; }
+                    size_t begin = col, rn = 0u, an = 0u;
+                    int rgap = oa[col] == '-', agap = ob[col] == '-';
+                    do {
+                        rn += oa[col] != '-'; an += ob[col] != '-'; col++;
+                    } while (col < length && oa[col] != ob[col] &&
+                        (oa[col] == '-') == rgap && (ob[col] == '-') == agap);
+                    expected[count++] = (duckvep_sequence_difference_t){ri, ai, rn, an, begin};
+                    ri += rn; ai += an;
+                }
+                duckvep_sequence_diff_result_t result;
+                ASSERT_EQ(DUCKVEP_SEQUENCE_DIFF_OK, duckvep_sequence_differences(
+                    a, n, b, m, align, &scratch, actual, 14u, &result));
+                ASSERT_EQ(length, result.alignment_length); ASSERT_EQ(count, result.count);
+                ASSERT_EQ(0, memcmp(actual, expected, count * sizeof(*actual)));
+                if (count) {
+                    memset(actual, 0xa5, sizeof(actual));
+                    ASSERT_EQ(DUCKVEP_SEQUENCE_DIFF_OUTPUT_FULL, duckvep_sequence_differences(
+                        a, n, b, m, align, &scratch, actual, count - 1u, &result));
+                    ASSERT_EQ(count, result.count);
+                    const uint8_t *bytes = (const uint8_t *)actual;
+                    for (size_t k = 0u; k < sizeof(actual); k++) ASSERT_EQ(0xa5u, bytes[k]);
+                }
+            }
+        }
+    }
+    PASS();
+}
+
+TEST haplotype_differences_bound_alignment_work_and_report_limits(void) {
+    uint8_t ref[10000], alt[10001], trace[30003];
+    uint64_t scores[20004];
+    memset(ref, 'A', sizeof(ref)); memset(alt, 'A', sizeof(alt)); alt[5000] = 'C';
+    duckvep_sequence_diff_scratch_t scratch = {scores, 20004u, trace, sizeof(trace)};
+    duckvep_sequence_difference_t differences[2];
+    duckvep_sequence_diff_result_t result;
+    ASSERT_EQ(DUCKVEP_SEQUENCE_DIFF_OK, duckvep_sequence_differences(ref, sizeof(ref),
+        alt, sizeof(alt), 1, &scratch, differences, 2u, &result));
+    ASSERT_EQ(30003u, result.trace_cells); ASSERT_EQ(1u, result.count);
+    ASSERT_EQ(5000u, differences[0].ref_start0); ASSERT_EQ(5000u, differences[0].alt_start0);
+    ASSERT_EQ(0u, differences[0].ref_length); ASSERT_EQ(1u, differences[0].alt_length);
+    scratch.trace_capacity--;
+    ASSERT_EQ(DUCKVEP_SEQUENCE_DIFF_TRACE_FULL, duckvep_sequence_differences(ref, sizeof(ref),
+        alt, sizeof(alt), 1, &scratch, differences, 2u, &result));
+    ASSERT_EQ(30003u, result.trace_cells);
+    scratch.trace_capacity++; scratch.score_capacity--;
+    ASSERT_EQ(DUCKVEP_SEQUENCE_DIFF_SCORE_FULL, duckvep_sequence_differences(ref, sizeof(ref),
+        alt, sizeof(alt), 1, &scratch, differences, 2u, &result));
+    ASSERT_EQ(DUCKVEP_SEQUENCE_DIFF_INVALID_ARG, duckvep_sequence_differences(ref, SIZE_MAX,
+        alt, sizeof(alt), 1, &scratch, differences, 2u, &result));
+    ASSERT_EQ(DUCKVEP_SEQUENCE_DIFF_INVALID_ARG, duckvep_sequence_differences((const uint8_t *)"-", 1u,
+        alt, sizeof(alt), 1, &scratch, differences, 2u, &result));
+    PASS();
 }
 
 TEST haplotype_full_translation_matches_every_supported_codon_table(void) {
@@ -27331,6 +27427,8 @@ int main(int argc, char **argv) {
     RUN_TEST(haplotype_block_spans_reconstruct_every_generated_edit_set);
     RUN_TEST(haplotype_apply_and_translate_known_cases);
     RUN_TEST(haplotype_full_translation_matches_every_supported_codon_table);
+    RUN_TEST(haplotype_differences_match_full_matrix_exhaustively);
+    RUN_TEST(haplotype_differences_bound_alignment_work_and_report_limits);
     RUN_TEST(haplotype_apply_rejects_overlapping_inputs);
     RUN_TEST(haplotype_apply_matches_rebuild_oracle_for_any_valid_edit_set);
     RUN_TEST(haplotype_snv_set_matches_equivalent_mnv_coding_facts);

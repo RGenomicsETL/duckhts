@@ -79,6 +79,30 @@ local({
   expect_equal(stopped$sequence_flags, 8)
   expect_equal(nrow(stopped$coding_blocks[[1]]), 2L)
   expect_equal(stopped$contributors[[1]]$event_index, 1:2)
+  expect_equal(stopped$cds_differences[[1]]$ref_start0, c(3, 9))
+  expect_equal(stopped$cds_differences[[1]]$reference, c("A", "C"))
+  expect_equal(stopped$cds_differences[[1]]$alternate, c("G", "A"))
+  spelling_tx <- sub("ATGAAATAACCC", "atgaaataaccc", stop_tx, fixed = TRUE)
+  expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('spelling',",
+    dbQuoteString(con, "SELECT 0::UINTEGER seq_region"), ",", dbQuoteString(con, spelling_tx), ",",
+    dbQuoteString(con, exons), ")"))$loaded)
+  spelled <- rduckhts_haplotypes(con, stop_calls, "spelling")
+  expect_equal(spelled$cds_differences, stopped$cds_differences)
+  insertion <- paste("SELECT 1 event_index,0 seq_region,105 AS position,'A' AS reference,'AA' alternate,",
+    "1 alt_index,0 transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set")
+  inserted <- rduckhts_haplotypes(con, insertion, "haps", max_alignment_cells = 39)
+  expect_equal(inserted$cds_differences[[1]]$ref_start0, 12)
+  expect_equal(inserted$cds_differences[[1]]$alt_start0, 12)
+  expect_equal(inserted$cds_differences[[1]]$reference, "")
+  expect_equal(inserted$cds_differences[[1]]$alternate, "A")
+  expect_error(rduckhts_haplotypes(con, insertion, "haps", max_alignment_cells = 38),
+    pattern = "max_alignment_cells=38, required=39")
+  cancelling <- paste("SELECT event_index,0 seq_region,position,reference,alternate,",
+    "1 alt_index,0 transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set",
+    "FROM (VALUES (1,101,'A','AA'),(2,108,'AA','A')) v(event_index,position,reference,alternate)")
+  unchanged <- rduckhts_haplotypes(con, cancelling, "haps", max_alignment_cells = 1, max_leaf_differences = 1)
+  expect_equal(nrow(unchanged$cds_differences[[1]]), 0L)
+  expect_equal(nrow(unchanged$contributors[[1]]), 2L)
   expect_error(rduckhts_haplotypes(con, calls, "haps", max_ploidy = 1), pattern = "max_ploidy")
   expect_error(rduckhts_haplotypes(con, calls, "haps", workspace_limit = 1), pattern = "workspace")
   expect_error(rduckhts_haplotypes(con, calls, "missing"), pattern = "loaded model")

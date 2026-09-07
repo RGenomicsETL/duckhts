@@ -1,5 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- return aligned `cds_differences` from `rduckhts_haplotypes()`, with explicit
+  sequence/alignment coordinates and empty spans for gaps. Per-call
+  `max_alignment_cells` and `max_leaf_differences` report capacity failures;
+  unknown sequences retain NULL differences and all contributing events
+
 - bundle the shared CDS translator used by independent annotation and phased
   replay. `rduckhts_haplotypes()` retains the same first-stop protein output,
   with downstream contributing events and coding blocks preserved

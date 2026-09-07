@@ -15,6 +15,19 @@
 #' has empty alternate. Unknown sequences have NULL blocks, not an empty known
 #' result. Blocks reuse `max_leaf_edits` capacity and the per-call workspace limit.
 #'
+#' `cds_differences` instead contains aligned differing runs: zero-based
+#' `ref_start0`, `alt_start0`, and `alignment_start0`, with borrowed sequence spans
+#' materialized as `reference` and `alternate`. An empty span denotes a gap.
+#' The reference uses replay's uppercase DNA spelling; model bytes stay immutable.
+#' Runs join only when adjacent columns have the same gap/non-gap type on both
+#' sides. Indel-bearing paths use the VEP-116 pure-Perl global-alignment score and
+#' tie order; substitution-only paths compare corresponding positions. Repeated
+#' sequence can therefore place a difference away from its contributing event.
+#' Differences are not HGVS normalization or event-provenance reassignment.
+#' Unknown sequences have NULL differences. `max_alignment_cells` bounds the
+#' exact traceback band and `max_leaf_differences` bounds output runs; exhaustion
+#' is an error, not approximate alignment or discarded differences.
+#'
 #' This alpha interface returns sequence mechanics, not combined SO consequences,
 #' compound HGVS or structural-event composition. Input must contain one row per
 #' `event_index`, `transcript_index`, `sample_index`, with columns `seq_region`,

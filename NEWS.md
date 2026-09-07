@@ -1,6 +1,12 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- expose aligned `cds_differences` from phased replay through a host-neutral
+  sequence kernel, with VEP-116 pure-Perl global-alignment scoring and tie order.
+  Per-call `max_alignment_cells` and `max_leaf_differences` bound traceback and
+  result storage; exhaustion errors instead of approximating or dropping runs.
+  Composite coding blocks and contributing events remain separate from alignment
+
 - use one native CDS translator for independent coding contexts and phased
   replay, deleting the separate stop-truncating implementation. Full translated
   residues and the first-stop position share one pass; phased SQL output still

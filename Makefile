@@ -454,6 +454,7 @@ DUCKVEP_KERNEL_SOURCES = \
 	src/duckvep/kernel/src/duckvep_codon.c \
 	src/duckvep/kernel/src/duckvep_coding.c \
 	src/duckvep/kernel/src/duckvep_haplotype.c \
+	src/duckvep/kernel/src/duckvep_sequence_diff.c \
 	src/duckvep/kernel/src/duckvep_carriers.c \
 	src/duckvep/kernel/src/duckvep_phase.c \
 	src/duckvep/kernel/src/duckvep_haplotype_stream.c

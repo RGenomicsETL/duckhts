@@ -53,6 +53,48 @@ ORDER BY c.phase_set,c.haplotype_lane;
 20	2	CACAAAAAAAAA
 
 # Compatibility combines called slots across PS; strict mode does not.
+query TTIIT
+SELECT cds,d.reference,d.ref_start0,d.alt_start0,d.alternate FROM (
+ SELECT cds,unnest(cds_differences) d FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap'))
+ORDER BY cds,d.ref_start0;
+----
+CAAAAAAAAAAA	A	0	0	C
+CACAAAAAAAAA	A	0	0	C
+CACAAAAAAAAA	A	2	2	C
+CGAAAAAAAAAA	AA	0	0	CG
+
+# Global-alignment tie placement in a repeat differs from the physical edit site.
+query IITTI
+SELECT d.ref_start0,d.alt_start0,'['||d.reference||']',d.alternate,d.alignment_start0 FROM (
+ SELECT unnest(cds_differences) d FROM duckvep_haplotypes(
+ 'SELECT 1 event_index,0 seq_region,105 AS position,''A'' AS reference,''AA'' alternate,
+ 1 alt_index,0 transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set',
+ 'hap',max_alignment_cells := 39));
+----
+12	12	[]	A	12
+
+statement error
+SELECT * FROM duckvep_haplotypes(
+ 'SELECT 1 event_index,0 seq_region,105 AS position,''A'' AS reference,''AA'' alternate,
+ 1 alt_index,0 transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set',
+ 'hap',max_alignment_cells := 38);
+----
+max_alignment_cells=38, required=39
+
+statement error
+SELECT * FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap',max_leaf_differences := 1);
+----
+max_leaf_differences=1, required=2
+
+query IIII
+SELECT cds_differences IS NULL,len(cds_differences),len(contributors),sequence_flags
+FROM duckvep_haplotypes('SELECT event_index,0 seq_region,position,reference,alternate,
+ 1 alt_index,0 transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set
+ FROM (VALUES (1,101,''A'',''AA''),(2,108,''AA'',''A''))
+ v(event_index,position,reference,alternate)','hap',max_alignment_cells := 1,max_leaf_differences := 1);
+----
+false	0	2	5
+
 query ITTII
 SELECT b.cds_start,b.reference,b.alternate,b.alt_start0,b.edit_count FROM (
  SELECT unnest(coding_blocks) b FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap'))
@@ -85,7 +127,7 @@ GROUP BY ALL;
 incomplete_input	true	6
 
 query I
-SELECT bool_and(coding_blocks IS NULL)
+SELECT bool_and(coding_blocks IS NULL AND cds_differences IS NULL)
 FROM duckvep_haplotypes('SELECT * REPLACE([NULL,NULL]::INTEGER[] AS alleles) FROM hap_calls','hap');
 ----
 true
@@ -252,6 +294,29 @@ FROM duckvep_haplotypes('SELECT event_index,0 seq_region,position,reference,alte
  v(event_index,position,reference,alternate)','hap_stops');
 ----
 ATGGAATAAACC	ME*	8	2	[1, 2]
+
+query I
+SELECT loaded FROM duckvep_model_load('hap_spelling','SELECT 0::UINTEGER seq_region',
+ 'SELECT * REPLACE(''atgaaataaccc''::BLOB AS cds_sequence) FROM hap_tx',
+ 'SELECT * FROM hap_exons');
+----
+1
+
+query IITT
+SELECT d.ref_start0,d.alt_start0,d.reference,d.alternate FROM (
+ SELECT unnest(cds_differences) d FROM duckvep_haplotypes(
+ 'SELECT 1 event_index,0 seq_region,103 AS position,''A'' AS reference,''G'' alternate,
+ 1 alt_index,0 transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set',
+ 'hap_spelling'));
+----
+3	3	A	G
+
+statement error
+SELECT loaded FROM duckvep_model_load('hap_rna','SELECT 0::UINTEGER seq_region',
+ 'SELECT * REPLACE(''augaaauaaccc''::BLOB AS cds_sequence) FROM hap_tx',
+ 'SELECT * FROM hap_exons');
+----
+non-ACGTN base
 
 query I
 SELECT bool_and(coding_blocks IS NULL)

@@ -583,6 +583,24 @@ generators, seeds, eligibility, denominators, failures and oracle remain untouch
 This tests the declared literal, diploid sequence-mechanics subset, not combined SO/HGVS,
 structural composition, raw-parser emulation or broad missing/ploidy compatibility.
 
+`sequence_diff_differential.R --artifacts results/<haplotype-run>
+--public-artifacts results/<haplotype-sql-run>` is a separate aligned-difference
+lane. It reuses every CDS/protein sequence pair from the receipted six-lane
+Haplosaurus cases, including unchanged reference lanes, and checks the native
+alignment kernel against the pinned `TranscriptHaplotype::_get_raw_diffs` path.
+The additional observer supplies the already validated reference/alternate
+sequence operands; it does not replace the original parser/mapper/container
+observer. The explicit environment must lack `Bio::Ext::Align`: this contract is
+the release-116 pure-Perl NW score and tie order, not its optional alternative.
+Public `cds_differences` from both policies must match the same complete expected
+run lists. Missing/extra pairs and runs, either sequence coordinate, the alignment
+coordinate, and either allele are corruption controls. Receipts retain every
+pair and mismatch; no sampling or alteration of prior denominators occurs.
+This proves alignment for the supplied sequences and public CDS differences,
+not reference-peptide model construction, public protein differences, compound
+SO or HGVS. The pure-C suite separately compares the exact band against a full
+matrix on exhaustive short pairs and exercises all declared allocation limits.
+
 This is **not** a public phased-executor certificate: the R harness materializes
 decoded calls, and it does not test native DuckDB carrier streaming, strict phase/PS
 interpretation, compound SO/HGVS, structural

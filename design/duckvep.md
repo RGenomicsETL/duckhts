@@ -704,6 +704,21 @@ insertions/deletions have one empty span. This is a composite edit representatio
 not an alignment, HGVS normalization, or a second consequence classifier. At most
 `max_leaf_edits` blocks are stored in the initialized workspace, and an unknown or
 failed sequence has NULL blocks. Complete contributor provenance remains on the leaf.
+`cds_differences` is a separate alignment view, not a change to physical edit
+identity. Indel-bearing leaves use the pinned VEP-116 pure-Perl NW score and
+traceback tie order; substitution-only leaves compare corresponding positions.
+Differing columns join only when both sides retain the same gap/non-gap type.
+Each run borrows ungapped reference/alternate spans and names zero-based positions
+on both sequences and on the alignment. No HGVS normalization or contributor
+reassignment is inferred from repeat-associated gap placement. Unknown sequences
+have NULL differences. One worker-local reference view per closing transcript uses
+replay's uppercase DNA spelling; model bytes remain immutable and letter case alone
+cannot introduce differences. A feasible alignment supplies a cost upper bound U under
+the equivalent nonnegative cost (substitution 4, gap 3); every optimum lies within
+|i-j| <= floor(U/3). Two worker-owned score rows and a caller-bounded traceback band
+therefore preserve exact global tie placement without allocating in execution.
+`max_alignment_cells` and `max_leaf_differences` are independent per-call limits
+within `workspace_limit`; exceeding either is an error, never approximate output.
 The registry owns one valid retained query connection: its extension-load database handle
 must not be retained. Only preparation/materialization uses that connection. A busy slot
 returns an error, including recursive preparation, while completed scan results and native

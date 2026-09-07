@@ -6,6 +6,8 @@ DUCKDB_EXTENSION_EXTERN
 
 #include "duckvep_model.h"
 #include "kernel/src/duckvep_haplotype_stream.h"
+#include "kernel/src/duckvep_sequence_diff.h"
+#include "kernel/src/duckvep_dna.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -14,14 +16,14 @@ DUCKDB_EXTENSION_EXTERN
 
 enum { LIMIT_EVENTS, LIMIT_TRANSCRIPTS, LIMIT_CARRIERS, LIMIT_PREFIXES, LIMIT_PROJECTIONS,
     LIMIT_ALLELES, LIMIT_LEAF_EVENTS, LIMIT_LEAF_EDITS, LIMIT_SEQUENCE, LIMIT_PLOIDY,
-    LIMIT_PHASE_SETS, LIMIT_WORKSPACE, LIMIT_COUNT };
-enum { HAPLOTYPE_LIST_COLUMN = 9, HAPLOTYPE_OUTPUT_COLUMNS = 12 };
+    LIMIT_PHASE_SETS, LIMIT_ALIGNMENT, LIMIT_DIFFERENCES, LIMIT_WORKSPACE, LIMIT_COUNT };
+enum { HAPLOTYPE_LIST_COLUMN = 9, HAPLOTYPE_OUTPUT_COLUMNS = 13 };
 static const char *const limit_names[] = {"max_active_events", "max_active_transcripts",
     "max_active_carriers", "max_active_prefixes", "max_active_projections", "max_allele_bytes",
     "max_leaf_events", "max_leaf_edits", "max_sequence_bases", "max_ploidy", "max_phase_sets",
-    "workspace_limit"};
+    "max_alignment_cells", "max_leaf_differences", "workspace_limit"};
 static const uint64_t limit_defaults[] = {16384, 4096, 65536, 262144, 262144, 8388608,
-    4096, 65536, 1048576, 64, 1024, 268435456};
+    4096, 65536, 1048576, 64, 1024, 16777216, 65536, 268435456};
 
 typedef struct {
     duckvep_registry_t *registry;
@@ -42,6 +44,12 @@ typedef struct {
     int32_t *gt;
     uint8_t *phase;
     duckvep_haplotype_phase_set_t *sets;
+    duckvep_sequence_diff_scratch_t difference_scratch;
+    duckvep_sequence_difference_t *differences;
+    duckvep_sequence_diff_result_t difference_result;
+    uint8_t *difference_reference;
+    uint32_t difference_transcript;
+    int have_difference_reference;
     size_t workspace_bytes;
 } haplotype_state_t;
 
@@ -136,6 +144,11 @@ static void haplotype_bind(duckdb_bind_info info) {
     bind_record_list(info, "carriers", carrier_names, carrier_ids, 4u);
     bind_record_list(info, "contributors", event_names, event_ids, 7u);
     bind_record_list(info, "coding_blocks", block_names, block_ids, 7u);
+    const char *const difference_names[] = {"ref_start0", "alt_start0", "reference", "alternate",
+        "alignment_start0"};
+    const duckdb_type difference_ids[] = {DUCKDB_TYPE_UBIGINT, DUCKDB_TYPE_UBIGINT,
+        DUCKDB_TYPE_VARCHAR, DUCKDB_TYPE_VARCHAR, DUCKDB_TYPE_UBIGINT};
+    bind_record_list(info, "cds_differences", difference_names, difference_ids, 5u);
     duckdb_bind_set_bind_data(info, b, haplotype_bind_destroy);
 }
 
@@ -150,6 +163,8 @@ static void haplotype_state_destroy(void *pointer) {
     free(b->carriers.call_index); free(b->carriers.prefix_index);
     free(b->events); free(b->projections); free(b->alleles); free(b->leaf_events);
     free(b->contributors); free(b->edits); free(b->blocks); free(b->cds); free(b->protein);
+    free(s->difference_scratch.scores); free(s->difference_scratch.trace); free(s->differences);
+    free(s->difference_reference);
     free(s->gt); free(s->phase); free(s->sets); free(s);
 }
 
@@ -174,6 +189,9 @@ static int workspace_allocate(haplotype_state_t *s, const haplotype_bind_t *bind
     if (n[LIMIT_SEQUENCE] == SIZE_MAX) return 0;
     b->cds_capacity = n[LIMIT_SEQUENCE];
     b->protein_capacity = n[LIMIT_SEQUENCE] + 1u;
+    if (b->protein_capacity > SIZE_MAX / 2u) return 0;
+    s->difference_scratch.score_capacity = b->protein_capacity * 2u;
+    s->difference_scratch.trace_capacity = n[LIMIT_ALIGNMENT];
     /* Count every byte before allocating any of the arrays. Each pointer has
      * one owner and one cleanup site; no allocator is used by the scan loop. */
 #define ARRAYS(X) \
@@ -189,6 +207,10 @@ static int workspace_allocate(haplotype_state_t *s, const haplotype_bind_t *bind
     X(b->contributors, b->leaf_capacity) X(b->edits, b->edit_capacity) \
     X(b->blocks, b->edit_capacity) \
     X(b->cds, b->cds_capacity) X(b->protein, b->protein_capacity) \
+    X(s->difference_scratch.scores, s->difference_scratch.score_capacity) \
+    X(s->difference_scratch.trace, s->difference_scratch.trace_capacity) \
+    X(s->differences, n[LIMIT_DIFFERENCES]) \
+    X(s->difference_reference, n[LIMIT_SEQUENCE]) \
     X(s->gt, n[LIMIT_PLOIDY]) X(s->phase, n[LIMIT_PLOIDY]) X(s->sets, n[LIMIT_PHASE_SETS])
 #define COUNT(p, count) \
     if ((count) > (n[LIMIT_WORKSPACE] - s->workspace_bytes) / sizeof(*(p))) return 0; \
@@ -338,16 +360,17 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
         ? sequence_name(leaf->sequence_status) : "unavailable_projection");
     ((uint64_t *)duckdb_vector_get_data(v[7]))[row] = leaf->edit_count;
     ((uint32_t *)duckdb_vector_get_data(v[8]))[row] = leaf->carriers.call_count;
-    const size_t counts[] = {leaf->carriers.call_count, leaf->contributor_count, leaf->block_count};
-    const unsigned field_counts[] = {4u, 7u, 7u};
-    for (unsigned list = 0u; list < 3u; list++) {
+    const size_t counts[] = {leaf->carriers.call_count, leaf->contributor_count, leaf->block_count,
+        s->difference_result.count};
+    const unsigned field_counts[] = {4u, 7u, 7u, 5u};
+    for (unsigned list = 0u; list < 4u; list++) {
         duckdb_vector vector = v[HAPLOTYPE_LIST_COLUMN + list];
         idx_t base = duckdb_list_vector_get_size(vector);
         size_t count = counts[list];
         if (count > UINT64_MAX - base || duckdb_list_vector_reserve(vector, base + count) != DuckDBSuccess ||
             duckdb_list_vector_set_size(vector, base + count) != DuckDBSuccess) return 0;
         ((duckdb_list_entry *)duckdb_vector_get_data(vector))[row] = (duckdb_list_entry){base, count};
-        if (list == 2u && !leaf->cds) null_cell(vector, row);
+        if (list >= 2u && !leaf->cds) null_cell(vector, row);
         duckdb_vector records = duckdb_list_vector_get_child(vector), fields[7];
         duckdb_vector_ensure_validity_writable(records);
         for (unsigned j = 0u; j < field_counts[list]; j++) {
@@ -378,7 +401,7 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
                 duckdb_vector_assign_string_element_len(fields[4], at, (const char *)c->source.alt, c->source.alt_len);
                 ((uint8_t *)duckdb_vector_get_data(fields[5]))[at] = c->evidence_flags;
                 duckdb_vector_assign_string_element(fields[6], at, projection_name(c->projection_status));
-            } else {
+            } else if (list == 2u) {
                 const duckvep_haplotype_block_t *block = &leaf->blocks[i];
                 ((uint32_t *)duckdb_vector_get_data(fields[0]))[at] = block->cds_start;
                 duckdb_vector_assign_string_element_len(fields[1], at,
@@ -389,6 +412,15 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
                 ((int64_t *)duckdb_vector_get_data(fields[4]))[at] = block->length_diff;
                 ((uint32_t *)duckdb_vector_get_data(fields[5]))[at] = block->flags;
                 ((uint64_t *)duckdb_vector_get_data(fields[6]))[at] = block->edit_count;
+            } else {
+                const duckvep_sequence_difference_t *d = &s->differences[i];
+                ((uint64_t *)duckdb_vector_get_data(fields[0]))[at] = d->ref_start0;
+                ((uint64_t *)duckdb_vector_get_data(fields[1]))[at] = d->alt_start0;
+                duckdb_vector_assign_string_element_len(fields[2], at,
+                    (const char *)s->difference_reference + d->ref_start0, d->ref_length);
+                duckdb_vector_assign_string_element_len(fields[3], at,
+                    (const char *)leaf->cds + d->alt_start0, d->alt_length);
+                ((uint64_t *)duckdb_vector_get_data(fields[4]))[at] = d->alignment_start0;
             }
         }
     }
@@ -487,6 +519,45 @@ static void haplotype_scan(duckdb_function_info info, duckdb_data_chunk output) 
             status = duckvep_haplotype_stream_next(&s->stream, &leaf);
             if (status == DUCKVEP_HAPLOTYPE_STREAM_DONE) continue;
             if (status == DUCKVEP_HAPLOTYPE_STREAM_OK) {
+                memset(&s->difference_result, 0, sizeof(s->difference_result));
+                if (leaf.cds) {
+                    uint32_t tx = leaf.carriers.transcript_index;
+                    size_t reference_length = s->stream.sequences->cds_length[tx];
+                    if (!s->have_difference_reference || tx != s->difference_transcript) {
+                        if (reference_length > bind->limits[LIMIT_SEQUENCE]) {
+                            snprintf(error, sizeof(error),
+                                "duckvep_haplotypes: max_sequence_bases=%zu, reference requires=%zu at transcript %u",
+                                bind->limits[LIMIT_SEQUENCE], reference_length, tx);
+                            duckdb_function_set_error(info, error); return;
+                        }
+                        /* Replay normalizes DNA spelling. Match that representation
+                         * once per closing transcript without mutating the model. */
+                        for (size_t i = 0u; i < reference_length; i++) {
+                            char base = duckvep_dna_normalize((char)leaf.reference_cds[i], 1);
+                            if (!base) {
+                                duckdb_function_set_error(info, "duckvep_haplotypes: invalid reference CDS base"); return;
+                            }
+                            s->difference_reference[i] = (uint8_t)base;
+                        }
+                        s->difference_transcript = tx; s->have_difference_reference = 1;
+                    }
+                    duckvep_sequence_diff_status_t diff = duckvep_sequence_differences(
+                        s->difference_reference, reference_length,
+                        leaf.cds, leaf.cds_length, (leaf.flags & DUCKVEP_HAPLOTYPE_FLAG_INDEL) != 0u,
+                        &s->difference_scratch, s->differences, bind->limits[LIMIT_DIFFERENCES],
+                        &s->difference_result);
+                    if (diff != DUCKVEP_SEQUENCE_DIFF_OK) {
+                        int limit = diff == DUCKVEP_SEQUENCE_DIFF_TRACE_FULL ? LIMIT_ALIGNMENT :
+                            diff == DUCKVEP_SEQUENCE_DIFF_OUTPUT_FULL ? LIMIT_DIFFERENCES : LIMIT_SEQUENCE;
+                        size_t required = limit == LIMIT_ALIGNMENT ? s->difference_result.trace_cells :
+                            limit == LIMIT_DIFFERENCES ? s->difference_result.count : leaf.cds_length;
+                        snprintf(error, sizeof(error),
+                            "duckvep_haplotypes: CDS difference status %u, %s=%zu, required=%zu at transcript %u",
+                            (unsigned)diff, limit_names[limit], bind->limits[limit], required,
+                            leaf.carriers.transcript_index);
+                        duckdb_function_set_error(info, error); return;
+                    }
+                }
                 if (!append_leaf(output, rows, s, &leaf)) {
                     duckdb_function_set_error(info, "duckvep_haplotypes: output list allocation failed"); return;
                 }
