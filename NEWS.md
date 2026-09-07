@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- record clean-build, two-seed phased replay conformance with retained intronic
+  contributors: 24,000 carrier comparisons across two policies. These are
+  literal-sequence checks, not combined SO/HGVS or performance evidence
+
 - preserve literal phased CDS replay when carried UTR/intronic events have no
   coding overlap. Keep their raw contributors and projection statuses; coding
   projection failures and incomplete phase evidence still suppress sequence.

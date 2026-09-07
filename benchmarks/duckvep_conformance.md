@@ -589,6 +589,47 @@ population error-rate claim. Full phased SO/HGVS, broader structural
 composition and stale real-corpus campaigns still need their own
 current-revision evidence.
 
+## Phased replay with noncoding contributors
+
+|     seed | policy        | input_records | input_calls | input_allele_slots | observed_carriers | provenance_memberships |
+|---------:|:--------------|--------------:|------------:|-------------------:|------------------:|-----------------------:|
+|      173 | strict        |          3764 |       11292 |              22584 |              6000 |                  14292 |
+|      173 | vep116_compat |          3764 |       11292 |              22584 |              6000 |                  14292 |
+| 20260906 | strict        |          3802 |       11406 |              22812 |              6000 |                  14406 |
+| 20260906 | vep116_compat |          3802 |       11406 |              22812 |              6000 |                  14406 |
+
+Source eb83f6ff1d03d05a3c9f8135c8ef355b7f431ee7 was built from a clean
+checkout, including an HTSlib clean rebuild. The ledger retains the
+extension hash, input/run receipt hashes and pinned VEP/variation
+revisions. DuckDB used four threads; these are correctness counts, not
+timing or memory measurements.
+
+Each unchanged 1,000-transcript corpus first passes its original public
+replay checks: 6,000 complete lanes, 4,000 occupied carriers, 3,000
+output leaves, 22,000 oracle comparisons and 4,000 first-stop/frame
+comparisons per policy. The supplemental corpus adds one homozygous
+intronic SNV per transcript while preserving every original VCF record.
+Running unmodified Haplosaurus on those inputs leaves its complete
+observations unchanged. DuckHTS must retain the intronic contributors,
+including on previously implicit reference lanes, with unchanged literal
+CDS/protein and an `outside_cds` contributor status.
+
+Both policies pass all 24,000 carrier comparisons and 57,396 provenance
+memberships. The same biological lanes are counted separately under each
+policy; these are not independent statistical trials. Five deliberately
+corrupted outputs per policy/seed are rejected. Fixed SQL/R tests
+additionally cover UTRs, insertions, missing calls and
+coding-overlapping projection failures; a native two-strand span
+enumeration supplies 6,774 assertions for the fix.
+
+This certifies the declared literal-replay cases, not altered splicing,
+combined SO/HGVS, broad phase compatibility or exhaustive rare
+configurations. The [conformance
+driver](../test/duckvep/conformance/haplotype_sql_differential.R) keeps
+this augmentation opt-in and does not replace the original corpus or
+verifier. Full phased throughput and peak-memory evidence remain
+missing.
+
 ## Individual Sequence Ontology terms
 
 For each transcript pair, this compares the union of terms emitted by
