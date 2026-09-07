@@ -3,8 +3,8 @@ Phased replay: native stream and public SQL
 
 <!-- duckvep_haplotypes.md is generated from duckvep_haplotypes.Rmd. -->
 
-Current source: 7f4a4e28bff31a13f14ee1cab25049408740ef65;
-identical-workload baseline: 8f9987e3826018cfa73c155eebac7a956b6dc024.
+Current source: 9b1b8a0d4e12c99f8f08d9c013d840abf5eb7ec1;
+identical-workload baseline: 7f4a4e28bff31a13f14ee1cab25049408740ef65.
 Native measurements cover literal phased replay. SQL materializes all
 current fields, including local coding-block SO; whole-haplotype SO/HGVS
 is unfinished. Both paths consume standalone ALT events and decoded
@@ -66,18 +66,18 @@ observed in the native stream, not inferred SQL counters.
 
 | transcripts | samples | overlap | mode   | min_s | median_s | max_s | max_process_rss_mib |
 |------------:|--------:|--------:|:-------|------:|---------:|------:|--------------------:|
-|        1024 |       4 |       1 | native | 0.003 |    0.003 | 0.003 |              74.480 |
-|        1024 |       4 |       1 | sql    | 0.057 |    0.066 | 0.071 |             216.492 |
-|        1024 |      64 |       1 | native | 0.014 |    0.014 | 0.014 |              74.480 |
-|        1024 |      64 |       1 | sql    | 0.384 |    0.387 | 0.421 |             375.961 |
-|        1024 |      64 |      16 | native | 0.017 |    0.017 | 0.017 |              74.637 |
-|        1024 |      64 |      16 | sql    | 0.350 |    0.353 | 0.354 |             377.035 |
-|        1024 |      64 |      64 | native | 0.018 |    0.018 | 0.019 |              74.637 |
-|        1024 |      64 |      64 | sql    | 0.351 |    0.353 | 0.354 |             376.449 |
-|        1024 |     256 |       1 | native | 0.046 |    0.047 | 0.047 |              74.633 |
-|        1024 |     256 |       1 | sql    | 1.349 |    1.368 | 1.480 |             956.984 |
-|       10240 |      64 |      16 | native | 0.170 |    0.179 | 0.180 |              74.480 |
-|       10240 |      64 |      16 | sql    | 4.196 |    4.204 | 4.240 |            2138.965 |
+|        1024 |       4 |       1 | native | 0.003 |    0.003 | 0.003 |              74.633 |
+|        1024 |       4 |       1 | sql    | 0.052 |    0.052 | 0.053 |             217.191 |
+|        1024 |      64 |       1 | native | 0.013 |    0.013 | 0.013 |              74.633 |
+|        1024 |      64 |       1 | sql    | 0.345 |    0.346 | 0.350 |             375.996 |
+|        1024 |      64 |      16 | native | 0.017 |    0.017 | 0.017 |              74.480 |
+|        1024 |      64 |      16 | sql    | 0.351 |    0.352 | 0.353 |             376.730 |
+|        1024 |      64 |      64 | native | 0.018 |    0.019 | 0.019 |              74.480 |
+|        1024 |      64 |      64 | sql    | 0.351 |    0.355 | 0.357 |             375.664 |
+|        1024 |     256 |       1 | native | 0.046 |    0.046 | 0.048 |              74.633 |
+|        1024 |     256 |       1 | sql    | 1.332 |    1.334 | 1.345 |             957.195 |
+|       10240 |      64 |      16 | native | 0.167 |    0.168 | 0.169 |              74.480 |
+|       10240 |      64 |      16 | sql    | 4.196 |    4.216 | 4.239 |            2133.883 |
 
 Both compared revisions return each block’s local SO mask, coding status
 and position relative to the first stop. A shared coding context
@@ -87,12 +87,12 @@ configurations. The native count sink omits local SO evaluation.
 
 | transcripts | samples | overlap | median_s_before | median_s_after | median_change_percent | max_process_rss_mib_before | max_process_rss_mib_after |
 |------------:|--------:|--------:|----------------:|---------------:|----------------------:|---------------------------:|--------------------------:|
-|        1024 |       4 |       1 |           0.052 |          0.066 |                26.923 |                    216.789 |                   216.492 |
-|        1024 |      64 |       1 |           0.345 |          0.387 |                12.174 |                    375.930 |                   375.961 |
-|        1024 |      64 |      16 |           0.355 |          0.353 |                -0.563 |                    376.910 |                   377.035 |
-|        1024 |      64 |      64 |           0.348 |          0.353 |                 1.437 |                    377.922 |                   376.449 |
-|        1024 |     256 |       1 |           1.319 |          1.368 |                 3.715 |                    957.906 |                   956.984 |
-|       10240 |      64 |      16 |           4.194 |          4.204 |                 0.238 |                   2135.238 |                  2138.965 |
+|        1024 |       4 |       1 |           0.066 |          0.052 |               -21.212 |                    216.492 |                   217.191 |
+|        1024 |      64 |       1 |           0.387 |          0.346 |               -10.594 |                    375.961 |                   375.996 |
+|        1024 |      64 |      16 |           0.353 |          0.352 |                -0.283 |                    377.035 |                   376.730 |
+|        1024 |      64 |      64 |           0.353 |          0.355 |                 0.567 |                    376.449 |                   375.664 |
+|        1024 |     256 |       1 |           1.368 |          1.334 |                -2.485 |                    956.984 |                   957.195 |
+|       10240 |      64 |      16 |           4.204 |          4.216 |                 0.285 |                   2138.965 |                  2133.883 |
 
 Each recorded pass uses a fresh process and a full warm-up. Native
 timing starts after workspace initialization and includes ordered-feed
@@ -157,12 +157,13 @@ complete relation. The process RSS table must not be presented as a
 constant-total-memory guarantee.
 
 This matched comparison retains three repeated passes per workload and
-revision. The current campaign overlapped full sanitizer jobs, so CPU
-pinning does not establish an otherwise idle machine or isolate the
-cause of timing differences. One machine and this deliberately shared
-synthetic cohort do not establish production throughput, statistical
-significance or a general absence of regression. Whole-haplotype SO/HGVS
-and typed structural composition require their own measurements.
+revision. The baseline campaign overlapped full sanitizer jobs; the
+current campaign ran after conformance and package testing completed.
+CPU pinning does not isolate the cause of timing differences between
+those campaigns. One machine and this deliberately shared synthetic
+cohort do not establish production throughput, statistical significance
+or a general absence of regression. Whole-haplotype SO/HGVS and typed
+structural composition require their own measurements.
 
 ## Reproduction
 

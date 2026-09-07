@@ -609,11 +609,16 @@ current-revision evidence.
 | 7f4a4e28        |      173 | vep116_compat |          3764 |       11292 |              22584 |              6000 |                  14292 |
 | 7f4a4e28        | 20260906 | strict        |          3802 |       11406 |              22812 |              6000 |                  14406 |
 | 7f4a4e28        | 20260906 | vep116_compat |          3802 |       11406 |              22812 |              6000 |                  14406 |
+| 9b1b8a0d        |      173 | strict        |          3764 |       11292 |              22584 |              6000 |                  14292 |
+| 9b1b8a0d        |      173 | vep116_compat |          3764 |       11292 |              22584 |              6000 |                  14292 |
+| 9b1b8a0d        | 20260906 | strict        |          3802 |       11406 |              22812 |              6000 |                  14406 |
+| 9b1b8a0d        | 20260906 | vep116_compat |          3802 |       11406 |              22812 |              6000 |                  14406 |
 
 Sources eb83f6ff1d03d05a3c9f8135c8ef355b7f431ee7,
 d1c591b76f8a9a07036736ac0666a004eb58e0eb,
 8f9987e3826018cfa73c155eebac7a956b6dc024,
-7f4a4e28bff31a13f14ee1cab25049408740ef65 were built from clean
+7f4a4e28bff31a13f14ee1cab25049408740ef65,
+9b1b8a0d4e12c99f8f08d9c013d840abf5eb7ec1 were built from clean
 checkouts, including an HTSlib clean rebuild. The ledger retains the
 extension hash, input/run receipt hashes and pinned VEP/variation
 revisions. DuckDB used four threads; these are correctness counts, not
@@ -629,13 +634,13 @@ observations unchanged. DuckHTS must retain the intronic contributors,
 including on previously implicit reference lanes, with unchanged literal
 CDS/protein and an `outside_cds` contributor status.
 
-Both policies pass all 96,000 carrier comparisons and 229,584 provenance
-memberships. The same biological lanes are counted separately under each
-policy and revision; these are not independent statistical trials. Five
-deliberately corrupted outputs per policy/seed are rejected. Fixed SQL/R
-tests additionally cover UTRs, insertions, missing calls and
-coding-overlapping projection failures; a native two-strand span
-enumeration supplies 6,774 assertions for the fix.
+Both policies pass all 120,000 carrier comparisons and 286,980
+provenance memberships. The same biological lanes are counted separately
+under each policy and revision; these are not independent statistical
+trials. Five deliberately corrupted outputs per policy/seed are
+rejected. Fixed SQL/R tests additionally cover UTRs, insertions, missing
+calls and coding-overlapping projection failures; a native two-strand
+span enumeration supplies 6,774 assertions for the fix.
 
 This certifies the declared literal-replay cases, not altered splicing,
 combined SO/HGVS, broad phase compatibility or exhaustive rare
@@ -657,11 +662,12 @@ Whole-haplotype SO/HGVS remains unfinished.
 |      3 |   768 |           768 |         1536 |         2304 |                        1332 |
 |      4 |  6144 |          6144 |        12288 |        24576 |                       16800 |
 
-Source 7f4a4e28bff31a13f14ee1cab25049408740ef65 records a **failing
-raw-input compatibility audit**: 6990 disagreements in 7020 profiles. It
-is not a population error rate or a replacement for the passing
-literal-sequence corpus. Public phased replay still consumes decoded
-calls; this audit exposes gaps in the compatibility target.
+Source 9b1b8a0d4e12c99f8f08d9c013d840abf5eb7ec1 records a **failing
+decoded-call/raw-parser comparison**: 6990 disagreements in 7020
+profiles. It is not a population error rate or a replacement for the
+passing literal-sequence corpus. This lane uses public
+`input_mode := 'alt_events'`; the separate raw source-record input is
+checked below.
 
 The [R
 driver](../test/duckvep/conformance/haplotype_phase_differential.R)
@@ -674,7 +680,7 @@ homozygous second site in a different phase set, using the registered
 Every REF is checked before execution. These are correctness
 denominators, not timing measurements.
 
-The pinned, unmodified Haplosaurus runner and public `vep116_compat`
+The pinned, unmodified Haplosaurus runner and decoded `vep116_compat`
 executor consume the same VCF/GFF/FASTA. Comparisons retain complete
 CDS/protein multisets, source-record contributors and carrier counts.
 Eighteen ordinary called diploid profiles agree; four deliberate
@@ -725,12 +731,28 @@ ALT. Missing REF observations retain provenance without inventing
 physical edits. Reference validation and coding projection failures
 still prevent sequence availability.
 
-This result covers the enumerated two-site, single-exon grammar, not
-overlapping replacements, splicing, combined SO/HGVS or a public
-raw-record interface. Public SQL/R replay consumes decoded calls: its
-full comparison objects, including all 6990 failures, match the
+This native result covers the enumerated two-site, single-exon grammar,
+not overlapping replacements, splicing or combined SO/HGVS. Public
+decoded-call comparison objects, including all 6990 failures, match the
 preceding audit exactly. The passing native lane does not waive those
 failures or make conditional sequence biologically known.
+
+Public `input_mode := 'source_records'` with
+`phase_policy := 'vep116_compat'` records **0 disagreements across 7020
+complete CDS/protein multiset, carrier-count and physical-edit
+provenance comparisons**, plus **0 disagreements across 28080 per-lane
+record observations**. It consumes original GT text and complete ALT
+lists from the same VCF fixture. The verifier additionally checks exact
+global record IDs, regions, positions and source REF/ALT bytes; repeated
+local site labels cannot substitute for record identity.
+
+The public lane exercises input materialization, sorting, transcript
+closing, DuckDB vector transitions and nested output. Fixed SQL/R
+controls reject duplicate calls, NULL keys, inconsistent record/GT
+identities, invalid ALT lists and GTs, and ploidy-limit exhaustion. This
+establishes the declared finite raw-input contract, not overlapping
+replacements, broader phase conformance, whole-haplotype SO/HGVS or
+biological certainty for conditional sequence.
 
 ## Individual Sequence Ontology terms
 

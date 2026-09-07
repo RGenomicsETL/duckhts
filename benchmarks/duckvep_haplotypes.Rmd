@@ -176,8 +176,9 @@ to DuckDB and may grow with the complete relation. The process RSS table must no
 be presented as a constant-total-memory guarantee.
 
 This matched comparison retains three repeated passes per workload and revision.
-The current campaign overlapped full sanitizer jobs, so CPU pinning does not
-establish an otherwise idle machine or isolate the cause of timing differences.
+The baseline campaign overlapped full sanitizer jobs; the current campaign ran
+after conformance and package testing completed. CPU pinning does not isolate the
+cause of timing differences between those campaigns.
 One machine and this deliberately shared synthetic cohort do not establish
 production throughput, statistical significance or a general absence of regression.
 Whole-haplotype SO/HGVS and typed structural composition require their own measurements.

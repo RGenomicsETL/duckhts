@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- record clean-build public raw-record replay conformance for 7,020 finite GT
+  profiles and 28,080 per-lane record observations, plus matched decoded-executor
+  benchmarks. Keep the decoded/raw-parser differences as a separate audit
+
 - expose source-record phased replay through `duckvep_haplotypes` with an
   explicit input mode, original GT text, complete ALT lists, contributor allele
   ordinals and conditional missing-slot sequence status

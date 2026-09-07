@@ -1041,11 +1041,11 @@ stopifnot(sum(phase_counts$cases) == 3 * sum(4^(1:4) * 2^(0:3)))
 knitr::kable(phase_counts, row.names = FALSE)
 ```
 
-Source `r phase_revision` records a **failing raw-input compatibility audit**:
+Source `r phase_revision` records a **failing decoded-call/raw-parser comparison**:
 `r sum(phase_counts$disagreements)` disagreements in `r sum(phase_counts$cases)`
 profiles. It is not a population error rate or a replacement for the passing
-literal-sequence corpus. Public phased replay still consumes decoded calls; this
-audit exposes gaps in the compatibility target.
+literal-sequence corpus. This lane uses public `input_mode := 'alt_events'`;
+the separate raw source-record input is checked below.
 
 The [R driver](../test/duckvep/conformance/haplotype_phase_differential.R) enumerates
 every GT over `0`, `1`, `2`, `.` at ploidies 1–4, every intervening separator pattern,
@@ -1056,7 +1056,7 @@ calls, 21,060 source ALT events/candidate calls, and 54,168 input allele slots.
 Every REF is checked before execution. These are correctness denominators, not
 timing measurements.
 
-The pinned, unmodified Haplosaurus runner and public `vep116_compat` executor consume
+The pinned, unmodified Haplosaurus runner and decoded `vep116_compat` executor consume
 the same VCF/GFF/FASTA. Comparisons retain complete CDS/protein multisets, source-record
 contributors and carrier counts. Eighteen ordinary called diploid profiles agree;
 four deliberate sequence/protein/provenance/duplicate corruptions are rejected.
@@ -1118,12 +1118,35 @@ sequence status and evidence distinct from a called ALT. Missing REF observation
 retain provenance without inventing physical edits. Reference validation and
 coding projection failures still prevent sequence availability.
 
-This result covers the enumerated two-site, single-exon grammar, not overlapping
-replacements, splicing, combined SO/HGVS or a public raw-record interface. Public
-SQL/R replay consumes decoded calls: its full comparison objects, including all
+This native result covers the enumerated two-site, single-exon grammar, not overlapping
+replacements, splicing or combined SO/HGVS. Public decoded-call comparison objects, including all
 `r sum(phase_counts$disagreements)` failures, match the preceding audit exactly.
 The passing native lane does not waive those failures or make conditional sequence
 biologically known.
+
+```{r public-raw-genotype-replay}
+public_raw_cases <- sum(phase_current$public_raw_replay_cases)
+public_raw_failures <- sum(phase_current$public_raw_replay_disagreements)
+public_raw_records <- sum(phase_current$public_raw_record_observations)
+public_raw_record_failures <- sum(phase_current$public_raw_record_disagreements)
+stopifnot(public_raw_cases == raw_cases, public_raw_records == raw_records)
+```
+
+Public `input_mode := 'source_records'` with `phase_policy := 'vep116_compat'`
+records **`r public_raw_failures` disagreements across `r public_raw_cases` complete
+CDS/protein multiset, carrier-count and physical-edit provenance comparisons**,
+plus **`r public_raw_record_failures` disagreements across `r public_raw_records`
+per-lane record observations**. It consumes original GT text and complete ALT lists
+from the same VCF fixture. The verifier additionally checks exact global record IDs,
+regions, positions and source REF/ALT bytes; repeated local site labels cannot
+substitute for record identity.
+
+The public lane exercises input materialization, sorting, transcript closing,
+DuckDB vector transitions and nested output. Fixed SQL/R controls reject duplicate
+calls, NULL keys, inconsistent record/GT identities, invalid ALT lists and GTs,
+and ploidy-limit exhaustion. This establishes the declared finite raw-input
+contract, not overlapping replacements, broader phase conformance, whole-haplotype
+SO/HGVS or biological certainty for conditional sequence.
 
 ## Individual Sequence Ontology terms
 
