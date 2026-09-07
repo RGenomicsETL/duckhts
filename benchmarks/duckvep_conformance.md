@@ -601,9 +601,14 @@ current-revision evidence.
 | d1c591b7        |      173 | vep116_compat |          3764 |       11292 |              22584 |              6000 |                  14292 |
 | d1c591b7        | 20260906 | strict        |          3802 |       11406 |              22812 |              6000 |                  14406 |
 | d1c591b7        | 20260906 | vep116_compat |          3802 |       11406 |              22812 |              6000 |                  14406 |
+| 8f9987e3        |      173 | strict        |          3764 |       11292 |              22584 |              6000 |                  14292 |
+| 8f9987e3        |      173 | vep116_compat |          3764 |       11292 |              22584 |              6000 |                  14292 |
+| 8f9987e3        | 20260906 | strict        |          3802 |       11406 |              22812 |              6000 |                  14406 |
+| 8f9987e3        | 20260906 | vep116_compat |          3802 |       11406 |              22812 |              6000 |                  14406 |
 
 Sources eb83f6ff1d03d05a3c9f8135c8ef355b7f431ee7,
-d1c591b76f8a9a07036736ac0666a004eb58e0eb were built from clean
+d1c591b76f8a9a07036736ac0666a004eb58e0eb,
+8f9987e3826018cfa73c155eebac7a956b6dc024 were built from clean
 checkouts, including an HTSlib clean rebuild. The ledger retains the
 extension hash, input/run receipt hashes and pinned VEP/variation
 revisions. DuckDB used four threads; these are correctness counts, not
@@ -619,7 +624,7 @@ observations unchanged. DuckHTS must retain the intronic contributors,
 including on previously implicit reference lanes, with unchanged literal
 CDS/protein and an `outside_cds` contributor status.
 
-Both policies pass all 48,000 carrier comparisons and 114,792 provenance
+Both policies pass all 72,000 carrier comparisons and 172,188 provenance
 memberships. The same biological lanes are counted separately under each
 policy and revision; these are not independent statistical trials. Five
 deliberately corrupted outputs per policy/seed are rejected. Fixed SQL/R
@@ -634,8 +639,9 @@ driver](../test/duckvep/conformance/haplotype_sql_differential.R) keeps
 this augmentation opt-in and does not replace the original corpus or
 verifier. The [phased replay benchmark](duckvep_haplotypes.md) now
 records sorted native and public SQL execution separately, with
-workspace and process memory. Combined SO/HGVS execution remains
-unimplemented and unmeasured.
+workspace and process memory. The current SQL benchmark includes local
+coding-block SO; these Haplosaurus comparisons do not certify those
+masks. Whole-haplotype SO/HGVS remains unfinished.
 
 ## Individual Sequence Ontology terms
 

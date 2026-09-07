@@ -1022,7 +1022,8 @@ SO/HGVS, broad phase compatibility or exhaustive rare configurations. The
 keeps this augmentation opt-in and does not replace the original corpus or
 verifier. The [phased replay benchmark](duckvep_haplotypes.md) now records sorted
 native and public SQL execution separately, with workspace and process memory.
-Combined SO/HGVS execution remains unimplemented and unmeasured.
+The current SQL benchmark includes local coding-block SO; these Haplosaurus
+comparisons do not certify those masks. Whole-haplotype SO/HGVS remains unfinished.
 
 ## Individual Sequence Ontology terms
 
