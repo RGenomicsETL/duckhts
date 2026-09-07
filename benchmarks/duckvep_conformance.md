@@ -113,13 +113,13 @@ assembly-specific frontier.
 |:---------|:--------------------------------|:-------------|:-------|:----------------|------:|------------:|-----------:|
 | b7c7237e | clinvar_chr21_hgvs_seed113      | differential | HGVSC  | 56,998/56,998   | 44871 |       12127 |          0 |
 | b7c7237e | clinvar_chr21_hgvs_seed113      | differential | HGVSP  | 56,998/56,998   | 20782 |       36216 |          0 |
-| cc1993fd | state_exploration_seed_31415927 | differential | HGVSC  | 100,268/100,268 | 99146 |        1122 |          0 |
-| cc1993fd | state_exploration_seed_31415927 | differential | HGVSP  | 100,268/100,268 | 31021 |       69247 |          0 |
+| 15417633 | state_exploration_seed_31415927 | differential | HGVSC  | 100,268/100,268 | 99146 |        1122 |          0 |
+| 15417633 | state_exploration_seed_31415927 | differential | HGVSP  | 100,268/100,268 | 31021 |       69247 |          0 |
 
 | revision | corpus                          | extension_build               | extension    | model_kind | model        | reference    | reference_index | source_vcf   | input_vcf    | pair_artifact |
 |:---------|:--------------------------------|:------------------------------|:-------------|:-----------|:-------------|:-------------|:----------------|:-------------|:-------------|:--------------|
 | b7c7237e | clinvar_chr21_hgvs_seed113      | htslib_distclean_make_release | e0e1089eeff9 | duckdb     | 9ffea3c63a0f | 1e74081a49ce | 0998f61682f4    | 7ecec9a75071 | 7ecec9a75071 | 9d722563db8d  |
-| cc1993fd | state_exploration_seed_31415927 | htslib_distclean_make_release | c108a9e51de1 | sql        | b21fbeac2c28 | 01d1f0252130 | 154cbe440869    | 1c5cbf73b5f6 | beab52a9d117 | a117dd2cdd0a  |
+| 15417633 | state_exploration_seed_31415927 | htslib_distclean_make_release | 738d88535a6b | sql        | b21fbeac2c28 | 01d1f0252130 | 154cbe440869    | 1c5cbf73b5f6 | beab52a9d117 | 0dc063953fa0  |
 
 This is exact string agreement for independent transcript events with
 VEP 116 invoked using `--hgvs`. A comparison is exact when both engines
@@ -283,6 +283,7 @@ recorded.
 | 2026-09-06 | a84ff150        | nmd_clinvar_chr21                                        | ensembl116-grch38-final    | 1353288 |     1353288 |          0 |    1353288 |                   0 | 100.00%    | 0.00%                                 |
 | 2026-09-06 | b7c7237e        | clinvar_chr21_hgvs_seed113                               | differential               |   56998 |       56998 |          0 |      56998 |                   0 | 100.00%    | 0.01%                                 |
 | 2026-09-06 | b7c7237e        | nmd_clinvar_chr21                                        | ensembl116-grch38-final    | 1353288 |     1353288 |          0 |    1353288 |                   0 | 100.00%    | 0.00%                                 |
+| 2026-09-07 | 15417633        | state_exploration_seed_31415927                          | differential               |  100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                                 |
 | 2026-09-07 | cc1993fd        | state_exploration_seed_31415927                          | differential               |  100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                                 |
 
 ## Randomized executable-VEP state exploration
@@ -297,8 +298,8 @@ with equal probability, with differing alleles up to 49 bases.
 
 | revision | seed     | pairs   | exact   | unresolved | resolved_disagreements | descriptive_independent_pair_upper_95_ppm |
 |:---------|:---------|:--------|:--------|:-----------|:-----------------------|:------------------------------------------|
-| cc1993fd | 31415927 | 100,268 | 100,268 | 0          | 0                      | 36.8                                      |
-| cc1993fd | combined | 100,268 | 100,268 | 0          | 0                      | 36.8                                      |
+| 15417633 | 31415927 | 100,268 | 100,268 | 0          | 0                      | 36.8                                      |
+| 15417633 | combined | 100,268 | 100,268 | 0          | 0                      | 36.8                                      |
 
 The same campaign covered the following SO terms. Counts are term
 memberships, not distinct transcript pairs, because one pair may carry
@@ -392,6 +393,7 @@ duplicate count. A failed suite does not append rows.
 | 2026-07-20 | e25c1513        | 0x0000000001352770 |                 51 | 5,000,500  | 5,000,500  |      0 |          0 |         209 | 208,879          |                40.954 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-07-22 | 05620047        | 0x0000000001df5e77 |                 51 | 5,000,500  | 5,000,500  |      0 |          0 |         212 | 209,576          |                50.925 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-07-22 | 6eebf9b0        | 0x6a09e667f3bcc909 |                 52 | 5,100,500  | 5,100,500  |      0 |          0 |         214 | 211,624          |                41.131 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
+| 2026-09-07 | 15417633        | 0x0000000001df5e77 |                 55 | 5,500,000  | 5,500,000  |      0 |          0 |         253 | 27,529,678       |                45.867 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-09-07 | cc1993fd        | 0x0000000001df5e77 |                 55 | 5,500,000  | 5,500,000  |      0 |          0 |         251 | 27,322,306       |                44.148 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 
 | target                                                                   | trials  | passed  | failed | skipped | duplicates |

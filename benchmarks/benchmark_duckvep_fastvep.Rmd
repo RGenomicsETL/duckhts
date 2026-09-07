@@ -1432,20 +1432,28 @@ indel_predicates <- translation_history[4L, , drop = FALSE]
 row.names(indel_predicates) <- NULL
 indel_timing <- read_gnu_time(
   file.path(data_dir, "indel_blocks_giab_threads1.time"), "DuckVEP", 1L, 1L)
+endpoint_predicates <- translation_history[5L, , drop = FALSE]
+row.names(endpoint_predicates) <- NULL
+endpoint_timing <- read_gnu_time(
+  file.path(data_dir, "endpoint_blocks_giab_threads1.time"), "DuckVEP", 1L, 1L)
 same_contract <- c("model_sha256", "input_registry_id", "model_registry_id",
   "source_records", "source_alt_alleles", "eligible_alt_alleles", "output_rows",
   "output_bytes", "threads", "affinity", "full_row_xor", "full_row_low32_sum",
   "full_row_high32_sum")
-stopifnot(nrow(translation_history) == 4L,
+stopifnot(nrow(translation_history) == 5L,
   identical(rebuild[same_contract], translation[same_contract]),
   identical(translation[same_contract], consensus[same_contract]),
   identical(consensus[same_contract], block_predicates[same_contract]),
   identical(block_predicates[same_contract], indel_predicates[same_contract]),
+  identical(indel_predicates[same_contract], endpoint_predicates[same_contract]),
   as.numeric(block_predicates$elapsed_seconds) == block_timing$elapsed_seconds,
   as.numeric(block_predicates$maximum_rss_kib) == block_timing$maximum_rss_kib,
   as.numeric(indel_predicates$elapsed_seconds) == indel_timing$elapsed_seconds,
-  as.numeric(indel_predicates$maximum_rss_kib) == indel_timing$maximum_rss_kib)
-translation_comparison <- rbind(rebuild, translation, consensus, block_predicates, indel_predicates)
+  as.numeric(indel_predicates$maximum_rss_kib) == indel_timing$maximum_rss_kib,
+  as.numeric(endpoint_predicates$elapsed_seconds) == endpoint_timing$elapsed_seconds,
+  as.numeric(endpoint_predicates$maximum_rss_kib) == endpoint_timing$maximum_rss_kib)
+translation_comparison <- rbind(rebuild, translation, consensus, block_predicates,
+  indel_predicates, endpoint_predicates)
 knitr::kable(data.frame(
   revision = substr(translation_comparison$source_revision, 1, 8),
   source_records = translation_comparison$source_records,
@@ -1532,6 +1540,30 @@ the timer. Disk availability became tight; only this run's generated 6.17 GB TSV
 was removed after verification, retaining its timing, fingerprint and input
 receipts. This measurement exercises the refactored independent interpreter,
 not compound-block classification or full phased execution.
+
+Source `r endpoint_predicates$source_revision` shares start/terminal-CDS string
+predicates using explicit borrowed coding spans. Compound blocks supply already
+rebuilt bases between reference flanks, without creating a single-variant context;
+physical frame geometry remains separate. The unchanged independent-event worker
+took `r endpoint_predicates$elapsed_seconds` s and
+`r endpoint_predicates$maximum_rss_kib` KiB peak RSS, versus
+`r indel_predicates$elapsed_seconds` s and `r indel_predicates$maximum_rss_kib`
+KiB for the nearest identical recorded workload. This is 1.66 s (2.53%) slower
+in one pass, not a statistical regression estimate or a no-regression claim.
+The full sanitizer, property and VEP runs finished before timing.
+
+Input/ALT/joined-allele and output denominators, model identity, all three
+full-row fingerprints and output SHA-256 match the preceding pass. Extension
+SHA-256 is `r endpoint_predicates$extension_sha256`; output SHA-256 is
+`r endpoint_predicates$output_sha256`. The worker exited zero. Temporary sort and
+output files exhausted ordinary-user disk availability; after successful output
+and input receipt checks, only the new 6.17 GB TSV was removed. Registered inputs,
+models, conformance artifacts and timing/output receipts were retained.
+The renewed original-seed 100,268-pair VEP/HGVS campaign and 5.5-million-trial
+property run are recorded in the [conformance report](duckvep_conformance.md).
+The additional 64,512-case native endpoint enumeration is a shared-predicate
+equivalence check, not executable compound-SO conformance. This benchmark still
+measures independent events, not the compound endpoint path itself.
 
 The phased executor still needs separate sorted-native and sort-included
 throughput/memory measurements. This independent-event run does not measure

@@ -499,11 +499,11 @@ the real VEP 116 executable.
 
 <img src="benchmark_duckvep_fastvep_files/figure-gfm/plot-fuzz-1.png" alt="Checked randomized property trials and generated VEP differential pairs, both with zero observed failures or differences." width="1120" />
 
-At tested ancestor cc1993fd, 55 randomized properties completed
+At tested ancestor 15417633, 55 randomized properties completed
 5,500,000 trials with zero failures. They compare optimized sweeps,
 projection, sequence editing, translation, HGVS, regulation/BND, and
 multi-edit mechanics with independent or deliberately slower oracles. At
-tested ancestor cc1993fd, generated state-exploration seed 31415927
+tested ancestor 15417633, generated state-exploration seed 31415927
 produced 100,268 variant/transcript comparisons against executable VEP
 116: all exact, with no unresolved, missing, or extra rows.
 
@@ -644,6 +644,7 @@ eligible alleles joined. Output receipts are also outside the timer.
 | fbe38c3a | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 62.73           | 5728276      |
 | c03c4879 | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 63.49           | 5732112      |
 | 8c2c52a6 | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 65.69           | 5728980      |
+| 15417633 | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 67.35           | 5730816      |
 
 The observed pass is 62.76 s versus 64.14 s for the nearest identical
 recorded workload, with 5,731,168 versus 5,730,396 KiB peak RSS. Single
@@ -733,6 +734,33 @@ became tight; only this run’s generated 6.17 GB TSV was removed after
 verification, retaining its timing, fingerprint and input receipts. This
 measurement exercises the refactored independent interpreter, not
 compound-block classification or full phased execution.
+
+Source 15417633e0a2f0e6f4a138736a61fe10310a0f26 shares
+start/terminal-CDS string predicates using explicit borrowed coding
+spans. Compound blocks supply already rebuilt bases between reference
+flanks, without creating a single-variant context; physical frame
+geometry remains separate. The unchanged independent-event worker took
+67.35 s and 5730816 KiB peak RSS, versus 65.69 s and 5728980 KiB for the
+nearest identical recorded workload. This is 1.66 s (2.53%) slower in
+one pass, not a statistical regression estimate or a no-regression
+claim. The full sanitizer, property and VEP runs finished before timing.
+
+Input/ALT/joined-allele and output denominators, model identity, all
+three full-row fingerprints and output SHA-256 match the preceding pass.
+Extension SHA-256 is
+738d88535a6b29b699b58626f68a8b45154d55a4f31641042cbaf8d4c69a5b98; output
+SHA-256 is
+6f1bd987b8a144822dda1ef2939bb42870711f86ac8797f2ce1ef3db1b5143d9. The
+worker exited zero. Temporary sort and output files exhausted
+ordinary-user disk availability; after successful output and input
+receipt checks, only the new 6.17 GB TSV was removed. Registered inputs,
+models, conformance artifacts and timing/output receipts were retained.
+The renewed original-seed 100,268-pair VEP/HGVS campaign and
+5.5-million-trial property run are recorded in the [conformance
+report](duckvep_conformance.md). The additional 64,512-case native
+endpoint enumeration is a shared-predicate equivalence check, not
+executable compound-SO conformance. This benchmark still measures
+independent events, not the compound endpoint path itself.
 
 The phased executor still needs separate sorted-native and sort-included
 throughput/memory measurements. This independent-event run does not

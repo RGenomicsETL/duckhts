@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- record current-code endpoint-refactor evidence: the original 100,268-pair
+  VEP/HGVS campaign and 5.5 million property trials pass. The identical one-core
+  GIAB workload takes 67.35 seconds versus 65.69 seconds, with matching complete
+  output fingerprints; one pass does not establish a statistical regression
+
 - share start/terminal-CDS reconstruction between independent coding events and
   physical compound blocks through borrowed sequence spans. Missing transcript
   flanks fail without partial facts; equal-length strings retain physical indel
