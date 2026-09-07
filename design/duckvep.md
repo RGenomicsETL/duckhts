@@ -707,12 +707,17 @@ call matrix. Output pauses retain the transcript drain cursor and reuse worker s
 Each known leaf exposes `coding_blocks` in ascending reference CDS order. The same
 partitioner used by the independent interaction property groups same-alternate-codon
 edits and keeps a block open while its frame is displaced. Each block retains its
-physical edit count and frame flags, and describes a reference span plus a span of
+source event IDs in physical-edit order and frame flags, and describes a reference span plus a span of
 the already rebuilt CDS. Retained bases between edits stay in those spans; pure
 insertions/deletions have one empty span. This is a composite edit representation,
 not an alignment, HGVS normalization, or a second consequence classifier. At most
 `max_leaf_edits` blocks are stored in the initialized workspace, and an unknown or
-failed sequence has NULL blocks. Complete contributor provenance remains on the leaf.
+failed sequence has NULL blocks. A parallel event-ID array follows physical edits through
+splitting, heap sorting and reversal; each block borrows its edit slice. An uploaded
+MNV may contribute several islands within or across blocks, so repeated IDs are retained,
+not deduplicated. SQL `event_indices` replaces the count-only block field; its length is
+the physical edit count. The ID array shares `max_leaf_edits` and is included in the
+workspace byte limit. Complete raw contributor provenance remains on the leaf.
 `cds_differences` is a separate alignment view, not a change to physical edit
 identity. Indel-bearing leaves use the pinned VEP-116 pure-Perl NW score and
 traceback tie order; substitution-only leaves compare corresponding positions.

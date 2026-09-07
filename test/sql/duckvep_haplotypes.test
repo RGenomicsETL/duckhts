@@ -216,7 +216,7 @@ FROM duckvep_haplotypes('SELECT event_index,0 seq_region,position,reference,alte
 false	0	2	5
 
 query ITTII
-SELECT b.cds_start,b.reference,b.alternate,b.alt_start0,b.edit_count FROM (
+SELECT b.cds_start,b.reference,b.alternate,b.alt_start0,len(b.event_indices) FROM (
  SELECT unnest(coding_blocks) b FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap'))
 ORDER BY b.alternate;
 ----
@@ -341,7 +341,7 @@ SELECT count(*) FROM duckvep_haplotypes('SELECT * FROM hap_many_calls','hap_many
 WHERE len(coding_blocks)=1 AND coding_blocks[1].cds_start=1 AND
  coding_blocks[1].reference='A' AND coding_blocks[1].alternate='C' AND
  coding_blocks[1].alt_start0=0 AND coding_blocks[1].sequence_flags=0 AND
- coding_blocks[1].edit_count=1;
+ len(coding_blocks[1].event_indices)=1 AND coding_blocks[1].event_indices[1]=transcript_index;
 ----
 5000
 
@@ -472,7 +472,7 @@ CROSS JOIN (VALUES (0),(1)) t(transcript_index);
 
 query IITTIIII
 SELECT transcript_index,b.cds_start,'['||b.reference||']','['||b.alternate||']',
- b.alt_start0,b.length_change,b.sequence_flags,b.edit_count FROM (
+ b.alt_start0,b.length_change,b.sequence_flags,len(b.event_indices) FROM (
  SELECT transcript_index,unnest(coding_blocks) b
  FROM duckvep_haplotypes('SELECT * FROM hap_block_calls','hap_blocks',max_leaf_edits := 5))
 ORDER BY transcript_index,b.cds_start;
@@ -485,6 +485,41 @@ ORDER BY transcript_index,b.cds_start;
 1	8	[TTTT]	[TTTA]	7	0	5	2
 1	15	[T]	[G]	14	0	0	1
 1	18	[]	[TTT]	17	3	1	1
+
+query IIT
+SELECT transcript_index,b.cds_start,b.event_indices FROM (
+ SELECT transcript_index,unnest(coding_blocks) b
+ FROM duckvep_haplotypes('SELECT * FROM hap_block_calls','hap_blocks',max_leaf_edits := 5))
+ORDER BY transcript_index,b.cds_start;
+----
+0	2	[1]
+0	4	[2]
+0	8	[3, 4]
+0	16	[5]
+1	3	[5]
+1	8	[4, 3]
+1	15	[2]
+1	18	[1]
+
+# One uploaded MNV contributes several physical islands in separate blocks;
+# intervening SNVs preserve both their own identity and CDS order on each strand.
+query IIT
+SELECT transcript_index,b.cds_start,b.event_indices FROM (
+ SELECT transcript_index,unnest(coding_blocks) b FROM duckvep_haplotypes(
+ 'SELECT event_index,0 seq_region,position,reference,alternate,1 alt_index,t.transcript_index,
+  0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set
+  FROM (VALUES (17::UBIGINT,100,''AAAAAAAA'',''CACAAAAC''),
+   (18446744073709551615::UBIGINT,101,''A'',''G''),
+   (18446744073709551614::UBIGINT,104,''A'',''G'')) e(event_index,position,reference,alternate)
+  CROSS JOIN (VALUES (0),(1)) t(transcript_index)','hap_blocks',max_leaf_edits := 5))
+ORDER BY transcript_index,b.cds_start;
+----
+0	1	[17, 18446744073709551615, 17]
+0	5	[18446744073709551614]
+0	8	[17]
+1	11	[17]
+1	14	[18446744073709551614]
+1	16	[17, 18446744073709551615, 17]
 
 query III
 SELECT count(*),sum(edit_count),sum(len(contributors))

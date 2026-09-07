@@ -1,5 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- return source `event_indices` lists inside `rduckhts_haplotypes()` coding
+  blocks, replacing the count-only block field. List lengths count physical
+  edits; repeated IDs preserve multi-island variants and can be joined to raw
+  contributors. The bundled reader retains CDS order on both strands
+
 - return `protein_differences` through `rduckhts_haplotypes()`, with zero-based
   amino-acid positions and Ensembl-116 reference-peptide rules. Both difference
   axes share bounded native storage and retain all contributing events;

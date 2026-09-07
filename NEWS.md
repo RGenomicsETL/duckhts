@@ -1,6 +1,12 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- replace the count-only phased `coding_blocks.edit_count` field with
+  `event_indices`, one source event ID per physical edit in CDS order. Repeated
+  IDs preserve multi-island MNV contributions within and across interaction
+  blocks; reverse-strand order and downstream contributors remain traceable.
+  Provenance uses bounded worker storage included in the per-call workspace limit
+
 - expose `protein_differences` from phased replay using the shared bounded
   alignment kernel. A native reference-peptide builder applies Ensembl-116
   start, stop and curated peptide-edit rules once per closing transcript.

@@ -9112,6 +9112,7 @@ struct haplotype_stream_scene {
     duckvep_haplotype_projection_t projections[16];
     duckvep_haplotype_contributor_t contributors[8];
     duckvep_haplotype_edit_t edits[8];
+    uint64_t edit_event_ids[9]; /* Last slot is a provenance-write canary. */
     duckvep_haplotype_block_t blocks[8];
     duckvep_carrier_event_t leaf_events[8];
     uint8_t alleles[128], cds[128], protein[128];
@@ -9146,7 +9147,7 @@ static void haplotype_stream_scene_prepare(struct haplotype_stream_scene *f, uin
         .events = f->events, .projections = f->projections, .alleles = f->alleles,
         .event_capacity = 8u, .projection_capacity = 16u, .allele_capacity = sizeof(f->alleles),
         .leaf_events = f->leaf_events, .contributors = f->contributors, .edits = f->edits,
-        .blocks = f->blocks,
+        .blocks = f->blocks, .edit_event_ids = f->edit_event_ids,
         .leaf_capacity = 8u, .edit_capacity = 8u, .cds = f->cds, .protein = f->protein,
         .cds_capacity = sizeof(f->cds), .protein_capacity = sizeof(f->protein)};
 }
@@ -9392,6 +9393,86 @@ TEST haplotype_stream_mnv_context_does_not_conflict_with_another_edit(void) {
         ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_DONE, duckvep_haplotype_stream_next(s, &leaf));
         ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_DONE, duckvep_haplotype_stream_finish(s));
     }
+    PASS();
+}
+
+TEST haplotype_stream_edit_provenance_survives_islands_sorting_and_blocks(void) {
+    /* Exhaust eight genomic positions independently: unchanged, part of one
+     * uploaded MNV, or a separate SNV. The direct digit/run oracle never uses
+     * the production splitter or sort. Repeat on both transcript strands. */
+    for (unsigned reverse = 0u; reverse < 2u; reverse++) for (unsigned code = 1u; code < 6561u; code++) {
+        struct haplotype_stream_scene f;
+        haplotype_stream_scene_prepare(&f, 1u);
+        if (reverse) { memset(f.reference, 'T', sizeof(f.reference)); f.strands[0] = -1; }
+        uint8_t digits[8], alternate[8], expected_cds[12];
+        unsigned value = code, has_mnv = 0u;
+        size_t source_count = 0u;
+        memset(expected_cds, reverse ? 'T' : 'A', sizeof(expected_cds));
+        for (unsigned i = 0u; i < 8u; i++) {
+            digits[i] = (uint8_t)(value % 3u); value /= 3u;
+            alternate[i] = digits[i] == 1u ? 'C' : 'A';
+            has_mnv |= digits[i] == 1u;
+            source_count += digits[i] == 2u;
+            if (digits[i]) expected_cds[reverse ? 11u - i : i] =
+                digits[i] == 1u ? (reverse ? 'G' : 'C') : (reverse ? 'C' : 'G');
+        }
+        source_count += has_mnv;
+        f.edit_event_ids[8] = UINT64_C(0xface0123456789ab);
+        duckvep_haplotype_stream_t *s = &f.stream;
+        ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_init(
+            s, &f.model, &f.exons, &f.sequences, &f.buffers));
+        duckvep_carrier_key_t key = {0u, 0, 1u, 1u, 0u};
+        uint32_t tx = 0u;
+        if (has_mnv) {
+            duckvep_haplotype_source_t source = {17u, (const uint8_t *)"AAAAAAAA", alternate,
+                100u, 0u, 8u, 8u};
+            ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, haplotype_test_begin_candidates(s, &source, &tx, 1u));
+            ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_push(s, &key, DUCKVEP_CARRIER_CALLED));
+        }
+        for (unsigned i = 0u; i < 8u; i++) if (digits[i] == 2u) {
+            duckvep_haplotype_source_t source = {UINT64_MAX - i, (const uint8_t *)"A",
+                (const uint8_t *)"G", 100u + i, 0u, 1u, 1u};
+            ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, haplotype_test_begin_candidates(s, &source, &tx, 1u));
+            ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_push(s, &key, DUCKVEP_CARRIER_CALLED));
+        }
+        ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_TRANSCRIPT_READY, duckvep_haplotype_stream_finish(s));
+        duckvep_haplotype_leaf_t leaf;
+        ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_next(s, &leaf));
+        ASSERT_EQ(DUCKVEP_CDS_EDIT_OK, leaf.projection_status);
+        ASSERT_EQ(DUCKVEP_HAPLOTYPE_OK, leaf.sequence_status);
+        ASSERT_EQ(source_count, leaf.contributor_count);
+        ASSERT_EQ(12u, leaf.cds_length);
+        ASSERT_EQ(0, memcmp(expected_cds, leaf.cds, sizeof(expected_cds)));
+        size_t edit = 0u;
+        for (unsigned i = 0u; i < 8u;) {
+            if (!digits[i]) { i++; continue; }
+            unsigned begin = i++;
+            if (digits[begin] == 1u) while (i < 8u && digits[i] == 1u) i++;
+            ASSERT(edit < leaf.edit_count);
+            size_t at = reverse ? leaf.edit_count - 1u - edit : edit;
+            ASSERT_EQ(digits[begin] == 1u ? 17u : UINT64_MAX - begin, leaf.edit_event_ids[at]);
+            ASSERT_EQ(reverse ? 13u - i : begin + 1u, f.edits[at].cds_start);
+            ASSERT_EQ(i - begin, f.edits[at].ref_len);
+            ASSERT_EQ(i - begin, f.edits[at].alt_len);
+            edit++;
+        }
+        ASSERT_EQ(edit, leaf.edit_count);
+        size_t covered = 0u;
+        for (size_t i = 0u; i < leaf.block_count; i++) {
+            ASSERT_EQ(covered, leaf.blocks[i].edit_begin);
+            ASSERT(leaf.blocks[i].edit_count > 0u && leaf.blocks[i].edit_count <= edit - covered);
+            covered += leaf.blocks[i].edit_count;
+        }
+        ASSERT_EQ(edit, covered);
+        ASSERT_EQ(UINT64_C(0xface0123456789ab), f.edit_event_ids[8]);
+        ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_DONE, duckvep_haplotype_stream_next(s, &leaf));
+        ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_DONE, duckvep_haplotype_stream_finish(s));
+    }
+    struct haplotype_stream_scene f;
+    haplotype_stream_scene_prepare(&f, 1u);
+    f.buffers.edit_event_ids = NULL;
+    ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG, duckvep_haplotype_stream_init(
+        &f.stream, &f.model, &f.exons, &f.sequences, &f.buffers));
     PASS();
 }
 
@@ -27529,6 +27610,7 @@ int main(int argc, char **argv) {
     RUN_TEST(haplotype_stream_retains_conflicts_and_latches_resource_errors);
     RUN_TEST(haplotype_stream_matches_dense_models_across_batches);
     RUN_TEST(haplotype_stream_mnv_context_does_not_conflict_with_another_edit);
+    RUN_TEST(haplotype_stream_edit_provenance_survives_islands_sorting_and_blocks);
     RUN_TEST(haplotype_stream_calls_match_permitted_genotypes);
     RUN_TEST(haplotype_stream_preserves_later_phase_sets_and_uncertain_prefixes);
     RUN_TEST(haplotype_stream_rejects_invalid_calls_and_latches_partial_broadcast);

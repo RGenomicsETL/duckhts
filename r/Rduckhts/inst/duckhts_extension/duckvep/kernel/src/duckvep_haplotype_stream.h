@@ -91,6 +91,7 @@ typedef struct {
     duckvep_carrier_event_t *leaf_events;
     duckvep_haplotype_contributor_t *contributors;
     duckvep_haplotype_edit_t *edits;
+    uint64_t *edit_event_ids; /* Parallel to edits, including after sorting/reversal. */
     duckvep_haplotype_block_t *blocks; /* At most edit_capacity interaction blocks. */
     size_t leaf_capacity, edit_capacity;
     uint8_t *cds, *protein;
@@ -102,6 +103,10 @@ typedef struct {
     const duckvep_haplotype_contributor_t *contributors;
     size_t contributor_count;
     size_t edit_count; /* Physical differing islands, not source-event count. */
+    /* One source identity per physical edit in ascending reference CDS order.
+     * A source may occur more than once or in several blocks. Borrowed only for
+     * known sequences; block.edit_begin/edit_count select the corresponding IDs. */
+    const uint64_t *edit_event_ids;
     const duckvep_haplotype_block_t *blocks; /* Ascending reference CDS order. */
     size_t block_count;
     const uint8_t *reference_cds; /* Model-owned; block spans borrow this and cds. */

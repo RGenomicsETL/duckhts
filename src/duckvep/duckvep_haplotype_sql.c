@@ -64,11 +64,17 @@ static void haplotype_bind_destroy(void *pointer) {
     free(b);
 }
 
-static duckdb_logical_type record_type(const char *const *names, const duckdb_type *ids, idx_t count) {
+static duckdb_logical_type record_type(const char *const *names, const duckdb_type *ids,
+    idx_t count, int last_field_is_list) {
     duckdb_logical_type types[9];
     const char *field_names[9];
     for (idx_t i = 0u; i < count; i++) {
         types[i] = duckdb_create_logical_type(ids[i]); field_names[i] = names[i];
+        if (last_field_is_list && i == count - 1u) {
+            duckdb_logical_type element = types[i];
+            types[i] = duckdb_create_list_type(element);
+            duckdb_destroy_logical_type(&element);
+        }
     }
     duckdb_logical_type type = duckdb_create_struct_type(types, field_names, count);
     for (idx_t i = 0u; i < count; i++) duckdb_destroy_logical_type(&types[i]);
@@ -76,8 +82,8 @@ static duckdb_logical_type record_type(const char *const *names, const duckdb_ty
 }
 
 static void bind_record_list(duckdb_bind_info info, const char *name,
-    const char *const *fields, const duckdb_type *ids, idx_t count) {
-    duckdb_logical_type record = record_type(fields, ids, count);
+    const char *const *fields, const duckdb_type *ids, idx_t count, int last_field_is_list) {
+    duckdb_logical_type record = record_type(fields, ids, count, last_field_is_list);
     duckdb_logical_type list = duckdb_create_list_type(record);
     duckdb_bind_add_result_column(info, name, list);
     duckdb_destroy_logical_type(&list);
@@ -140,18 +146,18 @@ static void haplotype_bind(duckdb_bind_info info) {
     const duckdb_type event_ids[] = {DUCKDB_TYPE_UBIGINT, DUCKDB_TYPE_UINTEGER, DUCKDB_TYPE_UBIGINT,
         DUCKDB_TYPE_VARCHAR, DUCKDB_TYPE_VARCHAR, DUCKDB_TYPE_UTINYINT, DUCKDB_TYPE_VARCHAR};
     const char *const block_names[] = {"cds_start", "reference", "alternate", "alt_start0",
-        "length_change", "sequence_flags", "edit_count"};
+        "length_change", "sequence_flags", "event_indices"};
     const duckdb_type block_ids[] = {DUCKDB_TYPE_UINTEGER, DUCKDB_TYPE_VARCHAR, DUCKDB_TYPE_VARCHAR,
         DUCKDB_TYPE_UBIGINT, DUCKDB_TYPE_BIGINT, DUCKDB_TYPE_UINTEGER, DUCKDB_TYPE_UBIGINT};
-    bind_record_list(info, "carriers", carrier_names, carrier_ids, 4u);
-    bind_record_list(info, "contributors", event_names, event_ids, 7u);
-    bind_record_list(info, "coding_blocks", block_names, block_ids, 7u);
+    bind_record_list(info, "carriers", carrier_names, carrier_ids, 4u, 0);
+    bind_record_list(info, "contributors", event_names, event_ids, 7u, 0);
+    bind_record_list(info, "coding_blocks", block_names, block_ids, 7u, 1);
     const char *const difference_names[] = {"ref_start0", "alt_start0", "reference", "alternate",
         "alignment_start0"};
     const duckdb_type difference_ids[] = {DUCKDB_TYPE_UBIGINT, DUCKDB_TYPE_UBIGINT,
         DUCKDB_TYPE_VARCHAR, DUCKDB_TYPE_VARCHAR, DUCKDB_TYPE_UBIGINT};
-    bind_record_list(info, "cds_differences", difference_names, difference_ids, 5u);
-    bind_record_list(info, "protein_differences", difference_names, difference_ids, 5u);
+    bind_record_list(info, "cds_differences", difference_names, difference_ids, 5u, 0);
+    bind_record_list(info, "protein_differences", difference_names, difference_ids, 5u, 0);
     duckdb_bind_set_bind_data(info, b, haplotype_bind_destroy);
 }
 
@@ -166,6 +172,7 @@ static void haplotype_state_destroy(void *pointer) {
     free(b->carriers.call_index); free(b->carriers.prefix_index);
     free(b->events); free(b->projections); free(b->alleles); free(b->leaf_events);
     free(b->contributors); free(b->edits); free(b->blocks); free(b->cds); free(b->protein);
+    free(b->edit_event_ids);
     free(s->difference_scratch.scores); free(s->difference_scratch.trace); free(s->differences);
     free(s->difference_reference); free(s->reference_protein);
     free(s->gt); free(s->phase); free(s->sets); free(s);
@@ -209,7 +216,7 @@ static int workspace_allocate(haplotype_state_t *s, const haplotype_bind_t *bind
     X(b->events, b->event_capacity) X(b->projections, b->projection_capacity) \
     X(b->alleles, b->allele_capacity) X(b->leaf_events, b->leaf_capacity) \
     X(b->contributors, b->leaf_capacity) X(b->edits, b->edit_capacity) \
-    X(b->blocks, b->edit_capacity) \
+    X(b->blocks, b->edit_capacity) X(b->edit_event_ids, b->edit_capacity) \
     X(b->cds, b->cds_capacity) X(b->protein, b->protein_capacity) \
     X(s->difference_scratch.scores, s->difference_scratch.score_capacity) \
     X(s->difference_scratch.trace, s->difference_scratch.trace_capacity) \
@@ -481,6 +488,21 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
             fields[j] = duckdb_struct_vector_get_child(records, j);
             duckdb_vector_ensure_validity_writable(fields[j]);
         }
+        idx_t event_base = 0u;
+        if (list == 2u && leaf->cds) {
+            event_base = duckdb_list_vector_get_size(fields[6]);
+            if (leaf->edit_count > UINT64_MAX - event_base ||
+                duckdb_list_vector_reserve(fields[6], event_base + leaf->edit_count) != DuckDBSuccess ||
+                duckdb_list_vector_set_size(fields[6], event_base + leaf->edit_count) != DuckDBSuccess)
+                return 0;
+            duckdb_vector ids = duckdb_list_vector_get_child(fields[6]);
+            duckdb_vector_ensure_validity_writable(ids);
+            uint64_t *data = duckdb_vector_get_data(ids);
+            for (size_t i = 0u; i < leaf->edit_count; i++) {
+                data[event_base + i] = leaf->edit_event_ids[i];
+                duckdb_validity_set_row_valid(duckdb_vector_get_validity(ids), event_base + i);
+            }
+        }
         uint32_t call_id = leaf->carriers.first_call;
         for (size_t i = 0u; i < count; i++) {
             idx_t at = base + i;
@@ -515,7 +537,8 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
                 ((uint64_t *)duckdb_vector_get_data(fields[3]))[at] = block->alt_start0;
                 ((int64_t *)duckdb_vector_get_data(fields[4]))[at] = block->length_diff;
                 ((uint32_t *)duckdb_vector_get_data(fields[5]))[at] = block->flags;
-                ((uint64_t *)duckdb_vector_get_data(fields[6]))[at] = block->edit_count;
+                ((duckdb_list_entry *)duckdb_vector_get_data(fields[6]))[at] =
+                    (duckdb_list_entry){event_base + block->edit_begin, block->edit_count};
             }
         }
     }
@@ -607,6 +630,10 @@ static void haplotype_scan(duckdb_function_info info, duckdb_data_chunk output) 
         if (duckdb_list_vector_set_size(duckdb_data_chunk_get_vector(output, i), 0u) != DuckDBSuccess) {
             duckdb_function_set_error(info, "duckvep_haplotypes: cannot reset output list"); return;
         }
+    duckdb_vector blocks = duckdb_list_vector_get_child(duckdb_data_chunk_get_vector(output, 11u));
+    if (duckdb_list_vector_set_size(duckdb_struct_vector_get_child(blocks, 6u), 0u) != DuckDBSuccess) {
+        duckdb_function_set_error(info, "duckvep_haplotypes: cannot reset block event list"); return;
+    }
     char error[DUCKVEP_SQL_ERROR_SIZE] = {0};
     while (rows < capacity) {
         duckvep_haplotype_stream_status_t status;

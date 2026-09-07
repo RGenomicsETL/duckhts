@@ -9,8 +9,12 @@
 #' `coding_blocks` groups physical edits that share an alternate codon or
 #' displace then restore the reading frame. Each block gives one-based reference
 #' `cds_start`, transcript-oriented `reference`/`alternate` spans, zero-based
-#' `alt_start0` in the rebuilt CDS, `length_change`, `sequence_flags` and physical
-#' `edit_count`. Spans include retained bases between edits; they are not aligned
+#' `alt_start0` in the rebuilt CDS, `length_change`, `sequence_flags` and
+#' `event_indices`: one source event ID per physical edit in ascending CDS order.
+#' An ID can repeat for several differing islands, within or across blocks;
+#' the list length is the physical edit count. This replaces the count-only block
+#' field. Join IDs to `contributors` for raw alleles and input provenance.
+#' Spans include retained bases between edits; they are not aligned
 #' differences or HGVS normalization. An insertion has empty reference; a deletion
 #' has empty alternate. Unknown sequences have NULL blocks, not an empty known
 #' result. Blocks reuse `max_leaf_edits` capacity and the per-call workspace limit.

@@ -47,7 +47,8 @@ local({
   expect_equal(blocks$reference, c("A", "AAA", "AA"))
   expect_equal(blocks$alternate, c("C", "CAC", "CG"))
   expect_equal(blocks$alt_start0, rep(0, 3))
-  expect_equal(blocks$edit_count, c(1, 2, 2))
+  expect_equal(lengths(blocks$event_indices), c(1, 2, 2))
+  expect_equal(blocks$event_indices, list(1, c(1, 3), c(1, 2)))
   expect_true(all(blocks$length_change == 0 & blocks$sequence_flags == 0))
   expect_equal(nrow(rduckhts_haplotypes(con, calls, "haps", "vep116_compat")), 2L)
   noncoding <- paste("SELECT * REPLACE(0::UBIGINT AS transcript_flags,",
@@ -77,8 +78,32 @@ local({
   expect_equal(blocks$alternate, c("TAAAAAA", "G"))
   expect_equal(blocks$alt_start0, c(1, 10))
   expect_equal(blocks$sequence_flags, c(5, 0))
-  expect_equal(blocks$edit_count, c(2, 1))
+  expect_equal(lengths(blocks$event_indices), c(2, 1))
+  expect_equal(blocks$event_indices, list(c(1, 2), 3))
   expect_equal(nrow(restored$contributors[[1]]), 3L)
+  reverse_tx <- paste("SELECT * REPLACE(1::UINTEGER AS transcript_index,-1::TINYINT AS strand,",
+    "'TTTTTTTTTTTT'::BLOB AS cds_sequence) FROM (", tx, ")")
+  reverse_exons <- paste("SELECT * REPLACE(1::UINTEGER AS transcript_index) FROM (", exons, ")")
+  expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('islands',",
+    dbQuoteString(con, "SELECT 0::UINTEGER seq_region"), ",",
+    dbQuoteString(con, paste(tx, "UNION ALL", reverse_tx)), ",",
+    dbQuoteString(con, paste(exons, "UNION ALL", reverse_exons)), ")"))$loaded)
+  island_calls <- paste("SELECT event_index,0 seq_region,position,reference,alternate,1 alt_index,",
+    "t.transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set",
+    "FROM (VALUES (17,100,'AAAAAAAA','CACAAAAC'),(19,101,'A','G'),(18,104,'A','G'))",
+    "e(event_index,position,reference,alternate) CROSS JOIN (VALUES (0),(1)) t(transcript_index)")
+  for (policy in c("strict", "vep116_compat")) {
+    islands <- rduckhts_haplotypes(con, island_calls, "islands", phase_policy = policy, max_leaf_edits = 5)
+    islands <- islands[order(islands$transcript_index), ]
+    expect_equal(islands$edit_count, c(5, 5))
+    expect_equal(lapply(islands$contributors, function(x) x$event_index), rep(list(c(17, 19, 18)), 2))
+    expect_equal(islands$coding_blocks[[1]]$event_indices, list(c(17, 19, 17), 18, 17))
+    expect_equal(islands$coding_blocks[[2]]$event_indices, list(17, 18, c(17, 19, 17)))
+    expect_equal(islands$coding_blocks[[1]]$cds_start, c(1, 5, 8))
+    expect_equal(islands$coding_blocks[[2]]$cds_start, c(5, 8, 10))
+    expect_error(rduckhts_haplotypes(con, island_calls, "islands", phase_policy = policy,
+      max_leaf_edits = 4), pattern = "max_leaf_edits")
+  }
   stop_tx <- paste("SELECT * REPLACE('ATGAAATAACCC'::BLOB AS cds_sequence) FROM (", tx, ")")
   expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('stops',",
     dbQuoteString(con, "SELECT 0::UINTEGER seq_region"), ",",
