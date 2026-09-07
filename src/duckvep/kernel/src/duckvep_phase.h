@@ -9,6 +9,43 @@
 #define DUCKVEP_PHASE_H
 
 #include <stdint.h>
+#include <stddef.h>
+
+typedef enum {
+    DUCKVEP_RAW_GT_OK = 0,
+    DUCKVEP_RAW_GT_INVALID_ARG,
+    DUCKVEP_RAW_GT_INVALID_SYNTAX,
+    DUCKVEP_RAW_GT_ALLELE_OUT_OF_RANGE,
+    DUCKVEP_RAW_GT_PLOIDY_LIMIT
+} duckvep_raw_gt_status_t;
+
+typedef enum {
+    DUCKVEP_RAW_GT_INVALID = 0,
+    DUCKVEP_RAW_GT_OMITTED_REFERENCE,
+    DUCKVEP_RAW_GT_OMITTED_EMPTY,
+    DUCKVEP_RAW_GT_RETAINED
+} duckvep_raw_gt_disposition_t;
+
+typedef struct {
+    uint32_t allele_index[2]; /* UINT32_MAX is an undefined container slot, not REF. */
+    uint32_t parsed_slots;    /* Includes slots beyond the file profile's two lanes. */
+    uint16_t source_ploidy;
+    uint8_t source_has_missing;
+    duckvep_raw_gt_disposition_t disposition;
+} duckvep_raw_gt_t;
+
+/* VEP-116 BaseVCF4::get_samples_genotypes(non_ref_only=1), followed by
+ * Haplosaurus's file-input diploid slots. Input is original VCF spelling, not
+ * reconstructed typed GT. Source REF/ALTs must be nonempty allele strings;
+ * source_alt_count excludes REF. Valid VCF numeric/dot GT grammar is required,
+ * including one optional leading phase separator. Malformed syntax and allele
+ * indices outside the source record fail instead of emulating Perl warnings.
+ * OMITTED_EMPTY differs from a retained call with an undefined second slot:
+ * the latter can cause an upstream conditional deletion. This routine only
+ * resolves source ordinals; it does not project or apply that interpretation.
+ * Constant native space, no allocation. Errors leave the output zeroed. */
+duckvep_raw_gt_status_t duckvep_phase_parse_vep116_raw(
+    const uint8_t *gt, size_t length, uint32_t source_alt_count, duckvep_raw_gt_t *out);
 
 typedef enum {
     DUCKVEP_PHASE_STRICT,
@@ -53,8 +90,8 @@ duckvep_phase_status_t duckvep_phase_observe(
 /* slot1 must identify the same allele/phase observation in the completed call.
  * SET uses PS within sample/chromosome; absent PS is a distinct default set.
  * ALL_SETS is phase-invariant: apply to every phase set, not only NULL PS.
- * ALLELE_SLOT ignores separators and PS and ranks only called alleles, matching
- * VEP-116 get_samples_genotypes followed by Haplosaurus slot assignment. Missing
+ * ALLELE_SLOT ignores separators and PS and ranks only called alleles: the
+ * decoded-call subset, not VEP-116 raw GT parsing or file ploidy inference. Missing
  * entries retain provenance but have no assigned compatibility lane.
  * UNRESOLVED must remain in provenance; never insert lane=0 into a carrier index
  * or omit it when deciding whether a completed sequence is fully known.

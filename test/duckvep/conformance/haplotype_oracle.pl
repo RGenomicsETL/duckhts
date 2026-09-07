@@ -4,6 +4,7 @@ use warnings;
 use Bio::EnsEMBL::VEP::Haplo::Runner;
 use JSON;
 use File::Basename qw(dirname);
+my $phase_output;
 
 # Observe the real release-116 parser, mapper and container. Only output is
 # replaced: upstream's tabular output omits the complete sequences, and its
@@ -33,12 +34,26 @@ use File::Basename qw(dirname);
             total_haplotype_count => $container->total_haplotype_count,
             haplotypes => [sort {$a->{cds} cmp $b->{cds}} @haplotypes],
         }), "\n";
+        if ($phase_output) {
+            print {$phase_output} JSON->new->canonical->encode({
+                transcript => $container->transcript->stable_id,
+                default_ploidy => $container->_default_ploidy,
+                sample_ploidy => $container->_sample_ploidy,
+                calls => [map {{
+                    source_id => $_->variation_feature->variation_name,
+                    sample => $_->sample->name,
+                    genotype => $_->genotype,
+                }} @{$container->get_all_SampleGenotypeFeatures}],
+            }), "\n";
+        }
         $self->{_output_lines_count}++;
     }
 }
 
-@ARGV == 3 or die "usage: haplotype_oracle.pl input.vcf reference.fa model.gff3.gz\n";
-my ($vcf, $fasta, $gff) = @ARGV;
+(@ARGV == 3 || @ARGV == 4) or die
+    "usage: haplotype_oracle.pl input.vcf reference.fa model.gff3.gz [phase-observations.jsonl]\n";
+my ($vcf, $fasta, $gff, $phase_path) = @ARGV;
+open($phase_output, '>', $phase_path) or die "cannot write $phase_path: $!" if defined($phase_path);
 my $runner = DuckHTS::HaploObserver->new({
     input_file => $vcf,
     fasta => $fasta,
@@ -50,3 +65,4 @@ my $runner = DuckHTS::HaploObserver->new({
     no_stats => 1,
 });
 $runner->run;
+close($phase_output) or die "cannot close phase observations: $!" if $phase_output;

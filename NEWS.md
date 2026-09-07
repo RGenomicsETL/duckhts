@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- add a constant-space native raw-GT parser with direct Haplosaurus-object
+  differential tests. This covers parsing only; public phased replay still
+  consumes decoded calls and does not emulate upstream undefined-slot deletions
+
 - add a finite raw-GT/Haplosaurus audit that retains missing-call, ploidy and
   lexical-parser disagreements, including raw spellings that HTSlib decodes
   identically. This does not broaden the phased reader's compatibility claim

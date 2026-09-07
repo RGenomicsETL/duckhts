@@ -593,12 +593,20 @@ ploidies 1–4, every intervening `/`/`|` combination, and absent, `/`, or `|`
 leading prefixes: 7,020 profiles, without sampling. Each profile has a multiallelic
 site and a homozygous second site in another PS. The registered 180-base replay
 fixture supplies the reference; bcftools checks every REF before either engine runs.
-The unchanged Haplosaurus observer and public SQL consume the same VCF/GFF/FASTA.
+The Haplosaurus observer and public SQL consume the same VCF/GFF/FASTA.
 Complete CDS/protein multisets, source-record contributors and carrier counts are
 compared; all raw observations, differences, decoded-GT collisions and receipts remain
 in a separate result directory. Eighteen ordinary called diploid profiles and four
 deliberate corruptions guard the verifier. This is a raw-input compatibility audit,
 not a replacement for the original phased-sequence corpus or a population error rate.
+
+An optional observer sidecar exposes the actual upstream retained genotype objects
+and file-profile ploidy without changing its sequence output. The same audit compares
+the standalone native raw-GT parser on all 14,040 source calls: retained/omitted status,
+parsed slot count, the two consumed allele ordinals, source ploidy and missingness.
+Seven field-corruption controls guard that comparison. Parser results and failures
+are retained separately; parser agreement does not turn full-replay failures into passes.
+The native parser does not yet feed public phased replay or apply undefined-slot deletions.
 
 ```sh
 Rscript test/duckvep/conformance/haplotype_phase_differential.R --max-ploidy 2

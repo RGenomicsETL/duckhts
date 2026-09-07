@@ -9109,6 +9109,77 @@ TEST phase_assignments_match_all_permitted_slot_permutations(void) {
     PASS();
 }
 
+TEST raw_gt_source_spelling_and_file_slots_are_distinct(void) {
+    static const struct {
+        const char *gt;
+        uint16_t ploidy;
+        uint8_t missing;
+        uint32_t slots, first, second;
+        duckvep_raw_gt_disposition_t disposition;
+    } cases[] = {
+        {"0|1", 2, 0, 2, 0, 1, DUCKVEP_RAW_GT_RETAINED},
+        {"|0|1", 2, 0, 3, 0, 0, DUCKVEP_RAW_GT_RETAINED},
+        {"0/1|2", 3, 0, 2, 0, 2, DUCKVEP_RAW_GT_RETAINED},
+        {"0|1/2", 3, 0, 2, 0, 1, DUCKVEP_RAW_GT_RETAINED},
+        {".|1", 2, 1, 1, 1, UINT32_MAX, DUCKVEP_RAW_GT_RETAINED},
+        {"1|.", 2, 1, 1, 1, UINT32_MAX, DUCKVEP_RAW_GT_RETAINED},
+        {"./.", 2, 1, 0, UINT32_MAX, UINT32_MAX, DUCKVEP_RAW_GT_OMITTED_EMPTY},
+        {"|./.", 2, 1, 2, 0, 0, DUCKVEP_RAW_GT_RETAINED},
+        {"./.|1", 3, 1, 2, 0, 1, DUCKVEP_RAW_GT_RETAINED},
+        {"|.", 1, 1, 1, 0, UINT32_MAX, DUCKVEP_RAW_GT_RETAINED},
+        {"1", 1, 0, 1, 1, UINT32_MAX, DUCKVEP_RAW_GT_RETAINED},
+        {"0", 1, 0, 0, UINT32_MAX, UINT32_MAX, DUCKVEP_RAW_GT_OMITTED_REFERENCE},
+        {"0|0/0", 3, 0, 0, UINT32_MAX, UINT32_MAX, DUCKVEP_RAW_GT_OMITTED_REFERENCE},
+        {"|0|0", 2, 0, 3, 0, 0, DUCKVEP_RAW_GT_RETAINED},
+        {"01/2", 2, 0, 2, 1, 2, DUCKVEP_RAW_GT_RETAINED},
+        {"/1|0", 2, 0, 2, 0, 0, DUCKVEP_RAW_GT_RETAINED}
+    };
+    for (size_t i = 0u; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        duckvep_raw_gt_t parsed;
+        ASSERT_EQ(DUCKVEP_RAW_GT_OK, duckvep_phase_parse_vep116_raw(
+            (const uint8_t *)cases[i].gt, strlen(cases[i].gt), 2u, &parsed));
+        ASSERT_EQ(cases[i].ploidy, parsed.source_ploidy);
+        ASSERT_EQ(cases[i].missing, parsed.source_has_missing);
+        ASSERT_EQ(cases[i].slots, parsed.parsed_slots);
+        ASSERT_EQ(cases[i].first, parsed.allele_index[0]);
+        ASSERT_EQ(cases[i].second, parsed.allele_index[1]);
+        ASSERT_EQ(cases[i].disposition, parsed.disposition);
+    }
+    static const char *invalid[] = {"|", "/", "||1", "1|", "1.", "-1", "0//1", "x", "1\\2"};
+    duckvep_raw_gt_t parsed, zero = {0};
+    memset(&zero, 0, sizeof(zero));
+    for (size_t i = 0u; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
+        memset(&parsed, 0xff, sizeof(parsed));
+        ASSERT_EQ(DUCKVEP_RAW_GT_INVALID_SYNTAX, duckvep_phase_parse_vep116_raw(
+            (const uint8_t *)invalid[i], strlen(invalid[i]), 2u, &parsed));
+        ASSERT_MEM_EQ(&zero, &parsed, sizeof(zero));
+    }
+    ASSERT_EQ(DUCKVEP_RAW_GT_ALLELE_OUT_OF_RANGE, duckvep_phase_parse_vep116_raw(
+        (const uint8_t *)"0|3", 3u, 2u, &parsed));
+    ASSERT_MEM_EQ(&zero, &parsed, sizeof(zero));
+    ASSERT_EQ(DUCKVEP_RAW_GT_ALLELE_OUT_OF_RANGE, duckvep_phase_parse_vep116_raw(
+        (const uint8_t *)"2147483648", 10u, INT32_MAX, &parsed));
+    ASSERT_EQ(DUCKVEP_RAW_GT_INVALID_ARG, duckvep_phase_parse_vep116_raw(NULL, 1u, 2u, &parsed));
+    ASSERT_EQ(DUCKVEP_RAW_GT_INVALID_ARG, duckvep_phase_parse_vep116_raw(
+        (const uint8_t *)"0", 1u, UINT32_MAX, &parsed));
+    ASSERT_EQ(DUCKVEP_RAW_GT_INVALID_ARG, duckvep_phase_parse_vep116_raw(
+        (const uint8_t *)"0", 1u, 2u, NULL));
+    const uint8_t embedded_nul[] = {'0', '|', 0};
+    ASSERT_EQ(DUCKVEP_RAW_GT_INVALID_SYNTAX, duckvep_phase_parse_vep116_raw(
+        embedded_nul, sizeof(embedded_nul), 2u, &parsed));
+    uint8_t *many = malloc(2u * (size_t)UINT16_MAX + 1u);
+    ASSERT(many != NULL);
+    for (size_t i = 0u; i < 2u * (size_t)UINT16_MAX + 1u; i++) many[i] = i % 2u ? '|' : '0';
+    ASSERT_EQ(DUCKVEP_RAW_GT_OK, duckvep_phase_parse_vep116_raw(
+        many, 2u * (size_t)UINT16_MAX - 1u, 0u, &parsed));
+    ASSERT_EQ(UINT16_MAX, parsed.source_ploidy);
+    ASSERT_EQ(DUCKVEP_RAW_GT_PLOIDY_LIMIT, duckvep_phase_parse_vep116_raw(
+        many, 2u * (size_t)UINT16_MAX + 1u, 0u, &parsed));
+    ASSERT_MEM_EQ(&zero, &parsed, sizeof(zero));
+    free(many);
+    PASS();
+}
+
 TEST phase_ploidy_and_invalid_observations_are_checked(void) {
     duckvep_phase_summary_t summary = {0}, before;
     duckvep_phase_assignment_t out;
@@ -28682,6 +28753,7 @@ int main(int argc, char **argv) {
     RUN_TEST(coding_snv_from_cds_matches_oracle_for_any_valid_snv);
     RUN_TEST(haplotype_edit_geometry_agrees_in_both_orders);
     RUN_TEST(phase_assignments_match_all_permitted_slot_permutations);
+    RUN_TEST(raw_gt_source_spelling_and_file_slots_are_distinct);
     RUN_TEST(phase_ploidy_and_invalid_observations_are_checked);
     RUN_TEST(carrier_stream_lifetime_keys_and_capacity);
     RUN_TEST(carrier_stream_reuses_slots_after_many_transcripts);

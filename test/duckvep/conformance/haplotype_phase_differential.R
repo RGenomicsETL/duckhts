@@ -25,6 +25,11 @@ canonical <- function(rows) {
     contributors = sort(unique(unlist(lapply(group, `[[`, "contributors"), use.names = FALSE)))))
 }
 
+phase_equal <- function(expected, observed) {
+  stopifnot(identical(names(expected), names(observed)), nrow(expected) == nrow(observed))
+  Reduce(`&`, Map(`==`, expected, observed))
+}
+
 main <- function() {
   opt <- optparse::parse_args(optparse::OptionParser(option_list = list(
     optparse::make_option("--max-ploidy", dest = "max_ploidy", type = "integer", default = 4L),
@@ -108,7 +113,8 @@ main <- function() {
   perl_lib <- paste(c(file.path(mirrors, "modules"), file.path(prefix, "share/ensembl-vep-116.0-0")), collapse = ":")
   run("micromamba", c("run", "--clean-env", "--env", paste0("PERL5LIB=", perl_lib), "-p", prefix,
     "perl", "test/duckvep/conformance/haplotype_oracle.pl", file.path(out, "calls.vcf"),
-    file.path(out, "reference.fa"), file.path(out, "model.gff3.gz")), "oracle")
+    file.path(out, "reference.fa"), file.path(out, "model.gff3.gz"),
+    file.path(out, "phase.jsonl")), "oracle")
   oracle <- lapply(readLines(file.path(out, "oracle.stdout")), jsonlite::fromJSON, simplifyVector = FALSE)
   names(oracle) <- vapply(oracle, `[[`, "", "transcript")
   stopifnot(!anyDuplicated(names(oracle)), setequal(names(oracle), cases$transcript))
@@ -117,6 +123,67 @@ main <- function() {
       all(vapply(o$haplotypes, function(h)
         identical(names(h$samples), "sample") && h$samples$sample == h$count, TRUE)))
   }
+
+  # Observe actual upstream objects, not a second implementation of its parser.
+  # Source ploidy/missingness is independently known from the generated grammar;
+  # effective file ploidy and retained allele slots come from Haplosaurus.
+  phase <- lapply(readLines(file.path(out, "phase.jsonl")), jsonlite::fromJSON, simplifyVector = FALSE)
+  names(phase) <- vapply(phase, `[[`, "", "transcript")
+  stopifnot(!anyDuplicated(names(phase)), setequal(names(phase), cases$transcript))
+  expected_phase <- do.call(rbind, lapply(seq_len(nrow(cases)), function(i) {
+    p <- phase[[cases$transcript[i]]]
+    stopifnot(p$default_ploidy == 2L, identical(names(p$sample_ploidy), "sample"),
+      p$sample_ploidy$sample == 2L)
+    ids <- vapply(p$calls, `[[`, "", "source_id")
+    stopifnot(!anyDuplicated(ids), all(ids %in% c("a", "b")),
+      all(vapply(p$calls, function(x) identical(x$sample, "sample"), TRUE)))
+    do.call(rbind, lapply(c("a", "b"), function(id) {
+      call <- p$calls[ids == id]
+      alleles <- if (id == "a") c("G", "A", "T") else c("G", "C")
+      indices <- if (length(call)) match(unlist(call[[1L]]$genotype), alleles) - 1L else integer()
+      stopifnot(!anyNA(indices))
+      data.frame(status = 0L, retained = length(call) == 1L, ploidy = cases$ploidy[i],
+        missing = as.integer(id == "a" && cases$missing[i]), slots = length(indices),
+        first = if (length(indices)) indices[1L] else -1L,
+        second = if (length(indices) > 1L) indices[2L] else -1L)
+    }))
+  }))
+  raw_gt <- as.vector(rbind(cases$GT, vapply(cases$ploidy,
+    function(n) paste(rep("1", n), collapse = "|"), "")))
+  probe_sources <- c("test/duckvep/conformance/phase_probe.c", "src/duckvep/kernel/src/duckvep_phase.c")
+  probe <- file.path(out, paste0("phase_probe", .Platform$dynlib.ext))
+  compiler <- Sys.getenv("CC", "cc")
+  run(compiler, c("-std=c99", "-O2", "-Wall", "-Wextra", "-Werror", "-fPIC", "-shared",
+    "-Isrc/duckvep/kernel/src", probe_sources, "-o", probe), "phase_compile")
+  writeLines(duckvep_evidence_command(compiler, "--version", "phase compiler"),
+    file.path(out, "phase_compiler.txt"))
+  dll <- dyn.load(probe)
+  parsed <- .C(getNativeSymbolInfo("duckhts_test_vep116_raw_gt", dll), raw_gt,
+    rep(c(2L, 1L), nrow(cases)), as.integer(length(raw_gt)), status = integer(length(raw_gt)),
+    disposition = integer(length(raw_gt)), ploidy = integer(length(raw_gt)),
+    missing = integer(length(raw_gt)), slots = integer(length(raw_gt)),
+    first = integer(length(raw_gt)), second = integer(length(raw_gt)))
+  dyn.unload(dll[["path"]])
+  observed_phase <- as.data.frame(parsed[c("status", "ploidy", "missing", "slots", "first", "second")])
+  observed_phase$retained <- parsed$disposition == 3L
+  observed_phase <- observed_phase[names(expected_phase)]
+  phase_matches <- phase_equal(expected_phase, observed_phase)
+  phase_keys <- data.frame(transcript = rep(cases$transcript, each = 2L),
+    source_id = rep(c("a", "b"), nrow(cases)), GT = raw_gt)
+  saveRDS(list(keys = phase_keys, expected = expected_phase, observed = observed_phase,
+    disposition = parsed$disposition), file.path(out, "phase_comparisons.rds"))
+  write.csv(cbind(phase_keys, equal = phase_matches), file.path(out, "phase_summary.csv"), row.names = FALSE)
+  write.csv(cbind(phase_keys[!phase_matches, ], expected_phase[!phase_matches, ],
+    observed_phase[!phase_matches, ]), file.path(out, "phase_mismatches.csv"), row.names = FALSE)
+  phase_rejected <- vapply(names(expected_phase), function(field) {
+    corrupt <- expected_phase
+    corrupt[[field]][1L] <- if (is.logical(corrupt[[field]])) !corrupt[[field]][1L] else
+      corrupt[[field]][1L] + 1L
+    !all(phase_equal(expected_phase, corrupt))
+  }, TRUE)
+  stopifnot(all(phase_rejected))
+  write.csv(data.frame(control = names(phase_rejected), rejected = phase_rejected),
+    file.path(out, "phase_controls.csv"), row.names = FALSE)
 
   con <- DBI::dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE))
@@ -192,13 +259,16 @@ main <- function() {
   collisions <- split(summary, summary$decoded_gt)
   collisions <- collisions[vapply(collisions, function(x) length(unique(x$oracle_signature)) > 1L, TRUE)]
   saveRDS(collisions, file.path(out, "decoded_collisions.rds"))
-  inputs <- c(paths, extension, "test/duckvep/conformance/haplotype_phase_differential.R",
+  inputs <- c(paths, extension, probe_sources, "src/duckvep/kernel/src/duckvep_phase.h",
+    "test/duckvep/conformance/haplotype_phase_differential.R",
     "test/duckvep/conformance/haplotype_oracle.pl", file.path(prefix,
       "share/ensembl-vep-116.0-0/Bio/EnsEMBL/IO/Parser/BaseVCF4.pm"))
   jsonlite::write_json(list(source_revision = revision, extension_build_binding = binding,
     oracle_revisions = as.list(pins), scope = "raw_GT_finite_phase_audit_not_conformance",
     max_ploidy = opt$max_ploidy, cases = nrow(summary), disagreements = sum(!summary$equal),
     decoded_collision_groups = length(collisions), controls_rejected = sum(rejected),
+    raw_parser_calls = length(raw_gt), raw_parser_disagreements = sum(!phase_matches),
+    raw_parser_controls_rejected = sum(phase_rejected),
     input_records = nrow(records), source_alt_events = 3L * nrow(cases),
     input_genotype_calls = nrow(records), input_allele_slots = 2L * sum(cases$ploidy),
     candidate_alt_calls = nrow(calls), native_leaves = nrow(actual),
@@ -210,6 +280,8 @@ main <- function() {
   print(aggregate(cbind(cases = rep(1L, nrow(summary)), disagreements = as.integer(!summary$equal)) ~
     ploidy + prefix + missing + mixed, data = summary, FUN = sum), row.names = FALSE)
   message("Decoded-equivalence collision groups: ", length(collisions))
+  message("Raw parser: ", sum(!phase_matches), " disagreements / ", length(raw_gt), " calls")
+  if (any(!phase_matches)) stop("Raw parser disagreements retained: ", out, call. = FALSE)
   if (any(!summary$equal)) stop("Raw-GT compatibility disagreements retained: ", out, call. = FALSE)
 }
 main()
