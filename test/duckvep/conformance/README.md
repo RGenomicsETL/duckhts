@@ -625,10 +625,10 @@ Rscript test/duckvep/conformance/haplotype_phase_differential.R --max-ploidy 2
 Rscript test/duckvep/conformance/haplotype_phase_differential.R
 ```
 
-The smaller command covers all 108 haploid/diploid profiles. Both commands currently
-exit nonzero with retained compatibility disagreements. `--extension-receipt` uses
-the same clean-build binding as the other drivers. Byte-level VEP parser behavior
-cannot be certified from typed GT alone when distinct raw spellings decode identically.
+`--max-ploidy 2` is a 108-profile smoke test; the full command enumerates all 7,020
+profiles in its finite grammar. Both retain compatibility disagreements and exit
+nonzero. `--extension-receipt` requires clean-build evidence. Typed GT cannot certify
+byte-level VEP parser behavior when distinct raw spellings decode identically.
 
 `haplotype_record_differential.R` checks source-record geometry independently of
 the raw-GT grammar audit. It uses the registered 180-base CDS, 144 fixed profiles
@@ -646,6 +646,25 @@ the comparator; disjoint and adjacent records are positive controls.
 ```sh
 Rscript test/duckvep/conformance/haplotype_record_differential.R --seed 173 --random-cases 512
 ```
+
+For mass rare-configuration trials, `--rare-per-stratum` requires that many draws
+in every geometry × strand × GT-pattern/source-ploidy cell (1,128 cells). GT patterns
+cover pipe/slash calls, mixed separators, leading separators, first/last missing
+slots, all-missing calls and ALT only after the two consumed file lanes. Source
+ploidies are 1, 2, 4, 8, 16 and 64; patterns require enough slots to express them.
+Positions, lengths, inserted/replacement bases and paired GTs vary within each cell.
+The generator checks source ploidy and spelling, and `coverage.csv` must meet every
+declared quota. Haplosaurus still consumes its two-lane file profile; source ploidy
+is not a claim of arbitrary-ploidy output compatibility.
+
+```sh
+Rscript test/duckvep/conformance/haplotype_record_differential.R --seed 173 --rare-per-stratum 32
+Rscript test/duckvep/conformance/haplotype_record_differential.R --seed 20260906 --rare-per-stratum 32
+```
+
+Each command includes the 144 fixed and 512 general-random cases: 36,752 profiles,
+110,256 source records and 73,504 file lanes. Quotas establish cross-product
+coverage, not exhaustive sequence coverage or independent biological observations.
 
 Use `--extension-receipt` for clean-build evidence. All inputs, outputs, comparisons
 and failures are retained in the reported artifact directory; a mismatch exits

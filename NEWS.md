@@ -1,6 +1,9 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- add quota-checked rare source-record trials across edit geometry, strand and
+  raw GT patterns at source ploidies through 64, with retained per-profile failures
+
 - add a source-record geometry audit covering overlapping substitutions,
   replacements, deletions and insertions on both strands. Full sequence,
   provenance and count disagreements remain explicit failures
