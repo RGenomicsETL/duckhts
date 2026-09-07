@@ -394,8 +394,7 @@ duckvep_owned_model_publish(duckvep_owned_model_t *model)
 }
 
 static int
-duckvep_owned_interval_index(duckvep_owned_model_t *model,
-	const uint16_t *seq_regions, const uint32_t *starts,
+duckvep_owned_interval_index(const uint16_t *seq_regions, const uint32_t *starts,
 	const uint32_t *ends, size_t count, const char *object_name,
 	cgranges_t **result, int *complete, char *error, size_t error_size)
 {
@@ -417,11 +416,9 @@ duckvep_owned_interval_index(duckvep_owned_model_t *model,
 		duckvep_sql_set_error(error, error_size, message);
 		return 0;
 	}
-	for (index = 0; index < model->known_seq_region_count; index++) {
-		(void)snprintf(region_name, sizeof(region_name), "%u",
-		    model->known_seq_regions[index]);
-		(void)cr_add_ctg(*result, region_name, 0);
-	}
+	/* cr_add registers only occupied regions. Empty pre-registered contigs have
+	 * no interval offset and cannot be indexed by cgranges. The model's region
+	 * relation, not this lookup accelerator, owns known-region identity. */
 	for (index = 0; index < count; index++) {
 		(void)snprintf(region_name, sizeof(region_name), "%u",
 		    seq_regions[index]);
@@ -443,12 +440,12 @@ static int
 duckvep_owned_model_index(duckvep_owned_model_t *model, char *error,
 	size_t error_size)
 {
-	return duckvep_owned_interval_index(model, model->seq_regions,
+	return duckvep_owned_interval_index(model->seq_regions,
 	    model->transcript_starts, model->transcript_ends,
 	    model->transcripts.transcript_count, "transcript",
 	    &model->interval_index, &model->interval_index_complete,
 	    error, error_size) &&
-	    duckvep_owned_interval_index(model,
+	    duckvep_owned_interval_index(
 	    model->interval_feature_seq_regions, model->interval_feature_starts,
 	    model->interval_feature_ends, model->interval_feature_count,
 	    "regulation feature", &model->interval_feature_index,
@@ -1885,6 +1882,19 @@ duckvep_query_command(duckdb_connection connection, const char *sql,
 	return state == DuckDBSuccess;
 }
 
+int
+duckvep_registry_query_acquire(duckvep_registry_t *registry, char *error, size_t error_size)
+{
+	/* Query execution can call another DuckVEP table function on a different
+	 * DuckDB worker. Waiting for this same connection would deadlock; a busy
+	 * preparation slot is a named capacity failure, never recursive execution. */
+	if (pthread_mutex_trylock(&registry->query_mutex) == 0)
+		return 1;
+	duckvep_sql_set_error(error, error_size,
+	    "DuckVEP query preparation is busy; nested preparation is unsupported, concurrent callers may retry");
+	return 0;
+}
+
 static int
 duckvep_model_load_queries(duckdb_connection connection,
 	const char *region_query, const char *transcript_query,
@@ -2382,7 +2392,12 @@ duckvep_model_load_init(duckdb_init_info info)
 		return;
 	}
 	memset(error, 0, sizeof(error));
-	pthread_mutex_lock(&registry->query_mutex);
+	if (!duckvep_registry_query_acquire(registry, error, sizeof(error))) {
+		duckvep_model_entry_destroy(entry);
+		free(state);
+		duckdb_init_set_error(info, error);
+		return;
+	}
 	loaded = duckvep_model_load_queries(registry->query_connection,
 	    bind->arguments[1], bind->arguments[2], bind->arguments[3],
 	    bind->mature_mirna_query,
@@ -2493,7 +2508,6 @@ duckvep_registry_create(duckdb_database database)
 		return NULL;
 	(void)pthread_mutex_init(&registry->mutex, NULL);
 	(void)pthread_mutex_init(&registry->query_mutex, NULL);
-	registry->database = database;
 	registry->references = 1;
 	if (duckdb_connect(database, &registry->query_connection) !=
 	    DuckDBSuccess || registry->query_connection == NULL) {

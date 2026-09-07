@@ -125,7 +125,6 @@ typedef struct duckvep_model_entry {
 typedef struct duckvep_registry {
 	pthread_mutex_t mutex;
 	pthread_mutex_t query_mutex;
-	duckdb_database database;
 	duckdb_connection query_connection;
 	duckvep_model_entry_t *models;
 	void *annotation_state_pool;
@@ -142,6 +141,7 @@ char *duckvep_vector_string(duckdb_vector, idx_t);
 duckvep_registry_t *duckvep_registry_create(duckdb_database);
 void duckvep_registry_retain(duckvep_registry_t *);
 void duckvep_registry_release(void *);
+int duckvep_registry_query_acquire(duckvep_registry_t *, char *, size_t);
 duckvep_model_entry_t *duckvep_registry_pin(duckvep_registry_t *,
 	const char *);
 void duckvep_registry_unpin(duckvep_registry_t *, duckvep_model_entry_t *);
@@ -154,5 +154,6 @@ int duckvep_model_reference_identity_matches(
 	const duckvep_owned_model_t *);
 void duckvep_register_model_functions(duckdb_connection,
 	duckvep_registry_t *);
+void duckvep_register_haplotypes(duckdb_connection, duckvep_registry_t *);
 
 #endif /* DUCKVEP_MODEL_H */

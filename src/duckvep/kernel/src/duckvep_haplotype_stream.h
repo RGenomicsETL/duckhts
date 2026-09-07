@@ -1,5 +1,5 @@
 /* Model-scoped literal-event replay over sparse carrier paths (INTERNAL).
- * All storage is caller-owned. begin copies REF/ALT once and projects once per
+ * All storage is caller-owned. begin copies REF/ALT once; project adds one
  * candidate transcript; push adds prepared carrier evidence, while push_call
  * interprets a decoded GT. Candidate and phase-domain discovery and output
  * materialization belong to the host query plan.
@@ -48,6 +48,7 @@ typedef struct {
 
 typedef struct {
     duckvep_haplotype_source_t source;
+    duckvep_event_t prepared;
     uint64_t serial;
     size_t allele_consumed;
     uint32_t projection_begin, projection_count, last_end1;
@@ -139,13 +140,18 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_init(
     const duckvep_sequence_pool_t *sequences,
     const duckvep_haplotype_stream_buffers_t *buffers);
 
-/* Candidates are unique ascending model-local ordinals overlapping the event's
- * genomic span. An insertion may touch the transcript end. The owner may discard
- * input alleles after OK; input must not alias workspace storage. Event IDs need only
+/* The owner may discard input alleles after OK; input must not alias workspace
+ * storage. Event IDs need only
  * be unique, with increasing IDs used to order events at the same coordinate. */
 duckvep_haplotype_stream_status_t duckvep_haplotype_stream_begin(
-    duckvep_haplotype_stream_t *stream, const duckvep_haplotype_source_t *event,
-    const uint32_t *transcripts, size_t transcript_count);
+    duckvep_haplotype_stream_t *stream, const duckvep_haplotype_source_t *event);
+
+/* Add candidates in strictly increasing model-local ordinal order. Calls for
+ * an earlier candidate may be consumed before projecting the next candidate;
+ * an event's entire cohort need not be buffered. Each candidate must overlap
+ * the genomic span (an insertion may touch the transcript end). */
+duckvep_haplotype_stream_status_t duckvep_haplotype_stream_project(
+    duckvep_haplotype_stream_t *stream, uint32_t transcript_index);
 
 /* Add this event to one lane in every candidate transcript, using the prepared
  * projection. No call matrix and no repeated projection across samples. */

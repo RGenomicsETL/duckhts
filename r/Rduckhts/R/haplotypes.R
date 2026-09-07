@@ -1,0 +1,66 @@
+#' Replay Phased Transcript Haplotypes
+#'
+#' Consume a SELECT query of flat event-by-transcript-by-sample calls through
+#' the bundled native replay stream. DuckDB derives complete phase-set domains
+#' and sorts the calls. Each output row is one occupied shared path, with CDS,
+#' protein, carrier keys and all contributing events. Incomplete calls and
+#' projection/edit failures retain provenance without inventing sequence.
+#'
+#' This alpha interface returns sequence mechanics, not combined SO consequences,
+#' compound HGVS or structural-event composition. Input must contain one row per
+#' `event_index`, `transcript_index`, `sample_index`, with columns `seq_region`,
+#' `position`, `reference`, `alternate`, `alt_index`, `alleles`, `phase_before`
+#' and nullable `phase_set`. Event indices identify individual ALT events; retain
+#' their source-record mapping. Transcript ordinals belong to the named model.
+#' Candidate selection is explicit in this input relation.
+#'
+#' Preparation reads committed objects on the registry's retained connection;
+#' caller-local temporary objects and uncommitted changes are not visible. One
+#' preparation may run per registry at a time. Nested or concurrent preparation
+#' returns a busy error; completed scans use independent native workspaces.
+#'
+#' @inheritParams rduckhts_geno
+#' @param calls_query One nonempty SELECT query supplying the call relation.
+#' @param model_name Name of an already loaded DuckVEP model.
+#' @param phase_policy Strict GT/PS interpretation or VEP-116 called-slot order.
+#'   Missing calls remain incomplete under both policies; the compatibility
+#'   policy does not reproduce upstream conditional missing-call sequences.
+#' @param ... Named positive integer workspace capacities accepted by
+#'   `duckvep_haplotypes`, such as `max_active_events`, `max_active_carriers`,
+#'   `max_sequence_bases`, `max_ploidy`, `max_phase_sets`, and `workspace_limit`.
+#' @return A data frame, or invisible `TRUE` when creating `table_name`.
+#' @export
+rduckhts_haplotypes <- function(con, calls_query, model_name,
+                               phase_policy = c("strict", "vep116_compat"),
+                               ..., table_name = NULL, overwrite = FALSE) {
+  for (name in c("calls_query", "model_name")) {
+    value <- get(name)
+    if (!is.character(value) || length(value) != 1L || is.na(value) || !nzchar(value)) {
+      stop(name, " must be one nonempty string", call. = FALSE)
+    }
+  }
+  phase_policy <- match.arg(phase_policy)
+  limits <- list(...)
+  if (length(limits) && (is.null(names(limits)) || anyDuplicated(names(limits)) ||
+      any(!grepl("^[a-z][a-z_]*$", names(limits))))) {
+    stop("capacities must have unique SQL parameter names", call. = FALSE)
+  }
+  params <- list(phase_policy = sql_quote_string(con, phase_policy))
+  for (name in names(limits)) {
+    value <- limits[[name]]
+    if (!is.numeric(value) || length(value) != 1L || !is.finite(value) ||
+        value <= 0 || value > 2^53 || value != floor(value)) {
+      stop(name, " must be one positive, exactly representable integer", call. = FALSE)
+    }
+    params[[name]] <- format(value, scientific = FALSE, trim = TRUE)
+  }
+  if (!is.logical(overwrite) || length(overwrite) != 1L || is.na(overwrite)) {
+    stop("overwrite must be TRUE or FALSE", call. = FALSE)
+  }
+  query <- paste0("SELECT * FROM duckvep_haplotypes(", sql_quote_string(con, calls_query),
+                  ",", sql_quote_string(con, model_name), build_param_str(params), ")")
+  if (is.null(table_name)) return(DBI::dbGetQuery(con, query))
+  prefix <- if (overwrite) "CREATE OR REPLACE TABLE " else "CREATE TABLE "
+  DBI::dbExecute(con, paste0(prefix, sql_quote_identifier(con, table_name), " AS ", query))
+  invisible(TRUE)
+}

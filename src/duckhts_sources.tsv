@@ -47,6 +47,7 @@ src/duckvep/duckvep_annotate.c|duckvep/duckvep_annotate.c
 src/duckvep/duckvep_ensembl.c|duckvep/duckvep_ensembl.c
 src/duckvep/duckvep_sql.c|duckvep/duckvep_sql.c
 src/duckvep/duckvep_phase_sql.c|duckvep/duckvep_phase_sql.c
+src/duckvep/duckvep_haplotype_sql.c|duckvep/duckvep_haplotype_sql.c
 src/hts_meta_reader.c|hts_meta_reader.c
 src/quality_encoding.c|quality_encoding.c
 src/quality_encoding_reader.c|quality_encoding_reader.c

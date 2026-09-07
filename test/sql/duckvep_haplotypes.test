@@ -1,0 +1,213 @@
+require duckhts
+
+statement ok
+CREATE TABLE hap_tx AS SELECT 0::UINTEGER transcript_index, 0::UINTEGER seq_region,
+  100::UBIGINT transcript_start, 111::UBIGINT transcript_end, 1::TINYINT strand,
+  0::UINTEGER gene_index, 3::UBIGINT transcript_flags, 100::UBIGINT cds_start,
+  111::UBIGINT cds_end, 'AAAAAAAAAAAA'::BLOB cds_sequence, 1::UTINYINT codon_table;
+
+statement ok
+CREATE TABLE hap_exons AS SELECT 0::UINTEGER transcript_index, 100::UBIGINT exon_start,
+  111::UBIGINT exon_end, 1::UBIGINT exon_cdna_start, 12::UBIGINT exon_cdna_end,
+  0::TINYINT phase, 0::TINYINT end_phase;
+
+query I
+SELECT loaded FROM duckvep_model_load('hap', 'SELECT i::UINTEGER seq_region FROM range(2) r(i)',
+  'SELECT * FROM hap_tx', 'SELECT * FROM hap_exons');
+----
+1
+
+# Flat event x transcript x sample calls. The early homozygote must reach
+# phase set 20, which is first encountered at the third source event.
+statement ok
+CREATE TABLE hap_calls AS SELECT event_index, 0::UINTEGER seq_region, position,
+  'A' reference, alternate, 1::UINTEGER alt_index, 0::UINTEGER transcript_index,
+  0::UINTEGER sample_index, alleles, [true,true] phase_before, phase_set
+FROM (VALUES (1::UBIGINT,100::UBIGINT,'C',[1,1],NULL::BIGINT),
+             (2,101,'G',[1,0],10), (3,102,'C',[0,1],20)) v(event_index,position,alternate,alleles,phase_set);
+
+query TTIT
+SELECT cds, protein, carrier_count, list_transform(contributors, c -> c.event_index)::VARCHAR
+FROM duckvep_haplotypes('SELECT * FROM hap_calls ORDER BY event_index DESC', 'hap') ORDER BY cds;
+----
+CAAAAAAAAAAA	QKKK	2	[1]
+CACAAAAAAAAA	HKKK	1	[1, 3]
+CGAAAAAAAAAA	RKKK	1	[1, 2]
+
+query IIT
+SELECT c.phase_set, c.haplotype_lane, cds FROM (
+  SELECT cds, unnest(carriers) c FROM duckvep_haplotypes('SELECT * FROM hap_calls', 'hap'))
+ORDER BY c.phase_set,c.haplotype_lane;
+----
+10	1	CGAAAAAAAAAA
+10	2	CAAAAAAAAAAA
+20	1	CAAAAAAAAAAA
+20	2	CACAAAAAAAAA
+
+# Compatibility combines called slots across PS; strict mode does not.
+query TTII
+SELECT cds, protein, carrier_count, carriers[1].phase_set IS NULL
+FROM duckvep_haplotypes('SELECT * FROM hap_calls', 'hap', phase_policy := 'vep116_compat') ORDER BY cds;
+----
+CACAAAAAAAAA	HKKK	1	true
+CGAAAAAAAAAA	RKKK	1	true
+
+# Unphased ambiguity affects every phase set; missing is not a reference call.
+query TII
+SELECT sequence_status, cds IS NULL, sum(carrier_count)
+FROM duckvep_haplotypes('SELECT * REPLACE(CASE WHEN event_index=3 THEN [false,false] ELSE phase_before END AS phase_before) FROM hap_calls', 'hap')
+GROUP BY ALL;
+----
+incomplete_input	true	2
+
+query TII
+SELECT sequence_status, cds IS NULL, sum(carrier_count)
+FROM duckvep_haplotypes('SELECT * REPLACE([NULL,NULL]::INTEGER[] AS alleles) FROM hap_calls', 'hap')
+GROUP BY ALL;
+----
+incomplete_input	true	6
+
+statement error
+SELECT * FROM duckvep_haplotypes('SELECT * FROM hap_calls UNION ALL SELECT * FROM hap_calls', 'hap');
+----
+duplicate call
+
+statement error
+SELECT * FROM duckvep_haplotypes('SELECT * REPLACE(NULL::UINTEGER AS sample_index) FROM hap_calls', 'hap');
+----
+required input
+
+statement error
+SELECT * FROM duckvep_haplotypes('SELECT * REPLACE(CASE WHEN event_index=3 THEN [1] ELSE alleles END AS alleles, NULL::BOOLEAN[] AS phase_before) FROM hap_calls', 'hap');
+----
+ploidy
+
+statement error
+SELECT * FROM duckvep_haplotypes('SELECT * FROM hap_calls', 'hap', workspace_limit := 1);
+----
+workspace
+
+statement error
+SELECT * FROM duckvep_haplotypes('SELECT * FROM hap_calls', 'hap', max_ploidy := 1);
+----
+max_ploidy
+
+query I
+SELECT count(*) FROM duckvep_haplotypes('SELECT * FROM hap_calls WHERE false', 'hap');
+----
+0
+
+query I
+SELECT 42;
+----
+42
+
+# More than two input and output chunks, disjoint transcript lifetime, PS NULL
+# versus present zero, and workspace reuse with one live event/transcript.
+statement ok
+CREATE TABLE hap_many_tx AS SELECT i::UINTEGER transcript_index, 0::UINTEGER seq_region,
+ (100+i*12)::UBIGINT transcript_start, (111+i*12)::UBIGINT transcript_end,
+ 1::TINYINT strand, 0::UINTEGER gene_index, 3::UBIGINT transcript_flags,
+ (100+i*12)::UBIGINT cds_start, (111+i*12)::UBIGINT cds_end,
+ 'AAAAAAAAAAAA'::BLOB cds_sequence, 1::UTINYINT codon_table FROM range(5000) r(i);
+
+statement ok
+CREATE TABLE hap_many_exons AS SELECT transcript_index, transcript_start exon_start,
+ transcript_end exon_end, 1::UBIGINT exon_cdna_start, 12::UBIGINT exon_cdna_end,
+ 0::TINYINT phase, 0::TINYINT end_phase FROM hap_many_tx;
+
+query I
+SELECT loaded FROM duckvep_model_load('hap_many','SELECT 0::UINTEGER seq_region',
+ 'SELECT * FROM hap_many_tx ORDER BY transcript_index',
+ 'SELECT * FROM hap_many_exons ORDER BY transcript_index');
+----
+1
+
+statement ok
+CREATE TABLE hap_many_calls AS SELECT transcript_index::UBIGINT event_index, seq_region,
+ transcript_start AS position, 'A' reference, 'C' alternate, 1::UINTEGER alt_index,
+ transcript_index, 0::UINTEGER sample_index, [1,0] alleles, [true,true] phase_before,
+ CASE WHEN transcript_index%2=0 THEN NULL ELSE 0 END::BIGINT phase_set FROM hap_many_tx;
+
+query IIIII
+SELECT count(*), sum(carrier_count), count(*) FILTER(WHERE cds='CAAAAAAAAAAA' AND protein='QKKK'),
+ count(*) FILTER(WHERE carriers[1].phase_set IS NULL),
+ count(*) FILTER(WHERE carriers[1].phase_set=0 AND contributors[1].event_index=transcript_index)
+FROM duckvep_haplotypes('SELECT * FROM hap_many_calls ORDER BY event_index DESC','hap_many',
+ max_active_events := 1, max_active_transcripts := 1, max_active_projections := 1,
+ max_active_carriers := 1, max_active_prefixes := 1, max_allele_bytes := 2);
+----
+5000	5000	5000	2500	2500
+
+# Two pinned models remain distinct in the same process.
+query I
+SELECT count(*) FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap');
+----
+3
+
+# One event fans into both strands. More than one chunk of samples is consumed
+# before projecting the next transcript; allele ownership must outlive chunks.
+query I
+SELECT loaded FROM duckvep_model_load('hap_twins','SELECT 0::UINTEGER seq_region',
+ 'SELECT * FROM hap_tx UNION ALL SELECT * REPLACE(1::UINTEGER AS transcript_index, -1::TINYINT AS strand, ''TTTTTTTTTTTT''::BLOB AS cds_sequence) FROM hap_tx',
+ 'SELECT * FROM hap_exons UNION ALL SELECT * REPLACE(1::UINTEGER AS transcript_index) FROM hap_exons');
+----
+1
+
+query ITTIII
+SELECT transcript_index,cds,protein,carrier_count,len(contributors),
+ len(list_distinct(list_transform(carriers,c -> c.sample_index)))
+FROM duckvep_haplotypes('SELECT c.* REPLACE(t.transcript_index AS transcript_index,s.i::UINTEGER AS sample_index) FROM hap_calls c CROSS JOIN range(3000) s(i) CROSS JOIN (VALUES (0::UINTEGER),(1)) t(transcript_index)',
+ 'hap_twins',max_active_events := 3,max_active_transcripts := 2,max_active_projections := 6,
+ max_allele_bytes := 6) ORDER BY transcript_index,cds;
+----
+0	CAAAAAAAAAAA	QKKK	6000	1	3000
+0	CACAAAAAAAAA	HKKK	3000	2	3000
+0	CGAAAAAAAAAA	RKKK	3000	2	3000
+1	TTTTTTTTTGTG	FFFV	3000	2	3000
+1	TTTTTTTTTTCG	FFFS	3000	2	3000
+1	TTTTTTTTTTTG	FFFL	6000	1	3000
+
+statement error
+SELECT * FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap',max_active_events := 1);
+----
+max_active_events=1 exhausted at event 2
+
+statement error
+SELECT * FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap',max_sequence_bases := 11);
+----
+max_sequence_bases=11
+
+statement error
+SELECT * FROM duckvep_haplotypes('SELECT c.* FROM hap_calls c CROSS JOIN duckvep_model_load(''nested_hap'',''SELECT 0::UINTEGER seq_region'',''SELECT * FROM hap_tx'',''SELECT * FROM hap_exons'') m','hap');
+----
+preparation is busy
+
+query I
+SELECT duckvep_model_drop('nested_hap');
+----
+0
+
+query I
+SELECT loaded FROM duckvep_model_load('hap_noncoding', 'SELECT 0::UINTEGER seq_region',
+ 'SELECT * REPLACE(0::UBIGINT AS transcript_flags, NULL::UBIGINT AS cds_start, NULL::UBIGINT AS cds_end, NULL::BLOB AS cds_sequence, NULL::UTINYINT AS codon_table) FROM hap_tx',
+ 'SELECT * FROM hap_exons');
+----
+1
+
+query TIII
+SELECT projection_status,count(*),count(*) FILTER(WHERE cds IS NULL AND protein IS NULL),sum(carrier_count)
+FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap_noncoding') GROUP BY projection_status;
+----
+outside_cds	3	3	4
+
+# Recursive query preparation must error, not deadlock the database connection.
+statement error
+SELECT * FROM duckvep_haplotypes('SELECT c.* FROM hap_calls c CROSS JOIN duckvep_haplotypes(''SELECT * FROM hap_calls'',''hap'') h','hap');
+----
+preparation is busy
+
+query I
+SELECT count(*) FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap');
+----
+3

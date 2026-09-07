@@ -1,18 +1,29 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
-- connect decoded GT/PS preparation to the native haplotype stream. Include
-  missing/unphased evidence in shared-path identity, preserve all contributors,
-  and return explicit incomplete results without CDS/protein for uncertain paths.
-  Caller-supplied complete phase-set domains carry phase-invariant calls into
-  sets encountered later. The public phased SQL executor remains unimplemented
+- expose `duckvep_haplotypes(calls_query, model_name, ...)` and its R wrapper:
+  DuckDB derives complete phase domains and sorts explicit transcript/sample
+  calls, while bounded native replay returns shared CDS/protein paths, carrier
+  keys and contributor evidence across chunks. Capacities are per-call options.
+  This alpha surface does not yet emit combined SO, compound HGVS or typed SV
+  composition; missing/ambiguous paths explicitly lack sequence. Noncoding
+  transcripts retain contributors with `outside_cds` and no invented sequence
+
+- remove the retained extension-load database handle from the DuckVEP registry.
+  Query materialization uses its valid retained connection, separately from
+  scan-owned native state. Nested or concurrent model/haplotype preparation
+  returns a named busy error instead of waiting recursively on that connection
+
+- omit empty contigs from DuckVEP's cgranges accelerators, avoiding invalid
+  indexing when known regions have no transcript or regulatory intervals.
+  The model's separate known-region relation remains authoritative
 
 - add `duckvep_phase_call(...)` over typed decoded GT/PS calls, backed by a
   host-neutral constant-space phase reducer. Per-call `strict` and
   `vep116_compat` policies preserve every allele slot, missing calls and explicit
   ambiguity, and distinguish phase-set lanes from phase-invariant calls that
-  must apply across all phase sets. This prepares carrier input; it does not
-  yet expose the phased haplotype executor or compound consequence/HGVS output
+  must apply across all phase sets. This prepares carrier input; phased replay
+  consumes the same reducer and includes missing/unphased evidence in path identity
 
 - delete DuckVEP's compatibility-only in-place CDS rebuild. The native kernel
   now has one linear immutable-input/scratch-output implementation and rejects
@@ -24,8 +35,8 @@
   input alleles once, retain one projection per event/transcript pair, recycle
   the active genomic window, and return each occupied path with all contributors.
   Share projected MNV decomposition with independent annotation so unchanged
-  internal bases do not create false edit conflicts. This is the native execution
-  layer; the public phased SQL/R interface is not yet available
+  internal bases do not create false edit conflicts. The same kernel backs the
+  public phased SQL/R interface
 
 - delete DuckVEP's 12-column short-tail model interface and the redundant
   `post_cds_bases` column from the Ensembl builder and model fingerprint. Models

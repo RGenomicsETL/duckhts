@@ -685,10 +685,20 @@ This is decoded-call interpretation, not emulation of VEP's raw mixed/prefixed-s
 parsing. This helper consumes a declared GT/PS phasing source;
 PSL/PSO or producer-specific phase identities require a separate explicit adapter.
 
-The public SQL haplotype executor remains unimplemented. Native
-sequence/indel flags are not combined SO or compound HGVS, and the literal replay stream
-does not yet compose typed structural events. Existing executable Haplosaurus comparisons
-exercise the native replay through a test bridge, not a public phased SQL surface.
+`duckvep_haplotypes` consumes flat event/transcript/sample calls. DuckDB derives phase
+domains and materializes sorted input; native event ingestion and candidate projection
+are separate operations, so an entire event's cohort is never copied into a first-party
+call matrix. Output pauses retain the transcript drain cursor and reuse worker scratch.
+The registry owns one valid retained query connection: its extension-load database handle
+must not be retained. Only preparation/materialization uses that connection. A busy slot
+returns an error, including recursive preparation, while completed scan results and native
+state have independent ownership. Caller TEMP objects/uncommitted writes are not visible.
+
+This public sequence-mechanics surface is not complete phased annotation. Native
+sequence/indel flags are not combined SO or compound HGVS, and literal replay does not yet
+compose typed structural events. Existing executable Haplosaurus comparisons exercise
+native replay through a test bridge; public-surface executable acceptance and measured
+sorted/sort-included execution remain required.
 
 The stream must preserve the original record/ALT identity, decoded allele indexes,
 ploidy, phasing flag, and `PS`/`PID`-like phase-set provenance. The same called local

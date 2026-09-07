@@ -172,7 +172,9 @@ void duckhts_test_carrier_haplotypes(
             (const uint8_t *)refs[event], (const uint8_t *)alts[event],
             (uint32_t)positions[event], 0u,
             (uint16_t)strlen(refs[event]), (uint16_t)strlen(alts[event])};
-        stream_status = duckvep_haplotype_stream_begin(&stream, &source, &zero, 1u);
+        stream_status = duckvep_haplotype_stream_begin(&stream, &source);
+        if (stream_status != DUCKVEP_HAPLOTYPE_STREAM_OK) goto stream_error;
+        stream_status = duckvep_haplotype_stream_project(&stream, zero);
         if (stream_status != DUCKVEP_HAPLOTYPE_STREAM_OK) goto stream_error;
         for (uint32_t sample = 0u; sample < 3u; sample++) {
             /* Each push may be separated by an input batch or vector edge. */

@@ -1359,6 +1359,15 @@ duckvep_cds_edit_build_prepared_allele(
              : allele->ref_length == 0u)) {
         return DUCKVEP_CDS_EDIT_INVALID_EVENT;
     }
+    /* A noncoding transcript has no CDS pool slice to borrow. Its projection
+     * is unavailable, not a malformed caller argument; an absent sequence for
+     * a declared coding transcript remains an invalid model. */
+    if (tx_idx < seq->transcript_count && seq->cds_length != NULL &&
+        seq->cds_length[tx_idx] == 0u && transcripts->cds_start1 != NULL &&
+        transcripts->cds_end1 != NULL && transcripts->cds_start1[tx_idx] == 0u &&
+        transcripts->cds_end1[tx_idx] == 0u) {
+        return DUCKVEP_CDS_EDIT_OUT_OF_CDS;
+    }
     if (!delta_cds_slice(seq, tx_idx, &cds_seq, &cds_len) || cds_len > UINT32_MAX) {
         return DUCKVEP_CDS_EDIT_INVALID_ARG;
     }

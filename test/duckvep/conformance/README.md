@@ -569,6 +569,20 @@ release conformance histories or the `not_implemented` phased transition.
 Seven deliberate corruptions exercise each comparison field; their rejection counts
 are reported separately from the real engine comparisons.
 
+`haplotype_sql_differential.R --artifacts results/<haplotype-run>` is an additional
+public-SQL lane. It verifies the original artifact hashes and successful controls,
+loads the same model/genotypes, and runs `duckvep_haplotypes` under both named policies.
+Required occupied carrier keys are checked against the complete independent paths,
+not inferred from the rows that happened to survive. Reference lanes are explicitly
+implicit in this SQL contract; their source-model paths complete the six-lane comparison
+against the unchanged Haplosaurus observation. Full CDS/protein, frame flags, contributors,
+sample/carrier counts and PS/ploidy are checked. Six additional output mutations must be
+rejected. New outputs and receipts live in a separate result directory; original inputs,
+generators, seeds, eligibility, denominators, failures and oracle remain untouched.
+`--extension-receipt` applies the same clean-build binding as the original lane.
+This tests the declared literal, diploid sequence-mechanics subset, not combined SO/HGVS,
+structural composition, raw-parser emulation or broad missing/ploidy compatibility.
+
 This is **not** a public phased-executor certificate: the R harness materializes
 decoded calls, and it does not test native DuckDB carrier streaming, strict phase/PS
 interpretation, compound SO/HGVS, structural

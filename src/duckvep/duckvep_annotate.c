@@ -3854,6 +3854,7 @@ register_duckvep_functions(duckdb_connection connection,
 	if (registry == NULL)
 		return;
 	duckvep_register_model_functions(connection, registry);
+	duckvep_register_haplotypes(connection, registry);
 	duckvep_register_allele_geometry_scalar(connection);
 	duckvep_register_breakend_geometry_scalar(connection);
 

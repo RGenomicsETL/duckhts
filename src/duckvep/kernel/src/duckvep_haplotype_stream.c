@@ -32,7 +32,7 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_init(
     memset(s, 0, sizeof(*s));
     if (!tx || !exons || !seq || !b || !tx->start1 || !tx->strand ||
         seq->transcript_count != tx->transcript_count ||
-        !seq->cds_offset || !seq->cds_length || !seq->cds_bytes ||
+        !seq->cds_offset || !seq->cds_length || (!seq->cds_bytes && seq->cds_bytes_len) ||
         !valid_array(b->events, b->event_capacity, sizeof(*b->events)) ||
         !valid_array(b->projections, b->projection_capacity, sizeof(*b->projections)) ||
         !valid_array(b->alleles, b->allele_capacity, 1u) ||
@@ -75,15 +75,12 @@ static void reclaim(duckvep_haplotype_stream_t *s, uint16_t chrom, uint32_t pos1
 }
 
 duckvep_haplotype_stream_status_t duckvep_haplotype_stream_begin(
-    duckvep_haplotype_stream_t *s, const duckvep_haplotype_source_t *source,
-    const uint32_t *candidates, size_t count) {
+    duckvep_haplotype_stream_t *s, const duckvep_haplotype_source_t *source) {
     if (!s || !s->initialized) return DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG;
     if (s->error) return s->error;
     if (!source || !source->pos1 || !source->ref || !source->alt ||
-        !source->ref_len || !source->alt_len || (count && !candidates) ||
-        s->serial == UINT64_MAX || count > UINT32_MAX ||
-        (uint32_t)source->ref_len - 1u > UINT32_MAX - source->pos1 ||
-        count > UINT64_MAX - s->projected_events)
+        !source->ref_len || !source->alt_len || s->serial == UINT64_MAX ||
+        (uint32_t)source->ref_len - 1u > UINT32_MAX - source->pos1)
         return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
     if (s->have_input && (source->chrom_id < s->last_chrom ||
         (source->chrom_id == s->last_chrom && (source->pos1 < s->last_pos1 ||
@@ -94,17 +91,6 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_begin(
                                      source->alt, source->alt_len, &prepared))
         return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
     prepared.chrom_id = source->chrom_id;
-    const duckvep_transcript_model_t *model = s->carriers.model;
-    uint32_t last_end1 = 0u;
-    for (size_t i = 0u; i < count; i++) {
-        uint32_t tx = candidates[i];
-        if (tx >= model->transcript_count || (i && tx <= candidates[i - 1u]) ||
-            model->chrom_id[tx] != source->chrom_id || model->end1[tx] < source->pos1 ||
-            (model->start1[tx] > prepared.raw_end1 &&
-             model->start1[tx] > duckvep_event_feature_max1(&prepared)))
-            return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
-        if (model->end1[tx] > last_end1) last_end1 = model->end1[tx];
-    }
     uint32_t completed;
     duckvep_carriers_status_t status = duckvep_carriers_advance(&s->carriers,
         source->chrom_id, source->pos1, s->serial + 1u, &completed);
@@ -115,61 +101,84 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_begin(
     if (status != DUCKVEP_CARRIERS_OK) return carrier_fail(s, status);
     reclaim(s, source->chrom_id, source->pos1, 0);
     const duckvep_haplotype_stream_buffers_t *b = &s->buffers;
-    if (count) {
-        if (s->event_count == b->event_capacity)
-            return fail(s, DUCKVEP_HAPLOTYPE_STREAM_EVENT_FULL);
-        if (count > b->projection_capacity - s->projection_count)
-            return fail(s, DUCKVEP_HAPLOTYPE_STREAM_PROJECTION_FULL);
-        size_t bytes = (size_t)source->ref_len + source->alt_len;
-        size_t at = ring_add(s->allele_begin, s->allele_count, b->allele_capacity);
-        size_t padding = bytes > b->allele_capacity - at ? b->allele_capacity - at : 0u;
-        size_t available = b->allele_capacity - s->allele_count;
-        if (padding > available || bytes > available - padding)
-            return fail(s, DUCKVEP_HAPLOTYPE_STREAM_ALLELE_FULL);
-        if (padding) at = 0u;
-        uint32_t event_at = (uint32_t)ring_add(s->event_begin, s->event_count, b->event_capacity);
-        duckvep_haplotype_stored_event_t *stored = &b->events[event_at];
-        *stored = (duckvep_haplotype_stored_event_t){0};
-        stored->source = *source;
-        stored->source.ref = b->alleles + at;
-        stored->source.alt = b->alleles + at + source->ref_len;
-        memcpy(b->alleles + at, source->ref, source->ref_len);
-        memcpy(b->alleles + at + source->ref_len, source->alt, source->alt_len);
-        stored->serial = s->serial + 1u;
-        stored->allele_consumed = padding + bytes;
-        stored->projection_begin = (uint32_t)ring_add(s->projection_begin,
-            s->projection_count, b->projection_capacity);
-        stored->projection_count = (uint32_t)count;
-        stored->last_end1 = last_end1;
-        duckvep_prepared_cds_allele_t allele = {&prepared,
-            stored->source.ref + prepared.ref_diff_offset,
-            stored->source.alt + prepared.alt_diff_offset,
-            stored->source.ref + prepared.anchor_ref_offset,
-            prepared.ref_diff_length, prepared.alt_diff_length, 1};
-        for (size_t i = 0u; i < count; i++) {
-            size_t projection_at = ring_add(stored->projection_begin, i, b->projection_capacity);
-            duckvep_haplotype_projection_t *p = &b->projections[projection_at];
-            p->transcript_index = candidates[i];
-            memset(&p->edit, 0, sizeof(p->edit));
-            p->status = duckvep_cds_edit_build_prepared_allele(model, s->exons, s->sequences,
-                candidates[i], model->strand[candidates[i]], &allele, UINT32_MAX, &p->edit);
-        }
-        s->current_event = event_at;
-        s->event_count++;
-        s->projection_count += (uint32_t)count;
-        s->allele_count += stored->allele_consumed;
-        if (s->event_count > s->peak_events) s->peak_events = s->event_count;
-        if (s->projection_count > s->peak_projections) s->peak_projections = s->projection_count;
-        if (s->allele_count > s->peak_alleles) s->peak_alleles = s->allele_count;
-    }
-    s->have_current = count != 0u;
-    s->have_input = 1u;
+    if (s->event_count == b->event_capacity)
+        return fail(s, DUCKVEP_HAPLOTYPE_STREAM_EVENT_FULL);
+    size_t bytes = (size_t)source->ref_len + source->alt_len;
+    size_t at = ring_add(s->allele_begin, s->allele_count, b->allele_capacity);
+    size_t padding = bytes > b->allele_capacity - at ? b->allele_capacity - at : 0u;
+    size_t available = b->allele_capacity - s->allele_count;
+    if (padding > available || bytes > available - padding)
+        return fail(s, DUCKVEP_HAPLOTYPE_STREAM_ALLELE_FULL);
+    if (padding) at = 0u;
+    uint32_t event_at = (uint32_t)ring_add(s->event_begin, s->event_count, b->event_capacity);
+    duckvep_haplotype_stored_event_t *stored = &b->events[event_at];
+    *stored = (duckvep_haplotype_stored_event_t){0};
+    stored->source = *source;
+    stored->prepared = prepared;
+    stored->source.ref = b->alleles + at;
+    stored->source.alt = b->alleles + at + source->ref_len;
+    memcpy(b->alleles + at, source->ref, source->ref_len);
+    memcpy(b->alleles + at + source->ref_len, source->alt, source->alt_len);
+    stored->serial = s->serial + 1u;
+    stored->allele_consumed = padding + bytes;
+    stored->projection_begin = (uint32_t)ring_add(s->projection_begin,
+        s->projection_count, b->projection_capacity);
+    stored->last_end1 = source->pos1;
+    s->current_event = event_at;
+    s->event_count++;
+    s->allele_count += stored->allele_consumed;
+    if (s->event_count > s->peak_events) s->peak_events = s->event_count;
+    if (s->allele_count > s->peak_alleles) s->peak_alleles = s->allele_count;
+    s->have_current = s->have_input = 1u;
     s->serial++;
     s->last_event_id = source->event_id;
     s->last_pos1 = source->pos1;
     s->last_chrom = source->chrom_id;
     s->input_events++;
-    s->projected_events += count;
+    return DUCKVEP_HAPLOTYPE_STREAM_OK;
+}
+
+duckvep_haplotype_stream_status_t duckvep_haplotype_stream_project(
+    duckvep_haplotype_stream_t *s, uint32_t tx) {
+    if (!s || !s->initialized) return DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG;
+    if (s->error) return s->error;
+    if (!s->have_current || s->closing || s->carriers.pending || s->carriers.finished)
+        return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
+    const duckvep_transcript_model_t *model = s->carriers.model;
+    const duckvep_haplotype_stream_buffers_t *b = &s->buffers;
+    duckvep_haplotype_stored_event_t *stored = &b->events[s->current_event];
+    const duckvep_event_t *prepared = &stored->prepared;
+    if (tx >= model->transcript_count || model->chrom_id[tx] != stored->source.chrom_id ||
+        model->end1[tx] < stored->source.pos1 ||
+        (model->start1[tx] > prepared->raw_end1 &&
+         model->start1[tx] > duckvep_event_feature_max1(prepared)))
+        return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
+    if (stored->projection_count) {
+        size_t previous = ring_add(stored->projection_begin, stored->projection_count - 1u,
+            b->projection_capacity);
+        if (tx <= b->projections[previous].transcript_index)
+            return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INPUT_ORDER);
+    }
+    if (s->projection_count == b->projection_capacity)
+        return fail(s, DUCKVEP_HAPLOTYPE_STREAM_PROJECTION_FULL);
+    if (s->projected_events == UINT64_MAX)
+        return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
+    size_t at = ring_add(stored->projection_begin, stored->projection_count, b->projection_capacity);
+    duckvep_haplotype_projection_t *p = &b->projections[at];
+    duckvep_prepared_cds_allele_t allele = {prepared,
+        stored->source.ref + prepared->ref_diff_offset,
+        stored->source.alt + prepared->alt_diff_offset,
+        stored->source.ref + prepared->anchor_ref_offset,
+        prepared->ref_diff_length, prepared->alt_diff_length, 1};
+    p->transcript_index = tx;
+    memset(&p->edit, 0, sizeof(p->edit));
+    p->status = duckvep_cds_edit_build_prepared_allele(model, s->exons, s->sequences,
+        tx, model->strand[tx], &allele, UINT32_MAX, &p->edit);
+    stored->projection_count++;
+    if (model->end1[tx] > stored->last_end1) stored->last_end1 = model->end1[tx];
+    s->projection_count++;
+    s->projected_events++;
+    if (s->projection_count > s->peak_projections) s->peak_projections = s->projection_count;
     return DUCKVEP_HAPLOTYPE_STREAM_OK;
 }
 

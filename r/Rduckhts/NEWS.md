@@ -1,13 +1,22 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
-- bundle native decoded-call haplotype replay with explicit missing/unphased
-  evidence and complete phase-set-domain input. Existing DBI annotation results
-  are unchanged; the public phased SQL executor is not yet exposed
+- add `rduckhts_haplotypes()` and bundled `duckvep_haplotypes()` for typed
+  transcript/sample call replay with per-call capacities, shared CDS/protein
+  paths and complete contributor/carrier evidence. The alpha output is sequence
+  mechanics, not combined consequence/HGVS or structural annotation. Noncoding
+  transcripts retain contributors with `outside_cds` and no invented sequence
+
+- make nested/concurrent DuckVEP model or haplotype query preparation fail with
+  a busy error rather than recursively waiting on the retained query connection;
+  concurrent callers may retry, and completed scans retain independent state
+
+- avoid invalid cgranges indexing when a loaded model has known regions without
+  transcript or regulatory intervals; known-region identity is unchanged
 
 - expose bundled `duckvep_phase_call(...)` through DBI for typed genotype/phase
   preparation, including per-call strict/VEP-116 policies, missing alleles and
   unresolved phase. SQL results distinguish phase-set assignments from
-  phase-invariant calls; this is not yet a public phased annotation executor
+  phase-invariant calls. The phased replay interface consumes the same reducer
 
 - bundle one immutable-reference CDS rebuild implementation, removing the unused
   in-place mutation path and rejecting overlapping native input/output storage.
@@ -15,7 +24,7 @@
 
 - include native haplotype replay and shared projected-CDS edit decomposition
   in the bundled extension's Unix and Windows source builds. Existing SQL/R
-  annotation interfaces are unchanged; a public phased reader is not yet exposed
+  annotation results are unchanged; the phased interface uses the same kernel
 
 - remove the bundled DuckVEP 12-column short-tail loader interface and redundant
   `post_cds_bases` builder column. DBI model queries use the 13-column complete-flank
