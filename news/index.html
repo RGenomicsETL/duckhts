@@ -34,7 +34,8 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="1.5.1.9000-0.1.5" id="rduckhts-1519000-015">Rduckhts 1.5.1.9000-0.1.5<a class="anchor" aria-label="anchor" href="#rduckhts-1519000-015"></a></h2>
-<ul><li><p>bundle DuckVEP kernel 0.19.0 with a unified model constructor for transcript and regulatory-feature models; R and SQL model-loading behavior is unchanged</p></li>
+<ul><li><p>remove the bundled DuckVEP 12-column short-tail loader interface and redundant <code>post_cds_bases</code> builder column. DBI model queries use the 13-column complete-flank form or the 11-column CDS-only form with explicit unresolved missing context. Newly computed model receipts omit the removed column and have new hashes</p></li>
+<li><p>bundle DuckVEP kernel 0.19.0 with a unified model constructor for transcript and regulatory-feature models; R and SQL model-loading behavior is unchanged</p></li>
 <li><p>avoid redundant genomic projection in bundled DuckVEP indel annotation and HGVS context construction, while retaining physical REF validation and full projection for features whose span differs from the validated edit</p></li>
 <li><p>correct bundled DuckVEP terminal-codon substitutions by including available 3-prime UTR bases in alternate codon translation. Partial-codon and coding-unknown terms can coexist with stop-gained; a preserved full peptide plus a new stop is stop-retained. Both genomic strands have SQL and package regression coverage</p></li>
 <li><p>correct bundled DuckVEP indel start/stop and in-frame consequences when a later coding exon supplies CDS phase padding. CDS-to-UTR edits and partial-CDS terminal-stop tests use VEP’s feature coordinates without weakening physical REF validation; known synthetic padding is not treated as missing sequence. Partial-CDS-to-UTR edits now validate REF and report missing required flanks before returning positional consequence facts</p></li>
