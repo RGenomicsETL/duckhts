@@ -588,6 +588,28 @@ generators, seeds, eligibility, denominators, failures and oracle remain untouch
 This tests the declared literal, diploid sequence-mechanics subset, not combined SO/HGVS,
 structural composition, raw-parser emulation or broad missing/ploidy compatibility.
 
+`haplotype_phase_differential.R` audits every GT over `0`, `1`, `2`, `.` at
+ploidies 1–4, every intervening `/`/`|` combination, and absent, `/`, or `|`
+leading prefixes: 7,020 profiles, without sampling. Each profile has a multiallelic
+site and a homozygous second site in another PS. The registered 180-base replay
+fixture supplies the reference; bcftools checks every REF before either engine runs.
+The unchanged Haplosaurus observer and public SQL consume the same VCF/GFF/FASTA.
+Complete CDS/protein multisets, source-record contributors and carrier counts are
+compared; all raw observations, differences, decoded-GT collisions and receipts remain
+in a separate result directory. Eighteen ordinary called diploid profiles and four
+deliberate corruptions guard the verifier. This is a raw-input compatibility audit,
+not a replacement for the original phased-sequence corpus or a population error rate.
+
+```sh
+Rscript test/duckvep/conformance/haplotype_phase_differential.R --max-ploidy 2
+Rscript test/duckvep/conformance/haplotype_phase_differential.R
+```
+
+The smaller command covers all 108 haploid/diploid profiles. Both commands currently
+exit nonzero with retained compatibility disagreements. `--extension-receipt` uses
+the same clean-build binding as the other drivers. Byte-level VEP parser behavior
+cannot be certified from typed GT alone when distinct raw spellings decode identically.
+
 Add `--noncoding-contributors` to run a separately receipted augmented corpus after
 the original gate passes. It adds one homozygous deep-intronic allele per transcript,
 reruns the pinned executable Haplosaurus, and requires its complete observation to

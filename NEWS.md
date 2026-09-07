@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- add a finite raw-GT/Haplosaurus audit that retains missing-call, ploidy and
+  lexical-parser disagreements, including raw spellings that HTSlib decodes
+  identically. This does not broaden the phased reader's compatibility claim
+
 - expose local SO masks and coding status for phased physical edit blocks,
   using the shared coding rules over completed replay. Keep later blocks and
   mark those starting after the first stop; whole-haplotype SO/HGVS is unfinished

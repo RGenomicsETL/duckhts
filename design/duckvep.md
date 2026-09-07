@@ -750,6 +750,13 @@ This is decoded-call interpretation, not emulation of VEP's raw mixed/prefixed-s
 parsing. This helper consumes a declared GT/PS phasing source;
 PSL/PSO or producer-specific phase identities require a separate explicit adapter.
 
+Typed GT is not a lossless representation of raw VCF spelling. For example, HTSlib
+decodes `0|1` and `|0|1` to the same alleles and phase flags, but VEP-116's raw parser
+can give them different Haplosaurus sequences. Exact raw-input compatibility therefore
+requires retained source GT and source-record allele context; reconstructing text from
+decoded calls cannot recover it. The finite raw-GT audit retains these collisions and
+missing-call/ploidy disagreements separately from the certified literal-replay cases.
+
 `duckvep_haplotypes` consumes flat event/transcript/sample calls. DuckDB derives phase
 domains and materializes sorted input; native event ingestion and candidate projection
 are separate operations, so an entire event's cohort is never copied into a first-party
