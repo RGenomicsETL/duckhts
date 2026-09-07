@@ -591,15 +591,20 @@ current-revision evidence.
 
 ## Phased replay with noncoding contributors
 
-|     seed | policy        | input_records | input_calls | input_allele_slots | observed_carriers | provenance_memberships |
-|---------:|:--------------|--------------:|------------:|-------------------:|------------------:|-----------------------:|
-|      173 | strict        |          3764 |       11292 |              22584 |              6000 |                  14292 |
-|      173 | vep116_compat |          3764 |       11292 |              22584 |              6000 |                  14292 |
-| 20260906 | strict        |          3802 |       11406 |              22812 |              6000 |                  14406 |
-| 20260906 | vep116_compat |          3802 |       11406 |              22812 |              6000 |                  14406 |
+| source_revision |     seed | policy        | input_records | input_calls | input_allele_slots | observed_carriers | provenance_memberships |
+|:----------------|---------:|:--------------|--------------:|------------:|-------------------:|------------------:|-----------------------:|
+| eb83f6ff        |      173 | strict        |          3764 |       11292 |              22584 |              6000 |                  14292 |
+| eb83f6ff        |      173 | vep116_compat |          3764 |       11292 |              22584 |              6000 |                  14292 |
+| eb83f6ff        | 20260906 | strict        |          3802 |       11406 |              22812 |              6000 |                  14406 |
+| eb83f6ff        | 20260906 | vep116_compat |          3802 |       11406 |              22812 |              6000 |                  14406 |
+| d1c591b7        |      173 | strict        |          3764 |       11292 |              22584 |              6000 |                  14292 |
+| d1c591b7        |      173 | vep116_compat |          3764 |       11292 |              22584 |              6000 |                  14292 |
+| d1c591b7        | 20260906 | strict        |          3802 |       11406 |              22812 |              6000 |                  14406 |
+| d1c591b7        | 20260906 | vep116_compat |          3802 |       11406 |              22812 |              6000 |                  14406 |
 
-Source eb83f6ff1d03d05a3c9f8135c8ef355b7f431ee7 was built from a clean
-checkout, including an HTSlib clean rebuild. The ledger retains the
+Sources eb83f6ff1d03d05a3c9f8135c8ef355b7f431ee7,
+d1c591b76f8a9a07036736ac0666a004eb58e0eb were built from clean
+checkouts, including an HTSlib clean rebuild. The ledger retains the
 extension hash, input/run receipt hashes and pinned VEP/variation
 revisions. DuckDB used four threads; these are correctness counts, not
 timing or memory measurements.
@@ -614,11 +619,11 @@ observations unchanged. DuckHTS must retain the intronic contributors,
 including on previously implicit reference lanes, with unchanged literal
 CDS/protein and an `outside_cds` contributor status.
 
-Both policies pass all 24,000 carrier comparisons and 57,396 provenance
+Both policies pass all 48,000 carrier comparisons and 114,792 provenance
 memberships. The same biological lanes are counted separately under each
-policy; these are not independent statistical trials. Five deliberately
-corrupted outputs per policy/seed are rejected. Fixed SQL/R tests
-additionally cover UTRs, insertions, missing calls and
+policy and revision; these are not independent statistical trials. Five
+deliberately corrupted outputs per policy/seed are rejected. Fixed SQL/R
+tests additionally cover UTRs, insertions, missing calls and
 coding-overlapping projection failures; a native two-strand span
 enumeration supplies 6,774 assertions for the fix.
 

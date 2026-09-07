@@ -3,14 +3,15 @@ Phased replay: native stream and public SQL
 
 <!-- duckvep_haplotypes.md is generated from duckvep_haplotypes.Rmd. -->
 
-Source: b6f0016ffd287336e8c1777740f67457016d7cbe. This is the first
-recorded baseline for the current **literal phased replay**
-implementation, not combined SO/HGVS. All runs use one thread pinned to
-CPU 2 on an Intel Core i5-13500, DuckDB 1.5.3, and a source-bound clean
-extension build. The native bridge uses the same kernel sources compiled
-with `-O3 -DNDEBUG`; receipts retain compiler/version, binary and
-fixture hashes, worker jobs, GNU-time logs and complete result
-fingerprints.
+Current source: d1c591b76f8a9a07036736ac0666a004eb58e0eb;
+identical-workload predecessor:
+b6f0016ffd287336e8c1777740f67457016d7cbe. These measurements cover
+**literal phased replay**, not combined SO/HGVS. All runs use one thread
+pinned to CPU 2 on an Intel Core i5-13500, DuckDB 1.5.3, and a
+source-bound clean extension build. The native bridge uses the same
+kernel sources compiled with `-O3 -DNDEBUG`; receipts retain
+compiler/version, binary and fixture hashes, worker jobs, GNU-time logs
+and complete result fingerprints.
 
 ## Workload and verification
 
@@ -59,18 +60,35 @@ observed in the native stream, not inferred SQL counters.
 
 | transcripts | samples | overlap | mode   | min_s | median_s | max_s | max_process_rss_mib |
 |------------:|--------:|--------:|:-------|------:|---------:|------:|--------------------:|
-|        1024 |       4 |       1 | native | 0.003 |    0.003 | 0.003 |              74.477 |
-|        1024 |       4 |       1 | sql    | 0.083 |    0.084 | 0.084 |             210.406 |
-|        1024 |      64 |       1 | native | 0.013 |    0.013 | 0.013 |              74.477 |
-|        1024 |      64 |       1 | sql    | 0.842 |    0.850 | 0.856 |             392.992 |
+|        1024 |       4 |       1 | native | 0.003 |    0.003 | 0.003 |              74.633 |
+|        1024 |       4 |       1 | sql    | 0.049 |    0.050 | 0.050 |             213.789 |
+|        1024 |      64 |       1 | native | 0.013 |    0.013 | 0.013 |              74.633 |
+|        1024 |      64 |       1 | sql    | 0.329 |    0.335 | 0.336 |             375.457 |
 |        1024 |      64 |      16 | native | 0.017 |    0.017 | 0.017 |              74.480 |
-|        1024 |      64 |      16 | sql    | 0.875 |    0.878 | 0.892 |             393.516 |
-|        1024 |      64 |      64 | native | 0.018 |    0.018 | 0.018 |              74.480 |
-|        1024 |      64 |      64 | sql    | 0.850 |    0.853 | 0.857 |             393.062 |
+|        1024 |      64 |      16 | sql    | 0.345 |    0.353 | 0.353 |             376.910 |
+|        1024 |      64 |      64 | native | 0.018 |    0.018 | 0.019 |              74.477 |
+|        1024 |      64 |      64 | sql    | 0.337 |    0.343 | 0.348 |             377.098 |
 |        1024 |     256 |       1 | native | 0.046 |    0.047 | 0.048 |              74.480 |
-|        1024 |     256 |       1 | sql    | 3.438 |    3.446 | 3.488 |            1030.109 |
-|       10240 |      64 |      16 | native | 0.167 |    0.167 | 0.168 |              74.480 |
-|       10240 |      64 |      16 | sql    | 9.105 |    9.162 | 9.300 |            2213.879 |
+|        1024 |     256 |       1 | sql    | 1.302 |    1.316 | 1.361 |             957.355 |
+|       10240 |      64 |      16 | native | 0.164 |    0.167 | 0.172 |              74.637 |
+|       10240 |      64 |      16 | sql    | 4.131 |    4.184 | 4.236 |            2130.625 |
+
+Grouped input validation replaces two per-row distinct-count windows
+with one event-identity aggregate and the ploidy count in the existing
+transcript/sample phase-domain aggregate. Duplicate-call rejection
+remains a window count. Raw calls, complete phase domains, final sort,
+native execution and output checks are unchanged. The same six workloads
+and all complete SQL row fingerprints match the predecessor; input and
+native benchmark binary hashes also match.
+
+| transcripts | samples | overlap | median_s_before | median_s_after | median_change_percent | max_process_rss_mib_before | max_process_rss_mib_after |
+|------------:|--------:|--------:|----------------:|---------------:|----------------------:|---------------------------:|--------------------------:|
+|        1024 |       4 |       1 |           0.084 |          0.050 |               -40.476 |                    210.406 |                   213.789 |
+|        1024 |      64 |       1 |           0.850 |          0.335 |               -60.588 |                    392.992 |                   375.457 |
+|        1024 |      64 |      16 |           0.878 |          0.353 |               -59.795 |                    393.516 |                   376.910 |
+|        1024 |      64 |      64 |           0.853 |          0.343 |               -59.789 |                    393.062 |                   377.098 |
+|        1024 |     256 |       1 |           3.446 |          1.316 |               -61.811 |                   1030.109 |                   957.355 |
+|       10240 |      64 |      16 |           9.162 |          4.184 |               -54.333 |                   2213.879 |                  2130.625 |
 
 Each recorded pass uses a fresh process and a full warm-up. Native
 timing starts after workspace initialization and includes ordered-feed
@@ -134,11 +152,11 @@ sorting and output memory belong to DuckDB and may grow with the
 complete relation. The process RSS table must not be presented as a
 constant-total-memory guarantee.
 
-There is no identical predecessor workload for a regression claim. Three
-repeated passes, one machine and this deliberately shared synthetic
-cohort do not establish production throughput or a statistical
-performance change. Combined SO/HGVS and typed structural composition
-will require renewed measurements when implemented.
+This matched before/after comparison retains three repeated passes per
+workload and revision. One machine and this deliberately shared
+synthetic cohort do not establish production throughput or statistical
+significance. Combined SO/HGVS and typed structural composition will
+require renewed measurements when implemented.
 
 ## Reproduction
 

@@ -988,13 +988,14 @@ stopifnot(!anyDuplicated(replay[c("source_revision", "seed", "policy")]),
   all(replay$controls_rejected == 5L), all(replay$original_controls_rejected == 6L),
   all(replay$original_oracle_failures == 0L), all(replay$original_frame_failures == 0L),
   all(replay$original_frame_control_rejected))
-table <- replay[c("seed", "policy", "input_records", "input_calls",
+table <- replay[c("source_revision", "seed", "policy", "input_records", "input_calls",
   "input_allele_slots", "observed_carriers", "provenance_memberships")]
+table$source_revision <- substr(table$source_revision, 1L, 8L)
 knitr::kable(table, row.names = FALSE)
 ```
 
-Source `r unique(replay$source_revision)` was built from a clean checkout, including
-an HTSlib clean rebuild. The ledger retains the extension hash, input/run receipt
+Sources `r paste(unique(replay$source_revision), collapse = ", ")` were built from
+clean checkouts, including an HTSlib clean rebuild. The ledger retains the extension hash, input/run receipt
 hashes and pinned VEP/variation revisions. DuckDB used four threads; these are
 correctness counts, not timing or memory measurements.
 
@@ -1010,7 +1011,7 @@ unchanged literal CDS/protein and an `outside_cds` contributor status.
 Both policies pass all `r format(sum(replay$observed_carriers), big.mark = ",")`
 carrier comparisons and `r format(sum(replay$provenance_memberships), big.mark = ",")`
 provenance memberships. The same biological lanes are counted separately under
-each policy; these are not independent statistical trials. Five deliberately
+each policy and revision; these are not independent statistical trials. Five deliberately
 corrupted outputs per policy/seed are rejected. Fixed SQL/R tests additionally
 cover UTRs, insertions, missing calls and coding-overlapping projection failures;
 a native two-strand span enumeration supplies 6,774 assertions for the fix.

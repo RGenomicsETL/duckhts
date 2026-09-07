@@ -12,24 +12,40 @@ history <- read.csv(file.path(root, "benchmarks/data/duckvep_haplotypes.csv"),
   colClasses = c(source_revision = "character", xor_hash = "character", sum_hash = "character"))
 stopifnot(all(history$extension_build_binding == "htslib_distclean_make_release"),
   !anyDuplicated(history[c("source_revision", "transcripts", "samples", "overlap", "mode", "pass")]))
+revisions <- unique(history$source_revision)
+stopifnot(length(revisions) >= 2L)
+revision <- tail(revisions, 1L)
+baseline_revision <- tail(revisions, 2L)[1L]
 keys <- c("transcripts", "samples", "overlap", "mode")
-groups <- split(history, interaction(history[keys], drop = TRUE))
+groups <- split(history, interaction(history[c("source_revision", keys)], drop = TRUE))
 summary <- do.call(rbind, lapply(groups, function(x) {
   stopifnot(nrow(x) == 3L, all(sort(x$pass) == 1:3))
-  data.frame(x[1L, keys], min_s = min(x$seconds), median_s = median(x$seconds),
+  data.frame(x[1L, c("source_revision", keys)], min_s = min(x$seconds), median_s = median(x$seconds),
     max_s = max(x$seconds), max_process_rss_mib = max(x$peak_process_rss_kib) / 1024)
 }))
+comparison <- merge(
+  subset(summary, source_revision == baseline_revision & mode == "sql"),
+  subset(summary, source_revision == revision & mode == "sql"),
+  by = keys, suffixes = c("_before", "_after"))
+comparison$median_change_percent <- 100 * (comparison$median_s_after / comparison$median_s_before - 1)
+comparison <- comparison[do.call(order, comparison[keys]), ]
+current <- history[history$source_revision == revision, ]
+summary <- summary[summary$source_revision == revision, setdiff(names(summary), "source_revision")]
 summary <- summary[do.call(order, summary[keys]), ]
-core <- history[history$mode == "native" & history$pass == 1L, ]
+core <- current[current$mode == "native" & current$pass == 1L, ]
 core <- core[order(core$transcripts, core$samples, core$overlap), ]
-public <- history[history$mode == "sql" & history$pass == 1L, ]
+public <- current[current$mode == "sql" & current$pass == 1L, ]
 public <- public[order(public$transcripts, public$samples, public$overlap), ]
 stopifnot(identical(as.list(core[c("transcripts", "samples", "overlap")]),
   as.list(public[c("transcripts", "samples", "overlap")])))
+fingerprints <- unique(history[history$mode == "sql", c("transcripts", "samples", "overlap",
+  "output_leaves", "output_carriers", "cds_bytes", "protein_bytes", "physical_edits",
+  "contributors", "blocks", "json_bytes", "xor_hash", "sum_hash")])
+stopifnot(nrow(comparison) == nrow(public), nrow(fingerprints) == nrow(public))
 ```
 
-Source: `r unique(history$source_revision)`. This is the first recorded baseline
-for the current **literal phased replay** implementation, not combined SO/HGVS.
+Current source: `r revision`; identical-workload predecessor: `r baseline_revision`.
+These measurements cover **literal phased replay**, not combined SO/HGVS.
 All runs use one thread pinned to CPU 2 on an Intel Core i5-13500, DuckDB 1.5.3,
 and a source-bound clean extension build. The native bridge uses the same kernel
 sources compiled with `-O3 -DNDEBUG`; receipts retain compiler/version, binary and
@@ -75,6 +91,19 @@ pool peaks below are observed in the native stream, not inferred SQL counters.
 
 ```{r timing}
 knitr::kable(summary, row.names = FALSE, digits = 3)
+```
+
+Grouped input validation replaces two per-row distinct-count windows with one
+event-identity aggregate and the ploidy count in the existing transcript/sample
+phase-domain aggregate. Duplicate-call rejection remains a window count. Raw
+calls, complete phase domains, final sort, native execution and output checks are
+unchanged. The same six workloads and all complete SQL row fingerprints match
+the predecessor; input and native benchmark binary hashes also match.
+
+```{r sql-comparison}
+knitr::kable(comparison[c("transcripts", "samples", "overlap", "median_s_before",
+  "median_s_after", "median_change_percent", "max_process_rss_mib_before",
+  "max_process_rss_mib_after")], row.names = FALSE, digits = 3)
 ```
 
 Each recorded pass uses a fresh process and a full warm-up. Native timing starts
@@ -126,9 +155,9 @@ ceiling and a 4 GB DuckDB memory limit. SQL input, sorting and output memory bel
 to DuckDB and may grow with the complete relation. The process RSS table must not
 be presented as a constant-total-memory guarantee.
 
-There is no identical predecessor workload for a regression claim. Three repeated
-passes, one machine and this deliberately shared synthetic cohort do not establish
-production throughput or a statistical performance change. Combined SO/HGVS and
+This matched before/after comparison retains three repeated passes per workload
+and revision. One machine and this deliberately shared synthetic cohort do not
+establish production throughput or statistical significance. Combined SO/HGVS and
 typed structural composition will require renewed measurements when implemented.
 
 ## Reproduction
