@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- return local coding-block SO masks, explicit coding status and after-first-stop
+  flags in bundled phased replay. Unresolved effects remain NA without hiding
+  known sequence or contributors; this is not complete whole-haplotype SO/HGVS
+
 - reuse grouped input validation in bundled phased replay, preserving source
   identity, duplicate-call, ploidy and phase-domain checks
 

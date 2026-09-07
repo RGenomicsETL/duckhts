@@ -65,6 +65,7 @@ typedef struct {
     duckvep_haplotype_source_t source;
     duckvep_cds_edit_status_t projection_status;
     uint8_t evidence_flags;
+    const duckvep_event_t *prepared; /* Borrowed source geometry for this transcript drain. */
 } duckvep_haplotype_contributor_t;
 
 typedef struct {

@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- expose local SO masks and coding status for phased physical edit blocks,
+  using the shared coding rules over completed replay. Keep later blocks and
+  mark those starting after the first stop; whole-haplotype SO/HGVS is unfinished
+
 - compute phased-input event identity and transcript/sample ploidy checks once
   per group, retaining duplicate-call rejection and complete phase domains
 

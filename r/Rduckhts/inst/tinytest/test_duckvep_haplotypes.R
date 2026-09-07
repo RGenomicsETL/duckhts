@@ -64,6 +64,13 @@ local({
     expect_identical(n_result$stop_in_displaced_frame, FALSE)
     expect_equal(n_result$sequence_status, "ok")
     expect_equal(nrow(n_result$contributors[[1L]]), 1L)
+    n_changed <- rduckhts_haplotypes(con, sub("102 AS position", "103 AS position", n_call),
+      "n_codons", phase_policy = policy)
+    expect_equal(n_changed$cds, "ATGACNTGNGCC")
+    expect_equal(n_changed$protein, "MTXA")
+    expect_equal(n_changed$sequence_status, "ok")
+    expect_equal(n_changed$coding_blocks[[1]]$coding_status, "unsupported")
+    expect_true(is.na(n_changed$coding_blocks[[1]]$local_consequence_mask))
   }
   expect_equal(sort(actual$cds), c("CAAAAAAAAAAA", "CACAAAAAAAAA", "CGAAAAAAAAAA"))
   expect_equal(sort(actual$carrier_count), c(1,1,2))
@@ -74,12 +81,37 @@ local({
   expect_equal(sum(lengths(lapply(actual$contributors, function(x) x$event_index))), 5L)
   blocks <- do.call(rbind, actual$coding_blocks)
   blocks <- blocks[order(blocks$alternate), ]
+  missense_mask <- dbGetQuery(con,
+    "SELECT consequence_mask FROM duckvep_so_terms() WHERE consequence='missense_variant'")$consequence_mask
+  synonymous_mask <- dbGetQuery(con,
+    "SELECT consequence_mask FROM duckvep_so_terms() WHERE consequence='synonymous_variant'")$consequence_mask
+  start_lost_mask <- dbGetQuery(con,
+    "SELECT consequence_mask FROM duckvep_so_terms() WHERE consequence='start_lost'")$consequence_mask
+  expect_true(all(blocks$coding_status == "ok"))
+  expect_equal(blocks$local_consequence_mask, rep(start_lost_mask, 3L))
+  expect_true(all(!blocks$after_first_stop))
   expect_equal(blocks$cds_start, rep(1, 3))
   expect_equal(blocks$reference, c("A", "AAA", "AA"))
   expect_equal(blocks$alternate, c("C", "CAC", "CG"))
   expect_equal(blocks$alt_start0, rep(0, 3))
   expect_equal(lengths(blocks$event_indices), c(1, 2, 2))
   expect_equal(blocks$event_indices, list(1, c(1, 3), c(1, 2)))
+  cis_tx <- sub("AAAAAAAAAAAA", "ATGTCTGCCTAA", tx, fixed = TRUE)
+  expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('cis',",
+    dbQuoteString(con, "SELECT 0::UINTEGER seq_region"), ",", dbQuoteString(con, cis_tx), ",",
+    dbQuoteString(con, exons), ")"))$loaded)
+  cis_calls <- paste("SELECT event_index,0 seq_region,position,reference,alternate,1 alt_index,",
+    "0 transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set",
+    "FROM (VALUES (1,103,'T','A'),(2,104,'C','G')) v(event_index,position,reference,alternate)")
+  for (policy in c("strict", "vep116_compat")) {
+    cis <- rduckhts_haplotypes(con, cis_calls, "cis", phase_policy = policy)
+    expect_equal(cis$cds, "ATGAGTGCCTAA")
+    expect_equal(cis$protein, "MSA*")
+    expect_equal(cis$coding_blocks[[1]]$coding_status, "ok")
+    expect_equal(cis$coding_blocks[[1]]$local_consequence_mask, synonymous_mask)
+    expect_equal(cis$coding_blocks[[1]]$event_indices, list(c(1, 2)))
+    expect_equal(nrow(cis$protein_differences[[1]]), 0L)
+  }
   expect_true(all(blocks$length_change == 0 & blocks$sequence_flags == 0))
   expect_equal(nrow(rduckhts_haplotypes(con, calls, "haps", "vep116_compat")), 2L)
   noncoding <- paste("SELECT * REPLACE(0::UBIGINT AS transcript_flags,",
@@ -184,6 +216,9 @@ local({
     expect_equal(blocks$reference, blocks$alternate)
     expect_equal(blocks$sequence_flags, 5)
     expect_equal(blocks$event_indices[[1]], c(1, 2))
+    expect_equal(blocks$coding_status, "ok")
+    expect_equal(blocks$local_consequence_mask, synonymous_mask)
+    expect_identical(blocks$after_first_stop, FALSE)
   }
   reverse_tx <- paste("SELECT * REPLACE(1::UINTEGER AS transcript_index,-1::TINYINT AS strand,",
     "'TTTTTTTTTTTT'::BLOB AS cds_sequence) FROM (", tx, ")")
@@ -221,6 +256,9 @@ local({
   expect_equal(stopped$sequence_flags, 8)
   expect_identical(stopped$stop_in_displaced_frame, FALSE)
   expect_equal(nrow(stopped$coding_blocks[[1]]), 2L)
+  expect_equal(stopped$coding_blocks[[1]]$coding_status, c("ok", "ok"))
+  expect_equal(stopped$coding_blocks[[1]]$local_consequence_mask, rep(missense_mask, 2L))
+  expect_identical(stopped$coding_blocks[[1]]$after_first_stop, c(FALSE, TRUE))
   expect_equal(stopped$contributors[[1]]$event_index, 1:2)
   expect_equal(stopped$cds_differences[[1]]$ref_start0, c(3, 9))
   expect_equal(stopped$cds_differences[[1]]$reference, c("A", "C"))

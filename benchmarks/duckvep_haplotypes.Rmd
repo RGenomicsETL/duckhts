@@ -9,9 +9,18 @@ output: github_document
 knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 root <- normalizePath(Sys.getenv("DUCKHTS_REPO_ROOT", getwd()), mustWork = TRUE)
 history <- read.csv(file.path(root, "benchmarks/data/duckvep_haplotypes.csv"),
-  colClasses = c(source_revision = "character", xor_hash = "character", sum_hash = "character"))
+  colClasses = c(source_revision = "character", xor_hash = "character", sum_hash = "character",
+    replay_xor_hash = "character", replay_sum_hash = "character"))
 stopifnot(all(history$extension_build_binding == "htslib_distclean_make_release"),
   !anyDuplicated(history[c("source_revision", "transcripts", "samples", "overlap", "mode", "pass")]))
+if (!"output_contract" %in% names(history)) history$output_contract <- NA_character_
+history$output_contract[is.na(history$output_contract)] <- "literal_replay"
+for (field in c("json_bytes", "xor_hash", "sum_hash")) {
+  projection <- paste0("replay_", field)
+  if (!projection %in% names(history)) history[[projection]] <- history[[field]]
+  missing <- is.na(history[[projection]])
+  history[[projection]][missing] <- history[[field]][missing]
+}
 revisions <- unique(history$source_revision)
 stopifnot(length(revisions) >= 2L)
 revision <- tail(revisions, 1L)
@@ -38,14 +47,20 @@ public <- current[current$mode == "sql" & current$pass == 1L, ]
 public <- public[order(public$transcripts, public$samples, public$overlap), ]
 stopifnot(identical(as.list(core[c("transcripts", "samples", "overlap")]),
   as.list(public[c("transcripts", "samples", "overlap")])))
-fingerprints <- unique(history[history$mode == "sql", c("transcripts", "samples", "overlap",
+fingerprint_keys <- c("transcripts", "samples", "overlap")
+fingerprints <- unique(history[history$mode == "sql", c(fingerprint_keys, "output_contract",
   "output_leaves", "output_carriers", "cds_bytes", "protein_bytes", "physical_edits",
   "contributors", "blocks", "json_bytes", "xor_hash", "sum_hash")])
-stopifnot(nrow(comparison) == nrow(public), nrow(fingerprints) == nrow(public))
+replay_fingerprints <- unique(history[history$mode == "sql", c(fingerprint_keys,
+  "replay_json_bytes", "replay_xor_hash", "replay_sum_hash")])
+stopifnot(nrow(comparison) == nrow(public),
+  !anyDuplicated(fingerprints[c(fingerprint_keys, "output_contract")]),
+  !anyDuplicated(replay_fingerprints[fingerprint_keys]))
 ```
 
-Current source: `r revision`; identical-workload predecessor: `r baseline_revision`.
-These measurements cover **literal phased replay**, not combined SO/HGVS.
+Current source: `r revision`; same-input predecessor: `r baseline_revision`.
+Native measurements cover literal phased replay. SQL materializes all current
+fields, including local coding-block SO; whole-haplotype SO/HGVS is unfinished.
 All runs use one thread pinned to CPU 2 on an Intel Core i5-13500, DuckDB 1.5.3,
 and a source-bound clean extension build. The native bridge uses the same kernel
 sources compiled with `-O3 -DNDEBUG`; receipts retain compiler/version, binary and
@@ -73,7 +88,10 @@ sample/lane/PS/ploidy membership. SQL validation compares the full carrier
 multiset with decoded input, checks sequences and edit provenance, and rejects an
 injected duplicate. Native validation also rejects a corrupted expected sequence.
 Every measured pass must retain all common native/SQL denominators and SQL's full,
-canonicalized nested-row fingerprint; failed runs are not promoted.
+canonicalized nested-row fingerprint; failed runs are not promoted. Full fingerprints
+must also agree across revisions sharing an output contract. An additional projection
+of every pre-existing field must agree across the additive coding-block schema change;
+it does not replace validation of the new full output.
 
 ```{r denominators}
 knitr::kable(core[c("transcripts", "samples", "overlap", "input_records",
@@ -93,12 +111,14 @@ pool peaks below are observed in the native stream, not inferred SQL counters.
 knitr::kable(summary, row.names = FALSE, digits = 3)
 ```
 
-Grouped input validation replaces two per-row distinct-count windows with one
-event-identity aggregate and the ploidy count in the existing transcript/sample
-phase-domain aggregate. Duplicate-call rejection remains a window count. Raw
-calls, complete phase domains, final sort, native execution and output checks are
-unchanged. The same six workloads and all complete SQL row fingerprints match
-the predecessor; input and native benchmark binary hashes also match.
+The current SQL output adds each block's local SO mask, coding status and position
+relative to the first stop. It opens a shared coding context on completed replay
+and evaluates physical blocks; it does not rebuild each leaf again. Consequently
+this is a same-input cost comparison for additional work and wider output, not an
+identical-output speedup or a claim of no regression. The native count sink still
+omits local SO evaluation. Prior sequence, provenance and difference fields retain
+their complete projected fingerprints; new full fingerprints and byte counts are
+recorded separately.
 
 ```{r sql-comparison}
 knitr::kable(comparison[c("transcripts", "samples", "overlap", "median_s_before",
@@ -113,7 +133,8 @@ does **not** include alignment, DuckDB, or nested output materialization.
 
 SQL timing covers `CREATE OR REPLACE TABLE ... AS SELECT * FROM duckvep_haplotypes(...)`:
 preparation, phase-domain discovery, mandatory sort, workspace initialization,
-replay, both sequence alignments and **all** nested output columns. Input/model
+replay, both sequence alignments, local coding-block SO and **all** nested output
+columns. Input/model
 staging is outside timing. The warm-up output table is replaced by the measured
 table. JSON sizing and fingerprint aggregation occur afterward, not in the timer;
 no file-output throughput is claimed.
@@ -157,7 +178,7 @@ be presented as a constant-total-memory guarantee.
 
 This matched before/after comparison retains three repeated passes per workload
 and revision. One machine and this deliberately shared synthetic cohort do not
-establish production throughput or statistical significance. Combined SO/HGVS and
+establish production throughput or statistical significance. Whole-haplotype SO/HGVS and
 typed structural composition will require renewed measurements when implemented.
 
 ## Reproduction

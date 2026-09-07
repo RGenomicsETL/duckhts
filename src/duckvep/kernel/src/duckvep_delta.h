@@ -529,6 +529,43 @@ DUCKVEP_INTERNAL_API duckvep_coding_context_status_t duckvep_coding_context_buil
     size_t                       alt_peptide_cap,
     duckvep_coding_context_t    *ctx);
 
+/* Open the same context over completed apply/translate results, without copying,
+ * replaying or translating. The views and metadata must come from successful
+ * duckvep_haplotype_apply_cds_edits and duckvep_translate_cds calls for this edit
+ * set, strand and table. Both peptides contain every complete codon, not a
+ * first-stop prefix or a curated reference protein. Edit order may be ascending
+ * or descending after replay. All storage stays borrowed and immutable while
+ * the context is consumed; output must not overlap any input. Metadata failures
+ * leave the context zeroed. This does not validate the replay a second time. */
+DUCKVEP_INTERNAL_API duckvep_coding_context_status_t duckvep_coding_context_open_replay(
+    const uint8_t                    *ref_cds,
+    size_t                            ref_cds_len,
+    const duckvep_edit_set_t          *edit_set,
+    int8_t                            transcript_strand,
+    duckvep_codon_table_t             table,
+    const uint8_t                    *alt_cds,
+    const duckvep_haplotype_result_t  *applied,
+    const uint8_t                    *ref_peptide,
+    const duckvep_translation_t      *ref_translation,
+    const uint8_t                    *alt_peptide,
+    const duckvep_translation_t      *alt_translation,
+    duckvep_coding_context_t         *ctx);
+
+/* Attach the selected model's phase padding, complete flanks and reference
+ * peptide-edit overlay to a context opened on that model's CDS. A single
+ * physical edit supplies its CDS start and, when available, its prepared source
+ * event for genomic insertion-length reach. Compound sets pass NULL/zero.
+ * The context may be partially enriched on failure; consume it only after OK.
+ * No sequence is copied, edited or translated. */
+DUCKVEP_INTERNAL_API duckvep_variant_coding_context_status_t duckvep_coding_context_attach_model(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    const duckvep_sequence_pool_t    *seq,
+    size_t                            tx_idx,
+    const duckvep_event_t            *event,
+    uint32_t                          physical_edit_start1,
+    duckvep_coding_context_t         *ctx);
+
 /* Build and enrich a CodingContext from an already projected edit set and the
  * immutable model. One length-changing edit may retain the virtual local
  * sequence representation; multi-edit/haplotype sets materialize once. The

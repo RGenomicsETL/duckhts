@@ -444,42 +444,48 @@ void duckvep_effect_ctx_apply_event(
     }
 }
 
+static uint64_t delta_pre_bits(const duckvep_sequence_delta_t *delta) {
+    if (delta == NULL || !delta->valid) return 0u;
+    uint64_t pre = DUCKVEP_PRE(DUCKVEP_PRE_DELTA);
+    if (delta->synonymous) pre |= DUCKVEP_PRE(DUCKVEP_PRE_SYNONYMOUS);
+    if (delta->missense) pre |= DUCKVEP_PRE(DUCKVEP_PRE_MISSENSE);
+    if (delta->stop_gained) pre |= DUCKVEP_PRE(DUCKVEP_PRE_STOP_GAINED);
+    if (delta->stop_lost) pre |= DUCKVEP_PRE(DUCKVEP_PRE_STOP_LOST);
+    if (delta->stop_retained) pre |= DUCKVEP_PRE(DUCKVEP_PRE_STOP_RETAINED);
+    if (delta->start_lost) pre |= DUCKVEP_PRE(DUCKVEP_PRE_START_LOST);
+    if (delta->start_retained) pre |= DUCKVEP_PRE(DUCKVEP_PRE_START_RETAINED);
+    if (delta->frameshift) pre |= DUCKVEP_PRE(DUCKVEP_PRE_FRAMESHIFT);
+    if (delta->inframe_deletion) pre |= DUCKVEP_PRE(DUCKVEP_PRE_INFRAME_DELETION);
+    if (delta->inframe_insertion) pre |= DUCKVEP_PRE(DUCKVEP_PRE_INFRAME_INSERTION);
+    if (delta->protein_altering) pre |= DUCKVEP_PRE(DUCKVEP_PRE_PROTEIN_ALTERING);
+    if (delta->coding_unknown) pre |= DUCKVEP_PRE(DUCKVEP_PRE_CODING_UNKNOWN);
+    if (delta->partial_codon) pre |= DUCKVEP_PRE(DUCKVEP_PRE_PARTIAL_CODON);
+    return pre;
+}
+
+uint64_t duckvep_effect_eval_coding_delta(const duckvep_sequence_delta_t *delta) {
+    uint64_t pre = delta_pre_bits(delta);
+    return pre ? duckvep_effect_eval(pre) : 0u;
+}
+
 void duckvep_effect_ctx_apply_delta(
     duckvep_effect_ctx_t           *ctx,
     const duckvep_sequence_delta_t *delta) {
 
-    if (ctx == NULL || delta == NULL || !delta->valid) return;
-    ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_DELTA);
-    if (delta->synonymous) ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_SYNONYMOUS);
-    if (delta->missense &&
-        (ctx->pre_bits &
-         (DUCKVEP_PRE(DUCKVEP_PRE_INSERTION) |
-          DUCKVEP_PRE(DUCKVEP_PRE_DELETION))) == 0u) {
-        ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_MISSENSE);
-    }
-    if (delta->stop_gained) ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_STOP_GAINED);
-    if (delta->stop_lost) ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_STOP_LOST);
-    if (delta->stop_retained) ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_STOP_RETAINED);
-    if (delta->start_lost) ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_START_LOST);
-    if (delta->start_retained) ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_START_RETAINED);
-    if (delta->frameshift &&
-        (ctx->pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_SNP)) == 0u) {
-        ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_FRAMESHIFT);
-    }
-    if (delta->inframe_deletion &&
-        (ctx->pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_DELETION)) != 0u) {
-        ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_INFRAME_DELETION);
-    }
-    if (delta->inframe_insertion &&
-        (ctx->pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_INSERTION)) != 0u) {
-        ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_INFRAME_INSERTION);
-    }
-    if (delta->protein_altering)
-        ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_PROTEIN_ALTERING);
-    if (delta->coding_unknown)
-        ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_CODING_UNKNOWN);
-    if (delta->partial_codon)
-        ctx->pre_bits |= DUCKVEP_PRE(DUCKVEP_PRE_PARTIAL_CODON);
+    if (ctx == NULL) return;
+    uint64_t pre = delta_pre_bits(delta);
+    /* Independent events retain VEP's uploaded-feature class gates. Physical
+     * compound blocks have already resolved their edit/frame shape in delta;
+     * they must not inherit an arbitrary contributor's transport class. */
+    if (ctx->pre_bits & (DUCKVEP_PRE(DUCKVEP_PRE_INSERTION) | DUCKVEP_PRE(DUCKVEP_PRE_DELETION)))
+        pre &= ~DUCKVEP_PRE(DUCKVEP_PRE_MISSENSE);
+    if (ctx->pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_SNP))
+        pre &= ~DUCKVEP_PRE(DUCKVEP_PRE_FRAMESHIFT);
+    if (!(ctx->pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_DELETION)))
+        pre &= ~DUCKVEP_PRE(DUCKVEP_PRE_INFRAME_DELETION);
+    if (!(ctx->pre_bits & DUCKVEP_PRE(DUCKVEP_PRE_INSERTION)))
+        pre &= ~DUCKVEP_PRE(DUCKVEP_PRE_INFRAME_INSERTION);
+    ctx->pre_bits |= pre;
 }
 
 void duckvep_effect_ctx_apply_sv(

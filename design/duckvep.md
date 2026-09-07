@@ -674,6 +674,12 @@ the public haplotype protein is a length-delimited prefix through that stop. Lat
 residues stay in worker storage for coding-context consumption, and later source
 events remain in contributor provenance. Full and stop-truncated translation do
 not have separate biological implementations.
+Coding contexts can borrow a completed replay and its complete raw translations.
+The same opener serves the context builder and native leaf consumers; it checks
+sequence/translation extents without applying edits or translating again. Displayed
+first-stop prefixes and curated reference proteins are not interchangeable with
+these complete raw peptide views. The model and worker buffers remain immutable
+while a consumer holds the context.
 The leaf's `stop_in_displaced_frame` fact intersects the first stop's three rebuilt
 CDS bases with physical frame excursions. An excursion starts at a frame-changing
 edit and ends after the restoring edit's alternate bases, or continues downstream
@@ -775,7 +781,7 @@ edits and keeps a block open while its frame is displaced. Each block retains it
 source event IDs in physical-edit order and frame flags, and describes a reference span plus a span of
 the already rebuilt CDS. Retained bases between edits stay in those spans; pure
 insertions/deletions have one empty span. This is a composite edit representation,
-not an alignment, HGVS normalization, or a second consequence classifier. At most
+not an alignment or HGVS normalization. At most
 `max_leaf_edits` blocks are stored in the initialized workspace, and an unknown or
 failed sequence has NULL blocks. A parallel event-ID array follows physical edits through
 splitting, heap sorting and reversal; each block borrows its edit slice. An uploaded
@@ -783,6 +789,24 @@ MNV may contribute several islands within or across blocks, so repeated IDs are 
 not deduplicated. SQL `event_indices` replaces the count-only block field; its length is
 the physical edit count. The ID array shares `max_leaf_edits` and is included in the
 workspace byte limit. Complete raw contributor provenance remains on the leaf.
+
+Each block's `local_consequence_mask` evaluates the shared generated SO rules over
+that block's physical coding delta in the completed haplotype. It does not OR
+independent event labels or apply an arbitrary contributor's uploaded-feature
+class gates. Decode it with `duckvep_so_terms()`. `coding_status` is `ok`,
+`unsupported`, `missing_transcript_tail`, `missing_transcript_flank`, or
+`invalid_argument`; only `ok` has a non-NULL mask. Known zero is distinct from
+unknown. Conservative coding predicates may be unsupported for an N-containing
+codon even when consensus sequence replay is available.
+`after_first_stop` means the block's first alternate codon is strictly after the
+first translated stop codon; it is false if no stop exists. A block starting before
+the stop but spanning it is not marked. Later blocks retain their local facts and
+provenance: this positional fact does not assert biological expression or rescue.
+The coding context borrows the complete alternate translation and model overlay;
+one separate raw reference translation is cached per closing transcript, distinct
+from the edited/display reference used for protein differences. Neither model
+mutation nor per-leaf replay, translation or allocation is required by this consumer.
+
 `cds_differences` is a separate alignment view, not a change to physical edit
 identity. Indel-bearing leaves use the pinned VEP-116 pure-Perl NW score and
 traceback tie order; substitution-only leaves compare corresponding positions.
@@ -813,8 +837,8 @@ must not be retained. Only preparation/materialization uses that connection. A b
 returns an error, including recursive preparation, while completed scan results and native
 state have independent ownership. Caller TEMP objects/uncommitted writes are not visible.
 
-This public sequence-mechanics surface is not complete phased annotation. Native
-sequence/indel flags are not combined SO or compound HGVS, and literal replay does not yet
+This public sequence-mechanics surface is not complete phased annotation. Local
+block masks and sequence/indel flags are not whole-haplotype SO or compound HGVS, and literal replay does not yet
 compose typed structural events. Existing executable Haplosaurus comparisons exercise
 native replay and the public SQL surface for their declared phased-sequence scope;
 they do not certify compound SO/HGVS. The

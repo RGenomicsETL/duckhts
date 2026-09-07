@@ -177,6 +177,13 @@ void duckvep_effect_ctx_apply_delta(
     duckvep_effect_ctx_t           *ctx,
     const duckvep_sequence_delta_t *delta);
 
+/* Evaluate resolved coding predicates through the same generated SO program,
+ * without an independent upload's SNP/insertion/deletion class gates. A physical
+ * interaction block supplies its actual frame/length predicates. Invalid deltas
+ * return zero, which is not evidence of a known empty consequence set. This is
+ * local coding SO, not contributor topology or whole-haplotype expression. */
+uint64_t duckvep_effect_eval_coding_delta(const duckvep_sequence_delta_t *delta);
+
 void duckvep_effect_ctx_apply_sv(
     duckvep_effect_ctx_t      *ctx,
     const duckvep_sv_effect_t *sv);

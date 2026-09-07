@@ -8,6 +8,7 @@ DUCKDB_EXTENSION_EXTERN
 #include "kernel/src/duckvep_haplotype_stream.h"
 #include "kernel/src/duckvep_sequence_diff.h"
 #include "kernel/src/duckvep_dna.h"
+#include "kernel/src/duckvep_effect.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -18,6 +19,7 @@ enum { LIMIT_EVENTS, LIMIT_TRANSCRIPTS, LIMIT_CARRIERS, LIMIT_PREFIXES, LIMIT_PR
     LIMIT_ALLELES, LIMIT_LEAF_EVENTS, LIMIT_LEAF_EDITS, LIMIT_SEQUENCE, LIMIT_PLOIDY,
     LIMIT_PHASE_SETS, LIMIT_ALIGNMENT, LIMIT_DIFFERENCES, LIMIT_WORKSPACE, LIMIT_COUNT };
 enum { HAPLOTYPE_LIST_COLUMN = 9, HAPLOTYPE_STOP_COLUMN = 14, HAPLOTYPE_OUTPUT_COLUMNS = 15 };
+enum { HAPLOTYPE_BLOCK_EVENT_FIELD = 9, HAPLOTYPE_BLOCK_FIELDS = 10 };
 static const char *const limit_names[] = {"max_active_events", "max_active_transcripts",
     "max_active_carriers", "max_active_prefixes", "max_active_projections", "max_allele_bytes",
     "max_leaf_events", "max_leaf_edits", "max_sequence_bases", "max_ploidy", "max_phase_sets",
@@ -48,6 +50,8 @@ typedef struct {
     duckvep_sequence_difference_t *differences;
     uint8_t *difference_reference;
     uint8_t *reference_protein;
+    uint8_t *reference_coding_protein;
+    duckvep_translation_t reference_coding_translation;
     size_t reference_protein_capacity, reference_protein_length;
     int reference_protein_known;
     uint32_t difference_transcript;
@@ -66,8 +70,8 @@ static void haplotype_bind_destroy(void *pointer) {
 
 static duckdb_logical_type record_type(const char *const *names, const duckdb_type *ids,
     idx_t count, int last_field_is_list) {
-    duckdb_logical_type types[9];
-    const char *field_names[9];
+    duckdb_logical_type types[HAPLOTYPE_BLOCK_FIELDS];
+    const char *field_names[HAPLOTYPE_BLOCK_FIELDS];
     for (idx_t i = 0u; i < count; i++) {
         types[i] = duckdb_create_logical_type(ids[i]); field_names[i] = names[i];
         if (last_field_is_list && i == count - 1u) {
@@ -146,12 +150,14 @@ static void haplotype_bind(duckdb_bind_info info) {
     const duckdb_type event_ids[] = {DUCKDB_TYPE_UBIGINT, DUCKDB_TYPE_UINTEGER, DUCKDB_TYPE_UBIGINT,
         DUCKDB_TYPE_VARCHAR, DUCKDB_TYPE_VARCHAR, DUCKDB_TYPE_UTINYINT, DUCKDB_TYPE_VARCHAR};
     const char *const block_names[] = {"cds_start", "reference", "alternate", "alt_start0",
-        "length_change", "sequence_flags", "event_indices"};
+        "length_change", "sequence_flags", "coding_status", "local_consequence_mask",
+        "after_first_stop", "event_indices"};
     const duckdb_type block_ids[] = {DUCKDB_TYPE_UINTEGER, DUCKDB_TYPE_VARCHAR, DUCKDB_TYPE_VARCHAR,
-        DUCKDB_TYPE_UBIGINT, DUCKDB_TYPE_BIGINT, DUCKDB_TYPE_UINTEGER, DUCKDB_TYPE_UBIGINT};
+        DUCKDB_TYPE_UBIGINT, DUCKDB_TYPE_BIGINT, DUCKDB_TYPE_UINTEGER, DUCKDB_TYPE_VARCHAR,
+        DUCKDB_TYPE_UBIGINT, DUCKDB_TYPE_BOOLEAN, DUCKDB_TYPE_UBIGINT};
     bind_record_list(info, "carriers", carrier_names, carrier_ids, 4u, 0);
     bind_record_list(info, "contributors", event_names, event_ids, 7u, 0);
-    bind_record_list(info, "coding_blocks", block_names, block_ids, 7u, 1);
+    bind_record_list(info, "coding_blocks", block_names, block_ids, HAPLOTYPE_BLOCK_FIELDS, 1);
     const char *const difference_names[] = {"ref_start0", "alt_start0", "reference", "alternate",
         "alignment_start0"};
     const duckdb_type difference_ids[] = {DUCKDB_TYPE_UBIGINT, DUCKDB_TYPE_UBIGINT,
@@ -178,6 +184,7 @@ static void haplotype_state_destroy(void *pointer) {
     free(b->edit_event_ids);
     free(s->difference_scratch.scores); free(s->difference_scratch.trace); free(s->differences);
     free(s->difference_reference); free(s->reference_protein);
+    free(s->reference_coding_protein);
     free(s->gt); free(s->phase); free(s->sets); free(s);
 }
 
@@ -226,6 +233,7 @@ static int workspace_allocate(haplotype_state_t *s, const haplotype_bind_t *bind
     X(s->differences, n[LIMIT_DIFFERENCES]) \
     X(s->difference_reference, n[LIMIT_SEQUENCE]) \
     X(s->reference_protein, s->reference_protein_capacity) \
+    X(s->reference_coding_protein, s->reference_protein_capacity) \
     X(s->gt, n[LIMIT_PLOIDY]) X(s->phase, n[LIMIT_PLOIDY]) X(s->sets, n[LIMIT_PHASE_SETS])
 #define COUNT(p, count) \
     if ((count) > (n[LIMIT_WORKSPACE] - s->workspace_bytes) / sizeof(*(p))) return 0; \
@@ -397,6 +405,14 @@ static int prepare_difference_reference(haplotype_state_t *s, const haplotype_bi
         return 0;
     }
     s->reference_protein_known = status == DUCKVEP_HAPLOTYPE_OK;
+    duckvep_translation_status_t coding = duckvep_translate_cds(leaf->reference_cds,
+        length, table, DUCKVEP_TRANSLATION_N_UNKNOWN, s->reference_coding_protein,
+        s->reference_protein_capacity, &s->reference_coding_translation);
+    if (coding != DUCKVEP_TRANSLATION_OK) {
+        snprintf(error, error_size, "duckvep_haplotypes: reference coding translation status %u at transcript %u",
+            (unsigned)coding, tx);
+        return 0;
+    }
     s->difference_transcript = tx; s->have_difference_reference = 1;
     return 1;
 }
@@ -462,6 +478,33 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
     const haplotype_bind_t *bind, const duckvep_haplotype_leaf_t *leaf,
     char *error, size_t error_size) {
     if (!prepare_difference_reference(s, bind, leaf, error, error_size)) return 0;
+    duckvep_coding_context_t coding;
+    uint32_t tx = leaf->carriers.transcript_index;
+    if (leaf->block_count) {
+        const duckvep_owned_model_t *model = &bind->entry->model;
+        duckvep_edit_set_t edits = {s->buffers.edits, leaf->edit_count};
+        duckvep_haplotype_result_t applied = {leaf->cds_length,
+            (int64_t)leaf->cds_length - model->sequences.cds_length[tx],
+            leaf->flags & ~(uint32_t)DUCKVEP_HAPLOTYPE_FLAG_STOP_TRUNCATED, leaf->edit_count};
+        duckvep_codon_table_t table = model->sequences.codon_table
+            ? (duckvep_codon_table_t)model->sequences.codon_table[tx] : DUCKVEP_CODON_TABLE_STANDARD;
+        const duckvep_event_t *event = NULL;
+        if (leaf->edit_count == 1u) {
+            for (size_t i = 0u; i < leaf->contributor_count; i++)
+                if (leaf->contributors[i].source.event_id == leaf->edit_event_ids[0])
+                    event = leaf->contributors[i].prepared;
+        }
+        if (duckvep_coding_context_open_replay(leaf->reference_cds, model->sequences.cds_length[tx],
+                &edits, model->transcripts.strand[tx], table, leaf->cds, &applied,
+                s->reference_coding_protein, &s->reference_coding_translation,
+                leaf->protein, &leaf->translation, &coding) != DUCKVEP_CODING_CONTEXT_OK ||
+            duckvep_coding_context_attach_model(&model->transcripts, &model->exons, &model->sequences,
+                tx, event, leaf->edit_count == 1u ? edits.edits[0].cds_start : 0u, &coding) !=
+                DUCKVEP_VARIANT_CODING_CONTEXT_OK) {
+            duckvep_sql_set_error(error, error_size, "duckvep_haplotypes: invalid completed coding context");
+            return 0;
+        }
+    }
     duckdb_vector v[HAPLOTYPE_OUTPUT_COLUMNS];
     for (unsigned i = 0u; i < HAPLOTYPE_OUTPUT_COLUMNS; i++) {
         v[i] = duckdb_data_chunk_get_vector(output, i);
@@ -483,7 +526,7 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
         ((bool *)duckdb_vector_get_data(v[HAPLOTYPE_STOP_COLUMN]))[row] = leaf->stop_in_displaced_frame != 0u;
     else null_cell(v[HAPLOTYPE_STOP_COLUMN], row);
     const size_t counts[] = {leaf->carriers.call_count, leaf->contributor_count, leaf->block_count};
-    const unsigned field_counts[] = {4u, 7u, 7u};
+    const unsigned field_counts[] = {4u, 7u, HAPLOTYPE_BLOCK_FIELDS};
     for (unsigned list = 0u; list < 3u; list++) {
         duckdb_vector vector = v[HAPLOTYPE_LIST_COLUMN + list];
         idx_t base = duckdb_list_vector_get_size(vector);
@@ -492,7 +535,7 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
             duckdb_list_vector_set_size(vector, base + count) != DuckDBSuccess) return 0;
         ((duckdb_list_entry *)duckdb_vector_get_data(vector))[row] = (duckdb_list_entry){base, count};
         if (list >= 2u && !leaf->cds) null_cell(vector, row);
-        duckdb_vector records = duckdb_list_vector_get_child(vector), fields[7];
+        duckdb_vector records = duckdb_list_vector_get_child(vector), fields[HAPLOTYPE_BLOCK_FIELDS];
         duckdb_vector_ensure_validity_writable(records);
         for (unsigned j = 0u; j < field_counts[list]; j++) {
             fields[j] = duckdb_struct_vector_get_child(records, j);
@@ -500,12 +543,13 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
         }
         idx_t event_base = 0u;
         if (list == 2u && leaf->cds) {
-            event_base = duckdb_list_vector_get_size(fields[6]);
+            duckdb_vector event_vector = fields[HAPLOTYPE_BLOCK_EVENT_FIELD];
+            event_base = duckdb_list_vector_get_size(event_vector);
             if (leaf->edit_count > UINT64_MAX - event_base ||
-                duckdb_list_vector_reserve(fields[6], event_base + leaf->edit_count) != DuckDBSuccess ||
-                duckdb_list_vector_set_size(fields[6], event_base + leaf->edit_count) != DuckDBSuccess)
+                duckdb_list_vector_reserve(event_vector, event_base + leaf->edit_count) != DuckDBSuccess ||
+                duckdb_list_vector_set_size(event_vector, event_base + leaf->edit_count) != DuckDBSuccess)
                 return 0;
-            duckdb_vector ids = duckdb_list_vector_get_child(fields[6]);
+            duckdb_vector ids = duckdb_list_vector_get_child(event_vector);
             duckdb_vector_ensure_validity_writable(ids);
             uint64_t *data = duckdb_vector_get_data(ids);
             for (size_t i = 0u; i < leaf->edit_count; i++) {
@@ -547,7 +591,21 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
                 ((uint64_t *)duckdb_vector_get_data(fields[3]))[at] = block->alt_start0;
                 ((int64_t *)duckdb_vector_get_data(fields[4]))[at] = block->length_diff;
                 ((uint32_t *)duckdb_vector_get_data(fields[5]))[at] = block->flags;
-                ((duckdb_list_entry *)duckdb_vector_get_data(fields[6]))[at] =
+                duckvep_sequence_delta_t delta;
+                duckvep_context_delta_status_t status = duckvep_coding_context_block_delta_fill(
+                    &coding, s->buffers.edits, leaf->edit_count, block,
+                    bind->entry->model.transcripts.flags[tx], &delta);
+                const char *name = status == DUCKVEP_CONTEXT_DELTA_OK ? "ok" :
+                    status == DUCKVEP_CONTEXT_DELTA_MISSING_TRANSCRIPT_TAIL ? "missing_transcript_tail" :
+                    status == DUCKVEP_CONTEXT_DELTA_MISSING_TRANSCRIPT_FLANK ? "missing_transcript_flank" :
+                    status == DUCKVEP_CONTEXT_DELTA_UNSUPPORTED ? "unsupported" : "invalid_argument";
+                duckdb_vector_assign_string_element(fields[6], at, name);
+                if (status == DUCKVEP_CONTEXT_DELTA_OK)
+                    ((uint64_t *)duckdb_vector_get_data(fields[7]))[at] = duckvep_effect_eval_coding_delta(&delta);
+                else null_cell(fields[7], at);
+                ((bool *)duckdb_vector_get_data(fields[8]))[at] =
+                    coding.alt_first_stop_position1 && block->alt_start0 / 3u >= coding.alt_first_stop_position1;
+                ((duckdb_list_entry *)duckdb_vector_get_data(fields[HAPLOTYPE_BLOCK_EVENT_FIELD]))[at] =
                     (duckdb_list_entry){event_base + block->edit_begin, block->edit_count};
             }
         }
@@ -641,7 +699,7 @@ static void haplotype_scan(duckdb_function_info info, duckdb_data_chunk output) 
             duckdb_function_set_error(info, "duckvep_haplotypes: cannot reset output list"); return;
         }
     duckdb_vector blocks = duckdb_list_vector_get_child(duckdb_data_chunk_get_vector(output, 11u));
-    if (duckdb_list_vector_set_size(duckdb_struct_vector_get_child(blocks, 6u), 0u) != DuckDBSuccess) {
+    if (duckdb_list_vector_set_size(duckdb_struct_vector_get_child(blocks, HAPLOTYPE_BLOCK_EVENT_FIELD), 0u) != DuckDBSuccess) {
         duckdb_function_set_error(info, "duckvep_haplotypes: cannot reset block event list"); return;
     }
     char error[DUCKVEP_SQL_ERROR_SIZE] = {0};

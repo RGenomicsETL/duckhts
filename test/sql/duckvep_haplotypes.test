@@ -154,6 +154,15 @@ SELECT protein FROM duckvep_haplotypes('SELECT * FROM hap_n_calls','hap_n',phase
 ----
 IAXA
 
+# Consensus sequence can be known while conservative coding predicates cannot
+# resolve a changed N-containing codon. Unknown facts are NULL, never zero.
+query TTTTI
+SELECT cds,protein,sequence_status,b.coding_status,b.local_consequence_mask IS NULL
+FROM (SELECT cds,protein,sequence_status,unnest(coding_blocks) b
+ FROM duckvep_haplotypes('SELECT * REPLACE(103 AS position) FROM hap_n_calls','hap_n'));
+----
+ATGACNTGNGCC	MTXA	ok	unsupported	1
+
 query TTIT
 SELECT cds, protein, carrier_count, list_transform(contributors, c -> c.event_index)::VARCHAR
 FROM duckvep_haplotypes('SELECT * FROM hap_calls ORDER BY event_index DESC', 'hap') ORDER BY cds;
@@ -230,6 +239,125 @@ FROM duckvep_haplotypes('SELECT * FROM hap_calls', 'hap', phase_policy := 'vep11
 ----
 CACAAAAAAAAA	HKKK	1	true
 CGAAAAAAAAAA	RKKK	1	true
+
+# VEP start_lost compares the annotated first peptide allele: even this toy
+# AAA-start transcript loses that allele when changed to Q, H or R.
+query TTI
+SELECT b.coding_status,t.consequence,count(*) FROM (
+ SELECT unnest(coding_blocks) b FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap'))
+JOIN duckvep_so_terms() t ON (b.local_consequence_mask & t.consequence_mask)<>0
+GROUP BY ALL;
+----
+ok	start_lost	3
+
+query TI
+SELECT typeof(b.local_consequence_mask),bool_and(NOT b.after_first_stop) FROM (
+ SELECT unnest(coding_blocks) b FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap')) GROUP BY ALL;
+----
+UBIGINT	true
+
+# Two individually missense substitutions restore serine in cis (TCT -> AGT).
+# Both orientations retain one physical block and both source identities.
+statement ok
+CREATE TABLE hap_cis_tx AS SELECT i::UINTEGER transcript_index,0::UINTEGER seq_region,
+ (100+100*i)::UBIGINT transcript_start,(111+100*i)::UBIGINT transcript_end,
+ (1-2*i)::TINYINT strand,0::UINTEGER gene_index,3::UBIGINT transcript_flags,
+ transcript_start cds_start,transcript_end cds_end,'ATGTCTGCCTAA'::BLOB cds_sequence,
+ 1::UTINYINT codon_table FROM range(2) r(i);
+
+query I
+SELECT loaded FROM duckvep_model_load('hap_cis','SELECT 0::UINTEGER seq_region',
+ 'SELECT * FROM hap_cis_tx','SELECT transcript_index,transcript_start exon_start,
+ transcript_end exon_end,1::UBIGINT exon_cdna_start,12::UBIGINT exon_cdna_end,
+ 0::TINYINT phase,0::TINYINT end_phase FROM hap_cis_tx');
+----
+true
+
+statement ok
+CREATE TABLE hap_cis_calls AS SELECT event_index,0 seq_region,position,reference,alternate,
+ 1 alt_index,transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set
+ FROM (VALUES (1,0,103,'T','A'),(2,0,104,'C','G'),(3,1,207,'G','C'),(4,1,208,'A','T'))
+ v(event_index,transcript_index,position,reference,alternate);
+
+query TI
+SELECT a.consequence,count(*) FROM hap_cis_calls c,
+ unnest(_duckvep_annotate_small_rich('hap_cis',c.seq_region::UINTEGER,c.position::UBIGINT,
+ c.reference,c.alternate,c.event_index::UBIGINT)) u(a)
+ WHERE a.transcript_index=c.transcript_index GROUP BY ALL;
+----
+missense_variant	4
+
+query TTTTIII
+SELECT cds,protein,b.coding_status,t.consequence,b.after_first_stop,len(b.event_indices),
+ len(protein_differences) FROM (
+ SELECT cds,protein,protein_differences,unnest(coding_blocks) b FROM
+ duckvep_haplotypes('SELECT * FROM hap_cis_calls','hap_cis'))
+ JOIN duckvep_so_terms() t ON (b.local_consequence_mask & t.consequence_mask)<>0;
+----
+ATGAGTGCCTAA	MSA*	ok	synonymous_variant	false	2	0
+ATGAGTGCCTAA	MSA*	ok	synonymous_variant	false	2	0
+
+# Exhaust every two/three-base codon replacement on both strands. The fixed
+# standard-code table is independent of the effect evaluator. All 6,912 occupied
+# paths are required, including stop codons, and cross SQL output vectors.
+statement ok
+CREATE TABLE hap_codons AS SELECT (16*a.i+4*b.i+c.i)::UINTEGER i,a.b||b.b||c.b codon,
+ substring('FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+ 16*a.i+4*b.i+c.i+1,1) aa
+FROM (VALUES (0,'T'),(1,'C'),(2,'A'),(3,'G')) a(i,b)
+CROSS JOIN (VALUES (0,'T'),(1,'C'),(2,'A'),(3,'G')) b(i,b)
+CROSS JOIN (VALUES (0,'T'),(1,'C'),(2,'A'),(3,'G')) c(i,b);
+
+statement ok
+CREATE TABLE hap_codon_tx AS SELECT (2*c.i+s.i)::UINTEGER transcript_index,
+ (2*c.i+s.i)::UINTEGER seq_region,100::UBIGINT transcript_start,111::UBIGINT transcript_end,
+ s.strand::TINYINT strand,0::UINTEGER gene_index,3::UBIGINT transcript_flags,
+ 100::UBIGINT cds_start,111::UBIGINT cds_end,('ATG'||codon||'GCCTAA')::BLOB cds_sequence,
+ 1::UTINYINT codon_table FROM hap_codons c CROSS JOIN (VALUES (0,1),(1,-1)) s(i,strand);
+
+query I
+SELECT loaded FROM duckvep_model_load('hap_all_codons',
+ 'SELECT seq_region FROM hap_codon_tx ORDER BY seq_region',
+ 'SELECT * FROM hap_codon_tx ORDER BY transcript_index','SELECT transcript_index,100::UBIGINT exon_start,
+ 111::UBIGINT exon_end,1::UBIGINT exon_cdna_start,12::UBIGINT exon_cdna_end,
+ 0::TINYINT phase,0::TINYINT end_phase FROM hap_codon_tx ORDER BY transcript_index');
+----
+1
+
+statement ok
+CREATE TABLE hap_codon_pairs AS SELECT t.transcript_index,t.seq_region,t.strand,
+ a.i sample_index,r.codon reference_codon,a.codon alternate_codon,a.aa alternate_aa,
+ CASE WHEN r.aa='*' AND a.aa='*' THEN 'stop_retained_variant'
+ WHEN r.aa='*' THEN 'stop_lost' WHEN a.aa='*' THEN 'stop_gained'
+ WHEN r.aa=a.aa THEN 'synonymous_variant' ELSE 'missense_variant' END consequence
+FROM hap_codon_tx t JOIN hap_codons r ON r.i=t.transcript_index//2 CROSS JOIN hap_codons a
+WHERE list_sum(list_transform(range(1,4),p->
+ (substring(r.codon,p,1)<>substring(a.codon,p,1))::INTEGER)) >= 2;
+
+statement ok
+CREATE TABLE hap_codon_calls AS SELECT (transcript_index*64+sample_index)*3+p event_index,
+ seq_region,CASE WHEN strand=1 THEN 102+p ELSE 109-p END::UBIGINT AS position,
+ CASE WHEN strand=1 THEN substring(reference_codon,p,1)
+ ELSE translate(substring(reference_codon,p,1),'ACGT','TGCA') END reference,
+ CASE WHEN strand=1 THEN substring(alternate_codon,p,1)
+ ELSE translate(substring(alternate_codon,p,1),'ACGT','TGCA') END alternate,
+ 1 alt_index,transcript_index,sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set
+FROM hap_codon_pairs CROSS JOIN range(1,4) b(p)
+WHERE substring(reference_codon,p,1)<>substring(alternate_codon,p,1);
+
+query IIIIII
+SELECT count(*),sum(h.carrier_count),bool_and(coalesce(h.cds='ATG'||e.alternate_codon||'GCCTAA',false)),
+ bool_and(coalesce(h.protein=CASE WHEN e.alternate_aa='*' THEN 'M*' ELSE 'M'||e.alternate_aa||'A*' END,false)),
+ bool_and(coalesce(len(h.coding_blocks)=1 AND h.coding_blocks[1].coding_status='ok'
+ AND h.coding_blocks[1].local_consequence_mask=t.consequence_mask
+ AND NOT h.coding_blocks[1].after_first_stop,false)),
+ bool_and(coalesce(len(h.coding_blocks[1].event_indices)=h.edit_count AND h.carrier_count=1,false))
+FROM duckvep_haplotypes('SELECT * FROM hap_codon_calls ORDER BY hash(event_index)',
+ 'hap_all_codons') h FULL OUTER JOIN hap_codon_pairs e
+ ON e.transcript_index=h.transcript_index AND e.sample_index=h.carriers[1].sample_index
+LEFT JOIN duckvep_so_terms() t ON t.consequence=e.consequence;
+----
+6912	6912	1	1	1	1
 
 # Unphased ambiguity affects every phase set; missing is not a reference call.
 query TII
@@ -555,6 +683,18 @@ FROM duckvep_haplotypes('SELECT event_index,0 seq_region,position,reference,alte
  v(event_index,position,reference,alternate)','hap_stops');
 ----
 ATGGAATAAACC	ME*	8	2	[1, 2]
+
+query TIT rowsort
+SELECT b.coding_status,b.after_first_stop,t.consequence FROM (
+ SELECT unnest(coding_blocks) b FROM duckvep_haplotypes(
+ 'SELECT event_index,0 seq_region,position,reference,alternate,1 alt_index,
+ 0 transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set
+ FROM (VALUES (1,103,''A'',''G''),(2,109,''C'',''A''))
+ v(event_index,position,reference,alternate)','hap_stops'))
+ JOIN duckvep_so_terms() t ON b.local_consequence_mask & t.consequence_mask <> 0;
+----
+ok	0	missense_variant
+ok	1	missense_variant
 
 query I
 SELECT loaded FROM duckvep_model_load('hap_spelling','SELECT 0::UINTEGER seq_region',

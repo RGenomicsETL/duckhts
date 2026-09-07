@@ -425,7 +425,7 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
         const duckvep_haplotype_projection_t *p = e ? find_projection(s, e, tx) : NULL;
         if (!p) return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INTERNAL_ERROR);
         uint8_t evidence = b->leaf_events[i].evidence_flags;
-        b->contributors[i] = (duckvep_haplotype_contributor_t){e->source, p->status, evidence};
+        b->contributors[i] = (duckvep_haplotype_contributor_t){e->source, p->status, evidence, &e->prepared};
         leaf.evidence_flags |= evidence;
         if (leaf.projection_status == DUCKVEP_CDS_EDIT_OK && !p->cds_unaffected)
             leaf.projection_status = p->status;

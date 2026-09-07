@@ -10318,6 +10318,12 @@ static enum theft_trial_res prop_haplotype_stream_matches_dense_models(struct th
         duckvep_haplotype_stream_t *s = &f[run].stream;
         unsigned seen_samples = 0u, path_count = 0u;
         uint64_t seen_paths = 0u;
+        uint8_t reference_peptide[5];
+        duckvep_translation_t reference_translation;
+        if (duckvep_translate_cds(f[run].reference, sizeof(f[run].reference),
+                DUCKVEP_CODON_TABLE_STANDARD, DUCKVEP_TRANSLATION_N_CONSENSUS,
+                reference_peptide, sizeof(reference_peptide), &reference_translation) !=
+            DUCKVEP_TRANSLATION_OK) return THEFT_TRIAL_ERROR;
         duckvep_haplotype_stream_status_t status = duckvep_haplotype_stream_finish(s);
         if (s->carriers.call_count) {
             if (status != DUCKVEP_HAPLOTYPE_STREAM_TRANSCRIPT_READY) return THEFT_TRIAL_FAIL;
@@ -10341,6 +10347,24 @@ static enum theft_trial_res prop_haplotype_stream_matches_dense_models(struct th
                 }
                 if (!mask || memcmp(expected, leaf.cds, sizeof(expected)) ||
                     (seen_paths & (UINT64_C(1) << mask))) return THEFT_TRIAL_FAIL;
+                /* Consume the stream's actual completed leaf, including its
+                 * ascending edits, without a second apply or translation. */
+                duckvep_edit_set_t set = {s->buffers.edits, leaf.edit_count};
+                duckvep_haplotype_result_t applied = {leaf.cds_length, 0, leaf.flags, leaf.edit_count};
+                duckvep_coding_context_t context;
+                if (duckvep_coding_context_open_replay(leaf.reference_cds, 12u, &set,
+                        f[run].strands[0], DUCKVEP_CODON_TABLE_STANDARD, leaf.cds, &applied,
+                        reference_peptide, &reference_translation, leaf.protein, &leaf.translation,
+                        &context) != DUCKVEP_CODING_CONTEXT_OK ||
+                    context.alt_cds != leaf.cds || context.alt_peptide != leaf.protein ||
+                    context.ref_peptide != reference_peptide || context.applied_edits != leaf.edit_count)
+                    return THEFT_TRIAL_FAIL;
+                for (size_t block = 0u; block < leaf.block_count; block++) {
+                    duckvep_sequence_delta_t facts;
+                    if (duckvep_coding_context_block_delta_fill(&context, set.edits, set.count,
+                            leaf.blocks + block, 0u, &facts) != DUCKVEP_CONTEXT_DELTA_OK || !facts.valid)
+                        return THEFT_TRIAL_FAIL;
+                }
                 seen_paths |= UINT64_C(1) << mask;
                 path_count++;
                 unsigned count = 0u;
@@ -11921,6 +11945,59 @@ TEST annotate_cursor_matches_tile_for_any_output_split(void) {
     cfg.trials = kprop_env_u64("DUCKVEP_PROP_TRIALS", KPROP_DEFAULT_TRIALS);
     cfg.seed = (theft_seed)kprop_env_u64("DUCKVEP_PROP_SEED", KPROP_DEFAULT_SEED);
     ASSERT_EQ(THEFT_RUN_PASS, theft_run(&cfg));
+    PASS();
+}
+
+TEST coding_delta_so_and_independent_class_gates_are_separate(void) {
+    static const struct { size_t offset; uint64_t pre, so; } fields[] = {
+#define FIELD(member, pre, so) {offsetof(duckvep_sequence_delta_t, member), DUCKVEP_PRE(pre), DUCKVEP_SO(so)}
+        FIELD(synonymous, DUCKVEP_PRE_SYNONYMOUS, DUCKVEP_SO_SYNONYMOUS),
+        FIELD(missense, DUCKVEP_PRE_MISSENSE, DUCKVEP_SO_MISSENSE),
+        FIELD(stop_gained, DUCKVEP_PRE_STOP_GAINED, DUCKVEP_SO_STOP_GAINED),
+        FIELD(stop_lost, DUCKVEP_PRE_STOP_LOST, DUCKVEP_SO_STOP_LOST),
+        FIELD(stop_retained, DUCKVEP_PRE_STOP_RETAINED, DUCKVEP_SO_STOP_RETAINED),
+        FIELD(start_lost, DUCKVEP_PRE_START_LOST, DUCKVEP_SO_START_LOST),
+        FIELD(start_retained, DUCKVEP_PRE_START_RETAINED, DUCKVEP_SO_START_RETAINED),
+        FIELD(frameshift, DUCKVEP_PRE_FRAMESHIFT, DUCKVEP_SO_FRAMESHIFT),
+        FIELD(inframe_deletion, DUCKVEP_PRE_INFRAME_DELETION, DUCKVEP_SO_INFRAME_DELETION),
+        FIELD(inframe_insertion, DUCKVEP_PRE_INFRAME_INSERTION, DUCKVEP_SO_INFRAME_INSERTION),
+        FIELD(protein_altering, DUCKVEP_PRE_PROTEIN_ALTERING, DUCKVEP_SO_PROTEIN_ALTERING),
+        FIELD(coding_unknown, DUCKVEP_PRE_CODING_UNKNOWN, DUCKVEP_SO_CODING_SEQUENCE),
+        FIELD(partial_codon, DUCKVEP_PRE_PARTIAL_CODON, DUCKVEP_SO_INCOMPLETE_TERMINAL_CODON)
+#undef FIELD
+    };
+    const uint64_t classes[] = {DUCKVEP_PRE(DUCKVEP_PRE_SNP),
+        DUCKVEP_PRE(DUCKVEP_PRE_INSERTION), DUCKVEP_PRE(DUCKVEP_PRE_DELETION)};
+    ASSERT_EQ(0u, duckvep_effect_eval_coding_delta(NULL));
+    for (uint32_t bits = 0u; bits < (1u << 13u); bits++) for (unsigned valid = 0u; valid < 2u; valid++) {
+        duckvep_sequence_delta_t delta = {0};
+        uint64_t expected_so = 0u;
+        delta.valid = (uint8_t)valid;
+        for (unsigned i = 0u; i < 13u; i++) if (bits & (1u << i)) {
+            *((uint8_t *)&delta + fields[i].offset) = 1u;
+            expected_so |= fields[i].so;
+        }
+        ASSERT_EQ(valid ? expected_so : 0u, duckvep_effect_eval_coding_delta(&delta));
+        for (unsigned shape = 0u; shape < 8u; shape++) {
+            duckvep_effect_ctx_t ctx = {0};
+            ctx.pre_bits = DUCKVEP_PRE(DUCKVEP_PRE_UPSTREAM);
+            for (unsigned i = 0u; i < 3u; i++) if (shape & (1u << i)) ctx.pre_bits |= classes[i];
+            uint64_t expected = ctx.pre_bits;
+            if (valid) {
+                expected |= DUCKVEP_PRE(DUCKVEP_PRE_DELTA);
+                for (unsigned i = 0u; i < 13u; i++) if (bits & (1u << i)) {
+                    uint64_t pre = fields[i].pre;
+                    if (pre == DUCKVEP_PRE(DUCKVEP_PRE_MISSENSE) && (shape & 6u)) continue;
+                    if (pre == DUCKVEP_PRE(DUCKVEP_PRE_FRAMESHIFT) && (shape & 1u)) continue;
+                    if (pre == DUCKVEP_PRE(DUCKVEP_PRE_INFRAME_INSERTION) && !(shape & 2u)) continue;
+                    if (pre == DUCKVEP_PRE(DUCKVEP_PRE_INFRAME_DELETION) && !(shape & 4u)) continue;
+                    expected |= pre;
+                }
+            }
+            duckvep_effect_ctx_apply_delta(&ctx, &delta);
+            ASSERT_EQ(expected, ctx.pre_bits);
+        }
+    }
     PASS();
 }
 
@@ -19988,6 +20065,57 @@ TEST cds_edit_noncoding_without_sequence_pool(void) {
     PASS();
 }
 
+TEST coding_context_open_replay_borrows_complete_sequences(void) {
+    static const uint8_t ref[] = "ATGAAATAAGCC", alt[] = "ATGAAGTAAGTT";
+    static const uint8_t rp[] = "MK*A", ap[] = "MK*V";
+    const duckvep_haplotype_edit_t edits[] = {
+        {10u, 3u, ref + 9u, 3u, alt + 9u, 1},
+        {4u, 3u, ref + 3u, 3u, alt + 3u, 1}
+    };
+    duckvep_edit_set_t set = {edits, 2u};
+    duckvep_haplotype_result_t applied = {12u, 0, 0u, 2u};
+    duckvep_translation_t rt = {4u, 3u, 1u}, at = rt;
+    duckvep_coding_context_t ctx;
+#define OPEN_REPLAY() duckvep_coding_context_open_replay(ref, 12u, &set, 1, \
+    DUCKVEP_CODON_TABLE_STANDARD, alt, &applied, rp, &rt, ap, &at, &ctx)
+    ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK, OPEN_REPLAY());
+    ASSERT(ctx.ref_cds == ref && ctx.alt_cds == alt);
+    ASSERT(ctx.ref_peptide == rp && ctx.alt_peptide == ap);
+    ASSERT_EQ(4u, ctx.alt_peptide_len);
+    ASSERT_EQ(3u, ctx.alt_first_stop_position1);
+    ASSERT_EQ(4u, ctx.ref_first_changed_codon);
+    ASSERT_EQ(4u, ctx.alt_last_changed_codon);
+    ASSERT_EQ(2u, ctx.applied_edits);
+    ASSERT(ctx.cds_changed && !ctx.has_single_edit);
+    for (unsigned mutation = 0u; mutation < 8u; mutation++) {
+        applied = (duckvep_haplotype_result_t){12u, 0, 0u, 2u};
+        rt = at = (duckvep_translation_t){4u, 3u, 1u};
+        switch (mutation) {
+        case 0: applied.applied_edits = 1u; break;
+        case 1: applied.length_diff = 1; break;
+        case 2: applied.cds_len = 13u; break;
+        case 3: rt.length = 3u; break;
+        case 4: at.length = 3u; break; /* A displayed first-stop prefix is not complete. */
+        case 5: rt.first_stop_position1 = 5u; break;
+        case 6: at.first_stop_position1 = 5u; break;
+        case 7: at.first_stop_position1 = 2u; break;
+        }
+        memset(&ctx, 0xA5, sizeof ctx);
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_INVALID_ARG, OPEN_REPLAY());
+        ASSERT(kprop_context_zero(&ctx));
+    }
+    ASSERT_EQ(DUCKVEP_CODING_CONTEXT_INVALID_ARG,
+        duckvep_coding_context_open_replay(ref, 12u, &set, 1,
+            DUCKVEP_CODON_TABLE_STANDARD, alt, NULL, rp, &rt, ap, &at, &ctx));
+    ASSERT(kprop_context_zero(&ctx));
+    ASSERT_EQ(DUCKVEP_CODING_CONTEXT_INVALID_ARG,
+        duckvep_coding_context_open_replay(ref, 12u, &set, 1,
+            DUCKVEP_CODON_TABLE_STANDARD, alt, &applied, rp, NULL, ap, &at, &ctx));
+    ASSERT(kprop_context_zero(&ctx));
+#undef OPEN_REPLAY
+    PASS();
+}
+
 TEST coding_context_known_scene(void) {
     {
         static const uint8_t ref_cds[9] = {'A','T','G','T','A','A','G','A','A'};
@@ -20874,6 +21002,25 @@ static enum theft_trial_res prop_coding_context_matches_direct_oracles(struct th
         ctx.alt_first_changed_codon != af || ctx.alt_last_changed_codon != al) {
         return THEFT_TRIAL_FAIL;
     }
+    /* The borrowed path consumes the independent oracle's already completed
+     * sequences, not the builder's buffers or another replay. Keep every
+     * original biological/capacity check and its generator unchanged. */
+    duckvep_haplotype_result_t applied = {(size_t)s->expect_len,
+        (int64_t)s->expect_len - (int64_t)s->cds_lenv,
+        kprop_context_flags_oracle(&edit_set), edit_set.count};
+    duckvep_translation_t rt = {ref_want_len, 0u, 1u}, at = {alt_want_len, 0u, 1u};
+    for (size_t i = 0u; i < ref_want_len; i++)
+        if (ref_want[i] == '*') { rt.first_stop_position1 = i + 1u; break; }
+    for (size_t i = 0u; i < alt_want_len; i++)
+        if (alt_want[i] == '*') { at.first_stop_position1 = i + 1u; break; }
+    duckvep_coding_context_t borrowed, expected = ctx;
+    expected.alt_cds = s->expect_cds;
+    expected.ref_peptide = ref_want;
+    expected.alt_peptide = alt_want;
+    if (duckvep_coding_context_open_replay(s->cds, s->cds_lenv, &edit_set, s->strand,
+            (duckvep_codon_table_t)s->ctab, s->expect_cds, &applied,
+            ref_want, &rt, alt_want, &at, &borrowed) != DUCKVEP_CODING_CONTEXT_OK ||
+        memcmp(&borrowed, &expected, sizeof borrowed) != 0) return THEFT_TRIAL_FAIL;
     if (ctx.alt_cds_len > 0u) {
         duckvep_coding_context_t fail_ctx;
         if (duckvep_coding_context_build(s->cds, s->cds_lenv, &edit_set, s->strand,
@@ -28347,6 +28494,7 @@ int main(int argc, char **argv) {
     RUN_TEST(effect_rule_tiers_suppress_only_later_tiers);
     RUN_TEST(generated_effect_lookup_matches_rule_interpreter);
     RUN_TEST(event_length_delta_pre_bits_follow_trimmed_alleles);
+    RUN_TEST(coding_delta_so_and_independent_class_gates_are_separate);
     RUN_TEST(ordinary_complete_feature_deletion_is_ablation_known_scene);
     RUN_TEST(complete_feature_overlap_suppresses_explicit_coding_unknown_known_scene);
     RUN_TEST(annotate_complete_equal_length_span_keeps_empty_endpoint_utrs_known_scene);
@@ -28407,6 +28555,7 @@ int main(int argc, char **argv) {
     RUN_TEST(breakend_parser_checks_shapes_and_limits);
     RUN_TEST(breakend_parser_recovers_constructed_components);
     RUN_TEST(cds_edit_noncoding_without_sequence_pool);
+    RUN_TEST(coding_context_open_replay_borrows_complete_sequences);
     RUN_TEST(coding_context_known_scene);
     RUN_TEST(variant_coding_context_known_scene);
     RUN_TEST(coding_context_delta_known_scene);

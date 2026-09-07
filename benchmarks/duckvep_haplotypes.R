@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # Two explicitly different scopes over one registered, factorized input:
-# initialized native replay/count sink; full public SQL sort/replay/materialization.
+# initialized native replay/count sink; full public SQL including local coding SO.
 
 fixture <- function(paths) {
   fasta <- readLines(paths[["haplotype_benchmark_reference"]])
@@ -111,6 +111,16 @@ sql <- function(job, input) {
     bit_xor(hash(to_json(h)))::VARCHAR xor_hash,sum(hash(to_json(h))::HUGEINT)::VARCHAR sum_hash
     FROM (SELECT * REPLACE(list_sort(carriers) AS carriers,list_sort(contributors) AS contributors)
       FROM measured) h")
+  # Retain the complete fingerprint above. This additional projection compares
+  # every previously exposed field across the additive coding-block schema change.
+  replay <- DBI::dbGetQuery(con, "SELECT sum(octet_length(encode(to_json(h)))) replay_json_bytes,
+    bit_xor(hash(to_json(h)))::VARCHAR replay_xor_hash,
+    sum(hash(to_json(h))::HUGEINT)::VARCHAR replay_sum_hash FROM (
+      SELECT * REPLACE(list_sort(carriers) AS carriers,list_sort(contributors) AS contributors,
+        list_transform(coding_blocks,b->struct_pack(cds_start:=b.cds_start,reference:=b.reference,
+          alternate:=b.alternate,alt_start0:=b.alt_start0,length_change:=b.length_change,
+          sequence_flags:=b.sequence_flags,event_indices:=b.event_indices)) AS coding_blocks)
+      FROM measured) h")
   stopifnot(fingerprint$output_leaves == job$transcripts * 3,
     fingerprint$output_carriers == job$transcripts * job$samples * 7 / 4,
     fingerprint$cds_bytes == job$transcripts * sum(nchar(input$expected$cds)),
@@ -138,8 +148,8 @@ sql <- function(job, input) {
     DBI::dbExecute(con, "INSERT INTO measured SELECT * FROM measured LIMIT 1")
     stopifnot(!exact())
   }
-  c(list(seconds = elapsed, duckdb_version = as.character(utils::packageVersion("duckdb"))),
-    as.list(fingerprint[1L, ]))
+  c(list(seconds = elapsed, duckdb_version = as.character(utils::packageVersion("duckdb")),
+    output_contract = "local_coding_block_so"), as.list(fingerprint[1L, ]), as.list(replay[1L, ]))
 }
 
 main <- function() {
@@ -235,7 +245,7 @@ main <- function() {
   if (!options$diagnostic) duckvep_evidence_assert_checkout(root, revision)
   write.csv(results, file.path(out, "results.csv"), row.names = FALSE)
   jsonlite::write_json(list(source_revision = revision, extension_build_binding = binding,
-    scope = "phased_literal_sequence_not_compound_so_hgvs", options = options,
+    scope = "native_literal_replay_and_sql_local_block_so_not_whole_haplotype_so_hgvs", options = options,
     compiler = system2(compiler, "--version", stdout = TRUE), compiler_flags = flags,
     worker_command = "/usr/bin/time -v -o TIME taskset -c CPU Rscript benchmarks/duckvep_haplotypes.R --job JOB",
     cpu = system2("lscpu", stdout = TRUE), session = capture.output(sessionInfo()),
