@@ -29,9 +29,11 @@ remain open.
 VEP 116 is the behavioral authority; pure-C properties and bcftools csq supply independent
 checks for mechanics and phased edit state.
 
-DuckVEP is alpha: its own interfaces and intermediate representations may be changed
-or deleted when a shared authority replaces them. Incorrect approximations are not
-backward-compatibility contracts. Preserve the pinned oracle, physical input records,
+DuckVEP is alpha: its own interfaces and intermediate representations have no
+backward-compatibility requirement. Replace or delete them when a simpler ownership
+contract or shared semantic authority makes them unnecessary; do not retain forwarding
+APIs or alternate implementations solely for older DuckVEP callers. Preserve the pinned
+oracle, physical input records,
 comparison denominators and failure controls; document deliberate result changes and
 test missing evidence explicitly instead of retaining a second implementation.
 
@@ -385,10 +387,11 @@ putting that selection in the receipt and validation evidence.
 The extension validates the columns it reads and rejects inconsistent values; the exact
 source-column projections are executable in the builder macros and acceptance fixtures.
 A future release adapter may add source handling, but it must still produce the same
-canonical region, transcript, and regulation relations. Loader projections are backward
-compatible in their documented 11-, 12-, and 13-column forms; a new model capability is an
-additive contract change with an explicit receipt field and tests, not a reinterpretation of
-an older model.
+canonical region, transcript, and regulation relations. The loader accepts an 11-column
+CDS-only projection or a 13-column complete-flank projection. These express different
+available sequence evidence, not interface generations; missing transcript flanks remain
+explicitly unresolved when required. A changed model contract requires an explicit receipt
+and tests, not reinterpretation or replacement of a previously receipted artifact.
 
 Promoting a new VEP target therefore requires three independent proofs: a pinned public
 source/release manifest and reference identity, canonical-model receipt validation, and

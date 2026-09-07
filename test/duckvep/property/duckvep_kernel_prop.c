@@ -8529,11 +8529,11 @@ TEST haplotype_apply_and_translate_known_cases(void) {
               duckvep_haplotype_apply_cds_edits((const uint8_t *)"ATG", 3u, edits, 1u,
                                                 (int8_t)1, cds, 3u, &cds_len, &r));
 
-    /* Exact aliasing must reserve the peak intermediate size, not only the
-     * length after a later lower-coordinate deletion restores the CDS. */
+    /* A later lower-coordinate deletion restores the final CDS length.
+     * Only final-length scratch is needed; in-place mutation is rejected. */
     {
         uint8_t alias_small[17];
-        uint8_t alias_large[17];
+        uint8_t reference[17];
         uint8_t before[17];
 
         memset(edits, 0, sizeof edits);
@@ -8549,20 +8549,21 @@ TEST haplotype_apply_and_translate_known_cases(void) {
         memset(alias_small, 0xa5, sizeof alias_small);
         memcpy(alias_small, "ACGTACGTACGT", 12u);
         memcpy(before, alias_small, sizeof before);
-        ASSERT_EQ(DUCKVEP_HAPLOTYPE_BUFFER_TOO_SMALL,
+        ASSERT_EQ(DUCKVEP_HAPLOTYPE_INVALID_ARG,
                   duckvep_haplotype_apply_cds_edits(
                       alias_small, 12u, edits, 2u, (int8_t)1,
                       alias_small, 12u, &cds_len, &r));
         ASSERT_EQ(0, memcmp(alias_small, before, sizeof before));
 
-        memset(alias_large, 0, sizeof alias_large);
-        memcpy(alias_large, "ACGTACGTACGT", 12u);
+        memset(reference, 0, sizeof reference);
+        memcpy(reference, "ACGTACGTACGT", 12u);
         ASSERT_EQ(DUCKVEP_HAPLOTYPE_OK,
                   duckvep_haplotype_apply_cds_edits(
-                      alias_large, 12u, edits, 2u, (int8_t)1,
-                      alias_large, 16u, &cds_len, &r));
+                      reference, 12u, edits, 2u, (int8_t)1,
+                      alias_small, 12u, &cds_len, &r));
         ASSERT_EQ(12u, cds_len);
-        ASSERT_STR_EQ("ACGTACAAAAGT", (const char *)alias_large);
+        ASSERT_EQ(0, memcmp("ACGTACAAAAGT", alias_small, 12u));
+        ASSERT_STR_EQ("ACGTACGTACGT", (const char *)reference);
     }
 
     edits[0].cds_start = 2u; edits[0].ref_len = 2u; edits[0].ref = (const uint8_t *)"TG";
@@ -8584,7 +8585,7 @@ TEST haplotype_edit_geometry_agrees_in_both_orders(void) {
 
     /* Exhaust every pair of in-range replacement spans and interbase sites.
      * Alleles match by construction, so geometry is the only possible error.
-     * Include both transcript orientations, distinct scratch and exact alias,
+     * Include both transcript orientations, distinct scratch and rejected alias,
      * CDS starts/ends, adjacent edits, and coincident zero-length insertions. */
     for (uint32_t left = 1u; left <= sizeof reference; left++) {
         for (uint32_t right = left; right <= sizeof reference; right++) {
@@ -8614,12 +8615,16 @@ TEST haplotype_edit_geometry_agrees_in_both_orders(void) {
                             memcpy(before, output, sizeof before);
                             size_t output_len = 999u;
                             memset(&result, 0xa5, sizeof result);
-                            ASSERT_EQ(expected, duckvep_haplotype_apply_cds_edits(
+                            duckvep_haplotype_status_t apply_expected = alias
+                                ? DUCKVEP_HAPLOTYPE_INVALID_ARG : expected;
+                            ASSERT_EQ(apply_expected, duckvep_haplotype_apply_cds_edits(
                                 alias ? output : reference, sizeof reference - 1u,
                                 descending, 2u, (int8_t)strand, output, sizeof output,
                                 &output_len, &result));
-                            if (expected == DUCKVEP_HAPLOTYPE_EDIT_ORDER) {
-                                ASSERT_EQ(0u, required);
+                            if (apply_expected != DUCKVEP_HAPLOTYPE_OK) {
+                                if (expected == DUCKVEP_HAPLOTYPE_EDIT_ORDER) {
+                                    ASSERT_EQ(0u, required);
+                                }
                                 ASSERT_EQ(0u, output_len);
                                 ASSERT_EQ(0u, result.applied_edits);
                                 ASSERT_EQ(0u, result.flags);
@@ -8635,6 +8640,62 @@ TEST haplotype_edit_geometry_agrees_in_both_orders(void) {
             }
         }
     }
+    PASS();
+}
+
+TEST haplotype_apply_rejects_overlapping_inputs(void) {
+    const uint8_t reference[] = "AAAAAAAAAAAA";
+    uint8_t storage[64], before[64];
+    duckvep_haplotype_result_t result;
+    size_t length;
+
+    /* Independently enumerate exact overlap, either direction, and adjacent
+     * spans for the CDS and each allele. No invalid call may mutate storage. */
+    for (int kind = 0; kind < 3; kind++) {
+        for (size_t src = 0u; src <= 20u; src++) {
+            for (size_t dst = 0u; dst <= 20u; dst++) {
+                size_t source_len = kind == 0 ? 12u : 1u;
+                int overlap = src < dst + 13u && dst < src + source_len;
+                duckvep_haplotype_edit_t edit = {
+                    6u, 1u, kind == 1 ? storage + src : reference,
+                    1u, kind == 2 ? storage + src : reference, (int8_t)1
+                };
+                memset(storage, 'A', sizeof storage);
+                memcpy(before, storage, sizeof before);
+                memset(&result, 0xa5, sizeof result);
+                length = 999u;
+                ASSERT_EQ(overlap ? DUCKVEP_HAPLOTYPE_INVALID_ARG : DUCKVEP_HAPLOTYPE_OK,
+                    duckvep_haplotype_apply_cds_edits(
+                        kind == 0 ? storage + src : reference, 12u, &edit, 1u,
+                        (int8_t)1, storage + dst, 13u, &length, &result));
+                if (overlap) {
+                    ASSERT_EQ(0u, length);
+                    ASSERT_EQ(0u, result.applied_edits);
+                    ASSERT_EQ(0u, result.cds_len);
+                    ASSERT_EQ(0u, result.flags);
+                    ASSERT_EQ(0, memcmp(storage, before, sizeof storage));
+                } else {
+                    ASSERT_EQ(12u, length);
+                    ASSERT_EQ(1u, result.applied_edits);
+                    ASSERT_EQ(0, memcmp(storage + dst, reference, 12u));
+                    ASSERT_EQ(0u, storage[dst + 12u]);
+                    ASSERT_EQ(0, memcmp(storage + src, before + src, source_len));
+                }
+            }
+        }
+    }
+    duckvep_haplotype_edit_t edit = {6u, 1u, reference, 1u, reference, (int8_t)1};
+    unsigned char edit_before[sizeof edit];
+    memcpy(edit_before, &edit, sizeof edit);
+    ASSERT_EQ(DUCKVEP_HAPLOTYPE_INVALID_ARG,
+        duckvep_haplotype_apply_cds_edits(reference, 12u, &edit, 1u, (int8_t)1,
+            (uint8_t *)&edit, sizeof edit, &length, &result));
+    ASSERT_EQ(0, memcmp(edit_before, &edit, sizeof edit));
+    ASSERT_EQ(0u, length);
+    ASSERT_EQ(DUCKVEP_HAPLOTYPE_INVALID_ARG,
+        duckvep_haplotype_apply_cds_edits(reference, 12u, &edit,
+            SIZE_MAX / sizeof edit + 1u, (int8_t)1, storage, sizeof storage, &length, &result));
+    ASSERT_EQ(0u, length);
     PASS();
 }
 
@@ -9615,15 +9676,15 @@ static enum theft_trial_res prop_haplotype_apply_matches_rebuild_oracle(struct t
     if (duckvep_haplotype_apply_cds_edits(
             in_place, KPROP_HAPLO_CDS_LEN, c->edits, c->edit_count,
             c->transcript_strand, in_place, sizeof in_place, &in_place_len,
-            &in_place_result) != DUCKVEP_HAPLOTYPE_OK) {
+            &in_place_result) != DUCKVEP_HAPLOTYPE_INVALID_ARG) {
         return THEFT_TRIAL_FAIL;
     }
-    if (in_place_len != want_len ||
-        memcmp(in_place, want, want_len) != 0 ||
-        in_place_result.cds_len != want_len ||
-        in_place_result.length_diff != want_diff ||
-        in_place_result.flags != want_flags ||
-        in_place_result.applied_edits != c->edit_count) {
+    if (in_place_len != 0u ||
+        memcmp(in_place, c->ref, KPROP_HAPLO_CDS_LEN + 1u) != 0 ||
+        in_place_result.cds_len != 0u ||
+        in_place_result.length_diff != 0 ||
+        in_place_result.flags != 0u ||
+        in_place_result.applied_edits != 0u) {
         return THEFT_TRIAL_FAIL;
     }
     return THEFT_TRIAL_PASS;
@@ -26680,6 +26741,7 @@ int main(int argc, char **argv) {
     RUN_TEST(haplotype_partition_known_cases);
     RUN_TEST(haplotype_partition_preserves_interactions_for_any_valid_edit_set);
     RUN_TEST(haplotype_apply_and_translate_known_cases);
+    RUN_TEST(haplotype_apply_rejects_overlapping_inputs);
     RUN_TEST(haplotype_apply_matches_rebuild_oracle_for_any_valid_edit_set);
     RUN_TEST(haplotype_snv_set_matches_equivalent_mnv_coding_facts);
     GREATEST_MAIN_END();

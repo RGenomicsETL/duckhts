@@ -85,11 +85,11 @@ duckvep_haplotype_status_t duckvep_haplotype_partition(
  * source provenance; input order must not choose the inserted sequence.
  * This mirrors Ensembl's reverse
  * mapping order and permits one linear rebuild without allocation or sorting.
- * `ref_cds == cds_out` remains supported for compatibility, but distinct input
- * and output buffers are the linear streaming path. Exact aliasing requires
- * `cds_cap` to cover the largest intermediate sequence produced while applying
- * the descending edits, not only the final sequence. Partially overlapping
- * buffers are not supported.
+ * The reference CDS, edit descriptors and allele byte spans are borrowed and
+ * must not overlap the output span `cds_out[0..cds_cap)`. An overlap returns
+ * INVALID_ARG before writing sequence bytes. `cds_cap` need only cover the final
+ * CDS; no intermediate mutated sequence is constructed. Output length/result
+ * storage must be separate from the input and sequence buffers.
  *
  * `ref`/`alt` alleles are oriented from variant_strand to transcript_strand
  * before validation/application. Bases must be A/C/G/T (case-insensitive; U is

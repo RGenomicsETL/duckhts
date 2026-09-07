@@ -43,11 +43,13 @@ static duckvep_haplotype_status_t haplo_fail(duckvep_haplotype_result_t *result,
     return status;
 }
 
-static int64_t diff_i64(uint32_t alt_len, uint32_t ref_len, int *ok) {
-    int64_t a = (int64_t)alt_len;
-    int64_t r = (int64_t)ref_len;
-    *ok = 1;
-    return a - r;
+static int haplo_overlaps_output(const void *input, size_t input_len,
+                                 const uint8_t *output, size_t output_cap) {
+    uintptr_t src = (uintptr_t)input;
+    uintptr_t dst = (uintptr_t)output;
+    if (input_len == 0u || output_cap == 0u) return 0;
+    /* Subtract addresses instead of forming a potentially wrapped end. */
+    return src <= dst ? dst - src < input_len : src - dst < output_cap;
 }
 
 static int haplo_add_i64(int64_t a, int64_t b, int64_t *out) {
@@ -96,7 +98,6 @@ static duckvep_haplotype_status_t haplo_partition_pass(
         const duckvep_haplotype_edit_t *edit = &edits[i];
         uint32_t edit_end;
         int64_t difference;
-        int ok_difference;
         int flush;
 
         if (edit->cds_start == 0u ||
@@ -124,9 +125,8 @@ static duckvep_haplotype_status_t haplo_partition_pass(
         have_previous = 1;
         if (edit_end > block_end) block_end = edit_end;
 
-        difference = diff_i64(edit->alt_len, edit->ref_len, &ok_difference);
-        if (!ok_difference ||
-            !haplo_add_i64(block_difference, difference, &block_difference)) {
+        difference = (int64_t)edit->alt_len - (int64_t)edit->ref_len;
+        if (!haplo_add_i64(block_difference, difference, &block_difference)) {
             return DUCKVEP_HAPLOTYPE_OUT_OF_RANGE;
         }
         if (difference != 0) {
@@ -210,49 +210,6 @@ duckvep_haplotype_status_t duckvep_haplotype_partition(
     return haplo_partition_pass(edits, edit_count, blocks, required_blocks);
 }
 
-/* Exact input/output aliasing was accepted by the original implementation.
- * Keep that compatibility path, where memmove is required because cumulative
- * edit displacement can change sign within one haplotype. Normal callers use
- * distinct reference and scratch buffers and take the linear rebuild below. */
-static duckvep_haplotype_status_t haplo_apply_exact_alias(
-    uint8_t                         *cds,
-    size_t                           ref_cds_len,
-    const duckvep_haplotype_edit_t  *edits,
-    size_t                           edit_count,
-    int8_t                           transcript_strand,
-    size_t                          *cds_len_out) {
-
-    size_t cur_len = ref_cds_len;
-    size_t i;
-
-    for (i = 0u; i < ref_cds_len; i++) {
-        char b = haplo_norm_cds_base(cds[i]);
-        if (b == '\0') return DUCKVEP_HAPLOTYPE_INVALID_BASE;
-        cds[i] = (uint8_t)b;
-    }
-
-    for (i = 0u; i < edit_count; i++) {
-        const duckvep_haplotype_edit_t *e = &edits[i];
-        size_t start0 = (size_t)e->cds_start - 1u;
-        size_t tail_start = start0 + (size_t)e->ref_len;
-        size_t tail_len = cur_len - tail_start;
-        size_t new_len = cur_len - (size_t)e->ref_len + (size_t)e->alt_len;
-        uint32_t j;
-        int reverse = e->variant_strand != transcript_strand;
-
-        memmove(cds + start0 + (size_t)e->alt_len,
-                cds + tail_start, tail_len);
-        for (j = 0u; j < e->alt_len; j++) {
-            cds[start0 + (size_t)j] = (uint8_t)haplo_oriented_base(
-                e->alt, e->alt_len, j, reverse);
-        }
-        cur_len = new_len;
-    }
-
-    *cds_len_out = cur_len;
-    return DUCKVEP_HAPLOTYPE_OK;
-}
-
 duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
     const uint8_t                    *ref_cds,
     size_t                            ref_cds_len,
@@ -264,8 +221,8 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
     size_t                           *cds_len_out,
     duckvep_haplotype_result_t       *result) {
 
-    size_t final_len = ref_cds_len;
-    size_t peak_len = ref_cds_len;
+    size_t final_len;
+    uint64_t measured_len;
     size_t i;
     uint32_t prev_start = UINT32_MAX;
     int saw_frameshift_edit = 0;
@@ -277,6 +234,9 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
 
     if (ref_cds == NULL || cds_out == NULL || cds_len_out == NULL ||
         (edit_count > 0u && edits == NULL) ||
+        edit_count > SIZE_MAX / sizeof *edits ||
+        haplo_overlaps_output(ref_cds, ref_cds_len, cds_out, cds_cap) ||
+        haplo_overlaps_output(edits, edit_count * sizeof *edits, cds_out, cds_cap) ||
         (transcript_strand != (int8_t)1 && transcript_strand != (int8_t)-1)) {
         return DUCKVEP_HAPLOTYPE_INVALID_ARG;
     }
@@ -285,17 +245,17 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
     for (i = 0u; i < edit_count; i++) {
         const duckvep_haplotype_edit_t *e = &edits[i];
         size_t start0;
-        size_t new_len;
         uint32_t j;
         int reverse;
-        int ok_diff = 0;
         int64_t d;
         uint32_t effective_end;
 
         if (e->cds_start == 0u ||
             (e->variant_strand != (int8_t)1 && e->variant_strand != (int8_t)-1) ||
             (e->ref_len > 0u && e->ref == NULL) ||
-            (e->alt_len > 0u && e->alt == NULL)) {
+            (e->alt_len > 0u && e->alt == NULL) ||
+            haplo_overlaps_output(e->ref, e->ref_len, cds_out, cds_cap) ||
+            haplo_overlaps_output(e->alt, e->alt_len, cds_out, cds_cap)) {
             return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_INVALID_ARG);
         }
 
@@ -334,8 +294,7 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
             }
         }
 
-        d = diff_i64(e->alt_len, e->ref_len, &ok_diff);
-        if (!ok_diff) return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_OUT_OF_RANGE);
+        d = (int64_t)e->alt_len - (int64_t)e->ref_len;
         if (!haplo_add_i64(total_diff, d, &total_diff)) {
             return haplo_fail(result, cds_len_out, NULL,
                               DUCKVEP_HAPLOTYPE_OUT_OF_RANGE);
@@ -343,29 +302,19 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
         if (d != 0) flags |= DUCKVEP_HAPLOTYPE_FLAG_INDEL;
         if ((d % 3) != 0) saw_frameshift_edit = 1;
 
-        if ((size_t)e->ref_len > final_len ||
-            (size_t)e->alt_len >
-                SIZE_MAX - (final_len - (size_t)e->ref_len)) {
-            return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_OUT_OF_RANGE);
-        }
-        new_len = final_len - (size_t)e->ref_len + (size_t)e->alt_len;
-        final_len = new_len;
-        if (final_len > peak_len) peak_len = final_len;
     }
 
-    if (final_len > cds_cap || (ref_cds == cds_out && peak_len > cds_cap)) {
+    if (!haplo_shift_coordinate(ref_cds_len, total_diff, &measured_len) ||
+        measured_len > SIZE_MAX) {
+        return haplo_fail(result, cds_len_out, NULL, DUCKVEP_HAPLOTYPE_OUT_OF_RANGE);
+    }
+    final_len = (size_t)measured_len;
+    if (final_len > cds_cap) {
         return haplo_fail(result, cds_len_out, NULL,
                           DUCKVEP_HAPLOTYPE_BUFFER_TOO_SMALL);
     }
 
-    if (ref_cds == cds_out) {
-        duckvep_haplotype_status_t alias_status = haplo_apply_exact_alias(
-            cds_out, ref_cds_len, edits, edit_count, transcript_strand,
-            cds_len_out);
-        if (alias_status != DUCKVEP_HAPLOTYPE_OK) {
-            return haplo_fail(result, cds_len_out, NULL, alias_status);
-        }
-    } else {
+    {
         /* Rebuild once from right to left. Every reference byte and ALT byte is
          * written exactly once; edit count no longer multiplies CDS-tail moves. */
         size_t src_cursor = ref_cds_len;

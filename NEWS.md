@@ -1,6 +1,12 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- delete DuckVEP's compatibility-only in-place CDS rebuild. The native kernel
+  now has one linear immutable-input/scratch-output implementation and rejects
+  overlapping reference, edit or allele storage before writing sequence bytes.
+  Scratch capacity covers the final CDS, not intermediate edits; SQL behavior
+  and biological conformance cases are unchanged
+
 - add caller-owned native haplotype replay over the sparse carrier index: copy
   input alleles once, retain one projection per event/transcript pair, recycle
   the active genomic window, and return each occupied path with all contributors.

@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- bundle one immutable-reference CDS rebuild implementation, removing the unused
+  in-place mutation path and rejecting overlapping native input/output storage.
+  R and SQL annotation behavior is unchanged
+
 - include native haplotype replay and shared projected-CDS edit decomposition
   in the bundled extension's Unix and Windows source builds. Existing SQL/R
   annotation interfaces are unchanged; a public phased reader is not yet exposed
