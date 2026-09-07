@@ -58,9 +58,11 @@ stopifnot(nrow(comparison) == nrow(public),
   !anyDuplicated(replay_fingerprints[fingerprint_keys]))
 ```
 
-Current source: `r revision`; same-input predecessor: `r baseline_revision`.
+Current source: `r revision`; identical-workload baseline: `r baseline_revision`.
 Native measurements cover literal phased replay. SQL materializes all current
 fields, including local coding-block SO; whole-haplotype SO/HGVS is unfinished.
+Both paths consume standalone ALT events and decoded calls; native raw-record
+parsing and conditional replay are not timed by this workload.
 All runs use one thread pinned to CPU 2 on an Intel Core i5-13500, DuckDB 1.5.3,
 and a source-bound clean extension build. The native bridge uses the same kernel
 sources compiled with `-O3 -DNDEBUG`; receipts retain compiler/version, binary and
@@ -89,9 +91,9 @@ multiset with decoded input, checks sequences and edit provenance, and rejects a
 injected duplicate. Native validation also rejects a corrupted expected sequence.
 Every measured pass must retain all common native/SQL denominators and SQL's full,
 canonicalized nested-row fingerprint; failed runs are not promoted. Full fingerprints
-must also agree across revisions sharing an output contract. An additional projection
-of every pre-existing field must agree across the additive coding-block schema change;
-it does not replace validation of the new full output.
+must also agree across revisions sharing an output contract. The literal-replay
+projection provides a separate comparison with the narrower recorded output
+contract; full current output is always checked.
 
 ```{r denominators}
 knitr::kable(core[c("transcripts", "samples", "overlap", "input_records",
@@ -111,14 +113,11 @@ pool peaks below are observed in the native stream, not inferred SQL counters.
 knitr::kable(summary, row.names = FALSE, digits = 3)
 ```
 
-The current SQL output adds each block's local SO mask, coding status and position
-relative to the first stop. It opens a shared coding context on completed replay
-and evaluates physical blocks; it does not rebuild each leaf again. Consequently
-this is a same-input cost comparison for additional work and wider output, not an
-identical-output speedup or a claim of no regression. The native count sink still
-omits local SO evaluation. Prior sequence, provenance and difference fields retain
-their complete projected fingerprints; new full fingerprints and byte counts are
-recorded separately.
+Both compared revisions return each block's local SO mask, coding status and
+position relative to the first stop. A shared coding context evaluates physical
+blocks on completed replay. Every full-output fingerprint and input/output
+denominator matches across the six configurations. The native count sink omits
+local SO evaluation.
 
 ```{r sql-comparison}
 knitr::kable(comparison[c("transcripts", "samples", "overlap", "median_s_before",
@@ -176,10 +175,12 @@ ceiling and a 4 GB DuckDB memory limit. SQL input, sorting and output memory bel
 to DuckDB and may grow with the complete relation. The process RSS table must not
 be presented as a constant-total-memory guarantee.
 
-This matched before/after comparison retains three repeated passes per workload
-and revision. One machine and this deliberately shared synthetic cohort do not
-establish production throughput or statistical significance. Whole-haplotype SO/HGVS and
-typed structural composition will require renewed measurements when implemented.
+This matched comparison retains three repeated passes per workload and revision.
+The current campaign overlapped full sanitizer jobs, so CPU pinning does not
+establish an otherwise idle machine or isolate the cause of timing differences.
+One machine and this deliberately shared synthetic cohort do not establish
+production throughput, statistical significance or a general absence of regression.
+Whole-haplotype SO/HGVS and typed structural composition require their own measurements.
 
 ## Reproduction
 

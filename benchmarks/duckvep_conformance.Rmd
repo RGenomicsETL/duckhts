@@ -1020,7 +1020,7 @@ This certifies the declared literal-replay cases, not altered splicing, combined
 SO/HGVS, broad phase compatibility or exhaustive rare configurations. The
 [conformance driver](../test/duckvep/conformance/haplotype_sql_differential.R)
 keeps this augmentation opt-in and does not replace the original corpus or
-verifier. The [phased replay benchmark](duckvep_haplotypes.md) now records sorted
+verifier. The [phased replay benchmark](duckvep_haplotypes.md) records sorted
 native and public SQL execution separately, with workspace and process memory.
 The current SQL benchmark includes local coding-block SO; these Haplosaurus
 comparisons do not certify those masks. Whole-haplotype SO/HGVS remains unfinished.
@@ -1092,11 +1092,38 @@ An optional observer sidecar reads actual Haplosaurus genotype objects and its
 file-profile ploidy; it does not override parsing or sequence construction.
 The comparison checks retained/omitted calls, parsed slot counts, the two consumed
 allele ordinals, source ploidy and missingness, with seven rejected field corruptions.
-The original observer output remains unchanged on the 1,000-transcript seed-173
-corpus, and all 7,020 full-replay comparison objects match the preceding audit.
-Parser code, bridge, compiler identity, binary and observations are hashed in the
-same clean-build receipt. This parser is not yet connected to public replay and
-does not apply upstream undefined-slot deletions. No full-replay failure is waived.
+The standard output on the 1,000-transcript seed-173 corpus matches its recorded
+oracle output. Parser code, bridge, compiler identity, binary and observations
+are hashed in the same clean-build receipt.
+
+```{r raw-genotype-replay}
+raw_cases <- sum(phase_current$raw_replay_cases)
+raw_disagreements <- sum(phase_current$raw_replay_disagreements)
+raw_records <- sum(phase_current$raw_replay_record_observations)
+raw_record_disagreements <- sum(phase_current$raw_replay_record_disagreements)
+stopifnot(raw_cases == sum(phase_counts$cases), raw_records == 4L * raw_cases,
+  all(phase_current$raw_replay_controls_rejected == 4L))
+```
+
+The native source-record stream records **`r raw_disagreements` disagreements across
+`r raw_cases` complete CDS/protein, carrier-count and physical-edit provenance
+comparisons**, and **`r raw_record_disagreements` disagreements across `r raw_records`
+per-lane source-record observations**. The latter checks selected allele ordinals,
+record and aggregate evidence, and sequence availability against the upstream
+object sidecar; four deliberate field corruptions are rejected.
+
+Raw replay keeps full source REF spans and actual ALT ordinals. An undefined
+consumed slot follows the pinned runner's full-REF deletion, with `conditional`
+sequence status and evidence distinct from a called ALT. Missing REF observations
+retain provenance without inventing physical edits. Reference validation and
+coding projection failures still prevent sequence availability.
+
+This result covers the enumerated two-site, single-exon grammar, not overlapping
+replacements, splicing, combined SO/HGVS or a public raw-record interface. Public
+SQL/R replay consumes decoded calls: its full comparison objects, including all
+`r sum(phase_counts$disagreements)` failures, match the preceding audit exactly.
+The passing native lane does not waive those failures or make conditional sequence
+biologically known.
 
 ## Individual Sequence Ontology terms
 

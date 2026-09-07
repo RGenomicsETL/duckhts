@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- record clean-build native raw-record replay evidence for 7,020 finite GT
+  profiles and matched six-workload performance evidence. Preserve the public
+  decoded-call audit's 6,990 disagreements and all earlier evidence rows
+
 - add source-record interpretations to native phased replay, including explicit
   conditional undefined-slot deletions and missing-call REF observations.
   Public SQL/R replay still consumes decoded calls

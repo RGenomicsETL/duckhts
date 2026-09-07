@@ -3,11 +3,13 @@ Phased replay: native stream and public SQL
 
 <!-- duckvep_haplotypes.md is generated from duckvep_haplotypes.Rmd. -->
 
-Current source: 8f9987e3826018cfa73c155eebac7a956b6dc024; same-input
-predecessor: d1c591b76f8a9a07036736ac0666a004eb58e0eb. Native
-measurements cover literal phased replay. SQL materializes all current
-fields, including local coding-block SO; whole-haplotype SO/HGVS is
-unfinished. All runs use one thread pinned to CPU 2 on an Intel Core
+Current source: 7f4a4e28bff31a13f14ee1cab25049408740ef65;
+identical-workload baseline: 8f9987e3826018cfa73c155eebac7a956b6dc024.
+Native measurements cover literal phased replay. SQL materializes all
+current fields, including local coding-block SO; whole-haplotype SO/HGVS
+is unfinished. Both paths consume standalone ALT events and decoded
+calls; native raw-record parsing and conditional replay are not timed by
+this workload. All runs use one thread pinned to CPU 2 on an Intel Core
 i5-13500, DuckDB 1.5.3, and a source-bound clean extension build. The
 native bridge uses the same kernel sources compiled with `-O3 -DNDEBUG`;
 receipts retain compiler/version, binary and fixture hashes, worker
@@ -40,9 +42,9 @@ validation also rejects a corrupted expected sequence. Every measured
 pass must retain all common native/SQL denominators and SQL’s full,
 canonicalized nested-row fingerprint; failed runs are not promoted. Full
 fingerprints must also agree across revisions sharing an output
-contract. An additional projection of every pre-existing field must
-agree across the additive coding-block schema change; it does not
-replace validation of the new full output.
+contract. The literal-replay projection provides a separate comparison
+with the narrower recorded output contract; full current output is
+always checked.
 
 | transcripts | samples | overlap | input_records | projected_events | input_calls | output_leaves | output_carriers | prefixes_created | translated_bases |
 |------------:|--------:|--------:|--------------:|-----------------:|------------:|--------------:|----------------:|-----------------:|-----------------:|
@@ -64,37 +66,33 @@ observed in the native stream, not inferred SQL counters.
 
 | transcripts | samples | overlap | mode   | min_s | median_s | max_s | max_process_rss_mib |
 |------------:|--------:|--------:|:-------|------:|---------:|------:|--------------------:|
-|        1024 |       4 |       1 | native | 0.003 |    0.003 | 0.003 |              74.637 |
-|        1024 |       4 |       1 | sql    | 0.051 |    0.052 | 0.053 |             216.789 |
-|        1024 |      64 |       1 | native | 0.013 |    0.013 | 0.013 |              74.633 |
-|        1024 |      64 |       1 | sql    | 0.343 |    0.345 | 0.345 |             375.930 |
-|        1024 |      64 |      16 | native | 0.017 |    0.018 | 0.018 |              74.633 |
-|        1024 |      64 |      16 | sql    | 0.352 |    0.355 | 0.356 |             376.910 |
-|        1024 |      64 |      64 | native | 0.018 |    0.018 | 0.024 |              74.480 |
-|        1024 |      64 |      64 | sql    | 0.347 |    0.348 | 0.351 |             377.922 |
-|        1024 |     256 |       1 | native | 0.047 |    0.047 | 0.047 |              74.480 |
-|        1024 |     256 |       1 | sql    | 1.319 |    1.319 | 1.329 |             957.906 |
-|       10240 |      64 |      16 | native | 0.167 |    0.168 | 0.171 |              74.633 |
-|       10240 |      64 |      16 | sql    | 4.146 |    4.194 | 4.340 |            2135.238 |
+|        1024 |       4 |       1 | native | 0.003 |    0.003 | 0.003 |              74.480 |
+|        1024 |       4 |       1 | sql    | 0.057 |    0.066 | 0.071 |             216.492 |
+|        1024 |      64 |       1 | native | 0.014 |    0.014 | 0.014 |              74.480 |
+|        1024 |      64 |       1 | sql    | 0.384 |    0.387 | 0.421 |             375.961 |
+|        1024 |      64 |      16 | native | 0.017 |    0.017 | 0.017 |              74.637 |
+|        1024 |      64 |      16 | sql    | 0.350 |    0.353 | 0.354 |             377.035 |
+|        1024 |      64 |      64 | native | 0.018 |    0.018 | 0.019 |              74.637 |
+|        1024 |      64 |      64 | sql    | 0.351 |    0.353 | 0.354 |             376.449 |
+|        1024 |     256 |       1 | native | 0.046 |    0.047 | 0.047 |              74.633 |
+|        1024 |     256 |       1 | sql    | 1.349 |    1.368 | 1.480 |             956.984 |
+|       10240 |      64 |      16 | native | 0.170 |    0.179 | 0.180 |              74.480 |
+|       10240 |      64 |      16 | sql    | 4.196 |    4.204 | 4.240 |            2138.965 |
 
-The current SQL output adds each block’s local SO mask, coding status
-and position relative to the first stop. It opens a shared coding
-context on completed replay and evaluates physical blocks; it does not
-rebuild each leaf again. Consequently this is a same-input cost
-comparison for additional work and wider output, not an identical-output
-speedup or a claim of no regression. The native count sink still omits
-local SO evaluation. Prior sequence, provenance and difference fields
-retain their complete projected fingerprints; new full fingerprints and
-byte counts are recorded separately.
+Both compared revisions return each block’s local SO mask, coding status
+and position relative to the first stop. A shared coding context
+evaluates physical blocks on completed replay. Every full-output
+fingerprint and input/output denominator matches across the six
+configurations. The native count sink omits local SO evaluation.
 
 | transcripts | samples | overlap | median_s_before | median_s_after | median_change_percent | max_process_rss_mib_before | max_process_rss_mib_after |
 |------------:|--------:|--------:|----------------:|---------------:|----------------------:|---------------------------:|--------------------------:|
-|        1024 |       4 |       1 |           0.050 |          0.052 |                 4.000 |                    213.789 |                   216.789 |
-|        1024 |      64 |       1 |           0.335 |          0.345 |                 2.985 |                    375.457 |                   375.930 |
-|        1024 |      64 |      16 |           0.353 |          0.355 |                 0.567 |                    376.910 |                   376.910 |
-|        1024 |      64 |      64 |           0.343 |          0.348 |                 1.458 |                    377.098 |                   377.922 |
-|        1024 |     256 |       1 |           1.316 |          1.319 |                 0.228 |                    957.355 |                   957.906 |
-|       10240 |      64 |      16 |           4.184 |          4.194 |                 0.239 |                   2130.625 |                  2135.238 |
+|        1024 |       4 |       1 |           0.052 |          0.066 |                26.923 |                    216.789 |                   216.492 |
+|        1024 |      64 |       1 |           0.345 |          0.387 |                12.174 |                    375.930 |                   375.961 |
+|        1024 |      64 |      16 |           0.355 |          0.353 |                -0.563 |                    376.910 |                   377.035 |
+|        1024 |      64 |      64 |           0.348 |          0.353 |                 1.437 |                    377.922 |                   376.449 |
+|        1024 |     256 |       1 |           1.319 |          1.368 |                 3.715 |                    957.906 |                   956.984 |
+|       10240 |      64 |      16 |           4.194 |          4.204 |                 0.238 |                   2135.238 |                  2138.965 |
 
 Each recorded pass uses a fresh process and a full warm-up. Native
 timing starts after workspace initialization and includes ordered-feed
@@ -136,12 +134,12 @@ are not bytes written to disk.
 
 | transcripts | samples | overlap | peak_transcripts | peak_carriers | peak_prefixes | peak_events | peak_projections | peak_allele_bytes | workspace_bytes | model_bytes |
 |------------:|--------:|--------:|-----------------:|--------------:|--------------:|------------:|-----------------:|------------------:|----------------:|------------:|
-|        1024 |       4 |       1 |                1 |             7 |             6 |           4 |                4 |                10 |            4516 |       34136 |
-|        1024 |      64 |       1 |                1 |           112 |             6 |           4 |                4 |                10 |           14116 |       34136 |
-|        1024 |      64 |      16 |               16 |          1792 |            96 |           4 |               64 |                10 |          189136 |       34136 |
-|        1024 |      64 |      64 |               64 |          7168 |           384 |           4 |              256 |                10 |          749200 |       34136 |
-|        1024 |     256 |       1 |                1 |           448 |             6 |           4 |                4 |                10 |           44836 |       34136 |
-|       10240 |      64 |      16 |               16 |          1792 |            96 |           4 |               64 |                10 |          189136 |      338264 |
+|        1024 |       4 |       1 |                1 |             7 |             6 |           4 |                4 |                10 |            4596 |       34136 |
+|        1024 |      64 |       1 |                1 |           112 |             6 |           4 |                4 |                10 |           14196 |       34136 |
+|        1024 |      64 |      16 |               16 |          1792 |            96 |           4 |               64 |                10 |          189216 |       34136 |
+|        1024 |      64 |      64 |               64 |          7168 |           384 |           4 |              256 |                10 |          749280 |       34136 |
+|        1024 |     256 |       1 |                1 |           448 |             6 |           4 |                4 |                10 |           44916 |       34136 |
+|       10240 |      64 |      16 |               16 |          1792 |            96 |           4 |               64 |                10 |          189216 |      338264 |
 
 Native workspace bytes count actual preallocated buffer capacities and
 state, separately from immutable model allocations. The fixed fixture is
@@ -158,11 +156,13 @@ sorting and output memory belong to DuckDB and may grow with the
 complete relation. The process RSS table must not be presented as a
 constant-total-memory guarantee.
 
-This matched before/after comparison retains three repeated passes per
-workload and revision. One machine and this deliberately shared
-synthetic cohort do not establish production throughput or statistical
-significance. Whole-haplotype SO/HGVS and typed structural composition
-will require renewed measurements when implemented.
+This matched comparison retains three repeated passes per workload and
+revision. The current campaign overlapped full sanitizer jobs, so CPU
+pinning does not establish an otherwise idle machine or isolate the
+cause of timing differences. One machine and this deliberately shared
+synthetic cohort do not establish production throughput, statistical
+significance or a general absence of regression. Whole-haplotype SO/HGVS
+and typed structural composition require their own measurements.
 
 ## Reproduction
 

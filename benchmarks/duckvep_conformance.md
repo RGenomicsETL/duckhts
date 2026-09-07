@@ -605,10 +605,15 @@ current-revision evidence.
 | 8f9987e3        |      173 | vep116_compat |          3764 |       11292 |              22584 |              6000 |                  14292 |
 | 8f9987e3        | 20260906 | strict        |          3802 |       11406 |              22812 |              6000 |                  14406 |
 | 8f9987e3        | 20260906 | vep116_compat |          3802 |       11406 |              22812 |              6000 |                  14406 |
+| 7f4a4e28        |      173 | strict        |          3764 |       11292 |              22584 |              6000 |                  14292 |
+| 7f4a4e28        |      173 | vep116_compat |          3764 |       11292 |              22584 |              6000 |                  14292 |
+| 7f4a4e28        | 20260906 | strict        |          3802 |       11406 |              22812 |              6000 |                  14406 |
+| 7f4a4e28        | 20260906 | vep116_compat |          3802 |       11406 |              22812 |              6000 |                  14406 |
 
 Sources eb83f6ff1d03d05a3c9f8135c8ef355b7f431ee7,
 d1c591b76f8a9a07036736ac0666a004eb58e0eb,
-8f9987e3826018cfa73c155eebac7a956b6dc024 were built from clean
+8f9987e3826018cfa73c155eebac7a956b6dc024,
+7f4a4e28bff31a13f14ee1cab25049408740ef65 were built from clean
 checkouts, including an HTSlib clean rebuild. The ledger retains the
 extension hash, input/run receipt hashes and pinned VEP/variation
 revisions. DuckDB used four threads; these are correctness counts, not
@@ -624,7 +629,7 @@ observations unchanged. DuckHTS must retain the intronic contributors,
 including on previously implicit reference lanes, with unchanged literal
 CDS/protein and an `outside_cds` contributor status.
 
-Both policies pass all 72,000 carrier comparisons and 172,188 provenance
+Both policies pass all 96,000 carrier comparisons and 229,584 provenance
 memberships. The same biological lanes are counted separately under each
 policy and revision; these are not independent statistical trials. Five
 deliberately corrupted outputs per policy/seed are rejected. Fixed SQL/R
@@ -637,11 +642,11 @@ combined SO/HGVS, broad phase compatibility or exhaustive rare
 configurations. The [conformance
 driver](../test/duckvep/conformance/haplotype_sql_differential.R) keeps
 this augmentation opt-in and does not replace the original corpus or
-verifier. The [phased replay benchmark](duckvep_haplotypes.md) now
-records sorted native and public SQL execution separately, with
-workspace and process memory. The current SQL benchmark includes local
-coding-block SO; these Haplosaurus comparisons do not certify those
-masks. Whole-haplotype SO/HGVS remains unfinished.
+verifier. The [phased replay benchmark](duckvep_haplotypes.md) records
+sorted native and public SQL execution separately, with workspace and
+process memory. The current SQL benchmark includes local coding-block
+SO; these Haplosaurus comparisons do not certify those masks.
+Whole-haplotype SO/HGVS remains unfinished.
 
 ## Raw genotype compatibility audit
 
@@ -652,7 +657,7 @@ masks. Whole-haplotype SO/HGVS remains unfinished.
 |      3 |   768 |           768 |         1536 |         2304 |                        1332 |
 |      4 |  6144 |          6144 |        12288 |        24576 |                       16800 |
 
-Source 02d8a798d04b8d7852590bb5cfbbe8d44b929fb2 records a **failing
+Source 7f4a4e28bff31a13f14ee1cab25049408740ef65 records a **failing
 raw-input compatibility audit**: 6990 disagreements in 7020 profiles. It
 is not a population error rate or a replacement for the passing
 literal-sequence corpus. Public phased replay still consumes decoded
@@ -701,13 +706,31 @@ reads actual Haplosaurus genotype objects and its file-profile ploidy;
 it does not override parsing or sequence construction. The comparison
 checks retained/omitted calls, parsed slot counts, the two consumed
 allele ordinals, source ploidy and missingness, with seven rejected
-field corruptions. The original observer output remains unchanged on the
-1,000-transcript seed-173 corpus, and all 7,020 full-replay comparison
-objects match the preceding audit. Parser code, bridge, compiler
+field corruptions. The standard output on the 1,000-transcript seed-173
+corpus matches its recorded oracle output. Parser code, bridge, compiler
 identity, binary and observations are hashed in the same clean-build
-receipt. This parser is not yet connected to public replay and does not
-apply upstream undefined-slot deletions. No full-replay failure is
-waived.
+receipt.
+
+The native source-record stream records **0 disagreements across 7020
+complete CDS/protein, carrier-count and physical-edit provenance
+comparisons**, and **0 disagreements across 28080 per-lane source-record
+observations**. The latter checks selected allele ordinals, record and
+aggregate evidence, and sequence availability against the upstream
+object sidecar; four deliberate field corruptions are rejected.
+
+Raw replay keeps full source REF spans and actual ALT ordinals. An
+undefined consumed slot follows the pinned runner’s full-REF deletion,
+with `conditional` sequence status and evidence distinct from a called
+ALT. Missing REF observations retain provenance without inventing
+physical edits. Reference validation and coding projection failures
+still prevent sequence availability.
+
+This result covers the enumerated two-site, single-exon grammar, not
+overlapping replacements, splicing, combined SO/HGVS or a public
+raw-record interface. Public SQL/R replay consumes decoded calls: its
+full comparison objects, including all 6990 failures, match the
+preceding audit exactly. The passing native lane does not waive those
+failures or make conditional sequence biologically known.
 
 ## Individual Sequence Ontology terms
 
