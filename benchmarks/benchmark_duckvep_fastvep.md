@@ -643,6 +643,7 @@ eligible alleles joined. Output receipts are also outside the timer.
 | e3269389 | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 62.76           | 5731168      |
 | fbe38c3a | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 62.73           | 5728276      |
 | c03c4879 | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 63.49           | 5732112      |
+| 8c2c52a6 | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 65.69           | 5728980      |
 
 The observed pass is 62.76 s versus 64.14 s for the nearest identical
 recorded workload, with 5,731,168 versus 5,730,396 KiB peak RSS. Single
@@ -705,6 +706,33 @@ receipt checks succeeded. Only this run’s new 6.17 GB TSV was removed
 after verification, retaining its receipts. This measures the shared
 independent-event path, not block classification, phased state,
 alignment, HGVS or structural composition.
+
+Source 8c2c52a6f8ba1610583a08abe9ce2a1693cf00fc shares the length-change
+predicate interpreter with actual interior haplotype blocks. Physical
+frame/stop geometry remains separate from VEP’s single-record
+start/endpoint reconstruction; compound start/terminal-CDS handling
+remains unsupported. The complete translator also retains its first-stop
+position for block interpretation without another CDS scan.
+
+The unchanged independent-event workload took 65.69 s and 5728980 KiB
+peak RSS, compared with 63.49 s and 5732112 KiB for the nearest
+identical recorded workload. This is 2.20 s (3.47%) slower in one pass,
+not evidence of no regression or a statistical performance estimate.
+Both full sanitizer runs completed before timing. The timed worker
+exited zero; the checked GNU time file retains its exact command and
+resource observations.
+
+All input/ALT/joined-allele and output denominators, the model identity,
+all three full-row multiset fingerprints and the output SHA-256 match
+that baseline. Extension SHA-256 is
+c108a9e51de11211ddad18f3c41f0eb9b14a7317ab31bb746ca478fa0562a8c4; output
+SHA-256 is
+6f1bd987b8a144822dda1ef2939bb42870711f86ac8797f2ce1ef3db1b5143d9. Source
+and output receipt checks ran outside the timer. Disk availability
+became tight; only this run’s generated 6.17 GB TSV was removed after
+verification, retaining its timing, fingerprint and input receipts. This
+measurement exercises the refactored independent interpreter, not
+compound-block classification or full phased execution.
 
 The phased executor still needs separate sorted-native and sort-included
 throughput/memory measurements. This independent-event run does not

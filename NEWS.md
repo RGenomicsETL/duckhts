@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- record the complete GIAB independent-annotation workload after sharing indel
+  predicates: 65.69 seconds on one core versus the nearest identical 63.49-second
+  pass, with identical full output fingerprints. This single-pass slowdown is
+  not a statistical estimate or a measurement of phased execution
+
 - share length-changing coding predicates between independent events and actual
   interior haplotype blocks, including separate reference/alternate coordinates
   and stops inside transient frame displacement. Single-record start/stop rules

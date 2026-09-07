@@ -1434,17 +1434,24 @@ block_predicates <- translation_history[3L, , drop = FALSE]
 row.names(block_predicates) <- NULL
 block_timing <- read_gnu_time(
   file.path(data_dir, "coding_blocks_giab_threads1.time"), "DuckVEP", 1L, 1L)
+indel_predicates <- translation_history[4L, , drop = FALSE]
+row.names(indel_predicates) <- NULL
+indel_timing <- read_gnu_time(
+  file.path(data_dir, "indel_blocks_giab_threads1.time"), "DuckVEP", 1L, 1L)
 same_contract <- c("model_sha256", "input_registry_id", "model_registry_id",
   "source_records", "source_alt_alleles", "eligible_alt_alleles", "output_rows",
   "output_bytes", "threads", "affinity", "full_row_xor", "full_row_low32_sum",
   "full_row_high32_sum")
-stopifnot(nrow(translation_history) == 3L,
+stopifnot(nrow(translation_history) == 4L,
   identical(rebuild[same_contract], translation[same_contract]),
   identical(translation[same_contract], consensus[same_contract]),
   identical(consensus[same_contract], block_predicates[same_contract]),
+  identical(block_predicates[same_contract], indel_predicates[same_contract]),
   as.numeric(block_predicates$elapsed_seconds) == block_timing$elapsed_seconds,
-  as.numeric(block_predicates$maximum_rss_kib) == block_timing$maximum_rss_kib)
-translation_comparison <- rbind(rebuild, translation, consensus, block_predicates)
+  as.numeric(block_predicates$maximum_rss_kib) == block_timing$maximum_rss_kib,
+  as.numeric(indel_predicates$elapsed_seconds) == indel_timing$elapsed_seconds,
+  as.numeric(indel_predicates$maximum_rss_kib) == indel_timing$maximum_rss_kib)
+translation_comparison <- rbind(rebuild, translation, consensus, block_predicates, indel_predicates)
 knitr::kable(data.frame(
   revision = substr(translation_comparison$source_revision, 1, 8),
   source_records = translation_comparison$source_records,
@@ -1508,6 +1515,29 @@ and separate output/input receipt checks succeeded. Only this run's new
 6.17 GB TSV was removed after verification, retaining its receipts.
 This measures the shared independent-event path, not block classification,
 phased state, alignment, HGVS or structural composition.
+
+Source `r indel_predicates$source_revision` shares the length-change predicate
+interpreter with actual interior haplotype blocks. Physical frame/stop geometry
+remains separate from VEP's single-record start/endpoint reconstruction; compound
+start/terminal-CDS handling remains unsupported. The complete translator also
+retains its first-stop position for block interpretation without another CDS scan.
+
+The unchanged independent-event workload took `r indel_predicates$elapsed_seconds`
+s and `r indel_predicates$maximum_rss_kib` KiB peak RSS, compared with
+`r block_predicates$elapsed_seconds` s and `r block_predicates$maximum_rss_kib`
+KiB for the nearest identical recorded workload. This is 2.20 s (3.47%) slower
+in one pass, not evidence of no regression or a statistical performance estimate.
+Both full sanitizer runs completed before timing. The timed worker exited zero;
+the checked GNU time file retains its exact command and resource observations.
+
+All input/ALT/joined-allele and output denominators, the model identity, all three
+full-row multiset fingerprints and the output SHA-256 match that baseline.
+Extension SHA-256 is `r indel_predicates$extension_sha256`; output SHA-256 is
+`r indel_predicates$output_sha256`. Source and output receipt checks ran outside
+the timer. Disk availability became tight; only this run's generated 6.17 GB TSV
+was removed after verification, retaining its timing, fingerprint and input
+receipts. This measurement exercises the refactored independent interpreter,
+not compound-block classification or full phased execution.
 
 The phased executor still needs separate sorted-native and sort-included
 throughput/memory measurements. This independent-event run does not measure
