@@ -645,11 +645,23 @@ every transcript follows one universal NMD rule.
 
 ## Phased edits
 
-The pure C mutation core already rebuilds a CDS from several non-overlapping edits in one
+The pure C mutation core rebuilds a CDS from several non-overlapping edits in one
 reverse-coordinate pass, translates once, and partitions interactions while the frame is
-displaced or the next edit touches the same alternate codon. The missing stream groups edits by
-`(model, transcript, sample, phase_set, haplotype)` and retains all contributing variant
-IDs.
+displaced or the next edit touches the same alternate codon. The model-scoped carrier index
+groups explicit `(transcript, sample, phase_set, haplotype)` keys and shares event prefixes.
+The native literal-event replay stream owns copied alleles and one projection per
+event/transcript pair in caller-supplied rings. It drains each occupied path once, with
+complete event provenance and explicit projection or edit-conflict status. Its mutable
+storage is bounded by the oldest active genomic window, including younger events retained
+behind a longer-lived transcript; capacity failures latch instead of dropping paths.
+Projected equal-length edits use the same differing-island decomposition as independent
+annotation: unchanged internal MNV bases do not mask or conflict with another carried edit.
+Source-record count and physical-edit count remain separate, with raw alleles preserved.
+
+The public SQL executor and phase-policy interpretation remain unimplemented. Native
+sequence/indel flags are not combined SO or compound HGVS, and the literal replay stream
+does not yet compose typed structural events. Existing executable Haplosaurus comparisons
+exercise the native replay through a test bridge, not a public phased SQL surface.
 
 The stream must preserve the original record/ALT identity, decoded allele indexes,
 ploidy, phasing flag, and `PS`/`PID`-like phase-set provenance. The same called local

@@ -1,6 +1,13 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- add caller-owned native haplotype replay over the sparse carrier index: copy
+  input alleles once, retain one projection per event/transcript pair, recycle
+  the active genomic window, and return each occupied path with all contributors.
+  Share projected MNV decomposition with independent annotation so unchanged
+  internal bases do not create false edit conflicts. This is the native execution
+  layer; the public phased SQL/R interface is not yet available
+
 - delete DuckVEP's 12-column short-tail model interface and the redundant
   `post_cds_bases` column from the Ensembl builder and model fingerprint. Models
   use complete pre-/post-CDS sequence or explicitly lack transcript flanks;

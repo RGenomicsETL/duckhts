@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- include native haplotype replay and shared projected-CDS edit decomposition
+  in the bundled extension's Unix and Windows source builds. Existing SQL/R
+  annotation interfaces are unchanged; a public phased reader is not yet exposed
+
 - remove the bundled DuckVEP 12-column short-tail loader interface and redundant
   `post_cds_bases` builder column. DBI model queries use the 13-column complete-flank
   form or the 11-column CDS-only form with explicit unresolved missing context.

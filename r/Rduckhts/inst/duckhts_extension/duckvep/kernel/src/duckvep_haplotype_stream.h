@@ -1,0 +1,145 @@
+/* Model-scoped literal-event replay over sparse carrier paths (INTERNAL).
+ * All storage is caller-owned. begin copies REF/ALT once and projects once per
+ * candidate transcript; push adds an explicitly interpreted non-reference lane.
+ * GT/PS interpretation, candidate lookup and DuckDB materialization are adapters.
+ *
+ * Input is sorted by (chrom_id, pos1, event_id). begin may report a transcript
+ * ready before consuming the input: drain next until DONE, then retry begin with
+ * the same input. finish uses the same drain protocol. Each next result borrows
+ * scratch until the next next/begin/finish call; its carrier list stays valid
+ * throughout that transcript's drain. The owner may pause between any two calls.
+ *
+ * Event/projection/allele rings retain only the oldest still-active genomic
+ * window, including intervening events pinned behind a longer transcript.
+ * Limits are explicit; exhaustion is an error, never silent loss or growth.
+ * Errors latch until reinitialization. Per-leaf projection/edit conflicts are
+ * results with complete provenance, not errors that drop an occupied path.
+ */
+#ifndef DUCKVEP_HAPLOTYPE_STREAM_H
+#define DUCKVEP_HAPLOTYPE_STREAM_H
+
+#include "duckvep_carriers.h"
+#include "duckvep_delta.h"
+
+typedef enum {
+    DUCKVEP_HAPLOTYPE_STREAM_OK,
+    DUCKVEP_HAPLOTYPE_STREAM_TRANSCRIPT_READY,
+    DUCKVEP_HAPLOTYPE_STREAM_DONE,
+    DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG,
+    DUCKVEP_HAPLOTYPE_STREAM_INPUT_ORDER,
+    DUCKVEP_HAPLOTYPE_STREAM_EVENT_FULL,
+    DUCKVEP_HAPLOTYPE_STREAM_PROJECTION_FULL,
+    DUCKVEP_HAPLOTYPE_STREAM_ALLELE_FULL,
+    DUCKVEP_HAPLOTYPE_STREAM_LEAF_FULL,
+    DUCKVEP_HAPLOTYPE_STREAM_EDIT_FULL,
+    DUCKVEP_HAPLOTYPE_STREAM_SEQUENCE_FULL,
+    DUCKVEP_HAPLOTYPE_STREAM_CARRIER_ERROR,
+    DUCKVEP_HAPLOTYPE_STREAM_INTERNAL_ERROR
+} duckvep_haplotype_stream_status_t;
+
+typedef struct {
+    uint64_t event_id;
+    const uint8_t *ref, *alt;
+    uint32_t pos1;
+    uint16_t chrom_id, ref_len, alt_len;
+} duckvep_haplotype_source_t;
+
+typedef struct {
+    duckvep_haplotype_source_t source;
+    uint64_t serial;
+    size_t allele_consumed;
+    uint32_t projection_begin, projection_count, last_end1;
+} duckvep_haplotype_stored_event_t;
+
+typedef struct {
+    duckvep_haplotype_edit_t edit;
+    uint32_t transcript_index;
+    duckvep_cds_edit_status_t status;
+} duckvep_haplotype_projection_t;
+
+typedef struct {
+    duckvep_haplotype_source_t source;
+    duckvep_cds_edit_status_t projection_status;
+} duckvep_haplotype_contributor_t;
+
+typedef struct {
+    duckvep_carrier_buffers_t carriers;
+    duckvep_haplotype_stored_event_t *events;
+    duckvep_haplotype_projection_t *projections;
+    uint8_t *alleles;
+    uint32_t event_capacity, projection_capacity;
+    size_t allele_capacity;
+    /* Scratch for one distinct occupied path, reused across its carriers. */
+    uint64_t *leaf_events;
+    duckvep_haplotype_contributor_t *contributors;
+    duckvep_haplotype_edit_t *edits;
+    size_t leaf_capacity, edit_capacity;
+    uint8_t *cds, *protein;
+    size_t cds_capacity, protein_capacity;
+} duckvep_haplotype_stream_buffers_t;
+
+typedef struct {
+    duckvep_carrier_leaf_t carriers;
+    const duckvep_haplotype_contributor_t *contributors;
+    size_t contributor_count;
+    size_t edit_count; /* Physical differing islands, not source-event count. */
+    const uint8_t *cds, *protein;
+    size_t cds_length, protein_length;
+    uint32_t flags;
+    /* First failed projection, or edit/rebuild status when projection is OK.
+     * Failed paths have no CDS/protein; all contributors/carriers remain. */
+    duckvep_cds_edit_status_t projection_status;
+    duckvep_haplotype_status_t sequence_status;
+} duckvep_haplotype_leaf_t;
+
+typedef struct {
+    duckvep_carriers_t carriers;
+    const duckvep_exon_model_t *exons;
+    const duckvep_sequence_pool_t *sequences;
+    duckvep_haplotype_stream_buffers_t buffers;
+    uint32_t event_begin, event_count, projection_begin, projection_count;
+    uint32_t current_event, closing;
+    size_t allele_begin, allele_count;
+    uint64_t serial, last_event_id;
+    uint32_t last_pos1;
+    uint16_t last_chrom;
+    uint8_t have_input, have_current, initialized;
+    duckvep_haplotype_stream_status_t error;
+    duckvep_carriers_status_t carrier_error;
+    uint64_t input_events, projected_events, completed_leaves, translated_bases;
+    uint32_t peak_events, peak_projections;
+    size_t peak_alleles;
+} duckvep_haplotype_stream_t;
+
+/* Distinct buffers; immutable model views remain pinned until teardown. */
+duckvep_haplotype_stream_status_t duckvep_haplotype_stream_init(
+    duckvep_haplotype_stream_t *stream,
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t *exons,
+    const duckvep_sequence_pool_t *sequences,
+    const duckvep_haplotype_stream_buffers_t *buffers);
+
+/* Candidates are unique ascending model-local ordinals overlapping the event's
+ * genomic span. An insertion may touch the transcript end. The owner may discard
+ * input alleles after OK; input must not alias workspace storage. Event IDs need only
+ * be unique, with increasing IDs used to order events at the same coordinate. */
+duckvep_haplotype_stream_status_t duckvep_haplotype_stream_begin(
+    duckvep_haplotype_stream_t *stream, const duckvep_haplotype_source_t *event,
+    const uint32_t *transcripts, size_t transcript_count);
+
+/* Add this event to one lane in every candidate transcript, using the prepared
+ * projection. No call matrix and no repeated projection across samples. */
+duckvep_haplotype_stream_status_t duckvep_haplotype_stream_push(
+    duckvep_haplotype_stream_t *stream, const duckvep_carrier_key_t *key);
+
+duckvep_haplotype_stream_status_t duckvep_haplotype_stream_finish(
+    duckvep_haplotype_stream_t *stream);
+
+/* Each occupied edit prefix is rebuilt/translated once. DONE releases the
+ * completed transcript; retry begin/finish to accept input or close the next.
+ * Iterate leaf.carriers.first_call using duckvep_carriers_call(&stream->carriers,
+ * id), following next_leaf, before calling next again. */
+duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
+    duckvep_haplotype_stream_t *stream, duckvep_haplotype_leaf_t *leaf);
+
+#endif

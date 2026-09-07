@@ -4,6 +4,7 @@
 #include "duckvep_haplotype.h"
 #include "duckvep_carriers.h"
 #include "duckvep_delta.h"
+#include "duckvep_haplotype_stream.h"
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
@@ -54,13 +55,7 @@ cleanup:
     free(edits);
 }
 
-static int descending_edit(const void *a, const void *b) {
-    uint32_t x = ((const duckvep_haplotype_edit_t *)a)->cds_start;
-    uint32_t y = ((const duckvep_haplotype_edit_t *)b)->cds_start;
-    return x < y ? 1 : x > y ? -1 : 0;
-}
-
-/* Exercise the real sparse index with the same three diploid fixture samples.
+/* Exercise the native replay stream with the same three diploid fixture samples.
  * R supplies genomic VCF alleles, ranked all-coding exons, and the allele-slot
  * assignments that generated the VCF, not projected CDS edit coordinates or
  * grouped haplotypes. Existing event/CDS projection authorities run once per
@@ -74,13 +69,12 @@ void duckhts_test_carrier_haplotypes(
     int *protein_lengths, int *flags, int *contributors, int *contributor_counts,
     double *metrics, int *status) {
     duckvep_carrier_buffers_t b = {0};
-    duckvep_carriers_t stream;
-    duckvep_haplotype_edit_t *all_edits = NULL, *leaf_edits = NULL;
-    uint64_t *events = NULL;
+    duckvep_haplotype_stream_t stream;
+    duckvep_haplotype_stream_buffers_t storage = {0};
     uint32_t *exon_storage = NULL;
     uint8_t *cds_scratch = NULL, *protein_scratch = NULL;
     uint16_t chrom = 0u;
-    uint32_t start1 = UINT32_MAX, end1 = 0u, completed, active, zero = 0u;
+    uint32_t start1 = UINT32_MAX, end1 = 0u, active, zero = 0u;
     uint16_t model_exon_count;
     uint64_t cds_offset = 0u;
     uint32_t cds_length;
@@ -90,16 +84,30 @@ void duckhts_test_carrier_haplotypes(
     duckvep_sequence_pool_t sequences = {0};
     duckvep_carrier_transcript_t transcript;
     duckvep_carrier_bucket_t transcript_index[2];
-    duckvep_carriers_status_t stream_status;
+    duckvep_haplotype_stream_status_t stream_status;
     *status = DUCKVEP_HAPLOTYPE_INVALID_ARG;
     memset(metrics, 0, 6u * sizeof(*metrics));
     if (*reference_length < 1 || *edit_count < 1 || *edit_count > 1000000 ||
         *exon_count < 1 || *exon_count > UINT16_MAX ||
         *capacity < 1 || *capacity > INT_MAX / 6 || (*strand != -1 && *strand != 1)) return;
     size_t count = (size_t)*edit_count;
-    all_edits = calloc(count, sizeof(*all_edits));
-    leaf_edits = calloc(count, sizeof(*leaf_edits));
-    events = calloc(count, sizeof(*events));
+    storage.event_capacity = storage.projection_capacity = (uint32_t)count;
+    storage.leaf_capacity = count;
+    for (size_t i = 0u; i < count; i++) {
+        size_t r = strlen(refs[i]), a = strlen(alts[i]);
+        if (r > UINT16_MAX || a > UINT16_MAX ||
+            r + a > SIZE_MAX - storage.allele_capacity) goto cleanup;
+        storage.allele_capacity += r + a;
+        size_t edits = r == a && r > 1u ? (r + 1u) / 2u : 1u;
+        if (edits > SIZE_MAX - storage.edit_capacity) goto cleanup;
+        storage.edit_capacity += edits;
+    }
+    storage.events = calloc(count, sizeof(*storage.events));
+    storage.projections = calloc(count, sizeof(*storage.projections));
+    storage.leaf_events = calloc(count, sizeof(*storage.leaf_events));
+    storage.contributors = calloc(count, sizeof(*storage.contributors));
+    storage.edits = calloc(storage.edit_capacity, sizeof(*storage.edits));
+    storage.alleles = malloc(storage.allele_capacity);
     exon_storage = calloc(4u * (size_t)*exon_count, sizeof(*exon_storage));
     cds_scratch = malloc((size_t)*capacity);
     protein_scratch = malloc((size_t)*capacity);
@@ -115,7 +123,9 @@ void duckhts_test_carrier_haplotypes(
     b.call_index = calloc(b.call_buckets, sizeof(*b.call_index));
     b.prefixes = calloc(b.prefix_capacity, sizeof(*b.prefixes));
     b.prefix_index = calloc(b.prefix_buckets, sizeof(*b.prefix_index));
-    if (!all_edits || !leaf_edits || !events || !exon_storage || !cds_scratch || !protein_scratch ||
+    if (!storage.events || !storage.projections || !storage.leaf_events ||
+        !storage.contributors || !storage.edits || !storage.alleles ||
+        !exon_storage || !cds_scratch || !protein_scratch ||
         !b.calls || !b.call_index || !b.prefixes || !b.prefix_index) goto cleanup;
     model_exon_count = (uint16_t)*exon_count;
     model_strand = (int8_t)*strand;
@@ -149,41 +159,28 @@ void duckhts_test_carrier_haplotypes(
     sequences.cds_bytes = reference; sequences.cds_bytes_len = cds_length;
     sequences.cds_offset = &cds_offset; sequences.cds_length = &cds_length;
     sequences.transcript_count = 1u;
+    storage.carriers = b;
+    storage.cds = cds_scratch; storage.cds_capacity = (size_t)*capacity;
+    storage.protein = protein_scratch; storage.protein_capacity = (size_t)*capacity;
+    stream_status = duckvep_haplotype_stream_init(&stream, &model, &exons, &sequences, &storage);
+    if (stream_status != DUCKVEP_HAPLOTYPE_STREAM_OK) goto stream_error;
     for (size_t i = 0u; i < count; i++) {
-        size_t ref_len = strlen(refs[i]), alt_len = strlen(alts[i]);
-        if (positions[i] < 1 || ref_len > UINT16_MAX || alt_len > UINT16_MAX ||
-            order[i] < 0 || (size_t)order[i] >= count) goto cleanup;
-        duckvep_event_t event = {0};
-        if (!duckvep_event_prepare_small((uint32_t)positions[i],
-                (const uint8_t *)refs[i], (uint16_t)ref_len,
-                (const uint8_t *)alts[i], (uint16_t)alt_len, &event)) goto cleanup;
-        duckvep_prepared_cds_allele_t allele = {&event,
-            (const uint8_t *)refs[i] + event.ref_diff_offset,
-            (const uint8_t *)alts[i] + event.alt_diff_offset,
-            (const uint8_t *)refs[i] + event.anchor_ref_offset,
-            event.ref_diff_length, event.alt_diff_length, 1};
-        duckvep_cds_edit_status_t projected = duckvep_cds_edit_build_prepared_allele(
-            &model, &exons, &sequences, 0u, model_strand, &allele, UINT32_MAX, &all_edits[i]);
-        if (projected != DUCKVEP_CDS_EDIT_OK) {
-            *status = 200 + (int)projected;
-            goto cleanup;
-        }
-    }
-    stream_status = duckvep_carriers_init(&stream, &model, &b);
-    if (stream_status != DUCKVEP_CARRIERS_OK) goto stream_error;
-    for (size_t i = 0u; i < count; i++) {
+        if (order[i] < 0 || (size_t)order[i] >= count) goto cleanup;
         size_t event = (size_t)order[i];
+        if (positions[event] < 1) goto cleanup;
+        duckvep_haplotype_source_t source = {event + 1u,
+            (const uint8_t *)refs[event], (const uint8_t *)alts[event],
+            (uint32_t)positions[event], 0u,
+            (uint16_t)strlen(refs[event]), (uint16_t)strlen(alts[event])};
+        stream_status = duckvep_haplotype_stream_begin(&stream, &source, &zero, 1u);
+        if (stream_status != DUCKVEP_HAPLOTYPE_STREAM_OK) goto stream_error;
         for (uint32_t sample = 0u; sample < 3u; sample++) {
-            /* Resume even between carriers of the same input event, simulating
-             * a source batch ending at every possible carrier row. */
-            stream_status = duckvep_carriers_advance(&stream, 0u,
-                (uint32_t)positions[event], event + 1u, &completed);
-            if (stream_status != DUCKVEP_CARRIERS_OK) goto stream_error;
+            /* Each push may be separated by an input batch or vector edge. */
             int lane = lanes[event * 3u + sample];
             if (lane < 1 || lane > 2) goto cleanup;
             duckvep_carrier_key_t key = {sample, 10, (uint16_t)lane, 2u, 1u};
-            stream_status = duckvep_carriers_push(&stream, 0u, &key);
-            if (stream_status != DUCKVEP_CARRIERS_OK) goto stream_error;
+            stream_status = duckvep_haplotype_stream_push(&stream, &key);
+            if (stream_status != DUCKVEP_HAPLOTYPE_STREAM_OK) goto stream_error;
         }
     }
     /* Reference lanes are implicit in the sparse index. The fixture adapter
@@ -204,57 +201,59 @@ void duckhts_test_carrier_haplotypes(
         flags[slot] = (int)(applied.flags | translated.flags);
         contributor_counts[slot] = 0;
     }
-    stream_status = duckvep_carriers_finish(&stream, &completed);
-    if (stream_status != DUCKVEP_CARRIERS_TRANSCRIPT_READY) goto stream_error;
-    duckvep_carrier_leaf_t leaf;
-    while ((stream_status = duckvep_carriers_next_leaf(&stream, &leaf)) == DUCKVEP_CARRIERS_OK) {
-        size_t required;
-        stream_status = duckvep_carriers_leaf_events(&stream, leaf.id, events, count, &required);
-        if (stream_status != DUCKVEP_CARRIERS_OK) goto stream_error;
-        for (size_t i = 0u; i < required; i++) {
-            if (!events[i] || events[i] > count) goto invalid;
-            leaf_edits[i] = all_edits[events[i] - 1u];
+    stream_status = duckvep_haplotype_stream_finish(&stream);
+    if (stream_status != DUCKVEP_HAPLOTYPE_STREAM_TRANSCRIPT_READY) goto stream_error;
+    duckvep_haplotype_leaf_t leaf;
+    while ((stream_status = duckvep_haplotype_stream_next(&stream, &leaf)) ==
+           DUCKVEP_HAPLOTYPE_STREAM_OK) {
+        if (leaf.projection_status != DUCKVEP_CDS_EDIT_OK) {
+            *status = 200 + (int)leaf.projection_status;
+            goto cleanup;
         }
-        qsort(leaf_edits, required, sizeof(*leaf_edits), descending_edit);
-        *status = duckvep_haplotype_apply_cds_edits(reference, (size_t)*reference_length,
-            leaf_edits, required, (int8_t)*strand, cds_scratch, (size_t)*capacity, &cds_len, &applied);
-        if (*status != DUCKVEP_HAPLOTYPE_OK) goto cleanup;
-        *status = duckvep_haplotype_translate_cds(cds_scratch, cds_len, DUCKVEP_CODON_TABLE_STANDARD,
-            protein_scratch, (size_t)*capacity, &protein_len, &translated);
-        if (*status != DUCKVEP_HAPLOTYPE_OK) goto cleanup;
-        metrics[3] += 1.0;
-        metrics[4] += (double)cds_len;
-        for (uint32_t id = leaf.first_call; id;) {
-            const duckvep_carrier_call_t *call = duckvep_carriers_call(&stream, id);
+        if (leaf.sequence_status != DUCKVEP_HAPLOTYPE_OK) {
+            *status = (int)leaf.sequence_status;
+            goto cleanup;
+        }
+        for (uint32_t id = leaf.carriers.first_call; id;) {
+            const duckvep_carrier_call_t *call = duckvep_carriers_call(&stream.carriers, id);
             if (!call || call->key.sample_index >= 3u || call->key.lane > 2u) goto invalid;
             size_t slot = (size_t)call->key.sample_index * 2u + call->key.lane - 1u;
-            memcpy(cds + slot * (size_t)*capacity, cds_scratch, cds_len);
-            memcpy(protein + slot * (size_t)*capacity, protein_scratch, protein_len);
-            cds_lengths[slot] = (int)cds_len; protein_lengths[slot] = (int)protein_len;
-            flags[slot] = (int)(applied.flags | translated.flags);
-            contributor_counts[slot] = (int)required;
-            for (size_t i = 0u; i < required; i++) contributors[slot * count + i] = (int)events[i] - 1;
+            memcpy(cds + slot * (size_t)*capacity, leaf.cds, leaf.cds_length);
+            memcpy(protein + slot * (size_t)*capacity, leaf.protein, leaf.protein_length);
+            cds_lengths[slot] = (int)leaf.cds_length;
+            protein_lengths[slot] = (int)leaf.protein_length;
+            flags[slot] = (int)leaf.flags;
+            contributor_counts[slot] = (int)leaf.contributor_count;
+            for (size_t i = 0u; i < leaf.contributor_count; i++) {
+                uint64_t event = leaf.contributors[i].source.event_id;
+                if (!event || event > count) goto invalid;
+                contributors[slot * count + i] = (int)event - 1;
+            }
             metrics[5] += 1.0;
             id = call->next_leaf;
         }
     }
-    if (stream_status != DUCKVEP_CARRIERS_DONE) goto stream_error;
-    stream_status = duckvep_carriers_release(&stream);
-    if (stream_status != DUCKVEP_CARRIERS_OK) goto stream_error;
-    stream_status = duckvep_carriers_finish(&stream, &completed);
-    if (stream_status != DUCKVEP_CARRIERS_DONE) goto stream_error;
-    metrics[0] = stream.peak_transcripts;
-    metrics[1] = stream.peak_calls;
-    metrics[2] = stream.peak_prefixes;
+    if (stream_status != DUCKVEP_HAPLOTYPE_STREAM_DONE) goto stream_error;
+    stream_status = duckvep_haplotype_stream_finish(&stream);
+    if (stream_status != DUCKVEP_HAPLOTYPE_STREAM_DONE) goto stream_error;
+    metrics[0] = stream.carriers.peak_transcripts;
+    metrics[1] = stream.carriers.peak_calls;
+    metrics[2] = stream.carriers.peak_prefixes;
+    metrics[3] = (double)stream.completed_leaves;
+    metrics[4] = (double)stream.translated_bases;
     *status = DUCKVEP_HAPLOTYPE_OK;
     goto cleanup;
 invalid:
     *status = DUCKVEP_HAPLOTYPE_INVALID_ARG;
     goto cleanup;
 stream_error:
-    *status = 100 + (int)stream_status;
+    *status = stream_status == DUCKVEP_HAPLOTYPE_STREAM_INPUT_ORDER
+        ? 100 + DUCKVEP_CARRIERS_INPUT_ORDER
+        : stream_status == DUCKVEP_HAPLOTYPE_STREAM_CARRIER_ERROR
+        ? 100 + (int)stream.carrier_error : 300 + (int)stream_status;
 cleanup:
-    free(all_edits); free(leaf_edits); free(events); free(exon_storage);
+    free(storage.events); free(storage.projections); free(storage.leaf_events);
+    free(storage.contributors); free(storage.edits); free(storage.alleles); free(exon_storage);
     free(cds_scratch); free(protein_scratch);
     free(b.calls); free(b.call_index); free(b.prefixes); free(b.prefix_index);
 }

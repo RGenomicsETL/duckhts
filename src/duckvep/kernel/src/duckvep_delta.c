@@ -1586,23 +1586,14 @@ DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t duckvep_variant_cds_edit_build(
 }
 
 DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t
-duckvep_variant_cds_edit_set_build_prepared(
-    const duckvep_transcript_model_t *transcripts,
-    const duckvep_exon_model_t       *exons,
-    const duckvep_sequence_pool_t    *seq,
-    const duckvep_variant_batch_t    *v,
-    uint32_t                          variant_idx,
-    size_t                            tx_idx,
-    int8_t                            transcript_strand,
-    const duckvep_event_t            *prepared_event,
-    uint32_t                          exon_hint,
+duckvep_projected_cds_edit_set_build(
+    const duckvep_haplotype_edit_t  *projected,
+    int8_t                           transcript_strand,
     duckvep_haplotype_edit_t         *scratch,
     size_t                            scratch_cap,
     duckvep_edit_set_t               *out) {
 
     duckvep_haplotype_edit_t edit;
-    duckvep_cds_edit_status_t st;
-    uint8_t kind;
     uint32_t islands = 0u;
     uint32_t i;
     uint32_t out_i;
@@ -1612,18 +1603,20 @@ duckvep_variant_cds_edit_set_build_prepared(
     out->count = 0u;
     if (scratch == NULL && scratch_cap > 0u) return DUCKVEP_CDS_EDIT_INVALID_ARG;
 
-    if (prepared_event == NULL) return DUCKVEP_CDS_EDIT_INVALID_ARG;
-    st = duckvep_variant_cds_edit_build_event(
-        transcripts, exons, seq, v, variant_idx, tx_idx, transcript_strand,
-        prepared_event, exon_hint, &edit);
-    if (st != DUCKVEP_CDS_EDIT_OK) return st;
-    if (v == NULL || v->variant_kind == NULL || variant_idx >= v->count) {
+    if (projected == NULL || !projected->cds_start ||
+        (projected->variant_strand != 1 && projected->variant_strand != -1) ||
+        (transcript_strand != 1 && transcript_strand != -1) ||
+        (projected->ref_len && !projected->ref) || (projected->alt_len && !projected->alt) ||
+        (!projected->ref_len && !projected->alt_len) ||
+        (projected->ref_len && projected->ref_len - 1u > UINT32_MAX - projected->cds_start)) {
         return DUCKVEP_CDS_EDIT_INVALID_ARG;
     }
-    kind = v->variant_kind[variant_idx];
-    if (kind != (uint8_t)DUCKVEP_KIND_MNV || edit.ref_len != edit.alt_len ||
-        edit.ref_len == 0u || edit.ref == NULL || edit.alt == NULL) {
-        if (scratch_cap == 0u) return DUCKVEP_CDS_EDIT_BUFFER_TOO_SMALL;
+    edit = *projected;
+    if (edit.ref_len != edit.alt_len || edit.ref_len == 0u) {
+        if (scratch_cap == 0u) {
+            out->count = 1u;
+            return DUCKVEP_CDS_EDIT_BUFFER_TOO_SMALL;
+        }
         scratch[0] = edit;
         out->edits = scratch;
         out->count = 1u;
@@ -1650,10 +1643,13 @@ duckvep_variant_cds_edit_set_build_prepared(
         }
     }
     if (islands == 0u) return DUCKVEP_CDS_EDIT_INVALID_EVENT;
-    if (scratch_cap < (size_t)islands) return DUCKVEP_CDS_EDIT_BUFFER_TOO_SMALL;
+    if (scratch_cap < (size_t)islands) {
+        out->count = islands;
+        return DUCKVEP_CDS_EDIT_BUFFER_TOO_SMALL;
+    }
 
     out_i = 0u;
-    if (transcript_strand > 0) {
+    if (edit.variant_strand == transcript_strand) {
         uint32_t pos = edit.ref_len;
         while (pos > 0u) {
             uint32_t hi;
@@ -1711,6 +1707,46 @@ duckvep_variant_cds_edit_set_build_prepared(
     out->edits = scratch;
     out->count = (size_t)islands;
     return DUCKVEP_CDS_EDIT_OK;
+}
+
+DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t
+duckvep_variant_cds_edit_set_build_prepared(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    const duckvep_sequence_pool_t    *seq,
+    const duckvep_variant_batch_t    *v,
+    uint32_t                          variant_idx,
+    size_t                            tx_idx,
+    int8_t                            transcript_strand,
+    const duckvep_event_t            *prepared_event,
+    uint32_t                          exon_hint,
+    duckvep_haplotype_edit_t         *scratch,
+    size_t                            scratch_cap,
+    duckvep_edit_set_t               *out) {
+    if (out == NULL) return DUCKVEP_CDS_EDIT_INVALID_ARG;
+    out->edits = NULL;
+    out->count = 0u;
+    if ((scratch == NULL && scratch_cap > 0u) || prepared_event == NULL)
+        return DUCKVEP_CDS_EDIT_INVALID_ARG;
+    duckvep_haplotype_edit_t edit;
+    duckvep_cds_edit_status_t status = duckvep_variant_cds_edit_build_event(
+        transcripts, exons, seq, v, variant_idx, tx_idx, transcript_strand,
+        prepared_event, exon_hint, &edit);
+    if (status != DUCKVEP_CDS_EDIT_OK) return status;
+    if (v == NULL || v->variant_kind == NULL || variant_idx >= v->count)
+        return DUCKVEP_CDS_EDIT_INVALID_ARG;
+    if (v->variant_kind[variant_idx] != (uint8_t)DUCKVEP_KIND_MNV) {
+        if (scratch_cap == 0u) return DUCKVEP_CDS_EDIT_BUFFER_TOO_SMALL;
+        scratch[0] = edit;
+        out->edits = scratch;
+        out->count = 1u;
+        return DUCKVEP_CDS_EDIT_OK;
+    }
+    status = duckvep_projected_cds_edit_set_build(&edit, transcript_strand,
+        scratch, scratch_cap, out);
+    /* Preserve this producer's all-zero failed-output contract. */
+    if (status != DUCKVEP_CDS_EDIT_OK) out->count = 0u;
+    return status;
 }
 
 DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t duckvep_variant_cds_edit_set_build(

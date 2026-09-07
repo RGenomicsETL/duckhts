@@ -139,6 +139,19 @@ typedef enum duckvep_cds_edit_status {
     DUCKVEP_CDS_EDIT_REF_MISMATCH
 } duckvep_cds_edit_status_t;
 
+/* Open a physical edit set from one already projected CDS edit. Equal-length
+ * substitutions split into maximal differing islands; unchanged internal bases
+ * are context, not conflicting edits. Other shapes remain one edit. No genomic
+ * projection is repeated. Alleles stay borrowed, output is descending CDS order,
+ * and BUFFER_TOO_SMALL writes no scratch and reports the required out->count. */
+DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t
+duckvep_projected_cds_edit_set_build(
+    const duckvep_haplotype_edit_t *projected,
+    int8_t transcript_strand,
+    duckvep_haplotype_edit_t *scratch,
+    size_t scratch_cap,
+    duckvep_edit_set_t *out);
+
 /* Prepared semantic allele borrowed by CDS projection after upload parsing or
  * HGVS 3-prime placement has already chosen the event coordinates. Alleles
  * are expressed in `variant_strand` orientation. `anchor_ref` is required only
