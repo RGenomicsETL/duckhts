@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- bundle native decoded-call haplotype replay with explicit missing/unphased
+  evidence and complete phase-set-domain input. Existing DBI annotation results
+  are unchanged; the public phased SQL executor is not yet exposed
+
 - expose bundled `duckvep_phase_call(...)` through DBI for typed genotype/phase
   preparation, including per-call strict/VEP-116 policies, missing alleles and
   unresolved phase. SQL results distinguish phase-set assignments from

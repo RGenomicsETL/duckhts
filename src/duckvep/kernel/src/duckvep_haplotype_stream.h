@@ -1,7 +1,8 @@
 /* Model-scoped literal-event replay over sparse carrier paths (INTERNAL).
  * All storage is caller-owned. begin copies REF/ALT once and projects once per
- * candidate transcript; push adds an explicitly interpreted non-reference lane.
- * GT/PS interpretation, candidate lookup and DuckDB materialization are adapters.
+ * candidate transcript; push adds prepared carrier evidence, while push_call
+ * interprets a decoded GT. Candidate and phase-domain discovery and output
+ * materialization belong to the host query plan.
  *
  * Input is sorted by (chrom_id, pos1, event_id). begin may report a transcript
  * ready before consuming the input: drain next until DONE, then retry begin with
@@ -20,6 +21,7 @@
 
 #include "duckvep_carriers.h"
 #include "duckvep_delta.h"
+#include "duckvep_phase.h"
 
 typedef enum {
     DUCKVEP_HAPLOTYPE_STREAM_OK,
@@ -60,7 +62,22 @@ typedef struct {
 typedef struct {
     duckvep_haplotype_source_t source;
     duckvep_cds_edit_status_t projection_status;
+    uint8_t evidence_flags;
 } duckvep_haplotype_contributor_t;
+
+typedef struct {
+    int64_t value;
+    uint8_t present;
+} duckvep_haplotype_phase_set_t;
+
+typedef struct {
+    const int32_t *alleles;
+    const uint8_t *phase_before; /* NULL means no phase information. */
+    uint32_t sample_index, alt_index;
+    uint16_t ploidy;
+    duckvep_haplotype_phase_set_t phase_set;
+    duckvep_phase_policy_t policy;
+} duckvep_haplotype_call_t;
 
 typedef struct {
     duckvep_carrier_buffers_t carriers;
@@ -70,7 +87,7 @@ typedef struct {
     uint32_t event_capacity, projection_capacity;
     size_t allele_capacity;
     /* Scratch for one distinct occupied path, reused across its carriers. */
-    uint64_t *leaf_events;
+    duckvep_carrier_event_t *leaf_events;
     duckvep_haplotype_contributor_t *contributors;
     duckvep_haplotype_edit_t *edits;
     size_t leaf_capacity, edit_capacity;
@@ -86,6 +103,7 @@ typedef struct {
     const uint8_t *cds, *protein;
     size_t cds_length, protein_length;
     uint32_t flags;
+    uint8_t evidence_flags; /* OR of contributor evidence, distinct from sequence flags. */
     /* First failed projection, or edit/rebuild status when projection is OK.
      * Failed paths have no CDS/protein; all contributors/carriers remain. */
     duckvep_cds_edit_status_t projection_status;
@@ -104,6 +122,8 @@ typedef struct {
     uint32_t last_pos1;
     uint16_t last_chrom;
     uint8_t have_input, have_current, initialized;
+    uint8_t have_phase_policy;
+    duckvep_phase_policy_t phase_policy;
     duckvep_haplotype_stream_status_t error;
     duckvep_carriers_status_t carrier_error;
     uint64_t input_events, projected_events, completed_leaves, translated_bases;
@@ -130,7 +150,31 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_begin(
 /* Add this event to one lane in every candidate transcript, using the prepared
  * projection. No call matrix and no repeated projection across samples. */
 duckvep_haplotype_stream_status_t duckvep_haplotype_stream_push(
-    duckvep_haplotype_stream_t *stream, const duckvep_carrier_key_t *key);
+    duckvep_haplotype_stream_t *stream, const duckvep_carrier_key_t *key,
+    uint8_t evidence_flags);
+
+/* Interpret the complete decoded GT for this source ALT and one candidate
+ * transcript. The caller's query plan supplies ALL phase sets for this sample
+ * and transcript, including those first observed in later records. Arrays are
+ * borrowed for the call, sorted absent-first then by signed value, and unique.
+ * An empty domain means only the absent/default set. Domains must stay logically
+ * identical across the transcript; discovery/broadcast planning belongs to the
+ * host, not a second first-party store of the whole query's phase-set catalogue.
+ * Homozygous/haploid and wholly unphased evidence is broadcast across the domain.
+ * Partial phase affects only its declared set and the unresolved slots within it.
+ * Compatibility mode requires the absent-only domain, compacts called slots,
+ * and retains missing-call evidence on every lane. Uncertain paths return
+ * INPUT_INCOMPLETE with no CDS/protein, including in compatibility mode; this
+ * does not certify VEP's conditional sequence output for missing genotypes.
+ * Source ALT ordinals must be positive and refer to the current begin event.
+ * Missing GT with unknown ploidy is an error; known-ploidy missing slots use -1.
+ * One phase policy applies to the stream; changing it is an error.
+ * A failure latches even if a broadcast already updated an earlier carrier.
+ */
+duckvep_haplotype_stream_status_t duckvep_haplotype_stream_push_call(
+    duckvep_haplotype_stream_t *stream, uint32_t transcript_index,
+    const duckvep_haplotype_call_t *call,
+    const duckvep_haplotype_phase_set_t *phase_sets, size_t phase_set_count);
 
 duckvep_haplotype_stream_status_t duckvep_haplotype_stream_finish(
     duckvep_haplotype_stream_t *stream);

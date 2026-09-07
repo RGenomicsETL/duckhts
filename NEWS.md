@@ -1,6 +1,12 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- connect decoded GT/PS preparation to the native haplotype stream. Include
+  missing/unphased evidence in shared-path identity, preserve all contributors,
+  and return explicit incomplete results without CDS/protein for uncertain paths.
+  Caller-supplied complete phase-set domains carry phase-invariant calls into
+  sets encountered later. The public phased SQL executor remains unimplemented
+
 - add `duckvep_phase_call(...)` over typed decoded GT/PS calls, backed by a
   host-neutral constant-space phase reducer. Per-call `strict` and
   `vep116_compat` policies preserve every allele slot, missing calls and explicit

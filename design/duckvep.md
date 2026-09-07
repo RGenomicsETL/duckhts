@@ -660,6 +660,17 @@ behind a longer-lived transcript; capacity failures latch instead of dropping pa
 Projected equal-length edits use the same differing-island decomposition as independent
 annotation: unchanged internal MNV bases do not mask or conflict with another carried edit.
 Source-record count and physical-edit count remain separate, with raw alleles preserved.
+Carrier-prefix identity includes per-event called/missing/unphased evidence. An uncertain
+path cannot share the result of a fully known path merely because their called edits agree.
+The native stream accepts complete decoded calls for a candidate transcript and uses the
+same phase reducer as SQL. Its host supplies the complete borrowed phase-set domain for
+each sample/transcript, including sets first encountered later; homozygous/haploid calls
+and wholly unphased evidence therefore reach future sets without a second native catalogue.
+Partial-phase uncertainty is confined to its declared set and unresolved slots. Missing
+or unresolved paths return explicit incomplete-input status and all contributor evidence,
+with no CDS/protein, including in the VEP-116 slot profile. This conservative incomplete
+result does not claim parity with upstream conditional sequences for missing genotypes.
+One stream cannot mix phase policies.
 
 `duckvep_phase_call` prepares decoded GT/PS calls through a constant-space native reducer.
 It observes the complete genotype before assigning slots. Strict assignments respect

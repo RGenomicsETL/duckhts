@@ -178,8 +178,11 @@ void duckhts_test_carrier_haplotypes(
             /* Each push may be separated by an input batch or vector edge. */
             int lane = lanes[event * 3u + sample];
             if (lane < 1 || lane > 2) goto cleanup;
-            duckvep_carrier_key_t key = {sample, 10, (uint16_t)lane, 2u, 1u};
-            stream_status = duckvep_haplotype_stream_push(&stream, &key);
+            int32_t gt[2] = {lane == 1, lane == 2};
+            const uint8_t phase[2] = {1u, 1u};
+            duckvep_haplotype_phase_set_t set = {10, 1u};
+            duckvep_haplotype_call_t call = {gt, phase, sample, 1u, 2u, set, DUCKVEP_PHASE_STRICT};
+            stream_status = duckvep_haplotype_stream_push_call(&stream, zero, &call, &set, 1u);
             if (stream_status != DUCKVEP_HAPLOTYPE_STREAM_OK) goto stream_error;
         }
     }

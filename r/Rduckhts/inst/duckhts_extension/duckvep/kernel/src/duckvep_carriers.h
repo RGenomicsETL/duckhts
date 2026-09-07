@@ -3,7 +3,7 @@
  *
  * The owner pins one immutable transcript model and owns all buffers. Projected
  * alleles/provenance stay in its event store until a transcript is drained.
- * This index stores only event IDs: identical prefixes share nodes across
+ * This index stores event IDs and call evidence: identical prefixes share nodes across
  * samples/phase sets/lanes; reference paths require no entry. Input is ordered
  * by (chrom_id, pos1, event_id), with a unique event ID per source event. Calls
  * for one event may span arbitrarily many input batches.
@@ -40,6 +40,17 @@ typedef struct {
     uint8_t phase_set_present;      /* Absent and a present PS=0 are distinct. */
 } duckvep_carrier_key_t;
 
+enum {
+    DUCKVEP_CARRIER_CALLED = 1u,
+    DUCKVEP_CARRIER_MISSING = 2u,
+    DUCKVEP_CARRIER_UNPHASED = 4u
+};
+
+typedef struct {
+    uint64_t event_id;
+    uint8_t evidence_flags;
+} duckvep_carrier_event_t;
+
 /* Slots and hash buckets are caller-owned implementation storage. A zero ID
  * means no slot; live IDs are one-based offsets into their respective arrays. */
 typedef struct {
@@ -60,6 +71,7 @@ typedef struct {
 typedef struct {
     uint64_t event_id;
     uint32_t transcript, parent, depth, first_call, call_count, next_transcript, next_free;
+    uint8_t evidence_flags;
 } duckvep_carrier_prefix_t;
 
 typedef struct {
@@ -104,21 +116,24 @@ duckvep_carriers_status_t duckvep_carriers_advance(
 duckvep_carriers_status_t duckvep_carriers_finish(
     duckvep_carriers_t *stream, uint32_t *transcript_index);
 
-/* Append the current non-reference event to one carrier. Capacity failures,
+/* Append the current event and nonzero evidence flags to one carrier. Missing
+ * or unphased evidence is part of prefix identity, never an implicit reference
+ * allele. The caller coalesces evidence for one event/key before pushing it.
+ * Capacity failures,
  * duplicate calls and changed ploidy for an existing carrier key leave all
  * path/pool state unchanged.
  * Phase interpretation belongs to the consumer; this preserves explicit keys. */
 duckvep_carriers_status_t duckvep_carriers_push(
     duckvep_carriers_t *stream, uint32_t transcript_index,
-    const duckvep_carrier_key_t *key);
+    const duckvep_carrier_key_t *key, uint8_t evidence_flags);
 
 /* Each distinct occupied prefix is emitted once, including a prefix that is
  * both a completed carrier path and an ancestor of a longer carrier path. */
 duckvep_carriers_status_t duckvep_carriers_next_leaf(
     duckvep_carriers_t *stream, duckvep_carrier_leaf_t *leaf);
-/* Event IDs are returned in arrival order. No output is written on OUTPUT_FULL. */
+/* Events/evidence are returned in arrival order. No output on OUTPUT_FULL. */
 duckvep_carriers_status_t duckvep_carriers_leaf_events(
-    const duckvep_carriers_t *stream, uint32_t leaf, uint64_t *events,
+    const duckvep_carriers_t *stream, uint32_t leaf, duckvep_carrier_event_t *events,
     size_t capacity, size_t *required);
 /* Iterate from leaf.first_call through next_leaf. Borrowed until release. */
 const duckvep_carrier_call_t *duckvep_carriers_call(

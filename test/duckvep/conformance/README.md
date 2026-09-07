@@ -554,8 +554,8 @@ existing clean-revision release-build receipt; runs without one are explicitly
 The direct-mutation oracle receives the generated original-CDS edit coordinates.
 The separate carrier bridge receives genomic VCF alleles, transcript-ranked exons
 and the borrowed reference CDS, but no projected edit coordinates. It uses the existing
-event preparation and CDS projector once per event, feeds explicit carrier rows through
-the native sparse prefix index, resumes between every carrier row, and rebuilds and
+event preparation and CDS projector once per event, passes the complete decoded diploid
+call through the native phase reducer and sparse prefix index, resumes between calls, and rebuilds and
 translates each occupied event path once. Their complete lane outputs must agree
 before comparison with Haplosaurus. `carrier_metrics.csv` records input events/carriers,
 peak active slots, completed event paths and translated bases; it is diagnostic work
