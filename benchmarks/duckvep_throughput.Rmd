@@ -291,6 +291,46 @@ extension SHA-256. The background I/O differs, so their timing difference is not
 speedup or a no-regression certificate. Model loading is untimed: this control does not
 measure constructor cost, cache acquisition throughput or peak memory.
 
+## Transcript-end HGVS correction control
+
+The transcript-end multiplication correction reruns the unchanged ordinary
+indel/HGVS workload at source `6ce2ddd85df7c325c3779f2f1cdd984b3beaf983`.
+Its nearest identical recorded control is
+`c57100b9c82a36f7e6f761a4b3d2f79838cdd132`; intervening changes mean this comparison
+cannot isolate the cost of the multiplication fix.
+
+```{r transcript-end-hgvs-control}
+multiplication_revisions <- c(
+  "c57100b9c82a36f7e6f761a4b3d2f79838cdd132",
+  "6ce2ddd85df7c325c3779f2f1cdd984b3beaf983"
+)
+multiplication_controls <- history[
+  history$source_revision %in% multiplication_revisions &
+    history$workload == "fixture_one_transcript_sorted_indels", ]
+stopifnot(nrow(multiplication_controls) == 2L,
+  !anyDuplicated(multiplication_controls$source_revision))
+multiplication_controls <- multiplication_controls[
+  match(multiplication_revisions, multiplication_controls$source_revision), ]
+stopifnot(!anyNA(multiplication_controls$source_revision),
+  all(vapply(multiplication_controls[same_workload],
+    function(x) length(unique(x)) == 1L, TRUE)))
+knitr::kable(multiplication_controls[, c(
+  "revision", "variants", "annotated_rows", "threads", "passes",
+  "min_seconds", "median_seconds", "max_seconds", "checksum_value"
+)], row.names = FALSE)
+```
+
+Both runs consume 1,000,000 inputs and produce 1,000,000 rows / 26,000,000
+HGVS/status bytes, with five passes, 100,000 warm-up inputs, one DuckDB thread
+pinned to CPU 2, a 5,000-base halo, DuckDB v1.5.3 and an Intel Core i5-13500.
+The current median is `r sprintf("%.3f", multiplication_controls$median_seconds[[2L]])`
+seconds versus `r sprintf("%.3f", multiplication_controls$median_seconds[[1L]])`,
+or `r sprintf("%+.2f%%", 100 * (multiplication_controls$median_seconds[[2L]] / multiplication_controls$median_seconds[[1L]] - 1))`.
+No conformance or sanitizer process overlapped the current timed run.
+This ordinary CDS-body workload does not exercise the corrected transcript-end
+clipping branch. No checked-in benchmark measures that branch or complete phased
+annotation yet; this is the nearest rendered control, not a no-regression claim.
+
 ## Annotation-dense transcript distance and ordered parallel partitions
 
 ```{r dense-threading}

@@ -111,15 +111,24 @@ assembly-specific frontier.
 
 | revision | corpus                          | model        | metric | exact           | match | both_absent | discordant |
 |:---------|:--------------------------------|:-------------|:-------|:----------------|------:|------------:|-----------:|
-| b7c7237e | clinvar_chr21_hgvs_seed113      | differential | HGVSC  | 56,998/56,998   | 44871 |       12127 |          0 |
-| b7c7237e | clinvar_chr21_hgvs_seed113      | differential | HGVSP  | 56,998/56,998   | 20782 |       36216 |          0 |
-| 15417633 | state_exploration_seed_31415927 | differential | HGVSC  | 100,268/100,268 | 99146 |        1122 |          0 |
-| 15417633 | state_exploration_seed_31415927 | differential | HGVSP  | 100,268/100,268 | 31021 |       69247 |          0 |
+| 6ce2ddd8 | clinvar_chr21_hgvs_seed113      | differential | HGVSC  | 56,998/56,998   | 44871 |       12127 |          0 |
+| 6ce2ddd8 | clinvar_chr21_hgvs_seed113      | differential | HGVSP  | 56,998/56,998   | 20782 |       36216 |          0 |
+| 6ce2ddd8 | hgvs_terminal_multiplication    | differential | HGVSC  | 4/4             |     1 |           3 |          0 |
+| 6ce2ddd8 | hgvs_terminal_multiplication    | differential | HGVSP  | 4/4             |     0 |           4 |          0 |
+| 6ce2ddd8 | state_exploration_seed_16180339 | differential | HGVSC  | 100,268/100,268 | 99169 |        1099 |          0 |
+| 6ce2ddd8 | state_exploration_seed_16180339 | differential | HGVSP  | 100,268/100,268 | 31403 |       68865 |          0 |
+| 6ce2ddd8 | state_exploration_seed_27182818 | differential | HGVSC  | 100,268/100,268 | 99135 |        1133 |          0 |
+| 6ce2ddd8 | state_exploration_seed_27182818 | differential | HGVSP  | 100,268/100,268 | 31227 |       69041 |          0 |
+| 6ce2ddd8 | state_exploration_seed_31415927 | differential | HGVSC  | 100,268/100,268 | 99146 |        1122 |          0 |
+| 6ce2ddd8 | state_exploration_seed_31415927 | differential | HGVSP  | 100,268/100,268 | 31021 |       69247 |          0 |
 
 | revision | corpus                          | extension_build               | extension    | model_kind | model        | reference    | reference_index | source_vcf   | input_vcf    | pair_artifact |
 |:---------|:--------------------------------|:------------------------------|:-------------|:-----------|:-------------|:-------------|:----------------|:-------------|:-------------|:--------------|
-| b7c7237e | clinvar_chr21_hgvs_seed113      | htslib_distclean_make_release | e0e1089eeff9 | duckdb     | 9ffea3c63a0f | 1e74081a49ce | 0998f61682f4    | 7ecec9a75071 | 7ecec9a75071 | 9d722563db8d  |
-| 15417633 | state_exploration_seed_31415927 | htslib_distclean_make_release | 738d88535a6b | sql        | b21fbeac2c28 | 01d1f0252130 | 154cbe440869    | 1c5cbf73b5f6 | beab52a9d117 | 0dc063953fa0  |
+| 6ce2ddd8 | clinvar_chr21_hgvs_seed113      | htslib_distclean_make_release | 3213f0a209bf | duckdb     | 8a59b14eed5c | 1e74081a49ce | 0998f61682f4    | 7ecec9a75071 | 7ecec9a75071 | f4df0ad05234  |
+| 6ce2ddd8 | hgvs_terminal_multiplication    | htslib_distclean_make_release | 3213f0a209bf | sql        | b21fbeac2c28 | 01d1f0252130 | 154cbe440869    | bfa15d2786f3 | c4182bf1b769 | eb37a23b382c  |
+| 6ce2ddd8 | state_exploration_seed_16180339 | htslib_distclean_make_release | 3213f0a209bf | sql        | b21fbeac2c28 | 01d1f0252130 | 154cbe440869    | 2d8315a4926a | 53150698e457 | ce7688057f5b  |
+| 6ce2ddd8 | state_exploration_seed_27182818 | htslib_distclean_make_release | 3213f0a209bf | sql        | b21fbeac2c28 | 01d1f0252130 | 154cbe440869    | ec5a793adc6b | 8486a6b4c05e | 2aba7e180609  |
+| 6ce2ddd8 | state_exploration_seed_31415927 | htslib_distclean_make_release | 3213f0a209bf | sql        | b21fbeac2c28 | 01d1f0252130 | 154cbe440869    | 1c5cbf73b5f6 | beab52a9d117 | 107ea9953774  |
 
 This is exact string agreement for independent transcript events with
 VEP 116 invoked using `--hgvs`. A comparison is exact when both engines
@@ -144,6 +153,17 @@ Earlier HTTP-identity-only acquisition receipts remain historical
 observations, not content-checksum evidence. The refreshed HGVS run
 retains the same 1,864-variant input and all 56,998 transcript pairs,
 with no unresolved, missing, extra or discordant pairs.
+
+The `6ce2ddd85df7` rerun again retains that exact source/input VCF and
+all 56,998 pairs, with exact consequences and HGVSc/HGVSp agreement. It
+resolves the model, reference and checksum-verified chromosome-21 cache
+through the artifact registry. Its physical model-file receipt differs
+from the older run; this is not a claim of byte-identical model files.
+The full GIAB conformance campaign has not been refreshed to this
+revision. A separate chromosome-21 attempt found no eligible model joins
+because the raw callset uses `chr21` and the model uses `21`; it stopped
+before VEP, was not counted as a pass, and did not replace the full GIAB
+gate.
 
 ## Paired-breakend differential
 
@@ -285,52 +305,91 @@ recorded.
 | 2026-09-06 | b7c7237e        | nmd_clinvar_chr21                                        | ensembl116-grch38-final    | 1353288 |     1353288 |          0 |    1353288 |                   0 | 100.00%    | 0.00%                                 |
 | 2026-09-07 | 15417633        | state_exploration_seed_31415927                          | differential               |  100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                                 |
 | 2026-09-07 | cc1993fd        | state_exploration_seed_31415927                          | differential               |  100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                                 |
+| 2026-09-07 | 7d40756a        | state_exploration_seed_16180339                          | differential               |  100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                                 |
+| 2026-09-07 | 7d40756a        | state_exploration_seed_27182818                          | differential               |  100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                                 |
+| 2026-09-07 | 6ce2ddd8        | clinvar_chr21_hgvs_seed113                               | differential               |   56998 |       56998 |          0 |      56998 |                   0 | 100.00%    | 0.01%                                 |
+| 2026-09-07 | 6ce2ddd8        | hgvs_terminal_multiplication                             | differential               |       4 |           4 |          0 |          4 |                   0 | 100.00%    | 60.24%                                |
+| 2026-09-07 | 6ce2ddd8        | state_exploration_seed_16180339                          | differential               |  100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                                 |
+| 2026-09-07 | 6ce2ddd8        | state_exploration_seed_27182818                          | differential               |  100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                                 |
+| 2026-09-07 | 6ce2ddd8        | state_exploration_seed_31415927                          | differential               |  100268 |      100268 |          0 |     100268 |                   0 | 100.00%    | 0.00%                                 |
 
 ## Randomized executable-VEP state exploration
 
 This is the anti-overfitting lane against the VEP executable, not an
 internal property test. Each seed contains the fixed predicate witnesses
 plus 100,000 unique alleles. Three quarters of random positions are
-within six bases of splice, exon, translation-start, and
-translation-stop boundaries; one quarter is uniform across the
-transcript. SNVs, MNVs, insertions, deletions, and delins are sampled
-with equal probability, with differing alleles up to 49 bases.
+within six bases of splice sites, exon endpoints, and translation starts
+and stops; one quarter is uniform across the transcript. SNVs, MNVs,
+insertions, deletions, and delins are sampled with equal probability,
+with differing alleles up to 49 bases.
 
 | revision | seed     | pairs   | exact   | unresolved | resolved_disagreements | descriptive_independent_pair_upper_95_ppm |
 |:---------|:---------|:--------|:--------|:-----------|:-----------------------|:------------------------------------------|
-| 15417633 | 31415927 | 100,268 | 100,268 | 0          | 0                      | 36.8                                      |
-| 15417633 | combined | 100,268 | 100,268 | 0          | 0                      | 36.8                                      |
+| 6ce2ddd8 | 16180339 | 100,268 | 100,268 | 0          | 0                      | 36.8                                      |
+| 6ce2ddd8 | 27182818 | 100,268 | 100,268 | 0          | 0                      | 36.8                                      |
+| 6ce2ddd8 | 31415927 | 100,268 | 100,268 | 0          | 0                      | 36.8                                      |
+| 6ce2ddd8 | combined | 300,804 | 300,804 | 0          | 0                      | 12.3                                      |
+
+The combined denominator counts pair comparisons across seed runs, not
+distinct alleles: the 268 fixed witnesses are deliberately shared and
+random draws may overlap. Neither the original generator nor its
+acceptance rules were changed.
+
+### Fresh-seed counterexample retained
+
+Seed 27182818 at `7d40756adc75` matched every consequence pair but
+emitted one extra HGVSc: `chrDuck:250 CGT>CCC`, transcript `DUCK1-201`,
+yielded `c.*10[3]` where VEP emitted no HGVSc. The pure-C properties
+passed on that revision too. VEP skips transcript allele clipping only
+for two-copy duplication; larger multiplications must undergo clipping
+and coordinate projection. The fix removes the early repeat-formatting
+path instead of changing the oracle or excluding the event. The original
+failing HGVS rows remain in the append-only ledger.
+
+| revision |  pairs | match | both_absent | discordant |
+|:---------|-------:|------:|------------:|-----------:|
+| 7d40756a | 100268 | 99135 |        1132 |          1 |
+| 6ce2ddd8 | 100268 | 99135 |        1133 |          0 |
+
+The same three frozen 100,268-pair corpora pass consequences and HGVS at
+`6ce2ddd85df7`. A separate four-record executable witness retains the
+discovered event, its two-copy positive control and larger-copy
+variants. Native regression tests additionally enumerate 120
+transcript-end projection cases: four bases, both strands and copy
+counts 2 through 16. Those finite cases exercise the shared edit/HGVS
+path; they are not 120 additional executable-VEP comparisons or proof of
+whole-haplotype SO/HGVS semantics.
 
 The same campaign covered the following SO terms. Counts are term
 memberships, not distinct transcript pairs, because one pair may carry
 several terms and seed runs deliberately retain the same fixed
 witnesses.
 
-| consequence_class                   | impact   | seeds_observed |     n | unresolved | term_mismatch | engine_extra | engine_missing |
-|:------------------------------------|:---------|---------------:|------:|-----------:|--------------:|-------------:|---------------:|
-| intron_variant                      | MODIFIER |              1 | 38982 |          0 |             0 |            0 |              0 |
-| coding_sequence_variant             | MODIFIER |              1 | 25725 |          0 |             0 |            0 |              0 |
-| frameshift_variant                  | HIGH     |              1 | 16217 |          0 |             0 |            0 |              0 |
-| 5_prime_UTR_variant                 | MODIFIER |              1 | 14857 |          0 |             0 |            0 |              0 |
-| 3_prime_UTR_variant                 | MODIFIER |              1 | 13731 |          0 |             0 |            0 |              0 |
-| splice_donor_variant                | HIGH     |              1 | 12921 |          0 |             0 |            0 |              0 |
-| splice_acceptor_variant             | HIGH     |              1 | 11668 |          0 |             0 |            0 |              0 |
-| splice_donor_5th_base_variant       | LOW      |              1 | 11280 |          0 |             0 |            0 |              0 |
-| splice_polypyrimidine_tract_variant | LOW      |              1 | 10399 |          0 |             0 |            0 |              0 |
-| stop_gained                         | HIGH     |              1 |  8483 |          0 |             0 |            0 |              0 |
-| start_lost                          | HIGH     |              1 |  8119 |          0 |             0 |            0 |              0 |
-| splice_region_variant               | LOW      |              1 |  8025 |          0 |             0 |            0 |              0 |
-| splice_donor_region_variant         | LOW      |              1 |  4702 |          0 |             0 |            0 |              0 |
-| missense_variant                    | MODERATE |              1 |  4373 |          0 |             0 |            0 |              0 |
-| inframe_insertion                   | MODERATE |              1 |  4251 |          0 |             0 |            0 |              0 |
-| stop_lost                           | HIGH     |              1 |  3645 |          0 |             0 |            0 |              0 |
-| protein_altering_variant            | MODERATE |              1 |  2758 |          0 |             0 |            0 |              0 |
-| stop_retained_variant               | LOW      |              1 |  2446 |          0 |             0 |            0 |              0 |
-| downstream_gene_variant             | MODIFIER |              1 |   420 |          0 |             0 |            0 |              0 |
-| inframe_deletion                    | MODERATE |              1 |   412 |          0 |             0 |            0 |              0 |
-| start_retained_variant              | LOW      |              1 |   357 |          0 |             0 |            0 |              0 |
-| synonymous_variant                  | LOW      |              1 |   113 |          0 |             0 |            0 |              0 |
-| intergenic_variant                  | MODIFIER |              1 |    13 |          0 |             0 |            0 |              0 |
+| consequence_class                   | impact   | seeds_observed |      n | unresolved | term_mismatch | engine_extra | engine_missing |
+|:------------------------------------|:---------|---------------:|-------:|-----------:|--------------:|-------------:|---------------:|
+| intron_variant                      | MODIFIER |              3 | 116484 |          0 |             0 |            0 |              0 |
+| coding_sequence_variant             | MODIFIER |              3 |  76854 |          0 |             0 |            0 |              0 |
+| frameshift_variant                  | HIGH     |              3 |  49155 |          0 |             0 |            0 |              0 |
+| 5_prime_UTR_variant                 | MODIFIER |              3 |  44738 |          0 |             0 |            0 |              0 |
+| 3_prime_UTR_variant                 | MODIFIER |              3 |  41181 |          0 |             0 |            0 |              0 |
+| splice_donor_variant                | HIGH     |              3 |  38750 |          0 |             0 |            0 |              0 |
+| splice_acceptor_variant             | HIGH     |              3 |  34670 |          0 |             0 |            0 |              0 |
+| splice_donor_5th_base_variant       | LOW      |              3 |  33786 |          0 |             0 |            0 |              0 |
+| splice_polypyrimidine_tract_variant | LOW      |              3 |  31101 |          0 |             0 |            0 |              0 |
+| stop_gained                         | HIGH     |              3 |  25890 |          0 |             0 |            0 |              0 |
+| start_lost                          | HIGH     |              3 |  24495 |          0 |             0 |            0 |              0 |
+| splice_region_variant               | LOW      |              3 |  24208 |          0 |             0 |            0 |              0 |
+| splice_donor_region_variant         | LOW      |              3 |  14109 |          0 |             0 |            0 |              0 |
+| missense_variant                    | MODERATE |              3 |  13035 |          0 |             0 |            0 |              0 |
+| inframe_insertion                   | MODERATE |              3 |  12993 |          0 |             0 |            0 |              0 |
+| stop_lost                           | HIGH     |              3 |  10983 |          0 |             0 |            0 |              0 |
+| protein_altering_variant            | MODERATE |              3 |   8157 |          0 |             0 |            0 |              0 |
+| stop_retained_variant               | LOW      |              3 |   7289 |          0 |             0 |            0 |              0 |
+| inframe_deletion                    | MODERATE |              3 |   1237 |          0 |             0 |            0 |              0 |
+| downstream_gene_variant             | MODIFIER |              3 |   1227 |          0 |             0 |            0 |              0 |
+| start_retained_variant              | LOW      |              3 |   1051 |          0 |             0 |            0 |              0 |
+| synonymous_variant                  | LOW      |              3 |    325 |          0 |             0 |            0 |              0 |
+| intergenic_variant                  | MODIFIER |              3 |     52 |          0 |             0 |            0 |              0 |
 
 This distribution deliberately stresses local alleles and positions near
 exon, splice-site, and CDS endpoints on one engineered transcript. It
@@ -394,6 +453,11 @@ duplicate count. A failed suite does not append rows.
 | 2026-07-22 | 05620047        | 0x0000000001df5e77 |                 51 | 5,000,500  | 5,000,500  |      0 |          0 |         212 | 209,576          |                50.925 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-07-22 | 6eebf9b0        | 0x6a09e667f3bcc909 |                 52 | 5,100,500  | 5,100,500  |      0 |          0 |         214 | 211,624          |                41.131 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-09-07 | 15417633        | 0x0000000001df5e77 |                 55 | 5,500,000  | 5,500,000  |      0 |          0 |         253 | 27,529,678       |                45.867 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
+| 2026-09-07 | 6ce2ddd8        | 0x0000000000f6e473 |                 55 | 5,500,000  | 5,500,000  |      0 |          0 |         254 | 27,530,551       |                43.970 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
+| 2026-09-07 | 6ce2ddd8        | 0x00000000019ec6e2 |                 55 | 5,500,000  | 5,500,000  |      0 |          0 |         254 | 27,529,725       |                54.879 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
+| 2026-09-07 | 6ce2ddd8        | 0x0000000001df5e77 |                 55 | 5,500,000  | 5,500,000  |      0 |          0 |         254 | 27,530,051       |                43.830 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
+| 2026-09-07 | 7d40756a        | 0x0000000000f6e473 |                 55 | 5,500,000  | 5,500,000  |      0 |          0 |         253 | 27,530,178       |                43.737 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
+| 2026-09-07 | 7d40756a        | 0x00000000019ec6e2 |                 55 | 5,500,000  | 5,500,000  |      0 |          0 |         253 | 27,529,352       |                43.699 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-09-07 | cc1993fd        | 0x0000000001df5e77 |                 55 | 5,500,000  | 5,500,000  |      0 |          0 |         251 | 27,322,306       |                44.148 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 
 | target                                                                   | trials  | passed  | failed | skipped | duplicates |
@@ -508,6 +572,22 @@ have named fixed witnesses in the coverage manifest; their absence from
 a random draw is not counted as statistical coverage. These counters
 describe the declared generators, not an exhaustive enumeration of
 biological configurations.
+
+| revision | seed               | targets |  trials | required_counters_observed | minimum_required_counter_hits | fixed_witness_counters_not_hit |
+|:---------|:-------------------|--------:|--------:|---------------------------:|------------------------------:|-------------------------------:|
+| 6ce2ddd8 | 0x0000000000f6e473 |      55 | 5500000 |                        255 |                             8 |                              3 |
+| 6ce2ddd8 | 0x00000000019ec6e2 |      55 | 5500000 |                        255 |                             7 |                              3 |
+| 6ce2ddd8 | 0x0000000001df5e77 |      55 | 5500000 |                        255 |                             6 |                              3 |
+
+Together these seeds executed 16,500,000 property trials on the shown
+revision. Millions of passing trials do not make a counter with six or
+eight observations densely explored, and marginal counters do not
+establish coverage of their cross-products. The fresh-seed HGVS failure
+above is direct evidence of this limit. Dedicated rare-state strata and
+retained counterexamples complement broad draws; they do not justify a
+population error-rate claim. Full phased SO/HGVS, broader structural
+composition and stale real-corpus campaigns still need their own
+current-revision evidence.
 
 ## Individual Sequence Ontology terms
 

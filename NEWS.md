@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- retain a fresh-seed HGVS counterexample and its correction in the conformance
+  ledger. The corrected revision passes 16.5 million property trials, 300,804
+  generated VEP pair comparisons across three seeds and 56,998 ClinVar pairs;
+  these targeted counts do not establish exhaustive or population-level coverage
+
 - fix transcript-end HGVS multiplication handling found by fresh-seed VEP
   conformance: only a two-copy duplication bypasses allele clipping. Larger
   copies follow the insertion projection and return no HGVS when its coordinates

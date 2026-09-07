@@ -397,6 +397,15 @@ acquisition receipts remain historical observations, not content-checksum
 evidence. The refreshed HGVS run retains the same 1,864-variant input and all
 56,998 transcript pairs, with no unresolved, missing, extra or discordant pairs.
 
+The `6ce2ddd85df7` rerun again retains that exact source/input VCF and all 56,998
+pairs, with exact consequences and HGVSc/HGVSp agreement. It resolves the model,
+reference and checksum-verified chromosome-21 cache through the artifact registry.
+Its physical model-file receipt differs from the older run; this is not a claim
+of byte-identical model files. The full GIAB conformance campaign has not been
+refreshed to this revision. A separate chromosome-21 attempt found no eligible
+model joins because the raw callset uses `chr21` and the model uses `21`; it stopped
+before VEP, was not counted as a pass, and did not replace the full GIAB gate.
+
 ## Paired-breakend differential
 
 ```{r paired-breakends}
@@ -593,7 +602,7 @@ knitr::kable(timeline, row.names = FALSE)
 This is the anti-overfitting lane against the VEP executable, not an internal
 property test. Each seed contains the fixed predicate witnesses plus 100,000
 unique alleles. Three quarters of random positions are within six bases of
-splice, exon, translation-start, and translation-stop boundaries; one quarter
+splice sites, exon endpoints, and translation starts and stops; one quarter
 is uniform across the transcript. SNVs, MNVs, insertions, deletions, and delins
 are sampled with equal probability, with differing alleles up to 49 bases.
 
@@ -647,6 +656,53 @@ if (nrow(latest_state_runs)) {
   cat("No randomized executable-VEP state exploration is recorded.\n")
 }
 ```
+
+The combined denominator counts pair comparisons across seed runs, not distinct
+alleles: the 268 fixed witnesses are deliberately shared and random draws may
+overlap. Neither the original generator nor its acceptance rules were changed.
+
+### Fresh-seed counterexample retained
+
+Seed 27182818 at `7d40756adc75` matched every consequence pair but emitted one
+extra HGVSc: `chrDuck:250 CGT>CCC`, transcript `DUCK1-201`, yielded `c.*10[3]`
+where VEP emitted no HGVSc. The pure-C properties passed on that revision too.
+VEP skips transcript allele clipping only for two-copy duplication; larger
+multiplications must undergo clipping and coordinate projection. The fix removes
+the early repeat-formatting path instead of changing the oracle or excluding the
+event. The original failing HGVS rows remain in the append-only ledger.
+
+```{r fresh-seed-hgvs-counterexample}
+counterexample_revisions <- c(
+  "7d40756adc7508f79a85c43f26cd7cffbba78e44",
+  "6ce2ddd85df7c325c3779f2f1cdd984b3beaf983"
+)
+counterexample_runs <- hgvs_bound_history[
+  hgvs_bound_history$corpus == "state_exploration_seed_27182818" &
+    hgvs_bound_history$source_revision %in% counterexample_revisions &
+    hgvs_bound_history$metric == "hgvsc",
+]
+counterexample_table <- do.call(rbind, lapply(counterexample_revisions, function(revision) {
+  rows <- counterexample_runs[counterexample_runs$source_revision == revision, ]
+  stopifnot(nrow(rows) > 0L, sum(rows$n) == 100268L)
+  data.frame(
+    revision = short_revision(revision),
+    pairs = sum(rows$n),
+    match = sum(rows$n[rows$comparison == "match"]),
+    both_absent = sum(rows$n[rows$comparison == "both_absent"]),
+    discordant = sum(rows$n[!rows$comparison %in% c("match", "both_absent")])
+  )
+}))
+stopifnot(identical(counterexample_table$discordant, c(1L, 0L)))
+knitr::kable(counterexample_table, row.names = FALSE)
+```
+
+The same three frozen 100,268-pair corpora pass consequences and HGVS at
+`6ce2ddd85df7`. A separate four-record executable witness retains the discovered
+event, its two-copy positive control and larger-copy variants. Native regression
+tests additionally enumerate 120 transcript-end projection cases: four bases,
+both strands and copy counts 2 through 16. Those finite cases exercise the shared
+edit/HGVS path; they are not 120 additional executable-VEP comparisons or proof of
+whole-haplotype SO/HGVS semantics.
 
 The same campaign covered the following SO terms. Counts are term memberships,
 not distinct transcript pairs, because one pair may carry several terms and seed
@@ -882,6 +938,43 @@ The other `r sum(coverage_check$requirement == "fixed_witness")` counters have n
 fixed witnesses in the coverage manifest; their absence from a random draw is not
 counted as statistical coverage. These counters describe the declared generators,
 not an exhaustive enumeration of biological configurations.
+
+```{r current-property-seed-coverage}
+current_property_rows <- property_history[
+  property_history$source_revision == last_property$source_revision, ]
+current_coverage_rows <- property_coverage_history[
+  property_coverage_history$source_revision == last_property$source_revision, ]
+seed_summary <- do.call(rbind, lapply(unique(current_property_rows$seed), function(seed) {
+  properties <- current_property_rows[current_property_rows$seed == seed, ]
+  counts <- merge(coverage_requirements,
+    current_coverage_rows[current_coverage_rows$seed == seed, ],
+    by = c("coverage", "metric"), all = TRUE)
+  required <- counts$requirement == "statistical_required"
+  stopifnot(!anyNA(counts), all(counts$count[required] > 0L),
+    !anyDuplicated(properties$target),
+    !anyDuplicated(counts[c("coverage", "metric")]))
+  data.frame(
+    revision = short_revision(last_property$source_revision),
+    seed = seed,
+    targets = nrow(properties),
+    trials = sum(properties$trials),
+    required_counters_observed = sum(required),
+    minimum_required_counter_hits = min(counts$count[required]),
+    fixed_witness_counters_not_hit = sum(
+      counts$requirement == "fixed_witness" & counts$count == 0L)
+  )
+}))
+knitr::kable(seed_summary, row.names = FALSE)
+```
+
+Together these seeds executed `r format(sum(seed_summary$trials), big.mark = ",", scientific = FALSE)`
+property trials on the shown revision. Millions of passing trials do not make a
+counter with six or eight observations densely explored, and marginal counters
+do not establish coverage of their cross-products. The fresh-seed HGVS failure
+above is direct evidence of this limit. Dedicated rare-state strata and retained
+counterexamples complement broad draws; they do not justify a population
+error-rate claim. Full phased SO/HGVS, broader structural composition and stale
+real-corpus campaigns still need their own current-revision evidence.
 
 ## Individual Sequence Ontology terms
 
