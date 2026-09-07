@@ -817,8 +817,12 @@ This public sequence-mechanics surface is not complete phased annotation. Native
 sequence/indel flags are not combined SO or compound HGVS, and literal replay does not yet
 compose typed structural events. Existing executable Haplosaurus comparisons exercise
 native replay and the public SQL surface for their declared phased-sequence scope;
-they do not certify compound SO/HGVS. Measured sorted/sort-included execution remains
-required.
+they do not certify compound SO/HGVS. The
+[phased replay benchmark](../benchmarks/duckvep_haplotypes.md) separates the
+initialized native stream from public SQL sort/materialization and records sparse
+pool occupancy, native workspace bytes and whole-process RSS. Its shared synthetic
+cohort measures literal replay, not future combined annotation or real-population
+performance; those paths require renewed evidence when implemented.
 
 The stream must preserve the original record/ALT identity, decoded allele indexes,
 ploidy, phasing flag, and `PS`/`PID`-like phase-set provenance. The same called local

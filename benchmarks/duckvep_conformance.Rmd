@@ -1019,7 +1019,9 @@ This certifies the declared literal-replay cases, not altered splicing, combined
 SO/HGVS, broad phase compatibility or exhaustive rare configurations. The
 [conformance driver](../test/duckvep/conformance/haplotype_sql_differential.R)
 keeps this augmentation opt-in and does not replace the original corpus or
-verifier. Full phased throughput and peak-memory evidence remain missing.
+verifier. The [phased replay benchmark](duckvep_haplotypes.md) now records sorted
+native and public SQL execution separately, with workspace and process memory.
+Combined SO/HGVS execution remains unimplemented and unmeasured.
 
 ## Individual Sequence Ontology terms
 
