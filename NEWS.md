@@ -1,6 +1,21 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- delete DuckVEP's 12-column short-tail model interface and the redundant
+  `post_cds_bases` column from the Ensembl builder and model fingerprint. Models
+  use complete pre-/post-CDS sequence or explicitly lack transcript flanks;
+  missing sequence still produces unresolved results. Rebuilt model receipts
+  have new hashes; existing model artifacts and historical evidence are not rewritten
+
+- repin the benchmark registry's full Ensembl-116 GRCh38 model to the complete-flank
+  receipt and give it a logical-hash-qualified cache path. Staging builds the newly
+  registered artifact while leaving the previous cached model and provenance intact
+
+- fix the DuckVEP/FastVEP benchmark receipt to hash each entire 17-field row;
+  the previous COLUMNS expansion hashed only Uploaded_variation in its aggregate.
+  Keep historical observations but limit their multiset claim to that first field;
+  add all-field mutation, NULL, duplicate and row-order controls
+
 - remove the redundant DuckVEP kernel model constructor in kernel 0.19.0: `duckvep_model_open`
   now accepts the optional interval-feature view directly. Native callers pass
   NULL for transcript-only models; model validation and SQL loading are unchanged

@@ -71,6 +71,10 @@ expect_equal(nrow(duckvep_sources), 20L)
 expect_true(all(duckvep_sources$transform == "direct_download"))
 expect_true(all(duckvep_sources$consumer == "duckvep_ensembl116_model"))
 model_row <- registry[registry$id == "duckvep_ensembl116_model", , drop = FALSE]
+model_identity <- duckhtsbench:::duckhts_bench_duckvep_identity(model_row$supplier_identity)
+expect_match(model_identity[["model_sha256"]], "^[0-9a-f]{64}$")
+expect_identical(model_row$cache_relpath,
+  paste0("models/duckvep/ensembl-116-grch38-", model_identity[["model_sha256"]], ".duckdb"))
 expect_match(model_row$locator, "artifact:ensembl116_core_schema", fixed = TRUE)
 expect_match(model_row$locator, "artifact:ensembl116_funcgen_motif_feature", fixed = TRUE)
 expect_false(grepl("gff3", model_row$locator, fixed = TRUE))

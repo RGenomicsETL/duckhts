@@ -1343,7 +1343,7 @@ ORDER BY ord;
 5	stop_lost	supported	-
 6	coding_sequence_variant&3_prime_UTR_variant	supported	-
 
-# The original eleven-column model remains valid. A terminal deletion that needs
+# A CDS-only model has no transcript flanks. A terminal deletion that needs
 # post-CDS bases fails closed rather than becoming a false frameshift.
 statement ok
 CREATE TABLE duckvep_test_transcripts_no_tail AS
@@ -1368,37 +1368,28 @@ FROM unnest(_duckvep_annotate_small_rich(
 ----
 coding_sequence_variant	unresolved	missing_transcript_tail
 
-# The legacy twelfth column carries only a short post-CDS prefix. It still
-# resolves terminal codons, but it cannot pretend to contain a complete UTR.
+# The removed short-tail interface must not be accepted as complete sequence.
 statement ok
-CREATE TABLE duckvep_test_transcripts_legacy_tail AS
+CREATE TABLE duckvep_test_transcripts_short_tail AS
 SELECT * EXCLUDE (pre_cds_sequence, post_cds_sequence),
        'ACG'::BLOB AS post_cds_bases
 FROM duckvep_test_transcripts;
 
-query I
+statement error
 SELECT loaded FROM duckvep_model_load(
-  'fixture-legacy-tail',
+  'fixture-short-tail',
   'SELECT * FROM duckvep_test_regions ORDER BY seq_region',
-  'SELECT * FROM duckvep_test_transcripts_legacy_tail ORDER BY seq_region, transcript_start',
+  'SELECT * FROM duckvep_test_transcripts_short_tail ORDER BY seq_region, transcript_start',
   'SELECT * FROM duckvep_test_exons ORDER BY transcript_index, exon_start'
 );
 ----
-1
+transcript query must return 11 CDS-only columns or 13 with complete pre_cds_sequence and post_cds_sequence
 
-query TTT
-SELECT annotation.consequence, annotation.status,
-       coalesce(annotation.reason, '-')
-FROM unnest(_duckvep_annotate_small_rich(
-  'fixture-legacy-tail', 1::UINTEGER, 238::UBIGINT, 'TA', 'T', 0::UBIGINT
-)) AS u(annotation);
-----
-stop_retained_variant	supported	-
-
+# Missing-flank diagnostics are retained on the CDS-only model.
 query TTT
 SELECT annotation.consequence, annotation.status, annotation.reason
 FROM unnest(_duckvep_annotate_small_rich(
-  'fixture-legacy-tail', 1::UINTEGER, 117::UBIGINT, 'ACGA', 'A', 0::UBIGINT
+  'fixture-no-tail', 1::UINTEGER, 117::UBIGINT, 'ACGA', 'A', 0::UBIGINT
 )) AS u(annotation);
 ----
 coding_sequence_variant&5_prime_UTR_variant	unresolved	missing_transcript_flank
@@ -1701,7 +1692,7 @@ SELECT duckvep_model_drop('fixture'), duckvep_model_drop('fixture2'),
        duckvep_model_drop('nmd-prediction'),
        duckvep_model_drop('position-one'),
        duckvep_model_drop('fixture-complete'),
-       duckvep_model_drop('fixture-legacy-tail'),
+       duckvep_model_drop('fixture-short-tail'),
        duckvep_model_drop('partial-cds-end');
 ----
-1	1	1	1	1	1	1	1	1
+1	1	1	1	1	1	1	0	1

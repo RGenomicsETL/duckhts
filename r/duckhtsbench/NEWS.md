@@ -1,5 +1,9 @@
 # duckhtsbench 0.0.0.9000
 
+- repin the Ensembl-116 GRCh38 model after removal of the redundant short-tail
+  column and use its logical hash in the registered cache path, allowing fresh
+  compilation without reusing or overwriting the previous model artifact
+
 - verify streamed VEP archives against a pinned SHA-256 or MD5, require the
   digest subprocess to succeed, and reject HTTP-metadata-only cache identities;
   shared local-artifact SHA-256/BSD-sum verification also rejects failed checksum

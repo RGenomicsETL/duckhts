@@ -54,7 +54,7 @@ fingerprint <- dbGetQuery(
   con,
   glue(
     "WITH rows AS (
-       SELECT hash(COLUMNS(*))::UBIGINT AS h
+       SELECT hash(row(*COLUMNS(*)))::UBIGINT AS h
        FROM read_csv(
          {input_sql}, delim = '\\t', header = true, skip = {opt$skip_lines},
          quote = '', escape = '', all_varchar = true
@@ -92,6 +92,7 @@ receipt <- data.frame(
   lines = lines,
   sha256 = sha256,
   multiset_checked = TRUE,
+  fingerprint_scope = "full_row",
   xor_hash = fingerprint$xor_hash,
   low32_sum = fingerprint$low32_sum,
   high32_sum = fingerprint$high32_sum,

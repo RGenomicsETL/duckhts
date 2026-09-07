@@ -1,5 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- remove the bundled DuckVEP 12-column short-tail loader interface and redundant
+  `post_cds_bases` builder column. DBI model queries use the 13-column complete-flank
+  form or the 11-column CDS-only form with explicit unresolved missing context.
+  Newly computed model receipts omit the removed column and have new hashes
+
 - bundle DuckVEP kernel 0.19.0 with a unified model constructor for transcript and
   regulatory-feature models; R and SQL model-loading behavior is unchanged
 
