@@ -44,6 +44,15 @@ protein, carrier keys and all contributing events. Incomplete calls and
 projection/edit failures retain provenance without inventing sequence.
 }
 \details{
+`coding_blocks` groups physical edits that share an alternate codon or
+displace then restore the reading frame. Each block gives one-based reference
+`cds_start`, transcript-oriented `reference`/`alternate` spans, zero-based
+`alt_start0` in the rebuilt CDS, `length_change`, `sequence_flags` and physical
+`edit_count`. Spans include retained bases between edits; they are not aligned
+differences or HGVS normalization. An insertion has empty reference; a deletion
+has empty alternate. Unknown sequences have NULL blocks, not an empty known
+result. Blocks reuse `max_leaf_edits` capacity and the per-call workspace limit.
+
 This alpha interface returns sequence mechanics, not combined SO consequences,
 compound HGVS or structural-event composition. Input must contain one row per
 `event_index`, `transcript_index`, `sample_index`, with columns `seq_region`,

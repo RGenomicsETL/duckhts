@@ -91,6 +91,7 @@ typedef struct {
     duckvep_carrier_event_t *leaf_events;
     duckvep_haplotype_contributor_t *contributors;
     duckvep_haplotype_edit_t *edits;
+    duckvep_haplotype_block_t *blocks; /* At most edit_capacity interaction blocks. */
     size_t leaf_capacity, edit_capacity;
     uint8_t *cds, *protein;
     size_t cds_capacity, protein_capacity;
@@ -101,12 +102,15 @@ typedef struct {
     const duckvep_haplotype_contributor_t *contributors;
     size_t contributor_count;
     size_t edit_count; /* Physical differing islands, not source-event count. */
+    const duckvep_haplotype_block_t *blocks; /* Ascending reference CDS order. */
+    size_t block_count;
+    const uint8_t *reference_cds; /* Model-owned; block spans borrow this and cds. */
     const uint8_t *cds, *protein;
     size_t cds_length, protein_length;
     uint32_t flags;
     uint8_t evidence_flags; /* OR of contributor evidence, distinct from sequence flags. */
     /* First failed projection, or edit/rebuild status when projection is OK.
-     * Failed paths have no CDS/protein; all contributors/carriers remain. */
+     * Failed paths have no CDS/protein/blocks; all contributors/carriers remain. */
     duckvep_cds_edit_status_t projection_status;
     duckvep_haplotype_status_t sequence_status;
 } duckvep_haplotype_leaf_t;

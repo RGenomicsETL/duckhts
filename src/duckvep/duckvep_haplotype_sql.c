@@ -15,6 +15,7 @@ DUCKDB_EXTENSION_EXTERN
 enum { LIMIT_EVENTS, LIMIT_TRANSCRIPTS, LIMIT_CARRIERS, LIMIT_PREFIXES, LIMIT_PROJECTIONS,
     LIMIT_ALLELES, LIMIT_LEAF_EVENTS, LIMIT_LEAF_EDITS, LIMIT_SEQUENCE, LIMIT_PLOIDY,
     LIMIT_PHASE_SETS, LIMIT_WORKSPACE, LIMIT_COUNT };
+enum { HAPLOTYPE_LIST_COLUMN = 9, HAPLOTYPE_OUTPUT_COLUMNS = 12 };
 static const char *const limit_names[] = {"max_active_events", "max_active_transcripts",
     "max_active_carriers", "max_active_prefixes", "max_active_projections", "max_allele_bytes",
     "max_leaf_events", "max_leaf_edits", "max_sequence_bases", "max_ploidy", "max_phase_sets",
@@ -62,6 +63,15 @@ static duckdb_logical_type record_type(const char *const *names, const duckdb_ty
     duckdb_logical_type type = duckdb_create_struct_type(types, field_names, count);
     for (idx_t i = 0u; i < count; i++) duckdb_destroy_logical_type(&types[i]);
     return type;
+}
+
+static void bind_record_list(duckdb_bind_info info, const char *name,
+    const char *const *fields, const duckdb_type *ids, idx_t count) {
+    duckdb_logical_type record = record_type(fields, ids, count);
+    duckdb_logical_type list = duckdb_create_list_type(record);
+    duckdb_bind_add_result_column(info, name, list);
+    duckdb_destroy_logical_type(&list);
+    duckdb_destroy_logical_type(&record);
 }
 
 static void haplotype_bind(duckdb_bind_info info) {
@@ -119,13 +129,13 @@ static void haplotype_bind(duckdb_bind_info info) {
         "evidence_flags", "projection_status"};
     const duckdb_type event_ids[] = {DUCKDB_TYPE_UBIGINT, DUCKDB_TYPE_UINTEGER, DUCKDB_TYPE_UBIGINT,
         DUCKDB_TYPE_VARCHAR, DUCKDB_TYPE_VARCHAR, DUCKDB_TYPE_UTINYINT, DUCKDB_TYPE_VARCHAR};
-    duckdb_logical_type carrier = record_type(carrier_names, carrier_ids, 4u);
-    duckdb_logical_type event = record_type(event_names, event_ids, 7u);
-    duckdb_logical_type carriers = duckdb_create_list_type(carrier), events = duckdb_create_list_type(event);
-    duckdb_bind_add_result_column(info, "carriers", carriers);
-    duckdb_bind_add_result_column(info, "contributors", events);
-    duckdb_destroy_logical_type(&carriers); duckdb_destroy_logical_type(&events);
-    duckdb_destroy_logical_type(&carrier); duckdb_destroy_logical_type(&event);
+    const char *const block_names[] = {"cds_start", "reference", "alternate", "alt_start0",
+        "length_change", "sequence_flags", "edit_count"};
+    const duckdb_type block_ids[] = {DUCKDB_TYPE_UINTEGER, DUCKDB_TYPE_VARCHAR, DUCKDB_TYPE_VARCHAR,
+        DUCKDB_TYPE_UBIGINT, DUCKDB_TYPE_BIGINT, DUCKDB_TYPE_UINTEGER, DUCKDB_TYPE_UBIGINT};
+    bind_record_list(info, "carriers", carrier_names, carrier_ids, 4u);
+    bind_record_list(info, "contributors", event_names, event_ids, 7u);
+    bind_record_list(info, "coding_blocks", block_names, block_ids, 7u);
     duckdb_bind_set_bind_data(info, b, haplotype_bind_destroy);
 }
 
@@ -139,7 +149,7 @@ static void haplotype_state_destroy(void *pointer) {
     free(b->carriers.active_transcripts); free(b->carriers.transcript_index);
     free(b->carriers.call_index); free(b->carriers.prefix_index);
     free(b->events); free(b->projections); free(b->alleles); free(b->leaf_events);
-    free(b->contributors); free(b->edits); free(b->cds); free(b->protein);
+    free(b->contributors); free(b->edits); free(b->blocks); free(b->cds); free(b->protein);
     free(s->gt); free(s->phase); free(s->sets); free(s);
 }
 
@@ -177,6 +187,7 @@ static int workspace_allocate(haplotype_state_t *s, const haplotype_bind_t *bind
     X(b->events, b->event_capacity) X(b->projections, b->projection_capacity) \
     X(b->alleles, b->allele_capacity) X(b->leaf_events, b->leaf_capacity) \
     X(b->contributors, b->leaf_capacity) X(b->edits, b->edit_capacity) \
+    X(b->blocks, b->edit_capacity) \
     X(b->cds, b->cds_capacity) X(b->protein, b->protein_capacity) \
     X(s->gt, n[LIMIT_PLOIDY]) X(s->phase, n[LIMIT_PLOIDY]) X(s->sets, n[LIMIT_PHASE_SETS])
 #define COUNT(p, count) \
@@ -310,8 +321,8 @@ static void null_cell(duckdb_vector vector, idx_t row) {
 
 static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s,
                        const duckvep_haplotype_leaf_t *leaf) {
-    duckdb_vector v[11];
-    for (unsigned i = 0u; i < 11u; i++) {
+    duckdb_vector v[HAPLOTYPE_OUTPUT_COLUMNS];
+    for (unsigned i = 0u; i < HAPLOTYPE_OUTPUT_COLUMNS; i++) {
         v[i] = duckdb_data_chunk_get_vector(output, i);
         duckdb_validity_set_row_valid(duckdb_vector_get_validity(v[i]), row);
     }
@@ -327,22 +338,27 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
         ? sequence_name(leaf->sequence_status) : "unavailable_projection");
     ((uint64_t *)duckdb_vector_get_data(v[7]))[row] = leaf->edit_count;
     ((uint32_t *)duckdb_vector_get_data(v[8]))[row] = leaf->carriers.call_count;
-    for (unsigned list = 0u; list < 2u; list++) {
-        duckdb_vector vector = v[9u + list];
+    const size_t counts[] = {leaf->carriers.call_count, leaf->contributor_count, leaf->block_count};
+    const unsigned field_counts[] = {4u, 7u, 7u};
+    for (unsigned list = 0u; list < 3u; list++) {
+        duckdb_vector vector = v[HAPLOTYPE_LIST_COLUMN + list];
         idx_t base = duckdb_list_vector_get_size(vector);
-        size_t count = list ? leaf->contributor_count : leaf->carriers.call_count;
+        size_t count = counts[list];
         if (count > UINT64_MAX - base || duckdb_list_vector_reserve(vector, base + count) != DuckDBSuccess ||
             duckdb_list_vector_set_size(vector, base + count) != DuckDBSuccess) return 0;
         ((duckdb_list_entry *)duckdb_vector_get_data(vector))[row] = (duckdb_list_entry){base, count};
+        if (list == 2u && !leaf->cds) null_cell(vector, row);
         duckdb_vector records = duckdb_list_vector_get_child(vector), fields[7];
-        for (unsigned j = 0u; j < (list ? 7u : 4u); j++) {
+        duckdb_vector_ensure_validity_writable(records);
+        for (unsigned j = 0u; j < field_counts[list]; j++) {
             fields[j] = duckdb_struct_vector_get_child(records, j);
             duckdb_vector_ensure_validity_writable(fields[j]);
         }
         uint32_t call_id = leaf->carriers.first_call;
         for (size_t i = 0u; i < count; i++) {
             idx_t at = base + i;
-            for (unsigned j = 0u; j < (list ? 7u : 4u); j++)
+            duckdb_validity_set_row_valid(duckdb_vector_get_validity(records), at);
+            for (unsigned j = 0u; j < field_counts[list]; j++)
                 duckdb_validity_set_row_valid(duckdb_vector_get_validity(fields[j]), at);
             if (!list) {
                 const duckvep_carrier_call_t *call = duckvep_carriers_call(&s->stream.carriers, call_id);
@@ -353,7 +369,7 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
                 ((uint16_t *)duckdb_vector_get_data(fields[2]))[at] = call->key.lane;
                 ((uint16_t *)duckdb_vector_get_data(fields[3]))[at] = call->key.ploidy;
                 call_id = call->next_leaf;
-            } else {
+            } else if (list == 1u) {
                 const duckvep_haplotype_contributor_t *c = &leaf->contributors[i];
                 ((uint64_t *)duckdb_vector_get_data(fields[0]))[at] = c->source.event_id;
                 ((uint32_t *)duckdb_vector_get_data(fields[1]))[at] = c->source.chrom_id;
@@ -362,6 +378,17 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
                 duckdb_vector_assign_string_element_len(fields[4], at, (const char *)c->source.alt, c->source.alt_len);
                 ((uint8_t *)duckdb_vector_get_data(fields[5]))[at] = c->evidence_flags;
                 duckdb_vector_assign_string_element(fields[6], at, projection_name(c->projection_status));
+            } else {
+                const duckvep_haplotype_block_t *block = &leaf->blocks[i];
+                ((uint32_t *)duckdb_vector_get_data(fields[0]))[at] = block->cds_start;
+                duckdb_vector_assign_string_element_len(fields[1], at,
+                    (const char *)leaf->reference_cds + block->cds_start - 1u, block->ref_len);
+                duckdb_vector_assign_string_element_len(fields[2], at,
+                    (const char *)leaf->cds + block->alt_start0, block->alt_len);
+                ((uint64_t *)duckdb_vector_get_data(fields[3]))[at] = block->alt_start0;
+                ((int64_t *)duckdb_vector_get_data(fields[4]))[at] = block->length_diff;
+                ((uint32_t *)duckdb_vector_get_data(fields[5]))[at] = block->flags;
+                ((uint64_t *)duckdb_vector_get_data(fields[6]))[at] = block->edit_count;
             }
         }
     }
@@ -446,9 +473,9 @@ static void haplotype_scan(duckdb_function_info info, duckdb_data_chunk output) 
     const haplotype_bind_t *bind = duckdb_function_get_bind_data(info);
     haplotype_state_t *s = duckdb_function_get_init_data(info);
     idx_t rows = 0u, capacity = duckdb_vector_size();
-    for (unsigned i = 0u; i < 11u; i++)
+    for (unsigned i = 0u; i < HAPLOTYPE_OUTPUT_COLUMNS; i++)
         duckdb_vector_ensure_validity_writable(duckdb_data_chunk_get_vector(output, i));
-    for (unsigned i = 9u; i < 11u; i++)
+    for (unsigned i = HAPLOTYPE_LIST_COLUMN; i < HAPLOTYPE_OUTPUT_COLUMNS; i++)
         if (duckdb_list_vector_set_size(duckdb_data_chunk_get_vector(output, i), 0u) != DuckDBSuccess) {
             duckdb_function_set_error(info, "duckvep_haplotypes: cannot reset output list"); return;
         }

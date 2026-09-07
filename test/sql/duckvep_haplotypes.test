@@ -53,6 +53,15 @@ ORDER BY c.phase_set,c.haplotype_lane;
 20	2	CACAAAAAAAAA
 
 # Compatibility combines called slots across PS; strict mode does not.
+query ITTII
+SELECT b.cds_start,b.reference,b.alternate,b.alt_start0,b.edit_count FROM (
+ SELECT unnest(coding_blocks) b FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap'))
+ORDER BY b.alternate;
+----
+1	A	C	0	1
+1	AAA	CAC	0	2
+1	AA	CG	0	2
+
 query TTII
 SELECT cds, protein, carrier_count, carriers[1].phase_set IS NULL
 FROM duckvep_haplotypes('SELECT * FROM hap_calls', 'hap', phase_policy := 'vep116_compat') ORDER BY cds;
@@ -74,6 +83,12 @@ FROM duckvep_haplotypes('SELECT * REPLACE([NULL,NULL]::INTEGER[] AS alleles) FRO
 GROUP BY ALL;
 ----
 incomplete_input	true	6
+
+query I
+SELECT bool_and(coding_blocks IS NULL)
+FROM duckvep_haplotypes('SELECT * REPLACE([NULL,NULL]::INTEGER[] AS alleles) FROM hap_calls','hap');
+----
+true
 
 statement error
 SELECT * FROM duckvep_haplotypes('SELECT * FROM hap_calls UNION ALL SELECT * FROM hap_calls', 'hap');
@@ -149,6 +164,17 @@ FROM duckvep_haplotypes('SELECT * FROM hap_many_calls ORDER BY event_index DESC'
 
 # Two pinned models remain distinct in the same process.
 query I
+SELECT count(*) FROM duckvep_haplotypes('SELECT * FROM hap_many_calls','hap_many',
+ max_active_events := 1,max_active_transcripts := 1,max_active_projections := 1,
+ max_active_carriers := 1,max_active_prefixes := 1,max_allele_bytes := 2,max_leaf_edits := 1)
+WHERE len(coding_blocks)=1 AND coding_blocks[1].cds_start=1 AND
+ coding_blocks[1].reference='A' AND coding_blocks[1].alternate='C' AND
+ coding_blocks[1].alt_start0=0 AND coding_blocks[1].sequence_flags=0 AND
+ coding_blocks[1].edit_count=1;
+----
+5000
+
+query I
 SELECT count(*) FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap');
 ----
 3
@@ -210,6 +236,56 @@ FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap_noncoding') GROUP BY proj
 outside_cds	3	3	4
 
 # Recursive query preparation must error, not deadlock the database connection.
+query I
+SELECT bool_and(coding_blocks IS NULL)
+FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap_noncoding');
+----
+true
+
+# Interacting indels restore the frame. An earlier in-frame insertion shifts
+# later alternate spans; the reverse transcript must expose transcript-oriented
+# bases and reverse CDS order, with no source events discarded.
+query I
+SELECT loaded FROM duckvep_model_load('hap_blocks','SELECT 0::UINTEGER seq_region',
+ 'SELECT * REPLACE(117::UBIGINT AS transcript_end,117::UBIGINT AS cds_end,''AAAAAAAAAAAAAAAAAA''::BLOB AS cds_sequence) FROM hap_tx UNION ALL SELECT * REPLACE(1::UINTEGER AS transcript_index,-1::TINYINT AS strand,117::UBIGINT AS transcript_end,117::UBIGINT AS cds_end,''TTTTTTTTTTTTTTTTTT''::BLOB AS cds_sequence) FROM hap_tx',
+ 'SELECT * REPLACE(117::UBIGINT AS exon_end,18::UBIGINT AS exon_cdna_end) FROM hap_exons UNION ALL SELECT * REPLACE(1::UINTEGER AS transcript_index,117::UBIGINT AS exon_end,18::UBIGINT AS exon_cdna_end) FROM hap_exons');
+----
+1
+
+statement ok
+CREATE TABLE hap_block_calls AS SELECT event_index,0 seq_region,position,reference,alternate,
+ 1 alt_index,t.transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set
+FROM (VALUES (1,100,'A','AAAA'),(2,103,'A','C'),(3,106,'A','AT'),
+ (4,109,'AA','A'),(5,115,'A','G')) e(event_index,position,reference,alternate)
+CROSS JOIN (VALUES (0),(1)) t(transcript_index);
+
+query IITTIIII
+SELECT transcript_index,b.cds_start,'['||b.reference||']','['||b.alternate||']',
+ b.alt_start0,b.length_change,b.sequence_flags,b.edit_count FROM (
+ SELECT transcript_index,unnest(coding_blocks) b
+ FROM duckvep_haplotypes('SELECT * FROM hap_block_calls','hap_blocks',max_leaf_edits := 5))
+ORDER BY transcript_index,b.cds_start;
+----
+0	2	[]	[AAA]	1	3	1	1
+0	4	[A]	[C]	6	0	0	1
+0	8	[AAAA]	[TAAA]	10	0	5	2
+0	16	[A]	[G]	18	0	0	1
+1	3	[T]	[C]	2	0	0	1
+1	8	[TTTT]	[TTTA]	7	0	5	2
+1	15	[T]	[G]	14	0	0	1
+1	18	[]	[TTT]	17	3	1	1
+
+query III
+SELECT count(*),sum(edit_count),sum(len(contributors))
+FROM duckvep_haplotypes('SELECT * FROM hap_block_calls','hap_blocks');
+----
+2	10	10
+
+statement error
+SELECT * FROM duckvep_haplotypes('SELECT * FROM hap_block_calls','hap_blocks',max_leaf_edits := 4);
+----
+max_leaf_edits=4
+
 statement error
 SELECT * FROM duckvep_haplotypes('SELECT c.* FROM hap_calls c CROSS JOIN duckvep_haplotypes(''SELECT * FROM hap_calls'',''hap'') h','hap');
 ----

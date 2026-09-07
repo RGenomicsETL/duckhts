@@ -28,6 +28,14 @@ local({
   expect_true(all(actual$sequence_status == "ok"))
   expect_true(all(actual$projection_status == "ok"))
   expect_equal(sum(lengths(lapply(actual$contributors, function(x) x$event_index))), 5L)
+  blocks <- do.call(rbind, actual$coding_blocks)
+  blocks <- blocks[order(blocks$alternate), ]
+  expect_equal(blocks$cds_start, rep(1, 3))
+  expect_equal(blocks$reference, c("A", "AAA", "AA"))
+  expect_equal(blocks$alternate, c("C", "CAC", "CG"))
+  expect_equal(blocks$alt_start0, rep(0, 3))
+  expect_equal(blocks$edit_count, c(1, 2, 2))
+  expect_true(all(blocks$length_change == 0 & blocks$sequence_flags == 0))
   expect_equal(nrow(rduckhts_haplotypes(con, calls, "haps", "vep116_compat")), 2L)
   noncoding <- paste("SELECT * REPLACE(0::UBIGINT AS transcript_flags,",
     "NULL::UBIGINT AS cds_start,NULL::UBIGINT AS cds_end,NULL::BLOB AS cds_sequence,",
@@ -39,6 +47,25 @@ local({
   expect_true(nrow(unavailable) == 3L && sum(unavailable$carrier_count) == 4L &&
     all(unavailable$projection_status == "outside_cds") &&
     all(is.na(unavailable$cds)) && all(is.na(unavailable$protein)))
+  null_blocks <- dbGetQuery(con, paste0("SELECT bool_and(coding_blocks IS NULL) ok FROM ",
+    "duckvep_haplotypes(", dbQuoteString(con, calls), ",'noncoding')"))
+  expect_true(null_blocks$ok)
+  # One restored-frame block followed by an independent substitution. Both
+  # input records in the block stay visible in contributor provenance.
+  indels <- paste("SELECT event_index,0 seq_region,position,reference,alternate,1 alt_index,",
+    "0 transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set FROM",
+    "(VALUES (1,100,'A','AT'),(2,106,'AA','A'),(3,110,'A','G'))",
+    "v(event_index,position,reference,alternate)")
+  restored <- rduckhts_haplotypes(con, indels, "haps", max_leaf_edits = 3)
+  blocks <- restored$coding_blocks[[1]]
+  expect_equal(nrow(restored), 1L)
+  expect_equal(blocks$cds_start, c(2, 11))
+  expect_equal(blocks$reference, c("AAAAAAA", "A"))
+  expect_equal(blocks$alternate, c("TAAAAAA", "G"))
+  expect_equal(blocks$alt_start0, c(1, 10))
+  expect_equal(blocks$sequence_flags, c(5, 0))
+  expect_equal(blocks$edit_count, c(2, 1))
+  expect_equal(nrow(restored$contributors[[1]]), 3L)
   expect_error(rduckhts_haplotypes(con, calls, "haps", max_ploidy = 1), pattern = "max_ploidy")
   expect_error(rduckhts_haplotypes(con, calls, "haps", workspace_limit = 1), pattern = "workspace")
   expect_error(rduckhts_haplotypes(con, calls, "missing"), pattern = "loaded model")
@@ -48,6 +75,7 @@ local({
   expect_error(rduckhts_haplotypes(con, calls, "haps", "strict", 12), pattern = "parameter names")
   rduckhts_haplotypes(con, calls, "haps", table_name = "hap_output")
   expect_equal(dbGetQuery(con, "SELECT count(*) n FROM hap_output")$n, 3)
+  expect_equal(dbGetQuery(con, "SELECT sum(len(coding_blocks)) n FROM hap_output")$n, 3)
   expect_error(rduckhts_haplotypes(con, calls, "haps", table_name = "hap_output"))
   rduckhts_haplotypes(con, calls, "haps", "vep116_compat", table_name = "hap_output", overwrite = TRUE)
   expect_equal(dbGetQuery(con, "SELECT count(*) n FROM hap_output")$n, 2)

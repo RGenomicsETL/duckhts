@@ -86,11 +86,11 @@ static duckvep_haplotype_status_t haplo_partition_pass(
     size_t i;
     uint32_t previous_start = 0u;
     uint32_t previous_end = 0u;
-    uint32_t block_end = 0u;
     int have_previous = 0;
     int block_saw_frameshift = 0;
     int64_t block_difference = 0;
     int64_t shift_before = 0;
+    int64_t completed_shift = 0;
     uint32_t block_flags = 0u;
 
     *block_count = 0u;
@@ -123,7 +123,6 @@ static duckvep_haplotype_status_t haplo_partition_pass(
         previous_start = edit->cds_start;
         previous_end = edit_end;
         have_previous = 1;
-        if (edit_end > block_end) block_end = edit_end;
 
         difference = (int64_t)edit->alt_len - (int64_t)edit->ref_len;
         if (!haplo_add_i64(block_difference, difference, &block_difference)) {
@@ -168,17 +167,28 @@ static duckvep_haplotype_status_t haplo_partition_pass(
                 block_flags |= DUCKVEP_HAPLOTYPE_FLAG_FRAMESHIFT;
             }
         }
+        uint32_t cds_start = edits[block_begin].cds_start;
+        uint64_t ref_len = (uint64_t)edit->cds_start - cds_start + edit->ref_len;
+        uint64_t alt_start0, alt_len;
+        if (ref_len > UINT32_MAX ||
+            !haplo_shift_coordinate((uint64_t)cds_start - 1u, completed_shift, &alt_start0) ||
+            !haplo_shift_coordinate(ref_len, block_difference, &alt_len) ||
+            alt_start0 > SIZE_MAX || alt_len > SIZE_MAX - alt_start0 ||
+            !haplo_add_i64(completed_shift, block_difference, &completed_shift)) {
+            return DUCKVEP_HAPLOTYPE_OUT_OF_RANGE;
+        }
         if (blocks != NULL) {
             blocks[count].edit_begin = block_begin;
             blocks[count].edit_count = i - block_begin + 1u;
-            blocks[count].cds_start = edits[block_begin].cds_start;
-            blocks[count].cds_end = block_end;
+            blocks[count].cds_start = cds_start;
+            blocks[count].ref_len = (uint32_t)ref_len;
+            blocks[count].alt_start0 = (size_t)alt_start0;
+            blocks[count].alt_len = (size_t)alt_len;
             blocks[count].length_diff = block_difference;
             blocks[count].flags = block_flags;
         }
         count++;
         block_begin = i + 1u;
-        block_end = 0u;
         block_difference = 0;
         shift_before = 0;
         block_flags = 0u;

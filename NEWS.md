@@ -1,6 +1,12 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- expose typed `coding_blocks` from phased replay, grouping same-codon edits and
+  frame-displacing/restoring indels. Reference and rebuilt-CDS spans borrow the
+  sequences already held by the kernel; block storage shares the explicit
+  `max_leaf_edits` limit. Missing or failed paths retain provenance and NULL blocks.
+  These composite spans are not normalized HGVS or combined SO consequences
+
 - expose `duckvep_haplotypes(calls_query, model_name, ...)` and its R wrapper:
   DuckDB derives complete phase domains and sorts explicit transcript/sample
   calls, while bounded native replay returns shared CDS/protein paths, carrier

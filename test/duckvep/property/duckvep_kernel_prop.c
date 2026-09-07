@@ -8834,6 +8834,7 @@ struct haplotype_stream_scene {
     duckvep_haplotype_projection_t projections[16];
     duckvep_haplotype_contributor_t contributors[8];
     duckvep_haplotype_edit_t edits[8];
+    duckvep_haplotype_block_t blocks[8];
     duckvep_carrier_event_t leaf_events[8];
     uint8_t alleles[128], cds[128], protein[128];
     duckvep_haplotype_stream_buffers_t buffers;
@@ -8867,6 +8868,7 @@ static void haplotype_stream_scene_prepare(struct haplotype_stream_scene *f, uin
         .events = f->events, .projections = f->projections, .alleles = f->alleles,
         .event_capacity = 8u, .projection_capacity = 16u, .allele_capacity = sizeof(f->alleles),
         .leaf_events = f->leaf_events, .contributors = f->contributors, .edits = f->edits,
+        .blocks = f->blocks,
         .leaf_capacity = 8u, .edit_capacity = 8u, .cds = f->cds, .protein = f->protein,
         .cds_capacity = sizeof(f->cds), .protein_capacity = sizeof(f->protein)};
 }
@@ -9900,7 +9902,7 @@ TEST haplotype_partition_known_cases(void) {
     ASSERT_EQ(0u, blocks[0].edit_begin);
     ASSERT_EQ(2u, blocks[0].edit_count);
     ASSERT_EQ(1u, blocks[0].cds_start);
-    ASSERT_EQ(3u, blocks[0].cds_end);
+    ASSERT_EQ(3u, blocks[0].ref_len);
     ASSERT_EQ(0, blocks[0].length_diff);
     ASSERT_EQ(0u, blocks[0].flags);
 
@@ -9959,6 +9961,42 @@ TEST haplotype_partition_known_cases(void) {
               duckvep_haplotype_partition(edits, 2u, blocks, 2u, &required));
     ASSERT_EQ(DUCKVEP_HAPLOTYPE_INVALID_ARG,
               duckvep_haplotype_partition(NULL, 1u, blocks, 2u, &required));
+    PASS();
+}
+
+TEST haplotype_partition_spans_track_both_cds_axes(void) {
+    const uint8_t *a = (const uint8_t *)"A";
+    duckvep_haplotype_edit_t edits[] = {
+        {1u, 0u, NULL, 3u, (const uint8_t *)"AAA", 1},
+        {4u, 1u, a, 1u, (const uint8_t *)"C", 1},
+        {7u, 0u, NULL, 1u, (const uint8_t *)"T", 1},
+        {10u, 1u, a, 0u, NULL, 1},
+        {16u, 1u, a, 1u, (const uint8_t *)"G", 1}
+    };
+    duckvep_haplotype_block_t blocks[5];
+    size_t count;
+    ASSERT_EQ(DUCKVEP_HAPLOTYPE_OK, duckvep_haplotype_partition(edits, 5u, blocks, 5u, &count));
+    ASSERT_EQ(4u, count);
+    const uint32_t starts[] = {1u, 4u, 7u, 16u}, ref_len[] = {0u, 1u, 4u, 1u};
+    const size_t alt_start0[] = {0u, 6u, 9u, 18u}, alt_len[] = {3u, 1u, 4u, 1u};
+    for (size_t i = 0u; i < count; i++) {
+        ASSERT_EQ(starts[i], blocks[i].cds_start);
+        ASSERT_EQ(ref_len[i], blocks[i].ref_len);
+        ASSERT_EQ(alt_start0[i], blocks[i].alt_start0);
+        ASSERT_EQ(alt_len[i], blocks[i].alt_len);
+    }
+    ASSERT_EQ(2u, blocks[2].edit_count);
+    ASSERT_EQ(DUCKVEP_HAPLOTYPE_FLAG_INDEL | DUCKVEP_HAPLOTYPE_FLAG_RESOLVED_FRAMESHIFT,
+        blocks[2].flags);
+    /* Delete a complete codon, then substitute in the next: the alternate axis
+     * moves backwards, but the reference-axis spans must not move. */
+    edits[0] = (duckvep_haplotype_edit_t){1u, 3u, (const uint8_t *)"AAA", 0u, NULL, 1};
+    ASSERT_EQ(DUCKVEP_HAPLOTYPE_OK, duckvep_haplotype_partition(edits, 2u, blocks, 5u, &count));
+    /* Both edits touch the first alternate codon after deleting the first one. */
+    ASSERT_EQ(1u, count);
+    ASSERT_EQ(4u, blocks[0].ref_len);
+    ASSERT_EQ(0u, blocks[0].alt_start0);
+    ASSERT_EQ(1u, blocks[0].alt_len);
     PASS();
 }
 
@@ -10168,7 +10206,9 @@ static enum theft_trial_res prop_haplotype_partition_preserves_interactions(
                 : DUCKVEP_HAPLOTYPE_FLAG_FRAMESHIFT;
         }
         if (block->cds_start != ascending[block->edit_begin].cds_start ||
-            block->cds_end != expected_end ||
+            block->cds_start - 1u + block->ref_len +
+                (ascending[block->edit_begin + block->edit_count - 1u].ref_len == 0u)
+                != expected_end ||
             block->length_diff != difference ||
             block->flags != expected_flags) {
             return THEFT_TRIAL_FAIL;
@@ -10183,6 +10223,54 @@ TEST haplotype_partition_preserves_interactions_for_any_valid_edit_set(void) {
     memset(&cfg, 0, sizeof cfg);
     cfg.name = "haplotype blocks preserve every frame and same-codon interaction";
     cfg.prop1 = prop_haplotype_partition_preserves_interactions;
+    cfg.type_info[0] = &kprop_haplo_info;
+    cfg.trials = kprop_env_u64("DUCKVEP_PROP_TRIALS", KPROP_DEFAULT_TRIALS);
+    cfg.seed = (theft_seed)kprop_env_u64("DUCKVEP_PROP_SEED", KPROP_DEFAULT_SEED);
+    ASSERT_EQ(THEFT_RUN_PASS, theft_run(&cfg));
+    PASS();
+}
+
+/* Additional evidence lane: the original generator, partition property and
+ * left-to-right oracle stay unchanged. Replacing each block's entire span
+ * must reproduce the original physical edits on both transcript strands. */
+static enum theft_trial_res prop_haplotype_block_spans_reconstruct(struct theft *t, void *arg) {
+    const struct kprop_haplo_case *c = arg;
+    duckvep_haplotype_edit_t ascending[KPROP_HAPLO_MAX_EDITS], composite[KPROP_HAPLO_MAX_EDITS];
+    duckvep_haplotype_block_t blocks[KPROP_HAPLO_MAX_EDITS];
+    uint8_t expected[KPROP_HAPLO_CAP], rebuilt[KPROP_HAPLO_CAP];
+    size_t expected_len, rebuilt_len, count;
+    int64_t difference;
+    uint32_t flags;
+    (void)t;
+    if (!haplo_oracle_rebuild(c->ref, KPROP_HAPLO_CDS_LEN, c->edits, c->edit_count,
+            c->transcript_strand, expected, sizeof(expected), &expected_len, &difference, &flags))
+        return THEFT_TRIAL_ERROR;
+    for (size_t i = 0u; i < c->edit_count; i++) ascending[i] = c->edits[c->edit_count - 1u - i];
+    if (duckvep_haplotype_partition(ascending, c->edit_count, blocks,
+            KPROP_HAPLO_MAX_EDITS, &count) != DUCKVEP_HAPLOTYPE_OK)
+        return THEFT_TRIAL_FAIL;
+    for (size_t i = 0u; i < count; i++) {
+        const duckvep_haplotype_block_t *b = &blocks[i];
+        size_t start0 = (size_t)b->cds_start - 1u;
+        if (start0 > KPROP_HAPLO_CDS_LEN || b->ref_len > KPROP_HAPLO_CDS_LEN - start0 ||
+            b->alt_start0 > expected_len || b->alt_len > expected_len - b->alt_start0 ||
+            b->alt_len > UINT32_MAX ||
+            b->length_diff != (int64_t)b->alt_len - (int64_t)b->ref_len)
+            return THEFT_TRIAL_FAIL;
+        composite[count - 1u - i] = (duckvep_haplotype_edit_t){b->cds_start, b->ref_len,
+            c->ref + start0, (uint32_t)b->alt_len, expected + b->alt_start0, c->transcript_strand};
+    }
+    if (!haplo_oracle_rebuild(c->ref, KPROP_HAPLO_CDS_LEN, composite, count,
+            c->transcript_strand, rebuilt, sizeof(rebuilt), &rebuilt_len, &difference, &flags))
+        return THEFT_TRIAL_FAIL;
+    return expected_len == rebuilt_len && !memcmp(expected, rebuilt, expected_len)
+        ? THEFT_TRIAL_PASS : THEFT_TRIAL_FAIL;
+}
+
+TEST haplotype_block_spans_reconstruct_every_generated_edit_set(void) {
+    struct theft_run_config cfg = {0};
+    cfg.name = "haplotype block spans reconstruct the independently replayed CDS";
+    cfg.prop1 = prop_haplotype_block_spans_reconstruct;
     cfg.type_info[0] = &kprop_haplo_info;
     cfg.trials = kprop_env_u64("DUCKVEP_PROP_TRIALS", KPROP_DEFAULT_TRIALS);
     cfg.seed = (theft_seed)kprop_env_u64("DUCKVEP_PROP_SEED", KPROP_DEFAULT_SEED);
@@ -27168,7 +27256,9 @@ int main(int argc, char **argv) {
     RUN_TEST(haplotype_stream_preserves_later_phase_sets_and_uncertain_prefixes);
     RUN_TEST(haplotype_stream_rejects_invalid_calls_and_latches_partial_broadcast);
     RUN_TEST(haplotype_partition_known_cases);
+    RUN_TEST(haplotype_partition_spans_track_both_cds_axes);
     RUN_TEST(haplotype_partition_preserves_interactions_for_any_valid_edit_set);
+    RUN_TEST(haplotype_block_spans_reconstruct_every_generated_edit_set);
     RUN_TEST(haplotype_apply_and_translate_known_cases);
     RUN_TEST(haplotype_apply_rejects_overlapping_inputs);
     RUN_TEST(haplotype_apply_matches_rebuild_oracle_for_any_valid_edit_set);

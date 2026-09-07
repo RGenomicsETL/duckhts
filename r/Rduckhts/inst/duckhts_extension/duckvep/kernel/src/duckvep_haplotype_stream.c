@@ -39,6 +39,7 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_init(
         !valid_array(b->leaf_events, b->leaf_capacity, sizeof(*b->leaf_events)) ||
         !valid_array(b->contributors, b->leaf_capacity, sizeof(*b->contributors)) ||
         !valid_array(b->edits, b->edit_capacity, sizeof(*b->edits)) ||
+        !valid_array(b->blocks, b->edit_capacity, sizeof(*b->blocks)) ||
         !valid_array(b->cds, b->cds_capacity, 1u) ||
         !valid_array(b->protein, b->protein_capacity, 1u))
         return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
@@ -434,6 +435,28 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
             leaf.sequence_status = duckvep_haplotype_translate_cds(b->cds, leaf.cds_length,
                 table, b->protein, b->protein_capacity, &leaf.protein_length, &translated);
             if (leaf.sequence_status == DUCKVEP_HAPLOTYPE_OK) {
+                /* Replay consumes descending coordinates; interaction discovery
+                 * consumes ascending coordinates. Reverse descriptors, not bases,
+                 * and borrow both sequences without rebuilding each block. */
+                for (size_t i = 0u; i < leaf.edit_count / 2u; i++) {
+                    duckvep_haplotype_edit_t edit = b->edits[i];
+                    b->edits[i] = b->edits[leaf.edit_count - 1u - i];
+                    b->edits[leaf.edit_count - 1u - i] = edit;
+                }
+                duckvep_haplotype_status_t partition = duckvep_haplotype_partition(
+                    b->edits, leaf.edit_count, b->blocks, b->edit_capacity, &leaf.block_count);
+                if (partition != DUCKVEP_HAPLOTYPE_OK)
+                    return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INTERNAL_ERROR);
+                for (size_t i = 0u; i < leaf.block_count; i++) {
+                    const duckvep_haplotype_block_t *block = &b->blocks[i];
+                    size_t start0 = (size_t)block->cds_start - 1u;
+                    if (start0 > length || block->ref_len > length - start0 ||
+                        block->alt_start0 > leaf.cds_length ||
+                        block->alt_len > leaf.cds_length - block->alt_start0)
+                        return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INTERNAL_ERROR);
+                }
+                leaf.blocks = b->blocks;
+                leaf.reference_cds = seq->cds_bytes + (size_t)offset;
                 leaf.cds = b->cds;
                 leaf.protein = b->protein;
                 leaf.flags = applied.flags | translated.flags;

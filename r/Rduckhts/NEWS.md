@@ -1,5 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- return typed `coding_blocks` through `rduckhts_haplotypes()` and the bundled
+  SQL function: transcript-oriented composite reference/alternate spans, both
+  CDS coordinate axes, physical edit counts and frame-interaction flags. Unknown
+  sequences have NULL blocks. These are not normalized HGVS or combined consequences
+
 - add `rduckhts_haplotypes()` and bundled `duckvep_haplotypes()` for typed
   transcript/sample call replay with per-call capacities, shared CDS/protein
   paths and complete contributor/carrier evidence. The alpha output is sequence

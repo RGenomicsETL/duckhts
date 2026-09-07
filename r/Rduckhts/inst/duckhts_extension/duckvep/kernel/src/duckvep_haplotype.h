@@ -56,14 +56,18 @@ typedef struct duckvep_haplotype_result {
     size_t  applied_edits;
 } duckvep_haplotype_result_t;
 
-/* One interaction block on the original CDS axis. Edits remain in the same
+/* One interaction block on the reference and replayed CDS axes. Edits remain in the same
  * block while their cumulative length change displaces the reading frame, or
- * while the next edit still touches the same alternate-sequence codon. */
+ * while the next edit still touches the same alternate-sequence codon.
+ * The spans include retained bases between edits, not an alignment or HGVS
+ * normalization. A pure insertion has ref_len=0; a pure deletion has alt_len=0. */
 typedef struct duckvep_haplotype_block {
     size_t   edit_begin;
     size_t   edit_count;
-    uint32_t cds_start;
-    uint32_t cds_end;
+    uint32_t cds_start; /* 1-based reference CDS; insertion is before this base. */
+    uint32_t ref_len;
+    size_t   alt_start0; /* 0-based offset in the complete replayed CDS. */
+    size_t   alt_len;
     int64_t  length_diff;
     uint32_t flags;
 } duckvep_haplotype_block_t;
