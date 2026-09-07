@@ -35,6 +35,11 @@ clinical evidence. The same extension is packaged on CRAN as `Rduckhts`.
 3. When mirroring external tool behavior, consult `.sync/` mirrors before secondary sources.
 4. Keep changes focused. Do not create branches, commits, large generated diffs, or workflow sprawl unless explicitly requested.
 5. Preserve existing public APIs unless the task explicitly asks for an API change.
+   DuckVEP is alpha and has no backward-compatibility requirement: redesign or delete its
+   APIs and intermediate representations when that simplifies ownership or semantic
+   authority. Update callers directly; do not retain compatibility-only shims or parallel
+   implementations. Preserve pinned biological semantics, physical input records, fuzzing
+   coverage, comparison denominators, and failure controls.
 6. When referring to public GitHub issues or PRs, use full GitHub URLs.
 
 ## Public Surface

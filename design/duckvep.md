@@ -648,10 +648,6 @@ every transcript follows one universal NMD rule.
 
 ## Phased edits
 
-DuckVEP is alpha: its interfaces and internal representations may be replaced
-without compatibility shims. Pinned biological semantics and independent evidence
-remain correctness contracts, not reasons to retain an obsolete API.
-
 The pure C mutation core rebuilds a CDS from several non-overlapping edits in one
 reverse-coordinate pass, translates once, and partitions interactions while the frame is
 displaced or the next edit touches the same alternate codon. The model-scoped carrier index
