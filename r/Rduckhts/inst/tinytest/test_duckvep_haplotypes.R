@@ -120,6 +120,36 @@ local({
   expect_equal(stopped$cds_differences[[1]]$ref_start0, c(3, 9))
   expect_equal(stopped$cds_differences[[1]]$reference, c("A", "C"))
   expect_equal(stopped$cds_differences[[1]]$alternate, c("G", "A"))
+  # The DNA frame restores after translation has already reached a stop. These
+  # are the unchanged seed-173 DHT000002 edits, also expressed on the forward strand.
+  early_cds <- paste0("ATGGGCTTGCCTAGCTTAAAACACTTGGTAAACTTTCTCGTGGTTACAACCTCGTTAGGGCTGCAT",
+    "CTTCTCTACATGGAGAAGTGCGAAGTCCGGGTAAGGACCGGGTGTTATAACCCAGCAGACAAGCT",
+    "GAAGGGGCGCGTGTACTTAGCTGCCCGCTCGAGGCATTGGTCCCCGTAA")
+  early_tx <- paste("SELECT i::UINTEGER transcript_index,0::UINTEGER seq_region,",
+    "11::UBIGINT transcript_start,190::UBIGINT transcript_end,s::TINYINT strand,",
+    "0::UINTEGER gene_index,3::UBIGINT transcript_flags,11::UBIGINT cds_start,",
+    "190::UBIGINT cds_end,", dbQuoteString(con, early_cds), "::BLOB cds_sequence,",
+    "1::UTINYINT codon_table FROM (VALUES (0,1),(1,-1)) t(i,s)")
+  early_exons <- paste("SELECT transcript_index,transcript_start exon_start,transcript_end exon_end,",
+    "1::UBIGINT exon_cdna_start,180::UBIGINT exon_cdna_end,0::TINYINT phase,0::TINYINT end_phase",
+    "FROM (", early_tx, ")")
+  expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('early_stop',",
+    dbQuoteString(con, "SELECT 0::UINTEGER seq_region"), ",", dbQuoteString(con, early_tx), ",",
+    dbQuoteString(con, early_exons), ")"))$loaded)
+  early_calls <- paste("SELECT event_index,0 seq_region,position,reference,alternate,1 alt_index,",
+    "transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set",
+    "FROM (VALUES (1,0,19,'G','GT'),(2,0,49,'CG','C'),(3,1,150,'AC','A'),(4,1,181,'G','GA'))",
+    "v(event_index,transcript_index,position,reference,alternate)")
+  for (policy in c("strict", "vep116_compat")) {
+    early <- rduckhts_haplotypes(con, early_calls, "early_stop", phase_policy = policy)
+    early <- early[order(early$transcript_index), ]
+    expect_equal(early$protein, c("MGLS*", "MGLS*"))
+    expect_equal(nchar(early$cds), c(180L, 180L))
+    expect_equal(early$sequence_flags, c(13, 13))
+    expect_equal(lapply(early$contributors, function(x) x$event_index), list(c(1, 2), c(3, 4)))
+    expect_equal(lapply(early$coding_blocks, function(x) x$event_indices), list(list(c(1, 2)), list(c(4, 3))))
+    expect_equal(vapply(early$coding_blocks, function(x) x$length_change, 0), c(0, 0))
+  }
   spelling_tx <- sub("ATGAAATAACCC", "atgaaataaccc", stop_tx, fixed = TRUE)
   expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('spelling',",
     dbQuoteString(con, "SELECT 0::UINTEGER seq_region"), ",", dbQuoteString(con, spelling_tx), ",",

@@ -1,6 +1,12 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- reject compound indels in the native substitution-fact evaluator, including
+  net-zero sets that were incorrectly accepted as substitutions. Sequence replay
+  remains available; combined SO/HGVS is not yet implemented. Add a separate
+  complete-lane support audit with source-built bcftools observations, retaining
+  unsupported results and upstream failures rather than counting them as agreement
+
 - replace the count-only phased `coding_blocks.edit_count` field with
   `event_indices`, one source event ID per physical edit in CDS order. Repeated
   IDs preserve multi-island MNV contributions within and across interaction

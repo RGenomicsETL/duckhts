@@ -453,6 +453,51 @@ FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap_noncoding');
 ----
 true
 
+# A restored DNA frame is not a rescued protein: the seed-173 DHT000002
+# insertion/deletion pair reaches MGLS* before the restoring deletion. Keep
+# both physical contributors and the complete CDS on either strand.
+statement ok
+CREATE TABLE hap_early_stop_tx AS SELECT i::UINTEGER transcript_index,0::UINTEGER seq_region,
+ 11::UBIGINT transcript_start,190::UBIGINT transcript_end,s::TINYINT strand,
+ 0::UINTEGER gene_index,3::UBIGINT transcript_flags,11::UBIGINT cds_start,
+ 190::UBIGINT cds_end,
+ 'ATGGGCTTGCCTAGCTTAAAACACTTGGTAAACTTTCTCGTGGTTACAACCTCGTTAGGGCTGCATCTTCTCTACATGGAGAAGTGCGAAGTCCGGGTAAGGACCGGGTGTTATAACCCAGCAGACAAGCTGAAGGGGCGCGTGTACTTAGCTGCCCGCTCGAGGCATTGGTCCCCGTAA'::BLOB cds_sequence,
+ 1::UTINYINT codon_table FROM (VALUES (0,1),(1,-1)) t(i,s);
+
+query I
+SELECT loaded FROM duckvep_model_load('hap_early_stop','SELECT 0::UINTEGER seq_region',
+ 'SELECT * FROM hap_early_stop_tx',
+ 'SELECT transcript_index,transcript_start exon_start,transcript_end exon_end,
+  1::UBIGINT exon_cdna_start,180::UBIGINT exon_cdna_end,0::TINYINT phase,0::TINYINT end_phase
+  FROM hap_early_stop_tx');
+----
+1
+
+statement ok
+CREATE TABLE hap_early_stop_calls AS SELECT event_index,0 seq_region,position,reference,alternate,
+ 1 alt_index,transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set
+ FROM (VALUES (1,0,19,'G','GT'),(2,0,49,'CG','C'),(3,1,150,'AC','A'),(4,1,181,'G','GA'))
+ v(event_index,transcript_index,position,reference,alternate);
+
+query ITIIIITT
+SELECT transcript_index,protein,len(cds),sequence_flags,len(coding_blocks),
+ coding_blocks[1].length_change,coding_blocks[1].event_indices,
+ list_transform(contributors,c -> c.event_index)
+ FROM duckvep_haplotypes('SELECT * FROM hap_early_stop_calls','hap_early_stop')
+ ORDER BY transcript_index;
+----
+0	MGLS*	180	13	1	0	[1, 2]	[1, 2]
+1	MGLS*	180	13	1	0	[4, 3]	[3, 4]
+
+query ITII
+SELECT transcript_index,protein,len(cds),sum(len(b.event_indices))
+ FROM (SELECT transcript_index,protein,cds,unnest(coding_blocks) b FROM
+ duckvep_haplotypes('SELECT * FROM hap_early_stop_calls','hap_early_stop',phase_policy := 'vep116_compat'))
+ GROUP BY ALL ORDER BY transcript_index;
+----
+0	MGLS*	180	2
+1	MGLS*	180	2
+
 # Interacting indels restore the frame. An earlier in-frame insertion shifts
 # later alternate spans; the reverse transcript must expose transcript-oriented
 # bases and reverse CDS order, with no source events discarded.

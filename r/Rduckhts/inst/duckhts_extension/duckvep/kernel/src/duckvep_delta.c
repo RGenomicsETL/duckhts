@@ -4410,6 +4410,13 @@ DUCKVEP_INTERNAL_API duckvep_context_delta_status_t duckvep_coding_context_delta
           ctx->alt_peptide == NULL))) {
         return DUCKVEP_CONTEXT_DELTA_INVALID_ARG;
     }
+    /* Net-zero compound indels are not substitutions. Their intermediate
+     * frame and stop state require interaction-block predicates; the CDS diff
+     * cannot recover those facts. Never publish the substitution approximation. */
+    if (ctx->applied_edits > 1u &&
+        (ctx->flags & DUCKVEP_HAPLOTYPE_FLAG_INDEL) != 0u) {
+        return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
+    }
     if (ctx->length_diff != 0) {
         duckvep_context_delta_status_t status;
         int handled;

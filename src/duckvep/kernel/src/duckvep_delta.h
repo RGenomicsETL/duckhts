@@ -92,23 +92,20 @@ DUCKVEP_INTERNAL_API int duckvep_transcript_has_partial_terminal_codon(
  * variant may produce several edits; for example, an MNV with retained internal
  * bases splits into multiple differing islands. A phased haplotype is another
  * N-edit set grouped by sample x phase_set x haplotype x transcript. Both are
- * applied and translated once by the oracle-tested CDS mutation core
- * (duckvep_haplotype_apply_cds_edits):
- * "haplotypes are MNVs at the coding-delta layer; they differ in grouping/flushing,
- * not in consequence logic". The cds-edit element is duckvep_haplotype_edit_t (the C
- * equivalent of the Rust oracle's CdsEdit, predictor.rs CdsEdit).
+ * applied and translated once by duckvep_haplotype_apply_cds_edits. Shared
+ * sequence mechanics do not imply equivalent consequence predicates: compound
+ * indels retain intermediate frame changes even when their net length is zero.
  *
  * EDIT CONTRACT (matches duckvep_haplotype_edit_t, NOT a new one): alleles are in
  * variant_strand orientation with a per-edit `variant_strand`; the apply helper
  * reverse-complements when variant_strand != transcript_strand (do NOT pre-orient
  * here). cds_start is 1-based; a pure insertion is ref_len==0 inserted BEFORE
- * cds_start. The Rust oracle's variant_to_cds_edit places an insertion AFTER cds_lo
- * (predictor.rs:248-253), so comparisons must account for that +1 convention.
+ * cds_start.
  *
  * Apply/translate split: mutate via duckvep_haplotype_apply_cds_edits, then translate.
  * duckvep_translate_cds retains all residues and records the first stop. Haplotype
  * output selects that prefix; VEP coding predicates consume the full codon-window
- * translation in duckvep_coding_context_build (predictor.rs build_coding_context:1138). */
+ * translation in duckvep_coding_context_build. */
 typedef struct duckvep_edit_set {
     const duckvep_haplotype_edit_t *edits; /* borrowed; variant_strand orientation     */
     size_t                          count; /* N edits; shared by one allele or haplotype */
@@ -624,12 +621,11 @@ duckvep_feature_substitution_context_fill(
  * length-preserving substitutions across codon-rounded windows and guarded
  * single-edit frameshift, in-frame insertion, deletion, and delins contexts.
  * Terminal partial codons share independent REF/ALT clipping and borrowed UTR
- * translation with the length-changing path. Ambiguous bases, length-changing
- * multi-edit contexts, and cases
- * requiring an incomplete compound consequence return UNSUPPORTED with `delta`
- * invalid. Length-preserving edit sets select their changed codons; the uploaded
- * feature producer selects the full feature's codons without minimizing retained
- * bases. Both selections use the same substitution interpreter. The raw dispatcher
+ * translation with the length-changing path. Ambiguous bases and multi-edit
+ * contexts containing any indel return UNSUPPORTED with `delta` invalid, even
+ * when the net length change is zero. Substitution-only edit sets select their
+ * changed codons; the uploaded feature producer selects the full feature's codons
+ * without minimizing retained bases. Both selections use the same substitution interpreter. The raw dispatcher
  * has no shape-specific fallback. */
 DUCKVEP_INTERNAL_API duckvep_context_delta_status_t duckvep_coding_context_delta_fill(
     const duckvep_coding_context_t *ctx,

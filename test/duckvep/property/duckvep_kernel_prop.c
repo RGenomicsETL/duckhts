@@ -21580,6 +21580,62 @@ static enum theft_trial_res prop_haplotype_snv_set_matches_equivalent_mnv(
     return THEFT_TRIAL_PASS;
 }
 
+TEST haplotype_compound_indels_are_not_substitution_facts(void) {
+    /* Unchanged Haplosaurus generator seed 173, DHT000002: genomic 211 G>GA
+     * and 180 AC>A on the reverse strand. The frame returns to zero at CDS 40,
+     * but the combined protein is already MGLS*. Pinned bcftools 1.23 csq
+     * reports stop_gained&frameshift, not a length-preserving substitution.
+     * Extend this witness across both allele orientations and net length signs. */
+    static const uint8_t cds[] =
+        "ATGGGCTTGCCTAGCTTAAAACACTTGGTAAACTTTCTCGTGGTTACAACCTCGTTAGGGCTGCAT"
+        "CTTCTCTACATGGAGAAGTGCGAAGTCCGGGTAAGGACCGGGTGTTATAACCCAGCAGACAAGCT"
+        "GAAGGGGCGCGTGTACTTAGCTGCCCGCTCGAGGCATTGGTCCCCGTAA";
+    static const uint8_t inserted[] = "TGG";
+    for (int strand = -1; strand <= 1; strand += 2) {
+        for (uint32_t inserted_len = 1u; inserted_len <= 3u; inserted_len++) {
+            for (uint32_t deleted_len = 1u; deleted_len <= 3u; deleted_len++) {
+                uint8_t ref[3], alt[3], alt_cds[192], ref_peptide[64], alt_peptide[64];
+                duckvep_coding_context_t ctx;
+                duckvep_sequence_delta_t delta;
+                for (uint32_t i = 0u; i < deleted_len; i++) {
+                    ref[i] = strand > 0 ? cds[39u + i]
+                        : (uint8_t)kprop_complement_base((char)cds[39u + deleted_len - 1u - i]);
+                }
+                for (uint32_t i = 0u; i < inserted_len; i++) {
+                    alt[i] = strand > 0 ? inserted[i]
+                        : (uint8_t)kprop_complement_base((char)inserted[inserted_len - 1u - i]);
+                }
+                duckvep_haplotype_edit_t edits[2] = {
+                    {40u, deleted_len, ref, 0u, NULL, 1},
+                    {10u, 0u, NULL, inserted_len, alt, 1}
+                };
+                duckvep_edit_set_t set = {edits, 2u};
+                ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK, duckvep_coding_context_build(
+                    cds, sizeof cds - 1u, &set, (int8_t)strand, DUCKVEP_CODON_TABLE_STANDARD,
+                    alt_cds, sizeof alt_cds, ref_peptide, sizeof ref_peptide,
+                    alt_peptide, sizeof alt_peptide, &ctx));
+                ASSERT_EQ(2u, ctx.applied_edits);
+                ASSERT(!ctx.has_single_edit);
+                ASSERT_EQ((int64_t)inserted_len - deleted_len, ctx.length_diff);
+                ASSERT(ctx.flags & DUCKVEP_HAPLOTYPE_FLAG_INDEL);
+                if (inserted_len == 1u && deleted_len == 1u) {
+                    ASSERT(ctx.flags & DUCKVEP_HAPLOTYPE_FLAG_RESOLVED_FRAMESHIFT);
+                    ASSERT_EQ(sizeof cds - 1u, ctx.alt_cds_len);
+                    ASSERT_EQ(60u, ctx.alt_peptide_len);
+                    ASSERT_MEM_EQ("MGLS*", ctx.alt_peptide, 5u);
+                    ASSERT(ctx.alt_peptide[5u] != 0u);
+                }
+                memset(&delta, 0xff, sizeof delta);
+                ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_UNSUPPORTED,
+                    duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+                duckvep_sequence_delta_t empty = {0};
+                ASSERT_MEM_EQ(&empty, &delta, sizeof delta);
+            }
+        }
+    }
+    PASS();
+}
+
 TEST haplotype_snv_set_matches_equivalent_mnv_coding_facts(void) {
     struct theft_run_config cfg;
     memset(&cfg, 0, sizeof cfg);
@@ -27626,6 +27682,7 @@ int main(int argc, char **argv) {
     RUN_TEST(haplotype_differences_bound_alignment_work_and_report_limits);
     RUN_TEST(haplotype_apply_rejects_overlapping_inputs);
     RUN_TEST(haplotype_apply_matches_rebuild_oracle_for_any_valid_edit_set);
+    RUN_TEST(haplotype_compound_indels_are_not_substitution_facts);
     RUN_TEST(haplotype_snv_set_matches_equivalent_mnv_coding_facts);
     GREATEST_MAIN_END();
 }

@@ -618,6 +618,32 @@ controls, and fails if any native reference or alternate comparison differs.
 Original Haplosaurus inputs and expectations are not changed. This
 lane does not certify public protein differences, compound SO or HGVS.
 
+`compound_coding_audit.R --artifacts results/<haplotype-run>` observes the native
+coding-context evaluator on every original edit set, including reference lanes.
+It verifies complete CDS/displayed-protein replay and rejects false supported
+consequences for compound indels, including net-zero sets. This is a support-limit
+audit, not a combined-SO differential; unsupported rows remain explicit and are
+never counted as biological agreement. The original corpus and assertions are unchanged.
+
+The additional `bcftools csq -p a` observation builds bcftools/HTSlib 1.23 from
+the exact `src/bcftools-1.23` tree in RBCFTools commit
+`9adeaf4cfcc3bff40efca6237749fefb53391678`, exported from the local mirror into
+the result directory. It does not reuse a prebuilt binary, modify the mirror,
+disable assertions, or fetch dependencies. Receipts bind source archive, built
+executable, command, complete native lane observations and upstream output/logs.
+An upstream crash remains a failing audit with partial rows and missing carriers
+counted; it does not interrupt observation of the complete native denominator.
+bcftools supplies complementary compound-state evidence, not the VEP-116 oracle
+or a replacement production classifier. In particular, seed 173's DHT000002
+restores its DNA frame yet translates to `MGLS*`; downstream contributors remain
+required. The native, SQL and R fixed witnesses preserve this case independently
+of the optional external audit.
+The assertion-enabled source build currently aborts at `csq.c:2433` on seed
+173's DHT000895. Its four original records succeed with each sample separately
+and with `cis,shared`, but fail with `cis,trans`. Retain that cohort-dependent
+failure; an assertion-disabled local binary is not evidence that the source-built
+lane passed.
+
 This is **not** a public phased-executor certificate: the R harness materializes
 decoded calls, and it does not test native DuckDB carrier streaming, strict phase/PS
 interpretation, compound SO/HGVS, structural

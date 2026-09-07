@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- test phased replay on both strands when translation stops before a later
+  indel restores the DNA frame: the package retains the complete CDS, truncated
+  protein and every contributing event under both phase policies
+
 - return source `event_indices` lists inside `rduckhts_haplotypes()` coding
   blocks, replacing the count-only block field. List lengths count physical
   edits; repeated IDs preserve multi-island variants and can be joined to raw
