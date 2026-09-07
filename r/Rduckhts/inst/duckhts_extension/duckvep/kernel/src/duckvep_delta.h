@@ -300,10 +300,11 @@ duckvep_sequence_delta_consequence_flags_complete_for_hgvs(
  * borrows `duckvep_coding_context_t`; consumers read residues through
  * duckvep_coding_context_peptide_window_base() so virtual single-edit
  * contexts, materialized haplotypes, terminal partial codons, and Ensembl
- * Translation SeqEdits keep one authority. `peptide_offset` is zero-based in
- * the complete protein; the remaining lengths count one-letter residues. */
+ * Translation SeqEdits keep one authority. Both offsets are zero-based in their
+ * respective complete proteins; the remaining lengths count one-letter residues. */
 typedef struct duckvep_coding_peptide_window {
-    size_t peptide_offset;
+    size_t ref_peptide_offset;
+    size_t alt_peptide_offset;
     size_t reference_span_length;
     size_t ref_nt_length;
     size_t alt_nt_length;
@@ -321,6 +322,18 @@ typedef struct duckvep_coding_peptide_window {
  * use this for length-changing alleles; HGVS also uses it for equal-length edits. */
 DUCKVEP_INTERNAL_API int duckvep_coding_context_peptide_window_open(
     const duckvep_coding_context_t  *ctx,
+    duckvep_coding_peptide_window_t *window);
+
+/* Open the same codon-rounded strings for one physical interaction block on a
+ * materialized complete haplotype. Prior closed blocks can shift ALT by whole
+ * codons: REF and ALT offsets are independent, and the length request uses this
+ * block's length change, not the complete path's. No edit is forged or reapplied.
+ * The block must come from duckvep_haplotype_partition for this context's edits.
+ * This opens sequence operands only; it does not classify compound consequences
+ * or truncate at a stop. On failure the window is zeroed. */
+DUCKVEP_INTERNAL_API int duckvep_coding_context_block_window_open(
+    const duckvep_coding_context_t  *ctx,
+    const duckvep_haplotype_block_t *block,
     duckvep_coding_peptide_window_t *window);
 
 /* Read one local residue from an opened window. `alternate` selects the

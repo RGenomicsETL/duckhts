@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- use explicit reference and alternate peptide coordinates in the bundled
+  coding/HGVS kernel, preserving independent-event HGVS output while sharing
+  window access with phased native analysis. No SQL signature or wrapper changes
+
 - test phased replay on both strands when translation stops before a later
   indel restores the DNA frame: the package retains the complete CDS, truncated
   protein and every contributing event under both phase policies

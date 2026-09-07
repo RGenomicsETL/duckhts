@@ -1,6 +1,18 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- replace the single peptide-window offset with explicit reference and alternate
+  coordinates shared by coding and HGVS kernels. Phased interaction blocks open
+  their actual sequence windows without inventing a single edit or reapplying
+  the path. Earlier in-frame shifts and local versus whole-path length changes
+  remain distinct; this supplies operands, not completed compound SO/HGVS
+
+- add an independent sample-separability audit for the complementary bcftools
+  observations. A separately receipted diagnostic patch keeps consequence
+  rendering state local to a leaf; the unchanged executable supplies per-sample
+  expectations. Cohort crashes and duplicate-output differences remain failing
+  evidence, and the original cohort audit and pinned VEP oracle are unchanged
+
 - reject compound indels in the native substitution-fact evaluator, including
   net-zero sets that were incorrectly accepted as substitutions. Sequence replay
   remains available; combined SO/HGVS is not yet implemented. Add a separate

@@ -85,14 +85,15 @@ main <- function() {
       capacity <- as.integer(nchar(case$cds) + sum(edits$alt_len) + 2L)
       x <- .C(symbol, case$cds, case$strand, as.integer(edits$start), edits$ref, edits$alt,
         as.integer(nrow(edits)), capacity, cds = raw(capacity), protein = raw(capacity),
-        statuses = integer(2L), facts = integer(17L), lengths = integer(2L))
+        statuses = integer(2L), facts = integer(22L), lengths = integer(2L))
       actual_cds <- rawToChar(x$cds[seq_len(x$lengths[1L])])
       full_protein <- rawToChar(x$protein[seq_len(x$lengths[2L])])
       displayed <- sub("(\\*).*", "\\1", full_protein)
       names(x$facts) <- c("valid", "sequence_status", "synonymous", "missense", "stop_gained",
         "stop_lost", "stop_retained", "start_lost", "start_retained", "frameshift",
         "inframe_deletion", "inframe_insertion", "protein_altering", "coding_unknown",
-        "partial_codon", "flags", "applied_edits")
+        "partial_codon", "flags", "applied_edits", "block_count", "opened_windows",
+        "shifted_windows", "invalid_window_residues", "first_failed_window")
       key <- paste(case$transcript, path$sample, (slot - 1L) %% 2L + 1L, sep = "/")
       matched <- which(csq$key == key)
       at <- at + 1L
@@ -120,6 +121,9 @@ main <- function() {
   summary <- data.frame(seed = original$seed, transcripts = length(cases), lanes = nrow(rows),
     occupied = sum(rows$occupied), context_failures = sum(rows$build_status != 0L),
     sequence_failures = sum(!rows$cds_match | !rows$protein_match),
+    block_windows = sum(rows$block_count), shifted_windows = sum(rows$shifted_windows),
+    failed_windows = sum(rows$block_count - rows$opened_windows),
+    invalid_window_residues = sum(rows$invalid_window_residues),
     unsupported = sum(rows$delta_status == 2L), compound_indels = sum(rows$compound_indel),
     falsely_supported_compound_indels = sum(false_support), bcftools_exit_status = bcftools_status,
     # Noncoding/splice consequences have four fields; strand and peptide are optional.
@@ -142,6 +146,8 @@ main <- function() {
     identical(code_hashes, vapply(code, duckvep_evidence_sha256, "")),
     identical(revision, duckvep_evidence_revision(root)),
     !any(false_support), all(rows$build_status == 0L), all(rows$cds_match & rows$protein_match),
+    all(rows$block_count == rows$opened_windows), all(rows$first_failed_window == 0L),
+    all(rows$invalid_window_residues == 0L),
     bcftools_status == 0L, summary$incomplete_bcftools_rows == 0L,
     summary$missing_occupied == 0L, nrow(extra) == 0L)
 }

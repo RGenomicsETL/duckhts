@@ -20964,8 +20964,8 @@ static int kprop_hgvs_is_vep_absent_terminal_insertion(
     ref_remaining = window.ref_length - prefix - suffix;
     alt_remaining = window.alt_length - prefix - suffix;
     if (ref_remaining != 0u || alt_remaining == 0u) return 0;
-    first_position1 = window.peptide_offset + 1u + prefix;
-    last_position1 = window.peptide_offset + window.ref_length - suffix;
+    first_position1 = window.ref_peptide_offset + 1u + prefix;
+    last_position1 = window.ref_peptide_offset + window.ref_length - suffix;
     low = first_position1 < last_position1
         ? first_position1 : last_position1;
     reference_length = context->ref_peptide_len;
@@ -21578,6 +21578,137 @@ static enum theft_trial_res prop_haplotype_snv_set_matches_equivalent_mnv(
     else
         g_haplotype_mnv_equivalence_cov.several_codons++;
     return THEFT_TRIAL_PASS;
+}
+
+TEST haplotype_block_windows_keep_both_peptide_axes(void) {
+    static const uint8_t reference[] = "ATGAAACCCGGGTTTTAAGCC";
+    static const uint8_t inserted[] = "AGTC";
+    size_t cases = 0u;
+    for (size_t length = 18u; length <= 20u; length++) {
+        for (int shift = -3; shift <= 3; shift += 3) {
+            for (uint32_t position = 10u; position <= length; position++) {
+                for (uint32_t alt_length = 0u; alt_length <= 4u; alt_length++) {
+                    for (int strand = -1; strand <= 1; strand += 2) {
+                        uint8_t ref[2][4], alt[2][4], cds[32], rp[16], ap[16];
+                        duckvep_coding_context_t ctx;
+                        duckvep_haplotype_edit_t edits[2] = {
+                            {position, 1u, ref[0], alt_length, alt[0], 1},
+                            {4u, shift > 0 ? 0u : shift < 0 ? 3u : 1u, ref[1],
+                             shift < 0 ? 0u : shift > 0 ? 3u : 1u, alt[1], 1}
+                        };
+                        const uint8_t *tx_alt[2] = {inserted,
+                            (const uint8_t *)(shift > 0 ? "CCC" : "T")};
+                        for (size_t e = 0u; e < 2u; e++) {
+                            for (uint32_t i = 0u; i < edits[e].ref_len; i++) {
+                                size_t at = edits[e].cds_start - 1u +
+                                    (strand > 0 ? i : edits[e].ref_len - 1u - i);
+                                ref[e][i] = strand > 0 ? reference[at]
+                                    : (uint8_t)kprop_complement_base((char)reference[at]);
+                            }
+                            for (uint32_t i = 0u; i < edits[e].alt_len; i++) {
+                                uint8_t b = tx_alt[e][strand > 0 ? i : edits[e].alt_len - 1u - i];
+                                alt[e][i] = strand > 0 ? b : (uint8_t)kprop_complement_base((char)b);
+                            }
+                        }
+                        duckvep_edit_set_t set = {edits, 2u};
+                        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK, duckvep_coding_context_build(
+                            reference, length, &set, (int8_t)strand, DUCKVEP_CODON_TABLE_STANDARD,
+                            cds, sizeof cds, rp, sizeof rp, ap, sizeof ap, &ctx));
+                        duckvep_haplotype_edit_t ascending[2] = {edits[1], edits[0]};
+                        duckvep_haplotype_block_t blocks[2];
+                        size_t count;
+                        ASSERT_EQ(DUCKVEP_HAPLOTYPE_OK,
+                            duckvep_haplotype_partition(ascending, 2u, blocks, 2u, &count));
+                        ASSERT_EQ(2u, count);
+                        duckvep_coding_context_t saved = ctx;
+                        duckvep_coding_peptide_window_t view;
+                        ASSERT(duckvep_coding_context_block_window_open(&ctx, &blocks[1], &view));
+                        ASSERT_MEM_EQ(&saved, &ctx, sizeof ctx);
+                        size_t ref_begin = ((size_t)position - 1u) / 3u * 3u;
+                        size_t alt_begin = (size_t)((int64_t)ref_begin + shift);
+                        size_t expected_ref_nt = length - ref_begin;
+                        if (expected_ref_nt > 3u) expected_ref_nt = 3u;
+                        size_t expected_alt_nt = ctx.alt_cds_len - alt_begin;
+                        if (expected_alt_nt > alt_length + 2u) expected_alt_nt = alt_length + 2u;
+                        ASSERT_EQ(ref_begin / 3u, view.ref_peptide_offset);
+                        ASSERT_EQ(alt_begin / 3u, view.alt_peptide_offset);
+                        ASSERT_EQ(expected_ref_nt, view.ref_nt_length);
+                        ASSERT_EQ(expected_alt_nt, view.alt_nt_length);
+                        for (int side = 0; side < 2; side++) {
+                            size_t offset = side ? alt_begin / 3u : ref_begin / 3u;
+                            size_t nts = side ? expected_alt_nt : expected_ref_nt;
+                            const uint8_t *peptide = side ? ap : rp;
+                            size_t whole = nts / 3u;
+                            int partial = nts % 3u && !(whole == 1u && peptide[offset] == '*');
+                            size_t residues = whole + (size_t)partial;
+                            ASSERT_EQ(residues, side ? view.alt_length : view.ref_length);
+                            for (size_t i = 0u; i < residues; i++) {
+                                uint8_t expected = i == whole ? 'X' : peptide[offset + i];
+                                ASSERT_EQ(expected, duckvep_coding_context_peptide_window_base(
+                                    &ctx, &view, side, i));
+                            }
+                            ASSERT_EQ(0u, duckvep_coding_context_peptide_window_base(
+                                &ctx, &view, side, residues));
+                        }
+                        if (view.ref_whole_length) {
+                            uint32_t curated_position = (uint32_t)view.ref_peptide_offset + 1u;
+                            const uint8_t curated = 'U';
+                            uint8_t alternate = duckvep_coding_context_peptide_window_base(
+                                &ctx, &view, 1, 0u);
+                            ctx.ref_peptide_edit_position1 = &curated_position;
+                            ctx.ref_peptide_edit_alt = &curated;
+                            ctx.ref_peptide_edit_count = 1u;
+                            ASSERT_EQ('U', duckvep_coding_context_peptide_window_base(&ctx, &view, 0, 0u));
+                            ASSERT_EQ(alternate, duckvep_coding_context_peptide_window_base(&ctx, &view, 1, 0u));
+                            ctx.ref_peptide_edit_count = 0u;
+                            ctx.ref_peptide_edit_position1 = NULL;
+                            ctx.ref_peptide_edit_alt = NULL;
+                        }
+                        for (int bad = 0; bad < 5; bad++) {
+                            duckvep_haplotype_block_t invalid = blocks[1];
+                            duckvep_coding_peptide_window_t cleared = {0};
+                            if (bad == 0) invalid.length_diff++;
+                            if (bad == 1) invalid.alt_start0++;
+                            if (bad == 2) invalid.edit_count = ctx.applied_edits + 1u;
+                            if (bad == 3) invalid.alt_start0 = SIZE_MAX;
+                            if (bad == 4) invalid.cds_start = UINT32_MAX;
+                            memset(&view, 0xff, sizeof view);
+                            ASSERT(!duckvep_coding_context_block_window_open(&ctx, &invalid, &view));
+                            ASSERT_MEM_EQ(&cleared, &view, sizeof view);
+                        }
+                        /* A real singleton must expose identical strings/coordinates
+                         * through the single-event and interaction-block entry points. */
+                        set.count = 1u;
+                        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK, duckvep_coding_context_build(
+                            reference, length, &set, (int8_t)strand, DUCKVEP_CODON_TABLE_STANDARD,
+                            cds, sizeof cds, rp, sizeof rp, ap, sizeof ap, &ctx));
+                        ASSERT_EQ(DUCKVEP_HAPLOTYPE_OK,
+                            duckvep_haplotype_partition(edits, 1u, blocks, 2u, &count));
+                        duckvep_coding_peptide_window_t single;
+                        ASSERT(duckvep_coding_context_peptide_window_open(&ctx, &single));
+                        ASSERT(duckvep_coding_context_block_window_open(&ctx, blocks, &view));
+                        ASSERT_MEM_EQ(&single, &view, sizeof view);
+                        cases++;
+                    }
+                }
+            }
+        }
+    }
+    ASSERT_EQ(900u, cases);
+
+    duckvep_coding_context_t ctx = {0};
+    duckvep_haplotype_block_t block = {0};
+    duckvep_coding_peptide_window_t view, empty = {0};
+    memset(&view, 0xff, sizeof view);
+    ASSERT(!duckvep_coding_context_block_window_open(&ctx, &block, &view));
+    ASSERT_MEM_EQ(&empty, &view, sizeof view);
+    ASSERT(!duckvep_coding_context_block_window_open(NULL, &block, &view));
+    ASSERT(!duckvep_coding_context_block_window_open(&ctx, NULL, &view));
+    ASSERT(!duckvep_coding_context_block_window_open(&ctx, &block, NULL));
+    ctx.ref_peptide = (const uint8_t *)"MK"; ctx.ref_peptide_len = 2u;
+    view.ref_peptide_offset = SIZE_MAX; view.ref_length = view.ref_whole_length = 2u;
+    ASSERT_EQ(0u, duckvep_coding_context_peptide_window_base(&ctx, &view, 0, 1u));
+    PASS();
 }
 
 TEST haplotype_compound_indels_are_not_substitution_facts(void) {
@@ -22997,7 +23128,7 @@ static enum theft_trial_res prop_partial_terminal_insertion_strata(
                delta.alt_aa != (uint8_t)(
                    !expected_insertion && !expected_protein_altering &&
                    expected_alt_length == 1u ? expected_peptide[0] : 0u) ||
-               delta.protein_pos != (int32_t)(window.peptide_offset + 1u)) {
+               delta.protein_pos != (int32_t)(window.ref_peptide_offset + 1u)) {
         fprintf(stderr,
                 "\n[terminal-partial failure] delta tail=%u site=%u len=%u "
                 "table=%u strand=%d status=%d valid=%u partial=%u frameshift=%u "
@@ -23010,7 +23141,7 @@ static enum theft_trial_res prop_partial_terminal_insertion_strata(
                 delta.inframe_deletion, delta.inframe_insertion,
                 delta.stop_gained, saw_stop, delta.coding_unknown,
                 (unsigned)expected_unknown, delta.protein_altering,
-                delta.protein_pos, window.peptide_offset + 1u);
+                delta.protein_pos, window.ref_peptide_offset + 1u);
         return THEFT_TRIAL_FAIL;
     }
 
@@ -26174,7 +26305,7 @@ static int kprop_vep_local_peptides(
     size_t alt_nt_length;
     size_t ref_whole;
     size_t alt_whole;
-    size_t peptide_offset;
+    size_t ref_peptide_offset;
     size_t i;
 
     if (ctx == NULL || ref_local_len == NULL || alt_local_len == NULL ||
@@ -26217,19 +26348,19 @@ static int kprop_vep_local_peptides(
     }
     ref_whole = (size_t)ref_nt_length / 3u;
     alt_whole = alt_nt_length / 3u;
-    peptide_offset = (size_t)nt_offset / 3u;
-    if (peptide_offset > ctx->ref_peptide_len ||
-        ref_whole > ctx->ref_peptide_len - peptide_offset ||
-        peptide_offset > ctx->alt_peptide_len ||
-        alt_whole > ctx->alt_peptide_len - peptide_offset ||
+    ref_peptide_offset = (size_t)nt_offset / 3u;
+    if (ref_peptide_offset > ctx->ref_peptide_len ||
+        ref_whole > ctx->ref_peptide_len - ref_peptide_offset ||
+        ref_peptide_offset > ctx->alt_peptide_len ||
+        alt_whole > ctx->alt_peptide_len - ref_peptide_offset ||
         ref_whole + 1u > 32u || alt_whole + 1u > 32u) {
         return 0;
     }
     for (i = 0u; i < ref_whole; i++) {
-        ref_local[i] = ctx->ref_peptide[peptide_offset + i];
+        ref_local[i] = ctx->ref_peptide[ref_peptide_offset + i];
     }
     for (i = 0u; i < alt_whole; i++) {
-        alt_local[i] = ctx->alt_peptide[peptide_offset + i];
+        alt_local[i] = ctx->alt_peptide[ref_peptide_offset + i];
     }
     *ref_local_len = ref_whole;
     *alt_local_len = alt_whole;
@@ -27682,6 +27813,7 @@ int main(int argc, char **argv) {
     RUN_TEST(haplotype_differences_bound_alignment_work_and_report_limits);
     RUN_TEST(haplotype_apply_rejects_overlapping_inputs);
     RUN_TEST(haplotype_apply_matches_rebuild_oracle_for_any_valid_edit_set);
+    RUN_TEST(haplotype_block_windows_keep_both_peptide_axes);
     RUN_TEST(haplotype_compound_indels_are_not_substitution_facts);
     RUN_TEST(haplotype_snv_set_matches_equivalent_mnv_coding_facts);
     GREATEST_MAIN_END();

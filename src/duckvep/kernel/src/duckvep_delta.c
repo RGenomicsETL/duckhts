@@ -2014,7 +2014,7 @@ static duckvep_coding_context_status_t delta_coding_context_open_validated_edit(
     duckvep_coding_context_t tmp;
     size_t start0;
     size_t alt_cds_len;
-    size_t peptide_offset;
+    size_t ref_peptide_offset;
     size_t nt_offset;
     size_t ref_nt_length;
     size_t alt_nt_length;
@@ -2105,8 +2105,8 @@ static duckvep_coding_context_status_t delta_coding_context_open_validated_edit(
 
     /* Cache exactly the codon-rounded window inspected by VEP's local peptide
      * predicates. This remains O(edit bytes), not O(transcript bytes). */
-    peptide_offset = start0 / 3u;
-    nt_offset = peptide_offset * 3u;
+    ref_peptide_offset = start0 / 3u;
+    nt_offset = ref_peptide_offset * 3u;
     if (edit->ref_len != 0u) {
         size_t last0 = start0 + (size_t)edit->ref_len - 1u;
         size_t end = (last0 / 3u + 1u) * 3u;
@@ -2114,8 +2114,8 @@ static duckvep_coding_context_status_t delta_coding_context_open_validated_edit(
     } else if (edit->cds_start > 1u) {
         size_t last0 = (size_t)edit->cds_start - 2u;
         size_t last_codon = last0 / 3u;
-        ref_nt_length = last_codon >= peptide_offset
-            ? (last_codon - peptide_offset + 1u) * 3u : 0u;
+        ref_nt_length = last_codon >= ref_peptide_offset
+            ? (last_codon - ref_peptide_offset + 1u) * 3u : 0u;
     } else {
         ref_nt_length = 0u;
     }
@@ -2195,7 +2195,7 @@ static duckvep_coding_context_status_t delta_coding_context_open_validated_edit(
     tmp.local_cds_offset = nt_offset;
     tmp.local_ref_cds_len = ref_nt_length;
     tmp.local_alt_cds_len = alt_nt_length;
-    tmp.local_peptide_offset = peptide_offset;
+    tmp.local_peptide_offset = ref_peptide_offset;
     tmp.local_ref_peptide_len = ref_local_peptide_len;
     tmp.local_alt_peptide_len = alt_local_peptide_len;
     *ctx = tmp;
@@ -3314,20 +3314,22 @@ int duckvep_coding_context_is_terminal_partial_insertion(
  * start, stop, frame, and insertion predicates all inspect the same bytes. */
 static int delta_context_codon_window_open(
     const duckvep_coding_context_t  *ctx,
-    uint64_t                         peptide_offset,
+    uint64_t                         ref_peptide_offset,
+    uint64_t                         alt_peptide_offset,
     uint64_t                         ref_codons,
+    int64_t                          length_diff,
     duckvep_coding_peptide_window_t *view) {
 
     uint64_t nt_offset64;
     uint64_t ref_nt_length64;
     uint64_t ref_whole_length64;
     int64_t requested_alt_nt;
-    size_t nt_offset;
+    size_t alt_nt_offset;
     size_t alt_length;
 
     if (view != NULL) memset(view, 0, sizeof *view);
     if (ctx == NULL || view == NULL ||
-        ctx->length_diff == INT64_MIN || ctx->ref_cds == NULL ||
+        length_diff == INT64_MIN || ctx->ref_cds == NULL ||
         (!ctx->virtual_single_edit &&
          (ctx->alt_cds == NULL || ctx->ref_peptide == NULL ||
           ctx->alt_peptide == NULL))) {
@@ -3335,8 +3337,9 @@ static int delta_context_codon_window_open(
     }
     if (!delta_context_codon_length(ctx, 1, &alt_length)) return 0;
 
-    if (peptide_offset > UINT64_MAX / 3u || ref_codons > UINT64_MAX / 3u) return 0;
-    nt_offset64 = peptide_offset * 3u;
+    if (ref_peptide_offset > UINT64_MAX / 3u || ref_codons > UINT64_MAX / 3u ||
+        alt_peptide_offset > SIZE_MAX / 3u) return 0;
+    nt_offset64 = ref_peptide_offset * 3u;
     ref_nt_length64 = ref_codons * 3u;
     if (nt_offset64 > (uint64_t)SIZE_MAX ||
         ref_codons > (uint64_t)SIZE_MAX ||
@@ -3346,9 +3349,9 @@ static int delta_context_codon_window_open(
     }
     /* Perl substr clamps each allele independently. The ALT request uses
      * the rounded reference request, not the shorter available REF string. */
-    if (ctx->length_diff > 0 &&
-        ctx->length_diff > INT64_MAX - (int64_t)ref_nt_length64) return 0;
-    requested_alt_nt = (int64_t)ref_nt_length64 + ctx->length_diff;
+    if (length_diff > 0 &&
+        length_diff > INT64_MAX - (int64_t)ref_nt_length64) return 0;
+    requested_alt_nt = (int64_t)ref_nt_length64 + length_diff;
     if (requested_alt_nt < 0 || (uint64_t)requested_alt_nt > SIZE_MAX) return 0;
     if (ref_nt_length64 > (uint64_t)ctx->ref_cds_len - nt_offset64) {
         /* A CDS_END_NF feature can end one or two nucleotides into the last
@@ -3364,31 +3367,32 @@ static int delta_context_codon_window_open(
             (uint64_t)ctx->ref_peptide_len - nt_offset64 / 3u) {
         return 0;
     }
-    nt_offset = (size_t)nt_offset64;
-    if (nt_offset > alt_length) return 0;
-    view->peptide_offset = nt_offset / 3u;
+    alt_nt_offset = (size_t)alt_peptide_offset * 3u;
+    if (alt_nt_offset > alt_length) return 0;
+    view->ref_peptide_offset = (size_t)ref_peptide_offset;
+    view->alt_peptide_offset = (size_t)alt_peptide_offset;
     view->ref_nt_length = (size_t)ref_nt_length64;
     view->alt_nt_length = (size_t)requested_alt_nt;
-    if (view->alt_nt_length > alt_length - nt_offset) {
-        view->alt_nt_length = alt_length - nt_offset;
+    if (view->alt_nt_length > alt_length - alt_nt_offset) {
+        view->alt_nt_length = alt_length - alt_nt_offset;
     }
     view->ref_whole_length = view->ref_nt_length / 3u;
     view->alt_whole_length = view->alt_nt_length / 3u;
-    if (view->peptide_offset > alt_length / 3u ||
+    if (view->alt_peptide_offset > alt_length / 3u ||
         view->alt_whole_length >
-            alt_length / 3u - view->peptide_offset) {
+            alt_length / 3u - view->alt_peptide_offset) {
         return 0;
     }
     view->ref_partial_x = (uint8_t)(
         (view->ref_nt_length % 3u) != 0u &&
         !(view->ref_whole_length == 1u &&
           delta_context_reference_peptide_base(
-              ctx, view->peptide_offset) == (uint8_t)'*'));
+              ctx, view->ref_peptide_offset) == (uint8_t)'*'));
     view->alt_partial_x = (uint8_t)(
         (view->alt_nt_length % 3u) != 0u &&
         !(view->alt_whole_length == 1u &&
           delta_context_alternate_codon_peptide_base(
-              ctx, view->peptide_offset) == (uint8_t)'*'));
+              ctx, view->alt_peptide_offset) == (uint8_t)'*'));
     if (view->ref_whole_length > SIZE_MAX - (size_t)view->ref_partial_x ||
         view->alt_whole_length > SIZE_MAX - (size_t)view->alt_partial_x) {
         return 0;
@@ -3428,7 +3432,34 @@ int duckvep_coding_context_peptide_window_open(
         ref_codons = 0u;
     }
     return delta_context_codon_window_open(
-        ctx, translation_start - 1u, ref_codons, view);
+        ctx, translation_start - 1u, translation_start - 1u,
+        ref_codons, ctx->length_diff, view);
+}
+
+int duckvep_coding_context_block_window_open(
+    const duckvep_coding_context_t  *ctx,
+    const duckvep_haplotype_block_t *block,
+    duckvep_coding_peptide_window_t *view) {
+    if (view) memset(view, 0, sizeof *view);
+    if (!ctx || !block || !view || ctx->virtual_single_edit || !block->cds_start ||
+        !block->edit_count || block->edit_begin > ctx->applied_edits ||
+        block->edit_count > ctx->applied_edits - block->edit_begin) return 0;
+    size_t start0 = (size_t)block->cds_start - 1u;
+    if (start0 > ctx->ref_cds_len || block->ref_len > ctx->ref_cds_len - start0 ||
+        block->alt_start0 > ctx->alt_cds_len ||
+        block->alt_len > ctx->alt_cds_len - block->alt_start0 ||
+        block->alt_len > INT64_MAX ||
+        (int64_t)block->alt_len - (int64_t)block->ref_len != block->length_diff ||
+        start0 % 3u != block->alt_start0 % 3u) return 0;
+    size_t first_codon = start0 / 3u;
+    size_t codons = block->ref_len
+        ? (start0 + block->ref_len - 1u) / 3u - first_codon + 1u
+        : (start0 % 3u != 0u);
+    duckvep_coding_peptide_window_t opened;
+    if (!delta_context_codon_window_open(ctx, first_codon, block->alt_start0 / 3u,
+            codons, block->length_diff, &opened)) return 0;
+    *view = opened;
+    return 1;
 }
 
 static int delta_context_local_translation_matches(
@@ -3438,14 +3469,17 @@ static int delta_context_local_translation_matches(
 
     size_t whole_length;
     size_t nt_offset;
+    size_t peptide_offset;
     size_t i;
 
     if (ctx == NULL || view == NULL ||
         !duckvep_codon_table_supported(
             (duckvep_codon_table_t)ctx->codon_table) ||
-        view->peptide_offset > SIZE_MAX / 3u) {
+        view->ref_peptide_offset > SIZE_MAX / 3u ||
+        view->alt_peptide_offset > SIZE_MAX / 3u) {
         return 0;
     }
+    peptide_offset = alternate ? view->alt_peptide_offset : view->ref_peptide_offset;
     if (ctx->virtual_single_edit) {
         size_t cached_length = alternate
             ? ctx->local_alt_peptide_len : ctx->local_ref_peptide_len;
@@ -3454,12 +3488,12 @@ static int delta_context_local_translation_matches(
         size_t needed = alternate ? view->alt_whole_length
                                   : view->ref_whole_length;
 
-        if (cached != NULL && view->peptide_offset == ctx->local_peptide_offset &&
+        if (cached != NULL && peptide_offset == ctx->local_peptide_offset &&
             needed <= cached_length) return 1;
     }
     whole_length = alternate ? view->alt_whole_length
                              : view->ref_whole_length;
-    nt_offset = view->peptide_offset * 3u;
+    nt_offset = peptide_offset * 3u;
     for (i = 0u; i < whole_length; i++) {
         char codon[4];
         size_t b;
@@ -3476,8 +3510,8 @@ static int delta_context_local_translation_matches(
         }
         codon[3] = '\0';
         if ((alternate ? delta_context_alternate_codon_peptide_base(
-                ctx, view->peptide_offset + i) : delta_context_raw_peptide_base(
-                ctx, 0, view->peptide_offset + i)) !=
+                ctx, peptide_offset + i) : delta_context_raw_peptide_base(
+                ctx, 0, peptide_offset + i)) !=
             (has_n ? (uint8_t)'X' : (uint8_t)duckvep_translate_codon(
                 codon, (duckvep_codon_table_t)ctx->codon_table))) {
             return 0;
@@ -3494,21 +3528,23 @@ uint8_t duckvep_coding_context_peptide_window_base(
 
     size_t whole_length;
     size_t length;
+    size_t offset;
     uint8_t partial_x;
 
     if (ctx == NULL || view == NULL) return 0u;
     whole_length = alternate ? view->alt_whole_length
                              : view->ref_whole_length;
     length = alternate ? view->alt_length : view->ref_length;
+    offset = alternate ? view->alt_peptide_offset : view->ref_peptide_offset;
     partial_x = alternate ? view->alt_partial_x : view->ref_partial_x;
-    if (index >= length) return 0u;
+    if (index >= length || offset > SIZE_MAX - index) return 0u;
     if (index == whole_length && partial_x) return (uint8_t)'X';
     if (!alternate) {
         return delta_context_reference_peptide_base(
-            ctx, view->peptide_offset + index);
+            ctx, view->ref_peptide_offset + index);
     }
     return delta_context_alternate_codon_peptide_base(
-        ctx, view->peptide_offset + index);
+        ctx, view->alt_peptide_offset + index);
 }
 
 typedef struct delta_local_peptide_scan {
@@ -3603,7 +3639,7 @@ static int delta_context_start_peptide_altered(
 
     duckvep_coding_peptide_window_t view;
     if (!duckvep_coding_context_peptide_window_open(ctx, &view) ||
-        view.peptide_offset != 0u || view.ref_length == 0u || view.alt_length == 0u ||
+        view.ref_peptide_offset != 0u || view.ref_length == 0u || view.alt_length == 0u ||
         (view.alt_length == 1u &&
          duckvep_coding_context_peptide_window_base(
              ctx, &view, 1, 0u) == (uint8_t)'X')) {
@@ -3772,24 +3808,24 @@ static uint8_t delta_context_vep_mutated_peptide_base(
     size_t replaced_length;
 
     if (ctx == NULL || view == NULL ||
-        view->peptide_offset > ctx->ref_peptide_len ||
-        view->alt_length > SIZE_MAX - view->peptide_offset) {
+        view->ref_peptide_offset > ctx->ref_peptide_len ||
+        view->alt_length > SIZE_MAX - view->ref_peptide_offset) {
         return 0u;
     }
-    alt_end = view->peptide_offset + view->alt_length;
+    alt_end = view->ref_peptide_offset + view->alt_length;
     /* Perl substr also clamps replacement of the complete reference peptide:
      * its terminal partial-codon X exists only in the local allele string. */
     replaced_length = view->reference_span_length;
-    if (replaced_length > ctx->ref_peptide_len - view->peptide_offset) {
-        replaced_length = ctx->ref_peptide_len - view->peptide_offset;
+    if (replaced_length > ctx->ref_peptide_len - view->ref_peptide_offset) {
+        replaced_length = ctx->ref_peptide_len - view->ref_peptide_offset;
     }
-    suffix_start = view->peptide_offset + replaced_length;
-    if (position < view->peptide_offset) {
+    suffix_start = view->ref_peptide_offset + replaced_length;
+    if (position < view->ref_peptide_offset) {
         return delta_context_reference_peptide_base(ctx, position);
     }
     if (position < alt_end) {
         return duckvep_coding_context_peptide_window_base(
-            ctx, view, 1, position - view->peptide_offset);
+            ctx, view, 1, position - view->ref_peptide_offset);
     }
     reference_position = suffix_start + (position - alt_end);
     return delta_context_reference_peptide_base(ctx, reference_position);
@@ -3834,24 +3870,24 @@ static int delta_context_vep_ref_eq_alt_sequence(
             ctx, reference_length - 1u) == (uint8_t)'*') {
         reference_length--;
     }
-    if (view->peptide_offset > reference_length) {
+    if (view->ref_peptide_offset > reference_length) {
         return 0;
     }
     replaced_length = view->reference_span_length;
-    if (replaced_length > reference_length - view->peptide_offset) {
-        replaced_length = reference_length - view->peptide_offset;
+    if (replaced_length > reference_length - view->ref_peptide_offset) {
+        replaced_length = reference_length - view->ref_peptide_offset;
     }
-    suffix_length = reference_length - view->peptide_offset - replaced_length;
-    if (view->peptide_offset > SIZE_MAX - view->alt_length ||
-        view->peptide_offset + view->alt_length > SIZE_MAX - suffix_length) {
+    suffix_length = reference_length - view->ref_peptide_offset - replaced_length;
+    if (view->ref_peptide_offset > SIZE_MAX - view->alt_length ||
+        view->ref_peptide_offset + view->alt_length > SIZE_MAX - suffix_length) {
         return 0;
     }
-    mutated_length = view->peptide_offset + view->alt_length + suffix_length;
+    mutated_length = view->ref_peptide_offset + view->alt_length + suffix_length;
     if (mutated_length <= reference_length) return 0;
-    /* The splice construction copies [0, peptide_offset) from the reference
+    /* The splice construction copies [0, ref_peptide_offset) from the reference
      * verbatim. Comparing that prefix again made a local insertion O(CDS
      * length); begin at the first position that can differ. */
-    for (i = view->peptide_offset; i < reference_length; i++) {
+    for (i = view->ref_peptide_offset; i < reference_length; i++) {
         if (delta_context_vep_mutated_peptide_base(ctx, view, i) !=
             delta_context_reference_peptide_base(ctx, i)) {
             return 0;
@@ -3991,11 +4027,11 @@ static duckvep_context_delta_status_t delta_context_length_change_predicates(
          ctx->insertion_length_reaches_terminal_stop != 0u);
     *handled = 1;
     if (!duckvep_coding_context_peptide_window_open(ctx, &view) ||
-        view.peptide_offset > (size_t)INT32_MAX - 1u ||
-        view.peptide_offset > SIZE_MAX / 3u) {
+        view.ref_peptide_offset > (size_t)INT32_MAX - 1u ||
+        view.ref_peptide_offset > SIZE_MAX / 3u) {
         return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
     }
-    nt_offset = view.peptide_offset * 3u;
+    nt_offset = view.ref_peptide_offset * 3u;
     delta->partial_codon = (uint8_t)duckvep_cds_position_is_partial_codon(
         ctx->ref_cds_len, ctx->single_edit_cds_start);
     local_unambiguous =
@@ -4028,7 +4064,7 @@ static duckvep_context_delta_status_t delta_context_length_change_predicates(
         delta->frameshift = 1u;
         delta->cdna_pos = -1;
         delta->cds_pos = -1;
-        delta->protein_pos = (int32_t)(view.peptide_offset + 1u);
+        delta->protein_pos = (int32_t)(view.ref_peptide_offset + 1u);
         delta->valid = 1u;
         return DUCKVEP_CONTEXT_DELTA_OK;
     }
@@ -4207,7 +4243,7 @@ static duckvep_context_delta_status_t delta_context_length_change_predicates(
 
     delta->cdna_pos = -1;
     delta->cds_pos = -1;
-    delta->protein_pos = (int32_t)(view.peptide_offset + 1u);
+    delta->protein_pos = (int32_t)(view.ref_peptide_offset + 1u);
     /* Scalar amino-acid fields describe a one-for-one substitution only. An
      * in-frame insertion/deletion, frameshift, or variable peptide replacement
      * keeps its protein position but leaves both scalar residues invalid. */
@@ -4272,10 +4308,10 @@ static duckvep_context_delta_status_t delta_context_substitution_window(
         hi_codon < lo_codon ||
         hi_codon >= (size_t)INT32_MAX ||
         !delta_context_codon_window_open(
-            ctx, lo_codon, hi_codon - lo_codon + 1u, &view)) {
+            ctx, lo_codon, lo_codon, hi_codon - lo_codon + 1u, ctx->length_diff, &view)) {
         return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
     }
-    nt_offset = view.peptide_offset * 3u;
+    nt_offset = view.ref_peptide_offset * 3u;
     for (alternate = 0; alternate <= 1; alternate++) {
         size_t length = alternate ? view.alt_nt_length : view.ref_nt_length;
         size_t b;
@@ -5590,7 +5626,7 @@ static int delta_simple_indel_stop_scan(
 
     size_t start0;
     size_t alt_cds_len;
-    size_t peptide_offset;
+    size_t ref_peptide_offset;
     size_t nt_offset;
     size_t ref_nt_length;
     size_t alt_nt_length;
@@ -5614,16 +5650,16 @@ static int delta_simple_indel_stop_scan(
     alt_cds_len = ref_cds_len - (size_t)edit->ref_len +
                   (size_t)edit->alt_len;
     length_diff = (int64_t)edit->alt_len - (int64_t)edit->ref_len;
-    peptide_offset = start0 / 3u;
-    nt_offset = peptide_offset * 3u;
+    ref_peptide_offset = start0 / 3u;
+    nt_offset = ref_peptide_offset * 3u;
     if (edit->ref_len != 0u) {
         size_t last0 = start0 + (size_t)edit->ref_len - 1u;
         ref_nt_length = (last0 / 3u + 1u) * 3u - nt_offset;
     } else if (edit->cds_start > 1u) {
         size_t last0 = (size_t)edit->cds_start - 2u;
         size_t last_codon = last0 / 3u;
-        ref_nt_length = last_codon >= peptide_offset
-            ? (last_codon - peptide_offset + 1u) * 3u : 0u;
+        ref_nt_length = last_codon >= ref_peptide_offset
+            ? (last_codon - ref_peptide_offset + 1u) * 3u : 0u;
     } else {
         ref_nt_length = 0u;
     }

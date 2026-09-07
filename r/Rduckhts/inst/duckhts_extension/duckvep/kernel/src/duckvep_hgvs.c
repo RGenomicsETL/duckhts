@@ -1709,7 +1709,8 @@ static int hgvs_protein_terminal_partial_insertion_window(
         return 0;
     }
     memset(window, 0, sizeof *window);
-    window->peptide_offset = nt_offset / 3u;
+    window->ref_peptide_offset = nt_offset / 3u;
+    window->alt_peptide_offset = nt_offset / 3u;
     window->ref_nt_length = context->ref_cds_len - nt_offset;
     window->alt_nt_length =
         window->ref_nt_length + (size_t)context->single_edit_alt_len;
@@ -1721,7 +1722,7 @@ static int hgvs_protein_terminal_partial_insertion_window(
         (uint8_t)((window->alt_nt_length % 3u) != 0u);
     if (window->alt_partial_x && window->alt_whole_length == 1u &&
         duckvep_coding_context_peptide_base(
-            context, 1, window->peptide_offset) == (uint8_t)'*') {
+            context, 1, window->alt_peptide_offset) == (uint8_t)'*') {
         window->alt_partial_x = 0u;
     }
     window->ref_length =
@@ -1759,7 +1760,8 @@ static uint8_t hgvs_protein_window_base(
         if (index >= length) return 0u;
         if (index == whole_length && partial_x) return (uint8_t)'X';
         return duckvep_coding_context_peptide_base(
-            context, alternate, window->peptide_offset + index);
+            context, alternate, (alternate ? window->alt_peptide_offset
+                                          : window->ref_peptide_offset) + index);
     }
     return duckvep_coding_context_peptide_window_base(
         context, window, alternate, index);
@@ -2316,8 +2318,8 @@ duckvep_hgvs_status_t duckvep_hgvs_protein_fact_build(
          * whose translated stop is retained), so hgvs_protein returns undef. */
         return DUCKVEP_HGVS_NOT_APPLICABLE;
     }
-    first64 = (uint64_t)fact.window.peptide_offset + 1u;
-    last64 = (uint64_t)fact.window.peptide_offset +
+    first64 = (uint64_t)fact.window.ref_peptide_offset + 1u;
+    last64 = (uint64_t)fact.window.ref_peptide_offset +
              (uint64_t)fact.window.ref_length;
     if (first64 > UINT32_MAX || last64 > UINT32_MAX) {
         return DUCKVEP_HGVS_OUT_OF_RANGE;

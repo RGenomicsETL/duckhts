@@ -675,6 +675,16 @@ protein preparation uses that same translator, then applies Ensembl's distinct
 start-methionine, terminal-stop and curated peptide-edit rules before comparison.
 It retains internal stops and applies single-residue edits to the complete
 reference; the displayed alternate still selects its first-stop prefix.
+Coding and HGVS share codon-rounded peptide windows with distinct reference and
+alternate offsets. A physical interaction block opens those operands against the
+complete materialized path: earlier closed blocks can shift the alternate by whole
+codons, while the local length request uses this block's change, not the path's
+total change. Window access retains reference peptide edits and terminal partial
+codons without reapplying edits, inventing a single edit, or truncating the complete
+context at a stop. These sequence operands are not compound consequence facts;
+multi-edit indel classification remains explicitly unsupported until its predicates
+consume actual interaction state. Leaf-specific result facts must not mutate shared
+carrier prefixes or immutable model sequence.
 Carrier-prefix identity includes per-event called/missing/unphased evidence. An uncertain
 path cannot share the result of a fully known path merely because their called edits agree.
 The native stream accepts complete decoded calls for a candidate transcript and uses the

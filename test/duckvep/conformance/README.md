@@ -624,6 +624,11 @@ It verifies complete CDS/displayed-protein replay and rejects false supported
 consequences for compound indels, including net-zero sets. This is a support-limit
 audit, not a combined-SO differential; unsupported rows remain explicit and are
 never counted as biological agreement. The original corpus and assertions are unchanged.
+It also opens every actual interaction block through the shared coding-window
+API and checks its residues against the complete translated context. Separate
+reference/alternate peptide offsets preserve earlier in-frame shifts; the local
+length request uses the block's change, not the complete path's. Failed windows,
+shifted-axis coverage and residue differences are retained as separate counters.
 
 The additional `bcftools csq -p a` observation builds bcftools/HTSlib 1.23 from
 the exact `src/bcftools-1.23` tree in RBCFTools commit
@@ -643,6 +648,20 @@ The assertion-enabled source build currently aborts at `csq.c:2433` on seed
 and with `cis,shared`, but fail with `cis,trans`. Retain that cohort-dependent
 failure; an assertion-disabled local binary is not evidence that the source-built
 lane passed.
+
+`compound_sample_audit.R --audit-artifacts results/<compound-coding-run>` is an
+additional sample-separability investigation. The original source-built binary
+runs each sample separately on the unchanged complete VCF/GFF/FASTA. A separate
+build applies `patches/bcftools_csq_prefix_local.patch`: this proposed correction
+to Petr Danecek's bcftools `hap_add_csq` keeps leaf-specific rendering state local
+instead of mutating a prefix node shared by another leaf. The original source,
+binary, cohort failure and VEP oracle are untouched; the patched build is not
+relabeled as upstream conformance. The audit checks the full occupied-carrier
+domain and full row multisets, retains missing/extra rows and duplicate counts,
+and fails on any discrepancy. On the existing two seeds the patch removes the
+assertion and preserves every distinct consequence row, but cohort emission
+still has extra duplicate rows. Those duplicates are unresolved evidence, not
+discarded rows or a passing conformance result.
 
 This is **not** a public phased-executor certificate: the R harness materializes
 decoded calls, and it does not test native DuckDB carrier streaming, strict phase/PS
