@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- preserve bundled phased CDS/protein replay with carried UTR/intronic events
+  outside coding sequence. All contributors remain visible; coding projection
+  failures and incomplete phase evidence still return unavailable sequence
+
 - fix bundled HGVS output for transcript-end replacements that resemble three
   or more copies after transcript clipping. Unprojectable insertions now return
   NA with `not_applicable` status, matching VEP 116; two-copy duplications remain

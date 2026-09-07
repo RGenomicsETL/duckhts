@@ -1,4 +1,5 @@
 #include "duckvep_haplotype_stream.h"
+#include "duckvep_classify.h"
 
 #include <string.h>
 
@@ -176,6 +177,22 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_project(
     memset(&p->edit, 0, sizeof(p->edit));
     p->status = duckvep_cds_edit_build_prepared_allele(model, s->exons, s->sequences,
         tx, model->strand[tx], &allele, UINT32_MAX, &p->edit);
+    p->cds_unaffected = 0u;
+    if (p->status == DUCKVEP_CDS_EDIT_OUT_OF_CDS && s->sequences->cds_length[tx] &&
+        model->cds_start1 && model->cds_end1 && model->cds_start1[tx] &&
+        model->exon_offset && model->exon_count && model->exon_count[tx] &&
+        s->exons->start1 && s->exons->end1 &&
+        model->exon_offset[tx] <= s->exons->exon_count &&
+        model->exon_count[tx] <= s->exons->exon_count - model->exon_offset[tx]) {
+        /* OUT_OF_CDS also covers failed CDS-slice bounds and coding/noncoding
+         * crossings. Only the shared topology classifier may prove absence of
+         * a coding overlap; an insertion examines both reference flanks. */
+        duckvep_region_state_t region = duckvep_region_classify_span(model, s->exons, tx,
+            prepared->interbase ? prepared->insertion_boundary0 : prepared->start1,
+            prepared->interbase ? duckvep_event_right_flank1(prepared) : prepared->end1,
+            0u, 0u);
+        p->cds_unaffected = !region.overlaps_cds;
+    }
     stored->projection_count++;
     if (model->end1[tx] > stored->last_end1) stored->last_end1 = model->end1[tx];
     s->projection_count++;
@@ -410,7 +427,8 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
         uint8_t evidence = b->leaf_events[i].evidence_flags;
         b->contributors[i] = (duckvep_haplotype_contributor_t){e->source, p->status, evidence};
         leaf.evidence_flags |= evidence;
-        if (leaf.projection_status == DUCKVEP_CDS_EDIT_OK) leaf.projection_status = p->status;
+        if (leaf.projection_status == DUCKVEP_CDS_EDIT_OK && !p->cds_unaffected)
+            leaf.projection_status = p->status;
         if (p->status == DUCKVEP_CDS_EDIT_OK && (evidence & DUCKVEP_CARRIER_CALLED)) {
             duckvep_edit_set_t edits;
             duckvep_cds_edit_status_t split = duckvep_projected_cds_edit_set_build(&p->edit,

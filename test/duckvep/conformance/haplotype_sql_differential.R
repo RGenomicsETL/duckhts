@@ -34,7 +34,9 @@ main <- function() {
   opt <- optparse::parse_args(optparse::OptionParser(option_list = list(
     optparse::make_option("--artifacts", type = "character"),
     optparse::make_option("--extension", default = "build/release/duckhts.duckdb_extension"),
-    optparse::make_option("--extension-receipt", dest = "extension_receipt", default = NULL)
+    optparse::make_option("--extension-receipt", dest = "extension_receipt", default = NULL),
+    optparse::make_option("--noncoding-contributors", dest = "noncoding_contributors",
+      action = "store_true", default = FALSE)
   )))
   source("scripts/duckvep_evidence.R", local = TRUE)
   root <- normalizePath(".")
@@ -206,6 +208,127 @@ main <- function() {
   stopifnot(all(summary$native_paths_equal), all(summary$oracle_failures == 0L), all(summary$controls_rejected == 6L),
     identical(hashes, vapply(files,duckvep_evidence_sha256,"")), identical(revision,duckvep_evidence_revision(root)))
   stopifnot(all(summary$frame_failures == 0L), all(summary$frame_control_rejected))
+  if (opt$noncoding_contributors) {
+    # This is a separate augmented corpus. Every original serialized record,
+    # verifier and oracle comparison above remains unchanged and must pass first.
+    source_paths <- file.path(artifact, c("carriers.vcf", "reference.fa", "model.gff3.gz"))
+    stopifnot(identical(unname(vapply(source_paths, duckvep_evidence_sha256, "")),
+      unname(unlist(original$sha256[source_paths]))))
+    vcf <- readLines(source_paths[1L])
+    fasta <- readLines(source_paths[2L])
+    stopifnot(length(fasta) == 2L * length(cases),
+      identical(substring(fasta[seq(1L, length(fasta), 2L)], 2L), regions$chrom))
+    genomes <- fasta[seq(2L, length(fasta), 2L)]
+    stopifnot(all(nchar(genomes) == 230L), all(vapply(cases, function(case)
+      identical(as.integer(case$exons$start), c(11L, 131L)) &&
+      identical(as.integer(case$exons$end), c(100L, 220L)), TRUE)))
+    intron_ref <- substring(genomes, 115L, 115L)
+    stopifnot(all(intron_ref %in% c("A", "C", "G", "T")))
+    intron_ids <- paste0(vapply(cases, `[[`, "", "transcript"), "_intronic")
+    extra <- paste(regions$chrom, 115L, intron_ids, intron_ref,
+      ifelse(intron_ref == "C", "G", "C"), ".", "PASS", ".", "GT:PS",
+      "1|1:10", "1|1:10", "1|1:10", sep = "\t")
+    records <- c(vcf[!startsWith(vcf, "#")], extra)
+    fields <- strsplit(records, "\t", fixed = TRUE)
+    chrom_order <- match(vapply(fields, `[[`, "", 1L), regions$chrom)
+    positions <- as.integer(vapply(fields, `[[`, "", 2L))
+    stopifnot(!anyNA(chrom_order), !anyNA(positions),
+      !anyDuplicated(vapply(fields, `[[`, "", 3L)))
+    augmented_vcf <- file.path(out, "noncoding.vcf")
+    writeLines(c(vcf[startsWith(vcf, "#")], records[order(chrom_order, positions)]), augmented_vcf)
+    prefix <- normalizePath(Sys.getenv("VEP_PREFIX", "/root/miniconda3/envs/vep"), mustWork = TRUE)
+    mirrors <- c(vep = ".sync/ensembl-vep", variation = ".sync/ensembl-variation")
+    for (name in names(mirrors)) {
+      stopifnot(identical(duckvep_evidence_command("git", c("-C", mirrors[[name]],
+        "rev-parse", "HEAD"), "oracle revision"), original$oracle_revisions[[name]]),
+        !length(duckvep_evidence_command("git", c("-C", mirrors[[name]], "status", "--porcelain"),
+          "oracle worktree")))
+    }
+    environment <- duckvep_evidence_command("micromamba", c("list", "-p", prefix, "--explicit"),
+      "oracle environment")
+    stopifnot(identical(duckvep_evidence_explicit_packages(environment),
+      duckvep_evidence_explicit_packages(readLines(
+        "test/duckvep/upstream/receipts/vep116_2026-07-22.conda-explicit.txt"))))
+    writeLines(environment, file.path(out, "noncoding_environment.txt"))
+    perl_lib <- paste(c(file.path(normalizePath(mirrors), "modules"),
+      file.path(prefix, "share/ensembl-vep-116.0-0")), collapse = ":")
+    command <- do.call(blit::conda, c(as.list(duckvep_blit_quote(c("run", "--clean-env", "--env",
+      paste0("PERL5LIB=", perl_lib), "-p", prefix, "perl",
+      normalizePath("test/duckvep/conformance/haplotype_oracle.pl"), augmented_vcf,
+      source_paths[2:3]))), list(conda = duckvep_blit_quote("micromamba"))))
+    oracle_path <- file.path(out, "noncoding_oracle.jsonl")
+    stopifnot(blit::cmd_run(command, stdout = oracle_path,
+      stderr = file.path(out, "noncoding_oracle.log"), stdin = NULL, verbose = FALSE) == 0L)
+    supplemented <- lapply(readLines(oracle_path), jsonlite::fromJSON, simplifyVector = FALSE)
+    names(supplemented) <- vapply(supplemented, `[[`, "", "transcript")
+    oracle_unchanged <- !anyDuplicated(names(supplemented)) &&
+      setequal(names(supplemented), names(oracle)) &&
+      identical(supplemented[names(oracle)], oracle)
+    DBI::dbExecute(con, paste0("CREATE TABLE hap_noncoding_genotypes AS SELECT * FROM (",
+      "SELECT record_index,CHROM,POS,ID,REF,ALT,unnest(calls,recursive:=true) FROM read_geno(",
+      DBI::dbQuoteString(con, augmented_vcf), ",decode_error_policy:='error'))"))
+    augmented_calls <- DBI::dbGetQuery(con, "SELECT * FROM hap_noncoding_genotypes ORDER BY record_index,sample_index")
+    augmented_events <- unique(augmented_calls[c("record_index", "ID")])
+    stopifnot(nrow(augmented_events) == nrow(events) + length(cases),
+      nrow(augmented_calls) == nrow(inputs$calls) + 3L * length(cases),
+      sum(lengths(augmented_calls$alleles)) == sum(lengths(inputs$calls$alleles)) + 6L * length(cases))
+    augmented_names <- setNames(augmented_events$ID, as.character(augmented_events$record_index))
+    augmented_query <- sub("FROM hap_genotypes g", "FROM hap_noncoding_genotypes g", calls_query, fixed = TRUE)
+    expected_all <- expected
+    expected_all$events <- vapply(seq_len(nrow(expected)), function(i) paste(sort(c(
+      if (nzchar(expected$events[i])) strsplit(expected$events[i], ",", fixed = TRUE)[[1L]],
+      intron_ids[expected$transcript_index[i] + 1L])), collapse = ","), "")
+    augmented_summary <- list()
+    for (policy in c("strict", "vep116_compat")) {
+      DBI::dbExecute(con, paste0("CREATE OR REPLACE TABLE hap_noncoding_output AS SELECT * FROM duckvep_haplotypes(",
+        DBI::dbQuoteString(con, augmented_query), ",'public_hap',phase_policy:=", DBI::dbQuoteString(con, policy), ")"))
+      actual <- DBI::dbGetQuery(con, paste("SELECT transcript_index,cds,protein,sequence_flags,projection_status,sequence_status,",
+        "c.sample_index,c.phase_set,c.haplotype_lane,c.ploidy,",
+        "list_transform(contributors,x -> x.event_index) event_ids,",
+        "list_transform(contributors,x -> x.projection_status) event_statuses",
+        "FROM hap_noncoding_output,unnest(carriers) u(c)"))
+      agrees <- function(x) {
+        keys <- paste(x$transcript_index, x$sample_index, x$haplotype_lane, sep = "/")
+        if (anyDuplicated(keys) || !setequal(keys, key(expected_all))) return(FALSE)
+        x <- x[match(key(expected_all), keys), ]
+        names <- lapply(x$event_ids, function(ids) unname(augmented_names[as.character(ids)]))
+        statuses <- vapply(seq_len(nrow(x)), function(i) identical(x$event_statuses[[i]],
+          ifelse(names[[i]] == intron_ids[x$transcript_index[i] + 1L], "outside_cds", "ok")), TRUE)
+        event_sets <- vapply(names, function(ids) paste(sort(ids), collapse = ","), "")
+        flags <- vapply(as.integer(x$sequence_flags), function(bits)
+          paste(sort(c("indel", "frameshift", "resolved_frameshift")[bitwAnd(bits, c(1L, 2L, 4L)) != 0L]), collapse = ","), "")
+        isTRUE(all(x$cds == expected_all$cds & x$protein == expected_all$protein &
+          flags == expected_all$flags & event_sets == expected_all$events & statuses &
+          x$projection_status == "ok" & x$sequence_status == "ok" & x$ploidy == 2L)) &&
+          if (policy == "strict") all(x$phase_set == 10) else all(is.na(x$phase_set))
+      }
+      mutations <- list(missing = actual[-1L, ], duplicate = rbind(actual, actual[1L, ]),
+        protein = actual, contributor = actual, status = actual)
+      mutations$protein$protein[1L] <- paste0(actual$protein[1L], "X")
+      mutations$contributor$event_ids[[1L]] <- head(actual$event_ids[[1L]], -1L)
+      mutations$status$event_statuses[[1L]][1L] <- "invalid_event"
+      rejected <- vapply(mutations, function(x) !agrees(x), TRUE)
+      saveRDS(actual, file.path(out, paste0("noncoding_", policy, ".rds")))
+      augmented_summary[[policy]] <- data.frame(policy, transcripts = length(cases),
+        input_records = nrow(augmented_events), input_calls = nrow(augmented_calls),
+        input_allele_slots = sum(lengths(augmented_calls$alleles)), complete_lanes = nrow(expected_all),
+        observed_carriers = nrow(actual), provenance_memberships = sum(lengths(actual$event_ids)),
+        oracle_unchanged, complete_paths_equal = agrees(actual), controls_rejected = sum(rejected))
+    }
+    augmented_summary <- do.call(rbind, augmented_summary)
+    write.csv(augmented_summary, file.path(out, "noncoding_summary.csv"), row.names = FALSE)
+    augmented_files <- c(source_paths, augmented_vcf, oracle_path,
+      file.path(out, c("noncoding_environment.txt", "noncoding_strict.rds", "noncoding_vep116_compat.rds", "noncoding_summary.csv")))
+    jsonlite::write_json(list(source_revision = revision, extension_build_binding = binding,
+      extension_sha256 = duckvep_evidence_sha256(extension), source_receipt = file.path(artifact, "receipt.json"),
+      scope = "literal_cds_with_complete_noncoding_provenance_not_splice_prediction_or_compound_so",
+      oracle_revisions = original$oracle_revisions,
+      sha256 = as.list(vapply(augmented_files, duckvep_evidence_sha256, ""))),
+      file.path(out, "noncoding_receipt.json"), pretty = TRUE, auto_unbox = TRUE)
+    print(augmented_summary, row.names = FALSE)
+    stopifnot(all(augmented_summary$oracle_unchanged), all(augmented_summary$complete_paths_equal),
+      all(augmented_summary$controls_rejected == 5L))
+  }
   if (!is.null(opt$extension_receipt)) duckvep_evidence_assert_checkout(root,revision)
 }
 main()

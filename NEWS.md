@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- preserve literal phased CDS replay when carried UTR/intronic events have no
+  coding overlap. Keep their raw contributors and projection statuses; coding
+  projection failures and incomplete phase evidence still suppress sequence.
+  This does not predict altered splicing or complete combined SO/HGVS annotation
+
 - retain a fresh-seed HGVS counterexample and its correction in the conformance
   ledger. The corrected revision passes 16.5 million property trials, 300,804
   generated VEP pair comparisons across three seeds and 56,998 ClinVar pairs;

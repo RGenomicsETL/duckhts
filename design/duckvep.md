@@ -660,6 +660,14 @@ behind a longer-lived transcript; capacity failures latch instead of dropping pa
 Projected equal-length edits use the same differing-island decomposition as independent
 annotation: unchanged internal MNV bases do not mask or conflict with another carried edit.
 Source-record count and physical-edit count remain separate, with raw alleles preserved.
+An out-of-CDS contributor is distinct from a failed coding projection. For a coding
+transcript, the shared topology classifier can prove that its semantic REF span (both
+flanks for an insertion) has no coding overlap; such a contributor retains its own
+`outside_cds` status without suppressing literal CDS replay. A path containing only
+these events retains the reference CDS with zero edits and complete provenance.
+Mixed coding/noncoding spans, invalid sequence slices and other projection errors
+remain failures. Missing/unphased evidence still makes the path incomplete. Literal
+replay does not predict splice alteration; noncoding transcripts still have no CDS.
 One shared CDS translator serves independent coding contexts and phased replay. It
 retains every complete codon's residue and the first-stop position in one pass;
 the public haplotype protein is a length-delimited prefix through that stop. Later
@@ -737,6 +745,27 @@ PSL/PSO or producer-specific phase identities require a separate explicit adapte
 domains and materializes sorted input; native event ingestion and candidate projection
 are separate operations, so an entire event's cohort is never copied into a first-party
 call matrix. Output pauses retain the transcript drain cursor and reuse worker scratch.
+
+The input SELECT supplies these named columns; DuckDB casts them before execution:
+
+```text
+event_index UBIGINT       seq_region UINTEGER        position UBIGINT
+reference VARCHAR        alternate VARCHAR          alt_index UINTEGER
+transcript_index UINTEGER sample_index UINTEGER      alleles INTEGER[]
+phase_before BOOLEAN[]   phase_set BIGINT
+```
+
+`event_index` uniquely identifies one source ALT; `alt_index` is its positive source
+ordinal, and `position` is one-based. Region/transcript/sample ordinals belong to the
+selected model and retained cold relations. NULL allele items mean missing, NULL phase
+flags mean unavailable, and `phase_set` is nullable. Candidate selection and source/ALT
+mapping remain explicit relations. Duplicate calls, inconsistent event/ALT geometry,
+changing sample/transcript ploidy, invalid GTs and out-of-model candidates fail.
+Evidence bits are 1 called, 2 missing and 4 unphased. Per-call capacities name active
+pools, leaves, sequences, genotypes and phase domains; `workspace_limit` sums native
+allocations, excluding DuckDB input/sort/output memory. Neither result order nor
+carrier-list order is a SQL ordering guarantee.
+
 Each known leaf exposes `coding_blocks` in ascending reference CDS order. The same
 partitioner used by the independent interaction property groups same-alternate-codon
 edits and keeps a block open while its frame is displaced. Each block retains its

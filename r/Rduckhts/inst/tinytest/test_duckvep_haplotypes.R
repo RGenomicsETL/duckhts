@@ -67,6 +67,62 @@ local({
   null_blocks <- dbGetQuery(con, paste0("SELECT bool_and(coding_blocks IS NULL) ok FROM ",
     "duckvep_haplotypes(", dbQuoteString(con, calls), ",'noncoding')"))
   expect_true(null_blocks$ok)
+  mixed_tx <- paste("SELECT i::UINTEGER transcript_index,0::UINTEGER seq_region,",
+    "100::UBIGINT transcript_start,151::UBIGINT transcript_end,",
+    "(CASE i WHEN 0 THEN 1 ELSE -1 END)::TINYINT strand,0::UINTEGER gene_index,",
+    "3::UBIGINT transcript_flags,103::UBIGINT cds_start,148::UBIGINT cds_end,",
+    "(CASE i WHEN 0 THEN 'AAAAAAAAAAAA' ELSE 'TTTTTTTTTTTT' END)::BLOB cds_sequence,",
+    "1::UTINYINT codon_table FROM range(2) t(i)")
+  dbExecute(con, paste("CREATE TABLE mixed_tx AS", mixed_tx))
+  mixed_exons <- paste("SELECT transcript_index,s::UBIGINT exon_start,e::UBIGINT exon_end,",
+    "(CASE WHEN (strand=1 AND s=100) OR (strand=-1 AND s=143) THEN 1 ELSE 10 END)::UBIGINT exon_cdna_start,",
+    "(exon_cdna_start+8)::UBIGINT exon_cdna_end,0::TINYINT phase,0::TINYINT end_phase",
+    "FROM mixed_tx CROSS JOIN (VALUES (100,108),(143,151)) v(s,e)",
+    "ORDER BY transcript_index,exon_cdna_start")
+  expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('mixed',",
+    dbQuoteString(con, "SELECT 0::UINTEGER seq_region"), ",",
+    dbQuoteString(con, "SELECT * FROM mixed_tx"), ",", dbQuoteString(con, mixed_exons), ")"))$loaded)
+  mixed_calls <- paste("SELECT event_index,0 seq_region,position,'A' reference,alternate,1 alt_index,",
+    "transcript_index,s.i sample_index,[CASE WHEN s.i=1 AND event_index=2 THEN 0 ELSE 1 END,0] alleles,",
+    "[true,true] phase_before,10 phase_set FROM (VALUES (1,100,'C'),(2,105,'G'),",
+    "(3,115,'C'),(4,149,'C')) v(event_index,position,alternate)",
+    "CROSS JOIN mixed_tx CROSS JOIN range(2) s(i)")
+  for (policy in c("strict", "vep116_compat")) {
+    mixed <- rduckhts_haplotypes(con, mixed_calls, "mixed", phase_policy = policy)
+    mixed <- mixed[order(mixed$transcript_index, mixed$cds), ]
+    expect_equal(mixed$cds, c("AAAAAAAAAAAA", "AAGAAAAAAAAA", "TTTTTTTTTCTT", "TTTTTTTTTTTT"))
+    expect_true(all(mixed$projection_status == "ok" & mixed$sequence_status == "ok"))
+    expect_equal(mixed$edit_count, c(0, 1, 1, 0))
+    expect_equal(vapply(mixed$contributors, nrow, 1L), c(3L, 4L, 4L, 3L))
+    contributors <- do.call(rbind, mixed$contributors)
+    expect_equal(as.integer(table(contributors$projection_status)[c("ok", "outside_cds")]), c(2L, 12L))
+    expect_equal(vapply(mixed$coding_blocks, nrow, 1L), c(0L, 1L, 1L, 0L))
+    for (site in c(115, 142)) {
+      insertion <- paste("SELECT * REPLACE(CASE WHEN event_index=3 THEN", site,
+        "ELSE position END AS position,CASE WHEN event_index=3 THEN 'AC' ELSE alternate END AS alternate)",
+        "FROM (", mixed_calls, ")")
+      insertion <- rduckhts_haplotypes(con, insertion, "mixed", phase_policy = policy)
+      expect_equal(nrow(insertion), 4L)
+      expect_equal(nchar(insertion$cds), rep(if (site == 115) 12L else 13L, 4L))
+      expect_equal(sum(insertion$edit_count), if (site == 115) 2 else 6)
+    }
+    uncertain <- paste("SELECT * REPLACE(CASE WHEN event_index=3 THEN [NULL,0] ELSE alleles END AS alleles)",
+      "FROM (", mixed_calls, ")")
+    uncertain <- rduckhts_haplotypes(con, uncertain, "mixed", phase_policy = policy)
+    # Compatibility compacts the called REF into lane 1, preserving the missing
+    # slot as a separate lane-2 prefix shared by the two samples per transcript.
+    expect_equal(nrow(uncertain), if (policy == "strict") 4L else 6L)
+    expect_equal(sum(uncertain$carrier_count), if (policy == "strict") 4 else 8)
+    expect_true(all(is.na(uncertain$cds)) &&
+      all(uncertain$sequence_status == "incomplete_input"))
+    crossing <- paste("SELECT * REPLACE(CASE WHEN event_index=1 THEN 102 ELSE position END AS position,",
+      "CASE WHEN event_index=1 THEN 'AA' ELSE reference END AS reference,",
+      "CASE WHEN event_index=1 THEN 'CC' ELSE alternate END AS alternate) FROM (", mixed_calls, ")")
+    crossing <- rduckhts_haplotypes(con, crossing, "mixed", phase_policy = policy)
+    expect_true(nrow(crossing) == 4L && all(is.na(crossing$cds)) &&
+      all(crossing$projection_status == "outside_cds"))
+  }
+  expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('mixed') dropped")$dropped)
   # One restored-frame block followed by an independent substitution. Both
   # input records in the block stay visible in contributor provenance.
   indels <- paste("SELECT event_index,0 seq_region,position,reference,alternate,1 alt_index,",

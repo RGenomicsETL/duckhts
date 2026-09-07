@@ -9341,6 +9341,87 @@ TEST haplotype_stream_projects_once_and_preserves_occupied_ancestors(void) {
     PASS();
 }
 
+TEST haplotype_stream_keeps_noncoding_contributors_without_poisoning_cds(void) {
+    /* Two exons with three UTR bases at each transcript end. Every small
+     * genomic span is classified independently by its literal CDS-base set;
+     * a span crossing a coding exon endpoint must still fail projection. */
+    for (int strand = -1; strand <= 1; strand += 2) {
+        for (uint32_t pos = 100u; pos <= 151u; pos++) {
+            for (uint16_t n = 1u; n <= 4u && pos + n - 1u <= 151u; n++) {
+                if (pos <= 105u && pos + n - 1u >= 105u) continue;
+                struct haplotype_stream_scene f;
+                haplotype_stream_scene_prepare(&f, 1u);
+                uint32_t cds_start = 103u, cds_end = 148u;
+                uint32_t exon_start[] = {100u, 143u}, exon_end[] = {108u, 151u};
+                uint32_t cdna_start[] = {1u, 10u}, cdna_end[] = {9u, 18u};
+                if (strand < 0) {
+                    exon_start[0] = 143u; exon_start[1] = 100u;
+                    exon_end[0] = 151u; exon_end[1] = 108u;
+                }
+                f.ends[0] = 151u; f.strands[0] = (int8_t)strand;
+                f.model.cds_start1 = &cds_start; f.model.cds_end1 = &cds_end;
+                f.exon_count[0] = 2u;
+                f.exons = (duckvep_exon_model_t){.exon_count = 2u,
+                    .start1 = exon_start, .end1 = exon_end,
+                    .cdna_start1 = cdna_start, .cdna_end1 = cdna_end};
+                memset(f.reference, strand > 0 ? 'A' : 'T', sizeof(f.reference));
+                duckvep_haplotype_stream_t *s = &f.stream;
+                ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_init(
+                    s, &f.model, &f.exons, &f.sequences, &f.buffers));
+                duckvep_haplotype_source_t events[] = {
+                    {1u, (const uint8_t *)"AAAA", (const uint8_t *)"CCCC", pos, 0u, n, n},
+                    {2u, (const uint8_t *)"A", (const uint8_t *)"G", 105u, 0u, 1u, 1u}
+                };
+                if (pos > 105u) {
+                    duckvep_haplotype_source_t swap = events[0];
+                    events[0] = events[1]; events[1] = swap;
+                }
+                duckvep_carrier_key_t key = {0u, 0, 1u, 1u, 0u};
+                uint32_t tx = 0u;
+                for (size_t i = 0u; i < 2u; i++) {
+                    ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK,
+                        haplotype_test_begin_candidates(s, events + i, &tx, 1u));
+                    ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK,
+                        duckvep_haplotype_stream_push(s, &key, DUCKVEP_CARRIER_CALLED));
+                }
+                uint32_t coding_bases = 0u;
+                uint8_t expected[12];
+                memcpy(expected, f.reference, sizeof(expected));
+                expected[strand > 0 ? 2u : 9u] = strand > 0 ? 'G' : 'C';
+                for (uint32_t p = pos; p < pos + n; p++) {
+                    if ((p >= 103u && p <= 108u) || (p >= 143u && p <= 148u)) {
+                        uint32_t offset = p <= 108u ? p - 103u : p - 143u + 6u;
+                        expected[strand > 0 ? offset : 11u - offset] = strand > 0 ? 'C' : 'G';
+                        coding_bases++;
+                    }
+                }
+                ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_TRANSCRIPT_READY,
+                    duckvep_haplotype_stream_finish(s));
+                duckvep_haplotype_leaf_t leaf;
+                ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_next(s, &leaf));
+                ASSERT_EQ(2u, leaf.contributor_count);
+                ASSERT_EQ(events[0].event_id, leaf.contributors[0].source.event_id);
+                ASSERT_EQ(events[1].event_id, leaf.contributors[1].source.event_id);
+                ASSERT_EQ(coding_bases == n ? DUCKVEP_CDS_EDIT_OK : DUCKVEP_CDS_EDIT_OUT_OF_CDS,
+                    leaf.contributors[pos < 105u ? 0u : 1u].projection_status);
+                if (coding_bases == 0u || coding_bases == n) {
+                    ASSERT_EQ(DUCKVEP_CDS_EDIT_OK, leaf.projection_status);
+                    ASSERT_EQ(DUCKVEP_HAPLOTYPE_OK, leaf.sequence_status);
+                    ASSERT_EQ(12u, leaf.cds_length);
+                    ASSERT_EQ(0, memcmp(expected, leaf.cds, sizeof(expected)));
+                    ASSERT_EQ(coding_bases ? 2u : 1u, leaf.edit_count);
+                } else {
+                    ASSERT_EQ(DUCKVEP_CDS_EDIT_OUT_OF_CDS, leaf.projection_status);
+                    ASSERT(leaf.cds == NULL && leaf.protein == NULL && leaf.blocks == NULL);
+                }
+                ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_DONE, duckvep_haplotype_stream_next(s, &leaf));
+                ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_DONE, duckvep_haplotype_stream_finish(s));
+            }
+        }
+    }
+    PASS();
+}
+
 TEST haplotype_stream_retains_conflicts_and_latches_resource_errors(void) {
     struct haplotype_stream_scene f;
     duckvep_carrier_key_t key = {0u, 1, 1u, 2u, 1u};
@@ -28392,6 +28473,7 @@ int main(int argc, char **argv) {
     RUN_TEST(carrier_stream_matches_dense_matrix_across_batches);
     RUN_TEST(haplotype_stream_recycles_owned_alleles_and_projection_slots);
     RUN_TEST(haplotype_stream_projects_once_and_preserves_occupied_ancestors);
+    RUN_TEST(haplotype_stream_keeps_noncoding_contributors_without_poisoning_cds);
     RUN_TEST(haplotype_stream_retains_conflicts_and_latches_resource_errors);
     RUN_TEST(haplotype_stream_matches_dense_models_across_batches);
     RUN_TEST(haplotype_stream_mnv_context_does_not_conflict_with_another_edit);

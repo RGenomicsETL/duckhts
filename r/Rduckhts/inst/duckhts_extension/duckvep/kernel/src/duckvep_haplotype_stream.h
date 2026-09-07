@@ -58,6 +58,7 @@ typedef struct {
     duckvep_haplotype_edit_t edit;
     uint32_t transcript_index;
     duckvep_cds_edit_status_t status;
+    uint8_t cds_unaffected; /* Proven no coding overlap, not an ignored projection failure. */
 } duckvep_haplotype_projection_t;
 
 typedef struct {
@@ -116,7 +117,9 @@ typedef struct {
     uint32_t flags;
     uint8_t evidence_flags; /* OR of contributor evidence, distinct from sequence flags. */
     uint8_t stop_in_displaced_frame; /* First translated stop intersects a frame excursion. */
-    /* First failed projection, or edit/rebuild status when projection is OK.
+    /* First failed coding projection, or edit/rebuild status when projection is OK.
+     * Proven noncoding contributors keep their own OUT_OF_CDS status but do not
+     * suppress a coding transcript's literal CDS. This does not predict splicing.
      * Failed paths have no CDS/protein/blocks; all contributors/carriers remain. */
     duckvep_cds_edit_status_t projection_status;
     duckvep_haplotype_status_t sequence_status;

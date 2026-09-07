@@ -427,6 +427,89 @@ FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap_noncoding') GROUP BY proj
 ----
 outside_cds	3	3	4
 
+# Noncoding contributors preserve a coding transcript's literal CDS; failed
+# coding projections still invalidate it. This does not predict altered splicing.
+statement ok
+CREATE TABLE hap_mixed_tx AS SELECT i::UINTEGER transcript_index,0::UINTEGER seq_region,
+ 100::UBIGINT transcript_start,151::UBIGINT transcript_end,
+ (CASE i WHEN 0 THEN 1 ELSE -1 END)::TINYINT strand,0::UINTEGER gene_index,
+ 3::UBIGINT transcript_flags,103::UBIGINT cds_start,148::UBIGINT cds_end,
+ (CASE i WHEN 0 THEN 'AAAAAAAAAAAA' ELSE 'TTTTTTTTTTTT' END)::BLOB cds_sequence,
+ 1::UTINYINT codon_table FROM range(2) t(i);
+
+query I
+SELECT loaded FROM duckvep_model_load('hap_mixed','SELECT 0::UINTEGER seq_region',
+ 'SELECT * FROM hap_mixed_tx',
+ 'SELECT transcript_index,s::UBIGINT exon_start,e::UBIGINT exon_end,
+  (CASE WHEN (strand=1 AND s=100) OR (strand=-1 AND s=143) THEN 1 ELSE 10 END)::UBIGINT exon_cdna_start,
+  (exon_cdna_start+8)::UBIGINT exon_cdna_end,0::TINYINT phase,0::TINYINT end_phase
+  FROM hap_mixed_tx CROSS JOIN (VALUES (100,108),(143,151)) v(s,e)
+  ORDER BY transcript_index,exon_cdna_start');
+----
+1
+
+statement ok
+CREATE TABLE hap_mixed_calls AS SELECT event_index,0 seq_region,position,'A' reference,alternate,
+ 1 alt_index,transcript_index,s.i sample_index,
+ [CASE WHEN s.i=1 AND event_index=2 THEN 0 ELSE 1 END,0] alleles,
+ [true,true] phase_before,10 phase_set
+ FROM (VALUES (1,100,'C'),(2,105,'G'),(3,115,'C'),(4,149,'C')) v(event_index,position,alternate)
+ CROSS JOIN hap_mixed_tx CROSS JOIN range(2) s(i);
+
+query ITTTII
+SELECT transcript_index,cds,projection_status,sequence_status,edit_count,len(contributors)
+ FROM duckvep_haplotypes('SELECT * FROM hap_mixed_calls','hap_mixed')
+ ORDER BY transcript_index,cds;
+----
+0	AAAAAAAAAAAA	ok	ok	0	3
+0	AAGAAAAAAAAA	ok	ok	1	4
+1	TTTTTTTTTCTT	ok	ok	1	4
+1	TTTTTTTTTTTT	ok	ok	0	3
+
+query III
+SELECT count(*),count(*) FILTER(WHERE c.projection_status='outside_cds'),
+ count(*) FILTER(WHERE c.projection_status='ok')
+ FROM duckvep_haplotypes('SELECT * FROM hap_mixed_calls','hap_mixed',phase_policy:='vep116_compat'),
+ unnest(contributors) u(c);
+----
+14	12	2
+
+# An intronic insertion has no CDS edit. Moving it to the coding-exon flank
+# must project the inserted bases, even though its VCF anchor remains intronic.
+query III
+SELECT count(*),sum(edit_count),count(*) FILTER(WHERE len(cds)=12)
+ FROM duckvep_haplotypes('SELECT * REPLACE(CASE WHEN event_index=3 THEN ''AC'' ELSE alternate END AS alternate)
+ FROM hap_mixed_calls','hap_mixed');
+----
+4	2	4
+
+query III
+SELECT count(*),sum(edit_count),count(*) FILTER(WHERE len(cds)=13)
+ FROM duckvep_haplotypes('SELECT * REPLACE(CASE WHEN event_index=3 THEN 142 ELSE position END AS position,
+ CASE WHEN event_index=3 THEN ''AC'' ELSE alternate END AS alternate)
+ FROM hap_mixed_calls','hap_mixed');
+----
+4	6	4
+
+query III
+SELECT count(*),count(*) FILTER(WHERE cds IS NULL AND sequence_status='incomplete_input'),
+ sum(len(contributors)) FROM duckvep_haplotypes(
+ 'SELECT * REPLACE(CASE WHEN event_index=3 THEN [NULL,0] ELSE alleles END AS alleles)
+  FROM hap_mixed_calls','hap_mixed');
+----
+4	4	14
+
+# A replacement crossing the CDS start is not a harmless UTR-only event.
+query III
+SELECT count(*),count(*) FILTER(WHERE cds IS NULL AND projection_status='outside_cds'),
+ sum(len(contributors)) FROM duckvep_haplotypes(
+ 'SELECT * REPLACE(CASE WHEN event_index=1 THEN 102 ELSE position END AS position,
+  CASE WHEN event_index=1 THEN ''AA'' ELSE reference END AS reference,
+  CASE WHEN event_index=1 THEN ''CC'' ELSE alternate END AS alternate) FROM hap_mixed_calls',
+ 'hap_mixed');
+----
+4	4	14
+
 # A premature stop truncates displayed protein, not downstream event provenance.
 query I
 SELECT loaded FROM duckvep_model_load('hap_stops','SELECT 0::UINTEGER seq_region',

@@ -588,6 +588,14 @@ generators, seeds, eligibility, denominators, failures and oracle remain untouch
 This tests the declared literal, diploid sequence-mechanics subset, not combined SO/HGVS,
 structural composition, raw-parser emulation or broad missing/ploidy compatibility.
 
+Add `--noncoding-contributors` to run a separately receipted augmented corpus after
+the original gate passes. It adds one homozygous deep-intronic allele per transcript,
+reruns the pinned executable Haplosaurus, and requires its complete observation to
+remain unchanged. Public replay must retain the added source on all six diploid lanes,
+including lanes with no coding edit, while preserving CDS/protein and coding flags.
+Five additional corruption controls guard full carrier keys, sequence, provenance and
+projection status. This checks literal replay, not splice prediction or combined SO.
+
 `sequence_diff_differential.R --artifacts results/<haplotype-run>
 --public-artifacts results/<haplotype-sql-run>` is a separate aligned-difference
 lane. It reuses every CDS/protein sequence pair from the receipted six-lane

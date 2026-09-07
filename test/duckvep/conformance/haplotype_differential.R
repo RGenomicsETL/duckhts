@@ -118,6 +118,7 @@ main <- function() {
       "src/duckvep/kernel/src/duckvep_carriers.c",
       "src/duckvep/kernel/src/duckvep_phase.c",
       "src/duckvep/kernel/src/duckvep_haplotype_stream.c",
+      "src/duckvep/kernel/src/duckvep_classify.c",
       "src/duckvep/kernel/src/duckvep_codon.c",
       "src/duckvep/kernel/src/duckvep_coding.c",
       "src/duckvep/kernel/src/duckvep_projection.c",
