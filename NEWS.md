@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- add a registry-staged phased-replay benchmark for initialized native execution
+  and public SQL sort/materialization, with full carrier checks, explicit
+  active-pool counts and separate native-workspace/process-memory measurements
+
 - let native compound-block coding predicates classify restoring indels that
   recreate reference sequence. Keep physical edits and frame flags even when
   CDS/protein differences are empty; combined SO/HGVS remains unfinished
