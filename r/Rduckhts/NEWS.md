@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- bundle the shared start/terminal-CDS interpreter for native compound blocks,
+  retaining independent annotation and explicit missing-flank failures. The
+  phased SQL/R relations still expose sequence/provenance, not complete SO/HGVS
+
 - use the shared indel-window interpreter in the bundled coding kernel,
   preserving independent annotation while supporting native interior compound
   block facts. Phased SQL output still does not claim complete SO/HGVS annotation

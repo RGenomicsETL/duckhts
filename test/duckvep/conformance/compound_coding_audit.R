@@ -136,13 +136,14 @@ main <- function() {
   false_support <- with(rows, compound_indel & (delta_status == 0L | valid != 0L))
   block_context <- rows[match(blocks$key, rows$key), ]
   # The whole-context indel approximation remains forbidden above. The block
-  # interpreter now supports actual interior indel windows, but does not claim
-  # compound start/terminal reconstruction or complete haplotype consequences.
+  # interpreter supports CDS start/terminal windows with known flanks, but does
+  # not claim complete haplotype consequences. Retain endpoint counts separately.
   interior <- blocks$cds_start > 3L &
     blocks$cds_start - 1L + blocks$ref_len <= block_context$reference_cds_length - 3L
   supported <- blocks$status == 0L & blocks$valid == 1L
   invalid_indel_support <- blocks$indel != 0L & supported &
-    block_context$applied_edits > 1L & !interior
+    (block_context$reference_cds_length < 3L | blocks$cds_start < 1L |
+      blocks$cds_start - 1L + blocks$ref_len > block_context$reference_cds_length)
   fact_columns <- c("valid", "synonymous", "missense", "stop_gained", "stop_lost", "stop_retained",
     "start_lost", "start_retained", "frameshift", "inframe_deletion", "inframe_insertion",
     "protein_altering", "coding_unknown", "partial_codon")
@@ -154,6 +155,7 @@ main <- function() {
     invalid_window_residues = sum(rows$invalid_window_residues),
     supported_substitution_blocks = sum(blocks$status == 0L & blocks$valid == 1L & blocks$indel == 0L),
     supported_indel_blocks = sum(supported & blocks$indel != 0L),
+    supported_endpoint_indel_blocks = sum(supported & blocks$indel != 0L & !interior),
     unsupported_blocks = sum(blocks$status == 2L),
     blocks_after_stop = sum(blocks$upstream_stop),
     frame_geometry_errors = sum(blocks$frame_status != 0L),

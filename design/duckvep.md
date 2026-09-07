@@ -692,14 +692,19 @@ context at a stop. Substitution-only blocks feed those operands into the same
 local predicate interpreter as independent events, even when an earlier closed
 indel shifted the alternate protein. Those local predicates do not decide whether
 an earlier stop prevents expression: the complete path retains that separate fact.
-Interior indel blocks use the same length-change predicate interpreter as
+Indel blocks use the same length-change predicate interpreter as
 independent events, with actual block geometry validated against their physical
 edit slice. The complete translation retains its first stop; intersection with
 frame-displaced bases prevents a DNA-restoring block being called in-frame when
 translation has already stopped. Reference and alternate nucleotide comparisons
-use their separate codon offsets. Compound start/terminal-CDS blocks still need
-compound-aware reconstruction and remain unsupported; VEP's single-record endpoint
-rules cannot be applied by fabricating one record. Neither local facts nor a net-zero
+use their separate codon offsets. Start/terminal-CDS predicates borrow the selected
+block's already rebuilt bases between unchanged reference flanks. This isolates local
+facts from separate blocks without manufacturing an input record or replaying edits.
+Complete 5-prime sequence and sufficient or explicitly complete 3-prime sequence remain
+required when the predicate reads them. Single-record genomic insertion-length reach
+is retained separately; a CDS span cannot infer that distance across introns.
+Equal-length strings do not erase physical indels or transient frame changes.
+Neither local facts nor a net-zero
 CDS diff constitute a whole-haplotype consequence set. The whole-context compound-indel
 substitution shortcut remains forbidden. Leaf-specific facts never mutate shared
 carrier prefixes or immutable model sequence.

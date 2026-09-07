@@ -632,10 +632,11 @@ shifted-axis coverage and residue differences are retained as separate counters.
 `blocks.csv` additionally retains every block's local predicate/support result,
 physical span and earlier-stop observation. Substitution blocks reuse the
 independent coding interpreter on their actual reference/alternate coordinates;
-interior indel blocks now reuse the independent length-change interpreter with
-actual frame/stop geometry. Single-edit blocks keep the independent endpoint
-rules; compound start/terminal blocks remain unsupported. The support audit
-records supported indel blocks separately and rejects unsupported endpoint
+indel blocks reuse the independent length-change and start/terminal interpreters with
+actual frame/stop geometry. Selected rebuilt block spans borrow unchanged reference
+flanks; unrelated blocks do not become part of that local predicate's operands.
+Single-record genomic insertion-length reach remains separate. The support audit
+records supported endpoint blocks separately and rejects out-of-CDS
 support, partial facts on failure and contradictory frame/in-frame facts.
 The whole-context compound-indel substitution guard remains unchanged.
 A later local missense predicate is not

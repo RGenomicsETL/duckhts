@@ -651,10 +651,12 @@ DUCKVEP_INTERNAL_API duckvep_context_delta_status_t duckvep_coding_context_delta
 /* Local coding predicates for an actual partition of ascending physical edits
  * in this complete materialized context. The edit slice validates block/frame
  * geometry; earlier closed blocks may shift ALT by whole codons. Substitutions
- * and interior indel blocks share the independent predicate interpreters. A
+ * and indel blocks share the independent predicate interpreters. A
  * first stop inside displaced bases prevents a restored indel block being
- * called in-frame. Compound start/terminal-CDS interactions remain unsupported;
- * they cannot borrow single-record endpoint reconstruction. Failure leaves the
+ * called in-frame. Start/terminal-CDS strings borrow this block's rebuilt bases
+ * between unchanged reference flanks, with explicit missing-flank errors.
+ * Single-record genomic insertion-length reach is not inferred from CDS spans.
+ * Equal-length strings never erase physical frame excursions. Failure leaves the
  * entire delta zeroed. These local facts are not a complete haplotype SO set:
  * earlier-stop reachability, contributor topology and unsupported blocks remain
  * separate. No context field or shared prefix is changed. */

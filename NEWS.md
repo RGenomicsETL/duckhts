@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- share start/terminal-CDS reconstruction between independent coding events and
+  physical compound blocks through borrowed sequence spans. Missing transcript
+  flanks fail without partial facts; equal-length strings retain physical indel
+  and frame state. Local block facts are not complete phased SO/HGVS annotation
+
 - refresh independent-event state-exploration evidence on the shared coding
   implementation: the unchanged seed-31415927 corpus matches all 100,268
   executable-VEP consequence and HGVS pairs, and 5.5 million C property trials
