@@ -126,6 +126,37 @@ observation_controls <- function(witness, actual, phase, model, exons, records) 
     missing_buffer_record = !mappings_ok(buffer, model, exons, records))
 }
 
+replay_lane_controls <- function(witness) {
+  stopifnot(replay_lanes_equal(witness, witness), length(witness) == 6L)
+  corrupt <- list(missing = witness[-1L], duplicate = c(witness, witness[1L]),
+    cds = witness, protein = witness, allele_key = witness, source_key = witness,
+    source_id = witness, sample = witness, absent_field = witness, invalid_source = witness,
+    swapped_lanes = witness, missing_lane_source = witness)
+  corrupt$cds[[1L]]$cds <- paste0(witness[[1L]]$cds, 'A')
+  corrupt$protein[[1L]]$protein <- paste0(witness[[1L]]$protein, 'X')
+  for (field in c('allele_key', 'source_key', 'source_id'))
+    corrupt[[field]][[1L]]$applied_sources[[1L]][[field]] <- 'wrong'
+  corrupt$sample[[1L]]$sample <- 'unknown'
+  corrupt$absent_field[[1L]]$cds <- NULL
+  corrupt$invalid_source[[1L]]$applied_sources[[1L]] <- 'invalid'
+  pair <- which(vapply(witness, function(x) x$sample == 's0', TRUE))
+  stopifnot(length(pair) == 2L, !identical(witness[[pair[1L]]]$cds, witness[[pair[2L]]]$cds))
+  corrupt$swapped_lanes[[pair[1L]]]$lane1 <- witness[[pair[2L]]]$lane1
+  corrupt$swapped_lanes[[pair[2L]]]$lane1 <- witness[[pair[1L]]]$lane1
+  shared <- which(vapply(witness, function(x) identical(x$cds, witness[[pair[2L]]]$cds), TRUE))
+  stopifnot(length(shared) > 1L, length(witness[[shared[1L]]]$applied_sources) > 0L)
+  corrupt$missing_lane_source[[shared[1L]]]$applied_sources <-
+    witness[[shared[1L]]]$applied_sources[-1L]
+  groups <- function(rows) canonical(lapply(rows, function(x) list(cds = x$cds,
+    protein = x$protein, count = 1L,
+    contributors = vapply(x$applied_sources, `[[`, '', 'source_id'),
+    samples = setNames(list(1L), x$sample))), samples = TRUE)
+  for (name in c('allele_key', 'source_key', 'swapped_lanes', 'missing_lane_source'))
+    stopifnot(identical(groups(witness), groups(corrupt[[name]])))
+  rejected <- vapply(corrupt, function(x) !replay_lanes_equal(witness, x), TRUE)
+  setNames(rejected, paste0('lane_', names(rejected)))
+}
+
 main <- function() {
   opt <- optparse::parse_args(optparse::OptionParser(option_list = list(
     optparse::make_option('--seed', type = 'integer', default = 173L),
@@ -310,6 +341,8 @@ main <- function() {
     r <- records[records_by_region[[as.character(model$seq_region)]], ]
     spans <- exons[exons_by_tx[[as.character(model$transcript_index)]], ]
     expected <- oracle[[model$transcript]]$haplotypes
+    expected_lanes <- phase[[model$transcript]]$replay_lanes
+    observed_lanes <- native_replay_lanes(a, r, model$strand, paste0('s', 0:2))
     observed <- lapply(seq_len(nrow(a)), function(j) {
       ids <- suppressWarnings(as.numeric(unlist(a$coding_blocks[[j]]$event_indices, use.names = FALSE)))
       matched <- match(ids, r$event_index)
@@ -319,6 +352,8 @@ main <- function() {
         samples = as.list(table(paste0('s', a$carriers[[j]]$sample_index))))
     })
     list(expected = canonical(expected, samples = TRUE), observed = canonical(observed, samples = TRUE),
+      expected_lanes = expected_lanes, observed_lanes = observed_lanes,
+      replay_lanes_equal = length(expected_lanes) == 6L && replay_lanes_equal(expected_lanes, observed_lanes),
       equal = identical(canonical(expected, samples = TRUE), canonical(observed, samples = TRUE)),
       sequences_equal = identical(canonical(expected, FALSE), canonical(observed, FALSE)),
       counts_equal = sum(a$carrier_count) == oracle[[model$transcript]]$total_haplotype_count,
@@ -327,13 +362,14 @@ main <- function() {
       mappings_equal = mappings_ok(phase[[model$transcript]], model, spans, r))
   })
   for (name in c('equal', 'sequences_equal', 'counts_equal', 'input_provenance_equal',
-      'mappings_equal', 'unavailable_carriers'))
+      'mappings_equal', 'replay_lanes_equal', 'unavailable_carriers'))
     summary[[name]] <- vapply(comparisons, `[[`, if (name == 'unavailable_carriers') 0 else TRUE, name)
-  summary$passed <- with(summary, equal & counts_equal & input_provenance_equal & mappings_equal)
+  summary$passed <- with(summary, equal & counts_equal & input_provenance_equal & mappings_equal & replay_lanes_equal)
   saveRDS(comparisons, file.path(out, 'comparisons.rds'))
   write.csv(summary, file.path(out, 'summary.csv'), row.names = FALSE)
   controls <- observation_controls(oracle[['T1full']]$haplotypes, actual[rows_by_tx[['0']], ],
     phase[['T1full']], models[1L, ], exons[exons_by_tx[['0']], ], records[records_by_region[['0']], ])
+  controls <- c(controls, replay_lane_controls(phase[['T1full']]$replay_lanes))
   write.csv(data.frame(control = names(controls), rejected = controls), file.path(out, 'controls.csv'), row.names = FALSE)
   DBI::dbDisconnect(con, shutdown = TRUE)
   identities <- unique(c('test/duckvep/conformance/haplotype_model_differential.R',
@@ -342,7 +378,7 @@ main <- function() {
     'r/duckhtsbench/inst/benchmark_registry.tsv', list.files(out, full.names = TRUE)))
   jsonlite::write_json(list(source_revision = revision, extension_build_binding = binding,
     tracked_changes = duckvep_evidence_tracked_changes(root),
-    scope = 'shared_transcript_source_replay_sequence_sample_counts_and_source_identity_sets',
+    scope = 'shared_transcript_source_replay_sequence_sample_counts_and_per_lane_source_identity_sets',
     seed = seed, rare_per_stratum = opt$rare_per_stratum, required_strata = nrow(coverage),
     minimum_stratum_draws = min(coverage$observed), controls_rejected = sum(controls),
     oracle_revisions = as.list(pins), source_artifact = 'haplotype_benchmark_reference',
@@ -351,13 +387,17 @@ main <- function() {
     sequence_failures = sum(!summary$sequences_equal), count_failures = sum(!summary$counts_equal),
     input_provenance_failures = sum(!summary$input_provenance_equal),
     mapping_failures = sum(!summary$mappings_equal),
+    replay_lane_failures = sum(!summary$replay_lanes_equal),
+    oracle_replay_lanes = sum(vapply(comparisons, function(x) length(x$expected_lanes), 1L)),
+    observed_replay_lanes = sum(vapply(comparisons, function(x) length(x$observed_lanes), 1L)),
     sha256 = as.list(vapply(identities, duckvep_evidence_sha256, ''))),
     file.path(out, 'receipt.json'), auto_unbox = TRUE, pretty = TRUE)
   if (!is.null(opt$extension_receipt)) duckvep_evidence_assert_checkout(root, revision)
   print(aggregate(cbind(profiles = rep(1L, nrow(summary)), failures = as.integer(!summary$passed),
     sequence_failures = as.integer(!summary$sequences_equal),
     input_provenance_failures = as.integer(!summary$input_provenance_equal),
-    mapping_failures = as.integer(!summary$mappings_equal)) ~ cohort + shape + kind,
+    mapping_failures = as.integer(!summary$mappings_equal),
+    replay_lane_failures = as.integer(!summary$replay_lanes_equal)) ~ cohort + shape + kind,
     summary, sum), row.names = FALSE)
   stopifnot(all(controls))
   if (any(!summary$passed)) stop('Shared-transcript replay differences retained: ', out, call. = FALSE)

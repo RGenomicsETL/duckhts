@@ -604,7 +604,11 @@ An optional observer sidecar exposes the actual upstream retained genotype objec
 and file-profile ploidy without changing its sequence output. Genotype and mapping
 values are copied when the original upstream container constructor returns;
 VariationFeature objects can be shared and remapped by another transcript before
-output serialization. `Rscript test/duckvep/conformance/haplotype_observer_contract.R`
+output serialization. `replay_lanes` copies each sample's original mutator return
+before equal-sequence grouping, including CDS, protein and applied-source keys.
+It observes only samples entering that mutator; reference-only samples handled
+by upstream's separate reference-haplotype path are not synthesized.
+`Rscript test/duckvep/conformance/haplotype_observer_contract.R`
 checks both strands against overlapping full-exon/two-exon models and verifies that
 enabling the sidecar preserves complete oracle output. The same audit compares
 the standalone native raw-GT parser on all 14,040 source calls: retained/omitted status,
@@ -718,19 +722,24 @@ Rscript test/duckvep/conformance/haplotype_model_differential.R --seed 20260906 
 Each command has 18,432 transcript cases, including 1,536 baseline cases, and
 110,592 sample/file-lane observations. Counts are compared per sample and complete
 CDS/protein group, so exchanging samples cannot pass through a pooled count.
-Applied-source identity sets are compared within equal-sequence groups; this
-does not prove physical-edit multiplicity or source-to-sample association in a
-shared upstream sequence group. Native contributors separately retain exact
+Each sample/file lane separately compares complete CDS/protein and applied-source
+identity sets against the upstream mutator. A homozygous alternate anchor puts
+all six lanes per transcript through that observed path. Source keys retain the
+full REF/ALT list and selected allele in transcript orientation; repeated physical
+edit islands from one source remain a single identity in this comparison.
+Native contributors separately retain exact
 record identity, region, position, REF, interpreted ALT and occupied sample/lane.
 The original source buffer, retained genotype multiplicity and transcript-owned
 CDS coordinates are checked against the fixture, including exon-repeated and
-unselected duplicate sources. Thirteen controls reject changed sequences,
-samples, counts, source provenance, genotype observations and mapping coordinates.
+unselected duplicate sources. Twenty-five controls reject changed sequences,
+samples, counts, source provenance, genotype observations, mapping coordinates,
+lane identities and malformed observations. Lane swaps and missing lane-specific
+sources must fail even when grouped sequences, sample counts and source sets agree.
 
 `coverage.csv` requires every declared quota; `summary.csv` and `comparisons.rds`
 retain all verdicts. The default quota is one; zero runs just the baseline.
 `--extension-receipt` enforces clean-build binding. All sequence, provenance and
-mapper disagreements exit nonzero. This provides shared-transcript and
+mapper or lane-association disagreements exit nonzero. This provides shared-transcript and
 source-context coverage, not arbitrary exon/UTR geometry, phase/PS inference,
 combined SO/HGVS, independent biological observations or population error rates.
 

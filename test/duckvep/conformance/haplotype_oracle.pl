@@ -8,6 +8,7 @@ use Scalar::Util qw(refaddr);
 use File::Basename qw(dirname);
 my $phase_output;
 my %phase_calls;
+my %lane_calls;
 
 # Run the release-116 parser, mapper and container. Construction delegates to
 # upstream unchanged; the observer copies shared genotype/mapping fields before
@@ -40,6 +41,7 @@ my %phase_calls;
         if ($phase_output) {
             my $calls = delete $phase_calls{Scalar::Util::refaddr($container)};
             die "missing construction-time genotype observations\n" unless defined $calls;
+            my $lanes = delete $lane_calls{Scalar::Util::refaddr($container)} || [];
             print {$phase_output} JSON->new->canonical->encode({
                 transcript => $container->transcript->stable_id,
                 default_ploidy => $container->_default_ploidy,
@@ -49,6 +51,7 @@ my %phase_calls;
                     start => $_->{start}, end => $_->{end}, alleles => $_->{alleles},
                 }} @{$self->get_InputBuffer->buffer}],
                 calls => $calls,
+                replay_lanes => [sort {$a->{sample} cmp $b->{sample} || $a->{lane1} <=> $b->{lane1}} @$lanes],
             }), "\n";
         }
         $self->{_output_lines_count}++;
@@ -60,6 +63,31 @@ my %phase_calls;
 my ($vcf, $fasta, $gff, $phase_path) = @ARGV;
 if (defined $phase_path) {
     open($phase_output, '>', $phase_path) or die "cannot write $phase_path: $!";
+    # Copy each file lane before sequence grouping unions contributing sources.
+    # Samples handled only by _add_reference_haplotypes do not enter this mutator.
+    my $mutator = \&Bio::EnsEMBL::Variation::TranscriptHaplotypeContainer::_mutate_sequences;
+    {
+        no warnings 'redefine';
+        *Bio::EnsEMBL::Variation::TranscriptHaplotypeContainer::_mutate_sequences = sub {
+            my ($container, $genotypes, $sample) = @_;
+            my $mutated = $mutator->(@_);
+            for my $lane (0..$#$mutated) {
+                my $value = $mutated->[$lane];
+                push @{$lane_calls{refaddr($container)}}, {
+                    sample => $sample, lane1 => $lane + 1,
+                    cds => $value->{cds}, protein => $value->{protein},
+                    applied_sources => [map {
+                        my $vf = $value->{vfs}->{$_};
+                        {
+                            allele_key => $_, source_id => $vf->variation_name,
+                            source_key => $vf->{_th_identifier},
+                        }
+                    } sort keys %{$value->{vfs}}],
+                };
+            }
+            return $mutated;
+        };
+    }
     my $constructor = \&Bio::EnsEMBL::Variation::TranscriptHaplotypeContainer::new;
     no warnings 'redefine';
     *Bio::EnsEMBL::Variation::TranscriptHaplotypeContainer::new = sub {
@@ -93,4 +121,5 @@ my $runner = DuckHTS::HaploObserver->new({
 });
 $runner->run;
 die "unemitted construction-time genotype observations\n" if keys %phase_calls;
+die "unemitted mutation observations\n" if keys %lane_calls;
 close($phase_output) or die "cannot close phase observations: $!" if $phase_output;

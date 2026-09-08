@@ -7,6 +7,7 @@ main <- function() {
     optparse::make_option('--oracle', default = 'test/duckvep/conformance/haplotype_oracle.pl')
   )))
   source('scripts/duckvep_evidence.R', local = TRUE)
+  source('test/duckvep/conformance/haplotype_observations.R', local = TRUE)
   root <- normalizePath('.')
   prefix <- normalizePath(opt$vep_prefix)
   pins <- c(vep = '57ea5c52340acc1f156267f810ad162e26597082',
@@ -101,14 +102,35 @@ main <- function() {
   missing$F_full$calls[[1L]]$mapping_end <- NULL
   dropped$R_full$calls <- list()
   stopifnot(!check(stale), !check(missing), !check(dropped))
+  output <- lapply(plain, jsonlite::fromJSON, simplifyVector = FALSE)
+  names(output) <- vapply(output, `[[`, '', 'transcript')
+  for (i in seq_len(nrow(expected))) {
+    tx <- expected$transcript[i]
+    haplotypes <- output[[tx]]$haplotypes
+    stopifnot(length(haplotypes) == 1L, haplotypes[[1L]]$count == 2L)
+    region <- if (startsWith(tx, 'F')) 1L else 2L
+    source_key <- paste(positions[region], positions[region],
+      paste(ref[region], alt[region], sep = '/'), sep = '_')
+    allele <- if (region == 1L) alt[region] else chartr('ACGT', 'TGCA', alt[region])
+    lanes <- lapply(1:2, function(lane) list(sample = 'sample', lane1 = lane,
+      cds = haplotypes[[1L]]$cds, protein = haplotypes[[1L]]$protein,
+      applied_sources = list(list(allele_key = paste0(allele, '|', source_key),
+        source_id = 'site', source_key = source_key))))
+    stopifnot(replay_lanes_equal(lanes, phase[[tx]]$replay_lanes))
+    wrong <- lanes
+    wrong[[1L]]$applied_sources[[1L]]$allele_key <- 'wrong'
+    stopifnot(!replay_lanes_equal(lanes, lanes[-1L]),
+      !replay_lanes_equal(lanes, c(lanes, lanes[1L])), !replay_lanes_equal(lanes, wrong))
+  }
   identities <- c(reference, oracle, 'test/duckvep/conformance/haplotype_observer_contract.R',
+    'test/duckvep/conformance/haplotype_observations.R',
     list.files(out, full.names = TRUE))
   jsonlite::write_json(list(source_revision = duckvep_evidence_revision(root),
     tracked_changes = duckvep_evidence_tracked_changes(root), oracle_revisions = as.list(pins),
     source_artifact = 'haplotype_benchmark_reference', transcripts = 4L, source_records = 2L,
-    controls_rejected = 3L, full_output_unchanged = TRUE,
+    controls_rejected = 15L, replay_lanes = 8L, full_output_unchanged = TRUE,
     sha256 = as.list(vapply(identities, duckvep_evidence_sha256, ''))),
     file.path(out, 'receipt.json'), pretty = TRUE, auto_unbox = TRUE)
-  message('Observer ownership: 4 transcript mappings, unchanged complete output, 3 corruptions rejected')
+  message('Observer ownership: 4 transcript mappings, 8 replay lanes, unchanged complete output, 15 corruptions rejected')
 }
 main()

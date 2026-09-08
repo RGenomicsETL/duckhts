@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- compare shared-transcript conformance by sample and file lane, including complete
+  CDS/protein sequences and applied-source identities. Observer and corruption
+  checks guard associations that equal-sequence grouping cannot distinguish
+
 - verify 36,864 rare shared-transcript cases against unchanged Haplosaurus inputs
   and output: 4,608 incompatibilities resolve with no regressions. Retain the
   failing evidence and append passing raw-record/context regression campaigns;
