@@ -685,7 +685,7 @@ CDS bases with physical frame excursions. An excursion starts at a frame-changin
 edit and ends after the restoring edit's alternate bases, or continues downstream
 if unrestored. A zero-base excursion cannot intersect a codon. A stop after frame
 restoration and a sequence with no stop both return false; unavailable sequence
-returns NULL. The shared edit geometry does not modify raw frame flags or imply
+or ordered overlapping replacements return NULL. The shared edit geometry does not modify raw frame flags or imply
 protein rescue, SO classification, or removal of downstream contributors.
 Ambiguity is an explicit input policy to that translator: independent coding
 predicates conservatively retain `X` for N-containing codons, while phased replay
@@ -821,11 +821,20 @@ REF, a positive value is the source ALT ordinal, and NULL means the undefined
 file-slot interpretation. The latter has empty alternate and deletes the complete
 source REF span. Evidence bit 8 and `sequence_status = 'conditional'` distinguish
 missing/undefined-slot replay from a known called sequence; bit 2 additionally
-retains explicit missing-source evidence. Missing REF observations have no physical
-edit. Projection failures still withhold sequence. Blocks, differences and local
+retains explicit missing-source evidence. Omitted missing observations have no physical
+edit; retained REF slots participate in ordered replacement. Projection failures still withhold sequence. Blocks, differences and local
 coding facts describe the displayed conditional sequence, not proven biology.
-Raw overlapping replacements retain explicit edit-conflict behavior; broad
-Haplosaurus overlap compatibility is not established by the finite GT audit.
+Overlapping raw records replay complete projected REF/ALT spans in descending
+original CDS start order; equal starts use ascending source event ordinal. REF is
+validated against the model, while replacement acts on the current sequence and
+clips removal at its current end. A retained REF slot can overwrite an earlier
+replacement. An omitted missing observation does not execute a REF replacement.
+Every operation that changes the current sequence retains its source ID, even
+when a later operation overwrites it or restores the reference. Duplicate records
+are separate operations. This explicit literal order is not proof that conflicting
+calls describe a biological haplotype. Whole-runner Haplosaurus conformance for
+duplicate and tied records remains open; a stable mapped-coordinate sort alone
+does not reproduce its record selection and ordering.
 
 Each known leaf exposes `coding_blocks` in ascending reference CDS order. The same
 partitioner used by the independent interaction property groups same-alternate-codon
@@ -842,11 +851,23 @@ not deduplicated. SQL `event_indices` replaces the count-only block field; its l
 the physical edit count. The ID array shares `max_leaf_edits` and is included in the
 workspace byte limit. Complete raw contributor provenance remains on the leaf.
 
+For an overlapping raw-record leaf, blocks are disjoint net reference/alternate
+components rather than differing islands. Their ID lists retain applied full-span
+operations in ascending reference CDS order, including overwritten operations;
+`edit_count` counts those operations. Net-zero components retain their provenance.
+Block flags describe net component length changes; leaf flags retain nominal
+source replacement length changes. These can differ after clipped replacement.
+Local SO is NULL with `coding_status='unsupported_ordered_replacements'`, and
+`stop_in_displaced_frame` is NULL because an overlapping operation history does
+not supply the disjoint physical edits required by those consumers. CDS, protein,
+aligned differences and after-first-stop positions still describe the literal
+replay. Disjoint raw records use the differing-island contract.
+
 Each block's `local_consequence_mask` evaluates the shared generated SO rules over
 that block's physical coding delta in the completed haplotype. It does not OR
 independent event labels or apply an arbitrary contributor's uploaded-feature
 class gates. Decode it with `duckvep_so_terms()`. `coding_status` is `ok`,
-`unsupported`, `missing_transcript_tail`, `missing_transcript_flank`, or
+`unsupported`, `unsupported_ordered_replacements`, `missing_transcript_tail`, `missing_transcript_flank`, or
 `invalid_argument`; only `ok` has a non-NULL mask. Known zero is distinct from
 unknown. Conservative coding predicates may be unsupported for an N-containing
 codon even when consensus sequence replay is available.

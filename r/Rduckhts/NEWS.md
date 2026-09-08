@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- return bounded full-span replay for overlapping `source_records` calls, including
+  retained REF alleles and overwritten contributors. Ordered components report
+  `unsupported_ordered_replacements` with NA local SO and displaced-frame facts
+
 - add `input_mode = "source_records"` to `rduckhts_haplotypes` for original GT
   spelling and complete ALT lists. Bundled replay exposes source allele ordinals
   and labels missing-slot sequences as conditional

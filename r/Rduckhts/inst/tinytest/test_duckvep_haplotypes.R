@@ -22,6 +22,32 @@ local({
     "(VALUES (1,100,'C',[1,1],NULL),(2,101,'G',[1,0],10),(3,102,'C',[0,1],20))",
     "v(event_index,position,alternate,alleles,phase_set)")
   actual <- rduckhts_haplotypes(con, calls, "haps")
+  overlapping <- paste("SELECT event_index,0 seq_region,position,reference,alternates,",
+    "0 transcript_index,0 sample_index,gt FROM",
+    "(VALUES (1,100,'AAA',['CAA'],'0|1'),(2,101,'A',['G'],'1|1'))",
+    "v(event_index,position,reference,alternates,gt)")
+  composed <- rduckhts_haplotypes(con, overlapping, "haps", "vep116_compat",
+    input_mode = "source_records")
+  composed <- composed[order(composed$cds), ]
+  expect_equal(composed$cds, c("AAAAAAAAAAAA", "CAAAAAAAAAAA"))
+  expect_equal(composed$protein, c("KKKK", "QKKK"))
+  expect_equal(composed$edit_count, c(2, 2))
+  expect_true(all(is.na(composed$stop_in_displaced_frame)))
+  for (i in 1:2) {
+    expect_equal(composed$coding_blocks[[i]]$coding_status, "unsupported_ordered_replacements")
+    expect_true(is.na(composed$coding_blocks[[i]]$local_consequence_mask))
+    expect_equal(composed$coding_blocks[[i]]$event_indices[[1]], c(1, 2))
+    expect_equal(composed$contributors[[i]]$alt_index, c(i - 1L, 1L))
+    expect_equal(composed$contributors[[i]]$evidence_flags, c(1L, 1L))
+  }
+  uncertain <- rduckhts_haplotypes(con, sub("0|1", ".|.", overlapping, fixed = TRUE),
+    "haps", "vep116_compat", input_mode = "source_records")
+  expect_equal(uncertain$cds, "AGAAAAAAAAAA")
+  expect_equal(uncertain$sequence_status, "conditional")
+  expect_equal(uncertain$edit_count, 1)
+  expect_equal(uncertain$carrier_count, 2L)
+  expect_error(rduckhts_haplotypes(con, overlapping, "haps", "vep116_compat",
+    input_mode = "source_records", max_leaf_edits = 1), pattern = "max_leaf_edits")
   raw_calls <- paste("SELECT i event_index,0 seq_region,99+i AS position,'A' AS reference,",
     "CASE i WHEN 1 THEN ['C','T'] ELSE ['G'] END alternates,0 transcript_index,0 sample_index,",
     "CASE i WHEN 1 THEN '.|1' ELSE '1|1' END gt FROM range(1,3) r(i)")

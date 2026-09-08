@@ -57,6 +57,173 @@ static int haplo_add_i64(int64_t a, int64_t b, int64_t *out) {
     return 1;
 }
 
+duckvep_haplotype_status_t duckvep_haplotype_compose_replacements(
+    const uint8_t *reference, size_t reference_length,
+    const duckvep_haplotype_edit_t *edits, size_t edit_count, int8_t transcript_strand,
+    uint64_t *source_ids, uint8_t *cds, size_t cds_capacity,
+    duckvep_haplotype_block_t *components, size_t component_capacity,
+    size_t *component_count, duckvep_haplotype_result_t *result) {
+    if (component_count) *component_count = 0u;
+    haplo_result_init(result);
+    if (!reference || !cds || !component_count || !result ||
+        reference_length > UINT32_MAX ||
+        (edit_count && (!edits || !source_ids || !components)) ||
+        edit_count > SIZE_MAX / sizeof(*edits) ||
+        edit_count > SIZE_MAX / sizeof(*source_ids) ||
+        component_capacity > SIZE_MAX / sizeof(*components) ||
+        (transcript_strand != 1 && transcript_strand != -1))
+        return DUCKVEP_HAPLOTYPE_INVALID_ARG;
+    if (component_capacity < edit_count) return DUCKVEP_HAPLOTYPE_BUFFER_TOO_SMALL;
+    size_t edit_bytes = edit_count * sizeof(*edits);
+    size_t id_bytes = edit_count * sizeof(*source_ids);
+    size_t component_bytes = component_capacity * sizeof(*components);
+#define OVERLAPS(p, n, q, m) haplo_overlaps_output((p), (n), (const uint8_t *)(q), (m))
+    if (OVERLAPS(reference, reference_length, cds, cds_capacity) ||
+        OVERLAPS(edits, edit_bytes, cds, cds_capacity) ||
+        OVERLAPS(source_ids, id_bytes, cds, cds_capacity) ||
+        OVERLAPS(components, component_bytes, cds, cds_capacity) ||
+        OVERLAPS(reference, reference_length, source_ids, id_bytes) ||
+        OVERLAPS(edits, edit_bytes, source_ids, id_bytes) ||
+        OVERLAPS(reference, reference_length, components, component_bytes) ||
+        OVERLAPS(edits, edit_bytes, components, component_bytes) ||
+        OVERLAPS(source_ids, id_bytes, components, component_bytes))
+        return DUCKVEP_HAPLOTYPE_INVALID_ARG;
+    size_t cursor = reference_length, suffix = 0u, peak = 0u;
+    int64_t nominal_difference = 0;
+    uint32_t flags = 0u;
+    int frame_changed = 0;
+    for (size_t i = 0u; i < reference_length; i++)
+        if (!haplo_norm_cds_base(reference[i])) return DUCKVEP_HAPLOTYPE_INVALID_BASE;
+    /* Length planning does not depend on sequence equality: replacing equal bytes
+     * leaves the same representation and length, but creates no source contribution. */
+    for (size_t i = 0u; i < edit_count; i++) {
+        const duckvep_haplotype_edit_t *e = &edits[i];
+        if (!e->cds_start || !e->ref_len || !e->ref || (e->alt_len && !e->alt) ||
+            (e->variant_strand != 1 && e->variant_strand != -1) ||
+            OVERLAPS(e->ref, e->ref_len, cds, cds_capacity) ||
+            OVERLAPS(e->alt, e->alt_len, cds, cds_capacity) ||
+            OVERLAPS(e->ref, e->ref_len, source_ids, id_bytes) ||
+            OVERLAPS(e->alt, e->alt_len, source_ids, id_bytes) ||
+            OVERLAPS(e->ref, e->ref_len, components, component_bytes) ||
+            OVERLAPS(e->alt, e->alt_len, components, component_bytes))
+            return DUCKVEP_HAPLOTYPE_INVALID_ARG;
+        size_t start0 = (size_t)e->cds_start - 1u;
+        if (start0 > reference_length || e->ref_len > reference_length - start0)
+            return DUCKVEP_HAPLOTYPE_OUT_OF_RANGE;
+        if (start0 > cursor) return DUCKVEP_HAPLOTYPE_EDIT_ORDER;
+        int reverse = e->variant_strand != transcript_strand;
+        for (uint32_t j = 0u; j < e->ref_len; j++) {
+            char base = haplo_oriented_base(e->ref, e->ref_len, j, reverse);
+            if (!base) return DUCKVEP_HAPLOTYPE_INVALID_BASE;
+            if (base != haplo_norm_cds_base(reference[start0 + j]))
+                return DUCKVEP_HAPLOTYPE_REF_MISMATCH;
+        }
+        for (uint32_t j = 0u; j < e->alt_len; j++)
+            if (!haplo_oriented_base(e->alt, e->alt_len, j, reverse))
+                return DUCKVEP_HAPLOTYPE_INVALID_BASE;
+        size_t prefix = cursor - start0;
+        if (e->ref_len <= prefix) {
+            size_t gap = prefix - e->ref_len;
+            if (gap > SIZE_MAX - suffix) return DUCKVEP_HAPLOTYPE_OUT_OF_RANGE;
+            suffix += gap;
+        } else {
+            size_t drop = e->ref_len - prefix;
+            suffix -= drop < suffix ? drop : suffix;
+        }
+        if (e->alt_len > SIZE_MAX - suffix) return DUCKVEP_HAPLOTYPE_OUT_OF_RANGE;
+        suffix += e->alt_len;
+        if (suffix > INT64_MAX) return DUCKVEP_HAPLOTYPE_OUT_OF_RANGE;
+        if (suffix > peak) peak = suffix;
+        cursor = start0;
+        int64_t delta = (int64_t)e->alt_len - e->ref_len;
+        if (!haplo_add_i64(nominal_difference, delta, &nominal_difference))
+            return DUCKVEP_HAPLOTYPE_OUT_OF_RANGE;
+        if (delta) flags |= DUCKVEP_HAPLOTYPE_FLAG_INDEL;
+        if (delta % 3) frame_changed = 1;
+    }
+#undef OVERLAPS
+    if (cursor > SIZE_MAX - suffix || cursor + suffix > INT64_MAX)
+        return DUCKVEP_HAPLOTYPE_OUT_OF_RANGE;
+    size_t final_length = cursor + suffix;
+    if (final_length > peak) peak = final_length;
+    if (peak > cds_capacity) return DUCKVEP_HAPLOTYPE_BUFFER_TOO_SMALL;
+
+    cursor = reference_length;
+    size_t at = cds_capacity, groups = 0u, changed_count = 0u;
+    for (size_t i = 0u; i < edit_count; i++) {
+        const duckvep_haplotype_edit_t *e = &edits[i];
+        uint64_t source_id = source_ids[i];
+        size_t start0 = (size_t)e->cds_start - 1u, prefix = cursor - start0;
+        /* min(ref_len, prefix + suffix), without forming an unbounded sum. */
+        size_t removed = e->ref_len;
+        if (removed > prefix && removed - prefix > cds_capacity - at)
+            removed = prefix + (cds_capacity - at);
+        int reverse = e->variant_strand != transcript_strand;
+        int changed = removed != e->alt_len;
+        for (size_t j = 0u; !changed && j < removed; j++) {
+            char current = j < prefix ? haplo_norm_cds_base(reference[start0 + j])
+                                      : (char)cds[at + j - prefix];
+            changed = current != haplo_oriented_base(e->alt, e->alt_len, (uint32_t)j, reverse);
+        }
+        size_t ref_end = start0 + e->ref_len, output_end, keep = groups, begin = changed_count;
+        if (e->ref_len <= prefix) {
+            size_t gap = prefix - e->ref_len;
+            at -= gap;
+            for (size_t j = 0u; j < gap; j++)
+                cds[at + j] = (uint8_t)haplo_norm_cds_base(reference[ref_end + j]);
+            output_end = at;
+        } else {
+            size_t consumed = at + (removed - prefix);
+            output_end = consumed;
+            if (changed) {
+                size_t mapped_ref = cursor, mapped_out = at;
+                int inside = 0;
+                while (keep) {
+                    const duckvep_haplotype_block_t *g = &components[keep - 1u];
+                    size_t end = g->alt_start0 + g->alt_len;
+                    if (!(g->alt_start0 < consumed || (!g->alt_len && end == consumed))) break;
+                    keep--;
+                    if (consumed <= end) {
+                        ref_end = (size_t)g->cds_start - 1u + g->ref_len;
+                        output_end = end;
+                        inside = 1;
+                        break;
+                    }
+                    mapped_ref = (size_t)g->cds_start - 1u + g->ref_len;
+                    mapped_out = end;
+                }
+                if (!inside) ref_end = mapped_ref + (consumed - mapped_out);
+                if (keep < groups) begin = components[keep].edit_begin;
+            }
+            at = consumed;
+        }
+        at -= e->alt_len;
+        for (uint32_t j = 0u; j < e->alt_len; j++)
+            cds[at + j] = (uint8_t)haplo_oriented_base(e->alt, e->alt_len, j, reverse);
+        cursor = start0;
+        if (changed) {
+            source_ids[changed_count++] = source_id;
+            int64_t delta = (int64_t)(output_end - at) - (int64_t)(ref_end - start0);
+            uint32_t component_flags = delta ? DUCKVEP_HAPLOTYPE_FLAG_INDEL : 0u;
+            if (delta % 3) component_flags |= DUCKVEP_HAPLOTYPE_FLAG_FRAMESHIFT;
+            components[keep] = (duckvep_haplotype_block_t){begin, changed_count - begin,
+                e->cds_start, (uint32_t)(ref_end - start0), at, output_end - at,
+                delta, component_flags};
+            groups = keep + 1u;
+        }
+    }
+    at -= cursor;
+    for (size_t j = 0u; j < cursor; j++) cds[at + j] = (uint8_t)haplo_norm_cds_base(reference[j]);
+    memmove(cds, cds + at, final_length);
+    for (size_t i = 0u; i < groups; i++) components[i].alt_start0 -= at;
+    if (final_length < cds_capacity) cds[final_length] = 0u;
+    if (frame_changed) flags |= nominal_difference % 3 ? DUCKVEP_HAPLOTYPE_FLAG_FRAMESHIFT
+                                                     : DUCKVEP_HAPLOTYPE_FLAG_RESOLVED_FRAMESHIFT;
+    *component_count = groups;
+    *result = (duckvep_haplotype_result_t){final_length, nominal_difference, flags, changed_count};
+    return DUCKVEP_HAPLOTYPE_OK;
+}
+
 duckvep_haplotype_status_t duckvep_haplotype_reference_protein(
     const uint8_t *cds, size_t cds_length, duckvep_codon_table_t table,
     const uint32_t *edit_positions1, const uint8_t *edit_alternates, size_t edit_count,

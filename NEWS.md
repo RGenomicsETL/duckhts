@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- replay overlapping raw source records as ordered full-span replacements with
+  bounded native storage, retained REF participation and overwritten-source
+  provenance. Ordered components expose net spans; local SO and displaced-frame
+  facts remain unavailable. Duplicate/tied-record Haplosaurus conformance is open
+
 - record 73,504 source-bound rare-configuration comparisons and 11 million
   passing native property trials. Retain all 38,749 raw-replay disagreements,
   including 11,437 available-sequence differences; carrier totals match

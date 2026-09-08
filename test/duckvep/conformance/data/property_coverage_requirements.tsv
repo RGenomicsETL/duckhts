@@ -257,3 +257,11 @@ variant-coding-context coverage	pep_diff	statistical_required	-
 variant-coding-context coverage	pep_same	statistical_required	-
 variant-coding-context coverage	rev	statistical_required	-
 variant-coding-context coverage	snv	statistical_required	-
+ordered-replacement coverage	forward	statistical_required	-
+ordered-replacement coverage	reverse	statistical_required	-
+ordered-replacement coverage	ref_slot	statistical_required	-
+ordered-replacement coverage	clipped	statistical_required	-
+ordered-replacement coverage	noop	statistical_required	-
+ordered-replacement coverage	tied	statistical_required	-
+ordered-replacement coverage	empty	statistical_required	-
+ordered-replacement coverage	merged_sources	statistical_required	-

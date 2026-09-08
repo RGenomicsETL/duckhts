@@ -9376,6 +9376,61 @@ TEST haplotype_stream_raw_record_reference_observations_require_matching_cds(voi
     PASS();
 }
 
+TEST haplotype_stream_retained_reference_replaces_but_omitted_missing_does_not(void) {
+    for (unsigned reverse = 0u; reverse < 2u; reverse++) {
+        for (unsigned missing = 0u; missing < 2u; missing++) {
+            struct haplotype_stream_scene f;
+            haplotype_stream_scene_prepare(&f, 1u);
+            f.strands[0] = reverse ? -1 : 1;
+            duckvep_haplotype_stream_t *s = &f.stream;
+            ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_init(
+                s, &f.model, &f.exons, &f.sequences, &f.buffers));
+            const uint8_t *ref = (const uint8_t *)(reverse ? "TTT" : "AAA");
+            const uint8_t *alt = (const uint8_t *)(reverse ? "G" : "C");
+            duckvep_haplotype_source_t sources[] = {
+                {1u, ref, ref, 100u, 0u, 3u, 3u, 0u, 1u},
+                {2u, ref, alt, 101u, 0u, 1u, 1u, 1u, 1u}
+            };
+            for (size_t i = 0u; i < 2u; i++) {
+                duckvep_raw_gt_t call;
+                const char *gt = i ? "1|1" : missing ? ".|." : "0|1";
+                ASSERT_EQ(DUCKVEP_RAW_GT_OK, duckvep_phase_parse_vep116_raw(
+                    (const uint8_t *)gt, strlen(gt), 1u, &call));
+                ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_begin(s, &sources[i]));
+                ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_project(s, 0u));
+                ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_push_raw_call(s, 0u, 0u, &call));
+            }
+            ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_TRANSCRIPT_READY, duckvep_haplotype_stream_finish(s));
+            duckvep_haplotype_leaf_t leaf;
+            unsigned checked = 0u;
+            while (duckvep_haplotype_stream_next(s, &leaf) == DUCKVEP_HAPLOTYPE_STREAM_OK) {
+                const duckvep_carrier_call_t *carrier = duckvep_carriers_call(&s->carriers, leaf.carriers.first_call);
+                ASSERT(carrier != NULL);
+                if (!missing && carrier->key.lane == 2u) continue;
+                ASSERT_EQ(12u, leaf.cds_length);
+                ASSERT_EQ(2u, leaf.contributor_count);
+                ASSERT_EQ(missing ? 1u : 2u, leaf.edit_count);
+                ASSERT_EQ(missing ? 0u : 1u, leaf.ordered_replacements);
+                ASSERT_EQ(missing ? DUCKVEP_HAPLOTYPE_CONDITIONAL : DUCKVEP_HAPLOTYPE_OK,
+                    leaf.sequence_status);
+                uint8_t expected[12]; memcpy(expected, f.reference, 12u);
+                if (missing) expected[reverse ? 10u : 1u] = 'C';
+                ASSERT_MEM_EQ(expected, leaf.cds, 12u);
+                ASSERT_EQ(0u, leaf.evidence_flags & DUCKVEP_CARRIER_REFERENCE_REPLAY);
+                if (!missing) {
+                    ASSERT_EQ(1u, leaf.block_count);
+                    ASSERT_EQ(2u, leaf.blocks[0].edit_count);
+                    ASSERT_EQ(0, leaf.blocks[0].length_diff);
+                    ASSERT_EQ(1u, leaf.contributors[0].source_replaced);
+                }
+                checked++;
+            }
+            ASSERT_EQ(1u, checked);
+        }
+    }
+    PASS();
+}
+
 TEST haplotype_stream_raw_record_identity_and_evidence_are_checked(void) {
     for (unsigned scenario = 0u; scenario < 6u; scenario++) {
         struct haplotype_stream_scene f;
@@ -10720,6 +10775,193 @@ TEST haplotype_partition_spans_track_both_cds_axes(void) {
     ASSERT_EQ(4u, blocks[0].ref_len);
     ASSERT_EQ(0u, blocks[0].alt_start0);
     ASSERT_EQ(1u, blocks[0].alt_len);
+    PASS();
+}
+
+TEST haplotype_ordered_replacements_validate_before_mutating(void) {
+    const uint8_t *ref = (const uint8_t *)"ACGTACGTACGT";
+    duckvep_haplotype_edit_t edits[] = {
+        {4u, 1u, ref + 3u, 1u, ref, 1},
+        {1u, 4u, ref, 4u, ref, 1}
+    };
+    uint8_t cds[32]; uint64_t ids[2] = {11u, 12u};
+    duckvep_haplotype_block_t blocks[2];
+    size_t count;
+    duckvep_haplotype_result_t result;
+    ASSERT_EQ(DUCKVEP_HAPLOTYPE_OK, duckvep_haplotype_compose_replacements(ref, 12u,
+        edits, 2u, 1, ids, cds, 12u, blocks, 2u, &count, &result));
+    ASSERT_MEM_EQ(ref, cds, 12u); ASSERT_EQ(2u, result.applied_edits); ASSERT_EQ(1u, count);
+    ASSERT_EQ(0, blocks[0].length_diff); ASSERT_EQ(4u, blocks[0].ref_len);
+    ASSERT_EQ(11u, ids[0]); ASSERT_EQ(12u, ids[1]);
+    for (unsigned scenario = 0u; scenario < 8u; scenario++) {
+        duckvep_haplotype_edit_t copy[2]; memcpy(copy, edits, sizeof(copy));
+        memset(cds, 0xa5, sizeof(cds)); memset(blocks, 0xa5, sizeof(blocks));
+        ids[0] = 11u; ids[1] = 12u;
+        size_t cap = sizeof(cds), block_cap = 2u;
+        duckvep_haplotype_status_t want = DUCKVEP_HAPLOTYPE_INVALID_ARG;
+        if (!scenario) { cap = 11u; want = DUCKVEP_HAPLOTYPE_BUFFER_TOO_SMALL; }
+        if (scenario == 1u) { block_cap = 1u; want = DUCKVEP_HAPLOTYPE_BUFFER_TOO_SMALL; }
+        if (scenario == 2u) { copy[0].ref = ref; want = DUCKVEP_HAPLOTYPE_REF_MISMATCH; }
+        if (scenario == 3u) { copy[0].alt = (const uint8_t *)"?"; want = DUCKVEP_HAPLOTYPE_INVALID_BASE; }
+        if (scenario == 4u) { copy[1].cds_start = 5u; want = DUCKVEP_HAPLOTYPE_EDIT_ORDER; }
+        if (scenario == 5u) { copy[1].ref_len = 13u; want = DUCKVEP_HAPLOTYPE_OUT_OF_RANGE; }
+        if (scenario == 6u) copy[0].alt = cds;
+        if (scenario == 7u) copy[1].ref_len = 0u;
+        ASSERT_EQ(want, duckvep_haplotype_compose_replacements(ref, 12u, copy, 2u,
+            1, ids, cds, cap, blocks, block_cap, &count, &result));
+        ASSERT_EQ(0u, count); ASSERT_EQ(0u, result.cds_len); ASSERT_EQ(0u, result.applied_edits);
+        ASSERT_EQ(11u, ids[0]); ASSERT_EQ(12u, ids[1]);
+        for (size_t i = 0u; i < sizeof(cds); i++) ASSERT_EQ(0xa5u, cds[i]);
+        for (size_t i = 0u; i < sizeof(blocks); i++) ASSERT_EQ(0xa5u, ((uint8_t *)blocks)[i]);
+    }
+    PASS();
+}
+
+enum { KPROP_REPLACEMENT_REF = 96, KPROP_REPLACEMENTS = 32, KPROP_REPLACEMENT_CAP = 4096 };
+struct kprop_replacements {
+    uint8_t reference[KPROP_REPLACEMENT_REF];
+    uint8_t ref[KPROP_REPLACEMENTS][KPROP_REPLACEMENT_REF];
+    uint8_t alt[KPROP_REPLACEMENTS][KPROP_REPLACEMENT_REF];
+    duckvep_haplotype_edit_t edits[KPROP_REPLACEMENTS];
+    size_t length, count;
+    int8_t strand;
+};
+static struct {
+    unsigned forward, reverse, ref_slot, clipped, noop, tied, empty, merged_sources;
+} replacement_coverage;
+
+static enum theft_alloc_res kprop_replacements_alloc(struct theft *t, void *env, void **instance) {
+    (void)env;
+    struct kprop_replacements *c = calloc(1u, sizeof(*c));
+    if (!c) return THEFT_ALLOC_ERROR;
+    c->length = 1u + kprop_bounded(t, KPROP_REPLACEMENT_REF);
+    c->count = 1u + kprop_bounded(t, KPROP_REPLACEMENTS);
+    c->strand = kprop_bounded(t, 2u) ? 1 : -1;
+    for (size_t i = 0u; i < c->length; i++) c->reference[i] = (uint8_t)"ACGT"[kprop_bounded(t, 4u)];
+    for (size_t i = 0u; i < c->count; i++) {
+        duckvep_haplotype_edit_t *e = &c->edits[i];
+        e->cds_start = 1u + (uint32_t)kprop_bounded(t, c->length);
+        e->ref_len = 1u + (uint32_t)kprop_bounded(t, c->length - e->cds_start + 1u);
+        e->alt_len = (uint32_t)kprop_bounded(t, 33u);
+        e->variant_strand = kprop_bounded(t, 2u) ? 1 : -1;
+        int reverse = e->variant_strand != c->strand;
+        unsigned mode = (unsigned)kprop_bounded(t, 8u);
+        if (!mode) e->alt_len = e->ref_len;
+        for (uint32_t j = 0u; j < e->ref_len; j++)
+            c->ref[i][reverse ? e->ref_len - 1u - j : j] =
+                haplo_test_variant_from_tx_base((char)c->reference[e->cds_start - 1u + j], reverse);
+        for (uint32_t j = 0u; j < e->alt_len; j++)
+            c->alt[i][reverse ? e->alt_len - 1u - j : j] = haplo_test_variant_from_tx_base(
+                !mode ? (char)c->reference[e->cds_start - 1u + j] : "ACGT"[kprop_bounded(t, 4u)], reverse);
+        e->ref = c->ref[i]; e->alt = c->alt[i];
+        if (i && mode == 1u) *e = c->edits[i - 1u];
+    }
+    /* Whole-CDS repeated deletion forces clipping and an empty final sequence. */
+    if (!kprop_bounded(t, 16u)) {
+        c->count = 2u;
+        c->edits[0] = c->edits[1] = (duckvep_haplotype_edit_t){
+            1u, (uint32_t)c->length, c->reference, 0u, NULL, c->strand};
+    }
+    for (size_t i = 1u; i < c->count; i++) {
+        duckvep_haplotype_edit_t e = c->edits[i]; size_t j = i;
+        while (j && c->edits[j - 1u].cds_start < e.cds_start) {
+            c->edits[j] = c->edits[j - 1u]; j--;
+        }
+        c->edits[j] = e;
+    }
+    *instance = c;
+    return THEFT_ALLOC_OK;
+}
+
+static enum theft_trial_res prop_replacements_match_literal_and_reconstruct(struct theft *t, void *arg) {
+    (void)t;
+    const struct kprop_replacements *c = arg;
+    uint8_t expected[KPROP_REPLACEMENT_CAP], got[KPROP_REPLACEMENT_CAP], rebuilt[KPROP_REPLACEMENT_CAP];
+    duckvep_haplotype_block_t blocks[KPROP_REPLACEMENTS];
+    uint64_t ids[KPROP_REPLACEMENTS], changed = 0u, observed = 0u;
+    size_t length = c->length, nblocks, nchanged = 0u;
+    int64_t nominal = 0;
+    uint32_t flags = 0u;
+    int shifted = 0;
+    memcpy(expected, c->reference, length);
+    replacement_coverage.forward += c->strand == 1;
+    replacement_coverage.reverse += c->strand == -1;
+    for (size_t i = 0u; i < c->count; i++) {
+        ids[i] = i;
+        const duckvep_haplotype_edit_t *e = &c->edits[i];
+        size_t start = e->cds_start - 1u;
+        if (start > length) return THEFT_TRIAL_ERROR;
+        size_t removed = e->ref_len < length - start ? e->ref_len : length - start;
+        uint8_t alt[KPROP_REPLACEMENT_REF];
+        int reverse = e->variant_strand != c->strand;
+        for (uint32_t j = 0u; j < e->alt_len; j++) alt[j] =
+            haplo_test_variant_from_tx_base((char)e->alt[reverse ? e->alt_len - 1u - j : j], reverse);
+        replacement_coverage.ref_slot += e->alt_len == e->ref_len &&
+            !memcmp(alt, c->reference + start, e->alt_len);
+        replacement_coverage.clipped += removed != e->ref_len;
+        replacement_coverage.tied += i && start == c->edits[i - 1u].cds_start - 1u;
+        int64_t delta = (int64_t)e->alt_len - e->ref_len;
+        nominal += delta;
+        if (delta) flags |= DUCKVEP_HAPLOTYPE_FLAG_INDEL;
+        shifted |= delta % 3 != 0;
+        if (removed != e->alt_len || memcmp(expected + start, alt, removed)) {
+            changed |= UINT64_C(1) << i; nchanged++;
+            memmove(expected + start + e->alt_len, expected + start + removed, length - start - removed);
+            memcpy(expected + start, alt, e->alt_len);
+            length += e->alt_len; length -= removed;
+        } else replacement_coverage.noop++;
+    }
+    replacement_coverage.empty += !length;
+    if (shifted) flags |= nominal % 3 ? DUCKVEP_HAPLOTYPE_FLAG_FRAMESHIFT
+                                     : DUCKVEP_HAPLOTYPE_FLAG_RESOLVED_FRAMESHIFT;
+    duckvep_haplotype_result_t result;
+    if (duckvep_haplotype_compose_replacements(c->reference, c->length, c->edits, c->count,
+            c->strand, ids, got, sizeof(got), blocks, KPROP_REPLACEMENTS, &nblocks, &result) !=
+        DUCKVEP_HAPLOTYPE_OK) return THEFT_TRIAL_FAIL;
+    if (result.cds_len != length || memcmp(got, expected, length) || result.flags != flags ||
+        result.length_diff != nominal || result.applied_edits != nchanged) return THEFT_TRIAL_FAIL;
+    size_t used = 0u, from = 0u, provenance = 0u;
+    for (size_t i = nblocks; i > 0u; i--) {
+        const duckvep_haplotype_block_t *b = &blocks[i - 1u];
+        size_t start = b->cds_start - 1u;
+        if (start < from || start > c->length || b->ref_len > c->length - start ||
+            b->alt_start0 > length || b->alt_len > length - b->alt_start0 ||
+            b->edit_begin > nchanged || b->edit_count > nchanged - b->edit_begin)
+            return THEFT_TRIAL_FAIL;
+        memcpy(rebuilt + used, c->reference + from, start - from); used += start - from;
+        if (b->alt_start0 != used) return THEFT_TRIAL_FAIL;
+        memcpy(rebuilt + used, got + b->alt_start0, b->alt_len); used += b->alt_len;
+        from = start + b->ref_len;
+        if (b->length_diff != (int64_t)b->alt_len - b->ref_len) return THEFT_TRIAL_FAIL;
+        replacement_coverage.merged_sources += b->edit_count > 1u;
+        for (size_t j = b->edit_begin; j < b->edit_begin + b->edit_count; j++) {
+            if (ids[j] >= c->count || (observed & (UINT64_C(1) << ids[j]))) return THEFT_TRIAL_FAIL;
+            observed |= UINT64_C(1) << ids[j]; provenance++;
+        }
+    }
+    memcpy(rebuilt + used, c->reference + from, c->length - from); used += c->length - from;
+    if (used != length || memcmp(rebuilt, got, length) || changed != observed || provenance != nchanged)
+        return THEFT_TRIAL_FAIL;
+    return THEFT_TRIAL_PASS;
+}
+
+static void kprop_replacements_free(void *instance, void *env) { (void)env; free(instance); }
+
+TEST haplotype_ordered_replacements_match_literal_for_overlapping_records(void) {
+    struct theft_type_info info = {.alloc = kprop_replacements_alloc, .free = kprop_replacements_free};
+    struct theft_run_config cfg = {0};
+    cfg.name = "ordered source replacements == literal replay, net spans and applied provenance";
+    cfg.prop1 = prop_replacements_match_literal_and_reconstruct;
+    cfg.type_info[0] = &info;
+    cfg.trials = kprop_env_u64("DUCKVEP_PROP_TRIALS", KPROP_DEFAULT_TRIALS);
+    cfg.seed = (theft_seed)kprop_env_u64("DUCKVEP_PROP_SEED", KPROP_DEFAULT_SEED);
+    memset(&replacement_coverage, 0, sizeof(replacement_coverage));
+    ASSERT_EQ(THEFT_RUN_PASS, theft_run(&cfg));
+    fprintf(stderr, "[ordered-replacement coverage] forward=%u reverse=%u ref_slot=%u clipped=%u "
+        "noop=%u tied=%u empty=%u merged_sources=%u\n", replacement_coverage.forward,
+        replacement_coverage.reverse, replacement_coverage.ref_slot, replacement_coverage.clipped,
+        replacement_coverage.noop, replacement_coverage.tied, replacement_coverage.empty,
+        replacement_coverage.merged_sources);
     PASS();
 }
 
@@ -28893,6 +29135,7 @@ int main(int argc, char **argv) {
     RUN_TEST(haplotype_stream_raw_record_slots_keep_conditional_deletion_provenance);
     RUN_TEST(haplotype_stream_raw_record_reference_observations_require_matching_cds);
     RUN_TEST(haplotype_stream_raw_record_identity_and_evidence_are_checked);
+    RUN_TEST(haplotype_stream_retained_reference_replaces_but_omitted_missing_does_not);
     RUN_TEST(haplotype_stream_recycles_owned_alleles_and_projection_slots);
     RUN_TEST(haplotype_stream_projects_once_and_preserves_occupied_ancestors);
     RUN_TEST(haplotype_stream_keeps_noncoding_contributors_without_poisoning_cds);
@@ -28915,6 +29158,8 @@ int main(int argc, char **argv) {
     RUN_TEST(haplotype_differences_bound_alignment_work_and_report_limits);
     RUN_TEST(haplotype_apply_rejects_overlapping_inputs);
     RUN_TEST(haplotype_apply_matches_rebuild_oracle_for_any_valid_edit_set);
+    RUN_TEST(haplotype_ordered_replacements_match_literal_for_overlapping_records);
+    RUN_TEST(haplotype_ordered_replacements_validate_before_mutating);
     RUN_TEST(haplotype_block_windows_keep_both_peptide_axes);
     RUN_TEST(haplotype_substitution_blocks_reuse_local_coding_predicates);
     RUN_TEST(haplotype_restoring_indels_can_recreate_reference_sequence);

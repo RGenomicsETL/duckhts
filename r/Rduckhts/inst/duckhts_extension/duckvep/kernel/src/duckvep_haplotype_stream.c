@@ -229,11 +229,14 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_push(
     if (!s->have_input || s->closing || s->carriers.pending || s->carriers.finished || !key ||
         !key->lane || key->lane > key->ploidy || key->phase_set_present > 1u ||
         !evidence || (evidence & ~(DUCKVEP_CARRIER_CALLED | DUCKVEP_CARRIER_MISSING |
-                                  DUCKVEP_CARRIER_UNPHASED | DUCKVEP_CARRIER_CONDITIONAL)))
+                                  DUCKVEP_CARRIER_UNPHASED | DUCKVEP_CARRIER_CONDITIONAL |
+                                  DUCKVEP_CARRIER_REFERENCE_REPLAY)))
         return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
     if (!s->have_current) return DUCKVEP_HAPLOTYPE_STREAM_OK;
     const duckvep_haplotype_stored_event_t *event = &s->buffers.events[s->current_event];
-    if (((evidence & DUCKVEP_CARRIER_CONDITIONAL) && !event->source.source_record) ||
+    if (((evidence & (DUCKVEP_CARRIER_CONDITIONAL | DUCKVEP_CARRIER_REFERENCE_REPLAY)) &&
+         !event->source.source_record) ||
+        ((evidence & DUCKVEP_CARRIER_REFERENCE_REPLAY) && event->source.allele_index) ||
         (event->source.source_record && event->source.allele_index == UINT32_MAX &&
          (!(evidence & DUCKVEP_CARRIER_CONDITIONAL) || (evidence & DUCKVEP_CARRIER_CALLED))))
         return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
@@ -431,9 +434,9 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_push_raw_call(
             if (call->allele_index[lane - 1u] != allele) continue;
             if (allele == UINT32_MAX) evidence = DUCKVEP_CARRIER_CONDITIONAL;
             else if (allele) evidence = DUCKVEP_CARRIER_CALLED;
+            else evidence = DUCKVEP_CARRIER_REFERENCE_REPLAY;
             if (call->source_has_missing)
                 evidence |= DUCKVEP_CARRIER_MISSING | DUCKVEP_CARRIER_CONDITIONAL;
-            if (!evidence) continue; /* Known reference remains implicit. */
         }
         duckvep_carrier_key_t key = {sample, 0, lane, 2u, 0u};
         duckvep_carriers_status_t status = duckvep_carriers_push(&s->carriers, tx, &key, evidence);
@@ -442,14 +445,20 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_push_raw_call(
     return DUCKVEP_HAPLOTYPE_STREAM_OK;
 }
 
+/* Descending CDS order with ascending source ordinal for equal starts. */
+static int edit_precedes_min(uint32_t start, uint64_t id, uint32_t other, uint64_t other_id) {
+    return start < other || (start == other && id > other_id);
+}
+
 static void sift_edit_min(duckvep_haplotype_edit_t *edits, uint64_t *ids,
     size_t root, size_t count) {
     duckvep_haplotype_edit_t value = edits[root];
     uint64_t id = ids[root];
     while (root < count / 2u) {
         size_t child = root * 2u + 1u;
-        if (child + 1u < count && edits[child + 1u].cds_start < edits[child].cds_start) child++;
-        if (value.cds_start <= edits[child].cds_start) break;
+        if (child + 1u < count && edit_precedes_min(edits[child + 1u].cds_start,
+                ids[child + 1u], edits[child].cds_start, ids[child])) child++;
+        if (!edit_precedes_min(edits[child].cds_start, ids[child], value.cds_start, id)) break;
         edits[root] = edits[child];
         ids[root] = ids[child];
         root = child;
@@ -472,6 +481,24 @@ static void sort_edits_descending(duckvep_haplotype_edit_t *edits, uint64_t *ids
         ids[remaining - 1u] = id;
         sift_edit_min(edits, ids, 0u, remaining - 1u);
     }
+}
+
+static duckvep_haplotype_stream_status_t append_differing_edits(
+    duckvep_haplotype_stream_t *s, const duckvep_haplotype_projection_t *p,
+    uint64_t event_id, duckvep_haplotype_leaf_t *leaf) {
+    const duckvep_haplotype_stream_buffers_t *b = &s->buffers;
+    duckvep_edit_set_t edits;
+    duckvep_cds_edit_status_t status = duckvep_projected_cds_edit_set_build(&p->edit,
+        s->carriers.model->strand[leaf->carriers.transcript_index], b->edits + leaf->edit_count,
+        b->edit_capacity - leaf->edit_count, &edits);
+    if (status == DUCKVEP_CDS_EDIT_BUFFER_TOO_SMALL)
+        return fail(s, DUCKVEP_HAPLOTYPE_STREAM_EDIT_FULL);
+    if (status == DUCKVEP_CDS_EDIT_OK) {
+        for (size_t j = 0u; j < edits.count; j++)
+            b->edit_event_ids[leaf->edit_count + j] = event_id;
+        leaf->edit_count += edits.count;
+    } else if (leaf->projection_status == DUCKVEP_CDS_EDIT_OK) leaf->projection_status = status;
+    return DUCKVEP_HAPLOTYPE_STREAM_OK;
 }
 
 duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
@@ -497,35 +524,61 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
         return fail(s, DUCKVEP_HAPLOTYPE_STREAM_LEAF_FULL);
     if (status != DUCKVEP_CARRIERS_OK) return carrier_fail(s, status);
     uint32_t tx = leaf.carriers.transcript_index;
+    int raw_records = 0;
     for (size_t i = 0u; i < count; i++) {
         const duckvep_haplotype_stored_event_t *e = find_event(s, b->leaf_events[i].event_id);
         const duckvep_haplotype_projection_t *p = e ? find_projection(s, e, tx) : NULL;
         if (!p) return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INTERNAL_ERROR);
         uint8_t evidence = b->leaf_events[i].evidence_flags;
-        b->contributors[i] = (duckvep_haplotype_contributor_t){e->source, p->status, evidence, &e->prepared};
-        leaf.evidence_flags |= evidence;
+        if (!i) raw_records = e->source.source_record;
+        if (raw_records != e->source.source_record)
+            return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
+        b->contributors[i] = (duckvep_haplotype_contributor_t){
+            e->source, p->status, evidence, &e->prepared, 0u};
+        if (!raw_records) leaf.evidence_flags |= evidence;
         if ((evidence & (DUCKVEP_CARRIER_MISSING | DUCKVEP_CARRIER_UNPHASED)) &&
             !(evidence & DUCKVEP_CARRIER_CONDITIONAL))
             leaf.sequence_status = DUCKVEP_HAPLOTYPE_INPUT_INCOMPLETE;
         if (leaf.projection_status == DUCKVEP_CDS_EDIT_OK && !p->cds_unaffected)
             leaf.projection_status = p->status;
         if (p->status == DUCKVEP_CDS_EDIT_OK &&
-            (evidence & (DUCKVEP_CARRIER_CALLED | DUCKVEP_CARRIER_CONDITIONAL)) &&
-            !(e->source.source_record && !e->source.allele_index)) {
-            /* An explicit REF observation was validated by projection but has
-             * no physical differing island. Keep its evidence/provenance. */
-            duckvep_edit_set_t edits;
-            duckvep_cds_edit_status_t split = duckvep_projected_cds_edit_set_build(&p->edit,
-                s->carriers.model->strand[tx], b->edits + leaf.edit_count,
-                b->edit_capacity - leaf.edit_count, &edits);
-            if (split == DUCKVEP_CDS_EDIT_BUFFER_TOO_SMALL)
-                return fail(s, DUCKVEP_HAPLOTYPE_STREAM_EDIT_FULL);
-            if (split == DUCKVEP_CDS_EDIT_OK) {
-                for (size_t j = 0u; j < edits.count; j++)
-                    b->edit_event_ids[leaf.edit_count + j] = e->source.event_id;
-                leaf.edit_count += edits.count;
+            (evidence & (DUCKVEP_CARRIER_CALLED | DUCKVEP_CARRIER_CONDITIONAL |
+                         DUCKVEP_CARRIER_REFERENCE_REPLAY)) &&
+            (!raw_records || e->source.allele_index || (evidence & DUCKVEP_CARRIER_REFERENCE_REPLAY))) {
+            if (raw_records) {
+                if (leaf.edit_count == b->edit_capacity)
+                    return fail(s, DUCKVEP_HAPLOTYPE_STREAM_EDIT_FULL);
+                b->edits[leaf.edit_count] = p->edit;
+                b->edit_event_ids[leaf.edit_count++] = i;
+            } else {
+                duckvep_haplotype_stream_status_t added = append_differing_edits(s, p,
+                    e->source.event_id, &leaf);
+                if (added != DUCKVEP_HAPLOTYPE_STREAM_OK) return added;
             }
-            else if (leaf.projection_status == DUCKVEP_CDS_EDIT_OK) leaf.projection_status = split;
+        }
+    }
+    if (raw_records && leaf.projection_status == DUCKVEP_CDS_EDIT_OK &&
+        leaf.sequence_status == DUCKVEP_HAPLOTYPE_OK) {
+        sort_edits_descending(b->edits, b->edit_event_ids, leaf.edit_count);
+        for (size_t i = 1u; i < leaf.edit_count; i++) {
+            if (b->edits[i].ref_len > b->edits[i - 1u].cds_start - b->edits[i].cds_start) {
+                leaf.ordered_replacements = 1u;
+                break;
+            }
+        }
+        if (!leaf.ordered_replacements) {
+            /* Disjoint full records have the same literal replay as their
+             * differing islands, which also retain local codon/frame facts. */
+            leaf.edit_count = 0u;
+            for (size_t i = 0u; i < count; i++) {
+                const duckvep_haplotype_contributor_t *c = &b->contributors[i];
+                if (c->projection_status != DUCKVEP_CDS_EDIT_OK || !c->source.allele_index) continue;
+                const duckvep_haplotype_stored_event_t *e = find_event(s, b->leaf_events[i].event_id);
+                const duckvep_haplotype_projection_t *p = find_projection(s, e, tx);
+                duckvep_haplotype_stream_status_t added = append_differing_edits(s, p,
+                    c->source.event_id, &leaf);
+                if (added != DUCKVEP_HAPLOTYPE_STREAM_OK) return added;
+            }
         }
     }
     leaf.contributors = b->contributors;
@@ -536,11 +589,28 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
         size_t length = seq->cds_length[tx];
         if (offset > seq->cds_bytes_len || length > seq->cds_bytes_len - offset)
             return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INTERNAL_ERROR);
-        sort_edits_descending(b->edits, b->edit_event_ids, leaf.edit_count);
         duckvep_haplotype_result_t applied;
-        leaf.sequence_status = duckvep_haplotype_apply_cds_edits(seq->cds_bytes + (size_t)offset,
-            length, b->edits, leaf.edit_count, s->carriers.model->strand[tx], b->cds, b->cds_capacity,
-            &leaf.cds_length, &applied);
+        if (leaf.ordered_replacements) {
+            leaf.sequence_status = duckvep_haplotype_compose_replacements(
+                seq->cds_bytes + (size_t)offset, length, b->edits, leaf.edit_count,
+                s->carriers.model->strand[tx], b->edit_event_ids, b->cds, b->cds_capacity,
+                b->blocks, b->edit_capacity, &leaf.block_count, &applied);
+            leaf.cds_length = applied.cds_len;
+            if (leaf.sequence_status == DUCKVEP_HAPLOTYPE_OK) {
+                leaf.edit_count = applied.applied_edits;
+                for (size_t i = 0u; i < leaf.edit_count; i++) {
+                    size_t source = (size_t)b->edit_event_ids[i];
+                    if (source >= count) return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INTERNAL_ERROR);
+                    b->contributors[source].source_replaced = 1u;
+                    b->edit_event_ids[i] = b->contributors[source].source.event_id;
+                }
+            }
+        } else {
+            sort_edits_descending(b->edits, b->edit_event_ids, leaf.edit_count);
+            leaf.sequence_status = duckvep_haplotype_apply_cds_edits(seq->cds_bytes + (size_t)offset,
+                length, b->edits, leaf.edit_count, s->carriers.model->strand[tx], b->cds, b->cds_capacity,
+                &leaf.cds_length, &applied);
+        }
         if (leaf.sequence_status == DUCKVEP_HAPLOTYPE_OK) {
             duckvep_codon_table_t table = seq->codon_table
                 ? (duckvep_codon_table_t)seq->codon_table[tx] : DUCKVEP_CODON_TABLE_STANDARD;
@@ -567,9 +637,17 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
                     b->edit_event_ids[i] = b->edit_event_ids[leaf.edit_count - 1u - i];
                     b->edit_event_ids[leaf.edit_count - 1u - i] = id;
                 }
-                duckvep_haplotype_status_t partition = duckvep_haplotype_partition(
-                    b->edits, leaf.edit_count, b->blocks, b->edit_capacity, &leaf.block_count);
-                if (partition != DUCKVEP_HAPLOTYPE_OK)
+                if (leaf.ordered_replacements) {
+                    for (size_t i = 0u; i < leaf.block_count / 2u; i++) {
+                        duckvep_haplotype_block_t block = b->blocks[i];
+                        b->blocks[i] = b->blocks[leaf.block_count - 1u - i];
+                        b->blocks[leaf.block_count - 1u - i] = block;
+                    }
+                    for (size_t i = 0u; i < leaf.block_count; i++)
+                        b->blocks[i].edit_begin = leaf.edit_count -
+                            (b->blocks[i].edit_begin + b->blocks[i].edit_count);
+                } else if (duckvep_haplotype_partition(b->edits, leaf.edit_count,
+                        b->blocks, b->edit_capacity, &leaf.block_count) != DUCKVEP_HAPLOTYPE_OK)
                     return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INTERNAL_ERROR);
                 size_t first_stop = leaf.translation.first_stop_position1;
                 if (first_stop > leaf.cds_length / 3u)
@@ -581,7 +659,7 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
                         block->alt_start0 > leaf.cds_length ||
                         block->alt_len > leaf.cds_length - block->alt_start0)
                         return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INTERNAL_ERROR);
-                    if (first_stop) {
+                    if (first_stop && !leaf.ordered_replacements) {
                         int intersects;
                         if (duckvep_haplotype_block_frame_intersects(b->edits,
                                 leaf.edit_count, block, (first_stop - 1u) * 3u, 3u,
@@ -607,11 +685,28 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
         }
         if (leaf.sequence_status == DUCKVEP_HAPLOTYPE_BUFFER_TOO_SMALL)
             return fail(s, DUCKVEP_HAPLOTYPE_STREAM_SEQUENCE_FULL);
-        if (leaf.sequence_status != DUCKVEP_HAPLOTYPE_OK)
+        if (leaf.sequence_status != DUCKVEP_HAPLOTYPE_OK) {
             leaf.cds_length = leaf.protein_length = 0u;
-        else if (leaf.evidence_flags & DUCKVEP_CARRIER_CONDITIONAL)
-            leaf.sequence_status = DUCKVEP_HAPLOTYPE_CONDITIONAL;
+            leaf.block_count = 0u;
+        }
     }
+    if (raw_records) {
+        size_t kept = 0u;
+        for (size_t i = 0u; i < count; i++) {
+            duckvep_haplotype_contributor_t c = b->contributors[i];
+            if (c.evidence_flags & DUCKVEP_CARRIER_REFERENCE_REPLAY) {
+                c.evidence_flags &= (uint8_t)~DUCKVEP_CARRIER_REFERENCE_REPLAY;
+                if (!c.evidence_flags && !c.source_replaced && leaf.cds) continue;
+                if (!c.evidence_flags) c.evidence_flags = DUCKVEP_CARRIER_CALLED;
+            }
+            leaf.evidence_flags |= c.evidence_flags;
+            b->contributors[kept++] = c;
+        }
+        leaf.contributor_count = kept;
+    }
+    if (leaf.cds && leaf.sequence_status == DUCKVEP_HAPLOTYPE_OK &&
+        (leaf.evidence_flags & DUCKVEP_CARRIER_CONDITIONAL))
+        leaf.sequence_status = DUCKVEP_HAPLOTYPE_CONDITIONAL;
     s->completed_leaves++;
     *out = leaf;
     return DUCKVEP_HAPLOTYPE_STREAM_OK;

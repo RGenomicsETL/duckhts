@@ -527,6 +527,53 @@ SELECT count(*) FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap');
 ----
 3
 
+# Full source replacements retain overwritten records and do not use differing
+# islands to decide which retained bases survive.
+statement ok
+CREATE TABLE hap_raw_overlap AS SELECT event_index,0 seq_region,position,reference,
+ alternates,0 transcript_index,0 sample_index,gt FROM
+ (VALUES (1,100,'AAA',['CAA'],'0|1'),(2,101,'A',['G'],'1|1'))
+ v(event_index,position,reference,alternates,gt);
+
+query TTIIITT
+SELECT cds,protein,edit_count,len(contributors),stop_in_displaced_frame,
+ coding_blocks[1].coding_status,coding_blocks[1].event_indices
+FROM duckvep_haplotypes('SELECT * FROM hap_raw_overlap ORDER BY event_index DESC','hap',
+ input_mode:='source_records',phase_policy:='vep116_compat') ORDER BY cds;
+----
+AAAAAAAAAAAA	KKKK	2	2	NULL	unsupported_ordered_replacements	[1, 2]
+CAAAAAAAAAAA	QKKK	2	2	NULL	unsupported_ordered_replacements	[1, 2]
+
+query TTII
+SELECT coding_blocks[1].reference,coding_blocks[1].alternate,
+ coding_blocks[1].local_consequence_mask,contributors[1].alt_index
+FROM duckvep_haplotypes('SELECT * FROM hap_raw_overlap','hap',
+ input_mode:='source_records',phase_policy:='vep116_compat') ORDER BY cds;
+----
+AAA	AAA	NULL	0
+AAA	CAA	NULL	1
+
+query TTIII
+SELECT cds,sequence_status,edit_count,carrier_count,evidence_flags
+FROM duckvep_haplotypes('SELECT * REPLACE(CASE event_index WHEN 1 THEN ''.|.'' ELSE gt END AS gt)
+ FROM hap_raw_overlap','hap',input_mode:='source_records',phase_policy:='vep116_compat');
+----
+AGAAAAAAAAAA	conditional	1	2	11
+
+query TI
+SELECT cds,edit_count FROM duckvep_haplotypes(
+ 'SELECT * REPLACE(100 AS position,''A'' AS reference,''1|1'' AS gt,
+ CASE event_index WHEN 1 THEN [''C''] ELSE [''G''] END AS alternates) FROM hap_raw_overlap',
+ 'hap',input_mode:='source_records',phase_policy:='vep116_compat');
+----
+GAAAAAAAAAAA	2
+
+statement error
+SELECT * FROM duckvep_haplotypes('SELECT * FROM hap_raw_overlap','hap',
+ input_mode:='source_records',phase_policy:='vep116_compat',max_leaf_edits:=1);
+----
+max_leaf_edits=1
+
 # Original GT spelling and source ALT ordinals are preserved separately from
 # decoded calls. An undefined file slot is conditional, never a called ALT.
 statement ok

@@ -147,6 +147,33 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
     size_t                           *cds_len_out,
     duckvep_haplotype_result_t       *result);
 
+/* Ordered full-span source replacements in descending original CDS start order;
+ * equal starts retain caller order. Every REF span is nonempty and validated against
+ * the original CDS. Replacement lengths clip at the current sequence end, as in
+ * VEP-116 Haplosaurus. Known REF alleles participate and can undo an earlier edit.
+ *
+ * source_ids is parallel input payload, compacted to the replacements that actually
+ * changed the current sequence. Payloads survive later overwrites. Components are
+ * disjoint reference/alternate spans in descending CDS order; edit_begin/edit_count
+ * select their contiguous payload ranges, including zero-net-change components.
+ * Component flags describe net span length change, not compound consequences.
+ * result->length_diff/flags follow nominal source lengths, even when clipping makes
+ * cds_len differ from reference length + length_diff. applied_edits counts changed
+ * replacements. These source flags do not locate physical frame-displaced bases.
+ *
+ * No allocation. component_capacity must cover edit_count; cds_capacity must cover
+ * the peak rebuilt suffix and final CDS. Input bases use apply_cds_edits conventions.
+ * Original CDS length is at most UINT32_MAX. Inputs, sequence output, components and
+ * payload storage are distinct; source_ids itself is compacted in place. Output
+ * result/count storage must also be distinct. Validation/capacity failures publish
+ * zero counts and do not modify sequence, component or payload storage. */
+duckvep_haplotype_status_t duckvep_haplotype_compose_replacements(
+    const uint8_t *reference, size_t reference_length,
+    const duckvep_haplotype_edit_t *edits, size_t edit_count, int8_t transcript_strand,
+    uint64_t *source_ids, uint8_t *cds, size_t cds_capacity,
+    duckvep_haplotype_block_t *components, size_t component_capacity,
+    size_t *component_count, duckvep_haplotype_result_t *result);
+
 
 #ifdef __cplusplus
 }

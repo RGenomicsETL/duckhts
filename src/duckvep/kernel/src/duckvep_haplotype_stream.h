@@ -71,6 +71,7 @@ typedef struct {
     duckvep_cds_edit_status_t projection_status;
     uint8_t evidence_flags;
     const duckvep_event_t *prepared; /* Borrowed source geometry for this transcript drain. */
+    uint8_t source_replaced; /* Ordered replay changed the then-current sequence. */
 } duckvep_haplotype_contributor_t;
 
 typedef struct {
@@ -98,7 +99,7 @@ typedef struct {
     duckvep_carrier_event_t *leaf_events;
     duckvep_haplotype_contributor_t *contributors;
     duckvep_haplotype_edit_t *edits;
-    uint64_t *edit_event_ids; /* Parallel to edits, including after sorting/reversal. */
+    uint64_t *edit_event_ids; /* Edit payloads, compacted to applied source IDs for ordered replay. */
     duckvep_haplotype_block_t *blocks; /* At most edit_capacity interaction blocks. */
     size_t leaf_capacity, edit_capacity;
     uint8_t *cds, *protein;
@@ -109,8 +110,9 @@ typedef struct {
     duckvep_carrier_leaf_t carriers;
     const duckvep_haplotype_contributor_t *contributors;
     size_t contributor_count;
-    size_t edit_count; /* Physical differing islands, not source-event count. */
-    /* One source identity per physical edit in ascending reference CDS order.
+    size_t edit_count; /* Differing islands, or applied full spans when ordered_replacements is set. */
+    /* One source identity per differing island or applied full-span operation,
+     * in ascending reference CDS order (tied-source order is not guaranteed).
      * A source may occur more than once or in several blocks. Borrowed only for
      * known sequences; block.edit_begin/edit_count select the corresponding IDs. */
     const uint64_t *edit_event_ids;
@@ -123,6 +125,9 @@ typedef struct {
     uint32_t flags;
     uint8_t evidence_flags; /* OR of contributor evidence, distinct from sequence flags. */
     uint8_t stop_in_displaced_frame; /* First translated stop intersects a frame excursion. */
+    /* Source-order components have exact sequences/provenance, but do not provide
+     * a disjoint physical edit history for local SO or frame-span interpretation. */
+    uint8_t ordered_replacements;
     /* First failed coding projection, or edit/rebuild status when projection is OK.
      * Proven noncoding contributors keep their own OUT_OF_CDS status but do not
      * suppress a coding transcript's literal CDS. This does not predict splicing.
@@ -209,8 +214,9 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_push_call(
 /* Route a validated raw-parser result to this source-record interpretation in
  * one candidate transcript. The host supplies every selected ALT interpretation
  * once, plus an empty-ALT interpretation if a retained call has an undefined
- * file slot. A REF interpretation retains missing REF/omitted-call observations
- * without adding an edit; known REF remains implicit. File ploidy is two and PS is
+ * file slot. Retained REF slots participate in ordered replacements; omitted missing
+ * calls retain conditional observations without replacing sequence. Nonmutating known
+ * REF observations are omitted from emitted contributors. File ploidy is two and PS is
  * ignored; the input source ploidy remains in the parser result, not the key.
  * Missing-source or undefined-slot sequences are explicitly CONDITIONAL, not
  * known strict-phase sequences. Mixing raw and decoded policies is an error. */

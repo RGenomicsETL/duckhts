@@ -44,7 +44,11 @@ enum {
     DUCKVEP_CARRIER_CALLED = 1u,
     DUCKVEP_CARRIER_MISSING = 2u,
     DUCKVEP_CARRIER_UNPHASED = 4u,
-    DUCKVEP_CARRIER_CONDITIONAL = 8u /* Explicit interpretation, not proof of a called allele. */
+    DUCKVEP_CARRIER_CONDITIONAL = 8u, /* Explicit interpretation, not proof of a called allele. */
+    /* Private replay tag: a retained source call consumes REF at this slot.
+     * Distinguishes executable REF from an omitted missing-call observation.
+     * Removed before public contributor/leaf evidence is emitted. */
+    DUCKVEP_CARRIER_REFERENCE_REPLAY = 16u
 };
 
 typedef struct {

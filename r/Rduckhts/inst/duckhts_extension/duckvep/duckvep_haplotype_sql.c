@@ -516,7 +516,7 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
     if (!prepare_difference_reference(s, bind, leaf, error, error_size)) return 0;
     duckvep_coding_context_t coding;
     uint32_t tx = leaf->carriers.transcript_index;
-    if (leaf->block_count) {
+    if (leaf->block_count && !leaf->ordered_replacements) {
         const duckvep_owned_model_t *model = &bind->entry->model;
         duckvep_edit_set_t edits = {s->buffers.edits, leaf->edit_count};
         duckvep_haplotype_result_t applied = {leaf->cds_length,
@@ -558,7 +558,7 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
         ? sequence_name(leaf->sequence_status) : "unavailable_projection");
     ((uint64_t *)duckdb_vector_get_data(v[7]))[row] = leaf->edit_count;
     ((uint32_t *)duckdb_vector_get_data(v[8]))[row] = leaf->carriers.call_count;
-    if (leaf->cds)
+    if (leaf->cds && !leaf->ordered_replacements)
         ((bool *)duckdb_vector_get_data(v[HAPLOTYPE_STOP_COLUMN]))[row] = leaf->stop_in_displaced_frame != 0u;
     else null_cell(v[HAPLOTYPE_STOP_COLUMN], row);
     const size_t counts[] = {leaf->carriers.call_count, leaf->contributor_count, leaf->block_count};
@@ -632,10 +632,12 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
                 ((int64_t *)duckdb_vector_get_data(fields[4]))[at] = block->length_diff;
                 ((uint32_t *)duckdb_vector_get_data(fields[5]))[at] = block->flags;
                 duckvep_sequence_delta_t delta;
-                duckvep_context_delta_status_t status = duckvep_coding_context_block_delta_fill(
+                duckvep_context_delta_status_t status = leaf->ordered_replacements
+                    ? DUCKVEP_CONTEXT_DELTA_UNSUPPORTED : duckvep_coding_context_block_delta_fill(
                     &coding, s->buffers.edits, leaf->edit_count, block,
                     bind->entry->model.transcripts.flags[tx], &delta);
-                const char *name = status == DUCKVEP_CONTEXT_DELTA_OK ? "ok" :
+                const char *name = leaf->ordered_replacements ? "unsupported_ordered_replacements" :
+                    status == DUCKVEP_CONTEXT_DELTA_OK ? "ok" :
                     status == DUCKVEP_CONTEXT_DELTA_MISSING_TRANSCRIPT_TAIL ? "missing_transcript_tail" :
                     status == DUCKVEP_CONTEXT_DELTA_MISSING_TRANSCRIPT_FLANK ? "missing_transcript_flank" :
                     status == DUCKVEP_CONTEXT_DELTA_UNSUPPORTED ? "unsupported" : "invalid_argument";
@@ -644,7 +646,8 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
                     ((uint64_t *)duckdb_vector_get_data(fields[7]))[at] = duckvep_effect_eval_coding_delta(&delta);
                 else null_cell(fields[7], at);
                 ((bool *)duckdb_vector_get_data(fields[8]))[at] =
-                    coding.alt_first_stop_position1 && block->alt_start0 / 3u >= coding.alt_first_stop_position1;
+                    leaf->translation.first_stop_position1 &&
+                    block->alt_start0 / 3u >= leaf->translation.first_stop_position1;
                 ((duckdb_list_entry *)duckdb_vector_get_data(fields[HAPLOTYPE_BLOCK_EVENT_FIELD]))[at] =
                     (duckdb_list_entry){event_base + block->edit_begin, block->edit_count};
             }
