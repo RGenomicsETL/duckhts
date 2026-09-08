@@ -1,6 +1,15 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- record 73,504 passing source-bound raw-record profiles, resolving all 15,953
+  retained failures without a paired regression, plus 38,016 passing paired-context
+  profiles and their fixed/random controls. Preserve historical evidence and add
+  matched decoded-executor benchmarks and 11.2 million native property trials
+
+- snapshot conformance-observer genotype/mapping values at upstream container
+  construction so overlapping transcripts cannot overwrite another transcript's
+  observations; test both strands, unchanged complete output and corruption rejection
+
 - plan raw haplotype replay order from complete supplied source buffers, including
   reference-only records. Select duplicate sources by their full ordered ALT lists
   and retain shadowed calls as explicit provenance

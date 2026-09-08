@@ -601,7 +601,12 @@ deliberate corruptions guard the verifier. This is a raw-input compatibility aud
 not a replacement for the original phased-sequence corpus or a population error rate.
 
 An optional observer sidecar exposes the actual upstream retained genotype objects
-and file-profile ploidy without changing its sequence output. The same audit compares
+and file-profile ploidy without changing its sequence output. Genotype and mapping
+values are copied when the original upstream container constructor returns;
+VariationFeature objects can be shared and remapped by another transcript before
+output serialization. `Rscript test/duckvep/conformance/haplotype_observer_contract.R`
+checks both strands against overlapping full-exon/two-exon models and verifies that
+enabling the sidecar preserves complete oracle output. The same audit compares
 the standalone native raw-GT parser on all 14,040 source calls: retained/omitted status,
 parsed slot count, the two consumed allele ordinals, source ploidy and missingness.
 Seven field-corruption controls guard that comparison. Parser results and failures

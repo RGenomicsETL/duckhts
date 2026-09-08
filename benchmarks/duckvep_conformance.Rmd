@@ -969,7 +969,7 @@ knitr::kable(seed_summary, row.names = FALSE)
 
 Together these seeds executed `r format(sum(seed_summary$trials), big.mark = ",", scientific = FALSE)`
 property trials on the shown revision. Millions of passing trials do not make a
-counter with six or eight observations densely explored, and marginal counters
+counter with single-digit observations densely explored, and marginal counters
 do not establish coverage of their cross-products. The fresh-seed HGVS failure
 above is direct evidence of this limit. Dedicated rare-state strata and retained
 counterexamples complement broad draws; they do not justify a population
@@ -1174,10 +1174,12 @@ against pinned, unmodified Haplosaurus. Across the two seeds there are
 `r format(sum(record_current$oracle_lanes), big.mark = ",")` oracle file lanes;
 DuckHTS returns `r format(sum(record_current$observed_carriers), big.mark = ",")`
 carrier memberships. The full comparison retains CDS/protein multisets, counts
-and applied-record provenance. Available includes explicitly conditional replay;
+and applied-record identity sets within each equal-sequence group. It does not
+certify physical-edit multiplicity or per-lane sequence association. Carrier-key
+uniqueness and totals are checked separately. Available includes explicitly conditional replay;
 a NULL sequence remains a disagreement, not a waiver.
-All failure columns count profiles. Every sequence is available in this campaign;
-availability does not imply agreement.
+All failure columns count profiles; `r sum(record_current$profiles_with_unavailable)`
+profiles have unavailable sequence. Availability does not imply agreement.
 The receipt ledger retains every run, generator, coverage and artifact hash.
 
 ```{r rare-source-record-transitions}
@@ -1196,11 +1198,13 @@ names(record_transitions) <- c("seed", "still passing", "resolved", "regressed",
 knitr::kable(record_transitions, row.names = FALSE)
 ```
 
-The paired comparison has **`r format(sum(record_transitions$regressed), big.mark = ",")`
-previously passing profiles that fail at the current source**. All are rare
-duplicate-deletion, same-start duplicate/SNV or reverse-strand same-end cases.
-They remain failures alongside every unresolved profile. The lower total failure
-count is not conformance and does not establish absence of regression.
+The identical-input comparison resolves
+**`r format(sum(record_transitions$resolved), big.mark = ",")` retained failures**,
+with **`r format(sum(record_transitions$regressed), big.mark = ",")` regressions** and
+**`r format(sum(record_transitions[["still failing"]]), big.mark = ",")` remaining failures**.
+These transitions apply only to the declared generated inputs; they do not establish
+absence of regression outside this campaign. Every earlier failing comparison remains
+in its revision-labelled artifact.
 
 Each seed includes 144 fixed profiles and 512 general-random overlapping pairs.
 The rare lane requires **32 draws in each of 1,128 cells**: 12 geometries × two
@@ -1244,8 +1248,60 @@ and applies full REF spans in descending mapped-CDS order: record a restores the
 retained middle base after b changes it. Applied-record provenance retains b even
 when its sequence change is overwritten. Ordered raw replacements use bounded
 native storage and preserve net component spans; local SO and displaced-frame
-facts are unavailable for that path. Duplicate selection and tied-record ordering
-remain compatibility gaps. These disagreements are not evidence that VEP is wrong.
+facts are unavailable for that path. Source-buffer ordering and duplicate selection
+are exercised by the quota-controlled campaigns in this report. Multi-transcript
+and cross-exon mapping require separate conformance. These observations are not
+evidence that VEP is wrong.
+
+### Paired source-context configurations
+
+```{r paired-source-contexts}
+contexts <- read.csv(file.path(root, "test/duckvep/conformance/data/haplotype_context_history.csv"),
+  colClasses = c(source_revision = "character"))
+stopifnot(all(contexts$extension_build_binding == "htslib_distclean_make_release"),
+  all(contexts$controls_rejected == 4L),
+  all(contexts$minimum_stratum_draws == contexts$context_per_stratum),
+  !anyDuplicated(contexts[c("source_revision", "seed", "context_per_stratum", "cohort", "shape")]))
+context_revision <- tail(unique(contexts$source_revision), 1L)
+context_current <- subset(contexts, source_revision == context_revision)
+context_quota <- max(context_current$context_per_stratum)
+context_current <- subset(context_current, context_per_stratum == context_quota)
+context_paired <- subset(context_current, cohort == "paired_context")
+context_summary <- aggregate(cbind(profiles, input_records, observed_carriers, failures,
+  oracle_context_changed, observed_context_changed) ~ seed, data = context_current, FUN = sum)
+knitr::kable(context_summary, row.names = FALSE)
+```
+
+Source `r context_revision` includes **`r format(sum(context_paired$profiles), big.mark = ",")`
+paired context profiles** from `r sum(context_paired$edit_templates)` seeded edit templates.
+The table also includes 656 fixed/general-random controls per seed; their inputs and
+complete oracle observations match the corresponding profiles in the rare-GT campaign.
+The ledger retains both the one-draw smoke runs and the `r context_quota`-draw runs.
+
+Every one of 2,376 geometry × GT-pattern × strand × placement × neutral-count cells
+receives `r context_quota` draws per seed. Each edit template is reused in 33 contexts:
+reference-only records occur before, between or after the tested edits, with counts
+including the neighbourhoods of the pinned interval tree's root changes. The
+generator verifies unchanged edit geometry, alleles and GTs across those contexts,
+the complete upstream source buffer, and the absence of neutral records from
+retained genotype objects.
+
+In **`r format(sum(context_paired$oracle_context_changed), big.mark = ",")` profiles**,
+the oracle's complete sequence/count/applied-record-set observation differs from
+the zero-neutral-record case; DuckHTS records
+`r format(sum(context_paired$observed_context_changed), big.mark = ",")` such changes.
+The full per-profile comparison, not equality of those two totals, determines agreement.
+These are paired observations, not independent biological samples or population
+error-rate estimates. The single-exon, one-sample reference and comparison limitations
+above also apply here; rare GT classes and neutral contexts are separate campaigns,
+not their complete cross-product.
+
+Cross-exon replay is not certified by these passing campaigns. A separate
+[two-seed multi-transcript diagnostic](https://github.com/RGenomicsETL/duckhts/issues/92#issuecomment-5578980966)
+retains 384 disagreements across 3,072 transcript cases: DuckHTS withholds sequence
+for exon-spanning projection failures while Haplosaurus omits the unmapped record.
+That temporary diagnostic does not validate physical-edit provenance or whole-haplotype
+SO/HGVS and is not promoted into the source-record ledger.
 
 ## Individual Sequence Ontology terms
 

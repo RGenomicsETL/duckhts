@@ -463,6 +463,8 @@ duplicate count. A failed suite does not append rows.
 | 2026-09-08 | 47eaa7b1        | 0x000000000135282a |                 56 | 5,600,000  | 5,600,000  |      0 |          0 |         265 | 27,739,627       |                46.705 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-09-08 | 6bcff335        | 0x00000000000000ad |                 55 | 5,500,000  | 5,500,000  |      0 |          0 |         262 | 27,738,016       |                47.299 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-09-08 | 6bcff335        | 0x000000000135282a |                 55 | 5,500,000  | 5,500,000  |      0 |          0 |         262 | 27,738,332       |                47.452 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
+| 2026-09-08 | ae131a9d        | 0x00000000000000ad |                 56 | 5,600,000  | 5,600,000  |      0 |          0 |         269 | 34,092,011       |                46.210 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
+| 2026-09-08 | ae131a9d        | 0x000000000135282a |                 56 | 5,600,000  | 5,600,000  |      0 |          0 |         269 | 34,092,327       |                45.861 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 
 | target                                                                          | trials  | passed  | failed | skipped | duplicates |
 |:--------------------------------------------------------------------------------|:--------|:--------|:-------|:--------|:-----------|
@@ -581,12 +583,12 @@ biological configurations.
 
 | revision | seed               | targets |  trials | required_counters_observed | minimum_required_counter_hits | fixed_witness_counters_not_hit |
 |:---------|:-------------------|--------:|--------:|---------------------------:|------------------------------:|-------------------------------:|
-| 47eaa7b1 | 0x00000000000000ad |      56 | 5600000 |                        263 |                             6 |                              3 |
-| 47eaa7b1 | 0x000000000135282a |      56 | 5600000 |                        263 |                             9 |                              3 |
+| ae131a9d | 0x00000000000000ad |      56 | 5600000 |                        263 |                             6 |                              3 |
+| ae131a9d | 0x000000000135282a |      56 | 5600000 |                        263 |                             9 |                              3 |
 
 Together these seeds executed 11,200,000 property trials on the shown
-revision. Millions of passing trials do not make a counter with six or
-eight observations densely explored, and marginal counters do not
+revision. Millions of passing trials do not make a counter with
+single-digit observations densely explored, and marginal counters do not
 establish coverage of their cross-products. The fresh-seed HGVS failure
 above is direct evidence of this limit. Dedicated rare-state strata and
 retained counterexamples complement broad draws; they do not justify a
@@ -667,7 +669,7 @@ Whole-haplotype SO/HGVS remains unfinished.
 |      3 |   768 |           768 |         1536 |         2304 |                        1332 |
 |      4 |  6144 |          6144 |        12288 |        24576 |                       16800 |
 
-Source 47eaa7b1460a6b29049cdb50928956a055d6abb9 records a **failing
+Source ae131a9d08f8cc3e8b38c034337740db0da8dbd4 records a **failing
 decoded-call/raw-parser comparison**: 6990 disagreements in 7020
 profiles. It is not a population error rate or a replacement for the
 passing literal-sequence corpus. This lane uses public
@@ -763,37 +765,40 @@ biological certainty for conditional sequence.
 
 |     seed | cohort           | profiles | full failures | available sequence differences | profiles with unavailable sequence | carrier-total failures |
 |---------:|:-----------------|---------:|--------------:|-------------------------------:|-----------------------------------:|-----------------------:|
-|      173 | fixed_and_random |      656 |           114 |                            108 |                                  0 |                      0 |
-| 20260906 | fixed_and_random |      656 |           120 |                            114 |                                  0 |                      0 |
-|      173 | rare             |    36096 |          7831 |                           7206 |                                  0 |                      0 |
-| 20260906 | rare             |    36096 |          7888 |                           7266 |                                  0 |                      0 |
+|      173 | fixed_and_random |      656 |             0 |                              0 |                                  0 |                      0 |
+| 20260906 | fixed_and_random |      656 |             0 |                              0 |                                  0 |                      0 |
+|      173 | rare             |    36096 |             0 |                              0 |                                  0 |                      0 |
+| 20260906 | rare             |    36096 |             0 |                              0 |                                  0 |                      0 |
 
-Source 47eaa7b1460a6b29049cdb50928956a055d6abb9 runs the public
+Source ae131a9d08f8cc3e8b38c034337740db0da8dbd4 runs the public
 `source_records`/`vep116_compat` path against pinned, unmodified
 Haplosaurus. Across the two seeds there are **73,504 profiles**, 220,512
 source records and 147,008 oracle file lanes; DuckHTS returns 147,008
 carrier memberships. The full comparison retains CDS/protein multisets,
-counts and applied-record provenance. Available includes explicitly
-conditional replay; a NULL sequence remains a disagreement, not a
-waiver. All failure columns count profiles. Every sequence is available
-in this campaign; availability does not imply agreement. The receipt
-ledger retains every run, generator, coverage and artifact hash.
+counts and applied-record identity sets within each equal-sequence
+group. It does not certify physical-edit multiplicity or per-lane
+sequence association. Carrier-key uniqueness and totals are checked
+separately. Available includes explicitly conditional replay; a NULL
+sequence remains a disagreement, not a waiver. All failure columns count
+profiles; 0 profiles have unavailable sequence. Availability does not
+imply agreement. The receipt ledger retains every run, generator,
+coverage and artifact hash.
 
 | source_revision                          | profiles | failures | available_sequence_failures | profiles_with_unavailable |
 |:-----------------------------------------|---------:|---------:|----------------------------:|--------------------------:|
-| 6bcff3353d7c9a2609996aae9828f9da3fb5f238 |    73504 |    38749 |                       11437 |                     27312 |
 | 47eaa7b1460a6b29049cdb50928956a055d6abb9 |    73504 |    15953 |                       14694 |                         0 |
+| ae131a9d08f8cc3e8b38c034337740db0da8dbd4 |    73504 |        0 |                           0 |                         0 |
 
 |     seed | still passing | resolved | regressed | still failing |
 |---------:|--------------:|---------:|----------:|--------------:|
-|      173 |         16398 |    12409 |       966 |          6979 |
-| 20260906 |         16433 |    12311 |       958 |          7050 |
+|      173 |         28807 |     7945 |         0 |             0 |
+| 20260906 |         28744 |     8008 |         0 |             0 |
 
-The paired comparison has **1,924 previously passing profiles that fail
-at the current source**. All are rare duplicate-deletion, same-start
-duplicate/SNV or reverse-strand same-end cases. They remain failures
-alongside every unresolved profile. The lower total failure count is not
-conformance and does not establish absence of regression.
+The identical-input comparison resolves **15,953 retained failures**,
+with **0 regressions** and **0 remaining failures**. These transitions
+apply only to the declared generated inputs; they do not establish
+absence of regression outside this campaign. Every earlier failing
+comparison remains in its revision-labelled artifact.
 
 Each seed includes 144 fixed profiles and 512 general-random overlapping
 pairs. The rare lane requires **32 draws in each of 1,128 cells**: 12
@@ -809,7 +814,7 @@ decoded-input corpora and the finite raw-GT audit remain independent
 evidence lanes.
 
 All 36,752 generated inputs per seed match source
-6bcff3353d7c9a2609996aae9828f9da3fb5f238 exactly, and each complete
+47eaa7b1460a6b29049cdb50928956a055d6abb9 exactly, and each complete
 oracle output is byte-identical. The comparison rules and all preceding
 comparison artifacts are preserved. Four deliberate output corruptions
 are rejected; the 24 fixed disjoint/adjacent controls per seed pass.
@@ -845,9 +850,52 @@ restores the retained middle base after b changes it. Applied-record
 provenance retains b even when its sequence change is overwritten.
 Ordered raw replacements use bounded native storage and preserve net
 component spans; local SO and displaced-frame facts are unavailable for
-that path. Duplicate selection and tied-record ordering remain
-compatibility gaps. These disagreements are not evidence that VEP is
-wrong.
+that path. Source-buffer ordering and duplicate selection are exercised
+by the quota-controlled campaigns in this report. Multi-transcript and
+cross-exon mapping require separate conformance. These observations are
+not evidence that VEP is wrong.
+
+### Paired source-context configurations
+
+|     seed | profiles | input_records | observed_carriers | failures | oracle_context_changed | observed_context_changed |
+|---------:|---------:|--------------:|------------------:|---------:|-----------------------:|-------------------------:|
+|      173 |    19664 |        345840 |             39328 |        0 |                   5376 |                     5376 |
+| 20260906 |    19664 |        345840 |             39328 |        0 |                   5376 |                     5376 |
+
+Source ae131a9d08f8cc3e8b38c034337740db0da8dbd4 includes **38,016 paired
+context profiles** from 1152 seeded edit templates. The table also
+includes 656 fixed/general-random controls per seed; their inputs and
+complete oracle observations match the corresponding profiles in the
+rare-GT campaign. The ledger retains both the one-draw smoke runs and
+the 8-draw runs.
+
+Every one of 2,376 geometry × GT-pattern × strand × placement ×
+neutral-count cells receives 8 draws per seed. Each edit template is
+reused in 33 contexts: reference-only records occur before, between or
+after the tested edits, with counts including the neighbourhoods of the
+pinned interval tree’s root changes. The generator verifies unchanged
+edit geometry, alleles and GTs across those contexts, the complete
+upstream source buffer, and the absence of neutral records from retained
+genotype objects.
+
+In **10,752 profiles**, the oracle’s complete
+sequence/count/applied-record-set observation differs from the
+zero-neutral-record case; DuckHTS records 10,752 such changes. The full
+per-profile comparison, not equality of those two totals, determines
+agreement. These are paired observations, not independent biological
+samples or population error-rate estimates. The single-exon, one-sample
+reference and comparison limitations above also apply here; rare GT
+classes and neutral contexts are separate campaigns, not their complete
+cross-product.
+
+Cross-exon replay is not certified by these passing campaigns. A
+separate [two-seed multi-transcript
+diagnostic](https://github.com/RGenomicsETL/duckhts/issues/92#issuecomment-5578980966)
+retains 384 disagreements across 3,072 transcript cases: DuckHTS
+withholds sequence for exon-spanning projection failures while
+Haplosaurus omits the unmapped record. That temporary diagnostic does
+not validate physical-edit provenance or whole-haplotype SO/HGVS and is
+not promoted into the source-record ledger.
 
 ## Individual Sequence Ontology terms
 

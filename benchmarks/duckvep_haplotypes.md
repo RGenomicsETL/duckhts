@@ -3,8 +3,8 @@ Phased replay: native stream and public SQL
 
 <!-- duckvep_haplotypes.md is generated from duckvep_haplotypes.Rmd. -->
 
-Current source: 47eaa7b1460a6b29049cdb50928956a055d6abb9;
-identical-workload baseline: 9b1b8a0d4e12c99f8f08d9c013d840abf5eb7ec1.
+Current source: ae131a9d08f8cc3e8b38c034337740db0da8dbd4;
+identical-workload baseline: 47eaa7b1460a6b29049cdb50928956a055d6abb9.
 Native measurements cover literal phased replay. SQL materializes all
 current fields, including local coding-block SO; whole-haplotype SO/HGVS
 is unfinished. Both paths consume standalone ALT events and decoded
@@ -67,17 +67,17 @@ observed in the native stream, not inferred SQL counters.
 | transcripts | samples | overlap | mode   | min_s | median_s | max_s | max_process_rss_mib |
 |------------:|--------:|--------:|:-------|------:|---------:|------:|--------------------:|
 |        1024 |       4 |       1 | native | 0.003 |    0.003 | 0.003 |              74.633 |
-|        1024 |       4 |       1 | sql    | 0.050 |    0.051 | 0.052 |             215.293 |
-|        1024 |      64 |       1 | native | 0.013 |    0.014 | 0.014 |              74.477 |
-|        1024 |      64 |       1 | sql    | 0.335 |    0.336 | 0.350 |             376.910 |
-|        1024 |      64 |      16 | native | 0.017 |    0.017 | 0.017 |              74.637 |
-|        1024 |      64 |      16 | sql    | 0.341 |    0.345 | 0.353 |             376.461 |
-|        1024 |      64 |      64 | native | 0.017 |    0.018 | 0.018 |              74.480 |
-|        1024 |      64 |      64 | sql    | 0.342 |    0.344 | 0.350 |             376.711 |
-|        1024 |     256 |       1 | native | 0.045 |    0.046 | 0.047 |              74.633 |
-|        1024 |     256 |       1 | sql    | 1.294 |    1.301 | 1.313 |             957.605 |
-|       10240 |      64 |      16 | native | 0.164 |    0.167 | 0.167 |              74.633 |
-|       10240 |      64 |      16 | sql    | 4.096 |    4.111 | 4.148 |            2133.590 |
+|        1024 |       4 |       1 | sql    | 0.050 |    0.051 | 0.052 |             215.258 |
+|        1024 |      64 |       1 | native | 0.013 |    0.013 | 0.014 |              74.480 |
+|        1024 |      64 |       1 | sql    | 0.337 |    0.339 | 0.341 |             376.762 |
+|        1024 |      64 |      16 | native | 0.016 |    0.017 | 0.017 |              74.480 |
+|        1024 |      64 |      16 | sql    | 0.339 |    0.345 | 0.351 |             376.715 |
+|        1024 |      64 |      64 | native | 0.018 |    0.018 | 0.018 |              74.480 |
+|        1024 |      64 |      64 | sql    | 0.341 |    0.341 | 0.346 |             376.402 |
+|        1024 |     256 |       1 | native | 0.046 |    0.047 | 0.048 |              74.629 |
+|        1024 |     256 |       1 | sql    | 1.301 |    1.309 | 1.312 |             957.941 |
+|       10240 |      64 |      16 | native | 0.164 |    0.164 | 0.166 |              74.633 |
+|       10240 |      64 |      16 | sql    | 4.097 |    4.105 | 4.114 |            2129.961 |
 
 Both compared revisions return each block’s local SO mask, coding status
 and position relative to the first stop. A shared coding context
@@ -87,12 +87,12 @@ configurations. The native count sink omits local SO evaluation.
 
 | transcripts | samples | overlap | median_s_before | median_s_after | median_change_percent | max_process_rss_mib_before | max_process_rss_mib_after |
 |------------:|--------:|--------:|----------------:|---------------:|----------------------:|---------------------------:|--------------------------:|
-|        1024 |       4 |       1 |           0.052 |          0.051 |                -1.923 |                    217.191 |                   215.293 |
-|        1024 |      64 |       1 |           0.346 |          0.336 |                -2.890 |                    375.996 |                   376.910 |
-|        1024 |      64 |      16 |           0.352 |          0.345 |                -1.989 |                    376.730 |                   376.461 |
-|        1024 |      64 |      64 |           0.355 |          0.344 |                -3.099 |                    375.664 |                   376.711 |
-|        1024 |     256 |       1 |           1.334 |          1.301 |                -2.474 |                    957.195 |                   957.605 |
-|       10240 |      64 |      16 |           4.216 |          4.111 |                -2.491 |                   2133.883 |                  2133.590 |
+|        1024 |       4 |       1 |           0.051 |          0.051 |                 0.000 |                    215.293 |                   215.258 |
+|        1024 |      64 |       1 |           0.336 |          0.339 |                 0.893 |                    376.910 |                   376.762 |
+|        1024 |      64 |      16 |           0.345 |          0.345 |                 0.000 |                    376.461 |                   376.715 |
+|        1024 |      64 |      64 |           0.344 |          0.341 |                -0.872 |                    376.711 |                   376.402 |
+|        1024 |     256 |       1 |           1.301 |          1.309 |                 0.615 |                    957.605 |                   957.941 |
+|       10240 |      64 |      16 |           4.111 |          4.105 |                -0.146 |                   2133.590 |                  2129.961 |
 
 Each recorded pass uses a fresh process and a full warm-up. Native
 timing starts after workspace initialization and includes ordered-feed
@@ -134,12 +134,12 @@ are not bytes written to disk.
 
 | transcripts | samples | overlap | peak_transcripts | peak_carriers | peak_prefixes | peak_events | peak_projections | peak_allele_bytes | workspace_bytes | model_bytes |
 |------------:|--------:|--------:|-----------------:|--------------:|--------------:|------------:|-----------------:|------------------:|----------------:|------------:|
-|        1024 |       4 |       1 |                1 |             7 |             6 |           4 |                4 |                10 |            4628 |       34136 |
-|        1024 |      64 |       1 |                1 |           112 |             6 |           4 |                4 |                10 |           14228 |       34136 |
-|        1024 |      64 |      16 |               16 |          1792 |            96 |           4 |               64 |                10 |          189248 |       34136 |
-|        1024 |      64 |      64 |               64 |          7168 |           384 |           4 |              256 |                10 |          749312 |       34136 |
-|        1024 |     256 |       1 |                1 |           448 |             6 |           4 |                4 |                10 |           44948 |       34136 |
-|       10240 |      64 |      16 |               16 |          1792 |            96 |           4 |               64 |                10 |          189248 |      338264 |
+|        1024 |       4 |       1 |                1 |             7 |             6 |           4 |                4 |                10 |            4700 |       34136 |
+|        1024 |      64 |       1 |                1 |           112 |             6 |           4 |                4 |                10 |           14300 |       34136 |
+|        1024 |      64 |      16 |               16 |          1792 |            96 |           4 |               64 |                10 |          189320 |       34136 |
+|        1024 |      64 |      64 |               64 |          7168 |           384 |           4 |              256 |                10 |          749384 |       34136 |
+|        1024 |     256 |       1 |                1 |           448 |             6 |           4 |                4 |                10 |           45020 |       34136 |
+|       10240 |      64 |      16 |               16 |          1792 |            96 |           4 |               64 |                10 |          189320 |      338264 |
 
 Native workspace bytes count actual preallocated buffer capacities and
 state, separately from immutable model allocations. The fixed fixture is
