@@ -731,10 +731,12 @@ Native contributors separately retain exact
 record identity, region, position, REF, interpreted ALT and occupied sample/lane.
 The original source buffer, retained genotype multiplicity and transcript-owned
 CDS coordinates are checked against the fixture, including exon-repeated and
-unselected duplicate sources. Twenty-five controls reject changed sequences,
-samples, counts, source provenance, genotype observations, mapping coordinates,
+unselected duplicate sources. Twenty-six controls reject changed sequences,
+reference models, samples, counts, source provenance, genotype observations, mapping coordinates,
 lane identities and malformed observations. Lane swaps and missing lane-specific
 sources must fail even when grouped sequences, sample counts and source sets agree.
+The sidecar also records upstream's constructed reference CDS. Its comparison
+to the loaded fixture has a separate failure count and a changed-sequence control.
 
 `coverage.csv` requires every declared quota; `summary.csv` and `comparisons.rds`
 retain all verdicts. The default quota is one; zero runs just the baseline.
@@ -742,6 +744,29 @@ retain all verdicts. The default quota is one; zero runs just the baseline.
 mapper or lane-association disagreements exit nonzero. This provides shared-transcript and
 source-context coverage, not arbitrary exon/UTR geometry, phase/PS inference,
 combined SO/HGVS, independent biological observations or population error rates.
+
+`--geometry-per-stratum` adds generated exon/UTR models to the same executor and
+comparison gates. It preserves the fixed-model input columns and seed stream,
+then draws each extra model from 504 cells: 2/3/5/7 coding exons × first coding
+split phase 0/1/2 × absent, intra-exon or separate-exon UTRs × both strands ×
+seven source geometries. Coding exon lengths, intron lengths and intra-exon UTR
+lengths vary; short internal exons can split a codon across three exons. Source
+geometries cover coding substitutions, CDS start/end crossings, exon entry/exit
+crossings, a whole exon with flanks and exon-end anchored insertions. Three samples
+carry opposite lanes and a compacted missing call, with a homozygous ALT anchor.
+
+```sh
+Rscript test/duckvep/conformance/haplotype_model_differential.R --seed 173 --rare-per-stratum 32 --geometry-per-stratum 32
+Rscript test/duckvep/conformance/haplotype_model_differential.R --seed 20260906 --rare-per-stratum 32 --geometry-per-stratum 32
+```
+
+Each command adds 16,128 models to the 18,432 fixed-model cases. All 34,560 cases
+compare six sample/file lanes, source identities, input provenance and owned
+mapper coordinates; all 26 corruption controls must pass. `geometry_coverage.csv`
+checks the requested cell quotas. This grammar uses one registered 180-base CDS
+and standard-code complete translations. It does not cover arbitrary biological
+models, reference-only sample routes, general phase/PS inference or structural
+composition. Failures remain in the combined summary and receipt.
 
 Add `--noncoding-contributors` to `haplotype_sql_differential.R` to run a separately
 receipted augmented corpus after the original gate passes. It adds one homozygous

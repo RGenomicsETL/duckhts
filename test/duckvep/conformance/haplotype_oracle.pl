@@ -44,6 +44,7 @@ my %lane_calls;
             my $lanes = delete $lane_calls{Scalar::Util::refaddr($container)} || [];
             print {$phase_output} JSON->new->canonical->encode({
                 transcript => $container->transcript->stable_id,
+                reference_cds => $container->transcript->{cds},
                 default_ploidy => $container->_default_ploidy,
                 sample_ploidy => $container->_sample_ploidy,
                 source_buffer => [map {{

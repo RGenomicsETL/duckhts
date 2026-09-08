@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- add quota-controlled phased replay models with variable exon lengths, split
+  codons, UTRs and CDS/exon-edge source spans. Verify upstream-constructed CDS
+  sequences alongside mapper observations, complete lanes and source provenance
+
 - verify 221,184 sample/file-lane associations across 36,864 quota-controlled
   shared-transcript cases. Both seeds pass all 25 corruption controls; inputs,
   complete oracle records and earlier verdicts are unchanged
