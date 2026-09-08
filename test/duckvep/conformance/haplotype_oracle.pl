@@ -39,11 +39,22 @@ my $phase_output;
                 transcript => $container->transcript->stable_id,
                 default_ploidy => $container->_default_ploidy,
                 sample_ploidy => $container->_sample_ploidy,
-                calls => [map {{
-                    source_id => $_->variation_feature->variation_name,
-                    sample => $_->sample->name,
-                    genotype => $_->genotype,
-                }} @{$container->get_all_SampleGenotypeFeatures}],
+                source_buffer => [map {{
+                    ids => $_->{ids}, chrom => $_->{chr},
+                    start => $_->{start}, end => $_->{end}, alleles => $_->{alleles},
+                }} @{$self->get_InputBuffer->buffer}],
+                calls => [map {
+                    my $vf = $_->variation_feature;
+                    my $mapping = $vf->{_cds_mapping};
+                    {
+                        source_id => $vf->variation_name,
+                        source_key => $vf->{_th_identifier},
+                        mapping_start => $mapping ? $mapping->start : undef,
+                        mapping_end => $mapping ? $mapping->end : undef,
+                        sample => $_->sample->name,
+                        genotype => $_->genotype,
+                    }
+                } @{$container->get_all_SampleGenotypeFeatures}],
             }), "\n";
         }
         $self->{_output_lines_count}++;

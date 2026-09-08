@@ -668,6 +668,30 @@ Each command includes the 144 fixed and 512 general-random cases: 36,752 profile
 110,256 source records and 73,504 file lanes. Quotas establish cross-product
 coverage, not exhaustive sequence coverage or independent biological observations.
 
+`--context-per-stratum` appends paired source-context trials. Identical edit
+geometry, alleles and GTs are replayed with `0|0` records before, between or after
+the edits. The 2,376 cells cross six geometries, six GT patterns, both strands,
+three placements and eleven neutral-record counts through 36. Counts include
+the neighbourhoods of the pinned interval tree's root changes. Each draw shares
+its tested edits across all 33 contexts; these are paired observations, not
+independent biological samples. The original fixed/general-random and optional
+rare-GT cohorts retain their inputs and comparison rules.
+
+```sh
+Rscript test/duckvep/conformance/haplotype_record_differential.R --seed 173 --context-per-stratum 8
+Rscript test/duckvep/conformance/haplotype_record_differential.R --seed 20260906 --context-per-stratum 8
+```
+
+Each command has 19,008 context profiles plus the 656 fixed/general-random profiles.
+`context_coverage.csv` checks every quota; `context_summary.csv` retains complete
+verdicts and paired changes relative to zero neutral records. The optional oracle
+sidecar records the complete source buffer and each retained genotype's selected
+CDS mapping. Buffered record IDs, coordinates and full alleles are checked against input,
+and reference-only records must be absent from retained genotype objects. The
+sidecar changes serialization only; sequence/count/provenance disagreements remain
+failures. This single-exon context experiment does not certify multi-transcript
+buffering, cross-exon record selection or complete phased annotation.
+
 Use `--extension-receipt` for clean-build evidence. All inputs, outputs, comparisons
 and failures are retained in the reported artifact directory; a mismatch exits
 nonzero. This is a single-exon source-replacement audit, not whole-haplotype SO/HGVS,
