@@ -112,7 +112,8 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_init(
         !valid_array(b->edit_event_ids, b->edit_capacity, sizeof(*b->edit_event_ids)) ||
         !valid_array(b->blocks, b->edit_capacity, sizeof(*b->blocks)) ||
         !valid_array(b->cds, b->cds_capacity, 1u) ||
-        !valid_array(b->protein, b->protein_capacity, 1u))
+        !valid_array(b->protein, b->protein_capacity, 1u) ||
+        !valid_array(b->reference_protein, b->reference_protein_capacity, 1u))
         return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
     duckvep_carriers_status_t status = duckvep_carriers_init(&s->carriers, tx, &b->carriers);
     if (status != DUCKVEP_CARRIERS_OK) return carrier_fail(s, status);
@@ -273,6 +274,7 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_project(
     p->cds_unaffected = 0u;
     p->source_selected = 1u;
     p->selection_set = 0u;
+    p->source_exonic = 1u;
     if (p->status == DUCKVEP_CDS_EDIT_OUT_OF_CDS && s->sequences->cds_length[tx] &&
         model->cds_start1 && model->cds_end1 && model->cds_start1[tx] &&
         model->exon_offset && model->exon_count && model->exon_count[tx] &&
@@ -286,7 +288,12 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_project(
             prepared->interbase ? prepared->insertion_boundary0 : prepared->start1,
             prepared->interbase ? duckvep_event_right_flank1(prepared) : prepared->end1,
             0u, 0u);
-        p->cds_unaffected = !region.overlaps_cds;
+        p->source_exonic = region.overlaps_exon;
+        /* Haplosaurus admits whole source spans through exons. Intronic
+         * context still has provenance but cannot alter its literal CDS,
+         * including the short gaps classified as frameshift introns by SO. */
+        p->cds_unaffected = !region.overlaps_cds ||
+            (stored->source.source_record && !region.overlaps_exon);
     }
     stored->projection_count++;
     if (model->end1[tx] > stored->last_end1) stored->last_end1 = model->end1[tx];
@@ -587,6 +594,40 @@ static duckvep_haplotype_stream_status_t append_differing_edits(
     return DUCKVEP_HAPLOTYPE_STREAM_OK;
 }
 
+/* One curated reference peptide per closing transcript, shared by native
+ * reference-only replay and host difference materialization. */
+static duckvep_haplotype_stream_status_t prepare_reference_protein(
+    duckvep_haplotype_stream_t *s, uint32_t tx) {
+    if (s->have_reference_protein && s->reference_transcript == tx)
+        return DUCKVEP_HAPLOTYPE_STREAM_OK;
+    const duckvep_sequence_pool_t *seq = s->sequences;
+    size_t length = seq->cds_length[tx];
+    uint64_t offset = seq->cds_offset[tx];
+    size_t begin = seq->peptide_edit_offset ? seq->peptide_edit_offset[tx] : 0u;
+    size_t end = seq->peptide_edit_offset ? seq->peptide_edit_offset[tx + 1u] : 0u;
+    if (offset > seq->cds_bytes_len || length > seq->cds_bytes_len - offset ||
+        (seq->peptide_edit_count && !seq->peptide_edit_offset) ||
+        begin > end || end > seq->peptide_edit_count ||
+        (end > begin && (!seq->peptide_edit_position1 || !seq->peptide_edit_alt)))
+        return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
+    duckvep_codon_table_t table = seq->codon_table
+        ? (duckvep_codon_table_t)seq->codon_table[tx] : DUCKVEP_CODON_TABLE_STANDARD;
+    duckvep_haplotype_status_t status = duckvep_haplotype_reference_protein(
+        seq->cds_bytes + (size_t)offset, length, table,
+        end > begin ? seq->peptide_edit_position1 + begin : NULL,
+        end > begin ? seq->peptide_edit_alt + begin : NULL, end - begin,
+        s->buffers.reference_protein, s->buffers.reference_protein_capacity,
+        &s->reference_protein_length);
+    if (status == DUCKVEP_HAPLOTYPE_BUFFER_TOO_SMALL)
+        return fail(s, DUCKVEP_HAPLOTYPE_STREAM_SEQUENCE_FULL);
+    if (status != DUCKVEP_HAPLOTYPE_OK && status != DUCKVEP_HAPLOTYPE_INPUT_INCOMPLETE)
+        return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
+    s->reference_protein_known = status == DUCKVEP_HAPLOTYPE_OK;
+    s->reference_transcript = tx;
+    s->have_reference_protein = 1u;
+    return DUCKVEP_HAPLOTYPE_STREAM_OK;
+}
+
 duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
     duckvep_haplotype_stream_t *s, duckvep_haplotype_leaf_t *out) {
     if (out) memset(out, 0, sizeof(*out));
@@ -610,7 +651,7 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
         return fail(s, DUCKVEP_HAPLOTYPE_STREAM_LEAF_FULL);
     if (status != DUCKVEP_CARRIERS_OK) return carrier_fail(s, status);
     uint32_t tx = leaf.carriers.transcript_index;
-    int raw_records = 0;
+    int raw_records = 0, retained_call = 0;
     for (size_t i = 0u; i < count; i++) {
         const duckvep_haplotype_stored_event_t *e = find_event(s, b->leaf_events[i].event_id);
         const duckvep_haplotype_projection_t *p = e ? find_projection(s, e, tx) : NULL;
@@ -619,6 +660,10 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
         if (!i) raw_records = e->source.source_record;
         if (raw_records != e->source.source_record)
             return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
+        /* Exon-admitted genotype retention selects the upstream mutation
+         * route even for shadowed, unmapped or UTR sources. */
+        retained_call |= p->source_exonic && (e->source.allele_index != 0u ||
+            (evidence & (DUCKVEP_CARRIER_CALLED | DUCKVEP_CARRIER_REFERENCE_REPLAY)) != 0u);
         b->contributors[i] = (duckvep_haplotype_contributor_t){
             e->source, p->status, evidence, &e->prepared, 0u};
         if (raw_records && !p->source_selected) {
@@ -720,6 +765,8 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
             default: leaf.sequence_status = DUCKVEP_HAPLOTYPE_INVALID_ARG; break;
             }
             if (leaf.sequence_status == DUCKVEP_HAPLOTYPE_OK) {
+                duckvep_haplotype_stream_status_t reference_status = prepare_reference_protein(s, tx);
+                if (reference_status != DUCKVEP_HAPLOTYPE_STREAM_OK) return reference_status;
                 /* Replay consumes descending coordinates; interaction discovery
                  * consumes ascending coordinates. Reverse descriptors, not bases,
                  * and borrow both sequences without rebuilding each block. */
@@ -772,6 +819,13 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
                 leaf.flags = applied.flags;
                 if (leaf.protein_length < leaf.translation.length)
                     leaf.flags |= DUCKVEP_HAPLOTYPE_FLAG_STOP_TRUNCATED;
+                leaf.reference_protein = s->reference_protein_known ? b->reference_protein : NULL;
+                leaf.reference_protein_length = s->reference_protein_length;
+                if (raw_records && !retained_call && leaf.reference_protein) {
+                    leaf.protein = leaf.reference_protein;
+                    leaf.protein_length = leaf.reference_protein_length;
+                    leaf.flags &= ~(uint32_t)DUCKVEP_HAPLOTYPE_FLAG_STOP_TRUNCATED;
+                }
                 if (leaf.cds_length > UINT64_MAX - s->translated_bases)
                     return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INTERNAL_ERROR);
                 s->translated_bases += leaf.cds_length;

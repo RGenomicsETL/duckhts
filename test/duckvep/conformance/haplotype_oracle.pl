@@ -9,6 +9,7 @@ use File::Basename qw(dirname);
 my $phase_output;
 my %phase_calls;
 my %lane_calls;
+my $container_json = @ARGV && $ARGV[0] eq '--container-json' ? !!shift(@ARGV) : 0;
 
 # Run the release-116 parser, mapper and container. Construction delegates to
 # upstream unchanged; the observer copies shared genotype/mapping fields before
@@ -20,24 +21,30 @@ my %lane_calls;
 
     sub dump_TranscriptHaplotypeContainer {
         my ($self, $container) = @_;
-        my @haplotypes;
-        foreach my $cds (@{$container->get_all_CDSHaplotypes}) {
-            my $protein = $cds->get_ProteinHaplotype;
-            push @haplotypes, {
-                cds => $cds->seq,
-                protein => $protein->seq,
-                flags => [sort @{$cds->get_all_flags}],
-                contributors => [sort map {$_->variation_name}
-                                      @{$cds->get_all_VariationFeatures}],
-                samples => $cds->get_all_sample_counts,
-                count => $cds->count,
-            };
+        if ($container_json) {
+            $self->{_json} ||= JSON->new->canonical->convert_blessed;
+            $self->SUPER::dump_TranscriptHaplotypeContainer($container);
+        } else {
+            my @haplotypes;
+            foreach my $cds (@{$container->get_all_CDSHaplotypes}) {
+                my $protein = $cds->get_ProteinHaplotype;
+                push @haplotypes, {
+                    cds => $cds->seq,
+                    protein => $protein->seq,
+                    flags => [sort @{$cds->get_all_flags}],
+                    contributors => [sort map {$_->variation_name}
+                                          @{$cds->get_all_VariationFeatures}],
+                    samples => $cds->get_all_sample_counts,
+                    count => $cds->count,
+                };
+            }
+            print JSON->new->canonical->encode({
+                transcript => $container->transcript->stable_id,
+                total_haplotype_count => $container->total_haplotype_count,
+                haplotypes => [sort {$a->{cds} cmp $b->{cds}} @haplotypes],
+            }), "\n";
+            $self->{_output_lines_count}++;
         }
-        print JSON->new->canonical->encode({
-            transcript => $container->transcript->stable_id,
-            total_haplotype_count => $container->total_haplotype_count,
-            haplotypes => [sort {$a->{cds} cmp $b->{cds}} @haplotypes],
-        }), "\n";
         if ($phase_output) {
             my $calls = delete $phase_calls{Scalar::Util::refaddr($container)};
             die "missing construction-time genotype observations\n" unless defined $calls;
@@ -45,6 +52,7 @@ my %lane_calls;
             print {$phase_output} JSON->new->canonical->encode({
                 transcript => $container->transcript->stable_id,
                 reference_cds => $container->transcript->{cds},
+                ($container_json ? (reference_protein => $container->transcript->{protein}) : ()),
                 default_ploidy => $container->_default_ploidy,
                 sample_ploidy => $container->_sample_ploidy,
                 source_buffer => [map {{
@@ -55,12 +63,11 @@ my %lane_calls;
                 replay_lanes => [sort {$a->{sample} cmp $b->{sample} || $a->{lane1} <=> $b->{lane1}} @$lanes],
             }), "\n";
         }
-        $self->{_output_lines_count}++;
     }
 }
 
 (@ARGV == 3 || @ARGV == 4) or die
-    "usage: haplotype_oracle.pl input.vcf reference.fa model.gff3.gz [phase-observations.jsonl]\n";
+    "usage: haplotype_oracle.pl [--container-json] input.vcf reference.fa model.gff3.gz [phase-observations.jsonl]\n";
 my ($vcf, $fasta, $gff, $phase_path) = @ARGV;
 if (defined $phase_path) {
     open($phase_output, '>', $phase_path) or die "cannot write $phase_path: $!";
@@ -119,6 +126,7 @@ my $runner = DuckHTS::HaploObserver->new({
     warning_file => $vcf . '.warnings',
     database => 0,
     no_stats => 1,
+    json => $container_json,
 });
 $runner->run;
 die "unemitted construction-time genotype observations\n" if keys %phase_calls;

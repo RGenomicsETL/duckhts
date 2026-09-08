@@ -1520,7 +1520,7 @@ duckvep_compat_vep116_source_cds_edit_build(
         first != cached_first || last != cached_last || exon != cached_exon || phase != cached_phase)
         return DUCKVEP_CDS_EDIT_INVALID_ARG;
     if ((uint64_t)last - first + 1u + phase != cds_length)
-        return DUCKVEP_CDS_EDIT_OUT_OF_CDS;
+        return DUCKVEP_CDS_EDIT_INVALID_ARG;
     if (duckvep_project_event_to_cds(&view, exons, tx_idx, event, &first, &last))
         return DUCKVEP_CDS_EDIT_OUT_OF_CDS;
 

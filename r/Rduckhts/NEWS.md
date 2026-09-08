@@ -1,5 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- preserve curated reference peptides for bundled `source_records` haplotypes
+  without retained exon-overlapping genotypes, including internal stops and start
+  methionine. Intronic context preserves provenance without changing literal CDS
+  replay. Retained exonic REF lanes keep mutation translation; missing evidence stays explicit
+
 - return conditional bundled `source_records` haplotypes when a validated source
   spans coding and noncoding sequence. Omitted contributors retain `source_unmapped`
   evidence; model/REF errors still withhold sequence and strict replay is unchanged

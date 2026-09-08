@@ -670,7 +670,7 @@ other projection errors as failures. Missing/unphased evidence makes the path in
 replay does not predict splice alteration; noncoding transcripts still have no CDS.
 One shared CDS translator serves independent coding contexts and phased replay. It
 retains every complete codon's residue and the first-stop position in one pass;
-the public haplotype protein is a length-delimited prefix through that stop. Later
+the mutation-path protein is a length-delimited prefix through that stop. Later
 residues stay in worker storage for coding-context consumption, and later source
 events remain in contributor provenance. Full and stop-truncated translation do
 not have separate biological implementations.
@@ -695,7 +695,17 @@ base, including trailing partial codons and sequence after a stop. Reference
 protein preparation uses that same translator, then applies Ensembl's distinct
 start-methionine, terminal-stop and curated peptide-edit rules before comparison.
 It retains internal stops and applies single-residue edits to the complete
-reference; the displayed alternate still selects its first-stop prefix.
+reference. One worker-owned reference peptide is prepared per closing transcript
+and serves both native replay and SQL difference materialization. A raw sample
+without a retained exon-overlapping genotype uses this curated reference peptide.
+Missing calls retain conditional evidence. Any retained exon-overlapping genotype
+selects mutation translation, including retained REF lanes and shadowed, unmapped
+or UTR sources with zero physical edits. Entirely intronic source spans retain
+provenance but do not select mutation translation or alter literal CDS replay.
+This also applies to short introns classified as frameshift introns for SO;
+Haplosaurus admits source records through exon overlap before constructing genotypes.
+CDS equality and edit count do not select the protein route. Strict decoded replay
+still withholds sequence for missing calls; pure-reference samples remain implicit.
 Coding and HGVS share codon-rounded peptide windows with distinct reference and
 alternate offsets. A physical interaction block opens those operands against the
 complete materialized path: earlier closed blocks can shift the alternate by whole

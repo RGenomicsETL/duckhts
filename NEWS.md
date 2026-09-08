@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- use the shared curated reference peptide for raw haplotypes without retained
+  exon-overlapping genotypes. Intronic context retains provenance and does not
+  alter literal CDS replay. Retained exon-overlapping calls use mutation
+  translation even with zero coding edits; reference preparation is worker-local
+
 - verify 69,120 phased transcript cases and 414,720 sample/file lanes, including
   32,256 variable-exon/UTR models and 4,580 observed one- or two-base coding
   exons. Both seeds pass all 26 corruption controls; matched inputs, complete

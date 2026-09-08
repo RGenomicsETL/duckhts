@@ -87,9 +87,10 @@ typedef struct {
     duckvep_haplotype_edit_t edit;
     uint32_t transcript_index;
     duckvep_cds_edit_status_t status;
-    uint8_t cds_unaffected; /* Proven no coding overlap, not an ignored projection failure. */
+    uint8_t cds_unaffected; /* Proven no literal CDS contribution, not an ignored projection failure. */
     uint8_t source_selected; /* Raw source selected for this candidate's replacement. */
     uint8_t selection_set;
+    uint8_t source_exonic; /* Full raw REF span reaches an exon admitted by Haplosaurus. */
 } duckvep_haplotype_projection_t;
 
 typedef struct {
@@ -128,8 +129,8 @@ typedef struct {
     uint64_t *edit_event_ids; /* Edit payloads, compacted to applied source IDs for ordered replay. */
     duckvep_haplotype_block_t *blocks; /* At most edit_capacity interaction blocks. */
     size_t leaf_capacity, edit_capacity;
-    uint8_t *cds, *protein;
-    size_t cds_capacity, protein_capacity;
+    uint8_t *cds, *protein, *reference_protein;
+    size_t cds_capacity, protein_capacity, reference_protein_capacity;
 } duckvep_haplotype_stream_buffers_t;
 
 typedef struct {
@@ -145,8 +146,12 @@ typedef struct {
     const duckvep_haplotype_block_t *blocks; /* Ascending reference CDS order. */
     size_t block_count;
     const uint8_t *reference_cds; /* Model-owned; block spans borrow this and cds. */
-    const uint8_t *cds, *protein; /* Length-delimited views; protein excludes residues after first stop. */
-    duckvep_translation_t translation; /* Full translation remains in protein storage for coding facts. */
+    /* Raw mutation protein is a first-stop prefix. Without a retained exonic
+     * genotype, raw replay uses the curated reference peptide instead. */
+    const uint8_t *cds, *protein;
+    const uint8_t *reference_protein; /* Worker-owned; NULL without a complete reference codon. */
+    size_t reference_protein_length;
+    duckvep_translation_t translation; /* Full raw translation remains in buffers.protein. */
     size_t cds_length, protein_length;
     uint32_t flags;
     uint8_t evidence_flags; /* OR of contributor evidence, distinct from sequence flags. */
@@ -178,6 +183,9 @@ typedef struct {
     uint8_t have_input, have_current, initialized;
     uint8_t have_phase_policy;
     duckvep_phase_policy_t phase_policy;
+    uint32_t reference_transcript;
+    size_t reference_protein_length;
+    uint8_t have_reference_protein, reference_protein_known;
     duckvep_haplotype_stream_status_t error;
     duckvep_carriers_status_t carrier_error;
     uint64_t input_events, projected_events, completed_leaves, translated_bases;

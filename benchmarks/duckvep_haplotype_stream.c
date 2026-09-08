@@ -113,6 +113,7 @@ void duckhts_bench_haplotype_stream(char **reference, int *transcripts, int *sam
     b.event_capacity = 5u; b.projection_capacity = 4u * o + 1u;
     b.allele_capacity = 64u; b.leaf_capacity = b.edit_capacity = 4u;
     b.cds_capacity = 184u; b.protein_capacity = 64u;
+    b.reference_protein_capacity = 62u;
 #define MODEL_ARRAYS(X) \
     X(chrom, n) X(exon_count, n) X(strand, n) X(starts, n) X(ends, n) \
     X(offsets, n) X(lengths, n) X(cdna_starts, n) X(cds_offsets, n)
@@ -123,7 +124,8 @@ void duckhts_bench_haplotype_stream(char **reference, int *transcripts, int *sam
     X(b.carriers.prefixes, b.carriers.prefix_capacity) X(b.carriers.prefix_index, b.carriers.prefix_buckets) \
     X(b.events, b.event_capacity) X(b.projections, b.projection_capacity) X(b.alleles, b.allele_capacity) \
     X(b.leaf_events, 4u) X(b.contributors, 4u) X(b.edits, 4u) X(b.edit_event_ids, 4u) \
-    X(b.blocks, 4u) X(b.cds, b.cds_capacity) X(b.protein, b.protein_capacity)
+    X(b.blocks, 4u) X(b.cds, b.cds_capacity) X(b.protein, b.protein_capacity) \
+    X(b.reference_protein, b.reference_protein_capacity)
 #define COUNT_MODEL(p, count) model_bytes += (count) * sizeof(*(p));
 #define COUNT_WORK(p, count) workspace += (count) * sizeof(*(p));
     MODEL_ARRAYS(COUNT_MODEL)

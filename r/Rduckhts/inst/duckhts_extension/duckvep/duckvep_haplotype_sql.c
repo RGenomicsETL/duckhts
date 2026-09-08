@@ -50,11 +50,8 @@ typedef struct {
     duckvep_sequence_diff_scratch_t difference_scratch;
     duckvep_sequence_difference_t *differences;
     uint8_t *difference_reference;
-    uint8_t *reference_protein;
     uint8_t *reference_coding_protein;
     duckvep_translation_t reference_coding_translation;
-    size_t reference_protein_capacity, reference_protein_length;
-    int reference_protein_known;
     uint32_t difference_transcript;
     int have_difference_reference;
     size_t workspace_bytes;
@@ -194,7 +191,7 @@ static void haplotype_state_destroy(void *pointer) {
     free(b->contributors); free(b->edits); free(b->blocks); free(b->cds); free(b->protein);
     free(b->edit_event_ids);
     free(s->difference_scratch.scores); free(s->difference_scratch.trace); free(s->differences);
-    free(s->difference_reference); free(s->reference_protein);
+    free(s->difference_reference); free(b->reference_protein);
     free(s->reference_coding_protein);
     free(s->gt); free(s->phase); free(s->sets); free(s);
 }
@@ -223,7 +220,7 @@ static int workspace_allocate(haplotype_state_t *s, const haplotype_bind_t *bind
     if (b->protein_capacity > SIZE_MAX / 2u) return 0;
     s->difference_scratch.score_capacity = b->protein_capacity * 2u;
     s->difference_scratch.trace_capacity = n[LIMIT_ALIGNMENT];
-    s->reference_protein_capacity = n[LIMIT_SEQUENCE] / 3u + 2u;
+    b->reference_protein_capacity = n[LIMIT_SEQUENCE] / 3u + 2u;
     /* Count every byte before allocating any of the arrays. Each pointer has
      * one owner and one cleanup site; no allocator is used by the scan loop. */
 #define ARRAYS(X) \
@@ -243,8 +240,8 @@ static int workspace_allocate(haplotype_state_t *s, const haplotype_bind_t *bind
     X(s->difference_scratch.trace, s->difference_scratch.trace_capacity) \
     X(s->differences, n[LIMIT_DIFFERENCES]) \
     X(s->difference_reference, n[LIMIT_SEQUENCE]) \
-    X(s->reference_protein, s->reference_protein_capacity) \
-    X(s->reference_coding_protein, s->reference_protein_capacity) \
+    X(b->reference_protein, b->reference_protein_capacity) \
+    X(s->reference_coding_protein, b->reference_protein_capacity) \
     X(s->gt, bind->source_records ? 0u : n[LIMIT_PLOIDY]) \
     X(s->phase, bind->source_records ? 0u : n[LIMIT_PLOIDY]) \
     X(s->sets, bind->source_records ? 0u : n[LIMIT_PHASE_SETS])
@@ -553,24 +550,11 @@ static int prepare_difference_reference(haplotype_state_t *s, const haplotype_bi
         }
         s->difference_reference[i] = (uint8_t)base;
     }
-    size_t begin = seq->peptide_edit_offset ? seq->peptide_edit_offset[tx] : 0u;
-    size_t count = seq->peptide_edit_offset ? seq->peptide_edit_offset[tx + 1u] - begin : 0u;
     duckvep_codon_table_t table = seq->codon_table
         ? (duckvep_codon_table_t)seq->codon_table[tx] : DUCKVEP_CODON_TABLE_STANDARD;
-    duckvep_haplotype_status_t status = duckvep_haplotype_reference_protein(
-        leaf->reference_cds, length, table,
-        count ? seq->peptide_edit_position1 + begin : NULL,
-        count ? seq->peptide_edit_alt + begin : NULL, count,
-        s->reference_protein, s->reference_protein_capacity, &s->reference_protein_length);
-    if (status != DUCKVEP_HAPLOTYPE_OK && status != DUCKVEP_HAPLOTYPE_INPUT_INCOMPLETE) {
-        snprintf(error, error_size, "duckvep_haplotypes: reference protein status %u at transcript %u",
-            (unsigned)status, tx);
-        return 0;
-    }
-    s->reference_protein_known = status == DUCKVEP_HAPLOTYPE_OK;
     duckvep_translation_status_t coding = duckvep_translate_cds(leaf->reference_cds,
         length, table, DUCKVEP_TRANSLATION_N_UNKNOWN, s->reference_coding_protein,
-        s->reference_protein_capacity, &s->reference_coding_translation);
+        s->buffers.reference_protein_capacity, &s->reference_coding_translation);
     if (coding != DUCKVEP_TRANSLATION_OK) {
         snprintf(error, error_size, "duckvep_haplotypes: reference coding translation status %u at transcript %u",
             (unsigned)coding, tx);
@@ -585,12 +569,12 @@ static int prepare_difference_reference(haplotype_state_t *s, const haplotype_bi
 static int append_sequence_differences(duckdb_vector vector, idx_t row, haplotype_state_t *s,
     const haplotype_bind_t *bind, const duckvep_haplotype_leaf_t *leaf, int protein,
     char *error, size_t error_size) {
-    int known = leaf->cds && (!protein || s->reference_protein_known);
-    const uint8_t *reference = protein ? s->reference_protein : s->difference_reference;
+    int known = leaf->cds && (!protein || leaf->reference_protein);
+    const uint8_t *reference = protein ? leaf->reference_protein : s->difference_reference;
     const uint8_t *alternate = protein ? leaf->protein : leaf->cds;
     duckvep_sequence_diff_result_t result = {0};
     if (known) {
-        size_t ref_length = protein ? s->reference_protein_length
+        size_t ref_length = protein ? leaf->reference_protein_length
             : s->stream.sequences->cds_length[leaf->carriers.transcript_index];
         size_t alt_length = protein ? leaf->protein_length : leaf->cds_length;
         duckvep_sequence_diff_status_t status = duckvep_sequence_differences(reference, ref_length,
@@ -660,7 +644,7 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
         if (duckvep_coding_context_open_replay(leaf->reference_cds, model->sequences.cds_length[tx],
                 &edits, model->transcripts.strand[tx], table, leaf->cds, &applied,
                 s->reference_coding_protein, &s->reference_coding_translation,
-                leaf->protein, &leaf->translation, &coding) != DUCKVEP_CODING_CONTEXT_OK ||
+                s->buffers.protein, &leaf->translation, &coding) != DUCKVEP_CODING_CONTEXT_OK ||
             duckvep_coding_context_attach_model(&model->transcripts, &model->exons, &model->sequences,
                 tx, event, leaf->edit_count == 1u ? edits.edits[0].cds_start : 0u, &coding) !=
                 DUCKVEP_VARIANT_CODING_CONTEXT_OK) {

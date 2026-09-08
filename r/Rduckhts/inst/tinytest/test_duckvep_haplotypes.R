@@ -514,6 +514,53 @@ local({
   expect_error(rduckhts_haplotypes(con, paste("SELECT * FROM (", p_calls,
     ") WHERE transcript_index=1"), "reference_proteins", max_leaf_differences = 1),
     pattern = "protein difference status 4, max_leaf_differences=1, required=2")
+  p_raw <- paste("SELECT event_index,seq_region,position,reference,[alternate] alternates,",
+    "transcript_index,sample_index,'.' gt FROM (", p_calls, ")")
+  p_missing <- rduckhts_haplotypes(con, p_raw, "reference_proteins", "vep116_compat",
+    input_mode = "source_records")
+  p_missing <- p_missing[order(p_missing$transcript_index), ]
+  expect_equal(p_missing$protein, c("MA*", "MUA*", "MAW*", "MAW*", "MA", ""))
+  expect_true(all(p_missing$edit_count == 0 & p_missing$carrier_count == 2 &
+    p_missing$sequence_flags == 0 & p_missing$sequence_status == "conditional"))
+  expect_true(all(vapply(p_missing$protein_differences[1:5], nrow, 1L) == 0L))
+  expect_true(is.null(p_missing$protein_differences[[6L]]))
+  p_retained <- rduckhts_haplotypes(con, sub("'.' gt", "'0|1' gt", p_raw, fixed = TRUE),
+    "reference_proteins", "vep116_compat", input_mode = "source_records")
+  p_retained <- p_retained[vapply(p_retained$carriers, function(x) 1L %in% x$haplotype_lane, TRUE), ]
+  p_retained <- p_retained[order(p_retained$transcript_index), ]
+  expect_equal(p_retained$protein, c("LA*", "M*", "MA*", "MAW", "LA*", ""))
+  expect_true(all(p_retained$edit_count == 0))
+  route_tx <- paste("SELECT i::UINTEGER transcript_index,i::UINTEGER seq_region,",
+    "11::UBIGINT transcript_start,(22+gap)::UBIGINT transcript_end,1::TINYINT strand,",
+    "i::UINTEGER gene_index,3::UBIGINT transcript_flags,transcript_start cds_start,",
+    "transcript_end cds_end,cds::BLOB cds_sequence,1::UTINYINT codon_table,gap FROM",
+    "(VALUES (0,12,'ATGAAACCCTAA'),(1,12,'ATGAAATAACCC'),(2,12,'CTGAAACCCTAA'),",
+    "(3,24,'ATGAAACCCTAA'),(4,24,'ATGAAATAACCC'),(5,24,'CTGAAACCCTAA')) v(i,gap,cds)")
+  dbExecute(con, paste("CREATE TABLE route_tx AS", route_tx))
+  route_queries <- c("SELECT seq_region FROM route_tx", "SELECT * EXCLUDE(gap) FROM route_tx",
+    paste("SELECT transcript_index,(11+(6+gap)*i)::UBIGINT exon_start,(16+(6+gap)*i)::UBIGINT exon_end,",
+      "(1+6*i)::UBIGINT exon_cdna_start,(6+6*i)::UBIGINT exon_cdna_end,",
+      "0::TINYINT phase,0::TINYINT end_phase FROM route_tx,range(2) e(i) ORDER BY transcript_index,i"))
+  expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('intronic_routes',",
+    paste(dbQuoteString(con, route_queries), collapse = ","), ")"))$loaded)
+  route_calls <- paste("SELECT transcript_index*2+e.i event_index,seq_region,",
+    "CASE e.i WHEN 1 THEN 14 ELSE 22 END AS position,CASE e.i WHEN 1 THEN 'A' ELSE 'C' END AS reference,",
+    "CASE e.i WHEN 1 THEN ['C'] ELSE ['T'] END alternates,transcript_index,s.i sample_index,",
+    "CASE WHEN s.i=0 THEN CASE e.i WHEN 1 THEN '.' ELSE '0|1' END WHEN s.i=1 THEN '0|0'",
+    "ELSE CASE e.i WHEN 1 THEN '1|1' ELSE '0|0' END END gt FROM route_tx,range(1,3) e(i),range(3) s(i)")
+  routes <- rduckhts_haplotypes(con, route_calls, "intronic_routes", "vep116_compat",
+    input_mode = "source_records")
+  routes <- routes[vapply(routes$carriers, function(x) 0 %in% x$sample_index, TRUE), ]
+  expect_equal(nrow(routes), 12L)
+  expect_equal(routes$protein, c("MKP*", "MK*P", "MKP*")[routes$transcript_index %% 3 + 1L])
+  expect_true(all(routes$edit_count == 0 & routes$sequence_flags == 0 &
+    routes$sequence_status == "conditional" & routes$carrier_count == 1))
+  expect_true(all(vapply(routes$protein_differences, nrow, 1L) == 0L))
+  intronic_sources <- do.call(rbind, routes$contributors)
+  intronic_sources <- intronic_sources[intronic_sources$position == 22, ]
+  expect_equal(nrow(intronic_sources), 6L)
+  expect_true(all(intronic_sources$projection_status == "outside_cds" &
+    intronic_sources$reference == "C" & intronic_sources$alternate == "T" & intronic_sources$evidence_flags == 1L))
   expect_error(rduckhts_haplotypes(con, calls, "haps", max_ploidy = 1), pattern = "max_ploidy")
   expect_error(rduckhts_haplotypes(con, calls, "haps", workspace_limit = 1), pattern = "workspace")
   expect_error(rduckhts_haplotypes(con, calls, "missing"), pattern = "loaded model")

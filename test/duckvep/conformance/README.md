@@ -768,6 +768,37 @@ and standard-code complete translations. It does not cover arbitrary biological
 models, reference-only sample routes, general phase/PS inference or structural
 composition. Failures remain in the combined summary and receipt.
 
+`haplotype_reference_differential.R` exercises reference-only sample handling
+through the original container JSON serializer. CDS and protein groups are compared
+separately by sample and count; one CDS may link both a curated reference peptide
+and a mutation peptide. The observer must preserve the complete unobserved JSON,
+including array order. Mutation lanes compare complete sequences and applied sources;
+all native contributors retain checked source geometry, allele and evidence.
+
+```sh
+Rscript test/duckvep/conformance/haplotype_reference_differential.R --seed 173 --rare-per-stratum 32
+Rscript test/duckvep/conformance/haplotype_reference_differential.R --seed 20260906 --rare-per-stratum 32
+```
+
+Each command requires 32 draws in 360 cells: three start codons × internal-stop
+presence × terminal-stop presence × strand × three all-missing GT spellings ×
+five routes: missing-only, retained-REF-lane, later-retained-call, short-intronic
+and long-intronic calls. Internal-stop codons, stop positions and two source
+positions vary. Intronic cases have two exons and lengths sampled from 1–12 or
+13–120 bases; the other routes use one exon. Models derive from the registered
+180-base reference and use the standard genetic code. Twenty-nine
+corruption controls guard groups, lanes, complete JSON, models, carrier keys and
+source provenance. `--extension-receipt` requires a clean source-bound build.
+
+Each of the 11,520 models has six upstream carrier memberships. DuckVEP emits four
+memberships for the missing/retained samples; the two pure-reference memberships
+remain implicit by API policy. Their upstream sequences/counts and absence from
+native output are checked separately, without padding the native output with oracle
+sequences. All expected groups, native rows, lane observations and disagreements are
+retained. This is sequence/count/provenance conformance, not a comparison of every
+native field to container JSON, arbitrary genetic-code/model coverage, general
+ploidy inference or whole-haplotype consequences.
+
 Add `--noncoding-contributors` to `haplotype_sql_differential.R` to run a separately
 receipted augmented corpus after the original gate passes. It adds one homozygous
 deep-intronic allele per transcript, reruns the pinned executable Haplosaurus, and

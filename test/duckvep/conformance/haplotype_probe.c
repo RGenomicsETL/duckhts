@@ -128,6 +128,8 @@ void duckhts_test_carrier_haplotypes(
     exon_storage = calloc(4u * (size_t)*exon_count, sizeof(*exon_storage));
     cds_scratch = malloc((size_t)*capacity);
     protein_scratch = malloc((size_t)*capacity);
+    storage.reference_protein = malloc((size_t)*capacity);
+    storage.reference_protein_capacity = (size_t)*capacity;
     b.transcripts = &transcript;
     b.active_transcripts = &active;
     b.transcript_index = transcript_index;
@@ -142,7 +144,7 @@ void duckhts_test_carrier_haplotypes(
     b.prefix_index = calloc(b.prefix_buckets, sizeof(*b.prefix_index));
     if (!storage.events || !storage.projections || !storage.leaf_events ||
         !storage.contributors || !storage.edits || !storage.edit_event_ids || !storage.blocks || !storage.alleles ||
-        !exon_storage || !cds_scratch || !protein_scratch ||
+        !exon_storage || !cds_scratch || !protein_scratch || !storage.reference_protein ||
         !b.calls || !b.call_index || !b.prefixes || !b.prefix_index) goto cleanup;
     model_exon_count = (uint16_t)*exon_count;
     model_strand = (int8_t)*strand;
@@ -283,6 +285,6 @@ cleanup:
     free(storage.contributors); free(storage.edits); free(storage.blocks);
     free(storage.edit_event_ids);
     free(storage.alleles); free(exon_storage);
-    free(cds_scratch); free(protein_scratch);
+    free(cds_scratch); free(protein_scratch); free(storage.reference_protein);
     free(b.calls); free(b.call_index); free(b.prefixes); free(b.prefix_index);
 }

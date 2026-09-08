@@ -9243,7 +9243,7 @@ struct haplotype_stream_scene {
     uint64_t edit_event_ids[9]; /* Last slot is a provenance-write canary. */
     duckvep_haplotype_block_t blocks[8];
     duckvep_carrier_event_t leaf_events[8];
-    uint8_t alleles[128], cds[128], protein[128];
+    uint8_t alleles[128], cds[128], protein[128], reference_protein[128];
     duckvep_haplotype_stream_buffers_t buffers;
     duckvep_haplotype_stream_t stream;
 };
@@ -9277,7 +9277,9 @@ static void haplotype_stream_scene_prepare(struct haplotype_stream_scene *f, uin
         .leaf_events = f->leaf_events, .contributors = f->contributors, .edits = f->edits,
         .blocks = f->blocks, .edit_event_ids = f->edit_event_ids,
         .leaf_capacity = 8u, .edit_capacity = 8u, .cds = f->cds, .protein = f->protein,
-        .cds_capacity = sizeof(f->cds), .protein_capacity = sizeof(f->protein)};
+        .cds_capacity = sizeof(f->cds), .protein_capacity = sizeof(f->protein),
+        .reference_protein = f->reference_protein,
+        .reference_protein_capacity = sizeof(f->reference_protein)};
 }
 
 static duckvep_haplotype_stream_status_t haplotype_test_begin_candidates(
@@ -9898,7 +9900,7 @@ TEST haplotype_source_omission_checks_layout_sequence_and_ref(void) {
             }
             if (scenario == 3u) { alt = 'Z'; expected = DUCKVEP_CDS_EDIT_INVALID_ALLELE; }
             if (scenario == 4u) { f.sequence_offsets[0] = 13u; expected = DUCKVEP_CDS_EDIT_INVALID_ARG; }
-            if (scenario == 5u) { f.lengths[0] = 11u; expected = DUCKVEP_CDS_EDIT_OUT_OF_CDS; }
+            if (scenario == 5u) { f.lengths[0] = 11u; expected = DUCKVEP_CDS_EDIT_INVALID_ARG; }
             if (scenario == 6u) { ce[0]--; expected = DUCKVEP_CDS_EDIT_INVALID_ARG; }
             if (scenario == 7u) { ends[0]++; expected = DUCKVEP_CDS_EDIT_INVALID_ARG; }
             if (scenario == 8u) { f.exons.cdna_start1 = NULL; expected = DUCKVEP_CDS_EDIT_INVALID_ARG; }
@@ -9923,6 +9925,13 @@ TEST haplotype_source_omission_checks_layout_sequence_and_ref(void) {
             if (expected == DUCKVEP_CDS_EDIT_SOURCE_UNMAPPED) {
                 duckvep_haplotype_edit_t zero = {0};
                 ASSERT_MEM_EQ(&zero, &edit, sizeof(edit));
+            }
+            if (scenario == 5u) {
+                /* Intronic context cannot conceal an inconsistent CDS extent. */
+                ASSERT(duckvep_event_prepare_replacement(120u, ref, 1u, &alt, 1u, &event));
+                allele.ref_length = allele.alt_length = 1u;
+                ASSERT_EQ(DUCKVEP_CDS_EDIT_INVALID_ARG, duckvep_compat_vep116_source_cds_edit_build(
+                    &f.model, &f.exons, &f.sequences, 0u, (int8_t)strand, &allele, &edit));
             }
         }
     }
@@ -9990,13 +9999,116 @@ TEST haplotype_stream_unmapped_sources_retain_raw_slot_evidence(void) {
     PASS();
 }
 
+TEST haplotype_stream_reference_only_protein_uses_call_retention(void) {
+    const char *references[] = {"ATGAAACCCTAA", "ATGAAATAACCC", "CTGAAACCCTAA"};
+    const char *curated[] = {"MKP*", "MK*P", "MKP*"};
+    const char *raw[] = {"MKP*", "MK*", "LKP*"};
+    const char *alternate[] = {"MQP*", "MQ*", "LQP*"};
+    for (unsigned reference = 0u; reference < 3u; reference++) {
+        for (int strand = -1; strand <= 1; strand += 2) {
+            for (unsigned peptide_edit = 0u; peptide_edit < 2u; peptide_edit++) {
+                /* Missing-only, coding, shadowed, unmapped, UTR and intronic calls. */
+                for (unsigned mode = 0u; mode < 7u; mode++) {
+                    struct haplotype_stream_scene f;
+                    haplotype_stream_scene_prepare(&f, 1u);
+                    memcpy(f.reference, references[reference], 12u);
+                    f.ends[0] = 117u; f.cdna_ends[0] = 18u; f.strands[0] = (int8_t)strand;
+                    uint32_t cds_start = 103u, cds_end = 114u;
+                    f.model.cds_start1 = &cds_start; f.model.cds_end1 = &cds_end;
+                    uint32_t exon_starts[] = {100u, mode == 5u ? 121u : 133u};
+                    uint32_t exon_ends[] = {108u, exon_starts[1] + 8u};
+                    uint32_t cdna_starts[] = {1u, 10u}, cdna_ends[] = {9u, 18u};
+                    if (mode >= 5u) {
+                        f.ends[0] = exon_ends[1]; cds_end = exon_starts[1] + 5u;
+                        if (strand < 0) {
+                            exon_starts[0] = exon_starts[1]; exon_starts[1] = 100u;
+                            exon_ends[0] = exon_ends[1]; exon_ends[1] = 108u;
+                        }
+                        f.exon_count[0] = 2u; f.exons.exon_count = 2u;
+                        f.exons.start1 = exon_starts; f.exons.end1 = exon_ends;
+                        f.exons.cdna_start1 = cdna_starts; f.exons.cdna_end1 = cdna_ends;
+                    }
+                    uint32_t peptide_offsets[] = {0u, peptide_edit}, peptide_position = 2u;
+                    uint8_t peptide_alt = 'W';
+                    f.sequences.peptide_edit_offset = peptide_offsets;
+                    f.sequences.peptide_edit_position1 = &peptide_position;
+                    f.sequences.peptide_edit_alt = &peptide_alt;
+                    f.sequences.peptide_edit_count = peptide_edit;
+                    ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_init(
+                        &f.stream, &f.model, &f.exons, &f.sequences, &f.buffers));
+                    duckvep_raw_gt_t missing, call;
+                    ASSERT_EQ(DUCKVEP_RAW_GT_OK, duckvep_phase_parse_vep116_raw(
+                        (const uint8_t *)".", 1u, 1u, &missing));
+                    ASSERT_EQ(DUCKVEP_RAW_GT_OK, duckvep_phase_parse_vep116_raw(
+                        (const uint8_t *)(mode ? "0|1" : "."), mode ? 3u : 1u, 1u, &call));
+                    duckvep_haplotype_source_t source = {1u, (const uint8_t *)"C",
+                        (const uint8_t *)"C", 100u, 0u, 1u, 1u, 0u, 1u, 0u};
+                    ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_begin(&f.stream, &source));
+                    ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_project(&f.stream, 0u));
+                    ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK,
+                        duckvep_haplotype_stream_push_raw_call(&f.stream, 0u, 0u, &missing, 1u));
+                    uint8_t ref[3], alt[3];
+                    uint32_t pos = mode >= 5u ? 115u : mode == 3u ? 102u
+                        : mode == 4u ? 101u : strand > 0 ? 106u : 111u;
+                    uint16_t length = mode == 3u ? 3u : 1u;
+                    for (uint16_t i = 0u; i < length; i++) {
+                        uint32_t p = pos + i;
+                        ref[i] = mode >= 5u || p < cds_start ? 'C' : strand > 0 ? f.reference[p - cds_start]
+                            : kprop_hgvs_complement(f.reference[cds_end - p]);
+                        alt[i] = mode == 4u ? 'G' : strand > 0 ? 'C' : 'G';
+                    }
+                    for (uint32_t allele = 0u; allele < 2u; allele++) {
+                        source = (duckvep_haplotype_source_t){2u, ref, allele ? alt : ref,
+                            pos, 0u, length, length, allele, 1u, 0u};
+                        ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_begin(&f.stream, &source));
+                        ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_project(&f.stream, 0u));
+                        ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_push_raw_call(
+                            &f.stream, 0u, 0u, &call, mode != 2u));
+                    }
+                    ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_TRANSCRIPT_READY,
+                        duckvep_haplotype_stream_finish(&f.stream));
+                    duckvep_haplotype_leaf_t leaf;
+                    unsigned seen = 0u;
+                    duckvep_haplotype_stream_status_t status;
+                    char expected_reference[5]; memcpy(expected_reference, curated[reference], 5u);
+                    if (peptide_edit) expected_reference[1] = 'W';
+                    while ((status = duckvep_haplotype_stream_next(&f.stream, &leaf)) == DUCKVEP_HAPLOTYPE_STREAM_OK) {
+                        ASSERT_EQ(DUCKVEP_HAPLOTYPE_CONDITIONAL, leaf.sequence_status);
+                        ASSERT_EQ(4u, leaf.reference_protein_length);
+                        ASSERT_MEM_EQ(expected_reference, leaf.reference_protein, 4u);
+                        for (uint32_t id = leaf.carriers.first_call; id;) {
+                            const duckvep_carrier_call_t *carrier = duckvep_carriers_call(&f.stream.carriers, id);
+                            ASSERT(carrier); ASSERT(carrier->key.lane == 1u || carrier->key.lane == 2u);
+                            unsigned bit = 1u << (carrier->key.lane - 1u);
+                            ASSERT_EQ(0u, seen & bit); seen |= bit;
+                            int edited = mode == 1u && carrier->key.lane == 2u;
+                            int reference_route = !mode || mode >= 5u;
+                            const char *expected = reference_route ? expected_reference
+                                : edited ? alternate[reference] : raw[reference];
+                            ASSERT_EQ(strlen(expected), leaf.protein_length);
+                            ASSERT_MEM_EQ(expected, leaf.protein, leaf.protein_length);
+                            ASSERT_EQ((size_t)edited, leaf.edit_count);
+                            ASSERT_EQ(reference_route, leaf.protein == leaf.reference_protein);
+                            if (reference_route) ASSERT_EQ(0u, leaf.flags & DUCKVEP_HAPLOTYPE_FLAG_STOP_TRUNCATED);
+                            id = carrier->next_leaf;
+                        }
+                    }
+                    ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_DONE, status); ASSERT_EQ(3u, seen);
+                }
+            }
+        }
+    }
+    PASS();
+}
+
 TEST haplotype_stream_retains_conflicts_and_latches_resource_errors(void) {
     struct haplotype_stream_scene f;
     duckvep_carrier_key_t key = {0u, 1, 1u, 2u, 1u};
     uint32_t tx = 0u;
     /* One bad REF, two conflicting edits, and each named capacity limit. */
-    for (unsigned scenario = 0u; scenario < 10u; scenario++) {
+    for (unsigned scenario = 0u; scenario < 13u; scenario++) {
         haplotype_stream_scene_prepare(&f, 1u);
+        uint32_t peptide_offsets[] = {1u, 0u};
         if (scenario == 2u) f.buffers.event_capacity = 1u;
         if (scenario == 3u) f.buffers.projection_capacity = 1u;
         if (scenario == 4u) f.buffers.allele_capacity = 3u;
@@ -10004,6 +10116,9 @@ TEST haplotype_stream_retains_conflicts_and_latches_resource_errors(void) {
         if (scenario == 6u) f.buffers.cds_capacity = 11u;
         if (scenario == 7u) f.buffers.protein_capacity = 4u;
         if (scenario == 9u) f.buffers.edit_capacity = 1u;
+        if (scenario == 10u) f.buffers.reference_protein_capacity = 5u;
+        if (scenario == 11u) f.sequences.peptide_edit_offset = peptide_offsets;
+        if (scenario == 12u) f.sequences.peptide_edit_count = 1u;
         duckvep_haplotype_stream_t *s = &f.stream;
         ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_init(
             s, &f.model, &f.exons, &f.sequences, &f.buffers));
@@ -10033,8 +10148,9 @@ TEST haplotype_stream_retains_conflicts_and_latches_resource_errors(void) {
             status = duckvep_haplotype_stream_next(s, &leaf);
             if (scenario == 5u) ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_LEAF_FULL, status);
             else if (scenario == 9u) ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_EDIT_FULL, status);
-            else if (scenario == 6u || scenario == 7u)
+            else if (scenario == 6u || scenario == 7u || scenario == 10u)
                 ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_SEQUENCE_FULL, status);
+            else if (scenario >= 11u) ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG, status);
             else {
                 ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, status);
                 ASSERT_EQ(scenario == 0u ? DUCKVEP_CDS_EDIT_REF_MISMATCH : DUCKVEP_CDS_EDIT_OK,
@@ -29456,6 +29572,7 @@ int main(int argc, char **argv) {
     RUN_TEST(haplotype_stream_keeps_noncoding_contributors_without_poisoning_cds);
     RUN_TEST(haplotype_source_omission_checks_layout_sequence_and_ref);
     RUN_TEST(haplotype_stream_unmapped_sources_retain_raw_slot_evidence);
+    RUN_TEST(haplotype_stream_reference_only_protein_uses_call_retention);
     RUN_TEST(haplotype_stream_retains_conflicts_and_latches_resource_errors);
     RUN_TEST(haplotype_stream_matches_dense_models_across_batches);
     RUN_TEST(haplotype_stream_mnv_context_does_not_conflict_with_another_edit);
