@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- verify 36,864 rare shared-transcript cases against unchanged Haplosaurus inputs
+  and output: 4,608 incompatibilities resolve with no regressions. Retain the
+  failing evidence and append passing raw-record/context regression campaigns;
+  rendered transition counts use their recorded baseline receipt
+
 - preserve conditional raw haplotype replay when Haplosaurus omits a source
   crossing coding and noncoding sequence. Contributors expose `source_unmapped`;
   shared layout validation, CDS extents and coding-overlap REF checks distinguish

@@ -669,7 +669,7 @@ Whole-haplotype SO/HGVS remains unfinished.
 |      3 |   768 |           768 |         1536 |         2304 |                        1332 |
 |      4 |  6144 |          6144 |        12288 |        24576 |                       16800 |
 
-Source ae131a9d08f8cc3e8b38c034337740db0da8dbd4 records a **failing
+Source 4119d55c43fe0649ffe8325135bbdf26c1f37e94 records a **failing
 decoded-call/raw-parser comparison**: 6990 disagreements in 7020
 profiles. It is not a population error rate or a replacement for the
 passing literal-sequence corpus. This lane uses public
@@ -770,7 +770,7 @@ biological certainty for conditional sequence.
 |      173 | rare             |    36096 |             0 |                              0 |                                  0 |                      0 |
 | 20260906 | rare             |    36096 |             0 |                              0 |                                  0 |                      0 |
 
-Source ae131a9d08f8cc3e8b38c034337740db0da8dbd4 runs the public
+Source 4119d55c43fe0649ffe8325135bbdf26c1f37e94 runs the public
 `source_records`/`vep116_compat` path against pinned, unmodified
 Haplosaurus. Across the two seeds there are **73,504 profiles**, 220,512
 source records and 147,008 oracle file lanes; DuckHTS returns 147,008
@@ -787,18 +787,19 @@ coverage and artifact hash.
 | source_revision                          | profiles | failures | available_sequence_failures | profiles_with_unavailable |
 |:-----------------------------------------|---------:|---------:|----------------------------:|--------------------------:|
 | 47eaa7b1460a6b29049cdb50928956a055d6abb9 |    73504 |    15953 |                       14694 |                         0 |
-| ae131a9d08f8cc3e8b38c034337740db0da8dbd4 |    73504 |        0 |                           0 |                         0 |
+| 4119d55c43fe0649ffe8325135bbdf26c1f37e94 |    73504 |        0 |                           0 |                         0 |
 
 |     seed | still passing | resolved | regressed | still failing |
 |---------:|--------------:|---------:|----------:|--------------:|
 |      173 |         28807 |     7945 |         0 |             0 |
 | 20260906 |         28744 |     8008 |         0 |             0 |
 
-The identical-input comparison resolves **15,953 retained failures**,
-with **0 regressions** and **0 remaining failures**. These transitions
-apply only to the declared generated inputs; they do not establish
-absence of regression outside this campaign. Every earlier failing
-comparison remains in its revision-labelled artifact.
+The identical-input comparison against receipt-named source
+47eaa7b1460a6b29049cdb50928956a055d6abb9 has **15,953 resolved
+failures**, with **0 regressions** and **0 remaining failures**. These
+cumulative transitions apply only to the declared generated inputs; they
+do not establish absence of regression outside this campaign. Every
+earlier failing comparison remains in its revision-labelled artifact.
 
 Each seed includes 144 fixed profiles and 512 general-random overlapping
 pairs. The rare lane requires **32 draws in each of 1,128 cells**: 12
@@ -862,7 +863,7 @@ not evidence that VEP is wrong.
 |      173 |    19664 |        345840 |             39328 |        0 |                   5376 |                     5376 |
 | 20260906 |    19664 |        345840 |             39328 |        0 |                   5376 |                     5376 |
 
-Source ae131a9d08f8cc3e8b38c034337740db0da8dbd4 includes **38,016 paired
+Source 4119d55c43fe0649ffe8325135bbdf26c1f37e94 includes **38,016 paired
 context profiles** from 1152 seeded edit templates. The table also
 includes 656 fixed/general-random controls per seed; their inputs and
 complete oracle observations match the corresponding profiles in the
@@ -892,10 +893,10 @@ cross-product.
 
 |     seed | profiles | source_records | observed_carriers | failures | count_failures | input_provenance_failures | mapping_failures |
 |---------:|---------:|---------------:|------------------:|---------:|---------------:|--------------------------:|-----------------:|
-|      173 |    18432 |         166224 |            110592 |     2304 |              0 |                         0 |                0 |
-| 20260906 |    18432 |         166224 |            110592 |     2304 |              0 |                         0 |                0 |
+|      173 |    18432 |         166224 |            110592 |        0 |              0 |                         0 |                0 |
+| 20260906 |    18432 |         166224 |            110592 |        0 |              0 |                         0 |                0 |
 
-Source 2c5bcb21ba6f054639b2031f8ca465be3b8b27d5 has **36,864 transcript
+Source 4119d55c43fe0649ffe8325135bbdf26c1f37e94 has **36,864 transcript
 cases**, including 33,792 quota-controlled cases and the complete
 3,072-case diagnostic baseline. Every region has three diploid samples,
 one full-exon transcript and an overlapping two-exon transcript (exons
@@ -909,13 +910,21 @@ This crosses shared-transcript mapping with source-context pressure; it
 is not a distribution of independent biological samples, arbitrary
 transcript models or an estimate of population error rates.
 
-All **4,608 disagreements** are exon-spanning records in the two-exon
-model. DuckHTS withholds the sequence, while pinned Haplosaurus filters
-the unmapped record and replays the other edits. These are failing
-compatibility cases, not exclusions or evidence that VEP is wrong. Every
-baseline input column, complete oracle JSON line and sequence verdict
-agrees with the retained diagnostic; its 384 disagreements remain in the
-denominator.
+Against source `2c5bcb21ba6f054639b2031f8ca465be3b8b27d5`, **4,608
+failures resolve, 0 passing cases regress, and 32,256 cases remain
+passing**. Every input column and complete keyed oracle JSON record is
+unchanged. This includes all 384 failures in the 3,072-case diagnostic
+baseline. Earlier failed artifacts and ledger rows remain; no case is
+excluded and the oracle is unchanged.
+
+Raw replay marks validated coding/noncoding source-span omissions
+`source_unmapped` and replays the other mapped sources with conditional
+evidence. The independent artifact audit checks omission status,
+evidence bit 8 and absence from physical edits across 18,432 leaves /
+24,576 carrier memberships. Model/REF errors still withhold sequence,
+and strict decoded replay retains its projection-failure policy. This is
+pinned Haplosaurus sequence-mechanics conformance, not evidence that VEP
+is wrong or that a conditional sequence describes biology.
 
 Full CDS/protein groups include counts per sample; exchanging samples is
 a rejected corruption even when pooled counts agree. Applied-source

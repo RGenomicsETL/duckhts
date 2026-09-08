@@ -3,8 +3,8 @@ Phased replay: native stream and public SQL
 
 <!-- duckvep_haplotypes.md is generated from duckvep_haplotypes.Rmd. -->
 
-Current source: ae131a9d08f8cc3e8b38c034337740db0da8dbd4;
-identical-workload baseline: 47eaa7b1460a6b29049cdb50928956a055d6abb9.
+Current source: 4119d55c43fe0649ffe8325135bbdf26c1f37e94;
+identical-workload baseline: ae131a9d08f8cc3e8b38c034337740db0da8dbd4.
 Native measurements cover literal phased replay. SQL materializes all
 current fields, including local coding-block SO; whole-haplotype SO/HGVS
 is unfinished. Both paths consume standalone ALT events and decoded
@@ -66,18 +66,18 @@ observed in the native stream, not inferred SQL counters.
 
 | transcripts | samples | overlap | mode   | min_s | median_s | max_s | max_process_rss_mib |
 |------------:|--------:|--------:|:-------|------:|---------:|------:|--------------------:|
-|        1024 |       4 |       1 | native | 0.003 |    0.003 | 0.003 |              74.633 |
-|        1024 |       4 |       1 | sql    | 0.050 |    0.051 | 0.052 |             215.258 |
-|        1024 |      64 |       1 | native | 0.013 |    0.013 | 0.014 |              74.480 |
-|        1024 |      64 |       1 | sql    | 0.337 |    0.339 | 0.341 |             376.762 |
-|        1024 |      64 |      16 | native | 0.016 |    0.017 | 0.017 |              74.480 |
-|        1024 |      64 |      16 | sql    | 0.339 |    0.345 | 0.351 |             376.715 |
-|        1024 |      64 |      64 | native | 0.018 |    0.018 | 0.018 |              74.480 |
-|        1024 |      64 |      64 | sql    | 0.341 |    0.341 | 0.346 |             376.402 |
-|        1024 |     256 |       1 | native | 0.046 |    0.047 | 0.048 |              74.629 |
-|        1024 |     256 |       1 | sql    | 1.301 |    1.309 | 1.312 |             957.941 |
-|       10240 |      64 |      16 | native | 0.164 |    0.164 | 0.166 |              74.633 |
-|       10240 |      64 |      16 | sql    | 4.097 |    4.105 | 4.114 |            2129.961 |
+|        1024 |       4 |       1 | native | 0.003 |    0.003 | 0.003 |              74.477 |
+|        1024 |       4 |       1 | sql    | 0.050 |    0.051 | 0.051 |             216.574 |
+|        1024 |      64 |       1 | native | 0.013 |    0.013 | 0.013 |              74.477 |
+|        1024 |      64 |       1 | sql    | 0.327 |    0.330 | 0.334 |             376.836 |
+|        1024 |      64 |      16 | native | 0.016 |    0.017 | 0.017 |              74.633 |
+|        1024 |      64 |      16 | sql    | 0.339 |    0.340 | 0.348 |             377.082 |
+|        1024 |      64 |      64 | native | 0.017 |    0.018 | 0.018 |              74.480 |
+|        1024 |      64 |      64 | sql    | 0.336 |    0.343 | 0.344 |             376.406 |
+|        1024 |     256 |       1 | native | 0.046 |    0.047 | 0.048 |              74.477 |
+|        1024 |     256 |       1 | sql    | 1.294 |    1.296 | 1.307 |             957.453 |
+|       10240 |      64 |      16 | native | 0.163 |    0.164 | 0.165 |              74.633 |
+|       10240 |      64 |      16 | sql    | 4.068 |    4.069 | 4.081 |            2133.770 |
 
 Both compared revisions return each block’s local SO mask, coding status
 and position relative to the first stop. A shared coding context
@@ -87,12 +87,12 @@ configurations. The native count sink omits local SO evaluation.
 
 | transcripts | samples | overlap | median_s_before | median_s_after | median_change_percent | max_process_rss_mib_before | max_process_rss_mib_after |
 |------------:|--------:|--------:|----------------:|---------------:|----------------------:|---------------------------:|--------------------------:|
-|        1024 |       4 |       1 |           0.051 |          0.051 |                 0.000 |                    215.293 |                   215.258 |
-|        1024 |      64 |       1 |           0.336 |          0.339 |                 0.893 |                    376.910 |                   376.762 |
-|        1024 |      64 |      16 |           0.345 |          0.345 |                 0.000 |                    376.461 |                   376.715 |
-|        1024 |      64 |      64 |           0.344 |          0.341 |                -0.872 |                    376.711 |                   376.402 |
-|        1024 |     256 |       1 |           1.301 |          1.309 |                 0.615 |                    957.605 |                   957.941 |
-|       10240 |      64 |      16 |           4.111 |          4.105 |                -0.146 |                   2133.590 |                  2129.961 |
+|        1024 |       4 |       1 |           0.051 |          0.051 |                 0.000 |                    215.258 |                   216.574 |
+|        1024 |      64 |       1 |           0.339 |          0.330 |                -2.655 |                    376.762 |                   376.836 |
+|        1024 |      64 |      16 |           0.345 |          0.340 |                -1.449 |                    376.715 |                   377.082 |
+|        1024 |      64 |      64 |           0.341 |          0.343 |                 0.587 |                    376.402 |                   376.406 |
+|        1024 |     256 |       1 |           1.309 |          1.296 |                -0.993 |                    957.941 |                   957.453 |
+|       10240 |      64 |      16 |           4.105 |          4.069 |                -0.877 |                   2129.961 |                  2133.770 |
 
 Each recorded pass uses a fresh process and a full warm-up. Native
 timing starts after workspace initialization and includes ordered-feed

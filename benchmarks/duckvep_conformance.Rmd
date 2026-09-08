@@ -1158,8 +1158,12 @@ stopifnot(all(records$extension_build_binding == "htslib_distclean_make_release"
   all(records$minimum_stratum_draws == records$rare_per_stratum),
   !anyDuplicated(records[c("source_revision", "seed", "cohort", "shape")]))
 record_revision <- tail(unique(records$source_revision), 1L)
-record_baseline_revision <- tail(unique(records$source_revision), 2L)[1L]
 record_current <- subset(records, source_revision == record_revision)
+record_authorities <- unique(records[c("receipt_sha256", "source_revision")])
+stopifnot(!anyDuplicated(record_authorities$receipt_sha256))
+record_baseline_revision <- unique(record_authorities$source_revision[match(
+  unique(record_current$baseline_receipt_sha256), record_authorities$receipt_sha256)])
+stopifnot(length(record_baseline_revision) == 1L, !anyNA(record_baseline_revision))
 record_summary <- aggregate(cbind(profiles, failures, available_sequence_failures,
   profiles_with_unavailable, count_failures) ~ seed + cohort, data = record_current, FUN = sum)
 names(record_summary) <- c("seed", "cohort", "profiles", "full failures",
@@ -1191,6 +1195,15 @@ record_before_after <- record_before_after[match(c(record_baseline_revision, rec
 knitr::kable(record_before_after, row.names = FALSE)
 record_transitions <- aggregate(cbind(baseline_pass_to_pass, baseline_fail_to_pass,
   baseline_pass_to_fail, baseline_fail_to_fail) ~ seed, data = record_current, FUN = sum)
+record_baseline_counts <- aggregate(cbind(profiles, failures) ~ seed,
+  data = subset(records, source_revision == record_baseline_revision), FUN = sum)
+record_baseline_counts <- record_baseline_counts[match(record_transitions$seed,
+  record_baseline_counts$seed), ]
+stopifnot(!anyNA(record_baseline_counts),
+  all(record_transitions$baseline_fail_to_pass + record_transitions$baseline_fail_to_fail ==
+    record_baseline_counts$failures),
+  all(record_transitions$baseline_pass_to_pass + record_transitions$baseline_pass_to_fail ==
+    record_baseline_counts$profiles - record_baseline_counts$failures))
 stopifnot(sum(as.matrix(record_transitions[-1L])) == sum(record_current$profiles),
   sum(record_transitions$baseline_pass_to_fail + record_transitions$baseline_fail_to_fail) ==
     sum(record_current$failures))
@@ -1198,11 +1211,11 @@ names(record_transitions) <- c("seed", "still passing", "resolved", "regressed",
 knitr::kable(record_transitions, row.names = FALSE)
 ```
 
-The identical-input comparison resolves
-**`r format(sum(record_transitions$resolved), big.mark = ",")` retained failures**,
+The identical-input comparison against receipt-named source `r record_baseline_revision` has
+**`r format(sum(record_transitions$resolved), big.mark = ",")` resolved failures**,
 with **`r format(sum(record_transitions$regressed), big.mark = ",")` regressions** and
 **`r format(sum(record_transitions[["still failing"]]), big.mark = ",")` remaining failures**.
-These transitions apply only to the declared generated inputs; they do not establish
+These cumulative transitions apply only to the declared generated inputs; they do not establish
 absence of regression outside this campaign. Every earlier failing comparison remains
 in its revision-labelled artifact.
 
@@ -1305,11 +1318,15 @@ stopifnot(all(model_history$extension_build_binding == "htslib_distclean_make_re
   all(model_history$controls_rejected == 13L),
   all(model_history$minimum_stratum_draws == model_history$rare_per_stratum),
   all(model_history$strata == 264L),
-  all(model_history$baseline_input_columns_equal & model_history$baseline_oracle_lines_equal &
-    model_history$baseline_sequence_verdicts_equal),
+  all(model_history$baseline_input_columns_equal & model_history$baseline_oracle_lines_equal),
   !anyDuplicated(model_history[c("source_revision", "seed", "rare_per_stratum")]))
 model_revision <- tail(unique(model_history$source_revision), 1L)
 model_current <- subset(model_history, source_revision == model_revision)
+stopifnot(all(model_current$profiles == with(model_current,
+  pass_to_fail + fail_to_pass + pass_to_pass + fail_to_fail)),
+  all(model_current$pass_to_fail == 0L),
+  all(model_current$fail_to_pass == 2304L),
+  all(model_current$baseline_revision == "2c5bcb21ba6f054639b2031f8ca465be3b8b27d5"))
 knitr::kable(model_current[c("seed", "profiles", "source_records", "observed_carriers",
   "failures", "count_failures", "input_provenance_failures", "mapping_failures")], row.names = FALSE)
 ```
@@ -1327,12 +1344,22 @@ and eleven neutral source counts through 36. This crosses shared-transcript mapp
 with source-context pressure; it is not a distribution of independent biological
 samples, arbitrary transcript models or an estimate of population error rates.
 
-All **`r format(sum(model_current$failures), big.mark = ",")` disagreements** are
-exon-spanning records in the two-exon model. DuckHTS withholds the sequence, while
-pinned Haplosaurus filters the unmapped record and replays the other edits. These
-are failing compatibility cases, not exclusions or evidence that VEP is wrong.
-Every baseline input column, complete oracle JSON line and sequence verdict agrees
-with the retained diagnostic; its 384 disagreements remain in the denominator.
+Against source `2c5bcb21ba6f054639b2031f8ca465be3b8b27d5`,
+**`r format(sum(model_current$fail_to_pass), big.mark = ",")` failures resolve,
+`r sum(model_current$pass_to_fail)` passing cases regress, and
+`r format(sum(model_current$pass_to_pass), big.mark = ",")` cases remain passing**.
+Every input column and complete keyed oracle JSON record is unchanged. This includes
+all 384 failures in the 3,072-case diagnostic baseline. Earlier failed artifacts and
+ledger rows remain; no case is excluded and the oracle is unchanged.
+
+Raw replay marks validated coding/noncoding source-span omissions `source_unmapped`
+and replays the other mapped sources with conditional evidence. The independent
+artifact audit checks omission status, evidence bit 8 and absence from physical
+edits across `r format(sum(model_current$omitted_leaves), big.mark = ",")` leaves /
+`r format(sum(model_current$omitted_carriers), big.mark = ",")` carrier memberships.
+Model/REF errors still withhold sequence, and strict decoded replay retains its
+projection-failure policy. This is pinned Haplosaurus sequence-mechanics conformance,
+not evidence that VEP is wrong or that a conditional sequence describes biology.
 
 Full CDS/protein groups include counts per sample; exchanging samples is a rejected
 corruption even when pooled counts agree. Applied-source identity sets are checked
