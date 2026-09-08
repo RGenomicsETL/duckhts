@@ -1148,6 +1148,78 @@ and ploidy-limit exhaustion. This establishes the declared finite raw-input
 contract, not overlapping replacements, broader phase conformance, whole-haplotype
 SO/HGVS or biological certainty for conditional sequence.
 
+## Rare source-record geometry
+
+```{r rare-source-records}
+records <- read.csv(file.path(root, "test/duckvep/conformance/data/haplotype_record_history.csv"),
+  colClasses = c(source_revision = "character"))
+stopifnot(all(records$extension_build_binding == "htslib_distclean_make_release"),
+  all(records$controls_rejected == 4L),
+  all(records$minimum_stratum_draws == records$rare_per_stratum),
+  !anyDuplicated(records[c("source_revision", "seed", "cohort", "shape")]))
+record_revision <- tail(unique(records$source_revision), 1L)
+record_current <- subset(records, source_revision == record_revision)
+record_summary <- aggregate(cbind(profiles, failures, available_sequence_failures,
+  profiles_with_unavailable, count_failures) ~ seed + cohort, data = record_current, FUN = sum)
+names(record_summary) <- c("seed", "cohort", "profiles", "full failures",
+  "available sequence differences", "profiles with unavailable sequence", "carrier-total failures")
+knitr::kable(record_summary, row.names = FALSE)
+```
+
+Source `r record_revision` runs the public `source_records`/`vep116_compat` path
+against pinned, unmodified Haplosaurus. Across the two seeds there are
+**`r format(sum(record_current$profiles), big.mark = ",")` profiles**,
+`r format(sum(record_current$input_records), big.mark = ",")` source records and
+`r format(sum(record_current$oracle_lanes), big.mark = ",")` oracle file lanes;
+DuckHTS returns `r format(sum(record_current$observed_carriers), big.mark = ",")`
+carrier memberships. The full comparison retains CDS/protein multisets, counts
+and applied-record provenance. Available includes explicitly conditional replay;
+a NULL sequence remains a disagreement, not a waiver.
+All failure columns count profiles. Unavailable outputs in these runs have
+`edit_conflict` status with successful coding projection.
+The receipt ledger retains every run, generator, coverage and artifact hash.
+
+Each seed includes 144 fixed profiles and 512 general-random overlapping pairs.
+The rare lane requires **32 draws in each of 1,128 cells**: 12 geometries × two
+strands × 47 valid GT-pattern/source-ploidy combinations. Ploidies are 1, 2, 4,
+8, 16 and 64. Patterns include mixed and leading separators, first/last missing
+slots, all-missing calls and ALT calls beyond the two consumed file lanes.
+Positions, replacement lengths and bases are seeded; actual GT strings and all
+cell quotas are checked. A pair shares its GT-pattern/ploidy class; this does not
+enumerate every pairing of different classes. Each profile has two tested records
+and a separate homozygous anchor. Both policies' existing decoded-input corpora
+and the finite raw-GT audit remain independent evidence lanes.
+
+The original 656 inputs and complete comparison objects per seed match their
+source-bound baseline exactly. Four deliberate output corruptions are rejected;
+the 24 fixed disjoint/adjacent controls per seed pass. Fixed profiles repeat across
+seeds, and all profiles use the same registered 180-base, single-exon reference
+and standard codon table. These are quota-controlled generated configurations,
+not independent biological observations, population error rates, strict-phase
+certification, combined SO/HGVS or structural-event conformance. Four DuckDB
+threads are used; these counts are not performance measurements.
+
+### Retained overlap witness
+
+At source `6bcff3353d7c9a2609996aae9828f9da3fb5f238`, the fixed positive-strand
+`mnv_retained_middle` cis profile has these records:
+
+| Source | Genomic position | REF | ALT | GT |
+| --- | ---: | --- | --- | --- |
+| a | 40 | TGCTGCT | AGCTGCA | 1\|0 |
+| b | 43 | T | A | 1\|0 |
+| anchor | 165 | C | G | 1\|1 |
+
+On the changed lane, CDS bases 25–40 are `GCTGCAGCTGCAGCTG` in Haplosaurus and
+`GCTGCAGCAGCAGCTG` in DuckHTS. DuckHTS reports an available sequence. The pinned
+[`_mutate_sequences` implementation](https://github.com/Ensembl/ensembl-variation/blob/2fb834b987ede3824e200197a838ce11e91aeb4b/modules/Bio/EnsEMBL/Variation/TranscriptHaplotypeContainer.pm#L1160)
+uses the [Haplo parser's raw spans](https://github.com/Ensembl/ensembl-vep/blob/57ea5c52340acc1f156267f810ad162e26597082/modules/Bio/EnsEMBL/VEP/Haplo/Parser/VCF.pm#L198)
+and applies full REF spans in descending mapped-CDS order: record a restores the
+retained middle base after b changes it. DuckHTS's differing-island decomposition
+keeps b's substitution. Applied-record provenance must still retain b even when
+its sequence change is overwritten. This is a DuckHTS raw-replay compatibility
+gap; it is not evidence that VEP is wrong.
+
 ## Individual Sequence Ontology terms
 
 For each transcript pair, this compares the union of terms emitted by either

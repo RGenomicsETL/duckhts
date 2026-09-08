@@ -626,9 +626,9 @@ Rscript test/duckvep/conformance/haplotype_phase_differential.R
 ```
 
 `--max-ploidy 2` is a 108-profile smoke test; the full command enumerates all 7,020
-profiles in its finite grammar. Both retain compatibility disagreements and exit
-nonzero. `--extension-receipt` requires clean-build evidence. Typed GT cannot certify
-byte-level VEP parser behavior when distinct raw spellings decode identically.
+profiles in its finite grammar. Both preserve all comparisons and exit nonzero on
+any disagreement. `--extension-receipt` requires clean-build evidence. Typed GT cannot
+certify byte-level VEP parser behavior when distinct raw spellings decode identically.
 
 `haplotype_record_differential.R` checks source-record geometry independently of
 the raw-GT grammar audit. It uses the registered 180-base CDS, 144 fixed profiles
@@ -652,7 +652,9 @@ in every geometry × strand × GT-pattern/source-ploidy cell (1,128 cells). GT p
 cover pipe/slash calls, mixed separators, leading separators, first/last missing
 slots, all-missing calls and ALT only after the two consumed file lanes. Source
 ploidies are 1, 2, 4, 8, 16 and 64; patterns require enough slots to express them.
-Positions, lengths, inserted/replacement bases and paired GTs vary within each cell.
+Positions, lengths and inserted/replacement bases vary within each cell. A pair
+shares its GT-pattern/ploidy class; callable allele slots are seeded within that
+pattern. This does not enumerate every pairing of different classes.
 The generator checks source ploidy and spelling, and `coverage.csv` must meet every
 declared quota. Haplosaurus still consumes its two-lane file profile; source ploidy
 is not a claim of arbitrary-ploidy output compatibility.
@@ -671,9 +673,10 @@ and failures are retained in the reported artifact directory; a mismatch exits
 nonzero. This is a single-exon source-replacement audit, not whole-haplotype SO/HGVS,
 splice prediction, population error rates or a claim that upstream behavior is wrong.
 
-Add `--noncoding-contributors` to run a separately receipted augmented corpus after
-the original gate passes. It adds one homozygous deep-intronic allele per transcript,
-reruns the pinned executable Haplosaurus, and requires its complete observation to
+Add `--noncoding-contributors` to `haplotype_sql_differential.R` to run a separately
+receipted augmented corpus after the original gate passes. It adds one homozygous
+deep-intronic allele per transcript, reruns the pinned executable Haplosaurus, and
+requires its complete observation to
 remain unchanged. Public replay must retain the added source on all six diploid lanes,
 including lanes with no coding edit, while preserving CDS/protein and coding flags.
 Five additional corruption controls guard full carrier keys, sequence, provenance and

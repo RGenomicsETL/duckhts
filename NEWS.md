@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- record 73,504 source-bound rare-configuration comparisons and 11 million
+  passing native property trials. Retain all 38,749 raw-replay disagreements,
+  including 11,437 available-sequence differences; carrier totals match
+
 - add quota-checked rare source-record trials across edit geometry, strand and
   raw GT patterns at source ploidies through 64, with retained per-profile failures
 
