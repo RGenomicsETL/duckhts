@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- verify 69,120 phased transcript cases and 414,720 sample/file lanes, including
+  32,256 variable-exon/UTR models and 4,580 observed one- or two-base coding
+  exons. Both seeds pass all 26 corruption controls; matched inputs, complete
+  oracle records and earlier verdicts are unchanged
+
 - add quota-controlled phased replay models with variable exon lengths, split
   codons, UTRs and CDS/exon-edge source spans. Verify upstream-constructed CDS
   sequences alongside mapper observations, complete lanes and source provenance

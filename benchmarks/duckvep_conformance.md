@@ -893,62 +893,88 @@ cross-product.
 
 |     seed | profiles | source_records | observed_carriers | failures | count_failures | input_provenance_failures | mapping_failures | replay_lane_failures |
 |---------:|---------:|---------------:|------------------:|---------:|---------------:|--------------------------:|-----------------:|---------------------:|
-|      173 |    18432 |         166224 |            110592 |        0 |              0 |                         0 |                0 |                    0 |
-| 20260906 |    18432 |         166224 |            110592 |        0 |              0 |                         0 |                0 |                    0 |
+|      173 |    34560 |         198480 |            207360 |        0 |              0 |                         0 |                0 |                    0 |
+| 20260906 |    34560 |         198480 |            207360 |        0 |              0 |                         0 |                0 |                    0 |
 
-Source 504dc785a1850d5f5c244ee5630f0da26b23fb81 has **36,864 transcript
-cases**, including 33,792 quota-controlled cases and the complete
-3,072-case diagnostic baseline. Every region has three diploid samples,
-one full-exon transcript and an overlapping two-exon transcript (exons
-11–70 and 101–190). Source coordinates and spanning lengths vary;
-transcript geometry and the registered 180-base reference are fixed.
+Source afb41c8688fbc058df3687160328f0c1c554bf67 has **69,120 transcript
+cases**, including 33,792 shared-transcript quota cases, 32,256
+variable-exon/UTR cases and the complete 3,072-case diagnostic baseline.
+Each fixed-model region has three diploid samples, one full-exon
+transcript and an overlapping two-exon transcript (exons 11–70 and
+101–190). All models use the registered 180-base reference;
+variable-exon models distribute it across genomic exons with introns and
+optional UTRs.
 
-Each seed supplies 32 draws in every geometry × cohort-GT-pattern ×
-strand × neutral-count cell: four record geometries, three sample
-configurations, two strands and eleven neutral source counts through 36.
-This crosses shared-transcript mapping with source-context pressure; it
-is not a distribution of independent biological samples, arbitrary
-transcript models or an estimate of population error rates.
+The fixed-model cohort supplies 32 draws per seed in every geometry ×
+cohort-GT-pattern × strand × neutral-count cell: four record geometries,
+three sample configurations, two strands and eleven neutral source
+counts through 36. This crosses shared-transcript mapping with
+source-context pressure; it is not a distribution of independent
+biological samples, arbitrary transcript models or an estimate of
+population error rates.
 
-Against source 4119d55c43fe0649ffe8325135bbdf26c1f37e94, **0 failures
+Against source 504dc785a1850d5f5c244ee5630f0da26b23fb81, **0 failures
 resolve, 0 passing cases regress, and 36,864 cases remain passing**.
-Every input column and complete keyed oracle JSON record is unchanged.
-Constructor observations retain every field and duplicate, preserving
-record order within each sample; sample enumeration order is not a
-biological observation. All grouped, input-provenance and mapper
-verdicts agree with the baseline. Earlier ledger entries retain the
-4,608 failures resolved at source
+Every matched input column and complete keyed oracle JSON record is
+unchanged. Constructor observations retain every field and duplicate,
+preserving record order within each sample; sample enumeration order is
+not a biological observation. All matched grouped, input-provenance,
+mapper and lane verdicts agree with the baseline. Earlier ledger entries
+retain the 4,608 failures resolved at source
 `4119d55c43fe0649ffe8325135bbdf26c1f37e94`, including all 384 failures
 in the 3,072-case diagnostic baseline.
 
 Raw replay marks validated coding/noncoding source-span omissions
 `source_unmapped` and replays the other mapped sources with conditional
 evidence. The independent artifact audit checks omission status,
-evidence bit 8 and absence from physical edits across 18,432 leaves /
-24,576 carrier memberships. Model/REF errors still withhold sequence,
+evidence bit 8 and absence from physical edits across 110,592 leaves /
+162,816 carrier memberships. Model/REF errors still withhold sequence,
 and strict decoded replay retains its projection-failure policy. This is
 pinned Haplosaurus sequence-mechanics conformance, not evidence that VEP
 is wrong or that a conditional sequence describes biology.
 
-The upstream mutator’s original return values provide **221,184
+The upstream mutator’s original return values provide **414,720
 sample/file-lane observations** before equal-sequence grouping. Each
 lane compares complete CDS/protein and applied-source identity sets,
 including full source keys and transcript-oriented alleles. A homozygous
 alternate anchor puts every sample through this observed path;
 reference-only samples handled separately upstream are not synthesized.
 
-All 25 corruption controls pass per seed. Lane swaps, changed allele
-keys and a source removed from one shared-sequence lane are rejected
-even when grouped sequence, sample-count and source-set comparisons
-still agree. Native contributor checks retain IDs, regions, positions,
-REF/ALT interpretations and carrier keys. Upstream checks retain source
-buffers, genotype multiplicities and constructor-owned mappings,
-including exon-repeated and unselected duplicate sources.
+All 26 corruption controls pass per seed, including a changed
+reference-CDS control. Lane swaps, changed allele keys and a source
+removed from one shared-sequence lane are rejected even when grouped
+sequence, sample-count and source-set comparisons still agree. Native
+contributor checks retain IDs, regions, positions, REF/ALT
+interpretations and carrier keys. Upstream checks retain source buffers,
+genotype multiplicities and constructor-owned mappings, including
+exon-repeated and unselected duplicate sources.
 
-Older rows have unmeasured lane metrics, not inferred passes.
-Applied-source sets do not certify physical-edit multiplicity. Arbitrary
-exon/UTR geometry, full phase/PS behavior, whole-haplotype SO/HGVS and
-structural composition remain outside this campaign’s tested scope.
+### Variable-exon and UTR configurations
+
+The geometry cohort adds **32,256 models**, with **0 disagreements**.
+Each seed requires 32 draws in each of 504 cells: 2/3/5/7 coding exons ×
+first coding split phase 0/1/2 × absent, intra-exon or separate-exon
+UTRs × both strands × seven source geometries. Exon, intron and
+intra-exon UTR lengths vary. Edits cover coding substitutions, CDS
+start/end crossings, exon entry/exit crossings, a whole exon with flanks
+and exon-end anchored insertions. Three samples carry opposite lanes and
+a compacted missing call, plus a homozygous ALT anchor.
+
+The audit verifies 137,088 coding exons, including 4,580 observed one-
+or two-base microexons. Microexon frequency is an observation of this
+generator, not a forced per-cell quota or a population rate. Upstream’s
+constructed reference CDS equals every loaded model; the mapper check
+clips exons to the model’s CDS coordinates. Model, mapping, sequence,
+count, source and lane failures remain separate counters and all
+contribute to the verdict.
+
+Older rows have unmeasured geometry/model/lane metrics, not inferred
+passes. Applied-source sets do not certify physical-edit multiplicity.
+This geometry grammar uses complete standard-code CDSs and one
+transcript per new region; arbitrary biological models,
+shared-variable-exon transcript interactions, reference-only sample
+routes, full phase/PS behavior, whole-haplotype SO/HGVS and structural
+composition remain outside this campaign’s tested scope.
 
 ## Individual Sequence Ontology terms
 
