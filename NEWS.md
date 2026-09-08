@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- plan raw haplotype replay order from complete supplied source buffers, including
+  reference-only records. Select duplicate sources by their full ordered ALT lists
+  and retain shadowed calls as explicit provenance
+
 - add paired source-context conformance trials with reference-only records
   before, between and after identical edits, checked cell quotas and retained
   upstream buffer order and CDS-mapping observations

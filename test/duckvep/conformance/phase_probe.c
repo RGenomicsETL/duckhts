@@ -101,12 +101,12 @@ void duckhts_test_raw_phase_haplotypes(char **reference, int *genomic_start,
                 }
                 duckvep_haplotype_source_t source = {(uint64_t)record + 1u,
                     (const uint8_t *)refs[record], (const uint8_t *)alt,
-                    (uint32_t)positions[record], 0u, (uint16_t)ref_len, (uint16_t)alt_len, index, 1u};
+                    (uint32_t)positions[record], 0u, (uint16_t)ref_len, (uint16_t)alt_len, index, 1u, 0u};
                 status = duckvep_haplotype_stream_begin(&stream, &source);
                 if (status == DUCKVEP_HAPLOTYPE_STREAM_OK)
                     status = duckvep_haplotype_stream_project(&stream, 0u);
                 if (status == DUCKVEP_HAPLOTYPE_STREAM_OK)
-                    status = duckvep_haplotype_stream_push_raw_call(&stream, 0u, 0u, &parsed);
+                    status = duckvep_haplotype_stream_push_raw_call(&stream, 0u, 0u, &parsed, 1u);
                 if (status != DUCKVEP_HAPLOTYPE_STREAM_OK) break;
             }
             alt_base += (size_t)alt_counts[record];

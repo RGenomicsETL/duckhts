@@ -809,6 +809,16 @@ GT grammar and out-of-range allele indices, including slots beyond the two used
 by the file profile. `max_ploidy` bounds source ploidy and the two file lanes;
 PS is ignored, and the decoded-only `max_phase_sets` workspace is not allocated.
 
+Raw replay treats the supplied records as its source universe, including `0|0`
+records. Preserve original equal-position file order in `event_index`; filtering
+records before preparation can change overlapping-edit replay. The native planner
+uses the loaded model's sorted transcript spans to form Haplosaurus input buffers.
+The first overlapping source span closes over connected transcripts; later records
+enter by start coordinate without extending the buffer with their REF ends.
+DuckDB retains buffer ordinals, counts all source records and derives the pinned
+Set::IntervalTree 0.12 preorder before genotype filtering. Its temporary preparation
+relations are query-owned; native planning uses constant scratch.
+
 DuckDB expands source REF, ALT and undefined-slot interpretations and sorts them
 by region, position, record ID, allele ordinal, transcript and sample. Each
 interpretation/candidate is projected once; calls stream without a native cohort
@@ -825,16 +835,19 @@ retains explicit missing-source evidence. Omitted missing observations have no p
 edit; retained REF slots participate in ordered replacement. Projection failures still withhold sequence. Blocks, differences and local
 coding facts describe the displayed conditional sequence, not proven biology.
 Overlapping raw records replay complete projected REF/ALT spans in descending
-original CDS start order; equal starts use ascending source event ordinal. REF is
+original CDS start order; equal starts use source-buffer tree order. REF is
 validated against the model, while replacement acts on the current sequence and
 clips removal at its current end. A retained REF slot can overwrite an earlier
 replacement. An omitted missing observation does not execute a REF replacement.
 Every operation that changes the current sequence retains its source ID, even
-when a later operation overwrites it or restores the reference. Duplicate records
-are separate operations. This explicit literal order is not proof that conflicting
-calls describe a biological haplotype. Whole-runner Haplosaurus conformance for
-duplicate and tied records remains open; a stable mapped-coordinate sort alone
-does not reproduce its record selection and ordering.
+when a later operation overwrites it or restores the reference. Sources sharing
+region, position, REF and the complete ordered ALT list use the last retained
+source in tree order for that transcript. Other calls remain contributors with
+`projection_status = 'shadowed_duplicate'` and do not execute replacements.
+Retention is determined by the native raw-GT parser across the candidate's samples.
+This order is not proof that conflicting calls describe a biological haplotype.
+File contexts omitted from the input relation, exon-repeated mappings and
+cross-transcript mapping reuse require separate whole-runner conformance.
 
 Each known leaf exposes `coding_blocks` in ascending reference CDS order. The same
 partitioner used by the independent interaction property groups same-alternate-codon

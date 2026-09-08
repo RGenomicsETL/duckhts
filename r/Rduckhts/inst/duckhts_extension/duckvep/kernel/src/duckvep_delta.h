@@ -133,7 +133,8 @@ typedef enum duckvep_cds_edit_status {
     DUCKVEP_CDS_EDIT_NON_CONTIGUOUS,
     DUCKVEP_CDS_EDIT_BUFFER_TOO_SMALL,
     DUCKVEP_CDS_EDIT_INVALID_ALLELE,
-    DUCKVEP_CDS_EDIT_REF_MISMATCH
+    DUCKVEP_CDS_EDIT_REF_MISMATCH,
+    DUCKVEP_CDS_EDIT_SOURCE_SHADOWED
 } duckvep_cds_edit_status_t;
 
 /* Open a physical edit set from one already projected CDS edit. Equal-length

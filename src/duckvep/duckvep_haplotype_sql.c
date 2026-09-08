@@ -262,6 +262,138 @@ static int workspace_allocate(haplotype_state_t *s, const haplotype_bind_t *bind
     return 1;
 }
 
+static int raw_prepare_query(duckdb_connection connection, const char *sql,
+    duckdb_result *result, char *error, size_t error_size) {
+    if (duckdb_query(connection, sql, result) == DuckDBSuccess) return 1;
+    duckvep_sql_set_error(error, error_size, duckdb_result_error(result));
+    return 0;
+}
+
+/* Called under the registry preparation lock. The SELECT is evaluated once;
+ * DuckDB owns both temporary relations and their spill. No native record array
+ * grows with the source stream. Drop only tables created by this invocation. */
+static int raw_prepare(haplotype_state_t *s, const haplotype_bind_t *b,
+    char *error, size_t error_size) {
+    duckdb_connection connection = b->registry->query_connection;
+    duckdb_result result = {0};
+    duckdb_appender appender = NULL;
+    duckdb_data_chunk chunk = NULL;
+    int have_raw = 0, have_order = 0, ok = 0;
+    if (!raw_prepare_query(connection,
+        "CREATE TEMP TABLE __duckvep_haplotype_raw(event_index UBIGINT, seq_region UINTEGER, "
+        "position UBIGINT, reference VARCHAR, alternates VARCHAR[], transcript_index UINTEGER, "
+        "sample_index UINTEGER, gt VARCHAR)", &result, error, error_size)) goto cleanup;
+    have_raw = 1; duckdb_destroy_result(&result);
+    if (duckdb_appender_create(connection, NULL, "__duckvep_haplotype_raw", &appender) != DuckDBSuccess)
+        goto append_failed;
+    while ((chunk = duckdb_fetch_chunk(s->input))) {
+        if (duckdb_append_data_chunk(appender, chunk) != DuckDBSuccess) goto append_failed;
+        duckdb_destroy_data_chunk(&chunk);
+    }
+    if (duckdb_result_error(&s->input)) {
+        duckvep_sql_set_error(error, error_size, duckdb_result_error(&s->input)); goto cleanup;
+    }
+    if (duckdb_appender_close(appender) != DuckDBSuccess) goto append_failed;
+    duckdb_appender_destroy(&appender);
+    duckdb_destroy_result(&s->input); s->have_result = 0;
+    if (!raw_prepare_query(connection,
+        "CREATE TEMP TABLE __duckvep_haplotype_order(event_index UBIGINT, buffer_id UBIGINT, "
+        "ordinal UBIGINT, source_ordinal UBIGINT)", &result, error, error_size)) goto cleanup;
+    have_order = 1; duckdb_destroy_result(&result);
+    if (!raw_prepare_query(connection,
+        "SELECT event_index, first(seq_region), first(position), first(reference), "
+        "count(DISTINCT (seq_region,position,reference,alternates)) versions "
+        "FROM __duckvep_haplotype_raw GROUP BY event_index ORDER BY 2,3,1",
+        &result, error, error_size)) goto cleanup;
+    if (duckdb_appender_create(connection, NULL, "__duckvep_haplotype_order", &appender) != DuckDBSuccess)
+        goto append_failed;
+    duckvep_haplotype_record_plan_t plan;
+    if (!duckvep_haplotype_record_plan_init(&plan, &b->entry->model.transcripts)) {
+        duckvep_sql_set_error(error, error_size, "duckvep_haplotypes: invalid source-planning model");
+        goto cleanup;
+    }
+    uint64_t source_ordinal = 0u;
+    while ((chunk = duckdb_fetch_chunk(result))) {
+        duckdb_vector v[5];
+        for (unsigned i = 0u; i < 5u; i++) v[i] = duckdb_data_chunk_get_vector(chunk, i);
+        for (idx_t row = 0u; row < duckdb_data_chunk_get_size(chunk); row++) {
+            for (unsigned i = 0u; i < 4u; i++) if (duckvep_row_is_null(v[i], row)) {
+                duckvep_sql_set_error(error, error_size, "duckvep_haplotypes: required input source column is NULL");
+                goto cleanup;
+            }
+            if (((int64_t *)duckdb_vector_get_data(v[4]))[row] != 1) {
+                duckvep_sql_set_error(error, error_size, "duckvep_haplotypes: inconsistent source record identity");
+                goto cleanup;
+            }
+            uint32_t chrom = ((uint32_t *)duckdb_vector_get_data(v[1]))[row];
+            uint64_t pos = ((uint64_t *)duckdb_vector_get_data(v[2]))[row];
+            duckdb_string_t ref = ((duckdb_string_t *)duckdb_vector_get_data(v[3]))[row];
+            uint32_t length = duckdb_string_t_length(ref);
+            uint64_t buffer, ordinal;
+            if (chrom > UINT16_MAX || !pos || pos > UINT32_MAX || !length || length > UINT16_MAX ||
+                length - 1u > UINT32_MAX - pos || source_ordinal == UINT64_MAX ||
+                !duckvep_haplotype_record_plan_next(&plan, (uint16_t)chrom, (uint32_t)pos,
+                    (uint32_t)(pos + length - 1u), &buffer, &ordinal)) {
+                duckvep_sql_set_error(error, error_size, "duckvep_haplotypes: invalid source span or record count");
+                goto cleanup;
+            }
+            source_ordinal++;
+            if (duckdb_append_uint64(appender, ((uint64_t *)duckdb_vector_get_data(v[0]))[row]) != DuckDBSuccess ||
+                duckdb_append_uint64(appender, buffer) != DuckDBSuccess ||
+                duckdb_append_uint64(appender, ordinal) != DuckDBSuccess ||
+                duckdb_append_uint64(appender, source_ordinal) != DuckDBSuccess ||
+                duckdb_appender_end_row(appender) != DuckDBSuccess) goto append_failed;
+        }
+        duckdb_destroy_data_chunk(&chunk);
+    }
+    if (duckdb_result_error(&result)) {
+        duckvep_sql_set_error(error, error_size, duckdb_result_error(&result)); goto cleanup;
+    }
+    if (duckdb_appender_close(appender) != DuckDBSuccess) goto append_failed;
+    duckdb_appender_destroy(&appender); duckdb_destroy_result(&result);
+    s->have_result = 1;
+    ok = raw_prepare_query(connection,
+        "WITH ordered AS (SELECT event_index, CASE WHEN buffer_id=0 THEN source_ordinal ELSE "
+        "source_ordinal-ordinal+_duckvep_record_order(count(*) OVER(PARTITION BY buffer_id)::UBIGINT,ordinal) "
+        "END replay_order FROM __duckvep_haplotype_order), "
+        "genotypes AS (SELECT event_index,sample_index,count(DISTINCT gt) gt_versions "
+        "FROM __duckvep_haplotype_raw GROUP BY event_index,sample_index), "
+        "calls AS MATERIALIZED (SELECT *, count(*) OVER(PARTITION BY event_index,transcript_index,sample_index) copies, "
+        "CASE WHEN alternates IS NULL OR len(alternates)>2147483647 OR "
+        "len(list_filter(alternates,a -> a IS NULL OR len(a)=0 OR len(a)>65535))>0 "
+        "THEN error('duckvep_haplotypes: invalid source ALT list') ELSE len(alternates) END alt_count "
+        "FROM __duckvep_haplotype_raw JOIN ordered USING(event_index)), "
+        "parsed AS MATERIALIZED (SELECT *, _duckvep_raw_gt(gt,alt_count::UINTEGER) raw_gt FROM calls), "
+        "selected AS (SELECT *, max(replay_order) FILTER(WHERE raw_gt.disposition=3) OVER "
+        "(PARTITION BY seq_region,position,reference,alternates,transcript_index) selected_order FROM parsed) "
+        "SELECT c.event_index,seq_region,position,reference, "
+        "CASE WHEN a.i=0 THEN reference WHEN a.i>alt_count THEN '' ELSE alternates[a.i] END alternate, "
+        "(CASE WHEN a.i>alt_count THEN 4294967295 ELSE a.i END)::UINTEGER alt_index, "
+        "transcript_index,c.sample_index,raw_gt,NULL::BOOLEAN[] phase_before,NULL::BIGINT phase_set, "
+        "alt_count,copies,1::BIGINT versions,gt_versions,replay_order, "
+        "(selected_order IS NULL OR replay_order=selected_order) source_selected "
+        "FROM selected c LEFT JOIN genotypes g USING(event_index,sample_index),range(0,alt_count+2) a(i) "
+        "ORDER BY seq_region,position,event_index,alt_index,transcript_index,sample_index",
+        &s->input, error, error_size);
+    goto cleanup;
+append_failed:
+    duckvep_sql_set_error(error, error_size, appender ? duckdb_appender_error(appender)
+        : "duckvep_haplotypes: could not stage source records");
+cleanup:
+    if (chunk) duckdb_destroy_data_chunk(&chunk);
+    if (appender) duckdb_appender_destroy(&appender);
+    duckdb_destroy_result(&result);
+    const char *drops[] = {"DROP TABLE temp.main.__duckvep_haplotype_order", "DROP TABLE temp.main.__duckvep_haplotype_raw"};
+    const int created[] = {have_order, have_raw};
+    for (unsigned i = 0u; i < 2u; i++) if (created[i]) {
+        if (duckdb_query(connection, drops[i], &result) != DuckDBSuccess && ok) {
+            duckvep_sql_set_error(error, error_size, duckdb_result_error(&result)); ok = 0;
+        }
+        duckdb_destroy_result(&result);
+    }
+    return ok;
+}
+
 static int input_open(haplotype_state_t *s, const haplotype_bind_t *b, char *error, size_t error_size) {
     /* One SELECT statement and snapshot on the registry's retained connection.
      * Only query preparation/materialization is serialized. The returned result
@@ -291,25 +423,11 @@ static int input_open(haplotype_state_t *s, const haplotype_bind_t *b, char *err
         "LEFT JOIN event_versions v USING(event_index) "
         "ORDER BY seq_region,position,event_index,transcript_index,sample_index";
     if (b->source_records) {
-        prefix = "WITH raw AS MATERIALIZED (SELECT event_index::UBIGINT event_index, "
+        prefix = "SELECT event_index::UBIGINT event_index, "
             "seq_region::UINTEGER seq_region, position::UBIGINT AS position, reference::VARCHAR AS reference, "
             "alternates::VARCHAR[] alternates, transcript_index::UINTEGER transcript_index, "
             "sample_index::UINTEGER sample_index, gt::VARCHAR gt FROM (";
-        middle = ") source), versions AS (SELECT event_index, "
-            "count(DISTINCT (seq_region,position,reference,alternates)) versions FROM raw GROUP BY event_index), "
-            "genotypes AS (SELECT event_index,sample_index,count(DISTINCT gt) gt_versions "
-            "FROM raw GROUP BY event_index,sample_index), calls AS MATERIALIZED (SELECT *, "
-            "count(*) OVER(PARTITION BY event_index,transcript_index,sample_index) copies, "
-            "CASE WHEN alternates IS NULL OR len(alternates)>2147483647 OR "
-            "len(list_filter(alternates,a -> a IS NULL OR len(a)=0 OR len(a)>65535))>0 "
-            "THEN error('duckvep_haplotypes: invalid source ALT list') ELSE len(alternates) END alt_count "
-            "FROM raw) SELECT c.event_index,seq_region,position,reference, "
-            "CASE WHEN a.i=0 THEN reference WHEN a.i>alt_count THEN '' ELSE alternates[a.i] END alternate, "
-            "(CASE WHEN a.i>alt_count THEN 4294967295 ELSE a.i END)::UINTEGER alt_index, "
-            "transcript_index,c.sample_index,gt,NULL::BOOLEAN[] phase_before,NULL::BIGINT phase_set, "
-            "alt_count,copies,versions,gt_versions FROM calls c LEFT JOIN versions v USING(event_index) "
-            "LEFT JOIN genotypes g USING(event_index,sample_index),range(0,alt_count+2) a(i) "
-            "ORDER BY seq_region,position,event_index,alt_index,transcript_index,sample_index";
+        middle = ") source";
         domain = ""; suffix = "";
     }
     size_t qlen = strlen(b->query), overhead = strlen(prefix) + strlen(middle) + strlen(domain) + strlen(suffix) + 1u;
@@ -322,10 +440,15 @@ static int input_open(haplotype_state_t *s, const haplotype_bind_t *b, char *err
     snprintf(sql, qlen + overhead, "%s%s%s%s%s", prefix, b->query, middle, domain, suffix);
     duckdb_prepared_statement statement = NULL;
     if (!duckvep_registry_query_acquire(b->registry, error, error_size)) { free(sql); return 0; }
-    int ok = duckdb_prepare(b->registry->query_connection, sql, &statement) == DuckDBSuccess;
+    duckdb_extracted_statements extracted = NULL;
+    idx_t statements = duckdb_extract_statements(b->registry->query_connection, sql, &extracted);
+    int ok = statements == 1u && duckdb_prepare_extracted_statement(
+        b->registry->query_connection, extracted, 0u, &statement) == DuckDBSuccess;
     free(sql);
     if (!ok) {
-        duckvep_sql_set_error(error, error_size, statement ? duckdb_prepare_error(statement) : "query connection unavailable");
+        const char *message = statement ? duckdb_prepare_error(statement) :
+            extracted ? duckdb_extract_statements_error(extracted) : NULL;
+        duckvep_sql_set_error(error, error_size, message ? message : "calls query must be one SELECT statement");
     } else if (duckdb_prepared_statement_type(statement) != DUCKDB_STATEMENT_TYPE_SELECT) {
         duckvep_sql_set_error(error, error_size, "calls query must be one SELECT statement"); ok = 0;
     } else {
@@ -334,6 +457,8 @@ static int input_open(haplotype_state_t *s, const haplotype_bind_t *b, char *err
         if (!ok) duckvep_sql_set_error(error, error_size, duckdb_result_error(&s->input));
     }
     if (statement) duckdb_destroy_prepare(&statement);
+    if (extracted) duckdb_destroy_extracted(&extracted);
+    if (ok && b->source_records) ok = raw_prepare(s, b, error, error_size);
     pthread_mutex_unlock(&b->registry->query_mutex);
     return ok;
 }
@@ -360,6 +485,7 @@ static const char *projection_name(duckvep_cds_edit_status_t status) {
     switch (status) {
     case DUCKVEP_CDS_EDIT_OK: return "ok";
     case DUCKVEP_CDS_EDIT_REF_MISMATCH: return "reference_mismatch";
+    case DUCKVEP_CDS_EDIT_SOURCE_SHADOWED: return "shadowed_duplicate";
     case DUCKVEP_CDS_EDIT_INVALID_ARG: return "invalid_argument";
     case DUCKVEP_CDS_EDIT_UNSUPPORTED_KIND: return "unsupported_kind";
     case DUCKVEP_CDS_EDIT_INVALID_EVENT: return "invalid_event";
@@ -659,9 +785,9 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
 
 static duckvep_haplotype_stream_status_t consume_call(haplotype_state_t *s,
     const haplotype_bind_t *bind, char *error, size_t error_size) {
-    duckdb_vector v[15];
+    duckdb_vector v[17];
     idx_t row = s->row;
-    for (unsigned i = 0u; i < 15u; i++) {
+    for (unsigned i = 0u; i < (bind->source_records ? 17u : 15u); i++) {
         v[i] = duckdb_data_chunk_get_vector(s->chunk, i);
         if (i != 9u && i != 10u && duckvep_row_is_null(v[i], row)) {
             snprintf(error, error_size, "duckvep_haplotypes: required input column %u is NULL", i + 1u);
@@ -688,7 +814,8 @@ static duckvep_haplotype_stream_status_t consume_call(haplotype_state_t *s,
     duckvep_haplotype_source_t source = {((uint64_t *)duckdb_vector_get_data(v[0]))[row],
         (const uint8_t *)duckdb_string_t_data(&ref), (const uint8_t *)duckdb_string_t_data(&alt),
         (uint32_t)pos, (uint16_t)chrom, (uint16_t)ref_len, (uint16_t)alt_len,
-        bind->source_records ? allele_index : 0u, (uint8_t)bind->source_records};
+        bind->source_records ? allele_index : 0u, (uint8_t)bind->source_records,
+        bind->source_records ? ((uint64_t *)duckdb_vector_get_data(v[15]))[row] : 0u};
     uint32_t tx = ((uint32_t *)duckdb_vector_get_data(v[6]))[row];
     duckvep_haplotype_stream_status_t status;
     int new_event = !s->stream.have_input || source.event_id != s->stream.last_event_id ||
@@ -703,13 +830,12 @@ static duckvep_haplotype_stream_status_t consume_call(haplotype_state_t *s,
         if (status != DUCKVEP_HAPLOTYPE_STREAM_OK) return status;
     }
     if (bind->source_records) {
-        duckdb_string_t text = ((duckdb_string_t *)duckdb_vector_get_data(v[8]))[row];
-        uint64_t alt_count = (uint64_t)((int64_t *)duckdb_vector_get_data(v[11]))[row];
-        duckvep_raw_gt_t call;
-        duckvep_raw_gt_status_t parsed = alt_count <= INT32_MAX
-            ? duckvep_phase_parse_vep116_raw((const uint8_t *)duckdb_string_t_data(&text),
-                duckdb_string_t_length(text), (uint32_t)alt_count, &call)
-            : DUCKVEP_RAW_GT_ALLELE_OUT_OF_RANGE;
+        uint32_t fields[7];
+        for (unsigned i = 0u; i < 7u; i++) fields[i] =
+            ((uint32_t *)duckdb_vector_get_data(duckdb_struct_vector_get_child(v[8], i)))[row];
+        duckvep_raw_gt_status_t parsed = (duckvep_raw_gt_status_t)fields[0];
+        duckvep_raw_gt_t call = {{fields[1], fields[2]}, fields[3], (uint16_t)fields[4],
+            (uint8_t)fields[5], (duckvep_raw_gt_disposition_t)fields[6]};
         if (parsed != DUCKVEP_RAW_GT_OK) {
             snprintf(error, error_size, "duckvep_haplotypes: raw GT status %u at event %llu, sample %u",
                 (unsigned)parsed, (unsigned long long)source.event_id,
@@ -722,7 +848,8 @@ static duckvep_haplotype_stream_status_t consume_call(haplotype_state_t *s,
             return DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG;
         }
         status = duckvep_haplotype_stream_push_raw_call(&s->stream, tx,
-            ((uint32_t *)duckdb_vector_get_data(v[7]))[row], &call);
+            ((uint32_t *)duckdb_vector_get_data(v[7]))[row], &call,
+            (uint8_t)((bool *)duckdb_vector_get_data(v[16]))[row]);
         if (status == DUCKVEP_HAPLOTYPE_STREAM_OK) {
             s->have_call = 1; s->last_tx = tx; s->row++;
         }

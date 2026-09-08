@@ -5,6 +5,7 @@ DUCKDB_EXTENSION_EXTERN
 
 #include "duckvep_phase.h"
 #include "duckvep_sql.h"
+#include "kernel/src/duckvep_haplotype_stream.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -130,7 +131,94 @@ static void phase_scalar(duckdb_function_info info, duckdb_data_chunk input,
     }
 }
 
+static void raw_gt_scalar(duckdb_function_info info, duckdb_data_chunk input,
+    duckdb_vector output) {
+    (void)info;
+    duckdb_vector text = duckdb_data_chunk_get_vector(input, 0u);
+    duckdb_vector count_vector = duckdb_data_chunk_get_vector(input, 1u);
+    duckdb_string_t *strings = duckdb_vector_get_data(text);
+    uint32_t *counts = duckdb_vector_get_data(count_vector);
+    uint32_t *fields[7];
+    for (idx_t i = 0u; i < 7u; i++)
+        fields[i] = duckdb_vector_get_data(duckdb_struct_vector_get_child(output, i));
+    duckdb_vector_ensure_validity_writable(output);
+    for (idx_t row = 0u; row < duckdb_data_chunk_get_size(input); row++) {
+        if (!phase_valid(text, row) || !phase_valid(count_vector, row)) {
+            duckdb_validity_set_row_invalid(duckdb_vector_get_validity(output), row);
+            continue;
+        }
+        duckdb_validity_set_row_valid(duckdb_vector_get_validity(output), row);
+        duckvep_raw_gt_t call = {0};
+        duckvep_raw_gt_status_t status = duckvep_phase_parse_vep116_raw(
+            (const uint8_t *)duckdb_string_t_data(&strings[row]),
+            duckdb_string_t_length(strings[row]), counts[row], &call);
+        fields[0][row] = (uint32_t)status;
+        fields[1][row] = call.allele_index[0]; fields[2][row] = call.allele_index[1];
+        fields[3][row] = call.parsed_slots; fields[4][row] = call.source_ploidy;
+        fields[5][row] = call.source_has_missing; fields[6][row] = (uint32_t)call.disposition;
+    }
+}
+
+static void record_order_scalar(duckdb_function_info info, duckdb_data_chunk input,
+    duckdb_vector output) {
+    duckdb_vector count_vector = duckdb_data_chunk_get_vector(input, 0u);
+    duckdb_vector ordinal_vector = duckdb_data_chunk_get_vector(input, 1u);
+    uint64_t *counts = duckdb_vector_get_data(count_vector);
+    uint64_t *ordinals = duckdb_vector_get_data(ordinal_vector);
+    uint64_t *ranks = duckdb_vector_get_data(output);
+    duckdb_vector_ensure_validity_writable(output);
+    for (idx_t row = 0u; row < duckdb_data_chunk_get_size(input); row++) {
+        if (!phase_valid(count_vector, row) || !phase_valid(ordinal_vector, row)) {
+            duckdb_validity_set_row_invalid(duckdb_vector_get_validity(output), row);
+            continue;
+        }
+        duckdb_validity_set_row_valid(duckdb_vector_get_validity(output), row);
+        ranks[row] = duckvep_haplotype_record_order(counts[row], ordinals[row]);
+        if (!ranks[row]) {
+            duckdb_scalar_function_set_error(info, "duckvep_haplotypes: invalid source-buffer ordinal");
+            return;
+        }
+    }
+}
+
+static bool register_raw_preparation(duckdb_connection connection) {
+    duckdb_logical_type uinteger = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
+    duckdb_logical_type ubigint = duckdb_create_logical_type(DUCKDB_TYPE_UBIGINT);
+    duckdb_logical_type varchar = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    duckdb_logical_type fields[7];
+    for (idx_t i = 0u; i < 7u; i++) fields[i] = uinteger;
+    const char *names[] = {"status", "allele0", "allele1", "parsed_slots", "source_ploidy",
+        "source_has_missing", "disposition"};
+    duckdb_logical_type result = duckdb_create_struct_type(fields, names, 7u);
+    duckdb_scalar_function function = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(function, "_duckvep_raw_gt");
+    duckdb_scalar_function_add_parameter(function, varchar);
+    duckdb_scalar_function_add_parameter(function, uinteger);
+    duckdb_scalar_function_set_return_type(function, result);
+    duckdb_scalar_function_set_function(function, raw_gt_scalar);
+    duckdb_scalar_function_set_special_handling(function);
+    duckdb_state state = duckdb_register_scalar_function(connection, function);
+    duckdb_destroy_scalar_function(&function);
+    if (state == DuckDBSuccess) {
+        function = duckdb_create_scalar_function();
+        duckdb_scalar_function_set_name(function, "_duckvep_record_order");
+        duckdb_scalar_function_add_parameter(function, ubigint);
+        duckdb_scalar_function_add_parameter(function, ubigint);
+        duckdb_scalar_function_set_return_type(function, ubigint);
+        duckdb_scalar_function_set_function(function, record_order_scalar);
+        duckdb_scalar_function_set_special_handling(function);
+        state = duckdb_register_scalar_function(connection, function);
+        duckdb_destroy_scalar_function(&function);
+    }
+    duckdb_destroy_logical_type(&result);
+    duckdb_destroy_logical_type(&varchar);
+    duckdb_destroy_logical_type(&ubigint);
+    duckdb_destroy_logical_type(&uinteger);
+    return state == DuckDBSuccess;
+}
+
 bool duckvep_register_phase_call(duckdb_connection connection) {
+    if (!register_raw_preparation(connection)) return false;
     duckdb_logical_type integer = duckdb_create_logical_type(DUCKDB_TYPE_INTEGER);
     duckdb_logical_type boolean = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
     duckdb_logical_type ushort = duckdb_create_logical_type(DUCKDB_TYPE_USMALLINT);

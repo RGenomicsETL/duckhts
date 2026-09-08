@@ -23,6 +23,29 @@
 #include "duckvep_delta.h"
 #include "duckvep_phase.h"
 
+/* Pinned Haplosaurus input-buffer planning over a complete coordinate-sorted
+ * source stream and borrowed, start-sorted transcript spans. The first record
+ * that overlaps a transcript closes over all connected transcript spans. Later
+ * records enter that buffer by start coordinate; their ends do not extend it.
+ * Records outside every buffer return buffer=ordinal=0. No allocation. */
+typedef struct {
+    const duckvep_transcript_model_t *model;
+    size_t transcript;
+    uint64_t buffer, ordinal;
+    uint32_t end1, last_pos1;
+    uint16_t chrom;
+    uint8_t have_input;
+} duckvep_haplotype_record_plan_t;
+
+int duckvep_haplotype_record_plan_init(duckvep_haplotype_record_plan_t *plan,
+    const duckvep_transcript_model_t *model);
+int duckvep_haplotype_record_plan_next(duckvep_haplotype_record_plan_t *plan,
+    uint16_t chrom, uint32_t start1, uint32_t end1, uint64_t *buffer, uint64_t *ordinal);
+/* One-based traversal rank after sorted insertion into Set::IntervalTree 0.12.
+ * Counts every record in the source buffer, including unretained REF calls.
+ * Zero indicates invalid count/ordinal. Constant space and logarithmic time. */
+uint64_t duckvep_haplotype_record_order(uint64_t count, uint64_t ordinal);
+
 typedef enum {
     DUCKVEP_HAPLOTYPE_STREAM_OK,
     DUCKVEP_HAPLOTYPE_STREAM_TRANSCRIPT_READY,
@@ -49,6 +72,7 @@ typedef struct {
      * file-slot interpretation (empty ALT, complete source REF deletion). */
     uint32_t allele_index;
     uint8_t source_record;
+    uint64_t replay_order; /* Unique positive planned source rank; all-zero uses caller order. */
 } duckvep_haplotype_source_t;
 
 typedef struct {
@@ -64,6 +88,8 @@ typedef struct {
     uint32_t transcript_index;
     duckvep_cds_edit_status_t status;
     uint8_t cds_unaffected; /* Proven no coding overlap, not an ignored projection failure. */
+    uint8_t source_selected; /* Raw source selected for this candidate's replacement. */
+    uint8_t selection_set;
 } duckvep_haplotype_projection_t;
 
 typedef struct {
@@ -219,10 +245,13 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_push_call(
  * REF observations are omitted from emitted contributors. File ploidy is two and PS is
  * ignored; the input source ploidy remains in the parser result, not the key.
  * Missing-source or undefined-slot sequences are explicitly CONDITIONAL, not
- * known strict-phase sequences. Mixing raw and decoded policies is an error. */
+ * known strict-phase sequences. Mixing raw and decoded policies is an error.
+ * source_selected is the candidate-wide mapping choice across all samples;
+ * zero retains contributor evidence without executing the source replacement.
+ * The choice must agree for every sample at this interpretation/candidate. */
 duckvep_haplotype_stream_status_t duckvep_haplotype_stream_push_raw_call(
     duckvep_haplotype_stream_t *stream, uint32_t transcript_index,
-    uint32_t sample_index, const duckvep_raw_gt_t *call);
+    uint32_t sample_index, const duckvep_raw_gt_t *call, uint8_t source_selected);
 
 duckvep_haplotype_stream_status_t duckvep_haplotype_stream_finish(
     duckvep_haplotype_stream_t *stream);

@@ -48,6 +48,27 @@ local({
   expect_equal(uncertain$carrier_count, 2L)
   expect_error(rduckhts_haplotypes(con, overlapping, "haps", "vep116_compat",
     input_mode = "source_records", max_leaf_edits = 1), pattern = "max_leaf_edits")
+  tied <- paste("SELECT event_index,0 seq_region,position,'A' AS reference,alternates,",
+    "0 transcript_index,0 sample_index,gt FROM (VALUES",
+    "(1,100,['C'],'1|1'),(2,100,['G'],'1|1'),(3,109,['T'],'0|0'))",
+    "r(event_index,position,alternates,gt)")
+  for (keep_context in c(FALSE, TRUE)) {
+    query <- paste(tied, if (keep_context) "" else "WHERE event_index<3", "ORDER BY event_index DESC")
+    result <- rduckhts_haplotypes(con, query, "haps", "vep116_compat", input_mode = "source_records")
+    expect_equal(result$cds, if (keep_context) "CAAAAAAAAAAA" else "GAAAAAAAAAAA")
+    expect_equal(result$edit_count, 2)
+    expect_equal(result$carrier_count, 2L)
+  }
+  duplicates <- paste("SELECT event_index,0 seq_region,100 AS position,'A' AS reference,",
+    "['C'] alternates,0 transcript_index,0 sample_index,gt",
+    "FROM (VALUES (1,'1|0'),(2,'0|1')) r(event_index,gt)")
+  result <- rduckhts_haplotypes(con, duplicates, "haps", "vep116_compat", input_mode = "source_records")
+  result <- result[order(result$cds), ]
+  expect_equal(result$cds, c("AAAAAAAAAAAA", "CAAAAAAAAAAA"))
+  expect_equal(result$contributors[[1]]$projection_status, "shadowed_duplicate")
+  expect_equal(result$contributors[[1]]$event_index, 1)
+  expect_equal(result$edit_count, c(0, 1))
+  expect_equal(result$coding_blocks[[2]]$event_indices[[1]], 2)
   raw_calls <- paste("SELECT i event_index,0 seq_region,99+i AS position,'A' AS reference,",
     "CASE i WHEN 1 THEN ['C','T'] ELSE ['G'] END alternates,0 transcript_index,0 sample_index,",
     "CASE i WHEN 1 THEN '.|1' ELSE '1|1' END gt FROM range(1,3) r(i)")

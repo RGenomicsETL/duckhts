@@ -1,5 +1,8 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- include reference-only source context when ordering bundled raw haplotype replay;
+  duplicate sources use complete ALT-list identity and expose shadowed contributors
+
 - return bounded full-span replay for overlapping `source_records` calls, including
   retained REF alleles and overwritten contributors. Ordered components report
   `unsupported_ordered_replacements` with NA local SO and displaced-frame facts

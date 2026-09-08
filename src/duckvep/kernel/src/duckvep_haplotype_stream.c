@@ -3,6 +3,75 @@
 
 #include <string.h>
 
+int duckvep_haplotype_record_plan_init(duckvep_haplotype_record_plan_t *p,
+    const duckvep_transcript_model_t *m) {
+    if (!p) return 0;
+    memset(p, 0, sizeof(*p));
+    if (!m || (m->transcript_count && (!m->chrom_id || !m->start1 || !m->end1))) return 0;
+    for (size_t i = 0u; i < m->transcript_count; i++)
+        if (!m->start1[i] || m->start1[i] > m->end1[i] ||
+            (i && (m->chrom_id[i] < m->chrom_id[i - 1u] ||
+             (m->chrom_id[i] == m->chrom_id[i - 1u] && m->start1[i] < m->start1[i - 1u])))) return 0;
+    p->model = m;
+    return 1;
+}
+
+int duckvep_haplotype_record_plan_next(duckvep_haplotype_record_plan_t *p,
+    uint16_t chrom, uint32_t start, uint32_t end, uint64_t *buffer, uint64_t *ordinal) {
+    if (buffer) *buffer = 0u;
+    if (ordinal) *ordinal = 0u;
+    if (!p || !p->model || !buffer || !ordinal || !start || end < start ||
+        (p->have_input && (chrom < p->chrom || (chrom == p->chrom && start < p->last_pos1)))) return 0;
+    if (!p->have_input || chrom != p->chrom) p->end1 = 0u;
+    p->have_input = 1u; p->chrom = chrom; p->last_pos1 = start;
+    if (start > p->end1) {
+        const duckvep_transcript_model_t *m = p->model;
+        int overlaps = 0;
+        while (p->transcript < m->transcript_count && m->chrom_id[p->transcript] < chrom)
+            p->transcript++;
+        while (p->transcript < m->transcript_count && m->chrom_id[p->transcript] == chrom &&
+                m->start1[p->transcript] <= end) {
+            uint32_t tx_end = m->end1[p->transcript++];
+            if (tx_end < start) continue;
+            overlaps = 1;
+            if (tx_end > end) end = tx_end;
+        }
+        p->end1 = 0u;
+        if (!overlaps) return 1;
+        if (p->buffer == UINT64_MAX) return 0;
+        p->buffer++; p->ordinal = 0u; p->end1 = end;
+    }
+    if (p->ordinal == UINT64_MAX) return 0;
+    *buffer = p->buffer; *ordinal = ++p->ordinal;
+    return 1;
+}
+
+uint64_t duckvep_haplotype_record_order(uint64_t count, uint64_t ordinal) {
+    if (!ordinal || ordinal > count) return 0u;
+    uint64_t rank = 1u;
+    while (count) {
+        /* Sorted red-black insertion doubles root ordinal r at 5*r-2
+         * records. Its left subtree is perfect with r-1 nodes; the right
+         * subtree is another sorted-insertion tree. Divide before adding
+         * to keep the threshold defined through UINT64_MAX records. */
+        uint64_t threshold = count / 5u + (count % 5u + 2u) / 5u;
+        uint64_t root = 1u;
+        while (root <= threshold) root *= 2u;
+        if (ordinal == root) return rank;
+        if (ordinal > root) {
+            ordinal -= root; count -= root; rank += root;
+            continue;
+        }
+        rank++;
+        for (root /= 2u; root; root /= 2u) {
+            if (ordinal == root) return rank;
+            if (ordinal > root) { ordinal -= root; rank += root; }
+            else rank++;
+        }
+    }
+    return 0u;
+}
+
 static duckvep_haplotype_stream_status_t fail(
     duckvep_haplotype_stream_t *s, duckvep_haplotype_stream_status_t status) {
     if (s) s->error = status;
@@ -83,7 +152,7 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_begin(
     if (s->error) return s->error;
     if (!source || !source->pos1 || !source->ref || !source->alt ||
         !source->ref_len || source->source_record > 1u ||
-        (!source->source_record && (!source->alt_len || source->allele_index)) ||
+        (!source->source_record && (!source->alt_len || source->allele_index || source->replay_order)) ||
         (source->source_record && ((source->allele_index == UINT32_MAX) != !source->alt_len)) ||
         (source->source_record && source->allele_index != UINT32_MAX && source->allele_index > INT32_MAX) ||
         s->serial == UINT64_MAX ||
@@ -99,7 +168,7 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_begin(
         source->event_id == s->last_event_id) {
         const duckvep_haplotype_source_t *previous = &s->buffers.events[s->current_event].source;
         if (!s->have_current || !previous->source_record || previous->ref_len != source->ref_len ||
-            memcmp(previous->ref, source->ref, source->ref_len))
+            memcmp(previous->ref, source->ref, source->ref_len) || previous->replay_order != source->replay_order)
             return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
     }
     if (source->source_record && !source->allele_index &&
@@ -199,6 +268,8 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_project(
     p->status = duckvep_cds_edit_build_prepared_allele(model, s->exons, s->sequences,
         tx, model->strand[tx], &allele, UINT32_MAX, &p->edit);
     p->cds_unaffected = 0u;
+    p->source_selected = 1u;
+    p->selection_set = 0u;
     if (p->status == DUCKVEP_CDS_EDIT_OUT_OF_CDS && s->sequences->cds_length[tx] &&
         model->cds_start1 && model->cds_end1 && model->cds_start1[tx] &&
         model->exon_offset && model->exon_count && model->exon_count[tx] &&
@@ -278,13 +349,13 @@ static const duckvep_haplotype_stored_event_t *find_event(
     return NULL;
 }
 
-static const duckvep_haplotype_projection_t *find_projection(
+static duckvep_haplotype_projection_t *find_projection(
     const duckvep_haplotype_stream_t *s, const duckvep_haplotype_stored_event_t *e, uint32_t tx) {
     size_t lo = 0u, hi = e->projection_count;
     while (lo < hi) {
         size_t mid = lo + (hi - lo) / 2u;
         size_t at = ring_add(e->projection_begin, mid, s->buffers.projection_capacity);
-        const duckvep_haplotype_projection_t *p = &s->buffers.projections[at];
+        duckvep_haplotype_projection_t *p = &s->buffers.projections[at];
         if (p->transcript_index == tx) return p;
         if (p->transcript_index < tx) lo = mid + 1u;
         else hi = mid;
@@ -396,18 +467,23 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_push_call(
 }
 
 duckvep_haplotype_stream_status_t duckvep_haplotype_stream_push_raw_call(
-    duckvep_haplotype_stream_t *s, uint32_t tx, uint32_t sample, const duckvep_raw_gt_t *call) {
+    duckvep_haplotype_stream_t *s, uint32_t tx, uint32_t sample, const duckvep_raw_gt_t *call,
+    uint8_t source_selected) {
     if (!s || !s->initialized) return DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG;
     if (s->error) return s->error;
     if (!s->have_current || s->closing || s->carriers.pending || s->carriers.finished ||
-        !call || !call->source_ploidy || call->source_has_missing > 1u ||
+        !call || !call->source_ploidy || call->source_has_missing > 1u || source_selected > 1u ||
         call->disposition < DUCKVEP_RAW_GT_OMITTED_REFERENCE ||
         call->disposition > DUCKVEP_RAW_GT_RETAINED ||
         (s->have_phase_policy && s->phase_policy != DUCKVEP_PHASE_VEP116_RAW))
         return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
     const duckvep_haplotype_stored_event_t *event = &s->buffers.events[s->current_event];
-    if (!event->source.source_record || !find_projection(s, event, tx))
+    duckvep_haplotype_projection_t *projection = find_projection(s, event, tx);
+    if (!event->source.source_record || !projection ||
+        (projection->selection_set && projection->source_selected != source_selected))
         return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
+    projection->source_selected = source_selected;
+    projection->selection_set = 1u;
     if (call->disposition == DUCKVEP_RAW_GT_RETAINED) {
         if (!call->parsed_slots || call->parsed_slots > (uint32_t)call->source_ploidy + 1u ||
             call->allele_index[0] > INT32_MAX ||
@@ -446,19 +522,24 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_push_raw_call(
 }
 
 /* Descending CDS order with ascending source ordinal for equal starts. */
-static int edit_precedes_min(uint32_t start, uint64_t id, uint32_t other, uint64_t other_id) {
+static int edit_precedes_min(uint32_t start, uint64_t id, uint32_t other, uint64_t other_id,
+    const duckvep_haplotype_contributor_t *contributors) {
+    if (contributors) {
+        if (contributors[id].source.replay_order) id = contributors[id].source.replay_order;
+        if (contributors[other_id].source.replay_order) other_id = contributors[other_id].source.replay_order;
+    }
     return start < other || (start == other && id > other_id);
 }
 
 static void sift_edit_min(duckvep_haplotype_edit_t *edits, uint64_t *ids,
-    size_t root, size_t count) {
+    size_t root, size_t count, const duckvep_haplotype_contributor_t *contributors) {
     duckvep_haplotype_edit_t value = edits[root];
     uint64_t id = ids[root];
     while (root < count / 2u) {
         size_t child = root * 2u + 1u;
         if (child + 1u < count && edit_precedes_min(edits[child + 1u].cds_start,
-                ids[child + 1u], edits[child].cds_start, ids[child])) child++;
-        if (!edit_precedes_min(edits[child].cds_start, ids[child], value.cds_start, id)) break;
+                ids[child + 1u], edits[child].cds_start, ids[child], contributors)) child++;
+        if (!edit_precedes_min(edits[child].cds_start, ids[child], value.cds_start, id, contributors)) break;
         edits[root] = edits[child];
         ids[root] = ids[child];
         root = child;
@@ -470,8 +551,10 @@ static void sift_edit_min(duckvep_haplotype_edit_t *edits, uint64_t *ids,
 /* Genomic upload order is not CDS edit order: trimming retained REF can move
  * an earlier upload past the next edit, and reverse transcripts invert it.
  * A typed in-place heap keeps scratch constant; libc qsort may allocate. */
-static void sort_edits_descending(duckvep_haplotype_edit_t *edits, uint64_t *ids, size_t count) {
-    for (size_t root = count / 2u; root > 0u; root--) sift_edit_min(edits, ids, root - 1u, count);
+static void sort_edits_descending(duckvep_haplotype_edit_t *edits, uint64_t *ids, size_t count,
+    const duckvep_haplotype_contributor_t *contributors) {
+    for (size_t root = count / 2u; root > 0u; root--)
+        sift_edit_min(edits, ids, root - 1u, count, contributors);
     for (size_t remaining = count; remaining > 1u; remaining--) {
         duckvep_haplotype_edit_t first = edits[0];
         uint64_t id = ids[0];
@@ -479,7 +562,7 @@ static void sort_edits_descending(duckvep_haplotype_edit_t *edits, uint64_t *ids
         edits[remaining - 1u] = first;
         ids[0] = ids[remaining - 1u];
         ids[remaining - 1u] = id;
-        sift_edit_min(edits, ids, 0u, remaining - 1u);
+        sift_edit_min(edits, ids, 0u, remaining - 1u, contributors);
     }
 }
 
@@ -535,6 +618,10 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
             return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
         b->contributors[i] = (duckvep_haplotype_contributor_t){
             e->source, p->status, evidence, &e->prepared, 0u};
+        if (raw_records && !p->source_selected) {
+            b->contributors[i].projection_status = DUCKVEP_CDS_EDIT_SOURCE_SHADOWED;
+            continue;
+        }
         if (!raw_records) leaf.evidence_flags |= evidence;
         if ((evidence & (DUCKVEP_CARRIER_MISSING | DUCKVEP_CARRIER_UNPHASED)) &&
             !(evidence & DUCKVEP_CARRIER_CONDITIONAL))
@@ -559,7 +646,7 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
     }
     if (raw_records && leaf.projection_status == DUCKVEP_CDS_EDIT_OK &&
         leaf.sequence_status == DUCKVEP_HAPLOTYPE_OK) {
-        sort_edits_descending(b->edits, b->edit_event_ids, leaf.edit_count);
+        sort_edits_descending(b->edits, b->edit_event_ids, leaf.edit_count, b->contributors);
         for (size_t i = 1u; i < leaf.edit_count; i++) {
             if (b->edits[i].ref_len > b->edits[i - 1u].cds_start - b->edits[i].cds_start) {
                 leaf.ordered_replacements = 1u;
@@ -606,7 +693,7 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
                 }
             }
         } else {
-            sort_edits_descending(b->edits, b->edit_event_ids, leaf.edit_count);
+            sort_edits_descending(b->edits, b->edit_event_ids, leaf.edit_count, NULL);
             leaf.sequence_status = duckvep_haplotype_apply_cds_edits(seq->cds_bytes + (size_t)offset,
                 length, b->edits, leaf.edit_count, s->carriers.model->strand[tx], b->cds, b->cds_capacity,
                 &leaf.cds_length, &applied);
