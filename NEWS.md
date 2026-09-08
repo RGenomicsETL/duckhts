@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- add quota-controlled multi-transcript replay trials across record geometry,
+  genotype, strand and neutral source-context counts. Compare sample-specific
+  sequence counts, applied-source identity sets, input provenance and owned
+  mapper observations; retain every disagreement and comparator control
+
 - record 73,504 passing source-bound raw-record profiles, resolving all 15,953
   retained failures without a paired regression, plus 38,016 passing paired-context
   profiles and their fixed/random controls. Preserve historical evidence and add

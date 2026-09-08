@@ -2,18 +2,7 @@
 # Source-record geometry audit against the pinned, unmodified Haplosaurus runner.
 # Complete sequence/count/provenance differences remain failures, including conflicts.
 
-canonical <- function(rows, provenance = TRUE) {
-  if (!length(rows)) return(list())
-  keys <- vapply(rows, function(x) jsonlite::toJSON(list(cds=x$cds, protein=x$protein),
-    auto_unbox=TRUE, na='null'), '')
-  lapply(split(rows, keys), function(group) {
-    value <- list(cds=group[[1L]]$cds, protein=group[[1L]]$protein,
-      count=sum(vapply(group, function(x) as.numeric(x$count), 0)))
-    if (provenance) value$contributors <- sort(unique(unlist(lapply(group, `[[`, 'contributors'),
-      use.names=FALSE)))
-    value
-  })
-}
+source('test/duckvep/conformance/haplotype_observations.R')
 
 main <- function() {
   opt <- optparse::parse_args(optparse::OptionParser(option_list=list(
@@ -357,6 +346,7 @@ main <- function() {
     write.csv(paired,file.path(out,'context_summary.csv'),row.names=FALSE)
   }
   identities <- unique(c(paths,extension,'test/duckvep/conformance/haplotype_record_differential.R',
+    'test/duckvep/conformance/haplotype_observations.R',
     'test/duckvep/conformance/haplotype_oracle.pl','r/duckhtsbench/inst/benchmark_registry.tsv',
     list.files(out,full.names=TRUE)))
   jsonlite::write_json(list(source_revision=revision,extension_build_binding=binding,

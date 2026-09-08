@@ -702,6 +702,38 @@ and failures are retained in the reported artifact directory; a mismatch exits
 nonzero. This is a single-exon source-replacement audit, not whole-haplotype SO/HGVS,
 splice prediction, population error rates or a claim that upstream behavior is wrong.
 
+`haplotype_model_differential.R` gives each source region overlapping single-exon
+and two-exon transcripts, with three diploid samples. Its 768-region baseline
+preserves the seeded multi-exon diagnostic's input columns. Additional trials
+require a quota in every one of 264 cells: four record geometries × three cohort
+GT patterns × both strands × eleven neutral-record counts through 36. Positions
+and spanning-record lengths vary within each cell; transcript geometry is fixed
+at exons 11–70 and 101–190. Each region supplies two transcript comparisons.
+
+```sh
+Rscript test/duckvep/conformance/haplotype_model_differential.R --seed 173 --rare-per-stratum 32
+Rscript test/duckvep/conformance/haplotype_model_differential.R --seed 20260906 --rare-per-stratum 32
+```
+
+Each command has 18,432 transcript cases, including 1,536 baseline cases, and
+110,592 sample/file-lane observations. Counts are compared per sample and complete
+CDS/protein group, so exchanging samples cannot pass through a pooled count.
+Applied-source identity sets are compared within equal-sequence groups; this
+does not prove physical-edit multiplicity or source-to-sample association in a
+shared upstream sequence group. Native contributors separately retain exact
+record identity, region, position, REF, interpreted ALT and occupied sample/lane.
+The original source buffer, retained genotype multiplicity and transcript-owned
+CDS coordinates are checked against the fixture, including exon-repeated and
+unselected duplicate sources. Thirteen controls reject changed sequences,
+samples, counts, source provenance, genotype observations and mapping coordinates.
+
+`coverage.csv` requires every declared quota; `summary.csv` and `comparisons.rds`
+retain all verdicts. The default quota is one; zero runs just the baseline.
+`--extension-receipt` enforces clean-build binding. Disagreements exit nonzero,
+including unavailable exon-spanning paths. This adds shared-transcript and
+source-context coverage, not arbitrary exon/UTR geometry, phase/PS inference,
+combined SO/HGVS, independent biological observations or population error rates.
+
 Add `--noncoding-contributors` to `haplotype_sql_differential.R` to run a separately
 receipted augmented corpus after the original gate passes. It adds one homozygous
 deep-intronic allele per transcript, reruns the pinned executable Haplosaurus, and
