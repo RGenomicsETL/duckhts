@@ -255,10 +255,7 @@ static int model_peptide_edit_alt_valid(uint8_t amino_acid) {
  * Never renumber an existing site; append new ones. */
 enum {
     DVW_MODEL_NULL_OUT      = 10u,
-    DVW_MODEL_NULL_VIEW     = 11u,
     DVW_MODEL_OOM           = 12u,
-    DVW_MODEL_EXON_RANGE    = 13u,
-    DVW_MODEL_CDS_RANGE     = 14u,
     DVW_MODEL_UNSORTED      = 15u,
     DVW_MODEL_SEQ_COUNT     = 16u,
     DVW_MODEL_SEQ_RANGE     = 17u,
@@ -289,11 +286,6 @@ enum {
     DVW_WS_SCRATCH_RANGE    = 63u,
     DVW_WS_SCRATCH_OOM      = 64u,
     DVW_WS_MODEL            = 65u,
-    DVW_MODEL_TX_LAYOUT      = 66u,
-    DVW_MODEL_EXON_LAYOUT    = 67u,
-    DVW_MODEL_CDNA_LAYOUT    = 68u,
-    DVW_MODEL_PHASE          = 69u,
-    DVW_MODEL_CDS_PROJECTION = 70u,
     DVW_MODEL_SEQ_CONTRACT   = 71u,
     DVW_MODEL_MIRNA_LAYOUT   = 72u,
     DVW_MODEL_PEPTIDE_EDIT_LAYOUT = 73u,
@@ -443,97 +435,9 @@ duckvep_status_t duckvep_model_open(
     for (t = 0u; t < transcripts->transcript_count; t++) {
         size_t eoff = (size_t)transcripts->exon_offset[t];
         size_t ecnt = (size_t)transcripts->exon_count[t];
-        uint32_t cds_s = transcripts->cds_start1[t];
-        uint32_t cds_e = transcripts->cds_end1[t];
 
-        if (transcripts->start1[t] == 0u ||
-            transcripts->start1[t] > transcripts->end1[t] ||
-            (transcripts->strand[t] != 1 && transcripts->strand[t] != -1)) {
-            return fail(error, DUCKVEP_ERR_MODEL_INVALID, DVW_MODEL_TX_LAYOUT,
-                        "transcript has an invalid span or strand");
-        }
-        if (eoff > exons->exon_count || ecnt > exons->exon_count - eoff) {
-            return fail(error, DUCKVEP_ERR_MODEL_INVALID, DVW_MODEL_EXON_RANGE,
-                        "exon slice out of range for a transcript");
-        }
-        if (cds_s != 0u) {
-            if (cds_s > cds_e || cds_s < transcripts->start1[t] ||
-                cds_e > transcripts->end1[t]) {
-                return fail(error, DUCKVEP_ERR_MODEL_INVALID, DVW_MODEL_CDS_RANGE,
-                            "cds interval outside the transcript span");
-            }
-        } else if (cds_e != 0u) {
-            /* cds_start1 == 0 is the non-coding sentinel; a stray cds_end1 is malformed. */
-            return fail(error, DUCKVEP_ERR_MODEL_INVALID, DVW_MODEL_CDS_RANGE,
-                        "cds_start1 == 0 (non-coding) but cds_end1 != 0");
-        }
-        if (ecnt > 0u) {
-            uint32_t genomic_min = UINT32_MAX;
-            uint32_t genomic_max = 0u;
-            size_t e;
-
-            for (e = 0u; e < ecnt; e++) {
-                size_t ei = eoff + e;
-                uint32_t exon_len;
-
-                if (exons->start1[ei] == 0u ||
-                    exons->start1[ei] > exons->end1[ei] ||
-                    exons->start1[ei] < transcripts->start1[t] ||
-                    exons->end1[ei] > transcripts->end1[t]) {
-                    return fail(error, DUCKVEP_ERR_MODEL_INVALID,
-                                DVW_MODEL_EXON_LAYOUT,
-                                "exon lies outside its transcript span");
-                }
-                if (e > 0u) {
-                    size_t previous = ei - 1u;
-                    if ((transcripts->strand[t] > 0 &&
-                         exons->start1[ei] <= exons->end1[previous]) ||
-                        (transcripts->strand[t] < 0 &&
-                         exons->end1[ei] >= exons->start1[previous])) {
-                        return fail(error, DUCKVEP_ERR_MODEL_INVALID,
-                                    DVW_MODEL_EXON_LAYOUT,
-                                    "exons overlap or are not in transcript order");
-                    }
-                }
-                if (exons->start1[ei] < genomic_min) genomic_min = exons->start1[ei];
-                if (exons->end1[ei] > genomic_max) genomic_max = exons->end1[ei];
-                exon_len = exons->end1[ei] - exons->start1[ei] + 1u;
-                if (exons->cdna_start1 != NULL) {
-                    uint32_t cdna_len;
-                    if (exons->cdna_start1[ei] == 0u ||
-                        exons->cdna_start1[ei] > exons->cdna_end1[ei]) {
-                        return fail(error, DUCKVEP_ERR_MODEL_INVALID,
-                                    DVW_MODEL_CDNA_LAYOUT,
-                                    "exon has an invalid cDNA span");
-                    }
-                    cdna_len = exons->cdna_end1[ei] -
-                               exons->cdna_start1[ei] + 1u;
-                    if (cdna_len != exon_len ||
-                        (e == 0u && exons->cdna_start1[ei] != 1u) ||
-                        (e > 0u &&
-                         (exons->cdna_end1[ei - 1u] == UINT32_MAX ||
-                          exons->cdna_start1[ei] !=
-                          exons->cdna_end1[ei - 1u] + 1u))) {
-                        return fail(error, DUCKVEP_ERR_MODEL_INVALID,
-                                    DVW_MODEL_CDNA_LAYOUT,
-                                    "exon cDNA spans are not contiguous and length preserving");
-                    }
-                }
-                if (exons->phase != NULL &&
-                    (exons->phase[ei] < -1 || exons->phase[ei] > 2 ||
-                     exons->end_phase[ei] < -1 || exons->end_phase[ei] > 2)) {
-                    return fail(error, DUCKVEP_ERR_MODEL_INVALID,
-                                DVW_MODEL_PHASE,
-                                "exon phase is outside -1,0,1,2");
-                }
-            }
-            if (genomic_min != transcripts->start1[t] ||
-                genomic_max != transcripts->end1[t]) {
-                return fail(error, DUCKVEP_ERR_MODEL_INVALID,
-                            DVW_MODEL_EXON_LAYOUT,
-                            "transcript span is not the outer exon envelope");
-            }
-        }
+        status = duckvep_model_validate_transcript_layout(transcripts, exons, t, error);
+        if (status != DUCKVEP_OK) return status;
         if (transcripts->mature_mirna_offset != NULL) {
             size_t begin = transcripts->mature_mirna_offset[t];
             size_t finish = transcripts->mature_mirna_offset[t + 1u];
@@ -572,13 +476,6 @@ duckvep_status_t duckvep_model_open(
                                 "mature-miRNA segment is not an ordered exonic interval");
                 }
             }
-        }
-        if (cds_s != 0u &&
-            (!model_exon_for_genomic(exons, eoff, ecnt, cds_s, NULL) ||
-             !model_exon_for_genomic(exons, eoff, ecnt, cds_e, NULL))) {
-            return fail(error, DUCKVEP_ERR_MODEL_INVALID,
-                        DVW_MODEL_CDS_PROJECTION,
-                        "CDS boundary does not project into an exon");
         }
         if (t > 0u) {
             uint16_t pc = transcripts->chrom_id[t - 1u];

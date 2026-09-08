@@ -134,7 +134,8 @@ typedef enum duckvep_cds_edit_status {
     DUCKVEP_CDS_EDIT_BUFFER_TOO_SMALL,
     DUCKVEP_CDS_EDIT_INVALID_ALLELE,
     DUCKVEP_CDS_EDIT_REF_MISMATCH,
-    DUCKVEP_CDS_EDIT_SOURCE_SHADOWED
+    DUCKVEP_CDS_EDIT_SOURCE_SHADOWED,
+    DUCKVEP_CDS_EDIT_SOURCE_UNMAPPED
 } duckvep_cds_edit_status_t;
 
 /* Open a physical edit set from one already projected CDS edit. Equal-length
@@ -451,6 +452,20 @@ duckvep_cds_edit_build_prepared_allele(
     const duckvep_prepared_cds_allele_t *allele,
     uint32_t                          exon_hint,
     duckvep_haplotype_edit_t         *edit);
+
+/* Haplosaurus full-source replacement in forward genomic allele orientation.
+ * SOURCE_UNMAPPED proves a coding/noncoding crossing that the pinned mapper
+ * cannot represent as one coordinate. The complete transcript layout, CDS
+ * extent and every coding-overlap REF base are checked before that result;
+ * invalid models, alleles and REF mismatches remain projection failures.
+ * SOURCE_UNMAPPED returns a zeroed edit. Noncoding-only spans retain OUT_OF_CDS. */
+DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t
+duckvep_compat_vep116_source_cds_edit_build(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t *exons,
+    const duckvep_sequence_pool_t *seq, size_t tx_idx,
+    int8_t transcript_strand, const duckvep_prepared_cds_allele_t *allele,
+    duckvep_haplotype_edit_t *edit);
 
 /* Reproduce VEP 116's independent-event outer-CDS replacement for a literal
  * feature whose genomic span contains one or more introns but whose two

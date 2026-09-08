@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- preserve conditional raw haplotype replay when Haplosaurus omits a source
+  crossing coding and noncoding sequence. Contributors expose `source_unmapped`;
+  shared layout validation, CDS extents and coding-overlap REF checks distinguish
+  these omissions from projection errors. Strict decoded replay is unchanged
+
 - record 36,864 clean-build shared-transcript conformance cases with 32 draws
   in every rare-configuration cell per seed. Retain all 4,608 exon-spanning
   sequence disagreements; carrier totals, input provenance, mapper observations

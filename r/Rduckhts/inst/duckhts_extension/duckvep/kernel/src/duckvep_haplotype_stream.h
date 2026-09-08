@@ -244,8 +244,10 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_push_call(
  * calls retain conditional observations without replacing sequence. Nonmutating known
  * REF observations are omitted from emitted contributors. File ploidy is two and PS is
  * ignored; the input source ploidy remains in the parser result, not the key.
- * Missing-source or undefined-slot sequences are explicitly CONDITIONAL, not
- * known strict-phase sequences. Mixing raw and decoded policies is an error.
+ * Missing-source, undefined-slot and SOURCE_UNMAPPED observations make replay
+ * explicitly CONDITIONAL. SOURCE_UNMAPPED retains a layout/REF-checked mapper
+ * omission without executing a partial edit. Other projection errors withhold
+ * sequence. Mixing raw and decoded policies is an error.
  * source_selected is the candidate-wide mapping choice across all samples;
  * zero retains contributor evidence without executing the source replacement.
  * The choice must agree for every sample at this interpretation/candidate. */

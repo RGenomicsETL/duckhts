@@ -285,6 +285,39 @@ local({
     expect_true(nrow(crossing) == 4L && all(is.na(crossing$cds)) &&
       all(crossing$projection_status == "outside_cds"))
   }
+  unmapped_calls <- paste("SELECT event_index,0 seq_region,position,reference,alternates,",
+    "transcript_index,s.i sample_index,CASE WHEN event_index=2 THEN '1|1'",
+    "ELSE ['1|1','0|1','.','.|1','0|0'][s.i+1] END gt FROM",
+    "(VALUES (1,107,repeat('A',38),['C']),(2,147,'A',['G']))",
+    "v(event_index,position,reference,alternates) CROSS JOIN mixed_tx CROSS JOIN range(5) s(i)")
+  unmapped <- rduckhts_haplotypes(con, unmapped_calls, "mixed", "vep116_compat",
+    input_mode = "source_records", max_leaf_edits = 1)
+  expect_equal(nrow(unmapped), 12L)
+  expect_equal(sum(unmapped$carrier_count), 20L)
+  expect_equal(sum(unmapped$carrier_count[unmapped$sequence_status == "conditional"]), 16L)
+  expect_true(all(unmapped$projection_status == "ok" & unmapped$edit_count == 1))
+  expect_true(all(unmapped$cds[unmapped$transcript_index == 0] == "AAAAAAAAAAGA"))
+  expect_true(all(unmapped$cds[unmapped$transcript_index == 1] == "TCTTTTTTTTTT"))
+  for (i in seq_len(nrow(unmapped))) {
+    expect_equal(unmapped$coding_blocks[[i]]$event_indices[[1]], 2)
+    source <- subset(unmapped$contributors[[i]], event_index == 1)
+    if (nrow(source)) {
+      expect_equal(source$projection_status, "source_unmapped")
+      expect_equal(bitwAnd(source$evidence_flags, 8L), 8L)
+      expect_equal(source$reference, strrep("A", 38L))
+      expect_equal(source$position, 107)
+    }
+  }
+  mismatch <- paste("SELECT * REPLACE(CASE WHEN event_index=1 THEN 'C'||repeat('A',37)",
+    "ELSE reference END AS reference) FROM (", unmapped_calls, ")")
+  mismatch <- rduckhts_haplotypes(con, mismatch, "mixed", "vep116_compat", input_mode = "source_records")
+  expect_equal(sum(mismatch$carrier_count[is.na(mismatch$cds)]), 16L)
+  expect_equal(sum(mismatch$carrier_count[mismatch$projection_status == "reference_mismatch"]), 16L)
+  decoded <- paste("SELECT *,alternates[1] alternate,1 alt_index,[1,1] alleles,",
+    "[true,true] phase_before,NULL::BIGINT phase_set FROM (", unmapped_calls, ") WHERE sample_index=0")
+  decoded <- rduckhts_haplotypes(con, decoded, "mixed")
+  expect_true(all(is.na(decoded$cds)) && all(decoded$projection_status == "outside_cds"))
+  expect_equal(sum(decoded$carrier_count), 4L)
   expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('mixed') dropped")$dropped)
   # One restored-frame block followed by an independent substitution. Both
   # input records in the block stay visible in contributor provenance.

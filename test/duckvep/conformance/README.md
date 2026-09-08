@@ -729,8 +729,8 @@ samples, counts, source provenance, genotype observations and mapping coordinate
 
 `coverage.csv` requires every declared quota; `summary.csv` and `comparisons.rds`
 retain all verdicts. The default quota is one; zero runs just the baseline.
-`--extension-receipt` enforces clean-build binding. Disagreements exit nonzero,
-including unavailable exon-spanning paths. This adds shared-transcript and
+`--extension-receipt` enforces clean-build binding. All sequence, provenance and
+mapper disagreements exit nonzero. This provides shared-transcript and
 source-context coverage, not arbitrary exon/UTR geometry, phase/PS inference,
 combined SO/HGVS, independent biological observations or population error rates.
 

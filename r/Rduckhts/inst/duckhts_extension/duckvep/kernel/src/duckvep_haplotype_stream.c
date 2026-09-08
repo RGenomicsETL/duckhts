@@ -265,8 +265,11 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_project(
         prepared->ref_diff_length, prepared->alt_diff_length, 1};
     p->transcript_index = tx;
     memset(&p->edit, 0, sizeof(p->edit));
-    p->status = duckvep_cds_edit_build_prepared_allele(model, s->exons, s->sequences,
-        tx, model->strand[tx], &allele, UINT32_MAX, &p->edit);
+    p->status = stored->source.source_record
+        ? duckvep_compat_vep116_source_cds_edit_build(model, s->exons, s->sequences,
+            tx, model->strand[tx], &allele, &p->edit)
+        : duckvep_cds_edit_build_prepared_allele(model, s->exons, s->sequences,
+            tx, model->strand[tx], &allele, UINT32_MAX, &p->edit);
     p->cds_unaffected = 0u;
     p->source_selected = 1u;
     p->selection_set = 0u;
@@ -620,6 +623,10 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
             e->source, p->status, evidence, &e->prepared, 0u};
         if (raw_records && !p->source_selected) {
             b->contributors[i].projection_status = DUCKVEP_CDS_EDIT_SOURCE_SHADOWED;
+            continue;
+        }
+        if (raw_records && p->status == DUCKVEP_CDS_EDIT_SOURCE_UNMAPPED) {
+            b->contributors[i].evidence_flags |= DUCKVEP_CARRIER_CONDITIONAL;
             continue;
         }
         if (!raw_records) leaf.evidence_flags |= evidence;

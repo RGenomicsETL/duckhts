@@ -665,8 +665,8 @@ transcript, the shared topology classifier can prove that its semantic REF span 
 flanks for an insertion) has no coding overlap; such a contributor retains its own
 `outside_cds` status without suppressing literal CDS replay. A path containing only
 these events retains the reference CDS with zero edits and complete provenance.
-Mixed coding/noncoding spans, invalid sequence slices and other projection errors
-remain failures. Missing/unphased evidence still makes the path incomplete. Literal
+Decoded replay treats mixed coding/noncoding spans, invalid sequence slices and
+other projection errors as failures. Missing/unphased evidence makes the path incomplete. Literal
 replay does not predict splice alteration; noncoding transcripts still have no CDS.
 One shared CDS translator serves independent coding contexts and phased replay. It
 retains every complete codon's residue and the first-stop position in one pass;
@@ -759,7 +759,13 @@ missing-call/ploidy disagreements separately from the certified literal-replay c
 Native raw-record replay uses source record IDs plus REF/ALT ordinals. An undefined
 file slot is an explicit empty-ALT interpretation of the complete source REF span;
 its sequence is conditional. Missing REF and omitted-call observations retain source
-evidence with zero physical edits. A projection failure still makes sequence unavailable.
+evidence with zero physical edits. A full source span crossing coding/noncoding bases
+has no single Haplosaurus CDS mapping. Raw replay retains it as `source_unmapped`
+with conditional evidence and replays the remaining mapped sources. The shared model
+layout validator, uncached CDS extent and cached-coordinate agreement are checked;
+every coding-overlap REF segment is verified through the ordinary edit projector.
+Intronic/UTR reference sequence is not available from a CDS-only pool. Invalid
+layout, CDS storage, alleles or coding REF still make sequence unavailable.
 SQL/R selects this raw-record interface with `input_mode := 'source_records'` and
 `phase_policy := 'vep116_compat'`. The default `alt_events` input is the decoded-call
 contract; it cannot emulate lexical distinctions absent from those arrays.
@@ -830,9 +836,12 @@ Source-record contributors append nullable `alt_index` to their struct: 0 means
 REF, a positive value is the source ALT ordinal, and NULL means the undefined
 file-slot interpretation. The latter has empty alternate and deletes the complete
 source REF span. Evidence bit 8 and `sequence_status = 'conditional'` distinguish
-missing/undefined-slot replay from a known called sequence; bit 2 additionally
+missing/undefined-slot replay and validated source-mapping omissions from a known
+called sequence; bit 2 additionally
 retains explicit missing-source evidence. Omitted missing observations have no physical
-edit; retained REF slots participate in ordered replacement. Projection failures still withhold sequence. Blocks, differences and local
+edit; retained REF slots participate in ordered replacement. A `source_unmapped`
+contributor performs no replacement and retains its interpreted REF/ALT identity.
+Other projection failures withhold sequence. Blocks, differences and local
 coding facts describe the displayed conditional sequence, not proven biology.
 Overlapping raw records replay complete projected REF/ALT spans in descending
 original CDS start order; equal starts use source-buffer tree order. REF is
@@ -846,8 +855,6 @@ source in tree order for that transcript. Other calls remain contributors with
 `projection_status = 'shadowed_duplicate'` and do not execute replacements.
 Retention is determined by the native raw-GT parser across the candidate's samples.
 This order is not proof that conflicting calls describe a biological haplotype.
-File contexts omitted from the input relation, exon-repeated mappings and
-cross-transcript mapping reuse require separate whole-runner conformance.
 
 Each known leaf exposes `coding_blocks` in ascending reference CDS order. The same
 partitioner used by the independent interaction property groups same-alternate-codon

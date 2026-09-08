@@ -863,6 +863,61 @@ SELECT count(*),count(*) FILTER(WHERE cds IS NULL AND projection_status='outside
 ----
 4	4	14
 
+# Raw compatibility omits a non-mappable full source span, retains its
+# interpretation as conditional evidence, and replays the separate coding edit.
+statement ok
+CREATE TABLE hap_unmapped_raw AS SELECT event_index,0 seq_region,position,reference,alternates,
+ transcript_index,s.i sample_index,CASE WHEN event_index=2 THEN '1|1'
+ ELSE ['1|1','0|1','.','.|1','0|0'][s.i+1] END gt
+ FROM (VALUES (1,107,repeat('A',38),['C']),(2,147,'A',['G']))
+ v(event_index,position,reference,alternates) CROSS JOIN hap_mixed_tx CROSS JOIN range(5) s(i);
+
+query ITTTIII
+SELECT transcript_index,cds,protein,sequence_status,sum(carrier_count),min(edit_count),max(edit_count)
+ FROM duckvep_haplotypes('SELECT * FROM hap_unmapped_raw','hap_mixed',
+ input_mode:='source_records',phase_policy:='vep116_compat',max_leaf_edits:=1)
+ GROUP BY ALL ORDER BY transcript_index,sequence_status;
+----
+0	AAAAAAAAAAGA	KKKR	conditional	8	1	1
+0	AAAAAAAAAAGA	KKKR	ok	2	1	1
+1	TCTTTTTTTTTT	SFFF	conditional	8	1	1
+1	TCTTTTTTTTTT	SFFF	ok	2	1	1
+
+query III
+SELECT count(*),count(*) FILTER(WHERE c.projection_status='source_unmapped' AND c.evidence_flags & 8 = 8),
+ count(*) FILTER(WHERE c.alt_index IS NULL AND c.alternate='')
+ FROM duckvep_haplotypes('SELECT * FROM hap_unmapped_raw','hap_mixed',
+ input_mode:='source_records',phase_policy:='vep116_compat'),unnest(contributors) u(c)
+ WHERE c.event_index=1;
+----
+10	10	2
+
+query III
+SELECT count(*),count(*) FILTER(WHERE block.event_indices=[2]),sum(len(block.event_indices))
+ FROM duckvep_haplotypes('SELECT * FROM hap_unmapped_raw','hap_mixed',
+ input_mode:='source_records',phase_policy:='vep116_compat'),unnest(coding_blocks) u(block);
+----
+12	12	12
+
+# A mismatching coding-overlap REF is a projection failure, not an omission.
+query III
+SELECT sum(carrier_count),sum(carrier_count) FILTER(WHERE cds IS NULL),
+ sum(carrier_count) FILTER(WHERE projection_status='reference_mismatch')
+ FROM duckvep_haplotypes('SELECT * REPLACE(CASE WHEN event_index=1 THEN ''C''||repeat(''A'',37)
+ ELSE reference END AS reference) FROM hap_unmapped_raw','hap_mixed',
+ input_mode:='source_records',phase_policy:='vep116_compat');
+----
+20	16	16
+
+query III
+SELECT sum(carrier_count),sum(carrier_count) FILTER(WHERE cds IS NULL),
+ sum(carrier_count) FILTER(WHERE projection_status='outside_cds')
+ FROM duckvep_haplotypes('SELECT *,alternates[1] alternate,1 alt_index,[1,1] alleles,
+ [true,true] phase_before,NULL::BIGINT phase_set FROM hap_unmapped_raw WHERE sample_index=0',
+ 'hap_mixed');
+----
+4	4	4
+
 # A premature stop truncates displayed protein, not downstream event provenance.
 query I
 SELECT loaded FROM duckvep_model_load('hap_stops','SELECT 0::UINTEGER seq_region',

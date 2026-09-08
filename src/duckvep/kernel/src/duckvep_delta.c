@@ -11,6 +11,7 @@
 #include "duckvep_coding.h" /* pulls duckvep_projection.h + duckvep_codon.h */
 #include "duckvep_dna.h"
 #include "duckvep_event.h"
+#include "duckvep_model_internal.h"
 
 #include <string.h>
 
@@ -1477,6 +1478,80 @@ duckvep_cds_edit_build_prepared_allele(
     out->ref_len = (uint32_t)allele->ref_length;
     out->ref = allele->ref;
     return DUCKVEP_CDS_EDIT_OK;
+}
+
+DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t
+duckvep_compat_vep116_source_cds_edit_build(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t *exons,
+    const duckvep_sequence_pool_t *seq, size_t tx_idx,
+    int8_t transcript_strand, const duckvep_prepared_cds_allele_t *allele,
+    duckvep_haplotype_edit_t *out) {
+    if (out) memset(out, 0, sizeof(*out));
+    if (!allele || !allele->event || allele->variant_strand != 1)
+        return DUCKVEP_CDS_EDIT_INVALID_ARG;
+    const duckvep_event_t *event = allele->event;
+    if (event->interbase || !event->start1 || event->end1 < event->start1 ||
+        event->end1 - event->start1 + 1u != allele->ref_length ||
+        event->raw_start1 != event->start1 || event->raw_end1 != event->end1)
+        return DUCKVEP_CDS_EDIT_INVALID_EVENT;
+    duckvep_cds_edit_status_t status = duckvep_cds_edit_build_prepared_allele(
+        transcripts, exons, seq, tx_idx, transcript_strand, allele, UINT32_MAX, out);
+    if (status != DUCKVEP_CDS_EDIT_OUT_OF_CDS || !seq->cds_length[tx_idx]) return status;
+    if (duckvep_model_validate_transcript_layout(transcripts, exons, tx_idx, NULL) != DUCKVEP_OK)
+        return DUCKVEP_CDS_EDIT_INVALID_ARG;
+
+    /* A failed whole-span projection is not evidence that the model's CDS
+     * storage is valid. Derive its extent from uncached exon coordinates. */
+    duckvep_transcript_model_t view = *transcripts;
+    view.cds_cdna_start1 = view.cds_cdna_end1 = view.cds_start_exon_index = NULL;
+    view.cds_phase_offset = NULL;
+    uint32_t first, last, exon;
+    uint8_t phase;
+    const uint8_t *cds;
+    size_t cds_length;
+    if (!delta_cds_slice(seq, tx_idx, &cds, &cds_length) ||
+        !duckvep_project_coding_cdna_bounds(&view, exons, tx_idx, &first, &last, &exon, &phase))
+        return DUCKVEP_CDS_EDIT_INVALID_ARG;
+    uint32_t cached_first, cached_last, cached_exon;
+    uint8_t cached_phase;
+    if (!duckvep_project_coding_cdna_bounds(transcripts, exons, tx_idx,
+            &cached_first, &cached_last, &cached_exon, &cached_phase) ||
+        first != cached_first || last != cached_last || exon != cached_exon || phase != cached_phase)
+        return DUCKVEP_CDS_EDIT_INVALID_ARG;
+    if ((uint64_t)last - first + 1u + phase != cds_length)
+        return DUCKVEP_CDS_EDIT_OUT_OF_CDS;
+    if (duckvep_project_event_to_cds(&view, exons, tx_idx, event, &first, &last))
+        return DUCKVEP_CDS_EDIT_OUT_OF_CDS;
+
+    size_t offset = transcripts->exon_offset[tx_idx];
+    size_t count = transcripts->exon_count[tx_idx];
+    uint32_t coding_bases = 0u;
+    for (size_t i = offset; i < offset + count; i++) {
+        uint32_t start = exons->start1[i], end = exons->end1[i];
+        if (start < transcripts->cds_start1[tx_idx]) start = transcripts->cds_start1[tx_idx];
+        if (end > transcripts->cds_end1[tx_idx]) end = transcripts->cds_end1[tx_idx];
+        if (start < event->start1) start = event->start1;
+        if (end > event->end1) end = event->end1;
+        if (start > end) continue;
+        uint32_t length = end - start + 1u;
+        if (i > UINT32_MAX || length > allele->ref_length - coding_bases)
+            return DUCKVEP_CDS_EDIT_INVALID_ARG;
+        const uint8_t *ref = allele->ref + start - event->start1;
+        duckvep_event_t piece;
+        if (!duckvep_event_prepare_replacement(start, ref, (uint16_t)length,
+                ref, (uint16_t)length, &piece)) return DUCKVEP_CDS_EDIT_INVALID_EVENT;
+        duckvep_prepared_cds_allele_t part = {&piece, ref, ref, ref,
+            (uint16_t)length, (uint16_t)length, 1};
+        duckvep_haplotype_edit_t checked;
+        status = duckvep_cds_edit_build_prepared_allele(transcripts, exons, seq,
+            tx_idx, transcript_strand, &part, (uint32_t)i, &checked);
+        if (status != DUCKVEP_CDS_EDIT_OK) return status;
+        coding_bases += length;
+    }
+    memset(out, 0, sizeof(*out));
+    return coding_bases && coding_bases < allele->ref_length
+        ? DUCKVEP_CDS_EDIT_SOURCE_UNMAPPED : DUCKVEP_CDS_EDIT_OUT_OF_CDS;
 }
 
 DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t
