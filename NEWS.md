@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- record the complete 73,504-profile ordered-replay campaign: 15,953 compatibility
+  failures, including 1,924 previously passing profiles. Preserve every failure,
+  paired input/oracle identity and transition count; add 11.2 million native
+  property trials and matched decoded-executor performance evidence
+
 - replay overlapping raw source records as ordered full-span replacements with
   bounded native storage, retained REF participation and overwritten-source
   provenance. Ordered components expose net spans; local SO and displaced-frame

@@ -1158,6 +1158,7 @@ stopifnot(all(records$extension_build_binding == "htslib_distclean_make_release"
   all(records$minimum_stratum_draws == records$rare_per_stratum),
   !anyDuplicated(records[c("source_revision", "seed", "cohort", "shape")]))
 record_revision <- tail(unique(records$source_revision), 1L)
+record_baseline_revision <- tail(unique(records$source_revision), 2L)[1L]
 record_current <- subset(records, source_revision == record_revision)
 record_summary <- aggregate(cbind(profiles, failures, available_sequence_failures,
   profiles_with_unavailable, count_failures) ~ seed + cohort, data = record_current, FUN = sum)
@@ -1175,9 +1176,31 @@ DuckHTS returns `r format(sum(record_current$observed_carriers), big.mark = ",")
 carrier memberships. The full comparison retains CDS/protein multisets, counts
 and applied-record provenance. Available includes explicitly conditional replay;
 a NULL sequence remains a disagreement, not a waiver.
-All failure columns count profiles. Unavailable outputs in these runs have
-`edit_conflict` status with successful coding projection.
+All failure columns count profiles. Every sequence is available in this campaign;
+availability does not imply agreement.
 The receipt ledger retains every run, generator, coverage and artifact hash.
+
+```{r rare-source-record-transitions}
+record_before_after <- aggregate(cbind(profiles, failures, available_sequence_failures,
+  profiles_with_unavailable) ~ source_revision, data = subset(records,
+    source_revision %in% c(record_baseline_revision, record_revision)), FUN = sum)
+record_before_after <- record_before_after[match(c(record_baseline_revision, record_revision),
+  record_before_after$source_revision), ]
+knitr::kable(record_before_after, row.names = FALSE)
+record_transitions <- aggregate(cbind(baseline_pass_to_pass, baseline_fail_to_pass,
+  baseline_pass_to_fail, baseline_fail_to_fail) ~ seed, data = record_current, FUN = sum)
+stopifnot(sum(as.matrix(record_transitions[-1L])) == sum(record_current$profiles),
+  sum(record_transitions$baseline_pass_to_fail + record_transitions$baseline_fail_to_fail) ==
+    sum(record_current$failures))
+names(record_transitions) <- c("seed", "still passing", "resolved", "regressed", "still failing")
+knitr::kable(record_transitions, row.names = FALSE)
+```
+
+The paired comparison has **`r format(sum(record_transitions$regressed), big.mark = ",")`
+previously passing profiles that fail at the current source**. All are rare
+duplicate-deletion, same-start duplicate/SNV or reverse-strand same-end cases.
+They remain failures alongside every unresolved profile. The lower total failure
+count is not conformance and does not establish absence of regression.
 
 Each seed includes 144 fixed profiles and 512 general-random overlapping pairs.
 The rare lane requires **32 draws in each of 1,128 cells**: 12 geometries × two
@@ -1190,8 +1213,9 @@ enumerate every pairing of different classes. Each profile has two tested record
 and a separate homozygous anchor. Both policies' existing decoded-input corpora
 and the finite raw-GT audit remain independent evidence lanes.
 
-The original 656 inputs and complete comparison objects per seed match their
-source-bound baseline exactly. Four deliberate output corruptions are rejected;
+All 36,752 generated inputs per seed match source `r record_baseline_revision`
+exactly, and each complete oracle output is byte-identical. The comparison rules
+and all preceding comparison artifacts are preserved. Four deliberate output corruptions are rejected;
 the 24 fixed disjoint/adjacent controls per seed pass. Fixed profiles repeat across
 seeds, and all profiles use the same registered 180-base, single-exon reference
 and standard codon table. These are quota-controlled generated configurations,
@@ -1199,7 +1223,7 @@ not independent biological observations, population error rates, strict-phase
 certification, combined SO/HGVS or structural-event conformance. Four DuckDB
 threads are used; these counts are not performance measurements.
 
-### Retained overlap witness
+### Full-span replacement witness
 
 At source `6bcff3353d7c9a2609996aae9828f9da3fb5f238`, the fixed positive-strand
 `mnv_retained_middle` cis profile has these records:
@@ -1210,15 +1234,18 @@ At source `6bcff3353d7c9a2609996aae9828f9da3fb5f238`, the fixed positive-strand
 | b | 43 | T | A | 1\|0 |
 | anchor | 165 | C | G | 1\|1 |
 
-On the changed lane, CDS bases 25–40 are `GCTGCAGCTGCAGCTG` in Haplosaurus and
-`GCTGCAGCAGCAGCTG` in DuckHTS. DuckHTS reports an available sequence. The pinned
+On the changed lane, CDS bases 25–40 are `GCTGCAGCTGCAGCTG` in Haplosaurus.
+DuckHTS source `6bcff3353d7c9a2609996aae9828f9da3fb5f238` returns
+`GCTGCAGCAGCAGCTG`; source `47eaa7b1460a6b29049cdb50928956a055d6abb9` matches
+Haplosaurus's complete sequence and applied-record provenance. The pinned
 [`_mutate_sequences` implementation](https://github.com/Ensembl/ensembl-variation/blob/2fb834b987ede3824e200197a838ce11e91aeb4b/modules/Bio/EnsEMBL/Variation/TranscriptHaplotypeContainer.pm#L1160)
 uses the [Haplo parser's raw spans](https://github.com/Ensembl/ensembl-vep/blob/57ea5c52340acc1f156267f810ad162e26597082/modules/Bio/EnsEMBL/VEP/Haplo/Parser/VCF.pm#L198)
 and applies full REF spans in descending mapped-CDS order: record a restores the
-retained middle base after b changes it. DuckHTS's differing-island decomposition
-keeps b's substitution. Applied-record provenance must still retain b even when
-its sequence change is overwritten. This is a DuckHTS raw-replay compatibility
-gap; it is not evidence that VEP is wrong.
+retained middle base after b changes it. Applied-record provenance retains b even
+when its sequence change is overwritten. Ordered raw replacements use bounded
+native storage and preserve net component spans; local SO and displaced-frame
+facts are unavailable for that path. Duplicate selection and tied-record ordering
+remain compatibility gaps. These disagreements are not evidence that VEP is wrong.
 
 ## Individual Sequence Ontology terms
 

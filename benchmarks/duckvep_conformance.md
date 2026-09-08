@@ -459,66 +459,69 @@ duplicate count. A failed suite does not append rows.
 | 2026-09-07 | 7d40756a        | 0x0000000000f6e473 |                 55 | 5,500,000  | 5,500,000  |      0 |          0 |         253 | 27,530,178       |                43.737 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-09-07 | 7d40756a        | 0x00000000019ec6e2 |                 55 | 5,500,000  | 5,500,000  |      0 |          0 |         253 | 27,529,352       |                43.699 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-09-07 | cc1993fd        | 0x0000000001df5e77 |                 55 | 5,500,000  | 5,500,000  |      0 |          0 |         251 | 27,322,306       |                44.148 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
+| 2026-09-08 | 47eaa7b1        | 0x00000000000000ad |                 56 | 5,600,000  | 5,600,000  |      0 |          0 |         265 | 27,739,311       |                46.712 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
+| 2026-09-08 | 47eaa7b1        | 0x000000000135282a |                 56 | 5,600,000  | 5,600,000  |      0 |          0 |         265 | 27,739,627       |                46.705 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-09-08 | 6bcff335        | 0x00000000000000ad |                 55 | 5,500,000  | 5,500,000  |      0 |          0 |         262 | 27,738,016       |                47.299 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-09-08 | 6bcff335        | 0x000000000135282a |                 55 | 5,500,000  | 5,500,000  |      0 |          0 |         262 | 27,738,332       |                47.452 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 
-| target                                                                   | trials  | passed  | failed | skipped | duplicates |
-|:-------------------------------------------------------------------------|:--------|:--------|:-------|:--------|:-----------|
-| annotate cursor cross-codon MNV route == tile                            | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate cursor DEL route == tile under output splits                    | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate cursor INS route == tile under output splits                    | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate cursor output splits == one annotate_tile                       | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate cursor padded SNV == tile under output splits                   | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate_tile == sweep + classify + structural-SO composition            | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate_tile codon refinement == coding-SNV kernel oracle               | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate_tile codon-aligned in-frame deletion == CDS-position oracle     | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate_tile codon-boundary in-frame insertion == CDS-position oracle   | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate_tile non-boundary in-frame insertion == peptide-window oracle   | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate_tile rejects NULL model without reading the batch               | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate_tile same-codon MNV == codon oracle                             | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate_tile simple frameshift indel == CDS-position oracle             | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate_tile start_lost SNV == start-codon oracle                       | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate_tile two-codon body MNV missense == codon-window oracle         | 100,000 | 100,000 | 0      | 0       | 0          |
-| breakend_parser_recovers_constructed_components                          | 100,000 | 100,000 | 0      | 0       | 0          |
-| cgranges-seeded first event + sweep == brute-force candidates            | 100,000 | 100,000 | 0      | 0       | 0          |
-| coding context == direct CDS splice + full peptide oracles               | 100,000 | 100,000 | 0      | 0       | 0          |
-| coding context delins shape == local-edge oracle                         | 100,000 | 100,000 | 0      | 0       | 0          |
-| coding context delta == single-codon oracle                              | 100,000 | 100,000 | 0      | 0       | 0          |
-| coding context delta in-frame deletion == edit-origin oracle             | 100,000 | 100,000 | 0      | 0       | 0          |
-| coding context delta in-frame insertion == edit-origin oracle            | 100,000 | 100,000 | 0      | 0       | 0          |
-| codon change classification consistent with translation                  | 100,000 | 100,000 | 0      | 0       | 0          |
-| complete literal spans == VEP complete-overlap source semantics          | 100,000 | 100,000 | 0      | 0       | 0          |
-| coordinate projection == brute-force transcript-order base walk          | 100,000 | 100,000 | 0      | 0       | 0          |
-| event differing-region normalization == independent trim oracle          | 100,000 | 100,000 | 0      | 0       | 0          |
-| haplotype block spans reconstruct the independently replayed CDS         | 100,000 | 100,000 | 0      | 0       | 0          |
-| haplotype blocks preserve every frame and same-codon interaction         | 100,000 | 100,000 | 0      | 0       | 0          |
-| HGVS genomic 3-prime shift == independent reference byte-walk            | 100,000 | 100,000 | 0      | 0       | 0          |
-| HGVSp fact replay == independently translated edited CDS                 | 100,000 | 100,000 | 0      | 0       | 0          |
-| HGVSp frameshift fact == independently extended translation              | 100,000 | 100,000 | 0      | 0       | 0          |
-| multi-edit CDS haplotype apply == left-to-right rebuild oracle           | 100,000 | 100,000 | 0      | 0       | 0          |
-| optimized sorted annotation == forced generalized full rows              | 100,000 | 100,000 | 0      | 0       | 0          |
-| owned haplotype replay == dense genomic edits in coexisting models       | 100,000 | 100,000 | 0      | 0       | 0          |
-| phased SNV set == equivalent MNV coding facts                            | 100,000 | 100,000 | 0      | 0       | 0          |
-| region mask structural invariants                                        | 100,000 | 100,000 | 0      | 0       | 0          |
-| regulation sweep/BND pairs == independent feature oracles                | 100,000 | 100,000 | 0      | 0       | 0          |
-| sequence delta annotation wrapper MNV == direct shape                    | 100,000 | 100,000 | 0      | 0       | 0          |
-| sequence delta exon hint == unhinted projection                          | 100,000 | 100,000 | 0      | 0       | 0          |
-| sequence delta scratch INDEL == local delins-shape oracle                | 100,000 | 100,000 | 0      | 0       | 0          |
-| sequence delta scratch MNV == single-codon oracle                        | 100,000 | 100,000 | 0      | 0       | 0          |
-| sequence delta scratch two-codon MNV window == codon-window oracle       | 100,000 | 100,000 | 0      | 0       | 0          |
-| sequence-backed SNV codon edit == codon-slice edit oracle                | 100,000 | 100,000 | 0      | 0       | 0          |
-| simple indel route == generalized CodingContext                          | 100,000 | 100,000 | 0      | 0       | 0          |
-| sorted point cursor classifier == exhaustive exon/gap scans              | 100,000 | 100,000 | 0      | 0       | 0          |
-| sorted span cursor classifier == exhaustive exon/gap scans               | 100,000 | 100,000 | 0      | 0       | 0          |
-| sparse carrier paths == dense event matrix across input batches          | 100,000 | 100,000 | 0      | 0       | 0          |
-| sweep candidate set == brute-force candidate set                         | 100,000 | 100,000 | 0      | 0       | 0          |
-| terminal partial-codon insertion == codon-rounded VEP translation oracle | 100,000 | 100,000 | 0      | 0       | 0          |
-| transcript coordinate == brute-force exon/intron walk                    | 100,000 | 100,000 | 0      | 0       | 0          |
-| variant CDS edit builder == direct CDS splice oracle                     | 100,000 | 100,000 | 0      | 0       | 0          |
-| variant CDS edit-set builder == single-edit splice oracle                | 100,000 | 100,000 | 0      | 0       | 0          |
-| variant CDS edit-set builder splits MNV diff islands                     | 100,000 | 100,000 | 0      | 0       | 0          |
-| variant coding context == direct CDS splice + full peptide oracles       | 100,000 | 100,000 | 0      | 0       | 0          |
-| VEP feature-span sweep candidates == independent parser oracle           | 100,000 | 100,000 | 0      | 0       | 0          |
+| target                                                                          | trials  | passed  | failed | skipped | duplicates |
+|:--------------------------------------------------------------------------------|:--------|:--------|:-------|:--------|:-----------|
+| annotate cursor cross-codon MNV route == tile                                   | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate cursor DEL route == tile under output splits                           | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate cursor INS route == tile under output splits                           | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate cursor output splits == one annotate_tile                              | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate cursor padded SNV == tile under output splits                          | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate_tile == sweep + classify + structural-SO composition                   | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate_tile codon refinement == coding-SNV kernel oracle                      | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate_tile codon-aligned in-frame deletion == CDS-position oracle            | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate_tile codon-boundary in-frame insertion == CDS-position oracle          | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate_tile non-boundary in-frame insertion == peptide-window oracle          | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate_tile rejects NULL model without reading the batch                      | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate_tile same-codon MNV == codon oracle                                    | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate_tile simple frameshift indel == CDS-position oracle                    | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate_tile start_lost SNV == start-codon oracle                              | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate_tile two-codon body MNV missense == codon-window oracle                | 100,000 | 100,000 | 0      | 0       | 0          |
+| breakend_parser_recovers_constructed_components                                 | 100,000 | 100,000 | 0      | 0       | 0          |
+| cgranges-seeded first event + sweep == brute-force candidates                   | 100,000 | 100,000 | 0      | 0       | 0          |
+| coding context == direct CDS splice + full peptide oracles                      | 100,000 | 100,000 | 0      | 0       | 0          |
+| coding context delins shape == local-edge oracle                                | 100,000 | 100,000 | 0      | 0       | 0          |
+| coding context delta == single-codon oracle                                     | 100,000 | 100,000 | 0      | 0       | 0          |
+| coding context delta in-frame deletion == edit-origin oracle                    | 100,000 | 100,000 | 0      | 0       | 0          |
+| coding context delta in-frame insertion == edit-origin oracle                   | 100,000 | 100,000 | 0      | 0       | 0          |
+| codon change classification consistent with translation                         | 100,000 | 100,000 | 0      | 0       | 0          |
+| complete literal spans == VEP complete-overlap source semantics                 | 100,000 | 100,000 | 0      | 0       | 0          |
+| coordinate projection == brute-force transcript-order base walk                 | 100,000 | 100,000 | 0      | 0       | 0          |
+| event differing-region normalization == independent trim oracle                 | 100,000 | 100,000 | 0      | 0       | 0          |
+| haplotype block spans reconstruct the independently replayed CDS                | 100,000 | 100,000 | 0      | 0       | 0          |
+| haplotype blocks preserve every frame and same-codon interaction                | 100,000 | 100,000 | 0      | 0       | 0          |
+| HGVS genomic 3-prime shift == independent reference byte-walk                   | 100,000 | 100,000 | 0      | 0       | 0          |
+| HGVSp fact replay == independently translated edited CDS                        | 100,000 | 100,000 | 0      | 0       | 0          |
+| HGVSp frameshift fact == independently extended translation                     | 100,000 | 100,000 | 0      | 0       | 0          |
+| multi-edit CDS haplotype apply == left-to-right rebuild oracle                  | 100,000 | 100,000 | 0      | 0       | 0          |
+| optimized sorted annotation == forced generalized full rows                     | 100,000 | 100,000 | 0      | 0       | 0          |
+| ordered source replacements == literal replay, net spans and applied provenance | 100,000 | 100,000 | 0      | 0       | 0          |
+| owned haplotype replay == dense genomic edits in coexisting models              | 100,000 | 100,000 | 0      | 0       | 0          |
+| phased SNV set == equivalent MNV coding facts                                   | 100,000 | 100,000 | 0      | 0       | 0          |
+| region mask structural invariants                                               | 100,000 | 100,000 | 0      | 0       | 0          |
+| regulation sweep/BND pairs == independent feature oracles                       | 100,000 | 100,000 | 0      | 0       | 0          |
+| sequence delta annotation wrapper MNV == direct shape                           | 100,000 | 100,000 | 0      | 0       | 0          |
+| sequence delta exon hint == unhinted projection                                 | 100,000 | 100,000 | 0      | 0       | 0          |
+| sequence delta scratch INDEL == local delins-shape oracle                       | 100,000 | 100,000 | 0      | 0       | 0          |
+| sequence delta scratch MNV == single-codon oracle                               | 100,000 | 100,000 | 0      | 0       | 0          |
+| sequence delta scratch two-codon MNV window == codon-window oracle              | 100,000 | 100,000 | 0      | 0       | 0          |
+| sequence-backed SNV codon edit == codon-slice edit oracle                       | 100,000 | 100,000 | 0      | 0       | 0          |
+| simple indel route == generalized CodingContext                                 | 100,000 | 100,000 | 0      | 0       | 0          |
+| sorted point cursor classifier == exhaustive exon/gap scans                     | 100,000 | 100,000 | 0      | 0       | 0          |
+| sorted span cursor classifier == exhaustive exon/gap scans                      | 100,000 | 100,000 | 0      | 0       | 0          |
+| sparse carrier paths == dense event matrix across input batches                 | 100,000 | 100,000 | 0      | 0       | 0          |
+| sweep candidate set == brute-force candidate set                                | 100,000 | 100,000 | 0      | 0       | 0          |
+| terminal partial-codon insertion == codon-rounded VEP translation oracle        | 100,000 | 100,000 | 0      | 0       | 0          |
+| transcript coordinate == brute-force exon/intron walk                           | 100,000 | 100,000 | 0      | 0       | 0          |
+| variant CDS edit builder == direct CDS splice oracle                            | 100,000 | 100,000 | 0      | 0       | 0          |
+| variant CDS edit-set builder == single-edit splice oracle                       | 100,000 | 100,000 | 0      | 0       | 0          |
+| variant CDS edit-set builder splits MNV diff islands                            | 100,000 | 100,000 | 0      | 0       | 0          |
+| variant coding context == direct CDS splice + full peptide oracles              | 100,000 | 100,000 | 0      | 0       | 0          |
+| VEP feature-span sweep candidates == independent parser oracle                  | 100,000 | 100,000 | 0      | 0       | 0          |
 
 Passing the requested number of trials is necessary but does not prove
 that a generator visited the states named by its contract. Randomized
@@ -564,12 +567,13 @@ suite-level pass count.
 | inframe_insertion coverage          | forward= 50,050; reverse= 49,950                                                                                                                                                                                                                                                                   |
 | mnv coverage                        | len2= 50,110; len3= 49,890                                                                                                                                                                                                                                                                         |
 | non-boundary insertion coverage     | forward= 50,132; inframe_insertion= 49,985; protein_altering= 50,015; reverse= 49,868                                                                                                                                                                                                              |
+| ordered-replacement coverage        | clipped= 85,602; empty= 6,365; forward= 49,777; merged_sources= 135,000; noop= 102,730; ref_slot= 220,687; reverse= 50,223; tied= 519,063                                                                                                                                                          |
 | simple-indel equivalence coverage   | del= 11,394; delins= 5,652; fallback= 38,829; fast= 21,130; frameshift= 18,801; fwd= 10,366; inframe_del= 1,847; inframe_ins= 482; ins= 4,084; rev= 10,764                                                                                                                                         |
 | start-codon coverage                | co_stop_gained= 4,129; co_synonymous= 24,245; lost_and_retained= 1,596; start_lost= 100,000; start_retained= 1,596; synonymous= 24,245                                                                                                                                                             |
 | terminal-partial-insertion coverage | after_tail_rejected= 41,724; length_mod0= 33,507; length_mod1= 33,297; length_mod2= 33,196; mitochondrial= 50,038; nonstop= 76,796; reverse_orientation= 50,001; same_orientation= 49,999; site_first= 41,607; site_internal= 16,669; standard= 49,962; stop= 11,190; tail1= 49,970; tail2= 50,030 |
 | variant-coding-context coverage     | capfail= 400,000; del= 19,940; fwd= 49,955; indel= 19,988; ins= 20,031; mnv= 20,094; pep_diff= 86,666; pep_same= 13,334; rev= 50,045; snv= 19,947                                                                                                                                                  |
 
-The run observed all 255 required nonzero counters. The other 3 counters
+The run observed all 263 required nonzero counters. The other 3 counters
 have named fixed witnesses in the coverage manifest; their absence from
 a random draw is not counted as statistical coverage. These counters
 describe the declared generators, not an exhaustive enumeration of
@@ -577,10 +581,10 @@ biological configurations.
 
 | revision | seed               | targets |  trials | required_counters_observed | minimum_required_counter_hits | fixed_witness_counters_not_hit |
 |:---------|:-------------------|--------:|--------:|---------------------------:|------------------------------:|-------------------------------:|
-| 6bcff335 | 0x00000000000000ad |      55 | 5500000 |                        255 |                             6 |                              3 |
-| 6bcff335 | 0x000000000135282a |      55 | 5500000 |                        255 |                             9 |                              3 |
+| 47eaa7b1 | 0x00000000000000ad |      56 | 5600000 |                        263 |                             6 |                              3 |
+| 47eaa7b1 | 0x000000000135282a |      56 | 5600000 |                        263 |                             9 |                              3 |
 
-Together these seeds executed 11,000,000 property trials on the shown
+Together these seeds executed 11,200,000 property trials on the shown
 revision. Millions of passing trials do not make a counter with six or
 eight observations densely explored, and marginal counters do not
 establish coverage of their cross-products. The fresh-seed HGVS failure
@@ -663,7 +667,7 @@ Whole-haplotype SO/HGVS remains unfinished.
 |      3 |   768 |           768 |         1536 |         2304 |                        1332 |
 |      4 |  6144 |          6144 |        12288 |        24576 |                       16800 |
 
-Source 9b1b8a0d4e12c99f8f08d9c013d840abf5eb7ec1 records a **failing
+Source 47eaa7b1460a6b29049cdb50928956a055d6abb9 records a **failing
 decoded-call/raw-parser comparison**: 6990 disagreements in 7020
 profiles. It is not a population error rate or a replacement for the
 passing literal-sequence corpus. This lane uses public
@@ -759,21 +763,37 @@ biological certainty for conditional sequence.
 
 |     seed | cohort           | profiles | full failures | available sequence differences | profiles with unavailable sequence | carrier-total failures |
 |---------:|:-----------------|---------:|--------------:|-------------------------------:|-----------------------------------:|-----------------------:|
-|      173 | fixed_and_random |      656 |           583 |                            278 |                                305 |                      0 |
-| 20260906 | fixed_and_random |      656 |           583 |                            285 |                                298 |                      0 |
-|      173 | rare             |    36096 |         18805 |                           5384 |                              13421 |                      0 |
-| 20260906 | rare             |    36096 |         18778 |                           5490 |                              13288 |                      0 |
+|      173 | fixed_and_random |      656 |           114 |                            108 |                                  0 |                      0 |
+| 20260906 | fixed_and_random |      656 |           120 |                            114 |                                  0 |                      0 |
+|      173 | rare             |    36096 |          7831 |                           7206 |                                  0 |                      0 |
+| 20260906 | rare             |    36096 |          7888 |                           7266 |                                  0 |                      0 |
 
-Source 6bcff3353d7c9a2609996aae9828f9da3fb5f238 runs the public
+Source 47eaa7b1460a6b29049cdb50928956a055d6abb9 runs the public
 `source_records`/`vep116_compat` path against pinned, unmodified
 Haplosaurus. Across the two seeds there are **73,504 profiles**, 220,512
 source records and 147,008 oracle file lanes; DuckHTS returns 147,008
 carrier memberships. The full comparison retains CDS/protein multisets,
 counts and applied-record provenance. Available includes explicitly
 conditional replay; a NULL sequence remains a disagreement, not a
-waiver. All failure columns count profiles. Unavailable outputs in these
-runs have `edit_conflict` status with successful coding projection. The
-receipt ledger retains every run, generator, coverage and artifact hash.
+waiver. All failure columns count profiles. Every sequence is available
+in this campaign; availability does not imply agreement. The receipt
+ledger retains every run, generator, coverage and artifact hash.
+
+| source_revision                          | profiles | failures | available_sequence_failures | profiles_with_unavailable |
+|:-----------------------------------------|---------:|---------:|----------------------------:|--------------------------:|
+| 6bcff3353d7c9a2609996aae9828f9da3fb5f238 |    73504 |    38749 |                       11437 |                     27312 |
+| 47eaa7b1460a6b29049cdb50928956a055d6abb9 |    73504 |    15953 |                       14694 |                         0 |
+
+|     seed | still passing | resolved | regressed | still failing |
+|---------:|--------------:|---------:|----------:|--------------:|
+|      173 |         16398 |    12409 |       966 |          6979 |
+| 20260906 |         16433 |    12311 |       958 |          7050 |
+
+The paired comparison has **1,924 previously passing profiles that fail
+at the current source**. All are rare duplicate-deletion, same-start
+duplicate/SNV or reverse-strand same-end cases. They remain failures
+alongside every unresolved profile. The lower total failure count is not
+conformance and does not establish absence of regression.
 
 Each seed includes 144 fixed profiles and 512 general-random overlapping
 pairs. The rare lane requires **32 draws in each of 1,128 cells**: 12
@@ -788,8 +808,10 @@ tested records and a separate homozygous anchor. Both policies’ existing
 decoded-input corpora and the finite raw-GT audit remain independent
 evidence lanes.
 
-The original 656 inputs and complete comparison objects per seed match
-their source-bound baseline exactly. Four deliberate output corruptions
+All 36,752 generated inputs per seed match source
+6bcff3353d7c9a2609996aae9828f9da3fb5f238 exactly, and each complete
+oracle output is byte-identical. The comparison rules and all preceding
+comparison artifacts are preserved. Four deliberate output corruptions
 are rejected; the 24 fixed disjoint/adjacent controls per seed pass.
 Fixed profiles repeat across seeds, and all profiles use the same
 registered 180-base, single-exon reference and standard codon table.
@@ -798,7 +820,7 @@ biological observations, population error rates, strict-phase
 certification, combined SO/HGVS or structural-event conformance. Four
 DuckDB threads are used; these counts are not performance measurements.
 
-### Retained overlap witness
+### Full-span replacement witness
 
 At source `6bcff3353d7c9a2609996aae9828f9da3fb5f238`, the fixed
 positive-strand `mnv_retained_middle` cis profile has these records:
@@ -810,17 +832,22 @@ positive-strand `mnv_retained_middle` cis profile has these records:
 | anchor |              165 | C       | G       | 1\|1 |
 
 On the changed lane, CDS bases 25–40 are `GCTGCAGCTGCAGCTG` in
-Haplosaurus and `GCTGCAGCAGCAGCTG` in DuckHTS. DuckHTS reports an
-available sequence. The pinned [`_mutate_sequences`
+Haplosaurus. DuckHTS source `6bcff3353d7c9a2609996aae9828f9da3fb5f238`
+returns `GCTGCAGCAGCAGCTG`; source
+`47eaa7b1460a6b29049cdb50928956a055d6abb9` matches Haplosaurus’s
+complete sequence and applied-record provenance. The pinned
+[`_mutate_sequences`
 implementation](https://github.com/Ensembl/ensembl-variation/blob/2fb834b987ede3824e200197a838ce11e91aeb4b/modules/Bio/EnsEMBL/Variation/TranscriptHaplotypeContainer.pm#L1160)
 uses the [Haplo parser’s raw
 spans](https://github.com/Ensembl/ensembl-vep/blob/57ea5c52340acc1f156267f810ad162e26597082/modules/Bio/EnsEMBL/VEP/Haplo/Parser/VCF.pm#L198)
 and applies full REF spans in descending mapped-CDS order: record a
-restores the retained middle base after b changes it. DuckHTS’s
-differing-island decomposition keeps b’s substitution. Applied-record
-provenance must still retain b even when its sequence change is
-overwritten. This is a DuckHTS raw-replay compatibility gap; it is not
-evidence that VEP is wrong.
+restores the retained middle base after b changes it. Applied-record
+provenance retains b even when its sequence change is overwritten.
+Ordered raw replacements use bounded native storage and preserve net
+component spans; local SO and displaced-frame facts are unavailable for
+that path. Duplicate selection and tied-record ordering remain
+compatibility gaps. These disagreements are not evidence that VEP is
+wrong.
 
 ## Individual Sequence Ontology terms
 
