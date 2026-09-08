@@ -669,7 +669,7 @@ Whole-haplotype SO/HGVS remains unfinished.
 |      3 |   768 |           768 |         1536 |         2304 |                        1332 |
 |      4 |  6144 |          6144 |        12288 |        24576 |                       16800 |
 
-Source 4119d55c43fe0649ffe8325135bbdf26c1f37e94 records a **failing
+Source 504dc785a1850d5f5c244ee5630f0da26b23fb81 records a **failing
 decoded-call/raw-parser comparison**: 6990 disagreements in 7020
 profiles. It is not a population error rate or a replacement for the
 passing literal-sequence corpus. This lane uses public
@@ -891,12 +891,12 @@ cross-product.
 
 ### Shared-transcript rare configurations
 
-|     seed | profiles | source_records | observed_carriers | failures | count_failures | input_provenance_failures | mapping_failures |
-|---------:|---------:|---------------:|------------------:|---------:|---------------:|--------------------------:|-----------------:|
-|      173 |    18432 |         166224 |            110592 |        0 |              0 |                         0 |                0 |
-| 20260906 |    18432 |         166224 |            110592 |        0 |              0 |                         0 |                0 |
+|     seed | profiles | source_records | observed_carriers | failures | count_failures | input_provenance_failures | mapping_failures | replay_lane_failures |
+|---------:|---------:|---------------:|------------------:|---------:|---------------:|--------------------------:|-----------------:|---------------------:|
+|      173 |    18432 |         166224 |            110592 |        0 |              0 |                         0 |                0 |                    0 |
+| 20260906 |    18432 |         166224 |            110592 |        0 |              0 |                         0 |                0 |                    0 |
 
-Source 4119d55c43fe0649ffe8325135bbdf26c1f37e94 has **36,864 transcript
+Source 504dc785a1850d5f5c244ee5630f0da26b23fb81 has **36,864 transcript
 cases**, including 33,792 quota-controlled cases and the complete
 3,072-case diagnostic baseline. Every region has three diploid samples,
 one full-exon transcript and an overlapping two-exon transcript (exons
@@ -910,12 +910,16 @@ This crosses shared-transcript mapping with source-context pressure; it
 is not a distribution of independent biological samples, arbitrary
 transcript models or an estimate of population error rates.
 
-Against source `2c5bcb21ba6f054639b2031f8ca465be3b8b27d5`, **4,608
-failures resolve, 0 passing cases regress, and 32,256 cases remain
-passing**. Every input column and complete keyed oracle JSON record is
-unchanged. This includes all 384 failures in the 3,072-case diagnostic
-baseline. Earlier failed artifacts and ledger rows remain; no case is
-excluded and the oracle is unchanged.
+Against source 4119d55c43fe0649ffe8325135bbdf26c1f37e94, **0 failures
+resolve, 0 passing cases regress, and 36,864 cases remain passing**.
+Every input column and complete keyed oracle JSON record is unchanged.
+Constructor observations retain every field and duplicate, preserving
+record order within each sample; sample enumeration order is not a
+biological observation. All grouped, input-provenance and mapper
+verdicts agree with the baseline. Earlier ledger entries retain the
+4,608 failures resolved at source
+`4119d55c43fe0649ffe8325135bbdf26c1f37e94`, including all 384 failures
+in the 3,072-case diagnostic baseline.
 
 Raw replay marks validated coding/noncoding source-span omissions
 `source_unmapped` and replays the other mapped sources with conditional
@@ -926,18 +930,25 @@ and strict decoded replay retains its projection-failure policy. This is
 pinned Haplosaurus sequence-mechanics conformance, not evidence that VEP
 is wrong or that a conditional sequence describes biology.
 
-Full CDS/protein groups include counts per sample; exchanging samples is
-a rejected corruption even when pooled counts agree. Applied-source
-identity sets are checked within equal-sequence groups. Native
-contributor checks independently retain source IDs, regions, positions,
-REF/ALT interpretations and occupied sample/file-lane keys. Upstream
-checks retain the complete source buffer, genotype multiplicities and
-constructor-owned mappings, including exon-repeated and unselected
-duplicate sources. All thirteen corruption controls pass for each seed.
-Source sets do not certify physical-edit multiplicity or
-source-to-sample association within a shared upstream sequence group.
-Full phase/PS behavior, compound SO/HGVS and structural composition
-remain outside this campaign’s tested scope.
+The upstream mutator’s original return values provide **221,184
+sample/file-lane observations** before equal-sequence grouping. Each
+lane compares complete CDS/protein and applied-source identity sets,
+including full source keys and transcript-oriented alleles. A homozygous
+alternate anchor puts every sample through this observed path;
+reference-only samples handled separately upstream are not synthesized.
+
+All 25 corruption controls pass per seed. Lane swaps, changed allele
+keys and a source removed from one shared-sequence lane are rejected
+even when grouped sequence, sample-count and source-set comparisons
+still agree. Native contributor checks retain IDs, regions, positions,
+REF/ALT interpretations and carrier keys. Upstream checks retain source
+buffers, genotype multiplicities and constructor-owned mappings,
+including exon-repeated and unselected duplicate sources.
+
+Older rows have unmeasured lane metrics, not inferred passes.
+Applied-source sets do not certify physical-edit multiplicity. Arbitrary
+exon/UTR geometry, full phase/PS behavior, whole-haplotype SO/HGVS and
+structural composition remain outside this campaign’s tested scope.
 
 ## Individual Sequence Ontology terms
 

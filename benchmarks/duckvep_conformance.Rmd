@@ -1315,7 +1315,7 @@ not their complete cross-product.
 model_history <- read.csv(file.path(root, "test/duckvep/conformance/data/haplotype_model_history.csv"),
   colClasses = c(source_revision = "character"))
 stopifnot(all(model_history$extension_build_binding == "htslib_distclean_make_release"),
-  all(model_history$controls_rejected == 13L),
+  all(model_history$controls_rejected == ifelse(is.na(model_history$replay_lane_failures), 13L, 25L)),
   all(model_history$minimum_stratum_draws == model_history$rare_per_stratum),
   all(model_history$strata == 264L),
   all(model_history$baseline_input_columns_equal & model_history$baseline_oracle_lines_equal),
@@ -1325,10 +1325,21 @@ model_current <- subset(model_history, source_revision == model_revision)
 stopifnot(all(model_current$profiles == with(model_current,
   pass_to_fail + fail_to_pass + pass_to_pass + fail_to_fail)),
   all(model_current$pass_to_fail == 0L),
-  all(model_current$fail_to_pass == 2304L),
-  all(model_current$baseline_revision == "2c5bcb21ba6f054639b2031f8ca465be3b8b27d5"))
+  all(model_current$failures == 0L), all(model_current$replay_lane_failures == 0L),
+  all(model_current$baseline_sidecar_fields_equal),
+  all(model_current$oracle_replay_lanes == 6L * model_current$profiles),
+  all(model_current$observed_replay_lanes == model_current$oracle_replay_lanes))
+for (i in seq_len(nrow(model_current))) {
+  current <- model_current[i, ]
+  previous <- subset(model_history, receipt_sha256 == current$baseline_receipt_sha256)
+  stopifnot(nrow(previous) == 1L, previous$source_revision == current$baseline_revision,
+    previous$seed == current$seed, previous$rare_per_stratum == current$rare_per_stratum,
+    previous$profiles == current$profiles,
+    previous$failures == current$fail_to_pass + current$fail_to_fail,
+    current$failures == current$pass_to_fail + current$fail_to_fail)
+}
 knitr::kable(model_current[c("seed", "profiles", "source_records", "observed_carriers",
-  "failures", "count_failures", "input_provenance_failures", "mapping_failures")], row.names = FALSE)
+  "failures", "count_failures", "input_provenance_failures", "mapping_failures", "replay_lane_failures")], row.names = FALSE)
 ```
 
 Source `r model_revision` has **`r format(sum(model_current$profiles), big.mark = ",")`
@@ -1344,13 +1355,17 @@ and eleven neutral source counts through 36. This crosses shared-transcript mapp
 with source-context pressure; it is not a distribution of independent biological
 samples, arbitrary transcript models or an estimate of population error rates.
 
-Against source `2c5bcb21ba6f054639b2031f8ca465be3b8b27d5`,
+Against source `r unique(model_current$baseline_revision)`,
 **`r format(sum(model_current$fail_to_pass), big.mark = ",")` failures resolve,
 `r sum(model_current$pass_to_fail)` passing cases regress, and
 `r format(sum(model_current$pass_to_pass), big.mark = ",")` cases remain passing**.
-Every input column and complete keyed oracle JSON record is unchanged. This includes
-all 384 failures in the 3,072-case diagnostic baseline. Earlier failed artifacts and
-ledger rows remain; no case is excluded and the oracle is unchanged.
+Every input column and complete keyed oracle JSON record is unchanged. Constructor
+observations retain every field and duplicate, preserving record order within each
+sample; sample enumeration order is not a biological observation. All grouped,
+input-provenance and mapper verdicts agree with the baseline. Earlier ledger entries
+retain the 4,608 failures resolved at source
+`4119d55c43fe0649ffe8325135bbdf26c1f37e94`, including all 384 failures in the
+3,072-case diagnostic baseline.
 
 Raw replay marks validated coding/noncoding source-span omissions `source_unmapped`
 and replays the other mapped sources with conditional evidence. The independent
@@ -1361,16 +1376,24 @@ Model/REF errors still withhold sequence, and strict decoded replay retains its
 projection-failure policy. This is pinned Haplosaurus sequence-mechanics conformance,
 not evidence that VEP is wrong or that a conditional sequence describes biology.
 
-Full CDS/protein groups include counts per sample; exchanging samples is a rejected
-corruption even when pooled counts agree. Applied-source identity sets are checked
-within equal-sequence groups. Native contributor checks independently retain source
-IDs, regions, positions, REF/ALT interpretations and occupied sample/file-lane keys.
-Upstream checks retain the complete source buffer, genotype multiplicities and
-constructor-owned mappings, including exon-repeated and unselected duplicate sources.
-All thirteen corruption controls pass for each seed. Source sets do not certify
-physical-edit multiplicity or source-to-sample association within a shared upstream
-sequence group. Full phase/PS behavior, compound SO/HGVS and structural composition
-remain outside this campaign's tested scope.
+The upstream mutator's original return values provide
+**`r format(sum(model_current$oracle_replay_lanes), big.mark = ",")` sample/file-lane
+observations** before equal-sequence grouping. Each lane compares complete CDS/protein
+and applied-source identity sets, including full source keys and transcript-oriented
+alleles. A homozygous alternate anchor puts every sample through this observed path;
+reference-only samples handled separately upstream are not synthesized.
+
+All 25 corruption controls pass per seed. Lane swaps, changed allele keys and a
+source removed from one shared-sequence lane are rejected even when grouped sequence,
+sample-count and source-set comparisons still agree. Native contributor checks retain
+IDs, regions, positions, REF/ALT interpretations and carrier keys. Upstream checks
+retain source buffers, genotype multiplicities and constructor-owned mappings,
+including exon-repeated and unselected duplicate sources.
+
+Older rows have unmeasured lane metrics, not inferred passes. Applied-source sets do
+not certify physical-edit multiplicity. Arbitrary exon/UTR geometry, full phase/PS
+behavior, whole-haplotype SO/HGVS and structural composition remain outside this
+campaign's tested scope.
 
 ## Individual Sequence Ontology terms
 

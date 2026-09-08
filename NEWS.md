@@ -1,6 +1,10 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- verify 221,184 sample/file-lane associations across 36,864 quota-controlled
+  shared-transcript cases. Both seeds pass all 25 corruption controls; inputs,
+  complete oracle records and earlier verdicts are unchanged
+
 - compare shared-transcript conformance by sample and file lane, including complete
   CDS/protein sequences and applied-source identities. Observer and corruption
   checks guard associations that equal-sequence grouping cannot distinguish
