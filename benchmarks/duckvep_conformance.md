@@ -669,7 +669,7 @@ Whole-haplotype SO/HGVS remains unfinished.
 |      3 |   768 |           768 |         1536 |         2304 |                        1332 |
 |      4 |  6144 |          6144 |        12288 |        24576 |                       16800 |
 
-Source 504dc785a1850d5f5c244ee5630f0da26b23fb81 records a **failing
+Source 16afccd0fd795df318bbd8b3e66f89b8321da022 records a **failing
 decoded-call/raw-parser comparison**: 6990 disagreements in 7020
 profiles. It is not a population error rate or a replacement for the
 passing literal-sequence corpus. This lane uses public
@@ -975,6 +975,116 @@ transcript per new region; arbitrary biological models,
 shared-variable-exon transcript interactions, reference-only sample
 routes, full phase/PS behavior, whole-haplotype SO/HGVS and structural
 composition remain outside this campaign’s tested scope.
+
+### Repeated-model publication audit
+
+|     seed | profiles | observed_carriers | failures | published_oracle_disagreements | publication_pass |
+|---------:|---------:|------------------:|---------:|-------------------------------:|:-----------------|
+|      173 |    34560 |            207360 |        0 |                              4 | FALSE            |
+| 20260906 |    34560 |            207360 |        0 |                              0 | TRUE             |
+
+Source 16afccd0fd795df318bbd8b3e66f89b8321da022 repeats all **69,120
+models** above with identical inputs. The sequence/count, model,
+mapping, source-provenance and complete-lane gates pass. The full keyed
+oracle-record comparison with afb41c8688fbc058df3687160328f0c1c554bf67
+**fails for 4 records**. They remain in the [complete disagreement
+pairs](../test/duckvep/conformance/data/haplotype_oracle_disagreements.csv);
+the failed publication audit is not promoted into the passing
+model-history table.
+
+The four changed records are TG13940, TG14331, TG14521 and TG14573 from
+seed 173. Only their grouped CDS flags differ: empty versus
+`frameshift, indel`. Complete sequences, counts and contributing-source
+identities agree. This classifies the differences; it does not remove
+those fields from the audit.
+
+The [fixed
+reproducer](../test/duckvep/conformance/haplotype_grouped_flags.R) uses
+TG13940’s seven-exon model and both original same-position records,
+including the mixed missing call. It invokes the original VEP-116 Runner
+JSON path in 64 fresh processes: 32 Perl hash seeds, each repeated
+twice, with `PERL_PERTURB_KEYS=0`. A second 64-process lane observation
+must preserve every byte of the original JSON within each seed and
+repeat. The per-sample/file-lane sequences and raw flags agree across
+all seeds.
+
+| cds_length | has_indel | observations |
+|-----------:|----------:|-------------:|
+|        180 |         0 |           22 |
+|        180 |         1 |           42 |
+|        182 |         1 |           64 |
+
+Run the reproducer with
+`Rscript test/duckvep/conformance/haplotype_grouped_flags.R`. It stages
+the registered reference without network access; the pinned VEP
+environment and tools must already be installed. Complete JSON, lane
+observations, environment and input hashes remain in its receipted
+artifact directory. Receipt SHA-256:
+4e4dd34fcf5ca14f1ecdcd9b31730a1c141561f3a84dd0a9ce47c415ebd1a49c.
+
+For the 180-base CDS group, `has_indel` is zero in 11 seeds and one in
+21; both repeats agree. All groups retain the same three sample
+memberships. Observed group metadata matches the first contributing
+mutation lane. The pinned [container
+implementation](https://github.com/Ensembl/ensembl-variation/blob/2fb834b987ede3824e200197a838ce11e91aeb4b/modules/Bio/EnsEMBL/Variation/TranscriptHaplotypeContainer.pm#L770)
+iterates samples in hash order, initializes each sequence-keyed object
+from its first lane, and adds later samples without combining their
+flags.
+
+This establishes order-dependent grouped metadata for the pinned
+implementation and fixture. It does not establish a biological error,
+validate whole-haplotype consequences or supply a consensus flag rule.
+Native flags describe occupied edit paths; equal final sequences need
+not have equal edit histories. Full grouped-metadata conformance remains
+unresolved.
+
+### Reference-only sample routes
+
+|     seed | profiles | source_records | oracle_carriers | native_carriers | implicit_reference_carriers | oracle_mutation_lanes | failures |
+|---------:|---------:|---------------:|----------------:|----------------:|----------------------------:|----------------------:|---------:|
+|      173 |    11520 |          23040 |           69120 |           46080 |                       23040 |                 27648 |        0 |
+| 20260906 |    11520 |          23040 |           69120 |           46080 |                       23040 |                 27648 |        0 |
+
+Source 16afccd0fd795df318bbd8b3e66f89b8321da022 passes **23,040
+generated models**. Each seed supplies 32 draws in all 360 cells: three
+start codons (ATG/CTG/TTG), internal-stop presence, terminal-stop
+presence, both strands, three all-missing GT spellings and five
+genotype-retention routes. Internal-stop codons, stop positions, source
+positions and intron lengths vary. The routes cover missing-only
+samples, retained reference lanes, later retained calls, and calls in
+1–12-base or 13–120-base introns. Models have one or two exons, a
+complete 180-base standard-code CDS, and three samples.
+
+The original upstream container JSON is the oracle. CDS and protein
+groups are compared separately by sample and count: one CDS can belong
+to both a curated reference protein and a mutation protein. The observer
+must preserve every byte of each complete keyed canonical JSON record,
+including array order. It records the original mutator’s **55,296
+sample/file lanes**, with complete sequences and applied-source identity
+sets. The independent audit also verifies exon-based genotype admission.
+
+Each model has six upstream carrier memberships. DuckVEP emits four
+memberships for the tested samples and keeps the two pure-reference
+memberships implicit. All **46,080** implicit memberships are checked
+upstream and must be absent from native output; no oracle sequence is
+inserted into the native comparison. Native contributors retain exact
+source IDs, regions, positions, REF/ALT bytes, allele ordinals, evidence
+and projection status. All 29 corruption controls pass per seed.
+
+A sample without retained exon-overlapping genotypes uses the curated
+reference peptide, preserving internal stops and legitimate-start
+methionine. Retained exonic reference lanes use mutation translation
+even with no coding edit. Intronic context retains provenance without
+selecting mutation translation or changing literal CDS replay, including
+short introns with distinct SO semantics. Missing evidence remains
+conditional; model/REF failures still withhold sequence. These are
+compatibility rules, not a claim that VEP is biologically wrong.
+
+This stratified grammar does not estimate population error rates or
+certify arbitrary genetic codes, biological models, ploidy/PS inference,
+splicing, whole-haplotype SO/HGVS or structural composition. Earlier
+failing diagnostics and the separate decoded/raw phase disagreements
+remain retained.
 
 ## Individual Sequence Ontology terms
 

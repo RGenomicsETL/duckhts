@@ -3,8 +3,8 @@ Phased replay: native stream and public SQL
 
 <!-- duckvep_haplotypes.md is generated from duckvep_haplotypes.Rmd. -->
 
-Current source: 4119d55c43fe0649ffe8325135bbdf26c1f37e94;
-identical-workload baseline: ae131a9d08f8cc3e8b38c034337740db0da8dbd4.
+Current source: 16afccd0fd795df318bbd8b3e66f89b8321da022;
+identical-workload baseline: 4119d55c43fe0649ffe8325135bbdf26c1f37e94.
 Native measurements cover literal phased replay. SQL materializes all
 current fields, including local coding-block SO; whole-haplotype SO/HGVS
 is unfinished. Both paths consume standalone ALT events and decoded
@@ -66,18 +66,18 @@ observed in the native stream, not inferred SQL counters.
 
 | transcripts | samples | overlap | mode   | min_s | median_s | max_s | max_process_rss_mib |
 |------------:|--------:|--------:|:-------|------:|---------:|------:|--------------------:|
-|        1024 |       4 |       1 | native | 0.003 |    0.003 | 0.003 |              74.477 |
-|        1024 |       4 |       1 | sql    | 0.050 |    0.051 | 0.051 |             216.574 |
-|        1024 |      64 |       1 | native | 0.013 |    0.013 | 0.013 |              74.477 |
-|        1024 |      64 |       1 | sql    | 0.327 |    0.330 | 0.334 |             376.836 |
-|        1024 |      64 |      16 | native | 0.016 |    0.017 | 0.017 |              74.633 |
-|        1024 |      64 |      16 | sql    | 0.339 |    0.340 | 0.348 |             377.082 |
-|        1024 |      64 |      64 | native | 0.017 |    0.018 | 0.018 |              74.480 |
-|        1024 |      64 |      64 | sql    | 0.336 |    0.343 | 0.344 |             376.406 |
-|        1024 |     256 |       1 | native | 0.046 |    0.047 | 0.048 |              74.477 |
-|        1024 |     256 |       1 | sql    | 1.294 |    1.296 | 1.307 |             957.453 |
-|       10240 |      64 |      16 | native | 0.163 |    0.164 | 0.165 |              74.633 |
-|       10240 |      64 |      16 | sql    | 4.068 |    4.069 | 4.081 |            2133.770 |
+|        1024 |       4 |       1 | native | 0.003 |    0.003 | 0.004 |              74.477 |
+|        1024 |       4 |       1 | sql    | 0.053 |    0.053 | 0.054 |             215.789 |
+|        1024 |      64 |       1 | native | 0.014 |    0.015 | 0.024 |              74.633 |
+|        1024 |      64 |       1 | sql    | 0.361 |    0.365 | 0.403 |             376.344 |
+|        1024 |      64 |      16 | native | 0.018 |    0.018 | 0.018 |              74.480 |
+|        1024 |      64 |      16 | sql    | 0.361 |    0.366 | 0.368 |             377.344 |
+|        1024 |      64 |      64 | native | 0.020 |    0.021 | 0.021 |              74.480 |
+|        1024 |      64 |      64 | sql    | 0.367 |    0.368 | 0.368 |             375.516 |
+|        1024 |     256 |       1 | native | 0.051 |    0.051 | 0.060 |              74.480 |
+|        1024 |     256 |       1 | sql    | 1.396 |    1.402 | 1.426 |             957.293 |
+|       10240 |      64 |      16 | native | 0.184 |    0.185 | 0.188 |              74.477 |
+|       10240 |      64 |      16 | sql    | 4.389 |    4.445 | 4.539 |            2134.574 |
 
 Both compared revisions return each block’s local SO mask, coding status
 and position relative to the first stop. A shared coding context
@@ -87,12 +87,12 @@ configurations. The native count sink omits local SO evaluation.
 
 | transcripts | samples | overlap | median_s_before | median_s_after | median_change_percent | max_process_rss_mib_before | max_process_rss_mib_after |
 |------------:|--------:|--------:|----------------:|---------------:|----------------------:|---------------------------:|--------------------------:|
-|        1024 |       4 |       1 |           0.051 |          0.051 |                 0.000 |                    215.258 |                   216.574 |
-|        1024 |      64 |       1 |           0.339 |          0.330 |                -2.655 |                    376.762 |                   376.836 |
-|        1024 |      64 |      16 |           0.345 |          0.340 |                -1.449 |                    376.715 |                   377.082 |
-|        1024 |      64 |      64 |           0.341 |          0.343 |                 0.587 |                    376.402 |                   376.406 |
-|        1024 |     256 |       1 |           1.309 |          1.296 |                -0.993 |                    957.941 |                   957.453 |
-|       10240 |      64 |      16 |           4.105 |          4.069 |                -0.877 |                   2129.961 |                  2133.770 |
+|        1024 |       4 |       1 |           0.051 |          0.053 |                 3.922 |                    216.574 |                   215.789 |
+|        1024 |      64 |       1 |           0.330 |          0.365 |                10.606 |                    376.836 |                   376.344 |
+|        1024 |      64 |      16 |           0.340 |          0.366 |                 7.647 |                    377.082 |                   377.344 |
+|        1024 |      64 |      64 |           0.343 |          0.368 |                 7.289 |                    376.406 |                   375.516 |
+|        1024 |     256 |       1 |           1.296 |          1.402 |                 8.179 |                    957.453 |                   957.293 |
+|       10240 |      64 |      16 |           4.069 |          4.445 |                 9.241 |                   2133.770 |                  2134.574 |
 
 Each recorded pass uses a fresh process and a full warm-up. Native
 timing starts after workspace initialization and includes ordered-feed
@@ -134,12 +134,12 @@ are not bytes written to disk.
 
 | transcripts | samples | overlap | peak_transcripts | peak_carriers | peak_prefixes | peak_events | peak_projections | peak_allele_bytes | workspace_bytes | model_bytes |
 |------------:|--------:|--------:|-----------------:|--------------:|--------------:|------------:|-----------------:|------------------:|----------------:|------------:|
-|        1024 |       4 |       1 |                1 |             7 |             6 |           4 |                4 |                10 |            4700 |       34136 |
-|        1024 |      64 |       1 |                1 |           112 |             6 |           4 |                4 |                10 |           14300 |       34136 |
-|        1024 |      64 |      16 |               16 |          1792 |            96 |           4 |               64 |                10 |          189320 |       34136 |
-|        1024 |      64 |      64 |               64 |          7168 |           384 |           4 |              256 |                10 |          749384 |       34136 |
-|        1024 |     256 |       1 |                1 |           448 |             6 |           4 |                4 |                10 |           45020 |       34136 |
-|       10240 |      64 |      16 |               16 |          1792 |            96 |           4 |               64 |                10 |          189320 |      338264 |
+|        1024 |       4 |       1 |                1 |             7 |             6 |           4 |                4 |                10 |            4810 |       34136 |
+|        1024 |      64 |       1 |                1 |           112 |             6 |           4 |                4 |                10 |           14410 |       34136 |
+|        1024 |      64 |      16 |               16 |          1792 |            96 |           4 |               64 |                10 |          189430 |       34136 |
+|        1024 |      64 |      64 |               64 |          7168 |           384 |           4 |              256 |                10 |          749494 |       34136 |
+|        1024 |     256 |       1 |                1 |           448 |             6 |           4 |                4 |                10 |           45130 |       34136 |
+|       10240 |      64 |      16 |               16 |          1792 |            96 |           4 |               64 |                10 |          189430 |      338264 |
 
 Native workspace bytes count actual preallocated buffer capacities and
 state, separately from immutable model allocations. The fixed fixture is

@@ -6,6 +6,12 @@
   alter literal CDS replay. Retained exon-overlapping calls use mutation
   translation even with zero coding edits; reference preparation is worker-local
 
+- verify 23,040 reference-route models with 32 draws per seed in all 360 cells,
+  including alternative starts, internal stops, missing calls and short introns.
+  Retain four complete-oracle grouped-flag disagreements in the repeated
+  69,120-model audit. A fixed original-Runner reproducer checks sample-order
+  dependence independently of DuckVEP; no biological error claim is made
+
 - verify 69,120 phased transcript cases and 414,720 sample/file lanes, including
   32,256 variable-exon/UTR models and 4,580 observed one- or two-base coding
   exons. Both seeds pass all 26 corruption controls; matched inputs, complete
