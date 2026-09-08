@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- record 36,864 clean-build shared-transcript conformance cases with 32 draws
+  in every rare-configuration cell per seed. Retain all 4,608 exon-spanning
+  sequence disagreements; carrier totals, input provenance, mapper observations
+  and thirteen corruption controls per seed pass
+
 - add quota-controlled multi-transcript replay trials across record geometry,
   genotype, strand and neutral source-context counts. Compare sample-specific
   sequence counts, applied-source identity sets, input provenance and owned

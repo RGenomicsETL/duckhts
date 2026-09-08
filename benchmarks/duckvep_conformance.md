@@ -888,14 +888,47 @@ reference and comparison limitations above also apply here; rare GT
 classes and neutral contexts are separate campaigns, not their complete
 cross-product.
 
-Cross-exon replay is not certified by these passing campaigns. A
-separate [two-seed multi-transcript
-diagnostic](https://github.com/RGenomicsETL/duckhts/issues/92#issuecomment-5578980966)
-retains 384 disagreements across 3,072 transcript cases: DuckHTS
-withholds sequence for exon-spanning projection failures while
-Haplosaurus omits the unmapped record. That temporary diagnostic does
-not validate physical-edit provenance or whole-haplotype SO/HGVS and is
-not promoted into the source-record ledger.
+### Shared-transcript rare configurations
+
+|     seed | profiles | source_records | observed_carriers | failures | count_failures | input_provenance_failures | mapping_failures |
+|---------:|---------:|---------------:|------------------:|---------:|---------------:|--------------------------:|-----------------:|
+|      173 |    18432 |         166224 |            110592 |     2304 |              0 |                         0 |                0 |
+| 20260906 |    18432 |         166224 |            110592 |     2304 |              0 |                         0 |                0 |
+
+Source 2c5bcb21ba6f054639b2031f8ca465be3b8b27d5 has **36,864 transcript
+cases**, including 33,792 quota-controlled cases and the complete
+3,072-case diagnostic baseline. Every region has three diploid samples,
+one full-exon transcript and an overlapping two-exon transcript (exons
+11–70 and 101–190). Source coordinates and spanning lengths vary;
+transcript geometry and the registered 180-base reference are fixed.
+
+Each seed supplies 32 draws in every geometry × cohort-GT-pattern ×
+strand × neutral-count cell: four record geometries, three sample
+configurations, two strands and eleven neutral source counts through 36.
+This crosses shared-transcript mapping with source-context pressure; it
+is not a distribution of independent biological samples, arbitrary
+transcript models or an estimate of population error rates.
+
+All **4,608 disagreements** are exon-spanning records in the two-exon
+model. DuckHTS withholds the sequence, while pinned Haplosaurus filters
+the unmapped record and replays the other edits. These are failing
+compatibility cases, not exclusions or evidence that VEP is wrong. Every
+baseline input column, complete oracle JSON line and sequence verdict
+agrees with the retained diagnostic; its 384 disagreements remain in the
+denominator.
+
+Full CDS/protein groups include counts per sample; exchanging samples is
+a rejected corruption even when pooled counts agree. Applied-source
+identity sets are checked within equal-sequence groups. Native
+contributor checks independently retain source IDs, regions, positions,
+REF/ALT interpretations and occupied sample/file-lane keys. Upstream
+checks retain the complete source buffer, genotype multiplicities and
+constructor-owned mappings, including exon-repeated and unselected
+duplicate sources. All thirteen corruption controls pass for each seed.
+Source sets do not certify physical-edit multiplicity or
+source-to-sample association within a shared upstream sequence group.
+Full phase/PS behavior, compound SO/HGVS and structural composition
+remain outside this campaign’s tested scope.
 
 ## Individual Sequence Ontology terms
 
