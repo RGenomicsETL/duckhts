@@ -140,6 +140,7 @@ main <- function() {
     optparse::make_option('--rare-per-stratum', dest = 'rare_per_stratum', type = 'integer', default = 1L),
     optparse::make_option('--geometry-per-stratum', dest = 'geometry_per_stratum', type = 'integer', default = 0L),
     optparse::make_option('--interaction-per-stratum', dest = 'interaction_per_stratum', type = 'integer', default = 0L),
+    optparse::make_option('--length-per-stratum', dest = 'length_per_stratum', type = 'integer', default = 0L),
     optparse::make_option('--extension-receipt', dest = 'extension_receipt', default = NULL),
     optparse::make_option('--vep-prefix', dest = 'vep_prefix', default = '/root/miniconda3/envs/vep')
   )))
@@ -149,9 +150,10 @@ main <- function() {
   stopifnot(!is.na(seed), !is.na(opt$rare_per_stratum), opt$rare_per_stratum >= 0L,
     !is.na(opt$geometry_per_stratum), opt$geometry_per_stratum >= 0L,
     !is.na(opt$interaction_per_stratum), opt$interaction_per_stratum >= 0L,
+    !is.na(opt$length_per_stratum), opt$length_per_stratum >= 0L,
     opt$rare_per_stratum <= (32768L - 768L) %/% 264L,
     768 + 264 * opt$rare_per_stratum + 504 * opt$geometry_per_stratum +
-      6048 * opt$interaction_per_stratum <= 32768)
+      6048 * opt$interaction_per_stratum + 4536 * opt$length_per_stratum <= 32768)
   revision <- duckvep_evidence_revision(root)
   extension <- normalizePath('build/release/duckhts.duckdb_extension')
   binding <- 'diagnostic_unbound'
@@ -254,14 +256,16 @@ main <- function() {
   models <- do.call(rbind, models); exons <- do.call(rbind, exons); records <- do.call(rbind, records)
   fixed_regions <- nrow(cases)
   geometry <- NULL
-  for (cohort in c('geometry', 'interaction')) {
+  for (cohort in c('geometry', 'interaction', 'length')) {
     quota <- opt[[paste0(cohort, '_per_stratum')]]
     if (!quota) next
-    added <- haplotype_geometry_cases(cds, quota, nrow(cases), nrow(models), cohort == 'interaction')
+    added <- if (cohort == 'length') haplotype_length_cases(cds, quota, nrow(cases), nrow(models)) else
+      haplotype_geometry_cases(cds, quota, nrow(cases), nrow(models), cohort == 'interaction')
     added$cases$gt_pair <- if (cohort == 'interaction') 'cis_trans_missing' else 'mixed_lanes'
     added$cases$neutral_count <- 0L
     added$cases$cohort <- cohort
     for (name in setdiff(names(added$cases), names(cases))) cases[[name]] <- NA
+    for (name in setdiff(names(cases), names(added$cases))) added$cases[[name]] <- NA
     cases <- rbind(cases, added$cases[names(cases)])
     models <- rbind(models, added$models[names(models)])
     exons <- rbind(exons, added$exons[names(exons)])
@@ -277,8 +281,10 @@ main <- function() {
   records <- records[order(records$seq_region, records$position, seq_len(nrow(records))), ]
   records$event_index <- seq_len(nrow(records))
   stopifnot(fixed_regions == 768L + 264L * opt$rare_per_stratum,
-    nrow(cases) == fixed_regions + 504L * opt$geometry_per_stratum + 6048L * opt$interaction_per_stratum,
-    nrow(models) == 2L * fixed_regions + 504L * opt$geometry_per_stratum + 6048L * opt$interaction_per_stratum,
+    nrow(cases) == fixed_regions + 504L * opt$geometry_per_stratum +
+      6048L * opt$interaction_per_stratum + 4536L * opt$length_per_stratum,
+    nrow(models) == 2L * fixed_regions + 504L * opt$geometry_per_stratum +
+      6048L * opt$interaction_per_stratum + 4536L * opt$length_per_stratum,
     all(table(interaction(cases[cases$cohort == 'baseline', c('shape', 'gt_pair', 'strand')])) == 32L),
     all(records$reference != records$alt))
   key <- function(x) do.call(paste, c(x[c('shape', 'gt_pair', 'strand', 'neutral_count')], sep = ':'))
@@ -411,6 +417,9 @@ main <- function() {
     interaction_per_stratum = opt$interaction_per_stratum, interaction_strata = if (opt$interaction_per_stratum) 6048L else 0L,
     interaction_profiles = sum(summary$cohort == 'interaction'),
     interaction_failures = sum(!summary$passed & summary$cohort == 'interaction'),
+    length_per_stratum = opt$length_per_stratum, length_strata = if (opt$length_per_stratum) 4536L else 0L,
+    length_profiles = sum(summary$cohort == 'length'),
+    length_failures = sum(!summary$passed & summary$cohort == 'length'),
     minimum_stratum_draws = min(coverage$observed), controls_rejected = sum(controls),
     oracle_revisions = as.list(pins), source_artifact = 'haplotype_benchmark_reference',
     profiles = nrow(summary), records = nrow(records), leaves = nrow(actual),

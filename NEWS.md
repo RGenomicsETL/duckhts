@@ -2,6 +2,14 @@
 
 # duckhts 1.5.1.9000
 
+- add explicit short/long CDS-length strata to the exon/UTR conformance generator,
+  including partial terminal codons and sequence sizes around 2,048 bases/codons;
+  independent generator checks cover genomic REF, spliced CDS, GFF and exon phases
+
+- retain a third four-draw rare-interaction diagnostic: 26,232 models and 157,392
+  sample/file lanes, zero sequence/count/provenance/mapping/lane failures and all
+  42 corruption controls; grouped metadata and complete phased HGVS remain separate
+
 - preserve selected samples' scalar phase sets when BCF FORMAT storage retains
   vector-end padding; PS uses the shared numeric cardinality check
 

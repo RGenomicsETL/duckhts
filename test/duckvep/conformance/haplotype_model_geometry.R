@@ -1,7 +1,12 @@
 # Generate transcript-oriented CDS splits and genomic source records from the
 # registered reference. GFF phase is the complement of Ensembl exon phase.
-haplotype_geometry_cases <- function(cds, quota, region_offset, transcript_offset, interaction = FALSE) {
-  stopifnot(nchar(cds) == 180L, quota >= 1L)
+haplotype_geometry_cases <- function(cds, quota, region_offset, transcript_offset,
+    interaction = FALSE, prefix = if (interaction) "P" else "G") {
+  stopifnot(is.character(cds), length(cds) == 1L, !is.na(cds), nchar(cds) >= 36L,
+    grepl("^[ACGT]+$", cds), length(quota) == 1L, !is.na(quota),
+    quota >= 1L, quota == as.integer(quota),
+    length(prefix) == 1L, !is.na(prefix), grepl("^[A-Za-z0-9_]+$", prefix))
+  cds_length <- nchar(cds)
   rc <- function(x) paste(rev(strsplit(chartr("ACGT", "TGCA", x), "", fixed = TRUE)[[1L]]), collapse = "")
   strata <- expand.grid(
     exon_count = c(2L, 3L, 5L, 7L), split_phase = 0:2,
@@ -23,10 +28,12 @@ haplotype_geometry_cases <- function(cds, quota, region_offset, transcript_offse
     profile <- cases[i, ]
     tx_index <- transcript_offset + i - 1L
     region <- region_offset + i - 1L
-    tx <- paste0(if (interaction) "TP" else "TG", i)
-    chr <- sprintf(if (interaction) "chrP%04d" else "chrG%04d", i)
-    first <- sample(seq(12L + profile$split_phase, 32L, 3L), 1L)
-    cuts <- c(0L, first, sort(sample(seq.int(first + 1L, 179L), profile$exon_count - 2L)), 180L)
+    tx <- paste0("T", prefix, i)
+    chr <- sprintf(paste0("chr", prefix, "%04d"), i)
+    first <- sample(seq(12L + profile$split_phase,
+      min(32L, cds_length - profile$exon_count + 1L), 3L), 1L)
+    cuts <- c(0L, first, sort(sample(seq.int(first + 1L, cds_length - 1L),
+      profile$exon_count - 2L)), cds_length)
     u5 <- if (profile$utr == "inside") sample(1:9, 1L) else 0L
     u3 <- if (profile$utr == "inside") sample(1:9, 1L) else 0L
     genome <- strrep("A", 10L)
@@ -182,4 +189,32 @@ haplotype_geometry_cases <- function(cds, quota, region_offset, transcript_offse
     cases = cases, models = models, exons = exons, records = records,
     layouts = layouts, phases = phases, fasta = fasta, gff = gff, coverage = coverage
   )
+}
+
+# Repeat the registered CDS's internal codons, retaining ATG and a raw TAA suffix.
+# Partial terminal codons exercise the pinned reference/alternate translation rules.
+haplotype_length_cases <- function(cds, quota, region_offset, transcript_offset) {
+  stopifnot(length(cds) == 1L, !is.na(cds), nchar(cds) == 180L,
+    startsWith(cds, "ATG"), endsWith(cds, "TAA"), grepl("^[ACGT]+$", cds))
+  lengths <- c(36L, 37L, 38L, 2047L, 2048L, 2049L, 6143L, 6144L, 6145L)
+  internal <- substr(cds, 4L, nchar(cds) - 3L)
+  cohorts <- vector("list", length(lengths))
+  for (i in seq_along(lengths)) {
+    n <- lengths[i]
+    sequence <- paste0("ATG", substr(strrep(internal, ceiling((n - 6L) / nchar(internal))),
+      1L, n - 6L), "TAA")
+    added <- haplotype_geometry_cases(sequence, quota, region_offset, transcript_offset,
+      prefix = paste0("L", n, "_"))
+    added$cases$cds_length <- added$coverage$cds_length <- n
+    cohorts[[i]] <- added
+    region_offset <- region_offset + nrow(added$models)
+    transcript_offset <- transcript_offset + nrow(added$models)
+  }
+  result <- lapply(names(cohorts[[1L]]), function(name)
+    do.call(if (name %in% c("fasta", "gff")) c else rbind, lapply(cohorts, `[[`, name)))
+  names(result) <- names(cohorts[[1L]])
+  stopifnot(nrow(result$coverage) == 4536L,
+    all(result$coverage$required == quota), all(result$coverage$observed == quota),
+    identical(nchar(result$models$cds), result$cases$cds_length))
+  result
 }

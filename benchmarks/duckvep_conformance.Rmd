@@ -1442,8 +1442,8 @@ stopifnot(nrow(empty_set_pair) == 2L,
   length(unique(empty_set_pair$actual_sha256)) == 1L,
   length(unique(empty_set_pair$extension_sha256)) == 1L)
 interaction_campaigns <- subset(interactions, interaction_per_stratum == 4L)
-stopifnot(nrow(interaction_campaigns) == 2L,
-  setequal(interaction_campaigns$seed, c(173L, 20260906L)),
+stopifnot(nrow(interaction_campaigns) == 3L,
+  setequal(interaction_campaigns$seed, c(173L, 20260906L, 20260909L)),
   all(interaction_campaigns$controls_rejected == 42L))
 knitr::kable(interactions[c("seed", "interaction_per_stratum", "profiles", "records",
   "carriers", "controls_rejected", "failures", "sequence_failures", "replay_lane_failures")],
@@ -1465,7 +1465,7 @@ eight additional controls reject absent/null fields, invalid identities, lost or
 invented sources and dropped or duplicated rows. No source record, sequence or
 lane comparison is excluded, and the failing baseline remains in the table.
 
-The two four-draw campaigns contain **`r format(sum(interaction_campaigns$profiles), big.mark = ",")`
+The `r nrow(interaction_campaigns)` four-draw campaigns contain **`r format(sum(interaction_campaigns$profiles), big.mark = ",")`
 models / `r format(sum(interaction_campaigns$carriers), big.mark = ",")` sample/file lanes**,
 with **`r sum(interaction_campaigns$failures)` failed model comparisons**. Each seed
 adds four draws in every one of 6,048 cells: the 504 exon/UTR geometry cells crossed

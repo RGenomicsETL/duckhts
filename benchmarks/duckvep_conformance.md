@@ -998,6 +998,7 @@ composition remain outside this campaign’s tested scope.
 |      173 |                       1 |     8088 |   32544 |    48528 |                42 |        0 |                 0 |                    0 |
 |      173 |                       4 |    26232 |   86976 |   157392 |                42 |        0 |                 0 |                    0 |
 | 20260906 |                       4 |    26232 |   86976 |   157392 |                42 |        0 |                 0 |                    0 |
+| 20260909 |                       4 |    26232 |   86976 |   157392 |                42 |        0 |                 0 |                    0 |
 
 These are **local diagnostic runs, not source-bound release
 certificates**. The [receipt
@@ -1017,12 +1018,12 @@ sources and dropped or duplicated rows. No source record, sequence or
 lane comparison is excluded, and the failing baseline remains in the
 table.
 
-The two four-draw campaigns contain **52,464 models / 314,784
-sample/file lanes**, with **0 failed model comparisons**. Each seed adds
-four draws in every one of 6,048 cells: the 504 exon/UTR geometry cells
-crossed with four partner allele shapes and three partner start
-locations (overlapping the first source span, in the same coding exon or
-in another coding exon). All source spans intersect their selected
+The 3 four-draw campaigns contain **78,696 models / 472,176 sample/file
+lanes**, with **0 failed model comparisons**. Each seed adds four draws
+in every one of 6,048 cells: the 504 exon/UTR geometry cells crossed
+with four partner allele shapes and three partner start locations
+(overlapping the first source span, in the same coding exon or in
+another coding exon). All source spans intersect their selected
 transcript. The original 1,536 fixed-model and 504 geometry cases
 precede the interaction draws without changing their inputs or RNG
 stream. Complete CDS/protein, sample counts, input provenance, source

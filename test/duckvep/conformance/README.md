@@ -944,6 +944,29 @@ or null contributor fields, invalid identities, lost or invented sources, and
 dropped or duplicated rows. This remains a standard-code 180-base CDS grammar,
 not a certificate for arbitrary models, phase sets, consequences or HGVS.
 
+`--length-per-stratum` crosses the 504 exon/UTR geometry cells with CDS lengths
+36/37/38, 2,047/2,048/2,049 and 6,143/6,144/6,145 bases: 4,536 required cells.
+These include short coding sequences, complete and partial terminal codons, and
+sequence sizes around 2,048 bases and 2,048 codons. Each CDS retains the registered
+reference's ATG start, repeats its internal codons to the requested length minus
+six, and appends TAA. A raw TAA suffix is not necessarily an in-frame stop.
+All derived sequences and source records are retained in the input receipt.
+
+```sh
+Rscript test/duckvep/conformance/haplotype_model_differential.R --seed 173 --rare-per-stratum 0 --length-per-stratum 1
+Rscript test/duckvep/conformance/haplotype_model_differential.R --seed 20260909 --rare-per-stratum 0 --length-per-stratum 4
+```
+
+The commands cover 6,072 and 19,680 models respectively, including the 1,536
+fixed-model cases, with 36,432 and 118,080 sample/file lanes. Length draws follow
+any geometry/interaction cohorts without changing their inputs or seed stream.
+`length_coverage.csv` enforces every requested quota. Complete sequence, count,
+source, mapping, reference-model and lane checks retain all failures under the
+same 42 corruption controls. The network-free generator test independently checks
+genomic REF, spliced CDS, ranked exon phases and emitted GFF coordinates/phases.
+This is a standard-code synthetic length grammar, not arbitrary genetic-code,
+phase-set, compound consequence or HGVS certification.
+
 `haplotype_reference_differential.R` exercises reference-only sample handling
 through the original container JSON serializer. CDS and protein groups are compared
 separately by sample and count; one CDS may link both a curated reference peptide
