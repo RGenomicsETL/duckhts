@@ -17,8 +17,8 @@ typedef struct {
 
 void duckhts_bcf_format_destroy(duckhts_bcf_format_t *values);
 
-/* HTSlib owns decoding. This adapter checks encoded types, capacity arithmetic,
- * sample width, numeric scalar cardinality and failed-realloc ownership before publishing a view.
+/* HTSlib owns decoding. This adapter checks encoded types, capacity arithmetic
+ * and numeric scalar cardinality before publishing a view.
  * GT uses its integer payload despite its String header. Mismatches obey policy;
  * physical unpacking, capacity and allocation failures always return zero. */
 int duckhts_bcf_format_decode(duckhts_bcf_format_t *values, bcf_hdr_t *header,

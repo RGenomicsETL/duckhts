@@ -71,13 +71,10 @@ int duckhts_bcf_check_field_type(bcf_hdr_t *hdr, bcf1_t *record,
                                 duckhts_bcf_field_class_t field_class,
                                 int header_id, int header_type,
                                 const char *reader_name, char *error, size_t error_size);
-int duckhts_bcf_check_format_width(const char *reader_name, const char *tag,
-                                  bcf_hdr_t *hdr, bcf1_t *record, int values,
-                                  int samples, char *error, size_t error_size);
-
 /* Decoded numeric scalar fields may contain at most one element per sample
  * (one vector for INFO). Missing elements count; vector-end padding does not.
- * Lists and GT are exempt. FORMAT count must first pass check_format_width. */
+ * Lists and GT are exempt. HTSlib returns a complete sample-count times stride
+ * array for FORMAT; callers check the multiplication before decoding. */
 int duckhts_bcf_check_scalar_count(bcf_hdr_t *hdr, bcf1_t *record,
                                    duckhts_bcf_field_class_t field_class,
                                    int header_id, int header_type, const void *values, int count,
@@ -99,7 +96,7 @@ int duckhts_bcf_parse_decode_policy(const char *text, duckhts_bcf_decode_policy_
 int duckhts_bcf_parse_scan_mode(const char *text, int *sequential);
 
 /* Classify bcf_get_* return codes. The caller chooses null/warn/error for a
- * type mismatch; undefined header fields and OOM always remain fatal. */
+ * type mismatch; undefined header fields, OOM and capacity overflow remain fatal. */
 duckhts_bcf_decode_status_t duckhts_bcf_decode_status(
     const char *reader_name, const char *field_class, const char *tag,
     bcf_hdr_t *hdr, bcf1_t *record, int ret, char *error, size_t error_size);

@@ -1,7 +1,7 @@
 /* Model-scoped literal-event replay over sparse carrier paths (INTERNAL).
  * All storage is caller-owned. begin copies REF/ALT once; project adds one
- * candidate transcript; push adds prepared carrier evidence, while push_call
- * interprets a decoded GT. Candidate and phase-domain discovery and output
+ * candidate transcript; push_call interprets a decoded GT and push_raw_call
+ * interprets retained source-record slots. Candidate and phase-domain discovery and output
  * materialization belong to the host query plan.
  *
  * Input is sorted by (chrom_id, pos1, event_id, allele_index). begin may report a transcript
@@ -218,12 +218,6 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_begin(
  * the genomic span (an insertion may touch the transcript end). */
 duckvep_haplotype_stream_status_t duckvep_haplotype_stream_project(
     duckvep_haplotype_stream_t *stream, uint32_t transcript_index);
-
-/* Add this event to one lane in every candidate transcript, using the prepared
- * projection. No call matrix and no repeated projection across samples. */
-duckvep_haplotype_stream_status_t duckvep_haplotype_stream_push(
-    duckvep_haplotype_stream_t *stream, const duckvep_carrier_key_t *key,
-    uint8_t evidence_flags);
 
 /* Interpret the complete decoded GT for this source ALT and one candidate
  * transcript. The caller's query plan supplies ALL phase sets for this sample

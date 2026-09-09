@@ -115,11 +115,9 @@ static void genotypes(const char *path, const duckhts_bcf_index_t *index) {
             assert(values > 0 && values % nsamples == 0);
             assert(duckhts_bcf_genotypes_decode(&typed, reader.hdr, record,
                 DUCKHTS_BCF_DECODE_ERROR, error, sizeof(error)));
-            assert(typed.samples == nsamples && !typed.ps_present);
+            assert(typed.samples == nsamples && !typed.ps_stride);
             assert(typed.gt_stride == values / nsamples);
             assert(memcmp(typed.gt, gt, (size_t)values * sizeof(*gt)) == 0);
-            assert(duckhts_bcf_check_format_width("test", "GT", reader.hdr, record,
-                values, nsamples, error, sizeof(error)));
             int stride = values / nsamples;
             for (int sample = 0; sample < nsamples; sample++) {
                 int original = selected_counts[selection] == 2 ? sample : selection == 1 ? 0 : 1;
@@ -176,7 +174,7 @@ static void genotype_values(void) {
     duckhts_bcf_genotypes_t values = {0};
     char error[512];
     assert(duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_ERROR, error, sizeof(error)));
-    assert(values.samples == 2 && values.gt_stride == 4 && values.ps_present);
+    assert(values.samples == 2 && values.gt_stride == 4 && values.ps_stride == 1);
     assert(memcmp(values.gt, gt, sizeof(gt)) == 0 && memcmp(values.ps, ps, sizeof(ps)) == 0);
     assert(duckhts_bcf_genotype_ploidy(values.gt, 4) == 4);
     assert(duckhts_bcf_genotype_ploidy(values.gt + 4, 4) == 1);
@@ -193,8 +191,9 @@ static void genotype_values(void) {
         assert(bcf_update_format_int32(header, record, "PS", padded, 2 * stride) == 0);
         assert(duckhts_bcf_genotypes_decode(&values, header, record,
             DUCKHTS_BCF_DECODE_ERROR, error, sizeof(error)));
-        assert(values.gt_stride == 4 && values.ps_present);
-        assert(values.ps[0] == scalar_ps[first] && values.ps[1] == scalar_ps[second]);
+        assert(values.gt_stride == 4 && values.ps_stride == stride);
+        assert(values.ps[0] == scalar_ps[first] && values.ps[stride] == scalar_ps[second]);
+        assert(memcmp(values.ps, padded, 2u * (size_t)stride * sizeof(*padded)) == 0);
         assert(memcmp(values.gt, gt, sizeof(gt)) == 0);
     }
     int32_t wide_ps[] = {10, 11, 20, bcf_int32_vector_end};
@@ -202,13 +201,15 @@ static void genotype_values(void) {
     assert(!duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_ERROR, error, sizeof(error)));
     assert(strstr(error, "FORMAT/PS has 2 values for header Number=1 at chrG:1 sample S1"));
     assert(duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_NULL, error, sizeof(error)));
-    assert(values.gt_stride == 4 && !values.ps_present);
+    assert(values.gt_stride == 4 && !values.ps_stride);
+    assert(duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_WARN, error, sizeof(error)));
+    assert(values.gt_stride == 4 && !values.ps_stride);
     const char *strings[] = {"10", "20"};
     assert(bcf_update_format_string(header, record, "PS", strings, 2) == 0);
     assert(!duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_ERROR, error, sizeof(error)));
     assert(strstr(error, "encoded BCF type CHAR"));
     assert(duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_NULL, error, sizeof(error)));
-    assert(values.gt_stride == 4 && !values.ps_present);
+    assert(values.gt_stride == 4 && !values.ps_stride);
     assert(bcf_update_format_int32(header, record, "PS", ps, 2) == 0);
     // bcf_get_format_values() stops at the first vector-end and fills the
     // remaining decoded slots with vector-end, even if raw padding has values.
@@ -224,7 +225,7 @@ static void genotype_values(void) {
     assert(!duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_ERROR, error, sizeof(error)));
     assert(strstr(error, "invalid FORMAT/GT allele"));
     assert(duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_NULL, error, sizeof(error)));
-    assert(values.gt_stride == 0 && values.ps_present);
+    assert(values.gt_stride == 0 && values.ps_stride == 1);
     bcf_fmt_t *format = bcf_get_fmt(header, record, "GT");
     int width = format->n;
     format->n = INT32_MAX; // Refuse signed count multiplication before HTSlib decoding.
@@ -235,7 +236,7 @@ static void genotype_values(void) {
     assert(!duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_ERROR, error, sizeof(error)));
     assert(strstr(error, "encoded BCF type CHAR"));
     assert(duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_NULL, error, sizeof(error)));
-    assert(values.gt_stride == 0 && values.ps_present);
+    assert(values.gt_stride == 0 && values.ps_stride == 1);
     duckhts_bcf_samples_t selection = {0};
     assert(duckhts_bcf_samples_build(&selection, header, "S2", error, sizeof(error)));
     char *reversed[] = {"S2", "S1"};
@@ -492,10 +493,8 @@ static void decode_errors(void) {
             assert(duckhts_bcf_decode_status("read_bcf", "FORMAT", "XX", reader.hdr, record,
                 ret, error, sizeof(error)) == expected);
             if (ret == -4) assert(strstr(error, "out of memory decoding FORMAT/XX at chr1:10"));
+            if (ret == -5) assert(strstr(error, "FORMAT/XX exceeds the supported decoded-value capacity at chr1:10"));
         }
-        assert(!duckhts_bcf_check_format_width("read_bcf", "XX", reader.hdr, record,
-            3, 2, error, sizeof(error)));
-        assert(strcmp(error, "read_bcf: FORMAT/XX decoded value count 3 is not divisible by sample count 2 at chr1:10") == 0);
         bcf_destroy(record);
         duckhts_bcf_scan_close(&reader);
     }

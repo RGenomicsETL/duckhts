@@ -5,7 +5,7 @@
 require duckhts
 
 # Excluded samples can leave BCF vector-end padding. It is not another PS value.
-foreach ext vcf bcf
+foreach ext vcf bcf vcf.gz
 
 foreach policy null warn error
 
@@ -17,6 +17,46 @@ FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_ps_width.${ext}',
 1	20
 
 endloop
+
+foreach policy null warn
+
+query TTII
+SELECT calls[1].alleles::VARCHAR, calls[2].alleles::VARCHAR,
+       calls[1].phase_set IS NULL, calls[2].phase_set IS NULL
+FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_ps_width.${ext}',
+               decode_error_policy := '${policy}');
+----
+[0, 1]	[1, 1]	1	1
+
+endloop
+
+statement error
+SELECT calls FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_ps_width.${ext}',
+                            decode_error_policy := 'error');
+----
+FORMAT/PS has 2 values for header Number=1 at chrG:10 sample S1
+
+# A bad scalar does not prevent a subsequent valid query on the connection.
+query II
+SELECT count(*), sum(len(calls))
+FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_ps_width.${ext}', samples := 'S2',
+               decode_error_policy := 'error');
+----
+1	1
+
+query TIIII
+SELECT calls[1].alleles::VARCHAR, calls[1].phase_set,
+       calls[1].format.gt, calls[1].format.ps, calls[1].format.ad
+FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_format_case.${ext}',
+               format_fields := ['gt', 'ps', 'ad'], decode_error_policy := 'error');
+----
+[0, 1]	10	21	22	23
+
+statement error
+SELECT calls FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_format_case.${ext}',
+                            format_fields := ['AD', 'ad']);
+----
+duplicate FORMAT field
 
 endloop
 

@@ -12,7 +12,7 @@ diff --git a/vcf.c b/vcf.c
 -        memcpy(*dst,info->vptr,info->len);
 +    if ( type==BCF_HT_STR )
 +    {
-+        if ( info->len==INT_MAX ) return -4;
++        if ( info->len==INT_MAX ) return -5;
 +        if ( *ndst < info->len+1 )
 +        {
 +            void *new_dst = realloc(*dst, (size_t)info->len + 1);
@@ -52,7 +52,7 @@ diff --git a/vcf.c b/vcf.c
 +    int nsmpl = bcf_hdr_nsamples(hdr);
 +    if ( !nsmpl ) return 0;
 +    if ( fmt->n < 0 || fmt->n == INT_MAX || nsmpl < 0 ||
-+         nsmpl > INT_MAX / (fmt->n + 1) ) return -4;
++         nsmpl > INT_MAX / (fmt->n + 1) ) return -5;
 +    int n = (fmt->n+1)*nsmpl;
 +    char **new_dst = *dst;
 +    if ( !new_dst )
@@ -98,7 +98,7 @@ diff --git a/vcf.c b/vcf.c
 -    }
 +    int nsmpl = bcf_hdr_nsamples(hdr);
 +    if ( !nsmpl ) return 0;
-+    if ( fmt->n < 0 || nsmpl < 0 || fmt->n > INT_MAX / nsmpl ) return -4;
++    if ( fmt->n < 0 || nsmpl < 0 || fmt->n > INT_MAX / nsmpl ) return -5;
 +    int n = fmt->n*nsmpl;
 +    if ( type==BCF_HT_STR )
 +    {
@@ -122,3 +122,13 @@ diff --git a/vcf.c b/vcf.c
 +        *dst = new_dst;
 +        *ndst = n;
 +    }
+diff --git a/htslib/vcf.h b/htslib/vcf.h
+--- a/htslib/vcf.h
++++ b/htslib/vcf.h
+@@ -1088,5 +1088,6 @@
+      *          -3 .. tag is not present in the VCF record
+      *          -4 .. the operation could not be completed (e.g. out of memory)
++     *          -5 .. decoded value count or string size exceeds the signed API capacity
+      *
+      *  Returns negative value on error or the number of values (including
+      *  missing values) put in *dst on success. bcf_get_info_string() returns

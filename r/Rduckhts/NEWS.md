@@ -1,6 +1,23 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
 
+- exercise bundled haplotype list allocation failures through DBI, including
+  phase preparation, nested provenance, sequence differences and query recovery
+
+- test bundled VCF 4.4 partial-phase calls and carrier evidence, preserving the
+  distinction between per-allele phasing and a separator between two alleles
+
+- preserve compound-HGVS start loss on phase-padded transcript models in bundled
+  DuckVEP; physical coding-block joins reject overlapping sequence spans
+
+- test PS scalar rejection and selected-sample padding under all decode policies
+  for VCF, BCF and compressed VCF; bundled genotype views retain decoded strides
+  and document distinct lowercase FORMAT tags
+
+- report decoded-capacity overflow separately from out-of-memory errors in bundled
+  readers, check projected FORMAT indices, and reuse checked list growth for
+  phased-haplotype results
+
 - preserve bundled readers' FORMAT/GT, numeric and string buffers on allocation
   failure, reporting query errors while keeping worker-owned memory recoverable
 

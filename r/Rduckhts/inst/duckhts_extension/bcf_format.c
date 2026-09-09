@@ -64,8 +64,6 @@ int duckhts_bcf_format_decode(duckhts_bcf_format_t *values, bcf_hdr_t *header,
     if (status == DUCKHTS_BCF_DECODE_FATAL) return 0;
     if (status == DUCKHTS_BCF_DECODE_TYPE_MISMATCH) goto mismatch;
     if (ret <= 0) goto absent;
-    if (numeric && !duckhts_bcf_check_format_width(reader_name, tag, header, record,
-                                                  ret, samples, error, error_size)) goto mismatch;
     if (numeric && !duckhts_bcf_check_scalar_count(header, record,
             is_gt ? DUCKHTS_BCF_FIELD_GT : DUCKHTS_BCF_FIELD_FORMAT,
             id, header_type, values->data, ret, reader_name, error, error_size)) goto mismatch;

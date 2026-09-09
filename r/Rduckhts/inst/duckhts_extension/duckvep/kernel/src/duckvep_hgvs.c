@@ -2690,8 +2690,12 @@ static int hgvs_protein_block_join(const duckvep_haplotype_block_t *left,
         right->edit_count > SIZE_MAX - left->edit_count ||
         right->alt_len > SIZE_MAX - right->alt_start0 ||
         right->alt_start0 < left->alt_start0) return 0;
-    uint64_t ref_length = (uint64_t)right->cds_start - left->cds_start + right->ref_len;
-    size_t alt_length = right->alt_start0 + right->alt_len - left->alt_start0;
+    uint64_t ref_gap = (uint64_t)right->cds_start - left->cds_start;
+    size_t alt_gap = right->alt_start0 - left->alt_start0;
+    /* Physical spans are disjoint on both CDS axes; peptide windows may overlap. */
+    if (left->ref_len > ref_gap || left->alt_len > alt_gap) return 0;
+    uint64_t ref_length = ref_gap + right->ref_len;
+    size_t alt_length = alt_gap + right->alt_len;
     if (ref_length > UINT32_MAX || alt_length > INT64_MAX) return 0;
     duckvep_haplotype_block_t joined = *left;
     joined.edit_count += right->edit_count;
@@ -2867,10 +2871,11 @@ static duckvep_hgvs_status_t hgvs_protein_haplotype_push(
         /* A retained source anchor can overlap the start codon without
          * changing it. Protein HGVS describes the completed path; a model
          * peptide edit alone also cannot establish a lost DNA start codon. */
+        size_t start0 = context->cds_phase_padding;
         if ((flags & DUCKVEP_CONSEQUENCE_FLAG_START_LOST) &&
-            context->ref_cds_len >= 3u && context->alt_cds_len >= 3u) {
+            context->ref_cds_len >= start0 + 3u && context->alt_cds_len >= start0 + 3u) {
             int same_start = 1;
-            for (size_t i = 0u; i < 3u; i++)
+            for (size_t i = start0; i < start0 + 3u; i++)
                 same_start &= duckvep_coding_context_cds_base(context, 0, i) ==
                     duckvep_coding_context_cds_base(context, 1, i);
             if (same_start) flags &= ~(uint32_t)DUCKVEP_CONSEQUENCE_FLAG_START_LOST;

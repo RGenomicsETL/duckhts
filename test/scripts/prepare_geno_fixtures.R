@@ -5,7 +5,7 @@ prepare_geno_fixtures <- function() {
   stopifnot(nzchar(Sys.which("bcftools")), nzchar(Sys.which("bgzip")))
   run <- function(args) stopifnot(system2("bcftools", shQuote(args)) == 0L)
   outputs <- character()
-  for (source in c("test/data/geno_calls.vcf", "test/data/geno_format.vcf",
+  for (source in c("test/data/geno_calls.vcf", "test/data/geno_format.vcf", "test/data/geno_format_case.vcf",
                    "test/data/bcf_scalar_counts.vcf")) {
     stopifnot(file.exists(source))
     bcf <- sub("vcf$", "bcf", source)
@@ -36,7 +36,9 @@ prepare_geno_fixtures <- function() {
     writeLines(c(selected, record), text)
     binary <- sub("vcf$", "bcf", text)
     run(c("view", "--no-version", "-Ob", "-o", binary, text))
-    outputs <- c(outputs, text, binary)
+    compressed <- paste0(text, ".gz")
+    stopifnot(system2("bgzip", c("-c", shQuote(text)), stdout = compressed) == 0L)
+    outputs <- c(outputs, text, binary, compressed)
   }
   # Reheader changes only the declared PS type, retaining the CHAR payload in
   # the BCF blocks. This must not reach HTSlib's integer convenience decoder.
@@ -49,6 +51,7 @@ prepare_geno_fixtures <- function() {
   stopifnot(all(file.copy(outputs, "r/Rduckhts/inst/extdata", overwrite = TRUE)))
   # Explicit VCF 4.4 phase-prefix witnesses stay textual: the locally installed
   # bcftools encoder may implement an older VCF version than bundled HTSlib.
-  stopifnot(file.copy("test/data/geno_vcf44.vcf", "r/Rduckhts/inst/extdata", overwrite = TRUE))
+  stopifnot(all(file.copy(c("test/data/geno_vcf44.vcf", "test/data/geno_phase_partial.vcf"),
+    "r/Rduckhts/inst/extdata", overwrite = TRUE)))
 }
 prepare_geno_fixtures()

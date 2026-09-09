@@ -1452,15 +1452,23 @@ static int bcf_fill_gt_string(duckdb_vector vec, idx_t row_count,
 static int bcf_fill_format_projected_col(bcf_init_data_t *init,
                                           const bcf_bind_data_t *bind,
                                           const bcf_projected_col_t *column,
-                                          duckdb_vector vector, idx_t row, int current_sample) {
-    int sample = bind->tidy_format ? current_sample : column->sample_idx;
+                                          duckdb_vector vector, idx_t row, int current_sample,
+                                          char *error, size_t error_size) {
+    int sample = bind->tidy_format && bind->n_samples > 0 ? current_sample : column->sample_idx;
+    if (sample < 0 || sample >= bind->n_samples || column->field_idx < 0 ||
+        column->field_idx >= init->cache_n_format_fields) {
+        snprintf(error, error_size, "read_bcf: invalid projected FORMAT sample or field index");
+        return -1;
+    }
     const duckhts_bcf_format_t *values = &init->formats[column->field_idx];
     if (values->count == 0) {
         duckhts_bcf_field_null(vector, row, column->is_list);
         return 1;
     }
     if (column->kind == BCF_OUT_FORMAT_GT) {
-        return bcf_fill_gt_string(vector, row, init, sample);
+        int ret = bcf_fill_gt_string(vector, row, init, sample);
+        if (ret < 0) snprintf(error, error_size, "read_bcf: out of memory formatting FORMAT/GT");
+        return ret;
     }
     return duckhts_bcf_format_write(vector, row, values, column->header_type,
                                      column->is_list, sample);
@@ -1974,11 +1982,8 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 const bcf_projected_col_t *proj_col = &init->projected_cols[group->projected_indices[group_col_idx]];
                 duckdb_vector vec = vectors[proj_col->out_idx];
                 int materialized = bcf_fill_format_projected_col(init, bind, proj_col, vec,
-                                              row_idx, sample_for_row);
-                if (materialized < 0) {
-                    snprintf(scan_err, sizeof(scan_err), "read_bcf: out of memory formatting FORMAT/GT");
-                    goto materialization_error;
-                }
+                                              row_idx, sample_for_row, scan_err, sizeof(scan_err));
+                if (materialized < 0) goto materialization_error;
                 if (!materialized) goto list_error;
             }
         }

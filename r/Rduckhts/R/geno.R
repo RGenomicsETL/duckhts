@@ -24,6 +24,9 @@
 #'   NULL or an empty vector keeps the default GT/PS schema. Unknown, empty,
 #'   missing and case-insensitively duplicate names error; GT and PS are already
 #'   exposed by the typed call fields and cannot be selected again.
+#'   Tag lookup uses exact header spelling: declared lowercase `gt` and `ps`
+#'   are distinct extra fields. Selected names must not collide under DuckDB's
+#'   case-insensitive struct-member lookup.
 #' @return A data frame when `table_name` is `NULL`, otherwise invisible `TRUE`.
 #' @seealso [rduckhts_bcf_samples()]
 #' @examples

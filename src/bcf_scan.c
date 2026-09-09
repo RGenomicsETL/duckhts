@@ -306,18 +306,6 @@ int duckhts_bcf_check_field_type(bcf_hdr_t *hdr, bcf1_t *record,
     return 0;
 }
 
-int duckhts_bcf_check_format_width(const char *reader_name, const char *tag,
-                                  bcf_hdr_t *hdr, bcf1_t *record, int values,
-                                  int samples, char *error, size_t error_size) {
-    if (values <= 0 || samples <= 0 || values % samples == 0) return 1;
-    char loc[128];
-    record_location(hdr, record, loc, sizeof(loc));
-    snprintf(error, error_size,
-             "%s: FORMAT/%s decoded value count %d is not divisible by sample count %d at %s",
-             reader_name ? reader_name : "read_bcf", tag ? tag : "?", values, samples, loc);
-    return 0;
-}
-
 int duckhts_bcf_check_scalar_count(bcf_hdr_t *hdr, bcf1_t *record,
                                    duckhts_bcf_field_class_t field_class,
                                    int header_id, int header_type, const void *values, int count,
@@ -369,6 +357,9 @@ duckhts_bcf_decode_status_t duckhts_bcf_decode_status(
         return DUCKHTS_BCF_DECODE_TYPE_MISMATCH;
     } else if (ret == -4) {
         snprintf(error, error_size, "%s: out of memory decoding %s/%s at %s", name, klass, field, loc);
+    } else if (ret == -5) {
+        snprintf(error, error_size, "%s: %s/%s exceeds the supported decoded-value capacity at %s",
+                 name, klass, field, loc);
     } else {
         snprintf(error, error_size, "%s: failed to decode %s/%s at %s (htslib return %d)", name, klass, field, loc, ret);
     }

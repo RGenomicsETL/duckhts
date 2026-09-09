@@ -65,21 +65,11 @@ static int decode_field(bcf_hdr_t *header, bcf1_t *record, int is_gt,
     if (status == DUCKHTS_BCF_DECODE_FATAL) return 0;
     if (status == DUCKHTS_BCF_DECODE_TYPE_MISMATCH) return accept_mismatch(policy, error);
     if (ret <= 0) return 1;
-    if (!duckhts_bcf_check_format_width("read_geno", tag, header, record,
-                                         ret, samples, error, error_size)) {
-        return accept_mismatch(policy, error);
-    }
     if (!is_gt && ret != samples) {
         if (!duckhts_bcf_check_scalar_count(header, record, DUCKHTS_BCF_FIELD_FORMAT,
                 id, BCF_HT_INT, *data, ret, "read_geno", error, error_size)) {
             return accept_mismatch(policy, error);
         }
-        /* Sample selection retains the file's encoded stride. Compact the
-         * validated scalar views in place; padding carries no PS value. */
-        int stride = ret / samples;
-        for (int sample = 0; sample < samples; sample++)
-            (*data)[sample] = (*data)[(size_t)sample * stride];
-        ret = samples;
     }
     if (is_gt) {
         int stride = ret / samples;
@@ -106,7 +96,7 @@ int duckhts_bcf_genotypes_decode(duckhts_bcf_genotypes_t *values, bcf_hdr_t *hea
                                  bcf1_t *record, duckhts_bcf_decode_policy_t policy,
                                  char *error, size_t error_size) {
     values->gt_stride = 0;
-    values->ps_present = 0;
+    values->ps_stride = 0;
     values->samples = bcf_hdr_nsamples(header);
     if (!values->samples) return 1;
     if (bcf_unpack(record, BCF_UN_FMT) < 0 || record->n_sample != (unsigned)values->samples) {
@@ -119,6 +109,6 @@ int duckhts_bcf_genotypes_decode(duckhts_bcf_genotypes_t *values, bcf_hdr_t *hea
         !decode_field(header, record, 0, &values->ps, &values->ps_capacity, &ps_count,
                        policy, error, error_size)) return 0;
     values->gt_stride = gt_count / values->samples;
-    values->ps_present = ps_count > 0;
+    values->ps_stride = ps_count / values->samples;
     return 1;
 }

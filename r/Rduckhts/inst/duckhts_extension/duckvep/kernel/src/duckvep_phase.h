@@ -2,7 +2,9 @@
  * Observe every decoded allele of one call into a zero-initialized summary,
  * then resolve those same slots against the completed summary. Allele -1 is
  * missing, 0 is REF, positive values are source ALT ordinals. phase_before is
- * the decoded per-allele flag, including HTSlib's leading-slot normalization.
+ * the decoded per-allele flag (VCF 4.4 section 1.6.2), including HTSlib's
+ * leading-slot normalization. It qualifies this allele, not the preceding
+ * allele: 0|1/2 and /0|1/2 leave slots 1 and 3 unphased; |0|1/2 does not.
  * The caller retains sample, chromosome, raw GT and nullable PS provenance.
  */
 #ifndef DUCKVEP_PHASE_H

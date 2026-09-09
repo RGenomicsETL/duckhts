@@ -4,6 +4,82 @@ library(DBI)
 local({
   con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE))
+  tx <- paste("SELECT i::UINTEGER transcript_index,i::UINTEGER seq_region,100::UBIGINT transcript_start,",
+    "120::UBIGINT transcript_end,CASE WHEN i<3 THEN 1 ELSE -1 END::TINYINT strand,",
+    "0::UINTEGER gene_index,3::UBIGINT transcript_flags,100::UBIGINT cds_start,120::UBIGINT cds_end,",
+    "(repeat('N',i%3)||'ATGGGTCCTGCTGAACAATAA')::BLOB cds_sequence,1::UTINYINT codon_table,",
+    "''::BLOB pre_cds_sequence,''::BLOB post_cds_sequence FROM range(6) t(i)")
+  ex <- paste("SELECT i::UINTEGER transcript_index,100::UBIGINT exon_start,120::UBIGINT exon_end,",
+    "1::UBIGINT exon_cdna_start,21::UBIGINT exon_cdna_end,(i%3)::TINYINT phase,",
+    "0::TINYINT end_phase FROM range(6) t(i)")
+  expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('start_padding',",
+    "'SELECT i::UINTEGER seq_region FROM range(6) t(i)',", dbQuoteString(con, tx), ",",
+    dbQuoteString(con, ex), ")"))$loaded)
+  calls <- paste("SELECT 2*i+j+1 AS event_index,i AS seq_region,",
+    "CASE WHEN i<3 THEN CASE WHEN j=0 THEN 102 ELSE 109 END",
+    "ELSE CASE WHEN j=0 THEN 118 ELSE 111 END END AS position,",
+    "CASE WHEN i<3 THEN 'G' ELSE 'C' END AS reference,",
+    "CASE WHEN i<3 THEN CASE WHEN j=0 THEN 'AAAA' ELSE 'T' END",
+    "ELSE CASE WHEN j=0 THEN 'TTTT' ELSE 'A' END END AS alternate,",
+    "1 alt_index,i transcript_index,0 sample_index,[1,1] alleles,[true,true] phase_before,",
+    "NULL::BIGINT phase_set FROM range(6) t(i) CROSS JOIN range(2) e(j)")
+  for (threads in c(1L, 4L)) {
+    dbExecute(con, paste("SET threads =", threads))
+    result <- rduckhts_haplotypes(con, calls, "start_padding", hgvs = TRUE)
+    result <- result[order(result$transcript_index), ]
+    expect_equal(result$transcript_index, 0:5)
+    expect_equal(result$hgvsp, rep(c("p.[(Met1?;Ala4Ser)]", "p.[(Gly2?;Cys4Phe)]", "p.(Trp2?)"), 2))
+    expect_true(all(result$hgvsp_status == "ok" & result$carrier_count == 2))
+    expect_equal(result$cds, paste0(strrep("N", (0:5) %% 3L), "ATAAAAGGTCCTTCTGAACAATAA"))
+  }
+})
+
+local({
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  tx <- paste("SELECT 0::UINTEGER transcript_index,0::UINTEGER seq_region,",
+    "100::UBIGINT transcript_start,111::UBIGINT transcript_end,1::TINYINT strand,",
+    "0::UINTEGER gene_index,3::UBIGINT transcript_flags,100::UBIGINT cds_start,",
+    "111::UBIGINT cds_end,'ATGGCTGCTTAA'::BLOB cds_sequence,1::UTINYINT codon_table,",
+    "''::BLOB pre_cds_sequence,''::BLOB post_cds_sequence")
+  ex <- paste("SELECT 0::UINTEGER transcript_index,100::UBIGINT exon_start,111::UBIGINT exon_end,",
+    "1::UBIGINT exon_cdna_start,12::UBIGINT exon_cdna_end,0::TINYINT phase,0::TINYINT end_phase")
+  expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('partial_phase',",
+    "'SELECT 0::UINTEGER seq_region',", dbQuoteString(con, tx), ",", dbQuoteString(con, ex), ")"))$loaded)
+  path <- system.file("extdata", "geno_phase_partial.vcf", package = "Rduckhts")
+  stopifnot(nzchar(path))
+  calls <- paste0("SELECT i AS event_index,0 AS seq_region,POS AS position,REF AS reference,",
+    "ALT[i] AS alternate,i AS alt_index,0 AS transcript_index,record_index AS sample_index,",
+    "calls[1].alleles alleles,calls[1].phase_before phase_before,calls[1].phase_set phase_set ",
+    "FROM read_geno(", dbQuoteString(con, path), ") CROSS JOIN range(1,3) alts(i) ",
+    "WHERE record_index IN (3,5,6,8)")
+  expected <- data.frame(sample = c(3L,3L,5L,5L,6L,6L,6L,8L,8L,8L),
+    lane = c(1L,3L,1L,3L,1L,2L,3L,1L,2L,3L),
+    cds = c(NA,NA,"ATGGATGCTTAA","ATGGGTGCTTAA",NA,"ATGGATGCTTAA",NA,
+      NA,"ATGGATGCTTAA","ATGGGTGCTTAA"),
+    evidence = c(4L,4L,1L,1L,6L,1L,6L,2L,1L,1L),
+    contributors = c(2L,2L,1L,1L,2L,1L,2L,2L,1L,1L))
+  for (threads in c(1L, 4L)) {
+    dbExecute(con, paste("SET threads =", threads))
+    result <- rduckhts_haplotypes(con, calls, "partial_phase")
+    actual <- do.call(rbind, lapply(seq_len(nrow(result)), function(i) {
+      carriers <- result$carriers[[i]]
+      expect_true(all(carriers$phase_set == 10 & carriers$ploidy == 3))
+      if (is.na(result$cds[i])) expect_equal(result$sequence_status[i], "incomplete_input")
+      data.frame(sample = carriers$sample_index, lane = carriers$haplotype_lane,
+        cds = result$cds[i], evidence = result$evidence_flags[i],
+        contributors = nrow(result$contributors[[i]]))
+    }))
+    actual <- actual[order(actual$sample, actual$lane), ]
+    rownames(actual) <- NULL
+    expect_equal(actual, expected)
+    expect_equal(sum(result$carrier_count), 10)
+  }
+})
+
+local({
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
   tx <- paste("SELECT i::UINTEGER transcript_index,0::UINTEGER seq_region,",
     "(100+20*i)::UBIGINT transcript_start,(111+20*i)::UBIGINT transcript_end,",
     "1::TINYINT strand,0::UINTEGER gene_index,3::UBIGINT transcript_flags,",

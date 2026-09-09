@@ -303,33 +303,6 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_project(
     return DUCKVEP_HAPLOTYPE_STREAM_OK;
 }
 
-duckvep_haplotype_stream_status_t duckvep_haplotype_stream_push(
-    duckvep_haplotype_stream_t *s, const duckvep_carrier_key_t *key, uint8_t evidence) {
-    if (!s || !s->initialized) return DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG;
-    if (s->error) return s->error;
-    if (!s->have_input || s->closing || s->carriers.pending || s->carriers.finished || !key ||
-        !key->lane || key->lane > key->ploidy || key->phase_set_present > 1u ||
-        !evidence || (evidence & ~(DUCKVEP_CARRIER_CALLED | DUCKVEP_CARRIER_MISSING |
-                                  DUCKVEP_CARRIER_UNPHASED | DUCKVEP_CARRIER_CONDITIONAL |
-                                  DUCKVEP_CARRIER_REFERENCE_REPLAY)))
-        return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
-    if (!s->have_current) return DUCKVEP_HAPLOTYPE_STREAM_OK;
-    const duckvep_haplotype_stored_event_t *event = &s->buffers.events[s->current_event];
-    if (((evidence & (DUCKVEP_CARRIER_CONDITIONAL | DUCKVEP_CARRIER_REFERENCE_REPLAY)) &&
-         !event->source.source_record) ||
-        ((evidence & DUCKVEP_CARRIER_REFERENCE_REPLAY) && event->source.allele_index) ||
-        (event->source.source_record && event->source.allele_index == UINT32_MAX &&
-         (!(evidence & DUCKVEP_CARRIER_CONDITIONAL) || (evidence & DUCKVEP_CARRIER_CALLED))))
-        return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
-    for (uint32_t i = 0u; i < event->projection_count; i++) {
-        size_t at = ring_add(event->projection_begin, i, s->buffers.projection_capacity);
-        duckvep_carriers_status_t status = duckvep_carriers_push(&s->carriers,
-            s->buffers.projections[at].transcript_index, key, evidence);
-        if (status != DUCKVEP_CARRIERS_OK) return carrier_fail(s, status);
-    }
-    return DUCKVEP_HAPLOTYPE_STREAM_OK;
-}
-
 duckvep_haplotype_stream_status_t duckvep_haplotype_stream_finish(duckvep_haplotype_stream_t *s) {
     if (!s || !s->initialized) return DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG;
     if (s->error) return s->error;

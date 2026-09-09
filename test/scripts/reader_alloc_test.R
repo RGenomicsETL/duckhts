@@ -94,8 +94,31 @@ test_installed_reader_allocations <- function(probe_path) {
         "format_fields := ['AD', 'DP', 'GQ', 'VI', 'VF', 'ST'])"), path))
     }
   }
+  error_patterns <- rep("failed to grow output list", length(queries))
+  tx <- paste("SELECT 0::UINTEGER transcript_index,0::UINTEGER seq_region,",
+    "100::UBIGINT transcript_start,111::UBIGINT transcript_end,1::TINYINT strand,",
+    "0::UINTEGER gene_index,3::UBIGINT transcript_flags,100::UBIGINT cds_start,",
+    "111::UBIGINT cds_end,'ATGGCTGCTTAA'::BLOB cds_sequence,1::UTINYINT codon_table,",
+    "''::BLOB pre_cds_sequence,''::BLOB post_cds_sequence")
+  ex <- paste("SELECT 0::UINTEGER transcript_index,100::UBIGINT exon_start,111::UBIGINT exon_end,",
+    "1::UBIGINT exon_cdna_start,12::UBIGINT exon_cdna_end,0::TINYINT phase,0::TINYINT end_phase")
+  stopifnot(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('list_probe',",
+    "'SELECT 0::UINTEGER seq_region',", dbQuoteString(con, tx), ",", dbQuoteString(con, ex), ")"))$loaded)
+  for (raw in c(FALSE, TRUE)) {
+    calls <- paste("SELECT 1 AS event_index,0 AS seq_region,104 AS position,'C' AS reference,",
+      "0 transcript_index,s sample_index,", if (raw) paste(
+        "['A'] alternates,CASE WHEN s=0 THEN '1|0' WHEN s=1 THEN '0|1' ELSE '.|1' END gt") else paste(
+        "'A' alternate,1 alt_index,CASE WHEN s=0 THEN [1,0] WHEN s=1 THEN [0,1] ELSE [NULL,1] END alleles,",
+        "[true,true] phase_before,NULL::BIGINT phase_set"), "FROM range(3) samples(s)")
+    queries <- c(queries, paste0("SELECT * FROM duckvep_haplotypes(", dbQuoteString(con, calls),
+      ",'list_probe'", if (raw) ",input_mode:='source_records',phase_policy:='vep116_compat'", ") ORDER BY ALL"))
+    error_patterns <- c(error_patterns,
+      paste0("duckvep_haplotypes: (cannot reset (output|block event) list|output list allocation failed)",
+        if (!raw) "|duckvep_phase_call: could not reserve output allele slots"))
+  }
   failures <- 0L
-  for (sql in queries) {
+  for (i in seq_along(queries)) {
+    sql <- queries[[i]]
     for (kind in 1:2) {
       list_arm(kind, 0L)
       expected <- dbGetQuery(con, sql)
@@ -105,7 +128,9 @@ test_installed_reader_allocations <- function(probe_path) {
       for (nth in seq_len(count)) {
         list_arm(kind, nth)
         error <- tryCatch({dbGetQuery(con, sql); NULL}, error = identity)
-        stopifnot(inherits(error, "error"), grepl("failed to grow output list", conditionMessage(error), fixed = TRUE))
+        stopifnot(inherits(error, "error"))
+        if (!grepl(error_patterns[[i]], conditionMessage(error)))
+          stop("list query ", i, ", kind ", kind, ", failure ", nth, ": ", conditionMessage(error))
         state <- list_stats()
         stopifnot(state$failed == 1L, state$unsafe_access == 0L)
         list_disarm()
@@ -115,7 +140,7 @@ test_installed_reader_allocations <- function(probe_path) {
       }
     }
   }
-  cat("Installed R BAM/BCF/genotype list failures:", failures,
+  cat("Installed R BAM/BCF/genotype/haplotype list failures:", failures,
       "errors, no post-failure data access, exact DBI recovery: OK\n")
 }
 

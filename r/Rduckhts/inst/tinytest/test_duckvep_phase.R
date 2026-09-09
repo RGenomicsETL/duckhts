@@ -23,6 +23,31 @@ test_phase_preparation <- function() {
     status = c(rep("called", 6), "missing", "called", "missing", rep("called", 3),
                "missing", rep("called", 3))
   ))
+  partial_path <- system.file("extdata", "geno_phase_partial.vcf", package = "Rduckhts")
+  stopifnot(nzchar(partial_path))
+  partial <- dbGetQuery(con, paste0(
+    "SELECT record_index::INTEGER r,c,duckvep_phase_call(c.alleles,c.phase_before,",
+    "phase_set:=c.phase_set) assignments FROM (SELECT record_index,calls[1] c FROM read_geno(",
+    dbQuoteString(con, partial_path), ")) ORDER BY r"))
+  expect_equal(partial$r, 0:11)
+  expected_gt <- list(0:2,0:2,0:2,c(1L,0L,2L),c(1L,0L,2L),c(1L,0L,2L),
+    c(NA_integer_,1L,2L),c(NA_integer_,1L,2L),c(NA_integer_,1L,2L),0:2,0:2,0:2)
+  expected_flags <- list(c(FALSE,TRUE,FALSE),c(FALSE,TRUE,FALSE),c(TRUE,TRUE,FALSE),
+    c(FALSE,TRUE,FALSE),c(FALSE,TRUE,FALSE),c(TRUE,TRUE,FALSE),c(FALSE,TRUE,FALSE),
+    c(FALSE,TRUE,FALSE),c(TRUE,TRUE,FALSE),c(TRUE,FALSE,FALSE),c(FALSE,FALSE,TRUE),c(FALSE,FALSE,TRUE))
+  expected_lanes <- list(c(NA,2L,NA),c(NA,2L,NA),1:3,c(NA,2L,NA),c(NA,2L,NA),1:3,
+    c(NA,2L,NA),c(NA,2L,NA),1:3,c(1L,NA,NA),c(NA,NA,3L),c(NA,NA,3L))
+  for (i in seq_len(nrow(partial))) {
+    expect_equal(partial$c$alleles[[i]], expected_gt[[i]])
+    expect_equal(partial$c$phase_before[[i]], expected_flags[[i]])
+    slots <- partial$assignments[[i]]
+    expect_equal(slots$input_slot, 1:3)
+    expect_equal(slots$haplotype_lane, expected_lanes[[i]])
+    expect_equal(slots$phase_set, ifelse(is.na(expected_lanes[[i]]), NA_real_, 10))
+    expect_equal(slots$phase_scope, ifelse(is.na(expected_lanes[[i]]), "unresolved", "phase_set"))
+    expect_equal(slots$status, ifelse(is.na(expected_gt[[i]]), "missing",
+      ifelse(is.na(expected_lanes[[i]]), "unphased", "called")))
+  }
   prepared <- function(gt, phase, policy = "strict", ps = "NULL") {
     dbGetQuery(con, paste0("SELECT a.input_slot::INTEGER slot, a.allele_index allele, ",
       "a.haplotype_lane::INTEGER lane, a.phase_set::VARCHAR ps, a.phase_scope, a.status ",

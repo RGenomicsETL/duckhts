@@ -379,6 +379,22 @@ manifest[[length(manifest) + 1]] <- render_fixture(
 )
 
 manifest[[length(manifest) + 1]] <- render_fixture(
+  filename = "geno_format_case.vcf",
+  section = "mapping",
+  purpose = "Case-sensitive FORMAT tag identity and case-insensitive DuckDB member collisions",
+  contigs = "chrG",
+  format_defs = list(
+    tag_def("GT", "1", "String", "Genotype"), tag_def("PS", "1", "Integer", "Phase set"),
+    tag_def("gt", "1", "Integer", "Distinct lowercase tag"),
+    tag_def("ps", "1", "Integer", "Distinct lowercase tag"),
+    tag_def("AD", "R", "Integer", "Allele depths"),
+    tag_def("ad", "1", "Integer", "Distinct lowercase tag")
+  ),
+  samples = c("S1"),
+  records = "chrG\t10\tcase\tA\tC\t.\tPASS\t.\tGT:PS:gt:ps:AD:ad\t0|1:10:21:22:3,4:23"
+)
+
+manifest[[length(manifest) + 1]] <- render_fixture(
   filename = "bcf_filter_list_regression.vcf",
   section = "regression",
   purpose = "read_bcf FILTER list-materialization regression for multi-entry and PASS values",

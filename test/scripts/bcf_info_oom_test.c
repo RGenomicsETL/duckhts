@@ -70,7 +70,7 @@ static void check_info(int type, int growing) {
             int old_length = info->len, old_capacity = capacity;
             void *old_values = values;
             info->len = INT_MAX; /* Terminator cannot fit the API's signed capacity. */
-            assert(bcf_get_info_values(header, record, "V", &values, &capacity, types[type]) == -4);
+            assert(bcf_get_info_values(header, record, "V", &values, &capacity, types[type]) == -5);
             assert(values == old_values && capacity == old_capacity);
             info->len = old_length;
         }
@@ -156,7 +156,7 @@ static void check_format(int type, int growing) {
             format->n = type == 4 ? INT_MAX : INT_MAX / 2 + 1;
             int result_overflow = type == 4 ? bcf_get_format_string(header, record, tag, &strings, &capacity) :
                 bcf_get_format_values(header, record, tag, &values, &capacity, types[type]);
-            assert(result_overflow == -4 && capacity == previous_capacity &&
+            assert(result_overflow == -5 && capacity == previous_capacity &&
                    values == previous_values && strings == previous_strings);
             format->n = previous_n;
         }

@@ -3,6 +3,7 @@
  * The C workspace is allocated at init and retains only the active window. */
 #include "duckdb_extension.h"
 DUCKDB_EXTENSION_EXTERN
+#include "duckdb_list.h"
 
 #include "duckvep_model.h"
 #include "kernel/src/duckvep_haplotype_stream.h"
@@ -636,11 +637,10 @@ static int append_sequence_differences(duckdb_vector vector, idx_t row, haplotyp
             return 0;
         }
     }
-    idx_t base = duckdb_list_vector_get_size(vector);
-    if (result.count > UINT64_MAX - base ||
-        duckdb_list_vector_reserve(vector, base + result.count) != DuckDBSuccess ||
-        duckdb_list_vector_set_size(vector, base + result.count) != DuckDBSuccess) return 0;
-    ((duckdb_list_entry *)duckdb_vector_get_data(vector))[row] = (duckdb_list_entry){base, result.count};
+    duckdb_list_entry entry;
+    if (!duckhts_list_extend(vector, result.count, &entry)) return 0;
+    idx_t base = entry.offset;
+    ((duckdb_list_entry *)duckdb_vector_get_data(vector))[row] = entry;
     if (!known) null_cell(vector, row);
     duckdb_vector records = duckdb_list_vector_get_child(vector), fields[5];
     duckdb_vector_ensure_validity_writable(records);
@@ -899,11 +899,11 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
     const unsigned field_counts[] = {4u, bind->source_records ? 8u : 7u, HAPLOTYPE_BLOCK_FIELDS};
     for (unsigned list = 0u; list < 3u; list++) {
         duckdb_vector vector = v[HAPLOTYPE_LIST_COLUMN + list];
-        idx_t base = duckdb_list_vector_get_size(vector);
         size_t count = counts[list];
-        if (count > UINT64_MAX - base || duckdb_list_vector_reserve(vector, base + count) != DuckDBSuccess ||
-            duckdb_list_vector_set_size(vector, base + count) != DuckDBSuccess) return 0;
-        ((duckdb_list_entry *)duckdb_vector_get_data(vector))[row] = (duckdb_list_entry){base, count};
+        duckdb_list_entry entry;
+        if (!duckhts_list_extend(vector, count, &entry)) return 0;
+        idx_t base = entry.offset;
+        ((duckdb_list_entry *)duckdb_vector_get_data(vector))[row] = entry;
         if (list >= 2u && !leaf->cds) null_cell(vector, row);
         duckdb_vector records = duckdb_list_vector_get_child(vector), fields[HAPLOTYPE_BLOCK_FIELDS];
         duckdb_vector_ensure_validity_writable(records);
@@ -914,11 +914,9 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
         idx_t event_base = 0u;
         if (list == 2u && leaf->cds) {
             duckdb_vector event_vector = fields[HAPLOTYPE_BLOCK_EVENT_FIELD];
-            event_base = duckdb_list_vector_get_size(event_vector);
-            if (leaf->edit_count > UINT64_MAX - event_base ||
-                duckdb_list_vector_reserve(event_vector, event_base + leaf->edit_count) != DuckDBSuccess ||
-                duckdb_list_vector_set_size(event_vector, event_base + leaf->edit_count) != DuckDBSuccess)
-                return 0;
+            duckdb_list_entry events;
+            if (!duckhts_list_extend(event_vector, leaf->edit_count, &events)) return 0;
+            event_base = events.offset;
             duckdb_vector ids = duckdb_list_vector_get_child(event_vector);
             duckdb_vector_ensure_validity_writable(ids);
             uint64_t *data = duckdb_vector_get_data(ids);

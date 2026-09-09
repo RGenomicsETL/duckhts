@@ -60,7 +60,10 @@ for every selected sample on that record. Physical read errors and OOM always fa
 their positions; no allele normalization or depth inference is performed.
 NULL or an empty vector keeps the default GT/PS schema. Unknown, empty,
 missing and case-insensitively duplicate names error; GT and PS are already
-exposed by the typed call fields and cannot be selected again.}
+exposed by the typed call fields and cannot be selected again.
+Tag lookup uses exact header spelling: declared lowercase `gt` and `ps`
+are distinct extra fields. Selected names must not collide under DuckDB's
+case-insensitive struct-member lookup.}
 }
 \value{
 A data frame when `table_name` is `NULL`, otherwise invisible `TRUE`.

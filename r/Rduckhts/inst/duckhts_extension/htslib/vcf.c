@@ -6125,7 +6125,7 @@ int bcf_get_info_values(const bcf_hdr_t *hdr, bcf1_t *line, const char *tag, voi
     if ( !info->vptr ) return -3;           // the tag was marked for removal
     if ( type==BCF_HT_STR )
     {
-        if ( info->len==INT_MAX ) return -4;
+        if ( info->len==INT_MAX ) return -5;
         if ( *ndst < info->len+1 )
         {
             void *new_dst = realloc(*dst, (size_t)info->len + 1);
@@ -6214,7 +6214,7 @@ int bcf_get_format_string(const bcf_hdr_t *hdr, bcf1_t *line, const char *tag, c
     int nsmpl = bcf_hdr_nsamples(hdr);
     if ( !nsmpl ) return 0;
     if ( fmt->n < 0 || fmt->n == INT_MAX || nsmpl < 0 ||
-         nsmpl > INT_MAX / (fmt->n + 1) ) return -4;
+         nsmpl > INT_MAX / (fmt->n + 1) ) return -5;
     int n = (fmt->n+1)*nsmpl;
     char **new_dst = *dst;
     if ( !new_dst )
@@ -6267,7 +6267,7 @@ int bcf_get_format_values(const bcf_hdr_t *hdr, bcf1_t *line, const char *tag, v
 
     int nsmpl = bcf_hdr_nsamples(hdr);
     if ( !nsmpl ) return 0;
-    if ( fmt->n < 0 || nsmpl < 0 || fmt->n > INT_MAX / nsmpl ) return -4;
+    if ( fmt->n < 0 || nsmpl < 0 || fmt->n > INT_MAX / nsmpl ) return -5;
     int n = fmt->n*nsmpl;
     if ( type==BCF_HT_STR )
     {

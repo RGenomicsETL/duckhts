@@ -112,6 +112,7 @@ static int geno_bind_format(duckdb_bind_info info, geno_bind_t *bind, bcf_hdr_t 
             goto cleanup;
         }
         if (!name) goto cleanup;
+        /* HTSlib tag lookup is case-sensitive; DuckDB struct member names are not. */
         for (int j = 0; j < i; j++) if (strcasecmp(name, names[j]) == 0) {
             snprintf(error, error_size, "read_geno: duplicate FORMAT field %s", name);
             goto cleanup;
@@ -368,9 +369,11 @@ static int geno_write_calls(duckdb_vector vector, idx_t row, const geno_bind_t *
             geno_set_null(allele_list, output_call);
             geno_set_null(phase_list, output_call);
         }
-        if (!values->ps_present || values->ps[i] == bcf_int32_missing || values->ps[i] == bcf_int32_vector_end) {
+        int32_t phase_set = values->ps_stride
+            ? values->ps[(size_t)i * values->ps_stride] : bcf_int32_missing;
+        if (phase_set == bcf_int32_missing || phase_set == bcf_int32_vector_end) {
             geno_set_null(ps, output_call);
-        } else ps_data[output_call] = values->ps[i];
+        } else ps_data[output_call] = phase_set;
         for (int slot = 0; slot < ploidy; slot++, output_slot++) {
             if (bcf_gt_is_missing(gt[slot])) geno_set_null(allele_child, alleles.offset + output_slot);
             else allele_data[alleles.offset + output_slot] = bcf_gt_allele(gt[slot]);

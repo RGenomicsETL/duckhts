@@ -87,24 +87,29 @@ test_record_major_genotypes <- function() {
     "max(record_index)::INTEGER AS last_record, sum(len(calls))::INTEGER AS calls FROM many_records")),
     data.frame(n = 5000, first_record = 0L, last_record = 4999L, calls = 5000L))
 
-  for (extension in c("vcf", "bcf")) {
+  for (extension in c("vcf", "bcf", "vcf.gz")) {
     for (policy in c("null", "warn", "error")) {
       rduckhts_geno(con, "selected_ps", fixture(paste0("geno_ps_width.", extension)),
                     samples = "S2", decode_error_policy = policy, overwrite = TRUE)
-      expect_equal(dbGetQuery(con, paste(
-        "SELECT calls[1].sample_index AS sample, calls[1].phase_set::INTEGER AS ps FROM selected_ps")),
+      expect_equal(dbGetQuery(con,
+        "SELECT calls[1].sample_index AS sample, calls[1].phase_set::INTEGER AS ps FROM selected_ps"),
         data.frame(sample = 1, ps = 20L))
     }
     for (kind in c("ps_type", "ps_number", "ps_width", "gt_allele")) {
       path <- fixture(paste0("geno_", kind, ".", extension))
       expect_error(rduckhts_geno(con, path = path, decode_error_policy = "error"), pattern = "FORMAT/")
-      rduckhts_geno(con, "bad_field", path, decode_error_policy = "null", overwrite = TRUE)
-      if (kind == "gt_allele") {
-        expect_equal(dbGetQuery(con, "SELECT calls[1].alleles IS NULL AS missing, calls[1].phase_set::INTEGER AS ps FROM bad_field"),
-                     data.frame(missing = TRUE, ps = 10L))
-      } else {
-        expect_equal(dbGetQuery(con, "SELECT calls[1].alleles::VARCHAR AS gt, calls[1].phase_set IS NULL AS missing FROM bad_field"),
-                     data.frame(gt = "[0, 1]", missing = TRUE))
+      for (policy in c("null", "warn")) {
+        rduckhts_geno(con, "bad_field", path, decode_error_policy = policy, overwrite = TRUE)
+        if (kind == "gt_allele") {
+          expect_equal(dbGetQuery(con, "SELECT calls[1].alleles IS NULL AS missing, calls[1].phase_set::INTEGER AS ps FROM bad_field"),
+                       data.frame(missing = TRUE, ps = 10L))
+        } else {
+          expect_equal(dbGetQuery(con, "SELECT calls[1].alleles::VARCHAR AS gt, calls[1].phase_set IS NULL AS missing FROM bad_field"),
+                       data.frame(gt = "[0, 1]", missing = TRUE))
+        }
+        if (kind == "ps_width") expect_equal(dbGetQuery(con, paste(
+          "SELECT calls[2].alleles::VARCHAR AS gt, calls[2].phase_set IS NULL AS missing,",
+          "len(calls) AS calls FROM bad_field")), data.frame(gt = "[1, 1]", missing = TRUE, calls = 2))
       }
     }
   }
@@ -169,6 +174,15 @@ test_selected_genotype_format <- function() {
     expect_equal(dbGetQuery(con, sql), data.frame(extra = 0, missing = 0))
   }
   for (extension in c("vcf", "bcf", "vcf.gz")) {
+    case_path <- fixture(paste0("geno_format_case.", extension))
+    rduckhts_geno(con, "case_tags", case_path, format_fields = c("gt", "ps", "ad"),
+                  decode_error_policy = "error", overwrite = TRUE)
+    expect_equal(dbGetQuery(con, paste(
+      "SELECT calls[1].alleles::VARCHAR AS gt, calls[1].phase_set::INTEGER AS ps,",
+      "calls[1].format.gt AS lower_gt, calls[1].format.ps AS lower_ps,",
+      "calls[1].format.ad AS lower_ad FROM case_tags")),
+      data.frame(gt = "[0, 1]", ps = 10L, lower_gt = 21L, lower_ps = 22L, lower_ad = 23L))
+    expect_error(rduckhts_geno(con, path = case_path, format_fields = c("AD", "ad")), pattern = "duplicate")
     path <- fixture(paste0("geno_format.", extension))
     quoted <- dbQuoteString(con, path)
     dbWriteTable(con, "samples", rduckhts_bcf_samples(con, path), overwrite = TRUE)

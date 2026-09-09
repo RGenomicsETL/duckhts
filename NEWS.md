@@ -2,6 +2,27 @@
 
 # duckhts 1.5.1.9000
 
+- remove the unused prepared-carrier stream entry point; native replay tests
+  construct complete decoded calls through the production genotype path
+
+- test VCF 4.4 per-allele phase indicators through genotype preparation and
+  haplotype replay, including implicit and explicit leading markers and missing slots
+
+- compare the unpadded DNA start codon when resolving compound-HGVS start loss;
+  synthetic CDS phase padding cannot hide a changed start, and physical block
+  joins reject overlap on either sequence axis
+
+- keep genotype PS views strided, preserving missing/vector-end values without
+  buffer compaction; SQL and installed-R tests cover scalar rejection and padding
+  under null/warn/error for VCF, BCF and compressed VCF
+
+- distinguish HTSlib decoded-capacity overflow from allocation failure, validate
+  projected FORMAT indices before access, and share checked list extension with
+  phased-haplotype output; FORMAT names retain exact header identity
+
+- expose named benchmark rendering from an explicit Rmd without overwriting
+  evidence snapshots; document the drivers for revision-specific reports
+
 - record selected-FORMAT measurements after the buffer-ownership fix: all 18 GIAB
   runs preserve their denominators and pass complete output comparisons; medians
   are 1–2% higher than the nearest identical workload

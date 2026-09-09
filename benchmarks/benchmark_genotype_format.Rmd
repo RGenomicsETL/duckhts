@@ -15,6 +15,21 @@ Stage the input explicitly with
 Rendering is network-free and resolves the input through the artifact registry.
 The output is a single-sample workload, not a large-cohort or remote-I/O result.
 
+Render a named snapshot from the repository root:
+
+```sh
+BENCHMARK_RMD=benchmark_genotype_format.Rmd \
+BENCHMARK_REPORT=benchmark_genotype_format_review.md taskset -c 2 make bench-snapshot
+```
+
+The target uses this Rmd and refuses to overwrite an existing report.
+`benchmark_genotype_format_ps_info.md` and `benchmark_genotype_format_buffers.md`
+are snapshots of this same workload rendered with those `output_file` names;
+each report records its measured source revision and extension hash. Reproducing
+a historical measurement requires its named source and binary, not the current
+checkout relabelled with an older filename. Input identity, denominators, all six
+projection layouts and corruption controls stay the same for comparisons.
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
 knitr::opts_knit$set(root.dir=normalizePath(".."))

@@ -1,5 +1,34 @@
 require duckhts
 
+# VCF 4.4 indicators qualify the following allele. An omitted leading marker
+# is '/' when another marker is '/'; a later '|' cannot phase the prior slot.
+query IIII
+WITH expected(r,gt,phases,lanes,statuses) AS (VALUES
+ (0,[0,1,2],[false,true,false],[NULL,2,NULL],['unphased','called','unphased']),
+ (1,[0,1,2],[false,true,false],[NULL,2,NULL],['unphased','called','unphased']),
+ (2,[0,1,2],[true,true,false],[1,2,3],['called','called','called']),
+ (3,[1,0,2],[false,true,false],[NULL,2,NULL],['unphased','called','unphased']),
+ (4,[1,0,2],[false,true,false],[NULL,2,NULL],['unphased','called','unphased']),
+ (5,[1,0,2],[true,true,false],[1,2,3],['called','called','called']),
+ (6,[NULL,1,2],[false,true,false],[NULL,2,NULL],['missing','called','unphased']),
+ (7,[NULL,1,2],[false,true,false],[NULL,2,NULL],['missing','called','unphased']),
+ (8,[NULL,1,2],[true,true,false],[1,2,3],['missing','called','called']),
+ (9,[0,1,2],[true,false,false],[1,NULL,NULL],['called','unphased','unphased']),
+ (10,[0,1,2],[false,false,true],[NULL,NULL,3],['unphased','unphased','called']),
+ (11,[0,1,2],[false,false,true],[NULL,NULL,3],['unphased','unphased','called'])
+), observed AS (
+ SELECT r,c,duckvep_phase_call(c.alleles,c.phase_before,phase_set:=c.phase_set) assignments
+ FROM (SELECT record_index r,calls[1] c FROM read_geno('test/data/geno_phase_partial.vcf'))
+)
+SELECT count(*),count(*) FILTER (WHERE c.alleles IS NOT DISTINCT FROM gt AND c.phase_before=phases),
+ count(*) FILTER (WHERE list_transform(assignments,x->x.haplotype_lane) IS NOT DISTINCT FROM lanes
+ AND list_transform(assignments,x->x.status)=statuses),
+ count(*) FILTER (WHERE c.phase_set=10 AND list_transform(assignments,x->x.phase_set)
+ IS NOT DISTINCT FROM list_transform(lanes,x->CASE WHEN x IS NOT NULL THEN 10 END))
+FROM observed JOIN expected USING(r);
+----
+12	12	12	12
+
 # SQLNULL[] casts must materialize every child validity bit, not expose one
 # constant NULL slot as though the remaining slots contained valid data.
 query IITTT

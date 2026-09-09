@@ -767,7 +767,11 @@ One stream cannot mix phase policies.
 `duckvep_phase_call` prepares decoded GT/PS calls through a constant-space native reducer.
 It observes the complete genotype before assigning slots. Strict assignments respect
 decoded per-allele phase, with unphased slots resolved only when permutation cannot change
-the called allele. Homozygous calls and haploid calls apply across every phase set;
+the called allele. [VCF 4.4 genotype fields](https://samtools.github.io/hts-specs/VCFv4.4.pdf)
+define each indicator for the following allele. Thus `0|1/2` and `/0|1/2` have
+unresolved first/third slots; `|0|1/2` fixes the first two and leaves one possible
+assignment for the third. A later pipe does not phase the preceding allele.
+Homozygous calls and haploid calls apply across every phase set;
 they must not be put into an isolated NULL-PS bucket. Missing alleles and unresolved
 heterozygous slots remain explicit and must affect whether a completed sequence is known.
 The named VEP-116 profile ranks called alleles after omitting missing entries, matching

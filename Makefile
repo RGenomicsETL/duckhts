@@ -420,6 +420,16 @@ bench-simd-bam-gc:
 bench-fastq-reader:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_fastq_reader.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
+.PHONY: bench-snapshot
+export BENCHMARK_RMD BENCHMARK_REPORT
+bench-snapshot:
+	Rscript -e 'source <- Sys.getenv("BENCHMARK_RMD"); report <- Sys.getenv("BENCHMARK_REPORT")' \
+		-e 'stopifnot(nzchar(source), basename(source) == source, endsWith(source, ".Rmd"))' \
+		-e 'stopifnot(nzchar(report), basename(report) == report, endsWith(report, ".md"))' \
+		-e 'stopifnot(file.exists(file.path("benchmarks", source)), !file.exists(file.path("benchmarks", report)))' \
+		-e 'Sys.setenv(DUCKHTS_REPO_ROOT = normalizePath("."))' \
+		-e 'rmarkdown::render(file.path("benchmarks", source), output_file = report, quiet = TRUE)'
+
 # =============================================================================
 # SIMD kernel contracts
 # =============================================================================
