@@ -3,10 +3,10 @@ Phased replay: native stream and public SQL
 
 <!-- duckvep_haplotypes.md is generated from duckvep_haplotypes.Rmd. -->
 
-Current source: ac423de1e6ec0f449b2f5ff2367763e009115b0a; same-input
-baseline: 16afccd0fd795df318bbd8b3e66f89b8321da022. Native measurements
-cover literal phased replay. SQL materializes all current fields,
-including local coding-block SO. HGVS generation is disabled;
+Compound-replay source: ac423de1e6ec0f449b2f5ff2367763e009115b0a;
+same-input baseline: 16afccd0fd795df318bbd8b3e66f89b8321da022. Native
+measurements cover literal phased replay. SQL materializes all current
+fields, including local coding-block SO. HGVS generation is disabled;
 whole-haplotype SO/HGVS is unfinished and its computation is not timed
 here. Native and decoded SQL consume standalone ALT events and decoded
 calls. The additional source-record SQL lane measures literal GT parsing
@@ -259,3 +259,76 @@ appear in the timing table above; its input and output denominators are:
 There is no earlier source-bound raw-lane measurement for a
 same-contract comparison. Different output denominators preclude
 treating raw versus decoded time as an implementation speedup.
+
+## Singleton HGVS materialization
+
+`--modes sql_singletons,sql_singletons_hgvs` compares the same decoded
+input with protein HGVS disabled and enabled. Each sample carries one of
+the four registered ALT events heterozygously. Four paths per transcript
+retain all non-reference carriers; reference paths remain implicit. The
+two substitutions and two frame-changing indels exercise the
+independent-event HGVS consumer, not compound HGVS. This is a different
+carrier distribution from the compound replay workload above; their
+timings are not interchangeable.
+
+The driver repeats the registered reference CDS at the model’s genomic
+coordinates, pads the inter-transcript sequence with A, and indexes that
+per-run FASTA. Both modes load exactly the same model and reference. A
+transcript has no UTR: explicitly empty pre-/post-CDS sequences
+distinguish a complete zero-length flank from an unavailable flank.
+Reference/model/input preparation is outside timing. The timed query
+includes sorting, bounded query initialization, sequence replay,
+differences, local coding facts and every output column. HGVS-enabled
+execution also opens its query-local faidx handle, retrieves genomic
+context and computes protein HGVS.
+
+Each mode has a separate correctness process, followed by three
+fresh-process measurement passes with a full warm-up. Direct sequence
+replacement and Biostrings translation check every expected CDS/protein.
+Multiset comparisons check complete carrier identities, phase sets,
+ploidies and source-event membership. The enabled path also compares
+every event/transcript HGVSp with independent annotation, allowing only
+its documented prediction-parenthesis difference. That internal
+consistency check is not an independent VEP oracle or compound-HGVS
+certificate. The four fixed event shapes do not measure broad HGVS
+conformance.
+
+Nine shared output corruptions and duplicate-output insertion must fail
+the correctness process. HGVS-enabled checks additionally reject missing
+HGVS and malformed internal parentheses. Whole-output byte counts and
+fingerprints must match every pass of the same mode. All non-HGVS fields
+must match between modes. HGVS-on/off complete outputs intentionally
+differ and are never reported as identical work. The worker receipts
+retain the derived FASTA/index, actual versus independent HGVS,
+source/binary/input hashes, jobs and process logs. Process RSS includes
+setup, warm-up and post-query aggregates, not just native workspace.
+
+Measured source: `e6c59820dd5089fc205eadb1bbfe6d899c5138fc`. One thread,
+CPU 2, Intel i5-13500, DuckDB 1.5.3.
+
+| transcripts | samples | overlap | mode                | median_s | min_s | max_s | peak_process_rss_mib |
+|------------:|--------:|--------:|:--------------------|---------:|------:|------:|---------------------:|
+|        1024 |      64 |      16 | sql_singletons      |    0.343 | 0.339 | 0.351 |             409.8438 |
+|       10240 |      64 |      16 | sql_singletons      |    4.132 | 4.098 | 4.224 |            2192.3711 |
+|        1024 |      64 |      16 | sql_singletons_hgvs |    0.345 | 0.344 | 0.347 |             410.0391 |
+|       10240 |      64 |      16 | sql_singletons_hgvs |    4.176 | 4.162 | 4.199 |            2193.1875 |
+
+| transcripts | samples | overlap | mode                | input_physical_records | input_record_sample_calls | input_candidate_sample_rows | output_leaves | output_carriers | cds_bytes | protein_bytes | json_bytes |
+|------------:|--------:|--------:|:--------------------|-----------------------:|--------------------------:|----------------------------:|--------------:|----------------:|----------:|--------------:|-----------:|
+|        1024 |      64 |      16 | sql_singletons      |                    256 |                     16384 |                      262144 |          4096 |           65536 |    737280 |        244736 |    8907368 |
+|        1024 |      64 |      16 | sql_singletons_hgvs |                    256 |                     16384 |                      262144 |          4096 |           65536 |    737280 |        244736 |    8915560 |
+|       10240 |      64 |      16 | sql_singletons      |                   2560 |                    163840 |                     2621440 |         40960 |          655360 |   7372800 |       2447360 |   89236552 |
+|       10240 |      64 |      16 | sql_singletons_hgvs |                   2560 |                    163840 |                     2621440 |         40960 |          655360 |   7372800 |       2447360 |   89318472 |
+
+This is the first source-bound measurement of this HGVS-enabled
+workload, not a before/after implementation comparison. Compound HGVS,
+raw-input omissions, multi-exon models and heterogeneous genomic
+contexts still need their own matched measurements. The compound replay
+and raw-record baselines above retain their original source revisions
+and denominators.
+
+``` bash
+Rscript benchmarks/duckvep_haplotypes.R \
+  --transcripts 16 --samples 4 --overlap 4 --passes 1 \
+  --modes sql_singletons,sql_singletons_hgvs --diagnostic
+```

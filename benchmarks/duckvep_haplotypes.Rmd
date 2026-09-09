@@ -80,7 +80,7 @@ stopifnot(!anyNA(raw_fingerprints),
   !anyDuplicated(raw_fingerprints[c(fingerprint_keys, "output_contract")]))
 ```
 
-Current source: `r revision`; same-input baseline: `r baseline_revision`.
+Compound-replay source: `r revision`; same-input baseline: `r baseline_revision`.
 Native measurements cover literal phased replay. SQL materializes all current
 fields, including local coding-block SO. HGVS generation is disabled;
 whole-haplotype SO/HGVS is unfinished and its computation is not timed here.
@@ -326,7 +326,7 @@ The worker receipts retain the derived FASTA/index, actual versus independent HG
 source/binary/input hashes, jobs and process logs. Process RSS includes setup,
 warm-up and post-query aggregates, not just native workspace.
 
-```{r singleton-hgvs}
+```{r singleton-hgvs, results='asis'}
 if (!nrow(singleton_history)) {
   cat("No source-bound singleton HGVS measurement is recorded.\n")
 } else {
@@ -361,10 +361,11 @@ if (!nrow(singleton_history)) {
   stopifnot(nrow(paired) * 2L == nrow(timings))
   cat("Measured source: `", singleton_revision,
     "`. One thread, CPU 2, Intel i5-13500, DuckDB 1.5.3.\n\n", sep = "")
-  knitr::kable(timings, row.names = FALSE)
-  knitr::kable(measured[measured$pass == 1L, c(mode_keys, "input_physical_records",
+  print(knitr::kable(timings, row.names = FALSE))
+  cat("\n\n")
+  print(knitr::kable(measured[measured$pass == 1L, c(mode_keys, "input_physical_records",
     "input_record_sample_calls", "input_candidate_sample_rows", "output_leaves",
-    "output_carriers", "cds_bytes", "protein_bytes", "json_bytes")], row.names = FALSE)
+    "output_carriers", "cds_bytes", "protein_bytes", "json_bytes")], row.names = FALSE))
 }
 ```
 
