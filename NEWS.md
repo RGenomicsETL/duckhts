@@ -4,7 +4,8 @@
 
 - add explicit short/long CDS-length strata to the exon/UTR conformance generator,
   including partial terminal codons and sequence sizes around 2,048 bases/codons;
-  independent generator checks cover genomic REF, spliced CDS, GFF and exon phases
+  independent generator checks cover genomic REF, spliced CDS, GFF and exon phases.
+  The runner records its explicit alignment-cell budget and native-query failures
 
 - retain a third four-draw rare-interaction diagnostic: 26,232 models and 157,392
   sample/file lanes, zero sequence/count/provenance/mapping/lane failures and all

@@ -953,8 +953,8 @@ six, and appends TAA. A raw TAA suffix is not necessarily an in-frame stop.
 All derived sequences and source records are retained in the input receipt.
 
 ```sh
-Rscript test/duckvep/conformance/haplotype_model_differential.R --seed 173 --rare-per-stratum 0 --length-per-stratum 1
-Rscript test/duckvep/conformance/haplotype_model_differential.R --seed 20260909 --rare-per-stratum 0 --length-per-stratum 4
+Rscript test/duckvep/conformance/haplotype_model_differential.R --seed 173 --rare-per-stratum 0 --length-per-stratum 1 --max-alignment-cells 67108864
+Rscript test/duckvep/conformance/haplotype_model_differential.R --seed 20260909 --rare-per-stratum 0 --length-per-stratum 4 --max-alignment-cells 67108864
 ```
 
 The commands cover 6,072 and 19,680 models respectively, including the 1,536
@@ -964,6 +964,13 @@ any geometry/interaction cohorts without changing their inputs or seed stream.
 source, mapping, reference-model and lane checks retain all failures under the
 same 42 corruption controls. The network-free generator test independently checks
 genomic REF, spliced CDS, ranked exon phases and emitted GFF coordinates/phases.
+The commands explicitly allow 67,108,864 exact alignment cells per sequence axis;
+the tool's default remains 16,777,216. The per-call limit is recorded alongside
+the executed SQL. A native-query error retains a receipt with the error and full
+input/oracle identities; it has no completed comparison verdict. The length cohort
+can exceed the default limit. Exhaustion retains inputs and oracle
+outputs for exact retry; no record is dropped and no approximate alignment substitutes
+for the bounded exact traceback.
 This is a standard-code synthetic length grammar, not arbitrary genetic-code,
 phase-set, compound consequence or HGVS certification.
 

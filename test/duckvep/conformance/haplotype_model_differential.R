@@ -141,6 +141,7 @@ main <- function() {
     optparse::make_option('--geometry-per-stratum', dest = 'geometry_per_stratum', type = 'integer', default = 0L),
     optparse::make_option('--interaction-per-stratum', dest = 'interaction_per_stratum', type = 'integer', default = 0L),
     optparse::make_option('--length-per-stratum', dest = 'length_per_stratum', type = 'integer', default = 0L),
+    optparse::make_option('--max-alignment-cells', dest = 'max_alignment_cells', type = 'integer', default = 16777216L),
     optparse::make_option('--extension-receipt', dest = 'extension_receipt', default = NULL),
     optparse::make_option('--vep-prefix', dest = 'vep_prefix', default = '/root/miniconda3/envs/vep')
   )))
@@ -151,6 +152,7 @@ main <- function() {
     !is.na(opt$geometry_per_stratum), opt$geometry_per_stratum >= 0L,
     !is.na(opt$interaction_per_stratum), opt$interaction_per_stratum >= 0L,
     !is.na(opt$length_per_stratum), opt$length_per_stratum >= 0L,
+    !is.na(opt$max_alignment_cells), opt$max_alignment_cells > 0L,
     opt$rare_per_stratum <= (32768L - 768L) %/% 264L,
     768 + 264 * opt$rare_per_stratum + 504 * opt$geometry_per_stratum +
       6048 * opt$interaction_per_stratum + 4536 * opt$length_per_stratum <= 32768)
@@ -318,7 +320,28 @@ main <- function() {
   run('micromamba', c('run', '--clean-env', '--env', paste0('PERL5LIB=', libs), '-p', prefix,
     'perl', 'test/duckvep/conformance/haplotype_oracle.pl', file.path(out, 'calls.vcf'),
     file.path(out, 'reference.fa'), file.path(out, 'model.gff3.gz'), file.path(out, 'phase.jsonl')), 'oracle')
+  write_receipt <- function(metrics) {
+    identities <- unique(c('test/duckvep/conformance/haplotype_model_differential.R',
+      'test/duckvep/conformance/haplotype_observations.R', 'scripts/duckvep_evidence.R', extension,
+      'test/duckvep/conformance/haplotype_model_geometry.R',
+      'test/duckvep/conformance/haplotype_oracle.pl', paths[['haplotype_benchmark_reference']],
+      'r/duckhtsbench/inst/benchmark_registry.tsv', list.files(out, full.names = TRUE)))
+    jsonlite::write_json(c(list(source_revision = revision, extension_build_binding = binding,
+      tracked_changes = duckvep_evidence_tracked_changes(root),
+      scope = 'shared_transcript_source_replay_sequence_sample_counts_and_per_lane_source_identity_sets',
+      seed = seed, rare_per_stratum = opt$rare_per_stratum, required_strata = nrow(coverage),
+      geometry_per_stratum = opt$geometry_per_stratum, geometry_strata = if (opt$geometry_per_stratum) 504L else 0L,
+      interaction_per_stratum = opt$interaction_per_stratum, interaction_strata = if (opt$interaction_per_stratum) 6048L else 0L,
+      length_per_stratum = opt$length_per_stratum, length_strata = if (opt$length_per_stratum) 4536L else 0L,
+      max_alignment_cells = opt$max_alignment_cells,
+      minimum_stratum_draws = min(coverage$observed), oracle_revisions = as.list(pins),
+      source_artifact = 'haplotype_benchmark_reference', profiles = nrow(models),
+      records = nrow(records), threads = 4L), metrics,
+      list(sha256 = as.list(vapply(identities, duckvep_evidence_sha256, '')))),
+      file.path(out, 'receipt.json'), auto_unbox = TRUE, pretty = TRUE)
+  }
   con <- DBI::dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = 'true')))
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
   q <- function(x) as.character(DBI::dbQuoteString(con, x))
   DBI::dbExecute(con, paste('LOAD', q(extension)))
   DBI::dbExecute(con, 'SET threads=4')
@@ -346,8 +369,14 @@ main <- function() {
   calls <- "SELECT event_index,r.seq_region,position,reference,string_split(alt,',') alternates,m.transcript_index,
     s.i sample_index,CASE s.i WHEN 0 THEN s0 WHEN 1 THEN s1 ELSE s2 END gt
     FROM records r JOIN models m USING(seq_region),range(3) s(i)"
-  actual <- DBI::dbGetQuery(con, paste0('SELECT * FROM duckvep_haplotypes(', q(calls),
-    ",'probe',input_mode:='source_records',phase_policy:='vep116_compat')"))
+  query <- paste0('SELECT * FROM duckvep_haplotypes(', q(calls),
+    ",'probe',input_mode:='source_records',phase_policy:='vep116_compat',max_alignment_cells:=",
+    opt$max_alignment_cells, ')')
+  writeLines(query, file.path(out, 'native_query.sql'))
+  actual <- tryCatch(DBI::dbGetQuery(con, query), error = function(error) {
+    write_receipt(list(execution_status = 'native_query_error', error = conditionMessage(error)))
+    stop(error)
+  })
   saveRDS(actual, file.path(out, 'actual.rds'))
   oracle <- lapply(readLines(file.path(out, 'oracle.stdout')), jsonlite::fromJSON, simplifyVector = FALSE)
   names(oracle) <- vapply(oracle, `[[`, '', 'transcript')
@@ -402,37 +431,21 @@ main <- function() {
   controls <- c(controls, wrong_reference_cds =
     !identical(paste0(models$cds[1L], 'A'), phase[['T1full']]$reference_cds))
   write.csv(data.frame(control = names(controls), rejected = controls), file.path(out, 'controls.csv'), row.names = FALSE)
-  DBI::dbDisconnect(con, shutdown = TRUE)
-  identities <- unique(c('test/duckvep/conformance/haplotype_model_differential.R',
-    'test/duckvep/conformance/haplotype_observations.R', 'scripts/duckvep_evidence.R', extension,
-    'test/duckvep/conformance/haplotype_model_geometry.R',
-    'test/duckvep/conformance/haplotype_oracle.pl', paths[['haplotype_benchmark_reference']],
-    'r/duckhtsbench/inst/benchmark_registry.tsv', list.files(out, full.names = TRUE)))
-  jsonlite::write_json(list(source_revision = revision, extension_build_binding = binding,
-    tracked_changes = duckvep_evidence_tracked_changes(root),
-    scope = 'shared_transcript_source_replay_sequence_sample_counts_and_per_lane_source_identity_sets',
-    seed = seed, rare_per_stratum = opt$rare_per_stratum, required_strata = nrow(coverage),
-    geometry_per_stratum = opt$geometry_per_stratum, geometry_strata = if (opt$geometry_per_stratum) 504L else 0L,
+  write_receipt(list(execution_status = 'compared',
     geometry_profiles = sum(summary$cohort == 'geometry'), geometry_failures = sum(!summary$passed & summary$cohort == 'geometry'),
-    interaction_per_stratum = opt$interaction_per_stratum, interaction_strata = if (opt$interaction_per_stratum) 6048L else 0L,
     interaction_profiles = sum(summary$cohort == 'interaction'),
     interaction_failures = sum(!summary$passed & summary$cohort == 'interaction'),
-    length_per_stratum = opt$length_per_stratum, length_strata = if (opt$length_per_stratum) 4536L else 0L,
     length_profiles = sum(summary$cohort == 'length'),
     length_failures = sum(!summary$passed & summary$cohort == 'length'),
-    minimum_stratum_draws = min(coverage$observed), controls_rejected = sum(controls),
-    oracle_revisions = as.list(pins), source_artifact = 'haplotype_benchmark_reference',
-    profiles = nrow(summary), records = nrow(records), leaves = nrow(actual),
-    carriers = sum(actual$carrier_count), threads = 4L, failures = sum(!summary$passed),
+    controls_rejected = sum(controls), leaves = nrow(actual),
+    carriers = sum(actual$carrier_count), failures = sum(!summary$passed),
     sequence_failures = sum(!summary$sequences_equal), count_failures = sum(!summary$counts_equal),
     input_provenance_failures = sum(!summary$input_provenance_equal),
     mapping_failures = sum(!summary$mappings_equal),
     model_sequence_failures = sum(!summary$model_sequence_equal),
     replay_lane_failures = sum(!summary$replay_lanes_equal),
     oracle_replay_lanes = sum(vapply(comparisons, function(x) length(x$expected_lanes), 1L)),
-    observed_replay_lanes = sum(vapply(comparisons, function(x) length(x$observed_lanes), 1L)),
-    sha256 = as.list(vapply(identities, duckvep_evidence_sha256, ''))),
-    file.path(out, 'receipt.json'), auto_unbox = TRUE, pretty = TRUE)
+    observed_replay_lanes = sum(vapply(comparisons, function(x) length(x$observed_lanes), 1L))))
   if (!is.null(opt$extension_receipt)) duckvep_evidence_assert_checkout(root, revision)
   print(aggregate(cbind(profiles = rep(1L, nrow(summary)), failures = as.integer(!summary$passed),
     sequence_failures = as.integer(!summary$sequences_equal),
