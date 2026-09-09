@@ -2,6 +2,12 @@
 
 # duckhts 1.5.1.9000
 
+- compile native property tests by family under fatal C11 pedantic diagnostics with a
+  checked source and test inventory;
+  execute fixed witnesses for empty-UTR overlap, split-start-codon insertions and
+  supported genetic-code IDs, retaining generated trials and coverage controls;
+  failed-projection diagnostics use initialized coordinates
+
 - retain matched selected-FORMAT, HPRC cohort and phased-replay measurements for the reader
   ownership and review fixes, with complete output checks and mixed timing results;
   raw-record replay comparisons verify input identity and all output denominators

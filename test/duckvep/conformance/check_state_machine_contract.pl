@@ -184,14 +184,14 @@ for my $execution_path (sort keys %path_spec) {
     $path_class_count{$path_class}++;
 }
 
-my $test_source = 'test/duckvep/property/duckvep_kernel_prop.c';
-open my $tfh, '<', $test_source or die "cannot open $test_source: $!\n";
+open my $tfh, '-|', $^X, 'test/duckvep/property/read_sources.pl'
+    or die "cannot read compiled property sources: $!\n";
 my $tests;
 {
     local $/;
     $tests = <$tfh>;
 }
-close $tfh or die "cannot close $test_source: $!\n";
+close $tfh or die "property source/registration audit failed\n";
 for my $row (@rows) {
     next if $row->{fixed_test} eq '-';
     my $name = quotemeta($row->{fixed_test});

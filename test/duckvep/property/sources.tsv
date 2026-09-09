@@ -1,0 +1,10 @@
+duckvep_kernel_prop.c
+duckvep_prop_sweep.c
+duckvep_prop_classify.c
+duckvep_prop_projection_hgvs.c
+duckvep_prop_codon.c
+duckvep_prop_replay.c
+duckvep_prop_stream.c
+duckvep_prop_annotation.c
+duckvep_prop_coding.c
+duckvep_prop_haplotype_hgvs.c

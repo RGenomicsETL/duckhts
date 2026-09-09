@@ -490,10 +490,10 @@ DUCKVEP_KERNEL_SOURCES = \
 	src/duckvep/kernel/src/duckvep_carriers.c \
 	src/duckvep/kernel/src/duckvep_phase.c \
 	src/duckvep/kernel/src/duckvep_haplotype_stream.c
-DUCKVEP_PROPERTY_DRIVER = test/duckvep/property/duckvep_kernel_prop.c
+DUCKVEP_PROPERTY_SOURCES = $(addprefix test/duckvep/property/,$(shell cat test/duckvep/property/sources.tsv))
 DUCKVEP_THEFT_PATCH = test/duckvep/vendor/patches/theft-mingw-no-fork.patch
 DUCKVEP_PROPERTY_CPPFLAGS ?=
-DUCKVEP_PROPERTY_CFLAGS = -std=c99 -g -O1 -Wall -Wextra \
+DUCKVEP_PROPERTY_CFLAGS = -std=c11 -g -O1 -Wall -Wextra -Werror -Wpedantic -pedantic-errors \
 	-Wno-unused-function -D_DEFAULT_SOURCE -DTHEFT_USE_FLOATING_POINT=0 \
 	-I test/duckvep/vendor/greatest \
 	-I src/duckvep/kernel/include \
@@ -524,6 +524,7 @@ duckvep-generated-check:
 	perl test/duckvep/conformance/generate_so_metadata.pl --check \
 		src/duckvep/kernel/src/duckvep_so_metadata.inc
 	perl test/duckvep/conformance/check_state_machine_contract.pl
+	perl test/duckvep/property/inventory_test.pl
 	perl test/duckvep/upstream/check_sources.pl
 
 duckvep-upstream-git-check:
@@ -543,7 +544,7 @@ test-duckvep-kernel: duckvep-generated-check
 	patch --silent --fuzz=0 -d "$$tmp/theft" -p1 < $(DUCKVEP_THEFT_PATCH); \
 	$(CC) $(DUCKVEP_PROPERTY_CPPFLAGS) $(DUCKVEP_PROPERTY_CFLAGS) \
 		-I "$$tmp/theft/inc" -I "$$tmp/theft/src" \
-		$(DUCKVEP_KERNEL_SOURCES) $(DUCKVEP_PROPERTY_DRIVER) \
+		$(DUCKVEP_KERNEL_SOURCES) $(DUCKVEP_PROPERTY_SOURCES) \
 		"$$tmp"/theft/src/*.c \
 		-pthread -o "$$tmp/duckvep_kernel_property"; \
 	"$$tmp/duckvep_kernel_property" $(DUCKVEP_PROPERTY_ARGS)
@@ -557,7 +558,7 @@ test-duckvep-kernel-asan: duckvep-generated-check
 	$(CC) $(DUCKVEP_PROPERTY_CPPFLAGS) $(DUCKVEP_PROPERTY_CFLAGS) -fsanitize=address \
 		-fno-omit-frame-pointer \
 		-I "$$tmp/theft/inc" -I "$$tmp/theft/src" \
-		$(DUCKVEP_KERNEL_SOURCES) $(DUCKVEP_PROPERTY_DRIVER) \
+		$(DUCKVEP_KERNEL_SOURCES) $(DUCKVEP_PROPERTY_SOURCES) \
 		"$$tmp"/theft/src/*.c \
 		-pthread -fsanitize=address -o "$$tmp/duckvep_kernel_property"; \
 	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 \
@@ -572,7 +573,7 @@ test-duckvep-kernel-ubsan: duckvep-generated-check
 	$(CC) $(DUCKVEP_PROPERTY_CPPFLAGS) $(DUCKVEP_PROPERTY_CFLAGS) -fsanitize=undefined \
 		-fno-omit-frame-pointer \
 		-I "$$tmp/theft/inc" -I "$$tmp/theft/src" \
-		$(DUCKVEP_KERNEL_SOURCES) $(DUCKVEP_PROPERTY_DRIVER) \
+		$(DUCKVEP_KERNEL_SOURCES) $(DUCKVEP_PROPERTY_SOURCES) \
 		"$$tmp"/theft/src/*.c \
 		-pthread -fsanitize=undefined -o "$$tmp/duckvep_kernel_property"; \
 	UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \

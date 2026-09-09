@@ -711,15 +711,19 @@ main <- function() {
     if (any(!grepl("^[A-Za-z_][A-Za-z0-9_]*$", evidence))) {
       die("fixed-witness evidence names must be C test identifiers")
     }
-    property_source_path <- file.path(
-      root,
-      "test",
-      "duckvep",
-      "property",
-      "duckvep_kernel_prop.c"
+    property_lines <- system2(
+      "perl",
+      shQuote(c(
+        file.path(root, "test/duckvep/property/read_sources.pl"),
+        file.path(root, "test/duckvep/property")
+      )),
+      stdout = TRUE
     )
+    if (!is.null(attr(property_lines, "status"))) {
+      die("property source/registration audit failed")
+    }
     property_source <- paste(
-      readLines(property_source_path, warn = FALSE),
+      property_lines,
       collapse = "\n"
     )
     witness_tags <- paste0(
