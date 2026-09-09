@@ -23,7 +23,8 @@ enum { LIMIT_EVENTS, LIMIT_TRANSCRIPTS, LIMIT_CARRIERS, LIMIT_PREFIXES, LIMIT_PR
     LIMIT_PHASE_SETS, LIMIT_ALIGNMENT, LIMIT_DIFFERENCES, LIMIT_HGVS_OPERATIONS,
     LIMIT_HGVS_BYTES, LIMIT_HGVS_REFERENCE, LIMIT_WORKSPACE, LIMIT_COUNT };
 enum { HAPLOTYPE_LIST_COLUMN = 9, HAPLOTYPE_STOP_COLUMN = 14,
-    HAPLOTYPE_HGVSP_COLUMN = 15, HAPLOTYPE_HGVSP_STATUS_COLUMN = 16, HAPLOTYPE_OUTPUT_COLUMNS = 17 };
+    HAPLOTYPE_HGVSP_COLUMN = 15, HAPLOTYPE_HGVSP_STATUS_COLUMN = 16,
+    HAPLOTYPE_NOMINAL_LENGTH_COLUMN = 17, HAPLOTYPE_OUTPUT_COLUMNS = 18 };
 enum { HAPLOTYPE_BLOCK_EVENT_FIELD = 9, HAPLOTYPE_BLOCK_FIELDS = 10 };
 static const char *const limit_names[] = {"max_active_events", "max_active_transcripts",
     "max_active_carriers", "max_active_prefixes", "max_active_projections", "max_allele_bytes",
@@ -195,6 +196,9 @@ static void haplotype_bind(duckdb_bind_info info) {
     duckdb_bind_add_result_column(info, "hgvsp", string_type);
     duckdb_bind_add_result_column(info, "hgvsp_status", string_type);
     duckdb_destroy_logical_type(&string_type);
+    duckdb_logical_type length_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
+    duckdb_bind_add_result_column(info, "nominal_length_diff", length_type);
+    duckdb_destroy_logical_type(&length_type);
     duckdb_bind_set_bind_data(info, b, haplotype_bind_destroy);
 }
 
@@ -854,7 +858,7 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
         const duckvep_owned_model_t *model = &bind->entry->model;
         duckvep_edit_set_t edits = {s->buffers.edits, leaf->edit_count};
         duckvep_haplotype_result_t applied = {leaf->cds_length,
-            (int64_t)leaf->cds_length - model->sequences.cds_length[tx],
+            leaf->nominal_length_diff,
             leaf->flags & ~(uint32_t)DUCKVEP_HAPLOTYPE_FLAG_STOP_TRUNCATED, leaf->edit_count};
         duckvep_codon_table_t table = model->sequences.codon_table
             ? (duckvep_codon_table_t)model->sequences.codon_table[tx] : DUCKVEP_CODON_TABLE_STANDARD;
@@ -886,6 +890,10 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
     if (leaf->protein) duckdb_vector_assign_string_element_len(v[2], row, (const char *)leaf->protein, leaf->protein_length);
     else null_cell(v[2], row);
     ((uint32_t *)duckdb_vector_get_data(v[3]))[row] = leaf->flags;
+    if (leaf->cds)
+        ((int64_t *)duckdb_vector_get_data(v[HAPLOTYPE_NOMINAL_LENGTH_COLUMN]))[row] =
+            leaf->nominal_length_diff;
+    else null_cell(v[HAPLOTYPE_NOMINAL_LENGTH_COLUMN], row);
     ((uint8_t *)duckdb_vector_get_data(v[4]))[row] = leaf->evidence_flags;
     duckdb_vector_assign_string_element(v[5], row, projection_name(leaf->projection_status));
     duckdb_vector_assign_string_element(v[6], row, leaf->projection_status == DUCKVEP_CDS_EDIT_OK

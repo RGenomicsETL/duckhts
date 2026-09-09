@@ -436,10 +436,9 @@ main <- function() {
   controls <- c(controls, wrong_reference_cds =
     !identical(paste0(models$cds[1L], 'A'), phase[['T1full']]$reference_cds))
   metadata_controls <- haplotype_metadata_controls(phase[['T1full']], oracle[['T1full']])
-  wrong_flags <- actual[rows_by_tx[['0']], , drop = FALSE]
-  wrong_flags$sequence_flags[1L] <- bitwXor(wrong_flags$sequence_flags[1L], 1L)
-  metadata_controls <- c(metadata_controls, metadata_native_flags =
-    !native_lane_flags_equal(phase[['T1full']]$replay_lanes, wrong_flags, paste0('s', 0:2)))
+  metadata_controls <- c(metadata_controls, native_lane_metadata_controls(
+    phase[['T1full']]$replay_lanes, actual[rows_by_tx[['0']], , drop = FALSE],
+    paste0('s', 0:2), bits = c(metadata_native_flags = 1L)))
   write.csv(data.frame(control = names(controls), rejected = controls), file.path(out, 'controls.csv'), row.names = FALSE)
   write.csv(data.frame(control = names(metadata_controls), rejected = metadata_controls),
     file.path(out, 'metadata_controls.csv'), row.names = FALSE)

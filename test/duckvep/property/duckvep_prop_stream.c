@@ -492,6 +492,7 @@ TEST haplotype_stream_raw_record_slots_keep_conditional_deletion_provenance(void
         ASSERT_EQ(1u, leaf.carriers.call_count);
         unsigned lane = carrier->key.lane;
         ASSERT(lane == 1u || lane == 2u); lanes |= 1u << lane;
+        ASSERT_EQ(lane == 1u ? 0 : -1, leaf.nominal_length_diff);
         const char *expected = lane == 1u ? "ACAAGAAAAAAA" : "AAAGAAAAAAA";
         ASSERT_EQ(strlen(expected), leaf.cds_length);
         ASSERT_MEM_EQ(expected, leaf.cds, leaf.cds_length);
@@ -527,6 +528,7 @@ TEST haplotype_stream_raw_record_reference_observations_require_matching_cds(voi
         ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_next(s, &leaf));
         ASSERT_EQ(2u, leaf.carriers.call_count); ASSERT_EQ(1u, leaf.contributor_count);
         ASSERT_EQ(0u, leaf.edit_count); ASSERT_EQ(0u, leaf.block_count);
+        ASSERT_EQ(0, leaf.nominal_length_diff);
         ASSERT_EQ(DUCKVEP_CARRIER_MISSING | DUCKVEP_CARRIER_CONDITIONAL, leaf.evidence_flags);
         ASSERT_EQ(0u, leaf.contributors[0].source.allele_index);
         if (mismatch) {
@@ -574,6 +576,7 @@ TEST haplotype_stream_retained_reference_replaces_but_omitted_missing_does_not(v
                 ASSERT(carrier != NULL);
                 if (!missing && carrier->key.lane == 2u) continue;
                 ASSERT_EQ(12u, leaf.cds_length);
+                ASSERT_EQ(0, leaf.nominal_length_diff);
                 ASSERT_EQ(2u, leaf.contributor_count);
                 ASSERT_EQ(missing ? 1u : 2u, leaf.edit_count);
                 ASSERT_EQ(missing ? 0u : 1u, leaf.ordered_replacements);
@@ -592,6 +595,79 @@ TEST haplotype_stream_retained_reference_replaces_but_omitted_missing_does_not(v
                 checked++;
             }
             ASSERT_EQ(1u, checked);
+        }
+    }
+    PASS();
+}
+
+TEST haplotype_stream_nominal_lengths_survive_clipped_and_disjoint_replay(void) {
+    static const struct {
+        uint32_t start[2];
+        uint16_t ref_len[2];
+        const char *alt[2];
+        int64_t nominal;
+        size_t length, edits, sources;
+        uint32_t flags;
+    } cases[] = {
+        /* The undefined slot deletes the last base; the following substitution
+         * inserts at that emptied position while retaining nominal REF length. */
+        {{12u, 12u}, {1u, 1u}, {"", "C"}, -1, 12u, 2u, 2u, 3u},
+        /* The six-base source sees only three bases after the other deletion.
+         * Its ALT already matches, but its nominal -3 remains in the sum. */
+        {{7u, 9u}, {6u, 4u}, {"AAA", "A"}, -6, 9u, 1u, 2u, 1u},
+        {{9u, 0u}, {4u, 0u}, {"A", ""}, -3, 9u, 1u, 1u, 1u},
+        {{4u, 9u}, {1u, 2u}, {"AAA", "A"}, 1, 13u, 2u, 2u, 3u}
+    };
+    for (unsigned reverse = 0u; reverse < 2u; reverse++) {
+        for (size_t scenario = 0u; scenario < sizeof(cases) / sizeof(cases[0]); scenario++) {
+            struct haplotype_stream_scene f;
+            haplotype_stream_scene_prepare(&f, 1u);
+            f.strands[0] = reverse ? -1 : 1;
+            ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_init(
+                &f.stream, &f.model, &f.exons, &f.sequences, &f.buffers));
+            uint8_t refs[2][6], alts[2][3];
+            duckvep_haplotype_source_t sources[2];
+            for (size_t i = 0u; i < cases[scenario].sources; i++) {
+                size_t alt_length = strlen(cases[scenario].alt[i]);
+                memset(refs[i], reverse ? 'T' : 'A', cases[scenario].ref_len[i]);
+                for (size_t j = 0u; j < alt_length; j++) alts[i][j] = (uint8_t)
+                    haplo_test_variant_from_tx_base(cases[scenario].alt[i][reverse ? alt_length - 1u - j : j],
+                        (int)reverse);
+                sources[i] = (duckvep_haplotype_source_t){0u, refs[i], alts[i],
+                    reverse ? 113u - cases[scenario].start[i] - cases[scenario].ref_len[i]
+                            : 99u + cases[scenario].start[i],
+                    0u, cases[scenario].ref_len[i], (uint16_t)alt_length,
+                    scenario == 0u && i == 0u ? UINT32_MAX : 1u, 1u, 0u};
+            }
+            if (cases[scenario].sources == 2u && sources[0].pos1 > sources[1].pos1) {
+                duckvep_haplotype_source_t tmp = sources[0]; sources[0] = sources[1]; sources[1] = tmp;
+            }
+            for (size_t i = 0u; i < cases[scenario].sources; i++) {
+                sources[i].event_id = i + 1u;
+                const char *gt = scenario ? "1|1" : sources[i].allele_index == UINT32_MAX ? ".|1" : "0|1";
+                duckvep_raw_gt_t call;
+                ASSERT_EQ(DUCKVEP_RAW_GT_OK, duckvep_phase_parse_vep116_raw(
+                    (const uint8_t *)gt, strlen(gt), 1u, &call));
+                ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_begin(&f.stream, &sources[i]));
+                ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_project(&f.stream, 0u));
+                ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_push_raw_call(
+                    &f.stream, 0u, 0u, &call, 1u));
+            }
+            ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_TRANSCRIPT_READY, duckvep_haplotype_stream_finish(&f.stream));
+            duckvep_haplotype_leaf_t leaf;
+            ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_next(&f.stream, &leaf));
+            ASSERT_EQ(scenario ? DUCKVEP_HAPLOTYPE_OK : DUCKVEP_HAPLOTYPE_CONDITIONAL, leaf.sequence_status);
+            ASSERT_EQ(cases[scenario].nominal, leaf.nominal_length_diff);
+            ASSERT_EQ(cases[scenario].length, leaf.cds_length);
+            ASSERT_EQ(cases[scenario].edits, leaf.edit_count);
+            ASSERT_EQ(cases[scenario].sources, leaf.contributor_count);
+            ASSERT_EQ(cases[scenario].flags, leaf.flags);
+            ASSERT_EQ(scenario < 2u, leaf.ordered_replacements);
+            ASSERT_EQ(scenario ? 2u : 1u, leaf.carriers.call_count);
+            for (size_t i = 0u; i < leaf.cds_length; i++)
+                ASSERT_EQ(!scenario && i == 11u ? 'C' : 'A', leaf.cds[i]);
+            if (scenario < 2u) ASSERT(leaf.nominal_length_diff != (int64_t)leaf.cds_length - 12);
+            ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_DONE, duckvep_haplotype_stream_next(&f.stream, &leaf));
         }
     }
     PASS();
@@ -1168,6 +1244,7 @@ TEST haplotype_stream_retains_conflicts_and_latches_resource_errors(void) {
                 if (scenario == 1u) ASSERT_EQ(2u, leaf.contributors[1].source.event_id);
                 ASSERT(!leaf.cds && !leaf.protein);
                 ASSERT_EQ(0u, leaf.cds_length); ASSERT_EQ(0u, leaf.protein_length);
+                ASSERT_EQ(0, leaf.nominal_length_diff);
                 ASSERT_EQ(1u, leaf.carriers.call_count);
                 ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_DONE, duckvep_haplotype_stream_next(s, &leaf));
                 ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_DONE, duckvep_haplotype_stream_finish(s));

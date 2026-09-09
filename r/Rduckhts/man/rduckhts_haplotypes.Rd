@@ -51,6 +51,11 @@ protein, carrier keys and all contributing events. Incomplete calls and
 projection/edit failures retain provenance without inventing sequence.
 }
 \details{
+`nominal_length_diff` is the signed sum of projected replacement ALT-minus-REF
+lengths before clipping at the current CDS end. It is zero for reference-only
+replay and NA without a CDS. Known and conditional paths retain this value;
+overlapping replacements can produce a different rebuilt CDS length change.
+
 `coding_blocks` groups physical edits that share an alternate codon or
 displace then restore the reading frame. Each block gives one-based reference
 `cds_start`, transcript-oriented `reference`/`alternate` spans, zero-based

@@ -765,10 +765,12 @@ Rscript test/duckvep/conformance/haplotype_phase_differential.R \
   --publish-artifact test/duckvep/conformance/results/haplotype_phase_RUN
 ```
 
-Publication verifies retained artifact hashes, recomputes stratum totals from the
-complete comparison objects, reconstructs decoded comparisons from transcript-keyed
-oracle/native observations, and binds genotype labels to retained VCF records and the
-reader's original GT strings. It checks totals against the receipt and rejects duplicate
+Publication verifies retained artifact hashes and reconstructs decoded, native raw and
+public raw comparisons from transcript-keyed oracle and execution outputs. Parser
+expectations come from upstream call observations; raw/public record observations come
+from retained execution buffers and output carrier/contributor rows. Genotype labels
+are bound to retained VCF records and the reader's original GT strings. It recomputes
+stratum totals, checks them against the receipt and rejects duplicate
 revisions before replacing the ledger under an exclusive writer lock. The artifact
 directory must be retained inside the repository so the ledger has a nonempty locator.
 Failed comparisons are published as failures;

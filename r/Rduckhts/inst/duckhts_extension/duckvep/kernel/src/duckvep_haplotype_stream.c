@@ -791,6 +791,7 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
                 leaf.protein = b->protein;
                 leaf.protein_length = leaf.translation.first_stop_position1
                     ? leaf.translation.first_stop_position1 : leaf.translation.length;
+                leaf.nominal_length_diff = applied.length_diff;
                 leaf.flags = applied.flags;
                 if (leaf.protein_length < leaf.translation.length)
                     leaf.flags |= DUCKVEP_HAPLOTYPE_FLAG_STOP_TRUNCATED;

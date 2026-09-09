@@ -925,7 +925,10 @@ components rather than differing islands. Their ID lists retain applied full-spa
 operations in ascending reference CDS order, including overwritten operations;
 `edit_count` counts those operations. Net-zero components retain their provenance.
 Block flags describe net component length changes; leaf flags retain nominal
-source replacement length changes. These can differ after clipped replacement.
+source replacement length changes. `nominal_length_diff` is the signed sum of
+projected replacement ALT-minus-REF lengths before clipping at the current CDS end.
+It is zero for reference-only replay and NULL when the leaf has no CDS. Known and
+conditional paths retain this fact even when the rebuilt CDS length change differs.
 Local SO is NULL with `coding_status='unsupported_ordered_replacements'`, and
 `stop_in_displaced_frame` is NULL because an overlapping operation history does
 not supply the disjoint physical edits required by those consumers. CDS, protein,

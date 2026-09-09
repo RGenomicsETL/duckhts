@@ -305,12 +305,8 @@ main <- function() {
   flag_witness <- reference_mutator_rows(source_witness,
     unique(vapply(phase_witness$calls, `[[`, '', 'sample')), samples)
   flags_equal <- function(x) native_lane_flags_equal(phase_witness$replay_lanes, x, samples)
-  stopifnot(flags_equal(flag_witness))
-  for (bit in c(1L, 2L, 4L)) {
-    bad <- flag_witness
-    bad$sequence_flags[1L] <- bitwXor(bad$sequence_flags[1L], bit)
-    metadata_controls[paste0('metadata_native_bit_', bit)] <- !flags_equal(bad)
-  }
+  metadata_controls <- c(metadata_controls,
+    native_lane_metadata_controls(phase_witness$replay_lanes, flag_witness, samples))
   bad <- flag_witness
   bad$carriers[[1L]] <- bad$carriers[[1L]][-1L, , drop = FALSE]
   metadata_controls['metadata_missing_mutator_carrier'] <- !flags_equal(bad)

@@ -1,6 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
 
+- return nominal_length_diff from bundled haplotype replay, preserving the signed
+  replacement-length sum when clipping changes the final CDS length; unavailable
+  sequences return NA
+
 - document the bundled haplotype and raw-genotype schemas in the generated README;
   local examples render without network access and remote examples remain usage snippets
 

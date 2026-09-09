@@ -127,12 +127,8 @@ main <- function() {
       stopifnot(!is.null(haplotype_lane_metadata(wrong_order$replay_lanes)))
       metadata_controls <- c(metadata_controls, metadata_wrong_first_lane =
         !haplotype_group_metadata_equal(wrong_order, x, container_json = TRUE))
-      for (bit in c(1L, 2L, 4L)) {
-        wrong <- actual
-        wrong$sequence_flags[1L] <- bitwXor(wrong$sequence_flags[1L], bit)
-        metadata_controls[paste0('metadata_native_bit_', bit)] <-
-          !native_lane_flags_equal(lanes, wrong, paste0('s', 0:2))
-      }
+      metadata_controls <- c(metadata_controls,
+        native_lane_metadata_controls(lanes, actual, paste0('s', 0:2)))
       stopifnot(all(metadata_controls))
     }
     rows[[name]] <- do.call(rbind, lapply(x$cds_haplotypes, function(h) {

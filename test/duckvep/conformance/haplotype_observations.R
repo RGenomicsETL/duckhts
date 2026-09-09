@@ -263,16 +263,22 @@ haplotype_lane_metadata <- function(lanes) {
 native_lane_flags_equal <- function(lanes, actual, samples) {
   lanes <- haplotype_lane_metadata(lanes)
   if (is.null(lanes) || !is.data.frame(actual) ||
-      !all(c('sequence_flags', 'carriers') %in% names(actual)) ||
+      !all(c('sequence_flags', 'nominal_length_diff', 'carriers') %in% names(actual)) ||
       !is.character(samples) || anyNA(samples) || anyDuplicated(samples)) return(FALSE)
   expected <- vapply(lanes, function(x) haplotype_raw_flag_bits(x$flags), 1L)
+  expected_lengths <- vapply(lanes, function(x) unname(haplotype_raw_flags(x$flags)['length_diff']), 0)
   keys <- vapply(lanes, function(x) jsonlite::toJSON(list(sample = x$sample,
     lane1 = x$lane1), auto_unbox = TRUE), '')
-  observed_keys <- character(); observed <- integer()
+  observed_keys <- character()
+  observed <- integer()
+  observed_lengths <- numeric()
   for (i in seq_len(nrow(actual))) {
     flags <- actual$sequence_flags[i]
+    nominal <- actual$nominal_length_diff[i]
     carriers <- actual$carriers[[i]]
     if (!is.numeric(flags) || is.na(flags) || flags != floor(flags) || flags < 0 || flags > 15 ||
+        !is.numeric(nominal) || length(nominal) != 1L || !is.finite(nominal) ||
+        nominal != floor(nominal) || abs(nominal) >= 2^53 ||
         !is.data.frame(carriers) || !all(c('sample_index', 'haplotype_lane') %in% names(carriers)) ||
         !all(vapply(carriers[c('sample_index', 'haplotype_lane')], is.numeric, TRUE)) ||
         anyNA(carriers[c('sample_index', 'haplotype_lane')]) ||
@@ -284,10 +290,30 @@ native_lane_flags_equal <- function(lanes, actual, samples) {
       observed_keys <- c(observed_keys, jsonlite::toJSON(list(
         sample = samples[carriers$sample_index[j] + 1L], lane1 = carriers$haplotype_lane[j]), auto_unbox = TRUE))
       observed <- c(observed, bitwAnd(as.integer(flags), 7L))
+      observed_lengths <- c(observed_lengths, as.numeric(nominal))
     }
   }
   !anyDuplicated(observed_keys) && setequal(keys, observed_keys) &&
-    identical(expected, observed[match(keys, observed_keys)])
+    identical(expected, observed[match(keys, observed_keys)]) &&
+    identical(expected_lengths, observed_lengths[match(keys, observed_keys)])
+}
+
+native_lane_metadata_controls <- function(lanes, actual, samples,
+    bits = c(metadata_native_bit_1 = 1L, metadata_native_bit_2 = 2L, metadata_native_bit_4 = 4L)) {
+  equal <- function(x) native_lane_flags_equal(lanes, x, samples)
+  stopifnot(nrow(actual) > 0L, equal(actual))
+  rejected <- vapply(bits, function(bit) {
+    bad <- actual
+    bad$sequence_flags[1L] <- bitwXor(bad$sequence_flags[1L], bit)
+    !equal(bad)
+  }, TRUE)
+  wrong <- actual
+  wrong$nominal_length_diff[1L] <- wrong$nominal_length_diff[1L] + 3
+  missing <- actual[setdiff(names(actual), 'nominal_length_diff')]
+  null <- actual
+  null$nominal_length_diff[1L] <- NA_real_
+  c(rejected, metadata_nominal_same_frame = !equal(wrong),
+    metadata_missing_nominal = !equal(missing), metadata_null_nominal = !equal(null))
 }
 
 # Check the actual upstream group owner, not a union or a selected flag value.

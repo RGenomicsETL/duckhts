@@ -24,12 +24,14 @@ main <- function() {
     mixed = grepl("|", gt, fixed = TRUE) & grepl("/", gt, fixed = TRUE),
     equal = seq_len(n) != 1L, oracle_lanes = 2, native_lanes = 2,
     native_unknown = 0, native_unavailable_carriers = 0)
-  parser_rows <- data.frame(status = rep(0L, 2L * n), retained = TRUE, ploidy = 2L,
-    missing = 0L, slots = 2L, first = 0L, second = 0L)
-  semantics <- data.frame(source_indices = rep(0L, 4L * n), source_evidence = 0L,
-    evidence = 0L, sequence_status = 0L)
-  raw <- list(output = list(errors = integer(n)), comparisons = rep(list(comparison), n),
-    expected_semantics = semantics, observed_semantics = semantics)
+  parser_rows <- data.frame(status = rep(0L, 2L * n), retained = TRUE, ploidy = rep(ploidy, each = 2L),
+    missing = as.vector(rbind(as.integer(summary$missing), 0L)), slots = 2L,
+    first = rep(c(1L, 0L), n), second = rep(c(1L, 0L), n))
+  lane_evidence <- rep(ifelse(summary$missing, 11L, 1L), each = 2L)
+  lane_status <- rep(ifelse(summary$missing, 8L, 0L), each = 2L)
+  semantics <- data.frame(source_indices = rep(c(1L, -2L), 2L * n),
+    source_evidence = as.vector(rbind(lane_evidence, 0L)),
+    evidence = rep(lane_evidence, each = 2L), sequence_status = rep(lane_status, each = 2L))
   native <- list(records = data.frame(record_index = seq_len(2L * n) - 1L,
       CHROM = rep(summary$chrom, each = 2L), POS = rep(c(41, 44), n),
       ID = rep(c("a", "b"), n), REF = "G"),
@@ -38,11 +40,36 @@ main <- function() {
       carrier_count = 1, cds = "ATG", protein = "M"))
   native$actual$contributors <- lapply(native$actual$transcript_index,
     function(i) data.frame(event_index = 6L * i + 1L))
-  raw$actual <- native$actual
+  public <- list(actual = native$actual,
+    comparisons = rep(list(comparison[c("expected", "observed", "equal")]), n),
+    expected_semantics = semantics, observed_semantics = semantics)
+  public$actual$coding_blocks <- lapply(public$actual$transcript_index,
+    function(i) data.frame(event_indices = I(list(2L * i))))
+  public$actual$contributors <- lapply(seq_len(nrow(public$actual)), function(row) {
+    i <- public$actual$transcript_index[row]
+    data.frame(event_index = 2L * i, seq_region = i, position = 41,
+      reference = "G", alt_index = 1L, alternate = "A", evidence_flags = lane_evidence[row])
+  })
+  public$actual$carriers <- lapply(seq_len(nrow(public$actual)), function(row)
+    data.frame(sample_index = 0L, ploidy = 2L, phase_set = NA_integer_,
+      haplotype_lane = (row - 1L) %% 2L + 1L))
+  public$actual$evidence_flags <- lane_evidence
+  public$actual$sequence_status <- ifelse(lane_status == 0L, "ok", "conditional")
   native$actual$cds[native$actual$transcript_index == 0L] <- "CTG"
   native$records$ALT <- rep(list(c("A", "T"), "C"), n)
   raw_gt <- as.vector(rbind(gt, vapply(ploidy,
     function(p) paste(rep("1", p), collapse = "|"), "")))
+  capacity <- 512L
+  replay <- c(list("ATG", 11L, raw_gt, c(41L, 44L), c("G", "G"), c("A", "T", "C"),
+      c(2L, 1L), n, capacity),
+    list(cds = rep(c(charToRaw("ATG"), raw(capacity - 3L)), 2L * n),
+      protein = rep(c(charToRaw("M"), raw(capacity - 1L)), 2L * n),
+      cds_lengths = rep(3L, 2L * n), protein_lengths = rep(1L, 2L * n),
+      sequence_status = lane_status, evidence = lane_evidence, edit_masks = rep(1L, 2L * n),
+      source_indices = semantics$source_indices, source_evidence = semantics$source_evidence,
+      errors = integer(n)))
+  raw <- list(output = replay, comparisons = public$comparisons,
+    expected_semantics = semantics, observed_semantics = semantics)
   native$records$calls <- lapply(seq_along(raw_gt), function(i) {
     x <- data.frame(sample_index = 0L, raw_gt = raw_gt[i])
     x$alleles <- list(integer(ploidy[(i + 1L) %/% 2L]))
@@ -52,11 +79,11 @@ main <- function() {
   parser <- list(keys = data.frame(transcript = rep(summary$transcript, each = 2L),
     source_id = rep(c("a", "b"), n), GT = as.vector(rbind(gt, vapply(ploidy,
       function(p) paste(rep("1", p), collapse = "|"), "")))),
-    expected = parser_rows, observed = parser_rows)
+    expected = parser_rows, observed = parser_rows, disposition = rep(3L, 2L * n))
   saveRDS(parser,
     file.path(directory, "phase_comparisons.rds"))
   saveRDS(raw, file.path(directory, "raw_replay.rds"))
-  saveRDS(raw, file.path(directory, "public_raw_replay.rds"))
+  saveRDS(public, file.path(directory, "public_raw_replay.rds"))
   saveRDS(native, file.path(directory, "native.rds"))
   saveRDS(list(), file.path(directory, "decoded_collisions.rds"))
   vcf <- c("##fileformat=VCFv4.4",
@@ -74,8 +101,14 @@ main <- function() {
     sep = "\t", quote = FALSE, row.names = FALSE)
   oracle <- lapply(cases$transcript, function(transcript) list(transcript = transcript,
     haplotypes = unname(groups), total_haplotype_count = 2))
+  names(oracle) <- cases$transcript
   writeLines(vapply(oracle, jsonlite::toJSON, "", auto_unbox = TRUE),
     file.path(directory, "oracle.stdout"))
+  phase <- lapply(cases$transcript, function(transcript) list(transcript = transcript,
+    default_ploidy = 2L, sample_ploidy = list(sample = 2L), calls = list(
+      list(source_id = "a", sample = "sample", genotype = c("A", "A")),
+      list(source_id = "b", sample = "sample", genotype = c("G", "G")))))
+  writeLines(vapply(phase, jsonlite::toJSON, "", auto_unbox = TRUE), file.path(directory, "phase.jsonl"))
   write_replay_summaries <- function(profiles) {
     for (kind in c("raw", "public_raw"))
       write.csv(transform(profiles, equal = TRUE),
@@ -188,6 +221,126 @@ main <- function() {
   update_receipt()
   fails(phase_history_rows(directory))
   saveRDS(native, file.path(directory, "native.rds"))
+  for (file in c("raw_replay.rds", "public_raw_replay.rds")) {
+    retained <- if (file == "raw_replay.rds") raw else public
+    changed_raw <- retained
+    forged <- canonical(list(list(cds = "FORGED", protein = "FORGED", count = 2,
+      contributors = "unobserved_source")))
+    changed_raw$comparisons <- rep(list(list(expected = forged, observed = forged, equal = TRUE)), n)
+    saveRDS(changed_raw, file.path(directory, file))
+    update_receipt()
+    fails(phase_history_rows(directory))
+    saveRDS(retained, file.path(directory, file))
+  }
+  for (kind in c("raw", "public_raw")) {
+    file <- paste0(kind, "_replay.rds")
+    retained <- if (kind == "raw") raw else public
+    changed <- retained
+    if (kind == "raw") {
+      changed$output$cds[1L] <- charToRaw("C")
+      changed$comparisons <- phase_raw_comparisons(transform(cases, cds = "ATG"), oracle, changed$output)
+    } else {
+      changed$actual$cds[1L] <- "CTG"
+      changed$comparisons <- phase_public_comparisons(cases, oracle, changed$actual, native$records)
+    }
+    # One genuinely different observed lane stays in its source-GT stratum.
+    lane_summary <- transform(cases, equal = seq_len(n) != 1L)
+    lane_receipt <- receipt
+    lane_receipt[[paste0(kind, "_replay_disagreements")]] <- 1L
+    saveRDS(changed, file.path(directory, file))
+    write.csv(lane_summary, file.path(directory, paste0(kind, "_replay_summary.csv")), row.names = FALSE)
+    update_receipt(lane_receipt)
+    failed_rows <- phase_history_rows(directory)
+    stopifnot(sum(failed_rows[[paste0(kind, "_replay_cases")]]) == n,
+      sum(failed_rows[[paste0(kind, "_replay_disagreements")]]) == 1L)
+    changed$comparisons[c(1L, n)] <- changed$comparisons[c(n, 1L)]
+    lane_summary$equal[c(1L, n)] <- lane_summary$equal[c(n, 1L)]
+    saveRDS(changed, file.path(directory, file))
+    write.csv(lane_summary, file.path(directory, paste0(kind, "_replay_summary.csv")), row.names = FALSE)
+    update_receipt(lane_receipt)
+    fails(phase_history_rows(directory))
+    saveRDS(retained, file.path(directory, file))
+    write_replay_summaries(cases)
+  }
+  for (field in names(parser_rows)) {
+    changed_parser <- parser
+    value <- parser_rows[[field]][1L]
+    value <- if (is.logical(value)) !value else value + 1L
+    changed_parser$expected[[field]][1L] <- value
+    changed_parser$observed[[field]][1L] <- value
+    if (field == "retained") changed_parser$disposition[1L] <- 1L
+    saveRDS(changed_parser, file.path(directory, "phase_comparisons.rds"))
+    update_receipt()
+    fails(phase_history_rows(directory))
+  }
+  saveRDS(parser, file.path(directory, "phase_comparisons.rds"))
+  for (file in c("raw_replay.rds", "public_raw_replay.rds")) {
+    retained <- if (file == "raw_replay.rds") raw else public
+    for (field in names(semantics)) {
+      changed <- retained
+      changed$expected_semantics[[field]][1L] <- changed$expected_semantics[[field]][1L] + 1L
+      changed$observed_semantics[[field]][1L] <- changed$expected_semantics[[field]][1L]
+      saveRDS(changed, file.path(directory, file))
+      update_receipt()
+      fails(phase_history_rows(directory))
+    }
+    changed <- retained
+    if (file == "raw_replay.rds") changed$output$source_indices[1L] <- 0L
+    else changed$actual$evidence_flags[1L] <- 0L
+    saveRDS(changed, file.path(directory, file))
+    update_receipt()
+    fails(phase_history_rows(directory))
+    saveRDS(retained, file.path(directory, file))
+  }
+  for (change in c("gt_order", "short_buffer", "long_sequence", "negative_sequence", "edit_mask")) {
+    changed <- raw
+    if (change == "gt_order") changed$output[[3L]][c(1L, 2L * n - 1L)] <-
+      changed$output[[3L]][c(2L * n - 1L, 1L)]
+    if (change == "short_buffer") changed$output$cds <- changed$output$cds[-1L]
+    if (change == "long_sequence") changed$output$cds_lengths[1L] <- capacity + 1L
+    if (change == "negative_sequence") changed$output$protein_lengths[1L] <- -1L
+    if (change == "edit_mask") changed$output$edit_masks[1L] <- 4L
+    saveRDS(changed, file.path(directory, "raw_replay.rds"))
+    update_receipt()
+    fails(phase_history_rows(directory))
+  }
+  saveRDS(raw, file.path(directory, "raw_replay.rds"))
+  changed <- public
+  changed$actual <- public$actual[rev(seq_len(nrow(public$actual))), ]
+  saveRDS(changed, file.path(directory, "public_raw_replay.rds"))
+  update_receipt()
+  reordered <- phase_history_rows(directory)
+  stopifnot(sum(reordered$public_raw_replay_cases) == n,
+    sum(reordered$public_raw_replay_disagreements) == 0L)
+  saveRDS(public, file.path(directory, "public_raw_replay.rds"))
+  for (missing_lanes in 1:2) {
+    absent_public <- public
+    absent_public$actual <- public$actual[-seq_len(missing_lanes), ]
+    absent_public$comparisons <- phase_public_comparisons(
+      cases, oracle, absent_public$actual, native$records)
+    absent_public$observed_semantics <- phase_public_semantics(
+      cases, absent_public$actual, native$records)
+    stopifnot(all(is.na(absent_public$observed_semantics[seq_len(2L * missing_lanes), ])))
+    saveRDS(absent_public, file.path(directory, "public_raw_replay.rds"))
+    write.csv(transform(cases, equal = seq_len(n) != 1L),
+      file.path(directory, "public_raw_replay_summary.csv"), row.names = FALSE)
+    update_receipt(modifyList(receipt, list(public_raw_replay_disagreements = 1L,
+      public_raw_record_disagreements = 2L * missing_lanes)))
+    absent_rows <- phase_history_rows(directory)
+    stopifnot(sum(absent_rows$public_raw_replay_cases) == n,
+      sum(absent_rows$public_raw_replay_disagreements) == 1L,
+      sum(absent_rows$public_raw_record_observations) == 4L * n,
+      sum(absent_rows$public_raw_record_disagreements) == 2L * missing_lanes)
+  }
+  saveRDS(public, file.path(directory, "public_raw_replay.rds"))
+  write_replay_summaries(cases)
+  for (field in c("transcript_index", "haplotype_lane", "alt_index")) {
+    invalid <- public$actual
+    if (field == "transcript_index") invalid$transcript_index[1L] <- 0.5
+    if (field == "haplotype_lane") invalid$carriers[[1L]]$haplotype_lane <- 1.5
+    if (field == "alt_index") invalid$contributors[[1L]]$alt_index <- 0.5
+    fails(phase_public_semantics(cases, invalid, native$records))
+  }
   for (change in c("missing_payload", "null_payload", "empty_payload", "missing_provenance", "wrong_count")) {
     changed_raw <- raw
     if (change == "missing_payload") changed_raw$comparisons <- rep(list(list(equal = TRUE)), n)

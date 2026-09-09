@@ -156,6 +156,9 @@ typedef struct {
     size_t reference_protein_length;
     duckvep_translation_t translation; /* Full raw translation remains in buffers.protein. */
     size_t cds_length, protein_length;
+    /* Sum of replayed ALT lengths minus nominal REF spans, before clipping or
+     * equality checks. Valid when cds is present, including conditional replay. */
+    int64_t nominal_length_diff;
     uint32_t flags;
     uint8_t evidence_flags; /* OR of contributor evidence, distinct from sequence flags. */
     uint8_t stop_in_displaced_frame; /* First translated stop intersects a frame excursion. */

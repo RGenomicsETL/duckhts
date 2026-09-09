@@ -78,6 +78,187 @@ phase_decoded_comparisons <- function(cases, oracle, actual, records) {
   })
 }
 
+phase_raw_comparisons <- function(cases, oracle, replay) {
+  n <- nrow(cases)
+  nlanes <- 2L * n
+  stopifnot(!anyDuplicated(names(oracle)), setequal(names(oracle), cases$transcript))
+  # The retained .C result starts with the nine inputs to
+  # duckhts_test_raw_phase_haplotypes; these positions bind each output lane.
+  input_names <- c("reference", "genomic_start", "gt", "positions", "refs", "alts",
+    "alt_counts", "nprofiles", "capacity")
+  input <- setNames(replay[seq_along(input_names)], input_names)
+  gt <- as.vector(rbind(cases$GT, vapply(cases$ploidy,
+    function(p) paste(rep("1", p), collapse = "|"), "")))
+  stopifnot(identical(input$reference, unique(cases$cds)), identical(input$genomic_start, 11L),
+    identical(input$gt, gt), identical(input$positions, c(41L, 44L)),
+    identical(input$refs, c("G", "G")), identical(input$alts, c("A", "T", "C")),
+    identical(input$alt_counts, c(2L, 1L)), identical(input$nprofiles, n),
+    is.integer(input$capacity), length(input$capacity) == 1L,
+    !is.na(input$capacity), input$capacity > 0L)
+  capacity <- input$capacity
+  for (axis in c("cds", "protein")) {
+    sizes <- replay[[paste0(axis, "_lengths")]]
+    stopifnot(is.raw(replay[[axis]]), length(replay[[axis]]) == as.double(nlanes) * capacity,
+      is.integer(sizes), length(sizes) == nlanes, !anyNA(sizes),
+      all(sizes >= 0L & sizes <= capacity))
+  }
+  stopifnot(is.integer(replay$edit_masks), length(replay$edit_masks) == nlanes,
+    !anyNA(replay$edit_masks), all(replay$edit_masks %in% 0:3),
+    is.integer(replay$errors), length(replay$errors) == n, !anyNA(replay$errors))
+  sequences <- lapply(seq_len(nlanes), function(i) list(
+    cds = rawToChar(replay$cds[(i - 1L) * capacity + seq_len(replay$cds_lengths[i])]),
+    protein = rawToChar(replay$protein[(i - 1L) * capacity + seq_len(replay$protein_lengths[i])]),
+    count = 1, contributors = c("a", "b")[bitwAnd(replay$edit_masks[i], c(1L, 2L)) != 0L]))
+  lapply(seq_len(n), function(i) {
+    expected <- canonical(oracle[[cases$transcript[i]]]$haplotypes)
+    observed <- canonical(sequences[2L * i - c(1L, 0L)])
+    list(expected = expected, observed = observed,
+      equal = replay$errors[i] == 0L && identical(expected, observed))
+  })
+}
+
+phase_public_comparisons <- function(cases, oracle, actual, records) {
+  stopifnot(!anyDuplicated(names(oracle)), setequal(names(oracle), cases$transcript),
+    is.data.frame(actual), all(c("transcript_index", "cds", "protein", "carrier_count",
+      "coding_blocks") %in% names(actual)),
+    is.numeric(actual$transcript_index), all(is.finite(actual$transcript_index)),
+    all(actual$transcript_index == floor(actual$transcript_index)),
+    all(actual$transcript_index %in% cases$transcript_index),
+    !anyDuplicated(records$record_index))
+  rows <- split(seq_len(nrow(actual)), actual$transcript_index)
+  lapply(seq_len(nrow(cases)), function(i) {
+    a <- actual[rows[[as.character(cases$transcript_index[i])]], , drop = FALSE]
+    observed <- lapply(seq_len(nrow(a)), function(j) {
+      blocks <- a$coding_blocks[[j]]
+      stopifnot(is.null(blocks) || (is.data.frame(blocks) && "event_indices" %in% names(blocks)))
+      ids <- unlist(blocks$event_indices, use.names = FALSE)
+      source_rows <- match(ids, records$record_index)
+      stopifnot(!anyNA(source_rows), all(records$CHROM[source_rows] == cases$chrom[i]))
+      list(cds = a$cds[j], protein = a$protein[j], count = a$carrier_count[j],
+        contributors = records$ID[source_rows])
+    })
+    expected <- canonical(oracle[[cases$transcript[i]]]$haplotypes)
+    observed <- canonical(observed)
+    list(expected = expected, observed = observed, equal = identical(expected, observed))
+  })
+}
+
+phase_parser_expected <- function(cases, phase) {
+  stopifnot(!anyDuplicated(names(phase)), setequal(names(phase), cases$transcript))
+  do.call(rbind, lapply(seq_len(nrow(cases)), function(i) {
+    p <- phase[[cases$transcript[i]]]
+    stopifnot(p$default_ploidy == 2L, identical(names(p$sample_ploidy), "sample"),
+      p$sample_ploidy$sample == 2L)
+    ids <- vapply(p$calls, `[[`, "", "source_id")
+    stopifnot(!anyDuplicated(ids), all(ids %in% c("a", "b")),
+      all(vapply(p$calls, function(x) identical(x$sample, "sample"), TRUE)))
+    do.call(rbind, lapply(c("a", "b"), function(id) {
+      call <- p$calls[ids == id]
+      alleles <- if (id == "a") c("G", "A", "T") else c("G", "C")
+      indices <- if (length(call)) match(unlist(call[[1L]]$genotype), alleles) - 1L else integer()
+      stopifnot(!anyNA(indices))
+      data.frame(status = 0L, retained = length(call) == 1L, ploidy = cases$ploidy[i],
+        missing = as.integer(id == "a" && cases$missing[i]), slots = length(indices),
+        first = if (length(indices)) indices[1L] else -1L,
+        second = if (length(indices) > 1L) indices[2L] else -1L)
+    }))
+  }))
+}
+
+phase_expected_semantics <- function(expected_phase) {
+  stopifnot(nrow(expected_phase) %% 2L == 0L)
+  n <- nrow(expected_phase) %/% 2L
+  nlanes <- 2L * n
+  sources <- rep(-2L, 2L * nlanes)
+  evidence <- integer(2L * nlanes)
+  for (i in seq_len(n)) for (lane in 1:2) for (record in 1:2) {
+    call <- expected_phase[2L * (i - 1L) + record, ]
+    at <- (2L * (i - 1L) + lane - 1L) * 2L + record
+    if (!call$retained) {
+      if (call$missing) {
+        sources[at] <- 0L
+        evidence[at] <- 10L
+      }
+      next
+    }
+    allele <- if (lane == 1L) call$first else call$second
+    if (allele == 0L && !call$missing) next
+    sources[at] <- allele
+    evidence[at] <- if (allele == -1L) 8L else if (allele > 0L) 1L else 0L
+    if (call$missing) evidence[at] <- bitwOr(evidence[at], 10L)
+  }
+  lane_evidence <- bitwOr(evidence[seq(1L, 2L * nlanes, 2L)],
+    evidence[seq(2L, 2L * nlanes, 2L)])
+  data.frame(source_indices = sources, source_evidence = evidence,
+    evidence = rep(lane_evidence, each = 2L),
+    sequence_status = rep(ifelse(bitwAnd(lane_evidence, 8L) != 0L, 8L, 0L), each = 2L))
+}
+
+phase_raw_semantics <- function(replay) {
+  nlanes <- 2L * length(replay$errors)
+  for (field in c("source_indices", "source_evidence", "evidence", "sequence_status")) {
+    count <- if (field %in% c("source_indices", "source_evidence")) 2L * nlanes else nlanes
+    stopifnot(is.integer(replay[[field]]), length(replay[[field]]) == count, !anyNA(replay[[field]]))
+  }
+  data.frame(source_indices = replay$source_indices, source_evidence = replay$source_evidence,
+    evidence = rep(replay$evidence, each = 2L), sequence_status = rep(replay$sequence_status, each = 2L))
+}
+
+phase_public_semantics <- function(cases, actual, records) {
+  stopifnot(is.data.frame(actual), all(c("transcript_index", "carrier_count", "carriers",
+    "contributors", "evidence_flags", "sequence_status") %in% names(actual)),
+    is.numeric(actual$transcript_index), all(is.finite(actual$transcript_index)),
+    all(actual$transcript_index == floor(actual$transcript_index)),
+    all(actual$transcript_index %in% cases$transcript_index))
+  semantics <- data.frame(source_indices = rep(NA_integer_, 4L * nrow(cases)),
+    source_evidence = NA_integer_, evidence = NA_integer_, sequence_status = NA_integer_)
+  seen <- logical(2L * nrow(cases))
+  for (i in seq_len(nrow(actual))) {
+    a <- actual[i, ]
+    carriers <- a$carriers[[1L]]
+    stopifnot(is.data.frame(carriers), all(c("sample_index", "ploidy", "phase_set",
+      "haplotype_lane") %in% names(carriers)), is.numeric(a$carrier_count),
+      is.finite(a$carrier_count), a$carrier_count > 0, a$carrier_count == nrow(carriers),
+      all(carriers$sample_index == 0L), all(carriers$ploidy == 2L),
+      all(is.na(carriers$phase_set)), is.numeric(carriers$haplotype_lane),
+      all(carriers$haplotype_lane %in% 1:2))
+    for (lane in carriers$haplotype_lane) {
+      key <- 2L * a$transcript_index + lane
+      stopifnot(!seen[key])
+      seen[key] <- TRUE
+      at <- 2L * (key - 1L) + 1:2
+      semantics$source_indices[at] <- -2L
+      semantics$source_evidence[at] <- 0L
+      semantics$evidence[at] <- a$evidence_flags
+      semantics$sequence_status[at] <- match(a$sequence_status, c("ok", "conditional")) * 8L - 8L
+      contributors <- a$contributors[[1L]]
+      stopifnot(is.data.frame(contributors), all(c("event_index", "seq_region", "position",
+        "reference", "alternate", "alt_index", "evidence_flags") %in% names(contributors)),
+        is.numeric(contributors$alt_index))
+      source_rows <- match(contributors$event_index, records$record_index)
+      stopifnot(!anyNA(source_rows),
+        all(records$CHROM[source_rows] == cases$chrom[a$transcript_index + 1L]),
+        all(contributors$seq_region == cases$seq_region[a$transcript_index + 1L]),
+        all(contributors$position == records$POS[source_rows]),
+        identical(contributors$reference, records$REF[source_rows]))
+      for (j in seq_len(nrow(contributors))) {
+        ordinal <- contributors$alt_index[j]
+        stopifnot(is.na(ordinal) || (is.finite(ordinal) && ordinal == floor(ordinal) &&
+          ordinal >= 0L && ordinal <= length(records$ALT[[source_rows[j]]])))
+        expected_alt <- if (is.na(ordinal)) "" else if (ordinal == 0L) records$REF[source_rows[j]]
+          else records$ALT[[source_rows[j]]][ordinal]
+        stopifnot(identical(contributors$alternate[j], expected_alt))
+      }
+      record <- match(records$ID[source_rows], c("a", "b"))
+      stopifnot(!anyNA(record), !anyDuplicated(record))
+      semantics$source_indices[at[record]] <- ifelse(is.na(contributors$alt_index), -1L,
+        as.integer(contributors$alt_index))
+      semantics$source_evidence[at[record]] <- contributors$evidence_flags
+    }
+  }
+  semantics
+}
+
 phase_history_rows <- function(directory) {
   source("scripts/duckvep_evidence.R", local = TRUE)
   directory <- normalizePath(directory, mustWork = TRUE)
@@ -92,7 +273,7 @@ phase_history_rows <- function(directory) {
   files <- c("cases.tsv", "summary.csv", "comparisons.rds", "phase_comparisons.rds", "raw_replay.rds",
     "public_raw_replay.rds", "controls.csv", "phase_controls.csv", "raw_replay_controls.csv",
     "decoded_collisions.rds", "native.rds", "calls.vcf", "oracle.stdout", "raw_replay_summary.csv",
-    "public_raw_replay_summary.csv")
+    "public_raw_replay_summary.csv", "phase.jsonl")
   paths <- normalizePath(file.path(directory, files), mustWork = TRUE)
   absolute <- startsWith(names(hashes), "/") | grepl("^[A-Za-z]:", names(hashes))
   recorded <- normalizePath(ifelse(absolute, names(hashes), file.path(getwd(), names(hashes))),
@@ -134,7 +315,20 @@ phase_history_rows <- function(directory) {
   oracle <- lapply(readLines(file.path(directory, "oracle.stdout")), jsonlite::fromJSON,
     simplifyVector = FALSE)
   names(oracle) <- vapply(oracle, `[[`, "", "transcript")
-  stopifnot(identical(decoded, phase_decoded_comparisons(cases, oracle, native$actual, native$records)))
+  phase <- lapply(readLines(file.path(directory, "phase.jsonl")), jsonlite::fromJSON,
+    simplifyVector = FALSE)
+  names(phase) <- vapply(phase, `[[`, "", "transcript")
+  stopifnot(identical(decoded, phase_decoded_comparisons(cases, oracle, native$actual, native$records)),
+    identical(raw$comparisons, phase_raw_comparisons(cases, oracle, raw$output)),
+    identical(public$comparisons, phase_public_comparisons(cases, oracle, public$actual, native$records)))
+  expected_phase <- phase_parser_expected(cases, phase)
+  expected_semantics <- phase_expected_semantics(expected_phase)
+  stopifnot(identical(parser$expected, expected_phase),
+    identical(parser$observed$retained, parser$disposition == 3L),
+    identical(raw$expected_semantics, expected_semantics),
+    identical(public$expected_semantics, expected_semantics),
+    identical(raw$observed_semantics, phase_raw_semantics(raw$output)),
+    identical(public$observed_semantics, phase_public_semantics(cases, public$actual, native$records)))
   raw_gt <- as.vector(rbind(cases$GT, vapply(cases$ploidy,
     function(p) paste(rep("1", p), collapse = "|"), "")))
   stopifnot(identical(parser$keys, data.frame(transcript = rep(cases$transcript, each = 2L),
@@ -360,24 +554,7 @@ main <- function() {
   phase <- lapply(readLines(file.path(out, "phase.jsonl")), jsonlite::fromJSON, simplifyVector = FALSE)
   names(phase) <- vapply(phase, `[[`, "", "transcript")
   stopifnot(!anyDuplicated(names(phase)), setequal(names(phase), cases$transcript))
-  expected_phase <- do.call(rbind, lapply(seq_len(nrow(cases)), function(i) {
-    p <- phase[[cases$transcript[i]]]
-    stopifnot(p$default_ploidy == 2L, identical(names(p$sample_ploidy), "sample"),
-      p$sample_ploidy$sample == 2L)
-    ids <- vapply(p$calls, `[[`, "", "source_id")
-    stopifnot(!anyDuplicated(ids), all(ids %in% c("a", "b")),
-      all(vapply(p$calls, function(x) identical(x$sample, "sample"), TRUE)))
-    do.call(rbind, lapply(c("a", "b"), function(id) {
-      call <- p$calls[ids == id]
-      alleles <- if (id == "a") c("G", "A", "T") else c("G", "C")
-      indices <- if (length(call)) match(unlist(call[[1L]]$genotype), alleles) - 1L else integer()
-      stopifnot(!anyNA(indices))
-      data.frame(status = 0L, retained = length(call) == 1L, ploidy = cases$ploidy[i],
-        missing = as.integer(id == "a" && cases$missing[i]), slots = length(indices),
-        first = if (length(indices)) indices[1L] else -1L,
-        second = if (length(indices) > 1L) indices[2L] else -1L)
-    }))
-  }))
+  expected_phase <- phase_parser_expected(cases, phase)
   raw_gt <- as.vector(rbind(cases$GT, vapply(cases$ploidy,
     function(n) paste(rep("1", n), collapse = "|"), "")))
   probe_sources <- c("test/duckvep/conformance/phase_probe.c", paste0("src/duckvep/kernel/src/duckvep_",
@@ -427,43 +604,13 @@ main <- function() {
     sequence_status = integer(nlanes), evidence = integer(nlanes), edit_masks = integer(nlanes),
     source_indices = integer(2L * nlanes), source_evidence = integer(2L * nlanes), errors = integer(nrow(cases)))
   dyn.unload(dll[["path"]])
-  raw_sequences <- lapply(seq_len(nlanes), function(i) list(
-    cds = rawToChar(replay$cds[(i - 1L) * capacity + seq_len(replay$cds_lengths[i])]),
-    protein = rawToChar(replay$protein[(i - 1L) * capacity + seq_len(replay$protein_lengths[i])]),
-    count = 1, contributors = c("a", "b")[bitwAnd(replay$edit_masks[i], c(1L, 2L)) != 0L]))
-  raw_comparisons <- lapply(seq_len(nrow(cases)), function(i) {
-    expected <- canonical(oracle[[cases$transcript[i]]]$haplotypes)
-    observed <- canonical(raw_sequences[2L * i - c(1L, 0L)])
-    list(expected = expected, observed = observed,
-      equal = replay$errors[i] == 0L && identical(expected, observed))
-  })
+  raw_comparisons <- phase_raw_comparisons(cases, oracle, replay)
   raw_matches <- vapply(raw_comparisons, `[[`, TRUE, "equal")
   # Expected record observations come from the upstream object sidecar, not
   # the native parser. Missing omissions retain a conditional REF observation;
   # only physical edits participate in upstream's contributing-variant list.
-  expected_sources <- rep(-2L, 2L * nlanes)
-  expected_evidence <- integer(2L * nlanes)
-  for (i in seq_len(nrow(cases))) for (lane in 1:2) for (record in 1:2) {
-    call <- expected_phase[2L * (i - 1L) + record, ]
-    at <- (2L * (i - 1L) + lane - 1L) * 2L + record
-    if (!call$retained) {
-      if (call$missing) { expected_sources[at] <- 0L; expected_evidence[at] <- 10L }
-      next
-    }
-    allele <- if (lane == 1L) call$first else call$second
-    if (allele == 0L && !call$missing) next
-    expected_sources[at] <- allele
-    expected_evidence[at] <- if (allele == -1L) 8L else if (allele > 0L) 1L else 0L
-    if (call$missing) expected_evidence[at] <- bitwOr(expected_evidence[at], 10L)
-  }
-  expected_lane_evidence <- bitwOr(expected_evidence[seq(1L, 2L * nlanes, 2L)],
-    expected_evidence[seq(2L, 2L * nlanes, 2L)])
-  expected_semantics <- data.frame(source_indices = expected_sources, source_evidence = expected_evidence,
-    evidence = rep(expected_lane_evidence, each = 2L),
-    sequence_status = rep(ifelse(bitwAnd(expected_lane_evidence, 8L) != 0L, 8L, 0L), each = 2L))
-  observed_semantics <- data.frame(source_indices = replay$source_indices,
-    source_evidence = replay$source_evidence, evidence = rep(replay$evidence, each = 2L),
-    sequence_status = rep(replay$sequence_status, each = 2L))
+  expected_semantics <- phase_expected_semantics(expected_phase)
+  observed_semantics <- phase_raw_semantics(replay)
   semantics_matches <- phase_equal(expected_semantics, observed_semantics)
   raw_rejected <- vapply(names(expected_semantics), function(field) {
     corrupt <- expected_semantics
@@ -523,52 +670,8 @@ main <- function() {
   public_raw <- DBI::dbGetQuery(con, "SELECT * FROM duckvep_haplotypes('SELECT * FROM source_calls',
     'phase',phase_policy:='vep116_compat',input_mode:='source_records')")
   saveRDS(public_raw, file.path(out, "public_raw_output.rds"))
-  public_raw_comparisons <- lapply(seq_len(nrow(cases)), function(i) {
-    a <- public_raw[public_raw$transcript_index == cases$transcript_index[i], ]
-    observed <- lapply(seq_len(nrow(a)), function(j) {
-      ids <- unlist(a$coding_blocks[[j]]$event_indices, use.names = FALSE)
-      list(cds = a$cds[j], protein = a$protein[j], count = a$carrier_count[j],
-        contributors = records$ID[match(ids, records$record_index)])
-    })
-    expected <- canonical(oracle[[cases$transcript[i]]]$haplotypes)
-    observed <- canonical(observed)
-    list(expected = expected, observed = observed, equal = identical(expected, observed))
-  })
-  public_semantics <- data.frame(source_indices = rep(-2L, 4L * nrow(cases)),
-    source_evidence = 0L, evidence = 0L, sequence_status = 0L)
-  seen <- logical(2L * nrow(cases))
-  for (i in seq_len(nrow(public_raw))) {
-    a <- public_raw[i, ]
-    stopifnot(a$carrier_count == nrow(a$carriers[[1L]]),
-      all(a$carriers[[1L]]$sample_index == 0L), all(a$carriers[[1L]]$ploidy == 2L),
-      all(is.na(a$carriers[[1L]]$phase_set)))
-    for (lane in a$carriers[[1L]]$haplotype_lane) {
-      key <- 2L * a$transcript_index + lane
-      stopifnot(lane %in% 1:2, !seen[key]); seen[key] <- TRUE
-      at <- 2L * (key - 1L) + 1:2
-      public_semantics$evidence[at] <- a$evidence_flags
-      public_semantics$sequence_status[at] <- match(a$sequence_status, c("ok", "conditional")) * 8L - 8L
-      contributors <- a$contributors[[1L]]
-      source_rows <- match(contributors$event_index, records$record_index)
-      stopifnot(!anyNA(source_rows),
-        all(records$CHROM[source_rows] == cases$chrom[a$transcript_index + 1L]),
-        all(contributors$seq_region == cases$seq_region[a$transcript_index + 1L]),
-        all(contributors$position == records$POS[source_rows]),
-        identical(contributors$reference, records$REF[source_rows]))
-      for (j in seq_len(nrow(contributors))) {
-        ordinal <- contributors$alt_index[j]
-        expected_alt <- if (is.na(ordinal)) "" else if (ordinal == 0L) records$REF[source_rows[j]]
-          else records$ALT[[source_rows[j]]][ordinal]
-        stopifnot(identical(contributors$alternate[j], expected_alt))
-      }
-      record <- match(records$ID[source_rows], c("a", "b"))
-      stopifnot(!anyNA(record), !anyDuplicated(record))
-      public_semantics$source_indices[at[record]] <- ifelse(is.na(contributors$alt_index), -1L,
-        as.integer(contributors$alt_index))
-      public_semantics$source_evidence[at[record]] <- contributors$evidence_flags
-    }
-  }
-  stopifnot(all(seen))
+  public_raw_comparisons <- phase_public_comparisons(cases, oracle, public_raw, records)
+  public_semantics <- phase_public_semantics(cases, public_raw, records)
   public_matches <- vapply(public_raw_comparisons, `[[`, TRUE, "equal")
   public_semantics_matches <- phase_equal(expected_semantics, public_semantics)
   public_semantics_matches[is.na(public_semantics_matches)] <- FALSE

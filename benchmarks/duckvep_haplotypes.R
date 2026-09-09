@@ -21,11 +21,14 @@ fixture <- function(paths) {
   protein <- as.character(Biostrings::translate(Biostrings::DNAStringSet(
     substring(cds, 1L, nchar(cds) %/% 3L * 3L))))
   protein <- sub("(\\*).*", "\\1", protein)
+  nominal_length_diff <- vapply(masks, function(mask)
+    sum((nchar(events$alternate) - nchar(events$reference))[
+      bitwAnd(mask, bitwShiftL(1L, 0:3)) != 0L]), 0)
   list(reference = fasta[2L], events = events,
-    expected = data.frame(mask = masks, cds, protein)[1:3, ],
-    singletons = data.frame(mask = masks, cds, protein)[4:7, ],
+    expected = data.frame(mask = masks, cds, protein, nominal_length_diff)[1:3, ],
+    singletons = data.frame(mask = masks, cds, protein, nominal_length_diff)[4:7, ],
     expected_reference = data.frame(mask = 0L, cds = fasta[2L], protein = sub("(\\*).*", "\\1",
-      as.character(Biostrings::translate(Biostrings::DNAString(fasta[2L]))))))
+      as.character(Biostrings::translate(Biostrings::DNAString(fasta[2L])))), nominal_length_diff = 0))
 }
 
 metric_names <- c("seconds", "workspace_bytes", "model_bytes", "input_records",
@@ -152,16 +155,28 @@ sql <- function(job, input) {
       FROM measured) h")
   # Full output, local coding-block output, and literal replay are separate
   # contracts. Narrow projections never replace the full-output check.
+  hgvs_so <- DBI::dbGetQuery(con, "SELECT sum(octet_length(encode(to_json(h)))) hgvs_so_json_bytes,
+    bit_xor(hash(to_json(h)))::VARCHAR hgvs_so_xor_hash,
+    sum(hash(to_json(h))::HUGEINT)::VARCHAR hgvs_so_sum_hash FROM (
+      SELECT * EXCLUDE(nominal_length_diff)
+        REPLACE(list_sort(carriers) AS carriers,list_sort(contributors) AS contributors)
+      FROM measured) h")
+  non_hgvs <- DBI::dbGetQuery(con, "SELECT sum(octet_length(encode(to_json(h)))) non_hgvs_json_bytes,
+    bit_xor(hash(to_json(h)))::VARCHAR non_hgvs_xor_hash,
+    sum(hash(to_json(h))::HUGEINT)::VARCHAR non_hgvs_sum_hash FROM (
+      SELECT * EXCLUDE(hgvsp,hgvsp_status)
+        REPLACE(list_sort(carriers) AS carriers,list_sort(contributors) AS contributors)
+      FROM measured) h")
   local_so <- DBI::dbGetQuery(con, "SELECT sum(octet_length(encode(to_json(h)))) local_so_json_bytes,
     bit_xor(hash(to_json(h)))::VARCHAR local_so_xor_hash,
     sum(hash(to_json(h))::HUGEINT)::VARCHAR local_so_sum_hash FROM (
-      SELECT * EXCLUDE(hgvsp,hgvsp_status)
+      SELECT * EXCLUDE(hgvsp,hgvsp_status,nominal_length_diff)
         REPLACE(list_sort(carriers) AS carriers,list_sort(contributors) AS contributors)
       FROM measured) h")
   replay <- DBI::dbGetQuery(con, "SELECT sum(octet_length(encode(to_json(h)))) replay_json_bytes,
     bit_xor(hash(to_json(h)))::VARCHAR replay_xor_hash,
     sum(hash(to_json(h))::HUGEINT)::VARCHAR replay_sum_hash FROM (
-      SELECT * EXCLUDE(hgvsp,hgvsp_status)
+      SELECT * EXCLUDE(hgvsp,hgvsp_status,nominal_length_diff)
         REPLACE(list_sort(carriers) AS carriers,list_sort(contributors) AS contributors,
         list_transform(coding_blocks,b->struct_pack(cds_start:=b.cds_start,reference:=b.reference,
           alternate:=b.alternate,alt_start0:=b.alt_start0,length_change:=b.length_change,
@@ -192,6 +207,7 @@ sql <- function(job, input) {
       UNION ALL (SELECT * FROM actual_carriers EXCEPT ALL SELECT * FROM expected_carriers))")$ok
     sequences <- function() DBI::dbGetQuery(con, sprintf("SELECT bool_and(coalesce(
       m.cds=e.cds AND m.protein=e.protein AND m.sequence_status='ok' AND m.projection_status='ok'
+      AND m.nominal_length_diff=e.nominal_length_diff
       AND %s
       AND m.evidence_flags=CASE WHEN e.mask=0 THEN 0 ELSE 1 END
       AND list_unique(list_transform(m.contributors,x->x.event_index))=length(m.contributors)
@@ -263,17 +279,24 @@ sql <- function(job, input) {
         DBI::dbExecute(con, "CREATE OR REPLACE TABLE measured AS SELECT * FROM verified")
       }
     }
+    # Nominal source lengths are checked independently of CDS/block lengths and
+    # frame-category bits. The +3 corruption preserves the frame category.
+    DBI::dbExecute(con, "UPDATE measured SET nominal_length_diff=nominal_length_diff+3")
+    stopifnot(!isTRUE(sequences()))
+    DBI::dbExecute(con, "UPDATE measured SET nominal_length_diff=nominal_length_diff-3")
+    stopifnot(isTRUE(sequences()))
     # A duplicate output cannot be hidden by a set-only comparison.
     DBI::dbExecute(con, "INSERT INTO measured SELECT * FROM measured LIMIT 1")
     stopifnot(!exact())
   }
   c(list(seconds = elapsed, duckdb_version = as.character(utils::packageVersion("duckdb")),
-    output_contract = if (singletons) paste0("singletons_local_coding_block_so_",
+    output_contract = paste0(if (singletons) paste0("singletons_local_coding_block_so_",
       if (hgvs) "hgvs" else "hgvs_status") else if (records)
       "source_records_local_coding_block_so_hgvs_status" else
-      "local_coding_block_so_hgvs_status"),
+      "local_coding_block_so_hgvs_status", "_nominal_length_diff")),
     denominators,
-    as.list(fingerprint[1L, ]), as.list(local_so[1L, ]), as.list(replay[1L, ]))
+    as.list(fingerprint[1L, ]), as.list(hgvs_so[1L, ]), as.list(non_hgvs[1L, ]),
+    as.list(local_so[1L, ]), as.list(replay[1L, ]))
 }
 
 main <- function() {
@@ -385,7 +408,7 @@ main <- function() {
   stopifnot(all(vapply(decoded, function(x) length(unique(x)) <= 1L, TRUE)))
   if (any(results$mode %in% c("sql_singletons", "sql_singletons_hgvs"))) {
     singleton_rows <- results[results$mode %in% c("sql_singletons", "sql_singletons_hgvs"),
-      c(shared_counts, "local_so_json_bytes", "local_so_xor_hash", "local_so_sum_hash"), drop = FALSE]
+      c(shared_counts, "non_hgvs_json_bytes", "non_hgvs_xor_hash", "non_hgvs_sum_hash"), drop = FALSE]
     stopifnot(all(vapply(singleton_rows, function(x) length(unique(x)) <= 1L, TRUE)))
   }
   stopifnot(identical(hashes, vapply(identities, duckvep_evidence_sha256, "")),

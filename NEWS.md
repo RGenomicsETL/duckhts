@@ -2,6 +2,14 @@
 
 # duckhts 1.5.1.9000
 
+- reconstruct raw/public phase-audit sequences and record observations from
+  retained keyed oracle and execution outputs before publication; compare parser
+  expectations with upstream call observations and preserve missing-lane failures
+
+- expose the replay kernel's signed nominal_length_diff in duckvep_haplotypes,
+  distinct from rebuilt CDS length change under clipped source replacements;
+  unavailable sequences return NULL
+
 - verify phase-audit genotype labels against retained VCF records and reader-captured
   raw GT before publishing per-profile or per-stratum results
 

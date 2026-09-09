@@ -4,6 +4,59 @@ library(DBI)
 local({
   con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE))
+  tx <- paste("SELECT i::UINTEGER transcript_index,i::UINTEGER seq_region,",
+    "100::UBIGINT transcript_start,111::UBIGINT transcript_end,(1-2*(i%2))::TINYINT strand,",
+    "0::UINTEGER gene_index,3::UBIGINT transcript_flags,transcript_start cds_start,",
+    "transcript_end cds_end,'AAAAAAAAAAAA'::BLOB cds_sequence,1::UTINYINT codon_table",
+    "FROM range(8) t(i)")
+  exons <- paste("SELECT i::UINTEGER transcript_index,100::UBIGINT exon_start,",
+    "111::UBIGINT exon_end,1::UBIGINT exon_cdna_start,12::UBIGINT exon_cdna_end,",
+    "0::TINYINT phase,0::TINYINT end_phase FROM range(8) t(i)")
+  expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('nominal',",
+    "'SELECT i::UINTEGER seq_region FROM range(8) t(i)',", dbQuoteString(con, tx), ",",
+    dbQuoteString(con, exons), ")"))$loaded)
+  calls <- paste("WITH edits(scenario,ordinal,cds_start,ref,alt,gt) AS (VALUES",
+    "(0,0,12,'A','AGC','.|1'),(0,1,12,'A','C','1|1'),",
+    "(1,0,7,'AAAAAA','AAA','1|1'),(1,1,9,'AAAA','A','1|1'),",
+    "(2,0,9,'AAAA','A','1|1'),(3,0,4,'A','AAA','1|1'),(3,1,9,'AA','A','1|1')),",
+    "oriented AS (SELECT i transcript_index,i seq_region,e.ordinal,",
+    "CASE WHEN i%2=0 THEN 99+cds_start ELSE 113-cds_start-len(ref) END AS position,",
+    "CASE WHEN i%2=0 THEN ref ELSE reverse(translate(ref,'ACGT','TGCA')) END AS reference,",
+    "[CASE WHEN i%2=0 THEN alt ELSE reverse(translate(alt,'ACGT','TGCA')) END] alternates,gt",
+    "FROM range(8) t(i) JOIN edits e ON i//2=e.scenario)",
+    "SELECT 2*transcript_index+row_number() OVER(PARTITION BY transcript_index",
+    "ORDER BY position,ordinal) event_index,seq_region,position,reference,alternates,",
+    "transcript_index,0 sample_index,gt FROM oriented ORDER BY event_index DESC")
+  expected <- data.frame(transcript_index = rep(0:7, each = 2L), lane = rep(1:2, 8L),
+    nominal = c(2, -1, 2, -1, rep(-6, 4L), rep(-3, 4L), rep(1, 4L)),
+    net = c(2, 0, 2, 0, rep(-3, 8L), rep(1, 4L)),
+    flags = c(rep(3L, 4L), rep(1L, 8L), rep(3L, 4L)))
+  for (threads in c(1L, 4L)) {
+    dbExecute(con, paste("SET threads =", threads))
+    result <- rduckhts_haplotypes(con, calls, "nominal", phase_policy = "vep116_compat",
+      input_mode = "source_records")
+    expect_identical(tail(names(result), 1L), "nominal_length_diff")
+    expect_equal(nrow(result), 10L)
+    expect_equal(sum(result$carrier_count), 16L)
+    actual <- do.call(rbind, lapply(seq_len(nrow(result)), function(i) {
+      expect_equal(result$sequence_status[i], if (result$transcript_index[i] < 2L) "conditional" else "ok")
+      expect_equal(nrow(result$contributors[[i]]), if (result$transcript_index[i] %in% 4:5) 1L else 2L)
+      data.frame(transcript_index = result$transcript_index[i],
+        lane = result$carriers[[i]]$haplotype_lane, nominal = result$nominal_length_diff[i],
+        net = nchar(result$cds[i]) - 12, flags = result$sequence_flags[i])
+    }))
+    actual <- actual[order(actual$transcript_index, actual$lane), ]
+    rownames(actual) <- NULL
+    expect_equal(actual, expected)
+    # Clipping changes actual component lengths, not the nominal source sum.
+    block_net <- vapply(result$coding_blocks, function(x) sum(x$length_change), 0)
+    expect_equal(sum(result$nominal_length_diff != block_net), 4L)
+  }
+})
+
+local({
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
   tx <- paste("SELECT i::UINTEGER transcript_index,i::UINTEGER seq_region,100::UBIGINT transcript_start,",
     "120::UBIGINT transcript_end,CASE WHEN i<3 THEN 1 ELSE -1 END::TINYINT strand,",
     "0::UINTEGER gene_index,3::UBIGINT transcript_flags,100::UBIGINT cds_start,120::UBIGINT cds_end,",
@@ -31,6 +84,7 @@ local({
     expect_equal(result$hgvsp, rep(c("p.[(Met1?;Ala4Ser)]", "p.[(Gly2?;Cys4Phe)]", "p.(Trp2?)"), 2))
     expect_true(all(result$hgvsp_status == "ok" & result$carrier_count == 2))
     expect_equal(result$cds, paste0(strrep("N", (0:5) %% 3L), "ATAAAAGGTCCTTCTGAACAATAA"))
+    expect_equal(result$nominal_length_diff, rep(3, 6))
   }
 })
 
@@ -62,6 +116,7 @@ local({
   for (threads in c(1L, 4L)) {
     dbExecute(con, paste("SET threads =", threads))
     result <- rduckhts_haplotypes(con, calls, "partial_phase")
+    expect_equal(result$nominal_length_diff, ifelse(is.na(result$cds), NA_real_, 0))
     actual <- do.call(rbind, lapply(seq_len(nrow(result)), function(i) {
       carriers <- result$carriers[[i]]
       expect_true(all(carriers$phase_set == 10 & carriers$ploidy == 3))
@@ -345,6 +400,7 @@ local({
   expect_equal(composed$cds, c("AAAAAAAAAAAA", "CAAAAAAAAAAA"))
   expect_equal(composed$protein, c("KKKK", "QKKK"))
   expect_equal(composed$edit_count, c(2, 2))
+  expect_equal(composed$nominal_length_diff, c(0, 0))
   expect_true(all(is.na(composed$stop_in_displaced_frame)))
   for (i in 1:2) {
     expect_equal(composed$coding_blocks[[i]]$coding_status, "unsupported_ordered_replacements")
@@ -359,6 +415,7 @@ local({
   expect_equal(uncertain$sequence_status, "conditional")
   expect_equal(uncertain$edit_count, 1)
   expect_equal(uncertain$carrier_count, 2L)
+  expect_equal(uncertain$nominal_length_diff, 0)
   expect_true(all(is.na(uncertain$hgvsp) & uncertain$hgvsp_status == "incomplete_input"))
   expect_error(rduckhts_haplotypes(con, overlapping, "haps", "vep116_compat",
     input_mode = "source_records", max_leaf_edits = 1), pattern = "max_leaf_edits")
