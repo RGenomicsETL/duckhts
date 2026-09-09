@@ -96,10 +96,13 @@ section, cite the nearest rendered baseline, and say what measurement is still m
 
 ### Pull Request Codex Review — Mandatory
 
-Every pull request must receive a Codex review of its current head commit before merge.
-After the ready-for-review PR is pushed, comment `@codex review` and wait for the Codex
-response. Address every actionable finding, push the fix, and request another review;
-repeat until Codex reports no major issue on the current head. Do not merge merely because
+After each major commit is pushed to `develop`, request Codex review on its pull request
+by commenting `@codex review` with the full head SHA, including while the PR is draft.
+Wait for the response, address every actionable finding, push the fix, and request another
+review. A review applies only to the commit it examined.
+
+Every pull request must receive a Codex review of its current ready-for-review head before
+merge. Repeat until Codex reports no major issue on that head. Do not merge merely because
 GitHub marks the branch mergeable or because CI passes. Record the reviewed commit in the
 handoff when the review response names it.
 

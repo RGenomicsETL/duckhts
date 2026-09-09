@@ -176,7 +176,8 @@ TEST haplotype_differences_bound_alignment_work_and_report_limits(void) {
 
 TEST haplotype_full_translation_matches_every_supported_codon_table(void) {
     const char alphabet[] = "ACGTUNacgtun";
-    uint8_t cds[13] = "ATGTGCTAAGCCN", peptide[8];
+    uint8_t cds[] = {'A', 'T', 'G', 'T', 'G', 'C', 'T', 'A', 'A', 'G', 'C', 'C', 'N'};
+    uint8_t peptide[8];
     duckvep_translation_t result;
     for (unsigned table = 0u; table < 32u; table++) {
         if (!duckvep_codon_table_supported((duckvep_codon_table_t)table)) {

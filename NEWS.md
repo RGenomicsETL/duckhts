@@ -2,6 +2,9 @@
 
 # duckhts 1.5.1.9000
 
+- initialize length-delimited native translation fixtures as byte arrays for
+  strict Clang builds, preserving their exact input lengths and test assertions
+
 - compile native property tests by family under fatal C11 pedantic diagnostics with a
   checked source and test inventory;
   execute fixed witnesses for empty-UTR overlap, split-start-codon insertions and
