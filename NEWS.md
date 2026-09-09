@@ -2,6 +2,10 @@
 
 # duckhts 1.5.1.9000
 
+- retain matched selected-FORMAT, HPRC cohort and phased-replay measurements for the reader
+  ownership and review fixes, with complete output checks and mixed timing results;
+  raw-record replay comparisons verify input identity and all output denominators
+
 - remove the unused prepared-carrier stream entry point; native replay tests
   construct complete decoded calls through the production genotype path
 

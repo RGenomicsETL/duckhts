@@ -41,8 +41,8 @@ summary <- do.call(rbind, lapply(groups, function(x) {
     max_s = max(x$seconds), max_process_rss_mib = max(x$peak_process_rss_kib) / 1024)
 }))
 comparison <- merge(
-  subset(summary, source_revision == baseline_revision & mode == "sql"),
-  subset(summary, source_revision == revision & mode == "sql"),
+  subset(summary, source_revision == baseline_revision & mode %in% c("sql", "sql_records")),
+  subset(summary, source_revision == revision & mode %in% c("sql", "sql_records")),
   by = keys, suffixes = c("_before", "_after"))
 comparison$median_change_percent <- 100 * (comparison$median_s_after / comparison$median_s_before - 1)
 comparison <- comparison[do.call(order, comparison[keys]), ]
@@ -65,7 +65,7 @@ replay_fingerprints <- unique(history[history$mode == "sql", c(fingerprint_keys,
 local_so_fingerprints <- unique(history[history$mode == "sql" & history$output_contract %in%
   c("local_coding_block_so", "local_coding_block_so_hgvs_status"), c(fingerprint_keys,
     "local_so_json_bytes", "local_so_xor_hash", "local_so_sum_hash")])
-stopifnot(nrow(comparison) == nrow(public),
+stopifnot(nrow(comparison) == nrow(public) + nrow(raw),
   !anyDuplicated(fingerprints[c(fingerprint_keys, "output_contract")]),
   !anyNA(local_so_fingerprints), !anyDuplicated(local_so_fingerprints[fingerprint_keys]),
   !anyDuplicated(replay_fingerprints[fingerprint_keys]))
@@ -78,6 +78,13 @@ raw_fingerprints <- unique(history[history$mode == "sql_records", c(fingerprint_
   "protein_bytes", "physical_edits", "contributors", "blocks", "json_bytes", "xor_hash", "sum_hash")])
 stopifnot(!anyNA(raw_fingerprints),
   !anyDuplicated(raw_fingerprints[c(fingerprint_keys, "output_contract")]))
+raw_matched <- unique(history[history$mode == "sql_records" &
+  history$source_revision %in% c(revision, baseline_revision),
+  c(fingerprint_keys, "threads", "cpu_affinity", "duckdb_version", "output_contract",
+    "reference_sha256", "events_sha256", "input_physical_records", "input_record_sample_calls",
+    "input_candidate_sample_rows", "output_leaves", "output_carriers", "cds_bytes",
+    "protein_bytes", "physical_edits", "contributors", "blocks", "json_bytes", "xor_hash", "sum_hash")])
+stopifnot(!anyNA(raw_matched), !anyDuplicated(raw_matched[fingerprint_keys]))
 ```
 
 Compound-replay source: `r revision`; same-input baseline: `r baseline_revision`.
@@ -146,7 +153,7 @@ The native count sink omits local SO evaluation. HGVS-enabled performance
 requires a separate workload.
 
 ```{r sql-comparison}
-knitr::kable(comparison[c("transcripts", "samples", "overlap", "median_s_before",
+knitr::kable(comparison[comparison$mode == "sql", c("transcripts", "samples", "overlap", "median_s_before",
   "median_s_after", "median_change_percent", "max_process_rss_mib_before",
   "max_process_rss_mib_after")], row.names = FALSE, digits = 3)
 ```
@@ -285,9 +292,16 @@ knitr::kable(raw[c("transcripts", "samples", "overlap", "input_physical_records"
 knitr::kable(raw[c("output_leaves", "cds_bytes", "protein_bytes", "json_bytes")], row.names = FALSE)
 ```
 
-There is no earlier source-bound raw-lane measurement for a same-contract
-comparison. Different output denominators preclude treating raw versus decoded
-time as an implementation speedup.
+The raw-lane comparison uses the same source revisions as the decoded comparison.
+Input hashes, complete output fingerprints, all listed denominators, thread count
+and output contract match between revisions. Different output denominators preclude
+treating raw versus decoded time as an implementation speedup.
+
+```{r raw-comparison}
+knitr::kable(comparison[comparison$mode == "sql_records", c("transcripts", "samples", "overlap",
+  "median_s_before", "median_s_after", "median_change_percent", "max_process_rss_mib_before",
+  "max_process_rss_mib_after")], row.names = FALSE, digits = 3)
+```
 
 ## Singleton HGVS materialization
 

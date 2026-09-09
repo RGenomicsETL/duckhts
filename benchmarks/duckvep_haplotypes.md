@@ -3,8 +3,8 @@ Phased replay: native stream and public SQL
 
 <!-- duckvep_haplotypes.md is generated from duckvep_haplotypes.Rmd. -->
 
-Compound-replay source: ac423de1e6ec0f449b2f5ff2367763e009115b0a;
-same-input baseline: 16afccd0fd795df318bbd8b3e66f89b8321da022. Native
+Compound-replay source: be6c4383b7c6fc8c4e7fd5b7f1bfc2cd3181d8b1;
+same-input baseline: ac423de1e6ec0f449b2f5ff2367763e009115b0a. Native
 measurements cover literal phased replay. SQL materializes all current
 fields, including local coding-block SO. HGVS generation is disabled;
 whole-haplotype SO/HGVS is unfinished and its computation is not timed
@@ -71,37 +71,35 @@ observed in the native stream, not inferred SQL counters.
 
 | transcripts | samples | overlap | mode        | min_s | median_s | max_s | max_process_rss_mib |
 |------------:|--------:|--------:|:------------|------:|---------:|------:|--------------------:|
-|        1024 |       4 |       1 | native      | 0.003 |    0.003 | 0.003 |              74.324 |
-|        1024 |       4 |       1 | sql         | 0.049 |    0.050 | 0.050 |             219.137 |
-|        1024 |      64 |       1 | native      | 0.013 |    0.013 | 0.014 |              74.320 |
-|        1024 |      64 |       1 | sql         | 0.329 |    0.334 | 0.334 |             378.934 |
-|        1024 |      64 |      16 | native      | 0.016 |    0.017 | 0.017 |              74.473 |
-|        1024 |      64 |      16 | sql         | 0.336 |    0.337 | 0.337 |             379.340 |
-|        1024 |      64 |      16 | sql_records | 0.711 |    0.711 | 0.723 |             610.504 |
-|        1024 |      64 |      64 | native      | 0.018 |    0.019 | 0.019 |              74.320 |
-|        1024 |      64 |      64 | sql         | 0.338 |    0.341 | 0.342 |             379.176 |
-|        1024 |     256 |       1 | native      | 0.045 |    0.047 | 0.047 |              74.465 |
-|        1024 |     256 |       1 | sql         | 1.321 |    1.328 | 1.331 |             960.242 |
-|       10240 |      64 |      16 | native      | 0.164 |    0.166 | 0.168 |              74.473 |
-|       10240 |      64 |      16 | sql         | 4.184 |    4.188 | 4.221 |            2133.344 |
+|        1024 |       4 |       1 | native      | 0.003 |    0.003 | 0.003 |              73.852 |
+|        1024 |       4 |       1 | sql         | 0.051 |    0.052 | 0.052 |             218.504 |
+|        1024 |      64 |       1 | native      | 0.013 |    0.014 | 0.014 |              73.699 |
+|        1024 |      64 |       1 | sql         | 0.345 |    0.346 | 0.376 |             376.996 |
+|        1024 |      64 |      16 | native      | 0.017 |    0.017 | 0.018 |              73.699 |
+|        1024 |      64 |      16 | sql         | 0.351 |    0.354 | 0.355 |             376.867 |
+|        1024 |      64 |      16 | sql_records | 0.734 |    0.734 | 0.738 |             611.840 |
+|        1024 |      64 |      64 | native      | 0.019 |    0.019 | 0.019 |              73.695 |
+|        1024 |      64 |      64 | sql         | 0.355 |    0.355 | 0.365 |             376.309 |
+|        1024 |     256 |       1 | native      | 0.047 |    0.047 | 0.047 |              73.855 |
+|        1024 |     256 |       1 | sql         | 1.327 |    1.331 | 1.333 |             959.578 |
+|       10240 |      64 |      16 | native      | 0.169 |    0.169 | 0.172 |              73.695 |
+|       10240 |      64 |      16 | sql         | 4.138 |    4.157 | 4.168 |            2143.230 |
 
 Both compared revisions return each block’s local SO mask, coding status
 and position relative to the first stop. A shared coding context
-evaluates physical blocks on completed replay. The current output adds
-HGVS columns. All prior local-coding-block fields and input/output
-denominators match, but complete rows have different schemas and byte
-counts. This is a same-input comparison, not identical-output work. The
-native count sink omits local SO evaluation. HGVS-enabled performance
-requires a separate workload.
+evaluates physical blocks on completed replay. Full-output fingerprints
+and input/output denominators match across the compared configurations.
+The native count sink omits local SO evaluation. HGVS-enabled
+performance requires a separate workload.
 
 | transcripts | samples | overlap | median_s_before | median_s_after | median_change_percent | max_process_rss_mib_before | max_process_rss_mib_after |
 |------------:|--------:|--------:|----------------:|---------------:|----------------------:|---------------------------:|--------------------------:|
-|        1024 |       4 |       1 |           0.053 |          0.050 |                -5.660 |                    215.789 |                   219.137 |
-|        1024 |      64 |       1 |           0.365 |          0.334 |                -8.493 |                    376.344 |                   378.934 |
-|        1024 |      64 |      16 |           0.366 |          0.337 |                -7.923 |                    377.344 |                   379.340 |
-|        1024 |      64 |      64 |           0.368 |          0.341 |                -7.337 |                    375.516 |                   379.176 |
-|        1024 |     256 |       1 |           1.402 |          1.328 |                -5.278 |                    957.293 |                   960.242 |
-|       10240 |      64 |      16 |           4.445 |          4.188 |                -5.782 |                   2134.574 |                  2133.344 |
+|        1024 |       4 |       1 |           0.050 |          0.052 |                 4.000 |                    219.137 |                   218.504 |
+|        1024 |      64 |       1 |           0.334 |          0.346 |                 3.593 |                    378.934 |                   376.996 |
+|        1024 |      64 |      16 |           0.337 |          0.354 |                 5.045 |                    379.340 |                   376.867 |
+|        1024 |      64 |      64 |           0.341 |          0.355 |                 4.106 |                    379.176 |                   376.309 |
+|        1024 |     256 |       1 |           1.328 |          1.331 |                 0.226 |                    960.242 |                   959.578 |
+|       10240 |      64 |      16 |           4.188 |          4.157 |                -0.740 |                   2133.344 |                  2143.230 |
 
 Each recorded pass uses a fresh process and a full warm-up. Native
 timing starts after workspace initialization and includes ordered-feed
@@ -146,12 +144,12 @@ are not bytes written to disk.
 
 | transcripts | samples | overlap | peak_transcripts | peak_carriers | peak_prefixes | peak_events | peak_projections | peak_allele_bytes | workspace_bytes | model_bytes |
 |------------:|--------:|--------:|-----------------:|--------------:|--------------:|------------:|-----------------:|------------------:|----------------:|------------:|
-|        1024 |       4 |       1 |                1 |             7 |             6 |           4 |                4 |                10 |            4810 |       34136 |
-|        1024 |      64 |       1 |                1 |           112 |             6 |           4 |                4 |                10 |           14410 |       34136 |
-|        1024 |      64 |      16 |               16 |          1792 |            96 |           4 |               64 |                10 |          189430 |       34136 |
-|        1024 |      64 |      64 |               64 |          7168 |           384 |           4 |              256 |                10 |          749494 |       34136 |
-|        1024 |     256 |       1 |                1 |           448 |             6 |           4 |                4 |                10 |           45130 |       34136 |
-|       10240 |      64 |      16 |               16 |          1792 |            96 |           4 |               64 |                10 |          189430 |      338264 |
+|        1024 |       4 |       1 |                1 |             7 |             6 |           4 |                4 |                10 |            4842 |       34136 |
+|        1024 |      64 |       1 |                1 |           112 |             6 |           4 |                4 |                10 |           14442 |       34136 |
+|        1024 |      64 |      16 |               16 |          1792 |            96 |           4 |               64 |                10 |          189462 |       34136 |
+|        1024 |      64 |      64 |               64 |          7168 |           384 |           4 |              256 |                10 |          749526 |       34136 |
+|        1024 |     256 |       1 |                1 |           448 |             6 |           4 |                4 |                10 |           45162 |       34136 |
+|       10240 |      64 |      16 |               16 |          1792 |            96 |           4 |               64 |                10 |          189462 |      338264 |
 
 Native workspace bytes count actual preallocated buffer capacities and
 state, separately from immutable model allocations. The fixed fixture is
@@ -256,9 +254,15 @@ appear in the timing table above; its input and output denominators are:
 |--------------:|----------:|--------------:|-----------:|
 |          4096 |    737280 |        245760 |   14052904 |
 
-There is no earlier source-bound raw-lane measurement for a
-same-contract comparison. Different output denominators preclude
-treating raw versus decoded time as an implementation speedup.
+The raw-lane comparison uses the same source revisions as the decoded
+comparison. Input hashes, complete output fingerprints, all listed
+denominators, thread count and output contract match between revisions.
+Different output denominators preclude treating raw versus decoded time
+as an implementation speedup.
+
+| transcripts | samples | overlap | median_s_before | median_s_after | median_change_percent | max_process_rss_mib_before | max_process_rss_mib_after |
+|------------:|--------:|--------:|----------------:|---------------:|----------------------:|---------------------------:|--------------------------:|
+|        1024 |      64 |      16 |           0.711 |          0.734 |                 3.235 |                    610.504 |                    611.84 |
 
 ## Singleton HGVS materialization
 
