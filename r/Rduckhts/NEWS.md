@@ -1,6 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
 
+- document the bundled haplotype and raw-genotype schemas in the generated README;
+  local examples render without network access and remote examples remain usage snippets
+
 - expose exact original VCF genotype text with rduckhts_geno(raw_gt = TRUE),
   retaining sample selection, physical records and explicit phase spelling;
   absent GT is NULL and literal missing alleles remain text. BCF input rejects

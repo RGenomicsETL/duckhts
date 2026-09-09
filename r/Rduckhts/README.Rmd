@@ -228,7 +228,7 @@ fq_files <- c(
   system.file("extdata", "r2.fq", package = "Rduckhts")
 )
 rduckhts_fastq_multi(con, "fq_multi", fq_files, overwrite = TRUE)
-dbGetQuery(con, "SELECT filename, count(*) AS n FROM fq_multi GROUP BY ALL")
+dbGetQuery(con, "SELECT filename, count(*) AS n FROM fq_multi GROUP BY ALL ORDER BY filename")
 ```
 
 Per-file parameters are supported via a `.params` data.frame with a `file` column
@@ -659,7 +659,8 @@ mos_out <- rduckhts_mosdepth(
   overwrite = TRUE
 )
 
-mos_out[, c("summary_path", "regions_path")]
+transform(mos_out[, c("summary_path", "regions_path")],
+          summary_path = "<tempfile>", regions_path = "<tempfile>")
 
 utils::read.delim(
   gzfile(mos_out$regions_path[[1]]),
@@ -753,7 +754,8 @@ writeLines(c(
   ">chrF",
   "ACGTACGTAA"
 ), munge_fasta)
-rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai"))
+transform(rduckhts_fasta_index(con, munge_fasta, index_path = paste0(munge_fasta, ".fai")),
+          index_path = "<tempfile>")
 
 munge_out <- rduckhts_munge(
   con,
@@ -838,7 +840,8 @@ bgzip_meta <- rduckhts_bgzip(
   keep = TRUE,
   overwrite = TRUE
 )
-bgzip_meta[, c("success", "output_path", "bytes_out")]
+transform(bgzip_meta[, c("success", "output_path", "bytes_out")],
+          output_path = "<tempfile>")
 
 bgunzip_meta <- rduckhts_bgunzip(
   con, tmp_bgz,
@@ -855,14 +858,14 @@ bam_index_meta <- rduckhts_bam_index(
   index_path = tmp_bai,
   threads = 1
 )
-bam_index_meta
+transform(bam_index_meta, index_path = "<tempfile>")
 
 bcf_index_meta <- rduckhts_bcf_index(
   con, bcf_src,
   index_path = tmp_csi,
   threads = 1
 )
-bcf_index_meta
+transform(bcf_index_meta, index_path = "<tempfile>")
 
 tabix_meta <- rduckhts_tabix_index(
   con, tmp_bgz,
@@ -870,7 +873,7 @@ tabix_meta <- rduckhts_tabix_index(
   index_path = tmp_tbi,
   threads = 1
 )
-tabix_meta
+transform(tabix_meta, index_path = "<tempfile>")
 
 rduckhts_bed(con, "targets_idx", tmp_bgz, region = "CHROMOSOME_I:1-20", index_path = tmp_tbi, overwrite = TRUE)
 dbGetQuery(con, "SELECT * FROM targets_idx")
@@ -991,9 +994,10 @@ head(index_spans_preview[, c("seqname", "tid", "index_type", "chunk_beg_vo", "ch
 
 ### Remote VCF on S3
 
-S3 files can be query when `htslib` is built with plugins enable. This is not the case on RTools
+S3 queries require a build with the S3 transport enabled; RTools builds do not
+enable it. This remote example is an unevaluated usage snippet.
 
-```{r, eval=TRUE}
+```{r, eval=FALSE}
 # Example S3 URL (1000 Genomes cohort VCF)
 s3_base <- "s3://1000genomes-dragen-v3.7.6/data/cohorts/"
 s3_path <- "gvcf-genotyper-dragen-3.7.6/hg19/3202-samples-cohort/"
@@ -1205,9 +1209,11 @@ head(index_raw, 1)
 
 ### Remote GTEx tabix example
 
-GTEx eQTL matrices on EBI are tabix-indexed. In browser wasm/webR, this still depends on CORS policy on both the data object and index object.
+GTEx eQTL matrices on EBI are tabix-indexed. In browser wasm/webR, this depends on
+CORS policy on both the data object and index object. This remote example is an
+unevaluated usage snippet.
 
-```{r, eval=TRUE}
+```{r, eval=FALSE}
 gtex_url <- "https://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz" 
 rduckhts_tabix(con, "gtex_eqtl", gtex_url, region = "1:11868-14409",
                   header = TRUE, auto_detect = TRUE, overwrite = TRUE)

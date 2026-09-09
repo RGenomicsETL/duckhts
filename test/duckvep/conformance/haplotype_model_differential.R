@@ -413,6 +413,8 @@ main <- function() {
       equal = identical(canonical(expected, samples = TRUE), canonical(observed, samples = TRUE)),
       sequences_equal = identical(canonical(expected, FALSE), canonical(observed, FALSE)),
       counts_equal = sum(a$carrier_count) == oracle[[model$transcript]]$total_haplotype_count,
+      lane_flags_equal = native_lane_flags_equal(expected_lanes, a, paste0('s', 0:2)),
+      group_metadata_equal = haplotype_group_metadata_equal(phase[[model$transcript]], oracle[[model$transcript]]),
       unavailable_carriers = sum(a$carrier_count[is.na(a$cds)]),
       input_provenance_equal = input_provenance_ok(a, r),
       mappings_equal = mappings_ok(phase[[model$transcript]], model, spans, r, layout$cds_start, layout$cds_end))
@@ -422,6 +424,9 @@ main <- function() {
     summary[[name]] <- vapply(comparisons, `[[`, if (name == 'unavailable_carriers') 0 else TRUE, name)
   summary$passed <- replay_comparisons_passed(summary) & with(summary,
     input_provenance_equal & mappings_equal & model_sequence_equal)
+  for (name in c('lane_flags_equal', 'group_metadata_equal'))
+    summary[[name]] <- vapply(comparisons, `[[`, TRUE, name)
+  summary$metadata_passed <- summary$lane_flags_equal & summary$group_metadata_equal
   saveRDS(comparisons, file.path(out, 'comparisons.rds'))
   write.csv(summary, file.path(out, 'summary.csv'), row.names = FALSE)
   controls <- observation_controls(oracle[['T1full']]$haplotypes, actual[rows_by_tx[['0']], ],
@@ -430,7 +435,14 @@ main <- function() {
   controls <- c(controls, haplotype_output_controls(actual[rows_by_tx[['0']], , drop = FALSE]))
   controls <- c(controls, wrong_reference_cds =
     !identical(paste0(models$cds[1L], 'A'), phase[['T1full']]$reference_cds))
+  metadata_controls <- haplotype_metadata_controls(phase[['T1full']], oracle[['T1full']])
+  wrong_flags <- actual[rows_by_tx[['0']], , drop = FALSE]
+  wrong_flags$sequence_flags[1L] <- bitwXor(wrong_flags$sequence_flags[1L], 1L)
+  metadata_controls <- c(metadata_controls, metadata_native_flags =
+    !native_lane_flags_equal(phase[['T1full']]$replay_lanes, wrong_flags, paste0('s', 0:2)))
   write.csv(data.frame(control = names(controls), rejected = controls), file.path(out, 'controls.csv'), row.names = FALSE)
+  write.csv(data.frame(control = names(metadata_controls), rejected = metadata_controls),
+    file.path(out, 'metadata_controls.csv'), row.names = FALSE)
   write_receipt(list(execution_status = 'compared',
     geometry_profiles = sum(summary$cohort == 'geometry'), geometry_failures = sum(!summary$passed & summary$cohort == 'geometry'),
     interaction_profiles = sum(summary$cohort == 'interaction'),
@@ -438,12 +450,15 @@ main <- function() {
     length_profiles = sum(summary$cohort == 'length'),
     length_failures = sum(!summary$passed & summary$cohort == 'length'),
     controls_rejected = sum(controls), leaves = nrow(actual),
+    metadata_controls_rejected = sum(metadata_controls),
     carriers = sum(actual$carrier_count), failures = sum(!summary$passed),
     sequence_failures = sum(!summary$sequences_equal), count_failures = sum(!summary$counts_equal),
     input_provenance_failures = sum(!summary$input_provenance_equal),
     mapping_failures = sum(!summary$mappings_equal),
     model_sequence_failures = sum(!summary$model_sequence_equal),
     replay_lane_failures = sum(!summary$replay_lanes_equal),
+    lane_flag_failures = sum(!summary$lane_flags_equal),
+    group_metadata_failures = sum(!summary$group_metadata_equal),
     oracle_replay_lanes = sum(vapply(comparisons, function(x) length(x$expected_lanes), 1L)),
     observed_replay_lanes = sum(vapply(comparisons, function(x) length(x$observed_lanes), 1L))))
   if (!is.null(opt$extension_receipt)) duckvep_evidence_assert_checkout(root, revision)
@@ -453,7 +468,8 @@ main <- function() {
     mapping_failures = as.integer(!summary$mappings_equal),
     replay_lane_failures = as.integer(!summary$replay_lanes_equal)) ~ cohort + shape + kind,
     summary, sum), row.names = FALSE)
-  stopifnot(all(controls))
+  stopifnot(all(controls), all(metadata_controls))
   if (any(!summary$passed)) stop('Shared-transcript replay differences retained: ', out, call. = FALSE)
+  if (any(!summary$metadata_passed)) stop('Lane/group metadata differences retained: ', out, call. = FALSE)
 }
 main()

@@ -61,6 +61,12 @@ my $container_json = @ARGV && $ARGV[0] eq '--container-json' ? !!shift(@ARGV) : 
                 }} @{$self->get_InputBuffer->buffer}],
                 calls => $calls,
                 replay_lanes => [sort {$a->{sample} cmp $b->{sample} || $a->{lane1} <=> $b->{lane1}} @$lanes],
+                cds_group_metadata => [map {{
+                    cds => $_->seq,
+                    flags => {indel => $_->has_indel || 0,
+                        frameshift => $_->{_frameshift} || 0, length_diff => $_->length_diff},
+                    categories => [sort @{$_->get_all_flags}],
+                }} @{$container->get_all_CDSHaplotypes}],
             }), "\n";
         }
     }
@@ -84,6 +90,8 @@ if (defined $phase_path) {
                 push @{$lane_calls{refaddr($container)}}, {
                     sample => $sample, lane1 => $lane + 1,
                     cds => $value->{cds}, protein => $value->{protein},
+                    traversal_ordinal => 1 + scalar @{$lane_calls{refaddr($container)} || []},
+                    flags => {%{$value->{flags}}},
                     applied_sources => [map {
                         my $vf = $value->{vfs}->{$_};
                         {

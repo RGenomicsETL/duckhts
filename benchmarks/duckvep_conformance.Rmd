@@ -1031,10 +1031,12 @@ comparisons do not certify those masks. Whole-haplotype SO/HGVS remains unfinish
 phase <- read.csv(file.path(root, "test/duckvep/conformance/data/haplotype_phase_history.csv"),
   colClasses = c(source_revision = "character"))
 stopifnot(all(phase$extension_build_binding == "htslib_distclean_make_release"),
-  all(phase$controls_rejected == 4L),
+  all(phase$controls_rejected %in% c(4L, 12L)),
   !anyDuplicated(phase[c("source_revision", "ploidy", "prefix", "missing", "mixed")]))
 phase_revision <- tail(unique(phase$source_revision), 1L)
 phase_current <- subset(phase, source_revision == phase_revision)
+phase_controls <- unique(phase_current$controls_rejected)
+stopifnot(length(phase_controls) == 1L)
 phase_counts <- aggregate(cbind(cases, disagreements, oracle_lanes, native_lanes,
   native_unavailable_carriers) ~ ploidy, data = phase_current, FUN = sum)
 stopifnot(sum(phase_counts$cases) == 3 * sum(4^(1:4) * 2^(0:3)))
@@ -1058,8 +1060,9 @@ timing measurements.
 
 The pinned, unmodified Haplosaurus runner and decoded `vep116_compat` executor consume
 the same VCF/GFF/FASTA. Comparisons retain complete CDS/protein multisets, source-record
-contributors and carrier counts. Eighteen ordinary called diploid profiles agree;
-four deliberate sequence/protein/provenance/duplicate corruptions are rejected.
+contributors and carrier counts. Eighteen ordinary called diploid profiles agree.
+The audit rejects `r phase_controls` deliberate corruptions: four check
+sequence/protein/provenance/duplicate handling`r if (phase_controls == 12L) ", and eight check grouped-observation fields, identities and row preservation" else ""`.
 All other disagreements remain failures, including missing-input NULL sequences
 and the difference between explicit source ploidy and Haplosaurus's file-input
 diploid fallback. The command exits nonzero after writing full observations,
@@ -1137,7 +1140,9 @@ records **`r public_raw_failures` disagreements across `r public_raw_cases` comp
 CDS/protein multiset, carrier-count and physical-edit provenance comparisons**,
 plus **`r public_raw_record_failures` disagreements across `r public_raw_records`
 per-lane record observations**. It consumes original GT text and complete ALT lists
-from the same VCF fixture. The verifier additionally checks exact global record IDs,
+from `read_geno(..., raw_gt := true)` on the same VCF fixture. An independent text
+read checks every source GT spelling and physical record ordinal; it does not
+supply the native input. The verifier additionally checks exact global record IDs,
 regions, positions and source REF/ALT bytes; repeated local site labels cannot
 substitute for record identity.
 

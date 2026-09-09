@@ -291,6 +291,7 @@ test-cache-paths:
 test-benchmark-registry: test-variantkey-provider-staging test-duckvep-corpus-staging
 	Rscript test/scripts/test_genotype_format_benchmark.R
 	Rscript test/scripts/test_haplotype_geometry.R
+	Rscript test/scripts/test_haplotype_phase_history.R
 	Rscript test/scripts/test_fastvep_receipt.R
 	Rscript test/scripts/test_vep_cache_staging.R
 	Rscript test/scripts/test_duckvep_model_relations.R

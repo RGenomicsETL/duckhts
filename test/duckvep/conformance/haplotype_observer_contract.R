@@ -104,6 +104,7 @@ main <- function() {
   stopifnot(!check(stale), !check(missing), !check(dropped))
   output <- lapply(plain, jsonlite::fromJSON, simplifyVector = FALSE)
   names(output) <- vapply(output, `[[`, '', 'transcript')
+  metadata_controls <- haplotype_metadata_controls(phase[['F_full']], output[['F_full']])
   for (i in seq_len(nrow(expected))) {
     tx <- expected$transcript[i]
     haplotypes <- output[[tx]]$haplotypes
@@ -117,11 +118,40 @@ main <- function() {
       applied_sources = list(list(allele_key = paste0(allele, '|', source_key),
         source_id = 'site', source_key = source_key))))
     stopifnot(replay_lanes_equal(lanes, phase[[tx]]$replay_lanes))
+    stopifnot(haplotype_group_metadata_equal(phase[[tx]], output[[tx]]))
     wrong <- lanes
     wrong[[1L]]$applied_sources[[1L]]$allele_key <- 'wrong'
     stopifnot(!replay_lanes_equal(lanes, lanes[-1L]),
       !replay_lanes_equal(lanes, c(lanes, lanes[1L])), !replay_lanes_equal(lanes, wrong))
   }
+  for (mode in c('plain', 'observed')) run('micromamba', c('run', '--clean-env',
+    '--env', paste0('PERL5LIB=', libs), '--env', 'PERL_HASH_SEED=0',
+    '--env', 'PERL_PERTURB_KEYS=0', '-p', prefix, 'perl', oracle, '--container-json',
+    file.path(out, c('calls.vcf', 'reference.fa', 'model.gff3.gz')),
+    if (mode == 'observed') file.path(out, 'container_phase.jsonl')), paste0('container_', mode))
+  container_plain <- readLines(file.path(out, 'container_plain.stdout'))
+  container_observed <- readLines(file.path(out, 'container_observed.stdout'))
+  stopifnot(length(container_plain) == 4L, identical(container_plain, container_observed))
+  container_phase <- lapply(readLines(file.path(out, 'container_phase.jsonl')),
+    jsonlite::fromJSON, simplifyVector = FALSE)
+  container_output <- lapply(container_plain, jsonlite::fromJSON, simplifyVector = FALSE)
+  names(container_phase) <- vapply(container_phase, `[[`, '', 'transcript')
+  for (x in container_output) stopifnot(haplotype_group_metadata_equal(
+    container_phase[[x$transcript_id]], x, container_json = TRUE))
+  first <- container_output[[1L]]
+  metadata_controls <- c(metadata_controls, setNames(haplotype_metadata_controls(
+    container_phase[[first$transcript_id]], first, container_json = TRUE),
+    paste0('container_', names(metadata_controls))))
+  reference_observation <- phase[['F_full']]
+  reference_observation$replay_lanes <- list()
+  reference_observation$reference_cds <- reference_observation$cds_group_metadata[[1L]]$cds
+  stopifnot(haplotype_group_metadata_equal(reference_observation, output[['F_full']]))
+  reference_observation$reference_cds <- paste0(reference_observation$reference_cds, 'A')
+  metadata_controls <- c(metadata_controls, metadata_unobserved_nonreference_group =
+    !haplotype_group_metadata_equal(reference_observation, output[['F_full']]))
+  stopifnot(all(metadata_controls))
+  write.csv(data.frame(control = names(metadata_controls), rejected = metadata_controls),
+    file.path(out, 'metadata_controls.csv'), row.names = FALSE)
   identities <- c(reference, oracle, 'test/duckvep/conformance/haplotype_observer_contract.R',
     'test/duckvep/conformance/haplotype_observations.R',
     list.files(out, full.names = TRUE))
@@ -129,8 +159,10 @@ main <- function() {
     tracked_changes = duckvep_evidence_tracked_changes(root), oracle_revisions = as.list(pins),
     source_artifact = 'haplotype_benchmark_reference', transcripts = 4L, source_records = 2L,
     controls_rejected = 15L, replay_lanes = 8L, full_output_unchanged = TRUE,
+    metadata_controls_rejected = sum(metadata_controls), container_output_unchanged = TRUE,
     sha256 = as.list(vapply(identities, duckvep_evidence_sha256, ''))),
     file.path(out, 'receipt.json'), pretty = TRUE, auto_unbox = TRUE)
   message('Observer ownership: 4 transcript mappings, 8 replay lanes, unchanged complete output, 15 corruptions rejected')
+  message('Metadata: ', sum(metadata_controls), ' corruptions rejected; unchanged original Runner JSON')
 }
 main()

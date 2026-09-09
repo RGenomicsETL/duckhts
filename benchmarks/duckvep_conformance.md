@@ -683,7 +683,7 @@ Whole-haplotype SO/HGVS remains unfinished.
 |      3 |   768 |           768 |         1536 |         2304 |                        1332 |
 |      4 |  6144 |          6144 |        12288 |        24576 |                       16800 |
 
-Source 16afccd0fd795df318bbd8b3e66f89b8321da022 records a **failing
+Source f70535b36af8c1107c14800cb64d63cd6041fd36 records a **failing
 decoded-call/raw-parser comparison**: 6990 disagreements in 7020
 profiles. It is not a population error rate or a replacement for the
 passing literal-sequence corpus. This lane uses public
@@ -704,12 +704,14 @@ denominators, not timing measurements.
 The pinned, unmodified Haplosaurus runner and decoded `vep116_compat`
 executor consume the same VCF/GFF/FASTA. Comparisons retain complete
 CDS/protein multisets, source-record contributors and carrier counts.
-Eighteen ordinary called diploid profiles agree; four deliberate
-sequence/protein/provenance/duplicate corruptions are rejected. All
-other disagreements remain failures, including missing-input NULL
-sequences and the difference between explicit source ploidy and
-Haplosaurus’s file-input diploid fallback. The command exits nonzero
-after writing full observations, comparisons and source-bound receipts.
+Eighteen ordinary called diploid profiles agree. The audit rejects 12
+deliberate corruptions: four check sequence/protein/provenance/duplicate
+handling, and eight check grouped-observation fields, identities and row
+preservation. All other disagreements remain failures, including
+missing-input NULL sequences and the difference between explicit source
+ploidy and Haplosaurus’s file-input diploid fallback. The command exits
+nonzero after writing full observations, comparisons and source-bound
+receipts.
 
 There are 1471 groups in which distinct raw GT spellings have
 **identical HTSlib alleles and phase flags but different Haplosaurus
@@ -763,9 +765,12 @@ Public `input_mode := 'source_records'` with
 complete CDS/protein multiset, carrier-count and physical-edit
 provenance comparisons**, plus **0 disagreements across 28080 per-lane
 record observations**. It consumes original GT text and complete ALT
-lists from the same VCF fixture. The verifier additionally checks exact
-global record IDs, regions, positions and source REF/ALT bytes; repeated
-local site labels cannot substitute for record identity.
+lists from `read_geno(..., raw_gt := true)` on the same VCF fixture. An
+independent text read checks every source GT spelling and physical
+record ordinal; it does not supply the native input. The verifier
+additionally checks exact global record IDs, regions, positions and
+source REF/ALT bytes; repeated local site labels cannot substitute for
+record identity.
 
 The public lane exercises input materialization, sorting, transcript
 closing, DuckDB vector transitions and nested output. Fixed SQL/R

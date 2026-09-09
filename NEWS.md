@@ -2,6 +2,16 @@
 
 # duckhts 1.5.1.9000
 
+- render current haplotype and raw-genotype catalog documentation in both READMEs;
+  executed examples use local fixtures and remote examples remain usage snippets
+
+- retain matched raw-GT reader measurements with complete source-byte comparisons;
+  publish finite phase-audit receipts with checked identities, observations,
+  denominators and controls, preserving disagreement verdicts
+
+- observe per-lane Haplosaurus mutation flags and sequence-group ownership
+  separately, with unchanged-output and metadata-corruption controls
+
 - retain original VCF genotype spelling with read_geno(raw_gt := true), including
   leading phase markers and missing alleles; selected calls borrow worker-local
   source spans until output materialization. BCF rejects the option because it

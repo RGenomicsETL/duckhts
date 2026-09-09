@@ -720,6 +720,11 @@ output serialization. `replay_lanes` copies each sample's original mutator retur
 before equal-sequence grouping, including CDS, protein and applied-source keys.
 It observes only samples entering that mutator; reference-only samples handled
 by upstream's separate reference-haplotype path are not synthesized.
+The sidecar retains raw mutation flags, nominal edit-length change and traversal
+ordinal. Group metadata is checked against the first protein-bearing mutation lane
+for each CDS; per-lane flags have a separate native comparison. Nominal edit-length
+change can differ from final CDS-length change when replacements overlap. Metadata
+checks add failing gates without replacing sequence, count or provenance comparisons.
 `Rscript test/duckvep/conformance/haplotype_observer_contract.R`
 checks both strands against overlapping full-exon/two-exon models and verifies that
 enabling the sidecar preserves complete oracle output. The same audit compares
@@ -752,6 +757,23 @@ Rscript test/duckvep/conformance/haplotype_phase_differential.R
 profiles in its finite grammar. Both preserve all comparisons and exit nonzero on
 any disagreement. `--extension-receipt` requires clean-build evidence. Typed GT cannot
 certify byte-level VEP parser behavior when distinct raw spellings decode identically.
+
+Publish a retained clean-build audit into the existing phase history with:
+
+```sh
+Rscript test/duckvep/conformance/haplotype_phase_differential.R \
+  --publish-artifact test/duckvep/conformance/results/haplotype_phase_RUN
+```
+
+Publication verifies retained artifact hashes, recomputes stratum totals from the
+complete comparison objects, checks them against the receipt, and rejects duplicate
+revisions before replacing the ledger under an exclusive writer lock. The artifact
+directory must be retained inside the repository so the ledger has a nonempty locator.
+Failed comparisons are published as failures;
+successful publication is not a passing conformance result. `--history` selects an
+explicit ledger path. `Rscript test/scripts/test_haplotype_phase_history.R` exercises
+receipt, denominator, retained-failure and duplicate-publication controls without
+an upstream installation.
 
 `haplotype_record_differential.R` checks source-record geometry independently of
 the raw-GT grammar audit. It uses the registered 180-base CDS, 144 fixed profiles

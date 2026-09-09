@@ -210,3 +210,166 @@ native_replay_lanes <- function(actual, records, strand, samples) {
   }
   result
 }
+
+# Raw mutation flags are distinct from sequence-group flags and from the final
+# sequence length difference. Overlapping replacements can give different sums.
+haplotype_raw_flags <- function(flags) {
+  fields <- c('indel', 'frameshift', 'length_diff')
+  if (!is.list(flags) || (length(flags) && is.null(names(flags))) || anyDuplicated(names(flags)) ||
+      any(!names(flags) %in% fields)) return(NULL)
+  values <- setNames(numeric(3L), fields)
+  for (name in names(flags)) {
+    x <- flags[[name]]
+    if (!is.numeric(x) || length(x) != 1L || !is.finite(x) ||
+        x != floor(x) || abs(x) >= 2^53 ||
+        (name != 'length_diff' && !x %in% 0:1)) return(NULL)
+    values[name] <- x
+  }
+  values
+}
+
+haplotype_raw_flag_bits <- function(flags) {
+  values <- haplotype_raw_flags(flags)
+  if (is.null(values)) return(NA_integer_)
+  as.integer(values['indel'] + if (values['frameshift'])
+    if (values['length_diff'] %% 3) 2L else 4L else 0L)
+}
+
+haplotype_flag_categories <- function(bits) {
+  c('frameshift', 'indel', 'resolved_frameshift')[bitwAnd(bits, c(2L, 1L, 4L)) != 0L]
+}
+
+# Validate the complete observed mutator-lane domain. Reference-only samples added
+# by _add_reference_haplotypes are not synthesized as mutation observations.
+haplotype_lane_metadata <- function(lanes) {
+  scalar <- function(x) is.character(x) && length(x) == 1L && !is.na(x)
+  integer_value <- function(x) is.numeric(x) && length(x) == 1L && is.finite(x) && x == floor(x)
+  fields <- c('sample', 'lane1', 'cds', 'protein', 'traversal_ordinal', 'flags')
+  if (!is.list(lanes)) return(NULL)
+  keys <- character(length(lanes)); ordinals <- numeric(length(lanes))
+  for (i in seq_along(lanes)) {
+    x <- lanes[[i]]
+    if (!is.list(x) || anyDuplicated(names(x)) || !all(fields %in% names(x)) ||
+        !scalar(x$sample) || !integer_value(x$lane1) || x$lane1 < 1L || x$lane1 > 65535L ||
+        (!is.null(x$cds) && !scalar(x$cds)) || (!is.null(x$protein) && !scalar(x$protein)) ||
+        !integer_value(x$traversal_ordinal) || is.null(haplotype_raw_flags(x$flags))) return(NULL)
+    keys[i] <- jsonlite::toJSON(list(sample = x$sample, lane1 = x$lane1), auto_unbox = TRUE)
+    ordinals[i] <- x$traversal_ordinal
+  }
+  if (anyDuplicated(keys) || !identical(sort(ordinals), as.numeric(seq_along(lanes)))) return(NULL)
+  lanes[order(ordinals)]
+}
+
+native_lane_flags_equal <- function(lanes, actual, samples) {
+  lanes <- haplotype_lane_metadata(lanes)
+  if (is.null(lanes) || !is.data.frame(actual) ||
+      !all(c('sequence_flags', 'carriers') %in% names(actual)) ||
+      !is.character(samples) || anyNA(samples) || anyDuplicated(samples)) return(FALSE)
+  expected <- vapply(lanes, function(x) haplotype_raw_flag_bits(x$flags), 1L)
+  keys <- vapply(lanes, function(x) jsonlite::toJSON(list(sample = x$sample,
+    lane1 = x$lane1), auto_unbox = TRUE), '')
+  observed_keys <- character(); observed <- integer()
+  for (i in seq_len(nrow(actual))) {
+    flags <- actual$sequence_flags[i]
+    carriers <- actual$carriers[[i]]
+    if (!is.numeric(flags) || is.na(flags) || flags != floor(flags) || flags < 0 || flags > 15 ||
+        !is.data.frame(carriers) || !all(c('sample_index', 'haplotype_lane') %in% names(carriers)) ||
+        !all(vapply(carriers[c('sample_index', 'haplotype_lane')], is.numeric, TRUE)) ||
+        anyNA(carriers[c('sample_index', 'haplotype_lane')]) ||
+        any(carriers$sample_index < 0 | carriers$sample_index >= length(samples) |
+          carriers$sample_index != floor(carriers$sample_index) |
+          carriers$haplotype_lane < 1 | carriers$haplotype_lane > 65535 |
+          carriers$haplotype_lane != floor(carriers$haplotype_lane))) return(FALSE)
+    for (j in seq_len(nrow(carriers))) {
+      observed_keys <- c(observed_keys, jsonlite::toJSON(list(
+        sample = samples[carriers$sample_index[j] + 1L], lane1 = carriers$haplotype_lane[j]), auto_unbox = TRUE))
+      observed <- c(observed, bitwAnd(as.integer(flags), 7L))
+    }
+  }
+  !anyDuplicated(observed_keys) && setequal(keys, observed_keys) &&
+    identical(expected, observed[match(keys, observed_keys)])
+}
+
+# Check the actual upstream group owner, not a union or a selected flag value.
+# Output is the untouched custom oracle record or original Runner JSON. A CDS
+# group with no mutator lane must be the zero-flag reference-only group.
+haplotype_group_metadata_equal <- function(observation, output, container_json = FALSE) {
+  lanes <- haplotype_lane_metadata(observation$replay_lanes)
+  groups <- observation$cds_group_metadata
+  published <- if (container_json) output$cds_haplotypes else output$haplotypes
+  if (is.null(lanes) || !is.list(groups) || !is.list(published) ||
+      !is.character(observation$reference_cds) || length(observation$reference_cds) != 1L ||
+      is.na(observation$reference_cds)) return(FALSE)
+  key <- function(rows, field) {
+    if (any(!vapply(rows, function(x) is.list(x) && !anyDuplicated(names(x)) &&
+        is.character(x[[field]]) && length(x[[field]]) == 1L && !is.na(x[[field]]), TRUE))) return(NULL)
+    vapply(rows, `[[`, '', field)
+  }
+  keys <- key(groups, 'cds'); output_keys <- key(published, if (container_json) 'seq' else 'cds')
+  if (is.null(keys) || is.null(output_keys) || anyDuplicated(keys) || anyDuplicated(output_keys) ||
+      !setequal(keys, output_keys)) return(FALSE)
+  eligible <- Filter(function(x) !is.null(x$protein) && nzchar(x$protein), lanes)
+  if (any(!vapply(eligible, function(x) !is.null(x$cds) && x$cds %in% keys, TRUE))) return(FALSE)
+  categories <- function(x) {
+    if (!is.list(x) && !is.character(x)) return(NULL)
+    if (any(!vapply(x, function(y) is.character(y) && length(y) == 1L && !is.na(y), TRUE))) return(NULL)
+    x <- as.character(unlist(x, use.names = FALSE))
+    if (anyDuplicated(x) || any(!x %in% c('indel', 'frameshift', 'resolved_frameshift'))) return(NULL)
+    sort(x)
+  }
+  for (i in seq_along(groups)) {
+    group <- groups[[i]]
+    candidates <- Filter(function(x) identical(x$cds, group$cds), eligible)
+    if (!length(candidates) && !identical(group$cds, observation$reference_cds)) return(FALSE)
+    first <- if (length(candidates)) candidates[[1L]]$flags else list()
+    raw <- haplotype_raw_flags(group$flags)
+    flags <- categories(group$categories)
+    expected <- haplotype_flag_categories(haplotype_raw_flag_bits(first))
+    if (!identical(sort(names(group$flags)), sort(c('indel', 'frameshift', 'length_diff'))) ||
+        is.null(raw) || is.null(flags) || !identical(raw, haplotype_raw_flags(first)) ||
+        !identical(flags, expected)) return(FALSE)
+    row <- published[[match(keys[i], output_keys)]]
+    if (container_json) {
+      if (!is.numeric(row$has_indel) || length(row$has_indel) != 1L || is.na(row$has_indel) ||
+          row$has_indel != raw['indel']) return(FALSE)
+    } else {
+      flags <- categories(row$flags)
+      if (is.null(flags) || !identical(flags, expected)) return(FALSE)
+    }
+  }
+  TRUE
+}
+
+haplotype_metadata_controls <- function(observation, output, container_json = FALSE) {
+  check <- function(x, y = output) haplotype_group_metadata_equal(x, y, container_json)
+  stopifnot(check(observation), length(observation$replay_lanes) > 0L)
+  corrupt <- list(indel = observation, frameshift = observation, length_diff = observation,
+    missing_flags = observation, invalid_flags = observation, duplicate_rank = observation,
+    missing_rank = observation, invalid_rank = observation, group_flags = observation,
+    group_categories = observation, missing_group_flag = observation,
+    missing_group = observation, duplicate_group = observation)
+  first <- which.min(vapply(observation$replay_lanes, `[[`, 1L, 'traversal_ordinal'))
+  original <- haplotype_raw_flags(observation$replay_lanes[[first]]$flags)
+  for (name in c('indel', 'frameshift'))
+    corrupt[[name]]$replay_lanes[[first]]$flags[[name]] <- 1 - original[name]
+  corrupt$length_diff$replay_lanes[[first]]$flags$length_diff <- original['length_diff'] + 1
+  corrupt$missing_flags$replay_lanes[[first]]$flags <- NULL
+  corrupt$invalid_flags$replay_lanes[[first]]$flags$indel <- 2L
+  stopifnot(length(observation$replay_lanes) > 1L)
+  corrupt$duplicate_rank$replay_lanes[[2L]]$traversal_ordinal <-
+    corrupt$duplicate_rank$replay_lanes[[1L]]$traversal_ordinal
+  corrupt$missing_rank$replay_lanes[[first]]$traversal_ordinal <- NULL
+  corrupt$invalid_rank$replay_lanes[[first]]$traversal_ordinal <- 0L
+  corrupt$group_flags$cds_group_metadata[[1L]]$flags$length_diff <-
+    corrupt$group_flags$cds_group_metadata[[1L]]$flags$length_diff + 1
+  corrupt$group_categories$cds_group_metadata[[1L]]$categories <- list('invalid')
+  corrupt$missing_group_flag$cds_group_metadata[[1L]]$flags$length_diff <- NULL
+  corrupt$missing_group$cds_group_metadata <- corrupt$missing_group$cds_group_metadata[-1L]
+  corrupt$duplicate_group$cds_group_metadata <- c(corrupt$duplicate_group$cds_group_metadata,
+    corrupt$duplicate_group$cds_group_metadata[1L])
+  rejected <- vapply(corrupt, function(x) !check(x), TRUE)
+  bad <- output
+  if (container_json) bad$cds_haplotypes[[1L]]$has_indel <- 2L else bad$haplotypes[[1L]]$flags <- list('invalid')
+  rejected <- c(rejected, published_flags = !check(observation, bad))
+  setNames(rejected, paste0('metadata_', names(rejected)))
+}

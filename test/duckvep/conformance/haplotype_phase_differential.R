@@ -23,13 +23,189 @@ phase_equal <- function(expected, observed) {
   Reduce(`&`, Map(`==`, expected, observed))
 }
 
+phase_history_rows <- function(directory) {
+  source("scripts/duckvep_evidence.R", local = TRUE)
+  directory <- normalizePath(directory, mustWork = TRUE)
+  artifact_directory <- duckvep_evidence_repo_path(getwd(), directory)
+  stopifnot(nzchar(artifact_directory))
+  receipt_path <- file.path(directory, "receipt.json")
+  receipt <- jsonlite::fromJSON(receipt_path)
+  stopifnot(receipt$extension_build_binding == "htslib_distclean_make_release",
+    receipt$scope == "raw_GT_finite_phase_audit_not_conformance",
+    grepl("^[0-9a-f]{40}$", receipt$source_revision), receipt$max_ploidy %in% 2:4)
+  hashes <- unlist(receipt$sha256)
+  files <- c("cases.tsv", "summary.csv", "comparisons.rds", "phase_comparisons.rds", "raw_replay.rds",
+    "public_raw_replay.rds", "controls.csv", "phase_controls.csv", "raw_replay_controls.csv",
+    "decoded_collisions.rds", "native.rds", "raw_replay_summary.csv", "public_raw_replay_summary.csv")
+  paths <- normalizePath(file.path(directory, files), mustWork = TRUE)
+  absolute <- startsWith(names(hashes), "/") | grepl("^[A-Za-z]:", names(hashes))
+  recorded <- normalizePath(ifelse(absolute, names(hashes), file.path(getwd(), names(hashes))),
+    mustWork = FALSE)
+  stopifnot(!anyDuplicated(recorded), all(paths %in% recorded))
+  # Verify retained observations before reading them. Source and binary hashes
+  # identify the execution receipt, not the checkout used to publish it.
+  retained <- list.files(directory, recursive = TRUE, full.names = TRUE)
+  retained <- retained[basename(retained) != "receipt.json"]
+  in_artifact <- startsWith(recorded, paste0(directory, .Platform$file.sep))
+  stopifnot(setequal(recorded[in_artifact], normalizePath(retained)))
+  at <- match(normalizePath(retained), recorded)
+  stopifnot(!anyNA(at), identical(unname(vapply(retained, duckvep_evidence_sha256, "")),
+    unname(hashes[at])))
+  read <- function(name) readRDS(file.path(directory, name))
+  summary <- read.csv(file.path(directory, "summary.csv"), stringsAsFactors = FALSE)
+  cases <- read.delim(file.path(directory, "cases.tsv"), stringsAsFactors = FALSE)
+  keys <- setdiff(names(cases), "cds")
+  stopifnot(all(c("transcript_index", "seq_region", "chrom", "transcript", "GT",
+    "ploidy", "prefix", "missing", "mixed", "cds") %in% names(cases)),
+    identical(summary[keys], cases[keys]))
+  n <- nrow(summary)
+  stopifnot(n == 3 * sum(4^(1:receipt$max_ploidy) * 2^(0:(receipt$max_ploidy - 1L))),
+    !anyDuplicated(summary$GT), !anyNA(summary),
+    all(grepl("^[|/]?[012.]([|/][012.]){0,3}$", summary$GT)),
+    identical(summary$transcript_index, seq_len(n) - 1L),
+    identical(summary$ploidy, lengths(strsplit(sub("^[|/]", "", summary$GT), "[|/]"))),
+    max(summary$ploidy) == receipt$max_ploidy,
+    identical(summary$prefix, grepl("^[|/]", summary$GT)),
+    identical(summary$missing, grepl(".", summary$GT, fixed = TRUE)),
+    identical(summary$mixed, grepl("|", summary$GT, fixed = TRUE) &
+      grepl("/", summary$GT, fixed = TRUE)))
+  decoded <- read("comparisons.rds")
+  parser <- read("phase_comparisons.rds")
+  raw <- read("raw_replay.rds")
+  public <- read("public_raw_replay.rds")
+  native <- read("native.rds")
+  raw_gt <- as.vector(rbind(cases$GT, vapply(cases$ploidy,
+    function(p) paste(rep("1", p), collapse = "|"), "")))
+  stopifnot(identical(parser$keys, data.frame(transcript = rep(cases$transcript, each = 2L),
+    source_id = rep(c("a", "b"), n), GT = raw_gt)))
+  carrier_counts <- function(actual) {
+    stopifnot(is.data.frame(actual), all(c("transcript_index", "carrier_count") %in% names(actual)),
+      is.numeric(actual$transcript_index), is.numeric(actual$carrier_count),
+      !anyNA(actual[c("transcript_index", "carrier_count")]),
+      all(actual$transcript_index %in% summary$transcript_index),
+      all(is.finite(actual$carrier_count) & actual$carrier_count > 0 &
+        actual$carrier_count == floor(actual$carrier_count)))
+    unname(vapply(split(actual$carrier_count,
+      factor(actual$transcript_index, levels = summary$transcript_index)), sum, 0))
+  }
+  groups_valid <- function(groups) is.list(groups) && all(vapply(groups, function(group) {
+    nullable_string <- function(x) is.null(x) || (is.character(x) && length(x) == 1L)
+    is.list(group) && !anyDuplicated(names(group)) &&
+      all(c("cds", "protein", "count", "contributors") %in% names(group)) &&
+      nullable_string(group$cds) && nullable_string(group$protein) &&
+      is.numeric(group$count) && length(group$count) == 1L && is.finite(group$count) &&
+      group$count > 0 && group$count == floor(group$count) &&
+      is.character(group$contributors) && !anyNA(group$contributors)
+  }, TRUE))
+  comparison_matches <- function(x, observed_counts, errors = integer(n)) {
+    stopifnot(length(x) == n, length(errors) == n, !anyNA(errors), length(observed_counts) == n)
+    stopifnot(all(vapply(x, function(row) is.list(row) && !anyDuplicated(names(row)) &&
+      all(c("expected", "observed", "equal") %in% names(row)) &&
+      is.logical(row$equal) && length(row$equal) == 1L && !is.na(row$equal) &&
+      groups_valid(row$expected) && groups_valid(row$observed), TRUE)))
+    counts <- function(groups) sum(vapply(groups, `[[`, 0, "count"))
+    stopifnot(all(vapply(x, function(row) counts(row$expected), 0) == 2),
+      identical(vapply(x, function(row) counts(row$observed), 0), as.numeric(observed_counts)))
+    result <- vapply(x, function(row) identical(row$expected, row$observed), TRUE) & errors == 0L
+    stopifnot(identical(result, vapply(x, `[[`, TRUE, "equal")))
+    result
+  }
+  stopifnot(all(summary$oracle_lanes == 2),
+    identical(as.numeric(summary$native_lanes), carrier_counts(native$actual)),
+    identical(summary$equal, comparison_matches(decoded, summary$native_lanes)))
+  for (field in c("oracle_lanes", "native_lanes", "native_unknown", "native_unavailable_carriers"))
+    stopifnot(identical(as.numeric(summary[[field]]), vapply(decoded, `[[`, 0, field)))
+  row_matches <- function(expected, observed, count, fields) {
+    stopifnot(is.data.frame(expected), is.data.frame(observed), nrow(expected) == count,
+      identical(names(expected), fields), identical(names(observed), fields))
+    result <- phase_equal(expected, observed)
+    result[is.na(result)] <- FALSE
+    result
+  }
+  parser_fields <- c("status", "retained", "ploidy", "missing", "slots", "first", "second")
+  record_fields <- c("source_indices", "source_evidence", "evidence", "sequence_status")
+  parser_matches <- row_matches(parser$expected, parser$observed, 2L * n, parser_fields)
+  raw_matches <- comparison_matches(raw$comparisons, rep(2, n), raw$output$errors)
+  public_matches <- comparison_matches(public$comparisons, carrier_counts(public$actual))
+  raw_records <- row_matches(raw$expected_semantics, raw$observed_semantics, 4L * n, record_fields)
+  public_records <- row_matches(public$expected_semantics, public$observed_semantics, 4L * n, record_fields)
+  stopifnot(identical(raw$expected_semantics, public$expected_semantics))
+  for (kind in c("raw", "public_raw")) {
+    lane <- read.csv(file.path(directory, paste0(kind, "_replay_summary.csv")), stringsAsFactors = FALSE)
+    stopifnot(identical(lane[keys], cases[keys]),
+      identical(lane$equal, if (kind == "raw") raw_matches else public_matches))
+  }
+  controls <- function(file, required) {
+    x <- read.csv(file.path(directory, file), stringsAsFactors = FALSE)
+    stopifnot(identical(names(x), c("control", "rejected")), !anyDuplicated(x$control),
+      all(required %in% x$control), is.logical(x$rejected), all(x$rejected))
+    nrow(x)
+  }
+  control_counts <- c(controls_rejected = controls("controls.csv",
+      c("duplicate", "cds", "protein", "contributor")),
+    raw_parser_controls_rejected = controls("phase_controls.csv", parser_fields),
+    raw_replay_controls_rejected = controls("raw_replay_controls.csv", record_fields))
+  values <- data.frame(cases = 1L, disagreements = as.integer(!summary$equal),
+    summary[c("oracle_lanes", "native_lanes", "native_unavailable_carriers")],
+    raw_parser_calls = 2L, raw_parser_disagreements = rowSums(matrix(!parser_matches, ncol = 2L, byrow = TRUE)),
+    raw_replay_cases = 1L, raw_replay_disagreements = as.integer(!raw_matches),
+    raw_replay_record_observations = 4L,
+    raw_replay_record_disagreements = rowSums(matrix(!raw_records, ncol = 4L, byrow = TRUE)),
+    public_raw_replay_cases = 1L, public_raw_replay_disagreements = as.integer(!public_matches),
+    public_raw_record_observations = 4L,
+    public_raw_record_disagreements = rowSums(matrix(!public_records, ncol = 4L, byrow = TRUE)))
+  totals <- c(colSums(values), control_counts,
+    decoded_collision_groups = length(read("decoded_collisions.rds")),
+    input_records = nrow(native$records), source_alt_events = sum(lengths(native$records$ALT)),
+    input_genotype_calls = sum(vapply(native$records$calls, nrow, 1L)),
+    input_allele_slots = sum(vapply(native$records$calls,
+      function(calls) sum(lengths(calls$alleles)), 0)),
+    candidate_alt_calls = nrow(native$calls), native_leaves = nrow(native$actual))
+  for (field in names(totals)) stopifnot(identical(as.numeric(receipt[[field]]), totals[[field]]))
+  extension_hash <- hashes[endsWith(names(hashes), "/duckhts.duckdb_extension")]
+  stopifnot(length(extension_hash) == 1L, grepl("^[0-9a-f]{64}$", extension_hash),
+    all(grepl("^[0-9a-f]{40}$", unlist(receipt$oracle_revisions))))
+  strata <- aggregate(values, summary[c("ploidy", "prefix", "missing", "mixed")], sum)
+  metadata <- data.frame(source_revision = receipt$source_revision,
+    extension_build_binding = receipt$extension_build_binding, extension_sha256 = unname(extension_hash),
+    oracle_vep_revision = receipt$oracle_revisions$vep,
+    oracle_variation_revision = receipt$oracle_revisions$variation,
+    receipt_sha256 = duckvep_evidence_sha256(receipt_path),
+    artifact_directory = artifact_directory, max_ploidy = receipt$max_ploidy,
+    decoded_collision_groups = receipt$decoded_collision_groups)
+  cbind(metadata[rep(1L, nrow(strata)), ], strata,
+    as.data.frame(as.list(control_counts)), row.names = NULL)
+}
+
+publish_phase_history <- function(directory, history_path) {
+  rows <- phase_history_rows(directory)
+  stopifnot(file.exists(history_path), !dir.exists(history_path))
+  lock <- paste0(history_path, ".lock")
+  if (!dir.create(lock, showWarnings = FALSE))
+    stop("Phase history publication is busy: ", lock, call. = FALSE)
+  on.exit(unlink(lock, recursive = TRUE), add = TRUE)
+  history <- read.csv(history_path, stringsAsFactors = FALSE)
+  stopifnot(setequal(names(history), names(rows)),
+    !any(rows$source_revision %in% history$source_revision))
+  rows <- rows[names(history)]
+  output <- tempfile("phase-history-", tmpdir = dirname(history_path))
+  on.exit(unlink(output), add = TRUE)
+  write.csv(rbind(history, rows), output, row.names = FALSE)
+  stopifnot(file.rename(output, history_path))
+  message("Published ", sum(rows$cases), " profiles with ", sum(rows$disagreements),
+    " retained decoded/raw disagreements; publication does not change their verdict.")
+}
+
 main <- function() {
   opt <- optparse::parse_args(optparse::OptionParser(option_list = list(
     optparse::make_option("--max-ploidy", dest = "max_ploidy", type = "integer", default = 4L),
     optparse::make_option("--vep-prefix", dest = "vep_prefix",
       default = Sys.getenv("VEP_PREFIX", "/root/miniconda3/envs/vep")),
-    optparse::make_option("--extension-receipt", dest = "extension_receipt", default = NULL)
+    optparse::make_option("--extension-receipt", dest = "extension_receipt", default = NULL),
+    optparse::make_option("--publish-artifact", dest = "publish_artifact", default = NULL),
+    optparse::make_option("--history", default = "test/duckvep/conformance/data/haplotype_phase_history.csv")
   )))
+  if (!is.null(opt$publish_artifact)) return(publish_phase_history(opt$publish_artifact, opt$history))
   stopifnot(opt$max_ploidy >= 2L, opt$max_ploidy <= 4L)
   source("scripts/duckvep_evidence.R", local = TRUE)
   root <- normalizePath(".")
@@ -439,4 +615,4 @@ main <- function() {
   if (any(!public_semantics_matches)) stop("Public raw record observations disagree: ", out, call. = FALSE)
   if (any(!summary$equal)) stop("Raw-GT compatibility disagreements retained: ", out, call. = FALSE)
 }
-main()
+if (sys.nframe() == 0L) main()
