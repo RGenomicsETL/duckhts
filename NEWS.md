@@ -2,6 +2,10 @@
 
 # duckhts 1.5.1.9000
 
+- measure selected genotype FORMAT materialization and calls-unprojected scans on
+  registered GIAB records, with independent slot counts, complete duplicate-preserving
+  comparisons and corruption controls; retain matched HPRC GT-only benchmark results
+
 - select typed per-call FORMAT values with read_geno(format_fields := ['AD', 'DP', 'GQ']),
   retaining original sample indices, missing elements and records without GT.
   read_bcf and read_geno share worker-owned FORMAT decoding and output materialization;

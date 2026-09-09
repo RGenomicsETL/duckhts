@@ -273,6 +273,7 @@ test-cache-paths:
 	bash test/scripts/test_conformance_plugin_cache.sh
 
 test-benchmark-registry: test-variantkey-provider-staging test-duckvep-corpus-staging
+	Rscript test/scripts/test_genotype_format_benchmark.R
 	Rscript test/scripts/test_fastvep_receipt.R
 	Rscript test/scripts/test_vep_cache_staging.R
 	Rscript test/scripts/test_duckvep_model_relations.R

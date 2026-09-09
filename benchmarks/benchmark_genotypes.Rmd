@@ -13,8 +13,7 @@ network-free. BCF and VCF.gz contain the same complete records, verified by
 the staging test and full HTSlib text comparison.
 
 This compares `read_geno()` with the canonical `read_bcf(..., tidy_format:=true)`
-GT projection. The experiment named `read_bcf_v2` in the original request was
-deleted; it is not reintroduced as a benchmark dependency. Full cohorts, the
+GT projection. Full cohorts, the
 first eight header samples, sparse non-reference calls, and downstream typed
 carrier expansion have separate denominators. The input has GT but no PS;
 these timings do not measure PS decoding, which SQL/R/native fixtures test.
