@@ -183,10 +183,24 @@ static void genotype_values(void) {
     assert(duckhts_bcf_genotype_has_alt(values.gt, 4));
     int32_t no_alt[] = {0, 1, bcf_gt_unphased(0)};
     assert(!duckhts_bcf_genotype_has_alt(no_alt, 3));
+    const int32_t scalar_ps[] = {INT32_MAX, bcf_int32_missing, bcf_int32_vector_end};
+    for (int stride = 1; stride <= 8; stride++) for (int first = 0; first < 3; first++)
+    for (int second = 0; second < 3; second++) {
+        int32_t padded[16];
+        for (int i = 0; i < 2 * stride; i++) padded[i] = bcf_int32_vector_end;
+        padded[0] = scalar_ps[first];
+        padded[stride] = scalar_ps[second];
+        assert(bcf_update_format_int32(header, record, "PS", padded, 2 * stride) == 0);
+        assert(duckhts_bcf_genotypes_decode(&values, header, record,
+            DUCKHTS_BCF_DECODE_ERROR, error, sizeof(error)));
+        assert(values.gt_stride == 4 && values.ps_present);
+        assert(values.ps[0] == scalar_ps[first] && values.ps[1] == scalar_ps[second]);
+        assert(memcmp(values.gt, gt, sizeof(gt)) == 0);
+    }
     int32_t wide_ps[] = {10, 11, 20, bcf_int32_vector_end};
     assert(bcf_update_format_int32(header, record, "PS", wide_ps, 4) == 0);
     assert(!duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_ERROR, error, sizeof(error)));
-    assert(strstr(error, "one value per sample"));
+    assert(strstr(error, "FORMAT/PS has 2 values for header Number=1 at chrG:1 sample S1"));
     assert(duckhts_bcf_genotypes_decode(&values, header, record, DUCKHTS_BCF_DECODE_NULL, error, sizeof(error)));
     assert(values.gt_stride == 4 && !values.ps_present);
     const char *strings[] = {"10", "20"};

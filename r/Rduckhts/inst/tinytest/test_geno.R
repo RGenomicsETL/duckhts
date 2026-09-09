@@ -88,6 +88,13 @@ test_record_major_genotypes <- function() {
     data.frame(n = 5000, first_record = 0L, last_record = 4999L, calls = 5000L))
 
   for (extension in c("vcf", "bcf")) {
+    for (policy in c("null", "warn", "error")) {
+      rduckhts_geno(con, "selected_ps", fixture(paste0("geno_ps_width.", extension)),
+                    samples = "S2", decode_error_policy = policy, overwrite = TRUE)
+      expect_equal(dbGetQuery(con, paste(
+        "SELECT calls[1].sample_index AS sample, calls[1].phase_set::INTEGER AS ps FROM selected_ps")),
+        data.frame(sample = 1, ps = 20L))
+    }
     for (kind in c("ps_type", "ps_number", "ps_width", "gt_allele")) {
       path <- fixture(paste0("geno_", kind, ".", extension))
       expect_error(rduckhts_geno(con, path = path, decode_error_policy = "error"), pattern = "FORMAT/")

@@ -1,6 +1,12 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
 
+- retain selected BCF samples' phase sets in rduckhts_geno when excluded samples
+  leave vector-end padding in FORMAT/PS storage
+
+- return bundled INFO decode allocation failures as query errors, preserving
+  the prior worker buffer for cleanup instead of crashing the R process
+
 - honor decode_error_policy for oversized numeric scalar INFO/FORMAT values in
   bundled readers; null/warn return NULL for the affected tag on that record,
   and error reports the tag, coordinate and observed value count

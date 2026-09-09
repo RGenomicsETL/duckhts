@@ -78,10 +78,16 @@ static int decode_field(bcf_hdr_t *header, bcf1_t *record, int is_gt,
         return accept_mismatch(policy, error);
     }
     if (!is_gt && ret != samples) {
-        snprintf(error, error_size,
-                 "read_geno: FORMAT/PS requires one value per sample at %s:%lld (got %d for %d samples)",
-                 bcf_hdr_id2name(header, record->rid), (long long)record->pos + 1, ret, samples);
-        return accept_mismatch(policy, error);
+        if (!duckhts_bcf_check_scalar_count(header, record, DUCKHTS_BCF_FIELD_FORMAT,
+                id, BCF_HT_INT, *data, ret, "read_geno", error, error_size)) {
+            return accept_mismatch(policy, error);
+        }
+        /* Sample selection retains the file's encoded stride. Compact the
+         * validated scalar views in place; padding carries no PS value. */
+        int stride = ret / samples;
+        for (int sample = 0; sample < samples; sample++)
+            (*data)[sample] = (*data)[(size_t)sample * stride];
+        ret = samples;
     }
     if (is_gt) {
         int stride = ret / samples;

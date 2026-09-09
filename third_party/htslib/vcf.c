@@ -6125,10 +6125,13 @@ int bcf_get_info_values(const bcf_hdr_t *hdr, bcf1_t *line, const char *tag, voi
     if ( !info->vptr ) return -3;           // the tag was marked for removal
     if ( type==BCF_HT_STR )
     {
+        if ( info->len==INT_MAX ) return -4;
         if ( *ndst < info->len+1 )
         {
+            void *new_dst = realloc(*dst, (size_t)info->len + 1);
+            if ( !new_dst ) return -4;
+            *dst = new_dst;
             *ndst = info->len + 1;
-            *dst  = realloc(*dst, *ndst);
         }
         memcpy(*dst,info->vptr,info->len);
         ((uint8_t*)*dst)[info->len] = 0;
@@ -6147,8 +6150,10 @@ int bcf_get_info_values(const bcf_hdr_t *hdr, bcf1_t *line, const char *tag, voi
     }
     if ( *ndst < info->len )
     {
+        void *new_dst = hts_realloc_p(*dst, info->len, size1);
+        if ( !new_dst ) return -4;
+        *dst = new_dst;
         *ndst = info->len;
-        *dst  = hts_realloc_p(*dst, *ndst, size1);
     }
 
     #define BRANCH(type_t, convert, is_missing, is_vector_end, set_missing, set_regular, out_type_t) do { \

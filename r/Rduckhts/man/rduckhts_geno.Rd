@@ -72,6 +72,7 @@ original-header sample indices, nullable allele indices, per-slot phase bits,
 and nullable scalar phase sets. An absent GT has NULL allele/phase lists;
 a missing allele still occupies a slot. Phase bits follow HTSlib decoding,
 including its leading-slot convention for VCF versions before 4.4.
+PS cardinality excludes vector-end padding retained after sample selection.
 }
 \details{
 Full scans preserve the input stream when assigning ordinals. Indexed regions

@@ -1,0 +1,36 @@
+diff --git a/vcf.c b/vcf.c
+--- a/vcf.c
++++ b/vcf.c
+@@ -6126,8 +6126,11 @@
+-    if ( type==BCF_HT_STR )
+-    {
+-        if ( *ndst < info->len+1 )
+-        {
+-            *ndst = info->len + 1;
+-            *dst  = realloc(*dst, *ndst);
+-        }
+-        memcpy(*dst,info->vptr,info->len);
++    if ( type==BCF_HT_STR )
++    {
++        if ( info->len==INT_MAX ) return -4;
++        if ( *ndst < info->len+1 )
++        {
++            void *new_dst = realloc(*dst, (size_t)info->len + 1);
++            if ( !new_dst ) return -4;
++            *dst = new_dst;
++            *ndst = info->len + 1;
++        }
++        memcpy(*dst,info->vptr,info->len);
+@@ -6148,5 +6151,7 @@
+-    if ( *ndst < info->len )
+-    {
+-        *ndst = info->len;
+-        *dst  = hts_realloc_p(*dst, *ndst, size1);
+-    }
++    if ( *ndst < info->len )
++    {
++        void *new_dst = hts_realloc_p(*dst, info->len, size1);
++        if ( !new_dst ) return -4;
++        *dst = new_dst;
++        *ndst = info->len;
++    }

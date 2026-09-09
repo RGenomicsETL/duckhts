@@ -6,6 +6,7 @@
 #' and nullable scalar phase sets. An absent GT has NULL allele/phase lists;
 #' a missing allele still occupies a slot. Phase bits follow HTSlib decoding,
 #' including its leading-slot convention for VCF versions before 4.4.
+#' PS cardinality excludes vector-end padding retained after sample selection.
 #'
 #' Full scans preserve the input stream when assigning ordinals. Indexed regions
 #' use HTSlib's union order and start a new ordinal at zero. Use SQL `ORDER BY

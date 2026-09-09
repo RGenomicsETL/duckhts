@@ -150,6 +150,15 @@ else
   "${runtime[@]}" "$build_dir/duckhts_bcf_scan_test" "$tmp"
 fi
 cmake --build "$build_dir" --target duckhts_reader_alloc_probe -j2
+if [ "$(uname -s)" = Linux ]; then
+  cmake --build "$build_dir" --target duckhts_bcf_info_oom_test -j2
+  if [ "$sanitizer" = asan ]; then
+    ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+      LD_PRELOAD="$(${CC:-cc} -print-file-name=libasan.so)" "$build_dir/duckhts_bcf_info_oom_test"
+  else
+    "${runtime[@]}" "$build_dir/duckhts_bcf_info_oom_test"
+  fi
+fi
 ${CC:-cc} -std=c11 -UNDEBUG -Wall -Wextra -Werror "${compile_flags[@]}" \
   -Isrc/include -Ithird_party/htslib test/scripts/bam_format_test.c \
   -L"$out_dir" -Wl,-rpath,"$root/$out_dir" -lduckhts "${link_flags[@]}" \

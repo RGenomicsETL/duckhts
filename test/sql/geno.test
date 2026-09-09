@@ -4,6 +4,22 @@
 
 require duckhts
 
+# Excluded samples can leave BCF vector-end padding. It is not another PS value.
+foreach ext vcf bcf
+
+foreach policy null warn error
+
+query II
+SELECT calls[1].sample_index, calls[1].phase_set
+FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_ps_width.${ext}',
+               samples := 'S2', decode_error_policy := '${policy}');
+----
+1	20
+
+endloop
+
+endloop
+
 foreach ext vcf bcf vcf.gz
 
 foreach policy null warn

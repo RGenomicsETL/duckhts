@@ -2,6 +2,13 @@
 
 # duckhts 1.5.1.9000
 
+- preserve selected samples' scalar phase sets when BCF FORMAT storage retains
+  vector-end padding; PS uses the shared numeric cardinality check
+
+- return INFO decode allocation errors without losing the caller's buffer or
+  crashing; the HTSlib vendor patch checks initial allocation, growth and string
+  terminator capacity, with isolated dependency-allocation failure tests
+
 - reject oversized numeric scalar INFO/FORMAT payloads through decode_error_policy;
   null/warn withhold the affected tag for the record instead of truncating values.
   Missing elements count toward scalar cardinality; vector-end padding does not

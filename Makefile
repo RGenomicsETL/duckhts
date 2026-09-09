@@ -143,7 +143,7 @@ endif
 
 test: test_debug
 test_debug: test-cache-paths test-duckvep-kernel test-simd-kernels test-liftover-property test-liftover-fuzz-debug test-sqllogictest-debug
-test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release
+test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom
 test_release: test-reference-cache
 ifneq ($(filter linux_%,$(or $(DUCKDB_PLATFORM),$(shell sed -n '1p' configure/platform.txt 2>/dev/null))),)
 test_release: test-reader-alloc
@@ -186,6 +186,12 @@ test-bcf-scan:
 			-Ithird_party/htslib test/scripts/bcf_scan_test.c \
 			-Lbuild/release -Wl,-rpath,$(PROJ_DIR)build/release -lduckhts -pthread \
 			-o "$$tmp/bcf_scan_test"; "$$tmp/bcf_scan_test" "$$tmp"
+
+.PHONY: test-bcf-info-oom
+test-bcf-info-oom:
+	@if [ "$$(uname -s)" = Linux ]; then \
+		./cmake_build/release/duckhts_bcf_info_oom_test; \
+	else echo "INFO realloc interposition requires Linux; reader SQL/R tests remain enabled"; fi
 
 .PHONY: test-reference-cache test-reference-cache-asan test-reference-cache-ubsan test-reference-cache-tsan
 define run_reference_cache_test

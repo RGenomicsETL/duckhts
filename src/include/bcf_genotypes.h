@@ -8,7 +8,7 @@
  * are adaptive HTSlib buffers, not an allocation-static execution guarantee. */
 typedef struct {
     int32_t *gt;
-    int32_t *ps;
+    int32_t *ps; /* One decoded scalar per selected sample; no vector-end padding slots. */
     int gt_capacity;
     int ps_capacity;
     int gt_stride; /* zero means absent/invalid GT, not known zero ploidy */

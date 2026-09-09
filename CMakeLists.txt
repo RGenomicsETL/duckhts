@@ -486,6 +486,16 @@ if(UNIX AND NOT DUCKDB_WASM_EXTENSION)
     target_compile_options(duckhts_reader_alloc_probe PRIVATE -fvisibility=default)
     target_include_directories(duckhts_reader_alloc_probe PRIVATE duckdb_capi src/include)
     target_link_libraries(duckhts_reader_alloc_probe PRIVATE ${CMAKE_DL_LIBS})
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # Distribution CI runs tests both inside and outside its build container.
+        # Build this static-link probe here; running it needs no CMake cache paths.
+        add_executable(duckhts_bcf_info_oom_test test/scripts/bcf_info_oom_test.c)
+        target_compile_features(duckhts_bcf_info_oom_test PRIVATE c_std_11)
+        target_compile_options(duckhts_bcf_info_oom_test PRIVATE -UNDEBUG)
+        target_include_directories(duckhts_bcf_info_oom_test PRIVATE ${HTSLIB_SRC_DIR})
+        target_link_options(duckhts_bcf_info_oom_test PRIVATE -Wl,--wrap=realloc)
+        target_link_libraries(duckhts_bcf_info_oom_test PRIVATE ${HTSLIB_LINK_LIBS})
+    endif()
 endif()
 
 # Host-neutral region parsing probe: real HTSlib, no DuckDB headers or runtime.
