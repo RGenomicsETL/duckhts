@@ -2,6 +2,9 @@
 
 # duckhts 1.5.1.9000
 
+- bind published decoded phase-audit comparisons to transcript-keyed oracle and native
+  observations, rejecting reassigned profile verdicts with unchanged global totals
+
 - verify retained mutation-lane flags and implicit-reference group metadata in
   the reference-route corpus with complete carrier and provenance accounting;
   reject native rows outside the declared transcript domain before comparison

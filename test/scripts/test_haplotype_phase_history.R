@@ -11,11 +11,12 @@ main <- function() {
   gt <- c(plain, paste0("|", plain), paste0("/", plain))
   n <- length(gt)
   ploidy <- lengths(strsplit(sub("^[|/]", "", gt), "[|/]"))
-  groups <- list(list(cds = "ATG", protein = "M", count = 2, contributors = "a"))
+  groups <- canonical(list(list(cds = "ATG", protein = "M", count = 2, contributors = "a")))
   comparison <- list(expected = groups, observed = groups, equal = TRUE,
-    oracle_lanes = 2, native_lanes = 2, native_unknown = 0, native_unavailable_carriers = 0)
+    oracle_lanes = 2L, native_lanes = 2, native_unknown = 0L, native_unavailable_carriers = 0)
   decoded <- rep(list(comparison), n)
   decoded[[1L]]$observed[[1L]]$cds <- "CTG"
+  decoded[[1L]]$observed <- canonical(decoded[[1L]]$observed)
   decoded[[1L]]$equal <- FALSE
   summary <- data.frame(transcript_index = seq_len(n) - 1L, seq_region = seq_len(n) - 1L,
     chrom = sprintf("chrP%05d", seq_len(n)), transcript = sprintf("HP%05d", seq_len(n)), GT = gt, ploidy,
@@ -29,10 +30,14 @@ main <- function() {
     evidence = 0L, sequence_status = 0L)
   raw <- list(output = list(errors = integer(n)), comparisons = rep(list(comparison), n),
     expected_semantics = semantics, observed_semantics = semantics)
-  native <- list(records = data.frame(record_index = seq_len(2L * n) - 1L),
+  native <- list(records = data.frame(record_index = seq_len(2L * n) - 1L, ID = rep(c("a", "b"), n)),
     calls = data.frame(event_index = seq_len(3L * n)),
-    actual = data.frame(transcript_index = rep(seq_len(n) - 1L, each = 2L), carrier_count = 1))
+    actual = data.frame(transcript_index = rep(seq_len(n) - 1L, each = 2L),
+      carrier_count = 1, cds = "ATG", protein = "M"))
+  native$actual$contributors <- lapply(native$actual$transcript_index,
+    function(i) data.frame(event_index = 6L * i + 1L))
   raw$actual <- native$actual
+  native$actual$cds[native$actual$transcript_index == 0L] <- "CTG"
   native$records$ALT <- rep(list(c("A", "T"), "C"), n)
   native$records$calls <- lapply(rep(ploidy, each = 2L), function(p) {
     x <- data.frame(sample_index = 0L)
@@ -56,6 +61,10 @@ main <- function() {
     "ploidy", "prefix", "missing", "mixed")]
   write.table(transform(cases, cds = "ATG"), file.path(directory, "cases.tsv"),
     sep = "\t", quote = FALSE, row.names = FALSE)
+  oracle <- lapply(cases$transcript, function(transcript) list(transcript = transcript,
+    haplotypes = unname(groups), total_haplotype_count = 2))
+  writeLines(vapply(oracle, jsonlite::toJSON, "", auto_unbox = TRUE),
+    file.path(directory, "oracle.stdout"))
   for (kind in c("raw", "public_raw"))
     write.csv(transform(cases, equal = TRUE), file.path(directory, paste0(kind, "_replay_summary.csv")),
       row.names = FALSE)
@@ -116,6 +125,16 @@ main <- function() {
   write.csv(changed, file.path(directory, "summary.csv"), row.names = FALSE)
   update_receipt()
   fails(phase_history_rows(directory))
+  write.csv(summary, file.path(directory, "summary.csv"), row.names = FALSE)
+  swapped <- decoded
+  swapped[c(1L, n)] <- swapped[c(n, 1L)]
+  changed <- summary
+  changed$equal[c(1L, n)] <- changed$equal[c(n, 1L)]
+  saveRDS(swapped, file.path(directory, "comparisons.rds"))
+  write.csv(changed, file.path(directory, "summary.csv"), row.names = FALSE)
+  update_receipt()
+  fails(phase_history_rows(directory))
+  saveRDS(decoded, file.path(directory, "comparisons.rds"))
   write.csv(summary, file.path(directory, "summary.csv"), row.names = FALSE)
   for (change in c("missing_payload", "null_payload", "empty_payload", "missing_provenance", "wrong_count")) {
     changed_raw <- raw

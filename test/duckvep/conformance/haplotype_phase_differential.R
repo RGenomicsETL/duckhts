@@ -23,6 +23,26 @@ phase_equal <- function(expected, observed) {
   Reduce(`&`, Map(`==`, expected, observed))
 }
 
+phase_decoded_comparisons <- function(cases, oracle, actual, records) {
+  stopifnot(!anyDuplicated(names(oracle)), setequal(names(oracle), cases$transcript),
+    all(actual$transcript_index %in% cases$transcript_index),
+    !anyDuplicated(records$record_index))
+  rows <- split(seq_len(nrow(actual)), actual$transcript_index)
+  lapply(seq_len(nrow(cases)), function(i) {
+    o <- oracle[[cases$transcript[i]]]
+    a <- actual[rows[[as.character(cases$transcript_index[i])]], , drop = FALSE]
+    observed <- lapply(seq_len(nrow(a)), function(j) list(cds = a$cds[j], protein = a$protein[j],
+      count = a$carrier_count[j], contributors = records$ID[match(
+        (a$contributors[[j]]$event_index - 1) %/% 3, records$record_index)]))
+    expected <- canonical(o$haplotypes)
+    observed <- canonical(observed)
+    list(expected = expected, observed = observed, equal = identical(expected, observed),
+      oracle_lanes = o$total_haplotype_count, native_lanes = sum(a$carrier_count),
+      native_unknown = sum(is.na(a$cds)),
+      native_unavailable_carriers = sum(a$carrier_count[is.na(a$cds)]))
+  })
+}
+
 phase_history_rows <- function(directory) {
   source("scripts/duckvep_evidence.R", local = TRUE)
   directory <- normalizePath(directory, mustWork = TRUE)
@@ -36,7 +56,8 @@ phase_history_rows <- function(directory) {
   hashes <- unlist(receipt$sha256)
   files <- c("cases.tsv", "summary.csv", "comparisons.rds", "phase_comparisons.rds", "raw_replay.rds",
     "public_raw_replay.rds", "controls.csv", "phase_controls.csv", "raw_replay_controls.csv",
-    "decoded_collisions.rds", "native.rds", "raw_replay_summary.csv", "public_raw_replay_summary.csv")
+    "decoded_collisions.rds", "native.rds", "oracle.stdout", "raw_replay_summary.csv",
+    "public_raw_replay_summary.csv")
   paths <- normalizePath(file.path(directory, files), mustWork = TRUE)
   absolute <- startsWith(names(hashes), "/") | grepl("^[A-Za-z]:", names(hashes))
   recorded <- normalizePath(ifelse(absolute, names(hashes), file.path(getwd(), names(hashes))),
@@ -74,6 +95,10 @@ phase_history_rows <- function(directory) {
   raw <- read("raw_replay.rds")
   public <- read("public_raw_replay.rds")
   native <- read("native.rds")
+  oracle <- lapply(readLines(file.path(directory, "oracle.stdout")), jsonlite::fromJSON,
+    simplifyVector = FALSE)
+  names(oracle) <- vapply(oracle, `[[`, "", "transcript")
+  stopifnot(identical(decoded, phase_decoded_comparisons(cases, oracle, native$actual, native$records)))
   raw_gt <- as.vector(rbind(cases$GT, vapply(cases$ploidy,
     function(p) paste(rep("1", p), collapse = "|"), "")))
   stopifnot(identical(parser$keys, data.frame(transcript = rep(cases$transcript, each = 2L),
@@ -449,19 +474,7 @@ main <- function() {
   stopifnot(all(actual$carrier_count == vapply(actual$carriers, nrow, 1L)),
     all(vapply(actual$carriers, function(c) all(c$sample_index == 0L), TRUE)))
   saveRDS(list(records = records, calls = calls, actual = actual), file.path(out, "native.rds"))
-  comparisons <- lapply(seq_len(nrow(cases)), function(i) {
-    o <- oracle[[cases$transcript[i]]]
-    a <- actual[actual$transcript_index == cases$transcript_index[i], ]
-    observed <- lapply(seq_len(nrow(a)), function(j) list(cds = a$cds[j], protein = a$protein[j],
-      count = a$carrier_count[j], contributors = records$ID[match(
-        (a$contributors[[j]]$event_index - 1) %/% 3, records$record_index)]))
-    expected <- canonical(o$haplotypes)
-    observed <- canonical(observed)
-    list(expected = expected, observed = observed, equal = identical(expected, observed),
-      oracle_lanes = o$total_haplotype_count, native_lanes = sum(a$carrier_count),
-      native_unknown = sum(is.na(a$cds)),
-      native_unavailable_carriers = sum(a$carrier_count[is.na(a$cds)]))
-  })
+  comparisons <- phase_decoded_comparisons(cases, oracle, actual, records)
   saveRDS(comparisons, file.path(out, "comparisons.rds"))
   # The independent text read checks every physical record ordinal. Production
   # source calls consume only the original GT retained by the VCF reader.
