@@ -69,6 +69,33 @@ duckvep_evidence_repo_path <- function(root, path) {
   substring(path, nchar(prefix) + 1L)
 }
 
+# Publication reopens every retained file; source/binary hashes identify the
+# executed revision rather than whichever checkout publishes the observations.
+duckvep_evidence_read_artifact <- function(directory, required_files) {
+  directory <- normalizePath(directory, mustWork = TRUE)
+  relative <- duckvep_evidence_repo_path(getwd(), directory)
+  stopifnot(nzchar(relative))
+  receipt_path <- file.path(directory, "receipt.json")
+  receipt <- jsonlite::fromJSON(receipt_path)
+  hashes <- unlist(receipt$sha256)
+  stopifnot(is.character(hashes), !is.null(names(hashes)),
+    !anyNA(hashes), all(grepl("^[0-9a-f]{64}$", hashes)))
+  absolute <- startsWith(names(hashes), "/") | grepl("^[A-Za-z]:", names(hashes))
+  recorded <- normalizePath(ifelse(absolute, names(hashes), file.path(getwd(), names(hashes))),
+    mustWork = FALSE)
+  required <- normalizePath(file.path(directory, required_files), mustWork = TRUE)
+  stopifnot(!anyDuplicated(recorded), all(required %in% recorded))
+  retained <- list.files(directory, recursive = TRUE, full.names = TRUE)
+  retained <- retained[basename(retained) != "receipt.json"]
+  in_artifact <- startsWith(recorded, paste0(directory, .Platform$file.sep))
+  stopifnot(setequal(recorded[in_artifact], normalizePath(retained)))
+  at <- match(normalizePath(retained), recorded)
+  stopifnot(!anyNA(at), identical(unname(vapply(retained, duckvep_evidence_sha256, "")),
+    unname(hashes[at])))
+  list(directory = directory, relative = relative, receipt_path = receipt_path,
+    receipt = receipt, hashes = setNames(unname(hashes), recorded))
+}
+
 duckvep_evidence_assert_checkout <- function(
   root,
   revision = NULL,

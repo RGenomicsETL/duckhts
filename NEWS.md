@@ -2,6 +2,10 @@
 
 # duckhts 1.5.1.9000
 
+- reconstruct model-campaign inputs, keyed oracle/native comparisons, corruption
+  controls and alignment bounds before publishing history; verify existing rows
+  without rewriting them and preserve honestly recorded disagreements
+
 - retain two complete source-bound model campaigns with 59,040 profiles and
   354,240 carrier memberships, explicit input-derived alignment budgets, and
   sequence, provenance and metadata checks; retain earlier failed executions

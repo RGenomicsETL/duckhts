@@ -1021,6 +1021,39 @@ default-limit failure remains in the length ledger alongside both completed runs
 it has no native comparison verdict. Per-run upstream group-owner checks do not
 waive the separate cross-run grouped-metadata disagreements.
 
+Publish a completed clean-build model campaign into the length ledger with:
+
+```sh
+Rscript test/duckvep/conformance/haplotype_model_differential.R \
+  --publish-artifact test/duckvep/conformance/results/haplotype_models_seed173_RUN
+```
+
+Publication verifies every retained file and regenerates the complete declared
+seeded cohort from the registered reference. Model relations, physical VCF records,
+FASTA/GFF text, stratum quotas and executed SQL must match. It reconstructs all
+comparisons from transcript-keyed upstream JSON/sidecar observations and native
+rows, including carrier-lane sequences, applied sources, nominal length and flags.
+Cached comparisons, summaries, all 60 controls and receipt metrics must agree with
+that reconstruction. The full-matrix bound is calculated from inputs alone.
+Rehashing altered summaries or relabelling a passing subset cannot establish a
+passing campaign. A genuinely discordant campaign retains its failure counts.
+
+`--history` selects an explicit existing ledger. Publication appends under an
+exclusive writer lock; an existing receipt is verified without rewriting its row.
+Diagnostic and aborted campaigns remain retained but are not accepted as completed
+clean-build observations by this publisher.
+
+`Rscript test/scripts/test_haplotype_model_history.R` exercises publication checks
+without VEP or DuckDB. Its small fixture retains the first two original transcript
+observations from clean source `0857ec1faf5736299a4341f73ffa557d8a9691ee`, seed 173;
+the source receipt locator, SHA-256 and oracle pins are embedded in the fixture.
+To reconstruct it from that retained campaign, maintainers run:
+
+```sh
+Rscript test/scripts/generate_model_publication_fixture.R \
+  test/duckvep/conformance/results/haplotype_models_seed173_24f4e42951c87e
+```
+
 `haplotype_reference_differential.R` exercises reference-only sample handling
 through the original container JSON serializer. CDS and protein groups are compared
 separately by sample and count; one CDS may link both a curated reference peptide

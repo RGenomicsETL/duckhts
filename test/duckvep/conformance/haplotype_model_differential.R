@@ -3,6 +3,8 @@
 source('test/duckvep/conformance/haplotype_observations.R')
 source('test/duckvep/conformance/haplotype_model_geometry.R')
 
+model_oracle_revisions <- c(vep = '57ea5c52340acc1f156267f810ad162e26597082',
+  variation = '2fb834b987ede3824e200197a838ce11e91aeb4b')
 
 # This generated grammar uses pipe-separated diploid calls, including .|1.
 # The pinned parser compacts called slots before consuming two file lanes.
@@ -134,54 +136,15 @@ observation_controls <- function(witness, actual, phase, model, exons, records) 
     missing_buffer_record = !mappings_ok(buffer, model, exons, records))
 }
 
-main <- function() {
-  opt <- optparse::parse_args(optparse::OptionParser(option_list = list(
-    optparse::make_option('--seed', type = 'integer', default = 173L),
-    optparse::make_option('--rare-per-stratum', dest = 'rare_per_stratum', type = 'integer', default = 1L),
-    optparse::make_option('--geometry-per-stratum', dest = 'geometry_per_stratum', type = 'integer', default = 0L),
-    optparse::make_option('--interaction-per-stratum', dest = 'interaction_per_stratum', type = 'integer', default = 0L),
-    optparse::make_option('--length-per-stratum', dest = 'length_per_stratum', type = 'integer', default = 0L),
-    optparse::make_option('--max-alignment-cells', dest = 'max_alignment_cells', type = 'integer', default = 16777216L),
-    optparse::make_option('--extension-receipt', dest = 'extension_receipt', default = NULL),
-    optparse::make_option('--vep-prefix', dest = 'vep_prefix', default = '/root/miniconda3/envs/vep')
-  )))
-  source('scripts/duckvep_evidence.R', local = TRUE)
-  root <- normalizePath('.')
-  seed <- opt$seed
-  stopifnot(!is.na(seed), !is.na(opt$rare_per_stratum), opt$rare_per_stratum >= 0L,
-    !is.na(opt$geometry_per_stratum), opt$geometry_per_stratum >= 0L,
-    !is.na(opt$interaction_per_stratum), opt$interaction_per_stratum >= 0L,
-    !is.na(opt$length_per_stratum), opt$length_per_stratum >= 0L,
-    !is.na(opt$max_alignment_cells), opt$max_alignment_cells > 0L,
-    opt$rare_per_stratum <= (32768L - 768L) %/% 264L,
-    768 + 264 * opt$rare_per_stratum + 504 * opt$geometry_per_stratum +
-      6048 * opt$interaction_per_stratum + 4536 * opt$length_per_stratum <= 32768)
-  revision <- duckvep_evidence_revision(root)
-  extension <- normalizePath('build/release/duckhts.duckdb_extension')
-  binding <- 'diagnostic_unbound'
-  if (!is.null(opt$extension_receipt)) {
-    duckvep_evidence_assert_checkout(root, revision)
-    binding <- duckvep_evidence_read_extension_receipt(opt$extension_receipt, root, extension, revision)$binding
-  }
-  Sys.setenv(DUCKHTSBENCH_REGISTRY = file.path(root, 'r/duckhtsbench/inst/benchmark_registry.tsv'))
-  paths <- duckhtsbench::duckhts_bench_stage_repository_fixtures(root, 'duckvep-haplotypes')
-  cds <- readLines(paths[['haplotype_benchmark_reference']])[2L]
+model_inputs <- function(seed, opt, cds) {
+  quotas <- unlist(opt[c('rare_per_stratum', 'geometry_per_stratum',
+    'interaction_per_stratum', 'length_per_stratum')])
+  stopifnot(length(seed) == 1L, is.finite(seed), seed >= 0, seed <= .Machine$integer.max,
+    seed == floor(seed), length(quotas) == 4L, is.numeric(quotas),
+    all(is.finite(quotas)), all(quotas >= 0), all(quotas == floor(quotas)),
+    768 + sum(quotas * c(264, 504, 6048, 4536)) <= 32768)
   rc <- function(x) paste(rev(strsplit(chartr('ACGT', 'TGCA', x), '', fixed = TRUE)[[1L]]), collapse = '')
-  out <- tempfile(paste0('haplotype_models_seed', seed, '_'),
-    tmpdir = 'test/duckvep/conformance/results')
-  dir.create(out)
-  message('Artifacts: ', out)
-  pins <- c(vep = '57ea5c52340acc1f156267f810ad162e26597082',
-    variation = '2fb834b987ede3824e200197a838ce11e91aeb4b')
-  mirrors <- normalizePath(c('.sync/ensembl-vep', '.sync/ensembl-variation'))
-  for (i in seq_along(pins)) stopifnot(
-    identical(duckvep_evidence_command('git', c('-C', mirrors[i], 'rev-parse', 'HEAD'), 'revision'), unname(pins[i])),
-    !length(duckvep_evidence_command('git', c('-C', mirrors[i], 'status', '--porcelain'), 'clean oracle')))
-  prefix <- normalizePath(opt$vep_prefix)
-  environment <- duckvep_evidence_command('micromamba', c('list', '-p', prefix, '--explicit'), 'environment')
-  stopifnot(identical(duckvep_evidence_explicit_packages(environment),
-    duckvep_evidence_explicit_packages(readLines('test/duckvep/upstream/receipts/vep116_2026-07-22.conda-explicit.txt'))))
-  writeLines(environment, file.path(out, 'environment.txt'))
+  coverages <- list()
   set.seed(seed)
   cases <- expand.grid(shape = c('disjoint', 'duplicate', 'different_alt_lists', 'exon_spanning'),
     gt_pair = c('cis', 'trans', 'mixed_missing'), strand = c(1L, -1L), draw = 1:32,
@@ -278,7 +241,7 @@ main <- function() {
       geometry$layouts <- rbind(geometry$layouts, added$layouts)
       geometry$phases <- rbind(geometry$phases, added$phases)
     }
-    write.csv(added$coverage, file.path(out, paste0(cohort, '_coverage.csv')), row.names = FALSE)
+    coverages[[cohort]] <- added$coverage
   }
   records <- records[order(records$seq_region, records$position, seq_len(nrow(records))), ]
   records$event_index <- seq_len(nrow(records))
@@ -294,59 +257,30 @@ main <- function() {
   coverage$required <- opt$rare_per_stratum
   coverage$observed <- tabulate(match(key(cases[cases$cohort == 'quota', ]), key(strata)), nrow(strata))
   stopifnot(nrow(strata) == 264L, all(coverage$observed == coverage$required))
-  write.csv(coverage, file.path(out, 'coverage.csv'), row.names = FALSE)
   inputs <- list(cases = cases, models = models, exons = exons, records = records)
   if (!is.null(geometry)) inputs$geometry <- geometry[c('layouts', 'phases')]
-  saveRDS(inputs, file.path(out, 'inputs.rds'))
-  writeLines(unlist(fasta), file.path(out, 'reference.fa'))
-  gff_lines <- unlist(gff)
-  parts <- strsplit(gff_lines, '\t')
+  list(inputs = inputs, fasta = fasta, gff = gff, coverage = coverage, coverages = coverages)
+}
+
+model_source_text <- function(generated) {
+  records <- generated$inputs$records
+  gff <- unlist(generated$gff)
+  parts <- strsplit(gff, '\t')
   gff_order <- order(vapply(parts, `[[`, '', 1L), as.integer(vapply(parts, `[[`, '', 4L)))
-  writeLines(c('##gff-version 3', gff_lines[gff_order]), file.path(out, 'model.gff3'))
-  contig_lengths <- vapply(fasta, function(x) nchar(x[2L]), 1L)
-  writeLines(c('##fileformat=VCFv4.4', paste0('##contig=<ID=', unique(records$chrom), ',length=', contig_lengths, '>'),
-    '##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">',
-    '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\ts0\ts1\ts2',
-    with(records, paste(chrom, position, source_id, reference, alt, '.', 'PASS', '.', 'GT', s0, s1, s2,
-      sep = '\t'))), file.path(out, 'calls.vcf'))
-  run <- function(cmd, args, name) stopifnot(system2(cmd, shQuote(args),
-    stdout = file.path(out, paste0(name, '.stdout')), stderr = file.path(out, paste0(name, '.stderr'))) == 0L)
-  run('samtools', c('faidx', file.path(out, 'reference.fa')), 'faidx')
-  run('bcftools', c('norm', '-c', 'e', '-f', file.path(out, 'reference.fa'), '-o',
-    file.path(out, 'checked.vcf'), file.path(out, 'calls.vcf')), 'refcheck')
-  run('bgzip', file.path(out, 'model.gff3'), 'bgzip')
-  run('tabix', c('-p', 'gff', file.path(out, 'model.gff3.gz')), 'tabix')
-  libs <- paste(c(file.path(mirrors, 'modules'), file.path(prefix, 'share/ensembl-vep-116.0-0')), collapse = ':')
-  run('micromamba', c('run', '--clean-env', '--env', paste0('PERL5LIB=', libs), '-p', prefix,
-    'perl', 'test/duckvep/conformance/haplotype_oracle.pl', file.path(out, 'calls.vcf'),
-    file.path(out, 'reference.fa'), file.path(out, 'model.gff3.gz'), file.path(out, 'phase.jsonl')), 'oracle')
-  write_receipt <- function(metrics) {
-    identities <- unique(c('test/duckvep/conformance/haplotype_model_differential.R',
-      'test/duckvep/conformance/haplotype_observations.R', 'scripts/duckvep_evidence.R', extension,
-      'test/duckvep/conformance/haplotype_model_geometry.R',
-      'test/duckvep/conformance/haplotype_oracle.pl', paths[['haplotype_benchmark_reference']],
-      'r/duckhtsbench/inst/benchmark_registry.tsv', list.files(out, full.names = TRUE)))
-    jsonlite::write_json(c(list(source_revision = revision, extension_build_binding = binding,
-      tracked_changes = duckvep_evidence_tracked_changes(root),
-      scope = 'shared_transcript_source_replay_sequence_sample_counts_and_per_lane_source_identity_sets',
-      seed = seed, rare_per_stratum = opt$rare_per_stratum, required_strata = nrow(coverage),
-      geometry_per_stratum = opt$geometry_per_stratum, geometry_strata = if (opt$geometry_per_stratum) 504L else 0L,
-      interaction_per_stratum = opt$interaction_per_stratum, interaction_strata = if (opt$interaction_per_stratum) 6048L else 0L,
-      length_per_stratum = opt$length_per_stratum, length_strata = if (opt$length_per_stratum) 4536L else 0L,
-      max_alignment_cells = opt$max_alignment_cells,
-      minimum_stratum_draws = min(coverage$observed), oracle_revisions = as.list(pins),
-      source_artifact = 'haplotype_benchmark_reference', profiles = nrow(models),
-      records = nrow(records), threads = 4L), metrics,
-      list(sha256 = as.list(vapply(identities, duckvep_evidence_sha256, '')))),
-      file.path(out, 'receipt.json'), auto_unbox = TRUE, pretty = TRUE)
-  }
-  con <- DBI::dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = 'true')))
-  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
-  q <- function(x) as.character(DBI::dbQuoteString(con, x))
-  DBI::dbExecute(con, paste('LOAD', q(extension)))
-  DBI::dbExecute(con, 'SET threads=4')
-  DBI::dbWriteTable(con, 'models', models); DBI::dbWriteTable(con, 'exons', exons)
-  DBI::dbWriteTable(con, 'records', records)
+  lengths <- vapply(generated$fasta, function(x) nchar(x[2L]), 1L)
+  list(fasta = unlist(generated$fasta), gff = c('##gff-version 3', gff[gff_order]),
+    vcf = c('##fileformat=VCFv4.4',
+      paste0('##contig=<ID=', unique(records$chrom), ',length=', lengths, '>'),
+      '##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">',
+      '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\ts0\ts1\ts2',
+      with(records, paste(chrom, position, source_id, reference, alt, '.', 'PASS', '.',
+        'GT', s0, s1, s2, sep = '\t'))))
+}
+
+model_layouts <- function(inputs) {
+  models <- inputs$models
+  exons <- inputs$exons
+  geometry <- inputs$geometry
   layouts <- data.frame(transcript_index = models$transcript_index,
     transcript_start = 11L, transcript_end = 190L, cds_start = 11L, cds_end = 190L)
   phases <- data.frame(transcript_index = exons$transcript_index, cs = exons$cs, phase = 0L, end_phase = 0L)
@@ -355,35 +289,26 @@ main <- function() {
     key <- function(x) paste(x$transcript_index, x$cs)
     phases[match(key(geometry$phases), key(phases)), ] <- geometry$phases
   }
-  DBI::dbWriteTable(con, 'layouts', layouts); DBI::dbWriteTable(con, 'phases', phases)
-  queries <- c('SELECT DISTINCT seq_region::UINTEGER seq_region FROM models ORDER BY seq_region',
-    'SELECT transcript_index::UINTEGER transcript_index,seq_region::UINTEGER seq_region,transcript_start::UBIGINT transcript_start,
-     transcript_end::UBIGINT transcript_end,strand::TINYINT strand,transcript_index::UINTEGER gene_index,3::UBIGINT transcript_flags,
-     cds_start::UBIGINT cds_start,cds_end::UBIGINT cds_end,cds::BLOB cds_sequence,1::UTINYINT codon_table
-     FROM models JOIN layouts USING(transcript_index) ORDER BY transcript_index',
-    'SELECT transcript_index::UINTEGER transcript_index,start::UBIGINT exon_start,"end"::UBIGINT exon_end,
-     cs::UBIGINT exon_cdna_start,ce::UBIGINT exon_cdna_end,phase::TINYINT phase,end_phase::TINYINT end_phase
-     FROM exons JOIN phases USING(transcript_index,cs) ORDER BY transcript_index,cs')
-  stopifnot(DBI::dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('probe',",
-    paste(q(queries), collapse = ','), ')'))$loaded)
+  list(layouts = layouts, phases = phases)
+}
+
+model_native_query <- function(max_alignment_cells) {
   calls <- "SELECT event_index,r.seq_region,position,reference,string_split(alt,',') alternates,m.transcript_index,
     s.i sample_index,CASE s.i WHEN 0 THEN s0 WHEN 1 THEN s1 ELSE s2 END gt
     FROM records r JOIN models m USING(seq_region),range(3) s(i)"
-  query <- paste0('SELECT * FROM duckvep_haplotypes(', q(calls),
-    ",'probe',input_mode:='source_records',phase_policy:='vep116_compat',max_alignment_cells:=",
-    opt$max_alignment_cells, ')')
-  writeLines(query, file.path(out, 'native_query.sql'))
-  actual <- tryCatch(DBI::dbGetQuery(con, query), error = function(error) {
-    write_receipt(list(execution_status = 'native_query_error', error = conditionMessage(error)))
-    stop(error)
-  })
-  saveRDS(actual, file.path(out, 'actual.rds'))
-  oracle <- lapply(readLines(file.path(out, 'oracle.stdout')), jsonlite::fromJSON, simplifyVector = FALSE)
-  names(oracle) <- vapply(oracle, `[[`, '', 'transcript')
-  stopifnot(!anyDuplicated(names(oracle)), setequal(names(oracle), models$transcript))
-  phase <- lapply(readLines(file.path(out, 'phase.jsonl')), jsonlite::fromJSON, simplifyVector = FALSE)
-  names(phase) <- vapply(phase, `[[`, '', 'transcript')
-  stopifnot(!anyDuplicated(names(phase)), setequal(names(phase), models$transcript))
+  paste0("SELECT * FROM duckvep_haplotypes('", gsub("'", "''", calls, fixed = TRUE),
+    "','probe',input_mode:='source_records',phase_policy:='vep116_compat',max_alignment_cells:=",
+    max_alignment_cells, ')')
+}
+
+model_comparisons <- function(inputs, actual, oracle, phase) {
+  models <- inputs$models
+  exons <- inputs$exons
+  records <- inputs$records
+  cases <- inputs$cases
+  layouts <- model_layouts(inputs)$layouts
+  stopifnot(!anyDuplicated(names(oracle)), setequal(names(oracle), models$transcript),
+    !anyDuplicated(names(phase)), setequal(names(phase), models$transcript))
   rows_by_tx <- native_haplotype_rows(actual, models$transcript_index)
   records_by_region <- split(seq_len(nrow(records)), records$seq_region)
   exons_by_tx <- split(seq_len(nrow(exons)), exons$transcript_index)
@@ -427,8 +352,6 @@ main <- function() {
   for (name in c('lane_flags_equal', 'group_metadata_equal'))
     summary[[name]] <- vapply(comparisons, `[[`, TRUE, name)
   summary$metadata_passed <- summary$lane_flags_equal & summary$group_metadata_equal
-  saveRDS(comparisons, file.path(out, 'comparisons.rds'))
-  write.csv(summary, file.path(out, 'summary.csv'), row.names = FALSE)
   controls <- observation_controls(oracle[['T1full']]$haplotypes, actual[rows_by_tx[['0']], ],
     phase[['T1full']], models[1L, ], exons[exons_by_tx[['0']], ], records[records_by_region[['0']], ])
   controls <- c(controls, replay_lane_controls(phase[['T1full']]$replay_lanes))
@@ -439,10 +362,7 @@ main <- function() {
   metadata_controls <- c(metadata_controls, native_lane_metadata_controls(
     phase[['T1full']]$replay_lanes, actual[rows_by_tx[['0']], , drop = FALSE],
     paste0('s', 0:2), bits = c(metadata_native_flags = 1L)))
-  write.csv(data.frame(control = names(controls), rejected = controls), file.path(out, 'controls.csv'), row.names = FALSE)
-  write.csv(data.frame(control = names(metadata_controls), rejected = metadata_controls),
-    file.path(out, 'metadata_controls.csv'), row.names = FALSE)
-  write_receipt(list(execution_status = 'compared',
+  metrics <- list(execution_status = 'compared',
     geometry_profiles = sum(summary$cohort == 'geometry'), geometry_failures = sum(!summary$passed & summary$cohort == 'geometry'),
     interaction_profiles = sum(summary$cohort == 'interaction'),
     interaction_failures = sum(!summary$passed & summary$cohort == 'interaction'),
@@ -459,7 +379,280 @@ main <- function() {
     lane_flag_failures = sum(!summary$lane_flags_equal),
     group_metadata_failures = sum(!summary$group_metadata_equal),
     oracle_replay_lanes = sum(vapply(comparisons, function(x) length(x$expected_lanes), 1L)),
-    observed_replay_lanes = sum(vapply(comparisons, function(x) length(x$observed_lanes), 1L))))
+    observed_replay_lanes = sum(vapply(comparisons, function(x) length(x$observed_lanes), 1L)))
+  list(comparisons = comparisons, summary = summary, controls = controls,
+    metadata_controls = metadata_controls, metrics = metrics)
+}
+
+# CSV has no integer/double distinction or row names; column names, order,
+# missingness and every displayed value must still match the reconstructed table.
+model_check_table <- function(observed, expected) {
+  stopifnot(identical(names(observed), names(expected)), nrow(observed) == nrow(expected),
+    identical(lapply(observed, as.character), lapply(expected, as.character)))
+  invisible(TRUE)
+}
+
+model_check_saved <- function(directory, inputs, actual, oracle, phase, receipt) {
+  checked <- model_comparisons(inputs, actual, oracle, phase)
+  stopifnot(identical(readRDS(file.path(directory, 'comparisons.rds')), checked$comparisons))
+  model_check_table(read.csv(file.path(directory, 'summary.csv')), checked$summary)
+  for (name in c('controls', 'metadata_controls')) {
+    controls <- checked[[name]]
+    model_check_table(read.csv(file.path(directory, paste0(name, '.csv'))),
+      data.frame(control = names(controls), rejected = controls))
+    stopifnot(all(controls))
+  }
+  for (name in names(checked$metrics)) {
+    value <- receipt[[name]]
+    stopifnot(length(value) == 1L, !is.na(value), identical(
+      as.character(value), as.character(checked$metrics[[name]])))
+  }
+  checked
+}
+
+model_history_row <- function(directory) {
+  source('scripts/duckvep_evidence.R', local = TRUE)
+  files <- c('inputs.rds', 'actual.rds', 'comparisons.rds', 'summary.csv', 'controls.csv',
+    'metadata_controls.csv', 'oracle.stdout', 'phase.jsonl', 'calls.vcf', 'reference.fa',
+    'model.gff3.gz', 'coverage.csv', 'native_query.sql')
+  artifact <- duckvep_evidence_read_artifact(directory, files)
+  directory <- artifact$directory
+  receipt <- artifact$receipt
+  fields <- c('extension_build_binding', 'execution_status', 'scope', 'source_revision',
+    'threads', 'source_artifact', 'length_per_stratum', 'profiles', 'records',
+    'required_strata', 'minimum_stratum_draws', 'geometry_strata',
+    'interaction_strata', 'length_strata')
+  stopifnot(all(vapply(receipt[fields], function(x) length(x) == 1L && !is.na(x), TRUE)))
+  stopifnot(receipt$extension_build_binding == 'htslib_distclean_make_release',
+    receipt$execution_status == 'compared', !length(receipt$tracked_changes),
+    receipt$scope == 'shared_transcript_source_replay_sequence_sample_counts_and_per_lane_source_identity_sets',
+    grepl('^[0-9a-f]{40}$', receipt$source_revision), receipt$threads == 4L,
+    identical(unlist(receipt$oracle_revisions), model_oracle_revisions),
+    receipt$source_artifact == 'haplotype_benchmark_reference', receipt$length_per_stratum > 0L)
+  limit <- receipt$max_alignment_cells
+  stopifnot(length(limit) == 1L, is.numeric(limit), is.finite(limit),
+    limit > 0, limit <= .Machine$integer.max, limit == floor(limit))
+  registry <- Sys.getenv('DUCKHTSBENCH_REGISTRY', unset = NA_character_)
+  on.exit(if (is.na(registry)) Sys.unsetenv('DUCKHTSBENCH_REGISTRY') else
+    Sys.setenv(DUCKHTSBENCH_REGISTRY = registry), add = TRUE)
+  Sys.setenv(DUCKHTSBENCH_REGISTRY = file.path(getwd(), 'r/duckhtsbench/inst/benchmark_registry.tsv'))
+  paths <- duckhtsbench::duckhts_bench_stage_repository_fixtures(getwd(), 'duckvep-haplotypes')
+  reference <- paths[['haplotype_benchmark_reference']]
+  stopifnot(artifact$hashes[[normalizePath(reference)]] == duckvep_evidence_sha256(reference))
+  generated <- model_inputs(receipt$seed, receipt, readLines(reference)[2L])
+  inputs <- generated$inputs
+  stopifnot(identical(inputs, readRDS(file.path(directory, 'inputs.rds'))),
+    receipt$profiles == nrow(inputs$models), receipt$records == nrow(inputs$records),
+    receipt$required_strata == nrow(generated$coverage),
+    receipt$minimum_stratum_draws == min(generated$coverage$observed))
+  text <- model_source_text(generated)
+  stopifnot(identical(readLines(file.path(directory, 'reference.fa')), text$fasta),
+    identical(readLines(file.path(directory, 'calls.vcf')), text$vcf),
+    identical(readLines(gzfile(file.path(directory, 'model.gff3.gz'))), text$gff))
+  model_check_table(read.csv(file.path(directory, 'coverage.csv')), generated$coverage)
+  for (cohort in c('geometry', 'interaction', 'length')) {
+    coverage <- generated$coverages[[cohort]]
+    stopifnot(receipt[[paste0(cohort, '_strata')]] == if (is.null(coverage)) 0L else nrow(coverage))
+    if (!is.null(coverage)) model_check_table(
+      read.csv(file.path(directory, paste0(cohort, '_coverage.csv'))), coverage)
+  }
+  query <- paste(readLines(file.path(directory, 'native_query.sql')), collapse = '\n')
+  stopifnot(identical(query, model_native_query(limit)))
+  read_observations <- function(file) {
+    rows <- lapply(readLines(file.path(directory, file)), jsonlite::fromJSON, simplifyVector = FALSE)
+    names(rows) <- vapply(rows, `[[`, '', 'transcript')
+    rows
+  }
+  checked <- model_check_saved(directory, inputs, readRDS(file.path(directory, 'actual.rds')),
+    read_observations('oracle.stdout'), read_observations('phase.jsonl'), receipt)
+  records <- inputs$records
+  added <- tapply(vapply(strsplit(records$alt, ',', fixed = TRUE),
+    function(alt) max(nchar(alt, type = 'bytes')), 0), records$seq_region, sum)
+  reference_lengths <- nchar(inputs$models$cds, type = 'bytes')
+  upper <- max((reference_lengths + 1) *
+    (reference_lengths + unname(added[as.character(inputs$models$seq_region)]) + 1))
+  kind <- if (receipt$geometry_per_stratum && receipt$interaction_per_stratum)
+    'combined_exact_budget' else 'exact_retry'
+  row <- c(list(run_kind = kind, source_revision = receipt$source_revision,
+    extension_build_binding = receipt$extension_build_binding), checked$metrics,
+    receipt[c('seed', 'length_per_stratum', 'length_strata', 'max_alignment_cells', 'profiles',
+      'records', 'threads', 'rare_per_stratum', 'required_strata', 'minimum_stratum_draws',
+      'geometry_per_stratum', 'geometry_strata', 'interaction_per_stratum', 'interaction_strata')],
+    list(intended_sample_file_lanes = 6L * nrow(inputs$models), required_alignment_cells = NA_real_,
+      receipt = file.path(artifact$relative, 'receipt.json'), receipt_kind = 'runner',
+      receipt_sha256 = duckvep_evidence_sha256(artifact$receipt_path), full_matrix_upper_bound = upper))
+  fields <- c(input_sha256 = 'inputs.rds', actual_sha256 = 'actual.rds', summary_sha256 = 'summary.csv',
+    comparison_sha256 = 'comparisons.rds', oracle_sha256 = 'oracle.stdout', phase_sha256 = 'phase.jsonl',
+    coverage_sha256 = 'length_coverage.csv')
+  for (name in names(fields)) row[[name]] <- unname(artifact$hashes[[file.path(directory, fields[[name]])]])
+  sources <- c(generator_sha256 = 'test/duckvep/conformance/haplotype_model_differential.R',
+    geometry_sha256 = 'test/duckvep/conformance/haplotype_model_geometry.R',
+    comparator_sha256 = 'test/duckvep/conformance/haplotype_observations.R')
+  for (name in names(sources)) row[[name]] <- unname(artifact$hashes[[normalizePath(sources[[name]])]])
+  extension <- artifact$hashes[grepl('/duckhts[.]duckdb_extension$', names(artifact$hashes))]
+  stopifnot(length(extension) == 1L)
+  row$extension_sha256 <- unname(extension)
+  as.data.frame(row, stringsAsFactors = FALSE)
+}
+
+publish_model_history <- function(directory, history_path) {
+  row <- model_history_row(directory)
+  lock <- paste0(history_path, '.lock')
+  if (!dir.create(lock, showWarnings = FALSE)) stop('Model history publication is busy: ', lock)
+  on.exit(unlink(lock, recursive = TRUE), add = TRUE)
+  history <- read.csv(history_path, colClasses = 'character', na.strings = '')
+  stopifnot(all(names(history) %in% names(row)))
+  row <- row[names(history)]
+  prior <- history$receipt_sha256 == row$receipt_sha256
+  if (any(prior)) {
+    model_check_table(history[prior, , drop = FALSE], row)
+    message('Verified existing model history row against complete retained observations.')
+    return(invisible(row))
+  }
+  stopifnot(!any(history$receipt == row$receipt))
+  output <- tempfile('model-history-', tmpdir = dirname(history_path))
+  on.exit(unlink(output), add = TRUE)
+  write.csv(rbind(history, row), output, row.names = FALSE, na = '')
+  stopifnot(file.rename(output, history_path))
+  message('Published ', row$profiles, ' profiles with ', row$failures,
+    ' replay and ', row$lane_flag_failures + row$group_metadata_failures,
+    ' metadata disagreements; publication preserves their verdicts.')
+  invisible(row)
+}
+
+main <- function() {
+  opt <- optparse::parse_args(optparse::OptionParser(option_list = list(
+    optparse::make_option('--seed', type = 'integer', default = 173L),
+    optparse::make_option('--rare-per-stratum', dest = 'rare_per_stratum', type = 'integer', default = 1L),
+    optparse::make_option('--geometry-per-stratum', dest = 'geometry_per_stratum', type = 'integer', default = 0L),
+    optparse::make_option('--interaction-per-stratum', dest = 'interaction_per_stratum', type = 'integer', default = 0L),
+    optparse::make_option('--length-per-stratum', dest = 'length_per_stratum', type = 'integer', default = 0L),
+    optparse::make_option('--max-alignment-cells', dest = 'max_alignment_cells', type = 'integer', default = 16777216L),
+    optparse::make_option('--extension-receipt', dest = 'extension_receipt', default = NULL),
+    optparse::make_option('--publish-artifact', dest = 'publish_artifact', default = NULL),
+    optparse::make_option('--history', default = 'test/duckvep/conformance/data/haplotype_length_history.csv'),
+    optparse::make_option('--vep-prefix', dest = 'vep_prefix', default = '/root/miniconda3/envs/vep')
+  )))
+  if (!is.null(opt$publish_artifact)) return(publish_model_history(opt$publish_artifact, opt$history))
+  source('scripts/duckvep_evidence.R', local = TRUE)
+  root <- normalizePath('.')
+  seed <- opt$seed
+  stopifnot(!is.na(opt$max_alignment_cells), opt$max_alignment_cells > 0L)
+  revision <- duckvep_evidence_revision(root)
+  extension <- normalizePath('build/release/duckhts.duckdb_extension')
+  binding <- 'diagnostic_unbound'
+  if (!is.null(opt$extension_receipt)) {
+    duckvep_evidence_assert_checkout(root, revision)
+    binding <- duckvep_evidence_read_extension_receipt(opt$extension_receipt, root, extension, revision)$binding
+  }
+  Sys.setenv(DUCKHTSBENCH_REGISTRY = file.path(root, 'r/duckhtsbench/inst/benchmark_registry.tsv'))
+  paths <- duckhtsbench::duckhts_bench_stage_repository_fixtures(root, 'duckvep-haplotypes')
+  cds <- readLines(paths[['haplotype_benchmark_reference']])[2L]
+  out <- tempfile(paste0('haplotype_models_seed', seed, '_'),
+    tmpdir = 'test/duckvep/conformance/results')
+  dir.create(out)
+  message('Artifacts: ', out)
+  pins <- model_oracle_revisions
+  mirrors <- normalizePath(c('.sync/ensembl-vep', '.sync/ensembl-variation'))
+  for (i in seq_along(pins)) stopifnot(
+    identical(duckvep_evidence_command('git', c('-C', mirrors[i], 'rev-parse', 'HEAD'), 'revision'), unname(pins[i])),
+    !length(duckvep_evidence_command('git', c('-C', mirrors[i], 'status', '--porcelain'), 'clean oracle')))
+  prefix <- normalizePath(opt$vep_prefix)
+  environment <- duckvep_evidence_command('micromamba', c('list', '-p', prefix, '--explicit'), 'environment')
+  stopifnot(identical(duckvep_evidence_explicit_packages(environment),
+    duckvep_evidence_explicit_packages(readLines('test/duckvep/upstream/receipts/vep116_2026-07-22.conda-explicit.txt'))))
+  writeLines(environment, file.path(out, 'environment.txt'))
+  generated <- model_inputs(seed, opt, cds)
+  inputs <- generated$inputs
+  cases <- inputs$cases
+  models <- inputs$models
+  exons <- inputs$exons
+  records <- inputs$records
+  coverage <- generated$coverage
+  write.csv(coverage, file.path(out, 'coverage.csv'), row.names = FALSE)
+  for (cohort in names(generated$coverages))
+    write.csv(generated$coverages[[cohort]], file.path(out, paste0(cohort, '_coverage.csv')), row.names = FALSE)
+  saveRDS(inputs, file.path(out, 'inputs.rds'))
+  text <- model_source_text(generated)
+  writeLines(text$fasta, file.path(out, 'reference.fa'))
+  writeLines(text$gff, file.path(out, 'model.gff3'))
+  writeLines(text$vcf, file.path(out, 'calls.vcf'))
+  run <- function(cmd, args, name) stopifnot(system2(cmd, shQuote(args),
+    stdout = file.path(out, paste0(name, '.stdout')), stderr = file.path(out, paste0(name, '.stderr'))) == 0L)
+  run('samtools', c('faidx', file.path(out, 'reference.fa')), 'faidx')
+  run('bcftools', c('norm', '-c', 'e', '-f', file.path(out, 'reference.fa'), '-o',
+    file.path(out, 'checked.vcf'), file.path(out, 'calls.vcf')), 'refcheck')
+  run('bgzip', file.path(out, 'model.gff3'), 'bgzip')
+  run('tabix', c('-p', 'gff', file.path(out, 'model.gff3.gz')), 'tabix')
+  libs <- paste(c(file.path(mirrors, 'modules'), file.path(prefix, 'share/ensembl-vep-116.0-0')), collapse = ':')
+  run('micromamba', c('run', '--clean-env', '--env', paste0('PERL5LIB=', libs), '-p', prefix,
+    'perl', 'test/duckvep/conformance/haplotype_oracle.pl', file.path(out, 'calls.vcf'),
+    file.path(out, 'reference.fa'), file.path(out, 'model.gff3.gz'), file.path(out, 'phase.jsonl')), 'oracle')
+  write_receipt <- function(metrics) {
+    identities <- unique(c('test/duckvep/conformance/haplotype_model_differential.R',
+      'test/duckvep/conformance/haplotype_observations.R', 'scripts/duckvep_evidence.R', extension,
+      'test/duckvep/conformance/haplotype_model_geometry.R',
+      'test/duckvep/conformance/haplotype_oracle.pl', paths[['haplotype_benchmark_reference']],
+      'r/duckhtsbench/inst/benchmark_registry.tsv', list.files(out, full.names = TRUE)))
+    jsonlite::write_json(c(list(source_revision = revision, extension_build_binding = binding,
+      tracked_changes = duckvep_evidence_tracked_changes(root),
+      scope = 'shared_transcript_source_replay_sequence_sample_counts_and_per_lane_source_identity_sets',
+      seed = seed, rare_per_stratum = opt$rare_per_stratum, required_strata = nrow(coverage),
+      geometry_per_stratum = opt$geometry_per_stratum, geometry_strata = if (opt$geometry_per_stratum) 504L else 0L,
+      interaction_per_stratum = opt$interaction_per_stratum, interaction_strata = if (opt$interaction_per_stratum) 6048L else 0L,
+      length_per_stratum = opt$length_per_stratum, length_strata = if (opt$length_per_stratum) 4536L else 0L,
+      max_alignment_cells = opt$max_alignment_cells,
+      minimum_stratum_draws = min(coverage$observed), oracle_revisions = as.list(pins),
+      source_artifact = 'haplotype_benchmark_reference', profiles = nrow(models),
+      records = nrow(records), threads = 4L), metrics,
+      list(sha256 = as.list(vapply(identities, duckvep_evidence_sha256, '')))),
+      file.path(out, 'receipt.json'), auto_unbox = TRUE, pretty = TRUE)
+  }
+  con <- DBI::dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = 'true')))
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  q <- function(x) as.character(DBI::dbQuoteString(con, x))
+  DBI::dbExecute(con, paste('LOAD', q(extension)))
+  DBI::dbExecute(con, 'SET threads=4')
+  DBI::dbWriteTable(con, 'models', models); DBI::dbWriteTable(con, 'exons', exons)
+  DBI::dbWriteTable(con, 'records', records)
+  layout <- model_layouts(inputs)
+  layouts <- layout$layouts
+  phases <- layout$phases
+  DBI::dbWriteTable(con, 'layouts', layouts); DBI::dbWriteTable(con, 'phases', phases)
+  queries <- c('SELECT DISTINCT seq_region::UINTEGER seq_region FROM models ORDER BY seq_region',
+    'SELECT transcript_index::UINTEGER transcript_index,seq_region::UINTEGER seq_region,transcript_start::UBIGINT transcript_start,
+     transcript_end::UBIGINT transcript_end,strand::TINYINT strand,transcript_index::UINTEGER gene_index,3::UBIGINT transcript_flags,
+     cds_start::UBIGINT cds_start,cds_end::UBIGINT cds_end,cds::BLOB cds_sequence,1::UTINYINT codon_table
+     FROM models JOIN layouts USING(transcript_index) ORDER BY transcript_index',
+    'SELECT transcript_index::UINTEGER transcript_index,start::UBIGINT exon_start,"end"::UBIGINT exon_end,
+     cs::UBIGINT exon_cdna_start,ce::UBIGINT exon_cdna_end,phase::TINYINT phase,end_phase::TINYINT end_phase
+     FROM exons JOIN phases USING(transcript_index,cs) ORDER BY transcript_index,cs')
+  stopifnot(DBI::dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('probe',",
+    paste(q(queries), collapse = ','), ')'))$loaded)
+  query <- model_native_query(opt$max_alignment_cells)
+  writeLines(query, file.path(out, 'native_query.sql'))
+  actual <- tryCatch(DBI::dbGetQuery(con, query), error = function(error) {
+    write_receipt(list(execution_status = 'native_query_error', error = conditionMessage(error)))
+    stop(error)
+  })
+  saveRDS(actual, file.path(out, 'actual.rds'))
+  oracle <- lapply(readLines(file.path(out, 'oracle.stdout')), jsonlite::fromJSON, simplifyVector = FALSE)
+  names(oracle) <- vapply(oracle, `[[`, '', 'transcript')
+  stopifnot(!anyDuplicated(names(oracle)), setequal(names(oracle), models$transcript))
+  phase <- lapply(readLines(file.path(out, 'phase.jsonl')), jsonlite::fromJSON, simplifyVector = FALSE)
+  names(phase) <- vapply(phase, `[[`, '', 'transcript')
+  stopifnot(!anyDuplicated(names(phase)), setequal(names(phase), models$transcript))
+  checked <- model_comparisons(inputs, actual, oracle, phase)
+  comparisons <- checked$comparisons
+  summary <- checked$summary
+  saveRDS(comparisons, file.path(out, 'comparisons.rds'))
+  write.csv(summary, file.path(out, 'summary.csv'), row.names = FALSE)
+  controls <- checked$controls
+  metadata_controls <- checked$metadata_controls
+  write.csv(data.frame(control = names(controls), rejected = controls), file.path(out, 'controls.csv'), row.names = FALSE)
+  write.csv(data.frame(control = names(metadata_controls), rejected = metadata_controls),
+    file.path(out, 'metadata_controls.csv'), row.names = FALSE)
+  write_receipt(checked$metrics)
   if (!is.null(opt$extension_receipt)) duckvep_evidence_assert_checkout(root, revision)
   print(aggregate(cbind(profiles = rep(1L, nrow(summary)), failures = as.integer(!summary$passed),
     sequence_failures = as.integer(!summary$sequences_equal),
@@ -471,4 +664,4 @@ main <- function() {
   if (any(!summary$passed)) stop('Shared-transcript replay differences retained: ', out, call. = FALSE)
   if (any(!summary$metadata_passed)) stop('Lane/group metadata differences retained: ', out, call. = FALSE)
 }
-main()
+if (sys.nframe() == 0L) main()

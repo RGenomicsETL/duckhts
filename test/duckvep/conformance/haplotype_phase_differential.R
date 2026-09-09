@@ -287,33 +287,19 @@ phase_public_semantics <- function(cases, actual, records) {
 
 phase_history_rows <- function(directory) {
   source("scripts/duckvep_evidence.R", local = TRUE)
-  directory <- normalizePath(directory, mustWork = TRUE)
-  artifact_directory <- duckvep_evidence_repo_path(getwd(), directory)
-  stopifnot(nzchar(artifact_directory))
-  receipt_path <- file.path(directory, "receipt.json")
-  receipt <- jsonlite::fromJSON(receipt_path)
-  stopifnot(receipt$extension_build_binding == "htslib_distclean_make_release",
-    receipt$scope == "raw_GT_finite_phase_audit_not_conformance",
-    grepl("^[0-9a-f]{40}$", receipt$source_revision), receipt$max_ploidy %in% 2:4)
-  hashes <- unlist(receipt$sha256)
   files <- c("cases.tsv", "summary.csv", "comparisons.rds", "phase_comparisons.rds", "raw_replay.rds",
     "public_raw_replay.rds", "controls.csv", "phase_controls.csv", "raw_replay_controls.csv",
     "decoded_collisions.rds", "native.rds", "calls.vcf", "oracle.stdout", "raw_replay_summary.csv",
     "public_raw_replay_summary.csv", "phase.jsonl")
-  paths <- normalizePath(file.path(directory, files), mustWork = TRUE)
-  absolute <- startsWith(names(hashes), "/") | grepl("^[A-Za-z]:", names(hashes))
-  recorded <- normalizePath(ifelse(absolute, names(hashes), file.path(getwd(), names(hashes))),
-    mustWork = FALSE)
-  stopifnot(!anyDuplicated(recorded), all(paths %in% recorded))
-  # Verify retained observations before reading them. Source and binary hashes
-  # identify the execution receipt, not the checkout used to publish it.
-  retained <- list.files(directory, recursive = TRUE, full.names = TRUE)
-  retained <- retained[basename(retained) != "receipt.json"]
-  in_artifact <- startsWith(recorded, paste0(directory, .Platform$file.sep))
-  stopifnot(setequal(recorded[in_artifact], normalizePath(retained)))
-  at <- match(normalizePath(retained), recorded)
-  stopifnot(!anyNA(at), identical(unname(vapply(retained, duckvep_evidence_sha256, "")),
-    unname(hashes[at])))
+  artifact <- duckvep_evidence_read_artifact(directory, files)
+  directory <- artifact$directory
+  artifact_directory <- artifact$relative
+  receipt_path <- artifact$receipt_path
+  receipt <- artifact$receipt
+  hashes <- unlist(receipt$sha256)
+  stopifnot(receipt$extension_build_binding == "htslib_distclean_make_release",
+    receipt$scope == "raw_GT_finite_phase_audit_not_conformance",
+    grepl("^[0-9a-f]{40}$", receipt$source_revision), receipt$max_ploidy %in% 2:4)
   read <- function(name) readRDS(file.path(directory, name))
   summary <- read.csv(file.path(directory, "summary.csv"), stringsAsFactors = FALSE)
   cases <- read.delim(file.path(directory, "cases.tsv"), stringsAsFactors = FALSE)

@@ -1100,6 +1100,18 @@ pass it.
 
 ### Complete model campaigns with an explicit alignment budget
 
+The [model-history
+publisher](../test/duckvep/conformance/haplotype_model_differential.R)
+reopens retained artifacts before accepting these ledger rows. It
+regenerates the declared seeded inputs, reconstructs comparisons from
+keyed upstream/native observations, checks every summary and control,
+and derives alignment bounds from inputs. Existing rows must match the
+reconstruction exactly. Publication verifies the recorded verdict; it
+does not convert disagreements into passes. The [publication regression
+test](../test/scripts/test_haplotype_model_history.R) uses retained
+pinned observations and rejects rehashed comparison forgeries and
+coherent carrier-lane swaps while accepting honestly recorded failures.
+
 |     seed | profiles | records | leaves | carriers | failures | lane_flag_failures | group_metadata_failures |
 |---------:|---------:|--------:|-------:|---------:|---------:|-------------------:|------------------------:|
 |      173 |    29520 |  194448 | 136320 |   177120 |        0 |                  0 |                       0 |
