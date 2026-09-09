@@ -2,6 +2,10 @@
 
 # duckhts 1.5.1.9000
 
+- bind finite-phase replay sequences and applied alleles to transcript/sample/lane
+  observations before aggregation; publication rejects rehashed lane swaps while
+  preserving genuine lane-association failures and every comparison profile
+
 - reconstruct raw/public phase-audit sequences and record observations from
   retained keyed oracle and execution outputs before publication; compare parser
   expectations with upstream call observations and preserve missing-lane failures

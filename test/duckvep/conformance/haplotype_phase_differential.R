@@ -78,10 +78,11 @@ phase_decoded_comparisons <- function(cases, oracle, actual, records) {
   })
 }
 
-phase_raw_comparisons <- function(cases, oracle, replay) {
+phase_raw_comparisons <- function(cases, oracle, replay, phase) {
   n <- nrow(cases)
   nlanes <- 2L * n
-  stopifnot(!anyDuplicated(names(oracle)), setequal(names(oracle), cases$transcript))
+  stopifnot(!anyDuplicated(names(oracle)), setequal(names(oracle), cases$transcript),
+    !anyDuplicated(names(phase)), setequal(names(phase), cases$transcript))
   # The retained .C result starts with the nine inputs to
   # duckhts_test_raw_phase_haplotypes; these positions bind each output lane.
   input_names <- c("reference", "genomic_start", "gt", "positions", "refs", "alts",
@@ -105,26 +106,49 @@ phase_raw_comparisons <- function(cases, oracle, replay) {
   stopifnot(is.integer(replay$edit_masks), length(replay$edit_masks) == nlanes,
     !anyNA(replay$edit_masks), all(replay$edit_masks %in% 0:3),
     is.integer(replay$errors), length(replay$errors) == n, !anyNA(replay$errors))
+  semantics <- phase_raw_semantics(replay)
   sequences <- lapply(seq_len(nlanes), function(i) list(
     cds = rawToChar(replay$cds[(i - 1L) * capacity + seq_len(replay$cds_lengths[i])]),
     protein = rawToChar(replay$protein[(i - 1L) * capacity + seq_len(replay$protein_lengths[i])]),
     count = 1, contributors = c("a", "b")[bitwAnd(replay$edit_masks[i], c(1L, 2L)) != 0L]))
   lapply(seq_len(n), function(i) {
     expected <- canonical(oracle[[cases$transcript[i]]]$haplotypes)
-    observed <- canonical(sequences[2L * i - c(1L, 0L)])
+    indices <- 2L * i - c(1L, 0L)
+    observed <- canonical(sequences[indices])
+    lanes <- lapply(indices, function(j) {
+      records <- which(bitwAnd(replay$edit_masks[j], c(1L, 2L)) != 0L)
+      sources <- lapply(records, function(record) {
+        ordinal <- semantics$source_indices[2L * (j - 1L) + record]
+        alleles <- if (record == 1L) c("G", "A", "T") else c("G", "C")
+        stopifnot(ordinal >= -1L, ordinal < length(alleles))
+        allele <- if (ordinal == -1L) "-" else alleles[ordinal + 1L]
+        key <- paste(input$positions[record], input$positions[record],
+          paste(alleles, collapse = "/"), sep = "_")
+        list(allele_key = paste(allele, key, sep = "|"),
+          source_id = c("a", "b")[record], source_key = key)
+      })
+      list(sample = "sample", lane1 = (j - 1L) %% 2L + 1L,
+        cds = sequences[[j]]$cds, protein = sequences[[j]]$protein, applied_sources = sources)
+    })
     list(expected = expected, observed = observed,
-      equal = replay$errors[i] == 0L && identical(expected, observed))
+      equal = replay$errors[i] == 0L && identical(expected, observed) &&
+        replay_lanes_equal(phase[[cases$transcript[i]]]$replay_lanes, lanes))
   })
 }
 
-phase_public_comparisons <- function(cases, oracle, actual, records) {
+phase_public_comparisons <- function(cases, oracle, actual, records, phase) {
   stopifnot(!anyDuplicated(names(oracle)), setequal(names(oracle), cases$transcript),
+    !anyDuplicated(names(phase)), setequal(names(phase), cases$transcript),
     is.data.frame(actual), all(c("transcript_index", "cds", "protein", "carrier_count",
       "coding_blocks") %in% names(actual)),
     is.numeric(actual$transcript_index), all(is.finite(actual$transcript_index)),
     all(actual$transcript_index == floor(actual$transcript_index)),
     all(actual$transcript_index %in% cases$transcript_index),
     !anyDuplicated(records$record_index))
+  phase_public_semantics(cases, actual, records)
+  sources <- data.frame(event_index = records$record_index, position = records$POS,
+    reference = records$REF, alt = vapply(records$ALT, paste, "", collapse = ","),
+    source_id = records$ID)
   rows <- split(seq_len(nrow(actual)), actual$transcript_index)
   lapply(seq_len(nrow(cases)), function(i) {
     a <- actual[rows[[as.character(cases$transcript_index[i])]], , drop = FALSE]
@@ -139,7 +163,9 @@ phase_public_comparisons <- function(cases, oracle, actual, records) {
     })
     expected <- canonical(oracle[[cases$transcript[i]]]$haplotypes)
     observed <- canonical(observed)
-    list(expected = expected, observed = observed, equal = identical(expected, observed))
+    lanes <- native_replay_lanes(a, sources, 1L, "sample")
+    list(expected = expected, observed = observed, equal = identical(expected, observed) &&
+      replay_lanes_equal(phase[[cases$transcript[i]]]$replay_lanes, lanes))
   })
 }
 
@@ -319,8 +345,8 @@ phase_history_rows <- function(directory) {
     simplifyVector = FALSE)
   names(phase) <- vapply(phase, `[[`, "", "transcript")
   stopifnot(identical(decoded, phase_decoded_comparisons(cases, oracle, native$actual, native$records)),
-    identical(raw$comparisons, phase_raw_comparisons(cases, oracle, raw$output)),
-    identical(public$comparisons, phase_public_comparisons(cases, oracle, public$actual, native$records)))
+    identical(raw$comparisons, phase_raw_comparisons(cases, oracle, raw$output, phase)),
+    identical(public$comparisons, phase_public_comparisons(cases, oracle, public$actual, native$records, phase)))
   expected_phase <- phase_parser_expected(cases, phase)
   expected_semantics <- phase_expected_semantics(expected_phase)
   stopifnot(identical(parser$expected, expected_phase),
@@ -352,8 +378,8 @@ phase_history_rows <- function(directory) {
       group$count > 0 && group$count == floor(group$count) &&
       is.character(group$contributors) && !anyNA(group$contributors)
   }, TRUE))
-  comparison_matches <- function(x, observed_counts, errors = integer(n)) {
-    stopifnot(length(x) == n, length(errors) == n, !anyNA(errors), length(observed_counts) == n)
+  comparison_matches <- function(x, observed_counts) {
+    stopifnot(length(x) == n, length(observed_counts) == n)
     stopifnot(all(vapply(x, function(row) is.list(row) && !anyDuplicated(names(row)) &&
       all(c("expected", "observed", "equal") %in% names(row)) &&
       is.logical(row$equal) && length(row$equal) == 1L && !is.na(row$equal) &&
@@ -361,9 +387,9 @@ phase_history_rows <- function(directory) {
     counts <- function(groups) sum(vapply(groups, `[[`, 0, "count"))
     stopifnot(all(vapply(x, function(row) counts(row$expected), 0) == 2),
       identical(vapply(x, function(row) counts(row$observed), 0), as.numeric(observed_counts)))
-    result <- vapply(x, function(row) identical(row$expected, row$observed), TRUE) & errors == 0L
-    stopifnot(identical(result, vapply(x, `[[`, TRUE, "equal")))
-    result
+    # Exact reconstruction above checks group output and lane-associated output
+    # together. Equal sequence groups alone do not establish correct phasing.
+    vapply(x, `[[`, TRUE, "equal")
   }
   stopifnot(all(summary$oracle_lanes == 2),
     identical(as.numeric(summary$native_lanes), carrier_counts(native$actual)),
@@ -380,7 +406,7 @@ phase_history_rows <- function(directory) {
   parser_fields <- c("status", "retained", "ploidy", "missing", "slots", "first", "second")
   record_fields <- c("source_indices", "source_evidence", "evidence", "sequence_status")
   parser_matches <- row_matches(parser$expected, parser$observed, 2L * n, parser_fields)
-  raw_matches <- comparison_matches(raw$comparisons, rep(2, n), raw$output$errors)
+  raw_matches <- comparison_matches(raw$comparisons, rep(2, n))
   public_matches <- comparison_matches(public$comparisons, carrier_counts(public$actual))
   raw_records <- row_matches(raw$expected_semantics, raw$observed_semantics, 4L * n, record_fields)
   public_records <- row_matches(public$expected_semantics, public$observed_semantics, 4L * n, record_fields)
@@ -604,7 +630,7 @@ main <- function() {
     sequence_status = integer(nlanes), evidence = integer(nlanes), edit_masks = integer(nlanes),
     source_indices = integer(2L * nlanes), source_evidence = integer(2L * nlanes), errors = integer(nrow(cases)))
   dyn.unload(dll[["path"]])
-  raw_comparisons <- phase_raw_comparisons(cases, oracle, replay)
+  raw_comparisons <- phase_raw_comparisons(cases, oracle, replay, phase)
   raw_matches <- vapply(raw_comparisons, `[[`, TRUE, "equal")
   # Expected record observations come from the upstream object sidecar, not
   # the native parser. Missing omissions retain a conditional REF observation;
@@ -670,7 +696,7 @@ main <- function() {
   public_raw <- DBI::dbGetQuery(con, "SELECT * FROM duckvep_haplotypes('SELECT * FROM source_calls',
     'phase',phase_policy:='vep116_compat',input_mode:='source_records')")
   saveRDS(public_raw, file.path(out, "public_raw_output.rds"))
-  public_raw_comparisons <- phase_public_comparisons(cases, oracle, public_raw, records)
+  public_raw_comparisons <- phase_public_comparisons(cases, oracle, public_raw, records, phase)
   public_semantics <- phase_public_semantics(cases, public_raw, records)
   public_matches <- vapply(public_raw_comparisons, `[[`, TRUE, "equal")
   public_semantics_matches <- phase_equal(expected_semantics, public_semantics)
