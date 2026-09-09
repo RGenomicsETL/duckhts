@@ -967,7 +967,7 @@ seed_summary <- do.call(rbind, lapply(unique(current_property_rows$seed), functi
 knitr::kable(seed_summary, row.names = FALSE)
 ```
 
-Together these seeds executed `r format(sum(seed_summary$trials), big.mark = ",", scientific = FALSE)`
+The recorded runs executed `r format(sum(seed_summary$trials), big.mark = ",", scientific = FALSE)`
 property trials on the shown revision. Millions of passing trials do not make a
 counter with single-digit observations densely explored, and marginal counters
 do not establish coverage of their cross-products. The fresh-seed HGVS failure

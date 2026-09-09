@@ -465,65 +465,73 @@ duplicate count. A failed suite does not append rows.
 | 2026-09-08 | 6bcff335        | 0x000000000135282a |                 55 | 5,500,000  | 5,500,000  |      0 |          0 |         262 | 27,738,332       |                47.452 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-09-08 | ae131a9d        | 0x00000000000000ad |                 56 | 5,600,000  | 5,600,000  |      0 |          0 |         269 | 34,092,011       |                46.210 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 | 2026-09-08 | ae131a9d        | 0x000000000135282a |                 56 | 5,600,000  | 5,600,000  |      0 |          0 |         269 | 34,092,327       |                45.861 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
+| 2026-09-09 | b38f6179        | 0x000000000135282a |                 63 | 6,300,000  | 6,300,000  |      0 |          0 |         291 | 56,325,135       |                52.343 | cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
 
-| target                                                                          | trials  | passed  | failed | skipped | duplicates |
-|:--------------------------------------------------------------------------------|:--------|:--------|:-------|:--------|:-----------|
-| annotate cursor cross-codon MNV route == tile                                   | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate cursor DEL route == tile under output splits                           | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate cursor INS route == tile under output splits                           | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate cursor output splits == one annotate_tile                              | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate cursor padded SNV == tile under output splits                          | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate_tile == sweep + classify + structural-SO composition                   | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate_tile codon refinement == coding-SNV kernel oracle                      | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate_tile codon-aligned in-frame deletion == CDS-position oracle            | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate_tile codon-boundary in-frame insertion == CDS-position oracle          | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate_tile non-boundary in-frame insertion == peptide-window oracle          | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate_tile rejects NULL model without reading the batch                      | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate_tile same-codon MNV == codon oracle                                    | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate_tile simple frameshift indel == CDS-position oracle                    | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate_tile start_lost SNV == start-codon oracle                              | 100,000 | 100,000 | 0      | 0       | 0          |
-| annotate_tile two-codon body MNV missense == codon-window oracle                | 100,000 | 100,000 | 0      | 0       | 0          |
-| breakend_parser_recovers_constructed_components                                 | 100,000 | 100,000 | 0      | 0       | 0          |
-| cgranges-seeded first event + sweep == brute-force candidates                   | 100,000 | 100,000 | 0      | 0       | 0          |
-| coding context == direct CDS splice + full peptide oracles                      | 100,000 | 100,000 | 0      | 0       | 0          |
-| coding context delins shape == local-edge oracle                                | 100,000 | 100,000 | 0      | 0       | 0          |
-| coding context delta == single-codon oracle                                     | 100,000 | 100,000 | 0      | 0       | 0          |
-| coding context delta in-frame deletion == edit-origin oracle                    | 100,000 | 100,000 | 0      | 0       | 0          |
-| coding context delta in-frame insertion == edit-origin oracle                   | 100,000 | 100,000 | 0      | 0       | 0          |
-| codon change classification consistent with translation                         | 100,000 | 100,000 | 0      | 0       | 0          |
-| complete literal spans == VEP complete-overlap source semantics                 | 100,000 | 100,000 | 0      | 0       | 0          |
-| coordinate projection == brute-force transcript-order base walk                 | 100,000 | 100,000 | 0      | 0       | 0          |
-| event differing-region normalization == independent trim oracle                 | 100,000 | 100,000 | 0      | 0       | 0          |
-| haplotype block spans reconstruct the independently replayed CDS                | 100,000 | 100,000 | 0      | 0       | 0          |
-| haplotype blocks preserve every frame and same-codon interaction                | 100,000 | 100,000 | 0      | 0       | 0          |
-| HGVS genomic 3-prime shift == independent reference byte-walk                   | 100,000 | 100,000 | 0      | 0       | 0          |
-| HGVSp fact replay == independently translated edited CDS                        | 100,000 | 100,000 | 0      | 0       | 0          |
-| HGVSp frameshift fact == independently extended translation                     | 100,000 | 100,000 | 0      | 0       | 0          |
-| multi-edit CDS haplotype apply == left-to-right rebuild oracle                  | 100,000 | 100,000 | 0      | 0       | 0          |
-| optimized sorted annotation == forced generalized full rows                     | 100,000 | 100,000 | 0      | 0       | 0          |
-| ordered source replacements == literal replay, net spans and applied provenance | 100,000 | 100,000 | 0      | 0       | 0          |
-| owned haplotype replay == dense genomic edits in coexisting models              | 100,000 | 100,000 | 0      | 0       | 0          |
-| phased SNV set == equivalent MNV coding facts                                   | 100,000 | 100,000 | 0      | 0       | 0          |
-| region mask structural invariants                                               | 100,000 | 100,000 | 0      | 0       | 0          |
-| regulation sweep/BND pairs == independent feature oracles                       | 100,000 | 100,000 | 0      | 0       | 0          |
-| sequence delta annotation wrapper MNV == direct shape                           | 100,000 | 100,000 | 0      | 0       | 0          |
-| sequence delta exon hint == unhinted projection                                 | 100,000 | 100,000 | 0      | 0       | 0          |
-| sequence delta scratch INDEL == local delins-shape oracle                       | 100,000 | 100,000 | 0      | 0       | 0          |
-| sequence delta scratch MNV == single-codon oracle                               | 100,000 | 100,000 | 0      | 0       | 0          |
-| sequence delta scratch two-codon MNV window == codon-window oracle              | 100,000 | 100,000 | 0      | 0       | 0          |
-| sequence-backed SNV codon edit == codon-slice edit oracle                       | 100,000 | 100,000 | 0      | 0       | 0          |
-| simple indel route == generalized CodingContext                                 | 100,000 | 100,000 | 0      | 0       | 0          |
-| sorted point cursor classifier == exhaustive exon/gap scans                     | 100,000 | 100,000 | 0      | 0       | 0          |
-| sorted span cursor classifier == exhaustive exon/gap scans                      | 100,000 | 100,000 | 0      | 0       | 0          |
-| sparse carrier paths == dense event matrix across input batches                 | 100,000 | 100,000 | 0      | 0       | 0          |
-| sweep candidate set == brute-force candidate set                                | 100,000 | 100,000 | 0      | 0       | 0          |
-| terminal partial-codon insertion == codon-rounded VEP translation oracle        | 100,000 | 100,000 | 0      | 0       | 0          |
-| transcript coordinate == brute-force exon/intron walk                           | 100,000 | 100,000 | 0      | 0       | 0          |
-| variant CDS edit builder == direct CDS splice oracle                            | 100,000 | 100,000 | 0      | 0       | 0          |
-| variant CDS edit-set builder == single-edit splice oracle                       | 100,000 | 100,000 | 0      | 0       | 0          |
-| variant CDS edit-set builder splits MNV diff islands                            | 100,000 | 100,000 | 0      | 0       | 0          |
-| variant coding context == direct CDS splice + full peptide oracles              | 100,000 | 100,000 | 0      | 0       | 0          |
-| VEP feature-span sweep candidates == independent parser oracle                  | 100,000 | 100,000 | 0      | 0       | 0          |
+| target                                                                               | trials  | passed  | failed | skipped | duplicates |
+|:-------------------------------------------------------------------------------------|:--------|:--------|:-------|:--------|:-----------|
+| annotate cursor cross-codon MNV route == tile                                        | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate cursor DEL route == tile under output splits                                | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate cursor INS route == tile under output splits                                | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate cursor output splits == one annotate_tile                                   | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate cursor padded SNV == tile under output splits                               | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate_tile == sweep + classify + structural-SO composition                        | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate_tile codon refinement == coding-SNV kernel oracle                           | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate_tile codon-aligned in-frame deletion == CDS-position oracle                 | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate_tile codon-boundary in-frame insertion == CDS-position oracle               | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate_tile non-boundary in-frame insertion == peptide-window oracle               | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate_tile rejects NULL model without reading the batch                           | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate_tile same-codon MNV == codon oracle                                         | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate_tile simple frameshift indel == CDS-position oracle                         | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate_tile start_lost SNV == start-codon oracle                                   | 100,000 | 100,000 | 0      | 0       | 0          |
+| annotate_tile two-codon body MNV missense == codon-window oracle                     | 100,000 | 100,000 | 0      | 0       | 0          |
+| breakend_parser_recovers_constructed_components                                      | 100,000 | 100,000 | 0      | 0       | 0          |
+| breakend_parser_rejects_mutated_components                                           | 100,000 | 100,000 | 0      | 0       | 0          |
+| cgranges-seeded first event + sweep == brute-force candidates                        | 100,000 | 100,000 | 0      | 0       | 0          |
+| coding context == direct CDS splice + full peptide oracles                           | 100,000 | 100,000 | 0      | 0       | 0          |
+| coding context delins shape == local-edge oracle                                     | 100,000 | 100,000 | 0      | 0       | 0          |
+| coding context delta == single-codon oracle                                          | 100,000 | 100,000 | 0      | 0       | 0          |
+| coding context delta in-frame deletion == edit-origin oracle                         | 100,000 | 100,000 | 0      | 0       | 0          |
+| coding context delta in-frame insertion == edit-origin oracle                        | 100,000 | 100,000 | 0      | 0       | 0          |
+| codon change classification consistent with translation                              | 100,000 | 100,000 | 0      | 0       | 0          |
+| complete literal spans == VEP complete-overlap source semantics                      | 100,000 | 100,000 | 0      | 0       | 0          |
+| compound HGVSp curated reference == complete protein replay                          | 100,000 | 100,000 | 0      | 0       | 0          |
+| compound HGVSp operations == literal in-frame CDS replay and independent translation | 100,000 | 100,000 | 0      | 0       | 0          |
+| compound HGVSp restored CDS == complete replay with changed local blocks             | 100,000 | 100,000 | 0      | 0       | 0          |
+| compound HGVSp separated restored-frame changes == complete protein replay           | 100,000 | 100,000 | 0      | 0       | 0          |
+| compound HGVSp terminal reference == displayed protein replay                        | 100,000 | 100,000 | 0      | 0       | 0          |
+| compound HGVSp terminal repeat == complete protein replay                            | 100,000 | 100,000 | 0      | 0       | 0          |
+| coordinate projection == brute-force transcript-order base walk                      | 100,000 | 100,000 | 0      | 0       | 0          |
+| event differing-region normalization == independent trim oracle                      | 100,000 | 100,000 | 0      | 0       | 0          |
+| haplotype block spans reconstruct the independently replayed CDS                     | 100,000 | 100,000 | 0      | 0       | 0          |
+| haplotype blocks preserve every frame and same-codon interaction                     | 100,000 | 100,000 | 0      | 0       | 0          |
+| HGVS genomic 3-prime shift == independent reference byte-walk                        | 100,000 | 100,000 | 0      | 0       | 0          |
+| HGVSp fact replay == independently translated edited CDS                             | 100,000 | 100,000 | 0      | 0       | 0          |
+| HGVSp frameshift fact == independently extended translation                          | 100,000 | 100,000 | 0      | 0       | 0          |
+| multi-edit CDS haplotype apply == left-to-right rebuild oracle                       | 100,000 | 100,000 | 0      | 0       | 0          |
+| optimized sorted annotation == forced generalized full rows                          | 100,000 | 100,000 | 0      | 0       | 0          |
+| ordered source replacements == literal replay, net spans and applied provenance      | 100,000 | 100,000 | 0      | 0       | 0          |
+| owned haplotype replay == dense genomic edits in coexisting models                   | 100,000 | 100,000 | 0      | 0       | 0          |
+| phased SNV set == equivalent MNV coding facts                                        | 100,000 | 100,000 | 0      | 0       | 0          |
+| region mask structural invariants                                                    | 100,000 | 100,000 | 0      | 0       | 0          |
+| regulation sweep/BND pairs == independent feature oracles                            | 100,000 | 100,000 | 0      | 0       | 0          |
+| sequence delta annotation wrapper MNV == direct shape                                | 100,000 | 100,000 | 0      | 0       | 0          |
+| sequence delta exon hint == unhinted projection                                      | 100,000 | 100,000 | 0      | 0       | 0          |
+| sequence delta scratch INDEL == local delins-shape oracle                            | 100,000 | 100,000 | 0      | 0       | 0          |
+| sequence delta scratch MNV == single-codon oracle                                    | 100,000 | 100,000 | 0      | 0       | 0          |
+| sequence delta scratch two-codon MNV window == codon-window oracle                   | 100,000 | 100,000 | 0      | 0       | 0          |
+| sequence-backed SNV codon edit == codon-slice edit oracle                            | 100,000 | 100,000 | 0      | 0       | 0          |
+| simple indel route == generalized CodingContext                                      | 100,000 | 100,000 | 0      | 0       | 0          |
+| sorted point cursor classifier == exhaustive exon/gap scans                          | 100,000 | 100,000 | 0      | 0       | 0          |
+| sorted span cursor classifier == exhaustive exon/gap scans                           | 100,000 | 100,000 | 0      | 0       | 0          |
+| sparse carrier paths == dense event matrix across input batches                      | 100,000 | 100,000 | 0      | 0       | 0          |
+| sweep candidate set == brute-force candidate set                                     | 100,000 | 100,000 | 0      | 0       | 0          |
+| terminal partial-codon insertion == codon-rounded VEP translation oracle             | 100,000 | 100,000 | 0      | 0       | 0          |
+| transcript coordinate == brute-force exon/intron walk                                | 100,000 | 100,000 | 0      | 0       | 0          |
+| variant CDS edit builder == direct CDS splice oracle                                 | 100,000 | 100,000 | 0      | 0       | 0          |
+| variant CDS edit-set builder == single-edit splice oracle                            | 100,000 | 100,000 | 0      | 0       | 0          |
+| variant CDS edit-set builder splits MNV diff islands                                 | 100,000 | 100,000 | 0      | 0       | 0          |
+| variant coding context == direct CDS splice + full peptide oracles                   | 100,000 | 100,000 | 0      | 0       | 0          |
+| VEP feature-span sweep candidates == independent parser oracle                       | 100,000 | 100,000 | 0      | 0       | 0          |
 
 Passing the requested number of trials is necessary but does not prove
 that a generator visited the states named by its contract. Randomized
@@ -534,48 +542,55 @@ machine-readable authority. Zero is evidence too: it identifies a state
 that the declared seed did not exercise and must not be hidden by the
 suite-level pass count.
 
-| randomized distribution             | observed states                                                                                                                                                                                                                                                                                    |
-|:------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| allele sweep coverage               | del= 812,847; indel= 811,257; ins= 810,886; interbase= 901,094; mnv= 811,941; prefix= 2,841,350; suffix= 2,247,130; tail= 2,683,865                                                                                                                                                                |
-| annotation-shortcut coverage        | coding_tx= 641,166; cursor_splits= 100,000; far= 4,940,445; generalized=12,283,823; mirna_tx= 319,849; nmd_rows= 2,281,720; simple= 1,709,247                                                                                                                                                      |
-| cds-edit-builder coverage           | body= 41,654; del= 19,940; fwd= 49,955; indel= 19,988; ins= 20,031; mnv= 20,094; rev= 50,045; snv= 19,947; start= 29,239; stop= 29,107                                                                                                                                                             |
-| cds-edit-set coverage               | body= 41,654; cap0= 100,000; del= 19,940; fwd= 49,955; indel= 19,988; ins= 20,031; mnv= 20,094; rev= 50,045; snv= 19,947; start= 29,239; stop= 29,107                                                                                                                                              |
-| cds-edit-set-mnv coverage           | body= 33,177; capfail= 100,000; fwd= 50,079; multi= 100,000; rev= 49,921; start= 33,617; stop= 33,206                                                                                                                                                                                              |
-| coding-context coverage             | capfail= 300,000; del= 19,940; fwd= 49,955; indel= 19,988; ins= 20,031; mnv= 20,094; pep_diff= 86,666; pep_same= 13,334; rev= 50,045; snv= 19,947                                                                                                                                                  |
-| codon coverage                      | mis= 68,020; stop_gained= 3,909; stop_lost= 3,974; stop_retained= 673; syn= 23,424                                                                                                                                                                                                                 |
-| complete-overlap coverage           | forward= 49,807; over_5000= 12,415; reverse= 50,193; right_endpoint= 1,465                                                                                                                                                                                                                         |
-| context-delins-shape coverage       | forward= 50,151; inframe= 49,984; lengthen= 49,864; protein_altering= 50,016; reverse= 49,849; shorten= 50,136                                                                                                                                                                                     |
-| context-delta coverage              | fwd= 50,015; mis= 20,049; rev= 49,985; stop_gained= 19,948; stop_lost= 20,007; stop_retained= 19,902; syn= 20,094                                                                                                                                                                                  |
-| context-inframe-deletion coverage   | forward= 50,130; reverse= 49,870                                                                                                                                                                                                                                                                   |
-| context-inframe-insertion coverage  | forward= 50,050; reverse= 49,950                                                                                                                                                                                                                                                                   |
-| cross-mnv coverage                  | fwd= 50,132; len2= 50,187; len3= 49,813; missense= 50,032; rev= 49,868; stop_gained= 24,898; synonymous= 25,070                                                                                                                                                                                    |
-| cursor-cross-route coverage         | context= 100,000; fwd= 50,132; len2= 50,187; len3= 49,813; rev= 49,868                                                                                                                                                                                                                             |
-| cursor-del-route coverage           | forward= 50,130; full= 100,000; reverse= 49,870                                                                                                                                                                                                                                                    |
-| cursor-ins-route coverage           | forward= 50,050; full= 100,000; reverse= 49,950                                                                                                                                                                                                                                                    |
-| cursor-route coverage               | full= 100,000; fwd= 50,015; mis= 20,049; rev= 49,985; stop_gained= 19,948; stop_lost= 20,007; stop_retained= 19,902; syn= 20,094                                                                                                                                                                   |
-| delta-cross-scratch coverage        | fwd= 50,132; len2= 50,187; len3= 49,813; missense= 50,032; rev= 49,868; stop_gained= 24,898; synonymous= 25,070                                                                                                                                                                                    |
-| delta-exon-hint coverage            | del= 19,940; fwd= 49,955; indel= 19,988; ins= 20,031; mnv= 20,094; rev= 50,045; snv= 19,947                                                                                                                                                                                                        |
-| delta-scratch coverage              | capfail= 100,000; fwd= 50,015; mis= 20,049; rev= 49,985; stop_gained= 19,948; stop_lost= 20,007; stop_retained= 19,902; syn= 20,094                                                                                                                                                                |
-| delta-scratch-indel coverage        | forward= 50,151; lengthen= 49,864; reverse= 49,849; shorten= 50,136                                                                                                                                                                                                                                |
-| delta-wrapper coverage              | fwd= 50,015; mis= 20,049; rev= 49,985; stop_gained= 19,948; stop_lost= 20,007; stop_retained= 19,902; syn= 20,094                                                                                                                                                                                  |
-| event normalization coverage        | del= 25,028; indel= 24,718; ins= 24,954; interbase= 27,720; prefix= 81,125; prefix0_interbase= 7,019; sub= 25,300; suffix= 77,968                                                                                                                                                                  |
-| frameshift coverage                 | -1= 7,294; -2= 7,155; +1= 7,530; +2= 7,131; del= 29,432; delins= 29,110; ins= 41,458; reverse= 47,774; stop_gained= 1,562; terminal_cil_protein_altering= 9; terminal_cil_retained= 47; terminal_endpoint= 16,522; terminal_missing_tail= 4,182; terminal_nonstop= 12,362; terminal_reverse= 8,203 |
-| frameshift length-oracle coverage   | frameshift= 62,587; inframe_len= 12,446; stop_gained= 1,893                                                                                                                                                                                                                                        |
-| haplotype-MNV equivalence coverage  | body= 33,177; fwd= 50,079; one_codon= 16,102; rev= 49,921; several_codons= 83,898; start= 33,617; stop= 33,206                                                                                                                                                                                     |
-| HGVS shift coverage                 | at_vep_limit= 0; composed= 96,683; del= 48,656; dup= 37,932; fwd= 49,955; ins= 51,189; nonlocal_ref_replay= 1,542; protein= 90,059; rev= 49,890; rotated= 20,818; terminal_duplication= 3,162                                                                                                      |
-| HGVSp frameshift coverage           | del= 24,911; delins= 29,221; eligible= 91,789; equal_stop= 19; fs= 87,367; fwd= 45,781; immediate_stop= 4,403; ins= 37,657; non_fs= 8,211; rev= 46,008; shortened= 0; ter_known= 17,365; ter_unknown= 70,002                                                                                       |
-| HGVSp replay coverage               | del= 3,941; delins= 3,844; dup= 388; equal= 8,346; fwd= 17,190; ins= 1,582; replayed= 34,988; rev= 17,798; special= 63,926; sub= 16,887; terminal_not_applicable= 1,086; vep_position_zero= 1,324; vep_stop_equal= 0                                                                               |
-| inframe_deletion coverage           | forward= 50,130; reverse= 49,870                                                                                                                                                                                                                                                                   |
-| inframe_insertion coverage          | forward= 50,050; reverse= 49,950                                                                                                                                                                                                                                                                   |
-| mnv coverage                        | len2= 50,110; len3= 49,890                                                                                                                                                                                                                                                                         |
-| non-boundary insertion coverage     | forward= 50,132; inframe_insertion= 49,985; protein_altering= 50,015; reverse= 49,868                                                                                                                                                                                                              |
-| ordered-replacement coverage        | clipped= 85,602; empty= 6,365; forward= 49,777; merged_sources= 135,000; noop= 102,730; ref_slot= 220,687; reverse= 50,223; tied= 519,063                                                                                                                                                          |
-| simple-indel equivalence coverage   | del= 11,394; delins= 5,652; fallback= 38,829; fast= 21,130; frameshift= 18,801; fwd= 10,366; inframe_del= 1,847; inframe_ins= 482; ins= 4,084; rev= 10,764                                                                                                                                         |
-| start-codon coverage                | co_stop_gained= 4,129; co_synonymous= 24,245; lost_and_retained= 1,596; start_lost= 100,000; start_retained= 1,596; synonymous= 24,245                                                                                                                                                             |
-| terminal-partial-insertion coverage | after_tail_rejected= 41,724; length_mod0= 33,507; length_mod1= 33,297; length_mod2= 33,196; mitochondrial= 50,038; nonstop= 76,796; reverse_orientation= 50,001; same_orientation= 49,999; site_first= 41,607; site_internal= 16,669; standard= 49,962; stop= 11,190; tail1= 49,970; tail2= 50,030 |
-| variant-coding-context coverage     | capfail= 400,000; del= 19,940; fwd= 49,955; indel= 19,988; ins= 20,031; mnv= 20,094; pep_diff= 86,666; pep_same= 13,334; rev= 50,045; snv= 19,947                                                                                                                                                  |
+| randomized distribution                    | observed states                                                                                                                                                                                                                                                                                    |
+|:-------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| allele sweep coverage                      | del= 812,847; indel= 811,257; ins= 810,886; interbase= 901,094; mnv= 811,941; prefix= 2,841,350; suffix= 2,247,130; tail= 2,683,865                                                                                                                                                                |
+| annotation-shortcut coverage               | coding_tx= 641,166; cursor_splits= 100,000; far= 4,940,445; generalized=12,283,823; mirna_tx= 319,849; nmd_rows= 2,281,720; simple= 1,709,247                                                                                                                                                      |
+| breakend mutation coverage                 | cases= 7,200,000; cells= 72; generated= 100,000; min_per_cell= 100,000; passed= 7,200,000                                                                                                                                                                                                          |
+| cds-edit-builder coverage                  | body= 41,654; del= 19,940; fwd= 49,955; indel= 19,988; ins= 20,031; mnv= 20,094; rev= 50,045; snv= 19,947; start= 29,239; stop= 29,107                                                                                                                                                             |
+| cds-edit-set coverage                      | body= 41,654; cap0= 100,000; del= 19,940; fwd= 49,955; indel= 19,988; ins= 20,031; mnv= 20,094; rev= 50,045; snv= 19,947; start= 29,239; stop= 29,107                                                                                                                                              |
+| cds-edit-set-mnv coverage                  | body= 33,177; capfail= 100,000; fwd= 50,079; multi= 100,000; rev= 49,921; start= 33,617; stop= 33,206                                                                                                                                                                                              |
+| coding-context coverage                    | capfail= 300,000; del= 19,940; fwd= 49,955; indel= 19,988; ins= 20,031; mnv= 20,094; pep_diff= 86,666; pep_same= 13,334; rev= 50,045; snv= 19,947                                                                                                                                                  |
+| codon coverage                             | mis= 68,020; stop_gained= 3,909; stop_lost= 3,974; stop_retained= 673; syn= 23,424                                                                                                                                                                                                                 |
+| complete-overlap coverage                  | forward= 49,807; over_5000= 12,415; reverse= 50,193; right_endpoint= 1,465                                                                                                                                                                                                                         |
+| compound HGVSp curated-reference coverage  | attempts= 370,938; cases= 100,000; cells= 80; forward= 50,000; min_per_cell= 1,250; prepared_views= 100,000; rejected= 345,938; reverse= 50,000                                                                                                                                                    |
+| compound HGVSp replay coverage             | cases= 100,000; del= 64,362; delins= 38,571; dup= 26,277; forward= 49,971; ins= 57,381; merged= 69,415; reverse= 50,029; sub= 64,902                                                                                                                                                               |
+| compound HGVSp restored-CDS coverage       | cases= 100,000; cells= 1,344; changed_block= 100,000; forward= 50,020; min_per_cell= 74; restored= 100,000; reverse= 49,980                                                                                                                                                                        |
+| compound HGVSp separated-frame coverage    | attempts= 1,492,401; cases= 100,000; forward= 50,126; rejected= 1,392,401; reverse= 49,874; split= 100,000                                                                                                                                                                                         |
+| compound HGVSp terminal-reference coverage | attempts= 375,013; cases= 100,000; cells= 504; forward= 49,979; generated= 100,000; min_per_cell= 198; passed= 100,000; rejected= 350,065; reverse= 50,021                                                                                                                                         |
+| compound HGVSp terminal-repeat coverage    | cases= 100,000; cells= 4,800; forward= 49,706; generated= 100,000; min_per_cell= 20; passed= 100,000; reverse= 50,294                                                                                                                                                                              |
+| context-delins-shape coverage              | forward= 50,151; inframe= 49,984; lengthen= 49,864; protein_altering= 50,016; reverse= 49,849; shorten= 50,136                                                                                                                                                                                     |
+| context-delta coverage                     | fwd= 50,015; mis= 20,049; rev= 49,985; stop_gained= 19,948; stop_lost= 20,007; stop_retained= 19,902; syn= 20,094                                                                                                                                                                                  |
+| context-inframe-deletion coverage          | forward= 50,130; reverse= 49,870                                                                                                                                                                                                                                                                   |
+| context-inframe-insertion coverage         | forward= 50,050; reverse= 49,950                                                                                                                                                                                                                                                                   |
+| cross-mnv coverage                         | fwd= 50,132; len2= 50,187; len3= 49,813; missense= 50,032; rev= 49,868; stop_gained= 24,898; synonymous= 25,070                                                                                                                                                                                    |
+| cursor-cross-route coverage                | context= 100,000; fwd= 50,132; len2= 50,187; len3= 49,813; rev= 49,868                                                                                                                                                                                                                             |
+| cursor-del-route coverage                  | forward= 50,130; full= 100,000; reverse= 49,870                                                                                                                                                                                                                                                    |
+| cursor-ins-route coverage                  | forward= 50,050; full= 100,000; reverse= 49,950                                                                                                                                                                                                                                                    |
+| cursor-route coverage                      | full= 100,000; fwd= 50,015; mis= 20,049; rev= 49,985; stop_gained= 19,948; stop_lost= 20,007; stop_retained= 19,902; syn= 20,094                                                                                                                                                                   |
+| delta-cross-scratch coverage               | fwd= 50,132; len2= 50,187; len3= 49,813; missense= 50,032; rev= 49,868; stop_gained= 24,898; synonymous= 25,070                                                                                                                                                                                    |
+| delta-exon-hint coverage                   | del= 19,940; fwd= 49,955; indel= 19,988; ins= 20,031; mnv= 20,094; rev= 50,045; snv= 19,947                                                                                                                                                                                                        |
+| delta-scratch coverage                     | capfail= 100,000; fwd= 50,015; mis= 20,049; rev= 49,985; stop_gained= 19,948; stop_lost= 20,007; stop_retained= 19,902; syn= 20,094                                                                                                                                                                |
+| delta-scratch-indel coverage               | forward= 50,151; lengthen= 49,864; reverse= 49,849; shorten= 50,136                                                                                                                                                                                                                                |
+| delta-wrapper coverage                     | fwd= 50,015; mis= 20,049; rev= 49,985; stop_gained= 19,948; stop_lost= 20,007; stop_retained= 19,902; syn= 20,094                                                                                                                                                                                  |
+| event normalization coverage               | del= 25,028; indel= 24,718; ins= 24,954; interbase= 27,720; prefix= 81,125; prefix0_interbase= 7,019; sub= 25,300; suffix= 77,968                                                                                                                                                                  |
+| frameshift coverage                        | -1= 7,294; -2= 7,155; +1= 7,530; +2= 7,131; del= 29,432; delins= 29,110; ins= 41,458; reverse= 47,774; stop_gained= 1,562; terminal_cil_protein_altering= 9; terminal_cil_retained= 47; terminal_endpoint= 16,522; terminal_missing_tail= 4,182; terminal_nonstop= 12,362; terminal_reverse= 8,203 |
+| frameshift length-oracle coverage          | frameshift= 62,587; inframe_len= 12,446; stop_gained= 1,893                                                                                                                                                                                                                                        |
+| haplotype-MNV equivalence coverage         | body= 33,177; fwd= 50,079; one_codon= 16,102; rev= 49,921; several_codons= 83,898; start= 33,617; stop= 33,206                                                                                                                                                                                     |
+| HGVS shift coverage                        | at_vep_limit= 0; composed= 96,683; del= 48,656; dup= 37,932; fwd= 49,955; ins= 51,189; nonlocal_ref_replay= 1,542; protein= 90,059; rev= 49,890; rotated= 20,818; terminal_duplication= 3,162                                                                                                      |
+| HGVSp frameshift coverage                  | del= 24,911; delins= 29,221; eligible= 91,789; equal_stop= 19; fs= 87,367; fwd= 45,781; immediate_stop= 4,403; ins= 37,657; non_fs= 8,211; rev= 46,008; shortened= 0; ter_known= 17,365; ter_unknown= 70,002                                                                                       |
+| HGVSp replay coverage                      | del= 3,941; delins= 3,844; dup= 388; equal= 8,346; fwd= 17,190; ins= 1,582; replayed= 34,988; rev= 17,798; special= 63,926; sub= 16,887; terminal_not_applicable= 1,086; vep_position_zero= 1,324; vep_stop_equal= 0                                                                               |
+| inframe_deletion coverage                  | forward= 50,130; reverse= 49,870                                                                                                                                                                                                                                                                   |
+| inframe_insertion coverage                 | forward= 50,050; reverse= 49,950                                                                                                                                                                                                                                                                   |
+| mnv coverage                               | len2= 50,110; len3= 49,890                                                                                                                                                                                                                                                                         |
+| non-boundary insertion coverage            | forward= 50,132; inframe_insertion= 49,985; protein_altering= 50,015; reverse= 49,868                                                                                                                                                                                                              |
+| ordered-replacement coverage               | clipped= 85,602; empty= 6,365; forward= 49,777; merged_sources= 135,000; noop= 102,730; ref_slot= 220,687; reverse= 50,223; tied= 519,063                                                                                                                                                          |
+| simple-indel equivalence coverage          | del= 11,394; delins= 5,652; fallback= 38,829; fast= 21,130; frameshift= 18,801; fwd= 10,366; inframe_del= 1,847; inframe_ins= 482; ins= 4,084; rev= 10,764                                                                                                                                         |
+| start-codon coverage                       | co_stop_gained= 4,129; co_synonymous= 24,245; lost_and_retained= 1,596; start_lost= 100,000; start_retained= 1,596; synonymous= 24,245                                                                                                                                                             |
+| terminal-partial-insertion coverage        | after_tail_rejected= 41,724; length_mod0= 33,507; length_mod1= 33,297; length_mod2= 33,196; mitochondrial= 50,038; nonstop= 76,796; reverse_orientation= 50,001; same_orientation= 49,999; site_first= 41,607; site_internal= 16,669; standard= 49,962; stop= 11,190; tail1= 49,970; tail2= 50,030 |
+| variant-coding-context coverage            | capfail= 400,000; del= 19,940; fwd= 49,955; indel= 19,988; ins= 20,031; mnv= 20,094; pep_diff= 86,666; pep_same= 13,334; rev= 50,045; snv= 19,947                                                                                                                                                  |
 
-The run observed all 263 required nonzero counters. The other 3 counters
+The run observed all 314 required nonzero counters. The other 3 counters
 have named fixed witnesses in the coverage manifest; their absence from
 a random draw is not counted as statistical coverage. These counters
 describe the declared generators, not an exhaustive enumeration of
@@ -583,10 +598,9 @@ biological configurations.
 
 | revision | seed               | targets |  trials | required_counters_observed | minimum_required_counter_hits | fixed_witness_counters_not_hit |
 |:---------|:-------------------|--------:|--------:|---------------------------:|------------------------------:|-------------------------------:|
-| ae131a9d | 0x00000000000000ad |      56 | 5600000 |                        263 |                             6 |                              3 |
-| ae131a9d | 0x000000000135282a |      56 | 5600000 |                        263 |                             9 |                              3 |
+| b38f6179 | 0x000000000135282a |      63 | 6300000 |                        314 |                             9 |                              3 |
 
-Together these seeds executed 11,200,000 property trials on the shown
+The recorded runs executed 6,300,000 property trials on the shown
 revision. Millions of passing trials do not make a counter with
 single-digit observations densely explored, and marginal counters do not
 establish coverage of their cross-products. The fresh-seed HGVS failure
@@ -975,6 +989,52 @@ transcript per new region; arbitrary biological models,
 shared-variable-exon transcript interactions, reference-only sample
 routes, full phase/PS behavior, whole-haplotype SO/HGVS and structural
 composition remain outside this campaign’s tested scope.
+
+### Interacting exon/UTR diagnostics
+
+|     seed | interaction_per_stratum | profiles | records | carriers | controls_rejected | failures | sequence_failures | replay_lane_failures |
+|---------:|------------------------:|---------:|--------:|---------:|------------------:|---------:|------------------:|---------------------:|
+|      173 |                       1 |     8088 |   32544 |    48528 |                34 |       98 |                 0 |                    0 |
+|      173 |                       1 |     8088 |   32544 |    48528 |                42 |        0 |                 0 |                    0 |
+|      173 |                       4 |    26232 |   86976 |   157392 |                42 |        0 |                 0 |                    0 |
+| 20260906 |                       4 |    26232 |   86976 |   157392 |                42 |        0 |                 0 |                    0 |
+
+These are **local diagnostic runs, not source-bound release
+certificates**. The [receipt
+ledger](../test/duckvep/conformance/data/haplotype_interaction_history.csv)
+retains the captured runtime revision, extension hash, generator and
+comparator hashes, complete-input/output hashes, comparison hashes and
+each failure count. The retained run directories contain the full
+observations; this ledger is not a portable corpus pack.
+
+The one-draw pair has identical source inputs and native outputs. Its 98
+baseline failures arise from the R comparator deleting an empty JSON
+contributor-array field while retaining an empty native character
+vector. Both are empty applied-source sets. Explicit empty-set
+normalization resolves that representation mismatch; eight additional
+controls reject absent/null fields, invalid identities, lost or invented
+sources and dropped or duplicated rows. No source record, sequence or
+lane comparison is excluded, and the failing baseline remains in the
+table.
+
+The two four-draw campaigns contain **52,464 models / 314,784
+sample/file lanes**, with **0 failed model comparisons**. Each seed adds
+four draws in every one of 6,048 cells: the 504 exon/UTR geometry cells
+crossed with four partner allele shapes and three partner start
+locations (overlapping the first source span, in the same coding exon or
+in another coding exon). All source spans intersect their selected
+transcript. The original 1,536 fixed-model and 504 geometry cases
+precede the interaction draws without changing their inputs or RNG
+stream. Complete CDS/protein, sample counts, input provenance, source
+mapping, reference-model sequence and per-lane applied-source identities
+have separate gates.
+
+This remains a standard-code, 180-base reference-CDS grammar with three
+diploid samples. Quota coverage is not an estimate of population error
+rates. Grouped upstream flags, arbitrary genetic codes, phase sets,
+structural composition and complete phased SO/HGVS require their own
+evidence; the publication failures below are not waived by these
+diagnostic comparisons.
 
 ### Repeated-model publication audit
 

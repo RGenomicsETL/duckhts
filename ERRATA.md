@@ -3,7 +3,7 @@
 Status: current compatibility and evidence ledger. Records pinned VEP-116 behavior,
 observed DuckVEP conformance gaps, and separately assessed upstream errata.
 
-## Pinned behavioral authority
+## Required target: pinned Ensembl VEP 116
 
 **The required compatibility target is pinned Ensembl VEP 116.** Within DuckVEP's
 declared supported surface, this includes each source record's HGVSc and HGVSp

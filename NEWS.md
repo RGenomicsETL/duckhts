@@ -2,6 +2,9 @@
 
 # duckhts 1.5.1.9000
 
+- record the complete 63-target, 6.3-million-trial native property campaign and
+  rare-interaction diagnostics, retaining prior evidence and the failing comparator baseline
+
 - isolate SQLLogicTest runner fixtures from checkout-volume assumptions on Windows;
   verify successful and failing execution through file, list and directory selection
 
