@@ -176,13 +176,14 @@ cat("Rejected corruption controls:",length(controls),"\n")
 This is the selected-FORMAT baseline, not a pre-change/post-change speedup claim.
 The nearest prior [GIAB full-reader report](benchmark_bcf_shared_scan.md) reads
 all declared columns with `read_bcf`; it does not measure this nested schema or
-projection set. The [matched HPRC report](benchmark_genotypes_format_shared.md)
-separately exercises the existing GT-only interfaces against
-[their recorded baseline](benchmark_genotypes.md). These workloads do not establish
+projection set. The [matched HPRC report](benchmark_genotypes_scalar_counts.md)
+separately exercises the existing GT-only interfaces against the
+[shared-decoder baseline](benchmark_genotypes_format_shared.md) and
+[earlier GT-only baseline](benchmark_genotypes.md). These workloads do not establish
 universal fastest-reader performance, multi-sample FORMAT scaling, remote-I/O
 throughput or sealed allocation.
 
-## Matched GT-only cohort comparison
+## Matched GT-only cohort comparisons
 
 The following comparison requires identical registered input hashes and all four
 input-denominator rows in the rendered HPRC reports. Both use one scan thread,
@@ -192,10 +193,13 @@ significance test or a general no-regression claim. The reports retain complete
 within-revision typed comparisons, not cross-revision output snapshots.
 
 ```{r cohort-comparison}
-cohort_baseline <- "benchmarks/benchmark_genotypes.md"
-cohort_current <- "benchmarks/benchmark_genotypes_format_shared.md"
-for (path in c(cohort_baseline,cohort_current)) {
+cohort_baselines <- c("benchmarks/benchmark_genotypes_format_shared.md", "benchmarks/benchmark_genotypes.md")
+cohort_current <- "benchmarks/benchmark_genotypes_scalar_counts.md"
+for (path in c(cohort_baselines,cohort_current)) {
   cat(basename(path),":",grep("Source revision:",readLines(path),value=TRUE),"\n")
 }
-knitr::kable(genotype_hprc_comparison(cohort_baseline,cohort_current),digits=3)
+for (baseline in cohort_baselines) {
+  cat("Comparison baseline:",basename(baseline),"\n")
+  print(knitr::kable(genotype_hprc_comparison(baseline,cohort_current),digits=3))
+}
 ```
