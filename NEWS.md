@@ -2,6 +2,11 @@
 
 # duckhts 1.5.1.9000
 
+- select typed per-call FORMAT values with read_geno(format_fields := ['AD', 'DP', 'GQ']),
+  retaining original sample indices, missing elements and records without GT.
+  read_bcf and read_geno share worker-owned FORMAT decoding and output materialization;
+  INFO/FORMAT shapes follow the declared header without tag-name schema repair
+
 - reuse the retained physical CDS projection for decoded singleton phased HGVS,
   preserving VEP uploaded-feature coordinates and separate shifted/raw-record
   projections; test complete coding views across strands, exon layouts and CDS phases.
@@ -26,7 +31,8 @@
 - state exact pinned Ensembl VEP 116 revisions as the HGVS acceptance authority in
   ERRATA.md, including conflicts with separately assessed HGVS recommendations;
   distinguish sequence equivalence from per-record compatibility and require runnable,
-  independently supported evidence for upstream-defect claims without waiving failures
+  independently supported evidence for upstream-defect claims without waiving failures.
+  Ledger entries do not imply a proven upstream defect or upstream acknowledgement
 
 - extend the phased model conformance generator with quota-controlled interacting
   edits across exon/UTR layouts, retaining the original inputs and RNG stream

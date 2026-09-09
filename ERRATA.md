@@ -3,9 +3,14 @@
 Status: current compatibility and evidence ledger. Records pinned VEP-116 behavior,
 observed DuckVEP conformance gaps, and separately assessed upstream errata.
 
+**An entry in this file is not, by itself, a claim that VEP is wrong.** Observed
+upstream behavior, DuckVEP compatibility failures and supported upstream-defect claims
+must be distinguished. Upstream acknowledgement is recorded separately from our evidence.
+
 ## Required target: pinned Ensembl VEP 116
 
-**DuckVEP follows pinned Ensembl VEP 116. HGVS presentation is not a spelling choice.**
+**DuckVEP must reproduce pinned Ensembl VEP 116, including its HGVS output and
+documented anomalies. This is the compatibility contract, not an HGVS spelling choice.**
 Within the declared supported surface, the acceptance contract is the pinned
 executable's output for each original record and source ALT, using the same reference,
 transcript model and settings. This includes HGVSc, HGVSp, input-representation-dependent

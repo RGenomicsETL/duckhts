@@ -23,6 +23,7 @@ test_installed_reader_allocations <- function(probe_path) {
   fixtures <- c(read_bcf = "bcf_cache_lifecycle.vcf", read_bam = "bam_read_groups.sam",
                 read_bcf_indexed = "bcf_scan_contigs.partial.vcf.gz",
                 read_geno = "geno_calls.bcf", read_bcf_samples = "geno_calls.vcf.gz",
+                read_geno_format = "geno_format.bcf",
                 read_bam_materialize = "bam_materialize.sam",
                 read_fasta = "region_names.fa", read_fastq = "r1.fq")
   failures <- 0L
@@ -30,10 +31,12 @@ test_installed_reader_allocations <- function(probe_path) {
     path <- system.file("extdata", fixtures[[reader]], package = "Rduckhts")
     stopifnot(nzchar(path))
     function_name <- switch(reader, read_bam_materialize = "read_bam",
-                            read_bcf_indexed = "read_bcf", reader)
+                            read_bcf_indexed = "read_bcf", read_geno_format = "read_geno", reader)
     options <- if (function_name == "read_bam") ", decompression_threads := 0" else ""
     if (reader == "read_bam_materialize")
       options <- paste0(options, ", standard_tags := true, auxiliary_tags := true")
+    if (reader == "read_geno_format")
+      options <- ", format_fields := ['AD', 'DP', 'GQ', 'VI', 'VF', 'ST']"
     mode <- if (reader == "read_bcf_indexed") "auto" else "sequential"
     if (reader == "read_bcf_indexed")
       options <- paste0(options, ", index_path := ", dbQuoteString(con, paste0(path, ".index.tbi")))
@@ -79,12 +82,16 @@ test_installed_reader_allocations <- function(probe_path) {
   queries <- vapply(seq_along(projections), function(i)
     sprintf("SELECT %s FROM read_bam(%s, %s, decompression_threads := 0)",
             projections[[i]], path, options[[i]]), character(1))
-  for (fixture in c("geno_calls.bcf", "bcf_cache_lifecycle.vcf", "mapping_number_families.vcf")) {
+  for (fixture in c("geno_calls.bcf", "geno_format.bcf", "bcf_cache_lifecycle.vcf", "mapping_number_families.vcf")) {
     path <- dbQuoteString(con, system.file("extdata", fixture, package = "Rduckhts"))
     queries <- c(queries, sprintf("SELECT * FROM read_bcf(%s, scan_mode := 'sequential')", path),
                  sprintf("SELECT * FROM read_bcf(%s, tidy_format := true, scan_mode := 'sequential')", path))
     if (fixture == "geno_calls.bcf") for (projection in c("ALT", "calls", "*")) {
       queries <- c(queries, sprintf("SELECT %s FROM read_geno(%s)", projection, path))
+    }
+    if (fixture == "geno_format.bcf") {
+      queries <- c(queries, sprintf(paste("SELECT calls FROM read_geno(%s,",
+        "format_fields := ['AD', 'DP', 'GQ', 'VI', 'VF', 'ST'])"), path))
     }
   }
   failures <- 0L

@@ -1,6 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
 
+- select extra typed FORMAT fields through rduckhts_geno(format_fields = c("AD", "DP", "GQ")),
+  attached to each call with missing-item positions and absent-GT calls retained.
+  Bundled readers use declared INFO/FORMAT header shapes without implicit tag-name repair
+
 - reuse decoded singleton CDS projections in bundled phased HGVS, with SQL/R
   comparisons against independent annotation for UTR-first, phase-padded models
   through decoded and raw-record calls

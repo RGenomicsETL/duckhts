@@ -6,6 +6,8 @@ src/simd/duckhts_simd_avx512.c|simd/duckhts_simd_avx512.c
 src/simd/duckhts_simd_neon.c|simd/duckhts_simd_neon.c
 src/simd/duckhts_simd_wasm_simd128.c|simd/duckhts_simd_wasm_simd128.c
 src/bcf_reader.c|bcf_reader.c
+src/bcf_field_vector.c|bcf_field_vector.c
+src/bcf_format.c|bcf_format.c
 src/bcf_scan.c|bcf_scan.c
 src/bcf_genotypes.c|bcf_genotypes.c
 src/geno_reader.c|geno_reader.c

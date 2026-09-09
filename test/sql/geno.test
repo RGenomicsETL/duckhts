@@ -4,6 +4,159 @@
 
 require duckhts
 
+# Selected typed FORMAT values share the sample axis and retain missing ordinals.
+foreach ext vcf bcf vcf.gz
+
+statement ok
+CREATE OR REPLACE TEMP TABLE selected_format AS
+SELECT * FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_format.${ext}',
+  format_fields := ['AD', 'DP', 'GQ', 'GL', 'VI', 'VF', 'ST'], decode_error_policy := 'error');
+
+query III
+SELECT count(*), sum(len(calls)), count(DISTINCT record_index) FROM selected_format;
+----
+6	12	6
+
+query TTTTTTT
+SELECT calls[1].format.AD::VARCHAR, calls[2].format.AD::VARCHAR,
+       calls[1].format.GL::VARCHAR, calls[1].format.VI::VARCHAR,
+       calls[1].format.VF::VARCHAR, calls[1].format.ST::VARCHAR, calls[1].alleles::VARCHAR
+FROM selected_format WHERE record_index = 0;
+----
+[10, NULL, 5]	[NULL, 7, 3]	[0.0, -1.0, NULL, -3.0, -4.0, -5.0]	[1, NULL, 3]	[1.5, NULL, 2.5]	[a, NULL, b]	[NULL, NULL]
+
+query ITTT
+SELECT record_index, calls[1].format.AD::VARCHAR, calls[2].format.AD::VARCHAR,
+       calls[1].alleles::VARCHAR FROM selected_format
+WHERE record_index BETWEEN 2 AND 4 ORDER BY record_index;
+----
+2	[8, 9]	[NULL]	NULL
+3	[8, 9]	[NULL]	NULL
+4	NULL	NULL	[0, 0]
+
+query IITTT
+SELECT len(calls[1].format.VI), calls[1].format.VI[257],
+       calls[1].format.AD::VARCHAR, calls[2].format.VI::VARCHAR, calls[2].format.VF::VARCHAR
+FROM selected_format WHERE record_index = 5;
+----
+257	257	[32768, 100000]	[NULL, 4]	[NULL, 4.5]
+
+# EXCEPT ALL in both directions preserves duplicate records and missing values.
+query II
+WITH actual AS (
+  SELECT g.CHROM, g.POS, g.ID, g.REF, g.ALT, s.sample_name,
+         c.format.AD, c.format.DP, c.format.GQ, c.format.GL,
+         c.format.VI, c.format.VF, c.format.ST
+  FROM selected_format g, unnest(g.calls) u(c),
+       read_bcf_samples('__WORKING_DIRECTORY__/test/data/geno_format.${ext}') s
+  WHERE c.sample_index = s.sample_index
+), expected AS (
+  SELECT CHROM, POS, ID, REF, ALT, SAMPLE_ID,
+         FORMAT_AD, FORMAT_DP, FORMAT_GQ, FORMAT_GL, FORMAT_VI, FORMAT_VF, FORMAT_ST
+  FROM read_bcf('__WORKING_DIRECTORY__/test/data/geno_format.${ext}',
+                tidy_format := true, scan_mode := 'sequential', decode_error_policy := 'error')
+)
+SELECT (SELECT count(*) FROM (FROM actual EXCEPT ALL FROM expected)),
+       (SELECT count(*) FROM (FROM expected EXCEPT ALL FROM actual));
+----
+0	0
+
+query III
+SELECT count(*), sum(len(calls)), sum(calls[1].sample_index)
+FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_format.${ext}',
+                format_fields := ['AD'], samples := 'S2');
+----
+6	6	6
+
+query II
+SELECT count(*), sum(len(calls))
+FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_format.${ext}',
+                format_fields := ['AD'], samples := '');
+----
+6	0
+
+query II
+SELECT count(*), sum(len(calls))
+FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_format.${ext}',
+                format_fields := ['AD'], non_reference_only := true);
+----
+6	4
+
+endloop
+
+foreach ext bcf vcf.gz
+
+query III
+SELECT count(*), sum(len(calls)), sum(calls[1].format.DP)
+FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_format.${ext}',
+  format_fields := ['AD', 'DP'], region := 'chrG:20-30,chrG:30-30');
+----
+3	6	41
+
+endloop
+
+statement error
+SELECT * FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_format.bcf', format_fields := ['absent']);
+----
+requested FORMAT/absent is not declared
+
+statement error
+SELECT * FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_format.bcf', format_fields := ['AD', 'ad']);
+----
+duplicate FORMAT field
+
+statement error
+SELECT * FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_format.bcf', format_fields := [NULL]);
+----
+nonempty, non-NULL
+
+statement error
+SELECT * FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_format.bcf', format_fields := ['']);
+----
+nonempty, non-NULL
+
+foreach tag GT PS
+
+statement error
+SELECT * FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_format.bcf', format_fields := ['${tag}']);
+----
+already exposed
+
+endloop
+
+query II
+SELECT (SELECT typeof(calls) FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_format.bcf',
+                format_fields := []) LIMIT 1) =
+       (SELECT typeof(calls) FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_format.bcf') LIMIT 1),
+       (SELECT typeof(calls) FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_format.bcf',
+                format_fields := NULL) LIMIT 1) =
+       (SELECT typeof(calls) FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_format.bcf') LIMIT 1);
+----
+1	1
+
+# Unprojected calls do not inspect malformed extra FORMAT payloads.
+query I
+SELECT count(*) FROM read_geno('__WORKING_DIRECTORY__/test/data/bcf_format_type_clash.bcf',
+  format_fields := ['XX'], decode_error_policy := 'error');
+----
+1
+
+statement error
+SELECT calls FROM read_geno('__WORKING_DIRECTORY__/test/data/bcf_format_type_clash.bcf',
+  format_fields := ['XX'], decode_error_policy := 'error');
+----
+FORMAT/XX encoded BCF type
+
+foreach policy null warn
+
+query I
+SELECT calls[1].format.XX IS NULL FROM read_geno('__WORKING_DIRECTORY__/test/data/bcf_format_type_clash.bcf',
+  format_fields := ['XX'], decode_error_policy := '${policy}');
+----
+1
+
+endloop
+
 statement ok
 SET threads=4;
 

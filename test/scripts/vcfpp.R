@@ -347,6 +347,38 @@ manifest[[length(manifest) + 1]] <- render_fixture(
 )
 
 manifest[[length(manifest) + 1]] <- render_fixture(
+  filename = "geno_format.vcf",
+  section = "mapping",
+  purpose = "Selected FORMAT values retain sample and allele ordinals, missing items, absent GT and physical duplicates",
+  contigs = "chrG",
+  format_defs = list(
+    tag_def("GT", "1", "String", "Genotype"), tag_def("PS", "1", "Integer", "Phase set"),
+    tag_def("AD", "R", "Integer", "Allele depths"), tag_def("DP", "1", "Integer", "Depth"),
+    tag_def("GQ", "1", "Integer", "Genotype quality"),
+    tag_def("GL", "G", "Float", "Genotype likelihoods"),
+    tag_def("VI", ".", "Integer", "Variable integers"),
+    tag_def("VF", ".", "Float", "Variable floats"),
+    tag_def("ST", ".", "String", "Variable strings")
+  ),
+  info_defs = list(tag_def("MI", ".", "Integer", "Missing integer ordinals"),
+                   tag_def("MF", ".", "Float", "Missing float ordinals"),
+                   tag_def("MS", ".", "String", "Missing string ordinals")),
+  samples = c("S1", "S2"),
+  records = c(
+    paste0("chrG\t10\tmulti\tA\tC,G\t.\tPASS\tMI=1,.,3;MF=1.5,.,2.5;MS=a,.,b",
+           "\tGT:PS:AD:DP:GQ:GL:VI:VF:ST",
+           "\t./.:10:10,.,5:15:42:0,-1,.,-3,-4,-5:1,.,3:1.5,.,2.5:a,.,b",
+           "\t1|2:20:.,7,3:10:.:.:.:.:."),
+    "chrG\t20\tpartial\tC\tT\t.\tPASS\t.\tGT:AD:DP\t0|1:3,4:7\t./.:4,5:9",
+    rep("chrG\t30\tno_gt\tG\tA\t.\tPASS\t.\tAD:DP:ST\t8,9:17:x\t.:.:.", 2L),
+    "chrG\t40\tno_extra\tT\tC\t.\tPASS\t.\tGT\t0/0\t./.",
+    paste0("chrG\t50\twide\tA\tT\t.\tPASS\t.\tGT:AD:VI:VF:ST",
+           "\t1:32768,100000:", paste(seq_len(257L), collapse = ","), ":3.5:longer,.,tail",
+           "\t0/1:1,2:.,4:.,4.5:z")
+  )
+)
+
+manifest[[length(manifest) + 1]] <- render_fixture(
   filename = "bcf_filter_list_regression.vcf",
   section = "regression",
   purpose = "read_bcf FILTER list-materialization regression for multi-entry and PASS values",
@@ -386,7 +418,7 @@ manifest[[length(manifest) + 1]] <- render_fixture(
 manifest[[length(manifest) + 1]] <- render_fixture(
   filename = "spec_standard_corrections.vcf",
   section = "spec",
-  purpose = "Intentionally misdeclared standard tags that should be corrected by spec-aware bind logic",
+  purpose = "Nonstandard Number declarations remain header-faithful without implicit schema repair",
   contigs = c("chr1"),
   info_defs = list(
     tag_def(

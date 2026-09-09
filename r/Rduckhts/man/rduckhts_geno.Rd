@@ -15,7 +15,8 @@ rduckhts_geno(
   scan_mode = "auto",
   decompression_threads = 0,
   decode_error_policy = "null",
-  overwrite = FALSE
+  overwrite = FALSE,
+  format_fields = NULL
 )
 }
 \arguments{
@@ -50,6 +51,14 @@ single-threaded.}
 \code{"error"} raises a DuckDB/R error.}
 
 \item{overwrite}{Logical. If TRUE, overwrites existing table}
+
+\item{format_fields}{Character vector of extra FORMAT tags, for example
+`c("AD", "DP", "GQ")`. Selected fields are typed members of each call's
+`format` struct using the header's Type and Number. Missing elements retain
+their positions; no allele normalization or depth inference is performed.
+NULL or an empty vector keeps the default GT/PS schema. Unknown, empty,
+missing and case-insensitively duplicate names error; GT and PS are already
+exposed by the typed call fields and cannot be selected again.}
 }
 \value{
 A data frame when `table_name` is `NULL`, otherwise invisible `TRUE`.

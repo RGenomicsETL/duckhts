@@ -4,20 +4,22 @@
 prepare_geno_fixtures <- function() {
   stopifnot(nzchar(Sys.which("bcftools")), nzchar(Sys.which("bgzip")))
   run <- function(args) stopifnot(system2("bcftools", shQuote(args)) == 0L)
-  source <- "test/data/geno_calls.vcf"
-  stopifnot(file.exists(source))
-  lines <- readLines(source)
-  bcf <- sub("vcf$", "bcf", source)
-  vcf <- paste0(source, ".gz")
-  run(c("view", "--no-version", "-Ob", "-o", bcf, source))
-  run(c("index", "-f", bcf))
-  stopifnot(system2("bgzip", c("-c", shQuote(source)), stdout = vcf) == 0L)
-  run(c("index", "-f", "-t", vcf))
-  outputs <- c(source, bcf, paste0(bcf, ".csi"), vcf, paste0(vcf, ".tbi"))
-  expected <- system2("bcftools", c("view", "-H", source), stdout = TRUE)
-  for (path in c(bcf, vcf)) {
-    stopifnot(identical(system2("bcftools", c("view", "-H", path), stdout = TRUE), expected))
+  outputs <- character()
+  for (source in c("test/data/geno_calls.vcf", "test/data/geno_format.vcf")) {
+    stopifnot(file.exists(source))
+    bcf <- sub("vcf$", "bcf", source)
+    vcf <- paste0(source, ".gz")
+    run(c("view", "--no-version", "-Ob", "-o", bcf, source))
+    run(c("index", "-f", bcf))
+    stopifnot(system2("bgzip", c("-c", shQuote(source)), stdout = vcf) == 0L)
+    run(c("index", "-f", "-t", vcf))
+    outputs <- c(outputs, source, bcf, paste0(bcf, ".csi"), vcf, paste0(vcf, ".tbi"))
+    expected <- system2("bcftools", c("view", "-H", source), stdout = TRUE)
+    for (path in c(bcf, vcf)) {
+      stopifnot(identical(system2("bcftools", c("view", "-H", path), stdout = TRUE), expected))
+    }
   }
+  lines <- readLines("test/data/geno_calls.vcf")
   header <- lines[startsWith(lines, "#")]
   for (kind in c("ps_type", "ps_number", "ps_width", "gt_allele")) {
     selected <- header

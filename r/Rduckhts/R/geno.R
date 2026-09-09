@@ -16,6 +16,13 @@
 #' @param table_name Optional table to create; `NULL` returns a data frame.
 #' @param non_reference_only Omit calls without any called alternate allele.
 #'   This does not infer phase or remove variant records.
+#' @param format_fields Character vector of extra FORMAT tags, for example
+#'   `c("AD", "DP", "GQ")`. Selected fields are typed members of each call's
+#'   `format` struct using the header's Type and Number. Missing elements retain
+#'   their positions; no allele normalization or depth inference is performed.
+#'   NULL or an empty vector keeps the default GT/PS schema. Unknown, empty,
+#'   missing and case-insensitively duplicate names error; GT and PS are already
+#'   exposed by the typed call fields and cannot be selected again.
 #' @return A data frame when `table_name` is `NULL`, otherwise invisible `TRUE`.
 #' @seealso [rduckhts_bcf_samples()]
 #' @examples
@@ -29,7 +36,7 @@ rduckhts_geno <- function(con, table_name = NULL, path, region = NULL,
                           index_path = NULL, samples = NULL,
                           non_reference_only = FALSE, scan_mode = "auto",
                           decompression_threads = 0, decode_error_policy = "null",
-                          overwrite = FALSE) {
+                          overwrite = FALSE, format_fields = NULL) {
   params <- list()
   if (!is.null(region)) params$region <- sql_quote_string(con, region)
   if (!is.null(index_path)) params$index_path <- sql_quote_string(con, index_path)
@@ -45,6 +52,7 @@ rduckhts_geno <- function(con, table_name = NULL, path, region = NULL,
   params$decompression_threads <- .validate_nonnegative_integer_param(
     decompression_threads, "decompression_threads")
   params$decode_error_policy <- sql_quote_string(con, decode_error_policy)
+  params$format_fields <- sql_varchar_list_literal(con, format_fields, "format_fields")
   query <- paste0("SELECT * FROM read_geno(", sql_quote_string(con, path), build_param_str(params), ")")
   if (is.null(table_name)) return(DBI::dbGetQuery(con, query))
   prefix <- if (overwrite) "CREATE OR REPLACE TABLE " else "CREATE TABLE "

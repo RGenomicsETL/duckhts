@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include "../../src/include/bcf_scan.h"
 #include "../../src/include/bcf_genotypes.h"
+#include "../../src/include/bcf_format.h"
 
 static const char *rows[] = {
     "chr1\t10\tknown\tA\tC\t60\tPASS\tDP=7\tGT\t0/1\t1/1\n",
@@ -238,6 +239,99 @@ static void genotype_values(void) {
     bcf_hdr_destroy(header);
 }
 
+static void format_values(void) {
+    bcf_hdr_t *header = bcf_hdr_init("w");
+    bcf1_t *record = bcf_init();
+    assert(header && record);
+    assert(bcf_hdr_append(header, "##contig=<ID=chrF,length=100>") == 0);
+    assert(bcf_hdr_append(header, "##FORMAT=<ID=VI,Number=.,Type=Integer,Description=\"Integers\">") == 0);
+    assert(bcf_hdr_append(header, "##FORMAT=<ID=VF,Number=.,Type=Float,Description=\"Floats\">") == 0);
+    assert(bcf_hdr_append(header, "##FORMAT=<ID=ST,Number=.,Type=String,Description=\"Strings\">") == 0);
+    assert(bcf_hdr_add_sample(header, "S1") == 0 && bcf_hdr_add_sample(header, "S2") == 0);
+    assert(bcf_hdr_add_sample(header, NULL) == 0 && bcf_hdr_sync(header) == 0);
+    record->rid = 0;
+    record->pos = 9;
+    assert(bcf_update_alleles_str(header, record, "A,C,G") == 0);
+    duckhts_bcf_format_t integers = {0}, floats = {0}, strings = {0};
+    char error[512];
+    int32_t *expected_i = NULL;
+    float *expected_f = NULL;
+    int capacity_i = 0, capacity_f = 0;
+    uint32_t rng = 217;
+    for (int trial = 0; trial < 1024; trial++) {
+        rng = rng * 1664525u + 1013904223u;
+        int width = 1 + (int)(rng % 257);
+        int32_t vi[514];
+        float vf[514];
+        for (int sample = 0; sample < 2; sample++) for (int j = 0; j < width; j++) {
+            size_t i = (size_t)sample * width + j;
+            rng = rng * 1664525u + 1013904223u;
+            vi[i] = (int32_t)(rng % (trial % 3 == 0 ? 120 : trial % 3 == 1 ? 30000 : 1000000));
+            vf[i] = (float)vi[i] / 8;
+            if (rng % 5 == 0) { vi[i] = bcf_int32_missing; bcf_float_set_missing(vf[i]); }
+            if (sample == 1 && j >= width / 2) {
+                vi[i] = bcf_int32_vector_end;
+                bcf_float_set_vector_end(vf[i]);
+            }
+        }
+        assert(bcf_update_format_int32(header, record, "VI", vi, width * 2) == 0);
+        assert(bcf_update_format_float(header, record, "VF", vf, width * 2) == 0);
+        int ni = bcf_get_format_int32(header, record, "VI", &expected_i, &capacity_i);
+        int nf = bcf_get_format_float(header, record, "VF", &expected_f, &capacity_f);
+        integers.loaded = floats.loaded = 0;
+        assert(duckhts_bcf_format_decode(&integers, header, record, "VI", BCF_HT_INT,
+            DUCKHTS_BCF_DECODE_ERROR, "test", error, sizeof(error)));
+        assert(duckhts_bcf_format_decode(&floats, header, record, "VF", BCF_HT_REAL,
+            DUCKHTS_BCF_DECODE_ERROR, "test", error, sizeof(error)));
+        assert(ni == 2 * width && nf == ni && integers.count == ni && floats.count == nf);
+        assert(integers.stride == width && floats.stride == width);
+        assert(memcmp(integers.data, expected_i, (size_t)ni * sizeof(*expected_i)) == 0);
+        assert(memcmp(floats.data, expected_f, (size_t)nf * sizeof(*expected_f)) == 0);
+        assert(memcmp(integers.data, vi, (size_t)ni * sizeof(*vi)) == 0);
+        assert(memcmp(floats.data, vf, (size_t)nf * sizeof(*vf)) == 0);
+        const char *text[] = {trial % 2 ? "a,.,b" : "longer,.,last", "."};
+        assert(bcf_update_format_string(header, record, "ST", text, 2) == 0);
+        strings.loaded = 0;
+        assert(duckhts_bcf_format_decode(&strings, header, record, "ST", BCF_HT_STR,
+            DUCKHTS_BCF_DECODE_ERROR, "test", error, sizeof(error)));
+        assert(strcmp(strings.strings[0], text[0]) == 0 && strcmp(strings.strings[1], text[1]) == 0);
+        void *retained = integers.data;
+        assert(bcf_update_format_int32(header, record, "VI", NULL, 0) == 0);
+        assert(duckhts_bcf_format_decode(&integers, header, record, "VI", BCF_HT_INT,
+            DUCKHTS_BCF_DECODE_ERROR, "test", error, sizeof(error)));
+        assert(integers.count == ni && integers.data == retained); // Cache lasts until explicit reset.
+        integers.loaded = 0;
+        assert(duckhts_bcf_format_decode(&integers, header, record, "VI", BCF_HT_INT,
+            DUCKHTS_BCF_DECODE_ERROR, "test", error, sizeof(error)));
+        assert(!integers.count && !integers.stride && integers.data == retained);
+    }
+    const char *bad[] = {"bad", "payload"};
+    assert(bcf_update_format_string(header, record, "VI", bad, 2) == 0);
+    integers.loaded = 0;
+    assert(!duckhts_bcf_format_decode(&integers, header, record, "VI", BCF_HT_INT,
+        DUCKHTS_BCF_DECODE_ERROR, "test", error, sizeof(error)));
+    assert(strstr(error, "encoded BCF type CHAR") && !integers.count);
+    assert(duckhts_bcf_format_decode(&integers, header, record, "VI", BCF_HT_INT,
+        DUCKHTS_BCF_DECODE_NULL, "test", error, sizeof(error)));
+    assert(!integers.count);
+    bcf_fmt_t *format = bcf_get_fmt(header, record, "ST");
+    int width = format->n;
+    format->n = INT32_MAX;
+    strings.loaded = 0;
+    assert(!duckhts_bcf_format_decode(&strings, header, record, "ST", BCF_HT_STR,
+        DUCKHTS_BCF_DECODE_NULL, "test", error, sizeof(error)));
+    assert(strstr(error, "decoded-value capacity") && !strings.count);
+    format->n = width;
+    free(expected_i);
+    free(expected_f);
+    duckhts_bcf_format_destroy(&integers);
+    duckhts_bcf_format_destroy(&floats);
+    duckhts_bcf_format_destroy(&strings);
+    duckhts_bcf_format_destroy(&strings);
+    bcf_destroy(record);
+    bcf_hdr_destroy(header);
+}
+
 static void literal_contigs(void) {
     const char *paths[] = {"test/data/bcf_literal_contigs.bcf", "test/data/bcf_literal_contigs.vcf.gz"};
     const char *names[] = {"chr1", "chr1:100-200", "absent"};
@@ -416,6 +510,7 @@ int main(int argc, char **argv) {
     }
     decode_errors();
     genotype_values();
+    format_values();
     literal_contigs();
     puts("BCF scanner: CSI/TBI, shifted offsets, 7200 concurrent exact-row scans, selected raw GT and decode errors: OK");
     return 0;

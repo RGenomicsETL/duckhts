@@ -28,7 +28,6 @@
 
 #include "duckdb_extension.h"
 DUCKDB_EXTENSION_EXTERN
-#include "include/vcf_types.h"
 
 #include <string.h>
 #include <stdlib.h>

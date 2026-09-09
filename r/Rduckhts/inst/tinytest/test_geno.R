@@ -138,4 +138,114 @@ test_record_major_genotypes <- function() {
   expect_equal(dbGetQuery(con, "SELECT 42 AS n")$n, 42L)
 }
 
+test_selected_genotype_format <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  fields <- c("AD", "DP", "GQ", "GL", "VI", "VF", "ST")
+  fixture <- function(name) {
+    path <- system.file("extdata", name, package = "Rduckhts")
+    stopifnot(nzchar(path), file.exists(path))
+    path
+  }
+  flatten <- function(source) paste0(
+    "SELECT CHROM, POS, ID, REF, ALT, s.sample_name AS sample, ",
+    paste0("c.format.", fields, " AS ", fields, collapse = ", "),
+    " FROM ", source, " g, unnest(g.calls) u(c), samples s WHERE c.sample_index=s.sample_index")
+  expected <- function(source) paste0(
+    "SELECT CHROM, POS, ID, REF, ALT, SAMPLE_ID AS sample, ",
+    paste0("FORMAT_", fields, " AS ", fields, collapse = ", "), " FROM ", source)
+  compare <- function(left, right) {
+    # Bag comparison counts every physical duplicate; NULL items stay in place.
+    sql <- sprintf(paste(
+      "SELECT (SELECT count(*) FROM ((%s) EXCEPT ALL (%s))) AS extra,",
+      "(SELECT count(*) FROM ((%s) EXCEPT ALL (%s))) AS missing"), left, right, right, left)
+    expect_equal(dbGetQuery(con, sql), data.frame(extra = 0, missing = 0))
+  }
+  for (extension in c("vcf", "bcf", "vcf.gz")) {
+    path <- fixture(paste0("geno_format.", extension))
+    quoted <- dbQuoteString(con, path)
+    dbWriteTable(con, "samples", rduckhts_bcf_samples(con, path), overwrite = TRUE)
+    for (selection in c("-", "S2", "^S2", "")) {
+      rduckhts_geno(con, "selected", path, samples = selection, format_fields = fields,
+                    decode_error_policy = "error", overwrite = TRUE)
+      baseline <- sprintf("read_bcf(%s, tidy_format := true, samples := %s, scan_mode := 'sequential')",
+                          quoted, dbQuoteString(con, selection))
+      expect_equal(dbGetQuery(con, "SELECT count(*) AS n FROM selected")$n, 6)
+      if (nzchar(selection)) compare(flatten("selected"), expected(baseline))
+      else expect_equal(dbGetQuery(con, "SELECT sum(len(calls)) AS n FROM selected")$n, 0)
+    }
+    rduckhts_geno(con, "selected", path, format_fields = fields, overwrite = TRUE)
+    first <- dbGetQuery(con, paste(
+      "SELECT calls[1].format.AD::VARCHAR AS ad, calls[1].format.GL::VARCHAR AS gl,",
+      "calls[1].format.ST::VARCHAR AS st, calls[1].alleles::VARCHAR AS gt",
+      "FROM selected WHERE record_index=0"))
+    expect_equal(first, data.frame(ad = "[10, NULL, 5]",
+      gl = "[0.0, -1.0, NULL, -3.0, -4.0, -5.0]", st = "[a, NULL, b]", gt = "[NULL, NULL]"))
+    expect_equal(dbGetQuery(con, paste(
+      "SELECT calls[1].alleles IS NULL AS missing_gt, calls[1].format.AD::VARCHAR AS ad",
+      "FROM selected WHERE record_index=2")), data.frame(missing_gt = TRUE, ad = "[8, 9]"))
+    expect_equal(dbGetQuery(con, sprintf(paste(
+      "SELECT INFO_MI::VARCHAR AS i, INFO_MF::VARCHAR AS f, INFO_MS::VARCHAR AS s",
+      "FROM read_bcf(%s) WHERE POS=10"), quoted)),
+      data.frame(i = "[1, NULL, 3]", f = "[1.5, NULL, 2.5]", s = "[a, NULL, b]"))
+    if (extension != "vcf") {
+      region <- "chrG:20-30,chrG:30-30"
+      rduckhts_geno(con, "selected", path, format_fields = fields, region = region, overwrite = TRUE)
+      compare(flatten("selected"), expected(sprintf("read_bcf(%s, tidy_format := true, region := %s)",
+                                                   quoted, dbQuoteString(con, region))))
+      expect_equal(dbGetQuery(con, "SELECT count(*) AS n FROM selected")$n, 3)
+    }
+    for (empty in list(NULL, character())) {
+      default <- rduckhts_geno(con, path = path)
+      expect_equal(rduckhts_geno(con, path = path, format_fields = empty), default)
+    }
+  }
+  # Repeated growing/missing fields exercise worker-cache reset across output chunks.
+  repeated <- tempfile("geno-format-chunks-", fileext = ".vcf")
+  on.exit(unlink(repeated), add = TRUE)
+  seed <- readLines(fixture("geno_format.vcf"))
+  writeLines(c(seed[startsWith(seed, "#")], rep(seed[!startsWith(seed, "#")], 1000L)), repeated)
+  rduckhts_geno(con, "selected", repeated, format_fields = fields, overwrite = TRUE)
+  expect_equal(dbGetQuery(con, "SELECT count(*) AS n, sum(len(calls)) AS calls FROM selected"),
+               data.frame(n = 6000, calls = 12000))
+  compare(flatten("selected"), expected(sprintf("read_bcf(%s, tidy_format := true, scan_mode := 'sequential')",
+                                               dbQuoteString(con, repeated))))
+  # A single call list and the tidy counterpart span more than 2,048 samples.
+  many_samples <- tempfile("geno-format-samples-", fileext = ".vcf")
+  on.exit(unlink(many_samples), add = TRUE)
+  row <- strsplit(seed[!startsWith(seed, "#")][1L], "\t", fixed = TRUE)[[1L]]
+  header <- strsplit(seed[startsWith(seed, "#CHROM")], "\t", fixed = TRUE)[[1L]]
+  writeLines(c(seed[startsWith(seed, "##")],
+    paste(c(header[1:9], paste0("S", seq_len(2053L))), collapse = "\t"),
+    paste(c(row[1:9], rep(row[10:11], length.out = 2053L)), collapse = "\t")), many_samples)
+  dbWriteTable(con, "samples", rduckhts_bcf_samples(con, many_samples), overwrite = TRUE)
+  rduckhts_geno(con, "selected", many_samples, format_fields = fields, overwrite = TRUE)
+  expect_equal(dbGetQuery(con, paste(
+    "SELECT len(calls)::INTEGER AS n, calls[2053].sample_index AS last_sample,",
+    "calls[2053].format.AD::VARCHAR AS ad FROM selected")),
+    data.frame(n = 2053L, last_sample = 2052L, ad = "[10, NULL, 5]"))
+  compare(flatten("selected"), expected(sprintf("read_bcf(%s, tidy_format := true, scan_mode := 'sequential')",
+                                               dbQuoteString(con, many_samples))))
+  path <- fixture("geno_format.bcf")
+  for (invalid in list(1, NA_character_, "", c("AD", NA_character_))) {
+    expect_error(rduckhts_geno(con, path = path, format_fields = invalid), pattern = "format_fields")
+  }
+  expect_error(rduckhts_geno(con, path = path, format_fields = c("AD", "ad")), pattern = "duplicate")
+  expect_error(rduckhts_geno(con, path = path, format_fields = "absent"), pattern = "not declared")
+  expect_error(rduckhts_geno(con, path = path, format_fields = "GT"), pattern = "already exposed")
+  expect_error(rduckhts_geno(con, path = path, format_fields = "PS"), pattern = "already exposed")
+  clash <- fixture("bcf_format_type_clash.bcf")
+  expect_error(rduckhts_geno(con, path = clash, format_fields = "XX", decode_error_policy = "error"),
+               pattern = "FORMAT/XX")
+  for (policy in c("null", "warn")) {
+    rduckhts_geno(con, "clash", clash, format_fields = "XX", decode_error_policy = policy, overwrite = TRUE)
+    expect_true(dbGetQuery(con, "SELECT calls[1].format.XX IS NULL AS missing FROM clash")$missing)
+  }
+  expect_equal(dbGetQuery(con, sprintf(paste(
+    "SELECT count(*) AS n FROM read_geno(%s, format_fields := ['XX'], decode_error_policy := 'error')"),
+    dbQuoteString(con, clash)))$n, 1)
+  expect_equal(dbGetQuery(con, "SELECT 42 AS n")$n, 42L)
+}
+
 test_record_major_genotypes()
+test_selected_genotype_format()
