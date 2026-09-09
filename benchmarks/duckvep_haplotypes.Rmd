@@ -400,12 +400,13 @@ if (length(singleton_revisions) >= 2L) {
 }
 ```
 
-The retained-allele implementation removes a separate HGVS source-byte buffer and
-borrows prepared decoded-event geometry; raw-source HGVS still prepares its distinct
-interpretation. This workload caps that deleted buffer at only 64 bytes. Process-RSS
-differences cannot be attributed to that small native saving. Three passes on one
-machine do not establish a speedup, statistical significance or a general absence of
-regression; HGVS-enabled median time is slightly higher in this comparison.
+Singleton HGVS borrows the decoded stream's successful physical CDS projection.
+VEP's uploaded-feature interpretation and shifted-HGVS placement remain distinct;
+raw-source HGVS prepares and projects its own minimized allele. One additional borrowed
+pointer per leaf-contributor slot is included in the query workspace limit. These
+whole-process measurements do not isolate that storage cost or the projection cost.
+HGVS-enabled medians are lower in this comparison, but three passes on one machine
+do not establish statistical significance or a general absence of regression.
 Compound HGVS, raw-input omissions,
 multi-exon models and heterogeneous genomic contexts still need their own matched
 measurements. The compound replay and raw-record baselines above retain their

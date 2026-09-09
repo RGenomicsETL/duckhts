@@ -4,7 +4,8 @@
 
 - reuse the retained physical CDS projection for decoded singleton phased HGVS,
   preserving VEP uploaded-feature coordinates and separate shifted/raw-record
-  projections; test complete coding views across strands, exon layouts and CDS phases
+  projections; test complete coding views across strands, exon layouts and CDS phases.
+  Matched singleton benchmarks preserve full outputs and retain per-revision results
 
 - reuse retained source alleles and prepared decoded-event geometry for singleton
   phased HGVS; raw-record replay retains its distinct full-span interpretation.
