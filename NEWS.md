@@ -2,6 +2,14 @@
 
 # duckhts 1.5.1.9000
 
+- record selected-FORMAT measurements after the buffer-ownership fix: all 18 GIAB
+  runs preserve their denominators and pass complete output comparisons; medians
+  are 1–2% higher than the nearest identical workload
+
+- record the one-draw short/long CDS diagnostic: 6,072 models, 36,432 sample/file
+  lanes and zero comparison failures; retain the default-budget failure, its
+  byte-identical higher-budget retry and the one-cell failure-control receipt
+
 - preserve numeric, genotype and string FORMAT buffers when HTSlib allocation
   fails, with checked sample-width arithmetic and unchanged caller ownership;
   shared readers rely on the dependency's tested failure contract

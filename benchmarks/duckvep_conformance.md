@@ -1037,6 +1037,47 @@ structural composition and complete phased SO/HGVS require their own
 evidence; the publication failures below are not waived by these
 diagnostic comparisons.
 
+### Short and long CDS diagnostics
+
+| run_kind         | max_alignment_cells | profiles | records | intended_sample_file_lanes | carriers | failures | controls_rejected |
+|:-----------------|--------------------:|---------:|--------:|---------------------------:|---------:|---------:|------------------:|
+| default_limit    |            16777216 |     6072 |   22464 |                      36432 |       NA |       NA |                NA |
+| exact_retry      |            67108864 |     6072 |   22464 |                      36432 |    36432 |        0 |                42 |
+| capacity_control |                   1 |     2040 |   14400 |                      12240 |       NA |       NA |                NA |
+
+These are **local diagnostics, not source-bound release certificates**.
+The [receipt
+ledger](../test/duckvep/conformance/data/haplotype_length_history.csv)
+names the source revisions, measured binary hash and retained inputs,
+observations and comparisons. The initial query error is a retrospective
+capture from its terminal log and retained files, not a completed runner
+receipt. Missing comparison counts in the two aborted runs mean **not
+computed**, not zero failures.
+
+The one-draw length cohort crosses CDS lengths 36/37/38,
+2,047/2,048/2,049 and 6,143/6,144/6,145 with all 504 exon/UTR geometry
+cells. The 4,536 models use the registered reference’s ATG start,
+repeated internal codons and a raw TAA suffix; partial terminal codons
+remain in the comparison. The 1,536 fixed-model cases remain included.
+Source e58f18ac3820c298af11694ee09282ecae93a01e compares complete
+CDS/protein, sample counts, input provenance, source mapping, reference
+CDS and per-lane applied-source identities for all 6,072 models and
+36,432 sample/file lanes. All seven failure counts are zero, and all 42
+corruption controls pass.
+
+At the default 16,777,216-cell limit, transcript 4,561 requires
+32,274,432 cells for exact CDS traceback and the query fails. The
+successful retry explicitly uses 67,108,864 cells per sequence axis with
+byte-identical generated inputs. It does not drop records, omit
+differences or substitute approximate alignment. The separate one-cell
+control fails at a 26,969-cell requirement and records the executed SQL,
+native error and full input/oracle hashes without a comparison verdict.
+
+This generated standard-code cohort does not estimate a population error
+rate or certify arbitrary reference models, grouped upstream flags,
+phase sets, structural composition or complete phased SO/HGVS. The
+grouped-metadata publication failures below remain unresolved.
+
 ### Repeated-model publication audit
 
 |     seed | profiles | observed_carriers | failures | published_oracle_disagreements | publication_pass |
