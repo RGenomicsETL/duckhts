@@ -2,6 +2,11 @@
 
 # duckhts 1.5.1.9000
 
+- retain original VCF genotype spelling with read_geno(raw_gt := true), including
+  leading phase markers and missing alleles; selected calls borrow worker-local
+  source spans until output materialization. BCF rejects the option because it
+  does not retain original GT text; the default typed call schema is unchanged
+
 - initialize length-delimited native translation fixtures as byte arrays for
   strict Clang builds, preserving their exact input lengths and test assertions
 

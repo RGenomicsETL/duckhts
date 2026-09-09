@@ -30,6 +30,7 @@ typedef struct {
     duckhts_bcf_decode_policy_t policy;
     int decompression_threads;
     int non_reference_only;
+    int raw_gt;
     int catalog;
     geno_format_field_t *fields;
     int field_count;
@@ -41,6 +42,7 @@ typedef struct {
     bcf1_t *record;
     duckhts_bcf_genotypes_t genotypes;
     duckhts_bcf_format_t *formats;
+    duckhts_bcf_gt_span_t *raw_gt;
     int format_count;
     idx_t columns[GENO_COLUMNS];
     idx_t column_count;
@@ -71,6 +73,7 @@ static void geno_local_destroy(void *data) {
     duckdb_free(local->formats);
     if (local->record) bcf_destroy(local->record);
     duckhts_bcf_scan_close(&local->scan);
+    duckdb_free(local->raw_gt);
     duckdb_free(local);
 }
 
@@ -151,16 +154,26 @@ cleanup:
 static duckdb_logical_type geno_calls_type(const geno_bind_t *bind) {
     duckdb_logical_type integer = duckdb_create_logical_type(DUCKDB_TYPE_INTEGER);
     duckdb_logical_type boolean = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
-    duckdb_logical_type children[] = {
+    duckdb_logical_type children[6] = {
         duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER),
         duckdb_create_list_type(integer), duckdb_create_list_type(boolean),
-        duckdb_create_logical_type(DUCKDB_TYPE_BIGINT), bind->format_type
+        duckdb_create_logical_type(DUCKDB_TYPE_BIGINT)
     };
-    const char *names[] = {"sample_index", "alleles", "phase_before", "phase_set", "format"};
-    duckdb_logical_type call = duckdb_create_struct_type(children, names, bind->field_count ? 5 : 4);
+    const char *names[6] = {"sample_index", "alleles", "phase_before", "phase_set"};
+    int count = 4;
+    if (bind->field_count) {
+        names[count] = "format";
+        children[count++] = bind->format_type;
+    }
+    if (bind->raw_gt) {
+        names[count] = "raw_gt";
+        children[count++] = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    }
+    duckdb_logical_type call = duckdb_create_struct_type(children, names, count);
     duckdb_logical_type calls = duckdb_create_list_type(call);
     duckdb_destroy_logical_type(&call);
     for (int i = 0; i < 4; i++) duckdb_destroy_logical_type(&children[i]);
+    if (bind->raw_gt) duckdb_destroy_logical_type(&children[count - 1]);
     duckdb_destroy_logical_type(&integer);
     duckdb_destroy_logical_type(&boolean);
     return calls;
@@ -239,10 +252,18 @@ static void geno_bind(duckdb_bind_info info, int catalog) {
         value = duckdb_bind_get_named_parameter(info, "non_reference_only");
         bind->non_reference_only = value && !duckdb_is_null_value(value) && duckdb_get_bool(value);
         if (value) duckdb_destroy_value(&value);
+        value = duckdb_bind_get_named_parameter(info, "raw_gt");
+        bind->raw_gt = value && !duckdb_is_null_value(value) && duckdb_get_bool(value);
+        if (value) duckdb_destroy_value(&value);
     }
     if (!duckhts_bcf_scan_open(&metadata, bind->path, NULL, 0, DUCKHTS_HTS_IO_PROFILE_METADATA,
             catalog ? "read_bcf_samples" : "read_geno", error, sizeof(error)) ||
         !duckhts_bcf_samples_build(&bind->samples, metadata.hdr, selector, error, sizeof(error))) goto fail;
+    if (bind->raw_gt && hts_get_format(metadata.fp)->format != vcf) {
+        snprintf(error, sizeof(error),
+            "read_geno: raw_gt requires VCF input; BCF does not retain original GT text");
+        goto fail;
+    }
     if (!catalog && !geno_bind_format(info, bind, metadata.hdr, error, sizeof(error))) goto fail;
     /* A full scan always follows the input stream, independent of index
      * availability. Only explicit regions need an immutable index snapshot. */
@@ -307,6 +328,17 @@ static void geno_local_init(duckdb_init_info info) {
                 bind->region_count ? DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION : DUCKHTS_HTS_IO_PROFILE_STREAMING,
                 "read_geno", error, sizeof(error)) ||
             !duckhts_bcf_samples_apply(&bind->samples, local->scan.hdr, error, sizeof(error))) goto fail;
+        if (bind->raw_gt && hts_get_format(local->scan.fp)->format != vcf) {
+            snprintf(error, sizeof(error),
+                "read_geno: raw_gt requires VCF input; BCF does not retain original GT text");
+            goto fail;
+        }
+        if (bind->raw_gt && local->needs_calls && bind->samples.count) {
+            local->raw_gt = duckhts_alloc_array(bind->samples.count, sizeof(*local->raw_gt));
+            if (!local->raw_gt) goto fail;
+            local->scan.raw_samples = &bind->samples;
+            local->scan.raw_gt = local->raw_gt;
+        }
         local->record = bcf_init();
         if (!local->record) {
             snprintf(error, sizeof(error), "read_geno: out of memory allocating BCF/VCF record");
@@ -329,7 +361,8 @@ static void geno_set_null(duckdb_vector vector, idx_t row) {
 
 static int geno_write_calls(duckdb_vector vector, idx_t row, const geno_bind_t *bind,
                             const duckhts_bcf_genotypes_t *values,
-                            const duckhts_bcf_format_t *formats) {
+                            const duckhts_bcf_format_t *formats,
+                            const duckhts_bcf_scan_t *scan) {
     idx_t count = 0, slots = 0;
     for (int i = 0; i < values->samples; i++) {
         const int32_t *gt = values->gt_stride ? values->gt + (size_t)i * values->gt_stride : NULL;
@@ -347,6 +380,7 @@ static int geno_write_calls(duckdb_vector vector, idx_t row, const geno_bind_t *
     duckdb_vector phase_list = duckdb_struct_vector_get_child(call, 2);
     duckdb_vector ps = duckdb_struct_vector_get_child(call, 3);
     duckdb_vector extra = bind->field_count ? duckdb_struct_vector_get_child(call, 4) : NULL;
+    duckdb_vector raw = bind->raw_gt ? duckdb_struct_vector_get_child(call, 4 + (bind->field_count != 0)) : NULL;
     if (!duckhts_list_extend(allele_list, slots, &alleles) ||
         !duckhts_list_extend(phase_list, slots, &phases)) return 0;
     /* No child data access until all three reserves succeed. */
@@ -384,6 +418,12 @@ static int geno_write_calls(duckdb_vector vector, idx_t row, const geno_bind_t *
             if (!duckhts_bcf_format_write(duckdb_struct_vector_get_child(extra, f), output_call,
                     &formats[f], field->type, field->is_list, i)) return 0;
         }
+        if (raw) {
+            const duckhts_bcf_gt_span_t *gt_text = &scan->raw_gt[i];
+            if (gt_text->offset == SIZE_MAX) geno_set_null(raw, output_call);
+            else duckdb_vector_assign_string_element_len(raw, output_call,
+                scan->line.s + gt_text->offset, gt_text->length);
+        }
         output_call++;
     }
     ((duckdb_list_entry *)duckdb_vector_get_data(vector))[row] = calls;
@@ -414,8 +454,11 @@ static void geno_read(duckdb_function_info info, duckdb_data_chunk output) {
             int ret = duckhts_bcf_scan_next(&local->scan, local->record);
             if (ret == -1) { local->done = 1; break; }
             if (ret < -1) {
-                snprintf(error, sizeof(error), "read_geno: failed to read BCF/VCF record from %s (htslib return %d)",
-                         bind->path, ret);
+                if (local->scan.raw_gt_error) {
+                    snprintf(error, sizeof(error), "read_geno: raw_gt %s at record_index %llu in %s",
+                        local->scan.raw_gt_error, (unsigned long long)local->next_index, bind->path);
+                } else snprintf(error, sizeof(error),
+                    "read_geno: failed to read BCF/VCF record from %s (htslib return %d)", bind->path, ret);
                 goto fail;
             }
             if (local->ordinal_exhausted) {
@@ -473,7 +516,8 @@ static void geno_read(duckdb_function_info info, duckdb_data_chunk output) {
                 if (!geno_write_alts(vector, rows, record)) goto list_error;
                 break;
             case GENO_CALLS:
-                if (!geno_write_calls(vector, rows, bind, &local->genotypes, local->formats)) goto list_error;
+                if (!geno_write_calls(vector, rows, bind, &local->genotypes, local->formats,
+                        &local->scan)) goto list_error;
                 break;
             default:
                 snprintf(error, sizeof(error), "read_geno: invalid projected column");
@@ -512,6 +556,7 @@ void register_read_geno_functions(duckdb_connection connection) {
             duckdb_table_function_add_named_parameter(function, "decode_error_policy", text);
             duckdb_table_function_add_named_parameter(function, "decompression_threads", bigint);
             duckdb_table_function_add_named_parameter(function, "non_reference_only", boolean);
+            duckdb_table_function_add_named_parameter(function, "raw_gt", boolean);
             duckdb_table_function_add_named_parameter(function, "format_fields", fields);
         }
         duckdb_table_function_set_bind(function, catalog ? geno_samples_bind : geno_read_bind);

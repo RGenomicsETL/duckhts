@@ -8,7 +8,8 @@ output:
 This measures `read_geno` on every record of the registered GIAB HG002 GRCh38
 NIST v4.2.1 benchmark VCF.gz. The single sample has declared GT, PS, AD, DP and
 GQ fields. GT/PS, +AD and +AD/DP/GQ have separate measurements; each selection
-also runs with `calls` unprojected. No record, allele or sample is filtered.
+also runs with `calls` unprojected. GT/PS additionally runs with `raw_gt := true`,
+both projected and unprojected. No record, allele or sample is filtered.
 
 Stage the input explicitly with
 `duckhtsbench::duckhts_bench_fetch("variantkey_giab_hg002_v421")`.
@@ -19,7 +20,7 @@ Render a named snapshot from the repository root:
 
 ```sh
 BENCHMARK_RMD=benchmark_genotype_format.Rmd \
-BENCHMARK_REPORT=benchmark_genotype_format_review.md taskset -c 2 make bench-snapshot
+BENCHMARK_REPORT=benchmark_genotype_format_raw_gt.md taskset -c 2 make bench-snapshot
 ```
 
 The target uses this Rmd and refuses to overwrite an existing report.
@@ -27,8 +28,9 @@ The target uses this Rmd and refuses to overwrite an existing report.
 are snapshots of this same workload rendered with those `output_file` names;
 each report records its measured source revision and extension hash. Reproducing
 a historical measurement requires its named source and binary, not the current
-checkout relabelled with an older filename. Input identity, denominators, all six
-projection layouts and corruption controls stay the same for comparisons.
+checkout relabelled with an older filename. Input identity, default-case denominators,
+all six default projection layouts and their four corruption controls stay the same
+for comparisons. The optional raw-GT cases and source-byte comparisons are separate.
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
@@ -61,11 +63,14 @@ stopifnot(identical(hts(c("query", "-l", input)), "HG002"),
 oracle <- genotype_format_oracle(input)
 cases <- expand.grid(selection=c("GT_PS","GT_PS_AD","GT_PS_AD_DP_GQ"),
                       calls_projected=c(TRUE,FALSE), stringsAsFactors=FALSE)
+cases$raw_gt <- FALSE
+cases <- rbind(cases, data.frame(selection="GT_PS", calls_projected=c(TRUE,FALSE), raw_gt=TRUE))
 selections <- list(GT_PS=character(), GT_PS_AD="AD", GT_PS_AD_DP_GQ=c("AD","DP","GQ"))
 directory <- tempfile("genotype-format-report-")
 dir.create(directory)
 results <- list()
-snapshots <- setNames(character(nrow(cases)), paste(cases$selection, cases$calls_projected))
+snapshots <- setNames(character(nrow(cases)), paste(cases$selection, cases$calls_projected,
+  ifelse(cases$raw_gt, "raw_GT", "default")))
 repetitions <- as.integer(Sys.getenv("GENO_FORMAT_RUNS", "3"))
 stopifnot(repetitions >= 1L)
 for (repetition in seq_len(repetitions)) {
@@ -76,7 +81,7 @@ for (repetition in seq_len(repetitions)) {
     snapshot <- if (repetition == 1L) file.path(directory, paste0(i,".parquet")) else ""
     if (nzchar(snapshot)) snapshots[i] <- snapshot
     observed <- callr::r(genotype_format_run, args=list(extension=extension, input=input,
-      fields=fields, calls_projected=case$calls_projected, snapshot=snapshot))
+      fields=fields, calls_projected=case$calls_projected, snapshot=snapshot, raw_gt=case$raw_gt))
     expected <- oracle
     if (!case$calls_projected) expected[names(expected)!="records"] <- 0
     if (!"AD" %in% fields) expected[c("ad_slots","ad_values")] <- 0
@@ -87,7 +92,7 @@ for (repetition in seq_len(repetitions)) {
   }
 }
 results <- do.call(rbind,results)
-for (rows in split(results, interaction(results$selection,results$calls_projected)))
+for (rows in split(results, interaction(results$selection,results$calls_projected,results$raw_gt), drop=TRUE))
   stopifnot(length(unique(rows$checksum)) == 1L)
 
 # Complete duplicate-preserving comparisons are outside every measurement.
@@ -122,6 +127,19 @@ for (i in which(cases$calls_projected & cases$selection != "GT_PS")) {
   stopifnot(differences == 0)
   comparisons[[length(comparisons)+1L]] <- data.frame(comparison=paste("read_bcf",cases$selection[i]),differences)
 }
+raw_snapshot <- snapshots[which(cases$raw_gt & cases$calls_projected)]
+raw_result <- dbSendQuery(con, paste("SELECT record_index,c.sample_index,c.raw_gt AS raw_gt FROM",
+  table(raw_snapshot), "g,unnest(calls) u(c) ORDER BY record_index,c.sample_index"))
+raw_oracle <- tryCatch(genotype_format_raw_compare(input,raw_result),
+                       finally=dbClearResult(raw_result))
+stopifnot(raw_oracle[["records"]] == oracle[["records"]], raw_oracle[["differences"]] == 0)
+for (i in seq_len(nrow(results))) {
+  expected <- raw_oracle[c("raw_gt_values","raw_gt_bytes")]
+  if (!results$raw_gt[i] || !results$calls_projected[i]) expected[] <- 0
+  stopifnot(identical(as.numeric(results[i,names(expected)]),as.numeric(expected)))
+}
+comparisons[[length(comparisons)+1L]] <- data.frame(comparison="original VCF raw GT",
+  differences=unname(raw_oracle[["differences"]]))
 # The same comparator must reject dropped records, altered values and missing-slot compaction.
 controls <- c(
   genotype_format_difference(con,"SELECT 1 AS id, [10,NULL,5] AS AD","SELECT 1 AS id, [10,5] AS AD"),
@@ -129,6 +147,15 @@ controls <- c(
   genotype_format_difference(con,"SELECT 15 AS DP","SELECT 14 AS DP"),
   genotype_format_difference(con,"SELECT NULL::INTEGER AS GQ","SELECT 0 AS GQ"))
 stopifnot(all(controls > 0))
+raw_control <- genotype_format_raw_gt(rep("chr1\t1\tdup\tA\tC\t.\tPASS\t.\tGT\t|0/1",2L))
+raw_mutated <- raw_missing <- raw_control
+raw_mutated$raw_gt[1] <- "0/1"
+raw_missing$raw_gt[1] <- NA_character_
+raw_controls <- c(
+  genotype_format_raw_difference(raw_control,raw_mutated),
+  genotype_format_raw_difference(raw_control,raw_control[-1L,]),
+  genotype_format_raw_difference(raw_control,raw_missing))
+stopifnot(all(raw_controls > 0))
 comparisons <- do.call(rbind,comparisons)
 dbDisconnect(con,shutdown=TRUE)
 unlink(directory,recursive=TRUE)
@@ -146,6 +173,8 @@ cat(system2("taskset",c("-pc",Sys.getpid()),stdout=TRUE),"\n")
 cat(system2("sh",c("-c",shQuote("lscpu | sed -n '/Model name:/p'")),stdout=TRUE),"\n")
 cat("DuckDB threads: 1; scan handles: 1; HTSlib decompression workers: 0; repetitions:",repetitions,"\n")
 knitr::kable(data.frame(denominator=names(oracle),count=as.numeric(oracle)))
+knitr::kable(data.frame(source_field=c("raw_gt_values","raw_gt_bytes"),
+  count=as.numeric(raw_oracle[c("raw_gt_values","raw_gt_bytes")])))
 ```
 
 Input denominators come from complete `bcftools view -H` records in bounded R
@@ -154,6 +183,10 @@ AD values count only nonmissing elements. DP/GQ values and PS values count nonmi
 scalars. An absent AD list has no child slots. An emitted scalar field occupies one
 slot per call even when NULL. No PS throughput claim is made when its observed count
 is zero.
+Raw-GT values and bytes come directly from the registered gzip-compressed VCF in
+65,536-record R batches, without HTSlib rendering. A literal `.` is a present
+source string; absent GT is NULL. Source byte counts exclude separators between
+FORMAT fields and the terminating line break.
 
 ## Materialization cost
 
@@ -166,29 +199,64 @@ after CTAS, not first-party workspace size. Database bytes are measured after ch
 Case order reverses on alternate repetitions; input data is warm in the OS cache.
 
 ```{r timings}
-summary <- aggregate(cbind(elapsed,cpu,peak_rss_kib,database_bytes) ~ selection+calls_projected,results,median)
-counts <- unique(results[c("selection","calls_projected","records","calls","gt_slots","extra_slots",
-                           "ad_values","dp_values","gq_values")])
-summary <- merge(summary,counts,by=c("selection","calls_projected"),sort=FALSE)
+summary <- aggregate(cbind(elapsed,cpu,peak_rss_kib,database_bytes) ~ selection+calls_projected+raw_gt,results,median)
+counts <- unique(results[c("selection","calls_projected","raw_gt","records","calls","gt_slots","extra_slots",
+                           "ad_values","dp_values","gq_values","raw_gt_values","raw_gt_bytes")])
+summary <- merge(summary,counts,by=c("selection","calls_projected","raw_gt"),sort=FALSE)
 knitr::kable(summary,digits=3)
-knitr::kable(results[c("repetition","selection","calls_projected","elapsed","cpu","peak_rss_kib")],digits=3)
+knitr::kable(results[c("repetition","selection","calls_projected","raw_gt","elapsed","cpu","peak_rss_kib")],digits=3)
 ```
 
 ## Complete comparisons and scope
 
-All six layouts preserve site fields and scan-local record ordinals. Projected
+All eight layouts preserve site fields and scan-local record ordinals. Projected
 layouts preserve the complete default GT/PS call state. Selected AD/DP/GQ values
 are compared with projected `read_bcf` across every record using `EXCEPT ALL`
 in both directions. Per-pass complete-row fingerprints must also agree within
 each layout. Four corruption controls test that missing-slot compaction, dropped
 duplicates, changed depth and NULL-to-zero substitution are rejected.
+The raw-GT snapshot additionally compares every call against the original VCF
+stream by physical record ordinal and sample index. Three separate controls reject
+a changed leading separator, a dropped physical duplicate and a missing source string.
+This single-sample VCF workload does not measure BCF, where original GT spelling is
+unavailable, or rare partial-phase configurations.
 
 ```{r comparisons}
 knitr::kable(comparisons)
 cat("Rejected corruption controls:",length(controls),"\n")
+cat("Rejected raw-GT corruption controls:",length(raw_controls),"\n")
 ```
 
-This is the selected-FORMAT baseline, not a pre-change/post-change speedup claim.
+## Matched default-case comparison
+
+The nearest identical default-case baseline is
+[benchmark_genotype_format_review.md](benchmark_genotype_format_review.md).
+The comparison requires the same registered input hash, file size and all eight
+default input denominators. Only the six default layouts are compared across
+revisions. Both reports identify their machine, affinity, thread counts and
+repetitions; percentage changes are descriptive, not significance tests or a
+general no-regression claim.
+
+```{r default-comparison}
+baseline <- "benchmarks/benchmark_genotype_format_review.md"
+cat(basename(baseline),":",grep("Source revision:",readLines(baseline),value=TRUE),"\n")
+knitr::kable(genotype_format_comparison(baseline,summary,oracle,artifact,input),digits=3)
+```
+
+The raw-GT cases have no identical earlier measurement. Their within-revision
+comparison below measures the additional optional work relative to GT/PS on the
+same input, separately for projected calls and unprojected calls.
+
+```{r raw-comparison}
+raw_cost <- merge(summary[summary$selection == "GT_PS" & !summary$raw_gt,
+                         c("calls_projected","elapsed","peak_rss_kib")],
+                  summary[summary$raw_gt,c("calls_projected","elapsed","peak_rss_kib")],
+                  by="calls_projected",suffixes=c("_default","_raw_gt"))
+stopifnot(nrow(raw_cost) == 2L)
+raw_cost$elapsed_change_percent <- 100 * (raw_cost$elapsed_raw_gt / raw_cost$elapsed_default - 1)
+knitr::kable(raw_cost,digits=3)
+```
+
 The nearest prior [GIAB full-reader report](benchmark_bcf_shared_scan.md) reads
 all declared columns with `read_bcf`; it does not measure this nested schema or
 projection set. The [matched HPRC report](benchmark_genotypes_scalar_counts.md)

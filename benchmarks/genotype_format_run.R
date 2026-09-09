@@ -50,8 +50,74 @@ genotype_format_oracle <- function(input) {
   counts
 }
 
+# One-sample source spelling, including an optional leading separator. Offsets are
+# physical record ordinals: equal site fields or equal GT strings do not collapse.
+genotype_format_raw_gt <- function(lines, first_record = 0) {
+  if (!length(lines)) return(data.frame(record_index = numeric(), sample_index = integer(),
+                                        raw_gt = character()))
+  rows <- strsplit(paste0(lines, "\t"), "\t", fixed = TRUE)
+  stopifnot(all(lengths(rows) == 10L))
+  gt <- vapply(rows, function(row) {
+    format <- strsplit(row[[9L]], ":", fixed = TRUE)[[1L]]
+    stopifnot(sum(format == "GT") <= 1L)
+    index <- match("GT", format)
+    if (is.na(index)) return(NA_character_)
+    values <- strsplit(paste0(row[[10L]], ":"), ":", fixed = TRUE)[[1L]]
+    if (index > length(values)) return(NA_character_)
+    values[[index]]
+  }, character(1))
+  data.frame(record_index = first_record + seq_along(lines) - 1,
+             sample_index = rep.int(0L, length(lines)), raw_gt = gt,
+             stringsAsFactors = FALSE)
+}
+
+genotype_format_raw_difference <- function(expected, observed) {
+  stopifnot(identical(names(expected), names(observed)))
+  count <- min(nrow(expected), nrow(observed))
+  different <- rep.int(FALSE, count)
+  for (field in names(expected)) {
+    left <- expected[[field]][seq_len(count)]
+    right <- observed[[field]][seq_len(count)]
+    if (field != "raw_gt") {
+      left <- as.numeric(left)
+      right <- as.numeric(right)
+    }
+    different <- different | (is.na(left) != is.na(right)) |
+      (!is.na(left) & !is.na(right) & left != right)
+  }
+  abs(nrow(expected) - nrow(observed)) + sum(different)
+}
+
+# The gzip stream is the registered original VCF, never bcftools-rendered text.
+# The result cursor must be ordered by record_index and sample_index. Both sides
+# retain at most batch_size rows in R; DuckDB owns snapshot ordering and spill.
+genotype_format_raw_compare <- function(input, result, batch_size = 65536L) {
+  stopifnot(length(batch_size) == 1L, !is.na(batch_size), batch_size >= 1L)
+  connection <- gzfile(input, "rt")
+  on.exit(close(connection))
+  counts <- c(records = 0, raw_gt_values = 0, raw_gt_bytes = 0, differences = 0)
+  repeat {
+    lines <- readLines(connection, n = batch_size)
+    if (!length(lines)) break
+    lines <- lines[!startsWith(lines, "#")]
+    if (!length(lines)) next
+    expected <- genotype_format_raw_gt(lines, counts[["records"]])
+    observed <- DBI::dbFetch(result, n = nrow(expected))
+    counts["records"] <- counts["records"] + nrow(expected)
+    counts["raw_gt_values"] <- counts["raw_gt_values"] + sum(!is.na(expected$raw_gt))
+    counts["raw_gt_bytes"] <- counts["raw_gt_bytes"] + sum(nchar(expected$raw_gt, type = "bytes"), na.rm = TRUE)
+    counts["differences"] <- counts["differences"] + genotype_format_raw_difference(expected, observed)
+  }
+  repeat {
+    extra <- DBI::dbFetch(result, n = batch_size)
+    if (!nrow(extra)) break
+    counts["differences"] <- counts["differences"] + nrow(extra)
+  }
+  counts
+}
+
 # One CTAS in a fresh process. Snapshots/checksums/denominators are outside timing.
-genotype_format_run <- function(extension, input, fields, calls_projected, snapshot = "") {
+genotype_format_run <- function(extension, input, fields, calls_projected, snapshot = "", raw_gt = FALSE) {
   directory <- tempfile("genotype-format-run-")
   dir.create(directory)
   on.exit(unlink(directory, recursive = TRUE))
@@ -67,13 +133,15 @@ genotype_format_run <- function(extension, input, fields, calls_projected, snaps
   selection <- paste(vapply(fields, quote, character(1)), collapse = ",")
   columns <- if (calls_projected) "*" else "record_index, CHROM, POS, ID, REF, ALT"
   sql <- sprintf(paste("CREATE TABLE result AS SELECT %s FROM read_geno(%s,",
-    "format_fields := [%s], scan_mode := 'sequential', decompression_threads := 0,",
-    "decode_error_policy := 'error')"), columns, quote(input), selection)
+    "%sformat_fields := [%s], scan_mode := 'sequential', decompression_threads := 0,",
+    "decode_error_policy := 'error')"), columns, quote(input),
+    if (raw_gt) "raw_gt := true, " else "", selection)
   elapsed <- system.time(DBI::dbExecute(con, sql))
   status <- readLines("/proc/self/status")
   rss <- as.numeric(sub("^VmHWM:\\s+([0-9]+).*", "\\1", status[grepl("^VmHWM:", status)]))
   counts <- c(records = query("SELECT count(*) AS n FROM result")$n, calls = 0, gt_slots = 0,
-              ps_values = 0, ad_slots = 0, ad_values = 0, dp_values = 0, gq_values = 0)
+              ps_values = 0, ad_slots = 0, ad_values = 0, dp_values = 0, gq_values = 0,
+              raw_gt_values = 0, raw_gt_bytes = 0)
   ordinals <- query("SELECT min(record_index) AS first, max(record_index) AS last, count(DISTINCT record_index) AS n FROM result")
   stopifnot(ordinals$first == 0, ordinals$last == counts["records"] - 1,
             ordinals$n == counts["records"])
@@ -82,6 +150,11 @@ genotype_format_run <- function(extension, input, fields, calls_projected, snaps
     common <- query(paste("SELECT count(*) AS calls, sum(len(c.alleles)) AS gt_slots,",
                           "count(c.phase_set) AS ps_values FROM expanded"))
     counts[names(common)] <- unlist(common, use.names = FALSE)
+    if (raw_gt) {
+      raw <- query(paste("SELECT count(c.raw_gt) AS raw_gt_values,",
+        "coalesce(sum(octet_length(encode(c.raw_gt))),0) AS raw_gt_bytes FROM expanded"))
+      counts[names(raw)] <- unlist(raw, use.names = FALSE)
+    }
     if ("AD" %in% fields) {
       ad <- query("SELECT coalesce(sum(len(c.format.AD)),0) AS ad_slots, coalesce(sum(list_count(c.format.AD)),0) AS ad_values FROM expanded")
       counts[names(ad)] <- unlist(ad, use.names = FALSE)
@@ -105,6 +178,40 @@ genotype_format_difference <- function(con, left, right) {
   sql <- sprintf(paste("SELECT count(*) AS n FROM (((%s) EXCEPT ALL (%s))",
                        "UNION ALL ((%s) EXCEPT ALL (%s)))"), left, right, right, left)
   as.numeric(DBI::dbGetQuery(con, sql)$n)
+}
+
+genotype_format_comparison <- function(baseline, current, oracle, artifact, input) {
+  lines <- readLines(baseline)
+  identity <- grep("Input artifact:", lines, value = TRUE)
+  stopifnot(length(identity) == 1L, grepl(artifact, identity, fixed = TRUE),
+            grepl(as.character(file.info(input)$size), identity, fixed = TRUE),
+            grepl(unname(tools::md5sum(input)), identity, fixed = TRUE))
+  table <- function(pattern) {
+    first <- grep(pattern, lines)
+    stopifnot(length(first) == 1L)
+    last <- first + 2L
+    while (last <= length(lines) && startsWith(lines[last], "|")) last <- last + 1L
+    split <- function(line) trimws(strsplit(substring(line, 2, nchar(line) - 1), "|", fixed = TRUE)[[1L]])
+    result <- as.data.frame(do.call(rbind, lapply(lines[seq.int(first + 2L, last - 1L)], split)))
+    names(result) <- split(lines[first])
+    result
+  }
+  counts <- table("^\\| denominator +\\| +count +\\|")
+  stopifnot(identical(counts$denominator, names(oracle)),
+            identical(as.numeric(counts$count), as.numeric(oracle)))
+  previous <- table("^\\| selection +\\| calls_projected +\\|")
+  previous$calls_projected <- as.logical(previous$calls_projected)
+  if ("raw_gt" %in% names(previous)) previous <- previous[!as.logical(previous$raw_gt),]
+  fields <- c("selection", "calls_projected", "elapsed", "peak_rss_kib")
+  result <- merge(previous[fields], current[!current$raw_gt, fields],
+                  by = c("selection", "calls_projected"), suffixes = c("_baseline", "_current"))
+  stopifnot(nrow(previous) == 6L, nrow(result) == 6L,
+            !anyDuplicated(result[c("selection", "calls_projected")]))
+  for (field in setdiff(names(result), c("selection", "calls_projected")))
+    result[[field]] <- as.numeric(result[[field]])
+  stopifnot(!anyNA(result), all(result$elapsed_baseline > 0))
+  result$elapsed_change_percent <- 100 * (result$elapsed_current / result$elapsed_baseline - 1)
+  result
 }
 
 # Read the exact rendered cohort table; require identical registered inputs and

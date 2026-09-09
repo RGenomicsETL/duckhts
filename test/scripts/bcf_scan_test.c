@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <htslib/bgzf.h>
 #include <htslib/hts_log.h>
 #include "../../src/include/bcf_scan.h"
 #include "../../src/include/bcf_genotypes.h"
@@ -147,6 +148,212 @@ static void genotypes(const char *path, const duckhts_bcf_index_t *index) {
         duckhts_bcf_samples_destroy(&selected);
         duckhts_bcf_samples_destroy(&selected);
     }
+}
+
+static void raw_genotypes(const char *directory) {
+    const char *header = "##fileformat=VCFv4.4\n"
+        "##contig=<ID=chrR,length=1000>\n"
+        "##INFO=<ID=TEXT,Number=1,Type=String,Description=\"Text\">\n"
+        "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n"
+        "##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\"Depth\">\n"
+        "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\tS2\tS3\n";
+    const char *records[] = {
+        "chrR\t10\tprefix\tA\tC,G\t.\t.\t.\tGT\t0|1\t|0|1\t/0|1/2\n",
+        "chrR\t10\tprefix\tA\tC,G\t.\t.\t.\tGT\t0|1\t|0|1\t/0|1/2\n",
+        "chrR\t20\tmixed\tA\tC,G\t.\t.\t.\tGT:DP\t|0|1/2:8\t.:.\t00|01:9\n",
+        "chrR\t30\tabsent\tA\tC,G\t.\t.\t.\tDP\t7\t.\t9\n",
+        "chrR\t40\tnone\tA\tC,G\t.\t.\t.\t.\t.\t.\t.\n",
+        "chrR\t50\tshort\tA\tC,G\t.\t.\t.\tGT:DP\t1\t./.\t0|1\n",
+        "chrR\t60\ttrailing\tA\tC,G\t.\t.\t.\tDP:GT\t5:|1/0\t7\t8:.\n"
+    };
+    const char *expected[][3] = {
+        {"0|1", "|0|1", "/0|1/2"}, {"0|1", "|0|1", "/0|1/2"},
+        {"|0|1/2", ".", "00|01"}, {NULL, NULL, NULL}, {NULL, NULL, NULL},
+        {"1", "./.", "0|1"}, {"|1/0", NULL, "."}, {"1|0", "|0/1", "."}
+    };
+    char plain[512], compressed[512], index_path[512];
+    assert(snprintf(plain, sizeof(plain), "%s/raw.vcf", directory) < (int)sizeof(plain));
+    assert(snprintf(compressed, sizeof(compressed), "%s/raw.vcf.gz", directory) < (int)sizeof(compressed));
+    assert(snprintf(index_path, sizeof(index_path), "%s/raw.csi", directory) < (int)sizeof(index_path));
+    FILE *file = fopen(plain, "wb");
+    assert(file && fputs(header, file) >= 0);
+    for (size_t i = 0; i < sizeof(records) / sizeof(*records); i++) assert(fputs(records[i], file) >= 0);
+    const char *large_prefix = "chrR\t70\tlarge\tA\tC,G\t.\t.\tTEXT=";
+    const char *large_suffix = "\tGT\t1|0\t|0/1\t.\n";
+    const size_t line_length = 131070u;
+    size_t fill = line_length - strlen(large_prefix) - strlen(large_suffix) + 1u;
+    assert(fputs(large_prefix, file) >= 0);
+    for (size_t i = 0; i < fill; i++) assert(fputc('A', file) != EOF);
+    assert(fputs(large_suffix, file) >= 0 && fclose(file) == 0);
+    file = fopen(plain, "rb");
+    BGZF *bgzf = bgzf_open(compressed, "w");
+    assert(file && bgzf);
+    char buffer[4096];
+    size_t bytes;
+    while ((bytes = fread(buffer, 1, sizeof(buffer), file)) != 0)
+        assert(bgzf_write(bgzf, buffer, bytes) == (ssize_t)bytes);
+    assert(!ferror(file) && fclose(file) == 0 && bgzf_close(bgzf) == 0);
+    assert(bcf_index_build3(compressed, index_path, 14, 0) == 0);
+    duckhts_bcf_index_t index = {0};
+    assert(duckhts_bcf_index_load(&index, vcf, compressed, index_path, 0) == 1);
+    const char *selectors[] = {NULL, "S2", "^S1", "S3,S1", ""};
+    for (int format = 0; format < 3; format++) for (int selection = 0; selection < 5; selection++) {
+        duckhts_bcf_scan_t reader = {0};
+        duckhts_bcf_samples_t samples = {0};
+        duckhts_bcf_gt_span_t spans[3];
+        char error[512];
+        assert(duckhts_bcf_scan_open(&reader, format ? compressed : plain, &index, 0,
+            DUCKHTS_HTS_IO_PROFILE_METADATA, "test", error, sizeof(error)));
+        assert(duckhts_bcf_samples_build(&samples, reader.hdr, selectors[selection], error, sizeof(error)));
+        assert(duckhts_bcf_samples_apply(&samples, reader.hdr, error, sizeof(error)));
+        reader.raw_samples = &samples;
+        reader.raw_gt = samples.count ? spans : NULL;
+        /* BGZF getline needs two spare bytes; vcf_parse needs four. The first
+         * compressed row therefore resizes after these GT offsets are captured. */
+        size_t first_capacity = strlen(records[0]) + 1u;
+        reader.line.s = malloc(first_capacity);
+        assert(reader.line.s);
+        reader.line.m = first_capacity;
+        if (format == 2) {
+            char *regions[] = {"chrR:10-40", "chrR:20-70", "chrR:10-10"};
+            assert(duckhts_bcf_scan_regions(&reader, regions, 3, error, sizeof(error)));
+        }
+        bcf1_t *record = bcf_init();
+        assert(record);
+        size_t row = 0;
+        int ret;
+        while ((ret = duckhts_bcf_scan_next(&reader, record)) >= 0) {
+            assert(row < sizeof(expected) / sizeof(*expected) && !reader.raw_gt_error);
+            if (!row && format) assert(reader.line.m > first_capacity);
+            assert(record->n_sample == (unsigned)samples.count);
+            for (int i = 0; i < samples.count; i++) {
+                const char *text = expected[row][samples.indices[i]];
+                assert((spans[i].offset == SIZE_MAX) == (text == NULL));
+                if (text) {
+                    assert(spans[i].offset < reader.line.m && spans[i].length < reader.line.m - spans[i].offset);
+                    assert(spans[i].length == strlen(text));
+                    assert(memcmp(reader.line.s + spans[i].offset, text, spans[i].length) == 0);
+                }
+            }
+            if (row == 7) assert(reader.line.m >= line_length + 4u);
+            row++;
+        }
+        assert(ret == -1 && row == sizeof(expected) / sizeof(*expected));
+        bcf_destroy(record);
+        duckhts_bcf_scan_close(&reader);
+        duckhts_bcf_samples_destroy(&samples);
+    }
+    duckhts_bcf_index_destroy(&index);
+    const char *bad[] = {
+        "chrR\t10\tbad\tA\tC\t.\t.\t.\tGT:GT\t0/1:1/1\t0/0:1/1\t1/1:0/0\n",
+        "chrR\t10\tbad\tA\tC\t.\t.\t.\tGT\t0/1\t1/1\n",
+        "chrR\t10\tbad\tA\tC\t.\t.\t.\tGT\t0/1\t1/1\t0/0\t1/1\n",
+        "chrR\t10\tbad\tA\tC\t.\t.\t.\tGT\t0/1\t1/1\tX\n",
+        "chrR\t10\tbad\tA\tC\t.\t.\t.\tGT\t0/1\t1/1\t0/0\n"
+    };
+    const char *reasons[] = {"duplicate FORMAT/GT", "sample column count", "sample columns", NULL,
+                            "embedded NUL"};
+    for (size_t i = 0; i < sizeof(bad) / sizeof(*bad); i++) {
+        file = fopen(plain, "wb");
+        assert(file && fputs(header, file) >= 0);
+        if (i == 4) {
+            size_t prefix = (size_t)(strstr(bad[i], "0/1") - bad[i]) + 1u;
+            assert(fwrite(bad[i], 1, prefix, file) == prefix && fputc('\0', file) != EOF);
+            assert(fputs(bad[i] + prefix, file) >= 0);
+        } else assert(fputs(bad[i], file) >= 0);
+        assert(fclose(file) == 0);
+        duckhts_bcf_scan_t reader = {0};
+        duckhts_bcf_samples_t samples = {0};
+        duckhts_bcf_gt_span_t spans[3];
+        char error[512];
+        assert(duckhts_bcf_scan_open(&reader, plain, NULL, 0,
+            DUCKHTS_HTS_IO_PROFILE_METADATA, "test", error, sizeof(error)));
+        assert(duckhts_bcf_samples_build(&samples, reader.hdr, NULL, error, sizeof(error)));
+        reader.raw_samples = &samples;
+        reader.raw_gt = spans;
+        bcf1_t *record = bcf_init();
+        assert(record && duckhts_bcf_scan_next(&reader, record) < -1);
+        if (reasons[i]) assert(reader.raw_gt_error && strstr(reader.raw_gt_error, reasons[i]));
+        else assert(!reader.raw_gt_error); /* Invalid GT grammar is rejected by HTSlib. */
+        bcf_destroy(record);
+        duckhts_bcf_scan_close(&reader);
+        duckhts_bcf_samples_destroy(&samples);
+    }
+    const char *text_edges[] = {
+        "chrR\t10\tedge\tA\tC,G\t.\t.\t.\tGT\t|0|1\t/0|1/2\t.\r\n",
+        "chrR\t10\tedge\tA\tC,G\t.\t.\t.\tGT\t|0|1\t/0|1/2\t.",
+        "chrR\t10\tedge\tA\tC,G\t.\t.\t.\tGT\t\t/0|1/2\t.\n"
+    };
+    const char *edge_gt[] = {"|0|1", "/0|1/2", "."};
+    for (int edge = 0; edge < 3; edge++) {
+        file = fopen(plain, "wb");
+        assert(file);
+        for (const char *p = header; *p; p++) {
+            if (!edge && *p == '\n') assert(fputc('\r', file) != EOF);
+            assert(fputc(*p, file) != EOF);
+        }
+        assert(fputs(text_edges[edge], file) >= 0 && fclose(file) == 0);
+        file = fopen(plain, "rb");
+        bgzf = bgzf_open(compressed, "w");
+        assert(file && bgzf);
+        while ((bytes = fread(buffer, 1, sizeof(buffer), file)) != 0)
+            assert(bgzf_write(bgzf, buffer, bytes) == (ssize_t)bytes);
+        assert(!ferror(file) && fclose(file) == 0 && bgzf_close(bgzf) == 0);
+        assert(bcf_index_build3(compressed, index_path, 14, 0) == 0);
+        assert(duckhts_bcf_index_load(&index, vcf, compressed, index_path, 0) == 1);
+        for (int format = 0; format < 3; format++) {
+            const char *path = format ? compressed : plain;
+            duckhts_bcf_scan_t reader = {0};
+            duckhts_bcf_samples_t samples = {0};
+            duckhts_bcf_gt_span_t spans[3];
+            char error[512];
+            assert(duckhts_bcf_scan_open(&reader, path, &index, 0,
+                DUCKHTS_HTS_IO_PROFILE_METADATA, "test", error, sizeof(error)));
+            assert(duckhts_bcf_samples_build(&samples, reader.hdr, NULL, error, sizeof(error)));
+            reader.raw_samples = &samples;
+            reader.raw_gt = spans;
+            if (format == 2) {
+                char *region = "chrR:10-10";
+                assert(duckhts_bcf_scan_regions(&reader, &region, 1, error, sizeof(error)));
+            }
+            htsFile *oracle = hts_open(path, "r");
+            assert(oracle);
+            bcf_hdr_t *oracle_header = bcf_hdr_read(oracle);
+            bcf1_t *oracle_record = bcf_init(), *record = bcf_init();
+            assert(oracle_header && oracle_record && record);
+            int expected_status = bcf_read(oracle, oracle_header, oracle_record);
+            int status = duckhts_bcf_scan_next(&reader, record);
+            assert(status == expected_status && !reader.raw_gt_error);
+            if (edge == 2) assert(status < -1); /* HTSlib rejects the explicit empty GT. */
+            else {
+                assert(status >= 0 && record->n_sample == 3);
+                for (int i = 0; i < 3; i++) {
+                    assert(spans[i].offset != SIZE_MAX && spans[i].length == strlen(edge_gt[i]));
+                    assert(memcmp(reader.line.s + spans[i].offset, edge_gt[i], spans[i].length) == 0);
+                }
+                assert(duckhts_bcf_scan_next(&reader, record) == -1);
+            }
+            bcf_destroy(oracle_record);
+            bcf_hdr_destroy(oracle_header);
+            assert(hts_close(oracle) == 0);
+            bcf_destroy(record);
+            duckhts_bcf_scan_close(&reader);
+            duckhts_bcf_samples_destroy(&samples);
+        }
+        duckhts_bcf_index_destroy(&index);
+    }
+    duckhts_bcf_scan_t reader = {0};
+    duckhts_bcf_samples_t samples = {0};
+    char error[512];
+    assert(duckhts_bcf_scan_open(&reader, "test/data/bcf_scan_contigs.bcf", NULL, 0,
+        DUCKHTS_HTS_IO_PROFILE_METADATA, "test", error, sizeof(error)));
+    reader.raw_samples = &samples;
+    bcf1_t *record = bcf_init();
+    assert(record && duckhts_bcf_scan_next(&reader, record) < -1);
+    assert(reader.raw_gt_error && strstr(reader.raw_gt_error, "BCF does not retain original GT text"));
+    bcf_destroy(record);
+    duckhts_bcf_scan_close(&reader);
+    assert(unlink(plain) == 0 && unlink(compressed) == 0 && unlink(index_path) == 0);
 }
 
 static void genotype_values(void) {
@@ -591,6 +798,7 @@ int main(int argc, char **argv) {
         assert(unlink(index_path) == 0);
     }
     decode_errors();
+    raw_genotypes(argv[1]);
     genotype_values();
     format_values();
     numeric_scalars();

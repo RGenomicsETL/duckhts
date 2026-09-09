@@ -1,6 +1,11 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
 
+- expose exact original VCF genotype text with rduckhts_geno(raw_gt = TRUE),
+  retaining sample selection, physical records and explicit phase spelling;
+  absent GT is NULL and literal missing alleles remain text. BCF input rejects
+  this option; the default typed call schema is unchanged
+
 - exercise bundled haplotype list allocation failures through DBI, including
   phase preparation, nested provenance, sequence differences and query recovery
 

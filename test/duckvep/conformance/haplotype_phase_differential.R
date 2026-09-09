@@ -147,7 +147,8 @@ main <- function() {
     c("phase", "haplotype", "carriers", "haplotype_stream", "classify", "codon", "coding", "projection", "delta"), ".c"))
   probe <- file.path(out, paste0("phase_probe", .Platform$dynlib.ext))
   compiler <- Sys.getenv("CC", "cc")
-  run(compiler, c("-std=c99", "-O2", "-Wall", "-Wextra", "-Werror", "-fPIC", "-shared",
+  run(compiler, c("-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-Wpedantic",
+    "-pedantic-errors", "-fPIC", "-shared",
     "-Isrc/duckvep/kernel/src", "-Isrc/duckvep/kernel/include", probe_sources, "-o", probe), "phase_compile")
   writeLines(duckvep_evidence_command(compiler, "--version", "phase compiler"),
     file.path(out, "phase_compiler.txt"))
@@ -258,7 +259,7 @@ main <- function() {
   stopifnot(DBI::dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('phase',",
     paste(q(queries), collapse = ","), ")"))$loaded)
   DBI::dbExecute(con, paste0("CREATE TABLE records AS SELECT * FROM read_geno(",
-    q(normalizePath(file.path(out, "calls.vcf"))), ")"))
+    q(normalizePath(file.path(out, "calls.vcf"))), ",raw_gt:=true)"))
   DBI::dbExecute(con, "CREATE TABLE calls AS SELECT r.record_index*3+a.i event_index,
     m.seq_region,r.POS AS position,r.REF reference,r.ALT[a.i] alternate,a.i alt_index,
     m.transcript_index,c.sample_index,c.alleles,c.phase_before,c.phase_set
@@ -286,18 +287,26 @@ main <- function() {
       native_unavailable_carriers = sum(a$carrier_count[is.na(a$cds)]))
   })
   saveRDS(comparisons, file.path(out, "comparisons.rds"))
-  # Retain the VCF's exact GT spelling. This declared fixture has FORMAT GT:PS;
-  # decoded arrays are not a source from which the raw spelling can be recovered.
+  # The independent text read checks every physical record ordinal. Production
+  # source calls consume only the original GT retained by the VCF reader.
   text_records <- read.delim(file.path(out, "calls.vcf"), header = FALSE, comment.char = "#",
     col.names = c("chrom", "position", "id", "ref", "alt", "qual", "filter", "info", "format", "sample"),
     colClasses = "character", quote = "")
   stopifnot(all(text_records$format == "GT:PS"), nrow(text_records) == nrow(records))
   text_records$gt <- sub(":.*$", "", text_records$sample)
-  DBI::dbWriteTable(con, "source_genotypes", text_records)
+  reader_gt <- DBI::dbGetQuery(con, "SELECT record_index,CHROM,POS,ID,REF,
+    array_to_string(ALT, ',') AS alt,c.sample_index,c.raw_gt AS gt
+    FROM records,unnest(calls) u(c) ORDER BY record_index,c.sample_index")
+  stopifnot(identical(as.integer(reader_gt$record_index), seq_len(nrow(text_records)) - 1L),
+    all(reader_gt$sample_index == 0L), identical(reader_gt$CHROM, text_records$chrom),
+    identical(as.character(reader_gt$POS), text_records$position),
+    identical(reader_gt$ID, text_records$id), identical(reader_gt$REF, text_records$ref),
+    identical(reader_gt$alt, text_records$alt), identical(reader_gt$gt, text_records$gt),
+    identical(reader_gt$gt, raw_gt))
   DBI::dbExecute(con, "CREATE TABLE source_calls AS SELECT r.record_index event_index,
     m.seq_region,r.POS AS position,r.REF reference,r.ALT alternates,m.transcript_index,
-    0::UINTEGER sample_index,g.gt FROM records r JOIN models m ON m.chrom=r.CHROM
-    JOIN source_genotypes g ON g.chrom=r.CHROM AND g.position::UBIGINT=r.POS AND g.id=r.ID")
+    c.sample_index,c.raw_gt AS gt FROM records r JOIN models m ON m.chrom=r.CHROM,
+    unnest(r.calls) u(c)")
   stopifnot(DBI::dbGetQuery(con, "SELECT count(*) n FROM source_calls")$n == nrow(records))
   public_raw <- DBI::dbGetQuery(con, "SELECT * FROM duckvep_haplotypes('SELECT * FROM source_calls',
     'phase',phase_policy:='vep116_compat',input_mode:='source_records')")

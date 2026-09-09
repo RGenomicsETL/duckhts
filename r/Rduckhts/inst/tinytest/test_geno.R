@@ -304,5 +304,100 @@ test_genotype_numeric_scalars <- function() {
   expect_equal(dbGetQuery(con, "SELECT 42 AS n")$n, 42L)
 }
 
+test_original_genotype_text <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  fixture <- function(name) {
+    path <- system.file("extdata", name, package = "Rduckhts")
+    stopifnot(nzchar(path), file.exists(path))
+    path
+  }
+  text <- fixture("geno_raw_gt.vcf")
+  compressed <- tempfile("geno-raw-", fileext = ".vcf.gz")
+  repeated <- tempfile("geno-raw-chunks-", fileext = ".vcf")
+  large <- tempfile("geno-raw-large-", fileext = ".vcf")
+  on.exit(unlink(c(compressed, paste0(compressed, ".tbi"), repeated, large)), add = TRUE)
+  expect_true(rduckhts_bgzip(con, text, output_path = compressed, threads = 1L)$success)
+  expect_true(rduckhts_tabix_index(con, compressed, threads = 1L)$success)
+  expected <- data.frame(record_index = rep(0:7, each = 2L), sample_index = rep(0:1, 8L),
+    raw_gt = c("0|1", "|0|1", "/0|1/2", "|0|1/2", "/0|1/2", "|0|1/2", ".", "./.",
+               NA, NA, NA, NA, "1", "|1", "00|01", "02/00"),
+    dp = c(10L, 20L, 11L, 21L, 11L, 21L, 12L, 22L, 13L, 23L, NA, NA, NA, NA, 14L, 24L))
+  flatten <- function() dbGetQuery(con, paste(
+    "SELECT record_index::INTEGER AS record_index,c.sample_index::INTEGER AS sample_index,",
+    "c.raw_gt,c.format.DP AS dp FROM raw_calls,unnest(calls) u(c) ORDER BY record_index,sample_index"))
+  for (path in c(text, compressed)) {
+    for (mode in c("auto", "sequential")) {
+      for (selector in c("-", "S2,S1,S2", "S2", "^S1", "")) {
+        expect_true(rduckhts_geno(con, "raw_calls", path, raw_gt = TRUE, format_fields = "DP",
+          samples = selector, scan_mode = mode, decode_error_policy = "error", overwrite = TRUE))
+        selected <- if (!nzchar(selector)) expected[FALSE, ] else if (selector %in% c("S2", "^S1")) {
+          expected[expected$sample_index == 1L, ]
+        } else expected
+        rownames(selected) <- NULL
+        expect_equal(flatten(), selected)
+        expect_equal(dbGetQuery(con, "SELECT count(*) AS n FROM raw_calls")$n, 8)
+      }
+      expect_true(rduckhts_geno(con, "raw_calls", path, raw_gt = TRUE, format_fields = "DP",
+        non_reference_only = TRUE, scan_mode = mode, overwrite = TRUE))
+      sparse <- expected[expected$record_index %in% c(0:2, 6:7), ]
+      rownames(sparse) <- NULL
+      expect_equal(flatten(), sparse)
+      expect_equal(dbGetQuery(con, "SELECT count(*) AS n FROM raw_calls")$n, 8)
+    }
+    ordinary <- rduckhts_geno(con, path = path)
+    expect_equal(rduckhts_geno(con, path = path, raw_gt = FALSE), ordinary)
+    raw <- rduckhts_geno(con, path = path, raw_gt = TRUE)
+    expect_equal(names(raw$calls[[1L]]), c("sample_index", "alleles", "phase_before", "phase_set", "raw_gt"))
+    raw$calls <- lapply(raw$calls, function(calls) calls[setdiff(names(calls), "raw_gt")])
+    expect_equal(raw, ordinary)
+  }
+  expect_true(rduckhts_geno(con, "raw_calls", compressed, raw_gt = TRUE, format_fields = "DP",
+    samples = "S2", region = "chrR:20-20,chrR:20-40,chrR:40-40", decompression_threads = 2L,
+    overwrite = TRUE))
+  region_expected <- expected[expected$sample_index == 1L & expected$record_index %in% 1:4, ]
+  region_expected$record_index <- 0:3
+  rownames(region_expected) <- NULL
+  expect_equal(flatten(), region_expected)
+  expect_equal(dbGetQuery(con, "SELECT ID FROM raw_calls ORDER BY record_index")$ID,
+               c("duplicate", "duplicate", "missing", "absent_gt"))
+
+  phase <- rduckhts_geno(con, path = fixture("geno_phase_partial.vcf"), raw_gt = TRUE)
+  expect_equal(vapply(phase$calls, function(calls) calls$raw_gt, ""),
+    c("0|1/2", "/0|1/2", "|0|1/2", "1|0/2", "/1|0/2", "|1|0/2", ".|1/2", "/.|1/2",
+      "|.|1/2", "|0/1/2", "/0/1|2", "0/1|2"))
+  prefixes <- rduckhts_geno(con, path = fixture("geno_vcf44.vcf"), raw_gt = TRUE)
+  expect_equal(vapply(prefixes$calls, function(calls) calls$raw_gt[2L], ""),
+               c("|0/1", "|1", "/.|1", "/1|0|1"))
+
+  # Missing raw fields, long lines and many selected samples use independent spans.
+  seed <- readLines(text)
+  writeLines(c(seed[startsWith(seed, "#")], rep(seed[!startsWith(seed, "#")], 300L)), repeated)
+  rduckhts_geno(con, "raw_calls", repeated, raw_gt = TRUE, format_fields = "DP", overwrite = TRUE)
+  repeated_expected <- expected[rep(seq_len(nrow(expected)), 300L), ]
+  repeated_expected$record_index <- rep(0:2399, each = 2L)
+  rownames(repeated_expected) <- NULL
+  expect_equal(flatten(), repeated_expected)
+  many <- rduckhts_geno(con, path = fixture("tidy_chunk_boundary.vcf"), raw_gt = TRUE)
+  expect_equal(many$calls[[1L]]$raw_gt, rep("0/1", 2053L))
+  long_gt <- paste0(strrep("0|", 4096L), "1")
+  writeLines(c(seed[startsWith(seed, "#")], paste("chrR", 10, "long", "A", "C,G", ".", "PASS", ".",
+    "GT:DP", paste0(long_gt, ":17"), "|1:27", sep = "\t")), large)
+  long <- rduckhts_geno(con, path = large, raw_gt = TRUE, format_fields = "DP")
+  expect_equal(long$calls[[1L]]$raw_gt, c(long_gt, "|1"))
+  expect_equal(lengths(long$calls[[1L]]$alleles), c(4097L, 1L))
+  expect_equal(long$calls[[1L]]$format$DP, c(17L, 27L))
+
+  binary <- fixture("geno_calls.bcf")
+  expect_error(rduckhts_geno(con, path = binary, raw_gt = TRUE), pattern = "raw_gt requires VCF input")
+  expect_error(dbGetQuery(con, sprintf("SELECT count(*) FROM read_geno(%s,raw_gt:=true)",
+    dbQuoteString(con, binary))), pattern = "raw_gt requires VCF input")
+  for (invalid in list(NA, NULL, logical(), c(TRUE, FALSE), 1, "true")) {
+    expect_error(rduckhts_geno(con, path = text, raw_gt = invalid), pattern = "raw_gt must be TRUE or FALSE")
+  }
+  expect_equal(dbGetQuery(con, "SELECT 42 AS n")$n, 42L)
+}
+
 test_selected_genotype_format()
 test_genotype_numeric_scalars()
+test_original_genotype_text()

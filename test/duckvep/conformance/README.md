@@ -734,8 +734,10 @@ the upstream genotype sidecar. Missing REF/omitted calls have conditional no-op
 observations; undefined slots have conditional full-REF deletions. Four deliberate
 observation corruptions guard source identity, evidence and sequence status. The
 public decoded-call lane has its own verdict; its failures remain in the receipt.
-The public `source_records` lane reads original GT text and complete ALT lists from
-the same VCF fixture and checks full sequences, counts, physical-edit provenance
+The public `source_records` lane consumes original GT text retained by
+`read_geno(..., raw_gt := true)` and complete ALT lists from the same VCF fixture.
+An independent text read checks every physical record ordinal and raw GT spelling;
+it does not supply the native input. The lane checks full sequences, counts, physical-edit provenance
 and per-lane record observations separately. Exact record IDs, regions, positions
 and REF/ALT bytes are checked against the input, not just the repeated local site
 labels. This two-site, single-exon grammar does not certify overlapping source

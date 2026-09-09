@@ -49,9 +49,10 @@ prepare_geno_fixtures <- function() {
   run(c("reheader", "-h", temporary_header, "-o", payload, "test/data/geno_ps_type.bcf"))
   outputs <- c(outputs, payload)
   stopifnot(all(file.copy(outputs, "r/Rduckhts/inst/extdata", overwrite = TRUE)))
-  # Explicit VCF 4.4 phase-prefix witnesses stay textual: the locally installed
-  # bcftools encoder may implement an older VCF version than bundled HTSlib.
-  stopifnot(all(file.copy(c("test/data/geno_vcf44.vcf", "test/data/geno_phase_partial.vcf"),
+  # Lexical VCF 4.4 witnesses stay textual: HTSlib formatting can canonicalize
+  # leading phase markers and allele spelling needed by the raw-GT tests.
+  stopifnot(all(file.copy(c("test/data/geno_vcf44.vcf", "test/data/geno_phase_partial.vcf",
+    "test/data/geno_raw_gt.vcf"),
     "r/Rduckhts/inst/extdata", overwrite = TRUE)))
 }
 prepare_geno_fixtures()

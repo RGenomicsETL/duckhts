@@ -4,6 +4,14 @@
 #include "bcf_index_snapshot.h"
 #include "hts_io_tuning.h"
 
+typedef struct duckhts_bcf_samples duckhts_bcf_samples_t;
+
+/* Borrowed VCF bytes at line.s + offset; SIZE_MAX means no source GT field.
+ * A present empty field has length zero. No decoding or text reconstruction. */
+typedef struct {
+    size_t offset, length;
+} duckhts_bcf_gt_span_t;
+
 /* Zero-initialize before open. One worker owns the file, mutable header,
  * iterator and text buffer. The parsed index is borrowed and must outlive the
  * scan. Records are caller-owned, so decoded views remain valid until the
@@ -14,6 +22,13 @@ typedef struct {
     const duckhts_bcf_index_t *index;
     hts_itr_t *itr;
     kstring_t line;
+    /* Optional VCF-only capture. The caller retains the immutable sample plan
+     * and count descriptors through close. Successful next exposes exact GT
+     * spans until the next next call, even if vcf_parse resized line.s.
+     * Leave both pointers NULL to use the ordinary format reader. */
+    const duckhts_bcf_samples_t *raw_samples;
+    duckhts_bcf_gt_span_t *raw_gt;
+    const char *raw_gt_error; /* Static diagnostic for the most recent capture failure. */
     int indexed; // An empty indexed selection must never fall back to streaming.
 } duckhts_bcf_scan_t;
 
@@ -42,13 +57,13 @@ int duckhts_bcf_scan_next(duckhts_bcf_scan_t *scan, bcf1_t *record);
  * or "-" selects all, "" selects none, other strings use HTSlib's comma-list
  * / ^exclusion syntax. No sample-file interpretation or silent unknown names.
  * Zero-initialize before build; destroy owns all malloc-family storage. */
-typedef struct {
+struct duckhts_bcf_samples {
     char *selector;
     int original_count;
     int count;
     uint32_t *indices;
     char **names;
-} duckhts_bcf_samples_t;
+};
 
 int duckhts_bcf_samples_build(duckhts_bcf_samples_t *samples, const bcf_hdr_t *header,
                               const char *selector, char *error, size_t error_size);

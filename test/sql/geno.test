@@ -4,6 +4,150 @@
 
 require duckhts
 
+# Original VCF spelling is a separate field from decoded alleles/phase flags.
+statement ok
+SELECT * FROM bgzip('__WORKING_DIRECTORY__/test/data/geno_raw_gt.vcf',
+  output_path := '__WORKING_DIRECTORY__/test_geno_raw_gt.vcf.gz', keep := true, overwrite := true);
+
+statement ok
+SELECT * FROM tabix_index('__WORKING_DIRECTORY__/test_geno_raw_gt.vcf.gz', preset := 'vcf',
+  index_path := '__WORKING_DIRECTORY__/test_geno_raw_gt.vcf.gz.tbi');
+
+statement ok
+CREATE TEMP TABLE geno_raw_expected(record_index UBIGINT, sample_index UINTEGER, raw_gt VARCHAR, dp INTEGER);
+
+statement ok
+INSERT INTO geno_raw_expected VALUES
+ (0,0,'0|1',10),(0,1,'|0|1',20),
+ (1,0,'/0|1/2',11),(1,1,'|0|1/2',21),
+ (2,0,'/0|1/2',11),(2,1,'|0|1/2',21),
+ (3,0,'.',12),(3,1,'./.',22),
+ (4,0,NULL,13),(4,1,NULL,23),(5,0,NULL,NULL),(5,1,NULL,NULL),
+ (6,0,'1',NULL),(6,1,'|1',NULL),(7,0,'00|01',14),(7,1,'02/00',24);
+
+foreach name test/data/geno_raw_gt.vcf test_geno_raw_gt.vcf.gz
+
+foreach mode auto sequential
+
+query I
+WITH observed AS (
+ SELECT record_index,c.sample_index,c.raw_gt,c.format.DP AS dp
+ FROM read_geno('__WORKING_DIRECTORY__/${name}', raw_gt := true, format_fields := ['DP'],
+                scan_mode := '${mode}', decode_error_policy := 'error'),unnest(calls) u(c)
+)
+SELECT count(*) FROM ((FROM observed EXCEPT ALL FROM geno_raw_expected)
+ UNION ALL (FROM geno_raw_expected EXCEPT ALL FROM observed));
+----
+0
+
+query I
+WITH observed AS (
+ SELECT record_index,c.sample_index,c.raw_gt
+ FROM read_geno('__WORKING_DIRECTORY__/${name}', raw_gt := true, samples := 'S2,S1,S2',
+                scan_mode := '${mode}'),unnest(calls) u(c)
+), expected AS (SELECT record_index,sample_index,raw_gt FROM geno_raw_expected)
+SELECT count(*) FROM ((FROM observed EXCEPT ALL FROM expected)
+ UNION ALL (FROM expected EXCEPT ALL FROM observed));
+----
+0
+
+query I
+WITH observed AS (
+ SELECT record_index,c.sample_index,c.raw_gt
+ FROM read_geno('__WORKING_DIRECTORY__/${name}', raw_gt := true, samples := '^S1',
+                scan_mode := '${mode}'),unnest(calls) u(c)
+), expected AS (SELECT record_index,sample_index,raw_gt FROM geno_raw_expected WHERE sample_index=1)
+SELECT count(*) FROM ((FROM observed EXCEPT ALL FROM expected)
+ UNION ALL (FROM expected EXCEPT ALL FROM observed));
+----
+0
+
+query II
+SELECT count(*),sum(len(calls)) FROM read_geno('__WORKING_DIRECTORY__/${name}',
+ raw_gt := true, samples := '', scan_mode := '${mode}');
+----
+8	0
+
+query II
+SELECT count(*),sum(len(calls)) FROM read_geno('__WORKING_DIRECTORY__/${name}',
+ raw_gt := true, non_reference_only := true, scan_mode := '${mode}');
+----
+8	10
+
+# Materialization copies the source text without changing decoded fields.
+query I
+WITH observed AS (
+ SELECT record_index,c.sample_index,c.alleles,c.phase_before,c.phase_set
+ FROM read_geno('__WORKING_DIRECTORY__/${name}', raw_gt := true, scan_mode := '${mode}'),unnest(calls) u(c)
+), expected AS (
+ SELECT record_index,c.sample_index,c.alleles,c.phase_before,c.phase_set
+ FROM read_geno('__WORKING_DIRECTORY__/${name}', scan_mode := '${mode}'),unnest(calls) u(c)
+)
+SELECT count(*) FROM ((FROM observed EXCEPT ALL FROM expected)
+ UNION ALL (FROM expected EXCEPT ALL FROM observed));
+----
+0
+
+endloop
+
+query TT
+SELECT typeof(calls),typeof(calls[1].raw_gt)
+FROM read_geno('__WORKING_DIRECTORY__/${name}', raw_gt := true) LIMIT 1;
+----
+STRUCT(sample_index UINTEGER, alleles INTEGER[], phase_before BOOLEAN[], phase_set BIGINT, raw_gt VARCHAR)[]	VARCHAR
+
+query T
+SELECT typeof(calls) FROM read_geno('__WORKING_DIRECTORY__/${name}', raw_gt := false) LIMIT 1;
+----
+STRUCT(sample_index UINTEGER, alleles INTEGER[], phase_before BOOLEAN[], phase_set BIGINT)[]
+
+query I
+SELECT count(*) FROM read_geno('__WORKING_DIRECTORY__/${name}', raw_gt := true);
+----
+8
+
+endloop
+
+# Region unions retain both physical duplicates, with original-header sample IDs.
+query ITIT
+SELECT record_index,ID,calls[1].sample_index,calls[1].raw_gt
+FROM read_geno('__WORKING_DIRECTORY__/test_geno_raw_gt.vcf.gz', raw_gt := true, samples := 'S2',
+ region := 'chrR:20-20,chrR:20-40,chrR:40-40', decompression_threads := 2)
+ORDER BY record_index;
+----
+0	duplicate	1	|0|1/2
+1	duplicate	1	|0|1/2
+2	missing	1	./.
+3	absent_gt	1	NULL
+
+query IT
+SELECT record_index,calls[1].raw_gt
+FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_phase_partial.vcf', raw_gt := true)
+ORDER BY record_index;
+----
+0	0|1/2
+1	/0|1/2
+2	|0|1/2
+3	1|0/2
+4	/1|0/2
+5	|1|0/2
+6	.|1/2
+7	/.|1/2
+8	|.|1/2
+9	|0/1/2
+10	/0/1|2
+11	0/1|2
+
+statement error
+SELECT calls FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_calls.bcf', raw_gt := true);
+----
+raw_gt requires VCF input; BCF does not retain original GT text
+
+statement error
+SELECT count(*) FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_calls.bcf', raw_gt := true);
+----
+raw_gt requires VCF input; BCF does not retain original GT text
+
 # Excluded samples can leave BCF vector-end padding. It is not another PS value.
 foreach ext vcf bcf vcf.gz
 
@@ -458,12 +602,34 @@ SELECT count(*) FROM ((SELECT * FROM observed EXCEPT ALL SELECT * FROM expected)
 ----
 0
 
+# Raw text and NULL fields reset independently across the same 6,000-record stream.
+query I
+WITH observed AS (
+ SELECT record_index,c.sample_index,c.raw_gt
+ FROM read_geno('__WORKING_DIRECTORY__/test_geno_chunks.vcf', raw_gt := true),unnest(calls) u(c)
+), seed AS (
+ SELECT record_index,c.sample_index,c.raw_gt
+ FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_calls.vcf', raw_gt := true),unnest(calls) u(c)
+), expected AS (
+ SELECT (s.record_index+6*r.i)::UBIGINT AS record_index,sample_index,raw_gt FROM seed s,range(1000) r(i)
+)
+SELECT count(*) FROM ((FROM observed EXCEPT ALL FROM expected)
+ UNION ALL (FROM expected EXCEPT ALL FROM observed));
+----
+0
+
 # One record's sample list crosses the usual output vector size.
 query III
 SELECT count(*), len(first(calls)), first(calls)[2053].sample_index
 FROM read_geno('__WORKING_DIRECTORY__/test/data/tidy_chunk_boundary.vcf');
 ----
 1	2053	2052
+
+query II
+SELECT len(calls),len(list_filter(calls,c -> c.raw_gt = '0/1'))
+FROM read_geno('__WORKING_DIRECTORY__/test/data/tidy_chunk_boundary.vcf', raw_gt := true);
+----
+2053	2053
 
 foreach ext vcf bcf
 

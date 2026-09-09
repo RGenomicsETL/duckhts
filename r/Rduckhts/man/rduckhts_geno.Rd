@@ -16,7 +16,8 @@ rduckhts_geno(
   decompression_threads = 0,
   decode_error_policy = "null",
   overwrite = FALSE,
-  format_fields = NULL
+  format_fields = NULL,
+  raw_gt = FALSE
 )
 }
 \arguments{
@@ -64,6 +65,12 @@ exposed by the typed call fields and cannot be selected again.
 Tag lookup uses exact header spelling: declared lowercase `gt` and `ps`
 are distinct extra fields. Selected names must not collide under DuckDB's
 case-insensitive struct-member lookup.}
+
+\item{raw_gt}{Retain exact original VCF genotype text in each call's `raw_gt`
+member. The default `FALSE` keeps the typed-call schema unchanged. `TRUE`
+preserves leading phase markers, mixed separators and allele spelling;
+an absent GT is `NULL`, while a literal missing `.` remains text. BCF input
+errors because its encoded genotypes do not retain the original text.}
 }
 \value{
 A data frame when `table_name` is `NULL`, otherwise invisible `TRUE`.
