@@ -2,6 +2,10 @@
 
 # duckhts 1.5.1.9000
 
+- verify retained mutation-lane flags and implicit-reference group metadata in
+  the reference-route corpus with complete carrier and provenance accounting;
+  reject native rows outside the declared transcript domain before comparison
+
 - render current haplotype and raw-genotype catalog documentation in both READMEs;
   executed examples use local fixtures and remote examples remain usage snippets
 

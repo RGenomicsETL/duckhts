@@ -49,6 +49,15 @@ reference_sources_valid <- function(actual, records) {
   TRUE
 }
 
+# Missing-only carriers remain in the full native checks. The upstream mutator
+# observes only samples with retained calls; its lane flags use that exact domain.
+reference_mutator_rows <- function(actual, retained, samples) {
+  actual$carriers <- lapply(actual$carriers, function(x)
+    x[samples[x$sample_index + 1L] %in% retained, , drop = FALSE])
+  actual$carrier_count <- vapply(actual$carriers, nrow, 1L)
+  actual[actual$carrier_count > 0L, , drop = FALSE]
+}
+
 main <- function() {
   opt <- optparse::parse_args(optparse::OptionParser(option_list = list(
     optparse::make_option('--seed', type = 'integer', default = 173L),
@@ -196,7 +205,7 @@ main <- function() {
   stopifnot(!anyDuplicated(names(oracle)), !anyDuplicated(names(phase)),
     !anyDuplicated(names(unobserved)), setequal(names(unobserved), models$transcript),
     setequal(names(oracle), models$transcript), setequal(names(phase), models$transcript))
-  by_tx <- split(seq_len(nrow(actual)), actual$transcript_index)
+  by_tx <- native_haplotype_rows(actual, models$transcript_index)
   comparisons <- lapply(seq_len(nrow(models)), function(i) {
     model <- models[i, ]; a <- actual[by_tx[[as.character(model$transcript_index)]], ]
     r <- records[records$seq_region == model$seq_region, ]
@@ -219,6 +228,9 @@ main <- function() {
       observer_equal = identical(oracle_lines[[model$transcript]], unobserved_lines[[model$transcript]]),
       axes_equal = !is.null(e) && !is.null(o) && identical(e, o),
       lanes_equal = replay_lanes_equal(p$replay_lanes, lanes),
+      lane_flags_equal = native_lane_flags_equal(p$replay_lanes,
+        reference_mutator_rows(a, retained, samples), samples),
+      group_metadata_equal = haplotype_group_metadata_equal(p, upstream, container_json = TRUE),
       model_equal = identical(model$cds, p$reference_cds),
       sources_equal = reference_sources_valid(a, r),
       counts_equal = all(vapply(split(expected$count, expected$axis), sum, 0) == 6) &&
@@ -234,6 +246,9 @@ main <- function() {
   for (name in c('axes_equal', 'lanes_equal', 'model_equal', 'sources_equal', 'counts_equal', 'carriers_equal', 'implicit_reference_equal', 'observer_equal'))
     summary[[name]] <- vapply(comparisons, `[[`, TRUE, name)
   summary$passed <- with(summary, axes_equal & lanes_equal & model_equal & sources_equal & counts_equal & carriers_equal & implicit_reference_equal & observer_equal)
+  for (name in c('lane_flags_equal', 'group_metadata_equal'))
+    summary[[name]] <- vapply(comparisons, `[[`, TRUE, name)
+  summary$metadata_passed <- summary$lane_flags_equal & summary$group_metadata_equal
   write.csv(summary, file.path(out, 'summary.csv'), row.names = FALSE)
   witness <- comparisons[[1L]]$expected
   equal <- function(x) identical(reference_axes(x), reference_axes(witness))
@@ -284,6 +299,42 @@ main <- function() {
     controls[paste0('source_', field)] <- !reference_sources_valid(bad, source_records)
   }
   write.csv(data.frame(control = names(controls), rejected = controls), file.path(out, 'controls.csv'), row.names = FALSE)
+  phase_witness <- phase[[models$transcript[1L]]]
+  upstream_witness <- oracle[[models$transcript[1L]]]
+  metadata_controls <- haplotype_metadata_controls(phase_witness, upstream_witness, container_json = TRUE)
+  flag_witness <- reference_mutator_rows(source_witness,
+    unique(vapply(phase_witness$calls, `[[`, '', 'sample')), samples)
+  flags_equal <- function(x) native_lane_flags_equal(phase_witness$replay_lanes, x, samples)
+  stopifnot(flags_equal(flag_witness))
+  for (bit in c(1L, 2L, 4L)) {
+    bad <- flag_witness
+    bad$sequence_flags[1L] <- bitwXor(bad$sequence_flags[1L], bit)
+    metadata_controls[paste0('metadata_native_bit_', bit)] <- !flags_equal(bad)
+  }
+  bad <- flag_witness
+  bad$carriers[[1L]] <- bad$carriers[[1L]][-1L, , drop = FALSE]
+  metadata_controls['metadata_missing_mutator_carrier'] <- !flags_equal(bad)
+  bad <- flag_witness
+  extra <- bad$carriers[[1L]][1L, , drop = FALSE]
+  extra$haplotype_lane <- 3L
+  bad$carriers[[1L]] <- rbind(bad$carriers[[1L]], extra)
+  metadata_controls['metadata_extra_mutator_carrier'] <- !flags_equal(bad)
+  reference_group <- which(vapply(phase_witness$cds_group_metadata,
+    function(x) identical(x$cds, phase_witness$reference_cds), TRUE))
+  stopifnot(length(reference_group) == 1L,
+    !any(vapply(phase_witness$replay_lanes,
+      function(x) identical(x$cds, phase_witness$reference_cds), TRUE)))
+  for (field in c('indel', 'frameshift', 'length_diff')) {
+    bad <- phase_witness
+    bad$cds_group_metadata[[reference_group]]$flags[[field]] <- 1L
+    metadata_controls[paste0('metadata_reference_', field)] <-
+      !haplotype_group_metadata_equal(bad, upstream_witness, container_json = TRUE)
+  }
+  write.csv(data.frame(control = names(metadata_controls), rejected = metadata_controls),
+    file.path(out, 'metadata_controls.csv'), row.names = FALSE)
+  output_controls <- haplotype_output_controls(actual)
+  write.csv(data.frame(control = names(output_controls), rejected = output_controls),
+    file.path(out, 'output_controls.csv'), row.names = FALSE)
   identities <- c('test/duckvep/conformance/haplotype_reference_differential.R',
     'test/duckvep/conformance/haplotype_oracle.pl', 'test/duckvep/conformance/haplotype_observations.R',
     'scripts/duckvep_evidence.R', 'r/duckhtsbench/inst/benchmark_registry.tsv',
@@ -298,12 +349,18 @@ main <- function() {
     observer_failures = sum(!summary$observer_equal),
     source_failures = sum(!summary$sources_equal),
     lane_failures = sum(!summary$lanes_equal), controls_rejected = sum(controls), threads = 4L,
+    lane_flag_failures = sum(!summary$lane_flags_equal),
+    group_metadata_failures = sum(!summary$group_metadata_equal),
+    cds_groups_compared = sum(vapply(phase, function(x) length(x$cds_group_metadata), 1L)),
+    metadata_controls_rejected = sum(metadata_controls),
+    output_controls_rejected = sum(output_controls),
     scope = 'one_or_two_exon_standard_code_source_retention_and_reference_protein_routes_with_implicit_REF_samples',
     sha256 = as.list(vapply(identities, duckvep_evidence_sha256, ''))), file.path(out, 'receipt.json'), pretty = TRUE, auto_unbox = TRUE)
   if (!is.null(opt$extension_receipt)) duckvep_evidence_assert_checkout(root, revision)
   print(aggregate(cbind(profiles = rep(1L, nrow(summary)), failures = !summary$passed,
     axes_failures = !summary$axes_equal, lane_failures = !summary$lanes_equal) ~ route, summary, sum), row.names = FALSE)
-  stopifnot(all(controls))
+  stopifnot(all(controls), all(metadata_controls), all(output_controls))
   if (any(!summary$passed)) stop('Reference-route disagreements retained: ', out, call. = FALSE)
+  if (any(!summary$metadata_passed)) stop('Reference-route lane/group metadata disagreements retained: ', out, call. = FALSE)
 }
 main()

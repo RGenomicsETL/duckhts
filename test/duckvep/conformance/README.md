@@ -1004,6 +1004,11 @@ separately by sample and count; one CDS may link both a curated reference peptid
 and a mutation peptide. The observer must preserve the complete unobserved JSON,
 including array order. Mutation lanes compare complete sequences and applied sources;
 all native contributors retain checked source geometry, allele and evidence.
+Per-lane flag checks use the observed mutator domain; complete source and carrier
+checks cover all native output. Group metadata also covers curated reference groups
+without a mutator owner, with separate failing gates for lane and group flags.
+The shared output validator checks the complete native transcript domain before
+per-transcript comparisons; unknown or missing transcripts cannot escape the audit.
 
 ```sh
 Rscript test/duckvep/conformance/haplotype_reference_differential.R --seed 173 --rare-per-stratum 32
@@ -1018,7 +1023,9 @@ positions vary. Intronic cases have two exons and lengths sampled from 1–12 or
 13–120 bases; the other routes use one exon. Models derive from the registered
 180-base reference and use the standard genetic code. Twenty-nine
 corruption controls guard groups, lanes, complete JSON, models, carrier keys and
-source provenance. `--extension-receipt` requires a clean source-bound build.
+source provenance. Twenty-two additional controls guard mutation flags, missing/extra
+mutator carriers, group ownership and implicit-reference flags. `--extension-receipt`
+requires a clean source-bound build.
 
 Each of the 11,520 models has six upstream carrier memberships. DuckVEP emits four
 memberships for the missing/retained samples; the two pure-reference memberships
