@@ -303,15 +303,15 @@ retain the derived FASTA/index, actual versus independent HGVS,
 source/binary/input hashes, jobs and process logs. Process RSS includes
 setup, warm-up and post-query aggregates, not just native workspace.
 
-Measured source: `e6c59820dd5089fc205eadb1bbfe6d899c5138fc`. One thread,
+Measured source: `68c0b8608c68494b1b4a67813bb838a48bde4331`. One thread,
 CPU 2, Intel i5-13500, DuckDB 1.5.3.
 
 | transcripts | samples | overlap | mode                | median_s | min_s | max_s | peak_process_rss_mib |
 |------------:|--------:|--------:|:--------------------|---------:|------:|------:|---------------------:|
-|        1024 |      64 |      16 | sql_singletons      |    0.343 | 0.339 | 0.351 |             409.8438 |
-|       10240 |      64 |      16 | sql_singletons      |    4.132 | 4.098 | 4.224 |            2192.3711 |
-|        1024 |      64 |      16 | sql_singletons_hgvs |    0.345 | 0.344 | 0.347 |             410.0391 |
-|       10240 |      64 |      16 | sql_singletons_hgvs |    4.176 | 4.162 | 4.199 |            2193.1875 |
+|        1024 |      64 |      16 | sql_singletons      |    0.340 | 0.340 | 0.341 |              411.168 |
+|       10240 |      64 |      16 | sql_singletons      |    4.123 | 4.113 | 4.179 |             2191.441 |
+|        1024 |      64 |      16 | sql_singletons_hgvs |    0.349 | 0.347 | 0.355 |              409.750 |
+|       10240 |      64 |      16 | sql_singletons_hgvs |    4.217 | 4.183 | 4.232 |             2191.215 |
 
 | transcripts | samples | overlap | mode                | input_physical_records | input_record_sample_calls | input_candidate_sample_rows | output_leaves | output_carriers | cds_bytes | protein_bytes | json_bytes |
 |------------:|--------:|--------:|:--------------------|-----------------------:|--------------------------:|----------------------------:|--------------:|----------------:|----------:|--------------:|-----------:|
@@ -320,12 +320,28 @@ CPU 2, Intel i5-13500, DuckDB 1.5.3.
 |       10240 |      64 |      16 | sql_singletons      |                   2560 |                    163840 |                     2621440 |         40960 |          655360 |   7372800 |       2447360 |   89236552 |
 |       10240 |      64 |      16 | sql_singletons_hgvs |                   2560 |                    163840 |                     2621440 |         40960 |          655360 |   7372800 |       2447360 |   89318472 |
 
-This is the first source-bound measurement of this HGVS-enabled
-workload, not a before/after implementation comparison. Compound HGVS,
-raw-input omissions, multi-exon models and heterogeneous genomic
-contexts still need their own matched measurements. The compound replay
-and raw-record baselines above retain their original source revisions
-and denominators.
+Nearest identical-workload source:
+`e6c59820dd5089fc205eadb1bbfe6d899c5138fc`. Full-output fingerprints,
+input identities and every listed denominator match within each mode.
+
+| transcripts | samples | overlap | mode                | median_s_before | min_s_before | max_s_before | peak_process_rss_mib_before | median_s_after | min_s_after | max_s_after | peak_process_rss_mib_after | median_change_percent |
+|------------:|--------:|--------:|:--------------------|----------------:|-------------:|-------------:|----------------------------:|---------------:|------------:|------------:|---------------------------:|----------------------:|
+|        1024 |      64 |      16 | sql_singletons      |           0.343 |        0.339 |        0.351 |                    409.8438 |          0.340 |       0.340 |       0.341 |                    411.168 |               -0.8746 |
+|        1024 |      64 |      16 | sql_singletons_hgvs |           0.345 |        0.344 |        0.347 |                    410.0391 |          0.349 |       0.347 |       0.355 |                    409.750 |                1.1594 |
+|       10240 |      64 |      16 | sql_singletons      |           4.132 |        4.098 |        4.224 |                   2192.3711 |          4.123 |       4.113 |       4.179 |                   2191.441 |               -0.2178 |
+|       10240 |      64 |      16 | sql_singletons_hgvs |           4.176 |        4.162 |        4.199 |                   2193.1875 |          4.217 |       4.183 |       4.232 |                   2191.215 |                0.9818 |
+
+The retained-allele implementation removes a separate HGVS source-byte
+buffer and borrows prepared decoded-event geometry; raw-source HGVS
+still prepares its distinct interpretation. This workload caps that
+deleted buffer at only 64 bytes. Process-RSS differences cannot be
+attributed to that small native saving. Three passes on one machine do
+not establish a speedup, statistical significance or a general absence
+of regression; HGVS-enabled median time is slightly higher in this
+comparison. Compound HGVS, raw-input omissions, multi-exon models and
+heterogeneous genomic contexts still need their own matched
+measurements. The compound replay and raw-record baselines above retain
+their original source revisions and denominators.
 
 ``` bash
 Rscript benchmarks/duckvep_haplotypes.R \

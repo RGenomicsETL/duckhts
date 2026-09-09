@@ -369,8 +369,44 @@ if (!nrow(singleton_history)) {
 }
 ```
 
-This is the first source-bound measurement of this HGVS-enabled workload, not a
-before/after implementation comparison. Compound HGVS, raw-input omissions,
+```{r singleton-revision-comparison, results='asis'}
+singleton_revisions <- unique(singleton_history$source_revision)
+if (length(singleton_revisions) >= 2L) {
+  previous_revision <- tail(singleton_revisions, 2L)[1L]
+  before <- singleton_history[singleton_history$source_revision == previous_revision, ]
+  fingerprint <- c(mode_keys, "threads", "cpu_affinity", "duckdb_version", "output_contract",
+    "input_physical_records", "input_record_sample_calls", "input_candidate_sample_rows",
+    "output_leaves", "output_carriers", "cds_bytes", "protein_bytes", "physical_edits",
+    "contributors", "blocks", "json_bytes", "xor_hash", "sum_hash", "reference_sha256", "events_sha256")
+  expected <- unique(before[fingerprint])
+  actual <- unique(measured[fingerprint])
+  expected <- expected[do.call(order, expected[mode_keys]), ]
+  actual <- actual[do.call(order, actual[mode_keys]), ]
+  rownames(expected) <- rownames(actual) <- NULL
+  stopifnot(identical(expected, actual))
+  previous_timing <- do.call(rbind, lapply(split(before, interaction(before[mode_keys], drop = TRUE)),
+    function(x) {
+      stopifnot(nrow(x) == 3L, identical(sort(x$pass), 1:3))
+      data.frame(x[1L, mode_keys], median_s = median(x$seconds),
+        min_s = min(x$seconds), max_s = max(x$seconds),
+        peak_process_rss_mib = max(x$peak_process_rss_kib) / 1024)
+    }))
+  comparison <- merge(previous_timing, timings, by = mode_keys, suffixes = c("_before", "_after"))
+  comparison$median_change_percent <- 100 * (comparison$median_s_after / comparison$median_s_before - 1)
+  cat("Nearest identical-workload source: `", previous_revision,
+    "`. Full-output fingerprints, input identities and every listed denominator match within each mode.\n\n",
+    sep = "")
+  print(knitr::kable(comparison, row.names = FALSE, digits = 4))
+}
+```
+
+The retained-allele implementation removes a separate HGVS source-byte buffer and
+borrows prepared decoded-event geometry; raw-source HGVS still prepares its distinct
+interpretation. This workload caps that deleted buffer at only 64 bytes. Process-RSS
+differences cannot be attributed to that small native saving. Three passes on one
+machine do not establish a speedup, statistical significance or a general absence of
+regression; HGVS-enabled median time is slightly higher in this comparison.
+Compound HGVS, raw-input omissions,
 multi-exon models and heterogeneous genomic contexts still need their own matched
 measurements. The compound replay and raw-record baselines above retain their
 original source revisions and denominators.

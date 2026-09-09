@@ -3,7 +3,8 @@
 # duckhts 1.5.1.9000
 
 - reuse retained source alleles and prepared decoded-event geometry for singleton
-  phased HGVS; raw-record replay retains its distinct full-span interpretation
+  phased HGVS; raw-record replay retains its distinct full-span interpretation.
+  Matched benchmarks retain full-output fingerprints and report per-revision timing
 
 - benchmark singleton phased replay with HGVS enabled and disabled on identical
   registered inputs, checking all outputs, source membership and independent-event HGVS
