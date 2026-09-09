@@ -4,6 +4,9 @@
 - fail SQLLogicTest runs on malformed test syntax, with process-status controls
   for individual files, file lists and directory runs
 
+- fail fasta_nuc queries on reference-fetch errors instead of omitting intervals;
+  reject overflowing FASTA index seek positions and inclusive coordinates
+
 - use the shared curated reference peptide for raw haplotypes without retained
   exon-overlapping genotypes. Intronic context retains provenance and does not
   alter literal CDS replay. Retained exon-overlapping calls use mutation

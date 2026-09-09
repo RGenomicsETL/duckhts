@@ -525,7 +525,7 @@
       "signature": "fasta_nuc(path, bed_path := NULL, bin_width := NULL, region := NULL, index_path := NULL, gzi_path := NULL, bed_index_path := NULL, include_seq := FALSE)",
       "returns": "table",
       "r_wrapper": "rduckhts_fasta_nuc",
-      "description": "Compute bedtools nuc-style nucleotide composition for supplied BED intervals or generated fixed-width bins over a FASTA reference. For bgzipped FASTA, gzi_path may point to an explicit .gzi sidecar when it is not colocated with the FASTA.",
+      "description": "Compute bedtools nuc-style nucleotide composition for supplied BED intervals or generated fixed-width bins over a FASTA reference. A failed reference fetch fails the query with the file and zero-based half-open interval; requested intervals are not silently omitted. For bgzipped FASTA, gzi_path may point to an explicit .gzi sidecar when it is not colocated with the FASTA.",
       "examples": [
         "SELECT chrom, start, \"end\", pct_gc FROM fasta_nuc('ce.fa', bin_width := 1000) LIMIT 5;"
       ]

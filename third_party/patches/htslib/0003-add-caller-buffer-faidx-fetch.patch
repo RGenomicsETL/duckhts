@@ -1,0 +1,253 @@
+diff --git a/faidx.c b/faidx.c
+--- a/faidx.c
++++ b/faidx.c
+@@ -736,84 +736,110 @@
+-static char *fai_retrieve(const faidx_t *fai, const faidx1_t *val,
+-                          uint64_t offset, hts_pos_t beg, hts_pos_t end, hts_pos_t *len) {
+-    char *buffer, *s;
+-    ssize_t nread, remaining, firstline_len, firstline_blen;
+-    int ret;
+-
+-    if ((uint64_t) end - (uint64_t) beg >= SIZE_MAX - 2) {
+-        hts_log_error("Range %"PRId64"..%"PRId64" too big", beg, end);
+-        *len = -1;
+-        return NULL;
+-    }
+-
+-    if (val->line_blen <= 0) {
+-        hts_log_error("Invalid line length in index: %"PRIu64, val->line_blen);
+-        *len = -1;
+-        return NULL;
+-    }
+-
+-    uint64_t line_len = val->line_blen + val->line_extra;
+-
+-    ret = bgzf_useek(fai->bgzf,
+-                     offset
+-                     + beg / val->line_blen * line_len
+-                     + beg % val->line_blen, SEEK_SET);
+-
+-    if (ret < 0) {
+-        *len = -1;
+-        hts_log_error("Failed to retrieve block. (Seeking in a compressed, .gzi unindexed, file?)");
+-        return NULL;
+-    }
+-
+-    // Over-allocate so there is extra space for one end-of-line sequence
+-    buffer = hts_malloc(hts_add_sat3(end - beg, line_len - val->line_blen, 1));
+-    if (!buffer) {
+-        *len = -1;
+-        return NULL;
+-    }
+-
+-    remaining = *len = end - beg;
+-    firstline_blen = val->line_blen - beg % val->line_blen;
+-
+-    // Special case when the entire interval requested is within a single FASTA/Q line
+-    if (remaining <= firstline_blen) {
+-        nread = bgzf_read_small(fai->bgzf, buffer, remaining);
+-        if (nread < remaining) goto error;
+-        buffer[nread] = '\0';
+-        return buffer;
+-    }
+-
+-    s = buffer;
+-    firstline_len = line_len - beg % val->line_blen;
+-
+-    // Read the (partial) first line and its line terminator, but increment  s  past the
+-    // line contents only, so the terminator characters will be overwritten by the next line.
+-    nread = bgzf_read_small(fai->bgzf, s, firstline_len);
+-    if (nread < firstline_len) goto error;
+-    s += firstline_blen;
+-    remaining -= firstline_blen;
+-
+-    // Similarly read complete lines and their line terminator characters, but overwrite the latter.
+-    while (remaining > val->line_blen) {
+-        nread = bgzf_read_small(fai->bgzf, s, line_len);
+-        if (nread < (ssize_t) line_len) goto error;
+-        s += val->line_blen;
+-        remaining -= val->line_blen;
+-    }
+-
+-    if (remaining > 0) {
+-        nread = bgzf_read_small(fai->bgzf, s, remaining);
+-        if (nread < remaining) goto error;
+-        s += remaining;
+-    }
+-
+-    *s = '\0';
+-    return buffer;
+-
+-error:
+-    hts_log_error("Failed to retrieve block: %s",
+-                  (nread == 0)? "unexpected end of file" : "error reading file");
+-    free(buffer);
+-    *len = -1;
+-    return NULL;
+-}
+-
++static int fai_retrieve_capacity(const faidx1_t *val, hts_pos_t beg,
++                                 hts_pos_t end, size_t *required) {
++    uint64_t bases = (uint64_t) end - (uint64_t) beg;
++    if (bases >= SIZE_MAX - 2 || val->line_extra >= SIZE_MAX - bases) {
++        hts_log_error("Range %"PRId64"..%"PRId64" too big", beg, end);
++        errno = EOVERFLOW;
++        return -1;
++    }
++    if (val->line_blen <= 0) {
++        hts_log_error("Invalid line length in index: %"PRIu64, val->line_blen);
++        errno = EINVAL;
++        return -1;
++    }
++    if (bases > (SIZE_MAX >> 1) || val->line_extra > (SIZE_MAX >> 1) ||
++        val->line_blen > (SIZE_MAX >> 1) - val->line_extra) {
++        hts_log_error("FASTA/Q range or line exceeds the signed I/O size limit");
++        errno = EOVERFLOW;
++        return -1;
++    }
++    // Include one line terminator and the trailing NUL.
++    *required = (size_t) bases + val->line_extra + 1;
++    return 0;
++}
++
++static char *fai_retrieve_buffer(const faidx_t *fai, const faidx1_t *val,
++                                uint64_t offset, hts_pos_t beg, hts_pos_t end,
++                                hts_pos_t *len, char *buffer) {
++    char *s;
++    ssize_t nread, remaining, firstline_len, firstline_blen;
++    int ret;
++
++    uint64_t line_len = val->line_blen + val->line_extra;
++
++    ret = bgzf_useek(fai->bgzf,
++                     offset
++                     + beg / val->line_blen * line_len
++                     + beg % val->line_blen, SEEK_SET);
++
++    if (ret < 0) {
++        *len = -1;
++        hts_log_error("Failed to retrieve block. (Seeking in a compressed, .gzi unindexed, file?)");
++        return NULL;
++    }
++
++    remaining = *len = end - beg;
++    firstline_blen = val->line_blen - beg % val->line_blen;
++
++    // Special case when the entire interval requested is within a single FASTA/Q line
++    if (remaining <= firstline_blen) {
++        nread = bgzf_read_small(fai->bgzf, buffer, remaining);
++        if (nread < remaining) goto error;
++        buffer[nread] = '\0';
++        return buffer;
++    }
++
++    s = buffer;
++    firstline_len = line_len - beg % val->line_blen;
++
++    // Read the (partial) first line and its line terminator, but increment  s  past the
++    // line contents only, so the terminator characters will be overwritten by the next line.
++    nread = bgzf_read_small(fai->bgzf, s, firstline_len);
++    if (nread < firstline_len) goto error;
++    s += firstline_blen;
++    remaining -= firstline_blen;
++
++    // Similarly read complete lines and their line terminator characters, but overwrite the latter.
++    while (remaining > val->line_blen) {
++        nread = bgzf_read_small(fai->bgzf, s, line_len);
++        if (nread < (ssize_t) line_len) goto error;
++        s += val->line_blen;
++        remaining -= val->line_blen;
++    }
++
++    if (remaining > 0) {
++        nread = bgzf_read_small(fai->bgzf, s, remaining);
++        if (nread < remaining) goto error;
++        s += remaining;
++    }
++
++    *s = '\0';
++    return buffer;
++
++error:
++    hts_log_error("Failed to retrieve block: %s",
++                  (nread == 0)? "unexpected end of file" : "error reading file");
++    buffer[0] = '\0';
++    *len = -1;
++    return NULL;
++}
++
++static char *fai_retrieve(const faidx_t *fai, const faidx1_t *val,
++                          uint64_t offset, hts_pos_t beg, hts_pos_t end,
++                          hts_pos_t *len) {
++    size_t required;
++    if (fai_retrieve_capacity(val, beg, end, &required) < 0) {
++        *len = -1;
++        return NULL;
++    }
++    char *buffer = hts_malloc(required);
++    if (!buffer) {
++        *len = -1;
++        return NULL;
++    }
++    if (!fai_retrieve_buffer(fai, val, offset, beg, end, len, buffer)) {
++        free(buffer);
++        return NULL;
++    }
++    return buffer;
++}
++
+@@ -1010,1 +1036,25 @@
+-char *faidx_fetch_seq(const faidx_t *fai, const char *c_name, int p_beg_i, int p_end_i, int *len)
++int faidx_fetch_seq64_into(const faidx_t *fai, const char *c_name,
++                           hts_pos_t p_beg_i, hts_pos_t p_end_i,
++                           char *buffer, size_t capacity, hts_pos_t *len,
++                           size_t *required) {
++    faidx1_t val;
++    if (len) *len = -1;
++    if (required) *required = 0;
++    if (!fai || !c_name || !len || !required || (capacity && !buffer)) {
++        errno = EINVAL;
++        return -1;
++    }
++    if (faidx_adjust_position(fai, 1, &val, c_name, &p_beg_i, &p_end_i, len))
++        return -1;
++    if (fai_retrieve_capacity(&val, p_beg_i, p_end_i + 1, required) < 0)
++        return -1;
++    *len = p_end_i + 1 - p_beg_i;
++    if (capacity < *required) {
++        errno = ENOSPC;
++        return -1;
++    }
++    return fai_retrieve_buffer(fai, &val, val.seq_offset, p_beg_i,
++                               p_end_i + 1, len, buffer) ? 0 : -1;
++}
++
++char *faidx_fetch_seq(const faidx_t *fai, const char *c_name, int p_beg_i, int p_end_i, int *len)
+diff --git a/htslib/faidx.h b/htslib/faidx.h
+--- a/htslib/faidx.h
++++ b/htslib/faidx.h
+@@ -252,1 +252,16 @@
+-char *faidx_fetch_seq64(const faidx_t *fai, const char *c_name, hts_pos_t p_beg_i, hts_pos_t p_end_i, hts_pos_t *len);
++char *faidx_fetch_seq64(const faidx_t *fai, const char *c_name, hts_pos_t p_beg_i, hts_pos_t p_end_i, hts_pos_t *len);
++
++/** Fetch into caller-owned storage with the coordinate clipping and case of
++    faidx_fetch_seq64(). Return 0 on success, -1 on error. len and required are
++    mandatory. required includes the sequence, one line terminator of scratch,
++    and the final NUL. On ENOSPC, len is the clipped sequence length; no bytes
++    are written and the file position is unchanged. NULL buffer with capacity
++    zero queries the requirement. Other errors set len to -1 (-2 for a missing
++    sequence). On read failure the buffer may contain partial data; len is -1.
++    No result buffer is allocated. BGZF/transport may allocate internally.
++*/
++HTSLIB_EXPORT
++int faidx_fetch_seq64_into(const faidx_t *fai, const char *c_name,
++                           hts_pos_t p_beg_i, hts_pos_t p_end_i,
++                           char *buffer, size_t capacity, hts_pos_t *len,
++                           size_t *required);
+diff --git a/htslib.map b/htslib.map
+--- a/htslib.map
++++ b/htslib.map
+@@ -667,1 +667,2 @@
+-HTSLIB_1.24 {
++HTSLIB_1.24 {
++    faidx_fetch_seq64_into;

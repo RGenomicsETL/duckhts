@@ -1,5 +1,8 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+- report reference-fetch failures through rduckhts_fasta_nuc instead of returning
+  incomplete intervals; bundled faidx checks reject overflowing index arithmetic
+
 - preserve curated reference peptides for bundled `source_records` haplotypes
   without retained exon-overlapping genotypes, including internal stops and start
   methionine. Intronic context preserves provenance without changing literal CDS
