@@ -3,18 +3,20 @@ Phased replay: native stream and public SQL
 
 <!-- duckvep_haplotypes.md is generated from duckvep_haplotypes.Rmd. -->
 
-Current source: 16afccd0fd795df318bbd8b3e66f89b8321da022; same-input
-baseline: 4119d55c43fe0649ffe8325135bbdf26c1f37e94. Native measurements
+Current source: ac423de1e6ec0f449b2f5ff2367763e009115b0a; same-input
+baseline: 16afccd0fd795df318bbd8b3e66f89b8321da022. Native measurements
 cover literal phased replay. SQL materializes all current fields,
 including local coding-block SO. HGVS generation is disabled;
 whole-haplotype SO/HGVS is unfinished and its computation is not timed
-here. Both paths consume standalone ALT events and decoded calls; native
-raw-record parsing and conditional replay are not timed by this
-workload. All runs use one thread pinned to CPU 2 on an Intel Core
-i5-13500, DuckDB 1.5.3, and a source-bound clean extension build. The
-native bridge uses the same kernel sources compiled with `-O3 -DNDEBUG`;
-receipts retain compiler/version, binary and fixture hashes, worker
-jobs, GNU-time logs and complete result fingerprints.
+here. Native and decoded SQL consume standalone ALT events and decoded
+calls. The additional source-record SQL lane measures literal GT parsing
+and replay; standalone native raw-record execution and conditional
+source omissions are not timed. All runs use one thread pinned to CPU 2
+on an Intel Core i5-13500, DuckDB 1.5.3, and a source-bound clean
+extension build. The native bridge uses the same kernel sources compiled
+with `-O3 -DNDEBUG`; receipts retain compiler/version, binary and
+fixture hashes, worker jobs, GNU-time logs and complete result
+fingerprints.
 
 ## Workload and verification
 
@@ -40,14 +42,14 @@ sequences, contributors and sample/lane/PS/ploidy membership. SQL
 validation compares the full carrier multiset with decoded input, checks
 sequences and edit provenance, and rejects an injected duplicate. Native
 validation also rejects a corrupted expected sequence. Every measured
-pass must retain all common native/SQL denominators and SQL’s full,
-canonicalized nested-row fingerprint; failed runs are not promoted. Full
-fingerprints must also agree across revisions sharing an output
-contract. Local coding-block and literal-replay projections provide
-separate comparisons with their recorded output contracts; full current
-output is always checked. The HGVS-status schema adds `hgvsp` (NULL) and
-`hgvsp_status` (`not_requested`) in this workload. Only the separate
-prior-schema projections exclude these columns.
+decoded pass must retain all common native/SQL denominators and SQL’s
+full, canonicalized nested-row fingerprint; failed runs are not
+promoted. Full fingerprints must also agree across revisions sharing an
+output contract. Local coding-block and literal-replay projections
+provide separate comparisons with their recorded output contracts; full
+current output is always checked. The HGVS-status schema adds `hgvsp`
+(NULL) and `hgvsp_status` (`not_requested`) in this workload. Only the
+separate prior-schema projections exclude these columns.
 
 | transcripts | samples | overlap | input_records | projected_events | input_calls | output_leaves | output_carriers | prefixes_created | translated_bases |
 |------------:|--------:|--------:|--------------:|-----------------:|------------:|--------------:|----------------:|-----------------:|-----------------:|
@@ -67,36 +69,39 @@ observed in the native stream, not inferred SQL counters.
 
 ## Timing and process memory
 
-| transcripts | samples | overlap | mode   | min_s | median_s | max_s | max_process_rss_mib |
-|------------:|--------:|--------:|:-------|------:|---------:|------:|--------------------:|
-|        1024 |       4 |       1 | native | 0.003 |    0.003 | 0.004 |              74.477 |
-|        1024 |       4 |       1 | sql    | 0.053 |    0.053 | 0.054 |             215.789 |
-|        1024 |      64 |       1 | native | 0.014 |    0.015 | 0.024 |              74.633 |
-|        1024 |      64 |       1 | sql    | 0.361 |    0.365 | 0.403 |             376.344 |
-|        1024 |      64 |      16 | native | 0.018 |    0.018 | 0.018 |              74.480 |
-|        1024 |      64 |      16 | sql    | 0.361 |    0.366 | 0.368 |             377.344 |
-|        1024 |      64 |      64 | native | 0.020 |    0.021 | 0.021 |              74.480 |
-|        1024 |      64 |      64 | sql    | 0.367 |    0.368 | 0.368 |             375.516 |
-|        1024 |     256 |       1 | native | 0.051 |    0.051 | 0.060 |              74.480 |
-|        1024 |     256 |       1 | sql    | 1.396 |    1.402 | 1.426 |             957.293 |
-|       10240 |      64 |      16 | native | 0.184 |    0.185 | 0.188 |              74.477 |
-|       10240 |      64 |      16 | sql    | 4.389 |    4.445 | 4.539 |            2134.574 |
+| transcripts | samples | overlap | mode        | min_s | median_s | max_s | max_process_rss_mib |
+|------------:|--------:|--------:|:------------|------:|---------:|------:|--------------------:|
+|        1024 |       4 |       1 | native      | 0.003 |    0.003 | 0.003 |              74.324 |
+|        1024 |       4 |       1 | sql         | 0.049 |    0.050 | 0.050 |             219.137 |
+|        1024 |      64 |       1 | native      | 0.013 |    0.013 | 0.014 |              74.320 |
+|        1024 |      64 |       1 | sql         | 0.329 |    0.334 | 0.334 |             378.934 |
+|        1024 |      64 |      16 | native      | 0.016 |    0.017 | 0.017 |              74.473 |
+|        1024 |      64 |      16 | sql         | 0.336 |    0.337 | 0.337 |             379.340 |
+|        1024 |      64 |      16 | sql_records | 0.711 |    0.711 | 0.723 |             610.504 |
+|        1024 |      64 |      64 | native      | 0.018 |    0.019 | 0.019 |              74.320 |
+|        1024 |      64 |      64 | sql         | 0.338 |    0.341 | 0.342 |             379.176 |
+|        1024 |     256 |       1 | native      | 0.045 |    0.047 | 0.047 |              74.465 |
+|        1024 |     256 |       1 | sql         | 1.321 |    1.328 | 1.331 |             960.242 |
+|       10240 |      64 |      16 | native      | 0.164 |    0.166 | 0.168 |              74.473 |
+|       10240 |      64 |      16 | sql         | 4.184 |    4.188 | 4.221 |            2133.344 |
 
 Both compared revisions return each block’s local SO mask, coding status
 and position relative to the first stop. A shared coding context
-evaluates physical blocks on completed replay. Full-output fingerprints
-and input/output denominators match across the compared configurations.
-The native count sink omits local SO evaluation. HGVS-enabled
-performance requires a separate workload.
+evaluates physical blocks on completed replay. The current output adds
+HGVS columns. All prior local-coding-block fields and input/output
+denominators match, but complete rows have different schemas and byte
+counts. This is a same-input comparison, not identical-output work. The
+native count sink omits local SO evaluation. HGVS-enabled performance
+requires a separate workload.
 
 | transcripts | samples | overlap | median_s_before | median_s_after | median_change_percent | max_process_rss_mib_before | max_process_rss_mib_after |
 |------------:|--------:|--------:|----------------:|---------------:|----------------------:|---------------------------:|--------------------------:|
-|        1024 |       4 |       1 |           0.051 |          0.053 |                 3.922 |                    216.574 |                   215.789 |
-|        1024 |      64 |       1 |           0.330 |          0.365 |                10.606 |                    376.836 |                   376.344 |
-|        1024 |      64 |      16 |           0.340 |          0.366 |                 7.647 |                    377.082 |                   377.344 |
-|        1024 |      64 |      64 |           0.343 |          0.368 |                 7.289 |                    376.406 |                   375.516 |
-|        1024 |     256 |       1 |           1.296 |          1.402 |                 8.179 |                    957.453 |                   957.293 |
-|       10240 |      64 |      16 |           4.069 |          4.445 |                 9.241 |                   2133.770 |                  2134.574 |
+|        1024 |       4 |       1 |           0.053 |          0.050 |                -5.660 |                    215.789 |                   219.137 |
+|        1024 |      64 |       1 |           0.365 |          0.334 |                -8.493 |                    376.344 |                   378.934 |
+|        1024 |      64 |      16 |           0.366 |          0.337 |                -7.923 |                    377.344 |                   379.340 |
+|        1024 |      64 |      64 |           0.368 |          0.341 |                -7.337 |                    375.516 |                   379.176 |
+|        1024 |     256 |       1 |           1.402 |          1.328 |                -5.278 |                    957.293 |                   960.242 |
+|       10240 |      64 |      16 |           4.445 |          4.188 |                -5.782 |                   2134.574 |                  2133.344 |
 
 Each recorded pass uses a fresh process and a full warm-up. Native
 timing starts after workspace initialization and includes ordered-feed
@@ -118,16 +123,19 @@ R host, model/input tables, warm-up, measured materialization and
 post-run aggregates. The heavier SQL correctness audit runs separately
 and is excluded from recorded RSS. RSS is not an isolated operator
 allocation measurement. These two execution scopes are intentionally
-different: their times are not a speedup comparison.
+different: their times are not a speedup comparison. Post-run
+fingerprint aggregates depend on the output schema, so a schema change
+also prevents interpreting process RSS as an identical-work memory
+comparison.
 
 | transcripts | samples | overlap | output_leaves | cds_bytes | protein_bytes | json_bytes |
 |------------:|--------:|--------:|--------------:|----------:|--------------:|-----------:|
-|        1024 |       4 |       1 |          3072 |    552960 |        184320 |    4933370 |
-|        1024 |      64 |       1 |          3072 |    552960 |        184320 |   11976442 |
-|        1024 |      64 |      16 |          3072 |    552960 |        184320 |   11948670 |
-|        1024 |      64 |      64 |          3072 |    552960 |        184320 |   11932670 |
-|        1024 |     256 |       1 |          3072 |    552960 |        184320 |   34819834 |
-|       10240 |      64 |      16 |         30720 |   5529600 |       1843200 |  119761294 |
+|        1024 |       4 |       1 |          3072 |    552960 |        184320 |    5068538 |
+|        1024 |      64 |       1 |          3072 |    552960 |        184320 |   12111610 |
+|        1024 |      64 |      16 |          3072 |    552960 |        184320 |   12083838 |
+|        1024 |      64 |      64 |          3072 |    552960 |        184320 |   12067838 |
+|        1024 |     256 |       1 |          3072 |    552960 |        184320 |   34955002 |
+|       10240 |      64 |      16 |         30720 |   5529600 |       1843200 |  121112974 |
 
 CDS/protein bytes count the sequence views returned once per occupied
 leaf. JSON bytes are the measured UTF-8 size of complete canonicalized
@@ -177,8 +185,22 @@ through `duckhtsbench`. All six configurations above use
 `--passes 3 --cpu 2`. To prepare the receipt from a clean checkout (no
 network access in the build):
 
+``` r
+source("scripts/duckvep_evidence.R")
+root <- normalizePath(".")
+revision <- duckvep_evidence_revision(root)
+extension <- duckvep_evidence_build_extension(root,
+  "build/release/duckhts.duckdb_extension", revision)
+duckvep_evidence_write_extension_receipt("/tmp/haplotype-extension.tsv", revision, extension)
+```
+
 Pass `--extension-receipt /tmp/haplotype-extension.tsv` to the R driver.
 For a network-free smoke test without a clean-build certificate:
+
+``` bash
+Rscript benchmarks/duckvep_haplotypes.R \
+  --transcripts 16 --samples 4 --overlap 4 --passes 1 --diagnostic
+```
 
 Diagnostic results are retained but are not accepted into the recorded
 baseline.
@@ -216,7 +238,24 @@ derived source table. Output fingerprints include the raw lane’s
 complete schema and reference paths; they are not substituted for
 decoded-output fingerprints.
 
-No source-bound raw-lane measurement is recorded in the tables above. A
-clean-build run with three passes is required before a timing
-comparison; different output denominators preclude treating raw versus
-decoded time as an implementation speedup.
+``` bash
+Rscript benchmarks/duckvep_haplotypes.R \
+  --transcripts 16 --samples 4 --overlap 4 --passes 1 \
+  --modes native,sql,sql_records --diagnostic
+```
+
+The source-bound raw lane uses three fresh-process passes at the current
+source, with one thread pinned to CPU 2. Its timing and process RSS
+appear in the timing table above; its input and output denominators are:
+
+| transcripts | samples | overlap | input_physical_records | input_record_sample_calls | input_candidate_sample_rows | output_leaves | output_carriers |
+|------------:|--------:|--------:|-----------------------:|--------------------------:|----------------------------:|--------------:|----------------:|
+|        1024 |      64 |      16 |                    256 |                     16384 |                      262144 |          4096 |          131072 |
+
+| output_leaves | cds_bytes | protein_bytes | json_bytes |
+|--------------:|----------:|--------------:|-----------:|
+|          4096 |    737280 |        245760 |   14052904 |
+
+There is no earlier source-bound raw-lane measurement for a
+same-contract comparison. Different output denominators preclude
+treating raw versus decoded time as an implementation speedup.

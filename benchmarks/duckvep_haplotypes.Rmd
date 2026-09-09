@@ -50,6 +50,7 @@ core <- current[current$mode == "native" & current$pass == 1L, ]
 core <- core[order(core$transcripts, core$samples, core$overlap), ]
 public <- current[current$mode == "sql" & current$pass == 1L, ]
 public <- public[order(public$transcripts, public$samples, public$overlap), ]
+raw <- current[current$mode == "sql_records" & current$pass == 1L, ]
 stopifnot(identical(as.list(core[c("transcripts", "samples", "overlap")]),
   as.list(public[c("transcripts", "samples", "overlap")])))
 fingerprint_keys <- c("transcripts", "samples", "overlap")
@@ -68,14 +69,21 @@ stopifnot(nrow(comparison) == nrow(public),
 compared_contracts <- unique(history$output_contract[history$mode == "sql" &
   history$source_revision %in% c(revision, baseline_revision)])
 same_contract <- length(compared_contracts) == 1L
+raw_fingerprints <- unique(history[history$mode == "sql_records", c(fingerprint_keys,
+  "output_contract", "input_physical_records", "input_record_sample_calls",
+  "input_candidate_sample_rows", "output_leaves", "output_carriers", "cds_bytes",
+  "protein_bytes", "physical_edits", "contributors", "blocks", "json_bytes", "xor_hash", "sum_hash")])
+stopifnot(!anyNA(raw_fingerprints),
+  !anyDuplicated(raw_fingerprints[c(fingerprint_keys, "output_contract")]))
 ```
 
 Current source: `r revision`; same-input baseline: `r baseline_revision`.
 Native measurements cover literal phased replay. SQL materializes all current
 fields, including local coding-block SO. HGVS generation is disabled;
 whole-haplotype SO/HGVS is unfinished and its computation is not timed here.
-Both paths consume standalone ALT events and decoded calls; native raw-record
-parsing and conditional replay are not timed by this workload.
+Native and decoded SQL consume standalone ALT events and decoded calls.
+The additional source-record SQL lane measures literal GT parsing and replay;
+standalone native raw-record execution and conditional source omissions are not timed.
 All runs use one thread pinned to CPU 2 on an Intel Core i5-13500, DuckDB 1.5.3,
 and a source-bound clean extension build. The native bridge uses the same kernel
 sources compiled with `-O3 -DNDEBUG`; receipts retain compiler/version, binary and
@@ -102,7 +110,7 @@ against independently rebuilt/Biostrings-translated sequences, contributors and
 sample/lane/PS/ploidy membership. SQL validation compares the full carrier
 multiset with decoded input, checks sequences and edit provenance, and rejects an
 injected duplicate. Native validation also rejects a corrupted expected sequence.
-Every measured pass must retain all common native/SQL denominators and SQL's full,
+Every measured decoded pass must retain all common native/SQL denominators and SQL's full,
 canonicalized nested-row fingerprint; failed runs are not promoted. Full fingerprints
 must also agree across revisions sharing an output contract. Local coding-block
 and literal-replay projections provide separate comparisons with their recorded
@@ -158,6 +166,8 @@ model/input tables, warm-up, measured materialization and post-run aggregates.
 The heavier SQL correctness audit runs separately and is excluded from recorded
 RSS. RSS is not an isolated operator allocation measurement. These two execution
 scopes are intentionally different: their times are not a speedup comparison.
+Post-run fingerprint aggregates depend on the output schema, so a schema change
+also prevents interpreting process RSS as an identical-work memory comparison.
 
 ```{r output-size}
 knitr::kable(public[c("transcripts", "samples", "overlap", "output_leaves",
@@ -205,7 +215,7 @@ from the shared evidence builder; it stages inputs through `duckhtsbench`.
 All six configurations above use `--passes 3 --cpu 2`. To prepare the receipt
 from a clean checkout (no network access in the build):
 
-```{r clean-build, eval=FALSE}
+```{r clean-build, eval=FALSE, echo=TRUE}
 source("scripts/duckvep_evidence.R")
 root <- normalizePath(".")
 revision <- duckvep_evidence_revision(root)
@@ -217,7 +227,7 @@ duckvep_evidence_write_extension_receipt("/tmp/haplotype-extension.tsv", revisio
 Pass `--extension-receipt /tmp/haplotype-extension.tsv` to the R driver. For a
 network-free smoke test without a clean-build certificate:
 
-```{bash smoke, eval=FALSE}
+```{bash smoke, eval=FALSE, echo=TRUE}
 Rscript benchmarks/duckvep_haplotypes.R \
   --transcripts 16 --samples 4 --overlap 4 --passes 1 --diagnostic
 ```
@@ -255,13 +265,23 @@ fixture table and the derived source table. Output fingerprints include the
 raw lane's complete schema and reference paths; they are not substituted for
 decoded-output fingerprints.
 
-```{bash source-record-smoke, eval=FALSE}
+```{bash source-record-smoke, eval=FALSE, echo=TRUE}
 Rscript benchmarks/duckvep_haplotypes.R \
   --transcripts 16 --samples 4 --overlap 4 --passes 1 \
   --modes native,sql,sql_records --diagnostic
 ```
 
-No source-bound raw-lane measurement is recorded in the tables above. A
-clean-build run with three passes is required before a timing comparison;
-different output denominators preclude treating raw versus decoded time as an
-implementation speedup.
+The source-bound raw lane uses three fresh-process passes at the current source,
+with one thread pinned to CPU 2. Its timing and process RSS appear in the timing
+table above; its input and output denominators are:
+
+```{r raw-denominators}
+knitr::kable(raw[c("transcripts", "samples", "overlap", "input_physical_records",
+  "input_record_sample_calls", "input_candidate_sample_rows", "output_leaves", "output_carriers")],
+  row.names = FALSE)
+knitr::kable(raw[c("output_leaves", "cds_bytes", "protein_bytes", "json_bytes")], row.names = FALSE)
+```
+
+There is no earlier source-bound raw-lane measurement for a same-contract
+comparison. Different output denominators preclude treating raw versus decoded
+time as an implementation speedup.

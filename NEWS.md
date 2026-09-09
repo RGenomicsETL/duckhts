@@ -1,6 +1,11 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+
+- record six source-bound phased-replay workloads and one raw-record SQL workload,
+  with three fresh-process passes each, complete fingerprints and explicit
+  output-schema differences from the prior benchmark revision
+
 - fail SQLLogicTest runs on malformed test syntax, with process-status controls
   for individual files, file lists and directory runs
 
