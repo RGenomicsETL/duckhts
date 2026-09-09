@@ -94,6 +94,8 @@ typedef struct {
 } duckvep_haplotype_projection_t;
 
 typedef struct {
+    /* Source bytes are contiguous REF then ALT in the retained allele ring;
+     * neither span crosses its end. They remain valid throughout this drain. */
     duckvep_haplotype_source_t source;
     duckvep_cds_edit_status_t projection_status;
     uint8_t evidence_flags;

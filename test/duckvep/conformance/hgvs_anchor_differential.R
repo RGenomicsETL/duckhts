@@ -34,6 +34,9 @@ run <- function() {
     'src/duckvep/duckvep_haplotype_sql.c', 'src/duckvep/duckvep_reference.c',
     'src/duckvep/duckvep_reference.h', 'src/duckvep/kernel/src/duckvep_kernel.c',
     'src/duckvep/kernel/src/duckvep_annotation_internal.h',
+    'src/duckvep/kernel/src/duckvep_event.h',
+    'src/duckvep/kernel/src/duckvep_haplotype_stream.c',
+    'src/duckvep/kernel/src/duckvep_haplotype_stream.h',
     'third_party/patches/htslib/0003-add-caller-buffer-faidx-fetch.patch',
     'third_party/patches/htslib/0004-check-faidx-coordinate-and-seek-arithmetic.patch',
     'third_party/htslib/faidx.c', 'third_party/htslib/htslib/faidx.h')

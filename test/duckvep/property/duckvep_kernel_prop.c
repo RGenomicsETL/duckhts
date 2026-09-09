@@ -9934,6 +9934,17 @@ TEST haplotype_stream_recycles_owned_alleles_and_projection_slots(void) {
             ASSERT_EQ(UINT64_MAX - drained, leaf.contributors[0].source.event_id);
             ASSERT_EQ('A', leaf.contributors[0].source.ref[0]);
             ASSERT_EQ(drained % 2u ? 'C' : 'A', leaf.contributors[0].source.alt[0]);
+            const duckvep_haplotype_contributor_t *contributor = &leaf.contributors[0];
+            const duckvep_haplotype_source_t *retained = &contributor->source;
+            ASSERT(retained->ref >= f.alleles);
+            ASSERT(retained->alt == retained->ref + retained->ref_len);
+            ASSERT(retained->alt + retained->alt_len <= f.alleles + f.buffers.allele_capacity);
+            duckvep_event_t prepared = {0};
+            ASSERT(duckvep_event_prepare_small(retained->pos1, retained->ref, retained->ref_len,
+                retained->alt, retained->alt_len, &prepared));
+            prepared.chrom_id = retained->chrom_id;
+            ASSERT(contributor->prepared != NULL);
+            ASSERT_MEM_EQ(&prepared, contributor->prepared, sizeof prepared);
             ASSERT_EQ(DUCKVEP_CDS_EDIT_OK, leaf.projection_status);
             ASSERT_EQ(DUCKVEP_HAPLOTYPE_OK, leaf.sequence_status);
             ASSERT_EQ(drained % 2u ? 12u : 14u, leaf.cds_length);
@@ -12524,8 +12535,9 @@ TEST observed_single_pair_matches_cursor_without_sweep_storage(void) {
                 }
                 if (rl == al && !memcmp(alleles, alleles + rl, rl))
                     alleles[rl] = alleles[rl] == 'A' ? 'C' : 'A';
-                duckvep_event_t event;
+                duckvep_event_t event = {0};
                 ASSERT(duckvep_event_prepare_small(pos, alleles, rl, alleles + rl, al, &event));
+                event.chrom_id = s.chrom;
                 uint32_t ro = 0u, ao = rl;
                 duckvep_variant_batch_t variant = {.chrom_id = &s.chrom, .pos1 = &pos, .end1 = &end,
                     .ref_offset = &ro, .alt_offset = &ao, .ref_length = &rl, .alt_length = &al,
@@ -12543,7 +12555,7 @@ TEST observed_single_pair_matches_cursor_without_sweep_storage(void) {
                 duckvep_status_t filled = duckvep_annotate_cursor_fill(cursor, &result, &error);
                 ASSERT(filled == DUCKVEP_OK || filled == DUCKVEP_ERR_RESULT_FULL);
                 ASSERT(result.count <= 1u);
-                ASSERT_EQ(DUCKVEP_OK, duckvep_annotate_pair_observed(model, &variant, 0u,
+                ASSERT_EQ(DUCKVEP_OK, duckvep_annotate_pair_observed(model, &variant, &event, 0u,
                     &scratch, annotation_observer_capture_row, &direct_capture, &error));
                 ASSERT_MEM_EQ(cursor_capture.rows, direct_capture.rows, sizeof cursor_capture.rows);
                 ASSERT_MEM_EQ(cursor_capture.events, direct_capture.events, sizeof cursor_capture.events);
@@ -12554,8 +12566,34 @@ TEST observed_single_pair_matches_cursor_without_sweep_storage(void) {
                 ASSERT_EQ(0u, result.count);
                 duckvep_annotate_cursor_close(cursor);
                 compared++;
-                ASSERT_EQ(DUCKVEP_ERR_INVALID_ARG, duckvep_annotate_pair_observed(model, &variant, 1u,
+                ASSERT_EQ(DUCKVEP_ERR_INVALID_ARG, duckvep_annotate_pair_observed(model, &variant, &event, 1u,
                     &scratch, annotation_observer_capture_row, &direct_capture, &error));
+                if (draw == 0u) {
+                    struct annotation_observer_capture rejected = {.expected_batch = &variant};
+                    for (unsigned fault = 0u; fault < 8u; fault++) {
+                        duckvep_event_t bad = event;
+                        if (fault == 0u) bad.chrom_id++;
+                        if (fault == 1u) bad.raw_start1++;
+                        if (fault == 2u) bad.raw_end1++;
+                        if (fault == 3u) bad.ref_diff_length = UINT16_MAX;
+                        if (fault == 4u) bad.alt_diff_length = UINT16_MAX;
+                        if (fault == 5u) bad.feature_allele_offset = UINT16_MAX;
+                        if (fault == 6u) bad.anchor_ref_offset = UINT16_MAX;
+                        if (fault == 7u) bad.has_mate = 1u;
+                        ASSERT_EQ(DUCKVEP_ERR_INVALID_ARG, duckvep_annotate_pair_observed(
+                            model, &variant, &bad, 0u, &scratch,
+                            annotation_observer_capture_row, &rejected, &error));
+                    }
+                    ASSERT_EQ(DUCKVEP_ERR_INVALID_ARG, duckvep_annotate_pair_observed(
+                        model, &variant, NULL, 0u, &scratch,
+                        annotation_observer_capture_row, &rejected, &error));
+                    variant.allele_bytes_len--;
+                    ASSERT_EQ(DUCKVEP_ERR_OUT_OF_RANGE, duckvep_annotate_pair_observed(
+                        model, &variant, &event, 0u, &scratch,
+                        annotation_observer_capture_row, &rejected, &error));
+                    variant.allele_bytes_len++;
+                    ASSERT_EQ(0u, rejected.count);
+                }
             }
         duckvep_options_close(options);
         duckvep_workspace_close(workspace);

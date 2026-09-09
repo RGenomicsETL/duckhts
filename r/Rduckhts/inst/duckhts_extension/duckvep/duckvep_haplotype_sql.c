@@ -63,8 +63,8 @@ typedef struct {
     duckvep_hgvs_protein_operation_t *protein_operations;
     duckvep_reference_reader_t reference;
     duckvep_delta_scratch_t hgvs_scratch;
-    uint8_t *hgvs_alleles, *hgvs_shifted_allele;
-    size_t hgvs_allele_capacity, hgvs_shifted_capacity;
+    uint8_t *hgvs_shifted_allele;
+    size_t hgvs_shifted_capacity;
     char *hgvsp;
     size_t workspace_bytes;
 } haplotype_state_t;
@@ -217,7 +217,7 @@ static void haplotype_state_destroy(void *pointer) {
     free(s->reference.bases);
     free(s->hgvs_scratch.edits); free(s->hgvs_scratch.alt_cds);
     free(s->hgvs_scratch.ref_peptide); free(s->hgvs_scratch.alt_peptide);
-    free(s->hgvs_alleles); free(s->hgvs_shifted_allele);
+    free(s->hgvs_shifted_allele);
     free(s->gt); free(s->phase); free(s->sets); free(s);
 }
 
@@ -253,7 +253,6 @@ static int workspace_allocate(haplotype_state_t *s, const haplotype_bind_t *bind
         s->hgvs_scratch.edits_cap = n[LIMIT_LEAF_EDITS] < islands ? n[LIMIT_LEAF_EDITS] : islands;
         s->hgvs_scratch.alt_cds_cap = n[LIMIT_SEQUENCE];
         s->hgvs_scratch.ref_peptide_cap = s->hgvs_scratch.alt_peptide_cap = n[LIMIT_SEQUENCE] / 3u + 1u;
-        s->hgvs_allele_capacity = n[LIMIT_ALLELES] < 2u * UINT16_MAX ? n[LIMIT_ALLELES] : 2u * UINT16_MAX;
         s->hgvs_shifted_capacity = n[LIMIT_ALLELES] < UINT16_MAX + 1u ? n[LIMIT_ALLELES] : UINT16_MAX + 1u;
     }
     /* Count every byte before allocating any of the arrays. Each pointer has
@@ -284,7 +283,6 @@ static int workspace_allocate(haplotype_state_t *s, const haplotype_bind_t *bind
     X(s->hgvs_scratch.alt_cds, s->hgvs_scratch.alt_cds_cap) \
     X(s->hgvs_scratch.ref_peptide, s->hgvs_scratch.ref_peptide_cap) \
     X(s->hgvs_scratch.alt_peptide, s->hgvs_scratch.alt_peptide_cap) \
-    X(s->hgvs_alleles, s->hgvs_allele_capacity) \
     X(s->hgvs_shifted_allele, s->hgvs_shifted_capacity) \
     X(s->gt, bind->source_records ? 0u : n[LIMIT_PLOIDY]) \
     X(s->phase, bind->source_records ? 0u : n[LIMIT_PLOIDY]) \
@@ -722,31 +720,30 @@ static int haplotype_hgvs_observe(void *pointer, const duckvep_variant_batch_t *
 static int append_single_event_hgvsp(duckdb_vector text, duckdb_vector status_vector, idx_t row,
     haplotype_state_t *s, const haplotype_bind_t *bind, const duckvep_haplotype_leaf_t *leaf,
     char *error, size_t error_size) {
-    const duckvep_haplotype_source_t *source = &leaf->contributors[0].source;
+    const duckvep_haplotype_contributor_t *contributor = &leaf->contributors[0];
+    const duckvep_haplotype_source_t *source = &contributor->source;
     size_t bytes = (size_t)source->ref_len + source->alt_len;
-    if (bytes > s->hgvs_allele_capacity) {
-        snprintf(error, error_size, "duckvep_haplotypes: HGVS allele bytes=%zu, required=%zu at event %llu",
-            s->hgvs_allele_capacity, bytes, (unsigned long long)source->event_id);
-        return 0;
-    }
-    memcpy(s->hgvs_alleles, source->ref, source->ref_len);
-    memcpy(s->hgvs_alleles + source->ref_len, source->alt, source->alt_len);
-    duckvep_event_t event;
-    if (!duckvep_event_prepare_small(source->pos1, source->ref, source->ref_len,
-            source->alt, source->alt_len, &event)) {
-        duckvep_sql_set_error(error, error_size, "duckvep_haplotypes: invalid source allele for HGVS");
-        return 0;
+    const duckvep_event_t *event = contributor->prepared;
+    duckvep_event_t normalized = {0};
+    if (source->source_record) {
+        if (!duckvep_event_prepare_small(source->pos1, source->ref, source->ref_len,
+                source->alt, source->alt_len, &normalized)) {
+            duckvep_sql_set_error(error, error_size, "duckvep_haplotypes: invalid source allele for HGVS");
+            return 0;
+        }
+        normalized.chrom_id = source->chrom_id;
+        event = &normalized;
     }
     uint32_t ref_offset = 0u, alt_offset = source->ref_len;
     duckvep_variant_batch_t variant = {.chrom_id = &source->chrom_id, .pos1 = &source->pos1,
-        .end1 = &event.raw_end1, .ref_offset = &ref_offset, .alt_offset = &alt_offset,
+        .end1 = &event->raw_end1, .ref_offset = &ref_offset, .alt_offset = &alt_offset,
         .ref_length = &source->ref_len, .alt_length = &source->alt_len,
-        .allele_bytes = s->hgvs_alleles, .allele_bytes_len = bytes, .variant_kind = &event.kind,
+        .allele_bytes = source->ref, .allele_bytes_len = bytes, .variant_kind = &event->kind,
         .count = 1u};
     haplotype_hgvs_observer_t observer = {.state = s, .bind = bind,
         .status = DUCKVEP_HGVS_NOT_APPLICABLE, .error = error, .error_size = error_size};
     duckvep_error_t native_error = {0};
-    if (duckvep_annotate_pair_observed(bind->entry->model.kernel, &variant,
+    if (duckvep_annotate_pair_observed(bind->entry->model.kernel, &variant, event,
             leaf->carriers.transcript_index, &s->hgvs_scratch, haplotype_hgvs_observe,
             &observer, &native_error) != DUCKVEP_OK) {
         if (!error[0]) duckvep_sql_set_error(error, error_size, native_error.message);

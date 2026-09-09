@@ -1,6 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
 
+- use retained allele storage for singleton HGVS in rduckhts_haplotypes, with
+  bounded-pool tests spanning input and output vectors for decoded and raw records
+
 - compile bundled caller-buffer FASTA size checks without Clang's out-of-range
   comparison warning, retaining overflow checks on native and 32-bit targets
 

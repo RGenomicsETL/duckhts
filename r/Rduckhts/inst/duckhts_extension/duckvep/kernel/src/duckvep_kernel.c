@@ -2591,13 +2591,39 @@ static duckvep_status_t validate_result_builder_for_append(
 
 DUCKVEP_INTERNAL_API duckvep_status_t duckvep_annotate_pair_observed(
     const duckvep_model_t *model, const duckvep_variant_batch_t *variants,
-    uint32_t transcript_index, duckvep_delta_scratch_t *scratch,
+    const duckvep_event_t *event, uint32_t transcript_index, duckvep_delta_scratch_t *scratch,
     duckvep_annotation_observer_fn observer, void *observer_context,
     duckvep_error_t *error) {
-    if (!model || !variants || variants->count != 1u ||
+    if (!model || !variants || variants->count != 1u || !event ||
+        !variants->chrom_id || !variants->pos1 || !variants->end1 || !variants->variant_kind ||
+        !variants->ref_offset || !variants->alt_offset || !variants->ref_length ||
+        !variants->alt_length || !variants->allele_bytes ||
         transcript_index >= model->transcripts.transcript_count || !scratch || !observer) {
         return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_PAIR_COLUMNS,
-            "observed pair requires one variant, a model transcript, scratch and an observer");
+            "observed pair requires one prepared literal allele, a model transcript, scratch and an observer");
+    }
+    if (!duckvep_event_allele_slices_ok(variants, 0u)) {
+        return fail(error, DUCKVEP_ERR_OUT_OF_RANGE, DVW_ANN_ALLELE_RANGE,
+            "REF/ALT slice outside allele_bytes_len");
+    }
+    if (!variants->ref_length[0] || !variants->alt_length[0] ||
+        !event->raw_start1 || event->raw_end1 < event->raw_start1 ||
+        event->raw_start1 != variants->pos1[0] || event->raw_end1 != variants->end1[0] ||
+        (uint64_t)event->raw_end1 - event->raw_start1 + 1u != variants->ref_length[0] ||
+        event->kind != variants->variant_kind[0] || event->kind >= DUCKVEP_KIND_SV ||
+        event->chrom_id != variants->chrom_id[0] ||
+        event->chrom_id != model->transcripts.chrom_id[transcript_index] ||
+        event->sv_type != DUCKVEP_SV_NONE || event->copy_change != DUCKVEP_COPY_CHANGE_UNKNOWN ||
+        event->has_mate ||
+        (variants->sv_type && variants->sv_type[0] != DUCKVEP_SV_NONE) ||
+        (variants->copy_change && variants->copy_change[0] != DUCKVEP_COPY_CHANGE_UNKNOWN) ||
+        (uint32_t)event->ref_diff_offset + event->ref_diff_length > variants->ref_length[0] ||
+        (uint32_t)event->alt_diff_offset + event->alt_diff_length > variants->alt_length[0] ||
+        event->feature_allele_offset > variants->ref_length[0] ||
+        event->feature_allele_offset > variants->alt_length[0] ||
+        event->anchor_ref_offset >= variants->ref_length[0]) {
+        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_PAIR_ORDER,
+            "prepared literal allele does not match the source view or transcript");
     }
     const struct duckvep_options options = {
         .splice_region_exonic = DUCKVEP_DEFAULT_SPLICE_REGION_EXONIC,
@@ -2605,19 +2631,10 @@ DUCKVEP_INTERNAL_API duckvep_status_t duckvep_annotate_pair_observed(
         .compatibility_profile = DUCKVEP_COMPAT_VEP_116
     };
     struct duckvep_workspace workspace = {.model = model, .force_generalized_annotation = 1};
-    duckvep_event_t event;
-    duckvep_status_t status = validate_common_annotate_args(
-        model, variants, &options, &workspace, &event, 0, error);
-    if (status != DUCKVEP_OK) return status;
-    if (event.kind == DUCKVEP_KIND_SV ||
-        event.chrom_id != model->transcripts.chrom_id[transcript_index]) {
-        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_PAIR_ORDER,
-            "observed pair requires a literal allele on the transcript's sequence region");
-    }
     duckvep_consequence_t row;
     duckvep_result_builder_t result;
     duckvep_result_builder_init(&result, &row, 1u);
-    struct annotate_ctx ctx = {.model = model, .variants = variants, .events = &event,
+    struct annotate_ctx ctx = {.model = model, .variants = variants, .events = event,
         .options = &options, .workspace = &workspace, .delta_scratch = scratch,
         .results = &result, .observer = observer, .observer_context = observer_context,
         .status = DUCKVEP_OK, .prepared_variant_idx = UINT32_MAX};

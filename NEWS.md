@@ -2,6 +2,9 @@
 
 # duckhts 1.5.1.9000
 
+- reuse retained source alleles and prepared decoded-event geometry for singleton
+  phased HGVS; raw-record replay retains its distinct full-span interpretation
+
 - benchmark singleton phased replay with HGVS enabled and disabled on identical
   registered inputs, checking all outputs, source membership and independent-event HGVS
 
@@ -14,8 +17,9 @@
 - compare empty applied-source sets consistently across JSON and native conformance
   observations, with controls rejecting missing fields, invalid identities and lost sources
 
-- require runnable, input-identified evidence for upstream-defect claims in ERRATA.md;
-  VEP-116 HGVS expectations and compatibility failures remain independent of those claims
+- state pinned Ensembl VEP 116 as the HGVS acceptance authority in ERRATA.md;
+  distinguish sequence equivalence from per-record compatibility and require runnable,
+  independently supported evidence for upstream-defect claims without waiving failures
 
 - extend the phased model conformance generator with quota-controlled interacting
   edits across exon/UTR layouts, retaining the original inputs and RNG stream

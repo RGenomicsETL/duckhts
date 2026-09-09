@@ -4,6 +4,56 @@ library(DBI)
 local({
   con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE))
+  tx <- paste("SELECT i::UINTEGER transcript_index,0::UINTEGER seq_region,",
+    "(100+20*i)::UBIGINT transcript_start,(111+20*i)::UBIGINT transcript_end,",
+    "1::TINYINT strand,0::UINTEGER gene_index,3::UBIGINT transcript_flags,",
+    "transcript_start AS cds_start,transcript_end AS cds_end,",
+    "'AAAAAAAAAAAA'::BLOB cds_sequence,1::UTINYINT codon_table,",
+    "''::BLOB pre_cds_sequence,''::BLOB post_cds_sequence FROM range(2051) t(i)")
+  ex <- paste("SELECT i::UINTEGER transcript_index,(100+20*i)::UBIGINT exon_start,",
+    "(111+20*i)::UBIGINT exon_end,1::UBIGINT exon_cdna_start,12::UBIGINT exon_cdna_end,",
+    "0::TINYINT phase,0::TINYINT end_phase FROM range(2051) t(i)")
+  expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('borrowed',",
+    "'SELECT 0::UINTEGER seq_region',", dbQuoteString(con, tx), ",",
+    dbQuoteString(con, ex), ")"))$loaded)
+  calls <- paste("SELECT i+1 AS event_index,0 AS seq_region,100+20*i AS position,",
+    "CASE WHEN i%2=0 THEN 'A' ELSE 'AAA' END AS reference,",
+    "CASE WHEN i%2=0 THEN 'C' ELSE 'CAA' END AS alternate,1 AS alt_index,",
+    "i AS transcript_index,s AS sample_index,[1,1] AS alleles,[true,true] AS phase_before,",
+    "NULL::BIGINT AS phase_set FROM range(2051) t(i) CROSS JOIN range(3) samples(s)")
+  for (threads in c(1L, 4L)) for (mode in c("alt_events", "source_records")) {
+    dbExecute(con, paste("SET threads =", threads))
+    query <- if (mode == "alt_events") calls else paste("SELECT event_index,seq_region,",
+      "position,reference,[alternate] alternates,transcript_index,sample_index,'1|1' gt FROM (",
+      calls, ")")
+    # Raw input retains REF and undefined-slot descriptors as well as ALT.
+    raw <- mode == "source_records"
+    result <- rduckhts_haplotypes(con, query, "borrowed", hgvs = TRUE, input_mode = mode,
+      phase_policy = if (raw) "vep116_compat" else "strict",
+      max_active_events = if (raw) 3 else 2, max_active_transcripts = 1,
+      max_active_projections = if (raw) 3 else 2, max_allele_bytes = if (raw) 24 else 8)
+    expect_equal(nrow(result), 2051L)
+    expect_equal(sort(result$transcript_index), 0:2050)
+    expect_true(all(result$carrier_count == 6 & result$cds == "CAAAAAAAAAAA" &
+      result$protein == "QKKK"))
+    # Independent annotation uses uncertain-start HGVS and needs FASTA for the
+    # padded allele. No missing value may be replaced by a guessed protein label.
+    expect_identical(result$hgvsp, ifelse(result$transcript_index %% 2 == 0, "p.(Lys1?)", NA_character_))
+    expect_identical(result$hgvsp_status, ifelse(result$transcript_index %% 2 == 0, "ok", "missing_reference"))
+    expect_true(all(vapply(result$contributors, nrow, 0L) == 1L))
+    provenance <- do.call(rbind, result$contributors)
+    expect_equal(provenance$event_index, result$transcript_index + 1)
+    expect_equal(provenance$position, 100 + 20 * result$transcript_index)
+    expect_identical(provenance$reference, ifelse(result$transcript_index %% 2 == 0, "A", "AAA"))
+    expect_identical(provenance$alternate, ifelse(result$transcript_index %% 2 == 0, "C", "CAA"))
+    expect_true(all(vapply(result$carriers, function(x)
+      identical(sort(as.integer(x$sample_index)), rep(0:2, each = 2L)), FALSE)))
+  }
+})
+
+local({
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
   tx <- paste("SELECT 0::UINTEGER transcript_index,0::UINTEGER seq_region,",
     "11::UBIGINT transcript_start,45::UBIGINT transcript_end,1::TINYINT strand,",
     "0::UINTEGER gene_index,3::UBIGINT transcript_flags,11::UBIGINT cds_start,",

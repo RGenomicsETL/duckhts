@@ -5,17 +5,19 @@ observed DuckVEP conformance gaps, and separately assessed upstream errata.
 
 ## Required target: pinned Ensembl VEP 116
 
-**The required compatibility target is pinned Ensembl VEP 116.** Within DuckVEP's
-declared supported surface, this includes each source record's HGVSc and HGVSp
-presentation, input-representation-dependent results, and absent HGVS values. Compare
-each original record and source ALT against that executable with matching reference,
-transcript model and settings. This is the acceptance contract, not a claim that all
-DuckVEP paths already conform.
+**DuckVEP follows pinned Ensembl VEP 116. HGVS presentation is not a spelling choice.**
+Within the declared supported surface, the acceptance contract is the pinned
+executable's output for each original record and source ALT, using the same reference,
+transcript model and settings. This includes HGVSc, HGVSp, input-representation-dependent
+results and absent HGVS values. It is a required target, not a claim that every DuckVEP
+path already conforms.
 
-**DuckVEP must reproduce VEP-116 output, not substitute a preferred HGVS spelling.**
-Sequence-equivalent inputs remain distinct source records with their own expected
-VEP-116 outputs. Neither a canonical HGVS spelling nor another tool's output may
-replace those expectations to make a compatibility test pass.
+**Sequence equivalence does not waive a VEP-116 mismatch.** Equivalent inputs retain
+their separate source identities and per-record expectations. A different string must
+be classified by what it asserts: two spellings may describe the same change, whereas
+different asserted termination positions describe different protein outcomes. Neither
+a preferred canonical spelling nor another tool's output may replace the pinned
+expectations to make a compatibility test pass.
 
 **HGVS recommendations are a separate audit reference.** Matching VEP 116 does not
 establish HGVS nomenclature correctness. A disagreement does not establish a VEP defect.

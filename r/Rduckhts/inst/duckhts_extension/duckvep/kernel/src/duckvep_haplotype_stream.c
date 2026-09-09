@@ -175,7 +175,7 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_begin(
     if (source->source_record && !source->allele_index &&
         (source->ref_len != source->alt_len || memcmp(source->ref, source->alt, source->ref_len)))
         return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
-    duckvep_event_t prepared;
+    duckvep_event_t prepared = {0};
     int valid = source->source_record
         ? duckvep_event_prepare_replacement(source->pos1, source->ref, source->ref_len,
             source->alt, source->alt_len, &prepared)

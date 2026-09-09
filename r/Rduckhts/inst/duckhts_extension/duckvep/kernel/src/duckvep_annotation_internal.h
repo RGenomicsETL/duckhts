@@ -45,13 +45,17 @@ DUCKVEP_INTERNAL_API void duckvep_annotate_cursor_set_observer(
     void                               *observer_context);
 
 /* Observe one explicitly selected transcript for a one-row literal-allele
- * batch. Uses VEP-116 defaults with zero upstream/downstream reach and the
- * same consequence/projection machinery as the cursor. Caller scratch is
- * borrowed; no sweep state or heap storage is constructed. The callback may
- * be omitted by transcript admission, and must consume its facts in place. */
+ * batch and its already prepared duckvep_event_prepare_small geometry. The
+ * caller owns the matching immutable source bytes and initializes the event's
+ * chromosome and non-structural metadata. Full-span source replacements are
+ * not this geometry: normalize their HGVS interpretation separately. Uses
+ * VEP-116 defaults with zero upstream/downstream reach and the same consequence
+ * machinery as the cursor. No allele normalization, sweep state or heap
+ * storage is constructed here. The callback may be omitted by transcript
+ * admission and must consume its borrowed facts before returning. */
 DUCKVEP_INTERNAL_API duckvep_status_t duckvep_annotate_pair_observed(
     const duckvep_model_t *model, const duckvep_variant_batch_t *variants,
-    uint32_t transcript_index, duckvep_delta_scratch_t *scratch,
+    const duckvep_event_t *event, uint32_t transcript_index, duckvep_delta_scratch_t *scratch,
     duckvep_annotation_observer_fn observer, void *observer_context,
     duckvep_error_t *error);
 
