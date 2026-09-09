@@ -2,6 +2,10 @@
 
 # duckhts 1.5.1.9000
 
+- retain source-bound nominal-length conformance and same-input phased benchmarks,
+  including the complete failing finite-phase audit and the long-CDS alignment-limit
+  failure; benchmark reports distinguish changed output and concurrent workloads
+
 - bind finite-phase replay sequences and applied alleles to transcript/sample/lane
   observations before aggregation; publication rejects rehashed lane swaps while
   preserving genuine lane-association failures and every comparison profile

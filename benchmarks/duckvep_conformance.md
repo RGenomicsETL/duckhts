@@ -683,7 +683,7 @@ Whole-haplotype SO/HGVS remains unfinished.
 |      3 |   768 |           768 |         1536 |         2304 |                        1332 |
 |      4 |  6144 |          6144 |        12288 |        24576 |                       16800 |
 
-Source f70535b36af8c1107c14800cb64d63cd6041fd36 records a **failing
+Source c69e0e0cf124c65cc8e23c25ca80691bd446a2cd records a **failing
 decoded-call/raw-parser comparison**: 6990 disagreements in 7020
 profiles. It is not a population error rate or a replacement for the
 passing literal-sequence corpus. This lane uses public
@@ -1083,6 +1083,21 @@ rate or certify arbitrary reference models, grouped upstream flags,
 phase sets, structural composition or complete phased SO/HGVS. The
 grouped-metadata publication failures below remain unresolved.
 
+| source_revision                          | max_alignment_cells | required_alignment_cells | profiles | records | intended_sample_file_lanes | execution_status   |
+|:-----------------------------------------|--------------------:|-------------------------:|---------:|--------:|---------------------------:|:-------------------|
+| c69e0e0cf124c65cc8e23c25ca80691bd446a2cd |            16777216 |                 37742592 |    29520 |  194448 |                     177120 | native_query_error |
+
+The clean source-bound campaign above combines 32 draws in each
+fixed-model rare stratum with one draw in every geometry, interaction
+and CDS-length stratum. It stops at transcript 28,010, a 6,143-base CDS,
+because exact traceback needs 37,742,592 cells against the declared
+16,777,216-cell limit. All 29,520 input profiles and upstream
+observations remain in its receipt. Native output and comparison counts
+were not produced. This is a failed execution, not zero disagreements.
+The chained seed 20260906 did not execute; neither seed is certified by
+this campaign. No input, alignment algorithm or limit was changed to
+pass it.
+
 ### Repeated-model publication audit
 
 |     seed | profiles | observed_carriers | failures | published_oracle_disagreements | publication_pass |
@@ -1152,7 +1167,7 @@ unresolved.
 |      173 |    11520 |          23040 |           69120 |           46080 |                       23040 |                 27648 |        0 |
 | 20260906 |    11520 |          23040 |           69120 |           46080 |                       23040 |                 27648 |        0 |
 
-Source 16afccd0fd795df318bbd8b3e66f89b8321da022 passes **23,040
+Source c69e0e0cf124c65cc8e23c25ca80691bd446a2cd passes **23,040
 generated models**. Each seed supplies 32 draws in all 360 cells: three
 start codons (ATG/CTG/TTG), internal-stop presence, terminal-stop
 presence, both strands, three all-missing GT spellings and five
@@ -1176,7 +1191,13 @@ memberships implicit. All **46,080** implicit memberships are checked
 upstream and must be absent from native output; no oracle sequence is
 inserted into the native comparison. Native contributors retain exact
 source IDs, regions, positions, REF/ALT bytes, allele ordinals, evidence
-and projection status. All 29 corruption controls pass per seed.
+and projection status. All 29 corruption controls pass per seed. Each
+run also passes 25 metadata and 16 output controls. Metadata comparisons
+retain the exact signed nominal edit-length sum for each mutation lane
+and the observed upstream owner of each sequence group. They do not
+infer nominal length from the final CDS length or from frame bits. Older
+history rows leave these unmeasured metadata fields empty rather than
+implying a pass.
 
 A sample without retained exon-overlapping genotypes uses the curated
 reference peptide, preserving internal stops and legitimate-start

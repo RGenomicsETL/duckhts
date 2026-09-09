@@ -3,8 +3,8 @@ Phased replay: native stream and public SQL
 
 <!-- duckvep_haplotypes.md is generated from duckvep_haplotypes.Rmd. -->
 
-Compound-replay source: be6c4383b7c6fc8c4e7fd5b7f1bfc2cd3181d8b1;
-same-input baseline: ac423de1e6ec0f449b2f5ff2367763e009115b0a. Native
+Compound-replay source: c69e0e0cf124c65cc8e23c25ca80691bd446a2cd;
+same-input baseline: be6c4383b7c6fc8c4e7fd5b7f1bfc2cd3181d8b1. Native
 measurements cover literal phased replay. SQL materializes all current
 fields, including local coding-block SO. HGVS generation is disabled;
 whole-haplotype SO/HGVS is unfinished and its computation is not timed
@@ -47,9 +47,20 @@ full, canonicalized nested-row fingerprint; failed runs are not
 promoted. Full fingerprints must also agree across revisions sharing an
 output contract. Local coding-block and literal-replay projections
 provide separate comparisons with their recorded output contracts; full
-current output is always checked. The HGVS-status schema adds `hgvsp`
-(NULL) and `hgvsp_status` (`not_requested`) in this workload. Only the
-separate prior-schema projections exclude these columns.
+current output is always checked. Contracts ending in
+`_nominal_length_diff` include the exact signed sum of source
+replacement-length changes. The verifier calculates that sum from
+fixture alleles, independently of replayed CDS and block lengths, and
+rejects a +3 corruption that preserves frame category. Historical
+contracts do not certify this numeric field.
+
+`hgvs_so_*` fingerprints retain every local-SO/HGVS-schema field and
+exclude only `nominal_length_diff`. `local_so_*` additionally excludes
+`hgvsp` and `hgvsp_status`; `replay_*` also projects each block to its
+literal replay fields. `non_hgvs_*` retains nominal length for the
+current HGVS-on/off comparison. The recorded contract determines which
+fields were measured; historical full fingerprints are used only for
+projections identical to their recorded schema.
 
 | transcripts | samples | overlap | input_records | projected_events | input_calls | output_leaves | output_carriers | prefixes_created | translated_bases |
 |------------:|--------:|--------:|--------------:|-----------------:|------------:|--------------:|----------------:|-----------------:|-----------------:|
@@ -71,35 +82,37 @@ observed in the native stream, not inferred SQL counters.
 
 | transcripts | samples | overlap | mode        | min_s | median_s | max_s | max_process_rss_mib |
 |------------:|--------:|--------:|:------------|------:|---------:|------:|--------------------:|
-|        1024 |       4 |       1 | native      | 0.003 |    0.003 | 0.003 |              73.852 |
-|        1024 |       4 |       1 | sql         | 0.051 |    0.052 | 0.052 |             218.504 |
-|        1024 |      64 |       1 | native      | 0.013 |    0.014 | 0.014 |              73.699 |
-|        1024 |      64 |       1 | sql         | 0.345 |    0.346 | 0.376 |             376.996 |
-|        1024 |      64 |      16 | native      | 0.017 |    0.017 | 0.018 |              73.699 |
-|        1024 |      64 |      16 | sql         | 0.351 |    0.354 | 0.355 |             376.867 |
-|        1024 |      64 |      16 | sql_records | 0.734 |    0.734 | 0.738 |             611.840 |
-|        1024 |      64 |      64 | native      | 0.019 |    0.019 | 0.019 |              73.695 |
-|        1024 |      64 |      64 | sql         | 0.355 |    0.355 | 0.365 |             376.309 |
-|        1024 |     256 |       1 | native      | 0.047 |    0.047 | 0.047 |              73.855 |
-|        1024 |     256 |       1 | sql         | 1.327 |    1.331 | 1.333 |             959.578 |
-|       10240 |      64 |      16 | native      | 0.169 |    0.169 | 0.172 |              73.695 |
-|       10240 |      64 |      16 | sql         | 4.138 |    4.157 | 4.168 |            2143.230 |
+|        1024 |       4 |       1 | native      | 0.003 |    0.003 | 0.003 |              73.855 |
+|        1024 |       4 |       1 | sql         | 0.052 |    0.055 | 0.055 |             219.172 |
+|        1024 |      64 |       1 | native      | 0.014 |    0.014 | 0.014 |              73.852 |
+|        1024 |      64 |       1 | sql         | 0.362 |    0.364 | 0.591 |             378.012 |
+|        1024 |      64 |      16 | native      | 0.022 |    0.022 | 0.022 |              73.855 |
+|        1024 |      64 |      16 | sql         | 0.371 |    0.372 | 0.398 |             378.488 |
+|        1024 |      64 |      16 | sql_records | 0.887 |    0.897 | 1.375 |             612.504 |
+|        1024 |      64 |      64 | native      | 0.022 |    0.022 | 0.023 |              73.852 |
+|        1024 |      64 |      64 | sql         | 0.374 |    0.379 | 0.388 |             377.684 |
+|        1024 |     256 |       1 | native      | 0.050 |    0.051 | 0.052 |              73.855 |
+|        1024 |     256 |       1 | sql         | 1.447 |    1.467 | 1.474 |             957.824 |
+|       10240 |      64 |      16 | native      | 0.184 |    0.185 | 0.188 |              73.699 |
+|       10240 |      64 |      16 | sql         | 4.667 |    4.841 | 5.113 |            2135.391 |
 
 Both compared revisions return each block’s local SO mask, coding status
 and position relative to the first stop. A shared coding context
-evaluates physical blocks on completed replay. Full-output fingerprints
-and input/output denominators match across the compared configurations.
-The native count sink omits local SO evaluation. HGVS-enabled
-performance requires a separate workload.
+evaluates physical blocks on completed replay. The recorded output
+contracts differ. Named prior-schema fingerprints and input/output
+denominators match, but complete rows have different schemas and byte
+counts. This is a same-input comparison, not identical-output work. The
+native count sink omits local SO evaluation. HGVS-enabled performance
+requires a separate workload.
 
 | transcripts | samples | overlap | median_s_before | median_s_after | median_change_percent | max_process_rss_mib_before | max_process_rss_mib_after |
 |------------:|--------:|--------:|----------------:|---------------:|----------------------:|---------------------------:|--------------------------:|
-|        1024 |       4 |       1 |           0.050 |          0.052 |                 4.000 |                    219.137 |                   218.504 |
-|        1024 |      64 |       1 |           0.334 |          0.346 |                 3.593 |                    378.934 |                   376.996 |
-|        1024 |      64 |      16 |           0.337 |          0.354 |                 5.045 |                    379.340 |                   376.867 |
-|        1024 |      64 |      64 |           0.341 |          0.355 |                 4.106 |                    379.176 |                   376.309 |
-|        1024 |     256 |       1 |           1.328 |          1.331 |                 0.226 |                    960.242 |                   959.578 |
-|       10240 |      64 |      16 |           4.188 |          4.157 |                -0.740 |                   2133.344 |                  2143.230 |
+|        1024 |       4 |       1 |           0.052 |          0.055 |                 5.769 |                    218.504 |                   219.172 |
+|        1024 |      64 |       1 |           0.346 |          0.364 |                 5.202 |                    376.996 |                   378.012 |
+|        1024 |      64 |      16 |           0.354 |          0.372 |                 5.085 |                    376.867 |                   378.488 |
+|        1024 |      64 |      64 |           0.355 |          0.379 |                 6.761 |                    376.309 |                   377.684 |
+|        1024 |     256 |       1 |           1.331 |          1.467 |                10.218 |                    959.578 |                   957.824 |
+|       10240 |      64 |      16 |           4.157 |          4.841 |                16.454 |                   2143.230 |                  2135.391 |
 
 Each recorded pass uses a fresh process and a full warm-up. Native
 timing starts after workspace initialization and includes ordered-feed
@@ -128,12 +141,12 @@ comparison.
 
 | transcripts | samples | overlap | output_leaves | cds_bytes | protein_bytes | json_bytes |
 |------------:|--------:|--------:|--------------:|----------:|--------------:|-----------:|
-|        1024 |       4 |       1 |          3072 |    552960 |        184320 |    5068538 |
-|        1024 |      64 |       1 |          3072 |    552960 |        184320 |   12111610 |
-|        1024 |      64 |      16 |          3072 |    552960 |        184320 |   12083838 |
-|        1024 |      64 |      64 |          3072 |    552960 |        184320 |   12067838 |
-|        1024 |     256 |       1 |          3072 |    552960 |        184320 |   34955002 |
-|       10240 |      64 |      16 |         30720 |   5529600 |       1843200 |  121112974 |
+|        1024 |       4 |       1 |          3072 |    552960 |        184320 |    5142266 |
+|        1024 |      64 |       1 |          3072 |    552960 |        184320 |   12185338 |
+|        1024 |      64 |      16 |          3072 |    552960 |        184320 |   12157566 |
+|        1024 |      64 |      64 |          3072 |    552960 |        184320 |   12141566 |
+|        1024 |     256 |       1 |          3072 |    552960 |        184320 |   35028730 |
+|       10240 |      64 |      16 |         30720 |   5529600 |       1843200 |  121850254 |
 
 CDS/protein bytes count the sequence views returned once per occupied
 leaf. JSON bytes are the measured UTF-8 size of complete canonicalized
@@ -166,14 +179,16 @@ sorting and output memory belong to DuckDB and may grow with the
 complete relation. The process RSS table must not be presented as a
 constant-total-memory guarantee.
 
-This matched comparison retains three repeated passes per workload and
-revision. Sanitizer and conformance jobs did not overlap either
-benchmark campaign. Both ran at different times on a shared machine; CPU
-pinning does not isolate the cause of timing differences between
-campaigns. One machine and this deliberately shared synthetic cohort do
-not establish production throughput, statistical significance or a
-general absence of regression. Whole-haplotype SO/HGVS and typed
-structural composition require their own measurements.
+This same-input comparison retains three repeated passes per workload
+and revision. The current campaign overlapped reference and model
+conformance jobs pinned to other CPUs; the recorded baseline did not
+overlap those jobs. Both ran at different times on a shared machine. CPU
+pinning does not isolate memory, thermal or scheduling effects, so
+timing differences do not establish the cost of the code change. One
+machine and this deliberately shared synthetic cohort do not establish
+production throughput, statistical significance or a general absence of
+regression. Whole-haplotype SO/HGVS and typed structural composition
+require their own measurements.
 
 ## Reproduction
 
@@ -220,10 +235,12 @@ sample/transcript, including the occupied reference path. Decoded lanes
 return three paths per transcript and 7/4 carriers per
 sample/transcript. Complete CDS/protein strings, carrier multisets,
 contributor IDs, ALT ordinals and block/edit counts are checked against
-the fixture. Eleven corruption controls cover changed CDS, protein,
-missing CDS, carrier identity, missing ploidy, contributor identity,
-missing ALT ordinal, invented HGVS, changed HGVS status, invalid source
-GT and duplicate output. They run in the separate correctness worker.
+the fixture. Corruption controls cover changed CDS, protein, missing
+CDS, carrier identity, missing ploidy, contributor identity, missing ALT
+ordinal, invented HGVS, changed HGVS status, invalid source GT and
+duplicate output. They run in the separate correctness worker. Contracts
+with `nominal_length_diff` also reject a signed length change of +3
+while all sequence flags remain untouched.
 
 `input_physical_records`, `input_record_sample_calls` and
 `input_candidate_sample_rows` are separately counted from the staged
@@ -252,17 +269,18 @@ appear in the timing table above; its input and output denominators are:
 
 | output_leaves | cds_bytes | protein_bytes | json_bytes |
 |--------------:|----------:|--------------:|-----------:|
-|          4096 |    737280 |        245760 |   14052904 |
+|          4096 |    737280 |        245760 |   14151208 |
 
 The raw-lane comparison uses the same source revisions as the decoded
-comparison. Input hashes, complete output fingerprints, all listed
-denominators, thread count and output contract match between revisions.
-Different output denominators preclude treating raw versus decoded time
-as an implementation speedup.
+comparison. Input hashes, all listed denominators, thread count and the
+complete prior local-SO/HGVS-schema projection match. The full output
+contracts differ; their complete byte counts and fingerprints remain
+separate. Different output denominators preclude treating raw versus
+decoded time as an implementation speedup.
 
 | transcripts | samples | overlap | median_s_before | median_s_after | median_change_percent | max_process_rss_mib_before | max_process_rss_mib_after |
 |------------:|--------:|--------:|----------------:|---------------:|----------------------:|---------------------------:|--------------------------:|
-|        1024 |      64 |      16 |           0.711 |          0.734 |                 3.235 |                    610.504 |                    611.84 |
+|        1024 |      64 |      16 |           0.734 |          0.897 |                22.207 |                     611.84 |                   612.504 |
 
 ## Singleton HGVS materialization
 
@@ -297,8 +315,9 @@ consistency check is not an independent VEP oracle or compound-HGVS
 certificate. The four fixed event shapes do not measure broad HGVS
 conformance.
 
-Nine shared output corruptions and duplicate-output insertion must fail
-the correctness process. HGVS-enabled checks additionally reject missing
+Shared output corruptions and duplicate-output insertion must fail the
+correctness process. Nominal-length contracts also reject a same-frame
++3 numeric corruption. HGVS-enabled checks additionally reject missing
 HGVS and malformed internal parentheses. Whole-output byte counts and
 fingerprints must match every pass of the same mode. All non-HGVS fields
 must match between modes. HGVS-on/off complete outputs intentionally
@@ -307,46 +326,46 @@ retain the derived FASTA/index, actual versus independent HGVS,
 source/binary/input hashes, jobs and process logs. Process RSS includes
 setup, warm-up and post-query aggregates, not just native workspace.
 
-Measured source: `78047f6601ce9ebd1fd8594c0d513bfbe4b664b9`. One thread,
+Measured source: `c69e0e0cf124c65cc8e23c25ca80691bd446a2cd`. One thread,
 CPU 2, Intel i5-13500, DuckDB 1.5.3.
 
 | transcripts | samples | overlap | mode                | median_s | min_s | max_s | peak_process_rss_mib |
 |------------:|--------:|--------:|:--------------------|---------:|------:|------:|---------------------:|
-|        1024 |      64 |      16 | sql_singletons      |    0.337 | 0.337 | 0.338 |             410.5156 |
-|       10240 |      64 |      16 | sql_singletons      |    4.101 | 4.092 | 4.110 |            2192.2852 |
-|        1024 |      64 |      16 | sql_singletons_hgvs |    0.343 | 0.342 | 0.354 |             411.0938 |
-|       10240 |      64 |      16 | sql_singletons_hgvs |    4.136 | 4.131 | 4.162 |            2191.3164 |
+|        1024 |      64 |      16 | sql_singletons      |    0.397 | 0.396 | 0.406 |             411.0273 |
+|       10240 |      64 |      16 | sql_singletons      |    5.229 | 4.837 | 6.093 |            2192.9805 |
+|        1024 |      64 |      16 | sql_singletons_hgvs |    0.399 | 0.398 | 0.412 |             409.7812 |
+|       10240 |      64 |      16 | sql_singletons_hgvs |    5.168 | 5.089 | 5.451 |            2191.1953 |
 
 | transcripts | samples | overlap | mode                | input_physical_records | input_record_sample_calls | input_candidate_sample_rows | output_leaves | output_carriers | cds_bytes | protein_bytes | json_bytes |
 |------------:|--------:|--------:|:--------------------|-----------------------:|--------------------------:|----------------------------:|--------------:|----------------:|----------:|--------------:|-----------:|
-|        1024 |      64 |      16 | sql_singletons      |                    256 |                     16384 |                      262144 |          4096 |           65536 |    737280 |        244736 |    8907368 |
-|        1024 |      64 |      16 | sql_singletons_hgvs |                    256 |                     16384 |                      262144 |          4096 |           65536 |    737280 |        244736 |    8915560 |
-|       10240 |      64 |      16 | sql_singletons      |                   2560 |                    163840 |                     2621440 |         40960 |          655360 |   7372800 |       2447360 |   89236552 |
-|       10240 |      64 |      16 | sql_singletons_hgvs |                   2560 |                    163840 |                     2621440 |         40960 |          655360 |   7372800 |       2447360 |   89318472 |
+|        1024 |      64 |      16 | sql_singletons      |                    256 |                     16384 |                      262144 |          4096 |           65536 |    737280 |        244736 |    9006696 |
+|        1024 |      64 |      16 | sql_singletons_hgvs |                    256 |                     16384 |                      262144 |          4096 |           65536 |    737280 |        244736 |    9014888 |
+|       10240 |      64 |      16 | sql_singletons      |                   2560 |                    163840 |                     2621440 |         40960 |          655360 |   7372800 |       2447360 |   90229832 |
+|       10240 |      64 |      16 | sql_singletons_hgvs |                   2560 |                    163840 |                     2621440 |         40960 |          655360 |   7372800 |       2447360 |   90311752 |
 
-Nearest identical-workload source:
-`68c0b8608c68494b1b4a67813bb838a48bde4331`. Full-output fingerprints,
-input identities and every listed denominator match within each mode.
+Nearest same-input source: `78047f6601ce9ebd1fd8594c0d513bfbe4b664b9`.
+Input identities, every listed denominator and the complete prior
+local-SO/HGVS-schema projection match. Full output contracts and byte
+counts differ; this is not identical-output work.
 
 | transcripts | samples | overlap | mode                | median_s_before | min_s_before | max_s_before | peak_process_rss_mib_before | median_s_after | min_s_after | max_s_after | peak_process_rss_mib_after | median_change_percent |
 |------------:|--------:|--------:|:--------------------|----------------:|-------------:|-------------:|----------------------------:|---------------:|------------:|------------:|---------------------------:|----------------------:|
-|        1024 |      64 |      16 | sql_singletons      |           0.340 |        0.340 |        0.341 |                     411.168 |          0.337 |       0.337 |       0.338 |                   410.5156 |               -0.8824 |
-|        1024 |      64 |      16 | sql_singletons_hgvs |           0.349 |        0.347 |        0.355 |                     409.750 |          0.343 |       0.342 |       0.354 |                   411.0938 |               -1.7192 |
-|       10240 |      64 |      16 | sql_singletons      |           4.123 |        4.113 |        4.179 |                    2191.441 |          4.101 |       4.092 |       4.110 |                  2192.2852 |               -0.5336 |
-|       10240 |      64 |      16 | sql_singletons_hgvs |           4.217 |        4.183 |        4.232 |                    2191.215 |          4.136 |       4.131 |       4.162 |                  2191.3164 |               -1.9208 |
+|        1024 |      64 |      16 | sql_singletons      |           0.337 |        0.337 |        0.338 |                    410.5156 |          0.397 |       0.396 |       0.406 |                   411.0273 |               17.8042 |
+|        1024 |      64 |      16 | sql_singletons_hgvs |           0.343 |        0.342 |        0.354 |                    411.0938 |          0.399 |       0.398 |       0.412 |                   409.7812 |               16.3265 |
+|       10240 |      64 |      16 | sql_singletons      |           4.101 |        4.092 |        4.110 |                   2192.2852 |          5.229 |       4.837 |       6.093 |                  2192.9805 |               27.5055 |
+|       10240 |      64 |      16 | sql_singletons_hgvs |           4.136 |        4.131 |        4.162 |                   2191.3164 |          5.168 |       5.089 |       5.451 |                  2191.1953 |               24.9516 |
 
 Singleton HGVS borrows the decoded stream’s successful physical CDS
 projection. VEP’s uploaded-feature interpretation and shifted-HGVS
 placement remain distinct; raw-source HGVS prepares and projects its own
-minimized allele. One additional borrowed pointer per leaf-contributor
-slot is included in the query workspace limit. These whole-process
-measurements do not isolate that storage cost or the projection cost.
-HGVS-enabled medians are lower in this comparison, but three passes on
-one machine do not establish statistical significance or a general
-absence of regression. Compound HGVS, raw-input omissions, multi-exon
-models and heterogeneous genomic contexts still need their own matched
-measurements. The compound replay and raw-record baselines above retain
-their original source revisions and denominators.
+minimized allele. Leaf and contributor storage is included in the query
+workspace limit. These whole-process measurements do not isolate that
+storage cost or the projection cost. Three passes on one machine do not
+establish statistical significance or a general absence of regression.
+Compound HGVS, raw-input omissions, multi-exon models and heterogeneous
+genomic contexts still need their own matched measurements. The compound
+replay and raw-record baselines above retain their original source
+revisions and denominators.
 
 ``` bash
 Rscript benchmarks/duckvep_haplotypes.R \

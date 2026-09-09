@@ -769,7 +769,9 @@ Publication verifies retained artifact hashes and reconstructs decoded, native r
 public raw comparisons from transcript-keyed oracle and execution outputs. Parser
 expectations come from upstream call observations; raw/public record observations come
 from retained execution buffers and output carrier/contributor rows. Genotype labels
-are bound to retained VCF records and the reader's original GT strings. It recomputes
+are bound to retained VCF records and the reader's original GT strings. Each raw replay
+sequence and applied allele is compared in its transcript/sample/lane tuple before
+sequence grouping; a lane swap cannot be hidden by unchanged group totals. It recomputes
 stratum totals, checks them against the receipt and rejects duplicate
 revisions before replacing the ledger under an exclusive writer lock. The artifact
 directory must be retained inside the repository so the ledger has a nonempty locator.

@@ -237,10 +237,12 @@ ceiling and a 4 GB DuckDB memory limit. SQL input, sorting and output memory bel
 to DuckDB and may grow with the complete relation. The process RSS table must not
 be presented as a constant-total-memory guarantee.
 
-This matched comparison retains three repeated passes per workload and revision.
-Sanitizer and conformance jobs did not overlap either benchmark campaign. Both
-ran at different times on a shared machine; CPU pinning does not isolate the
-cause of timing differences between campaigns.
+This same-input comparison retains three repeated passes per workload and revision.
+The current campaign overlapped reference and model conformance jobs pinned to
+other CPUs; the recorded baseline did not overlap those jobs. Both ran at
+different times on a shared machine. CPU pinning does not isolate memory,
+thermal or scheduling effects, so timing differences do not establish the
+cost of the code change.
 One machine and this deliberately shared synthetic cohort do not establish
 production throughput, statistical significance or a general absence of regression.
 Whole-haplotype SO/HGVS and typed structural composition require their own measurements.

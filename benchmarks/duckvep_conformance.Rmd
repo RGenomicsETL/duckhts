@@ -1492,6 +1492,11 @@ are not waived by these diagnostic comparisons.
 ```{r length-model-diagnostics}
 length_runs <- read.csv(file.path(root,
   "test/duckvep/conformance/data/haplotype_length_history.csv"), na.strings = "")
+length_bound <- subset(length_runs, extension_build_binding == "htslib_distclean_make_release")
+stopifnot(all(length_runs$extension_build_binding %in%
+  c("diagnostic_unbound", "htslib_distclean_make_release")),
+  !anyDuplicated(length_runs$receipt_sha256))
+length_runs <- subset(length_runs, extension_build_binding == "diagnostic_unbound")
 stopifnot(nrow(length_runs) == 3L, !anyDuplicated(length_runs$receipt_sha256),
   all(length_runs$extension_build_binding == "diagnostic_unbound"),
   identical(length_runs$run_kind, c("default_limit", "exact_retry", "capacity_control")),
@@ -1540,6 +1545,27 @@ This generated standard-code cohort does not estimate a population error rate
 or certify arbitrary reference models, grouped upstream flags, phase sets,
 structural composition or complete phased SO/HGVS. The grouped-metadata publication
 failures below remain unresolved.
+
+```{r source-bound-length-limit}
+stopifnot(nrow(length_bound) == 1L,
+  length_bound$run_kind == "combined_default_limit",
+  length_bound$execution_status == "native_query_error",
+  length_bound$profiles == 29520L, length_bound$records == 194448L,
+  length_bound$intended_sample_file_lanes == 6L * length_bound$profiles,
+  length_bound$max_alignment_cells < length_bound$required_alignment_cells,
+  all(is.na(length_bound[c("carriers", failure_columns)])))
+knitr::kable(length_bound[c("source_revision", "max_alignment_cells", "required_alignment_cells",
+  "profiles", "records", "intended_sample_file_lanes", "execution_status")], row.names = FALSE)
+```
+
+The clean source-bound campaign above combines 32 draws in each fixed-model rare
+stratum with one draw in every geometry, interaction and CDS-length stratum.
+It stops at transcript 28,010, a 6,143-base CDS, because exact traceback needs
+37,742,592 cells against the declared 16,777,216-cell limit. All 29,520 input
+profiles and upstream observations remain in its receipt. Native output and
+comparison counts were not produced. This is a failed execution, not zero
+disagreements. The chained seed 20260906 did not execute; neither seed is certified
+by this campaign. No input, alignment algorithm or limit was changed to pass it.
 
 ### Repeated-model publication audit
 
@@ -1636,8 +1662,11 @@ stopifnot(all(reference_history$extension_build_binding == "htslib_distclean_mak
 reference_revision <- tail(unique(reference_history$source_revision), 1L)
 reference_current <- subset(reference_history, source_revision == reference_revision)
 verdicts <- c("failures", "axes_failures", "lane_failures", "model_failures", "source_failures",
-  "count_failures", "carrier_failures", "implicit_reference_failures", "observer_failures")
+  "count_failures", "carrier_failures", "implicit_reference_failures", "observer_failures",
+  "lane_flag_failures", "group_metadata_failures")
 stopifnot(all(as.matrix(reference_current[verdicts]) == 0L),
+  all(reference_current$metadata_controls_rejected == 25L),
+  all(reference_current$output_controls_rejected == 16L),
   all(reference_current$minimum_short_intron == 1L),
   all(reference_current$maximum_short_intron == 12L),
   all(reference_current$minimum_long_intron == 13L),
@@ -1670,6 +1699,11 @@ implicit memberships are checked upstream and must be absent from native output;
 no oracle sequence is inserted into the native comparison. Native contributors
 retain exact source IDs, regions, positions, REF/ALT bytes, allele ordinals,
 evidence and projection status. All 29 corruption controls pass per seed.
+Each run also passes 25 metadata and 16 output controls. Metadata comparisons
+retain the exact signed nominal edit-length sum for each mutation lane and the
+observed upstream owner of each sequence group. They do not infer nominal length
+from the final CDS length or from frame bits. Older history rows leave these
+unmeasured metadata fields empty rather than implying a pass.
 
 A sample without retained exon-overlapping genotypes uses the curated reference
 peptide, preserving internal stops and legitimate-start methionine. Retained
