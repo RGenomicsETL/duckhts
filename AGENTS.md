@@ -42,6 +42,42 @@ clinical evidence. The same extension is packaged on CRAN as `Rduckhts`.
    coverage, comparison denominators, and failure controls.
 6. When referring to public GitHub issues or PRs, use full GitHub URLs.
 
+### Reviewable work and evidence integrity
+
+- Before substantive edits, state the requested outcome, the smallest coherent change,
+  and its acceptance checks in a short work update. Work in reviewable increments within
+  that scope. If completing it requires a new subsystem or a materially different contract,
+  explain the need and obtain direction before expanding. Persistence is not permission
+  to invent follow-up work; lines, commits, agent messages, and elapsed time are not results.
+- Apply `STYLE.md` equally to production code, tests, fixtures, benchmarks, build scripts,
+  and embedded C/R/SQL. Keep control flow and cleanup readable; do not compress unrelated
+  statements onto one line or stash state in unexplained positional slots to save tokens.
+  Test code needs review because a broken comparator can certify a broken implementation.
+- Use direct tools: `rg` for searches, ordinary shell tools for reads, and `apply_patch`
+  for source edits. Use established generators and formatters for their declared outputs.
+  Avoid chained string-replacement programs and interpreter stacks when one tool suffices.
+  Use R for new statistical and benchmark drivers; keep existing required Python tooling.
+  A runtime bridge must serve an actual platform or integration requirement.
+- Give cross-module operation codes, flags, and positional layouts one named definition
+  and a checked contract. Trace external values to the pinned upstream definition instead
+  of guessing constants. Production must not depend on test probes; extract genuinely
+  shared mechanics into the native library and test that implementation.
+- Preserve independent oracles, comparison keys, denominators, failure controls, and
+  retained counterexamples. Do not obtain a pass by filtering disagreements, narrowing
+  random trials, weakening assertions, widening tolerances, or accepting implementation
+  output as its own expectation. A genuine expected-behavior correction requires an
+  independently justified contract and an explicit test change with retained evidence.
+  Follow `design/duckvep_corpus_workflow.md` for biological conformance campaigns.
+- Delegate only bounded work with named file ownership, an interface or question,
+  validation requirements, and a stop condition. Subagents follow the same rules and
+  cannot expand the task themselves. The supervising agent reads their diffs, reconciles
+  shared contracts, and checks integration; a subagent's success message is not a review.
+- At each major checkpoint, inspect the complete diff, including generated and test
+  artifacts. Remove task-owned scratch and superseded implementations without discarding
+  regression coverage or retained evidence. Report the revision tested, checks actually
+  executed, remaining failures, and unreviewed scope. Stop when the requested outcome and
+  required gates are met; seek direction when further progress needs a scope change.
+
 ## Public Surface
 
 `functions.yaml` is the only hand-maintained public SQL catalog. Do not duplicate its
