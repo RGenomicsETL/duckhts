@@ -2,6 +2,9 @@
 
 # duckhts 1.5.1.9000
 
+- benchmark singleton phased replay with HGVS enabled and disabled on identical
+  registered inputs, checking all outputs, source membership and independent-event HGVS
+
 - record the complete 63-target, 6.3-million-trial native property campaign and
   rare-interaction diagnostics, retaining prior evidence and the failing comparator baseline
 

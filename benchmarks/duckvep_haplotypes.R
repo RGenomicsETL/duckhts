@@ -6,7 +6,7 @@ fixture <- function(paths) {
   stopifnot(length(fasta) == 2L, nchar(fasta[2L]) == 180L)
   events <- read.delim(paths[["haplotype_benchmark_events"]])
   stopifnot(identical(events$event_index, 1:4), all(diff(events$position) > 0))
-  masks <- c(3L, 12L, 15L)
+  masks <- c(3L, 12L, 15L, 1L, 2L, 4L, 8L)
   cds <- vapply(masks, function(mask) {
     sequence <- fasta[2L]
     for (i in rev(which(bitwAnd(mask, bitwShiftL(1L, 0:3)) != 0L))) {
@@ -18,10 +18,12 @@ fixture <- function(paths) {
     }
     sequence
   }, "")
-  protein <- as.character(Biostrings::translate(Biostrings::DNAStringSet(cds)))
+  protein <- as.character(Biostrings::translate(Biostrings::DNAStringSet(
+    substring(cds, 1L, nchar(cds) %/% 3L * 3L))))
   protein <- sub("(\\*).*", "\\1", protein)
   list(reference = fasta[2L], events = events,
-    expected = data.frame(mask = masks, cds, protein),
+    expected = data.frame(mask = masks, cds, protein)[1:3, ],
+    singletons = data.frame(mask = masks, cds, protein)[4:7, ],
     expected_reference = data.frame(mask = 0L, cds = fasta[2L], protein = sub("(\\*).*", "\\1",
       as.character(Biostrings::translate(Biostrings::DNAString(fasta[2L]))))))
 }
@@ -64,7 +66,10 @@ native <- function(job, input) {
 
 sql <- function(job, input) {
   records <- identical(job$mode, "sql_records")
-  expected <- if (records) rbind(input$expected_reference, input$expected) else input$expected
+  singletons <- job$mode %in% c("sql_singletons", "sql_singletons_hgvs")
+  hgvs <- identical(job$mode, "sql_singletons_hgvs")
+  expected <- if (singletons) input$singletons else if (records)
+    rbind(input$expected_reference, input$expected) else input$expected
   con <- DBI::dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true")))
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE))
   q <- function(x) as.character(DBI::dbQuoteString(con, x))
@@ -77,12 +82,17 @@ sql <- function(job, input) {
     0::UINTEGER seq_region,(i//%d*1000+100)::UBIGINT transcript_start,
     (transcript_start+179)::UBIGINT transcript_end,1::TINYINT strand,i::UINTEGER gene_index,
     3::UBIGINT transcript_flags,transcript_start cds_start,transcript_end cds_end,
-    %s::BLOB cds_sequence,1::UTINYINT codon_table FROM range(%d) t(i)",
-    job$overlap, q(input$reference), job$transcripts))
+    %s::BLOB cds_sequence,1::UTINYINT codon_table%s FROM range(%d) t(i)",
+    job$overlap, q(input$reference), if (singletons)
+      ",''::BLOB pre_cds_sequence,''::BLOB post_cds_sequence" else "", job$transcripts))
   exons <- "SELECT transcript_index,transcript_start exon_start,transcript_end exon_end,
     1::UBIGINT exon_cdna_start,180::UBIGINT exon_cdna_end,0::TINYINT phase,0::TINYINT end_phase FROM tx"
+  regions <- if (singletons) sprintf("SELECT 0::UINTEGER seq_region,
+    %d::UBIGINT sequence_length,'bench'::VARCHAR seq_region_name", job$reference_length) else
+    "SELECT 0::UINTEGER seq_region"
   stopifnot(DBI::dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('bench',",
-    q("SELECT 0::UINTEGER seq_region"), ",", q("SELECT * FROM tx"), ",", q(exons), ")"))$loaded)
+    q(regions), ",", q("SELECT * FROM tx"), ",", q(exons),
+    if (singletons) paste0(",reference_fasta:=", q(job$reference_fasta)), ")"))$loaded)
   DBI::dbExecute(con, sprintf("CREATE TABLE calls AS SELECT
     (transcript_index//%d*4+e.event_index)::UBIGINT event_index,0::UINTEGER seq_region,
     (transcript_start+e.position-1)::UBIGINT AS position,reference,alternate,1::UINTEGER alt_index,
@@ -94,16 +104,20 @@ sql <- function(job, input) {
     ORDER BY hash(event_index,transcript_index,sample_index)", job$overlap, job$samples))
   n <- DBI::dbGetQuery(con, "SELECT count(*) n FROM calls")$n
   stopifnot(n == job$transcripts * job$samples * 4)
+  if (singletons) DBI::dbExecute(con, "UPDATE calls SET alleles=
+    CASE WHEN sample_index%4=(event_index-1)%4 THEN [0,1] ELSE [0,0] END::INTEGER[]")
   denominators <- list()
   if (records) {
     DBI::dbExecute(con, "CREATE TABLE source_records AS SELECT
       event_index,seq_region,position,reference,[alternate] alternates,
       transcript_index,sample_index,alleles[1]::VARCHAR || '|' || alleles[2]::VARCHAR gt
       FROM calls")
-    denominators <- as.list(DBI::dbGetQuery(con, "SELECT
+  }
+  if (records || singletons) {
+    denominators <- as.list(DBI::dbGetQuery(con, paste0("SELECT
       count(DISTINCT event_index) input_physical_records,
       count(DISTINCT (event_index,sample_index)) input_record_sample_calls,
-      count(*) input_candidate_sample_rows FROM source_records")[1L, ])
+      count(*) input_candidate_sample_rows FROM ", if (records) "source_records" else "calls"))[1L, ])
     stopifnot(denominators$input_physical_records == job$transcripts / job$overlap * 4,
       denominators$input_record_sample_calls == job$transcripts / job$overlap * job$samples * 4,
       denominators$input_candidate_sample_rows == n)
@@ -118,9 +132,12 @@ sql <- function(job, input) {
     workspace_limit = 64 * 1024^2)
   if (records) limits[c("max_active_events", "max_active_projections", "max_allele_bytes")] <-
     c(13, 12 * job$overlap + 1, 192)
+  if (singletons) limits <- c(limits, max_hgvs_operations = 4, max_hgvs_bytes = 128,
+    max_hgvs_reference_bytes = 16384)
   query <- paste0("CREATE OR REPLACE TABLE measured AS SELECT * FROM duckvep_haplotypes(",
     q(if (records) "SELECT * FROM source_records" else "SELECT * FROM calls"), ",'bench',",
     if (records) "input_mode:='source_records',phase_policy:='vep116_compat'," else "",
+    if (hgvs) "hgvs:=true," else "",
     paste(names(limits), ":=", limits, collapse = ","), ")")
   DBI::dbExecute(con, query) # Full warm-up, including the mandatory internal sort.
   start <- proc.time()[["elapsed"]]
@@ -151,14 +168,16 @@ sql <- function(job, input) {
           sequence_flags:=b.sequence_flags,event_indices:=b.event_indices)) AS coding_blocks)
       FROM measured) h")
   stopifnot(fingerprint$output_leaves == job$transcripts * nrow(expected),
-    fingerprint$output_carriers == job$transcripts * job$samples * (if (records) 2 else 7 / 4),
+    fingerprint$output_carriers == job$transcripts * job$samples *
+      (if (singletons) 1 else if (records) 2 else 7 / 4),
     fingerprint$cds_bytes == job$transcripts * sum(nchar(expected$cds)),
     fingerprint$protein_bytes == job$transcripts * sum(nchar(expected$protein)),
-    fingerprint$physical_edits == job$transcripts * 8, fingerprint$contributors == job$transcripts * 8)
+    fingerprint$physical_edits == job$transcripts * (if (singletons) 4 else 8),
+    fingerprint$contributors == job$transcripts * (if (singletons) 4 else 8))
   if (job$verify) {
     # Compare the complete expected carrier relation, not just row counts/sums.
     DBI::dbExecute(con, paste0("CREATE TABLE expected_carriers AS SELECT transcript_index,sample_index,lane,
-      ", if (records) "NULL::BIGINT" else
+      ", if (records) "NULL::BIGINT" else if (singletons) "10::BIGINT" else
         "CASE WHEN sample_index%4=2 THEN NULL::BIGINT ELSE 10::BIGINT END", " phase_set,
       2::UINTEGER ploidy,
       coalesce(list_sort(list(event_index) FILTER(WHERE alleles[lane]=1)),[]::UBIGINT[]) events
@@ -173,44 +192,85 @@ sql <- function(job, input) {
       UNION ALL (SELECT * FROM actual_carriers EXCEPT ALL SELECT * FROM expected_carriers))")$ok
     sequences <- function() DBI::dbGetQuery(con, sprintf("SELECT bool_and(coalesce(
       m.cds=e.cds AND m.protein=e.protein AND m.sequence_status='ok' AND m.projection_status='ok'
-      AND m.hgvsp IS NULL AND m.hgvsp_status='not_requested'
+      AND %s
       AND m.evidence_flags=CASE WHEN e.mask=0 THEN 0 ELSE 1 END
       AND list_unique(list_transform(m.contributors,x->x.event_index))=length(m.contributors)
       AND coalesce(list_sum(list_transform(m.coding_blocks,x->length(x.event_indices))),0)=m.edit_count
       AND %s,false)) ok FROM measured m JOIN expected_sequences e
       ON e.mask=coalesce(list_sum(list_transform(m.contributors,
         x->(1::BIGINT << ((x.event_index-1)%%4)))),0)",
+      if (hgvs) "m.hgvsp IS NOT NULL AND m.hgvsp_status='ok'" else
+        "m.hgvsp IS NULL AND m.hgvsp_status='not_requested'",
       if (records) "len(list_filter(m.contributors,x->x.alt_index IS DISTINCT FROM 1))=0"
         else "true"))$ok
-    stopifnot(exact(), isTRUE(sequences()))
-    if (records) {
+    hgvs_equal <- function() TRUE
+    if (hgvs) {
+      DBI::dbExecute(con, "CREATE TABLE independent_events AS SELECT DISTINCT event_index,
+        seq_region,position,reference,alternate,NULL::UBIGINT end_position,
+        NULL::VARCHAR structural_type,NULL::VARCHAR copy_change,NULL::UINTEGER mate_seq_region,
+        NULL::UBIGINT mate_position FROM calls")
+      DBI::dbExecute(con, "CREATE TABLE independent AS SELECT * FROM duckvep_annotate(
+        'independent_events','bench',hgvs:=true,upstream_distance:=0,downstream_distance:=0)")
+      stopifnot(DBI::dbGetQuery(con, "SELECT count(*) n FROM independent")$n == job$transcripts * 4)
+      # The independent renderer omits prediction parentheses. Compare every
+      # event/transcript key and exact suffix; this is an internal path check,
+      # not a substitute for the executable VEP differential.
+      DBI::dbExecute(con, "CREATE VIEW actual_hgvs AS SELECT transcript_index,
+        contributors[1].event_index event_index,
+        CASE WHEN starts_with(hgvsp,'p.(') AND ends_with(hgvsp,')')
+          THEN 'p.' || substr(hgvsp,4,length(hgvsp)-4) ELSE hgvsp END protein_hgvs
+        FROM measured")
+      hgvs_equal <- function() DBI::dbGetQuery(con, "SELECT count(*)=0 ok FROM (
+        (SELECT * FROM actual_hgvs EXCEPT ALL
+          SELECT transcript_index,event_index,protein_hgvs FROM independent)
+        UNION ALL (SELECT transcript_index,event_index,protein_hgvs FROM independent
+          EXCEPT ALL SELECT * FROM actual_hgvs))")$ok
+      write.csv(DBI::dbGetQuery(con, "SELECT m.transcript_index,
+        contributors[1].event_index event_index,hgvsp,hgvsp_status,
+        i.protein_hgvs,i.protein_hgvs_status,i.protein_hgvs_reason
+        FROM measured m FULL JOIN independent i ON m.transcript_index=i.transcript_index
+          AND m.contributors[1].event_index=i.event_index ORDER BY event_index,m.transcript_index"),
+        sub("\\.rds$", "_hgvs.csv", job$result), row.names = FALSE)
+    }
+    stopifnot(exact(), isTRUE(sequences()), isTRUE(hgvs_equal()))
+    if (records || singletons) {
       # Every mutation is restored before the next independent control.
       DBI::dbExecute(con, "CREATE TABLE verified AS SELECT * FROM measured")
       mutations <- c(cds = "UPDATE measured SET cds='C' || substr(cds,2)",
         protein = "UPDATE measured SET protein='L' || substr(protein,2)",
         missing_cds = "UPDATE measured SET cds=NULL WHERE transcript_index=0",
         invented_hgvs = "UPDATE measured SET hgvsp='p.(Met1Leu)'",
-        hgvs_status = "UPDATE measured SET hgvsp_status='ok'",
+        hgvs_status = paste0("UPDATE measured SET hgvsp_status='",
+          if (hgvs) "not_requested" else "ok", "'"),
         carrier = "UPDATE measured SET carriers=list_transform(carriers,c->struct_update(c,sample_index:=4294967295::UINTEGER))",
         missing_ploidy = "UPDATE measured SET carriers=list_transform(carriers,c->struct_update(c,ploidy:=NULL::USMALLINT))",
         contributor = "UPDATE measured SET contributors=list_transform(contributors,c->struct_update(c,event_index:=0::UBIGINT))",
+        dropped_row = "DELETE FROM measured WHERE transcript_index=0")
+      if (records) mutations <- c(mutations,
         missing_alt_index = "UPDATE measured SET contributors=list_transform(contributors,c->struct_update(c,alt_index:=NULL::UINTEGER))")
+      if (hgvs) mutations <- c(mutations,
+        missing_hgvs = "UPDATE measured SET hgvsp=NULL",
+        malformed_hgvs = "UPDATE measured SET hgvsp=replace(hgvsp,'Ala','(Ala)')")
       for (mutation in mutations) {
         DBI::dbExecute(con, mutation)
-        stopifnot(!exact() || !isTRUE(sequences()))
+        stopifnot(!exact() || !isTRUE(sequences()) || !isTRUE(hgvs_equal()))
         DBI::dbExecute(con, "CREATE OR REPLACE TABLE measured AS SELECT * FROM verified")
       }
-      DBI::dbExecute(con, "UPDATE source_records SET gt='2|0'")
-      invalid <- tryCatch({DBI::dbExecute(con, query); NULL}, error = identity)
-      stopifnot(inherits(invalid, "error"), grepl("raw GT status", conditionMessage(invalid)))
-      DBI::dbExecute(con, "CREATE OR REPLACE TABLE measured AS SELECT * FROM verified")
+      if (records) {
+        DBI::dbExecute(con, "UPDATE source_records SET gt='2|0'")
+        invalid <- tryCatch({DBI::dbExecute(con, query); NULL}, error = identity)
+        stopifnot(inherits(invalid, "error"), grepl("raw GT status", conditionMessage(invalid)))
+        DBI::dbExecute(con, "CREATE OR REPLACE TABLE measured AS SELECT * FROM verified")
+      }
     }
     # A duplicate output cannot be hidden by a set-only comparison.
     DBI::dbExecute(con, "INSERT INTO measured SELECT * FROM measured LIMIT 1")
     stopifnot(!exact())
   }
   c(list(seconds = elapsed, duckdb_version = as.character(utils::packageVersion("duckdb")),
-    output_contract = if (records) "source_records_local_coding_block_so_hgvs_status" else
+    output_contract = if (singletons) paste0("singletons_local_coding_block_so_",
+      if (hgvs) "hgvs" else "hgvs_status") else if (records)
+      "source_records_local_coding_block_so_hgvs_status" else
       "local_coding_block_so_hgvs_status"),
     denominators,
     as.list(fingerprint[1L, ]), as.list(local_so[1L, ]), as.list(replay[1L, ]))
@@ -242,7 +302,7 @@ main <- function() {
     options$passes >= 1L, options$passes <= 20L, options$cpu >= 0L)
   modes <- strsplit(options$modes, ",", fixed = TRUE)[[1L]]
   stopifnot(length(modes) > 0L, !anyDuplicated(modes),
-    all(modes %in% c("native", "sql", "sql_records")))
+    all(modes %in% c("native", "sql", "sql_records", "sql_singletons", "sql_singletons_hgvs")))
   root <- normalizePath(system2("git", c("rev-parse", "--show-toplevel"), stdout = TRUE))
   source(file.path(root, "scripts/duckvep_evidence.R"), local = TRUE)
   revision <- duckvep_evidence_revision(root)
@@ -260,6 +320,18 @@ main <- function() {
   out <- tempfile("haplotype_benchmark_", tmpdir = file.path(root, "test/duckvep/conformance/results"))
   dir.create(out)
   message("Benchmark artifacts: ", out)
+  reference_fasta <- NULL
+  reference_length <- NULL
+  if (any(modes %in% c("sql_singletons", "sql_singletons_hgvs"))) {
+    # Repeat the registered CDS at exactly the SQL model's genomic coordinates.
+    # This per-run derivation and its faidx are retained with the worker jobs.
+    sequence <- paste0(strrep("A", 99L), strrep(paste0(input$reference, strrep("A", 820L)),
+      options$transcripts / options$overlap))
+    reference_length <- nchar(sequence)
+    reference_fasta <- file.path(out, "reference.fa")
+    writeLines(c(">bench", sequence), reference_fasta)
+    stopifnot(system2("samtools", c("faidx", shQuote(reference_fasta))) == 0L)
+  }
   sources <- c("benchmarks/duckvep_haplotype_stream.c", paste0("src/duckvep/kernel/src/duckvep_",
     c("haplotype", "carriers", "phase", "haplotype_stream", "classify", "codon", "coding", "projection", "delta"), ".c"))
   shared <- file.path(out, paste0("stream", .Platform$dynlib.ext))
@@ -268,7 +340,8 @@ main <- function() {
     "-I", "src/duckvep/kernel/src", "-I", "src/duckvep/kernel/include")
   stopifnot(system2(compiler, shQuote(c(flags, sources, "-o", shared)),
     stdout = file.path(out, "compiler.log"), stderr = file.path(out, "compiler.log")) == 0L)
-  identities <- c(paths, extension, shared, sources,
+  identities <- c(paths, if (!is.null(reference_fasta)) c(reference_fasta, paste0(reference_fasta, ".fai")),
+    extension, shared, sources,
     list.files("src/duckvep/kernel/src", "\\.(h|inc)$", full.names = TRUE),
     "src/duckvep/kernel/include/duckvep_kernel.h", "benchmarks/duckvep_haplotypes.R",
     "r/duckhtsbench/inst/benchmark_registry.tsv")
@@ -279,7 +352,8 @@ main <- function() {
     for (pass in 0:options$passes) {
       stem <- file.path(out, paste0(mode, "_", pass))
       job <- c(options[c("transcripts", "samples", "overlap")], list(mode = mode, verify = pass == 0L,
-        input = input, extension = extension, shared = shared, result = paste0(stem, ".rds")))
+        input = input, extension = extension, shared = shared, reference_fasta = reference_fasta,
+        reference_length = reference_length, result = paste0(stem, ".rds")))
       saveRDS(job, paste0(stem, "_job.rds"))
       command <- c("-v", "-o", paste0(stem, "_time.txt"), "taskset", "-c", as.character(options$cpu),
         file.path(R.home("bin"), "Rscript"), file.path(root, "benchmarks/duckvep_haplotypes.R"),
@@ -307,8 +381,13 @@ main <- function() {
   }))
   shared_counts <- c("output_leaves", "output_carriers", "cds_bytes", "protein_bytes",
     "physical_edits", "contributors", "blocks")
-  decoded <- results[results$mode != "sql_records", shared_counts, drop = FALSE]
+  decoded <- results[results$mode %in% c("native", "sql"), shared_counts, drop = FALSE]
   stopifnot(all(vapply(decoded, function(x) length(unique(x)) <= 1L, TRUE)))
+  if (any(results$mode %in% c("sql_singletons", "sql_singletons_hgvs"))) {
+    singleton_rows <- results[results$mode %in% c("sql_singletons", "sql_singletons_hgvs"),
+      c(shared_counts, "local_so_json_bytes", "local_so_xor_hash", "local_so_sum_hash"), drop = FALSE]
+    stopifnot(all(vapply(singleton_rows, function(x) length(unique(x)) <= 1L, TRUE)))
+  }
   stopifnot(identical(hashes, vapply(identities, duckvep_evidence_sha256, "")),
     identical(revision, duckvep_evidence_revision(root)))
   if (!options$diagnostic) duckvep_evidence_assert_checkout(root, revision)

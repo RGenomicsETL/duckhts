@@ -13,7 +13,10 @@ history <- read.csv(file.path(root, "benchmarks/data/duckvep_haplotypes.csv"),
     replay_xor_hash = "character", replay_sum_hash = "character",
     local_so_xor_hash = "character", local_so_sum_hash = "character"))
 stopifnot(all(history$extension_build_binding == "htslib_distclean_make_release"),
-  !anyDuplicated(history[c("source_revision", "transcripts", "samples", "overlap", "mode", "pass")]))
+  !anyDuplicated(history[c("source_revision", "transcripts", "samples", "overlap", "mode", "pass")]),
+  all(history$mode %in% c("native", "sql", "sql_records", "sql_singletons", "sql_singletons_hgvs")))
+singleton_history <- history[history$mode %in% c("sql_singletons", "sql_singletons_hgvs"), ]
+history <- history[history$mode %in% c("native", "sql", "sql_records"), ]
 if (!"output_contract" %in% names(history)) history$output_contract <- NA_character_
 history$output_contract[is.na(history$output_contract)] <- "literal_replay"
 for (field in c("json_bytes", "xor_hash", "sum_hash")) {
@@ -285,3 +288,94 @@ knitr::kable(raw[c("output_leaves", "cds_bytes", "protein_bytes", "json_bytes")]
 There is no earlier source-bound raw-lane measurement for a same-contract
 comparison. Different output denominators preclude treating raw versus decoded
 time as an implementation speedup.
+
+## Singleton HGVS materialization
+
+`--modes sql_singletons,sql_singletons_hgvs` compares the same decoded input with
+protein HGVS disabled and enabled. Each sample carries one of the four registered
+ALT events heterozygously. Four paths per transcript retain all non-reference
+carriers; reference paths remain implicit. The two substitutions and two
+frame-changing indels exercise the independent-event HGVS consumer, not compound
+HGVS. This is a different carrier distribution from the compound replay workload
+above; their timings are not interchangeable.
+
+The driver repeats the registered reference CDS at the model's genomic coordinates,
+pads the inter-transcript sequence with A, and indexes that per-run FASTA. Both
+modes load exactly the same model and reference. A transcript has no UTR: explicitly
+empty pre-/post-CDS sequences distinguish a complete zero-length flank from an
+unavailable flank. Reference/model/input preparation is outside timing. The timed
+query includes sorting, bounded query initialization, sequence replay, differences,
+local coding facts and every output column. HGVS-enabled execution also opens its
+query-local faidx handle, retrieves genomic context and computes protein HGVS.
+
+Each mode has a separate correctness process, followed by three fresh-process
+measurement passes with a full warm-up. Direct sequence replacement and Biostrings
+translation check every expected CDS/protein. Multiset comparisons check complete
+carrier identities, phase sets, ploidies and source-event membership. The enabled
+path also compares every event/transcript HGVSp with independent annotation, allowing
+only its documented prediction-parenthesis difference. That internal consistency
+check is not an independent VEP oracle or compound-HGVS certificate. The four fixed
+event shapes do not measure broad HGVS conformance.
+
+Nine shared output corruptions and duplicate-output insertion must fail the
+correctness process. HGVS-enabled checks additionally reject missing HGVS and
+malformed internal parentheses. Whole-output byte counts and fingerprints must match every
+pass of the same mode. All non-HGVS fields must match between modes. HGVS-on/off
+complete outputs intentionally differ and are never reported as identical work.
+The worker receipts retain the derived FASTA/index, actual versus independent HGVS,
+source/binary/input hashes, jobs and process logs. Process RSS includes setup,
+warm-up and post-query aggregates, not just native workspace.
+
+```{r singleton-hgvs}
+if (!nrow(singleton_history)) {
+  cat("No source-bound singleton HGVS measurement is recorded.\n")
+} else {
+  singleton_revision <- tail(unique(singleton_history$source_revision), 1L)
+  measured <- singleton_history[singleton_history$source_revision == singleton_revision, ]
+  stopifnot(all(measured$threads == 1L), all(measured$cpu_affinity == 2L),
+    all(measured$duckdb_version == "1.5.3"),
+    all(measured$output_leaves == measured$transcripts * 4),
+    all(measured$output_carriers == measured$transcripts * measured$samples),
+    all(measured$input_candidate_sample_rows == measured$transcripts * measured$samples * 4),
+    all(measured$input_physical_records == measured$transcripts / measured$overlap * 4),
+    all(measured$input_record_sample_calls ==
+      measured$transcripts / measured$overlap * measured$samples * 4))
+  configuration <- c("transcripts", "samples", "overlap")
+  mode_keys <- c(configuration, "mode")
+  non_hgvs <- unique(measured[c(configuration, "output_leaves", "output_carriers",
+    "cds_bytes", "protein_bytes", "physical_edits", "contributors", "blocks",
+    "local_so_json_bytes", "local_so_xor_hash", "local_so_sum_hash")])
+  stopifnot(!anyNA(non_hgvs), !anyDuplicated(non_hgvs[configuration]))
+  full <- unique(measured[c(mode_keys, "json_bytes", "xor_hash", "sum_hash")])
+  stopifnot(!anyNA(full), !anyDuplicated(full[mode_keys]))
+  timings <- do.call(rbind, lapply(split(measured, interaction(measured[mode_keys], drop = TRUE)),
+    function(x) {
+      stopifnot(nrow(x) == 3L, identical(sort(x$pass), 1:3))
+      data.frame(x[1L, mode_keys], median_s = median(x$seconds),
+        min_s = min(x$seconds), max_s = max(x$seconds),
+        peak_process_rss_mib = max(x$peak_process_rss_kib) / 1024)
+    }))
+  paired <- merge(timings[timings$mode == "sql_singletons", ],
+    timings[timings$mode == "sql_singletons_hgvs", ], by = configuration,
+    suffixes = c("_disabled", "_enabled"))
+  stopifnot(nrow(paired) * 2L == nrow(timings))
+  cat("Measured source: `", singleton_revision,
+    "`. One thread, CPU 2, Intel i5-13500, DuckDB 1.5.3.\n\n", sep = "")
+  knitr::kable(timings, row.names = FALSE)
+  knitr::kable(measured[measured$pass == 1L, c(mode_keys, "input_physical_records",
+    "input_record_sample_calls", "input_candidate_sample_rows", "output_leaves",
+    "output_carriers", "cds_bytes", "protein_bytes", "json_bytes")], row.names = FALSE)
+}
+```
+
+This is the first source-bound measurement of this HGVS-enabled workload, not a
+before/after implementation comparison. Compound HGVS, raw-input omissions,
+multi-exon models and heterogeneous genomic contexts still need their own matched
+measurements. The compound replay and raw-record baselines above retain their
+original source revisions and denominators.
+
+```{bash singleton-hgvs-smoke, eval=FALSE, echo=TRUE}
+Rscript benchmarks/duckvep_haplotypes.R \
+  --transcripts 16 --samples 4 --overlap 4 --passes 1 \
+  --modes sql_singletons,sql_singletons_hgvs --diagnostic
+```
