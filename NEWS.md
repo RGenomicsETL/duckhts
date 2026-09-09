@@ -1,6 +1,9 @@
 # DuckHTS Extension News
 
 # duckhts 1.5.1.9000
+- fail SQLLogicTest runs on malformed test syntax, with process-status controls
+  for individual files, file lists and directory runs
+
 - use the shared curated reference peptide for raw haplotypes without retained
   exon-overlapping genotypes. Intronic context retains provenance and does not
   alter literal CDS replay. Retained exon-overlapping calls use mutation

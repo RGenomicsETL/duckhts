@@ -22,6 +22,7 @@
 	duckvep-render-reports \
 	test-simd-kernels bench-simd-kernels \
 	test-sqllogictest-debug test-sqllogictest-release \
+	test-sqllogictest-runner \
 	check-benchmark-portability \
 	stage-norm-1000g-dragen-gvcf stage-liftover-references \
 	stage-giab-v4.2.1 stage-riker-wgs stage-duckvep-conformance-corpora \
@@ -289,7 +290,10 @@ test-duckvep-corpus-staging:
 test-cgranges-benchmark-r:
 	bash test/scripts/test_cgranges_benchmark_r.sh
 
-test-sqllogictest-debug: check_configure
+test-sqllogictest-runner: check_configure
+	$(PYTHON_VENV_BIN) test/scripts/sqllogictest_runner_test.py
+
+test-sqllogictest-debug: check_configure test-sqllogictest-runner
 	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
 		echo "Skipping SQLLogicTest: the Python DuckDB wheel is windows_amd64, not windows_amd64_mingw"; \
 	else \
@@ -298,7 +302,7 @@ test-sqllogictest-debug: check_configure
 			--external-extension build/debug/$(EXTENSION_NAME).duckdb_extension; \
 	fi
 
-test-sqllogictest-release: check_configure
+test-sqllogictest-release: check_configure test-sqllogictest-runner
 	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
 		echo "Skipping SQLLogicTest: the Python DuckDB wheel is windows_amd64, not windows_amd64_mingw"; \
 	else \
