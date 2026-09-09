@@ -746,8 +746,8 @@ static int fai_retrieve_capacity(const faidx1_t *val, hts_pos_t beg,
         errno = EINVAL;
         return -1;
     }
-    if (bases > (SIZE_MAX >> 1) || val->line_extra > (SIZE_MAX >> 1) ||
-        val->line_blen > (SIZE_MAX >> 1) - val->line_extra) {
+    if (bases > (SIZE_MAX >> 1) || val->line_blen > (SIZE_MAX >> 1) ||
+        val->line_extra > (SIZE_MAX >> 1) - val->line_blen) {
         hts_log_error("FASTA/Q range or line exceeds the signed I/O size limit");
         errno = EOVERFLOW;
         return -1;

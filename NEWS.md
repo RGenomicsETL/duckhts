@@ -2,6 +2,9 @@
 
 # duckhts 1.5.1.9000
 
+- keep caller-buffer FASTA signed-size checks warning-free under Clang on native
+  and 32-bit targets, with unchanged overflow rejection
+
 - record six source-bound phased-replay workloads and one raw-record SQL workload,
   with three fresh-process passes each, complete fingerprints and explicit
   output-schema differences from the prior benchmark revision

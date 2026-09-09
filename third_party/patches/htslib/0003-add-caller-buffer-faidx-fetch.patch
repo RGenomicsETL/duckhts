@@ -99,8 +99,8 @@ diff --git a/faidx.c b/faidx.c
 +        errno = EINVAL;
 +        return -1;
 +    }
-+    if (bases > (SIZE_MAX >> 1) || val->line_extra > (SIZE_MAX >> 1) ||
-+        val->line_blen > (SIZE_MAX >> 1) - val->line_extra) {
++    if (bases > (SIZE_MAX >> 1) || val->line_blen > (SIZE_MAX >> 1) ||
++        val->line_extra > (SIZE_MAX >> 1) - val->line_blen) {
 +        hts_log_error("FASTA/Q range or line exceeds the signed I/O size limit");
 +        errno = EOVERFLOW;
 +        return -1;

@@ -1,5 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
+
+- compile bundled caller-buffer FASTA size checks without Clang's out-of-range
+  comparison warning, retaining overflow checks on native and 32-bit targets
+
 - report reference-fetch failures through rduckhts_fasta_nuc instead of returning
   incomplete intervals; bundled faidx checks reject overflowing index arithmetic
 
