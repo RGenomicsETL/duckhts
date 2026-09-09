@@ -1,6 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
 
+- preserve bundled readers' FORMAT/GT, numeric and string buffers on allocation
+  failure, reporting query errors while keeping worker-owned memory recoverable
+
 - retain selected BCF samples' phase sets in rduckhts_geno when excluded samples
   leave vector-end padding in FORMAT/PS storage
 

@@ -2,6 +2,13 @@
 
 # duckhts 1.5.1.9000
 
+- preserve numeric, genotype and string FORMAT buffers when HTSlib allocation
+  fails, with checked sample-width arithmetic and unchanged caller ownership;
+  shared readers rely on the dependency's tested failure contract
+
+- build the BCF allocation probe only for tests, using CMake's target availability;
+  distribution tests reuse the container-built executable outside Docker
+
 - add explicit short/long CDS-length strata to the exon/UTR conformance generator,
   including partial terminal codons and sequence sizes around 2,048 bases/codons;
   independent generator checks cover genomic REF, spliced CDS, GFF and exon phases.

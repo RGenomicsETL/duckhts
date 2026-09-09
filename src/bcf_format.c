@@ -55,26 +55,10 @@ int duckhts_bcf_format_decode(duckhts_bcf_format_t *values, bcf_hdr_t *header,
                  reader_name, tag);
         return 0;
     }
-    int previous_capacity = values->capacity;
-    int ret;
-    /* HTSlib overwrites the numeric pointer or strings[0] on realloc failure.
-     * The old allocation remains owned by this worker until teardown. */
-    if (numeric) {
-        void *previous = values->data;
-        ret = bcf_get_format_values(header, record, tag, &values->data, &values->capacity,
-                                    is_gt ? BCF_HT_INT : header_type);
-        if (ret == -4 && !values->data) {
-            values->data = previous;
-            values->capacity = previous_capacity;
-        }
-    } else {
-        char *previous = values->strings ? values->strings[0] : NULL;
-        ret = bcf_get_format_string(header, record, tag, &values->strings, &values->capacity);
-        if (ret == -4 && values->strings && !values->strings[0]) {
-            values->strings[0] = previous;
-            values->capacity = previous_capacity;
-        }
-    }
+    int ret = numeric
+        ? bcf_get_format_values(header, record, tag, &values->data, &values->capacity,
+                                is_gt ? BCF_HT_INT : header_type)
+        : bcf_get_format_string(header, record, tag, &values->strings, &values->capacity);
     duckhts_bcf_decode_status_t status = duckhts_bcf_decode_status(
         reader_name, "FORMAT", tag, header, record, ret, error, error_size);
     if (status == DUCKHTS_BCF_DECODE_FATAL) return 0;

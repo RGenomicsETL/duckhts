@@ -6212,19 +6212,29 @@ int bcf_get_format_string(const bcf_hdr_t *hdr, bcf1_t *line, const char *tag, c
     if ( !fmt->p ) return -3;                                      // the tag was marked for removal
 
     int nsmpl = bcf_hdr_nsamples(hdr);
-    if ( !*dst )
-    {
-        *dst = hts_malloc_p(sizeof(char*), nsmpl);
-        if ( !*dst ) return -4;     // could not alloc
-        (*dst)[0] = NULL;
-    }
+    if ( !nsmpl ) return 0;
+    if ( fmt->n < 0 || fmt->n == INT_MAX || nsmpl < 0 ||
+         nsmpl > INT_MAX / (fmt->n + 1) ) return -4;
     int n = (fmt->n+1)*nsmpl;
-    if ( *ndst < n )
+    char **new_dst = *dst;
+    if ( !new_dst )
     {
-        (*dst)[0] = realloc((*dst)[0], n);
-        if ( !(*dst)[0] ) return -4;    // could not alloc
+        new_dst = hts_malloc_p(sizeof(char*), nsmpl);
+        if ( !new_dst ) return -4;
+        new_dst[0] = NULL;
+    }
+    if ( !*dst || *ndst < n )
+    {
+        char *new_data = realloc(new_dst[0], n);
+        if ( !new_data )
+        {
+            if ( !*dst ) free(new_dst);
+            return -4;
+        }
+        new_dst[0] = new_data;
         *ndst = n;
     }
+    *dst = new_dst;
     for (i=0; i<nsmpl; i++)
     {
         uint8_t *src = fmt->p + i*fmt->n;
@@ -6255,13 +6265,17 @@ int bcf_get_format_values(const bcf_hdr_t *hdr, bcf1_t *line, const char *tag, v
     bcf_fmt_t *fmt = &line->d.fmt[i];
     if ( !fmt->p ) return -3;                                      // the tag was marked for removal
 
+    int nsmpl = bcf_hdr_nsamples(hdr);
+    if ( !nsmpl ) return 0;
+    if ( fmt->n < 0 || nsmpl < 0 || fmt->n > INT_MAX / nsmpl ) return -4;
+    int n = fmt->n*nsmpl;
     if ( type==BCF_HT_STR )
     {
-        int n = fmt->n*bcf_hdr_nsamples(hdr);
         if ( *ndst < n )
         {
-            *dst  = realloc(*dst, n);
-            if ( !*dst ) return -4;     // could not alloc
+            void *new_dst = realloc(*dst, n);
+            if ( !new_dst ) return -4;
+            *dst = new_dst;
             *ndst = n;
         }
         memcpy(*dst,fmt->p,n);
@@ -6269,13 +6283,13 @@ int bcf_get_format_values(const bcf_hdr_t *hdr, bcf1_t *line, const char *tag, v
     }
 
     // Make sure the buffer is big enough
-    int nsmpl = bcf_hdr_nsamples(hdr);
     int size1 = type==BCF_HT_INT ? sizeof(int32_t) : sizeof(float);
-    if ( *ndst < fmt->n*nsmpl )
+    if ( *ndst < n )
     {
-        *ndst = fmt->n*nsmpl;
-        *dst  = hts_realloc_p(*dst, *ndst, size1);
-        if ( !*dst ) return -4;     // could not alloc
+        void *new_dst = hts_realloc_p(*dst, n, size1);
+        if ( !new_dst ) return -4;
+        *dst = new_dst;
+        *ndst = n;
     }
 
     #define BRANCH(type_t, convert, is_missing, is_vector_end, set_missing, set_vector_end, set_regular, out_type_t) { \

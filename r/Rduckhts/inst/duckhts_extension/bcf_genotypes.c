@@ -58,16 +58,8 @@ static int decode_field(bcf_hdr_t *header, bcf1_t *record, int is_gt,
         snprintf(error, error_size, "read_geno: FORMAT/%s exceeds the supported decoded-value capacity", tag);
         return 0;
     }
-    int32_t *previous = *data;
-    int previous_capacity = *capacity;
     int ret = is_gt ? bcf_get_genotypes(header, record, data, capacity)
         : bcf_get_format_int32(header, record, tag, data, capacity);
-    /* HTSlib 1.24 overwrites *data with realloc's return. On failure the old
-     * allocation is still ours; retain it so worker teardown can release it. */
-    if (ret == -4 && !*data) {
-        *data = previous;
-        *capacity = previous_capacity;
-    }
     duckhts_bcf_decode_status_t status = duckhts_bcf_decode_status(
         "read_geno", "FORMAT", tag, header, record, ret, error, error_size);
     if (status == DUCKHTS_BCF_DECODE_FATAL) return 0;

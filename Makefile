@@ -188,10 +188,20 @@ test-bcf-scan:
 			-o "$$tmp/bcf_scan_test"; "$$tmp/bcf_scan_test" "$$tmp"
 
 .PHONY: test-bcf-info-oom
+# The outside-Docker CI step reuses the probe; its CMake cache has container paths.
 test-bcf-info-oom:
-	@if [ "$$(uname -s)" = Linux ]; then \
-		./cmake_build/release/duckhts_bcf_info_oom_test; \
-	else echo "INFO realloc interposition requires Linux; reader SQL/R tests remain enabled"; fi
+	@set -e; \
+		test -f cmake_build/release/duckhts_bcf_info_oom.enabled || \
+			{ echo "Configure the release build before running the BCF allocation probe"; exit 1; }; \
+		case "$$(cat cmake_build/release/duckhts_bcf_info_oom.enabled)" in \
+		ON) \
+			if [ "$(LINUX_CI_IN_DOCKER)" != 0 ]; then \
+				cmake --build cmake_build/release --target duckhts_bcf_info_oom_test; \
+			fi; \
+			./cmake_build/release/duckhts_bcf_info_oom_test ;; \
+		OFF) echo "BCF realloc interposition requires a Linux target; reader SQL/R tests remain enabled" ;; \
+		*) echo "Invalid CMake BCF probe availability"; exit 1 ;; \
+		esac
 
 .PHONY: test-reference-cache test-reference-cache-asan test-reference-cache-ubsan test-reference-cache-tsan
 define run_reference_cache_test
