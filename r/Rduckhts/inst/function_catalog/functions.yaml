@@ -322,6 +322,18 @@
       ]
     },
     {
+      "name": "duckvep_repeat_sequence",
+      "kind": "scalar_macro",
+      "category": "Variant Annotation",
+      "signature": "duckvep_repeat_sequence(components, sequence_exact, max_sequence_bases := 5000)",
+      "returns": "STRUCT(sequence VARCHAR, status VARCHAR)",
+      "r_wrapper": "",
+      "description": "Prepare a literal sequence from an ordered list of repeat components with named fields unit VARCHAR and count numeric. Use the same helper separately for reference and alternate descriptions. sequence_exact is a required caller assertion that the complete ordered description, including interruptions, represents the allele; FALSE returns NULL sequence and summary_only, even for integral counts. VCF CNV:TR summary metadata does not establish this assertion: summaries may omit sequence changes. With TRUE, missing lists, elements, units or counts return incomplete_input; fractional counts return nonintegral_count without rounding or assuming where partial repeat bases occur. Complete nonnegative integral counts expand to sequence with status ok. Empty lists and zero counts produce an empty sequence, not NULL. Non-empty IUPAC DNA units retain case and ambiguous codes; invalid units and negative or nonfinite counts raise errors, including in summary mode. max_sequence_bases is a per-call nonnegative integral limit at most 2147483647, checked against the entire concatenation before expansion; exhaustion errors without partial output. DuckDB owns list and string storage. This helper does not parse RN/RUS/RUC/RB, infer reference counts, validate against FASTA, assign genomic anchors, normalize variants or certify a VEP expansion policy. Keep source event and ALT ordinals, raw fractional counts, confidence intervals and exactness in the caller relation; use literal alleles with the existing annotation/haplotype paths and retain summary-only events for structural consumers. ok certifies the expansion operation, not resolution of ambiguous DNA codes or the truth of the caller's exactness assertion.",
+      "examples": [
+        "SELECT (duckvep_repeat_sequence([{unit: 'CAG', count: 5}, {unit: 'CAT', count: 1}, {unit: 'CAG', count: 5}], true, max_sequence_bases := 100)).*;"
+      ]
+    },
+    {
       "name": "duckvep_breakend_geometry",
       "kind": "scalar",
       "category": "Variant Annotation",

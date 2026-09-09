@@ -3,6 +3,9 @@
 - report reference-fetch failures through rduckhts_fasta_nuc instead of returning
   incomplete intervals; bundled faidx checks reject overflowing index arithmetic
 
+- expose bundled duckvep_repeat_sequence SQL for exact ordered repeat descriptions,
+  with per-call size limits and explicit handling of summary or incomplete evidence
+
 - preserve curated reference peptides for bundled `source_records` haplotypes
   without retained exon-overlapping genotypes, including internal stops and start
   methionine. Intronic context preserves provenance without changing literal CDS

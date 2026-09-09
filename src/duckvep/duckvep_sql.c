@@ -173,6 +173,48 @@ duckvep_register_so_terms(duckdb_connection connection)
 }
 
 static bool
+duckvep_register_repeat_sequence(duckdb_connection connection)
+{
+	static const char *const sql[] = {
+		"CREATE OR REPLACE MACRO duckvep_repeat_sequence(components, sequence_exact, ",
+		"max_sequence_bases := 5000) AS (",
+		"WITH input AS (SELECT CAST(sequence_exact AS BOOLEAN) AS exact, ",
+		"CAST(max_sequence_bases AS DOUBLE) AS capacity, ",
+		"max_sequence_bases <> trunc(max_sequence_bases) AS fractional_capacity, ",
+		"coalesce(list_bool_or(list_transform(components, c -> ",
+		"c.count <> trunc(c.count))), false) AS fractional, ",
+		"list_transform(components, c -> struct_pack(unit := CAST(c.unit AS VARCHAR), ",
+		"count := CAST(c.count AS DOUBLE))) AS parts), ",
+		"facts AS (SELECT *, ",
+		"coalesce(list_bool_or(list_transform(parts, c -> c.unit IS NOT NULL AND ",
+		"NOT regexp_full_match(c.unit, '[ACGTRYSWKMBDHVNacgtryswkmbdhvn]+'))), false) AS invalid_unit, ",
+		"coalesce(list_bool_or(list_transform(parts, c -> c.count IS NOT NULL AND ",
+		"(NOT isfinite(c.count) OR c.count < 0))), false) AS invalid_count, ",
+		"parts IS NULL OR coalesce(list_bool_or(list_transform(parts, c -> ",
+		"c.unit IS NULL OR c.count IS NULL)), false) AS incomplete, ",
+		"coalesce(list_sum(list_transform(parts, c -> length(c.unit) * c.count)), 0) AS required ",
+		"FROM input) ",
+		"SELECT CASE ",
+		"WHEN exact IS NULL THEN error('duckvep_repeat_sequence: sequence_exact is required') ",
+		"WHEN capacity IS NULL OR NOT isfinite(capacity) OR capacity < 0 ",
+		"OR capacity > 2147483647 OR fractional_capacity ",
+		"THEN error('duckvep_repeat_sequence: max_sequence_bases must be an integer from 0 through 2147483647') ",
+		"WHEN invalid_unit THEN error('duckvep_repeat_sequence: repeat units must contain non-empty IUPAC DNA') ",
+		"WHEN invalid_count THEN error('duckvep_repeat_sequence: repeat counts must be finite and nonnegative') ",
+		"WHEN NOT exact THEN struct_pack(sequence := NULL::VARCHAR, status := 'summary_only') ",
+		"WHEN incomplete THEN struct_pack(sequence := NULL::VARCHAR, status := 'incomplete_input') ",
+		"WHEN fractional THEN struct_pack(sequence := NULL::VARCHAR, status := 'nonintegral_count') ",
+		"WHEN required > capacity THEN error('duckvep_repeat_sequence: required bases ' || ",
+		"CAST(required AS VARCHAR) || ' exceeds max_sequence_bases=' || CAST(capacity AS VARCHAR)) ",
+		"ELSE struct_pack(sequence := coalesce(array_to_string(list_transform(parts, c -> ",
+		"repeat(c.unit, CAST(c.count AS BIGINT))), ''), ''), status := 'ok') END FROM facts)"
+	};
+
+	return duckvep_register_sql_parts(connection, sql,
+	    sizeof(sql) / sizeof(sql[0]));
+}
+
+static bool
 duckvep_register_annotate_relation(duckdb_connection connection)
 {
 	static const char *const sql[] = {
@@ -615,6 +657,7 @@ register_duckvep_sql_functions(duckdb_connection connection)
 {
 	return duckvep_register_so_terms(connection) &&
 	    duckvep_register_phase_call(connection) &&
+	    duckvep_register_repeat_sequence(connection) &&
 	    duckvep_register_projection_code(connection) &&
 	    duckvep_register_annotate_relation(connection) &&
 	    duckvep_register_projection_relation(connection);

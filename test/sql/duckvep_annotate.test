@@ -5,6 +5,108 @@
 require duckhts
 
 query T
+SELECT typeof(duckvep_repeat_sequence([{unit:'CAG',count:2}],true));
+----
+STRUCT("sequence" VARCHAR, status VARCHAR)
+
+# Ordered exact components preserve interruptions, case and ambiguous DNA codes.
+query TT
+SELECT r.sequence,r.status FROM (SELECT duckvep_repeat_sequence(
+ [{unit:'CAG',count:2},{unit:'CAT',count:1},{unit:'nRy',count:2}],true,
+ max_sequence_bases:=15) r);
+----
+CAGCAGCATnRynRy	ok
+
+query TT
+SELECT r.sequence,r.status FROM (SELECT duckvep_repeat_sequence(
+ []::STRUCT(unit VARCHAR,count DOUBLE)[],true,max_sequence_bases:=0) r);
+----
+(empty)	ok
+
+query TT
+SELECT r.sequence,r.status FROM (SELECT duckvep_repeat_sequence(
+ [{unit:'CAG',count:0}],true,max_sequence_bases:=0) r);
+----
+(empty)	ok
+
+# A summary does not establish exact sequence even with integral, known counts.
+query IT
+SELECT r.sequence IS NULL,r.status FROM (SELECT duckvep_repeat_sequence(
+ [{unit:'CAG',count:1000000000000000000}],false,max_sequence_bases:=0) r);
+----
+1	summary_only
+
+query IT
+SELECT r.sequence IS NULL,r.status FROM (SELECT duckvep_repeat_sequence(
+ [{unit:'CAG',count:11.5}],true) r);
+----
+1	nonintegral_count
+
+# Test integrality before converting arbitrary caller numeric types to DOUBLE.
+query IT
+SELECT r.sequence IS NULL,r.status FROM (SELECT duckvep_repeat_sequence(
+ [{unit:'A',count:1.000000000000000001::DECIMAL(38,18)}],true) r);
+----
+1	nonintegral_count
+
+query IT
+SELECT count(*),min(r.status) FROM (SELECT duckvep_repeat_sequence(parts,true) r
+ FROM (VALUES (NULL::STRUCT(unit VARCHAR,count DOUBLE)[]),([NULL]),
+ ([{unit:NULL,count:1}]),([{unit:'CAG',count:NULL}])) v(parts))
+ WHERE r.sequence IS NULL;
+----
+4	incomplete_input
+
+# The complete concatenation, not each component separately, is capacity checked.
+statement error
+SELECT duckvep_repeat_sequence([{unit:'AC',count:2},{unit:'GT',count:2}],true,
+ max_sequence_bases:=7);
+----
+exceeds max_sequence_bases=7
+
+statement error
+SELECT duckvep_repeat_sequence([{unit:'AC',count:1e300}],true);
+----
+exceeds max_sequence_bases=5000
+
+statement error
+SELECT duckvep_repeat_sequence([{unit:'A',count:1}],true,max_sequence_bases:=1.000000000000000001::DECIMAL(38,18));
+----
+max_sequence_bases must be an integer
+
+statement error
+SELECT duckvep_repeat_sequence([{unit:'A',count:-1}],false);
+----
+counts must be finite and nonnegative
+
+statement error
+SELECT duckvep_repeat_sequence([{unit:'A',count:'NaN'::DOUBLE}],false);
+----
+counts must be finite and nonnegative
+
+statement error
+SELECT duckvep_repeat_sequence([{unit:'A.',count:1}],true);
+----
+repeat units must contain non-empty IUPAC DNA
+
+statement error
+SELECT duckvep_repeat_sequence([{unit:'A',count:1}],NULL);
+----
+sequence_exact is required
+
+# Input-dependent certainty, counts and capacities cross several output vectors.
+query III
+WITH prepared AS (
+ SELECT i,duckvep_repeat_sequence([{unit:'CAG',count:i%13}],i%3<>0,
+ max_sequence_bases:=(i%13)*3) r FROM range(10000) v(i)
+)
+SELECT count(*),count(*) FILTER (WHERE r.status='summary_only' AND r.sequence IS NULL),
+ count(*) FILTER (WHERE r.status='ok' AND r.sequence=repeat('CAG',(i%13)::BIGINT))
+FROM prepared;
+----
+10000	3334	6666
+
+query T
 SELECT typeof(duckvep_breakend_geometry('N[chr:1['));
 ----
 STRUCT(mate_chrom VARCHAR, mate_position UBIGINT, local_join_after BOOLEAN, mate_extends_right BOOLEAN, replacement_sequence VARCHAR)

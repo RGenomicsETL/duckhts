@@ -5,6 +5,45 @@ local({
   con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
 
+  repeat_query <- paste("SELECT r.* FROM (SELECT duckvep_repeat_sequence(",
+    "[{unit:'CAG',count:2},{unit:'CAT',count:1},{unit:'nRy',count:2}],true,",
+    "max_sequence_bases:=15) r)")
+  expect_identical(dbGetQuery(con, repeat_query),
+    data.frame(sequence = "CAGCAGCATnRynRy", status = "ok"))
+  cases <- c("[]::STRUCT(unit VARCHAR,count DOUBLE)[]", "[{unit:'CAG',count:0}]",
+    "NULL::STRUCT(unit VARCHAR,count DOUBLE)[]", "[NULL]::STRUCT(unit VARCHAR,count DOUBLE)[]",
+    "[{unit:NULL,count:1}]", "[{unit:'CAG',count:NULL}]", "[{unit:'CAG',count:1.5}]",
+    "[{unit:'A',count:1.000000000000000001::DECIMAL(38,18)}]")
+  wanted <- c("ok", "ok", rep("incomplete_input", 4L), rep("nonintegral_count", 2L))
+  for (i in seq_along(cases)) {
+    value <- dbGetQuery(con, paste0("SELECT r.* FROM (SELECT duckvep_repeat_sequence(",
+      cases[i], ",true) r)"))
+    expect_identical(value$status, wanted[i])
+    expect_identical(value$sequence, if (wanted[i] == "ok") "" else NA_character_)
+  }
+  summary <- dbGetQuery(con, paste("SELECT r.* FROM (SELECT duckvep_repeat_sequence(",
+    "[{unit:'CAG',count:1e300}],false,max_sequence_bases:=0) r)"))
+  expect_identical(summary, data.frame(sequence = NA_character_, status = "summary_only"))
+  for (count in c("-1", "'NaN'::DOUBLE", "'Infinity'::DOUBLE"))
+    expect_error(dbGetQuery(con, paste0("SELECT duckvep_repeat_sequence([{unit:'A',count:",
+      count, "}],false)")), pattern = "counts must be finite and nonnegative")
+  for (limit in c("NULL", "-1", "1.5", "2147483648", "'Infinity'::DOUBLE",
+                  "1.000000000000000001::DECIMAL(38,18)"))
+    expect_error(dbGetQuery(con, paste0("SELECT duckvep_repeat_sequence([{unit:'A',count:1}],",
+      "true,max_sequence_bases:=", limit, ")")), pattern = "max_sequence_bases must be an integer")
+  for (unit in c("", ".", "AU", "CAG ", "CAG;", "é"))
+    expect_error(dbGetQuery(con, paste0("SELECT duckvep_repeat_sequence([{unit:",
+      dbQuoteString(con, unit), ",count:1}],false)")),
+      pattern = "repeat units must contain non-empty IUPAC DNA")
+  expect_error(dbGetQuery(con, paste("SELECT duckvep_repeat_sequence(",
+    "[{unit:'AC',count:2},{unit:'GT',count:2}],true,max_sequence_bases:=7)")),
+    pattern = "exceeds max_sequence_bases=7")
+  expect_error(dbGetQuery(con, "SELECT duckvep_repeat_sequence([{unit:'AC',count:1e300}],true)"),
+    pattern = "exceeds max_sequence_bases=5000")
+  expect_error(dbGetQuery(con, "SELECT duckvep_repeat_sequence([{unit:'AC',count:1}],NULL)"),
+    pattern = "sequence_exact is required")
+  expect_identical(dbGetQuery(con, repeat_query)$sequence, "CAGCAGCATnRynRy")
+
   bnd <- dbGetQuery(
     con,
     paste(

@@ -7,6 +7,9 @@
 - fail fasta_nuc queries on reference-fetch errors instead of omitting intervals;
   reject overflowing FASTA index seek positions and inclusive coordinates
 
+- add duckvep_repeat_sequence for bounded expansion of exact ordered repeat
+  descriptions, with explicit summary, missing-input and fractional-count statuses
+
 - use the shared curated reference peptide for raw haplotypes without retained
   exon-overlapping genotypes. Intronic context retains provenance and does not
   alter literal CDS replay. Retained exon-overlapping calls use mutation
