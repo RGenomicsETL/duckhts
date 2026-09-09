@@ -9945,6 +9945,13 @@ TEST haplotype_stream_recycles_owned_alleles_and_projection_slots(void) {
             prepared.chrom_id = retained->chrom_id;
             ASSERT(contributor->prepared != NULL);
             ASSERT_MEM_EQ(&prepared, contributor->prepared, sizeof prepared);
+            ASSERT(contributor->projected != NULL);
+            ASSERT_EQ(drained % 2u ? 1u : 2u, contributor->projected->cds_start);
+            ASSERT_EQ(drained % 2u ? 1u : 0u, contributor->projected->ref_len);
+            ASSERT_EQ(drained % 2u ? 1u : 2u, contributor->projected->alt_len);
+            ASSERT(contributor->projected->ref == (drained % 2u ? retained->ref : NULL));
+            ASSERT(contributor->projected->alt == retained->alt + prepared.alt_diff_offset);
+            ASSERT_EQ(1, contributor->projected->variant_strand);
             ASSERT_EQ(DUCKVEP_CDS_EDIT_OK, leaf.projection_status);
             ASSERT_EQ(DUCKVEP_HAPLOTYPE_OK, leaf.sequence_status);
             ASSERT_EQ(drained % 2u ? 12u : 14u, leaf.cds_length);
@@ -12427,6 +12434,45 @@ TEST annotate_cursor_resumes_known_scene(void) {
     PASS();
 }
 
+/* Own the complete small-fixture views before an observer's scratch expires.
+ * Oversized views fail the comparison instead of comparing a prefix. */
+struct kprop_context_snapshot {
+    duckvep_coding_context_t metadata;
+    duckvep_coding_peptide_window_t window;
+    int window_present;
+    uint8_t cds[2][128], protein[2][128], local_peptide[2][128];
+};
+
+static int kprop_context_snapshot(const duckvep_coding_context_t *context,
+                                struct kprop_context_snapshot *out) {
+    memset(out, 0, sizeof *out);
+    out->metadata = *context;
+    out->metadata.ref_cds = out->metadata.alt_cds = NULL;
+    out->metadata.ref_peptide = out->metadata.alt_peptide = NULL;
+    out->metadata.single_edit_alt = out->metadata.local_alt_cds = NULL;
+    out->metadata.local_ref_peptide = out->metadata.local_alt_peptide = NULL;
+    out->metadata.ref_peptide_edit_position1 = NULL;
+    out->metadata.ref_peptide_edit_alt = NULL;
+    out->metadata.pre_cds_bases = out->metadata.post_cds_bases = NULL;
+    out->window_present = duckvep_coding_context_peptide_window_open(context, &out->window);
+    for (int alt = 0; alt <= 1; alt++) {
+        size_t cds_len = alt ? context->alt_cds_len : context->ref_cds_len;
+        size_t protein_len = alt ? context->alt_peptide_len : context->ref_peptide_len;
+        size_t local_len = !out->window_present ? 0u
+            : alt ? out->window.alt_length : out->window.ref_length;
+        if (cds_len > sizeof out->cds[alt] || protein_len > sizeof out->protein[alt] ||
+            local_len > sizeof out->local_peptide[alt]) return 0;
+        for (size_t i = 0u; i < cds_len; i++)
+            out->cds[alt][i] = (uint8_t)duckvep_coding_context_cds_base(context, alt, i);
+        for (size_t i = 0u; i < protein_len; i++)
+            out->protein[alt][i] = duckvep_coding_context_peptide_base(context, alt, i);
+        for (size_t i = 0u; i < local_len; i++)
+            out->local_peptide[alt][i] = duckvep_coding_context_peptide_window_base(
+                context, &out->window, alt, i);
+    }
+    return 1;
+}
+
 struct annotation_observer_capture {
     const duckvep_variant_batch_t *expected_batch;
     duckvep_consequence_t rows[6];
@@ -12441,6 +12487,7 @@ struct annotation_observer_capture {
     uint32_t transcript_edit_first_cdna1[6];
     uint32_t transcript_edit_ref_length[6];
     uint32_t transcript_edit_alt_length[6];
+    struct kprop_context_snapshot coding[6];
     size_t count;
 };
 
@@ -12474,6 +12521,8 @@ static int annotation_observer_capture_row(
         capture->delta_present[index] = facts->delta != NULL ? 1u : 0u;
         if (facts->delta) capture->deltas[index] = *facts->delta;
         capture->coding_context_valid[index] = facts->coding_context_valid;
+        if (facts->coding_context_valid && (!facts->coding_context ||
+            !kprop_context_snapshot(facts->coding_context, &capture->coding[index]))) return 0;
         if (facts->transcript_edit != NULL) {
             capture->transcript_edit_present[index] = 1u;
             capture->transcript_edit_first_cdna1[index] =
@@ -12490,21 +12539,52 @@ static int annotation_observer_capture_row(
 }
 
 TEST observed_single_pair_matches_cursor_without_sweep_storage(void) {
-    static const uint8_t cds[] = "ATGGCTGCTGCTGCTGCTGCTGCTGCTTAA";
+    static const uint8_t unpadded[] = "ATGGCTGCTGCTGCTGCTGCTGCTGCTTAA";
+    static const uint8_t flanks[] = "AAAAAAAAA";
     uint32_t random = UINT32_C(173);
     size_t compared = 0u;
+    for (unsigned layout = 0u; layout < 2u; layout++)
+    for (unsigned phase = 0u; phase <= 2u; phase++)
     for (int strand = -1; strand <= 1; strand += 2) {
         struct kprop_proj_scene s = {0};
         s.chrom = 0u; s.tstart = s.cds_s = 11u; s.tend = s.cds_e = 40u;
         s.strand = (int8_t)strand; s.excnt = 1u;
         s.es[0] = 11u; s.ee[0] = 40u; s.cs[0] = 1u; s.ce[0] = 30u;
+        s.phase[0] = s.end_phase[0] = (int8_t)phase;
+        if (layout) {
+            s.tstart = 1u; s.tend = 84u; s.cds_e = 79u; s.excnt = 3u;
+            s.es[0] = 1u; s.ee[0] = 4u; s.ce[0] = 4u;
+            s.es[1] = 11u; s.ee[1] = 21u; s.cs[1] = 5u; s.ce[1] = 15u;
+            s.es[2] = 61u; s.ee[2] = 84u; s.cs[2] = 16u; s.ce[2] = 39u;
+            s.phase[0] = s.end_phase[0] = -1;
+            s.phase[1] = (int8_t)phase;
+            s.end_phase[1] = s.phase[2] = (int8_t)((phase + 11u) % 3u);
+            s.end_phase[2] = (int8_t)phase;
+            if (strand < 0) {
+                s.tstart = 16u; s.tend = 99u; s.cds_s = 21u; s.cds_e = 89u;
+                for (unsigned e = 0u; e < 3u; e++) {
+                    uint32_t start = s.es[e];
+                    s.es[e] = 100u - s.ee[e]; s.ee[e] = 100u - start;
+                }
+            }
+        }
         s.flags = DUCKVEP_TX_HAS_TRANSLATION | DUCKVEP_TX_BIOTYPE_PROTEIN_CODING;
         kprop_proj_scene_finish(&s);
-        uint64_t offset = 0u;
-        uint32_t length = sizeof cds - 1u;
+        uint8_t cds[sizeof unpadded + 2u];
+        memset(cds, 'N', phase);
+        memcpy(cds + phase, unpadded, sizeof unpadded - 1u);
+        uint64_t offset = 0u, post_offset = 4u;
+        uint32_t length = sizeof unpadded - 1u + phase;
+        uint32_t pre_length = layout ? 4u : 0u, post_length = layout ? 5u : 0u;
         uint8_t table = DUCKVEP_CODON_TABLE_STANDARD;
         duckvep_sequence_pool_t seq = {.cds_bytes = cds, .cds_bytes_len = length,
             .cds_offset = &offset, .cds_length = &length, .codon_table = &table, .transcript_count = 1u};
+        if (layout) {
+            seq.flank_bytes = flanks; seq.flank_bytes_len = sizeof flanks - 1u;
+            seq.pre_cds_offset = &offset; seq.pre_cds_length = &pre_length;
+            seq.post_cds_offset = &post_offset; seq.post_cds_length = &post_length;
+            seq.flanks_complete = 1u;
+        }
         duckvep_model_t *model = NULL;
         duckvep_workspace_t *workspace = NULL;
         duckvep_options_t *options = NULL;
@@ -12516,7 +12596,7 @@ TEST observed_single_pair_matches_cursor_without_sweep_storage(void) {
         ASSERT_EQ(DUCKVEP_OK, duckvep_options_open(&init, &options, &error));
         uint8_t genomic[30];
         for (size_t i = 0u; i < sizeof genomic; i++) {
-            uint8_t base = cds[strand > 0 ? i : sizeof genomic - 1u - i];
+            uint8_t base = unpadded[strand > 0 ? i : sizeof genomic - 1u - i];
             genomic[i] = strand > 0 ? base : base == 'A' ? 'T' : base == 'C' ? 'G' : base == 'G' ? 'C' : 'A';
         }
         duckvep_haplotype_edit_t edits[32];
@@ -12529,6 +12609,21 @@ TEST observed_single_pair_matches_cursor_without_sweep_storage(void) {
                 uint32_t pos = 11u + random % (31u - rl), end = pos + rl - 1u;
                 uint8_t alleles[8];
                 memcpy(alleles, genomic + pos - 11u, rl);
+                if (layout) {
+                    /* Select every wholly exonic REF placement across both coding
+                     * exons; their junction splits a codon, not a source record. */
+                    uint32_t slot = random % (32u - 2u * rl);
+                    uint32_t first = slot < 12u - rl ? slot : slot + rl - 1u;
+                    uint32_t a, b;
+                    ASSERT(proj_brute_cdna_to_genomic(&s, first + 5u, &a, NULL));
+                    ASSERT(proj_brute_cdna_to_genomic(&s, first + rl + 4u, &b, NULL));
+                    pos = a < b ? a : b; end = pos + rl - 1u;
+                    for (unsigned j = 0u; j < rl; j++) {
+                        uint8_t base = unpadded[first + (strand > 0 ? j : rl - 1u - j)];
+                        alleles[j] = strand > 0 ? base
+                            : base == 'A' ? 'T' : base == 'C' ? 'G' : base == 'G' ? 'C' : 'A';
+                    }
+                }
                 for (unsigned i = 0u; i < al; i++) {
                     random = random * UINT32_C(1664525) + UINT32_C(1013904223);
                     alleles[rl + i] = (uint8_t)"ACGT"[(random >> 16u) & 3u];
@@ -12556,18 +12651,27 @@ TEST observed_single_pair_matches_cursor_without_sweep_storage(void) {
                 ASSERT(filled == DUCKVEP_OK || filled == DUCKVEP_ERR_RESULT_FULL);
                 ASSERT(result.count <= 1u);
                 ASSERT_EQ(DUCKVEP_OK, duckvep_annotate_pair_observed(model, &variant, &event, 0u,
-                    &scratch, annotation_observer_capture_row, &direct_capture, &error));
+                    &scratch, NULL, annotation_observer_capture_row, &direct_capture, &error));
                 ASSERT_MEM_EQ(cursor_capture.rows, direct_capture.rows, sizeof cursor_capture.rows);
                 ASSERT_MEM_EQ(cursor_capture.events, direct_capture.events, sizeof cursor_capture.events);
                 ASSERT_MEM_EQ(cursor_capture.deltas, direct_capture.deltas, sizeof cursor_capture.deltas);
                 ASSERT_MEM_EQ(&cursor_capture, &direct_capture, sizeof cursor_capture);
+                duckvep_haplotype_edit_t projected;
+                ASSERT_EQ(DUCKVEP_CDS_EDIT_OK, duckvep_variant_cds_edit_build(
+                    &s.tx, &s.ex, &seq, &variant, 0u, 0u, (int8_t)strand, &projected));
+                duckvep_haplotype_edit_t unchanged = projected;
+                struct annotation_observer_capture reused = {.expected_batch = &variant};
+                ASSERT_EQ(DUCKVEP_OK, duckvep_annotate_pair_observed(model, &variant, &event, 0u,
+                    &scratch, &projected, annotation_observer_capture_row, &reused, &error));
+                ASSERT_MEM_EQ(&direct_capture, &reused, sizeof reused);
+                ASSERT_MEM_EQ(&unchanged, &projected, sizeof projected);
                 duckvep_result_builder_reset(&result);
                 ASSERT_EQ(DUCKVEP_OK, duckvep_annotate_cursor_fill(cursor, &result, &error));
                 ASSERT_EQ(0u, result.count);
                 duckvep_annotate_cursor_close(cursor);
                 compared++;
                 ASSERT_EQ(DUCKVEP_ERR_INVALID_ARG, duckvep_annotate_pair_observed(model, &variant, &event, 1u,
-                    &scratch, annotation_observer_capture_row, &direct_capture, &error));
+                    &scratch, NULL, annotation_observer_capture_row, &direct_capture, &error));
                 if (draw == 0u) {
                     struct annotation_observer_capture rejected = {.expected_batch = &variant};
                     for (unsigned fault = 0u; fault < 8u; fault++) {
@@ -12581,17 +12685,29 @@ TEST observed_single_pair_matches_cursor_without_sweep_storage(void) {
                         if (fault == 6u) bad.anchor_ref_offset = UINT16_MAX;
                         if (fault == 7u) bad.has_mate = 1u;
                         ASSERT_EQ(DUCKVEP_ERR_INVALID_ARG, duckvep_annotate_pair_observed(
-                            model, &variant, &bad, 0u, &scratch,
+                            model, &variant, &bad, 0u, &scratch, NULL,
                             annotation_observer_capture_row, &rejected, &error));
                     }
                     ASSERT_EQ(DUCKVEP_ERR_INVALID_ARG, duckvep_annotate_pair_observed(
-                        model, &variant, NULL, 0u, &scratch,
+                        model, &variant, NULL, 0u, &scratch, NULL,
                         annotation_observer_capture_row, &rejected, &error));
                     variant.allele_bytes_len--;
                     ASSERT_EQ(DUCKVEP_ERR_OUT_OF_RANGE, duckvep_annotate_pair_observed(
-                        model, &variant, &event, 0u, &scratch,
+                        model, &variant, &event, 0u, &scratch, NULL,
                         annotation_observer_capture_row, &rejected, &error));
                     variant.allele_bytes_len++;
+                    for (unsigned fault = 0u; fault < 6u; fault++) {
+                        duckvep_haplotype_edit_t bad = projected;
+                        if (fault == 0u) bad.cds_start = 0u;
+                        if (fault == 1u) bad.variant_strand = -1;
+                        if (fault == 2u) bad.ref_len++;
+                        if (fault == 3u) bad.alt_len++;
+                        if (fault == 4u) bad.alt = bad.alt ? NULL : alleles;
+                        if (fault == 5u) bad.cds_start = UINT32_MAX;
+                        ASSERT_EQ(DUCKVEP_ERR_INVALID_ARG, duckvep_annotate_pair_observed(
+                            model, &variant, &event, 0u, &scratch, &bad,
+                            annotation_observer_capture_row, &rejected, &error));
+                    }
                     ASSERT_EQ(0u, rejected.count);
                 }
             }
@@ -12599,7 +12715,7 @@ TEST observed_single_pair_matches_cursor_without_sweep_storage(void) {
         duckvep_workspace_close(workspace);
         duckvep_model_close(model);
     }
-    ASSERT_EQ(2048u, compared);
+    ASSERT_EQ(12288u, compared);
     PASS();
 }
 
@@ -19324,7 +19440,7 @@ TEST sequence_delta_later_cds_phase_uses_feature_edits(void) {
                         ASSERT_EQ(DUCKVEP_VARIANT_CODING_CONTEXT_OK,
                             duckvep_variant_feature_coding_context_build_prepared(
                                 &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, strand, &event,
-                                UINT32_MAX, physical, 2u, alt_cds, sizeof alt_cds,
+                                UINT32_MAX, NULL, physical, 2u, alt_cds, sizeof alt_cds,
                                 ref_peptide, sizeof ref_peptide, alt_peptide, sizeof alt_peptide, &context));
                         if (physical[0].cds_start != unpadded_starts[j] + (uint32_t)phase)
                             fprintf(stderr, "[indel coordinate] case=%zu phase=%d strand=%d physical=%u feature=%u\n",
@@ -29309,6 +29425,31 @@ static enum theft_trial_res prop_delta_exon_hint_matches_unhinted(struct theft *
         !kprop_sequence_delta_equal(&unhinted, &hinted)) {
         return THEFT_TRIAL_FAIL;
     }
+    duckvep_haplotype_edit_t projected;
+    if (duckvep_variant_cds_edit_build(&s->tx, &s->ex, &s->seq, &s->v,
+            0u, 0u, s->strand, &projected) != DUCKVEP_CDS_EDIT_OK)
+        return THEFT_TRIAL_FAIL;
+    duckvep_haplotype_edit_t unchanged = projected;
+    struct kprop_context_snapshot computed, retained;
+    duckvep_sequence_delta_t observed[2];
+    duckvep_sequence_delta_route_t routes[2];
+    duckvep_variant_coding_context_status_t statuses[2];
+    for (unsigned cached = 0u; cached < 2u; cached++) {
+        duckvep_coding_context_t context;
+        duckvep_sequence_delta_fill_for_annotation_observed(
+            (duckvep_variant_kind_t)s->vkind, &s->tx, &s->ex, &s->seq, &s->v,
+            0u, 0u, s->vpos, s->strand, &scratch, &event,
+            (uint32_t)DUCKVEP_REGION_CDS, UINT32_MAX, cached ? &projected : NULL,
+            &routes[cached], &observed[cached], &context, &statuses[cached]);
+        if (statuses[cached] == DUCKVEP_VARIANT_CODING_CONTEXT_OK &&
+            !kprop_context_snapshot(&context, cached ? &retained : &computed))
+            return THEFT_TRIAL_FAIL;
+    }
+    if (routes[0] != routes[1] || statuses[0] != statuses[1] ||
+        memcmp(&observed[0], &observed[1], sizeof observed[0]) ||
+        memcmp(&unchanged, &projected, sizeof projected) ||
+        (statuses[0] == DUCKVEP_VARIANT_CODING_CONTEXT_OK &&
+         memcmp(&computed, &retained, sizeof computed))) return THEFT_TRIAL_FAIL;
     g_delta_exon_hint_cov.shape[s->expect_shape]++;
     if (s->strand > 0) g_delta_exon_hint_cov.fwd++;
     else g_delta_exon_hint_cov.rev++;
@@ -29416,7 +29557,7 @@ static enum theft_trial_res prop_simple_indel_route_matches_coding_context(
     duckvep_sequence_delta_fill_for_annotation_observed(
         (duckvep_variant_kind_t)s->vkind,
         &s->tx, &s->ex, &s->seq, &s->v, 0u, 0u, s->vpos, s->strand,
-        &authoritative_scratch, &event, (uint32_t)DUCKVEP_REGION_CDS, 0u,
+        &authoritative_scratch, &event, (uint32_t)DUCKVEP_REGION_CDS, 0u, NULL,
         &authoritative_route, &authoritative, &context, &context_status);
     duckvep_sequence_delta_fill_for_annotation_trace(
         (duckvep_variant_kind_t)s->vkind,

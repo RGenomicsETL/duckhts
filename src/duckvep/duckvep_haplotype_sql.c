@@ -744,7 +744,8 @@ static int append_single_event_hgvsp(duckdb_vector text, duckdb_vector status_ve
         .status = DUCKVEP_HGVS_NOT_APPLICABLE, .error = error, .error_size = error_size};
     duckvep_error_t native_error = {0};
     if (duckvep_annotate_pair_observed(bind->entry->model.kernel, &variant, event,
-            leaf->carriers.transcript_index, &s->hgvs_scratch, haplotype_hgvs_observe,
+            leaf->carriers.transcript_index, &s->hgvs_scratch,
+            source->source_record ? NULL : contributor->projected, haplotype_hgvs_observe,
             &observer, &native_error) != DUCKVEP_OK) {
         if (!error[0]) duckvep_sql_set_error(error, error_size, native_error.message);
         return 0;

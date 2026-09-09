@@ -1793,44 +1793,53 @@ duckvep_projected_cds_edit_set_build(
     return DUCKVEP_CDS_EDIT_OK;
 }
 
-DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t
-duckvep_variant_cds_edit_set_build_prepared(
-    const duckvep_transcript_model_t *transcripts,
-    const duckvep_exon_model_t       *exons,
-    const duckvep_sequence_pool_t    *seq,
+static duckvep_cds_edit_status_t delta_variant_edit_set_from_projected(
     const duckvep_variant_batch_t    *v,
     uint32_t                          variant_idx,
-    size_t                            tx_idx,
     int8_t                            transcript_strand,
-    const duckvep_event_t            *prepared_event,
-    uint32_t                          exon_hint,
+    const duckvep_haplotype_edit_t   *projected,
     duckvep_haplotype_edit_t         *scratch,
     size_t                            scratch_cap,
     duckvep_edit_set_t               *out) {
     if (out == NULL) return DUCKVEP_CDS_EDIT_INVALID_ARG;
     out->edits = NULL;
     out->count = 0u;
-    if ((scratch == NULL && scratch_cap > 0u) || prepared_event == NULL)
+    if ((scratch == NULL && scratch_cap > 0u) || projected == NULL)
         return DUCKVEP_CDS_EDIT_INVALID_ARG;
+    if (v == NULL || v->variant_kind == NULL || variant_idx >= v->count)
+        return DUCKVEP_CDS_EDIT_INVALID_ARG;
+    if (v->variant_kind[variant_idx] != (uint8_t)DUCKVEP_KIND_MNV) {
+        if (scratch_cap == 0u) return DUCKVEP_CDS_EDIT_BUFFER_TOO_SMALL;
+        scratch[0] = *projected;
+        out->edits = scratch;
+        out->count = 1u;
+        return DUCKVEP_CDS_EDIT_OK;
+    }
+    duckvep_cds_edit_status_t status = duckvep_projected_cds_edit_set_build(projected, transcript_strand,
+        scratch, scratch_cap, out);
+    /* Preserve this producer's all-zero failed-output contract. */
+    if (status != DUCKVEP_CDS_EDIT_OK) out->count = 0u;
+    return status;
+}
+
+DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t
+duckvep_variant_cds_edit_set_build_prepared(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t *exons, const duckvep_sequence_pool_t *seq,
+    const duckvep_variant_batch_t *v, uint32_t variant_idx, size_t tx_idx,
+    int8_t transcript_strand, const duckvep_event_t *prepared_event,
+    uint32_t exon_hint, duckvep_haplotype_edit_t *scratch, size_t scratch_cap,
+    duckvep_edit_set_t *out) {
+    if (!out) return DUCKVEP_CDS_EDIT_INVALID_ARG;
+    *out = (duckvep_edit_set_t){0};
+    if ((!scratch && scratch_cap) || !prepared_event) return DUCKVEP_CDS_EDIT_INVALID_ARG;
     duckvep_haplotype_edit_t edit;
     duckvep_cds_edit_status_t status = duckvep_variant_cds_edit_build_event(
         transcripts, exons, seq, v, variant_idx, tx_idx, transcript_strand,
         prepared_event, exon_hint, &edit);
     if (status != DUCKVEP_CDS_EDIT_OK) return status;
-    if (v == NULL || v->variant_kind == NULL || variant_idx >= v->count)
-        return DUCKVEP_CDS_EDIT_INVALID_ARG;
-    if (v->variant_kind[variant_idx] != (uint8_t)DUCKVEP_KIND_MNV) {
-        if (scratch_cap == 0u) return DUCKVEP_CDS_EDIT_BUFFER_TOO_SMALL;
-        scratch[0] = edit;
-        out->edits = scratch;
-        out->count = 1u;
-        return DUCKVEP_CDS_EDIT_OK;
-    }
-    status = duckvep_projected_cds_edit_set_build(&edit, transcript_strand,
-        scratch, scratch_cap, out);
-    /* Preserve this producer's all-zero failed-output contract. */
-    if (status != DUCKVEP_CDS_EDIT_OK) out->count = 0u;
-    return status;
+    return delta_variant_edit_set_from_projected(v, variant_idx, transcript_strand,
+        &edit, scratch, scratch_cap, out);
 }
 
 DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t duckvep_variant_cds_edit_set_build(
@@ -2773,6 +2782,7 @@ duckvep_variant_feature_coding_context_build_prepared(
     int8_t                            transcript_strand,
     const duckvep_event_t            *event,
     uint32_t                          exon_hint,
+    const duckvep_haplotype_edit_t   *projected,
     duckvep_haplotype_edit_t         *edit_scratch,
     size_t                            edit_scratch_cap,
     uint8_t                          *alt_cds_scratch,
@@ -2802,9 +2812,12 @@ duckvep_variant_feature_coding_context_build_prepared(
         duckvep_event_load(v, variant_idx, &event_storage);
         event = &event_storage;
     }
-    edit_status = duckvep_variant_cds_edit_set_build_prepared(
-        transcripts, exons, seq, v, variant_idx, tx_idx, transcript_strand,
-        event, exon_hint, edit_scratch, edit_scratch_cap, &physical);
+    edit_status = projected
+        ? delta_variant_edit_set_from_projected(v, variant_idx, transcript_strand,
+            projected, edit_scratch, edit_scratch_cap, &physical)
+        : duckvep_variant_cds_edit_set_build_prepared(
+            transcripts, exons, seq, v, variant_idx, tx_idx, transcript_strand,
+            event, exon_hint, edit_scratch, edit_scratch_cap, &physical);
     if (edit_status != DUCKVEP_CDS_EDIT_OK) {
         return delta_variant_context_from_edit_status(edit_status);
     }
@@ -5295,6 +5308,7 @@ static void sequence_delta_fill_snv(
     int8_t                            strand,
     const duckvep_event_t            *prepared_event,
     uint32_t                          exon_hint,
+    const duckvep_haplotype_edit_t   *projected,
     duckvep_sequence_delta_t         *delta) {
 
     duckvep_event_t loaded_event;
@@ -5331,7 +5345,27 @@ static void sequence_delta_fill_snv(
         return;
 
     pos = event->start1;
-    if (!delta_project_prepared_coding_base(
+    if (projected) {
+        uint32_t coding_start, coding_end;
+        uint8_t phase;
+        if (projected->ref_len != 1u || projected->alt_len != 1u ||
+            !duckvep_project_coding_cdna_bounds(transcripts, exons, tx_idx,
+                &coding_start, &coding_end, NULL, &phase) ||
+            projected->cds_start <= phase || projected->cds_start > cds_len ||
+            (uint64_t)coding_start + projected->cds_start - phase - 1u > coding_end) {
+            delta->sequence_status = (uint8_t)DUCKVEP_SEQUENCE_INVALID_PROJECTION;
+            return;
+        }
+        /* Convert the retained physical CDS coordinate; the scalar codon and
+         * start predicates do not consume an exon index or remap the source. */
+        physical = (duckvep_coding_projection_t){
+            .cdna_pos = (uint32_t)((uint64_t)coding_start + projected->cds_start - phase - 1u),
+            .cds_pos = projected->cds_start,
+            .protein_pos = (projected->cds_start - 1u) / 3u + 1u,
+            .codon_offset = (uint8_t)((projected->cds_start - 1u) % 3u),
+            .codon_start_cds = projected->cds_start - (projected->cds_start - 1u) % 3u,
+            .phase_offset = phase, .exon_idx = UINT32_MAX};
+    } else if (!delta_project_prepared_coding_base(
             transcripts, exons, seq, tx_idx, cds_len,
             exon_hint, pos, &physical) &&
         !duckvep_project_coding_base(transcripts, exons, tx_idx, pos, &physical)) {
@@ -6084,6 +6118,7 @@ static void duckvep_sequence_delta_fill_with_scratch_event(
     duckvep_delta_scratch_t          *scratch,
     const duckvep_event_t            *prepared_event,
     uint32_t                          exon_hint,
+    const duckvep_haplotype_edit_t   *projected,
     duckvep_sequence_delta_t         *delta,
     duckvep_coding_context_t         *context_out,
     duckvep_variant_coding_context_status_t *context_status_out) {
@@ -6100,7 +6135,7 @@ static void duckvep_sequence_delta_fill_with_scratch_event(
     switch (kind) {
     case DUCKVEP_KIND_SNV:
         sequence_delta_fill_snv(transcripts, exons, seq, v, variant_idx, tx_idx, pos,
-                                strand, prepared_event, exon_hint, delta);
+                                strand, prepared_event, exon_hint, projected, delta);
         /* The direct SNV consequence path is already the scalar authority, but
          * an observer (HGVS or phased edit collection) also needs the complete
          * coding facts. Build them once here while the same prepared event and
@@ -6109,7 +6144,7 @@ static void duckvep_sequence_delta_fill_with_scratch_event(
             duckvep_variant_coding_context_status_t context_status =
                 duckvep_variant_feature_coding_context_build_prepared(
                     transcripts, exons, seq, v, variant_idx, tx_idx, strand,
-                    prepared_event, exon_hint, scratch->edits,
+                    prepared_event, exon_hint, projected, scratch->edits,
                     scratch->edits_cap, scratch->alt_cds,
                     scratch->alt_cds_cap, scratch->ref_peptide,
                     scratch->ref_peptide_cap, scratch->alt_peptide,
@@ -6138,7 +6173,7 @@ static void duckvep_sequence_delta_fill_with_scratch_event(
             context = context_out != NULL ? context_out : &local_context;
             context_status = duckvep_variant_feature_coding_context_build_prepared(
                 transcripts, exons, seq, v, variant_idx, tx_idx, strand,
-                prepared_event, exon_hint, scratch->edits, scratch->edits_cap,
+                prepared_event, exon_hint, projected, scratch->edits, scratch->edits_cap,
                 scratch->alt_cds, scratch->alt_cds_cap,
                 scratch->ref_peptide, scratch->ref_peptide_cap,
                 scratch->alt_peptide, scratch->alt_peptide_cap, context);
@@ -6179,7 +6214,7 @@ static void duckvep_sequence_delta_fill_with_scratch_event(
             context = context_out != NULL ? context_out : &local_context;
             context_status = duckvep_variant_feature_coding_context_build_prepared(
                 transcripts, exons, seq, v, variant_idx, tx_idx, strand,
-                prepared_event, exon_hint, scratch->edits, scratch->edits_cap,
+                prepared_event, exon_hint, projected, scratch->edits, scratch->edits_cap,
                 scratch->alt_cds, scratch->alt_cds_cap,
                 scratch->ref_peptide, scratch->ref_peptide_cap,
                 scratch->alt_peptide, scratch->alt_peptide_cap, context);
@@ -6260,6 +6295,7 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_observed(
     const duckvep_event_t            *prepared_event,
     uint32_t                          classified_region_mask,
     uint32_t                          exon_hint,
+    const duckvep_haplotype_edit_t   *projected,
     duckvep_sequence_delta_route_t   *route,
     duckvep_sequence_delta_t         *delta,
     duckvep_coding_context_t         *context_out,
@@ -6285,7 +6321,7 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_observed(
         v->alt_length[variant_idx] == 1u) {
         duckvep_sequence_delta_fill_with_scratch_event(
             kind, transcripts, exons, seq, v, variant_idx, tx_idx, pos,
-            strand, scratch, prepared_event, exon_hint, delta, context_out,
+            strand, scratch, prepared_event, exon_hint, projected, delta, context_out,
             context_status_out);
         return;
     }
@@ -6371,7 +6407,7 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_observed(
                             kind != DUCKVEP_KIND_INS && kind != DUCKVEP_KIND_INDEL)) {
         duckvep_sequence_delta_fill_with_scratch_event(
             kind, transcripts, exons, seq, v, variant_idx, tx_idx, pos, strand,
-            NULL, prepared_event, exon_hint, delta, NULL, NULL);
+            NULL, prepared_event, exon_hint, projected, delta, NULL, NULL);
         return;
     }
 
@@ -6398,7 +6434,7 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_observed(
     }
     duckvep_sequence_delta_fill_with_scratch_event(
         kind, transcripts, exons, seq, v, variant_idx, tx_idx, pos, strand,
-        scratch, prepared_event, exon_hint, delta,
+        scratch, prepared_event, exon_hint, projected, delta,
         context_out, context_status_out);
 }
 
@@ -6421,7 +6457,7 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_trace(
 
     duckvep_sequence_delta_fill_for_annotation_observed(
         kind, transcripts, exons, seq, v, variant_idx, tx_idx, pos, strand,
-        scratch, prepared_event, classified_region_mask, exon_hint, route,
+        scratch, prepared_event, classified_region_mask, exon_hint, NULL, route,
         delta, NULL, NULL);
 }
 

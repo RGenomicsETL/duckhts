@@ -1,6 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
 
+- reuse decoded singleton CDS projections in bundled phased HGVS, with SQL/R
+  comparisons against independent annotation for UTR-first, phase-padded models
+  through decoded and raw-record calls
+
 - use retained allele storage for singleton HGVS in rduckhts_haplotypes, with
   bounded-pool tests spanning input and output vectors for decoded and raw records
 

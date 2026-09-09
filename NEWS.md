@@ -2,6 +2,10 @@
 
 # duckhts 1.5.1.9000
 
+- reuse the retained physical CDS projection for decoded singleton phased HGVS,
+  preserving VEP uploaded-feature coordinates and separate shifted/raw-record
+  projections; test complete coding views across strands, exon layouts and CDS phases
+
 - reuse retained source alleles and prepared decoded-event geometry for singleton
   phased HGVS; raw-record replay retains its distinct full-span interpretation.
   Matched benchmarks retain full-output fingerprints and report per-revision timing
@@ -18,7 +22,8 @@
 - compare empty applied-source sets consistently across JSON and native conformance
   observations, with controls rejecting missing fields, invalid identities and lost sources
 
-- state pinned Ensembl VEP 116 as the HGVS acceptance authority in ERRATA.md;
+- state exact pinned Ensembl VEP 116 revisions as the HGVS acceptance authority in
+  ERRATA.md, including conflicts with separately assessed HGVS recommendations;
   distinguish sequence equivalence from per-record compatibility and require runnable,
   independently supported evidence for upstream-defect claims without waiving failures
 

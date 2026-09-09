@@ -52,10 +52,13 @@ DUCKVEP_INTERNAL_API void duckvep_annotate_cursor_set_observer(
  * VEP-116 defaults with zero upstream/downstream reach and the same consequence
  * machinery as the cursor. No allele normalization, sweep state or heap
  * storage is constructed here. The callback may be omitted by transcript
- * admission and must consume its borrowed facts before returning. */
+ * admission and must consume its borrowed facts before returning. `projected`
+ * may borrow a successful physical CDS edit for this exact prepared allele and
+ * immutable model/transcript. Feature and shifted-HGVS coordinates stay distinct. */
 DUCKVEP_INTERNAL_API duckvep_status_t duckvep_annotate_pair_observed(
     const duckvep_model_t *model, const duckvep_variant_batch_t *variants,
     const duckvep_event_t *event, uint32_t transcript_index, duckvep_delta_scratch_t *scratch,
+    const duckvep_haplotype_edit_t *projected,
     duckvep_annotation_observer_fn observer, void *observer_context,
     duckvep_error_t *error);
 

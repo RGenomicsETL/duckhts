@@ -30,6 +30,7 @@ run <- function() {
   sha <- function(p) digest::digest(file = p, algo = 'sha256', serialize = FALSE)
   source_files <- c('test/duckvep/conformance/hgvs_anchor_differential.R',
     'src/duckvep/kernel/src/duckvep_hgvs.c','src/duckvep/kernel/src/duckvep_delta.c',
+    'src/duckvep/kernel/src/duckvep_delta.h',
     'src/duckvep/kernel/src/duckvep_hgvs.h','src/duckvep/duckvep_annotate.c',
     'src/duckvep/duckvep_haplotype_sql.c', 'src/duckvep/duckvep_reference.c',
     'src/duckvep/duckvep_reference.h', 'src/duckvep/kernel/src/duckvep_kernel.c',

@@ -54,6 +54,53 @@ local({
 local({
   con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE))
+  tx <- paste("SELECT i::UINTEGER transcript_index,i::UINTEGER seq_region,",
+    "100::UBIGINT transcript_start,125::UBIGINT transcript_end,",
+    "CASE WHEN i<3 THEN 1 ELSE -1 END::TINYINT strand,0::UINTEGER gene_index,",
+    "3::UBIGINT transcript_flags,CASE WHEN i<3 THEN 110 ELSE 104 END::UBIGINT cds_start,",
+    "CASE WHEN i<3 THEN 121 ELSE 115 END::UBIGINT cds_end,",
+    "(repeat('N',i%3)||'ATGGCTGCTTAA')::BLOB cds_sequence,1::UTINYINT codon_table,",
+    "'AAAAAA'::BLOB pre_cds_sequence,'AAAA'::BLOB post_cds_sequence FROM range(6) t(i)")
+  ex <- paste("SELECT i::UINTEGER transcript_index,",
+    "CASE WHEN i<3 THEN CASE WHEN e=0 THEN 100 ELSE 110 END ELSE CASE WHEN e=0 THEN 120 ELSE 100 END END::UBIGINT exon_start,",
+    "CASE WHEN i<3 THEN CASE WHEN e=0 THEN 105 ELSE 125 END ELSE CASE WHEN e=0 THEN 125 ELSE 115 END END::UBIGINT exon_end,",
+    "CASE WHEN e=0 THEN 1 ELSE 7 END::UBIGINT exon_cdna_start,",
+    "CASE WHEN e=0 THEN 6 ELSE 22 END::UBIGINT exon_cdna_end,",
+    "CASE WHEN e=0 THEN -1 ELSE i%3 END::TINYINT phase,-1::TINYINT end_phase",
+    "FROM range(6) t(i) CROSS JOIN range(2) ex(e) ORDER BY i,e")
+  expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('phase',",
+    "'SELECT i::UINTEGER seq_region FROM range(6) t(i)',", dbQuoteString(con, tx), ",",
+    dbQuoteString(con, ex), ")"))$loaded)
+  dbExecute(con, paste("CREATE TABLE phase_events AS SELECT i+1 event_index,i seq_region,",
+    "CASE WHEN i<3 THEN 114 ELSE 111 END AS position,CASE WHEN i<3 THEN 'C' ELSE 'G' END AS reference,",
+    "CASE WHEN i<3 THEN 'A' ELSE 'T' END AS alternate,NULL::UBIGINT end_position,",
+    "NULL::VARCHAR structural_type,NULL::VARCHAR copy_change,NULL::UINTEGER mate_seq_region,",
+    "NULL::UBIGINT mate_position FROM range(6) t(i)"))
+  expected <- dbGetQuery(con, paste("SELECT event_index,protein_hgvs FROM duckvep_annotate(",
+    "'phase_events','phase',hgvs:=true,upstream_distance:=0,downstream_distance:=0) ORDER BY event_index"))
+  expect_equal(nrow(expected), 6L)
+  expect_true(any(!is.na(expected$protein_hgvs)))
+  for (threads in c(1L, 4L)) for (mode in c("alt_events", "source_records")) {
+    dbExecute(con, paste("SET threads =", threads))
+    calls <- if (mode == "alt_events") paste("SELECT *,event_index-1 transcript_index,",
+      "0 sample_index,1 alt_index,[1,1] alleles,[true,true] phase_before,",
+      "NULL::BIGINT phase_set FROM phase_events") else paste("SELECT *,[alternate] alternates,",
+      "event_index-1 transcript_index,0 sample_index,'1|1' gt FROM phase_events")
+    result <- rduckhts_haplotypes(con, calls, "phase", hgvs = TRUE, input_mode = mode,
+      phase_policy = if (mode == "source_records") "vep116_compat" else "strict")
+    result <- result[order(result$transcript_index), ]
+    expect_equal(nrow(result), 6L)
+    expect_equal(result$transcript_index, 0:5)
+    expect_identical(gsub("[()]", "", result$hgvsp), expected$protein_hgvs)
+    expect_true(all(result$cds == paste0(strrep("N", (0:5) %% 3), "ATGGATGCTTAA")))
+    expect_true(all(result$carrier_count == 2 & vapply(result$contributors, nrow, 0L) == 1L))
+    expect_equal(do.call(rbind, result$contributors)$event_index, expected$event_index)
+  }
+})
+
+local({
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
   tx <- paste("SELECT 0::UINTEGER transcript_index,0::UINTEGER seq_region,",
     "11::UBIGINT transcript_start,45::UBIGINT transcript_end,1::TINYINT strand,",
     "0::UINTEGER gene_index,3::UBIGINT transcript_flags,11::UBIGINT cds_start,",

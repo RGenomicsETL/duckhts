@@ -665,7 +665,9 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
         retained_call |= p->source_exonic && (e->source.allele_index != 0u ||
             (evidence & (DUCKVEP_CARRIER_CALLED | DUCKVEP_CARRIER_REFERENCE_REPLAY)) != 0u);
         b->contributors[i] = (duckvep_haplotype_contributor_t){
-            e->source, p->status, evidence, &e->prepared, 0u};
+            .source = e->source, .projection_status = p->status, .evidence_flags = evidence,
+            .prepared = &e->prepared,
+            .projected = p->status == DUCKVEP_CDS_EDIT_OK ? &p->edit : NULL};
         if (raw_records && !p->source_selected) {
             b->contributors[i].projection_status = DUCKVEP_CDS_EDIT_SOURCE_SHADOWED;
             continue;

@@ -1242,6 +1242,7 @@ struct annotate_ctx {
     const duckvep_options_t       *options;
     duckvep_workspace_t           *workspace;
     duckvep_delta_scratch_t       *delta_scratch;
+    const duckvep_haplotype_edit_t *projected; /* Selected-pair physical CDS edit; never a sweep cache. */
     duckvep_workspace_delta_route_stats_t *delta_route_stats;
     duckvep_result_builder_t      *results;
     duckvep_annotation_observer_fn observer;
@@ -2115,6 +2116,7 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
                 kind, tx, &c->model->exons, seq, c->variants, variant_idx,
                 (size_t)tx_idx, pos, tx->strand[tx_idx], c->delta_scratch,
                 event, ectx.region, projection_exon_hint,
+                c->projected,
                 c->delta_route_stats != NULL ? &route : NULL, &delta,
                 &coding_context, &coding_context_status);
             if (coding_context_status == DUCKVEP_VARIANT_CODING_CONTEXT_OK) {
@@ -2592,6 +2594,7 @@ static duckvep_status_t validate_result_builder_for_append(
 DUCKVEP_INTERNAL_API duckvep_status_t duckvep_annotate_pair_observed(
     const duckvep_model_t *model, const duckvep_variant_batch_t *variants,
     const duckvep_event_t *event, uint32_t transcript_index, duckvep_delta_scratch_t *scratch,
+    const duckvep_haplotype_edit_t *projected,
     duckvep_annotation_observer_fn observer, void *observer_context,
     duckvep_error_t *error) {
     if (!model || !variants || variants->count != 1u || !event ||
@@ -2625,6 +2628,20 @@ DUCKVEP_INTERNAL_API duckvep_status_t duckvep_annotate_pair_observed(
         return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_PAIR_ORDER,
             "prepared literal allele does not match the source view or transcript");
     }
+    if (projected && (!projected->cds_start || projected->variant_strand != 1 ||
+        !model->has_seq || transcript_index >= model->seq.transcript_count ||
+        !model->seq.cds_length || !model->seq.cds_length[transcript_index] ||
+        (uint64_t)projected->cds_start - 1u + projected->ref_len >
+            model->seq.cds_length[transcript_index] ||
+        projected->ref_len != event->ref_diff_length ||
+        projected->alt_len != event->alt_diff_length ||
+        projected->ref != (projected->ref_len
+            ? variants->allele_bytes + variants->ref_offset[0] + event->ref_diff_offset : NULL) ||
+        projected->alt != (projected->alt_len
+            ? variants->allele_bytes + variants->alt_offset[0] + event->alt_diff_offset : NULL))) {
+        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_PAIR_ORDER,
+            "physical CDS edit does not match the prepared literal allele");
+    }
     const struct duckvep_options options = {
         .splice_region_exonic = DUCKVEP_DEFAULT_SPLICE_REGION_EXONIC,
         .splice_region_intronic = DUCKVEP_DEFAULT_SPLICE_REGION_INTRONIC,
@@ -2635,7 +2652,7 @@ DUCKVEP_INTERNAL_API duckvep_status_t duckvep_annotate_pair_observed(
     duckvep_result_builder_t result;
     duckvep_result_builder_init(&result, &row, 1u);
     struct annotate_ctx ctx = {.model = model, .variants = variants, .events = event,
-        .options = &options, .workspace = &workspace, .delta_scratch = scratch,
+        .options = &options, .workspace = &workspace, .delta_scratch = scratch, .projected = projected,
         .results = &result, .observer = observer, .observer_context = observer_context,
         .status = DUCKVEP_OK, .prepared_variant_idx = UINT32_MAX};
     if (!annotate_pair(0u, transcript_index, &ctx)) {
@@ -2815,6 +2832,7 @@ static duckvep_status_t annotate_cursor_fill(
     ctx.options = cursor->options;
     ctx.workspace = cursor->workspace;
     ctx.delta_scratch = duckvep_workspace_delta_scratch(cursor->workspace);
+    ctx.projected = NULL;
     ctx.delta_route_stats = cursor->workspace->delta_route_stats_enabled
                               ? &cursor->workspace->delta_route_stats
                               : NULL;
@@ -3019,6 +3037,7 @@ static duckvep_status_t annotate_explicit_pairs(
     ctx.options = options;
     ctx.workspace = workspace;
     ctx.delta_scratch = duckvep_workspace_delta_scratch(workspace);
+    ctx.projected = NULL;
     ctx.delta_route_stats = workspace->delta_route_stats_enabled
                               ? &workspace->delta_route_stats : NULL;
     ctx.results = results;

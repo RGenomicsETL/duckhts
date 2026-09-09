@@ -100,6 +100,7 @@ typedef struct {
     duckvep_cds_edit_status_t projection_status;
     uint8_t evidence_flags;
     const duckvep_event_t *prepared; /* Borrowed source geometry for this transcript drain. */
+    const duckvep_haplotype_edit_t *projected; /* Successful physical projection, or NULL. */
     uint8_t source_replaced; /* Ordered replay changed the then-current sequence. */
 } duckvep_haplotype_contributor_t;
 

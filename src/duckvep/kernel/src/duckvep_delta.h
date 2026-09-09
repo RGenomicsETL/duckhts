@@ -634,7 +634,10 @@ DUCKVEP_INTERNAL_API duckvep_variant_coding_context_status_t duckvep_variant_phy
  * without mutating that physical edit set. `exon_hint` is an absolute model exon
  * index or UINT32_MAX. Context accessors select the borrowed virtual CDS and
  * local peptide cache; unpadded cDNA-relative positions remain separate facts.
- * Equal-length multi-base features use the full-feature producer below. */
+ * Equal-length multi-base features use the full-feature producer below.
+ * `projected`, when supplied, is a successful physical CDS projection of the
+ * same prepared allele under this immutable model/transcript; it is not a
+ * full-span source replacement or a shifted HGVS edit. */
 DUCKVEP_INTERNAL_API duckvep_variant_coding_context_status_t
 duckvep_variant_feature_coding_context_build_prepared(
     const duckvep_transcript_model_t *transcripts,
@@ -646,6 +649,7 @@ duckvep_variant_feature_coding_context_build_prepared(
     int8_t                            transcript_strand,
     const duckvep_event_t            *event,
     uint32_t                          exon_hint,
+    const duckvep_haplotype_edit_t   *projected,
     duckvep_haplotype_edit_t         *edit_scratch,
     size_t                            edit_scratch_cap,
     uint8_t                          *alt_cds_scratch,
@@ -814,7 +818,9 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_trace(
  * workspace. A successful context is reported independently of whether the
  * consequence delta is valid, because HGVS and later phased edit-set consumers
  * may still need the translated state. Ordinary annotation calls the wrapper
- * above and pays no trace-copy cost. */
+ * above and pays no trace-copy cost. `projected` optionally borrows the
+ * successful physical CDS edit for the same prepared allele and transcript;
+ * uploaded-feature and shifted-HGVS interpretation remain separate. */
 DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_observed(
     duckvep_variant_kind_t            kind,
     const duckvep_transcript_model_t *transcripts,
@@ -829,6 +835,7 @@ DUCKVEP_INTERNAL_API void duckvep_sequence_delta_fill_for_annotation_observed(
     const duckvep_event_t            *prepared_event,
     uint32_t                          classified_region_mask,
     uint32_t                          exon_hint,
+    const duckvep_haplotype_edit_t   *projected,
     duckvep_sequence_delta_route_t   *route,
     duckvep_sequence_delta_t         *delta,
     duckvep_coding_context_t         *context_out,

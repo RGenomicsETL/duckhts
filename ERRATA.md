@@ -30,9 +30,12 @@ failures with every record retained in the denominator. The executable authoriti
 - dependency environment:
   [`vep116_2026-07-22.conda-explicit.txt`](test/duckvep/upstream/receipts/vep116_2026-07-22.conda-explicit.txt).
 
-For the supported VEP-116 HGVS surface, reproducing a documented upstream result is the
-compatibility requirement even when that result conflicts with a nomenclature rule.
-HGVS-rule assessments in this ledger name their recommendation version separately.
+**When VEP 116 and HGVS recommendations disagree, compatibility output follows VEP 116.**
+An independently supported nomenclature discrepancy belongs in this ledger; it does not
+authorize silently correcting the output. The exact executable revisions above are the
+target, not a floating VEP release or a generic HGVS renderer. Changing that target
+requires an explicit compatibility-contract decision, new pins and separate conformance
+evidence. HGVS-rule assessments name their recommendation version separately.
 An `ok` computation status does not certify that the returned string satisfies HGVS.
 `phase_policy := 'strict'` governs genotype phasing, not HGVS nomenclature. The internal
 `DUCKVEP_COMPAT_STRICT` control is not a certified HGVS implementation or a public SQL
