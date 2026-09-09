@@ -2,6 +2,9 @@
 
 # duckhts 1.5.1.9000
 
+- verify phase-audit genotype labels against retained VCF records and reader-captured
+  raw GT before publishing per-profile or per-stratum results
+
 - bind published decoded phase-audit comparisons to transcript-keyed oracle and native
   observations, rejecting reassigned profile verdicts with unchanged global totals
 

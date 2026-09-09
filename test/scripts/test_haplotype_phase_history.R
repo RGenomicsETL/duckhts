@@ -30,7 +30,9 @@ main <- function() {
     evidence = 0L, sequence_status = 0L)
   raw <- list(output = list(errors = integer(n)), comparisons = rep(list(comparison), n),
     expected_semantics = semantics, observed_semantics = semantics)
-  native <- list(records = data.frame(record_index = seq_len(2L * n) - 1L, ID = rep(c("a", "b"), n)),
+  native <- list(records = data.frame(record_index = seq_len(2L * n) - 1L,
+      CHROM = rep(summary$chrom, each = 2L), POS = rep(c(41, 44), n),
+      ID = rep(c("a", "b"), n), REF = "G"),
     calls = data.frame(event_index = seq_len(3L * n)),
     actual = data.frame(transcript_index = rep(seq_len(n) - 1L, each = 2L),
       carrier_count = 1, cds = "ATG", protein = "M"))
@@ -39,9 +41,11 @@ main <- function() {
   raw$actual <- native$actual
   native$actual$cds[native$actual$transcript_index == 0L] <- "CTG"
   native$records$ALT <- rep(list(c("A", "T"), "C"), n)
-  native$records$calls <- lapply(rep(ploidy, each = 2L), function(p) {
-    x <- data.frame(sample_index = 0L)
-    x$alleles <- list(integer(p))
+  raw_gt <- as.vector(rbind(gt, vapply(ploidy,
+    function(p) paste(rep("1", p), collapse = "|"), "")))
+  native$records$calls <- lapply(seq_along(raw_gt), function(i) {
+    x <- data.frame(sample_index = 0L, raw_gt = raw_gt[i])
+    x$alleles <- list(integer(ploidy[(i + 1L) %/% 2L]))
     x
   })
   saveRDS(decoded, file.path(directory, "comparisons.rds"))
@@ -55,7 +59,14 @@ main <- function() {
   saveRDS(raw, file.path(directory, "public_raw_replay.rds"))
   saveRDS(native, file.path(directory, "native.rds"))
   saveRDS(list(), file.path(directory, "decoded_collisions.rds"))
-  writeLines("synthetic source input", file.path(directory, "calls.vcf"))
+  vcf <- c("##fileformat=VCFv4.4",
+    '##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">',
+    '##FORMAT=<ID=PS,Number=1,Type=Integer,Description="Phase set">',
+    "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tsample",
+    paste(native$records$CHROM, native$records$POS, native$records$ID, "G",
+      rep(c("A,T", "C"), n), ".", "PASS", ".", "GT:PS",
+      paste0(raw_gt, rep(c(":10", ":20"), n)), sep = "\t"))
+  writeLines(vcf, file.path(directory, "calls.vcf"))
   write.csv(summary, file.path(directory, "summary.csv"), row.names = FALSE)
   cases <- summary[c("transcript_index", "seq_region", "chrom", "transcript", "GT",
     "ploidy", "prefix", "missing", "mixed")]
@@ -65,9 +76,12 @@ main <- function() {
     haplotypes = unname(groups), total_haplotype_count = 2))
   writeLines(vapply(oracle, jsonlite::toJSON, "", auto_unbox = TRUE),
     file.path(directory, "oracle.stdout"))
-  for (kind in c("raw", "public_raw"))
-    write.csv(transform(cases, equal = TRUE), file.path(directory, paste0(kind, "_replay_summary.csv")),
-      row.names = FALSE)
+  write_replay_summaries <- function(profiles) {
+    for (kind in c("raw", "public_raw"))
+      write.csv(transform(profiles, equal = TRUE),
+        file.path(directory, paste0(kind, "_replay_summary.csv")), row.names = FALSE)
+  }
+  write_replay_summaries(cases)
   for (file in c("controls.csv", "phase_controls.csv", "raw_replay_controls.csv")) {
     control <- switch(file, "controls.csv" = c("duplicate", "cds", "protein", "contributor"),
       "phase_controls.csv" = names(parser_rows), "raw_replay_controls.csv" = names(semantics))
@@ -94,13 +108,23 @@ main <- function() {
     jsonlite::write_json(value, file.path(directory, "receipt.json"), auto_unbox = TRUE)
   }
   fails <- function(expr) stopifnot(inherits(tryCatch({force(expr); NULL}, error = identity), "error"))
+  for (field in c("chrom", "transcript", "seq_region")) {
+    changed_cases <- cases
+    changed_cases[c(1L, n), field] <- changed_cases[c(n, 1L), field]
+    fails(phase_check_source_records(directory, changed_cases, native$records))
+  }
+  for (sample_index in c(0.5, NA_real_, 1)) {
+    changed_records <- native$records
+    changed_records$calls[[1L]]$sample_index <- sample_index
+    fails(phase_check_source_records(directory, cases, changed_records))
+  }
   update_receipt()
   rows <- phase_history_rows(directory)
   stopifnot(sum(rows$cases) == 108L, sum(rows$disagreements) == 1L,
     sum(rows$raw_parser_calls) == 216L, sum(rows$public_raw_record_observations) == 432L)
   unlink(file.path(directory, "calls.vcf"))
   fails(phase_history_rows(directory))
-  writeLines("synthetic source input", file.path(directory, "calls.vcf"))
+  writeLines(vcf, file.path(directory, "calls.vcf"))
   outside <- tempfile("phase-history-outside-")
   dir.create(outside)
   on.exit(unlink(outside, recursive = TRUE), add = TRUE)
@@ -136,6 +160,34 @@ main <- function() {
   fails(phase_history_rows(directory))
   saveRDS(decoded, file.path(directory, "comparisons.rds"))
   write.csv(summary, file.path(directory, "summary.csv"), row.names = FALSE)
+  # Reassign the profile labels coherently while keeping the physical input and
+  # transcript-keyed observations intact. Global denominators remain unchanged.
+  changed_cases <- cases
+  profile_fields <- c("GT", "ploidy", "prefix", "missing", "mixed")
+  changed_cases[c(1L, n), profile_fields] <- changed_cases[c(n, 1L), profile_fields]
+  changed <- summary
+  changed[profile_fields] <- changed_cases[profile_fields]
+  changed_parser <- parser
+  changed_parser$keys$GT <- as.vector(rbind(changed_cases$GT,
+    vapply(changed_cases$ploidy, function(p) paste(rep("1", p), collapse = "|"), "")))
+  write.table(transform(changed_cases, cds = "ATG"), file.path(directory, "cases.tsv"),
+    sep = "\t", quote = FALSE, row.names = FALSE)
+  write.csv(changed, file.path(directory, "summary.csv"), row.names = FALSE)
+  write_replay_summaries(changed_cases)
+  saveRDS(changed_parser, file.path(directory, "phase_comparisons.rds"))
+  update_receipt()
+  fails(phase_history_rows(directory))
+  write.table(transform(cases, cds = "ATG"), file.path(directory, "cases.tsv"),
+    sep = "\t", quote = FALSE, row.names = FALSE)
+  write.csv(summary, file.path(directory, "summary.csv"), row.names = FALSE)
+  write_replay_summaries(cases)
+  saveRDS(parser, file.path(directory, "phase_comparisons.rds"))
+  changed_native <- native
+  changed_native$records$calls[[1L]]$raw_gt <- "1"
+  saveRDS(changed_native, file.path(directory, "native.rds"))
+  update_receipt()
+  fails(phase_history_rows(directory))
+  saveRDS(native, file.path(directory, "native.rds"))
   for (change in c("missing_payload", "null_payload", "empty_payload", "missing_provenance", "wrong_count")) {
     changed_raw <- raw
     if (change == "missing_payload") changed_raw$comparisons <- rep(list(list(equal = TRUE)), n)

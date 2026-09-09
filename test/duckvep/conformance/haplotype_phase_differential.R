@@ -23,6 +23,41 @@ phase_equal <- function(expected, observed) {
   Reduce(`&`, Map(`==`, expected, observed))
 }
 
+phase_check_source_records <- function(directory, cases, records) {
+  text <- read.delim(file.path(directory, "calls.vcf"), header = FALSE, comment.char = "#",
+    col.names = c("chrom", "position", "id", "ref", "alt", "qual", "filter", "info", "format", "sample"),
+    colClasses = "character", quote = "", fill = FALSE)
+  n <- nrow(cases)
+  gt <- as.vector(rbind(cases$GT, vapply(cases$ploidy,
+    function(p) paste(rep("1", p), collapse = "|"), "")))
+  stopifnot(identical(cases$transcript_index, seq_len(n) - 1L),
+    identical(cases$seq_region, cases$transcript_index),
+    identical(cases$chrom, sprintf("chrP%05d", seq_len(n))),
+    identical(cases$transcript, sprintf("HP%05d", seq_len(n))),
+    nrow(text) == 2L * n, nrow(records) == nrow(text),
+    identical(text$chrom, rep(cases$chrom, each = 2L)),
+    identical(text$position, rep(c("41", "44"), n)),
+    identical(text$id, rep(c("a", "b"), n)), all(text$ref == "G"),
+    identical(text$alt, rep(c("A,T", "C"), n)), all(text$format == "GT:PS"),
+    identical(text$sample, paste0(gt, rep(c(":10", ":20"), n))),
+    !anyDuplicated(records$record_index))
+  at <- match(seq_len(nrow(text)) - 1L, records$record_index)
+  stopifnot(!anyNA(at))
+  records <- records[at, , drop = FALSE]
+  reader_gt <- vapply(records$calls, function(call) {
+    stopifnot(is.data.frame(call), nrow(call) == 1L,
+      is.numeric(call$sample_index), length(call$sample_index) == 1L,
+      !is.na(call$sample_index), call$sample_index == 0,
+      is.character(call$raw_gt), length(call$raw_gt) == 1L, !is.na(call$raw_gt))
+    call$raw_gt
+  }, "")
+  stopifnot(identical(records$CHROM, text$chrom),
+    identical(as.character(records$POS), text$position), identical(records$ID, text$id),
+    identical(records$REF, text$ref),
+    identical(vapply(records$ALT, paste, "", collapse = ","), text$alt),
+    identical(reader_gt, gt))
+}
+
 phase_decoded_comparisons <- function(cases, oracle, actual, records) {
   stopifnot(!anyDuplicated(names(oracle)), setequal(names(oracle), cases$transcript),
     all(actual$transcript_index %in% cases$transcript_index),
@@ -56,7 +91,7 @@ phase_history_rows <- function(directory) {
   hashes <- unlist(receipt$sha256)
   files <- c("cases.tsv", "summary.csv", "comparisons.rds", "phase_comparisons.rds", "raw_replay.rds",
     "public_raw_replay.rds", "controls.csv", "phase_controls.csv", "raw_replay_controls.csv",
-    "decoded_collisions.rds", "native.rds", "oracle.stdout", "raw_replay_summary.csv",
+    "decoded_collisions.rds", "native.rds", "calls.vcf", "oracle.stdout", "raw_replay_summary.csv",
     "public_raw_replay_summary.csv")
   paths <- normalizePath(file.path(directory, files), mustWork = TRUE)
   absolute <- startsWith(names(hashes), "/") | grepl("^[A-Za-z]:", names(hashes))
@@ -95,6 +130,7 @@ phase_history_rows <- function(directory) {
   raw <- read("raw_replay.rds")
   public <- read("public_raw_replay.rds")
   native <- read("native.rds")
+  phase_check_source_records(directory, cases, native$records)
   oracle <- lapply(readLines(file.path(directory, "oracle.stdout")), jsonlite::fromJSON,
     simplifyVector = FALSE)
   names(oracle) <- vapply(oracle, `[[`, "", "transcript")
@@ -478,20 +514,7 @@ main <- function() {
   saveRDS(comparisons, file.path(out, "comparisons.rds"))
   # The independent text read checks every physical record ordinal. Production
   # source calls consume only the original GT retained by the VCF reader.
-  text_records <- read.delim(file.path(out, "calls.vcf"), header = FALSE, comment.char = "#",
-    col.names = c("chrom", "position", "id", "ref", "alt", "qual", "filter", "info", "format", "sample"),
-    colClasses = "character", quote = "")
-  stopifnot(all(text_records$format == "GT:PS"), nrow(text_records) == nrow(records))
-  text_records$gt <- sub(":.*$", "", text_records$sample)
-  reader_gt <- DBI::dbGetQuery(con, "SELECT record_index,CHROM,POS,ID,REF,
-    array_to_string(ALT, ',') AS alt,c.sample_index,c.raw_gt AS gt
-    FROM records,unnest(calls) u(c) ORDER BY record_index,c.sample_index")
-  stopifnot(identical(as.integer(reader_gt$record_index), seq_len(nrow(text_records)) - 1L),
-    all(reader_gt$sample_index == 0L), identical(reader_gt$CHROM, text_records$chrom),
-    identical(as.character(reader_gt$POS), text_records$position),
-    identical(reader_gt$ID, text_records$id), identical(reader_gt$REF, text_records$ref),
-    identical(reader_gt$alt, text_records$alt), identical(reader_gt$gt, text_records$gt),
-    identical(reader_gt$gt, raw_gt))
+  phase_check_source_records(out, cases, records)
   DBI::dbExecute(con, "CREATE TABLE source_calls AS SELECT r.record_index event_index,
     m.seq_region,r.POS AS position,r.REF reference,r.ALT alternates,m.transcript_index,
     c.sample_index,c.raw_gt AS gt FROM records r JOIN models m ON m.chrom=r.CHROM,

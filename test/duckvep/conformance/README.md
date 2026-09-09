@@ -767,7 +767,8 @@ Rscript test/duckvep/conformance/haplotype_phase_differential.R \
 
 Publication verifies retained artifact hashes, recomputes stratum totals from the
 complete comparison objects, reconstructs decoded comparisons from transcript-keyed
-oracle/native observations, checks totals against the receipt, and rejects duplicate
+oracle/native observations, and binds genotype labels to retained VCF records and the
+reader's original GT strings. It checks totals against the receipt and rejects duplicate
 revisions before replacing the ledger under an exclusive writer lock. The artifact
 directory must be retained inside the repository so the ledger has a nonempty locator.
 Failed comparisons are published as failures;
