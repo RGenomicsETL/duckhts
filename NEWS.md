@@ -2,6 +2,9 @@
 
 # duckhts 1.5.1.9000
 
+- isolate SQLLogicTest runner fixtures from checkout-volume assumptions on Windows;
+  verify successful and failing execution through file, list and directory selection
+
 - keep caller-buffer FASTA signed-size checks warning-free under Clang on native
   and 32-bit targets, with unchanged overflow rejection
 

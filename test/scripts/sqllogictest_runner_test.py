@@ -22,15 +22,14 @@ class RunnerStatusTest(unittest.TestCase):
             def run(*arguments):
                 return subprocess.run(
                     [sys.executable, str(runner), "--test-dir", str(folder), *map(str, arguments)],
-                    cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                    # Directory discovery resolves paths against the working directory.
+                    cwd=folder, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                 )
 
-            result = run("--file-path", valid)
-            self.assertEqual(result.returncode, 0, result.stdout)
-            self.assertIn("SUCCESS", result.stdout)
-            for content, diagnostic in (
-                ("statement error\nSELECT 42;\n", "Invalid SQLLogicTest"),
-                ("query I\nSELECT 42;\n----\n43\n", "ERROR"),
+            for content, diagnostic, succeeds in (
+                ("query I\nSELECT 42;\n----\n42\n", "SUCCESS", True),
+                ("statement error\nSELECT 42;\n", "Invalid SQLLogicTest", False),
+                ("query I\nSELECT 42;\n----\n43\n", "ERROR", False),
             ):
                 broken.write_text(content, encoding="utf-8")
                 for arguments in (
@@ -38,7 +37,10 @@ class RunnerStatusTest(unittest.TestCase):
                 ):
                     with self.subTest(content=content, arguments=arguments):
                         result = run(*arguments)
-                        self.assertNotEqual(result.returncode, 0, result.stdout)
+                        if succeeds:
+                            self.assertEqual(result.returncode, 0, result.stdout)
+                        else:
+                            self.assertNotEqual(result.returncode, 0, result.stdout)
                         self.assertIn(diagnostic, result.stdout)
 
 
