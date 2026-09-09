@@ -1004,6 +1004,23 @@ for the bounded exact traceback.
 This is a standard-code synthetic length grammar, not arbitrary genetic-code,
 phase-set, compound consequence or HGVS certification.
 
+The combined campaign includes all fixed models, 32 draws per rare stratum, and
+one draw per geometry, interaction and CDS-length stratum:
+
+```sh
+Rscript test/duckvep/conformance/haplotype_model_differential.R --seed 173 --rare-per-stratum 32 --geometry-per-stratum 1 --interaction-per-stratum 1 --length-per-stratum 1 --max-alignment-cells 83886080 --extension-receipt /path/to/extension.tsv
+Rscript test/duckvep/conformance/haplotype_model_differential.R --seed 20260906 --rare-per-stratum 32 --geometry-per-stratum 1 --interaction-per-stratum 1 --length-per-stratum 1 --max-alignment-cells 83886080 --extension-receipt /path/to/extension.tsv
+```
+
+Each command compares 29,520 models, 194,448 source records and 177,120 sample/file
+lanes, including exact nominal-length and raw mutation flags. Forty-two corruption
+controls and 18 metadata controls are required. For this input grammar, a complete
+alignment matrix bounded by the reference length plus each record's longest ALT fits
+the explicit cell budget. The query workspace default is unchanged. The source-bound
+default-limit failure remains in the length ledger alongside both completed runs;
+it has no native comparison verdict. Per-run upstream group-owner checks do not
+waive the separate cross-run grouped-metadata disagreements.
+
 `haplotype_reference_differential.R` exercises reference-only sample handling
 through the original container JSON serializer. CDS and protein groups are compared
 separately by sample and count; one CDS may link both a curated reference peptide

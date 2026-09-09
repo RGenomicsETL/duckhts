@@ -683,7 +683,7 @@ Whole-haplotype SO/HGVS remains unfinished.
 |      3 |   768 |           768 |         1536 |         2304 |                        1332 |
 |      4 |  6144 |          6144 |        12288 |        24576 |                       16800 |
 
-Source c69e0e0cf124c65cc8e23c25ca80691bd446a2cd records a **failing
+Source 0857ec1faf5736299a4341f73ffa557d8a9691ee records a **failing
 decoded-call/raw-parser comparison**: 6990 disagreements in 7020
 profiles. It is not a population error rate or a replacement for the
 passing literal-sequence corpus. This lane uses public
@@ -1097,6 +1097,42 @@ were not produced. This is a failed execution, not zero disagreements.
 The chained seed 20260906 did not execute; neither seed is certified by
 this campaign. No input, alignment algorithm or limit was changed to
 pass it.
+
+### Complete model campaigns with an explicit alignment budget
+
+|     seed | profiles | records | leaves | carriers | failures | lane_flag_failures | group_metadata_failures |
+|---------:|---------:|--------:|-------:|---------:|---------:|-------------------:|------------------------:|
+|      173 |    29520 |  194448 | 136320 |   177120 |        0 |                  0 |                       0 |
+| 20260906 |    29520 |  194448 | 136320 |   177120 |        0 |                  0 |                       0 |
+
+Source 0857ec1faf5736299a4341f73ffa557d8a9691ee completes both full
+campaigns with all 59,040 models, 388,896 source records and 354,240
+sample/file lanes. Every declared stratum meets its quota. Sequence,
+count, reference-model, source, mapping and lane comparisons have zero
+disagreements. Each seed also passes exact nominal-length and raw
+lane-flag comparisons, the observed upstream group-owner checks, 42
+corruption controls and 18 metadata controls. The ledger retains all
+input, output, comparator and receipt identities. These results cover
+the generated standard-code grammar, not a population error rate or
+complete phased annotation.
+
+The per-call budget is 83,886,080 exact alignment cells per sequence
+axis; the default remains 16,777,216 and the query workspace limit
+remains 268,435,456 bytes. For reference length `n`, a conservative
+alternate-length bound is `n` plus the sum of each source record’s
+longest ALT. The complete matrix `(n + 1) * (bound + 1)` requires at
+most 75,479,026 cells for seed 173 and 75,454,442 for seed 20260906.
+This bound uses retained inputs, not native results. Seed 173’s inputs
+are byte-identical to the failed campaign above. Its failed receipt
+remains a failed execution; neither missing output nor a capacity error
+is counted as agreement.
+
+The separate 6,990 decoded/raw phase disagreements and four
+grouped-metadata publication disagreements remain retained. Per-run
+group-owner validation does not make order-dependent group metadata
+reproducible across upstream executions. Whole-haplotype consequences,
+compound HGVS and structural composition require their own
+implementation and conformance evidence.
 
 ### Repeated-model publication audit
 

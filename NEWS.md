@@ -2,6 +2,10 @@
 
 # duckhts 1.5.1.9000
 
+- retain two complete source-bound model campaigns with 59,040 profiles and
+  354,240 carrier memberships, explicit input-derived alignment budgets, and
+  sequence, provenance and metadata checks; retain earlier failed executions
+
 - retain source-bound nominal-length conformance and same-input phased benchmarks,
   including the complete failing finite-phase audit and the long-CDS alignment-limit
   failure; benchmark reports distinguish changed output and concurrent workloads

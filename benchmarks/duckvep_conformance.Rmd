@@ -1495,7 +1495,10 @@ length_runs <- read.csv(file.path(root,
 length_bound <- subset(length_runs, extension_build_binding == "htslib_distclean_make_release")
 stopifnot(all(length_runs$extension_build_binding %in%
   c("diagnostic_unbound", "htslib_distclean_make_release")),
-  !anyDuplicated(length_runs$receipt_sha256))
+  !anyDuplicated(length_runs$receipt_sha256),
+  all(length_bound$execution_status %in% c("native_query_error", "compared")))
+length_retry <- subset(length_bound, execution_status == "compared")
+length_bound <- subset(length_bound, execution_status == "native_query_error")
 length_runs <- subset(length_runs, extension_build_binding == "diagnostic_unbound")
 stopifnot(nrow(length_runs) == 3L, !anyDuplicated(length_runs$receipt_sha256),
   all(length_runs$extension_build_binding == "diagnostic_unbound"),
@@ -1566,6 +1569,61 @@ profiles and upstream observations remain in its receipt. Native output and
 comparison counts were not produced. This is a failed execution, not zero
 disagreements. The chained seed 20260906 did not execute; neither seed is certified
 by this campaign. No input, alignment algorithm or limit was changed to pass it.
+
+### Complete model campaigns with an explicit alignment budget
+
+```{r source-bound-combined-models}
+stopifnot(nrow(length_retry) == 2L,
+  all(length_retry$run_kind == "combined_exact_budget"),
+  setequal(length_retry$seed, c(173L, 20260906L)),
+  length(unique(length_retry$source_revision)) == 1L,
+  all(length_retry$rare_per_stratum == 32L),
+  all(length_retry$required_strata == 264L),
+  all(length_retry$minimum_stratum_draws == 32L),
+  all(length_retry$geometry_per_stratum == 1L & length_retry$geometry_strata == 504L),
+  all(length_retry$interaction_per_stratum == 1L & length_retry$interaction_strata == 6048L),
+  all(length_retry$length_per_stratum == 1L & length_retry$length_strata == 4536L),
+  all(length_retry$profiles == 1536L + 2L * 264L * 32L + 504L + 6048L + 4536L),
+  all(length_retry$records == 194448L),
+  all(length_retry$carriers == 6L * length_retry$profiles),
+  all(length_retry$oracle_replay_lanes == length_retry$carriers),
+  all(length_retry$observed_replay_lanes == length_retry$carriers),
+  all(length_retry$intended_sample_file_lanes == length_retry$carriers),
+  all(length_retry$controls_rejected == 42L),
+  all(length_retry$metadata_controls_rejected == 18L),
+  all(length_retry$threads == 4L),
+  all(length_retry$max_alignment_cells == 83886080L),
+  all(length_retry$full_matrix_upper_bound <= length_retry$max_alignment_cells),
+  all(length_retry[c(failure_columns, "lane_flag_failures", "group_metadata_failures")] == 0L),
+  length_retry$input_sha256[length_retry$seed == 173L] == length_bound$input_sha256,
+  all(length_retry$extension_sha256 == length_bound$extension_sha256))
+knitr::kable(length_retry[c("seed", "profiles", "records", "leaves", "carriers",
+  "failures", "lane_flag_failures", "group_metadata_failures")], row.names = FALSE)
+```
+
+Source `r unique(length_retry$source_revision)` completes both full campaigns with
+all 59,040 models, 388,896 source records and 354,240 sample/file lanes. Every
+declared stratum meets its quota. Sequence, count, reference-model, source,
+mapping and lane comparisons have zero disagreements. Each seed also passes exact
+nominal-length and raw lane-flag comparisons, the observed upstream group-owner
+checks, 42 corruption controls and 18 metadata controls. The ledger retains all
+input, output, comparator and receipt identities. These results cover the generated
+standard-code grammar, not a population error rate or complete phased annotation.
+
+The per-call budget is 83,886,080 exact alignment cells per sequence axis; the
+default remains 16,777,216 and the query workspace limit remains 268,435,456 bytes.
+For reference length `n`, a conservative alternate-length bound is `n` plus the sum
+of each source record's longest ALT. The complete matrix `(n + 1) * (bound + 1)`
+requires at most 75,479,026 cells for seed 173 and 75,454,442 for seed 20260906.
+This bound uses retained inputs, not native results. Seed 173's inputs are
+byte-identical to the failed campaign above. Its failed receipt remains a failed
+execution; neither missing output nor a capacity error is counted as agreement.
+
+The separate 6,990 decoded/raw phase disagreements and four grouped-metadata
+publication disagreements remain retained. Per-run group-owner validation does not
+make order-dependent group metadata reproducible across upstream executions.
+Whole-haplotype consequences, compound HGVS and structural composition require
+their own implementation and conformance evidence.
 
 ### Repeated-model publication audit
 
