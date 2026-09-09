@@ -2,13 +2,19 @@
 # Source sets do not prove physical-edit multiplicity or file-lane association.
 canonical <- function(rows, provenance = TRUE, samples = FALSE) {
   if (!length(rows)) return(list())
+  if (provenance) stopifnot(all(vapply(rows, function(row) {
+    sources <- row[['contributors']]
+    'contributors' %in% names(row) && !is.null(sources) &&
+      (is.character(sources) || is.list(sources)) &&
+      all(vapply(sources, function(x) is.character(x) && length(x) == 1L && !is.na(x), TRUE))
+  }, TRUE)))
   keys <- vapply(rows, function(x) jsonlite::toJSON(list(cds=x$cds, protein=x$protein),
     auto_unbox=TRUE, na='null'), '')
   lapply(split(rows, keys), function(group) {
     value <- list(cds=group[[1L]]$cds, protein=group[[1L]]$protein,
       count=sum(vapply(group, function(x) as.numeric(x$count), 0)))
-    if (provenance) value$contributors <- sort(unique(unlist(lapply(group, `[[`, 'contributors'),
-      use.names=FALSE)))
+    if (provenance) value$contributors <- sort(unique(as.character(unlist(
+      lapply(group, `[[`, 'contributors'), use.names=FALSE))))
     if (samples) {
       sample_names <- sort(unique(unlist(lapply(group, function(x) names(x$samples)), use.names=FALSE)))
       value$samples <- setNames(lapply(sample_names, function(name) sum(vapply(group, function(x) {
@@ -18,6 +24,40 @@ canonical <- function(rows, provenance = TRUE, samples = FALSE) {
     }
     value
   })
+}
+
+haplotype_group_controls <- function() {
+  oracle <- jsonlite::fromJSON('[
+    {"cds":"ATG","protein":"M","count":1,"contributors":[],"samples":{"s0":1}},
+    {"cds":"ATC","protein":"I","count":1,"contributors":["a","b"],"samples":{"s1":1}}
+  ]', simplifyVector = FALSE)
+  native <- oracle
+  native[[1L]]$contributors <- character()
+  native[[2L]]$contributors <- c('a', 'b')
+  expected <- canonical(oracle, samples = TRUE)
+  stopifnot(identical(expected, canonical(native, samples = TRUE)),
+    length(expected) == 2L, all(vapply(expected, function(x) 'contributors' %in% names(x), TRUE)))
+  merged <- native
+  merged[[1L]]$cds <- merged[[2L]]$cds
+  merged[[1L]]$protein <- merged[[2L]]$protein
+  group <- canonical(merged, samples = TRUE)
+  stopifnot(length(group) == 1L, identical(group[[1L]]$contributors, c('a', 'b')),
+    group[[1L]]$count == 2, identical(group[[1L]]$samples, list(s0 = 1, s1 = 1)))
+  corrupt <- list(missing_field = native, null_field = native, numeric_source = native,
+    missing_source = native, extra_source = native, na_source = native,
+    dropped_row = native[-1L], duplicate_row = c(native, native[1L]))
+  corrupt$missing_field[[1L]]$contributors <- NULL
+  corrupt$null_field[[1L]]['contributors'] <- list(NULL)
+  corrupt$numeric_source[[1L]]$contributors <- 1L
+  corrupt$missing_source[[2L]]$contributors <- 'a'
+  corrupt$extra_source[[1L]]$contributors <- 'extra'
+  corrupt$na_source[[1L]]$contributors <- NA_character_
+  rejected <- vapply(corrupt, function(x) {
+    observed <- try(canonical(x, samples = TRUE), silent = TRUE)
+    inherits(observed, 'try-error') || !identical(expected, observed)
+  }, TRUE)
+  stopifnot(all(rejected))
+  setNames(rejected, paste0('group_', names(rejected)))
 }
 
 # Every native row belongs to one declared transcript and at least one carrier.
@@ -63,7 +103,7 @@ haplotype_output_controls <- function(witness) {
   comparison$counts_equal <- FALSE
   rejected <- c(rejected, total_count = !replay_comparisons_passed(comparison))
   stopifnot(all(rejected))
-  setNames(rejected, paste0('output_', names(rejected)))
+  c(setNames(rejected, paste0('output_', names(rejected))), haplotype_group_controls())
 }
 
 # One upstream mutator result per sample/file lane. Applied sources are identity

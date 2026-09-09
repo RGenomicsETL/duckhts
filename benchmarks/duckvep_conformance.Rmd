@@ -1424,6 +1424,64 @@ biological models, shared-variable-exon transcript interactions, reference-only
 sample routes, full phase/PS behavior, whole-haplotype SO/HGVS and structural
 composition remain outside this campaign's tested scope.
 
+### Interacting exon/UTR diagnostics
+
+```{r interacting-model-diagnostics}
+interactions <- read.csv(file.path(root,
+  "test/duckvep/conformance/data/haplotype_interaction_history.csv"),
+  colClasses = c(source_revision = "character"))
+stopifnot(all(interactions$extension_build_binding == "diagnostic_unbound"),
+  !anyDuplicated(interactions$receipt_sha256),
+  all(interactions$interaction_strata == 6048L),
+  all(interactions$profiles == 2040L + 6048L * interactions$interaction_per_stratum),
+  all(interactions$oracle_replay_lanes == 6L * interactions$profiles),
+  all(interactions$observed_replay_lanes == interactions$oracle_replay_lanes))
+empty_set_pair <- subset(interactions, interaction_per_stratum == 1L)
+stopifnot(nrow(empty_set_pair) == 2L,
+  length(unique(empty_set_pair$input_sha256)) == 1L,
+  length(unique(empty_set_pair$actual_sha256)) == 1L,
+  length(unique(empty_set_pair$extension_sha256)) == 1L)
+interaction_campaigns <- subset(interactions, interaction_per_stratum == 4L)
+stopifnot(nrow(interaction_campaigns) == 2L,
+  setequal(interaction_campaigns$seed, c(173L, 20260906L)),
+  all(interaction_campaigns$controls_rejected == 42L))
+knitr::kable(interactions[c("seed", "interaction_per_stratum", "profiles", "records",
+  "carriers", "controls_rejected", "failures", "sequence_failures", "replay_lane_failures")],
+  row.names = FALSE)
+```
+
+These are **local diagnostic runs, not source-bound release certificates**. The
+[receipt ledger](../test/duckvep/conformance/data/haplotype_interaction_history.csv)
+retains the captured runtime revision, extension hash, generator and comparator
+hashes, complete-input/output hashes, comparison hashes and each failure count.
+The retained run directories contain the full observations; this ledger is not
+a portable corpus pack.
+
+The one-draw pair has identical source inputs and native outputs. Its 98 baseline
+failures arise from the R comparator deleting an empty JSON contributor-array
+field while retaining an empty native character vector. Both are empty applied-source
+sets. Explicit empty-set normalization resolves that representation mismatch;
+eight additional controls reject absent/null fields, invalid identities, lost or
+invented sources and dropped or duplicated rows. No source record, sequence or
+lane comparison is excluded, and the failing baseline remains in the table.
+
+The two four-draw campaigns contain **`r format(sum(interaction_campaigns$profiles), big.mark = ",")`
+models / `r format(sum(interaction_campaigns$carriers), big.mark = ",")` sample/file lanes**,
+with **`r sum(interaction_campaigns$failures)` failed model comparisons**. Each seed
+adds four draws in every one of 6,048 cells: the 504 exon/UTR geometry cells crossed
+with four partner allele shapes and three partner start locations (overlapping
+the first source span, in the same coding exon or in another coding exon).
+All source spans intersect their selected transcript. The original 1,536 fixed-model
+and 504 geometry cases precede the interaction draws without changing their inputs
+or RNG stream. Complete CDS/protein, sample counts, input provenance, source mapping,
+reference-model sequence and per-lane applied-source identities have separate gates.
+
+This remains a standard-code, 180-base reference-CDS grammar with three diploid
+samples. Quota coverage is not an estimate of population error rates. Grouped
+upstream flags, arbitrary genetic codes, phase sets, structural composition and
+complete phased SO/HGVS require their own evidence; the publication failures below
+are not waived by these diagnostic comparisons.
+
 ### Repeated-model publication audit
 
 ```{r repeated-model-audit}

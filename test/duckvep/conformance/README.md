@@ -708,7 +708,7 @@ fixture supplies the reference; bcftools checks every REF before either engine r
 The Haplosaurus observer and public SQL consume the same VCF/GFF/FASTA.
 Complete CDS/protein multisets, source-record contributors and carrier counts are
 compared; all raw observations, differences, decoded-GT collisions and receipts remain
-in a separate result directory. Eighteen ordinary called diploid profiles and four
+in a separate result directory. Eighteen ordinary called diploid profiles and twelve
 deliberate corruptions guard the verifier. This is a raw-input compatibility audit,
 not a replacement for the original phased-sequence corpus or a population error rate.
 
@@ -772,6 +772,8 @@ control. Both campaigns check the complete native transcript domain, positive
 carrier counts and exact list lengths before grouping output. Eight shared
 controls reject extra/NULL transcript rows, zero-carrier rows, missing transcripts,
 wrong/missing counts, duplicate transcript domains and total-count mismatches.
+Eight group controls additionally check empty source sets, missing/null fields,
+invalid identities, lost or invented sources, and dropped or duplicated rows.
 Disjoint and adjacent records are positive controls.
 `summary.csv` retains the grouped `equal` verdict and separately reports
 `replay_lanes_equal` and `counts_equal`; `all_equal` requires all three. Receipts
@@ -880,7 +882,7 @@ Native contributors separately retain exact
 record identity, region, position, REF, interpreted ALT and occupied sample/lane.
 The original source buffer, retained genotype multiplicity and transcript-owned
 CDS coordinates are checked against the fixture, including exon-repeated and
-unselected duplicate sources. Twenty-six controls reject changed sequences,
+unselected duplicate sources. Forty-two controls reject changed sequences,
 reference models, samples, counts, source provenance, genotype observations, mapping coordinates,
 lane identities and malformed observations. Lane swaps and missing lane-specific
 sources must fail even when grouped sequences, sample counts and source sets agree.
@@ -911,11 +913,36 @@ Rscript test/duckvep/conformance/haplotype_model_differential.R --seed 20260906 
 
 Each command adds 16,128 models to the 18,432 fixed-model cases. All 34,560 cases
 compare six sample/file lanes, source identities, input provenance and owned
-mapper coordinates; all 26 corruption controls must pass. `geometry_coverage.csv`
+mapper coordinates; all 42 corruption controls must pass. `geometry_coverage.csv`
 checks the requested cell quotas. This grammar uses one registered 180-base CDS
 and standard-code complete translations. It does not cover arbitrary biological
 models, reference-only sample routes, general phase/PS inference or structural
 composition. Failures remain in the combined summary and receipt.
+
+`--interaction-per-stratum` appends a second edit to generated exon/UTR models.
+Its 6,048 cells cross the 504 geometry cells with four partner allele shapes
+(SNV, insertion, deletion and replacement) and three start locations: inside
+the first record's REF span and transcript, within the same coding exon, or in
+another coding exon. REF spans may cross exon–intron junctions or CDS endpoints;
+every source span must intersect its explicitly selected transcript. Three
+samples supply cis, trans and compacted-missing calls, with a homozygous ALT
+anchor. The source records, including duplicate alleles, remain distinct.
+
+```sh
+Rscript test/duckvep/conformance/haplotype_model_differential.R --seed 173 --rare-per-stratum 0 --geometry-per-stratum 1 --interaction-per-stratum 4
+Rscript test/duckvep/conformance/haplotype_model_differential.R --seed 20260906 --rare-per-stratum 0 --geometry-per-stratum 1 --interaction-per-stratum 4
+```
+
+Each command adds 24,192 interaction models after the original 1,536 fixed-model
+and 504 geometry cases, for 26,232 models and 157,392 sample/file lanes.
+`interaction_coverage.csv` enforces four draws in every cell. The original
+cohorts retain their inputs and RNG stream; interactions consume later draws.
+All sequence, count, reference-model, source, mapping and file-lane comparisons
+use the existing gates. Empty applied-source arrays and native character vectors
+represent the same empty identity set. Eight shared group controls reject absent
+or null contributor fields, invalid identities, lost or invented sources, and
+dropped or duplicated rows. This remains a standard-code 180-base CDS grammar,
+not a certificate for arbitrary models, phase sets, consequences or HGVS.
 
 `haplotype_reference_differential.R` exercises reference-only sample handling
 through the original container JSON serializer. CDS and protein groups are compared

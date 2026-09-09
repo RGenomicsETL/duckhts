@@ -12,10 +12,10 @@ each original record and source ALT against that executable with matching refere
 transcript model and settings. This is the acceptance contract, not a claim that all
 DuckVEP paths already conform.
 
-**There is no alternative HGVS output policy selected here.** Sequence-equivalent
-inputs remain distinct source records with their own expected VEP-116 outputs.
-Neither a canonical HGVS spelling nor another tool's output may replace those
-expectations to make a compatibility test pass.
+**DuckVEP must reproduce VEP-116 output, not substitute a preferred HGVS spelling.**
+Sequence-equivalent inputs remain distinct source records with their own expected
+VEP-116 outputs. Neither a canonical HGVS spelling nor another tool's output may
+replace those expectations to make a compatibility test pass.
 
 **HGVS recommendations are a separate audit reference.** Matching VEP 116 does not
 establish HGVS nomenclature correctness. A disagreement does not establish a VEP defect.
@@ -43,19 +43,23 @@ terms, DuckVEP must reproduce that state before offering a separately named alte
 
 ## Evidence required to call an upstream result wrong
 
-A discrepancy is initially unclassified: it may be a DuckVEP defect, a different
-input/model/configuration, or a deliberate upstream convention. Compatibility witnesses
+**A DuckVEP/VEP disagreement is not evidence that VEP is wrong.** Its cause is initially
+unclassified: it may be a DuckVEP defect, a different input/model/configuration, a test
+harness error, or a deliberate upstream convention. Within the declared supported
+surface it remains a compatibility failure until resolved. Compatibility witnesses
 prove observed behaviour, not biological incorrectness. A proposed defect claim needs:
 
-- a minimized input and exact executable, dependency, reference and transcript-model
-  identities, with both outputs retained and matching coordinate/allele conventions;
+- a minimized input, runnable reproduction commands and exact executable, dependency,
+  reference and transcript-model identities, with input checksums, both complete raw
+  outputs, warnings and exit statuses retained and matching coordinate/allele conventions;
 - an independently checkable violated contract: for example a cited HGVS rule, or a
   CDS reconstruction and translation derived from the pinned reference and transcript,
   including strand, phase, codon table and model sequence edits;
 - controls that exclude our parser, projection, normalization and test comparator as
   the cause, plus the affected scope and counterexamples to any proposed general rule;
-- a distinction between observed evidence, our inference and upstream acknowledgement.
-  Another tool's agreement or a ClinVar classification alone does not prove the claim.
+- a distinction between observed evidence, our inference and upstream acknowledgement,
+  with links to any upstream report or response. Another tool's agreement or a ClinVar
+  classification alone does not prove the claim.
 
 Even a supported erratum does not remove mismatches from a VEP-conformance denominator
 or silently change the selected compatibility profile. Any alternative needs explicit
@@ -2026,3 +2030,33 @@ Source anchors: core `Transcript::translate`, `Translation::modify_translation`,
 `SeqEdit::apply_edit`, and Ensembl Variation 116
 `TranscriptHaplotypeContainer::_init` / `_mutate_sequences`. The reference
 translation receipt hashes the core modules from the pinned VEP distribution.
+
+## Haplosaurus sequence-group flags depend on sample traversal order
+
+**Classification: reproduced VEP-116 order-dependent metadata; not a claim of
+biological incorrectness. Full grouped-metadata conformance remains unresolved.**
+
+The pinned `TranscriptHaplotypeContainer::_init` traverses a sample hash and groups
+mutation lanes by sequence. A new group copies the first lane's `indel`, `frameshift`
+and `length_diff` flags. Later lanes add counts and contributing variants without
+combining those flags. Equal final sequences can therefore retain different group
+flags depending on sample traversal order.
+
+The [fixed seven-exon witness](test/duckvep/conformance/haplotype_grouped_flags.R)
+retains both original same-position records and the mixed missing call. Its
+[receipted experiment](test/duckvep/conformance/data/haplotype_grouped_flags_history.csv)
+runs 32 Perl hash seeds twice with `PERL_PERTURB_KEYS=0`: 64 original Runner runs
+and 64 observed runs. Observation preserves the complete original JSON within each
+seed and repeat. Per-lane sequences and flags remain identical across seeds. For
+the 180-base CDS group, `has_indel` is zero in 11 seeds and one in 21; both repeats
+agree, and every group retains the same three sample memberships.
+
+These observations identify the source of unstable group metadata, not a consensus
+biological flag rule. DuckVEP's path flags and VEP's sequence-group flags are distinct
+observations. The four retained full-output disagreements in the
+[publication audit](benchmarks/duckvep_conformance.md#repeated-model-publication-audit)
+remain failures; matching sequence, counts and provenance does not waive flag differences.
+No upstream acknowledgement is recorded.
+
+Source authority: Ensembl Variation 116
+[`TranscriptHaplotypeContainer::_init`](https://github.com/Ensembl/ensembl-variation/blob/2fb834b987ede3824e200197a838ce11e91aeb4b/modules/Bio/EnsEMBL/Variation/TranscriptHaplotypeContainer.pm#L768).

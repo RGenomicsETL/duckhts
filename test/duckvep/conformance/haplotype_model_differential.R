@@ -139,6 +139,7 @@ main <- function() {
     optparse::make_option('--seed', type = 'integer', default = 173L),
     optparse::make_option('--rare-per-stratum', dest = 'rare_per_stratum', type = 'integer', default = 1L),
     optparse::make_option('--geometry-per-stratum', dest = 'geometry_per_stratum', type = 'integer', default = 0L),
+    optparse::make_option('--interaction-per-stratum', dest = 'interaction_per_stratum', type = 'integer', default = 0L),
     optparse::make_option('--extension-receipt', dest = 'extension_receipt', default = NULL),
     optparse::make_option('--vep-prefix', dest = 'vep_prefix', default = '/root/miniconda3/envs/vep')
   )))
@@ -147,8 +148,10 @@ main <- function() {
   seed <- opt$seed
   stopifnot(!is.na(seed), !is.na(opt$rare_per_stratum), opt$rare_per_stratum >= 0L,
     !is.na(opt$geometry_per_stratum), opt$geometry_per_stratum >= 0L,
+    !is.na(opt$interaction_per_stratum), opt$interaction_per_stratum >= 0L,
     opt$rare_per_stratum <= (32768L - 768L) %/% 264L,
-    768 + 264 * opt$rare_per_stratum + 504 * opt$geometry_per_stratum <= 32768)
+    768 + 264 * opt$rare_per_stratum + 504 * opt$geometry_per_stratum +
+      6048 * opt$interaction_per_stratum <= 32768)
   revision <- duckvep_evidence_revision(root)
   extension <- normalizePath('build/release/duckhts.duckdb_extension')
   binding <- 'diagnostic_unbound'
@@ -251,25 +254,31 @@ main <- function() {
   models <- do.call(rbind, models); exons <- do.call(rbind, exons); records <- do.call(rbind, records)
   fixed_regions <- nrow(cases)
   geometry <- NULL
-  if (opt$geometry_per_stratum) {
-    geometry <- haplotype_geometry_cases(cds, opt$geometry_per_stratum, nrow(cases), nrow(models))
-    geometry$cases$gt_pair <- 'mixed_lanes'
-    geometry$cases$neutral_count <- 0L
-    geometry$cases$cohort <- 'geometry'
-    for (name in setdiff(names(geometry$cases), names(cases))) cases[[name]] <- NA
-    cases <- rbind(cases, geometry$cases[names(cases)])
-    models <- rbind(models, geometry$models[names(models)])
-    exons <- rbind(exons, geometry$exons[names(exons)])
-    records <- rbind(records, geometry$records[names(records)])
-    fasta <- c(fasta, geometry$fasta)
-    gff <- c(gff, geometry$gff)
-    write.csv(geometry$coverage, file.path(out, 'geometry_coverage.csv'), row.names = FALSE)
+  for (cohort in c('geometry', 'interaction')) {
+    quota <- opt[[paste0(cohort, '_per_stratum')]]
+    if (!quota) next
+    added <- haplotype_geometry_cases(cds, quota, nrow(cases), nrow(models), cohort == 'interaction')
+    added$cases$gt_pair <- if (cohort == 'interaction') 'cis_trans_missing' else 'mixed_lanes'
+    added$cases$neutral_count <- 0L
+    added$cases$cohort <- cohort
+    for (name in setdiff(names(added$cases), names(cases))) cases[[name]] <- NA
+    cases <- rbind(cases, added$cases[names(cases)])
+    models <- rbind(models, added$models[names(models)])
+    exons <- rbind(exons, added$exons[names(exons)])
+    records <- rbind(records, added$records[names(records)])
+    fasta <- c(fasta, added$fasta)
+    gff <- c(gff, added$gff)
+    if (is.null(geometry)) geometry <- added[c('layouts', 'phases')] else {
+      geometry$layouts <- rbind(geometry$layouts, added$layouts)
+      geometry$phases <- rbind(geometry$phases, added$phases)
+    }
+    write.csv(added$coverage, file.path(out, paste0(cohort, '_coverage.csv')), row.names = FALSE)
   }
   records <- records[order(records$seq_region, records$position, seq_len(nrow(records))), ]
   records$event_index <- seq_len(nrow(records))
   stopifnot(fixed_regions == 768L + 264L * opt$rare_per_stratum,
-    nrow(cases) == fixed_regions + 504L * opt$geometry_per_stratum,
-    nrow(models) == 2L * fixed_regions + 504L * opt$geometry_per_stratum,
+    nrow(cases) == fixed_regions + 504L * opt$geometry_per_stratum + 6048L * opt$interaction_per_stratum,
+    nrow(models) == 2L * fixed_regions + 504L * opt$geometry_per_stratum + 6048L * opt$interaction_per_stratum,
     all(table(interaction(cases[cases$cohort == 'baseline', c('shape', 'gt_pair', 'strand')])) == 32L),
     all(records$reference != records$alt))
   key <- function(x) do.call(paste, c(x[c('shape', 'gt_pair', 'strand', 'neutral_count')], sep = ':'))
@@ -397,8 +406,11 @@ main <- function() {
     tracked_changes = duckvep_evidence_tracked_changes(root),
     scope = 'shared_transcript_source_replay_sequence_sample_counts_and_per_lane_source_identity_sets',
     seed = seed, rare_per_stratum = opt$rare_per_stratum, required_strata = nrow(coverage),
-    geometry_per_stratum = opt$geometry_per_stratum, geometry_strata = if (is.null(geometry)) 0L else nrow(geometry$coverage),
+    geometry_per_stratum = opt$geometry_per_stratum, geometry_strata = if (opt$geometry_per_stratum) 504L else 0L,
     geometry_profiles = sum(summary$cohort == 'geometry'), geometry_failures = sum(!summary$passed & summary$cohort == 'geometry'),
+    interaction_per_stratum = opt$interaction_per_stratum, interaction_strata = if (opt$interaction_per_stratum) 6048L else 0L,
+    interaction_profiles = sum(summary$cohort == 'interaction'),
+    interaction_failures = sum(!summary$passed & summary$cohort == 'interaction'),
     minimum_stratum_draws = min(coverage$observed), controls_rejected = sum(controls),
     oracle_revisions = as.list(pins), source_artifact = 'haplotype_benchmark_reference',
     profiles = nrow(summary), records = nrow(records), leaves = nrow(actual),

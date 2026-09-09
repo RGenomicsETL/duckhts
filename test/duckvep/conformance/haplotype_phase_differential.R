@@ -2,6 +2,8 @@
 # Finite raw-GT audit against unmodified Haplosaurus. Disagreements are retained,
 # not accepted as conformance. The existing seeded replay corpus is untouched.
 
+source('test/duckvep/conformance/haplotype_observations.R')
+
 genotypes <- function(max_ploidy) {
   unlist(lapply(seq_len(max_ploidy), function(n) {
     alleles <- as.matrix(expand.grid(rep(list(c("0", "1", "2", ".")), n),
@@ -14,15 +16,6 @@ genotypes <- function(max_ploidy) {
       }, "")
     }), use.names = FALSE)
   }), use.names = FALSE)
-}
-
-canonical <- function(rows) {
-  if (!length(rows)) return(list())
-  keys <- vapply(rows, function(x) jsonlite::toJSON(list(cds = x$cds, protein = x$protein),
-    auto_unbox = TRUE, na = "null"), "")
-  lapply(split(rows, keys), function(group) list(cds = group[[1L]]$cds,
-    protein = group[[1L]]$protein, count = sum(vapply(group, function(x) as.numeric(x$count), 0)),
-    contributors = sort(unique(unlist(lapply(group, `[[`, "contributors"), use.names = FALSE)))))
 }
 
 phase_equal <- function(expected, observed) {
@@ -378,6 +371,7 @@ main <- function() {
   controls$protein[[1L]]$protein <- paste0("X", substring(witness[[1L]]$protein, 2L))
   controls$contributor[[1L]]$contributors <- c(witness[[1L]]$contributors, "deliberate_extra_event")
   rejected <- vapply(controls, function(x) !identical(canonical(x), canonical(witness)), TRUE)
+  rejected <- c(rejected, haplotype_group_controls())
   stopifnot(all(rejected))
   write.csv(data.frame(control = names(rejected), rejected),
     file.path(out, "controls.csv"), row.names = FALSE)
@@ -395,6 +389,7 @@ main <- function() {
   inputs <- c(paths, extension, probe_sources,
     list.files("src/duckvep/kernel", pattern = "\\.(h|inc|def)$", recursive = TRUE, full.names = TRUE),
     "test/duckvep/conformance/haplotype_phase_differential.R",
+    "test/duckvep/conformance/haplotype_observations.R",
     "test/duckvep/conformance/haplotype_oracle.pl", file.path(prefix,
       "share/ensembl-vep-116.0-0/Bio/EnsEMBL/IO/Parser/BaseVCF4.pm"))
   jsonlite::write_json(list(source_revision = revision, extension_build_binding = binding,

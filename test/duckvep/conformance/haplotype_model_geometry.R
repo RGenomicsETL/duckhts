@@ -1,6 +1,6 @@
 # Generate transcript-oriented CDS splits and genomic source records from the
 # registered reference. GFF phase is the complement of Ensembl exon phase.
-haplotype_geometry_cases <- function(cds, quota, region_offset, transcript_offset) {
+haplotype_geometry_cases <- function(cds, quota, region_offset, transcript_offset, interaction = FALSE) {
   stopifnot(nchar(cds) == 180L, quota >= 1L)
   rc <- function(x) paste(rev(strsplit(chartr("ACGT", "TGCA", x), "", fixed = TRUE)[[1L]]), collapse = "")
   strata <- expand.grid(
@@ -11,6 +11,11 @@ haplotype_geometry_cases <- function(cds, quota, region_offset, transcript_offse
       "whole_exon", "junction_insertion"
     ), stringsAsFactors = FALSE
   )
+  if (interaction) strata <- merge(strata, expand.grid(
+    second_location = c("overlap", "same_exon", "other_exon"),
+    second_edit = c("snv", "insertion", "deletion", "replacement"),
+    stringsAsFactors = FALSE
+  ), by = NULL)
   cases <- strata[rep(seq_len(nrow(strata)), each = quota), ]
   cases$draw <- rep(seq_len(quota), nrow(strata))
   models <- exons <- records <- fasta <- gff <- vector("list", nrow(cases))
@@ -18,8 +23,8 @@ haplotype_geometry_cases <- function(cds, quota, region_offset, transcript_offse
     profile <- cases[i, ]
     tx_index <- transcript_offset + i - 1L
     region <- region_offset + i - 1L
-    tx <- paste0("TG", i)
-    chr <- sprintf("chrG%04d", i)
+    tx <- paste0(if (interaction) "TP" else "TG", i)
+    chr <- sprintf(if (interaction) "chrP%04d" else "chrG%04d", i)
     first <- sample(seq(12L + profile$split_phase, 32L, 3L), 1L)
     cuts <- c(0L, first, sort(sample(seq.int(first + 1L, 179L), profile$exon_count - 2L)), 180L)
     u5 <- if (profile$utr == "inside") sample(1:9, 1L) else 0L
@@ -80,6 +85,30 @@ haplotype_geometry_cases <- function(cds, quota, region_offset, transcript_offse
       alt = c(alt, chartr("ACGT", "CGTA", anchor_ref)), source_id = c("edge", "anchor"),
       s0 = c("1|0", "1|1"), s1 = c("0|1", "1|1"), s2 = c(".|1", "1|1")
     )
+    if (interaction) {
+      edge_exon <- switch(profile$shape, cds_start = 1L, cds_end = nrow(coding), j)
+      other_exons <- setdiff(seq_len(nrow(coding)), edge_exon)
+      partner_exon <- if (profile$second_location == "other_exon")
+        other_exons[sample.int(length(other_exons), 1L)] else edge_exon
+      partner_positions <- if (profile$second_location == "overlap")
+        seq.int(max(pos, min(span$start)), min(pos + ref_length - 1L, max(span$end))) else
+        seq.int(coding$coding_start[partner_exon], coding$coding_end[partner_exon])
+      partner_pos <- partner_positions[sample.int(length(partner_positions), 1L)]
+      partner_length <- switch(profile$second_edit,
+        snv = 1L, insertion = 1L, deletion = sample(2:5, 1L), replacement = sample(2:6, 1L))
+      partner_ref <- substr(genome, partner_pos, partner_pos + partner_length - 1L)
+      partner_alt <- switch(profile$second_edit,
+        insertion = paste0(partner_ref, paste0(sample(c("A", "C", "G", "T"),
+          sample(1:3, 1L), replace = TRUE), collapse = "")),
+        deletion = substr(partner_ref, 1L, 1L), chartr("ACGT", "CGTA", partner_ref))
+      stopifnot(nchar(partner_ref) == partner_length, partner_ref != partner_alt,
+        profile$second_location != "other_exon" || partner_exon != edge_exon)
+      partner <- data.frame(position = partner_pos, reference = partner_ref,
+        alt = partner_alt, source_id = "partner", s0 = "1|0", s1 = "1|0", s2 = "1|1")
+      r <- rbind(r[1L, ], partner, r[2L, ])
+      stopifnot(all(r$position <= max(span$end) &
+        r$position + nchar(r$reference) - 1L >= min(span$start)))
+    }
     span$ce <- cumsum(span$end - span$start + 1L)
     span$cs <- c(1L, head(span$ce, -1L) + 1L)
     coding_before <- cumsum(c(0L, head(ifelse(is.na(span$coding_start), 0L,
@@ -147,7 +176,8 @@ haplotype_geometry_cases <- function(cds, quota, region_offset, transcript_offse
   coverage <- strata
   coverage$required <- quota
   coverage$observed <- tabulate(match(key(cases), key(strata)), nrow(strata))
-  stopifnot(nrow(strata) == 504L, all(coverage$observed == quota))
+  stopifnot(nrow(strata) == if (interaction) 6048L else 504L,
+    all(coverage$observed == quota))
   list(
     cases = cases, models = models, exons = exons, records = records,
     layouts = layouts, phases = phases, fasta = fasta, gff = gff, coverage = coverage

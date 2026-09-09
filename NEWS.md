@@ -5,6 +5,15 @@
 - isolate SQLLogicTest runner fixtures from checkout-volume assumptions on Windows;
   verify successful and failing execution through file, list and directory selection
 
+- compare empty applied-source sets consistently across JSON and native conformance
+  observations, with controls rejecting missing fields, invalid identities and lost sources
+
+- require runnable, input-identified evidence for upstream-defect claims in ERRATA.md;
+  VEP-116 HGVS expectations and compatibility failures remain independent of those claims
+
+- extend the phased model conformance generator with quota-controlled interacting
+  edits across exon/UTR layouts, retaining the original inputs and RNG stream
+
 - keep caller-buffer FASTA signed-size checks warning-free under Clang on native
   and 32-bit targets, with unchanged overflow rejection
 
