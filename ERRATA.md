@@ -1,8 +1,41 @@
-# DuckVEP compatibility errata
+# DuckHTS errata
 
-Status: current implementation guidance. This ledger records non-obvious VEP 116
-behaviour that DuckVEP intentionally reproduces. Code and executable differential tests
-remain authoritative; this is not an implementation diary.
+Status: current compatibility and evidence ledger. Records pinned VEP-116 behavior,
+observed DuckVEP conformance gaps, and separately assessed upstream errata.
+
+## Pinned behavioral authority
+
+**The required compatibility target is pinned Ensembl VEP 116.** Within DuckVEP's
+declared supported surface, this includes each source record's HGVSc and HGVSp
+presentation, input-representation-dependent results, and absent HGVS values. Compare
+each original record and source ALT against that executable with matching reference,
+transcript model and settings. This is the acceptance contract, not a claim that all
+DuckVEP paths already conform.
+
+**There is no alternative HGVS output policy selected here.** Sequence-equivalent
+inputs remain distinct source records with their own expected VEP-116 outputs.
+Neither a canonical HGVS spelling nor another tool's output may replace those
+expectations to make a compatibility test pass.
+
+**HGVS recommendations are a separate audit reference.** Matching VEP 116 does not
+establish HGVS nomenclature correctness. A disagreement does not establish a VEP defect.
+Suspected upstream errors require the evidence below; unresolved comparisons remain
+failures with every record retained in the denominator. The executable authorities are:
+
+- Ensembl VEP: `57ea5c52340acc1f156267f810ad162e26597082`;
+- Ensembl core: `c0cf13daa961d80584bad797b2eb0ff3a7500ef3`;
+- Ensembl variation: `2fb834b987ede3824e200197a838ce11e91aeb4b`;
+- dependency environment:
+  [`vep116_2026-07-22.conda-explicit.txt`](test/duckvep/upstream/receipts/vep116_2026-07-22.conda-explicit.txt).
+
+For the supported VEP-116 HGVS surface, reproducing a documented upstream result is the
+compatibility requirement even when that result conflicts with a nomenclature rule.
+HGVS-rule assessments in this ledger name their recommendation version separately.
+An `ok` computation status does not certify that the returned string satisfies HGVS.
+`phase_policy := 'strict'` governs genotype phasing, not HGVS nomenclature. The internal
+`DUCKVEP_COMPAT_STRICT` control is not a certified HGVS implementation or a public SQL
+HGVS selection option. Phased composition still requires its own validation; matching
+independent-event VEP output does not certify compound HGVS.
 
 VEP compatibility describes an observed result, not an endorsement of the underlying
 biology or API design. When VEP's predicate ordering produces an unusual combination of
@@ -32,6 +65,142 @@ Candidate witnesses: [fastVEP's divergence report at
 99b1275](https://github.com/Huang-lab/fastVEP/blob/99b1275fb114ecdff4b1b824a4284aa5058f8cef/docs/VEP_DIVERGENCE.md)
 describes VEP-115.1 observations. Establishing a VEP-116 defect or validating a
 DuckVEP alternative requires the evidence above for that exact version and contract.
+
+## HGVS authority and sequence equivalence
+
+VEP-116 compatibility and HGVS nomenclature correctness have separate verdicts.
+Compatibility compares each original input record with the pinned executable.
+A nomenclature claim names the HGVS recommendation version and the applicable rule;
+neither verdict substitutes for the other or changes its comparison denominator.
+
+Different representations are not automatically semantically equivalent. State which
+property is being compared:
+
+| Property | Required comparison |
+| --- | --- |
+| Source identity | Retain every physical input record and source ALT, including duplicate POS/REF/ALT records. |
+| Sequence equivalence | Reconstruct complete altered DNA and translated sequence under the same reference, transcript model and phased-edit interpretation. |
+| VEP-116 compatibility | Compare each original record's output, including absent HGVS values, with the pinned executable under matching inputs and settings. |
+| HGVS nomenclature correctness | Assess what each description asserts against an explicitly versioned HGVS rule and independent sequence evidence. |
+
+Equal altered DNA does not guarantee equal VEP-116 strings. Conversely, descriptions
+that assert different termination positions are not merely cosmetic spellings. The
+four-record witness below distinguishes those cases. Sequence-equivalent records stay
+separate in compatibility tests; their expected VEP output must not be replaced by one
+canonical string to make the comparison pass.
+
+[HGVS 21.1.4 extension rules](https://hgvs-nomenclature.org/21.1.4/recommendations/protein/extension/)
+give extension priority over frameshift or deletion-insertion when the complete
+reference protein is extended. Establish that sequence condition from the declared
+transcript, translation table and available downstream sequence. An unknown residue
+from an incomplete local codon does not establish a translated termination codon.
+
+Equal displayed proteins alone do not establish equivalent variants: the
+[HGVS deletion-insertion examples](https://hgvs-nomenclature.org/21.1.4/recommendations/protein/delins/)
+include different DNA variants with identical resulting proteins and different HGVS
+descriptions. A retained-anchor equivalence check must establish the same complete
+altered DNA under the same model and phased-edit interpretation. Source coordinates,
+record identity and contributor provenance remain separate from sequence equivalence.
+
+### Equivalent DNA anchors can produce contradictory VEP-116 protein descriptions
+
+**Classification: reproduced VEP-116 behavior; a sequence contradiction in the retained
+synthetic witness and an HGVS-rule inference, without upstream acknowledgement.**
+
+The witness uses standard translation table 1, a forward, single-exon transcript
+`ANCHOR1` on `chrA1:11-45`, and a phase-zero CDS at `chrA1:11-22`. Its complete transcript
+sequence is `ATGGGTCCTTAAAAAGAACAATAATAACTAGCTGA`; its CDS is `ATGGGTCCTTAA`, translating
+to `MGP*`. Coordinates below are one-based genomic positions. All four physical VCF
+records are retained, including the two with identical POS/REF/ALT and different IDs.
+
+| Source record ID | POS | REF | ALT | VEP HGVSc | VEP HGVSp suffix |
+| --- | --- | --- | --- | --- | --- |
+| `ANCHOR1_10_T_0` | 19 | T | TT | `ANCHOR1:c.10dup` | `p.Ter4LeufsTer9` |
+| `ANCHOR1_10_T_1` | 20 | T | TT | `ANCHOR1:c.10dup` | `p.Ter4delinsLeuTer` |
+| `ANCHOR1_11_T_0` | 20 | T | TT | `ANCHOR1:c.10dup` | `p.Ter4delinsLeuTer` |
+| `ANCHOR1_11_T_1` | 21 | A | TA | `ANCHOR1:c.10dup` | `p.Ter4delinsLeuTer` |
+
+**Observed sequence evidence.** Applying each REF/ALT to the same reference produces the
+same complete altered genome and transcript. The altered transcript is
+`ATGGGTCCTTTAAAAAGAACAATAATAACTAGCTGA`. Independent base-R translation and BioPerl agree
+on `MGPLKRTIITS*`, with the first stop at position 12. The delins string instead denotes
+Leu at position 4 followed immediately by a stop at position 5. These are not equivalent
+spellings of the same protein result.
+
+**Observed executable mechanism.** The allele-local peptide cache contains an incomplete
+codon rendered as `X`; the HGVS helper converts `Xaa` to `Ter`. The alternate anchor
+selects a different cached reference-peptide/frameshift state. Unmodified and
+observationally traced VEP runs produce identical complete record outputs, at both
+buffer sizes 1 and 5,000. Source authority:
+[`TranscriptVariationAllele::_get_hgvs_peptides`](https://github.com/Ensembl/ensembl-variation/blob/2fb834b987ede3824e200197a838ce11e91aeb4b/modules/Bio/EnsEMBL/Variation/TranscriptVariationAllele.pm#L2108)
+and the preceding `hgvs_protein` / `_get_hgvs_protein_type` call path.
+
+**HGVS-rule inference.** Under
+[HGVS 21.1.4](https://hgvs-nomenclature.org/21.1.4/recommendations/protein/extension/),
+the intact reference protein is extended, so extension takes priority over frameshift
+or delins. Our inferred predicted suffix is `p.(Ter4LeuextTer9)`. The observed frameshift
+string has the reconstructed termination distance but not the preferred operation;
+the observed delins string specifies a stop absent from the reconstructed sequence.
+This does not establish clinical impact, prevalence, behavior in other VEP versions,
+or a general defect affecting all stop-loss annotations.
+
+**DuckVEP policy.** VEP-116 compatibility requires the per-record observed presentation.
+Sequence equivalence and HGVS compatibility have separate assertions: equal altered DNA
+must preserve replayed sequence, while each original record's HGVS is compared with
+the pinned executable. A nomenclature disagreement remains visible; it is not removed
+from either comparison denominator or silently replaced with the inferred HGVS form.
+
+Retained local evidence lives under `test/duckvep/conformance/results/` in
+`hgvs_anchor_contract_NTMkInFP/receipt.json` and
+`hgvs_anchor_trace_p2DHeEUD/mechanism_receipt.json`. These receipts identify the reference,
+GFF, original records, complete oracle outputs, source trace and independent translation.
+Controls reject dropped records, duplicate identities, changed protein strings and
+synthetic stops. These are local diagnostic artifacts, not a published conformance pack
+or release-build certificate. No upstream acknowledgement is recorded.
+
+### Phased HGVS certification scope
+
+**Classification: diagnostic singleton conformance evidence, not complete phased-HGVS
+certification.** The four forward-transcript records above do not establish general compatibility.
+The [terminal-anchor differential](test/duckvep/conformance/README.md) crosses all three
+stop codons, following codons, both strands and both source-anchor forms. It compares
+every source independently under decoded and raw-genotype routes, with complete model
+sequence and exact CDS replay checks.
+
+The comparison retains every case, including absent HGVS values. A DuckVEP string
+where VEP emits none is a compatibility failure, not evidence that VEP is wrong.
+Such failures must not be excused by the four-record witness or removed from the
+denominator. Native composition properties and SQL/R tests do not replace this check.
+
+The retained diagnostic `hgvs_anchor_ca4e927159c40/receipt.json` under
+`test/duckvep/conformance/results/` covers 384 models and 12,288 physical records:
+zero independent-event HGVSp mismatches, zero phased HGVSp mismatches across 49,152
+comparisons (two routes and two thread counts), and zero CDS replay mismatches.
+Complete native outputs are thread-invariant. Five corruption controls exercise the
+same comparison routine. The failed baseline `hgvs_anchor_be6c231a9fb1c/receipt.json`
+retains its 21,376 phased disagreements over the same 49,152 comparisons. No case is
+waived. `baseline_comparison.json` verifies identical generated input hashes and zero
+changes to every non-HGVS output field across all 49,152 comparisons. These generated
+configurations establish neither a population error rate nor
+compound-event conformance; the diagnostic build is not release-certified.
+
+### Independent HGVS and curated-reference protein differences are separate contracts
+
+Pinned `TranscriptVariationAllele` reports `p.Ala2=` or `p.Ala3=` for the retained
+synonymous SNV witnesses with a legitimate alternative start, selenocysteine,
+terminal readthrough, mitochondrial termination or lowercase model sequence.
+Haplosaurus's displayed alternate may nevertheless differ from its curated reference
+protein. Those differences remain in `protein_differences`; they do not replace the
+single-source VEP HGVS label with a whole-protein contrast such as `p.Met1Leu`.
+
+`reference_translation_oracle.pl` constructs real pinned core/variation objects and
+observes both outputs. `reference_translation_differential.R` retains all six emitted
+HGVS observations from five source cases, including the extra uppercase-reference
+allele admitted by the direct API for lowercase sequence. That direct-API observation
+is not a claim about VEP's VCF parser. Its reference/alternate translation matrix
+and separate corruption controls remain part of the receipt.
+The retained diagnostic `reference_translation_c95213eafa7a3/receipt.json` covers
+27,014 reference/alternate translation cases and these six HGVS observations.
 
 ## Executable compatibility policy
 

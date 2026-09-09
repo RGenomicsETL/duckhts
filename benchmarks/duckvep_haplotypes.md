@@ -3,13 +3,14 @@ Phased replay: native stream and public SQL
 
 <!-- duckvep_haplotypes.md is generated from duckvep_haplotypes.Rmd. -->
 
-Current source: 16afccd0fd795df318bbd8b3e66f89b8321da022;
-identical-workload baseline: 4119d55c43fe0649ffe8325135bbdf26c1f37e94.
-Native measurements cover literal phased replay. SQL materializes all
-current fields, including local coding-block SO; whole-haplotype SO/HGVS
-is unfinished. Both paths consume standalone ALT events and decoded
-calls; native raw-record parsing and conditional replay are not timed by
-this workload. All runs use one thread pinned to CPU 2 on an Intel Core
+Current source: 16afccd0fd795df318bbd8b3e66f89b8321da022; same-input
+baseline: 4119d55c43fe0649ffe8325135bbdf26c1f37e94. Native measurements
+cover literal phased replay. SQL materializes all current fields,
+including local coding-block SO. HGVS generation is disabled;
+whole-haplotype SO/HGVS is unfinished and its computation is not timed
+here. Both paths consume standalone ALT events and decoded calls; native
+raw-record parsing and conditional replay are not timed by this
+workload. All runs use one thread pinned to CPU 2 on an Intel Core
 i5-13500, DuckDB 1.5.3, and a source-bound clean extension build. The
 native bridge uses the same kernel sources compiled with `-O3 -DNDEBUG`;
 receipts retain compiler/version, binary and fixture hashes, worker
@@ -42,9 +43,11 @@ validation also rejects a corrupted expected sequence. Every measured
 pass must retain all common native/SQL denominators and SQL’s full,
 canonicalized nested-row fingerprint; failed runs are not promoted. Full
 fingerprints must also agree across revisions sharing an output
-contract. The literal-replay projection provides a separate comparison
-with the narrower recorded output contract; full current output is
-always checked.
+contract. Local coding-block and literal-replay projections provide
+separate comparisons with their recorded output contracts; full current
+output is always checked. The HGVS-status schema adds `hgvsp` (NULL) and
+`hgvsp_status` (`not_requested`) in this workload. Only the separate
+prior-schema projections exclude these columns.
 
 | transcripts | samples | overlap | input_records | projected_events | input_calls | output_leaves | output_carriers | prefixes_created | translated_bases |
 |------------:|--------:|--------:|--------------:|-----------------:|------------:|--------------:|----------------:|-----------------:|-----------------:|
@@ -81,9 +84,10 @@ observed in the native stream, not inferred SQL counters.
 
 Both compared revisions return each block’s local SO mask, coding status
 and position relative to the first stop. A shared coding context
-evaluates physical blocks on completed replay. Every full-output
-fingerprint and input/output denominator matches across the six
-configurations. The native count sink omits local SO evaluation.
+evaluates physical blocks on completed replay. Full-output fingerprints
+and input/output denominators match across the compared configurations.
+The native count sink omits local SO evaluation. HGVS-enabled
+performance requires a separate workload.
 
 | transcripts | samples | overlap | median_s_before | median_s_after | median_change_percent | max_process_rss_mib_before | max_process_rss_mib_after |
 |------------:|--------:|--------:|----------------:|---------------:|----------------------:|---------------------------:|--------------------------:|
@@ -178,3 +182,41 @@ For a network-free smoke test without a clean-build certificate:
 
 Diagnostic results are retained but are not accepted into the recorded
 baseline.
+
+### Raw source-record SQL lane
+
+`--modes sql_records` measures the public
+`input_mode := 'source_records'` path under `vep116_compat`; the default
+`--modes native,sql` selects the decoded lanes reported above. All modes
+use the same registered reference and four biallelic events. Source rows
+carry the ordered ALT list and literal diploid GT text. The timed query
+includes source validation, replay-order planning, raw-GT parsing,
+allele expansion, sorting, replay and full nested output. File decoding
+and model/input staging are outside timing. This is not a standalone raw
+native kernel benchmark or a rare-configuration conformance campaign.
+
+The source lane returns four paths per transcript and two carriers per
+sample/transcript, including the occupied reference path. Decoded lanes
+return three paths per transcript and 7/4 carriers per
+sample/transcript. Complete CDS/protein strings, carrier multisets,
+contributor IDs, ALT ordinals and block/edit counts are checked against
+the fixture. Eleven corruption controls cover changed CDS, protein,
+missing CDS, carrier identity, missing ploidy, contributor identity,
+missing ALT ordinal, invented HGVS, changed HGVS status, invalid source
+GT and duplicate output. They run in the separate correctness worker.
+
+`input_physical_records`, `input_record_sample_calls` and
+`input_candidate_sample_rows` are separately counted from the staged
+source relation. REF, ALT and undefined-slot descriptors are execution
+work, not extra physical records. For this biallelic workload the raw
+lane reserves 13 active event slots, `12 * overlap + 1` projection slots
+and 192 allele bytes; other limits match the decoded SQL lane.
+Whole-process RSS includes both the decoded fixture table and the
+derived source table. Output fingerprints include the raw lane’s
+complete schema and reference paths; they are not substituted for
+decoded-output fingerprints.
+
+No source-bound raw-lane measurement is recorded in the tables above. A
+clean-build run with three passes is required before a timing
+comparison; different output denominators preclude treating raw versus
+decoded time as an implementation speedup.

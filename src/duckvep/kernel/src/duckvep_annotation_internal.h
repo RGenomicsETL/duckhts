@@ -44,4 +44,15 @@ DUCKVEP_INTERNAL_API void duckvep_annotate_cursor_set_observer(
     duckvep_annotation_observer_fn      observer,
     void                               *observer_context);
 
+/* Observe one explicitly selected transcript for a one-row literal-allele
+ * batch. Uses VEP-116 defaults with zero upstream/downstream reach and the
+ * same consequence/projection machinery as the cursor. Caller scratch is
+ * borrowed; no sweep state or heap storage is constructed. The callback may
+ * be omitted by transcript admission, and must consume its facts in place. */
+DUCKVEP_INTERNAL_API duckvep_status_t duckvep_annotate_pair_observed(
+    const duckvep_model_t *model, const duckvep_variant_batch_t *variants,
+    uint32_t transcript_index, duckvep_delta_scratch_t *scratch,
+    duckvep_annotation_observer_fn observer, void *observer_context,
+    duckvep_error_t *error);
+
 #endif /* DUCKVEP_ANNOTATION_INTERNAL_H */

@@ -1,5 +1,120 @@
 require duckhts
 
+# Pinned VEP-116 observations and sequence evidence are recorded in ERRATA.md.
+# Each physical source record is a separate sample, including duplicate alleles.
+query I
+SELECT loaded FROM duckvep_model_load('hap_anchor',
+ 'SELECT 0::UINTEGER seq_region,55::UBIGINT sequence_length,''chrA1''::VARCHAR seq_region_name',
+ 'SELECT 0::UINTEGER transcript_index,0::UINTEGER seq_region,
+  11::UBIGINT transcript_start,45::UBIGINT transcript_end,1::TINYINT strand,
+  0::UINTEGER gene_index,3::UBIGINT transcript_flags,11::UBIGINT cds_start,
+  22::UBIGINT cds_end,''ATGGGTCCTTAA''::BLOB cds_sequence,1::UTINYINT codon_table,
+  ''''::BLOB pre_cds_sequence,''AAAGAACAATAATAACTAGCTGA''::BLOB post_cds_sequence',
+ 'SELECT 0::UINTEGER transcript_index,11::UBIGINT exon_start,45::UBIGINT exon_end,
+  1::UBIGINT exon_cdna_start,35::UBIGINT exon_cdna_end,0::TINYINT phase,0::TINYINT end_phase',
+ reference_fasta:='test/data/duckvep/hgvs_anchor.fa');
+----
+1
+
+statement ok
+CREATE TABLE hap_anchor_calls AS SELECT event_index,0 seq_region,position,reference,alternate,
+ 1 alt_index,0 transcript_index,event_index-1 sample_index,[1,1] alleles,
+ [true,true] phase_before,NULL::BIGINT phase_set FROM
+ (VALUES (1,19,'T','TT'),(2,20,'T','TT'),(3,20,'T','TT'),(4,21,'A','TA'))
+ v(event_index,position,reference,alternate);
+
+query ITTTTIII
+SELECT contributors[1].event_index,cds,protein,hgvsp,hgvsp_status,carrier_count,
+ len(contributors),contributors[1].position FROM
+ duckvep_haplotypes('SELECT * FROM hap_anchor_calls','hap_anchor',hgvs:=true)
+ ORDER BY contributors[1].event_index;
+----
+1	ATGGGTCCTTTAA	MGPL	p.(Ter4LeufsTer9)	ok	2	1	19
+2	ATGGGTCCTTTAA	MGPL	p.(Ter4delinsLeuTer)	ok	2	1	20
+3	ATGGGTCCTTTAA	MGPL	p.(Ter4delinsLeuTer)	ok	2	1	20
+4	ATGGGTCCTTTAA	MGPL	p.(Ter4delinsLeuTer)	ok	2	1	21
+
+# Simultaneous duplicate records follow Haplosaurus last-source retention.
+# The shadowed source remains an output contributor, with reference replay.
+query ITTTTIIIT
+SELECT contributors[1].event_index,cds,protein,hgvsp,hgvsp_status,carrier_count,
+ len(contributors),contributors[1].position,contributors[1].projection_status FROM duckvep_haplotypes(
+ 'SELECT event_index,seq_region,position,reference,[alternate] alternates,
+  transcript_index,sample_index,''1|1'' gt FROM hap_anchor_calls','hap_anchor',
+ phase_policy:='vep116_compat',input_mode:='source_records',hgvs:=true)
+ ORDER BY contributors[1].event_index;
+----
+1	ATGGGTCCTTTAA	MGPL	p.(Ter4LeufsTer9)	ok	2	1	19	ok
+2	ATGGGTCCTTAA	MGP*	p.(=)	ok	2	1	20	shadowed_duplicate
+3	ATGGGTCCTTTAA	MGPL	p.(Ter4delinsLeuTer)	ok	2	1	20	ok
+4	ATGGGTCCTTTAA	MGPL	p.(Ter4delinsLeuTer)	ok	2	1	21	ok
+
+# Independent raw-record queries compare every source with its VEP observation.
+query IT
+SELECT contributors[1].event_index,hgvsp FROM (
+ SELECT * FROM duckvep_haplotypes(
+ 'SELECT event_index,seq_region,position,reference,[alternate] alternates,
+  transcript_index,sample_index,''1|1'' gt FROM hap_anchor_calls WHERE event_index=1',
+ 'hap_anchor',phase_policy:='vep116_compat',input_mode:='source_records',hgvs:=true)
+ UNION ALL SELECT * FROM duckvep_haplotypes(
+ 'SELECT event_index,seq_region,position,reference,[alternate] alternates,
+  transcript_index,sample_index,''1|1'' gt FROM hap_anchor_calls WHERE event_index=2',
+ 'hap_anchor',phase_policy:='vep116_compat',input_mode:='source_records',hgvs:=true)
+ UNION ALL SELECT * FROM duckvep_haplotypes(
+ 'SELECT event_index,seq_region,position,reference,[alternate] alternates,
+  transcript_index,sample_index,''1|1'' gt FROM hap_anchor_calls WHERE event_index=3',
+ 'hap_anchor',phase_policy:='vep116_compat',input_mode:='source_records',hgvs:=true)
+ UNION ALL SELECT * FROM duckvep_haplotypes(
+ 'SELECT event_index,seq_region,position,reference,[alternate] alternates,
+  transcript_index,sample_index,''1|1'' gt FROM hap_anchor_calls WHERE event_index=4',
+ 'hap_anchor',phase_policy:='vep116_compat',input_mode:='source_records',hgvs:=true))
+ ORDER BY contributors[1].event_index;
+----
+1	p.(Ter4LeufsTer9)
+2	p.(Ter4delinsLeuTer)
+3	p.(Ter4delinsLeuTer)
+4	p.(Ter4delinsLeuTer)
+
+# The complete 55-base reference needs 55 bases, one newline scratch byte and NUL.
+statement error
+SELECT * FROM duckvep_haplotypes('SELECT * FROM hap_anchor_calls','hap_anchor',
+ hgvs:=true,max_hgvs_reference_bytes:=56);
+----
+reference workspace bytes=56, required=57
+
+query II
+SELECT count(*),count(hgvsp) FROM duckvep_haplotypes('SELECT * FROM hap_anchor_calls','hap_anchor',
+ hgvs:=true,max_hgvs_reference_bytes:=57);
+----
+4	4
+
+query II
+SELECT count(*),count(hgvsp) FROM duckvep_haplotypes('SELECT * FROM hap_anchor_calls','hap_anchor',
+ hgvs:=false,max_hgvs_reference_bytes:=1);
+----
+4	0
+
+statement ok
+CREATE TEMP TABLE hap_anchor_without_hgvs AS SELECT * EXCLUDE(hgvsp,hgvsp_status)
+ FROM duckvep_haplotypes('SELECT * FROM hap_anchor_calls','hap_anchor');
+
+statement ok
+CREATE TEMP TABLE hap_anchor_with_hgvs AS SELECT * EXCLUDE(hgvsp,hgvsp_status)
+ FROM duckvep_haplotypes('SELECT * FROM hap_anchor_calls','hap_anchor',
+ hgvs:=true,max_hgvs_reference_bytes:=57);
+
+query I
+SELECT count(*) FROM ((SELECT * FROM hap_anchor_with_hgvs EXCEPT ALL SELECT * FROM hap_anchor_without_hgvs)
+ UNION ALL (SELECT * FROM hap_anchor_without_hgvs EXCEPT ALL SELECT * FROM hap_anchor_with_hgvs));
+----
+0
+
+statement ok
+DROP TABLE hap_anchor_without_hgvs;
+
+statement ok
+DROP TABLE hap_anchor_with_hgvs;
+
 statement ok
 CREATE TABLE hap_tx AS SELECT 0::UINTEGER transcript_index, 0::UINTEGER seq_region,
   100::UBIGINT transcript_start, 111::UBIGINT transcript_end, 1::TINYINT strand,
@@ -199,6 +314,207 @@ SELECT * FROM duckvep_haplotypes('SELECT * FROM hap_protein_alignment_calls','ha
  max_alignment_cells := 24);
 ----
 protein difference status 3, max_alignment_cells=24, required=25
+
+# Local substitution spans remain changed when surrounding codon indels
+# recreate the complete reference CDS. Genomic input covers both strands.
+statement ok
+CREATE TABLE hap_restore_tx AS SELECT i::UINTEGER transcript_index,0::UINTEGER seq_region,
+ (100+100*i)::UBIGINT transcript_start,(135+100*i)::UBIGINT transcript_end,
+ (1-2*i)::TINYINT strand,0::UINTEGER gene_index,3::UBIGINT transcript_flags,
+ transcript_start cds_start,transcript_end cds_end,
+ 'ATGGGTGGTGCTGATGATGCTGATGCTGATGGTTAA'::BLOB cds_sequence,1::UTINYINT codon_table
+ FROM range(2) r(i);
+
+query I
+SELECT loaded FROM duckvep_model_load('hap_restore','SELECT 0::UINTEGER seq_region',
+ 'SELECT * FROM hap_restore_tx',
+ 'SELECT transcript_index,transcript_start exon_start,transcript_end exon_end,
+  1::UBIGINT exon_cdna_start,36::UBIGINT exon_cdna_end,
+  0::TINYINT phase,0::TINYINT end_phase FROM hap_restore_tx');
+----
+1
+
+statement ok
+CREATE TABLE hap_restore_calls AS SELECT event_index,0 seq_region,position,reference,alternate,
+ 1 alt_index,transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set
+ FROM (VALUES (1,0,102,'GGGT','G'),(2,0,109,'GCT','GGT'),(3,0,111,'T','TGCT'),
+ (11,1,229,'CACC','C'),(12,1,224,'AGC','ACC'),(13,1,223,'C','CAGC'))
+ v(event_index,transcript_index,position,reference,alternate);
+
+statement ok
+CREATE TABLE hap_restore_result AS SELECT * FROM duckvep_haplotypes(
+ 'SELECT * FROM hap_restore_calls ORDER BY position DESC','hap_restore',max_leaf_edits:=3);
+
+query II
+SELECT count(*),bool_and(cds='ATGGGTGGTGCTGATGATGCTGATGCTGATGGTTAA'
+ AND protein='MGGADDADADG*' AND edit_count=3 AND sequence_flags=1
+ AND len(contributors)=3 AND len(cds_differences)=0 AND len(protein_differences)=0
+ AND NOT stop_in_displaced_frame) FROM hap_restore_result;
+----
+2	1
+
+query IITTT
+SELECT transcript_index,b.cds_start,b.coding_status,t.consequence,b.event_indices
+ FROM hap_restore_result,unnest(coding_blocks) u(b)
+ JOIN duckvep_so_terms() t ON (b.local_consequence_mask & t.consequence_mask)<>0
+ ORDER BY transcript_index,b.cds_start,t.consequence;
+----
+0	4	ok	inframe_deletion	[1]
+0	11	ok	missense_variant	[2]
+0	13	ok	inframe_insertion	[3]
+1	4	ok	inframe_deletion	[11]
+1	11	ok	missense_variant	[12]
+1	13	ok	inframe_insertion	[13]
+
+# Protein HGVS consumes a completed cis path, including repeat interactions
+# and separated amino-acid changes within one restored-frame block.
+statement ok
+CREATE TABLE hap_hgvs_tx AS SELECT i::UINTEGER transcript_index,0::UINTEGER seq_region,
+ (100+100*i)::UBIGINT transcript_start,(99+100*i+len(cds))::UBIGINT transcript_end,
+ (CASE WHEN i<3 THEN 1 ELSE -1 END)::TINYINT strand,0::UINTEGER gene_index,
+ 3::UBIGINT transcript_flags,transcript_start cds_start,transcript_end cds_end,
+ cds::BLOB cds_sequence,1::UTINYINT codon_table,''::BLOB pre_cds_sequence,''::BLOB post_cds_sequence
+ FROM range(6) r(i) JOIN (VALUES (0,'ATGGCTGCTGCTGCTGCTGAATAA'),
+ (1,'ATGCGGCATTTCTATGAATAA'),(2,'ATGGGTCCTGCTGAACAATAA')) c(k,cds) ON i%3=k;
+
+query I
+SELECT loaded FROM duckvep_model_load('hap_hgvs','SELECT 0::UINTEGER seq_region',
+ 'SELECT * FROM hap_hgvs_tx ORDER BY transcript_index',
+ 'SELECT transcript_index,transcript_start exon_start,transcript_end exon_end,
+  1::UBIGINT exon_cdna_start,(transcript_end-transcript_start+1)::UBIGINT exon_cdna_end,
+  0::TINYINT phase,0::TINYINT end_phase FROM hap_hgvs_tx ORDER BY transcript_index');
+----
+1
+
+statement ok
+CREATE TABLE hap_hgvs_calls AS SELECT 10*transcript_index+j AS event_index,0 seq_region,
+ CASE WHEN strand=1 THEN transcript_start+p-1 ELSE transcript_end-p-len(ref)+2 END AS position,
+ CASE WHEN strand=1 THEN ref ELSE seq_revcomp(ref) END AS reference,
+ CASE WHEN strand=1 THEN alt ELSE seq_revcomp(alt) END AS alternate,1 alt_index,
+ transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set
+ FROM hap_hgvs_tx JOIN (VALUES (0,1,3,'G','GGCT'),(0,2,11,'C','A'),
+ (1,1,3,'G','GC'),(1,2,12,'CT','C'),(2,1,3,'GGGT','G'),(2,2,9,'T','TT'))
+ v(k,j,p,ref,alt) ON transcript_index%3=k;
+
+query ITTTI
+SELECT transcript_index,protein,hgvsp,hgvsp_status,len(contributors) FROM duckvep_haplotypes(
+ 'SELECT * FROM hap_hgvs_calls ORDER BY position DESC','hap_hgvs',hgvs:=true)
+ ORDER BY transcript_index;
+----
+0	MAAADAAE*	p.(Ala4_Ala5insAsp)	ok	2
+1	MPAFHE*	p.[(Arg2_His3delinsProAla;Tyr5His)]	ok	2
+2	MPC*	p.[(Gly2del;Ala4CysfsTer2)]	ok	2
+3	MAAADAAE*	p.(Ala4_Ala5insAsp)	ok	2
+4	MPAFHE*	p.[(Arg2_His3delinsProAla;Tyr5His)]	ok	2
+5	MPC*	p.[(Gly2del;Ala4CysfsTer2)]	ok	2
+
+# Raw source-record replacements retain their anchors, including CDS base 3.
+# An unchanged start codon must not acquire a start-loss protein description.
+query ITTTI
+SELECT transcript_index,protein,hgvsp,hgvsp_status,carrier_count FROM duckvep_haplotypes(
+ 'SELECT event_index,seq_region,position,reference,[alternate] alternates,
+  transcript_index,sample_index,''1|1'' gt FROM hap_hgvs_calls','hap_hgvs',
+ input_mode:='source_records',phase_policy:='vep116_compat',hgvs:=true)
+ ORDER BY transcript_index;
+----
+0	MAAADAAE*	p.(Ala4_Ala5insAsp)	ok	2
+1	MPAFHE*	p.[(Arg2_His3delinsProAla;Tyr5His)]	ok	2
+2	MPC*	p.[(Gly2del;Ala4CysfsTer2)]	ok	2
+3	MAAADAAE*	p.(Ala4_Ala5insAsp)	ok	2
+4	MPAFHE*	p.[(Arg2_His3delinsProAla;Tyr5His)]	ok	2
+5	MPC*	p.[(Gly2del;Ala4CysfsTer2)]	ok	2
+
+query I
+SELECT bool_and(hgvsp IS NULL AND hgvsp_status='not_requested') FROM duckvep_haplotypes(
+ 'SELECT * FROM hap_hgvs_calls','hap_hgvs');
+----
+true
+
+query TTI
+SELECT hgvsp,hgvsp_status,edit_count FROM duckvep_haplotypes(
+ 'SELECT * FROM hap_restore_calls','hap_restore',hgvs:=true) ORDER BY transcript_index;
+----
+p.(=)	ok	3
+p.(=)	ok	3
+
+# Capacity is checked against the working operation stack and complete rendered
+# bytes; a query cannot return a shortened allele or silently omit operations.
+statement error
+SELECT * FROM duckvep_haplotypes('SELECT * FROM hap_hgvs_calls WHERE transcript_index=1',
+ 'hap_hgvs',hgvs:=true,max_hgvs_operations:=1);
+----
+max_hgvs_operations=1 exhausted
+
+statement error
+SELECT * FROM duckvep_haplotypes('SELECT * FROM hap_hgvs_calls WHERE transcript_index=0',
+ 'hap_hgvs',hgvs:=true,max_hgvs_bytes:=18);
+----
+max_hgvs_bytes=18, required=19
+
+query T
+SELECT hgvsp FROM duckvep_haplotypes('SELECT * FROM hap_hgvs_calls WHERE transcript_index=0',
+ 'hap_hgvs',hgvs:=true,max_hgvs_bytes:=19,max_hgvs_operations:=2);
+----
+p.(Ala4_Ala5insAsp)
+
+query ITT
+SELECT transcript_index,hgvsp,hgvsp_status FROM duckvep_haplotypes(
+ 'SELECT * FROM hap_protein_calls','hap_proteins',hgvs:=true) ORDER BY transcript_index;
+----
+0	p.(Ala2=)	ok
+1	p.(Ala3=)	ok
+2	p.(Ala2=)	ok
+3	p.(Ala2=)	ok
+4	p.(Ala2=)	ok
+5	NULL	missing_reference_protein
+
+# A coding insertion can recreate the prepared terminal peptide residue.
+# Genomic placement needs FASTA; sequence and provenance remain available.
+query TTTIII
+SELECT protein,hgvsp,hgvsp_status,edit_count,len(coding_blocks),len(contributors)
+ FROM duckvep_haplotypes(
+ 'SELECT * REPLACE (''CTGG'' AS alternate) FROM hap_protein_calls WHERE transcript_index=2',
+ 'hap_proteins',hgvs:=true);
+----
+MAW*	NULL	missing_reference	1	1	1
+
+# A model peptide alone cannot establish the genomic placement of an insertion.
+query TTTIII
+SELECT protein,hgvsp,hgvsp_status,edit_count,len(coding_blocks),len(contributors)
+ FROM duckvep_haplotypes(
+ 'SELECT * REPLACE (''CTGGGCC'' AS alternate) FROM hap_protein_calls WHERE transcript_index=2',
+ 'hap_proteins',hgvs:=true);
+----
+MAWA*	NULL	missing_reference	1	1	1
+
+# A prepared legitimate-start M differs from raw CTG translation even when
+# no ALT is carried. The difference has no invented physical coding edit.
+query TTII
+SELECT hgvsp,hgvsp_status,edit_count,len(coding_blocks) FROM duckvep_haplotypes(
+ 'SELECT event_index,seq_region,position,reference,[alternate] alternates,
+  transcript_index,sample_index,''0|1'' gt FROM hap_protein_calls WHERE transcript_index=0',
+ 'hap_proteins',input_mode:='source_records',phase_policy:='vep116_compat',hgvs:=true)
+ WHERE edit_count=0;
+----
+p.(Met1Leu)	ok	0	0
+
+# HGVS consumes a prepared protein operand without changing CDS, local SO,
+# carriers, physical blocks or contributing source identities.
+statement ok
+CREATE TEMP TABLE hap_protein_without_hgvs AS SELECT * EXCLUDE(hgvsp,hgvsp_status)
+ FROM duckvep_haplotypes('SELECT * FROM hap_protein_calls','hap_proteins');
+
+query I
+SELECT count(*) FROM (
+ SELECT * EXCLUDE(hgvsp,hgvsp_status) FROM duckvep_haplotypes(
+  'SELECT * FROM hap_protein_calls','hap_proteins',hgvs:=true)
+ EXCEPT ALL
+ SELECT * FROM hap_protein_without_hgvs);
+----
+0
+
+statement ok
+DROP TABLE hap_protein_without_hgvs;
 
 # Flat event x transcript x sample calls. The early homozygote must reach
 # phase set 20, which is first encountered at the third source event.
@@ -605,6 +921,103 @@ query I
 SELECT count(*) FROM duckvep_haplotypes('SELECT * FROM hap_calls','hap');
 ----
 3
+
+# Equal-length repeat expansions can carry different interrupted sequences.
+# Repeat-summary metadata is cold provenance, not an exact allele identity.
+statement ok
+CREATE TABLE hap_repeat_tx AS SELECT 0::UINTEGER transcript_index,0::UINTEGER seq_region,
+ 101::UBIGINT transcript_start,136::UBIGINT transcript_end,1::TINYINT strand,
+ 0::UINTEGER gene_index,3::UBIGINT transcript_flags,101::UBIGINT cds_start,
+ 136::UBIGINT cds_end,('ATG'||repeat('CAG',10)||'TAA')::BLOB cds_sequence,
+ 1::UTINYINT codon_table,''::BLOB pre_cds_sequence,''::BLOB post_cds_sequence;
+
+query I
+SELECT loaded FROM duckvep_model_load('hap_repeat',
+ 'SELECT 0::UINTEGER seq_region,236::UBIGINT sequence_length,''chr1''::VARCHAR seq_region_name',
+ 'SELECT * FROM hap_repeat_tx',
+ 'SELECT transcript_index,transcript_start exon_start,transcript_end exon_end,
+  1::UBIGINT exon_cdna_start,36::UBIGINT exon_cdna_end,
+  0::TINYINT phase,0::TINYINT end_phase FROM hap_repeat_tx',
+ reference_fasta:='__WORKING_DIRECTORY__/test/data/duckvep/repeat.fa');
+----
+1
+
+statement ok
+CREATE TABLE hap_repeat_calls AS SELECT event_index,0 seq_region,103 AS position,
+ 'G'||repeat('CAG',10) AS reference,'G'||sequence AS alternate,1 alt_index,
+ 0 transcript_index,event_index-1 sample_index,[1,1] alleles,[true,true] phase_before,
+ NULL::BIGINT phase_set,'CAG' repeat_unit,11 repeat_count
+ FROM (VALUES (1,repeat('CAG',11)),
+ (2,repeat('CAG',5)||'CAT'||repeat('CAG',5))) r(event_index,sequence);
+
+statement ok
+CREATE VIEW hap_repeat_prepared AS SELECT * REPLACE(
+ 'G'||(duckvep_repeat_sequence([{unit:'CAG',count:10}],true)).sequence AS reference,
+ 'G'||(duckvep_repeat_sequence(CASE event_index WHEN 1 THEN [{unit:'CAG',count:11}]
+ ELSE [{unit:'CAG',count:5},{unit:'CAT',count:1},{unit:'CAG',count:5}] END,true,
+ max_sequence_bases:=33)).sequence AS alternate) FROM hap_repeat_calls;
+
+query I
+SELECT count(*) FROM hap_repeat_prepared p JOIN hap_repeat_calls c USING(event_index)
+WHERE p.reference=c.reference AND p.alternate=c.alternate;
+----
+2
+
+query ITTI
+SELECT v.event_index,h.protein,h.hgvsp,h.carrier_count
+ FROM duckvep_haplotypes('SELECT * FROM hap_repeat_prepared','hap_repeat',hgvs:=true) h,
+ unnest(h.contributors) u(v) ORDER BY v.event_index;
+----
+1	MQQQQQQQQQQQ*	p.(Gln11dup)	2
+2	MQQQQQHQQQQQ*	p.(Gln6_Gln7insHis)	2
+
+statement ok
+CREATE VIEW hap_repeat_literal_events AS SELECT event_index,seq_region,position,reference,
+ alternate,NULL::UBIGINT end_position,NULL::VARCHAR structural_type,NULL::VARCHAR copy_change,
+ NULL::UINTEGER mate_seq_region,NULL::UBIGINT mate_position FROM hap_repeat_calls;
+
+statement ok
+CREATE VIEW hap_repeat_prepared_events AS SELECT event_index,seq_region,position,reference,
+ alternate,NULL::UBIGINT end_position,NULL::VARCHAR structural_type,NULL::VARCHAR copy_change,
+ NULL::UINTEGER mate_seq_region,NULL::UBIGINT mate_position FROM hap_repeat_prepared;
+
+query III
+WITH expected AS (SELECT * FROM duckvep_annotate('hap_repeat_literal_events','hap_repeat',
+ hgvs:=true,upstream_distance:=0,downstream_distance:=0)),
+ actual AS (SELECT * FROM duckvep_annotate('hap_repeat_prepared_events','hap_repeat',
+ hgvs:=true,upstream_distance:=0,downstream_distance:=0)),
+ differences AS ((SELECT * FROM actual EXCEPT ALL SELECT * FROM expected)
+ UNION ALL (SELECT * FROM expected EXCEPT ALL SELECT * FROM actual))
+SELECT (SELECT count(*) FROM actual),(SELECT count(*) FROM differences),
+ (SELECT count(*) FROM actual WHERE protein_hgvs IS NOT NULL);
+----
+2	0	2
+
+query ITTTIII
+SELECT c.event_index,h.protein,h.hgvsp,h.hgvsp_status,h.carrier_count,
+ c.reference=v.reference,c.alternate=v.alternate
+ FROM duckvep_haplotypes('SELECT * FROM hap_repeat_calls','hap_repeat',hgvs:=true) h,
+ unnest(h.contributors) u(v) JOIN hap_repeat_calls c ON c.event_index=v.event_index
+ ORDER BY c.event_index;
+----
+1	MQQQQQQQQQQQ*	p.(Gln11dup)	ok	2	1	1
+2	MQQQQQHQQQQQ*	p.(Gln6_Gln7insHis)	ok	2	1	1
+
+query ITTI
+SELECT v.event_index,h.protein,h.hgvsp,h.carrier_count
+ FROM duckvep_haplotypes(
+ 'SELECT event_index,seq_region,position,reference,[alternate] alternates,
+  transcript_index,sample_index,''1|1'' gt FROM hap_repeat_calls',
+ 'hap_repeat',input_mode:='source_records',phase_policy:='vep116_compat',hgvs:=true) h,
+ unnest(h.contributors) u(v) ORDER BY v.event_index;
+----
+1	MQQQQQQQQQQQ*	p.(Gln11dup)	2
+2	MQQQQQHQQQQQ*	p.(Gln6_Gln7insHis)	2
+
+query I
+SELECT duckvep_model_drop('hap_repeat');
+----
+1
 
 # Full source replacements retain overwritten records and do not use differing
 # islands to decide which retained bases survive.

@@ -134,37 +134,6 @@ observation_controls <- function(witness, actual, phase, model, exons, records) 
     missing_buffer_record = !mappings_ok(buffer, model, exons, records))
 }
 
-replay_lane_controls <- function(witness) {
-  stopifnot(replay_lanes_equal(witness, witness), length(witness) == 6L)
-  corrupt <- list(missing = witness[-1L], duplicate = c(witness, witness[1L]),
-    cds = witness, protein = witness, allele_key = witness, source_key = witness,
-    source_id = witness, sample = witness, absent_field = witness, invalid_source = witness,
-    swapped_lanes = witness, missing_lane_source = witness)
-  corrupt$cds[[1L]]$cds <- paste0(witness[[1L]]$cds, 'A')
-  corrupt$protein[[1L]]$protein <- paste0(witness[[1L]]$protein, 'X')
-  for (field in c('allele_key', 'source_key', 'source_id'))
-    corrupt[[field]][[1L]]$applied_sources[[1L]][[field]] <- 'wrong'
-  corrupt$sample[[1L]]$sample <- 'unknown'
-  corrupt$absent_field[[1L]]$cds <- NULL
-  corrupt$invalid_source[[1L]]$applied_sources[[1L]] <- 'invalid'
-  pair <- which(vapply(witness, function(x) x$sample == 's0', TRUE))
-  stopifnot(length(pair) == 2L, !identical(witness[[pair[1L]]]$cds, witness[[pair[2L]]]$cds))
-  corrupt$swapped_lanes[[pair[1L]]]$lane1 <- witness[[pair[2L]]]$lane1
-  corrupt$swapped_lanes[[pair[2L]]]$lane1 <- witness[[pair[1L]]]$lane1
-  shared <- which(vapply(witness, function(x) identical(x$cds, witness[[pair[2L]]]$cds), TRUE))
-  stopifnot(length(shared) > 1L, length(witness[[shared[1L]]]$applied_sources) > 0L)
-  corrupt$missing_lane_source[[shared[1L]]]$applied_sources <-
-    witness[[shared[1L]]]$applied_sources[-1L]
-  groups <- function(rows) canonical(lapply(rows, function(x) list(cds = x$cds,
-    protein = x$protein, count = 1L,
-    contributors = vapply(x$applied_sources, `[[`, '', 'source_id'),
-    samples = setNames(list(1L), x$sample))), samples = TRUE)
-  for (name in c('allele_key', 'source_key', 'swapped_lanes', 'missing_lane_source'))
-    stopifnot(identical(groups(witness), groups(corrupt[[name]])))
-  rejected <- vapply(corrupt, function(x) !replay_lanes_equal(witness, x), TRUE)
-  setNames(rejected, paste0('lane_', names(rejected)))
-}
-
 main <- function() {
   opt <- optparse::parse_args(optparse::OptionParser(option_list = list(
     optparse::make_option('--seed', type = 'integer', default = 173L),
@@ -371,11 +340,9 @@ main <- function() {
   phase <- lapply(readLines(file.path(out, 'phase.jsonl')), jsonlite::fromJSON, simplifyVector = FALSE)
   names(phase) <- vapply(phase, `[[`, '', 'transcript')
   stopifnot(!anyDuplicated(names(phase)), setequal(names(phase), models$transcript))
-  rows_by_tx <- split(seq_len(nrow(actual)), actual$transcript_index)
+  rows_by_tx <- native_haplotype_rows(actual, models$transcript_index)
   records_by_region <- split(seq_len(nrow(records)), records$seq_region)
   exons_by_tx <- split(seq_len(nrow(exons)), exons$transcript_index)
-  stopifnot(all(actual$carrier_count == vapply(actual$carriers, nrow, 1L)),
-    setequal(names(rows_by_tx), as.character(models$transcript_index)))
   summary <- cbind(models[setdiff(names(models), 'cds')],
     cases[models$seq_region + 1L, setdiff(names(cases), 'strand')])
   comparisons <- lapply(seq_len(nrow(models)), function(i) {
@@ -409,13 +376,14 @@ main <- function() {
   for (name in c('equal', 'sequences_equal', 'counts_equal', 'input_provenance_equal',
       'mappings_equal', 'replay_lanes_equal', 'model_sequence_equal', 'unavailable_carriers'))
     summary[[name]] <- vapply(comparisons, `[[`, if (name == 'unavailable_carriers') 0 else TRUE, name)
-  summary$passed <- with(summary, equal & counts_equal & input_provenance_equal & mappings_equal &
-    replay_lanes_equal & model_sequence_equal)
+  summary$passed <- replay_comparisons_passed(summary) & with(summary,
+    input_provenance_equal & mappings_equal & model_sequence_equal)
   saveRDS(comparisons, file.path(out, 'comparisons.rds'))
   write.csv(summary, file.path(out, 'summary.csv'), row.names = FALSE)
   controls <- observation_controls(oracle[['T1full']]$haplotypes, actual[rows_by_tx[['0']], ],
     phase[['T1full']], models[1L, ], exons[exons_by_tx[['0']], ], records[records_by_region[['0']], ])
   controls <- c(controls, replay_lane_controls(phase[['T1full']]$replay_lanes))
+  controls <- c(controls, haplotype_output_controls(actual[rows_by_tx[['0']], , drop = FALSE]))
   controls <- c(controls, wrong_reference_cds =
     !identical(paste0(models$cds[1L], 'A'), phase[['T1full']]$reference_cds))
   write.csv(data.frame(control = names(controls), rejected = controls), file.path(out, 'controls.csv'), row.names = FALSE)

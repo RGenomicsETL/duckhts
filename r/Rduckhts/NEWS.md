@@ -3,8 +3,42 @@
 - report reference-fetch failures through rduckhts_fasta_nuc instead of returning
   incomplete intervals; bundled faidx checks reject overflowing index arithmetic
 
+- use pinned VEP-116 single-source HGVS through rduckhts_haplotypes, separately
+  from curated-reference protein differences; genomic placement requiring an
+  unavailable FASTA returns missing_reference without losing sequence or provenance
+
+- accept max_hgvs_reference_bytes per call, with capacity/recovery tests and
+  bundled reference data for the VEP-116 anchor witnesses
+
+- test bundled phased HGVS against the four pinned VEP-116 anchor records,
+  preserving identical sequence replay, distinct source identities and the
+  per-record HGVS differences across decoded and raw-genotype calls
+
 - expose bundled duckvep_repeat_sequence SQL for exact ordered repeat descriptions,
   with per-call size limits and explicit handling of summary or incomplete evidence
+
+- test that bundled haplotype replay preserves interrupted repeat alleles separately
+  from equal-length pure repeats through decoded and raw-genotype inputs
+
+- clarify in the bundled function documentation that strict phasing does not
+  select strict HGVS nomenclature; pinned VEP-116 presentation is the phased HGVS
+  compatibility target, not a claim of complete conformance or independently
+  certified HGVS nomenclature
+
+- use complete prepared-reference flanks for bundled phased protein insertions,
+  including a terminal stop, while retaining physical edits and contributors
+
+- use prepared reference residues in bundled phased protein HGVS, including
+  legitimate starts and length-changing terminal peptide edits, while preserving
+  raw coding facts and source provenance. Unrepresentable protein ends remain explicit
+
+- add `hgvs = TRUE` to `rduckhts_haplotypes` for bounded protein HGVS suffixes,
+  with explicit unsupported statuses, operation/text limits and retained
+  sequence/provenance. Complete phased annotation remains unfinished
+
+- preserve local substitution consequences in bundled phased replay when
+  surrounding in-frame edits restore the reference CDS, with unchanged sequence
+  differences and complete contributor provenance on both strands
 
 - preserve curated reference peptides for bundled `source_records` haplotypes
   without retained exon-overlapping genotypes, including internal stops and start

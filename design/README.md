@@ -8,7 +8,7 @@ replaced them.
 | --- | --- |
 | [`duckvep.md`](duckvep.md) | Current DuckVEP mental model, ownership, model compilation, sorted execution, consequence authority, and validation contract. |
 | [`duckvep_corpus_workflow.md`](duckvep_corpus_workflow.md) | Current evidence-integrity policy for corpus derivation, conformance denominators, and VEP-release transitions. |
-| [`duckvep_errata.md`](duckvep_errata.md) | Current ledger of surprising VEP-116 behaviours that DuckVEP deliberately reproduces, with source anchors and executable witnesses. |
+| [`ERRATA.md`](../ERRATA.md) | Pinned VEP-116 behavioral authority and compatibility discrepancies, with source anchors, executable witnesses and separately assessed HGVS rules. |
 | [`duckvep.md#finite-quotient-conformance-certificate`](duckvep.md#finite-quotient-conformance-certificate) | Current formal state-transition model, finite proof basis, and counterexample-guided refinement contract. |
 | [`duckhts_parquet_lake.md`](duckhts_parquet_lake.md) | Parquet write-format contract and open DuckLake/native-writer work. |
 | [`fastq_throughput.md`](fastq_throughput.md) | Current direct-reader contract and open FASTQ parsing/QC throughput investigation. |

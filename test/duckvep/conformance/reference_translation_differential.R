@@ -1,6 +1,5 @@
 #!/usr/bin/env Rscript
-# Separate reference-translation investigation. No original generator, oracle,
-# acceptance category or default is altered. Every input and mismatch is kept.
+# Reference-translation and curated-reference HGVS observations from pinned Ensembl.
 main <- function() {
   opt <- optparse::parse_args(optparse::OptionParser(option_list = list(
     optparse::make_option("--vep-prefix", dest = "vep_prefix",
@@ -95,19 +94,25 @@ main <- function() {
     mito_terminal_aga = list(cds = "ATGGCCAGA", table = 2L),
     partial_stop_spelling = list(cds = "ATGGCCTAAA"),
     lowercase_stop = list(cds = "atggcctaa"),
+    lowercase_start = list(cds = "ctggcctaa"),
     multiple_edits = list(cds = "GTGTGAGCCTAA", edits = list(
       list(code = "initial_met", position1 = 1L, alternate = "M"),
       list(code = "_selenocysteine", position1 = 2L, alternate = "U"),
       list(code = "amino_acid_sub", position1 = 3L, alternate = "V")))
   )
+  hgvs_witnesses <- c("legitimate_start", "selenocysteine", "terminal_readthrough",
+    "mito_terminal_tga", "lowercase_start")
   for (name in names(witnesses)) {
     x <- witnesses[[name]]
     cases[[length(cases) + 1L]] <- list(id = paste0("witness/", name), family = "witness",
       cds = x$cds, table = if (is.null(x$table)) 1L else x$table,
       edits = if (is.null(x$edits)) list() else x$edits)
+    if (name %in% hgvs_witnesses) cases[[length(cases)]]$variants <- list(list(
+      id = "synonymous", position1 = if (name == "selenocysteine") 9L else 6L,
+      reference = "C", alternate = "T"))
   }
   ids <- vapply(cases, `[[`, "", "id")
-  stopifnot(!anyDuplicated(ids), nrow(grid) == 27000L, length(cases) == 27013L)
+  stopifnot(!anyDuplicated(ids), nrow(grid) == 27000L, length(cases) == 27014L)
   input <- file.path(out, "cases.jsonl")
   writeLines(vapply(cases, jsonlite::toJSON, "", auto_unbox = TRUE), input)
   perl_lib <- paste(c(file.path(mirrors, "modules"),
@@ -119,6 +124,18 @@ main <- function() {
     stdin = NULL, verbose = FALSE) == 0L)
   oracle <- lapply(readLines(oracle_file), jsonlite::fromJSON)
   stopifnot(identical(vapply(oracle, `[[`, "", "id"), ids))
+  independent <- do.call(rbind, lapply(hgvs_witnesses, function(name) {
+    id <- paste0("witness/", name)
+    observed <- oracle[[match(id, ids)]]$independent_hgvs
+    stopifnot(is.data.frame(observed), all(observed$id == "synonymous"),
+      all(unlist(observed$consequences) == "synonymous_variant"))
+    data.frame(case_id = id, allele = observed$allele, hgvsp = observed$hgvsp)
+  }))
+  expected_hgvs <- do.call(rbind, lapply(hgvs_witnesses, function(name) data.frame(
+    case_id = paste0("witness/", name), allele = if (name == "lowercase_start") c("C", "T") else "T",
+    hgvsp = paste0("witness/", name, "_protein.1:p.Ala", if (name == "selenocysteine") 3 else 2, "="))))
+  equal_hgvs <- function(x) identical(x, expected_hgvs)
+  write.csv(independent, file.path(out, "independent_hgvs.csv"), row.names = FALSE)
   rows <- lapply(seq_along(cases), function(i) {
     case <- cases[[i]]; expected <- oracle[[i]]
     actual <- translate(expected$prepared_cds, case$table)
@@ -151,15 +168,24 @@ main <- function() {
     corrupt <- expected; corrupt[[field]][1L] <- paste0(corrupt[[field]][1L], "X")
     controls[field] <- !equal(corrupt)
   }
+  corrupt_hgvs <- independent
+  corrupt_hgvs$hgvsp[1L] <- "p.Met1Leu"
+  controls <- c(controls, hgvs_missing = !equal_hgvs(independent[-1L, ]),
+    hgvs_duplicate = !equal_hgvs(rbind(independent, independent[1L, ])),
+    hgvs_wrong_reference_contrast = !equal_hgvs(corrupt_hgvs))
   write.csv(data.frame(control = names(controls), rejected = controls), file.path(out, "controls.csv"), row.names = FALSE)
   perl_sources <- c(file.path(prefix, "share/ensembl-vep-116.0-0/Bio/EnsEMBL",
       c("Transcript.pm", "Translation.pm", "SeqEdit.pm")),
     file.path(prefix, "lib/perl5/site_perl/Bio", c("Tools/CodonTable.pm", "PrimarySeqI.pm")),
-    file.path(mirrors[["variation"]], "modules/Bio/EnsEMBL/Variation/TranscriptHaplotypeContainer.pm"))
+    file.path(mirrors[["variation"]], "modules/Bio/EnsEMBL/Variation",
+      c("TranscriptHaplotypeContainer.pm", "TranscriptVariation.pm", "TranscriptVariationAllele.pm",
+        "VariationFeatureOverlap.pm", "Utils/VariationEffect.pm")))
   identities <- c(code, perl_sources, shared,
-    file.path(out, c("cases.jsonl", "oracle.jsonl", "pairs.csv", "witnesses.csv", "summary.csv", "controls.csv", "environment.txt")))
+    file.path(out, c("cases.jsonl", "oracle.jsonl", "pairs.csv", "witnesses.csv", "summary.csv", "controls.csv",
+      "independent_hgvs.csv", "environment.txt")))
   jsonlite::write_json(list(source_revision = revision, source_binding = binding,
     oracle_revisions = revisions, cases = length(cases),
+    independent_hgvs_observations = nrow(independent), independent_hgvs_equal = equal_hgvs(independent),
     scope = "native_reference_and_alternate_proteins_vs_actual_Ensembl_not_public_protein_differences",
     sha256 = as.list(vapply(identities, duckvep_evidence_sha256, ""))), file.path(out, "receipt.json"),
     pretty = TRUE, auto_unbox = TRUE)
@@ -168,6 +194,7 @@ main <- function() {
   stopifnot(all(controls), identical(code_hashes, vapply(code, duckvep_evidence_sha256, "")),
     identical(revision, duckvep_evidence_revision(root)))
   # This is deliberately not a passing certificate until all three comparisons pass.
-  stopifnot(!any(pairs$reference_failure | pairs$alternate_full_failure | pairs$alternate_failure))
+  stopifnot(!any(pairs$reference_failure | pairs$alternate_full_failure | pairs$alternate_failure),
+    equal_hgvs(independent))
 }
 main()

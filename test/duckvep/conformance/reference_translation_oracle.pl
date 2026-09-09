@@ -10,6 +10,8 @@ use Bio::EnsEMBL::Translation;
 use Bio::EnsEMBL::Attribute;
 use Bio::EnsEMBL::Variation::Sample;
 use Bio::EnsEMBL::Variation::TranscriptHaplotypeContainer;
+use Bio::EnsEMBL::Variation::VariationFeature;
+use Bio::EnsEMBL::Variation::TranscriptVariation;
 
 # Actual single-exon source objects, not cached or overridden peptide methods.
 # Slice attributes normally require a database adaptor; supply only the declared
@@ -59,9 +61,29 @@ while (my $line = <$input>) {
     my $prepared = $transcript->translateable_seq;
     die "Source CDS changed for $case->{id}: '$cds' became '$prepared'\n"
         unless uc($prepared) eq uc($cds);
+    my @independent;
+    for my $variant (@{$case->{variants} || []}) {
+        die "Independent witness requires a matching literal SNV\n" unless
+            length($variant->{reference}) == 1 && length($variant->{alternate}) == 1 &&
+            uc(substr($cds, $variant->{position1} - 1, 1)) eq uc($variant->{reference});
+        my $vf = Bio::EnsEMBL::Variation::VariationFeature->new(
+            -start => $variant->{position1}, -end => $variant->{position1}, -strand => 1,
+            -slice => $slice, -allele_string => $variant->{reference} . '/' . $variant->{alternate},
+            -variation_name => $variant->{id});
+        my $tv = Bio::EnsEMBL::Variation::TranscriptVariation->new(
+            -variation_feature => $vf, -transcript => $transcript);
+        my $alleles = $tv->get_all_alternate_TranscriptVariationAlleles;
+        die "No independent ALT\n" unless @$alleles;
+        for my $allele (@$alleles) {
+            my @terms = map { $_->SO_term } @{$allele->get_all_OverlapConsequences};
+            push @independent, {id => $variant->{id}, allele => $allele->variation_feature_seq,
+                consequences => \@terms, hgvsp => $allele->hgvs_protein};
+        }
+    }
     print $json->encode({id => $case->{id}, prepared_cds => $prepared,
         core_reference => $translation->seq, reference => $transcript->{protein},
         alternate_full => $container->_get_translation($prepared, $case->{table}),
-        alternate => $mutated->[0]->{protein}}), "\n";
+        alternate => $mutated->[0]->{protein},
+        (exists($case->{variants}) ? (independent_hgvs => \@independent) : ())}), "\n";
 }
 close($input) or die "Cannot close cases: $!\n";

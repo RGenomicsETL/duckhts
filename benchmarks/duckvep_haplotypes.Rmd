@@ -10,7 +10,8 @@ knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 root <- normalizePath(Sys.getenv("DUCKHTS_REPO_ROOT", getwd()), mustWork = TRUE)
 history <- read.csv(file.path(root, "benchmarks/data/duckvep_haplotypes.csv"),
   colClasses = c(source_revision = "character", xor_hash = "character", sum_hash = "character",
-    replay_xor_hash = "character", replay_sum_hash = "character"))
+    replay_xor_hash = "character", replay_sum_hash = "character",
+    local_so_xor_hash = "character", local_so_sum_hash = "character"))
 stopifnot(all(history$extension_build_binding == "htslib_distclean_make_release"),
   !anyDuplicated(history[c("source_revision", "transcripts", "samples", "overlap", "mode", "pass")]))
 if (!"output_contract" %in% names(history)) history$output_contract <- NA_character_
@@ -20,6 +21,10 @@ for (field in c("json_bytes", "xor_hash", "sum_hash")) {
   if (!projection %in% names(history)) history[[projection]] <- history[[field]]
   missing <- is.na(history[[projection]])
   history[[projection]][missing] <- history[[field]][missing]
+  local_so <- paste0("local_so_", field)
+  if (!local_so %in% names(history)) history[[local_so]] <- NA
+  old_contract <- history$output_contract == "local_coding_block_so"
+  history[[local_so]][old_contract] <- history[[field]][old_contract]
 }
 revisions <- unique(history$source_revision)
 stopifnot(length(revisions) >= 2L)
@@ -53,14 +58,22 @@ fingerprints <- unique(history[history$mode == "sql", c(fingerprint_keys, "outpu
   "contributors", "blocks", "json_bytes", "xor_hash", "sum_hash")])
 replay_fingerprints <- unique(history[history$mode == "sql", c(fingerprint_keys,
   "replay_json_bytes", "replay_xor_hash", "replay_sum_hash")])
+local_so_fingerprints <- unique(history[history$mode == "sql" & history$output_contract %in%
+  c("local_coding_block_so", "local_coding_block_so_hgvs_status"), c(fingerprint_keys,
+    "local_so_json_bytes", "local_so_xor_hash", "local_so_sum_hash")])
 stopifnot(nrow(comparison) == nrow(public),
   !anyDuplicated(fingerprints[c(fingerprint_keys, "output_contract")]),
+  !anyNA(local_so_fingerprints), !anyDuplicated(local_so_fingerprints[fingerprint_keys]),
   !anyDuplicated(replay_fingerprints[fingerprint_keys]))
+compared_contracts <- unique(history$output_contract[history$mode == "sql" &
+  history$source_revision %in% c(revision, baseline_revision)])
+same_contract <- length(compared_contracts) == 1L
 ```
 
-Current source: `r revision`; identical-workload baseline: `r baseline_revision`.
+Current source: `r revision`; same-input baseline: `r baseline_revision`.
 Native measurements cover literal phased replay. SQL materializes all current
-fields, including local coding-block SO; whole-haplotype SO/HGVS is unfinished.
+fields, including local coding-block SO. HGVS generation is disabled;
+whole-haplotype SO/HGVS is unfinished and its computation is not timed here.
 Both paths consume standalone ALT events and decoded calls; native raw-record
 parsing and conditional replay are not timed by this workload.
 All runs use one thread pinned to CPU 2 on an Intel Core i5-13500, DuckDB 1.5.3,
@@ -91,9 +104,11 @@ multiset with decoded input, checks sequences and edit provenance, and rejects a
 injected duplicate. Native validation also rejects a corrupted expected sequence.
 Every measured pass must retain all common native/SQL denominators and SQL's full,
 canonicalized nested-row fingerprint; failed runs are not promoted. Full fingerprints
-must also agree across revisions sharing an output contract. The literal-replay
-projection provides a separate comparison with the narrower recorded output
-contract; full current output is always checked.
+must also agree across revisions sharing an output contract. Local coding-block
+and literal-replay projections provide separate comparisons with their recorded
+output contracts; full current output is always checked. The HGVS-status schema
+adds `hgvsp` (NULL) and `hgvsp_status` (`not_requested`) in this workload. Only the
+separate prior-schema projections exclude these columns.
 
 ```{r denominators}
 knitr::kable(core[c("transcripts", "samples", "overlap", "input_records",
@@ -115,9 +130,9 @@ knitr::kable(summary, row.names = FALSE, digits = 3)
 
 Both compared revisions return each block's local SO mask, coding status and
 position relative to the first stop. A shared coding context evaluates physical
-blocks on completed replay. Every full-output fingerprint and input/output
-denominator matches across the six configurations. The native count sink omits
-local SO evaluation.
+blocks on completed replay. `r if (same_contract) "Full-output fingerprints and input/output denominators match across the compared configurations." else "The current output adds HGVS columns. All prior local-coding-block fields and input/output denominators match, but complete rows have different schemas and byte counts. This is a same-input comparison, not identical-output work."`
+The native count sink omits local SO evaluation. HGVS-enabled performance
+requires a separate workload.
 
 ```{r sql-comparison}
 knitr::kable(comparison[c("transcripts", "samples", "overlap", "median_s_before",
@@ -208,3 +223,45 @@ Rscript benchmarks/duckvep_haplotypes.R \
 ```
 
 Diagnostic results are retained but are not accepted into the recorded baseline.
+
+### Raw source-record SQL lane
+
+`--modes sql_records` measures the public `input_mode := 'source_records'` path
+under `vep116_compat`; the default `--modes native,sql` selects the decoded lanes
+reported above. All modes use the same registered reference and four biallelic
+events. Source rows carry the ordered ALT list and literal diploid GT text.
+The timed query includes source validation, replay-order planning, raw-GT parsing,
+allele expansion, sorting, replay and full nested output. File decoding and
+model/input staging are outside timing. This is not a standalone raw native
+kernel benchmark or a rare-configuration conformance campaign.
+
+The source lane returns four paths per transcript and two carriers per
+sample/transcript, including the occupied reference path. Decoded lanes return
+three paths per transcript and 7/4 carriers per sample/transcript.
+Complete CDS/protein strings, carrier
+multisets, contributor IDs, ALT ordinals and block/edit counts are checked
+against the fixture. Eleven corruption controls cover changed CDS, protein,
+missing CDS, carrier identity, missing ploidy, contributor identity, missing
+ALT ordinal, invented HGVS, changed HGVS status, invalid source GT and duplicate output. They run in the separate
+correctness worker.
+
+`input_physical_records`, `input_record_sample_calls` and
+`input_candidate_sample_rows` are separately counted from the staged source
+relation. REF, ALT and undefined-slot descriptors are execution work, not extra
+physical records. For this biallelic workload the raw lane reserves 13 active
+event slots, `12 * overlap + 1` projection slots and 192 allele bytes; other
+limits match the decoded SQL lane. Whole-process RSS includes both the decoded
+fixture table and the derived source table. Output fingerprints include the
+raw lane's complete schema and reference paths; they are not substituted for
+decoded-output fingerprints.
+
+```{bash source-record-smoke, eval=FALSE}
+Rscript benchmarks/duckvep_haplotypes.R \
+  --transcripts 16 --samples 4 --overlap 4 --passes 1 \
+  --modes native,sql,sql_records --diagnostic
+```
+
+No source-bound raw-lane measurement is recorded in the tables above. A
+clean-build run with three passes is required before a timing comparison;
+different output denominators preclude treating raw versus decoded time as an
+implementation speedup.

@@ -7,8 +7,90 @@
 - fail fasta_nuc queries on reference-fetch errors instead of omitting intervals;
   reject overflowing FASTA index seek positions and inclusive coordinates
 
+- use pinned VEP-116 genomic placement and source-allele predicates for singleton
+  phased protein HGVS, retaining sequence replay, source records and missing outputs
+
+- bound query-local HGVS reference storage with max_hgvs_reference_bytes and shared
+  caller-buffer faidx retrieval; unavailable genomic context remains explicit
+
+- initialize literal-allele event metadata independently of stack contents
+
+- centralize placed independent-event protein HGVS in an allocation-free native
+  fact builder, preserving fused consequence facts and explicit scratch limits
+
+- document the pinned VEP-116 behavioral authority, anchor-dependent protein HGVS
+  witness and unresolved DuckVEP mismatches in ERRATA.md, distinguishing source
+  identity, sequence equivalence, executable compatibility and HGVS-rule evidence;
+  suspected upstream errors require independent evidence and do not waive failures
+
 - add duckvep_repeat_sequence for bounded expansion of exact ordered repeat
   descriptions, with explicit summary, missing-input and fractional-count statuses
+
+- test distinct literal repeat haplotypes with equal lengths and summary counts,
+  preserving their protein sequences, HGVS, carriers and source alleles
+
+- exercise breakend parsing with seeded malformed-byte, bracket, coordinate and
+  overflow cases across 72 fault/form cells, including output clearing and recovery
+
+- clarify that phased HGVS retains VEP-116 presentation independently of strict
+  phasing, and that an ok computation status does not certify HGVS nomenclature
+
+- distinguish pinned VEP compatibility from versioned HGVS-rule validation in the
+  conformance guidance, including complete-sequence and termination-codon evidence
+
+- check raw-record rare-GT campaigns by sample/file lane before sequence grouping,
+  using shared sequence/provenance comparison and corruption controls; grouped
+  verdicts and generated input quotas remain separate evidence
+
+- require complete native output accounting and total-count agreement in raw-record
+  and multi-sample haplotype conformance, with controls for unassigned transcript
+  rows, zero-carrier rows, missing output and count mismatches
+
+- add an opt-in R benchmark lane for source-record haplotype SQL, with separate
+  physical-record, sample-call and candidate-row counts, complete output checks
+  and corruption controls; diagnostic runs remain outside recorded baselines
+
+- distinguish complete HGVS-status output from prior-schema projections in phased
+  benchmarks; schema changes remain explicit in cross-revision comparisons
+
+- retain the complete prepared-reference stop when composing phased protein
+  insertions, with full-sequence replay tests across 4,800 repeat-insertion cells
+
+- use prepared reference residues for phased protein HGVS, including legitimate
+  starts and length-changing terminal peptide edits, without changing raw coding
+  facts or inventing source edits. Unrepresentable protein ends remain explicit
+
+- check all retained left/right source anchors across the complete two-codon phased
+  frameshift matrix against their per-record isolated operations; retain sequence
+  equality checks and count anchor-dependent VEP-116 presentation differences
+
+- pin the four equivalent-DNA, differing-HGVSp VEP-116 records in SQL and R tests,
+  including duplicate physical records and decoded/raw-genotype routes
+
+- add an exhaustive stop/next-codon anchor differential against executable VEP 116,
+  retaining missing and differing HGVSp outcomes independently of CDS replay
+
+- expose opt-in phased protein HGVS with explicit result statuses and per-call
+  operation/text limits. Frame-closed protein operations retain source provenance
+  independently of physical coding-block grouping; complete phased annotation
+  and complete terminal-reference HGVS remain unfinished
+
+- exercise whole-protein contrast against curated references in 80 quota-controlled
+  native test cells, including zero DNA edits and frame-restoring paths
+
+- stress terminal peptide edits in 504 quota-controlled native test cells with
+  retained failures, complete protein replay and coverage counts on failed runs
+
+- fuzz ordered pairs of raw GT-pattern/ploidy classes across both strands and
+  twelve source-record geometries, with enforced coverage quotas, retained
+  compatibility disagreements and genotype-corruption controls
+
+- retain local substitution consequences in phased replay when surrounding
+  in-frame edits recreate the complete reference CDS. Unchanged final sequence
+  does not erase changed local spans or contributor provenance
+
+- exercise reference-restoring phased edits in 1,344 quota-controlled native
+  test cells, checking complete sequence replay and changed local coding spans
 
 - use the shared curated reference peptide for raw haplotypes without retained
   exon-overlapping genotypes. Intronic context retains provenance and does not

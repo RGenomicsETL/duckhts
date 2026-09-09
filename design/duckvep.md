@@ -680,6 +680,23 @@ sequence/translation extents without applying edits or translating again. Displa
 first-stop prefixes and curated reference proteins are not interchangeable with
 these complete raw peptide views. The model and worker buffers remain immutable
 while a consumer holds the context.
+The optional protein HGVS consumer builds frame-closed edit spans and merges
+normalized peptide operations that touch. Physical coding blocks remain intact:
+a codon-aligned deletion contributes no residue to the following alternate codon,
+even when the coding-block partition groups that deletion with a later edit.
+Predicted suffixes contain one complete supported operation set, without accession
+or source-identity reassignment. HGVS facts borrow a prepared reference protein
+independently of raw CDS translation and frame predicates. Reference preparation can
+change residues and length without inventing physical source edits; reference-only
+raw paths borrow the exact prepared reference. Protein ends compare through the
+alternate's first stop. A reference-only stop-marker loss supplies no extension, and
+insertions require reference flanks, including the prepared terminal stop when
+present. Interacting terminal operations retain that stop during peptide clipping.
+Unrepresentable ends, incomplete sequence and
+unsupported mechanics have NULL HGVS with an explicit status.
+Caller-selected operation/text
+capacities are included in the query workspace and cannot grow during execution.
+This consumer does not establish complete protein or DNA HGVS compatibility.
 The leaf's `stop_in_displaced_frame` fact intersects the first stop's three rebuilt
 CDS bases with physical frame excursions. An excursion starts at a frame-changing
 edit and ends after the restoring edit's alternate bases, or continues downstream
@@ -802,9 +819,27 @@ flags mean unavailable, and `phase_set` is nullable. Candidate selection and sou
 mapping remain explicit relations. Duplicate calls, inconsistent event/ALT geometry,
 changing sample/transcript ploidy, invalid GTs and out-of-model candidates fail.
 Evidence bits are 1 called, 2 missing and 4 unphased. Per-call capacities name active
-pools, leaves, sequences, genotypes and phase domains; `workspace_limit` sums native
-allocations, excluding DuckDB input/sort/output memory. Neither result order nor
+pools, leaves, sequences, genotypes and phase domains; `workspace_limit` sums
+DuckVEP-owned buffers, excluding DuckDB input/sort/output memory and HTSlib
+handle/transport storage. Neither result order nor
 carrier-list order is a SQL ordering guarantee.
+
+For a single ALT contributor, protein HGVS consumes the shared independent-event
+VEP-116 consequence and genomic-placement facts. Multiple MNV islands still belong
+to that one source allele. The completed haplotype CDS, protein, differences and
+provenance are separate outputs: an independent synonymous HGVS label need not
+describe the contrast against a curated reference protein. Missing genomic context
+required for placement returns `missing_reference`, not an unshifted substitute.
+Compound and reference-only paths retain their completed-path operation builder;
+neither route certifies complete phased HGVS.
+
+HGVS scratch is query-owned and allocated before execution. Each query opens its own
+mutable faidx handle. `max_hgvs_reference_bytes` bounds caller-buffer retrieval,
+including line-ending scratch; `max_sequence_bases`, `max_leaf_edits` and
+`max_allele_bytes` bound the sequence, edit and allele workspaces. The reference
+reader exposes separate VEP shift and complete-upload/duplication lookup views.
+Capacity failure is an error; a cache refill overwrites fixed storage only after
+invalidating the previous window. HTSlib transport allocations remain dependency-owned.
 
 For `input_mode := 'source_records'`, the required columns are:
 
@@ -934,14 +969,14 @@ DuckDB copies each list before the next axis resets those arrays. Limits apply
 separately to each axis. A reference CDS shorter than a complete codon has an
 unavailable protein comparison (NULL), not a known empty reference. Known equal
 proteins produce an empty list. The exact raw-suffix stop convention is recorded
-in [the compatibility errata](duckvep_errata.md#haplosaurus-reference-and-alternate-proteins-use-different-stop-rules).
+in [the compatibility errata](../ERRATA.md#haplosaurus-reference-and-alternate-proteins-use-different-stop-rules).
 The registry owns one valid retained query connection: its extension-load database handle
 must not be retained. Only preparation/materialization uses that connection. A busy slot
 returns an error, including recursive preparation, while completed scan results and native
 state have independent ownership. Caller TEMP objects/uncommitted writes are not visible.
 
 This public sequence-mechanics surface is not complete phased annotation. Local
-block masks and sequence/indel flags are not whole-haplotype SO or compound HGVS, and literal replay does not yet
+block masks and sequence/indel flags are not whole-haplotype SO or protein HGVS, and literal replay does not yet
 compose typed structural events. Existing executable Haplosaurus comparisons exercise
 native replay and the public SQL surface for their declared phased-sequence scope;
 they do not certify compound SO/HGVS. The
@@ -1023,6 +1058,29 @@ that identity for provenance and later HGVS while reproducing VEP's tandem-dupli
 gain/insertion predicates. Raw repeat units and counts remain columns in the surrounding
 relation; the consequence kernel consumes the prepared literal allele or exact structural
 span, not parser-specific INFO strings.
+
+Typed repeat preparation must distinguish exact sequence from repeat-summary evidence.
+[VCF 4.5 section 5.7](https://samtools.github.io/hts-specs/VCFv4.5.pdf) permits a
+`<CNV:TR>` summary to omit SNVs and indels present in the corresponding literal phased
+allele. Equal repeat units, counts, and lengths therefore do not establish sequence
+identity: `(CAG)11` and `(CAG)5(CAT)(CAG)5` can share summary metadata but encode different
+proteins. Sequence replay consumes the explicit literal allele or a caller-qualified exact
+repeat description, not a summary silently promoted to an exact sequence. VEP-derived
+expansion is a named compatibility interpretation, not evidence that the sample has a
+perfect repeat. The preparation contract must retain ordered repeat components, source ALT
+ordinals, nullable counts and lengths, confidence intervals, and exactness separately;
+`RUC` is a floating-point field and must not be silently narrowed to an integer count.
+
+`duckvep_repeat_sequence` prepares an exact ordered list of `(unit, count)` components
+in SQL; reference and alternate descriptions use the same operation. A required
+`sequence_exact` assertion separates exact descriptions from summaries. Missing data and
+fractional counts withhold the sequence with an explicit status. Complete integral counts
+expand only after the sum of all component lengths fits `max_sequence_bases`. This limit
+belongs to the SQL call, not to VEP's per-component parser limit. Empty lists describe an
+empty allele; a missing list means unavailable sequence. Input component order, case and
+IUPAC codes are preserved. The caller still supplies reference validation, genomic
+coordinates and source identity before annotation; summary data cannot enter sequence
+replay merely because its nominal counts happen to be integers.
 
 The paired-breakend native lane accepts the local and mate regions and raw one-based VCF
 positions from that same public event row. It queries the resident cgranges transcript and

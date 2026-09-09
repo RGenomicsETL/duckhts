@@ -4441,12 +4441,6 @@ static duckvep_context_delta_status_t delta_context_substitution_predicates(
 
     overlaps_start = view.ref_peptide_offset == 0u && view.alt_peptide_offset == 0u &&
         (tx_flags & (uint64_t)DUCKVEP_TX_CDS_START_NF) == 0u;
-    /* Physical REF/ALT can differ while the VEP feature-phase edit leaves
-     * the selected CDS bytes unchanged. Its uploaded peptide window still
-     * reaches the synonymous and retained-start/stop predicates. */
-    if (ctx->cds_changed == 0u && !uploaded_feature_window) {
-        return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
-    }
     if (overlaps_start) {
         if (uploaded_feature_window) {
             char b0 = delta_context_cds_base(ctx, 1, 0u);
@@ -4538,6 +4532,11 @@ static duckvep_context_delta_status_t delta_context_substitution_window(
     if (delta == NULL) return DUCKVEP_CONTEXT_DELTA_INVALID_ARG;
     memset(delta, 0, sizeof *delta);
     if (ctx == NULL) return DUCKVEP_CONTEXT_DELTA_INVALID_ARG;
+    /* Whole-CDS equality is meaningful for an independent edit. A phased
+     * block instead validates its own REF/ALT spans on their separate axes:
+     * other indels can restore the complete CDS without erasing this change. */
+    if (ctx->cds_changed == 0u && window == DELTA_SUBSTITUTION_EDIT_WINDOW)
+        return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
     if (ctx->ref_cds_len != ctx->alt_cds_len ||
         ctx->ref_peptide_len != ctx->alt_peptide_len ||
         hi_codon < lo_codon || hi_codon >= (size_t)INT32_MAX ||

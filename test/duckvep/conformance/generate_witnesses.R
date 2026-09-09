@@ -339,7 +339,7 @@ if (!is.na(cds_lo) && strand == "+") {
   }
 }
 
-# Pin the VEP-116 peptide-view asymmetry recorded in design/duckvep_errata.md.
+# Pin the VEP-116 peptide-view asymmetry recorded in ERRATA.md.
 # These coordinates belong to the minimal conformance transcript. Keep both sides:
 # the stop-only witness prevents whole-protein diffing, while the positive control
 # prevents a blanket suppression of in-frame insertion whenever a stop is gained.

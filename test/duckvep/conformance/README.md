@@ -167,7 +167,7 @@ The upstream suites exercise core topology, start/stop, frameshift/in-frame,
 incomplete-codon, mature-miRNA, frameshift-intron, selected HGVS shift,
 regulatory/motif, structural-parser, mitochondrial-codon, and one small phased-SNV
 case. They do not exhaust the named VEP-116 compatibility rules in
-`design/duckvep_errata.md`, the 1,000-base shift cap, the full BND/SV predicate
+`ERRATA.md`, the 1,000-base shift cap, the full BND/SV predicate
 matrix, long/pangenome alleles, or phased indel/MNV edit sets. Keep three separate
 receipts: the pinned upstream self-test, extracted upstream semantic fixtures, and
 the DuckVEP fixed/property/statistical/corpus conformance campaign.
@@ -194,6 +194,89 @@ Once a rare state is discovered, its generator receives a dedicated stratum inst
 depending on its accidental probability under a broad distribution. The terminal missing-
 tail, terminal-duplication, and non-stop terminal-codon strata follow this rule; the
 coverage manifest or direct property assertion makes their absence a failed run.
+
+The native phased-protein campaign checks complete CDS replay, independent translation
+and application of the typed protein operations. Its in-frame generator varies two to
+five edits in a 36-base CDS. A separate reference-restoration stratum covers 1,344 cells:
+seven coding locations, twelve distinct codon pairs, two transcript strands and all eight
+orientations of three physical alleles. Every cell receives at least
+`floor(DUCKVEP_PROP_TRIALS / 1344)` cases with seeded flanking sequence. These cases must
+preserve changed local coding spans even when the complete CDS is unchanged. These two
+generators use standard-table Ala/Gly/Asp/Pro body codons and intact start/stop codons.
+A separate restored-frame generator samples twelve-base spans, conditioned on stop-free
+reference/alternate translation with at least two differing runs separated by an unchanged
+residue. It reports accepted cases, all proposals and rejected proposals separately;
+every accepted case must split its protein operations and reproduce the complete protein.
+The operations retain shared physical-edit provenance. A curated-reference stratum
+requires draws in 80 cells: ten peptide-edit positions × two strands × four routes
+(no DNA edits, ordinary in-frame edits, complete CDS restoration and frame restoration).
+The reference has a single `U` peptide edit; the alternate is translated from literal
+CDS replay. Every result must reconstruct that complete alternate protein from the
+curated reference. Protein-only differences carry no invented physical source edit.
+Every curated-reference draw also compares a borrowed prepared-protein operand
+with the sparse model-edit view, checking complete replay, HGVS text, physical
+spans and coding-context immutability. This paired check retains the original
+case denominator; `prepared_views` counts the additional operand comparisons.
+A terminal-reference property requires draws in 504 cells: three raw terminal
+stop codons × 21 curated replacement residues × two strands × four edit routes.
+The routes are no DNA edits, ordinary in-frame changes, complete CDS restoration
+and frame restoration. Reference preparation adds a terminal marker after the
+curated residue; the property checks complete edit replay and then compares both
+displayed first-stop prefixes. Source spans and context immutability remain checked.
+Generated/evaluated cases, passing cases and per-cell coverage are reported even
+when a trial fails. A fixed cancellation witness retains a physical insertion
+with equal prepared/alternate proteins; its repeat-deletion control must still
+produce a deletion. Both strands and malformed physical-block rejection are checked.
+This is sequence-mechanics evidence, not complete executable-VEP HGVS conformance.
+The conditional frame-restoration route retains its proposal/rejection counts.
+A separate terminal-repeat campaign targets `XY` motif insertion with a terminal
+`X` reference peptide edit. Its 4,800 cells cross all twenty-by-twenty standard
+amino-acid pairs, three stop codons, two transcript strands and two source-allele
+strands. Seeded draws vary motif copy count, insertion placement and flanking
+sequence. These stop-free bodies require exact complete-protein replay before any
+first-stop display rule, so an inserted extra stop cannot be hidden by truncation.
+All cells and failures are retained; this cohort has no conditional rejection.
+The finite shifted-frame matrix crosses all 4,096 adjacent codon pairs, four
+insertion positions, four inserted bases, a preceding in-frame insertion or deletion,
+and both allele orientations: 262,144 cases. Each case also retains a left anchor
+and a right anchor in both source replacements, yielding 524,288 equivalent-CDS
+comparisons. Each anchored operation is also compared with its own isolated source
+edit: complete HGVS text, shape, reference positions and termination distance must
+agree. Sequence replay remains identical across equivalent source anchors. The matrix
+counts 3,072 anchor-dependent presentation differences; none bypasses the per-record
+operation checks. [The errata](../../../ERRATA.md#equivalent-dna-anchors-can-produce-contradictory-vep-116-protein-descriptions)
+separates that pinned-VEP contract from HGVS nomenclature correctness.
+These campaigns do not certify
+complete HGVS nomenclature or executable-VEP compatibility. The all-property runner
+retains its full denominator and the same failure controls.
+
+The source-record HGVS differential invokes unmodified pinned VEP 116 at buffer sizes
+1 and 5,000. Its complete matrix crosses three stop codons, all 64 following codons,
+two transcript strands, four insertion positions, four inserted bases and both
+retained-anchor forms: 384 models and 12,288 physical records. Literal right-retained
+replacements remain unnormalized parser inputs. Both decoded strict calls and raw
+`1|1` calls run at one and four DuckDB threads. Each query contains one source per
+transcript, so raw-file duplicate retention cannot change the independent-record
+comparison. Every input record participates in every route/thread configuration.
+The same indexed FASTA and model also pass through `duckvep_annotate` as an independent-
+event control, with a separate complete HGVSp comparison and retained output table.
+
+```bash
+Rscript test/duckvep/conformance/hgvs_anchor_differential.R --tail-codons 1
+Rscript test/duckvep/conformance/hgvs_anchor_differential.R --tail-codons 64
+```
+
+`VEP_PREFIX` or `--vep-prefix` names the VEP environment. The smaller command keeps
+all six stop/strand combinations and 192 records. Complete oracle VCFs, generated
+models and records, nested native outputs, per-record comparisons and source hashes
+are retained in a unique results directory. VCF percent escapes are decoded and the
+prediction parentheses are removed only for string comparison; absent HGVSp remains
+absent. The comparison routine must reject dropped records, duplicate IDs, changed
+strings, missing HGVSp and invented HGVSp. Complete native outputs must agree between
+thread counts. CDS replay and per-record HGVSp have independent verdicts. These
+diagnostic runs fail on any HGVSp disagreement, including cases where VEP emits no
+string. A passing terminal-anchor matrix does not certify compound or complete phased
+HGVS, and these diagnostic runs do not enter release history.
 
 The independent executable differential with seed `20260716` wrote 100,268 variants (268
 fixed witnesses plus 100,000 generated alleles) and matched all 100,268 VEP-116 transcript
@@ -386,6 +469,35 @@ The pinned VEP 116 run emitted 466 transcript pairs. All 466 DuckVEP pairs were 
 and the nominal/imprecise consequence multisets matched for all six event-kind pairs in
 both engines. The sampled oracle VCF retains `IMPRECISE`, `CIPOS`, and `CIEND`; this is a
 nominal-coordinate consequence test, not evidence that the uncertainty interval is exact.
+
+The exact repeat preparer has a seeded SQL differential against base R's ordered
+string repetition. Run from the repository root:
+
+```sh
+Rscript test/duckvep/conformance/repeat_sequence_differential.R --trials 100000 --seed 173
+Rscript test/duckvep/conformance/repeat_sequence_differential.R --trials 100000 --seed 20260906
+```
+
+Seven required strata exercise exact multi-component sequences, summary-only evidence,
+missing counts, missing units, fractional counts, empty sequences and unavailable component
+lists. The run retains all input components and complete expected/observed rows in Parquet,
+checks 32 generated capacity failures with recovery when enough exact scenes are available,
+and rejects dropped rows, duplicate identities, changed sequence and changed status.
+Receipts bind the seed, R RNG, extension bytes and source snapshots. These diagnostic runs
+do not enter release history or claim VEP raw-STR parsing or biological population coverage.
+SQL/R regressions separately compose exact pure and interrupted repeats through annotation
+and haplotype inputs; summary metadata is not an exact-sequence oracle.
+
+The native `breakend_parser_rejects_mutated_components` property generates a name,
+replacement and 64-bit mate coordinate, then exercises 72 fault/form cells for each
+draw: sixteen faults in each paired form and four in each single-breakend form.
+Every unmodified form must parse correctly. Mutations target non-DNA replacement
+bytes, embedded NUL, extra/missing/mismatched brackets, malformed mate names,
+empty or nondecimal coordinates and UBIGINT overflow. Exact-length unterminated
+buffers, unchanged input bytes, zeroed error output, output canaries and valid-record
+recovery are checked. Coverage reports all attempted and passing mutations plus the
+minimum draws per cell, including on failed runs. The 72 mutations share one generated
+scene; they are not independent biological samples or evidence for fusion reconstruction.
 
 Paired BNDs have their own generated mode because one event has two loci and cannot be
 represented as one structural span. It crosses same- and cross-chromosome endpoint pairs
@@ -647,10 +759,24 @@ lanes are occupied. Full REF spans, equal-position file order, retained MNV base
 insertions/deletions and known REF slots are part of the input, not normalized away.
 Haplosaurus receives the exact VCF/GFF/FASTA; bcftools validates every REF first.
 The public raw-record executor consumes the matching source relation. Full
-CDS/protein multisets, carrier counts and physical-edit source provenance are
-compared with no excluded disagreements. Counts distinguish unavailable paths
-from sequence differences where every path is available. Four corruptions guard
-the comparator; disjoint and adjacent records are positive controls.
+CDS/protein multisets, carrier counts and applied-source identity sets are compared
+with no excluded disagreements. The construction-time observer also captures both
+sample/file lanes before upstream sequence grouping. Each lane's complete CDS,
+protein and applied-source allele/record identity set is compared through the
+shared lane comparator. These source sets do not certify physical-edit multiplicity.
+Counts distinguish unavailable paths from sequence differences where every path
+is available. Four corruptions guard the grouped comparator; eleven additional
+controls guard lane identity and content, including a lane swap that leaves grouped
+results unchanged. The multi-sample campaign retains its twelfth shared-source
+control. Both campaigns check the complete native transcript domain, positive
+carrier counts and exact list lengths before grouping output. Eight shared
+controls reject extra/NULL transcript rows, zero-carrier rows, missing transcripts,
+wrong/missing counts, duplicate transcript domains and total-count mismatches.
+Disjoint and adjacent records are positive controls.
+`summary.csv` retains the grouped `equal` verdict and separately reports
+`replay_lanes_equal` and `counts_equal`; `all_equal` requires all three. Receipts
+retain every complete observation. A passing grouped comparison cannot hide
+a failed lane or total-count comparison.
 
 ```sh
 Rscript test/duckvep/conformance/haplotype_record_differential.R --seed 173 --random-cases 512
@@ -676,6 +802,29 @@ Rscript test/duckvep/conformance/haplotype_record_differential.R --seed 20260906
 Each command includes the 144 fixed and 512 general-random cases: 36,752 profiles,
 110,256 source records and 73,504 file lanes. Quotas establish cross-product
 coverage, not exhaustive sequence coverage or independent biological observations.
+
+`--pair-per-stratum` generates ordered pairs from all 47 eligible GT-pattern/ploidy
+classes on both strands: 4,418 cells. Each record independently draws its callable
+allele slots from its declared class. Geometry cycles through all twelve shapes,
+so twelve draws per cell cover every geometry once. Source ploidy may change
+between records; the homozygous anchor occupies both Haplosaurus file lanes.
+Positions, lengths and replacement bases are seeded. The existing fixed, random,
+same-class and source-context cohorts keep their seed stream and precede this cohort.
+
+```sh
+Rscript test/duckvep/conformance/haplotype_record_differential.R --seed 173 --pair-per-stratum 12
+Rscript test/duckvep/conformance/haplotype_record_differential.R --seed 20260906 --pair-per-stratum 12
+```
+
+Each command has 53,016 paired profiles plus 656 fixed/general-random profiles:
+161,016 source records and 107,344 file lanes. `pair_coverage.csv` and
+`pair_geometry_coverage.csv` require the complete declared cross-product; input
+checks verify both records' ploidy, separators and missing-slot placement. Five
+GT corruptions supplement the four sequence/count/provenance controls. Complete
+disagreements remain failures, including disjoint pairs with differing GT classes.
+The 65,536-profile limit applies to the sum of all enabled cohorts. This finite
+grammar does not establish arbitrary-ploidy output compatibility or population
+error rates; every cell still has a much larger unsampled sequence space.
 
 `--context-per-stratum` appends paired source-context trials. Identical edit
 geometry, alleles and GTs are replayed with `0|0` records before, between or after

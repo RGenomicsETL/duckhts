@@ -5,6 +5,7 @@
 #include "duckdb_extension.h"
 #include "cgranges.h"
 #include "kernel/include/duckvep_kernel.h"
+#include "duckvep_reference.h"
 
 #include <htslib/faidx.h>
 
@@ -106,11 +107,7 @@ typedef struct duckvep_workspace_cache {
 	duckvep_workspace_t *workspace;
 	/* faidx_t carries mutable seek/decompression state and therefore belongs
 	 * to one checked-out worker cache, never the shared immutable model. */
-	faidx_t *reference_fai;
-	char *reference_bases;
-	size_t reference_length;
-	uint32_t reference_start1;
-	uint16_t reference_chrom_id;
+	duckvep_reference_reader_t reference;
 	struct duckvep_workspace_cache *next;
 } duckvep_workspace_cache_t;
 

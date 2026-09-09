@@ -2008,9 +2008,9 @@ duckvep_workspace_cache_destroy(duckvep_workspace_cache_t *cache)
 {
 	if (cache == NULL)
 		return;
-	if (cache->reference_fai != NULL)
-		fai_destroy(cache->reference_fai);
-	free(cache->reference_bases);
+	if (cache->reference.fai != NULL)
+		fai_destroy(cache->reference.fai);
+	free(cache->reference.bases);
 	duckvep_workspace_close(cache->workspace);
 	free(cache);
 }

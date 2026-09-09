@@ -1892,9 +1892,10 @@ static DUCKVEP_HOT_ALIGN int annotate_pair(
     } else if (kind != DUCKVEP_KIND_SV && have_feature_alleles) {
         int sorted_span = c->span_sorted_safe &&
             c->model->point_ordered[tx_idx];
-        uint16_t sorted_rank = c->workspace->span_exon_rank[tx_idx];
-        uint16_t *rank_io = event->interbase
-            ? &sorted_rank : &c->workspace->span_exon_rank[tx_idx];
+        uint16_t sorted_rank = sorted_span
+            ? c->workspace->span_exon_rank[tx_idx] : UINT16_MAX;
+        uint16_t *rank_io = sorted_span && !event->interbase
+            ? &c->workspace->span_exon_rank[tx_idx] : &sorted_rank;
         duckvep_region_state_t region = sorted_span
             ? duckvep_region_classify_span_sorted(
                 tx, &c->model->exons, (size_t)tx_idx,
@@ -2320,7 +2321,7 @@ static int allele_shape_matches_kind(uint8_t        kind,
                                      const uint8_t *alt,
                                      uint16_t       alt_len,
                                      duckvep_event_t *event_out) {
-    duckvep_event_t event;
+    duckvep_event_t event = {0};
 
     if (!duckvep_event_prepare_small(pos1, ref, ref_len, alt, alt_len, &event) ||
         event.raw_end1 != end1 || event.kind != kind) {
@@ -2584,6 +2585,44 @@ static duckvep_status_t validate_result_builder_for_append(
     if (results->count > results->capacity) {
         return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_RESULT_COUNT,
                     "result builder count exceeds capacity");
+    }
+    return DUCKVEP_OK;
+}
+
+DUCKVEP_INTERNAL_API duckvep_status_t duckvep_annotate_pair_observed(
+    const duckvep_model_t *model, const duckvep_variant_batch_t *variants,
+    uint32_t transcript_index, duckvep_delta_scratch_t *scratch,
+    duckvep_annotation_observer_fn observer, void *observer_context,
+    duckvep_error_t *error) {
+    if (!model || !variants || variants->count != 1u ||
+        transcript_index >= model->transcripts.transcript_count || !scratch || !observer) {
+        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_PAIR_COLUMNS,
+            "observed pair requires one variant, a model transcript, scratch and an observer");
+    }
+    const struct duckvep_options options = {
+        .splice_region_exonic = DUCKVEP_DEFAULT_SPLICE_REGION_EXONIC,
+        .splice_region_intronic = DUCKVEP_DEFAULT_SPLICE_REGION_INTRONIC,
+        .compatibility_profile = DUCKVEP_COMPAT_VEP_116
+    };
+    struct duckvep_workspace workspace = {.model = model, .force_generalized_annotation = 1};
+    duckvep_event_t event;
+    duckvep_status_t status = validate_common_annotate_args(
+        model, variants, &options, &workspace, &event, 0, error);
+    if (status != DUCKVEP_OK) return status;
+    if (event.kind == DUCKVEP_KIND_SV ||
+        event.chrom_id != model->transcripts.chrom_id[transcript_index]) {
+        return fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_ANN_PAIR_ORDER,
+            "observed pair requires a literal allele on the transcript's sequence region");
+    }
+    duckvep_consequence_t row;
+    duckvep_result_builder_t result;
+    duckvep_result_builder_init(&result, &row, 1u);
+    struct annotate_ctx ctx = {.model = model, .variants = variants, .events = &event,
+        .options = &options, .workspace = &workspace, .delta_scratch = scratch,
+        .results = &result, .observer = observer, .observer_context = observer_context,
+        .status = DUCKVEP_OK, .prepared_variant_idx = UINT32_MAX};
+    if (!annotate_pair(0u, transcript_index, &ctx)) {
+        return fail(error, ctx.status, DVW_ANN_PAIR_ORDER, "observed pair annotation failed");
     }
     return DUCKVEP_OK;
 }

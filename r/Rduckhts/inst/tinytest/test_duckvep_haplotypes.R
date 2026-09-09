@@ -3,6 +3,143 @@ library(DBI)
 
 local({
   con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  tx <- paste("SELECT 0::UINTEGER transcript_index,0::UINTEGER seq_region,",
+    "11::UBIGINT transcript_start,45::UBIGINT transcript_end,1::TINYINT strand,",
+    "0::UINTEGER gene_index,3::UBIGINT transcript_flags,11::UBIGINT cds_start,",
+    "22::UBIGINT cds_end,'ATGGGTCCTTAA'::BLOB cds_sequence,1::UTINYINT codon_table,",
+    "''::BLOB pre_cds_sequence,'AAAGAACAATAATAACTAGCTGA'::BLOB post_cds_sequence")
+  ex <- paste("SELECT 0::UINTEGER transcript_index,11::UBIGINT exon_start,45::UBIGINT exon_end,",
+    "1::UBIGINT exon_cdna_start,35::UBIGINT exon_cdna_end,0::TINYINT phase,0::TINYINT end_phase")
+  regions <- "SELECT 0::UINTEGER seq_region,55::UBIGINT sequence_length,'chrA1'::VARCHAR seq_region_name"
+  reference <- system.file("extdata", "duckvep_hgvs_anchor.fa", package = "Rduckhts")
+  expect_true(nzchar(reference))
+  expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('anchor',",
+    dbQuoteString(con, regions), ",", dbQuoteString(con, tx), ",",
+    dbQuoteString(con, ex), ",reference_fasta:=", dbQuoteString(con, reference), ")"))$loaded)
+  calls <- paste("SELECT event_index,0 seq_region,position,reference,alternate,1 alt_index,",
+    "0 transcript_index,event_index-1 sample_index,[1,1] alleles,",
+    "[true,true] phase_before,NULL::BIGINT phase_set FROM",
+    "(VALUES (1,19,'T','TT'),(2,20,'T','TT'),(3,20,'T','TT'),(4,21,'A','TA'))",
+    "v(event_index,position,reference,alternate)")
+  inputs <- dbGetQuery(con, calls)
+  # These are per-record executable VEP-116 suffixes, not HGVS-rule corrections.
+  expected <- c("p.(Ter4LeufsTer9)", rep("p.(Ter4delinsLeuTer)", 3L))
+  baseline <- list()
+  for (threads in c(1L, 4L)) for (route in c("strict", "vep116_compat", "source_records")) {
+    dbExecute(con, paste("SET threads =", threads))
+    raw <- route == "source_records"
+    query <- if (raw) paste("SELECT event_index,seq_region,position,reference,",
+      "[alternate] alternates,transcript_index,sample_index,'1|1' gt FROM (", calls, ")") else calls
+    # Independent record comparisons must not trigger raw-file duplicate retention.
+    queries <- if (raw) paste("SELECT * FROM (", query, ") WHERE event_index=", 1:4) else query
+    result <- do.call(rbind, lapply(queries, function(sql) rduckhts_haplotypes(con, sql, "anchor",
+      phase_policy = if (raw) "vep116_compat" else route,
+      input_mode = if (raw) "source_records" else "alt_events", hgvs = TRUE)))
+    expect_equal(nrow(result), 4L)
+    ids <- vapply(result$contributors, function(x) x$event_index, 0)
+    expect_equal(sort(ids), 1:4)
+    result <- result[order(ids), ]
+    rownames(result) <- NULL
+    expect_identical(result$hgvsp, expected)
+    expect_true(all(result$hgvsp_status == "ok"))
+    expect_true(all(result$cds == "ATGGGTCCTTTAA" & result$protein == "MGPL"))
+    expect_true(all(result$carrier_count == 2L))
+    for (i in 1:4) {
+      expect_equal(nrow(result$contributors[[i]]), 1L)
+      expect_equal(result$contributors[[i]]$position, inputs$position[i])
+      expect_identical(result$contributors[[i]]$reference, inputs$reference[i])
+      expect_identical(result$contributors[[i]]$alternate, inputs$alternate[i])
+      expect_equal(result$carriers[[i]]$sample_index, rep(i-1L, 2L))
+    }
+    if (is.null(baseline[[route]])) baseline[[route]] <- result else
+      expect_identical(result, baseline[[route]])
+  }
+  expect_error(rduckhts_haplotypes(con, calls, "anchor", hgvs = TRUE,
+    max_hgvs_reference_bytes = 56), pattern = "reference workspace bytes=56, required=57")
+  bounded <- rduckhts_haplotypes(con, calls, "anchor", hgvs = TRUE, max_hgvs_reference_bytes = 57)
+  expect_equal(sum(!is.na(bounded$hgvsp)), 4L)
+  disabled <- rduckhts_haplotypes(con, calls, "anchor", hgvs = FALSE, max_hgvs_reference_bytes = 1)
+  expect_true(all(is.na(disabled$hgvsp) & disabled$hgvsp_status == "not_requested"))
+})
+
+local({
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  tx <- paste("SELECT 0::UINTEGER transcript_index,0::UINTEGER seq_region,",
+    "101::UBIGINT transcript_start,136::UBIGINT transcript_end,1::TINYINT strand,",
+    "0::UINTEGER gene_index,3::UBIGINT transcript_flags,101::UBIGINT cds_start,",
+    "136::UBIGINT cds_end,('ATG'||repeat('CAG',10)||'TAA')::BLOB cds_sequence,",
+    "1::UTINYINT codon_table,''::BLOB pre_cds_sequence,''::BLOB post_cds_sequence")
+  ex <- paste("SELECT 0::UINTEGER transcript_index,101::UBIGINT exon_start,",
+    "136::UBIGINT exon_end,1::UBIGINT exon_cdna_start,36::UBIGINT exon_cdna_end,",
+    "0::TINYINT phase,0::TINYINT end_phase")
+  reference <- system.file("extdata", "duckvep_repeat.fa", package = "Rduckhts")
+  expect_true(nzchar(reference))
+  regions <- "SELECT 0::UINTEGER seq_region,236::UBIGINT sequence_length,'chr1'::VARCHAR seq_region_name"
+  expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('repeat',",
+    dbQuoteString(con, regions), ",", dbQuoteString(con, tx), ",",
+    dbQuoteString(con, ex), ",reference_fasta:=", dbQuoteString(con, reference), ")"))$loaded)
+  # A VCF repeat summary may omit interruptions. Literal alleles determine replay.
+  calls <- paste("SELECT event_index,0 seq_region,103 AS position,",
+    "'G'||repeat('CAG',10) AS reference,'G'||sequence AS alternate,1 alt_index,",
+    "0 transcript_index,event_index-1 sample_index,[1,1] alleles,[true,true] phase_before,",
+    "NULL::BIGINT phase_set,'CAG' repeat_unit,11 repeat_count FROM",
+    "(VALUES (1,repeat('CAG',11)),(2,repeat('CAG',5)||'CAT'||repeat('CAG',5)))",
+    "r(event_index,sequence)")
+  exact <- dbGetQuery(con, calls)
+  prepared <- paste("SELECT * REPLACE('G'||(duckvep_repeat_sequence(",
+    "[{unit:'CAG',count:10}],true)).sequence AS reference,",
+    "'G'||(duckvep_repeat_sequence(CASE event_index WHEN 1 THEN [{unit:'CAG',count:11}]",
+    "ELSE [{unit:'CAG',count:5},{unit:'CAT',count:1},{unit:'CAG',count:5}] END,true,",
+    "max_sequence_bases:=33)).sequence AS alternate) FROM (", calls, ")")
+  expect_identical(dbGetQuery(con, prepared), exact)
+  annotations <- lapply(list(literal = calls, prepared = prepared), function(query) {
+    dbExecute(con, paste("CREATE OR REPLACE TABLE repeat_events AS SELECT event_index,",
+      "seq_region,position,reference,alternate,NULL::UBIGINT end_position,",
+      "NULL::VARCHAR structural_type,NULL::VARCHAR copy_change,NULL::UINTEGER mate_seq_region,",
+      "NULL::UBIGINT mate_position FROM (", query, ")"))
+    dbGetQuery(con, paste("SELECT * FROM duckvep_annotate('repeat_events','repeat',",
+      "hgvs:=true,upstream_distance:=0,downstream_distance:=0) ORDER BY event_index"))
+  })
+  expect_equal(nrow(annotations$prepared), 2L)
+  expect_identical(annotations$prepared, annotations$literal)
+  expect_true(all(!is.na(annotations$prepared$protein_hgvs)))
+  for (threads in c(1L, 4L)) for (mode in c("alt_events", "source_records")) {
+    dbExecute(con, paste("SET threads =", threads))
+    query <- if (mode == "alt_events") calls else paste(
+      "SELECT event_index,seq_region,position,reference,[alternate] alternates,",
+      "transcript_index,sample_index,'1|1' gt FROM (", calls, ")")
+    result <- rduckhts_haplotypes(con, query, "repeat",
+      phase_policy = if (mode == "alt_events") "strict" else "vep116_compat",
+      input_mode = mode, hgvs = TRUE)
+    expect_equal(nrow(result), 2L)
+    result <- result[order(vapply(result$contributors, function(x) x$event_index, 0)), ]
+    prepared_query <- if (mode == "alt_events") prepared else paste(
+      "SELECT event_index,seq_region,position,reference,[alternate] alternates,",
+      "transcript_index,sample_index,'1|1' gt FROM (", prepared, ")")
+    expanded <- rduckhts_haplotypes(con, prepared_query, "repeat",
+      phase_policy = if (mode == "alt_events") "strict" else "vep116_compat",
+      input_mode = mode, hgvs = TRUE)
+    expanded <- expanded[order(vapply(expanded$contributors, function(x) x$event_index, 0)), ]
+    rownames(expanded) <- rownames(result) <- NULL
+    expect_identical(expanded, result)
+    expect_identical(result$protein, c("MQQQQQQQQQQQ*", "MQQQQQHQQQQQ*"))
+    expect_identical(result$hgvsp, c("p.(Gln11dup)", "p.(Gln6_Gln7insHis)"))
+    expect_identical(result$hgvsp_status, c("ok", "ok"))
+    expect_equal(result$carrier_count, c(2L, 2L))
+    expect_identical(result$cds, paste0("AT", exact$alternate, "TAA"))
+    for (i in 1:2) {
+      expect_equal(result$contributors[[i]]$event_index, i)
+      expect_identical(result$contributors[[i]]$reference, exact$reference[i])
+      expect_identical(result$contributors[[i]]$alternate, exact$alternate[i])
+      expect_equal(result$carriers[[i]]$sample_index, rep(i - 1L, 2L))
+    }
+  }
+})
+
+local({
+  con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
   tx <- paste("SELECT 0::UINTEGER transcript_index, 0::UINTEGER seq_region,",
     "100::UBIGINT transcript_start,111::UBIGINT transcript_end,1::TINYINT strand,",
@@ -22,6 +159,9 @@ local({
     "(VALUES (1,100,'C',[1,1],NULL),(2,101,'G',[1,0],10),(3,102,'C',[0,1],20))",
     "v(event_index,position,alternate,alleles,phase_set)")
   actual <- rduckhts_haplotypes(con, calls, "haps")
+  expect_true(all(is.na(actual$hgvsp) & actual$hgvsp_status == "not_requested"))
+  for (invalid in list(NA, 1, "true", logical()))
+    expect_error(rduckhts_haplotypes(con, calls, "haps", hgvs = invalid), pattern = "hgvs must")
   overlapping <- paste("SELECT event_index,0 seq_region,position,reference,alternates,",
     "0 transcript_index,0 sample_index,gt FROM",
     "(VALUES (1,100,'AAA',['CAA'],'0|1'),(2,101,'A',['G'],'1|1'))",
@@ -41,11 +181,12 @@ local({
     expect_equal(composed$contributors[[i]]$evidence_flags, c(1L, 1L))
   }
   uncertain <- rduckhts_haplotypes(con, sub("0|1", ".|.", overlapping, fixed = TRUE),
-    "haps", "vep116_compat", input_mode = "source_records")
+    "haps", "vep116_compat", input_mode = "source_records", hgvs = TRUE)
   expect_equal(uncertain$cds, "AGAAAAAAAAAA")
   expect_equal(uncertain$sequence_status, "conditional")
   expect_equal(uncertain$edit_count, 1)
   expect_equal(uncertain$carrier_count, 2L)
+  expect_true(all(is.na(uncertain$hgvsp) & uncertain$hgvsp_status == "incomplete_input"))
   expect_error(rduckhts_haplotypes(con, overlapping, "haps", "vep116_compat",
     input_mode = "source_records", max_leaf_edits = 1), pattern = "max_leaf_edits")
   tied <- paste("SELECT event_index,0 seq_region,position,'A' AS reference,alternates,",
@@ -355,6 +496,48 @@ local({
     expect_equal(blocks$local_consequence_mask, synonymous_mask)
     expect_identical(blocks$after_first_stop, FALSE)
   }
+  restore_tx <- paste("SELECT i::UINTEGER transcript_index,0::UINTEGER seq_region,",
+    "(100+100*i)::UBIGINT transcript_start,(135+100*i)::UBIGINT transcript_end,",
+    "(1-2*i)::TINYINT strand,0::UINTEGER gene_index,3::UBIGINT transcript_flags,",
+    "transcript_start cds_start,transcript_end cds_end,",
+    "'ATGGGTGGTGCTGATGATGCTGATGCTGATGGTTAA'::BLOB cds_sequence,1::UTINYINT codon_table",
+    "FROM range(2) r(i)")
+  restore_exons <- paste("SELECT transcript_index,transcript_start exon_start,",
+    "transcript_end exon_end,1::UBIGINT exon_cdna_start,36::UBIGINT exon_cdna_end,",
+    "0::TINYINT phase,0::TINYINT end_phase FROM (", restore_tx, ")")
+  expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('restore',",
+    dbQuoteString(con, "SELECT 0::UINTEGER seq_region"), ",",
+    dbQuoteString(con, restore_tx), ",", dbQuoteString(con, restore_exons), ")"))$loaded)
+  restore_calls <- paste("SELECT event_index,0 seq_region,position,reference,alternate,",
+    "1 alt_index,transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set",
+    "FROM (VALUES (1,0,102,'GGGT','G'),(2,0,109,'GCT','GGT'),(3,0,111,'T','TGCT'),",
+    "(11,1,229,'CACC','C'),(12,1,224,'AGC','ACC'),(13,1,223,'C','CAGC'))",
+    "v(event_index,transcript_index,position,reference,alternate) ORDER BY position DESC")
+  for (policy in c("strict", "vep116_compat")) {
+    result <- rduckhts_haplotypes(con, restore_calls, "restore", policy, max_leaf_edits = 3)
+    expect_equal(nrow(result), 2L)
+    expect_equal(result$cds, rep("ATGGGTGGTGCTGATGATGCTGATGCTGATGGTTAA", 2L))
+    expect_equal(result$protein, rep("MGGADDADADG*", 2L))
+    expect_equal(result$edit_count, c(3, 3))
+    expect_equal(result$sequence_flags, c(1L, 1L))
+    expect_true(all(!result$stop_in_displaced_frame))
+    for (i in seq_len(nrow(result))) {
+      blocks <- result$coding_blocks[[i]]
+      expect_equal(blocks$cds_start, c(4, 11, 13))
+      expect_equal(blocks$coding_status, rep("ok", 3L))
+      expect_equal(blocks$local_consequence_mask[2], missense_mask)
+      expected_events <- 10 * result$transcript_index[i] + 1:3
+      expect_equal(unlist(blocks$event_indices), expected_events)
+      expect_equal(sort(result$contributors[[i]]$event_index), expected_events)
+      expect_equal(nrow(result$cds_differences[[i]]), 0L)
+      expect_equal(nrow(result$protein_differences[[i]]), 0L)
+    }
+  }
+  expect_error(rduckhts_haplotypes(con, restore_calls, "restore", max_leaf_edits = 2),
+    pattern = "max_leaf_edits")
+  # Finalize R-owned failed statements before checking model release.
+  gc()
+  expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('restore') dropped")$dropped)
   reverse_tx <- paste("SELECT * REPLACE(1::UINTEGER AS transcript_index,-1::TINYINT AS strand,",
     "'TTTTTTTTTTTT'::BLOB AS cds_sequence) FROM (", tx, ")")
   reverse_exons <- paste("SELECT * REPLACE(1::UINTEGER AS transcript_index) FROM (", exons, ")")
@@ -510,7 +693,32 @@ local({
     expect_equal(differences$ref_start0, c(0, 1, 2, 2, 3, 3, 0, 2))
     expect_equal(differences$alignment_start0, differences$ref_start0)
     expect_true(all(vapply(p$contributors, nrow, 1L) == 1L))
+    p_hgvs <- rduckhts_haplotypes(con, p_calls, "reference_proteins",
+      phase_policy = policy, hgvs = TRUE)
+    p_hgvs <- p_hgvs[order(p_hgvs$transcript_index), ]
+    # Pinned TranscriptVariationAllele observes each synonymous ALT separately
+    # from Haplosaurus's contrast against the curated reference protein.
+    expect_equal(p_hgvs$hgvsp, c("p.(Ala2=)", "p.(Ala3=)", rep("p.(Ala2=)", 3L), NA_character_))
+    expect_equal(p_hgvs$hgvsp_status, c(rep("ok", 5L), "missing_reference_protein"))
+    fields <- setdiff(names(p), c("hgvsp", "hgvsp_status"))
+    expect_equal(p_hgvs[fields], p[fields])
   }
+  p_equal <- rduckhts_haplotypes(con, paste("SELECT * REPLACE ('CTGG' AS alternate) FROM (",
+    p_calls, ") WHERE transcript_index=2"), "reference_proteins", hgvs = TRUE)
+  expect_equal(p_equal$protein, "MAW*")
+  expect_true(is.na(p_equal$hgvsp))
+  expect_equal(p_equal$hgvsp_status, "missing_reference")
+  expect_equal(p_equal$edit_count, 1)
+  expect_equal(nrow(p_equal$coding_blocks[[1L]]), 1L)
+  expect_equal(nrow(p_equal$contributors[[1L]]), 1L)
+  p_terminal <- rduckhts_haplotypes(con, paste("SELECT * REPLACE ('CTGGGCC' AS alternate) FROM (",
+    p_calls, ") WHERE transcript_index=2"), "reference_proteins", hgvs = TRUE)
+  expect_equal(p_terminal$protein, "MAWA*")
+  expect_true(is.na(p_terminal$hgvsp))
+  expect_equal(p_terminal$hgvsp_status, "missing_reference")
+  expect_equal(p_terminal$edit_count, 1)
+  expect_equal(nrow(p_terminal$coding_blocks[[1L]]), 1L)
+  expect_equal(nrow(p_terminal$contributors[[1L]]), 1L)
   expect_error(rduckhts_haplotypes(con, paste("SELECT * FROM (", p_calls,
     ") WHERE transcript_index=1"), "reference_proteins", max_leaf_differences = 1),
     pattern = "protein difference status 4, max_leaf_differences=1, required=2")
@@ -525,11 +733,14 @@ local({
   expect_true(all(vapply(p_missing$protein_differences[1:5], nrow, 1L) == 0L))
   expect_true(is.null(p_missing$protein_differences[[6L]]))
   p_retained <- rduckhts_haplotypes(con, sub("'.' gt", "'0|1' gt", p_raw, fixed = TRUE),
-    "reference_proteins", "vep116_compat", input_mode = "source_records")
+    "reference_proteins", "vep116_compat", input_mode = "source_records", hgvs = TRUE)
   p_retained <- p_retained[vapply(p_retained$carriers, function(x) 1L %in% x$haplotype_lane, TRUE), ]
   p_retained <- p_retained[order(p_retained$transcript_index), ]
   expect_equal(p_retained$protein, c("LA*", "M*", "MA*", "MAW", "LA*", ""))
   expect_true(all(p_retained$edit_count == 0))
+  expect_equal(p_retained$hgvsp[1:3], c("p.(Met1Leu)", "p.(Sec2Ter)", "p.(Trp3Ter)"))
+  expect_equal(p_retained$hgvsp_status[1:3], rep("ok", 3L))
+  expect_equal(nrow(p_retained$coding_blocks[[1L]]), 0L)
   route_tx <- paste("SELECT i::UINTEGER transcript_index,i::UINTEGER seq_region,",
     "11::UBIGINT transcript_start,(22+gap)::UBIGINT transcript_end,1::TINYINT strand,",
     "i::UINTEGER gene_index,3::UBIGINT transcript_flags,transcript_start cds_start,",
@@ -574,5 +785,70 @@ local({
   expect_error(rduckhts_haplotypes(con, calls, "haps", table_name = "hap_output"))
   rduckhts_haplotypes(con, calls, "haps", "vep116_compat", table_name = "hap_output", overwrite = TRUE)
   expect_equal(dbGetQuery(con, "SELECT count(*) n FROM hap_output")$n, 2)
+  expect_equal(dbGetQuery(con, "SELECT 42 n")$n, 42L)
+})
+
+local({
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  dbExecute(con, paste(
+    "CREATE TABLE protein_tx AS SELECT i::UINTEGER transcript_index,0::UINTEGER seq_region,",
+    "(100+100*i)::UBIGINT transcript_start,(99+100*i+len(cds))::UBIGINT transcript_end,",
+    "(CASE WHEN i<3 THEN 1 ELSE -1 END)::TINYINT strand,0::UINTEGER gene_index,",
+    "3::UBIGINT transcript_flags,transcript_start cds_start,transcript_end cds_end,",
+    "cds::BLOB cds_sequence,1::UTINYINT codon_table,''::BLOB pre_cds_sequence,''::BLOB post_cds_sequence",
+    "FROM range(6) r(i) JOIN (VALUES (0,'ATGGCTGCTGCTGCTGCTGAATAA'),",
+    "(1,'ATGCGGCATTTCTATGAATAA'),(2,'ATGGGTCCTGCTGAACAATAA')) c(k,cds) ON i%3=k"))
+  exons <- paste("SELECT transcript_index,transcript_start exon_start,transcript_end exon_end,",
+    "1::UBIGINT exon_cdna_start,(transcript_end-transcript_start+1)::UBIGINT exon_cdna_end,",
+    "0::TINYINT phase,0::TINYINT end_phase FROM protein_tx ORDER BY transcript_index")
+  expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('protein',",
+    dbQuoteString(con, "SELECT 0::UINTEGER seq_region"), ",",
+    dbQuoteString(con, "SELECT * FROM protein_tx ORDER BY transcript_index"), ",",
+    dbQuoteString(con, exons), ")"))$loaded)
+  dbExecute(con, paste(
+    "CREATE TABLE protein_calls AS SELECT 10*transcript_index+j AS event_index,0 seq_region,",
+    "CASE WHEN strand=1 THEN transcript_start+p-1 ELSE transcript_end-p-len(ref)+2 END AS position,",
+    "CASE WHEN strand=1 THEN ref ELSE seq_revcomp(ref) END AS reference,",
+    "CASE WHEN strand=1 THEN alt ELSE seq_revcomp(alt) END AS alternate,1 alt_index,",
+    "transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set",
+    "FROM protein_tx JOIN (VALUES (0,1,3,'G','GGCT'),(0,2,11,'C','A'),",
+    "(1,1,3,'G','GC'),(1,2,12,'CT','C'),(2,1,3,'GGGT','G'),(2,2,9,'T','TT'))",
+    "v(k,j,p,ref,alt) ON transcript_index%3=k"))
+  expected <- rep(c("p.(Ala4_Ala5insAsp)", "p.[(Arg2_His3delinsProAla;Tyr5His)]",
+    "p.[(Gly2del;Ala4CysfsTer2)]"), 2L)
+  for (policy in c("strict", "vep116_compat")) {
+    result <- rduckhts_haplotypes(con, "SELECT * FROM protein_calls ORDER BY position DESC",
+      "protein", phase_policy = policy, hgvs = TRUE)
+    result <- result[order(result$transcript_index), ]
+    expect_identical(result$hgvsp, expected)
+    expect_identical(result$hgvsp_status, rep("ok", 6L))
+    expect_identical(result$protein, rep(c("MAAADAAE*", "MPAFHE*", "MPC*"), 2L))
+    expect_equal(result$edit_count, rep(2, 6L))
+    expect_equal(vapply(result$contributors, nrow, 1L), rep(2L, 6L))
+    # Codon-aligned deletion plus insertion has different physical grouping
+    # on the two source strands, without changing the protein operation set.
+    expect_equal(vapply(result$coding_blocks, nrow, 1L)[c(3L, 6L)], c(2L, 1L))
+  }
+  one <- "SELECT * FROM protein_calls WHERE transcript_index=0"
+  source_calls <- paste("SELECT event_index,seq_region,position,reference,[alternate] alternates,",
+    "transcript_index,sample_index,'1|1' gt FROM protein_calls")
+  raw <- rduckhts_haplotypes(con, source_calls, "protein", "vep116_compat",
+    input_mode = "source_records", hgvs = TRUE)
+  raw <- raw[order(raw$transcript_index), ]
+  expect_identical(raw$hgvsp, expected)
+  expect_identical(raw$hgvsp_status, rep("ok", 6L))
+  expect_equal(raw$carrier_count, rep(2L, 6L))
+  expect_error(rduckhts_haplotypes(con, one, "protein", hgvs = TRUE, max_hgvs_bytes = 18),
+    pattern = "max_hgvs_bytes=18, required=19")
+  exact <- rduckhts_haplotypes(con, one, "protein", hgvs = TRUE,
+    max_hgvs_bytes = 19, max_hgvs_operations = 2)
+  expect_identical(exact$hgvsp, expected[1L])
+  expect_error(rduckhts_haplotypes(con, "SELECT * FROM protein_calls WHERE transcript_index=1",
+    "protein", hgvs = TRUE, max_hgvs_operations = 1), pattern = "max_hgvs_operations=1")
+  expect_error(rduckhts_haplotypes(con, one, "protein", hgvs = TRUE, workspace_limit = 1),
+    pattern = "workspace")
+  rduckhts_haplotypes(con, one, "protein", hgvs = TRUE, table_name = "protein_output")
+  expect_identical(dbGetQuery(con, "SELECT hgvsp FROM protein_output")$hgvsp, expected[1L])
   expect_equal(dbGetQuery(con, "SELECT 42 n")$n, 42L)
 })

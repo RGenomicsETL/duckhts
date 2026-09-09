@@ -333,7 +333,8 @@ DUCKVEP_INTERNAL_API int duckvep_coding_context_peptide_window_open(
  * materialized complete haplotype. Prior closed blocks can shift ALT by whole
  * codons: REF and ALT offsets are independent, and the length request uses this
  * block's length change, not the complete path's. No edit is forged or reapplied.
- * The block must come from duckvep_haplotype_partition for this context's edits.
+ * The span must contain one or more contiguous complete blocks from
+ * duckvep_haplotype_partition for this context's edits.
  * This opens sequence operands only; it does not classify compound consequences
  * or truncate at a stop. On failure the window is zeroed. */
 DUCKVEP_INTERNAL_API int duckvep_coding_context_block_window_open(

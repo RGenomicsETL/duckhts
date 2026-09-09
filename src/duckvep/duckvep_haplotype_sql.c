@@ -9,6 +9,8 @@ DUCKDB_EXTENSION_EXTERN
 #include "kernel/src/duckvep_sequence_diff.h"
 #include "kernel/src/duckvep_dna.h"
 #include "kernel/src/duckvep_effect.h"
+#include "kernel/src/duckvep_hgvs.h"
+#include "kernel/src/duckvep_annotation_internal.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -17,22 +19,26 @@ DUCKDB_EXTENSION_EXTERN
 
 enum { LIMIT_EVENTS, LIMIT_TRANSCRIPTS, LIMIT_CARRIERS, LIMIT_PREFIXES, LIMIT_PROJECTIONS,
     LIMIT_ALLELES, LIMIT_LEAF_EVENTS, LIMIT_LEAF_EDITS, LIMIT_SEQUENCE, LIMIT_PLOIDY,
-    LIMIT_PHASE_SETS, LIMIT_ALIGNMENT, LIMIT_DIFFERENCES, LIMIT_WORKSPACE, LIMIT_COUNT };
-enum { HAPLOTYPE_LIST_COLUMN = 9, HAPLOTYPE_STOP_COLUMN = 14, HAPLOTYPE_OUTPUT_COLUMNS = 15 };
+    LIMIT_PHASE_SETS, LIMIT_ALIGNMENT, LIMIT_DIFFERENCES, LIMIT_HGVS_OPERATIONS,
+    LIMIT_HGVS_BYTES, LIMIT_HGVS_REFERENCE, LIMIT_WORKSPACE, LIMIT_COUNT };
+enum { HAPLOTYPE_LIST_COLUMN = 9, HAPLOTYPE_STOP_COLUMN = 14,
+    HAPLOTYPE_HGVSP_COLUMN = 15, HAPLOTYPE_HGVSP_STATUS_COLUMN = 16, HAPLOTYPE_OUTPUT_COLUMNS = 17 };
 enum { HAPLOTYPE_BLOCK_EVENT_FIELD = 9, HAPLOTYPE_BLOCK_FIELDS = 10 };
 static const char *const limit_names[] = {"max_active_events", "max_active_transcripts",
     "max_active_carriers", "max_active_prefixes", "max_active_projections", "max_allele_bytes",
     "max_leaf_events", "max_leaf_edits", "max_sequence_bases", "max_ploidy", "max_phase_sets",
-    "max_alignment_cells", "max_leaf_differences", "workspace_limit"};
+    "max_alignment_cells", "max_leaf_differences", "max_hgvs_operations", "max_hgvs_bytes",
+    "max_hgvs_reference_bytes", "workspace_limit"};
 static const uint64_t limit_defaults[] = {16384, 4096, 65536, 262144, 262144, 8388608,
-    4096, 65536, 1048576, 64, 1024, 16777216, 65536, 268435456};
+    4096, 65536, 1048576, 64, 1024, 16777216, 65536, 65536, 1048576,
+    DUCKVEP_REFERENCE_DEFAULT_BYTES, 268435456};
 
 typedef struct {
     duckvep_registry_t *registry;
     duckvep_model_entry_t *entry;
     char *query;
     duckvep_phase_policy_t policy;
-    int source_records;
+    int source_records, hgvs;
     size_t limits[LIMIT_COUNT];
 } haplotype_bind_t;
 
@@ -54,6 +60,12 @@ typedef struct {
     duckvep_translation_t reference_coding_translation;
     uint32_t difference_transcript;
     int have_difference_reference;
+    duckvep_hgvs_protein_operation_t *protein_operations;
+    duckvep_reference_reader_t reference;
+    duckvep_delta_scratch_t hgvs_scratch;
+    uint8_t *hgvs_alleles, *hgvs_shifted_allele;
+    size_t hgvs_allele_capacity, hgvs_shifted_capacity;
+    char *hgvsp;
     size_t workspace_bytes;
 } haplotype_state_t;
 
@@ -127,6 +139,9 @@ static void haplotype_bind(duckdb_bind_info info) {
         duckdb_bind_set_error(info, "duckvep_haplotypes: input_mode must be 'alt_events' or 'source_records'; source_records requires phase_policy='vep116_compat'");
         haplotype_bind_destroy(b); return;
     }
+    value = duckdb_bind_get_named_parameter(info, "hgvs");
+    b->hgvs = value && !duckdb_is_null_value(value) && duckdb_get_bool(value);
+    duckdb_destroy_value(&value);
     for (unsigned i = 0u; i < LIMIT_COUNT; i++) {
         value = duckdb_bind_get_named_parameter(info, limit_names[i]);
         uint64_t n = value && !duckdb_is_null_value(value) ? duckdb_get_uint64(value) : limit_defaults[i];
@@ -175,6 +190,10 @@ static void haplotype_bind(duckdb_bind_info info) {
     duckdb_logical_type stop_in_frame_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
     duckdb_bind_add_result_column(info, "stop_in_displaced_frame", stop_in_frame_type);
     duckdb_destroy_logical_type(&stop_in_frame_type);
+    duckdb_logical_type string_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    duckdb_bind_add_result_column(info, "hgvsp", string_type);
+    duckdb_bind_add_result_column(info, "hgvsp_status", string_type);
+    duckdb_destroy_logical_type(&string_type);
     duckdb_bind_set_bind_data(info, b, haplotype_bind_destroy);
 }
 
@@ -193,6 +212,12 @@ static void haplotype_state_destroy(void *pointer) {
     free(s->difference_scratch.scores); free(s->difference_scratch.trace); free(s->differences);
     free(s->difference_reference); free(b->reference_protein);
     free(s->reference_coding_protein);
+    free(s->protein_operations); free(s->hgvsp);
+    if (s->reference.fai) fai_destroy(s->reference.fai);
+    free(s->reference.bases);
+    free(s->hgvs_scratch.edits); free(s->hgvs_scratch.alt_cds);
+    free(s->hgvs_scratch.ref_peptide); free(s->hgvs_scratch.alt_peptide);
+    free(s->hgvs_alleles); free(s->hgvs_shifted_allele);
     free(s->gt); free(s->phase); free(s->sets); free(s);
 }
 
@@ -214,13 +239,23 @@ static int workspace_allocate(haplotype_state_t *s, const haplotype_bind_t *bind
     b->event_capacity = (uint32_t)n[LIMIT_EVENTS]; b->projection_capacity = (uint32_t)n[LIMIT_PROJECTIONS];
     b->allele_capacity = n[LIMIT_ALLELES]; b->leaf_capacity = n[LIMIT_LEAF_EVENTS];
     b->edit_capacity = n[LIMIT_LEAF_EDITS];
-    if (n[LIMIT_SEQUENCE] == SIZE_MAX) return 0;
+    if (n[LIMIT_SEQUENCE] == SIZE_MAX || (bind->hgvs && n[LIMIT_HGVS_BYTES] == SIZE_MAX)) return 0;
     b->cds_capacity = n[LIMIT_SEQUENCE];
     b->protein_capacity = n[LIMIT_SEQUENCE] + 1u;
     if (b->protein_capacity > SIZE_MAX / 2u) return 0;
     s->difference_scratch.score_capacity = b->protein_capacity * 2u;
     s->difference_scratch.trace_capacity = n[LIMIT_ALIGNMENT];
     b->reference_protein_capacity = n[LIMIT_SEQUENCE] / 3u + 2u;
+    if (bind->hgvs) {
+        s->reference.capacity = bind->entry->model.reference_fasta_path ? n[LIMIT_HGVS_REFERENCE] : 0u;
+        /* Alternating differing/retained bases maximize one uint16-length MNV's islands. */
+        size_t islands = ((size_t)UINT16_MAX + 1u) / 2u;
+        s->hgvs_scratch.edits_cap = n[LIMIT_LEAF_EDITS] < islands ? n[LIMIT_LEAF_EDITS] : islands;
+        s->hgvs_scratch.alt_cds_cap = n[LIMIT_SEQUENCE];
+        s->hgvs_scratch.ref_peptide_cap = s->hgvs_scratch.alt_peptide_cap = n[LIMIT_SEQUENCE] / 3u + 1u;
+        s->hgvs_allele_capacity = n[LIMIT_ALLELES] < 2u * UINT16_MAX ? n[LIMIT_ALLELES] : 2u * UINT16_MAX;
+        s->hgvs_shifted_capacity = n[LIMIT_ALLELES] < UINT16_MAX + 1u ? n[LIMIT_ALLELES] : UINT16_MAX + 1u;
+    }
     /* Count every byte before allocating any of the arrays. Each pointer has
      * one owner and one cleanup site; no allocator is used by the scan loop. */
 #define ARRAYS(X) \
@@ -242,6 +277,15 @@ static int workspace_allocate(haplotype_state_t *s, const haplotype_bind_t *bind
     X(s->difference_reference, n[LIMIT_SEQUENCE]) \
     X(b->reference_protein, b->reference_protein_capacity) \
     X(s->reference_coding_protein, b->reference_protein_capacity) \
+    X(s->protein_operations, bind->hgvs ? n[LIMIT_HGVS_OPERATIONS] : 0u) \
+    X(s->hgvsp, bind->hgvs ? n[LIMIT_HGVS_BYTES] + 1u : 0u) \
+    X(s->reference.bases, s->reference.capacity) \
+    X(s->hgvs_scratch.edits, s->hgvs_scratch.edits_cap) \
+    X(s->hgvs_scratch.alt_cds, s->hgvs_scratch.alt_cds_cap) \
+    X(s->hgvs_scratch.ref_peptide, s->hgvs_scratch.ref_peptide_cap) \
+    X(s->hgvs_scratch.alt_peptide, s->hgvs_scratch.alt_peptide_cap) \
+    X(s->hgvs_alleles, s->hgvs_allele_capacity) \
+    X(s->hgvs_shifted_allele, s->hgvs_shifted_capacity) \
     X(s->gt, bind->source_records ? 0u : n[LIMIT_PLOIDY]) \
     X(s->phase, bind->source_records ? 0u : n[LIMIT_PLOIDY]) \
     X(s->sets, bind->source_records ? 0u : n[LIMIT_PHASE_SETS])
@@ -467,6 +511,8 @@ static void haplotype_init(duckdb_init_info info) {
     duckdb_init_set_max_threads(info, 1u);
     if (!s || !workspace_allocate(s, bind)) goto failed;
     duckvep_owned_model_t *m = &bind->entry->model;
+    if (bind->hgvs && !duckvep_reference_reader_init(&s->reference, m,
+            s->reference.bases, s->reference.capacity, error, sizeof(error))) goto failed;
     if (duckvep_haplotype_stream_init(&s->stream, &m->transcripts, &m->exons, &m->sequences,
         &s->buffers) != DUCKVEP_HAPLOTYPE_STREAM_OK) {
         duckvep_sql_set_error(error, sizeof(error), "duckvep_haplotypes: invalid native model/workspace"); goto failed;
@@ -621,13 +667,192 @@ static int append_sequence_differences(duckdb_vector vector, idx_t row, haplotyp
     return 1;
 }
 
+typedef struct {
+    haplotype_state_t *state;
+    const haplotype_bind_t *bind;
+    duckvep_hgvs_status_t status;
+    size_t length;
+    char *error;
+    size_t error_size;
+} haplotype_hgvs_observer_t;
+
+static int haplotype_hgvs_observe(void *pointer, const duckvep_variant_batch_t *variants,
+    const duckvep_consequence_t *row, const duckvep_pair_facts_t *facts) {
+    haplotype_hgvs_observer_t *o = pointer;
+    haplotype_state_t *s = o->state;
+    const duckvep_owned_model_t *m = &o->bind->entry->model;
+    if (!facts || !facts->event) return 0;
+    if (facts->transcript_edit_status != DUCKVEP_TRANSCRIPT_EDIT_OK) {
+        o->status = facts->transcript_edit_status == DUCKVEP_TRANSCRIPT_EDIT_OUTSIDE_TRANSCRIPT
+            ? DUCKVEP_HGVS_NOT_APPLICABLE : DUCKVEP_HGVS_INVALID_PROJECTION;
+        return 1;
+    }
+    int available;
+    duckvep_hgvs_reference_window_t shift, lookup;
+    if (!duckvep_reference_reader_windows(&s->reference, facts->event, &available,
+            &shift, &lookup, o->error, o->error_size)) return 0;
+    o->status = available ? duckvep_hgvs_uploaded_reference_validate(&lookup, facts->event,
+        variants->allele_bytes + variants->ref_offset[0], variants->ref_length[0]) : DUCKVEP_HGVS_OK;
+    if (o->status != DUCKVEP_HGVS_OK) return 1;
+    duckvep_transcript_edit_t edit;
+    duckvep_hgvs_dna_fact_t dna;
+    o->status = duckvep_hgvs_dna_pair_build(&m->transcripts, &m->exons, &m->sequences,
+        variants, facts, available ? &shift : NULL, available ? &lookup : NULL,
+        &s->hgvs_scratch, &edit, &dna);
+    if (o->status != DUCKVEP_HGVS_OK) return 1;
+    duckvep_pair_facts_t protein_facts = *facts;
+    protein_facts.transcript_edit = &edit;
+    duckvep_hgvs_protein_pair_t protein;
+    size_t required;
+    o->status = duckvep_hgvs_protein_pair_build(&m->transcripts, &m->exons, &m->sequences,
+        variants, row, &protein_facts, &dna, available ? &lookup : NULL,
+        &s->hgvs_scratch, s->hgvs_shifted_allele, s->hgvs_shifted_capacity, &required, &protein);
+    if (o->status != DUCKVEP_HGVS_OK) return 1;
+    o->status = duckvep_hgvs_protein_render(&protein.fact, 1, s->hgvsp,
+        o->bind->limits[LIMIT_HGVS_BYTES] + 1u, &o->length);
+    if (o->status == DUCKVEP_HGVS_BUFFER_TOO_SMALL) {
+        snprintf(o->error, o->error_size,
+            "duckvep_haplotypes: max_hgvs_bytes=%zu, required=%zu at transcript %u",
+            o->bind->limits[LIMIT_HGVS_BYTES], o->length, row->tx_idx);
+        return 0;
+    }
+    return 1;
+}
+
+static int append_single_event_hgvsp(duckdb_vector text, duckdb_vector status_vector, idx_t row,
+    haplotype_state_t *s, const haplotype_bind_t *bind, const duckvep_haplotype_leaf_t *leaf,
+    char *error, size_t error_size) {
+    const duckvep_haplotype_source_t *source = &leaf->contributors[0].source;
+    size_t bytes = (size_t)source->ref_len + source->alt_len;
+    if (bytes > s->hgvs_allele_capacity) {
+        snprintf(error, error_size, "duckvep_haplotypes: HGVS allele bytes=%zu, required=%zu at event %llu",
+            s->hgvs_allele_capacity, bytes, (unsigned long long)source->event_id);
+        return 0;
+    }
+    memcpy(s->hgvs_alleles, source->ref, source->ref_len);
+    memcpy(s->hgvs_alleles + source->ref_len, source->alt, source->alt_len);
+    duckvep_event_t event;
+    if (!duckvep_event_prepare_small(source->pos1, source->ref, source->ref_len,
+            source->alt, source->alt_len, &event)) {
+        duckvep_sql_set_error(error, error_size, "duckvep_haplotypes: invalid source allele for HGVS");
+        return 0;
+    }
+    uint32_t ref_offset = 0u, alt_offset = source->ref_len;
+    duckvep_variant_batch_t variant = {.chrom_id = &source->chrom_id, .pos1 = &source->pos1,
+        .end1 = &event.raw_end1, .ref_offset = &ref_offset, .alt_offset = &alt_offset,
+        .ref_length = &source->ref_len, .alt_length = &source->alt_len,
+        .allele_bytes = s->hgvs_alleles, .allele_bytes_len = bytes, .variant_kind = &event.kind,
+        .count = 1u};
+    haplotype_hgvs_observer_t observer = {.state = s, .bind = bind,
+        .status = DUCKVEP_HGVS_NOT_APPLICABLE, .error = error, .error_size = error_size};
+    duckvep_error_t native_error = {0};
+    if (duckvep_annotate_pair_observed(bind->entry->model.kernel, &variant,
+            leaf->carriers.transcript_index, &s->hgvs_scratch, haplotype_hgvs_observe,
+            &observer, &native_error) != DUCKVEP_OK) {
+        if (!error[0]) duckvep_sql_set_error(error, error_size, native_error.message);
+        return 0;
+    }
+    const char *name;
+    switch (observer.status) {
+        case DUCKVEP_HGVS_OK:
+            duckdb_validity_set_row_valid(duckdb_vector_get_validity(text), row);
+            duckdb_vector_assign_string_element_len(text, row, s->hgvsp, observer.length);
+            name = "ok"; break;
+        case DUCKVEP_HGVS_NOT_APPLICABLE: name = "not_applicable"; break;
+        case DUCKVEP_HGVS_MISSING_REFERENCE: name = "missing_reference"; break;
+        case DUCKVEP_HGVS_REFERENCE_MISMATCH: name = "reference_mismatch"; break;
+        case DUCKVEP_HGVS_INVALID_ALLELE: name = "invalid_allele"; break;
+        case DUCKVEP_HGVS_MISSING_PEPTIDE: name = "missing_peptide"; break;
+        case DUCKVEP_HGVS_MISSING_TRANSCRIPT_TAIL: name = "missing_transcript_tail"; break;
+        case DUCKVEP_HGVS_MISSING_TRANSCRIPT_FLANK: name = "missing_transcript_flank"; break;
+        case DUCKVEP_HGVS_UNSUPPORTED_PROTEIN: name = "unsupported_protein"; break;
+        case DUCKVEP_HGVS_UNSUPPORTED_EDIT: name = "unsupported_coding_context"; break;
+        case DUCKVEP_HGVS_INVALID_PROJECTION: name = "invalid_projection"; break;
+        default:
+            snprintf(error, error_size,
+                "duckvep_haplotypes: HGVS status %u at event %llu; max_sequence_bases=%zu, max_leaf_edits=%zu, max_allele_bytes=%zu",
+                (unsigned)observer.status, (unsigned long long)source->event_id,
+                bind->limits[LIMIT_SEQUENCE], bind->limits[LIMIT_LEAF_EDITS], bind->limits[LIMIT_ALLELES]);
+            return 0;
+    }
+    duckdb_vector_assign_string_element(status_vector, row, name);
+    return 1;
+}
+
+static int append_hgvsp(duckdb_vector text, duckdb_vector status_vector, idx_t row,
+    haplotype_state_t *s, const haplotype_bind_t *bind, const duckvep_haplotype_leaf_t *leaf,
+    const duckvep_coding_context_t *coding, char *error, size_t error_size) {
+    null_cell(text, row);
+    const char *name = !bind->hgvs ? "not_requested" :
+        !leaf->cds || !leaf->protein ? "unavailable_sequence" :
+        leaf->sequence_status != DUCKVEP_HAPLOTYPE_OK ? "incomplete_input" :
+        !leaf->reference_protein || !leaf->reference_protein_length ? "missing_reference_protein" :
+        leaf->ordered_replacements ? "unsupported_ordered_replacements" : NULL;
+    /* A singleton source allele uses the independent-event VEP presentation,
+     * including its original anchor and cached predicates. Physical MNV islands
+     * do not turn that one source into a compound event. */
+    if (!name && leaf->contributor_count == 1u) {
+        const duckvep_haplotype_contributor_t *c = &leaf->contributors[0];
+        if ((!c->source.source_record || (c->source.allele_index && c->source.allele_index != UINT32_MAX)) &&
+            (c->projection_status == DUCKVEP_CDS_EDIT_OK || c->projection_status == DUCKVEP_CDS_EDIT_OUT_OF_CDS))
+            return append_single_event_hgvsp(text, status_vector, row, s, bind, leaf, error, error_size);
+    }
+    size_t count = 0u;
+    /* The raw reference-only route already borrows the prepared reference.
+     * No codon replay is needed to establish equality of these exact operands. */
+    int reference_only = !name && !leaf->edit_count && leaf->protein == leaf->reference_protein;
+    if (!name && !reference_only) {
+        duckvep_hgvs_protein_reference_t reference = {
+            leaf->reference_protein, leaf->reference_protein_length};
+        duckvep_hgvs_status_t status = duckvep_hgvs_protein_haplotype_build(coding,
+            &reference, s->buffers.edits, leaf->edit_count, leaf->blocks, leaf->block_count,
+            bind->entry->model.transcripts.flags[leaf->carriers.transcript_index],
+            s->protein_operations, bind->limits[LIMIT_HGVS_OPERATIONS], &count);
+        if (status == DUCKVEP_HGVS_BUFFER_TOO_SMALL) {
+            snprintf(error, error_size,
+                "duckvep_haplotypes: max_hgvs_operations=%zu exhausted at transcript %u",
+                bind->limits[LIMIT_HGVS_OPERATIONS], leaf->carriers.transcript_index);
+            return 0;
+        }
+        switch (status) {
+            case DUCKVEP_HGVS_OK: break;
+            case DUCKVEP_HGVS_NOT_APPLICABLE: name = "not_applicable"; break;
+            case DUCKVEP_HGVS_MISSING_PEPTIDE: name = "missing_peptide"; break;
+            case DUCKVEP_HGVS_UNSUPPORTED_PROTEIN: name = "unsupported_protein"; break;
+            case DUCKVEP_HGVS_UNSUPPORTED_EDIT: name = "unsupported_coding_context"; break;
+            default:
+                snprintf(error, error_size, "duckvep_haplotypes: HGVS status %u at transcript %u",
+                    (unsigned)status, leaf->carriers.transcript_index);
+                return 0;
+        }
+    }
+    if (!name) {
+        size_t required;
+        duckvep_hgvs_status_t status = duckvep_hgvs_protein_haplotype_render(s->protein_operations,
+            count, 1, s->hgvsp, bind->limits[LIMIT_HGVS_BYTES] + 1u, &required);
+        if (status != DUCKVEP_HGVS_OK) {
+            snprintf(error, error_size,
+                "duckvep_haplotypes: HGVS render status %u, max_hgvs_bytes=%zu, required=%zu at transcript %u",
+                (unsigned)status, bind->limits[LIMIT_HGVS_BYTES], required, leaf->carriers.transcript_index);
+            return 0;
+        }
+        duckdb_validity_set_row_valid(duckdb_vector_get_validity(text), row);
+        duckdb_vector_assign_string_element_len(text, row, s->hgvsp, required);
+        name = "ok";
+    }
+    duckdb_vector_assign_string_element(status_vector, row, name);
+    return 1;
+}
+
 static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s,
     const haplotype_bind_t *bind, const duckvep_haplotype_leaf_t *leaf,
     char *error, size_t error_size) {
     if (!prepare_difference_reference(s, bind, leaf, error, error_size)) return 0;
     duckvep_coding_context_t coding;
     uint32_t tx = leaf->carriers.transcript_index;
-    if (leaf->block_count && !leaf->ordered_replacements) {
+    if (!leaf->ordered_replacements && (leaf->block_count ||
+            (bind->hgvs && leaf->cds && leaf->reference_protein &&
+             s->reference_coding_translation.length))) {
         const duckvep_owned_model_t *model = &bind->entry->model;
         duckvep_edit_set_t edits = {s->buffers.edits, leaf->edit_count};
         duckvep_haplotype_result_t applied = {leaf->cds_length,
@@ -765,7 +990,9 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
         }
     }
     return append_sequence_differences(v[12], row, s, bind, leaf, 0, error, error_size) &&
-        append_sequence_differences(v[13], row, s, bind, leaf, 1, error, error_size);
+        append_sequence_differences(v[13], row, s, bind, leaf, 1, error, error_size) &&
+        append_hgvsp(v[HAPLOTYPE_HGVSP_COLUMN], v[HAPLOTYPE_HGVSP_STATUS_COLUMN], row,
+            s, bind, leaf, &coding, error, error_size);
 }
 
 static duckvep_haplotype_stream_status_t consume_call(haplotype_state_t *s,
@@ -938,11 +1165,13 @@ void duckvep_register_haplotypes(duckdb_connection connection, duckvep_registry_
     duckdb_table_function function = duckdb_create_table_function();
     duckdb_logical_type string = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_logical_type integer = duckdb_create_logical_type(DUCKDB_TYPE_UBIGINT);
+    duckdb_logical_type boolean = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
     duckdb_table_function_set_name(function, "duckvep_haplotypes");
     duckdb_table_function_add_parameter(function, string);
     duckdb_table_function_add_parameter(function, string);
     duckdb_table_function_add_named_parameter(function, "phase_policy", string);
     duckdb_table_function_add_named_parameter(function, "input_mode", string);
+    duckdb_table_function_add_named_parameter(function, "hgvs", boolean);
     for (unsigned i = 0u; i < LIMIT_COUNT; i++)
         duckdb_table_function_add_named_parameter(function, limit_names[i], integer);
     duckvep_registry_retain(registry);
@@ -953,4 +1182,5 @@ void duckvep_register_haplotypes(duckdb_connection connection, duckvep_registry_
     (void)duckdb_register_table_function(connection, function);
     duckdb_destroy_table_function(&function);
     duckdb_destroy_logical_type(&string); duckdb_destroy_logical_type(&integer);
+    duckdb_destroy_logical_type(&boolean);
 }

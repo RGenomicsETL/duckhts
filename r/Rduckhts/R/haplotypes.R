@@ -42,6 +42,35 @@
 #' proteins have an empty list. Both difference axes reuse the same native
 #' scratch and are separately subject to the alignment-cell and run limits.
 #'
+#' `hgvs = TRUE` requests a VEP-116-derived protein HGVS suffix in `hgvsp`: equality,
+#' one operation, or a cis allele such as `p.[(Gly2del;Ala4CysfsTer2)]`.
+#' Protein operations use the completed path and may combine several physical
+#' edits; source contributors and coding blocks remain unchanged. `hgvsp_status`
+#' is `ok` only after the complete operation set has been rendered. Other statuses
+#' retain NULL text without discarding the sequence or provenance. Conditional or
+#' unavailable sequence, ordered overlapping replacements, missing peptide data,
+#' unsupported coding contexts, and unrepresentable protein ends remain explicit.
+#' Phase policy controls allele assignment, not HGVS nomenclature. Protein HGVS
+#' retains VEP's local-peptide and unknown-residue presentation. An `ok` status
+#' reports a supported computation, not independent HGVS-rule certification.
+#' A path with one original ALT source uses independent-event VEP-116 HGVS,
+#' including genomic shifting and absent results. Multiple differing islands
+#' within one MNV retain that single source identity. Placement needing an
+#' unavailable genomic FASTA returns `missing_reference`.
+#' Prepared references retain their own residues and length without changing raw
+#' CDS/frame facts or inventing source edits. Loss of only a reference stop marker
+#' supplies no alternate extension, and insertions require reference flanks.
+#' `max_hgvs_operations` bounds the working operation stack and final operations;
+#' `max_hgvs_bytes` bounds text bytes excluding NUL; `max_hgvs_reference_bytes`
+#' bounds the query-local FASTA result buffer, including NUL and line-ending
+#' scratch. Sequence/edit scratch derives from `max_sequence_bases` and
+#' `max_leaf_edits`, and allele scratch from `max_allele_bytes` and the literal
+#' allele width. All DuckVEP-owned buffers count toward `workspace_limit`;
+#' HTSlib handle/transport storage is separate. Exhaustion errors instead of
+#' truncating text. Disabled HGVS allocates no HGVS buffers or reference handle
+#' and returns `not_requested`. Identifiers are joined
+#' through the model transcript ordinal; the suffix contains no accession.
+#'
 #' `stop_in_displaced_frame` reports whether any of the first translated stop
 #' codon's three bases overlaps a frame-displaced span of the rebuilt CDS.
 #' Displacement starts at a frame-changing edit and ends after the alternate
@@ -50,8 +79,8 @@
 #' sequence is unavailable. It is a sequence fact, not a combined SO consequence
 #' or a claim that a restored DNA frame rescues the protein.
 #'
-#' This alpha interface returns sequence mechanics, not combined SO consequences,
-#' compound HGVS or structural-event composition. Input must contain one row per
+#' Whole-haplotype SO, DNA HGVS, complete protein HGVS and structural-event
+#' composition remain unfinished. Input must contain one row per
 #' `event_index`, `transcript_index`, `sample_index`, with columns `seq_region`,
 #' `position`, `reference`, `alternate`, `alt_index`, `alleles`, `phase_before`
 #' and nullable `phase_set`. Event indices identify individual ALT events; retain
@@ -83,6 +112,7 @@
 #'   pinned raw parser and explicitly conditional missing-slot interpretation.
 #' @param input_mode `alt_events` for decoded per-ALT calls, or `source_records`
 #'   for raw GT and complete source ALT lists under `vep116_compat`.
+#' @param hgvs Whether to request bounded protein HGVS for supported completed paths.
 #' @param ... Named positive integer workspace capacities accepted by
 #'   `duckvep_haplotypes`, such as `max_active_events`, `max_active_carriers`,
 #'   `max_sequence_bases`, `max_ploidy`, `max_phase_sets`, and `workspace_limit`.
@@ -91,7 +121,7 @@
 rduckhts_haplotypes <- function(con, calls_query, model_name,
                                phase_policy = c("strict", "vep116_compat"),
                                ..., input_mode = c("alt_events", "source_records"),
-                               table_name = NULL, overwrite = FALSE) {
+                               hgvs = FALSE, table_name = NULL, overwrite = FALSE) {
   for (name in c("calls_query", "model_name")) {
     value <- get(name)
     if (!is.character(value) || length(value) != 1L || is.na(value) || !nzchar(value)) {
@@ -103,13 +133,16 @@ rduckhts_haplotypes <- function(con, calls_query, model_name,
   if (input_mode == "source_records" && phase_policy != "vep116_compat") {
     stop("source_records requires phase_policy='vep116_compat'", call. = FALSE)
   }
+  if (!is.logical(hgvs) || length(hgvs) != 1L || is.na(hgvs)) {
+    stop("hgvs must be TRUE or FALSE", call. = FALSE)
+  }
   limits <- list(...)
   if (length(limits) && (is.null(names(limits)) || anyDuplicated(names(limits)) ||
       any(!grepl("^[a-z][a-z_]*$", names(limits))))) {
     stop("capacities must have unique SQL parameter names", call. = FALSE)
   }
   params <- list(phase_policy = sql_quote_string(con, phase_policy),
-                 input_mode = sql_quote_string(con, input_mode))
+                 input_mode = sql_quote_string(con, input_mode), hgvs = if (hgvs) "TRUE" else "FALSE")
   for (name in names(limits)) {
     value <- limits[[name]]
     if (!is.numeric(value) || length(value) != 1L || !is.finite(value) ||
