@@ -248,4 +248,40 @@ test_selected_genotype_format <- function() {
 }
 
 test_record_major_genotypes()
+test_genotype_numeric_scalars <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  expected <- data.frame(pos = seq(10, 70, 10), si = c(8, 10, 13, NA, 20, NA, 23),
+                         sf = c(2.5, 4.5, 6.5, 9.5, NA, NA, 15.5),
+                         si2 = c(9, 11, 14, NA, 21, NA, 24),
+                         sf2 = c(3.5, 5.5, 7.5, 10.5, NA, NA, 16.5))
+  for (extension in c("vcf", "bcf", "vcf.gz")) {
+    path <- system.file("extdata", paste0("bcf_scalar_counts.", extension), package = "Rduckhts")
+    expect_true(nzchar(path))
+    for (policy in c("null", "warn")) {
+      rduckhts_geno(con, "scalar_calls", path, format_fields = c("SI", "SF"),
+                    decode_error_policy = policy, overwrite = TRUE)
+      expect_equal(dbGetQuery(con, paste(
+        "SELECT POS AS pos, calls[1].format.SI AS si, calls[1].format.SF AS sf,",
+        "calls[2].format.SI AS si2, calls[2].format.SF AS sf2 FROM scalar_calls ORDER BY POS")), expected)
+    }
+    for (field in c("SI", "SF")) expect_error(
+      rduckhts_geno(con, path = path, format_fields = field, decode_error_policy = "error"),
+      pattern = "has 2 values for header Number=1 at chrS:")
+    rduckhts_geno(con, "scalar_calls", path, format_fields = c("SI", "SF"), samples = "",
+                  decode_error_policy = "error", overwrite = TRUE)
+    expect_equal(dbGetQuery(con, "SELECT count(*) AS n, sum(len(calls)) AS calls FROM scalar_calls"),
+                  data.frame(n = 7, calls = 0))
+    if (extension != "vcf") {
+      rduckhts_geno(con, "scalar_calls", path, region = "chrS:40-40", format_fields = "SI",
+                    samples = "S1", decode_error_policy = "error", overwrite = TRUE)
+      expect_equal(dbGetQuery(con, paste(
+        "SELECT calls[1].sample_index AS sample, calls[1].format.SI AS si FROM scalar_calls")),
+        data.frame(sample = 0, si = 16))
+    }
+  }
+  expect_equal(dbGetQuery(con, "SELECT 42 AS n")$n, 42L)
+}
+
 test_selected_genotype_format()
+test_genotype_numeric_scalars()

@@ -1,0 +1,19 @@
+##fileformat=VCFv4.2
+##FILTER=<ID=PASS,Description="All filters passed">
+##source=duckhts/test/scripts/vcfpp.R
+##contig=<ID=chrS>
+##INFO=<ID=II,Number=1,Type=Integer,Description="Scalar integer">
+##INFO=<ID=IF,Number=1,Type=Float,Description="Scalar float">
+##INFO=<ID=LI,Number=.,Type=Integer,Description="Integer list">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=SI,Number=1,Type=Integer,Description="Scalar integer">
+##FORMAT=<ID=SF,Number=1,Type=Float,Description="Scalar float">
+##FORMAT=<ID=LF,Number=.,Type=Float,Description="Float list">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1	S2
+chrS	10	valid	A	C	.	PASS	II=7;IF=1.5;LI=1,.,3	GT:SI:SF:LF	0/1:8:2.5:1,.,3	1:9:3.5:.
+chrS	20	info_integer	A	C	.	PASS	II=.,9;IF=2.5	GT:SI:SF	0/1:10:4.5	1/1:11:5.5
+chrS	30	info_float	A	C	.	PASS	II=12;IF=1.5,.	GT:SI:SF	0/1:13:6.5	1/1:14:7.5
+chrS	40	format_integer	A	C	.	PASS	II=15;IF=8.5	GT:SI:SF	0/1:16:9.5	1/1:17,18:10.5
+chrS	50	format_float	A	C	.	PASS	II=19;IF=11.5	GT:SI:SF	0/1:20:.,12.5	1/1:21:13.5
+chrS	60	missing_slots	A	C	.	PASS	II=.,.;IF=.,.	GT:SI:SF	./.:.,.:.,.	./.:.:.
+chrS	70	recovered	A	C	.	PASS	II=22;IF=14.5;LI=.,5	GT:SI:SF:LF	0:23:15.5:.,6	1/1:24:16.5:7,8

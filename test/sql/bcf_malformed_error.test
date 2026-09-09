@@ -71,3 +71,84 @@ statement error
 SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/vcf_file.bcf', decode_error_policy := 'strictish');
 ----
 read_bcf: decode_error_policy must be 'null', 'warn', or 'error'
+
+# Scalar validation preserves the record and every other tag. A malformed
+# FORMAT tag is withheld for all selected samples, including tidy output.
+foreach ext vcf bcf vcf.gz
+
+foreach policy null warn
+
+query IIRIIRR
+SELECT POS, INFO_II, INFO_IF, FORMAT_SI_S1, FORMAT_SI_S2, FORMAT_SF_S1, FORMAT_SF_S2
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.${ext}',
+              decode_error_policy := '${policy}') ORDER BY POS;
+----
+10	7	1.5	8	9	2.5	3.5
+20	NULL	2.5	10	11	4.5	5.5
+30	12	NULL	13	14	6.5	7.5
+40	15	8.5	NULL	NULL	9.5	10.5
+50	19	11.5	20	21	NULL	NULL
+60	NULL	NULL	NULL	NULL	NULL	NULL
+70	22	14.5	23	24	15.5	16.5
+
+query IIIII
+SELECT count(*), count(INFO_II), count(INFO_IF), count(FORMAT_SI), count(FORMAT_SF)
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.${ext}',
+              tidy_format := true, decode_error_policy := '${policy}');
+----
+14	10	10	10	10
+
+endloop
+
+statement error
+SELECT INFO_II FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.${ext}',
+                            decode_error_policy := 'error');
+----
+INFO/II has 2 values for header Number=1 at chrS:20
+
+statement error
+SELECT INFO_IF FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.${ext}',
+                            decode_error_policy := 'error');
+----
+INFO/IF has 2 values for header Number=1 at chrS:30
+
+statement error
+SELECT FORMAT_SI_S1 FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.${ext}',
+                                 decode_error_policy := 'error');
+----
+FORMAT/SI has 2 values for header Number=1 at chrS:40 sample S2
+
+statement error
+SELECT FORMAT_SF FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.${ext}',
+                               tidy_format := true, decode_error_policy := 'error');
+----
+FORMAT/SF has 2 values for header Number=1 at chrS:50 sample S1
+
+query TTT
+SELECT INFO_LI::VARCHAR, FORMAT_LF_S1::VARCHAR, FORMAT_GT_S1
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.${ext}',
+              decode_error_policy := 'error') WHERE POS = 10;
+----
+[1, NULL, 3]	[1.0, NULL, 3.0]	0/1
+
+# Unprojected malformed tags do not prevent streaming or counting records.
+query II
+SELECT count(*), sum(POS) FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.${ext}',
+                                       scan_mode := 'sequential', decode_error_policy := 'error');
+----
+7	280
+
+endloop
+
+# Retain the raw nonstandard-header witness; no tag-name repair or truncation.
+statement error
+SELECT INFO_SB FROM read_bcf('__WORKING_DIRECTORY__/test/data/spec_standard_corrections.vcf',
+                             decode_error_policy := 'error');
+----
+INFO/SB has 4 values for header Number=1 at chr1:300
+
+statement error
+SELECT FORMAT_HQ_S1 FROM read_bcf('__WORKING_DIRECTORY__/test/data/spec_standard_corrections.vcf',
+                                  decode_error_policy := 'error');
+----
+FORMAT/HQ has 2 values for header Number=1 at chr1:300 sample S1

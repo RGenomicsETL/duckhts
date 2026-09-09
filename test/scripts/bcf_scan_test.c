@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <htslib/hts_log.h>
 #include "../../src/include/bcf_scan.h"
 #include "../../src/include/bcf_genotypes.h"
 #include "../../src/include/bcf_format.h"
@@ -332,6 +333,74 @@ static void format_values(void) {
     bcf_hdr_destroy(header);
 }
 
+static void numeric_scalars(void) {
+    bcf_hdr_t *header = bcf_hdr_init("w");
+    bcf1_t *record = bcf_init();
+    assert(header && record);
+    assert(bcf_hdr_append(header, "##contig=<ID=chrS,length=100>") == 0);
+    assert(bcf_hdr_append(header, "##INFO=<ID=SI,Number=1,Type=Integer,Description=\"Scalar\">") == 0);
+    assert(bcf_hdr_append(header, "##INFO=<ID=SF,Number=1,Type=Float,Description=\"Scalar\">") == 0);
+    assert(bcf_hdr_append(header, "##FORMAT=<ID=SI,Number=1,Type=Integer,Description=\"Scalar\">") == 0);
+    assert(bcf_hdr_append(header, "##FORMAT=<ID=SF,Number=1,Type=Float,Description=\"Scalar\">") == 0);
+    assert(bcf_hdr_add_sample(header, "S1") == 0 && bcf_hdr_add_sample(header, "S2") == 0);
+    assert(bcf_hdr_add_sample(header, NULL) == 0 && bcf_hdr_sync(header) == 0);
+    record->rid = 0;
+    record->pos = 9;
+    assert(bcf_update_alleles_str(header, record, "A,C") == 0);
+    duckhts_bcf_format_t decoded[2] = {{0}, {0}};
+    const char *tags[] = {"SI", "SF"};
+    const int types[] = {BCF_HT_INT, BCF_HT_REAL};
+    const int magnitudes[] = {1, 300, 100000};
+    char error[512];
+    enum htsLogLevel log_level = hts_get_log_level();
+    hts_set_log_level(HTS_LOG_ERROR);
+    for (int scale = 0; scale < 3; scale++) for (int first = 0; first <= 3; first++)
+    for (int second = 0; second <= 3; second++) for (int missing = 0; missing < 8; missing++) {
+        int32_t integers[6];
+        float floats[6];
+        for (int sample = 0; sample < 2; sample++) for (int slot = 0; slot < 3; slot++) {
+            int i = sample * 3 + slot;
+            integers[i] = magnitudes[scale] + i;
+            floats[i] = (float)integers[i] + 0.5f;
+            if (missing & (1 << slot)) {
+                integers[i] = bcf_int32_missing;
+                bcf_float_set_missing(floats[i]);
+            }
+            if (slot >= (sample ? second : first)) {
+                integers[i] = bcf_int32_vector_end;
+                bcf_float_set_vector_end(floats[i]);
+            }
+        }
+        assert(bcf_update_format_int32(header, record, "SI", integers, 6) == 0);
+        assert(bcf_update_format_float(header, record, "SF", floats, 6) == 0);
+        for (int type = 0; type < 2; type++) {
+            const void *data = type ? (const void *)floats : (const void *)integers;
+            int id = bcf_hdr_id2int(header, BCF_DT_ID, tags[type]);
+            assert(duckhts_bcf_check_scalar_count(header, record, DUCKHTS_BCF_FIELD_INFO,
+                id, types[type], data, 3, "test", error, sizeof(error)) == (first <= 1));
+            if (first > 1) assert(strstr(error, "INFO/") && strstr(error, "Number=1 at chrS:10"));
+            for (int policy = DUCKHTS_BCF_DECODE_NULL; policy <= DUCKHTS_BCF_DECODE_ERROR; policy++) {
+                decoded[type].loaded = 0;
+                int valid = first <= 1 && second <= 1;
+                int ok = duckhts_bcf_format_decode(&decoded[type], header, record, tags[type], types[type],
+                    policy, "test", error, sizeof(error));
+                assert(ok == (valid || policy != DUCKHTS_BCF_DECODE_ERROR));
+                assert(decoded[type].count == (valid ? 6 : 0));
+                assert(decoded[type].stride == (valid ? 3 : 0));
+                assert(decoded[type].loaded == ok);
+                if (valid) assert(memcmp(decoded[type].data, data, 6 * sizeof(int32_t)) == 0);
+                else assert(strstr(error, "FORMAT/") && strstr(error, "Number=1 at chrS:10") &&
+                            strstr(error, first > 1 ? "sample S1" : "sample S2"));
+            }
+        }
+    }
+    hts_set_log_level(log_level);
+    duckhts_bcf_format_destroy(&decoded[0]);
+    duckhts_bcf_format_destroy(&decoded[1]);
+    bcf_destroy(record);
+    bcf_hdr_destroy(header);
+}
+
 static void literal_contigs(void) {
     const char *paths[] = {"test/data/bcf_literal_contigs.bcf", "test/data/bcf_literal_contigs.vcf.gz"};
     const char *names[] = {"chr1", "chr1:100-200", "absent"};
@@ -511,6 +580,7 @@ int main(int argc, char **argv) {
     decode_errors();
     genotype_values();
     format_values();
+    numeric_scalars();
     literal_contigs();
     puts("BCF scanner: CSI/TBI, shifted offsets, 7200 concurrent exact-row scans, selected raw GT and decode errors: OK");
     return 0;

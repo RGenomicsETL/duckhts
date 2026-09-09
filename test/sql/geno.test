@@ -4,6 +4,63 @@
 
 require duckhts
 
+foreach ext vcf bcf vcf.gz
+
+foreach policy null warn
+
+query IIIRR
+SELECT POS, calls[1].format.SI, calls[2].format.SI, calls[1].format.SF, calls[2].format.SF
+FROM read_geno('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.${ext}',
+               format_fields := ['SI', 'SF'], decode_error_policy := '${policy}') ORDER BY POS;
+----
+10	8	9	2.5	3.5
+20	10	11	4.5	5.5
+30	13	14	6.5	7.5
+40	NULL	NULL	9.5	10.5
+50	20	21	NULL	NULL
+60	NULL	NULL	NULL	NULL
+70	23	24	15.5	16.5
+
+endloop
+
+statement error
+SELECT calls FROM read_geno('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.${ext}',
+                            format_fields := ['SI'], decode_error_policy := 'error');
+----
+FORMAT/SI has 2 values for header Number=1 at chrS:40 sample S2
+
+statement error
+SELECT calls FROM read_geno('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.${ext}',
+                            format_fields := ['SF'], decode_error_policy := 'error');
+----
+FORMAT/SF has 2 values for header Number=1 at chrS:50 sample S1
+
+query II
+SELECT count(*), sum(POS) FROM read_geno('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.${ext}',
+  format_fields := ['SI', 'SF'], decode_error_policy := 'error');
+----
+7	280
+
+query II
+SELECT count(*), sum(len(calls)) FROM read_geno('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.${ext}',
+  format_fields := ['SI', 'SF'], samples := '', decode_error_policy := 'error');
+----
+7	0
+
+endloop
+
+foreach ext bcf vcf.gz
+
+# Header sample selection precedes validation; S1 has a valid scalar at POS 40.
+query II
+SELECT calls[1].sample_index, calls[1].format.SI
+FROM read_geno('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.${ext}',
+  region := 'chrS:40-40', samples := 'S1', format_fields := ['SI'], decode_error_policy := 'error');
+----
+0	16
+
+endloop
+
 # Selected typed FORMAT values share the sample axis and retain missing ordinals.
 foreach ext vcf bcf vcf.gz
 

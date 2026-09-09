@@ -452,15 +452,52 @@ manifest[[length(manifest) + 1]] <- render_fixture(
 )
 
 # ---------------------------------------------------------------------------
-# Section 6. Manifest and Summary
+# Section 6. Numeric Scalar Cardinality
+# ---------------------------------------------------------------------------
+
+manifest[[length(manifest) + 1]] <- render_fixture(
+  filename = "bcf_scalar_counts.vcf",
+  section = "spec",
+  purpose = "Numeric scalar overflow, missing elements, list controls and per-record recovery",
+  contigs = "chrS",
+  info_defs = list(tag_def("II", "1", "Integer", "Scalar integer"),
+                   tag_def("IF", "1", "Float", "Scalar float"),
+                   tag_def("LI", ".", "Integer", "Integer list")),
+  format_defs = list(tag_def("GT", "1", "String", "Genotype"),
+                     tag_def("SI", "1", "Integer", "Scalar integer"),
+                     tag_def("SF", "1", "Float", "Scalar float"),
+                     tag_def("LF", ".", "Float", "Float list")),
+  samples = c("S1", "S2"),
+  records = c(
+    "chrS\t10\tvalid\tA\tC\t.\tPASS\tII=7;IF=1.5;LI=1,.,3\tGT:SI:SF:LF\t0/1:8:2.5:1,.,3\t1:9:3.5:.",
+    "chrS\t20\tinfo_integer\tA\tC\t.\tPASS\tII=.,9;IF=2.5\tGT:SI:SF\t0/1:10:4.5\t1/1:11:5.5",
+    "chrS\t30\tinfo_float\tA\tC\t.\tPASS\tII=12;IF=1.5,.\tGT:SI:SF\t0/1:13:6.5\t1/1:14:7.5",
+    "chrS\t40\tformat_integer\tA\tC\t.\tPASS\tII=15;IF=8.5\tGT:SI:SF\t0/1:16:9.5\t1/1:17,18:10.5",
+    "chrS\t50\tformat_float\tA\tC\t.\tPASS\tII=19;IF=11.5\tGT:SI:SF\t0/1:20:.,12.5\t1/1:21:13.5",
+    "chrS\t60\tmissing_slots\tA\tC\t.\tPASS\tII=.,.;IF=.,.\tGT:SI:SF\t./.:.,.:.,.\t./.:.:.",
+    "chrS\t70\trecovered\tA\tC\t.\tPASS\tII=22;IF=14.5;LI=.,5\tGT:SI:SF:LF\t0:23:15.5:.,6\t1/1:24:16.5:7,8"
+  )
+)
+
+# ---------------------------------------------------------------------------
+# Section 7. Manifest and Summary
 # ---------------------------------------------------------------------------
 
 manifest_df <- do.call(rbind, manifest)
 
 for (output_dir in output_dirs) {
   manifest_path <- file.path(output_dir, "vcfpp_manifest.tsv")
+  rows <- manifest_df[, c("section", "file", "purpose")]
+  # Other fixture builders contribute rows to the same checked-in manifest.
+  if (file.exists(manifest_path)) {
+    retained <- read.delim(manifest_path, stringsAsFactors = FALSE)
+    stopifnot(identical(names(retained), names(rows)), !anyDuplicated(retained$file))
+    matched <- match(retained$file, rows$file)
+    retained[!is.na(matched), ] <- rows[matched[!is.na(matched)], ]
+    rows <- rbind(retained, rows[!rows$file %in% retained$file, ])
+  }
   write.table(
-    manifest_df[, c("section", "file", "purpose")],
+    rows,
     file = manifest_path,
     sep = "\t",
     row.names = FALSE,

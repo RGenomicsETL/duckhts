@@ -318,6 +318,41 @@ int duckhts_bcf_check_format_width(const char *reader_name, const char *tag,
     return 0;
 }
 
+int duckhts_bcf_check_scalar_count(bcf_hdr_t *hdr, bcf1_t *record,
+                                   duckhts_bcf_field_class_t field_class,
+                                   int header_id, int header_type, const void *values, int count,
+                                   const char *reader_name, char *error, size_t error_size) {
+    if (count <= 0 || field_class == DUCKHTS_BCF_FIELD_GT ||
+        (header_type != BCF_HT_INT && header_type != BCF_HT_REAL)) return 1;
+    int info = field_class == DUCKHTS_BCF_FIELD_INFO;
+    int samples = info ? 1 : bcf_hdr_nsamples(hdr);
+    if (count <= samples || samples <= 0) return 1;
+    int header_class = info ? BCF_HL_INFO : BCF_HL_FMT;
+    if (bcf_hdr_id2length(hdr, header_class, header_id) != BCF_VL_FIXED ||
+        bcf_hdr_id2number(hdr, header_class, header_id) > 1) return 1;
+    int stride = count / samples;
+    for (int sample = 0; sample < samples; sample++) {
+        size_t offset = (size_t)sample * stride;
+        int length = 0;
+        if (header_type == BCF_HT_INT) {
+            const int32_t *data = (const int32_t *)values + offset;
+            while (length < stride && data[length] != bcf_int32_vector_end) length++;
+        } else {
+            const float *data = (const float *)values + offset;
+            while (length < stride && !bcf_float_is_vector_end(data[length])) length++;
+        }
+        if (length <= 1) continue;
+        char loc[128];
+        record_location(hdr, record, loc, sizeof(loc));
+        snprintf(error, error_size, "%s: %s/%s has %d values for header Number=%u at %s%s%s",
+                 reader_name, info ? "INFO" : "FORMAT", bcf_hdr_int2id(hdr, BCF_DT_ID, header_id),
+                 length, (unsigned)bcf_hdr_id2number(hdr, header_class, header_id), loc,
+                 info ? "" : " sample ", info ? "" : hdr->samples[sample]);
+        return 0;
+    }
+    return 1;
+}
+
 duckhts_bcf_decode_status_t duckhts_bcf_decode_status(
     const char *reader_name, const char *field_class, const char *tag,
     bcf_hdr_t *hdr, bcf1_t *record, int ret, char *error, size_t error_size) {

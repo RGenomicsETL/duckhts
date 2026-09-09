@@ -75,6 +75,14 @@ int duckhts_bcf_check_format_width(const char *reader_name, const char *tag,
                                   bcf_hdr_t *hdr, bcf1_t *record, int values,
                                   int samples, char *error, size_t error_size);
 
+/* Decoded numeric scalar fields may contain at most one element per sample
+ * (one vector for INFO). Missing elements count; vector-end padding does not.
+ * Lists and GT are exempt. FORMAT count must first pass check_format_width. */
+int duckhts_bcf_check_scalar_count(bcf_hdr_t *hdr, bcf1_t *record,
+                                   duckhts_bcf_field_class_t field_class,
+                                   int header_id, int header_type, const void *values, int count,
+                                   const char *reader_name, char *error, size_t error_size);
+
 typedef enum {
     DUCKHTS_BCF_DECODE_OK,
     DUCKHTS_BCF_DECODE_TYPE_MISMATCH,

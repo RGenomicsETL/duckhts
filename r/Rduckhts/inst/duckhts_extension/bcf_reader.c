@@ -477,13 +477,17 @@ static int bcf_handle_decode_diagnostic(duckhts_bcf_decode_policy_t policy, cons
     return 1;
 }
 
-static int bcf_check_decode_ret(const char *reader_name, const char *field_class,
-                                const char *tag, bcf_hdr_t *hdr, bcf1_t *rec, int ret,
-                                duckhts_bcf_decode_policy_t policy, char *err, size_t err_size) {
+static int bcf_check_info_values(const field_meta_t *field, bcf_hdr_t *hdr, bcf1_t *rec,
+                                  const void *values, int *count,
+                                  duckhts_bcf_decode_policy_t policy, char *err, size_t err_size) {
     duckhts_bcf_decode_status_t status = duckhts_bcf_decode_status(
-        reader_name, field_class, tag, hdr, rec, ret, err, err_size);
-    return status == DUCKHTS_BCF_DECODE_OK ||
-        (status == DUCKHTS_BCF_DECODE_TYPE_MISMATCH && bcf_handle_decode_diagnostic(policy, err));
+        "read_bcf", "INFO", field->name, hdr, rec, *count, err, err_size);
+    if (status == DUCKHTS_BCF_DECODE_FATAL) return 0;
+    if (status == DUCKHTS_BCF_DECODE_OK &&
+        duckhts_bcf_check_scalar_count(hdr, rec, DUCKHTS_BCF_FIELD_INFO, field->header_id,
+            field->header_type, values, *count, "read_bcf", err, err_size)) return 1;
+    *count = 0;
+    return bcf_handle_decode_diagnostic(policy, err);
 }
 
 
@@ -1854,17 +1858,18 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                                                                       &info_i32[field_idx],
                                                                       &info_n_values[field_idx]);
                         }
+                        if (!bcf_check_info_values(field, init->scan.hdr, init->rec,
+                                info_i32[field_idx], &info_ret[field_idx],
+                                bind->decode_error_policy, scan_err, sizeof(scan_err))) {
+                            duckdb_function_set_error(info, scan_err);
+                            init->done = 1;
+                            scan_error = 1;
+                            break;
+                        }
                         info_loaded[field_idx] = 1;
                     }
                     values = info_i32[field_idx];
                     ret_info = info_ret[field_idx];
-                    if (!bcf_check_decode_ret("read_bcf", "INFO", tag, init->scan.hdr, init->rec,
-                                              ret_info, bind->decode_error_policy, scan_err, sizeof(scan_err))) {
-                        duckdb_function_set_error(info, scan_err[0] ? scan_err : "read_bcf: failed to decode INFO field");
-                        init->done = 1;
-                        scan_error = 1;
-                        break;
-                    }
 
                     if (!duckhts_bcf_field_int32(vec, row_idx, values, ret_info, proj_col->is_list)) goto list_error;
                 }
@@ -1889,17 +1894,18 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                                                                       &info_f32[field_idx],
                                                                       &info_n_values[field_idx]);
                         }
+                        if (!bcf_check_info_values(field, init->scan.hdr, init->rec,
+                                info_f32[field_idx], &info_ret[field_idx],
+                                bind->decode_error_policy, scan_err, sizeof(scan_err))) {
+                            duckdb_function_set_error(info, scan_err);
+                            init->done = 1;
+                            scan_error = 1;
+                            break;
+                        }
                         info_loaded[field_idx] = 1;
                     }
                     values = info_f32[field_idx];
                     ret_info = info_ret[field_idx];
-                    if (!bcf_check_decode_ret("read_bcf", "INFO", tag, init->scan.hdr, init->rec,
-                                              ret_info, bind->decode_error_policy, scan_err, sizeof(scan_err))) {
-                        duckdb_function_set_error(info, scan_err[0] ? scan_err : "read_bcf: failed to decode INFO field");
-                        init->done = 1;
-                        scan_error = 1;
-                        break;
-                    }
 
                     if (!duckhts_bcf_field_float(vec, row_idx, values, ret_info, proj_col->is_list)) goto list_error;
                 }
@@ -1925,17 +1931,18 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                                                                        &info_str[field_idx],
                                                                        &info_n_values[field_idx]);
                         }
+                        if (!bcf_check_info_values(field, init->scan.hdr, init->rec,
+                                info_str[field_idx], &info_ret[field_idx],
+                                bind->decode_error_policy, scan_err, sizeof(scan_err))) {
+                            duckdb_function_set_error(info, scan_err);
+                            init->done = 1;
+                            scan_error = 1;
+                            break;
+                        }
                         info_loaded[field_idx] = 1;
                     }
                     value = info_str[field_idx];
                     ret_info = info_ret[field_idx];
-                    if (!bcf_check_decode_ret("read_bcf", "INFO", tag, init->scan.hdr, init->rec,
-                                              ret_info, bind->decode_error_policy, scan_err, sizeof(scan_err))) {
-                        duckdb_function_set_error(info, scan_err[0] ? scan_err : "read_bcf: failed to decode INFO field");
-                        init->done = 1;
-                        scan_error = 1;
-                        break;
-                    }
 
                     if (!duckhts_bcf_field_string(vec, row_idx, ret_info > 0 ? value : NULL, proj_col->is_list)) goto list_error;
                 }

@@ -2,6 +2,10 @@
 
 # duckhts 1.5.1.9000
 
+- reject oversized numeric scalar INFO/FORMAT payloads through decode_error_policy;
+  null/warn withhold the affected tag for the record instead of truncating values.
+  Missing elements count toward scalar cardinality; vector-end padding does not
+
 - measure selected genotype FORMAT materialization and calls-unprojected scans on
   registered GIAB records, with independent slot counts, complete duplicate-preserving
   comparisons and corruption controls; retain matched HPRC GT-only benchmark results

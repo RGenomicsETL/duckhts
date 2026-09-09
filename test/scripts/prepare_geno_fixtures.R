@@ -5,7 +5,8 @@ prepare_geno_fixtures <- function() {
   stopifnot(nzchar(Sys.which("bcftools")), nzchar(Sys.which("bgzip")))
   run <- function(args) stopifnot(system2("bcftools", shQuote(args)) == 0L)
   outputs <- character()
-  for (source in c("test/data/geno_calls.vcf", "test/data/geno_format.vcf")) {
+  for (source in c("test/data/geno_calls.vcf", "test/data/geno_format.vcf",
+                   "test/data/bcf_scalar_counts.vcf")) {
     stopifnot(file.exists(source))
     bcf <- sub("vcf$", "bcf", source)
     vcf <- paste0(source, ".gz")

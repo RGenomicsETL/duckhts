@@ -1,6 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
 
+- honor decode_error_policy for oversized numeric scalar INFO/FORMAT values in
+  bundled readers; null/warn return NULL for the affected tag on that record,
+  and error reports the tag, coordinate and observed value count
+
 - select extra typed FORMAT fields through rduckhts_geno(format_fields = c("AD", "DP", "GQ")),
   attached to each call with missing-item positions and absent-GT calls retained.
   Bundled readers use declared INFO/FORMAT header shapes without implicit tag-name repair
