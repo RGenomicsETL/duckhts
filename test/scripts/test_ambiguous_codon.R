@@ -14,11 +14,13 @@ check_codon_matrix <- function(cases) {
     case_index <- case_index + 1L
     case <- cases[[case_index]]
     codon <- paste0(first, second, third)
-    stopifnot(setequal(names(case), c('id', 'cds', 'table', 'edits', 'variants')),
+    stopifnot(!anyDuplicated(names(case)),
+      setequal(names(case), c('id', 'cds', 'table', 'edits', 'variants')),
       identical(case$id, paste(table, codon, sep = '/')),
       identical(case$cds, paste0('ATG', codon, 'TAA')), is.numeric(case$table),
       identical(as.numeric(case$table), table),
       is.list(case$edits), length(case$edits) == 0L, is.data.frame(case$variants),
+      !anyDuplicated(names(case$variants)),
       setequal(names(case$variants), c('id', 'position1', 'reference', 'alternate')))
     variant_index <- 0L
     for (position in 1:3) for (alternate in bases[1:4]) {
@@ -71,6 +73,17 @@ codon_matrix_controls <- function(cases) {
     value <- changed[[1L]]$variants[[field]][1L]
     changed[[1L]]$variants[[field]][1L] <- if (is.numeric(value)) value + 1L else paste0(value, 'X')
     controls[paste0('variant_', field)] <- rejected(changed)
+  }
+  # Append raw JSON properties: toJSON renames duplicate R list names, which
+  # would test a different input from a source object with repeated properties.
+  encoded <- jsonlite::toJSON(cases[[1L]], auto_unbox = TRUE, dataframe = 'rows')
+  for (field in c('id', 'cds', 'table', 'edits', 'variants')) {
+    duplicate <- jsonlite::toJSON(cases[[1L]][field], auto_unbox = TRUE, dataframe = 'rows')
+    text <- paste0(substr(encoded, 1L, nchar(encoded) - 1L), ',', substring(duplicate, 2L))
+    changed <- cases
+    changed[[1L]] <- jsonlite::fromJSON(text)
+    stopifnot(anyDuplicated(names(changed[[1L]])) > 0L)
+    controls[paste0('duplicate_case_', field)] <- rejected(changed)
   }
   stopifnot(all(controls))
   controls

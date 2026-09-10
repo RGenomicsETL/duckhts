@@ -6,7 +6,8 @@
   pinned VEP 116; retain independent and singleton-phased disagreements, canonical
   controls, absent results and comparator corruption checks; publish complete
   comparison pairs as Parquet with network-free reconstruction of the exact
-  codon/table/substitution matrix and its comparisons
+  codon/table/substitution matrix and its comparisons; reject duplicate source
+  fields
 
 - reject aliased translation metadata before writing borrowed CDS, peptide or
   reference-edit storage
