@@ -6847,6 +6847,220 @@ TEST cds_edit_n_insertion_anchor_controls(void) {
     PASS();
 }
 
+/* VEP 116 TVA::peptide rejects N in the parsed REF, independently of codon
+ * consensus. Exact original-record observers prove all positive and negative
+ * predicates here: CN>C, CNGC>C and CN>CTAGC in GCN context, plus deletions in
+ * an ATN start, TAN terminal codon, and one-base terminal partial codon.
+ * Literal Haplosaurus replay of CN>C still applies the canonical ALT C. */
+TEST coding_context_removed_reference_n(void) {
+    static const struct {
+        const char *cds;
+        const char *reference;
+        const char *alternate;
+        uint32_t position1;
+        duckvep_sequence_delta_t expected;
+    } cases[] = {
+        { "ATGGCTGCCTAA", "CT", "C", 5u, { .frameshift = 1u, .missense = 1u } },
+        { "ATGGCNGCCTAA", "CN", "C", 5u, { .frameshift = 1u } },
+        { "ATGGCNGCCTAA", "CNGC", "C", 5u, { .inframe_deletion = 1u } },
+        { "ATGGCNGCCTAA", "CN", "CTAGC", 5u, { .coding_unknown = 1u } },
+        { "ATNGCNGCCTAA", "TN", "T", 2u, { .start_lost = 1u, .frameshift = 1u } },
+        { "ATGGCTGCCTAN", "AN", "A", 11u, { .stop_lost = 1u, .frameshift = 1u } },
+        { "ATGGCNGCCN", "CN", "C", 9u, { .partial_codon = 1u, .coding_unknown = 1u } }
+    };
+    size_t comparisons = 0u;
+    for (size_t c = 0u; c < sizeof cases / sizeof cases[0]; c++) {
+        for (int strand = 1; strand >= -1; strand -= 2) {
+            uint8_t cds[32];
+            size_t cds_length = strlen(cases[c].cds);
+            memcpy(cds, cases[c].cds, cds_length);
+            struct kprop_coding s = {0};
+            s.cds = cds;
+            s.strand = (int8_t)strand;
+            s.tstart = s.cds_s = s.es = 11u;
+            s.tend = s.cds_e = s.ee = 10u + (uint32_t)cds_length;
+            s.ecds = 1u;
+            s.ecde = (uint32_t)cds_length;
+            s.excnt = 1u;
+            kprop_wire_coding_scene(&s, (uint32_t)cds_length);
+            uint64_t flank_offset = 0u;
+            uint32_t flank_length = 0u;
+            s.seq.flanks_complete = 1u;
+            s.seq.pre_cds_offset = s.seq.post_cds_offset = &flank_offset;
+            s.seq.pre_cds_length = s.seq.post_cds_length = &flank_length;
+            s.rlen = (uint16_t)strlen(cases[c].reference);
+            s.alen = (uint16_t)strlen(cases[c].alternate);
+            s.vpos = kprop_genomic_pos_for_cds(&s, strand > 0
+                ? cases[c].position1 : cases[c].position1 + s.rlen - 1u);
+            s.vend = s.vpos + s.rlen - 1u;
+            s.vkind = s.alen < s.rlen ? DUCKVEP_KIND_DEL : DUCKVEP_KIND_INDEL;
+            s.aoff = s.rlen;
+            kprop_fill_variant_alt_from_tx(&s, 0u,
+                (const uint8_t *)cases[c].reference, s.rlen);
+            kprop_fill_variant_alt_from_tx(&s, s.aoff,
+                (const uint8_t *)cases[c].alternate, s.alen);
+            kprop_fill_expected_cds(&s, cases[c].position1, s.rlen,
+                (const uint8_t *)cases[c].alternate, s.alen);
+
+            duckvep_haplotype_edit_t edit;
+            ASSERT_EQ(DUCKVEP_CDS_EDIT_OK,
+                duckvep_variant_cds_edit_build(&s.tx, &s.ex, &s.seq, &s.v,
+                    0u, 0u, s.strand, &edit));
+            uint8_t alt_cds[32], ref_peptide[16], alt_peptide[16];
+            duckvep_coding_context_t ctx;
+            ASSERT_EQ(DUCKVEP_VARIANT_CODING_CONTEXT_OK,
+                duckvep_variant_feature_coding_context_build_prepared(
+                    &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, s.strand, NULL,
+                    UINT32_MAX, NULL, &edit, 1u, alt_cds, sizeof alt_cds,
+                    ref_peptide, sizeof ref_peptide, alt_peptide, sizeof alt_peptide, &ctx));
+            ASSERT_EQ(c != 0u, ctx.feature_ref_peptide_unavailable);
+            duckvep_sequence_delta_t delta;
+            ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+            ASSERT(delta.valid);
+            ASSERT_EQ(cases[c].expected.frameshift, delta.frameshift);
+            ASSERT_EQ(cases[c].expected.missense, delta.missense);
+            ASSERT_EQ(cases[c].expected.inframe_deletion, delta.inframe_deletion);
+            ASSERT_EQ(cases[c].expected.coding_unknown, delta.coding_unknown);
+            ASSERT_EQ(cases[c].expected.start_lost, delta.start_lost);
+            ASSERT_EQ(cases[c].expected.stop_lost, delta.stop_lost);
+            ASSERT_EQ(cases[c].expected.partial_codon, delta.partial_codon);
+            ASSERT(!delta.inframe_insertion && !delta.protein_altering &&
+                !delta.start_retained && !delta.stop_retained &&
+                !delta.stop_gained && !delta.synonymous);
+            ASSERT_EQ(0u, delta.ref_aa);
+            ASSERT_EQ(0u, delta.alt_aa);
+            if (c != 0u) {
+                duckvep_hgvs_protein_fact_t fact;
+                ASSERT_EQ(DUCKVEP_HGVS_MISSING_PEPTIDE,
+                    duckvep_hgvs_protein_fact_build(&ctx, &delta, &fact));
+            }
+
+            /* Both materialized physical replay and raw full-span replacement
+             * preserve sequence facts without a contributor's peptide gate. */
+            ASSERT_EQ(DUCKVEP_VARIANT_CODING_CONTEXT_OK,
+                duckvep_variant_physical_coding_context_build(&s.tx, &s.ex, &s.seq,
+                    &s.v, 0u, 0u, s.strand, &edit, 1u, alt_cds, sizeof alt_cds,
+                    ref_peptide, sizeof ref_peptide, alt_peptide, sizeof alt_peptide, &ctx));
+            ASSERT(!ctx.feature_ref_peptide_unavailable);
+            ASSERT_EQ(s.expect_len, ctx.alt_cds_len);
+            ASSERT_MEM_EQ(s.expect_cds, alt_cds, s.expect_len);
+            duckvep_haplotype_edit_t raw = {
+                .cds_start = cases[c].position1, .ref = s.abytes, .ref_len = s.rlen,
+                .alt = s.abytes + s.aoff, .alt_len = s.alen, .variant_strand = 1
+            };
+            duckvep_haplotype_result_t replay;
+            size_t replay_length;
+            ASSERT_EQ(DUCKVEP_HAPLOTYPE_OK,
+                duckvep_haplotype_apply_cds_edits(cds, cds_length, &raw, 1u, s.strand,
+                    alt_cds, sizeof alt_cds, &replay_length, &replay));
+            ASSERT_EQ(s.expect_len, replay_length);
+            ASSERT_MEM_EQ(s.expect_cds, alt_cds, replay_length);
+            uint64_t source_id = c + 1u;
+            duckvep_haplotype_block_t component;
+            size_t component_count;
+            ASSERT_EQ(DUCKVEP_HAPLOTYPE_OK,
+                duckvep_haplotype_compose_replacements(cds, cds_length, &raw, 1u,
+                    s.strand, &source_id, alt_cds, sizeof alt_cds, &component, 1u,
+                    &component_count, &replay));
+            ASSERT_EQ(1u, component_count);
+            ASSERT_EQ(1u, replay.applied_edits);
+            ASSERT_EQ(s.expect_len, replay.cds_len);
+            ASSERT_MEM_EQ(s.expect_cds, alt_cds, replay.cds_len);
+            ASSERT_EQ(c + 1u, source_id);
+            if (c == 1u) {
+                /* Prepared geometry cannot authorize reading beyond the
+                 * separately borrowed feature-allele slices. */
+                duckvep_event_t malformed;
+                duckvep_event_load(&s.v, 0u, &malformed);
+                malformed.ref_diff_length = 3u;
+                ASSERT_EQ(DUCKVEP_VARIANT_CODING_CONTEXT_INVALID_EVENT,
+                    duckvep_variant_feature_coding_context_build_prepared(
+                        &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, s.strand, &malformed,
+                        UINT32_MAX, &edit, &edit, 1u, alt_cds, sizeof alt_cds,
+                        ref_peptide, sizeof ref_peptide, alt_peptide, sizeof alt_peptide, &ctx));
+                ASSERT(!ctx.feature_ref_peptide_unavailable && ctx.ref_cds == NULL);
+
+                /* An unprojected N cannot be checked against the CDS. Invalid
+                 * REF letters must not disappear behind OUT_OF_CDS either. */
+                uint8_t outside_ref[2] = { 'C', 'C' };
+                static const uint8_t outside_alt = 'C';
+                static const uint8_t outside_bases[] = { 'C', 'N', 'R' };
+                for (size_t i = 0u; i < sizeof outside_bases; i++) {
+                    outside_ref[1] = outside_bases[i];
+                    duckvep_event_t outside;
+                    ASSERT(duckvep_event_prepare_replacement(s.tend + 1u,
+                        outside_ref, 2u, &outside_alt, 1u, &outside));
+                    duckvep_prepared_cds_allele_t allele = {
+                        .event = &outside, .ref = outside_ref, .ref_length = 2u,
+                        .alt = &outside_alt, .alt_length = 1u, .variant_strand = 1
+                    };
+                    ASSERT_EQ(i == 0u ? DUCKVEP_CDS_EDIT_OUT_OF_CDS
+                                      : DUCKVEP_CDS_EDIT_INVALID_ALLELE,
+                        duckvep_cds_edit_build_prepared_allele(&s.tx, &s.ex, &s.seq,
+                            0u, s.strand, &allele, UINT32_MAX, &edit));
+                }
+                static const struct {
+                    uint8_t ref_base, cds_base, alt_base;
+                    uint16_t alt_length;
+                    duckvep_cds_edit_status_t projection;
+                    duckvep_haplotype_status_t replay;
+                } invalid[] = {
+                    { 'A', 'N', 'C', 1u, DUCKVEP_CDS_EDIT_REF_MISMATCH,
+                      DUCKVEP_HAPLOTYPE_REF_MISMATCH },
+                    { 'N', 'A', 'C', 1u, DUCKVEP_CDS_EDIT_REF_MISMATCH,
+                      DUCKVEP_HAPLOTYPE_REF_MISMATCH },
+                    { 'R', 'N', 'C', 1u, DUCKVEP_CDS_EDIT_INVALID_ALLELE,
+                      DUCKVEP_HAPLOTYPE_INVALID_BASE },
+                    { 'N', 'N', 'N', 3u, DUCKVEP_CDS_EDIT_INVALID_ALLELE,
+                      DUCKVEP_HAPLOTYPE_INVALID_BASE },
+                    { 'N', 'N', 'R', 1u, DUCKVEP_CDS_EDIT_INVALID_ALLELE,
+                      DUCKVEP_HAPLOTYPE_INVALID_BASE },
+                    { 'N', 'N', 'C', 2u, DUCKVEP_CDS_EDIT_INVALID_ALLELE,
+                      DUCKVEP_HAPLOTYPE_INVALID_BASE }
+                };
+                size_t n_index = strand > 0 ? 1u : 0u;
+                for (size_t i = 0u; i < sizeof invalid / sizeof invalid[0]; i++) {
+                    /* Invalid letters are deliberately literal in both
+                     * orientations; N matching is never wildcard matching. */
+                    s.abytes[n_index] = invalid[i].ref_base;
+                    cds[5] = invalid[i].cds_base;
+                    s.alen = invalid[i].alt_length;
+                    for (uint16_t j = 0u; j < s.alen; j++)
+                        s.abytes[s.aoff + j] = invalid[i].alt_base;
+                    s.vkind = s.alen == s.rlen ? DUCKVEP_KIND_MNV : DUCKVEP_KIND_DEL;
+                    raw.alt_len = s.alen;
+                    ASSERT_EQ(invalid[i].projection,
+                        duckvep_variant_cds_edit_build(&s.tx, &s.ex, &s.seq, &s.v,
+                            0u, 0u, s.strand, &edit));
+                    memset(alt_cds, 0x5a, sizeof alt_cds);
+                    ASSERT_EQ(invalid[i].replay,
+                        duckvep_haplotype_apply_cds_edits(cds, cds_length, &raw, 1u,
+                            s.strand, alt_cds, sizeof alt_cds, &replay_length, &replay));
+                    ASSERT_EQ(0u, replay_length);
+                    ASSERT_EQ(0u, replay.applied_edits);
+                    ASSERT_EQ(0x5a, alt_cds[0]);
+                    ASSERT_EQ(invalid[i].replay,
+                        duckvep_haplotype_compose_replacements(cds, cds_length, &raw, 1u,
+                            s.strand, &source_id, alt_cds, sizeof alt_cds, &component, 1u,
+                            &component_count, &replay));
+                    ASSERT_EQ(0u, component_count);
+                    ASSERT_EQ(0u, replay.applied_edits);
+                    ASSERT_EQ(0x5a, alt_cds[0]);
+                }
+            }
+            comparisons++;
+        }
+    }
+    ASSERT_EQ(14u, comparisons);
+    ASSERT(duckvep_feature_allele_peptide_eligible(NULL, 0u));
+    ASSERT(duckvep_feature_allele_peptide_eligible((const uint8_t *)"aCgTu", 5u));
+    ASSERT(!duckvep_feature_allele_peptide_eligible((const uint8_t *)"N", 1u));
+    ASSERT(!duckvep_feature_allele_peptide_eligible((const uint8_t *)"R", 1u));
+    ASSERT(!duckvep_feature_allele_peptide_eligible(NULL, 1u));
+    PASS();
+}
+
 /* VariationEffect::_ins_del_stop_altered translates the original CDS-end
  * offset after the edit, even when that endpoint contains N. Here inserting C
  * before the last N makes NCN -> NCCN: the local peptide is XX, and the

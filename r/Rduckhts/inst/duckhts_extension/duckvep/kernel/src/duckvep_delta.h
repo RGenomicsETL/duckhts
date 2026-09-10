@@ -166,6 +166,14 @@ typedef struct duckvep_prepared_cds_allele {
     int8_t                 variant_strand;
 } duckvep_prepared_cds_allele_t;
 
+/* TVA peptide eligibility for a parsed feature allele. Empty deletion alleles
+ * are eligible; N is not, even when its surrounding codon has a consensus
+ * residue. Preserve the kernel's normalization of lowercase DNA and U to T.
+ * This is distinct from literal REF matching for physical sequence edits. */
+DUCKVEP_INTERNAL_API int duckvep_feature_allele_peptide_eligible(
+    const uint8_t *bases,
+    uint16_t       length);
+
 /* Borrowed complete spliced-transcript sequence view for a sequence-backed
  * coding transcript. The prepared CDS may contain positive start-phase
  * padding; `phase_offset` hides those synthetic bytes from cDNA addressing.
@@ -277,6 +285,11 @@ typedef struct duckvep_coding_context {
     uint8_t ref_first_stop_known;
     uint8_t compatibility_profile; /* duckvep_compat_profile_t */
     uint8_t feature_length_relation; /* duckvep_feature_length_relation_t */
+    /* An independent length-changing feature with N in its parsed REF has no
+     * TVA reference peptide, even when its CDS codon has a consensus residue.
+     * Physical/compound contexts leave this clear; their sequence operands
+     * do not inherit any contributor's uploaded-allele eligibility. */
+    uint8_t feature_ref_peptide_unavailable;
     uint8_t cds_phase_padding; /* Known synthetic N prefix, not unknown genomic REF. */
     uint32_t ref_first_stop_position1;
     uint32_t ref_first_changed_codon, ref_last_changed_codon;

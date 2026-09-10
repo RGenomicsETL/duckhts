@@ -156,13 +156,23 @@ result fields from its original correctness worker and all three timed
 workers, including every full-output fingerprint; Parquet round trips
 preserve those metrics and types. Rendering verifies the pinned bundle
 and receipt identities, binds the retained metrics to both ledgers, and
-checks the exact workload configuration and matching benchmark-driver,
-reference-FASTA and FASTA-index hashes across each capture pair. The
-driver is independently pinned; FASTA/index identities use the exact
-original job-directory paths without reopening historical files. Missing
-or altered input hashes and a changed sample count are rejected by seven
-receipt corruption controls. Rendering then reruns the complete typed,
-exact-key comparison.
+checks the exact workload configuration. The [original-input
+capsule](data/duckvep_haplotypes_indel_inputs.jsonl.gz) preserves 32
+original worker jobs, four benchmark receipts, their four FASTA/index
+pairs, and both registered fixtures. Each original receipt is bound to
+its capture and ledger; every job’s actual bytes must match that
+receipt, and the correctness job must also match its capture’s input
+hash. Decoded jobs must contain the exact registered reference and event
+table. Their complete semantic fields agree across revisions and passes,
+with each pass’s correctness flag checked separately; only named binary,
+output and reference-file paths are excluded from that equality.
+Extension identities are checked against their own revision, not equated
+across revisions. The driver remains independently pinned, and retained
+FASTA/index bytes must match both receipt layers. Original paths are
+identifiers only: rendering does not reopen historical files. Input
+controls reject missing, malformed or altered job hashes and
+self-consistently rehashed jobs with changed events or configuration.
+Rendering then reruns the complete typed, exact-key comparison.
 
 | transcripts | mode                | joined_rows | missing_keys | changed_rows | changed_other_events | unexplained_rows |
 |------------:|:--------------------|------------:|-------------:|-------------:|---------------------:|-----------------:|

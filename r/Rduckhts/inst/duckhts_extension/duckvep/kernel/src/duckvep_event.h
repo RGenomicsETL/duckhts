@@ -146,6 +146,9 @@ static inline int duckvep_event_feature_alleles(
     raw_ref_length = batch->ref_length[idx];
     raw_alt_length = batch->alt_length[idx];
     if (offset > raw_ref_length || offset > raw_alt_length) return 0;
+    if (raw_ref_length != raw_alt_length &&
+        (event->ref_diff_length > raw_ref_length - offset ||
+         event->alt_diff_length > raw_alt_length - offset)) return 0;
 
     *ref = batch->allele_bytes + batch->ref_offset[idx] + offset;
     *alt = batch->allele_bytes + batch->alt_offset[idx] + offset;

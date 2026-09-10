@@ -139,9 +139,10 @@ duckvep_haplotype_status_t duckvep_haplotype_block_frame_intersects(
  * storage must be separate from the input and sequence buffers.
  *
  * `ref`/`alt` alleles are oriented from variant_strand to transcript_strand
- * before validation/application. Bases must be A/C/G/T (case-insensitive; U is
- * accepted as T). The source CDS may contain N, but edited/reference-validated
- * positions must match A/C/G/T after orientation.
+ * before validation/application. ALT and equal-length REF must be A/C/G/T
+ * (case-insensitive; U is accepted as T). A length-changing REF may also
+ * contain N, which must match literal N in the source CDS after orientation;
+ * it is never a wildcard. Unedited source CDS bases may contain N.
  */
 duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
     const uint8_t                    *ref_cds,

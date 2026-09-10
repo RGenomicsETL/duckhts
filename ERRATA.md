@@ -1874,7 +1874,7 @@ For CDS `ATGGCNGCCTAA`, table 1, original CDS position 4 `G>GGCC`, VEP
 returns `protein_altering_variant` and `p.Ala2delinsGlyPro`. Consensus
 translation also applies to length-changing local peptide operands. A blanket
 rejection of genomic N loses these facts. Changed alleles still undergo their
-own eligibility check: an erased, literally matching VCF insertion anchor N
+own eligibility check: an erased, literally matching VCF indel anchor N
 is distinct from N inside the changed payload. Position 6 `N>NGCC` in this
 CDS yields `inframe_insertion` and `p.Ala2dup`; N is not a wildcard when
 validating the uploaded REF against the model or genomic reference.
@@ -1888,6 +1888,55 @@ Neither behavior means inserting `GCC` after trimming N. The independent-VEP
 and decoded-singleton expectations above therefore do not establish raw-source
 equivalence. Cross-route diagnostics retain these contrasts, while R tests
 check the raw mode's explicit unavailable-projection contract separately.
+
+Removed REF ambiguity has a separate eligibility rule. For the same CDS,
+original position 5 `CN>C` becomes VEP feature `N/-`: the literal deletion is
+valid and `frameshift_variant` is true, but the reference allele has no peptide
+and HGVSp is NULL. The canonical control `ATGGCTGCCTAA`, position 5 `CT>C`,
+has the same emitted SO and `p.Ala3ProfsTer?`. Its raw missense predicate is
+also true; the N-reference case's is false. Consensus translation of the CDS
+does not create an eligible reference-allele peptide. Actual Haplosaurus accepts
+the complete ALT `C` in both original records with GT `1|1`, rebuilding
+`ATGGCGCCTAA` / `MAP` with both carriers and the source contributor retained.
+Physical replay therefore accepts literal matching N in a length-changing REF,
+while independent peptide predicates preserve parsed-allele availability.
+This does not relax alternate-payload or equal-length-substitution validation.
+
+An N retained in both uploaded alleles is not a removed N. For CDS
+`ATGNAAGCCTAA`, genomic position 14 `NAAG>N`, VEP strips the matching anchor
+and annotates `AAG/-` at positions 15–17 as `inframe_deletion`, `p.Ala3del`.
+The same literal-anchor rule applies to deletion and replacement records as to
+insertions. Mismatched anchors and N in the changed payload remain distinct
+validation cases.
+
+For CDS `ATGNNAGCCTAA`, genomic position 13 `G>GAC`, VEP's post-HGVS
+`_get_fs_peptides` produces reference A and alternate X at amino-acid position 3.
+Its formatter converts Xaa to Ter before deciding whether a frameshift starts
+with an immediate stop, yielding `p.Ala3Ter`, not `p.Ala3TerfsTer?`.
+This is a pinned notation policy, not evidence that an ambiguous codon is a
+biological stop; it does not change translation or consequence predicates.
+The internal strict profile retains Xaa frameshift notation.
+
+The [translation witnesses](test/duckvep/conformance/data/indel_translation_witnesses.jsonl.gz)
+retain these original inputs, actual VEP CLI and Haplosaurus outputs, direct TVA
+observations, diagnostics and reproduction scripts, together with the alternate
+translation-table controls below. Seven fixed predicate cases include an in-frame
+deletion, unavailable coding contrast, start loss, stop loss and terminal partial
+codon; native tests additionally check their reverse-complement orientations.
+The capsule has 106 byte-exact files and SHA256
+`660cd81b5c62ea45dc0c4c2d7deddba671d019ab5a10d7d5a1c7a618091a8dc6`.
+Original receipt pins are
+`396a66d709a0248230a1f1d6e4a4aac45c32a67183efae50036aa8c6c4de05b5`
+for removed REF and
+`bdc81aa4e8a1a5783c76ff5e43d37035af5e2eb5f5872f29beee751744e3a560`
+for alternate-table observations; the seven-case predicate receipt is
+`12d56d937587f4cb9e348e011cf778a44384a2b28f4de7633d4e62b2c634e00c`.
+The retained-anchor and immediate-stop diagnostic receipt is
+`2e30edccd140181909cd529d374d4700a997dfcb93adbd6dee2387491f6c8dd5`;
+it retains all 168,000 independent comparison rows from its input checkpoint,
+112 repeated oracle observations, and two direct TVA observations.
+These are unsigned diagnostic witnesses,
+not general conformance or claims of an upstream biological defect.
 
 Raw predicates and emitted SO terms are different observations. The
 [retained predicate witnesses](test/duckvep/conformance/data/indel_predicate_witnesses)
@@ -1941,22 +1990,24 @@ error rates or certification of compound, reverse-strand or phase-padded indels.
 
 The [baseline](test/duckvep/conformance/data/ambiguous_indel_baseline) contains
 260,088 HGVSp and 70,532 SO disagreements. The
-[consensus correction](test/duckvep/conformance/data/ambiguous_indel_consensus)
-contains 164,454 HGVSp and 39,024 SO disagreements: 95,634 and 31,508 respectively
-are resolved, with no newly failing comparison and no changed keyed oracle
-expectation. **Both conformance commands still fail.** Each independent route
-retains 18,107 HGVSp and 19,512 SO disagreements; each decoded singleton route
-retains 18,107 HGVSp disagreements, and each raw route retains 27,906.
-All remaining independent SO disagreements involve N in the removed source
-span. Even the 86,016 canonical-codon controls retain 2,113 HGVSp disagreements
-per route; this correction does not certify their nonstandard-table protein
-formatting. Raw-mode differences are retained under the distinction above.
+[codon-consensus checkpoint](test/duckvep/conformance/data/ambiguous_indel_consensus)
+contains 164,454 HGVSp and 39,024 SO disagreements. The
+[translation/REF-eligibility checkpoint](test/duckvep/conformance/data/ambiguous_indel_translation)
+contains 62,172 HGVSp and zero SO disagreements: 102,282 HGVSp and all 39,024 SO
+failures from the preceding checkpoint are resolved. The source events, oracle
+expectations and comparison keys are unchanged, with no newly failing comparison.
+**Indel conformance still fails.** Each independent and decoded singleton route
+retains 2,937 HGVSp disagreements; each raw route retains 22,275. Even the
+86,016 canonical-codon controls retain 206 HGVSp disagreements per route.
+Raw-mode differences remain under the distinction above. Zero SO disagreements
+in this finite matrix do not certify other transcript structures or compound SO.
 
 The bundles preserve every pair, raw source/oracle observations, warnings,
 controls and separately identified source/binary hashes. The network-free audit
 pins their reviewed receipts outside those receipts and reconstructs the entire
-matrix and its nonzero verdicts. Its default paired check requires identical
-source and oracle expectations at each key and rejects newly failing HGVSp or
+matrix and its nonzero verdicts. Its default check compares each adjacent
+checkpoint, requires identical source and oracle expectations at each key, and
+rejects newly failing HGVSp or
 SO comparisons, including count-preserving exchanges. They remain unsigned
 diagnostic evidence.
 The 28,800-SNV regression matrix retains zero disagreements in its 230,400
@@ -2142,23 +2193,40 @@ Source anchors: the separate VEP 116 consequence and `hgvs_protein` call paths,
 `duckvep_sequence_delta_apply_consequence_flags` /
 `duckvep_sequence_delta_consequence_flags_complete_for_hgvs`.
 
-## Late protein-stop search ignores the transcript codon table
+## Frameshift alternate translation and late stop search use standard table 1
 
 VEP 116 does not use one translation authority throughout protein HGVS. Its ordinary
 transcript consequence and peptide paths honor the transcript's codon table, including
-vertebrate mitochondrial table 2. The late termination search used to append `fsTerN` or
-`extTerN` does not: `_stop_loss_extra_AA()` rebuilds an alternate `Bio::PrimarySeq` and
-calls `$alt_cds->translate()` without a codon-table argument, so BioPerl silently uses
-standard table 1. On mitochondrial transcripts, an alternate `TGA` is consequently a
+vertebrate mitochondrial table 2. `_get_fs_peptides()` and the late termination search
+used to append `fsTerN` or `extTerN` do not: both translate rebuilt alternate CDS
+without a codon-table argument, so BioPerl uses standard table 1. The frameshift
+reference peptide still comes from the transcript's table-specific `_peptide`.
+On mitochondrial transcripts, an alternate `TGA` is consequently a
 stop for the late HGVS search even though it is Trp in the peptide that established the
 frameshift consequence. The formatter searches that complete table-1 translation from
 its beginning. When the first such TGA lies before the affected residue, its computed
 distance is non-positive and VEP prints `Ter?`; the search must not reuse a first-stop
-shortcut proved under table 2. DuckVEP reproduces that inconsistency only in the late
-stop search; all ordinary mitochondrial coding consequences remain table-2 translations.
-`DUCKVEP_COMPAT_HGVS_LATE_STOP_STANDARD_TABLE` is the sole switch, and
-`duckvep_compat_late_stop_codon_table()` is the only code allowed to replace a
-transcript's table for this search. Strict mode retains the transcript table.
+shortcut proved under table 2. DuckVEP applies this policy to frameshift alternate
+residues and the late stop search; ordinary mitochondrial coding consequences remain
+table-2 translations. `DUCKVEP_COMPAT_HGVS_ALTERNATE_CDS_STANDARD_TABLE` and
+`duckvep_compat_hgvs_alternate_codon_table()` define the shared policy. The internal
+strict control retains the transcript table.
+
+Original-VCF controls on CDS `ATGAAAGCCTAA` distinguish these authorities:
+
+| Table | CDS position and original allele | Pinned HGVSp |
+| --- | --- | --- |
+| 2 | 4 `A>AG` | `p.Lys2ArgfsTer?` |
+| 2 | 4 `A>AT` | `p.Lys2IlefsTer?` |
+| 6 | 3 `G>GT` | `p.Lys2Ter` |
+| 9 | 4 `A>AG` | `p.Asn2ArgfsTer?` |
+
+Table 9's reference is `MNA`, while its rebuilt alternate translates to `MRSL`
+under table 1, not table-9 `MSSL`. Table-2 `A>AG` still emits both
+`frameshift_variant` and `stop_gained`; HGVSp's alternate-table policy must not
+change those consequences. The translation-witness capsule above retains ten
+direct TVA/native comparisons, six unchanged controls and complete observations
+for all 224 original alleles across these four models.
 
 The same formatter exposes a precedence state that consequence names alone do not make
 obvious. `_get_hgvs_protein_format()` tests cached `stop_lost` combined with peptide type
@@ -2179,8 +2247,9 @@ authority.
 
 Source anchors: Ensembl Variation 116
 `TranscriptVariationAllele::_get_hgvs_protein_format`,
-`TranscriptVariationAllele::_stop_loss_extra_AA`, and the argument-free
-`Bio::PrimarySeq::translate()` call in that late path.
+`TranscriptVariationAllele::_get_fs_peptides`,
+`TranscriptVariationAllele::_stop_loss_extra_AA`, and their argument-free
+`Bio::PrimarySeq::translate()` calls.
 
 ## DNA duplication projects the copied source before requiring insertion flanks
 

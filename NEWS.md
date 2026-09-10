@@ -2,13 +2,21 @@
 
 # duckhts 1.5.1.9000
 
+- use pinned VEP-116 table-1 alternate translation for frameshift HGVSp while
+  retaining transcript-specific reference peptides and coding consequences;
+  apply its Xaa-to-Ter formatting before selecting immediate-stop notation
+
+- replay literal matching N in length-changing REF alleles while preserving
+  unavailable reference-peptide predicates and NULL independent HGVSp; validate
+  retained N anchors literally for insertions, deletions and replacements
+
 - compare retained indel bundles by exact oracle and failure keys; reject
   count-preserving exchanges of resolved and newly failing comparisons
 
 - report all source-bound indel checkpoint measurements and their unequal
   singleton local-consequence fingerprints; retain complete keyed-output audits
   and comparator corruption controls, with explicit cross-run driver/reference
-  input checks
+  input checks and byte-exact original worker jobs bound to benchmark receipts
 
 - interpret N-containing indel codons with pinned VEP-116 consensus and match
   retained insertion anchors literally; share the checked coding/HGVS paths

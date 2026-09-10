@@ -104,6 +104,103 @@ capture_input_paths <- function(receipt) {
     index = file.path(job_directory, "reference.fa.fai"))
 }
 
+recorded_hash <- function(hashes, path) {
+  stopifnot(is.list(hashes), !is.null(names(hashes)), !anyDuplicated(names(hashes)),
+    is.character(path), length(path) == 1L, !is.na(path))
+  value <- hashes[[path]]
+  stopifnot(is.character(value), length(value) == 1L, !is.na(value),
+    grepl("^[0-9a-f]{64}$", value))
+  value
+}
+
+check_original_job <- function(job, hash, pass, capture, original, ledger, fixture) {
+  configuration <- capture$configuration
+  directory <- dirname(capture$original_job)
+  stem <- paste0(configuration$mode, "_", pass)
+  path <- file.path(directory, paste0(stem, "_job.rds"))
+  stopifnot(hash == recorded_hash(original$sha256, path))
+  if (pass == 0L) stopifnot(hash == recorded_hash(capture$input_sha256, path))
+  stopifnot(identical(names(job), c("transcripts", "samples", "overlap", "mode", "verify",
+      "input", "extension", "shared", "reference_fasta", "reference_length", "result")),
+    identical(job[names(configuration)], configuration), identical(job$verify, pass == 0L),
+    identical(job$reference_length, 99L + 1000L * job$transcripts %/% job$overlap),
+    identical(job$input$reference, fixture$reference), identical(job$input$events, fixture$events),
+    identical(job$reference_fasta, file.path(directory, "reference.fa")),
+    identical(job$shared, file.path(directory, "stream.so")),
+    identical(job$result, file.path(directory, paste0(stem, ".rds"))),
+    all(ledger$extension_sha256 == recorded_hash(original$sha256, job$extension)),
+    all(ledger$native_binary_sha256 == recorded_hash(original$sha256, job$shared)))
+  job[setdiff(names(job), c("extension", "shared", "reference_fasta", "result"))]
+}
+
+capture_original_jobs <- function(capture, ledger, directory) {
+  sha256 <- function(path) digest::digest(file = path, algo = "sha256")
+  job_directory <- dirname(capture$original_job)
+  retained <- file.path(directory, "original", basename(job_directory))
+  receipt_path <- file.path(retained, "receipt.json")
+  hash <- sha256(receipt_path)
+  stopifnot(hash == recorded_hash(capture, "benchmark_receipt_sha256"),
+    all(ledger$receipt_sha256 == hash),
+    hash == recorded_hash(capture$input_sha256, file.path(job_directory, "receipt.json")))
+  original <- jsonlite::fromJSON(receipt_path)
+  stopifnot(original$source_revision == capture$benchmark_source_revision)
+  fixture_paths <- file.path(directory, "fixtures", c("haplotype_benchmark.fa", "haplotype_benchmark.tsv"))
+  for (i in seq_along(fixture_paths)) {
+    suffix <- c("/duckvep-haplotypes/reference.fa", "/duckvep-haplotypes/events.tsv")[i]
+    path <- names(original$sha256)[endsWith(names(original$sha256), suffix)]
+    field <- c("reference_sha256", "events_sha256")[i]
+    stopifnot(length(path) == 1L, sha256(fixture_paths[i]) == recorded_hash(original$sha256, path),
+      all(ledger[[field]] == sha256(fixture_paths[i])))
+  }
+  fasta <- readLines(fixture_paths[1L])
+  stopifnot(length(fasta) == 2L, nchar(fasta[2L]) == 180L)
+  fixture <- list(reference = fasta[2L], events = read.delim(fixture_paths[2L]))
+  for (name in c("reference.fa", "reference.fa.fai")) {
+    path <- file.path(job_directory, name)
+    stopifnot(sha256(file.path(retained, name)) == recorded_hash(original$sha256, path),
+      sha256(file.path(retained, name)) == recorded_hash(capture$input_sha256, path))
+  }
+  stopifnot(identical(readLines(file.path(retained, "reference.fa")), c(">bench",
+    paste0(strrep("A", 99L), strrep(paste0(fixture$reference, strrep("A", 820L)),
+      capture$configuration$transcripts / capture$configuration$overlap)))))
+  rejected <- function(expression) tryCatch({ force(expression); FALSE }, error = function(e) TRUE)
+  jobs <- lapply(0:3, function(pass) {
+    path <- file.path(job_directory, paste0(capture$configuration$mode, "_", pass, "_job.rds"))
+    retained_path <- file.path(retained, basename(path))
+    job <- readRDS(retained_path)
+    hash <- sha256(retained_path)
+    semantic <- check_original_job(job, hash, pass, capture, original, ledger, fixture)
+    for (value in list(strrep("0", 64L), NULL, "malformed")) {
+      changed <- original
+      changed$sha256[[path]] <- value
+      stopifnot(rejected(check_original_job(job, hash, pass, capture, changed, ledger, fixture)))
+      if (pass == 0L) {
+        changed <- capture
+        changed$input_sha256[[path]] <- value
+        stopifnot(rejected(check_original_job(job, hash, pass, changed, original, ledger, fixture)))
+      }
+    }
+    if (pass == 0L) for (field in c("events", "samples")) {
+      changed <- job
+      if (field == "events") changed$input$events$alternate[1L] <- "T" else changed$samples <- 65L
+      changed_hash <- digest::digest(serialize(changed, NULL), algo = "sha256", serialize = FALSE)
+      changed_original <- original
+      changed_capture <- capture
+      changed_original$sha256[[path]] <- changed_hash
+      changed_capture$input_sha256[[path]] <- changed_hash
+      stopifnot(rejected(check_original_job(changed, changed_hash, pass,
+        changed_capture, changed_original, ledger, fixture)))
+    }
+    semantic
+  })
+  for (pass in 1:3) {
+    compared <- jobs[[pass + 1L]]
+    compared$verify <- TRUE
+    stopifnot(identical(jobs[[1L]], compared))
+  }
+  jobs
+}
+
 compare_capture_inputs <- function(before, after, mode, transcripts) {
   identities <- lapply(list(before, after), function(receipt) {
     stopifnot(identical(receipt$configuration,
@@ -124,21 +221,16 @@ compare_capture_inputs <- function(before, after, mode, transcripts) {
   invisible(TRUE)
 }
 
-audit_full_outputs <- function() {
-  bundle <- file.path(root, "benchmarks/data/duckvep_haplotypes_indel_full_audit.jsonl.gz")
+extract_audit_bundle <- function(bundle, expected_hash, count, directory) {
   sha256 <- function(path) digest::digest(file = path, algo = "sha256")
-  stopifnot(sha256(bundle) ==
-    "47c307544fc12d5c3430a7b9359eff68cf299e371e710111a04671807fc8c8c7")
+  stopifnot(sha256(bundle) == expected_hash)
   connection <- gzfile(bundle, "rt")
   records <- lapply(readLines(connection), jsonlite::fromJSON)
   close(connection)
   paths <- vapply(records, function(x) paste(x$origin, x$name, sep = "/"), "")
-  stopifnot(length(records) == 82L, !anyDuplicated(paths),
+  stopifnot(length(records) == count, !anyDuplicated(paths),
     all(grepl("^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$", paths)),
     !any(unlist(strsplit(paths, "/", fixed = TRUE)) %in% c(".", "..")))
-  directory <- tempfile("duckhts-singleton-audit-")
-  stopifnot(dir.create(directory))
-  on.exit(unlink(directory, recursive = TRUE), add = TRUE)
   for (i in seq_along(records)) {
     bytes <- jsonlite::base64_dec(records[[i]]$bytes_base64)
     stopifnot(digest::digest(bytes, algo = "sha256", serialize = FALSE) == records[[i]]$sha256)
@@ -146,6 +238,19 @@ audit_full_outputs <- function() {
     if (!dir.exists(dirname(path))) stopifnot(dir.create(dirname(path), recursive = TRUE))
     writeBin(bytes, path)
   }
+  invisible(TRUE)
+}
+
+audit_full_outputs <- function() {
+  sha256 <- function(path) digest::digest(file = path, algo = "sha256")
+  directory <- tempfile("duckhts-singleton-audit-")
+  stopifnot(dir.create(directory))
+  on.exit(unlink(directory, recursive = TRUE), add = TRUE)
+  extract_audit_bundle(file.path(root, "benchmarks/data/duckvep_haplotypes_indel_full_audit.jsonl.gz"),
+    "47c307544fc12d5c3430a7b9359eff68cf299e371e710111a04671807fc8c8c7", 82L, directory)
+  inputs <- file.path(directory, "inputs")
+  extract_audit_bundle(file.path(root, "benchmarks/data/duckvep_haplotypes_indel_inputs.jsonl.gz"),
+    "c5293f3ba2072a82290075e9476c79b1a28810b554f19b4ea3273d25b7ca95f1", 46L, inputs)
   comparator <- file.path(directory, "audit/audit_pairs.R")
   invoke <- function(label, before, after, transcripts, expected_error = NULL) {
     result <- file.path(directory, paste0(label, ".json"))
@@ -168,6 +273,7 @@ audit_full_outputs <- function() {
         sep = "_")), c("baseline", "current"))
       receipts <- lapply(captures, function(capture)
         jsonlite::fromJSON(file.path(capture, "receipt.json")))
+      jobs <- list()
       for (side in names(captures)) {
         capture <- captures[[side]]
         receipt <- receipts[[side]]
@@ -186,7 +292,9 @@ audit_full_outputs <- function() {
           stopifnot(sha256(file.path(capture, name)) == receipt$output_sha256[[name]])
         }
         for (field in names(metrics)) stopifnot(all(ledger[[field]] == metrics[[field]]))
+        jobs[[side]] <- capture_original_jobs(receipt, ledger, inputs)
       }
+      stopifnot(identical(jobs$baseline, jobs$current))
       compare_capture_inputs(receipts$baseline, receipts$current, mode, transcripts)
       rejected_input <- function(candidate) tryCatch({
         compare_capture_inputs(receipts$baseline, candidate, mode, transcripts)
@@ -310,12 +418,21 @@ at both transcript counts. Each untimed capture matches all 27 non-timing result
 fields from its original correctness worker and all three timed workers, including
 every full-output fingerprint; Parquet round trips preserve those metrics and types.
 Rendering verifies the pinned bundle and receipt identities, binds the retained
-metrics to both ledgers, and checks the exact workload configuration and matching
-benchmark-driver, reference-FASTA and FASTA-index hashes across each capture pair.
-The driver is independently pinned; FASTA/index identities use the exact original
-job-directory paths without reopening historical files. Missing or altered input
-hashes and a changed sample count are rejected by seven receipt corruption controls.
-Rendering then reruns the complete typed, exact-key comparison.
+metrics to both ledgers, and checks the exact workload configuration. The
+[original-input capsule](data/duckvep_haplotypes_indel_inputs.jsonl.gz) preserves
+32 original worker jobs, four benchmark receipts, their four FASTA/index pairs,
+and both registered fixtures. Each original receipt is bound to its capture and
+ledger; every job's actual bytes must match that receipt, and the correctness
+job must also match its capture's input hash. Decoded jobs must contain the exact
+registered reference and event table. Their complete semantic fields agree
+across revisions and passes, with each pass's correctness flag checked separately;
+only named binary, output and reference-file paths are excluded from that equality.
+Extension identities are checked against their own revision, not equated across
+revisions. The driver remains independently pinned, and retained FASTA/index bytes
+must match both receipt layers. Original paths are identifiers only: rendering
+does not reopen historical files. Input controls reject missing, malformed or
+altered job hashes and self-consistently rehashed jobs with changed events or
+configuration. Rendering then reruns the complete typed, exact-key comparison.
 
 ```{r complete-output-audit}
 knitr::kable(full_audit, row.names = FALSE)

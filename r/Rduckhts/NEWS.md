@@ -1,6 +1,14 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
 
+- match bundled frameshift HGVSp to pinned VEP-116 alternate translation without
+  changing transcript-specific reference or consequence translation; preserve
+  its immediate-stop notation when an ambiguous residue is formatted as Ter
+
+- accept literal matching N in length-changing replay REF alleles; preserve
+  missing reference-peptide annotations and source provenance through DBI, and
+  validate retained indel N anchors against the reference
+
 - use pinned VEP-116 consensus for bundled indel coding contexts and preserve
   literal matching N insertion anchors in independent and singleton HGVSp;
   test source alleles and missing results through DBI and rduckhts_haplotypes

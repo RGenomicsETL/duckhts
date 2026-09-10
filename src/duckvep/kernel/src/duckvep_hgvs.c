@@ -451,12 +451,15 @@ duckvep_hgvs_status_t duckvep_hgvs_uploaded_reference_validate(
     for (i = 0u; i < raw_ref_length; i++) {
         uint8_t uploaded;
         uint8_t reference_base;
-        /* The prepared event identifies the erased insertion anchor. VEP
-         * removes it before allele eligibility checks; N here is a literal
-         * reference byte to match, not an unknown changed allele or wildcard. */
-        int retained_anchor = event->interbase &&
-            event->kind == (uint8_t)DUCKVEP_KIND_INS && !event->ref_diff_length &&
-            i == (size_t)event->anchor_ref_offset;
+        /* VEP removes the shared prefix of any length-changing allele before
+         * eligibility checks, not only insertion anchors. N in that erased
+         * prefix (or a retained right insertion anchor) must match literally;
+         * changed REF bases and equal-length alleles keep strict validation. */
+        int retained_anchor =
+            (event->ref_diff_length != event->alt_diff_length &&
+             i < (size_t)event->feature_allele_offset) ||
+            (event->interbase && event->kind == (uint8_t)DUCKVEP_KIND_INS &&
+             !event->ref_diff_length && i == (size_t)event->anchor_ref_offset);
         uploaded = (uint8_t)duckvep_dna_normalize((char)raw_ref[i], retained_anchor);
         if (!uploaded) return DUCKVEP_HGVS_INVALID_ALLELE;
         duckvep_hgvs_status_t status = hgvs_reference_base(
@@ -1866,7 +1869,9 @@ static duckvep_hgvs_status_t hgvs_protein_extended_alt_base(
     }
     codon[3] = '\0';
     *residue_out = (uint8_t)duckvep_translate_codon(
-        codon, (duckvep_codon_table_t)context->codon_table);
+        codon, duckvep_compat_hgvs_alternate_codon_table(
+            (duckvep_compat_profile_t)context->compatibility_profile,
+            (duckvep_codon_table_t)context->codon_table));
     return DUCKVEP_HGVS_OK;
 }
 
@@ -1911,7 +1916,7 @@ static void hgvs_protein_stop_distance(
      * consequence path used (for example) vertebrate mitochondrial table 2.
      * Preserve that executable inconsistency only in this formatter query. */
     vep_context = *context;
-    vep_context.codon_table = (uint8_t)duckvep_compat_late_stop_codon_table(
+    vep_context.codon_table = (uint8_t)duckvep_compat_hgvs_alternate_codon_table(
         (duckvep_compat_profile_t)context->compatibility_profile,
         (duckvep_codon_table_t)context->codon_table);
     /* This shortcut was proved with context->codon_table. Reusing its first
@@ -2116,7 +2121,12 @@ static duckvep_hgvs_status_t hgvs_protein_frameshift_fact(
     fact->reference_first = reference;
     fact->reference_last = reference;
     fact->alternate_first = alternate;
-    fact->shape = alternate == (uint8_t)'*'
+    /* _get_hgvs_peptides converts Xaa to Ter before VEP's formatter tests
+     * immediate termination. This is presentation policy, not a stop fact. */
+    fact->shape = (alternate == (uint8_t)'*' ||
+        (alternate == (uint8_t)'X' && duckvep_compat_enabled(
+            (duckvep_compat_profile_t)context->compatibility_profile,
+            DUCKVEP_COMPAT_HGVS_XAA_AS_TER)))
         ? (uint8_t)DUCKVEP_HGVS_PROTEIN_SUBSTITUTION
         : (uint8_t)DUCKVEP_HGVS_PROTEIN_FRAMESHIFT;
     if (fact->shape == (uint8_t)DUCKVEP_HGVS_PROTEIN_FRAMESHIFT) {
@@ -2344,6 +2354,8 @@ static duckvep_hgvs_status_t hgvs_protein_fact_build_window(
         (reference && reference->length > UINT32_MAX)) {
         return DUCKVEP_HGVS_OUT_OF_RANGE;
     }
+    if (context->feature_ref_peptide_unavailable)
+        return DUCKVEP_HGVS_MISSING_PEPTIDE;
     memset(&fact, 0, sizeof fact);
     fact.context = context;
     if (reference) fact.reference = *reference;
@@ -3306,6 +3318,11 @@ duckvep_hgvs_status_t duckvep_hgvs_protein_pair_build(
     uint32_t variant = consequence->variant_idx;
     const duckvep_event_t *event = facts->event;
     duckvep_transcript_edit_t edit = *facts->transcript_edit;
+    /* Original feature-allele eligibility survives HGVS DNA shifting. Literal
+     * CDS replay can succeed while VEP has no reference peptide allele. */
+    if (edit.feature_ref_length != edit.feature_alt_length &&
+        !duckvep_feature_allele_peptide_eligible(edit.feature_ref, edit.feature_ref_length))
+        return DUCKVEP_HGVS_MISSING_PEPTIDE;
     int coordinates_defined = 0;
     duckvep_hgvs_status_t status = duckvep_hgvs_protein_coordinates_defined(
         transcripts, exons, &edit, dna, &coordinates_defined);

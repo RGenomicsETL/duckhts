@@ -1,8 +1,8 @@
 #!/usr/bin/env Rscript
 # Read-only audit: DIRECTORY RECEIPT_SHA256 pairs. Supplied digests identify
 # diagnostic bundles; they do not authenticate execution or establish agreement.
-# The default pinned pair must retain source and oracle expectations with no
-# newly failing comparison. Explicit DIRECTORY SHA pairs are independent audits.
+# Adjacent bundles in the default pinned chain must retain source and oracle
+# expectations with no new failure. Explicit DIRECTORY SHA pairs are independent audits.
 # --incomplete-model-diagnostic permits explicitly labelled old bundles with
 # unspecified native transcript flanks; the default requires complete flanks.
 source('test/duckvep/conformance/ambiguous_codon_differential.R')
@@ -490,13 +490,16 @@ if (sys.nframe() == 0L) {
       'test/duckvep/conformance/data/ambiguous_indel_baseline',
       '089860f4a90e07b33d73373f0683c9dbb80d8a3d5899f689517f092842037b03',
       'test/duckvep/conformance/data/ambiguous_indel_consensus',
-      'a1d0f0cd56717f20cfa663de72efa22ab16a416a460d65fa6ffa7d6122039385')
+      'a1d0f0cd56717f20cfa663de72efa22ab16a416a460d65fa6ffa7d6122039385',
+      'test/duckvep/conformance/data/ambiguous_indel_translation',
+      '263fe1773a382fdb76b27e034a3a126a069c0282f5afdc992d95e5a4762cc053')
   }
   baseline <- NULL
   for (i in seq.int(1L, length(args), by = 2L)) {
     audited <- indel_audit_bundle(args[i], args[i + 1L], allow_incomplete_model)
     if (compare_bundles) {
-      if (is.null(baseline)) baseline <- audited else indel_audit_compare(baseline, audited)
+      if (!is.null(baseline)) indel_audit_compare(baseline, audited)
+      baseline <- audited
     }
   }
 }

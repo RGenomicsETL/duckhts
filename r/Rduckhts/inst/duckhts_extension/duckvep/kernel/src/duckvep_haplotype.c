@@ -8,10 +8,6 @@
 #include <limits.h>
 #include <string.h>
 
-static char haplo_norm_base(char c) {
-    return duckvep_dna_normalize(c, 0);
-}
-
 static char haplo_norm_cds_base(uint8_t b) {
     return duckvep_dna_normalize((char)b, 1);
 }
@@ -21,12 +17,13 @@ static char haplo_complement(char b) {
 }
 
 static char haplo_oriented_base(const uint8_t *seq, uint32_t len, uint32_t idx,
-                                int reverse_complement) {
+                                int reverse_complement, int allow_n) {
     char b;
     if (seq == NULL || idx >= len) return '\0';
-    b = haplo_norm_base((char)seq[reverse_complement ? (len - 1u - idx) : idx]);
+    b = duckvep_dna_normalize(
+        (char)seq[reverse_complement ? (len - 1u - idx) : idx], allow_n);
     if (b == '\0') return '\0';
-    return reverse_complement ? haplo_complement(b) : b;
+    return reverse_complement && b != 'N' ? haplo_complement(b) : b;
 }
 
 static void haplo_result_init(duckvep_haplotype_result_t *result) {
@@ -113,13 +110,14 @@ duckvep_haplotype_status_t duckvep_haplotype_compose_replacements(
         if (start0 > cursor) return DUCKVEP_HAPLOTYPE_EDIT_ORDER;
         int reverse = e->variant_strand != transcript_strand;
         for (uint32_t j = 0u; j < e->ref_len; j++) {
-            char base = haplo_oriented_base(e->ref, e->ref_len, j, reverse);
+            char base = haplo_oriented_base(e->ref, e->ref_len, j, reverse,
+                                            e->ref_len != e->alt_len);
             if (!base) return DUCKVEP_HAPLOTYPE_INVALID_BASE;
             if (base != haplo_norm_cds_base(reference[start0 + j]))
                 return DUCKVEP_HAPLOTYPE_REF_MISMATCH;
         }
         for (uint32_t j = 0u; j < e->alt_len; j++)
-            if (!haplo_oriented_base(e->alt, e->alt_len, j, reverse))
+            if (!haplo_oriented_base(e->alt, e->alt_len, j, reverse, 0))
                 return DUCKVEP_HAPLOTYPE_INVALID_BASE;
         size_t prefix = cursor - start0;
         if (e->ref_len <= prefix) {
@@ -163,7 +161,7 @@ duckvep_haplotype_status_t duckvep_haplotype_compose_replacements(
         for (size_t j = 0u; !changed && j < removed; j++) {
             char current = j < prefix ? haplo_norm_cds_base(reference[start0 + j])
                                       : (char)cds[at + j - prefix];
-            changed = current != haplo_oriented_base(e->alt, e->alt_len, (uint32_t)j, reverse);
+            changed = current != haplo_oriented_base(e->alt, e->alt_len, (uint32_t)j, reverse, 0);
         }
         size_t ref_end = start0 + e->ref_len, output_end, keep = groups, begin = changed_count;
         if (e->ref_len <= prefix) {
@@ -199,7 +197,7 @@ duckvep_haplotype_status_t duckvep_haplotype_compose_replacements(
         }
         at -= e->alt_len;
         for (uint32_t j = 0u; j < e->alt_len; j++)
-            cds[at + j] = (uint8_t)haplo_oriented_base(e->alt, e->alt_len, j, reverse);
+            cds[at + j] = (uint8_t)haplo_oriented_base(e->alt, e->alt_len, j, reverse, 0);
         cursor = start0;
         if (changed) {
             source_ids[changed_count++] = source_id;
@@ -605,16 +603,17 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
 
         reverse = (e->variant_strand != transcript_strand);
         for (j = 0u; j < e->ref_len; j++) {
-            char expected = haplo_oriented_base(e->ref, e->ref_len, j, reverse);
+            char expected = haplo_oriented_base(e->ref, e->ref_len, j, reverse,
+                                                e->ref_len != e->alt_len);
             char observed = haplo_norm_cds_base(ref_cds[start0 + (size_t)j]);
             if (expected == '\0') return haplo_fail(result, cds_len_out, DUCKVEP_HAPLOTYPE_INVALID_BASE);
             if (observed == '\0') return haplo_fail(result, cds_len_out, DUCKVEP_HAPLOTYPE_INVALID_BASE);
-            if (observed == 'N' || observed != expected) {
+            if (observed != expected) {
                 return haplo_fail(result, cds_len_out, DUCKVEP_HAPLOTYPE_REF_MISMATCH);
             }
         }
         for (j = 0u; j < e->alt_len; j++) {
-            if (haplo_oriented_base(e->alt, e->alt_len, j, reverse) == '\0') {
+            if (haplo_oriented_base(e->alt, e->alt_len, j, reverse, 0) == '\0') {
                 return haplo_fail(result, cds_len_out, DUCKVEP_HAPLOTYPE_INVALID_BASE);
             }
         }
@@ -674,7 +673,7 @@ duckvep_haplotype_status_t duckvep_haplotype_apply_cds_edits(
             src_cursor = start0;
             for (j = e->alt_len; j > 0u; j--) {
                 cds_out[--dst_cursor] = (uint8_t)haplo_oriented_base(
-                    e->alt, e->alt_len, j - 1u, reverse);
+                    e->alt, e->alt_len, j - 1u, reverse, 0);
             }
         }
         if (src_cursor > dst_cursor) {
