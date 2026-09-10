@@ -71,8 +71,9 @@ typedef enum duckvep_translation_ambiguity {
  * Z for E/Q, and X otherwise. The unambiguous input fact remains false even when
  * the amino acid is resolved. Validate
  * every input base, including partial codons and sequence beyond the first stop.
- * No allocation. Result is zero on failure; bytes may be partial on invalid
- * input. Result storage must not overlap either byte span. */
+ * No allocation. Result storage must not overlap either byte span. Aliases and
+ * address-range overflow return INVALID_ARG before writes. Other failures zero the result;
+ * peptide bytes may be partial on invalid input. */
 duckvep_translation_status_t duckvep_translate_cds(
     const uint8_t *cds, size_t cds_length, duckvep_codon_table_t table,
     duckvep_translation_ambiguity_t ambiguity,
@@ -81,7 +82,8 @@ duckvep_translation_status_t duckvep_translate_cds(
 /* Produce N_CONSENSUS and N_UNKNOWN reference views in one translation pass.
  * Both distinct output spans have capacity >= cds_length/3 + 1; neither may
  * overlap CDS or result storage. No reference start/stop/SeqEdit rules are
- * applied. The result describes the conservative view and is zero on failure.
+ * applied. The result describes the conservative view. Result-storage aliases
+ * and address-range overflow return INVALID_ARG without writes; other failures zero the result.
  * Both complete peptides are NUL-terminated, including residues after stops. */
 duckvep_translation_status_t duckvep_translate_reference_cds(
     const uint8_t *cds, size_t cds_length, duckvep_codon_table_t table,

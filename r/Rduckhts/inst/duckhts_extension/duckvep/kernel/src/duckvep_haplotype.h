@@ -86,8 +86,10 @@ typedef struct duckvep_haplotype_block {
  * curated reference protein. coding_peptide uses N_UNKNOWN with no curation;
  * coding_translation describes that complete raw view, including internal stops.
  * Both output spans have the same capacity and must be distinct from all inputs
- * and result storage. No allocation. Length is zero on failure; coding_translation
- * is zero except on OK or INPUT_INCOMPLETE. Invalid bases may leave partial bytes. */
+ * and result storage. Result-storage aliases, address-range overflow and an
+ * unrepresentable edit-array size return INVALID_ARG before any write. Other failures zero length and
+ * coding_translation, except INPUT_INCOMPLETE supplies its valid coding view.
+ * No allocation. Invalid bases may leave partial bytes. */
 duckvep_haplotype_status_t duckvep_haplotype_reference_proteins(
     const uint8_t *cds, size_t cds_length, duckvep_codon_table_t table,
     const uint32_t *edit_positions1, const uint8_t *edit_alternates, size_t edit_count,

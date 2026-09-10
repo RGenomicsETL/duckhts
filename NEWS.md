@@ -2,6 +2,9 @@
 
 # duckhts 1.5.1.9000
 
+- reject aliased translation metadata before writing borrowed CDS, peptide or
+  reference-edit storage
+
 - prepare phased replay's curated and conservative reference proteins together
   in the native library; share the bounded transcript cache with SQL and preserve
   distinct ambiguous-codon, stop and peptide-edit semantics

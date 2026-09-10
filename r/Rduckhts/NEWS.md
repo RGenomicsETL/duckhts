@@ -1,6 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
 
+- validate native translation result storage before modifying bundled sequence
+  workspaces or borrowed references
+
 - reuse bundled haplotype replay's native reference-protein cache for coding
   results and protein differences, preserving ambiguous-codon and peptide-edit
   behavior with worker-local bounded storage

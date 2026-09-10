@@ -238,9 +238,9 @@ to DuckDB and may grow with the complete relation. The process RSS table must no
 be presented as a constant-total-memory guarantee.
 
 This same-input comparison retains three repeated passes per workload and revision.
-The current campaign overlapped reference and model conformance jobs pinned to
-other CPUs; the recorded baseline did not overlap those jobs. Both ran at
-different times on a shared machine. CPU pinning does not isolate memory,
+The `c69e0e0` baseline overlapped reference and model conformance jobs pinned to
+other CPUs. The current campaign did not deliberately overlap conformance work.
+Both ran at different times on a shared machine. CPU pinning does not isolate memory,
 thermal or scheduling effects, so timing differences do not establish the
 cost of the code change.
 One machine and this deliberately shared synthetic cohort do not establish

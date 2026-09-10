@@ -3,8 +3,8 @@ Phased replay: native stream and public SQL
 
 <!-- duckvep_haplotypes.md is generated from duckvep_haplotypes.Rmd. -->
 
-Compound-replay source: c69e0e0cf124c65cc8e23c25ca80691bd446a2cd;
-same-input baseline: be6c4383b7c6fc8c4e7fd5b7f1bfc2cd3181d8b1. Native
+Compound-replay source: 677d684810a78ba2749e5958954e7f745eb7d278;
+same-input baseline: c69e0e0cf124c65cc8e23c25ca80691bd446a2cd. Native
 measurements cover literal phased replay. SQL materializes all current
 fields, including local coding-block SO. HGVS generation is disabled;
 whole-haplotype SO/HGVS is unfinished and its computation is not timed
@@ -82,37 +82,35 @@ observed in the native stream, not inferred SQL counters.
 
 | transcripts | samples | overlap | mode        | min_s | median_s | max_s | max_process_rss_mib |
 |------------:|--------:|--------:|:------------|------:|---------:|------:|--------------------:|
-|        1024 |       4 |       1 | native      | 0.003 |    0.003 | 0.003 |              73.855 |
-|        1024 |       4 |       1 | sql         | 0.052 |    0.055 | 0.055 |             219.172 |
-|        1024 |      64 |       1 | native      | 0.014 |    0.014 | 0.014 |              73.852 |
-|        1024 |      64 |       1 | sql         | 0.362 |    0.364 | 0.591 |             378.012 |
-|        1024 |      64 |      16 | native      | 0.022 |    0.022 | 0.022 |              73.855 |
-|        1024 |      64 |      16 | sql         | 0.371 |    0.372 | 0.398 |             378.488 |
-|        1024 |      64 |      16 | sql_records | 0.887 |    0.897 | 1.375 |             612.504 |
-|        1024 |      64 |      64 | native      | 0.022 |    0.022 | 0.023 |              73.852 |
-|        1024 |      64 |      64 | sql         | 0.374 |    0.379 | 0.388 |             377.684 |
-|        1024 |     256 |       1 | native      | 0.050 |    0.051 | 0.052 |              73.855 |
-|        1024 |     256 |       1 | sql         | 1.447 |    1.467 | 1.474 |             957.824 |
-|       10240 |      64 |      16 | native      | 0.184 |    0.185 | 0.188 |              73.699 |
-|       10240 |      64 |      16 | sql         | 4.667 |    4.841 | 5.113 |            2135.391 |
+|        1024 |       4 |       1 | native      | 0.003 |    0.003 | 0.003 |              73.699 |
+|        1024 |       4 |       1 | sql         | 0.051 |    0.051 | 0.052 |             217.879 |
+|        1024 |      64 |       1 | native      | 0.014 |    0.014 | 0.014 |              73.699 |
+|        1024 |      64 |       1 | sql         | 0.335 |    0.337 | 0.337 |             377.520 |
+|        1024 |      64 |      16 | native      | 0.017 |    0.017 | 0.017 |              73.852 |
+|        1024 |      64 |      16 | sql         | 0.346 |    0.352 | 0.360 |             378.555 |
+|        1024 |      64 |      16 | sql_records | 0.725 |    0.733 | 0.738 |             612.230 |
+|        1024 |      64 |      64 | native      | 0.019 |    0.019 | 0.019 |              73.699 |
+|        1024 |      64 |      64 | sql         | 0.343 |    0.345 | 0.350 |             378.305 |
+|        1024 |     256 |       1 | native      | 0.045 |    0.046 | 0.048 |              73.695 |
+|        1024 |     256 |       1 | sql         | 1.299 |    1.303 | 1.303 |             958.102 |
+|       10240 |      64 |      16 | native      | 0.170 |    0.172 | 0.173 |              73.852 |
+|       10240 |      64 |      16 | sql         | 4.100 |    4.102 | 4.106 |            2143.492 |
 
 Both compared revisions return each block’s local SO mask, coding status
 and position relative to the first stop. A shared coding context
-evaluates physical blocks on completed replay. The recorded output
-contracts differ. Named prior-schema fingerprints and input/output
-denominators match, but complete rows have different schemas and byte
-counts. This is a same-input comparison, not identical-output work. The
-native count sink omits local SO evaluation. HGVS-enabled performance
-requires a separate workload.
+evaluates physical blocks on completed replay. Full-output fingerprints
+and input/output denominators match across the compared configurations.
+The native count sink omits local SO evaluation. HGVS-enabled
+performance requires a separate workload.
 
 | transcripts | samples | overlap | median_s_before | median_s_after | median_change_percent | max_process_rss_mib_before | max_process_rss_mib_after |
 |------------:|--------:|--------:|----------------:|---------------:|----------------------:|---------------------------:|--------------------------:|
-|        1024 |       4 |       1 |           0.052 |          0.055 |                 5.769 |                    218.504 |                   219.172 |
-|        1024 |      64 |       1 |           0.346 |          0.364 |                 5.202 |                    376.996 |                   378.012 |
-|        1024 |      64 |      16 |           0.354 |          0.372 |                 5.085 |                    376.867 |                   378.488 |
-|        1024 |      64 |      64 |           0.355 |          0.379 |                 6.761 |                    376.309 |                   377.684 |
-|        1024 |     256 |       1 |           1.331 |          1.467 |                10.218 |                    959.578 |                   957.824 |
-|       10240 |      64 |      16 |           4.157 |          4.841 |                16.454 |                   2143.230 |                  2135.391 |
+|        1024 |       4 |       1 |           0.055 |          0.051 |                -7.273 |                    219.172 |                   217.879 |
+|        1024 |      64 |       1 |           0.364 |          0.337 |                -7.418 |                    378.012 |                   377.520 |
+|        1024 |      64 |      16 |           0.372 |          0.352 |                -5.376 |                    378.488 |                   378.555 |
+|        1024 |      64 |      64 |           0.379 |          0.345 |                -8.971 |                    377.684 |                   378.305 |
+|        1024 |     256 |       1 |           1.467 |          1.303 |               -11.179 |                    957.824 |                   958.102 |
+|       10240 |      64 |      16 |           4.841 |          4.102 |               -15.265 |                   2135.391 |                  2143.492 |
 
 Each recorded pass uses a fresh process and a full warm-up. Native
 timing starts after workspace initialization and includes ordered-feed
@@ -157,12 +155,12 @@ are not bytes written to disk.
 
 | transcripts | samples | overlap | peak_transcripts | peak_carriers | peak_prefixes | peak_events | peak_projections | peak_allele_bytes | workspace_bytes | model_bytes |
 |------------:|--------:|--------:|-----------------:|--------------:|--------------:|------------:|-----------------:|------------------:|----------------:|------------:|
-|        1024 |       4 |       1 |                1 |             7 |             6 |           4 |                4 |                10 |            4842 |       34136 |
-|        1024 |      64 |       1 |                1 |           112 |             6 |           4 |                4 |                10 |           14442 |       34136 |
-|        1024 |      64 |      16 |               16 |          1792 |            96 |           4 |               64 |                10 |          189462 |       34136 |
-|        1024 |      64 |      64 |               64 |          7168 |           384 |           4 |              256 |                10 |          749526 |       34136 |
-|        1024 |     256 |       1 |                1 |           448 |             6 |           4 |                4 |                10 |           45162 |       34136 |
-|       10240 |      64 |      16 |               16 |          1792 |            96 |           4 |               64 |                10 |          189462 |      338264 |
+|        1024 |       4 |       1 |                1 |             7 |             6 |           4 |                4 |                10 |            4944 |       34136 |
+|        1024 |      64 |       1 |                1 |           112 |             6 |           4 |                4 |                10 |           14544 |       34136 |
+|        1024 |      64 |      16 |               16 |          1792 |            96 |           4 |               64 |                10 |          189564 |       34136 |
+|        1024 |      64 |      64 |               64 |          7168 |           384 |           4 |              256 |                10 |          749628 |       34136 |
+|        1024 |     256 |       1 |                1 |           448 |             6 |           4 |                4 |                10 |           45264 |       34136 |
+|       10240 |      64 |      16 |               16 |          1792 |            96 |           4 |               64 |                10 |          189564 |      338264 |
 
 Native workspace bytes count actual preallocated buffer capacities and
 state, separately from immutable model allocations. The fixed fixture is
@@ -180,15 +178,15 @@ complete relation. The process RSS table must not be presented as a
 constant-total-memory guarantee.
 
 This same-input comparison retains three repeated passes per workload
-and revision. The current campaign overlapped reference and model
-conformance jobs pinned to other CPUs; the recorded baseline did not
-overlap those jobs. Both ran at different times on a shared machine. CPU
-pinning does not isolate memory, thermal or scheduling effects, so
-timing differences do not establish the cost of the code change. One
-machine and this deliberately shared synthetic cohort do not establish
-production throughput, statistical significance or a general absence of
-regression. Whole-haplotype SO/HGVS and typed structural composition
-require their own measurements.
+and revision. The `c69e0e0` baseline overlapped reference and model
+conformance jobs pinned to other CPUs. The current campaign did not
+deliberately overlap conformance work. Both ran at different times on a
+shared machine. CPU pinning does not isolate memory, thermal or
+scheduling effects, so timing differences do not establish the cost of
+the code change. One machine and this deliberately shared synthetic
+cohort do not establish production throughput, statistical significance
+or a general absence of regression. Whole-haplotype SO/HGVS and typed
+structural composition require their own measurements.
 
 ## Reproduction
 
@@ -272,15 +270,14 @@ appear in the timing table above; its input and output denominators are:
 |          4096 |    737280 |        245760 |   14151208 |
 
 The raw-lane comparison uses the same source revisions as the decoded
-comparison. Input hashes, all listed denominators, thread count and the
-complete prior local-SO/HGVS-schema projection match. The full output
-contracts differ; their complete byte counts and fingerprints remain
-separate. Different output denominators preclude treating raw versus
-decoded time as an implementation speedup.
+comparison. Input hashes, complete output fingerprints, all listed
+denominators, thread count and output contract match between revisions.
+Different output denominators preclude treating raw versus decoded time
+as an implementation speedup.
 
 | transcripts | samples | overlap | median_s_before | median_s_after | median_change_percent | max_process_rss_mib_before | max_process_rss_mib_after |
 |------------:|--------:|--------:|----------------:|---------------:|----------------------:|---------------------------:|--------------------------:|
-|        1024 |      64 |      16 |           0.734 |          0.897 |                22.207 |                     611.84 |                   612.504 |
+|        1024 |      64 |      16 |           0.897 |          0.733 |               -18.283 |                    612.504 |                    612.23 |
 
 ## Singleton HGVS materialization
 
@@ -326,15 +323,15 @@ retain the derived FASTA/index, actual versus independent HGVS,
 source/binary/input hashes, jobs and process logs. Process RSS includes
 setup, warm-up and post-query aggregates, not just native workspace.
 
-Measured source: `c69e0e0cf124c65cc8e23c25ca80691bd446a2cd`. One thread,
+Measured source: `677d684810a78ba2749e5958954e7f745eb7d278`. One thread,
 CPU 2, Intel i5-13500, DuckDB 1.5.3.
 
 | transcripts | samples | overlap | mode                | median_s | min_s | max_s | peak_process_rss_mib |
 |------------:|--------:|--------:|:--------------------|---------:|------:|------:|---------------------:|
-|        1024 |      64 |      16 | sql_singletons      |    0.397 | 0.396 | 0.406 |             411.0273 |
-|       10240 |      64 |      16 | sql_singletons      |    5.229 | 4.837 | 6.093 |            2192.9805 |
-|        1024 |      64 |      16 | sql_singletons_hgvs |    0.399 | 0.398 | 0.412 |             409.7812 |
-|       10240 |      64 |      16 | sql_singletons_hgvs |    5.168 | 5.089 | 5.451 |            2191.1953 |
+|        1024 |      64 |      16 | sql_singletons      |    0.340 | 0.339 | 0.344 |             410.9961 |
+|       10240 |      64 |      16 | sql_singletons      |    4.131 | 4.127 | 4.254 |            2190.8164 |
+|        1024 |      64 |      16 | sql_singletons_hgvs |    0.347 | 0.345 | 0.347 |             408.7773 |
+|       10240 |      64 |      16 | sql_singletons_hgvs |    4.207 | 4.206 | 4.210 |            2191.1172 |
 
 | transcripts | samples | overlap | mode                | input_physical_records | input_record_sample_calls | input_candidate_sample_rows | output_leaves | output_carriers | cds_bytes | protein_bytes | json_bytes |
 |------------:|--------:|--------:|:--------------------|-----------------------:|--------------------------:|----------------------------:|--------------:|----------------:|----------:|--------------:|-----------:|
@@ -343,17 +340,16 @@ CPU 2, Intel i5-13500, DuckDB 1.5.3.
 |       10240 |      64 |      16 | sql_singletons      |                   2560 |                    163840 |                     2621440 |         40960 |          655360 |   7372800 |       2447360 |   90229832 |
 |       10240 |      64 |      16 | sql_singletons_hgvs |                   2560 |                    163840 |                     2621440 |         40960 |          655360 |   7372800 |       2447360 |   90311752 |
 
-Nearest same-input source: `78047f6601ce9ebd1fd8594c0d513bfbe4b664b9`.
-Input identities, every listed denominator and the complete prior
-local-SO/HGVS-schema projection match. Full output contracts and byte
-counts differ; this is not identical-output work.
+Nearest same-input source: `c69e0e0cf124c65cc8e23c25ca80691bd446a2cd`.
+Full-output fingerprints, input identities and every listed denominator
+match within each mode.
 
 | transcripts | samples | overlap | mode                | median_s_before | min_s_before | max_s_before | peak_process_rss_mib_before | median_s_after | min_s_after | max_s_after | peak_process_rss_mib_after | median_change_percent |
 |------------:|--------:|--------:|:--------------------|----------------:|-------------:|-------------:|----------------------------:|---------------:|------------:|------------:|---------------------------:|----------------------:|
-|        1024 |      64 |      16 | sql_singletons      |           0.337 |        0.337 |        0.338 |                    410.5156 |          0.397 |       0.396 |       0.406 |                   411.0273 |               17.8042 |
-|        1024 |      64 |      16 | sql_singletons_hgvs |           0.343 |        0.342 |        0.354 |                    411.0938 |          0.399 |       0.398 |       0.412 |                   409.7812 |               16.3265 |
-|       10240 |      64 |      16 | sql_singletons      |           4.101 |        4.092 |        4.110 |                   2192.2852 |          5.229 |       4.837 |       6.093 |                  2192.9805 |               27.5055 |
-|       10240 |      64 |      16 | sql_singletons_hgvs |           4.136 |        4.131 |        4.162 |                   2191.3164 |          5.168 |       5.089 |       5.451 |                  2191.1953 |               24.9516 |
+|        1024 |      64 |      16 | sql_singletons      |           0.397 |        0.396 |        0.406 |                    411.0273 |          0.340 |       0.339 |       0.344 |                   410.9961 |              -14.3577 |
+|        1024 |      64 |      16 | sql_singletons_hgvs |           0.399 |        0.398 |        0.412 |                    409.7812 |          0.347 |       0.345 |       0.347 |                   408.7773 |              -13.0326 |
+|       10240 |      64 |      16 | sql_singletons      |           5.229 |        4.837 |        6.093 |                   2192.9805 |          4.131 |       4.127 |       4.254 |                  2190.8164 |              -20.9983 |
+|       10240 |      64 |      16 | sql_singletons_hgvs |           5.168 |        5.089 |        5.451 |                   2191.1953 |          4.207 |       4.206 |       4.210 |                  2191.1172 |              -18.5952 |
 
 Singleton HGVS borrows the decoded stream’s successful physical CDS
 projection. VEP’s uploaded-feature interpretation and shifted-HGVS

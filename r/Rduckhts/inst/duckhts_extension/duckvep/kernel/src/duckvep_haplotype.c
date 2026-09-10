@@ -42,10 +42,10 @@ static duckvep_haplotype_status_t haplo_fail(duckvep_haplotype_result_t *result,
 }
 
 static int haplo_overlaps_output(const void *input, size_t input_len,
-                                 const uint8_t *output, size_t output_cap) {
+                                 const void *output, size_t output_cap) {
     uintptr_t src = (uintptr_t)input;
     uintptr_t dst = (uintptr_t)output;
-    if (input_len == 0u || output_cap == 0u) return 0;
+    if (!input || !output || input_len == 0u || output_cap == 0u) return 0;
     /* Subtract addresses instead of forming a potentially wrapped end. */
     return src <= dst ? dst - src < input_len : src - dst < output_cap;
 }
@@ -229,11 +229,31 @@ duckvep_haplotype_status_t duckvep_haplotype_reference_proteins(
     const uint32_t *edit_positions1, const uint8_t *edit_alternates, size_t edit_count,
     uint8_t *peptide, uint8_t *coding_peptide, size_t capacity, size_t *length,
     duckvep_translation_t *coding_translation) {
+    if (edit_count > SIZE_MAX / sizeof(*edit_positions1))
+        return DUCKVEP_HAPLOTYPE_INVALID_ARG;
+    size_t edit_bytes = edit_count * sizeof(*edit_positions1);
+    if ((cds && cds_length > UINTPTR_MAX - (uintptr_t)cds) ||
+        (peptide && capacity > UINTPTR_MAX - (uintptr_t)peptide) ||
+        (coding_peptide && capacity > UINTPTR_MAX - (uintptr_t)coding_peptide) ||
+        (edit_positions1 && edit_bytes > UINTPTR_MAX - (uintptr_t)edit_positions1) ||
+        (edit_alternates && edit_count > UINTPTR_MAX - (uintptr_t)edit_alternates))
+        return DUCKVEP_HAPLOTYPE_INVALID_ARG;
+    if (haplo_overlaps_output(length, sizeof(*length), cds, cds_length) ||
+        haplo_overlaps_output(length, sizeof(*length), peptide, capacity) ||
+        haplo_overlaps_output(length, sizeof(*length), coding_peptide, capacity) ||
+        haplo_overlaps_output(length, sizeof(*length), edit_positions1, edit_bytes) ||
+        haplo_overlaps_output(length, sizeof(*length), edit_alternates, edit_count) ||
+        haplo_overlaps_output(coding_translation, sizeof(*coding_translation), cds, cds_length) ||
+        haplo_overlaps_output(coding_translation, sizeof(*coding_translation), peptide, capacity) ||
+        haplo_overlaps_output(coding_translation, sizeof(*coding_translation), coding_peptide, capacity) ||
+        haplo_overlaps_output(coding_translation, sizeof(*coding_translation), edit_positions1, edit_bytes) ||
+        haplo_overlaps_output(coding_translation, sizeof(*coding_translation), edit_alternates, edit_count) ||
+        haplo_overlaps_output(length, sizeof(*length), coding_translation, sizeof(*coding_translation)))
+        return DUCKVEP_HAPLOTYPE_INVALID_ARG;
     if (length) *length = 0u;
     if (coding_translation) memset(coding_translation, 0, sizeof(*coding_translation));
     if (!length || !coding_translation) return DUCKVEP_HAPLOTYPE_INVALID_ARG;
     if (!cds || !peptide || !coding_peptide || !duckvep_codon_table_supported(table) ||
-        edit_count > SIZE_MAX / sizeof(*edit_positions1) ||
         (edit_count && (!edit_positions1 || !edit_alternates))) return DUCKVEP_HAPLOTYPE_INVALID_ARG;
     size_t codons = cds_length / 3u;
     if (capacity < codons + 2u) return DUCKVEP_HAPLOTYPE_BUFFER_TOO_SMALL;
