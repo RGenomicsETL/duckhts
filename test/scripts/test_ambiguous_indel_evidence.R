@@ -1,6 +1,8 @@
 #!/usr/bin/env Rscript
 # Read-only audit: DIRECTORY RECEIPT_SHA256 pairs. Supplied digests identify
 # diagnostic bundles; they do not authenticate execution or establish agreement.
+# The default pinned pair must retain source and oracle expectations with no
+# newly failing comparison. Explicit DIRECTORY SHA pairs are independent audits.
 # --incomplete-model-diagnostic permits explicitly labelled old bundles with
 # unspecified native transcript flanks; the default requires complete flanks.
 source('test/duckvep/conformance/ambiguous_codon_differential.R')
@@ -180,6 +182,53 @@ indel_audit_summary <- function(observed, expected) {
   invisible(TRUE)
 }
 
+indel_audit_comparison <- function(pairs, events, expected) {
+  list(events = events, expected = expected,
+    comparisons = pairs[c('route', 'event_index', 'allele', 'hgvsp_equal', 'so_equal')])
+}
+
+indel_audit_compare <- function(baseline, consensus) {
+  ordered <- function(relation, keys) {
+    stopifnot(is.data.frame(relation), !anyDuplicated(names(relation)),
+      !anyNA(relation[keys]), !anyDuplicated(relation[keys]))
+    relation <- relation[do.call(order, relation[keys]), , drop = FALSE]
+    rownames(relation) <- NULL
+    relation
+  }
+  stopifnot(identical(ordered(baseline$events, 'event_index'),
+      ordered(consensus$events, 'event_index')),
+    identical(ordered(baseline$expected, c('event_index', 'allele')),
+      ordered(consensus$expected, c('event_index', 'allele'))))
+  keys <- c('route', 'event_index', 'allele')
+  before <- ordered(baseline$comparisons, keys)
+  after <- ordered(consensus$comparisons, keys)
+  stopifnot(identical(names(before), c(keys, 'hgvsp_equal', 'so_equal')),
+    identical(names(after), names(before)), identical(before[keys], after[keys]),
+    !anyNA(before$hgvsp_equal), !anyNA(after$hgvsp_equal),
+    identical(is.na(before$so_equal), is.na(after$so_equal)))
+  report <- lapply(c('hgvsp', 'so'), function(metric) {
+    field <- paste0(metric, '_equal')
+    stopifnot(is.logical(before[[field]]), is.logical(after[[field]]))
+    compared <- !is.na(before[[field]])
+    prior_failures <- compared & !before[[field]]
+    current_failures <- compared & !after[[field]]
+    newly_failed <- which(current_failures & !prior_failures)
+    if (length(newly_failed)) {
+      first <- after[newly_failed[1L], keys]
+      stop('New ', metric, ' failures: ', length(newly_failed), '; first route/event/ALT: ',
+        paste(first, collapse = '/'), call. = FALSE)
+    }
+    data.frame(metric = metric, comparisons = sum(compared),
+      baseline_failures = sum(prior_failures), consensus_failures = sum(current_failures),
+      resolved_failures = sum(prior_failures & !current_failures), new_failures = 0L)
+  })
+  report <- do.call(rbind, report)
+  message('Indel cross-bundle audit: identical source events, oracle expectations and route/event/ALT keys; ',
+    paste(report$metric, report$comparisons, 'comparisons,', report$resolved_failures,
+      'resolved failures, 0 new failures', collapse = '; '))
+  invisible(report)
+}
+
 indel_audit_receipt <- function(receipt, allow_incomplete_model = FALSE) {
   fields <- c('source_revision', 'source_binding', 'extension_path', 'extension_sha256',
     'oracle_revisions', 'oracle_pairs', 'decoded_gt', 'source_gt', 'scope', 'sha256',
@@ -299,7 +348,76 @@ indel_audit_bundle <- function(directory, receipt_sha256, allow_incomplete_model
     '1,344,000 HGVSp / 336,000 SO comparisons reconstructed; ',
     sum(summary$hgvsp_failures), ' HGVSp / ', sum(summary$so_failures), ' SO failures; ',
     length(warnings), ' retained oracle diagnostic lines')
-  invisible(summary)
+  invisible(indel_audit_comparison(pairs, events, expected))
+}
+
+indel_audit_comparison_controls <- function(pairs, events, expected) {
+  rejected <- function(expression) tryCatch({ force(expression); FALSE }, error = function(e) TRUE)
+  third <- pairs$event_index == events$event_index[3L]
+  pairs$actual_present[third] <- TRUE
+  pairs$hgvsp_actual[third] <- expected$hgvsp[3L]
+  pairs$hgvsp_equal[third] <- TRUE
+  checked_bundle <- function(pair_rows, target = expected) {
+    indel_audit_pairs(pair_rows, events, target)
+    indel_audit_comparison(pair_rows, events, target)
+  }
+  baseline <- checked_bundle(pairs)
+  baseline_summary <- indel_audit_pairs(pairs, events, expected)
+  unchanged <- indel_audit_compare(baseline, baseline)
+  stopifnot(all(unchanged$baseline_failures > 0L), all(unchanged$resolved_failures == 0L))
+  reordered <- lapply(baseline, function(x) x[rev(seq_len(nrow(x))), , drop = FALSE])
+  stopifnot(identical(unchanged, indel_audit_compare(baseline, reordered)))
+  changed <- baseline
+  changed$comparisons <- changed$comparisons[-1L, ]
+  checks <- c(missing_key = rejected(indel_audit_compare(baseline, changed)))
+  changed <- baseline
+  changed$comparisons <- rbind(changed$comparisons, changed$comparisons[1L, ])
+  checks['duplicate_key'] <- rejected(indel_audit_compare(baseline, changed))
+  changed <- baseline
+  changed$comparisons$event_index[1:2] <- rev(changed$comparisons$event_index[1:2])
+  checks['count_preserving_key_swap'] <- rejected(indel_audit_compare(baseline, changed))
+  for (metric in c('hgvsp', 'so')) {
+    changed <- pairs
+    if (metric == 'hgvsp') {
+      changed$hgvsp_actual[2:3] <- c(NA_character_, 'p.ExchangedFailure')
+      changed$hgvsp_equal[2:3] <- c(TRUE, FALSE)
+    } else {
+      changed$so_actual[2:3] <- c('exchanged_failure', expected$so[3L])
+      changed$so_equal[2:3] <- c(FALSE, TRUE)
+    }
+    candidate <- checked_bundle(changed)
+    indel_audit_summary(indel_audit_pairs(changed, events, expected), baseline_summary)
+    field <- paste0(metric, '_equal')
+    stopifnot(sum(!baseline$comparisons[[field]], na.rm = TRUE) ==
+      sum(!candidate$comparisons[[field]], na.rm = TRUE))
+    checks[paste0('count_preserving_', metric, '_failure_exchange')] <-
+      rejected(indel_audit_compare(baseline, candidate))
+    changed <- pairs
+    target <- expected
+    event <- if (metric == 'hgvsp') 2L else 3L
+    target[[metric]][event] <- 'changed_oracle_expectation'
+    selected <- changed$event_index == events$event_index[event]
+    if (metric == 'so') selected <- selected & startsWith(changed$route, 'independent_')
+    changed[[paste0(metric, '_expected')]][selected] <- target[[metric]][event]
+    candidate <- checked_bundle(changed, target)
+    checks[paste0('coordinated_', metric, '_expectation_change')] <-
+      rejected(indel_audit_compare(baseline, candidate))
+  }
+  changed <- baseline
+  changed$comparisons$so_equal[1L] <- NA
+  checks['lost_so_comparison'] <- rejected(indel_audit_compare(baseline, changed))
+  changed <- baseline
+  changed$events$reference[1L] <- 'C'
+  checks['changed_source_geometry'] <- rejected(indel_audit_compare(baseline, changed))
+  changed <- pairs
+  changed$hgvsp_actual[2L] <- NA_character_
+  changed$hgvsp_equal[2L] <- TRUE
+  improved <- indel_audit_compare(baseline, checked_bundle(changed))
+  stopifnot(improved$resolved_failures[improved$metric == 'hgvsp'] == 1L)
+  if (!all(checks)) stop('Accepted cross-bundle corruption: ', paste(names(checks)[!checks], collapse = ', '))
+  message('Indel cross-bundle controls: ', length(checks), ' corruptions rejected; ',
+    'unchanged nonzero failures, reordered rows and a genuine resolved failure accepted')
+  invisible(TRUE)
 }
 
 indel_audit_self_test <- function() {
@@ -355,6 +473,7 @@ indel_audit_self_test <- function() {
   if (!all(checks)) stop('Accepted synthetic corruption: ', paste(names(checks)[!checks], collapse = ', '))
   message('Indel evidence audit: ', length(checks), ' in-memory corruptions rejected; ',
     'nonzero disagreements and explicit independent-native absence retained')
+  indel_audit_comparison_controls(pairs, events, expected)
   invisible(TRUE)
 }
 
@@ -364,7 +483,8 @@ if (sys.nframe() == 0L) {
   allow_incomplete_model <- length(args) > 0L && args[1L] == '--incomplete-model-diagnostic'
   if (allow_incomplete_model) args <- args[-1L]
   stopifnot(length(args) %% 2L == 0L)
-  if (!length(args)) {
+  compare_bundles <- !length(args)
+  if (compare_bundles) {
     stopifnot(!allow_incomplete_model)
     args <- c(
       'test/duckvep/conformance/data/ambiguous_indel_baseline',
@@ -372,7 +492,11 @@ if (sys.nframe() == 0L) {
       'test/duckvep/conformance/data/ambiguous_indel_consensus',
       'a1d0f0cd56717f20cfa663de72efa22ab16a416a460d65fa6ffa7d6122039385')
   }
+  baseline <- NULL
   for (i in seq.int(1L, length(args), by = 2L)) {
-    indel_audit_bundle(args[i], args[i + 1L], allow_incomplete_model)
+    audited <- indel_audit_bundle(args[i], args[i + 1L], allow_incomplete_model)
+    if (compare_bundles) {
+      if (is.null(baseline)) baseline <- audited else indel_audit_compare(baseline, audited)
+    }
   }
 }

@@ -1258,6 +1258,11 @@ matrix. Its default requires complete native transcript-flank metadata;
 Source geometry, comparison keys, missing results, model partitions and summary
 counts have independent corruption controls. The audit preserves nonzero
 disagreement counts; a successful audit is not a successful conformance run.
+With no arguments, it also compares the pinned baseline and consensus bundles:
+source identities, reconstructed oracle expectations and route-qualified keys
+must match, and no previously passing HGVSp or SO comparison may fail. Controls
+exchange failures while preserving every aggregate stratum. Explicit directory
+and digest arguments audit individual bundles without asserting cross-run improvement.
 
 `compound_coding_audit.R --artifacts results/<haplotype-run>` observes the native
 coding-context evaluator on every original edit set, including reference lanes.

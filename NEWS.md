@@ -2,8 +2,12 @@
 
 # duckhts 1.5.1.9000
 
+- compare retained indel bundles by exact oracle and failure keys; reject
+  count-preserving exchanges of resolved and newly failing comparisons
+
 - report all source-bound indel checkpoint measurements and their unequal
-  singleton local-consequence fingerprints
+  singleton local-consequence fingerprints; retain complete keyed-output audits
+  and comparator corruption controls
 
 - interpret N-containing indel codons with pinned VEP-116 consensus and match
   retained insertion anchors literally; share the checked coding/HGVS paths

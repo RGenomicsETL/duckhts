@@ -1906,9 +1906,12 @@ and independent VEP emits only `frameshift_variant` with
 class gate, so its local mask includes both raw predicates. The
 [checkpoint report](benchmarks/duckvep_haplotypes_indel.md) retains the paired
 four-row native outputs, exact upstream observation and all 51 measurements.
-The singleton full-output fingerprints differ from the prior source; their
-large-output audit remains incomplete and the benchmark equality failure is
-not waived by the small witness.
+A complete typed comparison of 90,112 keyed singleton row pairs finds exactly
+22,528 deletion-mask changes and no other field changes or missing keys. The
+retained captures match the original timed-output fingerprints, and seven
+corruption controls check the comparator. The singleton full-output fingerprints
+remain unequal; the report describes same-input, different-output measurements,
+not identical-output performance or a general conformance result.
 
 The indel predicate bundle retains six later-coding-exon models, both strands and phases
 0, 1 and 2, with N outside the validated `T>AC` or reverse-strand `A>GT`
@@ -1952,7 +1955,10 @@ formatting. Raw-mode differences are retained under the distinction above.
 The bundles preserve every pair, raw source/oracle observations, warnings,
 controls and separately identified source/binary hashes. The network-free audit
 pins their reviewed receipts outside those receipts and reconstructs the entire
-matrix and its nonzero verdicts. They remain unsigned diagnostic evidence.
+matrix and its nonzero verdicts. Its default paired check requires identical
+source and oracle expectations at each key and rejects newly failing HGVSp or
+SO comparisons, including count-preserving exchanges. They remain unsigned
+diagnostic evidence.
 The 28,800-SNV regression matrix retains zero disagreements in its 230,400
 HGVSp and 57,600 SO comparisons after this correction.
 

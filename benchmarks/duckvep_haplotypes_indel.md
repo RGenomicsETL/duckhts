@@ -148,11 +148,35 @@ per-file hashes. Rendering verifies the bundle identity, the complete
 four-row difference and the independent raw-predicate observation. It is
 unsigned diagnostic evidence.
 
-This small reproduction does **not** prove that it explains every
-differing field in each large timed output. A complete keyed-output
-audit remains required before these measurements can be promoted with an
-approved expected-output correction. The full-equality failure is
-retained, not waived by matching replay projections.
+The [complete-output
+audit](data/duckvep_haplotypes_indel_full_audit.jsonl.gz) retains all
+eight baseline/current Parquet relations for the two singleton modes at
+both transcript counts. Each untimed capture matches all 27 non-timing
+result fields from its original correctness worker and all three timed
+workers, including every full-output fingerprint; Parquet round trips
+preserve those metrics and types. Rendering verifies the pinned bundle
+and receipt identities, binds the retained metrics to both ledgers, then
+reruns the complete typed, exact-key comparison.
+
+| transcripts | mode                | joined_rows | missing_keys | changed_rows | changed_other_events | unexplained_rows |
+|------------:|:--------------------|------------:|-------------:|-------------:|---------------------:|-----------------:|
+|        1024 | sql_singletons      |        4096 |            0 |         1024 |                    0 |                0 |
+|        1024 | sql_singletons_hgvs |        4096 |            0 |         1024 |                    0 |                0 |
+|       10240 | sql_singletons      |       40960 |            0 |        10240 |                    0 |                0 |
+|       10240 | sql_singletons_hgvs |       40960 |            0 |        10240 |                    0 |                0 |
+
+Across 90112 keyed row pairs, 22528 differ only in the declared deletion
+mask above. There are no missing keys, changes to other events or
+unexplained field changes. The audit checks the full expected
+transcript/event inventory and deletion geometry, not only aggregate
+hashes. Its seven corruption controls reject NULL blocks,
+count-preserving key shifts, altered integer types, changed protein
+sequence, omitted or duplicate rows and an incorrect deletion mask;
+rendering reruns them. The bundle retains the observation/comparison
+scripts, receipts, complete corrupted inputs and original logs. These
+remain unsigned local observations. The outputs are still unequal:
+explaining their difference does not turn these measurements into
+identical-output work or change the historical promotion guard.
 
 Three passes on one shared machine do not establish statistical
 significance, a causal performance effect or a general absence of

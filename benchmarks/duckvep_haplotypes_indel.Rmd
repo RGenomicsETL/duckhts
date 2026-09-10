@@ -90,6 +90,88 @@ stopifnot(oracle$source$position1 == 67L, oracle$source$reference == "GC",
   length(oracle$raw_predicates) == 13L, sum(unlist(oracle$raw_predicates)) == 2L,
   identical(oracle$consequences, "frameshift_variant"),
   identical(oracle$hgvsp, "bench_protein.1:p.Ala23ValfsTer?"))
+
+audit_full_outputs <- function() {
+  bundle <- file.path(root, "benchmarks/data/duckvep_haplotypes_indel_full_audit.jsonl.gz")
+  sha256 <- function(path) digest::digest(file = path, algo = "sha256")
+  stopifnot(sha256(bundle) ==
+    "47c307544fc12d5c3430a7b9359eff68cf299e371e710111a04671807fc8c8c7")
+  connection <- gzfile(bundle, "rt")
+  records <- lapply(readLines(connection), jsonlite::fromJSON)
+  close(connection)
+  paths <- vapply(records, function(x) paste(x$origin, x$name, sep = "/"), "")
+  stopifnot(length(records) == 82L, !anyDuplicated(paths),
+    all(grepl("^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$", paths)),
+    !any(unlist(strsplit(paths, "/", fixed = TRUE)) %in% c(".", "..")))
+  directory <- tempfile("duckhts-singleton-audit-")
+  stopifnot(dir.create(directory))
+  on.exit(unlink(directory, recursive = TRUE), add = TRUE)
+  for (i in seq_along(records)) {
+    bytes <- jsonlite::base64_dec(records[[i]]$bytes_base64)
+    stopifnot(digest::digest(bytes, algo = "sha256", serialize = FALSE) == records[[i]]$sha256)
+    path <- file.path(directory, paths[i])
+    if (!dir.exists(dirname(path))) stopifnot(dir.create(dirname(path), recursive = TRUE))
+    writeBin(bytes, path)
+  }
+  comparator <- file.path(directory, "audit/audit_pairs.R")
+  invoke <- function(label, before, after, transcripts, expected_error = NULL) {
+    result <- file.path(directory, paste0(label, ".json"))
+    log <- file.path(directory, paste0(label, ".log"))
+    status <- system2(file.path(R.home("bin"), "Rscript"),
+      shQuote(c(comparator, before, after, transcripts, result)), stdout = log, stderr = log)
+    if (!is.null(expected_error)) {
+      stopifnot(status != 0L, !file.exists(result),
+        any(grepl(expected_error, readLines(log), fixed = TRUE)))
+      return(invisible(NULL))
+    }
+    if (status != 0L) stop(paste(readLines(log), collapse = "\n"))
+    jsonlite::fromJSON(result)
+  }
+  comparisons <- list()
+  for (transcripts in c(1024L, 10240L)) {
+    for (mode in c("sql_singletons", "sql_singletons_hgvs")) {
+      label <- paste(transcripts, mode, sep = "_")
+      captures <- setNames(file.path(directory, paste(c("baseline", "current"), label,
+        sep = "_")), c("baseline", "current"))
+      for (side in names(captures)) {
+        capture <- captures[[side]]
+        receipt <- jsonlite::fromJSON(file.path(capture, "receipt.json"))
+        metrics <- read.csv(file.path(capture, "metrics.csv"), colClasses = "character")
+        ledger <- if (side == "baseline") baseline else current
+        ledger <- ledger[ledger$transcripts == transcripts & ledger$samples == "64" &
+          ledger$overlap == "16" & ledger$mode == mode, ]
+        stopifnot(receipt$status == "complete", nrow(ledger) == 3L, nrow(metrics) == 1L,
+          length(receipt$verified_non_timing_fields) == 27L,
+          identical(names(metrics), receipt$verified_non_timing_fields),
+          identical(receipt$verified_timed_passes, 1:3), receipt$parquet_roundtrip_equal,
+          all(ledger$source_revision == receipt$benchmark_source_revision),
+          all(ledger$receipt_sha256 == receipt$benchmark_receipt_sha256),
+          all(ledger$extension_sha256 == receipt$input_sha256[[receipt$loaded_extension]]))
+        for (name in names(receipt$output_sha256)) {
+          stopifnot(sha256(file.path(capture, name)) == receipt$output_sha256[[name]])
+        }
+        for (field in names(metrics)) stopifnot(all(ledger[[field]] == metrics[[field]]))
+      }
+      observed <- invoke(label, file.path(captures[["baseline"]], "rows.parquet"),
+        file.path(captures[["current"]], "rows.parquet"), transcripts)
+      retained <- jsonlite::fromJSON(file.path(directory, "audit", paste0("full_", label, ".json")))
+      stopifnot(identical(observed$comparisons, retained$comparisons))
+      comparisons[[label]] <- data.frame(transcripts, mode, observed$comparisons)
+    }
+  }
+  controls <- read.csv(file.path(directory, "controls/summary.csv"), colClasses = "character")
+  stopifnot(nrow(controls) == 8L, all(controls$passed == "TRUE"),
+    sum(controls$expected_outcome == "accept") == 1L,
+    sum(controls$expected_outcome == "reject") == 7L)
+  for (i in which(controls$expected_outcome == "reject")) {
+    control <- controls$control[i]
+    invoke(control, file.path(directory, "controls", control, "baseline.parquet"),
+      file.path(directory, "controls", control, "current.parquet"), 1024L,
+      controls$expected_assertion[i])
+  }
+  do.call(rbind, comparisons)
+}
+full_audit <- audit_full_outputs()
 ```
 
 Source: `r revision`. Nearest same-input baseline: `r baseline_revision`.
@@ -170,10 +252,29 @@ stored as byte-exact base64 payloads with per-file hashes. Rendering verifies
 the bundle identity, the complete four-row difference and the independent
 raw-predicate observation. It is unsigned diagnostic evidence.
 
-This small reproduction does **not** prove that it explains every differing field
-in each large timed output. A complete keyed-output audit remains required before
-these measurements can be promoted with an approved expected-output correction.
-The full-equality failure is retained, not waived by matching replay projections.
+The [complete-output audit](data/duckvep_haplotypes_indel_full_audit.jsonl.gz)
+retains all eight baseline/current Parquet relations for the two singleton modes
+at both transcript counts. Each untimed capture matches all 27 non-timing result
+fields from its original correctness worker and all three timed workers, including
+every full-output fingerprint; Parquet round trips preserve those metrics and types.
+Rendering verifies the pinned bundle and receipt identities, binds the retained
+metrics to both ledgers, then reruns the complete typed, exact-key comparison.
+
+```{r complete-output-audit}
+knitr::kable(full_audit, row.names = FALSE)
+```
+
+Across `r sum(full_audit$joined_rows)` keyed row pairs,
+`r sum(full_audit$changed_rows)` differ only in the declared deletion mask above.
+There are no missing keys, changes to other events or unexplained field changes.
+The audit checks the full expected transcript/event inventory and deletion geometry,
+not only aggregate hashes. Its seven corruption controls reject NULL blocks,
+count-preserving key shifts, altered integer types, changed protein sequence,
+omitted or duplicate rows and an incorrect deletion mask; rendering reruns them.
+The bundle retains the observation/comparison scripts, receipts, complete corrupted
+inputs and original logs. These remain unsigned local observations. The outputs
+are still unequal: explaining their difference does not turn these measurements
+into identical-output work or change the historical promotion guard.
 
 Three passes on one shared machine do not establish statistical significance,
 a causal performance effect or a general absence of regression. This fixture
