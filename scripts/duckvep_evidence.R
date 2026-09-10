@@ -108,7 +108,6 @@ duckvep_evidence_verify_ci_receipt <- function(path, source_revision, bundle = N
   digest <- duckvep_evidence_sha256(path)
   args <- c("attestation", "verify", path,
     "--repo", "RGenomicsETL/duckhts",
-    "--signer-workflow", "RGenomicsETL/duckhts/.github/workflows/duckvep-provenance.yml",
     "--cert-identity-regex", paste0("^https://github[.]com/RGenomicsETL/duckhts/",
       "[.]github/workflows/duckvep-provenance[.]yml@refs/heads/(develop|main)$"),
     "--cert-oidc-issuer", "https://token.actions.githubusercontent.com",
