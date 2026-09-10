@@ -256,8 +256,8 @@ HGVS observations from five source cases, including the extra uppercase-referenc
 allele admitted by the direct API for lowercase sequence. That direct-API observation
 is not a claim about VEP's VCF parser. Its reference/alternate translation matrix
 and separate corruption controls remain part of the receipt.
-The retained diagnostic `reference_translation_c95213eafa7a3/receipt.json` covers
-27,014 reference/alternate translation cases and these six HGVS observations.
+The retained [reference-translation bundle](test/duckvep/conformance/data/reference_translation_consensus)
+covers 27,014 reference/alternate translation cases and these six HGVS observations.
 This observer supplies phase-zero models without a database adaptor. Translation
 attributes reach core reference curation, but it does not populate the variation
 model's `_seq_edits` cache as VEP's `prefetch_translation_data` does. Its independent
@@ -1839,15 +1839,20 @@ The implementation uses one consensus translator while keeping uploaded-allele
 validity, raw nucleotide ambiguity, uncurated coding peptides and curated
 reference proteins separate.
 
-The corrected-source diagnostic `ambiguous_codon_41cc93f76057e/receipt.json`
+The [corrected-source bundle](test/duckvep/conformance/data/ambiguous_codon_consensus)
 retains the same 28,800 SNVs, oracle and comparison axes: all 230,400 HGVSp and
 57,600 independent SO comparisons agree. All 64 comparator/provenance corruption
-controls pass. The original failing bundle remains unchanged. This local receipt
-hashes the dirty source and supplied binary; it is not a release-build certificate.
-`reference_translation_41dbc765682aa/receipt.json` separately retains zero failures
+controls pass. The original failing bundle remains unchanged. Both complete pair
+relations and raw source/oracle observations are tracked; their receipts retain
+the source and binary identities without claiming release-build certification.
+The [reference-translation bundle](test/duckvep/conformance/data/reference_translation_consensus)
+separately retains zero failures
 over 27,014 curated-reference, uncurated-coding and alternate translation cases.
 The coding expectation is the pinned raw consensus output, without masking N-bearing
 codons to X; the independent raw-nucleotide ambiguity checks are unchanged.
+Network-free audits reconstruct both corrected bundles and the original failure
+bundle from their raw observations. Compressed JSON and Parquet preserve every
+compared field without committing the local build trees or duplicate native outputs.
 
 SQL and R tests retain eleven exact source-SNV witnesses, including first and
 terminal codons, nonstandard tables and unavailable uploaded REF N. A single X

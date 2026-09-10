@@ -3,7 +3,9 @@
 main <- function() {
   opt <- optparse::parse_args(optparse::OptionParser(option_list = list(
     optparse::make_option("--vep-prefix", dest = "vep_prefix",
-      default = Sys.getenv("VEP_PREFIX", "/root/miniconda3/envs/vep"))
+      default = Sys.getenv("VEP_PREFIX", "/root/miniconda3/envs/vep")),
+    optparse::make_option("--evidence-out", dest = "evidence_out", default = "",
+      help = "Retain complete comparison pairs and raw oracle in a new directory")
   )))
   source("scripts/duckvep_evidence.R", local = TRUE)
   root <- normalizePath(".")
@@ -220,6 +222,31 @@ main <- function() {
   print(pairs[pairs$family == "witness", c("id", "expected_reference", "actual_reference", "expected_alternate", "actual_alternate")])
   stopifnot(all(controls), identical(code_hashes, vapply(code, duckvep_evidence_sha256, "")),
     identical(revision, duckvep_evidence_revision(root)))
+  if (nzchar(opt$evidence_out)) {
+    destination <- opt$evidence_out
+    stopifnot(!dir.exists(destination), dir.create(destination))
+    con <- DBI::dbConnect(duckdb::duckdb())
+    on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+    DBI::dbWriteTable(con, "comparison_pairs", pairs)
+    DBI::dbExecute(con, paste("COPY comparison_pairs TO",
+      DBI::dbQuoteString(con, file.path(destination, "pairs.parquet")), "(FORMAT PARQUET)"))
+    for (name in c("cases.jsonl", "oracle.jsonl")) {
+      compressed <- gzfile(file.path(destination, paste0(name, ".gz")), "wt")
+      writeLines(readLines(file.path(out, name)), compressed)
+      close(compressed)
+    }
+    stopifnot(all(file.copy(file.path(out, c("summary.csv", "controls.csv",
+      "independent_hgvs.csv", "environment.txt")), destination)))
+    manifest <- jsonlite::read_json(file.path(out, "receipt.json"), simplifyVector = TRUE)
+    manifest$local_receipt_sha256 <- duckvep_evidence_sha256(file.path(out, "receipt.json"))
+    manifest$probe_sha256 <- manifest$sha256[[shared]]
+    manifest$source_sha256 <- as.list(vapply(c(code, perl_sources), duckvep_evidence_sha256, ""))
+    published <- list.files(destination, full.names = TRUE)
+    manifest$sha256 <- as.list(setNames(vapply(published, duckvep_evidence_sha256, ""),
+      basename(published)))
+    jsonlite::write_json(manifest, file.path(destination, "receipt.json"),
+      pretty = TRUE, auto_unbox = TRUE)
+  }
   # Every sequence comparison and the raw translation metadata must agree.
   stopifnot(!any(pairs$reference_failure | pairs$alternate_full_failure | pairs$alternate_failure |
     pairs$coding_failure),

@@ -1,0 +1,5 @@
+"family","cases","reference_failures","coding_failures","raw_reference_hypothesis_failures","alternate_full_failures","alternate_failures"
+"internal",9000,0,0,5125,0,0
+"start",9000,0,0,5492,0,0
+"terminal",9000,0,0,965,0,0
+"witness",14,0,0,12,0,0

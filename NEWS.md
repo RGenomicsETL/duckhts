@@ -2,6 +2,9 @@
 
 # duckhts 1.5.1.9000
 
+- retain complete compact codon-consensus and reference-translation evidence with
+  network-free reconstruction checks; record matched phased-replay measurements
+
 - use pinned VEP-116 codon consensus for independent and singleton protein
   annotation, preserving uploaded-allele validity and raw nucleotide ambiguity;
   share uncurated translation with the curated haplotype reference

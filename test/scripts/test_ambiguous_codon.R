@@ -136,80 +136,95 @@ controls <- rbind(codon_controls(expected), codon_provenance_controls(FALSE),
 stopifnot(!anyDuplicated(controls$control), all(controls$rejected))
 message('Ambiguous-codon comparator: ', nrow(controls), ' corruptions rejected')
 
-# Reconstruct the checked-in failed baseline from raw VEP observations, not
-# from stored equality flags. This validates retention, not biological agreement.
-directory <- 'test/duckvep/conformance/data/ambiguous_codon_baseline'
-manifest <- read_unique_json(paste(readLines(file.path(directory, 'receipt.json')), collapse = '\n'))
-hashes <- unlist(manifest$sha256)
-stopifnot(setequal(names(hashes), c('pairs.parquet', 'cases.jsonl.gz', 'oracle.stdout.gz',
-  'summary.csv', 'controls.csv', 'environment.stdout')))
-for (name in names(hashes)) stopifnot(identical(unname(hashes[name]),
-  duckvep_evidence_sha256(file.path(directory, name))))
-read_records <- function(name) {
-  connection <- gzfile(file.path(directory, name), 'rt')
-  on.exit(close(connection))
-  lapply(readLines(connection), read_unique_json)
+# Reconstruct every bundle from raw VEP observations, not stored equality flags.
+# The failed baseline and the corrected result retain the same finite experiment.
+check_codon_bundle <- function(directory, hgvsp_failures, so_failures) {
+  manifest <- read_unique_json(paste(readLines(file.path(directory, 'receipt.json')), collapse = '\n'))
+  hashes <- unlist(manifest$sha256)
+  stopifnot(setequal(names(hashes), c('pairs.parquet', 'cases.jsonl.gz', 'oracle.stdout.gz',
+    'summary.csv', 'controls.csv', 'environment.stdout')))
+  for (name in names(hashes)) stopifnot(identical(unname(hashes[name]),
+    duckvep_evidence_sha256(file.path(directory, name))))
+  read_records <- function(name) {
+    connection <- gzfile(file.path(directory, name), 'rt')
+    on.exit(close(connection))
+    readLines(connection)
+  }
+  source_records <- read_records('cases.jsonl.gz')
+  oracle_records <- read_records('oracle.stdout.gz')
+  cases <- lapply(source_records, read_unique_json)
+  oracle <- lapply(oracle_records, read_unique_json)
+  stopifnot(check_codon_matrix(cases),
+    identical(vapply(cases, `[[`, '', 'id'), vapply(oracle, `[[`, '', 'id')))
+  matrix_controls <- codon_matrix_controls(cases)
+  stopifnot(nrow(controls) == 64L, length(matrix_controls) == 20L)
+  message(basename(directory), ': all 84 comparator, provenance and matrix corruptions rejected')
+  for (i in seq_along(cases)) {
+    variants <- cases[[i]]$variants
+    observed <- oracle[[i]]$independent_hgvs
+    stopifnot(identical(oracle[[i]]$prepared_cds, cases[[i]]$cds),
+      nrow(observed) == nrow(variants), !anyDuplicated(observed$id),
+      setequal(observed$id, variants$id),
+      identical(observed$allele, variants$alternate[match(observed$id, variants$id)]))
+  }
+  events <- do.call(rbind, lapply(cases, function(x) data.frame(
+    event_index = as.integer(x$variants$id), position = x$variants$position1,
+    reference = x$variants$reference, allele = x$variants$alternate, cds = x$cds, table = x$table,
+    case_id = x$id, codon = substr(x$cds, 4L, 6L))))
+  expected <- do.call(rbind, lapply(oracle, function(x) {
+    rows <- x$independent_hgvs
+    data.frame(event_index = as.integer(rows$id), allele = rows$allele,
+      hgvsp = sub('^.*:p\\.', 'p.', rows$hgvsp),
+      so = vapply(rows$consequences, function(terms) paste(sort(terms), collapse = '&'), ''))
+  }))
+  stopifnot(nrow(events) == 28800L, nrow(expected) == 28800L,
+    !anyDuplicated(events$event_index), !anyDuplicated(expected$event_index))
+  con <- DBI::dbConnect(duckdb::duckdb())
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  pairs <- DBI::dbGetQuery(con, paste('SELECT * FROM read_parquet(',
+    DBI::dbQuoteString(con, file.path(directory, 'pairs.parquet')), ')'))
+  stopifnot(nrow(pairs) == 230400L, all(pairs$actual_present), all(pairs$expected_present),
+    setequal(unique(pairs$route), paste0(rep(c('independent', 'strict', 'vep116_compat', 'source_records'),
+      each = 2L), '_', c(1L, 4L))),
+    all(pairs$seq_region == pairs$event_index - 1L),
+    all(pairs$transcript_index == pairs$event_index - 1L))
+  input_at <- match(pairs$event_index, events$event_index)
+  for (field in c('position', 'reference', 'allele', 'cds', 'table', 'case_id', 'codon'))
+    stopifnot(all(pairs[[field]] == events[[field]][input_at]))
+  stopifnot(all(pairs$source_n == ifelse(pairs$reference == 'N', 'yes', 'no')),
+    all(pairs$codon_n == ifelse(grepl('N', pairs$codon, fixed = TRUE), 'yes', 'no')))
+  for (route in unique(pairs$route)) {
+    part <- pairs[pairs$route == route, ]
+    actual <- data.frame(event_index = part$event_index, allele = part$allele,
+      hgvsp = part$hgvsp_actual, so = part$so_actual)
+    target <- expected
+    phased <- !startsWith(route, 'independent_')
+    if (phased) target$so <- NA_character_
+    checked <- codon_equal(actual, target)
+    if (phased) checked$so_equal <- NA
+    at <- match(checked$event_index, part$event_index)
+    for (field in names(checked)) stopifnot(identical(checked[[field]], part[[field]][at]))
+  }
+  summary <- aggregate(cbind(pairs = rep(1L, nrow(pairs)), hgvsp_failures = !pairs$hgvsp_equal,
+    so_compared = !is.na(pairs$so_equal), so_failures = !pairs$so_equal),
+    pairs[c('route', 'source_n', 'codon_n')], sum, na.rm = TRUE)
+  retained_summary <- read.csv(file.path(directory, 'summary.csv'))
+  stopifnot(identical(names(summary), names(retained_summary)),
+    all(summary == retained_summary), sum(!pairs$hgvsp_equal) == hgvsp_failures,
+    sum(!pairs$so_equal, na.rm = TRUE) == so_failures,
+    sum(!is.na(pairs$so_equal)) == 57600L)
+  retained_controls <- read.csv(file.path(directory, 'controls.csv'))
+  stopifnot(identical(controls$control, retained_controls$control),
+    identical(controls$rejected, retained_controls$rejected))
+  message(basename(directory), ': 230,400 HGVSp / 57,600 SO comparisons reconstructed; ',
+    hgvsp_failures, ' HGVSp / ', so_failures, ' SO failures')
+  list(source_records = source_records, oracle_records = oracle_records)
 }
-cases <- read_records('cases.jsonl.gz')
-oracle <- read_records('oracle.stdout.gz')
-stopifnot(check_codon_matrix(cases),
-  identical(vapply(cases, `[[`, '', 'id'), vapply(oracle, `[[`, '', 'id')))
-matrix_controls <- codon_matrix_controls(cases)
-message('Exact finite codon matrix: ', length(matrix_controls), ' corruptions rejected')
-for (i in seq_along(cases)) {
-  variants <- cases[[i]]$variants
-  observed <- oracle[[i]]$independent_hgvs
-  stopifnot(identical(oracle[[i]]$prepared_cds, cases[[i]]$cds),
-    nrow(observed) == nrow(variants), !anyDuplicated(observed$id),
-    setequal(observed$id, variants$id),
-    identical(observed$allele, variants$alternate[match(observed$id, variants$id)]))
-}
-events <- do.call(rbind, lapply(cases, function(x) data.frame(
-  event_index = as.integer(x$variants$id), position = x$variants$position1,
-  reference = x$variants$reference, allele = x$variants$alternate, cds = x$cds, table = x$table,
-  case_id = x$id, codon = substr(x$cds, 4L, 6L))))
-expected <- do.call(rbind, lapply(oracle, function(x) {
-  rows <- x$independent_hgvs
-  data.frame(event_index = as.integer(rows$id), allele = rows$allele,
-    hgvsp = sub('^.*:p\\.', 'p.', rows$hgvsp),
-    so = vapply(rows$consequences, function(terms) paste(sort(terms), collapse = '&'), ''))
-}))
-stopifnot(nrow(events) == 28800L, nrow(expected) == 28800L,
-  !anyDuplicated(events$event_index), !anyDuplicated(expected$event_index))
-con <- DBI::dbConnect(duckdb::duckdb())
-pairs <- DBI::dbGetQuery(con, paste('SELECT * FROM read_parquet(',
-  DBI::dbQuoteString(con, file.path(directory, 'pairs.parquet')), ')'))
-DBI::dbDisconnect(con, shutdown = TRUE)
-stopifnot(nrow(pairs) == 230400L, all(pairs$actual_present), all(pairs$expected_present),
-  setequal(unique(pairs$route), paste0(rep(c('independent', 'strict', 'vep116_compat', 'source_records'),
-    each = 2L), '_', c(1L, 4L))),
-  all(pairs$seq_region == pairs$event_index - 1L),
-  all(pairs$transcript_index == pairs$event_index - 1L))
-input_at <- match(pairs$event_index, events$event_index)
-for (field in c('position', 'reference', 'allele', 'cds', 'table', 'case_id', 'codon'))
-  stopifnot(all(pairs[[field]] == events[[field]][input_at]))
-stopifnot(all(pairs$source_n == ifelse(pairs$reference == 'N', 'yes', 'no')),
-  all(pairs$codon_n == ifelse(grepl('N', pairs$codon, fixed = TRUE), 'yes', 'no')))
-for (route in unique(pairs$route)) {
-  part <- pairs[pairs$route == route, ]
-  actual <- data.frame(event_index = part$event_index, allele = part$allele,
-    hgvsp = part$hgvsp_actual, so = part$so_actual)
-  target <- expected
-  phased <- !startsWith(route, 'independent_')
-  if (phased) target$so <- NA_character_
-  checked <- codon_equal(actual, target)
-  if (phased) checked$so_equal <- NA
-  at <- match(checked$event_index, part$event_index)
-  for (field in names(checked)) stopifnot(identical(checked[[field]], part[[field]][at]))
-}
-summary <- aggregate(cbind(pairs = rep(1L, nrow(pairs)), hgvsp_failures = !pairs$hgvsp_equal,
-  so_compared = !is.na(pairs$so_equal), so_failures = !pairs$so_equal),
-  pairs[c('route', 'source_n', 'codon_n')], sum, na.rm = TRUE)
-retained_summary <- read.csv(file.path(directory, 'summary.csv'))
-stopifnot(identical(names(summary), names(retained_summary)),
-  all(summary == retained_summary), sum(!pairs$hgvsp_equal) == 12992L,
-  sum(!pairs$so_equal, na.rm = TRUE) == 3248L)
-retained_controls <- read.csv(file.path(directory, 'controls.csv'))
-stopifnot(identical(controls$control, retained_controls$control),
-  identical(controls$rejected, retained_controls$rejected))
-message('Complete retained baseline reconstructed: 230,400 HGVSp / 57,600 SO comparisons; failures preserved')
+
+baseline <- check_codon_bundle('test/duckvep/conformance/data/ambiguous_codon_baseline',
+  hgvsp_failures = 12992L, so_failures = 3248L)
+consensus <- check_codon_bundle('test/duckvep/conformance/data/ambiguous_codon_consensus',
+  hgvsp_failures = 0L, so_failures = 0L)
+stopifnot(identical(baseline$source_records, consensus$source_records),
+  identical(baseline$oracle_records, consensus$oracle_records))
+message('Baseline and consensus retain identical raw source cases and oracle observations')

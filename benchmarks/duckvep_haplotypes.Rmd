@@ -132,6 +132,8 @@ a long-transcript benchmark, a reader benchmark, or evidence for arbitrary phase
 and structural configurations. Native input is a factorized, already-ordered
 feed; SQL input is its complete event/candidate/sample relation stored in hash
 order. Both retain every source identity and called carrier.
+The fixture contains only canonical DNA. It exercises shared translation and
+materialization paths, not the cost of N-rich annotation or consensus resolution.
 
 Before timing, native validation checks every transcript, complete CDS/protein
 against independently rebuilt/Biostrings-translated sequences, contributors and

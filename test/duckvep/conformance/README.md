@@ -1195,6 +1195,11 @@ lane does not certify public protein differences, compound SO or HGVS.
 The models have phase zero. Core reference peptide edits are exercised, but the
 observer does not populate the variation model's `_seq_edits` cache. Its six
 independent HGVS observations do not certify allele-local peptide-edit behavior.
+The complete [reference-translation bundle](data/reference_translation_consensus)
+retains raw cases, oracle observations, all pair fields, controls and source hashes.
+Use `--evidence-out NEW_DIRECTORY` to export a run; existing directories are not
+overwritten and failures are retained. `Rscript test/scripts/test_reference_translation.R`
+reconstructs its declared matrix and comparisons without an installed VEP.
 
 `Rscript test/duckvep/conformance/ambiguous_codon_differential.R` compares
 28,800 original SNVs across all 125 ACGTN internal codons and all 24 supported
@@ -1213,7 +1218,9 @@ Complete outputs, keyed outer comparisons, full source-field and carrier checks,
 binary hashes are retained locally. The checked-in
 [`ambiguous_codon_baseline`](data/ambiguous_codon_baseline) bundle contains all
 comparison pairs as Parquet, compressed source cases and raw oracle observations,
-summaries, controls and hashes. It excludes other native output fields. Use
+summaries, controls and hashes. The [consensus bundle](data/ambiguous_codon_consensus)
+retains the corrected run with the same full source/oracle matrix. Both exclude
+other native output fields. Use
 `--evidence-out NEW_DIRECTORY` to retain another complete comparison bundle;
 existing directories are not overwritten. Network-free reconstruction and
 corruption checks run with `Rscript test/scripts/test_ambiguous_codon.R`. The
@@ -1223,6 +1230,8 @@ reject changed fields, repeated case/variant JSON properties and count-preservin
 case or substitution replacements. Retained JSON object keys are checked before
 data-frame conversion; each required source field occurs exactly once.
 Route identities and N strata are checked against their declared axes.
+The audit checks both bundles and retains the baseline's original failure counts;
+neither its inputs nor its expectations are replaced by the corrected output.
 The supplied extension is explicitly diagnostic, not certified as built from
 the current checkout. The command fails on any disagreement; see
 [`ERRATA.md`](../../../ERRATA.md#n-containing-codons-in-independent-and-singleton-protein-annotation).
