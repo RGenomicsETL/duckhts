@@ -18,7 +18,12 @@ TEST codon_translate_known(void) {
     ASSERT_EQ('R', duckvep_translate_codon("AGA", STD));
     ASSERT_EQ('R', duckvep_translate_codon("AGG", STD));
     ASSERT_EQ('G', duckvep_translate_codon("ggg", STD)); /* case-insensitive */
-    ASSERT_EQ('X', duckvep_translate_codon("ANG", STD)); /* invalid base */
+    ASSERT_EQ('X', duckvep_translate_codon("ANG", STD)); /* unresolved consensus */
+    ASSERT_EQ('A', duckvep_translate_codon("GCN", STD));
+    ASSERT_EQ('T', duckvep_translate_codon("acn", STD));
+    ASSERT_EQ('X', duckvep_translate_codon("AAN", STD));
+    ASSERT_EQ('X', duckvep_translate_codon("A?G", STD));
+    ASSERT_EQ('X', duckvep_translate_codon(NULL, STD));
     /* vertebrate mitochondrial (transl_table=2) — the four edits */
     ASSERT_EQ('W', duckvep_translate_codon("TGA", MITO));
     ASSERT_EQ('M', duckvep_translate_codon("ATA", MITO));
@@ -49,6 +54,7 @@ TEST codon_translate_known(void) {
     ASSERT_EQ('E', duckvep_translate_codon("TAA", (duckvep_codon_table_t)30));
     ASSERT_EQ('W', duckvep_translate_codon("TGA", (duckvep_codon_table_t)31));
     ASSERT_EQ('X', duckvep_translate_codon("ATG", (duckvep_codon_table_t)8));
+    ASSERT_EQ('S', duckvep_translate_codon("TCN", STD));
     PASS();
 }
 
@@ -78,6 +84,9 @@ TEST codon_change_known(void) {
     ASSERT_EQ((uint32_t)DUCKVEP_CODON_STOP_GAINED, duckvep_codon_change("TAC", "TAA", STD).change); /* Y->* */
     ASSERT_EQ((uint32_t)DUCKVEP_CODON_STOP_LOST,   duckvep_codon_change("TAA", "TAC", STD).change); /* *->Y */
     ASSERT_EQ((uint32_t)DUCKVEP_CODON_INVALID,     duckvep_codon_change("ANG", "AAA", STD).change);
+    ASSERT_EQ((uint32_t)DUCKVEP_CODON_MISSENSE, duckvep_codon_change("GCN", "ACN", STD).change);
+    ASSERT_EQ((uint32_t)DUCKVEP_CODON_SYNONYMOUS, duckvep_codon_change("GCN", "GCT", STD).change);
+    ASSERT_EQ((uint32_t)DUCKVEP_CODON_INVALID, duckvep_codon_change("AAN", "ACN", STD).change);
     /* MT matters: TGG->TGA is stop_gained nuclear but synonymous in mito (TGA=W). */
     ASSERT_EQ((uint32_t)DUCKVEP_CODON_STOP_GAINED, duckvep_codon_change("TGG", "TGA", STD).change);
     ASSERT_EQ((uint32_t)DUCKVEP_CODON_SYNONYMOUS,  duckvep_codon_change("TGG", "TGA", MITO).change);
@@ -90,7 +99,7 @@ TEST codon_change_known(void) {
 struct kprop_codon { char ref[4]; char alt[4]; duckvep_codon_table_t table; };
 
 static enum theft_alloc_res kprop_codon_alloc(struct theft *t, void *env, void **instance) {
-    static const char bases5[5] = {'A', 'C', 'G', 'T', 'N'}; /* N -> invalid path */
+    static const char bases5[5] = {'A', 'C', 'G', 'T', 'N'};
     struct kprop_codon *c = (struct kprop_codon *)calloc(1u, sizeof *c);
     int i;
     (void)env;

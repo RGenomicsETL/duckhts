@@ -528,6 +528,8 @@ local({
   expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('n_codons',",
     dbQuoteString(con, "SELECT 0::UINTEGER seq_region"), ",", dbQuoteString(con, n_tx), ",",
     dbQuoteString(con, exons), ")"))$loaded)
+  missense_mask <- dbGetQuery(con,
+    "SELECT consequence_mask FROM duckvep_so_terms() WHERE consequence='missense_variant'")$consequence_mask
   n_call <- paste("SELECT 1 event_index,0 seq_region,102 AS position,'G' AS reference,'A' alternate,",
     "1 alt_index,0 transcript_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set")
   for (policy in c("strict", "vep116_compat")) {
@@ -542,8 +544,8 @@ local({
     expect_equal(n_changed$cds, "ATGACNTGNGCC")
     expect_equal(n_changed$protein, "MTXA")
     expect_equal(n_changed$sequence_status, "ok")
-    expect_equal(n_changed$coding_blocks[[1]]$coding_status, "unsupported")
-    expect_true(is.na(n_changed$coding_blocks[[1]]$local_consequence_mask))
+    expect_equal(n_changed$coding_blocks[[1]]$coding_status, "ok")
+    expect_equal(n_changed$coding_blocks[[1]]$local_consequence_mask, missense_mask)
   }
   expect_equal(sort(actual$cds), c("CAAAAAAAAAAA", "CACAAAAAAAAA", "CGAAAAAAAAAA"))
   expect_equal(sort(actual$carrier_count), c(1,1,2))
@@ -554,8 +556,6 @@ local({
   expect_equal(sum(lengths(lapply(actual$contributors, function(x) x$event_index))), 5L)
   blocks <- do.call(rbind, actual$coding_blocks)
   blocks <- blocks[order(blocks$alternate), ]
-  missense_mask <- dbGetQuery(con,
-    "SELECT consequence_mask FROM duckvep_so_terms() WHERE consequence='missense_variant'")$consequence_mask
   synonymous_mask <- dbGetQuery(con,
     "SELECT consequence_mask FROM duckvep_so_terms() WHERE consequence='synonymous_variant'")$consequence_mask
   start_lost_mask <- dbGetQuery(con,
@@ -913,7 +913,7 @@ local({
       expect_equal(views$protein, rep("MT*", 2L))
       expect_equal(views$carrier_count, rep(1, 2L))
       expect_equal(vapply(views$coding_blocks, function(x) x$coding_status, ""),
-        c("unsupported", "ok"))
+        c("ok", "ok"))
       for (difference in views$protein_differences) {
         expect_equal(difference$reference, "A")
         expect_equal(difference$alternate, "T")
@@ -921,6 +921,68 @@ local({
         expect_equal(difference$alt_start0, 1)
       }
     }
+  }
+
+  # Original VEP-116 witnesses: surrounding N, first/terminal codons and uploaded REF N.
+  # Unknown-residue HGVSp uses Ter; these expectations do not infer a stop consequence.
+  n_codon_source <- data.frame(i = 0:10,
+    cds = c("ATGGCNTAA", "ATGAANTAA", "ATGNCNTAA", "GCNGCCTAA", "AANGCCTAA",
+      "CTNGCCTAA", "ATGGCN", "ATGTAN", "ATGTCN", "GCNGCCTAA", "ATNGCCTAA"),
+    code = c(1L, 1L, 1L, 1L, 1L, 1L, 1L, 29L, 22L, 1L, 1L),
+    position = c(4L, 5L, 4L, 2L, 2L, 1L, 4L, 5L, 5L, 1L, 1L),
+    reference = c("G", "A", "N", "C", "A", "C", "G", "A", "C", "G", "A"),
+    alternate = c("A", "C", "A", "A", "C", "A", "A", "C", "A", "A", "C"))
+  dbWriteTable(con, "n_codon_source", n_codon_source)
+  n_codon_tx <- paste("SELECT i::UINTEGER transcript_index,i::UINTEGER seq_region,",
+    "1::UBIGINT transcript_start,length(cds)::UBIGINT transcript_end,1::TINYINT strand,",
+    "i::UINTEGER gene_index,3::UBIGINT transcript_flags,1::UBIGINT cds_start,",
+    "transcript_end cds_end,cds::BLOB cds_sequence,code::UTINYINT codon_table",
+    "FROM n_codon_source ORDER BY transcript_index")
+  n_codon_exons <- paste("SELECT i::UINTEGER transcript_index,1::UBIGINT exon_start,",
+    "length(cds)::UBIGINT exon_end,1::UBIGINT exon_cdna_start,",
+    "length(cds)::UBIGINT exon_cdna_end,0::TINYINT phase,0::TINYINT end_phase",
+    "FROM n_codon_source ORDER BY transcript_index")
+  expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('n_codon_witnesses',",
+    "'SELECT i::UINTEGER seq_region FROM n_codon_source ORDER BY i',",
+    dbQuoteString(con, n_codon_tx), ",", dbQuoteString(con, n_codon_exons), ")"))$loaded)
+  n_codon_calls <- paste("SELECT i::UBIGINT event_index,i::UINTEGER seq_region,",
+    "position::UBIGINT AS position,reference,alternate,1::UINTEGER alt_index,",
+    "i::UINTEGER transcript_index,0::UINTEGER sample_index,[1]::INTEGER[] alleles,",
+    "[true]::BOOLEAN[] phase_before,NULL::BIGINT phase_set FROM n_codon_source")
+  dbExecute(con, paste("CREATE TABLE n_codon_events AS SELECT event_index,seq_region,",
+    "position,reference,alternate,NULL::UBIGINT end_position,NULL::VARCHAR structural_type,",
+    "NULL::VARCHAR copy_change,NULL::UINTEGER mate_seq_region,NULL::UBIGINT mate_position",
+    "FROM (", n_codon_calls, ")"))
+  n_codon_expected_so <- c("missense_variant", "coding_sequence_variant&missense_variant",
+    "coding_sequence_variant", "coding_sequence_variant&missense_variant", "start_lost",
+    "coding_sequence_variant&missense_variant", "missense_variant", "missense_variant",
+    "coding_sequence_variant", "start_lost", "start_lost")
+  n_codon_expected_independent <- c("p.Ala2Thr", "p.Ter2Thr", NA_character_, "p.Ala1Ter",
+    "p.Ter1?", "p.Leu1Ter", "p.Ala2Thr", "p.Tyr2Ser", "p.Ter2=", "p.Ala1?", "p.Ter1?")
+  n_codon_expected_singleton <- c("p.(Ala2Thr)", "p.(Ter2Thr)", NA_character_, "p.(Ala1Ter)",
+    "p.(Ter1?)", "p.(Leu1Ter)", "p.(Ala2Thr)", "p.(Tyr2Ser)", "p.(Ter2=)",
+    "p.(Ala1?)", "p.(Ter1?)")
+  n_codon_independent <- dbGetQuery(con, paste("SELECT event_index,",
+    "(SELECT string_agg(t.consequence,'&' ORDER BY t.consequence) FROM duckvep_so_terms() t",
+    "WHERE (a.consequence_mask & t.consequence_mask)<>0) consequences,protein_hgvs",
+    "FROM duckvep_annotate('n_codon_events','n_codon_witnesses',hgvs:=true,",
+    "upstream_distance:=0,downstream_distance:=0) a ORDER BY event_index"))
+  expect_equal(n_codon_independent$event_index, n_codon_source$i)
+  expect_identical(n_codon_independent$consequences, n_codon_expected_so)
+  expect_identical(n_codon_independent$protein_hgvs, n_codon_expected_independent)
+  for (policy in c("strict", "vep116_compat")) {
+    n_codon_singletons <- rduckhts_haplotypes(con, n_codon_calls, "n_codon_witnesses",
+      phase_policy = policy, hgvs = TRUE)
+    n_codon_singletons <- n_codon_singletons[order(n_codon_singletons$transcript_index), ]
+    expect_equal(n_codon_singletons$transcript_index, n_codon_source$i)
+    expect_identical(n_codon_singletons$hgvsp, n_codon_expected_singleton)
+    expect_equal(n_codon_singletons$carrier_count, rep(1, nrow(n_codon_source)))
+    expect_equal(vapply(n_codon_singletons$contributors, nrow, 0L), rep(1L, nrow(n_codon_source)))
+    n_codon_contributors <- do.call(rbind, n_codon_singletons$contributors)
+    expect_equal(n_codon_contributors$event_index, n_codon_source$i)
+    expect_equal(n_codon_contributors$position, n_codon_source$position)
+    expect_identical(n_codon_contributors$reference, n_codon_source$reference)
+    expect_identical(n_codon_contributors$alternate, n_codon_source$alternate)
   }
 
   dbWriteTable(con, "reference_protein_source", data.frame(i = 0:5,

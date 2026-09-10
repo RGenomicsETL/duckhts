@@ -1827,7 +1827,6 @@ static duckvep_hgvs_status_t hgvs_protein_extended_alt_base(
     size_t total_length;
     char codon[4];
     size_t i;
-    int has_n = 0;
 
     if (residue_out == NULL) return DUCKVEP_HGVS_INVALID_ARG;
     *residue_out = 0u;
@@ -1857,13 +1856,11 @@ static duckvep_hgvs_status_t hgvs_protein_extended_alt_base(
                   (char)context->post_cds_bases[
                       index - edited_cds_length], 1);
         if (base == '\0') return DUCKVEP_HGVS_INVALID_ALLELE;
-        if (base == 'N') has_n = 1;
         codon[i] = base;
     }
     codon[3] = '\0';
-    *residue_out = has_n ? (uint8_t)'X'
-        : (uint8_t)duckvep_translate_codon(
-              codon, (duckvep_codon_table_t)context->codon_table);
+    *residue_out = (uint8_t)duckvep_translate_codon(
+        codon, (duckvep_codon_table_t)context->codon_table);
     return DUCKVEP_HGVS_OK;
 }
 

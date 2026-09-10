@@ -704,10 +704,10 @@ if unrestored. A zero-base excursion cannot intersect a codon. A stop after fram
 restoration and a sequence with no stop both return false; unavailable sequence
 or ordered overlapping replacements return NULL. The shared edit geometry does not modify raw frame flags or imply
 protein rescue, SO classification, or removal of downstream contributors.
-Ambiguity is an explicit input policy to that translator: independent coding
-predicates conservatively retain `X` for N-containing codons, while phased replay
-uses BioPerl's amino-acid consensus over every A/C/G/T expansion of N. A resolved
-residue does not clear the input's `unambiguous` fact. Both modes validate every
+Translation uses BioPerl's amino-acid consensus over every A/C/G/T expansion of N
+for independent coding predicates and phased replay. Uploaded REF/ALT validity
+remains a separate check. A resolved residue does not clear the input's
+`unambiguous` fact. The translator validates every
 base, including trailing partial codons and sequence after a stop. Reference
 protein preparation uses that same translator, then applies Ensembl's distinct
 start-methionine, terminal-stop and curated peptide-edit rules before comparison.
@@ -941,15 +941,16 @@ independent event labels or apply an arbitrary contributor's uploaded-feature
 class gates. Decode it with `duckvep_so_terms()`. `coding_status` is `ok`,
 `unsupported`, `unsupported_ordered_replacements`, `missing_transcript_tail`, `missing_transcript_flank`, or
 `invalid_argument`; only `ok` has a non-NULL mask. Known zero is distinct from
-unknown. Conservative coding predicates may be unsupported for an N-containing
-codon even when consensus sequence replay is available.
+unknown. Substitution predicates consume consensus peptides and retain an X-bearing
+peptide's independent coding-unknown flag. Unsupported length-changing contexts
+remain explicit even when consensus sequence replay is available.
 `after_first_stop` means the block's first alternate codon is strictly after the
 first translated stop codon; it is false if no stop exists. A block starting before
 the stop but spanning it is not marked. Later blocks retain their local facts and
 provenance: this positional fact does not assert biological expression or rescue.
 The coding context borrows the complete alternate translation and model overlay.
 One native translation pass per closing transcript prepares two worker-owned
-reference views: conservative N-to-X coding operands and the consensus, curated
+reference views: uncurated consensus coding operands and the curated
 reference used for protein differences. SQL borrows both views. Neither model
 mutation nor per-leaf replay, translation or allocation is required by this consumer.
 

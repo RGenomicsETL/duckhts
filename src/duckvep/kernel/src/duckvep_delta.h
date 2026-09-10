@@ -218,8 +218,9 @@ typedef enum duckvep_coding_context_status {
 
 /* Consequence-layer coding context over an already projected edit set. Peptides are
  * translated over every complete CDS codon and do NOT truncate after internal stops;
- * '*' is an ordinary peptide byte here. `N` codons translate to `X`, while non-ACGTUN
- * CDS bases are invalid. Changed-codon spans are peptide-diff windows after common
+ * '*' is an ordinary peptide byte here. `N` codons use BioPerl consensus;
+ * unresolved codons yield `X`, while non-ACGTUN CDS bases are invalid.
+ * Changed-codon spans are peptide-diff windows after common
  * prefix/suffix trimming: 0/0 denotes an empty side (for example, a pure peptide
  * insertion on the reference side) or no peptide difference on both sides. These spans
  * are peptide coordinates, not genomic/CDS coordinates. */
@@ -371,8 +372,8 @@ DUCKVEP_INTERNAL_API char duckvep_coding_context_cds_base(
 /* Scan one alternate CDS prefix followed by a caller-owned transcript suffix
  * and report the first translated stop. This is the sequential authority for
  * consumers that need a stop position without materializing the complete
- * alternate peptide. Ambiguous N codons translate to X and do not stop the
- * scan. `stop_position0` is a zero-based peptide coordinate when `found` is
+ * alternate peptide. N-containing codons use the shared consensus translator.
+ * `stop_position0` is a zero-based peptide coordinate when `found` is
  * set. */
 DUCKVEP_INTERNAL_API duckvep_coding_context_status_t
 duckvep_coding_context_first_alt_stop(

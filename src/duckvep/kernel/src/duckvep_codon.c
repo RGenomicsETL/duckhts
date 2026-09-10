@@ -115,39 +115,25 @@ static int translation_overlaps(const void *a, size_t a_size, const void *b, siz
     return left <= right ? right - left < a_size : left - right < b_size;
 }
 
-static duckvep_translation_status_t translate_cds(
+duckvep_translation_status_t duckvep_translate_cds(
     const uint8_t *cds, size_t cds_length, duckvep_codon_table_t table,
-    duckvep_translation_ambiguity_t ambiguity,
-    uint8_t *peptide, size_t peptide_capacity, duckvep_translation_t *result,
-    uint8_t *conservative, duckvep_translation_t *conservative_result) {
+    uint8_t *peptide, size_t peptide_capacity, duckvep_translation_t *result) {
     if (!result) return DUCKVEP_TRANSLATION_INVALID_ARG;
     if ((cds && cds_length > UINTPTR_MAX - (uintptr_t)cds) ||
         (peptide && peptide_capacity > UINTPTR_MAX - (uintptr_t)peptide) ||
-        (conservative && peptide_capacity > UINTPTR_MAX - (uintptr_t)conservative))
+        sizeof(*result) > UINTPTR_MAX - (uintptr_t)result)
         return DUCKVEP_TRANSLATION_INVALID_ARG;
     if (translation_overlaps(result, sizeof(*result), cds, cds_length) ||
-        translation_overlaps(result, sizeof(*result), peptide, peptide_capacity) ||
-        translation_overlaps(result, sizeof(*result), conservative, peptide_capacity) ||
-        translation_overlaps(conservative_result, sizeof(*conservative_result), cds, cds_length) ||
-        translation_overlaps(conservative_result, sizeof(*conservative_result), peptide, peptide_capacity) ||
-        translation_overlaps(conservative_result, sizeof(*conservative_result), conservative, peptide_capacity) ||
-        translation_overlaps(result, sizeof(*result), conservative_result, sizeof(*conservative_result)))
+        translation_overlaps(result, sizeof(*result), peptide, peptide_capacity))
         return DUCKVEP_TRANSLATION_INVALID_ARG;
     memset(result, 0, sizeof(*result));
-    if (conservative_result) memset(conservative_result, 0, sizeof(*conservative_result));
-    if ((conservative != NULL) != (conservative_result != NULL))
-        return DUCKVEP_TRANSLATION_INVALID_ARG;
     const char *amino_acids = duckvep_codon_table_amino_acids(table);
-    if (!cds || !peptide || !amino_acids || (ambiguity != DUCKVEP_TRANSLATION_N_UNKNOWN &&
-        ambiguity != DUCKVEP_TRANSLATION_N_CONSENSUS)) return DUCKVEP_TRANSLATION_INVALID_ARG;
+    if (!cds || !peptide || !amino_acids) return DUCKVEP_TRANSLATION_INVALID_ARG;
     size_t codons = cds_length / 3u;
     if (peptide_capacity < codons + 1u) return DUCKVEP_TRANSLATION_BUFFER_TOO_SMALL;
-    if (translation_overlaps(cds, cds_length, peptide, peptide_capacity) ||
-        translation_overlaps(cds, cds_length, conservative, peptide_capacity) ||
-        translation_overlaps(peptide, peptide_capacity, conservative, peptide_capacity))
+    if (translation_overlaps(cds, cds_length, peptide, peptide_capacity))
         return DUCKVEP_TRANSLATION_INVALID_ARG;
     duckvep_translation_t translated = {codons, 0u, 1u};
-    size_t conservative_stop = 0u;
     static const uint8_t normalized_code[8] = {0u, 2u, 0u, 1u, 0u, 0u, 0u, 3u};
     for (size_t i = 0u; i < codons; i++) {
         uint8_t code = 0u, has_n = 0u;
@@ -158,13 +144,8 @@ static duckvep_translation_status_t translate_cds(
             code = (uint8_t)((code << 2u) | normalized_code[(unsigned char)base & 7u]);
         }
         if (has_n) translated.unambiguous = 0u;
-        uint8_t aa = has_n ? (uint8_t)'X' : (uint8_t)amino_acids[code];
-        if (conservative) {
-            conservative[i] = aa;
-            if (aa == '*' && !conservative_stop) conservative_stop = i + 1u;
-        }
-        if (has_n && ambiguity == DUCKVEP_TRANSLATION_N_CONSENSUS)
-            aa = codon_n_consensus(cds + i * 3u, amino_acids);
+        uint8_t aa = has_n ? codon_n_consensus(cds + i * 3u, amino_acids)
+                           : (uint8_t)amino_acids[code];
         peptide[i] = aa;
         if (aa == '*' && !translated.first_stop_position1) translated.first_stop_position1 = i + 1u;
     }
@@ -175,30 +156,7 @@ static duckvep_translation_status_t translate_cds(
     }
     peptide[codons] = 0u;
     *result = translated;
-    if (conservative) {
-        conservative[codons] = 0u;
-        *conservative_result = translated;
-        conservative_result->first_stop_position1 = conservative_stop;
-    }
     return DUCKVEP_TRANSLATION_OK;
-}
-
-duckvep_translation_status_t duckvep_translate_cds(
-    const uint8_t *cds, size_t cds_length, duckvep_codon_table_t table,
-    duckvep_translation_ambiguity_t ambiguity,
-    uint8_t *peptide, size_t peptide_capacity, duckvep_translation_t *result) {
-    return translate_cds(cds, cds_length, table, ambiguity,
-        peptide, peptide_capacity, result, NULL, NULL);
-}
-
-duckvep_translation_status_t duckvep_translate_reference_cds(
-    const uint8_t *cds, size_t cds_length, duckvep_codon_table_t table,
-    uint8_t *consensus, uint8_t *conservative, size_t capacity,
-    duckvep_translation_t *conservative_result) {
-    if (!conservative_result) return DUCKVEP_TRANSLATION_INVALID_ARG;
-    duckvep_translation_t consensus_result;
-    return translate_cds(cds, cds_length, table, DUCKVEP_TRANSLATION_N_CONSENSUS,
-        consensus, capacity, &consensus_result, conservative, conservative_result);
 }
 
 static int base2bit(char c) {
@@ -213,7 +171,8 @@ static char translate_codon_with_table(const char *codon3,
     b1 = base2bit(codon3[0]);
     b2 = base2bit(codon3[1]);
     b3 = base2bit(codon3[2]);
-    if (b1 < 0 || b2 < 0 || b3 < 0) return 'X';
+    if (b1 < 0 || b2 < 0 || b3 < 0)
+        return (char)codon_n_consensus((const uint8_t *)codon3, amino_acids);
     idx = (b1 << 4) | (b2 << 2) | b3;
     return amino_acids[idx];
 }
@@ -306,7 +265,9 @@ int duckvep_cds_first_stop_position1(
             }
             code = (uint8_t)((code << 2u) | (uint8_t)base_code);
         }
-        if (!has_n && amino_acids[code] == '*') {
+        uint8_t aa = has_n ? codon_n_consensus(cds + i * 3u, amino_acids)
+                           : (uint8_t)amino_acids[code];
+        if (aa == '*') {
             if (i >= (size_t)UINT32_MAX) return 0;
             *position1_out = (uint32_t)i + 1u;
             return 1;
@@ -346,8 +307,12 @@ duckvep_codon_result_t duckvep_codon_change_prepared(
     if (amino_acids != NULL) {
         if (prepared_codon_index(ref3, &ref_index))
             aa_ref = amino_acids[ref_index];
+        else if (ref3 != NULL)
+            aa_ref = (char)codon_n_consensus((const uint8_t *)ref3, amino_acids);
         if (prepared_codon_index(alt3, &alt_index))
             aa_alt = amino_acids[alt_index];
+        else if (alt3 != NULL)
+            aa_alt = (char)codon_n_consensus((const uint8_t *)alt3, amino_acids);
     }
     return codon_change_from_amino_acids(aa_ref, aa_alt);
 }

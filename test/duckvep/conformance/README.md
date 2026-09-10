@@ -1192,6 +1192,9 @@ hashes, package lock, source identity and missing/extra/sequence corruption
 controls, and fails if any native reference or alternate comparison differs.
 Original Haplosaurus inputs and expectations are not changed. This
 lane does not certify public protein differences, compound SO or HGVS.
+The models have phase zero. Core reference peptide edits are exercised, but the
+observer does not populate the variation model's `_seq_edits` cache. Its six
+independent HGVS observations do not certify allele-local peptide-edit behavior.
 
 `Rscript test/duckvep/conformance/ambiguous_codon_differential.R` compares
 28,800 original SNVs across all 125 ACGTN internal codons and all 24 supported

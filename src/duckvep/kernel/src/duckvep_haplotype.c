@@ -258,6 +258,8 @@ duckvep_haplotype_status_t duckvep_haplotype_reference_proteins(
     size_t codons = cds_length / 3u;
     if (capacity < codons + 2u) return DUCKVEP_HAPLOTYPE_BUFFER_TOO_SMALL;
     if (haplo_overlaps_output(cds, cds_length, peptide, capacity) ||
+        haplo_overlaps_output(cds, cds_length, coding_peptide, capacity) ||
+        haplo_overlaps_output(peptide, capacity, coding_peptide, capacity) ||
         haplo_overlaps_output(edit_positions1, edit_count * sizeof(*edit_positions1), peptide, capacity) ||
         haplo_overlaps_output(edit_alternates, edit_count, peptide, capacity) ||
         haplo_overlaps_output(edit_positions1, edit_count * sizeof(*edit_positions1), coding_peptide, capacity) ||
@@ -270,10 +272,11 @@ duckvep_haplotype_status_t duckvep_haplotype_reference_proteins(
         if (aa != '*' && (aa < 'A' || aa > 'Z')) return DUCKVEP_HAPLOTYPE_INVALID_ARG;
     }
     duckvep_translation_t translated;
-    duckvep_translation_status_t status = duckvep_translate_reference_cds(cds, cds_length, table,
-        peptide, coding_peptide, capacity, &translated);
+    duckvep_translation_status_t status = duckvep_translate_cds(cds, cds_length, table,
+        coding_peptide, capacity, &translated);
     if (status != DUCKVEP_TRANSLATION_OK) return status == DUCKVEP_TRANSLATION_INVALID_BASE
         ? DUCKVEP_HAPLOTYPE_INVALID_BASE : DUCKVEP_HAPLOTYPE_INVALID_ARG;
+    memcpy(peptide, coding_peptide, translated.length + 1u);
     if (cds_length < 3u) {
         *coding_translation = translated;
         return DUCKVEP_HAPLOTYPE_INPUT_INCOMPLETE;

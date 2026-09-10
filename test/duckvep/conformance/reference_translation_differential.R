@@ -144,13 +144,10 @@ main <- function() {
     case <- cases[[i]]; expected <- oracle[[i]]
     actual <- translate(expected$prepared_cds, case$table)
     reference <- reference_protein(expected$prepared_cds, case$table, case$edits)
-    # The conservative policy masks N-bearing codons of the uncurated pinned
-    # translation, not of the native result or the curated reference protein.
+    # Coding operands use the uncurated pinned consensus translation. Raw DNA
+    # ambiguity is an independent fact, including the trailing partial codon.
     coding <- strsplit(expected$alternate_full, '', fixed = TRUE)[[1L]]
-    starts <- seq_along(coding) * 3L - 2L
     stopifnot(length(coding) == nchar(expected$prepared_cds) %/% 3L)
-    codons <- substring(toupper(expected$prepared_cds), starts, starts + 2L)
-    coding[grepl('N', codons, fixed = TRUE)] <- 'X'
     coding_stop <- which(coding == '*')
     expected_coding <- paste0(coding, collapse = '')
     expected_stop <- if (length(coding_stop)) coding_stop[1L] else 0
@@ -223,7 +220,7 @@ main <- function() {
   print(pairs[pairs$family == "witness", c("id", "expected_reference", "actual_reference", "expected_alternate", "actual_alternate")])
   stopifnot(all(controls), identical(code_hashes, vapply(code, duckvep_evidence_sha256, "")),
     identical(revision, duckvep_evidence_revision(root)))
-  # Every sequence comparison and the conservative translation metadata must agree.
+  # Every sequence comparison and the raw translation metadata must agree.
   stopifnot(!any(pairs$reference_failure | pairs$alternate_full_failure | pairs$alternate_failure |
     pairs$coding_failure),
     equal_hgvs(independent))

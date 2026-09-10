@@ -72,7 +72,7 @@ typedef struct duckvep_haplotype_block {
     uint32_t flags;
 } duckvep_haplotype_block_t;
 
-/* Construct the pinned VEP-116 Haplosaurus reference protein and its conservative
+/* Construct the pinned VEP-116 Haplosaurus reference protein and its uncurated
  * coding view in one translation pass from a borrowed
  * transcript-oriented CDS and optional sorted single-residue Ensembl SeqEdits.
  * Uses consensus translation, removes the last complete translated stop,
@@ -83,7 +83,7 @@ typedef struct duckvep_haplotype_block {
  * alternates are A-Z or '*'. A terminal SeqEdit may append a removed residue.
  * Capacity must be at least cds_length/3 + 2 (extra stop plus NUL). Shorter CDS
  * returns INPUT_INCOMPLETE with a valid zero-codon coding view, not an invented
- * curated reference protein. coding_peptide uses N_UNKNOWN with no curation;
+ * curated reference protein. coding_peptide uses consensus with no curation;
  * coding_translation describes that complete raw view, including internal stops.
  * Both output spans have the same capacity and must be distinct from all inputs
  * and result storage. Result-storage aliases, address-range overflow and an

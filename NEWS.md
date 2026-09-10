@@ -2,6 +2,10 @@
 
 # duckhts 1.5.1.9000
 
+- use pinned VEP-116 codon consensus for independent and singleton protein
+  annotation, preserving uploaded-allele validity and raw nucleotide ambiguity;
+  share uncurated translation with the curated haplotype reference
+
 - add an exhaustive 28,800-SNV diagnostic for N-containing coding contexts against
   pinned VEP 116; retain independent and singleton-phased disagreements, canonical
   controls, absent results and comparator corruption checks; publish complete

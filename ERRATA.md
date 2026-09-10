@@ -258,6 +258,10 @@ is not a claim about VEP's VCF parser. Its reference/alternate translation matri
 and separate corruption controls remain part of the receipt.
 The retained diagnostic `reference_translation_c95213eafa7a3/receipt.json` covers
 27,014 reference/alternate translation cases and these six HGVS observations.
+This observer supplies phase-zero models without a database adaptor. Translation
+attributes reach core reference curation, but it does not populate the variation
+model's `_seq_edits` cache as VEP's `prefetch_translation_data` does. Its independent
+HGVS observations therefore do not certify allele-local peptide-edit semantics.
 
 ## Executable compatibility policy
 
@@ -1770,8 +1774,8 @@ projection used before it formats `c.` or `n.` notation.
 
 ## N-containing codons in independent and singleton protein annotation
 
-This is an observed **DuckVEP compatibility defect**, not a claim that VEP is
-wrong. A source SNV with A/C/G/T alleles can sit inside a codon containing N at
+This entry records a **DuckVEP compatibility defect** and its scoped correction,
+not a claim that VEP is wrong. A source SNV with A/C/G/T alleles can sit inside a codon containing N at
 another position. VEP 116 checks the uploaded allele for unambiguous DNA and
 translates its surrounding codon using BioPerl's consensus rules. Those are
 different checks. Uncertainty in the nucleotide sequence does not necessarily
@@ -1801,7 +1805,7 @@ retains all 28,800 original SNVs: 13,824 canonical-codon controls, 7,776 events
 with unambiguous uploaded alleles and N elsewhere in the codon, and 7,200 events
 with N at the uploaded REF position. It exhausts 125 internal ACGTN codons,
 three edited positions, every different A/C/G/T ALT, and all 24 supported tables.
-At this production revision, 1,624 distinct SNVs disagree in both independent
+At revision `84770198dd9e43ddd4aa936d2f5bf9c3deabe550`, 1,624 distinct SNVs disagree in both independent
 SO and HGVSp: 656 require missense alone and 968 require missense together with
 the generic coding term. All are in the surrounding-N stratum. Canonical and
 uploaded-N controls match the compared terms/text. These counts are a finite
@@ -1830,9 +1834,27 @@ The oracle uses the pinned environment and actual VEP-116
 and `Utils::VariationEffect::{missense_variant,coding_unknown}`; it does not
 replace these methods. Full outer comparisons, absent results, carrier/source
 identities and deliberate comparator corruptions are retained. The diagnostic
-exits nonzero on the defect and labels the supplied extension as build-unbound.
-The required correction must preserve separate uploaded-allele validity,
-codon translation, raw nucleotide ambiguity and consequence predicates.
+fails on any disagreement and labels the supplied extension as build-unbound.
+The implementation uses one consensus translator while keeping uploaded-allele
+validity, raw nucleotide ambiguity, uncurated coding peptides and curated
+reference proteins separate.
+
+The corrected-source diagnostic `ambiguous_codon_41cc93f76057e/receipt.json`
+retains the same 28,800 SNVs, oracle and comparison axes: all 230,400 HGVSp and
+57,600 independent SO comparisons agree. All 64 comparator/provenance corruption
+controls pass. The original failing bundle remains unchanged. This local receipt
+hashes the dirty source and supplied binary; it is not a release-build certificate.
+`reference_translation_41dbc765682aa/receipt.json` separately retains zero failures
+over 27,014 curated-reference, uncurated-coding and alternate translation cases.
+The coding expectation is the pinned raw consensus output, without masking N-bearing
+codons to X; the independent raw-nucleotide ambiguity checks are unchanged.
+
+SQL and R tests retain eleven exact source-SNV witnesses, including first and
+terminal codons, nonstandard tables and unavailable uploaded REF N. A single X
+alternate peptide suppresses VEP's `start_lost`; X in a longer peptide does not
+establish the same condition. These witnesses do not extend the exhaustive
+internal-codon comparison to phase padding, reverse strands, peptide-edit caches,
+indels or compound events. Length-changing contexts can still be unsupported.
 
 ## Protein HGVS preserves VEP's local-peptide state machine
 

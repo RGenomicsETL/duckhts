@@ -569,7 +569,7 @@ static duckvep_haplotype_stream_status_t append_differing_edits(
 }
 
 /* One preparation per closing transcript supplies curated replay/difference
- * reference and conservative coding operands from the same translation pass. */
+ * reference and uncurated coding operands from the same translation pass. */
 static duckvep_haplotype_stream_status_t prepare_reference_protein(
     duckvep_haplotype_stream_t *s, uint32_t tx) {
     if (s->have_reference_protein && s->reference_transcript == tx)
@@ -731,7 +731,7 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
             duckvep_codon_table_t table = seq->codon_table
                 ? (duckvep_codon_table_t)seq->codon_table[tx] : DUCKVEP_CODON_TABLE_STANDARD;
             duckvep_translation_status_t translation = duckvep_translate_cds(b->cds,
-                leaf.cds_length, table, DUCKVEP_TRANSLATION_N_CONSENSUS,
+                leaf.cds_length, table,
                 b->protein, b->protein_capacity, &leaf.translation);
             switch (translation) {
             case DUCKVEP_TRANSLATION_OK: break;

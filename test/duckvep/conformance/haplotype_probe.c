@@ -52,7 +52,7 @@ void duckhts_test_haplotype(
         &cds_len, &applied);
     if (*status != DUCKVEP_HAPLOTYPE_OK) goto cleanup;
     duckvep_translation_status_t tst = duckvep_translate_cds(cds, cds_len,
-        DUCKVEP_CODON_TABLE_STANDARD, DUCKVEP_TRANSLATION_N_UNKNOWN,
+        DUCKVEP_CODON_TABLE_STANDARD,
         protein, (size_t)*protein_capacity, &translated);
     *status = translation_status(tst);
     if (*status != DUCKVEP_HAPLOTYPE_OK) goto cleanup;
@@ -219,7 +219,7 @@ void duckhts_test_carrier_haplotypes(
         NULL, 0u, (int8_t)*strand, cds_scratch, (size_t)*capacity, &cds_len, &applied);
     if (*status != DUCKVEP_HAPLOTYPE_OK) goto cleanup;
     duckvep_translation_status_t tst = duckvep_translate_cds(cds_scratch, cds_len,
-        DUCKVEP_CODON_TABLE_STANDARD, DUCKVEP_TRANSLATION_N_UNKNOWN,
+        DUCKVEP_CODON_TABLE_STANDARD,
         protein_scratch, (size_t)*capacity, &translated);
     *status = translation_status(tst);
     if (*status != DUCKVEP_HAPLOTYPE_OK) goto cleanup;

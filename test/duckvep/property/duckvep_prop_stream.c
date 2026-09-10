@@ -1089,7 +1089,7 @@ TEST haplotype_stream_reference_only_protein_uses_call_retention(void) {
     const char *curated[] = {"MKP*", "MK*P", "MKP*", "MAP*"};
     const char *raw[] = {"MKP*", "MK*", "LKP*", "MAP*"};
     const char *alternate[] = {"MQP*", "MQ*", "LQP*", "MPP*"};
-    const char *coding[] = {"MKP*", "MK*P", "LKP*", "MXP*"};
+    const char *coding[] = {"MKP*", "MK*P", "LKP*", "MAP*"};
     for (unsigned reference = 0u; reference < 4u; reference++) {
         for (int strand = -1; strand <= 1; strand += 2) {
             for (unsigned peptide_edit = 0u; peptide_edit < 2u; peptide_edit++) {
@@ -2097,7 +2097,7 @@ static enum theft_trial_res prop_haplotype_stream_matches_dense_models(struct th
         uint8_t reference_peptide[5];
         duckvep_translation_t reference_translation;
         if (duckvep_translate_cds(f[run].reference, sizeof(f[run].reference),
-                DUCKVEP_CODON_TABLE_STANDARD, DUCKVEP_TRANSLATION_N_CONSENSUS,
+                DUCKVEP_CODON_TABLE_STANDARD,
                 reference_peptide, sizeof(reference_peptide), &reference_translation) !=
             DUCKVEP_TRANSLATION_OK) return THEFT_TRIAL_ERROR;
         duckvep_haplotype_stream_status_t status = duckvep_haplotype_stream_finish(s);

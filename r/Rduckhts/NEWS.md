@@ -1,6 +1,9 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
 
+- correct bundled independent and singleton protein annotations in N-containing
+  codons using pinned VEP-116 consensus, while preserving unknown uploaded alleles
+
 - validate native translation result storage before modifying bundled sequence
   workspaces or borrowed references
 

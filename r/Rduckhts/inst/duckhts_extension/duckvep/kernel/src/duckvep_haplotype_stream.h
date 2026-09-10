@@ -154,7 +154,7 @@ typedef struct {
     const uint8_t *cds, *protein;
     const uint8_t *reference_protein; /* Worker-owned; NULL without a complete reference codon. */
     size_t reference_protein_length;
-    const uint8_t *reference_coding_protein; /* Full N_UNKNOWN view, without reference curation. */
+    const uint8_t *reference_coding_protein; /* Full consensus view, without reference curation. */
     duckvep_translation_t reference_coding_translation;
     duckvep_translation_t translation; /* Full raw translation remains in buffers.protein. */
     size_t cds_length, protein_length;

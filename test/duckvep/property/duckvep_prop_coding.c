@@ -2955,7 +2955,7 @@ TEST coding_context_known_scene(void) {
         ASSERT_EQ(3u, ctx.alt_last_changed_codon);
         ASSERT_EQ(DUCKVEP_TRANSLATION_OK,
                   duckvep_translate_cds(ctx.alt_cds, ctx.alt_cds_len,
-                      DUCKVEP_CODON_TABLE_STANDARD, DUCKVEP_TRANSLATION_N_UNKNOWN, alt_pep, sizeof alt_pep, &hres));
+                      DUCKVEP_CODON_TABLE_STANDARD, alt_pep, sizeof alt_pep, &hres));
         trunc_len = hres.first_stop_position1 ? hres.first_stop_position1 : hres.length;
         ASSERT_EQ((size_t)2u, trunc_len);
         ASSERT(memcmp(alt_pep, "M*", 2u) == 0);
@@ -3322,8 +3322,16 @@ TEST coding_context_delta_known_scene(void) {
         ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_UNSUPPORTED,
                   duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
         ASSERT(!delta.valid);
-        /* Do not rely on peptide X alone: inconsistent callers with non-X peptide bytes
-         * still cannot classify an ambiguous changed codon. */
+        /* Consensus operands require an explicit table and matching raw
+         * peptides. Source-allele validation belongs to the projection layer. */
+        ctx.codon_table = DUCKVEP_CODON_TABLE_STANDARD;
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                  duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+        ASSERT(delta.valid && delta.start_lost && !delta.missense);
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK, duckvep_coding_context_delta_fill(
+            &ctx, (uint64_t)DUCKVEP_TX_CDS_START_NF, &delta));
+        ASSERT(delta.valid && !delta.start_lost && delta.missense && delta.coding_unknown);
+        /* An invented reference peptide must still fail with a valid table. */
         {
             static const uint8_t fake_ref_pep[2] = {'E','\0'};
             memset(&ctx, 0, sizeof ctx);
@@ -3331,6 +3339,7 @@ TEST coding_context_delta_known_scene(void) {
             ctx.alt_cds = alt_cds; ctx.alt_cds_len = 3u;
             ctx.ref_peptide = fake_ref_pep; ctx.ref_peptide_len = 1u;
             ctx.alt_peptide = alt_pep; ctx.alt_peptide_len = 1u;
+            ctx.codon_table = DUCKVEP_CODON_TABLE_STANDARD;
             ctx.cds_changed = 1u;
         }
         ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_UNSUPPORTED,
