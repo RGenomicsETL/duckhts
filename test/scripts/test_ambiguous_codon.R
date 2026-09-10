@@ -2,6 +2,18 @@
 # Network-free comparator controls, independent of production annotations.
 source('test/duckvep/conformance/ambiguous_codon_differential.R')
 
+# Check object keys before array-to-data-frame conversion can discard duplicates.
+read_unique_json <- function(text) {
+  check_object_names <- function(value) {
+    if (!is.list(value)) return(invisible(TRUE))
+    stopifnot(!anyDuplicated(names(value)))
+    for (child in value) check_object_names(child)
+    invisible(TRUE)
+  }
+  check_object_names(jsonlite::fromJSON(text, simplifyVector = FALSE))
+  jsonlite::fromJSON(text)
+}
+
 # Independently enumerate the declared axes and source ordinals. Do not infer
 # eligibility or the expected substitutions from the retained case contents.
 check_codon_matrix <- function(cases) {
@@ -43,6 +55,13 @@ check_codon_matrix <- function(cases) {
 
 codon_matrix_controls <- function(cases) {
   rejected <- function(x) !isTRUE(tryCatch(check_codon_matrix(x), error = function(e) FALSE))
+  rejected_json <- function(text) {
+    tryCatch({
+      changed <- cases
+      changed[[1L]] <- read_unique_json(text)
+      rejected(changed)
+    }, error = function(e) TRUE)
+  }
   stopifnot(!rejected(cases))
   controls <- c(missing_case = rejected(cases[-1L]))
   # Tables 1 and 11 share these internal AAA peptide observations. Keep all
@@ -77,13 +96,34 @@ codon_matrix_controls <- function(cases) {
   # Append raw JSON properties: toJSON renames duplicate R list names, which
   # would test a different input from a source object with repeated properties.
   encoded <- jsonlite::toJSON(cases[[1L]], auto_unbox = TRUE, dataframe = 'rows')
+  stopifnot(!rejected_json(encoded))
   for (field in c('id', 'cds', 'table', 'edits', 'variants')) {
     duplicate <- jsonlite::toJSON(cases[[1L]][field], auto_unbox = TRUE, dataframe = 'rows')
     text <- paste0(substr(encoded, 1L, nchar(encoded) - 1L), ',', substring(duplicate, 2L))
     changed <- cases
     changed[[1L]] <- jsonlite::fromJSON(text)
     stopifnot(anyDuplicated(names(changed[[1L]])) > 0L)
-    controls[paste0('duplicate_case_', field)] <- rejected(changed)
+    controls[paste0('duplicate_case_', field)] <- rejected(changed) && rejected_json(text)
+  }
+  variants <- cases[[1L]]$variants
+  encoded_variants <- vapply(seq_len(nrow(variants)), function(i)
+    jsonlite::toJSON(as.list(variants[i, ]), auto_unbox = TRUE), '')
+  case_fields <- cases[[1L]][setdiff(names(cases[[1L]]), 'variants')]
+  prefix <- jsonlite::toJSON(case_fields, auto_unbox = TRUE)
+  for (field in c('id', 'position1', 'reference', 'alternate')) {
+    value <- variants[1L, field]
+    duplicate <- setNames(list(if (is.numeric(value)) value + 1L else
+      paste0(value, '_duplicate')), field)
+    property <- jsonlite::toJSON(duplicate, auto_unbox = TRUE)
+    changed_variants <- encoded_variants
+    first <- encoded_variants[1L]
+    changed_variants[1L] <- paste0(substr(first, 1L, nchar(first) - 1L), ',',
+      substring(property, 2L))
+    text <- paste0(substr(prefix, 1L, nchar(prefix) - 1L), ',"variants":[',
+      paste(changed_variants, collapse = ','), ']}')
+    raw <- jsonlite::fromJSON(text, simplifyVector = FALSE)
+    stopifnot(anyDuplicated(names(raw$variants[[1L]])) > 0L)
+    controls[paste0('duplicate_variant_', field)] <- rejected_json(text)
   }
   stopifnot(all(controls))
   controls
@@ -99,7 +139,7 @@ message('Ambiguous-codon comparator: ', nrow(controls), ' corruptions rejected')
 # Reconstruct the checked-in failed baseline from raw VEP observations, not
 # from stored equality flags. This validates retention, not biological agreement.
 directory <- 'test/duckvep/conformance/data/ambiguous_codon_baseline'
-manifest <- jsonlite::read_json(file.path(directory, 'receipt.json'), simplifyVector = TRUE)
+manifest <- read_unique_json(paste(readLines(file.path(directory, 'receipt.json')), collapse = '\n'))
 hashes <- unlist(manifest$sha256)
 stopifnot(setequal(names(hashes), c('pairs.parquet', 'cases.jsonl.gz', 'oracle.stdout.gz',
   'summary.csv', 'controls.csv', 'environment.stdout')))
@@ -108,7 +148,7 @@ for (name in names(hashes)) stopifnot(identical(unname(hashes[name]),
 read_records <- function(name) {
   connection <- gzfile(file.path(directory, name), 'rt')
   on.exit(close(connection))
-  lapply(readLines(connection), jsonlite::fromJSON)
+  lapply(readLines(connection), read_unique_json)
 }
 cases <- read_records('cases.jsonl.gz')
 oracle <- read_records('oracle.stdout.gz')

@@ -1215,9 +1215,10 @@ summaries, controls and hashes. It excludes other native output fields. Use
 existing directories are not overwritten. Network-free reconstruction and
 corruption checks run with `Rscript test/scripts/test_ambiguous_codon.R`. The
 audit independently enumerates every declared codon/table/substitution and
-source ordinal before reading comparisons. Sixteen additional matrix controls
-reject changed fields, repeated JSON properties and count-preserving case or
-substitution replacements. Each required source field occurs exactly once.
+source ordinal before reading comparisons. Twenty additional matrix controls
+reject changed fields, repeated case/variant JSON properties and count-preserving
+case or substitution replacements. Retained JSON object keys are checked before
+data-frame conversion; each required source field occurs exactly once.
 Route identities and N strata are checked against their declared axes.
 The supplied extension is explicitly diagnostic, not certified as built from
 the current checkout. The command fails on any disagreement; see
