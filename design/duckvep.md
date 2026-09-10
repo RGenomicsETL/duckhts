@@ -947,9 +947,10 @@ codon even when consensus sequence replay is available.
 first translated stop codon; it is false if no stop exists. A block starting before
 the stop but spanning it is not marked. Later blocks retain their local facts and
 provenance: this positional fact does not assert biological expression or rescue.
-The coding context borrows the complete alternate translation and model overlay;
-one separate raw reference translation is cached per closing transcript, distinct
-from the edited/display reference used for protein differences. Neither model
+The coding context borrows the complete alternate translation and model overlay.
+One native translation pass per closing transcript prepares two worker-owned
+reference views: conservative N-to-X coding operands and the consensus, curated
+reference used for protein differences. SQL borrows both views. Neither model
 mutation nor per-leaf replay, translation or allocation is required by this consumer.
 
 `cds_differences` is a separate alignment view, not a change to physical edit

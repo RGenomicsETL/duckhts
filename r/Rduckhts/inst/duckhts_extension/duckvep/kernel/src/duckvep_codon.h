@@ -78,6 +78,16 @@ duckvep_translation_status_t duckvep_translate_cds(
     duckvep_translation_ambiguity_t ambiguity,
     uint8_t *peptide, size_t peptide_capacity, duckvep_translation_t *result);
 
+/* Produce N_CONSENSUS and N_UNKNOWN reference views in one translation pass.
+ * Both distinct output spans have capacity >= cds_length/3 + 1; neither may
+ * overlap CDS or result storage. No reference start/stop/SeqEdit rules are
+ * applied. The result describes the conservative view and is zero on failure.
+ * Both complete peptides are NUL-terminated, including residues after stops. */
+duckvep_translation_status_t duckvep_translate_reference_cds(
+    const uint8_t *cds, size_t cds_length, duckvep_codon_table_t table,
+    uint8_t *consensus, uint8_t *conservative, size_t capacity,
+    duckvep_translation_t *conservative_result);
+
 /* Return the first raw-CDS stop as a one-based peptide position, or zero when
  * no complete codon is a stop. N-containing codons translate to X. The return
  * value is false only for an invalid base, unsupported table, or NULL output. */

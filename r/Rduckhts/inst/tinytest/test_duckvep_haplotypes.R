@@ -890,6 +890,39 @@ local({
   expect_error(rduckhts_haplotypes(con, cancelling, "reference_limit", max_alignment_cells = 24),
     pattern = "protein difference status 3, max_alignment_cells=24, required=25")
 
+  views_tx <- paste("SELECT i::UINTEGER transcript_index,0::UINTEGER seq_region,",
+    "(100+20*i)::UBIGINT transcript_start,(108+20*i)::UBIGINT transcript_end,",
+    "1::TINYINT strand,0::UINTEGER gene_index,3::UBIGINT transcript_flags,",
+    "transcript_start cds_start,transcript_end cds_end,cds::BLOB cds_sequence,1::UTINYINT codon_table",
+    "FROM (VALUES (0,'ATGGCNTAA'),(1,'ATGGCCTAA')) v(i,cds)")
+  views_exons <- paste("SELECT transcript_index,transcript_start exon_start,transcript_end exon_end,",
+    "1::UBIGINT exon_cdna_start,9::UBIGINT exon_cdna_end,",
+    "0::TINYINT phase,0::TINYINT end_phase FROM (", views_tx, ")")
+  expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('reference_views',",
+    dbQuoteString(con, "SELECT 0::UINTEGER seq_region"), ",", dbQuoteString(con, views_tx), ",",
+    dbQuoteString(con, views_exons), ")"))$loaded)
+  views_calls <- paste("SELECT transcript_index+1 event_index,0 seq_region,",
+    "transcript_start+3 AS position,'G' reference,'A' alternate,1 alt_index,transcript_index,",
+    "0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set FROM (", views_tx, ")")
+  for (workers in c(1L, 4L)) {
+    dbExecute(con, paste("SET threads=", workers))
+    for (policy in c("strict", "vep116_compat")) {
+      views <- rduckhts_haplotypes(con, views_calls, "reference_views", phase_policy = policy)
+      views <- views[order(views$transcript_index), ]
+      expect_equal(views$cds, c("ATGACNTAA", "ATGACCTAA"))
+      expect_equal(views$protein, rep("MT*", 2L))
+      expect_equal(views$carrier_count, rep(1, 2L))
+      expect_equal(vapply(views$coding_blocks, function(x) x$coding_status, ""),
+        c("unsupported", "ok"))
+      for (difference in views$protein_differences) {
+        expect_equal(difference$reference, "A")
+        expect_equal(difference$alternate, "T")
+        expect_equal(difference$ref_start0, 1)
+        expect_equal(difference$alt_start0, 1)
+      }
+    }
+  }
+
   dbWriteTable(con, "reference_protein_source", data.frame(i = 0:5,
     cds = c("CTGGCCTAA", "ATGTGAGCCTAA", "ATGGCCTAA", "ATGGCCTGA", "ctggcctaa", "AT"),
     code = c(1L, 1L, 1L, 2L, 1L, 1L)))

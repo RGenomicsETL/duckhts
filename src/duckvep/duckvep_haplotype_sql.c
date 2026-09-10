@@ -58,8 +58,6 @@ typedef struct {
     duckvep_sequence_diff_scratch_t difference_scratch;
     duckvep_sequence_difference_t *differences;
     uint8_t *difference_reference;
-    uint8_t *reference_coding_protein;
-    duckvep_translation_t reference_coding_translation;
     uint32_t difference_transcript;
     int have_difference_reference;
     duckvep_hgvs_protein_operation_t *protein_operations;
@@ -216,7 +214,7 @@ static void haplotype_state_destroy(void *pointer) {
     free(b->edit_event_ids);
     free(s->difference_scratch.scores); free(s->difference_scratch.trace); free(s->differences);
     free(s->difference_reference); free(b->reference_protein);
-    free(s->reference_coding_protein);
+    free(b->reference_coding_protein);
     free(s->protein_operations); free(s->hgvsp);
     if (s->reference.fai) fai_destroy(s->reference.fai);
     free(s->reference.bases);
@@ -280,7 +278,7 @@ static int workspace_allocate(haplotype_state_t *s, const haplotype_bind_t *bind
     X(s->differences, n[LIMIT_DIFFERENCES]) \
     X(s->difference_reference, n[LIMIT_SEQUENCE]) \
     X(b->reference_protein, b->reference_protein_capacity) \
-    X(s->reference_coding_protein, b->reference_protein_capacity) \
+    X(b->reference_coding_protein, b->reference_protein_capacity) \
     X(s->protein_operations, bind->hgvs ? n[LIMIT_HGVS_OPERATIONS] : 0u) \
     X(s->hgvsp, bind->hgvs ? n[LIMIT_HGVS_BYTES] + 1u : 0u) \
     X(s->reference.bases, s->reference.capacity) \
@@ -599,16 +597,6 @@ static int prepare_difference_reference(haplotype_state_t *s, const haplotype_bi
         }
         s->difference_reference[i] = (uint8_t)base;
     }
-    duckvep_codon_table_t table = seq->codon_table
-        ? (duckvep_codon_table_t)seq->codon_table[tx] : DUCKVEP_CODON_TABLE_STANDARD;
-    duckvep_translation_status_t coding = duckvep_translate_cds(leaf->reference_cds,
-        length, table, DUCKVEP_TRANSLATION_N_UNKNOWN, s->reference_coding_protein,
-        s->buffers.reference_protein_capacity, &s->reference_coding_translation);
-    if (coding != DUCKVEP_TRANSLATION_OK) {
-        snprintf(error, error_size, "duckvep_haplotypes: reference coding translation status %u at transcript %u",
-            (unsigned)coding, tx);
-        return 0;
-    }
     s->difference_transcript = tx; s->have_difference_reference = 1;
     return 1;
 }
@@ -854,7 +842,7 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
     uint32_t tx = leaf->carriers.transcript_index;
     if (!leaf->ordered_replacements && (leaf->block_count ||
             (bind->hgvs && leaf->cds && leaf->reference_protein &&
-             s->reference_coding_translation.length))) {
+             leaf->reference_coding_translation.length))) {
         const duckvep_owned_model_t *model = &bind->entry->model;
         duckvep_edit_set_t edits = {s->buffers.edits, leaf->edit_count};
         duckvep_haplotype_result_t applied = {leaf->cds_length,
@@ -870,7 +858,7 @@ static int append_leaf(duckdb_data_chunk output, idx_t row, haplotype_state_t *s
         }
         if (duckvep_coding_context_open_replay(leaf->reference_cds, model->sequences.cds_length[tx],
                 &edits, model->transcripts.strand[tx], table, leaf->cds, &applied,
-                s->reference_coding_protein, &s->reference_coding_translation,
+                leaf->reference_coding_protein, &leaf->reference_coding_translation,
                 s->buffers.protein, &leaf->translation, &coding) != DUCKVEP_CODING_CONTEXT_OK ||
             duckvep_coding_context_attach_model(&model->transcripts, &model->exons, &model->sequences,
                 tx, event, leaf->edit_count == 1u ? edits.edits[0].cds_start : 0u, &coding) !=

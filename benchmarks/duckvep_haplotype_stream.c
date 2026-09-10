@@ -125,7 +125,8 @@ void duckhts_bench_haplotype_stream(char **reference, int *transcripts, int *sam
     X(b.events, b.event_capacity) X(b.projections, b.projection_capacity) X(b.alleles, b.allele_capacity) \
     X(b.leaf_events, 4u) X(b.contributors, 4u) X(b.edits, 4u) X(b.edit_event_ids, 4u) \
     X(b.blocks, 4u) X(b.cds, b.cds_capacity) X(b.protein, b.protein_capacity) \
-    X(b.reference_protein, b.reference_protein_capacity)
+    X(b.reference_protein, b.reference_protein_capacity) \
+    X(b.reference_coding_protein, b.reference_protein_capacity)
 #define COUNT_MODEL(p, count) model_bytes += (count) * sizeof(*(p));
 #define COUNT_WORK(p, count) workspace += (count) * sizeof(*(p));
     MODEL_ARRAYS(COUNT_MODEL)

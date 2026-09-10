@@ -132,7 +132,7 @@ typedef struct {
     uint64_t *edit_event_ids; /* Edit payloads, compacted to applied source IDs for ordered replay. */
     duckvep_haplotype_block_t *blocks; /* At most edit_capacity interaction blocks. */
     size_t leaf_capacity, edit_capacity;
-    uint8_t *cds, *protein, *reference_protein;
+    uint8_t *cds, *protein, *reference_protein, *reference_coding_protein;
     size_t cds_capacity, protein_capacity, reference_protein_capacity;
 } duckvep_haplotype_stream_buffers_t;
 
@@ -154,6 +154,8 @@ typedef struct {
     const uint8_t *cds, *protein;
     const uint8_t *reference_protein; /* Worker-owned; NULL without a complete reference codon. */
     size_t reference_protein_length;
+    const uint8_t *reference_coding_protein; /* Full N_UNKNOWN view, without reference curation. */
+    duckvep_translation_t reference_coding_translation;
     duckvep_translation_t translation; /* Full raw translation remains in buffers.protein. */
     size_t cds_length, protein_length;
     /* Sum of replayed ALT lengths minus nominal REF spans, before clipping or
@@ -191,6 +193,7 @@ typedef struct {
     duckvep_phase_policy_t phase_policy;
     uint32_t reference_transcript;
     size_t reference_protein_length;
+    duckvep_translation_t reference_coding_translation;
     uint8_t have_reference_protein, reference_protein_known;
     duckvep_haplotype_stream_status_t error;
     duckvep_carriers_status_t carrier_error;

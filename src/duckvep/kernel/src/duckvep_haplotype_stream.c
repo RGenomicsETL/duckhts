@@ -113,7 +113,8 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_init(
         !valid_array(b->blocks, b->edit_capacity, sizeof(*b->blocks)) ||
         !valid_array(b->cds, b->cds_capacity, 1u) ||
         !valid_array(b->protein, b->protein_capacity, 1u) ||
-        !valid_array(b->reference_protein, b->reference_protein_capacity, 1u))
+        !valid_array(b->reference_protein, b->reference_protein_capacity, 1u) ||
+        !valid_array(b->reference_coding_protein, b->reference_protein_capacity, 1u))
         return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
     duckvep_carriers_status_t status = duckvep_carriers_init(&s->carriers, tx, &b->carriers);
     if (status != DUCKVEP_CARRIERS_OK) return carrier_fail(s, status);
@@ -567,8 +568,8 @@ static duckvep_haplotype_stream_status_t append_differing_edits(
     return DUCKVEP_HAPLOTYPE_STREAM_OK;
 }
 
-/* One curated reference peptide per closing transcript, shared by native
- * reference-only replay and host difference materialization. */
+/* One preparation per closing transcript supplies curated replay/difference
+ * reference and conservative coding operands from the same translation pass. */
 static duckvep_haplotype_stream_status_t prepare_reference_protein(
     duckvep_haplotype_stream_t *s, uint32_t tx) {
     if (s->have_reference_protein && s->reference_transcript == tx)
@@ -585,12 +586,13 @@ static duckvep_haplotype_stream_status_t prepare_reference_protein(
         return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
     duckvep_codon_table_t table = seq->codon_table
         ? (duckvep_codon_table_t)seq->codon_table[tx] : DUCKVEP_CODON_TABLE_STANDARD;
-    duckvep_haplotype_status_t status = duckvep_haplotype_reference_protein(
+    duckvep_haplotype_status_t status = duckvep_haplotype_reference_proteins(
         seq->cds_bytes + (size_t)offset, length, table,
         end > begin ? seq->peptide_edit_position1 + begin : NULL,
         end > begin ? seq->peptide_edit_alt + begin : NULL, end - begin,
-        s->buffers.reference_protein, s->buffers.reference_protein_capacity,
-        &s->reference_protein_length);
+        s->buffers.reference_protein, s->buffers.reference_coding_protein,
+        s->buffers.reference_protein_capacity, &s->reference_protein_length,
+        &s->reference_coding_translation);
     if (status == DUCKVEP_HAPLOTYPE_BUFFER_TOO_SMALL)
         return fail(s, DUCKVEP_HAPLOTYPE_STREAM_SEQUENCE_FULL);
     if (status != DUCKVEP_HAPLOTYPE_OK && status != DUCKVEP_HAPLOTYPE_INPUT_INCOMPLETE)
@@ -797,6 +799,8 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
                     leaf.flags |= DUCKVEP_HAPLOTYPE_FLAG_STOP_TRUNCATED;
                 leaf.reference_protein = s->reference_protein_known ? b->reference_protein : NULL;
                 leaf.reference_protein_length = s->reference_protein_length;
+                leaf.reference_coding_protein = b->reference_coding_protein;
+                leaf.reference_coding_translation = s->reference_coding_translation;
                 if (raw_records && !retained_call && leaf.reference_protein) {
                     leaf.protein = leaf.reference_protein;
                     leaf.protein_length = leaf.reference_protein_length;

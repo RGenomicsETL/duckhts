@@ -1,6 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
 
+- reuse bundled haplotype replay's native reference-protein cache for coding
+  results and protein differences, preserving ambiguous-codon and peptide-edit
+  behavior with worker-local bounded storage
+
 - return nominal_length_diff from bundled haplotype replay, preserving the signed
   replacement-length sum when clipping changes the final CDS length; unavailable
   sequences return NA

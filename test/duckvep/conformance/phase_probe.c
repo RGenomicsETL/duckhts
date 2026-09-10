@@ -65,6 +65,7 @@ void duckhts_test_raw_phase_haplotypes(char **reference, int *genomic_start,
     duckvep_haplotype_block_t blocks[16];
     uint64_t edit_ids[16];
     uint8_t alleles[128], cds_scratch[512], protein_scratch[512], reference_protein[512];
+    uint8_t reference_coding_protein[512];
     duckvep_haplotype_stream_buffers_t buffers = {
         .carriers = {.transcripts = &transcript, .calls = calls, .prefixes = prefixes,
             .active_transcripts = &active, .transcript_index = tx_index, .call_index = call_index,
@@ -76,7 +77,8 @@ void duckhts_test_raw_phase_haplotypes(char **reference, int *genomic_start,
         .edit_event_ids = edit_ids, .blocks = blocks, .leaf_capacity = 8u, .edit_capacity = 16u,
         .cds = cds_scratch, .protein = protein_scratch,
         .cds_capacity = sizeof(cds_scratch), .protein_capacity = sizeof(protein_scratch),
-        .reference_protein = reference_protein, .reference_protein_capacity = sizeof(reference_protein)};
+        .reference_protein = reference_protein, .reference_protein_capacity = sizeof(reference_protein),
+        .reference_coding_protein = reference_coding_protein};
     for (int profile = 0; profile < *count; profile++) {
         duckvep_haplotype_stream_t stream;
         duckvep_haplotype_stream_status_t status = duckvep_haplotype_stream_init(

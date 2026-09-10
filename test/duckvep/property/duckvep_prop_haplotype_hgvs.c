@@ -1320,6 +1320,8 @@ static enum theft_trial_res prop_hgvs_terminal_reference_replay(struct theft *t,
     if (c->transcript_strand > 0) quota->forward++;
     else quota->reverse++;
     uint8_t cds[80], rp[32], ap[32], prepared[32], wanted_reference[32];
+    uint8_t coding_reference[32];
+    duckvep_translation_t coding_translation;
     uint8_t wanted_cds[80], wanted[32], replayed[2][80];
     size_t wanted_cds_length, wanted_length, reference_length, prepared_length;
     int64_t difference; uint32_t flags;
@@ -1334,9 +1336,10 @@ static enum theft_trial_res prop_hgvs_terminal_reference_replay(struct theft *t,
     if (!reference_length || wanted_reference[reference_length - 1u] != '*') return THEFT_TRIAL_ERROR;
     wanted_reference[reference_length - 1u] = input->residue;
     wanted_reference[reference_length++] = '*';
-    if (duckvep_haplotype_reference_protein(c->ref, KPROP_HAPLO_CDS_LEN,
+    if (duckvep_haplotype_reference_proteins(c->ref, KPROP_HAPLO_CDS_LEN,
             DUCKVEP_CODON_TABLE_STANDARD, &position, &input->residue, 1u,
-            prepared, sizeof prepared, &prepared_length) != DUCKVEP_HAPLOTYPE_OK ||
+            prepared, coding_reference, sizeof prepared, &prepared_length, &coding_translation) !=
+            DUCKVEP_HAPLOTYPE_OK ||
         prepared_length != reference_length || memcmp(prepared, wanted_reference, reference_length))
         return THEFT_TRIAL_FAIL;
     duckvep_edit_set_t set = {c->edits, c->edit_count};

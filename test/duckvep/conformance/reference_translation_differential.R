@@ -58,9 +58,13 @@ main <- function() {
     capacity <- nchar(cds) %/% 3L + 2L
     x <- .C(reference_symbol, as.character(cds), as.integer(table), positions, alternates,
       as.integer(length(edits)), peptide = raw(capacity), as.integer(capacity),
-      status = integer(1L), length = double(1L))
+      status = integer(1L), length = double(1L), coding_peptide = raw(capacity),
+      coding_facts = double(3L))
     stopifnot(x$status == 0L)
-    rawToChar(x$peptide[seq_len(x$length)])
+    list(protein = rawToChar(x$peptide[seq_len(x$length)]),
+      coding = rawToChar(x$coding_peptide[seq_len(x$coding_facts[1L])]),
+      coding_length = x$coding_facts[1L], first_stop = x$coding_facts[2L],
+      unambiguous = x$coding_facts[3L])
   }
   # Exhaustive ACGTN triplets in each codon role, every supported table and
   # trailing-partial length. The matrix is declared independently of C tables.
@@ -140,14 +144,34 @@ main <- function() {
     case <- cases[[i]]; expected <- oracle[[i]]
     actual <- translate(expected$prepared_cds, case$table)
     reference <- reference_protein(expected$prepared_cds, case$table, case$edits)
+    # The conservative policy masks N-bearing codons of the uncurated pinned
+    # translation, not of the native result or the curated reference protein.
+    coding <- strsplit(expected$alternate_full, '', fixed = TRUE)[[1L]]
+    starts <- seq_along(coding) * 3L - 2L
+    stopifnot(length(coding) == nchar(expected$prepared_cds) %/% 3L)
+    codons <- substring(toupper(expected$prepared_cds), starts, starts + 2L)
+    coding[grepl('N', codons, fixed = TRUE)] <- 'X'
+    coding_stop <- which(coding == '*')
+    expected_coding <- paste0(coding, collapse = '')
+    expected_stop <- if (length(coding_stop)) coding_stop[1L] else 0
+    coding_metadata_equal <- reference$coding_length == length(coding) &&
+      reference$first_stop == expected_stop
+    coding_metadata_equal <- coding_metadata_equal &&
+      reference$unambiguous == !grepl('N', toupper(expected$prepared_cds), fixed = TRUE)
     data.frame(id = case$id, family = case$family, table = case$table,
       cds = case$cds, prepared_cds = expected$prepared_cds,
       core_reference = expected$core_reference, expected_reference = expected$reference,
-      raw_reference = actual$full, actual_reference = reference,
+      raw_reference = actual$full, actual_reference = reference$protein,
+      expected_coding = expected_coding, actual_coding = reference$coding,
+      expected_coding_length = length(coding), actual_coding_length = reference$coding_length,
+      expected_coding_stop = expected_stop, actual_coding_stop = reference$first_stop,
+      expected_coding_unambiguous = !grepl('N', toupper(expected$prepared_cds), fixed = TRUE),
+      actual_coding_unambiguous = reference$unambiguous != 0,
+      coding_failure = !identical(reference$coding, expected_coding) || !coding_metadata_equal,
       expected_alternate_full = expected$alternate_full,
       actual_alternate_full = actual$full, expected_alternate = expected$alternate,
       actual_alternate = actual$visible,
-      reference_failure = !identical(reference, expected$reference),
+      reference_failure = !identical(reference$protein, expected$reference),
       raw_reference_hypothesis_failure = !identical(actual$full, expected$reference),
       alternate_full_failure = !identical(actual$full, expected$alternate_full),
       alternate_failure = !identical(actual$visible, expected$alternate))
@@ -156,16 +180,22 @@ main <- function() {
   write.csv(pairs, file.path(out, "pairs.csv"), row.names = FALSE)
   write.csv(pairs[pairs$family == "witness", ], file.path(out, "witnesses.csv"), row.names = FALSE)
   summary <- aggregate(cbind(cases = rep(1L, nrow(pairs)), reference_failures = pairs$reference_failure,
+    coding_failures = pairs$coding_failure,
     raw_reference_hypothesis_failures = pairs$raw_reference_hypothesis_failure,
     alternate_full_failures = pairs$alternate_full_failure, alternate_failures = pairs$alternate_failure),
     pairs[c("family")], sum)
   write.csv(summary, file.path(out, "summary.csv"), row.names = FALSE)
   # Deliberate corruption must fail the complete identity/sequence comparison.
-  expected <- pairs[c("id", "expected_reference", "expected_alternate_full", "expected_alternate")]
+  expected <- pairs[c("id", "expected_reference", "expected_alternate_full", "expected_alternate",
+    "expected_coding", "expected_coding_length", "expected_coding_stop",
+    "expected_coding_unambiguous")]
   equal <- function(x) identical(x, expected)
   controls <- c(missing = !equal(expected[-1L, ]), duplicate = !equal(rbind(expected, expected[1L, ])))
   for (field in names(expected)) {
-    corrupt <- expected; corrupt[[field]][1L] <- paste0(corrupt[[field]][1L], "X")
+    corrupt <- expected
+    value <- corrupt[[field]][1L]
+    corrupt[[field]][1L] <- if (is.logical(value)) !value else if (is.numeric(value))
+      value + 1 else paste0(value, "X")
     controls[field] <- !equal(corrupt)
   }
   corrupt_hgvs <- independent
@@ -193,8 +223,9 @@ main <- function() {
   print(pairs[pairs$family == "witness", c("id", "expected_reference", "actual_reference", "expected_alternate", "actual_alternate")])
   stopifnot(all(controls), identical(code_hashes, vapply(code, duckvep_evidence_sha256, "")),
     identical(revision, duckvep_evidence_revision(root)))
-  # This is deliberately not a passing certificate until all three comparisons pass.
-  stopifnot(!any(pairs$reference_failure | pairs$alternate_full_failure | pairs$alternate_failure),
+  # Every sequence comparison and the conservative translation metadata must agree.
+  stopifnot(!any(pairs$reference_failure | pairs$alternate_full_failure | pairs$alternate_failure |
+    pairs$coding_failure),
     equal_hgvs(independent))
 }
 main()

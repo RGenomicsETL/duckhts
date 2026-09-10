@@ -373,6 +373,52 @@ sequence_variant	unresolved	no_feature_in_loaded_model
 
 # Curated reference proteins are not raw translations of the uploaded path.
 statement ok
+CREATE TABLE hap_reference_views_tx AS SELECT i::UINTEGER transcript_index,0::UINTEGER seq_region,
+ (100+20*i)::UBIGINT transcript_start,(108+20*i)::UBIGINT transcript_end,
+ 1::TINYINT strand,0::UINTEGER gene_index,3::UBIGINT transcript_flags,
+ transcript_start cds_start,transcript_end cds_end,cds::BLOB cds_sequence,1::UTINYINT codon_table
+ FROM (VALUES (0,'ATGGCNTAA'),(1,'ATGGCCTAA')) v(i,cds);
+
+query I
+SELECT loaded FROM duckvep_model_load('hap_reference_views','SELECT 0::UINTEGER seq_region',
+ 'SELECT * FROM hap_reference_views_tx',
+ 'SELECT transcript_index,transcript_start exon_start,transcript_end exon_end,
+  1::UBIGINT exon_cdna_start,9::UBIGINT exon_cdna_end,
+  0::TINYINT phase,0::TINYINT end_phase FROM hap_reference_views_tx');
+----
+1
+
+statement ok
+CREATE TABLE hap_reference_views_calls AS SELECT transcript_index+1 event_index,0 seq_region,
+ transcript_start+3 AS position,'G' reference,'A' alternate,1 alt_index,transcript_index,
+ 0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set FROM hap_reference_views_tx;
+
+# GCN and GCC both translate to Ala by consensus, but only GCC has a known
+# conservative coding operand. Each closing transcript supplies its own views.
+foreach policy strict vep116_compat
+
+foreach workers 1 4
+
+statement ok
+SET threads=${workers};
+
+query ITTTTTI
+SELECT transcript_index,protein,protein_differences[1].reference,
+ protein_differences[1].alternate,coding_blocks[1].coding_status,
+ cds,carrier_count FROM duckvep_haplotypes('SELECT * FROM hap_reference_views_calls',
+ 'hap_reference_views',phase_policy:='${policy}') ORDER BY transcript_index;
+----
+0	MT*	A	T	unsupported	ATGACNTAA	1
+1	MT*	A	T	ok	ATGACCTAA	1
+
+endloop
+
+endloop
+
+statement ok
+SET threads=4;
+
+statement ok
 CREATE TABLE hap_protein_tx AS SELECT i::UINTEGER transcript_index,0::UINTEGER seq_region,
  (100+20*i)::UBIGINT transcript_start,(99+20*i+len(cds))::UBIGINT transcript_end,
  1::TINYINT strand,0::UINTEGER gene_index,3::UBIGINT transcript_flags,

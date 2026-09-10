@@ -72,7 +72,8 @@ typedef struct duckvep_haplotype_block {
     uint32_t flags;
 } duckvep_haplotype_block_t;
 
-/* Construct the pinned VEP-116 Haplosaurus reference protein from a borrowed
+/* Construct the pinned VEP-116 Haplosaurus reference protein and its conservative
+ * coding view in one translation pass from a borrowed
  * transcript-oriented CDS and optional sorted single-residue Ensembl SeqEdits.
  * Uses consensus translation, removes the last complete translated stop,
  * forces a legitimate initial start to M, then applies peptide edits. Finally
@@ -81,13 +82,17 @@ typedef struct duckvep_haplotype_block {
  * Peptide positions are one-based, strictly increasing and <= cds_length/3;
  * alternates are A-Z or '*'. A terminal SeqEdit may append a removed residue.
  * Capacity must be at least cds_length/3 + 2 (extra stop plus NUL). Shorter CDS
- * returns INPUT_INCOMPLETE, not an invented empty reference protein.
- * Input spans and length output must not overlap peptide[0..capacity).
- * No allocation. Length is zero on failure; invalid bases may leave partial bytes. */
-duckvep_haplotype_status_t duckvep_haplotype_reference_protein(
+ * returns INPUT_INCOMPLETE with a valid zero-codon coding view, not an invented
+ * curated reference protein. coding_peptide uses N_UNKNOWN with no curation;
+ * coding_translation describes that complete raw view, including internal stops.
+ * Both output spans have the same capacity and must be distinct from all inputs
+ * and result storage. No allocation. Length is zero on failure; coding_translation
+ * is zero except on OK or INPUT_INCOMPLETE. Invalid bases may leave partial bytes. */
+duckvep_haplotype_status_t duckvep_haplotype_reference_proteins(
     const uint8_t *cds, size_t cds_length, duckvep_codon_table_t table,
     const uint32_t *edit_positions1, const uint8_t *edit_alternates, size_t edit_count,
-    uint8_t *peptide, size_t capacity, size_t *length);
+    uint8_t *peptide, uint8_t *coding_peptide, size_t capacity, size_t *length,
+    duckvep_translation_t *coding_translation);
 
 /* Partition edits sorted by ascending original CDS coordinate. The caller has
  * already grouped them by model, transcript, sample, phase set, and haplotype.

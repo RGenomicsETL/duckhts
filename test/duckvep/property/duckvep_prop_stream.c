@@ -209,6 +209,7 @@ struct haplotype_stream_scene {
     duckvep_haplotype_block_t blocks[8];
     duckvep_carrier_event_t leaf_events[8];
     uint8_t alleles[128], cds[128], protein[128], reference_protein[128];
+    uint8_t reference_coding_protein[128];
     duckvep_haplotype_stream_buffers_t buffers;
     duckvep_haplotype_stream_t stream;
 };
@@ -244,6 +245,7 @@ static void haplotype_stream_scene_prepare(struct haplotype_stream_scene *f, uin
         .leaf_capacity = 8u, .edit_capacity = 8u, .cds = f->cds, .protein = f->protein,
         .cds_capacity = sizeof(f->cds), .protein_capacity = sizeof(f->protein),
         .reference_protein = f->reference_protein,
+        .reference_coding_protein = f->reference_coding_protein,
         .reference_protein_capacity = sizeof(f->reference_protein)};
 }
 
@@ -1083,11 +1085,12 @@ TEST haplotype_stream_unmapped_sources_retain_raw_slot_evidence(void) {
 }
 
 TEST haplotype_stream_reference_only_protein_uses_call_retention(void) {
-    const char *references[] = {"ATGAAACCCTAA", "ATGAAATAACCC", "CTGAAACCCTAA"};
-    const char *curated[] = {"MKP*", "MK*P", "MKP*"};
-    const char *raw[] = {"MKP*", "MK*", "LKP*"};
-    const char *alternate[] = {"MQP*", "MQ*", "LQP*"};
-    for (unsigned reference = 0u; reference < 3u; reference++) {
+    const char *references[] = {"ATGAAACCCTAA", "ATGAAATAACCC", "CTGAAACCCTAA", "ATGGCNCCCTAA"};
+    const char *curated[] = {"MKP*", "MK*P", "MKP*", "MAP*"};
+    const char *raw[] = {"MKP*", "MK*", "LKP*", "MAP*"};
+    const char *alternate[] = {"MQP*", "MQ*", "LQP*", "MPP*"};
+    const char *coding[] = {"MKP*", "MK*P", "LKP*", "MXP*"};
+    for (unsigned reference = 0u; reference < 4u; reference++) {
         for (int strand = -1; strand <= 1; strand += 2) {
             for (unsigned peptide_edit = 0u; peptide_edit < 2u; peptide_edit++) {
                 /* Missing-only, coding, shadowed, unmapped, UTR and intronic calls. */
@@ -1159,6 +1162,11 @@ TEST haplotype_stream_reference_only_protein_uses_call_retention(void) {
                         ASSERT_EQ(DUCKVEP_HAPLOTYPE_CONDITIONAL, leaf.sequence_status);
                         ASSERT_EQ(4u, leaf.reference_protein_length);
                         ASSERT_MEM_EQ(expected_reference, leaf.reference_protein, 4u);
+                        ASSERT_MEM_EQ(coding[reference], leaf.reference_coding_protein, 5u);
+                        ASSERT_EQ(4u, leaf.reference_coding_translation.length);
+                        ASSERT_EQ(reference == 1u ? 3u : 4u,
+                            leaf.reference_coding_translation.first_stop_position1);
+                        ASSERT_EQ(reference != 3u, leaf.reference_coding_translation.unambiguous);
                         for (uint32_t id = leaf.carriers.first_call; id;) {
                             const duckvep_carrier_call_t *carrier = duckvep_carriers_call(&f.stream.carriers, id);
                             ASSERT(carrier); ASSERT(carrier->key.lane == 1u || carrier->key.lane == 2u);
