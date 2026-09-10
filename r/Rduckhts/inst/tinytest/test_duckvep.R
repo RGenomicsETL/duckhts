@@ -1239,6 +1239,78 @@ local({
   expect_true(dbGetQuery(con,
     "SELECT duckvep_model_drop('r-hgvs-alternate-table') dropped")$dropped)
 
+  # Pinned VEP 116 original records in indel_translation_witnesses.jsonl.gz:
+  # shared suffix N is erased just like a prefix, including genuine C/GT
+  # delins. Equal-length and changed REF N do not gain HGVSp availability.
+  hgvs_padding_sources <- data.frame(
+    event_index = 1:14, seq_region = c(rep(0L, 7L), rep(1L, 3L), rep(2L, 4L)),
+    position = c(14L, 15L, 14L, 14L, 14L, 14L, 16L, 14L, 14L, 14L, 14L, 15L, 14L, 14L),
+    reference = c("ACN", "CN", "ACN", "ACN", "ACN", "ACN", "N", "NCN", "NCN", "NCN",
+      "ACC", "CC", "ACC", "ACC"),
+    alternate = c("ATCN", "TCN", "AGTN", "AN", "ATN", "A", "NT", "NTCN", "NGTN", "NN",
+      "ATCC", "TCC", "AGTC", "AC")
+  )
+  dbWriteTable(con, "hgvs_padding_sources", hgvs_padding_sources)
+  dbExecute(con, paste(
+    "CREATE TABLE hgvs_padding_transcripts AS SELECT",
+    "i::UINTEGER transcript_index, i::UINTEGER seq_region,",
+    "11::UBIGINT transcript_start, 22::UBIGINT transcript_end,",
+    "1::TINYINT strand, i::UINTEGER gene_index, 3::UBIGINT transcript_flags,",
+    "transcript_start cds_start, transcript_end cds_end,",
+    "cds::BLOB cds_sequence, 1::UTINYINT codon_table,",
+    "''::BLOB pre_cds_sequence, ''::BLOB post_cds_sequence",
+    "FROM (VALUES (0, 'ATGACNGCCTAA'), (1, 'ATGNCNGCCTAA'), (2, 'ATGACCGCCTAA')) s(i, cds)"
+  ))
+  expect_true(load_model("r-hgvs-padding", c(
+    paste("SELECT seq_region, 32::UBIGINT sequence_length,",
+      "CASE seq_region WHEN 0 THEN 'padding_acn' WHEN 1 THEN 'padding_ncn'",
+      "ELSE 'padding_acc' END seq_region_name FROM hgvs_padding_transcripts ORDER BY seq_region"),
+    "SELECT * FROM hgvs_padding_transcripts ORDER BY transcript_index",
+    paste("SELECT transcript_index, 11::UBIGINT exon_start, 22::UBIGINT exon_end,",
+      "1::UBIGINT exon_cdna_start, 12::UBIGINT exon_cdna_end,",
+      "0::TINYINT phase, 0::TINYINT end_phase FROM hgvs_padding_transcripts ORDER BY transcript_index")
+  ), reference_fasta = system.file("extdata", "duckvep_indel_translation.fa",
+    package = "Rduckhts", mustWork = TRUE))$loaded)
+  dbExecute(con, paste(
+    "CREATE TABLE hgvs_padding_events AS SELECT event_index::UBIGINT event_index,",
+    "seq_region::UINTEGER seq_region, position::UBIGINT AS position, reference, alternate,",
+    "NULL::UBIGINT end_position, NULL::VARCHAR structural_type,",
+    "NULL::VARCHAR copy_change, NULL::UINTEGER mate_seq_region,",
+    "NULL::UBIGINT mate_position FROM hgvs_padding_sources"
+  ))
+  hgvs_padding <- dbGetQuery(con, paste(
+    "SELECT event_index, protein_hgvs,",
+    "(SELECT string_agg(t.consequence, '&' ORDER BY t.consequence)",
+    "FROM duckvep_so_terms() t",
+    "WHERE (a.consequence_mask & t.consequence_mask) <> 0) consequences",
+    "FROM duckvep_annotate('hgvs_padding_events', 'r-hgvs-padding',",
+    "hgvs := true, upstream_distance := 0, downstream_distance := 0) a ORDER BY event_index"
+  ))
+  expect_equal(hgvs_padding$event_index, hgvs_padding_sources$event_index)
+  expect_identical(hgvs_padding$protein_hgvs, c(
+    "p.Thr2IlefsTer?", "p.Thr2IlefsTer?", "p.Thr2SerfsTer?", "p.Thr2Ter",
+    NA_character_, NA_character_, "p.Ala3CysfsTer?", "p.Ala3Ter", "p.Ala3Ter",
+    "p.Ala3ProfsTer?", "p.Thr2IlefsTer?", "p.Thr2IlefsTer?", "p.Thr2SerfsTer?", "p.Ala3ProfsTer?"
+  ))
+  expect_identical(hgvs_padding$consequences,
+    c(rep("frameshift_variant", 4L), "coding_sequence_variant", rep("frameshift_variant", 9L)))
+  # Unlike independent events, raw source replay requires the full ALT to be
+  # eligible. These matching N-padded insertions remain invalid on that route.
+  padding_replay <- rduckhts_haplotypes(con, paste(
+    "SELECT event_index, seq_region, position, reference, [alternate] alternates,",
+    "seq_region transcript_index, 0 sample_index, '1|1' gt FROM hgvs_padding_events",
+    "WHERE event_index IN (1, 8)"
+  ), "r-hgvs-padding", hgvs = TRUE, input_mode = "source_records", phase_policy = "vep116_compat")
+  padding_replay <- padding_replay[order(padding_replay$transcript_index), ]
+  expect_identical(padding_replay$hgvsp, rep(NA_character_, 2L))
+  expect_identical(padding_replay$projection_status, rep("invalid_allele", 2L))
+  expect_equal(vapply(padding_replay$contributors, nrow, 0L), c(1L, 1L))
+  padding_contributors <- do.call(rbind, padding_replay$contributors)
+  expect_equal(padding_contributors$event_index, c(1L, 8L))
+  expect_identical(padding_contributors$reference, c("ACN", "NCN"))
+  expect_identical(padding_contributors$alternate, c("ATCN", "NTCN"))
+  expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-hgvs-padding') dropped")$dropped)
+
   # Pinned original events 110244/143844: removed REF N makes the independent
   # reference peptide unavailable, but does not invalidate raw source replay.
   hgvs_removed_ref_sources <- data.frame(

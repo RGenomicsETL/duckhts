@@ -439,6 +439,9 @@ duckvep_hgvs_status_t duckvep_hgvs_uploaded_reference_validate(
     size_t                                 raw_ref_length) {
 
     size_t i;
+    size_t feature_offset;
+    size_t feature_end;
+    int length_changing;
 
     if (reference == NULL || event == NULL || raw_ref == NULL ||
         raw_ref_length == 0u || event->raw_start1 == 0u ||
@@ -448,22 +451,27 @@ duckvep_hgvs_status_t duckvep_hgvs_uploaded_reference_validate(
         reference->chrom_id != event->chrom_id) {
         return DUCKVEP_HGVS_INVALID_ARG;
     }
+    feature_offset = (size_t)event->feature_allele_offset;
+    length_changing = event->ref_diff_length != event->alt_diff_length;
+    if (length_changing &&
+        (feature_offset > raw_ref_length ||
+         (size_t)event->ref_diff_length > raw_ref_length - feature_offset)) {
+        return DUCKVEP_HGVS_INVALID_ARG;
+    }
+    feature_end = feature_offset + (size_t)event->ref_diff_length;
     for (i = 0u; i < raw_ref_length; i++) {
         uint8_t uploaded;
         uint8_t reference_base;
-        /* VEP removes the shared prefix of any length-changing allele before
-         * eligibility checks, not only insertion anchors. N in that erased
-         * prefix (or a retained right insertion anchor) must match literally;
-         * changed REF bases and equal-length alleles keep strict validation. */
-        int retained_anchor =
-            (event->ref_diff_length != event->alt_diff_length &&
-             i < (size_t)event->feature_allele_offset) ||
-            (event->interbase && event->kind == (uint8_t)DUCKVEP_KIND_INS &&
-             !event->ref_diff_length && i == (size_t)event->anchor_ref_offset);
-        uploaded = (uint8_t)duckvep_dna_normalize((char)raw_ref[i], retained_anchor);
+        /* VEP minimizes both ends of length-changing alleles before checking
+         * eligibility. N outside the prepared feature REF is erased padding,
+         * but must still match literally. Changed REF bases and equal-length
+         * uploaded alleles retain strict validation. */
+        int erased_padding = length_changing &&
+            (i < feature_offset || i >= feature_end);
+        uploaded = (uint8_t)duckvep_dna_normalize((char)raw_ref[i], erased_padding);
         if (!uploaded) return DUCKVEP_HGVS_INVALID_ALLELE;
         duckvep_hgvs_status_t status = hgvs_reference_base(
-            reference, event->raw_start1 + (uint32_t)i, retained_anchor, &reference_base);
+            reference, event->raw_start1 + (uint32_t)i, erased_padding, &reference_base);
         if (status != DUCKVEP_HGVS_OK) return status;
         if (uploaded != reference_base) {
             return DUCKVEP_HGVS_REFERENCE_MISMATCH;
@@ -2334,6 +2342,7 @@ static duckvep_hgvs_status_t hgvs_protein_fact_build_window(
     uint64_t last64;
     duckvep_hgvs_status_t status;
     int stop_pair_early = 0;
+    int equal_peptides = 0;
     int xaa_as_ter;
 
     if (out == NULL) return DUCKVEP_HGVS_INVALID_ARG;
@@ -2398,7 +2407,7 @@ static duckvep_hgvs_status_t hgvs_protein_fact_build_window(
 
     if (ref_length == alt_length && ref_length != 0u) {
         size_t i;
-        int identical = 1;
+        equal_peptides = 1;
         for (i = 0u; i < ref_length; i++) {
             uint8_t reference = hgvs_protein_window_base(
                 context, &fact.reference, &fact.window, 0, i);
@@ -2408,14 +2417,14 @@ static duckvep_hgvs_status_t hgvs_protein_fact_build_window(
                 return DUCKVEP_HGVS_MISSING_PEPTIDE;
             }
             if (reference != alternate) {
-                identical = 0;
+                equal_peptides = 0;
                 break;
             }
         }
-        /* hgvs_protein skips _clip_alleles when the complete local peptides
-         * are equal, so equality keeps translation_start rather than moving
-         * one position past the matched window. */
-        if (identical) {
+        /* Equal local peptides skip _clip_alleles, not type selection.
+         * _get_hgvs_protein_type gives frameshift precedence and then
+         * _get_fs_peptides compares full translations from translation_start. */
+        if (equal_peptides && !(mechanism_flags & DUCKVEP_CONSEQUENCE_FLAG_FRAMESHIFT)) {
             fact.shape = (uint8_t)DUCKVEP_HGVS_PROTEIN_EQUAL;
             fact.ref_length = ref_length;
             fact.alt_length = alt_length;
@@ -2429,7 +2438,7 @@ static duckvep_hgvs_status_t hgvs_protein_fact_build_window(
         }
     }
 
-    while (prefix < ref_length && prefix < alt_length) {
+    while (!equal_peptides && prefix < ref_length && prefix < alt_length) {
         uint8_t reference = hgvs_protein_window_base(
             context, &fact.reference, &fact.window, 0, prefix);
         uint8_t alternate = hgvs_protein_window_base(
@@ -2451,7 +2460,7 @@ static duckvep_hgvs_status_t hgvs_protein_fact_build_window(
         if (reference != alternate) break;
         prefix++;
     }
-    while (!stop_pair_early && suffix < ref_length - prefix &&
+    while (!equal_peptides && !stop_pair_early && suffix < ref_length - prefix &&
            suffix < alt_length - prefix) {
         uint8_t reference = hgvs_protein_window_base(
             context, &fact.reference, &fact.window, 0, ref_length - 1u - suffix);

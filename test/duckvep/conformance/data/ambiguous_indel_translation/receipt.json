@@ -1,8 +1,8 @@
 {
-  "source_revision": "72bc78d2cad5be48cec582165ef7092d0ac16553",
+  "source_revision": "52ce78513b3f5f7c2a46fe82dc44dd458333092b",
   "source_binding": "diagnostic_unbound",
   "extension_path": "/root/duckhts/build/release/duckhts.duckdb_extension",
-  "extension_sha256": "0217585b75ac7277794590b7f714b85eb942667a1705ea87a31021faa7833ab5",
+  "extension_sha256": "cb34f65f738f5d26ce5b849bbcf9628e95db180e62a199a153aacbdac44f25b0",
   "oracle_revisions": ["57ea5c52340acc1f156267f810ad162e26597082", "2fb834b987ede3824e200197a838ce11e91aeb4b"],
   "oracle_pairs": 168000,
   "decoded_gt": "haploid ALT",
@@ -13,9 +13,9 @@
     "controls.csv": "5c041c2b33d4bd5430a39331999b471a999efc0c1d4c04c589ce531c28f77afe",
     "environment.stdout": "f64b182410f936e6273f404442e79a749109651ee99eb48cd7bf76cec8973e24",
     "oracle.stderr.gz": "a37daf7e9e650085f54b718579bc9f648c2f0b146fe8b387ef7a2c8c2db4cb50",
-    "oracle.stdout.gz": "7e78ac613bebf06a730883c92345a423d33d9c3b5aed4f39ba7d405852ff8ffb",
-    "pairs.parquet": "af281d12b859731ca6d0b92d2ae385e624794880c28bf476990f12f2ba02ffb0",
-    "summary.csv": "0ea4bb37958a2ffe747333c84e3b233aaeb8f4b421c90025ed89698a2cb413ac"
+    "oracle.stdout.gz": "7da415fb09509026097818549b8b26c2d57c4f334fcbfd60824f53b1a1896dcb",
+    "pairs.parquet": "9f02dc29a50a8aff905ac85adbde4747ebf424c0324fe5f31155117a5d187d3d",
+    "summary.csv": "e5c75935d50523d105db82658fb9e9f6fc6bf4e9df0c7d2152724282843dc703"
   },
   "oracle_models": 3000,
   "native_transcript_instances": 168000,
@@ -48,7 +48,7 @@
   "so_comparisons": 336000,
   "source_indels": 168000,
   "variant_family": "indel",
-  "local_receipt_sha256": "02b2ce5d210093dd1de2d795c9e41129d32e0029863b7e17d15ebbdd6c2c4cc7",
+  "local_receipt_sha256": "2a37f4fface6ff8b87f037dcfcf7b9705bdaeef7175b0a71d95c0216a7231f1c",
   "source_sha256": {
     "test/duckvep/conformance/ambiguous_codon_differential.R": "210fa31c86d9b45a2ede66045dab280bf8ba215934f423f033c8b14b9431813f",
     "test/duckvep/conformance/contributor_identity.R": "3fec588c0990f1ea4837572dd4b6d50bdac3286c9aeecf354b4edee34edb61f7",
@@ -85,7 +85,7 @@
     "src/duckvep/kernel/src/duckvep_haplotype_stream.h": "3fcc5a649b1c5a65df0c2c14703f2edd46bd5562d0460735b9c528436a522152",
     "src/duckvep/kernel/src/duckvep_haplotype.c": "ef6e46c002cd218edfb42e55a545094c9dae301f7724a862a9ede49d1932fac2",
     "src/duckvep/kernel/src/duckvep_haplotype.h": "f5190d34568bea6d8309779f1e31c9662fe67f7efe60eb429c77467ee536c5c1",
-    "src/duckvep/kernel/src/duckvep_hgvs.c": "0523797d61d47e10d963ad72cc46843126bfeb22964256e973f51a5772d38df3",
+    "src/duckvep/kernel/src/duckvep_hgvs.c": "7d74adf3dd736cd4f6e1a8d0f6a8b713d07171e5321b94fcda05871552ac71c4",
     "src/duckvep/kernel/src/duckvep_hgvs.h": "9653f401e58dab9eac9d2bd93b9576ee803ba7d2c1e7c8025e75a1302bdd851b",
     "src/duckvep/kernel/src/duckvep_kernel.c": "f333f1f25647e6a1a0e841a46b50be2e3474f22ba64299a7bfa560ffb066aa24",
     "src/duckvep/kernel/src/duckvep_model_internal.h": "53b605a4e1aa5f7a72d634d443b8bfe8ade5acdb50bd5740460cb6f3a9e833a6",

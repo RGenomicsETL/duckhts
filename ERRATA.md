@@ -1909,6 +1909,22 @@ The same literal-anchor rule applies to deletion and replacement records as to
 insertions. Mismatched anchors and N in the changed payload remain distinct
 validation cases.
 
+Shared suffixes also disappear during minimization. For CDS `ATGACNGCCTAA`,
+genomic position 14 `ACN>ATCN` and position 15 `CN>TCN` both become `-/T`
+at 15–14 and yield `p.Thr2IlefsTer?`, `frameshift_variant`. Position 14
+`ACN>AGTN` instead becomes `C/GT` at 15 and yields `p.Thr2SerfsTer?`.
+The complete uploaded REF must match literally, including N outside the
+checked minimized REF interval on either side. This does not make an N inside
+that interval eligible or minimize equal-length uploaded alleles.
+
+For CDS `ATGNCNGCCTAA`, position 14 `NCN>NN` becomes `C/-` at position 15.
+Its local reference and alternate peptides are both X, but VEP still evaluates
+the frameshift and returns `p.Ala3ProfsTer?`, `frameshift_variant`.
+`hgvs_protein` skips clipping for equal local peptides; `_get_hgvs_protein_type`
+then gives the frameshift predicate precedence, and `_get_fs_peptides` compares
+the downstream translations. Local equality alone does not establish protein
+equality for a frame-changing edit.
+
 For CDS `ATGNNAGCCTAA`, genomic position 13 `G>GAC`, VEP's post-HGVS
 `_get_fs_peptides` produces reference A and alternate X at amino-acid position 3.
 Its formatter converts Xaa to Ter before deciding whether a frameshift starts
@@ -1923,8 +1939,8 @@ observations, diagnostics and reproduction scripts, together with the alternate
 translation-table controls below. Seven fixed predicate cases include an in-frame
 deletion, unavailable coding contrast, start loss, stop loss and terminal partial
 codon; native tests additionally check their reverse-complement orientations.
-The capsule has 106 byte-exact files and SHA256
-`660cd81b5c62ea45dc0c4c2d7deddba671d019ab5a10d7d5a1c7a618091a8dc6`.
+The capsule has 146 byte-exact files and SHA256
+`f20373cc8bbd3c6d729f1409c9aff3681049be57ff82c0c5b685cca63c8e343d`.
 Original receipt pins are
 `396a66d709a0248230a1f1d6e4a4aac45c32a67183efae50036aa8c6c4de05b5`
 for removed REF and
@@ -1935,6 +1951,16 @@ The retained-anchor and immediate-stop diagnostic receipt is
 `2e30edccd140181909cd529d374d4700a997dfcb93adbd6dee2387491f6c8dd5`;
 it retains all 168,000 independent comparison rows from its input checkpoint,
 112 repeated oracle observations, and two direct TVA observations.
+The erased-padding receipt is
+`7c8dea7611c850908ba46800b0f14032f5de54415f3edae1b16575287d7f3202`;
+its 14 original VCF records cover suffix, prefix, both-sided padding, unequal
+replacement, deletion, equal-length and changed-N controls in three models.
+Their actual parser geometry agrees with the native prepared event. The
+geometry probe's source and output are retained, not its compiled executable.
+The equal-local-peptide receipt is
+`df54971ee09344132d2526a17349875a0606a4c4b1bc15113d2fd87eeddd6931`;
+three fresh TVA call orders agree for original records 4, 10 and 14. The
+native fact probe retains its source and output, not its compiled executable.
 These are unsigned diagnostic witnesses,
 not general conformance or claims of an upstream biological defect.
 
@@ -1993,12 +2019,12 @@ The [baseline](test/duckvep/conformance/data/ambiguous_indel_baseline) contains
 [codon-consensus checkpoint](test/duckvep/conformance/data/ambiguous_indel_consensus)
 contains 164,454 HGVSp and 39,024 SO disagreements. The
 [translation/REF-eligibility checkpoint](test/duckvep/conformance/data/ambiguous_indel_translation)
-contains 62,172 HGVSp and zero SO disagreements: 102,282 HGVSp and all 39,024 SO
+contains 44,236 HGVSp and zero SO disagreements: 120,218 HGVSp and all 39,024 SO
 failures from the preceding checkpoint are resolved. The source events, oracle
 expectations and comparison keys are unchanged, with no newly failing comparison.
 **Indel conformance still fails.** Each independent and decoded singleton route
-retains 2,937 HGVSp disagreements; each raw route retains 22,275. Even the
-86,016 canonical-codon controls retain 206 HGVSp disagreements per route.
+retains 353 HGVSp disagreements; each raw route retains 21,059. Even the
+86,016 canonical-codon controls retain 203 HGVSp disagreements per route.
 Raw-mode differences remain under the distinction above. Zero SO disagreements
 in this finite matrix do not certify other transcript structures or compound SO.
 

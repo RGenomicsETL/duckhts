@@ -2,6 +2,10 @@
 
 # duckhts 1.5.1.9000
 
+- validate matching N in shared prefixes and suffixes of minimized indels;
+  preserve changed-allele rejection and check retained-padding geometry;
+  evaluate frameshift translation even when the local peptide pair is equal
+
 - use pinned VEP-116 table-1 alternate translation for frameshift HGVSp while
   retaining transcript-specific reference peptides and coding consequences;
   apply its Xaa-to-Ter formatting before selecting immediate-stop notation

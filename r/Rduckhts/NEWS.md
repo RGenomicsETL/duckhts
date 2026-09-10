@@ -1,6 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
 
+- preserve bundled HGVS for matching N padding on either side of a minimized
+  indel, with exact original-record and reference-mismatch checks; retain
+  frameshift translation when the local peptide pair is equal
+
 - match bundled frameshift HGVSp to pinned VEP-116 alternate translation without
   changing transcript-specific reference or consequence translation; preserve
   its immediate-stop notation when an ambiguous residue is formatted as Ter

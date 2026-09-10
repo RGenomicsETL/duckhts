@@ -2933,6 +2933,77 @@ TEST hgvs_short_alternate_cds_reproduces_vep_trim_assignment(void) {
     PASS();
 }
 
+TEST hgvs_equal_local_peptides_do_not_hide_frameshift(void) {
+    /* Pinned original padding witnesses 4/10/14: ACN>AN, NCN>NN and ACC>AC
+     * at genomic 14 in complete CDS 11..22 models. In witness 10 the local
+     * peptides are X/X, but _get_hgvs_protein_type still selects frameshift;
+     * _get_fs_peptides finds the first full-translation difference at Ala3. */
+    static const struct {
+        const char *cds;
+        const char *reference;
+        const char *alternate;
+        uint8_t local_reference;
+        const char *hgvs;
+    } cases[] = {
+        {"ATGACNGCCTAA", "ACN", "AN", 'T', "p.Thr2Ter"},
+        {"ATGNCNGCCTAA", "NCN", "NN", 'X', "p.Ala3ProfsTer?"},
+        {"ATGACCGCCTAA", "ACC", "AC", 'T', "p.Ala3ProfsTer?"}
+    };
+    static const duckvep_compat_profile_t profiles[] = {DUCKVEP_COMPAT_STRICT, DUCKVEP_COMPAT_VEP_116};
+    for (size_t i = 0u; i < sizeof cases / sizeof cases[0]; i++) {
+        duckvep_event_t event;
+        ASSERT(duckvep_event_prepare_small(14u, (const uint8_t *)cases[i].reference, 3u,
+            (const uint8_t *)cases[i].alternate, 2u, &event));
+        duckvep_haplotype_edit_t edit = {0};
+        edit.cds_start = event.feature_start1 - 10u;
+        edit.ref = (const uint8_t *)cases[i].reference + event.feature_allele_offset;
+        edit.ref_len = event.ref_diff_length;
+        edit.alt = (const uint8_t *)cases[i].alternate + event.feature_allele_offset;
+        edit.alt_len = event.alt_diff_length;
+        edit.variant_strand = 1;
+        duckvep_edit_set_t edits = {&edit, 1u};
+        uint8_t alt_cds[32], ref_peptide[16], alt_peptide[16];
+        duckvep_coding_context_t context;
+        ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK, duckvep_coding_context_build(
+            (const uint8_t *)cases[i].cds, 12u, &edits, 1, DUCKVEP_CODON_TABLE_STANDARD,
+            alt_cds, sizeof alt_cds, ref_peptide, sizeof ref_peptide,
+            alt_peptide, sizeof alt_peptide, &context));
+        context.post_cds_complete = 1u;
+        duckvep_coding_peptide_window_t window;
+        ASSERT(duckvep_coding_context_peptide_window_open(&context, &window));
+        ASSERT_EQ(1u, window.ref_length);
+        ASSERT_EQ(1u, window.alt_length);
+        ASSERT_EQ(cases[i].local_reference,
+            duckvep_coding_context_peptide_window_base(&context, &window, 0, 0u));
+        ASSERT_EQ('X', duckvep_coding_context_peptide_window_base(&context, &window, 1, 0u));
+        duckvep_sequence_delta_t delta;
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK, duckvep_coding_context_delta_fill(&context, 0u, &delta));
+        ASSERT(delta.valid);
+        ASSERT(delta.frameshift);
+        ASSERT_FALSE(delta.stop_retained);
+        for (size_t p = 0u; p < sizeof profiles / sizeof profiles[0]; p++) {
+            context.compatibility_profile = (uint8_t)profiles[p];
+            duckvep_hgvs_protein_fact_t fact;
+            ASSERT_EQ(DUCKVEP_HGVS_OK, duckvep_hgvs_protein_fact_build(&context, &delta, &fact));
+            ASSERT_EQ(window.ref_length, fact.window.ref_length);
+            ASSERT_EQ(window.alt_length, fact.window.alt_length);
+            if (i == 1u) {
+                ASSERT_EQ(DUCKVEP_HGVS_PROTEIN_FRAMESHIFT, fact.shape);
+                ASSERT_EQ(3u, fact.first_position1);
+                ASSERT_EQ('A', fact.reference_first);
+                ASSERT_EQ('P', fact.alternate_first);
+            }
+            char rendered[64];
+            size_t required;
+            ASSERT_EQ(DUCKVEP_HGVS_OK,
+                duckvep_hgvs_protein_render(&fact, 0, rendered, sizeof rendered, &required));
+            ASSERT_STR_EQ(i == 0u && profiles[p] == DUCKVEP_COMPAT_STRICT
+                ? "p.Thr2XaafsTer?" : cases[i].hgvs, rendered);
+        }
+    }
+    PASS();
+}
+
 TEST hgvs_frameshift_xaa_immediate_stop_is_compatibility_policy(void) {
     /* Original VEP event 32261: ATGNNAGCCTAA, genomic 13 G>GAC.
      * Its actual HGVS shift produces ATGNCANAGCCTAA; _get_fs_peptides
@@ -3404,6 +3475,125 @@ TEST hgvs_uploaded_reference_validates_vcf_anchor_and_padding(void) {
         event.chrom_id = reference.chrom_id;
         ASSERT_EQ(DUCKVEP_HGVS_INVALID_ALLELE, duckvep_hgvs_uploaded_reference_validate(
             &reference, &event, reference.bases, reference.length));
+    }
+    /* Actual VEP 116 Parser.pm::minimise_alleles observations: ACN>ATCN
+     * erases CN, not just N. ACN>AGTN keeps C/GT. Both ends may contain N. */
+    static const struct {
+        const char *reference;
+        const char *alternate;
+        uint16_t offset;
+        uint16_t ref_length;
+        uint16_t alt_length;
+    } padding[] = {
+        {"ACN", "ATCN", 1u, 0u, 1u},
+        {"CN", "TCN", 0u, 0u, 1u},
+        {"ACN", "AGTN", 1u, 1u, 2u},
+        {"ACN", "AN", 1u, 1u, 0u},
+        {"N", "NT", 1u, 0u, 1u},
+        {"NCN", "NTCN", 1u, 0u, 1u},
+        {"NCN", "NGTN", 1u, 1u, 2u},
+        {"NCN", "NN", 1u, 1u, 0u}
+    };
+    for (size_t i = 0u; i < sizeof padding / sizeof padding[0]; i++) {
+        reference.bases = (const uint8_t *)padding[i].reference;
+        reference.length = strlen(padding[i].reference);
+        ASSERT(duckvep_event_prepare_small(124u, reference.bases,
+            (uint16_t)reference.length, (const uint8_t *)padding[i].alternate,
+            (uint16_t)strlen(padding[i].alternate), &event));
+        event.chrom_id = reference.chrom_id;
+        ASSERT_EQ(padding[i].offset, event.feature_allele_offset);
+        ASSERT_EQ(padding[i].ref_length, event.ref_diff_length);
+        ASSERT_EQ(padding[i].alt_length, event.alt_diff_length);
+        ASSERT_EQ(DUCKVEP_HGVS_OK, duckvep_hgvs_uploaded_reference_validate(
+            &reference, &event, reference.bases, reference.length));
+        event.feature_allele_offset = (uint16_t)(reference.length + 1u);
+        ASSERT_EQ(DUCKVEP_HGVS_INVALID_ARG, duckvep_hgvs_uploaded_reference_validate(
+            &reference, &event, reference.bases, reference.length));
+        event.feature_allele_offset = (uint16_t)reference.length;
+        event.ref_diff_length = 1u;
+        event.alt_diff_length = 2u;
+        ASSERT_EQ(DUCKVEP_HGVS_INVALID_ARG, duckvep_hgvs_uploaded_reference_validate(
+            &reference, &event, reference.bases, reference.length));
+    }
+    PASS();
+}
+
+TEST hgvs_uploaded_reference_padding_enumeration(void) {
+    /* Independent construction: shared A/G/N padding surrounds canonical
+     * differing payloads. Their disjoint alphabets fix the expected interval
+     * without asking native preparation to supply the expectation. Reverse
+     * complements exchange prefix/suffix roles, including right anchors. */
+    static const char *prefixes[] = {"", "A", "N", "AN", "NA", "NN", "AAN", "NAA"};
+    static const char *suffixes[] = {"", "G", "N", "GN", "NG", "NN", "GGN", "NGG"};
+    static const struct {
+        const char *reference;
+        const char *alternate;
+    } payloads[] = {{"", "C"}, {"C", ""}, {"C", "TT"}, {"CC", "T"}};
+    size_t cases = 0u;
+    for (size_t p = 0u; p < sizeof prefixes / sizeof prefixes[0]; p++) {
+        for (size_t s = 0u; s < sizeof suffixes / sizeof suffixes[0]; s++) {
+            if (!p && !s) continue; /* Original VCF REF and ALT must be nonempty. */
+            for (size_t shape = 0u; shape < sizeof payloads / sizeof payloads[0]; shape++) {
+                char ref[16], alt[16];
+                snprintf(ref, sizeof ref, "%s%s%s", prefixes[p], payloads[shape].reference, suffixes[s]);
+                snprintf(alt, sizeof alt, "%s%s%s", prefixes[p], payloads[shape].alternate, suffixes[s]);
+                size_t ref_length = strlen(ref), alt_length = strlen(alt);
+                for (int reverse = 0; reverse < 2; reverse++) {
+                    uint8_t uploaded[16], alternate[16], genome[16];
+                    for (size_t i = 0u; i < ref_length; i++) {
+                        uploaded[i] = reverse ? (uint8_t)kprop_complement_base(ref[ref_length - 1u - i])
+                            : (uint8_t)ref[i];
+                    }
+                    for (size_t i = 0u; i < alt_length; i++) {
+                        alternate[i] = reverse ? (uint8_t)kprop_complement_base(alt[alt_length - 1u - i])
+                            : (uint8_t)alt[i];
+                    }
+                    memcpy(genome, uploaded, ref_length);
+                    duckvep_hgvs_reference_window_t reference = {genome, ref_length, 124u, 1u};
+                    duckvep_event_t event;
+                    ASSERT(duckvep_event_prepare_small(124u, uploaded, (uint16_t)ref_length,
+                        alternate, (uint16_t)alt_length, &event));
+                    event.chrom_id = reference.chrom_id;
+                    ASSERT_EQ(strlen(reverse ? suffixes[s] : prefixes[p]), event.feature_allele_offset);
+                    ASSERT_EQ(strlen(payloads[shape].reference), event.ref_diff_length);
+                    ASSERT_EQ(strlen(payloads[shape].alternate), event.alt_diff_length);
+                    ASSERT_EQ(DUCKVEP_HGVS_OK, duckvep_hgvs_uploaded_reference_validate(
+                        &reference, &event, uploaded, ref_length));
+                    for (size_t i = 0u; i < ref_length; i++) {
+                        genome[i] = uploaded[i] == (uint8_t)'A' ? (uint8_t)'C' : (uint8_t)'A';
+                        ASSERT_EQ(DUCKVEP_HGVS_REFERENCE_MISMATCH, duckvep_hgvs_uploaded_reference_validate(
+                            &reference, &event, uploaded, ref_length));
+                        genome[i] = uploaded[i];
+                    }
+                    /* The same unminimized replacement has no erased padding;
+                     * it cannot borrow the independent-event N permission. */
+                    ASSERT(duckvep_event_prepare_replacement(124u, uploaded, (uint16_t)ref_length,
+                        alternate, (uint16_t)alt_length, &event));
+                    event.chrom_id = reference.chrom_id;
+                    ASSERT_EQ(memchr(uploaded, 'N', ref_length) ? DUCKVEP_HGVS_INVALID_ALLELE : DUCKVEP_HGVS_OK,
+                        duckvep_hgvs_uploaded_reference_validate(&reference, &event, uploaded, ref_length));
+                    cases++;
+                }
+            }
+        }
+    }
+    ASSERT_EQ(504u, cases);
+    /* N inside the differing interval, equal-length shared N padding, and
+     * other ambiguous symbols are not licensed by prefix/suffix minimization. */
+    static const struct {
+        const char *reference;
+        const char *alternate;
+    } invalid[] = {{"ANC", "AC"}, {"ACN", "ATN"}, {"NCN", "NTN"},
+        {"ACR", "ATCR"}, {"RCA", "RTA"}};
+    for (size_t i = 0u; i < sizeof invalid / sizeof invalid[0]; i++) {
+        const uint8_t *ref = (const uint8_t *)invalid[i].reference;
+        duckvep_hgvs_reference_window_t reference = {ref, strlen(invalid[i].reference), 124u, 1u};
+        duckvep_event_t event;
+        ASSERT(duckvep_event_prepare_small(124u, ref, (uint16_t)reference.length,
+            (const uint8_t *)invalid[i].alternate, (uint16_t)strlen(invalid[i].alternate), &event));
+        event.chrom_id = reference.chrom_id;
+        ASSERT_EQ(DUCKVEP_HGVS_INVALID_ALLELE, duckvep_hgvs_uploaded_reference_validate(
+            &reference, &event, ref, reference.length));
     }
     PASS();
 }

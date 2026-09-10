@@ -218,3 +218,61 @@ Pass `--extension-receipt PATH` and the listed `--transcripts`,
 `--samples`, `--overlap` and `--modes` to each invocation. Preserve
 every result and receipt; do not append a campaign that fails the
 historical full-output check.
+
+## Canonical workload at the translation checkpoint
+
+Source `52ce78513b3f5f7c2a46fe82dc44dd458333092b` is compared with the
+matched `20efcf2af33b38c5be7596e2db7b243a3be53c47` workload: 1,024
+transcripts, 64 samples, 16 overlapping transcripts, 256 physical events
+and 262,144 candidate/sample input rows. Both runs use one thread on CPU
+2, DuckDB 1.5.3 and three fresh-process timed passes. No DuckHTS test or
+conformance jobs ran concurrently with this checkpoint’s timers; other
+shared-host activity was not controlled.
+
+| mode                | input_candidate_sample_rows | output_leaves | output_carriers | baseline_median_s | checkpoint_median_s | checkpoint_max_rss_mib |
+|:--------------------|----------------------------:|:--------------|:----------------|------------------:|--------------------:|-----------------------:|
+| native              |                      262144 | 3072          | 114688          |          0.017662 |            0.017174 |               73.69531 |
+| sql                 |                      262144 | 3072          | 114688          |          0.348000 |            0.346000 |              378.93750 |
+| sql_records         |                      262144 | 4096          | 131072          |          0.730000 |            0.731000 |              611.99219 |
+| sql_singletons      |                      262144 | 4096          | 65536           |          0.347000 |            0.343000 |              411.19531 |
+| sql_singletons_hgvs |                      262144 | 4096          | 65536           |          0.349000 |            0.353000 |              408.82812 |
+
+All 15 matched rows have identical non-timing result fields, including
+every SQL full-output fingerprint, output denominator and native
+workspace/count metric. The [15 checkpoint
+observations](data/duckvep_haplotypes_indel_translation.csv) retain
+individual passes. The [177-file evidence
+capsule](data/duckvep_haplotypes_indel_translation.jsonl.gz) retains
+both runs’ original worker jobs, results, logs, process-time reports,
+benchmark receipts and FASTA/index pairs, both clean-build receipts, the
+registered fixtures and the unchanged driver. Rendering verifies every
+retained file against its receipt before comparing actual jobs and
+results. It requires complete job semantics to agree across revisions,
+excluding only the explicitly checked correctness flag and named
+binary/output/reference-file paths. All 40 result objects are checked
+for within-mode repeatability; all timed values and RSS measurements are
+bound to the corresponding ledger rows. Twenty job-mutation controls
+reject changed sample counts or event alleles. Original paths remain
+identifiers only; rendering does not reopen historical files.
+
+Compiled extension and native-bridge payloads are not included in this
+capsule; their identities are retained and checked through the original
+receipts. The checkpoint extension SHA-256 is
+`0217585b75ac7277794590b7f714b85eb942667a1705ea87a31021faa7833ab5`.
+These are unsigned local source-bound measurements. The historical
+unequal-output comparison and its complete-output controls remain
+separate and unchanged.
+
+This canonical table-1 workload measures shared replay and
+singleton-HGVS paths. It does not measure the newly accepted N-bearing
+REF or nonstandard-codon-table branches. Three passes on a shared host
+do not establish statistical significance, causality or a general
+absence of regression. Reproduce with the clean-build receipt procedure
+above and this command:
+
+``` bash
+Rscript benchmarks/duckvep_haplotypes.R \
+  --transcripts 1024 --samples 64 --overlap 16 --passes 3 --cpu 2 \
+  --modes native,sql,sql_records,sql_singletons,sql_singletons_hgvs \
+  --extension-receipt /tmp/duckhts-indel-52ce785-extension.tsv
+```

@@ -472,3 +472,203 @@ knitr::kable(workloads, row.names = FALSE)
 Pass `--extension-receipt PATH` and the listed `--transcripts`, `--samples`,
 `--overlap` and `--modes` to each invocation. Preserve every result and receipt;
 do not append a campaign that fails the historical full-output check.
+
+## Canonical workload at the translation checkpoint
+
+```{r translation-checkpoint, include=FALSE}
+translation <- read.csv(file.path(root, "benchmarks/data/duckvep_haplotypes_indel_translation.csv"),
+  colClasses = "character")
+translation_previous <- current[current$transcripts == "1024" & current$samples == "64" &
+  current$overlap == "16", ]
+translation_modes <- c("native", "sql", "sql_records", "sql_singletons", "sql_singletons_hgvs")
+stopifnot(identical(names(translation), names(current)), nrow(translation) == 15L,
+  nrow(translation_previous) == 15L, !anyDuplicated(translation[keys]),
+  all(translation$source_revision == "52ce78513b3f5f7c2a46fe82dc44dd458333092b"),
+  all(translation$extension_sha256 ==
+    "0217585b75ac7277794590b7f714b85eb942667a1705ea87a31021faa7833ab5"))
+
+check_translation_job <- function(job, mode, pass, original_directory, receipt, fixture) {
+  stopifnot(identical(names(job), c("transcripts", "samples", "overlap", "mode", "verify",
+      "input", "extension", "shared", "reference_fasta", "reference_length", "result")),
+    identical(job$transcripts, 1024L), identical(job$samples, 64L), identical(job$overlap, 16L),
+    identical(job$mode, mode), identical(job$verify, pass == 0L),
+    identical(job$input$reference, fixture$reference), identical(job$input$events, fixture$events),
+    identical(job$reference_length, 64099L),
+    identical(job$reference_fasta, file.path(original_directory, "reference.fa")),
+    identical(job$shared, file.path(original_directory, "stream.so")),
+    identical(job$result, file.path(original_directory, paste0(mode, "_", pass, ".rds"))))
+  recorded_hash(receipt$sha256, job$extension)
+  job[setdiff(names(job), c("verify", "extension", "shared", "reference_fasta", "result"))]
+}
+
+audit_translation_checkpoint <- function() {
+  sha256 <- function(path) digest::digest(file = path, algo = "sha256")
+  directory <- tempfile("duckhts-translation-benchmark-")
+  stopifnot(dir.create(directory))
+  on.exit(unlink(directory, recursive = TRUE), add = TRUE)
+  extract_audit_bundle(file.path(root, "benchmarks/data/duckvep_haplotypes_indel_translation.jsonl.gz"),
+    "61ece03ac6673e2877e8fcf1e3b83cdf990fb3598d1fac468721675323c45688", 177L, directory)
+  fixture_paths <- file.path(directory, "fixtures", c("reference.fa", "events.tsv"))
+  fasta <- readLines(fixture_paths[1L])
+  stopifnot(length(fasta) == 2L, nchar(fasta[2L]) == 180L)
+  fixture <- list(reference = fasta[2L], events = read.delim(fixture_paths[2L]))
+  driver_hash <- sha256(file.path(directory, "source/duckvep_haplotypes.R"))
+  stopifnot(driver_hash == "b53ba0692c077953884e3c435d4be42094e1f682a4ea3f250e8366485bc04775")
+  jobs <- receipts <- list()
+  for (side in c("baseline", "current")) {
+    path <- file.path(directory, side)
+    ledger <- if (side == "baseline") translation_previous else translation
+    receipt <- jsonlite::fromJSON(file.path(path, "receipt.json"))
+    receipts[[side]] <- receipt
+    stopifnot(all(ledger$receipt_sha256 == sha256(file.path(path, "receipt.json"))),
+      all(ledger$source_revision == receipt$source_revision),
+      all(ledger$extension_build_binding == "htslib_distclean_make_release"),
+      identical(receipt$extension_build_binding, "htslib_distclean_make_release"),
+      identical(receipt$options[c("transcripts", "samples", "overlap", "passes", "cpu", "modes",
+        "diagnostic")], list(transcripts = 1024L, samples = 64L, overlap = 16L, passes = 3L,
+          cpu = 2L, modes = paste(translation_modes, collapse = ","), diagnostic = FALSE)))
+    result_path <- names(receipt$sha256)[endsWith(names(receipt$sha256), "/results.csv")]
+    stopifnot(length(result_path) == 1L)
+    original_directory <- dirname(result_path)
+    stopifnot(all(endsWith(original_directory, paste0("/", ledger$artifact_directory))))
+    original_files <- names(receipt$sha256)[startsWith(names(receipt$sha256),
+      paste0(original_directory, "/"))]
+    stopifnot(!anyDuplicated(basename(original_files)),
+      setequal(list.files(path), c("receipt.json", setdiff(basename(original_files), "stream.so"))))
+    for (name in setdiff(list.files(path), "receipt.json")) {
+      stopifnot(sha256(file.path(path, name)) ==
+        recorded_hash(receipt$sha256, file.path(original_directory, name)))
+    }
+    for (i in seq_along(fixture_paths)) {
+      original <- names(receipt$sha256)[endsWith(names(receipt$sha256),
+        paste0("/duckvep-haplotypes/", basename(fixture_paths[i])))]
+      field <- c("reference_sha256", "events_sha256")[i]
+      stopifnot(length(original) == 1L,
+        sha256(fixture_paths[i]) == recorded_hash(receipt$sha256, original),
+        all(ledger[[field]] == sha256(fixture_paths[i])))
+    }
+    original_driver <- names(receipt$sha256)[endsWith(names(receipt$sha256),
+      "benchmarks/duckvep_haplotypes.R")]
+    stopifnot(length(original_driver) == 1L,
+      recorded_hash(receipt$sha256, original_driver) == driver_hash,
+      identical(readLines(file.path(path, "reference.fa")),
+        c(">bench", paste0(strrep("A", 99L), strrep(paste0(fixture$reference, strrep("A", 820L)), 64L)))))
+    build <- read.delim(file.path(directory, "build", paste0(side, ".tsv")), colClasses = "character")
+    stopifnot(identical(names(build), c("field", "value")),
+      identical(build$field, c("source_revision", "path", "binding", "sha256")))
+    build <- setNames(build$value, build$field)
+    stopifnot(build[["source_revision"]] == receipt$source_revision,
+      build[["binding"]] == receipt$extension_build_binding,
+      build[["sha256"]] == recorded_hash(receipt$sha256, build[["path"]]),
+      all(ledger$extension_sha256 == build[["sha256"]]),
+      all(ledger$native_binary_sha256 == recorded_hash(receipt$sha256,
+        file.path(original_directory, "stream.so"))))
+    measured <- read.csv(file.path(path, "results.csv"), colClasses = "character")
+    stopifnot(nrow(measured) == 15L, !anyDuplicated(measured[keys]))
+    measured <- measured[do.call(order, measured[keys]), ]
+    ledger <- ledger[do.call(order, ledger[keys]), ]
+    rownames(measured) <- rownames(ledger) <- NULL
+    stopifnot(identical(measured, ledger[names(measured)]))
+    jobs[[side]] <- list()
+    for (mode in translation_modes) {
+      first <- NULL
+      for (pass in 0:3) {
+        stem <- paste0(mode, "_", pass)
+        job <- readRDS(file.path(path, paste0(stem, "_job.rds")))
+        semantic <- check_translation_job(job, mode, pass, original_directory, receipt, fixture)
+        stopifnot(identical(job$extension, build[["path"]]))
+        jobs[[side]][[stem]] <- semantic
+        value <- readRDS(file.path(path, paste0(stem, ".rds")))
+        non_timing <- value[setdiff(names(value), "seconds")]
+        if (pass == 0L) first <- non_timing else stopifnot(identical(non_timing, first))
+        if (pass != 0L) {
+          row <- ledger[ledger$mode == mode & ledger$pass == pass, ]
+          stopifnot(nrow(row) == 1L)
+          for (field in names(value)) stopifnot(identical(as.character(value[[field]]), row[[field]]))
+          timing <- readLines(file.path(path, paste0(stem, "_time.txt")))
+          rss <- sub(".*: ", "", timing[grepl("Maximum resident set size", timing, fixed = TRUE)])
+          stopifnot(identical(rss, row$peak_process_rss_kib))
+        }
+        if (pass == 0L) for (field in c("samples", "events")) {
+          changed <- job
+          if (field == "samples") changed$samples <- 65L else changed$input$events$alternate[1L] <- "T"
+          rejected <- tryCatch({
+            check_translation_job(changed, mode, pass, original_directory, receipt, fixture)
+            FALSE
+          }, error = function(e) TRUE)
+          stopifnot(rejected)
+        }
+      }
+    }
+  }
+  stopifnot(identical(jobs$baseline, jobs$current),
+    identical(receipts$baseline$compiler, receipts$current$compiler),
+    identical(receipts$baseline$compiler_flags, receipts$current$compiler_flags))
+  invisible(TRUE)
+}
+audit_translation_checkpoint()
+translation <- translation[do.call(order, translation[keys]), ]
+translation_previous <- translation_previous[do.call(order, translation_previous[keys]), ]
+rownames(translation) <- rownames(translation_previous) <- NULL
+stopifnot(identical(translation[setdiff(names(translation), measurement_fields)],
+  translation_previous[setdiff(names(translation_previous), measurement_fields)]),
+  all(translation$threads == "1"), all(translation$cpu_affinity == "2"),
+  all(translation$duckdb_version[translation$mode != "native"] == "1.5.3"),
+  all(is.finite(as.numeric(translation$seconds))), all(as.numeric(translation$seconds) > 0))
+translation_summary <- do.call(rbind, lapply(translation_modes, function(mode) {
+  after <- translation[translation$mode == mode, ]
+  before <- translation_previous[translation_previous$mode == mode, ]
+  stopifnot(identical(sort(after$pass), c("1", "2", "3")))
+  data.frame(mode, input_candidate_sample_rows = 262144L,
+    output_leaves = after$output_leaves[1L], output_carriers = after$output_carriers[1L],
+    baseline_median_s = median(as.numeric(before$seconds)),
+    checkpoint_median_s = median(as.numeric(after$seconds)),
+    checkpoint_max_rss_mib = max(as.numeric(after$peak_process_rss_kib)) / 1024)
+}))
+```
+
+Source `52ce78513b3f5f7c2a46fe82dc44dd458333092b` is compared with the matched
+`20efcf2af33b38c5be7596e2db7b243a3be53c47` workload: 1,024 transcripts, 64 samples,
+16 overlapping transcripts, 256 physical events and 262,144 candidate/sample input rows.
+Both runs use one thread on CPU 2, DuckDB 1.5.3 and three fresh-process timed passes.
+No DuckHTS test or conformance jobs ran concurrently with this checkpoint's
+timers; other shared-host activity was not controlled.
+
+```{r translation-timing}
+knitr::kable(translation_summary, digits = 6, row.names = FALSE)
+```
+
+All 15 matched rows have identical non-timing result fields, including every SQL
+full-output fingerprint, output denominator and native workspace/count metric.
+The [15 checkpoint observations](data/duckvep_haplotypes_indel_translation.csv)
+retain individual passes. The [177-file evidence capsule](data/duckvep_haplotypes_indel_translation.jsonl.gz)
+retains both runs' original worker jobs, results, logs, process-time reports,
+benchmark receipts and FASTA/index pairs, both clean-build receipts, the registered
+fixtures and the unchanged driver. Rendering verifies every retained file against
+its receipt before comparing actual jobs and results. It requires complete job
+semantics to agree across revisions, excluding only the explicitly checked
+correctness flag and named binary/output/reference-file paths. All 40 result
+objects are checked for within-mode repeatability; all timed values and RSS
+measurements are bound to the corresponding ledger rows. Twenty job-mutation
+controls reject changed sample counts or event alleles. Original paths remain
+identifiers only; rendering does not reopen historical files.
+
+Compiled extension and native-bridge payloads are not included in this capsule;
+their identities are retained and checked through the original receipts. The
+checkpoint extension SHA-256 is
+`0217585b75ac7277794590b7f714b85eb942667a1705ea87a31021faa7833ab5`.
+These are unsigned local source-bound measurements. The historical unequal-output
+comparison and its complete-output controls remain separate and unchanged.
+
+This canonical table-1 workload measures shared replay and singleton-HGVS paths.
+It does not measure the newly accepted N-bearing REF or nonstandard-codon-table
+branches. Three passes on a shared host do not establish statistical significance,
+causality or a general absence of regression. Reproduce with the clean-build
+receipt procedure above and this command:
+
+```{bash translation-reproduction, eval=FALSE, echo=TRUE}
+Rscript benchmarks/duckvep_haplotypes.R \
+  --transcripts 1024 --samples 64 --overlap 16 --passes 3 --cpu 2 \
+  --modes native,sql,sql_records,sql_singletons,sql_singletons_hgvs \
+  --extension-receipt /tmp/duckhts-indel-52ce785-extension.tsv
+```
