@@ -221,20 +221,22 @@ historical full-output check.
 
 ## Canonical workload at the translation checkpoints
 
-Sources `52ce78513b3f5f7c2a46fe82dc44dd458333092b` and
-`de3d008004f615c198a422a42a773bd7c9de0b70` each use the nearest recorded
+Sources `52ce78513b3f5f7c2a46fe82dc44dd458333092b`,
+`de3d008004f615c198a422a42a773bd7c9de0b70` and
+`d6d188da54f0a0cf97ec74244243ebad251194f5` each use the nearest recorded
 identical workload as their timing baseline:
-`20efcf2af33b38c5be7596e2db7b243a3be53c47` for `52ce785`, and `52ce785`
-for `de3d008`. The workload has 1,024 transcripts, 64 samples, 16
-overlapping transcripts, 256 physical events and 262,144
-candidate/sample input rows. All three runs use one thread on CPU 2,
-DuckDB 1.5.3 and three fresh-process timed passes. No DuckHTS test or
-conformance jobs ran concurrently with the `52ce785` timers. The
-`de3d008` campaign ran from 00:59:19 to 00:59:59 +0200 on September 11,
-2026; a previously launched small read-only classification/oracle
-diagnostic completed at 01:00:01, so concurrent diagnostic activity
-cannot be excluded. This measured run is retained without replacement.
-Other shared-host activity was not controlled.
+`20efcf2af33b38c5be7596e2db7b243a3be53c47` for `52ce785`, `52ce785` for
+`de3d008`, and `de3d008` for `d6d188d`. The workload has 1,024
+transcripts, 64 samples, 16 overlapping transcripts, 256 physical events
+and 262,144 candidate/sample input rows. All four runs use one thread on
+CPU 2, DuckDB 1.5.3 and three fresh-process timed passes. No DuckHTS
+test or conformance jobs ran concurrently with the `52ce785` timers. No
+DuckHTS build, test, conformance or diagnostic jobs overlapped the
+`d6d188d` timers. The `de3d008` campaign ran from 00:59:19 to 00:59:59
++0200 on September 11, 2026; a previously launched small read-only
+classification/oracle diagnostic completed at 01:00:01, so concurrent
+diagnostic activity cannot be excluded. This measured run is retained
+without replacement. Other shared-host activity was not controlled.
 
 | revision | baseline_revision | mode                | input_candidate_sample_rows | output_leaves | output_carriers | baseline_median_s | checkpoint_median_s | checkpoint_max_rss_mib |
 |:---------|:------------------|:--------------------|----------------------------:|:--------------|:----------------|------------------:|--------------------:|-----------------------:|
@@ -248,30 +250,34 @@ Other shared-host activity was not controlled.
 | de3d008  | 52ce785           | sql_records         |                      262144 | 4096          | 131072          |          0.731000 |            0.734000 |              612.45703 |
 | de3d008  | 52ce785           | sql_singletons      |                      262144 | 4096          | 65536           |          0.343000 |            0.343000 |              409.75391 |
 | de3d008  | 52ce785           | sql_singletons_hgvs |                      262144 | 4096          | 65536           |          0.353000 |            0.348000 |              409.91797 |
+| d6d188d  | de3d008           | native              |                      262144 | 3072          | 114688          |          0.017235 |            0.017650 |               73.85156 |
+| d6d188d  | de3d008           | sql                 |                      262144 | 3072          | 114688          |          0.344000 |            0.347000 |              378.92188 |
+| d6d188d  | de3d008           | sql_records         |                      262144 | 4096          | 131072          |          0.734000 |            0.738000 |              611.44922 |
+| d6d188d  | de3d008           | sql_singletons      |                      262144 | 4096          | 65536           |          0.343000 |            0.342000 |              411.05078 |
+| d6d188d  | de3d008           | sql_singletons_hgvs |                      262144 | 4096          | 65536           |          0.348000 |            0.348000 |              410.01953 |
 
 Each checkpoint’s 15 matched rows have identical non-timing result
 fields, including every SQL full-output fingerprint, output denominator
-and native workspace/count metric. The [30 checkpoint
+and native workspace/count metric. The [45 checkpoint
 observations](data/duckvep_haplotypes_indel_translation.csv) retain
-individual passes. The [264-file evidence
+individual passes. The [351-file evidence
 capsule](data/duckvep_haplotypes_indel_translation.jsonl.gz) retains all
-three runs’ original worker jobs, results, logs, process-time reports,
-benchmark receipts and FASTA/index pairs, all three clean-build
-receipts, the registered fixtures and the unchanged driver. Rendering
-verifies every retained file against its receipt before comparing actual
-jobs and results. It requires complete job semantics to agree across
-revisions, excluding only the explicitly checked correctness flag and
-named binary/output/reference-file paths. All 60 result objects are
-checked for within-mode repeatability; all timed values and RSS
-measurements are bound to the corresponding ledger rows. Thirty
-job-mutation controls reject changed sample counts or event alleles.
-Original paths remain identifiers only; rendering does not reopen
-historical files.
+four runs’ original worker jobs, results, logs, process-time reports,
+benchmark receipts and FASTA/index pairs, all four clean-build receipts,
+the registered fixtures and the unchanged driver. Rendering verifies
+every retained file against its receipt before comparing actual jobs and
+results. It requires complete job semantics to agree across revisions,
+excluding only the explicitly checked correctness flag and named
+binary/output/reference-file paths. All 80 result objects are checked
+for within-mode repeatability; all timed values and RSS measurements are
+bound to the corresponding ledger rows. Forty job-mutation controls
+reject changed sample counts or event alleles. Original paths remain
+identifiers only; rendering does not reopen historical files.
 
 Compiled extension and native-bridge payloads are not included in this
 capsule; their identities are retained and checked through the original
-receipts. The `de3d008` extension SHA-256 is
-`cb34f65f738f5d26ce5b849bbcf9628e95db180e62a199a153aacbdac44f25b0`.
+receipts. The `d6d188d` extension SHA-256 is
+`2563543e63566c24872a9f8c5a6db4a12871bd8b58e9f99e9f5a87672b3dd565`.
 These are unsigned local source-bound measurements. The historical
 unequal-output comparison and its complete-output controls remain
 separate and unchanged. The checkpoint comparisons establish fingerprint
@@ -288,5 +294,5 @@ above and this command:
 Rscript benchmarks/duckvep_haplotypes.R \
   --transcripts 1024 --samples 64 --overlap 16 --passes 3 --cpu 2 \
   --modes native,sql,sql_records,sql_singletons,sql_singletons_hgvs \
-  --extension-receipt /tmp/duckhts-indel-de3d008-extension.tsv
+  --extension-receipt /tmp/duckhts-indel-d6d188d-evidence.0aBmKK/extension.tsv
 ```

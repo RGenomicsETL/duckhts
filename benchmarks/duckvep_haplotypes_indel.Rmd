@@ -486,11 +486,13 @@ stopifnot(identical(names(translation), names(current)),
   nrow(translation) == 15L * length(translation_revisions),
   nrow(translation_previous) == 15L, !anyDuplicated(translation[c("source_revision", keys)]),
   identical(translation_revisions, c("52ce78513b3f5f7c2a46fe82dc44dd458333092b",
-    "de3d008004f615c198a422a42a773bd7c9de0b70")),
+    "de3d008004f615c198a422a42a773bd7c9de0b70", "d6d188da54f0a0cf97ec74244243ebad251194f5")),
   all(translation$extension_sha256[translation$source_revision == translation_revisions[1L]] ==
     "0217585b75ac7277794590b7f714b85eb942667a1705ea87a31021faa7833ab5"),
   all(translation$extension_sha256[translation$source_revision == translation_revisions[2L]] ==
-    "cb34f65f738f5d26ce5b849bbcf9628e95db180e62a199a153aacbdac44f25b0"))
+    "cb34f65f738f5d26ce5b849bbcf9628e95db180e62a199a153aacbdac44f25b0"),
+  all(translation$extension_sha256[translation$source_revision == translation_revisions[3L]] ==
+    "2563543e63566c24872a9f8c5a6db4a12871bd8b58e9f99e9f5a87672b3dd565"))
 
 check_translation_job <- function(job, mode, pass, original_directory, receipt, fixture) {
   stopifnot(identical(names(job), c("transcripts", "samples", "overlap", "mode", "verify",
@@ -512,7 +514,7 @@ audit_translation_checkpoint <- function() {
   stopifnot(dir.create(directory))
   on.exit(unlink(directory, recursive = TRUE), add = TRUE)
   extract_audit_bundle(file.path(root, "benchmarks/data/duckvep_haplotypes_indel_translation.jsonl.gz"),
-    "906fb60f01ec02ab1bf3f43c0d5451a40634457166c7f9e412e55155bf623037", 264L, directory)
+    "2f189dcf4e6d0e1ccb6d3e2fb606610ccd002dfb966ea47480ead23319c8819e", 351L, directory)
   fixture_paths <- file.path(directory, "fixtures", c("reference.fa", "events.tsv"))
   fasta <- readLines(fixture_paths[1L])
   stopifnot(length(fasta) == 2L, nchar(fasta[2L]) == 180L)
@@ -656,13 +658,16 @@ translation_summary <- do.call(rbind, lapply(translation_revisions, function(sou
 }))
 ```
 
-Sources `52ce78513b3f5f7c2a46fe82dc44dd458333092b` and
-`de3d008004f615c198a422a42a773bd7c9de0b70` each use the nearest recorded identical
+Sources `52ce78513b3f5f7c2a46fe82dc44dd458333092b`,
+`de3d008004f615c198a422a42a773bd7c9de0b70` and
+`d6d188da54f0a0cf97ec74244243ebad251194f5` each use the nearest recorded identical
 workload as their timing baseline: `20efcf2af33b38c5be7596e2db7b243a3be53c47`
-for `52ce785`, and `52ce785` for `de3d008`. The workload has 1,024 transcripts, 64 samples,
+for `52ce785`, `52ce785` for `de3d008`, and `de3d008` for `d6d188d`.
+The workload has 1,024 transcripts, 64 samples,
 16 overlapping transcripts, 256 physical events and 262,144 candidate/sample input rows.
-All three runs use one thread on CPU 2, DuckDB 1.5.3 and three fresh-process timed passes.
+All four runs use one thread on CPU 2, DuckDB 1.5.3 and three fresh-process timed passes.
 No DuckHTS test or conformance jobs ran concurrently with the `52ce785` timers.
+No DuckHTS build, test, conformance or diagnostic jobs overlapped the `d6d188d` timers.
 The `de3d008` campaign ran from 00:59:19 to 00:59:59 +0200 on September 11, 2026;
 a previously launched small read-only classification/oracle diagnostic completed
 at 01:00:01, so concurrent diagnostic activity cannot be excluded. This measured
@@ -674,23 +679,23 @@ knitr::kable(translation_summary, digits = 6, row.names = FALSE)
 
 Each checkpoint's 15 matched rows have identical non-timing result fields, including every SQL
 full-output fingerprint, output denominator and native workspace/count metric.
-The [30 checkpoint observations](data/duckvep_haplotypes_indel_translation.csv)
-retain individual passes. The [264-file evidence capsule](data/duckvep_haplotypes_indel_translation.jsonl.gz)
-retains all three runs' original worker jobs, results, logs, process-time reports,
-benchmark receipts and FASTA/index pairs, all three clean-build receipts, the registered
+The [45 checkpoint observations](data/duckvep_haplotypes_indel_translation.csv)
+retain individual passes. The [351-file evidence capsule](data/duckvep_haplotypes_indel_translation.jsonl.gz)
+retains all four runs' original worker jobs, results, logs, process-time reports,
+benchmark receipts and FASTA/index pairs, all four clean-build receipts, the registered
 fixtures and the unchanged driver. Rendering verifies every retained file against
 its receipt before comparing actual jobs and results. It requires complete job
 semantics to agree across revisions, excluding only the explicitly checked
-correctness flag and named binary/output/reference-file paths. All 60 result
+correctness flag and named binary/output/reference-file paths. All 80 result
 objects are checked for within-mode repeatability; all timed values and RSS
-measurements are bound to the corresponding ledger rows. Thirty job-mutation
+measurements are bound to the corresponding ledger rows. Forty job-mutation
 controls reject changed sample counts or event alleles. Original paths remain
 identifiers only; rendering does not reopen historical files.
 
 Compiled extension and native-bridge payloads are not included in this capsule;
 their identities are retained and checked through the original receipts. The
-`de3d008` extension SHA-256 is
-`cb34f65f738f5d26ce5b849bbcf9628e95db180e62a199a153aacbdac44f25b0`.
+`d6d188d` extension SHA-256 is
+`2563543e63566c24872a9f8c5a6db4a12871bd8b58e9f99e9f5a87672b3dd565`.
 These are unsigned local source-bound measurements. The historical unequal-output
 comparison and its complete-output controls remain separate and unchanged.
 The checkpoint comparisons establish fingerprint equality, not complete typed-row equality.
@@ -705,5 +710,5 @@ receipt procedure above and this command:
 Rscript benchmarks/duckvep_haplotypes.R \
   --transcripts 1024 --samples 64 --overlap 16 --passes 3 --cpu 2 \
   --modes native,sql,sql_records,sql_singletons,sql_singletons_hgvs \
-  --extension-receipt /tmp/duckhts-indel-de3d008-extension.tsv
+  --extension-receipt /tmp/duckhts-indel-d6d188d-evidence.0aBmKK/extension.tsv
 ```
