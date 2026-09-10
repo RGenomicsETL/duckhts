@@ -219,49 +219,63 @@ Pass `--extension-receipt PATH` and the listed `--transcripts`,
 every result and receipt; do not append a campaign that fails the
 historical full-output check.
 
-## Canonical workload at the translation checkpoint
+## Canonical workload at the translation checkpoints
 
-Source `52ce78513b3f5f7c2a46fe82dc44dd458333092b` is compared with the
-matched `20efcf2af33b38c5be7596e2db7b243a3be53c47` workload: 1,024
-transcripts, 64 samples, 16 overlapping transcripts, 256 physical events
-and 262,144 candidate/sample input rows. Both runs use one thread on CPU
-2, DuckDB 1.5.3 and three fresh-process timed passes. No DuckHTS test or
-conformance jobs ran concurrently with this checkpoint’s timers; other
-shared-host activity was not controlled.
+Sources `52ce78513b3f5f7c2a46fe82dc44dd458333092b` and
+`de3d008004f615c198a422a42a773bd7c9de0b70` each use the nearest recorded
+identical workload as their timing baseline:
+`20efcf2af33b38c5be7596e2db7b243a3be53c47` for `52ce785`, and `52ce785`
+for `de3d008`. The workload has 1,024 transcripts, 64 samples, 16
+overlapping transcripts, 256 physical events and 262,144
+candidate/sample input rows. All three runs use one thread on CPU 2,
+DuckDB 1.5.3 and three fresh-process timed passes. No DuckHTS test or
+conformance jobs ran concurrently with the `52ce785` timers. The
+`de3d008` campaign ran from 00:59:19 to 00:59:59 +0200 on September 11,
+2026; a previously launched small read-only classification/oracle
+diagnostic completed at 01:00:01, so concurrent diagnostic activity
+cannot be excluded. This measured run is retained without replacement.
+Other shared-host activity was not controlled.
 
-| mode                | input_candidate_sample_rows | output_leaves | output_carriers | baseline_median_s | checkpoint_median_s | checkpoint_max_rss_mib |
-|:--------------------|----------------------------:|:--------------|:----------------|------------------:|--------------------:|-----------------------:|
-| native              |                      262144 | 3072          | 114688          |          0.017662 |            0.017174 |               73.69531 |
-| sql                 |                      262144 | 3072          | 114688          |          0.348000 |            0.346000 |              378.93750 |
-| sql_records         |                      262144 | 4096          | 131072          |          0.730000 |            0.731000 |              611.99219 |
-| sql_singletons      |                      262144 | 4096          | 65536           |          0.347000 |            0.343000 |              411.19531 |
-| sql_singletons_hgvs |                      262144 | 4096          | 65536           |          0.349000 |            0.353000 |              408.82812 |
+| revision | baseline_revision | mode                | input_candidate_sample_rows | output_leaves | output_carriers | baseline_median_s | checkpoint_median_s | checkpoint_max_rss_mib |
+|:---------|:------------------|:--------------------|----------------------------:|:--------------|:----------------|------------------:|--------------------:|-----------------------:|
+| 52ce785  | 20efcf2           | native              |                      262144 | 3072          | 114688          |          0.017662 |            0.017174 |               73.69531 |
+| 52ce785  | 20efcf2           | sql                 |                      262144 | 3072          | 114688          |          0.348000 |            0.346000 |              378.93750 |
+| 52ce785  | 20efcf2           | sql_records         |                      262144 | 4096          | 131072          |          0.730000 |            0.731000 |              611.99219 |
+| 52ce785  | 20efcf2           | sql_singletons      |                      262144 | 4096          | 65536           |          0.347000 |            0.343000 |              411.19531 |
+| 52ce785  | 20efcf2           | sql_singletons_hgvs |                      262144 | 4096          | 65536           |          0.349000 |            0.353000 |              408.82812 |
+| de3d008  | 52ce785           | native              |                      262144 | 3072          | 114688          |          0.017174 |            0.017235 |               73.69922 |
+| de3d008  | 52ce785           | sql                 |                      262144 | 3072          | 114688          |          0.346000 |            0.344000 |              379.13672 |
+| de3d008  | 52ce785           | sql_records         |                      262144 | 4096          | 131072          |          0.731000 |            0.734000 |              612.45703 |
+| de3d008  | 52ce785           | sql_singletons      |                      262144 | 4096          | 65536           |          0.343000 |            0.343000 |              409.75391 |
+| de3d008  | 52ce785           | sql_singletons_hgvs |                      262144 | 4096          | 65536           |          0.353000 |            0.348000 |              409.91797 |
 
-All 15 matched rows have identical non-timing result fields, including
-every SQL full-output fingerprint, output denominator and native
-workspace/count metric. The [15 checkpoint
+Each checkpoint’s 15 matched rows have identical non-timing result
+fields, including every SQL full-output fingerprint, output denominator
+and native workspace/count metric. The [30 checkpoint
 observations](data/duckvep_haplotypes_indel_translation.csv) retain
-individual passes. The [177-file evidence
-capsule](data/duckvep_haplotypes_indel_translation.jsonl.gz) retains
-both runs’ original worker jobs, results, logs, process-time reports,
-benchmark receipts and FASTA/index pairs, both clean-build receipts, the
-registered fixtures and the unchanged driver. Rendering verifies every
-retained file against its receipt before comparing actual jobs and
-results. It requires complete job semantics to agree across revisions,
-excluding only the explicitly checked correctness flag and named
-binary/output/reference-file paths. All 40 result objects are checked
-for within-mode repeatability; all timed values and RSS measurements are
-bound to the corresponding ledger rows. Twenty job-mutation controls
-reject changed sample counts or event alleles. Original paths remain
-identifiers only; rendering does not reopen historical files.
+individual passes. The [264-file evidence
+capsule](data/duckvep_haplotypes_indel_translation.jsonl.gz) retains all
+three runs’ original worker jobs, results, logs, process-time reports,
+benchmark receipts and FASTA/index pairs, all three clean-build
+receipts, the registered fixtures and the unchanged driver. Rendering
+verifies every retained file against its receipt before comparing actual
+jobs and results. It requires complete job semantics to agree across
+revisions, excluding only the explicitly checked correctness flag and
+named binary/output/reference-file paths. All 60 result objects are
+checked for within-mode repeatability; all timed values and RSS
+measurements are bound to the corresponding ledger rows. Thirty
+job-mutation controls reject changed sample counts or event alleles.
+Original paths remain identifiers only; rendering does not reopen
+historical files.
 
 Compiled extension and native-bridge payloads are not included in this
 capsule; their identities are retained and checked through the original
-receipts. The checkpoint extension SHA-256 is
-`0217585b75ac7277794590b7f714b85eb942667a1705ea87a31021faa7833ab5`.
+receipts. The `de3d008` extension SHA-256 is
+`cb34f65f738f5d26ce5b849bbcf9628e95db180e62a199a153aacbdac44f25b0`.
 These are unsigned local source-bound measurements. The historical
 unequal-output comparison and its complete-output controls remain
-separate and unchanged.
+separate and unchanged. The checkpoint comparisons establish fingerprint
+equality, not complete typed-row equality.
 
 This canonical table-1 workload measures shared replay and
 singleton-HGVS paths. It does not measure the newly accepted N-bearing
@@ -274,5 +288,5 @@ above and this command:
 Rscript benchmarks/duckvep_haplotypes.R \
   --transcripts 1024 --samples 64 --overlap 16 --passes 3 --cpu 2 \
   --modes native,sql,sql_records,sql_singletons,sql_singletons_hgvs \
-  --extension-receipt /tmp/duckhts-indel-52ce785-extension.tsv
+  --extension-receipt /tmp/duckhts-indel-de3d008-extension.tsv
 ```
