@@ -15,7 +15,8 @@ use Bio::EnsEMBL::Variation::TranscriptVariation;
 
 # Actual single-exon source objects, not cached or overridden peptide methods.
 # Slice attributes normally require a database adaptor; supply only the declared
-# input table attribute. No translation, sequence or container method is replaced.
+# input table attribute. This shim changes no sequence or translation method;
+# VCF mode uses the standard upstream FASTA transport below.
 {
     package DuckHTS::TranslationSlice;
     use parent 'Bio::EnsEMBL::Slice';
@@ -25,22 +26,123 @@ use Bio::EnsEMBL::Variation::TranscriptVariation;
         return [$self->{_input_codon_table}];
     }
 }
-# Observe both core reference translation and the Haplosaurus container's
-# reference/alternate paths. The original end-to-end observer is unchanged.
+
+# Indel HGVS expands genomic slices. Use VEP's own FASTA transport over the
+# explicitly supplied contigs, not an attached Slice sequence or invented flank.
+sub prepare_vcf_fasta {
+    my ($input, $json) = @_;
+    require File::Temp;
+    require File::Spec;
+    require Bio::EnsEMBL::Variation::Utils::FastaSequence;
+    my $directory = File::Temp::tempdir('duckhts-translation-XXXXXX', TMPDIR => 1, CLEANUP => 1);
+    my $path = File::Spec->catfile($directory, 'reference.fa');
+    open(my $fasta, '>', $path) or die "Cannot create oracle FASTA: $!\n";
+    my %contigs;
+    while (my $line = <$input>) {
+        my $case = $json->decode($line);
+        die "VCF mode requires homogeneous variant_format='vcf' cases\n" unless
+            defined($case->{variant_format}) && $case->{variant_format} eq 'vcf';
+        my ($id, $genome, $cds, $start) =
+            @{$case}{qw(id genomic_sequence cds cds_start1)};
+        die "VCF mode requires unique literal contig IDs\n" unless
+            defined($id) && $id =~ /^[^\s,<>]+$/ && !$contigs{$id}++;
+        die "VCF mode requires declared literal genomic and CDS sequences\n" unless
+            defined($genome) && $genome =~ /^[ACGTN]+$/i &&
+            defined($cds) && length($cds) >= 3 && $cds =~ /^[ACGTN]+$/i;
+        die "VCF mode requires CDS matching its declared genomic span\n" unless
+            defined($start) && $start =~ /^[1-9][0-9]*$/ && $start <= length($genome) &&
+            length($cds) <= length($genome) - $start + 1 &&
+            uc(substr($genome, $start - 1, length($cds))) eq uc($cds);
+        print {$fasta} ">$id\n$genome\n" or die "Cannot write oracle FASTA: $!\n";
+    }
+    close($fasta) or die "Cannot close oracle FASTA: $!\n";
+    seek($input, 0, 0) or die "Cannot rewind oracle cases: $!\n";
+    Bio::EnsEMBL::Variation::Utils::FastaSequence::setup_fasta(
+        -FASTA => $path, -OFFLINE => 1);
+}
+
+# Keep original VCF records intact until the pinned parser removes their anchors.
+# In particular, a matching N anchor is legal here even though a retained N in
+# the parsed allele can make the subsequent TVA peptide unavailable.
+sub parse_vcf_variants {
+    my ($case, $slice, $config) = @_;
+    my $cds = $case->{cds};
+    my $chromosome = $slice->seq_region_name;
+    my $vcf = "##fileformat=VCFv4.4\n" .
+        "##contig=<ID=$chromosome,length=" . $slice->seq_region_length . ">\n" .
+        "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n";
+    my %ids;
+    for my $variant (@{$case->{variants} || []}) {
+        my ($id, $position, $reference, $alternate) =
+            @{$variant}{qw(id position1 reference alternate)};
+        die "VCF witness requires a unique literal source ID\n" unless
+            defined($id) && $id ne '.' && $id =~ /^[^\s;]+$/ && !$ids{$id}++;
+        die "VCF witness requires one literal ACGTN REF and ALT\n" unless
+            defined($reference) && $reference =~ /^[ACGTN]+$/i &&
+            defined($alternate) && $alternate =~ /^[ACGTN]+$/i;
+        die "VCF witness requires a complete matching uploaded REF\n" unless
+            defined($position) && $position =~ /^[1-9][0-9]*$/ &&
+            $position <= length($cds) && length($reference) <= length($cds) - $position + 1 &&
+            uc(substr($cds, $position - 1, length($reference))) eq uc($reference);
+        my $genomic_position = $case->{cds_start1} - 1 + $position;
+        $vcf .= join("\t", $chromosome, $genomic_position, $id, $reference, $alternate,
+            '.', 'PASS', '.') . "\n";
+    }
+    open(my $records, '<', \$vcf) or die "Cannot open in-memory VCF: $!\n";
+    my $parser = Bio::EnsEMBL::VEP::Parser::VCF->new({
+        config => $config, file => $records, valid_chromosomes => [$chromosome]});
+    my @features;
+    for my $variant (@{$case->{variants} || []}) {
+        my $vf = $parser->next;
+        die "VCF parser lost or reassigned source $variant->{id}\n" unless
+            $vf && $vf->isa('Bio::EnsEMBL::Variation::VariationFeature') &&
+            $vf->variation_name eq $variant->{id} &&
+            $vf->{nontrimmed_allele_string} eq
+                $variant->{reference} . '/' . $variant->{alternate};
+        $vf->slice($slice);
+        push @features, $vf;
+    }
+    die "VCF parser produced an extra source\n" if $parser->next;
+    close($records) or die "Cannot close in-memory VCF: $!\n";
+    return \@features;
+}
+
+# Observe core reference translation, Haplosaurus reference/alternate paths,
+# and independent TVA consequences/HGVS from the declared source records.
 @ARGV == 1 or die "usage: reference_translation_oracle.pl cases.jsonl\n";
 open(my $input, '<', $ARGV[0]) or die "Cannot read cases: $!\n";
 my $json = JSON->new->canonical;
+my $vcf_config;
+my $first_line = <$input>;
+die "Oracle requires at least one case\n" unless defined($first_line);
+my $vcf_mode = exists($json->decode($first_line)->{variant_format});
+seek($input, 0, 0) or die "Cannot rewind oracle cases: $!\n";
+prepare_vcf_fasta($input, $json) if $vcf_mode;
 while (my $line = <$input>) {
     my $case = $json->decode($line);
+    die "Unknown variant_format\n" if exists($case->{variant_format}) &&
+        (!defined($case->{variant_format}) || $case->{variant_format} ne 'vcf');
+    my $is_vcf = exists($case->{variant_format});
+    die "Cannot mix VCF and default SNV cases\n" if $is_vcf != $vcf_mode;
+    if ($is_vcf && !$vcf_config) {
+        require Bio::EnsEMBL::VEP::Config;
+        require Bio::EnsEMBL::VEP::Parser::VCF;
+        $vcf_config = Bio::EnsEMBL::VEP::Config->new({
+            offline => 1, database => 0, minimal => 0, check_ref => 0, lookup_ref => 0,
+            dir => File::Spec->devnull, warning_file => 'STDERR', quiet => 1});
+    }
     my $cds = $case->{cds};
     die "Require at least one complete ACGTN codon\n"
         unless length($cds) >= 3 && $cds =~ /^[ACGTNacgtn]+$/;
-    my $slice = DuckHTS::TranslationSlice->new(-SEQ => $cds, -START => 1,
-        -END => length($cds), -STRAND => 1, -SEQ_REGION_NAME => 'translation_witness',
+    my $cds_start = $is_vcf ? $case->{cds_start1} : 1;
+    my $slice = DuckHTS::TranslationSlice->new(
+        ($is_vcf ? () : (-SEQ => $cds)), -START => 1,
+        -END => $is_vcf ? length($case->{genomic_sequence}) : length($cds), -STRAND => 1,
+        -SEQ_REGION_NAME => $is_vcf ? $case->{id} : 'translation_witness',
         -COORD_SYSTEM => Bio::EnsEMBL::CoordSystem->new(-NAME => 'chromosome', -RANK => 1));
     $slice->{_input_codon_table} = Bio::EnsEMBL::Attribute->new(
         -CODE => 'codon_table', -VALUE => $case->{table});
-    my $exon = Bio::EnsEMBL::Exon->new(-START => 1, -END => length($cds),
+    my $exon = Bio::EnsEMBL::Exon->new(-START => $cds_start, -END => $cds_start + length($cds) - 1,
         -STRAND => 1, -PHASE => 0, -END_PHASE => length($cds) % 3, -SLICE => $slice);
     my $transcript = Bio::EnsEMBL::Transcript->new(-STABLE_ID => $case->{id},
         -SLICE => $slice, -STRAND => 1);
@@ -61,23 +163,36 @@ while (my $line = <$input>) {
     my $prepared = $transcript->translateable_seq;
     die "Source CDS changed for $case->{id}: '$cds' became '$prepared'\n"
         unless uc($prepared) eq uc($cds);
+    my @parsed = $is_vcf ? @{parse_vcf_variants($case, $slice, $vcf_config)} : ();
     my @independent;
     for my $variant (@{$case->{variants} || []}) {
-        die "Independent witness requires a matching literal SNV\n" unless
-            length($variant->{reference}) == 1 && length($variant->{alternate}) == 1 &&
-            uc(substr($cds, $variant->{position1} - 1, 1)) eq uc($variant->{reference});
-        my $vf = Bio::EnsEMBL::Variation::VariationFeature->new(
-            -start => $variant->{position1}, -end => $variant->{position1}, -strand => 1,
-            -slice => $slice, -allele_string => $variant->{reference} . '/' . $variant->{alternate},
-            -variation_name => $variant->{id});
+        my $vf;
+        my %source;
+        if ($is_vcf) {
+            $vf = shift @parsed;
+            # Parser coordinates are genomic, one-based inclusive. Insertions
+            # have start=end+1; the source position1 remains CDS-local.
+            %source = (source_reference => $variant->{reference},
+                source_alternate => $variant->{alternate}, parser_start => 0 + $vf->start,
+                parser_end => 0 + $vf->end, parser_allele_string => $vf->allele_string);
+        } else {
+            die "Independent witness requires a matching literal SNV\n" unless
+                length($variant->{reference}) == 1 && length($variant->{alternate}) == 1 &&
+                uc(substr($cds, $variant->{position1} - 1, 1)) eq uc($variant->{reference});
+            $vf = Bio::EnsEMBL::Variation::VariationFeature->new(
+                -start => $variant->{position1}, -end => $variant->{position1}, -strand => 1,
+                -slice => $slice, -allele_string => $variant->{reference} . '/' . $variant->{alternate},
+                -variation_name => $variant->{id});
+        }
         my $tv = Bio::EnsEMBL::Variation::TranscriptVariation->new(
             -variation_feature => $vf, -transcript => $transcript);
         my $alleles = $tv->get_all_alternate_TranscriptVariationAlleles;
         die "No independent ALT\n" unless @$alleles;
+        die "VCF witness did not retain exactly one ALT\n" if $is_vcf && @$alleles != 1;
         for my $allele (@$alleles) {
             my @terms = map { $_->SO_term } @{$allele->get_all_OverlapConsequences};
             push @independent, {id => $variant->{id}, allele => $allele->variation_feature_seq,
-                consequences => \@terms, hgvsp => $allele->hgvs_protein};
+                consequences => \@terms, hgvsp => $allele->hgvs_protein, %source};
         }
     }
     print $json->encode({id => $case->{id}, prepared_cds => $prepared,

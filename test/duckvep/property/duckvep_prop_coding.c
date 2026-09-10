@@ -900,12 +900,27 @@ TEST sequence_delta_later_cds_phase_uses_feature_edits(void) {
                     ASSERT_EQ(0, memcmp(&delta, &standalone, sizeof delta));
                     if (j == 1u) {
                         uint8_t saved = cds[(size_t)phase];
-                        /* Genuine N immediately after the synthetic prefix is
-                         * not known padding, even outside the validated REF. */
-                        cds[(size_t)phase] = 'N';
+                        /* An unsupported base remains invalid even when it is
+                         * outside the physically validated uploaded REF. */
+                        cds[(size_t)phase] = 'R';
                         duckvep_sequence_delta_fill_with_scratch((duckvep_variant_kind_t)s.vkind,
                             &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, s.vpos, strand, &scratch, &delta);
                         ASSERT(!delta.valid);
+                        /* Pinned original-model VEP observations, both strands
+                         * and all three phases: genuine first-CDS N remains
+                         * outside the validated T>AC / A>GT source allele.
+                         * Local codons NGT/NGAC, NNG/NNAC or NNN/NNAC all give
+                         * X/XX, with exactly start_lost and frameshift. */
+                        cds[(size_t)phase] = 'N';
+                        duckvep_sequence_delta_fill_with_scratch((duckvep_variant_kind_t)s.vkind,
+                            &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, s.vpos, strand, &scratch, &delta);
+                        ASSERT(delta.valid && delta.start_lost && delta.frameshift);
+                        ASSERT(!delta.synonymous && !delta.missense &&
+                            !delta.stop_gained && !delta.stop_lost && !delta.stop_retained &&
+                            !delta.start_retained && !delta.inframe_insertion &&
+                            !delta.inframe_deletion && !delta.protein_altering &&
+                            !delta.coding_unknown && !delta.partial_codon);
+                        ASSERT_EQ((uint8_t)DUCKVEP_SEQUENCE_RESOLVED, delta.sequence_status);
                         cds[(size_t)phase] = saved;
                     }
                     /* Wrong anchor or changed REF must fail before rephasing. */
@@ -5105,7 +5120,10 @@ TEST coding_context_delta_frameshift_known_scene(void) {
               duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
     ASSERT(kprop_delta_is_frameshift_at(&delta, 3));
 
-    /* (2) -1 frameshift at codon 4 (body) -> frameshift at protein pos 4. */
+    /* (2) Pinned VEP original record: CDS ATGAAACCCGGGTTTTAA, pos10 GG>C.
+     * TVA codons GGG/CG give peptides G/X. Its raw frameshift and missense
+     * predicates are both true; Constants.pm's decrease_length class gate
+     * excludes emitted missense_variant. Keep raw facts and emitted SO separate. */
     edit.cds_start = 10u; edit.ref = cds + 9u; edit.ref_len = 2u;
     edit.alt = del2a; edit.alt_len = 1u;
     ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
@@ -5115,7 +5133,32 @@ TEST coding_context_delta_frameshift_known_scene(void) {
                                            alt_pep, sizeof alt_pep, &ctx));
     ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
               duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
-    ASSERT(kprop_delta_is_frameshift_at(&delta, 4));
+    ASSERT(delta.valid && delta.frameshift && delta.missense);
+    ASSERT(!delta.synonymous && !delta.stop_gained && !delta.stop_lost &&
+        !delta.stop_retained && !delta.start_lost && !delta.start_retained &&
+        !delta.inframe_deletion && !delta.inframe_insertion && !delta.protein_altering &&
+        !delta.coding_unknown && !delta.partial_codon);
+    ASSERT_EQ(-1, delta.cdna_pos);
+    ASSERT_EQ(-1, delta.cds_pos);
+    ASSERT_EQ(4, delta.protein_pos);
+    ASSERT_EQ(0u, delta.ref_aa);
+    ASSERT_EQ(0u, delta.alt_aa);
+    {
+        duckvep_effect_ctx_t effect = {
+            .pre_bits = DUCKVEP_PRE(DUCKVEP_PRE_CODING)
+        };
+        duckvep_event_t event = {
+            .kind = (uint8_t)DUCKVEP_KIND_INDEL,
+            .ref_diff_length = 2u, .alt_diff_length = 1u,
+            .feature_length_relation = (uint8_t)DUCKVEP_FEATURE_LENGTH_DECREASE
+        };
+        duckvep_effect_ctx_apply_event(NULL, &effect, &event);
+        duckvep_effect_ctx_apply_delta(&effect, &delta);
+        duckvep_effect_ctx_finalize(&effect);
+        ASSERT_EQ(DUCKVEP_SO(DUCKVEP_SO_FRAMESHIFT),
+            duckvep_effect_eval(effect.pre_bits));
+        ASSERT(delta.missense);
+    }
 
     /* (3) +1 frameshift disrupting the start codon (cds 1). */
     edit.cds_start = 1u; edit.ref = cds; edit.ref_len = 1u;
@@ -6199,6 +6242,7 @@ TEST coding_context_delta_frameshift_matches_length_oracle(void) {
     unsigned fs_seen = 0u;
     unsigned inframe_seen = 0u;
     unsigned fs_stop_seen = 0u;
+    unsigned fs_missense_seen = 0u;
 
     for (t = 0u; t < trials; t++) {
         uint8_t cds[36];
@@ -6267,13 +6311,23 @@ TEST coding_context_delta_frameshift_matches_length_oracle(void) {
             int stop_oracle;
             ASSERT(delta.valid && delta.frameshift);
             ASSERT(!delta.inframe_insertion && !delta.inframe_deletion &&
-                   !delta.missense && !delta.synonymous && !delta.start_lost);
+                   !delta.synonymous && !delta.start_lost);
             /* stop_gained must equal VEP's independent local-window oracle, never the
              * downstream retranslation the full alt peptide would suggest. */
             stop_oracle = kprop_frameshift_local_stop_oracle(cds, cds_len, ctx.alt_cds,
                                                              ctx.alt_cds_len, cds_start,
                                                              ref_len, ctx.length_diff);
             ASSERT_EQ(stop_oracle, delta.stop_gained ? 1 : 0);
+            /* TVA::peptide appends X to a partial codon. With this generator's
+             * 1..4-base operands and codon-aligned body edits, a
+             * -1/-2 change preserves peptide count but replaces the last
+             * canonical residue with X; +1/+2 changes increase peptide count.
+             * VariationEffect::missense_variant therefore holds exactly for
+             * shortening without stop_gained. No native peptide is its oracle.
+             * Executable default-seed trial2: ATGACGTATGTAGTAGATCCTTCCGAATAT,
+             * pos19 CCT>A, has P/X and raw frame+missense but frame-only SO. */
+            ASSERT_EQ(net < 0 && !stop_oracle, delta.missense != 0u);
+            if (delta.missense) fs_missense_seen++;
             if (delta.stop_gained) fs_stop_seen++;
             fs_seen++;
         } else if (net != 0) {
@@ -6284,8 +6338,8 @@ TEST coding_context_delta_frameshift_matches_length_oracle(void) {
     ASSERT(fs_seen > 0u);
     ASSERT(inframe_seen > 0u);
     fprintf(stderr,
-            "[frameshift length-oracle coverage] frameshift=%u inframe_len=%u stop_gained=%u\n",
-            fs_seen, inframe_seen, fs_stop_seen);
+            "[frameshift length-oracle coverage] frameshift=%u inframe_len=%u stop_gained=%u raw_missense=%u\n",
+            fs_seen, inframe_seen, fs_stop_seen, fs_missense_seen);
     PASS();
 }
 
@@ -6603,6 +6657,244 @@ TEST coding_context_delta_inframe_deletion_known_scene(void) {
     ctx.single_edit_alt_len = 0u;
     ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_UNSUPPORTED,
               duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+    ASSERT(!delta.valid);
+    PASS();
+}
+
+/* Pinned VEP 116 original-VCF witnesses: the complete 5 codons x 4 anchors x
+ * 3 inserted strings from the 60-record NINDEL diagnostic. The emitted SO
+ * expectations below come from that executable, not from native translation.
+ * VariationEffect::inframe_insertion preserves a reference peptide edge;
+ * coding_unknown may coexist with it, unlike protein_altering_variant.
+ * HGVSp assertions cover all 20 in-frame records; frameshift HGVS additionally
+ * requires the adapter's independent 3-prime placement and late stop replay. */
+TEST coding_context_n_insertion_vep_witnesses(void) {
+    static const char codons[5][4] = { "GCT", "GCN", "AAT", "AAN", "NCN" };
+    static const char *inserted[3] = { "A", "GCC", "ACGT" };
+    static const uint8_t inframe[4][5] = {
+        {1, 1, 1, 1, 1}, {0, 0, 0, 1, 1},
+        {1, 1, 0, 0, 1}, {1, 1, 1, 1, 1}
+    };
+    static const uint8_t unknown[4][5] = {
+        {0, 0, 0, 0, 0}, {0, 0, 0, 1, 1},
+        {0, 0, 0, 0, 1}, {0, 0, 0, 0, 0}
+    };
+    static const char *protein[4][5] = {
+        { "p.Ala3dup", "p.Ala3dup", "p.Met1_Asn2insAla",
+          "p.Met1_Ter2insAla", "p.Met1_Ter2insAla" },
+        { "p.Ala2delinsGlyPro", "p.Ala2delinsGlyPro", "p.Asn2delinsSerHis",
+          "p.Met1_Ter2insSer", "p.Ter2_Ala3insPro" },
+        { "p.Ala2_Ala3insPro", "p.Ala2_Ala3insPro", "p.Asn2delinsLysPro",
+          "p.Ter2delinsLysPro", "p.Ter2_Ala3insPro" },
+        { "p.Ala2dup", "p.Ala2dup", "p.Asn2_Ala3insAla",
+          "p.Ter2_Ala3insAla", "p.Ter2_Ala3insAla" }
+    };
+    size_t comparisons = 0u;
+    size_t protein_comparisons = 0u;
+    size_t n_anchors = 0u;
+    for (size_t payload = 0u; payload < 3u; payload++) {
+        for (size_t anchor = 0u; anchor < 4u; anchor++) {
+            for (size_t codon = 0u; codon < 5u; codon++) {
+                uint8_t cds[] = "ATGGCTGCTTAA";
+                memcpy(cds + 3u, codons[codon], 3u);
+                struct kprop_coding s = {0};
+                s.cds = cds;
+                s.strand = 1;
+                s.tstart = s.cds_s = s.es = 1000u;
+                s.tend = s.cds_e = s.ee = 1011u;
+                s.ecds = 1u;
+                s.ecde = 12u;
+                s.excnt = 1u;
+                kprop_wire_coding_scene(&s, 12u);
+                s.vpos = s.vend = 1002u + (uint32_t)anchor;
+                s.vkind = (uint8_t)DUCKVEP_KIND_INS;
+                s.abytes[0] = s.abytes[1] = cds[2u + anchor];
+                size_t inserted_length = strlen(inserted[payload]);
+                memcpy(s.abytes + 2u, inserted[payload], inserted_length);
+                s.roff = 0u;
+                s.rlen = 1u;
+                s.aoff = 1u;
+                s.alen = (uint16_t)(inserted_length + 1u);
+                if (s.abytes[0] == 'N') n_anchors++;
+
+                duckvep_haplotype_edit_t edit;
+                ASSERT_EQ(DUCKVEP_CDS_EDIT_OK,
+                    duckvep_variant_cds_edit_build(&s.tx, &s.ex, &s.seq, &s.v,
+                        0u, 0u, s.strand, &edit));
+                ASSERT_EQ(4u + anchor, edit.cds_start);
+                ASSERT_EQ(0u, edit.ref_len);
+                ASSERT_EQ(inserted_length, edit.alt_len);
+                duckvep_edit_set_t edit_set = { .edits = &edit, .count = 1u };
+                duckvep_event_t event;
+                duckvep_event_load(&s.v, 0u, &event);
+                for (int virtual_context = 0; virtual_context < 2; virtual_context++) {
+                    uint8_t alt_cds[32], ref_peptide[16], alt_peptide[16];
+                    duckvep_coding_context_t ctx;
+                    duckvep_sequence_delta_t delta;
+                    if (virtual_context) {
+                        ASSERT_EQ(DUCKVEP_VARIANT_CODING_CONTEXT_OK,
+                            duckvep_model_coding_context_build(&s.tx, &s.ex, &s.seq,
+                                0u, s.strand, &event, &edit_set, alt_cds, sizeof alt_cds,
+                                ref_peptide, sizeof ref_peptide,
+                                alt_peptide, sizeof alt_peptide, &ctx));
+                        ASSERT(ctx.virtual_single_edit);
+                    } else {
+                        ASSERT_EQ(DUCKVEP_VARIANT_CODING_CONTEXT_OK,
+                            duckvep_variant_physical_coding_context_build(
+                                &s.tx, &s.ex, &s.seq, &s.v, 0u, 0u, s.strand,
+                                &edit, 1u, alt_cds, sizeof alt_cds,
+                                ref_peptide, sizeof ref_peptide,
+                                alt_peptide, sizeof alt_peptide, &ctx));
+                        ASSERT(!ctx.virtual_single_edit);
+                    }
+                    ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                        duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+                    ASSERT(delta.valid);
+                    ASSERT_EQ(payload != 1u, delta.frameshift);
+                    ASSERT_EQ(payload == 1u && inframe[anchor][codon],
+                        delta.inframe_insertion);
+                    ASSERT_EQ(payload == 1u && !inframe[anchor][codon],
+                        delta.protein_altering);
+                    ASSERT_EQ(payload == 1u && unknown[anchor][codon],
+                        delta.coding_unknown);
+                    ASSERT(!delta.inframe_deletion && !delta.partial_codon &&
+                        !delta.synonymous && !delta.missense && !delta.stop_gained &&
+                        !delta.stop_lost && !delta.stop_retained &&
+                        !delta.start_lost && !delta.start_retained);
+                    comparisons++;
+                    if (payload == 1u) {
+                        duckvep_hgvs_protein_fact_t fact;
+                        char text[64];
+                        size_t required;
+                        ASSERT_EQ(DUCKVEP_HGVS_OK,
+                            duckvep_hgvs_protein_fact_build(&ctx, &delta, &fact));
+                        ASSERT_EQ(DUCKVEP_HGVS_OK,
+                            duckvep_hgvs_protein_render(&fact, 0, text, sizeof text,
+                                &required));
+                        ASSERT_STR_EQ(protein[anchor][codon], text);
+                        protein_comparisons++;
+                    }
+                }
+            }
+        }
+    }
+    ASSERT_EQ(120u, comparisons);
+    ASSERT_EQ(40u, protein_comparisons);
+    ASSERT_EQ(12u, n_anchors);
+    PASS();
+}
+
+/* Parser::VCF removes one shared indel anchor before
+ * VariationFeatureOverlapAllele::seq_is_unambiguous_dna sees the payload.
+ * Neither that rule nor reference-codon consensus admits uploaded N alleles. */
+TEST cds_edit_n_insertion_anchor_controls(void) {
+    for (int strand = 1; strand >= -1; strand -= 2) {
+        uint8_t cds[] = "ATGGCNGCTTAA";
+        struct kprop_coding s = {0};
+        s.cds = cds;
+        s.strand = (int8_t)strand;
+        s.tstart = s.cds_s = s.es = 1000u;
+        s.tend = s.cds_e = s.ee = 1011u;
+        s.ecds = 1u;
+        s.ecde = 12u;
+        s.excnt = 1u;
+        kprop_wire_coding_scene(&s, 12u);
+        s.vpos = s.vend = kprop_genomic_pos_for_cds(&s, 6u);
+        s.vkind = (uint8_t)DUCKVEP_KIND_INS;
+        s.roff = 0u;
+        s.rlen = 1u;
+        s.aoff = 1u;
+        s.alen = 4u;
+        memcpy(s.abytes, "NNGCC", 5u);
+        duckvep_haplotype_edit_t edit;
+        ASSERT_EQ(DUCKVEP_CDS_EDIT_OK,
+            duckvep_variant_cds_edit_build(&s.tx, &s.ex, &s.seq, &s.v,
+                0u, 0u, s.strand, &edit));
+        ASSERT_EQ(strand > 0 ? 7u : 6u, edit.cds_start);
+        ASSERT_EQ(0u, edit.ref_len);
+        ASSERT_EQ(3u, edit.alt_len);
+
+        /* N inside the changed payload is not an erased VCF anchor. */
+        s.abytes[3] = 'N';
+        ASSERT_EQ(DUCKVEP_CDS_EDIT_INVALID_ALLELE,
+            duckvep_variant_cds_edit_build(&s.tx, &s.ex, &s.seq, &s.v,
+                0u, 0u, s.strand, &edit));
+        s.abytes[3] = 'C';
+        /* N is not a wildcard when checking retained reference identity. */
+        s.abytes[0] = s.abytes[1] = 'A';
+        ASSERT_EQ(DUCKVEP_CDS_EDIT_REF_MISMATCH,
+            duckvep_variant_cds_edit_build(&s.tx, &s.ex, &s.seq, &s.v,
+                0u, 0u, s.strand, &edit));
+        s.abytes[0] = s.abytes[1] = 'N';
+        cds[5] = 'C';
+        ASSERT_EQ(DUCKVEP_CDS_EDIT_REF_MISMATCH,
+            duckvep_variant_cds_edit_build(&s.tx, &s.ex, &s.seq, &s.v,
+                0u, 0u, s.strand, &edit));
+        cds[5] = 'N';
+        /* Untrimmed N>A and A>N substitutions retain the original rejection. */
+        s.vkind = (uint8_t)DUCKVEP_KIND_SNV;
+        s.alen = 1u;
+        s.abytes[1] = 'A';
+        ASSERT_EQ(DUCKVEP_CDS_EDIT_INVALID_ALLELE,
+            duckvep_variant_cds_edit_build(&s.tx, &s.ex, &s.seq, &s.v,
+                0u, 0u, s.strand, &edit));
+        s.abytes[0] = 'A';
+        s.abytes[1] = 'N';
+        ASSERT_EQ(DUCKVEP_CDS_EDIT_INVALID_ALLELE,
+            duckvep_variant_cds_edit_build(&s.tx, &s.ex, &s.seq, &s.v,
+                0u, 0u, s.strand, &edit));
+    }
+    PASS();
+}
+
+/* VariationEffect::_ins_del_stop_altered translates the original CDS-end
+ * offset after the edit, even when that endpoint contains N. Here inserting C
+ * before the last N makes NCN -> NCCN: the local peptide is XX, and the
+ * reconstructed original endpoint NCC translates to X, not a retained stop.
+ * The complete-end coordinate predicate therefore adds stop_lost. */
+TEST coding_context_n_length_change_validation(void) {
+    static const uint8_t cds[] = "ATGNCN";
+    static const uint8_t inserted[] = "C";
+    duckvep_haplotype_edit_t edit = {
+        .cds_start = 6u, .alt = inserted, .alt_len = 1u, .variant_strand = 1
+    };
+    duckvep_edit_set_t edit_set = { .edits = &edit, .count = 1u };
+    uint8_t alt_cds[16], ref_peptide[8], alt_peptide[8];
+    duckvep_coding_context_t ctx;
+    duckvep_sequence_delta_t delta;
+    ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK,
+        duckvep_coding_context_build(cds, sizeof cds - 1u, &edit_set, 1, STD,
+            alt_cds, sizeof alt_cds, ref_peptide, sizeof ref_peptide,
+            alt_peptide, sizeof alt_peptide, &ctx));
+    ctx.post_cds_complete = 1u;
+    ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+        duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+    ASSERT(delta.valid && delta.frameshift && delta.stop_lost);
+    ASSERT(!delta.stop_retained && !delta.stop_gained && !delta.coding_unknown &&
+        !delta.start_lost && !delta.start_retained && !delta.inframe_insertion &&
+        !delta.inframe_deletion && !delta.protein_altering && !delta.missense &&
+        !delta.synonymous && !delta.partial_codon);
+
+    /* Consensus is not permission to accept stale peptide operands or invalid
+     * nucleotide bytes, including the untranslated partial-codon remainder. */
+    ref_peptide[1] = 'W';
+    ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_UNSUPPORTED,
+        duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+    ASSERT(!delta.valid);
+    ref_peptide[1] = 'X';
+    alt_peptide[1] = 'W';
+    ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_UNSUPPORTED,
+        duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+    ASSERT(!delta.valid);
+    alt_peptide[1] = 'X';
+    alt_cds[6] = 'R';
+    ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_UNSUPPORTED,
+        duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
+    ASSERT(!delta.valid);
+    alt_cds[6] = 'N';
+    ctx.codon_table = 0u;
+    ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_UNSUPPORTED,
+        duckvep_coding_context_delta_fill(&ctx, 0u, &delta));
     ASSERT(!delta.valid);
     PASS();
 }

@@ -1,0 +1,17 @@
+{
+  "format": "indel_predicate_witnesses",
+  "source_binding": "unsigned_diagnostic",
+  "scope": "raw_indel_predicates_vs_emitted_SO_and_HGVSp_only_not_general_indel_or_compound_conformance",
+  "cases": {
+    "raw_missense": 2,
+    "phase_n": 6
+  },
+  "oracle_revisions": ["57ea5c52340acc1f156267f810ad162e26597082", "2fb834b987ede3824e200197a838ce11e91aeb4b"],
+  "original_receipt_sha256": {
+    "raw_missense": "6690f90e1f8eec8b17e8c9b208963e0ae230df4e73d4b9c4a566f64ff13e63bd",
+    "phase_n": "03e5106b0ac2f82f1f41ed21ba981f72da2b2779312ff19b247608d492398fca"
+  },
+  "sha256": {
+    "evidence.jsonl.gz": "c64e46642af13d4c63a3893fff43acab90b4869b6248645fb3f8a4dc01896310"
+  }
+}

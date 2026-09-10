@@ -380,8 +380,9 @@ predicate, or requiring a codon-aligned stored CDS endpoint changes VEP results.
 The kernel's physical edit array is not mutated when opening an independent
 feature-coordinate context. The context retains a separate unpadded edit start
 and the model's physical padding count. Known padding N bytes, including their
-shifted positions after an indel, represent exact VEP X residues; genomic or
-allele ambiguity remains unresolved. Standalone scratch calls use the same
+shifted positions after an indel, participate in the same BioPerl consensus
+translation as genomic N. Changed-allele eligibility remains a separate check.
+Standalone scratch calls use the same
 annotation dispatcher. Physical materialization remains an explicitly named
 sequence-edit reference, not a second independent-consequence implementation.
 
@@ -1865,6 +1866,84 @@ alternate peptide suppresses VEP's `start_lost`; X in a longer peptide does not
 establish the same condition. These witnesses do not extend the exhaustive
 internal-codon comparison to phase padding, reverse strands, peptide-edit caches,
 indels or compound events. Length-changing contexts can still be unsupported.
+
+### Indel codon consensus and retained N anchors
+
+**Classification: DuckVEP compatibility corrections against pinned VEP 116.**
+For CDS `ATGGCNGCCTAA`, table 1, original CDS position 4 `G>GGCC`, VEP
+returns `protein_altering_variant` and `p.Ala2delinsGlyPro`. Consensus
+translation also applies to length-changing local peptide operands. A blanket
+rejection of genomic N loses these facts. Changed alleles still undergo their
+own eligibility check: an erased, literally matching VCF insertion anchor N
+is distinct from N inside the changed payload. Position 6 `N>NGCC` in this
+CDS yields `inframe_insertion` and `p.Ala2dup`; N is not a wildcard when
+validating the uploaded REF against the model or genomic reference.
+
+Raw `source_records` replay is a different input contract. Haplosaurus's VCF
+parser preserves the complete `NGCC` allele, and
+`TranscriptHaplotypeContainer::_mutate_sequences` skips non-ACGT alleles before
+replacement. DuckVEP's declared raw-replay contract instead retains invalid
+alleles as unavailable projections, with provenance and NULL sequence/HGVSp.
+Neither behavior means inserting `GCC` after trimming N. The independent-VEP
+and decoded-singleton expectations above therefore do not establish raw-source
+equivalence. Cross-route diagnostics retain these contrasts, while R tests
+check the raw mode's explicit unavailable-projection contract separately.
+
+Raw predicates and emitted SO terms are different observations. The
+[retained predicate witnesses](test/duckvep/conformance/data/indel_predicate_witnesses)
+include CDS `ATGAAACCCGGGTTTTAA`, position 10 `GG>C`, and CDS
+`ATGACGTATGTAGTAGATCCTTCCGAATAT`, position 19 `CCT>A`. Their local peptides
+are respectively `G/X` and `P/X`. Both raw `frameshift` and `missense_variant`
+predicates are true, but emitted SO contains only `frameshift_variant`:
+`Constants.pm` excludes missense for a length-decreasing feature. The observed
+HGVSp values are `p.Gly4ArgfsTer?` and `p.Pro7IlefsTer?`. Native tests check
+both layers rather than treating a raw missense flag as an emitted consequence.
+
+The same bundle retains six later-coding-exon models, both strands and phases
+0, 1 and 2, with N outside the validated `T>AC` or reverse-strand `A>GT`
+source allele. Pinned TVA and CLI observations agree on
+`frameshift_variant&start_lost`; the local peptides are `X/XX`. HGVSp is
+`p.Thr2_?1` at phase 0 and `p.Met1?` at phases 1 and 2. These exact models
+justify their native regression expectations; they do not certify every
+phase-padded indel. The bundle preserves source models, original VCF, FASTA,
+GFF, observation scripts, complete TVA/CLI output, warnings and original
+receipts. Its network-free audit reconstructs all eight witnesses and rejects
+semantic corruptions and rewritten receipt identities. It is unsigned diagnostic
+evidence, not an authenticated execution certificate.
+
+Source anchors: pinned `Parser::VCF`, `TranscriptVariationAllele::peptide`,
+`Utils::VariationEffect::{missense_variant,inframe_insertion,coding_unknown}`
+and the feature-class gates in `Utils::Constants`. VEP's parser also minimizes
+some complex indels without `--minimal`; diagnostic source records remain
+unchanged, and comparisons retain their original event/ALT identities.
+
+The complete forward, single-exon indel matrix retains 168,000 source records
+across 125 ACGTN codons, 24 tables and 56 insertion/deletion/replacement
+geometries per model. Both native and oracle transcripts have explicitly empty
+UTRs and separate A10 genomic flanks. All eight route/thread configurations
+remain in 1,344,000 HGVSp comparisons; the independent routes additionally
+compare 336,000 SO sets. These finite synthetic counts are not population
+error rates or certification of compound, reverse-strand or phase-padded indels.
+
+The [baseline](test/duckvep/conformance/data/ambiguous_indel_baseline) contains
+260,088 HGVSp and 70,532 SO disagreements. The
+[consensus correction](test/duckvep/conformance/data/ambiguous_indel_consensus)
+contains 164,454 HGVSp and 39,024 SO disagreements: 95,634 and 31,508 respectively
+are resolved, with no newly failing comparison and no changed keyed oracle
+expectation. **Both conformance commands still fail.** Each independent route
+retains 18,107 HGVSp and 19,512 SO disagreements; each decoded singleton route
+retains 18,107 HGVSp disagreements, and each raw route retains 27,906.
+All remaining independent SO disagreements involve N in the removed source
+span. Even the 86,016 canonical-codon controls retain 2,113 HGVSp disagreements
+per route; this correction does not certify their nonstandard-table protein
+formatting. Raw-mode differences are retained under the distinction above.
+
+The bundles preserve every pair, raw source/oracle observations, warnings,
+controls and separately identified source/binary hashes. The network-free audit
+pins their reviewed receipts outside those receipts and reconstructs the entire
+matrix and its nonzero verdicts. They remain unsigned diagnostic evidence.
+The 28,800-SNV regression matrix retains zero disagreements in its 230,400
+HGVSp and 57,600 SO comparisons after this correction.
 
 ## Protein HGVS preserves VEP's local-peptide state machine
 

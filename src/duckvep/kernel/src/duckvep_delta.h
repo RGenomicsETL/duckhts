@@ -250,8 +250,6 @@ typedef struct duckvep_coding_context {
      * insertion. CDS distance cannot derive this: an intron may lie between
      * the insertion and terminal codon. */
     uint8_t insertion_length_reaches_terminal_stop;
-    uint8_t local_ref_unambiguous;
-    uint8_t local_alt_unambiguous;
     /* Sparse Ensembl Translation SeqEdits. Positions are one-based and sorted.
      * They are an overlay on the reference peptide only: VEP deliberately
      * leaves the alternate peptide as the raw codon translation. */

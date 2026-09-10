@@ -2,6 +2,14 @@
 
 # duckhts 1.5.1.9000
 
+- interpret N-containing indel codons with pinned VEP-116 consensus and match
+  retained insertion anchors literally; share the checked coding/HGVS paths
+  without accepting ambiguous changed alleles
+
+- retain exact upstream raw-predicate and emitted-consequence witnesses;
+  exercise 168,000 original VCF indels across codon tables with complete keyed
+  comparisons, explicit model partitions and failure receipts
+
 - pin retained diagnostic receipts independently of their declared hashes; verify
   VEP environment and source identities and reject rehashed oracle/native substitutions
 

@@ -985,6 +985,88 @@ local({
     expect_identical(n_codon_contributors$alternate, n_codon_source$alternate)
   }
 
+  # Original VCF indels across consensus codons and matching N-valued anchors.
+  # Literal alternate "NA" is DNA, not missing data.
+  n_indel_source <- data.frame(i = 0:7,
+    cds = c("ATGGCNGCCTAA", "ATGAANGCCTAA", "ATGGCNGCCTAA", "ATGAANGCCTAA",
+      "ATGGCNGCCTAA", "ATGGCTGCCTAA", "ATGNCNGCCTAA", "ATGNCNGCCTAA"),
+    position = c(14L, 14L, 15L, 15L, 16L, 16L, 14L, 14L),
+    reference = c("G", "A", "C", "A", "N", "T", "N", "N"),
+    alternate = c("GGCC", "AGCC", "CGCC", "AGCC", "NGCC", "TGCC", "NGCC", "NA"))
+  dbWriteTable(con, "n_indel_source", n_indel_source)
+  n_indel_tx <- paste("SELECT i::UINTEGER transcript_index,i::UINTEGER seq_region,",
+    "11::UBIGINT transcript_start,22::UBIGINT transcript_end,1::TINYINT strand,",
+    "i::UINTEGER gene_index,3::UBIGINT transcript_flags,transcript_start cds_start,",
+    "transcript_end cds_end,cds::BLOB cds_sequence,1::UTINYINT codon_table",
+    "FROM n_indel_source ORDER BY transcript_index")
+  n_indel_exons <- paste("SELECT i::UINTEGER transcript_index,11::UBIGINT exon_start,",
+    "22::UBIGINT exon_end,1::UBIGINT exon_cdna_start,12::UBIGINT exon_cdna_end,",
+    "0::TINYINT phase,0::TINYINT end_phase FROM n_indel_source ORDER BY transcript_index")
+  n_indel_regions <- paste("SELECT i::UINTEGER seq_region,32::UBIGINT sequence_length,",
+    "'n'||i seq_region_name FROM n_indel_source ORDER BY i")
+  expect_true(dbGetQuery(con, paste0("SELECT loaded FROM duckvep_model_load('n_indel_witnesses',",
+    dbQuoteString(con, n_indel_regions), ",",
+    dbQuoteString(con, n_indel_tx), ",", dbQuoteString(con, n_indel_exons),
+    ",reference_fasta:=", dbQuoteString(con, system.file("extdata", "duckvep_n_indel.fa",
+      package = "Rduckhts")), ")"))$loaded)
+  n_indel_calls <- paste("SELECT i::UBIGINT event_index,i::UINTEGER seq_region,",
+    "position::UBIGINT AS position,reference,alternate,1::UINTEGER alt_index,",
+    "i::UINTEGER transcript_index,0::UINTEGER sample_index,[1]::INTEGER[] alleles,",
+    "[true]::BOOLEAN[] phase_before,NULL::BIGINT phase_set FROM n_indel_source")
+  dbExecute(con, paste("CREATE TABLE n_indel_events AS SELECT event_index,seq_region,",
+    "position,reference,alternate,NULL::UBIGINT end_position,NULL::VARCHAR structural_type,",
+    "NULL::VARCHAR copy_change,NULL::UINTEGER mate_seq_region,NULL::UBIGINT mate_position",
+    "FROM (", n_indel_calls, ")"))
+  n_indel_expected_so <- c("protein_altering_variant", "coding_sequence_variant&inframe_insertion",
+    "inframe_insertion", "protein_altering_variant", "inframe_insertion", "inframe_insertion",
+    "coding_sequence_variant&inframe_insertion", "frameshift_variant")
+  n_indel_expected_hgvs <- c("p.Ala2delinsGlyPro", "p.Met1_Ter2insSer", "p.Ala2_Ala3insPro",
+    "p.Ter2delinsLysPro", "p.Ala2dup", "p.Ala2dup", "p.Ter2_Ala3insPro", NA_character_)
+  independent <- dbGetQuery(con, paste("SELECT event_index,",
+    "(SELECT string_agg(t.consequence,'&' ORDER BY t.consequence) FROM duckvep_so_terms() t",
+    "WHERE (a.consequence_mask & t.consequence_mask)<>0) consequences,protein_hgvs",
+    "FROM duckvep_annotate('n_indel_events','n_indel_witnesses',hgvs:=true,",
+    "upstream_distance:=0,downstream_distance:=0) a ORDER BY event_index"))
+  expect_equal(independent$event_index, n_indel_source$i)
+  expect_identical(independent$consequences, n_indel_expected_so)
+  expect_identical(independent$protein_hgvs, n_indel_expected_hgvs)
+  for (policy in c("strict", "vep116_compat")) {
+    for (raw in c(FALSE, TRUE)) {
+      n_indel_query <- if (raw) paste("SELECT i event_index,i seq_region,position,reference,",
+        "[alternate] alternates,i transcript_index,0 sample_index,'1|1' gt FROM n_indel_source") else
+        n_indel_calls
+      if (raw && policy == "strict") {
+        expect_error(rduckhts_haplotypes(con, n_indel_query, "n_indel_witnesses", hgvs = TRUE,
+          phase_policy = policy, input_mode = "source_records"),
+          "source_records requires phase_policy='vep116_compat'")
+        next
+      }
+      singletons <- rduckhts_haplotypes(con, n_indel_query, "n_indel_witnesses", hgvs = TRUE,
+        phase_policy = policy, input_mode = if (raw) "source_records" else "alt_events")
+      singletons <- singletons[order(singletons$transcript_index), ]
+      expect_equal(singletons$transcript_index, n_indel_source$i)
+      # Raw replay validates the full allele; it does not use independent
+      # VEP's anchor trimming. Invalid raw alleles retain unavailable projection.
+      expected_hgvs <- n_indel_expected_hgvs
+      invalid_raw <- raw & grepl("N", n_indel_source$alternate, fixed = TRUE)
+      expected_hgvs[invalid_raw] <- NA_character_
+      expect_identical(sub("^p\\.\\((.*)\\)$", "p.\\1", singletons$hgvsp), expected_hgvs)
+      expect_identical(singletons$projection_status,
+        ifelse(invalid_raw, "invalid_allele", "ok"))
+      expect_identical(is.na(singletons$cds), invalid_raw)
+      expect_identical(is.na(singletons$protein), invalid_raw)
+      expect_identical(singletons$sequence_status,
+        ifelse(invalid_raw, "unavailable_projection", "ok"))
+      expect_equal(singletons$carrier_count, rep(if (raw) 2 else 1, 8L))
+      expect_equal(vapply(singletons$contributors, nrow, 0L), rep(1L, 8L))
+      contributors <- do.call(rbind, singletons$contributors)
+      expect_equal(contributors$event_index, n_indel_source$i)
+      expect_equal(contributors$position, n_indel_source$position)
+      expect_identical(contributors$reference, n_indel_source$reference)
+      expect_identical(contributors$alternate, n_indel_source$alternate)
+    }
+  }
+
   dbWriteTable(con, "reference_protein_source", data.frame(i = 0:5,
     cds = c("CTGGCCTAA", "ATGTGAGCCTAA", "ATGGCCTAA", "ATGGCCTGA", "ctggcctaa", "AT"),
     code = c(1L, 1L, 1L, 2L, 1L, 1L)))

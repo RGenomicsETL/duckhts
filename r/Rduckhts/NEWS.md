@@ -1,6 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
 
+- use pinned VEP-116 consensus for bundled indel coding contexts and preserve
+  literal matching N insertion anchors in independent and singleton HGVSp;
+  test source alleles and missing results through DBI and rduckhts_haplotypes
+
 - correct bundled independent and singleton protein annotations in N-containing
   codons using pinned VEP-116 consensus, while preserving unknown uploaded alleles
 

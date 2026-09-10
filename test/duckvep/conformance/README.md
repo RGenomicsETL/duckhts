@@ -1236,6 +1236,29 @@ The supplied extension is explicitly diagnostic, not certified as built from
 the current checkout. The command fails on any disagreement; see
 [`ERRATA.md`](../../../ERRATA.md#n-containing-codons-in-independent-and-singleton-protein-annotation).
 
+The same driver accepts `--variant-family indel`. Its complete finite matrix
+has 168,000 original VCF records: 56 insertions, deletions and unequal-length
+replacements per codon/table, including 25,200 N anchors and 19,512 removed
+spans containing N. Source models have one forward exon exactly covering the
+CDS, explicit empty transcript UTRs, and separately declared genomic flanks.
+Three native models hold 56,000 events each to respect the region-ordinal limit;
+global event identities remain unchanged and local ordinals are partition-qualified.
+All eight route/thread configurations contribute 1,344,000 HGVSp comparisons;
+the two independent routes contribute 336,000 SO comparisons. Raw source-mode
+contrasts remain in these comparisons even where its full-allele eligibility
+differs from independent VEP's anchor trimming. These are diagnostic contrasts,
+not proof of raw-Haplosaurus equivalence or population error rates.
+
+Use `--evidence-out NEW_DIRECTORY` to retain complete comparison pairs, raw
+source/oracle records, warnings, controls and identities. The read-only audit
+`Rscript test/scripts/test_ambiguous_indel_evidence.R DIRECTORY RECEIPT_SHA256`
+requires a separately reviewed receipt digest and reconstructs the entire
+matrix. Its default requires complete native transcript-flank metadata;
+`--incomplete-model-diagnostic` explicitly labels earlier model-setup diagnostics.
+Source geometry, comparison keys, missing results, model partitions and summary
+counts have independent corruption controls. The audit preserves nonzero
+disagreement counts; a successful audit is not a successful conformance run.
+
 `compound_coding_audit.R --artifacts results/<haplotype-run>` observes the native
 coding-context evaluator on every original edit set, including reference lanes.
 It verifies complete CDS/displayed-protein replay and rejects false supported

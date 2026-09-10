@@ -253,6 +253,7 @@ duckvep_hgvs_status_t duckvep_hgvs_dna_fact_build(
 static duckvep_hgvs_status_t hgvs_reference_base(
     const duckvep_hgvs_reference_window_t *reference,
     uint32_t                                position1,
+    int                                     retained_anchor,
     uint8_t                                *base_out) {
 
     uint64_t offset;
@@ -269,8 +270,8 @@ static duckvep_hgvs_status_t hgvs_reference_base(
     if (offset >= (uint64_t)reference->length) {
         return DUCKVEP_HGVS_MISSING_REFERENCE;
     }
-    base = duckvep_dna_normalize((char)reference->bases[(size_t)offset], 0);
-    if (base == '\0' || base == 'N') return DUCKVEP_HGVS_INVALID_ALLELE;
+    base = duckvep_dna_normalize((char)reference->bases[(size_t)offset], retained_anchor);
+    if (base == '\0') return DUCKVEP_HGVS_INVALID_ALLELE;
     *base_out = (uint8_t)base;
     return DUCKVEP_HGVS_OK;
 }
@@ -450,11 +451,16 @@ duckvep_hgvs_status_t duckvep_hgvs_uploaded_reference_validate(
     for (i = 0u; i < raw_ref_length; i++) {
         uint8_t uploaded;
         uint8_t reference_base;
-        duckvep_hgvs_status_t status = hgvs_oriented_allele_base(
-            raw_ref, raw_ref_length, (int8_t)1, 0u, i, &uploaded);
-        if (status != DUCKVEP_HGVS_OK) return status;
-        status = hgvs_reference_base(
-            reference, event->raw_start1 + (uint32_t)i, &reference_base);
+        /* The prepared event identifies the erased insertion anchor. VEP
+         * removes it before allele eligibility checks; N here is a literal
+         * reference byte to match, not an unknown changed allele or wildcard. */
+        int retained_anchor = event->interbase &&
+            event->kind == (uint8_t)DUCKVEP_KIND_INS && !event->ref_diff_length &&
+            i == (size_t)event->anchor_ref_offset;
+        uploaded = (uint8_t)duckvep_dna_normalize((char)raw_ref[i], retained_anchor);
+        if (!uploaded) return DUCKVEP_HGVS_INVALID_ALLELE;
+        duckvep_hgvs_status_t status = hgvs_reference_base(
+            reference, event->raw_start1 + (uint32_t)i, retained_anchor, &reference_base);
         if (status != DUCKVEP_HGVS_OK) return status;
         if (uploaded != reference_base) {
             return DUCKVEP_HGVS_REFERENCE_MISMATCH;
@@ -798,7 +804,7 @@ duckvep_hgvs_dna_fact_build_genomic_shifted_with_lookup(
                 &uploaded);
             if (status != DUCKVEP_HGVS_OK) return status;
             status = hgvs_reference_base(
-                lookup_reference, edit->event.start1 + (uint32_t)i,
+                lookup_reference, edit->event.start1 + (uint32_t)i, 0,
                 &reference_base);
             if (status != DUCKVEP_HGVS_OK) return status;
             if (uploaded != reference_base) {
@@ -921,7 +927,7 @@ duckvep_hgvs_dna_fact_build_genomic_shifted_with_lookup(
             &pattern_base);
         if (status != DUCKVEP_HGVS_OK) return status;
         status = hgvs_reference_base(
-            shift_reference, reference_position, &reference_base);
+            shift_reference, reference_position, 0, &reference_base);
         if (status != DUCKVEP_HGVS_OK) return status;
         if (pattern_base != reference_base) break;
         shift++;
@@ -1006,7 +1012,7 @@ duckvep_hgvs_dna_fact_build_genomic_shifted_with_lookup(
                 status = duckvep_hgvs_dna_base(&result, 1, i, &alt_base);
                 if (status != DUCKVEP_HGVS_OK) return status;
                 status = hgvs_reference_base(
-                    lookup_reference, reference_position, &reference_base);
+                    lookup_reference, reference_position, 0, &reference_base);
                 if (status != DUCKVEP_HGVS_OK) {
                     duplicated = 0;
                     break;
@@ -1310,7 +1316,7 @@ duckvep_hgvs_status_t duckvep_hgvs_shifted_cds_edit_build(
             ? fact->placed_insertion_boundary0 :
               fact->placed_insertion_boundary0 + 1u;
         status = hgvs_reference_base(
-            reference, anchor_position1, allele_scratch + allele_length);
+            reference, anchor_position1, 1, allele_scratch + allele_length);
         if (status != DUCKVEP_HGVS_OK) return status;
         allele.alt = allele_scratch;
         allele.alt_length = fact->alt_length;

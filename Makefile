@@ -292,6 +292,9 @@ test-benchmark-registry: test-variantkey-provider-staging test-duckvep-corpus-st
 	Rscript test/scripts/test_genotype_format_benchmark.R
 	Rscript test/scripts/test_hgvs_cis_codon.R
 	Rscript test/scripts/test_ambiguous_codon.R
+	Rscript test/scripts/test_ambiguous_indel.R
+	Rscript test/scripts/test_ambiguous_indel_evidence.R
+	Rscript test/scripts/test_indel_predicate_witnesses.R
 	Rscript test/scripts/test_reference_translation.R
 	Rscript test/scripts/test_haplotype_geometry.R
 	Rscript test/scripts/test_haplotype_phase_history.R

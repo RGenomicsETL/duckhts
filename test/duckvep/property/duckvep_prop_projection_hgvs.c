@@ -960,6 +960,147 @@ TEST hgvs_protein_pair_reuses_fused_facts_and_bounds_shift_scratch(void) {
     PASS();
 }
 
+TEST hgvs_retained_n_insertion_anchor_matches_vep(void) {
+    /* Pinned Parser/VCF.pm removes the shared anchor before allele eligibility.
+     * Actual VEP CLI observations retain these original N>NGCC records, with
+     * GCN->A and NCN->X consensus translation. The canonical anchor is a control. */
+    static const struct {
+        const char *genome;
+        uint32_t position1;
+        const char *alleles;
+        const char *protein;
+    } cases[] = {
+        {"AAAAAAAAAA" "ATGGCNGCCTAA" "AAAAAAAAAA", 16u, "NNGCC", "p.Ala2dup"},
+        {"AAAAAAAAAA" "ATGNCNGCCTAA" "AAAAAAAAAA", 14u, "NNGCC", "p.Ter2_Ala3insPro"},
+        {"AAAAAAAAAA" "ATGGCTGCCTAA" "AAAAAAAAAA", 16u, "TTGCC", "p.Ala2dup"}
+    };
+    for (size_t i = 0u; i < sizeof cases / sizeof cases[0]; i++) {
+        struct kprop_proj_scene s = {0};
+        s.chrom = 0u;
+        s.tstart = s.cds_s = s.es[0] = 11u;
+        s.tend = s.cds_e = s.ee[0] = 22u;
+        s.cs[0] = 1u;
+        s.ce[0] = 12u;
+        s.strand = 1;
+        s.excnt = 1u;
+        s.flags = DUCKVEP_TX_HAS_TRANSLATION | DUCKVEP_TX_BIOTYPE_PROTEIN_CODING;
+        kprop_proj_scene_finish(&s);
+        uint64_t offset = 0u;
+        uint32_t length = 12u, empty = 0u;
+        uint8_t table = DUCKVEP_CODON_TABLE_STANDARD;
+        duckvep_sequence_pool_t sequences = {0};
+        sequences.cds_bytes = (const uint8_t *)cases[i].genome + 10u;
+        sequences.cds_bytes_len = length;
+        sequences.cds_offset = &offset;
+        sequences.cds_length = &length;
+        sequences.codon_table = &table;
+        sequences.transcript_count = 1u;
+        sequences.flank_bytes = sequences.cds_bytes;
+        sequences.flank_bytes_len = length;
+        sequences.pre_cds_offset = sequences.post_cds_offset = &offset;
+        sequences.pre_cds_length = sequences.post_cds_length = &empty;
+        sequences.flanks_complete = 1u;
+        duckvep_hgvs_reference_window_t reference = {
+            (const uint8_t *)cases[i].genome, strlen(cases[i].genome), 1u, 0u};
+        uint32_t ro = 0u, ao = 1u;
+        uint16_t rl = 1u, al = 4u;
+        uint8_t kind = DUCKVEP_KIND_INS;
+        duckvep_variant_batch_t variants = {0};
+        variants.chrom_id = &s.chrom;
+        variants.pos1 = variants.end1 = &cases[i].position1;
+        variants.ref_offset = &ro;
+        variants.alt_offset = &ao;
+        variants.ref_length = &rl;
+        variants.alt_length = &al;
+        variants.variant_kind = &kind;
+        variants.count = 1u;
+        variants.allele_bytes = (const uint8_t *)cases[i].alleles;
+        variants.allele_bytes_len = 5u;
+        duckvep_event_t event;
+        ASSERT(duckvep_event_prepare_small(cases[i].position1, variants.allele_bytes,
+            rl, variants.allele_bytes + ao, al, &event));
+        event.chrom_id = 0u;
+        ASSERT_EQ(DUCKVEP_HGVS_OK, duckvep_hgvs_uploaded_reference_validate(
+            &reference, &event, variants.allele_bytes, rl));
+        duckvep_haplotype_edit_t edits[4];
+        duckvep_transcript_edit_t edit;
+        ASSERT_EQ(DUCKVEP_TRANSCRIPT_EDIT_OK, duckvep_transcript_edit_build_prepared(
+            &s.tx, &s.ex, &sequences, &variants, 0u, 0u, &event, edits, 4u, &edit));
+        ASSERT_EQ(DUCKVEP_CDS_EDIT_OK, edit.cds_status);
+        uint8_t cds[64], rp[32], ap[32];
+        duckvep_delta_scratch_t scratch = {edits, 4u, cds, sizeof cds,
+            rp, sizeof rp, ap, sizeof ap};
+        duckvep_coding_context_t context;
+        ASSERT_EQ(DUCKVEP_VARIANT_CODING_CONTEXT_OK, duckvep_model_coding_context_build(
+            &s.tx, &s.ex, &sequences, 0u, 1, &event, &edit.cds_edits,
+            cds, sizeof cds, rp, sizeof rp, ap, sizeof ap, &context));
+        duckvep_sequence_delta_t delta;
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+            duckvep_coding_context_delta_fill(&context, s.flags, &delta));
+        duckvep_pair_facts_t facts = {0};
+        facts.event = &event;
+        facts.transcript_edit = &edit;
+        facts.transcript_edit_status = DUCKVEP_TRANSCRIPT_EDIT_OK;
+        facts.coding_context = &context;
+        facts.delta = &delta;
+        facts.projection_exon_hint = 0u;
+        duckvep_consequence_t row = {0};
+        row.overlap_object_kind = DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT;
+        row.region_mask = DUCKVEP_REGION_CDS;
+        row.flags = duckvep_sequence_delta_consequence_flags(&delta, 1);
+        duckvep_hgvs_dna_fact_t dna;
+        ASSERT_EQ(DUCKVEP_HGVS_OK, duckvep_hgvs_dna_fact_build_genomic_shifted_with_lookup(
+            &s.tx, &s.ex, &reference, &reference, &edit, &dna));
+        ASSERT_EQ(0, dna.shift_offset);
+        for (uint8_t reuse_context = 0u; reuse_context < 2u; reuse_context++) {
+            facts.coding_context_valid = reuse_context;
+            uint8_t alleles[6];
+            memset(alleles, 0xa5, sizeof alleles);
+            duckvep_hgvs_protein_pair_t pair;
+            size_t required;
+            if (!reuse_context) {
+                ASSERT_EQ(DUCKVEP_HGVS_BUFFER_TOO_SMALL, duckvep_hgvs_protein_pair_build(
+                    &s.tx, &s.ex, &sequences, &variants, &row, &facts, &dna, &reference,
+                    &scratch, alleles + 1u, 3u, &required, &pair));
+                ASSERT_EQ(4u, required);
+                for (size_t j = 0u; j < sizeof alleles; j++) ASSERT_EQ(0xa5u, alleles[j]);
+            }
+            ASSERT_EQ(DUCKVEP_HGVS_OK, duckvep_hgvs_protein_pair_build(
+                &s.tx, &s.ex, &sequences, &variants, &row, &facts, &dna, &reference,
+                &scratch, alleles + 1u, 4u, &required, &pair));
+            ASSERT_EQ(reuse_context ? 0u : 4u, required);
+            ASSERT(pair.fact.context == (reuse_context ? &context : &pair.context));
+            ASSERT_EQ(0xa5u, alleles[0]);
+            ASSERT_EQ(0xa5u, alleles[5]);
+            char rendered[64];
+            ASSERT_EQ(DUCKVEP_HGVS_OK, duckvep_hgvs_protein_render(
+                &pair.fact, 0, rendered, sizeof rendered, &required));
+            ASSERT_STR_EQ(cases[i].protein, rendered);
+        }
+        /* Permission to read the retained anchor does not admit an N in the
+         * inserted payload or the genomic sequence used for shifting. */
+        duckvep_hgvs_dna_fact_t unknown_payload = dna;
+        unknown_payload.alt = (const uint8_t *)"GNC";
+        facts.coding_context_valid = 0u;
+        uint8_t allele_scratch[4];
+        duckvep_hgvs_protein_pair_t pair;
+        size_t required;
+        ASSERT_EQ(DUCKVEP_HGVS_INVALID_ALLELE, duckvep_hgvs_protein_pair_build(
+            &s.tx, &s.ex, &sequences, &variants, &row, &facts, &unknown_payload, &reference,
+            &scratch, allele_scratch, sizeof allele_scratch, &required, &pair));
+        uint8_t unknown_shift_bases[32];
+        ASSERT_EQ(sizeof unknown_shift_bases, reference.length);
+        memcpy(unknown_shift_bases, reference.bases, sizeof unknown_shift_bases);
+        unknown_shift_bases[0] = (uint8_t)'N';
+        duckvep_hgvs_reference_window_t unknown_shift = reference;
+        unknown_shift.bases = unknown_shift_bases;
+        ASSERT_EQ(DUCKVEP_HGVS_INVALID_ALLELE,
+            duckvep_hgvs_dna_fact_build_genomic_shifted_with_lookup(
+                &s.tx, &s.ex, &unknown_shift, &reference, &edit, &dna));
+    }
+    PASS();
+}
+
 TEST hgvs_dna_facts_orient_reverse_alleles_once(void) {
     static const uint8_t ref[] = {'A', 'C'};
     static const uint8_t alt[] = {'G'};
@@ -3026,6 +3167,36 @@ TEST hgvs_uploaded_reference_validates_vcf_anchor_and_padding(void) {
               duckvep_hgvs_uploaded_reference_validate(
                   &reference, &event, wrong_padded_ref,
                   sizeof wrong_padded_ref));
+
+    /* An erased N anchor must match literally. An untrimmed N substitution,
+     * other ambiguous symbols, and a missing anchor remain invalid. */
+    static const uint8_t n_anchor[] = "N";
+    static const uint8_t n_insertion[] = "NGCC";
+    ASSERT(duckvep_event_prepare_small(124u, n_anchor, 1u, n_insertion, 4u, &event));
+    event.chrom_id = reference.chrom_id;
+    ASSERT_EQ(DUCKVEP_HGVS_REFERENCE_MISMATCH, duckvep_hgvs_uploaded_reference_validate(
+        &reference, &event, n_anchor, 1u));
+    reference.bases = n_anchor;
+    reference.length = 1u;
+    ASSERT_EQ(DUCKVEP_HGVS_OK, duckvep_hgvs_uploaded_reference_validate(
+        &reference, &event, n_anchor, 1u));
+    ASSERT_EQ(DUCKVEP_HGVS_REFERENCE_MISMATCH, duckvep_hgvs_uploaded_reference_validate(
+        &reference, &event, correct_anchor, 1u));
+    ASSERT_EQ(DUCKVEP_HGVS_INVALID_ALLELE, duckvep_hgvs_uploaded_reference_validate(
+        &reference, &event, (const uint8_t *)"R", 1u));
+    reference.bases = (const uint8_t *)"R";
+    ASSERT_EQ(DUCKVEP_HGVS_INVALID_ALLELE, duckvep_hgvs_uploaded_reference_validate(
+        &reference, &event, n_anchor, 1u));
+    reference.bases = n_anchor;
+    reference.length = 0u;
+    ASSERT_EQ(DUCKVEP_HGVS_MISSING_REFERENCE, duckvep_hgvs_uploaded_reference_validate(
+        &reference, &event, n_anchor, 1u));
+    reference.length = 1u;
+    ASSERT(duckvep_event_prepare_small(124u, n_anchor, 1u,
+        (const uint8_t *)"A", 1u, &event));
+    event.chrom_id = reference.chrom_id;
+    ASSERT_EQ(DUCKVEP_HGVS_INVALID_ALLELE, duckvep_hgvs_uploaded_reference_validate(
+        &reference, &event, n_anchor, 1u));
     PASS();
 }
 
