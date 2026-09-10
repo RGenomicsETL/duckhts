@@ -1021,12 +1021,36 @@ default-limit failure remains in the length ledger alongside both completed runs
 it has no native comparison verdict. Per-run upstream group-owner checks do not
 waive the separate cross-run grouped-metadata disagreements.
 
-Publish a completed clean-build model campaign into the length ledger with:
+The `DuckVEP execution provenance` workflow builds and executes on GitHub-hosted
+runners from `develop` or `main`. Its `length` campaign covers 6,072 profiles;
+`full` executes both 29,520-profile model seeds. Dispatch the full campaign with:
+
+```sh
+gh workflow run duckvep-provenance.yml --ref develop -f campaign=full
+```
+
+Each workflow artifact contains `duckvep-model.tar.gz`: the original relative
+result directory, executed binary, build receipt, observations and a detached
+`attestation.jsonl`. Download into an empty directory, inspect the archive, and
+extract its `test/` tree into the repository without overwriting existing files.
+Keep the detached bundle outside the result directory. Publish a completed run with:
 
 ```sh
 Rscript test/duckvep/conformance/haplotype_model_differential.R \
-  --publish-artifact test/duckvep/conformance/results/haplotype_models_seed173_RUN
+  --publish-artifact test/duckvep/conformance/results/ci-model_RUN_ATTEMPT_SEED \
+  --attestation-bundle /path/to/attestation.jsonl
 ```
+
+Publication requires GitHub CLI with `gh attestation verify`. Its certificate must
+identify `RGenomicsETL/duckhts`, `.github/workflows/duckvep-provenance.yml`, a
+GitHub-hosted runner and the `develop` or `main` ref; source and signer digests must
+both equal the receipt's source commit. Omitting `--attestation-bundle` fetches the
+signature from GitHub. Verification can require network access to refresh trusted
+signing material even with a local bundle. Repository/workflow control is the trust
+root: the signature authenticates execution origin, not scientific correctness or
+the absence of flaws in trusted code. The workflow accepts no uploaded run to sign.
+Historical unsigned runs remain retained evidence, but cannot pass this publication
+gate or acquire signatures retroactively.
 
 Publication verifies every retained file and regenerates the complete declared
 seeded cohort from the registered reference. Model relations, physical VCF records,
@@ -1041,10 +1065,14 @@ passing campaign. A genuinely discordant campaign retains its failure counts.
 `--history` selects an explicit existing ledger. Publication appends under an
 exclusive writer lock; an existing receipt is verified without rewriting its row.
 Diagnostic and aborted campaigns remain retained but are not accepted as completed
-clean-build observations by this publisher.
+clean-build observations by this publisher. CI retains and signs failed execution
+receipts when the clean-build checks succeed; a signature does not clear that
+failure. The workflow tests authentic and altered receipts with the real verifier
+and validates publication in an isolated ledger without changing checked-in history.
 
-`Rscript test/scripts/test_haplotype_model_history.R` exercises publication checks
-without VEP or DuckDB. Its small fixture retains the first two original transcript
+`Rscript test/scripts/test_haplotype_model_history.R` exercises observation and
+comparison checks without VEP, DuckDB or signature verification. Its small fixture
+retains the first two original transcript
 observations from clean source `0857ec1faf5736299a4341f73ffa557d8a9691ee`, seed 173;
 the source receipt locator, SHA-256 and oracle pins are embedded in the fixture.
 To reconstruct it from that retained campaign, maintainers run:

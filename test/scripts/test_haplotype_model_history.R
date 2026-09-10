@@ -110,6 +110,42 @@ main <- function() {
   }
   stopifnot(identical(checked, model_comparisons(fixture$inputs, fixture$actual,
     rev(fixture$oracle), rev(fixture$phase))))
+  # A within-sample swap on both sides preserves grouped oracle totals. Native
+  # edit IDs still join to contributors whose alleles must match the source GT.
+  rows <- lapply(seq_len(nrow(fixture$actual)), function(i) {
+    x <- fixture$actual[i, , drop = FALSE]
+    lapply(seq_len(nrow(x$carriers[[1L]])), function(j) {
+      one <- x
+      one$carriers[[1L]] <- x$carriers[[1L]][j, , drop = FALSE]
+      one$carrier_count <- 1
+      one
+    })
+  })
+  split <- do.call(rbind, unlist(rows, recursive = FALSE))
+  stopifnot(model_comparisons(fixture$inputs, split,
+    fixture$oracle, fixture$phase)$metrics$failures == 0L)
+  phase <- fixture$phase
+  lanes <- which(vapply(phase[[2L]]$replay_lanes, function(x) x$sample == 's0', TRUE))
+  pair <- which(split$transcript_index == 1L &
+    vapply(split$carriers, function(x) x$sample_index == 0L, TRUE))
+  pair <- pair[order(vapply(split$carriers[pair], `[[`, 1L, 'haplotype_lane'))]
+  stopifnot(length(pair) == 2L, length(lanes) == 2L)
+  for (field in c('cds', 'protein', 'coding_blocks', 'sequence_flags', 'nominal_length_diff'))
+    split[[field]][pair] <- split[[field]][rev(pair)]
+  for (field in c('cds', 'protein', 'applied_sources', 'flags')) {
+    values <- lapply(phase[[2L]]$replay_lanes[lanes], `[[`, field)
+    for (i in 1:2) phase[[2L]]$replay_lanes[[lanes[i]]][field] <- values[3L - i]
+  }
+  swapped_sides <- model_comparisons(fixture$inputs, split, fixture$oracle, phase)
+  stopifnot(swapped_sides$metrics$failures == 1L,
+    swapped_sides$metrics$replay_lane_failures == 1L,
+    swapped_sides$metrics$input_provenance_failures == 0L,
+    swapped_sides$metrics$mapping_failures == 0L)
+  split$contributors[pair] <- split$contributors[rev(pair)]
+  swapped_sources <- model_comparisons(fixture$inputs, split, fixture$oracle, phase)
+  stopifnot(swapped_sources$metrics$failures == 1L,
+    swapped_sources$metrics$replay_lane_failures == 0L,
+    swapped_sources$metrics$input_provenance_failures == 1L)
   # A passing subset cannot establish the full seeded model/input denominator.
   options <- list(rare_per_stratum = 0L, geometry_per_stratum = 0L,
     interaction_per_stratum = 0L, length_per_stratum = 0L)

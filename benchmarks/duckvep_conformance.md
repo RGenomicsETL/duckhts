@@ -1102,15 +1102,21 @@ pass it.
 
 The [model-history
 publisher](../test/duckvep/conformance/haplotype_model_differential.R)
-reopens retained artifacts before accepting these ledger rows. It
-regenerates the declared seeded inputs, reconstructs comparisons from
-keyed upstream/native observations, checks every summary and control,
-and derives alignment bounds from inputs. Existing rows must match the
-reconstruction exactly. Publication verifies the recorded verdict; it
-does not convert disagreements into passes. The [publication regression
+requires a CI-authenticated execution receipt and reopens retained
+artifacts. It regenerates the declared seeded inputs, reconstructs
+comparisons from keyed upstream/native observations, checks every
+summary and control, and derives alignment bounds from inputs. Existing
+rows must match the reconstruction exactly. Publication verifies the
+recorded verdict; it does not convert disagreements into passes. The
+[publication regression
 test](../test/scripts/test_haplotype_model_history.R) uses retained
 pinned observations and rejects rehashed comparison forgeries and
 coherent carrier-lane swaps while accepting honestly recorded failures.
+The historical campaigns below were locally executed and their complete
+observations were reconstructed at
+`7d7d0bc62806f9104db9d59911ebf62f9a3ae4e1`. They have no CI-issued
+signatures and do not satisfy the authenticated-publication gate. Their
+recorded counts and verdicts remain unchanged.
 
 |     seed | profiles | records | leaves | carriers | failures | lane_flag_failures | group_metadata_failures |
 |---------:|---------:|--------:|-------:|---------:|---------:|-------------------:|------------------------:|

@@ -2,6 +2,10 @@
 
 # duckhts 1.5.1.9000
 
+- require GitHub-issued execution-receipt attestations for model-history publication,
+  tied to the repository, trusted workflow and source commit; retain unsigned history
+  without upgrading its provenance and test coordinated source/native lane swaps
+
 - reconstruct model-campaign inputs, keyed oracle/native comparisons, corruption
   controls and alignment bounds before publishing history; verify existing rows
   without rewriting them and preserve honestly recorded disagreements

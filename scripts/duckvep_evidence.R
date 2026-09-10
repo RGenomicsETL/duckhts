@@ -76,6 +76,7 @@ duckvep_evidence_read_artifact <- function(directory, required_files) {
   relative <- duckvep_evidence_repo_path(getwd(), directory)
   stopifnot(nzchar(relative))
   receipt_path <- file.path(directory, "receipt.json")
+  receipt_sha256 <- duckvep_evidence_sha256(receipt_path)
   receipt <- jsonlite::fromJSON(receipt_path)
   hashes <- unlist(receipt$sha256)
   stopifnot(is.character(hashes), !is.null(names(hashes)),
@@ -92,8 +93,31 @@ duckvep_evidence_read_artifact <- function(directory, required_files) {
   at <- match(normalizePath(retained), recorded)
   stopifnot(!anyNA(at), identical(unname(vapply(retained, duckvep_evidence_sha256, "")),
     unname(hashes[at])))
+  stopifnot(identical(receipt_sha256, duckvep_evidence_sha256(receipt_path)))
   list(directory = directory, relative = relative, receipt_path = receipt_path,
-    receipt = receipt, hashes = setNames(unname(hashes), recorded))
+    receipt = receipt, receipt_sha256 = receipt_sha256,
+    hashes = setNames(unname(hashes), recorded))
+}
+
+# GitHub verifies the signature, transparency log, hosted-runner certificate and
+# source/workflow identities. Run JSON is the signed subject, not the trust root.
+duckvep_evidence_verify_ci_receipt <- function(path, source_revision, bundle = NULL) {
+  stopifnot(length(source_revision) == 1L, !is.na(source_revision),
+    grepl("^[0-9a-f]{40}$", source_revision))
+  path <- normalizePath(path, mustWork = TRUE)
+  digest <- duckvep_evidence_sha256(path)
+  args <- c("attestation", "verify", path,
+    "--repo", "RGenomicsETL/duckhts",
+    "--signer-workflow", "RGenomicsETL/duckhts/.github/workflows/duckvep-provenance.yml",
+    "--cert-identity-regex", paste0("^https://github[.]com/RGenomicsETL/duckhts/",
+      "[.]github/workflows/duckvep-provenance[.]yml@refs/heads/(develop|main)$"),
+    "--cert-oidc-issuer", "https://token.actions.githubusercontent.com",
+    "--source-digest", source_revision, "--signer-digest", source_revision,
+    "--deny-self-hosted-runners", "--predicate-type", "https://slsa.dev/provenance/v1")
+  if (!is.null(bundle)) args <- c(args, "--bundle", normalizePath(bundle, mustWork = TRUE))
+  duckvep_evidence_command("gh", args, "CI execution-receipt attestation verification failed")
+  stopifnot(identical(digest, duckvep_evidence_sha256(path)))
+  invisible(digest)
 }
 
 duckvep_evidence_assert_checkout <- function(

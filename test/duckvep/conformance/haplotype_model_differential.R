@@ -410,7 +410,7 @@ model_check_saved <- function(directory, inputs, actual, oracle, phase, receipt)
   checked
 }
 
-model_history_row <- function(directory) {
+model_history_row <- function(directory, attestation_bundle = NULL) {
   source('scripts/duckvep_evidence.R', local = TRUE)
   files <- c('inputs.rds', 'actual.rds', 'comparisons.rds', 'summary.csv', 'controls.csv',
     'metadata_controls.csv', 'oracle.stdout', 'phase.jsonl', 'calls.vcf', 'reference.fa',
@@ -418,6 +418,8 @@ model_history_row <- function(directory) {
   artifact <- duckvep_evidence_read_artifact(directory, files)
   directory <- artifact$directory
   receipt <- artifact$receipt
+  stopifnot(identical(artifact$receipt_sha256, duckvep_evidence_verify_ci_receipt(
+    artifact$receipt_path, receipt$source_revision, attestation_bundle)))
   fields <- c('extension_build_binding', 'execution_status', 'scope', 'source_revision',
     'threads', 'source_artifact', 'length_per_stratum', 'profiles', 'records',
     'required_strata', 'minimum_stratum_draws', 'geometry_strata',
@@ -438,7 +440,7 @@ model_history_row <- function(directory) {
   Sys.setenv(DUCKHTSBENCH_REGISTRY = file.path(getwd(), 'r/duckhtsbench/inst/benchmark_registry.tsv'))
   paths <- duckhtsbench::duckhts_bench_stage_repository_fixtures(getwd(), 'duckvep-haplotypes')
   reference <- paths[['haplotype_benchmark_reference']]
-  stopifnot(artifact$hashes[[normalizePath(reference)]] == duckvep_evidence_sha256(reference))
+  stopifnot(identical(receipt$source_artifact_sha256, duckvep_evidence_sha256(reference)))
   generated <- model_inputs(receipt$seed, receipt, readLines(reference)[2L])
   inputs <- generated$inputs
   stopifnot(identical(inputs, readRDS(file.path(directory, 'inputs.rds'))),
@@ -495,8 +497,8 @@ model_history_row <- function(directory) {
   as.data.frame(row, stringsAsFactors = FALSE)
 }
 
-publish_model_history <- function(directory, history_path) {
-  row <- model_history_row(directory)
+publish_model_history <- function(directory, history_path, attestation_bundle = NULL) {
+  row <- model_history_row(directory, attestation_bundle)
   lock <- paste0(history_path, '.lock')
   if (!dir.create(lock, showWarnings = FALSE)) stop('Model history publication is busy: ', lock)
   on.exit(unlink(lock, recursive = TRUE), add = TRUE)
@@ -530,16 +532,20 @@ main <- function() {
     optparse::make_option('--max-alignment-cells', dest = 'max_alignment_cells', type = 'integer', default = 16777216L),
     optparse::make_option('--extension-receipt', dest = 'extension_receipt', default = NULL),
     optparse::make_option('--publish-artifact', dest = 'publish_artifact', default = NULL),
+    optparse::make_option('--attestation-bundle', dest = 'attestation_bundle', default = NULL),
+    optparse::make_option('--output-dir', dest = 'output_dir', default = NULL),
     optparse::make_option('--history', default = 'test/duckvep/conformance/data/haplotype_length_history.csv'),
     optparse::make_option('--vep-prefix', dest = 'vep_prefix', default = '/root/miniconda3/envs/vep')
   )))
-  if (!is.null(opt$publish_artifact)) return(publish_model_history(opt$publish_artifact, opt$history))
+  if (!is.null(opt$publish_artifact)) return(publish_model_history(
+    opt$publish_artifact, opt$history, opt$attestation_bundle))
   source('scripts/duckvep_evidence.R', local = TRUE)
   root <- normalizePath('.')
   seed <- opt$seed
   stopifnot(!is.na(opt$max_alignment_cells), opt$max_alignment_cells > 0L)
   revision <- duckvep_evidence_revision(root)
   extension <- normalizePath('build/release/duckhts.duckdb_extension')
+  extension_sha256 <- duckvep_evidence_sha256(extension)
   binding <- 'diagnostic_unbound'
   if (!is.null(opt$extension_receipt)) {
     duckvep_evidence_assert_checkout(root, revision)
@@ -548,9 +554,19 @@ main <- function() {
   Sys.setenv(DUCKHTSBENCH_REGISTRY = file.path(root, 'r/duckhtsbench/inst/benchmark_registry.tsv'))
   paths <- duckhtsbench::duckhts_bench_stage_repository_fixtures(root, 'duckvep-haplotypes')
   cds <- readLines(paths[['haplotype_benchmark_reference']])[2L]
-  out <- tempfile(paste0('haplotype_models_seed', seed, '_'),
-    tmpdir = 'test/duckvep/conformance/results')
-  dir.create(out)
+  results <- 'test/duckvep/conformance/results'
+  dir.create(results, recursive = TRUE, showWarnings = FALSE)
+  out <- if (is.null(opt$output_dir)) tempfile(paste0('haplotype_models_seed', seed, '_'),
+    tmpdir = results) else opt$output_dir
+  stopifnot(identical(normalizePath(dirname(out), mustWork = TRUE),
+    normalizePath(results)), grepl('^[A-Za-z0-9][A-Za-z0-9_.-]*$', basename(out)),
+    !file.exists(out))
+  out <- file.path(results, basename(out))
+  stopifnot(dir.create(out), file.copy(extension, file.path(out, 'duckhts.duckdb_extension')))
+  extension <- file.path(out, 'duckhts.duckdb_extension')
+  stopifnot(identical(extension_sha256, duckvep_evidence_sha256(extension)))
+  if (!is.null(opt$extension_receipt)) stopifnot(
+    file.copy(opt$extension_receipt, file.path(out, 'extension.tsv')))
   message('Artifacts: ', out)
   pins <- model_oracle_revisions
   mirrors <- normalizePath(c('.sync/ensembl-vep', '.sync/ensembl-variation'))
@@ -589,10 +605,12 @@ main <- function() {
     'perl', 'test/duckvep/conformance/haplotype_oracle.pl', file.path(out, 'calls.vcf'),
     file.path(out, 'reference.fa'), file.path(out, 'model.gff3.gz'), file.path(out, 'phase.jsonl')), 'oracle')
   write_receipt <- function(metrics) {
+    stopifnot(identical(extension_sha256, duckvep_evidence_sha256(extension)))
     identities <- unique(c('test/duckvep/conformance/haplotype_model_differential.R',
-      'test/duckvep/conformance/haplotype_observations.R', 'scripts/duckvep_evidence.R', extension,
+      'test/duckvep/conformance/haplotype_observations.R', 'scripts/duckvep_evidence.R',
+      duckvep_evidence_repo_path(root, extension),
       'test/duckvep/conformance/haplotype_model_geometry.R',
-      'test/duckvep/conformance/haplotype_oracle.pl', paths[['haplotype_benchmark_reference']],
+      'test/duckvep/conformance/haplotype_oracle.pl',
       'r/duckhtsbench/inst/benchmark_registry.tsv', list.files(out, full.names = TRUE)))
     jsonlite::write_json(c(list(source_revision = revision, extension_build_binding = binding,
       tracked_changes = duckvep_evidence_tracked_changes(root),
@@ -603,7 +621,9 @@ main <- function() {
       length_per_stratum = opt$length_per_stratum, length_strata = if (opt$length_per_stratum) 4536L else 0L,
       max_alignment_cells = opt$max_alignment_cells,
       minimum_stratum_draws = min(coverage$observed), oracle_revisions = as.list(pins),
-      source_artifact = 'haplotype_benchmark_reference', profiles = nrow(models),
+      source_artifact = 'haplotype_benchmark_reference',
+      source_artifact_sha256 = duckvep_evidence_sha256(paths[['haplotype_benchmark_reference']]),
+      profiles = nrow(models),
       records = nrow(records), threads = 4L), metrics,
       list(sha256 = as.list(vapply(identities, duckvep_evidence_sha256, '')))),
       file.path(out, 'receipt.json'), auto_unbox = TRUE, pretty = TRUE)
