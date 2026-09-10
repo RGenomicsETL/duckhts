@@ -1899,7 +1899,18 @@ predicates are true, but emitted SO contains only `frameshift_variant`:
 HGVSp values are `p.Gly4ArgfsTer?` and `p.Pro7IlefsTer?`. Native tests check
 both layers rather than treating a raw missense flag as an emitted consequence.
 
-The same bundle retains six later-coding-exon models, both strands and phases
+The canonical replay benchmark's CDS67 `GC>G` supplies an exact additional
+witness: local `GCT/GT` gives `A/X`, raw frameshift and missense are true,
+and independent VEP emits only `frameshift_variant` with
+`p.Ala23ValfsTer?`. A physical block does not inherit the uploaded-feature
+class gate, so its local mask includes both raw predicates. The
+[checkpoint report](benchmarks/duckvep_haplotypes_indel.md) retains the paired
+four-row native outputs, exact upstream observation and all 51 measurements.
+The singleton full-output fingerprints differ from the prior source; their
+large-output audit remains incomplete and the benchmark equality failure is
+not waived by the small witness.
+
+The indel predicate bundle retains six later-coding-exon models, both strands and phases
 0, 1 and 2, with N outside the validated `T>AC` or reverse-strand `A>GT`
 source allele. Pinned TVA and CLI observations agree on
 `frameshift_variant&start_lost`; the local peptides are `X/XX`. HGVSp is

@@ -2,6 +2,9 @@
 
 # duckhts 1.5.1.9000
 
+- report all source-bound indel checkpoint measurements and their unequal
+  singleton local-consequence fingerprints
+
 - interpret N-containing indel codons with pinned VEP-116 consensus and match
   retained insertion anchors literally; share the checked coding/HGVS paths
   without accepting ambiguous changed alleles

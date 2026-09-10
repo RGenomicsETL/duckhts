@@ -1,0 +1,199 @@
+---
+title: "Indel checkpoint: replay benchmark with unequal outputs"
+output: github_document
+---
+
+<!-- duckvep_haplotypes_indel.md is generated from duckvep_haplotypes_indel.Rmd. -->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+root <- normalizePath(Sys.getenv("DUCKHTS_REPO_ROOT", getwd()), mustWork = TRUE)
+current <- read.csv(file.path(root, "benchmarks/data/duckvep_haplotypes_indel.csv"),
+  colClasses = "character")
+history <- read.csv(file.path(root, "benchmarks/data/duckvep_haplotypes.csv"),
+  colClasses = "character")
+revision <- unique(current$source_revision)
+baseline_revision <- "e3ec6d231cc7e5c769685761a4739c8fcffc30ff"
+baseline <- history[history$source_revision == baseline_revision, ]
+keys <- c("transcripts", "samples", "overlap", "mode", "pass")
+stopifnot(identical(revision, "20efcf2af33b38c5be7596e2db7b243a3be53c47"),
+  identical(names(current), names(baseline)), nrow(current) == 51L, nrow(baseline) == 51L,
+  !anyDuplicated(current[keys]), !anyDuplicated(baseline[keys]),
+  all(current$extension_build_binding == "htslib_distclean_make_release"),
+  all(current$threads == "1"), all(current$cpu_affinity == "2"),
+  all(current$duckdb_version[current$mode != "native"] == "1.5.3"),
+  all(is.finite(as.numeric(current$seconds))), all(as.numeric(current$seconds) > 0),
+  all(is.finite(as.numeric(current$peak_process_rss_kib))),
+  all(as.numeric(current$peak_process_rss_kib) > 0))
+current <- current[do.call(order, current[keys]), ]
+baseline <- baseline[do.call(order, baseline[keys]), ]
+rownames(current) <- rownames(baseline) <- NULL
+stopifnot(identical(current[keys], baseline[keys]))
+fingerprints <- grep("(^|_)(xor|sum)_hash$", names(current), value = TRUE)
+measurement_fields <- c("source_revision", "seconds", "peak_process_rss_kib",
+  "artifact_directory", "receipt_sha256", "extension_sha256", "native_binary_sha256")
+invariants <- setdiff(names(current), c(measurement_fields, fingerprints))
+stopifnot(identical(current[invariants], baseline[invariants]))
+equal <- function(a, b) (is.na(a) & is.na(b)) | (!is.na(a) & !is.na(b) & a == b)
+differences <- do.call(rbind, lapply(fingerprints, function(field) {
+  at <- which(!equal(current[[field]], baseline[[field]]))
+  data.frame(current[at, keys], field = rep(field, length(at)),
+    baseline_value = baseline[[field]][at], current_value = current[[field]][at])
+}))
+groups <- split(seq_len(nrow(current)), interaction(current[keys[-5L]], drop = TRUE))
+summary <- do.call(rbind, lapply(groups, function(at) {
+  stopifnot(identical(sort(current$pass[at]), c("1", "2", "3")))
+  for (field in setdiff(names(current), c("pass", "seconds", "peak_process_rss_kib"))) {
+    stopifnot(length(unique(current[[field]][at])) == 1L,
+      length(unique(baseline[[field]][at])) == 1L)
+  }
+  data.frame(current[at[1L], keys[-5L]],
+    baseline_median_s = median(as.numeric(baseline$seconds[at])),
+    current_median_s = median(as.numeric(current$seconds[at])),
+    current_max_rss_mib = max(as.numeric(current$peak_process_rss_kib[at])) / 1024,
+    full_output_equal = if (current$mode[at[1L]] == "native") NA else
+      all(equal(current$xor_hash[at], baseline$xor_hash[at])) &&
+      all(equal(current$sum_hash[at], baseline$sum_hash[at])),
+    replay_equal = if (current$mode[at[1L]] == "native") NA else
+      all(equal(current$replay_xor_hash[at], baseline$replay_xor_hash[at])) &&
+      all(equal(current$replay_sum_hash[at], baseline$replay_sum_hash[at])))
+}))
+summary <- summary[do.call(order, summary[keys[-5L]]), ]
+witness_path <- file.path(root, "benchmarks/data/duckvep_haplotypes_indel_witness.jsonl.gz")
+stopifnot(digest::digest(file = witness_path, algo = "sha256") ==
+  "753dfd26db78bd02b9662ed857840c64e2742f71d4e34f1dd74623cbdf52e1a7")
+witness_input <- gzfile(witness_path, "rt")
+witness <- lapply(readLines(witness_input), jsonlite::fromJSON)
+close(witness_input)
+witness_keys <- vapply(witness, function(x) paste(x$origin, x$name, sep = "/"), "")
+stopifnot(length(witness) == 38L, !anyDuplicated(witness_keys))
+for (record in witness) stopifnot(digest::digest(jsonlite::base64_dec(record$bytes_base64),
+  algo = "sha256", serialize = FALSE) == record$sha256)
+read_witness <- function(key) {
+  at <- which(witness_keys == key)
+  stopifnot(length(at) == 1L)
+  strsplit(rawToChar(jsonlite::base64_dec(witness[[at]]$bytes_base64)), "\n", fixed = TRUE)[[1L]]
+}
+before_rows <- lapply(read_witness("native/baseline.jsonl"), jsonlite::fromJSON, simplifyVector = FALSE)
+after_rows <- lapply(read_witness("native/current.jsonl"), jsonlite::fromJSON, simplifyVector = FALSE)
+stopifnot(length(before_rows) == 4L, length(after_rows) == 4L,
+  before_rows[[4L]]$contributors[[1L]]$event_index == 4L,
+  before_rows[[4L]]$coding_blocks[[1L]]$local_consequence_mask == 8388608L,
+  after_rows[[4L]]$coding_blocks[[1L]]$local_consequence_mask == 8396800L)
+before_rows[[4L]]$coding_blocks[[1L]]$local_consequence_mask <- 8396800L
+stopifnot(identical(before_rows, after_rows))
+oracle <- jsonlite::fromJSON(read_witness("oracle/tva.stdout"))
+stopifnot(oracle$source$position1 == 67L, oracle$source$reference == "GC",
+  oracle$source$alternate == "G", oracle$ref_codon == "GCT", oracle$alt_codon == "GT",
+  oracle$ref_peptide == "A", oracle$alt_peptide == "X",
+  oracle$raw_predicates$frameshift == 1L, oracle$raw_predicates$missense_variant == 1L,
+  length(oracle$raw_predicates) == 13L, sum(unlist(oracle$raw_predicates)) == 2L,
+  identical(oracle$consequences, "frameshift_variant"),
+  identical(oracle$hgvsp, "bench_protein.1:p.Ala23ValfsTer?"))
+```
+
+Source: `r revision`. Nearest same-input baseline: `r baseline_revision`.
+All 51 timed observations are retained in
+[the checkpoint data](data/duckvep_haplotypes_indel.csv), including every full-output
+fingerprint. **The cross-revision full-output equality check failed.** None of
+these rows was appended to the existing benchmark history, and its equality
+guard remains unchanged. Rendering this diagnostic report is not a passing
+benchmark-promotion verdict.
+
+## Workload and execution
+
+[The benchmark driver](duckvep_haplotypes.R) uses the same registered 180-base
+canonical-DNA CDS, four original ALT events and diploid sample templates as
+[the baseline report](duckvep_haplotypes.md). It checks complete carrier multisets,
+sequences, edit provenance, corrupted inputs and full output fingerprints within
+each mode. The singleton HGVS check compares independent and phased DuckHTS
+paths; it is not an independent VEP oracle.
+
+Both campaigns ran on the Intel i5-13500 with DuckDB 1.5.3, one thread pinned to
+CPU 2, three fresh-process timed passes and separate correctness workers.
+The current extension was rebuilt from a clean tracked checkout with HTSlib
+distclean; its SHA-256 is
+`a5dceecf83f96b484339fec50372953465dc0543199508bb368df34a9c647f13`.
+Retained receipts identify source files, native bridge, extension, registered
+inputs, derived FASTA/index and every worker artifact. They are local
+source-bound records, not signed CI attestations.
+
+Native timing covers initialized ordered-feed replay and a count sink. SQL timing
+covers full table materialization, including preparation, sort, replay, sequence
+differences, local coding facts and all nested output. Model/input staging and
+post-query fingerprints are outside timing. Whole-process maximum RSS includes
+the R/DuckDB host, setup, warm-up, output and post-query checks.
+
+## All measured configurations
+
+```{r timing}
+knitr::kable(summary, row.names = FALSE, digits = 4)
+```
+
+`NA` marks the native count sink, which has no serialized SQL-row fingerprint.
+Counts, input identities, output contracts, sequence bytes and JSON byte lengths
+match between revisions. The unequal singleton fingerprints mean those timings
+are **same-input, different-output measurements**, not identical-output work.
+Matching byte lengths do not establish matching values.
+
+```{r denominators}
+denominators <- c(keys[-5L], "input_records", "projected_events", "input_calls",
+  "input_physical_records", "input_record_sample_calls", "input_candidate_sample_rows",
+  "output_leaves", "output_carriers", "cds_bytes", "protein_bytes", "json_bytes")
+knitr::kable(current[current$pass == "1", denominators], row.names = FALSE)
+```
+
+## Retained output differences
+
+All three measured passes agree within each mode. Across revisions,
+`r nrow(unique(differences[keys]))` of 51 timed rows have unequal fingerprints:
+the two singleton modes at both transcript counts, with three passes each.
+Literal replay fingerprints agree. The complete observations below retain the
+unequal hash values; no field was normalized away to obtain a match.
+
+```{r unequal-fingerprints}
+knitr::kable(differences[differences$pass == "1", ], row.names = FALSE)
+```
+
+A [retained four-event, one-transcript reproduction](data/duckvep_haplotypes_indel_witness.jsonl.gz) isolates the deletion
+`GC>G` at CDS position 67: its block `local_consequence_mask` changes from
+8,388,608 (`frameshift`) to 8,396,800 (`frameshift` plus raw `missense`). Every
+other field in those four complete rows is unchanged. The physical deletion
+changes local `GCT` to partial `GT`, giving peptide operands `A` and `X`.
+The documented local-block contract evaluates raw coding predicates without an
+independent source event's uploaded-feature class gates. See
+[ERRATA.md](../ERRATA.md) for the pinned predicate evidence and its limits.
+The compact witness preserves both complete native outputs and all original
+files from the exact pinned-VEP observation, including source, observation
+scripts, commands, receipts and failed-attempt diagnostics. Its 38 files are
+stored as byte-exact base64 payloads with per-file hashes. Rendering verifies
+the bundle identity, the complete four-row difference and the independent
+raw-predicate observation. It is unsigned diagnostic evidence.
+
+This small reproduction does **not** prove that it explains every differing field
+in each large timed output. A complete keyed-output audit remains required before
+these measurements can be promoted with an approved expected-output correction.
+The full-equality failure is retained, not waived by matching replay projections.
+
+Three passes on one shared machine do not establish statistical significance,
+a causal performance effect or a general absence of regression. This fixture
+does not measure N-rich annotation, whole-haplotype consequences or compound HGVS.
+
+## Reproduction
+
+Use the clean extension-receipt procedure in the baseline report, then run
+`benchmarks/duckvep_haplotypes.R` with `--passes 3 --cpu 2` and these six workloads:
+
+```{r workloads}
+workloads <- unique(current[c("transcripts", "samples", "overlap")])
+workloads$modes <- vapply(seq_len(nrow(workloads)), function(i) {
+  selected <- current$transcripts == workloads$transcripts[i] &
+    current$samples == workloads$samples[i] & current$overlap == workloads$overlap[i]
+  paste(unique(current$mode[selected]), collapse = ",")
+}, "")
+knitr::kable(workloads, row.names = FALSE)
+```
+
+Pass `--extension-receipt PATH` and the listed `--transcripts`, `--samples`,
+`--overlap` and `--modes` to each invocation. Preserve every result and receipt;
+do not append a campaign that fails the historical full-output check.
