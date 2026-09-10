@@ -1213,7 +1213,11 @@ comparison pairs as Parquet, compressed source cases and raw oracle observations
 summaries, controls and hashes. It excludes other native output fields. Use
 `--evidence-out NEW_DIRECTORY` to retain another complete comparison bundle;
 existing directories are not overwritten. Network-free reconstruction and
-corruption checks run with `Rscript test/scripts/test_ambiguous_codon.R`.
+corruption checks run with `Rscript test/scripts/test_ambiguous_codon.R`. The
+audit independently enumerates every declared codon/table/substitution and
+source ordinal before reading comparisons. Eleven additional matrix controls
+reject changed fields and count-preserving case or substitution replacements.
+Route identities and N strata are checked against their declared axes.
 The supplied extension is explicitly diagnostic, not certified as built from
 the current checkout. The command fails on any disagreement; see
 [`ERRATA.md`](../../../ERRATA.md#n-containing-codons-in-independent-and-singleton-protein-annotation).

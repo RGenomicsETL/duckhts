@@ -1,6 +1,81 @@
 #!/usr/bin/env Rscript
 # Network-free comparator controls, independent of production annotations.
 source('test/duckvep/conformance/ambiguous_codon_differential.R')
+
+# Independently enumerate the declared axes and source ordinals. Do not infer
+# eligibility or the expected substitutions from the retained case contents.
+check_codon_matrix <- function(cases) {
+  bases <- c('A', 'C', 'G', 'T', 'N')
+  tables <- c(1:6, 9:14, 16, 21:31)
+  stopifnot(length(cases) == 24L * 5L^3L)
+  case_index <- 0L
+  event_index <- 0L
+  for (third in bases) for (second in bases) for (first in bases) for (table in tables) {
+    case_index <- case_index + 1L
+    case <- cases[[case_index]]
+    codon <- paste0(first, second, third)
+    stopifnot(setequal(names(case), c('id', 'cds', 'table', 'edits', 'variants')),
+      identical(case$id, paste(table, codon, sep = '/')),
+      identical(case$cds, paste0('ATG', codon, 'TAA')), is.numeric(case$table),
+      identical(as.numeric(case$table), table),
+      is.list(case$edits), length(case$edits) == 0L, is.data.frame(case$variants),
+      setequal(names(case$variants), c('id', 'position1', 'reference', 'alternate')))
+    variant_index <- 0L
+    for (position in 1:3) for (alternate in bases[1:4]) {
+      reference <- substr(codon, position, position)
+      if (reference == alternate) next
+      variant_index <- variant_index + 1L
+      event_index <- event_index + 1L
+      stopifnot(variant_index <= nrow(case$variants))
+      variant <- case$variants[variant_index, ]
+      stopifnot(identical(variant$id, as.character(event_index)),
+        is.numeric(variant$position1),
+        identical(as.numeric(variant$position1), as.numeric(position + 3L)),
+        identical(variant$reference, reference), identical(variant$alternate, alternate))
+    }
+    stopifnot(nrow(case$variants) == variant_index)
+  }
+  stopifnot(case_index == 3000L, event_index == 28800L)
+  invisible(TRUE)
+}
+
+codon_matrix_controls <- function(cases) {
+  rejected <- function(x) !isTRUE(tryCatch(check_codon_matrix(x), error = function(e) FALSE))
+  stopifnot(!rejected(cases))
+  controls <- c(missing_case = rejected(cases[-1L]))
+  # Tables 1 and 11 share these internal AAA peptide observations. Keep all
+  # event ordinals and totals while replacing the table-11 case with a copy.
+  changed <- cases
+  case_ids <- vapply(cases, `[[`, '', 'id')
+  original <- match('1/AAA', case_ids)
+  replaced <- match('11/AAA', case_ids)
+  changed[[replaced]] <- cases[[original]]
+  changed[[replaced]]$id <- 'duplicate/1/AAA'
+  changed[[replaced]]$variants$id <- cases[[replaced]]$variants$id
+  ids <- unlist(lapply(changed, function(x) x$variants$id))
+  stopifnot(length(changed) == 3000L, length(ids) == 28800L, !anyDuplicated(ids),
+    !anyDuplicated(vapply(changed, `[[`, '', 'id')))
+  controls['count_preserving_case_swap'] <- rejected(changed)
+  changed <- cases
+  changed[[1L]]$variants[2L, c('position1', 'reference', 'alternate')] <-
+    changed[[1L]]$variants[1L, c('position1', 'reference', 'alternate')]
+  controls['count_preserving_variant_swap'] <- rejected(changed)
+  for (field in c('id', 'cds', 'table', 'edits')) {
+    changed <- cases
+    changed[[1L]][[field]] <- switch(field, id = 'wrong', cds = 'ATGAACTAA',
+      table = 2L, edits = list(list(position1 = 2L, alternate = 'A')))
+    controls[paste0('case_', field)] <- rejected(changed)
+  }
+  for (field in c('id', 'position1', 'reference', 'alternate')) {
+    changed <- cases
+    value <- changed[[1L]]$variants[[field]][1L]
+    changed[[1L]]$variants[[field]][1L] <- if (is.numeric(value)) value + 1L else paste0(value, 'X')
+    controls[paste0('variant_', field)] <- rejected(changed)
+  }
+  stopifnot(all(controls))
+  controls
+}
+
 expected <- data.frame(event_index = 1:2, allele = c('A', 'C'),
   hgvsp = c('p.Ala2Thr', NA_character_), so = c('missense_variant', 'coding_sequence_variant'))
 controls <- rbind(codon_controls(expected), codon_provenance_controls(FALSE),
@@ -24,11 +99,22 @@ read_records <- function(name) {
 }
 cases <- read_records('cases.jsonl.gz')
 oracle <- read_records('oracle.stdout.gz')
-stopifnot(length(cases) == 3000L,
+stopifnot(check_codon_matrix(cases),
   identical(vapply(cases, `[[`, '', 'id'), vapply(oracle, `[[`, '', 'id')))
+matrix_controls <- codon_matrix_controls(cases)
+message('Exact finite codon matrix: ', length(matrix_controls), ' corruptions rejected')
+for (i in seq_along(cases)) {
+  variants <- cases[[i]]$variants
+  observed <- oracle[[i]]$independent_hgvs
+  stopifnot(identical(oracle[[i]]$prepared_cds, cases[[i]]$cds),
+    nrow(observed) == nrow(variants), !anyDuplicated(observed$id),
+    setequal(observed$id, variants$id),
+    identical(observed$allele, variants$alternate[match(observed$id, variants$id)]))
+}
 events <- do.call(rbind, lapply(cases, function(x) data.frame(
   event_index = as.integer(x$variants$id), position = x$variants$position1,
-  reference = x$variants$reference, allele = x$variants$alternate, cds = x$cds, table = x$table)))
+  reference = x$variants$reference, allele = x$variants$alternate, cds = x$cds, table = x$table,
+  case_id = x$id, codon = substr(x$cds, 4L, 6L))))
 expected <- do.call(rbind, lapply(oracle, function(x) {
   rows <- x$independent_hgvs
   data.frame(event_index = as.integer(rows$id), allele = rows$allele,
@@ -42,11 +128,15 @@ pairs <- DBI::dbGetQuery(con, paste('SELECT * FROM read_parquet(',
   DBI::dbQuoteString(con, file.path(directory, 'pairs.parquet')), ')'))
 DBI::dbDisconnect(con, shutdown = TRUE)
 stopifnot(nrow(pairs) == 230400L, all(pairs$actual_present), all(pairs$expected_present),
+  setequal(unique(pairs$route), paste0(rep(c('independent', 'strict', 'vep116_compat', 'source_records'),
+    each = 2L), '_', c(1L, 4L))),
   all(pairs$seq_region == pairs$event_index - 1L),
   all(pairs$transcript_index == pairs$event_index - 1L))
 input_at <- match(pairs$event_index, events$event_index)
-for (field in c('position', 'reference', 'allele', 'cds', 'table'))
+for (field in c('position', 'reference', 'allele', 'cds', 'table', 'case_id', 'codon'))
   stopifnot(all(pairs[[field]] == events[[field]][input_at]))
+stopifnot(all(pairs$source_n == ifelse(pairs$reference == 'N', 'yes', 'no')),
+  all(pairs$codon_n == ifelse(grepl('N', pairs$codon, fixed = TRUE), 'yes', 'no')))
 for (route in unique(pairs$route)) {
   part <- pairs[pairs$route == route, ]
   actual <- data.frame(event_index = part$event_index, allele = part$allele,

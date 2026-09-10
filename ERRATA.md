@@ -1818,6 +1818,10 @@ comparisons span eight route/thread configurations, with 12,992 disagreements;
 missing or extra. The bundle includes 64 passing comparator/provenance
 corruption controls. It is unsigned diagnostic evidence, not an authenticated
 conformance certificate, and excludes native fields outside the comparison.
+The network-free audit independently reconstructs every expected case and
+substitution from the declared finite grid. Eleven matrix corruption controls
+include case and substitution replacements that preserve cardinalities and
+unique event ordinals. Totals alone do not establish exhaustive coverage.
 
 The oracle uses the pinned environment and actual VEP-116
 `TranscriptVariationAllele::peptide`, `VariationFeatureOverlapAllele::seq_is_unambiguous_dna`
