@@ -1374,6 +1374,99 @@ local({
   expect_true(dbGetQuery(con,
     "SELECT duckvep_model_drop('r-hgvs-removed-ref') dropped")$dropped)
 
+  # Pinned original records in indel_translation_witnesses.jsonl.gz, under
+  # canonical_hgvs and xaa_duplication. Each source has an isolated transcript.
+  hgvs_residual_sources <- data.frame(
+    i = 0:11,
+    event_index = c(4052L, 4059L, 4065L, 4067L, 4069L, 13533L, 13684L, 32276L,
+      71881L, 89760L, 110256L, 146516L),
+    codon_table = c(1L, 1L, 1L, 1L, 1L, 2L, 5L, 1L, 14L, 26L, 1L, 1L),
+    cds = c(rep("ATGTAAGCCTAA", 5L), "ATGAGAGCCTAA", "ATGAGAGCCTAA", "ATGNNAGCCTAA",
+      "ATGTAGGCCTAA", "ATGCTGGCCTAA", "ATGGCTGCCTAA", "ATGNCNGCCTAA"),
+    position = c(14L, 14L, 15L, 15L, 15L, 15L, 14L, 14L, 15L, 16L, 16L, 14L),
+    reference = c("T", "TAAG", "A", "A", "AAG", "GAG", "A", "N", "A", "G", "T", "N"),
+    alternate = c("TGCC", "TA", "AAC", "AACGT", "A", "G", "AGCC", "NGCC",
+      "AAC", "GGCC", "TGCC", "NGCC")
+  )
+  hgvs_residual_expected <- c("p.Ter2delinsCysGln", "p.Ala3Ter", "p.Ter2_Ala3insTer",
+    "p.Ter2_Ala3insArgTer", "p.Ala3Ter", "p.Ala3Ter", "p.Arg2dup", "p.Xaa2dup",
+    "p.Ter2_Ala3insTer", "p.Ala2_Ala3insAla", "p.Ala2dup", "p.Ter2_Ala3insPro")
+  hgvs_residual_so <- c("stop_lost", "coding_sequence_variant", "stop_retained_variant",
+    "coding_sequence_variant&inframe_insertion", "coding_sequence_variant", "inframe_deletion",
+    "inframe_insertion", "coding_sequence_variant&inframe_insertion", "coding_sequence_variant",
+    "inframe_insertion", "inframe_insertion", "coding_sequence_variant&inframe_insertion")
+  dbWriteTable(con, "hgvs_residual_sources", hgvs_residual_sources)
+  dbExecute(con, paste(
+    "CREATE TABLE hgvs_residual_transcripts AS SELECT",
+    "i::UINTEGER transcript_index, i::UINTEGER seq_region,",
+    "11::UBIGINT transcript_start, 22::UBIGINT transcript_end,",
+    "1::TINYINT strand, i::UINTEGER gene_index, 3::UBIGINT transcript_flags,",
+    "transcript_start cds_start, transcript_end cds_end,",
+    "cds::BLOB cds_sequence, codon_table::UTINYINT codon_table,",
+    "''::BLOB pre_cds_sequence, ''::BLOB post_cds_sequence FROM hgvs_residual_sources"
+  ))
+  expect_true(load_model("r-hgvs-residual", c(
+    paste("SELECT i::UINTEGER seq_region, 32::UBIGINT sequence_length,",
+      "'residual_' || event_index seq_region_name FROM hgvs_residual_sources ORDER BY i"),
+    "SELECT * FROM hgvs_residual_transcripts ORDER BY transcript_index",
+    paste("SELECT transcript_index, 11::UBIGINT exon_start, 22::UBIGINT exon_end,",
+      "1::UBIGINT exon_cdna_start, 12::UBIGINT exon_cdna_end,",
+      "0::TINYINT phase, 0::TINYINT end_phase",
+      "FROM hgvs_residual_transcripts ORDER BY transcript_index")
+  ), reference_fasta = system.file("extdata", "duckvep_indel_translation.fa",
+    package = "Rduckhts", mustWork = TRUE))$loaded)
+  dbExecute(con, paste(
+    "CREATE TABLE hgvs_residual_events AS SELECT event_index::UBIGINT event_index,",
+    "i::UINTEGER seq_region, position::UBIGINT AS position, reference, alternate,",
+    "NULL::UBIGINT end_position, NULL::VARCHAR structural_type,",
+    "NULL::VARCHAR copy_change, NULL::UINTEGER mate_seq_region,",
+    "NULL::UBIGINT mate_position FROM hgvs_residual_sources"
+  ))
+  residual <- dbGetQuery(con, paste(
+    "SELECT event_index, protein_hgvs, protein_hgvs_status,",
+    "(SELECT string_agg(t.consequence, '&' ORDER BY t.consequence)",
+    "FROM duckvep_so_terms() t",
+    "WHERE (a.consequence_mask & t.consequence_mask) <> 0) consequences",
+    "FROM duckvep_annotate('hgvs_residual_events', 'r-hgvs-residual',",
+    "hgvs := true, upstream_distance := 0, downstream_distance := 0) a ORDER BY event_index"
+  ))
+  expect_equal(residual$event_index, hgvs_residual_sources$event_index)
+  expect_identical(residual$protein_hgvs, hgvs_residual_expected)
+  expect_identical(residual$protein_hgvs_status, rep("supported", 12L))
+  expect_identical(residual$consequences, hgvs_residual_so)
+  for (raw in c(FALSE, TRUE)) {
+    input <- if (raw) paste(
+      "SELECT event_index, seq_region, position, reference, [alternate] alternates,",
+      "seq_region transcript_index, 0 sample_index, '1|1' gt FROM hgvs_residual_events"
+    ) else paste(
+      "SELECT event_index, seq_region, position, reference, alternate, 1 alt_index,",
+      "seq_region transcript_index, 0 sample_index, [1]::INTEGER[] alleles,",
+      "[true]::BOOLEAN[] phase_before, NULL::BIGINT phase_set FROM hgvs_residual_events"
+    )
+    replay <- rduckhts_haplotypes(con, input, "r-hgvs-residual", hgvs = TRUE,
+      phase_policy = "vep116_compat", input_mode = if (raw) "source_records" else "alt_events")
+    replay <- replay[order(replay$transcript_index), ]
+    expect_equal(replay$transcript_index, hgvs_residual_sources$i)
+    # Raw ALT N remains ineligible even when TVA can erase its shared anchor.
+    invalid_raw <- raw & hgvs_residual_sources$event_index %in% c(32276L, 146516L)
+    expected <- hgvs_residual_expected
+    expected[invalid_raw] <- NA_character_
+    expect_identical(sub("^p\\.\\((.*)\\)$", "p.\\1", replay$hgvsp), expected)
+    expect_identical(replay$projection_status, ifelse(invalid_raw, "invalid_allele", "ok"))
+    expect_identical(replay$sequence_status, ifelse(invalid_raw, "unavailable_projection", "ok"))
+    expect_identical(is.na(replay$cds), invalid_raw)
+    expect_identical(is.na(replay$protein), invalid_raw)
+    expect_equal(replay$carrier_count, rep(if (raw) 2L else 1L, 12L))
+    expect_equal(vapply(replay$contributors, nrow, 0L), rep(1L, 12L))
+    contributors <- do.call(rbind, replay$contributors)
+    expect_equal(contributors$event_index, hgvs_residual_sources$event_index)
+    expect_equal(contributors$seq_region, hgvs_residual_sources$i)
+    expect_equal(contributors$position, hgvs_residual_sources$position)
+    expect_identical(contributors$reference, hgvs_residual_sources$reference)
+    expect_identical(contributors$alternate, hgvs_residual_sources$alternate)
+  }
+  expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-hgvs-residual') dropped")$dropped)
+
   # Protein HGVS uses its own exact-size retry after the initial native scratch
   # fills. Exercise that adapter path through DBI with an in-frame insertion.
   hgvs_long_protein <- dbGetQuery(

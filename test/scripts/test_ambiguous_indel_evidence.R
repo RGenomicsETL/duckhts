@@ -492,7 +492,7 @@ if (sys.nframe() == 0L) {
       'test/duckvep/conformance/data/ambiguous_indel_consensus',
       'a1d0f0cd56717f20cfa663de72efa22ab16a416a460d65fa6ffa7d6122039385',
       'test/duckvep/conformance/data/ambiguous_indel_translation',
-      'a240e618939c4a68dfac11a1cf4f54d79ab2f088e237c4ef3dae84732018a251')
+      '49d5db6cd0292a18fd72de941d0d904f84920964384d625cbfae791904b96d44')
   }
   baseline <- NULL
   for (i in seq.int(1L, length(args), by = 2L)) {

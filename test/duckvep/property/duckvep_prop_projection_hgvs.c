@@ -960,6 +960,248 @@ TEST hgvs_protein_pair_reuses_fused_facts_and_bounds_shift_scratch(void) {
     PASS();
 }
 
+TEST hgvs_indel_original_facts_and_duplication_match_vep(void) {
+    /* Original VCF records observed in pinned VEP 116, retained in the
+     * indel_translation_witnesses capsule. These cover duplication naming,
+     * default-table duplication detection, original false frameshift guards,
+     * and the three-letter delins formatter's unreachable /X$/ suffix. */
+    static const struct {
+        uint64_t id;
+        const char *cds;
+        uint8_t table;
+        uint32_t position;
+        const char *reference;
+        const char *alternate;
+        const char *hgvs;
+        const char *strict_hgvs;
+        uint8_t stop_retained;
+    } cases[] = {
+        {4052u, "ATGTAAGCCTAA", 1u, 14u, "T", "TGCC", "p.Ter2delinsCysGln", NULL, 0u},
+        {4059u, "ATGTAAGCCTAA", 1u, 14u, "TAAG", "TA", "p.Ala3Ter", NULL, 0u},
+        {4065u, "ATGTAAGCCTAA", 1u, 15u, "A", "AAC", "p.Ter2_Ala3insTer", NULL, 1u},
+        {4067u, "ATGTAAGCCTAA", 1u, 15u, "A", "AACGT", "p.Ter2_Ala3insArgTer", NULL, 0u},
+        {4069u, "ATGTAAGCCTAA", 1u, 15u, "AAG", "A", "p.Ala3Ter", NULL, 0u},
+        {13533u, "ATGAGAGCCTAA", 2u, 15u, "GAG", "G", "p.Ala3Ter", NULL, 0u},
+        {13684u, "ATGAGAGCCTAA", 5u, 14u, "A", "AGCC", "p.Arg2dup", "p.Ser2_Ala3insArg", 0u},
+        {71881u, "ATGTAGGCCTAA", 14u, 15u, "A", "AAC", "p.Ter2_Ala3insTer", NULL, 0u},
+        {89760u, "ATGCTGGCCTAA", 26u, 16u, "G", "GGCC", "p.Ala2_Ala3insAla", "p.Ala2dup", 0u},
+        {32276u, "ATGNNAGCCTAA", 1u, 14u, "N", "NGCC", "p.Xaa2dup", "p.Xaa2dup", 0u},
+        {110256u, "ATGGCTGCCTAA", 1u, 16u, "T", "TGCC", "p.Ala2dup", "p.Ala2dup", 0u},
+        {146516u, "ATGNCNGCCTAA", 1u, 14u, "N", "NGCC", "p.Ter2_Ala3insPro", "p.Xaa2_Ala3insPro", 0u}
+    };
+    static const int frameshift_excluded[] = {1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0};
+    static const duckvep_compat_profile_t profiles[] = {DUCKVEP_COMPAT_VEP_116, DUCKVEP_COMPAT_STRICT};
+    size_t paired_cases = 0u, profile_cases = 0u;
+    ASSERT_EQ(sizeof cases / sizeof cases[0], sizeof frameshift_excluded / sizeof frameshift_excluded[0]);
+    for (size_t i = 0u; i < sizeof cases / sizeof cases[0]; i++) {
+        struct kprop_proj_scene s = {0};
+        s.tstart = s.cds_s = s.es[0] = 11u;
+        s.tend = s.cds_e = s.ee[0] = 22u;
+        s.strand = 1;
+        s.excnt = 1u;
+        s.cs[0] = 1u;
+        s.ce[0] = 12u;
+        s.flags = DUCKVEP_TX_HAS_TRANSLATION | DUCKVEP_TX_BIOTYPE_PROTEIN_CODING;
+        kprop_proj_scene_finish(&s);
+        char genome[33], saved_genome[33];
+        ASSERT_EQ(32, snprintf(genome, sizeof genome, "AAAAAAAAAA%sAAAAAAAAAA", cases[i].cds));
+        memcpy(saved_genome, genome, sizeof genome);
+        uint64_t offset = 0u;
+        uint32_t length = 12u, empty = 0u;
+        duckvep_sequence_pool_t sequences = {0};
+        sequences.cds_bytes = (const uint8_t *)genome + 10u;
+        sequences.cds_bytes_len = length;
+        sequences.cds_offset = &offset;
+        sequences.cds_length = &length;
+        sequences.codon_table = &cases[i].table;
+        sequences.transcript_count = 1u;
+        sequences.flank_bytes = sequences.cds_bytes;
+        sequences.flank_bytes_len = length;
+        sequences.pre_cds_offset = sequences.post_cds_offset = &offset;
+        sequences.pre_cds_length = sequences.post_cds_length = &empty;
+        sequences.flanks_complete = 1u;
+        duckvep_hgvs_reference_window_t reference = {(const uint8_t *)genome, 32u, 1u, 0u};
+        uint16_t rl = (uint16_t)strlen(cases[i].reference);
+        uint16_t al = (uint16_t)strlen(cases[i].alternate);
+        uint32_t ro = 0u, ao = rl, raw_end = cases[i].position + rl - 1u;
+        uint8_t allele_bytes[16];
+        ASSERT((size_t)rl + al <= sizeof allele_bytes);
+        memcpy(allele_bytes, cases[i].reference, rl);
+        memcpy(allele_bytes + ao, cases[i].alternate, al);
+        duckvep_event_t event;
+        ASSERT(duckvep_event_prepare_small(cases[i].position, allele_bytes, rl,
+            allele_bytes + ao, al, &event));
+        event.chrom_id = s.chrom;
+        uint8_t kind = event.kind;
+        duckvep_variant_batch_t variants = {0};
+        variants.chrom_id = &s.chrom;
+        variants.pos1 = &cases[i].position;
+        variants.end1 = &raw_end;
+        variants.ref_offset = &ro;
+        variants.alt_offset = &ao;
+        variants.ref_length = &rl;
+        variants.alt_length = &al;
+        variants.variant_kind = &kind;
+        variants.allele_bytes = allele_bytes;
+        variants.allele_bytes_len = (size_t)rl + al;
+        variants.count = 1u;
+        ASSERT_EQ(DUCKVEP_HGVS_OK, duckvep_hgvs_uploaded_reference_validate(
+            &reference, &event, allele_bytes, rl));
+        duckvep_haplotype_edit_t edits[4];
+        duckvep_transcript_edit_t edit;
+        ASSERT_EQ(DUCKVEP_TRANSCRIPT_EDIT_OK, duckvep_transcript_edit_build_prepared(
+            &s.tx, &s.ex, &sequences, &variants, 0u, 0u, &event, edits, 4u, &edit));
+        ASSERT_EQ(DUCKVEP_CDS_EDIT_OK, edit.cds_status);
+        uint8_t cds[64] = {0}, rp[32] = {0}, ap[32] = {0};
+        duckvep_coding_context_t context;
+        ASSERT_EQ(DUCKVEP_VARIANT_CODING_CONTEXT_OK, duckvep_model_coding_context_build(
+            &s.tx, &s.ex, &sequences, 0u, 1, &event, &edit.cds_edits,
+            cds, sizeof cds, rp, sizeof rp, ap, sizeof ap, &context));
+        duckvep_sequence_delta_t delta;
+        ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK, duckvep_coding_context_delta_fill(&context, s.flags, &delta));
+        ASSERT(delta.valid);
+        ASSERT_FALSE(delta.frameshift);
+        ASSERT_EQ(cases[i].stop_retained, delta.stop_retained);
+        duckvep_coding_peptide_window_t window;
+        ASSERT(duckvep_coding_context_peptide_window_open(&context, &window));
+        int excluded = -1;
+        ASSERT(duckvep_coding_peptide_window_frameshift_excluded(&context, &window, &delta, &excluded));
+        ASSERT_EQ(frameshift_excluded[i], excluded);
+        if (cases[i].id == 13684u) {
+            /* Failure and a valid false result are distinct. Partial/retained
+             * stops short-circuit; unavailable REF does not invent a stop. */
+            ASSERT_FALSE(duckvep_coding_peptide_window_frameshift_excluded(
+                NULL, &window, &delta, &excluded));
+            ASSERT_EQ(0, excluded);
+            ASSERT_FALSE(duckvep_coding_peptide_window_frameshift_excluded(
+                &context, NULL, &delta, &excluded));
+            ASSERT_FALSE(duckvep_coding_peptide_window_frameshift_excluded(
+                &context, &window, NULL, &excluded));
+            ASSERT_FALSE(duckvep_coding_peptide_window_frameshift_excluded(
+                &context, &window, &delta, NULL));
+            duckvep_coding_peptide_window_t invalid = window;
+            invalid.ref_peptide_offset = context.ref_peptide_len;
+            ASSERT_FALSE(duckvep_coding_peptide_window_frameshift_excluded(
+                &context, &invalid, &delta, &excluded));
+            ASSERT_EQ(0, excluded);
+            duckvep_sequence_delta_t guarded = delta;
+            guarded.partial_codon = 1u;
+            ASSERT(duckvep_coding_peptide_window_frameshift_excluded(
+                &context, &window, &guarded, &excluded));
+            ASSERT_EQ(1, excluded);
+            guarded.partial_codon = 0u;
+            guarded.stop_retained = 1u;
+            ASSERT(duckvep_coding_peptide_window_frameshift_excluded(
+                &context, &window, &guarded, &excluded));
+            ASSERT_EQ(1, excluded);
+            duckvep_coding_context_t unavailable = context;
+            unavailable.feature_ref_peptide_unavailable = 1u;
+            ASSERT(duckvep_coding_peptide_window_frameshift_excluded(
+                &unavailable, &invalid, &delta, &excluded));
+            ASSERT_EQ(0, excluded);
+        }
+        duckvep_pair_facts_t facts = {0};
+        facts.event = &event;
+        facts.transcript_edit = &edit;
+        facts.transcript_edit_status = DUCKVEP_TRANSCRIPT_EDIT_OK;
+        facts.coding_context = &context;
+        facts.delta = &delta;
+        facts.projection_exon_hint = 0u;
+        duckvep_consequence_t row = {0};
+        row.overlap_object_kind = DUCKVEP_OVERLAP_OBJECT_TRANSCRIPT;
+        row.region_mask = DUCKVEP_REGION_CDS;
+        row.flags = duckvep_sequence_delta_consequence_flags(&delta, 1);
+        duckvep_hgvs_dna_fact_t dna;
+        ASSERT_EQ(DUCKVEP_HGVS_OK, duckvep_hgvs_dna_fact_build_genomic_shifted_with_lookup(
+            &s.tx, &s.ex, &reference, &reference, &edit, &dna));
+        duckvep_coding_context_t saved_context = context;
+        duckvep_sequence_delta_t saved_delta = delta;
+        duckvep_transcript_edit_t saved_edit = edit;
+        uint8_t saved_cds[64], saved_rp[32], saved_ap[32];
+        memcpy(saved_cds, cds, sizeof cds);
+        memcpy(saved_rp, rp, sizeof rp);
+        memcpy(saved_ap, ap, sizeof ap);
+        for (uint8_t alias = 0u; alias < 2u; alias++) {
+            for (uint8_t reuse = 0u; reuse < 2u; reuse++) {
+                for (uint8_t supplied_delta = 0u; supplied_delta < 2u; supplied_delta++) {
+                    /* Rebuild exact original operands before each call. Aliased
+                     * scratch may overwrite them during shifting; the original
+                     * exclusion of frameshift must already have been captured. */
+                    memset(cds, 0, sizeof cds);
+                    memset(rp, 0, sizeof rp);
+                    memset(ap, 0, sizeof ap);
+                    ASSERT_EQ(DUCKVEP_VARIANT_CODING_CONTEXT_OK, duckvep_model_coding_context_build(
+                        &s.tx, &s.ex, &sequences, 0u, 1, &event, &edit.cds_edits,
+                        cds, sizeof cds, rp, sizeof rp, ap, sizeof ap, &context));
+                    ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                        duckvep_coding_context_delta_fill(&context, s.flags, &delta));
+                    duckvep_haplotype_edit_t pair_edits[4];
+                    uint8_t pair_cds[64], pair_rp[32], pair_ap[32], allele_scratch[18];
+                    duckvep_delta_scratch_t scratch = {pair_edits, 4u, alias ? cds : pair_cds, sizeof pair_cds,
+                        alias ? rp : pair_rp, sizeof pair_rp, alias ? ap : pair_ap, sizeof pair_ap};
+                    memset(allele_scratch, 0xa5, sizeof allele_scratch);
+                    facts.coding_context_valid = reuse;
+                    facts.delta = supplied_delta ? &delta : NULL;
+                    duckvep_hgvs_protein_pair_t pair;
+                    size_t required;
+                    ASSERT_EQ(DUCKVEP_HGVS_OK, duckvep_hgvs_protein_pair_build(
+                        &s.tx, &s.ex, &sequences, &variants, &row, &facts, &dna, &reference,
+                        &scratch, allele_scratch + 1u, sizeof allele_scratch - 2u, &required, &pair));
+                    ASSERT_EQ(0xa5u, allele_scratch[0]);
+                    ASSERT_EQ(0xa5u, allele_scratch[sizeof allele_scratch - 1u]);
+                    char rendered[128];
+                    ASSERT_EQ(DUCKVEP_HGVS_OK, duckvep_hgvs_protein_render(
+                        &pair.fact, 0, rendered, sizeof rendered, &required));
+                    if (strcmp(cases[i].hgvs, rendered)) {
+                        fprintf(stderr, "original event %" PRIu64 " alias=%u reuse=%u delta=%u: %s != %s\n",
+                            cases[i].id, (unsigned)alias, (unsigned)reuse,
+                            (unsigned)supplied_delta, rendered, cases[i].hgvs);
+                    }
+                    ASSERT_STR_EQ(cases[i].hgvs, rendered);
+                    ASSERT_MEM_EQ(&saved_context, &context, sizeof context);
+                    ASSERT_MEM_EQ(&saved_delta, &delta, sizeof delta);
+                    ASSERT_MEM_EQ(&saved_edit, &edit, sizeof edit);
+                    if (!alias) {
+                        ASSERT_MEM_EQ(saved_cds, cds, sizeof cds);
+                        ASSERT_MEM_EQ(saved_rp, rp, sizeof rp);
+                        ASSERT_MEM_EQ(saved_ap, ap, sizeof ap);
+                    }
+                    ASSERT_MEM_EQ(saved_genome, genome, sizeof genome);
+                    ASSERT_MEM_EQ(cases[i].reference, allele_bytes, rl);
+                    ASSERT_MEM_EQ(cases[i].alternate, allele_bytes + ao, al);
+                    paired_cases++;
+                }
+            }
+        }
+        if (cases[i].strict_hgvs) {
+            /* STRICT keeps declared-table duplication detection and Xaa
+             * spelling. These are internal policy controls, not VEP claims. */
+            ASSERT_EQ(DUCKVEP_VARIANT_CODING_CONTEXT_OK, duckvep_model_coding_context_build(
+                &s.tx, &s.ex, &sequences, 0u, 1, &event, &edit.cds_edits,
+                cds, sizeof cds, rp, sizeof rp, ap, sizeof ap, &context));
+            ASSERT_EQ(DUCKVEP_CONTEXT_DELTA_OK,
+                duckvep_coding_context_delta_fill(&context, s.flags, &delta));
+            for (size_t p = 0u; p < sizeof profiles / sizeof profiles[0]; p++) {
+                duckvep_coding_context_t profile_context = context;
+                profile_context.compatibility_profile = (uint8_t)profiles[p];
+                duckvep_hgvs_protein_fact_t fact;
+                ASSERT_EQ(DUCKVEP_HGVS_OK,
+                    duckvep_hgvs_protein_fact_build(&profile_context, &delta, &fact));
+                char rendered[128];
+                size_t required;
+                ASSERT_EQ(DUCKVEP_HGVS_OK,
+                    duckvep_hgvs_protein_render(&fact, 0, rendered, sizeof rendered, &required));
+                ASSERT_STR_EQ(profiles[p] == DUCKVEP_COMPAT_VEP_116 ? cases[i].hgvs : cases[i].strict_hgvs,
+                    rendered);
+                profile_cases++;
+            }
+        }
+    }
+    ASSERT_EQ(96u, paired_cases);
+    ASSERT_EQ(10u, profile_cases);
+    PASS();
+}
+
 TEST hgvs_retained_n_insertion_anchor_matches_vep(void) {
     /* Pinned Parser/VCF.pm removes the shared anchor before allele eligibility.
      * Actual VEP CLI observations retain these original N>NGCC records, with
@@ -2481,10 +2723,11 @@ TEST hgvs_sidecar_requires_frameshift_proof_for_length_change(void) {
 TEST compatibility_policy_inventory_is_versioned(void) {
     const uint32_t all_vep116_language_leaks =
         (uint32_t)(DUCKVEP_COMPAT_HGVS_INCOMPLETE_CODON_ASSIGNMENT |
-                   DUCKVEP_COMPAT_HGVS_ALTERNATE_CDS_STANDARD_TABLE |
+                   DUCKVEP_COMPAT_HGVS_CDS_STANDARD_TABLE |
                    DUCKVEP_COMPAT_HGVS_TERMINAL_PARTIAL_INSERTION |
                    DUCKVEP_COMPAT_HGVS_NEGATIVE_SUBSTR |
-                   DUCKVEP_COMPAT_HGVS_XAA_AS_TER);
+                   DUCKVEP_COMPAT_HGVS_XAA_AS_TER |
+                   DUCKVEP_COMPAT_HGVS_THREE_LETTER_DELINS_NO_EXTENSION);
     duckvep_compat_policy_t vep116 =
         duckvep_compat_policy(DUCKVEP_COMPAT_VEP_116);
     duckvep_compat_policy_t strict =
@@ -2493,11 +2736,11 @@ TEST compatibility_policy_inventory_is_versioned(void) {
     ASSERT_EQ(all_vep116_language_leaks, vep116.flags);
     ASSERT_EQ(0u, strict.flags);
     ASSERT_EQ(DUCKVEP_CODON_TABLE_STANDARD,
-              duckvep_compat_hgvs_alternate_codon_table(
+              duckvep_compat_hgvs_codon_table(
                   DUCKVEP_COMPAT_VEP_116,
                   DUCKVEP_CODON_TABLE_VERT_MITO));
     ASSERT_EQ(DUCKVEP_CODON_TABLE_VERT_MITO,
-              duckvep_compat_hgvs_alternate_codon_table(
+              duckvep_compat_hgvs_codon_table(
                   DUCKVEP_COMPAT_STRICT,
                   DUCKVEP_CODON_TABLE_VERT_MITO));
     PASS();

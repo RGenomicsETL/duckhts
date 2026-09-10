@@ -364,6 +364,18 @@ DUCKVEP_INTERNAL_API uint8_t duckvep_coding_context_peptide_window_base(
     int                                    alternate,
     size_t                                 index);
 
+/* VEP frameshift exclusions shared by local classification and independent
+ * HGVS reconstruction: partial_codon, stop_retained, or an available reference
+ * peptide beginning with '*'. This is not an assertion that every false
+ * frameshift remains false after a different CDS replay. The caller supplies
+ * an opened window and captures the result before reusing its borrowed bytes.
+ * Return zero for invalid operands, not for a valid no-exclusion result. */
+DUCKVEP_INTERNAL_API int duckvep_coding_peptide_window_frameshift_excluded(
+    const duckvep_coding_context_t        *context,
+    const duckvep_coding_peptide_window_t *window,
+    const duckvep_sequence_delta_t        *delta,
+    int                                   *excluded_out);
+
 /* Read one residue from a complete coding context with the same reference
  * edit and virtual-single-edit semantics as the local window above. */
 DUCKVEP_INTERNAL_API uint8_t duckvep_coding_context_peptide_base(

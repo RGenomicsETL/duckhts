@@ -227,7 +227,11 @@ DUCKVEP_INTERNAL_API duckvep_hgvs_status_t duckvep_hgvs_dna_pair_build(
 
 /* Protein-coordinate admission, shifted CDS views and cached consequence
  * predicates share one VEP-116 authority. The DNA fact must already describe
- * the supplied projected event and reference. No allocation or rendering is
+ * the supplied projected event and reference. Original partial/stop-retained/
+ * leading-reference-stop frame exclusions are captured before shifted scratch
+ * reuse; other absent frameshift evidence does not suppress generalized replay.
+ * A missing original context is reopened through the prepared feature producer,
+ * without retaining pointers into its scratch. No allocation or rendering is
  * performed. allele_required is nonzero only when shifted-allele storage is
  * needed; BUFFER_TOO_SMALL with a larger requirement permits a caller retry.
  * Other BUFFER_TOO_SMALL results refer to the supplied delta scratch. */

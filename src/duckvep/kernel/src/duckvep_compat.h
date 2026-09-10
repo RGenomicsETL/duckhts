@@ -18,9 +18,10 @@ typedef enum duckvep_compat_flag {
     /* hgvs_protein::_trim_incomplete_codon assigns instead of compares its
      * keep-length guard, retaining every alternate CDS with length >= 3. */
     DUCKVEP_COMPAT_HGVS_INCOMPLETE_CODON_ASSIGNMENT = UINT32_C(1) << 0,
-    /* _get_fs_peptides and _stop_loss_extra_AA translate alternate CDS
-     * without a codon-table argument; BioPerl selects NCBI table 1. */
-    DUCKVEP_COMPAT_HGVS_ALTERNATE_CDS_STANDARD_TABLE = UINT32_C(1) << 1,
+    /* _get_fs_peptides/_stop_loss_extra_AA translate alternate CDS, and
+     * _check_for_peptide_duplication translates reference CDS, without a
+     * codon-table argument; BioPerl selects NCBI table 1. */
+    DUCKVEP_COMPAT_HGVS_CDS_STANDARD_TABLE = UINT32_C(1) << 1,
     /* A pure insertion in an incomplete terminal codon uses distinct
      * consequence and protein-HGVS peptide views. */
     DUCKVEP_COMPAT_HGVS_TERMINAL_PARTIAL_INSERTION = UINT32_C(1) << 2,
@@ -28,7 +29,11 @@ typedef enum duckvep_compat_flag {
      * start-of-peptide insertion representation. */
     DUCKVEP_COMPAT_HGVS_NEGATIVE_SUBSTR = UINT32_C(1) << 3,
     /* VEP's protein formatter conflates BioPerl Xaa with Ter. */
-    DUCKVEP_COMPAT_HGVS_XAA_AS_TER = UINT32_C(1) << 4
+    DUCKVEP_COMPAT_HGVS_XAA_AS_TER = UINT32_C(1) << 4,
+    /* The delins/ins formatter tests reference /X$/ after three-letter
+     * conversion and Xaa->Ter. No converted residue satisfies that guard,
+     * so this path cannot append extTer; del/> stop loss is separate. */
+    DUCKVEP_COMPAT_HGVS_THREE_LETTER_DELINS_NO_EXTENSION = UINT32_C(1) << 5
 } duckvep_compat_flag_t;
 
 typedef struct duckvep_compat_policy {
@@ -54,10 +59,11 @@ static inline duckvep_compat_policy_t duckvep_compat_policy(
     if (profile == DUCKVEP_COMPAT_VEP_116) {
         policy.flags =
             (uint32_t)(DUCKVEP_COMPAT_HGVS_INCOMPLETE_CODON_ASSIGNMENT |
-                       DUCKVEP_COMPAT_HGVS_ALTERNATE_CDS_STANDARD_TABLE |
+                       DUCKVEP_COMPAT_HGVS_CDS_STANDARD_TABLE |
                        DUCKVEP_COMPAT_HGVS_TERMINAL_PARTIAL_INSERTION |
                        DUCKVEP_COMPAT_HGVS_NEGATIVE_SUBSTR |
-                       DUCKVEP_COMPAT_HGVS_XAA_AS_TER);
+                       DUCKVEP_COMPAT_HGVS_XAA_AS_TER |
+                       DUCKVEP_COMPAT_HGVS_THREE_LETTER_DELINS_NO_EXTENSION);
     }
     return policy;
 }
@@ -69,12 +75,12 @@ static inline int duckvep_compat_enabled(
     return (duckvep_compat_policy(profile).flags & (uint32_t)flag) != 0u;
 }
 
-static inline duckvep_codon_table_t duckvep_compat_hgvs_alternate_codon_table(
+static inline duckvep_codon_table_t duckvep_compat_hgvs_codon_table(
     duckvep_compat_profile_t profile,
     duckvep_codon_table_t    transcript_table) {
 
     return duckvep_compat_enabled(
-            profile, DUCKVEP_COMPAT_HGVS_ALTERNATE_CDS_STANDARD_TABLE)
+            profile, DUCKVEP_COMPAT_HGVS_CDS_STANDARD_TABLE)
         ? DUCKVEP_CODON_TABLE_STANDARD : transcript_table;
 }
 

@@ -2,6 +2,10 @@
 
 # duckhts 1.5.1.9000
 
+- preserve original peptide exclusions during shifted protein-HGVS replay;
+  match pinned VEP-116 duplication lookup, Xaa duplication names and delins
+  extension formatting without changing independent consequence predicates
+
 - validate matching N in shared prefixes and suffixes of minimized indels;
   preserve changed-allele rejection and check retained-padding geometry;
   evaluate frameshift translation even when the local peptide pair is equal

@@ -1234,6 +1234,10 @@ later HGVS replay. Positive frameshift evidence can complete a length-changing d
 absence of frameshift is conclusive for a length-preserving CDS edit. A length-changing
 splice-overlapping edit without that positive flag must run the complete delta evaluator;
 otherwise VEP-compatible frameshifts can be misrendered as premature stops or delins.
+An original partial-codon, retained-stop or available leading-stop peptide operand
+is explicit negative evidence, captured before HGVS shifting reuses worker scratch.
+The shared peptide-window guard preserves these exclusions without treating an
+absent frameshift flag as conclusive.
 
 This implemented surface is not yet a full VEP-HGVS compatibility claim. It covers
 independent literal small variants and returns explicit unresolved reasons when reference,

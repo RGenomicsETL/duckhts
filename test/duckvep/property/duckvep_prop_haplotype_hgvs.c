@@ -709,6 +709,92 @@ TEST hgvs_haplotype_equal_suffix_requires_aligned_protein_axes(void) {
     PASS();
 }
 
+TEST hgvs_haplotype_duplication_uses_supplied_reference(void) {
+    /* The compound API replays its declared or explicitly supplied reference.
+     * The independent TVA duplication query's default-table CDS translation
+     * must not replace that authority, including sparse Translation SeqEdits. */
+    enum { SPARSE_SEQEDIT = 1u, SUPPLIED_REFERENCE = 2u };
+    static const struct {
+        const char *cds;
+        uint8_t table;
+        uint32_t insertion1;
+        const char *reference;
+        const char *curated;
+        const char *alternate;
+        duckvep_hgvs_protein_shape_t shape;
+    } cases[] = {
+        {"ATGAGAGCCTAA", 5u, 5u, "MSA*", "MRA*", "MSRA*", DUCKVEP_HGVS_PROTEIN_INSERTION},
+        {"ATGCTGGCCTAA", 26u, 7u, "MAA*", "MLA*", "MAAA*", DUCKVEP_HGVS_PROTEIN_DUPLICATION}
+    };
+    static const duckvep_compat_profile_t profiles[] = {DUCKVEP_COMPAT_VEP_116, DUCKVEP_COMPAT_STRICT};
+    size_t checked = 0u;
+    for (size_t i = 0u; i < sizeof cases / sizeof cases[0]; i++) {
+        for (unsigned mode = 0u; mode < 4u; mode++) {
+            for (size_t p = 0u; p < sizeof profiles / sizeof profiles[0]; p++) {
+                duckvep_haplotype_edit_t edit = {cases[i].insertion1, 0u, NULL,
+                    3u, (const uint8_t *)"GCC", 1};
+                duckvep_edit_set_t set = {&edit, 1u};
+                uint8_t cds[32], rp[16], ap[16], replayed[2][16];
+                duckvep_coding_context_t context;
+                ASSERT_EQ(DUCKVEP_CODING_CONTEXT_OK, duckvep_coding_context_build(
+                    (const uint8_t *)cases[i].cds, 12u, &set, 1,
+                    (duckvep_codon_table_t)cases[i].table,
+                    cds, sizeof cds, rp, sizeof rp, ap, sizeof ap, &context));
+                context.post_cds_complete = 1u;
+                context.compatibility_profile = (uint8_t)profiles[p];
+                ASSERT_EQ(4u, context.ref_peptide_len);
+                ASSERT_MEM_EQ(cases[i].reference, rp, 4u);
+                ASSERT_EQ(5u, context.alt_peptide_len);
+                ASSERT_MEM_EQ(cases[i].alternate, ap, 5u);
+                uint32_t curated_position = 2u;
+                uint8_t curated_residue = (uint8_t)cases[i].curated[1];
+                if (mode & SPARSE_SEQEDIT) {
+                    context.ref_peptide_edit_position1 = &curated_position;
+                    context.ref_peptide_edit_alt = &curated_residue;
+                    context.ref_peptide_edit_count = 1u;
+                }
+                const uint8_t *reference = (const uint8_t *)(mode ? cases[i].curated : cases[i].reference);
+                duckvep_hgvs_protein_reference_t view = {reference, 4u};
+                duckvep_haplotype_block_t block;
+                size_t blocks, count;
+                ASSERT_EQ(DUCKVEP_HAPLOTYPE_OK,
+                    duckvep_haplotype_partition(&edit, 1u, &block, 1u, &blocks));
+                ASSERT_EQ(1u, blocks);
+                duckvep_coding_context_t saved_context = context;
+                duckvep_haplotype_edit_t saved_edit = edit;
+                duckvep_haplotype_block_t saved_block = block;
+                duckvep_hgvs_protein_operation_t operations[3];
+                ASSERT_EQ(DUCKVEP_HGVS_OK, duckvep_hgvs_protein_haplotype_build(
+                    &context, (mode & SUPPLIED_REFERENCE) ? &view : NULL, &edit, 1u, &block, 1u,
+                    0u, operations, 3u, &count));
+                ASSERT(count > 0u && count <= 3u);
+                if (!mode) {
+                    ASSERT_EQ(1u, count);
+                    ASSERT_EQ(cases[i].shape, operations[0].fact.shape);
+                }
+                memcpy(replayed[0], reference, 4u);
+                size_t length = 4u;
+                unsigned side = 0u;
+                for (size_t j = count; j > 0u; j--) {
+                    ASSERT(kprop_hgvs_protein_fact_replay(&operations[j - 1u].fact,
+                        replayed[side], length, replayed[side ^ 1u], sizeof replayed[0], &length));
+                    side ^= 1u;
+                }
+                ASSERT_EQ(5u, length);
+                ASSERT_MEM_EQ(cases[i].alternate, replayed[side], length);
+                ASSERT_MEM_EQ(&saved_context, &context, sizeof context);
+                ASSERT_MEM_EQ(&saved_edit, &edit, sizeof edit);
+                ASSERT_MEM_EQ(&saved_block, &block, sizeof block);
+                ASSERT_MEM_EQ(cases[i].reference, rp, 4u);
+                ASSERT_MEM_EQ(cases[i].alternate, ap, 5u);
+                checked++;
+            }
+        }
+    }
+    ASSERT_EQ(16u, checked);
+    PASS();
+}
+
 TEST hgvs_haplotype_terminal_insertion_replays_complete_sequence(void) {
     static const uint8_t reference[] = "ATGGATGCTTAA", prepared[] = "MDAD*";
     duckvep_haplotype_edit_t edit = {4u, 0u, NULL, 6u, (const uint8_t *)"GATGCT", 1};

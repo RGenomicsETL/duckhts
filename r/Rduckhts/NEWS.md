@@ -1,6 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
 
+- match bundled indel HGVSp to pinned VEP-116 duplication and extension
+  formatting; preserve original peptide exclusions after HGVS shifting,
+  with original-record SQL and DBI regression coverage
+
 - preserve bundled HGVS for matching N padding on either side of a minimized
   indel, with exact original-record and reference-mismatch checks; retain
   frameshift translation when the local peptide pair is equal

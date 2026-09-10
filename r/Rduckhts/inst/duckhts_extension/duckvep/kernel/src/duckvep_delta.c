@@ -3572,6 +3572,26 @@ int duckvep_coding_context_block_window_open(
     return 1;
 }
 
+int duckvep_coding_peptide_window_frameshift_excluded(
+    const duckvep_coding_context_t        *context,
+    const duckvep_coding_peptide_window_t *window,
+    const duckvep_sequence_delta_t        *delta,
+    int                                   *excluded_out) {
+
+    if (excluded_out != NULL) *excluded_out = 0;
+    if (context == NULL || window == NULL || delta == NULL || excluded_out == NULL)
+        return 0;
+    if (delta->partial_codon || delta->stop_retained) {
+        *excluded_out = 1;
+    } else if (!context->feature_ref_peptide_unavailable && window->ref_length != 0u) {
+        uint8_t first = duckvep_coding_context_peptide_window_base(
+            context, window, 0, 0u);
+        if (first == 0u) return 0;
+        *excluded_out = first == (uint8_t)'*';
+    }
+    return 1;
+}
+
 static int delta_context_local_translation_matches(
     const duckvep_coding_context_t  *ctx,
     const duckvep_coding_peptide_window_t *view,
@@ -4146,10 +4166,12 @@ static duckvep_context_delta_status_t delta_context_length_change_window(
         delta->stop_gained = 1u;
     }
 
-    frameshift = !delta->partial_codon && !delta->stop_retained &&
-        !(peptide_pair_available && view.ref_length != 0u &&
-          duckvep_coding_context_peptide_window_base(
-              ctx, &view, 0, 0u) == (uint8_t)'*') &&
+    int frameshift_excluded;
+    if (!duckvep_coding_peptide_window_frameshift_excluded(
+            ctx, &view, delta, &frameshift_excluded)) {
+        return DUCKVEP_CONTEXT_DELTA_UNSUPPORTED;
+    }
+    frameshift = !frameshift_excluded &&
         ((span->length_diff % 3) != 0 || stop_in_displaced_frame);
     delta->frameshift = (uint8_t)frameshift;
 

@@ -1939,8 +1939,8 @@ observations, diagnostics and reproduction scripts, together with the alternate
 translation-table controls below. Seven fixed predicate cases include an in-frame
 deletion, unavailable coding contrast, start loss, stop loss and terminal partial
 codon; native tests additionally check their reverse-complement orientations.
-The capsule has 146 byte-exact files and SHA256
-`f20373cc8bbd3c6d729f1409c9aff3681049be57ff82c0c5b685cca63c8e343d`.
+The capsule has 186 byte-exact files and SHA256
+`6647ec849fcc7398dfa4a838b9c41f2d3da124186feb47f65eaba46f1b6e5312`.
 Original receipt pins are
 `396a66d709a0248230a1f1d6e4a4aac45c32a67183efae50036aa8c6c4de05b5`
 for removed REF and
@@ -1961,6 +1961,11 @@ The equal-local-peptide receipt is
 `df54971ee09344132d2526a17349875a0606a4c4b1bc15113d2fd87eeddd6931`;
 three fresh TVA call orders agree for original records 4, 10 and 14. The
 native fact probe retains its source and output, not its compiled executable.
+The `canonical_hgvs` and `xaa_duplication` origins retain twelve original-record
+observations for internal-stop shifting, delins formatting and duplication.
+Their receipt pins are
+`93d5cee946ba03b11acfd78fa26e77ee1ace7e40ddd19873a26b87786d90bb2f` and
+`38d8d2fdef7fce4e5bfc8fad8f11496201de7dd7462ba9ab697ecc74a455e796`.
 These are unsigned diagnostic witnesses,
 not general conformance or claims of an upstream biological defect.
 
@@ -2019,13 +2024,13 @@ The [baseline](test/duckvep/conformance/data/ambiguous_indel_baseline) contains
 [codon-consensus checkpoint](test/duckvep/conformance/data/ambiguous_indel_consensus)
 contains 164,454 HGVSp and 39,024 SO disagreements. The
 [translation/REF-eligibility checkpoint](test/duckvep/conformance/data/ambiguous_indel_translation)
-contains 44,236 HGVSp and zero SO disagreements: 120,218 HGVSp and all 39,024 SO
+contains 41,712 HGVSp and zero SO disagreements: 122,742 HGVSp and all 39,024 SO
 failures from the preceding checkpoint are resolved. The source events, oracle
 expectations and comparison keys are unchanged, with no newly failing comparison.
-**Indel conformance still fails.** Each independent and decoded singleton route
-retains 353 HGVSp disagreements; each raw route retains 21,059. Even the
-86,016 canonical-codon controls retain 203 HGVSp disagreements per route.
-Raw-mode differences remain under the distinction above. Zero SO disagreements
+Independent and decoded singleton routes match all 168,000 events each, including
+the 86,016 canonical-codon controls. **Indel conformance still fails:** each raw
+route retains 20,856 HGVSp disagreements under the input-contract distinction above.
+Zero SO disagreements
 in this finite matrix do not certify other transcript structures or compound SO.
 
 The bundles preserve every pair, raw source/oracle observations, warnings,
@@ -2097,6 +2102,22 @@ peptide comparison would choose another representation:
   `p.Trp23_Ter24ins...`. An earlier coding insertion can clip to the same peptide-level
   insertion after the final non-stop residue, but VEP returns no HGVSp; globally appending
   a synthetic stop creates false protein strings.
+- Independent-event duplication detection translates raw reference CDS with BioPerl's
+  default table 1,
+  independently of the declared-table peptide used for clipping and insertion flanks.
+  On table-5 CDS `ATGAGAGCCTAA`, original CDS position 4 `A>AGCC` gives
+  `p.Arg2dup`, even though the declared reference residue is Ser. On table-26 CDS
+  `ATGCTGGCCTAA`, position 6 `G>GGCC` gives `p.Ala2_Ala3insAla`, not a duplication.
+  The duplication formatter returns before ordinary Xaa-to-Ter replacement: table-1
+  `ATGNNAGCCTAA`, position 4 `N>NGCC`, gives `p.Xaa2dup`. For an ordinary insertion,
+  `ATGNCNGCCTAA` with the same original allele gives `p.Ter2_Ala3insPro`.
+  Compound protein contrast against an explicitly supplied curated reference is a
+  different contract: its duplication must replay against that supplied sequence.
+- The delins/insertion formatter tests its already converted reference text for a
+  trailing literal `X` before appending an extension. Three-letter `Ter` does not
+  satisfy that condition. Table-1 `ATGTAAGCCTAA`, position 4 `T>TGCC`, therefore
+  gives `p.Ter2delinsCysGln` despite a true `stop_lost` predicate. The separate
+  substitution/deletion extension branch still applies.
 
 The internal protein-HGVS facts keep equality, substitution, deletion, insertion, delins,
 duplication, frameshift, start loss, and extension distinct before rendering. Randomized
@@ -2104,18 +2125,20 @@ properties replay the described peptide edit and publish counters for each obser
 strand, immediate-stop state, and unsupported terminal insertion. Executable-VEP strings
 remain the final compatibility oracle.
 
-Three named policy flags isolate the executable-language behaviour in this state machine:
+Named policy flags isolate the executable-language behaviour in this state machine:
 
 - `DUCKVEP_COMPAT_HGVS_INCOMPLETE_CODON_ASSIGNMENT` owns the assignment in
   `_trim_incomplete_codon`;
 - `DUCKVEP_COMPAT_HGVS_NEGATIVE_SUBSTR` owns only the negative-`substr` position-zero
-  result; and
+  result;
 - `DUCKVEP_COMPAT_HGVS_XAA_AS_TER` owns both Xaa/Ter equality and rendered residue-name
-  substitution, including truncation of alternate peptide text at the first VEP-style
-  `Ter`.
+  substitution outside duplication, including truncation of alternate peptide text at
+  the first VEP-style `Ter`; and
+- `DUCKVEP_COMPAT_HGVS_THREE_LETTER_DELINS_NO_EXTENSION` preserves the delins/insertion
+  formatter's post-conversion reference test.
 
 The shared fact builder and writer consume those flags. Callers cannot recreate these
-states by passing a formatter hint, and the strict oracle disables all three.
+states by passing a formatter hint, and the strict control disables these policies.
 
 VEP's ordinary `--hgvs` output renders the default protein suffix without parentheses,
 for example `p.Ter394CysextTer9`. Parentheses are a presentation option enabled by
@@ -2143,6 +2166,17 @@ DuckVEP therefore carries a compact predicate sidecar beside the consequence mas
 Frameshift and stop-retained bits are positive evidence: HGVS may OR them into its
 independent CDS replay, but an absent bit must not clear a fact that the replay proved.
 Deriving those HGVSp states only from the SO mask loses valid VEP combinations.
+
+Original peptide operands supply a separate, explicit exclusion. VEP's
+`_get_peptide_alleles` caches the pair before HGVS shifting; `frameshift` rejects
+a partial codon, a retained stop, or an available reference peptide beginning
+with `*`. Those guards survive the display shift even if the shifted local
+reference no longer begins with a stop. On table-1 CDS `ATGTAAGCCTAA`, original
+CDS position 5 `AAG>A` therefore gives `p.Ala3Ter`; `A>AAC` gives
+`p.Ter2_Ala3insTer`, and `A>AACGT` gives `p.Ter2_Ala3insArgTer`.
+The shared peptide-window guard captures these concrete exclusions before
+worker scratch is reused. Missing operands do not establish an exclusion,
+and an absent frameshift flag alone remains insufficient.
 
 `start_lost` and `stop_lost` are the narrow exceptions. VEP evaluates and caches those
 predicates while it constructs consequences, before `hgvs_protein()` performs its private
@@ -2213,7 +2247,8 @@ three such rows: `21:44288343 AGG>A` on `ENST00000291582` and `ENST00000966178` 
 only for an unchanged CDS length or positive frameshift evidence.
 
 Source anchors: the separate VEP 116 consequence and `hgvs_protein` call paths,
-`VariationEffect::start_lost`, `VariationEffect::stop_lost`, their `_predicate_cache`,
+`VariationEffect::frameshift`, `::_get_peptide_alleles`, `::start_lost`,
+`::stop_lost`, their `_predicate_cache`,
 `Mapper::map_insert`, and DuckVEP
 `duckvep_sequence_delta_consequence_flags` /
 `duckvep_sequence_delta_apply_consequence_flags` /
@@ -2234,8 +2269,9 @@ its beginning. When the first such TGA lies before the affected residue, its com
 distance is non-positive and VEP prints `Ter?`; the search must not reuse a first-stop
 shortcut proved under table 2. DuckVEP applies this policy to frameshift alternate
 residues and the late stop search; ordinary mitochondrial coding consequences remain
-table-2 translations. `DUCKVEP_COMPAT_HGVS_ALTERNATE_CDS_STANDARD_TABLE` and
-`duckvep_compat_hgvs_alternate_codon_table()` define the shared policy. The internal
+table-2 translations. `DUCKVEP_COMPAT_HGVS_CDS_STANDARD_TABLE` and
+`duckvep_compat_hgvs_codon_table()` define the shared policy for these alternate
+translations and the raw-reference duplication lookup. The internal
 strict control retains the transcript table.
 
 Original-VCF controls on CDS `ATGAAAGCCTAA` distinguish these authorities:
