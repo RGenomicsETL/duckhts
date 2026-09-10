@@ -195,6 +195,17 @@ duckvep_evidence_sha256 <- function(path) {
   digest
 }
 
+# The caller pins reviewed historical bytes independently of the receipt itself.
+# This preserves an unsigned diagnostic's identity; it does not authenticate its execution.
+duckvep_evidence_check_receipt_pin <- function(path, expected_sha256) {
+  stopifnot(is.character(expected_sha256), length(expected_sha256) == 1L,
+    !is.na(expected_sha256), grepl("^[0-9a-f]{64}$", expected_sha256))
+  if (!identical(duckvep_evidence_sha256(path), expected_sha256)) {
+    stop("retained diagnostic receipt differs from its reviewed pin: ", path, call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
 duckvep_evidence_cache_info_path <- function(
   cache_dir,
   species,

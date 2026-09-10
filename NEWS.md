@@ -2,6 +2,9 @@
 
 # duckhts 1.5.1.9000
 
+- pin retained diagnostic receipts independently of their declared hashes; verify
+  VEP environment and source identities and reject rehashed oracle/native substitutions
+
 - retain complete compact codon-consensus and reference-translation evidence with
   network-free reconstruction checks; record matched phased-replay measurements
 

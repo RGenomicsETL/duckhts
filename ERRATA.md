@@ -1853,6 +1853,11 @@ codons to X; the independent raw-nucleotide ambiguity checks are unchanged.
 Network-free audits reconstruct both corrected bundles and the original failure
 bundle from their raw observations. Compressed JSON and Parquet preserve every
 compared field without committing the local build trees or duplicate native outputs.
+The audit code pins each reviewed receipt independently of its declared hashes,
+binding the recorded source map, binary identity and all retained payloads. It also
+checks diagnostic status, oracle revisions and the pinned package environment.
+Rehashed oracle/native substitutions are rejected. These checks preserve the
+identity of unsigned historical observations; they do not authenticate execution.
 
 SQL and R tests retain eleven exact source-SNV witnesses, including first and
 terminal codons, nonstandard tables and unavailable uploaded REF N. A single X

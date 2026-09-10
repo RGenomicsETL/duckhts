@@ -2,6 +2,9 @@
 # Network-free reconstruction of the retained VEP-116 translation comparisons.
 source("scripts/duckvep_evidence.R")
 
+# Fixed unsigned fixture identity, independent of hashes declared inside its receipt.
+reference_receipt_pin <- "5d417755b5f4866da3a7ab302404d6ab2b9264b3df0aac20a23d97f86618fc21"
+
 reference_read_json <- function(text) {
   check_names <- function(value) {
     if (!is.list(value)) return(invisible(TRUE))
@@ -177,8 +180,7 @@ reference_check_receipt <- function(receipt) {
   stopifnot(all(c("source_revision", "source_binding", "oracle_revisions", "cases",
     "independent_hgvs_observations", "independent_hgvs_equal", "scope", "sha256",
     "source_sha256", "local_receipt_sha256", "probe_sha256") %in% names(receipt)),
-    is.character(receipt$source_revision), length(receipt$source_revision) == 1L,
-    grepl("^[0-9a-f]{40}$", receipt$source_revision),
+    identical(receipt$source_revision, "e3ec6d231cc7e5c769685761a4739c8fcffc30ff"),
     identical(receipt$source_binding, "diagnostic_unbound"), identical(receipt$cases, 27014L),
     identical(receipt$independent_hgvs_observations, 6L), isTRUE(receipt$independent_hgvs_equal),
     identical(unlist(receipt$oracle_revisions, use.names = FALSE),
@@ -203,7 +205,31 @@ reference_rejects <- function(expression) {
   tryCatch({ force(expression); FALSE }, error = function(e) TRUE)
 }
 
-reference_corruption_controls <- function(cases, oracle, expected, pairs, receipt) {
+reference_pin_controls <- function(path, receipt) {
+  temporary <- tempfile("reference-receipt-pin-", fileext = ".json")
+  on.exit(unlink(temporary), add = TRUE)
+  stopifnot(file.copy(path, temporary))
+  duckvep_evidence_check_receipt_pin(temporary, reference_receipt_pin)
+  lines <- readLines(path)
+  # The unmodified text round-trip must retain the exact pinned bytes, so each
+  # rejection below tests its one identity change rather than JSON reformatting.
+  writeLines(lines, temporary, useBytes = TRUE)
+  duckvep_evidence_check_receipt_pin(temporary, reference_receipt_pin)
+  controls <- logical()
+  for (field in c("source_revision", "source_sha256", "probe_sha256", "local_receipt_sha256")) {
+    original <- if (field == "source_sha256") receipt$source_sha256[[1L]] else receipt[[field]]
+    replacement <- paste0(if (startsWith(original, "0")) "1" else "0", substring(original, 2L))
+    stopifnot(sum(grepl(original, lines, fixed = TRUE)) == 1L,
+      grepl(if (field == "source_revision") "^[0-9a-f]{40}$" else "^[0-9a-f]{64}$", replacement))
+    writeLines(sub(original, replacement, lines, fixed = TRUE), temporary, useBytes = TRUE)
+    controls[paste0("receipt_pin_", field)] <- reference_rejects(
+      duckvep_evidence_check_receipt_pin(temporary, reference_receipt_pin))
+  }
+  stopifnot(all(controls))
+  controls
+}
+
+reference_corruption_controls <- function(cases, oracle, expected, pairs, receipt, receipt_path) {
   controls <- c(missing = reference_rejects(reference_check_pairs(pairs[-1L, ], expected)),
     duplicate = reference_rejects(reference_check_pairs(rbind(pairs, pairs[1L, ]), expected)))
   retained_fields <- c("id", "expected_reference", "expected_alternate_full", "expected_alternate",
@@ -274,13 +300,16 @@ reference_corruption_controls <- function(cases, oracle, expected, pairs, receip
     '{"sha256":{"cases.jsonl.gz":"a","cases.jsonl.gz":"b"}}')
   for (i in seq_along(duplicate_json)) controls[paste0("json_duplicate_", i)] <-
     reference_rejects(reference_read_json(duplicate_json[i]))
+  controls <- c(controls, reference_pin_controls(receipt_path, receipt))
   stopifnot(!anyDuplicated(names(controls)), all(controls))
   list(retained = retained, count = length(controls))
 }
 
 main <- function() {
   directory <- "test/duckvep/conformance/data/reference_translation_consensus"
-  receipt <- reference_read_json(paste(readLines(file.path(directory, "receipt.json")), collapse = "\n"))
+  receipt_path <- file.path(directory, "receipt.json")
+  duckvep_evidence_check_receipt_pin(receipt_path, reference_receipt_pin)
+  receipt <- reference_read_json(paste(readLines(receipt_path), collapse = "\n"))
   reference_check_receipt(receipt)
   stopifnot(setequal(list.files(directory), c(names(receipt$sha256), "receipt.json")))
   for (name in names(receipt$sha256)) stopifnot(identical(receipt$sha256[[name]],
@@ -304,7 +333,7 @@ main <- function() {
   summary <- reference_check_pairs(pairs, expected$pairs)
   reference_check_summary(summary, read.csv(file.path(directory, "summary.csv")))
   stopifnot(identical(expected$hgvs, read.csv(file.path(directory, "independent_hgvs.csv"))))
-  controls <- reference_corruption_controls(cases, oracle, expected$pairs, pairs, receipt)
+  controls <- reference_corruption_controls(cases, oracle, expected$pairs, pairs, receipt, receipt_path)
   stopifnot(identical(controls$retained, read.csv(file.path(directory, "controls.csv"))))
   message("Reference translation: all 27,014 comparisons reconstructed; ", controls$count,
     " corruption controls rejected. Six HGVS observations checked against literals; no native HGVSp claim.")
