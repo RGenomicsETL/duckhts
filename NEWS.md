@@ -7,7 +7,8 @@
 
 - report all source-bound indel checkpoint measurements and their unequal
   singleton local-consequence fingerprints; retain complete keyed-output audits
-  and comparator corruption controls
+  and comparator corruption controls, with explicit cross-run driver/reference
+  input checks
 
 - interpret N-containing indel codons with pinned VEP-116 consensus and match
   retained insertion anchors literally; share the checked coding/HGVS paths

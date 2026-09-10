@@ -155,8 +155,14 @@ both transcript counts. Each untimed capture matches all 27 non-timing
 result fields from its original correctness worker and all three timed
 workers, including every full-output fingerprint; Parquet round trips
 preserve those metrics and types. Rendering verifies the pinned bundle
-and receipt identities, binds the retained metrics to both ledgers, then
-reruns the complete typed, exact-key comparison.
+and receipt identities, binds the retained metrics to both ledgers, and
+checks the exact workload configuration and matching benchmark-driver,
+reference-FASTA and FASTA-index hashes across each capture pair. The
+driver is independently pinned; FASTA/index identities use the exact
+original job-directory paths without reopening historical files. Missing
+or altered input hashes and a changed sample count are rejected by seven
+receipt corruption controls. Rendering then reruns the complete typed,
+exact-key comparison.
 
 | transcripts | mode                | joined_rows | missing_keys | changed_rows | changed_other_events | unexplained_rows |
 |------------:|:--------------------|------------:|-------------:|-------------:|---------------------:|-----------------:|

@@ -91,6 +91,39 @@ stopifnot(oracle$source$position1 == 67L, oracle$source$reference == "GC",
   identical(oracle$consequences, "frameshift_variant"),
   identical(oracle$hgvsp, "bench_protein.1:p.Ala23ValfsTer?"))
 
+capture_input_paths <- function(receipt) {
+  hashes <- receipt$input_sha256
+  stopifnot(is.list(hashes), !is.null(names(hashes)), !anyDuplicated(names(hashes)))
+  driver <- names(hashes)[endsWith(names(hashes), "/benchmarks/duckvep_haplotypes.R")]
+  stopifnot(length(driver) == 1L, is.character(receipt$original_job),
+    length(receipt$original_job) == 1L, !is.na(receipt$original_job))
+  job_directory <- dirname(receipt$original_job)
+  stopifnot(dirname(job_directory) == file.path(dirname(dirname(driver)),
+    "test/duckvep/conformance/results"))
+  c(driver = driver, reference = file.path(job_directory, "reference.fa"),
+    index = file.path(job_directory, "reference.fa.fai"))
+}
+
+compare_capture_inputs <- function(before, after, mode, transcripts) {
+  identities <- lapply(list(before, after), function(receipt) {
+    stopifnot(identical(receipt$configuration,
+      list(mode = mode, transcripts = transcripts, samples = 64L, overlap = 16L)),
+      basename(receipt$original_job) == paste0(mode, "_0_job.rds"))
+    paths <- capture_input_paths(receipt)
+    hashes <- vapply(paths, function(path) {
+      value <- receipt$input_sha256[[path]]
+      stopifnot(is.character(value), length(value) == 1L, !is.na(value),
+        grepl("^[0-9a-f]{64}$", value))
+      value
+    }, "")
+    stopifnot(hashes[["driver"]] ==
+      "b53ba0692c077953884e3c435d4be42094e1f682a4ea3f250e8366485bc04775")
+    hashes
+  })
+  stopifnot(identical(identities[[1L]], identities[[2L]]))
+  invisible(TRUE)
+}
+
 audit_full_outputs <- function() {
   bundle <- file.path(root, "benchmarks/data/duckvep_haplotypes_indel_full_audit.jsonl.gz")
   sha256 <- function(path) digest::digest(file = path, algo = "sha256")
@@ -133,9 +166,11 @@ audit_full_outputs <- function() {
       label <- paste(transcripts, mode, sep = "_")
       captures <- setNames(file.path(directory, paste(c("baseline", "current"), label,
         sep = "_")), c("baseline", "current"))
+      receipts <- lapply(captures, function(capture)
+        jsonlite::fromJSON(file.path(capture, "receipt.json")))
       for (side in names(captures)) {
         capture <- captures[[side]]
-        receipt <- jsonlite::fromJSON(file.path(capture, "receipt.json"))
+        receipt <- receipts[[side]]
         metrics <- read.csv(file.path(capture, "metrics.csv"), colClasses = "character")
         ledger <- if (side == "baseline") baseline else current
         ledger <- ledger[ledger$transcripts == transcripts & ledger$samples == "64" &
@@ -152,6 +187,23 @@ audit_full_outputs <- function() {
         }
         for (field in names(metrics)) stopifnot(all(ledger[[field]] == metrics[[field]]))
       }
+      compare_capture_inputs(receipts$baseline, receipts$current, mode, transcripts)
+      rejected_input <- function(candidate) tryCatch({
+        compare_capture_inputs(receipts$baseline, candidate, mode, transcripts)
+        FALSE
+      }, error = function(e) TRUE)
+      for (path in capture_input_paths(receipts$current)) {
+        changed <- receipts$current
+        hash <- changed$input_sha256[[path]]
+        changed$input_sha256[[path]] <- paste0(if (startsWith(hash, "0")) "1" else "0",
+          substring(hash, 2L))
+        stopifnot(rejected_input(changed))
+        changed$input_sha256[[path]] <- NULL
+        stopifnot(rejected_input(changed))
+      }
+      changed <- receipts$current
+      changed$configuration$samples <- 65L
+      stopifnot(rejected_input(changed))
       observed <- invoke(label, file.path(captures[["baseline"]], "rows.parquet"),
         file.path(captures[["current"]], "rows.parquet"), transcripts)
       retained <- jsonlite::fromJSON(file.path(directory, "audit", paste0("full_", label, ".json")))
@@ -258,7 +310,12 @@ at both transcript counts. Each untimed capture matches all 27 non-timing result
 fields from its original correctness worker and all three timed workers, including
 every full-output fingerprint; Parquet round trips preserve those metrics and types.
 Rendering verifies the pinned bundle and receipt identities, binds the retained
-metrics to both ledgers, then reruns the complete typed, exact-key comparison.
+metrics to both ledgers, and checks the exact workload configuration and matching
+benchmark-driver, reference-FASTA and FASTA-index hashes across each capture pair.
+The driver is independently pinned; FASTA/index identities use the exact original
+job-directory paths without reopening historical files. Missing or altered input
+hashes and a changed sample count are rejected by seven receipt corruption controls.
+Rendering then reruns the complete typed, exact-key comparison.
 
 ```{r complete-output-audit}
 knitr::kable(full_audit, row.names = FALSE)
