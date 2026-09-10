@@ -278,6 +278,35 @@ diagnostic runs fail on any HGVSp disagreement, including cases where VEP emits 
 string. A passing terminal-anchor matrix does not certify compound or complete phased
 HGVS, and these diagnostic runs do not enter release history.
 
+The internal-codon matrix separately tests an exact source MNV and its sequence-
+equivalent set of two or three cis SNVs. It exhausts 61 non-stop reference codons,
+64 alternate codons and both strands, retaining every pair with two or three changed
+bases: 6,588 models, 6,588 MNV records and 16,470 SNV records. Both representations
+must independently reconstruct the same complete genomic CDS before annotation.
+
+```bash
+Rscript test/duckvep/conformance/hgvs_cis_codon_differential.R --vep-prefix "$VEP_PREFIX"
+Rscript test/scripts/test_hgvs_cis_codon.R
+```
+
+Pinned VEP runs at buffer sizes 1 and 5,000 on the original MNV records. Those exact
+records also pass through `duckvep_annotate` and the singleton haplotype path. The
+multi-source cis-SNV path is a separate representation comparison, not an executable
+compound-HGVS oracle. Each haplotype representation uses decoded strict haploid calls
+and raw `1|1` diploid calls, at one and four DuckDB threads. Both raw carriers and
+every contributor's original coordinates, alleles and identity must survive. Raw `1`
+is not a decoded-haploid substitute: the pinned file route can infer its diploid
+fallback and supply a conditional second lane.
+
+The runner retains the full VEP output, native tables, comparisons, input relations,
+executed extension and source hashes. Missing sequence is a failure; absence of HGVS
+must agree on both sides. Only accession prefixes and a single outer prediction
+wrapper are excluded from suffix comparison. Localized equality is not rewritten to
+whole-protein equality. The command exits nonzero on any disagreement in either lane;
+its diagnostic receipt does not certify compound HGVS or enter release history.
+The network-free test checks input geometry and corrupts oracle rows, HGVS strings,
+source fields and carrier metadata to test rejection independently of biological results.
+
 The independent executable differential with seed `20260716` wrote 100,268 variants (268
 fixed witnesses plus 100,000 generated alleles) and matched all 100,268 VEP-116 transcript
 pairs, with no unresolved, missing, or extra rows. The generated alleles included 384 SNVs,

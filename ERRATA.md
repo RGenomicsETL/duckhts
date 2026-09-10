@@ -198,6 +198,49 @@ changes to every non-HGVS output field across all 49,152 comparisons. These gene
 configurations establish neither a population error rate nor
 compound-event conformance; the diagnostic build is not release-certified.
 
+### Cis synonymous substitutions and a single MNV have different equality output
+
+**Classification: reproduced compound/single-record presentation disagreement;
+not a demonstrated VEP defect or a protein-sequence error.**
+
+The exhaustive [internal-codon diagnostic](test/duckvep/conformance/README.md) covers
+6,588 forward/reverse model cases with two or three changed bases in the second
+codon, standard translation table 1, complete phase-zero CDS and one exon. VEP 116
+annotates the original three-base MNV. DuckVEP receives that exact MNV separately
+from the equivalent two- or three-SNV source relation; it does not merge their
+source identities for compatibility scoring.
+
+For example, the forward `CIS01299` model has CDS `ATGAGAGCCTAA` at genomic positions
+11–22. Both of these inputs reconstruct CDS `ATGCGCGCCTAA` and protein `MRA*`:
+
+| Source representation | Genomic edits | Observed HGVSp suffix |
+| --- | --- | --- |
+| One MNV, pinned VEP and DuckVEP | 14: `AGA` → `CGC` | `p.Arg2=`; DuckVEP's phased singleton adds prediction parentheses |
+| Two cis SNVs, DuckVEP compound path | 14: `A` → `C`; 16: `A` → `C` | `p.(=)` |
+
+The same distinction occurs in 80 of the 6,588 cases, all involving synonymous
+Arg, Leu or Ser codons. Across one/four DuckDB threads, decoded strict haploid calls
+and raw `1|1` diploid calls, 39,528 exact-MNV HGVSp comparisons have zero mismatches.
+The separate cis-SNV/MNV comparison retains 320 mismatches across 26,352 comparisons
+(80 cases repeated in four configurations). All 52,704 haplotype CDS and protein
+comparisons agree, and complete native outputs agree across thread counts.
+
+[HGVS 21.1.4 substitution rules](https://hgvs-nomenclature.org/21.1.4/recommendations/protein/substitution/)
+distinguish equality at a named residue from equality of the entire protein coding
+region. The compound builder contrasts complete proteins and emits `p.(=)` when
+there are no changed protein operations; the single-source path preserves VEP's
+localized label. Equal reconstructed sequence does not turn these assertions into
+interchangeable compatibility strings. Conversely, VEP's output for a synthetic
+merged MNV does not establish its output for multiple original records.
+
+The diagnostic exits nonzero and waives no difference. Its exact-MNV result is
+single-record evidence, not compound-HGVS certification or an upstream-error claim.
+Retained local evidence is
+`test/duckvep/conformance/results/hgvs_cis_codon_3e62f43d481358/receipt.json`,
+including both complete oracle VCFs, source relations, nested native outputs,
+34 corruption controls, source hashes and the executed extension. This is an
+unsigned, build-unbound diagnostic; it does not enter release conformance history.
+
 ### Independent HGVS and curated-reference protein differences are separate contracts
 
 Pinned `TranscriptVariationAllele` reports `p.Ala2=` or `p.Ala3=` for the retained

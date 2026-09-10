@@ -2,6 +2,10 @@
 
 # duckhts 1.5.1.9000
 
+- add an exhaustive internal-codon HGVSp diagnostic comparing exact MNV records
+  with pinned VEP 116 and retaining cis-SNV representation disagreements separately;
+  check genomic reconstruction, original contributors and carrier lanes
+
 - require GitHub-issued execution-receipt attestations for model-history publication,
   tied to the repository, trusted workflow and source commit; retain unsigned history
   without upgrading its provenance and test coordinated source/native lane swaps
