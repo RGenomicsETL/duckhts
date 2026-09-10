@@ -1768,6 +1768,64 @@ Source anchors: VEP 116
 `TranscriptVariationAllele::hgvs_transcript` and the transcript-variation coordinate
 projection used before it formats `c.` or `n.` notation.
 
+## N-containing codons in independent and singleton protein annotation
+
+This is an observed **DuckVEP compatibility defect**, not a claim that VEP is
+wrong. A source SNV with A/C/G/T alleles can sit inside a codon containing N at
+another position. VEP 116 checks the uploaded allele for unambiguous DNA and
+translates its surrounding codon using BioPerl's consensus rules. Those are
+different checks. Uncertainty in the nucleotide sequence does not necessarily
+make its translated amino acid unknown.
+
+For single-exon, forward-strand, phase-zero CDS `ATGGCNTAA`, table 1, the
+original SNV at CDS position 4 is `G>A`. VEP returns `missense_variant` and
+`p.Ala2Thr`; the rebuilt CDS is `ATGACNTAA`. DuckVEP production revision
+`84770198dd9e43ddd4aa936d2f5bf9c3deabe550` instead returns
+`coding_sequence_variant` and `p.Ter2=` from `duckvep_annotate`, and
+`p.(Ter2=)` from singleton `duckvep_haplotypes`. The latter's complete protein
+is correctly `MT*`, while its local coding block remains unsupported. Agreement
+of replayed sequence therefore does not establish annotation agreement.
+
+The failure also occurs with partially resolved peptides. In CDS `ATGAANTAA`, position
+5 `A>C` changes an unknown residue to threonine. VEP returns both
+`coding_sequence_variant` and `missense_variant`, with `p.Ter2Thr` under its
+unknown-residue presentation rule. DuckVEP returns only the generic coding term
+and `p.Ter2=`. In contrast, position 4 `N>A` in `ATGNCNTAA` has an ambiguous
+uploaded REF: VEP returns the generic coding term and no HGVSp. That absent
+result is a retained control, not permission to assign a consensus peptide to
+an unavailable uploaded-allele interpretation.
+
+The executable diagnostic
+[`ambiguous_codon_differential.R`](test/duckvep/conformance/ambiguous_codon_differential.R)
+retains all 28,800 original SNVs: 13,824 canonical-codon controls, 7,776 events
+with unambiguous uploaded alleles and N elsewhere in the codon, and 7,200 events
+with N at the uploaded REF position. It exhausts 125 internal ACGTN codons,
+three edited positions, every different A/C/G/T ALT, and all 24 supported tables.
+At this production revision, 1,624 distinct SNVs disagree in both independent
+SO and HGVSp: 656 require missense alone and 968 require missense together with
+the generic coding term. All are in the surrounding-N stratum. Canonical and
+uploaded-N controls match the compared terms/text. These counts are a finite
+synthetic matrix, not an estimated population error rate. Phased local SO,
+start/terminal codons, reverse strands, phase padding, indels and compound
+events are outside this diagnostic's comparison contract.
+
+The local baseline is retained at
+`test/duckvep/conformance/results/ambiguous_codon_14dca568db554/receipt.json`
+(SHA-256 `939b239e09662e591abaf931a210bd7ebdaa56184cf763a8098272bd7711038e`).
+It contains 230,400 HGVSp comparisons across eight route/thread configurations,
+with 12,992 disagreements, and 57,600 independent SO comparisons with 3,248
+disagreements. Ten comparator corruption controls pass. No pair is missing or
+extra. This unsigned local diagnostic is not a published conformance pack.
+
+The oracle uses the pinned environment and actual VEP-116
+`TranscriptVariationAllele::peptide`, `VariationFeatureOverlapAllele::seq_is_unambiguous_dna`
+and `Utils::VariationEffect::{missense_variant,coding_unknown}`; it does not
+replace these methods. Full outer comparisons, absent results, carrier/source
+identities and deliberate comparator corruptions are retained. The diagnostic
+exits nonzero on the defect and labels the supplied extension as build-unbound.
+The required correction must preserve separate uploaded-allele validity,
+codon translation, raw nucleotide ambiguity and consequence predicates.
+
 ## Protein HGVS preserves VEP's local-peptide state machine
 
 VEP 116 protein HGVS is not a generic diff followed by a canonical formatter. Its helper

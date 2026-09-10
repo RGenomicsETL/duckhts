@@ -1178,8 +1178,8 @@ matrix on exhaustive short pairs and exercises all declared allocation limits.
 
 `reference_translation_differential.R` is a separate reference-peptide
 investigation over all 125 ACGTN triplets in start/internal/terminal positions,
-all 24 supported tables, all three trailing-partial lengths, and 13 explicit
-start, stop, ambiguity, case and peptide-edit witnesses (27,013 cases). Real
+all 24 supported tables, all three trailing-partial lengths, and 14 explicit
+start, stop, ambiguity, case and peptide-edit witnesses (27,014 cases). Real
 Ensembl single-exon models feed `Transcript::translate`, `Translation::seq`
 and `TranscriptHaplotypeContainer`; only the input slice's table attribute is
 supplied without a database. No translation or container method is overridden.
@@ -1192,6 +1192,24 @@ hashes, package lock, source identity and missing/extra/sequence corruption
 controls, and fails if any native reference or alternate comparison differs.
 Original Haplosaurus inputs and expectations are not changed. This
 lane does not certify public protein differences, compound SO or HGVS.
+
+`Rscript test/duckvep/conformance/ambiguous_codon_differential.R` compares
+28,800 original SNVs across all 125 ACGTN internal codons and all 24 supported
+tables. Each codon position is replaced by every different A/C/G/T base;
+N at the uploaded REF position remains a distinct stratum from N elsewhere in
+the codon. Canonical controls and unresolved outputs remain in the denominator.
+The pinned `reference_translation_oracle.pl` observes actual VEP-116
+TranscriptVariationAllele consequences and HGVSp. Independent DuckVEP SO/HGVSp
+and singleton phased HGVSp run with one/four threads, both decoded phase
+policies and raw source-record input. Decoded calls are haploid ALT; raw calls
+use explicit `1|1` and require both diploid carriers. Phased local SO is not compared or counted
+as agreement. Only the enclosing protein prediction parentheses are removed
+for the singleton comparison; unknown residues and absent text are preserved.
+Complete outputs, keyed outer comparisons, provenance checks, ten comparator
+corruption controls, module/package identities and binary hashes are retained.
+The supplied extension is explicitly diagnostic, not certified as built from
+the current checkout. The command fails on any disagreement; see
+[`ERRATA.md`](../../../ERRATA.md#n-containing-codons-in-independent-and-singleton-protein-annotation).
 
 `compound_coding_audit.R --artifacts results/<haplotype-run>` observes the native
 coding-context evaluator on every original edit set, including reference lanes.

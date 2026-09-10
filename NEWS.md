@@ -2,6 +2,10 @@
 
 # duckhts 1.5.1.9000
 
+- add an exhaustive 28,800-SNV diagnostic for N-containing coding contexts against
+  pinned VEP 116; retain independent and singleton-phased disagreements, canonical
+  controls, absent results and comparator corruption checks
+
 - reject aliased translation metadata before writing borrowed CDS, peptide or
   reference-edit storage
 
