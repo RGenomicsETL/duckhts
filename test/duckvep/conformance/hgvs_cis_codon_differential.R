@@ -1,6 +1,7 @@
 #!/usr/bin/env Rscript
 # Exact MNV compatibility and separate cis-SNV/MNV representation comparisons.
 source('scripts/duckvep_evidence.R')
+source('test/duckvep/conformance/contributor_identity.R')
 
 cis_codon_reverse_complement <- function(x) {
   paste0(rev(strsplit(chartr('ACGT', 'TGCA', x), '', fixed = TRUE)[[1L]]), collapse = '')
@@ -121,13 +122,8 @@ cis_codon_check_native <- function(actual, records, models, ploidy = 1L) {
   for (i in seq_len(nrow(models))) {
     source <- grouped[[as.character(models$transcript_index[i])]]
     observed <- actual$contributors[[i]]
-    fields <- c('event_index', 'seq_region', 'position', 'reference', 'alternate')
-    stopifnot(all(c(fields, 'evidence_flags', 'projection_status') %in% names(observed)),
-      nrow(observed) == nrow(source), !anyDuplicated(observed$event_index),
-      setequal(observed$event_index, source$event_index))
-    source <- source[match(observed$event_index, source$event_index), ]
-    for (field in fields)
-      stopifnot(all(observed[[field]] == source[[field]]))
+    duckvep_check_contributors(observed, source)
+    stopifnot(all(c('evidence_flags', 'projection_status') %in% names(observed)))
     carrier <- actual$carriers[[i]]
     stopifnot(all(c('sample_index', 'phase_set', 'haplotype_lane', 'ploidy') %in% names(carrier)),
       all(observed$evidence_flags == 1L), all(observed$projection_status == 'ok'),
@@ -219,6 +215,7 @@ cis_codon_main <- function() {
   sha <- duckvep_evidence_sha256
   revision <- duckvep_evidence_revision('.')
   sources <- unique(c('test/duckvep/conformance/hgvs_cis_codon_differential.R',
+    'test/duckvep/conformance/contributor_identity.R',
     'scripts/duckvep_evidence.R', list.files('src/duckvep', recursive = TRUE,
       full.names = TRUE, pattern = '\\.[ch]$')))
   hashes <- vapply(sources, sha, '')

@@ -1809,13 +1809,15 @@ synthetic matrix, not an estimated population error rate. Phased local SO,
 start/terminal codons, reverse strands, phase padding, indels and compound
 events are outside this diagnostic's comparison contract.
 
-The local baseline is retained at
-`test/duckvep/conformance/results/ambiguous_codon_14dca568db554/receipt.json`
-(SHA-256 `939b239e09662e591abaf931a210bd7ebdaa56184cf763a8098272bd7711038e`).
-It contains 230,400 HGVSp comparisons across eight route/thread configurations,
-with 12,992 disagreements, and 57,600 independent SO comparisons with 3,248
-disagreements. Ten comparator corruption controls pass. No pair is missing or
-extra. This unsigned local diagnostic is not a published conformance pack.
+The checked-in
+[`ambiguous_codon_baseline`](test/duckvep/conformance/data/ambiguous_codon_baseline)
+bundle contains every comparison pair as Parquet, compressed source cases and
+raw oracle observations, summaries, controls and hashes. Its 230,400 HGVSp
+comparisons span eight route/thread configurations, with 12,992 disagreements;
+57,600 independent SO comparisons contain 3,248 disagreements. No pair is
+missing or extra. The bundle includes 64 passing comparator/provenance
+corruption controls. It is unsigned diagnostic evidence, not an authenticated
+conformance certificate, and excludes native fields outside the comparison.
 
 The oracle uses the pinned environment and actual VEP-116
 `TranscriptVariationAllele::peptide`, `VariationFeatureOverlapAllele::seq_is_unambiguous_dna`

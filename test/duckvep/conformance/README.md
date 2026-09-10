@@ -1205,8 +1205,15 @@ policies and raw source-record input. Decoded calls are haploid ALT; raw calls
 use explicit `1|1` and require both diploid carriers. Phased local SO is not compared or counted
 as agreement. Only the enclosing protein prediction parentheses are removed
 for the singleton comparison; unknown residues and absent text are preserved.
-Complete outputs, keyed outer comparisons, provenance checks, ten comparator
-corruption controls, module/package identities and binary hashes are retained.
+Complete outputs, keyed outer comparisons, full source-field and carrier checks,
+64 comparator/provenance corruption controls, module/package identities and
+binary hashes are retained locally. The checked-in
+[`ambiguous_codon_baseline`](data/ambiguous_codon_baseline) bundle contains all
+comparison pairs as Parquet, compressed source cases and raw oracle observations,
+summaries, controls and hashes. It excludes other native output fields. Use
+`--evidence-out NEW_DIRECTORY` to retain another complete comparison bundle;
+existing directories are not overwritten. Network-free reconstruction and
+corruption checks run with `Rscript test/scripts/test_ambiguous_codon.R`.
 The supplied extension is explicitly diagnostic, not certified as built from
 the current checkout. The command fails on any disagreement; see
 [`ERRATA.md`](../../../ERRATA.md#n-containing-codons-in-independent-and-singleton-protein-annotation).

@@ -4,7 +4,8 @@
 
 - add an exhaustive 28,800-SNV diagnostic for N-containing coding contexts against
   pinned VEP 116; retain independent and singleton-phased disagreements, canonical
-  controls, absent results and comparator corruption checks
+  controls, absent results and comparator corruption checks; publish complete
+  comparison pairs as Parquet with a network-free evidence reconstruction test
 
 - reject aliased translation metadata before writing borrowed CDS, peptide or
   reference-edit storage

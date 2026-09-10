@@ -1,6 +1,64 @@
 #!/usr/bin/env Rscript
 # Exact original SNVs: uploaded-allele ambiguity and surrounding codon ambiguity.
 source('scripts/duckvep_evidence.R')
+source('test/duckvep/conformance/contributor_identity.R')
+
+codon_check_provenance <- function(actual, events, raw) {
+  ploidy <- if (raw) 2L else 1L
+  stopifnot(all(c('transcript_index', 'carrier_count', 'contributors', 'carriers') %in% names(actual)),
+    nrow(actual) == nrow(events), !anyDuplicated(actual$transcript_index),
+    setequal(actual$transcript_index, events$transcript_index), all(actual$carrier_count == ploidy))
+  events <- events[match(actual$transcript_index, events$transcript_index), , drop = FALSE]
+  if (raw) events$alt_index <- 1L
+  for (i in seq_len(nrow(actual))) {
+    duckvep_check_contributors(actual$contributors[[i]], events[i, , drop = FALSE])
+    carriers <- actual$carriers[[i]]
+    stopifnot(all(c('sample_index', 'phase_set', 'haplotype_lane', 'ploidy') %in% names(carriers)),
+      nrow(carriers) == ploidy, all(carriers$sample_index == 0L), all(is.na(carriers$phase_set)),
+      identical(sort(as.integer(carriers$haplotype_lane)), seq_len(ploidy)), all(carriers$ploidy == ploidy))
+  }
+  invisible(TRUE)
+}
+
+codon_provenance_controls <- function(raw) {
+  ploidy <- if (raw) 2L else 1L
+  events <- data.frame(event_index = 1L, transcript_index = 0L, seq_region = 0L,
+    position = 4L, reference = 'G', alternate = 'A')
+  actual <- data.frame(transcript_index = 0L, carrier_count = ploidy)
+  actual$contributors <- list(events[setdiff(names(events), 'transcript_index')])
+  if (raw) actual$contributors[[1L]]$alt_index <- 1L
+  actual$carriers <- list(data.frame(sample_index = 0L, phase_set = NA_integer_,
+    haplotype_lane = seq_len(ploidy), ploidy = ploidy))
+  rejected <- function(x) !isTRUE(tryCatch(codon_check_provenance(x, events, raw),
+    error = function(e) FALSE))
+  stopifnot(!rejected(actual))
+  controls <- c(missing_leaf = rejected(actual[FALSE, ]),
+    duplicate_leaf = rejected(rbind(actual, actual)))
+  for (field in c('transcript_index', 'carrier_count')) {
+    changed <- actual
+    changed[[field]][1L] <- changed[[field]][1L] + 1L
+    controls[field] <- rejected(changed)
+  }
+  for (part in c('contributors', 'carriers')) {
+    changed <- actual
+    changed[[part]][[1L]] <- changed[[part]][[1L]][FALSE, ]
+    controls[paste0('missing_', part)] <- rejected(changed)
+    changed[[part]][[1L]] <- rbind(actual[[part]][[1L]], actual[[part]][[1L]])
+    controls[paste0('duplicate_', part)] <- rejected(changed)
+    for (field in names(actual[[part]][[1L]])) {
+      changed <- actual
+      value <- changed[[part]][[1L]][[field]][1L]
+      changed[[part]][[1L]][[field]][1L] <- if (is.na(value)) 1L else
+        if (is.character(value)) paste0(value, '_corrupt') else value + 1L
+      controls[paste(part, field, sep = '_')] <- rejected(changed)
+      changed[[part]][[1L]][[field]] <- NULL
+      controls[paste('missing', part, field, sep = '_')] <- rejected(changed)
+    }
+  }
+  stopifnot(all(controls))
+  data.frame(control = paste(if (raw) 'raw' else 'decoded', names(controls), sep = '_'),
+    rejected = unname(controls))
+}
 
 codon_equal <- function(actual, expected) {
   required <- c('event_index', 'allele', 'hgvsp', 'so')
@@ -55,12 +113,15 @@ main <- function() {
   suppressPackageStartupMessages(library(DBI))
   opt <- optparse::parse_args(optparse::OptionParser(option_list = list(
     optparse::make_option('--extension', default = 'build/release/duckhts.duckdb_extension'),
+    optparse::make_option('--evidence-out', dest = 'evidence_out', default = '',
+      help = 'Retain a compact complete comparison bundle in a new directory'),
     optparse::make_option('--vep-prefix', dest = 'vep_prefix',
       default = Sys.getenv('VEP_PREFIX', '/root/miniconda3/envs/vep'))
   )))
   revision <- duckvep_evidence_revision('.')
   extension <- normalizePath(opt$extension, mustWork = TRUE)
   sources <- c('test/duckvep/conformance/ambiguous_codon_differential.R',
+    'test/duckvep/conformance/contributor_identity.R',
     'test/duckvep/conformance/reference_translation_oracle.pl', 'scripts/duckvep_evidence.R',
     list.files('src/duckvep', recursive = TRUE, full.names = TRUE, pattern = '\\.[ch]$'))
   source_hashes <- vapply(sources, duckvep_evidence_sha256, '')
@@ -137,7 +198,8 @@ main <- function() {
       so = vapply(rows$consequences, function(terms) paste(sort(terms), collapse = '&'), ''))
   }))
   stopifnot(setequal(expected$event_index, events$event_index))
-  controls <- codon_controls(expected)
+  controls <- rbind(codon_controls(expected), codon_provenance_controls(FALSE),
+    codon_provenance_controls(TRUE))
   write.csv(expected, file.path(out, 'expected.csv'), row.names = FALSE)
   write.csv(controls, file.path(out, 'controls.csv'), row.names = FALSE)
   con <- dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = 'true')))
@@ -177,7 +239,6 @@ main <- function() {
       label <- paste0(route, '_', threads)
       raw <- route == 'source_records'
       policy <- if (raw) 'vep116_compat' else route
-      ploidy <- if (raw) 2L else 1L
       calls <- paste('SELECT event_index,seq_region,position,reference,alternate,transcript_index,',
         '1 alt_index,0 sample_index,[1] alleles,[true] phase_before,NULL::BIGINT phase_set FROM inputs')
       if (raw) calls <- paste('SELECT event_index,seq_region,position,reference,transcript_index,',
@@ -187,18 +248,9 @@ main <- function() {
         q(if (raw) 'source_records' else 'alt_events'), ')'))
       dbExecute(con, paste('COPY', label, 'TO', q(file.path(out, paste0(label, '.parquet'))), '(FORMAT PARQUET)'))
       provenance <- dbGetQuery(con, paste('SELECT transcript_index,contributors,carriers,carrier_count FROM', label))
-      stopifnot(all(provenance$carrier_count == ploidy),
-        all(vapply(seq_len(nrow(provenance)), function(i) {
-          contributors <- provenance$contributors[[i]]
-          carriers <- provenance$carriers[[i]]
-          nrow(contributors) == 1L && nrow(carriers) == ploidy &&
-            contributors$event_index == provenance$transcript_index[i] + 1L &&
-            all(carriers$sample_index == 0L) && all(is.na(carriers$phase_set)) &&
-            setequal(carriers$haplotype_lane, seq_len(ploidy)) && all(carriers$ploidy == ploidy)
-        }, TRUE)))
+      codon_check_provenance(provenance, events, raw)
       actual <- dbGetQuery(con, paste('SELECT h.contributors[1].event_index::INTEGER event_index,',
-        'i.alternate allele,h.hgvsp,NULL::VARCHAR so FROM', label,
-        'h LEFT JOIN inputs i ON h.contributors[1].event_index=i.event_index'))
+        'h.contributors[1].alternate allele,h.hgvsp,NULL::VARCHAR so FROM', label, 'h'))
       # Only the documented outer prediction wrapper is removed. No equality,
       # unknown-residue, absent-result or compound-expression normalization.
       actual$hgvsp <- sub('^p\\.\\((.*)\\)$', 'p.\\1', actual$hgvsp)
@@ -210,7 +262,8 @@ main <- function() {
   }
   pairs <- do.call(rbind, lapply(names(comparisons), function(route)
     cbind(route = route, comparisons[[route]])))
-  pairs <- merge(pairs, events[c('event_index', 'codon', 'table', 'reference')],
+  pairs <- merge(pairs, events[c('event_index', 'seq_region', 'transcript_index', 'position',
+    'reference', 'codon', 'table', 'cds', 'case_id')],
     by = 'event_index', all.x = TRUE, sort = FALSE)
   pairs$source_n <- ifelse(is.na(pairs$reference), 'unmatched',
     ifelse(pairs$reference == 'N', 'yes', 'no'))
@@ -236,6 +289,27 @@ main <- function() {
     identical(module_hashes, vapply(modules, duckvep_evidence_sha256, '')),
     identical(extension_hash, duckvep_evidence_sha256(extension)),
     identical(revision, duckvep_evidence_revision('.')))
+  if (nzchar(opt$evidence_out)) {
+    destination <- opt$evidence_out
+    stopifnot(!dir.exists(destination), dir.create(destination))
+    dbWriteTable(con, 'comparison_pairs', pairs)
+    dbExecute(con, paste('COPY comparison_pairs TO', q(file.path(destination, 'pairs.parquet')),
+      '(FORMAT PARQUET)'))
+    for (name in c('cases.jsonl', 'oracle.stdout')) {
+      compressed <- gzfile(file.path(destination, paste0(name, '.gz')), 'wt')
+      writeLines(readLines(file.path(out, name)), compressed)
+      close(compressed)
+    }
+    stopifnot(all(file.copy(file.path(out, c('summary.csv', 'controls.csv', 'environment.stdout')),
+      destination)))
+    manifest <- jsonlite::read_json(file.path(out, 'receipt.json'), simplifyVector = TRUE)
+    manifest$local_receipt_sha256 <- duckvep_evidence_sha256(file.path(out, 'receipt.json'))
+    manifest$scope <- paste(manifest$scope, 'complete_pairs_and_oracle_not_all_native_output_fields', sep = ';')
+    manifest$source_sha256 <- as.list(c(source_hashes, module_hashes))
+    published <- list.files(destination, full.names = TRUE)
+    manifest$sha256 <- as.list(setNames(vapply(published, duckvep_evidence_sha256, ''), basename(published)))
+    jsonlite::write_json(manifest, file.path(destination, 'receipt.json'), pretty = TRUE, auto_unbox = TRUE)
+  }
   stopifnot(all(pairs$hgvsp_equal), all(pairs$so_equal, na.rm = TRUE))
 }
-main()
+if (sys.nframe() == 0L) main()
