@@ -1045,18 +1045,17 @@ local({
         phase_policy = policy, input_mode = if (raw) "source_records" else "alt_events")
       singletons <- singletons[order(singletons$transcript_index), ]
       expect_equal(singletons$transcript_index, n_indel_source$i)
-      # Raw replay validates the full allele; it does not use independent
-      # VEP's anchor trimming. Invalid raw alleles retain unavailable projection.
+      # Raw N-bearing ALTs are skipped with conditional source evidence.
+      # Independent and decoded calls still use their existing allele contract.
       expected_hgvs <- n_indel_expected_hgvs
-      invalid_raw <- raw & grepl("N", n_indel_source$alternate, fixed = TRUE)
-      expected_hgvs[invalid_raw] <- NA_character_
+      skipped_raw <- raw & grepl("N", n_indel_source$alternate, fixed = TRUE)
+      expected_hgvs[skipped_raw] <- NA_character_
       expect_identical(sub("^p\\.\\((.*)\\)$", "p.\\1", singletons$hgvsp), expected_hgvs)
-      expect_identical(singletons$projection_status,
-        ifelse(invalid_raw, "invalid_allele", "ok"))
-      expect_identical(is.na(singletons$cds), invalid_raw)
-      expect_identical(is.na(singletons$protein), invalid_raw)
+      expect_identical(singletons$projection_status, rep("ok", 8L))
+      expect_false(anyNA(singletons$cds))
+      expect_false(anyNA(singletons$protein))
       expect_identical(singletons$sequence_status,
-        ifelse(invalid_raw, "unavailable_projection", "ok"))
+        ifelse(skipped_raw, "conditional", "ok"))
       expect_equal(singletons$carrier_count, rep(if (raw) 2 else 1, 8L))
       expect_equal(vapply(singletons$contributors, nrow, 0L), rep(1L, 8L))
       contributors <- do.call(rbind, singletons$contributors)
@@ -1064,8 +1063,83 @@ local({
       expect_equal(contributors$position, n_indel_source$position)
       expect_identical(contributors$reference, n_indel_source$reference)
       expect_identical(contributors$alternate, n_indel_source$alternate)
+      expect_identical(contributors$projection_status,
+        ifelse(skipped_raw, "source_allele_skipped", "ok"))
+      if (raw) {
+        expect_identical(singletons$hgvsp_status[skipped_raw], rep("incomplete_input", 3L))
+        expect_identical(singletons$cds[skipped_raw], n_indel_source$cds[skipped_raw])
+        expect_identical(singletons$protein[skipped_raw], c("MAA*", "MXA*", "MXA*"))
+        expect_equal(singletons$edit_count[skipped_raw], rep(0L, 3L))
+        expect_equal(bitwAnd(singletons$evidence_flags[skipped_raw], 8L), rep(8L, 3L))
+        expect_equal(bitwAnd(contributors$evidence_flags[skipped_raw], 8L), rep(8L, 3L))
+        expect_equal(contributors$alt_index, rep(1L, 8L))
+        for (field in c("coding_blocks", "cds_differences", "protein_differences"))
+          expect_equal(vapply(singletons[[field]][skipped_raw], nrow, 0L), rep(0L, 3L))
+      }
     }
   }
+
+  # Pinned raw GT 1 has two file lanes, unlike a decoded haploid call.
+  raw_one_slot <- rduckhts_haplotypes(con, paste(
+    "SELECT i event_index,i seq_region,position,reference,[alternate] alternates,",
+    "i transcript_index,0 sample_index,'1' gt FROM n_indel_source WHERE i=4"
+  ), "n_indel_witnesses", "vep116_compat", input_mode = "source_records")
+  raw_one_slot <- raw_one_slot[order(vapply(raw_one_slot$carriers,
+    function(x) x$haplotype_lane[1L], 0L)), ]
+  expect_identical(raw_one_slot$cds, c("ATGGCNGCCTAA", "ATGGCGCCTAA"))
+  expect_identical(raw_one_slot$protein, c("MAA*", "MAP"))
+  expect_identical(raw_one_slot$sequence_status, rep("conditional", 2L))
+  expect_equal(raw_one_slot$edit_count, c(0L, 1L))
+  expect_equal(raw_one_slot$carrier_count, c(1L, 1L))
+  one_slot_carriers <- do.call(rbind, raw_one_slot$carriers)
+  expect_equal(one_slot_carriers$haplotype_lane, c(1L, 2L))
+  expect_equal(one_slot_carriers$ploidy, c(2L, 2L))
+  expect_equal(vapply(raw_one_slot$contributors, nrow, 0L), c(1L, 1L))
+  one_slot_sources <- do.call(rbind, raw_one_slot$contributors)
+  expect_equal(one_slot_sources$event_index, c(4L, 4L))
+  expect_equal(one_slot_sources$alt_index, c(1L, NA_integer_))
+  expect_identical(one_slot_sources$alternate, c("NGCC", ""))
+
+  wrong_skip_ref <- rduckhts_haplotypes(con, paste(
+    "SELECT i event_index,i seq_region,position,'G' reference,[alternate] alternates,",
+    "i transcript_index,0 sample_index,'1|1' gt FROM n_indel_source WHERE i=4"
+  ), "n_indel_witnesses", "vep116_compat", input_mode = "source_records")
+  expect_identical(wrong_skip_ref$projection_status, "reference_mismatch")
+  expect_true(is.na(wrong_skip_ref$cds) && is.na(wrong_skip_ref$protein))
+  expect_equal(wrong_skip_ref$carrier_count, 2L)
+  expect_equal(wrong_skip_ref$contributors[[1L]]$event_index, 4L)
+  expect_identical(wrong_skip_ref$contributors[[1L]]$projection_status, "reference_mismatch")
+
+  # Numeric source IDs retain the pinned mixed_n_anchor/mixed_snv mapping.
+  dbWriteTable(con, "n_skipped_mixed", data.frame(event_index = 1:2,
+    source_id = c("mixed_n_anchor", "mixed_snv"), position = c(16L, 18L),
+    reference = c("N", "C"), alternate = c("NGCC", "A")))
+  skipped_mixed <- rduckhts_haplotypes(con, paste(
+    "SELECT event_index,4 seq_region,position,reference,[alternate] alternates,",
+    "4 transcript_index,0 sample_index,'1|1' gt FROM n_skipped_mixed"
+  ), "n_indel_witnesses", "vep116_compat", input_mode = "source_records", hgvs = TRUE,
+    max_leaf_edits = 1)
+  expect_equal(nrow(skipped_mixed), 1L)
+  expect_identical(skipped_mixed$cds, "ATGGCNGACTAA")
+  expect_identical(skipped_mixed$protein, "MAD*")
+  expect_identical(skipped_mixed$projection_status, "ok")
+  expect_identical(skipped_mixed$sequence_status, "conditional")
+  expect_true(is.na(skipped_mixed$hgvsp))
+  expect_identical(skipped_mixed$hgvsp_status, "incomplete_input")
+  expect_equal(skipped_mixed$carrier_count, 2L)
+  expect_equal(skipped_mixed$edit_count, 1L)
+  expect_equal(nrow(skipped_mixed$coding_blocks[[1L]]), 1L)
+  expect_equal(skipped_mixed$coding_blocks[[1L]]$event_indices[[1L]], 2L)
+  expect_equal(nrow(skipped_mixed$cds_differences[[1L]]), 1L)
+  expect_equal(nrow(skipped_mixed$protein_differences[[1L]]), 1L)
+  mixed_sources <- skipped_mixed$contributors[[1L]]
+  expect_equal(mixed_sources$event_index, 1:2)
+  expect_equal(mixed_sources$position, c(16L, 18L))
+  expect_identical(mixed_sources$reference, c("N", "C"))
+  expect_identical(mixed_sources$alternate, c("NGCC", "A"))
+  expect_equal(mixed_sources$alt_index, c(1L, 1L))
+  expect_identical(mixed_sources$projection_status, c("source_allele_skipped", "ok"))
+  expect_equal(bitwAnd(mixed_sources$evidence_flags, 8L), c(8L, 0L))
 
   dbWriteTable(con, "reference_protein_source", data.frame(i = 0:5,
     cds = c("CTGGCCTAA", "ATGTGAGCCTAA", "ATGGCCTAA", "ATGGCCTGA", "ctggcctaa", "AT"),

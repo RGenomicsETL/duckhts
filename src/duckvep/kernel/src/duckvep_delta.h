@@ -135,7 +135,8 @@ typedef enum duckvep_cds_edit_status {
     DUCKVEP_CDS_EDIT_INVALID_ALLELE,
     DUCKVEP_CDS_EDIT_REF_MISMATCH,
     DUCKVEP_CDS_EDIT_SOURCE_SHADOWED,
-    DUCKVEP_CDS_EDIT_SOURCE_UNMAPPED
+    DUCKVEP_CDS_EDIT_SOURCE_UNMAPPED,
+    DUCKVEP_CDS_EDIT_SOURCE_ALLELE_SKIPPED
 } duckvep_cds_edit_status_t;
 
 /* Open a physical edit set from one already projected CDS edit. Equal-length
@@ -483,7 +484,13 @@ duckvep_cds_edit_build_prepared_allele(
  * cannot represent as one coordinate. The complete transcript layout, CDS
  * extent and every coding-overlap REF base are checked before that result;
  * invalid models, alleles and REF mismatches remain projection failures.
- * SOURCE_UNMAPPED returns a zeroed edit. Noncoding-only spans retain OUT_OF_CDS. */
+ * SOURCE_ALLELE_SKIPPED proves a valid complete coding REF replacement whose
+ * selected raw ALT Haplosaurus does not mutate. The supported literal alphabet
+ * is ACGTUN/acgtun: uppercase ACGT and empty ALT apply; N, U and lowercase skip.
+ * Unsupported symbols/dashes remain INVALID_ALLELE, not stripped or coerced.
+ * A skip checks the same layout/CDS extent plus every coding REF base; it does
+ * not manufacture an edit or bypass a failed whole-span mapping. Both source
+ * omission statuses return a zeroed edit. Noncoding-only spans retain OUT_OF_CDS. */
 DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t
 duckvep_compat_vep116_source_cds_edit_build(
     const duckvep_transcript_model_t *transcripts,

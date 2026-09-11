@@ -636,7 +636,7 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
         if (raw_records != e->source.source_record)
             return fail(s, DUCKVEP_HAPLOTYPE_STREAM_INVALID_ARG);
         /* Exon-admitted genotype retention selects the upstream mutation
-         * route even for shadowed, unmapped or UTR sources. */
+         * route even for shadowed, unmapped, skipped-allele or UTR sources. */
         retained_call |= p->source_exonic && (e->source.allele_index != 0u ||
             (evidence & (DUCKVEP_CARRIER_CALLED | DUCKVEP_CARRIER_REFERENCE_REPLAY)) != 0u);
         b->contributors[i] = (duckvep_haplotype_contributor_t){
@@ -647,7 +647,8 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
             b->contributors[i].projection_status = DUCKVEP_CDS_EDIT_SOURCE_SHADOWED;
             continue;
         }
-        if (raw_records && p->status == DUCKVEP_CDS_EDIT_SOURCE_UNMAPPED) {
+        if (raw_records && (p->status == DUCKVEP_CDS_EDIT_SOURCE_UNMAPPED ||
+                            p->status == DUCKVEP_CDS_EDIT_SOURCE_ALLELE_SKIPPED)) {
             b->contributors[i].evidence_flags |= DUCKVEP_CARRIER_CONDITIONAL;
             continue;
         }

@@ -79,6 +79,17 @@ ORDER BY event_index;
 5400	p.Ala3del	supported	inframe_deletion
 32261	p.Ala3Ter	supported	frameshift_variant
 
+# Pinned raw_indel_5400 skips the full N-bearing ALT, not just its anchor.
+query ITTTTIIIIT
+SELECT contributors[1].event_index,cds,protein,projection_status,sequence_status,
+  edit_count,carrier_count,len(contributors),len(coding_blocks),contributors[1].projection_status
+FROM duckvep_haplotypes(
+  'SELECT event_index,seq_region,position,reference,[alternate] alternates,
+   seq_region transcript_index,0 sample_index,''1|1'' gt FROM hgvs_table_events WHERE event_index=5400',
+  'hgvs-alternate-table',input_mode:='source_records',phase_policy:='vep116_compat');
+----
+5400	ATGNAAGCCTAA	MXA*	ok	conditional	0	2	1	0	source_allele_skipped
+
 query I
 SELECT duckvep_model_drop('hgvs-alternate-table');
 ----
@@ -152,10 +163,11 @@ ORDER BY event_index;
 13	p.Thr2SerfsTer?	frameshift_variant
 14	p.Ala3ProfsTer?	frameshift_variant
 
-# Raw source replay still validates the full ALT; it must not acquire the
+# Raw source replay skips a complete N-bearing ALT rather than applying the
 # independent-event permission to erase matching N padding before eligibility.
-query ITT
-SELECT contributors[1].event_index, hgvsp, projection_status
+query ITTTTTTIII
+SELECT contributors[1].event_index, cds, protein, hgvsp, projection_status, sequence_status,
+  contributors[1].projection_status, edit_count, len(coding_blocks), carrier_count
 FROM duckvep_haplotypes(
   'SELECT event_index, seq_region, position, reference, [alternate] alternates,
    seq_region transcript_index, 0 sample_index, ''1|1'' gt FROM hgvs_padding_events
@@ -163,8 +175,8 @@ FROM duckvep_haplotypes(
   'hgvs-padding', hgvs := true, input_mode := 'source_records', phase_policy := 'vep116_compat')
 ORDER BY transcript_index;
 ----
-1	NULL	invalid_allele
-8	NULL	invalid_allele
+1	ATGACNGCCTAA	MTA*	NULL	ok	conditional	source_allele_skipped	0	0	2
+8	ATGNCNGCCTAA	MXA*	NULL	ok	conditional	source_allele_skipped	0	0	2
 
 query I
 SELECT duckvep_model_drop('hgvs-padding');
@@ -321,8 +333,8 @@ CREATE TABLE hgvs_residual_raw AS SELECT * FROM duckvep_haplotypes(
    seq_region transcript_index, 0 sample_index, ''1|1'' gt FROM hgvs_residual_events',
   'hgvs-residual', hgvs := true, input_mode := 'source_records', phase_policy := 'vep116_compat');
 
-# Source-record replay validates the complete ALT, so the two N-anchor records
-# remain present with unavailable sequence rather than acquiring TVA eligibility.
+# Source-record replay skips N-bearing ALTs while retaining conditional evidence.
+# It does not acquire independent TVA eligibility by erasing their shared anchor.
 query TITT
 SELECT route, event_index, regexp_replace(hgvsp, '^p\.\((.*)\)$', 'p.\1'), projection_status
 FROM (
@@ -351,11 +363,11 @@ raw	4067	p.Ter2_Ala3insArgTer	ok
 raw	4069	p.Ala3Ter	ok
 raw	13533	p.Ala3Ter	ok
 raw	13684	p.Arg2dup	ok
-raw	32276	NULL	invalid_allele
+raw	32276	NULL	ok
 raw	71881	p.Ter2_Ala3insTer	ok
 raw	89760	p.Ala2_Ala3insAla	ok
 raw	110256	p.Ala2dup	ok
-raw	146516	NULL	invalid_allele
+raw	146516	NULL	ok
 
 query IIIIII
 WITH observed AS (
@@ -374,13 +386,21 @@ SELECT count(*), count(DISTINCT (route, observed.event_index)),
     AND seq_region = s.i AND observed.position = s.position
     AND observed.reference = s.reference AND observed.alternate = s.alternate, false)),
   bool_and(coalesce(carrier_count = CASE WHEN route = 'raw' THEN 2 ELSE 1 END, false)),
-  bool_and((observed.cds IS NULL) = (route = 'raw' AND s.event_index IN (32276, 146516))
-    AND (protein IS NULL) = (route = 'raw' AND s.event_index IN (32276, 146516))),
+  bool_and(observed.cds IS NOT NULL AND protein IS NOT NULL),
   bool_and(coalesce(sequence_status = CASE WHEN route = 'raw' AND s.event_index IN (32276, 146516)
-    THEN 'unavailable_projection' ELSE 'ok' END, false))
+    THEN 'conditional' ELSE 'ok' END, false))
 FROM observed JOIN hgvs_residual_sources s ON observed.transcript_index = s.i;
 ----
 24	24	1	1	1	1
+
+query ITTTTIIIII
+SELECT contributors[1].event_index,cds,protein,hgvsp_status,contributors[1].projection_status,
+  edit_count,len(coding_blocks),len(cds_differences),len(protein_differences),
+  evidence_flags & 8 = 8 AND contributors[1].evidence_flags & 8 = 8
+FROM hgvs_residual_raw WHERE transcript_index IN (7,11) ORDER BY transcript_index;
+----
+32276	ATGNNAGCCTAA	MXA*	incomplete_input	source_allele_skipped	0	0	0	0	1
+146516	ATGNCNGCCTAA	MXA*	incomplete_input	source_allele_skipped	0	0	0	0	1
 
 query I
 SELECT duckvep_model_drop('hgvs-residual');

@@ -1882,12 +1882,22 @@ validating the uploaded REF against the model or genomic reference.
 Raw `source_records` replay is a different input contract. Haplosaurus's VCF
 parser preserves the complete `NGCC` allele, and
 `TranscriptHaplotypeContainer::_mutate_sequences` skips non-ACGT alleles before
-replacement. DuckVEP's declared raw-replay contract instead retains invalid
-alleles as unavailable projections, with provenance and NULL sequence/HGVSp.
-Neither behavior means inserting `GCC` after trimming N. The independent-VEP
-and decoded-singleton expectations above therefore do not establish raw-source
-equivalence. Cross-route diagnostics retain these contrasts, while R tests
-check the raw mode's explicit unavailable-projection contract separately.
+replacement. DuckVEP retains a checked skipped source as
+`source_allele_skipped`, with conditional evidence and zero physical edits.
+For this source alone, the raw sequence is unchanged `ATGGCNGCCTAA` / `MAA*`,
+with both `1|1` carriers. Other valid sources still replay. This does not mean
+inserting `GCC` after trimming N. The complete coding REF and model storage
+remain validated; mismatches still withhold sequence. Conditional paths have
+NULL HGVSp and `incomplete_input`, not an assertion of protein equivalence.
+Independent-VEP and decoded-singleton expectations therefore do not establish
+raw-source equivalence; cross-route diagnostics retain those contrasts.
+
+The raw mutation gate is case-sensitive: within DuckVEP's supported literal
+ACGTUN/acgtun alphabet, uppercase ACGT applies, while N, U and lowercase ALT
+bases skip. Unsupported IUPAC symbols and dashes remain explicit native
+limitations. Raw `GT=1` is not decoded haploidy: pinned Haplosaurus retains two
+file lanes, and its undefined second slot replaces the complete REF with an
+empty ALT. For the example above, that lane is `ATGGCGCCTAA` / `MAP`.
 
 Removed REF ambiguity has a separate eligibility rule. For the same CDS,
 original position 5 `CN>C` becomes VEP feature `N/-`: the literal deletion is
@@ -1939,8 +1949,8 @@ observations, diagnostics and reproduction scripts, together with the alternate
 translation-table controls below. Seven fixed predicate cases include an in-frame
 deletion, unavailable coding contrast, start loss, stop loss and terminal partial
 codon; native tests additionally check their reverse-complement orientations.
-The capsule has 186 byte-exact files and SHA256
-`6647ec849fcc7398dfa4a838b9c41f2d3da124186feb47f65eaba46f1b6e5312`.
+The capsule has 290 byte-exact files and SHA256
+`7b0acf236647f50971e1920e9232152fc8df765c1aac72031d1f7f530e71a6a0`.
 Original receipt pins are
 `396a66d709a0248230a1f1d6e4a4aac45c32a67183efae50036aa8c6c4de05b5`
 for removed REF and
@@ -1966,6 +1976,17 @@ observations for internal-stop shifting, delins formatting and duplication.
 Their receipt pins are
 `93d5cee946ba03b11acfd78fa26e77ee1ace7e40ddd19873a26b87786d90bb2f` and
 `38d8d2fdef7fce4e5bfc8fad8f11496201de7dd7462ba9ab697ecc74a455e796`.
+Raw-source observations retain five exact indels with `GT=1|1`, their `GT=1`
+companions, five additional configurations including a skipped-plus-valid pair,
+and nine literal ALT spellings. Original Runner output and observed output are
+byte-identical within each campaign; per-lane observations retain applied source
+IDs and raw flags. Their receipt pins are
+`96fef08540301180ea41b70e4c0342889286563cbc3f6ed46648f7cab0368944`,
+`e3efba82cbb9d53623753b37f8747be580e48180e0700c558c60aec5f6a2f51a`,
+`0eb53b96f6fab741bed65faf42fcaebed6eb4a27125e17fa136ff16d84cc58e2` and
+`286298b57d32972e0c9094ddfcdf98c7f0aa4e8d726830e51fcbb6ad9521a175`.
+The first pin identifies the final receipt over closed output/log files; its
+earlier receipt is also retained, including its explicitly superseded log hash.
 These are unsigned diagnostic witnesses,
 not general conformance or claims of an upstream biological defect.
 

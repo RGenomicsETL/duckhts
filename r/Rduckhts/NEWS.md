@@ -1,6 +1,10 @@
 
 # Rduckhts 1.5.1.9000-0.1.5
 
+- return conditional raw haplotypes for supported alleles skipped by pinned
+  Haplosaurus, preserving source contributors and other valid edits; keep
+  incorrect coding REF and invalid model storage as projection failures
+
 - match bundled indel HGVSp to pinned VEP-116 duplication and extension
   formatting; preserve original peptide exclusions after HGVS shifting,
   with original-record SQL and DBI regression coverage

@@ -1307,39 +1307,25 @@ static int delta_project_prepared_event_to_cds(
     return 1;
 }
 
-DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t
-duckvep_cds_edit_build_prepared_allele(
+static duckvep_cds_edit_status_t delta_prepared_cds_allele_open(
     const duckvep_transcript_model_t *transcripts,
     const duckvep_exon_model_t       *exons,
     const duckvep_sequence_pool_t    *seq,
     size_t                            tx_idx,
     int8_t                            transcript_strand,
     const duckvep_prepared_cds_allele_t *allele,
-    uint32_t                          exon_hint,
-    duckvep_haplotype_edit_t         *out) {
-
-    const uint8_t *cds_seq;
-    const duckvep_event_t *event;
-    size_t cds_len;
-    duckvep_coding_projection_t proj;
-    uint32_t min_cds;
-    uint32_t max_cds;
-    uint32_t projected_pos;
-    uint16_t j;
-    uint8_t kind;
-    int8_t allele_orientation;
-
-    if (out != NULL) memset(out, 0, sizeof *out);
+    const uint8_t                  **cds_seq,
+    size_t                          *cds_len) {
     if (transcripts == NULL || exons == NULL || seq == NULL || allele == NULL ||
-        allele->event == NULL || out == NULL ||
+        allele->event == NULL ||
         tx_idx >= transcripts->transcript_count ||
         (transcript_strand != (int8_t)1 && transcript_strand != (int8_t)-1) ||
         (allele->variant_strand != (int8_t)1 &&
          allele->variant_strand != (int8_t)-1)) {
         return DUCKVEP_CDS_EDIT_INVALID_ARG;
     }
-    event = allele->event;
-    kind = event->kind;
+    const duckvep_event_t *event = allele->event;
+    uint8_t kind = event->kind;
     if (kind != (uint8_t)DUCKVEP_KIND_SNV &&
         kind != (uint8_t)DUCKVEP_KIND_INS &&
         kind != (uint8_t)DUCKVEP_KIND_DEL &&
@@ -1369,20 +1355,81 @@ duckvep_cds_edit_build_prepared_allele(
         transcripts->cds_end1[tx_idx] == 0u) {
         return DUCKVEP_CDS_EDIT_OUT_OF_CDS;
     }
-    if (!delta_cds_slice(seq, tx_idx, &cds_seq, &cds_len) || cds_len > UINT32_MAX) {
+    if (!delta_cds_slice(seq, tx_idx, cds_seq, cds_len) || *cds_len > UINT32_MAX) {
         return DUCKVEP_CDS_EDIT_INVALID_ARG;
     }
+    return DUCKVEP_CDS_EDIT_OK;
+}
+
+/* Physical replacement validation only: callers own ALT eligibility and the
+ * policy for REF that cannot be mapped. No edit is manufactured for an allele
+ * that Haplosaurus will skip. */
+static duckvep_cds_edit_status_t delta_cds_replacement_reference_validate(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t *exons,
+    const duckvep_sequence_pool_t *seq, size_t tx_idx,
+    const uint8_t *cds_seq, size_t cds_len,
+    const duckvep_prepared_cds_allele_t *allele,
+    int8_t transcript_strand, uint32_t exon_hint,
+    duckvep_cds_edit_status_t unmapped_status, uint32_t *cds_start) {
+    uint32_t min_cds, max_cds;
+    if (!delta_project_prepared_event_to_cds(
+            transcripts, exons, seq, tx_idx, cds_len,
+            exon_hint, allele->event, &min_cds, &max_cds) &&
+        !duckvep_project_event_to_cds(
+            transcripts, exons, tx_idx, allele->event, &min_cds, &max_cds)) {
+        return unmapped_status;
+    }
+    /* Geometry does not prove the extent of a separately borrowed CDS slice. */
+    if (min_cds == 0u || (size_t)min_cds > cds_len ||
+        (size_t)allele->ref_length > cds_len - ((size_t)min_cds - 1u)) {
+        return DUCKVEP_CDS_EDIT_OUT_OF_CDS;
+    }
+    int reverse = allele->variant_strand != transcript_strand;
+    for (uint16_t j = 0u; j < allele->ref_length; j++) {
+        size_t index = reverse ? (size_t)allele->ref_length - 1u - j : j;
+        char expected = delta_norm_base((char)allele->ref[index]);
+        if (expected == '\0') return DUCKVEP_CDS_EDIT_INVALID_ALLELE;
+        if (reverse && expected != 'N') expected = delta_complement_base(expected);
+        char observed = delta_norm_base((char)cds_seq[(size_t)min_cds - 1u + j]);
+        if (expected == '\0' || observed == '\0' || expected != observed)
+            return DUCKVEP_CDS_EDIT_REF_MISMATCH;
+    }
+    *cds_start = min_cds;
+    return DUCKVEP_CDS_EDIT_OK;
+}
+
+DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t
+duckvep_cds_edit_build_prepared_allele(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t       *exons,
+    const duckvep_sequence_pool_t    *seq,
+    size_t                            tx_idx,
+    int8_t                            transcript_strand,
+    const duckvep_prepared_cds_allele_t *allele,
+    uint32_t                          exon_hint,
+    duckvep_haplotype_edit_t         *out) {
+    const uint8_t *cds_seq;
+    size_t cds_len;
+    if (out == NULL) return DUCKVEP_CDS_EDIT_INVALID_ARG;
+    memset(out, 0, sizeof *out);
+    duckvep_cds_edit_status_t status = delta_prepared_cds_allele_open(
+        transcripts, exons, seq, tx_idx, transcript_strand, allele, &cds_seq, &cds_len);
+    if (status != DUCKVEP_CDS_EDIT_OK) return status;
     if (!duckvep_feature_allele_peptide_eligible(allele->alt, allele->alt_length)) {
         return DUCKVEP_CDS_EDIT_INVALID_ALLELE;
     }
 
-    allele_orientation = allele->variant_strand == transcript_strand
+    const duckvep_event_t *event = allele->event;
+    int8_t allele_orientation = allele->variant_strand == transcript_strand
         ? (int8_t)1 : (int8_t)-1;
     out->variant_strand = allele->variant_strand;
     out->alt_len = (uint32_t)allele->alt_length;
     out->alt = allele->alt_length > 0u ? allele->alt : NULL;
 
     if (event->interbase) {
+        duckvep_coding_projection_t proj;
+        uint32_t projected_pos;
         uint32_t boundary;
         uint32_t right_flank;
 
@@ -1454,47 +1501,69 @@ duckvep_cds_edit_build_prepared_allele(
     if (!reference_peptide_eligible) {
         if (allele->ref_length == allele->alt_length)
             return DUCKVEP_CDS_EDIT_INVALID_ALLELE;
-        for (j = 0u; j < allele->ref_length; j++) {
+        for (uint16_t j = 0u; j < allele->ref_length; j++) {
             if (delta_norm_base((char)allele->ref[j]) == '\0')
                 return DUCKVEP_CDS_EDIT_INVALID_ALLELE;
         }
     }
 
-    if (!delta_project_prepared_event_to_cds(
-            transcripts, exons, seq, tx_idx, cds_len,
-            exon_hint, event, &min_cds, &max_cds) &&
-        !duckvep_project_event_to_cds(
-            transcripts, exons, tx_idx, event, &min_cds, &max_cds)) {
-        /* An unmapped N cannot be checked against this CDS pool. Do not turn
-         * its failed projection into an omitted raw-source replacement. */
-        return reference_peptide_eligible
-            ? DUCKVEP_CDS_EDIT_OUT_OF_CDS : DUCKVEP_CDS_EDIT_INVALID_ALLELE;
-    }
-    /* Genomic/CDS projection proves model geometry, not the extent of a
-     * separately borrowed sequence slice. Validate that slice before REF
-     * reads, including when the hinted fast path fell back to projection. */
-    if (min_cds == 0u || (size_t)min_cds > cds_len ||
-        (size_t)allele->ref_length > cds_len - ((size_t)min_cds - 1u)) {
-        return DUCKVEP_CDS_EDIT_OUT_OF_CDS;
-    }
-    for (j = 0u; j < allele->ref_length; j++) {
-        size_t index = allele_orientation > 0
-            ? (size_t)j : (size_t)allele->ref_length - 1u - (size_t)j;
-        char expected = delta_norm_base((char)allele->ref[index]);
-        if (expected == '\0') return DUCKVEP_CDS_EDIT_INVALID_ALLELE;
-        if (allele_orientation < 0 && expected != 'N')
-            expected = delta_complement_base(expected);
-        char observed = delta_norm_base(
-            (char)cds_seq[(size_t)min_cds - 1u + (size_t)j]);
-
-        if (expected == '\0' || observed == '\0' || expected != observed) {
-            return DUCKVEP_CDS_EDIT_REF_MISMATCH;
-        }
-    }
+    uint32_t min_cds;
+    /* An unmapped N cannot be checked against this CDS pool. Do not turn its
+     * failed projection into an omitted raw-source replacement. */
+    status = delta_cds_replacement_reference_validate(transcripts, exons, seq,
+        tx_idx, cds_seq, cds_len, allele, transcript_strand, exon_hint,
+        reference_peptide_eligible ? DUCKVEP_CDS_EDIT_OUT_OF_CDS
+                                  : DUCKVEP_CDS_EDIT_INVALID_ALLELE, &min_cds);
+    if (status != DUCKVEP_CDS_EDIT_OK) return status;
     out->cds_start = min_cds;
     out->ref_len = (uint32_t)allele->ref_length;
     out->ref = allele->ref;
     return DUCKVEP_CDS_EDIT_OK;
+}
+
+/* A skipped or unmapped source must not hide invalid cached coordinates or a
+ * CDS slice whose length disagrees with the complete transcript layout. */
+static duckvep_cds_edit_status_t delta_source_cds_model_validate(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t *exons,
+    const duckvep_sequence_pool_t *seq, size_t tx_idx,
+    duckvep_transcript_model_t *view, const uint8_t **cds, size_t *cds_length) {
+    if (duckvep_model_validate_transcript_layout(transcripts, exons, tx_idx, NULL) != DUCKVEP_OK)
+        return DUCKVEP_CDS_EDIT_INVALID_ARG;
+    *view = *transcripts;
+    view->cds_cdna_start1 = view->cds_cdna_end1 = view->cds_start_exon_index = NULL;
+    view->cds_phase_offset = NULL;
+    uint32_t first, last, exon;
+    uint8_t phase;
+    if (!delta_cds_slice(seq, tx_idx, cds, cds_length) || *cds_length > UINT32_MAX ||
+        !duckvep_project_coding_cdna_bounds(view, exons, tx_idx, &first, &last, &exon, &phase))
+        return DUCKVEP_CDS_EDIT_INVALID_ARG;
+    uint32_t cached_first, cached_last, cached_exon;
+    uint8_t cached_phase;
+    if (!duckvep_project_coding_cdna_bounds(transcripts, exons, tx_idx,
+            &cached_first, &cached_last, &cached_exon, &cached_phase) ||
+        first != cached_first || last != cached_last || exon != cached_exon || phase != cached_phase)
+        return DUCKVEP_CDS_EDIT_INVALID_ARG;
+    if ((uint64_t)last - first + 1u + phase != *cds_length)
+        return DUCKVEP_CDS_EDIT_INVALID_ARG;
+    return DUCKVEP_CDS_EDIT_OK;
+}
+
+/* The supported literal alphabet is ACGTUN/acgtun, not every byte accepted by
+ * the upstream parser. Haplosaurus 116 _mutate_sequences uses /^[ACGT]*$/ on
+ * the selected raw allele: lowercase, U and N are skipped without mutation.
+ * Empty ALT is the existing undefined-slot deletion. Symbolic alleles and
+ * embedded dashes remain unsupported; this path never strips or coerces them. */
+static duckvep_cds_edit_status_t delta_vep116_source_alt_status(
+    const uint8_t *alt, uint16_t length) {
+    duckvep_cds_edit_status_t status = DUCKVEP_CDS_EDIT_OK;
+    for (uint16_t i = 0u; i < length; i++) {
+        if (delta_norm_base((char)alt[i]) == '\0')
+            return DUCKVEP_CDS_EDIT_INVALID_ALLELE;
+        if (alt[i] != 'A' && alt[i] != 'C' && alt[i] != 'G' && alt[i] != 'T')
+            status = DUCKVEP_CDS_EDIT_SOURCE_ALLELE_SKIPPED;
+    }
+    return status;
 }
 
 DUCKVEP_INTERNAL_API duckvep_cds_edit_status_t
@@ -1505,41 +1574,60 @@ duckvep_compat_vep116_source_cds_edit_build(
     int8_t transcript_strand, const duckvep_prepared_cds_allele_t *allele,
     duckvep_haplotype_edit_t *out) {
     if (out) memset(out, 0, sizeof(*out));
-    if (!allele || !allele->event || allele->variant_strand != 1)
+    if (!out || !allele || !allele->event || allele->variant_strand != 1 ||
+        !allele->ref || (allele->alt_length && !allele->alt))
         return DUCKVEP_CDS_EDIT_INVALID_ARG;
     const duckvep_event_t *event = allele->event;
     if (event->interbase || !event->start1 || event->end1 < event->start1 ||
         event->end1 - event->start1 + 1u != allele->ref_length ||
-        event->raw_start1 != event->start1 || event->raw_end1 != event->end1)
+        event->raw_start1 != event->start1 || event->raw_end1 != event->end1 ||
+        event->feature_start1 != event->start1 || event->feature_end1 != event->end1 ||
+        event->ref_diff_offset || event->alt_diff_offset || event->feature_allele_offset)
         return DUCKVEP_CDS_EDIT_INVALID_EVENT;
-    duckvep_cds_edit_status_t status = duckvep_cds_edit_build_prepared_allele(
-        transcripts, exons, seq, tx_idx, transcript_strand, allele, UINT32_MAX, out);
-    if (status != DUCKVEP_CDS_EDIT_OUT_OF_CDS || !seq->cds_length[tx_idx]) return status;
-    if (duckvep_model_validate_transcript_layout(transcripts, exons, tx_idx, NULL) != DUCKVEP_OK)
-        return DUCKVEP_CDS_EDIT_INVALID_ARG;
+    duckvep_cds_edit_status_t alt_status =
+        delta_vep116_source_alt_status(allele->alt, allele->alt_length);
+    if (alt_status == DUCKVEP_CDS_EDIT_INVALID_ALLELE) return alt_status;
 
-    /* A failed whole-span projection is not evidence that the model's CDS
-     * storage is valid. Derive its extent from uncached exon coordinates. */
-    duckvep_transcript_model_t view = *transcripts;
-    view.cds_cdna_start1 = view.cds_cdna_end1 = view.cds_start_exon_index = NULL;
-    view.cds_phase_offset = NULL;
-    uint32_t first, last, exon;
-    uint8_t phase;
     const uint8_t *cds;
     size_t cds_length;
-    if (!delta_cds_slice(seq, tx_idx, &cds, &cds_length) ||
-        !duckvep_project_coding_cdna_bounds(&view, exons, tx_idx, &first, &last, &exon, &phase))
-        return DUCKVEP_CDS_EDIT_INVALID_ARG;
-    uint32_t cached_first, cached_last, cached_exon;
-    uint8_t cached_phase;
-    if (!duckvep_project_coding_cdna_bounds(transcripts, exons, tx_idx,
-            &cached_first, &cached_last, &cached_exon, &cached_phase) ||
-        first != cached_first || last != cached_last || exon != cached_exon || phase != cached_phase)
-        return DUCKVEP_CDS_EDIT_INVALID_ARG;
-    if ((uint64_t)last - first + 1u + phase != cds_length)
-        return DUCKVEP_CDS_EDIT_INVALID_ARG;
-    if (duckvep_project_event_to_cds(&view, exons, tx_idx, event, &first, &last))
-        return DUCKVEP_CDS_EDIT_OUT_OF_CDS;
+    duckvep_transcript_model_t view;
+    duckvep_cds_edit_status_t status;
+    if (alt_status == DUCKVEP_CDS_EDIT_SOURCE_ALLELE_SKIPPED) {
+        status = delta_prepared_cds_allele_open(transcripts, exons, seq, tx_idx,
+            transcript_strand, allele, &cds, &cds_length);
+        if (status != DUCKVEP_CDS_EDIT_OK) {
+            if (status == DUCKVEP_CDS_EDIT_OUT_OF_CDS &&
+                duckvep_model_validate_transcript_layout(transcripts, exons, tx_idx,
+                    NULL) != DUCKVEP_OK)
+                return DUCKVEP_CDS_EDIT_INVALID_ARG;
+            return status;
+        }
+        status = delta_source_cds_model_validate(transcripts, exons, seq,
+            tx_idx, &view, &cds, &cds_length);
+        if (status != DUCKVEP_CDS_EDIT_OK) return status;
+        for (uint16_t i = 0u; i < allele->ref_length; i++) {
+            if (delta_norm_base((char)allele->ref[i]) == '\0')
+                return DUCKVEP_CDS_EDIT_INVALID_ALLELE;
+        }
+        uint32_t cds_start;
+        status = delta_cds_replacement_reference_validate(&view, exons, seq,
+            tx_idx, cds, cds_length, allele, transcript_strand, UINT32_MAX,
+            duckvep_feature_allele_peptide_eligible(allele->ref, allele->ref_length)
+                ? DUCKVEP_CDS_EDIT_OUT_OF_CDS : DUCKVEP_CDS_EDIT_INVALID_ALLELE,
+            &cds_start);
+        if (status == DUCKVEP_CDS_EDIT_OK) return alt_status;
+        if (status != DUCKVEP_CDS_EDIT_OUT_OF_CDS) return status;
+    } else {
+        status = duckvep_cds_edit_build_prepared_allele(transcripts, exons, seq,
+            tx_idx, transcript_strand, allele, UINT32_MAX, out);
+        if (status != DUCKVEP_CDS_EDIT_OUT_OF_CDS || !seq->cds_length[tx_idx]) return status;
+        status = delta_source_cds_model_validate(transcripts, exons, seq,
+            tx_idx, &view, &cds, &cds_length);
+        if (status != DUCKVEP_CDS_EDIT_OK) return status;
+        uint32_t first, last;
+        if (duckvep_project_event_to_cds(&view, exons, tx_idx, event, &first, &last))
+            return DUCKVEP_CDS_EDIT_OUT_OF_CDS;
+    }
 
     size_t offset = transcripts->exon_offset[tx_idx];
     size_t count = transcripts->exon_count[tx_idx];
@@ -1555,14 +1643,15 @@ duckvep_compat_vep116_source_cds_edit_build(
         if (i > UINT32_MAX || length > allele->ref_length - coding_bases)
             return DUCKVEP_CDS_EDIT_INVALID_ARG;
         const uint8_t *ref = allele->ref + start - event->start1;
-        duckvep_event_t piece;
-        if (!duckvep_event_prepare_replacement(start, ref, (uint16_t)length,
-                ref, (uint16_t)length, &piece)) return DUCKVEP_CDS_EDIT_INVALID_EVENT;
-        duckvep_prepared_cds_allele_t part = {&piece, ref, ref, ref,
-            (uint16_t)length, (uint16_t)length, 1};
-        duckvep_haplotype_edit_t checked;
-        status = duckvep_cds_edit_build_prepared_allele(transcripts, exons, seq,
-            tx_idx, transcript_strand, &part, (uint32_t)i, &checked);
+        /* Validate the coding REF subspan without supplying a synthetic ALT. */
+        duckvep_event_t piece = {.start1 = start, .end1 = end,
+            .ref_diff_length = (uint16_t)length};
+        duckvep_prepared_cds_allele_t part = {.event = &piece, .ref = ref,
+            .ref_length = (uint16_t)length, .variant_strand = 1};
+        uint32_t cds_start;
+        status = delta_cds_replacement_reference_validate(&view, exons, seq,
+            tx_idx, cds, cds_length, &part, transcript_strand, (uint32_t)i,
+            DUCKVEP_CDS_EDIT_OUT_OF_CDS, &cds_start);
         if (status != DUCKVEP_CDS_EDIT_OK) return status;
         coding_bases += length;
     }

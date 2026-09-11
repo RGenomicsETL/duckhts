@@ -531,6 +531,7 @@ static const char *projection_name(duckvep_cds_edit_status_t status) {
     case DUCKVEP_CDS_EDIT_REF_MISMATCH: return "reference_mismatch";
     case DUCKVEP_CDS_EDIT_SOURCE_SHADOWED: return "shadowed_duplicate";
     case DUCKVEP_CDS_EDIT_SOURCE_UNMAPPED: return "source_unmapped";
+    case DUCKVEP_CDS_EDIT_SOURCE_ALLELE_SKIPPED: return "source_allele_skipped";
     case DUCKVEP_CDS_EDIT_INVALID_ARG: return "invalid_argument";
     case DUCKVEP_CDS_EDIT_UNSUPPORTED_KIND: return "unsupported_kind";
     case DUCKVEP_CDS_EDIT_INVALID_EVENT: return "invalid_event";

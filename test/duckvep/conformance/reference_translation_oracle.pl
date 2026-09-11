@@ -9,6 +9,7 @@ use Bio::EnsEMBL::Transcript;
 use Bio::EnsEMBL::Translation;
 use Bio::EnsEMBL::Attribute;
 use Bio::EnsEMBL::Variation::Sample;
+use Bio::EnsEMBL::Variation::SampleGenotypeFeature;
 use Bio::EnsEMBL::Variation::TranscriptHaplotypeContainer;
 use Bio::EnsEMBL::Variation::VariationFeature;
 use Bio::EnsEMBL::Variation::TranscriptVariation;
@@ -109,7 +110,8 @@ sub parse_vcf_variants {
 
 # Observe core reference translation, Haplosaurus reference/alternate paths,
 # and independent TVA consequences/HGVS from the declared source records.
-@ARGV == 1 or die "usage: reference_translation_oracle.pl cases.jsonl\n";
+my $raw_records = @ARGV && $ARGV[0] eq '--raw-records' ? !!shift(@ARGV) : 0;
+@ARGV == 1 or die "usage: reference_translation_oracle.pl [--raw-records] cases.jsonl\n";
 open(my $input, '<', $ARGV[0]) or die "Cannot read cases: $!\n";
 my $json = JSON->new->canonical;
 my $vcf_config;
@@ -124,6 +126,7 @@ while (my $line = <$input>) {
         (!defined($case->{variant_format}) || $case->{variant_format} ne 'vcf');
     my $is_vcf = exists($case->{variant_format});
     die "Cannot mix VCF and default SNV cases\n" if $is_vcf != $vcf_mode;
+    die "Raw-record observations require original VCF cases\n" if $raw_records && !$is_vcf;
     if ($is_vcf && !$vcf_config) {
         require Bio::EnsEMBL::VEP::Config;
         require Bio::EnsEMBL::VEP::Parser::VCF;
@@ -154,6 +157,66 @@ while (my $line = <$input>) {
     for my $edit (@{$case->{edits}}) {
         $translation->add_Attributes(Bio::EnsEMBL::Attribute->new(-CODE => $edit->{code},
             -VALUE => join(' ', $edit->{position1}, $edit->{position1}, $edit->{alternate})));
+    }
+    if ($raw_records) {
+        # Fixed raw GT 1|1 gives two literal ALT slots. Construct the same VF
+        # and SGF fields as Haplo::AnnotationType::Transcript, without ordinary
+        # VEP minimisation. This observes container mechanics, not raw-GT parsing.
+        my @observations;
+        my %ids;
+        for my $variant (@{$case->{variants} || []}) {
+            my ($id, $position, $reference, $alternate) =
+                @{$variant}{qw(id position1 reference alternate)};
+            die "Raw witness requires unique source IDs and matching literal alleles\n" unless
+                defined($id) && $id =~ /^[^\s;]+$/ && !$ids{$id}++ &&
+                defined($position) && $position =~ /^[1-9][0-9]*$/ &&
+                defined($reference) && $reference =~ /^[ACGTN]+$/i &&
+                defined($alternate) && $alternate =~ /^[ACGTN]+$/i &&
+                $position <= length($cds) && length($reference) <= length($cds) - $position + 1 &&
+                uc(substr($cds, $position - 1, length($reference))) eq uc($reference);
+            my $start = $cds_start - 1 + $position;
+            my $end = $start + length($reference) - 1;
+            my $vf = Bio::EnsEMBL::Variation::VariationFeature->new_fast({
+                start => $start, end => $end, strand => 1, map_weight => 1,
+                allele_string => "$reference/$alternate", variation_name => $id,
+                chr => $slice->seq_region_name, slice => $slice,
+            });
+            my $sample = Bio::EnsEMBL::Variation::Sample->new(-NAME => 'translation_sample');
+            my $gt = Bio::EnsEMBL::Variation::SampleGenotypeFeature->new_fast({
+                variation_feature => $vf, sample => $sample,
+                genotype => [$alternate, $alternate], phased => 1,
+                start => $start, end => $end, strand => 1, slice => $slice,
+            });
+            my $container = Bio::EnsEMBL::Variation::TranscriptHaplotypeContainer->new(
+                -TRANSCRIPT => $transcript, -GENOTYPES => [$gt], -SAMPLES => [$sample]);
+            die "No raw container for source $id\n" unless $container;
+            my $genotypes = $container->_filter_and_sort_genotypes(
+                $container->get_all_SampleGenotypeFeatures);
+            my $mutated = $container->_mutate_sequences($genotypes, $sample->name);
+            my $mapping = $vf->{_cds_mapping};
+            my @lanes;
+            for my $lane (0..$#$mutated) {
+                my $value = $mutated->[$lane];
+                push @lanes, {
+                    lane1 => $lane + 1, sample => $sample->name,
+                    cds => $value->{cds}, protein => $value->{protein},
+                    flags => {%{$value->{flags}}},
+                    applied_sources => [sort map {$_->variation_name} values %{$value->{vfs}}],
+                };
+            }
+            # Serialize before the next event reuses this transcript's caches.
+            my $container_json = JSON->new->canonical->convert_blessed->encode($container);
+            push @observations, {
+                id => $id, source_reference => $reference, source_alternate => $alternate,
+                source_position1 => $start, raw_gt => '1|1',
+                mapping_start => $mapping ? $mapping->start : undef,
+                mapping_end => $mapping ? $mapping->end : undef,
+                reference_cds => $transcript->{cds}, reference_protein => $transcript->{protein},
+                lanes => \@lanes, container => $json->decode($container_json),
+            };
+        }
+        print $json->encode({id => $case->{id}, raw_haplotypes => \@observations}), "\n";
+        next;
     }
     my $sample = Bio::EnsEMBL::Variation::Sample->new(-NAME => 'translation_sample');
     my $container = Bio::EnsEMBL::Variation::TranscriptHaplotypeContainer->new(

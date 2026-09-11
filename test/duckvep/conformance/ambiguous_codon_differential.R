@@ -2,6 +2,7 @@
 # Original VCF alleles: uploaded ambiguity and surrounding codon ambiguity.
 source('scripts/duckvep_evidence.R')
 source('test/duckvep/conformance/contributor_identity.R')
+source('test/duckvep/conformance/raw_indel_observations.R')
 
 codon_check_provenance <- function(actual, events, raw) {
   ploidy <- if (raw) 2L else 1L
@@ -352,6 +353,7 @@ main <- function() {
   revision <- duckvep_evidence_revision('.')
   extension <- normalizePath(opt$extension, mustWork = TRUE)
   sources <- c('test/duckvep/conformance/ambiguous_codon_differential.R',
+    'test/duckvep/conformance/raw_indel_observations.R',
     'test/duckvep/conformance/contributor_identity.R',
     'test/duckvep/conformance/reference_translation_oracle.pl', 'scripts/duckvep_evidence.R',
     list.files('src/duckvep', recursive = TRUE, full.names = TRUE, pattern = '\\.[ch]$'))
@@ -473,6 +475,15 @@ main <- function() {
     so_compared = !is.na(pairs$so_equal), so_failures = !pairs$so_equal),
     pairs[c('route', 'source_n', 'codon_n')], sum, na.rm = TRUE)
   write.csv(summary, file.path(out, 'summary.csv'), row.names = FALSE)
+  raw_comparison <- NULL
+  if (indel) {
+    stage <- 'raw_container_oracle_execution'
+    command(c('run', '--clean-env', '--env', paste0('PERL5LIB=', libs), '-p', prefix, 'perl',
+      normalizePath('test/duckvep/conformance/reference_translation_oracle.pl'),
+      '--raw-records', input), 'raw_oracle')
+    stage <- 'raw_container_comparison'
+    raw_comparison <- raw_indel_compare(con, events, partitions, out)
+  }
   stage <- 'complete_evidence_retention'
   # Arbitrary supplied binaries are explicitly diagnostic; hashes do not prove
   # that the checkout built the extension. Retain both identities independently.
@@ -498,6 +509,7 @@ main <- function() {
     manifest$source_indels <- nrow(events)
     manifest$variant_family <- 'indel'
     manifest$scope <- 'independent_SO_HGVSp_and_singleton_phased_HGVSp_original_VCF_indels_forward_single_exon'
+    manifest$raw_container_comparison <- raw_comparison
   }
   jsonlite::write_json(manifest,
     file.path(out, 'receipt.json'), pretty = TRUE, auto_unbox = TRUE)
@@ -521,6 +533,7 @@ main <- function() {
     stopifnot(all(file.copy(file.path(out, c('summary.csv', 'controls.csv', 'environment.stdout')),
       destination)))
     manifest <- jsonlite::read_json(file.path(out, 'receipt.json'), simplifyVector = TRUE)
+    manifest$raw_container_comparison <- NULL
     manifest$local_receipt_sha256 <- duckvep_evidence_sha256(file.path(out, 'receipt.json'))
     manifest$scope <- paste(manifest$scope, 'complete_pairs_and_oracle_not_all_native_output_fields', sep = ';')
     manifest$source_sha256 <- as.list(c(source_hashes, module_hashes))
@@ -530,5 +543,6 @@ main <- function() {
   }
   execution_complete <- TRUE
   stopifnot(all(pairs$hgvsp_equal), all(pairs$so_equal, na.rm = TRUE))
+  if (indel) stopifnot(raw_comparison$all_equal)
 }
 if (sys.nframe() == 0L) main()

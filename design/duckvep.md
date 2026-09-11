@@ -794,9 +794,16 @@ evidence with zero physical edits. A full source span crossing coding/noncoding 
 has no single Haplosaurus CDS mapping. Raw replay retains it as `source_unmapped`
 with conditional evidence and replays the remaining mapped sources. The shared model
 layout validator, uncached CDS extent and cached-coordinate agreement are checked;
-every coding-overlap REF segment is verified through the ordinary edit projector.
-Intronic/UTR reference sequence is not available from a CDS-only pool. Invalid
-layout, CDS storage, alleles or coding REF still make sequence unavailable.
+every coding-overlap REF segment is verified through the shared REF validator.
+A completely mapped source whose ALT contains N, U or lowercase bases within
+the supported ACGTUN/acgtun alphabet retains `source_allele_skipped`, conditional
+evidence and zero physical edits. Haplosaurus's case-sensitive ACGT mutation
+gate selects this behavior; the remaining sources still replay, and a retained
+exonic call selects normal CDS translation even when no edit applies. Uppercase
+ACGT and an undefined-slot empty ALT apply. Unsupported symbols and dashes
+remain invalid rather than being stripped or coerced. Intronic/UTR reference
+sequence is not available from a CDS-only pool. Invalid layout, CDS storage,
+unsupported alleles or coding REF still make sequence unavailable.
 SQL/R selects this raw-record interface with `input_mode := 'source_records'` and
 `phase_policy := 'vep116_compat'`. The default `alt_events` input is the decoded-call
 contract; it cannot emulate lexical distinctions absent from those arrays.
@@ -885,11 +892,12 @@ Source-record contributors append nullable `alt_index` to their struct: 0 means
 REF, a positive value is the source ALT ordinal, and NULL means the undefined
 file-slot interpretation. The latter has empty alternate and deletes the complete
 source REF span. Evidence bit 8 and `sequence_status = 'conditional'` distinguish
-missing/undefined-slot replay and validated source-mapping omissions from a known
-called sequence; bit 2 additionally
+missing/undefined-slot replay, validated source-mapping omissions and skipped raw
+alleles from a known called sequence; bit 2 additionally
 retains explicit missing-source evidence. Omitted missing observations have no physical
 edit; retained REF slots participate in ordered replacement. A `source_unmapped`
-contributor performs no replacement and retains its interpreted REF/ALT identity.
+or `source_allele_skipped` contributor performs no replacement and retains its
+interpreted REF/ALT identity.
 Other projection failures withhold sequence. Blocks, differences and local
 coding facts describe the displayed conditional sequence, not proven biology.
 Overlapping raw records replay complete projected REF/ALT spans in descending

@@ -2,6 +2,10 @@
 
 # duckhts 1.5.1.9000
 
+- retain Haplosaurus-skipped raw alleles as conditional source contributors,
+  with zero edits; validate coding REF and model storage before replaying the
+  remaining sources and translating the CDS
+
 - preserve original peptide exclusions during shifted protein-HGVS replay;
   match pinned VEP-116 duplication lookup, Xaa duplication names and delins
   extension formatting without changing independent consequence predicates

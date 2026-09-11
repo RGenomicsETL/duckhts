@@ -566,23 +566,111 @@ SELECT transcript_index,hgvsp FROM duckvep_haplotypes('SELECT * FROM hap_n_indel
 
 endloop
 
-# Raw source replay keeps the complete allele and its invalid-allele status;
-# it does not trim a shared N before projection as independent VEP does.
-query ITT
-SELECT transcript_index,hgvsp,projection_status FROM duckvep_haplotypes(
+# Raw N-bearing ALTs are skipped with conditional source evidence. The full
+# source record remains a contributor; independent and decoded calls differ.
+statement ok
+CREATE TABLE hap_n_indel_raw AS SELECT * FROM duckvep_haplotypes(
  'SELECT event_index,seq_region,position,reference,[alternate] alternates,
   transcript_index,0 sample_index,''1|1'' gt FROM hap_n_indel_calls',
- 'hap_n_indels',hgvs:=true,phase_policy:='vep116_compat',input_mode:='source_records')
-ORDER BY transcript_index;
+ 'hap_n_indels',hgvs:=true,phase_policy:='vep116_compat',input_mode:='source_records');
+
+query ITTT
+SELECT transcript_index,hgvsp,projection_status,sequence_status
+FROM hap_n_indel_raw ORDER BY transcript_index;
 ----
-0	p.(Ala2delinsGlyPro)	ok
-1	p.(Met1_Ter2insSer)	ok
-2	p.(Ala2_Ala3insPro)	ok
-3	p.(Ter2delinsLysPro)	ok
-4	NULL	invalid_allele
-5	p.(Ala2dup)	ok
-6	NULL	invalid_allele
-7	NULL	invalid_allele
+0	p.(Ala2delinsGlyPro)	ok	ok
+1	p.(Met1_Ter2insSer)	ok	ok
+2	p.(Ala2_Ala3insPro)	ok	ok
+3	p.(Ter2delinsLysPro)	ok	ok
+4	NULL	ok	conditional
+5	p.(Ala2dup)	ok	ok
+6	NULL	ok	conditional
+7	NULL	ok	conditional
+
+query III
+SELECT count(*),sum(carrier_count),sum(len(contributors)) FROM hap_n_indel_raw;
+----
+8	16	8
+
+query ITTIIIITI
+SELECT contributors[1].event_index,cds,protein,edit_count,len(coding_blocks),
+  len(cds_differences),len(protein_differences),contributors[1].projection_status,
+  evidence_flags & 8 = 8 AND contributors[1].evidence_flags & 8 = 8
+FROM hap_n_indel_raw WHERE transcript_index IN (4,6,7) ORDER BY transcript_index;
+----
+4	ATGGCNGCCTAA	MAA*	0	0	0	0	source_allele_skipped	1
+6	ATGNCNGCCTAA	MXA*	0	0	0	0	source_allele_skipped	1
+7	ATGNCNGCCTAA	MXA*	0	0	0	0	source_allele_skipped	1
+
+query III
+SELECT count(*),count(*) FILTER(WHERE hgvsp IS NULL AND hgvsp_status='incomplete_input'),
+  count(*) FILTER(WHERE contributors[1].event_index=s.i
+    AND contributors[1].position=s.pos+10 AND contributors[1].reference=s.ref
+    AND contributors[1].alternate=s.alt AND contributors[1].alt_index=1)
+FROM hap_n_indel_raw JOIN hap_n_indel_source s ON transcript_index=s.i
+WHERE transcript_index IN (4,6,7);
+----
+3	3	3
+
+# Raw GT 1 has an undefined second file slot; it is not decoded haploidy.
+# Pinned raw_indel_143856 observes a skipped ALT and a full-REF deletion.
+query IITTIIITT
+SELECT carriers[1].haplotype_lane,carriers[1].ploidy,cds,protein,carrier_count,
+  edit_count,contributors[1].alt_index,contributors[1].alternate,sequence_status
+FROM duckvep_haplotypes(
+ 'SELECT event_index,seq_region,position,reference,[alternate] alternates,
+  transcript_index,0 sample_index,''1'' gt FROM hap_n_indel_calls WHERE event_index=4',
+ 'hap_n_indels',phase_policy:='vep116_compat',input_mode:='source_records')
+ORDER BY carriers[1].haplotype_lane;
+----
+1	2	ATGGCNGCCTAA	MAA*	1	0	1	NGCC	conditional
+2	2	ATGGCGCCTAA	MAP	1	1	NULL	(empty)	conditional
+
+# Skipping an ALT does not permit a false source REF to pass validation.
+query TIIT
+SELECT projection_status,cds IS NULL,protein IS NULL,contributors[1].projection_status
+FROM duckvep_haplotypes(
+ 'SELECT event_index,seq_region,position,''G'' reference,[alternate] alternates,
+  transcript_index,0 sample_index,''1|1'' gt FROM hap_n_indel_calls WHERE event_index=4',
+ 'hap_n_indels',phase_policy:='vep116_compat',input_mode:='source_records');
+----
+reference_mismatch	1	1	reference_mismatch
+
+# Pinned mixed_n_anchor/mixed_snv observations: the skipped source does not
+# suppress a later coding substitution. Numeric IDs map to these source names.
+statement ok
+CREATE TABLE hap_n_skipped_mixed AS SELECT event_index,source_id,4 seq_region,position,reference,
+  [alternate] alternates,4 transcript_index,0 sample_index,'1|1' gt
+FROM (VALUES (1,'mixed_n_anchor',16,'N','NGCC'),(2,'mixed_snv',18,'C','A'))
+  s(event_index,source_id,position,reference,alternate);
+
+statement ok
+CREATE TABLE hap_n_skipped_result AS SELECT * FROM duckvep_haplotypes(
+ 'SELECT * FROM hap_n_skipped_mixed','hap_n_indels',hgvs:=true,max_leaf_edits:=1,
+ phase_policy:='vep116_compat',input_mode:='source_records');
+
+query TTTTIIIIT
+SELECT cds,protein,projection_status,sequence_status,carrier_count,edit_count,
+  len(coding_blocks),len(contributors),hgvsp_status FROM hap_n_skipped_result;
+----
+ATGGCNGACTAA	MAD*	ok	conditional	2	1	1	2	incomplete_input
+
+query TITTTII
+SELECT s.source_id,c.position,c.reference,c.alternate,c.projection_status,c.alt_index,
+  c.evidence_flags & 8
+FROM hap_n_skipped_result,unnest(contributors) u(c)
+JOIN hap_n_skipped_mixed s ON c.event_index=s.event_index ORDER BY c.event_index;
+----
+mixed_n_anchor	16	N	NGCC	source_allele_skipped	1	8
+mixed_snv	18	C	A	ok	1	0
+
+query IIIII
+SELECT count(*),sum(carrier_count),count(*) FILTER(WHERE hgvsp IS NULL),
+  count(*) FILTER(WHERE coding_blocks[1].event_indices=[2]),
+  count(*) FILTER(WHERE len(cds_differences)=1 AND len(protein_differences)=1)
+FROM hap_n_skipped_result;
+----
+1	2	1	1	1
 
 statement ok
 CREATE TABLE hap_protein_tx AS SELECT i::UINTEGER transcript_index,0::UINTEGER seq_region,
