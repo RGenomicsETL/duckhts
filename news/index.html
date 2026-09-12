@@ -64,7 +64,8 @@
 </ul></div>
 <div class="section level3">
 <h3 id="installation-compatibility-and-migration-1-5-2-0-1-5">Installation, compatibility and migration<a class="anchor" aria-label="anchor" href="#installation-compatibility-and-migration-1-5-2-0-1-5"></a></h3>
-<ul><li>Quote wrapper paths/options through DBI literals and object names through DBI identifiers, while preserving explicitly documented SQL-expression arguments.</li>
+<ul><li>Provide concise function summaries and a bundled SQL reference with signatures, return schemas, usage contracts and examples, linked from the package README.</li>
+<li>Quote wrapper paths/options through DBI literals and object names through DBI identifiers, while preserving explicitly documented SQL-expression arguments.</li>
 <li>Compile a registered R native library so binary repositories record the actual target architecture. Binary publication checks the package <code>Built</code> field against the bundled extension metadata.</li>
 <li>Keep live-database rejection tests independent of DuckDB error wording, checking connection/driver validity and unchanged unsigned-extension policy across the tested released and upcoming DuckDB R versions.</li>
 <li>Remove experimental bundled <code>read_bcf_v2</code> and <code>read_bcf_appender</code>. Use <code>read_bcf()</code> or supported R wrappers with projection, explicit sequential mode where needed, and DuckDB CTAS/INSERT/COPY for materialization. Experimental-only arguments are not transferred.</li>
