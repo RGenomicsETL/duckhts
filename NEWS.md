@@ -1,6 +1,12 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.1.9000
+# duckhts 1.5.2
+
+- preserve known reference slots in raw haplotype replay when N or lowercase
+  bases exclude mutation; selected ALT slots retain conditional evidence
+
+- make the R connection-safety regression independent of DuckDB error wording,
+  preserving live-driver and unsigned-extension-policy checks
 
 - retain Haplosaurus-skipped raw alleles as conditional source contributors,
   with zero edits; validate coding REF and model storage before replaying the

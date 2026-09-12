@@ -1,5 +1,11 @@
 
-# Rduckhts 1.5.1.9000-0.1.5
+# Rduckhts 1.5.2-0.1.5
+
+- preserve known reference haplotypes without conditional evidence for N or
+  lowercase REF slots; keep selected skipped ALTs distinct in SQL and DBI results
+
+- test live database-instance rejection without depending on DuckDB's error
+  wording; verify the existing driver, connection and security setting remain intact
 
 - return conditional raw haplotypes for supported alleles skipped by pinned
   Haplosaurus, preserving source contributors and other valid edits; keep

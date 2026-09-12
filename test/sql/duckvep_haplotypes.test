@@ -612,6 +612,56 @@ WHERE transcript_index IN (4,6,7);
 ----
 3	3	3
 
+statement ok
+CREATE TABLE hap_ref_slot_source AS SELECT i event_index,i seq_region,pos AS position,
+ ref reference,alt alternate,i transcript_index,0 sample_index
+FROM (VALUES (4,16,'N','NGCC'),(5,15,'c','cGCC')) v(i,pos,ref,alt);
+
+# The source ordinal distinguishes known REF from a skipped ALT even when
+# their bytes are identical. Pinned Haplosaurus leaves both sequences unchanged.
+foreach selected_alt alternate reference
+
+query ITTTTIII
+SELECT transcript_index,cds,protein,sequence_status,hgvsp,carrier_count,
+ edit_count,len(contributors) FROM duckvep_haplotypes(
+ 'SELECT * EXCLUDE(alternate),[${selected_alt}] alternates,''|0|0'' gt FROM hap_ref_slot_source',
+ 'hap_n_indels',phase_policy:='vep116_compat',input_mode:='source_records',hgvs:=true)
+ORDER BY transcript_index;
+----
+4	ATGGCNGCCTAA	MAA*	ok	p.(=)	2	0	0
+5	ATGGCTGCCTAA	MAA*	ok	p.(=)	2	0	0
+
+query IITIIIT
+SELECT transcript_index,carriers[1].haplotype_lane,sequence_status,edit_count,
+ len(contributors),contributors[1].alt_index,hgvsp FROM duckvep_haplotypes(
+ 'SELECT * EXCLUDE(alternate),[${selected_alt}] alternates,''0|1'' gt FROM hap_ref_slot_source',
+ 'hap_n_indels',phase_policy:='vep116_compat',input_mode:='source_records',hgvs:=true)
+ORDER BY transcript_index,carriers[1].haplotype_lane;
+----
+4	1	ok	0	0	NULL	p.(=)
+4	2	conditional	0	1	1	NULL
+5	1	ok	0	0	NULL	p.(=)
+5	2	conditional	0	1	1	NULL
+
+query IIII
+SELECT count(*),sum(carrier_count),count(*) FILTER(WHERE sequence_status='conditional'),
+ count(*) FILTER(WHERE contributors[1].alt_index=1 AND edit_count=0)
+FROM duckvep_haplotypes(
+ 'SELECT * EXCLUDE(alternate),[${selected_alt}] alternates,''1|1'' gt FROM hap_ref_slot_source',
+ 'hap_n_indels',phase_policy:='vep116_compat',input_mode:='source_records');
+----
+2	4	2	2
+
+# The raw parser omits the exact unprefixed 0|0 spelling.
+query I
+SELECT count(*) FROM duckvep_haplotypes(
+ 'SELECT * EXCLUDE(alternate),[${selected_alt}] alternates,''0|0'' gt FROM hap_ref_slot_source',
+ 'hap_n_indels',phase_policy:='vep116_compat',input_mode:='source_records');
+----
+0
+
+endloop
+
 # Raw GT 1 has an undefined second file slot; it is not decoded haploidy.
 # Pinned raw_indel_143856 observes a skipped ALT and a full-REF deletion.
 query IITTIIITT

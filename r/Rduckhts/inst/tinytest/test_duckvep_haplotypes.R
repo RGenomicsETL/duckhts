@@ -1079,6 +1079,49 @@ local({
     }
   }
 
+  dbExecute(con, "CREATE TABLE ref_slot_source AS SELECT i event_index,i seq_region,
+    pos AS position,ref reference,alt alternate,i transcript_index,0 sample_index
+    FROM (VALUES(4,16,'N','NGCC'),(5,15,'c','cGCC')) v(i,pos,ref,alt)")
+  for (selected_alt in c("alternate", "reference")) {
+    ref_slot_query <- paste0("SELECT * EXCLUDE(alternate),[", selected_alt,
+      "] alternates,'%s' gt FROM ref_slot_source")
+    ref_slots <- rduckhts_haplotypes(con, sprintf(ref_slot_query, "|0|0"),
+      "n_indel_witnesses", "vep116_compat", input_mode = "source_records", hgvs = TRUE)
+    ref_slots <- ref_slots[order(ref_slots$transcript_index), ]
+    expect_equal(ref_slots$transcript_index, 4:5)
+    expect_identical(ref_slots$cds, c("ATGGCNGCCTAA", "ATGGCTGCCTAA"))
+    expect_identical(ref_slots$protein, rep("MAA*", 2L))
+    expect_identical(ref_slots$sequence_status, rep("ok", 2L))
+    expect_identical(ref_slots$hgvsp, rep("p.(=)", 2L))
+    expect_equal(ref_slots$evidence_flags, c(0L, 0L))
+    expect_equal(ref_slots$carrier_count, c(2L, 2L))
+    expect_equal(ref_slots$edit_count, c(0L, 0L))
+    expect_equal(vapply(ref_slots$contributors, nrow, 0L), c(0L, 0L))
+
+    mixed_slots <- rduckhts_haplotypes(con, sprintf(ref_slot_query, "0|1"),
+      "n_indel_witnesses", "vep116_compat", input_mode = "source_records", hgvs = TRUE)
+    lanes <- vapply(mixed_slots$carriers, function(x) x$haplotype_lane[1L], 0L)
+    mixed_slots <- mixed_slots[order(mixed_slots$transcript_index, lanes), ]
+    expect_equal(mixed_slots$transcript_index, c(4L, 4L, 5L, 5L))
+    expect_identical(mixed_slots$sequence_status, rep(c("ok", "conditional"), 2L))
+    expect_identical(mixed_slots$hgvsp, rep(c("p.(=)", NA_character_), 2L))
+    expect_equal(mixed_slots$edit_count, rep(0L, 4L))
+    expect_equal(mixed_slots$carrier_count, rep(1L, 4L))
+    expect_equal(vapply(mixed_slots$contributors, nrow, 0L), c(0L, 1L, 0L, 1L))
+    expect_equal(vapply(mixed_slots$contributors[c(2L, 4L)],
+      function(x) x$alt_index[1L], 0), c(1L, 1L))
+
+    alt_slots <- rduckhts_haplotypes(con, sprintf(ref_slot_query, "1|1"),
+      "n_indel_witnesses", "vep116_compat", input_mode = "source_records")
+    expect_equal(nrow(alt_slots), 2L)
+    expect_identical(alt_slots$sequence_status, rep("conditional", 2L))
+    expect_equal(alt_slots$carrier_count, c(2L, 2L))
+    expect_equal(vapply(alt_slots$contributors, function(x) x$alt_index[1L], 0), c(1L, 1L))
+    omitted <- rduckhts_haplotypes(con, sprintf(ref_slot_query, "0|0"),
+      "n_indel_witnesses", "vep116_compat", input_mode = "source_records")
+    expect_equal(nrow(omitted), 0L)
+  }
+
   # Pinned raw GT 1 has two file lanes, unlike a decoded haploid call.
   raw_one_slot <- rduckhts_haplotypes(con, paste(
     "SELECT i event_index,i seq_region,position,reference,[alternate] alternates,",

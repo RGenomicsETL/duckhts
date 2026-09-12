@@ -543,6 +543,83 @@ TEST haplotype_stream_raw_record_reference_observations_require_matching_cds(voi
         ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_DONE, duckvep_haplotype_stream_next(s, &leaf));
         ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_DONE, duckvep_haplotype_stream_finish(s));
     }
+    /* Haplosaurus omits unprefixed homozygous REF calls. Its retained REF slots
+     * still have no mutation when their literal bases fail /^[ACGT]*$/. A
+     * positive ALT ordinal with identical bytes remains a selected ALT. */
+    static const struct {
+        uint8_t source, model, alternate;
+        int skipped;
+    } bases[] = {{'A', 'A', 'C', 0}, {'N', 'N', 'N', 1}, {'n', 'N', 'n', 1},
+                 {'a', 'A', 'a', 1}, {'U', 'T', 'U', 1}};
+    static const struct {
+        const char *gt;
+        uint32_t allele_index;
+        int missing, omitted;
+    } calls[] = {{"0|0", 0u, 0, 1}, {"|0|0", 0u, 0, 0}, {"1|1", 1u, 0, 0},
+                 {".", 0u, 1, 0}, {"|./.", 0u, 1, 0}};
+    for (size_t b = 0u; b < sizeof(bases) / sizeof(bases[0]); b++) {
+        for (size_t c = 0u; c < sizeof(calls) / sizeof(calls[0]); c++) {
+            struct haplotype_stream_scene f;
+            haplotype_stream_scene_prepare(&f, 1u);
+            f.reference[0] = bases[b].model;
+            duckvep_haplotype_stream_t *s = &f.stream;
+            ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_init(
+                s, &f.model, &f.exons, &f.sequences, &f.buffers));
+            duckvep_haplotype_source_t source = {
+                .event_id = 1u, .ref = &bases[b].source,
+                .alt = calls[c].allele_index ? &bases[b].alternate : &bases[b].source,
+                .pos1 = 100u, .ref_len = 1u, .alt_len = 1u,
+                .allele_index = calls[c].allele_index, .source_record = 1u};
+            duckvep_raw_gt_t call;
+            ASSERT_EQ(DUCKVEP_RAW_GT_OK, duckvep_phase_parse_vep116_raw(
+                (const uint8_t *)calls[c].gt, strlen(calls[c].gt), 1u, &call));
+            ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_begin(s, &source));
+            ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_project(s, 0u));
+            ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK,
+                duckvep_haplotype_stream_push_raw_call(s, 0u, 7u, &call, 1u));
+            if (calls[c].omitted) {
+                ASSERT_EQ(DUCKVEP_RAW_GT_OMITTED_REFERENCE, call.disposition);
+                ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_DONE, duckvep_haplotype_stream_finish(s));
+                continue;
+            }
+            ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_TRANSCRIPT_READY, duckvep_haplotype_stream_finish(s));
+            duckvep_haplotype_leaf_t leaf;
+            ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_OK, duckvep_haplotype_stream_next(s, &leaf));
+            int skipped_alt = calls[c].allele_index && bases[b].skipped;
+            int conditional = calls[c].missing || skipped_alt;
+            if (leaf.projection_status != DUCKVEP_CDS_EDIT_OK ||
+                leaf.sequence_status != (conditional ? DUCKVEP_HAPLOTYPE_CONDITIONAL : DUCKVEP_HAPLOTYPE_OK))
+                fprintf(stderr, "reference slot base=%c GT=%s ordinal=%u projection=%d sequence=%d\n",
+                    bases[b].source, calls[c].gt, calls[c].allele_index,
+                    leaf.projection_status, leaf.sequence_status);
+            ASSERT_EQ(conditional ? DUCKVEP_HAPLOTYPE_CONDITIONAL : DUCKVEP_HAPLOTYPE_OK,
+                leaf.sequence_status);
+            ASSERT_EQ(DUCKVEP_CDS_EDIT_OK, leaf.projection_status);
+            ASSERT_EQ(12u, leaf.cds_length);
+            int applied = calls[c].allele_index && !bases[b].skipped;
+            uint8_t expected[12];
+            memcpy(expected, f.reference, sizeof(expected));
+            if (applied) expected[0] = bases[b].alternate;
+            ASSERT_MEM_EQ(expected, leaf.cds, 12u);
+            ASSERT_EQ(applied ? 1u : 0u, leaf.edit_count);
+            ASSERT_EQ(applied ? 1u : 0u, leaf.block_count);
+            ASSERT_EQ(2u, leaf.carriers.call_count);
+            ASSERT_EQ(calls[c].missing || calls[c].allele_index ? 1u : 0u, leaf.contributor_count);
+            uint8_t evidence = calls[c].missing
+                ? DUCKVEP_CARRIER_MISSING | DUCKVEP_CARRIER_CONDITIONAL
+                : calls[c].allele_index ? DUCKVEP_CARRIER_CALLED : 0u;
+            if (skipped_alt) evidence |= DUCKVEP_CARRIER_CONDITIONAL;
+            ASSERT_EQ(evidence, leaf.evidence_flags);
+            if (leaf.contributor_count) {
+                ASSERT_EQ(calls[c].allele_index, leaf.contributors[0].source.allele_index);
+                ASSERT_EQ(evidence, leaf.contributors[0].evidence_flags);
+                ASSERT_EQ(skipped_alt ? DUCKVEP_CDS_EDIT_SOURCE_ALLELE_SKIPPED : DUCKVEP_CDS_EDIT_OK,
+                    leaf.contributors[0].projection_status);
+            }
+            ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_DONE, duckvep_haplotype_stream_next(s, &leaf));
+            ASSERT_EQ(DUCKVEP_HAPLOTYPE_STREAM_DONE, duckvep_haplotype_stream_finish(s));
+        }
+    }
     PASS();
 }
 

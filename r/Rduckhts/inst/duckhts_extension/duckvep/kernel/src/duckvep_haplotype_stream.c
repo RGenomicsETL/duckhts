@@ -649,6 +649,13 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_next(
         }
         if (raw_records && (p->status == DUCKVEP_CDS_EDIT_SOURCE_UNMAPPED ||
                             p->status == DUCKVEP_CDS_EDIT_SOURCE_ALLELE_SKIPPED)) {
+            /* A checked REF slot excluded from mutation is a nonmutating
+             * reference observation. Its source ordinal, not byte equality,
+             * distinguishes it from a selected ALT with the same spelling. */
+            if (p->status == DUCKVEP_CDS_EDIT_SOURCE_ALLELE_SKIPPED && !e->source.allele_index) {
+                b->contributors[i].projection_status = DUCKVEP_CDS_EDIT_OK;
+                continue;
+            }
             b->contributors[i].evidence_flags |= DUCKVEP_CARRIER_CONDITIONAL;
             continue;
         }

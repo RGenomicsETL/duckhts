@@ -258,9 +258,11 @@ duckvep_haplotype_stream_status_t duckvep_haplotype_stream_push_call(
  * Missing-source, undefined-slot, SOURCE_UNMAPPED and SOURCE_ALLELE_SKIPPED
  * observations make replay explicitly CONDITIONAL. SOURCE_UNMAPPED retains a
  * layout/REF-checked mapper omission without executing a partial edit.
- * SOURCE_ALLELE_SKIPPED retains a checked raw allele excluded from mutation,
+ * SOURCE_ALLELE_SKIPPED retains a checked raw ALT excluded from mutation,
  * with complete provenance but no edit or coding block; other valid sources
- * still replay. An exon-admitted skipped source selects normal CDS translation.
+ * still replay. A checked REF slot excluded from mutation is a nonmutating
+ * reference observation; its missing-call evidence, if present, is preserved.
+ * An exon-admitted skipped source selects normal CDS translation.
  * Other projection errors withhold sequence. Mixing raw and decoded policies
  * is an error.
  * source_selected is the candidate-wide mapping choice across all samples;

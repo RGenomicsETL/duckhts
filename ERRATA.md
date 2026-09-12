@@ -51,6 +51,32 @@ VEP compatibility describes an observed result, not an endorsement of the underl
 biology or API design. When VEP's predicate ordering produces an unusual combination of
 terms, DuckVEP must reproduce that state before offering a separately named alternative.
 
+## Haplosaurus does not define whole-haplotype SO, IMPACT or NMD
+
+**Classification: upstream output scope, not an upstream defect or a waived mismatch.**
+Pinned Haplosaurus exposes CDS/protein sequences, differences, carriers, source variants
+and flags. Its CDS flags distinguish indels, open frameshifts and resolved frameshifts;
+its protein flags include stop changes and available SIFT/PolyPhen predictions. These
+are not a whole-haplotype Sequence Ontology consequence set, IMPACT category or NMD
+prediction. The per-source transcript-variation objects used to identify protein
+contributors do not classify the completed haplotype.
+
+The pinned NMD plugin consumes one transcript-variation allele. Its eligibility comes
+from that allele's consequences, and its positional rules use the original feature's
+CDS/exon coordinates. It does not consume a completed alternate CDS or its first stop.
+Choosing a contributor, merging uploaded spans, or substituting the alternate stop
+position would define a different NMD policy, not reproduce that plugin.
+
+Whole-haplotype SO/IMPACT/NMD remains a requested DuckVEP feature. It requires an explicit
+compound-prediction contract and independent validation; neither a union of independent
+labels nor a passing Haplosaurus sequence comparison establishes that contract. Existing
+VEP-116 comparisons, failures and denominators remain unchanged.
+
+Sources: pinned [Haplosaurus output](https://github.com/Ensembl/ensembl-vep/blob/57ea5c52340acc1f156267f810ad162e26597082/modules/Bio/EnsEMBL/VEP/Haplo/Runner.pm#L235-L308),
+[CDS flags](https://github.com/Ensembl/ensembl-variation/blob/2fb834b987ede3824e200197a838ce11e91aeb4b/modules/Bio/EnsEMBL/Variation/CDSHaplotype.pm#L138-L189),
+[protein flags](https://github.com/Ensembl/ensembl-variation/blob/2fb834b987ede3824e200197a838ce11e91aeb4b/modules/Bio/EnsEMBL/Variation/ProteinHaplotype.pm#L387-L455),
+and [NMD plugin](https://github.com/Ensembl/VEP_plugins/blob/0082591268417af618e03850c5ffdc7c09998a5d/NMD.pm#L79-L118).
+
 ## Evidence required to call an upstream result wrong
 
 **A DuckVEP/VEP disagreement is not evidence that VEP is wrong.** Its cause is initially
