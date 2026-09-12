@@ -223,23 +223,29 @@ historical full-output check.
 
 Sources `52ce78513b3f5f7c2a46fe82dc44dd458333092b`,
 `de3d008004f615c198a422a42a773bd7c9de0b70`,
-`d6d188da54f0a0cf97ec74244243ebad251194f5` and
-`a4ab9f516275b4c2d1178ddded5da6fbaeccf396` each use the nearest recorded
+`d6d188da54f0a0cf97ec74244243ebad251194f5`,
+`a4ab9f516275b4c2d1178ddded5da6fbaeccf396` and
+`6e1a1de9e6cf34dae4dc9f58f27817ca4dd7e8e0` each use the nearest recorded
 identical workload as their timing baseline:
 `20efcf2af33b38c5be7596e2db7b243a3be53c47` for `52ce785`, `52ce785` for
-`de3d008`, `de3d008` for `d6d188d`, and `d6d188d` for `a4ab9f5`. The
-workload has 1,024 transcripts, 64 samples, 16 overlapping transcripts,
-256 physical events and 262,144 candidate/sample input rows. All five
-runs use one thread on CPU 2, DuckDB 1.5.3 and three fresh-process timed
-passes. No DuckHTS test or conformance jobs ran concurrently with the
-`52ce785` timers. No DuckHTS build, test, conformance or diagnostic jobs
-overlapped the `d6d188d` timers. The same isolation applies to
-`a4ab9f5`, measured from 02:53:38 to 02:54:19 +0200 on September 11,
-2026. The `de3d008` campaign ran from 00:59:19 to 00:59:59 +0200 on
-September 11, 2026; a previously launched small read-only
-classification/oracle diagnostic completed at 01:00:01, so concurrent
-diagnostic activity cannot be excluded. This measured run is retained
-without replacement. Other shared-host activity was not controlled.
+`de3d008`, `de3d008` for `d6d188d`, and `d6d188d` for `a4ab9f5`;
+`6e1a1de` compares with `a4ab9f5`. The workload has 1,024 transcripts,
+64 samples, 16 overlapping transcripts, 256 physical events and 262,144
+candidate/sample input rows. All six runs use one thread on CPU 2,
+DuckDB 1.5.3 and three fresh-process timed passes. No DuckHTS test or
+conformance jobs ran concurrently with the `52ce785` timers. No DuckHTS
+build, test, conformance or diagnostic jobs overlapped the `d6d188d`
+timers. The same isolation applies to `a4ab9f5`, measured from 02:53:38
+to 02:54:19 +0200 on September 11, 2026. The `de3d008` campaign ran from
+00:59:19 to 00:59:59 +0200 on September 11, 2026; a previously launched
+small read-only classification/oracle diagnostic completed at 01:00:01,
+so concurrent diagnostic activity cannot be excluded. This measured run
+is retained without replacement. Other shared-host activity was not
+controlled. The `6e1a1de` driver ran from 21:28:02 to 21:28:42 +0200 on
+September 12, 2026, after the build, test and conformance jobs finished.
+No other local DuckHTS builds, tests, conformance, benchmarks or
+diagnostic computations overlapped its timers; read-only GitHub status
+and clock checks continued.
 
 | revision | baseline_revision | mode                | input_candidate_sample_rows | output_leaves | output_carriers | baseline_median_s | checkpoint_median_s | checkpoint_max_rss_mib |
 |:---------|:------------------|:--------------------|----------------------------:|:--------------|:----------------|------------------:|--------------------:|-----------------------:|
@@ -263,29 +269,34 @@ without replacement. Other shared-host activity was not controlled.
 | a4ab9f5  | d6d188d           | sql_records         |                      262144 | 4096          | 131072          |          0.738000 |            0.728000 |              611.23828 |
 | a4ab9f5  | d6d188d           | sql_singletons      |                      262144 | 4096          | 65536           |          0.342000 |            0.344000 |              408.10938 |
 | a4ab9f5  | d6d188d           | sql_singletons_hgvs |                      262144 | 4096          | 65536           |          0.348000 |            0.348000 |              408.94922 |
+| 6e1a1de  | a4ab9f5           | native              |                      262144 | 3072          | 114688          |          0.016827 |            0.017450 |               73.69922 |
+| 6e1a1de  | a4ab9f5           | sql                 |                      262144 | 3072          | 114688          |          0.346000 |            0.344000 |              378.75000 |
+| 6e1a1de  | a4ab9f5           | sql_records         |                      262144 | 4096          | 131072          |          0.728000 |            0.734000 |              612.30859 |
+| 6e1a1de  | a4ab9f5           | sql_singletons      |                      262144 | 4096          | 65536           |          0.344000 |            0.340000 |              409.71094 |
+| 6e1a1de  | a4ab9f5           | sql_singletons_hgvs |                      262144 | 4096          | 65536           |          0.348000 |            0.348000 |              409.24219 |
 
 Each checkpoint’s 15 matched rows have identical non-timing result
 fields, including every SQL full-output fingerprint, output denominator
-and native workspace/count metric. The [60 checkpoint
+and native workspace/count metric. The [75 checkpoint
 observations](data/duckvep_haplotypes_indel_translation.csv) retain
-individual passes. The [438-file evidence
+individual passes. The [525-file evidence
 capsule](data/duckvep_haplotypes_indel_translation.jsonl.gz) retains all
-five runs’ original worker jobs, results, logs, process-time reports,
-benchmark receipts and FASTA/index pairs, all five clean-build receipts,
+six runs’ original worker jobs, results, logs, process-time reports,
+benchmark receipts and FASTA/index pairs, all six clean-build receipts,
 the registered fixtures and the unchanged driver. Rendering verifies
 every retained file against its receipt before comparing actual jobs and
 results. It requires complete job semantics to agree across revisions,
 excluding only the explicitly checked correctness flag and named
-binary/output/reference-file paths. All 100 result objects are checked
+binary/output/reference-file paths. All 120 result objects are checked
 for within-mode repeatability; all timed values and RSS measurements are
-bound to the corresponding ledger rows. Fifty job-mutation controls
+bound to the corresponding ledger rows. Sixty job-mutation controls
 reject changed sample counts or event alleles. Original paths remain
 identifiers only; rendering does not reopen historical files.
 
 Compiled extension and native-bridge payloads are not included in this
 capsule; their identities are retained and checked through the original
-receipts. The `a4ab9f5` extension SHA-256 is
-`0c59589d09461267bb6e702e79ed3cdd0cad8d8b8db568395346e70649a1efe3`.
+receipts. The `6e1a1de` extension SHA-256 is
+`a53dcb1e1046e8bcb414400c69201d428e96a56a763dfee531fee7dc399bca9d`.
 These are unsigned local source-bound measurements. The historical
 unequal-output comparison and its complete-output controls remain
 separate and unchanged. The checkpoint comparisons establish fingerprint
@@ -293,14 +304,15 @@ equality, not complete typed-row equality.
 
 This canonical table-1 workload measures shared replay and
 singleton-HGVS paths. It does not measure N-bearing REF, skipped raw ALT
-or nonstandard-codon-table branches. Three passes on a shared host do
-not establish statistical significance, causality or a general absence
-of regression. Reproduce with the clean-build receipt procedure above
-and this command:
+or nonstandard-codon-table branches, including the N/U/lowercase
+REF-slot correction in `6e1a1de`. Three passes on a shared host do not
+establish statistical significance, causality or a general absence of
+regression. Reproduce with the clean-build receipt procedure above and
+this command:
 
 ``` bash
 Rscript benchmarks/duckvep_haplotypes.R \
   --transcripts 1024 --samples 64 --overlap 16 --passes 3 --cpu 2 \
   --modes native,sql,sql_records,sql_singletons,sql_singletons_hgvs \
-  --extension-receipt /tmp/duckhts-raw-replay-validation.NB3Y6G/extension.tsv
+  --extension-receipt /tmp/duckhts-foundation-merge.a0qkeM/extension.tsv
 ```
