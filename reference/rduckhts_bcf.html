@@ -9,7 +9,7 @@ This follows the RBCFTools pattern of creating a table that can be queried."></h
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.1.9000-0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2-0.1.5</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -104,10 +104,12 @@ single-threaded.</p></dd>
 
 
 <dt id="arg-decode-error-policy">decode_error_policy<a class="anchor" aria-label="anchor" href="#arg-decode-error-policy"></a></dt>
-<dd><p>Character. Dirty/corrupt BCF decode policy:
-<code>"null"</code> returns NULL for header-vs-payload type clashes,
+<dd><p>Character. VCF/BCF decode policy:
+<code>"null"</code> returns NULL for header-vs-payload type clashes or oversized numeric scalars,
 <code>"warn"</code> emits a DuckHTS warning and returns NULL, and
-<code>"error"</code> raises a DuckDB/R error.</p></dd>
+<code>"error"</code> raises a DuckDB/R error. Missing elements count toward scalar
+cardinality; vector-end padding does not. A malformed FORMAT tag is withheld
+for every selected sample on that record. Physical read errors and OOM always fail.</p></dd>
 
 
 <dt id="arg-overwrite">overwrite<a class="anchor" aria-label="anchor" href="#arg-overwrite"></a></dt>

@@ -69,9 +69,13 @@ rduckhts_bcf(
 
 - decode_error_policy:
 
-  Character. Dirty/corrupt BCF decode policy: `"null"` returns NULL for
-  header-vs-payload type clashes, `"warn"` emits a DuckHTS warning and
-  returns NULL, and `"error"` raises a DuckDB/R error.
+  Character. VCF/BCF decode policy: `"null"` returns NULL for
+  header-vs-payload type clashes or oversized numeric scalars, `"warn"`
+  emits a DuckHTS warning and returns NULL, and `"error"` raises a
+  DuckDB/R error. Missing elements count toward scalar cardinality;
+  vector-end padding does not. A malformed FORMAT tag is withheld for
+  every selected sample on that record. Physical read errors and OOM
+  always fail.
 
 - overwrite:
 

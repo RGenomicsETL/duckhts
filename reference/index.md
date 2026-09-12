@@ -82,6 +82,8 @@
   : Create GTF Table
 - [`rduckhts_gtf_multi()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gtf_multi.md)
   : Read multiple GTF files into a DuckDB table
+- [`rduckhts_haplotypes()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_haplotypes.md)
+  : Replay Phased Transcript Haplotypes
 - [`rduckhts_hts_header()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_header.md)
   : Read HTS Header Metadata
 - [`rduckhts_hts_index()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_hts_index.md)

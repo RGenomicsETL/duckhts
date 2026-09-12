@@ -4,12 +4,14 @@ record has a zero-based scan-local `record_index` and a list of calls with
 original-header sample indices, nullable allele indices, per-slot phase bits,
 and nullable scalar phase sets. An absent GT has NULL allele/phase lists;
 a missing allele still occupies a slot. Phase bits follow HTSlib decoding,
-including its leading-slot convention for VCF versions before 4.4."><meta property="og:description" content="Read typed GT/PS calls without repeating variant text per sample. Each
+including its leading-slot convention for VCF versions before 4.4.
+PS cardinality excludes vector-end padding retained after sample selection."><meta property="og:description" content="Read typed GT/PS calls without repeating variant text per sample. Each
 record has a zero-based scan-local `record_index` and a list of calls with
 original-header sample indices, nullable allele indices, per-slot phase bits,
 and nullable scalar phase sets. An absent GT has NULL allele/phase lists;
 a missing allele still occupies a slot. Phase bits follow HTSlib decoding,
-including its leading-slot convention for VCF versions before 4.4."></head><body>
+including its leading-slot convention for VCF versions before 4.4.
+PS cardinality excludes vector-end padding retained after sample selection."></head><body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
 
 
@@ -17,7 +19,7 @@ including its leading-slot convention for VCF versions before 4.4."></head><body
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.1.9000-0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2-0.1.5</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -49,7 +51,8 @@ record has a zero-based scan-local `record_index` and a list of calls with
 original-header sample indices, nullable allele indices, per-slot phase bits,
 and nullable scalar phase sets. An absent GT has NULL allele/phase lists;
 a missing allele still occupies a slot. Phase bits follow HTSlib decoding,
-including its leading-slot convention for VCF versions before 4.4.</p>
+including its leading-slot convention for VCF versions before 4.4.
+PS cardinality excludes vector-end padding retained after sample selection.</p>
     </div>
 
     <div class="section level2">
@@ -65,7 +68,9 @@ including its leading-slot convention for VCF versions before 4.4.</p>
 <span>  scan_mode <span class="op">=</span> <span class="st">"auto"</span>,</span>
 <span>  decompression_threads <span class="op">=</span> <span class="fl">0</span>,</span>
 <span>  decode_error_policy <span class="op">=</span> <span class="st">"null"</span>,</span>
-<span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span></span>
+<span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  format_fields <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  raw_gt <span class="op">=</span> <span class="cn">FALSE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -117,14 +122,37 @@ single-threaded.</p></dd>
 
 
 <dt id="arg-decode-error-policy">decode_error_policy<a class="anchor" aria-label="anchor" href="#arg-decode-error-policy"></a></dt>
-<dd><p>Character. Dirty/corrupt BCF decode policy:
-<code>"null"</code> returns NULL for header-vs-payload type clashes,
+<dd><p>Character. VCF/BCF decode policy:
+<code>"null"</code> returns NULL for header-vs-payload type clashes or oversized numeric scalars,
 <code>"warn"</code> emits a DuckHTS warning and returns NULL, and
-<code>"error"</code> raises a DuckDB/R error.</p></dd>
+<code>"error"</code> raises a DuckDB/R error. Missing elements count toward scalar
+cardinality; vector-end padding does not. A malformed FORMAT tag is withheld
+for every selected sample on that record. Physical read errors and OOM always fail.</p></dd>
 
 
 <dt id="arg-overwrite">overwrite<a class="anchor" aria-label="anchor" href="#arg-overwrite"></a></dt>
 <dd><p>Logical. If TRUE, overwrites existing table</p></dd>
+
+
+<dt id="arg-format-fields">format_fields<a class="anchor" aria-label="anchor" href="#arg-format-fields"></a></dt>
+<dd><p>Character vector of extra FORMAT tags, for example
+`c("AD", "DP", "GQ")`. Selected fields are typed members of each call's
+`format` struct using the header's Type and Number. Missing elements retain
+their positions; no allele normalization or depth inference is performed.
+NULL or an empty vector keeps the default GT/PS schema. Unknown, empty,
+missing and case-insensitively duplicate names error; GT and PS are already
+exposed by the typed call fields and cannot be selected again.
+Tag lookup uses exact header spelling: declared lowercase `gt` and `ps`
+are distinct extra fields. Selected names must not collide under DuckDB's
+case-insensitive struct-member lookup.</p></dd>
+
+
+<dt id="arg-raw-gt">raw_gt<a class="anchor" aria-label="anchor" href="#arg-raw-gt"></a></dt>
+<dd><p>Retain exact original VCF genotype text in each call's `raw_gt`
+member. The default `FALSE` keeps the typed-call schema unchanged. `TRUE`
+preserves leading phase markers, mixed separators and allele spelling;
+an absent GT is `NULL`, while a literal missing `.` remains text. BCF input
+errors because its encoded genotypes do not retain the original text.</p></dd>
 
 </dl></div>
     <div class="section level2">

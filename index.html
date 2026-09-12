@@ -22,7 +22,7 @@
 
     <a class="navbar-brand me-2" href="index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.1.9000-0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2-0.1.5</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -304,7 +304,7 @@
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"r2.fq"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_fastq_multi.html">rduckhts_fastq_multi</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"fq_multi"</span>, <span class="va">fq_files</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT filename, count(*) AS n FROM fq_multi GROUP BY ALL"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT filename, count(*) AS n FROM fq_multi GROUP BY ALL ORDER BY filename"</span><span class="op">)</span></span>
 <span><span class="co">#&gt;                                               filename n</span></span>
 <span><span class="co">#&gt; 1 /usr/local/lib/R/site-library/Rduckhts/extdata/r1.fq 5</span></span>
 <span><span class="co">#&gt; 2 /usr/local/lib/R/site-library/Rduckhts/extdata/r2.fq 5</span></span></code></pre></div>
@@ -463,9 +463,9 @@ Show generated function catalog
 <colgroup>
 <col width="0%">
 <col width="0%">
-<col width="11%">
+<col width="21%">
 <col width="0%">
-<col width="87%">
+<col width="77%">
 </colgroup>
 <thead><tr class="header">
 <th>Function</th>
@@ -532,13 +532,34 @@ Show generated function catalog
 <td>Project independent literal alleles into typed, unshifted VEP-116 transcript presentation facts using transparent DuckDB SQL. events_table supplies unique event_index UBIGINT, seq_region UINTEGER, position UBIGINT, reference VARCHAR and alternate VARCHAR. annotations_table supplies event_index, nullable transcript_index and consequence_mask from duckvep_annotate. transcripts_table is the same validated, immutable prepared transcript relation used to load the annotation model, with seq_region, transcript spans, strand, transcript_flags, CDS spans/sequence, codon_table, complete post_cds_sequence, transcript-ordered nested exons and peptide_edits as produced by duckvep_ensembl_transcripts. Missing events, duplicate event/model keys, missing transcripts and source/model region disagreement fail. One row is preserved per input annotation, including duplicates and transcript-free rows; no arrival order is promised. output_allele uses the VEP feature allele, with ‘-’ for an empty alternate, rather than the uploaded or universally minimized ALT. Nullable one-based cDNA/CDS/protein start/end fields retain independent missing endpoints; insertion ranges are presented in ascending flank order and interbase remains explicit. Exon/intron first/last ordinals are transcript-oriented; totals describe the model even when no ordinal overlaps. Distance is the shortest distance from VEP feature endpoints to transcript endpoints and is present only for upstream/downstream consequences. Codon strings retain VEP changed-base casing and variable-length indel forms; amino-acid fields are separate reference/alternate strings, including multi-residue edits. Withheld coding sequence retains NULL codon and amino-acid fields; ‘-’ denotes an empty codon, not unavailable sequence. Genetic codes reuse the kernel’s immutable tables, and reference peptide edits come from the prepared model. This adds no consequence engine, FASTA handle, phased execution, structural projection, or HGVS shifting. Join event_index/transcript_index back to source annotations and cold source/model relations for stable identifiers, canonical, MANE, CCDS, GENCODE and biotype attributes; transcript-quality cds_start_nf/cds_end_nf must not be conflated with canonical flags.</td>
 </tr>
 <tr class="odd">
+<td><code>duckvep_repeat_sequence</code></td>
+<td>scalar_macro</td>
+<td>STRUCT(sequence VARCHAR, status VARCHAR)</td>
+<td></td>
+<td>Prepare a literal sequence from an ordered list of repeat components with named fields unit VARCHAR and count numeric. Use the same helper separately for reference and alternate descriptions. sequence_exact is a required caller assertion that the complete ordered description, including interruptions, represents the allele; FALSE returns NULL sequence and summary_only, even for integral counts. VCF CNV:TR summary metadata does not establish this assertion: summaries may omit sequence changes. With TRUE, missing lists, elements, units or counts return incomplete_input; fractional counts return nonintegral_count without rounding or assuming where partial repeat bases occur. Complete nonnegative integral counts expand to sequence with status ok. Empty lists and zero counts produce an empty sequence, not NULL. Non-empty IUPAC DNA units retain case and ambiguous codes; invalid units and negative or nonfinite counts raise errors, including in summary mode. max_sequence_bases is a per-call nonnegative integral limit at most 2147483647, checked against the entire concatenation before expansion; exhaustion errors without partial output. DuckDB owns list and string storage. This helper does not parse RN/RUS/RUC/RB, infer reference counts, validate against FASTA, assign genomic anchors, normalize variants or certify a VEP expansion policy. Keep source event and ALT ordinals, raw fractional counts, confidence intervals and exactness in the caller relation; use literal alleles with the existing annotation/haplotype paths and retain summary-only events for structural consumers. ok certifies the expansion operation, not resolution of ambiguous DNA codes or the truth of the caller’s exactness assertion.</td>
+</tr>
+<tr class="even">
 <td><code>duckvep_breakend_geometry</code></td>
 <td>scalar</td>
 <td>STRUCT(mate_chrom VARCHAR, mate_position UBIGINT, local_join_after BOOLEAN, mate_extends_right BOOLEAN, replacement_sequence VARCHAR)</td>
 <td></td>
 <td>Parse one VCF 4.5 breakend ALT into typed preparation facts without reference lookup or allocation of native scratch. The four paired forms t[p[, t]p], ]p]t, and [p[t retain the exact mate contig name, one-based mate position, and replacement sequence t. local_join_after is TRUE for a bracket pair after t; mate_extends_right is TRUE for square opening brackets. The joined mate piece is reverse-complemented when those two booleans differ. Replacement sequence includes retained local bases and must not be mislabeled as inserted sequence; case is preserved. Single breakends t. and .t retain replacement sequence and local_join_after with all mate fields NULL. NULL input and non-breakend ALT (including plain ., *, and symbolic alleles) return NULL; malformed bracket forms or leading/trailing-dot forms raise an error. Call once per ALT after multiallelic expansion. Mate positions from zero through UBIGINT maximum are retained with checked decimal parsing; zero can denote a virtual telomeric mate. Annotation still requires model-addressable positive UINTEGER coordinates: parsing does not authorize annotating telomeres or unknown assembly contigs. Mate names may contain colons and are split from position at the last colon; no alias stripping is performed. Join names to the declared model region relation and pass the resulting paired coordinates to duckvep_annotate. Keep source ID, INFO/MATEID, EVENT, confidence intervals, REF, raw ALT, and these orientation/payload fields beside the annotation: ALT alone cannot establish mate record identity, reciprocal agreement, phase, or fusion HGVS. This helper does not merge reciprocal records or reconstruct a rearranged sequence.</td>
 </tr>
+<tr class="odd">
+<td><code>duckvep_haplotypes</code></td>
+<td>table</td>
+<td>TABLE(transcript_index UINTEGER, cds VARCHAR, protein VARCHAR, sequence_flags UINTEGER, evidence_flags UTINYINT, projection_status VARCHAR, sequence_status VARCHAR, edit_count UBIGINT, carrier_count UINTEGER, carriers STRUCT(sample_index UINTEGER, phase_set BIGINT, haplotype_lane USMALLINT, ploidy USMALLINT)[], contributors STRUCT(event_index UBIGINT, seq_region UINTEGER, position UBIGINT, reference VARCHAR, alternate VARCHAR, evidence_flags UTINYINT, projection_status VARCHAR)[], coding_blocks STRUCT(cds_start UINTEGER, reference VARCHAR, alternate VARCHAR, alt_start0 UBIGINT, length_change BIGINT, sequence_flags UINTEGER, coding_status VARCHAR, local_consequence_mask UBIGINT, after_first_stop BOOLEAN, event_indices UBIGINT[])[], cds_differences STRUCT(ref_start0 UBIGINT, alt_start0 UBIGINT, reference VARCHAR, alternate VARCHAR, alignment_start0 UBIGINT)[], protein_differences STRUCT(ref_start0 UBIGINT, alt_start0 UBIGINT, reference VARCHAR, alternate VARCHAR, alignment_start0 UBIGINT)[], stop_in_displaced_frame BOOLEAN, hgvsp VARCHAR, hgvsp_status VARCHAR, nominal_length_diff BIGINT)</td>
+<td><code>rduckhts_haplotypes</code></td>
+<td>Replay literal phased CDS/protein haplotypes with carriers, contributors, coding blocks and aligned differences. nominal_length_diff is the signed sum of projected replacement ALT-minus-REF lengths before clipping at the current CDS end; it is NULL without a CDS and can differ from the rebuilt CDS length change. Blocks expose local coding status, an SO mask decoded with duckvep_so_terms(), and first-stop position facts. Default alt_events input uses decoded GT/PS; source_records requires vep116_compat, original gt text and complete alternates lists. Raw replay plans source-buffer tree order before genotype filtering; include reference-only context and preserve equal-position file order in event_index. Duplicate sources use complete ordered ALT-list identity; shadowed calls retain shadowed_duplicate contributor status without executing replacements. Overlapping raw records use ordered full-span replay with overwritten-source provenance and net component spans; local SO and displaced-frame facts are NULL with unsupported_ordered_replacements coding status. Raw missing-slot replay and validated coding/noncoding-span omissions are conditional. Raw ALTs containing N, U or lowercase bases within the supported ACGTUN/acgtun alphabet retain source_allele_skipped with conditional evidence and zero edits; other valid sources still replay. Unsupported symbols/dashes remain invalid. Samples without retained exon-overlapping genotypes use the curated reference peptide; retained exonic calls use mutation translation even with zero edits. Intronic context retains provenance without altering literal CDS replay. Omitted sources retain source_unmapped; model/REF failures still withhold sequence. Raw contributors expose alt_index (0 REF, positive ALT, NULL undefined). hgvs := TRUE requests a VEP-116-derived predicted protein suffix from complete supported paths, with hgvsp_status=‘ok’; other statuses retain NULL text and all sequence/provenance. Phase policy controls allele assignment, not HGVS nomenclature. HGVSp retains VEP local-peptide and unknown-residue presentation; ok reports a supported computation, not independent HGVS-rule certification. Conditional sequences, ordered overlapping replacements, missing peptide data, unsupported coding contexts and unrepresentable protein ends remain explicit. Paths with one original ALT source use the shared independent-event VEP-116 HGVS state, including genomic shifting and absent protein results; MNV islands preserve that source identity. Genomic placement requiring unavailable FASTA returns missing_reference. Prepared references retain their own residues and length; a reference-only stop-marker loss supplies no extension and insertions require reference flanks. Protein normalization does not rewrite physical coding blocks or event identities. max_hgvs_operations bounds the working stack and final operations; max_hgvs_bytes bounds text excluding NUL. max_hgvs_reference_bytes bounds the query-local FASTA result buffer, including NUL and line-ending scratch. HGVS sequence/edit scratch derives from max_sequence_bases and max_leaf_edits, and allele scratch from max_allele_bytes and the literal-allele width. All DuckVEP-owned buffers count toward workspace_limit and error on exhaustion; HTSlib handle/transport storage is separate. Disabled HGVS allocates no HGVS buffers or reference handle and returns not_requested. Join protein identifiers through the model transcript ordinal. Whole-haplotype SO, DNA HGVS, complete protein HGVS, structural composition and splice prediction remain unfinished. See design/duckvep.md#phased-edits for input, ownership and coordinate contracts.</td>
+</tr>
 <tr class="even">
+<td><code>duckvep_phase_call</code></td>
+<td>scalar</td>
+<td>STRUCT(input_slot USMALLINT, allele_index INTEGER, haplotype_lane USMALLINT, ploidy USMALLINT, phase_set BIGINT, phase_scope VARCHAR, status VARCHAR)[]</td>
+<td></td>
+<td>Prepare one typed GT call for phased execution without parsing genotype strings or allocating native scratch. Consume read_geno calls.alleles and calls.phase_before before ALT expansion; retain record/sample/model identity and raw GT/PS beside the result. One output entry preserves each one-based input_slot, source allele_index (0 REF, positive source ALT ordinal, NULL missing) and ploidy, limited to 1..65535. A NULL GT returns NULL, not reference or an empty carrier list. NULL phase list or flags mean unavailable phase; otherwise lists must have equal length. Empty GT lists and negative called allele indices fail. VCF 4.4 phase indicators qualify the following allele: 0|1/2 and /0|1/2 leave slots 1 and 3 unphased; a later pipe does not phase the preceding allele. strict preserves explicitly phased lanes and resolves remaining unphased slots only if their assignment cannot change under permutation. Homozygous called GTs and haploid calls have all_phase_sets scope: their facts apply across phase sets, not merely the NULL-PS set. phase_set scope retains the supplied signed BIGINT identity; NULL denotes the default set and differs from present zero. The input is decoded data, not VCF PS schema validation. Scope is always local to the caller’s sample and chromosome. Unresolved heterozygous slots have NULL haplotype_lane, unresolved scope and unphased status; missing alleles keep missing status even when a lane is known. vep116_compat ignores separators/PS and assigns allele_slot lanes after removing missing entries, matching the pinned VEP parser’s input to Haplosaurus. Missing input entries remain explicit with NULL lane. Decoded ploidy is preserved; this helper does not emulate VEP’s raw mixed/prefixed-separator parsing or its container’s ploidy inference. NULL policy means strict; unknown policy fails. Do not discard missing/unresolved entries or treat all_phase_sets as a separate ordinary PS when constructing haplotypes. This GT/PS-only helper does not interpret PSL/PSO/PID, phase records, verify ALT bounds against a source record, build haplotypes, or emit combined SO/HGVS. Only use it with a declared GT/PS phasing source; alternative phase encodings require their own explicit adapter.</td>
+</tr>
+<tr class="odd">
 <td><code>duckvep_annotate</code></td>
 <td>table</td>
 <td>table</td>
@@ -546,7 +567,7 @@ Show generated function catalog
 <td>Annotate a narrow canonical event relation against one resident DuckVEP model through one fixed-schema, pipe-friendly surface. events_table names a coordinate-ordered relation with event_index UBIGINT, seq_region UINTEGER, positive one-based position, reference VARCHAR, alternate VARCHAR, end_position UBIGINT, structural_type VARCHAR, copy_change VARCHAR, mate_seq_region UINTEGER, and mate_position UBIGINT. One row represents one ALT allele. Keep genotype, phase-set, confidence-interval, raw-ALT, orientation, and other provenance in the source relation; join selected annotations back by event_index instead of multiplying wide payloads by transcript count. Literal reference/alternate rows are small variants; an explicit structural type, supported symbolic ALT, or span without literal alleles is structural; a complete mate coordinate pair is a breakend. Following VEP 116, expanded gVCF <non_ref>, bare <em>, and . ALT rows emit no annotation. The distinct &lt;</em>&gt; catch-all allele remains an overlap allele: coding positions receive coding_sequence_variant, start/stop codon positions receive the corresponding retained consequence, and HGVS fields remain NULL. VEP 116 also compares the literal three-character &lt;<em>&gt; spelling with REF length, so a long-REF catch-all allele that completely contains a feature can receive an ablation term; exclude &lt;</em>&gt; rows after ALT expansion if catch-all consequences are not wanted. A literal ALT from a mixed gVCF record remains a small variant even when the source relation retains record-level INFO/END; keep that END as provenance rather than treating it as an SV type. Contradictory or incomplete geometry fails instead of being guessed, including disagreement between supported symbolic ALT and explicit structural_type values. For VCF span SVs, prepare position as POS + 1 after removing the left anchor; insertion position is the interbase site after POS. DEL implies LOSS and DUP/TDUP imply GAIN when copy_change is NULL. Filtering the globally coordinate-ordered event stream preserves the order required by each native transcript and regulation-feature sweep; the macro does not hide a sort. The event seq_region is an exact ordinal in the loaded model; annotation does not strip contig prefixes or project PAR, patch, alternate-haplotype, or circular-origin coordinates. X/Y PAR and alternate-path transcript rows therefore remain path-specific exactly as prepared. Each event is annotated independently: genotype and phase-set columns are not combined into haplotypes. The stable compact contract includes SO/region masks, IMPACT/status/reason codes, one-based cDNA/CDS/protein positions, amino-acid bytes, NMD prediction/escape codes, and overlap-object ordinals. protein_position is the affected one-based protein residue/codon ordinal used by codon-level evidence such as PS1/PM5. rich := TRUE adds Consequence, IMPACT, region, amino-acid, NMD, overlap-object, duckvep_status, and duckvep_reason text from the same native pass while retaining every compact field; FALSE or explicit NULL leaves those presentation columns NULL. hgvs := TRUE fuses independent-event HGVSc/HGVSn/HGVSp into the small-variant path without repeating candidate discovery; it composes with rich := TRUE in one pass; structural and breakend HGVS remain NULL. DuckHTS audit status/reason fields distinguish an unresolved computation from a genuinely absent consequence and are not Ensembl CSQ fields. Zero disables either directional transcript window. Decode consequence_mask only after filtering by joining duckvep_so_terms(); join transcript_index, gene_index, or regulation_feature_index to the prepared model relations for stable identifiers, biotype, MANE/GENCODE/CCDS flags, and other presentation metadata. This typed rich projection does not claim the complete serialized VEP CSQ vocabulary: exon/intron ordinals, codon strings, distance text, CANONICAL/APPRIS/TSL, existing variation, and supplementary predictors require their declared model or annotation relations.</non_ref>
 </td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>duckvep_so_terms</code></td>
 <td>table</td>
 <td>table</td>
@@ -561,11 +582,11 @@ Show generated function catalog
 </h3>
 <table class="table">
 <colgroup>
-<col width="1%">
 <col width="0%">
 <col width="0%">
-<col width="8%">
-<col width="89%">
+<col width="0%">
+<col width="4%">
+<col width="94%">
 </colgroup>
 <thead><tr class="header">
 <th>Function</th>
@@ -580,14 +601,14 @@ Show generated function catalog
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_bcf</code></td>
-<td>Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, optional bcftools-style CSQ type overrides, explicit scan_mode control (‘auto’ or full-file ‘sequential’), optional htslib decompression worker threads via decompression_threads (default 0 for single-threaded reads), and decode_error_policy (‘null’, ‘warn’, or ‘error’) for corrupt BCF header-vs-payload decode mismatches. The reader retains worker-owned INFO/FORMAT/GT buffers and record-owned annotation across output chunks; tidy sample rows repeat the complete record annotation. Comma-separated indexed regions use htslib’s native multi-region iterator and emit a record once when requested regions overlap. NULL or an empty region string means no filter; empty comma-separated items and malformed known-contig intervals are errors. Unknown contigs retain HTSlib’s skip policy. Automatic and region plans retain the parsed bind-time index, including remote and explicit index_path inputs: later index removal, corruption, or replacement leaves the original scan offsets and counts unchanged. Supply a matching initial data/index pair and keep data/header contents unchanged for the prepared plan’s lifetime; this is not a data-file snapshot or validation of an initially unrelated index. Reprepare to use a new index. With no usable index at bind, auto streams and region queries error. Sequential mode does not load an index; index-only counts do not validate file contents. samples uses HTSlib selectors: NULL or ‘-’ keeps all, an empty string keeps none, comma-separated names include samples, and a leading ‘^’ excludes names. Unknown names error; selection is pushed into each worker header before record decoding and retains header order. read_bcf_samples() maps original-header sample indices to names.</td>
+<td>Read VCF and BCF variant data with typed INFO, FORMAT, typed CSQ/ANN/BCSQ subfields, optional tidy sample output, optional bcftools-style CSQ type overrides, explicit scan_mode control (‘auto’ or full-file ‘sequential’), optional htslib decompression worker threads via decompression_threads (default 0 for single-threaded reads), and decode_error_policy (‘null’, ‘warn’, or ‘error’) for header-vs-payload type mismatches and oversized numeric scalars. A numeric scalar with multiple elements before vector-end padding errors or becomes NULL under the selected policy; missing elements count. For FORMAT, null/warn withhold that tag for every selected sample on the record. The reader retains worker-owned INFO/FORMAT/GT buffers and record-owned annotation across output chunks; tidy sample rows repeat the complete record annotation. Comma-separated indexed regions use htslib’s native multi-region iterator and emit a record once when requested regions overlap. NULL or an empty region string means no filter; empty comma-separated items and malformed known-contig intervals are errors. Unknown contigs retain HTSlib’s skip policy. Automatic and region plans retain the parsed bind-time index, including remote and explicit index_path inputs: later index removal, corruption, or replacement leaves the original scan offsets and counts unchanged. Supply a matching initial data/index pair and keep data/header contents unchanged for the prepared plan’s lifetime; this is not a data-file snapshot or validation of an initially unrelated index. Reprepare to use a new index. With no usable index at bind, auto streams and region queries error. Sequential mode does not load an index; index-only counts do not validate file contents. samples uses HTSlib selectors: NULL or ‘-’ keeps all, an empty string keeps none, comma-separated names include samples, and a leading ‘^’ excludes names. Unknown names error; selection is pushed into each worker header before record decoding and retains header order. read_bcf_samples() maps original-header sample indices to names. INFO/FORMAT SQL types and scalar/list shapes follow declared header Type and Number, including nonstandard declarations for named tags; no implicit schema repair is performed. Numeric and string list items retain missing positions as NULL, and numeric vector-end padding terminates the list. An absent field is NULL; an explicitly missing numeric list is [NULL], without inferred allele/genotype cardinality.</td>
 </tr>
 <tr class="even">
 <td><code>read_geno</code></td>
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_geno</code></td>
-<td>Read one typed genotype row per VCF/BCF record: record_index UBIGINT, CHROM, POS, ID, REF, ALT VARCHAR[], and calls STRUCT(sample_index UINTEGER, alleles INTEGER[], phase_before BOOLEAN[], phase_set BIGINT)[]. Sample indices are zero-based original-header positions; join read_bcf_samples() from the same unchanged file for names. GT preserves arbitrary ploidy, nullable missing allele slots and HTSlib’s decoded per-slot phase flags, including its leading-slot convention for VCF versions before 4.4. Absent GT has NULL allele and phase lists; absent PS is NULL. FORMAT/PS must declare Number=1,Type=Integer; header/type/width mismatches follow decode_error_policy, while physical read errors and OOM always fail. non_reference_only removes calls with no called ALT, never records, and does not infer phase. samples shares read_bcf’s HTSlib comma-list/exclusion selectors. Full scans stream in input order independent of index availability, with one scan worker and separately configured htslib decompression threads. record_index is a zero-based scan-local ordinal, not a persistent file locator; indexed region unions restart at zero in HTSlib iterator order. Use explicit ORDER BY record_index when consuming order. Comma-separated overlapping regions visit a physical record once while preserving distinct duplicate records. Sequential mode rejects regions. Only projected calls decode GT/PS; zero selected samples yields an empty calls list on every row.</td>
+<td>Read one typed genotype row per VCF/BCF record: record_index UBIGINT, CHROM, POS, ID, REF, ALT VARCHAR[], and calls STRUCT(sample_index UINTEGER, alleles INTEGER[], phase_before BOOLEAN[], phase_set BIGINT)[]. Sample indices are zero-based original-header positions; join read_bcf_samples() from the same unchanged file for names. GT preserves arbitrary ploidy, nullable missing allele slots and HTSlib’s decoded per-slot phase flags, including its leading-slot convention for VCF versions before 4.4. Absent GT has NULL allele and phase lists; absent PS is NULL. FORMAT/PS must declare Number=1,Type=Integer. Its scalar cardinality excludes vector-end padding, including padding retained after sample selection; header/type/cardinality mismatches follow decode_error_policy, while physical read errors and OOM always fail. non_reference_only removes calls with no called ALT, never records, and does not infer phase. samples shares read_bcf’s HTSlib comma-list/exclusion selectors. Full scans stream in input order independent of index availability, with one scan worker and separately configured htslib decompression threads. record_index is a zero-based scan-local ordinal, not a persistent file locator; indexed region unions restart at zero in HTSlib iterator order. Use explicit ORDER BY record_index when consuming order. Comma-separated overlapping regions visit a physical record once while preserving distinct duplicate records. Sequential mode rejects regions. Only projected calls decode GT/PS; zero selected samples yields an empty calls list on every row. format_fields selects extra declared FORMAT tags as typed members of each call’s format struct, for example [‘AD’, ‘DP’, ‘GQ’]. NULL or [] retains the default GT/PS schema. Types and scalar/list shapes follow the header’s Type and Number, using the same decoder and materializer as read_bcf. Missing list elements retain their ordinals; vector-end padding terminates each sample’s list. An absent field is NULL; an explicitly missing numeric list value is [NULL], without inferred A/R/G padding. No allele normalization or depth inference is performed. A missing GT does not hide selected values unless non_reference_only filters that call. Undeclared, empty, NULL and case-insensitively duplicate tag names error; GT and PS cannot be selected because the call already exposes their typed fields. Tag lookup uses exact header spelling: declared lowercase gt and ps are distinct extra fields. Case-insensitively duplicate selections are rejected because DuckDB struct member names would collide. Extra fields decode once per record into worker-owned reusable buffers, only when calls is projected. Malformed encoded types and oversized numeric scalars follow decode_error_policy. Multiple elements before vector-end padding in a scalar field error or make that tag NULL for every selected sample on the record; missing elements count. This check does not infer list cardinality. Allocation and physical read failures remain fatal. With raw_gt := TRUE, calls also contains raw_gt VARCHAR after any format struct. This preserves exact original VCF GT text, including leading phase markers, mixed separators and allele spelling. An absent GT is NULL; a literal missing dot remains ‘.’. Default FALSE leaves the call schema unchanged. BCF input is rejected even when calls is not projected because encoded GT cannot recover original text. Capture follows the original-header sample selection and physical record ordinal, including indexed region unions; it does not infer phasing or emulate a downstream parser.</td>
 </tr>
 <tr class="odd">
 <td><code>read_bcf_samples</code></td>
@@ -622,7 +643,7 @@ Show generated function catalog
 <td>table</td>
 <td>table</td>
 <td><code>rduckhts_fasta_nuc</code></td>
-<td>Compute bedtools nuc-style nucleotide composition for supplied BED intervals or generated fixed-width bins over a FASTA reference. For bgzipped FASTA, gzi_path may point to an explicit .gzi sidecar when it is not colocated with the FASTA.</td>
+<td>Compute bedtools nuc-style nucleotide composition for supplied BED intervals or generated fixed-width bins over a FASTA reference. A failed reference fetch fails the query with the file and zero-based half-open interval; requested intervals are not silently omitted. For bgzipped FASTA, gzi_path may point to an explicit .gzi sidecar when it is not colocated with the FASTA.</td>
 </tr>
 <tr class="even">
 <td><code>read_fastq</code></td>
@@ -2025,11 +2046,10 @@ Show generated function catalog
 <span>  overwrite <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span>
 <span></span>
-<span><span class="va">mos_out</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"summary_path"</span>, <span class="st">"regions_path"</span><span class="op">)</span><span class="op">]</span></span>
-<span><span class="co">#&gt;                                                                  summary_path</span></span>
-<span><span class="co">#&gt; 1 &lt;tempfile&gt;</span></span>
-<span><span class="co">#&gt;                                                            regions_path</span></span>
-<span><span class="co">#&gt; 1 &lt;tempfile&gt;</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/transform.html" class="external-link">transform</a></span><span class="op">(</span><span class="va">mos_out</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"summary_path"</span>, <span class="st">"regions_path"</span><span class="op">)</span><span class="op">]</span>,</span>
+<span>          summary_path <span class="op">=</span> <span class="st">"&lt;tempfile&gt;"</span>, regions_path <span class="op">=</span> <span class="st">"&lt;tempfile&gt;"</span><span class="op">)</span></span>
+<span><span class="co">#&gt;   summary_path regions_path</span></span>
+<span><span class="co">#&gt; 1   &lt;tempfile&gt;   &lt;tempfile&gt;</span></span>
 <span></span>
 <span><span class="fu">utils</span><span class="fu">::</span><span class="fu"><a href="https://rdrr.io/r/utils/read.table.html" class="external-link">read.delim</a></span><span class="op">(</span></span>
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/connections.html" class="external-link">gzfile</a></span><span class="op">(</span><span class="va">mos_out</span><span class="op">$</span><span class="va">regions_path</span><span class="op">[[</span><span class="fl">1</span><span class="op">]</span><span class="op">]</span><span class="op">)</span>,</span>
@@ -2139,8 +2159,9 @@ Show generated function catalog
 <span>  <span class="st">"&gt;chrF"</span>,</span>
 <span>  <span class="st">"ACGTACGTAA"</span></span>
 <span><span class="op">)</span>, <span class="va">munge_fasta</span><span class="op">)</span></span>
-<span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">munge_fasta</span>, index_path <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">munge_fasta</span>, <span class="st">".fai"</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   success                                          index_path</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/transform.html" class="external-link">transform</a></span><span class="op">(</span><span class="fu"><a href="reference/rduckhts_fasta_index.html">rduckhts_fasta_index</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">munge_fasta</span>, index_path <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">munge_fasta</span>, <span class="st">".fai"</span><span class="op">)</span><span class="op">)</span>,</span>
+<span>          index_path <span class="op">=</span> <span class="st">"&lt;tempfile&gt;"</span><span class="op">)</span></span>
+<span><span class="co">#&gt;   success index_path</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
 <span></span>
 <span><span class="va">munge_out</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_munge.html">rduckhts_munge</a></span><span class="op">(</span></span>
@@ -2244,9 +2265,10 @@ Show generated function catalog
 <span>  keep <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  overwrite <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span>
-<span><span class="va">bgzip_meta</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"success"</span>, <span class="st">"output_path"</span>, <span class="st">"bytes_out"</span><span class="op">)</span><span class="op">]</span></span>
-<span><span class="co">#&gt;   success                                           output_path bytes_out</span></span>
-<span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;       169</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/transform.html" class="external-link">transform</a></span><span class="op">(</span><span class="va">bgzip_meta</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"success"</span>, <span class="st">"output_path"</span>, <span class="st">"bytes_out"</span><span class="op">)</span><span class="op">]</span>,</span>
+<span>          output_path <span class="op">=</span> <span class="st">"&lt;tempfile&gt;"</span><span class="op">)</span></span>
+<span><span class="co">#&gt;   success output_path bytes_out</span></span>
+<span><span class="co">#&gt; 1    TRUE  &lt;tempfile&gt;       169</span></span>
 <span></span>
 <span><span class="va">bgunzip_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_bgunzip.html">rduckhts_bgunzip</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>, <span class="va">tmp_bgz</span>,</span>
@@ -2265,8 +2287,8 @@ Show generated function catalog
 <span>  index_path <span class="op">=</span> <span class="va">tmp_bai</span>,</span>
 <span>  threads <span class="op">=</span> <span class="fl">1</span></span>
 <span><span class="op">)</span></span>
-<span><span class="va">bam_index_meta</span></span>
-<span><span class="co">#&gt;   success                                           index_path index_format</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/transform.html" class="external-link">transform</a></span><span class="op">(</span><span class="va">bam_index_meta</span>, index_path <span class="op">=</span> <span class="st">"&lt;tempfile&gt;"</span><span class="op">)</span></span>
+<span><span class="co">#&gt;   success index_path index_format</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;          BAI</span></span>
 <span></span>
 <span><span class="va">bcf_index_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_bcf_index.html">rduckhts_bcf_index</a></span><span class="op">(</span></span>
@@ -2274,8 +2296,8 @@ Show generated function catalog
 <span>  index_path <span class="op">=</span> <span class="va">tmp_csi</span>,</span>
 <span>  threads <span class="op">=</span> <span class="fl">1</span></span>
 <span><span class="op">)</span></span>
-<span><span class="va">bcf_index_meta</span></span>
-<span><span class="co">#&gt;   success                                              index_path index_format</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/transform.html" class="external-link">transform</a></span><span class="op">(</span><span class="va">bcf_index_meta</span>, index_path <span class="op">=</span> <span class="st">"&lt;tempfile&gt;"</span><span class="op">)</span></span>
+<span><span class="co">#&gt;   success index_path index_format</span></span>
 <span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;          CSI</span></span>
 <span></span>
 <span><span class="va">tabix_meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_tabix_index.html">rduckhts_tabix_index</a></span><span class="op">(</span></span>
@@ -2284,11 +2306,9 @@ Show generated function catalog
 <span>  index_path <span class="op">=</span> <span class="va">tmp_tbi</span>,</span>
 <span>  threads <span class="op">=</span> <span class="fl">1</span></span>
 <span><span class="op">)</span></span>
-<span><span class="va">tabix_meta</span></span>
-<span><span class="co">#&gt;   success                                                index_path</span></span>
-<span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;</span></span>
-<span><span class="co">#&gt;   index_format</span></span>
-<span><span class="co">#&gt; 1          TBI</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/transform.html" class="external-link">transform</a></span><span class="op">(</span><span class="va">tabix_meta</span>, index_path <span class="op">=</span> <span class="st">"&lt;tempfile&gt;"</span><span class="op">)</span></span>
+<span><span class="co">#&gt;   success index_path index_format</span></span>
+<span><span class="co">#&gt; 1    TRUE &lt;tempfile&gt;          TBI</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_bed.html">rduckhts_bed</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"targets_idx"</span>, <span class="va">tmp_bgz</span>, region <span class="op">=</span> <span class="st">"CHROMOSOME_I:1-20"</span>, index_path <span class="op">=</span> <span class="va">tmp_tbi</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT * FROM targets_idx"</span><span class="op">)</span></span>
@@ -2466,7 +2486,7 @@ Show generated function catalog
 <div class="section level3">
 <h3 id="remote-vcf-on-s3">Remote VCF on S3<a class="anchor" aria-label="anchor" href="#remote-vcf-on-s3"></a>
 </h3>
-<p>S3 files can be query when <code>htslib</code> is built with plugins enable. This is not the case on RTools</p>
+<p>S3 queries require a build with the S3 transport enabled; RTools builds do not enable it. This remote example is an unevaluated usage snippet.</p>
 <div class="sourceCode" id="cb25"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># Example S3 URL (1000 Genomes cohort VCF)</span></span>
 <span><span class="va">s3_base</span> <span class="op">&lt;-</span> <span class="st">"s3://1000genomes-dragen-v3.7.6/data/cohorts/"</span></span>
@@ -2475,9 +2495,7 @@ Show generated function catalog
 <span><span class="va">s3_vcf_uri</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">s3_base</span>, <span class="va">s3_path</span>, <span class="va">s3_vcf_file</span><span class="op">)</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/rduckhts_bcf.html">rduckhts_bcf</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"s3_variants"</span>, <span class="va">s3_vcf_uri</span>, region <span class="op">=</span> <span class="st">"chr22:16050000-16050500"</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT CHROM, COUNT(*) AS n FROM s3_variants GROUP BY CHROM"</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   CHROM  n</span></span>
-<span><span class="co">#&gt; 1 chr22 11</span></span></code></pre></div>
+<span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT CHROM, COUNT(*) AS n FROM s3_variants GROUP BY CHROM"</span><span class="op">)</span></span></code></pre></div>
 </div>
 <div class="section level3">
 <h3 id="fastq-files">FASTQ files<a class="anchor" aria-label="anchor" href="#fastq-files"></a>
@@ -2757,30 +2775,12 @@ Show generated function catalog
 <div class="section level3">
 <h3 id="remote-gtex-tabix-example">Remote GTEx tabix example<a class="anchor" aria-label="anchor" href="#remote-gtex-tabix-example"></a>
 </h3>
-<p>GTEx eQTL matrices on EBI are tabix-indexed. In browser wasm/webR, this still depends on CORS policy on both the data object and index object.</p>
+<p>GTEx eQTL matrices on EBI are tabix-indexed. In browser wasm/webR, this depends on CORS policy on both the data object and index object. This remote example is an unevaluated usage snippet.</p>
 <div class="sourceCode" id="cb34"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">gtex_url</span> <span class="op">&lt;-</span> <span class="st">"https://ftp.ebi.ac.uk/pub/databases/spot/eQTL/imported/GTEx_V8/ge/Brain_Cerebellar_Hemisphere.tsv.gz"</span> </span>
 <span><span class="fu"><a href="reference/rduckhts_tabix.html">rduckhts_tabix</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"gtex_eqtl"</span>, <span class="va">gtex_url</span>, region <span class="op">=</span> <span class="st">"1:11868-14409"</span>,</span>
 <span>                  header <span class="op">=</span> <span class="cn">TRUE</span>, auto_detect <span class="op">=</span> <span class="cn">TRUE</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT * FROM gtex_eqtl LIMIT 5"</span><span class="op">)</span></span>
-<span><span class="co">#&gt;          variant r2    pvalue molecular_trait_object_id molecular_trait_id</span></span>
-<span><span class="co">#&gt; 1 chr1_13550_G_A NA 0.0204520           ENSG00000188290    ENSG00000188290</span></span>
-<span><span class="co">#&gt; 2 chr1_13550_G_A NA 0.0303633           ENSG00000230699    ENSG00000230699</span></span>
-<span><span class="co">#&gt; 3 chr1_13550_G_A NA 0.1057900           ENSG00000177757    ENSG00000177757</span></span>
-<span><span class="co">#&gt; 4 chr1_13550_G_A NA 0.1617190           ENSG00000241860    ENSG00000241860</span></span>
-<span><span class="co">#&gt; 5 chr1_13550_G_A NA 0.1919580           ENSG00000198744    ENSG00000198744</span></span>
-<span><span class="co">#&gt;         maf         gene_id median_tpm      beta       se  an ac chromosome</span></span>
-<span><span class="co">#&gt; 1 0.0114286 ENSG00000188290  6.3960000  0.633986 0.270285 350  4          1</span></span>
-<span><span class="co">#&gt; 2 0.0114286 ENSG00000230699  0.0674459 -0.980082 0.447861 350  4          1</span></span>
-<span><span class="co">#&gt; 3 0.0114286 ENSG00000177757  1.2659000  0.631359 0.387738 350  4          1</span></span>
-<span><span class="co">#&gt; 4 0.0114286 ENSG00000241860  0.1081970 -0.791695 0.562674 350  4          1</span></span>
-<span><span class="co">#&gt; 5 0.0114286 ENSG00000198744 21.6284000 -0.592354 0.451705 350  4          1</span></span>
-<span><span class="co">#&gt;   position ref alt type        rsid</span></span>
-<span><span class="co">#&gt; 1    13550   G   A  SNP rs554008981</span></span>
-<span><span class="co">#&gt; 2    13550   G   A  SNP rs554008981</span></span>
-<span><span class="co">#&gt; 3    13550   G   A  SNP rs554008981</span></span>
-<span><span class="co">#&gt; 4    13550   G   A  SNP rs554008981</span></span>
-<span><span class="co">#&gt; 5    13550   G   A  SNP rs554008981</span></span></code></pre></div>
+<span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT * FROM gtex_eqtl LIMIT 5"</span><span class="op">)</span></span></code></pre></div>
 <div class="sourceCode" id="cb35"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbDisconnect.html" class="external-link">dbDisconnect</a></span><span class="op">(</span><span class="va">con</span>, shutdown <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></code></pre></div>
 </div>
