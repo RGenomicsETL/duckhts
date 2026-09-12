@@ -4,6 +4,14 @@
 #include "bcf_index_snapshot.h"
 #include "hts_io_tuning.h"
 
+typedef struct duckhts_bcf_samples duckhts_bcf_samples_t;
+
+/* Borrowed VCF bytes at line.s + offset; SIZE_MAX means no source GT field.
+ * A present empty field has length zero. No decoding or text reconstruction. */
+typedef struct {
+    size_t offset, length;
+} duckhts_bcf_gt_span_t;
+
 /* Zero-initialize before open. One worker owns the file, mutable header,
  * iterator and text buffer. The parsed index is borrowed and must outlive the
  * scan. Records are caller-owned, so decoded views remain valid until the
@@ -14,6 +22,13 @@ typedef struct {
     const duckhts_bcf_index_t *index;
     hts_itr_t *itr;
     kstring_t line;
+    /* Optional VCF-only capture. The caller retains the immutable sample plan
+     * and count descriptors through close. Successful next exposes exact GT
+     * spans until the next next call, even if vcf_parse resized line.s.
+     * Leave both pointers NULL to use the ordinary format reader. */
+    const duckhts_bcf_samples_t *raw_samples;
+    duckhts_bcf_gt_span_t *raw_gt;
+    const char *raw_gt_error; /* Static diagnostic for the most recent capture failure. */
     int indexed; // An empty indexed selection must never fall back to streaming.
 } duckhts_bcf_scan_t;
 
@@ -42,13 +57,13 @@ int duckhts_bcf_scan_next(duckhts_bcf_scan_t *scan, bcf1_t *record);
  * or "-" selects all, "" selects none, other strings use HTSlib's comma-list
  * / ^exclusion syntax. No sample-file interpretation or silent unknown names.
  * Zero-initialize before build; destroy owns all malloc-family storage. */
-typedef struct {
+struct duckhts_bcf_samples {
     char *selector;
     int original_count;
     int count;
     uint32_t *indices;
     char **names;
-} duckhts_bcf_samples_t;
+};
 
 int duckhts_bcf_samples_build(duckhts_bcf_samples_t *samples, const bcf_hdr_t *header,
                               const char *selector, char *error, size_t error_size);
@@ -71,9 +86,14 @@ int duckhts_bcf_check_field_type(bcf_hdr_t *hdr, bcf1_t *record,
                                 duckhts_bcf_field_class_t field_class,
                                 int header_id, int header_type,
                                 const char *reader_name, char *error, size_t error_size);
-int duckhts_bcf_check_format_width(const char *reader_name, const char *tag,
-                                  bcf_hdr_t *hdr, bcf1_t *record, int values,
-                                  int samples, char *error, size_t error_size);
+/* Decoded numeric scalar fields may contain at most one element per sample
+ * (one vector for INFO). Missing elements count; vector-end padding does not.
+ * Lists and GT are exempt. HTSlib returns a complete sample-count times stride
+ * array for FORMAT; callers check the multiplication before decoding. */
+int duckhts_bcf_check_scalar_count(bcf_hdr_t *hdr, bcf1_t *record,
+                                   duckhts_bcf_field_class_t field_class,
+                                   int header_id, int header_type, const void *values, int count,
+                                   const char *reader_name, char *error, size_t error_size);
 
 typedef enum {
     DUCKHTS_BCF_DECODE_OK,
@@ -91,7 +111,7 @@ int duckhts_bcf_parse_decode_policy(const char *text, duckhts_bcf_decode_policy_
 int duckhts_bcf_parse_scan_mode(const char *text, int *sequential);
 
 /* Classify bcf_get_* return codes. The caller chooses null/warn/error for a
- * type mismatch; undefined header fields and OOM always remain fatal. */
+ * type mismatch; undefined header fields, OOM and capacity overflow remain fatal. */
 duckhts_bcf_decode_status_t duckhts_bcf_decode_status(
     const char *reader_name, const char *field_class, const char *tag,
     bcf_hdr_t *hdr, bcf1_t *record, int ret, char *error, size_t error_size);

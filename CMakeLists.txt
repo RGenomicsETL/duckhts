@@ -473,9 +473,11 @@ endif()
 message(STATUS "htslib link libs: ${HTSLIB_LINK_LIBS}")
 
 # Test-only copied-API interposition; never linked into the extension/package.
+set(DUCKHTS_BCF_INFO_OOM_ENABLED OFF)
 if(UNIX AND NOT DUCKDB_WASM_EXTENSION)
     add_executable(duckhts_bcf_scan_test EXCLUDE_FROM_ALL
-        test/scripts/bcf_scan_test.c src/bcf_scan.c src/bcf_genotypes.c src/region_list.c)
+        test/scripts/bcf_scan_test.c src/bcf_scan.c src/bcf_genotypes.c
+        src/bcf_format.c src/region_list.c)
     target_compile_features(duckhts_bcf_scan_test PRIVATE c_std_11)
     target_compile_options(duckhts_bcf_scan_test PRIVATE -UNDEBUG)
     target_include_directories(duckhts_bcf_scan_test PRIVATE ${HTSLIB_SRC_DIR})
@@ -485,7 +487,18 @@ if(UNIX AND NOT DUCKDB_WASM_EXTENSION)
     target_compile_options(duckhts_reader_alloc_probe PRIVATE -fvisibility=default)
     target_include_directories(duckhts_reader_alloc_probe PRIVATE duckdb_capi src/include)
     target_link_libraries(duckhts_reader_alloc_probe PRIVATE ${CMAKE_DL_LIBS})
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(DUCKHTS_BCF_INFO_OOM_ENABLED ON)
+        add_executable(duckhts_bcf_info_oom_test EXCLUDE_FROM_ALL test/scripts/bcf_info_oom_test.c)
+        target_compile_features(duckhts_bcf_info_oom_test PRIVATE c_std_11)
+        target_compile_options(duckhts_bcf_info_oom_test PRIVATE -UNDEBUG)
+        target_include_directories(duckhts_bcf_info_oom_test PRIVATE ${HTSLIB_SRC_DIR})
+        target_link_options(duckhts_bcf_info_oom_test PRIVATE -Wl,--wrap=realloc)
+        target_link_libraries(duckhts_bcf_info_oom_test PRIVATE ${HTSLIB_LINK_LIBS})
+    endif()
 endif()
+file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/duckhts_bcf_info_oom.enabled"
+    CONTENT "${DUCKHTS_BCF_INFO_OOM_ENABLED}\n")
 
 # Host-neutral region parsing probe: real HTSlib, no DuckDB headers or runtime.
 if(NOT DUCKDB_WASM_EXTENSION)

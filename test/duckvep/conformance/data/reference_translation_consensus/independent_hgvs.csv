@@ -1,0 +1,7 @@
+"case_id","allele","hgvsp"
+"witness/legitimate_start","T","witness/legitimate_start_protein.1:p.Ala2="
+"witness/selenocysteine","T","witness/selenocysteine_protein.1:p.Ala3="
+"witness/terminal_readthrough","T","witness/terminal_readthrough_protein.1:p.Ala2="
+"witness/mito_terminal_tga","T","witness/mito_terminal_tga_protein.1:p.Ala2="
+"witness/lowercase_start","C","witness/lowercase_start_protein.1:p.Ala2="
+"witness/lowercase_start","T","witness/lowercase_start_protein.1:p.Ala2="

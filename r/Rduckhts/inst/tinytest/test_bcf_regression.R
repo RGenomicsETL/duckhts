@@ -206,6 +206,60 @@ test_bcf_type_clash_errors <- function() {
 
 }
 
+test_bcf_numeric_scalars <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  expected <- data.frame(pos = seq(10, 70, 10), ii = c(7, NA, 12, 15, 19, NA, 22),
+    ff = c(1.5, 2.5, NA, 8.5, 11.5, NA, 14.5), si = c(8, 10, 13, NA, 20, NA, 23),
+    sf = c(2.5, 4.5, 6.5, 9.5, NA, NA, 15.5))
+  for (extension in c("vcf", "bcf", "vcf.gz")) {
+    path <- system.file("extdata", paste0("bcf_scalar_counts.", extension), package = "Rduckhts")
+    expect_true(nzchar(path))
+    quoted <- dbQuoteString(con, path)
+    for (policy in c("null", "warn")) {
+      rduckhts_bcf(con, "scalar_fields", path, decode_error_policy = policy, overwrite = TRUE)
+      expect_equal(dbGetQuery(con, paste(
+        "SELECT POS AS pos, INFO_II AS ii, INFO_IF AS ff,",
+        "FORMAT_SI_S1 AS si, FORMAT_SF_S1 AS sf FROM scalar_fields ORDER BY POS")), expected)
+      rduckhts_bcf(con, "scalar_fields", path, tidy_format = TRUE,
+                   decode_error_policy = policy, overwrite = TRUE)
+      expect_equal(dbGetQuery(con, paste(
+        "SELECT count(*) AS n, count(INFO_II) AS ii, count(INFO_IF) AS ff,",
+        "count(FORMAT_SI) AS si, count(FORMAT_SF) AS sf FROM scalar_fields")),
+        data.frame(n = 14, ii = 10, ff = 10, si = 10, sf = 10))
+    }
+    for (field in c("INFO_II", "INFO_IF", "FORMAT_SI_S1", "FORMAT_SF_S1")) {
+      expect_error(dbGetQuery(con, sprintf(
+        "SELECT %s FROM read_bcf(%s, decode_error_policy := 'error')", field, quoted)),
+        pattern = "has 2 values for header Number=1 at chrS:")
+    }
+    expect_error(rduckhts_bcf(con, "scalar_error", path, decode_error_policy = "error"),
+                 pattern = "has 2 values")
+    expect_true(!dbExistsTable(con, "scalar_error"))
+    expect_equal(dbGetQuery(con, sprintf(paste(
+      "SELECT count(*) AS n, sum(POS) AS pos FROM read_bcf(%s,",
+      "scan_mode := 'sequential', decode_error_policy := 'error')"), quoted)),
+      data.frame(n = 7, pos = 280))
+  }
+  # The same retained record spans multiple tidy output chunks; invalid fields
+  # stay NULL, then valid values on the next record must be decoded afresh.
+  path <- system.file("extdata", "bcf_scalar_counts.vcf", package = "Rduckhts")
+  lines <- readLines(path)
+  header <- lines[startsWith(lines, "##")]
+  columns <- strsplit(lines[startsWith(lines, "#CHROM")], "\t", fixed = TRUE)[[1]]
+  records <- strsplit(lines[!startsWith(lines, "#")], "\t", fixed = TRUE)
+  many <- tempfile("scalar-tidy-", fileext = ".vcf")
+  on.exit(unlink(many), add = TRUE)
+  writeLines(c(header, paste(c(columns[1:9], paste0("S", seq_len(2053))), collapse = "\t"),
+    paste(c(records[[6]][1:9], rep(records[[6]][10], 2053)), collapse = "\t"),
+    paste(c(records[[7]][1:9], rep(records[[7]][11], 2053)), collapse = "\t")), many)
+  expect_equal(dbGetQuery(con, sprintf(paste(
+    "SELECT count(*) AS n, count(INFO_II) AS ii, count(INFO_IF) AS ff,",
+    "sum(FORMAT_SI) AS si, sum(FORMAT_SF) AS sf FROM read_bcf(%s, tidy_format := true)"),
+    dbQuoteString(con, many))), data.frame(n = 4106, ii = 2053, ff = 2053, si = 2053 * 24, sf = 2053 * 16.5))
+}
+
 test_bcf_filter_list_fetch_regression()
 test_bcf_malformed_record_errors()
 test_bcf_type_clash_errors()
+test_bcf_numeric_scalars()

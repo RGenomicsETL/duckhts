@@ -1,0 +1,14 @@
+"control","rejected"
+"missing",TRUE
+"duplicate",TRUE
+"id",TRUE
+"expected_reference",TRUE
+"expected_alternate_full",TRUE
+"expected_alternate",TRUE
+"expected_coding",TRUE
+"expected_coding_length",TRUE
+"expected_coding_stop",TRUE
+"expected_coding_unambiguous",TRUE
+"hgvs_missing",TRUE
+"hgvs_duplicate",TRUE
+"hgvs_wrong_reference_contrast",TRUE

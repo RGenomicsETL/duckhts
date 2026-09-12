@@ -1,0 +1,13 @@
+--- a/csq.c
++++ b/csq.c
+@@ -2197 +2197,3 @@
+-    if ( hap->stack[ibeg].node->type != HAP_SSS )
++    // Consequence rendering belongs to this leaf, not its shared prefix nodes.
++    int symbolic = hap->stack[ibeg].node->type == HAP_SSS;
++    if ( !symbolic )
+@@ -2288 +2290 @@
+-        hap->stack[ibeg].node->type = HAP_SSS;
++        symbolic = 1;
+@@ -2293 +2295 @@
+-    if ( hap->stack[ibeg].node->type == HAP_SSS  )
++    if ( symbolic )

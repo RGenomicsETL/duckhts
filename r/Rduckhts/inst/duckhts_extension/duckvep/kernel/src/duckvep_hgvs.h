@@ -36,7 +36,9 @@ typedef enum duckvep_hgvs_status {
     DUCKVEP_HGVS_NOT_APPLICABLE,
     DUCKVEP_HGVS_UNSUPPORTED_PROTEIN,
     DUCKVEP_HGVS_UNSUPPORTED_EDIT,
-    DUCKVEP_HGVS_BUFFER_TOO_SMALL
+    DUCKVEP_HGVS_BUFFER_TOO_SMALL,
+    DUCKVEP_HGVS_MISSING_TRANSCRIPT_TAIL,
+    DUCKVEP_HGVS_MISSING_TRANSCRIPT_FLANK
 } duckvep_hgvs_status_t;
 
 typedef enum duckvep_hgvs_numbering {
@@ -66,7 +68,7 @@ typedef struct duckvep_hgvs_coordinate {
 
 /* Initial edit shape. REPLACEMENT is the VEP delins default for any non-empty
  * multi-base or unequal-length REF/ALT pair. Sequence-aware refinement may
- * later prove inversion, duplication, or repeat syntax without changing the
+ * later prove inversion or duplication without changing the
  * underlying transcript edit. */
 typedef enum duckvep_hgvs_dna_shape {
     DUCKVEP_HGVS_DNA_SUBSTITUTION = 1,
@@ -74,8 +76,7 @@ typedef enum duckvep_hgvs_dna_shape {
     DUCKVEP_HGVS_DNA_INSERTION = 3,
     DUCKVEP_HGVS_DNA_REPLACEMENT = 4,
     DUCKVEP_HGVS_DNA_INVERSION = 5,
-    DUCKVEP_HGVS_DNA_DUPLICATION = 6,
-    DUCKVEP_HGVS_DNA_REPEAT = 7
+    DUCKVEP_HGVS_DNA_DUPLICATION = 6
 } duckvep_hgvs_dna_shape_t;
 
 typedef struct duckvep_hgvs_dna_fact {
@@ -91,7 +92,6 @@ typedef struct duckvep_hgvs_dna_fact {
     const uint8_t *alt;
     uint16_t ref_length;
     uint16_t alt_length;
-    uint32_t repeat_count;
     int32_t shift_offset;
     int8_t transcript_strand;
     uint8_t numbering; /* duckvep_hgvs_numbering_t */
@@ -150,9 +150,9 @@ duckvep_hgvs_uploaded_reference_validate(
     size_t                                 raw_ref_length);
 
 /* Typed protein edit after VEP-compatible peptide clipping and 3-prime
- * placement.  The fact borrows `context`; `window` is a value snapshot whose
- * residues remain accessible only while the context and its caller-owned
- * scratch buffers remain alive.  ref/alt offsets are relative to `window`.
+ * placement. The fact borrows `context` and optional prepared-reference bytes;
+ * `window` is a value snapshot. All borrowed sequence buffers must remain alive
+ * while the fact is consumed. Ref/alt offsets are relative to `window`.
  * `termination_distance` is the HGVS Ter distance for frameshift/extension
  * syntax when termination_known is set; otherwise the renderer writes `?`.
  */
@@ -168,8 +168,17 @@ typedef enum duckvep_hgvs_protein_shape {
     DUCKVEP_HGVS_PROTEIN_EXTENSION = 9
 } duckvep_hgvs_protein_shape_t;
 
+/* Borrowed displayed reference residues. Raw CDS translation and frame facts
+ * remain in the coding context. NULL bases with zero length selects that
+ * context's reference translation and sparse model peptide edits. */
+typedef struct duckvep_hgvs_protein_reference {
+    const uint8_t *bases;
+    size_t length;
+} duckvep_hgvs_protein_reference_t;
+
 typedef struct duckvep_hgvs_protein_fact {
     const duckvep_coding_context_t *context;
+    duckvep_hgvs_protein_reference_t reference;
     duckvep_coding_peptide_window_t window;
     size_t ref_offset;
     size_t ref_length;
@@ -191,6 +200,64 @@ typedef struct duckvep_hgvs_protein_fact {
      * residues, which need not be part of the local changed-peptide window. */
     uint8_t start_lost_flanking;
 } duckvep_hgvs_protein_fact_t;
+
+struct duckvep_pair_facts;
+
+/* Caller-owned storage for a protein fact derived from a placed independent
+ * transcript event. The fact borrows either context below or the synchronous
+ * consequence context, plus model, allele and delta scratch bytes. Consume it
+ * before reusing any of those buffers; copying this struct does not relocate
+ * its internal context pointer. A failed call leaves fact zeroed. */
+typedef struct duckvep_hgvs_protein_pair {
+    duckvep_coding_context_t context;
+    duckvep_hgvs_protein_fact_t fact;
+} duckvep_hgvs_protein_pair_t;
+
+/* Prepare the placed DNA view consumed by independent-event protein HGVS.
+ * Uploaded REF validation is the caller's per-event responsibility when a
+ * genomic reference is supplied. Without it, only complete CDS-contained
+ * unpadded replacements can be established. Outputs borrow the pair/model. */
+DUCKVEP_INTERNAL_API duckvep_hgvs_status_t duckvep_hgvs_dna_pair_build(
+    const duckvep_transcript_model_t *transcripts, const duckvep_exon_model_t *exons,
+    const duckvep_sequence_pool_t *sequences, const duckvep_variant_batch_t *variants,
+    const struct duckvep_pair_facts *facts,
+    const duckvep_hgvs_reference_window_t *shift,
+    const duckvep_hgvs_reference_window_t *lookup, duckvep_delta_scratch_t *scratch,
+    duckvep_transcript_edit_t *edit, duckvep_hgvs_dna_fact_t *dna);
+
+/* Protein-coordinate admission, shifted CDS views and cached consequence
+ * predicates share one VEP-116 authority. The DNA fact must already describe
+ * the supplied projected event and reference. Original partial/stop-retained/
+ * leading-reference-stop frame exclusions are captured before shifted scratch
+ * reuse; other absent frameshift evidence does not suppress generalized replay.
+ * A missing original context is reopened through the prepared feature producer,
+ * without retaining pointers into its scratch. No allocation or rendering is
+ * performed. allele_required is nonzero only when shifted-allele storage is
+ * needed; BUFFER_TOO_SMALL with a larger requirement permits a caller retry.
+ * Other BUFFER_TOO_SMALL results refer to the supplied delta scratch. */
+DUCKVEP_INTERNAL_API duckvep_hgvs_status_t duckvep_hgvs_protein_pair_build(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t *exons,
+    const duckvep_sequence_pool_t *sequences,
+    const duckvep_variant_batch_t *variants,
+    const duckvep_consequence_t *consequence,
+    const struct duckvep_pair_facts *facts,
+    const duckvep_hgvs_dna_fact_t *dna,
+    const duckvep_hgvs_reference_window_t *reference,
+    duckvep_delta_scratch_t *scratch,
+    uint8_t *allele_scratch, size_t allele_capacity, size_t *allele_required,
+    duckvep_hgvs_protein_pair_t *out);
+
+/* One normalized protein operation and its physical CDS edit span. The span
+ * indexes the caller's ascending edits; normalization never rewrites those
+ * edits or their source-event identities. Separated amino-acid changes within
+ * one physical block share that block's edit span. An empty span denotes a
+ * protein contrast without a physical DNA edit, such as a model peptide edit.
+ * A merged operation can contain both model contrast and physical edits. */
+typedef struct duckvep_hgvs_protein_operation {
+    duckvep_hgvs_protein_fact_t fact;
+    duckvep_haplotype_block_t span;
+} duckvep_hgvs_protein_operation_t;
 
 /* Convert one transcript coordinate into VEP 116 c./n. numbering. */
 DUCKVEP_INTERNAL_API duckvep_hgvs_status_t
@@ -299,14 +366,57 @@ DUCKVEP_INTERNAL_API duckvep_hgvs_status_t duckvep_hgvs_dna_render_basic(
     size_t                         *required_out);
 
 /* Build an independent-event HGVSp fact from the same coding context and
- * predicate facts used by consequence classification.  No SO term is used as
- * an input.  Materialized multi-edit contexts are accepted, which is the
- * later Haplosaurus reuse point; virtual and materialized single-edit
+ * predicate facts used by consequence classification. No SO term is used as
+ * an input. Materialized multi-edit contexts are accepted; virtual and materialized single-edit
  * contexts share the codon-rounded peptide-window helper above. */
 DUCKVEP_INTERNAL_API duckvep_hgvs_status_t duckvep_hgvs_protein_fact_build(
     const duckvep_coding_context_t *context,
     const duckvep_sequence_delta_t *delta,
     duckvep_hgvs_protein_fact_t    *out);
+
+/* Build protein operations from the complete materialized phased context and
+ * its ascending physical edits/interaction blocks. Frame-closed edit spans use
+ * the shared coding predicates and HGVS operation builder; peptide-normalized
+ * overlap joins their operations independently of physical coding-block grouping.
+ * A codon-aligned deletion does not supply a residue in the next codon.
+ * Earlier whole-codon shifts use
+ * distinct reference/alternate positions. Blocks strictly after the translated
+ * stop retain their source provenance outside this protein-operation view.
+ * Adjacent or overlapping normalized operations combine their physical spans
+ * before rebuilding the operation. Length-preserving delins split at internal
+ * unchanged residues; their operations retain the same physical edit span.
+ * Protein spans between physical edit windows are compared on their distinct
+ * reference/alternate axes, including model peptide edits. Those differences
+ * carry no invented source event. Equality blocks add no output operation.
+ * An equal complete suffix ends protein comparison only when both cursors have
+ * the same distance to their protein ends. Physical edits are validated first
+ * and remain available independently of the protein-operation view.
+ * Unsupported predicates fail the whole build, never publish a subset.
+ *
+ * Storage is caller-owned and distinct from all input spans. Capacity covers
+ * the working stack (physical blocks plus intervening contrast runs) and the
+ * final protein-operation count after splitting. Equality entries can occupy
+ * stack slots until interacting operations have combined. Count is zero on
+ * failure, with output bytes unspecified.
+ * Operations borrow context and its sequence buffers. An optional reference
+ * selects prepared residues independently of raw translation length. Comparisons
+ * end at the alternate's first stop; unmatched protein ends use the same bounded
+ * operation builder. A reference-only stop-marker loss without an alternate
+ * residue is unsupported, and an insertion without reference flanks is not
+ * applicable. Both flanks come from the selected reference, including its
+ * terminal stop. The reference bytes must outlive the operations. No allocation
+ * or sequence replay. */
+DUCKVEP_INTERNAL_API duckvep_hgvs_status_t duckvep_hgvs_protein_haplotype_build(
+    const duckvep_coding_context_t *context,
+    const duckvep_hgvs_protein_reference_t *reference,
+    const duckvep_haplotype_edit_t *edits,
+    size_t                          edit_count,
+    const duckvep_haplotype_block_t *blocks,
+    size_t                          block_count,
+    uint64_t                        transcript_flags,
+    duckvep_hgvs_protein_operation_t *operations,
+    size_t                           operation_capacity,
+    size_t                          *operation_count);
 
 /* VEP deletes its HGVS shift hash before the late frameshift stop search.
  * Adapters that replay the restored original allele at the original CDS
@@ -352,6 +462,19 @@ DUCKVEP_INTERNAL_API duckvep_hgvs_status_t duckvep_hgvs_protein_render(
     char                              *buffer,
     size_t                             capacity,
     size_t                            *required_out);
+
+/* Render one successful complete haplotype build as p.(=), a single protein
+ * change, or a cis allele such as p.[(Gly2del;Ala4CysfsTer2)]. Prediction
+ * parentheses enclose the full cis group inside its square brackets, following
+ * https://hgvs-nomenclature.org/stable/recommendations/protein/alleles/ . Identifiers and
+ * other haplotype lanes remain outside this suffix. Input operations must be
+ * ordered, noninteracting and borrow the same completed context. Zero count
+ * means whole-protein equality established by the builder, not unknown input.
+ * Uses the same residue/operation writer and capacity contract as the singleton
+ * renderer, with no scratch allocation. */
+DUCKVEP_INTERNAL_API duckvep_hgvs_status_t duckvep_hgvs_protein_haplotype_render(
+    const duckvep_hgvs_protein_operation_t *operations,
+    size_t count, int predicted, char *buffer, size_t capacity, size_t *required_out);
 
 #ifdef __cplusplus
 }

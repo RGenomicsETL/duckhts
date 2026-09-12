@@ -15,7 +15,9 @@ rduckhts_geno(
   scan_mode = "auto",
   decompression_threads = 0,
   decode_error_policy = "null",
-  overwrite = FALSE
+  overwrite = FALSE,
+  format_fields = NULL,
+  raw_gt = FALSE
 )
 }
 \arguments{
@@ -44,12 +46,31 @@ count/parallel scan paths. Sequential mode is incompatible with `region`.}
 threads per file handle. Default `0`. Use `0` to keep BCF/VCF reads
 single-threaded.}
 
-\item{decode_error_policy}{Character. Dirty/corrupt BCF decode policy:
-\code{"null"} returns NULL for header-vs-payload type clashes,
+\item{decode_error_policy}{Character. VCF/BCF decode policy:
+\code{"null"} returns NULL for header-vs-payload type clashes or oversized numeric scalars,
 \code{"warn"} emits a DuckHTS warning and returns NULL, and
-\code{"error"} raises a DuckDB/R error.}
+\code{"error"} raises a DuckDB/R error. Missing elements count toward scalar
+cardinality; vector-end padding does not. A malformed FORMAT tag is withheld
+for every selected sample on that record. Physical read errors and OOM always fail.}
 
 \item{overwrite}{Logical. If TRUE, overwrites existing table}
+
+\item{format_fields}{Character vector of extra FORMAT tags, for example
+`c("AD", "DP", "GQ")`. Selected fields are typed members of each call's
+`format` struct using the header's Type and Number. Missing elements retain
+their positions; no allele normalization or depth inference is performed.
+NULL or an empty vector keeps the default GT/PS schema. Unknown, empty,
+missing and case-insensitively duplicate names error; GT and PS are already
+exposed by the typed call fields and cannot be selected again.
+Tag lookup uses exact header spelling: declared lowercase `gt` and `ps`
+are distinct extra fields. Selected names must not collide under DuckDB's
+case-insensitive struct-member lookup.}
+
+\item{raw_gt}{Retain exact original VCF genotype text in each call's `raw_gt`
+member. The default `FALSE` keeps the typed-call schema unchanged. `TRUE`
+preserves leading phase markers, mixed separators and allele spelling;
+an absent GT is `NULL`, while a literal missing `.` remains text. BCF input
+errors because its encoded genotypes do not retain the original text.}
 }
 \value{
 A data frame when `table_name` is `NULL`, otherwise invisible `TRUE`.
@@ -61,6 +82,7 @@ original-header sample indices, nullable allele indices, per-slot phase bits,
 and nullable scalar phase sets. An absent GT has NULL allele/phase lists;
 a missing allele still occupies a slot. Phase bits follow HTSlib decoding,
 including its leading-slot convention for VCF versions before 4.4.
+PS cardinality excludes vector-end padding retained after sample selection.
 }
 \details{
 Full scans preserve the input stream when assigning ordinals. Indexed regions

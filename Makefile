@@ -22,6 +22,7 @@
 	duckvep-render-reports \
 	test-simd-kernels bench-simd-kernels \
 	test-sqllogictest-debug test-sqllogictest-release \
+	test-sqllogictest-runner \
 	check-benchmark-portability \
 	stage-norm-1000g-dragen-gvcf stage-liftover-references \
 	stage-giab-v4.2.1 stage-riker-wgs stage-duckvep-conformance-corpora \
@@ -142,7 +143,7 @@ endif
 
 test: test_debug
 test_debug: test-cache-paths test-duckvep-kernel test-simd-kernels test-liftover-property test-liftover-fuzz-debug test-sqllogictest-debug
-test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release
+test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom
 test_release: test-reference-cache
 ifneq ($(filter linux_%,$(or $(DUCKDB_PLATFORM),$(shell sed -n '1p' configure/platform.txt 2>/dev/null))),)
 test_release: test-reader-alloc
@@ -185,6 +186,22 @@ test-bcf-scan:
 			-Ithird_party/htslib test/scripts/bcf_scan_test.c \
 			-Lbuild/release -Wl,-rpath,$(PROJ_DIR)build/release -lduckhts -pthread \
 			-o "$$tmp/bcf_scan_test"; "$$tmp/bcf_scan_test" "$$tmp"
+
+.PHONY: test-bcf-info-oom
+# The outside-Docker CI step reuses the probe; its CMake cache has container paths.
+test-bcf-info-oom:
+	@set -e; \
+		test -f cmake_build/release/duckhts_bcf_info_oom.enabled || \
+			{ echo "Configure the release build before running the BCF allocation probe"; exit 1; }; \
+		case "$$(cat cmake_build/release/duckhts_bcf_info_oom.enabled)" in \
+		ON) \
+			if [ "$(LINUX_CI_IN_DOCKER)" != 0 ]; then \
+				cmake --build cmake_build/release --target duckhts_bcf_info_oom_test; \
+			fi; \
+			./cmake_build/release/duckhts_bcf_info_oom_test ;; \
+		OFF) echo "BCF realloc interposition requires a Linux target; reader SQL/R tests remain enabled" ;; \
+		*) echo "Invalid CMake BCF probe availability"; exit 1 ;; \
+		esac
 
 .PHONY: test-reference-cache test-reference-cache-asan test-reference-cache-ubsan test-reference-cache-tsan
 define run_reference_cache_test
@@ -272,6 +289,16 @@ test-cache-paths:
 	bash test/scripts/test_conformance_plugin_cache.sh
 
 test-benchmark-registry: test-variantkey-provider-staging test-duckvep-corpus-staging
+	Rscript test/scripts/test_genotype_format_benchmark.R
+	Rscript test/scripts/test_hgvs_cis_codon.R
+	Rscript test/scripts/test_ambiguous_codon.R
+	Rscript test/scripts/test_ambiguous_indel.R
+	Rscript test/scripts/test_ambiguous_indel_evidence.R
+	Rscript test/scripts/test_indel_predicate_witnesses.R
+	Rscript test/scripts/test_reference_translation.R
+	Rscript test/scripts/test_haplotype_geometry.R
+	Rscript test/scripts/test_haplotype_phase_history.R
+	Rscript test/scripts/test_haplotype_model_history.R
 	Rscript test/scripts/test_fastvep_receipt.R
 	Rscript test/scripts/test_vep_cache_staging.R
 	Rscript test/scripts/test_duckvep_model_relations.R
@@ -289,7 +316,10 @@ test-duckvep-corpus-staging:
 test-cgranges-benchmark-r:
 	bash test/scripts/test_cgranges_benchmark_r.sh
 
-test-sqllogictest-debug: check_configure
+test-sqllogictest-runner: check_configure
+	$(PYTHON_VENV_BIN) test/scripts/sqllogictest_runner_test.py
+
+test-sqllogictest-debug: check_configure test-sqllogictest-runner
 	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
 		echo "Skipping SQLLogicTest: the Python DuckDB wheel is windows_amd64, not windows_amd64_mingw"; \
 	else \
@@ -298,7 +328,7 @@ test-sqllogictest-debug: check_configure
 			--external-extension build/debug/$(EXTENSION_NAME).duckdb_extension; \
 	fi
 
-test-sqllogictest-release: check_configure
+test-sqllogictest-release: check_configure test-sqllogictest-runner
 	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
 		echo "Skipping SQLLogicTest: the Python DuckDB wheel is windows_amd64, not windows_amd64_mingw"; \
 	else \
@@ -398,6 +428,16 @@ bench-simd-bam-gc:
 bench-fastq-reader:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_fastq_reader.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
+.PHONY: bench-snapshot
+export BENCHMARK_RMD BENCHMARK_REPORT
+bench-snapshot:
+	Rscript -e 'source <- Sys.getenv("BENCHMARK_RMD"); report <- Sys.getenv("BENCHMARK_REPORT")' \
+		-e 'stopifnot(nzchar(source), basename(source) == source, endsWith(source, ".Rmd"))' \
+		-e 'stopifnot(nzchar(report), basename(report) == report, endsWith(report, ".md"))' \
+		-e 'stopifnot(file.exists(file.path("benchmarks", source)), !file.exists(file.path("benchmarks", report)))' \
+		-e 'Sys.setenv(DUCKHTS_REPO_ROOT = normalizePath("."))' \
+		-e 'rmarkdown::render(file.path("benchmarks", source), output_file = report, quiet = TRUE)'
+
 # =============================================================================
 # SIMD kernel contracts
 # =============================================================================
@@ -454,11 +494,14 @@ DUCKVEP_KERNEL_SOURCES = \
 	src/duckvep/kernel/src/duckvep_codon.c \
 	src/duckvep/kernel/src/duckvep_coding.c \
 	src/duckvep/kernel/src/duckvep_haplotype.c \
-	src/duckvep/kernel/src/duckvep_carriers.c
-DUCKVEP_PROPERTY_DRIVER = test/duckvep/property/duckvep_kernel_prop.c
+	src/duckvep/kernel/src/duckvep_sequence_diff.c \
+	src/duckvep/kernel/src/duckvep_carriers.c \
+	src/duckvep/kernel/src/duckvep_phase.c \
+	src/duckvep/kernel/src/duckvep_haplotype_stream.c
+DUCKVEP_PROPERTY_SOURCES = $(addprefix test/duckvep/property/,$(shell cat test/duckvep/property/sources.tsv))
 DUCKVEP_THEFT_PATCH = test/duckvep/vendor/patches/theft-mingw-no-fork.patch
 DUCKVEP_PROPERTY_CPPFLAGS ?=
-DUCKVEP_PROPERTY_CFLAGS = -std=c99 -g -O1 -Wall -Wextra \
+DUCKVEP_PROPERTY_CFLAGS = -std=c11 -g -O1 -Wall -Wextra -Werror -Wpedantic -pedantic-errors \
 	-Wno-unused-function -D_DEFAULT_SOURCE -DTHEFT_USE_FLOATING_POINT=0 \
 	-I test/duckvep/vendor/greatest \
 	-I src/duckvep/kernel/include \
@@ -489,6 +532,7 @@ duckvep-generated-check:
 	perl test/duckvep/conformance/generate_so_metadata.pl --check \
 		src/duckvep/kernel/src/duckvep_so_metadata.inc
 	perl test/duckvep/conformance/check_state_machine_contract.pl
+	perl test/duckvep/property/inventory_test.pl
 	perl test/duckvep/upstream/check_sources.pl
 
 duckvep-upstream-git-check:
@@ -508,7 +552,7 @@ test-duckvep-kernel: duckvep-generated-check
 	patch --silent --fuzz=0 -d "$$tmp/theft" -p1 < $(DUCKVEP_THEFT_PATCH); \
 	$(CC) $(DUCKVEP_PROPERTY_CPPFLAGS) $(DUCKVEP_PROPERTY_CFLAGS) \
 		-I "$$tmp/theft/inc" -I "$$tmp/theft/src" \
-		$(DUCKVEP_KERNEL_SOURCES) $(DUCKVEP_PROPERTY_DRIVER) \
+		$(DUCKVEP_KERNEL_SOURCES) $(DUCKVEP_PROPERTY_SOURCES) \
 		"$$tmp"/theft/src/*.c \
 		-pthread -o "$$tmp/duckvep_kernel_property"; \
 	"$$tmp/duckvep_kernel_property" $(DUCKVEP_PROPERTY_ARGS)
@@ -522,7 +566,7 @@ test-duckvep-kernel-asan: duckvep-generated-check
 	$(CC) $(DUCKVEP_PROPERTY_CPPFLAGS) $(DUCKVEP_PROPERTY_CFLAGS) -fsanitize=address \
 		-fno-omit-frame-pointer \
 		-I "$$tmp/theft/inc" -I "$$tmp/theft/src" \
-		$(DUCKVEP_KERNEL_SOURCES) $(DUCKVEP_PROPERTY_DRIVER) \
+		$(DUCKVEP_KERNEL_SOURCES) $(DUCKVEP_PROPERTY_SOURCES) \
 		"$$tmp"/theft/src/*.c \
 		-pthread -fsanitize=address -o "$$tmp/duckvep_kernel_property"; \
 	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 \
@@ -537,7 +581,7 @@ test-duckvep-kernel-ubsan: duckvep-generated-check
 	$(CC) $(DUCKVEP_PROPERTY_CPPFLAGS) $(DUCKVEP_PROPERTY_CFLAGS) -fsanitize=undefined \
 		-fno-omit-frame-pointer \
 		-I "$$tmp/theft/inc" -I "$$tmp/theft/src" \
-		$(DUCKVEP_KERNEL_SOURCES) $(DUCKVEP_PROPERTY_DRIVER) \
+		$(DUCKVEP_KERNEL_SOURCES) $(DUCKVEP_PROPERTY_SOURCES) \
 		"$$tmp"/theft/src/*.c \
 		-pthread -fsanitize=undefined -o "$$tmp/duckvep_kernel_property"; \
 	UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \

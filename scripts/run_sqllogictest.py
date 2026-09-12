@@ -143,9 +143,19 @@ class DuckHTSSQLLogicTestExecutor(sqllogic_runner.SQLLogicTestExecutor):
             _cleanup(artifacts - preexisting)
 
 
+class DuckHTSSQLLogicParser(sqllogic_runner.SQLLogicParser):
+    def parse(self, path):
+        try:
+            return super().parse(path)
+        except sqllogic_runner.SQLParserException as error:
+            # Invalid test syntax is a broken gate, not an unsupported SQL feature.
+            raise RuntimeError(f"Invalid SQLLogicTest {path}: {error.message}") from error
+
+
 def main() -> None:
-    # Reuse the pinned upstream CLI and parser, replacing only its executor class.
+    # Preserve upstream CLI, parsing and execution semantics; fail on invalid tests.
     sqllogic_runner.SQLLogicTestExecutor = DuckHTSSQLLogicTestExecutor
+    sqllogic_runner.SQLLogicParser = DuckHTSSQLLogicParser
     sqllogic_runner.SQLLogicPythonRunner().run()
 
 

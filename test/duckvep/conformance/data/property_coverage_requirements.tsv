@@ -1,4 +1,55 @@
 coverage	metric	requirement	evidence
+breakend mutation coverage	generated	statistical_required	-
+breakend mutation coverage	cases	statistical_required	-
+breakend mutation coverage	passed	statistical_required	-
+breakend mutation coverage	cells	statistical_required	-
+breakend mutation coverage	min_per_cell	statistical_required	-
+compound HGVSp terminal-reference coverage	cases	statistical_required	-
+compound HGVSp terminal-reference coverage	passed	statistical_required	-
+compound HGVSp terminal-reference coverage	generated	statistical_required	-
+compound HGVSp terminal-reference coverage	cells	statistical_required	-
+compound HGVSp terminal-reference coverage	min_per_cell	statistical_required	-
+compound HGVSp terminal-reference coverage	forward	statistical_required	-
+compound HGVSp terminal-reference coverage	reverse	statistical_required	-
+compound HGVSp terminal-reference coverage	attempts	statistical_required	-
+compound HGVSp terminal-reference coverage	rejected	statistical_required	-
+compound HGVSp terminal-repeat coverage	cases	statistical_required	-
+compound HGVSp terminal-repeat coverage	passed	statistical_required	-
+compound HGVSp terminal-repeat coverage	generated	statistical_required	-
+compound HGVSp terminal-repeat coverage	cells	statistical_required	-
+compound HGVSp terminal-repeat coverage	min_per_cell	statistical_required	-
+compound HGVSp terminal-repeat coverage	forward	statistical_required	-
+compound HGVSp terminal-repeat coverage	reverse	statistical_required	-
+compound HGVSp curated-reference coverage	cases	statistical_required	-
+compound HGVSp curated-reference coverage	cells	statistical_required	-
+compound HGVSp curated-reference coverage	min_per_cell	statistical_required	-
+compound HGVSp curated-reference coverage	forward	statistical_required	-
+compound HGVSp curated-reference coverage	reverse	statistical_required	-
+compound HGVSp curated-reference coverage	attempts	statistical_required	-
+compound HGVSp curated-reference coverage	rejected	statistical_required	-
+compound HGVSp curated-reference coverage	prepared_views	statistical_required	-
+compound HGVSp separated-frame coverage	cases	statistical_required	-
+compound HGVSp separated-frame coverage	attempts	statistical_required	-
+compound HGVSp separated-frame coverage	rejected	statistical_required	-
+compound HGVSp separated-frame coverage	split	statistical_required	-
+compound HGVSp separated-frame coverage	forward	statistical_required	-
+compound HGVSp separated-frame coverage	reverse	statistical_required	-
+compound HGVSp replay coverage	cases	statistical_required	-
+compound HGVSp replay coverage	merged	statistical_required	-
+compound HGVSp replay coverage	forward	statistical_required	-
+compound HGVSp replay coverage	reverse	statistical_required	-
+compound HGVSp replay coverage	sub	statistical_required	-
+compound HGVSp replay coverage	del	statistical_required	-
+compound HGVSp replay coverage	ins	statistical_required	-
+compound HGVSp replay coverage	delins	statistical_required	-
+compound HGVSp replay coverage	dup	statistical_required	-
+compound HGVSp restored-CDS coverage	cases	statistical_required	-
+compound HGVSp restored-CDS coverage	restored	statistical_required	-
+compound HGVSp restored-CDS coverage	changed_block	statistical_required	-
+compound HGVSp restored-CDS coverage	forward	statistical_required	-
+compound HGVSp restored-CDS coverage	reverse	statistical_required	-
+compound HGVSp restored-CDS coverage	cells	statistical_required	-
+compound HGVSp restored-CDS coverage	min_per_cell	statistical_required	-
 allele sweep coverage	del	statistical_required	-
 allele sweep coverage	indel	statistical_required	-
 allele sweep coverage	ins	statistical_required	-
@@ -257,3 +308,11 @@ variant-coding-context coverage	pep_diff	statistical_required	-
 variant-coding-context coverage	pep_same	statistical_required	-
 variant-coding-context coverage	rev	statistical_required	-
 variant-coding-context coverage	snv	statistical_required	-
+ordered-replacement coverage	forward	statistical_required	-
+ordered-replacement coverage	reverse	statistical_required	-
+ordered-replacement coverage	ref_slot	statistical_required	-
+ordered-replacement coverage	clipped	statistical_required	-
+ordered-replacement coverage	noop	statistical_required	-
+ordered-replacement coverage	tied	statistical_required	-
+ordered-replacement coverage	empty	statistical_required	-
+ordered-replacement coverage	merged_sources	statistical_required	-

@@ -4,6 +4,409 @@
 
 require duckhts
 
+# Pinned VEP 116 ambiguous_indel_consensus original events, including standard
+# controls, retained in conformance/data/indel_translation_witnesses.jsonl.gz.
+# Models use genomic CDS 11..22 and no transcript flanks. _get_fs_peptides()
+# uses table 1 for alternate CDS but preserves the transcript table for
+# reference residues and consequences. Events 5400/32261 separately pin a
+# parsed-away N deletion anchor and Xaa-to-Ter immediate-stop formatting.
+statement ok
+CREATE TABLE hgvs_table_sources AS SELECT * FROM (VALUES
+  (0, 4, 1, 13, 'G', 'GT'),
+  (1, 17, 1, 14, 'A', 'AG'),
+  (2, 18, 1, 14, 'A', 'AT'),
+  (3, 73, 2, 14, 'A', 'AG'),
+  (4, 74, 2, 14, 'A', 'AT'),
+  (5, 76, 2, 14, 'A', 'AGCC'),
+  (6, 284, 6, 13, 'G', 'GT'),
+  (7, 353, 9, 14, 'A', 'AG'),
+  (8, 354, 9, 14, 'A', 'AT'),
+  (9, 356, 9, 14, 'A', 'AGCC'),
+  (10, 5400, 1, 14, 'NAAG', 'N'),
+  (11, 32261, 1, 13, 'G', 'GAC')
+) s(i, event_index, codon_table, position, reference, alternate);
+
+statement ok
+CREATE TABLE hgvs_table_transcripts AS SELECT
+  i::UINTEGER transcript_index, i::UINTEGER seq_region,
+  11::UBIGINT transcript_start, 22::UBIGINT transcript_end,
+  1::TINYINT strand, i::UINTEGER gene_index, 3::UBIGINT transcript_flags,
+  transcript_start cds_start, transcript_end cds_end,
+  (CASE i WHEN 10 THEN 'ATGNAAGCCTAA' WHEN 11 THEN 'ATGNNAGCCTAA'
+   ELSE 'ATGAAAGCCTAA' END)::BLOB cds_sequence, codon_table::UTINYINT codon_table,
+  ''::BLOB pre_cds_sequence, ''::BLOB post_cds_sequence
+FROM hgvs_table_sources;
+
+query I
+SELECT loaded FROM duckvep_model_load('hgvs-alternate-table',
+  'SELECT seq_region, 32::UBIGINT sequence_length,
+   CASE seq_region WHEN 10 THEN ''residual_naa'' WHEN 11 THEN ''residual_nna''
+   ELSE ''table'' || seq_region END seq_region_name
+   FROM hgvs_table_transcripts ORDER BY seq_region',
+  'SELECT * FROM hgvs_table_transcripts ORDER BY transcript_index',
+  'SELECT transcript_index, 11::UBIGINT exon_start, 22::UBIGINT exon_end,
+   1::UBIGINT exon_cdna_start, 12::UBIGINT exon_cdna_end,
+   0::TINYINT phase, 0::TINYINT end_phase FROM hgvs_table_transcripts ORDER BY transcript_index',
+  reference_fasta := '__WORKING_DIRECTORY__/test/data/duckvep/indel_translation.fa');
+----
+1
+
+statement ok
+CREATE TABLE hgvs_table_events AS SELECT event_index::UBIGINT event_index,
+  i::UINTEGER seq_region, position::UBIGINT AS position, reference, alternate,
+  NULL::UBIGINT end_position, NULL::VARCHAR structural_type,
+  NULL::VARCHAR copy_change, NULL::UINTEGER mate_seq_region,
+  NULL::UBIGINT mate_position FROM hgvs_table_sources;
+
+query ITTT
+SELECT event_index, protein_hgvs, protein_hgvs_status,
+  (SELECT string_agg(t.consequence, '&' ORDER BY t.consequence)
+   FROM duckvep_so_terms() t WHERE (a.consequence_mask & t.consequence_mask) <> 0)
+FROM duckvep_annotate('hgvs_table_events', 'hgvs-alternate-table',
+  hgvs := true, upstream_distance := 0, downstream_distance := 0) a
+ORDER BY event_index;
+----
+4	p.Lys2Ter	supported	frameshift_variant
+17	p.Lys2ArgfsTer?	supported	frameshift_variant
+18	p.Lys2IlefsTer?	supported	frameshift_variant
+73	p.Lys2ArgfsTer?	supported	frameshift_variant&stop_gained
+74	p.Lys2IlefsTer?	supported	frameshift_variant
+76	p.Lys2delinsSerGln	supported	protein_altering_variant
+284	p.Lys2Ter	supported	frameshift_variant
+353	p.Asn2ArgfsTer?	supported	frameshift_variant
+354	p.Asn2IlefsTer?	supported	frameshift_variant
+356	p.Asn2delinsSerGln	supported	protein_altering_variant
+5400	p.Ala3del	supported	inframe_deletion
+32261	p.Ala3Ter	supported	frameshift_variant
+
+# Pinned raw_indel_5400 skips the full N-bearing ALT, not just its anchor.
+query ITTTTIIIIT
+SELECT contributors[1].event_index,cds,protein,projection_status,sequence_status,
+  edit_count,carrier_count,len(contributors),len(coding_blocks),contributors[1].projection_status
+FROM duckvep_haplotypes(
+  'SELECT event_index,seq_region,position,reference,[alternate] alternates,
+   seq_region transcript_index,0 sample_index,''1|1'' gt FROM hgvs_table_events WHERE event_index=5400',
+  'hgvs-alternate-table',input_mode:='source_records',phase_policy:='vep116_compat');
+----
+5400	ATGNAAGCCTAA	MXA*	ok	conditional	0	2	1	0	source_allele_skipped
+
+query I
+SELECT duckvep_model_drop('hgvs-alternate-table');
+----
+1
+
+# Fourteen original records observed with pinned VEP 116, retained in
+# conformance/data/indel_translation_witnesses.jsonl.gz. The parser erases
+# shared prefix AND suffix before eligibility: ACN>ATCN is -/T, whereas
+# ACN>AGTN is C/GT. Changed REF N and equal-length N stay unavailable.
+statement ok
+CREATE TABLE hgvs_padding_sources AS SELECT * FROM (VALUES
+  (1, 0, 14, 'ACN', 'ATCN'), (2, 0, 15, 'CN', 'TCN'),
+  (3, 0, 14, 'ACN', 'AGTN'), (4, 0, 14, 'ACN', 'AN'),
+  (5, 0, 14, 'ACN', 'ATN'), (6, 0, 14, 'ACN', 'A'),
+  (7, 0, 16, 'N', 'NT'), (8, 1, 14, 'NCN', 'NTCN'),
+  (9, 1, 14, 'NCN', 'NGTN'), (10, 1, 14, 'NCN', 'NN'),
+  (11, 2, 14, 'ACC', 'ATCC'), (12, 2, 15, 'CC', 'TCC'),
+  (13, 2, 14, 'ACC', 'AGTC'), (14, 2, 14, 'ACC', 'AC')
+) s(event_index, seq_region, position, reference, alternate);
+
+statement ok
+CREATE TABLE hgvs_padding_transcripts AS SELECT
+  i::UINTEGER transcript_index, i::UINTEGER seq_region,
+  11::UBIGINT transcript_start, 22::UBIGINT transcript_end,
+  1::TINYINT strand, i::UINTEGER gene_index, 3::UBIGINT transcript_flags,
+  transcript_start cds_start, transcript_end cds_end,
+  cds::BLOB cds_sequence, 1::UTINYINT codon_table,
+  ''::BLOB pre_cds_sequence, ''::BLOB post_cds_sequence
+FROM (VALUES (0, 'ATGACNGCCTAA'), (1, 'ATGNCNGCCTAA'), (2, 'ATGACCGCCTAA')) s(i, cds);
+
+query I
+SELECT loaded FROM duckvep_model_load('hgvs-padding',
+  'SELECT seq_region, 32::UBIGINT sequence_length,
+   CASE seq_region WHEN 0 THEN ''padding_acn'' WHEN 1 THEN ''padding_ncn''
+   ELSE ''padding_acc'' END seq_region_name FROM hgvs_padding_transcripts ORDER BY seq_region',
+  'SELECT * FROM hgvs_padding_transcripts ORDER BY transcript_index',
+  'SELECT transcript_index, 11::UBIGINT exon_start, 22::UBIGINT exon_end,
+   1::UBIGINT exon_cdna_start, 12::UBIGINT exon_cdna_end,
+   0::TINYINT phase, 0::TINYINT end_phase FROM hgvs_padding_transcripts ORDER BY transcript_index',
+  reference_fasta := '__WORKING_DIRECTORY__/test/data/duckvep/indel_translation.fa');
+----
+1
+
+statement ok
+CREATE TABLE hgvs_padding_events AS SELECT event_index::UBIGINT event_index,
+  seq_region::UINTEGER seq_region, position::UBIGINT AS position, reference, alternate,
+  NULL::UBIGINT end_position, NULL::VARCHAR structural_type,
+  NULL::VARCHAR copy_change, NULL::UINTEGER mate_seq_region,
+  NULL::UBIGINT mate_position FROM hgvs_padding_sources;
+
+query ITT
+SELECT event_index, protein_hgvs,
+  (SELECT string_agg(t.consequence, '&' ORDER BY t.consequence)
+   FROM duckvep_so_terms() t WHERE (a.consequence_mask & t.consequence_mask) <> 0)
+FROM duckvep_annotate('hgvs_padding_events', 'hgvs-padding',
+  hgvs := true, upstream_distance := 0, downstream_distance := 0) a
+ORDER BY event_index;
+----
+1	p.Thr2IlefsTer?	frameshift_variant
+2	p.Thr2IlefsTer?	frameshift_variant
+3	p.Thr2SerfsTer?	frameshift_variant
+4	p.Thr2Ter	frameshift_variant
+5	NULL	coding_sequence_variant
+6	NULL	frameshift_variant
+7	p.Ala3CysfsTer?	frameshift_variant
+8	p.Ala3Ter	frameshift_variant
+9	p.Ala3Ter	frameshift_variant
+10	p.Ala3ProfsTer?	frameshift_variant
+11	p.Thr2IlefsTer?	frameshift_variant
+12	p.Thr2IlefsTer?	frameshift_variant
+13	p.Thr2SerfsTer?	frameshift_variant
+14	p.Ala3ProfsTer?	frameshift_variant
+
+# Raw source replay skips a complete N-bearing ALT rather than applying the
+# independent-event permission to erase matching N padding before eligibility.
+query ITTTTTTIII
+SELECT contributors[1].event_index, cds, protein, hgvsp, projection_status, sequence_status,
+  contributors[1].projection_status, edit_count, len(coding_blocks), carrier_count
+FROM duckvep_haplotypes(
+  'SELECT event_index, seq_region, position, reference, [alternate] alternates,
+   seq_region transcript_index, 0 sample_index, ''1|1'' gt FROM hgvs_padding_events
+   WHERE event_index IN (1, 8)',
+  'hgvs-padding', hgvs := true, input_mode := 'source_records', phase_policy := 'vep116_compat')
+ORDER BY transcript_index;
+----
+1	ATGACNGCCTAA	MTA*	NULL	ok	conditional	source_allele_skipped	0	0	2
+8	ATGNCNGCCTAA	MXA*	NULL	ok	conditional	source_allele_skipped	0	0	2
+
+query I
+SELECT duckvep_model_drop('hgvs-padding');
+----
+1
+
+# Pinned original events 110244/143844 distinguish an N removed from uploaded
+# REF from an N in uploaded ALT. Independent TVA cannot obtain the N reference
+# peptide; raw Haplosaurus replay still removes the complete matching REF.
+statement ok
+CREATE TABLE hgvs_removed_ref_sources AS SELECT * FROM (VALUES
+  (0, 110244, 'ATGGCTGCCTAA', 'CT'),
+  (1, 143844, 'ATGGCNGCCTAA', 'CN')
+) s(i, event_index, cds, reference);
+
+statement ok
+CREATE TABLE hgvs_removed_ref_transcripts AS SELECT
+  i::UINTEGER transcript_index, i::UINTEGER seq_region,
+  11::UBIGINT transcript_start, 22::UBIGINT transcript_end,
+  1::TINYINT strand, i::UINTEGER gene_index, 3::UBIGINT transcript_flags,
+  transcript_start cds_start, transcript_end cds_end,
+  cds::BLOB cds_sequence, 1::UTINYINT codon_table,
+  ''::BLOB pre_cds_sequence, ''::BLOB post_cds_sequence
+FROM hgvs_removed_ref_sources;
+
+query I
+SELECT loaded FROM duckvep_model_load('hgvs-removed-ref',
+  'SELECT seq_region, 32::UBIGINT sequence_length,
+   CASE WHEN seq_region = 0 THEN ''n5'' ELSE ''n0'' END seq_region_name
+   FROM hgvs_removed_ref_transcripts ORDER BY seq_region',
+  'SELECT * FROM hgvs_removed_ref_transcripts ORDER BY transcript_index',
+  'SELECT transcript_index, 11::UBIGINT exon_start, 22::UBIGINT exon_end,
+   1::UBIGINT exon_cdna_start, 12::UBIGINT exon_cdna_end,
+   0::TINYINT phase, 0::TINYINT end_phase FROM hgvs_removed_ref_transcripts ORDER BY transcript_index',
+  reference_fasta := '__WORKING_DIRECTORY__/test/data/duckvep/n_indel.fa');
+----
+1
+
+statement ok
+CREATE TABLE hgvs_removed_ref_events AS SELECT event_index::UBIGINT event_index,
+  i::UINTEGER seq_region, 15::UBIGINT AS position, reference, 'C' alternate,
+  NULL::UBIGINT end_position, NULL::VARCHAR structural_type,
+  NULL::VARCHAR copy_change, NULL::UINTEGER mate_seq_region,
+  NULL::UBIGINT mate_position FROM hgvs_removed_ref_sources;
+
+query ITT
+SELECT event_index, protein_hgvs,
+  (SELECT string_agg(t.consequence, '&' ORDER BY t.consequence)
+   FROM duckvep_so_terms() t WHERE (a.consequence_mask & t.consequence_mask) <> 0)
+FROM duckvep_annotate('hgvs_removed_ref_events', 'hgvs-removed-ref',
+  hgvs := true, upstream_distance := 0, downstream_distance := 0) a
+ORDER BY event_index;
+----
+110244	p.Ala3ProfsTer?	frameshift_variant
+143844	NULL	frameshift_variant
+
+query ITTITTI
+SELECT contributors[1].event_index, cds, protein, contributors[1].position,
+  contributors[1].reference, contributors[1].alternate, len(contributors)
+FROM duckvep_haplotypes(
+  'SELECT event_index, seq_region, position, reference, [alternate] alternates,
+   seq_region transcript_index, 0 sample_index, ''1|1'' gt FROM hgvs_removed_ref_events',
+  'hgvs-removed-ref', input_mode := 'source_records', phase_policy := 'vep116_compat')
+ORDER BY transcript_index;
+----
+110244	ATGGCGCCTAA	MAP	15	CT	C	1
+143844	ATGGCGCCTAA	MAP	15	CN	C	1
+
+query I
+SELECT duckvep_model_drop('hgvs-removed-ref');
+----
+1
+
+# Original records from pinned VEP 116, retained under canonical_hgvs and
+# xaa_duplication in conformance/data/indel_translation_witnesses.jsonl.gz.
+# Each record has an isolated transcript with genomic CDS 11..22. These cover
+# source-peptide duplication tests, shifted internal stops and extension suffixes.
+statement ok
+CREATE TABLE hgvs_residual_sources AS SELECT * FROM (VALUES
+  (0, 4052, 1, 'ATGTAAGCCTAA', 14, 'T', 'TGCC'),
+  (1, 4059, 1, 'ATGTAAGCCTAA', 14, 'TAAG', 'TA'),
+  (2, 4065, 1, 'ATGTAAGCCTAA', 15, 'A', 'AAC'),
+  (3, 4067, 1, 'ATGTAAGCCTAA', 15, 'A', 'AACGT'),
+  (4, 4069, 1, 'ATGTAAGCCTAA', 15, 'AAG', 'A'),
+  (5, 13533, 2, 'ATGAGAGCCTAA', 15, 'GAG', 'G'),
+  (6, 13684, 5, 'ATGAGAGCCTAA', 14, 'A', 'AGCC'),
+  (7, 32276, 1, 'ATGNNAGCCTAA', 14, 'N', 'NGCC'),
+  (8, 71881, 14, 'ATGTAGGCCTAA', 15, 'A', 'AAC'),
+  (9, 89760, 26, 'ATGCTGGCCTAA', 16, 'G', 'GGCC'),
+  (10, 110256, 1, 'ATGGCTGCCTAA', 16, 'T', 'TGCC'),
+  (11, 146516, 1, 'ATGNCNGCCTAA', 14, 'N', 'NGCC')
+) s(i, event_index, codon_table, cds, position, reference, alternate);
+
+statement ok
+CREATE TABLE hgvs_residual_transcripts AS SELECT
+  i::UINTEGER transcript_index, i::UINTEGER seq_region,
+  11::UBIGINT transcript_start, 22::UBIGINT transcript_end,
+  1::TINYINT strand, i::UINTEGER gene_index, 3::UBIGINT transcript_flags,
+  transcript_start cds_start, transcript_end cds_end,
+  cds::BLOB cds_sequence, codon_table::UTINYINT codon_table,
+  ''::BLOB pre_cds_sequence, ''::BLOB post_cds_sequence
+FROM hgvs_residual_sources;
+
+query I
+SELECT loaded FROM duckvep_model_load('hgvs-residual',
+  'SELECT i::UINTEGER seq_region, 32::UBIGINT sequence_length,
+   ''residual_'' || event_index seq_region_name FROM hgvs_residual_sources ORDER BY i',
+  'SELECT * FROM hgvs_residual_transcripts ORDER BY transcript_index',
+  'SELECT transcript_index, 11::UBIGINT exon_start, 22::UBIGINT exon_end,
+   1::UBIGINT exon_cdna_start, 12::UBIGINT exon_cdna_end,
+   0::TINYINT phase, 0::TINYINT end_phase FROM hgvs_residual_transcripts ORDER BY transcript_index',
+  reference_fasta := '__WORKING_DIRECTORY__/test/data/duckvep/indel_translation.fa');
+----
+1
+
+statement ok
+CREATE TABLE hgvs_residual_events AS SELECT event_index::UBIGINT event_index,
+  i::UINTEGER seq_region, position::UBIGINT AS position, reference, alternate,
+  NULL::UBIGINT end_position, NULL::VARCHAR structural_type,
+  NULL::VARCHAR copy_change, NULL::UINTEGER mate_seq_region,
+  NULL::UBIGINT mate_position FROM hgvs_residual_sources;
+
+query ITTT
+SELECT event_index, protein_hgvs, protein_hgvs_status,
+  (SELECT string_agg(t.consequence, '&' ORDER BY t.consequence)
+   FROM duckvep_so_terms() t WHERE (a.consequence_mask & t.consequence_mask) <> 0)
+FROM duckvep_annotate('hgvs_residual_events', 'hgvs-residual',
+  hgvs := true, upstream_distance := 0, downstream_distance := 0) a
+ORDER BY event_index;
+----
+4052	p.Ter2delinsCysGln	supported	stop_lost
+4059	p.Ala3Ter	supported	coding_sequence_variant
+4065	p.Ter2_Ala3insTer	supported	stop_retained_variant
+4067	p.Ter2_Ala3insArgTer	supported	coding_sequence_variant&inframe_insertion
+4069	p.Ala3Ter	supported	coding_sequence_variant
+13533	p.Ala3Ter	supported	inframe_deletion
+13684	p.Arg2dup	supported	inframe_insertion
+32276	p.Xaa2dup	supported	coding_sequence_variant&inframe_insertion
+71881	p.Ter2_Ala3insTer	supported	coding_sequence_variant
+89760	p.Ala2_Ala3insAla	supported	inframe_insertion
+110256	p.Ala2dup	supported	inframe_insertion
+146516	p.Ter2_Ala3insPro	supported	coding_sequence_variant&inframe_insertion
+
+statement ok
+CREATE TABLE hgvs_residual_decoded AS SELECT * FROM duckvep_haplotypes(
+  'SELECT event_index, seq_region, position, reference, alternate, 1 alt_index,
+   seq_region transcript_index, 0 sample_index, [1]::INTEGER[] alleles,
+   [true]::BOOLEAN[] phase_before, NULL::BIGINT phase_set FROM hgvs_residual_events',
+  'hgvs-residual', hgvs := true, phase_policy := 'vep116_compat');
+
+statement ok
+CREATE TABLE hgvs_residual_raw AS SELECT * FROM duckvep_haplotypes(
+  'SELECT event_index, seq_region, position, reference, [alternate] alternates,
+   seq_region transcript_index, 0 sample_index, ''1|1'' gt FROM hgvs_residual_events',
+  'hgvs-residual', hgvs := true, input_mode := 'source_records', phase_policy := 'vep116_compat');
+
+# Source-record replay skips N-bearing ALTs while retaining conditional evidence.
+# It does not acquire independent TVA eligibility by erasing their shared anchor.
+query TITT
+SELECT route, event_index, regexp_replace(hgvsp, '^p\.\((.*)\)$', 'p.\1'), projection_status
+FROM (
+  SELECT 'decoded' route, contributors[1].event_index event_index, hgvsp, projection_status
+  FROM hgvs_residual_decoded
+  UNION ALL
+  SELECT 'raw', contributors[1].event_index, hgvsp, projection_status FROM hgvs_residual_raw
+) ORDER BY route, event_index;
+----
+decoded	4052	p.Ter2delinsCysGln	ok
+decoded	4059	p.Ala3Ter	ok
+decoded	4065	p.Ter2_Ala3insTer	ok
+decoded	4067	p.Ter2_Ala3insArgTer	ok
+decoded	4069	p.Ala3Ter	ok
+decoded	13533	p.Ala3Ter	ok
+decoded	13684	p.Arg2dup	ok
+decoded	32276	p.Xaa2dup	ok
+decoded	71881	p.Ter2_Ala3insTer	ok
+decoded	89760	p.Ala2_Ala3insAla	ok
+decoded	110256	p.Ala2dup	ok
+decoded	146516	p.Ter2_Ala3insPro	ok
+raw	4052	p.Ter2delinsCysGln	ok
+raw	4059	p.Ala3Ter	ok
+raw	4065	p.Ter2_Ala3insTer	ok
+raw	4067	p.Ter2_Ala3insArgTer	ok
+raw	4069	p.Ala3Ter	ok
+raw	13533	p.Ala3Ter	ok
+raw	13684	p.Arg2dup	ok
+raw	32276	NULL	ok
+raw	71881	p.Ter2_Ala3insTer	ok
+raw	89760	p.Ala2_Ala3insAla	ok
+raw	110256	p.Ala2dup	ok
+raw	146516	NULL	ok
+
+query IIIIII
+WITH observed AS (
+  SELECT 'decoded' route, transcript_index, carrier_count, len(contributors) contributor_count,
+    contributors[1].event_index event_index, contributors[1].seq_region seq_region,
+    contributors[1].position AS position, contributors[1].reference AS reference,
+    contributors[1].alternate AS alternate, cds, protein, sequence_status FROM hgvs_residual_decoded
+  UNION ALL
+  SELECT 'raw', transcript_index, carrier_count, len(contributors),
+    contributors[1].event_index, contributors[1].seq_region,
+    contributors[1].position, contributors[1].reference,
+    contributors[1].alternate, cds, protein, sequence_status FROM hgvs_residual_raw
+)
+SELECT count(*), count(DISTINCT (route, observed.event_index)),
+  bool_and(coalesce(contributor_count = 1 AND observed.event_index = s.event_index
+    AND seq_region = s.i AND observed.position = s.position
+    AND observed.reference = s.reference AND observed.alternate = s.alternate, false)),
+  bool_and(coalesce(carrier_count = CASE WHEN route = 'raw' THEN 2 ELSE 1 END, false)),
+  bool_and(observed.cds IS NOT NULL AND protein IS NOT NULL),
+  bool_and(coalesce(sequence_status = CASE WHEN route = 'raw' AND s.event_index IN (32276, 146516)
+    THEN 'conditional' ELSE 'ok' END, false))
+FROM observed JOIN hgvs_residual_sources s ON observed.transcript_index = s.i;
+----
+24	24	1	1	1	1
+
+query ITTTTIIIII
+SELECT contributors[1].event_index,cds,protein,hgvsp_status,contributors[1].projection_status,
+  edit_count,len(coding_blocks),len(cds_differences),len(protein_differences),
+  evidence_flags & 8 = 8 AND contributors[1].evidence_flags & 8 = 8
+FROM hgvs_residual_raw WHERE transcript_index IN (7,11) ORDER BY transcript_index;
+----
+32276	ATGNNAGCCTAA	MXA*	incomplete_input	source_allele_skipped	0	0	0	0	1
+146516	ATGNCNGCCTAA	MXA*	incomplete_input	source_allele_skipped	0	0	0	0	1
+
+query I
+SELECT duckvep_model_drop('hgvs-residual');
+----
+1
+
 statement ok
 CREATE TABLE duckvep_hgvs_regions AS
 SELECT * FROM (VALUES
@@ -592,7 +995,9 @@ WITH variants(ord, position, reference, alternate) AS (
     (2, 250::UBIGINT, 'C', 'A'),
     (3, 250::UBIGINT, 'CG', 'GC'),
     (4, 250::UBIGINT, 'CG', 'CC'),
-    (5, 249::UBIGINT, 'ACG', 'ACC')
+    (5, 249::UBIGINT, 'ACG', 'ACC'),
+    (6, 250::UBIGINT, 'CGT', 'CCC'),
+    (7, 250::UBIGINT, 'CGTA', 'CCCC')
 )
 SELECT ord,
        coalesce(annotation.transcript_hgvs, '-'),
@@ -610,6 +1015,8 @@ ORDER BY ord;
 3	c.*10_*9insG	supported	not_applicable
 4	c.*10dup	supported	not_applicable
 5	-	not_applicable	not_applicable
+6	-	not_applicable	not_applicable
+7	-	not_applicable	not_applicable
 
 # A 3-prime shift can move an insertion from the terminal codon to the first
 # 3-prime UTR base. VEP keeps HGVSc but has no peptide allele to format.

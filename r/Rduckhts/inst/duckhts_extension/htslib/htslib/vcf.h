@@ -1087,6 +1087,7 @@ set to one of BCF_ERR* codes and must be checked before calling bcf_write().
      *          -2 .. clash between types defined in the header and encountered in the VCF record
      *          -3 .. tag is not present in the VCF record
      *          -4 .. the operation could not be completed (e.g. out of memory)
+     *          -5 .. decoded value count or string size exceeds the signed API capacity
      *
      *  Returns negative value on error or the number of values (including
      *  missing values) put in *dst on success. bcf_get_info_string() returns

@@ -14,4 +14,7 @@ mapping	duckvep/minimal_bcsq.vcf	Tiny BCSQ-tagged fixture for DuckVEP/csq parser
 regression	bcf_filter_list_regression.vcf	read_bcf FILTER list-materialization regression for multi-entry and PASS values
 regression	malformed_bad_pos.vcf	Valid first record followed by malformed POS to verify BCF/VCF scan errors are surfaced instead of treated as EOF
 regression	bcf_cache_lifecycle.vcf	Synthetic three-record cache reset, missing fields, growing FORMAT arrays, ploidy and CSQ descriptor reuse
-spec	spec_standard_corrections.vcf	Intentionally misdeclared standard tags that should be corrected by spec-aware bind logic
+spec	spec_standard_corrections.vcf	Nonstandard Number declarations remain header-faithful without implicit schema repair
+mapping	geno_format.vcf	Selected FORMAT values retain sample and allele ordinals, missing items, absent GT and physical duplicates
+spec	bcf_scalar_counts.vcf	Numeric scalar overflow, missing elements, list controls and per-record recovery
+mapping	geno_format_case.vcf	Case-sensitive FORMAT tag identity and case-insensitive DuckDB member collisions

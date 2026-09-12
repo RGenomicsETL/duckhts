@@ -58,30 +58,18 @@ static int decode_field(bcf_hdr_t *header, bcf1_t *record, int is_gt,
         snprintf(error, error_size, "read_geno: FORMAT/%s exceeds the supported decoded-value capacity", tag);
         return 0;
     }
-    int32_t *previous = *data;
-    int previous_capacity = *capacity;
     int ret = is_gt ? bcf_get_genotypes(header, record, data, capacity)
         : bcf_get_format_int32(header, record, tag, data, capacity);
-    /* HTSlib 1.24 overwrites *data with realloc's return. On failure the old
-     * allocation is still ours; retain it so worker teardown can release it. */
-    if (ret == -4 && !*data) {
-        *data = previous;
-        *capacity = previous_capacity;
-    }
     duckhts_bcf_decode_status_t status = duckhts_bcf_decode_status(
         "read_geno", "FORMAT", tag, header, record, ret, error, error_size);
     if (status == DUCKHTS_BCF_DECODE_FATAL) return 0;
     if (status == DUCKHTS_BCF_DECODE_TYPE_MISMATCH) return accept_mismatch(policy, error);
     if (ret <= 0) return 1;
-    if (!duckhts_bcf_check_format_width("read_geno", tag, header, record,
-                                         ret, samples, error, error_size)) {
-        return accept_mismatch(policy, error);
-    }
     if (!is_gt && ret != samples) {
-        snprintf(error, error_size,
-                 "read_geno: FORMAT/PS requires one value per sample at %s:%lld (got %d for %d samples)",
-                 bcf_hdr_id2name(header, record->rid), (long long)record->pos + 1, ret, samples);
-        return accept_mismatch(policy, error);
+        if (!duckhts_bcf_check_scalar_count(header, record, DUCKHTS_BCF_FIELD_FORMAT,
+                id, BCF_HT_INT, *data, ret, "read_geno", error, error_size)) {
+            return accept_mismatch(policy, error);
+        }
     }
     if (is_gt) {
         int stride = ret / samples;
@@ -108,7 +96,7 @@ int duckhts_bcf_genotypes_decode(duckhts_bcf_genotypes_t *values, bcf_hdr_t *hea
                                  bcf1_t *record, duckhts_bcf_decode_policy_t policy,
                                  char *error, size_t error_size) {
     values->gt_stride = 0;
-    values->ps_present = 0;
+    values->ps_stride = 0;
     values->samples = bcf_hdr_nsamples(header);
     if (!values->samples) return 1;
     if (bcf_unpack(record, BCF_UN_FMT) < 0 || record->n_sample != (unsigned)values->samples) {
@@ -121,6 +109,6 @@ int duckhts_bcf_genotypes_decode(duckhts_bcf_genotypes_t *values, bcf_hdr_t *hea
         !decode_field(header, record, 0, &values->ps, &values->ps_capacity, &ps_count,
                        policy, error, error_size)) return 0;
     values->gt_stride = gt_count / values->samples;
-    values->ps_present = ps_count > 0;
+    values->ps_stride = ps_count / values->samples;
     return 1;
 }

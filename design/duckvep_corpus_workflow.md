@@ -116,6 +116,14 @@ regulatory rows, or comparing unlike corpora.
 
 ## Publish a portable release pack deliberately
 
+Model-history publication authenticates the execution receipt with GitHub's
+attestation verifier, restricted to the repository's named provenance workflow,
+hosted runner, permitted branch and source commit. The workflow builds and executes
+the campaign itself; it does not sign imported local results. A signature establishes
+origin under that repository/workflow trust policy, not biological agreement.
+Publication must still reconstruct the complete comparisons and retain failures.
+Unsigned historical observations remain evidence with their original provenance.
+
 Cross-machine reproducibility requires a versioned pack, not a historical result with a
 digest. A pack needs receipted models, permitted corpus shards, a machine-readable manifest
 of source/derivation/assembly/normalization/seed/cardinality identities, and expected

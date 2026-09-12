@@ -29,9 +29,11 @@ remain open.
 VEP 116 is the behavioral authority; pure-C properties and bcftools csq supply independent
 checks for mechanics and phased edit state.
 
-DuckVEP is alpha: its own interfaces and intermediate representations may be changed
-or deleted when a shared authority replaces them. Incorrect approximations are not
-backward-compatibility contracts. Preserve the pinned oracle, physical input records,
+DuckVEP is alpha: its own interfaces and intermediate representations have no
+backward-compatibility requirement. Replace or delete them when a simpler ownership
+contract or shared semantic authority makes them unnecessary; do not retain forwarding
+APIs or alternate implementations solely for older DuckVEP callers. Preserve the pinned
+oracle, physical input records,
 comparison denominators and failure controls; document deliberate result changes and
 test missing evidence explicitly instead of retaining a second implementation.
 
@@ -385,10 +387,11 @@ putting that selection in the receipt and validation evidence.
 The extension validates the columns it reads and rejects inconsistent values; the exact
 source-column projections are executable in the builder macros and acceptance fixtures.
 A future release adapter may add source handling, but it must still produce the same
-canonical region, transcript, and regulation relations. Loader projections are backward
-compatible in their documented 11-, 12-, and 13-column forms; a new model capability is an
-additive contract change with an explicit receipt field and tests, not a reinterpretation of
-an older model.
+canonical region, transcript, and regulation relations. The loader accepts an 11-column
+CDS-only projection or a 13-column complete-flank projection. These express different
+available sequence evidence, not interface generations; missing transcript flanks remain
+explicitly unresolved when required. A changed model contract requires an explicit receipt
+and tests, not reinterpretation or replacement of a previously receipted artifact.
 
 Promoting a new VEP target therefore requires three independent proofs: a pinned public
 source/release manifest and reference identity, canonical-model receipt validation, and
@@ -645,11 +648,360 @@ every transcript follows one universal NMD rule.
 
 ## Phased edits
 
-The pure C mutation core already rebuilds a CDS from several non-overlapping edits in one
+The pure C mutation core rebuilds a CDS from several non-overlapping edits in one
 reverse-coordinate pass, translates once, and partitions interactions while the frame is
-displaced or the next edit touches the same alternate codon. The missing stream groups edits by
-`(model, transcript, sample, phase_set, haplotype)` and retains all contributing variant
-IDs.
+displaced or the next edit touches the same alternate codon. The model-scoped carrier index
+groups explicit `(transcript, sample, phase_set, haplotype)` keys and shares event prefixes.
+The native literal-event replay stream owns copied alleles and one projection per
+event/transcript pair in caller-supplied rings. It drains each occupied path once, with
+complete event provenance and explicit projection or edit-conflict status. Its mutable
+storage is bounded by the oldest active genomic window, including younger events retained
+behind a longer-lived transcript; capacity failures latch instead of dropping paths.
+Projected equal-length edits use the same differing-island decomposition as independent
+annotation: unchanged internal MNV bases do not mask or conflict with another carried edit.
+Source-record count and physical-edit count remain separate, with raw alleles preserved.
+An out-of-CDS contributor is distinct from a failed coding projection. For a coding
+transcript, the shared topology classifier can prove that its semantic REF span (both
+flanks for an insertion) has no coding overlap; such a contributor retains its own
+`outside_cds` status without suppressing literal CDS replay. A path containing only
+these events retains the reference CDS with zero edits and complete provenance.
+Decoded replay treats mixed coding/noncoding spans, invalid sequence slices and
+other projection errors as failures. Missing/unphased evidence makes the path incomplete. Literal
+replay does not predict splice alteration; noncoding transcripts still have no CDS.
+One shared CDS translator serves independent coding contexts and phased replay. It
+retains every complete codon's residue and the first-stop position in one pass;
+the mutation-path protein is a length-delimited prefix through that stop. Later
+residues stay in worker storage for coding-context consumption, and later source
+events remain in contributor provenance. Full and stop-truncated translation do
+not have separate biological implementations.
+Coding contexts can borrow a completed replay and its complete raw translations.
+The same opener serves the context builder and native leaf consumers; it checks
+sequence/translation extents without applying edits or translating again. Displayed
+first-stop prefixes and curated reference proteins are not interchangeable with
+these complete raw peptide views. The model and worker buffers remain immutable
+while a consumer holds the context.
+The optional protein HGVS consumer builds frame-closed edit spans and merges
+normalized peptide operations that touch. Physical coding blocks remain intact:
+a codon-aligned deletion contributes no residue to the following alternate codon,
+even when the coding-block partition groups that deletion with a later edit.
+Predicted suffixes contain one complete supported operation set, without accession
+or source-identity reassignment. HGVS facts borrow a prepared reference protein
+independently of raw CDS translation and frame predicates. Reference preparation can
+change residues and length without inventing physical source edits; reference-only
+raw paths borrow the exact prepared reference. Protein ends compare through the
+alternate's first stop. A reference-only stop-marker loss supplies no extension, and
+insertions require reference flanks, including the prepared terminal stop when
+present. Interacting terminal operations retain that stop during peptide clipping.
+Unrepresentable ends, incomplete sequence and
+unsupported mechanics have NULL HGVS with an explicit status.
+Caller-selected operation/text
+capacities are included in the query workspace and cannot grow during execution.
+This consumer does not establish complete protein or DNA HGVS compatibility.
+The leaf's `stop_in_displaced_frame` fact intersects the first stop's three rebuilt
+CDS bases with physical frame excursions. An excursion starts at a frame-changing
+edit and ends after the restoring edit's alternate bases, or continues downstream
+if unrestored. A zero-base excursion cannot intersect a codon. A stop after frame
+restoration and a sequence with no stop both return false; unavailable sequence
+or ordered overlapping replacements return NULL. The shared edit geometry does not modify raw frame flags or imply
+protein rescue, SO classification, or removal of downstream contributors.
+Translation uses BioPerl's amino-acid consensus over every A/C/G/T expansion of N
+for independent coding predicates and phased replay. Uploaded REF/ALT validity
+remains a separate check. A resolved residue does not clear the input's
+`unambiguous` fact. The translator validates every
+base, including trailing partial codons and sequence after a stop. Reference
+protein preparation uses that same translator, then applies Ensembl's distinct
+start-methionine, terminal-stop and curated peptide-edit rules before comparison.
+It retains internal stops and applies single-residue edits to the complete
+reference. One worker-owned reference peptide is prepared per closing transcript
+and serves both native replay and SQL difference materialization. A raw sample
+without a retained exon-overlapping genotype uses this curated reference peptide.
+Missing calls retain conditional evidence. Any retained exon-overlapping genotype
+selects mutation translation, including retained REF lanes and shadowed, unmapped
+or UTR sources with zero physical edits. Entirely intronic source spans retain
+provenance but do not select mutation translation or alter literal CDS replay.
+This also applies to short introns classified as frameshift introns for SO;
+Haplosaurus admits source records through exon overlap before constructing genotypes.
+CDS equality and edit count do not select the protein route. Strict decoded replay
+still withholds sequence for missing calls; pure-reference samples remain implicit.
+Coding and HGVS share codon-rounded peptide windows with distinct reference and
+alternate offsets. A physical interaction block opens those operands against the
+complete materialized path: earlier closed blocks can shift the alternate by whole
+codons, while the local length request uses this block's change, not the path's
+total change. Window access retains reference peptide edits and terminal partial
+codons without reapplying edits, inventing a single edit, or truncating the complete
+context at a stop. Substitution-only blocks feed those operands into the same
+local predicate interpreter as independent events, even when an earlier closed
+indel shifted the alternate protein. Those local predicates do not decide whether
+an earlier stop prevents expression: the complete path retains that separate fact.
+Indel blocks use the same length-change predicate interpreter as
+independent events, with actual block geometry validated against their physical
+edit slice. The complete translation retains its first stop; intersection with
+frame-displaced bases prevents a DNA-restoring block being called in-frame when
+translation has already stopped. Reference and alternate nucleotide comparisons
+use their separate codon offsets. Start/terminal-CDS predicates borrow the selected
+block's already rebuilt bases between unchanged reference flanks. This isolates local
+facts from separate blocks without manufacturing an input record or replaying edits.
+Complete 5-prime sequence and sufficient or explicitly complete 3-prime sequence remain
+required when the predicate reads them. Single-record genomic insertion-length reach
+is retained separately; a CDS span cannot infer that distance across introns.
+Equal-length or identical strings do not erase physical indels or transient frame
+changes. Restoring indels that recreate reference CDS retain their physical block
+and can have synonymous local coding facts; an identity substitution is not a
+coding change. Empty CDS/protein differences do not remove source provenance.
+Neither local facts nor a net-zero
+CDS diff constitute a whole-haplotype consequence set. The whole-context compound-indel
+substitution shortcut remains forbidden. Leaf-specific facts never mutate shared
+carrier prefixes or immutable model sequence.
+Carrier-prefix identity includes per-event called/missing/unphased evidence. An uncertain
+path cannot share the result of a fully known path merely because their called edits agree.
+The native stream accepts complete decoded calls for a candidate transcript and uses the
+same phase reducer as SQL. Its host supplies the complete borrowed phase-set domain for
+each sample/transcript, including sets first encountered later; homozygous/haploid calls
+and wholly unphased evidence therefore reach future sets without a second native catalogue.
+Partial-phase uncertainty is confined to its declared set and unresolved slots. Missing
+or unresolved paths return explicit incomplete-input status and all contributor evidence,
+with no CDS/protein, including in the VEP-116 slot profile. This conservative incomplete
+result does not claim parity with upstream conditional sequences for missing genotypes.
+One stream cannot mix phase policies.
+
+`duckvep_phase_call` prepares decoded GT/PS calls through a constant-space native reducer.
+It observes the complete genotype before assigning slots. Strict assignments respect
+decoded per-allele phase, with unphased slots resolved only when permutation cannot change
+the called allele. [VCF 4.4 genotype fields](https://samtools.github.io/hts-specs/VCFv4.4.pdf)
+define each indicator for the following allele. Thus `0|1/2` and `/0|1/2` have
+unresolved first/third slots; `|0|1/2` fixes the first two and leaves one possible
+assignment for the third. A later pipe does not phase the preceding allele.
+Homozygous calls and haploid calls apply across every phase set;
+they must not be put into an isolated NULL-PS bucket. Missing alleles and unresolved
+heterozygous slots remain explicit and must affect whether a completed sequence is known.
+The named VEP-116 profile ranks called alleles after omitting missing entries, matching
+the upstream parser's input to Haplosaurus; the output still retains those missing input
+slots with no assigned lane. Separators and PS do not affect compatibility assignments.
+This is decoded-call interpretation, not emulation of VEP's raw mixed/prefixed-separator
+parsing. This helper consumes a declared GT/PS phasing source;
+PSL/PSO or producer-specific phase identities require a separate explicit adapter.
+
+Typed GT is not a lossless representation of raw VCF spelling. For example, HTSlib
+decodes `0|1` and `|0|1` to the same alleles and phase flags, but VEP-116's raw parser
+can give them different Haplosaurus sequences. Exact raw-input compatibility therefore
+requires retained source GT and source-record allele context; reconstructing text from
+decoded calls cannot recover it. The finite raw-GT audit retains these collisions and
+missing-call/ploidy disagreements separately from the certified literal-replay cases.
+Native raw-record replay uses source record IDs plus REF/ALT ordinals. An undefined
+file slot is an explicit empty-ALT interpretation of the complete source REF span;
+its sequence is conditional. Missing REF and omitted-call observations retain source
+evidence with zero physical edits. A full source span crossing coding/noncoding bases
+has no single Haplosaurus CDS mapping. Raw replay retains it as `source_unmapped`
+with conditional evidence and replays the remaining mapped sources. The shared model
+layout validator, uncached CDS extent and cached-coordinate agreement are checked;
+every coding-overlap REF segment is verified through the shared REF validator.
+A completely mapped source whose ALT contains N, U or lowercase bases within
+the supported ACGTUN/acgtun alphabet retains `source_allele_skipped`, conditional
+evidence and zero physical edits. Haplosaurus's case-sensitive ACGT mutation
+gate selects this behavior; the remaining sources still replay, and a retained
+exonic call selects normal CDS translation even when no edit applies. Uppercase
+ACGT and an undefined-slot empty ALT apply. Unsupported symbols and dashes
+remain invalid rather than being stripped or coerced. Intronic/UTR reference
+sequence is not available from a CDS-only pool. Invalid layout, CDS storage,
+unsupported alleles or coding REF still make sequence unavailable.
+SQL/R selects this raw-record interface with `input_mode := 'source_records'` and
+`phase_policy := 'vep116_compat'`. The default `alt_events` input is the decoded-call
+contract; it cannot emulate lexical distinctions absent from those arrays.
+
+`duckvep_haplotypes` consumes flat event/transcript/sample calls. DuckDB derives phase
+domains and materializes sorted input; native event ingestion and candidate projection
+are separate operations, so an entire event's cohort is never copied into a first-party
+call matrix. Output pauses retain the transcript drain cursor and reuse worker scratch.
+
+For `input_mode := 'alt_events'`, the SELECT supplies these named columns;
+DuckDB casts them before execution:
+
+```text
+event_index UBIGINT       seq_region UINTEGER        position UBIGINT
+reference VARCHAR        alternate VARCHAR          alt_index UINTEGER
+transcript_index UINTEGER sample_index UINTEGER      alleles INTEGER[]
+phase_before BOOLEAN[]   phase_set BIGINT
+```
+
+`event_index` uniquely identifies one source ALT; `alt_index` is its positive source
+ordinal, and `position` is one-based. Region/transcript/sample ordinals belong to the
+selected model and retained cold relations. NULL allele items mean missing, NULL phase
+flags mean unavailable, and `phase_set` is nullable. Candidate selection and source/ALT
+mapping remain explicit relations. Duplicate calls, inconsistent event/ALT geometry,
+changing sample/transcript ploidy, invalid GTs and out-of-model candidates fail.
+Evidence bits are 1 called, 2 missing and 4 unphased. Per-call capacities name active
+pools, leaves, sequences, genotypes and phase domains; `workspace_limit` sums
+DuckVEP-owned buffers, excluding DuckDB input/sort/output memory and HTSlib
+handle/transport storage. Neither result order nor
+carrier-list order is a SQL ordering guarantee.
+
+For a single ALT contributor, protein HGVS consumes the shared independent-event
+VEP-116 consequence and genomic-placement facts. Multiple MNV islands still belong
+to that one source allele. The completed haplotype CDS, protein, differences and
+provenance are separate outputs: an independent synonymous HGVS label need not
+describe the contrast against a curated reference protein. Missing genomic context
+required for placement returns `missing_reference`, not an unshifted substitute.
+Compound and reference-only paths retain their completed-path operation builder;
+neither route certifies complete phased HGVS.
+
+HGVS scratch is query-owned and allocated before execution. Each query opens its own
+mutable faidx handle. `max_hgvs_reference_bytes` bounds caller-buffer retrieval,
+including line-ending scratch; `max_sequence_bases`, `max_leaf_edits` and
+`max_allele_bytes` bound the sequence, edit and allele workspaces. The reference
+reader exposes separate VEP shift and complete-upload/duplication lookup views.
+Capacity failure is an error; a cache refill overwrites fixed storage only after
+invalidating the previous window. HTSlib transport allocations remain dependency-owned.
+
+For `input_mode := 'source_records'`, the required columns are:
+
+```text
+event_index UBIGINT       seq_region UINTEGER        position UBIGINT
+reference VARCHAR        alternates VARCHAR[]       gt VARCHAR
+transcript_index UINTEGER sample_index UINTEGER
+```
+
+Here `event_index` identifies one whole source record, not a decomposed ALT.
+`gt` is original VCF spelling, and `alternates` preserves every ALT in source
+order. Candidate selection remains explicit. Required cells, ALT items and
+allele strings cannot be NULL; source allele strings are nonempty. An empty ALT
+list represents a REF-only record. Duplicate record/transcript/sample calls,
+inconsistent record geometry/ALT lists, or conflicting GT spellings for the same
+record/sample across candidates fail before replay. The parser rejects invalid
+GT grammar and out-of-range allele indices, including slots beyond the two used
+by the file profile. `max_ploidy` bounds source ploidy and the two file lanes;
+PS is ignored, and the decoded-only `max_phase_sets` workspace is not allocated.
+
+Raw replay treats the supplied records as its source universe, including `0|0`
+records. Preserve original equal-position file order in `event_index`; filtering
+records before preparation can change overlapping-edit replay. The native planner
+uses the loaded model's sorted transcript spans to form Haplosaurus input buffers.
+The first overlapping source span closes over connected transcripts; later records
+enter by start coordinate without extending the buffer with their REF ends.
+DuckDB retains buffer ordinals, counts all source records and derives the pinned
+Set::IntervalTree 0.12 preorder before genotype filtering. Its temporary preparation
+relations are query-owned; native planning uses constant scratch.
+
+DuckDB expands source REF, ALT and undefined-slot interpretations and sorts them
+by region, position, record ID, allele ordinal, transcript and sample. Each
+interpretation/candidate is projected once; calls stream without a native cohort
+matrix. These interpretations share the named active-event/projection/allele
+limits, including unused interpretations. Original record/GT relations remain
+the cold provenance authority.
+
+Source-record contributors append nullable `alt_index` to their struct: 0 means
+REF, a positive value is the source ALT ordinal, and NULL means the undefined
+file-slot interpretation. The latter has empty alternate and deletes the complete
+source REF span. Evidence bit 8 and `sequence_status = 'conditional'` distinguish
+missing/undefined-slot replay, validated source-mapping omissions and skipped raw
+alleles from a known called sequence; bit 2 additionally
+retains explicit missing-source evidence. Omitted missing observations have no physical
+edit; retained REF slots participate in ordered replacement. A `source_unmapped`
+or `source_allele_skipped` contributor performs no replacement and retains its
+interpreted REF/ALT identity.
+Other projection failures withhold sequence. Blocks, differences and local
+coding facts describe the displayed conditional sequence, not proven biology.
+Overlapping raw records replay complete projected REF/ALT spans in descending
+original CDS start order; equal starts use source-buffer tree order. REF is
+validated against the model, while replacement acts on the current sequence and
+clips removal at its current end. A retained REF slot can overwrite an earlier
+replacement. An omitted missing observation does not execute a REF replacement.
+Every operation that changes the current sequence retains its source ID, even
+when a later operation overwrites it or restores the reference. Sources sharing
+region, position, REF and the complete ordered ALT list use the last retained
+source in tree order for that transcript. Other calls remain contributors with
+`projection_status = 'shadowed_duplicate'` and do not execute replacements.
+Retention is determined by the native raw-GT parser across the candidate's samples.
+This order is not proof that conflicting calls describe a biological haplotype.
+
+Each known leaf exposes `coding_blocks` in ascending reference CDS order. The same
+partitioner used by the independent interaction property groups same-alternate-codon
+edits and keeps a block open while its frame is displaced. Each block retains its
+source event IDs in physical-edit order and frame flags, and describes a reference span plus a span of
+the already rebuilt CDS. Retained bases between edits stay in those spans; pure
+insertions/deletions have one empty span. This is a composite edit representation,
+not an alignment or HGVS normalization. At most
+`max_leaf_edits` blocks are stored in the initialized workspace, and an unknown or
+failed sequence has NULL blocks. A parallel event-ID array follows physical edits through
+splitting, heap sorting and reversal; each block borrows its edit slice. An uploaded
+MNV may contribute several islands within or across blocks, so repeated IDs are retained,
+not deduplicated. SQL `event_indices` replaces the count-only block field; its length is
+the physical edit count. The ID array shares `max_leaf_edits` and is included in the
+workspace byte limit. Complete raw contributor provenance remains on the leaf.
+
+For an overlapping raw-record leaf, blocks are disjoint net reference/alternate
+components rather than differing islands. Their ID lists retain applied full-span
+operations in ascending reference CDS order, including overwritten operations;
+`edit_count` counts those operations. Net-zero components retain their provenance.
+Block flags describe net component length changes; leaf flags retain nominal
+source replacement length changes. `nominal_length_diff` is the signed sum of
+projected replacement ALT-minus-REF lengths before clipping at the current CDS end.
+It is zero for reference-only replay and NULL when the leaf has no CDS. Known and
+conditional paths retain this fact even when the rebuilt CDS length change differs.
+Local SO is NULL with `coding_status='unsupported_ordered_replacements'`, and
+`stop_in_displaced_frame` is NULL because an overlapping operation history does
+not supply the disjoint physical edits required by those consumers. CDS, protein,
+aligned differences and after-first-stop positions still describe the literal
+replay. Disjoint raw records use the differing-island contract.
+
+Each block's `local_consequence_mask` evaluates the shared generated SO rules over
+that block's physical coding delta in the completed haplotype. It does not OR
+independent event labels or apply an arbitrary contributor's uploaded-feature
+class gates. Decode it with `duckvep_so_terms()`. `coding_status` is `ok`,
+`unsupported`, `unsupported_ordered_replacements`, `missing_transcript_tail`, `missing_transcript_flank`, or
+`invalid_argument`; only `ok` has a non-NULL mask. Known zero is distinct from
+unknown. Substitution predicates consume consensus peptides and retain an X-bearing
+peptide's independent coding-unknown flag. Unsupported length-changing contexts
+remain explicit even when consensus sequence replay is available.
+`after_first_stop` means the block's first alternate codon is strictly after the
+first translated stop codon; it is false if no stop exists. A block starting before
+the stop but spanning it is not marked. Later blocks retain their local facts and
+provenance: this positional fact does not assert biological expression or rescue.
+The coding context borrows the complete alternate translation and model overlay.
+One native translation pass per closing transcript prepares two worker-owned
+reference views: uncurated consensus coding operands and the curated
+reference used for protein differences. SQL borrows both views. Neither model
+mutation nor per-leaf replay, translation or allocation is required by this consumer.
+
+`cds_differences` is a separate alignment view, not a change to physical edit
+identity. Indel-bearing leaves use the pinned VEP-116 pure-Perl NW score and
+traceback tie order; substitution-only leaves compare corresponding positions.
+Differing columns join only when both sides retain the same gap/non-gap type.
+Each run borrows ungapped reference/alternate spans and names zero-based positions
+on both sequences and on the alignment. No HGVS normalization or contributor
+reassignment is inferred from repeat-associated gap placement. Unknown sequences
+have NULL differences. One worker-local reference view per closing transcript uses
+replay's uppercase DNA spelling; model bytes remain immutable and letter case alone
+cannot introduce differences. A feasible alignment supplies a cost upper bound U under
+the equivalent nonnegative cost (substitution 4, gap 3); every optimum lies within
+|i-j| <= floor(U/3). Two worker-owned score rows and a caller-bounded traceback band
+therefore preserve exact global tie placement without allocating in execution.
+`max_alignment_cells` and `max_leaf_differences` are independent per-call limits
+within `workspace_limit`; exceeding either is an error, never approximate output.
+`protein_differences` uses the same alignment and span contract in amino-acid
+coordinates. The reference peptide is prepared once per closing transcript in
+worker storage of at most `max_sequence_bases/3 + 2` bytes: a terminal curated
+edit can restore a removed residue, and Haplosaurus can append another stop.
+CDS and protein axes sequentially reuse the same traceback and descriptor arrays;
+DuckDB copies each list before the next axis resets those arrays. Limits apply
+separately to each axis. A reference CDS shorter than a complete codon has an
+unavailable protein comparison (NULL), not a known empty reference. Known equal
+proteins produce an empty list. The exact raw-suffix stop convention is recorded
+in [the compatibility errata](../ERRATA.md#haplosaurus-reference-and-alternate-proteins-use-different-stop-rules).
+The registry owns one valid retained query connection: its extension-load database handle
+must not be retained. Only preparation/materialization uses that connection. A busy slot
+returns an error, including recursive preparation, while completed scan results and native
+state have independent ownership. Caller TEMP objects/uncommitted writes are not visible.
+
+This public sequence-mechanics surface is not complete phased annotation. Local
+block masks and sequence/indel flags are not whole-haplotype SO or protein HGVS, and literal replay does not yet
+compose typed structural events. Existing executable Haplosaurus comparisons exercise
+native replay and the public SQL surface for their declared phased-sequence scope;
+they do not certify compound SO/HGVS. The
+[phased replay benchmark](../benchmarks/duckvep_haplotypes.md) separates the
+initialized native stream from public SQL sort/materialization and records sparse
+pool occupancy, native workspace bytes and whole-process RSS. Its shared synthetic
+cohort measures literal replay, not future combined annotation or real-population
+performance; those paths require renewed evidence when implemented.
 
 The stream must preserve the original record/ALT identity, decoded allele indexes,
 ploidy, phasing flag, and `PS`/`PID`-like phase-set provenance. The same called local
@@ -723,6 +1075,29 @@ that identity for provenance and later HGVS while reproducing VEP's tandem-dupli
 gain/insertion predicates. Raw repeat units and counts remain columns in the surrounding
 relation; the consequence kernel consumes the prepared literal allele or exact structural
 span, not parser-specific INFO strings.
+
+Typed repeat preparation must distinguish exact sequence from repeat-summary evidence.
+[VCF 4.5 section 5.7](https://samtools.github.io/hts-specs/VCFv4.5.pdf) permits a
+`<CNV:TR>` summary to omit SNVs and indels present in the corresponding literal phased
+allele. Equal repeat units, counts, and lengths therefore do not establish sequence
+identity: `(CAG)11` and `(CAG)5(CAT)(CAG)5` can share summary metadata but encode different
+proteins. Sequence replay consumes the explicit literal allele or a caller-qualified exact
+repeat description, not a summary silently promoted to an exact sequence. VEP-derived
+expansion is a named compatibility interpretation, not evidence that the sample has a
+perfect repeat. The preparation contract must retain ordered repeat components, source ALT
+ordinals, nullable counts and lengths, confidence intervals, and exactness separately;
+`RUC` is a floating-point field and must not be silently narrowed to an integer count.
+
+`duckvep_repeat_sequence` prepares an exact ordered list of `(unit, count)` components
+in SQL; reference and alternate descriptions use the same operation. A required
+`sequence_exact` assertion separates exact descriptions from summaries. Missing data and
+fractional counts withhold the sequence with an explicit status. Complete integral counts
+expand only after the sum of all component lengths fits `max_sequence_bases`. This limit
+belongs to the SQL call, not to VEP's per-component parser limit. Empty lists describe an
+empty allele; a missing list means unavailable sequence. Input component order, case and
+IUPAC codes are preserved. The caller still supplies reference validation, genomic
+coordinates and source identity before annotation; summary data cannot enter sequence
+replay merely because its nominal counts happen to be integers.
 
 The paired-breakend native lane accepts the local and mate regions and raw one-based VCF
 positions from that same public event row. It queries the resident cgranges transcript and
@@ -867,6 +1242,10 @@ later HGVS replay. Positive frameshift evidence can complete a length-changing d
 absence of frameshift is conclusive for a length-preserving CDS edit. A length-changing
 splice-overlapping edit without that positive flag must run the complete delta evaluator;
 otherwise VEP-compatible frameshifts can be misrendered as premature stops or delins.
+An original partial-codon, retained-stop or available leading-stop peptide operand
+is explicit negative evidence, captured before HGVS shifting reuses worker scratch.
+The shared peptide-window guard preserves these exclusions without treating an
+absent frameshift flag as conclusive.
 
 This implemented surface is not yet a full VEP-HGVS compatibility claim. It covers
 independent literal small variants and returns explicit unresolved reasons when reference,

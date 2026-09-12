@@ -79,6 +79,20 @@ test_interval_readers <- function() {
   ]
   expect_equal(first_seq[1], "GCCTAAGCCT")
 
+  # Deliberately malformed FAI metadata must fail, including after a valid BED row.
+  bad_fasta <- system.file("extdata", "faidx_invalid.fa", package = "Rduckhts")
+  bad_bed <- system.file("extdata", "faidx_invalid.bed", package = "Rduckhts")
+  expect_error(rduckhts_fasta_nuc(con, bad_fasta, bin_width = 1,
+    region = "offset_wrap:5-5", include_seq = TRUE), "fasta_nuc: failed to fetch")
+  expect_error(rduckhts_fasta_nuc(con, bad_fasta, bin_width = 20,
+    region = "truncated:1-20"), "fasta_nuc: failed to fetch")
+  expect_error(rduckhts_fasta_nuc(con, bad_fasta, bed_path = bad_bed,
+    include_seq = TRUE), "fasta_nuc: failed to fetch")
+  recovered <- rduckhts_fasta_nuc(con, bad_fasta, bin_width = 4,
+    region = "ok:1-4", include_seq = TRUE)
+  expect_equal(recovered$seq, "AcGT")
+  expect_equal(recovered$seq_len, 4)
+
   n_fasta_path <- system.file("extdata", "nuc_with_n.fa", package = "Rduckhts")
   n_bed_path <- system.file("extdata", "nuc_with_n.bed", package = "Rduckhts")
   n_fasta_index_path <- tempfile("duckhts_nuc_n_", fileext = ".fai")

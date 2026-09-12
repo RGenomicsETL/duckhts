@@ -2,7 +2,7 @@
  * duckvep_codon.h — codon translation + coding-change classification (INTERNAL).
  *
  * The CDS bucket of the kernel (the ~0.5% of candidates inside coding sequence)
- * lands here: a reference codon and the alt codon (3 ASCII bases each, A/C/G/T,
+ * lands here: a reference codon and the alt codon (3 ASCII bases each, A/C/G/T/N,
  * already strand-oriented and frame-aligned by the coding projection) are
  * translated and classified.
  *
@@ -35,13 +35,46 @@ typedef enum duckvep_codon_table {
 
 int duckvep_codon_table_supported(duckvep_codon_table_t table);
 
+/* BioPerl 1.7.8 start predicate: true when ANY A/C/G/T expansion is a start.
+ * Three borrowed A/C/G/T/U/N bytes, case-insensitive; invalid input/table is false.
+ * This predicate is distinct from ordinary translation of the same codon. */
+int duckvep_codon_is_start(const uint8_t *codon3, duckvep_codon_table_t table);
+
 /* Borrow the immutable 64-amino-acid translation table for a supported NCBI
  * table id. The caller retains no ownership; NULL means unsupported. This is
  * the bulk-translation path after bases and table id have been validated. */
 const char *duckvep_codon_table_amino_acids(duckvep_codon_table_t table);
 
+typedef enum duckvep_translation_status {
+    DUCKVEP_TRANSLATION_OK = 0,
+    DUCKVEP_TRANSLATION_INVALID_ARG,
+    DUCKVEP_TRANSLATION_BUFFER_TOO_SMALL,
+    DUCKVEP_TRANSLATION_INVALID_BASE
+} duckvep_translation_status_t;
+
+typedef struct duckvep_translation {
+    size_t length; /* Every complete codon, including residues after internal stops. */
+    size_t first_stop_position1; /* Zero means no stop; otherwise also the visible protein length. */
+    uint8_t unambiguous; /* All CDS bases, including a trailing partial codon, are A/C/G/T/U. */
+} duckvep_translation_t;
+
+/* Translate once into distinct caller storage of at least cds_length/3 + 1
+ * bytes. Full peptide output is NUL-terminated; callers select the prefix
+ * through first_stop_position1 when they need the stop-truncated protein.
+ * A/C/G/T/U and N are case-insensitive. BioPerl 1.7.8 consensus translation emits
+ * the common amino acid of each codon's A/C/G/T expansions, B for D/N,
+ * Z for E/Q, and X otherwise. The unambiguous input fact remains false even when
+ * the amino acid is resolved. Every input base is validated, including partial
+ * codons and sequence beyond the first stop.
+ * No allocation. Result storage must not overlap either byte span. Aliases and
+ * address-range overflow return INVALID_ARG before writes. Other failures zero the result;
+ * peptide bytes may be partial on invalid input. */
+duckvep_translation_status_t duckvep_translate_cds(
+    const uint8_t *cds, size_t cds_length, duckvep_codon_table_t table,
+    uint8_t *peptide, size_t peptide_capacity, duckvep_translation_t *result);
+
 /* Return the first raw-CDS stop as a one-based peptide position, or zero when
- * no complete codon is a stop. N-containing codons translate to X. The return
+ * no complete codon is a stop. N-containing codons use BioPerl consensus. The return
  * value is false only for an invalid base, unsupported table, or NULL output. */
 int duckvep_cds_first_stop_position1(
     const uint8_t          *cds,
@@ -59,24 +92,26 @@ enum {
 };
 
 typedef struct duckvep_codon_result {
-    char     aa_ref;  /* 1-letter AA, '*' = stop, 'X' = invalid input */
+    char     aa_ref;  /* 1-letter AA, '*' = stop, 'X' = unknown or invalid input */
     char     aa_alt;
     uint32_t change;  /* one DUCKVEP_CODON_* bit */
 } duckvep_codon_result_t;
 
-/* Translate a 3-base ASCII codon to a 1-letter amino acid under `table`. Returns
- * 'X' if any base is not A/C/G/T/U (case-insensitive), or if the table id is
- * not supported. */
+/* Translate a 3-base ASCII codon to a 1-letter amino acid under `table`.
+ * BioPerl 1.7.8 consensus resolves N-containing codons. Returns 'X' for an
+ * unresolved codon, a base outside A/C/G/T/U/N (case-insensitive), or an
+ * unsupported table id. */
 char duckvep_translate_codon(const char *codon3, duckvep_codon_table_t table);
 
 /* Classify a reference->alt codon change under `table`. start-codon context
  * (start_lost) is decided by the caller, which knows whether this is the
- * translation start. */
+ * translation start. An unknown amino acid X sets INVALID; richer VEP
+ * consequence predicates remain the caller's responsibility. */
 duckvep_codon_result_t duckvep_codon_change(const char *ref3, const char *alt3,
                                             duckvep_codon_table_t table);
 
 /* Equivalent classifier for transcript-oriented codons already normalized to
- * uppercase A/C/G/T/N by the validated model/edit path. N remains invalid; the
+ * uppercase A/C/G/T/N by the validated model/edit path. N uses consensus; the
  * caller must not pass any other byte. This avoids repeating six general ASCII
  * normalization operations in the coding-SNV hot loop. */
 duckvep_codon_result_t duckvep_codon_change_prepared(

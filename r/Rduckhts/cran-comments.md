@@ -1,44 +1,36 @@
 ## Submission
 
-This is the requested resubmission of Rduckhts 1.5.1-0.1.1, now versioned
-1.5.1-0.1.3. It is a patch release following the accepted Rduckhts
-1.5.0-0.1.0 and updates the bundled 'duckhts' DuckDB extension from 1.5.0 to
-1.5.1.
+Rduckhts 1.5.2-0.1.5 packages DuckHTS 1.5.2 for the coordinated R and DuckDB
+community-extension release. It adds selected typed FORMAT fields and original
+genotype text to the genotype reader, improves reader allocation-failure
+handling, and fixes independent-event consequence and protein-HGVS behavior
+against pinned Ensembl VEP 116. The alpha haplotype interface supplies phased
+sequence replay and provenance; complete compound consequence prediction is
+outside this release's supported scope. Details are in `NEWS.md`.
 
-The reported M1Mac installation failure was caused by the package's former
-default of promoting compiler warnings supplied by R and the installation
-environment to errors. Released package builds now preserve that external
-warning policy, while strict package-owned diagnostics remain an explicit CI
-check. Vendored htslib headers are treated as system headers in Unix-like
-package builds. The macOS ARM64 package check enables the conversion-warning
-flags that produced the report; package installation emits no compiler warning
-or error diagnostics, and `R CMD check` finishes with `Status: OK`.
-
-This resubmission also derives Windows extension metadata from R's target
-rather than the architecture reported by the MSYS shell. A native Windows
-ARM64 job builds a clean source tarball, installs it, loads the resulting
-`windows_arm64_mingw` extension, and validates the bundled htslib receipt.
-
-The release fixes the other reported native diagnostics, including
-uninitialized normalization cleanup state and liftover alias pointers, unused
-coverage, interval, and VEP code, the libBigWig `bwCleanup` prototype, and
-MinGW visibility and allocation-size checks. It also adds
-`rduckhts_connect()` to permit loading the bundled extension with `duckdb`
-1.5.5, fixing the Fedora-Clang example and tinytest errors. There is no
-user-facing API breakage. Full details are in `NEWS.md`.
+This release also addresses the upcoming `duckdb` R release's reverse-dependency
+failure. The connection test checks rejection and preservation of the existing
+driver, connection and unsigned-extension policy without depending on DuckDB's
+diagnostic wording. The original test reproduces the reported failure against
+`duckdb` R commit `6a05aded03c52e1ef11cfa6804f146f86017502d`; the revised test
+passes against that same build.
 
 ## Test environments
 
-The package was checked on Ubuntu 24.04 with R-devel and on Fedora 44 with R
-4.6.1 and Clang 22.1.8. GitHub Actions also checked Ubuntu R-release and
-R-devel, Windows x86_64 R-release, and macOS ARM64 R-release, and built,
-installed, and validated a clean source tarball on Windows ARM64 R-release.
+Local source-tarball installation and `R CMD check --as-cran`: Ubuntu 24.04.3
+LTS, x86_64, R 4.6.0, GCC 13.3.0, and `duckdb` R 1.5.3.
+
+Connection compatibility was also tested with `duckdb` R 1.5.5 and the pinned
+release-candidate source above, which reports R package version 1.5.5.9013.36
+and DuckDB engine v1.5.6-dev150 (`a3cd0deed1`).
 
 ## R CMD check results
 
-Checks completed with 0 errors, 0 warnings, and 1 note. The note reports CRAN
-package updates from the preceding six months.
+0 errors, 0 warnings, 2 notes:
 
-## Reverse dependencies
-
-There are no reverse dependencies on CRAN.
+- CRAN incoming feasibility reports seven package updates in the preceding six
+  months. This coordinated feature release also prepares for the upcoming
+  `duckdb` R release.
+- The local R installation supplies `-mno-omit-leaf-frame-pointer`, which the
+  compilation-flags check reports as non-portable. Rduckhts does not add this
+  flag; it preserves the installation's compiler settings.

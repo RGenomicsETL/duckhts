@@ -8,11 +8,11 @@
  * are adaptive HTSlib buffers, not an allocation-static execution guarantee. */
 typedef struct {
     int32_t *gt;
-    int32_t *ps;
+    int32_t *ps; /* Strided scalars, including missing/vector-end sentinels and padding. */
     int gt_capacity;
     int ps_capacity;
     int gt_stride; /* zero means absent/invalid GT, not known zero ploidy */
-    int ps_present;
+    int ps_stride; /* zero means absent/invalid PS; first slot is the scalar or a sentinel */
     int samples;
 } duckhts_bcf_genotypes_t;
 

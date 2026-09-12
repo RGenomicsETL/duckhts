@@ -43,10 +43,12 @@ count/parallel scan paths. Sequential mode is incompatible with `region`.}
 threads per file handle. Default `0`. Use `0` to keep BCF/VCF reads
 single-threaded.}
 
-\item{decode_error_policy}{Character. Dirty/corrupt BCF decode policy:
-\code{"null"} returns NULL for header-vs-payload type clashes,
+\item{decode_error_policy}{Character. VCF/BCF decode policy:
+\code{"null"} returns NULL for header-vs-payload type clashes or oversized numeric scalars,
 \code{"warn"} emits a DuckHTS warning and returns NULL, and
-\code{"error"} raises a DuckDB/R error.}
+\code{"error"} raises a DuckDB/R error. Missing elements count toward scalar
+cardinality; vector-end padding does not. A malformed FORMAT tag is withheld
+for every selected sample on that record. Physical read errors and OOM always fail.}
 
 \item{overwrite}{Logical. If TRUE, overwrites existing table}
 

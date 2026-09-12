@@ -194,6 +194,7 @@ insertion order; they remain only as historical measurements.
 | 2026-09-06 | 9b1ded85 | fixture_one_transcript_sorted_indels                             | hgvs        |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       1.253 |          1.264 |       1.270 |              791139 |         1264.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 791,139                |
 | 2026-09-06 | 11752725 | fixture_one_transcript_sorted_indels                             | hgvs        |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       1.285 |          1.289 |       1.292 |              775795 |         1289.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 775,795                |
 | 2026-09-06 | c57100b9 | fixture_one_transcript_sorted_indels                             | hgvs        |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       1.256 |          1.261 |       1.273 |              793021 |         1261.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 793,021                |
+| 2026-09-07 | 6ce2ddd8 | fixture_one_transcript_sorted_indels                             | hgvs        |       1 |                1 |                5000 | 1,000,000  | 1           | 2         | 0                   | 1,000,000      |      5 |       1.295 |          1.300 |       1.366 |              769231 |         1300.0 | 13th Gen Intel(R) Core(TM) i5-13500 | 2            | 769,231                |
 
 Each pass consumes every staged input and checks output cardinality plus
 either the rendered consequence-byte total or the numeric
@@ -275,6 +276,30 @@ The background I/O differs, so their timing difference is not a code
 speedup or a no-regression certificate. Model loading is untimed: this
 control does not measure constructor cost, cache acquisition throughput
 or peak memory.
+
+## Transcript-end HGVS correction control
+
+The transcript-end multiplication correction reruns the unchanged
+ordinary indel/HGVS workload at source
+`6ce2ddd85df7c325c3779f2f1cdd984b3beaf983`. Its nearest identical
+recorded control is `c57100b9c82a36f7e6f761a4b3d2f79838cdd132`;
+intervening changes mean this comparison cannot isolate the cost of the
+multiplication fix.
+
+| revision | variants | annotated_rows | threads | passes | min_seconds | median_seconds | max_seconds | checksum_value |
+|:---------|---------:|---------------:|--------:|-------:|------------:|---------------:|------------:|:---------------|
+| c57100b9 |    1e+06 |          1e+06 |       1 |      5 |       1.256 |          1.261 |       1.273 | 26000000       |
+| 6ce2ddd8 |    1e+06 |          1e+06 |       1 |      5 |       1.295 |          1.300 |       1.366 | 26000000       |
+
+Both runs consume 1,000,000 inputs and produce 1,000,000 rows /
+26,000,000 HGVS/status bytes, with five passes, 100,000 warm-up inputs,
+one DuckDB thread pinned to CPU 2, a 5,000-base halo, DuckDB v1.5.3 and
+an Intel Core i5-13500. The current median is 1.300 seconds versus
+1.261, or +3.09%. No conformance or sanitizer process overlapped the
+current timed run. This ordinary CDS-body workload does not exercise the
+corrected transcript-end clipping branch. No checked-in benchmark
+measures that branch or complete phased annotation yet; this is the
+nearest rendered control, not a no-regression claim.
 
 ## Annotation-dense transcript distance and ordered parallel partitions
 

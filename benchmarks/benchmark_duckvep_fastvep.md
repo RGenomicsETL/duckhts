@@ -499,11 +499,11 @@ the real VEP 116 executable.
 
 <img src="benchmark_duckvep_fastvep_files/figure-gfm/plot-fuzz-1.png" alt="Checked randomized property trials and generated VEP differential pairs, both with zero observed failures or differences." width="1120" />
 
-At tested ancestor 6eebf9b0, 52 randomized properties completed
-5,100,500 trials with zero failures. They compare optimized sweeps,
+At tested ancestor 15417633, 55 randomized properties completed
+5,500,000 trials with zero failures. They compare optimized sweeps,
 projection, sequence editing, translation, HGVS, regulation/BND, and
 multi-edit mechanics with independent or deliberately slower oracles. At
-tested ancestor 05620047, generated state-exploration seed 31415927
+tested ancestor 15417633, generated state-exploration seed 31415927
 produced 100,268 variant/transcript comparisons against executable VEP
 116: all exact, with no unresolved, missing, or extra rows.
 
@@ -539,7 +539,7 @@ silently charged to only one tool.
     explicit sort and real output.
 2.  **The speed result survives a compatibility check.** DuckVEP is
     exact on all 56,998 held-out VEP transcript pairs, consequence sets,
-    HGVSc suffixes, and HGVSp suffixes, then adds 5.1 million randomized
+    HGVSc suffixes, and HGVSp suffixes, then adds 5,500,000 randomized
     property trials and 100,268 generated VEP pair comparisons with no
     observed failure. FastVEP’s speed result does not imply the same
     HGVS contract.
@@ -617,6 +617,155 @@ model logical hash is
 are separate from the unchanged historical observations. The receipt
 mutation test detects the old first-column-only implementation on
 `Location`, the second output field.
+
+## Shared CDS translation acceptance (2026-09-07)
+
+Source `e3269389d01ad98888eab494bdb1a9ef4dc68d73` deletes the separate
+independent-context and phased-replay CDS translators. One
+allocation-free kernel now produces every complete translated codon, the
+first-stop position and sequence ambiguity. Public phased protein output
+selects the first-stop prefix without discarding the downstream sequence
+or contributing events.
+
+The unchanged timed worker consumed the same registry-resolved GIAB
+input and Ensembl-116 model as the model-rebuild acceptance above. This
+is the independent consequence path, not phased execution. The
+fresh-process workload still includes model loading, sequential VCF
+decoding, ALT expansion, sorting, annotation and the same 17-field real
+TSV output. Machine, DuckDB 1.5.3, one thread pinned to CPU 2, distance
+5,000 and 4 GB memory limit are unchanged. Source counts and the
+contig-join denominator were checked after timing; all 4,095,611
+eligible alleles joined. Output receipts are also outside the timer.
+
+| revision | source_records | source_ALT | eligible_ALT | output_rows | output_bytes | threads | passes | elapsed_seconds | peak_RSS_KiB |
+|:---------|:---------------|:-----------|:-------------|:------------|:-------------|:--------|:-------|:----------------|:-------------|
+| 5cc99b89 | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 64.14           | 5730396      |
+| e3269389 | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 62.76           | 5731168      |
+| fbe38c3a | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 62.73           | 5728276      |
+| c03c4879 | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 63.49           | 5732112      |
+| 8c2c52a6 | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 65.69           | 5728980      |
+| 15417633 | 4048342        | 4096123    | 4095611      | 47629345    | 6174109722   | 1       | 1      | 67.35           | 5730816      |
+
+The observed pass is 62.76 s versus 64.14 s for the nearest identical
+recorded workload, with 5,731,168 versus 5,730,396 KiB peak RSS. Single
+passes do not establish a speedup or a no-regression confidence
+interval. Temporary sort and output files briefly exhausted
+ordinary-user disk availability; the timed worker nevertheless completed
+with exit status zero. Its generated TSV was removed after validation to
+recover 6.17 GB; input/model files and timing/output receipts were
+retained.
+
+Output rows, bytes and all three full-row multiset fingerprints match
+the previous receipt: XOR 7884817531533516516, low/high-32-bit sums
+102287041565538772 / 102283789823111554. The full-file SHA-256 differs
+(3bc65e115eff6ddbd9048cbe3c84268d61768b50d1539b631aa528124b31232b): the
+projection does not promise final row order. Matching fingerprints are
+evidence about the complete 17-field projection, not a collision-free
+proof or conformance for unprojected HGVS/structural fields. Extension
+SHA-256 is
+fc23f76b0ac9257d035d8b9e8d198c2eb5a940d8b538cc5072e2f7548bbe45e5; the
+model logical hash remains
+38da573cf9968c58e5ff42b8edddd0de952cc51cdb37c1ca03b481c7aea0853f.
+
+Source fbe38c3aa736fe6a6d14bd7788e7c68e0cb0c3a9 adds explicit
+N-ambiguity policies to that same translator. Phased proteins resolve a
+common amino acid across all nucleotide expansions; independent coding
+predicates keep conservative unknown codons. The unchanged
+independent-event worker took 62.73 s and 5728276 KiB peak RSS, versus
+62.76 s and 5,731,168 KiB for the nearest identical recorded workload
+above. All input/output denominators, model identity and full-row
+fingerprints match. This is another single pass, not evidence of a
+speedup or a statistical no-regression claim. Extension SHA-256 is
+fa7c08ce0fae5cc113a7457e057667da857994b8390e8b46fe1255c97f9c8874; output
+SHA-256 is
+6f1bd987b8a144822dda1ef2939bb42870711f86ac8797f2ce1ef3db1b5143d9. Disk
+availability again became tight during sorting/output. The worker and
+receipt checks succeeded; only its newly generated 6.17 GB TSV was
+removed after validation. This workload does not measure the phased
+N-consensus path itself.
+
+Source c03c4879f42447d15bc84b043a79b108157eec1d separates
+reference/alternate window selection from the shared substitution
+predicates and lets actual phased substitution blocks consume that
+interpreter. Compound-indel blocks remain unsupported. The
+independent-event worker, registry inputs, model, one-core placement,
+memory setting and 17-field output contract are unchanged. The clean
+source-bound extension took 63.49 s and 5732112 KiB peak RSS. The
+nearest identical recorded workload is the 62.73 s pass above: this pass
+is 0.76 s (1.21%) slower, not a no-regression or speedup claim.
+
+All source/ALT/joined-allele and output denominators match; the model
+still contains 644,427 transcripts. All three full-row multiset
+fingerprints and the full-file SHA-256 match that baseline. The
+extension SHA-256 is
+ac9bcb98509095493aa5de9fb47c764ba1a2705a8853e8901befbb633f691149; output
+SHA-256 is
+6f1bd987b8a144822dda1ef2939bb42870711f86ac8797f2ce1ef3db1b5143d9. The
+checked GNU time file retains the exact command and exit status. Disk
+availability was tight again; the worker and separate output/input
+receipt checks succeeded. Only this run’s new 6.17 GB TSV was removed
+after verification, retaining its receipts. This measures the shared
+independent-event path, not block classification, phased state,
+alignment, HGVS or structural composition.
+
+Source 8c2c52a6f8ba1610583a08abe9ce2a1693cf00fc shares the length-change
+predicate interpreter with actual interior haplotype blocks. Physical
+frame/stop geometry remains separate from VEP’s single-record
+start/endpoint reconstruction; compound start/terminal-CDS handling
+remains unsupported. The complete translator also retains its first-stop
+position for block interpretation without another CDS scan.
+
+The unchanged independent-event workload took 65.69 s and 5728980 KiB
+peak RSS, compared with 63.49 s and 5732112 KiB for the nearest
+identical recorded workload. This is 2.20 s (3.47%) slower in one pass,
+not evidence of no regression or a statistical performance estimate.
+Both full sanitizer runs completed before timing. The timed worker
+exited zero; the checked GNU time file retains its exact command and
+resource observations.
+
+All input/ALT/joined-allele and output denominators, the model identity,
+all three full-row multiset fingerprints and the output SHA-256 match
+that baseline. Extension SHA-256 is
+c108a9e51de11211ddad18f3c41f0eb9b14a7317ab31bb746ca478fa0562a8c4; output
+SHA-256 is
+6f1bd987b8a144822dda1ef2939bb42870711f86ac8797f2ce1ef3db1b5143d9. Source
+and output receipt checks ran outside the timer. Disk availability
+became tight; only this run’s generated 6.17 GB TSV was removed after
+verification, retaining its timing, fingerprint and input receipts. This
+measurement exercises the refactored independent interpreter, not
+compound-block classification or full phased execution.
+
+Source 15417633e0a2f0e6f4a138736a61fe10310a0f26 shares
+start/terminal-CDS string predicates using explicit borrowed coding
+spans. Compound blocks supply already rebuilt bases between reference
+flanks, without creating a single-variant context; physical frame
+geometry remains separate. The unchanged independent-event worker took
+67.35 s and 5730816 KiB peak RSS, versus 65.69 s and 5728980 KiB for the
+nearest identical recorded workload. This is 1.66 s (2.53%) slower in
+one pass, not a statistical regression estimate or a no-regression
+claim. The full sanitizer, property and VEP runs finished before timing.
+
+Input/ALT/joined-allele and output denominators, model identity, all
+three full-row fingerprints and output SHA-256 match the preceding pass.
+Extension SHA-256 is
+738d88535a6b29b699b58626f68a8b45154d55a4f31641042cbaf8d4c69a5b98; output
+SHA-256 is
+6f1bd987b8a144822dda1ef2939bb42870711f86ac8797f2ce1ef3db1b5143d9. The
+worker exited zero. Temporary sort and output files exhausted
+ordinary-user disk availability; after successful output and input
+receipt checks, only the new 6.17 GB TSV was removed. Registered inputs,
+models, conformance artifacts and timing/output receipts were retained.
+The renewed original-seed 100,268-pair VEP/HGVS campaign and
+5.5-million-trial property run are recorded in the [conformance
+report](duckvep_conformance.md). The additional 64,512-case native
+endpoint enumeration is a shared-predicate equivalence check, not
+executable compound-SO conformance. This benchmark still measures
+independent events, not the compound endpoint path itself.
+
+The phased executor still needs separate sorted-native and sort-included
+throughput/memory measurements. This independent-event run does not
+measure phase preparation, carrier sharing or combined haplotype
+consequences.
 
 ## Revisions and input receipts
 

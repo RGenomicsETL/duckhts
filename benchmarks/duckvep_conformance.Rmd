@@ -397,6 +397,15 @@ acquisition receipts remain historical observations, not content-checksum
 evidence. The refreshed HGVS run retains the same 1,864-variant input and all
 56,998 transcript pairs, with no unresolved, missing, extra or discordant pairs.
 
+The `6ce2ddd85df7` rerun again retains that exact source/input VCF and all 56,998
+pairs, with exact consequences and HGVSc/HGVSp agreement. It resolves the model,
+reference and checksum-verified chromosome-21 cache through the artifact registry.
+Its physical model-file receipt differs from the older run; this is not a claim
+of byte-identical model files. The full GIAB conformance campaign has not been
+refreshed to this revision. A separate chromosome-21 attempt found no eligible
+model joins because the raw callset uses `chr21` and the model uses `21`; it stopped
+before VEP, was not counted as a pass, and did not replace the full GIAB gate.
+
 ## Paired-breakend differential
 
 ```{r paired-breakends}
@@ -593,7 +602,7 @@ knitr::kable(timeline, row.names = FALSE)
 This is the anti-overfitting lane against the VEP executable, not an internal
 property test. Each seed contains the fixed predicate witnesses plus 100,000
 unique alleles. Three quarters of random positions are within six bases of
-splice, exon, translation-start, and translation-stop boundaries; one quarter
+splice sites, exon endpoints, and translation starts and stops; one quarter
 is uniform across the transcript. SNVs, MNVs, insertions, deletions, and delins
 are sampled with equal probability, with differing alleles up to 49 bases.
 
@@ -648,9 +657,56 @@ if (nrow(latest_state_runs)) {
 }
 ```
 
+The combined denominator counts pair comparisons across seed runs, not distinct
+alleles: the 268 fixed witnesses are deliberately shared and random draws may
+overlap. Neither the original generator nor its acceptance rules were changed.
+
+### Fresh-seed counterexample retained
+
+Seed 27182818 at `7d40756adc75` matched every consequence pair but emitted one
+extra HGVSc: `chrDuck:250 CGT>CCC`, transcript `DUCK1-201`, yielded `c.*10[3]`
+where VEP emitted no HGVSc. The pure-C properties passed on that revision too.
+VEP skips transcript allele clipping only for two-copy duplication; larger
+multiplications must undergo clipping and coordinate projection. The fix removes
+the early repeat-formatting path instead of changing the oracle or excluding the
+event. The original failing HGVS rows remain in the append-only ledger.
+
+```{r fresh-seed-hgvs-counterexample}
+counterexample_revisions <- c(
+  "7d40756adc7508f79a85c43f26cd7cffbba78e44",
+  "6ce2ddd85df7c325c3779f2f1cdd984b3beaf983"
+)
+counterexample_runs <- hgvs_bound_history[
+  hgvs_bound_history$corpus == "state_exploration_seed_27182818" &
+    hgvs_bound_history$source_revision %in% counterexample_revisions &
+    hgvs_bound_history$metric == "hgvsc",
+]
+counterexample_table <- do.call(rbind, lapply(counterexample_revisions, function(revision) {
+  rows <- counterexample_runs[counterexample_runs$source_revision == revision, ]
+  stopifnot(nrow(rows) > 0L, sum(rows$n) == 100268L)
+  data.frame(
+    revision = short_revision(revision),
+    pairs = sum(rows$n),
+    match = sum(rows$n[rows$comparison == "match"]),
+    both_absent = sum(rows$n[rows$comparison == "both_absent"]),
+    discordant = sum(rows$n[!rows$comparison %in% c("match", "both_absent")])
+  )
+}))
+stopifnot(identical(counterexample_table$discordant, c(1L, 0L)))
+knitr::kable(counterexample_table, row.names = FALSE)
+```
+
+The same three frozen 100,268-pair corpora pass consequences and HGVS at
+`6ce2ddd85df7`. A separate four-record executable witness retains the discovered
+event, its two-copy positive control and larger-copy variants. Native regression
+tests additionally enumerate 120 transcript-end projection cases: four bases,
+both strands and copy counts 2 through 16. Those finite cases exercise the shared
+edit/HGVS path; they are not 120 additional executable-VEP comparisons or proof of
+whole-haplotype SO/HGVS semantics.
+
 The same campaign covered the following SO terms. Counts are term memberships,
-not distinct transcript pairs, because one pair may carry several terms and the
-four seeds deliberately retain the same fixed witnesses.
+not distinct transcript pairs, because one pair may carry several terms and seed
+runs deliberately retain the same fixed witnesses.
 
 ```{r state-exploration-so}
 if (nrow(latest_state_runs)) {
@@ -692,8 +748,9 @@ if (nrow(latest_state_runs)) {
 }
 ```
 
-This distribution deliberately stresses local allele and boundary states on one
-engineered transcript. It does not replace the indexed-cache corpora, which add
+This distribution deliberately stresses local alleles and positions near exon,
+splice-site, and CDS endpoints on one engineered transcript. It does not replace
+the indexed-cache corpora, which add
 real transcript density, imported flags, exceptional peptide edits, codon tables,
 assemblies, and species. The revision is shown explicitly because this expensive
 campaign is not silently attributed to later code.
@@ -797,7 +854,14 @@ knitr::kable(property_runs, row.names = FALSE)
 ```
 
 ```{r property-targets}
-last_property <- property_history[nrow(property_history), , drop = FALSE]
+property_ancestry <- revision_ancestry[
+  revision_ancestry %in% property_history$source_revision
+]
+stopifnot(length(property_ancestry) > 0L)
+last_property <- tail(property_history[
+  property_history$source_revision == property_ancestry[[1L]],
+  , drop = FALSE
+], 1L)
 latest_properties <- property_history[
   property_history$source_revision == last_property$source_revision &
     property_history$seed == last_property$seed &
@@ -833,6 +897,19 @@ latest_coverage <- property_coverage_history[
   drop = FALSE
 ]
 if (nrow(latest_coverage)) {
+  coverage_requirements <- read.delim(file.path(
+    root, "test", "duckvep", "conformance", "data",
+    "property_coverage_requirements.tsv"
+  ))
+  coverage_check <- merge(
+    coverage_requirements, latest_coverage,
+    by = c("coverage", "metric"), all = TRUE
+  )
+  required_coverage <- coverage_check$requirement == "statistical_required"
+  stopifnot(
+    !anyNA(coverage_check),
+    all(coverage_check$count[required_coverage] > 0)
+  )
   latest_coverage$count <- format(
     latest_coverage$count,
     big.mark = ",",
@@ -855,6 +932,863 @@ if (nrow(latest_coverage)) {
   cat("No distribution-counter ledger has been recorded for the latest run yet.\n")
 }
 ```
+
+The run observed all `r sum(required_coverage)` required nonzero counters.
+The other `r sum(coverage_check$requirement == "fixed_witness")` counters have named
+fixed witnesses in the coverage manifest; their absence from a random draw is not
+counted as statistical coverage. These counters describe the declared generators,
+not an exhaustive enumeration of biological configurations.
+
+```{r current-property-seed-coverage}
+current_property_rows <- property_history[
+  property_history$source_revision == last_property$source_revision, ]
+current_coverage_rows <- property_coverage_history[
+  property_coverage_history$source_revision == last_property$source_revision, ]
+seed_summary <- do.call(rbind, lapply(unique(current_property_rows$seed), function(seed) {
+  properties <- current_property_rows[current_property_rows$seed == seed, ]
+  counts <- merge(coverage_requirements,
+    current_coverage_rows[current_coverage_rows$seed == seed, ],
+    by = c("coverage", "metric"), all = TRUE)
+  required <- counts$requirement == "statistical_required"
+  stopifnot(!anyNA(counts), all(counts$count[required] > 0L),
+    !anyDuplicated(properties$target),
+    !anyDuplicated(counts[c("coverage", "metric")]))
+  data.frame(
+    revision = short_revision(last_property$source_revision),
+    seed = seed,
+    targets = nrow(properties),
+    trials = sum(properties$trials),
+    required_counters_observed = sum(required),
+    minimum_required_counter_hits = min(counts$count[required]),
+    fixed_witness_counters_not_hit = sum(
+      counts$requirement == "fixed_witness" & counts$count == 0L)
+  )
+}))
+knitr::kable(seed_summary, row.names = FALSE)
+```
+
+The recorded runs executed `r format(sum(seed_summary$trials), big.mark = ",", scientific = FALSE)`
+property trials on the shown revision. Millions of passing trials do not make a
+counter with single-digit observations densely explored, and marginal counters
+do not establish coverage of their cross-products. The fresh-seed HGVS failure
+above is direct evidence of this limit. Dedicated rare-state strata and retained
+counterexamples complement broad draws; they do not justify a population
+error-rate claim. Full phased SO/HGVS, broader structural composition and stale
+real-corpus campaigns still need their own current-revision evidence.
+
+## Phased replay with noncoding contributors
+
+```{r phased-noncoding-replay}
+replay <- read.csv(file.path(root, "test", "duckvep", "conformance", "data",
+  "haplotype_replay_history.csv"), colClasses = c(source_revision = "character"))
+stopifnot(!anyDuplicated(replay[c("source_revision", "seed", "policy")]),
+  all(replay$extension_build_binding == "htslib_distclean_make_release"),
+  all(replay$oracle_unchanged), all(replay$complete_paths_equal),
+  all(replay$complete_lanes == replay$observed_carriers),
+  all(replay$controls_rejected == 5L), all(replay$original_controls_rejected == 6L),
+  all(replay$original_oracle_failures == 0L), all(replay$original_frame_failures == 0L),
+  all(replay$original_frame_control_rejected))
+table <- replay[c("source_revision", "seed", "policy", "input_records", "input_calls",
+  "input_allele_slots", "observed_carriers", "provenance_memberships")]
+table$source_revision <- substr(table$source_revision, 1L, 8L)
+knitr::kable(table, row.names = FALSE)
+```
+
+Sources `r paste(unique(replay$source_revision), collapse = ", ")` were built from
+clean checkouts, including an HTSlib clean rebuild. The ledger retains the extension hash, input/run receipt
+hashes and pinned VEP/variation revisions. DuckDB used four threads; these are
+correctness counts, not timing or memory measurements.
+
+Each unchanged 1,000-transcript corpus first passes its original public replay
+checks: 6,000 complete lanes, 4,000 occupied carriers, 3,000 output leaves,
+22,000 oracle comparisons and 4,000 first-stop/frame comparisons per policy.
+The supplemental corpus adds one homozygous intronic SNV per transcript while
+preserving every original VCF record. Running unmodified Haplosaurus on those
+inputs leaves its complete observations unchanged. DuckHTS must retain the
+intronic contributors, including on previously implicit reference lanes, with
+unchanged literal CDS/protein and an `outside_cds` contributor status.
+
+Both policies pass all `r format(sum(replay$observed_carriers), big.mark = ",")`
+carrier comparisons and `r format(sum(replay$provenance_memberships), big.mark = ",")`
+provenance memberships. The same biological lanes are counted separately under
+each policy and revision; these are not independent statistical trials. Five deliberately
+corrupted outputs per policy/seed are rejected. Fixed SQL/R tests additionally
+cover UTRs, insertions, missing calls and coding-overlapping projection failures;
+a native two-strand span enumeration supplies 6,774 assertions for the fix.
+
+This certifies the declared literal-replay cases, not altered splicing, combined
+SO/HGVS, broad phase compatibility or exhaustive rare configurations. The
+[conformance driver](../test/duckvep/conformance/haplotype_sql_differential.R)
+keeps this augmentation opt-in and does not replace the original corpus or
+verifier. The [phased replay benchmark](duckvep_haplotypes.md) records sorted
+native and public SQL execution separately, with workspace and process memory.
+The current SQL benchmark includes local coding-block SO; these Haplosaurus
+comparisons do not certify those masks. Whole-haplotype SO/HGVS remains unfinished.
+
+## Raw genotype compatibility audit
+
+```{r raw-genotype-audit}
+phase <- read.csv(file.path(root, "test/duckvep/conformance/data/haplotype_phase_history.csv"),
+  colClasses = c(source_revision = "character"))
+stopifnot(all(phase$extension_build_binding == "htslib_distclean_make_release"),
+  all(phase$controls_rejected %in% c(4L, 12L)),
+  !anyDuplicated(phase[c("source_revision", "ploidy", "prefix", "missing", "mixed")]))
+phase_revision <- tail(unique(phase$source_revision), 1L)
+phase_current <- subset(phase, source_revision == phase_revision)
+phase_controls <- unique(phase_current$controls_rejected)
+stopifnot(length(phase_controls) == 1L)
+phase_counts <- aggregate(cbind(cases, disagreements, oracle_lanes, native_lanes,
+  native_unavailable_carriers) ~ ploidy, data = phase_current, FUN = sum)
+stopifnot(sum(phase_counts$cases) == 3 * sum(4^(1:4) * 2^(0:3)))
+knitr::kable(phase_counts, row.names = FALSE)
+```
+
+Source `r phase_revision` records a **failing decoded-call/raw-parser comparison**:
+`r sum(phase_counts$disagreements)` disagreements in `r sum(phase_counts$cases)`
+profiles. It is not a population error rate or a replacement for the passing
+literal-sequence corpus. This lane uses public `input_mode := 'alt_events'`;
+the separate raw source-record input is checked below.
+
+The [R driver](../test/duckvep/conformance/haplotype_phase_differential.R) enumerates
+every GT over `0`, `1`, `2`, `.` at ploidies 1–4, every intervening separator pattern,
+and absent, `/`, or `|` leading prefixes. No profile is sampled or excluded. Each
+has one multiallelic site plus a homozygous second site in a different phase set,
+using the registered 180-base reference. There are 14,040 source records/genotype
+calls, 21,060 source ALT events/candidate calls, and 54,168 input allele slots.
+Every REF is checked before execution. These are correctness denominators, not
+timing measurements.
+
+The pinned, unmodified Haplosaurus runner and decoded `vep116_compat` executor consume
+the same VCF/GFF/FASTA. Comparisons retain complete CDS/protein multisets, source-record
+contributors and carrier counts. Eighteen ordinary called diploid profiles agree.
+The audit rejects `r phase_controls` deliberate corruptions: four check
+sequence/protein/provenance/duplicate handling`r if (phase_controls == 12L) ", and eight check grouped-observation fields, identities and row preservation" else ""`.
+All other disagreements remain failures, including missing-input NULL sequences
+and the difference between explicit source ploidy and Haplosaurus's file-input
+diploid fallback. The command exits nonzero after writing full observations,
+comparisons and source-bound receipts.
+
+There are `r unique(phase_current$decoded_collision_groups)` groups in which distinct
+raw GT spellings have **identical HTSlib alleles and phase flags but different
+Haplosaurus outputs**. A witness is `0|1` versus `|0|1`: both decode to alleles
+`[0,1]`, phase flags `[true,true]`. VEP-116's parser retains a leading empty split
+field as REF before the container consumes its allele slots, changing the result.
+The same model, remaining call and phase sets are used on both sides.
+
+Thus raw-parser compatibility cannot be recovered from typed calls alone. This
+does not justify changing HTSlib-faithful genotype decoding or treating an unknown
+call as biologically known. Exact raw-input emulation needs retained source GT and
+source-record allele context, with upstream conditional sequence explicitly
+distinguished from strict-phase evidence. Whole-haplotype SO/HGVS and typed
+structural composition remain separate unfinished requirements.
+
+```{r raw-genotype-parser}
+parser_calls <- sum(phase_current$raw_parser_calls)
+parser_disagreements <- sum(phase_current$raw_parser_disagreements)
+stopifnot(parser_calls == 2L * sum(phase_counts$cases),
+  all(phase_current$raw_parser_controls_rejected == 7L))
+```
+
+The constant-space native raw-GT parser separately records
+**`r parser_disagreements` disagreements across `r parser_calls` source calls**.
+An optional observer sidecar reads actual Haplosaurus genotype objects and its
+file-profile ploidy; it does not override parsing or sequence construction.
+The comparison checks retained/omitted calls, parsed slot counts, the two consumed
+allele ordinals, source ploidy and missingness, with seven rejected field corruptions.
+The standard output on the 1,000-transcript seed-173 corpus matches its recorded
+oracle output. Parser code, bridge, compiler identity, binary and observations
+are hashed in the same clean-build receipt.
+
+```{r raw-genotype-replay}
+raw_cases <- sum(phase_current$raw_replay_cases)
+raw_disagreements <- sum(phase_current$raw_replay_disagreements)
+raw_records <- sum(phase_current$raw_replay_record_observations)
+raw_record_disagreements <- sum(phase_current$raw_replay_record_disagreements)
+stopifnot(raw_cases == sum(phase_counts$cases), raw_records == 4L * raw_cases,
+  all(phase_current$raw_replay_controls_rejected == 4L))
+```
+
+The native source-record stream records **`r raw_disagreements` disagreements across
+`r raw_cases` complete CDS/protein, carrier-count and physical-edit provenance
+comparisons**, and **`r raw_record_disagreements` disagreements across `r raw_records`
+per-lane source-record observations**. The latter checks selected allele ordinals,
+record and aggregate evidence, and sequence availability against the upstream
+object sidecar; four deliberate field corruptions are rejected.
+
+Raw replay keeps full source REF spans and actual ALT ordinals. An undefined
+consumed slot follows the pinned runner's full-REF deletion, with `conditional`
+sequence status and evidence distinct from a called ALT. Missing REF observations
+retain provenance without inventing physical edits. Reference validation and
+coding projection failures still prevent sequence availability.
+
+This native result covers the enumerated two-site, single-exon grammar, not overlapping
+replacements, splicing or combined SO/HGVS. Public decoded-call comparison objects, including all
+`r sum(phase_counts$disagreements)` failures, match the preceding audit exactly.
+The passing native lane does not waive those failures or make conditional sequence
+biologically known.
+
+```{r public-raw-genotype-replay}
+public_raw_cases <- sum(phase_current$public_raw_replay_cases)
+public_raw_failures <- sum(phase_current$public_raw_replay_disagreements)
+public_raw_records <- sum(phase_current$public_raw_record_observations)
+public_raw_record_failures <- sum(phase_current$public_raw_record_disagreements)
+stopifnot(public_raw_cases == raw_cases, public_raw_records == raw_records)
+```
+
+Public `input_mode := 'source_records'` with `phase_policy := 'vep116_compat'`
+records **`r public_raw_failures` disagreements across `r public_raw_cases` complete
+CDS/protein multiset, carrier-count and physical-edit provenance comparisons**,
+plus **`r public_raw_record_failures` disagreements across `r public_raw_records`
+per-lane record observations**. It consumes original GT text and complete ALT lists
+from `read_geno(..., raw_gt := true)` on the same VCF fixture. An independent text
+read checks every source GT spelling and physical record ordinal; it does not
+supply the native input. The verifier additionally checks exact global record IDs,
+regions, positions and source REF/ALT bytes; repeated local site labels cannot
+substitute for record identity.
+
+The public lane exercises input materialization, sorting, transcript closing,
+DuckDB vector transitions and nested output. Fixed SQL/R controls reject duplicate
+calls, NULL keys, inconsistent record/GT identities, invalid ALT lists and GTs,
+and ploidy-limit exhaustion. This establishes the declared finite raw-input
+contract, not overlapping replacements, broader phase conformance, whole-haplotype
+SO/HGVS or biological certainty for conditional sequence.
+
+## Rare source-record geometry
+
+```{r rare-source-records}
+records <- read.csv(file.path(root, "test/duckvep/conformance/data/haplotype_record_history.csv"),
+  colClasses = c(source_revision = "character"))
+stopifnot(all(records$extension_build_binding == "htslib_distclean_make_release"),
+  all(records$controls_rejected == 4L),
+  all(records$minimum_stratum_draws == records$rare_per_stratum),
+  !anyDuplicated(records[c("source_revision", "seed", "cohort", "shape")]))
+record_revision <- tail(unique(records$source_revision), 1L)
+record_current <- subset(records, source_revision == record_revision)
+record_authorities <- unique(records[c("receipt_sha256", "source_revision")])
+stopifnot(!anyDuplicated(record_authorities$receipt_sha256))
+record_baseline_revision <- unique(record_authorities$source_revision[match(
+  unique(record_current$baseline_receipt_sha256), record_authorities$receipt_sha256)])
+stopifnot(length(record_baseline_revision) == 1L, !anyNA(record_baseline_revision))
+record_summary <- aggregate(cbind(profiles, failures, available_sequence_failures,
+  profiles_with_unavailable, count_failures) ~ seed + cohort, data = record_current, FUN = sum)
+names(record_summary) <- c("seed", "cohort", "profiles", "full failures",
+  "available sequence differences", "profiles with unavailable sequence", "carrier-total failures")
+knitr::kable(record_summary, row.names = FALSE)
+```
+
+Source `r record_revision` runs the public `source_records`/`vep116_compat` path
+against pinned, unmodified Haplosaurus. Across the two seeds there are
+**`r format(sum(record_current$profiles), big.mark = ",")` profiles**,
+`r format(sum(record_current$input_records), big.mark = ",")` source records and
+`r format(sum(record_current$oracle_lanes), big.mark = ",")` oracle file lanes;
+DuckHTS returns `r format(sum(record_current$observed_carriers), big.mark = ",")`
+carrier memberships. The full comparison retains CDS/protein multisets, counts
+and applied-record identity sets within each equal-sequence group. It does not
+certify physical-edit multiplicity or per-lane sequence association. Carrier-key
+uniqueness and totals are checked separately. Available includes explicitly conditional replay;
+a NULL sequence remains a disagreement, not a waiver.
+All failure columns count profiles; `r sum(record_current$profiles_with_unavailable)`
+profiles have unavailable sequence. Availability does not imply agreement.
+The receipt ledger retains every run, generator, coverage and artifact hash.
+
+```{r rare-source-record-transitions}
+record_before_after <- aggregate(cbind(profiles, failures, available_sequence_failures,
+  profiles_with_unavailable) ~ source_revision, data = subset(records,
+    source_revision %in% c(record_baseline_revision, record_revision)), FUN = sum)
+record_before_after <- record_before_after[match(c(record_baseline_revision, record_revision),
+  record_before_after$source_revision), ]
+knitr::kable(record_before_after, row.names = FALSE)
+record_transitions <- aggregate(cbind(baseline_pass_to_pass, baseline_fail_to_pass,
+  baseline_pass_to_fail, baseline_fail_to_fail) ~ seed, data = record_current, FUN = sum)
+record_baseline_counts <- aggregate(cbind(profiles, failures) ~ seed,
+  data = subset(records, source_revision == record_baseline_revision), FUN = sum)
+record_baseline_counts <- record_baseline_counts[match(record_transitions$seed,
+  record_baseline_counts$seed), ]
+stopifnot(!anyNA(record_baseline_counts),
+  all(record_transitions$baseline_fail_to_pass + record_transitions$baseline_fail_to_fail ==
+    record_baseline_counts$failures),
+  all(record_transitions$baseline_pass_to_pass + record_transitions$baseline_pass_to_fail ==
+    record_baseline_counts$profiles - record_baseline_counts$failures))
+stopifnot(sum(as.matrix(record_transitions[-1L])) == sum(record_current$profiles),
+  sum(record_transitions$baseline_pass_to_fail + record_transitions$baseline_fail_to_fail) ==
+    sum(record_current$failures))
+names(record_transitions) <- c("seed", "still passing", "resolved", "regressed", "still failing")
+knitr::kable(record_transitions, row.names = FALSE)
+```
+
+The identical-input comparison against receipt-named source `r record_baseline_revision` has
+**`r format(sum(record_transitions$resolved), big.mark = ",")` resolved failures**,
+with **`r format(sum(record_transitions$regressed), big.mark = ",")` regressions** and
+**`r format(sum(record_transitions[["still failing"]]), big.mark = ",")` remaining failures**.
+These cumulative transitions apply only to the declared generated inputs; they do not establish
+absence of regression outside this campaign. Every earlier failing comparison remains
+in its revision-labelled artifact.
+
+Each seed includes 144 fixed profiles and 512 general-random overlapping pairs.
+The rare lane requires **32 draws in each of 1,128 cells**: 12 geometries × two
+strands × 47 valid GT-pattern/source-ploidy combinations. Ploidies are 1, 2, 4,
+8, 16 and 64. Patterns include mixed and leading separators, first/last missing
+slots, all-missing calls and ALT calls beyond the two consumed file lanes.
+Positions, replacement lengths and bases are seeded; actual GT strings and all
+cell quotas are checked. A pair shares its GT-pattern/ploidy class; this does not
+enumerate every pairing of different classes. Each profile has two tested records
+and a separate homozygous anchor. Both policies' existing decoded-input corpora
+and the finite raw-GT audit remain independent evidence lanes.
+
+All 36,752 generated inputs per seed match source `r record_baseline_revision`
+exactly, and each complete oracle output is byte-identical. The comparison rules
+and all preceding comparison artifacts are preserved. Four deliberate output corruptions are rejected;
+the 24 fixed disjoint/adjacent controls per seed pass. Fixed profiles repeat across
+seeds, and all profiles use the same registered 180-base, single-exon reference
+and standard codon table. These are quota-controlled generated configurations,
+not independent biological observations, population error rates, strict-phase
+certification, combined SO/HGVS or structural-event conformance. Four DuckDB
+threads are used; these counts are not performance measurements.
+
+### Full-span replacement witness
+
+At source `6bcff3353d7c9a2609996aae9828f9da3fb5f238`, the fixed positive-strand
+`mnv_retained_middle` cis profile has these records:
+
+| Source | Genomic position | REF | ALT | GT |
+| --- | ---: | --- | --- | --- |
+| a | 40 | TGCTGCT | AGCTGCA | 1\|0 |
+| b | 43 | T | A | 1\|0 |
+| anchor | 165 | C | G | 1\|1 |
+
+On the changed lane, CDS bases 25–40 are `GCTGCAGCTGCAGCTG` in Haplosaurus.
+DuckHTS source `6bcff3353d7c9a2609996aae9828f9da3fb5f238` returns
+`GCTGCAGCAGCAGCTG`; source `47eaa7b1460a6b29049cdb50928956a055d6abb9` matches
+Haplosaurus's complete sequence and applied-record provenance. The pinned
+[`_mutate_sequences` implementation](https://github.com/Ensembl/ensembl-variation/blob/2fb834b987ede3824e200197a838ce11e91aeb4b/modules/Bio/EnsEMBL/Variation/TranscriptHaplotypeContainer.pm#L1160)
+uses the [Haplo parser's raw spans](https://github.com/Ensembl/ensembl-vep/blob/57ea5c52340acc1f156267f810ad162e26597082/modules/Bio/EnsEMBL/VEP/Haplo/Parser/VCF.pm#L198)
+and applies full REF spans in descending mapped-CDS order: record a restores the
+retained middle base after b changes it. Applied-record provenance retains b even
+when its sequence change is overwritten. Ordered raw replacements use bounded
+native storage and preserve net component spans; local SO and displaced-frame
+facts are unavailable for that path. Source-buffer ordering and duplicate selection
+are exercised by the quota-controlled campaigns in this report. Multi-transcript
+and cross-exon mapping require separate conformance. These observations are not
+evidence that VEP is wrong.
+
+### Paired source-context configurations
+
+```{r paired-source-contexts}
+contexts <- read.csv(file.path(root, "test/duckvep/conformance/data/haplotype_context_history.csv"),
+  colClasses = c(source_revision = "character"))
+stopifnot(all(contexts$extension_build_binding == "htslib_distclean_make_release"),
+  all(contexts$controls_rejected == 4L),
+  all(contexts$minimum_stratum_draws == contexts$context_per_stratum),
+  !anyDuplicated(contexts[c("source_revision", "seed", "context_per_stratum", "cohort", "shape")]))
+context_revision <- tail(unique(contexts$source_revision), 1L)
+context_current <- subset(contexts, source_revision == context_revision)
+context_quota <- max(context_current$context_per_stratum)
+context_current <- subset(context_current, context_per_stratum == context_quota)
+context_paired <- subset(context_current, cohort == "paired_context")
+context_summary <- aggregate(cbind(profiles, input_records, observed_carriers, failures,
+  oracle_context_changed, observed_context_changed) ~ seed, data = context_current, FUN = sum)
+knitr::kable(context_summary, row.names = FALSE)
+```
+
+Source `r context_revision` includes **`r format(sum(context_paired$profiles), big.mark = ",")`
+paired context profiles** from `r sum(context_paired$edit_templates)` seeded edit templates.
+The table also includes 656 fixed/general-random controls per seed; their inputs and
+complete oracle observations match the corresponding profiles in the rare-GT campaign.
+The ledger retains both the one-draw smoke runs and the `r context_quota`-draw runs.
+
+Every one of 2,376 geometry × GT-pattern × strand × placement × neutral-count cells
+receives `r context_quota` draws per seed. Each edit template is reused in 33 contexts:
+reference-only records occur before, between or after the tested edits, with counts
+including the neighbourhoods of the pinned interval tree's root changes. The
+generator verifies unchanged edit geometry, alleles and GTs across those contexts,
+the complete upstream source buffer, and the absence of neutral records from
+retained genotype objects.
+
+In **`r format(sum(context_paired$oracle_context_changed), big.mark = ",")` profiles**,
+the oracle's complete sequence/count/applied-record-set observation differs from
+the zero-neutral-record case; DuckHTS records
+`r format(sum(context_paired$observed_context_changed), big.mark = ",")` such changes.
+The full per-profile comparison, not equality of those two totals, determines agreement.
+These are paired observations, not independent biological samples or population
+error-rate estimates. The single-exon, one-sample reference and comparison limitations
+above also apply here; rare GT classes and neutral contexts are separate campaigns,
+not their complete cross-product.
+
+### Shared-transcript rare configurations
+
+```{r shared-transcript-models}
+model_history <- read.csv(file.path(root, "test/duckvep/conformance/data/haplotype_model_history.csv"),
+  colClasses = c(source_revision = "character"))
+stopifnot(all(model_history$extension_build_binding == "htslib_distclean_make_release"),
+  all(model_history$controls_rejected == ifelse(!is.na(model_history$model_sequence_failures), 26L,
+    ifelse(is.na(model_history$replay_lane_failures), 13L, 25L))),
+  all(model_history$minimum_stratum_draws == model_history$rare_per_stratum),
+  all(model_history$strata == 264L),
+  all(model_history$baseline_input_columns_equal & model_history$baseline_oracle_lines_equal),
+  !anyDuplicated(model_history[c("source_revision", "seed", "rare_per_stratum")]))
+model_revision <- tail(unique(model_history$source_revision), 1L)
+model_current <- subset(model_history, source_revision == model_revision)
+stopifnot(all(model_current$paired_profiles == with(model_current,
+  pass_to_fail + fail_to_pass + pass_to_pass + fail_to_fail)),
+  all(model_current$profiles == model_current$paired_profiles + model_current$geometry_profiles),
+  all(model_current$model_sequence_failures == 0L),
+  all(model_current$geometry_strata == 504L),
+  all(model_current$minimum_geometry_draws == model_current$geometry_per_stratum),
+  all(model_current$geometry_profiles == model_current$geometry_strata * model_current$geometry_per_stratum),
+  all(model_current$pass_to_fail == 0L),
+  all(model_current$failures == 0L), all(model_current$replay_lane_failures == 0L),
+  all(model_current$baseline_sidecar_fields_equal),
+  all(model_current$oracle_replay_lanes == 6L * model_current$profiles),
+  all(model_current$observed_replay_lanes == model_current$oracle_replay_lanes))
+for (i in seq_len(nrow(model_current))) {
+  current <- model_current[i, ]
+  previous <- subset(model_history, receipt_sha256 == current$baseline_receipt_sha256)
+  stopifnot(nrow(previous) == 1L, previous$source_revision == current$baseline_revision,
+    previous$seed == current$seed, previous$rare_per_stratum == current$rare_per_stratum,
+    previous$profiles == current$paired_profiles,
+    previous$failures == current$fail_to_pass + current$fail_to_fail,
+    current$failures == current$pass_to_fail + current$fail_to_fail + current$geometry_failures)
+}
+knitr::kable(model_current[c("seed", "profiles", "source_records", "observed_carriers",
+  "failures", "count_failures", "input_provenance_failures", "mapping_failures", "replay_lane_failures")], row.names = FALSE)
+```
+
+Source `r model_revision` has **`r format(sum(model_current$profiles), big.mark = ",")`
+transcript cases**, including `r format(sum(model_current$quota_profiles), big.mark = ",")`
+shared-transcript quota cases, `r format(sum(model_current$geometry_profiles), big.mark = ",")`
+variable-exon/UTR cases and the complete 3,072-case diagnostic baseline.
+Each fixed-model region has three diploid samples, one full-exon transcript and an
+overlapping two-exon transcript (exons 11–70 and 101–190). All models use the
+registered 180-base reference; variable-exon models distribute it across genomic
+exons with introns and optional UTRs.
+
+The fixed-model cohort supplies 32 draws per seed in every geometry × cohort-GT-pattern × strand ×
+neutral-count cell: four record geometries, three sample configurations, two strands
+and eleven neutral source counts through 36. This crosses shared-transcript mapping
+with source-context pressure; it is not a distribution of independent biological
+samples, arbitrary transcript models or an estimate of population error rates.
+
+Against source `r unique(model_current$baseline_revision)`,
+**`r format(sum(model_current$fail_to_pass), big.mark = ",")` failures resolve,
+`r sum(model_current$pass_to_fail)` passing cases regress, and
+`r format(sum(model_current$pass_to_pass), big.mark = ",")` cases remain passing**.
+Every matched input column and complete keyed oracle JSON record is unchanged. Constructor
+observations retain every field and duplicate, preserving record order within each
+sample; sample enumeration order is not a biological observation. All matched grouped,
+input-provenance, mapper and lane verdicts agree with the baseline. Earlier ledger entries
+retain the 4,608 failures resolved at source
+`4119d55c43fe0649ffe8325135bbdf26c1f37e94`, including all 384 failures in the
+3,072-case diagnostic baseline.
+
+Raw replay marks validated coding/noncoding source-span omissions `source_unmapped`
+and replays the other mapped sources with conditional evidence. The independent
+artifact audit checks omission status, evidence bit 8 and absence from physical
+edits across `r format(sum(model_current$omitted_leaves), big.mark = ",")` leaves /
+`r format(sum(model_current$omitted_carriers), big.mark = ",")` carrier memberships.
+Model/REF errors still withhold sequence, and strict decoded replay retains its
+projection-failure policy. This is pinned Haplosaurus sequence-mechanics conformance,
+not evidence that VEP is wrong or that a conditional sequence describes biology.
+
+The upstream mutator's original return values provide
+**`r format(sum(model_current$oracle_replay_lanes), big.mark = ",")` sample/file-lane
+observations** before equal-sequence grouping. Each lane compares complete CDS/protein
+and applied-source identity sets, including full source keys and transcript-oriented
+alleles. A homozygous alternate anchor puts every sample through this observed path;
+reference-only samples handled separately upstream are not synthesized.
+
+All 26 corruption controls pass per seed, including a changed reference-CDS control. Lane swaps, changed allele keys and a
+source removed from one shared-sequence lane are rejected even when grouped sequence,
+sample-count and source-set comparisons still agree. Native contributor checks retain
+IDs, regions, positions, REF/ALT interpretations and carrier keys. Upstream checks
+retain source buffers, genotype multiplicities and constructor-owned mappings,
+including exon-repeated and unselected duplicate sources.
+
+### Variable-exon and UTR configurations
+
+The geometry cohort adds **`r format(sum(model_current$geometry_profiles), big.mark = ",")`
+models**, with **`r sum(model_current$geometry_failures)` disagreements**.
+Each seed requires 32 draws in each of 504 cells: 2/3/5/7 coding exons × first
+coding split phase 0/1/2 × absent, intra-exon or separate-exon UTRs × both strands ×
+seven source geometries. Exon, intron and intra-exon UTR lengths vary. Edits cover
+coding substitutions, CDS start/end crossings, exon entry/exit crossings, a whole
+exon with flanks and exon-end anchored insertions. Three samples carry opposite
+lanes and a compacted missing call, plus a homozygous ALT anchor.
+
+The audit verifies `r format(sum(model_current$geometry_coding_exons), big.mark = ",")`
+coding exons, including `r format(sum(model_current$geometry_microexons), big.mark = ",")`
+observed one- or two-base microexons. Microexon frequency is an observation of this
+generator, not a forced per-cell quota or a population rate. Upstream's constructed
+reference CDS equals every loaded model; the mapper check clips exons to the
+model's CDS coordinates. Model, mapping, sequence, count, source and lane failures
+remain separate counters and all contribute to the verdict.
+
+Older rows have unmeasured geometry/model/lane metrics, not inferred passes.
+Applied-source sets do not certify physical-edit multiplicity. This geometry grammar
+uses complete standard-code CDSs and one transcript per new region; arbitrary
+biological models, shared-variable-exon transcript interactions, reference-only
+sample routes, full phase/PS behavior, whole-haplotype SO/HGVS and structural
+composition remain outside this campaign's tested scope.
+
+### Interacting exon/UTR diagnostics
+
+```{r interacting-model-diagnostics}
+interactions <- read.csv(file.path(root,
+  "test/duckvep/conformance/data/haplotype_interaction_history.csv"),
+  colClasses = c(source_revision = "character"))
+stopifnot(all(interactions$extension_build_binding == "diagnostic_unbound"),
+  !anyDuplicated(interactions$receipt_sha256),
+  all(interactions$interaction_strata == 6048L),
+  all(interactions$profiles == 2040L + 6048L * interactions$interaction_per_stratum),
+  all(interactions$oracle_replay_lanes == 6L * interactions$profiles),
+  all(interactions$observed_replay_lanes == interactions$oracle_replay_lanes))
+empty_set_pair <- subset(interactions, interaction_per_stratum == 1L)
+stopifnot(nrow(empty_set_pair) == 2L,
+  length(unique(empty_set_pair$input_sha256)) == 1L,
+  length(unique(empty_set_pair$actual_sha256)) == 1L,
+  length(unique(empty_set_pair$extension_sha256)) == 1L)
+interaction_campaigns <- subset(interactions, interaction_per_stratum == 4L)
+stopifnot(nrow(interaction_campaigns) == 3L,
+  setequal(interaction_campaigns$seed, c(173L, 20260906L, 20260909L)),
+  all(interaction_campaigns$controls_rejected == 42L))
+knitr::kable(interactions[c("seed", "interaction_per_stratum", "profiles", "records",
+  "carriers", "controls_rejected", "failures", "sequence_failures", "replay_lane_failures")],
+  row.names = FALSE)
+```
+
+These are **local diagnostic runs, not source-bound release certificates**. The
+[receipt ledger](../test/duckvep/conformance/data/haplotype_interaction_history.csv)
+retains the captured runtime revision, extension hash, generator and comparator
+hashes, complete-input/output hashes, comparison hashes and each failure count.
+The retained run directories contain the full observations; this ledger is not
+a portable corpus pack.
+
+The one-draw pair has identical source inputs and native outputs. Its 98 baseline
+failures arise from the R comparator deleting an empty JSON contributor-array
+field while retaining an empty native character vector. Both are empty applied-source
+sets. Explicit empty-set normalization resolves that representation mismatch;
+eight additional controls reject absent/null fields, invalid identities, lost or
+invented sources and dropped or duplicated rows. No source record, sequence or
+lane comparison is excluded, and the failing baseline remains in the table.
+
+The `r nrow(interaction_campaigns)` four-draw campaigns contain **`r format(sum(interaction_campaigns$profiles), big.mark = ",")`
+models / `r format(sum(interaction_campaigns$carriers), big.mark = ",")` sample/file lanes**,
+with **`r sum(interaction_campaigns$failures)` failed model comparisons**. Each seed
+adds four draws in every one of 6,048 cells: the 504 exon/UTR geometry cells crossed
+with four partner allele shapes and three partner start locations (overlapping
+the first source span, in the same coding exon or in another coding exon).
+All source spans intersect their selected transcript. The original 1,536 fixed-model
+and 504 geometry cases precede the interaction draws without changing their inputs
+or RNG stream. Complete CDS/protein, sample counts, input provenance, source mapping,
+reference-model sequence and per-lane applied-source identities have separate gates.
+
+This remains a standard-code, 180-base reference-CDS grammar with three diploid
+samples. Quota coverage is not an estimate of population error rates. Grouped
+upstream flags, arbitrary genetic codes, phase sets, structural composition and
+complete phased SO/HGVS require their own evidence; the publication failures below
+are not waived by these diagnostic comparisons.
+
+### Short and long CDS diagnostics
+
+```{r length-model-diagnostics}
+length_runs <- read.csv(file.path(root,
+  "test/duckvep/conformance/data/haplotype_length_history.csv"), na.strings = "")
+length_bound <- subset(length_runs, extension_build_binding == "htslib_distclean_make_release")
+stopifnot(all(length_runs$extension_build_binding %in%
+  c("diagnostic_unbound", "htslib_distclean_make_release")),
+  !anyDuplicated(length_runs$receipt_sha256),
+  all(length_bound$execution_status %in% c("native_query_error", "compared")))
+length_retry <- subset(length_bound, execution_status == "compared")
+length_bound <- subset(length_bound, execution_status == "native_query_error")
+length_runs <- subset(length_runs, extension_build_binding == "diagnostic_unbound")
+stopifnot(nrow(length_runs) == 3L, !anyDuplicated(length_runs$receipt_sha256),
+  all(length_runs$extension_build_binding == "diagnostic_unbound"),
+  identical(length_runs$run_kind, c("default_limit", "exact_retry", "capacity_control")),
+  identical(length_runs$execution_status, c("native_query_error", "compared", "native_query_error")),
+  length_runs$input_sha256[1L] == length_runs$input_sha256[2L],
+  length(unique(length_runs$extension_sha256)) == 1L,
+  all(is.na(length_runs$failures[c(1L, 3L)])),
+  all(is.na(length_runs$carriers[c(1L, 3L)])),
+  all(length_runs$max_alignment_cells[c(1L, 3L)] < length_runs$required_alignment_cells[c(1L, 3L)]),
+  length_runs$profiles[2L] == 6072L, length_runs$records[2L] == 22464L,
+  length_runs$length_strata[2L] == 4536L, length_runs$length_per_stratum[2L] == 1L,
+  length_runs$carriers[2L] == 36432L, length_runs$controls_rejected[2L] == 42L,
+  length_runs$oracle_replay_lanes[2L] == length_runs$carriers[2L],
+  length_runs$observed_replay_lanes[2L] == length_runs$carriers[2L])
+failure_columns <- c("failures", "sequence_failures", "count_failures",
+  "input_provenance_failures", "mapping_failures", "model_sequence_failures", "replay_lane_failures")
+stopifnot(all(length_runs[2L, failure_columns] == 0L))
+knitr::kable(length_runs[c("run_kind", "max_alignment_cells", "profiles", "records",
+  "intended_sample_file_lanes", "carriers", "failures", "controls_rejected")], row.names = FALSE)
+```
+
+These are **local diagnostics, not source-bound release certificates**. The
+[receipt ledger](../test/duckvep/conformance/data/haplotype_length_history.csv)
+names the source revisions, measured binary hash and retained inputs, observations
+and comparisons. The initial query error is a retrospective capture from its
+terminal log and retained files, not a completed runner receipt. Missing comparison
+counts in the two aborted runs mean **not computed**, not zero failures.
+
+The one-draw length cohort crosses CDS lengths 36/37/38, 2,047/2,048/2,049 and
+6,143/6,144/6,145 with all 504 exon/UTR geometry cells. The 4,536 models use the
+registered reference's ATG start, repeated internal codons and a raw TAA suffix;
+partial terminal codons remain in the comparison. The 1,536 fixed-model cases
+remain included. Source `r length_runs$source_revision[2L]` compares complete
+CDS/protein, sample counts, input provenance, source mapping, reference CDS and
+per-lane applied-source identities for all 6,072 models and 36,432 sample/file lanes.
+All seven failure counts are zero, and all 42 corruption controls pass.
+
+At the default 16,777,216-cell limit, transcript 4,561 requires 32,274,432 cells
+for exact CDS traceback and the query fails. The successful retry explicitly uses
+67,108,864 cells per sequence axis with byte-identical generated inputs. It does
+not drop records, omit differences or substitute approximate alignment. The
+separate one-cell control fails at a 26,969-cell requirement and records the
+executed SQL, native error and full input/oracle hashes without a comparison verdict.
+
+This generated standard-code cohort does not estimate a population error rate
+or certify arbitrary reference models, grouped upstream flags, phase sets,
+structural composition or complete phased SO/HGVS. The grouped-metadata publication
+failures below remain unresolved.
+
+```{r source-bound-length-limit}
+stopifnot(nrow(length_bound) == 1L,
+  length_bound$run_kind == "combined_default_limit",
+  length_bound$execution_status == "native_query_error",
+  length_bound$profiles == 29520L, length_bound$records == 194448L,
+  length_bound$intended_sample_file_lanes == 6L * length_bound$profiles,
+  length_bound$max_alignment_cells < length_bound$required_alignment_cells,
+  all(is.na(length_bound[c("carriers", failure_columns)])))
+knitr::kable(length_bound[c("source_revision", "max_alignment_cells", "required_alignment_cells",
+  "profiles", "records", "intended_sample_file_lanes", "execution_status")], row.names = FALSE)
+```
+
+The clean source-bound campaign above combines 32 draws in each fixed-model rare
+stratum with one draw in every geometry, interaction and CDS-length stratum.
+It stops at transcript 28,010, a 6,143-base CDS, because exact traceback needs
+37,742,592 cells against the declared 16,777,216-cell limit. All 29,520 input
+profiles and upstream observations remain in its receipt. Native output and
+comparison counts were not produced. This is a failed execution, not zero
+disagreements. The chained seed 20260906 did not execute; neither seed is certified
+by this campaign. No input, alignment algorithm or limit was changed to pass it.
+
+### Complete model campaigns with an explicit alignment budget
+
+The [model-history publisher](../test/duckvep/conformance/haplotype_model_differential.R)
+requires a CI-authenticated execution receipt and reopens retained artifacts. It regenerates the
+declared seeded inputs, reconstructs comparisons from keyed upstream/native
+observations, checks every summary and control, and derives alignment bounds from
+inputs. Existing rows must match the reconstruction exactly. Publication verifies
+the recorded verdict; it does not convert disagreements into passes. The
+[publication regression test](../test/scripts/test_haplotype_model_history.R)
+uses retained pinned observations and rejects rehashed comparison forgeries and
+coherent carrier-lane swaps while accepting honestly recorded failures.
+The historical campaigns below were locally executed and their complete observations
+were reconstructed at `7d7d0bc62806f9104db9d59911ebf62f9a3ae4e1`. They have no
+CI-issued signatures and do not satisfy the authenticated-publication gate. Their
+recorded counts and verdicts remain unchanged.
+
+```{r source-bound-combined-models}
+stopifnot(nrow(length_retry) == 2L,
+  all(length_retry$run_kind == "combined_exact_budget"),
+  setequal(length_retry$seed, c(173L, 20260906L)),
+  length(unique(length_retry$source_revision)) == 1L,
+  all(length_retry$rare_per_stratum == 32L),
+  all(length_retry$required_strata == 264L),
+  all(length_retry$minimum_stratum_draws == 32L),
+  all(length_retry$geometry_per_stratum == 1L & length_retry$geometry_strata == 504L),
+  all(length_retry$interaction_per_stratum == 1L & length_retry$interaction_strata == 6048L),
+  all(length_retry$length_per_stratum == 1L & length_retry$length_strata == 4536L),
+  all(length_retry$profiles == 1536L + 2L * 264L * 32L + 504L + 6048L + 4536L),
+  all(length_retry$records == 194448L),
+  all(length_retry$carriers == 6L * length_retry$profiles),
+  all(length_retry$oracle_replay_lanes == length_retry$carriers),
+  all(length_retry$observed_replay_lanes == length_retry$carriers),
+  all(length_retry$intended_sample_file_lanes == length_retry$carriers),
+  all(length_retry$controls_rejected == 42L),
+  all(length_retry$metadata_controls_rejected == 18L),
+  all(length_retry$threads == 4L),
+  all(length_retry$max_alignment_cells == 83886080L),
+  all(length_retry$full_matrix_upper_bound <= length_retry$max_alignment_cells),
+  all(length_retry[c(failure_columns, "lane_flag_failures", "group_metadata_failures")] == 0L),
+  length_retry$input_sha256[length_retry$seed == 173L] == length_bound$input_sha256,
+  all(length_retry$extension_sha256 == length_bound$extension_sha256))
+knitr::kable(length_retry[c("seed", "profiles", "records", "leaves", "carriers",
+  "failures", "lane_flag_failures", "group_metadata_failures")], row.names = FALSE)
+```
+
+Source `r unique(length_retry$source_revision)` completes both full campaigns with
+all 59,040 models, 388,896 source records and 354,240 sample/file lanes. Every
+declared stratum meets its quota. Sequence, count, reference-model, source,
+mapping and lane comparisons have zero disagreements. Each seed also passes exact
+nominal-length and raw lane-flag comparisons, the observed upstream group-owner
+checks, 42 corruption controls and 18 metadata controls. The ledger retains all
+input, output, comparator and receipt identities. These results cover the generated
+standard-code grammar, not a population error rate or complete phased annotation.
+
+The per-call budget is 83,886,080 exact alignment cells per sequence axis; the
+default remains 16,777,216 and the query workspace limit remains 268,435,456 bytes.
+For reference length `n`, a conservative alternate-length bound is `n` plus the sum
+of each source record's longest ALT. The complete matrix `(n + 1) * (bound + 1)`
+requires at most 75,479,026 cells for seed 173 and 75,454,442 for seed 20260906.
+This bound uses retained inputs, not native results. Seed 173's inputs are
+byte-identical to the failed campaign above. Its failed receipt remains a failed
+execution; neither missing output nor a capacity error is counted as agreement.
+
+The separate 6,990 decoded/raw phase disagreements and four grouped-metadata
+publication disagreements remain retained. Per-run group-owner validation does not
+make order-dependent group metadata reproducible across upstream executions.
+Whole-haplotype consequences, compound HGVS and structural composition require
+their own implementation and conformance evidence.
+
+### Repeated-model publication audit
+
+```{r repeated-model-audit}
+reaudit <- read.csv(file.path(root, "test/duckvep/conformance/data/haplotype_model_reaudit.csv"),
+  colClasses = c(source_revision = "character", published_revision = "character"))
+oracle_pairs <- read.csv(file.path(root,
+  "test/duckvep/conformance/data/haplotype_oracle_disagreements.csv"))
+stopifnot(all(reaudit$published_inputs_equal),
+  !anyDuplicated(oracle_pairs[c("seed", "transcript")]),
+  all(oracle_pairs$old_record != oracle_pairs$new_record),
+  all(reaudit$published_oracle_disagreements == vapply(reaudit$seed,
+    function(seed) sum(oracle_pairs$seed == seed), 1L)),
+  all(reaudit$oracle_replay_lanes == reaudit$observed_replay_lanes),
+  all(reaudit$publication_pass == (reaudit$published_oracle_disagreements == 0L & reaudit$failures == 0L)))
+knitr::kable(reaudit[c("seed", "profiles", "observed_carriers", "failures",
+  "published_oracle_disagreements", "publication_pass")], row.names = FALSE)
+```
+
+Source `r unique(reaudit$source_revision)` repeats all
+**`r format(sum(reaudit$profiles), big.mark = ",")` models** above with identical inputs.
+The sequence/count, model, mapping, source-provenance and complete-lane gates pass.
+The full keyed oracle-record comparison with `r unique(reaudit$published_revision)`
+**fails for `r sum(reaudit$published_oracle_disagreements)` records**. They remain in
+the [complete disagreement pairs](../test/duckvep/conformance/data/haplotype_oracle_disagreements.csv);
+the failed publication audit is not promoted into the passing model-history table.
+
+The four changed records are TG13940, TG14331, TG14521 and TG14573 from seed 173.
+Only their grouped CDS flags differ: empty versus `frameshift, indel`.
+Complete sequences, counts and contributing-source identities agree. This classifies
+the differences; it does not remove those fields from the audit.
+
+The [fixed reproducer](../test/duckvep/conformance/haplotype_grouped_flags.R)
+uses TG13940's seven-exon model and both original same-position records, including
+the mixed missing call. It invokes the original VEP-116 Runner JSON path in 64
+fresh processes: 32 Perl hash seeds, each repeated twice, with
+`PERL_PERTURB_KEYS=0`. A second 64-process lane observation must preserve every
+byte of the original JSON within each seed and repeat. The per-sample/file-lane
+sequences and raw flags agree across all seeds.
+
+```{r grouped-flag-probe}
+flag_probe <- read.csv(file.path(root, "test/duckvep/conformance/data/haplotype_grouped_flags.csv"))
+flag_receipt <- read.csv(file.path(root,
+  "test/duckvep/conformance/data/haplotype_grouped_flags_history.csv"))
+stopifnot(nrow(flag_receipt) == 1L, flag_receipt$original_runs == 64L,
+  flag_receipt$observed_runs == 64L, flag_receipt$full_output_unchanged,
+  flag_receipt$per_lane_flags_unchanged, flag_receipt$first_lane_flags_match)
+stopifnot(nrow(flag_probe) == 128L,
+  !anyDuplicated(flag_probe[c("hash_seed", "repeat_index", "cds")]),
+  all(flag_probe$count == 3L), setequal(flag_probe$hash_seed, 0:31),
+  setequal(flag_probe$repeat_index, 1:2))
+flag_counts <- aggregate(cbind(observations = rep(1L, nrow(flag_probe))) ~ cds_length + has_indel,
+  transform(flag_probe, cds_length = nchar(cds)), sum)
+knitr::kable(flag_counts, row.names = FALSE)
+```
+
+Run the reproducer with `Rscript test/duckvep/conformance/haplotype_grouped_flags.R`.
+It stages the registered reference without network access; the pinned VEP
+environment and tools must already be installed. Complete JSON, lane observations,
+environment and input hashes remain in its receipted artifact directory.
+Receipt SHA-256: `r flag_receipt$receipt_sha256`.
+
+For the 180-base CDS group, `has_indel` is zero in 11 seeds and one in 21;
+both repeats agree. All groups retain the same three sample memberships.
+Observed group metadata matches the first contributing mutation lane.
+The pinned
+[container implementation](https://github.com/Ensembl/ensembl-variation/blob/2fb834b987ede3824e200197a838ce11e91aeb4b/modules/Bio/EnsEMBL/Variation/TranscriptHaplotypeContainer.pm#L770)
+iterates samples in hash order, initializes each sequence-keyed object from its
+first lane, and adds later samples without combining their flags.
+
+This establishes order-dependent grouped metadata for the pinned implementation
+and fixture. It does not establish a biological error, validate whole-haplotype
+consequences or supply a consensus flag rule. Native flags describe occupied
+edit paths; equal final sequences need not have equal edit histories. Full
+grouped-metadata conformance remains unresolved.
+
+### Reference-only sample routes
+
+```{r reference-protein-routes}
+reference_history <- read.csv(file.path(root,
+  "test/duckvep/conformance/data/haplotype_reference_history.csv"),
+  colClasses = c(source_revision = "character"))
+stopifnot(all(reference_history$extension_build_binding == "htslib_distclean_make_release"),
+  all(reference_history$strata == 360L),
+  all(reference_history$minimum_stratum_draws == reference_history$rare_per_stratum),
+  all(reference_history$profiles == reference_history$strata * reference_history$rare_per_stratum),
+  all(reference_history$source_records == 2L * reference_history$profiles),
+  all(reference_history$source_calls == 3L * reference_history$source_records),
+  all(reference_history$oracle_carriers == 6L * reference_history$profiles),
+  all(reference_history$native_carriers == 4L * reference_history$profiles),
+  all(reference_history$implicit_reference_carriers == 2L * reference_history$profiles),
+  all(reference_history$controls_rejected == 29L),
+  !anyDuplicated(reference_history[c("source_revision", "seed", "rare_per_stratum")]))
+reference_revision <- tail(unique(reference_history$source_revision), 1L)
+reference_current <- subset(reference_history, source_revision == reference_revision)
+verdicts <- c("failures", "axes_failures", "lane_failures", "model_failures", "source_failures",
+  "count_failures", "carrier_failures", "implicit_reference_failures", "observer_failures",
+  "lane_flag_failures", "group_metadata_failures")
+stopifnot(all(as.matrix(reference_current[verdicts]) == 0L),
+  all(reference_current$metadata_controls_rejected == 25L),
+  all(reference_current$output_controls_rejected == 16L),
+  all(reference_current$minimum_short_intron == 1L),
+  all(reference_current$maximum_short_intron == 12L),
+  all(reference_current$minimum_long_intron == 13L),
+  all(reference_current$maximum_long_intron == 120L))
+knitr::kable(reference_current[c("seed", "profiles", "source_records", "oracle_carriers",
+  "native_carriers", "implicit_reference_carriers", "oracle_mutation_lanes", "failures")], row.names = FALSE)
+```
+
+Source `r reference_revision` passes **`r format(sum(reference_current$profiles), big.mark = ",")`
+generated models**. Each seed supplies 32 draws in all 360 cells: three start codons
+(ATG/CTG/TTG), internal-stop presence, terminal-stop presence, both strands, three
+all-missing GT spellings and five genotype-retention routes. Internal-stop codons,
+stop positions, source positions and intron lengths vary. The routes cover
+missing-only samples, retained reference lanes, later retained calls, and calls in
+1–12-base or 13–120-base introns. Models have one or two exons, a complete 180-base
+standard-code CDS, and three samples.
+
+The original upstream container JSON is the oracle. CDS and protein groups are
+compared separately by sample and count: one CDS can belong to both a curated
+reference protein and a mutation protein. The observer must preserve every byte
+of each complete keyed canonical JSON record, including array order. It records
+the original mutator's **`r format(sum(reference_current$oracle_mutation_lanes), big.mark = ",")`
+sample/file lanes**, with complete sequences and applied-source identity sets.
+The independent audit also verifies exon-based genotype admission.
+
+Each model has six upstream carrier memberships. DuckVEP emits four memberships
+for the tested samples and keeps the two pure-reference memberships implicit.
+All **`r format(sum(reference_current$implicit_reference_carriers), big.mark = ",")`**
+implicit memberships are checked upstream and must be absent from native output;
+no oracle sequence is inserted into the native comparison. Native contributors
+retain exact source IDs, regions, positions, REF/ALT bytes, allele ordinals,
+evidence and projection status. All 29 corruption controls pass per seed.
+Each run also passes 25 metadata and 16 output controls. Metadata comparisons
+retain the exact signed nominal edit-length sum for each mutation lane and the
+observed upstream owner of each sequence group. They do not infer nominal length
+from the final CDS length or from frame bits. Older history rows leave these
+unmeasured metadata fields empty rather than implying a pass.
+
+A sample without retained exon-overlapping genotypes uses the curated reference
+peptide, preserving internal stops and legitimate-start methionine. Retained
+exonic reference lanes use mutation translation even with no coding edit.
+Intronic context retains provenance without selecting mutation translation or
+changing literal CDS replay, including short introns with distinct SO semantics.
+Missing evidence remains conditional; model/REF failures still withhold sequence.
+These are compatibility rules, not a claim that VEP is biologically wrong.
+
+This stratified grammar does not estimate population error rates or certify
+arbitrary genetic codes, biological models, ploidy/PS inference, splicing,
+whole-haplotype SO/HGVS or structural composition. Earlier failing diagnostics and
+the separate decoded/raw phase disagreements remain retained.
 
 ## Individual Sequence Ontology terms
 

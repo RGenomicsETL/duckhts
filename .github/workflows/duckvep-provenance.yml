@@ -1,0 +1,173 @@
+name: DuckVEP execution provenance
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - '.github/workflows/duckvep-provenance.yml'
+      - 'scripts/duckvep_evidence.R'
+      - 'test/duckvep/conformance/haplotype_model*.R'
+      - 'test/duckvep/conformance/haplotype_observations.R'
+      - 'test/scripts/test_duckvep_ci_provenance.R'
+      - 'test/scripts/test_haplotype_model_history.R'
+  workflow_dispatch:
+    inputs:
+      campaign:
+        description: 'Length smoke or both complete model seeds'
+        type: choice
+        options: [length, full]
+        default: length
+
+permissions:
+  contents: read
+
+jobs:
+  models:
+    if: github.repository == 'RGenomicsETL/duckhts' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: ${{ fromJSON(inputs.campaign == 'full' && '[173,20260906]' || '[173]') }}
+    env:
+      CAMPAIGN: ${{ inputs.campaign || 'length' }}
+      MODEL_SEED: ${{ matrix.seed }}
+      MODEL_OUTPUT: test/duckvep/conformance/results/ci-model-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.seed }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.11'
+      - uses: r-lib/actions/setup-r@465b7d8e732ca3921382b1674c59bada9cbf3399 # v2
+        with:
+          r-version: '4.5.3'
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-r-dependencies@465b7d8e732ca3921382b1674c59bada9cbf3399 # v2
+        with:
+          working-directory: r/duckhtsbench
+          dependencies: '"hard"'
+          extra-packages: |
+            any::DBI@1.3.0
+            any::duckdb@1.5.3
+            any::jsonlite@2.0.0
+            any::optparse@1.8.2
+          install-pandoc: false
+      - name: Stage native and pinned oracle dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libbz2-dev libcurl4-openssl-dev libdeflate-dev liblzma-dev libssl-dev zlib1g-dev samtools bcftools tabix
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/micromamba" https://github.com/mamba-org/micromamba-releases/releases/download/2.3.3-0/micromamba-linux-64
+          echo "9496f94a8b78c536573c93d946ec9bba74bd9ff79ee55aaa4b546e30db8f511b  $RUNNER_TEMP/micromamba" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/micromamba"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/micromamba" create -y -r "$RUNNER_TEMP/mamba" -p "$RUNNER_TEMP/vep" --file test/duckvep/upstream/receipts/vep116_2026-07-22.conda-explicit.txt
+          R CMD INSTALL r/duckhtsbench
+          Rscript - <<'RS'
+          source('scripts/duckvep_evidence.R')
+          source('test/duckvep/conformance/haplotype_model_differential.R')
+          for (name in names(model_oracle_revisions)) {
+            directory <- file.path('.sync', paste0('ensembl-', name))
+            duckvep_evidence_command('git', c('init', directory), 'initialize oracle mirror')
+            duckvep_evidence_command('git', c('-C', directory, 'fetch', '--depth=1',
+              paste0('https://github.com/Ensembl/ensembl-', name), model_oracle_revisions[[name]]),
+              'fetch pinned oracle')
+            duckvep_evidence_command('git', c('-C', directory, 'checkout', '--detach', 'FETCH_HEAD'),
+              'checkout pinned oracle')
+          }
+          RS
+          make configure
+      - name: Clean source-bound build
+        id: build
+        shell: Rscript {0}
+        run: |
+          source('scripts/duckvep_evidence.R')
+          root <- normalizePath('.')
+          revision <- duckvep_evidence_revision(root)
+          stopifnot(identical(revision, Sys.getenv('GITHUB_SHA')))
+          extension <- duckvep_evidence_build_extension(root,
+            file.path(root, 'build/release/duckhts.duckdb_extension'), revision)
+          duckvep_evidence_write_extension_receipt(
+            file.path(Sys.getenv('RUNNER_TEMP'), 'extension.tsv'), revision, extension)
+      - name: Execute pinned model campaign
+        id: execute
+        shell: bash
+        run: |
+          quotas=(--rare-per-stratum 0 --length-per-stratum 1)
+          if [ "$CAMPAIGN" = full ]; then
+            quotas=(--rare-per-stratum 32 --geometry-per-stratum 1 --interaction-per-stratum 1 --length-per-stratum 1)
+          fi
+          Rscript test/duckvep/conformance/haplotype_model_differential.R \
+            --seed "$MODEL_SEED" "${quotas[@]}" --max-alignment-cells 83886080 \
+            --output-dir "$MODEL_OUTPUT" --vep-prefix "$RUNNER_TEMP/vep" \
+            --extension-receipt "$RUNNER_TEMP/extension.tsv"
+      - name: Check signing inputs
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && hashFiles(format('{0}/receipt.json', env.MODEL_OUTPUT)) != '' }}
+        id: signing
+        shell: Rscript {0}
+        run: |
+          source('scripts/duckvep_evidence.R')
+          receipt <- jsonlite::fromJSON(file.path(Sys.getenv('MODEL_OUTPUT'), 'receipt.json'))
+          duckvep_evidence_assert_checkout(normalizePath('.'), Sys.getenv('GITHUB_SHA'))
+          stopifnot(identical(receipt$source_revision, Sys.getenv('GITHUB_SHA')),
+            identical(receipt$extension_build_binding, 'htslib_distclean_make_release'),
+            !length(receipt$tracked_changes))
+          build <- duckvep_evidence_read_extension_receipt(file.path(Sys.getenv('RUNNER_TEMP'), 'extension.tsv'),
+            normalizePath('.'), 'build/release/duckhts.duckdb_extension', receipt$source_revision)
+          binary <- file.path(Sys.getenv('MODEL_OUTPUT'), 'duckhts.duckdb_extension')
+          stopifnot(identical(receipt$sha256[[binary]], build$sha256),
+            identical(duckvep_evidence_sha256(binary), build$sha256))
+      - name: Attest execution receipt and binary
+        if: ${{ !cancelled() && steps.signing.outcome == 'success' }}
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: |
+            ${{ env.MODEL_OUTPUT }}/receipt.json
+            ${{ env.MODEL_OUTPUT }}/duckhts.duckdb_extension
+      - name: Verify signature and reject altered receipts
+        id: verify
+        if: ${{ !cancelled() && steps.attest.outcome == 'success' }}
+        env:
+          ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: Rscript test/scripts/test_duckvep_ci_provenance.R "$MODEL_OUTPUT/receipt.json" "$ATTESTATION_BUNDLE"
+      - name: Reconstruct and publish into an isolated validation ledger
+        if: ${{ !cancelled() && steps.execute.outcome == 'success' && steps.verify.outcome == 'success' }}
+        env:
+          ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        shell: Rscript {0}
+        run: |
+          source('test/duckvep/conformance/haplotype_model_differential.R')
+          history <- file.path(Sys.getenv('RUNNER_TEMP'), 'model-history.csv')
+          template <- read.csv('test/duckvep/conformance/data/haplotype_length_history.csv',
+            colClasses = 'character', na.strings = '')
+          write.csv(template[FALSE, ], history, row.names = FALSE, na = '')
+          publish_model_history(Sys.getenv('MODEL_OUTPUT'), history, Sys.getenv('ATTESTATION_BUNDLE'))
+      - name: Package observations and detached signature
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          entries=("$MODEL_OUTPUT")
+          if [ -n "$ATTESTATION_BUNDLE" ]; then
+            cp "$ATTESTATION_BUNDLE" "$RUNNER_TEMP/attestation.jsonl"
+            entries+=(-C "$RUNNER_TEMP" attestation.jsonl)
+          fi
+          tar -czf "$RUNNER_TEMP/duckvep-model.tar.gz" "${entries[@]}"
+      - name: Retain observations, binary and detached signature
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: duckvep-model-${{ matrix.seed }}-${{ github.sha }}
+          path: ${{ runner.temp }}/duckvep-model.tar.gz
+          if-no-files-found: error
+          retention-days: 90

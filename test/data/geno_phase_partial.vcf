@@ -1,0 +1,18 @@
+##fileformat=VCFv4.4
+##source=DuckHTS_synthetic_VCF44_per_allele_phase
+##contig=<ID=chrG,length=1000>
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=PS,Number=1,Type=Integer,Description="Phase set">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1
+chrG	104	implicit	C	A,G	.	PASS	.	GT:PS	0|1/2:10
+chrG	104	slash	C	A,G	.	PASS	.	GT:PS	/0|1/2:10
+chrG	104	pipe	C	A,G	.	PASS	.	GT:PS	|0|1/2:10
+chrG	104	alt_implicit	C	A,G	.	PASS	.	GT:PS	1|0/2:10
+chrG	104	alt_slash	C	A,G	.	PASS	.	GT:PS	/1|0/2:10
+chrG	104	alt_pipe	C	A,G	.	PASS	.	GT:PS	|1|0/2:10
+chrG	104	missing_implicit	C	A,G	.	PASS	.	GT:PS	.|1/2:10
+chrG	104	missing_slash	C	A,G	.	PASS	.	GT:PS	/.|1/2:10
+chrG	104	missing_pipe	C	A,G	.	PASS	.	GT:PS	|.|1/2:10
+chrG	104	leading_only	C	A,G	.	PASS	.	GT:PS	|0/1/2:10
+chrG	104	last_slash	C	A,G	.	PASS	.	GT:PS	/0/1|2:10
+chrG	104	last_implicit	C	A,G	.	PASS	.	GT:PS	0/1|2:10

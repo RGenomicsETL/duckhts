@@ -23,8 +23,11 @@ Rscript -e 'rmarkdown::render("benchmarks/benchmark_bcf_record_cache.Rmd", knit_
 
 The earlier `benchmark_bcf_record_cache.md` records the experiment at its named
 source revisions. Preserve historical reports when measuring subsequent changes:
-render this Rmd with a change-specific output file (for allocation-error handling,
-`output_file = "benchmark_reader_allocations.md"`). The paired pre-change binary
+render this Rmd with a change-specific output file. Its snapshots are
+`benchmark_reader_allocations.md`, `benchmark_bcf_reader_retirement.md`,
+`benchmark_bcf_shared_scan.md` and `benchmark_bcf_genotype_integration.md`.
+Use `BENCHMARK_RMD=benchmark_bcf_record_cache.Rmd BENCHMARK_REPORT=<new-name>.md
+make bench-snapshot` with the baseline variables above. The paired pre-change binary
 provides the identical-workload baseline. This workload exercises BCF construction
 and materialization, not BAM SAMPLE_ID caching or FASTA/FASTQ throughput. Set
 `BCF_CACHE_READERS=read_bcf,read_bcf_v2` only to reproduce the historical comparison

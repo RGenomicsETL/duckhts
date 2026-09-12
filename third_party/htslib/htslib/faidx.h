@@ -251,6 +251,21 @@ by end users by calling `free()` on it.
 HTSLIB_EXPORT
 char *faidx_fetch_seq64(const faidx_t *fai, const char *c_name, hts_pos_t p_beg_i, hts_pos_t p_end_i, hts_pos_t *len);
 
+/** Fetch into caller-owned storage with the coordinate clipping and case of
+    faidx_fetch_seq64(). Return 0 on success, -1 on error. len and required are
+    mandatory. required includes the sequence, one line terminator of scratch,
+    and the final NUL. On ENOSPC, len is the clipped sequence length; no bytes
+    are written and the file position is unchanged. NULL buffer with capacity
+    zero queries the requirement. Other errors set len to -1 (-2 for a missing
+    sequence). On read failure the buffer may contain partial data; len is -1.
+    No result buffer is allocated. BGZF/transport may allocate internally.
+*/
+HTSLIB_EXPORT
+int faidx_fetch_seq64_into(const faidx_t *fai, const char *c_name,
+                           hts_pos_t p_beg_i, hts_pos_t p_end_i,
+                           char *buffer, size_t capacity, hts_pos_t *len,
+                           size_t *required);
+
 /// Fetch the quality string in a region for FASTQ files
 /** @param  fai  Pointer to the faidx_t struct
     @param  c_name Region name

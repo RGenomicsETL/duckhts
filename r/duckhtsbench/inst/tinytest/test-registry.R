@@ -22,6 +22,8 @@ expect_match(duckhts_bench_artifact_path("revel_v13_grch37"), "revel_grch37\\.pa
 expect_equal(nrow(duckhts_bench_stage_plan("variantkey-providers")), sum(registry$workload == "variantkey-providers"))
 expect_match(registry$consumer[registry$id == "variantkey_giab_hg002_v421"],
   "benchmark_bcf_record_cache.Rmd", fixed = TRUE)
+expect_match(registry$consumer[registry$id == "variantkey_giab_hg002_v421"],
+  "benchmark_genotype_format.Rmd", fixed = TRUE)
 corpus_rows <- duckhts_bench_stage_plan("duckvep-conformance-corpora")
 expect_equal(nrow(corpus_rows), 13L)
 expect_equal(sum(corpus_rows$role == "raw_vcf_source_receipt"), 3L)

@@ -26,7 +26,8 @@ knitr::knit_engines$set(sql = knitr::knit_engines$get("duckdb"))
 # can be loaded. duckknit_start_session() only accepts a db path, not extra
 # CLI flags, so we launch the process directly and register it in duckknit's
 # internal session table.
-options(duckknit.duckdb = "/usr/local/bin/duckdb152")
+duckdb_cli <- Sys.getenv("DUCKDB_CLI", unset = "")
+options(duckknit.duckdb = if (nzchar(duckdb_cli)) duckdb_cli else NULL)
 if (!requireNamespace("Rduckhts", quietly = TRUE)) {
   stop("Install the bootstrapped Rduckhts package before rendering README.md")
 }
@@ -88,7 +89,9 @@ cat(paste(readLines("r/Rduckhts/inst/function_catalog/functions.md"), collapse =
 
 ## Examples
 
-The examples below run directly against bundled local test files through the DuckDB CLI and load the built extension from `build/release/duckhts.duckdb_extension`.
+Executed examples use bundled local test files through the DuckDB CLI and load
+the extension bundled in the installed `Rduckhts` package. Remote examples are
+unevaluated usage snippets.
 
 ### Core readers
 
@@ -133,7 +136,7 @@ not the number of workers.
 This query reads a real 100 kb slice of the UCSC GRCh38 phyloP 100-way track
 rather than converting it to an intermediate text file:
 
-```{sql eval=TRUE, collapse=FALSE, comment=""}
+```{sql eval=FALSE, collapse=FALSE, comment=""}
 SELECT count(*) AS stored_intervals,
        min(VALUE)::DOUBLE AS minimum,
        max(VALUE)::DOUBLE AS maximum
@@ -1844,7 +1847,7 @@ setup_hts_env()
 
 Example (works in static-handler mode and plugin mode):
 
-```{sql, eval=TRUE, collapse=FALSE, comment=""}
+```{sql, eval=FALSE, collapse=FALSE, comment=""}
 SELECT CHROM, COUNT(*) AS n
 FROM read_bcf('s3://1000genomes-dragen-v3.7.6/data/cohorts/gvcf-genotyper-dragen-3.7.6/hg19/3202-samples-cohort/3202_samples_cohort_gg_chr22.vcf.gz',
               region := 'chr22:16050000-16050500')
@@ -1945,6 +1948,7 @@ https://www.htslib.org/doc/htslib-s3-plugin.html
 ## Development
 
 This README is rendered with [`duckknit`](https://github.com/rundel/duckknit) to execute SQL snippets in a persistent DuckDB session.
+It discovers `duckdb` on `PATH`; `DUCKDB_CLI` selects an explicit executable path.
 
 ### Clone and environment setup
 

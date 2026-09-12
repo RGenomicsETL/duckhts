@@ -9,7 +9,6 @@
 #include "duckdb_extension.h"
 DUCKDB_EXTENSION_EXTERN
 
-#include "include/vcf_types.h"
 #include "include/vep_parser.h"
 
 #include <string.h>
@@ -32,6 +31,8 @@ DUCKDB_EXTENSION_EXTERN
 #include "include/duckdb_list.h"
 #include "include/region_list.h"
 #include "include/bcf_scan.h"
+#include "include/bcf_field_vector.h"
+#include "include/bcf_format.h"
 
 // =============================================================================
 // Constants
@@ -60,11 +61,7 @@ typedef struct {
     char* name;              // Field name (owned)
     int header_id;           // Header ID for bcf_get_* functions
     int header_type;         // BCF_HT_* from header (used for reading data)
-    int schema_type;         // BCF_HT_* for schema (may be corrected)
-    int vl_type;             // BCF_VL_* (corrected per VCF spec)
-    int fixed_count;         // Exact fixed cardinality for Number=N fields, else <= 1
     int is_list;             // Whether this is a list type
-    int duckdb_col_idx;      // Column index in DuckDB result
 } field_meta_t;
 
 typedef enum {
@@ -199,16 +196,7 @@ typedef struct {
     // the current record, including when tidy samples span output chunks.
     int cache_n_format_fields;
     int cache_n_info_fields;
-    int *fmt_loaded;
-    int *fmt_ret;
-    int *fmt_n_values;
-    int32_t **fmt_i32;
-    float **fmt_f32;
-    char ***fmt_str;
-    int gt_loaded;
-    int gt_ret;
-    int gt_n_values;
-    int32_t *gt_arr;
+    duckhts_bcf_format_t *formats;
     int *info_loaded;
     int *info_ret;
     int *info_n_values;
@@ -219,17 +207,6 @@ typedef struct {
     vep_record_t *vep_rec;
     int vep_loaded;
 } bcf_init_data_t;
-
-// =============================================================================
-// Warning Callback for DuckDB
-// =============================================================================
-
-static void duckdb_vcf_warning(const char* msg, void* ctx) {
-    (void)ctx;
-    // In DuckDB extensions, we can't easily emit warnings
-    // For now, print to stderr
-    fprintf(stderr, "[bcf_reader] %s\n", msg);
-}
 
 /* The work list must use the iterator's dictionary. VCF headers need not list
  * every Tabix contig, especially when index_path is not colocated with the file.
@@ -261,8 +238,6 @@ cleanup:
 // =============================================================================
 // Memory Management
 // =============================================================================
-
-static void free_bcf_format_string_array(char **values);
 
 static void destroy_bind_data(void* data) {
     bcf_bind_data_t* bind = (bcf_bind_data_t*)data;
@@ -316,18 +291,11 @@ static void destroy_global_init_data(void* data) {
 
 static void bcf_decode_cache_free(bcf_init_data_t *init) {
     if (!init) return;
-    for (int i = 0; i < init->cache_n_format_fields; i++) {
-        if (init->fmt_i32 && init->fmt_i32[i]) free(init->fmt_i32[i]);
-        if (init->fmt_f32 && init->fmt_f32[i]) free(init->fmt_f32[i]);
-        if (init->fmt_str && init->fmt_str[i]) free_bcf_format_string_array(init->fmt_str[i]);
+    if (init->formats) {
+        for (int i = 0; i < init->cache_n_format_fields; i++)
+            duckhts_bcf_format_destroy(&init->formats[i]);
+        duckdb_free(init->formats);
     }
-    if (init->gt_arr) free(init->gt_arr);
-    if (init->fmt_loaded) duckdb_free(init->fmt_loaded);
-    if (init->fmt_ret) duckdb_free(init->fmt_ret);
-    if (init->fmt_n_values) duckdb_free(init->fmt_n_values);
-    if (init->fmt_i32) duckdb_free(init->fmt_i32);
-    if (init->fmt_f32) duckdb_free(init->fmt_f32);
-    if (init->fmt_str) duckdb_free(init->fmt_str);
 
     for (int i = 0; i < init->cache_n_info_fields; i++) {
         if (init->info_i32 && init->info_i32[i]) free(init->info_i32[i]);
@@ -343,16 +311,7 @@ static void bcf_decode_cache_free(bcf_init_data_t *init) {
     if (init->info_str) duckdb_free(init->info_str);
     if (init->vep_rec) vep_record_destroy(init->vep_rec);
 
-    init->fmt_loaded = NULL;
-    init->fmt_ret = NULL;
-    init->fmt_n_values = NULL;
-    init->fmt_i32 = NULL;
-    init->fmt_f32 = NULL;
-    init->fmt_str = NULL;
-    init->gt_arr = NULL;
-    init->gt_loaded = 0;
-    init->gt_ret = 0;
-    init->gt_n_values = 0;
+    init->formats = NULL;
     init->info_loaded = NULL;
     init->info_ret = NULL;
     init->info_n_values = NULL;
@@ -372,15 +331,8 @@ static int bcf_decode_cache_init(bcf_init_data_t *init, const bcf_bind_data_t *b
     init->cache_n_info_fields = bind->n_info_fields;
 
     if (bind->n_format_fields > 0) {
-        size_t nfmt = (size_t)bind->n_format_fields;
-        init->fmt_loaded = duckhts_alloc_array(nfmt, sizeof(*init->fmt_loaded));
-        init->fmt_ret = duckhts_alloc_array(nfmt, sizeof(*init->fmt_ret));
-        init->fmt_n_values = duckhts_alloc_array(nfmt, sizeof(*init->fmt_n_values));
-        init->fmt_i32 = duckhts_alloc_array(nfmt, sizeof(*init->fmt_i32));
-        init->fmt_f32 = duckhts_alloc_array(nfmt, sizeof(*init->fmt_f32));
-        init->fmt_str = duckhts_alloc_array(nfmt, sizeof(*init->fmt_str));
-        if (!init->fmt_loaded || !init->fmt_ret || !init->fmt_n_values ||
-            !init->fmt_i32 || !init->fmt_f32 || !init->fmt_str) {
+        init->formats = duckhts_alloc_array(bind->n_format_fields, sizeof(*init->formats));
+        if (!init->formats) {
             bcf_decode_cache_free(init);
             return 0;
         }
@@ -432,11 +384,6 @@ static void destroy_init_data(void* data) {
 // String Utilities
 // =============================================================================
 
-static void free_bcf_format_string_array(char **values) {
-    if (!values) return;
-    if (values[0]) free(values[0]);
-    free(values);
-}
 
 static int bcf_projection_unpack_mask(const bcf_bind_data_t* bind, const idx_t* column_ids, idx_t column_count) {
     int mask = 0;
@@ -518,9 +465,6 @@ static int bcf_record_has_info_field(bcf1_t *rec, const field_meta_t *field) {
     return rec && field && bcf_get_info_id(rec, field->header_id) != NULL;
 }
 
-static int bcf_record_has_format_field(bcf1_t *rec, const field_meta_t *field) {
-    return rec && field && bcf_get_fmt_id(rec, field->header_id) != NULL;
-}
 
 static int bcf_reader_input_is_bcf(htsFile *fp) {
     const htsFormat *fmt = fp ? hts_get_format(fp) : NULL;
@@ -529,37 +473,23 @@ static int bcf_reader_input_is_bcf(htsFile *fp) {
 
 static int bcf_handle_decode_diagnostic(duckhts_bcf_decode_policy_t policy, const char *msg) {
     if (policy == DUCKHTS_BCF_DECODE_ERROR) return 0;
-    if (policy == DUCKHTS_BCF_DECODE_WARN && msg && msg[0]) vcf_emit_warning(msg);
+    if (policy == DUCKHTS_BCF_DECODE_WARN && msg && msg[0]) hts_log_warning("%s", msg);
     return 1;
 }
 
-static int bcf_check_decode_ret(const char *reader_name, const char *field_class,
-                                const char *tag, bcf_hdr_t *hdr, bcf1_t *rec, int ret,
-                                duckhts_bcf_decode_policy_t policy, char *err, size_t err_size) {
+static int bcf_check_info_values(const field_meta_t *field, bcf_hdr_t *hdr, bcf1_t *rec,
+                                  const void *values, int *count,
+                                  duckhts_bcf_decode_policy_t policy, char *err, size_t err_size) {
     duckhts_bcf_decode_status_t status = duckhts_bcf_decode_status(
-        reader_name, field_class, tag, hdr, rec, ret, err, err_size);
-    return status == DUCKHTS_BCF_DECODE_OK ||
-        (status == DUCKHTS_BCF_DECODE_TYPE_MISMATCH && bcf_handle_decode_diagnostic(policy, err));
+        "read_bcf", "INFO", field->name, hdr, rec, *count, err, err_size);
+    if (status == DUCKHTS_BCF_DECODE_FATAL) return 0;
+    if (status == DUCKHTS_BCF_DECODE_OK &&
+        duckhts_bcf_check_scalar_count(hdr, rec, DUCKHTS_BCF_FIELD_INFO, field->header_id,
+            field->header_type, values, *count, "read_bcf", err, err_size)) return 1;
+    *count = 0;
+    return bcf_handle_decode_diagnostic(policy, err);
 }
 
-static int bcf_handle_format_width(const char *reader_name,
-                                   const char *tag,
-                                   bcf_hdr_t *hdr,
-                                   bcf1_t *rec,
-                                   int *ret,
-                                   int n_samples,
-                                   duckhts_bcf_decode_policy_t policy,
-                                   char *err,
-                                   size_t err_size) {
-    if (!ret || duckhts_bcf_check_format_width(reader_name, tag, hdr, rec, *ret, n_samples, err, err_size)) {
-        return 1;
-    }
-    if (!bcf_handle_decode_diagnostic(policy, err)) {
-        return 0;
-    }
-    *ret = -3;
-    return 1;
-}
 
 static int bcf_projected_columns_init(bcf_init_data_t *local, const bcf_bind_data_t *bind,
                                       char *err, size_t err_size) {
@@ -790,42 +720,10 @@ static int bcf_try_get_index_row_count(const hts_idx_t *idx, uint64_t row_multip
 }
 
 static inline void set_validity_bit(uint64_t* validity, idx_t row, int is_valid);
-static int process_comma_separated_list(duckdb_vector vec, idx_t row, const char* value);
 
 // =============================================================================
 // DuckDB Type Creation Helpers
 // =============================================================================
-
-/**
- * Create a DuckDB logical type for a BCF field.
- */
-static duckdb_logical_type create_bcf_field_type(int bcf_type, int is_list) {
-    duckdb_logical_type element_type;
-
-    switch (bcf_type) {
-        case BCF_HT_FLAG:
-            element_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
-            break;
-        case BCF_HT_INT:
-            element_type = duckdb_create_logical_type(DUCKDB_TYPE_INTEGER);
-            break;
-        case BCF_HT_REAL:
-            element_type = duckdb_create_logical_type(DUCKDB_TYPE_FLOAT);
-            break;
-        case BCF_HT_STR:
-        default:
-            element_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
-            break;
-    }
-
-    if (is_list) {
-        duckdb_logical_type list_type = duckdb_create_list_type(element_type);
-        duckdb_destroy_logical_type(&element_type);
-        return list_type;
-    }
-
-    return element_type;
-}
 
 static duckdb_logical_type create_vep_field_type(vep_field_type_t vep_type, int is_list) {
     duckdb_logical_type element_type;
@@ -855,132 +753,12 @@ static duckdb_logical_type create_vep_field_type(vep_field_type_t vep_type, int 
     return element_type;
 }
 
-static void set_field_null(duckdb_vector vec, idx_t row, int is_list) {
-    duckdb_vector_ensure_validity_writable(vec);
-    uint64_t* validity = duckdb_vector_get_validity(vec);
-    set_validity_bit(validity, row, 0);
-
-    if (is_list) {
-        duckdb_list_entry entry = {duckdb_list_vector_get_size(vec), 0};
-        duckdb_list_entry* list_data = (duckdb_list_entry*)duckdb_vector_get_data(vec);
-        list_data[row] = entry;
-    }
-}
-
-static int assign_int32_field(duckdb_vector vec, idx_t row, const int32_t* values, int n_values, int is_list) {
-    if (!values || n_values <= 0) {
-        set_field_null(vec, row, is_list);
-        return 1;
-    }
-
-    if (!is_list) {
-        if (values[0] != bcf_int32_missing && values[0] != bcf_int32_vector_end) {
-            int32_t* data = (int32_t*)duckdb_vector_get_data(vec);
-            data[row] = values[0];
-        } else {
-            set_field_null(vec, row, 0);
-        }
-        return 1;
-    }
-
-    duckdb_list_entry entry;
-    entry.offset = duckdb_list_vector_get_size(vec);
-    entry.length = 0;
-
-    for (int i = 0; i < n_values; i++) {
-        if (values[i] != bcf_int32_missing && values[i] != bcf_int32_vector_end) {
-            entry.length++;
-        }
-    }
-
-    if (entry.length > 0) {
-        if (!duckhts_list_extend(vec, entry.length, &entry)) return 0;
-
-        duckdb_vector child_vec = duckdb_list_vector_get_child(vec);
-        int32_t* child_data = (int32_t*)duckdb_vector_get_data(child_vec);
-        int write_idx = 0;
-        for (int i = 0; i < n_values; i++) {
-            if (values[i] != bcf_int32_missing && values[i] != bcf_int32_vector_end) {
-                child_data[entry.offset + write_idx] = values[i];
-                write_idx++;
-            }
-        }
-    }
-
-    duckdb_list_entry* list_data = (duckdb_list_entry*)duckdb_vector_get_data(vec);
-    list_data[row] = entry;
-    return 1;
-}
-
-static int assign_float_field(duckdb_vector vec, idx_t row, const float* values, int n_values, int is_list) {
-    if (!values || n_values <= 0) {
-        set_field_null(vec, row, is_list);
-        return 1;
-    }
-
-    if (!is_list) {
-        if (!bcf_float_is_missing(values[0]) && !bcf_float_is_vector_end(values[0])) {
-            float* data = (float*)duckdb_vector_get_data(vec);
-            data[row] = values[0];
-        } else {
-            set_field_null(vec, row, 0);
-        }
-        return 1;
-    }
-
-    duckdb_list_entry entry;
-    entry.offset = duckdb_list_vector_get_size(vec);
-    entry.length = 0;
-
-    for (int i = 0; i < n_values; i++) {
-        if (!bcf_float_is_missing(values[i]) && !bcf_float_is_vector_end(values[i])) {
-            entry.length++;
-        }
-    }
-
-    if (entry.length > 0) {
-        if (!duckhts_list_extend(vec, entry.length, &entry)) return 0;
-
-        duckdb_vector child_vec = duckdb_list_vector_get_child(vec);
-        float* child_data = (float*)duckdb_vector_get_data(child_vec);
-        int write_idx = 0;
-        for (int i = 0; i < n_values; i++) {
-            if (!bcf_float_is_missing(values[i]) && !bcf_float_is_vector_end(values[i])) {
-                child_data[entry.offset + write_idx] = values[i];
-                write_idx++;
-            }
-        }
-    }
-
-    duckdb_list_entry* list_data = (duckdb_list_entry*)duckdb_vector_get_data(vec);
-    list_data[row] = entry;
-    return 1;
-}
-
-static int assign_string_field(duckdb_vector vec, idx_t row, const char* value, int is_list) {
-    if (!value || strcmp(value, ".") == 0) {
-        set_field_null(vec, row, is_list);
-        return 1;
-    }
-
-    if (is_list) {
-        return process_comma_separated_list(vec, row, value);
-    } else {
-        duckdb_vector_assign_string_element(vec, row, value);
-    }
-    return 1;
-}
-
-
 // =============================================================================
 // Schema Building - Bind Function
 // =============================================================================
 
 static void bcf_read_bind(duckdb_bind_info info) {
     const char *reader_name = "read_bcf";
-
-    // Set up warning callback
-    vcf_set_warning_callback(duckdb_vcf_warning, NULL);
 
     // Get the file path parameter
     duckdb_value path_val = duckdb_bind_get_parameter(info, 0);
@@ -1268,30 +1046,19 @@ static void bcf_read_bind(duckdb_bind_info info) {
                 int header_vl_type = bcf_hdr_id2length(hdr, BCF_HL_INFO, i);
                 int header_count = bcf_hdr_id2number(hdr, BCF_HL_INFO, i);
 
-                // Validate against VCF spec (emits warnings)
-                int corrected_type;
-                int corrected_count;
-                int corrected_vl_type = vcf_validate_info_field(field_name, header_vl_type,
-                                                                 header_count, header_type,
-                                                                 &corrected_type, &corrected_count);
-
                 field_meta_t* field = &bind->info_fields[info_idx];
                 field->name = duckhts_copy_string(field_name);
                 if (!field->name) goto bind_oom;
                 field->header_id = i;
                 field->header_type = header_type;
-                field->schema_type = header_type;  // Use header type for data
-                field->vl_type = corrected_vl_type;
-                field->fixed_count = corrected_vl_type == BCF_VL_FIXED ? corrected_count : 1;
-                field->is_list = vcf_is_list_type(corrected_vl_type, field->fixed_count);
-                field->duckdb_col_idx = col_idx;
+                field->is_list = header_vl_type != BCF_VL_FIXED || header_count > 1;
 
                 // Create column name: INFO_<fieldname>
                 char col_name[256];
                 snprintf(col_name, sizeof(col_name), "INFO_%s", field_name);
 
                 // Create DuckDB type
-                duckdb_logical_type field_type = create_bcf_field_type(header_type, field->is_list);
+                duckdb_logical_type field_type = duckhts_bcf_field_type(header_type, field->is_list);
                 duckdb_bind_add_result_column(info, col_name, field_type);
                 duckdb_destroy_logical_type(&field_type);
 
@@ -1333,9 +1100,6 @@ static void bcf_read_bind(duckdb_bind_info info) {
             bind->format_fields[0].name = duckhts_copy_string("GT");
             if (!bind->format_fields[0].name) goto bind_oom;
             bind->format_fields[0].header_type = BCF_HT_STR;
-            bind->format_fields[0].schema_type = BCF_HT_STR;
-            bind->format_fields[0].vl_type = BCF_VL_FIXED;
-            bind->format_fields[0].fixed_count = 1;
             bind->format_fields[0].is_list = 0;
         }
         if (!bind->format_fields && bind->n_format_fields > 0) {
@@ -1351,22 +1115,12 @@ static void bcf_read_bind(duckdb_bind_info info) {
                     int header_vl_type = bcf_hdr_id2length(hdr, BCF_HL_FMT, i);
                     int header_count = bcf_hdr_id2number(hdr, BCF_HL_FMT, i);
 
-                    // Validate against VCF spec (emits warnings, only once)
-                    int corrected_type;
-                    int corrected_count;
-                    int corrected_vl_type = vcf_validate_format_field(field_name, header_vl_type,
-                                                                       header_count, header_type,
-                                                                       &corrected_type, &corrected_count);
-
                     field_meta_t* field = &bind->format_fields[fmt_idx];
                     field->name = duckhts_copy_string(field_name);
                     if (!field->name) goto bind_oom;
                     field->header_id = i;
                     field->header_type = header_type;
-                    field->schema_type = header_type;
-                    field->vl_type = corrected_vl_type;
-                    field->fixed_count = corrected_vl_type == BCF_VL_FIXED ? corrected_count : 1;
-                    field->is_list = vcf_is_list_type(corrected_vl_type, field->fixed_count);
+                    field->is_list = header_vl_type != BCF_VL_FIXED || header_count > 1;
 
                     fmt_idx++;
                 }
@@ -1390,7 +1144,7 @@ static void bcf_read_bind(duckdb_bind_info info) {
                 char col_name[256];
                 snprintf(col_name, sizeof(col_name), "FORMAT_%s", field->name);
 
-                duckdb_logical_type field_type = create_bcf_field_type(field->header_type, field->is_list);
+                duckdb_logical_type field_type = duckhts_bcf_field_type(field->header_type, field->is_list);
                 duckdb_bind_add_result_column(info, col_name, field_type);
                 duckdb_destroy_logical_type(&field_type);
 
@@ -1407,7 +1161,7 @@ static void bcf_read_bind(duckdb_bind_info info) {
                     snprintf(col_name, sizeof(col_name), "FORMAT_%s_%s",
                              field->name, bind->sample_names[s]);
 
-                    duckdb_logical_type field_type = create_bcf_field_type(field->header_type, field->is_list);
+                    duckdb_logical_type field_type = duckhts_bcf_field_type(field->header_type, field->is_list);
                     duckdb_bind_add_result_column(info, col_name, field_type);
                     duckdb_destroy_logical_type(&field_type);
 
@@ -1661,71 +1415,7 @@ static inline void set_validity_bit(uint64_t* validity, idx_t row, int is_valid)
 }
 
 // Single-pass comma-separated string list processing
-static int process_comma_separated_list(duckdb_vector vec, idx_t row, const char* value) {
-    if (!value || strcmp(value, ".") == 0) {
-        // NULL value - empty list
-        duckdb_vector_ensure_validity_writable(vec);
-        uint64_t* validity = duckdb_vector_get_validity(vec);
-        set_validity_bit(validity, row, 0);
-        duckdb_list_entry entry = {duckdb_list_vector_get_size(vec), 0};
-        duckdb_list_entry* list_data = (duckdb_list_entry*)duckdb_vector_get_data(vec);
-        list_data[row] = entry;
-        return 1;
-    }
 
-    duckdb_list_entry entry;
-    entry.offset = duckdb_list_vector_get_size(vec);
-    entry.length = 0;
-
-    // Single-pass: count tokens and assign in one go
-    const char* p = value;
-    const char* token_start = p;
-    idx_t token_count = 0;
-
-    // First pass: count tokens
-    while (*p) {
-        if (*p == ',') {
-            token_count++;
-            token_start = p + 1;
-        }
-        p++;
-    }
-    if (p > token_start) token_count++;  // Last token
-
-    entry.length = token_count;
-
-    // Reserve and fill
-    if (entry.length > 0) {
-        if (!duckhts_list_extend(vec, entry.length, &entry)) return 0;
-        duckdb_vector child_vec = duckdb_list_vector_get_child(vec);
-
-        // Second pass: assign tokens
-        p = value;
-        token_start = p;
-        idx_t write_idx = 0;
-
-        while (*p) {
-            if (*p == ',') {
-                // Assign current token
-                duckdb_vector_assign_string_element_len(child_vec, entry.offset + write_idx,
-                                                     token_start, p - token_start);
-                write_idx++;
-                token_start = p + 1;
-            }
-            p++;
-        }
-
-        // Last token
-        if (p > token_start) {
-            duckdb_vector_assign_string_element_len(child_vec, entry.offset + write_idx,
-                                                 token_start, p - token_start);
-        }
-    }
-
-    duckdb_list_entry* list_data = (duckdb_list_entry*)duckdb_vector_get_data(vec);
-    list_data[row] = entry;
-    return 1;
-}
 
 // =============================================================================
 // Helper: Claim next contig for parallel scanning
@@ -1744,140 +1434,11 @@ static int claim_next_contig(bcf_init_data_t *init, bcf_global_init_data_t *glob
     return 1;
 }
 
-static int bcf_decode_format_projected_field(bcf_init_data_t *init,
-                                             const bcf_bind_data_t *bind,
-                                             const bcf_projected_col_t *proj_col,
-                                             int *fmt_loaded, int *fmt_ret,
-                                             int *fmt_n_values,
-                                             int32_t **fmt_i32, float **fmt_f32,
-                                             char ***fmt_str,
-                                             int *gt_loaded, int *gt_ret,
-                                             int *gt_n_values, int32_t **gt_arr,
-                                             char *err, size_t err_size) {
-    if (!init || !bind || !proj_col || proj_col->field_idx < 0 || !proj_col->field) {
-        return 1;
-    }
-
-    int field_idx = proj_col->field_idx;
-    const char *tag = proj_col->field->name;
-    const char *reader_name = "read_bcf";
-    duckhts_bcf_decode_policy_t policy = bind->decode_error_policy;
-    duckhts_bcf_field_class_t field_class = proj_col->kind == BCF_OUT_FORMAT_GT
-        ? DUCKHTS_BCF_FIELD_GT : DUCKHTS_BCF_FIELD_FORMAT;
-
-    switch (proj_col->kind) {
-    case BCF_OUT_FORMAT_INT:
-        if (fmt_loaded && !fmt_loaded[field_idx]) {
-            if (!bcf_record_has_format_field(init->rec, proj_col->field)) {
-                fmt_ret[field_idx] = -3;
-            } else if (bcf_reader_input_is_bcf(init->scan.fp) &&
-                       !duckhts_bcf_check_field_type(init->scan.hdr, init->rec,
-                           field_class,
-                           proj_col->field->header_id, proj_col->field->header_type,
-                           reader_name, err, err_size)) {
-                if (!bcf_handle_decode_diagnostic(policy, err)) {
-                    return 0;
-                }
-                fmt_ret[field_idx] = -3;
-            } else {
-                fmt_ret[field_idx] = bcf_get_format_int32(init->scan.hdr, init->rec, tag,
-                                                           &fmt_i32[field_idx],
-                                                           &fmt_n_values[field_idx]);
-            }
-            fmt_loaded[field_idx] = 1;
-        }
-        if (!bcf_check_decode_ret(reader_name, "FORMAT", tag, init->scan.hdr, init->rec,
-                                  fmt_ret[field_idx], policy, err, err_size)) {
-            return 0;
-        }
-        return bcf_handle_format_width(reader_name, tag, init->scan.hdr, init->rec,
-                                       &fmt_ret[field_idx], bind->n_samples,
-                                       policy, err, err_size);
-    case BCF_OUT_FORMAT_FLOAT:
-        if (fmt_loaded && !fmt_loaded[field_idx]) {
-            if (!bcf_record_has_format_field(init->rec, proj_col->field)) {
-                fmt_ret[field_idx] = -3;
-            } else if (bcf_reader_input_is_bcf(init->scan.fp) &&
-                       !duckhts_bcf_check_field_type(init->scan.hdr, init->rec,
-                           field_class,
-                           proj_col->field->header_id, proj_col->field->header_type,
-                           reader_name, err, err_size)) {
-                if (!bcf_handle_decode_diagnostic(policy, err)) {
-                    return 0;
-                }
-                fmt_ret[field_idx] = -3;
-            } else {
-                fmt_ret[field_idx] = bcf_get_format_float(init->scan.hdr, init->rec, tag,
-                                                           &fmt_f32[field_idx],
-                                                           &fmt_n_values[field_idx]);
-            }
-            fmt_loaded[field_idx] = 1;
-        }
-        if (!bcf_check_decode_ret(reader_name, "FORMAT", tag, init->scan.hdr, init->rec,
-                                  fmt_ret[field_idx], policy, err, err_size)) {
-            return 0;
-        }
-        return bcf_handle_format_width(reader_name, tag, init->scan.hdr, init->rec,
-                                       &fmt_ret[field_idx], bind->n_samples,
-                                       policy, err, err_size);
-    case BCF_OUT_FORMAT_GT:
-        if (gt_loaded && !*gt_loaded) {
-            if (!bcf_record_has_format_field(init->rec, proj_col->field)) {
-                *gt_ret = -3;
-            } else if (bcf_reader_input_is_bcf(init->scan.fp) &&
-                       !duckhts_bcf_check_field_type(init->scan.hdr, init->rec,
-                           field_class,
-                           proj_col->field->header_id, proj_col->field->header_type,
-                           reader_name, err, err_size)) {
-                if (!bcf_handle_decode_diagnostic(policy, err)) {
-                    return 0;
-                }
-                *gt_ret = -3;
-            } else {
-                *gt_ret = bcf_get_genotypes(init->scan.hdr, init->rec, gt_arr, gt_n_values);
-            }
-            *gt_loaded = 1;
-        }
-        if (!bcf_check_decode_ret(reader_name, "FORMAT", tag, init->scan.hdr, init->rec,
-                                  *gt_ret, policy, err, err_size)) {
-            return 0;
-        }
-        return bcf_handle_format_width(reader_name, tag, init->scan.hdr, init->rec,
-                                       gt_ret, bind->n_samples,
-                                       policy, err, err_size);
-    case BCF_OUT_FORMAT_STRING:
-        if (fmt_loaded && !fmt_loaded[field_idx]) {
-            if (!bcf_record_has_format_field(init->rec, proj_col->field)) {
-                fmt_ret[field_idx] = -3;
-            } else if (bcf_reader_input_is_bcf(init->scan.fp) &&
-                       !duckhts_bcf_check_field_type(init->scan.hdr, init->rec,
-                           field_class,
-                           proj_col->field->header_id, proj_col->field->header_type,
-                           reader_name, err, err_size)) {
-                if (!bcf_handle_decode_diagnostic(policy, err)) {
-                    return 0;
-                }
-                fmt_ret[field_idx] = -3;
-            } else {
-                fmt_ret[field_idx] = bcf_get_format_string(init->scan.hdr, init->rec, tag,
-                                                            &fmt_str[field_idx],
-                                                            &fmt_n_values[field_idx]);
-            }
-            fmt_loaded[field_idx] = 1;
-        }
-        return bcf_check_decode_ret(reader_name, "FORMAT", tag, init->scan.hdr, init->rec,
-                                    fmt_ret[field_idx], policy, err, err_size);
-    default:
-        break;
-    }
-    return 1;
-}
-
 static int bcf_fill_gt_string(duckdb_vector vec, idx_t row_count,
                                bcf_init_data_t *init, int sample_idx) {
     bcf_fmt_t *gt = bcf_get_fmt(init->scan.hdr, init->rec, "GT");
     if (!gt) {
-        set_field_null(vec, row_count, 0);
+        duckhts_bcf_field_null(vec, row_count, 0);
         return 1;
     }
     init->gt_kstr.l = 0;
@@ -1890,73 +1451,27 @@ static int bcf_fill_gt_string(duckdb_vector vec, idx_t row_count,
 
 static int bcf_fill_format_projected_col(bcf_init_data_t *init,
                                           const bcf_bind_data_t *bind,
-                                          const bcf_projected_col_t *proj_col,
-                                          duckdb_vector vec,
-                                          idx_t row_count,
-                                          int current_sample,
-                                          int *fmt_ret,
-                                          int32_t **fmt_i32,
-                                          float **fmt_f32,
-                                          char ***fmt_str,
-                                          int gt_ret,
-                                          int32_t *gt_arr) {
-    int field_idx = proj_col->field_idx;
-    int sample_idx = (bind->tidy_format && bind->n_samples > 0)
-        ? current_sample
-        : proj_col->sample_idx;
-
-    if (sample_idx < 0 || sample_idx >= bind->n_samples || field_idx < 0 || field_idx >= bind->n_format_fields) {
+                                          const bcf_projected_col_t *column,
+                                          duckdb_vector vector, idx_t row, int current_sample,
+                                          char *error, size_t error_size) {
+    int sample = bind->tidy_format && bind->n_samples > 0 ? current_sample : column->sample_idx;
+    if (sample < 0 || sample >= bind->n_samples || column->field_idx < 0 ||
+        column->field_idx >= init->cache_n_format_fields) {
+        snprintf(error, error_size, "read_bcf: invalid projected FORMAT sample or field index");
+        return -1;
+    }
+    const duckhts_bcf_format_t *values = &init->formats[column->field_idx];
+    if (values->count == 0) {
+        duckhts_bcf_field_null(vector, row, column->is_list);
         return 1;
     }
-
-    switch (proj_col->kind) {
-    case BCF_OUT_FORMAT_INT: {
-        int ret_fmt = fmt_ret[field_idx];
-        int32_t *values = fmt_i32[field_idx];
-        if (ret_fmt > 0 && values) {
-            int vals_per_sample = ret_fmt / bind->n_samples;
-            int32_t *sample_vals = values + sample_idx * vals_per_sample;
-            return assign_int32_field(vec, row_count, sample_vals, vals_per_sample, proj_col->is_list);
-        } else {
-            set_field_null(vec, row_count, proj_col->is_list);
-        }
-        break;
+    if (column->kind == BCF_OUT_FORMAT_GT) {
+        int ret = bcf_fill_gt_string(vector, row, init, sample);
+        if (ret < 0) snprintf(error, error_size, "read_bcf: out of memory formatting FORMAT/GT");
+        return ret;
     }
-    case BCF_OUT_FORMAT_FLOAT: {
-        int ret_fmt = fmt_ret[field_idx];
-        float *values = fmt_f32[field_idx];
-        if (ret_fmt > 0 && values) {
-            int vals_per_sample = ret_fmt / bind->n_samples;
-            float *sample_vals = values + sample_idx * vals_per_sample;
-            return assign_float_field(vec, row_count, sample_vals, vals_per_sample, proj_col->is_list);
-        } else {
-            set_field_null(vec, row_count, proj_col->is_list);
-        }
-        break;
-    }
-    case BCF_OUT_FORMAT_GT:
-        if (gt_ret > 0 && gt_arr) {
-            return bcf_fill_gt_string(vec, row_count, init, sample_idx);
-        } else {
-            duckdb_vector_ensure_validity_writable(vec);
-            uint64_t* validity = duckdb_vector_get_validity(vec);
-            set_validity_bit(validity, row_count, 0);
-        }
-        break;
-    case BCF_OUT_FORMAT_STRING: {
-        int ret_fmt = fmt_ret[field_idx];
-        char **values = fmt_str[field_idx];
-        return assign_string_field(
-            vec,
-            row_count,
-            (ret_fmt > 0 && values) ? values[sample_idx] : NULL,
-            proj_col->is_list
-        );
-    }
-    default:
-        break;
-    }
-    return 1;
+    return duckhts_bcf_format_write(vector, row, values, column->header_type,
+                                     column->is_list, sample);
 }
 
 // =============================================================================
@@ -2028,16 +1543,6 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
     int current_sample = 0;  // Which sample we're emitting (only used in tidy mode)
 
     // Borrow the worker cache; only the record transition resets loaded state.
-    int *fmt_loaded = init->fmt_loaded;
-    int *fmt_ret = init->fmt_ret;
-    int *fmt_n_values = init->fmt_n_values;
-    int32_t **fmt_i32 = init->fmt_i32;
-    float **fmt_f32 = init->fmt_f32;
-    char ***fmt_str = init->fmt_str;
-    int gt_loaded = init->gt_loaded;
-    int gt_ret = init->gt_ret;
-    int gt_n_values = init->gt_n_values;
-    int32_t *gt_arr = init->gt_arr;
     int *info_loaded = init->info_loaded;
     int *info_ret = init->info_ret;
     int *info_n_values = init->info_n_values;
@@ -2100,12 +1605,11 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
             }
 
             if (bind->n_format_fields > 0) {
-                memset(fmt_loaded, 0, (size_t)bind->n_format_fields * sizeof(int));
+                for (int i = 0; i < bind->n_format_fields; i++) init->formats[i].loaded = 0;
             }
             if (bind->n_info_fields > 0) {
                 memset(info_loaded, 0, (size_t)bind->n_info_fields * sizeof(int));
             }
-            gt_loaded = 0;
             if (init->vep_rec) {
                 vep_record_destroy(init->vep_rec);
                 init->vep_rec = NULL;
@@ -2131,12 +1635,9 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 continue;
             }
             const bcf_projected_col_t *first_col = &init->projected_cols[group->projected_indices[0]];
-            if (!bcf_decode_format_projected_field(init, bind, first_col,
-                                                   fmt_loaded, fmt_ret, fmt_n_values,
-                                                   fmt_i32, fmt_f32, fmt_str,
-                                                   &gt_loaded, &gt_ret,
-                                                   &gt_n_values, &gt_arr,
-                                                   scan_err, sizeof(scan_err))) {
+            if (!duckhts_bcf_format_decode(&init->formats[group->field_idx],
+                    init->scan.hdr, init->rec, first_col->field->name, first_col->header_type,
+                    bind->decode_error_policy, "read_bcf", scan_err, sizeof(scan_err))) {
                 duckdb_function_set_error(info, scan_err[0] ? scan_err : "read_bcf: failed to decode FORMAT field");
                 init->done = 1;
                 scan_error = 1;
@@ -2365,19 +1866,20 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                                                                       &info_i32[field_idx],
                                                                       &info_n_values[field_idx]);
                         }
+                        if (!bcf_check_info_values(field, init->scan.hdr, init->rec,
+                                info_i32[field_idx], &info_ret[field_idx],
+                                bind->decode_error_policy, scan_err, sizeof(scan_err))) {
+                            duckdb_function_set_error(info, scan_err);
+                            init->done = 1;
+                            scan_error = 1;
+                            break;
+                        }
                         info_loaded[field_idx] = 1;
                     }
                     values = info_i32[field_idx];
                     ret_info = info_ret[field_idx];
-                    if (!bcf_check_decode_ret("read_bcf", "INFO", tag, init->scan.hdr, init->rec,
-                                              ret_info, bind->decode_error_policy, scan_err, sizeof(scan_err))) {
-                        duckdb_function_set_error(info, scan_err[0] ? scan_err : "read_bcf: failed to decode INFO field");
-                        init->done = 1;
-                        scan_error = 1;
-                        break;
-                    }
 
-                    if (!assign_int32_field(vec, row_idx, values, ret_info, proj_col->is_list)) goto list_error;
+                    if (!duckhts_bcf_field_int32(vec, row_idx, values, ret_info, proj_col->is_list)) goto list_error;
                 }
                 else if (proj_col->header_type == BCF_HT_REAL) {
                     float* values = NULL;
@@ -2400,19 +1902,20 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                                                                       &info_f32[field_idx],
                                                                       &info_n_values[field_idx]);
                         }
+                        if (!bcf_check_info_values(field, init->scan.hdr, init->rec,
+                                info_f32[field_idx], &info_ret[field_idx],
+                                bind->decode_error_policy, scan_err, sizeof(scan_err))) {
+                            duckdb_function_set_error(info, scan_err);
+                            init->done = 1;
+                            scan_error = 1;
+                            break;
+                        }
                         info_loaded[field_idx] = 1;
                     }
                     values = info_f32[field_idx];
                     ret_info = info_ret[field_idx];
-                    if (!bcf_check_decode_ret("read_bcf", "INFO", tag, init->scan.hdr, init->rec,
-                                              ret_info, bind->decode_error_policy, scan_err, sizeof(scan_err))) {
-                        duckdb_function_set_error(info, scan_err[0] ? scan_err : "read_bcf: failed to decode INFO field");
-                        init->done = 1;
-                        scan_error = 1;
-                        break;
-                    }
 
-                    if (!assign_float_field(vec, row_idx, values, ret_info, proj_col->is_list)) goto list_error;
+                    if (!duckhts_bcf_field_float(vec, row_idx, values, ret_info, proj_col->is_list)) goto list_error;
                 }
                 else {
                     // String type
@@ -2436,19 +1939,20 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                                                                        &info_str[field_idx],
                                                                        &info_n_values[field_idx]);
                         }
+                        if (!bcf_check_info_values(field, init->scan.hdr, init->rec,
+                                info_str[field_idx], &info_ret[field_idx],
+                                bind->decode_error_policy, scan_err, sizeof(scan_err))) {
+                            duckdb_function_set_error(info, scan_err);
+                            init->done = 1;
+                            scan_error = 1;
+                            break;
+                        }
                         info_loaded[field_idx] = 1;
                     }
                     value = info_str[field_idx];
                     ret_info = info_ret[field_idx];
-                    if (!bcf_check_decode_ret("read_bcf", "INFO", tag, init->scan.hdr, init->rec,
-                                              ret_info, bind->decode_error_policy, scan_err, sizeof(scan_err))) {
-                        duckdb_function_set_error(info, scan_err[0] ? scan_err : "read_bcf: failed to decode INFO field");
-                        init->done = 1;
-                        scan_error = 1;
-                        break;
-                    }
 
-                    if (!assign_string_field(vec, row_idx, ret_info > 0 ? value : NULL, proj_col->is_list)) goto list_error;
+                    if (!duckhts_bcf_field_string(vec, row_idx, ret_info > 0 ? value : NULL, proj_col->is_list)) goto list_error;
                 }
                 break;
             }
@@ -2478,13 +1982,8 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 const bcf_projected_col_t *proj_col = &init->projected_cols[group->projected_indices[group_col_idx]];
                 duckdb_vector vec = vectors[proj_col->out_idx];
                 int materialized = bcf_fill_format_projected_col(init, bind, proj_col, vec,
-                                              row_idx, sample_for_row,
-                                              fmt_ret, fmt_i32, fmt_f32,
-                                              fmt_str, gt_ret, gt_arr);
-                if (materialized < 0) {
-                    snprintf(scan_err, sizeof(scan_err), "read_bcf: out of memory formatting FORMAT/GT");
-                    goto materialization_error;
-                }
+                                              row_idx, sample_for_row, scan_err, sizeof(scan_err));
+                if (materialized < 0) goto materialization_error;
                 if (!materialized) goto list_error;
             }
         }
@@ -2517,10 +2016,6 @@ materialization_error:
     row_count = 0;
 scan_cleanup:
     duckdb_free(vectors);
-    init->gt_loaded = gt_loaded;
-    init->gt_ret = gt_ret;
-    init->gt_n_values = gt_n_values;
-    init->gt_arr = gt_arr;
 
     duckdb_data_chunk_set_size(output, row_count);
 }

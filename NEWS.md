@@ -1,6 +1,620 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.1.9000
+# duckhts 1.5.2
+
+- preserve known reference slots in raw haplotype replay when N or lowercase
+  bases exclude mutation; selected ALT slots retain conditional evidence
+
+- make the R connection-safety regression independent of DuckDB error wording,
+  preserving live-driver and unsigned-extension-policy checks
+
+- retain Haplosaurus-skipped raw alleles as conditional source contributors,
+  with zero edits; validate coding REF and model storage before replaying the
+  remaining sources and translating the CDS
+
+- preserve original peptide exclusions during shifted protein-HGVS replay;
+  match pinned VEP-116 duplication lookup, Xaa duplication names and delins
+  extension formatting without changing independent consequence predicates
+
+- validate matching N in shared prefixes and suffixes of minimized indels;
+  preserve changed-allele rejection and check retained-padding geometry;
+  evaluate frameshift translation even when the local peptide pair is equal
+
+- use pinned VEP-116 table-1 alternate translation for frameshift HGVSp while
+  retaining transcript-specific reference peptides and coding consequences;
+  apply its Xaa-to-Ter formatting before selecting immediate-stop notation
+
+- replay literal matching N in length-changing REF alleles while preserving
+  unavailable reference-peptide predicates and NULL independent HGVSp; validate
+  retained N anchors literally for insertions, deletions and replacements
+
+- compare retained indel bundles by exact oracle and failure keys; reject
+  count-preserving exchanges of resolved and newly failing comparisons
+
+- report all source-bound indel checkpoint measurements and their unequal
+  singleton local-consequence fingerprints; retain complete keyed-output audits
+  and comparator corruption controls, with explicit cross-run driver/reference
+  input checks and byte-exact original worker jobs bound to benchmark receipts
+
+- interpret N-containing indel codons with pinned VEP-116 consensus and match
+  retained insertion anchors literally; share the checked coding/HGVS paths
+  without accepting ambiguous changed alleles
+
+- retain exact upstream raw-predicate and emitted-consequence witnesses;
+  exercise 168,000 original VCF indels across codon tables with complete keyed
+  comparisons, explicit model partitions and failure receipts
+
+- pin retained diagnostic receipts independently of their declared hashes; verify
+  VEP environment and source identities and reject rehashed oracle/native substitutions
+
+- retain complete compact codon-consensus and reference-translation evidence with
+  network-free reconstruction checks; record matched phased-replay measurements
+
+- use pinned VEP-116 codon consensus for independent and singleton protein
+  annotation, preserving uploaded-allele validity and raw nucleotide ambiguity;
+  share uncurated translation with the curated haplotype reference
+
+- add an exhaustive 28,800-SNV diagnostic for N-containing coding contexts against
+  pinned VEP 116; retain independent and singleton-phased disagreements, canonical
+  controls, absent results and comparator corruption checks; publish complete
+  comparison pairs as Parquet with network-free reconstruction of the exact
+  codon/table/substitution matrix and its comparisons; reject duplicate source
+  and oracle fields before JSON simplification
+
+- reject aliased translation metadata before writing borrowed CDS, peptide or
+  reference-edit storage
+
+- prepare phased replay's curated and conservative reference proteins together
+  in the native library; share the bounded transcript cache with SQL and preserve
+  distinct ambiguous-codon, stop and peptide-edit semantics
+
+- add an exhaustive internal-codon HGVSp diagnostic comparing exact MNV records
+  with pinned VEP 116 and retaining cis-SNV representation disagreements separately;
+  check genomic reconstruction, original contributors and carrier lanes
+
+- require GitHub-issued execution-receipt attestations for model-history publication,
+  tied to the repository, trusted workflow and source commit; retain unsigned history
+  without upgrading its provenance and test coordinated source/native lane swaps
+
+- reconstruct model-campaign inputs, keyed oracle/native comparisons, corruption
+  controls and alignment bounds before publishing history; verify existing rows
+  without rewriting them and preserve honestly recorded disagreements
+
+- retain two complete source-bound model campaigns with 59,040 profiles and
+  354,240 carrier memberships, explicit input-derived alignment budgets, and
+  sequence, provenance and metadata checks; retain earlier failed executions
+
+- retain source-bound nominal-length conformance and same-input phased benchmarks,
+  including the complete failing finite-phase audit and the long-CDS alignment-limit
+  failure; benchmark reports distinguish changed output and concurrent workloads
+
+- bind finite-phase replay sequences and applied alleles to transcript/sample/lane
+  observations before aggregation; publication rejects rehashed lane swaps while
+  preserving genuine lane-association failures and every comparison profile
+
+- reconstruct raw/public phase-audit sequences and record observations from
+  retained keyed oracle and execution outputs before publication; compare parser
+  expectations with upstream call observations and preserve missing-lane failures
+
+- expose the replay kernel's signed nominal_length_diff in duckvep_haplotypes,
+  distinct from rebuilt CDS length change under clipped source replacements;
+  unavailable sequences return NULL
+
+- verify phase-audit genotype labels against retained VCF records and reader-captured
+  raw GT before publishing per-profile or per-stratum results
+
+- bind published decoded phase-audit comparisons to transcript-keyed oracle and native
+  observations, rejecting reassigned profile verdicts with unchanged global totals
+
+- verify retained mutation-lane flags and implicit-reference group metadata in
+  the reference-route corpus with complete carrier and provenance accounting;
+  reject native rows outside the declared transcript domain before comparison
+
+- render current haplotype and raw-genotype catalog documentation in both READMEs;
+  executed examples use local fixtures and remote examples remain usage snippets
+
+- retain matched raw-GT reader measurements with complete source-byte comparisons;
+  publish finite phase-audit receipts with checked identities, observations,
+  denominators and controls, preserving disagreement verdicts
+
+- observe per-lane Haplosaurus mutation flags and sequence-group ownership
+  separately, with unchanged-output and metadata-corruption controls
+
+- retain original VCF genotype spelling with read_geno(raw_gt := true), including
+  leading phase markers and missing alleles; selected calls borrow worker-local
+  source spans until output materialization. BCF rejects the option because it
+  does not retain original GT text; the default typed call schema is unchanged
+
+- initialize length-delimited native translation fixtures as byte arrays for
+  strict Clang builds, preserving their exact input lengths and test assertions
+
+- compile native property tests by family under fatal C11 pedantic diagnostics with a
+  checked source and test inventory;
+  execute fixed witnesses for empty-UTR overlap, split-start-codon insertions and
+  supported genetic-code IDs, retaining generated trials and coverage controls;
+  failed-projection diagnostics use initialized coordinates
+
+- retain matched selected-FORMAT, HPRC cohort and phased-replay measurements for the reader
+  ownership and review fixes, with complete output checks and mixed timing results;
+  raw-record replay comparisons verify input identity and all output denominators
+
+- remove the unused prepared-carrier stream entry point; native replay tests
+  construct complete decoded calls through the production genotype path
+
+- test VCF 4.4 per-allele phase indicators through genotype preparation and
+  haplotype replay, including implicit and explicit leading markers and missing slots
+
+- compare the unpadded DNA start codon when resolving compound-HGVS start loss;
+  synthetic CDS phase padding cannot hide a changed start, and physical block
+  joins reject overlap on either sequence axis
+
+- keep genotype PS views strided, preserving missing/vector-end values without
+  buffer compaction; SQL and installed-R tests cover scalar rejection and padding
+  under null/warn/error for VCF, BCF and compressed VCF
+
+- distinguish HTSlib decoded-capacity overflow from allocation failure, validate
+  projected FORMAT indices before access, and share checked list extension with
+  phased-haplotype output; FORMAT names retain exact header identity
+
+- expose named benchmark rendering from an explicit Rmd without overwriting
+  evidence snapshots; document the drivers for revision-specific reports
+
+- record selected-FORMAT measurements after the buffer-ownership fix: all 18 GIAB
+  runs preserve their denominators and pass complete output comparisons; medians
+  are 1–2% higher than the nearest identical workload
+
+- record the one-draw short/long CDS diagnostic: 6,072 models, 36,432 sample/file
+  lanes and zero comparison failures; retain the default-budget failure, its
+  byte-identical higher-budget retry and the one-cell failure-control receipt
+
+- preserve numeric, genotype and string FORMAT buffers when HTSlib allocation
+  fails, with checked sample-width arithmetic and unchanged caller ownership;
+  shared readers rely on the dependency's tested failure contract
+
+- build the BCF allocation probe only for tests, using CMake's target availability;
+  distribution tests reuse the container-built executable outside Docker
+
+- add explicit short/long CDS-length strata to the exon/UTR conformance generator,
+  including partial terminal codons and sequence sizes around 2,048 bases/codons;
+  independent generator checks cover genomic REF, spliced CDS, GFF and exon phases.
+  The runner records its explicit alignment-cell budget and native-query failures
+
+- retain a third four-draw rare-interaction diagnostic: 26,232 models and 157,392
+  sample/file lanes, zero sequence/count/provenance/mapping/lane failures and all
+  42 corruption controls; grouped metadata and complete phased HGVS remain separate
+
+- preserve selected samples' scalar phase sets when BCF FORMAT storage retains
+  vector-end padding; PS uses the shared numeric cardinality check
+
+- return INFO decode allocation errors without losing the caller's buffer or
+  crashing; the HTSlib vendor patch checks initial allocation, growth and string
+  terminator capacity, with isolated dependency-allocation failure tests
+
+- reject oversized numeric scalar INFO/FORMAT payloads through decode_error_policy;
+  null/warn withhold the affected tag for the record instead of truncating values.
+  Missing elements count toward scalar cardinality; vector-end padding does not
+
+- measure selected genotype FORMAT materialization and calls-unprojected scans on
+  registered GIAB records, with independent slot counts, complete duplicate-preserving
+  comparisons and corruption controls; retain matched HPRC GT-only benchmark results
+
+- select typed per-call FORMAT values with read_geno(format_fields := ['AD', 'DP', 'GQ']),
+  retaining original sample indices, missing elements and records without GT.
+  read_bcf and read_geno share worker-owned FORMAT decoding and output materialization;
+  INFO/FORMAT shapes follow the declared header without tag-name schema repair
+
+- reuse the retained physical CDS projection for decoded singleton phased HGVS,
+  preserving VEP uploaded-feature coordinates and separate shifted/raw-record
+  projections; test complete coding views across strands, exon layouts and CDS phases.
+  Matched singleton benchmarks preserve full outputs and retain per-revision results
+
+- reuse retained source alleles and prepared decoded-event geometry for singleton
+  phased HGVS; raw-record replay retains its distinct full-span interpretation.
+  Matched benchmarks retain full-output fingerprints and report per-revision timing
+
+- benchmark singleton phased replay with HGVS enabled and disabled on identical
+  registered inputs, checking all outputs, source membership and independent-event HGVS
+
+- record the complete 63-target, 6.3-million-trial native property campaign and
+  rare-interaction diagnostics, retaining prior evidence and the failing comparator baseline
+
+- isolate SQLLogicTest runner fixtures from checkout-volume assumptions on Windows;
+  verify successful and failing execution through file, list and directory selection
+
+- compare empty applied-source sets consistently across JSON and native conformance
+  observations, with controls rejecting missing fields, invalid identities and lost sources
+
+- state exact pinned Ensembl VEP 116 revisions as the HGVS acceptance authority in
+  ERRATA.md, including conflicts with separately assessed HGVS recommendations;
+  distinguish sequence equivalence from per-record compatibility and require runnable,
+  independently supported evidence for upstream-defect claims without waiving failures.
+  Ledger entries do not imply a proven upstream defect or upstream acknowledgement
+
+- extend the phased model conformance generator with quota-controlled interacting
+  edits across exon/UTR layouts, retaining the original inputs and RNG stream
+
+- keep caller-buffer FASTA signed-size checks warning-free under Clang on native
+  and 32-bit targets, with unchanged overflow rejection
+
+- record six source-bound phased-replay workloads and one raw-record SQL workload,
+  with three fresh-process passes each, complete fingerprints and explicit
+  output-schema differences from the prior benchmark revision
+
+- fail SQLLogicTest runs on malformed test syntax, with process-status controls
+  for individual files, file lists and directory runs
+
+- fail fasta_nuc queries on reference-fetch errors instead of omitting intervals;
+  reject overflowing FASTA index seek positions and inclusive coordinates
+
+- use pinned VEP-116 genomic placement and source-allele predicates for singleton
+  phased protein HGVS, retaining sequence replay, source records and missing outputs
+
+- bound query-local HGVS reference storage with max_hgvs_reference_bytes and shared
+  caller-buffer faidx retrieval; unavailable genomic context remains explicit
+
+- initialize literal-allele event metadata independently of stack contents
+
+- centralize placed independent-event protein HGVS in an allocation-free native
+  fact builder, preserving fused consequence facts and explicit scratch limits
+
+- document the pinned VEP-116 behavioral authority, anchor-dependent protein HGVS
+  witness and unresolved DuckVEP mismatches in ERRATA.md, distinguishing source
+  identity, sequence equivalence, executable compatibility and HGVS-rule evidence;
+  suspected upstream errors require independent evidence and do not waive failures
+
+- add duckvep_repeat_sequence for bounded expansion of exact ordered repeat
+  descriptions, with explicit summary, missing-input and fractional-count statuses
+
+- test distinct literal repeat haplotypes with equal lengths and summary counts,
+  preserving their protein sequences, HGVS, carriers and source alleles
+
+- exercise breakend parsing with seeded malformed-byte, bracket, coordinate and
+  overflow cases across 72 fault/form cells, including output clearing and recovery
+
+- clarify that phased HGVS retains VEP-116 presentation independently of strict
+  phasing, and that an ok computation status does not certify HGVS nomenclature
+
+- distinguish pinned VEP compatibility from versioned HGVS-rule validation in the
+  conformance guidance, including complete-sequence and termination-codon evidence
+
+- check raw-record rare-GT campaigns by sample/file lane before sequence grouping,
+  using shared sequence/provenance comparison and corruption controls; grouped
+  verdicts and generated input quotas remain separate evidence
+
+- require complete native output accounting and total-count agreement in raw-record
+  and multi-sample haplotype conformance, with controls for unassigned transcript
+  rows, zero-carrier rows, missing output and count mismatches
+
+- add an opt-in R benchmark lane for source-record haplotype SQL, with separate
+  physical-record, sample-call and candidate-row counts, complete output checks
+  and corruption controls; diagnostic runs remain outside recorded baselines
+
+- distinguish complete HGVS-status output from prior-schema projections in phased
+  benchmarks; schema changes remain explicit in cross-revision comparisons
+
+- retain the complete prepared-reference stop when composing phased protein
+  insertions, with full-sequence replay tests across 4,800 repeat-insertion cells
+
+- use prepared reference residues for phased protein HGVS, including legitimate
+  starts and length-changing terminal peptide edits, without changing raw coding
+  facts or inventing source edits. Unrepresentable protein ends remain explicit
+
+- check all retained left/right source anchors across the complete two-codon phased
+  frameshift matrix against their per-record isolated operations; retain sequence
+  equality checks and count anchor-dependent VEP-116 presentation differences
+
+- pin the four equivalent-DNA, differing-HGVSp VEP-116 records in SQL and R tests,
+  including duplicate physical records and decoded/raw-genotype routes
+
+- add an exhaustive stop/next-codon anchor differential against executable VEP 116,
+  retaining missing and differing HGVSp outcomes independently of CDS replay
+
+- expose opt-in phased protein HGVS with explicit result statuses and per-call
+  operation/text limits. Frame-closed protein operations retain source provenance
+  independently of physical coding-block grouping; complete phased annotation
+  and complete terminal-reference HGVS remain unfinished
+
+- exercise whole-protein contrast against curated references in 80 quota-controlled
+  native test cells, including zero DNA edits and frame-restoring paths
+
+- stress terminal peptide edits in 504 quota-controlled native test cells with
+  retained failures, complete protein replay and coverage counts on failed runs
+
+- fuzz ordered pairs of raw GT-pattern/ploidy classes across both strands and
+  twelve source-record geometries, with enforced coverage quotas, retained
+  compatibility disagreements and genotype-corruption controls
+
+- retain local substitution consequences in phased replay when surrounding
+  in-frame edits recreate the complete reference CDS. Unchanged final sequence
+  does not erase changed local spans or contributor provenance
+
+- exercise reference-restoring phased edits in 1,344 quota-controlled native
+  test cells, checking complete sequence replay and changed local coding spans
+
+- use the shared curated reference peptide for raw haplotypes without retained
+  exon-overlapping genotypes. Intronic context retains provenance and does not
+  alter literal CDS replay. Retained exon-overlapping calls use mutation
+  translation even with zero coding edits; reference preparation is worker-local
+
+- verify 23,040 reference-route models with 32 draws per seed in all 360 cells,
+  including alternative starts, internal stops, missing calls and short introns.
+  Retain four complete-oracle grouped-flag disagreements in the repeated
+  69,120-model audit. A fixed original-Runner reproducer checks sample-order
+  dependence independently of DuckVEP; no biological error claim is made
+
+- verify 69,120 phased transcript cases and 414,720 sample/file lanes, including
+  32,256 variable-exon/UTR models and 4,580 observed one- or two-base coding
+  exons. Both seeds pass all 26 corruption controls; matched inputs, complete
+  oracle records and earlier verdicts are unchanged
+
+- add quota-controlled phased replay models with variable exon lengths, split
+  codons, UTRs and CDS/exon-edge source spans. Verify upstream-constructed CDS
+  sequences alongside mapper observations, complete lanes and source provenance
+
+- verify 221,184 sample/file-lane associations across 36,864 quota-controlled
+  shared-transcript cases. Both seeds pass all 25 corruption controls; inputs,
+  complete oracle records and earlier verdicts are unchanged
+
+- compare shared-transcript conformance by sample and file lane, including complete
+  CDS/protein sequences and applied-source identities. Observer and corruption
+  checks guard associations that equal-sequence grouping cannot distinguish
+
+- verify 36,864 rare shared-transcript cases against unchanged Haplosaurus inputs
+  and output: 4,608 incompatibilities resolve with no regressions. Retain the
+  failing evidence and append passing raw-record/context regression campaigns;
+  rendered transition counts use their recorded baseline receipt
+
+- preserve conditional raw haplotype replay when Haplosaurus omits a source
+  crossing coding and noncoding sequence. Contributors expose `source_unmapped`;
+  shared layout validation, CDS extents and coding-overlap REF checks distinguish
+  these omissions from projection errors. Strict decoded replay is unchanged
+
+- record 36,864 clean-build shared-transcript conformance cases with 32 draws
+  in every rare-configuration cell per seed. Retain all 4,608 exon-spanning
+  sequence disagreements; carrier totals, input provenance, mapper observations
+  and thirteen corruption controls per seed pass
+
+- add quota-controlled multi-transcript replay trials across record geometry,
+  genotype, strand and neutral source-context counts. Compare sample-specific
+  sequence counts, applied-source identity sets, input provenance and owned
+  mapper observations; retain every disagreement and comparator control
+
+- record 73,504 passing source-bound raw-record profiles, resolving all 15,953
+  retained failures without a paired regression, plus 38,016 passing paired-context
+  profiles and their fixed/random controls. Preserve historical evidence and add
+  matched decoded-executor benchmarks and 11.2 million native property trials
+
+- snapshot conformance-observer genotype/mapping values at upstream container
+  construction so overlapping transcripts cannot overwrite another transcript's
+  observations; test both strands, unchanged complete output and corruption rejection
+
+- plan raw haplotype replay order from complete supplied source buffers, including
+  reference-only records. Select duplicate sources by their full ordered ALT lists
+  and retain shadowed calls as explicit provenance
+
+- add paired source-context conformance trials with reference-only records
+  before, between and after identical edits, checked cell quotas and retained
+  upstream buffer order and CDS-mapping observations
+
+- record the complete 73,504-profile ordered-replay campaign: 15,953 compatibility
+  failures, including 1,924 previously passing profiles. Preserve every failure,
+  paired input/oracle identity and transition count; add 11.2 million native
+  property trials and matched decoded-executor performance evidence
+
+- replay overlapping raw source records as ordered full-span replacements with
+  bounded native storage, retained REF participation and overwritten-source
+  provenance. Ordered components expose net spans; local SO and displaced-frame
+  facts remain unavailable. Duplicate/tied-record Haplosaurus conformance is open
+
+- record 73,504 source-bound rare-configuration comparisons and 11 million
+  passing native property trials. Retain all 38,749 raw-replay disagreements,
+  including 11,437 available-sequence differences; carrier totals match
+
+- add quota-checked rare source-record trials across edit geometry, strand and
+  raw GT patterns at source ploidies through 64, with retained per-profile failures
+
+- add a source-record geometry audit covering overlapping substitutions,
+  replacements, deletions and insertions on both strands. Full sequence,
+  provenance and count disagreements remain explicit failures
+
+- record clean-build public raw-record replay conformance for 7,020 finite GT
+  profiles and 28,080 per-lane record observations, plus matched decoded-executor
+  benchmarks. Keep the decoded/raw-parser differences as a separate audit
+
+- expose source-record phased replay through `duckvep_haplotypes` with an
+  explicit input mode, original GT text, complete ALT lists, contributor allele
+  ordinals and conditional missing-slot sequence status
+
+- record clean-build native raw-record replay evidence for 7,020 finite GT
+  profiles and matched six-workload performance evidence. Preserve the public
+  decoded-call audit's 6,990 disagreements and all earlier evidence rows
+
+- add source-record interpretations to native phased replay, including explicit
+  conditional undefined-slot deletions and missing-call REF observations.
+  Public SQL/R replay still consumes decoded calls
+
+- add a constant-space native raw-GT parser with direct Haplosaurus-object
+  differential tests. This covers parsing only; public phased replay still
+  consumes decoded calls and does not emulate upstream undefined-slot deletions
+
+- add a finite raw-GT/Haplosaurus audit that retains missing-call, ploidy and
+  lexical-parser disagreements, including raw spellings that HTSlib decodes
+  identically. This does not broaden the phased reader's compatibility claim
+
+- expose local SO masks and coding status for phased physical edit blocks,
+  using the shared coding rules over completed replay. Keep later blocks and
+  mark those starting after the first stop; whole-haplotype SO/HGVS is unfinished
+
+- compute phased-input event identity and transcript/sample ploidy checks once
+  per group, retaining duplicate-call rejection and complete phase domains
+
+- add a registry-staged phased-replay benchmark for initialized native execution
+  and public SQL sort/materialization, with full carrier checks, explicit
+  active-pool counts and separate native-workspace/process-memory measurements
+
+- let native compound-block coding predicates classify restoring indels that
+  recreate reference sequence. Keep physical edits and frame flags even when
+  CDS/protein differences are empty; combined SO/HGVS remains unfinished
+
+- record clean-build, two-seed phased replay conformance with retained intronic
+  contributors: 24,000 carrier comparisons across two policies. These are
+  literal-sequence checks, not combined SO/HGVS or performance evidence
+
+- preserve literal phased CDS replay when carried UTR/intronic events have no
+  coding overlap. Keep their raw contributors and projection statuses; coding
+  projection failures and incomplete phase evidence still suppress sequence.
+  This does not predict altered splicing or complete combined SO/HGVS annotation
+
+- retain a fresh-seed HGVS counterexample and its correction in the conformance
+  ledger. The corrected revision passes 16.5 million property trials, 300,804
+  generated VEP pair comparisons across three seeds and 56,998 ClinVar pairs;
+  these targeted counts do not establish exhaustive or population-level coverage
+
+- fix transcript-end HGVS multiplication handling found by fresh-seed VEP
+  conformance: only a two-copy duplication bypasses allele clipping. Larger
+  copies follow the insertion projection and return no HGVS when its coordinates
+  leave the transcript; remove the incorrect native repeat-formatting path
+
+- record current-code endpoint-refactor evidence: the original 100,268-pair
+  VEP/HGVS campaign and 5.5 million property trials pass. The identical one-core
+  GIAB workload takes 67.35 seconds versus 65.69 seconds, with matching complete
+  output fingerprints; one pass does not establish a statistical regression
+
+- share start/terminal-CDS reconstruction between independent coding events and
+  physical compound blocks through borrowed sequence spans. Missing transcript
+  flanks fail without partial facts; equal-length strings retain physical indel
+  and frame state. Local block facts are not complete phased SO/HGVS annotation
+
+- refresh independent-event state-exploration evidence on the shared coding
+  implementation: the unchanged seed-31415927 corpus matches all 100,268
+  executable-VEP consequence and HGVS pairs, and 5.5 million C property trials
+  satisfy all 255 required nonzero coverage counters. Historical failures remain
+  recorded; this does not certify compound SO/HGVS or refresh other corpus campaigns
+
+- record the complete GIAB independent-annotation workload after sharing indel
+  predicates: 65.69 seconds on one core versus the nearest identical 63.49-second
+  pass, with identical full output fingerprints. This single-pass slowdown is
+  not a statistical estimate or a measurement of phased execution
+
+- share length-changing coding predicates between independent events and actual
+  interior haplotype blocks, including separate reference/alternate coordinates
+  and stops inside transient frame displacement. Single-record start/stop rules
+  remain isolated; compound CDS-start/terminal interactions and whole-haplotype
+  SO/HGVS are not yet implemented. Invalid blocks publish no partial facts
+
+- expose `stop_in_displaced_frame` in phased replay: a shared native edit-geometry
+  check distinguishes a first stop within displaced CDS bases from one after
+  frame restoration. Unavailable sequences return NULL. Raw frame flags and
+  complete contributors remain intact; this is not combined SO/HGVS annotation
+
+- record the current-code complete GIAB independent-annotation workload after
+  the shared block-predicate refactor: 63.49 seconds on one core versus the
+  nearest identical 62.73-second pass, with identical full output fingerprints.
+  This single-pass comparison does not certify phased performance or no regression
+
+- share the existing coding-substitution predicates with actual phased
+  interaction blocks, including alternate protein coordinates shifted by
+  earlier closed indels. Local predicates do not erase an earlier stop or
+  classify indel-bearing blocks as substitutions. The complete-lane diagnostic
+  now retains per-block facts, support status and earlier-stop observations;
+  this is not yet complete phased SO/HGVS annotation
+
+- replace the single peptide-window offset with explicit reference and alternate
+  coordinates shared by coding and HGVS kernels. Phased interaction blocks open
+  their actual sequence windows without inventing a single edit or reapplying
+  the path. Earlier in-frame shifts and local versus whole-path length changes
+  remain distinct; this supplies operands, not completed compound SO/HGVS
+
+- add an independent sample-separability audit for the complementary bcftools
+  observations. A separately receipted diagnostic patch keeps consequence
+  rendering state local to a leaf; the unchanged executable supplies per-sample
+  expectations. Cohort crashes and duplicate-output differences remain failing
+  evidence, and the original cohort audit and pinned VEP oracle are unchanged
+
+- reject compound indels in the native substitution-fact evaluator, including
+  net-zero sets that were incorrectly accepted as substitutions. Sequence replay
+  remains available; combined SO/HGVS is not yet implemented. Add a separate
+  complete-lane support audit with source-built bcftools observations, retaining
+  unsupported results and upstream failures rather than counting them as agreement
+
+- replace the count-only phased `coding_blocks.edit_count` field with
+  `event_indices`, one source event ID per physical edit in CDS order. Repeated
+  IDs preserve multi-island MNV contributions within and across interaction
+  blocks; reverse-strand order and downstream contributors remain traceable.
+  Provenance uses bounded worker storage included in the per-call workspace limit
+
+- expose `protein_differences` from phased replay using the shared bounded
+  alignment kernel. A native reference-peptide builder applies Ensembl-116
+  start, stop and curated peptide-edit rules once per closing transcript.
+  CDS/protein differences reuse traceback and descriptor storage; unknown
+  protein comparisons remain NULL, with complete contributors preserved
+
+- resolve `N`-containing codons in phased proteins when every nucleotide expansion
+  gives the same amino acid, matching BioPerl (for example `GCN` gives alanine).
+  Unresolved codons remain `X`; the native input-ambiguity fact stays explicit.
+  Independent coding predicates retain their conservative `N` handling through
+  an explicit policy in the shared translator
+
+- expose aligned `cds_differences` from phased replay through a host-neutral
+  sequence kernel, with VEP-116 pure-Perl global-alignment scoring and tie order.
+  Per-call `max_alignment_cells` and `max_leaf_differences` bound traceback and
+  result storage; exhaustion errors instead of approximating or dropping runs.
+  Composite coding blocks and contributing events remain separate from alignment
+
+- use one native CDS translator for independent coding contexts and phased
+  replay, deleting the separate stop-truncating implementation. Full translated
+  residues and the first-stop position share one pass; phased SQL output still
+  returns the protein prefix through its first stop and preserves later contributors
+
+- materialize typed GT/phase list elements before native phase preparation.
+  A whole-list cast of `[NULL,NULL]` could leave a constant child vector and
+  misread later missing slots as known alleles or phase, exposed by Windows CI.
+  Missing evidence and all original conformance expectations remain intact
+
+- expose typed `coding_blocks` from phased replay, grouping same-codon edits and
+  frame-displacing/restoring indels. Reference and rebuilt-CDS spans borrow the
+  sequences already held by the kernel; block storage shares the explicit
+  `max_leaf_edits` limit. Missing or failed paths retain provenance and NULL blocks.
+  These composite spans are not normalized HGVS or combined SO consequences
+
+- expose `duckvep_haplotypes(calls_query, model_name, ...)` and its R wrapper:
+  DuckDB derives complete phase domains and sorts explicit transcript/sample
+  calls, while bounded native replay returns shared CDS/protein paths, carrier
+  keys and contributor evidence across chunks. Capacities are per-call options.
+  This alpha surface does not yet emit combined SO, compound HGVS or typed SV
+  composition; missing/ambiguous paths explicitly lack sequence. Noncoding
+  transcripts retain contributors with `outside_cds` and no invented sequence
+
+- remove the retained extension-load database handle from the DuckVEP registry.
+  Query materialization uses its valid retained connection, separately from
+  scan-owned native state. Nested or concurrent model/haplotype preparation
+  returns a named busy error instead of waiting recursively on that connection
+
+- omit empty contigs from DuckVEP's cgranges accelerators, avoiding invalid
+  indexing when known regions have no transcript or regulatory intervals.
+  Skip sorting zero-hit seed lists without storage. The model's separate
+  known-region relation remains authoritative
+
+- add `duckvep_phase_call(...)` over typed decoded GT/PS calls, backed by a
+  host-neutral constant-space phase reducer. Per-call `strict` and
+  `vep116_compat` policies preserve every allele slot, missing calls and explicit
+  ambiguity, and distinguish phase-set lanes from phase-invariant calls that
+  must apply across all phase sets. This prepares carrier input; phased replay
+  consumes the same reducer and includes missing/unphased evidence in path identity
+
+- delete DuckVEP's compatibility-only in-place CDS rebuild. The native kernel
+  now has one linear immutable-input/scratch-output implementation and rejects
+  overlapping reference, edit or allele storage before writing sequence bytes.
+  Scratch capacity covers the final CDS, not intermediate edits; SQL behavior
+  and biological conformance cases are unchanged
+
+- add caller-owned native haplotype replay over the sparse carrier index: copy
+  input alleles once, retain one projection per event/transcript pair, recycle
+  the active genomic window, and return each occupied path with all contributors.
+  Share projected MNV decomposition with independent annotation so unchanged
+  internal bases do not create false edit conflicts. The same kernel backs the
+  public phased SQL/R interface
+
 - delete DuckVEP's 12-column short-tail model interface and the redundant
   `post_cds_bases` column from the Ensembl builder and model fingerprint. Models
   use complete pre-/post-CDS sequence or explicitly lack transcript flanks;

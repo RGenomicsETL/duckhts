@@ -665,6 +665,7 @@ HTSLIB_1.23 {
 } HTSLIB_1.22;
 
 HTSLIB_1.24 {
+    faidx_fetch_seq64_into;
     bcf_itr_querys1;
     bcf_itr_regarray;
     kfgetline;

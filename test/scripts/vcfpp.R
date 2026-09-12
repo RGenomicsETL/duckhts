@@ -347,6 +347,54 @@ manifest[[length(manifest) + 1]] <- render_fixture(
 )
 
 manifest[[length(manifest) + 1]] <- render_fixture(
+  filename = "geno_format.vcf",
+  section = "mapping",
+  purpose = "Selected FORMAT values retain sample and allele ordinals, missing items, absent GT and physical duplicates",
+  contigs = "chrG",
+  format_defs = list(
+    tag_def("GT", "1", "String", "Genotype"), tag_def("PS", "1", "Integer", "Phase set"),
+    tag_def("AD", "R", "Integer", "Allele depths"), tag_def("DP", "1", "Integer", "Depth"),
+    tag_def("GQ", "1", "Integer", "Genotype quality"),
+    tag_def("GL", "G", "Float", "Genotype likelihoods"),
+    tag_def("VI", ".", "Integer", "Variable integers"),
+    tag_def("VF", ".", "Float", "Variable floats"),
+    tag_def("ST", ".", "String", "Variable strings")
+  ),
+  info_defs = list(tag_def("MI", ".", "Integer", "Missing integer ordinals"),
+                   tag_def("MF", ".", "Float", "Missing float ordinals"),
+                   tag_def("MS", ".", "String", "Missing string ordinals")),
+  samples = c("S1", "S2"),
+  records = c(
+    paste0("chrG\t10\tmulti\tA\tC,G\t.\tPASS\tMI=1,.,3;MF=1.5,.,2.5;MS=a,.,b",
+           "\tGT:PS:AD:DP:GQ:GL:VI:VF:ST",
+           "\t./.:10:10,.,5:15:42:0,-1,.,-3,-4,-5:1,.,3:1.5,.,2.5:a,.,b",
+           "\t1|2:20:.,7,3:10:.:.:.:.:."),
+    "chrG\t20\tpartial\tC\tT\t.\tPASS\t.\tGT:AD:DP\t0|1:3,4:7\t./.:4,5:9",
+    rep("chrG\t30\tno_gt\tG\tA\t.\tPASS\t.\tAD:DP:ST\t8,9:17:x\t.:.:.", 2L),
+    "chrG\t40\tno_extra\tT\tC\t.\tPASS\t.\tGT\t0/0\t./.",
+    paste0("chrG\t50\twide\tA\tT\t.\tPASS\t.\tGT:AD:VI:VF:ST",
+           "\t1:32768,100000:", paste(seq_len(257L), collapse = ","), ":3.5:longer,.,tail",
+           "\t0/1:1,2:.,4:.,4.5:z")
+  )
+)
+
+manifest[[length(manifest) + 1]] <- render_fixture(
+  filename = "geno_format_case.vcf",
+  section = "mapping",
+  purpose = "Case-sensitive FORMAT tag identity and case-insensitive DuckDB member collisions",
+  contigs = "chrG",
+  format_defs = list(
+    tag_def("GT", "1", "String", "Genotype"), tag_def("PS", "1", "Integer", "Phase set"),
+    tag_def("gt", "1", "Integer", "Distinct lowercase tag"),
+    tag_def("ps", "1", "Integer", "Distinct lowercase tag"),
+    tag_def("AD", "R", "Integer", "Allele depths"),
+    tag_def("ad", "1", "Integer", "Distinct lowercase tag")
+  ),
+  samples = c("S1"),
+  records = "chrG\t10\tcase\tA\tC\t.\tPASS\t.\tGT:PS:gt:ps:AD:ad\t0|1:10:21:22:3,4:23"
+)
+
+manifest[[length(manifest) + 1]] <- render_fixture(
   filename = "bcf_filter_list_regression.vcf",
   section = "regression",
   purpose = "read_bcf FILTER list-materialization regression for multi-entry and PASS values",
@@ -386,7 +434,7 @@ manifest[[length(manifest) + 1]] <- render_fixture(
 manifest[[length(manifest) + 1]] <- render_fixture(
   filename = "spec_standard_corrections.vcf",
   section = "spec",
-  purpose = "Intentionally misdeclared standard tags that should be corrected by spec-aware bind logic",
+  purpose = "Nonstandard Number declarations remain header-faithful without implicit schema repair",
   contigs = c("chr1"),
   info_defs = list(
     tag_def(
@@ -420,15 +468,52 @@ manifest[[length(manifest) + 1]] <- render_fixture(
 )
 
 # ---------------------------------------------------------------------------
-# Section 6. Manifest and Summary
+# Section 6. Numeric Scalar Cardinality
+# ---------------------------------------------------------------------------
+
+manifest[[length(manifest) + 1]] <- render_fixture(
+  filename = "bcf_scalar_counts.vcf",
+  section = "spec",
+  purpose = "Numeric scalar overflow, missing elements, list controls and per-record recovery",
+  contigs = "chrS",
+  info_defs = list(tag_def("II", "1", "Integer", "Scalar integer"),
+                   tag_def("IF", "1", "Float", "Scalar float"),
+                   tag_def("LI", ".", "Integer", "Integer list")),
+  format_defs = list(tag_def("GT", "1", "String", "Genotype"),
+                     tag_def("SI", "1", "Integer", "Scalar integer"),
+                     tag_def("SF", "1", "Float", "Scalar float"),
+                     tag_def("LF", ".", "Float", "Float list")),
+  samples = c("S1", "S2"),
+  records = c(
+    "chrS\t10\tvalid\tA\tC\t.\tPASS\tII=7;IF=1.5;LI=1,.,3\tGT:SI:SF:LF\t0/1:8:2.5:1,.,3\t1:9:3.5:.",
+    "chrS\t20\tinfo_integer\tA\tC\t.\tPASS\tII=.,9;IF=2.5\tGT:SI:SF\t0/1:10:4.5\t1/1:11:5.5",
+    "chrS\t30\tinfo_float\tA\tC\t.\tPASS\tII=12;IF=1.5,.\tGT:SI:SF\t0/1:13:6.5\t1/1:14:7.5",
+    "chrS\t40\tformat_integer\tA\tC\t.\tPASS\tII=15;IF=8.5\tGT:SI:SF\t0/1:16:9.5\t1/1:17,18:10.5",
+    "chrS\t50\tformat_float\tA\tC\t.\tPASS\tII=19;IF=11.5\tGT:SI:SF\t0/1:20:.,12.5\t1/1:21:13.5",
+    "chrS\t60\tmissing_slots\tA\tC\t.\tPASS\tII=.,.;IF=.,.\tGT:SI:SF\t./.:.,.:.,.\t./.:.:.",
+    "chrS\t70\trecovered\tA\tC\t.\tPASS\tII=22;IF=14.5;LI=.,5\tGT:SI:SF:LF\t0:23:15.5:.,6\t1/1:24:16.5:7,8"
+  )
+)
+
+# ---------------------------------------------------------------------------
+# Section 7. Manifest and Summary
 # ---------------------------------------------------------------------------
 
 manifest_df <- do.call(rbind, manifest)
 
 for (output_dir in output_dirs) {
   manifest_path <- file.path(output_dir, "vcfpp_manifest.tsv")
+  rows <- manifest_df[, c("section", "file", "purpose")]
+  # Other fixture builders contribute rows to the same checked-in manifest.
+  if (file.exists(manifest_path)) {
+    retained <- read.delim(manifest_path, stringsAsFactors = FALSE)
+    stopifnot(identical(names(retained), names(rows)), !anyDuplicated(retained$file))
+    matched <- match(retained$file, rows$file)
+    retained[!is.na(matched), ] <- rows[matched[!is.na(matched)], ]
+    rows <- rbind(retained, rows[!rows$file %in% retained$file, ])
+  }
   write.table(
-    manifest_df[, c("section", "file", "purpose")],
+    rows,
     file = manifest_path,
     sep = "\t",
     row.names = FALSE,

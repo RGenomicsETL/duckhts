@@ -100,12 +100,18 @@ test_reused_file_driver_rejected <- function() {
   con <- DBI::dbConnect(drv)
   on.exit(.connection_test_cleanup(con, drv, dbdir), add = TRUE)
 
-  expect_error(
-    rduckhts_connect(dbdir = dbdir),
-    "already has a live instance"
-  )
+  expect_error(rduckhts_connect(dbdir = dbdir))
+  expect_true(DBI::dbIsValid(drv))
   expect_true(DBI::dbIsValid(con))
   expect_equal(DBI::dbGetQuery(con, "SELECT 42 AS answer")$answer[[1L]], 42)
+  allow_unsigned <- DBI::dbGetQuery(
+    con,
+    paste(
+      "SELECT lower(value) AS value FROM duckdb_settings()",
+      "WHERE name = 'allow_unsigned_extensions'"
+    )
+  )$value[[1L]]
+  expect_identical(allow_unsigned, "false")
 }
 
 test_failed_file_connection_releases_driver <- function() {

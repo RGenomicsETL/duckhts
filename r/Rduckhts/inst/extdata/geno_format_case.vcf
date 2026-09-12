@@ -1,0 +1,12 @@
+##fileformat=VCFv4.2
+##FILTER=<ID=PASS,Description="All filters passed">
+##source=duckhts/test/scripts/vcfpp.R
+##contig=<ID=chrG>
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=PS,Number=1,Type=Integer,Description="Phase set">
+##FORMAT=<ID=gt,Number=1,Type=Integer,Description="Distinct lowercase tag">
+##FORMAT=<ID=ps,Number=1,Type=Integer,Description="Distinct lowercase tag">
+##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Allele depths">
+##FORMAT=<ID=ad,Number=1,Type=Integer,Description="Distinct lowercase tag">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1
+chrG	10	case	A	C	.	PASS	.	GT:PS:gt:ps:AD:ad	0|1:10:21:22:3,4:23

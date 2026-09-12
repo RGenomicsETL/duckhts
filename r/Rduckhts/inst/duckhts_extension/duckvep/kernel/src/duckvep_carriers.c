@@ -14,8 +14,8 @@ static uint64_t call_hash(uint32_t tx, const duckvep_carrier_key_t *key) {
         mix(((uint64_t)key->lane << 1) | key->phase_set_present);
 }
 
-static uint64_t prefix_hash(uint32_t tx, uint32_t parent, uint64_t event) {
-    return mix(((uint64_t)tx << 32) | parent) ^ mix(event);
+static uint64_t prefix_hash(uint32_t tx, uint32_t parent, uint64_t event, uint8_t evidence) {
+    return mix(((uint64_t)tx << 32) | parent) ^ mix(event) ^ mix(evidence);
 }
 
 /* Backshift deletion keeps lookups bounded by live entries rather than a
@@ -65,15 +65,16 @@ static uint32_t find_call(const duckvep_carriers_t *s, uint32_t tx,
 }
 
 static uint32_t find_prefix(const duckvep_carriers_t *s, uint32_t tx, uint32_t parent,
-                           uint64_t event, uint32_t *at) {
+                           uint64_t event, uint8_t evidence, uint32_t *at) {
     uint32_t count = s->buffers.prefix_buckets;
-    uint64_t hash = prefix_hash(tx, parent, event);
+    uint64_t hash = prefix_hash(tx, parent, event, evidence);
     *at = count ? (uint32_t)hash & (count - 1u) : 0u;
     if (!count) return 0u;
     while (s->buffers.prefix_index[*at].id) {
         uint32_t id = s->buffers.prefix_index[*at].id;
         const duckvep_carrier_prefix_t *prefix = &s->buffers.prefixes[id - 1u];
-        if (prefix->transcript == tx && prefix->parent == parent && prefix->event_id == event) return id;
+        if (prefix->transcript == tx && prefix->parent == parent && prefix->event_id == event &&
+            prefix->evidence_flags == evidence) return id;
         *at = (*at + 1u) & (count - 1u);
     }
     return 0u;
@@ -229,11 +230,15 @@ duckvep_carriers_status_t duckvep_carriers_finish(duckvep_carriers_t *s, uint32_
 }
 
 duckvep_carriers_status_t duckvep_carriers_push(
-    duckvep_carriers_t *s, uint32_t tx_index, const duckvep_carrier_key_t *key) {
+    duckvep_carriers_t *s, uint32_t tx_index, const duckvep_carrier_key_t *key, uint8_t evidence) {
     uint32_t tx_at, call_at, prefix_at;
     if (!s || !s->initialized || !key || !s->have_event || s->finished || s->pending ||
         tx_index >= s->model->transcript_count || !key->lane || key->lane > key->ploidy ||
-        key->phase_set_present > 1u || s->model->chrom_id[tx_index] != s->chrom ||
+        key->phase_set_present > 1u || !evidence ||
+        (evidence & ~(DUCKVEP_CARRIER_CALLED | DUCKVEP_CARRIER_MISSING |
+                      DUCKVEP_CARRIER_UNPHASED | DUCKVEP_CARRIER_CONDITIONAL |
+                      DUCKVEP_CARRIER_REFERENCE_REPLAY)) ||
+        s->model->chrom_id[tx_index] != s->chrom ||
         s->model->end1[tx_index] < s->pos1) return DUCKVEP_CARRIERS_INVALID_ARG;
     uint32_t tx_id = find_transcript(s, tx_index, &tx_at);
     int new_tx = !tx_id;
@@ -248,7 +253,7 @@ duckvep_carriers_status_t duckvep_carriers_push(
     if (parent && s->buffers.prefixes[parent - 1u].event_id == s->event_id)
         return DUCKVEP_CARRIERS_DUPLICATE_CALL;
     if (!call_id && !s->free_call) return DUCKVEP_CARRIERS_CALL_FULL;
-    uint32_t prefix_id = find_prefix(s, tx_id, parent, s->event_id, &prefix_at);
+    uint32_t prefix_id = find_prefix(s, tx_id, parent, s->event_id, evidence, &prefix_at);
     if (!prefix_id && !s->free_prefix) return DUCKVEP_CARRIERS_PREFIX_FULL;
 
     /* Every capacity and key check precedes publication of any new slot. */
@@ -266,13 +271,14 @@ duckvep_carriers_status_t duckvep_carriers_push(
         s->free_prefix = prefix->next_free;
         memset(prefix, 0, sizeof(*prefix));
         prefix->event_id = s->event_id;
+        prefix->evidence_flags = evidence;
         prefix->transcript = tx_id;
         prefix->parent = parent;
         prefix->depth = parent ? s->buffers.prefixes[parent - 1u].depth + 1u : 1u;
         prefix->next_transcript = tx->first_prefix;
         tx->first_prefix = prefix_id;
         s->buffers.prefix_index[prefix_at] = (duckvep_carrier_bucket_t){
-            prefix_hash(tx_id, parent, s->event_id), prefix_id};
+            prefix_hash(tx_id, parent, s->event_id, evidence), prefix_id};
         s->prefix_count++;
     }
     if (!call_id) {
@@ -328,7 +334,7 @@ duckvep_carriers_status_t duckvep_carriers_next_leaf(
 }
 
 duckvep_carriers_status_t duckvep_carriers_leaf_events(
-    const duckvep_carriers_t *s, uint32_t id, uint64_t *events,
+    const duckvep_carriers_t *s, uint32_t id, duckvep_carrier_event_t *events,
     size_t capacity, size_t *required) {
     if (required) *required = 0u;
     if (!s || !s->initialized || !s->closing || !required || !id ||
@@ -340,7 +346,7 @@ duckvep_carriers_status_t duckvep_carriers_leaf_events(
     size_t at = *required;
     while (id) {
         prefix = &s->buffers.prefixes[id - 1u];
-        events[--at] = prefix->event_id;
+        events[--at] = (duckvep_carrier_event_t){prefix->event_id, prefix->evidence_flags};
         id = prefix->parent;
     }
     return DUCKVEP_CARRIERS_OK;
@@ -372,7 +378,7 @@ duckvep_carriers_status_t duckvep_carriers_release(duckvep_carriers_t *s) {
     while (id) {
         duckvep_carrier_prefix_t *prefix = &s->buffers.prefixes[id - 1u];
         uint32_t next = prefix->next_transcript;
-        (void)find_prefix(s, tx_id, prefix->parent, prefix->event_id, &at);
+        (void)find_prefix(s, tx_id, prefix->parent, prefix->event_id, prefix->evidence_flags, &at);
         remove_bucket(s->buffers.prefix_index, s->buffers.prefix_buckets, at);
         prefix->transcript = 0u;
         prefix->next_free = s->free_prefix;

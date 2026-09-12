@@ -4,20 +4,23 @@
 prepare_geno_fixtures <- function() {
   stopifnot(nzchar(Sys.which("bcftools")), nzchar(Sys.which("bgzip")))
   run <- function(args) stopifnot(system2("bcftools", shQuote(args)) == 0L)
-  source <- "test/data/geno_calls.vcf"
-  stopifnot(file.exists(source))
-  lines <- readLines(source)
-  bcf <- sub("vcf$", "bcf", source)
-  vcf <- paste0(source, ".gz")
-  run(c("view", "--no-version", "-Ob", "-o", bcf, source))
-  run(c("index", "-f", bcf))
-  stopifnot(system2("bgzip", c("-c", shQuote(source)), stdout = vcf) == 0L)
-  run(c("index", "-f", "-t", vcf))
-  outputs <- c(source, bcf, paste0(bcf, ".csi"), vcf, paste0(vcf, ".tbi"))
-  expected <- system2("bcftools", c("view", "-H", source), stdout = TRUE)
-  for (path in c(bcf, vcf)) {
-    stopifnot(identical(system2("bcftools", c("view", "-H", path), stdout = TRUE), expected))
+  outputs <- character()
+  for (source in c("test/data/geno_calls.vcf", "test/data/geno_format.vcf", "test/data/geno_format_case.vcf",
+                   "test/data/bcf_scalar_counts.vcf")) {
+    stopifnot(file.exists(source))
+    bcf <- sub("vcf$", "bcf", source)
+    vcf <- paste0(source, ".gz")
+    run(c("view", "--no-version", "-Ob", "-o", bcf, source))
+    run(c("index", "-f", bcf))
+    stopifnot(system2("bgzip", c("-c", shQuote(source)), stdout = vcf) == 0L)
+    run(c("index", "-f", "-t", vcf))
+    outputs <- c(outputs, source, bcf, paste0(bcf, ".csi"), vcf, paste0(vcf, ".tbi"))
+    expected <- system2("bcftools", c("view", "-H", source), stdout = TRUE)
+    for (path in c(bcf, vcf)) {
+      stopifnot(identical(system2("bcftools", c("view", "-H", path), stdout = TRUE), expected))
+    }
   }
+  lines <- readLines("test/data/geno_calls.vcf")
   header <- lines[startsWith(lines, "#")]
   for (kind in c("ps_type", "ps_number", "ps_width", "gt_allele")) {
     selected <- header
@@ -33,7 +36,9 @@ prepare_geno_fixtures <- function() {
     writeLines(c(selected, record), text)
     binary <- sub("vcf$", "bcf", text)
     run(c("view", "--no-version", "-Ob", "-o", binary, text))
-    outputs <- c(outputs, text, binary)
+    compressed <- paste0(text, ".gz")
+    stopifnot(system2("bgzip", c("-c", shQuote(text)), stdout = compressed) == 0L)
+    outputs <- c(outputs, text, binary, compressed)
   }
   # Reheader changes only the declared PS type, retaining the CHAR payload in
   # the BCF blocks. This must not reach HTSlib's integer convenience decoder.
@@ -44,8 +49,10 @@ prepare_geno_fixtures <- function() {
   run(c("reheader", "-h", temporary_header, "-o", payload, "test/data/geno_ps_type.bcf"))
   outputs <- c(outputs, payload)
   stopifnot(all(file.copy(outputs, "r/Rduckhts/inst/extdata", overwrite = TRUE)))
-  # Explicit VCF 4.4 phase-prefix witnesses stay textual: the locally installed
-  # bcftools encoder may implement an older VCF version than bundled HTSlib.
-  stopifnot(file.copy("test/data/geno_vcf44.vcf", "r/Rduckhts/inst/extdata", overwrite = TRUE))
+  # Lexical VCF 4.4 witnesses stay textual: HTSlib formatting can canonicalize
+  # leading phase markers and allele spelling needed by the raw-GT tests.
+  stopifnot(all(file.copy(c("test/data/geno_vcf44.vcf", "test/data/geno_phase_partial.vcf",
+    "test/data/geno_raw_gt.vcf"),
+    "r/Rduckhts/inst/extdata", overwrite = TRUE)))
 }
 prepare_geno_fixtures()

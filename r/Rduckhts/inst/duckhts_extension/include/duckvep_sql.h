@@ -8,5 +8,6 @@
 
 bool duckvep_register_sql_parts(duckdb_connection connection,
 	const char *const *parts, size_t part_count);
+bool duckvep_register_phase_call(duckdb_connection connection);
 
 #endif

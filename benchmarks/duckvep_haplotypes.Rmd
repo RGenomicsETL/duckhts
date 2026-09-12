@@ -1,0 +1,470 @@
+---
+title: "Phased replay: native stream and public SQL"
+output: github_document
+---
+
+<!-- duckvep_haplotypes.md is generated from duckvep_haplotypes.Rmd. -->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+root <- normalizePath(Sys.getenv("DUCKHTS_REPO_ROOT", getwd()), mustWork = TRUE)
+history_path <- file.path(root, "benchmarks/data/duckvep_haplotypes.csv")
+hash_columns <- names(read.csv(history_path, nrows = 0L))
+hash_columns <- hash_columns[grepl("(^source_revision$|_(xor|sum)_hash$|^(xor|sum)_hash$)", hash_columns)]
+history <- read.csv(history_path, colClasses = setNames(rep("character", length(hash_columns)), hash_columns))
+stopifnot(all(history$extension_build_binding == "htslib_distclean_make_release"),
+  !anyDuplicated(history[c("source_revision", "transcripts", "samples", "overlap", "mode", "pass")]),
+  all(history$mode %in% c("native", "sql", "sql_records", "sql_singletons", "sql_singletons_hgvs")))
+if (!"output_contract" %in% names(history)) history$output_contract <- NA_character_
+history$output_contract[is.na(history$output_contract)] <- "literal_replay"
+nominal_contract <- endsWith(history$output_contract, "_nominal_length_diff")
+history$hgvs_so_contract <- sub("_nominal_length_diff$", "", history$output_contract)
+for (field in c("json_bytes", "xor_hash", "sum_hash")) {
+  projection <- paste0("replay_", field)
+  if (!projection %in% names(history)) history[[projection]] <- history[[field]]
+  missing <- is.na(history[[projection]])
+  history[[projection]][missing] <- history[[field]][missing]
+  local_so <- paste0("local_so_", field)
+  if (!local_so %in% names(history)) history[[local_so]] <- NA
+  old_contract <- history$output_contract == "local_coding_block_so"
+  history[[local_so]][old_contract] <- history[[field]][old_contract]
+  hgvs_so <- paste0("hgvs_so_", field)
+  if (!hgvs_so %in% names(history)) history[[hgvs_so]] <- NA
+  history[[hgvs_so]][!nominal_contract] <- history[[field]][!nominal_contract]
+  non_hgvs <- paste0("non_hgvs_", field)
+  if (!non_hgvs %in% names(history)) history[[non_hgvs]] <- NA
+  history[[non_hgvs]][!nominal_contract] <- history[[local_so]][!nominal_contract]
+}
+stopifnot(!anyNA(history[nominal_contract, c("json_bytes", "xor_hash", "sum_hash",
+  "hgvs_so_json_bytes", "hgvs_so_xor_hash", "hgvs_so_sum_hash",
+  "non_hgvs_json_bytes", "non_hgvs_xor_hash", "non_hgvs_sum_hash")]))
+singleton_history <- history[history$mode %in% c("sql_singletons", "sql_singletons_hgvs"), ]
+history <- history[history$mode %in% c("native", "sql", "sql_records"), ]
+revisions <- unique(history$source_revision)
+stopifnot(length(revisions) >= 2L)
+revision <- tail(revisions, 1L)
+baseline_revision <- tail(revisions, 2L)[1L]
+keys <- c("transcripts", "samples", "overlap", "mode")
+groups <- split(history, interaction(history[c("source_revision", keys)], drop = TRUE))
+summary <- do.call(rbind, lapply(groups, function(x) {
+  stopifnot(nrow(x) == 3L, all(sort(x$pass) == 1:3))
+  data.frame(x[1L, c("source_revision", keys)], min_s = min(x$seconds), median_s = median(x$seconds),
+    max_s = max(x$seconds), max_process_rss_mib = max(x$peak_process_rss_kib) / 1024)
+}))
+comparison <- merge(
+  subset(summary, source_revision == baseline_revision & mode %in% c("sql", "sql_records")),
+  subset(summary, source_revision == revision & mode %in% c("sql", "sql_records")),
+  by = keys, suffixes = c("_before", "_after"))
+comparison$median_change_percent <- 100 * (comparison$median_s_after / comparison$median_s_before - 1)
+comparison <- comparison[do.call(order, comparison[keys]), ]
+current <- history[history$source_revision == revision, ]
+summary <- summary[summary$source_revision == revision, setdiff(names(summary), "source_revision")]
+summary <- summary[do.call(order, summary[keys]), ]
+core <- current[current$mode == "native" & current$pass == 1L, ]
+core <- core[order(core$transcripts, core$samples, core$overlap), ]
+public <- current[current$mode == "sql" & current$pass == 1L, ]
+public <- public[order(public$transcripts, public$samples, public$overlap), ]
+raw <- current[current$mode == "sql_records" & current$pass == 1L, ]
+stopifnot(identical(as.list(core[c("transcripts", "samples", "overlap")]),
+  as.list(public[c("transcripts", "samples", "overlap")])))
+fingerprint_keys <- c("transcripts", "samples", "overlap")
+fingerprints <- unique(history[history$mode == "sql", c(fingerprint_keys, "output_contract",
+  "output_leaves", "output_carriers", "cds_bytes", "protein_bytes", "physical_edits",
+  "contributors", "blocks", "json_bytes", "xor_hash", "sum_hash")])
+replay_fingerprints <- unique(history[history$mode == "sql", c(fingerprint_keys,
+  "replay_json_bytes", "replay_xor_hash", "replay_sum_hash")])
+local_so_fingerprints <- unique(history[history$mode == "sql" & history$hgvs_so_contract %in%
+  c("local_coding_block_so", "local_coding_block_so_hgvs_status"), c(fingerprint_keys,
+    "local_so_json_bytes", "local_so_xor_hash", "local_so_sum_hash")])
+hgvs_so_fingerprints <- unique(history[history$mode == "sql", c(fingerprint_keys,
+  "hgvs_so_contract", "hgvs_so_json_bytes", "hgvs_so_xor_hash", "hgvs_so_sum_hash")])
+stopifnot(nrow(comparison) == nrow(public) + nrow(raw),
+  !anyDuplicated(fingerprints[c(fingerprint_keys, "output_contract")]),
+  !anyNA(local_so_fingerprints), !anyDuplicated(local_so_fingerprints[fingerprint_keys]),
+  !anyNA(hgvs_so_fingerprints),
+  !anyDuplicated(hgvs_so_fingerprints[c(fingerprint_keys, "hgvs_so_contract")]),
+  !anyDuplicated(replay_fingerprints[fingerprint_keys]))
+compared_contracts <- unique(history$output_contract[history$mode == "sql" &
+  history$source_revision %in% c(revision, baseline_revision)])
+same_contract <- length(compared_contracts) == 1L
+raw_same_contract <- length(unique(history$output_contract[history$mode == "sql_records" &
+  history$source_revision %in% c(revision, baseline_revision)])) == 1L
+raw_fingerprints <- unique(history[history$mode == "sql_records", c(fingerprint_keys,
+  "output_contract", "input_physical_records", "input_record_sample_calls",
+  "input_candidate_sample_rows", "output_leaves", "output_carriers", "cds_bytes",
+  "protein_bytes", "physical_edits", "contributors", "blocks", "json_bytes", "xor_hash", "sum_hash")])
+stopifnot(!anyNA(raw_fingerprints),
+  !anyDuplicated(raw_fingerprints[c(fingerprint_keys, "output_contract")]))
+raw_matched <- unique(history[history$mode == "sql_records" &
+  history$source_revision %in% c(revision, baseline_revision),
+  c(fingerprint_keys, "threads", "cpu_affinity", "duckdb_version", "hgvs_so_contract",
+    "reference_sha256", "events_sha256", "input_physical_records", "input_record_sample_calls",
+    "input_candidate_sample_rows", "output_leaves", "output_carriers", "cds_bytes",
+    "protein_bytes", "physical_edits", "contributors", "blocks",
+    "hgvs_so_json_bytes", "hgvs_so_xor_hash", "hgvs_so_sum_hash")])
+stopifnot(!anyNA(raw_matched), !anyDuplicated(raw_matched[fingerprint_keys]))
+```
+
+Compound-replay source: `r revision`; same-input baseline: `r baseline_revision`.
+Native measurements cover literal phased replay. SQL materializes all current
+fields, including local coding-block SO. HGVS generation is disabled;
+whole-haplotype SO/HGVS is unfinished and its computation is not timed here.
+Native and decoded SQL consume standalone ALT events and decoded calls.
+The additional source-record SQL lane measures literal GT parsing and replay;
+standalone native raw-record execution and conditional source omissions are not timed.
+All runs use one thread pinned to CPU 2 on an Intel Core i5-13500, DuckDB 1.5.3,
+and a source-bound clean extension build. The native bridge uses the same kernel
+sources compiled with `-O3 -DNDEBUG`; receipts retain compiler/version, binary and
+fixture hashes, worker jobs, GNU-time logs and complete result fingerprints.
+
+## Workload and verification
+
+The [registry](../r/duckhtsbench/inst/benchmark_registry.tsv) stages two committed,
+checksum-verified fixtures without network access: a 180-base CDS and four ALT
+events. Two substitutions share a codon; an insertion/deletion pair displaces
+and restores the frame. Four diploid sample templates repeat across the cohort,
+producing exactly three occupied paths per transcript. Strict phase uses PS=10.
+Transcript groups share genomic intervals, with non-overlapping groups 1,000
+bases apart; `overlap` is the number of simultaneously active transcripts.
+
+This deliberately favourable prefix-sharing workload is not a real population,
+a long-transcript benchmark, a reader benchmark, or evidence for arbitrary phase
+and structural configurations. Native input is a factorized, already-ordered
+feed; SQL input is its complete event/candidate/sample relation stored in hash
+order. Both retain every source identity and called carrier.
+The fixture contains only canonical DNA. It exercises shared translation and
+materialization paths, not the cost of N-rich annotation or consensus resolution.
+
+Before timing, native validation checks every transcript, complete CDS/protein
+against independently rebuilt/Biostrings-translated sequences, contributors and
+sample/lane/PS/ploidy membership. SQL validation compares the full carrier
+multiset with decoded input, checks sequences and edit provenance, and rejects an
+injected duplicate. Native validation also rejects a corrupted expected sequence.
+Every measured decoded pass must retain all common native/SQL denominators and SQL's full,
+canonicalized nested-row fingerprint; failed runs are not promoted. Full fingerprints
+must also agree across revisions sharing an output contract. Local coding-block
+and literal-replay projections provide separate comparisons with their recorded
+output contracts; full current output is always checked. Contracts ending in
+`_nominal_length_diff` include the exact signed sum of source replacement-length
+changes. The verifier calculates that sum from fixture alleles, independently of
+replayed CDS and block lengths, and rejects a +3 corruption that preserves frame
+category. Historical contracts do not certify this numeric field.
+
+`hgvs_so_*` fingerprints retain every local-SO/HGVS-schema field and exclude only
+`nominal_length_diff`. `local_so_*` additionally excludes `hgvsp` and
+`hgvsp_status`; `replay_*` also projects each block to its literal replay fields.
+`non_hgvs_*` retains nominal length for the current HGVS-on/off comparison.
+The recorded contract determines which fields were measured; historical full
+fingerprints are used only for projections identical to their recorded schema.
+
+```{r denominators}
+knitr::kable(core[c("transcripts", "samples", "overlap", "input_records",
+  "projected_events", "input_calls", "output_leaves", "output_carriers",
+  "prefixes_created", "translated_bases")], row.names = FALSE)
+```
+
+`input_records` counts distinct source ALT events, not candidate/sample rows.
+`projected_events` counts event/transcript pairs. `output_carriers` counts
+memberships of sample/lane keys in completed leaves; `output_leaves` counts
+unique occupied prefixes, not unique peptide strings. Prefix creation and active
+pool peaks below are observed in the native stream, not inferred SQL counters.
+
+## Timing and process memory
+
+```{r timing}
+knitr::kable(summary, row.names = FALSE, digits = 3)
+```
+
+Both compared revisions return each block's local SO mask, coding status and
+position relative to the first stop. A shared coding context evaluates physical
+blocks on completed replay. `r if (same_contract) "Full-output fingerprints and input/output denominators match across the compared configurations." else "The recorded output contracts differ. Named prior-schema fingerprints and input/output denominators match, but complete rows have different schemas and byte counts. This is a same-input comparison, not identical-output work."`
+The native count sink omits local SO evaluation. HGVS-enabled performance
+requires a separate workload.
+
+```{r sql-comparison}
+knitr::kable(comparison[comparison$mode == "sql", c("transcripts", "samples", "overlap", "median_s_before",
+  "median_s_after", "median_change_percent", "max_process_rss_mib_before",
+  "max_process_rss_mib_after")], row.names = FALSE, digits = 3)
+```
+
+Each recorded pass uses a fresh process and a full warm-up. Native timing starts
+after workspace initialization and includes ordered-feed construction, GT routing,
+projection, replay/translation, block construction and a count/length sink. It
+does **not** include alignment, DuckDB, or nested output materialization.
+
+SQL timing covers `CREATE OR REPLACE TABLE ... AS SELECT * FROM duckvep_haplotypes(...)`:
+preparation, phase-domain discovery, mandatory sort, workspace initialization,
+replay, both sequence alignments, local coding-block SO and **all** nested output
+columns. Input/model
+staging is outside timing. The warm-up output table is replaced by the measured
+table. JSON sizing and fingerprint aggregation occur afterward, not in the timer;
+no file-output throughput is claimed.
+
+GNU `/usr/bin/time -v` measures whole-process maximum RSS, including the R host,
+model/input tables, warm-up, measured materialization and post-run aggregates.
+The heavier SQL correctness audit runs separately and is excluded from recorded
+RSS. RSS is not an isolated operator allocation measurement. These two execution
+scopes are intentionally different: their times are not a speedup comparison.
+Post-run fingerprint aggregates depend on the output schema, so a schema change
+also prevents interpreting process RSS as an identical-work memory comparison.
+
+```{r output-size}
+knitr::kable(public[c("transcripts", "samples", "overlap", "output_leaves",
+  "cds_bytes", "protein_bytes", "json_bytes")], row.names = FALSE)
+```
+
+CDS/protein bytes count the sequence views returned once per occupied leaf.
+JSON bytes are the measured UTF-8 size of complete canonicalized SQL rows,
+including carriers, contributors, blocks and differences; they are not bytes
+written to disk.
+
+## Sparse native state
+
+```{r state}
+knitr::kable(core[c("transcripts", "samples", "overlap", "peak_transcripts",
+  "peak_carriers", "peak_prefixes", "peak_events", "peak_projections",
+  "peak_allele_bytes", "workspace_bytes", "model_bytes")], row.names = FALSE)
+```
+
+Native workspace bytes count actual preallocated buffer capacities and state,
+separately from immutable model allocations. The fixed fixture is borrowed;
+validation additionally owns `transcripts + 2 * samples` bytes outside the timed
+kernel workspace. Peak pool occupancy is measured by the production stream.
+Increasing total transcripts at fixed cohort size and overlap does not increase
+that workspace; immutable model storage still grows with transcript count.
+
+Both paths use the same active-pool limits. SQL additionally allows 65,536
+alignment cells and 64 differing runs per axis, with a 64 MiB native workspace
+ceiling and a 4 GB DuckDB memory limit. SQL input, sorting and output memory belong
+to DuckDB and may grow with the complete relation. The process RSS table must not
+be presented as a constant-total-memory guarantee.
+
+This same-input comparison retains three repeated passes per workload and revision.
+Neither compared campaign deliberately overlapped conformance work. Both ran at
+different times on a shared machine. CPU pinning does not isolate memory,
+thermal or scheduling effects, so timing differences do not establish the
+cost of the code change.
+One machine and this deliberately shared synthetic cohort do not establish
+production throughput, statistical significance or a general absence of regression.
+Whole-haplotype SO/HGVS and typed structural composition require their own measurements.
+
+## Reproduction
+
+Run [the R driver](duckvep_haplotypes.R) with a clean source-bound extension receipt
+from the shared evidence builder; it stages inputs through `duckhtsbench`.
+All six configurations above use `--passes 3 --cpu 2`. To prepare the receipt
+from a clean checkout (no network access in the build):
+
+```{r clean-build, eval=FALSE, echo=TRUE}
+source("scripts/duckvep_evidence.R")
+root <- normalizePath(".")
+revision <- duckvep_evidence_revision(root)
+extension <- duckvep_evidence_build_extension(root,
+  "build/release/duckhts.duckdb_extension", revision)
+duckvep_evidence_write_extension_receipt("/tmp/haplotype-extension.tsv", revision, extension)
+```
+
+Pass `--extension-receipt /tmp/haplotype-extension.tsv` to the R driver. For a
+network-free smoke test without a clean-build certificate:
+
+```{bash smoke, eval=FALSE, echo=TRUE}
+Rscript benchmarks/duckvep_haplotypes.R \
+  --transcripts 16 --samples 4 --overlap 4 --passes 1 --diagnostic
+```
+
+Diagnostic results are retained but are not accepted into the recorded baseline.
+
+### Raw source-record SQL lane
+
+`--modes sql_records` measures the public `input_mode := 'source_records'` path
+under `vep116_compat`; the default `--modes native,sql` selects the decoded lanes
+reported above. All modes use the same registered reference and four biallelic
+events. Source rows carry the ordered ALT list and literal diploid GT text.
+The timed query includes source validation, replay-order planning, raw-GT parsing,
+allele expansion, sorting, replay and full nested output. File decoding and
+model/input staging are outside timing. This is not a standalone raw native
+kernel benchmark or a rare-configuration conformance campaign.
+
+The source lane returns four paths per transcript and two carriers per
+sample/transcript, including the occupied reference path. Decoded lanes return
+three paths per transcript and 7/4 carriers per sample/transcript.
+Complete CDS/protein strings, carrier
+multisets, contributor IDs, ALT ordinals and block/edit counts are checked
+against the fixture. Corruption controls cover changed CDS, protein,
+missing CDS, carrier identity, missing ploidy, contributor identity, missing
+ALT ordinal, invented HGVS, changed HGVS status, invalid source GT and duplicate output. They run in the separate
+correctness worker. Contracts with `nominal_length_diff` also reject a signed
+length change of +3 while all sequence flags remain untouched.
+
+`input_physical_records`, `input_record_sample_calls` and
+`input_candidate_sample_rows` are separately counted from the staged source
+relation. REF, ALT and undefined-slot descriptors are execution work, not extra
+physical records. For this biallelic workload the raw lane reserves 13 active
+event slots, `12 * overlap + 1` projection slots and 192 allele bytes; other
+limits match the decoded SQL lane. Whole-process RSS includes both the decoded
+fixture table and the derived source table. Output fingerprints include the
+raw lane's complete schema and reference paths; they are not substituted for
+decoded-output fingerprints.
+
+```{bash source-record-smoke, eval=FALSE, echo=TRUE}
+Rscript benchmarks/duckvep_haplotypes.R \
+  --transcripts 16 --samples 4 --overlap 4 --passes 1 \
+  --modes native,sql,sql_records --diagnostic
+```
+
+The source-bound raw lane uses three fresh-process passes at the current source,
+with one thread pinned to CPU 2. Its timing and process RSS appear in the timing
+table above; its input and output denominators are:
+
+```{r raw-denominators}
+knitr::kable(raw[c("transcripts", "samples", "overlap", "input_physical_records",
+  "input_record_sample_calls", "input_candidate_sample_rows", "output_leaves", "output_carriers")],
+  row.names = FALSE)
+knitr::kable(raw[c("output_leaves", "cds_bytes", "protein_bytes", "json_bytes")], row.names = FALSE)
+```
+
+The raw-lane comparison uses the same source revisions as the decoded comparison.
+`r if (raw_same_contract) "Input hashes, complete output fingerprints, all listed denominators, thread count and output contract match between revisions." else "Input hashes, all listed denominators, thread count and the complete prior local-SO/HGVS-schema projection match. The full output contracts differ; their complete byte counts and fingerprints remain separate."`
+Different output denominators preclude
+treating raw versus decoded time as an implementation speedup.
+
+```{r raw-comparison}
+knitr::kable(comparison[comparison$mode == "sql_records", c("transcripts", "samples", "overlap",
+  "median_s_before", "median_s_after", "median_change_percent", "max_process_rss_mib_before",
+  "max_process_rss_mib_after")], row.names = FALSE, digits = 3)
+```
+
+## Singleton HGVS materialization
+
+`--modes sql_singletons,sql_singletons_hgvs` compares the same decoded input with
+protein HGVS disabled and enabled. Each sample carries one of the four registered
+ALT events heterozygously. Four paths per transcript retain all non-reference
+carriers; reference paths remain implicit. The two substitutions and two
+frame-changing indels exercise the independent-event HGVS consumer, not compound
+HGVS. This is a different carrier distribution from the compound replay workload
+above; their timings are not interchangeable.
+
+The driver repeats the registered reference CDS at the model's genomic coordinates,
+pads the inter-transcript sequence with A, and indexes that per-run FASTA. Both
+modes load exactly the same model and reference. A transcript has no UTR: explicitly
+empty pre-/post-CDS sequences distinguish a complete zero-length flank from an
+unavailable flank. Reference/model/input preparation is outside timing. The timed
+query includes sorting, bounded query initialization, sequence replay, differences,
+local coding facts and every output column. HGVS-enabled execution also opens its
+query-local faidx handle, retrieves genomic context and computes protein HGVS.
+
+Each mode has a separate correctness process, followed by three fresh-process
+measurement passes with a full warm-up. Direct sequence replacement and Biostrings
+translation check every expected CDS/protein. Multiset comparisons check complete
+carrier identities, phase sets, ploidies and source-event membership. The enabled
+path also compares every event/transcript HGVSp with independent annotation, allowing
+only its documented prediction-parenthesis difference. That internal consistency
+check is not an independent VEP oracle or compound-HGVS certificate. The four fixed
+event shapes do not measure broad HGVS conformance.
+
+Shared output corruptions and duplicate-output insertion must fail the
+correctness process. Nominal-length contracts also reject a same-frame +3
+numeric corruption. HGVS-enabled checks additionally reject missing HGVS and
+malformed internal parentheses. Whole-output byte counts and fingerprints must match every
+pass of the same mode. All non-HGVS fields must match between modes. HGVS-on/off
+complete outputs intentionally differ and are never reported as identical work.
+The worker receipts retain the derived FASTA/index, actual versus independent HGVS,
+source/binary/input hashes, jobs and process logs. Process RSS includes setup,
+warm-up and post-query aggregates, not just native workspace.
+
+```{r singleton-hgvs, results='asis'}
+if (!nrow(singleton_history)) {
+  cat("No source-bound singleton HGVS measurement is recorded.\n")
+} else {
+  singleton_revision <- tail(unique(singleton_history$source_revision), 1L)
+  measured <- singleton_history[singleton_history$source_revision == singleton_revision, ]
+  stopifnot(all(measured$threads == 1L), all(measured$cpu_affinity == 2L),
+    all(measured$duckdb_version == "1.5.3"),
+    all(measured$output_leaves == measured$transcripts * 4),
+    all(measured$output_carriers == measured$transcripts * measured$samples),
+    all(measured$input_candidate_sample_rows == measured$transcripts * measured$samples * 4),
+    all(measured$input_physical_records == measured$transcripts / measured$overlap * 4),
+    all(measured$input_record_sample_calls ==
+      measured$transcripts / measured$overlap * measured$samples * 4))
+  configuration <- c("transcripts", "samples", "overlap")
+  mode_keys <- c(configuration, "mode")
+  non_hgvs <- unique(measured[c(configuration, "output_leaves", "output_carriers",
+    "cds_bytes", "protein_bytes", "physical_edits", "contributors", "blocks",
+    "non_hgvs_json_bytes", "non_hgvs_xor_hash", "non_hgvs_sum_hash")])
+  stopifnot(!anyNA(non_hgvs), !anyDuplicated(non_hgvs[configuration]))
+  full <- unique(measured[c(mode_keys, "json_bytes", "xor_hash", "sum_hash")])
+  stopifnot(!anyNA(full), !anyDuplicated(full[mode_keys]))
+  timings <- do.call(rbind, lapply(split(measured, interaction(measured[mode_keys], drop = TRUE)),
+    function(x) {
+      stopifnot(nrow(x) == 3L, identical(sort(x$pass), 1:3))
+      data.frame(x[1L, mode_keys], median_s = median(x$seconds),
+        min_s = min(x$seconds), max_s = max(x$seconds),
+        peak_process_rss_mib = max(x$peak_process_rss_kib) / 1024)
+    }))
+  paired <- merge(timings[timings$mode == "sql_singletons", ],
+    timings[timings$mode == "sql_singletons_hgvs", ], by = configuration,
+    suffixes = c("_disabled", "_enabled"))
+  stopifnot(nrow(paired) * 2L == nrow(timings))
+  cat("Measured source: `", singleton_revision,
+    "`. One thread, CPU 2, Intel i5-13500, DuckDB 1.5.3.\n\n", sep = "")
+  print(knitr::kable(timings, row.names = FALSE))
+  cat("\n\n")
+  print(knitr::kable(measured[measured$pass == 1L, c(mode_keys, "input_physical_records",
+    "input_record_sample_calls", "input_candidate_sample_rows", "output_leaves",
+    "output_carriers", "cds_bytes", "protein_bytes", "json_bytes")], row.names = FALSE))
+}
+```
+
+```{r singleton-revision-comparison, results='asis'}
+singleton_revisions <- unique(singleton_history$source_revision)
+if (length(singleton_revisions) >= 2L) {
+  previous_revision <- tail(singleton_revisions, 2L)[1L]
+  before <- singleton_history[singleton_history$source_revision == previous_revision, ]
+  singleton_same_contract <- setequal(unique(before$output_contract), unique(measured$output_contract))
+  schema_fields <- if (singleton_same_contract) c("output_contract", "json_bytes", "xor_hash", "sum_hash") else
+    c("hgvs_so_contract", "hgvs_so_json_bytes", "hgvs_so_xor_hash", "hgvs_so_sum_hash")
+  fingerprint <- c(mode_keys, "threads", "cpu_affinity", "duckdb_version", schema_fields,
+    "input_physical_records", "input_record_sample_calls", "input_candidate_sample_rows",
+    "output_leaves", "output_carriers", "cds_bytes", "protein_bytes", "physical_edits",
+    "contributors", "blocks", "reference_sha256", "events_sha256")
+  expected <- unique(before[fingerprint])
+  actual <- unique(measured[fingerprint])
+  expected <- expected[do.call(order, expected[mode_keys]), ]
+  actual <- actual[do.call(order, actual[mode_keys]), ]
+  rownames(expected) <- rownames(actual) <- NULL
+  stopifnot(identical(expected, actual))
+  previous_timing <- do.call(rbind, lapply(split(before, interaction(before[mode_keys], drop = TRUE)),
+    function(x) {
+      stopifnot(nrow(x) == 3L, identical(sort(x$pass), 1:3))
+      data.frame(x[1L, mode_keys], median_s = median(x$seconds),
+        min_s = min(x$seconds), max_s = max(x$seconds),
+        peak_process_rss_mib = max(x$peak_process_rss_kib) / 1024)
+    }))
+  comparison <- merge(previous_timing, timings, by = mode_keys, suffixes = c("_before", "_after"))
+  comparison$median_change_percent <- 100 * (comparison$median_s_after / comparison$median_s_before - 1)
+  cat("Nearest same-input source: `", previous_revision, "`. ",
+    if (singleton_same_contract)
+      "Full-output fingerprints, input identities and every listed denominator match within each mode.\n\n" else
+      paste0("Input identities, every listed denominator and the complete prior local-SO/HGVS-schema projection match. ",
+        "Full output contracts and byte counts differ; this is not identical-output work.\n\n"),
+    sep = "")
+  print(knitr::kable(comparison, row.names = FALSE, digits = 4))
+}
+```
+
+Singleton HGVS borrows the decoded stream's successful physical CDS projection.
+VEP's uploaded-feature interpretation and shifted-HGVS placement remain distinct;
+raw-source HGVS prepares and projects its own minimized allele. Leaf and contributor
+storage is included in the query workspace limit. These whole-process measurements
+do not isolate that storage cost or the projection cost. Three passes on one machine
+do not establish statistical significance or a general absence of regression.
+Compound HGVS, raw-input omissions,
+multi-exon models and heterogeneous genomic contexts still need their own matched
+measurements. The compound replay and raw-record baselines above retain their
+original source revisions and denominators.
+
+```{bash singleton-hgvs-smoke, eval=FALSE, echo=TRUE}
+Rscript benchmarks/duckvep_haplotypes.R \
+  --transcripts 16 --samples 4 --overlap 4 --passes 1 \
+  --modes sql_singletons,sql_singletons_hgvs --diagnostic
+```

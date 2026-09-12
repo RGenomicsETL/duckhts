@@ -1,0 +1,8 @@
+##fileformat=VCFv4.2
+##contig=<ID=chrDuck,length=260>
+##source=VEP116_seed27182818_transcript_end_multiplication_witnesses
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chrDuck	250	terminal_dup	CG	CC	.	PASS	.
+chrDuck	250	terminal_triplication	CGT	CCC	.	PASS	.
+chrDuck	250	terminal_four_copies	CGTA	CCCC	.	PASS	.
+chrDuck	250	terminal_eight_copies	CGT	CCCCCCCC	.	PASS	.

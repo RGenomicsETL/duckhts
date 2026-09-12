@@ -1,5 +1,5 @@
 # name: test/sql/fasta_gzi_path.test
-# description: Explicit gzi_path for bgzipped FASTA readers
+# description: Explicit FASTA indexes, failed retrieval and connection recovery
 # group: [duckhts]
 
 require duckhts
@@ -42,3 +42,30 @@ FROM fasta_nuc(
 );
 ----
 20
+
+# These deliberately malformed FAI entries either overrun the tiny FASTA or
+# wrap a physical file offset. Neither failure may omit the requested interval.
+statement error
+SELECT * FROM fasta_nuc('__WORKING_DIRECTORY__/test/data/faidx_invalid.fa',
+  bin_width := 1, region := 'offset_wrap:5-5', include_seq := true);
+----
+fasta_nuc: failed to fetch
+
+statement error
+SELECT * FROM fasta_nuc('__WORKING_DIRECTORY__/test/data/faidx_invalid.fa',
+  bin_width := 20, region := 'truncated:1-20');
+----
+fasta_nuc: failed to fetch
+
+# A failure after a valid BED row fails the complete query.
+statement error
+SELECT * FROM fasta_nuc('__WORKING_DIRECTORY__/test/data/faidx_invalid.fa',
+  bed_path := '__WORKING_DIRECTORY__/test/data/faidx_invalid.bed', include_seq := true);
+----
+fasta_nuc: failed to fetch
+
+query TI
+SELECT seq, seq_len FROM fasta_nuc('__WORKING_DIRECTORY__/test/data/faidx_invalid.fa',
+  bin_width := 4, region := 'ok:1-4', include_seq := true);
+----
+AcGT	4

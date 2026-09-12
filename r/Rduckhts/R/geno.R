@@ -6,6 +6,7 @@
 #' and nullable scalar phase sets. An absent GT has NULL allele/phase lists;
 #' a missing allele still occupies a slot. Phase bits follow HTSlib decoding,
 #' including its leading-slot convention for VCF versions before 4.4.
+#' PS cardinality excludes vector-end padding retained after sample selection.
 #'
 #' Full scans preserve the input stream when assigning ordinals. Indexed regions
 #' use HTSlib's union order and start a new ordinal at zero. Use SQL `ORDER BY
@@ -16,6 +17,21 @@
 #' @param table_name Optional table to create; `NULL` returns a data frame.
 #' @param non_reference_only Omit calls without any called alternate allele.
 #'   This does not infer phase or remove variant records.
+#' @param format_fields Character vector of extra FORMAT tags, for example
+#'   `c("AD", "DP", "GQ")`. Selected fields are typed members of each call's
+#'   `format` struct using the header's Type and Number. Missing elements retain
+#'   their positions; no allele normalization or depth inference is performed.
+#'   NULL or an empty vector keeps the default GT/PS schema. Unknown, empty,
+#'   missing and case-insensitively duplicate names error; GT and PS are already
+#'   exposed by the typed call fields and cannot be selected again.
+#'   Tag lookup uses exact header spelling: declared lowercase `gt` and `ps`
+#'   are distinct extra fields. Selected names must not collide under DuckDB's
+#'   case-insensitive struct-member lookup.
+#' @param raw_gt Retain exact original VCF genotype text in each call's `raw_gt`
+#'   member. The default `FALSE` keeps the typed-call schema unchanged. `TRUE`
+#'   preserves leading phase markers, mixed separators and allele spelling;
+#'   an absent GT is `NULL`, while a literal missing `.` remains text. BCF input
+#'   errors because its encoded genotypes do not retain the original text.
 #' @return A data frame when `table_name` is `NULL`, otherwise invisible `TRUE`.
 #' @seealso [rduckhts_bcf_samples()]
 #' @examples
@@ -29,7 +45,7 @@ rduckhts_geno <- function(con, table_name = NULL, path, region = NULL,
                           index_path = NULL, samples = NULL,
                           non_reference_only = FALSE, scan_mode = "auto",
                           decompression_threads = 0, decode_error_policy = "null",
-                          overwrite = FALSE) {
+                          overwrite = FALSE, format_fields = NULL, raw_gt = FALSE) {
   params <- list()
   if (!is.null(region)) params$region <- sql_quote_string(con, region)
   if (!is.null(index_path)) params$index_path <- sql_quote_string(con, index_path)
@@ -40,11 +56,16 @@ rduckhts_geno <- function(con, table_name = NULL, path, region = NULL,
   if (!is.logical(overwrite) || length(overwrite) != 1L || is.na(overwrite)) {
     stop("overwrite must be TRUE or FALSE", call. = FALSE)
   }
+  if (!is.logical(raw_gt) || length(raw_gt) != 1L || is.na(raw_gt)) {
+    stop("raw_gt must be TRUE or FALSE", call. = FALSE)
+  }
   params$non_reference_only <- if (non_reference_only) "true" else "false"
   params$scan_mode <- sql_quote_string(con, .validate_scan_mode_param(scan_mode))
   params$decompression_threads <- .validate_nonnegative_integer_param(
     decompression_threads, "decompression_threads")
   params$decode_error_policy <- sql_quote_string(con, decode_error_policy)
+  params$format_fields <- sql_varchar_list_literal(con, format_fields, "format_fields")
+  params$raw_gt <- if (raw_gt) "true" else "false"
   query <- paste0("SELECT * FROM read_geno(", sql_quote_string(con, path), build_param_str(params), ")")
   if (is.null(table_name)) return(DBI::dbGetQuery(con, query))
   prefix <- if (overwrite) "CREATE OR REPLACE TABLE " else "CREATE TABLE "

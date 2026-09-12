@@ -4,6 +4,26 @@
 
 require duckhts
 
+query TTT
+SELECT INFO_MI::VARCHAR, INFO_MF::VARCHAR, INFO_MS::VARCHAR
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/geno_format.vcf') WHERE POS = 10;
+----
+[1, NULL, 3]	[1.5, NULL, 2.5]	[a, NULL, b]
+
+# SQL shapes follow the supplied header, including nonstandard named tags.
+query TTT
+SELECT typeof(INFO_SB), typeof(FORMAT_HQ_S1), typeof(FORMAT_FT_S1)
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/spec_standard_corrections.vcf') LIMIT 1;
+----
+INTEGER	INTEGER	VARCHAR[]
+
+query TT
+SELECT typeof(calls[1].format.HQ), typeof(calls[1].format.FT)
+FROM read_geno('__WORKING_DIRECTORY__/test/data/spec_standard_corrections.vcf',
+                format_fields := ['HQ', 'FT']) LIMIT 1;
+----
+INTEGER	VARCHAR[]
+
 query T
 SELECT typeof(FORMAT_LAA_SAMPLE1)
 FROM read_bcf('__WORKING_DIRECTORY__/test/data/format_string_list.vcf')

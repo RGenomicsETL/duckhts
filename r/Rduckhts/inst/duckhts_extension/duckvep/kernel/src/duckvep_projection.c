@@ -3,8 +3,138 @@
  * See duckvep_projection.h. No allocation; no sequence access.
  */
 #include "duckvep_projection.h"
+#include "duckvep_model_internal.h"
 
 #include <string.h>
+
+static duckvep_status_t layout_fail(duckvep_error_t *error, duckvep_status_t status,
+                                    uint32_t where, const char *message) {
+    if (error) {
+        size_t n = strlen(message);
+        if (n >= sizeof(error->message)) n = sizeof(error->message) - 1u;
+        error->status = status;
+        error->where_code = where;
+        memcpy(error->message, message, n);
+        error->message[n] = '\0';
+    }
+    return status;
+}
+
+DUCKVEP_INTERNAL_API duckvep_status_t duckvep_model_validate_transcript_layout(
+    const duckvep_transcript_model_t *transcripts,
+    const duckvep_exon_model_t *exons, size_t t, duckvep_error_t *error) {
+    if (!transcripts || !exons || t >= transcripts->transcript_count ||
+        !transcripts->start1 || !transcripts->end1 || !transcripts->strand ||
+        !transcripts->exon_offset || !transcripts->exon_count ||
+        !transcripts->cds_start1 || !transcripts->cds_end1 ||
+        (exons->exon_count && (!exons->start1 || !exons->end1)) ||
+        ((exons->cdna_start1 == NULL) != (exons->cdna_end1 == NULL)) ||
+        ((exons->phase == NULL) != (exons->end_phase == NULL)))
+        return layout_fail(error, DUCKVEP_ERR_INVALID_ARG, DVW_MODEL_NULL_VIEW,
+                    "transcript layout has incomplete columns");
+    size_t eoff = transcripts->exon_offset[t];
+    size_t ecnt = transcripts->exon_count[t];
+    uint32_t cds_s = transcripts->cds_start1[t];
+    uint32_t cds_e = transcripts->cds_end1[t];
+
+    if (transcripts->start1[t] == 0u ||
+        transcripts->start1[t] > transcripts->end1[t] ||
+        (transcripts->strand[t] != 1 && transcripts->strand[t] != -1)) {
+        return layout_fail(error, DUCKVEP_ERR_MODEL_INVALID, DVW_MODEL_TX_LAYOUT,
+                    "transcript has an invalid span or strand");
+    }
+    if (eoff > exons->exon_count || ecnt > exons->exon_count - eoff) {
+        return layout_fail(error, DUCKVEP_ERR_MODEL_INVALID, DVW_MODEL_EXON_RANGE,
+                    "exon slice out of range for a transcript");
+    }
+    if (cds_s != 0u) {
+        if (cds_s > cds_e || cds_s < transcripts->start1[t] ||
+            cds_e > transcripts->end1[t]) {
+            return layout_fail(error, DUCKVEP_ERR_MODEL_INVALID, DVW_MODEL_CDS_RANGE,
+                        "cds interval outside the transcript span");
+        }
+    } else if (cds_e != 0u) {
+        /* cds_start1 == 0 is the non-coding sentinel; a stray cds_end1 is malformed. */
+        return layout_fail(error, DUCKVEP_ERR_MODEL_INVALID, DVW_MODEL_CDS_RANGE,
+                    "cds_start1 == 0 (non-coding) but cds_end1 != 0");
+    }
+    int cds_start_exonic = 0, cds_end_exonic = 0;
+    if (ecnt > 0u) {
+        uint32_t genomic_min = UINT32_MAX;
+        uint32_t genomic_max = 0u;
+        size_t e;
+
+        for (e = 0u; e < ecnt; e++) {
+            size_t ei = eoff + e;
+            uint32_t exon_len;
+
+            if (exons->start1[ei] == 0u ||
+                exons->start1[ei] > exons->end1[ei] ||
+                exons->start1[ei] < transcripts->start1[t] ||
+                exons->end1[ei] > transcripts->end1[t]) {
+                return layout_fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                            DVW_MODEL_EXON_LAYOUT,
+                            "exon lies outside its transcript span");
+            }
+            if (e > 0u) {
+                size_t previous = ei - 1u;
+                if ((transcripts->strand[t] > 0 &&
+                     exons->start1[ei] <= exons->end1[previous]) ||
+                    (transcripts->strand[t] < 0 &&
+                     exons->end1[ei] >= exons->start1[previous])) {
+                    return layout_fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                DVW_MODEL_EXON_LAYOUT,
+                                "exons overlap or are not in transcript order");
+                }
+            }
+            if (exons->start1[ei] < genomic_min) genomic_min = exons->start1[ei];
+            if (exons->end1[ei] > genomic_max) genomic_max = exons->end1[ei];
+            cds_start_exonic |= exons->start1[ei] <= cds_s && cds_s <= exons->end1[ei];
+            cds_end_exonic |= exons->start1[ei] <= cds_e && cds_e <= exons->end1[ei];
+            exon_len = exons->end1[ei] - exons->start1[ei] + 1u;
+            if (exons->cdna_start1 != NULL) {
+                uint32_t cdna_len;
+                if (exons->cdna_start1[ei] == 0u ||
+                    exons->cdna_start1[ei] > exons->cdna_end1[ei]) {
+                    return layout_fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                DVW_MODEL_CDNA_LAYOUT,
+                                "exon has an invalid cDNA span");
+                }
+                cdna_len = exons->cdna_end1[ei] -
+                           exons->cdna_start1[ei] + 1u;
+                if (cdna_len != exon_len ||
+                    (e == 0u && exons->cdna_start1[ei] != 1u) ||
+                    (e > 0u &&
+                     (exons->cdna_end1[ei - 1u] == UINT32_MAX ||
+                      exons->cdna_start1[ei] !=
+                      exons->cdna_end1[ei - 1u] + 1u))) {
+                    return layout_fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                                DVW_MODEL_CDNA_LAYOUT,
+                                "exon cDNA spans are not contiguous and length preserving");
+                }
+            }
+            if (exons->phase != NULL &&
+                (exons->phase[ei] < -1 || exons->phase[ei] > 2 ||
+                 exons->end_phase[ei] < -1 || exons->end_phase[ei] > 2)) {
+                return layout_fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                            DVW_MODEL_PHASE,
+                            "exon phase is outside -1,0,1,2");
+            }
+        }
+        if (genomic_min != transcripts->start1[t] ||
+            genomic_max != transcripts->end1[t]) {
+            return layout_fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                        DVW_MODEL_EXON_LAYOUT,
+                        "transcript span is not the outer exon envelope");
+        }
+    }
+    if (cds_s != 0u && (!cds_start_exonic || !cds_end_exonic)) {
+        return layout_fail(error, DUCKVEP_ERR_MODEL_INVALID,
+                    DVW_MODEL_CDS_PROJECTION,
+                    "CDS endpoint does not project into an exon");
+    }
+    return DUCKVEP_OK;
+}
 
 static int valid_tx_exon_slice(const duckvep_transcript_model_t *tx,
                                const duckvep_exon_model_t *ex,

@@ -17,6 +17,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <config.h>
 
 #include <ctype.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -955,9 +956,15 @@ static void fasta_nuc_scan(duckdb_function_info info, duckdb_data_chunk output) 
         if (seq_len > 0) {
             seq = faidx_fetch_seq64(init->fai, chrom, (hts_pos_t)start, (hts_pos_t)end - 1, &fetch_len);
             if (!seq || fetch_len < 0) {
+                char error[512];
+                snprintf(error, sizeof error, "fasta_nuc: failed to fetch %s:[%" PRId64 ",%" PRId64 ") from %s",
+                    chrom, start, end, init->bind->fasta_path);
+                duckdb_function_set_error(info, error);
                 if (init->bind->mode == FASTA_NUC_MODE_BED) free((void *)chrom);
                 free(seq);
-                continue;
+                init->done = true;
+                duckdb_data_chunk_set_size(output, 0);
+                return;
             }
             seq_len = fetch_len;
             count_nucleotides(seq, seq_len, &num_a, &num_c, &num_g, &num_t, &num_n, &num_other);

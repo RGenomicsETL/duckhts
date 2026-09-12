@@ -733,41 +733,61 @@ faidx_t *fai_load_format(const char *fn, enum fai_format_options format) {
 }
 
 
-static char *fai_retrieve(const faidx_t *fai, const faidx1_t *val,
-                          uint64_t offset, hts_pos_t beg, hts_pos_t end, hts_pos_t *len) {
-    char *buffer, *s;
+static int fai_retrieve_capacity(const faidx1_t *val, hts_pos_t beg,
+                                 hts_pos_t end, size_t *required) {
+    uint64_t bases = (uint64_t) end - (uint64_t) beg;
+    if (bases >= SIZE_MAX - 2 || val->line_extra >= SIZE_MAX - bases) {
+        hts_log_error("Range %"PRId64"..%"PRId64" too big", beg, end);
+        errno = EOVERFLOW;
+        return -1;
+    }
+    if (val->line_blen <= 0) {
+        hts_log_error("Invalid line length in index: %"PRIu64, val->line_blen);
+        errno = EINVAL;
+        return -1;
+    }
+    if (bases > (SIZE_MAX >> 1) || val->line_blen > (SIZE_MAX >> 1) ||
+        val->line_extra > (SIZE_MAX >> 1) - val->line_blen) {
+        hts_log_error("FASTA/Q range or line exceeds the signed I/O size limit");
+        errno = EOVERFLOW;
+        return -1;
+    }
+    // Include one line terminator and the trailing NUL.
+    *required = (size_t) bases + val->line_extra + 1;
+    return 0;
+}
+
+static char *fai_retrieve_buffer(const faidx_t *fai, const faidx1_t *val,
+                                uint64_t offset, hts_pos_t beg, hts_pos_t end,
+                                hts_pos_t *len, char *buffer) {
+    char *s;
     ssize_t nread, remaining, firstline_len, firstline_blen;
     int ret;
 
-    if ((uint64_t) end - (uint64_t) beg >= SIZE_MAX - 2) {
-        hts_log_error("Range %"PRId64"..%"PRId64" too big", beg, end);
-        *len = -1;
-        return NULL;
-    }
-
-    if (val->line_blen <= 0) {
-        hts_log_error("Invalid line length in index: %"PRIu64, val->line_blen);
-        *len = -1;
-        return NULL;
-    }
-
     uint64_t line_len = val->line_blen + val->line_extra;
 
-    ret = bgzf_useek(fai->bgzf,
-                     offset
-                     + beg / val->line_blen * line_len
-                     + beg % val->line_blen, SEEK_SET);
+    uint64_t column = (uint64_t) beg % val->line_blen;
+    uint64_t row = (uint64_t) beg / val->line_blen;
+    if (offset > INT64_MAX - column ||
+        row > (INT64_MAX - offset - column) / line_len) {
+        errno = EOVERFLOW;
+        *len = -1;
+        hts_log_error("FASTA/Q index seek position exceeds the signed offset limit");
+        return NULL;
+    }
+    uint64_t position = offset + row * line_len + column;
+    off_t seek_position = (off_t) position;
+    if (seek_position < 0 || (uint64_t) seek_position != position) {
+        errno = EOVERFLOW;
+        *len = -1;
+        hts_log_error("FASTA/Q index seek position exceeds the platform offset limit");
+        return NULL;
+    }
+    ret = bgzf_useek(fai->bgzf, seek_position, SEEK_SET);
 
     if (ret < 0) {
         *len = -1;
         hts_log_error("Failed to retrieve block. (Seeking in a compressed, .gzi unindexed, file?)");
-        return NULL;
-    }
-
-    // Over-allocate so there is extra space for one end-of-line sequence
-    buffer = hts_malloc(hts_add_sat3(end - beg, line_len - val->line_blen, 1));
-    if (!buffer) {
-        *len = -1;
         return NULL;
     }
 
@@ -812,9 +832,29 @@ static char *fai_retrieve(const faidx_t *fai, const faidx1_t *val,
 error:
     hts_log_error("Failed to retrieve block: %s",
                   (nread == 0)? "unexpected end of file" : "error reading file");
-    free(buffer);
+    buffer[0] = '\0';
     *len = -1;
     return NULL;
+}
+
+static char *fai_retrieve(const faidx_t *fai, const faidx1_t *val,
+                          uint64_t offset, hts_pos_t beg, hts_pos_t end,
+                          hts_pos_t *len) {
+    size_t required;
+    if (fai_retrieve_capacity(val, beg, end, &required) < 0) {
+        *len = -1;
+        return NULL;
+    }
+    char *buffer = hts_malloc(required);
+    if (!buffer) {
+        *len = -1;
+        return NULL;
+    }
+    if (!fai_retrieve_buffer(fai, val, offset, beg, end, len, buffer)) {
+        free(buffer);
+        return NULL;
+    }
+    return buffer;
 }
 
 static int fai_get_val(const faidx_t *fai, const char *str,
@@ -971,6 +1011,14 @@ static int faidx_adjust_position(const faidx_t *fai, int end_adjust,
     else if(val->len <= *p_end_i)
         *p_end_i = val->len - end_adjust;
 
+    // Inclusive callers add one to the adjusted end before reading.
+    if (end_adjust && *p_end_i == INT64_MAX) {
+        errno = EOVERFLOW;
+        if (len) *len = -1;
+        hts_log_error("FASTA/Q interval end exceeds the signed coordinate limit");
+        return 1;
+    }
+
     return 0;
 }
 
@@ -1005,6 +1053,30 @@ char *faidx_fetch_seq64(const faidx_t *fai, const char *c_name, hts_pos_t p_beg_
 
     // Now retrieve the sequence
     return fai_retrieve(fai, &val, val.seq_offset, p_beg_i, p_end_i + 1, len);
+}
+
+int faidx_fetch_seq64_into(const faidx_t *fai, const char *c_name,
+                           hts_pos_t p_beg_i, hts_pos_t p_end_i,
+                           char *buffer, size_t capacity, hts_pos_t *len,
+                           size_t *required) {
+    faidx1_t val;
+    if (len) *len = -1;
+    if (required) *required = 0;
+    if (!fai || !c_name || !len || !required || (capacity && !buffer)) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (faidx_adjust_position(fai, 1, &val, c_name, &p_beg_i, &p_end_i, len))
+        return -1;
+    if (fai_retrieve_capacity(&val, p_beg_i, p_end_i + 1, required) < 0)
+        return -1;
+    *len = p_end_i + 1 - p_beg_i;
+    if (capacity < *required) {
+        errno = ENOSPC;
+        return -1;
+    }
+    return fai_retrieve_buffer(fai, &val, val.seq_offset, p_beg_i,
+                               p_end_i + 1, len, buffer) ? 0 : -1;
 }
 
 char *faidx_fetch_seq(const faidx_t *fai, const char *c_name, int p_beg_i, int p_end_i, int *len)

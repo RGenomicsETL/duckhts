@@ -2,6 +2,8 @@
  * implementation to inspect its retained-storage bound without a public debug API. */
 #include <htslib/faidx.h>
 #include <htslib/bgzf.h>
+#include <errno.h>
+#include <inttypes.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -73,14 +75,15 @@ static int write_references(const char *directory) {
         CHECK(out != NULL);
         CHECK(bgzf_write(out, ">chr1\n", 6) == 6);
         for (size_t p = 0; p < BASES; p += 64) {
-            char line[65];
+            char line[66];
             for (size_t i = 0; i < 64; i++) {
                 char base = "ACGTNRYSWKM"[random_u32(&state) % 11];
                 expected[r][p + i] = base;
                 line[i] = i % 3 ? base : (char)(base + ('a' - 'A'));
             }
-            line[64] = '\n';
-            CHECK(bgzf_write(out, line, sizeof(line)) == sizeof(line));
+            size_t bytes = r % 3 ? 65u : 66u;
+            line[64] = r % 3 ? '\n' : '\r'; line[65] = '\n';
+            CHECK(bgzf_write(out, line, bytes) == (ssize_t)bytes);
         }
         static const char tail[] = ">1\nACGT\n>MT\nRYACGT\n";
         CHECK(bgzf_write(out, tail, sizeof(tail) - 1) == sizeof(tail) - 1);
@@ -90,12 +93,106 @@ static int write_references(const char *directory) {
     return 1;
 }
 
+static int bounded_fetch_edges(faidx_t *fai) {
+    char buffer[16], saved[16];
+    memset(buffer, 0xa5, sizeof buffer); memcpy(saved, buffer, sizeof buffer);
+    hts_pos_t length;
+    size_t required;
+    CHECK(faidx_fetch_seq64_into(NULL, "1", 0, 3, buffer, sizeof buffer, &length, &required) == -1);
+    CHECK(errno == EINVAL && length == -1 && required == 0u);
+    CHECK(faidx_fetch_seq64_into(fai, NULL, 0, 3, buffer, sizeof buffer, &length, &required) == -1);
+    CHECK(errno == EINVAL && length == -1 && required == 0u);
+    CHECK(faidx_fetch_seq64_into(fai, "1", 0, 3, NULL, 1u, &length, &required) == -1);
+    CHECK(errno == EINVAL && length == -1 && required == 0u);
+    CHECK(faidx_fetch_seq64_into(fai, "1", 0, 3, buffer, sizeof buffer, NULL, &required) == -1);
+    CHECK(errno == EINVAL && required == 0u);
+    CHECK(faidx_fetch_seq64_into(fai, "1", 0, 3, buffer, sizeof buffer, &length, NULL) == -1);
+    CHECK(errno == EINVAL && length == -1);
+    CHECK(faidx_fetch_seq64_into(fai, "absent", 0, 3, buffer, sizeof buffer, &length, &required) == -1);
+    CHECK(length == -2 && required == 0u && !memcmp(buffer, saved, sizeof buffer));
+    static const struct { hts_pos_t begin, end; const char *bases; } cases[] = {
+        {-20, 2, "ACG"}, {3, 20, "T"}, {5, 5, ""}, {3, 1, "C"}, {-3, -1, "A"}, {0, 3, "ACGT"},
+        {INT64_MAX, INT64_MAX, ""}, {0, INT64_MAX, "ACGT"}
+    };
+    for (size_t i = 0u; i < sizeof cases / sizeof cases[0]; i++) {
+        memset(buffer, 0xa5, sizeof buffer);
+        CHECK(faidx_fetch_seq64_into(fai, "1", cases[i].begin, cases[i].end,
+            buffer, sizeof buffer, &length, &required) == 0);
+        CHECK(length == (hts_pos_t)strlen(cases[i].bases));
+        CHECK(required == (size_t)length + 2u);
+        CHECK(!strcmp(buffer, cases[i].bases) && (unsigned char)buffer[required] == 0xa5u);
+    }
+    return 1;
+}
+
+static int bounded_fetch_failures(const char *directory) {
+    char fasta[1100], index[1100];
+    int n = snprintf(fasta, sizeof fasta, "%s/bounded-failures.fa", directory);
+    CHECK(n > 0 && (size_t)n < sizeof fasta);
+    n = snprintf(index, sizeof index, "%s/bounded-failures.fai", directory);
+    CHECK(n > 0 && (size_t)n < sizeof index);
+    FILE *file = fopen(fasta, "wb");
+    CHECK(file != NULL);
+    CHECK(fputs(">ok\nAcGT\n", file) >= 0 && fclose(file) == 0);
+    file = fopen(index, "wb");
+    CHECK(file != NULL);
+    CHECK(fprintf(file,
+        "ok\t4\t4\t4\t5\n"
+        "truncated\t20\t4\t4\t5\n"
+        "zero_width\t4\t4\t0\t1\n"
+        "offset_wrap\t20\t%" PRIu64 "\t4\t5\n"
+        "line_product\t%" PRIu64 "\t0\t1\t3\n"
+        "signed_end\t%" PRIu64 "\t4\t4\t5\n",
+        UINT64_MAX - 1u, UINT64_MAX, UINT64_MAX) > 0);
+    CHECK(fclose(file) == 0);
+    faidx_t *fai = observed_load(fasta, index, NULL, 0, FAI_FASTA);
+    CHECK(fai != NULL);
+    static const struct {
+        const char *name;
+        hts_pos_t begin, end;
+        int error;
+    } failures[] = {
+        {"truncated", 0, 19, 0},
+        {"zero_width", 0, 3, EINVAL},
+        /* Without checked seek arithmetic, the offset wraps to byte 3 and
+         * returns the header newline as if it were a reference base. */
+        {"offset_wrap", 4, 4, EOVERFLOW},
+        {"line_product", INT64_MAX - 1, INT64_MAX - 1, EOVERFLOW},
+        {"signed_end", INT64_MAX, INT64_MAX, EOVERFLOW}
+    };
+    for (size_t i = 0; i < sizeof failures / sizeof failures[0]; i++) {
+        unsigned char buffer[66];
+        memset(buffer, 0xa5, sizeof buffer);
+        hts_pos_t length = 42;
+        size_t required = 42;
+        errno = 0;
+        CHECK(faidx_fetch_seq64_into(fai, failures[i].name, failures[i].begin,
+            failures[i].end, (char *)buffer + 1, sizeof buffer - 2, &length, &required) == -1);
+        CHECK(length == -1 && (!failures[i].error || errno == failures[i].error));
+        CHECK(buffer[0] == 0xa5u && buffer[sizeof buffer - 1] == 0xa5u);
+        if (failures[i].error) {
+            for (size_t j = 0; j < sizeof buffer; j++) CHECK(buffer[j] == 0xa5u);
+        }
+        char *allocated = faidx_fetch_seq64(fai, failures[i].name,
+            failures[i].begin, failures[i].end, &length);
+        CHECK(allocated == NULL && length == -1);
+        CHECK(!failures[i].error || errno == failures[i].error);
+        CHECK(faidx_fetch_seq64_into(fai, "ok", 0, 3, (char *)buffer + 1,
+            sizeof buffer - 2, &length, &required) == 0);
+        CHECK(length == 4 && !strcmp((char *)buffer + 1, "AcGT"));
+    }
+    observed_destroy(fai);
+    CHECK(atomic_load(&live_handles) == 0);
+    return 1;
+}
+
 static int bounds_and_aliases(void) {
     const char *error = NULL;
     for (unsigned r = 0; r < REFERENCES; r++) {
         duckhts_reference_entry_t *entry =
             duckhts_reference_cache_get(paths[r], NULL, NULL, 0, &error);
         CHECK(entry && !error);
+        CHECK(bounded_fetch_edges(entry->fai));
         char *bases = duckhts_reference_fetch(entry, "chr1", 10, 20,
                                             DUCKHTS_REFERENCE_EXACT);
         CHECK(bases && !memcmp(bases, expected[r] + 10, 11) && bases[11] == 0);
@@ -194,6 +291,32 @@ static int bounds_and_aliases(void) {
     return 1;
 }
 
+static int bounded_fetch_matches(faidx_t *fai, unsigned reference,
+    size_t position, size_t length) {
+    unsigned char buffer[4102], saved[4102];
+    memset(buffer, 0xa5, sizeof buffer); memcpy(saved, buffer, sizeof saved);
+    hts_pos_t got_length = -1;
+    size_t required = 0u;
+    errno = 0;
+    CHECK(faidx_fetch_seq64_into(fai, "chr1", position, position + length - 1u,
+        NULL, 0u, &got_length, &required) == -1);
+    CHECK(errno == ENOSPC && got_length == (hts_pos_t)length);
+    CHECK(required == length + (reference % 3 ? 2u : 3u));
+    CHECK(faidx_fetch_seq64_into(fai, "chr1", position, position + length - 1u,
+        (char *)buffer + 1u, required - 1u, &got_length, &required) == -1);
+    CHECK(errno == ENOSPC && !memcmp(buffer, saved, sizeof buffer));
+    CHECK(faidx_fetch_seq64_into(fai, "chr1", position, position + length - 1u,
+        (char *)buffer + 1u, required, &got_length, &required) == 0);
+    CHECK(got_length == (hts_pos_t)length && buffer[length + 1u] == 0u);
+    CHECK(buffer[0] == 0xa5u && buffer[required + 1u] == 0xa5u);
+    for (size_t i = 0u; i < length; i++) {
+        unsigned char raw = (unsigned char)expected[reference][position + i];
+        if ((position + i) % 64u % 3u == 0u) raw += 'a' - 'A';
+        CHECK(buffer[i + 1u] == raw);
+    }
+    return 1;
+}
+
 static void *random_worker(void *pointer) {
     struct worker *w = pointer;
     uint32_t state = seed + w->id;
@@ -227,6 +350,10 @@ static void *random_worker(void *pointer) {
             break;
         }
         free(bases);
+        if (!bounded_fetch_matches(entry->fai, r, position, length)) {
+            w->failed = 1;
+            break;
+        }
         w->bases += length;
     }
     return NULL; /* pthread destructor must close every cached handle. */
@@ -237,7 +364,7 @@ int main(int argc, char **argv) {
     if (argc > 2) seed = (uint32_t)strtoul(argv[2], NULL, 10);
     if (argc > 3) trials = (unsigned)strtoul(argv[3], NULL, 10);
     if (!seed || !trials) return 2;
-    if (!write_references(argv[1]) || !bounds_and_aliases()) return 1;
+    if (!write_references(argv[1]) || !bounded_fetch_failures(argv[1]) || !bounds_and_aliases()) return 1;
     char index[1100];
     snprintf(index, sizeof(index), "%s.fai", paths[0]);
     if (remove(index)) return 1;

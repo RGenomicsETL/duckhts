@@ -1,0 +1,14 @@
+##fileformat=VCFv4.4
+##source=DuckHTS_synthetic_raw_GT_spelling
+##contig=<ID=chrR,length=1000>
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Depth">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1	S2
+chrR	10	prefix	A	C,G	.	PASS	.	GT:DP	0|1:10	|0|1:20
+chrR	20	duplicate	A	C,G	.	PASS	.	GT:DP	/0|1/2:11	|0|1/2:21
+chrR	20	duplicate	A	C,G	.	PASS	.	GT:DP	/0|1/2:11	|0|1/2:21
+chrR	30	missing	A	C,G	.	PASS	.	GT:DP	.:12	./.:22
+chrR	40	absent_gt	A	C,G	.	PASS	.	DP	13	23
+chrR	50	absent_format	A	C,G	.	PASS	.	.	.	.
+chrR	60	short_format	A	C,G	.	PASS	.	GT:DP	1	|1
+chrR	70	allele_spelling	A	C,G	.	PASS	.	GT:DP	00|01:14	02/00:24

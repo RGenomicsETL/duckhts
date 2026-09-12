@@ -22,6 +22,11 @@ REFERENCE_CACHE_BASELINE_REV=<commit> \
 Rscript -e 'rmarkdown::render("benchmarks/benchmark_reference_cache.Rmd", knit_root_dir=getwd())'
 ```
 
+`benchmark_reference_cache_affinity.md` and `benchmark_reference_cache_pr.md`
+are revision-specific snapshots of this Rmd. With the same baseline variables,
+use `BENCHMARK_RMD=benchmark_reference_cache.Rmd BENCHMARK_REPORT=<new-name>.md
+make bench-snapshot` to render a new report without overwriting either snapshot.
+
 The candidate defaults to `build/release/duckhts.duckdb_extension`. Stage the
 registered reference explicitly with `duckhts_bench_fetch("liftover_grch38_fasta")`
 before rendering. No benchmark download or alternate cache layout is embedded

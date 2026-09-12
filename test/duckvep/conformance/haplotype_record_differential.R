@@ -1,0 +1,463 @@
+#!/usr/bin/env Rscript
+# Source-record geometry audit against the pinned, unmodified Haplosaurus runner.
+# Complete sequence/count/provenance differences remain failures, including conflicts.
+
+source('test/duckvep/conformance/haplotype_observations.R')
+
+main <- function() {
+  opt <- optparse::parse_args(optparse::OptionParser(option_list=list(
+    optparse::make_option('--seed', type='integer', default=173L),
+    optparse::make_option('--random-cases', dest='random_cases', type='integer', default=512L),
+    optparse::make_option('--rare-per-stratum', dest='rare_per_stratum', type='integer', default=0L),
+    optparse::make_option('--context-per-stratum', dest='context_per_stratum', type='integer', default=0L),
+    optparse::make_option('--pair-per-stratum', dest='pair_per_stratum', type='integer', default=0L),
+    optparse::make_option('--extension-receipt', dest='extension_receipt', default=NULL),
+    optparse::make_option('--vep-prefix', dest='vep_prefix', default='/root/miniconda3/envs/vep')
+  )))
+  stopifnot(!is.na(opt$seed), opt$random_cases >= 0L, opt$random_cases <= 65536L-144L)
+  stopifnot(!is.na(opt$rare_per_stratum), opt$rare_per_stratum >= 0L)
+  stopifnot(!is.na(opt$context_per_stratum), opt$context_per_stratum >= 0L)
+  stopifnot(!is.na(opt$pair_per_stratum), opt$pair_per_stratum >= 0L)
+  source('scripts/duckvep_evidence.R', local=TRUE)
+  root <- normalizePath('.')
+  revision <- duckvep_evidence_revision(root)
+  extension <- normalizePath('build/release/duckhts.duckdb_extension')
+  binding <- 'diagnostic_unbound'
+  if (!is.null(opt$extension_receipt)) {
+    duckvep_evidence_assert_checkout(root, revision)
+    binding <- duckvep_evidence_read_extension_receipt(opt$extension_receipt, root, extension, revision)$binding
+  }
+  out <- tempfile(paste0('haplotype_records_seed',opt$seed,'_'), tmpdir='test/duckvep/conformance/results')
+  dir.create(out)
+  message('Record artifacts: ', out)
+  pins <- c(vep='57ea5c52340acc1f156267f810ad162e26597082',
+    variation='2fb834b987ede3824e200197a838ce11e91aeb4b')
+  mirrors <- normalizePath(c('.sync/ensembl-vep','.sync/ensembl-variation'))
+  for (i in seq_along(pins)) stopifnot(
+    identical(duckvep_evidence_command('git', c('-C',mirrors[i],'rev-parse','HEAD'), 'oracle revision'),
+      unname(pins[i])),
+    !length(duckvep_evidence_command('git', c('-C',mirrors[i],'status','--porcelain'), 'oracle checkout')))
+  prefix <- normalizePath(opt$vep_prefix)
+  environment <- duckvep_evidence_command('micromamba', c('list','-p',prefix,'--explicit'), 'oracle environment')
+  writeLines(environment, file.path(out,'environment.txt'))
+  stopifnot(identical(duckvep_evidence_explicit_packages(environment),
+    duckvep_evidence_explicit_packages(readLines('test/duckvep/upstream/receipts/vep116_2026-07-22.conda-explicit.txt'))))
+  Sys.setenv(DUCKHTSBENCH_REGISTRY=file.path(root,'r/duckhtsbench/inst/benchmark_registry.tsv'))
+  paths <- duckhtsbench::duckhts_bench_stage_repository_fixtures(root,'duckvep-haplotypes')
+  paths <- paths['haplotype_benchmark_reference']
+  cds <- readLines(paths[['haplotype_benchmark_reference']])[2L]
+  stopifnot(nchar(cds) == 180L)
+  complement <- function(x) paste(rev(strsplit(chartr('ACGT','TGCA',x),'',fixed=TRUE)[[1L]]),collapse='')
+  change <- function(x) chartr('ACGT','CGTA',x)
+  dna <- function(n) paste(sample(c('A','C','G','T'),n,replace=TRUE),collapse='')
+  shapes <- c('disjoint','adjacent','same_start_snv','same_start_duplicate',
+    'mnv_retained_middle','containing_deletion','containing_insertion','partial_overlap',
+    'shared_deletion_anchor','same_end','same_start_length_change','duplicate_deletion')
+  genotypes <- data.frame(phase=c('cis','trans','homozygous','missing','prefixed','unphased'),
+    a=c('1|0','1|0','1|1','.|1','|0|1','0/1'), b=c('1|0','0|1','1|1','1|0','1|1','1/0'))
+  cases <- expand.grid(shape=shapes, phase=genotypes$phase, strand=c(1L,-1L), stringsAsFactors=FALSE)
+  cases$generated <- FALSE
+  set.seed(opt$seed)
+  if (opt$random_cases) cases <- rbind(cases, data.frame(shape='random_overlap',
+    phase=sample(genotypes$phase,opt$random_cases,replace=TRUE),
+    strand=sample(c(1L,-1L),opt$random_cases,replace=TRUE),generated=TRUE))
+  cases$source_ploidy <- NA_integer_
+  cases$rare <- FALSE
+  rare_gt <- expand.grid(phase=c('called_pipe','called_slash','mixed','leading_pipe',
+    'leading_slash','missing_first','missing_last','all_missing','late_alt'),
+    source_ploidy=c(1L,2L,4L,8L,16L,64L),stringsAsFactors=FALSE)
+  rare_gt <- subset(rare_gt,
+    !(source_ploidy == 1L & phase %in% c('called_slash','missing_first','missing_last')) &
+    !(source_ploidy < 4L & phase %in% c('mixed','late_alt')))
+  strata <- merge(expand.grid(shape=shapes,strand=c(1L,-1L),stringsAsFactors=FALSE),rare_gt)
+  stopifnot(nrow(cases) + as.double(nrow(strata))*opt$rare_per_stratum <= 65536L)
+  if (opt$rare_per_stratum) {
+    rare <- strata[rep(seq_len(nrow(strata)),each=opt$rare_per_stratum),]
+    rare$generated <- rare$rare <- TRUE
+    cases <- rbind(cases,rare[names(cases)])
+  }
+  core_profiles <- nrow(cases)
+  context <- expand.grid(shape=c('same_start_snv','same_start_duplicate',
+    'same_start_length_change','duplicate_deletion','same_end','partial_overlap'),
+    phase=genotypes$phase,strand=c(1L,-1L),placement=c('before','between','after'),
+    neutral_count=c(0L,1L,4L,5L,6L,14L,15L,16L,34L,35L,36L),stringsAsFactors=FALSE)
+  stopifnot(core_profiles + as.double(nrow(context))*opt$context_per_stratum <= 65536L)
+  if (opt$context_per_stratum) {
+    cases$placement <- NA_character_
+    cases$neutral_count <- 0L
+    cases$context_draw <- NA_integer_
+    extra <- context[rep(seq_len(nrow(context)),each=opt$context_per_stratum),]
+    extra$context_draw <- rep(seq_len(opt$context_per_stratum),nrow(context))
+    extra$generated <- TRUE
+    extra$rare <- FALSE
+    extra$source_ploidy <- NA_integer_
+    cases <- rbind(cases,extra[names(cases)])
+  }
+  context_profiles <- nrow(cases)-core_profiles
+  cases$paired <- FALSE
+  cases$phase_b <- NA_character_
+  cases$source_ploidy_b <- cases$pair_draw <- NA_integer_
+  pair_strata <- expand.grid(a=seq_len(nrow(rare_gt)),b=seq_len(nrow(rare_gt)),
+    strand=c(1L,-1L))
+  pair_strata <- data.frame(rare_gt[pair_strata$a,],
+    phase_b=rare_gt$phase[pair_strata$b],source_ploidy_b=rare_gt$source_ploidy[pair_strata$b],
+    strand=pair_strata$strand,row.names=NULL)
+  stopifnot(nrow(cases) + as.double(nrow(pair_strata))*opt$pair_per_stratum <= 65536L)
+  if (opt$pair_per_stratum) {
+    paired <- pair_strata[rep(seq_len(nrow(pair_strata)),each=opt$pair_per_stratum),]
+    paired$pair_draw <- rep(seq_len(opt$pair_per_stratum),nrow(pair_strata))
+    paired$shape <- shapes[1L+(paired$pair_draw-1L)%%length(shapes)]
+    paired$generated <- paired$paired <- TRUE
+    paired$rare <- FALSE
+    if (opt$context_per_stratum) {
+      paired$placement <- NA_character_
+      paired$neutral_count <- 0L
+      paired$context_draw <- NA_integer_
+    }
+    cases <- rbind(cases,paired[names(cases)])
+  }
+  raw_gt <- function(kind,n) {
+    alleles <- sample(c('0','1'),n,replace=TRUE)
+    alleles[sample.int(n,1L)] <- '1'
+    separators <- rep('|',n-1L)
+    if (kind == 'called_slash') separators[] <- '/'
+    if (kind == 'mixed') {
+      separators <- sample(c('/','|'),n-1L,replace=TRUE)
+      separators[1:2] <- c('/','|')
+    }
+    if (kind == 'missing_first') { alleles[1L] <- '.'; alleles[n] <- '1' }
+    if (kind == 'missing_last') { alleles[n] <- '.'; alleles[1L] <- '1' }
+    if (kind == 'all_missing') alleles[] <- '.'
+    if (kind == 'late_alt') { alleles[] <- '0'; alleles[n] <- '1' }
+    prefix <- switch(kind,leading_pipe='|',leading_slash='/', '')
+    paste0(prefix,paste0(alleles,c(separators,''),collapse=''))
+  }
+  cases$transcript_index <- cases$seq_region <- seq_len(nrow(cases))-1L
+  cases$chrom <- sprintf('chrR%06d',seq_len(nrow(cases)))
+  cases$transcript <- sprintf('HR%06d',seq_len(nrow(cases)))
+  cases$cds <- cds
+  fasta <- gff <- records <- vector('list',nrow(cases))
+  record_count <- 0L
+  context_templates <- list()
+  for (i in seq_len(nrow(cases))) {
+    genome <- paste0(strrep('A',10L),if (cases$strand[i] == 1L) cds else complement(cds),strrep('A',10L))
+    fasta[[i]] <- c(paste0('>',cases$chrom[i]),genome)
+    id <- cases$transcript[i]
+    attrs <- c(paste0('ID=gene:',id,';biotype=protein_coding'),
+      paste0('ID=transcript:',id,';Parent=gene:',id,';biotype=protein_coding'),
+      paste0('ID=exon:',id,';Parent=transcript:',id),paste0('Parent=transcript:',id))
+    gff[[i]] <- paste(cases$chrom[i],'records',c('gene','mRNA','exon','CDS'),11,190,'.',
+      if (cases$strand[i] == 1L) '+' else '-',c('.','.','.','0'),attrs,sep='\t')
+    geometry <- switch(cases$shape[i],
+      disjoint=c(40L,1L,47L,1L), adjacent=c(40L,1L,41L,1L),
+      same_start_snv=c(40L,1L,40L,1L), same_start_duplicate=c(40L,1L,40L,1L),
+      mnv_retained_middle=c(40L,7L,43L,1L), containing_deletion=c(40L,7L,43L,1L),
+      containing_insertion=c(40L,4L,42L,1L), partial_overlap=c(40L,6L,43L,5L),
+      shared_deletion_anchor=c(40L,5L,44L,3L), same_end=c(40L,7L,42L,5L),
+      same_start_length_change=c(40L,4L,40L,1L), duplicate_deletion=c(40L,5L,40L,5L),
+      random_overlap={a <- sample(35:120,1L); n <- sample(2:10,1L); c(a,n,a+sample(0:(n-1L),1L),sample(1:10,1L))})
+    contextual <- i > core_profiles && i <= core_profiles+context_profiles
+    randomized <- cases$rare[i] || contextual || cases$paired[i]
+    if (randomized) {
+      start <- sample(if(contextual) 40:105 else 15:105,1L)
+      n <- sample(3:25,1L)
+      inside <- sample.int(n-2L,1L)
+      geometry <- switch(cases$shape[i],
+        disjoint=c(start,1L,start+sample(2:25,1L),1L), adjacent=c(start,1L,start+1L,1L),
+        same_start_snv=c(start,1L,start,1L), same_start_duplicate=c(start,1L,start,1L),
+        mnv_retained_middle=c(start,n,start+inside,1L),
+        containing_deletion=c(start,n,start+inside,1L),
+        containing_insertion=c(start,n,start+inside,1L),
+        partial_overlap=c(start,n,start+inside,n-inside+sample(1:10,1L)),
+        shared_deletion_anchor=c(start,n,start+n-1L,sample(2:10,1L)),
+        same_end=c(start,n,start+inside,n-inside),
+        same_start_length_change=c(start,n,start,1L), duplicate_deletion=c(start,n,start,n))
+    }
+    positions <- c(geometry[c(1L,3L)],165L)
+    refs <- substring(genome,positions,positions+c(geometry[c(2L,4L)],1L)-1L)
+    alts <- vapply(refs,change,'')
+    shape <- cases$shape[i]
+    if (shape == 'same_start_snv') alts[2L] <- change(alts[1L])
+    if (shape == 'mnv_retained_middle') alts[1L] <- paste0(change(substr(refs[1L],1L,1L)),
+      substr(refs[1L],2L,nchar(refs[1L])-1L),change(substring(refs[1L],nchar(refs[1L]))))
+    if (shape %in% c('containing_deletion','duplicate_deletion','shared_deletion_anchor'))
+      alts[1L] <- substr(refs[1L],1L,1L)
+    if (shape %in% c('duplicate_deletion','shared_deletion_anchor')) alts[2L] <- substr(refs[2L],1L,1L)
+    if (shape %in% c('containing_insertion','same_start_length_change'))
+      alts[1L] <- paste0(substr(refs[1L],1L,1L),
+        if (randomized) dna(sample(c(1:8,15L,16L,31L),1L)) else 'AC',substring(refs[1L],2L))
+    if (shape == 'partial_overlap') alts[1:2] <-
+      if (randomized) vapply(sample(1:20,2L,replace=TRUE),dna,'') else c('ACGT','GTC')
+    if (shape == 'random_overlap') {
+      alts[1:2] <- vapply(sample(1:10,2L,replace=TRUE),dna,'')
+      for (j in 1:2) if (alts[j] == refs[j]) alts[j] <- change(alts[j])
+    }
+    if (randomized) for (j in 1:2) if (alts[j] == refs[j]) alts[j] <- change(alts[j])
+    gt <- if (cases$paired[i]) list(a=raw_gt(cases$phase[i],cases$source_ploidy[i]),
+      b=raw_gt(cases$phase_b[i],cases$source_ploidy_b[i])) else
+      if (cases$rare[i]) list(a=raw_gt(cases$phase[i],cases$source_ploidy[i]),
+      b=raw_gt(cases$phase[i],cases$source_ploidy[i])) else genotypes[match(cases$phase[i],genotypes$phase),]
+    r <- data.frame(event_index=1:3,seq_region=cases$seq_region[i],
+      chrom=cases$chrom[i],transcript_index=cases$transcript_index[i],position=positions,
+      reference=refs,alternate=alts,source_id=c('a','b','anchor'),sample_index=0L,gt=c(gt$a,gt$b,'1|1'))
+    if (contextual) {
+      key <- paste(shape,cases$phase[i],cases$strand[i],cases$context_draw[i],sep=':')
+      fields <- c('position','reference','alternate','gt')
+      if (is.null(context_templates[[key]])) {
+        context_templates[[key]] <- r[fields]
+        rownames(context_templates[[key]]) <- NULL
+      }
+      else r[fields] <- context_templates[[key]]
+    }
+    if (contextual && cases$neutral_count[i]) {
+      n <- seq_len(cases$neutral_count[i])
+      neutral <- r[rep(1L,length(n)),]
+      neutral$source_id <- paste0('neutral',n)
+      neutral$position <- switch(cases$placement[i],before=12L+(n-1L)%%16L,
+        between=rep(r$position[1L],length(n)),after=174L+(n-1L)%%16L)
+      neutral$reference <- substring(genome,neutral$position,neutral$position)
+      neutral$alternate <- vapply(neutral$reference,change,'')
+      neutral$gt <- '0|0'
+      r <- if (cases$placement[i]=='before') rbind(neutral,r) else
+        if(cases$placement[i]=='between') rbind(r[1L,],neutral,r[2:3,]) else rbind(r,neutral)
+    }
+    r$event_index <- record_count + seq_len(nrow(r))
+    record_count <- record_count + nrow(r)
+    records[[i]] <- r
+  }
+  records <- do.call(rbind,records)
+  records <- records[order(records$seq_region,records$position,records$event_index),]
+  record_rows_by_tx <- split(seq_len(nrow(records)),records$transcript_index)
+  stopifnot(!anyDuplicated(records$event_index),nrow(records) == 3L*nrow(cases) +
+    if(opt$context_per_stratum) sum(cases$neutral_count) else 0L,
+    all(records$reference != records$alternate))
+  pairs <- which(records$source_id %in% c('a','b'))
+  pairs <- split(pairs,records$transcript_index[pairs])
+  pairs <- pairs[match(as.character(cases$transcript_index),names(pairs))]
+  gt_matches <- function(gt,kind,n) {
+    prefix <- switch(kind,leading_pipe='|',leading_slash='/', '')
+    if (nzchar(prefix)) {
+      if (!startsWith(gt,prefix)) return(FALSE)
+      gt <- substring(gt,2L)
+    }
+    if (!grepl('^[01.]+([|/][01.]+)*$',gt)) return(FALSE)
+    atoms <- strsplit(gt,'[|/]')[[1L]]
+    if (length(atoms) != n || any(!atoms %in% c('0','1','.'))) return(FALSE)
+    if (kind == 'mixed') {
+      if (!grepl('|',gt,fixed=TRUE) || !grepl('/',gt,fixed=TRUE)) return(FALSE)
+    } else if (kind == 'called_slash') {
+      if (grepl('|',gt,fixed=TRUE)) return(FALSE)
+    } else if (grepl('/',gt,fixed=TRUE)) return(FALSE)
+    switch(kind,
+      all_missing=all(atoms == '.'),
+      missing_first=atoms[1L] == '.' && sum(atoms == '.') == 1L && any(atoms == '1'),
+      missing_last=atoms[n] == '.' && sum(atoms == '.') == 1L && any(atoms == '1'),
+      late_alt=all(head(atoms,-1L) == '0') && tail(atoms,1L) == '1',
+      !any(atoms == '.') && any(atoms == '1'))
+  }
+  for (i in which(cases$rare | cases$paired)) {
+    r <- records[pairs[[i]],]
+    stopifnot(nrow(r) == 2L,setequal(r$source_id,c('a','b')))
+    gt <- r$gt[match(c('a','b'),r$source_id)]
+    stopifnot(gt_matches(gt[1L],cases$phase[i],cases$source_ploidy[i]),
+      gt_matches(gt[2L],if(cases$paired[i]) cases$phase_b[i] else cases$phase[i],
+        if(cases$paired[i]) cases$source_ploidy_b[i] else cases$source_ploidy[i]))
+  }
+  saveRDS(list(cases=cases,records=records),file.path(out,'inputs.rds'))
+  writeLines(unlist(fasta),file.path(out,'reference.fa'))
+  writeLines(c('##gff-version 3',unlist(gff)),file.path(out,'model.gff3'))
+  writeLines(c('##fileformat=VCFv4.4',paste0('##contig=<ID=',cases$chrom,',length=200>'),
+    '##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">',
+    '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tsample',
+    with(records,paste(chrom,position,source_id,reference,alternate,'.','PASS','.','GT',gt,sep='\t'))),
+    file.path(out,'calls.vcf'))
+  run <- function(command,args,name) {
+    status <- system2(command,shQuote(args),stdout=file.path(out,paste0(name,'.stdout')),
+      stderr=file.path(out,paste0(name,'.stderr')))
+    if (status != 0L) stop(name,' failed; artifacts retained: ',out)
+  }
+  run('samtools',c('faidx',file.path(out,'reference.fa')),'faidx')
+  run('bcftools',c('norm','-c','e','-f',file.path(out,'reference.fa'),'-o',
+    file.path(out,'ref_checked.vcf'),file.path(out,'calls.vcf')),'reference_check')
+  run('bgzip',file.path(out,'model.gff3'),'bgzip')
+  run('tabix',c('-p','gff',file.path(out,'model.gff3.gz')),'tabix')
+  libs <- paste(c(file.path(mirrors,'modules'),file.path(prefix,'share/ensembl-vep-116.0-0')),collapse=':')
+  run('micromamba',c('run','--clean-env','--env',paste0('PERL5LIB=',libs),'-p',prefix,
+    'perl','test/duckvep/conformance/haplotype_oracle.pl',file.path(out,'calls.vcf'),
+    file.path(out,'reference.fa'),file.path(out,'model.gff3.gz'),
+    file.path(out,'phase.jsonl')),'oracle')
+  oracle <- lapply(readLines(file.path(out,'oracle.stdout')),jsonlite::fromJSON,simplifyVector=FALSE)
+  names(oracle) <- vapply(oracle,`[[`,'','transcript')
+  stopifnot(!anyDuplicated(names(oracle)),setequal(names(oracle),cases$transcript))
+  oracle <- oracle[match(cases$transcript,names(oracle))]
+  phase <- lapply(readLines(file.path(out,'phase.jsonl')),jsonlite::fromJSON,simplifyVector=FALSE)
+  phase_ids <- vapply(phase,`[[`,'','transcript')
+  stopifnot(!anyDuplicated(phase_ids),setequal(phase_ids,cases$transcript))
+  phase <- phase[match(cases$transcript,phase_ids)]
+  con <- DBI::dbConnect(duckdb::duckdb(config=list(allow_unsigned_extensions='true')))
+  on.exit(DBI::dbDisconnect(con,shutdown=TRUE),add=TRUE)
+  q <- function(x) as.character(DBI::dbQuoteString(con,x))
+  DBI::dbExecute(con,paste('LOAD',q(extension)))
+  DBI::dbExecute(con,'SET threads=4')
+  DBI::dbWriteTable(con,'models',cases)
+  DBI::dbWriteTable(con,'records',records)
+  queries <- c('SELECT seq_region::UINTEGER seq_region FROM models ORDER BY seq_region',
+    'SELECT transcript_index::UINTEGER transcript_index,seq_region::UINTEGER seq_region,
+     11::UBIGINT transcript_start,190::UBIGINT transcript_end,strand::TINYINT strand,
+     transcript_index::UINTEGER gene_index,3::UBIGINT transcript_flags,11::UBIGINT cds_start,
+     190::UBIGINT cds_end,cds::BLOB cds_sequence,1::UTINYINT codon_table FROM models ORDER BY transcript_index',
+    'SELECT transcript_index::UINTEGER transcript_index,11::UBIGINT exon_start,190::UBIGINT exon_end,
+     1::UBIGINT exon_cdna_start,180::UBIGINT exon_cdna_end,0::TINYINT phase,0::TINYINT end_phase
+     FROM models ORDER BY transcript_index')
+  stopifnot(DBI::dbGetQuery(con,paste0("SELECT loaded FROM duckvep_model_load('records',",
+    paste(q(queries),collapse=','),')'))$loaded)
+  actual <- DBI::dbGetQuery(con,"SELECT * FROM duckvep_haplotypes(
+    'SELECT *,[alternate] alternates FROM records','records',input_mode:='source_records',phase_policy:='vep116_compat')")
+  saveRDS(actual,file.path(out,'actual.rds'))
+  rows_by_tx <- native_haplotype_rows(actual,cases$transcript_index)
+  record_index <- match(seq_len(nrow(records)),records$event_index)
+  stopifnot(!anyNA(record_index))
+  comparisons <- lapply(seq_len(nrow(cases)),function(i) {
+    a <- actual[rows_by_tx[[i]],,drop=FALSE]
+    r <- records[record_rows_by_tx[[as.character(cases$transcript_index[i])]],,drop=FALSE]
+    r$alt <- r$alternate
+    expected_lanes <- phase[[i]]$replay_lanes
+    observed_lanes <- native_replay_lanes(a,r,cases$strand[i],'sample')
+    observed <- lapply(seq_len(nrow(a)),function(j) {
+      ids <- suppressWarnings(as.numeric(unlist(a$coding_blocks[[j]]$event_indices,use.names=FALSE)))
+      stopifnot(all(is.finite(ids) & ids >= 1 & ids <= nrow(records) & ids == floor(ids)))
+      matched <- record_index[ids]
+      stopifnot(!anyNA(matched),all(records$seq_region[matched] == cases$seq_region[i]))
+      list(cds=a$cds[j],protein=a$protein[j],count=a$carrier_count[j],contributors=records$source_id[matched])
+    })
+    expected <- oracle[[i]]$haplotypes
+    list(expected=canonical(expected),observed=canonical(observed),
+      equal=identical(canonical(expected),canonical(observed)),
+      expected_lanes=expected_lanes,observed_lanes=observed_lanes,
+      replay_lanes_equal=length(expected_lanes)==2L &&
+        replay_lanes_equal(expected_lanes,observed_lanes),
+      sequences_equal=identical(canonical(expected,FALSE),canonical(observed,FALSE)),
+      counts_equal=sum(a$carrier_count) == oracle[[i]]$total_haplotype_count,
+      unavailable_carriers=sum(a$carrier_count[is.na(a$cds)]))
+  })
+  saveRDS(comparisons,file.path(out,'comparisons.rds'))
+  summary <- cases[setdiff(names(cases),'cds')]
+  for (field in c('equal','sequences_equal','counts_equal','replay_lanes_equal','unavailable_carriers'))
+    summary[[field]] <- vapply(comparisons,`[[`,if(field == 'unavailable_carriers') 0 else TRUE,field)
+  summary$all_equal <- replay_comparisons_passed(summary)
+  write.csv(summary,file.path(out,'summary.csv'),row.names=FALSE)
+  witness <- oracle[[1L]]$haplotypes
+  corrupt <- list(duplicate=c(witness,witness[1L]),cds=witness,protein=witness,contributor=witness)
+  corrupt$cds[[1L]]$cds <- paste0('C',substring(witness[[1L]]$cds,2L))
+  corrupt$protein[[1L]]$protein <- paste0('X',substring(witness[[1L]]$protein,2L))
+  corrupt$contributor[[1L]]$contributors <- c(witness[[1L]]$contributors,'deliberate_extra_record')
+  rejected <- vapply(corrupt,function(x) !identical(canonical(x),canonical(witness)),TRUE)
+  rejected <- c(rejected,
+    gt_ploidy=!gt_matches('1|0','called_pipe',4L),
+    gt_separator=!gt_matches('1|0','called_slash',2L),
+    gt_missing_position=!gt_matches('1|.','missing_first',2L),
+    gt_leading_separator=!gt_matches('/1|0','leading_pipe',2L),
+    gt_late_alt=!gt_matches('1|0|0|0','late_alt',4L))
+  rejected <- c(rejected,replay_lane_controls(phase[[1L]]$replay_lanes,require_shared=FALSE))
+  rejected <- c(rejected,haplotype_output_controls(actual[rows_by_tx[[1L]],,drop=FALSE]))
+  stopifnot(all(rejected),all(summary$equal[!summary$rare & !summary$paired &
+    summary$shape %in% c('disjoint','adjacent')]))
+  write.csv(data.frame(control=names(rejected),rejected),file.path(out,'controls.csv'),row.names=FALSE)
+  coverage <- strata
+  stratum_key <- function(x) do.call(paste,c(x[c('shape','strand','phase','source_ploidy')],sep=':'))
+  coverage$required <- opt$rare_per_stratum
+  coverage$observed <- tabulate(match(stratum_key(summary[summary$rare,]),stratum_key(strata)),nrow(strata))
+  stopifnot(all(coverage$observed == coverage$required))
+  write.csv(coverage,file.path(out,'coverage.csv'),row.names=FALSE)
+  pair_key <- function(x) do.call(paste,c(x[c('phase','source_ploidy','phase_b',
+    'source_ploidy_b','strand')],sep=':'))
+  pair_strata$required <- opt$pair_per_stratum
+  pair_match <- match(pair_key(summary[summary$paired,]),pair_key(pair_strata))
+  stopifnot(!anyNA(pair_match))
+  pair_strata$observed <- tabulate(pair_match,nrow(pair_strata))
+  stopifnot(all(pair_strata$observed == pair_strata$required))
+  write.csv(pair_strata,file.path(out,'pair_coverage.csv'),row.names=FALSE)
+  if (opt$pair_per_stratum) {
+    geometry_coverage <- expand.grid(stratum=seq_len(nrow(pair_strata)),shape=shapes)
+    shape_index <- match(summary$shape[summary$paired],shapes)
+    stopifnot(!anyNA(shape_index))
+    geometry_coverage$observed <- tabulate(pair_match+(shape_index-1L)*nrow(pair_strata),
+      nrow(geometry_coverage))
+    geometry_coverage$required <- opt$pair_per_stratum %/% length(shapes) +
+      as.integer(match(geometry_coverage$shape,shapes) <= opt$pair_per_stratum %% length(shapes))
+    stopifnot(all(geometry_coverage$observed == geometry_coverage$required))
+    geometry_coverage <- cbind(pair_strata[geometry_coverage$stratum,
+      setdiff(names(pair_strata),c('required','observed'))],geometry_coverage[-1L])
+    write.csv(geometry_coverage,file.path(out,'pair_geometry_coverage.csv'),row.names=FALSE)
+  }
+  if (opt$context_per_stratum) {
+    context_key <- function(x) do.call(paste,c(x[c('shape','strand','phase','placement','neutral_count')],sep=':'))
+    context$required <- opt$context_per_stratum
+    context_indices <- core_profiles+seq_len(context_profiles)
+    context$observed <- tabulate(match(context_key(summary[context_indices,]),
+      context_key(context)),nrow(context))
+    stopifnot(all(context$observed==context$required),
+      all(records$gt[startsWith(records$source_id,'neutral')]=='0|0'))
+    for (i in context_indices) {
+      key <- paste(cases$shape[i],cases$phase[i],cases$strand[i],cases$context_draw[i],sep=':')
+      rows <- records[record_rows_by_tx[[as.character(i-1L)]],]
+      buffer <- phase[[i]]$source_buffer
+      stopifnot(length(buffer)==nrow(rows),
+        identical(vapply(buffer,function(x) x$ids[[1L]],''),rows$source_id),
+        identical(vapply(buffer,`[[`,'','chrom'),rows$chrom),
+        all(vapply(buffer,function(x) as.numeric(x$start),0)==rows$position),
+        all(vapply(buffer,function(x) as.numeric(x$end),0)==rows$position+nchar(rows$reference)-1L),
+        identical(vapply(buffer,`[[`,'','alleles'),paste(rows$reference,rows$alternate,sep=',')),
+        !any(startsWith(vapply(phase[[i]]$calls,`[[`,'','source_id'),'neutral')))
+      r <- rows[rows$source_id %in% c('a','b','anchor'),]
+      r <- r[match(c('a','b','anchor'),r$source_id),c('position','reference','alternate','gt')]
+      rownames(r) <- NULL
+      stopifnot(identical(r,context_templates[[key]]))
+    }
+    write.csv(context,file.path(out,'context_coverage.csv'),row.names=FALSE)
+    keys <- with(cases[context_indices,],paste(shape,phase,strand,context_draw,sep=':'))
+    baseline <- context_indices[match(keys,keys)]
+    stopifnot(all(cases$neutral_count[baseline]==0L))
+    paired <- summary[context_indices,]
+    paired$baseline_transcript <- cases$transcript[baseline]
+    paired$oracle_context_changed <- vapply(seq_along(context_indices),function(j)
+      !identical(comparisons[[context_indices[j]]]$expected,comparisons[[baseline[j]]]$expected),TRUE)
+    paired$observed_context_changed <- vapply(seq_along(context_indices),function(j)
+      !identical(comparisons[[context_indices[j]]]$observed,comparisons[[baseline[j]]]$observed),TRUE)
+    write.csv(paired,file.path(out,'context_summary.csv'),row.names=FALSE)
+  }
+  identities <- unique(c(paths,extension,'test/duckvep/conformance/haplotype_record_differential.R',
+    'test/duckvep/conformance/haplotype_observations.R',
+    'test/duckvep/conformance/haplotype_oracle.pl','r/duckhtsbench/inst/benchmark_registry.tsv',
+    list.files(out,full.names=TRUE)))
+  jsonlite::write_json(list(source_revision=revision,extension_build_binding=binding,
+    scope='source_record_geometry_and_file_lane_association_not_complete_phased_conformance',
+    source_artifact='haplotype_benchmark_reference',
+    generator='test/duckvep/conformance/haplotype_record_differential.R',
+    oracle_revisions=as.list(pins),seed=opt$seed,random_cases=opt$random_cases,
+    rare_per_stratum=opt$rare_per_stratum,rare_strata=nrow(strata),rare_profiles=sum(summary$rare),
+    pair_per_stratum=opt$pair_per_stratum,pair_strata=nrow(pair_strata),
+    pair_profiles=sum(summary$paired),pair_failures=sum(!summary$all_equal & summary$paired),
+    paired_group_failures=sum(!summary$equal & summary$paired),
+    context_per_stratum=opt$context_per_stratum,context_strata=nrow(context),
+    context_profiles=context_profiles,core_profiles=core_profiles,
+    input_records=nrow(records),profiles=nrow(cases),failures=sum(!summary$all_equal),
+    grouped_failures=sum(!summary$equal),replay_lane_failures=sum(!summary$replay_lanes_equal),
+    oracle_replay_lanes=sum(vapply(comparisons,function(x) length(x$expected_lanes),1L)),
+    observed_replay_lanes=sum(vapply(comparisons,function(x) length(x$observed_lanes),1L)),
+    threads=4L,output_leaves=nrow(actual),observed_carriers=sum(actual$carrier_count),
+    oracle_leaves=sum(vapply(oracle,function(x) length(x$haplotypes),1L)),
+    oracle_lanes=sum(vapply(oracle,`[[`,0,'total_haplotype_count')),
+    sequence_failures=sum(!summary$sequences_equal),count_failures=sum(!summary$counts_equal),
+    available_sequence_failures=sum(!summary$sequences_equal & summary$unavailable_carriers == 0L),
+    profiles_with_unavailable=sum(summary$unavailable_carriers > 0L),
+    controls_rejected=sum(rejected),sha256=as.list(vapply(identities,duckvep_evidence_sha256,''))),
+    file.path(out,'receipt.json'),pretty=TRUE,auto_unbox=TRUE)
+  if (!is.null(opt$extension_receipt)) duckvep_evidence_assert_checkout(root,revision)
+  print(aggregate(cbind(profiles=rep(1L,nrow(summary)),failures=as.integer(!summary$all_equal),
+    sequence_failures=as.integer(!summary$sequences_equal),
+    replay_lane_failures=as.integer(!summary$replay_lanes_equal),unavailable_carriers) ~ shape,
+    data=summary,FUN=sum),row.names=FALSE)
+  if (any(!summary$all_equal)) stop('Source-record replay differences retained: ',out,call.=FALSE)
+}
+main()

@@ -5,6 +5,45 @@ local({
   con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
 
+  repeat_query <- paste("SELECT r.* FROM (SELECT duckvep_repeat_sequence(",
+    "[{unit:'CAG',count:2},{unit:'CAT',count:1},{unit:'nRy',count:2}],true,",
+    "max_sequence_bases:=15) r)")
+  expect_identical(dbGetQuery(con, repeat_query),
+    data.frame(sequence = "CAGCAGCATnRynRy", status = "ok"))
+  cases <- c("[]::STRUCT(unit VARCHAR,count DOUBLE)[]", "[{unit:'CAG',count:0}]",
+    "NULL::STRUCT(unit VARCHAR,count DOUBLE)[]", "[NULL]::STRUCT(unit VARCHAR,count DOUBLE)[]",
+    "[{unit:NULL,count:1}]", "[{unit:'CAG',count:NULL}]", "[{unit:'CAG',count:1.5}]",
+    "[{unit:'A',count:1.000000000000000001::DECIMAL(38,18)}]")
+  wanted <- c("ok", "ok", rep("incomplete_input", 4L), rep("nonintegral_count", 2L))
+  for (i in seq_along(cases)) {
+    value <- dbGetQuery(con, paste0("SELECT r.* FROM (SELECT duckvep_repeat_sequence(",
+      cases[i], ",true) r)"))
+    expect_identical(value$status, wanted[i])
+    expect_identical(value$sequence, if (wanted[i] == "ok") "" else NA_character_)
+  }
+  summary <- dbGetQuery(con, paste("SELECT r.* FROM (SELECT duckvep_repeat_sequence(",
+    "[{unit:'CAG',count:1e300}],false,max_sequence_bases:=0) r)"))
+  expect_identical(summary, data.frame(sequence = NA_character_, status = "summary_only"))
+  for (count in c("-1", "'NaN'::DOUBLE", "'Infinity'::DOUBLE"))
+    expect_error(dbGetQuery(con, paste0("SELECT duckvep_repeat_sequence([{unit:'A',count:",
+      count, "}],false)")), pattern = "counts must be finite and nonnegative")
+  for (limit in c("NULL", "-1", "1.5", "2147483648", "'Infinity'::DOUBLE",
+                  "1.000000000000000001::DECIMAL(38,18)"))
+    expect_error(dbGetQuery(con, paste0("SELECT duckvep_repeat_sequence([{unit:'A',count:1}],",
+      "true,max_sequence_bases:=", limit, ")")), pattern = "max_sequence_bases must be an integer")
+  for (unit in c("", ".", "AU", "CAG ", "CAG;", "é"))
+    expect_error(dbGetQuery(con, paste0("SELECT duckvep_repeat_sequence([{unit:",
+      dbQuoteString(con, unit), ",count:1}],false)")),
+      pattern = "repeat units must contain non-empty IUPAC DNA")
+  expect_error(dbGetQuery(con, paste("SELECT duckvep_repeat_sequence(",
+    "[{unit:'AC',count:2},{unit:'GT',count:2}],true,max_sequence_bases:=7)")),
+    pattern = "exceeds max_sequence_bases=7")
+  expect_error(dbGetQuery(con, "SELECT duckvep_repeat_sequence([{unit:'AC',count:1e300}],true)"),
+    pattern = "exceeds max_sequence_bases=5000")
+  expect_error(dbGetQuery(con, "SELECT duckvep_repeat_sequence([{unit:'AC',count:1}],NULL)"),
+    pattern = "sequence_exact is required")
+  expect_identical(dbGetQuery(con, repeat_query)$sequence, "CAGCAGCATnRynRy")
+
   bnd <- dbGetQuery(
     con,
     paste(
@@ -1131,6 +1170,349 @@ local({
   expect_identical(hgvs_coding$transcript_hgvs_status, "supported")
   expect_identical(hgvs_coding$protein_hgvs_status, "supported")
 
+  # Original records observed in pinned VEP 116 ambiguous_indel_consensus,
+  # retained in conformance/data/indel_translation_witnesses.jsonl.gz.
+  # Alternate frameshift CDS uses table 1; the reference peptide and SO still
+  # use the transcript table. Standard and in-frame controls must not change.
+  # Events 5400/32261 pin a parsed-away N deletion anchor and immediate-stop
+  # formatting after VEP's Xaa-to-Ter conversion, respectively.
+  hgvs_table_sources <- data.frame(
+    i = 0:11,
+    event_index = c(4L, 17L, 18L, 73L, 74L, 76L, 284L, 353L, 354L, 356L, 5400L, 32261L),
+    codon_table = c(1L, 1L, 1L, 2L, 2L, 2L, 6L, 9L, 9L, 9L, 1L, 1L),
+    position = c(13L, 14L, 14L, 14L, 14L, 14L, 13L, 14L, 14L, 14L, 14L, 13L),
+    reference = c("G", "A", "A", "A", "A", "A", "G", "A", "A", "A", "NAAG", "G"),
+    alternate = c("GT", "AG", "AT", "AG", "AT", "AGCC", "GT", "AG", "AT", "AGCC", "N", "GAC")
+  )
+  dbWriteTable(con, "hgvs_table_sources", hgvs_table_sources)
+  dbExecute(con, paste(
+    "CREATE TABLE hgvs_table_transcripts AS SELECT",
+    "i::UINTEGER transcript_index, i::UINTEGER seq_region,",
+    "11::UBIGINT transcript_start, 22::UBIGINT transcript_end,",
+    "1::TINYINT strand, i::UINTEGER gene_index, 3::UBIGINT transcript_flags,",
+    "transcript_start cds_start, transcript_end cds_end,",
+    "(CASE i WHEN 10 THEN 'ATGNAAGCCTAA' WHEN 11 THEN 'ATGNNAGCCTAA'",
+    "ELSE 'ATGAAAGCCTAA' END)::BLOB cds_sequence, codon_table::UTINYINT codon_table,",
+    "''::BLOB pre_cds_sequence, ''::BLOB post_cds_sequence FROM hgvs_table_sources"
+  ))
+  expect_true(load_model("r-hgvs-alternate-table", c(
+    paste("SELECT seq_region, 32::UBIGINT sequence_length,",
+      "CASE seq_region WHEN 10 THEN 'residual_naa' WHEN 11 THEN 'residual_nna'",
+      "ELSE 'table' || seq_region END seq_region_name",
+      "FROM hgvs_table_transcripts ORDER BY seq_region"),
+    "SELECT * FROM hgvs_table_transcripts ORDER BY transcript_index",
+    paste("SELECT transcript_index, 11::UBIGINT exon_start, 22::UBIGINT exon_end,",
+      "1::UBIGINT exon_cdna_start, 12::UBIGINT exon_cdna_end,",
+      "0::TINYINT phase, 0::TINYINT end_phase",
+      "FROM hgvs_table_transcripts ORDER BY transcript_index")
+  ), reference_fasta = system.file("extdata", "duckvep_indel_translation.fa",
+    package = "Rduckhts", mustWork = TRUE))$loaded)
+  dbExecute(con, paste(
+    "CREATE TABLE hgvs_table_events AS SELECT event_index::UBIGINT event_index,",
+    "i::UINTEGER seq_region, position::UBIGINT AS position, reference, alternate,",
+    "NULL::UBIGINT end_position, NULL::VARCHAR structural_type,",
+    "NULL::VARCHAR copy_change, NULL::UINTEGER mate_seq_region,",
+    "NULL::UBIGINT mate_position FROM hgvs_table_sources"
+  ))
+  hgvs_tables <- dbGetQuery(con, paste(
+    "SELECT event_index, protein_hgvs, protein_hgvs_status,",
+    "(SELECT string_agg(t.consequence, '&' ORDER BY t.consequence)",
+    "FROM duckvep_so_terms() t",
+    "WHERE (a.consequence_mask & t.consequence_mask) <> 0) consequences",
+    "FROM duckvep_annotate('hgvs_table_events', 'r-hgvs-alternate-table',",
+    "hgvs := true, upstream_distance := 0, downstream_distance := 0) a",
+    "ORDER BY event_index"
+  ))
+  expect_equal(hgvs_tables$event_index, hgvs_table_sources$event_index)
+  expect_identical(hgvs_tables$protein_hgvs, c(
+    "p.Lys2Ter", "p.Lys2ArgfsTer?", "p.Lys2IlefsTer?", "p.Lys2ArgfsTer?",
+    "p.Lys2IlefsTer?", "p.Lys2delinsSerGln", "p.Lys2Ter", "p.Asn2ArgfsTer?",
+    "p.Asn2IlefsTer?", "p.Asn2delinsSerGln", "p.Ala3del", "p.Ala3Ter"
+  ))
+  expect_identical(hgvs_tables$protein_hgvs_status, rep("supported", 12L))
+  expect_identical(hgvs_tables$consequences, c(
+    "frameshift_variant", "frameshift_variant", "frameshift_variant",
+    "frameshift_variant&stop_gained", "frameshift_variant", "protein_altering_variant",
+    "frameshift_variant", "frameshift_variant", "frameshift_variant", "protein_altering_variant",
+    "inframe_deletion", "frameshift_variant"
+  ))
+  raw_naa <- rduckhts_haplotypes(con, paste(
+    "SELECT event_index,seq_region,position,reference,[alternate] alternates,",
+    "seq_region transcript_index,0 sample_index,'1|1' gt FROM hgvs_table_events WHERE event_index=5400"
+  ), "r-hgvs-alternate-table", "vep116_compat", input_mode = "source_records", hgvs = TRUE)
+  expect_identical(raw_naa$cds, "ATGNAAGCCTAA")
+  expect_identical(raw_naa$protein, "MXA*")
+  expect_identical(raw_naa$projection_status, "ok")
+  expect_identical(raw_naa$sequence_status, "conditional")
+  expect_equal(raw_naa$carrier_count, 2L)
+  expect_equal(raw_naa$edit_count, 0L)
+  expect_true(is.na(raw_naa$hgvsp))
+  expect_identical(raw_naa$hgvsp_status, "incomplete_input")
+  expect_equal(nrow(raw_naa$coding_blocks[[1L]]), 0L)
+  expect_equal(nrow(raw_naa$contributors[[1L]]), 1L)
+  expect_equal(raw_naa$contributors[[1L]]$event_index, 5400L)
+  expect_equal(raw_naa$contributors[[1L]]$position, 14L)
+  expect_identical(raw_naa$contributors[[1L]]$reference, "NAAG")
+  expect_identical(raw_naa$contributors[[1L]]$alternate, "N")
+  expect_identical(raw_naa$contributors[[1L]]$projection_status, "source_allele_skipped")
+  expect_equal(bitwAnd(raw_naa$contributors[[1L]]$evidence_flags, 8L), 8L)
+  expect_true(dbGetQuery(con,
+    "SELECT duckvep_model_drop('r-hgvs-alternate-table') dropped")$dropped)
+
+  # Pinned VEP 116 original records in indel_translation_witnesses.jsonl.gz:
+  # shared suffix N is erased just like a prefix, including genuine C/GT
+  # delins. Equal-length and changed REF N do not gain HGVSp availability.
+  hgvs_padding_sources <- data.frame(
+    event_index = 1:14, seq_region = c(rep(0L, 7L), rep(1L, 3L), rep(2L, 4L)),
+    position = c(14L, 15L, 14L, 14L, 14L, 14L, 16L, 14L, 14L, 14L, 14L, 15L, 14L, 14L),
+    reference = c("ACN", "CN", "ACN", "ACN", "ACN", "ACN", "N", "NCN", "NCN", "NCN",
+      "ACC", "CC", "ACC", "ACC"),
+    alternate = c("ATCN", "TCN", "AGTN", "AN", "ATN", "A", "NT", "NTCN", "NGTN", "NN",
+      "ATCC", "TCC", "AGTC", "AC")
+  )
+  dbWriteTable(con, "hgvs_padding_sources", hgvs_padding_sources)
+  dbExecute(con, paste(
+    "CREATE TABLE hgvs_padding_transcripts AS SELECT",
+    "i::UINTEGER transcript_index, i::UINTEGER seq_region,",
+    "11::UBIGINT transcript_start, 22::UBIGINT transcript_end,",
+    "1::TINYINT strand, i::UINTEGER gene_index, 3::UBIGINT transcript_flags,",
+    "transcript_start cds_start, transcript_end cds_end,",
+    "cds::BLOB cds_sequence, 1::UTINYINT codon_table,",
+    "''::BLOB pre_cds_sequence, ''::BLOB post_cds_sequence",
+    "FROM (VALUES (0, 'ATGACNGCCTAA'), (1, 'ATGNCNGCCTAA'), (2, 'ATGACCGCCTAA')) s(i, cds)"
+  ))
+  expect_true(load_model("r-hgvs-padding", c(
+    paste("SELECT seq_region, 32::UBIGINT sequence_length,",
+      "CASE seq_region WHEN 0 THEN 'padding_acn' WHEN 1 THEN 'padding_ncn'",
+      "ELSE 'padding_acc' END seq_region_name FROM hgvs_padding_transcripts ORDER BY seq_region"),
+    "SELECT * FROM hgvs_padding_transcripts ORDER BY transcript_index",
+    paste("SELECT transcript_index, 11::UBIGINT exon_start, 22::UBIGINT exon_end,",
+      "1::UBIGINT exon_cdna_start, 12::UBIGINT exon_cdna_end,",
+      "0::TINYINT phase, 0::TINYINT end_phase FROM hgvs_padding_transcripts ORDER BY transcript_index")
+  ), reference_fasta = system.file("extdata", "duckvep_indel_translation.fa",
+    package = "Rduckhts", mustWork = TRUE))$loaded)
+  dbExecute(con, paste(
+    "CREATE TABLE hgvs_padding_events AS SELECT event_index::UBIGINT event_index,",
+    "seq_region::UINTEGER seq_region, position::UBIGINT AS position, reference, alternate,",
+    "NULL::UBIGINT end_position, NULL::VARCHAR structural_type,",
+    "NULL::VARCHAR copy_change, NULL::UINTEGER mate_seq_region,",
+    "NULL::UBIGINT mate_position FROM hgvs_padding_sources"
+  ))
+  hgvs_padding <- dbGetQuery(con, paste(
+    "SELECT event_index, protein_hgvs,",
+    "(SELECT string_agg(t.consequence, '&' ORDER BY t.consequence)",
+    "FROM duckvep_so_terms() t",
+    "WHERE (a.consequence_mask & t.consequence_mask) <> 0) consequences",
+    "FROM duckvep_annotate('hgvs_padding_events', 'r-hgvs-padding',",
+    "hgvs := true, upstream_distance := 0, downstream_distance := 0) a ORDER BY event_index"
+  ))
+  expect_equal(hgvs_padding$event_index, hgvs_padding_sources$event_index)
+  expect_identical(hgvs_padding$protein_hgvs, c(
+    "p.Thr2IlefsTer?", "p.Thr2IlefsTer?", "p.Thr2SerfsTer?", "p.Thr2Ter",
+    NA_character_, NA_character_, "p.Ala3CysfsTer?", "p.Ala3Ter", "p.Ala3Ter",
+    "p.Ala3ProfsTer?", "p.Thr2IlefsTer?", "p.Thr2IlefsTer?", "p.Thr2SerfsTer?", "p.Ala3ProfsTer?"
+  ))
+  expect_identical(hgvs_padding$consequences,
+    c(rep("frameshift_variant", 4L), "coding_sequence_variant", rep("frameshift_variant", 9L)))
+  # Raw replay skips complete N-bearing ALTs without applying independent
+  # VEP's matching-padding removal.
+  padding_replay <- rduckhts_haplotypes(con, paste(
+    "SELECT event_index, seq_region, position, reference, [alternate] alternates,",
+    "seq_region transcript_index, 0 sample_index, '1|1' gt FROM hgvs_padding_events",
+    "WHERE event_index IN (1, 8)"
+  ), "r-hgvs-padding", hgvs = TRUE, input_mode = "source_records", phase_policy = "vep116_compat")
+  padding_replay <- padding_replay[order(padding_replay$transcript_index), ]
+  expect_identical(padding_replay$hgvsp, rep(NA_character_, 2L))
+  expect_identical(padding_replay$hgvsp_status, rep("incomplete_input", 2L))
+  expect_identical(padding_replay$projection_status, rep("ok", 2L))
+  expect_identical(padding_replay$sequence_status, rep("conditional", 2L))
+  expect_identical(padding_replay$cds, c("ATGACNGCCTAA", "ATGNCNGCCTAA"))
+  expect_identical(padding_replay$protein, c("MTA*", "MXA*"))
+  expect_equal(padding_replay$edit_count, c(0L, 0L))
+  expect_equal(padding_replay$carrier_count, c(2L, 2L))
+  expect_equal(bitwAnd(padding_replay$evidence_flags, 8L), c(8L, 8L))
+  for (field in c("coding_blocks", "cds_differences", "protein_differences"))
+    expect_equal(vapply(padding_replay[[field]], nrow, 0L), c(0L, 0L))
+  expect_equal(vapply(padding_replay$contributors, nrow, 0L), c(1L, 1L))
+  padding_contributors <- do.call(rbind, padding_replay$contributors)
+  expect_equal(padding_contributors$event_index, c(1L, 8L))
+  expect_identical(padding_contributors$reference, c("ACN", "NCN"))
+  expect_identical(padding_contributors$alternate, c("ATCN", "NTCN"))
+  expect_equal(padding_contributors$position, c(14L, 14L))
+  expect_equal(padding_contributors$alt_index, c(1L, 1L))
+  expect_identical(padding_contributors$projection_status, rep("source_allele_skipped", 2L))
+  expect_equal(bitwAnd(padding_contributors$evidence_flags, 8L), c(8L, 8L))
+  expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-hgvs-padding') dropped")$dropped)
+
+  # Pinned original events 110244/143844: removed REF N makes the independent
+  # reference peptide unavailable, but does not invalidate raw source replay.
+  hgvs_removed_ref_sources <- data.frame(
+    i = 0:1, event_index = c(110244L, 143844L),
+    cds = c("ATGGCTGCCTAA", "ATGGCNGCCTAA"), reference = c("CT", "CN")
+  )
+  dbWriteTable(con, "hgvs_removed_ref_sources", hgvs_removed_ref_sources)
+  dbExecute(con, paste(
+    "CREATE TABLE hgvs_removed_ref_transcripts AS SELECT",
+    "i::UINTEGER transcript_index, i::UINTEGER seq_region,",
+    "11::UBIGINT transcript_start, 22::UBIGINT transcript_end,",
+    "1::TINYINT strand, i::UINTEGER gene_index, 3::UBIGINT transcript_flags,",
+    "transcript_start cds_start, transcript_end cds_end,",
+    "cds::BLOB cds_sequence, 1::UTINYINT codon_table,",
+    "''::BLOB pre_cds_sequence, ''::BLOB post_cds_sequence FROM hgvs_removed_ref_sources"
+  ))
+  expect_true(load_model("r-hgvs-removed-ref", c(
+    paste("SELECT seq_region, 32::UBIGINT sequence_length,",
+      "CASE WHEN seq_region = 0 THEN 'n5' ELSE 'n0' END seq_region_name",
+      "FROM hgvs_removed_ref_transcripts ORDER BY seq_region"),
+    "SELECT * FROM hgvs_removed_ref_transcripts ORDER BY transcript_index",
+    paste("SELECT transcript_index, 11::UBIGINT exon_start, 22::UBIGINT exon_end,",
+      "1::UBIGINT exon_cdna_start, 12::UBIGINT exon_cdna_end,",
+      "0::TINYINT phase, 0::TINYINT end_phase",
+      "FROM hgvs_removed_ref_transcripts ORDER BY transcript_index")
+  ), reference_fasta = system.file("extdata", "duckvep_n_indel.fa",
+    package = "Rduckhts", mustWork = TRUE))$loaded)
+  dbExecute(con, paste(
+    "CREATE TABLE hgvs_removed_ref_events AS SELECT event_index::UBIGINT event_index,",
+    "i::UINTEGER seq_region, 15::UBIGINT AS position, reference, 'C' alternate,",
+    "NULL::UBIGINT end_position, NULL::VARCHAR structural_type,",
+    "NULL::VARCHAR copy_change, NULL::UINTEGER mate_seq_region,",
+    "NULL::UBIGINT mate_position FROM hgvs_removed_ref_sources"
+  ))
+  hgvs_removed_ref <- dbGetQuery(con, paste(
+    "SELECT event_index, protein_hgvs,",
+    "(SELECT string_agg(t.consequence, '&' ORDER BY t.consequence)",
+    "FROM duckvep_so_terms() t",
+    "WHERE (a.consequence_mask & t.consequence_mask) <> 0) consequences",
+    "FROM duckvep_annotate('hgvs_removed_ref_events', 'r-hgvs-removed-ref',",
+    "hgvs := true, upstream_distance := 0, downstream_distance := 0) a",
+    "ORDER BY event_index"
+  ))
+  expect_equal(hgvs_removed_ref$event_index, hgvs_removed_ref_sources$event_index)
+  expect_identical(hgvs_removed_ref$protein_hgvs, c("p.Ala3ProfsTer?", NA_character_))
+  expect_identical(hgvs_removed_ref$consequences, rep("frameshift_variant", 2L))
+  removed_ref_replay <- rduckhts_haplotypes(con, paste(
+    "SELECT event_index, seq_region, position, reference, [alternate] alternates,",
+    "seq_region transcript_index, 0 sample_index, '1|1' gt FROM hgvs_removed_ref_events"
+  ), "r-hgvs-removed-ref", input_mode = "source_records", phase_policy = "vep116_compat")
+  removed_ref_replay <- removed_ref_replay[order(removed_ref_replay$transcript_index), ]
+  expect_equal(removed_ref_replay$transcript_index, hgvs_removed_ref_sources$i)
+  expect_identical(removed_ref_replay$cds, rep("ATGGCGCCTAA", 2L))
+  expect_identical(removed_ref_replay$protein, rep("MAP", 2L))
+  expect_equal(vapply(removed_ref_replay$contributors, nrow, 0L), c(1L, 1L))
+  removed_ref_contributors <- do.call(rbind, removed_ref_replay$contributors)
+  expect_equal(removed_ref_contributors$event_index, hgvs_removed_ref_sources$event_index)
+  expect_equal(removed_ref_contributors$position, c(15, 15))
+  expect_identical(removed_ref_contributors$reference, hgvs_removed_ref_sources$reference)
+  expect_identical(removed_ref_contributors$alternate, c("C", "C"))
+  expect_true(dbGetQuery(con,
+    "SELECT duckvep_model_drop('r-hgvs-removed-ref') dropped")$dropped)
+
+  # Pinned original records in indel_translation_witnesses.jsonl.gz, under
+  # canonical_hgvs and xaa_duplication. Each source has an isolated transcript.
+  hgvs_residual_sources <- data.frame(
+    i = 0:11,
+    event_index = c(4052L, 4059L, 4065L, 4067L, 4069L, 13533L, 13684L, 32276L,
+      71881L, 89760L, 110256L, 146516L),
+    codon_table = c(1L, 1L, 1L, 1L, 1L, 2L, 5L, 1L, 14L, 26L, 1L, 1L),
+    cds = c(rep("ATGTAAGCCTAA", 5L), "ATGAGAGCCTAA", "ATGAGAGCCTAA", "ATGNNAGCCTAA",
+      "ATGTAGGCCTAA", "ATGCTGGCCTAA", "ATGGCTGCCTAA", "ATGNCNGCCTAA"),
+    position = c(14L, 14L, 15L, 15L, 15L, 15L, 14L, 14L, 15L, 16L, 16L, 14L),
+    reference = c("T", "TAAG", "A", "A", "AAG", "GAG", "A", "N", "A", "G", "T", "N"),
+    alternate = c("TGCC", "TA", "AAC", "AACGT", "A", "G", "AGCC", "NGCC",
+      "AAC", "GGCC", "TGCC", "NGCC")
+  )
+  hgvs_residual_expected <- c("p.Ter2delinsCysGln", "p.Ala3Ter", "p.Ter2_Ala3insTer",
+    "p.Ter2_Ala3insArgTer", "p.Ala3Ter", "p.Ala3Ter", "p.Arg2dup", "p.Xaa2dup",
+    "p.Ter2_Ala3insTer", "p.Ala2_Ala3insAla", "p.Ala2dup", "p.Ter2_Ala3insPro")
+  hgvs_residual_so <- c("stop_lost", "coding_sequence_variant", "stop_retained_variant",
+    "coding_sequence_variant&inframe_insertion", "coding_sequence_variant", "inframe_deletion",
+    "inframe_insertion", "coding_sequence_variant&inframe_insertion", "coding_sequence_variant",
+    "inframe_insertion", "inframe_insertion", "coding_sequence_variant&inframe_insertion")
+  dbWriteTable(con, "hgvs_residual_sources", hgvs_residual_sources)
+  dbExecute(con, paste(
+    "CREATE TABLE hgvs_residual_transcripts AS SELECT",
+    "i::UINTEGER transcript_index, i::UINTEGER seq_region,",
+    "11::UBIGINT transcript_start, 22::UBIGINT transcript_end,",
+    "1::TINYINT strand, i::UINTEGER gene_index, 3::UBIGINT transcript_flags,",
+    "transcript_start cds_start, transcript_end cds_end,",
+    "cds::BLOB cds_sequence, codon_table::UTINYINT codon_table,",
+    "''::BLOB pre_cds_sequence, ''::BLOB post_cds_sequence FROM hgvs_residual_sources"
+  ))
+  expect_true(load_model("r-hgvs-residual", c(
+    paste("SELECT i::UINTEGER seq_region, 32::UBIGINT sequence_length,",
+      "'residual_' || event_index seq_region_name FROM hgvs_residual_sources ORDER BY i"),
+    "SELECT * FROM hgvs_residual_transcripts ORDER BY transcript_index",
+    paste("SELECT transcript_index, 11::UBIGINT exon_start, 22::UBIGINT exon_end,",
+      "1::UBIGINT exon_cdna_start, 12::UBIGINT exon_cdna_end,",
+      "0::TINYINT phase, 0::TINYINT end_phase",
+      "FROM hgvs_residual_transcripts ORDER BY transcript_index")
+  ), reference_fasta = system.file("extdata", "duckvep_indel_translation.fa",
+    package = "Rduckhts", mustWork = TRUE))$loaded)
+  dbExecute(con, paste(
+    "CREATE TABLE hgvs_residual_events AS SELECT event_index::UBIGINT event_index,",
+    "i::UINTEGER seq_region, position::UBIGINT AS position, reference, alternate,",
+    "NULL::UBIGINT end_position, NULL::VARCHAR structural_type,",
+    "NULL::VARCHAR copy_change, NULL::UINTEGER mate_seq_region,",
+    "NULL::UBIGINT mate_position FROM hgvs_residual_sources"
+  ))
+  residual <- dbGetQuery(con, paste(
+    "SELECT event_index, protein_hgvs, protein_hgvs_status,",
+    "(SELECT string_agg(t.consequence, '&' ORDER BY t.consequence)",
+    "FROM duckvep_so_terms() t",
+    "WHERE (a.consequence_mask & t.consequence_mask) <> 0) consequences",
+    "FROM duckvep_annotate('hgvs_residual_events', 'r-hgvs-residual',",
+    "hgvs := true, upstream_distance := 0, downstream_distance := 0) a ORDER BY event_index"
+  ))
+  expect_equal(residual$event_index, hgvs_residual_sources$event_index)
+  expect_identical(residual$protein_hgvs, hgvs_residual_expected)
+  expect_identical(residual$protein_hgvs_status, rep("supported", 12L))
+  expect_identical(residual$consequences, hgvs_residual_so)
+  for (raw in c(FALSE, TRUE)) {
+    input <- if (raw) paste(
+      "SELECT event_index, seq_region, position, reference, [alternate] alternates,",
+      "seq_region transcript_index, 0 sample_index, '1|1' gt FROM hgvs_residual_events"
+    ) else paste(
+      "SELECT event_index, seq_region, position, reference, alternate, 1 alt_index,",
+      "seq_region transcript_index, 0 sample_index, [1]::INTEGER[] alleles,",
+      "[true]::BOOLEAN[] phase_before, NULL::BIGINT phase_set FROM hgvs_residual_events"
+    )
+    replay <- rduckhts_haplotypes(con, input, "r-hgvs-residual", hgvs = TRUE,
+      phase_policy = "vep116_compat", input_mode = if (raw) "source_records" else "alt_events")
+    replay <- replay[order(replay$transcript_index), ]
+    expect_equal(replay$transcript_index, hgvs_residual_sources$i)
+    # Raw ALT N is skipped even when TVA can erase its shared anchor.
+    skipped_raw <- raw & hgvs_residual_sources$event_index %in% c(32276L, 146516L)
+    expected <- hgvs_residual_expected
+    expected[skipped_raw] <- NA_character_
+    expect_identical(sub("^p\\.\\((.*)\\)$", "p.\\1", replay$hgvsp), expected)
+    expect_identical(replay$projection_status, rep("ok", 12L))
+    expect_identical(replay$sequence_status, ifelse(skipped_raw, "conditional", "ok"))
+    expect_false(anyNA(replay$cds))
+    expect_false(anyNA(replay$protein))
+    expect_equal(replay$carrier_count, rep(if (raw) 2L else 1L, 12L))
+    expect_equal(vapply(replay$contributors, nrow, 0L), rep(1L, 12L))
+    contributors <- do.call(rbind, replay$contributors)
+    expect_equal(contributors$event_index, hgvs_residual_sources$event_index)
+    expect_equal(contributors$seq_region, hgvs_residual_sources$i)
+    expect_equal(contributors$position, hgvs_residual_sources$position)
+    expect_identical(contributors$reference, hgvs_residual_sources$reference)
+    expect_identical(contributors$alternate, hgvs_residual_sources$alternate)
+    expect_identical(contributors$projection_status,
+      ifelse(skipped_raw, "source_allele_skipped", "ok"))
+    if (raw) {
+      expect_identical(replay$hgvsp_status[skipped_raw], rep("incomplete_input", 2L))
+      expect_identical(replay$cds[skipped_raw], hgvs_residual_sources$cds[skipped_raw])
+      expect_identical(replay$protein[skipped_raw], c("MXA*", "MXA*"))
+      expect_equal(replay$edit_count[skipped_raw], c(0L, 0L))
+      expect_equal(bitwAnd(replay$evidence_flags[skipped_raw], 8L), c(8L, 8L))
+      expect_equal(bitwAnd(contributors$evidence_flags[skipped_raw], 8L), c(8L, 8L))
+      expect_equal(contributors$alt_index, rep(1L, 12L))
+      for (field in c("coding_blocks", "cds_differences", "protein_differences"))
+        expect_equal(vapply(replay[[field]][skipped_raw], nrow, 0L), c(0L, 0L))
+    }
+  }
+  expect_true(dbGetQuery(con, "SELECT duckvep_model_drop('r-hgvs-residual') dropped")$dropped)
+
   # Protein HGVS uses its own exact-size retry after the initial native scratch
   # fills. Exercise that adapter path through DBI with an in-frame insertion.
   hgvs_long_protein <- dbGetQuery(
@@ -1167,6 +1549,32 @@ local({
     c("not_applicable", "not_applicable")
   )
   expect_true(all(is.na(hgvs_directional$transcript_hgvs_reason)))
+
+  # The unchanged seed-27182818 VEP differential found CGT>CCC at the
+  # last transcript base. Only two-copy 'dup' bypasses VEP allele clipping.
+  expect_true(load_model(
+    "r-hgvs-multiplication",
+    c("SELECT 1::UINTEGER seq_region, 260::UBIGINT sequence_length, 'chrDuck' seq_region_name",
+      queries[2:3]),
+    reference_fasta = system.file("extdata", "duckvep_minimal.fa",
+      package = "Rduckhts", mustWork = TRUE)
+  )$loaded)
+  hgvs_multiplication <- dbGetQuery(con, paste(
+    "WITH variants(ord, reference, alternate) AS (VALUES",
+    "(1, 'CG', 'CC'), (2, 'CGT', 'CCC'), (3, 'CGTA', 'CCCC'))",
+    "SELECT ord, a.transcript_hgvs, a.transcript_hgvs_status,",
+    "a.transcript_hgvs_reason, a.protein_hgvs_status",
+    "FROM variants, LATERAL unnest(_duckvep_annotate_small_hgvs(",
+    "'r-hgvs-multiplication', 1::UINTEGER, 250::UBIGINT,",
+    "reference, alternate, 0::UBIGINT)) u(a) ORDER BY ord"
+  ))
+  expect_identical(hgvs_multiplication$transcript_hgvs, c("c.*10dup", NA, NA))
+  expect_identical(hgvs_multiplication$transcript_hgvs_status,
+    c("supported", "not_applicable", "not_applicable"))
+  expect_true(all(is.na(hgvs_multiplication$transcript_hgvs_reason)))
+  expect_identical(hgvs_multiplication$protein_hgvs_status, rep("not_applicable", 3))
+  expect_true(dbGetQuery(con,
+    "SELECT duckvep_model_drop('r-hgvs-multiplication') dropped")$dropped)
 
   hgvs_terminal_insertion <- dbGetQuery(
     con,

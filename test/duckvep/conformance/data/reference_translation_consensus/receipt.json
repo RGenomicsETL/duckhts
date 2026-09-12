@@ -1,0 +1,41 @@
+{
+  "source_revision": "e3ec6d231cc7e5c769685761a4739c8fcffc30ff",
+  "source_binding": "diagnostic_unbound",
+  "oracle_revisions": ["57ea5c52340acc1f156267f810ad162e26597082", "2fb834b987ede3824e200197a838ce11e91aeb4b"],
+  "cases": 27014,
+  "independent_hgvs_observations": 6,
+  "independent_hgvs_equal": true,
+  "scope": "native_reference_and_alternate_proteins_vs_actual_Ensembl_not_public_protein_differences",
+  "sha256": {
+    "cases.jsonl.gz": "97a37581d199773391728fd52b933e003e14f03c8c42d42b6e5f775a6db8f589",
+    "controls.csv": "3b752b5fd97f66509b55a11aebb6136c0b492028d3948a3e269ec971b747346c",
+    "environment.txt": "f64b182410f936e6273f404442e79a749109651ee99eb48cd7bf76cec8973e24",
+    "independent_hgvs.csv": "4992586e0599881bb6a343265075979d3ff360af7fdfad042f38d6c1d6c9a9a5",
+    "oracle.jsonl.gz": "07689c6a915042eadaf1e37d46424fd7a0f241c53c682fa9c5c51d634c12815d",
+    "pairs.parquet": "e35b76cca4920311a6c2768b98a106a3673d6ed63b2d5a5a2ccfd710e89134ad",
+    "summary.csv": "55b607f3e9ea51d321247dcf8a0ed1991a41976533c6a998624f8f03ddb3600d"
+  },
+  "local_receipt_sha256": "78a8d3eb837dc0b9571de55efa68b23ce3567ce1fd078e2d0375f64f0dfcccf0",
+  "probe_sha256": "447d982281076a1e81347075d8c67521c927a927b10a343c087a1988d814a9f4",
+  "source_sha256": {
+    "test/duckvep/conformance/reference_translation_probe.c": "95b9e3146c84e5d223df7a04545696d0e0da7accdf03251eb5e368ef922f269c",
+    "src/duckvep/kernel/src/duckvep_codon.c": "0906132fa4ddf6bc437881c28385e827d3ae1fc58cd90303fbe3e58100f267e1",
+    "src/duckvep/kernel/src/duckvep_haplotype.c": "0c05ddd960997e1fb52b4e55f5ff0ef841fe8ffc608f77b7282fc9d8b6c10246",
+    "src/duckvep/kernel/src/duckvep_codon.h": "a48a2c3d7da80c8a33b732d5de2071b64393597779b82f2e09c7fdff70c9c1ef",
+    "src/duckvep/kernel/src/duckvep_dna.h": "c0d1a84633789f0ca1c56b6c2079d0439153c58999db16fe66319e255b7c5651",
+    "src/duckvep/kernel/src/duckvep_haplotype.h": "944fd4273dcff972a8571245c42cc562ad87ef3d4d83d893b4c2b5508f9719df",
+    "test/duckvep/conformance/reference_translation_oracle.pl": "9bf4e2f6b76433bfd754f003c7cc90e24b9c4a536d9a3af1e44b56c7df93910f",
+    "test/duckvep/conformance/reference_translation_differential.R": "c7810ca231d94ab5432700d37a3d7b3360b5c3e7dfed7f59a474432ffeafe65f",
+    "scripts/duckvep_evidence.R": "a6c5b23c51bf2b0cc704494097184f92f4a4f58c87abe5366430bdf48958322f",
+    "/root/miniconda3/envs/vep/share/ensembl-vep-116.0-0/Bio/EnsEMBL/Transcript.pm": "9aff45b96b4bdb8126f4999c6ff3bdfe68bc77b6e316cd01e049e5b57083d0f0",
+    "/root/miniconda3/envs/vep/share/ensembl-vep-116.0-0/Bio/EnsEMBL/Translation.pm": "b15aae4d7bf93afec84c65b4feef723ba17af1dc8bb9a58c7685518c11bb0748",
+    "/root/miniconda3/envs/vep/share/ensembl-vep-116.0-0/Bio/EnsEMBL/SeqEdit.pm": "d045391b3a3461cebf2cfbb1b60aab54f90d81a42edc0dfa545a72f44848c887",
+    "/root/miniconda3/envs/vep/lib/perl5/site_perl/Bio/Tools/CodonTable.pm": "0ac0ab15a37935177c37ee81262a63a0c047ffafbe1068138a87cb6493ff8f93",
+    "/root/miniconda3/envs/vep/lib/perl5/site_perl/Bio/PrimarySeqI.pm": "026d36407817017451833a198eecb0244210c661e4fff9068d4ef53479356759",
+    "/root/duckhts/.sync/ensembl-variation/modules/Bio/EnsEMBL/Variation/TranscriptHaplotypeContainer.pm": "53a0ae2046600fc4d101ab5fbd256ccbe200ef3e798d3d0f09ed3e8516ce41a0",
+    "/root/duckhts/.sync/ensembl-variation/modules/Bio/EnsEMBL/Variation/TranscriptVariation.pm": "b15b0193d848f3bcc3b36ef2c8df3aa0fc7b47dd088facc860c614348781ba1c",
+    "/root/duckhts/.sync/ensembl-variation/modules/Bio/EnsEMBL/Variation/TranscriptVariationAllele.pm": "f053bcae16eceda1e070e192e9bd11cdc3f6f6a4a095cae36fa9fd08be4c674d",
+    "/root/duckhts/.sync/ensembl-variation/modules/Bio/EnsEMBL/Variation/VariationFeatureOverlap.pm": "aa8d6cbe1c4ed7cdf4423d1b616b2960f8a526488b86f902b6eaca85a6618f51",
+    "/root/duckhts/.sync/ensembl-variation/modules/Bio/EnsEMBL/Variation/Utils/VariationEffect.pm": "6dcef8278c2e24b37eb3389a1e9d00f593336549f2d9ce72ca11271476c16faf"
+  }
+}

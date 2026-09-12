@@ -125,6 +125,9 @@ It is not a brace-placement contest and it is not permission to manufacture tiny
 
 ## Interfaces and documentation
 
+- Prose states the current contract and stands on its own. Replace superseded wording
+  rather than narrating edits; retain warnings only for traps a fresh reader could meet.
+  Revision history belongs in changelogs and revision-labelled evidence, not inline prose.
 - Public APIs describe behavior implemented today. No reserved flags, ignored arguments,
   version-suffixed experiments, or placeholder fields.
 - `functions.yaml`, executable tests, and C headers are contracts. Design notes contain
