@@ -58,6 +58,11 @@ release submission.
   and transcript ends. N-containing codons use pinned VEP-116 consensus
   where defined; literal REF validation and unavailable-context states
   remain explicit.
+- Match VEP-116 transcript HGVS for literal SNPs whose CDS begins after
+  a noncoding exon, clipped coordinate ordering and reverse-strand
+  insertions shifted immediately outside transcript start. Returned HGVS
+  columns are accession-free bodies; model metadata supplies serialized
+  identifiers.
 - Expose bundled `duckvep_transcript_projection()`,
   `duckvep_breakend_geometry()` and `duckvep_repeat_sequence()` through
   SQL/DBI. These provide typed transcript display, raw BND preparation
