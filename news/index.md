@@ -64,6 +64,8 @@ release submission.
   and bounded exact-repeat expansion. Correct the paired-BND
   truncation/intergenic union. BND replacement text is not inserted-only
   sequence; repeat summaries do not establish an exact allele.
+  Transcript display shares decoded reference sequences and extracts
+  local codon spans to reduce per-event memory use.
 - Handle empty known regions, invalid/short CDS models and all-NULL
   phase lists safely. Nested/concurrent model or haplotype preparation
   returns a busy error; completed scans retain independent state.
