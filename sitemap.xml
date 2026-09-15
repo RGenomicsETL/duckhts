@@ -62,6 +62,10 @@
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_samtools_idxstats.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_score.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_somalier_charr.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_somalier_matched_contamination.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_somalier_relatedness.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_somalier_sketches.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix_convert_parquet.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix_index.html</loc></url>

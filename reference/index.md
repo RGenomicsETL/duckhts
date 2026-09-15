@@ -121,6 +121,14 @@
   [`rduckhts_simd_kernel_info()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md)
   [`rduckhts_simd_set_backend()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_simd_backend.md)
   : DuckHTS SIMD backend diagnostics
+- [`rduckhts_somalier_charr()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_somalier_charr.md)
+  : Estimate Per-Sample Contamination with CHARR
+- [`rduckhts_somalier_matched_contamination()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_somalier_matched_contamination.md)
+  : Estimate Directional Contamination Against Matched Anchors
+- [`rduckhts_somalier_relatedness()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_somalier_relatedness.md)
+  : Compare Somalier-Derived Sample Sketches
+- [`rduckhts_somalier_sketches()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_somalier_sketches.md)
+  : Prepare Somalier-Derived Sample Sketches
 - [`rduckhts_tabix()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix.md)
   : Create Tabix-Indexed File Table
 - [`rduckhts_tabix_convert_parquet()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_tabix_convert_parquet.md)

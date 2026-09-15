@@ -937,6 +937,80 @@ Show generated function catalog
 </table>
 </div>
 <div class="section level3">
+<h3 id="sample-identity">Sample Identity<a class="anchor" aria-label="anchor" href="#sample-identity"></a>
+</h3>
+<table class="table">
+<colgroup>
+<col width="43%">
+<col width="5%">
+<col width="15%">
+<col width="35%">
+</colgroup>
+<thead><tr class="header">
+<th>Function</th>
+<th>Kind</th>
+<th>R helper</th>
+<th>Description</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td><a href="inst/function_catalog/reference.html#duckhts_somalier_panel_sha256"><code>duckhts_somalier_panel_sha256</code></a></td>
+<td>scalar_macro</td>
+<td></td>
+<td>Derive a stable SHA-256 identity for an ordered biallelic sample-fingerprinting panel.</td>
+</tr>
+<tr class="even">
+<td><a href="inst/function_catalog/reference.html#duckhts_somalier_frequency_sha256"><code>duckhts_somalier_frequency_sha256</code></a></td>
+<td>scalar_macro</td>
+<td></td>
+<td>Derive a stable identity for panel-aligned population-B allele frequencies.</td>
+</tr>
+<tr class="odd">
+<td><a href="inst/function_catalog/reference.html#duckhts_somalier_classify"><code>duckhts_somalier_classify</code></a></td>
+<td>scalar</td>
+<td></td>
+<td>Classify one measured A/B/other count tuple for Somalier-derived autosomal relatedness.</td>
+</tr>
+<tr class="even">
+<td><a href="inst/function_catalog/reference.html#duckhts_somalier_prepare_sketches"><code>duckhts_somalier_prepare_sketches</code></a></td>
+<td>table_macro</td>
+<td><code>rduckhts_somalier_sketches</code></td>
+<td>Build one panel-verified packed relatedness sketch per sample from typed count evidence.</td>
+</tr>
+<tr class="odd">
+<td><a href="inst/function_catalog/reference.html#duckhts_somalier_verify_sketches"><code>duckhts_somalier_verify_sketches</code></a></td>
+<td>scalar_macro</td>
+<td></td>
+<td>Verify persisted relatedness sketches against their retained raw count evidence.</td>
+</tr>
+<tr class="even">
+<td><a href="inst/function_catalog/reference.html#duckhts_somalier_relatedness"><code>duckhts_somalier_relatedness</code></a></td>
+<td>scalar</td>
+<td><code>rduckhts_somalier_relatedness</code></td>
+<td>Compute fused Somalier-derived relatedness and concordance statistics for two prepared sketches.</td>
+</tr>
+<tr class="odd">
+<td><a href="inst/function_catalog/reference.html#duckhts_somalier_verify_relatedness"><code>duckhts_somalier_verify_relatedness</code></a></td>
+<td>scalar</td>
+<td></td>
+<td>Verify a typed relatedness result against its two sealed sketches.</td>
+</tr>
+<tr class="even">
+<td><a href="inst/function_catalog/reference.html#duckhts_somalier_charr"><code>duckhts_somalier_charr</code></a></td>
+<td>table_macro</td>
+<td><code>rduckhts_somalier_charr</code></td>
+<td>Estimate per-sample contamination with a bounded Somalier-derived CHARR reduction.</td>
+</tr>
+<tr class="odd">
+<td><a href="inst/function_catalog/reference.html#duckhts_somalier_matched_contamination"><code>duckhts_somalier_matched_contamination</code></a></td>
+<td>table_macro</td>
+<td><code>rduckhts_somalier_matched_contamination</code></td>
+<td>Estimate directional contamination for explicitly selected receiver/anchor sample pairs.</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="section level3">
 <h3 id="metadata">Metadata<a class="anchor" aria-label="anchor" href="#metadata"></a>
 </h3>
 <table class="table">

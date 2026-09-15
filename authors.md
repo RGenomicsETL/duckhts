@@ -9,7 +9,7 @@
   Htslib Authors
 
 - **Brent Pedersen**. Copyright holder.  
-  Mosdepth Original Author
+  Original author of mosdepth and Somalier
 
 - **Giulio Genovese**. Copyright holder.  
   Author of BCFTools munge,score,liftover plugins

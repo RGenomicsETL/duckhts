@@ -6,6 +6,48 @@ Release notes in preparation. This package bundles DuckHTS 1.5.2; the
 entries below describe implemented package behavior, not a completed
 release submission.
 
+### Sample identity and contamination
+
+- Add
+  [`rduckhts_somalier_sketches()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_somalier_sketches.md)
+  and
+  [`rduckhts_somalier_relatedness()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_somalier_relatedness.md)
+  for panel-checked count evidence, reusable packed sketches and
+  selected-pair statistics. Tables or ordinary Parquet files can supply
+  inputs and retain typed results; unavailable count tuples remain
+  distinct from measured zero counts.
+- Bundled SQL `duckhts_somalier_verify_relatedness()` checks persisted
+  pair results against their sealed sketches, including identity,
+  denominators, metrics and nullable numerical status.
+- Bundled SQL `duckhts_somalier_verify_sketches()` rebuilds sketches
+  from retained evidence and detects raw-count or availability changes
+  even when the classified genotype is unchanged. Invalid retained
+  classification settings return false instead of becoming
+  rebuild-aggregate settings.
+- Add
+  [`rduckhts_somalier_charr()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_somalier_charr.md)
+  and
+  [`rduckhts_somalier_matched_contamination()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_somalier_matched_contamination.md)
+  over measured count channels and aligned population-B allele
+  frequencies. They retain numerical status and usable-site
+  denominators, and reject changed panel/evidence identity. The matched
+  method preserves receiver/anchor direction and evaluates only
+  requested ordered pairs without a pair-sized native workspace. CHARR
+  results are stable across parallel aggregate reduction order.
+- Bound sample and assembly identities retained by bundled sketch,
+  CHARR, and matched-contamination states to 1,024 bytes, including
+  persisted inputs. Panel assembly and region are checked before hash
+  encoding.
+- Preserve strict binomial-tail cutoffs with outward-rounded comparisons
+  and a per-call `max_threshold_work` limit shared across distinct
+  measured depths for both contamination wrappers; exhaustion errors
+  without partial results. Sketches constructed with IEEE negative-zero
+  balance settings round-trip.
+- The bundled estimators use stable high-depth CHARR tail evaluation and
+  a full-grid matched search. Their documented numerical counterexamples
+  can differ from Somalier v0.3.4 output; they are not bitwise CLI
+  replicas.
+
 ### Genotypes and variant readers
 
 - Add
