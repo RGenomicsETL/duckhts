@@ -1,0 +1,765 @@
+# name: test/sql/somalier.test
+# description: Count availability, ordered-panel sketches, fused pair metrics, and Parquet persistence
+# group: [duckhts]
+
+require duckhts
+
+# Counts remain measured even when every channel is zero; all-NULL channels
+# mean unavailable evidence. A 5% B balance is a middling unknown call.
+query III
+WITH input(a, b, other, ord) AS (
+  VALUES (20::UBIGINT, 0::UBIGINT, 0::UBIGINT, 0),
+         (10, 10, 0, 1), (0, 20, 0, 2), (19, 1, 0, 3),
+         (0, 0, 0, 4), (NULL, NULL, NULL, 5), (0, 20, 3, 6)
+), calls AS (
+  SELECT ord, duckhts_somalier_classify(a, b, other, 7, 0.3, 0.01) AS c
+  FROM input
+)
+SELECT c.genotype, c.middling::INTEGER, c.unavailable::INTEGER
+FROM calls ORDER BY ord;
+----
+0	0	0
+1	0	0
+2	0	0
+-1	1	0
+-1	0	0
+-1	0	1
+-1	0	0
+
+statement error
+SELECT duckhts_somalier_classify(20, NULL, 0, 7, 0.3, 0.01);
+----
+counts must be all measured or all unavailable
+
+statement error
+SELECT duckhts_somalier_classify(4294967296::UBIGINT, 0, 0, 7, 0.3, 0.01);
+----
+measured counts exceed UINT32_MAX
+
+statement ok
+CREATE TEMP TABLE somalier_panel_base AS
+SELECT 'GRCh38' AS assembly, i::UBIGINT AS site_index,
+       'chr1' AS region, (100 + i)::UBIGINT AS position,
+       CASE WHEN i % 2 = 0 THEN 'A' ELSE 'C' END AS allele_a,
+       CASE WHEN i % 2 = 0 THEN 'G' ELSE 'T' END AS allele_b
+FROM range(8) sites(i);
+
+statement ok
+CREATE TEMP TABLE somalier_panel_flipped AS
+SELECT assembly, site_index, region, position,
+       CASE WHEN site_index = 0 THEN allele_b ELSE allele_a END AS allele_a,
+       CASE WHEN site_index = 0 THEN allele_a ELSE allele_b END AS allele_b
+FROM somalier_panel_base;
+
+statement ok
+CREATE TEMP TABLE somalier_panel_reordered AS
+SELECT assembly,
+       CASE site_index WHEN 0 THEN 1 WHEN 1 THEN 0 ELSE site_index END AS site_index,
+       region, position, allele_a, allele_b
+FROM somalier_panel_base;
+
+statement ok
+CREATE TEMP TABLE somalier_panel_physical_reorder AS
+SELECT * FROM somalier_panel_base ORDER BY site_index DESC;
+
+query I
+SELECT duckhts_somalier_panel_sha256('somalier_panel_base') =
+       duckhts_somalier_panel_sha256('somalier_panel_physical_reorder');
+----
+1
+
+# Canonical A/B orientation is one panel authority. Site ordinals remain part
+# of the digest even when site_count and physical coordinates are unchanged.
+statement error
+SELECT duckhts_somalier_panel_sha256('somalier_panel_flipped');
+----
+canonical distinct uppercase biallelic SNP alleles A < B
+
+query I
+SELECT duckhts_somalier_panel_sha256('somalier_panel_base') <>
+       duckhts_somalier_panel_sha256('somalier_panel_reordered');
+----
+1
+
+foreach nonauto X chrX NC_000023.10 NC_000023.11 Y chrY NC_000024.9 NC_000024.10
+
+statement ok
+CREATE OR REPLACE TEMP VIEW somalier_nonauto AS
+SELECT * REPLACE(CASE WHEN site_index = 0 THEN '${nonauto}'
+                    ELSE region END AS region)
+FROM somalier_panel_base;
+
+statement error
+SELECT duckhts_somalier_panel_sha256('somalier_nonauto');
+----
+autosomal panel sites require
+
+endloop
+
+statement ok
+CREATE TEMP VIEW somalier_empty_assembly AS
+SELECT * REPLACE('' AS assembly) FROM somalier_panel_base;
+
+statement error
+SELECT duckhts_somalier_panel_sha256('somalier_empty_assembly');
+----
+panel must use one assembly
+
+statement ok
+CREATE TEMP VIEW somalier_null_index AS
+SELECT * REPLACE(CASE WHEN site_index = 0 THEN NULL::UBIGINT
+                    ELSE site_index END AS site_index)
+FROM somalier_panel_base;
+
+statement error
+SELECT duckhts_somalier_panel_sha256('somalier_null_index');
+----
+panel identity fields cannot be NULL
+
+statement ok
+CREATE TEMP VIEW somalier_duplicate_position AS
+SELECT * REPLACE(CASE WHEN site_index = 1 THEN 100::UBIGINT
+                    ELSE position END AS position)
+FROM somalier_panel_base;
+
+statement error
+SELECT duckhts_somalier_panel_sha256('somalier_duplicate_position');
+----
+duplicate physical region and position
+
+statement ok
+CREATE TEMP TABLE somalier_evidence (
+  sample_id VARCHAR, assembly VARCHAR, site_index UBIGINT,
+  region VARCHAR, position UBIGINT, allele_a VARCHAR, allele_b VARCHAR,
+  a UBIGINT, b UBIGINT, other UBIGINT
+);
+
+# Independently specified eight-site calls:
+# site   0  1   2    3    4   5       6   7
+# A      AA AA  AB   AB   BB  absent  BB  measured zero
+# B      AA BB  AB   BB   BB  AA      AA  absent
+# Z has eight measured zero-depth observations; U has eight unavailable ones.
+statement ok
+INSERT INTO somalier_evidence
+SELECT sample_id, p.assembly, p.site_index, p.region, p.position,
+       p.allele_a, p.allele_b, c.a, c.b, c.other
+FROM (VALUES
+  ('A', 0, 20, 0, 0), ('A', 1, 20, 0, 0),
+  ('A', 2, 10, 10, 0), ('A', 3, 10, 10, 0),
+  ('A', 4, 0, 20, 0), ('A', 5, NULL, NULL, NULL),
+  ('A', 6, 0, 20, 0), ('A', 7, 0, 0, 0),
+  ('B', 0, 20, 0, 0), ('B', 1, 0, 20, 0),
+  ('B', 2, 10, 10, 0), ('B', 3, 0, 20, 0),
+  ('B', 4, 0, 20, 0), ('B', 5, 20, 0, 0),
+  ('B', 6, 20, 0, 0), ('B', 7, NULL, NULL, NULL)
+) AS c(sample_id, site_index, a, b, other)
+JOIN somalier_panel_base p USING (site_index);
+
+statement ok
+INSERT INTO somalier_evidence
+SELECT 'Z', assembly, site_index, region, position, allele_a, allele_b,
+       0::UBIGINT, 0::UBIGINT, 0::UBIGINT
+FROM somalier_panel_base;
+
+statement ok
+INSERT INTO somalier_evidence
+SELECT 'U', assembly, site_index, region, position, allele_a, allele_b,
+       NULL::UBIGINT, NULL::UBIGINT, NULL::UBIGINT
+FROM somalier_panel_base;
+
+statement ok
+CREATE TEMP TABLE somalier_sketches AS
+SELECT * FROM duckhts_somalier_prepare_sketches(
+  'somalier_evidence', 'somalier_panel_base',
+  7, 0.3, 0.01, max_sites := 8);
+
+# Persist the normalized settings used by the sealed identity. IEEE negative
+# zero must not make a freshly constructed sketch fail its own digest check.
+statement ok
+CREATE TEMP TABLE somalier_negative_zero_sketches AS
+SELECT * FROM duckhts_somalier_prepare_sketches(
+  'somalier_evidence', 'somalier_panel_base',
+  7, 0.3, -0.0::DOUBLE, max_sites := 8);
+
+query III
+SELECT duckhts_somalier_verify_sketches(
+         'somalier_evidence', 'somalier_panel_base',
+         'somalier_negative_zero_sketches', 8),
+       count(*),
+       sum(signbit(a.sketch.hom_balance_cutoff)::INTEGER)
+FROM somalier_negative_zero_sketches a, somalier_negative_zero_sketches b
+WHERE a.sketch.sample_id < b.sketch.sample_id
+  AND duckhts_somalier_relatedness(a.sketch, b.sketch, 8).status IS NOT NULL;
+----
+1	6	0
+
+query I
+SELECT duckhts_somalier_verify_sketches(
+  'somalier_evidence', 'somalier_panel_base', 'somalier_sketches', 8);
+----
+1
+
+# Invalid persisted settings are corruption, not aggregate settings.
+statement ok
+CREATE TEMP VIEW somalier_invalid_settings AS
+SELECT struct_update(sketch, min_depth := 0::UBIGINT) AS sketch
+FROM somalier_sketches;
+
+query I
+SELECT duckhts_somalier_verify_sketches(
+  'somalier_evidence', 'somalier_panel_base', 'somalier_invalid_settings', 8);
+----
+0
+
+# The count receipt binds raw evidence even when the genotype mask is unchanged.
+statement ok
+CREATE TEMP VIEW somalier_changed_count AS
+SELECT * REPLACE(CASE WHEN sample_id = 'A' AND site_index = 0
+                      THEN 19::UBIGINT ELSE a END AS a)
+FROM somalier_evidence;
+
+query I
+SELECT duckhts_somalier_verify_sketches(
+  'somalier_changed_count', 'somalier_panel_base', 'somalier_sketches', 8);
+----
+0
+
+statement ok
+CREATE TEMP VIEW somalier_changed_availability AS
+SELECT * REPLACE(CASE WHEN sample_id = 'Z' AND site_index = 0
+                      THEN NULL::UBIGINT ELSE a END AS a,
+                 CASE WHEN sample_id = 'Z' AND site_index = 0
+                      THEN NULL::UBIGINT ELSE b END AS b,
+                 CASE WHEN sample_id = 'Z' AND site_index = 0
+                      THEN NULL::UBIGINT ELSE other END AS other)
+FROM somalier_evidence;
+
+query I
+SELECT duckhts_somalier_verify_sketches(
+  'somalier_changed_availability', 'somalier_panel_base', 'somalier_sketches', 8);
+----
+0
+
+statement ok
+CREATE TEMP VIEW somalier_reordered_evidence AS
+SELECT * FROM somalier_evidence ORDER BY site_index DESC, sample_id DESC;
+
+query I
+SELECT duckhts_somalier_verify_sketches(
+  'somalier_reordered_evidence', 'somalier_panel_base', 'somalier_sketches', 8);
+----
+1
+
+query I
+SELECT count(*) FROM duckhts_somalier_prepare_sketches(
+  'somalier_evidence', 'somalier_panel_base', 7, 0.3, 0.01);
+----
+4
+
+# Bit positions use zero-based site_index. The expected words are calculated
+# directly from the truth table, not from another sketch implementation.
+query TIIII
+SELECT sketch.sample_id, sketch.hom_a[1], sketch.het[1],
+       sketch.hom_b[1], sketch.unavailable_count
+FROM somalier_sketches ORDER BY sketch.sample_id;
+----
+A	3	12	80	1
+B	97	4	26	1
+U	0	0	0	8
+Z	0	0	0	0
+
+statement ok
+CREATE TEMP VIEW somalier_ab AS
+SELECT duckhts_somalier_relatedness(a.sketch, b.sketch, 8) AS pair
+FROM somalier_sketches a, somalier_sketches b
+WHERE a.sketch.sample_id = 'A' AND b.sketch.sample_id = 'B';
+
+# Jointly called sites are 0,1,2,3,4,6. IBS0 is 1 and 6; IBS2 is
+# 0,2,4. The het denominator counts A's 2 and 3 plus B's 2.
+query TTIIII
+SELECT pair.sample_a, pair.sample_b, pair.jointly_called,
+       pair.ibs0, pair.ibs2, pair.shared_hets
+FROM somalier_ab;
+----
+A	B	6	2	3	1
+
+query IIIIIIIIII
+SELECT pair.het_ab, pair.shared_hom_b,
+       pair.het_count_a, pair.het_count_b,
+       pair.hom_b_count_a, pair.hom_b_count_b,
+       pair.callable_hom_count_a, pair.callable_hom_count_b,
+       pair.matching_hom_count, pair.site_count
+FROM somalier_ab;
+----
+3	1	2	1	2	3	4	5	2	8
+
+query TRRR
+SELECT pair.status, pair.relatedness,
+       pair.inferred_hom_concordance, pair.raw_hom_b_concordance
+FROM somalier_ab;
+----
+ok	-2.0	0.5	-1.5
+
+query TII
+SELECT pair.status, pair.jointly_called,
+       pair.unavailable_count_a + pair.unavailable_count_b
+FROM (
+  SELECT duckhts_somalier_relatedness(z.sketch, u.sketch, 8) AS pair
+  FROM somalier_sketches z, somalier_sketches u
+  WHERE z.sketch.sample_id = 'Z' AND u.sketch.sample_id = 'U'
+);
+----
+no_evidence	0	8
+
+query II
+SELECT pair.relatedness IS NULL, pair.adjusted_concordance IS NULL
+FROM (
+  SELECT duckhts_somalier_relatedness(z.sketch, u.sketch, 8) AS pair
+  FROM somalier_sketches z, somalier_sketches u
+  WHERE z.sketch.sample_id = 'Z' AND u.sketch.sample_id = 'U'
+);
+----
+1	1
+
+statement ok
+CREATE TEMP VIEW somalier_zu AS
+SELECT duckhts_somalier_relatedness(z.sketch, u.sketch, 8) AS pair
+FROM somalier_sketches z, somalier_sketches u
+WHERE z.sketch.sample_id = 'Z' AND u.sketch.sample_id = 'U';
+
+# The typed verifier checks pair identity, all counters and denominators,
+# nullable status-dependent metrics, and the sealed sketch content.
+query IIIIIIIII
+SELECT duckhts_somalier_verify_relatedness(ab.pair, a.sketch, b.sketch, 8),
+       duckhts_somalier_verify_relatedness(
+         struct_update(ab.pair, ibs0 := 3::UBIGINT), a.sketch, b.sketch, 8),
+       duckhts_somalier_verify_relatedness(
+         struct_update(ab.pair, site_count := 7::UBIGINT), a.sketch, b.sketch, 8),
+       duckhts_somalier_verify_relatedness(
+         struct_update(ab.pair, relatedness := -1.5::DOUBLE), a.sketch, b.sketch, 8),
+       duckhts_somalier_verify_relatedness(
+         struct_update(ab.pair, relatedness := NULL::DOUBLE), a.sketch, b.sketch, 8),
+       duckhts_somalier_verify_relatedness(
+         struct_update(ab.pair, sample_a := 'B'), a.sketch, b.sketch, 8),
+       duckhts_somalier_verify_relatedness(
+         struct_update(ab.pair, method_version := 'wrong'), a.sketch, b.sketch, 8),
+       duckhts_somalier_verify_relatedness(
+         struct_update(ab.pair, status := 'no_evidence'), a.sketch, b.sketch, 8),
+       duckhts_somalier_verify_relatedness(
+         ab.pair, a.sketch,
+         struct_update(b.sketch, content_digest_0 := 0::UBIGINT), 8)
+FROM somalier_ab ab, somalier_sketches a, somalier_sketches b
+WHERE a.sketch.sample_id = 'A' AND b.sketch.sample_id = 'B';
+----
+1	0	0	0	0	0	0	0	0
+
+query IIIII
+SELECT duckhts_somalier_verify_relatedness(
+         struct_update(ab.pair, sample_b := 'A'), a.sketch, b.sketch, 8),
+       duckhts_somalier_verify_relatedness(
+         struct_update(ab.pair, assembly := 'GRCh37'), a.sketch, b.sketch, 8),
+       duckhts_somalier_verify_relatedness(
+         struct_update(ab.pair, panel_sha256 := repeat('b', 64)),
+         a.sketch, b.sketch, 8),
+       duckhts_somalier_verify_relatedness(
+         struct_update(ab.pair, middling_balance_count_a :=
+           ab.pair.middling_balance_count_a + 1::UBIGINT), a.sketch, b.sketch, 8),
+       duckhts_somalier_verify_relatedness(
+         struct_update(ab.pair, unavailable_count_b :=
+           ab.pair.unavailable_count_b + 1::UBIGINT), a.sketch, b.sketch, 8)
+FROM somalier_ab ab, somalier_sketches a, somalier_sketches b
+WHERE a.sketch.sample_id = 'A' AND b.sketch.sample_id = 'B';
+----
+0	0	0	0	0
+
+query IIIII
+SELECT duckhts_somalier_verify_relatedness(zu.pair, z.sketch, u.sketch, 8),
+       duckhts_somalier_verify_relatedness(
+         struct_update(zu.pair, jointly_called := 1::UBIGINT), z.sketch, u.sketch, 8),
+       duckhts_somalier_verify_relatedness(
+         struct_update(zu.pair, relatedness := 0.0::DOUBLE), z.sketch, u.sketch, 8),
+       duckhts_somalier_verify_relatedness(
+         struct_update(zu.pair, status := 'ok'), z.sketch, u.sketch, 8),
+       duckhts_somalier_verify_relatedness(
+         zu.pair, z.sketch, u.sketch, 7)
+FROM somalier_zu zu, somalier_sketches z, somalier_sketches u
+WHERE z.sketch.sample_id = 'Z' AND u.sketch.sample_id = 'U';
+----
+1	0	0	0	0
+
+# A selected-pair relation avoids asking the adapter to construct all pairs.
+statement ok
+CREATE TEMP TABLE somalier_selected_pairs(sample_a VARCHAR, sample_b VARCHAR);
+
+statement ok
+INSERT INTO somalier_selected_pairs VALUES ('A', 'B'), ('Z', 'U');
+
+query TTI
+SELECT p.sample_a, p.sample_b, r.jointly_called
+FROM somalier_selected_pairs p
+JOIN somalier_sketches a ON a.sketch.sample_id = p.sample_a
+JOIN somalier_sketches b ON b.sketch.sample_id = p.sample_b,
+LATERAL (SELECT duckhts_somalier_relatedness(a.sketch, b.sketch, 8) AS r)
+ORDER BY p.sample_a;
+----
+A	B	6
+Z	U	0
+
+# A sketch's ordered panel, assembly, and classification settings must match.
+statement error
+SELECT duckhts_somalier_relatedness(
+  a.sketch, struct_update(b.sketch, assembly := 'GRCh37'), 8)
+FROM somalier_sketches a, somalier_sketches b
+WHERE a.sketch.sample_id = 'A' AND b.sketch.sample_id = 'B';
+----
+assembly identity mismatch
+
+statement error
+SELECT duckhts_somalier_relatedness(
+  a.sketch, struct_update(b.sketch, panel_sha256 := repeat('b', 64)), 8)
+FROM somalier_sketches a, somalier_sketches b
+WHERE a.sketch.sample_id = 'A' AND b.sketch.sample_id = 'B';
+----
+corrupt sketch masks or settings
+
+statement error
+SELECT duckhts_somalier_relatedness(
+  a.sketch, struct_update(b.sketch, min_depth := 8::UBIGINT), 8)
+FROM somalier_sketches a, somalier_sketches b
+WHERE a.sketch.sample_id = 'A' AND b.sketch.sample_id = 'B';
+----
+corrupt sketch masks or settings
+
+statement error
+SELECT duckhts_somalier_relatedness(
+  a.sketch,
+  struct_update(b.sketch, middling_balance_count := 2::UBIGINT), 8)
+FROM somalier_sketches a, somalier_sketches b
+WHERE a.sketch.sample_id = 'A' AND b.sketch.sample_id = 'B';
+----
+corrupt sketch masks or settings
+
+statement error
+SELECT duckhts_somalier_relatedness(
+  a.sketch,
+  struct_update(b.sketch, content_digest_0 := 0::UBIGINT), 8)
+FROM somalier_sketches a, somalier_sketches b
+WHERE a.sketch.sample_id = 'A' AND b.sketch.sample_id = 'B';
+----
+corrupt sketch masks or settings
+
+# A noncanonical panel is rejected; callers must transform count channels and
+# population-B frequencies together before presenting a canonical panel.
+statement ok
+CREATE TEMP TABLE somalier_flipped_evidence AS
+SELECT e.sample_id || '_F' AS sample_id, p.assembly, p.site_index,
+       p.region, p.position, p.allele_a, p.allele_b,
+       CASE WHEN e.site_index = 0 THEN e.b ELSE e.a END AS a,
+       CASE WHEN e.site_index = 0 THEN e.a ELSE e.b END AS b,
+       e.other
+FROM somalier_evidence e
+JOIN somalier_panel_flipped p USING (site_index)
+WHERE e.sample_id IN ('A', 'B');
+
+statement error
+SELECT * FROM duckhts_somalier_prepare_sketches(
+  'somalier_flipped_evidence', 'somalier_panel_flipped',
+  7, 0.3, 0.01, max_sites := 8);
+----
+canonical distinct uppercase biallelic SNP alleles A < B
+
+statement error
+SELECT duckhts_somalier_relatedness(
+  a.sketch,
+  struct_update(b.sketch,
+    panel_sha256 := duckhts_somalier_panel_sha256('somalier_panel_reordered')),
+  8)
+FROM somalier_sketches a, somalier_sketches b
+WHERE a.sketch.sample_id = 'A' AND b.sketch.sample_id = 'B';
+----
+corrupt sketch masks or settings
+
+statement ok
+CREATE TEMP VIEW somalier_wrong_orientation AS
+SELECT sample_id, assembly, site_index, region, position,
+       CASE WHEN site_index = 0 THEN allele_b ELSE allele_a END AS allele_a,
+       CASE WHEN site_index = 0 THEN allele_a ELSE allele_b END AS allele_b,
+       a, b, other
+FROM somalier_evidence WHERE sample_id = 'A';
+
+statement error
+SELECT * FROM duckhts_somalier_prepare_sketches(
+  'somalier_wrong_orientation', 'somalier_panel_base',
+  7, 0.3, 0.01, max_sites := 8);
+----
+evidence site geometry or A/B orientation does not match ordered panel
+
+statement error
+SELECT duckhts_somalier_relatedness(a.sketch, b.sketch, 7)
+FROM somalier_sketches a, somalier_sketches b
+WHERE a.sketch.sample_id = 'A' AND b.sketch.sample_id = 'B';
+----
+site_count exceeds max_sites
+
+# Preparation must not silently omit a physical panel observation or accept a
+# malformed count tuple. The internal aggregate is tested separately for its
+# own checked site_index contract.
+statement ok
+CREATE TEMP VIEW somalier_missing_evidence AS
+SELECT * FROM somalier_evidence
+WHERE sample_id = 'A' AND site_index <> 7;
+
+statement error
+SELECT * FROM duckhts_somalier_prepare_sketches(
+  'somalier_missing_evidence', 'somalier_panel_base',
+  7, 0.3, 0.01, max_sites := 8);
+----
+missing site_index
+
+statement ok
+CREATE TEMP VIEW somalier_duplicate_evidence AS
+SELECT * FROM somalier_evidence WHERE sample_id = 'A'
+UNION ALL SELECT * FROM somalier_evidence
+WHERE sample_id = 'A' AND site_index = 0;
+
+statement ok
+SET threads = 1;
+
+statement error
+SELECT * FROM duckhts_somalier_prepare_sketches(
+  'somalier_duplicate_evidence', 'somalier_panel_base',
+  7, 0.3, 0.01, max_sites := 8);
+----
+duplicate site_index
+
+statement error
+SELECT __duckhts_somalier_sketch(sample_id, assembly,
+         duckhts_somalier_panel_sha256('somalier_panel_base'),
+         site_index, 9::UBIGINT, a, b, other,
+         7::UBIGINT, 0.3::DOUBLE, 0.01::DOUBLE, 9::UBIGINT)
+FROM somalier_duplicate_evidence;
+----
+duplicate site_index
+
+statement ok
+CREATE TEMP VIEW somalier_out_of_range AS
+SELECT sample_id, assembly,
+       CASE WHEN site_index = 7 THEN 8::UBIGINT ELSE site_index END AS site_index,
+       region, position, allele_a, allele_b, a, b, other
+FROM somalier_evidence WHERE sample_id = 'A';
+
+statement error
+SELECT * FROM duckhts_somalier_prepare_sketches(
+  'somalier_out_of_range', 'somalier_panel_base',
+  7, 0.3, 0.01, max_sites := 8);
+----
+evidence site geometry or A/B orientation does not match ordered panel
+
+statement error
+SELECT __duckhts_somalier_sketch(sample_id, assembly,
+         duckhts_somalier_panel_sha256('somalier_panel_base'),
+         site_index, 8::UBIGINT, a, b, other,
+         7::UBIGINT, 0.3::DOUBLE, 0.01::DOUBLE, 8::UBIGINT)
+FROM somalier_out_of_range;
+----
+site_index is outside [0, site_count)
+
+statement ok
+CREATE TEMP VIEW somalier_partial_counts AS
+SELECT sample_id, assembly, site_index, region, position,
+       allele_a, allele_b, a,
+       CASE WHEN site_index = 7 THEN NULL::UBIGINT ELSE b END AS b,
+       other
+FROM somalier_evidence WHERE sample_id = 'A';
+
+statement error
+SELECT * FROM duckhts_somalier_prepare_sketches(
+  'somalier_partial_counts', 'somalier_panel_base',
+  7, 0.3, 0.01, max_sites := 8);
+----
+counts must be all measured or all unavailable
+
+statement error
+SELECT * FROM duckhts_somalier_prepare_sketches(
+  'somalier_evidence', 'somalier_panel_base',
+  7, 0.3, 0.01, max_sites := 7);
+----
+site_count must be positive and no larger than max_sites
+
+# Retained aggregate identities have a fixed byte bound independent of the
+# number of samples. The largest accepted identity and first rejected byte are
+# checked directly on the production aggregate.
+query I
+SELECT length((__duckhts_somalier_sketch(
+  repeat('s', 1024), repeat('a', 1024), repeat('b', 64),
+  0::UBIGINT, 1::UBIGINT, 20::UBIGINT, 0::UBIGINT, 0::UBIGINT,
+  7::UBIGINT, 0.3::DOUBLE, 0.01::DOUBLE, 1::UBIGINT)).sample_id);
+----
+1024
+
+statement error
+SELECT __duckhts_somalier_sketch(
+  repeat('s', 1025), 'GRCh38', repeat('b', 64),
+  0::UBIGINT, 1::UBIGINT, 20::UBIGINT, 0::UBIGINT, 0::UBIGINT,
+  7::UBIGINT, 0.3::DOUBLE, 0.01::DOUBLE, 1::UBIGINT);
+----
+sample_id and assembly must be at most 1024 bytes
+
+# Final mask word counts at the 64-bit transition, with a called last site.
+statement ok
+CREATE TEMP TABLE somalier_word_panel_all AS
+SELECT n, 'GRCh38' AS assembly, i::UBIGINT AS site_index,
+       'chr2' AS region, (1000 + i)::UBIGINT AS position,
+       'A' AS allele_a, 'G' AS allele_b
+FROM (VALUES (63::UBIGINT), (64::UBIGINT), (65::UBIGINT)) sizes(n),
+     LATERAL range(n::BIGINT) sites(i);
+
+statement ok
+CREATE TEMP TABLE somalier_word_evidence_all AS
+SELECT 'W' || n::VARCHAR AS sample_id, assembly, site_index,
+       region, position, allele_a, allele_b,
+       CASE WHEN site_index = n - 1 THEN 20 ELSE 0 END::UBIGINT AS a,
+       0::UBIGINT AS b, 0::UBIGINT AS other, n
+FROM somalier_word_panel_all;
+
+statement ok
+CREATE TEMP VIEW somalier_word_panel_63 AS
+SELECT assembly, site_index, region, position, allele_a, allele_b
+FROM somalier_word_panel_all WHERE n = 63;
+
+statement ok
+CREATE TEMP VIEW somalier_word_panel_64 AS
+SELECT assembly, site_index, region, position, allele_a, allele_b
+FROM somalier_word_panel_all WHERE n = 64;
+
+statement ok
+CREATE TEMP VIEW somalier_word_panel_65 AS
+SELECT assembly, site_index, region, position, allele_a, allele_b
+FROM somalier_word_panel_all WHERE n = 65;
+
+statement ok
+CREATE TEMP VIEW somalier_word_evidence_63 AS
+SELECT sample_id, assembly, site_index, region, position,
+       allele_a, allele_b, a, b, other
+FROM somalier_word_evidence_all WHERE n = 63;
+
+statement ok
+CREATE TEMP VIEW somalier_word_evidence_64 AS
+SELECT sample_id, assembly, site_index, region, position,
+       allele_a, allele_b, a, b, other
+FROM somalier_word_evidence_all WHERE n = 64;
+
+statement ok
+CREATE TEMP VIEW somalier_word_evidence_65 AS
+SELECT sample_id, assembly, site_index, region, position,
+       allele_a, allele_b, a, b, other
+FROM somalier_word_evidence_all WHERE n = 65;
+
+statement ok
+CREATE TEMP TABLE somalier_word_sizes AS
+SELECT 63 AS n, sketch FROM duckhts_somalier_prepare_sketches(
+  'somalier_word_evidence_63', 'somalier_word_panel_63',
+  7, 0.3, 0.01, max_sites := 63)
+UNION ALL
+SELECT 64, sketch FROM duckhts_somalier_prepare_sketches(
+  'somalier_word_evidence_64', 'somalier_word_panel_64',
+  7, 0.3, 0.01, max_sites := 64)
+UNION ALL
+SELECT 65, sketch FROM duckhts_somalier_prepare_sketches(
+  'somalier_word_evidence_65', 'somalier_word_panel_65',
+  7, 0.3, 0.01, max_sites := 65);
+
+query IIII
+SELECT n, len(sketch.hom_a), len(sketch.het), len(sketch.hom_b)
+FROM somalier_word_sizes ORDER BY n;
+----
+63	1	1	1
+64	1	1	1
+65	2	2	2
+
+query III
+SELECT n, sketch.hom_a[1], coalesce(sketch.hom_a[2], 0)
+FROM somalier_word_sizes ORDER BY n;
+----
+63	4611686018427387904	0
+64	9223372036854775808	0
+65	0	1
+
+statement ok
+CREATE TEMP VIEW somalier_word_sketch_63 AS
+SELECT sketch FROM somalier_word_sizes WHERE n = 63;
+
+statement ok
+CREATE TEMP VIEW somalier_word_sketch_64 AS
+SELECT sketch FROM somalier_word_sizes WHERE n = 64;
+
+statement ok
+CREATE TEMP VIEW somalier_word_sketch_65 AS
+SELECT sketch FROM somalier_word_sizes WHERE n = 65;
+
+query III
+SELECT duckhts_somalier_verify_sketches(
+         'somalier_word_evidence_63', 'somalier_word_panel_63',
+         'somalier_word_sketch_63', 63),
+       duckhts_somalier_verify_sketches(
+         'somalier_word_evidence_64', 'somalier_word_panel_64',
+         'somalier_word_sketch_64', 64),
+       duckhts_somalier_verify_sketches(
+         'somalier_word_evidence_65', 'somalier_word_panel_65',
+         'somalier_word_sketch_65', 65);
+----
+1	1	1
+
+# Parquet preserves typed sketch identity, word arrays, and pair output.
+statement ok
+COPY somalier_sketches TO '__WORKING_DIRECTORY__/test_somalier_sketches.parquet'
+  (FORMAT PARQUET);
+
+statement ok
+CREATE TEMP VIEW somalier_persisted AS
+SELECT * FROM read_parquet('__WORKING_DIRECTORY__/test_somalier_sketches.parquet');
+
+query I
+SELECT duckhts_somalier_verify_sketches(
+  'somalier_evidence', 'somalier_panel_base', 'somalier_persisted', 8);
+----
+1
+
+query I
+WITH original AS (
+  SELECT duckhts_somalier_relatedness(a.sketch, b.sketch, 8) AS pair
+  FROM somalier_sketches a, somalier_sketches b
+  WHERE a.sketch.sample_id = 'A' AND b.sketch.sample_id = 'B'
+), persisted AS (
+  SELECT duckhts_somalier_relatedness(a.sketch, b.sketch, 8) AS pair
+  FROM somalier_persisted a, somalier_persisted b
+  WHERE a.sketch.sample_id = 'A' AND b.sketch.sample_id = 'B'
+)
+SELECT count(*) FROM ((FROM original EXCEPT ALL FROM persisted)
+ UNION ALL (FROM persisted EXCEPT ALL FROM original));
+----
+0
+
+query I
+SELECT count(*) FROM ((FROM somalier_sketches EXCEPT ALL FROM somalier_persisted)
+ UNION ALL (FROM somalier_persisted EXCEPT ALL FROM somalier_sketches));
+----
+0
+
+statement ok
+CREATE TEMP TABLE somalier_pair_rows AS
+SELECT pair FROM somalier_ab UNION ALL SELECT pair FROM somalier_zu;
+
+statement ok
+COPY somalier_pair_rows TO '__WORKING_DIRECTORY__/test_somalier_pairs.parquet'
+  (FORMAT PARQUET);
+
+query II
+SELECT count(*) AS rows,
+       count(*) FILTER (WHERE duckhts_somalier_verify_relatedness(
+         r.pair, a.sketch, b.sketch, 8)) AS verified
+FROM read_parquet('__WORKING_DIRECTORY__/test_somalier_pairs.parquet') r
+JOIN somalier_persisted a ON a.sketch.sample_id = r.pair.sample_a
+JOIN somalier_persisted b ON b.sketch.sample_id = r.pair.sample_b;
+----
+2	2

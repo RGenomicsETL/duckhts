@@ -1,0 +1,15 @@
+case_id	metric	input	upstream_value	independent_value	relation	abs_tolerance	expected_native_status	expected_usable_sites	expected_hom_a	expected_hom_b
+charr_depth_100	charr_threshold	100	2.20000000000000000e+01	22	equal	0	ok	NA	NA	NA
+charr_depth_200	charr_threshold	200	3.80000000000000000e+01	38	equal	0	ok	NA	NA	NA
+charr_depth_6000	charr_threshold	6000	6.00000000000000000e+03	793	different	0	ok	NA	NA	NA
+charr_deep_usable	charr_usable	4000/2000/0	1.00000000000000000e+00	0	different	0	no_evidence	0	0	0
+charr_deep_estimate	charr_estimate	4000/2000/0	6.66666666666666630e-01	NaN	different	1e-12	no_evidence	0	0	0
+charr_control_estimate	charr_estimate	199/1/0	2.00000000000000004e-02	0.02	equal	1e-14	ok	1	1	0
+pair_two_sites_usable	pair_usable	two_sites	2.00000000000000000e+00	2	equal	0	ok	2	NA	NA
+pair_search_alpha	pair_alpha	upstream_search	4.40983005625052549e-01	0.397590363107944	better_feasible	2e-6	ok	2	NA	NA
+pair_search_likelihood	pair_log_likelihood	upstream_search	-2.02101997470757652e+02	-202.101997470758	equal	1e-10	ok	2	NA	NA
+pair_likelihood_0	pair_log_likelihood	0.0	-4.97809288728390698e+02	-497.809288728391	equal	1e-10	ok	2	NA	NA
+pair_likelihood_02	pair_log_likelihood	0.2	-2.02934562679479143e+02	-202.934562679479	equal	1e-10	ok	2	NA	NA
+pair_likelihood_04	pair_log_likelihood	0.4	-2.01549058392067082e+02	-201.549058392067	equal	1e-10	ok	2	NA	NA
+pair_likelihood_05	pair_log_likelihood	0.5	-2.04455696097921759e+02	-204.455696097922	equal	1e-10	ok	2	NA	NA
+pair_likelihood_1	pair_log_likelihood	1.0	-2.78645166585098025e+02	-278.645166585098	equal	1e-10	ok	2	NA	NA

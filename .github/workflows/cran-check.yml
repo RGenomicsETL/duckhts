@@ -109,9 +109,16 @@ jobs:
 
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          extra-packages: any::rcmdcheck
+          extra-packages: |
+            any::rcmdcheck
+            any::digest
           needs: check
           working-directory: r/Rduckhts
+
+      - name: Run pinned and statistical Somalier campaigns
+        if: matrix.config.os == 'ubuntu-latest' && matrix.config.r == 'release'
+        shell: bash
+        run: scripts/test_somalier_release_campaigns.sh
 
       - uses: r-lib/actions/check-r-package@v2
         with:

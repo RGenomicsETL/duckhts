@@ -1,0 +1,343 @@
+---
+title: "Synthetic Somalier mechanics benchmark"
+output:
+  github_document:
+    html_preview: false
+---
+
+<!-- benchmark_somalier*.md is generated from this Rmd. Do not edit a rendered report. -->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+This report measures DuckHTS's public Somalier-derived SQL stack on ordinary
+Parquet relations: validated panel and population-frequency hashing, sketch
+preparation, selected and all-pair relatedness reduction, CHARR, directional
+matched-anchor contamination, and end-to-end output persistence. The fixture
+has the canonical Somalier panel width of 17,000 biallelic sites, but its
+coordinates, population B frequencies, and count evidence are deterministic
+arithmetic data. They are not upstream Somalier sites, population estimates,
+or biological observations, and this report makes no biological-parity claim.
+
+The default workload is 250 samples and 4,250,000 count-evidence rows.
+`SOMALIER_BENCHMARK_SAMPLES` may select 2 through 1,000 samples without network
+access. The default is the registry identity used for checked-in measurements;
+an override is a parameterized cache instance of the same registry derivation.
+`SOMALIER_BENCHMARK_SELECTED_SAMPLES` and `SOMALIER_BENCHMARK_SELECTED_PAIRS`
+set distinct selected samples `K` and distinct ordered requested pairs `P`.
+The default is `K=3, P=2` when at least three samples are staged. The first
+`K-1` pairs form a receiver-to-sample001 star; additional pairs follow a
+deterministic distinct ordered topology.
+
+## Interface decision
+
+The retained evidence is a long typed relation keyed by sample and panel site,
+with nullable A/B/other counts. This keeps unavailable evidence distinct from
+measured zero, lets `read_geno(format_fields := ['AD'])` supply header-typed
+allele depths without serializing native structs, and permits Parquet projection
+of only the identity and count columns. The nearest recorded AD-ingestion
+measurement is `benchmark_genotype_format_review.md`: one projected sample over
+4,048,342 GIAB records and 8,144,465 nonmissing AD values took a median 7.479 s;
+the unprojected control took 5.847 s. That report also records zero differences
+against projected `read_bcf()` for the selected fields.
+
+Preparation returns one packed sketch row per sample; pairwise relatedness then
+borrows two sketches. This avoids expanding every pair back to site rows and
+avoids opaque `.somalier` payloads. Selected pairs are ordinary two-column
+relations, so a new batch can join only new-to-cohort pairs while the all-pair
+case remains available. Contamination keeps long count evidence because GT
+masks cannot supply measured depths or population AF. The measurements below
+separately exercise preparation, selected pairs, all pairs, contamination, and
+Parquet-to-results execution; they do not benchmark BCF decoding or a specific
+new-batch cohort ratio.
+
+## Reproduction
+
+Build the extension from the source revision under test, then render a named,
+non-overwriting snapshot from the repository root. Set
+`SOMALIER_BENCHMARK_EXTENSION_RECEIPT` to a verified release-extension receipt
+whose source revision and extension SHA-256 match the checkout and measured
+binary:
+
+```{r clean-build, eval=FALSE, echo=TRUE}
+source("scripts/duckvep_evidence.R")
+root <- normalizePath(".")
+revision <- duckvep_evidence_revision(root)
+extension <- duckvep_evidence_build_extension(root,
+  "build/release/duckhts.duckdb_extension", revision)
+duckvep_evidence_write_extension_receipt(
+  "/tmp/somalier-extension.tsv", revision, extension
+)
+```
+
+```sh
+BENCHMARK_RMD=benchmark_somalier.Rmd \
+BENCHMARK_REPORT=benchmark_somalier_reviewed.md \
+SOMALIER_BENCHMARK_EXTENSION_RECEIPT=/tmp/somalier-extension.tsv \
+SOMALIER_BENCHMARK_SAMPLES=250 \
+SOMALIER_BENCHMARK_SELECTED_SAMPLES=3 \
+SOMALIER_BENCHMARK_SELECTED_PAIRS=2 \
+SOMALIER_BENCHMARK_THREADS=4 \
+SOMALIER_BENCHMARK_REPETITIONS=3 \
+make bench-snapshot
+```
+
+Rendering refuses tracked or untracked changes below `src/` and in the
+benchmark source, runner, stage implementation, and registry. The report
+requires a verified release build receipt binding that revision to the
+measured extension SHA-256. Staging is local and deterministic under the recorded generator
+and DuckDB writer version; it neither downloads data nor invokes an upstream tool.
+Each measured repetition runs in a fresh R process. Extension load, connection
+creation, input validation, and prerequisite construction for the two isolated
+pair-reduction cases are outside those timed intervals. The end-to-end case
+includes all public computations and ordered persistence of their five output
+relations to ordinary Zstandard-compressed Parquet.
+The `matched_memory` case captures Linux process high-water RSS immediately
+before and after the matched public call, before whole-input validation and
+the independent result oracle. A single `K/P` point is not a memory-scaling
+proof.
+
+```{r measurement, include=FALSE}
+library(DBI)
+source("r/duckhtsbench/R/registry.R")
+source("r/duckhtsbench/R/stage.R")
+source("r/duckhtsbench/R/somalier.R")
+Sys.setenv(DUCKHTSBENCH_REGISTRY =
+  normalizePath("r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+
+benchmark_sources <- c("benchmarks/benchmark_somalier.Rmd",
+  "benchmarks/benchmark_somalier_run.R", "r/duckhtsbench/R/registry.R",
+  "r/duckhtsbench/R/stage.R", "r/duckhtsbench/R/somalier.R",
+  "r/duckhtsbench/inst/benchmark_registry.tsv", "scripts/duckvep_evidence.R")
+dirty <- system2("git", c("status", "--porcelain", "--untracked-files=all", "--",
+                         "src", benchmark_sources), stdout = TRUE, stderr = TRUE)
+if (length(dirty)) stop("Render the Somalier benchmark from committed src/ and benchmark inputs")
+source_revision <- system2("git", c("rev-parse", "HEAD"), stdout = TRUE)
+source_tree <- system2("git", c("rev-parse", "HEAD:src"), stdout = TRUE)
+stopifnot(length(source_revision) == 1L, nchar(source_revision) == 40L,
+          length(source_tree) == 1L, nchar(source_tree) == 40L)
+
+whole_number <- function(name, default, minimum, maximum) {
+  value <- suppressWarnings(as.numeric(Sys.getenv(name, unset = as.character(default))))
+  if (length(value) != 1L || !is.finite(value) || value != floor(value) ||
+      value < minimum || value > maximum) {
+    stop(name, " must be a whole number from ", minimum, " through ", maximum)
+  }
+  as.integer(value)
+}
+samples <- whole_number("SOMALIER_BENCHMARK_SAMPLES", 250L, 2L, 1000L)
+selected_samples <- whole_number("SOMALIER_BENCHMARK_SELECTED_SAMPLES",
+                                 min(samples, 3L), 2L, samples)
+selected_pairs <- whole_number("SOMALIER_BENCHMARK_SELECTED_PAIRS",
+                               selected_samples - 1L, selected_samples - 1L,
+                               min(selected_samples * (selected_samples - 1L), 100000L))
+threads <- whole_number("SOMALIER_BENCHMARK_THREADS", 4L, 1L, 256L)
+repetitions <- whole_number("SOMALIER_BENCHMARK_REPETITIONS", 3L, 1L, 20L)
+warmups <- whole_number("SOMALIER_BENCHMARK_WARMUPS", 1L, 0L, 5L)
+extension <- normalizePath(Sys.getenv(
+  "DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension"), mustWork = TRUE)
+paths <- duckhts_bench_stage_somalier(samples, selected_samples, selected_pairs)
+input_bytes <- file.info(paths)$size
+input_sha256 <- vapply(paths, digest::digest, character(1L), file = TRUE, algo = "sha256")
+extension_sha256 <- digest::digest(file = extension, algo = "sha256")
+benchmark_sha256 <- vapply(benchmark_sources, digest::digest, character(1L),
+                          file = TRUE, algo = "sha256")
+receipt_setting <- Sys.getenv("SOMALIER_BENCHMARK_EXTENSION_RECEIPT", unset = "")
+if (!nzchar(receipt_setting)) {
+  stop("SOMALIER_BENCHMARK_EXTENSION_RECEIPT must name a verified release build receipt")
+}
+source("scripts/duckvep_evidence.R")
+receipt_path <- normalizePath(receipt_setting, mustWork = TRUE)
+build <- duckvep_evidence_read_extension_receipt(receipt_path, normalizePath("."),
+                                                  extension, source_revision)
+stopifnot(identical(build$sha256, extension_sha256))
+binary_binding <- paste("verified release receipt:", build$binding)
+receipt_sha256 <- digest::digest(file = receipt_path, algo = "sha256")
+
+runner <- normalizePath("benchmarks/benchmark_somalier_run.R", mustWork = TRUE)
+cases <- c("panel_hash", "sketches", "related_selected", "related_all", "charr",
+           "matched_anchor", "matched_memory", "end_to_end")
+run_case <- function(case, repetition, warmup = FALSE) {
+  directory <- tempfile(sprintf("somalier-%s-%d-", case, repetition))
+  result_path <- paste0(directory, ".tsv")
+  log_path <- paste0(directory, ".log")
+  dir.create(directory)
+  on.exit(unlink(c(directory, result_path, log_path), recursive = TRUE), add = TRUE)
+  args <- c(runner, case, extension, unname(paths), directory, threads, result_path)
+  status <- system2("Rscript", shQuote(args), stdout = log_path, stderr = log_path)
+  if (status != 0L || !file.exists(result_path)) {
+    stop("Somalier benchmark subprocess failed:\n",
+         paste(readLines(log_path, warn = FALSE), collapse = "\n"))
+  }
+  value <- utils::read.delim(result_path, check.names = FALSE, stringsAsFactors = FALSE)
+  stopifnot(nrow(value) == 1L, identical(value$case, case))
+  value$repetition <- repetition
+  value$warmup <- warmup
+  value
+}
+if (warmups) {
+  for (warmup in seq_len(warmups)) {
+    for (case in cases) invisible(run_case(case, warmup, TRUE))
+  }
+}
+measurements <- list()
+for (repetition in seq_len(repetitions)) {
+  order <- if (repetition %% 2L) cases else rev(cases)
+  for (case in order) {
+    measurements[[length(measurements) + 1L]] <- run_case(case, repetition)
+  }
+}
+measurements <- do.call(rbind, measurements)
+rownames(measurements) <- NULL
+for (rows in split(measurements, measurements$case)) {
+  stopifnot(length(unique(rows$fingerprint)) == 1L,
+            length(unique(rows$sites)) == 1L,
+            length(unique(rows$samples)) == 1L,
+            length(unique(rows$evidence_rows)) == 1L,
+            length(unique(rows$selected_samples)) == 1L,
+            length(unique(rows$selected_pairs)) == 1L,
+            length(unique(rows$result_rows)) == 1L,
+            length(unique(rows$persisted_output_rows)) == 1L,
+            length(unique(rows$persisted_output_bytes)) == 1L,
+            all(vapply(rows[grepl("_output_(rows|bytes)$", names(rows))],
+                       function(value) length(unique(value)) == 1L, logical(1L))))
+}
+summary <- do.call(rbind, lapply(cases, function(case) {
+  rows <- measurements[measurements$case == case, , drop = FALSE]
+  data.frame(
+    workload = case,
+    median_seconds = stats::median(rows$seconds),
+    repetitions = nrow(rows),
+    result_rows = rows$result_rows[[1L]],
+    persisted_output_rows = rows$persisted_output_rows[[1L]],
+    persisted_output_bytes = rows$persisted_output_bytes[[1L]],
+    median_process_peak_rss_kib = stats::median(rows$peak_process_rss_kib, na.rm = TRUE),
+    median_peak_increase_kib = stats::median(rows$peak_increase_kib, na.rm = TRUE),
+    stringsAsFactors = FALSE
+  )
+}))
+work <- do.call(rbind, lapply(cases, function(case) {
+  row <- measurements[measurements$case == case, , drop = FALSE][1L, ]
+  row[c("case", "related_selected_pairs", "related_all_pairs",
+        "related_selected_joint_sites", "related_all_joint_sites", "charr_samples",
+        "charr_usable_sites", "matched_pairs", "matched_profile_samples",
+        "matched_profile_input_rows", "matched_profile_elements",
+        "matched_profile_payload_bytes",
+        "frequency_profile_elements", "frequency_profile_payload_bytes",
+        "matched_usable_sites", "matched_evaluations", "matched_panel_site_visits",
+        "matched_likelihood_contributions")]
+}))
+related_work <- work[work$related_selected_pairs + work$related_all_pairs > 0,
+  c("case", "related_selected_pairs", "related_all_pairs",
+    "related_selected_joint_sites", "related_all_joint_sites"), drop = FALSE]
+charr_work <- work[work$charr_samples > 0,
+  c("case", "charr_samples", "charr_usable_sites"), drop = FALSE]
+matched_work <- work[work$matched_pairs > 0,
+  c("case", "matched_pairs", "matched_profile_samples",
+    "matched_profile_input_rows", "matched_profile_elements",
+    "matched_profile_payload_bytes", "frequency_profile_elements",
+    "frequency_profile_payload_bytes", "matched_usable_sites",
+    "matched_evaluations", "matched_panel_site_visits",
+    "matched_likelihood_contributions"), drop = FALSE]
+input_summary <- data.frame(
+  artifact = names(paths),
+  rows = c(17000, 17000, 17000 * samples, selected_pairs),
+  bytes = unname(input_bytes),
+  sha256 = unname(input_sha256),
+  stringsAsFactors = FALSE
+)
+end_to_end <- measurements[measurements$case == "end_to_end", , drop = FALSE][1L, ]
+output_summary <- data.frame(
+  relation = c("sketches", "selected relatedness", "all-pair relatedness", "CHARR",
+               "directional matched-anchor"),
+  rows = unname(as.numeric(end_to_end[1L, c("sketches_output_rows", "selected_output_rows",
+    "all_pairs_output_rows", "charr_output_rows", "matched_output_rows")])),
+  bytes = unname(as.numeric(end_to_end[1L, c("sketches_output_bytes", "selected_output_bytes",
+    "all_pairs_output_bytes", "charr_output_bytes", "matched_output_bytes")])),
+  stringsAsFactors = FALSE
+)
+provenance <- data.frame(
+  item = c("checkout revision", "checkout src/ tree", "binary/checkout binding",
+           "extension SHA-256", "extension path", "build receipt path",
+           "build receipt SHA-256", "samples", "panel sites",
+           "count-evidence rows", "measured evidence rows", "unavailable evidence rows",
+           "selected samples K", "requested ordered pairs P", "threads",
+           "timed repetitions", "excluded warmups", "R", "DuckDB R package", "host"),
+  value = c(source_revision, source_tree, binary_binding,
+            extension_sha256, extension, receipt_path, receipt_sha256, samples, 17000,
+            17000 * samples, measurements$measured_evidence_rows[[1L]],
+            measurements$unavailable_evidence_rows[[1L]], selected_samples, selected_pairs,
+            threads, repetitions, warmups,
+            R.version.string, as.character(utils::packageVersion("duckdb")),
+            paste(Sys.info()[c("sysname", "release", "machine")], collapse = " ")),
+  stringsAsFactors = FALSE
+)
+benchmark_identity <- data.frame(source = benchmark_sources,
+                                 sha256 = unname(benchmark_sha256),
+                                 stringsAsFactors = FALSE)
+memory_repetitions <- measurements[measurements$case == "matched_memory",
+  c("repetition", "seconds", "baseline_peak_rss_kib", "measured_peak_rss_kib",
+    "peak_increase_kib"), drop = FALSE]
+```
+
+## Provenance and exact inputs
+
+```{r provenance}
+knitr::kable(provenance)
+knitr::kable(benchmark_identity)
+knitr::kable(input_summary)
+```
+
+Every evidence row retains the ordered panel identity, sample ID, and nullable
+integer A/B/other counts. Independent pre-timing checks require one dense
+17,000-site panel, one AF row per site, one evidence row per sample/site, and
+either three measured counts or three NULL counts. Every synthetic panel site
+has lexicographically canonical `allele_a < allele_b`. The pair relation
+contains `P` distinct ordered requests spanning `K` selected sample IDs.
+
+## Measurements
+
+```{r results}
+knitr::kable(summary, digits = 3)
+knitr::kable(related_work)
+knitr::kable(charr_work)
+knitr::kable(matched_work)
+knitr::kable(output_summary)
+knitr::kable(memory_repetitions, digits = 3)
+```
+
+The runner checks 266 words in each of the three prepared masks. Selected-pair
+`jointly_called`, `ibs0`, and `ibs2` integers are compared with a separate SQL
+classification over raw counts. All-pair reduction must emit exactly the
+sample-sketch self-join's pair keys, checked by a full outer join, with
+`samples * (samples - 1) / 2` unique pairs and nonzero evaluated sites. CHARR
+must retain every sample, input site, and unavailable-count denominator. A
+separate SQL calculation checks every sample's usable counters and estimate;
+the retained sample001 estimate is also checked against an arithmetic R
+expectation. Directional matched-anchor output must retain every requested
+ordered pair and 17,000 observed sites per pair. A separate raw-count SQL
+calculation checks usable and unavailable sites for every requested pair.
+The retained sample002-to-sample001 and, when present,
+sample003-to-sample001 alpha and relative log likelihood are checked by a
+separate vectorized R likelihood and optimizer. Finally,
+every persisted Parquet relation is
+rescanned and checked against its exact expected row count. These gates run
+outside the displayed elapsed intervals and prevent a fast result obtained by
+dropped samples, sites, pairs, or outputs.
+
+`median_process_peak_rss_kib` is Linux `VmHWM` for each fresh benchmark process.
+For ordinary cases it includes untimed R, DuckDB, extension load, validation,
+and correctness state. In `matched_memory`, the reported high-water mark and
+increase are captured directly after the public matched call and before
+whole-input checks or the independent oracle. The increase is a difference
+between two process high-water marks, not an allocation counter; reused
+previously committed memory may not increase it. It is `NA` on systems without
+`/proc/self/status`. The current report is one `K/P` topology and makes no
+sample-vs-pair memory-growth claim. The matched implementation prepares four
+typed lists per selected sample (`K * 17,000 * 4` list elements, with 10 typed
+payload bytes per site, read from `K * 17,000` evidence rows) and one eight-byte
+AF list per site; it then evaluates
+`P` scalar fits. `result_rows` counts actual computation rows for every lane.
+Persisted output rows and bytes are nonzero only for end-to-end persistence.

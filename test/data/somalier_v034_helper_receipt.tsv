@@ -1,0 +1,17 @@
+field	value
+upstream	https://github.com/brentp/somalier
+tag	v0.3.4
+commit	ff58fdade8f4f8293d904f10e0a4a13f1fac808d
+scope	helper-level source-derived witness; not full CLI conformance
+compiler	Nim 1.6.14 Linux amd64
+source_archive_sha256	acd2dc11be6051c80d15628703a9419965cea3fe7a0563b47e14743e7ac6339e
+source_archive_bytes	1208978
+witness_driver_sha256	0f3bbd0c7088e98859221172c73d1399eefb2db33a7afc07052277726d7f0f32
+regeneration	Rscript test/scripts/somalier_v034_regenerate.R [staged-source-archive]
+charr_source	src/somalierpkg/charr.nim lines 5-100 unchanged; git blob fb8563c5a5e1c4fa9c9edcf0956bf679a53b3bd6
+pair_source	src/somalierpkg/contamination.nim lines 25-27,51-61,68-87,268-288,319-321,336-433,452-513 unchanged; git blob c1ef08d887b08889c9346bea770c3e20f5d518a4
+upstream_result_sha256	34e8dff0151c4d556aaaf3c4b3c03bfabdc55e00861f60b058d74303ea3c4aeb
+upstream_helper_exit	0
+discovery_comparison_exit	1
+discovery_comparison_failure	Retained depth-6000 CHARR eligibility and pair-search counterexamples; fixed-alpha likelihoods agree.
+status_contract	Pinned helpers expose counts and NaN, not named status; expected_native_status is DuckHTS's independent numerical contract.

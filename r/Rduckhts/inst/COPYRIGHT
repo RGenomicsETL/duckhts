@@ -28,3 +28,10 @@ Mosdepth test fixtures
 	Authors: Brent Pedersen and mosdepth contributors
 	License: MIT
 	Reference: upstream mosdepth project LICENSE
+
+Somalier-derived numerical methods
+	Source: inst/duckhts_extension/somalier.c
+	Author: Brent Pedersen and Somalier contributors
+	License: MIT
+	Reference: Somalier v0.3.4, commit ff58fdade8f4f8293d904f10e0a4a13f1fac808d
+	Note: DuckHTS ports a defined computational subset; no Somalier Nim source or .somalier store is bundled.

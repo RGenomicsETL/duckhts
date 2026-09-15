@@ -6,7 +6,7 @@ Authors@R: c(
     email = "sounkoutoure@gmail.com",
     role = c("aut", "cre")),
     person(given = "James K Bonfield, John Marshall,Petr Danecek ,Heng Li , Valeriu Ohan, Andrew Whitwham,Thomas Keane , Robert M Davies", role = "ctb", comment = "Htslib Authors"),
-    person(given = "Brent", family = "Pedersen", role = "cph", comment = "Mosdepth Original Author"),
+    person(given = "Brent", family = "Pedersen", role = "cph", comment = "Original author of mosdepth and Somalier"),
     person(given = "Giulio", family = "Genovese", email = "giulio.genovese@gmail.com", role = "cph", comment = "Author of BCFTools munge,score,liftover plugins"),
     person(given = "Nicola", family = "Asuni", role = "cph", comment = "Author of the VariantKey and RegionKey C API"),
     person(given = "Devon", family = "Ryan", role = "cph", comment = "Author of libBigWig"),

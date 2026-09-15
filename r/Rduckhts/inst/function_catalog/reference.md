@@ -1578,6 +1578,284 @@ SELECT duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc FROM read_fastq('reads.fastq.gz
 WITH q AS (SELECT duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc FROM read_fastq('reads.fastq.gz')) SELECT cycle.* FROM q, UNNEST(qc.cycles) AS u(cycle);
 ```
 
+## duckhts_somalier_panel_sha256
+
+Derive a stable SHA-256 identity for an ordered biallelic sample-fingerprinting panel.
+
+Signature:
+
+```sql
+duckhts_somalier_panel_sha256(panel_table)
+```
+
+Returns:
+
+```
+VARCHAR
+```
+
+### Panel contract
+
+panel_table has assembly, dense zero-based site_index, region, positive one-based position, allele_a and allele_b. One nonempty assembly, unique physical region/position and uppercase single-base A/C/G/T alleles in lexical A < B order are required. The pinned Somalier v0.3.4 X/Y aliases are rejected; other aliases cannot be biologically classified from a region string. The calculation assumes diploid three-state genotypes. The digest commits to this domain and every ordered site, independent of physical row order.
+
+### Examples
+
+```sql
+SELECT duckhts_somalier_panel_sha256('fingerprint_panel');
+```
+
+## duckhts_somalier_frequency_sha256
+
+Derive a stable identity for panel-aligned population-B allele frequencies.
+
+Signature:
+
+```sql
+duckhts_somalier_frequency_sha256(frequency_table, panel_table)
+```
+
+Returns:
+
+```
+VARCHAR
+```
+
+### Frequency contract
+
+frequency_table must cover every panel site exactly once with the same assembly, ordinal, coordinate and A/B orientation plus a finite population_b_af in [0,1]. The digest commits to the panel identity and every ordered frequency value.
+
+### Examples
+
+```sql
+SELECT duckhts_somalier_frequency_sha256('population_frequencies', 'fingerprint_panel');
+```
+
+## duckhts_somalier_classify
+
+Classify one measured A/B/other count tuple for Somalier-derived autosomal relatedness.
+
+Signature:
+
+```sql
+duckhts_somalier_classify(a, b, other, min_depth, min_het_balance, hom_balance_cutoff)
+```
+
+Returns:
+
+```
+STRUCT(genotype TINYINT, middling BOOLEAN, unavailable BOOLEAN)
+```
+
+### Evidence
+
+a, b and other are all measured or all NULL. Three zeros are measured zero-depth evidence; three NULL values are unavailable. Genotype is -1 unknown, 0 homozygous A, 1 heterozygous or 2 homozygous B.
+
+### Scope
+
+Alleles must already use the panel's ordered A/B orientation. Relatedness classification preserves the pinned Somalier v0.3.4 10% other-read filter; contamination uses separate stricter eligibility.
+
+### Examples
+
+```sql
+SELECT duckhts_somalier_classify(20, 20, 0, 7, 0.3, 0.01);
+```
+
+## duckhts_somalier_prepare_sketches
+
+Build one panel-verified packed relatedness sketch per sample from typed count evidence.
+
+Signature:
+
+```sql
+duckhts_somalier_prepare_sketches(evidence_table, panel_table, min_depth, min_het_balance, hom_balance_cutoff, max_sites := 1000000)
+```
+
+Returns:
+
+```
+table(sketch STRUCT)
+```
+
+### Evidence
+
+evidence_table contains sample_id, the six panel identity columns, and nullable a, b and other counts. Each sample must contain every panel ordinal exactly once. Count channels already follow the panel's canonical lexical A/B order; changed coordinates or orientation error. Counts are never inferred from GT or DP. All-NULL tuples are unavailable, all-zero tuples are measured zero depth, and partial NULL tuples error.
+
+### Persistence
+
+The returned struct contains identities, classification settings, counters, a raw-count receipt, content integrity fields and three UBIGINT[] masks. The receipt binds every ordinal, availability state and A/B/other tuple even when changed counts retain the same genotype. It is an ordinary typed value suitable for Parquet, not a serialized native object. max_sites bounds each prepared sketch; sample_id and assembly are each limited to 1,024 bytes.
+
+### Examples
+
+```sql
+CREATE TABLE sample_sketches AS SELECT * FROM duckhts_somalier_prepare_sketches('allele_counts', 'fingerprint_panel', 7, 0.3, 0.01);
+```
+
+## duckhts_somalier_verify_sketches
+
+Verify persisted relatedness sketches against their retained raw count evidence.
+
+Signature:
+
+```sql
+duckhts_somalier_verify_sketches(evidence_table, panel_table, sketches_table, max_sites := 1000000)
+```
+
+Returns:
+
+```
+BOOLEAN
+```
+
+### Integrity
+
+Checks persisted classification settings before using them as rebuild parameters. With valid settings, it rebuilds every sample through the panel and count-validation path and compares the complete typed sketch. It returns false for invalid retained settings, changed A/B/other counts, changed availability, altered masks or receipts, and missing, extra or duplicate sample sketches. Invalid panel/evidence geometry and incomplete or duplicate site ordinals error.
+
+### Scope
+
+evidence_table must contain exactly the samples represented by sketches_table. max_sites is a positive panel-site limit at most 100,000,000. Receipts detect accidental divergence between persisted evidence and sketches; they are not an authenticity mechanism.
+
+### Examples
+
+```sql
+SELECT duckhts_somalier_verify_sketches('allele_counts', 'fingerprint_panel', 'sample_sketches');
+```
+
+## duckhts_somalier_relatedness
+
+Compute fused Somalier-derived relatedness and concordance statistics for two prepared sketches.
+
+Signature:
+
+```sql
+duckhts_somalier_relatedness(sketch_a, sketch_b, max_sites)
+```
+
+Returns:
+
+```
+STRUCT
+```
+
+### Results
+
+The struct retains sample and panel identities, method version, status, jointly-called count, IBS0/IBS2, shared heterozygotes, heterozygote and homozygote denominators, middling/unavailable counters, relatedness and named concordance values. relatedness is 2(shared_hets - 2 IBS0)/max(1,het_ab). inferred_hom_concordance is matching_hom_count/max(1,min(callable_hom_count_a,callable_hom_count_b)). raw_hom_b_concordance is (shared_hom_b - 2 IBS0)/max(1,min(hom_b_count_a,hom_b_count_b)). adjusted_concordance applies pinned v0.3.4's middling and low-homozygote penalties and upper-range transform. Floating results are NULL when no site is jointly callable.
+
+### Execution
+
+Both sketches must have identical panel digests, site counts and classification settings. Mask words are borrowed directly; comparison allocates no pair-sized workspace. SQL chooses the requested pair relation and output ordering.
+
+### Examples
+
+```sql
+SELECT unnest(duckhts_somalier_relatedness(a.sketch, b.sketch, 1000000)) FROM sample_sketches a JOIN sample_sketches b ON a.sketch.sample_id < b.sketch.sample_id;
+```
+
+## duckhts_somalier_verify_relatedness
+
+Verify a typed relatedness result against its two sealed sketches.
+
+Signature:
+
+```sql
+duckhts_somalier_verify_relatedness(pair_result, sketch_a, sketch_b, max_sites)
+```
+
+Returns:
+
+```
+BOOLEAN
+```
+
+### Integrity
+
+Returns false when a sketch digest, sample or panel identity, method/status, site denominator, integer statistic, floating statistic or status-dependent NULL value is inconsistent. The check recomputes the pair metrics from borrowed mask words without a per-pair allocation. It detects accidental corruption, not malicious rewriting of both sketches and their integrity fields.
+
+### Limit
+
+max_sites is a positive panel-site limit at most 100,000,000. Invalid or NULL typed inputs return false.
+
+### Examples
+
+```sql
+SELECT duckhts_somalier_verify_relatedness(r.pair, a.sketch, b.sketch, 1000000) FROM pair_results r JOIN sample_sketches a ON a.sketch.sample_id = r.pair.sample_a JOIN sample_sketches b ON b.sketch.sample_id = r.pair.sample_b;
+```
+
+## duckhts_somalier_charr
+
+Estimate per-sample contamination with a bounded Somalier-derived CHARR reduction.
+
+Signature:
+
+```sql
+duckhts_somalier_charr(evidence_table, panel_table, frequency_table, min_depth := 15, max_depth := 1000000, hom_minor_rate := 0.12, hom_tail_alpha := 0.002, max_sites := 1000000)
+```
+
+Returns:
+
+```
+table(contamination STRUCT)
+```
+
+### Inputs
+
+Count evidence and population_b_af must match the panel's full ordered site identity. CHARR uses measured counts, its own homozygous-like binomial eligibility and the pinned 4% other-read filter; relatedness genotype masks are insufficient.
+
+### Results
+
+The struct retains sample, panel and frequency identities, method and numerical status, observed/unavailable/usable and homozygous-site denominators, estimate and every filter/limit. No usable evidence has status no_evidence and a NULL estimate, distinct from measured zero contamination.
+
+### Limits
+
+A+B depth must not exceed 1,000,000. sample_id and assembly are each limited to 1,024 bytes. Input order and parallel aggregate reduction order do not change the estimate.
+
+### Compatibility
+
+Eligibility follows Somalier 0.3.4 CHARR except that DuckHTS computes high-depth binomial tails without upstream's numerical underflow. Very deep sites can therefore have different eligibility; a pinned upstream counterexample is retained in the conformance tests.
+
+### Examples
+
+```sql
+SELECT unnest(contamination) FROM duckhts_somalier_charr('allele_counts', 'fingerprint_panel', 'population_frequencies');
+```
+
+## duckhts_somalier_matched_contamination
+
+Estimate directional contamination for explicitly selected receiver/anchor sample pairs.
+
+Signature:
+
+```sql
+duckhts_somalier_matched_contamination(evidence_table, panel_table, frequency_table, pairs_table, min_depth := 15, max_depth := 1000000, hom_minor_rate := 0.05, hom_tail_alpha := 0.001, error_rate := 0.002, min_probability := 1e-10, min_prior_frequency := 1e-6, alpha_min := 0, alpha_max := 1, grid_step := 0.01, refine_tolerance := 1e-10, max_evaluations := 4096, max_sites := 1000000)
+```
+
+Returns:
+
+```
+table(contamination STRUCT)
+```
+
+### Direction
+
+pairs_table contains distinct receiver_id and anchor_id rows. The anchor supplies the receiver's expected uncontaminated homozygous genotype; it is not assumed to identify the contaminating donor. Reversing a pair is a different fit.
+
+### Results
+
+The struct retains ordered sample, panel and frequency identities, method/status, observed/unavailable/usable denominators, alpha, evaluation count and every filter/search limit. No usable evidence returns NULL alpha. relative_log_likelihood omits alpha-independent binomial coefficients and is comparable only across alpha values for the same observations.
+
+### Execution
+
+The query prepares one bounded site profile per distinct selected sample and one panel-aligned frequency profile before joining requested ordered pairs. The pair scalar borrows those DuckDB-owned lists and allocates no per-pair workspace. Panel and evidence cardinalities are checked before profile-list construction; max_sites is a per-call panel limit.
+
+### Numerical difference
+
+DuckHTS searches a full 0.01 grid and refines a feasible local optimum rather than reproducing Somalier v0.3.4's fixed coarse/high-refinement sequence. The retained two-site witness fits alpha about 0.39759 versus upstream 0.440983. Both likelihoods and settings are retained in the differential test; results are not guaranteed bitwise identical to the CLI.
+
+### Examples
+
+```sql
+SELECT unnest(contamination) FROM duckhts_somalier_matched_contamination('allele_counts', 'fingerprint_panel', 'population_frequencies', 'receiver_anchor_pairs');
+```
+
 ## detect_quality_encoding
 
 Inspect a FASTQ file's observed quality ASCII range and report compatible legacy encodings with a heuristic guessed encoding.

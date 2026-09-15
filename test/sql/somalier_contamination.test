@@ -1,0 +1,698 @@
+# name: test/sql/somalier_contamination.test
+# description: Ordered frequency identity, CHARR, directional matched contamination, and persistence
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+CREATE TEMP TABLE contam_panel AS
+SELECT 'GRCh38' AS assembly, i::UBIGINT AS site_index,
+       'chr1' AS region, (100 + i)::UBIGINT AS position,
+       'A' AS allele_a, 'G' AS allele_b
+FROM range(2) sites(i);
+
+statement ok
+CREATE TEMP TABLE contam_frequency AS
+SELECT p.*, CASE site_index WHEN 0 THEN 0.25 ELSE 0.80 END::DOUBLE AS population_b_af
+FROM contam_panel p;
+
+statement ok
+CREATE TEMP TABLE contam_match_frequency AS
+SELECT p.*, 0.5::DOUBLE AS population_b_af
+FROM contam_panel p;
+
+statement ok
+CREATE TEMP VIEW contam_one_panel AS
+SELECT * FROM contam_panel WHERE site_index = 0;
+
+statement ok
+CREATE TEMP VIEW contam_one_frequency AS
+SELECT * FROM contam_frequency WHERE site_index = 0;
+
+# The frequency identity must be insensitive to physical row order, but
+# sensitive to a changed B frequency and to ordered-panel identity.
+statement ok
+CREATE TEMP TABLE contam_frequency_reordered AS
+SELECT * FROM contam_frequency ORDER BY site_index DESC;
+
+query III
+SELECT duckhts_somalier_frequency_sha256('contam_frequency', 'contam_panel') =
+         duckhts_somalier_frequency_sha256('contam_frequency_reordered', 'contam_panel'),
+       duckhts_somalier_frequency_sha256('contam_frequency', 'contam_panel') <>
+         duckhts_somalier_frequency_sha256('contam_match_frequency', 'contam_panel'),
+       length(duckhts_somalier_frequency_sha256('contam_frequency', 'contam_panel'));
+----
+1	1	64
+
+statement ok
+CREATE TEMP TABLE contam_evidence (
+  sample_id VARCHAR, assembly VARCHAR, site_index UBIGINT,
+  region VARCHAR, position UBIGINT, allele_a VARCHAR, allele_b VARCHAR,
+  a UBIGINT, b UBIGINT, other UBIGINT
+);
+
+# One is the one-site CHARR witness. R and H are the retained two-site
+# matched witness: receiver 160/40 and 40/160, anchor 199/1 and 1/199.
+# U is unavailable, E heterozygous, and D contributes one homozygous site.
+statement ok
+INSERT INTO contam_evidence
+SELECT c.sample_id, p.assembly, p.site_index, p.region, p.position,
+       p.allele_a, p.allele_b, c.a::UBIGINT, c.b::UBIGINT, c.other::UBIGINT
+FROM (VALUES
+  ('One', 0, 199, 1, 0), ('R', 0, 160, 40, 0), ('R', 1, 40, 160, 0),
+  ('H', 0, 199, 1, 0), ('H', 1, 1, 199, 0),
+  ('U', 0, NULL, NULL, NULL), ('U', 1, NULL, NULL, NULL),
+  ('E', 0, 100, 100, 0), ('E', 1, 100, 100, 0),
+  ('D', 0, 199, 1, 0), ('D', 1, NULL, NULL, NULL),
+  ('X', 0, 199, 1, 10), ('X', 1, 1, 199, 10),
+  ('L', 0, 6, 0, 0), ('L', 1, 0, 6, 0)
+) AS c(sample_id, site_index, a, b, other)
+JOIN contam_panel p USING (site_index);
+
+statement ok
+CREATE TEMP VIEW contam_one_evidence AS
+SELECT * FROM contam_evidence WHERE sample_id = 'One';
+
+# A single infiltrating B read in 200 measured A/B reads, AF(B)=0.25:
+# 1 / (0.25 * 200) = 0.02. Explicit binomial settings keep it HOM_A.
+query TIIIIIR
+SELECT contamination.status, contamination.site_count,
+       contamination.observed_sites, contamination.unavailable_sites,
+       contamination.usable_sites, contamination.usable_hom_a,
+       contamination.estimate
+FROM duckhts_somalier_charr(
+  'contam_one_evidence', 'contam_one_panel', 'contam_one_frequency',
+  min_depth := 7, hom_minor_rate := 0.1, hom_tail_alpha := 0.001,
+  max_sites := 1);
+----
+ok	1	1	0	1	1	0.02
+
+statement ok
+CREATE TEMP VIEW contam_charr_evidence AS
+SELECT * FROM contam_evidence WHERE sample_id IN ('D', 'E', 'U', 'X', 'L');
+
+# A measured heterozygote, unavailable tuple, high-other tuple, and
+# below-minimum-depth tuple are distinct observations but not usable sites.
+query TTIIIII
+SELECT contamination.sample_id, contamination.status,
+       contamination.observed_sites, contamination.unavailable_sites,
+       contamination.usable_sites, contamination.usable_hom_a,
+       contamination.usable_hom_b
+FROM duckhts_somalier_charr(
+  'contam_charr_evidence', 'contam_panel', 'contam_frequency',
+  min_depth := 7, hom_minor_rate := 0.1, hom_tail_alpha := 0.001,
+  max_sites := 2)
+ORDER BY contamination.sample_id;
+----
+D	ok	2	1	1	1	0
+E	no_evidence	2	0	0	0	0
+L	no_evidence	2	0	0	0	0
+U	no_evidence	2	2	0	0	0
+X	no_evidence	2	0	0	0	0
+
+query TII
+SELECT contamination.sample_id, contamination.estimate IS NULL,
+       contamination.site_count
+FROM duckhts_somalier_charr(
+  'contam_charr_evidence', 'contam_panel', 'contam_frequency',
+  min_depth := 7, hom_minor_rate := 0.1, hom_tail_alpha := 0.001,
+  max_sites := 2)
+WHERE contamination.sample_id IN ('E', 'U')
+ORDER BY contamination.sample_id;
+----
+E	1	2
+U	1	2
+
+statement ok
+CREATE TEMP TABLE contam_pairs(receiver_id VARCHAR, anchor_id VARCHAR);
+
+statement ok
+INSERT INTO contam_pairs VALUES ('R', 'H'), ('H', 'R'), ('U', 'H'), ('R', 'E');
+
+# The two-site fit has an independently calculated optimum near 0.3975904.
+# Its retained relative score omits only the alpha-independent binomial
+# coefficients. An independent R optimize() evaluation gives
+# alpha=0.39759034863198689 and score=-201.54726376072162; at alpha=0.4
+# the score is -201.54905839206708.
+query TTIIRIRI
+SELECT contamination.receiver_id, contamination.anchor_id,
+       contamination.site_count, contamination.usable_sites,
+       contamination.alpha, contamination.evaluations,
+       round(contamination.relative_log_likelihood, 9),
+       contamination.relative_log_likelihood > -201.54905839206708
+FROM duckhts_somalier_matched_contamination(
+  'contam_evidence', 'contam_panel', 'contam_match_frequency', 'contam_pairs',
+  max_sites := 2)
+WHERE contamination.receiver_id = 'R' AND contamination.anchor_id = 'H';
+----
+R	H	2	2	0.3975904	143	-201.547263761	1
+
+query TTTIIII
+SELECT contamination.receiver_id, contamination.anchor_id,
+       contamination.status, contamination.observed_sites,
+       contamination.receiver_unavailable_sites,
+       contamination.anchor_unavailable_sites, contamination.usable_sites
+FROM duckhts_somalier_matched_contamination(
+  'contam_evidence', 'contam_panel', 'contam_match_frequency', 'contam_pairs',
+  max_sites := 2)
+ORDER BY contamination.receiver_id, contamination.anchor_id;
+----
+H	R	no_evidence	2	0	0	0
+R	E	no_evidence	2	0	0	0
+R	H	ok	2	0	0	2
+U	H	no_evidence	2	2	0	0
+
+query TII
+SELECT contamination.receiver_id, contamination.alpha IS NULL,
+       contamination.relative_log_likelihood IS NULL
+FROM duckhts_somalier_matched_contamination(
+  'contam_evidence', 'contam_panel', 'contam_match_frequency', 'contam_pairs',
+  max_sites := 2)
+WHERE contamination.receiver_id = 'U';
+----
+U	1	1
+
+statement ok
+CREATE TEMP TABLE contam_panel_flipped AS
+SELECT assembly, site_index, region, position,
+       allele_b AS allele_a, allele_a AS allele_b
+FROM contam_panel;
+
+statement ok
+CREATE TEMP TABLE contam_frequency_flipped AS
+SELECT p.*, (1.0 - f.population_b_af)::DOUBLE AS population_b_af
+FROM contam_panel_flipped p JOIN contam_frequency f USING (site_index);
+
+statement ok
+CREATE TEMP TABLE contam_frequency_flipped_bad AS
+SELECT p.*, f.population_b_af
+FROM contam_panel_flipped p JOIN contam_frequency f USING (site_index);
+
+statement ok
+CREATE TEMP TABLE contam_evidence_flipped AS
+SELECT e.sample_id, p.assembly, p.site_index, p.region, p.position,
+       p.allele_a, p.allele_b, e.b AS a, e.a AS b, e.other
+FROM contam_evidence e JOIN contam_panel_flipped p USING (site_index);
+
+statement ok
+CREATE TEMP VIEW contam_one_evidence_flipped AS
+SELECT * FROM contam_evidence_flipped WHERE sample_id = 'One';
+
+statement ok
+CREATE TEMP VIEW contam_one_panel_flipped AS
+SELECT * FROM contam_panel_flipped WHERE site_index = 0;
+
+statement ok
+CREATE TEMP VIEW contam_one_frequency_flipped AS
+SELECT * FROM contam_frequency_flipped WHERE site_index = 0;
+
+statement ok
+CREATE TEMP VIEW contam_one_frequency_flipped_bad AS
+SELECT * FROM contam_frequency_flipped_bad WHERE site_index = 0;
+
+statement ok
+CREATE TEMP VIEW contam_flipped_pairs AS
+SELECT * FROM contam_pairs WHERE receiver_id = 'R' AND anchor_id = 'H';
+
+# Public panels require canonical lexical A/B order. The kernel's A/B+AF
+# symmetry remains a native property; SQL must reject noncanonical panels.
+statement error
+SELECT duckhts_somalier_panel_sha256('contam_panel_flipped');
+----
+canonical distinct uppercase biallelic SNP alleles A < B
+
+statement error
+SELECT * FROM duckhts_somalier_charr(
+  'contam_one_evidence_flipped', 'contam_one_panel_flipped',
+  'contam_one_frequency_flipped', min_depth := 7, max_sites := 1);
+----
+canonical distinct uppercase biallelic SNP alleles A < B
+
+statement error
+SELECT * FROM duckhts_somalier_matched_contamination(
+  'contam_evidence_flipped', 'contam_panel_flipped',
+  'contam_frequency_flipped', 'contam_flipped_pairs', max_sites := 2);
+----
+canonical distinct uppercase biallelic SNP alleles A < B
+
+statement ok
+CREATE TEMP TABLE contam_frequency_duplicate AS
+SELECT * FROM contam_frequency
+UNION ALL SELECT * FROM contam_frequency WHERE site_index = 0;
+
+statement error
+SELECT duckhts_somalier_frequency_sha256('contam_frequency_duplicate', 'contam_panel');
+----
+frequency rows must cover each panel site once
+
+statement ok
+CREATE TEMP VIEW contam_frequency_missing AS
+SELECT * FROM contam_frequency WHERE site_index = 0;
+
+statement error
+SELECT duckhts_somalier_frequency_sha256('contam_frequency_missing', 'contam_panel');
+----
+frequency rows must cover each panel site once
+
+statement ok
+CREATE TEMP VIEW contam_frequency_wrong_tuple AS
+SELECT assembly, site_index, region, position + 1 AS position,
+       allele_a, allele_b, population_b_af
+FROM contam_frequency;
+
+statement error
+SELECT duckhts_somalier_frequency_sha256('contam_frequency_wrong_tuple', 'contam_panel');
+----
+frequency site geometry or A/B orientation does not match ordered panel
+
+statement ok
+CREATE TEMP VIEW contam_frequency_nan AS
+SELECT assembly, site_index, region, position, allele_a, allele_b,
+       CASE WHEN site_index = 0 THEN 'NaN'::DOUBLE ELSE population_b_af END AS population_b_af
+FROM contam_frequency;
+
+statement error
+SELECT duckhts_somalier_frequency_sha256('contam_frequency_nan', 'contam_panel');
+----
+population B frequency must be finite in [0, 1]
+
+statement ok
+CREATE TEMP VIEW contam_frequency_extreme AS
+SELECT assembly, site_index, region, position, allele_a, allele_b,
+       CASE WHEN site_index = 0 THEN 1.1 ELSE population_b_af END AS population_b_af
+FROM contam_frequency;
+
+statement error
+SELECT duckhts_somalier_frequency_sha256('contam_frequency_extreme', 'contam_panel');
+----
+population B frequency must be finite in [0, 1]
+
+statement ok
+CREATE TEMP VIEW contam_wrong_evidence AS
+SELECT sample_id, assembly, site_index, region, position + 1 AS position,
+       allele_a, allele_b, a, b, other
+FROM contam_one_evidence;
+
+statement error
+SELECT * FROM duckhts_somalier_charr(
+  'contam_wrong_evidence', 'contam_one_panel', 'contam_one_frequency',
+  min_depth := 7, max_sites := 1);
+----
+evidence or frequency relation does not match the ordered panel
+
+statement ok
+CREATE TEMP VIEW contam_partial_evidence AS
+SELECT sample_id, assembly, site_index, region, position, allele_a,
+       allele_b, a, NULL::UBIGINT AS b, other
+FROM contam_one_evidence;
+
+statement error
+SELECT * FROM duckhts_somalier_charr(
+  'contam_partial_evidence', 'contam_one_panel', 'contam_one_frequency',
+  min_depth := 7, max_sites := 1);
+----
+counts must be all measured or all unavailable
+
+statement ok
+CREATE TEMP VIEW contam_duplicate_evidence AS
+SELECT * FROM contam_one_evidence UNION ALL SELECT * FROM contam_one_evidence;
+
+statement error
+SELECT * FROM duckhts_somalier_charr(
+  'contam_duplicate_evidence', 'contam_one_panel', 'contam_one_frequency',
+  min_depth := 7, max_sites := 1);
+----
+duplicate ordinal
+
+statement ok
+CREATE TEMP VIEW contam_missing_evidence AS
+SELECT * FROM contam_evidence WHERE sample_id = 'H' AND site_index = 0;
+
+statement error
+SELECT * FROM duckhts_somalier_charr(
+  'contam_missing_evidence', 'contam_panel', 'contam_frequency',
+  min_depth := 7, max_sites := 2);
+----
+missing site_index
+
+statement error
+SELECT * FROM duckhts_somalier_charr(
+  'contam_one_evidence', 'contam_one_panel', 'contam_one_frequency',
+  min_depth := 7, max_depth := 199, max_sites := 1);
+----
+a depth or site setting exceeds its declared limit
+
+statement error
+SELECT * FROM duckhts_somalier_charr(
+  'contam_one_evidence', 'contam_one_panel', 'contam_one_frequency',
+  min_depth := 7, max_sites := 0);
+----
+max_sites must be 1..100000000
+
+statement error
+SELECT * FROM duckhts_somalier_charr(
+  'contam_evidence', 'contam_panel', 'contam_frequency',
+  min_depth := 7, max_sites := 1);
+----
+invalid identity, site limit
+
+statement error
+SELECT __duckhts_somalier_charr(
+  'Identity', repeat('a', 1025), repeat('b', 64), repeat('c', 64),
+  0::UBIGINT, 1::UBIGINT, 199::UBIGINT, 1::UBIGINT, 0::UBIGINT,
+  0.25::DOUBLE, 7::UBIGINT, 1000000::UBIGINT, 0.1::DOUBLE,
+  0.001::DOUBLE, 1::UBIGINT);
+----
+sample_id and assembly must be at most 1024 bytes
+
+# The public macros derive this identity, while the checked aggregate refuses
+# rows that attempt to change it inside one reduction group.
+statement ok
+SET threads = 1;
+
+statement error
+SELECT __duckhts_somalier_charr(
+  'Identity', 'GRCh38', repeat('a', 64),
+  CASE site_index WHEN 0 THEN repeat('b', 64) ELSE repeat('c', 64) END,
+  site_index, 2::UBIGINT, 200::UBIGINT, 0::UBIGINT, 0::UBIGINT,
+  0.25::DOUBLE, 7::UBIGINT, 1000000::UBIGINT, 0.1::DOUBLE,
+  0.001::DOUBLE, 2::UBIGINT)
+FROM contam_panel;
+----
+identity, site count, or settings changed within one group
+
+statement ok
+CREATE TEMP VIEW contam_matched_duplicate_evidence AS
+SELECT * FROM contam_evidence
+UNION ALL SELECT * FROM contam_evidence WHERE sample_id = 'R' AND site_index = 0;
+
+statement error
+SELECT * FROM duckhts_somalier_matched_contamination(
+  'contam_matched_duplicate_evidence', 'contam_panel',
+  'contam_match_frequency', 'contam_pairs', max_sites := 2);
+----
+duplicate or out-of-range site_index
+
+statement error
+SELECT count(*) FROM duckhts_somalier_matched_contamination(
+  'contam_matched_duplicate_evidence', 'contam_panel',
+  'contam_match_frequency', 'contam_pairs', max_sites := 2);
+----
+duplicate or out-of-range site_index
+
+statement ok
+CREATE TEMP VIEW contam_matched_missing_evidence AS
+SELECT * FROM contam_evidence WHERE sample_id <> 'H' OR site_index = 0;
+
+statement error
+SELECT * FROM duckhts_somalier_matched_contamination(
+  'contam_matched_missing_evidence', 'contam_panel',
+  'contam_match_frequency', 'contam_pairs', max_sites := 2);
+----
+each ordered pair requires complete evidence
+
+statement ok
+CREATE TEMP VIEW contam_matched_partial_evidence AS
+SELECT sample_id, assembly, site_index, region, position, allele_a, allele_b,
+       a, CASE WHEN sample_id = 'R' AND site_index = 0 THEN NULL::UBIGINT ELSE b END AS b,
+       other
+FROM contam_evidence;
+
+statement error
+SELECT * FROM duckhts_somalier_matched_contamination(
+  'contam_matched_partial_evidence', 'contam_panel',
+  'contam_match_frequency', 'contam_pairs', max_sites := 2);
+----
+count tuple must be all measured or all unavailable
+
+statement ok
+CREATE TEMP VIEW contam_matched_wrong_tuple AS
+SELECT sample_id, assembly, site_index, region,
+       CASE WHEN sample_id = 'R' AND site_index = 0 THEN position + 1 ELSE position END AS position,
+       allele_a, allele_b, a, b, other
+FROM contam_evidence;
+
+statement error
+SELECT * FROM duckhts_somalier_matched_contamination(
+  'contam_matched_wrong_tuple', 'contam_panel',
+  'contam_match_frequency', 'contam_pairs', max_sites := 2);
+----
+sample site geometry or A/B orientation does not match ordered panel
+
+statement error
+SELECT * FROM duckhts_somalier_matched_contamination(
+  'contam_evidence', 'contam_panel',
+  'contam_match_frequency', 'contam_pairs', max_depth := 199, max_sites := 2);
+----
+a sample depth exceeds max_depth
+
+statement error
+SELECT * FROM duckhts_somalier_matched_contamination(
+  'contam_evidence', 'contam_panel',
+  'contam_match_frequency', 'contam_pairs', max_sites := 1);
+----
+panel exceeds max_sites
+
+statement error
+SELECT count(*) FROM duckhts_somalier_matched_contamination(
+  'contam_evidence', 'contam_panel',
+  'contam_match_frequency', 'contam_pairs', max_sites := 1);
+----
+panel exceeds max_sites
+
+statement error
+SELECT * FROM duckhts_somalier_matched_contamination(
+  'contam_evidence', 'contam_panel',
+  'contam_match_frequency', 'contam_pairs', max_sites := 2,
+  max_evaluations := 10);
+----
+workspace or max_evaluations limit exceeded
+
+statement ok
+CREATE TEMP TABLE contam_self_pair AS
+SELECT 'R' AS receiver_id, 'R' AS anchor_id;
+
+statement ok
+CREATE TEMP TABLE contam_empty_pairs AS
+SELECT 'R' AS receiver_id, 'H' AS anchor_id WHERE false;
+
+statement error
+SELECT * FROM duckhts_somalier_matched_contamination(
+  'contam_evidence', 'contam_panel',
+  'contam_match_frequency', 'contam_empty_pairs', max_sites := 2,
+  grid_step := 0);
+----
+invalid filter, search, or resource settings
+
+statement error
+SELECT count(*) FROM duckhts_somalier_matched_contamination(
+  'contam_evidence', 'contam_panel',
+  'contam_match_frequency', 'contam_empty_pairs', max_sites := 2,
+  grid_step := 0);
+----
+invalid filter, search, or resource settings
+
+# A NULL in one row must not abort the vector callback or leave later rows
+# uninitialized. The valid rows flank both NULL and invalid settings.
+query II rowsort
+SELECT case_index,
+       __duckhts_somalier_matched_settings_valid(
+         min_depth, 1000000, 0.05, 0.001, 0.002, 1e-10, 1e-6,
+         0, 1, grid_step, 1e-10, 4096, 2)::INTEGER
+FROM (VALUES
+  (0, NULL::UBIGINT, 0.01),
+  (1, 15::UBIGINT, 0.01),
+  (2, 15::UBIGINT, 0.0),
+  (3, 15::UBIGINT, 0.01)
+) settings(case_index, min_depth, grid_step);
+----
+0	0
+1	1
+2	0
+3	1
+
+statement error
+SELECT * FROM duckhts_somalier_matched_contamination(
+  'contam_evidence', 'contam_panel',
+  'contam_match_frequency', 'contam_self_pair', max_sites := 2);
+----
+pairs require distinct nonempty receiver and anchor identities
+
+statement ok
+CREATE TEMP TABLE contam_duplicate_pair AS
+SELECT 'R' AS receiver_id, 'H' AS anchor_id
+UNION ALL SELECT 'R', 'H';
+
+statement error
+SELECT * FROM duckhts_somalier_matched_contamination(
+  'contam_evidence', 'contam_panel',
+  'contam_match_frequency', 'contam_duplicate_pair', max_sites := 2);
+----
+duplicate ordered pair
+
+statement ok
+CREATE TEMP TABLE contam_missing_pair AS
+SELECT 'R' AS receiver_id, 'Absent' AS anchor_id;
+
+statement error
+SELECT * FROM duckhts_somalier_matched_contamination(
+  'contam_evidence', 'contam_panel',
+  'contam_match_frequency', 'contam_missing_pair', max_sites := 2);
+----
+each ordered pair requires complete evidence
+
+# A 200,000-site relation exceeds DuckDB's parallel scan threshold. CHARR has
+# exactly zero infiltrating reads at every accepted homozygous site; the
+# matched receiver has measured zero depth, so both outputs are exactly
+# comparable independent of reduction order.
+statement ok
+CREATE TEMP TABLE contam_large_panel AS
+SELECT 'GRCh38' AS assembly, i::UBIGINT AS site_index,
+       'chr9' AS region, (1000000 + i)::UBIGINT AS position,
+       'A' AS allele_a, 'G' AS allele_b
+FROM range(200000) sites(i);
+
+statement ok
+CREATE TEMP TABLE contam_large_frequency AS
+SELECT p.*, 0.25::DOUBLE AS population_b_af FROM contam_large_panel p;
+
+statement ok
+CREATE TEMP TABLE contam_large_charr_evidence AS
+SELECT 'LargeC' AS sample_id, p.*,
+       200::UBIGINT AS a, 0::UBIGINT AS b, 0::UBIGINT AS other
+FROM contam_large_panel p;
+
+statement ok
+CREATE TEMP TABLE contam_large_matched_evidence AS
+SELECT 'LargeR' AS sample_id, p.*,
+       0::UBIGINT AS a, 0::UBIGINT AS b, 0::UBIGINT AS other
+FROM contam_large_panel p
+UNION ALL
+SELECT 'LargeH', p.*, 200::UBIGINT, 0::UBIGINT, 0::UBIGINT
+FROM contam_large_panel p;
+
+statement ok
+CREATE TEMP TABLE contam_large_pairs AS
+SELECT 'LargeR' AS receiver_id, 'LargeH' AS anchor_id;
+
+statement ok
+SET threads = 1;
+
+statement ok
+CREATE TEMP TABLE contam_large_charr_t1 AS
+SELECT * FROM duckhts_somalier_charr(
+  'contam_large_charr_evidence', 'contam_large_panel',
+  'contam_large_frequency', min_depth := 7, max_sites := 200000);
+
+statement ok
+CREATE TEMP TABLE contam_large_matched_t1 AS
+SELECT * FROM duckhts_somalier_matched_contamination(
+  'contam_large_matched_evidence', 'contam_large_panel',
+  'contam_large_frequency', 'contam_large_pairs',
+  min_depth := 7, max_sites := 200000);
+
+statement ok
+SET threads = 4;
+
+statement ok
+CREATE TEMP TABLE contam_large_charr_t4 AS
+SELECT * FROM duckhts_somalier_charr(
+  'contam_large_charr_evidence', 'contam_large_panel',
+  'contam_large_frequency', min_depth := 7, max_sites := 200000);
+
+statement ok
+CREATE TEMP TABLE contam_large_matched_t4 AS
+SELECT * FROM duckhts_somalier_matched_contamination(
+  'contam_large_matched_evidence', 'contam_large_panel',
+  'contam_large_frequency', 'contam_large_pairs',
+  min_depth := 7, max_sites := 200000);
+
+query IIIIII
+SELECT c.contamination.observed_sites, c.contamination.usable_sites,
+       c.contamination.estimate = 0,
+       m.contamination.observed_sites, m.contamination.usable_sites,
+       m.contamination.alpha IS NULL
+FROM contam_large_charr_t4 c, contam_large_matched_t4 m;
+----
+200000	200000	1	200000	0	1
+
+query II
+SELECT (SELECT count(*) FROM ((FROM contam_large_charr_t1 EXCEPT ALL
+                              FROM contam_large_charr_t4)
+         UNION ALL (FROM contam_large_charr_t4 EXCEPT ALL
+                    FROM contam_large_charr_t1))),
+       (SELECT count(*) FROM ((FROM contam_large_matched_t1 EXCEPT ALL
+                              FROM contam_large_matched_t4)
+         UNION ALL (FROM contam_large_matched_t4 EXCEPT ALL
+                    FROM contam_large_matched_t1)));
+----
+0	0
+
+# Typed output relations and their identity digests survive Parquet without
+# invoking the fit as a surrogate expected-value oracle.
+statement ok
+CREATE TEMP TABLE contam_charr_result AS
+SELECT * FROM duckhts_somalier_charr(
+  'contam_charr_evidence', 'contam_panel', 'contam_frequency',
+  min_depth := 7, hom_minor_rate := 0.1, hom_tail_alpha := 0.001,
+  max_sites := 2);
+
+statement ok
+CREATE TEMP TABLE contam_matched_result AS
+SELECT * FROM duckhts_somalier_matched_contamination(
+  'contam_evidence', 'contam_panel', 'contam_match_frequency', 'contam_pairs',
+  max_sites := 2);
+
+statement ok
+COPY contam_charr_result TO '__WORKING_DIRECTORY__/test_somalier_charr.parquet'
+  (FORMAT PARQUET);
+
+statement ok
+COPY contam_matched_result TO '__WORKING_DIRECTORY__/test_somalier_matched.parquet'
+  (FORMAT PARQUET);
+
+query II
+SELECT (SELECT count(*) FROM ((FROM contam_charr_result EXCEPT ALL
+                             FROM read_parquet('__WORKING_DIRECTORY__/test_somalier_charr.parquet'))
+        UNION ALL (FROM read_parquet('__WORKING_DIRECTORY__/test_somalier_charr.parquet')
+                   EXCEPT ALL FROM contam_charr_result))),
+       (SELECT count(*) FROM ((FROM contam_matched_result EXCEPT ALL
+                             FROM read_parquet(
+                               '__WORKING_DIRECTORY__/test_somalier_matched.parquet'))
+        UNION ALL (FROM read_parquet('__WORKING_DIRECTORY__/test_somalier_matched.parquet')
+                   EXCEPT ALL FROM contam_matched_result)));
+----
+0	0
+
+# Macro-internal relation names must not shadow ordinary caller relations.
+statement ok
+CREATE TEMP VIEW panel AS FROM contam_panel;
+
+statement ok
+CREATE TEMP VIEW frequency AS FROM contam_match_frequency;
+
+statement ok
+CREATE TEMP VIEW evidence AS
+SELECT * FROM contam_evidence WHERE sample_id <> 'One';
+
+statement ok
+CREATE TEMP VIEW pairs AS FROM contam_pairs;
+
+query IIIIRR
+SELECT length(duckhts_somalier_panel_sha256('panel')),
+       length(duckhts_somalier_frequency_sha256('frequency', 'panel')),
+       (SELECT count(*) FROM duckhts_somalier_prepare_sketches(
+          'evidence', 'panel', 7, 0.3, 0.01, max_sites := 2)),
+       (SELECT contamination.usable_sites FROM duckhts_somalier_charr(
+          'evidence', 'panel', 'frequency', min_depth := 7,
+          hom_minor_rate := 0.1, hom_tail_alpha := 0.001, max_sites := 2)
+        WHERE contamination.sample_id = 'D'),
+       (SELECT contamination.estimate FROM duckhts_somalier_charr(
+          'evidence', 'panel', 'frequency', min_depth := 7,
+          hom_minor_rate := 0.1, hom_tail_alpha := 0.001, max_sites := 2)
+        WHERE contamination.sample_id = 'D'),
+       (SELECT contamination.alpha FROM duckhts_somalier_matched_contamination(
+          'evidence', 'panel', 'frequency', 'pairs', max_sites := 2)
+        WHERE contamination.receiver_id = 'R' AND contamination.anchor_id = 'H');
+----
+64	64	7	1	0.01	0.39759034730391873

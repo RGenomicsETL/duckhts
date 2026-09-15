@@ -22,6 +22,10 @@ src/munge_udf.c|munge_udf.c
 src/reference_cache.c|reference_cache.c
 src/seq_reader.c|seq_reader.c
 src/fastq_qc.c|fastq_qc.c
+src/somalier.c|somalier.c
+src/somalier_contamination_sql.c|somalier_contamination_sql.c
+src/somalier_matched_sql.c|somalier_matched_sql.c
+src/somalier_sql.c|somalier_sql.c
 src/interval_udf.c|interval_udf.c
 src/bigwig_reader.c|bigwig_reader.c
 src/libbigwig_hfile_io.c|libbigwig_hfile_io.c

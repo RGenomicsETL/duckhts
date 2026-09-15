@@ -506,6 +506,16 @@ if(NOT DUCKDB_WASM_EXTENSION)
     target_compile_features(duckhts_region_list_test PRIVATE c_std_11)
     target_include_directories(duckhts_region_list_test PRIVATE ${HTSLIB_SRC_DIR})
     target_link_libraries(duckhts_region_list_test PRIVATE ${HTSLIB_LINK_LIBS})
+
+    # Host-neutral Somalier numerical kernel: no DuckDB or HTSlib dependency.
+    add_executable(duckhts_somalier_native_test EXCLUDE_FROM_ALL
+        test/scripts/somalier_native_test.c src/somalier.c)
+    target_compile_features(duckhts_somalier_native_test PRIVATE c_std_11)
+    target_compile_options(duckhts_somalier_native_test PRIVATE -UNDEBUG)
+    target_include_directories(duckhts_somalier_native_test PRIVATE src/include)
+    if(NOT WIN32)
+        target_link_libraries(duckhts_somalier_native_test PRIVATE m)
+    endif()
 endif()
 
 target_link_libraries(${EXTENSION_NAME} PRIVATE

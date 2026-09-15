@@ -3,9 +3,42 @@
 # duckhts 1.5.2
 
 Release notes in preparation. DuckHTS 1.5.2 and Rduckhts 1.5.2-0.1.5 share
-the same extension release. The features below are implemented; publication
-still requires the separate relatedness and contamination work in
-https://github.com/RGenomicsETL/duckhts/issues/218.
+the same extension release; publication remains pending.
+
+## Sample identity and contamination
+
+- Add panel-verified, Parquet-persistable count evidence sketches and fused
+  Somalier-derived relatedness/concordance statistics. Canonical A/B allele
+  order, site geometry, classification settings and sample identity are checked;
+  requested pairs borrow reusable packed masks without per-pair allocation.
+- Add `duckhts_somalier_verify_relatedness()` to recompute typed pair results
+  against their sealed sketches and reject altered identities, denominators,
+  metrics or status-dependent NULL values.
+- Add `duckhts_somalier_verify_sketches()` to rebuild persisted sketches from
+  retained count evidence. Raw-count receipts distinguish unavailable from
+  measured zero and detect count changes that preserve the genotype mask;
+  invalid retained classification settings return false instead of reaching
+  the rebuild aggregate as settings.
+- Add distinct per-sample CHARR and directional matched-anchor contamination
+  methods over measured A/B/other counts and panel-aligned population frequency.
+  Both retain usable-site denominators, filter/search settings and numerical
+  status; no usable evidence is not reported as zero contamination. CHARR uses
+  an exact fixed-size scaled accumulator so parallel reduction order does not
+  change its estimate or persisted result.
+- Bound retained Somalier sample and assembly identities to 1,024 bytes before
+  aggregate-state allocation, including parallel sketch and CHARR reductions.
+- Preserve strict binomial-tail cutoffs with exact small binary-rational cases
+  and an outward-rounded final comparison; persist the normalized
+  classification settings used to seal each sketch.
+- Preserve the pinned Somalier v0.3.4 numerical counterexamples: stable
+  high-depth CHARR tail evaluation and a full-grid matched search can differ
+  from upstream's underflow-prone threshold and fixed search sequence. The
+  supported depth limit and retained witness values are stated in the catalog.
+- The matched method prepares one site profile per selected sample and one
+  frequency profile, then evaluates requested ordered pairs over borrowed
+  arrays. Panel/evidence cardinality limits are checked before profile lists
+  are built. The supported first scope assumes diploid, biallelic autosomal
+  SNPs and is not a Somalier CLI or `.somalier` storage replacement.
 
 ## Genotype and variant readers
 

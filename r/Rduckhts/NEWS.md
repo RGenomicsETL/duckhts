@@ -3,6 +3,35 @@
 Release notes in preparation. This package bundles DuckHTS 1.5.2; the entries
 below describe implemented package behavior, not a completed release submission.
 
+## Sample identity and contamination
+
+- Add `rduckhts_somalier_sketches()` and
+  `rduckhts_somalier_relatedness()` for panel-checked count evidence,
+  reusable packed sketches and selected-pair statistics. Tables or ordinary
+  Parquet files can supply inputs and retain typed results; unavailable count
+  tuples remain distinct from measured zero counts.
+- Bundled SQL `duckhts_somalier_verify_relatedness()` checks persisted pair
+  results against their sealed sketches, including identity, denominators,
+  metrics and nullable numerical status.
+- Bundled SQL `duckhts_somalier_verify_sketches()` rebuilds sketches from
+  retained evidence and detects raw-count or availability changes even when
+  the classified genotype is unchanged. Invalid retained classification
+  settings return false instead of becoming rebuild-aggregate settings.
+- Add `rduckhts_somalier_charr()` and
+  `rduckhts_somalier_matched_contamination()` over measured count channels and
+  aligned population-B allele frequencies. They retain numerical status and
+  usable-site denominators, and reject changed panel/evidence identity. The
+  matched method preserves receiver/anchor direction and evaluates only
+  requested ordered pairs without a pair-sized native workspace. CHARR results
+  are stable across parallel aggregate reduction order.
+- Bound sample and assembly identities retained by bundled sketch and CHARR
+  aggregate states to 1,024 bytes.
+- Preserve strict binomial-tail cutoffs with certified final comparisons and
+  round-trip sketches constructed with IEEE negative-zero balance settings.
+- The bundled estimators use stable high-depth CHARR tail evaluation and a
+  full-grid matched search. Their documented numerical counterexamples can
+  differ from Somalier v0.3.4 output; they are not bitwise CLI replicas.
+
 ## Genotypes and variant readers
 
 - Add `rduckhts_geno()` for typed arbitrary-ploidy GT/PS calls and
