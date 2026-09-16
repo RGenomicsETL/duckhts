@@ -506,10 +506,10 @@ Show generated function catalog
 <td>Project independent literal alleles and existing DuckVEP annotations into typed, unshifted VEP-116 transcript display fields.</td>
 </tr>
 <tr class="odd">
-<td><a href="inst/function_catalog/reference.html#duckvep_repeat_sequence"><code>duckvep_repeat_sequence</code></a></td>
+<td><a href="inst/function_catalog/reference.html#duckvep_repeat_alleles"><code>duckvep_repeat_alleles</code></a></td>
 <td>scalar_macro</td>
 <td></td>
-<td>Expand a caller-asserted exact ordered repeat description into a bounded literal sequence.</td>
+<td>Prepare bounded literal reference and alternate alleles from exact ordered repeat descriptions.</td>
 </tr>
 <tr class="even">
 <td><a href="inst/function_catalog/reference.html#duckvep_breakend_geometry"><code>duckvep_breakend_geometry</code></a></td>
@@ -941,10 +941,10 @@ Show generated function catalog
 </h3>
 <table class="table">
 <colgroup>
-<col width="43%">
-<col width="5%">
+<col width="41%">
+<col width="4%">
 <col width="15%">
-<col width="35%">
+<col width="38%">
 </colgroup>
 <thead><tr class="header">
 <th>Function</th>
@@ -954,54 +954,72 @@ Show generated function catalog
 </tr></thead>
 <tbody>
 <tr class="odd">
+<td><a href="inst/function_catalog/reference.html#duckhts_somalier_import_sites"><code>duckhts_somalier_import_sites</code></a></td>
+<td>table_macro</td>
+<td><code>rduckhts_somalier_import_sites</code></td>
+<td>Import an already selected Somalier sites VCF/BCF as one canonical panel and population-frequency relation.</td>
+</tr>
+<tr class="even">
+<td><a href="inst/function_catalog/reference.html#duckhts_somalier_vcf_counts"><code>duckhts_somalier_vcf_counts</code></a></td>
+<td>table_macro</td>
+<td><code>rduckhts_somalier_vcf_counts</code></td>
+<td>Extract a complete panel-aligned A/B/other count relation from VCF/BCF FORMAT/AD.</td>
+</tr>
+<tr class="odd">
+<td><a href="inst/function_catalog/reference.html#duckhts_somalier_bam_counts"><code>duckhts_somalier_bam_counts</code></a></td>
+<td>table</td>
+<td><code>rduckhts_somalier_bam_counts</code></td>
+<td>Extract complete panel-aligned A/B/other base counts from one indexed BAM or CRAM source.</td>
+</tr>
+<tr class="even">
 <td><a href="inst/function_catalog/reference.html#duckhts_somalier_panel_sha256"><code>duckhts_somalier_panel_sha256</code></a></td>
 <td>scalar_macro</td>
 <td></td>
 <td>Derive a stable SHA-256 identity for an ordered biallelic sample-fingerprinting panel.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><a href="inst/function_catalog/reference.html#duckhts_somalier_frequency_sha256"><code>duckhts_somalier_frequency_sha256</code></a></td>
 <td>scalar_macro</td>
 <td></td>
 <td>Derive a stable identity for panel-aligned population-B allele frequencies.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><a href="inst/function_catalog/reference.html#duckhts_somalier_classify"><code>duckhts_somalier_classify</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Classify one measured A/B/other count tuple for Somalier-derived autosomal relatedness.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><a href="inst/function_catalog/reference.html#duckhts_somalier_prepare_sketches"><code>duckhts_somalier_prepare_sketches</code></a></td>
 <td>table_macro</td>
 <td><code>rduckhts_somalier_sketches</code></td>
 <td>Build one panel-verified packed relatedness sketch per sample from typed count evidence.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><a href="inst/function_catalog/reference.html#duckhts_somalier_verify_sketches"><code>duckhts_somalier_verify_sketches</code></a></td>
 <td>scalar_macro</td>
 <td></td>
 <td>Verify persisted relatedness sketches against their retained raw count evidence.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><a href="inst/function_catalog/reference.html#duckhts_somalier_relatedness"><code>duckhts_somalier_relatedness</code></a></td>
 <td>scalar</td>
 <td><code>rduckhts_somalier_relatedness</code></td>
 <td>Compute fused Somalier-derived relatedness and concordance statistics for two prepared sketches.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><a href="inst/function_catalog/reference.html#duckhts_somalier_verify_relatedness"><code>duckhts_somalier_verify_relatedness</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Verify a typed relatedness result against its two sealed sketches.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><a href="inst/function_catalog/reference.html#duckhts_somalier_charr"><code>duckhts_somalier_charr</code></a></td>
 <td>table_macro</td>
 <td><code>rduckhts_somalier_charr</code></td>
 <td>Estimate per-sample contamination with a bounded Somalier-derived CHARR reduction.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><a href="inst/function_catalog/reference.html#duckhts_somalier_matched_contamination"><code>duckhts_somalier_matched_contamination</code></a></td>
 <td>table_macro</td>
 <td><code>rduckhts_somalier_matched_contamination</code></td>

@@ -137,9 +137,9 @@ release submission.
   columns are accession-free bodies; model metadata supplies serialized
   identifiers.
 - Expose bundled `duckvep_transcript_projection()`,
-  `duckvep_breakend_geometry()` and `duckvep_repeat_sequence()` through
+  `duckvep_breakend_geometry()` and `duckvep_repeat_alleles()` through
   SQL/DBI. These provide typed transcript display, raw BND preparation
-  and bounded exact-repeat expansion. Correct the paired-BND
+  and bounded paired exact-repeat preparation. Correct the paired-BND
   truncation/intergenic union. BND replacement text is not inserted-only
   sequence; repeat summaries do not establish an exact allele.
   Transcript display shares decoded reference sequences and extracts
