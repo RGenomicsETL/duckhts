@@ -70,7 +70,8 @@ PS cardinality excludes vector-end padding retained after sample selection.</p>
 <span>  decode_error_policy <span class="op">=</span> <span class="st">"null"</span>,</span>
 <span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  format_fields <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  raw_gt <span class="op">=</span> <span class="cn">FALSE</span></span>
+<span>  raw_gt <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  include_filter <span class="op">=</span> <span class="cn">FALSE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -153,6 +154,12 @@ member. The default `FALSE` keeps the typed-call schema unchanged. `TRUE`
 preserves leading phase markers, mixed separators and allele spelling;
 an absent GT is `NULL`, while a literal missing `.` remains text. BCF input
 errors because its encoded genotypes do not retain the original text.</p></dd>
+
+
+<dt id="arg-include-filter">include_filter<a class="anchor" aria-label="anchor" href="#arg-include-filter"></a></dt>
+<dd><p>Add the physical record's `FILTER` as a `VARCHAR[]`
+column. `PASS` is `c("PASS")`; an unapplied `.` filter is `NULL`; named
+failing filters retain header order. The default keeps the existing schema.</p></dd>
 
 </dl></div>
     <div class="section level2">

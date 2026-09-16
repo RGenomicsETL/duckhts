@@ -25,7 +25,8 @@ rduckhts_geno(
   decode_error_policy = "null",
   overwrite = FALSE,
   format_fields = NULL,
-  raw_gt = FALSE
+  raw_gt = FALSE,
+  include_filter = FALSE
 )
 ```
 
@@ -111,6 +112,13 @@ rduckhts_geno(
   spelling; an absent GT is \`NULL\`, while a literal missing \`.\`
   remains text. BCF input errors because its encoded genotypes do not
   retain the original text.
+
+- include_filter:
+
+  Add the physical record's \`FILTER\` as a \`VARCHAR\[\]\` column.
+  \`PASS\` is \`c("PASS")\`; an unapplied \`.\` filter is \`NULL\`;
+  named failing filters retain header order. The default keeps the
+  existing schema.
 
 ## Value
 
