@@ -224,6 +224,101 @@ dbGetQuery(con, "SELECT COUNT(*) AS n FROM reads")
 #> 1 10
 ```
 
+## Sample relatedness and contamination
+
+The Somalier-derived workflow consumes ordinary typed relations. The
+panel defines an ordered A/B allele orientation, and count extraction
+preserves one row per sample and panel site. At the second site below,
+the bundled VCF is multiallelic: the allele outside the panel’s A/B pair
+is counted as `other`.
+
+This two-site fixture keeps the example runnable and shows the complete
+API; its estimates are not meaningful population or sample QC results.
+Real analyses need a validated genome-wide panel and its matching
+population frequencies.
+
+``` r
+sites_vcf <- system.file(
+  "extdata", "mapping_number_families.vcf", package = "Rduckhts"
+)
+
+invisible(dbExecute(con, paste(
+  "CREATE TEMP TABLE identity_panel AS SELECT * FROM (VALUES",
+  "('GRCh38', 0::UBIGINT, 'chr1', 100::UBIGINT, 'A', 'C', 0.25::DOUBLE),",
+  "('GRCh38', 1::UBIGINT, 'chr1', 200::UBIGINT, 'A', 'G', 0.80::DOUBLE)",
+  ") p(assembly, site_index, region, position, allele_a, allele_b,",
+  "population_b_af)"
+)))
+
+rduckhts_somalier_vcf_counts(
+  con, sites_vcf, panel_table = "identity_panel", samples = "S1,S2",
+  table_name = "identity_counts"
+)
+dbGetQuery(con, paste(
+  "SELECT sample_id, site_index, a, b, other, status",
+  "FROM identity_counts ORDER BY sample_id, site_index"
+))
+#>   sample_id site_index a  b other   status
+#> 1        S1          0 9  3     0 measured
+#> 2        S1          1 5  9     4 measured
+#> 3        S2          0 0 20     0 measured
+#> 4        S2          1 0 10     5 measured
+```
+
+Build one reusable packed sketch per sample, then compare the sketches.
+A production result should retain the panel, counts, and sketches so the
+reported denominators and identities can be verified later.
+
+``` r
+rduckhts_somalier_sketches(
+  con, evidence_table = "identity_counts", panel_table = "identity_panel",
+  table_name = "identity_sketches", min_depth = 7,
+  min_het_balance = 0.20, hom_balance_cutoff = 0.05, max_sites = 2
+)
+
+relatedness <- rduckhts_somalier_relatedness(
+  con, sketches_table = "identity_sketches", max_sites = 2
+)
+relatedness[, c(
+  "sample_a", "sample_b", "jointly_called", "ibs0", "ibs2", "relatedness"
+)]
+#>   sample_a sample_b jointly_called ibs0 ibs2 relatedness
+#> 1       S1       S2              1    0    0           0
+```
+
+CHARR uses population-B frequencies from the panel. Matched
+contamination is directional, so the requested relation names the
+receiver and anchor explicitly.
+
+``` r
+charr <- rduckhts_somalier_charr(
+  con, evidence_table = "identity_counts", panel_table = "identity_panel",
+  frequency_table = "identity_panel", min_depth = 7,
+  hom_minor_rate = 0.10, hom_tail_alpha = 0.001, max_sites = 2
+)
+charr[order(charr$sample_id),
+      c("sample_id", "status", "usable_sites", "estimate")]
+#>   sample_id status usable_sites estimate
+#> 1        S1     ok            1        1
+#> 2        S2     ok            1        0
+
+invisible(dbExecute(con, paste(
+  "CREATE TEMP TABLE contamination_pairs AS",
+  "SELECT 'S1'::VARCHAR receiver_id, 'S2'::VARCHAR anchor_id"
+)))
+matched <- rduckhts_somalier_matched_contamination(
+  con, evidence_table = "identity_counts", panel_table = "identity_panel",
+  frequency_table = "identity_panel", pairs_table = "contamination_pairs",
+  min_depth = 7, hom_minor_rate = 0.10, hom_tail_alpha = 0.001,
+  max_sites = 2
+)
+matched[, c(
+  "receiver_id", "anchor_id", "status", "usable_sites", "alpha"
+)]
+#>   receiver_id anchor_id status usable_sites     alpha
+#> 1          S1        S2     ok            1 0.7541658
+```
+
 ### Link a downstream package to the bundled htslib
 
 [`rduckhts_htslib_config()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_htslib_config.md)

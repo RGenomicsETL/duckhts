@@ -6,6 +6,9 @@ This package bundles DuckHTS 1.5.2.
 
 ### Sample identity and contamination
 
+- Add a runnable README workflow from bundled VCF `FORMAT/AD` extraction
+  through packed sketches, relatedness, CHARR, and directional matched
+  contamination.
 - Add
   [`rduckhts_somalier_import_sites()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_somalier_import_sites.md)
   for converting an already selected sites VCF/BCF into the typed panel
