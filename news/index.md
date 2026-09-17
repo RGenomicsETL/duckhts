@@ -2,6 +2,8 @@
 
 ## Rduckhts 1.5.2-0.1.5
 
+CRAN release: 2026-09-16
+
 This package bundles DuckHTS 1.5.2.
 
 ### Sample identity and contamination
