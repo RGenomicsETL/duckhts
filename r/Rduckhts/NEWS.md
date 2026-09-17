@@ -55,6 +55,16 @@ This package bundles DuckHTS 1.5.2.
   full-grid matched search. Their documented numerical counterexamples can
   differ from Somalier v0.3.4 output; they are not bitwise CLI replicas.
 
+## GenBank annotations
+
+- Add `rduckhts_genbank()` for GenBank flat-file features in `rduckhts_gff()`'s
+  column shape, with an optional parsed qualifier `MAP`. `join()`/`order()`
+  locations flatten to one row per segment, `complement(...)` sets strand `-`,
+  and the record-level `source` feature is dropped.
+- Add `rduckhts_genbank_to_fasta()` to write each record's ORIGIN sequence as
+  FASTA under the same name reported as `seqname`. Bgzipped records are read in
+  place through htslib's hFILE layer.
+
 ## Genotypes and variant readers
 
 - Add `rduckhts_geno()` for typed arbitrary-ploidy GT/PS calls and

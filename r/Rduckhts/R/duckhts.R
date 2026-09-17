@@ -1688,6 +1688,138 @@ rduckhts_gtf <- function(
   invisible(TRUE)
 }
 
+#' Create GenBank Feature Table
+#'
+#' Creates a DuckDB table from a GenBank flat file using the DuckHTS
+#' extension. Features are emitted in \code{read_gff}'s column shape, so a
+#' GenBank record substitutes for a GFF without a schema change. Locations
+#' built with \code{join()} or \code{order()} flatten to one row per segment,
+#' and \code{complement(...)} sets strand \code{"-"}.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param table_name Name for the created table, or \code{NULL} to create the
+#'   \code{genbank_data} view
+#' @param path Path to the GenBank flat file, optionally bgzipped
+#' @param attributes_map Logical. If \code{TRUE}, add a parsed
+#'   \code{MAP(VARCHAR, VARCHAR)} column alongside the raw attribute string
+#' @param overwrite Logical. If TRUE, overwrites an existing table
+#'
+#' @return Invisible TRUE on success
+#'
+#' @export
+rduckhts_genbank <- function(
+  con,
+  table_name = NULL,
+  path,
+  attributes_map = FALSE,
+  overwrite = FALSE
+) {
+  if (
+    !is.character(path) || length(path) != 1L || is.na(path) || !nzchar(path)
+  ) {
+    stop("path must be one non-empty character string", call. = FALSE)
+  }
+  if (
+    !is.logical(attributes_map) ||
+      length(attributes_map) != 1L ||
+      is.na(attributes_map)
+  ) {
+    stop("attributes_map must be TRUE or FALSE", call. = FALSE)
+  }
+
+  if (!is.null(table_name)) {
+    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
+      stop(
+        "Table '",
+        table_name,
+        "' already exists. Use overwrite = TRUE to replace it."
+      )
+    }
+    if (DBI::dbExistsTable(con, table_name)) {
+      DBI::dbRemoveTable(con, table_name)
+    }
+  }
+
+  params <- list()
+  if (attributes_map) {
+    params$attributes_map <- "true"
+  }
+  param_str <- build_param_str(params)
+
+  if (!is.null(table_name)) {
+    create_query <- sprintf(
+      "CREATE TABLE %s AS SELECT * FROM read_genbank(%s%s)",
+      sql_quote_identifier(con, table_name),
+      sql_quote_string(con, path),
+      param_str
+    )
+  } else {
+    create_query <- sprintf(
+      "CREATE VIEW genbank_data AS SELECT * FROM read_genbank(%s%s)",
+      sql_quote_string(con, path),
+      param_str
+    )
+  }
+
+  DBI::dbExecute(con, create_query)
+  invisible(TRUE)
+}
+
+#' Write GenBank Sequence as FASTA
+#'
+#' Writes the ORIGIN sequence of each record in a GenBank flat file to a FASTA
+#' file using the DuckHTS extension. Records are written under the same name
+#' \code{rduckhts_genbank} reports as \code{seqname}, so feature coordinates
+#' land on the contig of that name.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param path Path to the GenBank flat file, optionally bgzipped
+#' @param output_path Optional explicit output path for the FASTA file
+#' @param line_width Sequence characters per output line
+#' @param overwrite Overwrite an existing output file
+#'
+#' @return A data frame with columns \code{success}, \code{output_path} and
+#'   \code{records_written}
+#'
+#' @export
+rduckhts_genbank_to_fasta <- function(
+  con,
+  path,
+  output_path = NULL,
+  line_width = 70,
+  overwrite = FALSE
+) {
+  if (
+    !is.character(path) || length(path) != 1L || is.na(path) || !nzchar(path)
+  ) {
+    stop("path must be one non-empty character string", call. = FALSE)
+  }
+  if (
+    !is.numeric(line_width) ||
+      length(line_width) != 1L ||
+      is.na(line_width) ||
+      line_width < 1 ||
+      line_width != floor(line_width)
+  ) {
+    stop("line_width must be a positive whole number", call. = FALSE)
+  }
+
+  params <- list(line_width = as.character(as.integer(line_width)))
+  if (!is.null(output_path)) {
+    params$output_path <- sql_quote_string(con, output_path)
+  }
+  if (overwrite) {
+    params$overwrite <- "true"
+  }
+  param_str <- build_param_str(params)
+  query <- sprintf(
+    "SELECT * FROM genbank_to_fasta(%s%s)",
+    sql_quote_string(con, path),
+    param_str
+  )
+  DBI::dbGetQuery(con, query)
+}
+
 #' Create Tabix-Indexed File Table
 #'
 #' Creates a DuckDB table from any tabix-indexed file using the DuckHTS extension.

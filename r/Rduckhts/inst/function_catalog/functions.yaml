@@ -33,7 +33,7 @@
         "LIMIT 5;"
       ],
       "extended_intro": [
-        "DuckHTS provides DuckDB table functions for common high-throughput sequencing (HTS) formats using htslib. Query VCF, BCF, BAM, CRAM, FASTA, FASTQ, GTF, GFF, and tabix-indexed files directly in SQL.",
+        "DuckHTS provides DuckDB table functions for common high-throughput sequencing (HTS) formats using htslib. Query VCF, BCF, BAM, CRAM, FASTA, FASTQ, GTF, GFF, GenBank, and tabix-indexed files directly in SQL.",
         "The extension also includes sequence utility UDFs, SAM flag predicate helpers, and HTS metadata helpers."
       ],
       "feature_notes": [
@@ -1080,6 +1080,37 @@
       },
       "examples": [
         "SELECT seqname, feature, start, \"end\" FROM read_gtf('annotations.gtf.gz') LIMIT 5;"
+      ]
+    },
+    {
+      "name": "read_genbank",
+      "kind": "table",
+      "category": "Readers",
+      "signature": "read_genbank(path, attributes_map := FALSE)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_genbank",
+      "description": "Read GenBank flat-file features in read_gff's column shape, with optional parsed qualifier MAP.",
+      "details": {
+        "Mapping": "seqname is VERSION, else ACCESSION, else the LOCUS name; source is 'GenBank'. join()/order() flatten to one row per segment and complement(...) sets strand '-'. /codon_start 1/2/3 becomes GFF frame 0/1/2 on CDS. The record-level source feature is dropped, and /translation is omitted as redundant with ORIGIN.",
+        "Attributes": "Synthesized GFF3 keys ID, Name and Parent accompany the original qualifiers; Parent links a feature to the gene sharing its /locus_tag. attributes_map := TRUE adds the parsed MAP alongside the raw attribute string."
+      },
+      "examples": [
+        "SELECT seqname, feature, start, \"end\" FROM read_genbank('phix174.gb') LIMIT 5;"
+      ]
+    },
+    {
+      "name": "genbank_to_fasta",
+      "kind": "table",
+      "category": "Converters",
+      "signature": "genbank_to_fasta(path, output_path := NULL, line_width := 70, overwrite := FALSE)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_genbank_to_fasta",
+      "description": "Write the ORIGIN sequence of each GenBank record as FASTA and return success, output_path and records_written.",
+      "details": {
+        "Naming": "Records are written under the same name read_genbank reports as seqname, so feature coordinates land on the contig of that name."
+      },
+      "examples": [
+        "SELECT * FROM genbank_to_fasta('phix174.gb', output_path := 'phix174.fa');"
       ]
     },
     {

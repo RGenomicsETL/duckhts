@@ -1,0 +1,85 @@
+# name: test/sql/genbank_reader.test
+# description: GenBank flat-file features and FASTA materialization
+# group: [duckhts]
+
+require duckhts
+
+# Fixtures are the NCBI RefSeq records for two canonical phage genomes:
+# phiX174 (NC_001422.1, 5386 bp, circular) and lambda (NC_001416.1, 48502 bp,
+# linear). Between them they cover join() spanning the origin and complement().
+
+query TI
+SELECT feature, count(*)
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/phix174.gb')
+GROUP BY feature
+ORDER BY feature;
+----
+CDS	14
+gene	14
+mRNA	2
+misc_feature	2
+rep_origin	1
+variation	4
+
+# The record-level `source` feature describes the whole record rather than an
+# interval within it, so it is dropped instead of emitted as a full-length row.
+query I
+SELECT count(*)
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/phix174.gb')
+WHERE feature = 'source';
+----
+0
+
+# join(3981..5386,1..136) wraps the origin of the circular genome. Each segment
+# becomes its own row, and the synthesized ID ties the segments back together.
+query TII
+SELECT feature, start, "end"
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/phix174.gb')
+WHERE regexp_extract(attributes, 'ID=([^;]*)', 1) = 'CDS-1'
+ORDER BY start;
+----
+CDS	1	136
+CDS	3981	5386
+
+# Qualifiers are available as a MAP with attributes_map := TRUE.
+query T
+SELECT attributes_map['locus_tag']
+FROM read_genbank(
+  '__WORKING_DIRECTORY__/test/data/phix174.gb',
+  attributes_map := TRUE
+)
+WHERE feature = 'CDS' AND start = 1001;
+----
+phiX174p06
+
+# complement(...) maps to strand '-'; lambda carries both orientations.
+query TI
+SELECT strand, count(*)
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/lambda.gb')
+GROUP BY strand
+ORDER BY strand;
+----
++	197
+-	87
+
+# genbank_to_fasta writes the ORIGIN sequence under the same name read_genbank
+# reports as seqname, so feature coordinates land on the contig of that name.
+statement ok
+SELECT *
+FROM genbank_to_fasta(
+  '__WORKING_DIRECTORY__/test/data/lambda.gb',
+  output_path := '__WORKING_DIRECTORY__/test/tmp_lambda.fa',
+  overwrite := TRUE
+);
+
+query TI
+SELECT NAME, length(SEQUENCE)
+FROM read_fasta('__WORKING_DIRECTORY__/test/tmp_lambda.fa');
+----
+NC_001416.1	48502
+
+query T
+SELECT DISTINCT seqname
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/lambda.gb');
+----
+NC_001416.1
