@@ -1,0 +1,148 @@
+# name: test/sql/genbank_reader.test
+# description: GenBank flat-file features and FASTA materialization
+# group: [duckhts]
+
+require duckhts
+
+# Fixtures are the NCBI RefSeq records for two canonical phage genomes:
+# phiX174 (NC_001422.1, 5386 bp, circular) and lambda (NC_001416.1, 48502 bp,
+# linear). Between them they cover join() spanning the origin and complement().
+
+query TI
+SELECT feature, count(*)
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/phix174.gb')
+GROUP BY feature
+ORDER BY feature;
+----
+CDS	14
+gene	14
+mRNA	2
+misc_feature	2
+rep_origin	1
+variation	4
+
+# The record-level `source` feature describes the whole record rather than an
+# interval within it, so it is dropped instead of emitted as a full-length row.
+query I
+SELECT count(*)
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/phix174.gb')
+WHERE feature = 'source';
+----
+0
+
+# join(3981..5386,1..136) wraps the origin of the circular genome. Each segment
+# becomes its own row, and the synthesized ID ties the segments back together.
+query TII
+SELECT feature, start, "end"
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/phix174.gb')
+WHERE regexp_extract(attributes, 'ID=([^;]*)', 1) = 'CDS-1'
+ORDER BY start;
+----
+CDS	1	136
+CDS	3981	5386
+
+# Qualifiers are available as a MAP with attributes_map := TRUE.
+query T
+SELECT attributes_map['locus_tag']
+FROM read_genbank(
+  '__WORKING_DIRECTORY__/test/data/phix174.gb',
+  attributes_map := TRUE
+)
+WHERE feature = 'CDS' AND start = 1001;
+----
+phiX174p06
+
+# complement(...) maps to strand '-'; lambda carries both orientations.
+query TI
+SELECT strand, count(*)
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/lambda.gb')
+GROUP BY strand
+ORDER BY strand;
+----
++	197
+-	87
+
+# genbank_to_fasta writes the ORIGIN sequence under the same name read_genbank
+# reports as seqname, so feature coordinates land on the contig of that name.
+statement ok
+SELECT *
+FROM genbank_to_fasta(
+  '__WORKING_DIRECTORY__/test/data/lambda.gb',
+  output_path := '__WORKING_DIRECTORY__/test/tmp_lambda.fa',
+  overwrite := TRUE
+);
+
+query TI
+SELECT NAME, length(SEQUENCE)
+FROM read_fasta('__WORKING_DIRECTORY__/test/tmp_lambda.fa');
+----
+NC_001416.1	48502
+
+query T
+SELECT DISTINCT seqname
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/lambda.gb');
+----
+NC_001416.1
+
+# A SQL NULL path is a VARCHAR-typed value whose string is NULL. This used to reach
+# strdup(NULL) and take the process down rather than raising a bind error.
+statement error
+SELECT count(*) FROM read_genbank(NULL::VARCHAR);
+----
+read_genbank requires a file path
+
+# Converting a record ONTO its own input truncates the file the parser is about to
+# read, so the source is destroyed and nothing is produced. overwrite is for replacing
+# a stale output, never for consuming the input. The paths here differ as strings and
+# name the same file, which is why the check compares the files themselves.
+statement ok
+SELECT * FROM genbank_to_fasta(
+  '__WORKING_DIRECTORY__/test/data/phix174.gb',
+  output_path := '__WORKING_DIRECTORY__/test/tmp_inplace.gb',
+  overwrite := TRUE
+);
+
+statement error
+SELECT * FROM genbank_to_fasta(
+  '__WORKING_DIRECTORY__/test/tmp_inplace.gb',
+  output_path := '__WORKING_DIRECTORY__/test/./tmp_inplace.gb',
+  overwrite := TRUE
+);
+----
+is the input file
+
+# MULTI-RECORD. A concatenated GenBank is two records in one file, and the header and
+# sequence state must reset at each `//`. phix174_x2.gb is phix174 twice: 37 features
+# each, and two FASTA records out.
+query I
+SELECT count(*) FROM read_genbank('__WORKING_DIRECTORY__/test/data/phix174_x2.gb');
+----
+74
+
+statement ok
+SELECT * FROM genbank_to_fasta(
+  '__WORKING_DIRECTORY__/test/data/phix174_x2.gb',
+  output_path := '__WORKING_DIRECTORY__/test/tmp_x2.fa',
+  overwrite := TRUE
+);
+
+query TI
+SELECT NAME, length(SEQUENCE)::INTEGER FROM read_fasta('__WORKING_DIRECTORY__/test/tmp_x2.fa');
+----
+NC_001422.1	5386
+NC_001422.1	5386
+
+# BGZIPPED INPUT. I/O goes through htslib's hFILE, so a bgzipped record reads in place
+# with no separate decompression step. Compressed here rather than shipping a second
+# binary fixture, so the two paths are provably the same bytes.
+statement ok
+SELECT * FROM bgzip(
+  '__WORKING_DIRECTORY__/test/data/phix174.gb',
+  output_path := '__WORKING_DIRECTORY__/test/tmp_phix.gb.gz',
+  keep := TRUE, overwrite := TRUE
+);
+
+query I
+SELECT count(*) FROM read_genbank('__WORKING_DIRECTORY__/test/tmp_phix.gb.gz');
+----
+37

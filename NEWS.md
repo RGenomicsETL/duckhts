@@ -69,6 +69,19 @@ DuckHTS 1.5.2 and Rduckhts 1.5.2-0.1.5 share the same extension release.
   are built. The supported first scope assumes diploid, biallelic autosomal
   SNPs and is not a Somalier CLI or `.somalier` storage replacement.
 
+## GenBank annotations
+
+- Add `read_genbank()` for GenBank flat-file features in `read_gff()`'s column
+  shape, so a GenBank record substitutes for a GFF without a schema change.
+  `join()`/`order()` locations flatten to one row per segment, `complement(...)`
+  sets strand `-`, and `/codon_start` becomes the GFF frame on CDS. The
+  record-level `source` feature is dropped, and `/translation` is omitted as
+  redundant with ORIGIN.
+- Add `genbank_to_fasta()` to write each record's ORIGIN sequence as FASTA under
+  the same name `read_genbank()` reports as `seqname`, so feature coordinates
+  land on the contig of that name. Input is read through htslib's hFILE layer,
+  so bgzipped records need no separate decompression step.
+
 ## Genotype and variant readers
 
 - Add `read_geno()` for record-major, arbitrary-ploidy GT/PS calls and

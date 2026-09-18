@@ -2048,6 +2048,62 @@ Comma-separated indexed regions emit each row once across overlaps. scan_mode='s
 SELECT seqname, feature, start, "end" FROM read_gtf('annotations.gtf.gz') LIMIT 5;
 ```
 
+## read_genbank
+
+Read GenBank flat-file features in read_gff's column shape, with optional parsed qualifier MAP.
+
+Signature:
+
+```sql
+read_genbank(path, attributes_map := FALSE)
+```
+
+Returns:
+
+```
+table
+```
+
+### Mapping
+
+seqname is VERSION, else ACCESSION, else the LOCUS name; source is 'GenBank'. join()/order() flatten to one row per segment and complement(...) sets strand '-'. /codon_start 1/2/3 becomes GFF frame 0/1/2 on CDS. The record-level source feature is dropped, and /translation is omitted as redundant with ORIGIN.
+
+### Attributes
+
+Synthesized GFF3 keys ID, Name and Parent accompany the original qualifiers; Parent links a feature to the gene sharing its /locus_tag. attributes_map := TRUE adds the parsed MAP alongside the raw attribute string.
+
+### Examples
+
+```sql
+SELECT seqname, feature, start, "end" FROM read_genbank('phix174.gb') LIMIT 5;
+```
+
+## genbank_to_fasta
+
+Write the ORIGIN sequence of each GenBank record as FASTA and return success, output_path and records_written.
+
+Signature:
+
+```sql
+genbank_to_fasta(path, output_path := NULL, line_width := 70, overwrite := FALSE)
+```
+
+Returns:
+
+```
+table
+```
+
+### Naming
+
+Records are written under the same name read_genbank reports as seqname, so feature coordinates land on the contig of that name.
+
+### Examples
+
+```sql
+SELECT * FROM genbank_to_fasta('phix174.gb', output_path := 'phix174.fa');
+```
+
 ## read_tabix
 
 Read tabix-indexed text with optional header handling, inferred types and region selection.
