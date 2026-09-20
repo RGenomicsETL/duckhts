@@ -54,7 +54,7 @@
 <div class="section level2">
 <h2 id="how-it-works">How it works<a class="anchor" aria-label="anchor" href="#how-it-works"></a>
 </h2>
-<p>Following <a href="https://github.com/RGenomicsETL/RBCFTools" class="external-link">RBCFTools</a>, tables are created and returned instead of data frames. <code>VCF</code>/<code>BCF</code>, <code>SAM</code>/<code>BAM</code>/<code>CRAM</code>, <code>FASTA</code>, <code>FASTQ</code>, BigWig, <code>GFF</code>, <code>GTF</code>, and <code>tabix</code> formats can be queried. We support region queries for indexed files, and we target Linux, macOS, and RTools. <a href="https://github.com/samtools/htslib" class="external-link"><code>htslib</code></a> 1.24 is bundled so build dependencies stay minimal. The package build adapts the generic extension infrastructure to a GNU make-based R package workflow, while the standalone community extension uses the submitted <a href="https://github.com/RGenomicsETL/duckhts" class="external-link"><code>duckhts</code></a> build path.</p>
+<p>Following <a href="https://github.com/RGenomicsETL/RBCFTools" class="external-link">RBCFTools</a>, tables are created and returned instead of data frames. <code>VCF</code>/<code>BCF</code>, <code>SAM</code>/<code>BAM</code>/<code>CRAM</code>, <code>FASTA</code>, <code>FASTQ</code>, BigWig, <code>GFF</code>, <code>GTF</code>, GenBank, and <code>tabix</code> formats can be queried. We support region queries for indexed files, and we target Linux, macOS, and RTools. <a href="https://github.com/samtools/htslib" class="external-link"><code>htslib</code></a> 1.24 is bundled so build dependencies stay minimal. The package build adapts the generic extension infrastructure to a GNU make-based R package workflow, while the standalone community extension uses the submitted <a href="https://github.com/RGenomicsETL/duckhts" class="external-link"><code>duckhts</code></a> build path.</p>
 </div>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
@@ -152,7 +152,7 @@
 </h2>
 <p>Create a package-owned connection with <code><a href="reference/rduckhts_connect.html">rduckhts_connect()</a></code>, which explicitly loads the bundled extension without enabling automatic installation or loading of unrelated DuckDB extensions. Use <code>rduckhts_load(con, extension_path = NULL)</code> only for an existing connection whose driver permits extension loading. The wrappers break down into:</p>
 <ul>
-<li>readers: <code><a href="reference/rduckhts_bcf.html">rduckhts_bcf()</a></code>, <code><a href="reference/rduckhts_bam.html">rduckhts_bam()</a></code>, <code><a href="reference/rduckhts_fasta.html">rduckhts_fasta()</a></code>, <code><a href="reference/rduckhts_fastq.html">rduckhts_fastq()</a></code>, <code><a href="reference/rduckhts_bigwig.html">rduckhts_bigwig()</a></code>, <code><a href="reference/rduckhts_gff.html">rduckhts_gff()</a></code>, <code><a href="reference/rduckhts_gtf.html">rduckhts_gtf()</a></code>, <code><a href="reference/rduckhts_tabix.html">rduckhts_tabix()</a></code>, <code><a href="reference/rduckhts_bed.html">rduckhts_bed()</a></code>
+<li>readers: <code><a href="reference/rduckhts_bcf.html">rduckhts_bcf()</a></code>, <code><a href="reference/rduckhts_bam.html">rduckhts_bam()</a></code>, <code><a href="reference/rduckhts_fasta.html">rduckhts_fasta()</a></code>, <code><a href="reference/rduckhts_fastq.html">rduckhts_fastq()</a></code>, <code><a href="reference/rduckhts_bigwig.html">rduckhts_bigwig()</a></code>, <code><a href="reference/rduckhts_gff.html">rduckhts_gff()</a></code>, <code><a href="reference/rduckhts_gtf.html">rduckhts_gtf()</a></code>, <code><a href="reference/rduckhts_genbank.html">rduckhts_genbank()</a></code>, <code><a href="reference/rduckhts_tabix.html">rduckhts_tabix()</a></code>, <code><a href="reference/rduckhts_bed.html">rduckhts_bed()</a></code>
 </li>
 <li>multi-file readers: <code><a href="reference/rduckhts_bam_multi.html">rduckhts_bam_multi()</a></code>, <code><a href="reference/rduckhts_bcf_multi.html">rduckhts_bcf_multi()</a></code>, <code><a href="reference/rduckhts_fastq_multi.html">rduckhts_fastq_multi()</a></code>, <code><a href="reference/rduckhts_fasta_multi.html">rduckhts_fasta_multi()</a></code>, <code><a href="reference/rduckhts_gff_multi.html">rduckhts_gff_multi()</a></code>, <code><a href="reference/rduckhts_gtf_multi.html">rduckhts_gtf_multi()</a></code>, <code><a href="reference/rduckhts_tabix_multi.html">rduckhts_tabix_multi()</a></code>, <code><a href="reference/rduckhts_bed_multi.html">rduckhts_bed_multi()</a></code>
 </li>
@@ -165,6 +165,8 @@
 <li>htslib diagnostics/linking: <code><a href="reference/rduckhts_htslib_info.html">rduckhts_htslib_info()</a></code>, <code><a href="reference/rduckhts_htslib_version.html">rduckhts_htslib_version()</a></code>, <code><a href="reference/rduckhts_htslib_config.html">rduckhts_htslib_config()</a></code>
 </li>
 <li>Parquet converters: <code><a href="reference/rduckhts_bcf_convert_parquet.html">rduckhts_bcf_convert_parquet()</a></code>, <code><a href="reference/rduckhts_bam_convert_parquet.html">rduckhts_bam_convert_parquet()</a></code>, <code><a href="reference/rduckhts_gff_convert_parquet.html">rduckhts_gff_convert_parquet()</a></code>, <code><a href="reference/rduckhts_tabix_convert_parquet.html">rduckhts_tabix_convert_parquet()</a></code>
+</li>
+<li>sequence converters: <code><a href="reference/rduckhts_genbank_to_fasta.html">rduckhts_genbank_to_fasta()</a></code>
 </li>
 <li>SIMD diagnostics: <code><a href="reference/rduckhts_simd_backend.html">rduckhts_simd_backend()</a></code>, <code><a href="reference/rduckhts_simd_backend.html">rduckhts_simd_requested_backend()</a></code>, <code><a href="reference/rduckhts_simd_backend.html">rduckhts_simd_backend_available()</a></code>, <code><a href="reference/rduckhts_simd_backend.html">rduckhts_simd_set_backend()</a></code>
 </li>
@@ -704,24 +706,30 @@ Show generated function catalog
 <td>Read GTF annotations with optional raw scalar and parsed list/pair attributes and indexed region selection.</td>
 </tr>
 <tr class="even">
+<td><a href="inst/function_catalog/reference.html#read_genbank"><code>read_genbank</code></a></td>
+<td>table</td>
+<td><code>rduckhts_genbank</code></td>
+<td>Read GenBank flat-file features in read_gff’s column shape, with optional parsed qualifier MAP.</td>
+</tr>
+<tr class="odd">
 <td><a href="inst/function_catalog/reference.html#read_tabix"><code>read_tabix</code></a></td>
 <td>table</td>
 <td><code>rduckhts_tabix</code></td>
 <td>Read tabix-indexed text with optional header handling, inferred types and region selection.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><a href="inst/function_catalog/reference.html#fasta_index"><code>fasta_index</code></a></td>
 <td>table</td>
 <td><code>rduckhts_fasta_index</code></td>
 <td>Build a FASTA index (.fai) and return a single row with columns success (BOOLEAN) and index_path (VARCHAR).</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><a href="inst/function_catalog/reference.html#hts_union_query"><code>hts_union_query</code></a></td>
 <td>scalar_macro</td>
 <td><code>rduckhts_bam_multi, rduckhts_bcf_multi, rduckhts_fastq_multi, rduckhts_fasta_multi, rduckhts_bed_multi, rduckhts_tabix_multi, rduckhts_gff_multi, rduckhts_gtf_multi</code></td>
 <td>Generate a UNION ALL BY NAME query string that reads every file matching a glob pattern through the named reader function. The result includes a ‘filename’ column identifying the source file for each row. Assign to a variable with SET VARIABLE and execute via query(getvariable(…)). Optional params string is appended to each reader call. In R, use the typed rduckhts_*_multi() helpers instead, which accept file vectors with optional per-file parameters and create DuckDB tables directly.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><a href="inst/function_catalog/reference.html#hts_region_union_query"><code>hts_region_union_query</code></a></td>
 <td>scalar_macro</td>
 <td></td>
@@ -770,6 +778,12 @@ Show generated function catalog
 <td>scalar_macro</td>
 <td><code>rduckhts_tabix_convert_parquet</code></td>
 <td>Build COPY SQL for read_tabix() output with Parquet metadata, header text and selected columns, filters or partitions.</td>
+</tr>
+<tr class="odd">
+<td><a href="inst/function_catalog/reference.html#genbank_to_fasta"><code>genbank_to_fasta</code></a></td>
+<td>table</td>
+<td><code>rduckhts_genbank_to_fasta</code></td>
+<td>Write the ORIGIN sequence of each GenBank record as FASTA and return success, output_path and records_written.</td>
 </tr>
 </tbody>
 </table>
@@ -2836,6 +2850,7 @@ Show generated function catalog
 <h2 data-toc-skip>Developers</h2>
 <ul class="list-unstyled">
 <li>Sounkou Mahamane Toure <br><small class="roles"> Author, maintainer </small>   </li>
+<li>Ryan Ward <br><small class="roles"> Author </small>   </li>
 <li><a href="authors.html">More about authors...</a></li>
 </ul>
 </div>
@@ -2847,7 +2862,7 @@ Show generated function catalog
 
 
     <footer><div class="pkgdown-footer-left">
-  <p>Developed by Sounkou Mahamane Toure.</p>
+  <p>Developed by Sounkou Mahamane Toure, Ryan Ward.</p>
 </div>
 
 <div class="pkgdown-footer-right">

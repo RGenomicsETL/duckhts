@@ -70,6 +70,10 @@
   : Read multiple FASTQ files into a DuckDB table
 - [`rduckhts_functions()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_functions.md)
   : List DuckHTS Extension Functions
+- [`rduckhts_genbank()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_genbank.md)
+  : Create GenBank Feature Table
+- [`rduckhts_genbank_to_fasta()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_genbank_to_fasta.md)
+  : Write GenBank Sequence as FASTA
 - [`rduckhts_geno()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_geno.md)
   : Read Record-Major Genotypes
 - [`rduckhts_gff()`](https://rgenomicsetl.github.io/duckhts/reference/rduckhts_gff.md)

@@ -51,6 +51,11 @@
 <li>The bundled estimators use stable high-depth CHARR tail evaluation and a full-grid matched search. Their documented numerical counterexamples can differ from Somalier v0.3.4 output; they are not bitwise CLI replicas.</li>
 </ul></div>
 <div class="section level3">
+<h3 id="genbank-annotations-1-5-2-0-1-5">GenBank annotations<a class="anchor" aria-label="anchor" href="#genbank-annotations-1-5-2-0-1-5"></a></h3>
+<ul><li>Add <code><a href="../reference/rduckhts_genbank.html">rduckhts_genbank()</a></code> for GenBank flat-file features in <code><a href="../reference/rduckhts_gff.html">rduckhts_gff()</a></code>’s column shape, with an optional parsed qualifier <code>MAP</code>. <code>join()</code>/<code><a href="https://rdrr.io/r/base/order.html" class="external-link">order()</a></code> locations give one row per segment in biological order with the CDS phase carried across segments, <code>complement(...)</code> sets strand <code>-</code>, <code>Parent</code> links to the gene sharing a <code>/locus_tag</code> in any file order, repeated qualifiers comma-join, and the record-level <code>source</code> feature is dropped. Truncated or malformed records, including a FEATURES table not followed by a sequence section, are errors naming the feature and line.</li>
+<li>Add <code><a href="../reference/rduckhts_genbank_to_fasta.html">rduckhts_genbank_to_fasta()</a></code> to write each record’s ORIGIN sequence as FASTA under the same name reported as <code>seqname</code>. Bgzipped records are read in place through htslib’s hFILE layer. The output is renamed into place only after a clean read, so an existing file is never lost. <code>output_path</code>, <code>line_width</code> and <code>overwrite</code> are validated before any SQL runs.</li>
+</ul></div>
+<div class="section level3">
 <h3 id="genotypes-and-variant-readers-1-5-2-0-1-5">Genotypes and variant readers<a class="anchor" aria-label="anchor" href="#genotypes-and-variant-readers-1-5-2-0-1-5"></a></h3>
 <ul><li>Add <code><a href="../reference/rduckhts_geno.html">rduckhts_geno()</a></code> for typed arbitrary-ploidy GT/PS calls and <code><a href="../reference/rduckhts_bcf_samples.html">rduckhts_bcf_samples()</a></code> for original-header sample identities. Sample selection retains original sample indices; sparse scans preserve variant records while omitting calls without a called ALT.</li>
 <li>Select extra typed FORMAT fields with <code>format_fields = c("AD", "DP", "GQ")</code>, including values on records without GT. Header types/cardinalities and missing elements remain intact. Single-file and multi-file BCF wrappers also support per-call sample selection.</li>
@@ -372,7 +377,7 @@
 
 
     <footer><div class="pkgdown-footer-left">
-  <p>Developed by Sounkou Mahamane Toure.</p>
+  <p>Developed by Sounkou Mahamane Toure, Ryan Ward.</p>
 </div>
 
 <div class="pkgdown-footer-right">
