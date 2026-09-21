@@ -302,8 +302,8 @@ charr <- rduckhts_somalier_charr(
 charr[order(charr$sample_id),
       c("sample_id", "status", "usable_sites", "estimate")]
 #>   sample_id status usable_sites estimate
-#> 1        S1     ok            1        1
-#> 2        S2     ok            1        0
+#> 2        S1     ok            1        1
+#> 1        S2     ok            1        0
 
 invisible(dbExecute(con, paste(
   "CREATE TEMP TABLE contamination_pairs AS",
@@ -2062,6 +2062,22 @@ dbDisconnect(con, shutdown = TRUE)
 ## License
 
 GPL-3.
+
+## Credits
+
+[![Contributors](https://contrib.rocks/image?repo=RGenomicsETL/duckhts)](https://github.com/RGenomicsETL/duckhts/graphs/contributors)
+
+The GenBank reader and FASTA converter were contributed by [Ryan
+Ward](https://github.com/ryandward) of [Nurture
+Bio](https://github.com/Nurture-Bio).
+
+Thanks to all
+[contributors](https://github.com/RGenomicsETL/duckhts/graphs/contributors).
+See the [package author
+credits](https://rgenomicsetl.github.io/duckhts/DESCRIPTION) and
+[third-party
+notices](https://rgenomicsetl.github.io/duckhts/inst/COPYRIGHT) for
+upstream acknowledgements.
 
 # Package index
 

@@ -253,8 +253,8 @@
 <span><span class="va">charr</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/order.html" class="external-link">order</a></span><span class="op">(</span><span class="va">charr</span><span class="op">$</span><span class="va">sample_id</span><span class="op">)</span>,</span>
 <span>      <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"sample_id"</span>, <span class="st">"status"</span>, <span class="st">"usable_sites"</span>, <span class="st">"estimate"</span><span class="op">)</span><span class="op">]</span></span>
 <span><span class="co">#&gt;   sample_id status usable_sites estimate</span></span>
-<span><span class="co">#&gt; 1        S1     ok            1        1</span></span>
-<span><span class="co">#&gt; 2        S2     ok            1        0</span></span>
+<span><span class="co">#&gt; 2        S1     ok            1        1</span></span>
+<span><span class="co">#&gt; 1        S2     ok            1        0</span></span>
 <span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/invisible.html" class="external-link">invisible</a></span><span class="op">(</span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbExecute.html" class="external-link">dbExecute</a></span><span class="op">(</span><span class="va">con</span>, <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste</a></span><span class="op">(</span></span>
 <span>  <span class="st">"CREATE TEMP TABLE contamination_pairs AS"</span>,</span>
@@ -2820,6 +2820,13 @@ Show generated function catalog
 <h2 id="license">License<a class="anchor" aria-label="anchor" href="#license"></a>
 </h2>
 <p>GPL-3.</p>
+</div>
+<div class="section level2">
+<h2 id="credits">Credits<a class="anchor" aria-label="anchor" href="#credits"></a>
+</h2>
+<p><a href="https://github.com/RGenomicsETL/duckhts/graphs/contributors" class="external-link"><img src="https://contrib.rocks/image?repo=RGenomicsETL/duckhts" alt="Contributors"></a></p>
+<p>The GenBank reader and FASTA converter were contributed by <a href="https://github.com/ryandward" class="external-link">Ryan Ward</a> of <a href="https://github.com/Nurture-Bio" class="external-link">Nurture Bio</a>.</p>
+<p>Thanks to all <a href="https://github.com/RGenomicsETL/duckhts/graphs/contributors" class="external-link">contributors</a>. See the <a href="DESCRIPTION">package author credits</a> and <a href="inst/COPYRIGHT">third-party notices</a> for upstream acknowledgements.</p>
 </div>
 </div>
   </main><aside class="col-md-3"><div class="links">

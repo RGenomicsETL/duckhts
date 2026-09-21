@@ -1,5 +1,11 @@
 # Changelog
 
+## Rduckhts 1.5.2.9000-0.1.5
+
+- Show contributor avatars and credit Ryan Ward / Nurture Bio for
+  GenBank support in the package README footer, with links to upstream
+  acknowledgements.
+
 ## Rduckhts 1.5.2-0.1.5
 
 CRAN release: 2026-09-16
