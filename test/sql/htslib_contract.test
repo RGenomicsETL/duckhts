@@ -23,3 +23,33 @@ SELECT duckhts_htslib_version() = duckhts_htslib_version()
    AND duckhts_htslib_feature_string() = duckhts_htslib_feature_string();
 ----
 1
+
+# ==============================================================
+# Where bytes come from: readers take htslib URLs, not only paths.
+# The host decides the source and the SQL does not change. Browser builds
+# add blob: object URLs (test/wasm/blob-readers.spec.ts). Expected rows are
+# the literal fixture contents.
+# ==============================================================
+
+query TIIT
+SELECT chrom, start, "end", name
+FROM read_bed('data:,chr1%090%0910%09a%0Achr2%095%0920%09b%0A', scan_mode := 'sequential')
+ORDER BY chrom;
+----
+chr1	0	10	a
+chr2	5	20	b
+
+query TII
+SELECT chrom, start, "end"
+FROM read_bed('data:;base64,Y2hyMQkwCTEwCg==', scan_mode := 'sequential');
+----
+chr1	0	10
+
+query TIIT
+SELECT chrom, start, "end", name
+FROM read_bed('preload:__WORKING_DIRECTORY__/test/data/fixture_mixed_regions.bed', scan_mode := 'sequential')
+ORDER BY start;
+----
+11	1000	1200	cluster
+11	6000	6200	dup_only
+11	20000	20100	zero

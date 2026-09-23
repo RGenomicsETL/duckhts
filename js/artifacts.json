@@ -1,0 +1,11 @@
+{
+  "duckhts": "1.5.2",
+  "source": "https://community-extensions.duckdb.org/v1.5.5",
+  "abi": "C_STRUCT",
+  "minimum_duckdb": "v1.2.0",
+  "platforms": {
+    "wasm_mvp": "b10b0e3aa9b4ed4a5301321578224a21f8528e45bd5b09a9141bc2b14a36b81c",
+    "wasm_eh": "2dc20d6cb8c85340c64a8cb3af728e343cca46c0bef356fe139ce9379e2ab7dd",
+    "wasm_threads": "74fd1176620bd4914123dbb16663cdca3d3559a516b1491403b9db5eef84a493"
+  }
+}

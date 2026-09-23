@@ -618,7 +618,8 @@ static int run_bam_bed_coverage(bam_bed_cov_bind_t *bind, char *err, size_t errl
         return -1;
     }
 
-    idx = sam_index_load2(fp, bind->path, bind->index_path);
+    idx = sam_index_load3(fp, bind->path, bind->index_path,
+                          duckhts_index_save_remote_flag(bind->path, bind->index_path));
     if (!idx) {
         snprintf(err, errlen,
                  "duckhts_bam_bed_coverage: indexed BAM/CRAM input is required (failed to load .bai/.csi/.crai)");

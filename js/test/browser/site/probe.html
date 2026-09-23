@@ -1,0 +1,84 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>duckhts npm probe</title>
+<script type="importmap">
+  {
+    "imports": {
+      "apache-arrow": "/node_modules/apache-arrow/Arrow.dom.mjs",
+      "flatbuffers": "/node_modules/flatbuffers/mjs/flatbuffers.js",
+      "tslib": "/node_modules/tslib/tslib.es6.mjs"
+    }
+  }
+</script>
+<script type="module">
+  import { loadDuckhts } from "/src/index.js";
+
+  // Open duckdb-wasm from this origin with unsigned extensions disallowed,
+  // load DuckHTS through the package loader, and report what each read path
+  // returns.  Failures are reported as values so the test can assert on them.
+  async function attempt(run) {
+    try {
+      return { ok: true, value: await run() };
+    } catch (error) {
+      return { ok: false, error: String(error?.message ?? error) };
+    }
+  }
+
+  function plain(table) {
+    return table.toArray().map((row) => {
+      const out = {};
+      for (const [key, value] of Object.entries(row.toJSON())) {
+        out[key] = typeof value === "bigint" ? Number(value) : value;
+      }
+      return out;
+    });
+  }
+
+  window.probe = async (runtime) => {
+    const base = `${location.origin}/node_modules/duckdb-wasm-${runtime}/dist/`;
+    const duckdb = await import(`${base}duckdb-browser.mjs`);
+    const bundle = await duckdb.selectBundle({
+      mvp: { mainModule: `${base}duckdb-mvp.wasm`, mainWorker: `${base}duckdb-browser-mvp.worker.js` },
+      eh: { mainModule: `${base}duckdb-eh.wasm`, mainWorker: `${base}duckdb-browser-eh.worker.js` },
+    });
+    const db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), new Worker(bundle.mainWorker));
+    await db.instantiate(bundle.mainModule);
+    await db.open({ allowUnsignedExtensions: false });
+    const conn = await db.connect();
+
+    const result = {};
+    result.duckdb = plain(await conn.query("SELECT version() AS v"))[0].v;
+    result.unsignedAllowed = plain(
+      await conn.query("SELECT current_setting('allow_unsigned_extensions') AS v"),
+    )[0].v;
+    result.load = await attempt(() => loadDuckhts(conn, { baseUrl: "/duckhts/" }));
+    if (!result.load.ok) return result;
+
+    const bedUrl = `${location.origin}/data/fixture_mixed_regions.bed`;
+    result.bedHttp = await attempt(async () =>
+      plain(await conn.query(`SELECT chrom, start, "end", name FROM read_bed('${bedUrl}') ORDER BY start`)),
+    );
+    result.gffHttp = await attempt(async () =>
+      plain(await conn.query(
+        `SELECT seqname, feature, start, "end" FROM read_gff('${location.origin}/data/gff_attrs.gff3')`,
+      )),
+    );
+
+    const bedBytes = new Uint8Array(await (await fetch(bedUrl)).arrayBuffer());
+    await db.registerFileBuffer("dropped_buffer.bed", bedBytes);
+    result.bedRegisteredBuffer = await attempt(async () =>
+      plain(await conn.query("SELECT count(*) AS n FROM read_bed('dropped_buffer.bed')")),
+    );
+
+    const dropped = new File([bedBytes], "dropped_handle.bed");
+    await db.registerFileHandle("dropped_handle.bed", dropped, duckdb.DuckDBDataProtocol.BROWSER_FILEREADER, true);
+    result.bedRegisteredHandle = await attempt(async () =>
+      plain(await conn.query("SELECT count(*) AS n FROM read_bed('dropped_handle.bed')")),
+    );
+
+    await conn.close();
+    await db.terminate();
+    return result;
+  };
+  document.title = "ready";
+</script>

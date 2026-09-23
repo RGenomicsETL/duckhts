@@ -4,6 +4,7 @@
 #include <htslib/faidx.h>
 #include <htslib/hfile.h>
 #include <htslib/hts.h>
+#include <string.h>
 
 /* htslib exports this function but declares it only inside hwrite() in the
  * public header.  Give direct hFILE consumers a normal file-scope prototype. */
@@ -29,6 +30,18 @@ typedef enum {
     DUCKHTS_HTS_IO_PROFILE_STREAMING = 1,
     DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION = 2
 } duckhts_hts_io_profile_t;
+
+/* Index-load flag for "save a remote index locally".  blob: object URLs
+ * (Emscripten builds) name page-local Blobs: a saved copy buys nothing, and each
+ * one would stay in the worker's in-memory filesystem under a new UUID name.
+ * Network schemes keep htslib's HTS_IDX_SAVE_REMOTE behaviour. */
+static inline int duckhts_index_save_remote_flag(const char *path, const char *index_path) {
+    if ((path && strncmp(path, "blob:", 5) == 0) ||
+        (index_path && strncmp(index_path, "blob:", 5) == 0)) {
+        return 0;
+    }
+    return HTS_IDX_SAVE_REMOTE;
+}
 
 static inline int duckhts_is_remote_path(const char *path) {
     return path && path[0] != '\0' && hisremote(path);

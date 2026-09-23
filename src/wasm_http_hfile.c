@@ -1,5 +1,5 @@
 /*
- * wasm_http_hfile.c -- browser-native http/https hFILE backend for webR.
+ * wasm_http_hfile.c -- browser-native http/https/blob hFILE backend.
  *
  * Written against vendored htslib internals. Re-check hFILE_scheme_handler
  * layout and browser acceptance tests on every htslib vendor bump.
@@ -14,8 +14,9 @@
  * Browser constraints still apply: same-origin URLs work, remote URLs require
  * permissive CORS headers, and S3/GCS remain out of scope for the wasm build.
  *
- * Seek semantics: SEEK_SET and SEEK_CUR are pure C; SEEK_END issues one HEAD
- * request to get Content-Length and caches the result per handle.
+ * Seek semantics: SEEK_SET and SEEK_CUR are pure C; SEEK_END discovers and
+ * caches size using HEAD or a ranged GET. Chromium blob URLs reject HEAD and
+ * expose size through Content-Range.
  *
  * Write support is intentionally absent. All remote hFILE access is read-only.
  */
@@ -53,7 +54,7 @@ typedef struct {
 
 /*
  * Optional browser-side configuration object:
- *   Module.duckhtsWasmHttpConfig = {
+ *   duckhtsWasmHttpConfig = {
  *     headers: {"Authorization": "Bearer ...", "X-Foo": "bar"},
  *     allowHosts: ["example.org", ".ebi.ac.uk"],
  *     enforceHostAllowlist: false,
@@ -61,10 +62,17 @@ typedef struct {
  *     allowInsecureAuth: false
  *   }
  *
+ * Where it is read: Module.duckhtsWasmHttpConfig first (webR, where the
+ * Emscripten Module is global), else globalThis.duckhtsWasmHttpConfig in the
+ * thread running DuckDB.  duckdb-wasm keeps its Module private, so set the
+ * global in its worker, e.g. in a wrapper script before importScripts().
+ *
  * Security model:
  * - Custom headers are applied only when allowHosts matches URL hostname.
  * - Optional hard host allowlist: enforceHostAllowlist=true blocks requests to
- *   hosts that do not match allowHosts.
+ *   hosts that do not match allowHosts.  blob: URLs are exempt: they name
+ *   page-local Blobs, make no network request, and have no hostname, so they
+ *   never match allowHosts and never receive custom headers.
  * - Authorization is stripped on non-HTTPS URLs unless allowInsecureAuth=true.
  */
 
@@ -74,7 +82,7 @@ static double wasm_http_discover_size(const char *url, uintptr_t cache_key)
         var url = UTF8ToString($0);
         var key = String($1 >>> 0);
         var cache = Module.duckhtsWasmHttpFullObjectCache;
-        var cfg = Module.duckhtsWasmHttpConfig || null;
+        var cfg = Module.duckhtsWasmHttpConfig || globalThis.duckhtsWasmHttpConfig || null;
         var xhr = new XMLHttpRequest();
         var cl = null;
         var cr = null;
@@ -131,6 +139,10 @@ static double wasm_http_discover_size(const char *url, uintptr_t cache_key)
 
         function shouldAllowRequest(targetUrl) {
             if (!cfg || cfg.enforceHostAllowlist !== true) return true;
+            /* blob: URLs name page-local Blobs, not hosts: they make no network
+             * request and resolve only in the origin that created them, so the
+             * outbound host allowlist does not apply to them. */
+            if (String(targetUrl).slice(0, 5) === "blob:") return true;
             return hostMatchesAllowlist(targetUrl, cfg.allowHosts);
         }
 
@@ -255,7 +267,7 @@ static ssize_t wasm_http_read(hFILE *fpv, void *buffer, size_t nbytes)
         var slash = -1;
         var cache = Module.duckhtsWasmHttpFullObjectCache;
         var cached = null;
-        var cfg = Module.duckhtsWasmHttpConfig || null;
+        var cfg = Module.duckhtsWasmHttpConfig || globalThis.duckhtsWasmHttpConfig || null;
 
         function hostMatchesAllowlist(targetUrl, allowHosts) {
             var host = "";
@@ -307,6 +319,10 @@ static ssize_t wasm_http_read(hFILE *fpv, void *buffer, size_t nbytes)
 
         function shouldAllowRequest(targetUrl) {
             if (!cfg || cfg.enforceHostAllowlist !== true) return true;
+            /* blob: URLs name page-local Blobs, not hosts: they make no network
+             * request and resolve only in the origin that created them, so the
+             * outbound host allowlist does not apply to them. */
+            if (String(targetUrl).slice(0, 5) === "blob:") return true;
             return hostMatchesAllowlist(targetUrl, cfg.allowHosts);
         }
 
@@ -430,7 +446,7 @@ static ssize_t wasm_http_write(hFILE *fpv, const void *buffer, size_t nbytes)
  * wasm_http_seek -- update the logical read position.
  *
  * SEEK_SET / SEEK_CUR: pure arithmetic, no XHR.
- * SEEK_END: issues one synchronous HEAD to get Content-Length (cached).
+ * SEEK_END: discovers and caches the size using HEAD or a ranged GET.
  * ---------------------------------------------------------------------- */
 static off_t wasm_http_seek(hFILE *fpv, off_t offset, int whence)
 {
@@ -494,6 +510,50 @@ static const struct hFILE_backend wasm_http_backend = {
 };
 
 /* -------------------------------------------------------------------------
+ * wasm_blob_is_empty -- whether a blob: URL names an empty Blob.
+ *
+ * Chromium rejects every Range request on an empty Blob (the range starts at
+ * EOF) with the same NetworkError as a revoked URL, so the open-time peek
+ * cannot tell them apart.  A plain GET can: an empty Blob answers 200 with no
+ * bytes, while a revoked or unknown URL throws.  Only reached after a failed
+ * peek, so a non-empty Blob is never downloaded whole here.
+ * ---------------------------------------------------------------------- */
+static int wasm_blob_is_empty(const char *url)
+{
+    return EM_ASM_INT({
+        var xhr = new XMLHttpRequest();
+        try {
+            xhr.open("GET", UTF8ToString($0), false);
+            xhr.responseType = "arraybuffer";
+            xhr.send(null);
+        } catch (e) {
+            return 0;
+        }
+        return (xhr.status === 200 && xhr.response && xhr.response.byteLength === 0) ? 1 : 0;
+    }, url);
+}
+
+/* Allocate a read-only handle for url; known_size is -1 when not yet known. */
+static hFILE_wasm_http *wasm_http_new(const char *url, const char *mode, off_t known_size)
+{
+    hFILE_wasm_http *fp = (hFILE_wasm_http *)hfile_init(sizeof(hFILE_wasm_http), mode, 0);
+    if (fp == NULL) return NULL;
+
+    fp->url = strdup(url);
+    if (fp->url == NULL) {
+        hfile_destroy(&fp->base);
+        errno = ENOMEM;
+        return NULL;
+    }
+    fp->http_offset = 0;
+    fp->file_size   = known_size;
+    fp->warned_no_range = 0;
+    fp->warned_large_full_download = 0;
+    fp->base.backend = &wasm_http_backend;
+    return fp;
+}
+
+/* -------------------------------------------------------------------------
  * Scheme handler open(): allocate hFILE_wasm_http and initialise it.
  * ---------------------------------------------------------------------- */
 static hFILE *wasm_http_open(const char *url, const char *mode)
@@ -507,20 +567,27 @@ static hFILE *wasm_http_open(const char *url, const char *mode)
         return NULL;
     }
 
-    fp = (hFILE_wasm_http *)hfile_init(sizeof(hFILE_wasm_http), mode, 0);
+    fp = wasm_http_new(url, mode, -1);
     if (fp == NULL) return NULL;
 
-    fp->url = strdup(url);
-    if (fp->url == NULL) {
-        hfile_destroy(&fp->base);
-        errno = ENOMEM;
-        return NULL;
+    /* A missing blob must fail at open, not during index format detection.
+     * hpeek retains the bytes in hFILE's bounded buffer for the first read.
+     * An empty Blob also fails the peek; it is a valid empty input (native
+     * htslib reads a zero-byte file as empty), so reopen it with size 0,
+     * which makes every read return EOF without a request. */
+    if (strncmp(url, "blob:", 5) == 0) {
+        char probe;
+        if (hpeek(&fp->base, &probe, 1) < 0) {
+            int saved_errno = errno;
+            hclose_abruptly(&fp->base);
+            if (!wasm_blob_is_empty(url)) {
+                errno = saved_errno;
+                return NULL;
+            }
+            fp = wasm_http_new(url, mode, 0);
+            if (fp == NULL) return NULL;
+        }
     }
-    fp->http_offset = 0;
-    fp->file_size   = -1;
-    fp->warned_no_range = 0;
-    fp->warned_large_full_download = 0;
-    fp->base.backend = &wasm_http_backend;
     return &fp->base;
 }
 
@@ -545,6 +612,7 @@ void register_wasm_http_hfile_backend(void)
 
     hfile_add_scheme_handler("http",  &wasm_http_handler);
     hfile_add_scheme_handler("https", &wasm_http_handler);
+    hfile_add_scheme_handler("blob",  &wasm_http_handler);
     registered = 1;
 }
 

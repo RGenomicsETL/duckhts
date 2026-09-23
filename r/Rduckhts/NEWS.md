@@ -1,5 +1,21 @@
 # Rduckhts 1.5.2.9000-0.1.5
 
+- In webR, an explicit `blob:` `index_path` is no longer copied into the in-memory
+  filesystem and kept for the rest of the session.
+
+- In webR, an empty `blob:` File reads as an empty input (zero rows), matching a
+  zero-byte file natively, instead of failing to open.
+
+- In webR, `blob:` URLs are exempt from `Module.duckhtsWasmHttpConfig`'s
+  `enforceHostAllowlist`: they have no hostname and make no network request, so
+  no `allowHosts` entry could authorise them before.
+
+- The bundled Emscripten extension accepts read-only `blob:` URLs in webR. A
+  browser File can be exposed as an object URL, with a separate `index_path` URL
+  for region queries; callers must retain both URLs until queries finish.
+  Chromium 148.0.7778.96 worker XHR tests found HEAD fails with status 0, ranged
+  GET returns 206 with size in `Content-Range`, ranges crossing EOF are truncated,
+  and out-of-range or revoked URLs fail with status 0. Native builds are unchanged.
 - Show contributor avatars and credit Ryan Ward / Nurture Bio for GenBank
   support in the package README footer, with links to upstream acknowledgements.
 

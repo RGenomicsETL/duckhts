@@ -1,0 +1,80 @@
+name: npm package
+
+# Tests the duckhts npm package (js/) on pull requests that touch it, and
+# publishes it to npm on manual dispatch after the same tests pass.  The
+# package ships the signed community-repository wasm builds pinned in
+# js/artifacts.json; nothing here builds the extension.
+on:
+  pull_request:
+    paths:
+      - "js/**"
+      - "test/data/fixture_mixed_regions.bed"
+      - "test/data/gff_attrs.gff3"
+      - ".github/workflows/npm-package.yml"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish js/ to npm after the tests pass"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: loader, staging and browser tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: js
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: js/package-lock.json
+
+      - run: npm ci
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+      - run: npm pack --dry-run
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-package-playwright-report
+          path: js/playwright-report
+          retention-days: 7
+
+  publish:
+    name: publish to npm
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: js
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - run: npm ci
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

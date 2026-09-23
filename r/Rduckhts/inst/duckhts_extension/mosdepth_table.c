@@ -1436,7 +1436,8 @@ static void *mosdepth_parallel_worker(void *arg) {
         goto worker_done;
     }
     idx = sam_index_load3(fp, bind->path, bind->index_path,
-                          HTS_IDX_SILENT_FAIL | HTS_IDX_SAVE_REMOTE);
+                          HTS_IDX_SILENT_FAIL |
+                              duckhts_index_save_remote_flag(bind->path, bind->index_path));
     if (!idx) {
         mosdepth_parallel_set_error(ctx, "duckhts_mosdepth: worker failed to load index");
         goto worker_done;
@@ -1839,7 +1840,9 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
         }
         goto cleanup;
     }
-    idx = sam_index_load3(fp, bind->path, bind->index_path, HTS_IDX_SILENT_FAIL | HTS_IDX_SAVE_REMOTE);
+    idx = sam_index_load3(fp, bind->path, bind->index_path,
+                          HTS_IDX_SILENT_FAIL |
+                              duckhts_index_save_remote_flag(bind->path, bind->index_path));
     if (!idx) {
         snprintf(err, errlen,
                  "duckhts_mosdepth: indexed BAM/CRAM input is required (failed to load .bai/.csi/.crai)");

@@ -186,7 +186,7 @@ static int fast_idxstats_to_file(samFile *fp, sam_hdr_t *header, const char *pat
     }
 
     *used_fast = 0;
-    idx = sam_index_load2(fp, path, index_path);
+    idx = sam_index_load3(fp, path, index_path, duckhts_index_save_remote_flag(path, index_path));
     if (!idx) return 1;
 
     for (int i = 0; i < sam_hdr_nref(header); ++i) {

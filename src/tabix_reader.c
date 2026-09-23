@@ -53,6 +53,18 @@ DUCKDB_EXTENSION_EXTERN
 #define TABIX_MAX_GENERIC_COLS 256
 #define TABIX_NUM_PARSE_BUF 128
 
+static tbx_t *tabix_reader_load_index(const char *path, const char *index_path) {
+    int flags = duckhts_index_save_remote_flag(path, index_path);
+#ifdef __EMSCRIPTEN__
+    /* Object URLs have no sibling index files. An explicit index_path still
+     * reports load failures; an absent inferred sidecar permits streaming. */
+    if (!index_path && strncmp(path, "blob:", 5) == 0) {
+        flags |= HTS_IDX_SILENT_FAIL;
+    }
+#endif
+    return tbx_index_load3(path, index_path, flags);
+}
+
 static inline void set_null(duckdb_vector vec, idx_t row) {
     duckdb_vector_ensure_validity_writable(vec);
     uint64_t *v = duckdb_vector_get_validity(vec);
@@ -1245,7 +1257,7 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         int header_from_skip = 0;
         char *header_candidate = NULL;
 
-        tbx_t *tbx = tbx_index_load2(bd->file_path, bd->index_path);
+        tbx_t *tbx = tabix_reader_load_index(bd->file_path, bd->index_path);
         if (tbx) {
             tbx_conf_t conf = tbx->conf;
             meta_char = conf.meta_char ? conf.meta_char : '#';
@@ -1372,7 +1384,7 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
     }
 
     if (bd->n_regions == 0 && !bd->scan_sequential) {
-        tbx_t *tbx_stats = tbx_index_load2(bd->file_path, bd->index_path);
+        tbx_t *tbx_stats = tabix_reader_load_index(bd->file_path, bd->index_path);
         if (tbx_stats) {
             bd->index_row_count_valid =
                 tabix_try_get_index_row_count(tbx_stats, &bd->index_row_count);
@@ -1438,7 +1450,7 @@ static void tabix_init(duckdb_init_info info) {
 
     /* Try to load tabix index when it is needed for region scans or auto metadata use. */
     if (bd->n_regions > 0 || !bd->scan_sequential) {
-        id->tbx = tbx_index_load2(bd->file_path, bd->index_path);
+        id->tbx = tabix_reader_load_index(bd->file_path, bd->index_path);
     }
 
     if (bd->n_regions > 0) {

@@ -142,3 +142,9 @@ r/Rduckhts/inst/duckhts_extension/samtools/*.so
 r/Rduckhts/inst/duckhts_extension/samtools/*.dll
 r/Rduckhts/inst/duckhts_extension/samtools/*.dylib
 r/Rduckhts/inst/duckhts_extension/samtools/*.a
+
+# npm package (js/): staged binaries and test output
+js/node_modules/
+js/dist/
+js/test-results/
+js/playwright-report/

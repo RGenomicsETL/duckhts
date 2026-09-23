@@ -2,6 +2,78 @@
 
 # duckhts 1.5.2.9000
 
+- Do not save a `blob:` index to a local file. `HTS_IDX_SAVE_REMOTE` made htslib copy
+  an explicit `blob:` `index_path` into the Emscripten worker's in-memory filesystem and
+  keep it, leaving one UUID-named copy per object URL. A shared
+  `duckhts_index_save_remote_flag()` (in `src/include/hts_io_tuning.h`) now withholds the
+  flag when the data or index path is a `blob:` URL, at every index load that set it
+  (tabix readers, mosdepth, `duckhts_bam_bed_coverage`, `duckhts_samtools_idxstats`).
+  Network paths keep htslib's behaviour, and native behaviour is unchanged. Reported by
+  Codex review on https://github.com/RGenomicsETL/duckhts/pull/248.
+
+- npm package: pin the documented install to `@duckdb/duckdb-wasm@1.33.1-dev57.0` (a bare
+  install gets stable 1.32.0, which cannot load this extension, #247), and declare the
+  peer range as `1.33.1-dev57.0 || >=1.33.1`, since npm compares prerelease tags as text
+  and a `>=` prerelease floor admitted older builds such as `dev6`. Reported by Codex
+  review on https://github.com/RGenomicsETL/duckhts/pull/248.
+
+- Read an empty `blob:` File as an empty input, as native htslib reads a zero-byte
+  file (`read_bed` / `read_gff` return zero rows). Chromium rejects every Range request
+  on an empty Blob with the same `NetworkError` as a revoked URL, so after a failed
+  open-time peek a plain `GET` now tells them apart: 200 with no bytes means empty.
+  Browser test: an empty File gives zero rows from both readers; without the fallback
+  it fails to open (negative control). Reported by Codex review on
+  https://github.com/RGenomicsETL/duckhts/pull/248.
+
+- License the `duckhts` npm package as GPL-2.0-or-later and ship `js/LICENSE` (GPL-2
+  text) and `js/THIRD_PARTY_NOTICES.md` in its tarball. The notices reproduce the
+  licences of everything linked into the wasm binaries (HTSlib, htscodecs, libBigWig,
+  cgranges, VariantKey, zlib, bzip2, liblzma), taken from the wasm build's link inputs.
+  Reported by Codex review on https://github.com/RGenomicsETL/duckhts/pull/248.
+
+- Make the wasm HTTP policy reachable in duckdb-wasm and exempt `blob:` URLs from
+  its host allowlist. duckdb-wasm keeps its Emscripten `Module` private, so
+  `Module.duckhtsWasmHttpConfig` could only be set in webR; the extension now also
+  reads `globalThis.duckhtsWasmHttpConfig` in the thread running DuckDB (set it in
+  the duckdb-wasm worker). With `enforceHostAllowlist`, `blob:` URLs (no hostname,
+  no network request) were refused whatever `allowHosts` said; they are now exempt
+  and still never receive custom headers. A browser test sets the policy on the
+  worker global, checks that a non-listed host is refused, and reads a `blob:` file
+  under the same policy; without the exemption it fails (negative control). Reported
+  by Codex review on https://github.com/RGenomicsETL/duckhts/pull/248.
+
+- Test the native half of the "readers take URLs, not only paths" contract in
+  `test/sql/htslib_contract.test`: `read_bed` over `data:` URLs (percent-encoded and
+  base64) and `preload:` of a committed fixture, with expected rows taken from the
+  literal inputs. Browser builds cover `blob:` in `test/wasm/blob-readers.spec.ts`.
+
+- Emscripten builds accept read-only `blob:` URLs through the htslib XHR backend,
+  including local File reads and explicit `index_path` object URLs for indexed
+  regions. Missing auto-discovered sidecars allow streaming; callers own URL
+  revocation. Range-ignoring transports retain the full-body JavaScript cache
+  fallback, copying only requested chunks into Wasm memory.
+  DuckDB VFS registrations remain separate and invisible to htslib. The npm
+  package's pinned signed binaries do not yet contain this handler.
+- Add `js/src/local-file.js` (`localFileUrl(file)` → `{ url, revoke }`) for browser
+  Files and Blobs. It is deliberately not exported from the npm package entry until
+  `artifacts.json` pins DuckHTS builds that contain the `blob:` handler; a test
+  enforces this (Codex review P1). Chromium 148.0.7778.96
+  worker-synchronous XHR measurements show `HEAD blob:` fails with `NetworkError`
+  (status 0), ranged GET returns 206 with the total in `Content-Range`, and ranges
+  crossing EOF are truncated. Out-of-range and revoked URLs fail with
+  `NetworkError` (status 0). These observations are covered by browser tests.
+
+- Add the `duckhts` npm package under `js/` for `@duckdb/duckdb-wasm`
+  (https://github.com/RGenomicsETL/duckhts/issues/246). It ships the signed
+  community-repository wasm builds of DuckHTS 1.5.2 byte for byte (staged by
+  `js/scripts/stage.mjs` against pinned sha256 values in `js/artifacts.json`), and a
+  `loadDuckhts(conn, { baseUrl })` loader that picks the build for `PRAGMA platform`,
+  so web applications can serve the extension from their own origin with unsigned
+  extensions disallowed. A Playwright test loads it into duckdb-wasm
+  `1.33.1-dev57.0` (DuckDB v1.5.4) and reads BED and GFF over same-origin HTTP. It
+  records two current limits: files registered with duckdb-wasm are not visible to
+  htslib-backed readers, and LOAD fails on DuckDB v1.4.x
+  (https://github.com/RGenomicsETL/duckhts/issues/247).
 - Show contributor avatars and credit Ryan Ward / Nurture Bio for GenBank
   support in the README footer, with links to upstream acknowledgements.
 

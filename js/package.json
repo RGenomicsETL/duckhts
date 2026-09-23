@@ -1,0 +1,63 @@
+{
+  "name": "duckhts",
+  "version": "1.5.2",
+  "description": "DuckHTS DuckDB extension for duckdb-wasm: read HTS formats (BAM, CRAM, VCF, BCF, FASTA, FASTQ, GFF, GTF, BED, GenBank, bigWig, tabix) with SQL in the browser",
+  "type": "module",
+  "license": "GPL-2.0-or-later",
+  "author": "Sounkou Mahamane Toure",
+  "homepage": "https://github.com/RGenomicsETL/duckhts/tree/main/js#readme",
+  "bugs": "https://github.com/RGenomicsETL/duckhts/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RGenomicsETL/duckhts.git",
+    "directory": "js"
+  },
+  "keywords": [
+    "duckdb",
+    "duckdb-wasm",
+    "duckdb-extension",
+    "htslib",
+    "genomics",
+    "bioinformatics",
+    "bam",
+    "vcf",
+    "gff",
+    "genbank"
+  ],
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./dist/*": "./dist/*"
+  },
+  "files": [
+    "src",
+    "dist",
+    "artifacts.json",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "scripts": {
+    "stage": "node scripts/stage.mjs",
+    "prepack": "node scripts/stage.mjs",
+    "test": "node --test test/*.test.mjs",
+    "test:browser": "node scripts/stage.mjs && playwright test --config test/browser/playwright.config.mjs"
+  },
+  "peerDependencies": {
+    "@duckdb/duckdb-wasm": "1.33.1-dev57.0 || >=1.33.1"
+  },
+  "peerDependenciesMeta": {
+    "@duckdb/duckdb-wasm": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.60.0",
+    "duckdb-wasm-next": "npm:@duckdb/duckdb-wasm@1.33.1-dev57.0",
+    "duckdb-wasm-stable": "npm:@duckdb/duckdb-wasm@1.32.0"
+  }
+}
