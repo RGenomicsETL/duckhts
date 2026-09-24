@@ -264,15 +264,15 @@ typedef struct tabix_field {
 static int split_fields(const char *line, tabix_field_t *fields, int capacity) {
     const char *start = line;
     int count = 0;
-    for (const char *p = line; ; p++) {
-        if (*p != '\t' && *p != '\0') continue;
+    for (;;) {
+        size_t len = strcspn(start, "\t");
         if (count < capacity) {
             fields[count].start = start;
-            fields[count].len = (int)(p - start);
+            fields[count].len = (int)len;
         }
         count++;
-        if (*p == '\0') break;
-        start = p + 1;
+        if (start[len] == '\0') break;
+        start += len + 1;
     }
     return count;
 }
@@ -1592,7 +1592,10 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
             continue;
         }
 
-        int n_fields = split_fields(id->line.s, id->fields, n_cols);
+        int n_fields = 0;
+        if (chunk_col_count > 0 || (bd->strict && bd->mode == TABIX_MODE_GFF)) {
+            n_fields = split_fields(id->line.s, id->fields, n_cols);
+        }
         if (bd->strict && bd->mode == TABIX_MODE_GFF) {
             char err[256];
             if (!validate_gff3_line_strict(id->fields, n_fields, err, sizeof(err))) {
