@@ -1,5 +1,9 @@
 # Rduckhts 1.5.2.9002-0.1.5
 
+- `rduckhts_gff()` and `rduckhts_gtf()` accept `attributes` to create named
+  attribute columns. The bundled `read_gff` and `read_gtf` SQL readers also
+  support `attributes := ['key', ...]` with values matching `attributes_map`.
+
 - The bundled extension scans tabix, GFF3 and GTF fields once up to the last
   projected field, including attributes when requested. Strict GFF3 validation
   still counts the entire line; SQL results and diagnostics are unchanged.

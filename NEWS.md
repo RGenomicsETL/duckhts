@@ -2,6 +2,10 @@
 
 # duckhts 1.5.2.9002
 
+- `read_gff` and `read_gtf` accept `attributes := ['key', ...]` to expose requested
+  attribute keys as projected VARCHAR columns with values matching `attributes_map`.
+  Empty, duplicate and fixed/optional column names are rejected at bind.
+
 - Scan tabix, GFF3 and GTF fields once up to the last projected field; parsed
   attribute outputs include the attributes field, and strict GFF3 checks count
   the entire line. Values, NULLs and strict diagnostics retain their existing

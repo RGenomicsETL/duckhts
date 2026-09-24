@@ -44,6 +44,7 @@ DUCKDB_EXTENSION_EXTERN
 
 #include "include/hts_io_tuning.h"
 #include "include/region_list.h"
+#include "include/named_attribute_columns.h"
 
 /* ================================================================
  * Constants
@@ -135,6 +136,7 @@ typedef struct {
     int  attr_map_col;
     int  attr_list_col;
     int  attr_pairs_col;
+    duckhts_attribute_columns named_attributes;
     int  strict;
     int  header;
     int  skip_header_line;
@@ -164,6 +166,7 @@ static void tabix_bind_data_destroy(void *data) {
             free(bd->header_names);
         }
         free(bd->col_types);
+        duckhts_attribute_columns_destroy(&bd->named_attributes);
         free(bd);
     }
 }
@@ -181,6 +184,8 @@ typedef struct {
     idx_t     *column_ids;      /* logical column indices (for projection pushdown) */
     idx_t      n_projected_cols;
     int        split_limit;     /* fields to visit; 0 counts the whole line */
+    duckhts_projected_attribute *projected_attributes;
+    idx_t      n_projected_attributes;
     struct tabix_field *fields;
     int        count_only;
     uint64_t   count_remaining;
@@ -197,6 +202,7 @@ static void tabix_init_data_destroy(void *data) {
         if (id->fp)  hts_close(id->fp);
         free(id->line.s);
         free(id->column_ids);
+        free(id->projected_attributes);
         free(id->fields);
         free(id);
     }
@@ -880,6 +886,61 @@ static int fill_attr_map(duckdb_vector vec, idx_t row, const char *s, bool is_gf
     return 1;
 }
 
+/* Match the MAP's first occurrence, trimmed key and value, without decoding GFF3. */
+static void find_projected_attributes(duckhts_projected_attribute *projected, idx_t count,
+                                      const char *s, int length, bool is_gff) {
+    for (idx_t i = 0; i < count; i++) projected[i].value = NULL;
+    if (!s || length == 0 || (length == 1 && s[0] == '.')) return;
+
+    const char *p = s;
+    const char *end = s + length;
+    while (p < end) {
+        while (p < end && (*p == ';' || *p == ' ' || *p == '\t')) p++;
+        if (p == end) break;
+        const char *key = p;
+        const char *value = NULL;
+        int key_len, value_len;
+        if (is_gff) {
+            while (p < end && *p != '=' && *p != ';') p++;
+            if (p == end || *p != '=') {
+                while (p < end && *p != ';') p++;
+                continue;
+            }
+            key_len = (int)(p - key);
+            p++;
+            value = p;
+            while (p < end && *p != ';') p++;
+            value_len = (int)(p - value);
+        } else {
+            while (p < end && *p != ' ' && *p != '\t' && *p != ';') p++;
+            key_len = (int)(p - key);
+            while (p < end && (*p == ' ' || *p == '\t')) p++;
+            if (p < end && *p == '"') {
+                p++;
+                value = p;
+                while (p < end && *p != '"') p++;
+                value_len = (int)(p - value);
+                if (p < end) p++;
+            } else {
+                value = p;
+                while (p < end && *p != ';') p++;
+                value_len = (int)(p - value);
+            }
+        }
+        trim_span(&key, &key_len);
+        trim_span(&value, &value_len);
+        for (idx_t i = 0; key_len > 0 && i < count; i++) {
+            if (!projected[i].value && projected[i].key->length == (size_t)key_len &&
+                memcmp(projected[i].key->name, key, (size_t)key_len) == 0) {
+                projected[i].value = value;
+                projected[i].value_length = (size_t)value_len;
+            }
+        }
+        while (p < end && *p != ';') p++;
+        if (p < end) p++;
+    }
+}
+
 static void set_null_list_like(duckdb_vector vec, idx_t row) {
     duckdb_vector_ensure_validity_writable(vec);
     uint64_t *validity = duckdb_vector_get_validity(vec);
@@ -1165,6 +1226,20 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         }
         if (attr_pairs_val) duckdb_destroy_value(&attr_pairs_val);
 
+        const char *reserved[] = {
+            "seqname", "source", "feature", "start", "end", "score", "strand", "frame", "attributes",
+            NULL, NULL, NULL
+        };
+        size_t reserved_count = GXF_BASE_COL_COUNT;
+        if (bd->include_attr_map) reserved[reserved_count++] = "attributes_map";
+        if (bd->include_attr_list) reserved[reserved_count++] = "attributes_list";
+        if (bd->include_attr_pairs) reserved[reserved_count++] = "attributes_pairs";
+        if (!duckhts_attribute_columns_bind(info, "attributes", reserved, reserved_count,
+                                             &bd->named_attributes)) {
+            tabix_bind_data_destroy(bd);
+            return;
+        }
+
         if (mode == TABIX_MODE_GFF) {
             duckdb_value strict_val = duckdb_bind_get_named_parameter(info, "strict");
             if (strict_val && !duckdb_is_null_value(strict_val)) {
@@ -1211,6 +1286,7 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
             duckdb_bind_add_result_column(info, "attributes_pairs", attr_pairs_type);
             duckdb_destroy_logical_type(&attr_pairs_type);
         }
+        duckhts_attribute_columns_declare(info, &bd->named_attributes, (idx_t)next_attr_col);
     } else {
         /* Optional header handling for generic tabix */
         val = duckdb_bind_get_named_parameter(info, "header");
@@ -1448,6 +1524,11 @@ static void tabix_init(duckdb_init_info info) {
     id->n_projected_cols = duckdb_init_get_column_count(info);
     if (id->n_projected_cols > 0) {
         id->column_ids = (idx_t *)malloc(sizeof(idx_t) * id->n_projected_cols);
+        if (!id->column_ids) {
+            duckdb_init_set_error(info, "Out of memory mapping projected columns");
+            tabix_init_data_destroy(id);
+            return;
+        }
         for (idx_t i = 0; i < id->n_projected_cols; i++) {
             id->column_ids[i] = duckdb_init_get_column_index(info, i);
             int field_col = (int)id->column_ids[i];
@@ -1462,6 +1543,17 @@ static void tabix_init(duckdb_init_info info) {
         id->column_ids = NULL;
     }
     if (bd->strict && bd->mode == TABIX_MODE_GFF) id->split_limit = 0;
+
+    if (bd->mode != TABIX_MODE_GENERIC && bd->named_attributes.count && id->n_projected_cols) {
+        id->projected_attributes = duckhts_attribute_columns_project(
+            &bd->named_attributes, id->column_ids, id->n_projected_cols,
+            &id->n_projected_attributes);
+        if (id->n_projected_attributes && !id->projected_attributes) {
+            duckdb_init_set_error(info, "Out of memory mapping projected attributes");
+            tabix_init_data_destroy(id);
+            return;
+        }
+    }
 
     if (id->n_projected_cols == 0 && bd->n_regions == 0 && !bd->scan_sequential && bd->index_row_count_valid && !bd->strict) {
         id->count_only = 1;
@@ -1628,11 +1720,23 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
 
         if (chunk_col_count > 0) {
         if (bd->mode == TABIX_MODE_GTF || bd->mode == TABIX_MODE_GFF) {
+            if (id->n_projected_attributes) {
+                int len = 0;
+                const char *attrs = field_at(id->fields, n_fields, GXF_COL_ATTRIBUTES, &len);
+                find_projected_attributes(id->projected_attributes, id->n_projected_attributes,
+                                          attrs, len, bd->mode == TABIX_MODE_GFF);
+                duckhts_attribute_columns_write(id->projected_attributes,
+                                                id->n_projected_attributes, vectors, row_count);
+            }
             /* Parse GTF/GFF columns with projection pushdown:
              * Vector index c maps to logical column id->column_ids[c],
              * which is the field index in the TSV line. */
             for (idx_t c = 0; c < chunk_col_count; c++) {
                 int logical_col = (int)id->column_ids[c];
+                if ((idx_t)logical_col >= bd->named_attributes.first_column &&
+                    (idx_t)logical_col - bd->named_attributes.first_column < bd->named_attributes.count) {
+                    continue;
+                }
                 if (logical_col == bd->attr_map_col && bd->include_attr_map) {
                     const char *fld = NULL;
                     int flen = 0;
@@ -1852,6 +1956,11 @@ static duckdb_table_function create_tabix_tf(const char *name,
         duckdb_table_function_add_named_parameter(tf, "attributes_list", bool_type);
         duckdb_table_function_add_named_parameter(tf, "attributes_pairs", bool_type);
         duckdb_destroy_logical_type(&bool_type);
+        duckdb_logical_type child = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+        duckdb_logical_type keys = duckdb_create_list_type(child);
+        duckdb_table_function_add_named_parameter(tf, "attributes", keys);
+        duckdb_destroy_logical_type(&keys);
+        duckdb_destroy_logical_type(&child);
     }
 
     if (include_strict) {

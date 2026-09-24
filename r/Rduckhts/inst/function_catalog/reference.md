@@ -1998,12 +1998,12 @@ SELECT * FROM detect_quality_encoding('reads.fq.gz');
 
 ## read_gff
 
-Read GFF annotations with optional raw scalar and parsed list/pair attributes, strict GFF3 validation and indexed region selection.
+Read GFF annotations with optional parsed attributes, strict GFF3 validation and indexed region selection.
 
 Signature:
 
 ```sql
-read_gff(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, strict := FALSE, region := NULL, index_path := NULL, scan_mode := 'auto')
+read_gff(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, attributes := []::VARCHAR[], strict := FALSE, region := NULL, index_path := NULL, scan_mode := 'auto')
 ```
 
 Returns:
@@ -2011,6 +2011,10 @@ Returns:
 ```
 table
 ```
+
+### Attributes
+
+attributes := ['Parent', 'ID'] appends VARCHAR columns named for the requested keys. Each value equals attributes_map[key], including NULL for absent keys; repeated keys use the first value and GFF3 percent encoding is retained. Keys must be nonempty, unique under ASCII case-insensitive column naming, and distinct from fixed and optional attribute column names. Only projected keys are parsed during scanning.
 
 ### Scanning
 
@@ -2024,12 +2028,12 @@ SELECT seqname, feature, start, "end" FROM read_gff('gff_file.gff.gz') LIMIT 5;
 
 ## read_gtf
 
-Read GTF annotations with optional raw scalar and parsed list/pair attributes and indexed region selection.
+Read GTF annotations with optional parsed attributes and indexed region selection.
 
 Signature:
 
 ```sql
-read_gtf(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, region := NULL, index_path := NULL, scan_mode := 'auto')
+read_gtf(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, attributes := []::VARCHAR[], region := NULL, index_path := NULL, scan_mode := 'auto')
 ```
 
 Returns:
@@ -2037,6 +2041,10 @@ Returns:
 ```
 table
 ```
+
+### Attributes
+
+attributes := ['gene_id', 'transcript_id'] appends VARCHAR columns named for the requested keys. Each value equals attributes_map[key], including NULL for absent keys; repeated keys use the first value. Keys must be nonempty, unique under ASCII case-insensitive column naming, and distinct from fixed and optional attribute column names. Only projected keys are parsed during scanning.
 
 ### Scanning
 
