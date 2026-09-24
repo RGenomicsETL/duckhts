@@ -1,0 +1,6 @@
+"workload","artifact","reader","expected_rows","options","bytes","sha256"
+"BAM","ont_ecoli_k12_bam","read_bam",27377,", scan_mode := 'sequential', decompression_threads := 0",56460404,"b9bf633c99fd27503f3413c9c3208dc8d39a05c675ff15395972b981fa2225b2"
+"FASTQ.gz","ont_ecoli_k12_reads_fastq_gz","read_fastq",25950,"",53549982,"ce3dace293ab2e5171e3c5fc95a7863715214649628568393b37a4f465a61f51"
+"FASTA","ont_ecoli_k12_reference_fna","read_fasta",1,"",4699745,"53bb6a51b6e92139ced1e38f74b7938781027c52200922ff03718c2237d23bb4"
+"VCF.gz","multi_region_vcf_gz","read_bcf",2e+06,", scan_mode := 'sequential', decompression_threads := 0",3391626,"a052d2f7836ce92c00cb3d8033edadf8e5db2372d78a46c44c1d6c0410555ad7"
+"BCF","multi_region_bcf","read_bcf",2e+06,", scan_mode := 'sequential', decompression_threads := 0",4626191,"dce85f5c236290141e47401a837946a81e39e567a20c3dbd8fbd1dc223bb3461"

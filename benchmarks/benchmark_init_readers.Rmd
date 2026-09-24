@@ -1,0 +1,227 @@
+---
+title: "Reader performance across initialization compatibility changes"
+output: github_document
+params:
+  baseline_extension: !r Sys.getenv("DUCKHTS_BASELINE_EXTENSION")
+  candidate_extension: !r Sys.getenv("DUCKHTS_EXTENSION")
+  baseline_revision: "183ae5fc5f464e68c697b990406a26a5d8138b51"
+  candidate_revision: "e602cd66796c9f1c17dce8f27cbf3fce5f779363"
+  repetitions: 7
+  measure: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r measure, include=FALSE, eval=params$measure}
+library(DBI)
+library(duckdb)
+library(duckhtsbench)
+repetitions <- as.integer(params$repetitions)
+stopifnot(repetitions >= 3L)
+extensions <- setNames(
+  normalizePath(c(params$baseline_extension, params$candidate_extension), mustWork = TRUE),
+  c("baseline", "candidate")
+)
+inputs <- data.frame(
+  workload = c("BAM", "FASTQ.gz", "FASTA", "VCF.gz", "BCF"),
+  artifact = c("ont_ecoli_k12_bam", "ont_ecoli_k12_reads_fastq_gz",
+               "ont_ecoli_k12_reference_fna", "multi_region_vcf_gz", "multi_region_bcf"),
+  reader = c("read_bam", "read_fastq", "read_fasta", "read_bcf", "read_bcf"),
+  expected_rows = c(27377, 25950, 1, 2000000, 2000000),
+  options = c(
+    ", scan_mode := 'sequential', decompression_threads := 0",
+    "", "",
+    ", scan_mode := 'sequential', decompression_threads := 0",
+    ", scan_mode := 'sequential', decompression_threads := 0"
+  )
+)
+paths <- vapply(inputs$artifact, duckhts_bench_artifact_path, character(1))
+stopifnot(all(file.exists(paths)))
+inputs$bytes <- file.info(paths)$size
+inputs$sha256 <- vapply(paths, digest::digest, character(1), algo = "sha256", file = TRUE)
+metadata <- data.frame(
+  build = names(extensions),
+  source_revision = c(params$baseline_revision, params$candidate_revision),
+  extension_sha256 = vapply(extensions, digest::digest, character(1), algo = "sha256", file = TRUE),
+  duckdb = as.character(packageVersion("duckdb")),
+  R = R.version.string,
+  threads = 1L,
+  measured_repetitions = repetitions,
+  run_utc = format(Sys.time(), tz = "UTC", usetz = TRUE),
+  cpu_affinity = sub("^Cpus_allowed_list:\\s+", "",
+                    grep("^Cpus_allowed_list:", readLines("/proc/self/status"), value = TRUE)),
+  host_system = paste(Sys.info()[c("sysname", "release", "machine")], collapse = " / "),
+  cpu_model = sub("^model name\\s*:\\s*", "",
+                  grep("^model name", readLines("/proc/cpuinfo"), value = TRUE)[[1]])
+)
+scratch <- tempfile("init-reader-benchmark-")
+dir.create(scratch)
+
+# One extension per fresh process. Timing includes all-column CTAS, not checksums
+# or Parquet output. No COUNT-only projection can replace decoding the records.
+measure <- function(extension, input, reader, options, expected_rows, snapshot) {
+  library(DBI)
+  library(duckdb)
+  con <- dbConnect(duckdb(config = list(allow_unsigned_extensions = "true"),
+                         shared_home = FALSE))
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  load_time <- system.time(dbExecute(con, paste("LOAD", dbQuoteString(con, extension))))
+  dbExecute(con, "SET threads=1")
+  dbExecute(con, "SET memory_limit='8GB'")
+  query <- sprintf("CREATE TABLE records AS SELECT * FROM %s(%s%s)",
+                   reader, dbQuoteString(con, input), options)
+  elapsed <- system.time(dbExecute(con, query))
+  counts <- dbGetQuery(con, paste(
+    "SELECT count(*) AS rows, sum(hash(r)::HUGEINT)::VARCHAR AS checksum",
+    "FROM records r"
+  ))
+  stopifnot(as.numeric(counts$rows) == expected_rows)
+  schema <- dbGetQuery(con, "DESCRIBE records")
+  if (nzchar(snapshot)) {
+    dbExecute(con, sprintf("COPY records TO %s (FORMAT PARQUET)",
+                          dbQuoteString(con, snapshot)))
+  }
+  data.frame(rows = as.numeric(counts$rows), columns = nrow(schema),
+             checksum = counts$checksum,
+             schema_sha256 = digest::digest(schema, algo = "sha256"),
+             elapsed = unname(elapsed["elapsed"]),
+             load_elapsed = unname(load_time["elapsed"]))
+}
+
+results <- list()
+snapshots <- matrix("", nrow(inputs), length(extensions),
+                    dimnames = list(inputs$workload, names(extensions)))
+for (i in seq_len(nrow(inputs))) {
+  for (iteration in seq_len(repetitions)) {
+    # Alternating order limits systematic drift between the two builds.
+    order <- if (iteration %% 2L) names(extensions) else rev(names(extensions))
+    for (build in order) {
+      snapshot <- if (iteration == 1L) file.path(scratch, paste0(i, "-", build, ".parquet")) else ""
+      if (nzchar(snapshot)) snapshots[i, build] <- snapshot
+      result <- callr::r(measure, list(extensions[[build]], paths[[i]], inputs$reader[[i]],
+                                      inputs$options[[i]], inputs$expected_rows[[i]], snapshot))
+      results[[length(results) + 1L]] <- cbind(
+        data.frame(workload = inputs$workload[[i]], build, iteration), result
+      )
+    }
+  }
+}
+results <- do.call(rbind, results)
+
+# Compare complete first-run multisets in both directions, retaining duplicates.
+con <- dbConnect(duckdb(shared_home = FALSE))
+multiset_difference <- function(con, a, b) {
+  query <- sprintf(paste(
+    "SELECT count(*) AS n FROM ((SELECT * FROM %s EXCEPT ALL SELECT * FROM %s)",
+    "UNION ALL (SELECT * FROM %s EXCEPT ALL SELECT * FROM %s)) differences"
+  ), a, b, b, a)
+  as.numeric(dbGetQuery(con, query)$n)
+}
+proofs <- list()
+for (i in seq_len(nrow(inputs))) {
+  a <- paste0("read_parquet(", dbQuoteString(con, snapshots[i, "baseline"]), ")")
+  b <- paste0("read_parquet(", dbQuoteString(con, snapshots[i, "candidate"]), ")")
+  mismatches <- multiset_difference(con, a, b)
+  group <- results[results$workload == inputs$workload[[i]], ]
+  stopifnot(mismatches == 0, length(unique(group$checksum)) == 1L,
+            length(unique(group$schema_sha256)) == 1L)
+  proofs[[i]] <- data.frame(workload = inputs$workload[[i]], mismatches,
+                            rows = group$rows[[1]], columns = group$columns[[1]],
+                            checksum = group$checksum[[1]])
+}
+# The same multiset comparison must detect a missing duplicate record.
+stopifnot(multiset_difference(con, "(VALUES (1),(1)) a(x)", "(VALUES (1)) b(x)") == 1,
+          multiset_difference(con, "(VALUES (1)) a(x)", "(VALUES (1),(1)) b(x)") == 1,
+          multiset_difference(con, "(VALUES (NULL),(1)) a(x)", "(VALUES (1),(1)) b(x)") == 2)
+dbDisconnect(con, shutdown = TRUE)
+unlink(scratch, recursive = TRUE)
+proofs <- do.call(rbind, proofs)
+write.csv(results, "data/init_readers_timings.csv", row.names = FALSE)
+write.csv(inputs, "data/init_readers_inputs.csv", row.names = FALSE)
+write.csv(metadata, "data/init_readers_metadata.csv", row.names = FALSE)
+write.csv(proofs, "data/init_readers_proofs.csv", row.names = FALSE)
+```
+
+```{r tables, include=FALSE}
+results <- read.csv("data/init_readers_timings.csv", colClasses = c(checksum = "character"))
+inputs <- read.csv("data/init_readers_inputs.csv")
+metadata <- read.csv("data/init_readers_metadata.csv")
+proofs <- read.csv("data/init_readers_proofs.csv", colClasses = "character")
+repetitions <- unique(metadata$measured_repetitions)
+stopifnot(length(repetitions) == 1L)
+summary <- aggregate(elapsed ~ workload + build, results, median)
+comparison <- merge(summary[summary$build == "baseline", c("workload", "elapsed")],
+                    summary[summary$build == "candidate", c("workload", "elapsed")],
+                    by = "workload", suffixes = c("_baseline", "_candidate"))
+comparison$ratio <- comparison$elapsed_candidate / comparison$elapsed_baseline
+```
+
+## Scope and method
+
+This is a matched check of five reader/format combinations on one host, with
+**one DuckDB thread**, automatic SIMD dispatch, and no htslib decompression
+workers for BAM/VCF/BCF. Each observation starts a fresh R process and database.
+All reader columns are decoded and materialized by `CREATE TABLE AS SELECT *`;
+checksums and comparison snapshots are outside the timed interval. Extension
+load time is recorded separately. There are `r repetitions` measured
+observations per build/workload, in alternating build order; no cold-cache or
+peak-memory claim is made.
+
+Inputs resolve through `duckhtsbench`: the ONT E. coli BAM, its FASTQ reads and
+reference, and the registered two-million-record synthetic VCF/BCF. Expected
+counts come from the retained ONT staging evidence, reference/read registry
+metadata, and synthetic generator contract. They are not inferred from candidate
+output. Every repetition must match its expected record count, complete schema,
+and all-field checksum. First-run outputs additionally undergo exact multiset
+comparison in both directions, including duplicate rows.
+
+This workload does not measure DuckVEP, CRAM, indexed interval selection, or
+reader scaling across thread counts. The nearest broader reader baselines are
+[BCF record caching](benchmark_bcf_record_cache.md),
+[multi-region readers](benchmark_multi_region_readers.md), and
+[FASTQ reading](benchmark_fastq_reader.md); their inputs/projections differ, so
+the matched baseline in this report is the performance comparator.
+
+## Artifact identity
+
+```{r metadata}
+knitr::kable(metadata[setdiff(names(metadata), c("host_system", "cpu_model"))])
+```
+
+```{r host}
+cat(metadata$host_system[[1]], "\n", metadata$cpu_model[[1]], "\n", sep = "")
+```
+
+## Inputs and output denominators
+
+```{r inputs}
+knitr::kable(inputs[c("workload", "artifact", "expected_rows", "bytes", "sha256")])
+knitr::kable(proofs)
+```
+
+## Matched reader timing
+
+Median seconds and candidate/baseline ratios. The single-record FASTA has
+millisecond-scale variation and limited timing resolution; its 14–15 ms range
+is not evidence of a general reader speed difference.
+
+```{r timing}
+knitr::kable(comparison, digits = 3)
+```
+
+```{r distribution}
+distribution <- aggregate(elapsed ~ workload + build, results,
+                          function(x) c(min = min(x), median = median(x), max = max(x)))
+knitr::kable(do.call(data.frame, distribution), digits = 3)
+```
+
+```{r load}
+knitr::kable(aggregate(load_elapsed ~ build, results, median), digits = 3)
+```
+
+Raw timings, source/binary identities, input hashes and equality proofs are kept
+in `data/init_readers_{timings,metadata,inputs,proofs}.csv`. The default render
+measures and validates the workload; `measure: false` renders those recorded
+CSVs without executing readers or creating new measurements.
