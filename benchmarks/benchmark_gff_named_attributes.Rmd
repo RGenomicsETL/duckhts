@@ -14,6 +14,9 @@ runtime's own default; the GFF reader uses one worker in either setting.
 
 ```{r setup, include=FALSE}
 knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r benchmark, include=FALSE}
 Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath(
   "r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE
 ))
@@ -41,6 +44,7 @@ named <- paste0(source_sql, ", attributes := ['Parent', 'ID', 'gene_type'])")
 map <- paste0(source_sql, ", attributes_map := true)")
 queries <- c(
   plain_columns = paste0("SELECT count(*) n, sum(start + \"end\") metric FROM ", plain),
+  named_none_projected = paste0("SELECT count(*) n, sum(start + \"end\") metric FROM ", named),
   attributes_string = paste0("SELECT count(*) n, sum(length(attributes)) metric FROM ", plain),
   map_parent = paste0("SELECT count(*) n, count(attributes_map['Parent']) metric FROM ", map),
   regexp_three = paste0("SELECT count(*) n, sum(length(regexp_extract(attributes, '(?:^|;)Parent=([^;]*)', 1)) + length(regexp_extract(attributes, '(?:^|;)ID=([^;]*)', 1)) + length(regexp_extract(attributes, '(?:^|;)gene_type=([^;]*)', 1))) metric FROM ", plain),
@@ -82,5 +86,8 @@ knitr::kable(results, digits = 3)
 ```
 
 The one-key projection requests three keys at bind but scans only `Parent`.
-Comparisons across workloads reflect different aggregation and expression costs,
-not isolated parsing cycles. Browser wasm timings are not measured in this report.
+`named_none_projected` requests three keys at bind but reads only the physical
+coordinate columns; its scan skips attribute parsing entirely. Comparisons across workloads reflect different aggregation and expression costs,
+not isolated parsing cycles. The local duckdb-wasm browser test could not load
+this extension: `duckdb_get_list_size` has an incompatible wasm import type
+with the staged browser runtime. Browser wasm timings are unavailable.
