@@ -957,7 +957,7 @@ static void register_reverse_regionkey_function(duckdb_connection connection) {
     duckdb_destroy_logical_type(&struct_type);
 }
 
-void register_variantkey_functions(duckdb_connection connection) {
+bool register_variantkey_functions(duckdb_connection connection) {
     duckdb_scalar_function fn;
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_logical_type bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
@@ -1085,6 +1085,7 @@ void register_variantkey_functions(duckdb_connection connection) {
 
     register_decode_regionkey_function(connection);
 
+    duckdb_scalar_function_set regionkey_set = duckdb_create_scalar_function_set("regionkey");
     fn = duckdb_create_scalar_function();
     duckdb_scalar_function_set_name(fn, "regionkey");
     duckdb_scalar_function_add_parameter(fn, varchar_type);
@@ -1092,7 +1093,7 @@ void register_variantkey_functions(duckdb_connection connection) {
     duckdb_scalar_function_add_parameter(fn, bigint_type);
     duckdb_scalar_function_set_return_type(fn, ubigint_type);
     duckdb_scalar_function_set_function(fn, regionkey_scalar3);
-    duckdb_register_scalar_function(connection, fn);
+    bool ok = duckdb_add_scalar_function_to_set(regionkey_set, fn) == DuckDBSuccess;
     duckdb_destroy_scalar_function(&fn);
 
     fn = duckdb_create_scalar_function();
@@ -1103,8 +1104,10 @@ void register_variantkey_functions(duckdb_connection connection) {
     duckdb_scalar_function_add_parameter(fn, bigint_type);
     duckdb_scalar_function_set_return_type(fn, ubigint_type);
     duckdb_scalar_function_set_function(fn, regionkey_scalar4);
-    duckdb_register_scalar_function(connection, fn);
+    ok = duckdb_add_scalar_function_to_set(regionkey_set, fn) == DuckDBSuccess && ok;
     duckdb_destroy_scalar_function(&fn);
+    ok = ok && duckdb_register_scalar_function_set(connection, regionkey_set) == DuckDBSuccess;
+    duckdb_destroy_scalar_function_set(&regionkey_set);
 
     fn = duckdb_create_scalar_function();
     duckdb_scalar_function_set_name(fn, "regionkey_hex");
@@ -1172,4 +1175,5 @@ void register_variantkey_functions(duckdb_connection connection) {
     duckdb_destroy_logical_type(&bool_type);
     duckdb_destroy_logical_type(&utinyint_type);
     duckdb_destroy_logical_type(&uinteger_type);
+    return ok;
 }

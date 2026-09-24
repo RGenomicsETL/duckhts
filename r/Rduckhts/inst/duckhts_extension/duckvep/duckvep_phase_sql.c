@@ -217,8 +217,10 @@ static bool register_raw_preparation(duckdb_connection connection) {
     return state == DuckDBSuccess;
 }
 
-bool duckvep_register_phase_call(duckdb_connection connection) {
-    if (!register_raw_preparation(connection)) return false;
+bool duckvep_register_phase_kernels(duckdb_connection connection) {
+    if (!register_raw_preparation(connection)) {
+        return false;
+    }
     duckdb_logical_type integer = duckdb_create_logical_type(DUCKDB_TYPE_INTEGER);
     duckdb_logical_type boolean = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
     duckdb_logical_type ushort = duckdb_create_logical_type(DUCKDB_TYPE_USMALLINT);
@@ -251,7 +253,10 @@ bool duckvep_register_phase_call(duckdb_connection connection) {
     duckdb_destroy_logical_type(&ushort);
     duckdb_destroy_logical_type(&boolean);
     duckdb_destroy_logical_type(&integer);
-    if (state != DuckDBSuccess) return false;
+    return state == DuckDBSuccess;
+}
+
+bool duckvep_register_phase_call(duckhts_registration_t *registration) {
     /* A list-wise cast of SQLNULL[] can leave a constant NULL child under a
      * flat parent. The stable C callback only flattens that parent in this
      * case, so indexing the child's validity mask treats later NULLs as valid.
@@ -264,5 +269,5 @@ bool duckvep_register_phase_call(duckdb_connection connection) {
         "list_transform(phase_before, p -> CAST(p AS BOOLEAN)), ",
         "CAST(phase_set AS BIGINT), CAST(phase_policy AS VARCHAR))"
     };
-    return duckvep_register_sql_parts(connection, sql, sizeof(sql) / sizeof(sql[0]));
+    return duckhts_register_sql_parts(registration, sql, sizeof(sql) / sizeof(sql[0]));
 }

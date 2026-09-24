@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include "duckhts_somalier.h"
+#include "duckhts_registration.h"
 #include "duckhts_simd.h"
 #include "wasm_http_hfile.h"
 
@@ -38,9 +39,9 @@ extern void register_duckhts_somalier_contamination_functions(
 extern void register_duckhts_somalier_matched_functions(
     duckdb_connection connection);
 extern bool register_duckhts_somalier_vcf_extract_sql(
-    duckdb_connection connection);
+    duckhts_registration_t *registration);
 extern bool register_duckhts_somalier_bam_extract_functions(
-    duckdb_connection connection, duckdb_database database);
+    duckhts_registration_t *registration, duckdb_database database);
 /* interval_udf.c */
 extern void register_read_bed_function(duckdb_connection connection);
 extern void register_fasta_nuc_function(duckdb_connection connection);
@@ -85,13 +86,14 @@ extern void register_duckhts_samtools_idxstats_function(duckdb_connection connec
 /* bam_bed_coverage.c */
 extern void register_duckhts_bam_bed_coverage_function(duckdb_connection connection);
 /* cgranges_api.c */
-extern void register_duckhts_cgranges_functions(duckdb_connection connection, duckdb_database database);
+extern bool register_duckhts_cgranges_functions(duckdb_connection connection, duckdb_database database);
 /* duckvep resident model and annotation adapter */
-extern void register_duckvep_functions(duckdb_connection connection, duckdb_database database);
-extern bool register_duckvep_ensembl_functions(duckdb_connection connection);
-extern bool register_duckvep_sql_functions(duckdb_connection connection);
+extern bool register_duckvep_functions(duckdb_connection connection, duckdb_database database);
+extern bool register_duckvep_sql_kernels(duckhts_registration_t *registration);
+extern bool register_duckvep_ensembl_functions(duckhts_registration_t *registration);
+extern bool register_duckvep_sql_functions(duckhts_registration_t *registration);
 /* variantkey_udf.c */
-extern void register_variantkey_functions(duckdb_connection connection);
+extern bool register_variantkey_functions(duckdb_connection connection);
 /* simd/duckhts_simd_dispatch.c */
 extern void register_duckhts_simd_functions(duckdb_connection connection);
 
@@ -184,55 +186,26 @@ static void register_duckhts_htslib_functions(duckdb_connection connection) {
     duckdb_destroy_scalar_function(&function);
 }
 
-static bool run_sql_or_fail(duckdb_connection connection, const char *sql) {
-    duckdb_result result;
-    duckdb_state state = duckdb_query(connection, sql, &result);
-    if (state != DuckDBSuccess) {
-        const char *err = duckdb_result_error(&result);
-        if (err && *err) {
-            fprintf(stderr, "[duckhts] failed SQL registration: %s\n", err);
-        }
-        duckdb_destroy_result(&result);
-        return false;
-    }
-    duckdb_destroy_result(&result);
-    return true;
-}
-
-static bool run_sql_parts_or_fail(duckdb_connection connection, const char *const *parts, size_t count) {
-    size_t total_len = 0;
-    size_t offset = 0;
-    char *sql = NULL;
-    size_t i;
-    bool ok;
-
-    for (i = 0; i < count; i++) {
-        total_len += strlen(parts[i]);
-    }
-
-    sql = (char *)malloc(total_len + 1);
-    if (!sql) {
-        fprintf(stderr, "[duckhts] failed SQL registration: out of memory\n");
-        return false;
-    }
-
-    for (i = 0; i < count; i++) {
-        size_t len = strlen(parts[i]);
-        memcpy(sql + offset, parts[i], len);
-        offset += len;
-    }
-    sql[offset] = '\0';
-
-    ok = run_sql_or_fail(connection, sql);
-    free(sql);
-    return ok;
-}
-
 DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
                             duckdb_extension_info info,
                             struct duckdb_extension_access* access) {
-    (void)info;
-    (void)access;
+    duckhts_registration_t registration = {
+        .connection = connection,
+        .info = info,
+        .access = access
+    };
+    const char *version = duckdb_library_version();
+    unsigned major = 0;
+    unsigned minor = 0;
+    if (sscanf(version, "v%u.%u", &major, &minor) != 2 ||
+        major < 1 || (major == 1 && minor < 4)) {
+        char message[160];
+        snprintf(message, sizeof(message),
+                 "DuckHTS requires DuckDB 1.4.0 or newer; loaded runtime is %s", version);
+        return duckhts_registration_error(&registration, message);
+    }
+
+    /* Native functions must exist before SQL macros are bound. */
     register_wasm_http_hfile_backend();
     duckhts_simd_init();
 
@@ -247,9 +220,8 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_read_fastq_function(connection);
     register_duckhts_fastq_qc_function(connection);
     register_duckhts_somalier_functions(connection);
-    if (!register_duckhts_somalier_vcf_extract_sql(connection) ||
-        !register_duckhts_somalier_bam_extract_functions(
-            connection, *access->get_database(info))) {
+    if (!register_duckhts_somalier_bam_extract_functions(
+            &registration, *access->get_database(info))) {
         return false;
     }
     register_duckhts_somalier_contamination_functions(connection);
@@ -280,41 +252,48 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_bam_bin_counts_function(connection);
     register_duckhts_samtools_idxstats_function(connection);
     register_duckhts_bam_bed_coverage_function(connection);
-    register_variantkey_functions(connection);
-    register_duckhts_cgranges_functions(connection, *access->get_database(info));
-    register_duckvep_functions(connection, *access->get_database(info));
-    if (!register_duckvep_ensembl_functions(connection)) {
+    if (!register_variantkey_functions(connection)) {
+        return duckhts_registration_error(&registration,
+            "DuckHTS could not register regionkey overloads");
+    }
+    if (!register_duckhts_cgranges_functions(connection, *access->get_database(info))) {
+        return duckhts_registration_error(&registration,
+            "DuckHTS could not register cgranges functions");
+    }
+    if (!register_duckvep_functions(connection, *access->get_database(info))) {
+        return duckhts_registration_error(&registration,
+            "DuckHTS could not register DuckVEP scalar overloads");
+    }
+    if (!register_duckvep_sql_kernels(&registration)) {
         return false;
     }
-    if (!register_duckvep_sql_functions(connection)) {
-        return false;
-    }
-    if (!run_sql_or_fail(connection,
+
+    if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckhts_quote_ident(x) AS "
         "CASE WHEN x IS NULL THEN NULL ELSE '\"' || replace(x, '\"', '\"\"') || '\"' END")) {
         return false;
     }
-    if (!run_sql_or_fail(connection,
+    if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckhts_quote_string(x) AS "
         "CASE WHEN x IS NULL THEN NULL ELSE '''' || replace(x, '''', '''''') || '''' END")) {
         return false;
     }
-    if (!run_sql_or_fail(connection,
+    if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckhts_json_path_key(x) AS "
         "'$.\"' || replace(replace(x, '\\', '\\\\'), '\"', '\\\"') || '\"'")) {
         return false;
     }
-    if (!run_sql_or_fail(connection,
+    if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckhts_duckdb_type_supported(candidate_type_name) AS ("
         "EXISTS (SELECT 1 FROM duckdb_types() AS dt WHERE lower(dt.type_name) = lower(candidate_type_name)))")) {
         return false;
     }
-    if (!run_sql_or_fail(connection,
+    if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckhts_duckdb_supports_variant() AS ("
         "duckhts_duckdb_type_supported('VARIANT'))")) {
         return false;
     }
-    if (!run_sql_or_fail(connection,
+    if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckhts_duckdb_supports_geometry() AS ("
         "duckhts_duckdb_type_supported('GEOMETRY'))")) {
         return false;
@@ -389,13 +368,13 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
 
         snprintf(max_identity_bytes, sizeof(max_identity_bytes), "%u",
                  (unsigned int)DUCKHTS_SOMALIER_MAX_IDENTITY_BYTES);
-        if (!run_sql_parts_or_fail(connection, somalier_panel_sha256_sql,
+        if (!duckhts_register_sql_parts(&registration, somalier_panel_sha256_sql,
                 sizeof(somalier_panel_sha256_sql) /
                     sizeof(somalier_panel_sha256_sql[0]))) {
             return false;
         }
     }
-    if (!run_sql_or_fail(connection,
+    if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckhts_somalier_prepare_sketches("
         "evidence_table, panel_table, min_depth, min_het_balance, "
         "hom_balance_cutoff, max_sites := 1000000) AS TABLE "
@@ -439,7 +418,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "WHERE ec.valid GROUP BY c.sample_id, pi.panel_sha256, pi.site_count")) {
         return false;
     }
-    if (!run_sql_or_fail(connection,
+    if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckhts_somalier_verify_sketches("
         "evidence_table, panel_table, sketches_table, max_sites := 1000000) AS ("
         "WITH __dht_stored AS MATERIALIZED (SELECT sketch FROM query_table(sketches_table)), "
@@ -482,7 +461,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "FROM __dht_compared)")) {
         return false;
     }
-    if (!run_sql_or_fail(connection,
+    if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckhts_somalier_frequency_sha256("
         "frequency_table, panel_table) AS ("
         "WITH __dht_panel AS MATERIALIZED (SELECT CAST(assembly AS VARCHAR) AS assembly, "
@@ -619,7 +598,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         static const char *const charr_sql[] = {
             charr_sql_a, charr_sql_b, charr_sql_c
         };
-        if (!run_sql_parts_or_fail(connection, charr_sql,
+        if (!duckhts_register_sql_parts(&registration, charr_sql,
                 sizeof(charr_sql) / sizeof(charr_sql[0]))) {
             return false;
         }
@@ -786,18 +765,18 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             matched_sql_a, matched_sql_b, matched_sql_c, matched_sql_d,
             matched_sql_e
         };
-        if (!run_sql_parts_or_fail(connection, matched_sql,
+        if (!duckhts_register_sql_parts(&registration, matched_sql,
                 sizeof(matched_sql) / sizeof(matched_sql[0]))) {
             return false;
         }
     }
-    if (!run_sql_or_fail(connection,
+    if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckhts_parquet_ident_list(cols) AS ("
         "CASE WHEN len(cols) = 0 THEN '*' "
         "ELSE (SELECT string_agg(duckhts_quote_ident(x), ', ') FROM unnest(cols) AS t(x)) END)")) {
         return false;
     }
-    if (!run_sql_or_fail(connection,
+    if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckhts_raw_header_text(path, format_hint) AS ("
         "(SELECT coalesce(string_agg(raw, '\\n' ORDER BY idx), '') "
         "FROM read_hts_header(path, format := format_hint, mode := 'raw')))")) {
@@ -835,7 +814,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             "UNION ALL SELECT e.key, e.value, 40 FROM unnest(map_entries(metadata)) AS t(e)",
             ") all_metadata) ranked WHERE rn = 1)"
         };
-        if (!run_sql_parts_or_fail(connection, parquet_metadata_sql,
+        if (!duckhts_register_sql_parts(&registration, parquet_metadata_sql,
                                    sizeof(parquet_metadata_sql) / sizeof(parquet_metadata_sql[0]))) {
             return false;
         }
@@ -858,7 +837,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             "duckhts_parquet_metadata_args(source_format, reader, path, header_key, header_value, header_corrected, columns, partition_by, filter_sql, layout_metadata, metadata, metadata_json_file, write_format_version) || ')' ",
             "ELSE '' END || ')' )"
         };
-        if (!run_sql_parts_or_fail(connection, parquet_copy_sql,
+        if (!duckhts_register_sql_parts(&registration, parquet_copy_sql,
                                    sizeof(parquet_copy_sql) / sizeof(parquet_copy_sql[0]))) {
             return false;
         }
@@ -883,7 +862,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             "metadata := metadata, metadata_json_file := metadata_json_file, compression := compression, row_group_size := row_group_size, ",
             "include_metadata := include_metadata, overwrite := overwrite, write_format_version := write_format_version))"
         };
-        if (!run_sql_parts_or_fail(connection, bcf_convert_sql,
+        if (!duckhts_register_sql_parts(&registration, bcf_convert_sql,
                                    sizeof(bcf_convert_sql) / sizeof(bcf_convert_sql[0]))) {
             return false;
         }
@@ -914,7 +893,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             "metadata := metadata, metadata_json_file := metadata_json_file, compression := compression, row_group_size := row_group_size, ",
             "include_metadata := include_metadata, overwrite := overwrite, write_format_version := write_format_version))"
         };
-        if (!run_sql_parts_or_fail(connection, bam_convert_sql,
+        if (!duckhts_register_sql_parts(&registration, bam_convert_sql,
                                    sizeof(bam_convert_sql) / sizeof(bam_convert_sql[0]))) {
             return false;
         }
@@ -942,7 +921,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             "[coalesce(region, ''), CASE WHEN header IS NULL THEN '' WHEN header THEN 'true' ELSE 'false' END, array_to_string(header_names, ','), CASE WHEN auto_detect IS NULL THEN '' WHEN auto_detect THEN 'true' ELSE 'false' END, array_to_string(column_types, ','), CASE WHEN attributes_map THEN 'true' ELSE 'false' END, CASE WHEN attributes_list THEN 'true' ELSE 'false' END, CASE WHEN attributes_pairs THEN 'true' ELSE 'false' END, CASE WHEN strict THEN 'true' ELSE 'false' END]), ",
             "metadata := metadata, metadata_json_file := metadata_json_file, compression := compression, row_group_size := row_group_size, include_metadata := include_metadata, overwrite := overwrite, write_format_version := write_format_version))"
         };
-        if (!run_sql_parts_or_fail(connection, gff_convert_sql,
+        if (!duckhts_register_sql_parts(&registration, gff_convert_sql,
                                    sizeof(gff_convert_sql) / sizeof(gff_convert_sql[0]))) {
             return false;
         }
@@ -965,7 +944,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             "[coalesce(region, ''), CASE WHEN header IS NULL THEN '' WHEN header THEN 'true' ELSE 'false' END, array_to_string(header_names, ','), CASE WHEN auto_detect IS NULL THEN '' WHEN auto_detect THEN 'true' ELSE 'false' END, array_to_string(column_types, ',')]), ",
             "metadata := metadata, metadata_json_file := metadata_json_file, compression := compression, row_group_size := row_group_size, include_metadata := include_metadata, overwrite := overwrite, write_format_version := write_format_version))"
         };
-        if (!run_sql_parts_or_fail(connection, tabix_convert_sql,
+        if (!duckhts_register_sql_parts(&registration, tabix_convert_sql,
                                    sizeof(tabix_convert_sql) / sizeof(tabix_convert_sql[0]))) {
             return false;
         }
@@ -982,7 +961,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             ") FROM glob(pattern) g(file))",
             ")"
         };
-        if (!run_sql_parts_or_fail(connection, hts_union_query_sql,
+        if (!duckhts_register_sql_parts(&registration, hts_union_query_sql,
                                     sizeof(hts_union_query_sql) / sizeof(hts_union_query_sql[0]))) {
             return false;
         }
@@ -1002,12 +981,12 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             ") FROM unnest(regions) WITH ORDINALITY AS t(region, ord))",
             ")"
         };
-        if (!run_sql_parts_or_fail(connection, hts_region_union_query_sql,
+        if (!duckhts_register_sql_parts(&registration, hts_region_union_query_sql,
                                     sizeof(hts_region_union_query_sql) / sizeof(hts_region_union_query_sql[0]))) {
             return false;
         }
     }
-    if (!run_sql_or_fail(connection,
+    if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckdb_munge_preset_map(preset) AS "
         "CASE "
         "WHEN upper(preset) = 'PLINK' THEN map(['SNP','BP','CHR','A1','A2','P','OR','BETA','INFO','FRQ','SE'], ['SNP','BP','CHR','A1','A2','P','OR','BETA','INFO','FRQ','SE']) "
@@ -1021,7 +1000,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "ELSE error('duckdb_munge: unknown preset') END")) {
         return false;
     }
-    if (!run_sql_or_fail(connection,
+    if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckdb_munge_resolved_map(preset, column_map, column_map_file) AS "
         "CASE "
         "WHEN preset <> '' AND map_extract_value(column_map, '') IS NULL THEN error('duckdb_munge: specify only one of preset, column_map, or column_map_file') "
@@ -1073,7 +1052,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             "  fasta_ref, iffy_tag, mismatch_tag, ns, nc, ne",
             ") AS mu) q"
         };
-        if (!run_sql_parts_or_fail(connection, duckdb_munge_sql, sizeof(duckdb_munge_sql) / sizeof(duckdb_munge_sql[0]))) {
+        if (!duckhts_register_sql_parts(&registration, duckdb_munge_sql, sizeof(duckdb_munge_sql) / sizeof(duckdb_munge_sql[0]))) {
             return false;
         }
     }
@@ -1117,12 +1096,12 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             "  fasta_ref, iffy_tag, mismatch_tag, ns, nc, ne",
             ") AS mu) q"
         };
-        if (!run_sql_parts_or_fail(connection, duckdb_munge_metal_sql,
+        if (!duckhts_register_sql_parts(&registration, duckdb_munge_metal_sql,
                                    sizeof(duckdb_munge_metal_sql) / sizeof(duckdb_munge_metal_sql[0]))) {
             return false;
         }
     }
-    if (!run_sql_or_fail(connection,
+    if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO read_hts_index_raw(path, format := NULL, index_path := NULL) AS TABLE "
         "SELECT "
         "index_type, index_path, meta AS raw "
@@ -1131,7 +1110,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "LIMIT 1")) {
         return false;
     }
-    if (!run_sql_or_fail(connection,
+    if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckdb_liftover(table_name, chrom_col, pos_col, ref_col := NULL, alt_col := NULL, "
         "chain_path := NULL, dst_fasta_ref := NULL, src_fasta_ref := NULL, max_snp_gap := 1, max_indel_inc := 250, "
         "lift_mt := false, end_pos_col := NULL, no_left_align := false) AS TABLE "
@@ -1182,11 +1161,13 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             "'FROM (SELECT * FROM ' || table_name || ') src' ",
             "END)"
         };
-        if (!run_sql_parts_or_fail(connection, duckhts_bcftools_norm_sql,
+        if (!duckhts_register_sql_parts(&registration, duckhts_bcftools_norm_sql,
                                    sizeof(duckhts_bcftools_norm_sql) / sizeof(duckhts_bcftools_norm_sql[0]))) {
             return false;
         }
     }
 
-    return true;
+    return register_duckvep_sql_functions(&registration) &&
+           register_duckvep_ensembl_functions(&registration) &&
+           register_duckhts_somalier_vcf_extract_sql(&registration);
 }

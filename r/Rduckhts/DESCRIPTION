@@ -29,7 +29,7 @@ Depends:
     R (>= 4.4.0)
 Imports:
     DBI,
-    duckdb,
+    duckdb (>= 1.4.0),
     methods,
     utils
 Suggests:

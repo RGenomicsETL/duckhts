@@ -3750,18 +3750,17 @@ duckvep_hgvs_annotation_list_type(void)
 	return list;
 }
 
-static void
+static bool
 duckvep_register_annotate_scalar(duckdb_connection connection,
 	duckvep_registry_t *registry, duckdb_logical_type varchar_type,
 	duckdb_logical_type uinteger_type, duckdb_logical_type ubigint_type,
-	int distance_parameters, int compact,
-	duckvep_scalar_event_family_t event_family)
+	int compact, duckvep_scalar_event_family_t event_family)
 {
-	duckdb_scalar_function scalar;
+	duckdb_scalar_function_set functions;
 	duckdb_logical_type result_type;
+	bool ok = true;
 	const char *name;
 
-	scalar = duckdb_create_scalar_function();
 	result_type = compact ? duckvep_compact_annotation_list_type() :
 	    duckvep_annotation_list_type(0, 0);
 	if (event_family == DUCKVEP_SCALAR_STRUCTURAL)
@@ -3773,118 +3772,135 @@ duckvep_register_annotate_scalar(duckdb_connection connection,
 	else
 		name = compact ? "_duckvep_annotate_small_compact" :
 		    "_duckvep_annotate_small_rich";
-	duckdb_scalar_function_set_name(scalar, name);
-	duckdb_scalar_function_add_parameter(scalar, varchar_type);
-	duckdb_scalar_function_add_parameter(scalar, uinteger_type);
-	duckdb_scalar_function_add_parameter(scalar, ubigint_type);
-	if (event_family == DUCKVEP_SCALAR_STRUCTURAL) {
-		duckdb_scalar_function_add_parameter(scalar, ubigint_type);
+	functions = duckdb_create_scalar_function_set(name);
+	for (int distance_parameters = 0; distance_parameters <= 2; distance_parameters++) {
+		duckdb_scalar_function scalar = duckdb_create_scalar_function();
+		duckdb_scalar_function_set_name(scalar, name);
 		duckdb_scalar_function_add_parameter(scalar, varchar_type);
-		duckdb_scalar_function_add_parameter(scalar, varchar_type);
-	} else if (event_family == DUCKVEP_SCALAR_BREAKEND) {
 		duckdb_scalar_function_add_parameter(scalar, uinteger_type);
 		duckdb_scalar_function_add_parameter(scalar, ubigint_type);
-	} else {
-		duckdb_scalar_function_add_parameter(scalar, varchar_type);
-		duckdb_scalar_function_add_parameter(scalar, varchar_type);
+		if (event_family == DUCKVEP_SCALAR_STRUCTURAL) {
+			duckdb_scalar_function_add_parameter(scalar, ubigint_type);
+			duckdb_scalar_function_add_parameter(scalar, varchar_type);
+			duckdb_scalar_function_add_parameter(scalar, varchar_type);
+		} else if (event_family == DUCKVEP_SCALAR_BREAKEND) {
+			duckdb_scalar_function_add_parameter(scalar, uinteger_type);
+			duckdb_scalar_function_add_parameter(scalar, ubigint_type);
+		} else {
+			duckdb_scalar_function_add_parameter(scalar, varchar_type);
+			duckdb_scalar_function_add_parameter(scalar, varchar_type);
+		}
+		if (distance_parameters >= 1)
+			duckdb_scalar_function_add_parameter(scalar, ubigint_type);
+		if (distance_parameters >= 2)
+			duckdb_scalar_function_add_parameter(scalar, ubigint_type);
+		duckdb_scalar_function_set_return_type(scalar, result_type);
+		duckdb_scalar_function_set_volatile(scalar);
+		duckvep_registry_retain(registry);
+		duckdb_scalar_function_set_extra_info(scalar, registry,
+		    duckvep_registry_release);
+		if (event_family == DUCKVEP_SCALAR_STRUCTURAL)
+			duckdb_scalar_function_set_function(scalar, compact ?
+			    duckvep_annotate_sv_compact_scalar : duckvep_annotate_sv_scalar);
+		else if (event_family == DUCKVEP_SCALAR_BREAKEND)
+			duckdb_scalar_function_set_function(scalar, compact ?
+			    duckvep_annotate_breakend_compact_scalar :
+			    duckvep_annotate_breakend_scalar);
+		else
+			duckdb_scalar_function_set_function(scalar, compact ?
+			    duckvep_annotate_compact_scalar : duckvep_annotate_scalar);
+		ok = duckdb_add_scalar_function_to_set(functions, scalar) == DuckDBSuccess && ok;
+		duckdb_destroy_scalar_function(&scalar);
 	}
-	if (distance_parameters >= 1)
-		duckdb_scalar_function_add_parameter(scalar, ubigint_type);
-	if (distance_parameters >= 2)
-		duckdb_scalar_function_add_parameter(scalar, ubigint_type);
-	duckdb_scalar_function_set_return_type(scalar, result_type);
-	duckdb_scalar_function_set_volatile(scalar);
-	duckvep_registry_retain(registry);
-	duckdb_scalar_function_set_extra_info(scalar, registry,
-	    duckvep_registry_release);
-	if (event_family == DUCKVEP_SCALAR_STRUCTURAL)
-		duckdb_scalar_function_set_function(scalar, compact ?
-		    duckvep_annotate_sv_compact_scalar : duckvep_annotate_sv_scalar);
-	else if (event_family == DUCKVEP_SCALAR_BREAKEND)
-		duckdb_scalar_function_set_function(scalar, compact ?
-		    duckvep_annotate_breakend_compact_scalar :
-		    duckvep_annotate_breakend_scalar);
-	else
-		duckdb_scalar_function_set_function(scalar, compact ?
-		    duckvep_annotate_compact_scalar : duckvep_annotate_scalar);
-	(void)duckdb_register_scalar_function(connection, scalar);
-	duckdb_destroy_scalar_function(&scalar);
+	ok = ok && duckdb_register_scalar_function_set(connection, functions) == DuckDBSuccess;
+	duckdb_destroy_scalar_function_set(&functions);
 	duckdb_destroy_logical_type(&result_type);
+	return ok;
 }
 
-static void
+static bool
 duckvep_register_hgvs_scalar(duckdb_connection connection,
 	duckvep_registry_t *registry, duckdb_logical_type varchar_type,
 	duckdb_logical_type uinteger_type, duckdb_logical_type ubigint_type,
-	int distance_parameters, int rich)
+	int rich)
 {
-	duckdb_scalar_function scalar;
-	duckdb_logical_type result_type;
-
-	scalar = duckdb_create_scalar_function();
-	result_type = rich ? duckvep_annotation_list_type(1, 0) :
+	bool ok = true;
+	const char *name = rich ? "_duckvep_annotate_small_rich_hgvs" :
+	    "_duckvep_annotate_small_hgvs";
+	duckdb_scalar_function_set functions = duckdb_create_scalar_function_set(name);
+	duckdb_logical_type result_type = rich ? duckvep_annotation_list_type(1, 0) :
 	    duckvep_hgvs_annotation_list_type();
-	duckdb_scalar_function_set_name(scalar,
-	    rich ? "_duckvep_annotate_small_rich_hgvs" :
-	    "_duckvep_annotate_small_hgvs");
-	duckdb_scalar_function_add_parameter(scalar, varchar_type);
-	duckdb_scalar_function_add_parameter(scalar, uinteger_type);
-	duckdb_scalar_function_add_parameter(scalar, ubigint_type);
-	duckdb_scalar_function_add_parameter(scalar, varchar_type);
-	duckdb_scalar_function_add_parameter(scalar, varchar_type);
-	if (distance_parameters >= 1)
+
+	for (int distance_parameters = 0; distance_parameters <= 2; distance_parameters++) {
+		duckdb_scalar_function scalar = duckdb_create_scalar_function();
+		duckdb_scalar_function_set_name(scalar, name);
+		duckdb_scalar_function_add_parameter(scalar, varchar_type);
+		duckdb_scalar_function_add_parameter(scalar, uinteger_type);
 		duckdb_scalar_function_add_parameter(scalar, ubigint_type);
-	if (distance_parameters >= 2)
-		duckdb_scalar_function_add_parameter(scalar, ubigint_type);
-	duckdb_scalar_function_set_return_type(scalar, result_type);
-	duckdb_scalar_function_set_volatile(scalar);
-	duckvep_registry_retain(registry);
-	duckdb_scalar_function_set_extra_info(scalar, registry,
-	    duckvep_registry_release);
-	duckdb_scalar_function_set_function(scalar, rich ?
-	    duckvep_annotate_rich_hgvs_scalar : duckvep_annotate_hgvs_scalar);
-	(void)duckdb_register_scalar_function(connection, scalar);
-	duckdb_destroy_scalar_function(&scalar);
+		duckdb_scalar_function_add_parameter(scalar, varchar_type);
+		duckdb_scalar_function_add_parameter(scalar, varchar_type);
+		if (distance_parameters >= 1)
+			duckdb_scalar_function_add_parameter(scalar, ubigint_type);
+		if (distance_parameters >= 2)
+			duckdb_scalar_function_add_parameter(scalar, ubigint_type);
+		duckdb_scalar_function_set_return_type(scalar, result_type);
+		duckdb_scalar_function_set_volatile(scalar);
+		duckvep_registry_retain(registry);
+		duckdb_scalar_function_set_extra_info(scalar, registry,
+		    duckvep_registry_release);
+		duckdb_scalar_function_set_function(scalar, rich ?
+		    duckvep_annotate_rich_hgvs_scalar : duckvep_annotate_hgvs_scalar);
+		ok = duckdb_add_scalar_function_to_set(functions, scalar) == DuckDBSuccess && ok;
+		duckdb_destroy_scalar_function(&scalar);
+	}
+	ok = ok && duckdb_register_scalar_function_set(connection, functions) == DuckDBSuccess;
+	duckdb_destroy_scalar_function_set(&functions);
 	duckdb_destroy_logical_type(&result_type);
+	return ok;
 }
 
-static void
+static bool
 duckvep_register_projected_scalar(duckdb_connection connection,
 	duckvep_registry_t *registry, duckdb_logical_type varchar_type,
 	duckdb_logical_type uinteger_type, duckdb_logical_type ubigint_type,
-	int distance_parameters, int with_hgvs)
+	int with_hgvs)
 {
-	duckdb_scalar_function scalar;
-	duckdb_logical_type result_type;
+	bool ok = true;
+	const char *name = with_hgvs ? "_duckvep_annotate_small_projected_hgvs" :
+	    "_duckvep_annotate_small_projected";
+	duckdb_scalar_function_set functions = duckdb_create_scalar_function_set(name);
+	duckdb_logical_type result_type = duckvep_annotation_list_type(with_hgvs, 1);
 
-	scalar = duckdb_create_scalar_function();
-	result_type = duckvep_annotation_list_type(with_hgvs, 1);
-	duckdb_scalar_function_set_name(scalar, with_hgvs ?
-	    "_duckvep_annotate_small_projected_hgvs" :
-	    "_duckvep_annotate_small_projected");
-	duckdb_scalar_function_add_parameter(scalar, varchar_type);
-	duckdb_scalar_function_add_parameter(scalar, uinteger_type);
-	duckdb_scalar_function_add_parameter(scalar, ubigint_type);
-	duckdb_scalar_function_add_parameter(scalar, varchar_type);
-	duckdb_scalar_function_add_parameter(scalar, varchar_type);
-	if (distance_parameters >= 1)
+	for (int distance_parameters = 0; distance_parameters <= 2; distance_parameters++) {
+		duckdb_scalar_function scalar = duckdb_create_scalar_function();
+		duckdb_scalar_function_set_name(scalar, name);
+		duckdb_scalar_function_add_parameter(scalar, varchar_type);
+		duckdb_scalar_function_add_parameter(scalar, uinteger_type);
 		duckdb_scalar_function_add_parameter(scalar, ubigint_type);
-	if (distance_parameters >= 2)
-		duckdb_scalar_function_add_parameter(scalar, ubigint_type);
-	duckdb_scalar_function_set_return_type(scalar, result_type);
-	duckdb_scalar_function_set_volatile(scalar);
-	duckvep_registry_retain(registry);
-	duckdb_scalar_function_set_extra_info(scalar, registry,
-	    duckvep_registry_release);
-	duckdb_scalar_function_set_function(scalar, with_hgvs ?
-	    duckvep_annotate_projected_hgvs_scalar :
-	    duckvep_annotate_projected_scalar);
-	(void)duckdb_register_scalar_function(connection, scalar);
-	duckdb_destroy_scalar_function(&scalar);
+		duckdb_scalar_function_add_parameter(scalar, varchar_type);
+		duckdb_scalar_function_add_parameter(scalar, varchar_type);
+		if (distance_parameters >= 1)
+			duckdb_scalar_function_add_parameter(scalar, ubigint_type);
+		if (distance_parameters >= 2)
+			duckdb_scalar_function_add_parameter(scalar, ubigint_type);
+		duckdb_scalar_function_set_return_type(scalar, result_type);
+		duckdb_scalar_function_set_volatile(scalar);
+		duckvep_registry_retain(registry);
+		duckdb_scalar_function_set_extra_info(scalar, registry,
+		    duckvep_registry_release);
+		duckdb_scalar_function_set_function(scalar, with_hgvs ?
+		    duckvep_annotate_projected_hgvs_scalar :
+		    duckvep_annotate_projected_scalar);
+		ok = duckdb_add_scalar_function_to_set(functions, scalar) == DuckDBSuccess && ok;
+		duckdb_destroy_scalar_function(&scalar);
+	}
+	ok = ok && duckdb_register_scalar_function_set(connection, functions) == DuckDBSuccess;
+	duckdb_destroy_scalar_function_set(&functions);
 	duckdb_destroy_logical_type(&result_type);
+	return ok;
 }
 
-void
+bool
 register_duckvep_functions(duckdb_connection connection,
 	duckdb_database database)
 {
@@ -3893,7 +3909,7 @@ register_duckvep_functions(duckdb_connection connection,
 
 	registry = duckvep_registry_create(database);
 	if (registry == NULL)
-		return;
+		return false;
 	duckvep_register_model_functions(connection, registry);
 	duckvep_register_haplotypes(connection, registry);
 	duckvep_register_allele_geometry_scalar(connection);
@@ -3902,69 +3918,30 @@ register_duckvep_functions(duckdb_connection connection,
 	varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
 	uinteger_type = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
 	ubigint_type = duckdb_create_logical_type(DUCKDB_TYPE_UBIGINT);
-	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 0, 0, DUCKVEP_SCALAR_SMALL);
-	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 1, 0, DUCKVEP_SCALAR_SMALL);
-	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 2, 0, DUCKVEP_SCALAR_SMALL);
-	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 0, 1, DUCKVEP_SCALAR_SMALL);
-	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 1, 1, DUCKVEP_SCALAR_SMALL);
-	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 2, 1, DUCKVEP_SCALAR_SMALL);
-	duckvep_register_hgvs_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 0, 0);
-	duckvep_register_hgvs_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 1, 0);
-	duckvep_register_hgvs_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 2, 0);
-	duckvep_register_hgvs_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 0, 1);
-	duckvep_register_hgvs_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 1, 1);
-	duckvep_register_hgvs_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 2, 1);
-	duckvep_register_projected_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 0, 0);
-	duckvep_register_projected_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 1, 0);
-	duckvep_register_projected_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 2, 0);
-	duckvep_register_projected_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 0, 1);
-	duckvep_register_projected_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 1, 1);
-	duckvep_register_projected_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 2, 1);
-	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 0, 0, DUCKVEP_SCALAR_STRUCTURAL);
-	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 1, 0, DUCKVEP_SCALAR_STRUCTURAL);
-	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 2, 0, DUCKVEP_SCALAR_STRUCTURAL);
-	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 0, 1, DUCKVEP_SCALAR_STRUCTURAL);
-	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 1, 1, DUCKVEP_SCALAR_STRUCTURAL);
-	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 2, 1, DUCKVEP_SCALAR_STRUCTURAL);
-	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 0, 0, DUCKVEP_SCALAR_BREAKEND);
-	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 1, 0, DUCKVEP_SCALAR_BREAKEND);
-	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 2, 0, DUCKVEP_SCALAR_BREAKEND);
-	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 0, 1, DUCKVEP_SCALAR_BREAKEND);
-	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 1, 1, DUCKVEP_SCALAR_BREAKEND);
-	duckvep_register_annotate_scalar(connection, registry, varchar_type,
-	    uinteger_type, ubigint_type, 2, 1, DUCKVEP_SCALAR_BREAKEND);
+	bool ok = duckvep_register_annotate_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 0, DUCKVEP_SCALAR_SMALL) &&
+	    duckvep_register_annotate_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 1, DUCKVEP_SCALAR_SMALL) &&
+	    duckvep_register_hgvs_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 0) &&
+	    duckvep_register_hgvs_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 1) &&
+	    duckvep_register_projected_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 0) &&
+	    duckvep_register_projected_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 1) &&
+	    duckvep_register_annotate_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 0, DUCKVEP_SCALAR_STRUCTURAL) &&
+	    duckvep_register_annotate_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 1, DUCKVEP_SCALAR_STRUCTURAL) &&
+	    duckvep_register_annotate_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 0, DUCKVEP_SCALAR_BREAKEND) &&
+	    duckvep_register_annotate_scalar(connection, registry, varchar_type,
+	    uinteger_type, ubigint_type, 1, DUCKVEP_SCALAR_BREAKEND);
 	duckdb_destroy_logical_type(&varchar_type);
 	duckdb_destroy_logical_type(&uinteger_type);
 	duckdb_destroy_logical_type(&ubigint_type);
 
 	duckvep_registry_release(registry);
+	return ok;
 }

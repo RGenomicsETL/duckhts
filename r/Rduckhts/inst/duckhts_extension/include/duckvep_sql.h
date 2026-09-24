@@ -1,13 +1,9 @@
 #ifndef DUCKVEP_SQL_H
 #define DUCKVEP_SQL_H
 
-#include "duckdb_extension.h"
+#include "duckhts_registration.h"
 
-#include <stdbool.h>
-#include <stddef.h>
-
-bool duckvep_register_sql_parts(duckdb_connection connection,
-	const char *const *parts, size_t part_count);
-bool duckvep_register_phase_call(duckdb_connection connection);
+bool duckvep_register_phase_kernels(duckdb_connection connection);
+bool duckvep_register_phase_call(duckhts_registration_t *registration);
 
 #endif

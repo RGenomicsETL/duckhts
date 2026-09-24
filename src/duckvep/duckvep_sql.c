@@ -16,53 +16,6 @@ typedef struct {
 	idx_t offset;
 } duckvep_so_scan_t;
 
-bool
-duckvep_register_sql_parts(duckdb_connection connection,
-	const char *const *parts, size_t part_count)
-{
-	duckdb_result result;
-	duckdb_state state;
-	char *sql;
-	size_t index, length, offset;
-
-	length = 0;
-	for (index = 0; index < part_count; index++) {
-		size_t part_length;
-
-		part_length = strlen(parts[index]);
-		if (part_length > SIZE_MAX - length)
-			return false;
-		length += part_length;
-	}
-	if (length == SIZE_MAX)
-		return false;
-	sql = malloc(length + 1);
-	if (sql == NULL)
-		return false;
-	offset = 0;
-	for (index = 0; index < part_count; index++) {
-		size_t part_length;
-
-		part_length = strlen(parts[index]);
-		memcpy(sql + offset, parts[index], part_length);
-		offset += part_length;
-	}
-	sql[offset] = '\0';
-	state = duckdb_query(connection, sql, &result);
-	free(sql);
-	if (state != DuckDBSuccess) {
-		const char *error;
-
-		error = duckdb_result_error(&result);
-		fprintf(stderr, "[duckhts] failed DuckVEP SQL registration: %s\n",
-		    error != NULL ? error : "unknown error");
-		duckdb_destroy_result(&result);
-		return false;
-	}
-	duckdb_destroy_result(&result);
-	return true;
-}
-
 static void
 duckvep_so_terms_bind(duckdb_bind_info info)
 {
@@ -173,7 +126,7 @@ duckvep_register_so_terms(duckdb_connection connection)
 }
 
 static bool
-duckvep_register_repeat_alleles(duckdb_connection connection)
+duckvep_register_repeat_alleles(duckhts_registration_t *registration)
 {
 	static const char *const sql[] = {
 		"CREATE OR REPLACE MACRO duckvep_repeat_alleles(reference_components, ",
@@ -193,11 +146,11 @@ duckvep_register_repeat_alleles(duckdb_connection connection)
 		"coalesce(list_bool_or(list_transform(alt_arg, c -> ",
 		"c.count <> trunc(c.count))), false) AS alt_fractional FROM raw_input), ",
 		"axes AS (SELECT exact, capacity, fractional_capacity, u.axis, u.name, ",
-		"u.parts, u.fractional FROM input, unnest([",
+		"u.parts, u.fractional FROM (SELECT exact, capacity, fractional_capacity, unnest([",
 		"struct_pack(axis := 0, name := 'reference', parts := ref_parts, ",
 		"fractional := ref_fractional), ",
 		"struct_pack(axis := 1, name := 'alternate', parts := alt_parts, ",
-		"fractional := alt_fractional)]) t(u)), ",
+		"fractional := alt_fractional)]) AS u FROM input) allele_axes), ",
 		"facts AS (SELECT *, ",
 		"coalesce(list_bool_or(list_transform(parts, c -> c.unit IS NOT NULL AND ",
 		"NOT regexp_full_match(c.unit, '[ACGTRYSWKMBDHVNacgtryswkmbdhvn]+'))), false) AS invalid_unit, ",
@@ -246,12 +199,12 @@ duckvep_register_repeat_alleles(duckdb_connection connection)
 		"length_direction := NULL::VARCHAR, status := status) END FROM paired)"
 	};
 
-	return duckvep_register_sql_parts(connection, sql,
+	return duckhts_register_sql_parts(registration, sql,
 	    sizeof(sql) / sizeof(sql[0]));
 }
 
 static bool
-duckvep_register_annotate_relation(duckdb_connection connection)
+duckvep_register_annotate_relation(duckhts_registration_t *registration)
 {
 	static const char *const sql[] = {
 		"CREATE OR REPLACE MACRO duckvep_annotate(events_table, model_name, ",
@@ -444,7 +397,7 @@ duckvep_register_annotate_relation(duckdb_connection connection)
 		"UNION ALL BY NAME SELECT * FROM breakend_rich"
 	};
 
-	return duckvep_register_sql_parts(connection, sql,
+	return duckhts_register_sql_parts(registration, sql,
 	    sizeof(sql) / sizeof(sql[0]));
 }
 
@@ -496,8 +449,26 @@ duckvep_register_projection_code(duckdb_connection connection)
 	return state == DuckDBSuccess;
 }
 
+bool
+register_duckvep_sql_kernels(duckhts_registration_t *registration)
+{
+	if (!duckvep_register_so_terms(registration->connection)) {
+		return duckhts_registration_error(registration,
+		    "DuckHTS could not register duckvep_so_terms");
+	}
+	if (!duckvep_register_projection_code(registration->connection)) {
+		return duckhts_registration_error(registration,
+		    "DuckHTS could not register __duckvep_projection_code");
+	}
+	if (!duckvep_register_phase_kernels(registration->connection)) {
+		return duckhts_registration_error(registration,
+		    "DuckHTS could not register DuckVEP phase kernels");
+	}
+	return true;
+}
+
 static bool
-duckvep_register_projection_relation(duckdb_connection connection)
+duckvep_register_projection_relation(duckhts_registration_t *registration)
 {
 	static const char *const sql[] = {
 		"CREATE OR REPLACE MACRO __duckvep_projection_base(exons, strand, pos1) AS\n",
@@ -523,9 +494,10 @@ duckvep_register_projection_relation(duckdb_connection connection)
 		"      THEN 'X' ELSE '' END, ''), '-') END;\n",
 		"CREATE OR REPLACE MACRO __duckvep_projection_peptide(dna, genetic_code) AS\n",
 		"  __duckvep_projection_peptide_finish(dna, coalesce(array_to_string(\n",
-		"    list_transform(range(length(dna) // 3), i -> coalesce(nullif(\n",
-		"      __duckvep_projection_residue(substring(upper(dna), 3*i+1, 3), genetic_code),\n",
-		"      ''), 'X')), ''), ''));\n",
+		"    list_transform(range(length(dna) // 3), i -> coalesce(CASE WHEN\n",
+		"      __duckvep_projection_residue(substring(upper(dna), 3*i+1, 3), genetic_code) = ''\n",
+		"      THEN NULL ELSE __duckvep_projection_residue(\n",
+		"        substring(upper(dna), 3*i+1, 3), genetic_code) END, 'X')), ''), ''));\n",
 		"\n",
 		/* Slice an ordered virtual sequence span; offsets and lengths are nonnegative. */
 		"CREATE OR REPLACE MACRO __duckvep_projection_span(sequence, source_start1,\n",
@@ -709,17 +681,15 @@ duckvep_register_projection_relation(duckdb_connection connection)
 		"FROM translated;\n"
 	};
 
-	return duckvep_register_sql_parts(connection, sql,
+	return duckhts_register_sql_parts(registration, sql,
 	    sizeof(sql) / sizeof(sql[0]));
 }
 
 bool
-register_duckvep_sql_functions(duckdb_connection connection)
+register_duckvep_sql_functions(duckhts_registration_t *registration)
 {
-	return duckvep_register_so_terms(connection) &&
-	    duckvep_register_phase_call(connection) &&
-	    duckvep_register_repeat_alleles(connection) &&
-	    duckvep_register_projection_code(connection) &&
-	    duckvep_register_annotate_relation(connection) &&
-	    duckvep_register_projection_relation(connection);
+	return duckvep_register_phase_call(registration) &&
+	    duckvep_register_repeat_alleles(registration) &&
+	    duckvep_register_annotate_relation(registration) &&
+	    duckvep_register_projection_relation(registration);
 }

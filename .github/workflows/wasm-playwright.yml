@@ -17,8 +17,15 @@ permissions:
 
 jobs:
   wasm-playwright:
-    name: duckdb-wasm browser smoke test
+    name: duckdb-wasm ${{ matrix.runtime }} browser smoke test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: ['1.31.0', '1.32.0']
+    env:
+      DUCKDB_WASM_NPM_VERSION: ${{ matrix.runtime }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,6 +63,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.runtime }}
           path: test/wasm/playwright-report
           retention-days: 7

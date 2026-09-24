@@ -1,0 +1,68 @@
+require duckhts
+
+# Native table functions and dependent SQL macros are ready after LOAD.
+query TT
+SELECT function_name, function_type FROM duckdb_functions()
+WHERE function_name IN ('read_hts_header', 'duckhts_somalier_import_sites',
+                        'duckvep_phase_call', 'duckvep_so_terms')
+ORDER BY function_name;
+----
+duckhts_somalier_import_sites	table_macro
+duckvep_phase_call	macro
+duckvep_so_terms	table
+read_hts_header	table
+
+query I
+SELECT count(*) FROM duckhts_somalier_import_sites(
+  'test/data/somalier_sites.vcf', 'GRCh38');
+----
+3
+
+query I
+SELECT count(*) FROM duckvep_so_terms() WHERE consequence = 'missense_variant';
+----
+1
+
+query IT
+SELECT cigar_query_length('5M2I'), duckhts_quote_ident('two words');
+----
+7	"two words"
+
+# Every supported arity is registered together under its native function name.
+query TT
+SELECT function_name, list_sort(list(len(parameters)))::VARCHAR
+FROM duckdb_functions()
+WHERE function_name IN (
+  'regionkey', 'duckhts_cgranges_add', 'duckhts_cgranges_from_query',
+  'duckhts_cgranges_from_table', 'duckhts_cgranges_has_overlap',
+  'duckhts_cgranges_count_overlaps', 'duckhts_cgranges_overlaps_list',
+  '_duckvep_annotate_small_rich', '_duckvep_annotate_small_compact',
+  '_duckvep_annotate_small_hgvs', '_duckvep_annotate_small_rich_hgvs',
+  '_duckvep_annotate_small_projected', '_duckvep_annotate_small_projected_hgvs',
+  '_duckvep_annotate_structural_rich', '_duckvep_annotate_structural_compact',
+  '_duckvep_annotate_breakend_rich', '_duckvep_annotate_breakend_compact')
+GROUP BY function_name ORDER BY function_name;
+----
+_duckvep_annotate_breakend_compact	[5, 6, 7]
+_duckvep_annotate_breakend_rich	[5, 6, 7]
+_duckvep_annotate_small_compact	[5, 6, 7]
+_duckvep_annotate_small_hgvs	[5, 6, 7]
+_duckvep_annotate_small_projected	[5, 6, 7]
+_duckvep_annotate_small_projected_hgvs	[5, 6, 7]
+_duckvep_annotate_small_rich	[5, 6, 7]
+_duckvep_annotate_small_rich_hgvs	[5, 6, 7]
+_duckvep_annotate_structural_compact	[6, 7, 8]
+_duckvep_annotate_structural_rich	[6, 7, 8]
+duckhts_cgranges_add	[4, 5, 5, 5, 5]
+duckhts_cgranges_count_overlaps	[4, 5]
+duckhts_cgranges_from_query	[5, 6]
+duckhts_cgranges_from_table	[5, 6]
+duckhts_cgranges_has_overlap	[4, 5]
+duckhts_cgranges_overlaps_list	[4, 5]
+regionkey	[3, 4]
+
+query TT
+SELECT __duckvep_projection_peptide('ATGGCNTAA', __duckvep_projection_code(1)),
+       __duckvep_projection_peptide('ATGA', __duckvep_projection_code(1));
+----
+MA*	MX
