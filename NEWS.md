@@ -2,6 +2,15 @@
 
 # duckhts 1.5.2.9001
 
+- Require DuckDB 1.4.0 or newer for the extension's SQL surface while retaining
+  the stable v1.2.0 C API target. Register native functions before dependent SQL
+  macros so DuckDB 1.4 can load the extension, register complete native overload
+  sets, and report initialization failures through DuckDB with their underlying
+  diagnostics. DuckVEP repeat and transcript-presentation SQL preserve their
+  results without triggering older-runtime binder failures.
+- Record matched all-column BAM, BCF, VCF, FASTQ and FASTA reader timings and
+  exact-output comparisons in `benchmarks/benchmark_init_readers.md`.
+
 - Make the aligned-block benchmark oracle NULL-aware, compare every physical
   record before timing, and retain duplicate/NULL corruption controls with
   record-keyed XOR and sum checks. Recorded timings retain their stated

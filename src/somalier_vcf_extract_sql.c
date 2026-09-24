@@ -1,58 +1,6 @@
-#include "duckdb_extension.h"
-DUCKDB_EXTENSION_EXTERN
+#include "duckhts_registration.h"
 
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
-static bool duckhts_somalier_register_vcf_sql(duckdb_connection connection,
-                                               const char *const *parts,
-                                               size_t part_count) {
-    duckdb_result result;
-    duckdb_state state;
-    size_t sql_size = 0;
-    size_t offset = 0;
-    char *sql;
-
-    for (size_t i = 0; i < part_count; i++) {
-        size_t part_size = strlen(parts[i]);
-        if (part_size > SIZE_MAX - sql_size - 1) {
-            fprintf(stderr, "[duckhts] failed Somalier VCF SQL registration: "
-                            "SQL text is too large\n");
-            return false;
-        }
-        sql_size += part_size;
-    }
-    sql = malloc(sql_size + 1);
-    if (!sql) {
-        fprintf(stderr, "[duckhts] failed Somalier VCF SQL registration: out of memory\n");
-        return false;
-    }
-    for (size_t i = 0; i < part_count; i++) {
-        size_t part_size = strlen(parts[i]);
-        memcpy(sql + offset, parts[i], part_size);
-        offset += part_size;
-    }
-    sql[offset] = '\0';
-
-    state = duckdb_query(connection, sql, &result);
-    free(sql);
-
-    if (state != DuckDBSuccess) {
-        const char *error = duckdb_result_error(&result);
-        if (error && *error) {
-            fprintf(stderr, "[duckhts] failed Somalier VCF SQL registration: %s\n", error);
-        }
-        duckdb_destroy_result(&result);
-        return false;
-    }
-    duckdb_destroy_result(&result);
-    return true;
-}
-
-bool register_duckhts_somalier_vcf_extract_sql(duckdb_connection connection) {
+bool register_duckhts_somalier_vcf_extract_sql(duckhts_registration_t *registration) {
     static const char *const sites_sql[] = {
         "CREATE OR REPLACE MACRO duckhts_somalier_import_sites("
         "path, assembly_name, max_sites := 1000000) AS TABLE "
@@ -265,10 +213,8 @@ bool register_duckhts_somalier_vcf_extract_sql(duckdb_connection connection) {
         "WHERE rv.valid AND av.valid AND fv.valid"
     };
 
-    if (!duckhts_somalier_register_vcf_sql(
-            connection, sites_sql, sizeof(sites_sql) / sizeof(sites_sql[0]))) {
-        return false;
-    }
-    return duckhts_somalier_register_vcf_sql(
-        connection, counts_sql, sizeof(counts_sql) / sizeof(counts_sql[0]));
+    return duckhts_register_sql_parts(
+               registration, sites_sql, sizeof(sites_sql) / sizeof(sites_sql[0])) &&
+           duckhts_register_sql_parts(
+               registration, counts_sql, sizeof(counts_sql) / sizeof(counts_sql[0]));
 }

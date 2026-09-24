@@ -4,6 +4,14 @@
 
 require duckhts
 
+# SQL MAP expansion provides an independent control for auxiliary-tag materialization.
+query TTT
+SELECT name, entry.key, entry.value
+FROM (VALUES ('control', map(['tag'], ['value']))) data(name, tags),
+UNNEST(map_entries(tags)) AS items(entry);
+----
+control	tag	value
+
 # Synthetic SAM is the source authority; no external acquisition or generated oracle.
 query TTTTTTT rowsort
 SELECT QNAME, CIGAR, SEQ, QUAL, ML::VARCHAR, FZ::VARCHAR, CG::VARCHAR

@@ -40,6 +40,10 @@ install.packages("Rduckhts")
 
 ## System Requirements
 
+The package requires `duckdb` 1.4.0 or newer and a DuckDB runtime of at
+least 1.4.0. The bundled extension’s v1.2.0 stable C API target is
+distinct from this SQL-runtime requirement.
+
 Installation requires `htslib` dependencies such as zlib and libbz2, and
 optionally liblzma, libcurl, and OpenSSL for full functionality. The
 package requires GNU make. On Windows Rtools builds, `htslib` plugins
@@ -426,9 +430,9 @@ fq_files <- c(
 )
 rduckhts_fastq_multi(con, "fq_multi", fq_files, overwrite = TRUE)
 dbGetQuery(con, "SELECT filename, count(*) AS n FROM fq_multi GROUP BY ALL ORDER BY filename")
-#>                                               filename n
-#> 1 /usr/local/lib/R/site-library/Rduckhts/extdata/r1.fq 5
-#> 2 /usr/local/lib/R/site-library/Rduckhts/extdata/r2.fq 5
+#>                                                    filename n
+#> 1 <Rduckhts>/extdata/r1.fq 5
+#> 2 <Rduckhts>/extdata/r2.fq 5
 ```
 
 Per-file parameters are supported via a `.params` data.frame with a
@@ -680,17 +684,17 @@ This section is generated from `functions.yaml`.
 
 ### CIGAR Utils
 
-| Function | Kind | R helper | Description |
-|----|----|----|----|
-| [`cigar_has_soft_clip`](inst/function_catalog/reference.md#cigar_has_soft_clip) | scalar |  | Test whether a CIGAR string contains any soft-clipped segment (`S`). Overloaded to also accept a UINTEGER\[\] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path. |
-| [`cigar_has_hard_clip`](inst/function_catalog/reference.md#cigar_has_hard_clip) | scalar |  | Test whether a CIGAR string contains any hard-clipped segment (`H`). Overloaded to also accept a UINTEGER\[\] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path. |
-| [`cigar_left_soft_clip`](inst/function_catalog/reference.md#cigar_left_soft_clip) | scalar |  | Return the left-end soft-clipped length from a CIGAR string, or zero if the alignment does not start with `S`. Overloaded to also accept a UINTEGER\[\] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path. |
-| [`cigar_right_soft_clip`](inst/function_catalog/reference.md#cigar_right_soft_clip) | scalar |  | Return the right-end soft-clipped length from a CIGAR string, or zero if the alignment does not end with `S`. Overloaded to also accept a UINTEGER\[\] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path. |
-| [`cigar_query_length`](inst/function_catalog/reference.md#cigar_query_length) | scalar |  | Return the query-consuming length from a CIGAR string, counting `M`, `I`, `S`, `=`, and `X`. Overloaded to also accept a UINTEGER\[\] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path. |
-| [`cigar_aligned_query_length`](inst/function_catalog/reference.md#cigar_aligned_query_length) | scalar |  | Return the aligned query length from a CIGAR string, counting `M`, `=`, and `X` but excluding clips and insertions. Overloaded to also accept a UINTEGER\[\] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path. |
-| [`cigar_reference_length`](inst/function_catalog/reference.md#cigar_reference_length) | scalar |  | Return the reference-consuming length from a CIGAR string, counting `M`, `D`, `N`, `=`, and `X`. Overloaded to also accept a UINTEGER\[\] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path. |
-| [`cigar_has_op`](inst/function_catalog/reference.md#cigar_has_op) | scalar |  | Test whether a CIGAR string contains at least one instance of the requested operator. Overloaded to also accept a UINTEGER\[\] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path. |
-| [`cigar_aligned_blocks`](inst/function_catalog/reference.md#cigar_aligned_blocks) | scalar |  | Return the aligned blocks of a CIGAR as a struct of three parallel BIGINT lists: ref_start, query_start and width, one entry per M, = or X op in CIGAR order. Overloaded to also accept a UINTEGER\[\] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path. |
+| Function                                                                                      | Kind   | R helper | Description                                                                                                                                                                                                                                                                                                                             |
+|-----------------------------------------------------------------------------------------------|--------|----------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| [`cigar_has_soft_clip`](inst/function_catalog/reference.md#cigar_has_soft_clip)               | scalar |          | Test whether a CIGAR string contains any soft-clipped segment (`S`). Overloaded to also accept a UINTEGER\[\] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path.                                                                                          |
+| [`cigar_has_hard_clip`](inst/function_catalog/reference.md#cigar_has_hard_clip)               | scalar |          | Test whether a CIGAR string contains any hard-clipped segment (`H`). Overloaded to also accept a UINTEGER\[\] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path.                                                                                          |
+| [`cigar_left_soft_clip`](inst/function_catalog/reference.md#cigar_left_soft_clip)             | scalar |          | Return the left-end soft-clipped length from a CIGAR string, or zero if the alignment does not start with `S`. Overloaded to also accept a UINTEGER\[\] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path.                                                |
+| [`cigar_right_soft_clip`](inst/function_catalog/reference.md#cigar_right_soft_clip)           | scalar |          | Return the right-end soft-clipped length from a CIGAR string, or zero if the alignment does not end with `S`. Overloaded to also accept a UINTEGER\[\] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path.                                                 |
+| [`cigar_query_length`](inst/function_catalog/reference.md#cigar_query_length)                 | scalar |          | Return the query-consuming length from a CIGAR string, counting `M`, `I`, `S`, `=`, and `X`. Overloaded to also accept a UINTEGER\[\] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path.                                                                  |
+| [`cigar_aligned_query_length`](inst/function_catalog/reference.md#cigar_aligned_query_length) | scalar |          | Return the aligned query length from a CIGAR string, counting `M`, `=`, and `X` but excluding clips and insertions. Overloaded to also accept a UINTEGER\[\] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path.                                           |
+| [`cigar_reference_length`](inst/function_catalog/reference.md#cigar_reference_length)         | scalar |          | Return the reference-consuming length from a CIGAR string, counting `M`, `D`, `N`, `=`, and `X`. Overloaded to also accept a UINTEGER\[\] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path.                                                              |
+| [`cigar_has_op`](inst/function_catalog/reference.md#cigar_has_op)                             | scalar |          | Test whether a CIGAR string contains at least one instance of the requested operator. Overloaded to also accept a UINTEGER\[\] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path.                                                                         |
+| [`cigar_aligned_blocks`](inst/function_catalog/reference.md#cigar_aligned_blocks)             | scalar |          | Return the aligned blocks of a CIGAR as a struct of three parallel BIGINT lists: ref_start, query_start and width, one entry per M, = or X op in CIGAR order. Overloaded to also accept a UINTEGER\[\] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path. |
 
 </details>
 
@@ -1997,7 +2001,7 @@ head(index_spans[, c("seqname", "tid", "index_type", "chunk_beg_vo", "chunk_end_
 index_raw <- rduckhts_hts_index_raw(con, bcf_path, index_path = bcf_index_path)
 head(index_raw, 1)
 #> [1] index_type
-#> [2] '/usr/local/lib/R/site-library/Rduckhts/extdata/vcf_file.bcf.csi'
+#> [2] '<Rduckhts>/extdata/vcf_file.bcf.csi'
 #> [3] raw
 #> <0 rows> (or 0-length row.names)
 ```

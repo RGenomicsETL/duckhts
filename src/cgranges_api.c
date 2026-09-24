@@ -2175,29 +2175,35 @@ static duckdb_logical_type create_cgranges_overlap_list_type(void) {
     return list_type;
 }
 
-static void register_cgranges_probe_scalar(duckdb_connection connection, duckhts_cgranges_registry_t *reg,
+static bool register_cgranges_probe_scalar(duckdb_connection connection, duckhts_cgranges_registry_t *reg,
                                            const char *name, duckdb_scalar_function_t func,
                                            duckdb_logical_type return_type,
                                            duckdb_logical_type varchar_type,
-                                           duckdb_logical_type bigint_type,
-                                           int with_mode) {
-    duckdb_scalar_function fn = duckdb_create_scalar_function();
-    duckdb_scalar_function_set_name(fn, name);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, bigint_type);
-    duckdb_scalar_function_add_parameter(fn, bigint_type);
-    if (with_mode) duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_set_return_type(fn, return_type);
-    duckdb_scalar_function_set_volatile(fn);
-    retain_registry(reg);
-    duckdb_scalar_function_set_extra_info(fn, reg, destroy_registry);
-    duckdb_scalar_function_set_function(fn, func);
-    duckdb_register_scalar_function(connection, fn);
-    duckdb_destroy_scalar_function(&fn);
+                                           duckdb_logical_type bigint_type) {
+    duckdb_scalar_function_set functions = duckdb_create_scalar_function_set(name);
+    bool ok = true;
+    for (int with_mode = 0; with_mode <= 1; with_mode++) {
+        duckdb_scalar_function fn = duckdb_create_scalar_function();
+        duckdb_scalar_function_set_name(fn, name);
+        duckdb_scalar_function_add_parameter(fn, varchar_type);
+        duckdb_scalar_function_add_parameter(fn, varchar_type);
+        duckdb_scalar_function_add_parameter(fn, bigint_type);
+        duckdb_scalar_function_add_parameter(fn, bigint_type);
+        if (with_mode) duckdb_scalar_function_add_parameter(fn, varchar_type);
+        duckdb_scalar_function_set_return_type(fn, return_type);
+        duckdb_scalar_function_set_volatile(fn);
+        retain_registry(reg);
+        duckdb_scalar_function_set_extra_info(fn, reg, destroy_registry);
+        duckdb_scalar_function_set_function(fn, func);
+        ok = duckdb_add_scalar_function_to_set(functions, fn) == DuckDBSuccess && ok;
+        duckdb_destroy_scalar_function(&fn);
+    }
+    ok = ok && duckdb_register_scalar_function_set(connection, functions) == DuckDBSuccess;
+    duckdb_destroy_scalar_function_set(&functions);
+    return ok;
 }
 
-static void register_scalar_bool_1(duckdb_connection connection, duckhts_cgranges_registry_t *reg,
+static bool register_scalar_bool_1(duckdb_connection connection, duckhts_cgranges_registry_t *reg,
                                    const char *name, duckdb_scalar_function_t func) {
     duckdb_scalar_function fn = duckdb_create_scalar_function();
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
@@ -2209,195 +2215,102 @@ static void register_scalar_bool_1(duckdb_connection connection, duckhts_cgrange
     retain_registry(reg);
     duckdb_scalar_function_set_extra_info(fn, reg, destroy_registry);
     duckdb_scalar_function_set_function(fn, func);
-    duckdb_register_scalar_function(connection, fn);
+    bool ok = duckdb_register_scalar_function(connection, fn) == DuckDBSuccess;
     duckdb_destroy_logical_type(&varchar_type);
     duckdb_destroy_logical_type(&bool_type);
     duckdb_destroy_scalar_function(&fn);
+    return ok;
 }
 
-void register_duckhts_cgranges_functions(duckdb_connection connection, duckdb_database database) {
+bool register_duckhts_cgranges_functions(duckdb_connection connection, duckdb_database database) {
     duckhts_cgranges_registry_t *reg;
     duckdb_scalar_function fn;
     duckdb_table_function tf;
+
+    reg = (duckhts_cgranges_registry_t *)calloc(1, sizeof(*reg));
+    if (!reg) return false;
+    if (pthread_mutex_init(&reg->mutex, NULL) != 0) {
+        free(reg);
+        return false;
+    }
+    reg->database = database;
+    reg->connection = NULL;
+    reg->ref_count = 1;
+    if (duckdb_connect(database, &reg->connection) == DuckDBError || !reg->connection) {
+        destroy_registry(reg);
+        return false;
+    }
+
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_logical_type bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
     duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
-
-    reg = (duckhts_cgranges_registry_t *)calloc(1, sizeof(*reg));
-    if (!reg) return;
-    pthread_mutex_init(&reg->mutex, NULL);
-    reg->database = database;
-    reg->connection = NULL;
-    reg->ref_count = 0;
-    if (duckdb_connect(database, &reg->connection) == DuckDBError || !reg->connection) {
-        pthread_mutex_destroy(&reg->mutex);
-        free(reg);
-        duckdb_destroy_logical_type(&varchar_type);
-        duckdb_destroy_logical_type(&bigint_type);
-        duckdb_destroy_logical_type(&bool_type);
-        return;
-    }
-
-    register_scalar_bool_1(connection, reg, "duckhts_cgranges_create", cgranges_create_scalar);
-    register_scalar_bool_1(connection, reg, "duckhts_cgranges_index", cgranges_index_scalar);
-    register_scalar_bool_1(connection, reg, "duckhts_cgranges_destroy", cgranges_destroy_scalar);
-
-    fn = duckdb_create_scalar_function();
-    duckdb_scalar_function_set_name(fn, "duckhts_cgranges_add");
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, bigint_type);
-    duckdb_scalar_function_add_parameter(fn, bigint_type);
-    duckdb_scalar_function_set_return_type(fn, bool_type);
-    duckdb_scalar_function_set_volatile(fn);
-    retain_registry(reg);
-    duckdb_scalar_function_set_extra_info(fn, reg, destroy_registry);
-    duckdb_scalar_function_set_function(fn, cgranges_add_scalar);
-    duckdb_register_scalar_function(connection, fn);
-    duckdb_destroy_scalar_function(&fn);
-
-    fn = duckdb_create_scalar_function();
-    duckdb_scalar_function_set_name(fn, "duckhts_cgranges_add");
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, bigint_type);
-    duckdb_scalar_function_add_parameter(fn, bigint_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_set_return_type(fn, bool_type);
-    duckdb_scalar_function_set_volatile(fn);
-    retain_registry(reg);
-    duckdb_scalar_function_set_extra_info(fn, reg, destroy_registry);
-    duckdb_scalar_function_set_function(fn, cgranges_add_scalar);
-    duckdb_register_scalar_function(connection, fn);
-    duckdb_destroy_scalar_function(&fn);
-
-    fn = duckdb_create_scalar_function();
-    duckdb_scalar_function_set_name(fn, "duckhts_cgranges_add");
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, bigint_type);
-    duckdb_scalar_function_add_parameter(fn, bigint_type);
-    duckdb_scalar_function_add_parameter(fn, bigint_type);
-    duckdb_scalar_function_set_return_type(fn, bool_type);
-    duckdb_scalar_function_set_volatile(fn);
-    retain_registry(reg);
-    duckdb_scalar_function_set_extra_info(fn, reg, destroy_registry);
-    duckdb_scalar_function_set_function(fn, cgranges_add_scalar);
-    duckdb_register_scalar_function(connection, fn);
-    duckdb_destroy_scalar_function(&fn);
-
-    fn = duckdb_create_scalar_function();
-    duckdb_scalar_function_set_name(fn, "duckhts_cgranges_add");
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, bigint_type);
-    duckdb_scalar_function_add_parameter(fn, bigint_type);
-    duckdb_scalar_function_add_parameter(fn, bool_type);
-    duckdb_scalar_function_set_return_type(fn, bool_type);
-    duckdb_scalar_function_set_volatile(fn);
-    retain_registry(reg);
-    duckdb_scalar_function_set_extra_info(fn, reg, destroy_registry);
-    duckdb_scalar_function_set_function(fn, cgranges_add_scalar);
-    duckdb_register_scalar_function(connection, fn);
-    duckdb_destroy_scalar_function(&fn);
+    bool ok = register_scalar_bool_1(connection, reg, "duckhts_cgranges_create", cgranges_create_scalar) &&
+        register_scalar_bool_1(connection, reg, "duckhts_cgranges_index", cgranges_index_scalar) &&
+        register_scalar_bool_1(connection, reg, "duckhts_cgranges_destroy", cgranges_destroy_scalar);
 
     {
         duckdb_logical_type double_type = duckdb_create_logical_type(DUCKDB_TYPE_DOUBLE);
-        fn = duckdb_create_scalar_function();
-        duckdb_scalar_function_set_name(fn, "duckhts_cgranges_add");
-        duckdb_scalar_function_add_parameter(fn, varchar_type);
-        duckdb_scalar_function_add_parameter(fn, varchar_type);
-        duckdb_scalar_function_add_parameter(fn, bigint_type);
-        duckdb_scalar_function_add_parameter(fn, bigint_type);
-        duckdb_scalar_function_add_parameter(fn, double_type);
-        duckdb_scalar_function_set_return_type(fn, bool_type);
-        duckdb_scalar_function_set_volatile(fn);
-        retain_registry(reg);
-        duckdb_scalar_function_set_extra_info(fn, reg, destroy_registry);
-        duckdb_scalar_function_set_function(fn, cgranges_add_scalar);
-        duckdb_register_scalar_function(connection, fn);
-        duckdb_destroy_scalar_function(&fn);
+        duckdb_logical_type payload_types[] = {NULL, varchar_type, bigint_type, bool_type, double_type};
+        duckdb_scalar_function_set functions = duckdb_create_scalar_function_set("duckhts_cgranges_add");
+        for (size_t i = 0; i < sizeof(payload_types) / sizeof(payload_types[0]); i++) {
+            fn = duckdb_create_scalar_function();
+            duckdb_scalar_function_set_name(fn, "duckhts_cgranges_add");
+            duckdb_scalar_function_add_parameter(fn, varchar_type);
+            duckdb_scalar_function_add_parameter(fn, varchar_type);
+            duckdb_scalar_function_add_parameter(fn, bigint_type);
+            duckdb_scalar_function_add_parameter(fn, bigint_type);
+            if (payload_types[i]) duckdb_scalar_function_add_parameter(fn, payload_types[i]);
+            duckdb_scalar_function_set_return_type(fn, bool_type);
+            duckdb_scalar_function_set_volatile(fn);
+            retain_registry(reg);
+            duckdb_scalar_function_set_extra_info(fn, reg, destroy_registry);
+            duckdb_scalar_function_set_function(fn, cgranges_add_scalar);
+            ok = duckdb_add_scalar_function_to_set(functions, fn) == DuckDBSuccess && ok;
+            duckdb_destroy_scalar_function(&fn);
+        }
+        ok = ok && duckdb_register_scalar_function_set(connection, functions) == DuckDBSuccess;
+        duckdb_destroy_scalar_function_set(&functions);
         duckdb_destroy_logical_type(&double_type);
     }
 
-    fn = duckdb_create_scalar_function();
-    duckdb_scalar_function_set_name(fn, "duckhts_cgranges_from_query");
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_set_return_type(fn, bool_type);
-    duckdb_scalar_function_set_volatile(fn);
-    retain_registry(reg);
-    duckdb_scalar_function_set_extra_info(fn, reg, destroy_registry);
-    duckdb_scalar_function_set_function(fn, cgranges_from_query_scalar);
-    duckdb_register_scalar_function(connection, fn);
-    duckdb_destroy_scalar_function(&fn);
+    {
+        const struct {
+            const char *name;
+            duckdb_scalar_function_t function;
+        } loaders[] = {
+            {"duckhts_cgranges_from_query", cgranges_from_query_scalar},
+            {"duckhts_cgranges_from_table", cgranges_from_table_scalar}
+        };
+        for (size_t i = 0; i < sizeof(loaders) / sizeof(loaders[0]); i++) {
+            duckdb_scalar_function_set functions = duckdb_create_scalar_function_set(loaders[i].name);
+            for (int with_payload = 0; with_payload <= 1; with_payload++) {
+                fn = duckdb_create_scalar_function();
+                duckdb_scalar_function_set_name(fn, loaders[i].name);
+                for (int parameter = 0; parameter < 5 + with_payload; parameter++) {
+                    duckdb_scalar_function_add_parameter(fn, varchar_type);
+                }
+                duckdb_scalar_function_set_return_type(fn, bool_type);
+                duckdb_scalar_function_set_volatile(fn);
+                retain_registry(reg);
+                duckdb_scalar_function_set_extra_info(fn, reg, destroy_registry);
+                duckdb_scalar_function_set_function(fn, loaders[i].function);
+                ok = duckdb_add_scalar_function_to_set(functions, fn) == DuckDBSuccess && ok;
+                duckdb_destroy_scalar_function(&fn);
+            }
+            ok = ok && duckdb_register_scalar_function_set(connection, functions) == DuckDBSuccess;
+            duckdb_destroy_scalar_function_set(&functions);
+        }
+    }
 
-    fn = duckdb_create_scalar_function();
-    duckdb_scalar_function_set_name(fn, "duckhts_cgranges_from_query");
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_set_return_type(fn, bool_type);
-    duckdb_scalar_function_set_volatile(fn);
-    retain_registry(reg);
-    duckdb_scalar_function_set_extra_info(fn, reg, destroy_registry);
-    duckdb_scalar_function_set_function(fn, cgranges_from_query_scalar);
-    duckdb_register_scalar_function(connection, fn);
-    duckdb_destroy_scalar_function(&fn);
-
-    fn = duckdb_create_scalar_function();
-    duckdb_scalar_function_set_name(fn, "duckhts_cgranges_from_table");
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_set_return_type(fn, bool_type);
-    duckdb_scalar_function_set_volatile(fn);
-    retain_registry(reg);
-    duckdb_scalar_function_set_extra_info(fn, reg, destroy_registry);
-    duckdb_scalar_function_set_function(fn, cgranges_from_table_scalar);
-    duckdb_register_scalar_function(connection, fn);
-    duckdb_destroy_scalar_function(&fn);
-
-    fn = duckdb_create_scalar_function();
-    duckdb_scalar_function_set_name(fn, "duckhts_cgranges_from_table");
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_add_parameter(fn, varchar_type);
-    duckdb_scalar_function_set_return_type(fn, bool_type);
-    duckdb_scalar_function_set_volatile(fn);
-    retain_registry(reg);
-    duckdb_scalar_function_set_extra_info(fn, reg, destroy_registry);
-    duckdb_scalar_function_set_function(fn, cgranges_from_table_scalar);
-    duckdb_register_scalar_function(connection, fn);
-    duckdb_destroy_scalar_function(&fn);
-
-    register_cgranges_probe_scalar(connection, reg, "duckhts_cgranges_has_overlap",
-                                   cgranges_has_overlap_scalar, bool_type, varchar_type, bigint_type, 0);
-    register_cgranges_probe_scalar(connection, reg, "duckhts_cgranges_has_overlap",
-                                   cgranges_has_overlap_scalar, bool_type, varchar_type, bigint_type, 1);
-    register_cgranges_probe_scalar(connection, reg, "duckhts_cgranges_count_overlaps",
-                                   cgranges_count_overlaps_scalar, bigint_type, varchar_type, bigint_type, 0);
-    register_cgranges_probe_scalar(connection, reg, "duckhts_cgranges_count_overlaps",
-                                   cgranges_count_overlaps_scalar, bigint_type, varchar_type, bigint_type, 1);
+    ok = ok && register_cgranges_probe_scalar(connection, reg, "duckhts_cgranges_has_overlap",
+                                             cgranges_has_overlap_scalar, bool_type, varchar_type, bigint_type);
+    ok = ok && register_cgranges_probe_scalar(connection, reg, "duckhts_cgranges_count_overlaps",
+                                             cgranges_count_overlaps_scalar, bigint_type, varchar_type, bigint_type);
     {
         duckdb_logical_type overlaps_list_type = create_cgranges_overlap_list_type();
-        register_cgranges_probe_scalar(connection, reg, "duckhts_cgranges_overlaps_list",
-                                       cgranges_overlaps_list_scalar, overlaps_list_type,
-                                       varchar_type, bigint_type, 0);
-        register_cgranges_probe_scalar(connection, reg, "duckhts_cgranges_overlaps_list",
-                                       cgranges_overlaps_list_scalar, overlaps_list_type,
-                                       varchar_type, bigint_type, 1);
+        ok = ok && register_cgranges_probe_scalar(connection, reg, "duckhts_cgranges_overlaps_list",
+                                                 cgranges_overlaps_list_scalar, overlaps_list_type,
+                                                 varchar_type, bigint_type);
         duckdb_destroy_logical_type(&overlaps_list_type);
     }
 
@@ -2414,7 +2327,7 @@ void register_duckhts_cgranges_functions(duckdb_connection connection, duckdb_da
     duckdb_table_function_set_bind(tf, overlaps_bind);
     duckdb_table_function_set_init(tf, overlaps_init);
     duckdb_table_function_set_function(tf, overlaps_scan);
-    duckdb_register_table_function(connection, tf);
+    ok = ok && duckdb_register_table_function(connection, tf) == DuckDBSuccess;
     duckdb_destroy_table_function(&tf);
 
     tf = duckdb_create_table_function();
@@ -2431,10 +2344,12 @@ void register_duckhts_cgranges_functions(duckdb_connection connection, duckdb_da
     duckdb_table_function_set_bind(tf, overlaps_bulk_bind);
     duckdb_table_function_set_init(tf, overlaps_bulk_init);
     duckdb_table_function_set_function(tf, overlaps_bulk_scan);
-    duckdb_register_table_function(connection, tf);
+    ok = ok && duckdb_register_table_function(connection, tf) == DuckDBSuccess;
     duckdb_destroy_table_function(&tf);
 
     duckdb_destroy_logical_type(&varchar_type);
     duckdb_destroy_logical_type(&bigint_type);
     duckdb_destroy_logical_type(&bool_type);
+    destroy_registry(reg);
+    return ok;
 }

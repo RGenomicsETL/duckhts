@@ -1,5 +1,10 @@
 # Rduckhts 1.5.2.9001-0.1.5
 
+- Require duckdb 1.4.0 or newer. The bundled extension registers native
+  functions before dependent SQL macros, retains all supported native overloads
+  on DuckDB 1.4, and includes the underlying diagnostic in initialization errors.
+  DuckVEP repeat and transcript-presentation SQL support the older binder.
+
 - The bundled extension validates complete text and packed CIGARs with checked
   lengths and consumed spans. CIGAR metrics and presence checks return NULL for
   malformed suffixes or arithmetic outside BIGINT, including a bad suffix after

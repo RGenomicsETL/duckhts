@@ -19,6 +19,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/sam.h>
 
 #include "include/bam_site_counts.h"
+#include "duckhts_registration.h"
 
 #define BAM_EXTRACT_MAX_PATH_BYTES 16384u
 #define BAM_EXTRACT_MAX_IDENTITY_BYTES 1024u
@@ -1219,7 +1220,7 @@ static void bam_extract_scan(duckdb_function_info info,
 }
 
 bool register_duckhts_somalier_bam_extract_functions(
-    duckdb_connection connection, duckdb_database database) {
+    duckhts_registration_t *registration, duckdb_database database) {
     bam_extract_registry_t *registry = duckdb_malloc(sizeof(*registry));
     duckdb_table_function function = NULL;
     duckdb_logical_type varchar_type = NULL;
@@ -1227,16 +1228,21 @@ bool register_duckhts_somalier_bam_extract_functions(
     duckdb_logical_type double_type = NULL;
     bool ok = false;
 
-    if (!registry) return false;
+    if (!registry) {
+        return duckhts_registration_error(registration,
+            "DuckHTS could not allocate Somalier BAM registration state");
+    }
     memset(registry, 0, sizeof(*registry));
     if (pthread_mutex_init(&registry->query_mutex, NULL) != 0) {
         duckdb_free(registry);
-        return false;
+        return duckhts_registration_error(registration,
+            "DuckHTS could not initialize the Somalier BAM registration mutex");
     }
     if (duckdb_connect(database, &registry->query_connection) != DuckDBSuccess ||
         !registry->query_connection) {
         bam_extract_registry_destroy(registry);
-        return false;
+        return duckhts_registration_error(registration,
+            "DuckHTS could not open the Somalier BAM registration connection");
     }
     function = duckdb_create_table_function();
     varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
@@ -1286,11 +1292,15 @@ bool register_duckhts_somalier_bam_extract_functions(
     duckdb_table_function_set_init(function, bam_extract_global_init);
     duckdb_table_function_set_local_init(function, bam_extract_local_init);
     duckdb_table_function_set_function(function, bam_extract_scan);
-    ok = duckdb_register_table_function(connection, function) == DuckDBSuccess;
+    ok = duckdb_register_table_function(registration->connection, function) == DuckDBSuccess;
 
     duckdb_destroy_logical_type(&double_type);
     duckdb_destroy_logical_type(&ubigint_type);
     duckdb_destroy_logical_type(&varchar_type);
     duckdb_destroy_table_function(&function);
-    return ok;
+    if (!ok) {
+        return duckhts_registration_error(registration,
+            "DuckHTS could not register duckhts_somalier_bam_counts");
+    }
+    return true;
 }

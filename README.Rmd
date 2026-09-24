@@ -74,6 +74,14 @@ tabix-indexed files directly in [DuckDB](https://duckdb.org/). DuckHTS uses
 functions for consequence annotation, intervals, coverage, sequence operations,
 compression, indexing, and export.
 
+## Runtime compatibility
+
+DuckHTS requires DuckDB **1.4.0 or newer** for its SQL functions and macros.
+The stable **v1.2.0 C API** recorded in `C_STRUCT` extension metadata is a
+separate interface version; it does not imply support for DuckDB 1.2 SQL.
+For duckdb-wasm, check the embedded DuckDB engine version rather than comparing
+npm package version numbers with DuckDB release numbers.
+
 ## Functions
 
 <details>
