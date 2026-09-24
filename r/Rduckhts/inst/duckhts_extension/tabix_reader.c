@@ -180,6 +180,7 @@ typedef struct {
     bool       finished;
     idx_t     *column_ids;      /* logical column indices (for projection pushdown) */
     idx_t      n_projected_cols;
+    struct tabix_field *fields;
     int        count_only;
     uint64_t   count_remaining;
     int        skip_remaining;
@@ -195,6 +196,7 @@ static void tabix_init_data_destroy(void *data) {
         if (id->fp)  hts_close(id->fp);
         free(id->line.s);
         free(id->column_ids);
+        free(id->fields);
         free(id);
     }
 }
@@ -251,28 +253,37 @@ static int parse_type_name(const char *s) {
     return DUCKDB_TYPE_VARCHAR;
 }
 
-/* Get n-th tab-separated field (0-based). Returns pointer into s, sets *len.
- * Returns NULL if field index is out of range. */
-static const char *get_field(const char *s, int idx, int *len) {
-    int cur = 0;
-    const char *start = s;
-    while (*s) {
-        if (*s == '\t') {
-            if (cur == idx) {
-                *len = (int)(s - start);
-                return start;
-            }
-            cur++;
-            start = s + 1;
+/* Views into the current kstring; valid until the next htslib read. */
+typedef struct tabix_field {
+    const char *start;
+    int len;
+} tabix_field_t;
+
+/* Store at most capacity fields while counting all fields for strict GFF3
+ * diagnostics. Unstored fields are never projected. */
+static int split_fields(const char *line, tabix_field_t *fields, int capacity) {
+    const char *start = line;
+    int count = 0;
+    for (const char *p = line; ; p++) {
+        if (*p != '\t' && *p != '\0') continue;
+        if (count < capacity) {
+            fields[count].start = start;
+            fields[count].len = (int)(p - start);
         }
-        s++;
+        count++;
+        if (*p == '\0') break;
+        start = p + 1;
     }
-    if (cur == idx) {
-        *len = (int)(s - start);
-        return start;
+    return count;
+}
+
+static const char *field_at(const tabix_field_t *fields, int count, int idx, int *len) {
+    if (idx < 0 || idx >= count) {
+        *len = 0;
+        return NULL;
     }
-    *len = 0;
-    return NULL;
+    *len = fields[idx].len;
+    return fields[idx].start;
 }
 
 static void trim_span(const char **start, int *len) {
@@ -526,8 +537,8 @@ static int parse_attr_pairs(const char *s, bool is_gff, gxf_attr_pair_t **out_pa
                   : parse_gtf_attr_pairs(s, out_pairs, out_count);
 }
 
-static int validate_gff3_line_strict(const char *line, char *err, size_t err_len) {
-    int n_fields = count_fields(line);
+static int validate_gff3_line_strict(const tabix_field_t *fields, int n_fields,
+                                     char *err, size_t err_len) {
     if (n_fields != 9) {
         if (n_fields < 9) {
             snprintf(err, err_len, "TooFewFields: expected exactly 9 tab-separated fields, found %d", n_fields);
@@ -538,13 +549,13 @@ static int validate_gff3_line_strict(const char *line, char *err, size_t err_len
     }
 
     int len = 0;
-    const char *seqid = get_field(line, GXF_COL_SEQNAME, &len);
+    const char *seqid = field_at(fields, n_fields, GXF_COL_SEQNAME, &len);
     if (!seqid || len == 0) {
         snprintf(err, err_len, "EmptySeqid: seqid (column 1) is empty");
         return 0;
     }
 
-    const char *feature = get_field(line, GXF_COL_FEATURE, &len);
+    const char *feature = field_at(fields, n_fields, GXF_COL_FEATURE, &len);
     if (!feature || len == 0) {
         snprintf(err, err_len, "EmptyFeaturetype: feature type (column 3) is empty");
         return 0;
@@ -555,8 +566,8 @@ static int validate_gff3_line_strict(const char *line, char *err, size_t err_len
     }
 
     int start_len = 0, end_len = 0;
-    const char *start_s = get_field(line, GXF_COL_START, &start_len);
-    const char *end_s = get_field(line, GXF_COL_END, &end_len);
+    const char *start_s = field_at(fields, n_fields, GXF_COL_START, &start_len);
+    const char *end_s = field_at(fields, n_fields, GXF_COL_END, &end_len);
     int64_t start = 0, endv = 0;
     int have_start = start_s && start_len > 0 && !(start_len == 1 && start_s[0] == '.');
     int have_end = end_s && end_len > 0 && !(end_len == 1 && end_s[0] == '.');
@@ -585,7 +596,7 @@ static int validate_gff3_line_strict(const char *line, char *err, size_t err_len
         return 0;
     }
 
-    const char *score = get_field(line, GXF_COL_SCORE, &len);
+    const char *score = field_at(fields, n_fields, GXF_COL_SCORE, &len);
     if (score && len > 0 && !(len == 1 && score[0] == '.')) {
         double d = 0.0;
         if (!parse_double_span(score, len, &d)) {
@@ -594,27 +605,27 @@ static int validate_gff3_line_strict(const char *line, char *err, size_t err_len
         }
     }
 
-    const char *strand = get_field(line, GXF_COL_STRAND, &len);
+    const char *strand = field_at(fields, n_fields, GXF_COL_STRAND, &len);
     if (!strand || len != 1 || !(strand[0] == '+' || strand[0] == '-' || strand[0] == '?' || strand[0] == '.')) {
         snprintf(err, err_len, "InvalidStrand: strand must be one of '+', '-', '?', '.'");
         return 0;
     }
 
     int frame_len = 0;
-    const char *frame = get_field(line, GXF_COL_FRAME, &frame_len);
+    const char *frame = field_at(fields, n_fields, GXF_COL_FRAME, &frame_len);
     if (!frame || frame_len != 1 || !(frame[0] == '.' || frame[0] == '0' || frame[0] == '1' || frame[0] == '2')) {
         snprintf(err, err_len, "InvalidPhase: phase must be 0, 1, 2, or '.'");
         return 0;
     }
     int feature_len = 0;
-    const char *feature_check = get_field(line, GXF_COL_FEATURE, &feature_len);
+    const char *feature_check = field_at(fields, n_fields, GXF_COL_FEATURE, &feature_len);
     if (feature_check && span_equals_lit(feature_check, feature_len, "CDS") && frame[0] == '.') {
         snprintf(err, err_len, "InvalidPhase: CDS row missing required phase");
         return 0;
     }
 
     int attr_len = 0;
-    const char *attrs = get_field(line, GXF_COL_ATTRIBUTES, &attr_len);
+    const char *attrs = field_at(fields, n_fields, GXF_COL_ATTRIBUTES, &attr_len);
     if (attrs) trim_span(&attrs, &attr_len);
     if (attrs && attr_len > 0 && !(attr_len == 1 && attrs[0] == '.')) {
         if (!gff3_attr_segments_valid(attrs, attr_len)) {
@@ -636,12 +647,14 @@ static char *dup_field_name(const char *start, int len) {
 }
 
 static int parse_header_names(const char *line, char ***out_names) {
-    int n = count_fields(line);
+    tabix_field_t fields[TABIX_MAX_GENERIC_COLS];
+    int n = split_fields(line, fields, TABIX_MAX_GENERIC_COLS);
+    if (n > TABIX_MAX_GENERIC_COLS) n = TABIX_MAX_GENERIC_COLS;
     char **names = (char **)malloc(sizeof(char *) * (size_t)n);
     if (!names) return 0;
     for (int i = 0; i < n; i++) {
         int len = 0;
-        const char *start = get_field(line, i, &len);
+        const char *start = field_at(fields, n, i, &len);
         if (!start) {
             names[i] = dup_field_name("", 0);
         } else {
@@ -1319,6 +1332,14 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
 
         if (bd->auto_detect && !bd->col_types_provided) {
             int *type_state = (int *)malloc(sizeof(int) * (size_t)bd->n_cols);
+            tabix_field_t *fields = (tabix_field_t *)malloc(sizeof(*fields) * (size_t)bd->n_cols);
+            if (!type_state || !fields) {
+                free(type_state);
+                free(fields);
+                duckdb_bind_set_error(info, "Out of memory inferring tabix column types");
+                tabix_bind_data_destroy(bd);
+                return;
+            }
             for (int i = 0; i < bd->n_cols; i++) type_state[i] = DUCKDB_TYPE_INTEGER;
 
             /* Reopen to scan for type inference */
@@ -1334,9 +1355,10 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
                     if (bd->meta_char && l2.s[0] == bd->meta_char) continue;
                     if (skip_header) { skip_header = 0; continue; }
 
+                    int n_fields = split_fields(l2.s, fields, bd->n_cols);
                     for (int i = 0; i < bd->n_cols; i++) {
                         int flen = 0;
-                        const char *fld = get_field(l2.s, i, &flen);
+                        const char *fld = field_at(fields, n_fields, i, &flen);
                         if (!fld || flen == 0 || (flen == 1 && fld[0] == '.')) continue;
                         if (is_integer_field(fld, flen)) {
                             continue;
@@ -1363,6 +1385,7 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
                 }
             }
             free(type_state);
+            free(fields);
         }
 
         duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
@@ -1414,6 +1437,12 @@ static void tabix_init(duckdb_init_info info) {
         return;
     }
 
+    id->fields = (tabix_field_t *)malloc(sizeof(*id->fields) * (size_t)bd->n_cols);
+    if (!id->fields) {
+        duckdb_init_set_error(info, "Out of memory allocating tabix fields");
+        tabix_init_data_destroy(id);
+        return;
+    }
     id->n_projected_cols = duckdb_init_get_column_count(info);
     if (id->n_projected_cols > 0) {
         id->column_ids = (idx_t *)malloc(sizeof(idx_t) * id->n_projected_cols);
@@ -1563,9 +1592,10 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
             continue;
         }
 
+        int n_fields = split_fields(id->line.s, id->fields, n_cols);
         if (bd->strict && bd->mode == TABIX_MODE_GFF) {
             char err[256];
-            if (!validate_gff3_line_strict(id->line.s, err, sizeof(err))) {
+            if (!validate_gff3_line_strict(id->fields, n_fields, err, sizeof(err))) {
                 char msg[384];
                 if (id->itr) {
                     snprintf(msg, sizeof(msg), "read_gff strict validation failed during indexed region scan: %s", err);
@@ -1593,7 +1623,7 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
                 if (logical_col == bd->attr_map_col && bd->include_attr_map) {
                     const char *fld = NULL;
                     int flen = 0;
-                    fld = get_field(id->line.s, GXF_COL_ATTRIBUTES, &flen);
+                    fld = field_at(id->fields, n_fields, GXF_COL_ATTRIBUTES, &flen);
                         char *tmp = NULL;
                         if (fld && flen > 0) {
                             tmp = (char *)malloc((size_t)flen + 1);
@@ -1620,7 +1650,7 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
                     }
                 if (logical_col == bd->attr_list_col && bd->include_attr_list) {
                     int flen = 0;
-                    const char *fld = get_field(id->line.s, GXF_COL_ATTRIBUTES, &flen);
+                    const char *fld = field_at(id->fields, n_fields, GXF_COL_ATTRIBUTES, &flen);
                     char *tmp = NULL;
                     if (fld && flen > 0) {
                         tmp = (char *)malloc((size_t)flen + 1);
@@ -1647,7 +1677,7 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
                 }
                 if (logical_col == bd->attr_pairs_col && bd->include_attr_pairs) {
                     int flen = 0;
-                    const char *fld = get_field(id->line.s, GXF_COL_ATTRIBUTES, &flen);
+                    const char *fld = field_at(id->fields, n_fields, GXF_COL_ATTRIBUTES, &flen);
                     char *tmp = NULL;
                     if (fld && flen > 0) {
                         tmp = (char *)malloc((size_t)flen + 1);
@@ -1681,7 +1711,7 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
                 }
 
                 int flen = 0;
-                const char *fld = get_field(id->line.s, logical_col, &flen);
+                const char *fld = field_at(id->fields, n_fields, logical_col, &flen);
 
                 if (!fld || flen == 0 || (flen == 1 && fld[0] == '.')) {
                     /* Missing value */
@@ -1744,7 +1774,7 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
                 int logical_col = (int)id->column_ids[c];
                 if (logical_col >= n_cols) continue;
                 int flen = 0;
-                const char *fld = get_field(id->line.s, logical_col, &flen);
+                const char *fld = field_at(id->fields, n_fields, logical_col, &flen);
                 if (!fld || flen == 0 || (flen == 1 && fld[0] == '.')) {
                     set_null(vectors[c], row_count);
                     continue;
