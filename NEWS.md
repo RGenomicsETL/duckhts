@@ -2,6 +2,10 @@
 
 # duckhts 1.5.2.9001
 
+- Split tabix, GFF3 and GTF records once per line for projected columns,
+  attribute outputs and strict GFF3 validation. Values, NULLs and strict
+  diagnostics retain their existing contracts.
+
 - Require DuckDB 1.4.0 or newer for the extension's SQL surface while retaining
   the stable v1.2.0 C API target. Register native functions before dependent SQL
   macros so DuckDB 1.4 can load the extension, register complete native overload

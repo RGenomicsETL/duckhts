@@ -1,0 +1,159 @@
+---
+title: "Tabix GFF/GTF single-split reader benchmark"
+output:
+  github_document:
+    html_preview: false
+    pandoc_args: ["--wrap=preserve", "--columns=400"]
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+This report compares identical release builds of origin/develop and the single-split
+reader on the same host. Each query returns one aggregate row but hashes every
+requested column so DuckDB must materialize it. The two builds must agree on
+row count, XOR fingerprint and hash sum for each workload. Warm-up, load, and staging are
+outside the five timed repetitions. The input is GENCODE mouse vM25 BASIC GFF3
+and GTF; the BED-like file is the first 100,000 GFF3 data records rearranged
+into 16 columns (chromosome, zero-based start, end, feature, score, strand,
+source, phase, attributes, then seven repeated source fields). The `gff_plain`
+projection selects `seqname`, `start` and `end`; `gff_all_nine` and
+`gtf_all_nine` select all nine physical columns. The BED-like query selects
+all 16 fields. This derived file tests generic column projection, not BED
+semantics or the BED reader.
+
+## Reproduction
+
+The inputs are registered under workload `tabix-single-split` in
+`r/duckhtsbench/inst/benchmark_registry.tsv`. Stage with network access only
+in the explicit staging command; `--offline` validates both source checksums
+and reconstructs the derived input from an already-cached GFF3:
+
+``` sh
+Rscript scripts/stage_tabix_split.R
+Rscript scripts/stage_tabix_split.R --offline
+```
+
+Build origin/develop in a separate worktree with `make configure && make release -j4`.
+Set `DUCKHTS_TABIX_BASELINE_EXTENSION` to its release binary and
+`DUCKHTS_TABIX_BASELINE_REVISION` to its exact commit; the candidate defaults
+to `build/release/duckhts.duckdb_extension`. Render with
+`Rscript -e 'rmarkdown::render("benchmarks/benchmark_tabix_split.Rmd")'`.
+The `default` condition leaves DuckDB's `threads` setting untouched. Both
+conditions run on the same process affinity (reported below); the reader is
+not a parallel table scan, so the thread conditions are not a scaling claim.
+
+```{r benchmark, echo=FALSE, message=FALSE}
+suppressPackageStartupMessages({
+  library(DBI)
+  library(duckdb)
+})
+Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath(
+  "r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE
+))
+ids <- c("tabix_split_gff3", "tabix_split_gtf", "tabix_split_bed")
+paths <- stats::setNames(vapply(ids, duckhtsbench::duckhts_bench_artifact_path,
+                                character(1)), ids)
+stopifnot(all(file.exists(paths)))
+for (id in ids) duckhtsbench::duckhts_bench_validate_identity(id, paths[[id]])
+paths <- stats::setNames(normalizePath(paths), ids)
+
+baseline <- Sys.getenv("DUCKHTS_TABIX_BASELINE_EXTENSION")
+baseline_revision <- Sys.getenv("DUCKHTS_TABIX_BASELINE_REVISION")
+candidate <- Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension")
+stopifnot(nzchar(baseline_revision), file.exists(baseline), file.exists(candidate))
+binaries <- c(develop = normalizePath(baseline), branch = normalizePath(candidate))
+source_revision <- system2("git", c("rev-parse", "HEAD"), stdout = TRUE)
+source_tree <- system2("git", c("rev-parse", "HEAD:src"), stdout = TRUE)
+affinity <- system2("taskset", c("-pc", Sys.getpid()), stdout = TRUE)
+knitr::kable(data.frame(
+  build = names(binaries), revision = c(baseline_revision, source_revision),
+  binary = unname(binaries)
+), caption = "Release binaries (built from the named revisions).")
+cat("Host:", Sys.info()[["nodename"]], "; affinity:", affinity, "; candidate src tree:", source_tree, "\n")
+
+quote_path <- function(path) paste0("'", gsub("'", "''", path, fixed = TRUE), "'")
+queries <- c(
+  gff_plain = sprintf(
+    paste0('SELECT count(*) AS rows, hex(bit_xor(hash(seqname, start, "end"))) AS digest, ',
+           'sum(hash(seqname, start, "end")) AS digest_sum ',
+           'FROM read_gff(%s, scan_mode := \'sequential\')'),
+    quote_path(paths[["tabix_split_gff3"]])
+  ),
+  gff_all_nine = sprintf(
+    paste0('SELECT count(*) AS rows, hex(bit_xor(hash(seqname, source, feature, start, "end", score, strand, frame, attributes))) AS digest, ',
+           'sum(hash(seqname, source, feature, start, "end", score, strand, frame, attributes)) AS digest_sum ',
+           'FROM read_gff(%s, scan_mode := \'sequential\')'),
+    quote_path(paths[["tabix_split_gff3"]])
+  ),
+  gtf_all_nine = sprintf(
+    paste0('SELECT count(*) AS rows, hex(bit_xor(hash(seqname, source, feature, start, "end", score, strand, frame, attributes))) AS digest, ',
+           'sum(hash(seqname, source, feature, start, "end", score, strand, frame, attributes)) AS digest_sum ',
+           'FROM read_gtf(%s, scan_mode := \'sequential\')'),
+    quote_path(paths[["tabix_split_gtf"]])
+  ),
+  tabix_bed16 = sprintf(
+    paste0('SELECT count(*) AS rows, hex(bit_xor(hash(',
+           paste(sprintf('column%d', 0:15), collapse = ', '),
+           '))) AS digest, sum(hash(',
+           paste(sprintf('column%d', 0:15), collapse = ', '),
+           ')) AS digest_sum FROM read_tabix(%s, scan_mode := \'sequential\')'),
+    quote_path(paths[["tabix_split_bed"]])
+  )
+)
+inputs <- c(gff_plain = "tabix_split_gff3", gff_all_nine = "tabix_split_gff3",
+            gtf_all_nine = "tabix_split_gtf", tabix_bed16 = "tabix_split_bed")
+measure <- function(extension, threads, sql) {
+  config <- list(allow_unsigned_extensions = "true")
+  if (identical(threads, "1")) config$threads <- "1"
+  con <- dbConnect(duckdb(config = config))
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  dbExecute(con, paste("LOAD", quote_path(extension)))
+  actual_threads <- dbGetQuery(con, "SELECT current_setting('threads') AS threads")$threads[[1L]]
+  expected <- dbGetQuery(con, sql)
+  elapsed <- numeric(5L)
+  for (i in seq_along(elapsed)) {
+    started <- proc.time()[["elapsed"]]
+    observed <- dbGetQuery(con, sql)
+    elapsed[[i]] <- proc.time()[["elapsed"]] - started
+    stopifnot(identical(observed, expected))
+  }
+  list(result = expected, seconds = stats::median(elapsed), threads = actual_threads)
+}
+results <- list()
+for (threads in c("1", "default")) {
+  for (name in names(queries)) {
+    reference <- measure(binaries[["develop"]], threads, queries[[name]])
+    candidate_run <- measure(binaries[["branch"]], threads, queries[[name]])
+    stopifnot(identical(reference$result, candidate_run$result))
+    for (build in names(binaries)) {
+      run <- if (build == "develop") reference else candidate_run
+      results[[length(results) + 1L]] <- data.frame(
+        workload = name, build = build, threads = threads,
+        effective_threads = run$threads, input_bytes = file.info(paths[[inputs[[name]]]])$size,
+        input_rows = format(run$result$rows[[1L]], scientific = FALSE, trim = TRUE),
+        result_rows = nrow(run$result),
+        digest = run$result$digest[[1L]], median_seconds = run$seconds
+      )
+    }
+  }
+}
+result <- do.call(rbind, results)
+knitr::kable(result[, c("workload", "build", "threads", "effective_threads",
+                        "input_bytes", "input_rows", "result_rows", "median_seconds")],
+             digits = 3, caption = "Five-run median wall time (seconds); output fingerprints and hash sums match across builds.")
+```
+
+In this run the narrow GFF projection is slower while all-column GFF/GTF
+and wide tabix improve. Scanning even the unprojected final GFF attribute
+field costs time in the narrow projection; this workload does not establish
+a universal speedup.
+
+The raw input checksum, byte count and derivation are pinned in the registry
+and validated before measurement. `input_rows` is the count returned by each
+scan; `result_rows` counts aggregate rows materialized by the query. Times include scanning, decompression
+of GENCODE inputs, aggregation and DuckDB execution but exclude opening the
+connection and loading the extension. Fingerprint and hash-sum equality check output values,
+not ordering; no output rows are filtered by the benchmark.

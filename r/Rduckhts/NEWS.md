@@ -1,5 +1,9 @@
 # Rduckhts 1.5.2.9001-0.1.5
 
+- The bundled extension scans tabix, GFF3 and GTF lines with one field split
+  for projected columns and attributes, retaining existing SQL results and
+  strict GFF3 diagnostics.
+
 - Require duckdb 1.4.0 or newer. The bundled extension registers native
   functions before dependent SQL macros, retains all supported native overloads
   on DuckDB 1.4, and includes the underlying diagnostic in initialization errors.
