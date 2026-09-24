@@ -3,8 +3,10 @@ DUCKDB_EXTENSION_EXTERN
 
 #include <ctype.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
+#include "duckhts_cigar.h"
 #include "duckhts_simd_internal.h"
 #include "seq_encoding.h"
 
@@ -54,7 +56,7 @@ static const uint16_t SAM_FLAG_FIELD_MASKS[] = {
 enum { SAM_FLAG_FIELD_COUNT = (int)(sizeof(SAM_FLAG_FIELD_MASKS) / sizeof(SAM_FLAG_FIELD_MASKS[0])) };
 
 typedef struct {
-    int valid;
+    uint32_t seen_ops;
     int has_soft_clip;
     int has_hard_clip;
     int64_t left_soft_clip;
@@ -72,6 +74,23 @@ enum {
     CIGAR_METRIC_QUERY_LENGTH = 5,
     CIGAR_METRIC_ALIGNED_QUERY_LENGTH = 6,
     CIGAR_METRIC_REFERENCE_LENGTH = 7
+};
+
+/* Static lifetime: registration and execution borrow the same metric metadata. */
+typedef struct {
+    const char *name;
+    int id;
+    duckdb_type return_type;
+} cigar_metric_definition_t;
+
+static const cigar_metric_definition_t CIGAR_METRICS[] = {
+    {"cigar_has_soft_clip", CIGAR_METRIC_HAS_SOFT_CLIP, DUCKDB_TYPE_BOOLEAN},
+    {"cigar_has_hard_clip", CIGAR_METRIC_HAS_HARD_CLIP, DUCKDB_TYPE_BOOLEAN},
+    {"cigar_left_soft_clip", CIGAR_METRIC_LEFT_SOFT_CLIP, DUCKDB_TYPE_BIGINT},
+    {"cigar_right_soft_clip", CIGAR_METRIC_RIGHT_SOFT_CLIP, DUCKDB_TYPE_BIGINT},
+    {"cigar_query_length", CIGAR_METRIC_QUERY_LENGTH, DUCKDB_TYPE_BIGINT},
+    {"cigar_aligned_query_length", CIGAR_METRIC_ALIGNED_QUERY_LENGTH, DUCKDB_TYPE_BIGINT},
+    {"cigar_reference_length", CIGAR_METRIC_REFERENCE_LENGTH, DUCKDB_TYPE_BIGINT}
 };
 
 static inline void set_null_at(duckdb_vector vector, idx_t row) {
@@ -158,230 +177,34 @@ static inline int64_t get_int64_at(duckdb_vector vector, idx_t row) {
     return result;
 }
 
-static int parse_cigar_metrics(const char *cigar, idx_t len, cigar_metrics_t *metrics) {
-    int64_t op_len = 0;
-    int saw_op = 0;
-    char first_op = '\0';
-    int64_t first_len = 0;
-    char last_op = '\0';
-    int64_t last_len = 0;
+/* Both representations use the same complete scan. No-CIGAR succeeds with
+   seen_ops == 0 so wrappers can distinguish metric NULL from presence false.
+   On failure the caller must discard all accumulated metrics. */
+static inline duckhts_cigar_status_t cigar_scan_metrics(duckhts_cigar_cursor_t *cursor,
+                                                      cigar_metrics_t *metrics) {
+    duckhts_cigar_op_t op;
+    duckhts_cigar_status_t status;
 
     memset(metrics, 0, sizeof(*metrics));
-    if (!cigar || len == 0 || (len == 1 && cigar[0] == '*')) {
-        return 0;
-    }
-
-    for (idx_t i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)cigar[i];
-        if (isdigit(c)) {
-            op_len = op_len * 10 + (int64_t)(c - '0');
-            continue;
+    while ((status = duckhts_cigar_next(cursor, &op)) > 0) {
+        if (op.type == 3) {
+            /* Aligned query is a subset of the already checked query span. */
+            metrics->aligned_query_length += op.length;
         }
-        if (op_len <= 0) {
-            return 0;
+        if (metrics->seen_ops == 0 && op.code == BAM_CSOFT_CLIP) {
+            metrics->left_soft_clip = op.length;
         }
-
-        switch (c) {
-        case 'M':
-        case '=':
-        case 'X':
-            metrics->query_length += op_len;
-            metrics->aligned_query_length += op_len;
-            metrics->reference_length += op_len;
-            break;
-        case 'I':
-            metrics->query_length += op_len;
-            break;
-        case 'S':
-            metrics->query_length += op_len;
-            metrics->has_soft_clip = 1;
-            break;
-        case 'H':
-            metrics->has_hard_clip = 1;
-            break;
-        case 'D':
-        case 'N':
-            metrics->reference_length += op_len;
-            break;
-        case 'P':
-            break;
-        default:
-            return 0;
-        }
-
-        if (!saw_op) {
-            first_op = (char)c;
-            first_len = op_len;
-        }
-        last_op = (char)c;
-        last_len = op_len;
-        saw_op = 1;
-        op_len = 0;
+        metrics->right_soft_clip = op.code == BAM_CSOFT_CLIP ? op.length : 0;
+        metrics->seen_ops |= UINT32_C(1) << op.code;
     }
-
-    if (!saw_op || op_len != 0) {
-        return 0;
+    if (status < 0) {
+        return status;
     }
-    if (first_op == 'S') {
-        metrics->left_soft_clip = first_len;
-    }
-    if (last_op == 'S') {
-        metrics->right_soft_clip = last_len;
-    }
-    metrics->valid = 1;
-    return 1;
-}
-
-static int cigar_has_operator_text(const char *cigar, idx_t cigar_len, char op) {
-    int64_t op_len = 0;
-
-    if (!cigar || cigar_len == 0 || (cigar_len == 1 && cigar[0] == '*')) {
-        return 0;
-    }
-    for (idx_t i = 0; i < cigar_len; i++) {
-        unsigned char c = (unsigned char)cigar[i];
-        if (isdigit(c)) {
-            op_len = op_len * 10 + (int64_t)(c - '0');
-            continue;
-        }
-        if (op_len <= 0) {
-            return -1;
-        }
-        if ((char)c == op) {
-            return 1;
-        }
-        op_len = 0;
-    }
-    if (op_len != 0) {
-        return -1;
-    }
-    return 0;
-}
-
-/* Binary BAM CIGAR: each UINTEGER is (oplen << 4) | op, with htslib BAM_CIGAR
-   op codes M=0 I=1 D=2 N=3 S=4 H=5 P=6 ==7 X=8 B=9 (as read_bam(
-   cigar_representation := 'binary') emits). Fill metrics exactly as
-   parse_cigar_metrics does for the text form; return 0 (invalid -> NULL) for an
-   empty list or a bad op/zero length, matching '*'/empty/malformed text. */
-static int binary_cigar_metrics(const uint32_t *ops, idx_t n, cigar_metrics_t *metrics) {
-    char first_op = '\0';
-    char last_op = '\0';
-    int64_t first_len = 0;
-
-    memset(metrics, 0, sizeof(*metrics));
-    if (!ops || n == 0) {
-        return 0;
-    }
-    for (idx_t i = 0; i < n; i++) {
-        uint32_t c = ops[i];
-        int op = (int)(c & 0xFu);
-        int64_t oplen = (int64_t)(c >> 4);
-        char opc;
-
-        if (oplen <= 0) {
-            return 0;
-        }
-        switch (op) {
-        case 0: opc = 'M'; break;   /* M */
-        case 7: opc = '='; break;   /* = */
-        case 8: opc = 'X'; break;   /* X */
-        case 1: opc = 'I'; break;   /* I */
-        case 4: opc = 'S'; break;   /* S */
-        case 5: opc = 'H'; break;   /* H */
-        case 2: opc = 'D'; break;   /* D */
-        case 3: opc = 'N'; break;   /* N */
-        case 6: opc = 'P'; break;   /* P */
-        default: return 0;          /* B (9) or unknown: text path rejects too */
-        }
-        switch (opc) {
-        case 'M':
-        case '=':
-        case 'X':
-            metrics->query_length += oplen;
-            metrics->aligned_query_length += oplen;
-            metrics->reference_length += oplen;
-            break;
-        case 'I':
-            metrics->query_length += oplen;
-            break;
-        case 'S':
-            metrics->query_length += oplen;
-            metrics->has_soft_clip = 1;
-            break;
-        case 'H':
-            metrics->has_hard_clip = 1;
-            break;
-        case 'D':
-        case 'N':
-            metrics->reference_length += oplen;
-            break;
-        case 'P':
-        default:
-            break;
-        }
-        if (i == 0) {
-            first_op = opc;
-            first_len = oplen;
-        }
-        last_op = opc;
-    }
-    if (first_op == 'S') {
-        metrics->left_soft_clip = first_len;
-    }
-    if (last_op == 'S') {
-        /* right soft clip length = oplen of the last element (it is S) */
-        metrics->right_soft_clip = (int64_t)(ops[n - 1] >> 4);
-    }
-    metrics->valid = 1;
-    return 1;
-}
-
-/* True if every element in [offset, offset+length) of a list child vector is
-   non-NULL. A NULL child element means the packed value is unspecified, so the
-   binary-CIGAR paths treat such a row as invalid (-> NULL), like the nt16
-   overloads do. `validity` NULL means the child has no NULLs (all valid). */
-static int list_child_range_valid(uint64_t *validity, idx_t offset, idx_t length) {
-    if (!validity) {
-        return 1;
-    }
-    for (idx_t i = 0; i < length; i++) {
-        if (!duckdb_validity_row_is_valid(validity, offset + i)) {
-            return 0;
-        }
-    }
-    return 1;
-}
-
-/* Binary-CIGAR analogue of cigar_has_operator_text: return 1 if op present,
-   0 if absent (incl. empty), -1 on malformed (zero-length element). `op` is a
-   validated CIGAR op char. */
-static int binary_cigar_has_op(const uint32_t *ops, idx_t n, char op) {
-    int want;
-
-    switch (op) {
-    case 'M': want = 0; break;
-    case 'I': want = 1; break;
-    case 'D': want = 2; break;
-    case 'N': want = 3; break;
-    case 'S': want = 4; break;
-    case 'H': want = 5; break;
-    case 'P': want = 6; break;
-    case '=': want = 7; break;
-    case 'X': want = 8; break;
-    default:  return -1;
-    }
-    if (!ops || n == 0) {
-        return 0;
-    }
-    for (idx_t i = 0; i < n; i++) {
-        if ((int64_t)(ops[i] >> 4) <= 0) {
-            return -1;
-        }
-        if ((int)(ops[i] & 0xFu) == want) {
-            return 1;
-        }
-    }
-    return 0;
+    metrics->query_length = cursor->query_span;
+    metrics->reference_length = cursor->reference_span;
+    metrics->has_soft_clip = (metrics->seen_ops & (UINT32_C(1) << BAM_CSOFT_CLIP)) != 0;
+    metrics->has_hard_clip = (metrics->seen_ops & (UINT32_C(1) << BAM_CHARD_CLIP)) != 0;
+    return DUCKHTS_CIGAR_OK;
 }
 
 static void seq_revcomp_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
@@ -996,21 +819,126 @@ static void sam_flag_bits_scalar(duckdb_function_info info, duckdb_data_chunk in
     }
 }
 
+static int cigar_requested_op(const char *text, idx_t length) {
+    if (length != 1) {
+        return -1;
+    }
+    unsigned char op = (unsigned char)text[0];
+    if (op >= 'a' && op <= 'z') {
+        op = (unsigned char)(op - 'a' + 'A');
+    }
+    return bam_cigar_table[op];
+}
+
+static duckdb_vector cigar_strict_vector(duckdb_data_chunk input, idx_t index) {
+    return duckdb_data_chunk_get_column_count(input) > index
+        ? duckdb_data_chunk_get_vector(input, index) : NULL;
+}
+
+/* Call only after all top-level arguments, including strict, are non-NULL.
+   A true return means execution must stop after setting the DuckDB error. */
+static bool cigar_strict_error(duckdb_function_info info, const char *name,
+                              duckdb_vector strict_vec, idx_t row,
+                              duckhts_cigar_status_t status,
+                              const duckhts_cigar_cursor_t *cursor) {
+    if (status >= 0 || !strict_vec || !((bool *)duckdb_vector_get_data(strict_vec))[row]) {
+        return false;
+    }
+    const char *reason;
+    switch (status) {
+    case DUCKHTS_CIGAR_MISSING_LENGTH:
+        reason = "missing operation length";
+        break;
+    case DUCKHTS_CIGAR_ZERO_LENGTH:
+        reason = "zero operation length";
+        break;
+    case DUCKHTS_CIGAR_MISSING_OP:
+        reason = "trailing length without an operator";
+        break;
+    case DUCKHTS_CIGAR_UNSUPPORTED_OP:
+        reason = "unsupported CIGAR operator";
+        break;
+    case DUCKHTS_CIGAR_LENGTH_OVERFLOW:
+        reason = "operation length exceeds BIGINT";
+        break;
+    case DUCKHTS_CIGAR_QUERY_OVERFLOW:
+        reason = "query span exceeds BIGINT";
+        break;
+    case DUCKHTS_CIGAR_REFERENCE_OVERFLOW:
+        reason = "reference span exceeds BIGINT";
+        break;
+    case DUCKHTS_CIGAR_NULL_CHILD:
+        reason = "NULL packed operation";
+        break;
+    case DUCKHTS_CIGAR_INPUT_TOO_LARGE:
+        reason = "packed input exceeds addressable size";
+        break;
+    case DUCKHTS_CIGAR_INVALID_REQUESTED_OP:
+        reason = "requested operator must be one of M, I, D, N, S, H, P, =, X";
+        break;
+    case DUCKHTS_CIGAR_POSITION_OVERFLOW:
+        reason = "position plus reference span exceeds BIGINT";
+        break;
+    default:
+        reason = "invalid CIGAR";
+        break;
+    }
+    char message[256];
+    if (cursor && status != DUCKHTS_CIGAR_INPUT_TOO_LARGE) {
+        snprintf(message, sizeof(message), "%s: %s at %s %zu", name, reason,
+                 cursor->text ? "operation-start byte offset" : "op index", cursor->offset + 1);
+    } else {
+        snprintf(message, sizeof(message), "%s: %s", name, reason);
+    }
+    duckdb_scalar_function_set_error(info, message);
+    return true;
+}
+
+/* Validate child NULLs before borrowing packed storage. On failure offset
+   identifies the NULL child within this row, independent of its list offset. */
+static duckhts_cigar_status_t cigar_packed_cursor(duckdb_list_entry entry,
+                                                const uint32_t *data,
+                                                uint64_t *validity,
+                                                duckhts_cigar_cursor_t *cursor) {
+    memset(cursor, 0, sizeof(*cursor));
+    if (entry.length > SIZE_MAX) {
+        return DUCKHTS_CIGAR_INPUT_TOO_LARGE;
+    }
+    if (validity) {
+        for (idx_t i = 0; i < entry.length; i++) {
+            if (!duckdb_validity_row_is_valid(validity, entry.offset + i)) {
+                cursor->offset = (size_t)i;
+                return DUCKHTS_CIGAR_NULL_CHILD;
+            }
+        }
+    }
+    cursor->packed = entry.length ? data + entry.offset : NULL;
+    cursor->count = (size_t)entry.length;
+    return DUCKHTS_CIGAR_OK;
+}
+
 static void cigar_metric_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
-    uintptr_t metric_id = (uintptr_t)duckdb_scalar_function_get_extra_info(info);
+    const cigar_metric_definition_t *metric = duckdb_scalar_function_get_extra_info(info);
+    int metric_id = metric->id;
     duckdb_vector cigar_vec = duckdb_data_chunk_get_vector(input, 0);
+    duckdb_vector strict_vec = cigar_strict_vector(input, 1);
     idx_t row_count = duckdb_data_chunk_get_size(input);
     cigar_metrics_t metrics;
 
     for (idx_t row = 0; row < row_count; row++) {
-        if (!row_is_valid(cigar_vec, row)) {
+        if (!row_is_valid(cigar_vec, row) || (strict_vec && !row_is_valid(strict_vec, row))) {
             set_null_at(output, row);
             continue;
         }
 
         idx_t cigar_len = 0;
         const char *cigar = get_string_at(cigar_vec, row, &cigar_len);
-        if (!parse_cigar_metrics(cigar, cigar_len, &metrics)) {
+        duckhts_cigar_cursor_t cursor = {.text = cigar, .count = cigar_len};
+        duckhts_cigar_status_t status = cigar_scan_metrics(&cursor, &metrics);
+        if (status < 0 || metrics.seen_ops == 0) {
+            if (cigar_strict_error(info, metric->name, strict_vec, row, status, &cursor)) {
+                return;
+            }
             set_null_at(output, row);
             continue;
         }
@@ -1046,14 +974,15 @@ static void cigar_metric_scalar(duckdb_function_info info, duckdb_data_chunk inp
 }
 
 static void cigar_has_op_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
-    (void)info;
     duckdb_vector cigar_vec = duckdb_data_chunk_get_vector(input, 0);
     duckdb_vector op_vec = duckdb_data_chunk_get_vector(input, 1);
+    duckdb_vector strict_vec = cigar_strict_vector(input, 2);
     bool *out_data = (bool *)duckdb_vector_get_data(output);
     idx_t row_count = duckdb_data_chunk_get_size(input);
 
     for (idx_t row = 0; row < row_count; row++) {
-        if (!row_is_valid(cigar_vec, row) || !row_is_valid(op_vec, row)) {
+        if (!row_is_valid(cigar_vec, row) || !row_is_valid(op_vec, row) ||
+            (strict_vec && !row_is_valid(strict_vec, row))) {
             set_null_at(output, row);
             continue;
         }
@@ -1062,34 +991,27 @@ static void cigar_has_op_scalar(duckdb_function_info info, duckdb_data_chunk inp
         idx_t op_len = 0;
         const char *cigar = get_string_at(cigar_vec, row, &cigar_len);
         const char *op_text = get_string_at(op_vec, row, &op_len);
-        if (op_len != 1) {
+        int op = cigar_requested_op(op_text, op_len);
+        if (!duckhts_cigar_op_supported(op)) {
+            if (cigar_strict_error(info, "cigar_has_op", strict_vec, row,
+                                   DUCKHTS_CIGAR_INVALID_REQUESTED_OP, NULL)) {
+                return;
+            }
             set_null_at(output, row);
             continue;
         }
 
-        char op = (char)toupper((unsigned char)op_text[0]);
-        switch (op) {
-        case 'M':
-        case 'I':
-        case 'D':
-        case 'N':
-        case 'S':
-        case 'H':
-        case 'P':
-        case '=':
-        case 'X':
-            break;
-        default:
+        duckhts_cigar_cursor_t cursor = {.text = cigar, .count = cigar_len};
+        cigar_metrics_t metrics;
+        duckhts_cigar_status_t status = cigar_scan_metrics(&cursor, &metrics);
+        if (status < 0) {
+            if (cigar_strict_error(info, "cigar_has_op", strict_vec, row, status, &cursor)) {
+                return;
+            }
             set_null_at(output, row);
             continue;
         }
-
-        int has_op = cigar_has_operator_text(cigar, cigar_len, op);
-        if (has_op < 0) {
-            set_null_at(output, row);
-            continue;
-        }
-        out_data[row] = (has_op != 0);
+        out_data[row] = (metrics.seen_ops & (UINT32_C(1) << op)) != 0;
     }
 }
 
@@ -1097,8 +1019,10 @@ static void cigar_has_op_scalar(duckdb_function_info info, duckdb_data_chunk inp
    from the packed BAM CIGAR list read_bam(cigar_representation := 'binary')
    emits; bit-identical to the text path for the same read. */
 static void cigar_metric_binary_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
-    uintptr_t metric_id = (uintptr_t)duckdb_scalar_function_get_extra_info(info);
+    const cigar_metric_definition_t *metric = duckdb_scalar_function_get_extra_info(info);
+    int metric_id = metric->id;
     duckdb_vector cigar_vec = duckdb_data_chunk_get_vector(input, 0);
+    duckdb_vector strict_vec = cigar_strict_vector(input, 1);
     duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(cigar_vec);
     duckdb_vector child_vec = duckdb_list_vector_get_child(cigar_vec);
     uint32_t *child_data = (uint32_t *)duckdb_vector_get_data(child_vec);
@@ -1107,13 +1031,20 @@ static void cigar_metric_binary_scalar(duckdb_function_info info, duckdb_data_ch
     cigar_metrics_t metrics;
 
     for (idx_t row = 0; row < row_count; row++) {
-        if (!row_is_valid(cigar_vec, row)) {
+        if (!row_is_valid(cigar_vec, row) || (strict_vec && !row_is_valid(strict_vec, row))) {
             set_null_at(output, row);
             continue;
         }
-        duckdb_list_entry entry = list_data[row];
-        if (!list_child_range_valid(child_validity, entry.offset, entry.length) ||
-            !binary_cigar_metrics(child_data + entry.offset, entry.length, &metrics)) {
+        duckhts_cigar_cursor_t cursor;
+        duckhts_cigar_status_t status = cigar_packed_cursor(list_data[row], child_data,
+                                                           child_validity, &cursor);
+        if (status > 0) {
+            status = cigar_scan_metrics(&cursor, &metrics);
+        }
+        if (status < 0 || metrics.seen_ops == 0) {
+            if (cigar_strict_error(info, metric->name, strict_vec, row, status, &cursor)) {
+                return;
+            }
             set_null_at(output, row);
             continue;
         }
@@ -1137,9 +1068,9 @@ static void cigar_metric_binary_scalar(duckdb_function_info info, duckdb_data_ch
 
 /* Binary (UINTEGER[] cigar, VARCHAR op) overload of cigar_has_op_scalar. */
 static void cigar_has_op_binary_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
-    (void)info;
     duckdb_vector cigar_vec = duckdb_data_chunk_get_vector(input, 0);
     duckdb_vector op_vec = duckdb_data_chunk_get_vector(input, 1);
+    duckdb_vector strict_vec = cigar_strict_vector(input, 2);
     duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(cigar_vec);
     duckdb_vector child_vec = duckdb_list_vector_get_child(cigar_vec);
     uint32_t *child_data = (uint32_t *)duckdb_vector_get_data(child_vec);
@@ -1148,37 +1079,259 @@ static void cigar_has_op_binary_scalar(duckdb_function_info info, duckdb_data_ch
     idx_t row_count = duckdb_data_chunk_get_size(input);
 
     for (idx_t row = 0; row < row_count; row++) {
-        if (!row_is_valid(cigar_vec, row) || !row_is_valid(op_vec, row)) {
+        if (!row_is_valid(cigar_vec, row) || !row_is_valid(op_vec, row) ||
+            (strict_vec && !row_is_valid(strict_vec, row))) {
             set_null_at(output, row);
             continue;
         }
         idx_t op_len = 0;
         const char *op_text = get_string_at(op_vec, row, &op_len);
-        if (op_len != 1) {
+        int op = cigar_requested_op(op_text, op_len);
+        if (!duckhts_cigar_op_supported(op)) {
+            if (cigar_strict_error(info, "cigar_has_op", strict_vec, row,
+                                   DUCKHTS_CIGAR_INVALID_REQUESTED_OP, NULL)) {
+                return;
+            }
             set_null_at(output, row);
             continue;
         }
-        char op = (char)toupper((unsigned char)op_text[0]);
-        switch (op) {
-        case 'M': case 'I': case 'D': case 'N':
-        case 'S': case 'H': case 'P': case '=': case 'X':
-            break;
-        default:
+        duckhts_cigar_cursor_t cursor;
+        duckhts_cigar_status_t status = cigar_packed_cursor(list_data[row], child_data,
+                                                           child_validity, &cursor);
+        cigar_metrics_t metrics;
+        if (status > 0) {
+            status = cigar_scan_metrics(&cursor, &metrics);
+        }
+        if (status < 0) {
+            if (cigar_strict_error(info, "cigar_has_op", strict_vec, row, status, &cursor)) {
+                return;
+            }
             set_null_at(output, row);
             continue;
         }
-        duckdb_list_entry entry = list_data[row];
-        if (!list_child_range_valid(child_validity, entry.offset, entry.length)) {
-            set_null_at(output, row);
-            continue;
-        }
-        int has_op = binary_cigar_has_op(child_data + entry.offset, entry.length, op);
-        if (has_op < 0) {
-            set_null_at(output, row);
-            continue;
-        }
-        out_data[row] = (has_op != 0);
+        out_data[row] = (metrics.seen_ops & (UINT32_C(1) << op)) != 0;
     }
+}
+
+/* ================================================================
+ * cigar_aligned_blocks(cigar, pos)
+ *   -> STRUCT(ref_start BIGINT[], query_start BIGINT[], width BIGINT[])
+ *
+ * One block per M, = or X op, in CIGAR order, never merged: pysam's
+ * get_blocks() and GenomicAlignments' cigarRangesAlongReferenceSpace /
+ * cigarRangesAlongQuerySpace over the aligned ops. ref_start is pos plus the
+ * reference consumed before the block, so it carries whatever base pos uses;
+ * query_start is the 0-based offset into the stored SEQ (S counts, H does
+ * not); width is the op length. Invalid input is NULL by default and an error
+ * with strict TRUE. NULL arguments and empty or '*' CIGAR remain NULL.
+ * A valid CIGAR with no aligned op is three empty lists.
+ *
+ * Op semantics come from htslib's packed table: bam_cigar_type(op) bit 1
+ * consumes query, bit 2 consumes reference, and type 3 is exactly M, =, X.
+ * ================================================================ */
+
+enum {
+    CIGAR_BLOCK_REF_START = 0,
+    CIGAR_BLOCK_QUERY_START = 1,
+    CIGAR_BLOCK_WIDTH = 2,
+    CIGAR_BLOCK_FIELD_COUNT = 3
+};
+static const char *CIGAR_BLOCK_FIELD_NAMES[CIGAR_BLOCK_FIELD_COUNT] = {"ref_start", "query_start", "width"};
+
+/* Write cursor over the three block lists of one chunk. Capacity is reserved
+   once from an upper bound on blocks (the chunk's op count, or its byte count
+   for text) and the lists are sized to the cursor when the chunk is published,
+   so nothing partial is visible if a reserve fails. */
+typedef struct {
+    duckdb_vector list[CIGAR_BLOCK_FIELD_COUNT]; /* struct children, LIST(BIGINT) */
+    duckdb_list_entry *entry[CIGAR_BLOCK_FIELD_COUNT];
+    int64_t *value[CIGAR_BLOCK_FIELD_COUNT];     /* list child data, capacity elements */
+    idx_t n;                                     /* blocks written so far */
+} cigar_block_sink_t;
+
+static int cigar_block_sink_open(duckdb_function_info info, duckdb_vector output, idx_t capacity,
+                                 cigar_block_sink_t *sink) {
+    sink->n = 0;
+    for (int f = 0; f < CIGAR_BLOCK_FIELD_COUNT; f++) {
+        sink->list[f] = duckdb_struct_vector_get_child(output, (idx_t)f);
+        if (duckdb_list_vector_set_size(sink->list[f], 0) != DuckDBSuccess ||
+            duckdb_list_vector_reserve(sink->list[f], capacity) != DuckDBSuccess) {
+            duckdb_scalar_function_set_error(info, "cigar_aligned_blocks: failed to grow list storage");
+            return 0;
+        }
+    }
+    for (int f = 0; f < CIGAR_BLOCK_FIELD_COUNT; f++) {
+        sink->entry[f] = (duckdb_list_entry *)duckdb_vector_get_data(sink->list[f]);
+        sink->value[f] = (int64_t *)duckdb_vector_get_data(duckdb_list_vector_get_child(sink->list[f]));
+    }
+    return 1;
+}
+
+static void cigar_block_sink_null_row(cigar_block_sink_t *sink, duckdb_vector output, idx_t row) {
+    for (int f = 0; f < CIGAR_BLOCK_FIELD_COUNT; f++) {
+        sink->entry[f][row].offset = sink->n;
+        sink->entry[f][row].length = 0;
+        set_null_at(sink->list[f], row);
+    }
+    set_null_at(output, row);
+}
+
+static void cigar_block_sink_row(cigar_block_sink_t *sink, idx_t row, idx_t start) {
+    for (int f = 0; f < CIGAR_BLOCK_FIELD_COUNT; f++) {
+        sink->entry[f][row].offset = start;
+        sink->entry[f][row].length = sink->n - start;
+    }
+}
+
+static void cigar_block_sink_publish(duckdb_function_info info, cigar_block_sink_t *sink) {
+    for (int f = 0; f < CIGAR_BLOCK_FIELD_COUNT; f++) {
+        if (duckdb_list_vector_set_size(sink->list[f], sink->n) != DuckDBSuccess) {
+            duckdb_scalar_function_set_error(info, "cigar_aligned_blocks: failed to size list storage");
+            return;
+        }
+    }
+}
+
+/* Validate each operation before its candidate write; the wrapper rewinds the entire row on
+   failure. Reservation includes every input op, so writing a candidate for
+   nonaligned ops is safe and only aligned ops advance the output cursor. */
+static inline duckhts_cigar_status_t cigar_scan_blocks(cigar_block_sink_t *sink,
+                                                     duckhts_cigar_cursor_t *cursor, int64_t pos) {
+    duckhts_cigar_op_t op;
+    duckhts_cigar_status_t status;
+    size_t op_start = cursor->offset;
+
+    while ((status = duckhts_cigar_next(cursor, &op)) > 0) {
+        /* Spans are nonnegative BIGINTs. Negative pos is allowed, and adding
+           a span cannot underflow. Check the reference end before addition. */
+        if (pos > INT64_MAX - cursor->reference_span) {
+            /* Retain the failing operation's location for adapter diagnostics. */
+            cursor->offset = op_start;
+            return DUCKHTS_CIGAR_POSITION_OVERFLOW;
+        }
+        idx_t n = sink->n;
+        sink->value[CIGAR_BLOCK_REF_START][n] = pos + op.reference_start;
+        sink->value[CIGAR_BLOCK_QUERY_START][n] = op.query_start;
+        sink->value[CIGAR_BLOCK_WIDTH][n] = op.length;
+        sink->n = n + (idx_t)(op.type == 3);
+        op_start = cursor->offset;
+    }
+    if (status < 0) {
+        return status;
+    }
+    return cursor->offset != 0 ? DUCKHTS_CIGAR_OK : DUCKHTS_CIGAR_END;
+}
+
+static void cigar_aligned_blocks_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
+    duckdb_vector cigar_vec = duckdb_data_chunk_get_vector(input, 0);
+    duckdb_vector pos_vec = duckdb_data_chunk_get_vector(input, 1);
+    duckdb_vector strict_vec = cigar_strict_vector(input, 2);
+    int64_t *pos_data = (int64_t *)duckdb_vector_get_data(pos_vec);
+    idx_t row_count = duckdb_data_chunk_get_size(input);
+    cigar_block_sink_t sink;
+    idx_t capacity = 0;
+
+    /* A text CIGAR has no more ops than bytes. */
+    for (idx_t row = 0; row < row_count; row++) {
+        idx_t cigar_len = 0;
+        if (!row_is_valid(cigar_vec, row) || !row_is_valid(pos_vec, row) ||
+            (strict_vec && !row_is_valid(strict_vec, row))) {
+            continue;
+        }
+        (void)get_string_at(cigar_vec, row, &cigar_len);
+        if (cigar_len > (idx_t)-1 - capacity) {
+            duckdb_scalar_function_set_error(info, "cigar_aligned_blocks: chunk CIGAR length overflows");
+            return;
+        }
+        capacity += cigar_len;
+    }
+    if (!cigar_block_sink_open(info, output, capacity, &sink)) {
+        return;
+    }
+
+    for (idx_t row = 0; row < row_count; row++) {
+        if (!row_is_valid(cigar_vec, row) || !row_is_valid(pos_vec, row) ||
+            (strict_vec && !row_is_valid(strict_vec, row))) {
+            cigar_block_sink_null_row(&sink, output, row);
+            continue;
+        }
+
+        idx_t cigar_len = 0;
+        const char *cigar = get_string_at(cigar_vec, row, &cigar_len);
+        duckhts_cigar_cursor_t cursor = {.text = cigar, .count = cigar_len};
+        idx_t start = sink.n;
+
+        duckhts_cigar_status_t status = cigar_scan_blocks(&sink, &cursor, pos_data[row]);
+        if (status <= 0) {
+            sink.n = start;
+            cigar_block_sink_null_row(&sink, output, row);
+            if (cigar_strict_error(info, "cigar_aligned_blocks", strict_vec, row, status, &cursor)) {
+                return;
+            }
+            continue;
+        }
+        cigar_block_sink_row(&sink, row, start);
+    }
+    cigar_block_sink_publish(info, &sink);
+}
+
+/* Binary (UINTEGER[]) overload: the packed BAM CIGAR read_bam(
+   cigar_representation := 'binary') emits, decoded in place from the list
+   child; bit-identical to the text path for the same read. */
+static void cigar_aligned_blocks_binary_scalar(duckdb_function_info info, duckdb_data_chunk input,
+                                               duckdb_vector output) {
+    duckdb_vector cigar_vec = duckdb_data_chunk_get_vector(input, 0);
+    duckdb_vector pos_vec = duckdb_data_chunk_get_vector(input, 1);
+    duckdb_vector strict_vec = cigar_strict_vector(input, 2);
+    duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(cigar_vec);
+    duckdb_vector child_vec = duckdb_list_vector_get_child(cigar_vec);
+    uint32_t *child_data = (uint32_t *)duckdb_vector_get_data(child_vec);
+    uint64_t *child_validity = duckdb_vector_get_validity(child_vec);
+    int64_t *pos_data = (int64_t *)duckdb_vector_get_data(pos_vec);
+    idx_t row_count = duckdb_data_chunk_get_size(input);
+    cigar_block_sink_t sink;
+    idx_t capacity = 0;
+
+    /* Blocks cannot outnumber ops, and every row's op count is in its entry. */
+    for (idx_t row = 0; row < row_count; row++) {
+        if (!row_is_valid(cigar_vec, row) || !row_is_valid(pos_vec, row) ||
+            (strict_vec && !row_is_valid(strict_vec, row))) {
+            continue;
+        }
+        if (list_data[row].length > (idx_t)-1 - capacity) {
+            duckdb_scalar_function_set_error(info, "cigar_aligned_blocks: chunk op count overflows");
+            return;
+        }
+        capacity += list_data[row].length;
+    }
+    if (!cigar_block_sink_open(info, output, capacity, &sink)) {
+        return;
+    }
+
+    for (idx_t row = 0; row < row_count; row++) {
+        if (!row_is_valid(cigar_vec, row) || !row_is_valid(pos_vec, row) ||
+            (strict_vec && !row_is_valid(strict_vec, row))) {
+            cigar_block_sink_null_row(&sink, output, row);
+            continue;
+        }
+        duckhts_cigar_cursor_t cursor;
+        duckhts_cigar_status_t status = cigar_packed_cursor(list_data[row], child_data,
+                                                           child_validity, &cursor);
+        idx_t start = sink.n;
+        if (status > 0) {
+            status = cigar_scan_blocks(&sink, &cursor, pos_data[row]);
+        }
+        if (status <= 0) {
+            sink.n = start;
+            cigar_block_sink_null_row(&sink, output, row);
+            if (cigar_strict_error(info, "cigar_aligned_blocks", strict_vec, row, status, &cursor)) {
+                return;
+            }
+            continue;
+        }
+        cigar_block_sink_row(&sink, row, start);
+    }
+    cigar_block_sink_publish(info, &sink);
 }
 
 typedef struct {
@@ -1622,48 +1775,47 @@ static void register_sam_flag_bits_function(duckdb_connection connection) {
 }
 
 static void register_cigar_metric_function(duckdb_connection connection,
-                                           const char *name,
-                                           uintptr_t metric_id,
-                                           duckdb_type return_type_id) {
+                                           const cigar_metric_definition_t *metric) {
     /* Overload set: VARCHAR (text CIGAR) and UINTEGER[] (binary CIGAR as
        read_bam(cigar_representation := 'binary') emits). Both carry the same
-       metric_id in extra_info; results are bit-identical for the same read. */
+       metadata in extra_info; results are bit-identical for the same read. */
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_logical_type uinteger_type = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
     duckdb_logical_type list_type = duckdb_create_list_type(uinteger_type);
-    duckdb_logical_type return_type = duckdb_create_logical_type(return_type_id);
+    duckdb_logical_type return_type = duckdb_create_logical_type(metric->return_type);
+    duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
 
-    duckdb_scalar_function_set set = duckdb_create_scalar_function_set(name);
+    duckdb_scalar_function_set set = duckdb_create_scalar_function_set(metric->name);
 
-    duckdb_scalar_function fn_txt = duckdb_create_scalar_function();
-    duckdb_scalar_function_set_name(fn_txt, name);
-    duckdb_scalar_function_add_parameter(fn_txt, varchar_type);
-    duckdb_scalar_function_set_return_type(fn_txt, return_type);
-    duckdb_scalar_function_set_function(fn_txt, cigar_metric_scalar);
-    duckdb_scalar_function_set_extra_info(fn_txt, (void *)metric_id, NULL);
-    duckdb_add_scalar_function_to_set(set, fn_txt);
-
-    duckdb_scalar_function fn_bin = duckdb_create_scalar_function();
-    duckdb_scalar_function_set_name(fn_bin, name);
-    duckdb_scalar_function_add_parameter(fn_bin, list_type);
-    duckdb_scalar_function_set_return_type(fn_bin, return_type);
-    duckdb_scalar_function_set_function(fn_bin, cigar_metric_binary_scalar);
-    duckdb_scalar_function_set_extra_info(fn_bin, (void *)metric_id, NULL);
-    duckdb_add_scalar_function_to_set(set, fn_bin);
+    for (int binary = 0; binary < 2; binary++) {
+        for (int strict = 0; strict < 2; strict++) {
+            duckdb_scalar_function fn = duckdb_create_scalar_function();
+            duckdb_scalar_function_set_name(fn, metric->name);
+            duckdb_scalar_function_add_parameter(fn, binary ? list_type : varchar_type);
+            if (strict) {
+                duckdb_scalar_function_add_parameter(fn, bool_type);
+            }
+            duckdb_scalar_function_set_return_type(fn, return_type);
+            duckdb_scalar_function_set_function(fn, binary ? cigar_metric_binary_scalar
+                                                           : cigar_metric_scalar);
+            duckdb_scalar_function_set_extra_info(fn, (void *)metric, NULL);
+            duckdb_add_scalar_function_to_set(set, fn);
+            duckdb_destroy_scalar_function(&fn);
+        }
+    }
 
     duckdb_register_scalar_function_set(connection, set);
 
-    duckdb_destroy_scalar_function(&fn_txt);
-    duckdb_destroy_scalar_function(&fn_bin);
     duckdb_destroy_scalar_function_set(&set);
     duckdb_destroy_logical_type(&varchar_type);
     duckdb_destroy_logical_type(&uinteger_type);
     duckdb_destroy_logical_type(&list_type);
     duckdb_destroy_logical_type(&return_type);
+    duckdb_destroy_logical_type(&bool_type);
 }
 
 static void register_cigar_has_op_function(duckdb_connection connection) {
-    /* Overload set: (VARCHAR cigar, VARCHAR op) and (UINTEGER[] cigar, VARCHAR op). */
+    /* Text/packed inputs, each with an optional final BOOLEAN strict argument. */
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_logical_type uinteger_type = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
     duckdb_logical_type list_type = duckdb_create_list_type(uinteger_type);
@@ -1671,31 +1823,79 @@ static void register_cigar_has_op_function(duckdb_connection connection) {
 
     duckdb_scalar_function_set set = duckdb_create_scalar_function_set("cigar_has_op");
 
-    duckdb_scalar_function fn_txt = duckdb_create_scalar_function();
-    duckdb_scalar_function_set_name(fn_txt, "cigar_has_op");
-    duckdb_scalar_function_add_parameter(fn_txt, varchar_type);
-    duckdb_scalar_function_add_parameter(fn_txt, varchar_type);
-    duckdb_scalar_function_set_return_type(fn_txt, bool_type);
-    duckdb_scalar_function_set_function(fn_txt, cigar_has_op_scalar);
-    duckdb_add_scalar_function_to_set(set, fn_txt);
-
-    duckdb_scalar_function fn_bin = duckdb_create_scalar_function();
-    duckdb_scalar_function_set_name(fn_bin, "cigar_has_op");
-    duckdb_scalar_function_add_parameter(fn_bin, list_type);
-    duckdb_scalar_function_add_parameter(fn_bin, varchar_type);
-    duckdb_scalar_function_set_return_type(fn_bin, bool_type);
-    duckdb_scalar_function_set_function(fn_bin, cigar_has_op_binary_scalar);
-    duckdb_add_scalar_function_to_set(set, fn_bin);
+    for (int binary = 0; binary < 2; binary++) {
+        for (int strict = 0; strict < 2; strict++) {
+            duckdb_scalar_function fn = duckdb_create_scalar_function();
+            duckdb_scalar_function_set_name(fn, "cigar_has_op");
+            duckdb_scalar_function_add_parameter(fn, binary ? list_type : varchar_type);
+            duckdb_scalar_function_add_parameter(fn, varchar_type);
+            if (strict) {
+                duckdb_scalar_function_add_parameter(fn, bool_type);
+            }
+            duckdb_scalar_function_set_return_type(fn, bool_type);
+            duckdb_scalar_function_set_function(fn, binary ? cigar_has_op_binary_scalar
+                                                           : cigar_has_op_scalar);
+            duckdb_add_scalar_function_to_set(set, fn);
+            duckdb_destroy_scalar_function(&fn);
+        }
+    }
 
     duckdb_register_scalar_function_set(connection, set);
 
-    duckdb_destroy_scalar_function(&fn_txt);
-    duckdb_destroy_scalar_function(&fn_bin);
     duckdb_destroy_scalar_function_set(&set);
     duckdb_destroy_logical_type(&varchar_type);
     duckdb_destroy_logical_type(&uinteger_type);
     duckdb_destroy_logical_type(&list_type);
     duckdb_destroy_logical_type(&bool_type);
+}
+
+static void register_cigar_aligned_blocks_function(duckdb_connection connection) {
+    /* Overload set as register_cigar_metric_function: VARCHAR or UINTEGER[]
+       cigar with a BIGINT pos, returning one STRUCT of three BIGINT lists. */
+    duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+    duckdb_logical_type uinteger_type = duckdb_create_logical_type(DUCKDB_TYPE_UINTEGER);
+    duckdb_logical_type list_type = duckdb_create_list_type(uinteger_type);
+    duckdb_logical_type bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
+    duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
+    duckdb_logical_type field_types[CIGAR_BLOCK_FIELD_COUNT];
+    duckdb_logical_type struct_type;
+
+    for (int f = 0; f < CIGAR_BLOCK_FIELD_COUNT; f++) {
+        field_types[f] = duckdb_create_list_type(bigint_type);
+    }
+    struct_type = duckdb_create_struct_type(field_types, CIGAR_BLOCK_FIELD_NAMES, CIGAR_BLOCK_FIELD_COUNT);
+
+    duckdb_scalar_function_set set = duckdb_create_scalar_function_set("cigar_aligned_blocks");
+
+    for (int binary = 0; binary < 2; binary++) {
+        for (int strict = 0; strict < 2; strict++) {
+            duckdb_scalar_function fn = duckdb_create_scalar_function();
+            duckdb_scalar_function_set_name(fn, "cigar_aligned_blocks");
+            duckdb_scalar_function_add_parameter(fn, binary ? list_type : varchar_type);
+            duckdb_scalar_function_add_parameter(fn, bigint_type);
+            if (strict) {
+                duckdb_scalar_function_add_parameter(fn, bool_type);
+            }
+            duckdb_scalar_function_set_return_type(fn, struct_type);
+            duckdb_scalar_function_set_function(fn, binary ? cigar_aligned_blocks_binary_scalar
+                                                           : cigar_aligned_blocks_scalar);
+            duckdb_add_scalar_function_to_set(set, fn);
+            duckdb_destroy_scalar_function(&fn);
+        }
+    }
+
+    duckdb_register_scalar_function_set(connection, set);
+
+    duckdb_destroy_scalar_function_set(&set);
+    for (int f = 0; f < CIGAR_BLOCK_FIELD_COUNT; f++) {
+        duckdb_destroy_logical_type(&field_types[f]);
+    }
+    duckdb_destroy_logical_type(&struct_type);
+    duckdb_destroy_logical_type(&bigint_type);
+    duckdb_destroy_logical_type(&bool_type);
+    duckdb_destroy_logical_type(&list_type);
+    duckdb_destroy_logical_type(&uinteger_type);
+    duckdb_destroy_logical_type(&varchar_type);
 }
 
 static void register_seq_kmers_function(duckdb_connection connection) {
@@ -1730,14 +1930,11 @@ void register_kmer_udf_functions(duckdb_connection connection) {
     register_seq_decode_4bit_function(connection);
     register_seq_gc_content_function(connection);
     register_seq_kmers_function(connection);
-    register_cigar_metric_function(connection, "cigar_has_soft_clip", CIGAR_METRIC_HAS_SOFT_CLIP, DUCKDB_TYPE_BOOLEAN);
-    register_cigar_metric_function(connection, "cigar_has_hard_clip", CIGAR_METRIC_HAS_HARD_CLIP, DUCKDB_TYPE_BOOLEAN);
-    register_cigar_metric_function(connection, "cigar_left_soft_clip", CIGAR_METRIC_LEFT_SOFT_CLIP, DUCKDB_TYPE_BIGINT);
-    register_cigar_metric_function(connection, "cigar_right_soft_clip", CIGAR_METRIC_RIGHT_SOFT_CLIP, DUCKDB_TYPE_BIGINT);
-    register_cigar_metric_function(connection, "cigar_query_length", CIGAR_METRIC_QUERY_LENGTH, DUCKDB_TYPE_BIGINT);
-    register_cigar_metric_function(connection, "cigar_aligned_query_length", CIGAR_METRIC_ALIGNED_QUERY_LENGTH, DUCKDB_TYPE_BIGINT);
-    register_cigar_metric_function(connection, "cigar_reference_length", CIGAR_METRIC_REFERENCE_LENGTH, DUCKDB_TYPE_BIGINT);
+    for (size_t i = 0; i < sizeof(CIGAR_METRICS) / sizeof(CIGAR_METRICS[0]); i++) {
+        register_cigar_metric_function(connection, &CIGAR_METRICS[i]);
+    }
     register_cigar_has_op_function(connection);
+    register_cigar_aligned_blocks_function(connection);
     register_sam_flag_bits_function(connection);
     register_sam_flag_has_function(connection);
     register_sam_is_forward_aligned_function(connection);

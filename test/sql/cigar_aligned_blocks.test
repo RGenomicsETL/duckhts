@@ -1,0 +1,232 @@
+# name: test/sql/cigar_aligned_blocks.test
+# description: cigar_aligned_blocks(cigar, pos): aligned block geometry from text and binary CIGAR
+# group: [duckhts]
+
+require duckhts
+
+# ---------------------------------------------------------------------------
+# One block per M, = or X op in CIGAR order, never merged. ref_start is pos
+# plus the reference consumed before the block, in whatever base pos uses;
+# query_start is the 0-based offset into the stored SEQ (soft clips count,
+# hard clips do not); width is the op length. D and N advance the reference,
+# I advances the query, H and P consume nothing.
+# ---------------------------------------------------------------------------
+
+query TTT
+SELECT (b).ref_start::VARCHAR, (b).query_start::VARCHAR, (b).width::VARCHAR
+FROM (SELECT cigar_aligned_blocks('5S90M5S', 100) AS b);
+----
+[100]	[5]	[90]
+
+query TTT
+SELECT (b).ref_start::VARCHAR, (b).query_start::VARCHAR, (b).width::VARCHAR
+FROM (SELECT cigar_aligned_blocks('10M2I10M', 1) AS b);
+----
+[1, 11]	[0, 12]	[10, 10]
+
+query TTT
+SELECT (b).ref_start::VARCHAR, (b).query_start::VARCHAR, (b).width::VARCHAR
+FROM (SELECT cigar_aligned_blocks('10M5D10M', 1) AS b);
+----
+[1, 16]	[0, 10]	[10, 10]
+
+query TTT
+SELECT (b).ref_start::VARCHAR, (b).query_start::VARCHAR, (b).width::VARCHAR
+FROM (SELECT cigar_aligned_blocks('10M100N10M', 1000) AS b);
+----
+[1000, 1110]	[0, 10]	[10, 10]
+
+query TTT
+SELECT (b).ref_start::VARCHAR, (b).query_start::VARCHAR, (b).width::VARCHAR
+FROM (SELECT cigar_aligned_blocks('5H10M', 1) AS b);
+----
+[1]	[0]	[10]
+
+query TTT
+SELECT (b).ref_start::VARCHAR, (b).query_start::VARCHAR, (b).width::VARCHAR
+FROM (SELECT cigar_aligned_blocks('10=1X9=', 1) AS b);
+----
+[1, 11, 12]	[0, 10, 11]	[10, 1, 9]
+
+query TTT
+SELECT (b).ref_start::VARCHAR, (b).query_start::VARCHAR, (b).width::VARCHAR
+FROM (SELECT cigar_aligned_blocks('3S4M2P3M', 1) AS b);
+----
+[1, 5]	[3, 7]	[4, 3]
+
+# pos 0 gives offsets from the alignment start; a negative pos is carried as is.
+query TT
+SELECT (cigar_aligned_blocks('20M', 0)).ref_start::VARCHAR,
+       (cigar_aligned_blocks('10M', -5)).ref_start::VARCHAR;
+----
+[0]	[-5]
+
+# A valid CIGAR with no aligned op is empty lists, not NULL.
+query TTT
+SELECT (b).ref_start::VARCHAR, (b).query_start::VARCHAR, (b).width::VARCHAR
+FROM (SELECT cigar_aligned_blocks('5S', 1) AS b);
+----
+[]	[]	[]
+
+# The type contract.
+query T
+SELECT typeof(cigar_aligned_blocks('10M', 1));
+----
+STRUCT(ref_start BIGINT[], query_start BIGINT[], width BIGINT[])
+
+# ---------------------------------------------------------------------------
+# With strict omitted, invalid input is NULL. NULL cigar or pos, '*', empty,
+# a zero-length op, trailing digits, a bare op, or the B op.
+# ---------------------------------------------------------------------------
+
+query IIIIIIII
+SELECT (cigar_aligned_blocks(NULL::VARCHAR, 1) IS NULL)::INTEGER,
+       (cigar_aligned_blocks('10M', NULL) IS NULL)::INTEGER,
+       (cigar_aligned_blocks('*', 1) IS NULL)::INTEGER,
+       (cigar_aligned_blocks('', 1) IS NULL)::INTEGER,
+       (cigar_aligned_blocks('0M', 1) IS NULL)::INTEGER,
+       (cigar_aligned_blocks('10M5', 1) IS NULL)::INTEGER,
+       (cigar_aligned_blocks('M', 1) IS NULL)::INTEGER,
+       (cigar_aligned_blocks('10B', 1) IS NULL)::INTEGER;
+----
+1	1	1	1	1	1	1	1
+
+# The running reference and query spans must fit in BIGINT as they accumulate,
+# not only at the end: a query span that wraps, or a reference accumulator that
+# wraps back to a small value, is NULL. A representable limit is still a block.
+query IIT
+SELECT (cigar_aligned_blocks('9223372036854775807I1I1M', 1) IS NULL)::INTEGER,
+       (cigar_aligned_blocks('9223372036854775807D9223372036854775807D2D1M', 1) IS NULL)::INTEGER,
+       (cigar_aligned_blocks('9223372036854775807M', 0)).width::VARCHAR;
+----
+1	1	[9223372036854775807]
+
+# Trailing digits are NULL even when their value is zero.
+query II
+SELECT (cigar_aligned_blocks('10M0', 1) IS NULL)::INTEGER,
+       (cigar_aligned_blocks('10M00', 1) IS NULL)::INTEGER;
+----
+1	1
+
+# An invalid row followed by a valid row in one chunk: the rejected row's
+# candidate writes are rewound and the next row's blocks are intact.
+query IT
+SELECT (b IS NULL)::INTEGER, (b).ref_start::VARCHAR
+FROM (SELECT cigar_aligned_blocks(c, 1) AS b, i
+      FROM (VALUES ('9223372036854775807I1I1M', 1), ('10M0', 2), ('5M2D5M', 3)) AS t(c, i)
+      ORDER BY i);
+----
+1	NULL
+1	NULL
+0	[1, 8]
+
+# pos plus the alignment's reference span must fit in BIGINT.
+query TI
+SELECT (cigar_aligned_blocks('10M', 9223372036854775797)).ref_start::VARCHAR,
+       (cigar_aligned_blocks('10M', 9223372036854775798) IS NULL)::INTEGER;
+----
+[9223372036854775797]	1
+
+# ---------------------------------------------------------------------------
+# Binary overload (UINTEGER[], oplen<<4|op as read_bam(cigar_representation :=
+# 'binary') emits) is bit-identical to the text path. '5S90M5S' = [84, 1440, 84].
+# Empty is NULL like '*'; a NULL element, a zero length, or op 9 (B) is NULL.
+# ---------------------------------------------------------------------------
+
+query TTT
+SELECT (b).ref_start::VARCHAR, (b).query_start::VARCHAR, (b).width::VARCHAR
+FROM (SELECT cigar_aligned_blocks([84, 1440, 84]::UINTEGER[], 100) AS b);
+----
+[100]	[5]	[90]
+
+query I
+SELECT (cigar_aligned_blocks([84, 1440, 84]::UINTEGER[], 100) = cigar_aligned_blocks('5S90M5S', 100))::INTEGER;
+----
+1
+
+query IIII
+SELECT (cigar_aligned_blocks([]::UINTEGER[], 1) IS NULL)::INTEGER,
+       (cigar_aligned_blocks([1600, NULL, 20]::UINTEGER[], 1) IS NULL)::INTEGER,
+       (cigar_aligned_blocks([0]::UINTEGER[], 1) IS NULL)::INTEGER,
+       (cigar_aligned_blocks([169]::UINTEGER[], 1) IS NULL)::INTEGER;
+----
+1	1	1	1
+
+# ---------------------------------------------------------------------------
+# Real alignments. Three fixtures: nanopore.bam (186 long reads, D H I M S,
+# up to 319 ops), range.bam (112 short reads, D M S) and empty-tids.bam
+# (12,495 reads, D H I M S). The text and binary overloads must agree read
+# for read, and the block count must equal the number of M, = and X ops.
+# ---------------------------------------------------------------------------
+
+query I
+SELECT count(*)
+FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam') AS t
+JOIN read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', cigar_representation := 'binary') AS b
+  USING (QNAME, FLAG, RNAME, POS)
+WHERE cigar_aligned_blocks(t.CIGAR, t.POS) IS DISTINCT FROM cigar_aligned_blocks(b.CIGAR, b.POS);
+----
+0
+
+query I
+SELECT count(*)
+FROM read_bam('__WORKING_DIRECTORY__/test/data/empty-tids.bam') AS t
+JOIN read_bam('__WORKING_DIRECTORY__/test/data/empty-tids.bam', cigar_representation := 'binary') AS b
+  USING (QNAME, FLAG, RNAME, POS)
+WHERE cigar_aligned_blocks(t.CIGAR, t.POS) IS DISTINCT FROM cigar_aligned_blocks(b.CIGAR, b.POS);
+----
+0
+
+query II
+SELECT count(*),
+       count(*) FILTER (WHERE len((b).ref_start) = len(list_filter(CIGAR, lambda c: (c & 15) IN (0, 7, 8)))
+                          AND len((b).query_start) = len((b).ref_start)
+                          AND len((b).width) = len((b).ref_start))
+FROM (SELECT CIGAR, cigar_aligned_blocks(CIGAR, POS) AS b
+      FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', cigar_representation := 'binary'));
+----
+186	186
+
+# ---------------------------------------------------------------------------
+# Independent oracle: the same geometry derived in SQL from the packed ops,
+# with prefix sums over the preceding ops (reference: M D N = X; query:
+# M I S = X). Every read of every fixture must agree.
+# ---------------------------------------------------------------------------
+
+query I
+SELECT count(*)
+FROM (
+  SELECT
+    cigar_aligned_blocks(CIGAR, POS) AS b,
+    cigar_aligned_blocks(CIGAR, POS, FALSE) AS loose_b,
+    cigar_aligned_blocks(CIGAR, POS, TRUE) AS strict_b,
+    list_transform(list_filter(list_transform(CIGAR, lambda c, i:
+        {'kind': c & 15,
+         'ref': POS + COALESCE(list_sum(list_transform(list_slice(CIGAR, 1, i - 1),
+                    lambda p: CASE WHEN (p & 15) IN (0, 2, 3, 7, 8) THEN (p >> 4)::BIGINT ELSE 0 END)), 0)}),
+      lambda x: x.kind IN (0, 7, 8)), lambda x: x.ref) AS ref_start,
+    list_transform(list_filter(list_transform(CIGAR, lambda c, i:
+        {'kind': c & 15,
+         'q': COALESCE(list_sum(list_transform(list_slice(CIGAR, 1, i - 1),
+                    lambda p: CASE WHEN (p & 15) IN (0, 1, 4, 7, 8) THEN (p >> 4)::BIGINT ELSE 0 END)), 0)}),
+      lambda x: x.kind IN (0, 7, 8)), lambda x: x.q) AS query_start,
+    list_transform(list_filter(CIGAR, lambda c: (c & 15) IN (0, 7, 8)), lambda c: (c >> 4)::BIGINT) AS width
+  FROM (
+    SELECT CIGAR, POS FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', cigar_representation := 'binary')
+    UNION ALL
+    SELECT CIGAR, POS FROM read_bam('__WORKING_DIRECTORY__/test/data/range.bam', cigar_representation := 'binary')
+    UNION ALL
+    SELECT CIGAR, POS FROM read_bam('__WORKING_DIRECTORY__/test/data/empty-tids.bam', cigar_representation := 'binary')
+  )
+)
+WHERE (b).ref_start IS DISTINCT FROM ref_start
+   OR (b).query_start IS DISTINCT FROM query_start
+   OR (b).width IS DISTINCT FROM width
+   OR (loose_b).ref_start IS DISTINCT FROM ref_start
+   OR (loose_b).query_start IS DISTINCT FROM query_start
+   OR (loose_b).width IS DISTINCT FROM width
+   OR (strict_b).ref_start IS DISTINCT FROM ref_start
+   OR (strict_b).query_start IS DISTINCT FROM query_start
+   OR (strict_b).width IS DISTINCT FROM width;
+----
+0

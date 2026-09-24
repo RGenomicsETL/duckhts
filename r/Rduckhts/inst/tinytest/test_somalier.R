@@ -388,6 +388,24 @@ test_somalier_contamination_wrappers <- function() {
   qid <- function(x) as.character(dbQuoteIdentifier(con, x))
   qstr <- function(x) as.character(dbQuoteString(con, x))
 
+  # The aggregate and public macro report the same count constraints.
+  expect_error(dbGetQuery(con, paste(
+    "SELECT __duckhts_somalier_charr(",
+    "'Overflow', 'GRCh38', repeat('a', 64), repeat('b', 64),",
+    "0::UBIGINT, 1::UBIGINT, 18446744073709551615::UBIGINT, 1::UBIGINT, 0::UBIGINT,",
+    "200::UBIGINT, 11::UBIGINT, 0.25::DOUBLE, 7::UBIGINT,",
+    "1000000::UBIGINT, 0.1::DOUBLE, 0.001::DOUBLE,",
+    "16000000::UBIGINT, 1::UBIGINT)"
+  )), "measured counts must fit UINTEGER")
+  expect_error(dbGetQuery(con, paste(
+    "SELECT __duckhts_somalier_charr(",
+    "'Partial', 'GRCh38', repeat('a', 64), repeat('b', 64),",
+    "0::UBIGINT, 1::UBIGINT, 199::UBIGINT, NULL::UBIGINT, 0::UBIGINT,",
+    "200::UBIGINT, 11::UBIGINT, 0.25::DOUBLE, 7::UBIGINT,",
+    "1000000::UBIGINT, 0.1::DOUBLE, 0.001::DOUBLE,",
+    "16000000::UBIGINT, 1::UBIGINT)"
+  )), "counts must be all measured or all unavailable")
+
   panel_name <- "contamination panel's relation"
   evidence_name <- 'contamination evidence; relation'
   frequency_name <- 'population frequency "B"'

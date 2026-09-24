@@ -179,7 +179,11 @@ Additional R package rules:
 - The authoritative extension version is `version:` in the root `description.yml`.
 - The authoritative R package version is `Version:` in `r/Rduckhts/DESCRIPTION`; keep the DuckHTS version before the hyphen and the R packaging revision after it.
 - After releasing `X.Y.Z` to both CRAN and the DuckDB community extension repository, start the next development cycle by changing only those two declarations: `X.Y.Z` -> `X.Y.Z.9000` and `X.Y.Z-A` -> `X.Y.Z.9000-A`.
-- For a release, perform the inverse transformation while retaining the current R packaging revision `A`.
+- Increment the development suffix for each published user-facing development update:
+  `X.Y.Z.9000` -> `X.Y.Z.9001` -> `X.Y.Z.9002`, keeping the same prefix in the R
+  package version and retaining packaging revision `A` unless packaging needs its own revision.
+- For a release, remove the current development suffix (`.9000`, `.9001`, etc.)
+  while retaining the current R packaging revision `A`.
 - Do not hand-edit `configure/extension_version.txt`, rendered README/catalog files, or the local `community-extensions/` descriptor for a version-only bump. Normal configure, bootstrap, and catalog rendering carry the authoritative versions forward.
 - A version-only development-cycle bump does not add empty `NEWS.md` sections; changelog entries belong to actual user-visible changes and release finalization.
 

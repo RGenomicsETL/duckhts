@@ -1,5 +1,38 @@
 # DuckHTS Extension News
 
+# duckhts 1.5.2.9001
+
+- Require DuckDB 1.4.0 or newer for the extension's SQL surface while retaining
+  the stable v1.2.0 C API target. Register native functions before dependent SQL
+  macros so DuckDB 1.4 can load the extension, register complete native overload
+  sets, and report initialization failures through DuckDB with their underlying
+  diagnostics. DuckVEP repeat and transcript-presentation SQL preserve their
+  results without triggering older-runtime binder failures.
+- Record matched all-column BAM, BCF, VCF, FASTQ and FASTA reader timings and
+  exact-output comparisons in `benchmarks/benchmark_init_readers.md`.
+
+- Make the aligned-block benchmark oracle NULL-aware, compare every physical
+  record before timing, and retain duplicate/NULL corruption controls with
+  record-keyed XOR and sum checks. Recorded timings retain their stated
+  aggregate-only validation limits; recorded-data rendering does not rerun them.
+- Reuse staged ONT BAMs only when receipt source hashes match the verified
+  reference and reads; missing identities and changed inputs require derivation.
+
+- Validate complete text and packed CIGARs with shared checked decoding and
+  consumed-span arithmetic. Metrics and presence checks return NULL for malformed
+  suffixes or lengths/spans outside BIGINT, including invalid suffixes after an
+  operator match. Unsupported requested operators return NULL in both forms.
+  Requested-operator case folding is ASCII and locale-independent. Full-input
+  checking adds validation work to operator-presence calls.
+- Add an optional final `strict` BOOLEAN to the CIGAR metrics, operator test and
+  aligned-block functions. Its default is FALSE; TRUE raises an error for invalid
+  input under the same checked grammar. Diagnostics identify the function and
+  1-based packed-op index or text operation-start byte where available. SQL NULL
+  arguments and no-CIGAR sentinels retain their per-function outcomes.
+- Measure checked CIGAR projection costs on matched ONT and synthetic long-CIGAR
+  inputs in `benchmarks/benchmark_cigar_validation.md`, including all strict modes,
+  retained output denominators, and the cost of full-input operator checks.
+
 # duckhts 1.5.2.9000
 
 - Do not save a `blob:` index to a local file. `HTS_IDX_SAVE_REMOTE` made htslib copy
@@ -74,8 +107,20 @@
   records two current limits: files registered with duckdb-wasm are not visible to
   htslib-backed readers, and LOAD fails on DuckDB v1.4.x
   (https://github.com/RGenomicsETL/duckhts/issues/247).
+
+- Keep Somalier CHARR count-error diagnostics consistent between the public SQL
+  validation and native aggregate, regardless of which rejects the input first.
+
+- Let ONT benchmark staging use samtools bundled by the optional RBCFTools
+  package when it is absent from PATH, and cover unavailable tools in staging tests.
+
 - Show contributor avatars and credit Ryan Ward / Nurture Bio for GenBank
   support in the README footer, with links to upstream acknowledgements.
+- Add `cigar_aligned_blocks(cigar, pos)`: Extracts contiguous aligned segments
+  (M, =, X) from a CIGAR string or binary array into a STRUCT of parallel
+  lists (`ref_start`, `query_start`, `width`). Use it to convert alignments
+  into genomic intervals for coverage, junction, and range overlap analysis
+  without custom SQL loops.
 
 # duckhts 1.5.2
 

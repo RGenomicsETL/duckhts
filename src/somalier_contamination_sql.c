@@ -653,7 +653,8 @@ static void charr_update(duckdb_function_info info, duckdb_data_chunk input,
         if (!counts_from_vectors(vector[CH_IN_A], vector[CH_IN_B],
                                  vector[CH_IN_OTHER], row, &counts)) {
             duckdb_aggregate_function_set_error(info,
-                "duckhts_somalier_charr: counts must be all measured or all unavailable and fit UINT32");
+                "duckhts_somalier_charr: counts must be all measured or all unavailable; "
+                "measured counts must fit UINTEGER");
             return;
         }
         {

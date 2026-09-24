@@ -1,4 +1,5 @@
 src/duckhts.c|duckhts.c
+src/extension_registration.c|extension_registration.c
 src/simd/duckhts_simd_dispatch.c|simd/duckhts_simd_dispatch.c
 src/simd/duckhts_simd_scalar.c|simd/duckhts_simd_scalar.c
 src/simd/duckhts_simd_avx2.c|simd/duckhts_simd_avx2.c

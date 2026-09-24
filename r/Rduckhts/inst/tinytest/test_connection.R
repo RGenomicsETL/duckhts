@@ -79,6 +79,36 @@ test_package_owned_connection <- function() {
   )$n
   expect_equal(loaded, 1)
 
+  sites <- system.file("extdata", "somalier_sites.vcf", package = "Rduckhts")
+  imported <- dbGetQuery(
+    con,
+    paste0(
+      "SELECT count(*) AS n FROM duckhts_somalier_import_sites(",
+      dbQuoteString(con, sites), ", 'GRCh38')"
+    )
+  )
+  expect_equal(imported$n, 3)
+  expect_equal(
+    dbGetQuery(
+      con,
+      paste(
+        "SELECT len(parameters) AS arity FROM duckdb_functions()",
+        "WHERE function_name = 'regionkey' ORDER BY arity"
+      )
+    )$arity,
+    c(3, 4)
+  )
+  expect_equal(
+    dbGetQuery(
+      con,
+      paste(
+        "SELECT count(*) AS n FROM duckvep_so_terms()",
+        "WHERE consequence = 'missense_variant'"
+      )
+    )$n,
+    1
+  )
+
   json_state <- dbGetQuery(
     con,
     paste(

@@ -96,20 +96,24 @@ mkdir -p "${SITE_ROOT}/scripts" "${SITE_ROOT}/duckdb-wasm" "${SITE_ROOT}/extdata
 
 RUNTIME_BASE="https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@${DUCKDB_WASM_NPM_VERSION}/dist"
 RUNTIME_CACHE="$(duckhts_cache_subdir "runtime/duckdb-wasm/${DUCKDB_WASM_NPM_VERSION}")"
-if [[ "$DUCKDB_WASM_NPM_VERSION" != "1.31.0" ]]; then
+runtime_sha256() { # filename; npm package dist assets
+  case "$DUCKDB_WASM_NPM_VERSION/$1" in
+    1.31.0/duckdb-browser.mjs) printf '%s\n' '660ee2979e878cfd1d70122ab6d511d4454c5e687f59977e77ff70097730a8a0' ;;
+    1.31.0/duckdb-browser-eh.worker.js) printf '%s\n' 'fb692cd56e87c71849ff545e14fef54c91ed4cdef295f16172ab27be8de76b5d' ;;
+    1.31.0/duckdb-eh.wasm) printf '%s\n' '07993a5cda534ebb303d476cbdf3d1f7271841c1298709a4b4a5713d8c78b156' ;;
+    1.31.0/duckdb-browser-eh.worker.js.map) printf '%s\n' 'e3750fb2ea26e4e1e1baf49f3a2b2f3d722d3a0bd840830f2abd431f8546dc90' ;;
+    1.32.0/duckdb-browser.mjs) printf '%s\n' '4f8c0bb3c23d1ec457a451cc27418597b9a40dd772cceacc436a2cb7b9a49c18' ;;
+    1.32.0/duckdb-browser-eh.worker.js) printf '%s\n' 'f8ab72b6b90b3ad83077d47426d4a99d5d9a4c7e07cba1a2be37d655adc7c1ab' ;;
+    1.32.0/duckdb-eh.wasm) printf '%s\n' '4c221bfa59c11f24dbd750e70c90b9252eca6eec5633936e6a2ec766e55fd879' ;;
+    1.32.0/duckdb-browser-eh.worker.js.map) printf '%s\n' '10ad23ff9cd7171dd4a67b18b236fbf469c605b613862aa9ba72579d9d6e1060' ;;
+    *) return 2 ;;
+  esac
+}
+if ! runtime_sha256 duckdb-browser.mjs >/dev/null; then
   echo "DuckDB wasm runtime version $DUCKDB_WASM_NPM_VERSION has no pinned asset manifest" >&2
   exit 2
 fi
 mkdir -p "$RUNTIME_CACHE"
-runtime_sha256() { # filename
-  case "$1" in
-    duckdb-browser.mjs) printf '%s\n' '660ee2979e878cfd1d70122ab6d511d4454c5e687f59977e77ff70097730a8a0' ;;
-    duckdb-browser-eh.worker.js) printf '%s\n' 'fb692cd56e87c71849ff545e14fef54c91ed4cdef295f16172ab27be8de76b5d' ;;
-    duckdb-eh.wasm) printf '%s\n' '07993a5cda534ebb303d476cbdf3d1f7271841c1298709a4b4a5713d8c78b156' ;;
-    duckdb-browser-eh.worker.js.map) printf '%s\n' 'e3750fb2ea26e4e1e1baf49f3a2b2f3d722d3a0bd840830f2abd431f8546dc90' ;;
-    *) return 2 ;;
-  esac
-}
 sha256_of() { # path
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" | awk '{print $1}'

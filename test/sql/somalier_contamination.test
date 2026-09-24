@@ -593,6 +593,28 @@ SELECT * FROM duckhts_somalier_charr(
 ----
 a sample A+B depth exceeds max_depth
 
+# Count diagnostics agree whether the SQL check or native aggregate rejects
+# the input. Direct calls exercise the native guard independently of the plan.
+statement error
+SELECT __duckhts_somalier_charr(
+  'Overflow', 'GRCh38', repeat('a', 64), repeat('b', 64),
+  0::UBIGINT, 1::UBIGINT, 18446744073709551615::UBIGINT, 1::UBIGINT, 0::UBIGINT,
+  200::UBIGINT, 11::UBIGINT, 0.25::DOUBLE, 7::UBIGINT,
+  1000000::UBIGINT, 0.1::DOUBLE, 0.001::DOUBLE,
+  16000000::UBIGINT, 1::UBIGINT);
+----
+measured counts must fit UINTEGER
+
+statement error
+SELECT __duckhts_somalier_charr(
+  'Partial', 'GRCh38', repeat('a', 64), repeat('b', 64),
+  0::UBIGINT, 1::UBIGINT, 199::UBIGINT, NULL::UBIGINT, 0::UBIGINT,
+  200::UBIGINT, 11::UBIGINT, 0.25::DOUBLE, 7::UBIGINT,
+  1000000::UBIGINT, 0.1::DOUBLE, 0.001::DOUBLE,
+  16000000::UBIGINT, 1::UBIGINT);
+----
+counts must be all measured or all unavailable
+
 statement ok
 CREATE TEMP VIEW contam_overflow_evidence AS
 SELECT sample_id, assembly, site_index, region, position, allele_a, allele_b,

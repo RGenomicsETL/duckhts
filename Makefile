@@ -151,8 +151,29 @@ test_debug: test-cache-paths test-duckvep-kernel test-simd-kernels test-genbank-
 test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-genbank-core test-genbank-oracle test-somalier-native test-bam-site-counts test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom test-hts-region-ownership
 test_release: test-reference-cache
 ifneq ($(filter linux_%,$(or $(DUCKDB_PLATFORM),$(shell sed -n '1p' configure/platform.txt 2>/dev/null))),)
-test_release: test-reader-alloc
+test_release: test-reader-alloc test-extension-init
 endif
+
+DUCKDB_INIT_TEST_PYTHON ?= $(PYTHON_VENV_BIN)
+DUCKDB_INIT_TEST_EXPECT ?= supported
+
+.PHONY: test-extension-init
+test-extension-init:
+	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+		$(CC) -std=c11 -O1 -g -Wall -Wextra -Werror -fPIC -shared -fvisibility=hidden \
+			-DDUCKDB_EXTENSION_NAME=duckhts_init_failure \
+			-Iduckdb_capi -Isrc/include \
+			test/scripts/extension_init_failure.c src/extension_registration.c \
+			-o "$$tmp/duckhts_init_failure.so"; \
+		$(PYTHON_VENV_BIN) extension-ci-tools/scripts/append_extension_metadata.py \
+			-l "$$tmp/duckhts_init_failure.so" \
+			-o "$$tmp/duckhts_init_failure.duckdb_extension" \
+			-n duckhts_init_failure -dv $(TARGET_DUCKDB_VERSION) \
+			-evf configure/extension_version.txt -pf configure/platform.txt; \
+		$(DUCKDB_INIT_TEST_PYTHON) test/scripts/extension_init_test.py \
+			--extension build/release/duckhts.duckdb_extension \
+			--failure-extension "$$tmp/duckhts_init_failure.duckdb_extension" \
+			--expect $(DUCKDB_INIT_TEST_EXPECT)
 
 # Distribution CI tests the same binary inside and outside Docker. Its CMake
 # cache contains container-absolute paths, so build this host-only shim afresh.
@@ -400,6 +421,7 @@ test-cache-paths:
 	bash test/scripts/test_conformance_plugin_cache.sh
 
 test-benchmark-registry: release test-variantkey-provider-staging test-duckvep-corpus-staging
+	Rscript test/scripts/test_cigar_blocks_benchmark.R build/release/duckhts.duckdb_extension
 	Rscript test/scripts/test_genotype_format_benchmark.R
 	Rscript test/scripts/test_hgvs_cis_codon.R
 	Rscript test/scripts/test_ambiguous_codon.R

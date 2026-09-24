@@ -1,0 +1,343 @@
+---
+title: "CIGAR aligned blocks benchmark"
+output:
+  github_document:
+    html_preview: false
+    pandoc_args: ["--wrap=preserve", "--columns=400"]
+params:
+  measure: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+This report compares `cigar_aligned_blocks(CIGAR, POS)` with a plain binary-CIGAR
+scan and a SQL block derivation using `list_slice` prefix sums inside lambdas.
+The plain scan is the denominator; the SQL derivation is quadratic in the op
+count of each alignment record. All three are timed on the same host in one render,
+through one in-memory DuckDB connection, over two real alignments staged
+through the duckhtsbench registry:
+
+- the `ont-ecoli-k12` workload: ENA run `ERR14686255`, 25,950 MinION reads of
+  an *Escherichia coli* K-12 MG1655 derivative, aligned by `minimap2 -x map-ont`
+  to the NCBI RefSeq assembly `GCF_000005845.2` and sorted by `samtools` at
+  staging time. The genome is one contig, so `read_bam` scans it on one thread.
+- the `riker-wgs` workload: the 1000 Genomes high-coverage sample HG00188
+  (`ERR3240174`) transcoded from CRAM to BAM at staging time, read through the
+  `chr22` region of its index. A region scan is one `read_bam` thread by
+  construction, and it keeps the short-read condition to a few million reads.
+
+A measured render requires exact, NULL-aware equality of the three block lists
+for every physical record before timing, including duplicate read identities
+and missing CIGARs. Timed passes check exact counts and two fingerprints keyed
+by physical ordinal, including explicit NULL markers. These checks complement
+the fixture oracle in `test/sql/cigar_aligned_blocks.test`.
+
+The recorded measurements at `1139f23ddde1` have aggregate-XOR validation only,
+not per-record conformance evidence. XOR can conceal duplicate errors and does
+not distinguish NULL lists from empty lists in this DuckDB runtime.
+[The recorded data](https://github.com/ryandward/duckhts/blob/54995e6f3a211786b3421a629edfd87d8929e371/benchmarks/data/cigar_aligned_blocks.csv)
+retain their measured timings and denominators. The recorded revision below
+identifies the measurement shown; rendering stored data does not validate it.
+
+The focused current-source comparison is
+[`benchmark_cigar_validation.md`](benchmark_cigar_validation.md). The nearest report
+on the short-read input is [`benchmark_riker_wgs.md`](benchmark_riker_wgs.md),
+which times whole-file `read_bam` scans against Riker; it shares the registered
+BAM but not the region or the projection, so it is context rather than a
+comparison.
+
+## Reproduction
+
+Stage both inputs once, with network access only in this step. The long-read
+staging needs `minimap2` and `samtools`; the short-read staging needs
+`samtools` and downloads a 14 GB CRAM plus the GRCh38 reference:
+
+``` sh
+Rscript -e 'duckhtsbench::duckhts_bench_stage_ont_ecoli()'
+Rscript -e 'duckhtsbench::duckhts_bench_stage_riker()'
+```
+
+`DUCKHTS_EXTENSION` selects the extension to measure (default:
+`build/release/duckhts.duckdb_extension`). Render from a tracked-clean revision;
+rendering resolves the staged paths through the registry and does not download:
+
+``` sh
+taskset -c 8-11 Rscript -e 'rmarkdown::render("benchmarks/benchmark_cigar_aligned_blocks.Rmd")'
+```
+
+Both inputs run on one `read_bam` thread, so the benchmark pins each pass to
+the highest logical CPU in the affinity mask of the rendering process; wrap the
+render in `taskset -c` to choose it. Input staging, extension loading,
+connection setup, warm-up and result verification are excluded from timing.
+To render the stored measurements without claiming a new run, use
+`rmarkdown::render("benchmarks/benchmark_cigar_aligned_blocks.Rmd", params = list(measure = FALSE))`.
+This mode reads the checked-in results and metadata; it does not run validation.
+
+```{r benchmark, echo=FALSE, message=FALSE, eval=params$measure}
+suppressPackageStartupMessages({
+  library(DBI)
+  library(duckdb)
+})
+
+sql_string <- function(x) {
+  sprintf("'%s'", gsub("'", "''", x, fixed = TRUE))
+}
+
+command_output <- function(command, args = character()) {
+  paste(system2(command, args, stdout = TRUE, stderr = TRUE), collapse = " ")
+}
+
+receipt_field <- function(receipt, field) {
+  fields <- utils::read.delim(receipt, colClasses = "character", quote = "", comment.char = "")
+  value <- fields$value[fields$field == field]
+  if (length(value) != 1L) stop("missing provenance field ", field, " in ", receipt)
+  value
+}
+
+ont <- duckhtsbench::duckhts_bench_stage_ont_ecoli(fetch = FALSE)
+riker_bam <- duckhtsbench::duckhts_bench_artifact_path("riker_hg00188_bam")
+stopifnot(
+  file.exists(riker_bam),
+  file.exists(paste0(riker_bam, ".bai")),
+  file.exists(paste0(riker_bam, ".provenance.tsv"))
+)
+inputs <- list(
+  ont = list(
+    label = "ONT E. coli K-12 (ERR14686255)",
+    path = normalizePath(ont[["bam"]], mustWork = TRUE),
+    region = NULL
+  ),
+  riker = list(
+    label = "Illumina HG00188 chr22 (ERR3240174)",
+    path = normalizePath(riker_bam, mustWork = TRUE),
+    region = "chr22"
+  )
+)
+
+extension <- normalizePath(Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension"),
+                           mustWork = TRUE)
+revision <- command_output("git", c("rev-parse", "--short=12", "HEAD"))
+src_tree <- command_output("git", c("rev-parse", "HEAD:src"))
+tracked_dirty <- length(system2(
+  "git", c("status", "--porcelain", "--untracked-files=no"), stdout = TRUE
+)) > 0L
+if (tracked_dirty) {
+  stop("Render the benchmark from a tracked-clean source revision")
+}
+
+con <- dbConnect(duckdb(config = list(allow_unsigned_extensions = "true"), shared_home = FALSE))
+invisible(dbExecute(con, paste("LOAD", dbQuoteString(con, extension))))
+
+scan_sql <- function(input) {
+  region <- if (is.null(input$region)) "" else sprintf(", region := %s", sql_string(input$region))
+  sprintf(
+    "read_bam(%s, index_path := %s, cigar_representation := 'binary'%s)",
+    sql_string(input$path), sql_string(paste0(input$path, ".bai")), region
+  )
+}
+
+source("scripts/cigar_aligned_blocks_benchmark.R", local = TRUE)
+
+set_affinity <- function(cpus) {
+  output <- system2("taskset", c("-pc", cpus, Sys.getpid()), stdout = TRUE, stderr = TRUE)
+  if (!is.null(attr(output, "status"))) stop(paste(output, collapse = " "))
+  invisible(output)
+}
+
+affinity_cpus <- function() {
+  line <- system2("taskset", c("-pc", Sys.getpid()), stdout = TRUE)
+  spec <- sub("^.*: *", "", line[[length(line)]])
+  unlist(lapply(strsplit(spec, ",", fixed = TRUE)[[1L]], function(part) {
+    bounds <- as.integer(strsplit(part, "-", fixed = TRUE)[[1L]])
+    if (length(bounds) == 1L) bounds else seq.int(bounds[[1L]], bounds[[2L]])
+  }))
+}
+host_cpus <- affinity_cpus()
+cpu_one <- as.character(host_cpus[[length(host_cpus)]])
+set_affinity(cpu_one)
+invisible(dbExecute(con, "SET threads = 1"))
+
+workloads <- c("read_bam only", "blocks in SQL", "cigar_aligned_blocks")
+results <- list()
+expectations <- list()
+for (name in names(inputs)) {
+  input <- inputs[[name]]
+  scan <- scan_sql(input)
+  checked <- validate_blocks(con, scan)
+  expected <- lapply(workloads, function(workload) dbGetQuery(con, workload_sql(scan, workload)))
+  names(expected) <- workloads
+  # Every workload reads the same rows, and the two block derivations must
+  # agree on every read's geometry.
+  stopifnot(
+    length(unique(vapply(expected, function(e) as.character(e$reads[[1L]]), character(1L)))) == 1L,
+    identical(checked$records, expected[["read_bam only"]]$reads),
+    identical(expected[["blocks in SQL"]], expected[["cigar_aligned_blocks"]]),
+    as.numeric(expected[["cigar_aligned_blocks"]]$blocks[[1L]]) > 0
+  )
+  expectations[[name]] <- expected
+  repetitions <- if (name == "ont") 9L else 5L
+  for (workload in workloads) {
+    sql <- workload_sql(scan, workload)
+    for (i in seq_len(2L)) stopifnot(identical(dbGetQuery(con, sql), expected[[workload]]))
+    seconds <- numeric(repetitions)
+    for (i in seq_len(repetitions)) {
+      started <- proc.time()[["elapsed"]]
+      observed <- dbGetQuery(con, sql)
+      seconds[[i]] <- proc.time()[["elapsed"]] - started
+      stopifnot(identical(observed, expected[[workload]]))
+    }
+    results[[length(results) + 1L]] <- data.frame(
+      input = input$label,
+      workload = workload,
+      threads = 1L,
+      affinity = cpu_one,
+      repetitions = repetitions,
+      reads = as.double(expected[[workload]]$reads[[1L]]),
+      ops = as.double(expected[[workload]]$ops[[1L]]),
+      blocks = as.double(expected[["cigar_aligned_blocks"]]$blocks[[1L]]),
+      min_seconds = min(seconds),
+      median_seconds = median(seconds),
+      max_seconds = max(seconds),
+      median_reads_per_second = as.double(expected[[workload]]$reads[[1L]]) / median(seconds),
+      fingerprint = expected[[workload]]$fingerprint[[1L]],
+      fingerprint_sum = expected[[workload]]$fingerprint_sum[[1L]],
+      stringsAsFactors = FALSE
+    )
+  }
+}
+results <- do.call(rbind, results)
+rownames(results) <- NULL
+
+versions <- c(
+  duckdb = dbGetQuery(con, "SELECT version() AS v")$v[[1L]],
+  htslib = dbGetQuery(con, "SELECT duckhts_htslib_version() AS v")$v[[1L]]
+)
+invisible(dbDisconnect(con, shutdown = TRUE))
+
+results$revision <- revision
+results$run_date <- as.character(Sys.Date())
+results$duckdb_version <- versions[["duckdb"]]
+results$htslib_version <- versions[["htslib"]]
+results$extension_md5 <- unname(tools::md5sum(extension))
+
+dir.create("benchmarks/data", showWarnings = FALSE, recursive = TRUE)
+write.csv(results, "benchmarks/data/cigar_aligned_blocks.csv", row.names = FALSE, na = "")
+
+cpu_model <- sub(
+  "^model name[[:space:]]*:[[:space:]]*", "",
+  grep("^model name", readLines("/proc/cpuinfo"), value = TRUE)[[1L]]
+)
+ont_receipt <- paste0(inputs$ont$path, ".provenance.tsv")
+big <- function(x) format(x, big.mark = ",", scientific = FALSE)
+metadata <- data.frame(
+  property = c(
+    "revision", "src tree", "extension MD5", "run date",
+    "long-read input", "long-read reads (ERR14686255)", "long-read ops", "long-read blocks",
+    "long-read aligner", "long-read sorter",
+    "short-read input", "short-read reads (chr22)", "short-read ops", "short-read blocks",
+    "block fingerprint, long-read (SQL = scalar)", "block fingerprint, short-read (SQL = scalar)",
+    "DuckDB version", "htslib version", "CPU"
+  ),
+  value = c(
+    revision, src_tree, unname(tools::md5sum(extension)), as.character(Sys.Date()),
+    "duckhtsbench registry ont-ecoli-k12: ENA ERR14686255 reads on NCBI RefSeq GCF_000005845.2, minimap2 map-ont, samtools sort",
+    big(expectations$ont[["read_bam only"]]$reads[[1L]]),
+    big(expectations$ont[["read_bam only"]]$ops[[1L]]),
+    big(expectations$ont[["cigar_aligned_blocks"]]$blocks[[1L]]),
+    receipt_field(ont_receipt, "aligner"),
+    receipt_field(ont_receipt, "sorter"),
+    "duckhtsbench registry riker-wgs: 1000 Genomes HG00188 ERR3240174 CRAM transcoded to BAM, region chr22",
+    big(expectations$riker[["read_bam only"]]$reads[[1L]]),
+    big(expectations$riker[["read_bam only"]]$ops[[1L]]),
+    big(expectations$riker[["cigar_aligned_blocks"]]$blocks[[1L]]),
+    expectations$ont[["cigar_aligned_blocks"]]$fingerprint[[1L]],
+    expectations$riker[["cigar_aligned_blocks"]]$fingerprint[[1L]],
+    versions[["duckdb"]], versions[["htslib"]], cpu_model
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(metadata, "benchmarks/data/cigar_aligned_blocks_metadata.csv", row.names = FALSE)
+```
+
+```{r recorded-results, echo=FALSE}
+if (!params$measure) {
+  results <- read.csv("benchmarks/data/cigar_aligned_blocks.csv", stringsAsFactors = FALSE)
+  metadata <- read.csv("benchmarks/data/cigar_aligned_blocks_metadata.csv", colClasses = "character")
+}
+knitr::kable(metadata, col.names = c("Property", "Recorded value"))
+```
+
+## Results
+
+Each workload scans the same rows and returns one row to R, so the timing
+covers reading, decoding and projection rather than transporting all blocks.
+The Reads column counts physical alignment records, including duplicate names.
+Measured runs first compare every physical record against the SQL oracle,
+then check exact record/op/block totals and record-keyed XOR and sum fingerprints
+on every timed pass. NULL markers distinguish missing CIGARs from valid CIGARs
+with no aligned blocks. Recorded-data rendering does not execute those checks;
+the recorded `1139f23ddde1` data have the aggregate-XOR limits described above.
+
+```{r results-table, echo=FALSE}
+display <- results[, c(
+  "input", "workload", "threads", "affinity", "repetitions", "reads", "ops", "blocks",
+  "min_seconds", "median_seconds", "max_seconds", "median_reads_per_second"
+)]
+for (column in c("reads", "ops", "blocks")) {
+  display[[column]] <- format(display[[column]], big.mark = ",", scientific = FALSE)
+}
+for (column in c("min_seconds", "median_seconds", "max_seconds")) {
+  display[[column]] <- sprintf("%.3f", display[[column]])
+}
+display$median_reads_per_second <- format(
+  round(display$median_reads_per_second), big.mark = ",", scientific = FALSE
+)
+names(display) <- c(
+  "Input", "Workload", "Threads", "CPU affinity", "Runs", "Reads", "CIGAR ops", "Blocks",
+  "Minimum seconds", "Median seconds", "Maximum seconds", "Median reads/s"
+)
+knitr::kable(display, align = c("l", "l", rep("r", 10)))
+```
+
+```{r comparison-table, echo=FALSE}
+plain <- results[results$workload == "read_bam only", c("input", "median_seconds")]
+names(plain)[2L] <- "plain"
+comparison <- merge(
+  merge(plain, results[results$workload == "blocks in SQL", c("input", "median_seconds")], by = "input"),
+  results[results$workload == "cigar_aligned_blocks", c("input", "median_seconds")],
+  by = "input", suffixes = c("_sql", "_scalar")
+)
+comparison <- comparison[match(unique(results$input), comparison$input), ]
+comparison$sql_over_plain <- comparison$median_seconds_sql - comparison$plain
+comparison$scalar_over_plain <- comparison$median_seconds_scalar - comparison$plain
+comparison$ratio <- comparison$sql_over_plain / comparison$scalar_over_plain
+out <- data.frame(
+  Input = comparison$input,
+  `Plain scan` = sprintf("%.3f", comparison$plain),
+  `Blocks in SQL` = sprintf("%.3f", comparison$median_seconds_sql),
+  `cigar_aligned_blocks` = sprintf("%.3f", comparison$median_seconds_scalar),
+  `SQL cost over plain` = sprintf("%.3f", comparison$sql_over_plain),
+  `Scalar cost over plain` = sprintf("%.3f", comparison$scalar_over_plain),
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
+rownames(out) <- NULL
+knitr::kable(out, align = c("l", rep("r", 5)))
+```
+
+The cost of each derivation is its median minus the plain scan's median on the
+same input, which is the time the projection itself adds. The SQL derivation
+grows with the square of each read's op count, so its cost is set by the
+long-read input's op distribution; the scalar's cost is linear in ops and is
+bounded by the writes of three lists per read.
+
+The measurement does not include staging, extension loading, or any consumer
+of the block lists, and it does not measure memory. Both inputs run on one
+`read_bam` thread, the long-read input because its genome is one contig and the
+short-read input because a region scan is single-threaded, so the numbers say
+nothing about scaling across contigs. Small timings vary with scheduling; the
+differences are for this host and these inputs only.

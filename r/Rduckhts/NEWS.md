@@ -1,3 +1,22 @@
+# Rduckhts 1.5.2.9001-0.1.5
+
+- Require duckdb 1.4.0 or newer. The bundled extension registers native
+  functions before dependent SQL macros, retains all supported native overloads
+  on DuckDB 1.4, and includes the underlying diagnostic in initialization errors.
+  DuckVEP repeat and transcript-presentation SQL support the older binder.
+
+- The bundled extension validates complete text and packed CIGARs with checked
+  lengths and consumed spans. CIGAR metrics and presence checks return NULL for
+  malformed suffixes or arithmetic outside BIGINT, including a bad suffix after
+  a matching operator. Unsupported requested operators return NULL in both forms.
+  Requested-operator case folding is ASCII and locale-independent. Full-input
+  checking adds validation work to operator-presence calls.
+- The bundled CIGAR SQL functions accept an optional final `strict` BOOLEAN.
+  FALSE is the default; TRUE raises an error for invalid input under the same
+  checked grammar. Errors name the function and the 1-based packed-op index or
+  text operation-start byte where available. SQL NULL arguments and no-CIGAR
+  sentinels retain their per-function outcomes.
+
 # Rduckhts 1.5.2.9000-0.1.5
 
 - In webR, an explicit `blob:` `index_path` is no longer copied into the in-memory
@@ -16,8 +35,17 @@
   Chromium 148.0.7778.96 worker XHR tests found HEAD fails with status 0, ranged
   GET returns 206 with size in `Content-Range`, ranges crossing EOF are truncated,
   and out-of-range or revoked URLs fail with status 0. Native builds are unchanged.
+
+- The bundled extension reports consistent Somalier CHARR count errors whether
+  public SQL validation or the native aggregate rejects the input first.
+
 - Show contributor avatars and credit Ryan Ward / Nurture Bio for GenBank
   support in the package README footer, with links to upstream acknowledgements.
+- Add `cigar_aligned_blocks(cigar, pos)`: Extracts contiguous aligned segments
+  (M, =, X) from a CIGAR string or binary array into a STRUCT of parallel
+  lists (`ref_start`, `query_start`, `width`). Use it to convert alignments
+  into genomic intervals for coverage, junction, and range overlap analysis
+  without custom SQL loops.
 
 # Rduckhts 1.5.2-0.1.5
 

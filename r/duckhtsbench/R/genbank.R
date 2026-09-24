@@ -29,28 +29,36 @@ duckhts_bench_stage_genbank <- function(fetch = TRUE) {
     duckhts_bench_validate_identity(ids[[1L]], paths[["gbff_gz"]])
   }
 
-  if (file.exists(paths[["gbff"]])) {
+  duckhts_bench_stage_gunzip(ids[[2L]], paths[["gbff_gz"]], paths[["gbff"]])
+  invisible(paths)
+}
+
+# Derive one registered gunzip artifact from its cached source. A cached output
+# that still matches its registered identity is kept and re-receipted; anything
+# else is rebuilt through a partial file so a failed derivation publishes nothing.
+duckhts_bench_stage_gunzip <- function(id, source, destination) {
+  if (file.exists(destination)) {
     valid <- tryCatch({
-      duckhts_bench_validate_identity(ids[[2L]], paths[["gbff"]])
+      duckhts_bench_validate_identity(id, destination)
       TRUE
     }, error = function(error) FALSE)
     if (valid) {
-      duckhts_bench_write_provenance(ids[[2L]], paths[["gbff"]])
-      return(invisible(paths))
+      duckhts_bench_write_provenance(id, destination)
+      return(invisible(destination))
     }
-    unlink(c(paths[["gbff"]], paste0(paths[["gbff"]], ".provenance.tsv")), force = TRUE)
+    unlink(c(destination, paste0(destination, ".provenance.tsv")), force = TRUE)
   }
-  dir.create(dirname(paths[["gbff"]]), recursive = TRUE, showWarnings = FALSE)
-  temporary <- paste0(paths[["gbff"]], ".partial-", Sys.getpid())
+  dir.create(dirname(destination), recursive = TRUE, showWarnings = FALSE)
+  temporary <- paste0(destination, ".partial-", Sys.getpid())
   unlink(temporary, force = TRUE)
   on.exit(unlink(temporary, force = TRUE), add = TRUE)
-  duckhts_bench_gunzip(paths[["gbff_gz"]], temporary)
-  duckhts_bench_validate_identity(ids[[2L]], temporary)
-  if (!file.rename(temporary, paths[["gbff"]])) {
-    stop("could not publish the uncompressed GenBank input: ", paths[["gbff"]], call. = FALSE)
+  duckhts_bench_gunzip(source, temporary)
+  duckhts_bench_validate_identity(id, temporary)
+  if (!file.rename(temporary, destination)) {
+    stop("could not publish the uncompressed artifact: ", destination, call. = FALSE)
   }
-  duckhts_bench_write_provenance(ids[[2L]], paths[["gbff"]])
-  invisible(paths)
+  duckhts_bench_write_provenance(id, destination)
+  invisible(destination)
 }
 
 duckhts_bench_gunzip <- function(source, destination) {

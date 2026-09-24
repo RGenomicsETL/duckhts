@@ -191,4 +191,10 @@ fi
 # with known regions that have no transcript or regulatory intervals.
 "${python_runtime[@]}" ./configure/venv/bin/python3 scripts/run_sqllogictest.py \
   --test-dir test/sql --file-path test/sql/duckvep_annotate.test --external-extension "$extension"
+# CIGAR checks assert numeric results as well as memory safety: UBSan does not
+# diagnose unsigned wraparound, and invalid rows must not leak list entries.
+for cigar_test in cigar_utils cigar_aligned_blocks bam_cigar_binary; do
+  "${python_runtime[@]}" ./configure/venv/bin/python3 scripts/run_sqllogictest.py \
+    --test-dir test/sql --file-path "test/sql/$cigar_test.test" --external-extension "$extension"
+done
 echo "$sanitizer complete-extension gates: OK"

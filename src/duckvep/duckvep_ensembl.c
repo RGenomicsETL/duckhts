@@ -11,7 +11,7 @@ DUCKDB_EXTENSION_EXTERN
 #include "duckvep_sql.h"
 
 static bool
-duckvep_register_ensembl_regions(duckdb_connection connection)
+duckvep_register_ensembl_regions(duckhts_registration_t *registration)
 {
 	static const char *const sql[] = {
 		"CREATE OR REPLACE MACRO duckvep_ensembl_regions(",
@@ -70,12 +70,12 @@ duckvep_register_ensembl_regions(duckdb_connection connection)
 		"ORDER BY seq_region"
 	};
 
-	return duckvep_register_sql_parts(connection, sql,
+	return duckhts_register_sql_parts(registration, sql,
 	    sizeof(sql) / sizeof(sql[0]));
 }
 
 static bool
-duckvep_register_ensembl_transcripts(duckdb_connection connection)
+duckvep_register_ensembl_transcripts(duckhts_registration_t *registration)
 {
 	static const char *const sql[] = {
 		"CREATE OR REPLACE MACRO duckvep_ensembl_transcripts(",
@@ -442,12 +442,12 @@ duckvep_register_ensembl_transcripts(duckdb_connection connection)
 		"WHERE validation.valid ORDER BY p.transcript_index"
 	};
 
-	return duckvep_register_sql_parts(connection, sql,
+	return duckhts_register_sql_parts(registration, sql,
 	    sizeof(sql) / sizeof(sql[0]));
 }
 
 static bool
-duckvep_register_ensembl_regulation_features(duckdb_connection connection)
+duckvep_register_ensembl_regulation_features(duckhts_registration_t *registration)
 {
 	/* VEP 116 Database/RegFeat drops epigenetically_modified_region rows
 	 * before constructing overlap objects. The prepared resident relation must
@@ -521,12 +521,12 @@ duckvep_register_ensembl_regulation_features(duckdb_connection connection)
 		"ORDER BY regulation_feature_index"
 	};
 
-	return duckvep_register_sql_parts(connection, sql,
+	return duckhts_register_sql_parts(registration, sql,
 	    sizeof(sql) / sizeof(sql[0]));
 }
 
 static bool
-duckvep_register_model_receipt(duckdb_connection connection)
+duckvep_register_model_receipt(duckhts_registration_t *registration)
 {
 	static const char *const sql[] = {
 		"CREATE OR REPLACE MACRO duckvep_model_receipt(regions_table, transcripts_table, source_name, source_version, ",
@@ -656,15 +656,15 @@ duckvep_register_model_receipt(duckdb_connection connection)
 		"CROSS JOIN validation WHERE validation.valid"
 	};
 
-	return duckvep_register_sql_parts(connection, sql,
+	return duckhts_register_sql_parts(registration, sql,
 	    sizeof(sql) / sizeof(sql[0]));
 }
 
 bool
-register_duckvep_ensembl_functions(duckdb_connection connection)
+register_duckvep_ensembl_functions(duckhts_registration_t *registration)
 {
-	return duckvep_register_ensembl_regions(connection) &&
-	    duckvep_register_ensembl_transcripts(connection) &&
-	    duckvep_register_ensembl_regulation_features(connection) &&
-	    duckvep_register_model_receipt(connection);
+	return duckvep_register_ensembl_regions(registration) &&
+	    duckvep_register_ensembl_transcripts(registration) &&
+	    duckvep_register_ensembl_regulation_features(registration) &&
+	    duckvep_register_model_receipt(registration);
 }

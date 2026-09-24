@@ -1,0 +1,180 @@
+---
+title: "CIGAR validation cost"
+output:
+  github_document:
+    html_preview: false
+    pandoc_args: ["--wrap=preserve", "--columns=400"]
+params:
+  prefix: "data/cigar_validation"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+read_output <- function(role, kind) {
+  read.csv(paste0(params$prefix, "_", role, "_", kind, ".csv"),
+           colClasses = "character", check.names = FALSE)
+}
+baseline <- read_output("baseline", "results")
+candidate <- read_output("candidate", "results")
+baseline_meta <- read_output("baseline", "metadata")
+candidate_meta <- read_output("candidate", "metadata")
+baseline_inputs <- read_output("baseline", "inputs")
+candidate_inputs <- read_output("candidate", "inputs")
+meta <- function(role, property) {
+  data <- if (role == "baseline") baseline_meta else candidate_meta
+  value <- data$value[data$property == property]
+  stopifnot(length(value) == 1L)
+  value
+}
+same_environment <- c("host", "system", "cpu", "affinity", "threads", "r_version",
+                      "duckdb_version", "driver_sha256", "ont_sha256", "ont_aligner",
+                      "ont_sorter", "size", "synthetic_rows", "synthetic_cycles")
+for (property in same_environment) {
+  stopifnot(identical(meta("baseline", property), meta("candidate", property)))
+}
+stopifnot(identical(baseline_inputs, candidate_inputs))
+keys <- c("input", "workload", "representation")
+proof <- c("output_records", "nonnull_outputs", "output_total", "fingerprint_xor",
+           "fingerprint_sum", "repetitions")
+ordered <- function(data) data[do.call(order, data[keys]), , drop = FALSE]
+baseline <- ordered(baseline)
+rownames(baseline) <- NULL
+stopifnot(!anyDuplicated(baseline[keys]), all(baseline$mode == "default"),
+          setequal(candidate$mode, c("default", "false", "true")))
+for (mode in c("default", "false", "true")) {
+  observed <- ordered(candidate[candidate$mode == mode, , drop = FALSE])
+  rownames(observed) <- NULL
+  stopifnot(identical(baseline[c(keys, proof)], observed[c(keys, proof)]))
+}
+```
+
+This focused comparison measures the old CIGAR implementation and the shared
+checked decoder in separate R processes on the same host and inputs. It measures
+all seven metric helpers individually, `has_op('M')`, `has_op('P')`, and aligned
+blocks, for both text and packed CIGAR. Candidate calls use the default overload
+and explicit strict `FALSE` and `TRUE`. Every row is retained, including missing
+CIGARs; any oracle or cross-extension output disagreement stops the run or render.
+
+The nearest retained baseline is
+[`benchmark_cigar_aligned_blocks.md`](benchmark_cigar_aligned_blocks.md), source
+`1139f23ddde1`, with 27,377 ONT records / 2,817,619 operations / 1,408,917 blocks
+and 9,569,553 HG00188 chr22 records / 10,964,914 operations / 9,971,254 blocks.
+That report used minimap2 2.28-r1209 and samtools 1.21 for ONT. This focused report
+does **not** establish an identical-input comparison with that older ONT
+derivation. It does **not** rerun Riker; the approximately 17 GB acquisition and
+short-read measurement remain outstanding. The full existing report is retained.
+
+## Reproduction and scope
+
+Run from the repository root with DBI, duckdb, digest, and duckhtsbench available
+in the R library. ONT must already be staged through the duckhtsbench registry;
+the driver only resolves cached paths and performs no download or staging.
+Use one identical `taskset` CPU mask for both commands. Supply the full source
+revision and `HEAD:src` IDs for each build, and `uncommitted` if the extension
+was built from modified sources. Those IDs describe the base revision when the
+source is uncommitted; the loaded binary's SHA256 identifies the measured binary.
+The driver records caller-supplied source metadata without certifying the build.
+
+```sh
+# Set these to the local build paths and full Git object IDs for the measured builds.
+taskset -c "$CPU" Rscript scripts/benchmark_cigar_validation.R baseline \
+  "$BASELINE_EXTENSION" "$BASELINE_SOURCE" "$BASELINE_REVISION" "$BASELINE_SRC_TREE" \
+  clean benchmarks/data/cigar_validation full 5
+taskset -c "$CPU" Rscript scripts/benchmark_cigar_validation.R candidate \
+  "$CANDIDATE_EXTENSION" "$CANDIDATE_SOURCE" "$CANDIDATE_REVISION" "$CANDIDATE_SRC_TREE" \
+  "$CANDIDATE_SOURCE_STATE" benchmarks/data/cigar_validation full 5
+Rscript -e 'rmarkdown::render("benchmarks/benchmark_cigar_validation.Rmd")'
+```
+
+Each invocation loads exactly one extension. For a smoke check use `smoke 2`
+and prefix `benchmarks/data/cigar_validation_smoke`: this uses the first 256
+sequential ONT records and 4,096 synthetic records with 50 ops each. Full runs
+use every sequential ONT record and 8,192 synthetic records with 194 ops each.
+Synthetic records have alternating H/S endpoints and repeated M/I/D/N/=/X ops;
+lengths and positions vary with record identity. M matches near the start and
+P is absent, making the cost of checking the full suffix in `has_op` visible.
+
+Inputs are materialized before timing. Text is rendered directly from the same
+packed words using htslib's `MIDNSHP=X` mapping. SQL columns keep native calls
+from being constant-folded. The seven metric oracles use independent packed-op
+sums and literal first/last-op rules. Block expectations use the prefix-slice
+SQL geometry in the existing aligned-block benchmark. Every result is compared
+row by row with `IS DISTINCT FROM`, including NULLs and all three block lists,
+before one excluded warm-up and the timed repetitions. Disagreements retain
+counterexamples in a declared `*_mismatches.csv` output and stop execution.
+
+Timed queries consume the full helper output in aggregates, returning one row
+to R. Timing includes SQL execution, output hashing and the DBI aggregate
+transfer; it excludes BAM I/O, input construction, oracle construction,
+extension loading, warm-up and result comparisons. This measures resident
+projection cost, not a pure C kernel, I/O throughput or memory use. Each pass
+must match the independent oracle's exact counts, totals, XOR and sum of hashes
+linked to physical row ordinal, QNAME, FLAG, RNAME and POS. Rendering verifies
+these results across processes and strict modes, together with the input
+fingerprint and BAM SHA256. No disagreement is filtered or tolerated.
+
+## Environment and inputs
+
+```{r environment}
+properties <- c("revision", "src_tree", "source_state", "extension_sha256", "source_dir",
+                "run_utc", "host", "system", "cpu", "affinity", "threads", "r_version",
+                "duckdb_version", "htslib_version", "driver_sha256", "size")
+knitr::kable(data.frame(
+  Property = properties,
+  Baseline = vapply(properties, function(x) meta("baseline", x), character(1)),
+  Candidate = vapply(properties, function(x) meta("candidate", x), character(1))
+), row.names = FALSE)
+properties <- c("ont_artifact", "ont_sha256", "ont_release", "ont_sources", "ont_transform",
+                "ont_aligner", "ont_sorter", "synthetic_rows", "synthetic_cycles", "riker")
+knitr::kable(data.frame(Property = properties,
+                       Value = vapply(properties, function(x) meta("baseline", x), character(1))),
+             row.names = FALSE)
+knitr::kable(baseline_inputs)
+```
+
+Operation and block counts cover all input records. Missing CIGAR counts are
+reported separately and remain in every helper's output denominator. The
+synthetic SQL is literal workload construction in the driver and requires no
+artifact registration. ONT identifies ENA ERR14686255 on RefSeq GCF_000005845.2;
+the receipt records its actual aligner and sorter above.
+
+## Outputs and timing
+
+```{r results}
+comparison <- baseline[c(keys, "output_records", "nonnull_outputs", "output_total",
+                          "repetitions", "median_seconds")]
+names(comparison)[names(comparison) == "median_seconds"] <- "baseline_s"
+for (mode in c("default", "false", "true")) {
+  selected <- candidate[candidate$mode == mode, c(keys, "median_seconds")]
+  names(selected)[names(selected) == "median_seconds"] <- paste0(mode, "_s")
+  comparison <- merge(comparison, selected, by = keys, sort = FALSE)
+}
+comparison <- ordered(comparison)
+for (column in c("baseline_s", "default_s", "false_s", "true_s")) {
+  comparison[[column]] <- as.numeric(comparison[[column]])
+}
+comparison$default_over_baseline <- comparison$default_s / comparison$baseline_s
+comparison$false_over_baseline <- comparison$false_s / comparison$baseline_s
+comparison$true_over_baseline <- comparison$true_s / comparison$baseline_s
+ratios <- c("default_over_baseline", "false_over_baseline", "true_over_baseline")
+comparison[comparison$baseline_s == 0, ratios] <- NA_real_
+knitr::kable(comparison, digits = 4, row.names = FALSE)
+```
+
+All times are medians in seconds; ratios above 1 indicate extra cost relative
+to the baseline. Output totals are summed lengths for numeric helpers, true
+counts for Boolean helpers, and emitted block counts for aligned blocks.
+The non-NULL count retains missing-output behavior. Candidate strict modes
+have identical outputs to the default and baseline in this workload. The
+default, explicit `FALSE`, and strict `TRUE` timings must be read separately:
+full suffix validation can cost more than an early presence match. Small
+timings include timer resolution and scheduling noise; a zero baseline median
+has no meaningful ratio. These measurements make no scaling or malformed-input
+performance claim.
+
+The declared outputs are `data/cigar_validation_{baseline,candidate}_{metadata,inputs,results,timings}.csv`
+(or the `cigar_validation_smoke` prefix), plus `*_mismatches.csv` on an oracle
+failure. They retain per-repeat elapsed times, minimum/median/maximum times,
+complete output counts and both identity-linked fingerprints, input
+denominators, and source/binary metadata. The report is rendered only after
+both runs pass their independent oracle checks.

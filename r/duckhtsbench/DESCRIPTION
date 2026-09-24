@@ -1,7 +1,7 @@
 Package: duckhtsbench
 Type: Package
 Title: DuckHTS Benchmark Input Registry
-Version: 0.0.0.9000
+Version: 0.0.0.9001
 Authors@R: person("Sounkou", role = c("aut", "cre"), email = "sounkou@example.org")
 Description: Internal utilities that declare, stage, and validate reproducible
     benchmark and conformance inputs for DuckHTS.
@@ -15,6 +15,8 @@ Suggests:
     duckdb,
     jsonlite,
     optparse,
+    RBCFTools (>= 1.24-1.1.0),
     tinytest
+Additional_repositories: https://rgenomicsetl.r-universe.dev
 Roxygen: list(markdown = TRUE)
 Config/roxygen2/version: 8.0.0

@@ -3535,7 +3535,7 @@ Test whether a CIGAR string contains any soft-clipped segment (`S`). Overloaded 
 Signature:
 
 ```sql
-cigar_has_soft_clip(cigar)
+cigar_has_soft_clip(cigar[, strict])
 ```
 
 Returns:
@@ -3543,6 +3543,10 @@ Returns:
 ```
 BOOLEAN
 ```
+
+### Input validation
+
+See cigar_query_length for full-input validation and missing-input behavior.
 
 ### Examples
 
@@ -3557,7 +3561,7 @@ Test whether a CIGAR string contains any hard-clipped segment (`H`). Overloaded 
 Signature:
 
 ```sql
-cigar_has_hard_clip(cigar)
+cigar_has_hard_clip(cigar[, strict])
 ```
 
 Returns:
@@ -3565,6 +3569,10 @@ Returns:
 ```
 BOOLEAN
 ```
+
+### Input validation
+
+See cigar_query_length for full-input validation and missing-input behavior.
 
 ### Examples
 
@@ -3579,7 +3587,7 @@ Return the left-end soft-clipped length from a CIGAR string, or zero if the alig
 Signature:
 
 ```sql
-cigar_left_soft_clip(cigar)
+cigar_left_soft_clip(cigar[, strict])
 ```
 
 Returns:
@@ -3587,6 +3595,10 @@ Returns:
 ```
 BIGINT
 ```
+
+### Input validation
+
+See cigar_query_length for full-input validation and missing-input behavior. The literal first op determines the left soft clip; a leading H is not skipped.
 
 ### Examples
 
@@ -3601,7 +3613,7 @@ Return the right-end soft-clipped length from a CIGAR string, or zero if the ali
 Signature:
 
 ```sql
-cigar_right_soft_clip(cigar)
+cigar_right_soft_clip(cigar[, strict])
 ```
 
 Returns:
@@ -3609,6 +3621,10 @@ Returns:
 ```
 BIGINT
 ```
+
+### Input validation
+
+See cigar_query_length for full-input validation and missing-input behavior. The literal last op determines the right soft clip; a trailing H is not skipped.
 
 ### Examples
 
@@ -3623,7 +3639,7 @@ Return the query-consuming length from a CIGAR string, counting `M`, `I`, `S`, `
 Signature:
 
 ```sql
-cigar_query_length(cigar)
+cigar_query_length(cigar[, strict])
 ```
 
 Returns:
@@ -3632,10 +3648,22 @@ Returns:
 BIGINT
 ```
 
+### Input validation
+
+Text and packed CIGARs are validated in full. Supported ops are M, I, D, N, S, H, P, = and X, each with a positive length that fits BIGINT. Consumed query and reference spans must each fit BIGINT. Invalid ops, missing lengths, trailing digits, arithmetic overflow and NULL packed elements are invalid input. This validates operation syntax and numeric ranges, not biological ordering constraints.
+
+### Failure policy
+
+The optional final positional BOOLEAN strict defaults to FALSE: invalid input returns NULL. TRUE uses the same grammar but raises a DuckDB error naming the function and failure. Where an operation can be identified, diagnostics give its 1-based packed-op index or the 1-based byte at which the text operation starts. No read identifier is inferred. A top-level SQL NULL argument, including strict, returns NULL. Empty text, '*' and an empty packed list return NULL in either policy.
+
 ### Examples
 
 ```sql
 SELECT cigar_query_length('5S90M5I');
+```
+
+```sql
+SELECT cigar_query_length([84, 1440, 81]::UINTEGER[], TRUE);
 ```
 
 ## cigar_aligned_query_length
@@ -3645,7 +3673,7 @@ Return the aligned query length from a CIGAR string, counting `M`, `=`, and `X` 
 Signature:
 
 ```sql
-cigar_aligned_query_length(cigar)
+cigar_aligned_query_length(cigar[, strict])
 ```
 
 Returns:
@@ -3653,6 +3681,10 @@ Returns:
 ```
 BIGINT
 ```
+
+### Input validation
+
+See cigar_query_length for full-input validation and missing-input behavior.
 
 ### Examples
 
@@ -3667,7 +3699,7 @@ Return the reference-consuming length from a CIGAR string, counting `M`, `D`, `N
 Signature:
 
 ```sql
-cigar_reference_length(cigar)
+cigar_reference_length(cigar[, strict])
 ```
 
 Returns:
@@ -3675,6 +3707,10 @@ Returns:
 ```
 BIGINT
 ```
+
+### Input validation
+
+See cigar_query_length for full-input validation and missing-input behavior.
 
 ### Examples
 
@@ -3689,7 +3725,7 @@ Test whether a CIGAR string contains at least one instance of the requested oper
 Signature:
 
 ```sql
-cigar_has_op(cigar, op)
+cigar_has_op(cigar, op[, strict])
 ```
 
 Returns:
@@ -3698,10 +3734,56 @@ Returns:
 BOOLEAN
 ```
 
+### Input validation
+
+Uses the full-input validation of cigar_query_length, including the suffix after any matching op. The requested operator is one supported ASCII character, case-insensitive independently of the process locale.
+
+### Failure policy
+
+The optional final positional BOOLEAN strict defaults to FALSE: an invalid operator or malformed CIGAR returns NULL. TRUE raises an error with the diagnostic conventions of cigar_query_length. A top-level SQL NULL argument, including strict, returns NULL. Empty text, '*' and an empty packed list return false for a valid requested operator in either policy.
+
 ### Examples
 
 ```sql
 SELECT cigar_has_op('5S90M5S', 'S');
+```
+
+## cigar_aligned_blocks
+
+Return the aligned blocks of a CIGAR as a struct of three parallel BIGINT lists: ref_start, query_start and width, one entry per M, = or X op in CIGAR order. Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := 'binary')); the binary overload is bit-identical to the text path.
+
+Signature:
+
+```sql
+cigar_aligned_blocks(cigar, pos[, strict])
+```
+
+Returns:
+
+```
+STRUCT
+```
+
+### Coordinates
+
+ref_start is pos plus the reference bases consumed before the block, so it carries whatever base pos uses; pass read_bam's 1-based POS for 1-based starts or 0 for offsets from the alignment start. query_start is the 0-based offset into the stored SEQ: soft clips count, hard clips do not. width is the op length. D and N advance the reference and split blocks, I advances the query and splits blocks, H and P consume nothing. Blocks are never merged, as in pysam get_blocks() and GenomicAlignments cigarRangesAlongReferenceSpace over M, = and X.
+
+### Input validation
+
+Uses the full-input CIGAR grammar of cigar_query_length. The half-open reference end, pos + cigar_reference_length(cigar), must also fit BIGINT. A negative pos is permitted. A valid CIGAR with no aligned op returns three empty lists.
+
+### Failure policy
+
+The optional final positional BOOLEAN strict defaults to FALSE: malformed CIGAR or coordinate overflow returns NULL. TRUE raises an error with the diagnostic conventions of cigar_query_length. A top-level SQL NULL argument, including pos or strict, returns NULL. Empty text, '*' and an empty packed list return NULL in either policy.
+
+### Examples
+
+```sql
+SELECT (cigar_aligned_blocks('5S90M5S', 100)).ref_start;
+```
+
+```sql
+SELECT UNNEST((b).ref_start) AS ref_start, UNNEST((b).width) AS width FROM (SELECT cigar_aligned_blocks(CIGAR, POS) AS b FROM read_bam('reads.bam', cigar_representation := 'binary'));
 ```
 
 ## is_paired
