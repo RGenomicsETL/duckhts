@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9000-0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9001-0.1.5</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -33,12 +33,20 @@
     </div>
 
     <div class="section level2">
+<h2 class="pkg-version" data-toc-text="1.5.2.9001-0.1.5" id="rduckhts-1529001-015">Rduckhts 1.5.2.9001-0.1.5<a class="anchor" aria-label="anchor" href="#rduckhts-1529001-015"></a></h2>
+<ul><li><p>Require duckdb 1.4.0 or newer. The bundled extension registers native functions before dependent SQL macros, retains all supported native overloads on DuckDB 1.4, and includes the underlying diagnostic in initialization errors. DuckVEP repeat and transcript-presentation SQL support the older binder.</p></li>
+<li><p>The bundled extension validates complete text and packed CIGARs with checked lengths and consumed spans. CIGAR metrics and presence checks return NULL for malformed suffixes or arithmetic outside BIGINT, including a bad suffix after a matching operator. Unsupported requested operators return NULL in both forms. Requested-operator case folding is ASCII and locale-independent. Full-input checking adds validation work to operator-presence calls.</p></li>
+<li><p>The bundled CIGAR SQL functions accept an optional final <code>strict</code> BOOLEAN. FALSE is the default; TRUE raises an error for invalid input under the same checked grammar. Errors name the function and the 1-based packed-op index or text operation-start byte where available. SQL NULL arguments and no-CIGAR sentinels retain their per-function outcomes.</p></li>
+</ul></div>
+    <div class="section level2">
 <h2 class="pkg-version" data-toc-text="1.5.2.9000-0.1.5" id="rduckhts-1529000-015">Rduckhts 1.5.2.9000-0.1.5<a class="anchor" aria-label="anchor" href="#rduckhts-1529000-015"></a></h2>
 <ul><li><p>In webR, an explicit <code>blob:</code> <code>index_path</code> is no longer copied into the in-memory filesystem and kept for the rest of the session.</p></li>
 <li><p>In webR, an empty <code>blob:</code> File reads as an empty input (zero rows), matching a zero-byte file natively, instead of failing to open.</p></li>
 <li><p>In webR, <code>blob:</code> URLs are exempt from <code>Module.duckhtsWasmHttpConfig</code>’s <code>enforceHostAllowlist</code>: they have no hostname and make no network request, so no <code>allowHosts</code> entry could authorise them before.</p></li>
 <li><p>The bundled Emscripten extension accepts read-only <code>blob:</code> URLs in webR. A browser File can be exposed as an object URL, with a separate <code>index_path</code> URL for region queries; callers must retain both URLs until queries finish. Chromium 148.0.7778.96 worker XHR tests found HEAD fails with status 0, ranged GET returns 206 with size in <code>Content-Range</code>, ranges crossing EOF are truncated, and out-of-range or revoked URLs fail with status 0. Native builds are unchanged.</p></li>
+<li><p>The bundled extension reports consistent Somalier CHARR count errors whether public SQL validation or the native aggregate rejects the input first.</p></li>
 <li><p>Show contributor avatars and credit Ryan Ward / Nurture Bio for GenBank support in the package README footer, with links to upstream acknowledgements.</p></li>
+<li><p>Add <code>cigar_aligned_blocks(cigar, pos)</code>: Extracts contiguous aligned segments (M, =, X) from a CIGAR string or binary array into a STRUCT of parallel lists (<code>ref_start</code>, <code>query_start</code>, <code>width</code>). Use it to convert alignments into genomic intervals for coverage, junction, and range overlap analysis without custom SQL loops.</p></li>
 </ul></div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="1.5.2-0.1.5" id="rduckhts-152-015">Rduckhts 1.5.2-0.1.5<a class="anchor" aria-label="anchor" href="#rduckhts-152-015"></a></h2><p class="text-muted">CRAN release: 2026-09-16</p>

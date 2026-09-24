@@ -22,7 +22,7 @@
 
     <a class="navbar-brand me-2" href="index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9000-0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9001-0.1.5</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -69,6 +69,7 @@
 <div class="section level2">
 <h2 id="system-requirements">System Requirements<a class="anchor" aria-label="anchor" href="#system-requirements"></a>
 </h2>
+<p>The package requires <code>duckdb</code> 1.4.0 or newer and a DuckDB runtime of at least 1.4.0. The bundled extension’s v1.2.0 stable C API target is distinct from this SQL-runtime requirement.</p>
 <p>Installation requires <code>htslib</code> dependencies such as zlib and libbz2, and optionally liblzma, libcurl, and OpenSSL for full functionality. The package requires GNU make. On Windows Rtools builds, <code>htslib</code> plugins are not enabled.</p>
 </div>
 <div class="section level2">
@@ -383,9 +384,9 @@
 <span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rduckhts_fastq_multi.html">rduckhts_fastq_multi</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"fq_multi"</span>, <span class="va">fq_files</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT filename, count(*) AS n FROM fq_multi GROUP BY ALL ORDER BY filename"</span><span class="op">)</span></span>
-<span><span class="co">#&gt;                                               filename n</span></span>
-<span><span class="co">#&gt; 1 /usr/local/lib/R/site-library/Rduckhts/extdata/r1.fq 5</span></span>
-<span><span class="co">#&gt; 2 /usr/local/lib/R/site-library/Rduckhts/extdata/r2.fq 5</span></span></code></pre></div>
+<span><span class="co">#&gt;                                                    filename n</span></span>
+<span><span class="co">#&gt; 1 &lt;Rduckhts&gt;/extdata/r1.fq 5</span></span>
+<span><span class="co">#&gt; 2 &lt;Rduckhts&gt;/extdata/r2.fq 5</span></span></code></pre></div>
 <p>Per-file parameters are supported via a <code>.params</code> data.frame with a <code>file</code> column and columns matching reader arguments. <code>NA</code> values fall back to the uniform default:</p>
 <div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">bam_path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"range.bam"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
@@ -1555,10 +1556,10 @@ Show generated function catalog
 </h3>
 <table class="table">
 <colgroup>
-<col width="23%">
+<col width="21%">
+<col width="1%">
 <col width="2%">
-<col width="2%">
-<col width="71%">
+<col width="74%">
 </colgroup>
 <thead><tr class="header">
 <th>Function</th>
@@ -1614,6 +1615,12 @@ Show generated function catalog
 <td>scalar</td>
 <td></td>
 <td>Test whether a CIGAR string contains at least one instance of the requested operator. Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path.</td>
+</tr>
+<tr class="odd">
+<td><a href="inst/function_catalog/reference.html#cigar_aligned_blocks"><code>cigar_aligned_blocks</code></a></td>
+<td>scalar</td>
+<td></td>
+<td>Return the aligned blocks of a CIGAR as a struct of three parallel BIGINT lists: ref_start, query_start and width, one entry per M, = or X op in CIGAR order. Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path.</td>
 </tr>
 </tbody>
 </table>
@@ -2783,7 +2790,7 @@ Show generated function catalog
 <span><span class="va">index_raw</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rduckhts_hts_index_raw.html">rduckhts_hts_index_raw</a></span><span class="op">(</span><span class="va">con</span>, <span class="va">bcf_path</span>, index_path <span class="op">=</span> <span class="va">bcf_index_path</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">index_raw</span>, <span class="fl">1</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] index_type</span></span>
-<span><span class="co">#&gt; [2] '/usr/local/lib/R/site-library/Rduckhts/extdata/vcf_file.bcf.csi'</span></span>
+<span><span class="co">#&gt; [2] '&lt;Rduckhts&gt;/extdata/vcf_file.bcf.csi'</span></span>
 <span><span class="co">#&gt; [3] raw</span></span>
 <span><span class="co">#&gt; &lt;0 rows&gt; (or 0-length row.names)</span></span></code></pre></div>
 </div>

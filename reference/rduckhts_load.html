@@ -11,7 +11,7 @@ rduckhts_connect()."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9000-0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9001-0.1.5</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -67,7 +67,9 @@ called before using HTS reader functions on a connection not created by
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
-    <p>The connection must permit unsigned extension loading. With current versions
+    <p>DuckDB 1.4.0 or newer is required. SQL registration errors retain the
+underlying DuckDB diagnostic in the initialization error.</p>
+<p>The connection must permit unsigned extension loading. With current versions
 of the <span class="pkg">duckdb</span> R package, its driver must also permit extension loading.
 Prefer <code><a href="rduckhts_connect.html">rduckhts_connect()</a></code> when Rduckhts owns the connection.</p>
     </div>
