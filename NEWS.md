@@ -2,9 +2,10 @@
 
 # duckhts 1.5.2.9001
 
-- Split tabix, GFF3 and GTF records once per line for projected columns,
-  attribute outputs and strict GFF3 validation. Values, NULLs and strict
-  diagnostics retain their existing contracts.
+- Scan tabix, GFF3 and GTF fields once up to the last projected field; parsed
+  attribute outputs include the attributes field, and strict GFF3 checks count
+  the entire line. Values, NULLs and strict diagnostics retain their existing
+  contracts.
 
 - Require DuckDB 1.4.0 or newer for the extension's SQL surface while retaining
   the stable v1.2.0 C API target. Register native functions before dependent SQL

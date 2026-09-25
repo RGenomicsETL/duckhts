@@ -19,10 +19,11 @@ outside the five timed repetitions. The input is GENCODE mouse vM25 BASIC GFF3
 and GTF; the BED-like file is the first 100,000 GFF3 data records rearranged
 into 16 columns (chromosome, zero-based start, end, feature, score, strand,
 source, phase, attributes, then seven repeated source fields). The `gff_plain`
-projection selects `seqname`, `start` and `end`; `gff_all_nine` and
-`gtf_all_nine` select all nine physical columns. The BED-like query selects
-all 16 fields. This derived file tests generic column projection, not BED
-semantics or the BED reader.
+projection selects `seqname`, `start` and `end`; `gff_five` selects `seqname`,
+`start`, `end`, `feature` and `strand`. `gff_all_nine` and `gtf_all_nine`
+select all nine physical columns. The BED-like query selects all 16 fields.
+This derived file tests generic column projection, not BED semantics or the
+BED reader.
 
 ## Reproduction
 
@@ -36,7 +37,9 @@ Rscript scripts/stage_tabix_split.R
 Rscript scripts/stage_tabix_split.R --offline
 ```
 
-Build origin/develop in a separate worktree with `make configure && make release -j4`.
+Build origin/develop from a source archive in a separate directory with
+`make configure && make release -j4` (copy the pinned extension-ci-tools
+submodule into that directory before building).
 Set `DUCKHTS_TABIX_BASELINE_EXTENSION` to its release binary and
 `DUCKHTS_TABIX_BASELINE_REVISION` to its exact commit; the candidate defaults
 to `build/release/duckhts.duckdb_extension`. Render with
@@ -82,6 +85,12 @@ queries <- c(
            'FROM read_gff(%s, scan_mode := \'sequential\')'),
     quote_path(paths[["tabix_split_gff3"]])
   ),
+  gff_five = sprintf(
+    paste0('SELECT count(*) AS rows, hex(bit_xor(hash(seqname, start, "end", feature, strand))) AS digest, ',
+           'sum(hash(seqname, start, "end", feature, strand)) AS digest_sum ',
+           'FROM read_gff(%s, scan_mode := \'sequential\')'),
+    quote_path(paths[["tabix_split_gff3"]])
+  ),
   gff_all_nine = sprintf(
     paste0('SELECT count(*) AS rows, hex(bit_xor(hash(seqname, source, feature, start, "end", score, strand, frame, attributes))) AS digest, ',
            'sum(hash(seqname, source, feature, start, "end", score, strand, frame, attributes)) AS digest_sum ',
@@ -103,7 +112,8 @@ queries <- c(
     quote_path(paths[["tabix_split_bed"]])
   )
 )
-inputs <- c(gff_plain = "tabix_split_gff3", gff_all_nine = "tabix_split_gff3",
+inputs <- c(gff_plain = "tabix_split_gff3", gff_five = "tabix_split_gff3",
+            gff_all_nine = "tabix_split_gff3",
             gtf_all_nine = "tabix_split_gtf", tabix_bed16 = "tabix_split_bed")
 measure <- function(extension, threads, sql) {
   config <- list(allow_unsigned_extensions = "true")
@@ -146,14 +156,10 @@ knitr::kable(result[, c("workload", "build", "threads", "effective_threads",
              digits = 3, caption = "Five-run median wall time (seconds); output fingerprints and hash sums match across builds.")
 ```
 
-In this run the narrow GFF projection is slower while all-column GFF/GTF
-and wide tabix improve. Scanning even the unprojected final GFF attribute
-field costs time in the narrow projection; this workload does not establish
-a universal speedup.
-
 The raw input checksum, byte count and derivation are pinned in the registry
 and validated before measurement. `input_rows` is the count returned by each
-scan; `result_rows` counts aggregate rows materialized by the query. Times include scanning, decompression
-of GENCODE inputs, aggregation and DuckDB execution but exclude opening the
-connection and loading the extension. Fingerprint and hash-sum equality check output values,
-not ordering; no output rows are filtered by the benchmark.
+scan; `result_rows` counts aggregate rows materialized by the query. Times
+include scanning, decompression of GENCODE inputs, aggregation and DuckDB
+execution but exclude opening the connection and loading the extension.
+Fingerprint and hash-sum equality check output values, not ordering; no
+output rows are filtered by the benchmark.

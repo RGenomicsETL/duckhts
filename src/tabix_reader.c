@@ -180,6 +180,7 @@ typedef struct {
     bool       finished;
     idx_t     *column_ids;      /* logical column indices (for projection pushdown) */
     idx_t      n_projected_cols;
+    int        split_limit;     /* fields to visit; 0 counts the whole line */
     struct tabix_field *fields;
     int        count_only;
     uint64_t   count_remaining;
@@ -259,9 +260,10 @@ typedef struct tabix_field {
     int len;
 } tabix_field_t;
 
-/* Store at most capacity fields while counting all fields for strict GFF3
- * diagnostics. Unstored fields are never projected. */
-static int split_fields(const char *line, tabix_field_t *fields, int capacity) {
+/* Visit at most limit fields (0 means the whole line). The returned count
+ * includes only fields present within that limit; strict GFF3 counts excess
+ * fields without storing beyond capacity. */
+static int split_fields(const char *line, tabix_field_t *fields, int capacity, int limit) {
     const char *start = line;
     int count = 0;
     for (;;) {
@@ -271,7 +273,7 @@ static int split_fields(const char *line, tabix_field_t *fields, int capacity) {
             fields[count].len = (int)len;
         }
         count++;
-        if (start[len] == '\0') break;
+        if (start[len] == '\0' || (limit > 0 && count == limit)) break;
         start += len + 1;
     }
     return count;
@@ -648,7 +650,7 @@ static char *dup_field_name(const char *start, int len) {
 
 static int parse_header_names(const char *line, char ***out_names) {
     tabix_field_t fields[TABIX_MAX_GENERIC_COLS];
-    int n = split_fields(line, fields, TABIX_MAX_GENERIC_COLS);
+    int n = split_fields(line, fields, TABIX_MAX_GENERIC_COLS, 0);
     if (n > TABIX_MAX_GENERIC_COLS) n = TABIX_MAX_GENERIC_COLS;
     char **names = (char **)malloc(sizeof(char *) * (size_t)n);
     if (!names) return 0;
@@ -1355,7 +1357,7 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
                     if (bd->meta_char && l2.s[0] == bd->meta_char) continue;
                     if (skip_header) { skip_header = 0; continue; }
 
-                    int n_fields = split_fields(l2.s, fields, bd->n_cols);
+                    int n_fields = split_fields(l2.s, fields, bd->n_cols, 0);
                     for (int i = 0; i < bd->n_cols; i++) {
                         int flen = 0;
                         const char *fld = field_at(fields, n_fields, i, &flen);
@@ -1448,10 +1450,18 @@ static void tabix_init(duckdb_init_info info) {
         id->column_ids = (idx_t *)malloc(sizeof(idx_t) * id->n_projected_cols);
         for (idx_t i = 0; i < id->n_projected_cols; i++) {
             id->column_ids[i] = duckdb_init_get_column_index(info, i);
+            int field_col = (int)id->column_ids[i];
+            if (bd->mode != TABIX_MODE_GENERIC && field_col >= GXF_BASE_COL_COUNT) {
+                field_col = GXF_COL_ATTRIBUTES;
+            }
+            if (field_col < bd->n_cols && field_col + 1 > id->split_limit) {
+                id->split_limit = field_col + 1;
+            }
         }
     } else {
         id->column_ids = NULL;
     }
+    if (bd->strict && bd->mode == TABIX_MODE_GFF) id->split_limit = 0;
 
     if (id->n_projected_cols == 0 && bd->n_regions == 0 && !bd->scan_sequential && bd->index_row_count_valid && !bd->strict) {
         id->count_only = 1;
@@ -1594,7 +1604,7 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
 
         int n_fields = 0;
         if (chunk_col_count > 0 || (bd->strict && bd->mode == TABIX_MODE_GFF)) {
-            n_fields = split_fields(id->line.s, id->fields, n_cols);
+            n_fields = split_fields(id->line.s, id->fields, n_cols, id->split_limit);
         }
         if (bd->strict && bd->mode == TABIX_MODE_GFF) {
             char err[256];

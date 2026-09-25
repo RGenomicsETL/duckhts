@@ -972,6 +972,32 @@ SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_strict_invali
 ----
 2
 
+# --- Narrow projections ignore malformed and absent later fields ---
+query III
+SELECT seqname, start, "end"
+FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_strict_invalid_attr.gff3');
+----
+chr1	1	10
+
+query III
+SELECT seqname, start, "end"
+FROM read_gff('__WORKING_DIRECTORY__/test/data/tabix_split_extra.gff3');
+----
+chr1	1	2
+
+query IIIII
+SELECT seqname, start, "end", feature, strand
+FROM read_gff('__WORKING_DIRECTORY__/test/data/tabix_split_edges.gff3')
+WHERE seqname = 'chr3';
+----
+chr3	5	6	gene	+
+
+# --- Strict GFF3 counts absent trailing fields even with a narrow projection ---
+statement error
+SELECT seqname, start, "end" FROM read_gff('__WORKING_DIRECTORY__/test/data/tabix_split_edges.gff3', strict := true);
+----
+TooFewFields: expected exactly 9 tab-separated fields, found 8
+
 # --- GFF3 field views preserve empty, missing, extra and CRLF fields ---
 query IIIIIIII
 SELECT seqname, source, feature, start, "end", score IS NULL, strand, frame
