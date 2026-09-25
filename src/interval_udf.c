@@ -99,7 +99,7 @@ typedef struct {
     tbx_t *tbx;
     hts_itr_t *itr;
     kstring_t line;
-    bed_bind_data_t *bind;
+    bed_error_policy_t error_policy;
     bool finished;
     int64_t line_number;
     idx_t *column_ids;
@@ -434,7 +434,7 @@ static void read_bed_init(duckdb_init_info info) {
     bed_bind_data_t *bind = (bed_bind_data_t *)duckdb_init_get_bind_data(info);
     bed_init_data_t *init = (bed_init_data_t *)duckdb_malloc(sizeof(bed_init_data_t));
     memset(init, 0, sizeof(*init));
-    init->bind = bind;
+    init->error_policy = bind->error_policy;
 
     init->n_projected_cols = duckdb_init_get_column_count(info);
     if (init->n_projected_cols > 0) {
@@ -488,7 +488,7 @@ static int next_bed_line(bed_init_data_t *init) {
             init->finished = true;
             return 0;
         }
-        if (init->bind->error_policy == BED_ERROR_POLICY_REPORT) init->line_number++;
+        if (init->error_policy == BED_ERROR_POLICY_REPORT) init->line_number++;
         if (init->line.l == 0 || is_meta_bed_line(init->line.s)) continue;
         return 1;
     }
@@ -524,13 +524,13 @@ static void read_bed_scan(duckdb_function_info info, duckdb_data_chunk output) {
     while (row_count < INTERVAL_BATCH_SIZE && next_bed_line(init)) {
         int n_fields = count_tab_fields(init->line.s);
         if (n_fields < 3) {
-            if (init->bind->error_policy == BED_ERROR_POLICY_ERROR) {
+            if (init->error_policy == BED_ERROR_POLICY_ERROR) {
                 duckdb_function_set_error(info, bed_short_line_error);
                 init->finished = true;
                 duckdb_data_chunk_set_size(output, 0);
                 return;
             }
-            if (init->bind->error_policy == BED_ERROR_POLICY_SKIP) continue;
+            if (init->error_policy == BED_ERROR_POLICY_SKIP) continue;
             for (idx_t c = 0; c < col_count; c++) {
                 int logical_col = (int)init->column_ids[c];
                 if (logical_col == BED_COL_ERROR) {
