@@ -1,8 +1,12 @@
+#include "duckdb_extension.h"
 #include "named_attribute_columns.h"
 
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
+
+/* Only projection mapping is exercised here; DuckDB-facing paths are covered by SQL tests. */
+duckdb_ext_api_v1 duckdb_ext_api;
 
 int main(void) {
     duckhts_attribute_key keys[] = {

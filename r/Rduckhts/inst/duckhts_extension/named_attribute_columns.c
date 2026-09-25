@@ -1,3 +1,6 @@
+#include "duckdb_extension.h"
+DUCKDB_EXTENSION_EXTERN
+
 #include "named_attribute_columns.h"
 
 #include <stdint.h>
