@@ -50,22 +50,41 @@ run_case() {
     if [[ $name == bgzip ]]; then
         printf 'payload\n' >"$dir/input"
     else
-        printf '@HD\tVN:1.6\n@SQ\tSN:chr1\n' >"$dir/input"
+        printf '%s\n' \
+            $'@HD\tVN:1.6' \
+            $'@SQ\tSN:chr1\tLN:100' \
+            $'read1\t0\tchr1\t1\t60\t1M\t*\t0\t0\tA\tI' >"$dir/input"
     fi
     wait "$reader" || status=$?
     reader=
-    if [[ $status -eq 0 ]] || ! cmp -s "$dir/expected" "$dir/output"; then
-        echo "$name: query must fail and preserve the concurrent output" >&2
+    if [[ $status -eq 0 ]]; then
+        echo "$name: query succeeded despite concurrent output" >&2
         return 1
     fi
-    if [[ $name == idxstats ]] && ! grep -q 'failed to read alignment header' "$dir/query.log"; then
-        echo 'idxstats: expected the malformed SAM header error' >&2
+    if ! cmp -s "$dir/expected" "$dir/output"; then
+        echo "$name: query modified the concurrent output" >&2
+        return 1
+    fi
+    if [[ $name == idxstats ]] && ! grep -q 'output already exists' "$dir/query.log"; then
+        echo 'idxstats: expected the exclusive-open error' >&2
         return 1
     fi
     echo "$name: failed without clobbering concurrent output"
 }
-run_case bgzip
-run_case idxstats
+case ${2:-all} in
+    all)
+        run_case bgzip
+        run_case idxstats
+        ;;
+    idxstats-race)
+        run_case idxstats
+        exit 0
+        ;;
+    *)
+        echo 'usage: writer_no_clobber.sh [extension] [all|idxstats-race]' >&2
+        exit 2
+        ;;
+esac
 
 run_symlink_case() {
     local name=$1
