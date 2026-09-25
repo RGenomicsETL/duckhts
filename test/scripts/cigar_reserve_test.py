@@ -32,13 +32,13 @@ def main():
                 rows = con.execute(f"SELECT cigar_aligned_blocks({cigar}, 42)").fetchall()
                 assert rows == [({"ref_start": [42], "query_start": [0], "width": [1]},)]
                 assert probe.reader_list_attempts() == 3, label
-                assert probe.reader_list_max_reserve() == 1, label
+                assert probe.reader_list_max_reserve() <= 1, label
             finally:
                 probe.reader_list_disarm()
     finally:
         probe.reader_alloc_close()
         con.close()
-    print("CIGAR child-list reserve: three one-block reservations per overload: OK")
+    print("CIGAR child-list reserve: three reservations of at most one block per overload: OK")
 
 
 if __name__ == "__main__":

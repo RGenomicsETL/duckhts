@@ -1139,7 +1139,7 @@ enum {
 static const char *CIGAR_BLOCK_FIELD_NAMES[CIGAR_BLOCK_FIELD_COUNT] = {"ref_start", "query_start", "width"};
 
 /* Write cursor over the three block lists of one chunk. Capacity is reserved
-   once from the aligned-block count for text, or the op count for packed input.
+   once from the aligned-operator byte count for text, or the op count for packed input.
    The lists are sized to the cursor when the chunk is published, so nothing
    partial is visible if a reserve fails. */
 typedef struct {
@@ -1232,8 +1232,8 @@ static void cigar_aligned_blocks_scalar(duckdb_function_info info, duckdb_data_c
     cigar_block_sink_t sink;
     idx_t capacity = 0;
 
-    /* Count only decoded aligned ops. Invalid rows are rescanned below for
-       the same NULL or strict diagnostic; their valid prefix is an upper bound. */
+    /* Every decoded block has one M, = or X byte. Count those bytes without
+       decoding; even malformed rows cannot write more blocks than this bound. */
     for (idx_t row = 0; row < row_count; row++) {
         if (!row_is_valid(cigar_vec, row) || !row_is_valid(pos_vec, row) ||
             (strict_vec && !row_is_valid(strict_vec, row))) {
@@ -1241,17 +1241,15 @@ static void cigar_aligned_blocks_scalar(duckdb_function_info info, duckdb_data_c
         }
         idx_t cigar_len = 0;
         const char *cigar = get_string_at(cigar_vec, row, &cigar_len);
-        duckhts_cigar_cursor_t cursor = {.text = cigar, .count = cigar_len};
-        duckhts_cigar_op_t op;
-        while (duckhts_cigar_next(&cursor, &op) > 0) {
-            if (op.type == 3) {
-                if (capacity == (idx_t)-1) {
-                    duckdb_scalar_function_set_error(info, "cigar_aligned_blocks: chunk block count overflows");
-                    return;
-                }
-                capacity++;
-            }
+        idx_t row_bound = 0;
+        for (idx_t i = 0; i < cigar_len; i++) {
+            row_bound += (idx_t)(cigar[i] == 'M' || cigar[i] == '=' || cigar[i] == 'X');
         }
+        if (row_bound > (idx_t)-1 - capacity) {
+            duckdb_scalar_function_set_error(info, "cigar_aligned_blocks: chunk block count overflows");
+            return;
+        }
+        capacity += row_bound;
     }
     if (!cigar_block_sink_open(info, output, capacity, &sink)) {
         return;
