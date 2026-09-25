@@ -4,6 +4,23 @@
 
 require duckhts
 
+query IIII
+WITH standard AS (
+  SELECT * FROM read_bed('__WORKING_DIRECTORY__/test/data/targets.bed')
+), skipped AS (
+  SELECT * FROM read_bed('__WORKING_DIRECTORY__/test/data/targets.bed', error_policy := 'skip')
+), reported AS (
+  SELECT chrom, start, "end", name, score, strand, thick_start, thick_end,
+         item_rgb, block_count, block_sizes, block_starts, extra
+  FROM read_bed('__WORKING_DIRECTORY__/test/data/targets.bed', error_policy := 'report')
+)
+SELECT (SELECT count(*) FROM (SELECT * FROM standard EXCEPT ALL SELECT * FROM skipped)),
+       (SELECT count(*) FROM (SELECT * FROM skipped EXCEPT ALL SELECT * FROM standard)),
+       (SELECT count(*) FROM (SELECT * FROM standard EXCEPT ALL SELECT * FROM reported)),
+       (SELECT count(*) FROM (SELECT * FROM reported EXCEPT ALL SELECT * FROM standard));
+----
+0	0	0	0
+
 # The committed fixture has metadata at lines 1-3, short data lines at 5 and
 # 10, and a CRLF data line at 8. Numeric conversion is nullable; reversed
 # intervals are accepted by the existing reader.
@@ -37,6 +54,22 @@ SELECT count(*), count(start), count("end"), count(*) FILTER (WHERE "end" < star
 FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed', error_policy := 'skip');
 ----
 5	4	5	1
+
+query II
+WITH skipped AS (
+  SELECT chrom, start, "end", name, score, strand, thick_start, thick_end,
+         item_rgb, block_count, block_sizes, block_starts, extra
+  FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed', error_policy := 'skip')
+), reported AS (
+  SELECT chrom, start, "end", name, score, strand, thick_start, thick_end,
+         item_rgb, block_count, block_sizes, block_starts, extra
+  FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed', error_policy := 'report')
+  WHERE error IS NULL
+)
+SELECT (SELECT count(*) FROM (SELECT * FROM skipped EXCEPT ALL SELECT * FROM reported)),
+       (SELECT count(*) FROM (SELECT * FROM reported EXCEPT ALL SELECT * FROM skipped));
+----
+0	0
 
 query ITTT
 SELECT line_number, coalesce(chrom, '<null>'), coalesce(error, '<null>'), coalesce(replace(raw_line, chr(9), '|'), '<null>')
