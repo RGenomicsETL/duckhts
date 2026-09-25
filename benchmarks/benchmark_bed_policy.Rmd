@@ -7,8 +7,12 @@ The public DuckBedQC `duckbedqc_118fc21` corpus supplies
 `data/GRCh38_exons.bed` (SHA-256
 `75b120e20be18497716c81d81648bb919574b34b90cc15abc474e06f09924073`,
 22,802,546 bytes). Stage it with `scripts/stage_duckbedqc_data.sh`.
-The baseline is an independent `git archive` of `81edf9bff85ab2daabeccd1daaf13e4bfa39ee47` built with
-`make configure && make release -j4`; the candidate is the revision below.
+The baseline is an independent `origin/develop` worktree at
+`41334c784891caa2df004ff762200094fcdd0aa9` built with
+`make configure && make release -j4`; the candidate is
+`b26c61e2be45871ba51c40cc3769242c17aaae2d` built with `make release -j4`.
+Both revisions are available in this repository. The candidate binary has no
+unresolved `duckdb_` symbols (`nm -D -u build/release/duckhts.duckdb_extension`).
 The query forces a full scan with `scan_mode := 'sequential'` and aggregates
 `count(*)`, `sum(start)`, and `sum("end")`. Both numeric sums are checked across
 policies and builds. Each run reads the 22 MB file and returns one aggregate
@@ -20,7 +24,8 @@ unmodified thread setting, recorded alongside the single-thread runs.
 ```{r, echo=TRUE}
 stopifnot(nzchar(Sys.getenv("BED_POLICY_BASE")),
           nzchar(Sys.getenv("BED_POLICY_BRANCH")),
-          nzchar(Sys.getenv("BED_POLICY_REV")))
+          nzchar(Sys.getenv("BED_POLICY_REV")),
+          nzchar(Sys.getenv("BED_POLICY_BASE_REV")))
 run_benchmark <- function(extension, label, revision) {
   output <- tempfile(fileext = ".tsv")
   result <- system2("Rscript", c("benchmarks/bed_policy_run.R", extension,
@@ -34,7 +39,7 @@ observations <- rbind(
   run_benchmark(Sys.getenv("BED_POLICY_BRANCH"), "candidate",
                 Sys.getenv("BED_POLICY_REV")),
   run_benchmark(Sys.getenv("BED_POLICY_BASE"), "baseline",
-                "81edf9bff85ab2daabeccd1daaf13e4bfa39ee47")
+                Sys.getenv("BED_POLICY_BASE_REV"))
 )
 stopifnot(length(unique(observations$input_lines)) == 1L,
           length(unique(observations$output_rows)) == 1L,
@@ -42,6 +47,8 @@ stopifnot(length(unique(observations$input_lines)) == 1L,
           length(unique(observations$end_sum)) == 1L,
           all(table(interaction(observations$build, observations$threads,
                                 observations$policy, drop = TRUE)) == 11L))
+write.table(observations, "benchmarks/bed_policy_observations.tsv",
+            sep = "\t", row.names = FALSE, quote = FALSE)
 summary <- aggregate(seconds ~ revision + build + threads + effective_threads +
                        policy + input_lines + output_rows,
                      observations, median)
@@ -82,6 +89,8 @@ alternating <- do.call(rbind, lapply(seq_len(15L), function(run) {
 stopifnot(nrow(alternating) == 30L,
           length(unique(alternating$result)) == 1L,
           all(table(alternating$build) == 15L))
+write.table(alternating, "benchmarks/bed_policy_alternating.tsv",
+            sep = "\t", row.names = FALSE, quote = FALSE)
 alternating_summary <- aggregate(seconds ~ build, alternating,
                                  function(x) c(min = min(x), median = median(x)))
 alternating_summary <- data.frame(
