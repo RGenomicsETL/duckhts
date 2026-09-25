@@ -51,21 +51,64 @@ knitr::kable(summary, caption = "Median wall seconds over eleven independent sca
 
 | revision                                 | build     | threads | effective_threads | policy | input_lines | output_rows | seconds |
 |:-----------------------------------------|:----------|:--------|------------------:|:-------|------------:|------------:|--------:|
-| 81edf9bff85ab2daabeccd1daaf13e4bfa39ee47 | baseline  | 1       |                 1 | error  |      389852 |      389852 |   0.038 |
-| b7066dcc4e973b7188a81f2b5613d9312de24afe | candidate | 1       |                 1 | error  |      389852 |      389852 |   0.044 |
-| 81edf9bff85ab2daabeccd1daaf13e4bfa39ee47 | baseline  | default |                20 | error  |      389852 |      389852 |   0.038 |
-| b7066dcc4e973b7188a81f2b5613d9312de24afe | candidate | default |                20 | error  |      389852 |      389852 |   0.045 |
-| b7066dcc4e973b7188a81f2b5613d9312de24afe | candidate | 1       |                 1 | report |      389852 |      389852 |   0.044 |
-| b7066dcc4e973b7188a81f2b5613d9312de24afe | candidate | default |                20 | report |      389852 |      389852 |   0.044 |
-| b7066dcc4e973b7188a81f2b5613d9312de24afe | candidate | 1       |                 1 | skip   |      389852 |      389852 |   0.044 |
-| b7066dcc4e973b7188a81f2b5613d9312de24afe | candidate | default |                20 | skip   |      389852 |      389852 |   0.044 |
+| 81edf9bff85ab2daabeccd1daaf13e4bfa39ee47 | baseline  | 1       |                 1 | error  |      389852 |      389852 |   0.039 |
+| 22d4bde23866798a51ea0ab6a4460aed5a326194 | candidate | 1       |                 1 | error  |      389852 |      389852 |   0.042 |
+| 81edf9bff85ab2daabeccd1daaf13e4bfa39ee47 | baseline  | default |                20 | error  |      389852 |      389852 |   0.039 |
+| 22d4bde23866798a51ea0ab6a4460aed5a326194 | candidate | default |                20 | error  |      389852 |      389852 |   0.041 |
+| 22d4bde23866798a51ea0ab6a4460aed5a326194 | candidate | 1       |                 1 | report |      389852 |      389852 |   0.042 |
+| 22d4bde23866798a51ea0ab6a4460aed5a326194 | candidate | default |                20 | report |      389852 |      389852 |   0.043 |
+| 22d4bde23866798a51ea0ab6a4460aed5a326194 | candidate | 1       |                 1 | skip   |      389852 |      389852 |   0.042 |
+| 22d4bde23866798a51ea0ab6a4460aed5a326194 | candidate | default |                20 | skip   |      389852 |      389852 |   0.042 |
 
 Median wall seconds over eleven independent scans per
 policy/thread/build
 
-Default policy, 1 threads: 0.038 s to 0.044 s (+15.8%).
+Default policy, 1 threads: 0.039 s to 0.042 s (+7.7%).
 
-Default policy, default threads: 0.038 s to 0.045 s (+18.4%).
+Default policy, default threads: 0.039 s to 0.041 s (+5.1%).
+
+The alternating comparison runs the exact default-policy aggregate with
+one DuckDB thread in a fresh R process per observation. The baseline and
+candidate alternate fifteen times each; process startup is outside the
+reported query wall time.
+
+``` r
+load_at_start <- system("uptime", intern = TRUE)
+run_single <- function(extension, label, run) {
+  lines <- system2("Rscript", c("benchmarks/bed_policy_single.R",
+                                  extension, label, run), stdout = TRUE)
+  if (!is.null(attr(lines, "status")) && attr(lines, "status") != 0L) {
+    stop("alternating scan failed: ", label, " run ", run)
+  }
+  read.delim(text = paste(lines, collapse = "\n"), check.names = FALSE)
+}
+alternating <- do.call(rbind, lapply(seq_len(15L), function(run) {
+  rbind(run_single(Sys.getenv("BED_POLICY_BASE"), "baseline", run),
+        run_single(Sys.getenv("BED_POLICY_BRANCH"), "candidate", run))
+}))
+stopifnot(nrow(alternating) == 30L,
+          length(unique(alternating$result)) == 1L,
+          all(table(alternating$build) == 15L))
+alternating_summary <- aggregate(seconds ~ build, alternating,
+                                 function(x) c(min = min(x), median = median(x)))
+alternating_summary <- data.frame(
+  build = alternating_summary$build,
+  min = round(alternating_summary$seconds[, "min"], 4),
+  median = round(alternating_summary$seconds[, "median"], 4)
+)
+knitr::kable(alternating_summary,
+             caption = "Alternating fresh-process scans (15 per build, one thread)")
+```
+
+| build     |   min | median |
+|:----------|------:|-------:|
+| baseline  | 0.039 |  0.041 |
+| candidate | 0.039 |  0.042 |
+
+Alternating fresh-process scans (15 per build, one thread)
+
+Host load before alternating scans: 20:23:28 up 353 days, 5:17, 21
+users, load average: 0.87, 1.05, 1.14.
 
 The reader’s only fatal data-line check is fewer than three
 tab-delimited fields. Numeric parse failures yield NULL and reversed
