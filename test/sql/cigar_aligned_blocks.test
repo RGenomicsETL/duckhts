@@ -101,6 +101,15 @@ SELECT (cigar_aligned_blocks('9223372036854775807I1I1M', 1) IS NULL)::INTEGER,
 ----
 1	1	[9223372036854775807]
 
+# A large decoded length with leading zeroes produces one block, not one
+# reservation slot per input byte (the former reserve was about 48 MB here).
+query TTTI
+SELECT (b).ref_start::VARCHAR, (b).query_start::VARCHAR,
+       (b).width::VARCHAR, (b = cigar_aligned_blocks([16]::UINTEGER[], 42))::INTEGER
+FROM (SELECT cigar_aligned_blocks(repeat('0', 2000000) || '1M', 42) AS b);
+----
+[42]	[0]	[1]	1
+
 # Trailing digits are NULL even when their value is zero.
 query II
 SELECT (cigar_aligned_blocks('10M0', 1) IS NULL)::INTEGER,

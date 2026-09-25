@@ -11,6 +11,10 @@
 - The bundled `read_hts_header` reports a scan error if it cannot reserve or
   size its parsed `key_values` MAP list.
 
+- The bundled `cigar_aligned_blocks` grows text-output child lists
+  geometrically, including for CIGARs with long runs of leading zeroes,
+  while decoding each text CIGAR once.
+
 # Rduckhts 1.5.2.9001-0.1.5
 
 - Require duckdb 1.4.0 or newer. The bundled extension registers native

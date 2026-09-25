@@ -1138,24 +1138,25 @@ enum {
 };
 static const char *CIGAR_BLOCK_FIELD_NAMES[CIGAR_BLOCK_FIELD_COUNT] = {"ref_start", "query_start", "width"};
 
-/* Write cursor over the three block lists of one chunk. Capacity is reserved
-   once from an upper bound on blocks (the chunk's op count, or its byte count
-   for text) and the lists are sized to the cursor when the chunk is published,
-   so nothing partial is visible if a reserve fails. */
+/* Write cursor over the three block lists of one chunk. Text grows the three
+   child lists together; packed input reserves from its op count. The lists are
+   sized to the cursor when published, so failed rows are never visible. */
 typedef struct {
     duckdb_vector list[CIGAR_BLOCK_FIELD_COUNT]; /* struct children, LIST(BIGINT) */
     duckdb_list_entry *entry[CIGAR_BLOCK_FIELD_COUNT];
     int64_t *value[CIGAR_BLOCK_FIELD_COUNT];     /* list child data, capacity elements */
     idx_t n;                                     /* blocks written so far */
+    idx_t capacity;                              /* child-list capacity */
 } cigar_block_sink_t;
 
 static int cigar_block_sink_open(duckdb_function_info info, duckdb_vector output, idx_t capacity,
                                  cigar_block_sink_t *sink) {
     sink->n = 0;
+    sink->capacity = capacity;
     for (int f = 0; f < CIGAR_BLOCK_FIELD_COUNT; f++) {
         sink->list[f] = duckdb_struct_vector_get_child(output, (idx_t)f);
         if (duckdb_list_vector_set_size(sink->list[f], 0) != DuckDBSuccess ||
-            duckdb_list_vector_reserve(sink->list[f], capacity) != DuckDBSuccess) {
+            (capacity && duckdb_list_vector_reserve(sink->list[f], capacity) != DuckDBSuccess)) {
             duckdb_scalar_function_set_error(info, "cigar_aligned_blocks: failed to grow list storage");
             return 0;
         }
@@ -1164,6 +1165,25 @@ static int cigar_block_sink_open(duckdb_function_info info, duckdb_vector output
         sink->entry[f] = (duckdb_list_entry *)duckdb_vector_get_data(sink->list[f]);
         sink->value[f] = (int64_t *)duckdb_vector_get_data(duckdb_list_vector_get_child(sink->list[f]));
     }
+    return 1;
+}
+
+static int cigar_block_sink_grow(duckdb_function_info info, cigar_block_sink_t *sink) {
+    if (sink->capacity > ((idx_t)-1) / 2) {
+        duckdb_scalar_function_set_error(info, "cigar_aligned_blocks: chunk block count overflows");
+        return 0;
+    }
+    idx_t capacity = sink->capacity ? sink->capacity * 2 : 1;
+    for (int f = 0; f < CIGAR_BLOCK_FIELD_COUNT; f++) {
+        if (duckdb_list_vector_reserve(sink->list[f], capacity) != DuckDBSuccess) {
+            duckdb_scalar_function_set_error(info, "cigar_aligned_blocks: failed to grow list storage");
+            return 0;
+        }
+    }
+    for (int f = 0; f < CIGAR_BLOCK_FIELD_COUNT; f++) {
+        sink->value[f] = (int64_t *)duckdb_vector_get_data(duckdb_list_vector_get_child(sink->list[f]));
+    }
+    sink->capacity = capacity;
     return 1;
 }
 
@@ -1192,11 +1212,11 @@ static void cigar_block_sink_publish(duckdb_function_info info, cigar_block_sink
     }
 }
 
-/* Validate each operation before its candidate write; the wrapper rewinds the entire row on
-   failure. Reservation includes every input op, so writing a candidate for
-   nonaligned ops is safe and only aligned ops advance the output cursor. */
-static inline duckhts_cigar_status_t cigar_scan_blocks(cigar_block_sink_t *sink,
-                                                     duckhts_cigar_cursor_t *cursor, int64_t pos) {
+/* Validate each operation before writing an aligned block; the wrapper rewinds
+   the entire row on failure. */
+static inline int cigar_scan_blocks(duckdb_function_info info, cigar_block_sink_t *sink,
+                                    duckhts_cigar_cursor_t *cursor, int64_t pos,
+                                    duckhts_cigar_status_t *result) {
     duckhts_cigar_op_t op;
     duckhts_cigar_status_t status;
     size_t op_start = cursor->offset;
@@ -1207,19 +1227,24 @@ static inline duckhts_cigar_status_t cigar_scan_blocks(cigar_block_sink_t *sink,
         if (pos > INT64_MAX - cursor->reference_span) {
             /* Retain the failing operation's location for adapter diagnostics. */
             cursor->offset = op_start;
-            return DUCKHTS_CIGAR_POSITION_OVERFLOW;
+            *result = DUCKHTS_CIGAR_POSITION_OVERFLOW;
+            return 1;
         }
-        idx_t n = sink->n;
-        sink->value[CIGAR_BLOCK_REF_START][n] = pos + op.reference_start;
-        sink->value[CIGAR_BLOCK_QUERY_START][n] = op.query_start;
-        sink->value[CIGAR_BLOCK_WIDTH][n] = op.length;
-        sink->n = n + (idx_t)(op.type == 3);
+        if (op.type == 3) {
+            if (sink->n == sink->capacity && !cigar_block_sink_grow(info, sink)) {
+                return 0;
+            }
+            idx_t n = sink->n;
+            sink->value[CIGAR_BLOCK_REF_START][n] = pos + op.reference_start;
+            sink->value[CIGAR_BLOCK_QUERY_START][n] = op.query_start;
+            sink->value[CIGAR_BLOCK_WIDTH][n] = op.length;
+            sink->n = n + 1;
+        }
         op_start = cursor->offset;
     }
-    if (status < 0) {
-        return status;
-    }
-    return cursor->offset != 0 ? DUCKHTS_CIGAR_OK : DUCKHTS_CIGAR_END;
+    *result = status < 0 ? status :
+              cursor->offset != 0 ? DUCKHTS_CIGAR_OK : DUCKHTS_CIGAR_END;
+    return 1;
 }
 
 static void cigar_aligned_blocks_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
@@ -1229,23 +1254,10 @@ static void cigar_aligned_blocks_scalar(duckdb_function_info info, duckdb_data_c
     int64_t *pos_data = (int64_t *)duckdb_vector_get_data(pos_vec);
     idx_t row_count = duckdb_data_chunk_get_size(input);
     cigar_block_sink_t sink;
-    idx_t capacity = 0;
 
-    /* A text CIGAR has no more ops than bytes. */
-    for (idx_t row = 0; row < row_count; row++) {
-        idx_t cigar_len = 0;
-        if (!row_is_valid(cigar_vec, row) || !row_is_valid(pos_vec, row) ||
-            (strict_vec && !row_is_valid(strict_vec, row))) {
-            continue;
-        }
-        (void)get_string_at(cigar_vec, row, &cigar_len);
-        if (cigar_len > (idx_t)-1 - capacity) {
-            duckdb_scalar_function_set_error(info, "cigar_aligned_blocks: chunk CIGAR length overflows");
-            return;
-        }
-        capacity += cigar_len;
-    }
-    if (!cigar_block_sink_open(info, output, capacity, &sink)) {
+    /* One slot per input row avoids repeated small reallocations; the reserve
+       is bounded by chunk cardinality, not by CIGAR byte length. */
+    if (!cigar_block_sink_open(info, output, row_count, &sink)) {
         return;
     }
 
@@ -1261,7 +1273,10 @@ static void cigar_aligned_blocks_scalar(duckdb_function_info info, duckdb_data_c
         duckhts_cigar_cursor_t cursor = {.text = cigar, .count = cigar_len};
         idx_t start = sink.n;
 
-        duckhts_cigar_status_t status = cigar_scan_blocks(&sink, &cursor, pos_data[row]);
+        duckhts_cigar_status_t status;
+        if (!cigar_scan_blocks(info, &sink, &cursor, pos_data[row], &status)) {
+            return;
+        }
         if (status <= 0) {
             sink.n = start;
             cigar_block_sink_null_row(&sink, output, row);
@@ -1318,8 +1333,8 @@ static void cigar_aligned_blocks_binary_scalar(duckdb_function_info info, duckdb
         duckhts_cigar_status_t status = cigar_packed_cursor(list_data[row], child_data,
                                                            child_validity, &cursor);
         idx_t start = sink.n;
-        if (status > 0) {
-            status = cigar_scan_blocks(&sink, &cursor, pos_data[row]);
+        if (status > 0 && !cigar_scan_blocks(info, &sink, &cursor, pos_data[row], &status)) {
+            return;
         }
         if (status <= 0) {
             sink.n = start;

@@ -151,7 +151,7 @@ test_debug: test-cache-paths test-duckvep-kernel test-simd-kernels test-genbank-
 test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-genbank-core test-genbank-oracle test-somalier-native test-bam-site-counts test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom test-hts-region-ownership
 test_release: test-reference-cache
 ifneq ($(filter linux_%,$(or $(DUCKDB_PLATFORM),$(shell sed -n '1p' configure/platform.txt 2>/dev/null))),)
-test_release: test-reader-alloc test-extension-init test-named-attribute-columns test-extension-symbols
+test_release: test-reader-alloc test-cigar-reserve-alloc test-extension-init test-named-attribute-columns test-extension-symbols
 endif
 
 .PHONY: test-extension-symbols
@@ -201,9 +201,12 @@ define run_reader_alloc_test
 		$(1) "$$tmp/reader_alloc_probe.so"
 endef
 
-.PHONY: test-reader-alloc test-reader-alloc-r
+.PHONY: test-reader-alloc test-reader-alloc-r test-cigar-reserve-alloc
 test-reader-alloc: test-bam-format test-bcf-scan
 	$(call run_reader_alloc_test,./configure/venv/bin/python3 test/scripts/reader_alloc_test.py --extension build/release/duckhts.duckdb_extension --probe)
+
+test-cigar-reserve-alloc:
+	$(call run_reader_alloc_test,./configure/venv/bin/python3 test/scripts/cigar_reserve_test.py --extension build/release/duckhts.duckdb_extension --probe)
 
 test-reader-alloc-r:
 	$(call run_reader_alloc_test,Rscript test/scripts/reader_alloc_test.R)
