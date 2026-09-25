@@ -24,6 +24,11 @@
 - Validate the staged ONT benchmark's BAM index against its SHA-256 and byte
   size receipt before reusing the cache.
 
+- `read_bed` accepts `error_policy := 'error'` (default), `'skip'`, or
+  `'report'` for short data lines. Report mode exposes physical line numbers,
+  raw rejected lines, and error text in three additional columns; it requires
+  a full-file scan.
+
 # duckhts 1.5.2.9001
 
 - Require DuckDB 1.4.0 or newer for the extension's SQL surface while retaining
