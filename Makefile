@@ -201,9 +201,12 @@ define run_reader_alloc_test
 		$(1) "$$tmp/reader_alloc_probe.so"
 endef
 
-.PHONY: test-reader-alloc test-reader-alloc-r
+.PHONY: test-reader-alloc test-reader-alloc-r test-cigar-reserve-alloc
 test-reader-alloc: test-bam-format test-bcf-scan
 	$(call run_reader_alloc_test,./configure/venv/bin/python3 test/scripts/reader_alloc_test.py --extension build/release/duckhts.duckdb_extension --probe)
+
+test-cigar-reserve-alloc:
+	$(call run_reader_alloc_test,./configure/venv/bin/python3 test/scripts/cigar_reserve_test.py --extension build/release/duckhts.duckdb_extension --probe)
 
 test-reader-alloc-r:
 	$(call run_reader_alloc_test,Rscript test/scripts/reader_alloc_test.R)

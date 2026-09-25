@@ -174,8 +174,10 @@ timings include timer resolution and scheduling noise; a zero baseline median
 has no meaningful ratio. These measurements make no scaling or malformed-input
 performance claim.
 
-The declared outputs are `r paste0(params$prefix, "_{baseline,candidate}_{metadata,inputs,results,timings}.csv")`,
-plus `*_mismatches.csv` on an oracle failure. They retain per-repeat elapsed times, minimum/median/maximum times,
+The declared outputs use the prefix above, followed by `_baseline_` or
+`_candidate_` and `metadata`, `inputs`, `results` or `timings` with a `.csv`
+suffix; an oracle failure retains `*_mismatches.csv`. They retain per-repeat
+elapsed times, minimum/median/maximum times,
 complete output counts and both identity-linked fingerprints, input
 denominators, and source/binary metadata. The report is rendered only after
 both runs pass their independent oracle checks.

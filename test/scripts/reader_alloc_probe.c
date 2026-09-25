@@ -26,8 +26,10 @@ static duckdb_state (*saved_reserve)(duckdb_vector, idx_t);
 static duckdb_state (*saved_set_size)(duckdb_vector, idx_t);
 static void *(*saved_get_data)(duckdb_vector);
 static long list_kind, list_attempts, list_fail_at, list_failures, data_after_failure;
+static idx_t list_max_reserve;
 
 static duckdb_state probe_reserve(duckdb_vector vec, idx_t size) {
+    if (size > list_max_reserve) list_max_reserve = size;
     if (list_kind == 1 && ++list_attempts == list_fail_at) {
         list_failures++;
         return DuckDBError;
@@ -124,6 +126,7 @@ int reader_list_arm(long kind, long nth) {
     list_kind = kind;
     list_fail_at = nth;
     list_attempts = list_failures = data_after_failure = 0;
+    list_max_reserve = 0;
     extension_api->duckdb_list_vector_reserve = probe_reserve;
     extension_api->duckdb_list_vector_set_size = probe_set_size;
     extension_api->duckdb_vector_get_data = probe_get_data;
@@ -137,6 +140,7 @@ void reader_list_disarm(void) {
 }
 
 long reader_list_attempts(void) { return list_attempts; }
+idx_t reader_list_max_reserve(void) { return list_max_reserve; }
 long reader_list_failures(void) { return list_failures; }
 long reader_list_data_after_failure(void) { return data_after_failure; }
 
