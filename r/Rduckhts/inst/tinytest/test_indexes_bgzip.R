@@ -121,6 +121,40 @@ test_indexes_bgzip <- function() {
   expect_error(rduckhts_bgunzip(con, broken_bgzf, output_path = created_path))
   expect_false(file.exists(created_path))
 
+  if (identical(Sys.info()[["sysname"]], "Linux")) {
+    referent_path <- file.path(tmp_dir, "symlink_referent.txt")
+    link_path <- file.path(tmp_dir, "symlink_output")
+    writeLines("referent must survive", referent_path)
+
+    expect_true(file.symlink(referent_path, link_path))
+    rduckhts_bgzip(con, bed_path, output_path = link_path, threads = 1,
+                   overwrite = TRUE)
+    expect_equal(Sys.readlink(link_path), "")
+    expect_true(file.info(link_path)$size > 0)
+    expect_equal(readLines(referent_path), "referent must survive")
+    unlink(link_path)
+
+    expect_true(file.symlink(referent_path, link_path))
+    expect_error(rduckhts_bgzip(con, tmp_dir, output_path = link_path,
+                                threads = 1, overwrite = TRUE))
+    expect_false(file.exists(link_path))
+    expect_equal(readLines(referent_path), "referent must survive")
+
+    expect_true(file.symlink(referent_path, link_path))
+    rduckhts_bgunzip(con, bed_gz_path, output_path = link_path,
+                     threads = 1, overwrite = TRUE)
+    expect_equal(Sys.readlink(link_path), "")
+    expect_equal(readLines(link_path), readLines(bed_path))
+    expect_equal(readLines(referent_path), "referent must survive")
+    unlink(link_path)
+
+    expect_true(file.symlink(referent_path, link_path))
+    expect_error(rduckhts_bgunzip(con, broken_bgzf, output_path = link_path,
+                                  threads = 1, overwrite = TRUE))
+    expect_false(file.exists(link_path))
+    expect_equal(readLines(referent_path), "referent must survive")
+  }
+
   fai_auto <- rduckhts_fasta_index(con, auto_fasta_path)
   expect_true(isTRUE(fai_auto$success[1]))
   expect_equal(fai_auto$index_path[1], auto_fasta_index_path)

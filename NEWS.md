@@ -34,7 +34,8 @@
 - Enforce no-overwrite at file creation for bgzip, bgunzip, idxstats, and
   mosdepth output files, including CSI indexes. Failed writes clean up only
   paths opened by that invocation; newly created files retain the process
-  umask's permissions.
+  umask's permissions. On POSIX, `overwrite := TRUE` replaces an existing
+  symlink entry with a new file without writing through to its referent.
 
 - Require DuckDB 1.4.0 or newer for the extension's SQL surface while retaining
   the stable v1.2.0 C API target. Register native functions before dependent SQL

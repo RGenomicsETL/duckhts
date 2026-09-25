@@ -22,6 +22,7 @@
 	duckvep-render-reports \
 	test-simd-kernels bench-simd-kernels \
 	test-sqllogictest-debug test-sqllogictest-release \
+	test-writer-no-clobber-debug test-writer-no-clobber-release \
 	test-sqllogictest-runner \
 	check-benchmark-portability \
 	stage-norm-1000g-dragen-gvcf stage-liftover-references \
@@ -147,8 +148,8 @@ endif
 
 test: test_debug
 test_debug test_release: test-function-catalog
-test_debug: test-cache-paths test-duckvep-kernel test-simd-kernels test-genbank-core test-liftover-property test-liftover-fuzz-debug test-sqllogictest-debug
-test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-genbank-core test-genbank-oracle test-somalier-native test-bam-site-counts test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom test-hts-region-ownership
+test_debug: test-cache-paths test-duckvep-kernel test-simd-kernels test-genbank-core test-liftover-property test-liftover-fuzz-debug test-sqllogictest-debug test-writer-no-clobber-debug
+test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-genbank-core test-genbank-oracle test-somalier-native test-bam-site-counts test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom test-hts-region-ownership test-writer-no-clobber-release
 test_release: test-reference-cache
 ifneq ($(filter linux_%,$(or $(DUCKDB_PLATFORM),$(shell sed -n '1p' configure/platform.txt 2>/dev/null))),)
 test_release: test-reader-alloc test-cigar-reserve-alloc test-extension-init test-named-attribute-columns test-extension-symbols

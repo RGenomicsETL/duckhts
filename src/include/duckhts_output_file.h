@@ -22,11 +22,12 @@ typedef struct {
 
 /* New files use 0666 subject to umask, like fopen("wb") and htslib. */
 static inline int duckhts_output_open(const char *path, int overwrite, duckhts_output_owner_t *owner) {
-    int flags = O_WRONLY | O_CREAT | (overwrite ? O_TRUNC : O_EXCL);
+    int flags = O_WRONLY | O_CREAT | O_EXCL;
     int fd;
     owner->opened = 0;
     owner->identity_valid = 0;
 #ifdef _WIN32
+    if (overwrite) flags = O_WRONLY | O_CREAT | O_TRUNC;
     fd = _open(path, flags | _O_BINARY, _S_IREAD | _S_IWRITE);
     if (fd >= 0) {
         BY_HANDLE_FILE_INFORMATION info;
@@ -38,6 +39,10 @@ static inline int duckhts_output_open(const char *path, int overwrite, duckhts_o
         }
     }
 #else
+    if (overwrite && unlink(path) != 0 && errno != ENOENT) return -1;
+#ifdef O_NOFOLLOW
+    flags |= O_NOFOLLOW;
+#endif
     fd = open(path, flags, 0666);
     if (fd >= 0) {
         struct stat st;
@@ -75,9 +80,10 @@ static inline void duckhts_output_cleanup(const char *path, duckhts_output_owner
     BY_HANDLE_FILE_INFORMATION info;
     HANDLE handle = CreateFileA(path, FILE_READ_ATTRIBUTES,
                                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+                                NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
     if (handle == INVALID_HANDLE_VALUE) return;
     if (GetFileInformationByHandle(handle, &info) &&
+        !(info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) &&
         owner.device == (unsigned long long)info.dwVolumeSerialNumber &&
         owner.inode == (((unsigned long long)info.nFileIndexHigh << 32) | info.nFileIndexLow)) {
         CloseHandle(handle);
@@ -87,8 +93,9 @@ static inline void duckhts_output_cleanup(const char *path, duckhts_output_owner
     CloseHandle(handle);
 #else
     struct stat st;
-    if (stat(path, &st) == 0 && owner.device == (unsigned long long)st.st_dev &&
-        owner.inode == (unsigned long long)st.st_ino) remove(path);
+    if (lstat(path, &st) == 0 && S_ISREG(st.st_mode) &&
+        owner.device == (unsigned long long)st.st_dev &&
+        owner.inode == (unsigned long long)st.st_ino) unlink(path);
 #endif
 }
 

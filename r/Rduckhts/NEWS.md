@@ -23,7 +23,9 @@
 
 - Bundled bgzip, bgunzip, idxstats, and mosdepth outputs (including CSI indexes)
   use exclusive creation when `overwrite = FALSE`; a failed operation does not
-  remove an output that the invocation did not open.
+  remove an output that the invocation did not open. On POSIX,
+  `overwrite = TRUE` replaces a symlink output entry with a new file without
+  writing through to its referent.
 
 - Require duckdb 1.4.0 or newer. The bundled extension registers native
   functions before dependent SQL macros, retains all supported native overloads
