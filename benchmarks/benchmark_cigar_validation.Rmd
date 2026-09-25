@@ -55,7 +55,7 @@ blocks, for both text and packed CIGAR. Candidate calls use the default overload
 and explicit strict `FALSE` and `TRUE`. Every row is retained, including missing
 CIGARs; any oracle or cross-extension output disagreement stops the run or render.
 
-`r if (params$comparison == "reserve") "On the measured host, uptime load averages (1/5/15 minutes) were 1.40/1.77/1.23 before baseline, 2.27/2.01/1.35 before candidate, and 1.47/1.81/1.32 afterward. The 8,192-row synthetic text aligned-block workload remains 0.020 to 0.022 seconds (median, +10%). A separate 300-execution perf record -F 199 -g -e cycles:u sample of that materialized text input and the same hash summary found 5.58% of candidate cycles in libc __memmove_avx_unaligned_erms (5.32% via duckdb::VectorListBuffer::Reserve); baseline __memmove was below 1%. Child-list copies on geometric growth are consistent with the residual synthetic cost; the sample does not isolate each reserve call's latency." else ""`
+`r if (params$comparison == "reserve") "On the measured host, uptime load averages (1/5/15 minutes) were 0.32/0.26/0.24 before baseline, 1.26/0.53/0.34 before candidate, and 1.55/0.82/0.46 afterward. The 8,192-row synthetic text aligned-block workload took 0.020 seconds at baseline and 0.022 seconds for the candidate (medians, +10%). The ONT text aligned-block workload took 0.052 seconds in both builds (medians)." else ""`
 
 The nearest retained baseline is
 [`benchmark_cigar_aligned_blocks.md`](benchmark_cigar_aligned_blocks.md), source
