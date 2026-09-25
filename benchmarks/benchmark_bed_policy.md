@@ -6,20 +6,20 @@ The public DuckBedQC `duckbedqc_118fc21` corpus supplies
 `75b120e20be18497716c81d81648bb919574b34b90cc15abc474e06f09924073`,
 22,802,546 bytes). Stage it with `scripts/stage_duckbedqc_data.sh`. The
 baseline is an independent `origin/develop` worktree at
-`41334c784891caa2df004ff762200094fcdd0aa9` built with
-`make configure && make release -j4`; the candidate is
-`b26c61e2be45871ba51c40cc3769242c17aaae2d` built with
-`make release -j4`. Both revisions are available in this repository. The
-candidate binary has no unresolved `duckdb_` symbols
-(`nm -D -u build/release/duckhts.duckdb_extension`). The query forces a
-full scan with `scan_mode := 'sequential'` and aggregates `count(*)`,
-`sum(start)`, and `sum("end")`. Both numeric sums are checked across
-policies and builds. Each run reads the 22 MB file and returns one
-aggregate row. R/DBI wall time includes query planning and result
-materialization. DuckDB R 1.5.5 loads the extension in a fresh R process
-for each build. The unindexed file is clean under the reader’s short-row
-rule. “default” is the engine’s unmodified thread setting, recorded
-alongside the single-thread runs.
+`f741354dc5012f94f59229e922ed5317c07e04fc` built with
+`make configure && make release -j4`; the candidate source is
+`1d87d9e38155596a1cb751e76cfdcbdf203fa2ef` (`HEAD:src` tree
+`33c6d888a382ad81d34f2a7313a117dd715d472d`) built with
+`make release -j4`. Both revisions and the source tree are available in
+this repository. The candidate passes `make test-extension-symbols`. The
+query forces a full scan with `scan_mode := 'sequential'` and aggregates
+`count(*)`, `sum(start)`, and `sum("end")`. Both numeric sums are
+checked across policies and builds. Each run reads the 22 MB file and
+returns one aggregate row. R/DBI wall time includes query planning and
+result materialization. DuckDB R 1.5.5 loads the extension in a fresh R
+process for each build. The unindexed file is clean under the reader’s
+short-row rule. “default” is the engine’s unmodified thread setting,
+recorded alongside the single-thread runs.
 
 ``` r
 stopifnot(nzchar(Sys.getenv("BED_POLICY_BASE")),
@@ -58,21 +58,21 @@ knitr::kable(summary, caption = "Median wall seconds over eleven independent sca
 
 | revision                                 | build     | threads | effective_threads | policy | input_lines | output_rows | seconds |
 |:-----------------------------------------|:----------|:--------|------------------:|:-------|------------:|------------:|--------:|
-| 41334c784891caa2df004ff762200094fcdd0aa9 | baseline  | 1       |                 1 | error  |      389852 |      389852 |   0.041 |
-| b26c61e2be45871ba51c40cc3769242c17aaae2d | candidate | 1       |                 1 | error  |      389852 |      389852 |   0.041 |
-| 41334c784891caa2df004ff762200094fcdd0aa9 | baseline  | default |                20 | error  |      389852 |      389852 |   0.040 |
-| b26c61e2be45871ba51c40cc3769242c17aaae2d | candidate | default |                20 | error  |      389852 |      389852 |   0.041 |
-| b26c61e2be45871ba51c40cc3769242c17aaae2d | candidate | 1       |                 1 | report |      389852 |      389852 |   0.043 |
-| b26c61e2be45871ba51c40cc3769242c17aaae2d | candidate | default |                20 | report |      389852 |      389852 |   0.043 |
-| b26c61e2be45871ba51c40cc3769242c17aaae2d | candidate | 1       |                 1 | skip   |      389852 |      389852 |   0.043 |
-| b26c61e2be45871ba51c40cc3769242c17aaae2d | candidate | default |                20 | skip   |      389852 |      389852 |   0.043 |
+| f741354dc5012f94f59229e922ed5317c07e04fc | baseline  | 1       |                 1 | error  |      389852 |      389852 |   0.039 |
+| 1d87d9e38155596a1cb751e76cfdcbdf203fa2ef | candidate | 1       |                 1 | error  |      389852 |      389852 |   0.039 |
+| f741354dc5012f94f59229e922ed5317c07e04fc | baseline  | default |                20 | error  |      389852 |      389852 |   0.040 |
+| 1d87d9e38155596a1cb751e76cfdcbdf203fa2ef | candidate | default |                20 | error  |      389852 |      389852 |   0.039 |
+| 1d87d9e38155596a1cb751e76cfdcbdf203fa2ef | candidate | 1       |                 1 | report |      389852 |      389852 |   0.039 |
+| 1d87d9e38155596a1cb751e76cfdcbdf203fa2ef | candidate | default |                20 | report |      389852 |      389852 |   0.040 |
+| 1d87d9e38155596a1cb751e76cfdcbdf203fa2ef | candidate | 1       |                 1 | skip   |      389852 |      389852 |   0.039 |
+| 1d87d9e38155596a1cb751e76cfdcbdf203fa2ef | candidate | default |                20 | skip   |      389852 |      389852 |   0.040 |
 
 Median wall seconds over eleven independent scans per
 policy/thread/build
 
-Default policy, 1 threads: 0.041 s to 0.041 s (+0.0%).
+Default policy, 1 threads: 0.039 s to 0.039 s (+0.0%).
 
-Default policy, default threads: 0.040 s to 0.041 s (+2.5%).
+Default policy, default threads: 0.040 s to 0.039 s (-2.5%).
 
 The alternating comparison runs the exact default-policy aggregate with
 one DuckDB thread in a fresh R process per observation. The baseline and
@@ -111,13 +111,13 @@ knitr::kable(alternating_summary,
 
 | build     |   min | median |
 |:----------|------:|-------:|
-| baseline  | 0.039 |  0.040 |
-| candidate | 0.039 |  0.042 |
+| baseline  | 0.038 |  0.041 |
+| candidate | 0.038 |  0.040 |
 
 Alternating fresh-process scans (15 per build, one thread)
 
-Host load before alternating scans: 21:40:49 up 353 days, 6:34, 21
-users, load average: 0.49, 0.34, 0.36.
+Host load before alternating scans: 00:31:44 up 353 days, 9:25, 21
+users, load average: 0.70, 0.33, 0.29.
 
 The reader’s only fatal data-line check is fewer than three
 tab-delimited fields. Numeric parse failures yield NULL and reversed

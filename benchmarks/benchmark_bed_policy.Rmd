@@ -8,11 +8,12 @@ The public DuckBedQC `duckbedqc_118fc21` corpus supplies
 `75b120e20be18497716c81d81648bb919574b34b90cc15abc474e06f09924073`,
 22,802,546 bytes). Stage it with `scripts/stage_duckbedqc_data.sh`.
 The baseline is an independent `origin/develop` worktree at
-`41334c784891caa2df004ff762200094fcdd0aa9` built with
-`make configure && make release -j4`; the candidate is
-`b26c61e2be45871ba51c40cc3769242c17aaae2d` built with `make release -j4`.
-Both revisions are available in this repository. The candidate binary has no
-unresolved `duckdb_` symbols (`nm -D -u build/release/duckhts.duckdb_extension`).
+`f741354dc5012f94f59229e922ed5317c07e04fc` built with
+`make configure && make release -j4`; the candidate source is
+`1d87d9e38155596a1cb751e76cfdcbdf203fa2ef` (`HEAD:src` tree
+`33c6d888a382ad81d34f2a7313a117dd715d472d`) built with `make release -j4`.
+Both revisions and the source tree are available in this repository. The candidate
+passes `make test-extension-symbols`.
 The query forces a full scan with `scan_mode := 'sequential'` and aggregates
 `count(*)`, `sum(start)`, and `sum("end")`. Both numeric sums are checked across
 policies and builds. Each run reads the 22 MB file and returns one aggregate
