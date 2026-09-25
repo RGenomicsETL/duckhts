@@ -156,6 +156,28 @@ knitr::kable(result[, c("workload", "build", "threads", "effective_threads",
              digits = 3, caption = "Five-run median wall time (seconds); output fingerprints and hash sums match across builds.")
 ```
 
+## Narrow GFF profile
+
+Two additional five-run passes at affinity 0–3 measured `gff_plain` at
+0.711/0.772 s and 0.573/0.643 s (develop/branch) with one thread; the second
+pass also measured 0.522/0.538 s with default threads. The narrow projection
+is slower in both one-thread passes. A separate paired `perf stat`/`perf record`
+run pinned to CPU 0 used the same query and input, with one warm-up and 12
+repeated scans per build. Develop used 7.705 s CPU task-clock and 92.99 billion
+core instructions; the branch used 7.471 s and 89.47 billion. Sampled core
+cycles were about 59% in zlib in each build. The branch spent 3.5% in libc
+`strcspn` (not present in the develop profile); sampled reader share was
+17.3% versus 14.3% and libc share was 11.8% versus 15.3%. Develop's narrow reader
+uses an inline byte scan per projected field; the branch pays for five
+`strcspn` calls and field-span storage, with little redundant scanning to
+eliminate. Total core cycles were 33.02 billion and 33.55 billion,
+respectively. The binaries were stripped, so samples inside the reader cannot
+be assigned to individual C lines. CPU-0 task-clock does not reproduce the
+0–3 wall-time regression, and the first pass had competing jobs on the
+pinned CPUs. The remaining difference cannot be apportioned between parser
+cost, scheduling and frequency variation; no narrow-projection speedup is
+claimed.
+
 The raw input checksum, byte count and derivation are pinned in the registry
 and validated before measurement. `input_rows` is the count returned by each
 scan; `result_rows` counts aggregate rows materialized by the query. Times
