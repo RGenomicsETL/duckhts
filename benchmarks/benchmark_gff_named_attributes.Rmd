@@ -11,6 +11,8 @@ aggregates of the stated columns, not `count(*)` shortcuts. Five measured runs
 follow one warm-up per workload and thread setting. Times include gzip decode,
 row scan, aggregation and R/DBI query execution. Default threads are the
 runtime's own default; the GFF reader uses one worker in either setting.
+The host is a 13th Gen Intel Core i5-13500 (20 logical CPUs); `uptime` before
+the run reported load averages of 1.51, 1.09, and 0.79.
 
 ```{r setup, include=FALSE}
 knitr::opts_knit$set(root.dir = normalizePath(".."))
@@ -52,6 +54,7 @@ queries <- c(
   named_one_projected = paste0("SELECT count(*) n, sum(length(coalesce(Parent, ''))) metric FROM ", named)
 )
 rows <- list()
+measured_runs <- list()
 for (threads in c(1L, default_threads)) {
   DBI::dbExecute(con, paste0("SET threads = ", threads))
   for (kind in names(queries)) {
@@ -65,8 +68,14 @@ for (threads in c(1L, default_threads)) {
       elapsed[[run]] <- proc.time()[["elapsed"]] - start
     }
     stopifnot(identical(as.numeric(result$n[[1L]]), 1299172))
+    thread_label <- if (threads == 1L) "1" else paste0("default (", threads, ")")
+    measured_runs[[length(measured_runs) + 1L]] <- data.frame(
+      threads = thread_label, workload = kind, run = seq_along(elapsed),
+      seconds = elapsed, input_rows = result$n[[1L]], output_rows = 1L,
+      metric = as.character(result$metric[[1L]])
+    )
     rows[[length(rows) + 1L]] <- data.frame(
-      threads = if (threads == 1L) "1" else paste0("default (", threads, ")"),
+      threads = thread_label,
       workload = kind, input_rows = result$n[[1L]],
       output_rows = 1L, metric = as.character(result$metric[[1L]]),
       median_seconds = median(elapsed), runs = length(elapsed)
@@ -74,10 +83,18 @@ for (threads in c(1L, default_threads)) {
   }
 }
 results <- do.call(rbind, rows)
+previous <- c(0.540, 0.542, 0.690, 2.326, 2.371, 0.900, 0.788,
+              0.542, 0.543, 0.691, 2.327, 2.376, 0.905, 0.784)
+stopifnot(identical(results$workload, rep(names(queries), 2L)))
+results$previous_median_seconds <- previous
+write.csv(do.call(rbind, measured_runs),
+          "benchmarks/benchmark_gff_named_attributes_runs.csv", row.names = FALSE)
 DBI::dbDisconnect(con, shutdown = TRUE)
 ```
 
 Source revision: `r revision`. DuckDB runtime: `r as.character(packageVersion("duckdb"))`.
+Previous medians: source revision c4728030d2770b591f0875206aac0af9be9d2c26;
+extension SHA-256 1d868ba87527209147d86dfdbf796f00ee29ecd0cbc5d81951e8ee21a8331421.
 Extension SHA-256: `r strsplit(system2("sha256sum", extension, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`.
 Input SHA-256: `r strsplit(system2("sha256sum", input, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`.
 
@@ -87,7 +104,8 @@ knitr::kable(results, digits = 3)
 
 The one-key projection requests three keys at bind but scans only `Parent`.
 `named_none_projected` requests three keys at bind but reads only the physical
-coordinate columns; its scan skips attribute parsing entirely. Comparisons across workloads reflect different aggregation and expression costs,
-not isolated parsing cycles. The local duckdb-wasm browser test could not load
-this extension: `duckdb_get_list_size` has an incompatible wasm import type
-with the staged browser runtime. Browser wasm timings are unavailable.
+coordinate columns; its scan skips attribute parsing entirely. Comparisons across
+workloads reflect different aggregation and expression costs, not isolated
+parsing cycles. `make wasm-playwright-test` built the extension from this
+checkout for duckdb-wasm 1.31.0; all six Chromium tests passed, including
+`test/wasm/gff-attributes.spec.ts`. Browser wasm timings were not measured.
