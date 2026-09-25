@@ -6,6 +6,9 @@
   attribute outputs include the attributes field, and strict GFF3 checks count
   the entire line. Values, NULLs and strict diagnostics retain their existing
   contracts.
+- Stage the tabix-split BED benchmark artifact through a checksum-validated
+  temporary file, rebuilding corrupt cached outputs; test its offline derivation
+  and cache reuse with synthetic GFF3/GTF inputs.
 
 # duckhts 1.5.2.9001
 

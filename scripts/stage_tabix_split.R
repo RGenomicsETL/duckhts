@@ -1,9 +1,11 @@
 #!/usr/bin/env Rscript
 
 # Stage the GENCODE mouse vM25 inputs and a deterministic BED-like 16-column sample.
-Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath(
-  "r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE
-))
+if (!nzchar(Sys.getenv("DUCKHTSBENCH_REGISTRY", unset = ""))) {
+  Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath(
+    "r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE
+  ))
+}
 ids <- c("tabix_split_gff3", "tabix_split_gtf")
 offline <- identical(commandArgs(trailingOnly = TRUE), "--offline")
 for (id in ids) {
@@ -17,9 +19,22 @@ for (id in ids) {
   }
 }
 
-input <- duckhtsbench::duckhts_bench_artifact_path(ids[[1L]])
-output <- duckhtsbench::duckhts_bench_artifact_path("tabix_split_bed")
-if (!file.exists(output)) {
+stage_tabix_bed <- function(input, output) {
+  id <- "tabix_split_bed"
+  if (file.exists(output)) {
+    valid <- tryCatch({
+      duckhtsbench::duckhts_bench_validate_identity(id, output)
+      TRUE
+    }, error = function(error) FALSE)
+    if (valid) {
+      duckhtsbench::duckhts_bench_write_provenance(id, output)
+      return(invisible(output))
+    }
+    if (unlink(c(output, paste0(output, ".provenance.tsv")), force = TRUE) != 0L) {
+      stop("could not remove invalid tabix split artifact: ", output)
+    }
+  }
+
   con <- gzfile(input, "rt")
   lines <- readLines(con, n = 120000L)
   close(con)
@@ -35,8 +50,17 @@ if (!file.exists(output)) {
     row[[8L]], row[[9L]]
   ), collapse = "\t"), character(1))
   dir.create(dirname(output), recursive = TRUE, showWarnings = FALSE)
-  writeLines(bed, output, useBytes = TRUE)
+  temporary <- tempfile(pattern = paste0(basename(output), ".partial-"), tmpdir = dirname(output))
+  on.exit(unlink(temporary, force = TRUE), add = TRUE)
+  writeLines(bed, temporary, useBytes = TRUE)
+  duckhtsbench::duckhts_bench_validate_identity(id, temporary)
+  if (!file.rename(temporary, output)) stop("could not publish tabix split artifact: ", output)
+  duckhtsbench::duckhts_bench_write_provenance(id, output)
+  invisible(output)
 }
-duckhtsbench::duckhts_bench_validate_identity("tabix_split_bed", output)
-duckhtsbench::duckhts_bench_write_provenance("tabix_split_bed", output)
+
+stage_tabix_bed(
+  duckhtsbench::duckhts_bench_artifact_path(ids[[1L]]),
+  duckhtsbench::duckhts_bench_artifact_path("tabix_split_bed")
+)
 cat("Staged", length(ids) + 1L, "tabix split inputs\n")
