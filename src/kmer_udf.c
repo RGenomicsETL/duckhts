@@ -1255,7 +1255,9 @@ static void cigar_aligned_blocks_scalar(duckdb_function_info info, duckdb_data_c
     idx_t row_count = duckdb_data_chunk_get_size(input);
     cigar_block_sink_t sink;
 
-    if (!cigar_block_sink_open(info, output, 0, &sink)) {
+    /* One slot per input row avoids repeated small reallocations; the reserve
+       is bounded by chunk cardinality, not by CIGAR byte length. */
+    if (!cigar_block_sink_open(info, output, row_count, &sink)) {
         return;
     }
 
