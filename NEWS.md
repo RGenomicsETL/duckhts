@@ -37,6 +37,13 @@
 
 # duckhts 1.5.2.9001
 
+- Add an npm `dev` channel with sha256-pinned unsigned wasm builds from a named
+  GitHub Actions run. The npm loader requires an explicit DuckDB unsigned-extension
+  setting on this channel and exposes `SIGNED` and blob-capable `localFileUrl`;
+  `latest` retains signed community binaries and rejects local object URLs.
+  Packaging checks the selected channel and maps development versions to npm
+  numeric prereleases.
+
 - Require DuckDB 1.4.0 or newer for the extension's SQL surface while retaining
   the stable v1.2.0 C API target. Register native functions before dependent SQL
   macros so DuckDB 1.4 can load the extension, register complete native overload

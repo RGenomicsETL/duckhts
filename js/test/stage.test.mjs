@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -9,11 +9,10 @@ import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-// Runs scripts/stage.mjs against a local server, so the checksum contract is
-// tested without touching the community repository.
-
 const stageScript = fileURLToPath(new URL("../scripts/stage.mjs", import.meta.url));
 const run = promisify(execFile);
+const platforms = ["wasm_mvp", "wasm_eh", "wasm_threads"];
+const fileName = "duckhts.duckdb_extension.wasm";
 const payload = Buffer.from("\0asm stand-in for a staged extension");
 const payloadSha256 = createHash("sha256").update(payload).digest("hex");
 
@@ -23,7 +22,7 @@ let workDir;
 
 before(async () => {
   server = createServer((request, response) => {
-    if (request.url === "/wasm_eh/duckhts.duckdb_extension.wasm") {
+    if (platforms.some((platform) => request.url === `/${platform}/${fileName}`)) {
       response.writeHead(200).end(payload);
     } else {
       response.writeHead(404).end();
@@ -39,33 +38,65 @@ after(async () => {
   await rm(workDir, { recursive: true, force: true });
 });
 
-async function stage(name, sha256) {
-  const manifest = path.join(workDir, `${name}.json`);
+async function stage(channel, name, badPlatform, options = {}) {
+  const manifestPath = path.join(workDir, `${name}.json`);
   const output = path.join(workDir, name);
-  await writeFile(manifest, JSON.stringify({ source, platforms: { wasm_eh: sha256 } }));
-  const result = await run(process.execPath, [stageScript, manifest, output]).catch((error) => error);
-  return { result, target: path.join(output, "wasm_eh", "duckhts.duckdb_extension.wasm") };
+  const directory = path.join(workDir, `${name}-downloads`);
+  const dev = channel === "dev";
+  const pins = Object.fromEntries(platforms.map((platform) => [platform, dev ? {
+    artifact: `extension-${platform}`,
+    sha256: platform === badPlatform ? "0".repeat(64) : payloadSha256,
+  } : platform === badPlatform ? "0".repeat(64) : payloadSha256]));
+  const manifest = {
+    signed: !dev,
+    source: dev ? { repository: "RGenomicsETL/duckhts", run: 1 } : source,
+    platforms: pins,
+  };
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  if (dev) {
+    for (const { artifact } of Object.values(pins)) {
+      await mkdir(path.join(directory, artifact), { recursive: true });
+      if (!options.missing) await writeFile(path.join(directory, artifact, fileName), payload);
+    }
+  }
+  const args = [stageScript, channel, manifestPath, output, ...(dev ? [directory] : [])];
+  const result = await run(process.execPath, args, {
+    env: { ...process.env, DUCKHTS_NPM_CHANNEL: channel },
+  }).catch((error) => error);
+  return { result, output };
 }
 
-test("stage writes a download whose sha256 matches the manifest", async () => {
-  const { result, target } = await stage("match", payloadSha256);
-  assert.equal(result.code, undefined, result.stderr);
-  assert.deepEqual(await readFile(target), payload);
+for (const channel of ["signed", "dev"]) {
+  test(`${channel}: stages each pinned binary byte for byte`, async () => {
+    const { result, output } = await stage(channel, `${channel}-match`);
+    assert.equal(result.code, undefined, result.stderr);
+    for (const platform of platforms) {
+      assert.deepEqual(await readFile(path.join(output, platform, fileName)), payload);
+    }
+  });
+
+  test(`${channel}: rejects a checksum mismatch without writing any binary`, async () => {
+    const { result, output } = await stage(channel, `${channel}-mismatch`, "wasm_threads");
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /sha256 [0-9a-f]{64}, expected 0{64}/);
+    for (const platform of platforms) {
+      await assert.rejects(stat(path.join(output, platform, fileName)), { code: "ENOENT" });
+    }
+  });
+}
+
+test("dev: rejects a missing artifact without fetching another channel", async () => {
+  const { result } = await stage("dev", "dev-missing", null, { missing: true });
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /ENOENT/);
 });
 
-test("stage rejects a checksum mismatch and writes nothing", async () => {
-  const { result, target } = await stage("mismatch", "0".repeat(64));
+test("stage rejects a manifest from the other channel", async () => {
+  const manifestPath = path.join(workDir, "wrong-channel.json");
+  await writeFile(manifestPath, JSON.stringify({ signed: false, platforms: {} }));
+  const result = await run(process.execPath, [stageScript, "signed", manifestPath, path.join(workDir, "wrong")], {
+    env: { ...process.env, DUCKHTS_NPM_CHANNEL: "signed" },
+  }).catch((error) => error);
   assert.equal(result.code, 1);
-  assert.match(result.stderr, /sha256 [0-9a-f]{64}, expected 0{64}/);
-  await assert.rejects(stat(target), { code: "ENOENT" });
-});
-
-test("stage rejects a missing artifact", async () => {
-  const manifest = path.join(workDir, "missing.json");
-  await writeFile(manifest, JSON.stringify({ source, platforms: { wasm_mvp: payloadSha256 } }));
-  const result = await run(process.execPath, [stageScript, manifest, path.join(workDir, "missing")]).catch(
-    (error) => error,
-  );
-  assert.equal(result.code, 1);
-  assert.match(result.stderr, /HTTP 404/);
+  assert.match(result.stderr, /signed status disagrees/);
 });
