@@ -94,12 +94,22 @@ typedef struct {
     int index_row_count_valid;
 } bed_bind_data_t;
 
-typedef struct {
+typedef struct bed_init_data bed_init_data_t;
+typedef void (*bed_scan_rows_fn)(duckdb_function_info, duckdb_data_chunk,
+                                 bed_init_data_t *, duckdb_vector *, idx_t);
+
+static void read_bed_rows_error(duckdb_function_info info, duckdb_data_chunk output,
+                                bed_init_data_t *init, duckdb_vector *vectors, idx_t col_count);
+static void read_bed_rows_tolerant(duckdb_function_info info, duckdb_data_chunk output,
+                                   bed_init_data_t *init, duckdb_vector *vectors, idx_t col_count);
+
+typedef struct bed_init_data {
     htsFile *fp;
     tbx_t *tbx;
     hts_itr_t *itr;
     kstring_t line;
     bed_error_policy_t error_policy;
+    bed_scan_rows_fn scan_rows;
     bool finished;
     int64_t line_number;
     idx_t *column_ids;
@@ -435,6 +445,8 @@ static void read_bed_init(duckdb_init_info info) {
     bed_init_data_t *init = (bed_init_data_t *)duckdb_malloc(sizeof(bed_init_data_t));
     memset(init, 0, sizeof(*init));
     init->error_policy = bind->error_policy;
+    init->scan_rows = bind->error_policy == BED_ERROR_POLICY_ERROR
+        ? read_bed_rows_error : read_bed_rows_tolerant;
 
     init->n_projected_cols = duckdb_init_get_column_count(info);
     if (init->n_projected_cols > 0) {
@@ -567,8 +579,10 @@ static void read_bed_rows_error(duckdb_function_info info, duckdb_data_chunk out
     duckdb_data_chunk_set_size(output, row_count);
 }
 
-static void read_bed_rows_tolerant(duckdb_data_chunk output, bed_init_data_t *init,
-                                   duckdb_vector *vectors, idx_t col_count, bool report) {
+static void read_bed_rows_tolerant(duckdb_function_info info, duckdb_data_chunk output,
+                                   bed_init_data_t *init, duckdb_vector *vectors, idx_t col_count) {
+    (void)info;
+    const bool report = init->error_policy == BED_ERROR_POLICY_REPORT;
     idx_t row_count = 0;
     while (row_count < INTERVAL_BATCH_SIZE && next_bed_line(init, report)) {
         if (count_tab_fields(init->line.s) < 3) {
@@ -631,12 +645,7 @@ static void read_bed_scan(duckdb_function_info info, duckdb_data_chunk output) {
         vectors[c] = duckdb_data_chunk_get_vector(output, c);
     }
 
-    if (init->error_policy == BED_ERROR_POLICY_ERROR) {
-        read_bed_rows_error(info, output, init, vectors, col_count);
-    } else {
-        read_bed_rows_tolerant(output, init, vectors, col_count,
-                               init->error_policy == BED_ERROR_POLICY_REPORT);
-    }
+    init->scan_rows(info, output, init, vectors, col_count);
 }
 
 static void destroy_fasta_nuc_bind(void *data) {
