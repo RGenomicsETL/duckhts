@@ -6,6 +6,7 @@ output:
     pandoc_args: ["--wrap=preserve", "--columns=400"]
 params:
   prefix: "data/cigar_validation"
+  comparison: "decoder"
 ---
 
 ```{r setup, include=FALSE}
@@ -48,8 +49,7 @@ for (mode in c("default", "false", "true")) {
 }
 ```
 
-This focused comparison measures the old CIGAR implementation and the shared
-checked decoder in separate R processes on the same host and inputs. It measures
+`r if (params$comparison == "reserve") "This focused comparison measures the aligned-block reservation change against origin/develop in separate R processes on the same host and inputs." else "This focused comparison measures the old CIGAR implementation and the shared checked decoder in separate R processes on the same host and inputs."` It measures
 all seven metric helpers individually, `has_op('M')`, `has_op('P')`, and aligned
 blocks, for both text and packed CIGAR. Candidate calls use the default overload
 and explicit strict `FALSE` and `TRUE`. Every row is retained, including missing
@@ -74,6 +74,8 @@ revision and `HEAD:src` IDs for each build, and `uncommitted` if the extension
 was built from modified sources. Those IDs describe the base revision when the
 source is uncommitted; the loaded binary's SHA256 identifies the measured binary.
 The driver records caller-supplied source metadata without certifying the build.
+The CSV prefix for this rendering is `r paste0("benchmarks/", params$prefix)`;
+use it in place of `benchmarks/data/cigar_validation` below.
 
 ```sh
 # Set these to the local build paths and full Git object IDs for the measured builds.
@@ -172,9 +174,8 @@ timings include timer resolution and scheduling noise; a zero baseline median
 has no meaningful ratio. These measurements make no scaling or malformed-input
 performance claim.
 
-The declared outputs are `data/cigar_validation_{baseline,candidate}_{metadata,inputs,results,timings}.csv`
-(or the `cigar_validation_smoke` prefix), plus `*_mismatches.csv` on an oracle
-failure. They retain per-repeat elapsed times, minimum/median/maximum times,
+The declared outputs are `r paste0(params$prefix, "_{baseline,candidate}_{metadata,inputs,results,timings}.csv")`,
+plus `*_mismatches.csv` on an oracle failure. They retain per-repeat elapsed times, minimum/median/maximum times,
 complete output counts and both identity-linked fingerprints, input
 denominators, and source/binary metadata. The report is rendered only after
 both runs pass their independent oracle checks.
