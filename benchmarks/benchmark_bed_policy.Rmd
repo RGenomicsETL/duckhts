@@ -60,6 +60,41 @@ for (thread_setting in c("1", "default")) {
 }
 ```
 
+The alternating comparison runs the exact default-policy aggregate with
+one DuckDB thread in a fresh R process per observation. The baseline and
+candidate alternate fifteen times each; process startup is outside the
+reported query wall time.
+
+```{r alternating}
+load_at_start <- system("uptime", intern = TRUE)
+run_single <- function(extension, label, run) {
+  lines <- system2("Rscript", c("benchmarks/bed_policy_single.R",
+                                  extension, label, run), stdout = TRUE)
+  if (!is.null(attr(lines, "status")) && attr(lines, "status") != 0L) {
+    stop("alternating scan failed: ", label, " run ", run)
+  }
+  read.delim(text = paste(lines, collapse = "\n"), check.names = FALSE)
+}
+alternating <- do.call(rbind, lapply(seq_len(15L), function(run) {
+  rbind(run_single(Sys.getenv("BED_POLICY_BASE"), "baseline", run),
+        run_single(Sys.getenv("BED_POLICY_BRANCH"), "candidate", run))
+}))
+stopifnot(nrow(alternating) == 30L,
+          length(unique(alternating$result)) == 1L,
+          all(table(alternating$build) == 15L))
+alternating_summary <- aggregate(seconds ~ build, alternating,
+                                 function(x) c(min = min(x), median = median(x)))
+alternating_summary <- data.frame(
+  build = alternating_summary$build,
+  min = round(alternating_summary$seconds[, "min"], 4),
+  median = round(alternating_summary$seconds[, "median"], 4)
+)
+knitr::kable(alternating_summary,
+             caption = "Alternating fresh-process scans (15 per build, one thread)")
+```
+
+Host load before alternating scans: `r load_at_start`.
+
 The reader's only fatal data-line check is fewer than three tab-delimited
 fields. Numeric parse failures yield NULL and reversed intervals are not
 rejected. This workload does not measure malformed-row reporting or remote I/O.

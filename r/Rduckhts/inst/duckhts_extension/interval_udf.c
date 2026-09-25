@@ -480,7 +480,7 @@ static void read_bed_init(duckdb_init_info info) {
     duckdb_init_set_init_data(info, init, destroy_bed_init);
 }
 
-static int next_bed_line(bed_init_data_t *init) {
+static inline int next_bed_line(bed_init_data_t *init, bool report) {
     while (!init->finished) {
         int ret = init->itr ? tbx_itr_next(init->fp, init->tbx, init->itr, &init->line)
                             : hts_getline(init->fp, '\n', &init->line);
@@ -488,11 +488,122 @@ static int next_bed_line(bed_init_data_t *init) {
             init->finished = true;
             return 0;
         }
-        if (init->error_policy == BED_ERROR_POLICY_REPORT) init->line_number++;
+        if (report) init->line_number++;
         if (init->line.l == 0 || is_meta_bed_line(init->line.s)) continue;
         return 1;
     }
     return 0;
+}
+
+static inline void bed_write_field(bed_init_data_t *init, duckdb_vector vector,
+                                   idx_t row, int logical_col) {
+    int len = 0;
+    const char *field = NULL;
+    int64_t ival = 0;
+    switch (logical_col) {
+        case BED_COL_CHROM:
+        case BED_COL_NAME:
+        case BED_COL_SCORE:
+        case BED_COL_STRAND:
+        case BED_COL_ITEM_RGB:
+        case BED_COL_BLOCK_SIZES:
+        case BED_COL_BLOCK_STARTS:
+            field = get_field_span(init->line.s, logical_col, &len);
+            if (!field || len == 0) {
+                set_null(vector, row);
+            } else {
+                duckdb_vector_assign_string_element_len(vector, row, field, len);
+            }
+            break;
+        case BED_COL_START:
+        case BED_COL_END:
+        case BED_COL_THICK_START:
+        case BED_COL_THICK_END:
+        case BED_COL_BLOCK_COUNT:
+            field = get_field_span(
+                init->line.s,
+                logical_col == BED_COL_START ? 1 :
+                logical_col == BED_COL_END ? 2 :
+                logical_col == BED_COL_THICK_START ? 6 :
+                logical_col == BED_COL_THICK_END ? 7 : 9,
+                &len
+            );
+            if (!field || len == 0 || !parse_int64_span_local(field, len, &ival)) {
+                set_null(vector, row);
+            } else {
+                int64_t *data = (int64_t *)duckdb_vector_get_data(vector);
+                data[row] = ival;
+            }
+            break;
+        case BED_COL_EXTRA:
+            field = get_extra_span(init->line.s, 12, &len);
+            if (!field || len == 0) {
+                set_null(vector, row);
+            } else {
+                duckdb_vector_assign_string_element_len(vector, row, field, len);
+            }
+            break;
+        default:
+            set_null(vector, row);
+            break;
+    }
+}
+
+static void read_bed_rows_error(duckdb_function_info info, duckdb_data_chunk output,
+                                bed_init_data_t *init, duckdb_vector *vectors, idx_t col_count) {
+    idx_t row_count = 0;
+    while (row_count < INTERVAL_BATCH_SIZE && next_bed_line(init, false)) {
+        if (count_tab_fields(init->line.s) < 3) {
+            duckdb_function_set_error(info, bed_short_line_error);
+            init->finished = true;
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
+        for (idx_t c = 0; c < col_count; c++) {
+            bed_write_field(init, vectors[c], row_count, (int)init->column_ids[c]);
+        }
+        row_count++;
+    }
+    duckdb_data_chunk_set_size(output, row_count);
+}
+
+static void read_bed_rows_tolerant(duckdb_data_chunk output, bed_init_data_t *init,
+                                   duckdb_vector *vectors, idx_t col_count, bool report) {
+    idx_t row_count = 0;
+    while (row_count < INTERVAL_BATCH_SIZE && next_bed_line(init, report)) {
+        if (count_tab_fields(init->line.s) < 3) {
+            if (!report) continue;
+            for (idx_t c = 0; c < col_count; c++) {
+                int logical_col = (int)init->column_ids[c];
+                if (logical_col == BED_COL_ERROR) {
+                    duckdb_vector_assign_string_element(vectors[c], row_count, bed_short_line_error);
+                } else if (logical_col == BED_COL_LINE_NUMBER) {
+                    ((int64_t *)duckdb_vector_get_data(vectors[c]))[row_count] = init->line_number;
+                } else if (logical_col == BED_COL_RAW_LINE) {
+                    duckdb_vector_assign_string_element_len(vectors[c], row_count,
+                                                             init->line.s, init->line.l);
+                } else {
+                    set_null(vectors[c], row_count);
+                }
+            }
+            row_count++;
+            continue;
+        }
+        for (idx_t c = 0; c < col_count; c++) {
+            int logical_col = (int)init->column_ids[c];
+            if (report && logical_col >= BED_COL_COUNT) {
+                if (logical_col == BED_COL_LINE_NUMBER) {
+                    ((int64_t *)duckdb_vector_get_data(vectors[c]))[row_count] = init->line_number;
+                } else {
+                    set_null(vectors[c], row_count);
+                }
+            } else {
+                bed_write_field(init, vectors[c], row_count, logical_col);
+            }
+        }
+        row_count++;
+    }
+    duckdb_data_chunk_set_size(output, row_count);
 }
 
 static void read_bed_scan(duckdb_function_info info, duckdb_data_chunk output) {
@@ -514,106 +625,18 @@ static void read_bed_scan(duckdb_function_info info, duckdb_data_chunk output) {
         return;
     }
 
-    idx_t row_count = 0;
     idx_t col_count = duckdb_data_chunk_get_column_count(output);
     duckdb_vector vectors[BED_REPORT_COL_COUNT];
     for (idx_t c = 0; c < col_count; c++) {
         vectors[c] = duckdb_data_chunk_get_vector(output, c);
     }
 
-    while (row_count < INTERVAL_BATCH_SIZE && next_bed_line(init)) {
-        int n_fields = count_tab_fields(init->line.s);
-        if (n_fields < 3) {
-            if (init->error_policy == BED_ERROR_POLICY_ERROR) {
-                duckdb_function_set_error(info, bed_short_line_error);
-                init->finished = true;
-                duckdb_data_chunk_set_size(output, 0);
-                return;
-            }
-            if (init->error_policy == BED_ERROR_POLICY_SKIP) continue;
-            for (idx_t c = 0; c < col_count; c++) {
-                int logical_col = (int)init->column_ids[c];
-                if (logical_col == BED_COL_ERROR) {
-                    duckdb_vector_assign_string_element(vectors[c], row_count, bed_short_line_error);
-                } else if (logical_col == BED_COL_LINE_NUMBER) {
-                    ((int64_t *)duckdb_vector_get_data(vectors[c]))[row_count] = init->line_number;
-                } else if (logical_col == BED_COL_RAW_LINE) {
-                    duckdb_vector_assign_string_element_len(vectors[c], row_count,
-                                                             init->line.s, init->line.l);
-                } else {
-                    set_null(vectors[c], row_count);
-                }
-            }
-            row_count++;
-            continue;
-        }
-
-        for (idx_t c = 0; c < col_count; c++) {
-            int logical_col = (int)init->column_ids[c];
-            int len = 0;
-            const char *field = NULL;
-            int64_t ival = 0;
-            switch (logical_col) {
-                case BED_COL_ERROR:
-                case BED_COL_RAW_LINE:
-                    set_null(vectors[c], row_count);
-                    break;
-                case BED_COL_LINE_NUMBER:
-                    ((int64_t *)duckdb_vector_get_data(vectors[c]))[row_count] = init->line_number;
-                    break;
-                case BED_COL_CHROM:
-                case BED_COL_NAME:
-                case BED_COL_SCORE:
-                case BED_COL_STRAND:
-                case BED_COL_ITEM_RGB:
-                case BED_COL_BLOCK_SIZES:
-                case BED_COL_BLOCK_STARTS:
-                    field = get_field_span(init->line.s, logical_col, &len);
-                    if (!field || len == 0) {
-                        set_null(vectors[c], row_count);
-                    } else {
-                        duckdb_vector_assign_string_element_len(vectors[c], row_count, field, len);
-                    }
-                    break;
-                case BED_COL_START:
-                case BED_COL_END:
-                case BED_COL_THICK_START:
-                case BED_COL_THICK_END:
-                case BED_COL_BLOCK_COUNT:
-                    field = get_field_span(
-                        init->line.s,
-                        logical_col == BED_COL_START ? 1 :
-                        logical_col == BED_COL_END ? 2 :
-                        logical_col == BED_COL_THICK_START ? 6 :
-                        logical_col == BED_COL_THICK_END ? 7 : 9,
-                        &len
-                    );
-                    if (!field || len == 0) {
-                        set_null(vectors[c], row_count);
-                    } else if (!parse_int64_span_local(field, len, &ival)) {
-                        set_null(vectors[c], row_count);
-                    } else {
-                        int64_t *data = (int64_t *)duckdb_vector_get_data(vectors[c]);
-                        data[row_count] = ival;
-                    }
-                    break;
-                case BED_COL_EXTRA:
-                    field = get_extra_span(init->line.s, 12, &len);
-                    if (!field || len == 0) {
-                        set_null(vectors[c], row_count);
-                    } else {
-                        duckdb_vector_assign_string_element_len(vectors[c], row_count, field, len);
-                    }
-                    break;
-                default:
-                    set_null(vectors[c], row_count);
-                    break;
-            }
-        }
-        row_count++;
+    if (init->error_policy == BED_ERROR_POLICY_ERROR) {
+        read_bed_rows_error(info, output, init, vectors, col_count);
+    } else {
+        read_bed_rows_tolerant(output, init, vectors, col_count,
+                               init->error_policy == BED_ERROR_POLICY_REPORT);
     }
-
-    duckdb_data_chunk_set_size(output, row_count);
 }
 
 static void destroy_fasta_nuc_bind(void *data) {
