@@ -8,6 +8,7 @@ on:
   pull_request:
     paths:
       - "js/**"
+      - "description.yml"
       - "test/data/fixture_mixed_regions.bed"
       - "test/data/gff_attrs.gff3"
       - ".github/workflows/npm-package.yml"

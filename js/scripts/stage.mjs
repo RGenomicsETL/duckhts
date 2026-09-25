@@ -77,8 +77,12 @@ try {
     directory = await mkdtemp(path.join(tmpdir(), "duckhts-npm-dev-"));
     temporary = true;
     const artifacts = [...new Set(pending.map(({ pin }) => pin.artifact))];
-    execFileSync("gh", ["run", "download", String(manifest.source.run), "-R", manifest.source.repository,
-      ...artifacts.flatMap((artifact) => ["-n", artifact]), "-D", directory], { stdio: "inherit" });
+    for (const artifact of artifacts) {
+      const destination = path.join(directory, artifact);
+      await mkdir(destination, { recursive: true });
+      execFileSync("gh", ["run", "download", String(manifest.source.run), "-R", manifest.source.repository,
+        "-n", artifact, "-D", destination], { stdio: "inherit" });
+    }
   }
 
   const verified = [];

@@ -37,6 +37,10 @@
 
 # duckhts 1.5.2.9001
 
+- Stage unsigned npm binaries from GitHub Actions one artifact at a time so
+  cached platforms can be reused when a single platform needs downloading.
+  Run npm package checks on pull requests that change `description.yml`.
+
 - Add an npm `dev` channel with sha256-pinned unsigned wasm builds from a named
   GitHub Actions run. The npm loader requires an explicit DuckDB unsigned-extension
   setting on this channel and exposes `SIGNED` and blob-capable `localFileUrl`;

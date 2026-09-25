@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -53,21 +53,26 @@ async function stage(channel, name, badPlatform, options = {}) {
     platforms: pins,
   };
   await writeFile(manifestPath, JSON.stringify(manifest));
-  if (dev) {
+  if (dev && !options.gh) {
     for (const { artifact } of Object.values(pins)) {
       await mkdir(path.join(directory, artifact), { recursive: true });
       if (!options.missing) await writeFile(path.join(directory, artifact, fileName), payload);
     }
   }
-  const args = [stageScript, channel, manifestPath, output, ...(dev ? [directory] : [])];
+  for (const platform of options.cached ?? []) {
+    const target = path.join(output, platform, fileName);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, platform === options.stale ? Buffer.from("stale") : payload);
+  }
+  const args = [stageScript, channel, manifestPath, output, ...(dev && !options.gh ? [directory] : [])];
   const result = await run(process.execPath, args, {
-    env: { ...process.env, DUCKHTS_NPM_CHANNEL: channel },
+    env: { ...process.env, DUCKHTS_NPM_CHANNEL: channel, ...options.env },
   }).catch((error) => error);
   return { result, output };
 }
 
 for (const channel of ["signed", "dev"]) {
-  test(`${channel}: stages each pinned binary byte for byte`, async () => {
+  test(`${channel}: stages each pinned binary byte for byte${channel === "dev" ? " from an offline multi-artifact directory" : ""}`, async () => {
     const { result, output } = await stage(channel, `${channel}-match`);
     assert.equal(result.code, undefined, result.stderr);
     for (const platform of platforms) {
@@ -84,6 +89,53 @@ for (const channel of ["signed", "dev"]) {
     }
   });
 }
+
+async function mockGh(name) {
+  const bin = path.join(workDir, `${name}-bin`);
+  const log = path.join(workDir, `${name}-gh.log`);
+  const payloadFile = path.join(workDir, `${name}-payload.wasm`);
+  await mkdir(bin);
+  await writeFile(payloadFile, payload);
+  const executable = path.join(bin, "gh");
+  await writeFile(executable, `#!/bin/sh
+set -eu
+[ "$#" -eq 9 ]
+[ "$1" = run ] && [ "$2" = download ] && [ "$3" = 1 ]
+[ "$4" = -R ] && [ "$5" = RGenomicsETL/duckhts ]
+[ "$6" = -n ] && [ "$8" = -D ]
+printf '%s\\n' "$7" >> "$GH_LOG"
+mkdir -p "$9"
+cp "$GH_PAYLOAD" "$9/${fileName}"
+`);
+  await chmod(executable, 0o755);
+  return { log, env: { PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+    GH_LOG: log, GH_PAYLOAD: payloadFile } };
+}
+
+test("dev: downloads only a stale artifact beside two verified cached platforms", async () => {
+  const gh = await mockGh("stale");
+  const { result, output } = await stage("dev", "dev-stale", null, {
+    gh: true, cached: platforms, stale: "wasm_eh", env: gh.env,
+  });
+  assert.equal(result.code, undefined, result.stderr);
+  assert.deepEqual((await readFile(gh.log, "utf8")).trim().split("\n"), ["extension-wasm_eh"]);
+  assert.match(result.stdout, /wasm_mvp: verified/);
+  assert.match(result.stdout, /wasm_threads: verified/);
+  for (const platform of platforms) {
+    assert.deepEqual(await readFile(path.join(output, platform, fileName)), payload);
+  }
+});
+
+test("dev: stages multiple missing artifacts through single-artifact gh downloads", async () => {
+  const gh = await mockGh("all");
+  const { result, output } = await stage("dev", "dev-all", null, { gh: true, env: gh.env });
+  assert.equal(result.code, undefined, result.stderr);
+  assert.deepEqual((await readFile(gh.log, "utf8")).trim().split("\n"),
+    platforms.map((platform) => `extension-${platform}`));
+  for (const platform of platforms) {
+    assert.deepEqual(await readFile(path.join(output, platform, fileName)), payload);
+  }
+});
 
 test("dev: rejects a missing artifact without fetching another channel", async () => {
   const { result } = await stage("dev", "dev-missing", null, { missing: true });
