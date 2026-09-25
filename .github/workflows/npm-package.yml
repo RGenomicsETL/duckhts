@@ -37,7 +37,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        channel: [signed, dev]
+        # Pull requests test both channels; a dispatch tests only the channel it publishes,
+        # since each channel's version check rejects the other's version scheme.
+        channel: ${{ github.event_name == 'workflow_dispatch' && fromJSON(format('["{0}"]', inputs.channel)) || fromJSON('["signed", "dev"]') }}
     permissions:
       contents: read
       actions: read
