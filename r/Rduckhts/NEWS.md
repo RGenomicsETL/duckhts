@@ -1,3 +1,9 @@
+# Rduckhts 1.5.2.9002-0.1.5
+
+- The bundled extension scans tabix, GFF3 and GTF fields once up to the last
+  projected field, including attributes when requested. Strict GFF3 validation
+  still counts the entire line; SQL results and diagnostics are unchanged.
+
 # Rduckhts 1.5.2.9001-0.1.5
 
 - The bundled `read_hts_header` reports a scan error if it cannot reserve or
