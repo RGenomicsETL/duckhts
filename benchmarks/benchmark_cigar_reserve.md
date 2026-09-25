@@ -28,18 +28,19 @@ revision and `HEAD:src` IDs for each build, and `uncommitted` if the extension
 was built from modified sources. Those IDs describe the base revision when the
 source is uncommitted; the loaded binary’s SHA256 identifies the measured binary.
 The driver records caller-supplied source metadata without certifying the build.
-The CSV prefix for this rendering is benchmarks/data/cigar_reserve_257;
-use it in place of `benchmarks/data/cigar_validation` below.
+The commands below use the CSV prefix benchmarks/data/cigar_reserve_257.
 
 ``` sh
 # Set these to the local build paths and full Git object IDs for the measured builds.
 taskset -c "$CPU" Rscript scripts/benchmark_cigar_validation.R baseline \
   "$BASELINE_EXTENSION" "$BASELINE_SOURCE" "$BASELINE_REVISION" "$BASELINE_SRC_TREE" \
-  clean benchmarks/data/cigar_validation full 5
+  clean benchmarks/data/cigar_reserve_257 full 5
 taskset -c "$CPU" Rscript scripts/benchmark_cigar_validation.R candidate \
   "$CANDIDATE_EXTENSION" "$CANDIDATE_SOURCE" "$CANDIDATE_REVISION" "$CANDIDATE_SRC_TREE" \
-  "$CANDIDATE_SOURCE_STATE" benchmarks/data/cigar_validation full 5
-Rscript -e 'rmarkdown::render("benchmarks/benchmark_cigar_validation.Rmd")'
+  "$CANDIDATE_SOURCE_STATE" benchmarks/data/cigar_reserve_257 full 5
+Rscript -e 'rmarkdown::render("benchmarks/benchmark_cigar_validation.Rmd",
+  params = list(prefix = "data/cigar_reserve_257", comparison = "reserve"),
+  output_file = "benchmark_cigar_reserve.md")'
 ```
 
 Each invocation loads exactly one extension. For a smoke check use `smoke 2`
