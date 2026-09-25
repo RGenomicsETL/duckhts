@@ -1437,6 +1437,7 @@ rduckhts_detect_quality_encoding <- function(con, path, max_records = 10000) {
 #'   instead of index-backed count paths. Sequential mode is incompatible with
 #'   \code{region}.
 #' @param attributes_map Logical. If TRUE, returns raw attributes as a scalar MAP column
+#' @param attributes Character vector of attribute keys to expose as VARCHAR columns
 #' @param attributes_list Logical. If TRUE, returns attributes as MAP(VARCHAR, VARCHAR[])
 #' @param attributes_pairs Logical. If TRUE, returns attributes as a LIST of key/value/index structs
 #' @param strict Logical. If TRUE, enforce GFF3 structural validation while scanning
@@ -1460,7 +1461,8 @@ rduckhts_gff <- function(
   attributes_list = FALSE,
   attributes_pairs = FALSE,
   strict = FALSE,
-  overwrite = FALSE
+  overwrite = FALSE,
+  attributes = NULL
 ) {
   if (!missing(table_name) && !is.null(table_name)) {
     if (DBI::dbExistsTable(con, table_name) && !overwrite) {
@@ -1521,6 +1523,9 @@ rduckhts_gff <- function(
       con,
       .validate_scan_mode_param(scan_mode)
     )
+  }
+  if (!is.null(attributes)) {
+    params$attributes <- sql_varchar_list_literal(con, attributes, "attributes")
   }
   if (attributes_map) {
     params$attributes_map <- "true"
@@ -1574,6 +1579,7 @@ rduckhts_gff <- function(
 #'   instead of index-backed count paths. Sequential mode is incompatible with
 #'   \code{region}.
 #' @param attributes_map Logical. If TRUE, returns raw attributes as a scalar MAP column
+#' @param attributes Character vector of attribute keys to expose as VARCHAR columns
 #' @param attributes_list Logical. If TRUE, returns attributes as MAP(VARCHAR, VARCHAR[])
 #' @param attributes_pairs Logical. If TRUE, returns attributes as a LIST of key/value/index structs
 #' @param overwrite Logical. If TRUE, overwrites existing table
@@ -1595,7 +1601,8 @@ rduckhts_gtf <- function(
   attributes_map = FALSE,
   attributes_list = FALSE,
   attributes_pairs = FALSE,
-  overwrite = FALSE
+  overwrite = FALSE,
+  attributes = NULL
 ) {
   if (!missing(table_name) && !is.null(table_name)) {
     if (DBI::dbExistsTable(con, table_name) && !overwrite) {
@@ -1656,6 +1663,9 @@ rduckhts_gtf <- function(
       con,
       .validate_scan_mode_param(scan_mode)
     )
+  }
+  if (!is.null(attributes)) {
+    params$attributes <- sql_varchar_list_literal(con, attributes, "attributes")
   }
   if (attributes_map) {
     params$attributes_map <- "true"

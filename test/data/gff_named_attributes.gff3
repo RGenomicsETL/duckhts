@@ -1,0 +1,7 @@
+##gff-version 3
+# Authored fixture: raw scalar attribute syntax, no external source.
+chr1	test	gene	1	10	.	+	.	ID=first;ID=second;Parent=p1,p2;encoded=a%3Bb%20c; spaced = value ;empty=;odd-key=x;quote'key=q
+chr1	test	exon	11	20	.	+	.	Parent=p3;ID=third;encoded=%25; spaced=other;empty= ;odd-key=y
+chr1	test	exon	21	30	.	+	.	.
+chr2	test	gene	1	10	.	-	.	malformed;=ignored;ID=fourth;Parent=;ID=later;encoded=a=b
+chr2	test	exon	11	20	.	-	.	ID=last;id=lower;trailing=value
