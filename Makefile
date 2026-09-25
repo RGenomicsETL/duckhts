@@ -155,8 +155,9 @@ test_release: test-reader-alloc test-extension-init test-named-attribute-columns
 endif
 
 .PHONY: test-extension-symbols
-test-extension-symbols: release
-	@set -e; symbols=$$(nm -D -u build/release/duckhts.duckdb_extension); \
+test-extension-symbols:
+	@set -e; test -f build/release/duckhts.duckdb_extension || { echo "test-extension-symbols: build the release extension first"; exit 1; }; \
+		symbols=$$(nm -D -u build/release/duckhts.duckdb_extension); \
 		printf '%s\n' "$$symbols" | \
 		awk '$$NF ~ /^duckdb_/ { print "Unexpected DuckDB C API import: " $$0; bad = 1 } END { exit bad }'
 
