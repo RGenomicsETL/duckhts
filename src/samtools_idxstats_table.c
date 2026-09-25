@@ -26,6 +26,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/sam.h>
 
 #include "include/hts_io_tuning.h"
+#include "include/duckhts_output_file.h"
 
 #ifndef SAM_RNAME
 #define SAM_RNAME SAM_POS
@@ -53,35 +54,6 @@ static char *append_suffix_idxstats(const char *path, const char *suffix) {
     memcpy(out, path, path_len);
     memcpy(out + path_len, suffix, suffix_len + 1);
     return out;
-}
-
-static int file_exists_idxstats(const char *path) {
-    FILE *fp;
-    if (!path) return 0;
-    fp = fopen(path, "rb");
-    if (!fp) return 0;
-    fclose(fp);
-    return 1;
-}
-
-static int prepare_output_path_idxstats(const char *path, int overwrite, char *err, size_t errlen) {
-    if (!path || !path[0]) {
-        snprintf(err, errlen, "duckhts_samtools_idxstats: output must be non-empty");
-        return -1;
-    }
-    if (!file_exists_idxstats(path)) return 0;
-    if (!overwrite) {
-        snprintf(err, errlen,
-                 "duckhts_samtools_idxstats: output already exists (use overwrite := TRUE to replace)");
-        return -1;
-    }
-    if (remove(path) != 0) {
-        snprintf(err, errlen,
-                 "duckhts_samtools_idxstats: failed to replace existing output '%s'",
-                 path);
-        return -1;
-    }
-    return 0;
 }
 
 static int slow_idxstats_to_file(samFile *fp, sam_hdr_t *header, FILE *out, int threads,
@@ -220,8 +192,11 @@ static int run_samtools_idxstats(samtools_idxstats_bind_t *bind, char *err, size
     sam_hdr_t *header = NULL;
     FILE *out = NULL;
     int rc = -1;
+    duckhts_output_owner_t owned = {0};
+    int fd;
 
-    if (prepare_output_path_idxstats(bind->output_path, bind->overwrite, err, errlen) != 0) {
+    if (!bind->output_path || !bind->output_path[0]) {
+        snprintf(err, errlen, "duckhts_samtools_idxstats: output must be non-empty");
         return -1;
     }
 
@@ -239,10 +214,21 @@ static int run_samtools_idxstats(samtools_idxstats_bind_t *bind, char *err, size
         goto cleanup;
     }
 
-    out = fopen(bind->output_path, "wb");
+    fd = duckhts_output_open(bind->output_path, bind->overwrite, &owned);
+    if (fd < 0) {
+        if (errno == EEXIST && !bind->overwrite) {
+            snprintf(err, errlen, "duckhts_samtools_idxstats: output already exists (use overwrite := TRUE to replace)");
+        } else {
+            snprintf(err, errlen, "duckhts_samtools_idxstats: failed to open '%s': %s",
+                     bind->output_path, strerror(errno));
+        }
+        goto cleanup;
+    }
+    out = duckhts_output_fdopen(fd);
     if (!out) {
         snprintf(err, errlen, "duckhts_samtools_idxstats: failed to open '%s': %s",
                  bind->output_path, strerror(errno));
+        duckhts_output_close_fd(fd);
         goto cleanup;
     }
 
@@ -287,7 +273,7 @@ cleanup:
     }
     if (header) sam_hdr_destroy(header);
     if (fp) sam_close(fp);
-    if (rc != 0 && bind->output_path) remove(bind->output_path);
+    if (rc != 0) duckhts_output_cleanup(bind->output_path, owned);
     return rc;
 }
 

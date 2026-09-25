@@ -1,0 +1,84 @@
+# name: test/sql/writer_no_clobber.test
+# description: File writers enforce exclusive creation and retain unrelated outputs
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+COPY (SELECT 'sentinel' AS text) TO '__WORKING_DIRECTORY__/writer_sentinel.txt' (FORMAT CSV, HEADER FALSE);
+
+statement error
+SELECT * FROM bgzip('__WORKING_DIRECTORY__/writer_sentinel.txt',
+  output_path := '__WORKING_DIRECTORY__/writer_sentinel.txt', overwrite := FALSE);
+----
+already exists
+
+query I
+SELECT CASE WHEN content LIKE '%sentinel%' THEN 1 ELSE 0 END
+FROM read_text('__WORKING_DIRECTORY__/writer_sentinel.txt');
+----
+1
+
+statement ok
+SELECT * FROM bgzip('__WORKING_DIRECTORY__/writer_sentinel.txt',
+  output_path := '__WORKING_DIRECTORY__/writer_output.gz', overwrite := FALSE);
+
+statement error
+SELECT * FROM bgzip('__WORKING_DIRECTORY__/writer_sentinel.txt',
+  output_path := '__WORKING_DIRECTORY__/writer_output.gz', overwrite := FALSE);
+----
+already exists
+
+statement ok
+SELECT * FROM bgzip('__WORKING_DIRECTORY__/writer_sentinel.txt',
+  output_path := '__WORKING_DIRECTORY__/writer_output.gz', overwrite := TRUE);
+
+statement ok
+SELECT * FROM bgunzip('__WORKING_DIRECTORY__/writer_output.gz',
+  output_path := '__WORKING_DIRECTORY__/writer_plain.txt', overwrite := FALSE);
+
+query I
+SELECT CASE WHEN content LIKE '%sentinel%' THEN 1 ELSE 0 END
+FROM read_text('__WORKING_DIRECTORY__/writer_plain.txt');
+----
+1
+
+statement error
+SELECT * FROM bgunzip('__WORKING_DIRECTORY__/writer_output.gz',
+  output_path := '__WORKING_DIRECTORY__/writer_plain.txt', overwrite := FALSE);
+----
+already exists
+
+statement ok
+SELECT * FROM bgunzip('__WORKING_DIRECTORY__/writer_output.gz',
+  output_path := '__WORKING_DIRECTORY__/writer_plain.txt', overwrite := TRUE);
+
+statement error
+SELECT * FROM duckhts_samtools_idxstats('__WORKING_DIRECTORY__/test/data/range.bam',
+  output := '__WORKING_DIRECTORY__/writer_sentinel.txt', overwrite := FALSE);
+----
+already exists
+
+query I
+SELECT CASE WHEN content LIKE '%sentinel%' THEN 1 ELSE 0 END
+FROM read_text('__WORKING_DIRECTORY__/writer_sentinel.txt');
+----
+1
+
+statement ok
+SELECT * FROM duckhts_samtools_idxstats('__WORKING_DIRECTORY__/test/data/range.bam',
+  output := '__WORKING_DIRECTORY__/writer_sentinel.txt', overwrite := TRUE);
+
+statement ok
+SELECT * FROM duckhts_mosdepth('__WORKING_DIRECTORY__/writer_no_clobber',
+  '__WORKING_DIRECTORY__/test/data/range.bam', fast_mode := TRUE, overwrite := FALSE);
+
+statement error
+SELECT * FROM duckhts_mosdepth('__WORKING_DIRECTORY__/writer_no_clobber',
+  '__WORKING_DIRECTORY__/test/data/range.bam', fast_mode := TRUE, overwrite := FALSE);
+----
+already exists
+
+statement ok
+SELECT * FROM duckhts_mosdepth('__WORKING_DIRECTORY__/writer_no_clobber',
+  '__WORKING_DIRECTORY__/test/data/range.bam', fast_mode := TRUE, overwrite := TRUE);
