@@ -151,7 +151,7 @@ test_debug: test-cache-paths test-duckvep-kernel test-simd-kernels test-genbank-
 test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-genbank-core test-genbank-oracle test-somalier-native test-bam-site-counts test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom test-hts-region-ownership
 test_release: test-reference-cache
 ifneq ($(filter linux_%,$(or $(DUCKDB_PLATFORM),$(shell sed -n '1p' configure/platform.txt 2>/dev/null))),)
-test_release: test-reader-alloc test-extension-init test-named-attribute-columns test-extension-symbols
+test_release: test-reader-alloc test-cigar-reserve-alloc test-extension-init test-named-attribute-columns test-extension-symbols
 endif
 
 .PHONY: test-extension-symbols

@@ -18,6 +18,12 @@
 - Report a scan error when `read_hts_header` cannot reserve or size its parsed
   `key_values` MAP list, rather than writing child values after a failed request.
 
+- Bound `cigar_aligned_blocks` child-list growth geometrically for text CIGARs,
+  including long runs of leading zeroes. Decode each text CIGAR once.
+
+- Validate the staged ONT benchmark's BAM index against its SHA-256 and byte
+  size receipt before reusing the cache.
+
 # duckhts 1.5.2.9001
 
 - Require DuckDB 1.4.0 or newer for the extension's SQL surface while retaining
