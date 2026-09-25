@@ -1,5 +1,8 @@
 # Rduckhts 1.5.2.9001-0.1.5
 
+- The bundled `read_hts_header` reports a scan error if it cannot reserve or
+  size its parsed `key_values` MAP list.
+
 - Require duckdb 1.4.0 or newer. The bundled extension registers native
   functions before dependent SQL macros, retains all supported native overloads
   on DuckDB 1.4, and includes the underlying diagnostic in initialization errors.

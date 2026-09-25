@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail every direct DuckHTS duckdb_malloc call on real reader query paths.
+"""Exercise reader allocation and list-growth failure recovery on real queries.
 
 The shim is test-only and POSIX-only; no global malloc interposition. Exact
 successful schemas/rows must survive recovery. The ledger covers first-party
@@ -132,12 +132,38 @@ def main():
                     assert con.execute("SELECT 4242").fetchone() == (4242,)
                     assert read(sql) == expected, (projection, kind, nth, "list recovery changed rows")
                     list_failures += 1
+        header_failures = 0
+        for mode in ("parsed", "both"):
+            sql = "SELECT key_values FROM " + source(
+                "read_hts_header", "formatcols.vcf.gz", f", mode:='{mode}'")
+            for kind in (1, 2):
+                assert probe.reader_list_arm(kind, 0) == 0
+                expected = read(sql)
+                count = probe.reader_list_attempts()
+                assert count > 0, (mode, kind, "no MAP list reservation")
+                probe.reader_list_disarm()
+                for nth in range(1, count + 1):
+                    assert probe.reader_list_arm(kind, nth) == 0
+                    try:
+                        read(sql)
+                    except duckdb.Error as error:
+                        assert "read_hts_header: out of memory reserving key_values map" in str(error), (
+                            mode, kind, nth, error)
+                    else:
+                        raise AssertionError((mode, kind, nth, "MAP list failure silently succeeded"))
+                    assert probe.reader_list_failures() == 1, (mode, kind, nth, "injection missed")
+                    assert probe.reader_list_data_after_failure() == 0, (mode, kind, nth, "child data access")
+                    probe.reader_list_disarm()
+                    assert con.execute("SELECT 4242").fetchone() == (4242,)
+                    assert read(sql) == expected, (mode, kind, nth, "MAP recovery changed rows")
+                    header_failures += 1
     finally:
         probe.reader_list_disarm()
         probe.reader_alloc_close()
         con.close()
     print(f"reader allocation failures: {failures} errors, zero tracked leaks, exact schema/row recovery: OK")
     print(f"BAM list failures: {list_failures} errors, no data access after failure, exact recovery: OK")
+    print(f"header MAP list failures: {header_failures} errors, no child data access, exact recovery: OK")
 
 
 if __name__ == "__main__":
