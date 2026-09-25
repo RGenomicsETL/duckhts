@@ -1,11 +1,13 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.2.9001
+# duckhts 1.5.2.9002
 
 - Scan tabix, GFF3 and GTF fields once up to the last projected field; parsed
   attribute outputs include the attributes field, and strict GFF3 checks count
   the entire line. Values, NULLs and strict diagnostics retain their existing
   contracts.
+
+# duckhts 1.5.2.9001
 
 - Require DuckDB 1.4.0 or newer for the extension's SQL surface while retaining
   the stable v1.2.0 C API target. Register native functions before dependent SQL
