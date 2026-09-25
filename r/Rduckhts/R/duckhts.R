@@ -621,6 +621,10 @@ rduckhts_bigwig <- function(
 #'
 #' Creates a DuckDB table from a BED file using the DuckHTS extension.
 #'
+#' @param error_policy Optional short-line policy: \code{"error"} (default),
+#'   \code{"skip"}, or \code{"report"}. Report adds diagnostic columns and
+#'   requires a full-file scan rather than a region query.
+#'
 #' @param con A DuckDB connection with DuckHTS loaded
 #' @param table_name Name for the created table
 #' @param path Path to the BED file
@@ -642,7 +646,8 @@ rduckhts_bed <- function(
   region = NULL,
   index_path = NULL,
   scan_mode = NULL,
-  overwrite = FALSE
+  overwrite = FALSE,
+  error_policy = NULL
 ) {
   if (!missing(table_name) && !is.null(table_name)) {
     if (DBI::dbExistsTable(con, table_name) && !overwrite) {
@@ -669,6 +674,13 @@ rduckhts_bed <- function(
       con,
       .validate_scan_mode_param(scan_mode)
     )
+  }
+  if (!is.null(error_policy)) {
+    if (!is.character(error_policy) || length(error_policy) != 1L ||
+        is.na(error_policy) || !tolower(error_policy) %in% c("error", "skip", "report")) {
+      stop("error_policy must be 'error', 'skip', or 'report'", call. = FALSE)
+    }
+    params$error_policy <- sql_quote_string(con, tolower(error_policy))
   }
   param_str <- build_param_str(params)
 

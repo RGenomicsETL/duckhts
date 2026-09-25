@@ -161,3 +161,27 @@ test_interval_readers <- function() {
 }
 
 test_interval_readers()
+
+test_bed_error_policy <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  path <- system.file("extdata", "bed_error_policy.bed", package = "Rduckhts")
+  expect_true(file.exists(path))
+  expect_error(rduckhts_bed(con, "bed_default", path), "fewer than 3")
+  expect_error(rduckhts_bed(con, "bed_invalid", path, error_policy = "other"),
+    "error_policy must be")
+  expect_silent(rduckhts_bed(con, "bed_skip", path, error_policy = "skip"))
+  expect_equal(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM bed_skip")$n, 5)
+  expect_silent(rduckhts_bed(con, "bed_report", path,
+    error_policy = "report", scan_mode = "sequential"))
+  errors <- DBI::dbGetQuery(con,
+    "SELECT line_number, raw_line FROM bed_report WHERE error IS NOT NULL ORDER BY line_number")
+  # These are physical lines 5 and 10 of the bundled text fixture.
+  expect_equal(errors$line_number, c(5, 10))
+  expect_equal(errors$raw_line, c("chr1\t7", "chr2"))
+  expect_equal(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM bed_report")$n, 7)
+  expect_error(rduckhts_bed(con, "bed_region", path,
+    region = "chr1:1-10", error_policy = "report"), "physical line numbers")
+}
+
+test_bed_error_policy()

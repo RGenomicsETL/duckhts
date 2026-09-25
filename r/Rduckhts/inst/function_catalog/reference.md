@@ -1228,12 +1228,12 @@ SELECT NAME, length(SEQUENCE) FROM read_fasta('ce.fa');
 
 ## read_bed
 
-Read BED3-BED12 interval files with canonical typed columns and optional tabix-backed region filtering. scan_mode := 'sequential' forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.
+Read BED3-BED12 interval files with canonical typed columns and optional tabix-backed region filtering.
 
 Signature:
 
 ```sql
-read_bed(path, region := NULL, index_path := NULL, scan_mode := 'auto')
+read_bed(path, region := NULL, index_path := NULL, scan_mode := 'auto', error_policy := 'error')
 ```
 
 Returns:
@@ -1241,6 +1241,14 @@ Returns:
 ```
 table
 ```
+
+### scan_mode
+
+scan_mode := 'sequential' forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.
+
+### error_policy
+
+error_policy := 'error' aborts on data lines with fewer than three tab-delimited fields; 'skip' drops those lines; 'report' emits them with NULL normal columns and adds error (VARCHAR), line_number (BIGINT, 1-based physical line including headers/comments), and raw_line (VARCHAR, without newline). Good rows have NULL error and raw_line. Report requires a full-file scan, not a region query. Non-integer numeric fields become NULL, reversed intervals remain accepted, and blank/header/track/browser lines are ignored in all modes.
 
 ### Examples
 

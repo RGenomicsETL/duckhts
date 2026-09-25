@@ -1,0 +1,10 @@
+# test header
+track name=peaks
+browser position chr1:1-20
+chr1	0	10	first
+chr1	7
+chr1	bad	12	bad_start
+chr1	20	19	reversed
+chr2	2	3	crlf
+chr2	4	5	last
+chr2
