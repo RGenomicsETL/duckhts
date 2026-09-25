@@ -8,10 +8,10 @@
   projected field, including attributes when requested. Strict GFF3 validation
   still counts the entire line; SQL results and diagnostics are unchanged.
 
-# Rduckhts 1.5.2.9001-0.1.5
-
 - The bundled `read_hts_header` reports a scan error if it cannot reserve or
   size its parsed `key_values` MAP list.
+
+# Rduckhts 1.5.2.9001-0.1.5
 
 - Require duckdb 1.4.0 or newer. The bundled extension registers native
   functions before dependent SQL macros, retains all supported native overloads

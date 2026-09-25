@@ -10,14 +10,15 @@
   attribute outputs include the attributes field, and strict GFF3 checks count
   the entire line. Values, NULLs and strict diagnostics retain their existing
   contracts.
+
 - Stage the tabix-split BED benchmark artifact through a checksum-validated
   temporary file, rebuilding corrupt cached outputs; test its offline derivation
   and cache reuse with synthetic GFF3/GTF inputs.
 
-# duckhts 1.5.2.9001
-
 - Report a scan error when `read_hts_header` cannot reserve or size its parsed
   `key_values` MAP list, rather than writing child values after a failed request.
+
+# duckhts 1.5.2.9001
 
 - Require DuckDB 1.4.0 or newer for the extension's SQL surface while retaining
   the stable v1.2.0 C API target. Register native functions before dependent SQL
