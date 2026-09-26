@@ -22,6 +22,7 @@
 	duckvep-render-reports \
 	test-simd-kernels bench-simd-kernels \
 	test-sqllogictest-debug test-sqllogictest-release \
+	test-writer-no-clobber-debug test-writer-no-clobber-release \
 	test-sqllogictest-runner \
 	check-benchmark-portability \
 	stage-norm-1000g-dragen-gvcf stage-liftover-references \
@@ -147,12 +148,34 @@ endif
 
 test: test_debug
 test_debug test_release: test-function-catalog
-test_debug: test-cache-paths test-duckvep-kernel test-simd-kernels test-genbank-core test-liftover-property test-liftover-fuzz-debug test-sqllogictest-debug
-test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-genbank-core test-genbank-oracle test-somalier-native test-bam-site-counts test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom test-hts-region-ownership
+test_debug: test-cache-paths test-duckvep-kernel test-simd-kernels test-genbank-core test-liftover-property test-liftover-fuzz-debug test-sqllogictest-debug test-writer-no-clobber-debug
+test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-genbank-core test-genbank-oracle test-somalier-native test-bam-site-counts test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom test-hts-region-ownership test-writer-no-clobber-release
 test_release: test-reference-cache
 ifneq ($(filter linux_%,$(or $(DUCKDB_PLATFORM),$(shell sed -n '1p' configure/platform.txt 2>/dev/null))),)
-test_release: test-reader-alloc test-extension-init
+test_release: test-reader-alloc test-cigar-reserve-alloc test-extension-init test-named-attribute-columns test-extension-symbols
 endif
+
+.PHONY: test-extension-symbols
+test-extension-symbols:
+	@set -e; test -f build/release/duckhts.duckdb_extension || { echo "test-extension-symbols: build the release extension first"; exit 1; }; \
+		symbols=$$(nm -D -u build/release/duckhts.duckdb_extension); \
+		printf '%s\n' "$$symbols" | \
+		awk '$$NF ~ /^duckdb_/ { print "Unexpected DuckDB C API import: " $$0; bad = 1 } END { exit bad }'
+
+.PHONY: test-named-attribute-columns
+test-named-attribute-columns:
+	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+		$(CC) -std=c11 -O2 -Wall -Wextra -Werror -UNDEBUG \
+			-Iduckdb_capi -Isrc/include \
+			test/scripts/named_attribute_columns_test.c src/named_attribute_columns.c \
+			-o "$$tmp/named_attribute_columns_test"; \
+		"$$tmp/named_attribute_columns_test"
+
+test-writer-no-clobber-debug:
+	DUCKHTS_TEST_PYTHON=$(PYTHON_VENV_BIN) bash test/scripts/writer_no_clobber.sh build/debug/$(EXTENSION_NAME).duckdb_extension
+
+test-writer-no-clobber-release:
+	DUCKHTS_TEST_PYTHON=$(PYTHON_VENV_BIN) bash test/scripts/writer_no_clobber.sh build/release/$(EXTENSION_NAME).duckdb_extension
 
 DUCKDB_INIT_TEST_PYTHON ?= $(PYTHON_VENV_BIN)
 DUCKDB_INIT_TEST_EXPECT ?= supported
@@ -185,9 +208,12 @@ define run_reader_alloc_test
 		$(1) "$$tmp/reader_alloc_probe.so"
 endef
 
-.PHONY: test-reader-alloc test-reader-alloc-r
+.PHONY: test-reader-alloc test-reader-alloc-r test-cigar-reserve-alloc
 test-reader-alloc: test-bam-format test-bcf-scan
 	$(call run_reader_alloc_test,./configure/venv/bin/python3 test/scripts/reader_alloc_test.py --extension build/release/duckhts.duckdb_extension --probe)
+
+test-cigar-reserve-alloc:
+	$(call run_reader_alloc_test,./configure/venv/bin/python3 test/scripts/cigar_reserve_test.py --extension build/release/duckhts.duckdb_extension --probe)
 
 test-reader-alloc-r:
 	$(call run_reader_alloc_test,Rscript test/scripts/reader_alloc_test.R)

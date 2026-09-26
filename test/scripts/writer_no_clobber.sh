@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+# Linux regressions for concurrent creators and symlink output ownership.
+set -euo pipefail
+if [[ $(uname -s) != Linux ]]; then
+    echo 'writer race and symlink tests: Linux only (skipped)'
+    exit 0
+fi
+extension=$(realpath "${1:-build/release/duckhts.duckdb_extension}")
+python=${DUCKHTS_TEST_PYTHON:-python3}
+root=$(mktemp -d)
+reader=
+cleanup() {
+    if [[ -n $reader ]]; then
+        kill "$reader" 2>/dev/null || true
+        wait "$reader" 2>/dev/null || true
+    fi
+    rm -rf "$root"
+}
+trap cleanup EXIT
+
+# Run one statement with the extension loaded, replacing the calling (sub)shell so a
+# backgrounded call's PID is the process that opens the FIFO. Uses the duckdb Python
+# module the SQL tests use (CI has no DuckDB CLI); DUCKDB_CLI selects a CLI instead.
+exec_sql() {
+    if [[ -n ${DUCKDB_CLI:-} ]]; then
+        exec "$DUCKDB_CLI" -unsigned -c "LOAD '$extension'; $1"
+    fi
+    exec "$python" -c 'import duckdb, sys
+con = duckdb.connect(config={"allow_unsigned_extensions": "true"})
+con.load_extension(sys.argv[1])
+print(con.execute(sys.argv[2]).fetchall())' "$extension" "$1"
+}
+
+run_case() {
+    local name=$1
+    local dir="$root/$name"
+    local sql status=0 blocked=false
+    mkdir "$dir"
+    mkfifo "$dir/input"
+    if [[ $name == bgzip ]]; then
+        sql="SELECT * FROM bgzip('$dir/input', output_path := '$dir/output', threads := 1, overwrite := false);"
+    else
+        sql="SELECT * FROM duckhts_samtools_idxstats('$dir/input', output := '$dir/output', overwrite := false);"
+    fi
+    (exec_sql "$sql") >"$dir/query.log" 2>&1 &
+    reader=$!
+    for ((i = 0; i < 400; i++)); do
+        if grep -q wait_for_partner "/proc/$reader/wchan" 2>/dev/null; then
+            blocked=true
+            break
+        fi
+        if ! kill -0 "$reader" 2>/dev/null; then
+            break
+        fi
+        sleep 0.05
+    done
+    if [[ $blocked != true ]]; then
+        echo "$name: input-open synchronization failed; query log:" >&2
+        cat "$dir/query.log" >&2
+        return 1
+    fi
+    printf 'independently published data\n' >"$dir/expected"
+    cp "$dir/expected" "$dir/output"
+    if [[ $name == bgzip ]]; then
+        printf 'payload\n' >"$dir/input"
+    else
+        printf '%s\n' \
+            $'@HD\tVN:1.6' \
+            $'@SQ\tSN:chr1\tLN:100' \
+            $'read1\t0\tchr1\t1\t60\t1M\t*\t0\t0\tA\tI' >"$dir/input"
+    fi
+    wait "$reader" || status=$?
+    reader=
+    if [[ $status -eq 0 ]]; then
+        echo "$name: query succeeded despite concurrent output" >&2
+        return 1
+    fi
+    if ! cmp -s "$dir/expected" "$dir/output"; then
+        echo "$name: query modified the concurrent output" >&2
+        return 1
+    fi
+    if [[ $name == idxstats ]] && ! grep -q 'output already exists' "$dir/query.log"; then
+        echo 'idxstats: expected the exclusive-open error' >&2
+        return 1
+    fi
+    echo "$name: failed without clobbering concurrent output"
+}
+case ${2:-all} in
+    all)
+        run_case bgzip
+        run_case idxstats
+        ;;
+    idxstats-race)
+        run_case idxstats
+        exit 0
+        ;;
+    *)
+        echo 'usage: writer_no_clobber.sh [extension] [all|idxstats-race]' >&2
+        exit 2
+        ;;
+esac
+
+run_symlink_case() {
+    local name=$1
+    local outcome=$2
+    local dir="$root/${name}_${outcome}"
+    local input sql status=0
+    mkdir "$dir"
+    printf 'referent must survive\n' >"$dir/referent"
+    ln -s referent "$dir/output"
+    case "$name" in
+        bgzip)
+            if [[ $outcome == success ]]; then
+                printf 'payload\n' >"$dir/input"
+            else
+                mkdir "$dir/input"
+            fi
+            input="$dir/input"
+            sql="SELECT * FROM bgzip('$input', output_path := '$dir/output', threads := 1, overwrite := true);"
+            ;;
+        bgunzip)
+            printf 'payload\n' >"$dir/plain"
+            (exec_sql "SELECT * FROM bgzip('$dir/plain', output_path := '$dir/input.gz', threads := 1);") >"$dir/prepare.log" 2>&1
+            if [[ $outcome == failure ]]; then
+                printf '\377' | dd of="$dir/input.gz" bs=1 seek=20 conv=notrunc status=none
+            fi
+            input="$dir/input.gz"
+            sql="SELECT * FROM bgunzip('$input', output_path := '$dir/output', threads := 1, overwrite := true);"
+            ;;
+        idxstats)
+            if [[ $outcome == success ]]; then
+                input="$(pwd)/test/data/range.bam"
+            else
+                printf '@HD\tVN:1.6\n@SQ\tSN:chr1\tLN:100\nbad\t0\tchr1\tinvalid\t60\t1M\t*\t0\t0\tA\tI\n' >"$dir/input.sam"
+                input="$dir/input.sam"
+            fi
+            sql="SELECT * FROM duckhts_samtools_idxstats('$input', output := '$dir/output', overwrite := true);"
+            ;;
+    esac
+    (exec_sql "$sql") >"$dir/query.log" 2>&1 || status=$?
+    if [[ $outcome == success ]]; then
+        if [[ $status -ne 0 || ! -f $dir/output || -L $dir/output ]]; then
+            echo "$name: overwrite must replace symlink with a regular output" >&2
+            return 1
+        fi
+        if [[ $name == bgzip ]]; then
+            gzip -dc "$dir/output" >"$dir/result"
+            cmp "$dir/input" "$dir/result"
+        elif [[ $name == bgunzip ]]; then
+            cmp "$dir/plain" "$dir/output"
+        else
+            grep -q $'CHROMOSOME_I\t' "$dir/output"
+        fi
+    else
+        if [[ $status -eq 0 || -e $dir/output || -L $dir/output ]]; then
+            echo "$name: failed overwrite must remove only its own output" >&2
+            return 1
+        fi
+        if [[ $name == idxstats ]]; then
+            grep -q 'failed while scanning input' "$dir/query.log"
+        else
+            grep -q 'read error' "$dir/query.log"
+        fi
+    fi
+    if [[ -L $dir/output ]] || ! cmp -s "$dir/referent" <(printf 'referent must survive\n'); then
+        echo "$name: overwrite touched the symlink referent" >&2
+        return 1
+    fi
+    echo "$name: symlink overwrite $outcome preserved the referent"
+}
+for writer in bgzip bgunzip idxstats; do
+    run_symlink_case "$writer" success
+    run_symlink_case "$writer" failure
+done

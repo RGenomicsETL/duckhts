@@ -1,0 +1,5 @@
+# meta
+chr1	src	gene	1	2	.	+	.	ID=one;Alias=a,b
+chr2		gene	3	4	.	-	.	
+chr3	src	gene	5	6	.	+	.
+chr4	src	gene	7	8	.	+	.	ID=four	

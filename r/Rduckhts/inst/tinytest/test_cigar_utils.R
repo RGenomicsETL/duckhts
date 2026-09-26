@@ -289,6 +289,21 @@ test_cigar_geometry_and_flags <- function() {
   expect_true(isTRUE(blocks$empty_null[[1]]))
   expect_equal(blocks$clip_only_blocks[[1]], 0)
 
+  leading_zero <- DBI::dbGetQuery(
+    con,
+    paste(
+      "SELECT (b).ref_start::VARCHAR AS ref_start,",
+      "(b).query_start::VARCHAR AS query_start,",
+      "(b).width::VARCHAR AS width,",
+      "b = cigar_aligned_blocks([16]::UINTEGER[], 42) AS bin_eq",
+      "FROM (SELECT cigar_aligned_blocks(repeat('0', 2000000) || '1M', 42) AS b)"
+    )
+  )
+  expect_equal(leading_zero$ref_start[[1]], "[42]")
+  expect_equal(leading_zero$query_start[[1]], "[0]")
+  expect_equal(leading_zero$width[[1]], "[1]")
+  expect_true(isTRUE(leading_zero$bin_eq[[1]]))
+
   # Running spans are checked as they accumulate, trailing digits are NULL even
   # when zero-valued, and a rejected row does not disturb the next row's blocks.
   edge <- DBI::dbGetQuery(

@@ -13,4 +13,6 @@ test("npm pack includes LICENSE and THIRD_PARTY_NOTICES.md", () => {
   const files = pack.files.map((f) => f.path);
   assert.ok(files.includes("LICENSE"), files.join(", "));
   assert.ok(files.includes("THIRD_PARTY_NOTICES.md"), files.join(", "));
+  assert.ok(files.includes("src/channel.js"), files.join(", "));
+  assert.ok(files.includes("artifacts-dev.json"), files.join(", "));
 });

@@ -38,6 +38,7 @@ src/bigwig_reader.c|bigwig_reader.c
 src/libbigwig_hfile_io.c|libbigwig_hfile_io.c
 src/kmer_udf.c|kmer_udf.c
 src/tabix_reader.c|tabix_reader.c
+src/named_attribute_columns.c|named_attribute_columns.c
 src/vep_parser.c|vep_parser.c
 src/duckvep/kernel/src/duckvep_kernel.c|duckvep/kernel/src/duckvep_kernel.c
 src/duckvep/kernel/src/duckvep_so.c|duckvep/kernel/src/duckvep_so.c

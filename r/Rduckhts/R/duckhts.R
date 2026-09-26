@@ -1,6 +1,27 @@
 # DuckHTS SQL wrapper functions. Keep transport and native computation in the
 # extension; these functions validate R inputs and compose SQL relations.
 
+.duckhts_create_table <- function(con, table_name, select_sql, overwrite) {
+  if (DBI::dbExistsTable(con, table_name) && !overwrite) {
+    stop(
+      "Table '",
+      table_name,
+      "' already exists. Use overwrite = TRUE to replace it."
+    )
+  }
+  prefix <- if (overwrite) "CREATE OR REPLACE TABLE" else "CREATE TABLE"
+  DBI::dbExecute(
+    con,
+    sprintf(
+      "%s %s AS %s",
+      prefix,
+      sql_quote_identifier(con, table_name),
+      select_sql
+    )
+  )
+  invisible(TRUE)
+}
+
 #' Create VCF/BCF Table
 #'
 #' Creates a DuckDB table from a VCF or BCF file using the DuckHTS extension.
@@ -58,19 +79,6 @@ rduckhts_bcf <- function(
   overwrite = FALSE,
   samples = NULL
 ) {
-  if (!missing(table_name) && !is.null(table_name)) {
-    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
-      stop(
-        "Table '",
-        table_name,
-        "' already exists. Use overwrite = TRUE to replace it."
-      )
-    }
-    if (DBI::dbExistsTable(con, table_name)) {
-      DBI::dbRemoveTable(con, table_name)
-    }
-  }
-
   params <- list()
   if (!is.null(samples)) params$samples <- sql_quote_string(con, samples)
   if (!is.null(region)) {
@@ -127,22 +135,16 @@ rduckhts_bcf <- function(
 
   param_str <- build_param_str(params)
 
+  select_sql <- sprintf(
+    "SELECT * FROM read_bcf(%s%s)",
+    sql_quote_string(con, path),
+    param_str
+  )
   if (!is.null(table_name)) {
-    create_query <- sprintf(
-      "CREATE TABLE %s AS SELECT * FROM read_bcf(%s%s)",
-      sql_quote_identifier(con, table_name),
-      sql_quote_string(con, path),
-      param_str
-    )
+    .duckhts_create_table(con, table_name, select_sql, overwrite)
   } else {
-    create_query <- sprintf(
-      "CREATE VIEW bcf_data AS SELECT * FROM read_bcf(%s%s)",
-      sql_quote_string(con, path),
-      param_str
-    )
+    DBI::dbExecute(con, paste("CREATE VIEW bcf_data AS", select_sql))
   }
-
-  DBI::dbExecute(con, create_query)
   invisible(TRUE)
 }
 
@@ -206,19 +208,6 @@ rduckhts_bam <- function(
   decompression_threads = 2,
   overwrite = FALSE
 ) {
-  if (!missing(table_name) && !is.null(table_name)) {
-    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
-      stop(
-        "Table '",
-        table_name,
-        "' already exists. Use overwrite = TRUE to replace it."
-      )
-    }
-    if (DBI::dbExistsTable(con, table_name)) {
-      DBI::dbRemoveTable(con, table_name)
-    }
-  }
-
   params <- list()
   if (!is.null(region)) {
     params$region <- sql_quote_string(con, region)
@@ -265,22 +254,16 @@ rduckhts_bam <- function(
 
   param_str <- build_param_str(params)
 
+  select_sql <- sprintf(
+    "SELECT * FROM read_bam(%s%s)",
+    sql_quote_string(con, path),
+    param_str
+  )
   if (!is.null(table_name)) {
-    create_query <- sprintf(
-      "CREATE TABLE %s AS SELECT * FROM read_bam(%s%s)",
-      sql_quote_identifier(con, table_name),
-      sql_quote_string(con, path),
-      param_str
-    )
+    .duckhts_create_table(con, table_name, select_sql, overwrite)
   } else {
-    create_query <- sprintf(
-      "CREATE VIEW bam_data AS SELECT * FROM read_bam(%s%s)",
-      sql_quote_string(con, path),
-      param_str
-    )
+    DBI::dbExecute(con, paste("CREATE VIEW bam_data AS", select_sql))
   }
-
-  DBI::dbExecute(con, create_query)
   invisible(TRUE)
 }
 
@@ -314,19 +297,6 @@ rduckhts_pileup <- function(
   flag_mask = 1796,
   overwrite = FALSE
 ) {
-  if (!missing(table_name) && !is.null(table_name)) {
-    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
-      stop(
-        "Table '",
-        table_name,
-        "' already exists. Use overwrite = TRUE to replace it."
-      )
-    }
-    if (DBI::dbExistsTable(con, table_name)) {
-      DBI::dbRemoveTable(con, table_name)
-    }
-  }
-
   if (
     is.null(region) || length(region) != 1L || is.na(region) || !nzchar(region)
   ) {
@@ -352,22 +322,16 @@ rduckhts_pileup <- function(
   }
   param_str <- build_param_str(params)
 
+  select_sql <- sprintf(
+    "SELECT * FROM read_pileup(%s%s)",
+    sql_quote_string(con, path),
+    param_str
+  )
   if (!is.null(table_name)) {
-    create_query <- sprintf(
-      "CREATE TABLE %s AS SELECT * FROM read_pileup(%s%s)",
-      sql_quote_identifier(con, table_name),
-      sql_quote_string(con, path),
-      param_str
-    )
+    .duckhts_create_table(con, table_name, select_sql, overwrite)
   } else {
-    create_query <- sprintf(
-      "CREATE VIEW pileup_data AS SELECT * FROM read_pileup(%s%s)",
-      sql_quote_string(con, path),
-      param_str
-    )
+    DBI::dbExecute(con, paste("CREATE VIEW pileup_data AS", select_sql))
   }
-
-  DBI::dbExecute(con, create_query)
   invisible(TRUE)
 }
 
@@ -465,19 +429,6 @@ rduckhts_fasta <- function(
   scan_mode = NULL,
   overwrite = FALSE
 ) {
-  if (!missing(table_name) && !is.null(table_name)) {
-    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
-      stop(
-        "Table '",
-        table_name,
-        "' already exists. Use overwrite = TRUE to replace it."
-      )
-    }
-    if (DBI::dbExistsTable(con, table_name)) {
-      DBI::dbRemoveTable(con, table_name)
-    }
-  }
-
   params <- list()
   if (!is.null(region)) {
     params$region <- sql_quote_string(con, region)
@@ -499,22 +450,16 @@ rduckhts_fasta <- function(
   }
   param_str <- build_param_str(params)
 
+  select_sql <- sprintf(
+    "SELECT * FROM read_fasta(%s%s)",
+    sql_quote_string(con, path),
+    param_str
+  )
   if (!is.null(table_name)) {
-    create_query <- sprintf(
-      "CREATE TABLE %s AS SELECT * FROM read_fasta(%s%s)",
-      sql_quote_identifier(con, table_name),
-      sql_quote_string(con, path),
-      param_str
-    )
+    .duckhts_create_table(con, table_name, select_sql, overwrite)
   } else {
-    create_query <- sprintf(
-      "CREATE VIEW fasta_data AS SELECT * FROM read_fasta(%s%s)",
-      sql_quote_string(con, path),
-      param_str
-    )
+    DBI::dbExecute(con, paste("CREATE VIEW fasta_data AS", select_sql))
   }
-
-  DBI::dbExecute(con, create_query)
   invisible(TRUE)
 }
 
@@ -576,19 +521,6 @@ rduckhts_bigwig <- function(
     )
   }
 
-  if (!missing(table_name) && !is.null(table_name)) {
-    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
-      stop(
-        "Table '",
-        table_name,
-        "' already exists. Use overwrite = TRUE to replace it."
-      )
-    }
-    if (DBI::dbExistsTable(con, table_name)) {
-      DBI::dbRemoveTable(con, table_name)
-    }
-  }
-
   params <- list(
     blocks_per_iteration = as.character(as.integer(blocks_per_iteration))
   )
@@ -605,21 +537,20 @@ rduckhts_bigwig <- function(
     }
   )
   if (is.null(table_name)) {
-    statement <- paste("CREATE VIEW bigwig_data AS", query)
+    DBI::dbExecute(con, paste("CREATE VIEW bigwig_data AS", query))
   } else {
-    statement <- sprintf(
-      "CREATE TABLE %s AS %s",
-      sql_quote_identifier(con, table_name),
-      query
-    )
+    .duckhts_create_table(con, table_name, query, overwrite)
   }
-  DBI::dbExecute(con, statement)
   invisible(TRUE)
 }
 
 #' Create BED Table
 #'
 #' Creates a DuckDB table from a BED file using the DuckHTS extension.
+#'
+#' @param error_policy Optional short-line policy: \code{"error"} (default),
+#'   \code{"skip"}, or \code{"report"}. Report adds diagnostic columns and
+#'   requires a full-file scan rather than a region query.
 #'
 #' @param con A DuckDB connection with DuckHTS loaded
 #' @param table_name Name for the created table
@@ -642,21 +573,9 @@ rduckhts_bed <- function(
   region = NULL,
   index_path = NULL,
   scan_mode = NULL,
-  overwrite = FALSE
+  overwrite = FALSE,
+  error_policy = NULL
 ) {
-  if (!missing(table_name) && !is.null(table_name)) {
-    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
-      stop(
-        "Table '",
-        table_name,
-        "' already exists. Use overwrite = TRUE to replace it."
-      )
-    }
-    if (DBI::dbExistsTable(con, table_name)) {
-      DBI::dbRemoveTable(con, table_name)
-    }
-  }
-
   params <- list()
   if (!is.null(region)) {
     params$region <- sql_quote_string(con, region)
@@ -670,24 +589,25 @@ rduckhts_bed <- function(
       .validate_scan_mode_param(scan_mode)
     )
   }
+  if (!is.null(error_policy)) {
+    if (!is.character(error_policy) || length(error_policy) != 1L ||
+        is.na(error_policy) || !tolower(error_policy) %in% c("error", "skip", "report")) {
+      stop("error_policy must be 'error', 'skip', or 'report'", call. = FALSE)
+    }
+    params$error_policy <- sql_quote_string(con, tolower(error_policy))
+  }
   param_str <- build_param_str(params)
 
+  select_sql <- sprintf(
+    "SELECT * FROM read_bed(%s%s)",
+    sql_quote_string(con, path),
+    param_str
+  )
   if (!is.null(table_name)) {
-    create_query <- sprintf(
-      "CREATE TABLE %s AS SELECT * FROM read_bed(%s%s)",
-      sql_quote_identifier(con, table_name),
-      sql_quote_string(con, path),
-      param_str
-    )
+    .duckhts_create_table(con, table_name, select_sql, overwrite)
   } else {
-    create_query <- sprintf(
-      "CREATE VIEW bed_data AS SELECT * FROM read_bed(%s%s)",
-      sql_quote_string(con, path),
-      param_str
-    )
+    DBI::dbExecute(con, paste("CREATE VIEW bed_data AS", select_sql))
   }
-
-  DBI::dbExecute(con, create_query)
   invisible(TRUE)
 }
 
@@ -1333,19 +1253,6 @@ rduckhts_fastq <- function(
   scan_mode = NULL,
   overwrite = FALSE
 ) {
-  if (!missing(table_name) && !is.null(table_name)) {
-    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
-      stop(
-        "Table '",
-        table_name,
-        "' already exists. Use overwrite = TRUE to replace it."
-      )
-    }
-    if (DBI::dbExistsTable(con, table_name)) {
-      DBI::dbRemoveTable(con, table_name)
-    }
-  }
-
   params <- list()
   if (!is.null(mate_path)) {
     params$mate_path <- sql_quote_string(con, mate_path)
@@ -1377,22 +1284,16 @@ rduckhts_fastq <- function(
 
   param_str <- build_param_str(params)
 
+  select_sql <- sprintf(
+    "SELECT * FROM read_fastq(%s%s)",
+    sql_quote_string(con, path),
+    param_str
+  )
   if (!is.null(table_name)) {
-    create_query <- sprintf(
-      "CREATE TABLE %s AS SELECT * FROM read_fastq(%s%s)",
-      sql_quote_identifier(con, table_name),
-      sql_quote_string(con, path),
-      param_str
-    )
+    .duckhts_create_table(con, table_name, select_sql, overwrite)
   } else {
-    create_query <- sprintf(
-      "CREATE VIEW fastq_data AS SELECT * FROM read_fastq(%s%s)",
-      sql_quote_string(con, path),
-      param_str
-    )
+    DBI::dbExecute(con, paste("CREATE VIEW fastq_data AS", select_sql))
   }
-
-  DBI::dbExecute(con, create_query)
   invisible(TRUE)
 }
 
@@ -1437,6 +1338,7 @@ rduckhts_detect_quality_encoding <- function(con, path, max_records = 10000) {
 #'   instead of index-backed count paths. Sequential mode is incompatible with
 #'   \code{region}.
 #' @param attributes_map Logical. If TRUE, returns raw attributes as a scalar MAP column
+#' @param attributes Character vector of attribute keys to expose as VARCHAR columns
 #' @param attributes_list Logical. If TRUE, returns attributes as MAP(VARCHAR, VARCHAR[])
 #' @param attributes_pairs Logical. If TRUE, returns attributes as a LIST of key/value/index structs
 #' @param strict Logical. If TRUE, enforce GFF3 structural validation while scanning
@@ -1460,21 +1362,9 @@ rduckhts_gff <- function(
   attributes_list = FALSE,
   attributes_pairs = FALSE,
   strict = FALSE,
-  overwrite = FALSE
+  overwrite = FALSE,
+  attributes = NULL
 ) {
-  if (!missing(table_name) && !is.null(table_name)) {
-    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
-      stop(
-        "Table '",
-        table_name,
-        "' already exists. Use overwrite = TRUE to replace it."
-      )
-    }
-    if (DBI::dbExistsTable(con, table_name)) {
-      DBI::dbRemoveTable(con, table_name)
-    }
-  }
-
   params <- list()
   if (!is.null(region)) {
     params$region <- sql_quote_string(con, region)
@@ -1522,6 +1412,9 @@ rduckhts_gff <- function(
       .validate_scan_mode_param(scan_mode)
     )
   }
+  if (!is.null(attributes)) {
+    params$attributes <- sql_varchar_list_literal(con, attributes, "attributes")
+  }
   if (attributes_map) {
     params$attributes_map <- "true"
   }
@@ -1537,22 +1430,16 @@ rduckhts_gff <- function(
 
   param_str <- build_param_str(params)
 
+  select_sql <- sprintf(
+    "SELECT * FROM read_gff(%s%s)",
+    sql_quote_string(con, path),
+    param_str
+  )
   if (!is.null(table_name)) {
-    create_query <- sprintf(
-      "CREATE TABLE %s AS SELECT * FROM read_gff(%s%s)",
-      sql_quote_identifier(con, table_name),
-      sql_quote_string(con, path),
-      param_str
-    )
+    .duckhts_create_table(con, table_name, select_sql, overwrite)
   } else {
-    create_query <- sprintf(
-      "CREATE VIEW gff_data AS SELECT * FROM read_gff(%s%s)",
-      sql_quote_string(con, path),
-      param_str
-    )
+    DBI::dbExecute(con, paste("CREATE VIEW gff_data AS", select_sql))
   }
-
-  DBI::dbExecute(con, create_query)
   invisible(TRUE)
 }
 
@@ -1574,6 +1461,7 @@ rduckhts_gff <- function(
 #'   instead of index-backed count paths. Sequential mode is incompatible with
 #'   \code{region}.
 #' @param attributes_map Logical. If TRUE, returns raw attributes as a scalar MAP column
+#' @param attributes Character vector of attribute keys to expose as VARCHAR columns
 #' @param attributes_list Logical. If TRUE, returns attributes as MAP(VARCHAR, VARCHAR[])
 #' @param attributes_pairs Logical. If TRUE, returns attributes as a LIST of key/value/index structs
 #' @param overwrite Logical. If TRUE, overwrites existing table
@@ -1595,21 +1483,9 @@ rduckhts_gtf <- function(
   attributes_map = FALSE,
   attributes_list = FALSE,
   attributes_pairs = FALSE,
-  overwrite = FALSE
+  overwrite = FALSE,
+  attributes = NULL
 ) {
-  if (!missing(table_name) && !is.null(table_name)) {
-    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
-      stop(
-        "Table '",
-        table_name,
-        "' already exists. Use overwrite = TRUE to replace it."
-      )
-    }
-    if (DBI::dbExistsTable(con, table_name)) {
-      DBI::dbRemoveTable(con, table_name)
-    }
-  }
-
   params <- list()
   if (!is.null(region)) {
     params$region <- sql_quote_string(con, region)
@@ -1657,6 +1533,9 @@ rduckhts_gtf <- function(
       .validate_scan_mode_param(scan_mode)
     )
   }
+  if (!is.null(attributes)) {
+    params$attributes <- sql_varchar_list_literal(con, attributes, "attributes")
+  }
   if (attributes_map) {
     params$attributes_map <- "true"
   }
@@ -1669,22 +1548,16 @@ rduckhts_gtf <- function(
 
   param_str <- build_param_str(params)
 
+  select_sql <- sprintf(
+    "SELECT * FROM read_gtf(%s%s)",
+    sql_quote_string(con, path),
+    param_str
+  )
   if (!is.null(table_name)) {
-    create_query <- sprintf(
-      "CREATE TABLE %s AS SELECT * FROM read_gtf(%s%s)",
-      sql_quote_identifier(con, table_name),
-      sql_quote_string(con, path),
-      param_str
-    )
+    .duckhts_create_table(con, table_name, select_sql, overwrite)
   } else {
-    create_query <- sprintf(
-      "CREATE VIEW gtf_data AS SELECT * FROM read_gtf(%s%s)",
-      sql_quote_string(con, path),
-      param_str
-    )
+    DBI::dbExecute(con, paste("CREATE VIEW gtf_data AS", select_sql))
   }
-
-  DBI::dbExecute(con, create_query)
   invisible(TRUE)
 }
 
@@ -1734,41 +1607,22 @@ rduckhts_genbank <- function(
     stop("attributes_map must be TRUE or FALSE", call. = FALSE)
   }
 
-  if (!is.null(table_name)) {
-    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
-      stop(
-        "Table '",
-        table_name,
-        "' already exists. Use overwrite = TRUE to replace it."
-      )
-    }
-    if (DBI::dbExistsTable(con, table_name)) {
-      DBI::dbRemoveTable(con, table_name)
-    }
-  }
-
   params <- list()
   if (attributes_map) {
     params$attributes_map <- "true"
   }
   param_str <- build_param_str(params)
 
+  select_sql <- sprintf(
+    "SELECT * FROM read_genbank(%s%s)",
+    sql_quote_string(con, path),
+    param_str
+  )
   if (!is.null(table_name)) {
-    create_query <- sprintf(
-      "CREATE TABLE %s AS SELECT * FROM read_genbank(%s%s)",
-      sql_quote_identifier(con, table_name),
-      sql_quote_string(con, path),
-      param_str
-    )
+    .duckhts_create_table(con, table_name, select_sql, overwrite)
   } else {
-    create_query <- sprintf(
-      "CREATE VIEW genbank_data AS SELECT * FROM read_genbank(%s%s)",
-      sql_quote_string(con, path),
-      param_str
-    )
+    DBI::dbExecute(con, paste("CREATE VIEW genbank_data AS", select_sql))
   }
-
-  DBI::dbExecute(con, create_query)
   invisible(TRUE)
 }
 
@@ -1889,19 +1743,6 @@ rduckhts_tabix <- function(
   scan_mode = NULL,
   overwrite = FALSE
 ) {
-  if (!missing(table_name) && !is.null(table_name)) {
-    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
-      stop(
-        "Table '",
-        table_name,
-        "' already exists. Use overwrite = TRUE to replace it."
-      )
-    }
-    if (DBI::dbExistsTable(con, table_name)) {
-      DBI::dbRemoveTable(con, table_name)
-    }
-  }
-
   params <- list()
   if (!is.null(region)) {
     params$region <- sql_quote_string(con, region)
@@ -1951,22 +1792,16 @@ rduckhts_tabix <- function(
   }
   param_str <- build_param_str(params)
 
+  select_sql <- sprintf(
+    "SELECT * FROM read_tabix(%s%s)",
+    sql_quote_string(con, path),
+    param_str
+  )
   if (!is.null(table_name)) {
-    create_query <- sprintf(
-      "CREATE TABLE %s AS SELECT * FROM read_tabix(%s%s)",
-      sql_quote_identifier(con, table_name),
-      sql_quote_string(con, path),
-      param_str
-    )
+    .duckhts_create_table(con, table_name, select_sql, overwrite)
   } else {
-    create_query <- sprintf(
-      "CREATE VIEW tabix_data AS SELECT * FROM read_tabix(%s%s)",
-      sql_quote_string(con, path),
-      param_str
-    )
+    DBI::dbExecute(con, paste("CREATE VIEW tabix_data AS", select_sql))
   }
-
-  DBI::dbExecute(con, create_query)
   invisible(TRUE)
 }
 
@@ -2839,20 +2674,6 @@ rduckhts_score <- function(
   .params,
   overwrite
 ) {
-  # Table guard — same pattern as rduckhts_bam, rduckhts_bcf, etc.
-  if (!missing(table_name) && !is.null(table_name)) {
-    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
-      stop(
-        "Table '",
-        table_name,
-        "' already exists. Use overwrite = TRUE to replace it."
-      )
-    }
-    if (DBI::dbExistsTable(con, table_name)) {
-      DBI::dbRemoveTable(con, table_name)
-    }
-  }
-
   # Validate .params
   if (!is.null(.params)) {
     if (!is.data.frame(.params)) {
@@ -2909,13 +2730,7 @@ rduckhts_score <- function(
   }
 
   union_sql <- paste(arms, collapse = " UNION ALL BY NAME ")
-  create_sql <- sprintf(
-    "CREATE TABLE %s AS %s",
-    sql_quote_identifier(con, table_name),
-    union_sql
-  )
-  DBI::dbExecute(con, create_sql)
-  invisible(TRUE)
+  .duckhts_create_table(con, table_name, union_sql, overwrite)
 }
 
 # --------------------------------------------------------------------------

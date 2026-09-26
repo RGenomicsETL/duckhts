@@ -1228,12 +1228,12 @@ SELECT NAME, length(SEQUENCE) FROM read_fasta('ce.fa');
 
 ## read_bed
 
-Read BED3-BED12 interval files with canonical typed columns and optional tabix-backed region filtering. scan_mode := 'sequential' forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.
+Read BED3-BED12 interval files with canonical typed columns and optional tabix-backed region filtering.
 
 Signature:
 
 ```sql
-read_bed(path, region := NULL, index_path := NULL, scan_mode := 'auto')
+read_bed(path, region := NULL, index_path := NULL, scan_mode := 'auto', error_policy := 'error')
 ```
 
 Returns:
@@ -1241,6 +1241,18 @@ Returns:
 ```
 table
 ```
+
+### scan_mode
+
+scan_mode := 'sequential' forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.
+
+### validation
+
+read_bed is a lenient reader, not a BEDv1 validator (https://samtools.github.io/hts-specs/BEDv1.pdf): it also reads UCSC track files, skipping track and browser lines, and it only rejects data lines with fewer than three tab-delimited fields. Coordinates are not checked against BEDv1: a non-integer chromStart/chromEnd reads as NULL and chromEnd < chromStart is returned as is, so filter those in SQL when strict BED is required.
+
+### error_policy
+
+error_policy := 'error' aborts on data lines with fewer than three tab-delimited fields; 'skip' drops those lines; 'report' emits them with NULL normal columns and adds error (VARCHAR), line_number (BIGINT, 1-based physical line including headers/comments), and raw_line (VARCHAR, without newline). Good rows have NULL error and raw_line. Report requires a full-file scan, not a region query. Non-integer numeric fields become NULL, reversed intervals remain accepted, and blank/header/track/browser lines are ignored in all modes.
 
 ### Examples
 
@@ -1998,12 +2010,12 @@ SELECT * FROM detect_quality_encoding('reads.fq.gz');
 
 ## read_gff
 
-Read GFF annotations with optional raw scalar and parsed list/pair attributes, strict GFF3 validation and indexed region selection.
+Read GFF annotations with optional parsed attributes, strict GFF3 validation and indexed region selection.
 
 Signature:
 
 ```sql
-read_gff(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, strict := FALSE, region := NULL, index_path := NULL, scan_mode := 'auto')
+read_gff(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, attributes := []::VARCHAR[], strict := FALSE, region := NULL, index_path := NULL, scan_mode := 'auto')
 ```
 
 Returns:
@@ -2011,6 +2023,10 @@ Returns:
 ```
 table
 ```
+
+### Attributes
+
+attributes := ['Parent', 'ID'] appends VARCHAR columns named for the requested keys. Each value equals attributes_map[key], including NULL for absent keys; repeated keys use the first value and GFF3 percent encoding is retained. Keys must be nonempty, unique under ASCII case-insensitive column naming, and distinct from fixed and optional attribute column names. Only projected keys are parsed during scanning.
 
 ### Scanning
 
@@ -2024,12 +2040,12 @@ SELECT seqname, feature, start, "end" FROM read_gff('gff_file.gff.gz') LIMIT 5;
 
 ## read_gtf
 
-Read GTF annotations with optional raw scalar and parsed list/pair attributes and indexed region selection.
+Read GTF annotations with optional parsed attributes and indexed region selection.
 
 Signature:
 
 ```sql
-read_gtf(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, region := NULL, index_path := NULL, scan_mode := 'auto')
+read_gtf(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, attributes := []::VARCHAR[], region := NULL, index_path := NULL, scan_mode := 'auto')
 ```
 
 Returns:
@@ -2037,6 +2053,10 @@ Returns:
 ```
 table
 ```
+
+### Attributes
+
+attributes := ['gene_id', 'transcript_id'] appends VARCHAR columns named for the requested keys. Each value equals attributes_map[key], including NULL for absent keys; repeated keys use the first value. Keys must be nonempty, unique under ASCII case-insensitive column naming, and distinct from fixed and optional attribute column names. Only projected keys are parsed during scanning.
 
 ### Scanning
 

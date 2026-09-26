@@ -1,3 +1,33 @@
+# Rduckhts 1.5.2.9002-0.1.5
+
+- Table-reading wrappers preserve an existing table when `overwrite = TRUE`
+  fails validation or cannot read an input file.
+
+- `rduckhts_gff()` and `rduckhts_gtf()` accept `attributes` to create named
+  attribute columns. The bundled `read_gff` and `read_gtf` SQL readers also
+  support `attributes := ['key', ...]` with values matching `attributes_map`.
+
+- The bundled extension scans tabix, GFF3 and GTF fields once up to the last
+  projected field, including attributes when requested. Strict GFF3 validation
+  still counts the entire line; SQL results and diagnostics are unchanged.
+
+- The bundled `read_hts_header` reports a scan error if it cannot reserve or
+  size its parsed `key_values` MAP list.
+
+- The bundled `cigar_aligned_blocks` grows text-output child lists
+  geometrically, including for CIGARs with long runs of leading zeroes,
+  while decoding each text CIGAR once.
+
+- `rduckhts_bed()` accepts `error_policy` to skip short BED data lines or
+  include diagnostic rows with their physical line numbers and raw text in
+  the bundled extension. The default still raises an error.
+
+- Bundled bgzip, bgunzip, idxstats, and mosdepth outputs (including CSI indexes)
+  use exclusive creation when `overwrite = FALSE`; a failed operation does not
+  remove an output that the invocation did not open. On POSIX,
+  `overwrite = TRUE` replaces a symlink output entry with a new file without
+  writing through to its referent.
+
 # Rduckhts 1.5.2.9001-0.1.5
 
 - Require duckdb 1.4.0 or newer. The bundled extension registers native

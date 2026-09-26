@@ -1,5 +1,61 @@
 # DuckHTS Extension News
 
+# duckhts 1.5.2.9002
+
+- R table-reading wrappers replace existing tables atomically with `overwrite = TRUE`;
+  invalid options or failed file reads leave the previous table intact.
+
+- `read_gff` and `read_gtf` accept `attributes := ['key', ...]` to expose requested
+  attribute keys as projected VARCHAR columns with values matching `attributes_map`.
+  Empty, duplicate and fixed/optional column names are rejected at bind.
+
+- Scan tabix, GFF3 and GTF fields once up to the last projected field; parsed
+  attribute outputs include the attributes field, and strict GFF3 checks count
+  the entire line. Values, NULLs and strict diagnostics retain their existing
+  contracts.
+
+- Stage the tabix-split BED benchmark artifact through a checksum-validated
+  temporary file, rebuilding corrupt cached outputs; test its offline derivation
+  and cache reuse with synthetic GFF3/GTF inputs.
+
+- Report a scan error when `read_hts_header` cannot reserve or size its parsed
+  `key_values` MAP list, rather than writing child values after a failed request.
+
+- Bound `cigar_aligned_blocks` child-list growth geometrically for text CIGARs,
+  including long runs of leading zeroes. Decode each text CIGAR once.
+
+- Validate the staged ONT benchmark's BAM index against its SHA-256 and byte
+  size receipt before reusing the cache.
+
+- `read_bed` accepts `error_policy := 'error'` (default), `'skip'`, or
+  `'report'` for short data lines. Report mode exposes physical line numbers,
+  raw rejected lines, and error text in three additional columns; it requires
+  a full-file scan.
+
+- Enforce no-overwrite at file creation for bgzip, bgunzip, idxstats, and
+  mosdepth output files, including CSI indexes. Failed writes clean up only
+  paths opened by that invocation; newly created files retain the process
+  umask's permissions. On POSIX, `overwrite := TRUE` replaces an existing
+  symlink entry with a new file without writing through to its referent.
+
+- Detect expired or missing pinned npm dev artifacts before downloading. Pull-request
+  checks report the expired pin and skip dev browser/pack steps while retaining unit
+  and version checks; dev publishing requires available, checksum-verified binaries.
+
+- Check npm package identities against the checkout's release or development version;
+  pull requests test both channel runtimes, and dispatch requires a matching channel.
+
+- Stage unsigned npm binaries from GitHub Actions one artifact at a time so
+  cached platforms can be reused when a single platform needs downloading.
+  Run npm package checks on pull requests that change `description.yml`.
+
+- Add an npm `dev` channel with sha256-pinned unsigned wasm builds from a named
+  GitHub Actions run. The npm loader requires an explicit DuckDB unsigned-extension
+  setting on this channel and exposes `SIGNED` and blob-capable `localFileUrl`;
+  `latest` retains signed community binaries and rejects local object URLs.
+  Packaging checks the selected channel and maps development versions to npm
+  numeric prereleases.
+
 # duckhts 1.5.2.9001
 
 - Require DuckDB 1.4.0 or newer for the extension's SQL surface while retaining

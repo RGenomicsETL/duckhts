@@ -960,11 +960,85 @@ SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_strict_invali
 ----
 InvalidCoordinate
 
+# --- strict GFF3 reports the exact number of excess fields ---
+statement error
+SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/tabix_split_extra.gff3', strict := true);
+----
+TooManyFields: expected exactly 9 tab-separated fields, found 11
+
 # --- default GFF3 reading remains permissive for existing ingestion workflows ---
 query I
 SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_strict_invalid.gff3');
 ----
 2
+
+# --- Narrow projections ignore malformed and absent later fields ---
+query III
+SELECT seqname, start, "end"
+FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_strict_invalid_attr.gff3');
+----
+chr1	1	10
+
+query III
+SELECT seqname, start, "end"
+FROM read_gff('__WORKING_DIRECTORY__/test/data/tabix_split_extra.gff3');
+----
+chr1	1	2
+
+query IIIII
+SELECT seqname, start, "end", feature, strand
+FROM read_gff('__WORKING_DIRECTORY__/test/data/tabix_split_edges.gff3')
+WHERE seqname = 'chr3';
+----
+chr3	5	6	gene	+
+
+# --- Strict GFF3 counts absent trailing fields even with a narrow projection ---
+statement error
+SELECT seqname, start, "end" FROM read_gff('__WORKING_DIRECTORY__/test/data/tabix_split_edges.gff3', strict := true);
+----
+TooFewFields: expected exactly 9 tab-separated fields, found 8
+
+# --- GFF3 field views preserve empty, missing, extra and CRLF fields ---
+query IIIIIIII
+SELECT seqname, source, feature, start, "end", score IS NULL, strand, frame
+FROM read_gff('__WORKING_DIRECTORY__/test/data/tabix_split_edges.gff3')
+ORDER BY start;
+----
+chr1	src	gene	1	2	true	+	.
+chr2	.	gene	3	4	true	-	.
+chr3	src	gene	5	6	true	+	.
+chr4	src	gene	7	8	true	+	.
+
+query IIII
+SELECT length(attributes), length(coalesce(map_extract_value(attributes_map, 'ID'), '')),
+       length(coalesce(list_extract(map_extract_value(attributes_list, 'Alias'), 2), '')),
+       coalesce(list_count(attributes_pairs), 0)
+FROM read_gff('__WORKING_DIRECTORY__/test/data/tabix_split_edges.gff3',
+              attributes_map := true, attributes_list := true, attributes_pairs := true)
+ORDER BY start;
+----
+16	3	1	3
+1	0	0	0
+1	0	0	0
+7	4	0	1
+
+# --- A long final field is not truncated at the split ---
+query II
+SELECT length(attributes), length(map_extract_value(attributes_map, 'ID'))
+FROM read_gff('__WORKING_DIRECTORY__/test/data/tabix_split_long.gff3', attributes_map := true);
+----
+4099	4096
+
+# --- GTF uses the same field positions when trailing fields are absent ---
+query IIII
+SELECT seqname, source, start, length(attributes)
+FROM read_gtf('__WORKING_DIRECTORY__/test/data/tabix_split_edges.gff3')
+ORDER BY start;
+----
+chr1	src	1	16
+chr2	.	3	1
+chr3	src	5	1
+chr4	src	7	7
 
 # --- GFF3 attributes_list: grouped multi-values, URL-decoded values ---
 query III
@@ -1008,6 +1082,22 @@ weird; semi	3	1
 # ==============================================================
 # read_tabix - generic tabix reader (bgzipped + tabix indexed)
 # ==============================================================
+
+# --- Generic projection and type inference distinguish empty, missing and trailing fields ---
+query IIIIII
+SELECT column0, column1 IS NULL, column2, column3 IS NULL, column4, column5 IS NULL
+FROM read_tabix('__WORKING_DIRECTORY__/test/data/tabix_split_edges.tsv',
+                header_names := ['column0', 'column1', 'column2', 'column3', 'column4', 'column5'])
+ORDER BY column0;
+----
+chr1	true	3	true	last	true
+chr2	false	NULL	true	NULL	true
+
+query II
+SELECT typeof(column1), typeof(column2)
+FROM read_tabix('__WORKING_DIRECTORY__/test/data/tabix_split_edges.tsv', auto_detect := true) LIMIT 1;
+----
+BIGINT	BIGINT
 
 # --- record count ---
 query I
