@@ -37,8 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # Pull requests test both channels; a dispatch tests only the channel it publishes,
-        # since each channel's version check rejects the other's version scheme.
+        # Pull requests test both runtimes; dispatch tests only the selected channel.
         channel: ${{ github.event_name == 'workflow_dispatch' && fromJSON(format('["{0}"]', inputs.channel)) || fromJSON('["signed", "dev"]') }}
     permissions:
       contents: read
@@ -59,8 +58,7 @@ jobs:
           cache-dependency-path: js/package-lock.json
 
       - run: npm ci
-      - run: npm run check:version
-        if: matrix.channel == 'dev'
+      - run: npm run check:version -- ${{ matrix.channel }} ${{ github.event_name == 'workflow_dispatch' && 'publish' || 'pr' }}
       - run: npm test
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
@@ -98,7 +96,7 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - run: npm ci
-      - run: npm run check:version
+      - run: npm run check:version -- ${{ inputs.channel }} publish
       - run: npm publish --provenance --access public --tag ${{ inputs.channel == 'dev' && 'dev' || 'latest' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

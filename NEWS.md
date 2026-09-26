@@ -2,6 +2,9 @@
 
 # duckhts 1.5.2.9002
 
+- Check npm package identities against the checkout's release or development version;
+  pull requests test both channel runtimes, and dispatch requires a matching channel.
+
 - `read_gff` and `read_gtf` accept `attributes := ['key', ...]` to expose requested
   attribute keys as projected VARCHAR columns with values matching `attributes_map`.
   Empty, duplicate and fixed/optional column names are rejected at bind.

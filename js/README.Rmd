@@ -13,7 +13,7 @@ its channel's manifest before packaging. `SIGNED` reports which channel supplied
 | npm dist-tag | Install | Binary source | DuckHTS version |
 |---|---|---|---|
 | `latest` | `npm install duckhts@latest` | signed community repository (`artifacts.json`) | released version |
-| `dev` | `npm install duckhts@dev` | unsigned GitHub Actions run (`artifacts-dev.json`) | `1.5.2.9001` as npm `1.5.2-9001` |
+| `dev` | `npm install duckhts@dev` | unsigned GitHub Actions run (`artifacts-dev.json`) | `1.5.2.9002` as npm `1.5.2-9002` |
 
 The `dev` loader refuses to load unless DuckDB has `allow_unsigned_extensions=true`.
 For duckdb-wasm, opt in explicitly when opening the database:
@@ -129,10 +129,13 @@ Set `DUCKHTS_NPM_CHANNEL=signed|dev` for staging, browser tests and packaging.
 `npm run stage` is the only network step; `npm pack` and `npm publish` run it through
 `prepack`. For offline dev staging from an existing download tree, use
 `node scripts/stage.mjs dev js/artifacts-dev.json js/dist /path/to/gh-download`
-from the repository root. `npm run check:version` checks the dev npm prerelease against
-`description.yml` and the manifest, or a signed release against `artifacts.json`.
-The publish workflow dispatch takes `channel=dev|signed` and `publish=true`; only a
-version matching the selected channel can be published.
+from the repository root. `npm run check:version` requires a matching version in
+`description.yml`, the selected manifest, `package.json` and `package-lock.json`.
+It accepts `-- <channel> <pr|publish>`; without a mode it uses strict publish checks.
+Pull requests check identity for the checkout's channel and skip the other channel's
+identity check while testing both runtimes. The publish workflow dispatch takes
+`channel=dev|signed` and `publish=true`; dispatch always requires the selected
+channel to match the checkout's version form.
 
 ## Licence
 
