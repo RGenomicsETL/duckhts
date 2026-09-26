@@ -1,5 +1,9 @@
 # Rduckhts 1.5.2.9002-0.1.5
 
+- Bundled output writers preserve the target of a Windows file symlink on
+  overwrite; table-creating wrappers reject an existing table before resolving
+  input files when `overwrite = FALSE`.
+
 - Table-reading wrappers preserve an existing table when `overwrite = TRUE`
   fails validation or cannot read an input file.
 

@@ -27,7 +27,14 @@ static inline int duckhts_output_open(const char *path, int overwrite, duckhts_o
     owner->opened = 0;
     owner->identity_valid = 0;
 #ifdef _WIN32
-    if (overwrite) flags = O_WRONLY | O_CREAT | O_TRUNC;
+    if (overwrite && !DeleteFileA(path)) {
+        DWORD error = GetLastError();
+        if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) {
+            errno = (error == ERROR_ACCESS_DENIED || error == ERROR_SHARING_VIOLATION)
+                        ? EACCES : EIO;
+            return -1;
+        }
+    }
     fd = _open(path, flags | _O_BINARY, _S_IREAD | _S_IWRITE);
     if (fd >= 0) {
         BY_HANDLE_FILE_INFORMATION info;
