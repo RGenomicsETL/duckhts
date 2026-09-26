@@ -2,6 +2,9 @@
 
 # duckhts 1.5.2.9002
 
+- R table-reading wrappers replace existing tables atomically with `overwrite = TRUE`;
+  invalid options or failed file reads leave the previous table intact.
+
 - `read_gff` and `read_gtf` accept `attributes := ['key', ...]` to expose requested
   attribute keys as projected VARCHAR columns with values matching `attributes_map`.
   Empty, duplicate and fixed/optional column names are rejected at bind.

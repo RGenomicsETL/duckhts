@@ -51,5 +51,23 @@ library(DBI)
     expect_error(case$wrapper(con, "bad", path, attributes = "START"), "collides")
     expect_error(case$wrapper(con, "bad", path, attributes = c("ID", "id")), "distinct")
     expect_error(case$wrapper(con, "bad", path, attributes = paste0("k", 1:257)), "256")
+
+    for (invalid in list(NA_character_, "START")) {
+      dbExecute(con, "CREATE OR REPLACE TABLE preserved AS SELECT 1 AS marker UNION ALL SELECT 2")
+      expected <- dbGetQuery(con, "SELECT marker FROM preserved ORDER BY marker")
+      expect_error(
+        case$wrapper(con, "preserved", path, attributes = invalid, overwrite = TRUE),
+        if (is.na(invalid)) "NA" else "collides",
+        info = kind
+      )
+      expect_true(dbExistsTable(con, "preserved"), info = paste(kind, invalid))
+      if (dbExistsTable(con, "preserved")) {
+        expect_identical(
+          dbGetQuery(con, "SELECT marker FROM preserved ORDER BY marker"),
+          expected,
+          info = paste(kind, invalid)
+        )
+      }
+    }
   }
 })()
