@@ -2,6 +2,9 @@
 
 # duckhts 1.5.2.9002
 
+- Licences are declared consistently: the DuckDB extension is MIT (top-level `LICENSE`),
+  the R packages are GPL (>= 2) and the npm package is GPL-2.0-or-later.
+
 - Publish the DuckHTS README as the project landing page and the Rduckhts pkgdown
   site under `/Rduckhts/`, with redirects for previous package documentation URLs.
 
