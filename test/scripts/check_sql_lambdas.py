@@ -6,9 +6,12 @@ import re
 
 C_STRING = re.compile(r'"(?:\\[^\n]|[^"\\\n])*"')
 SQL_STRING = re.compile(r"'(?:''|[^'])*'")
+# Any `name ->` or `(a, b) ->` outside SQL string literals is flagged, whatever the body
+# (`x -> 1` and `x -> 'c'` are deprecated lambdas too). Extension SQL does not use the JSON
+# arrow operators; write json_extract(...) instead so this guard stays exact.
 OLD_LAMBDA = re.compile(
     r"(?<![\w.])(?:[A-Za-z_]\w*|\(\s*[A-Za-z_]\w*"
-    r"(?:\s*,\s*[A-Za-z_]\w*)+\s*\))\s*->(?!\s*['\"\d])")
+    r"(?:\s*,\s*[A-Za-z_]\w*)+\s*\))\s*->")
 
 
 def deprecated_lambdas(source):
@@ -23,7 +26,9 @@ def main():
         (1, "x ->")]
     assert list(deprecated_lambdas('"list_reduce(xs, (a, b) -> a + b)"')) == [
         (1, "(a, b) ->")]
-    assert not list(deprecated_lambdas('"j->\'key\'" "j->0" "\'a -> b\'" "lambda x: x + 1"'))
+    assert [e for _, e in deprecated_lambdas('"list_transform(xs, x -> 1)" "list_transform(xs, x -> \'c\')"')] == [
+        "x ->", "x ->"]
+    assert not list(deprecated_lambdas('"\'a -> b\'" "lambda x: x + 1"'))
 
     root = Path(__file__).resolve().parents[2] / "src"
     findings = [

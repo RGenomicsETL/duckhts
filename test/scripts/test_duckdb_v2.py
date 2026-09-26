@@ -2,14 +2,17 @@
 """Exercise the release extension under a DuckDB 2.0 Python wheel."""
 
 from pathlib import Path
+import re
 
 import duckdb
 
 
 root = Path(__file__).resolve().parents[2]
 extension = root / "build/release/duckhts.duckdb_extension"
-if not duckdb.__version__.startswith("2.0."):
-    raise SystemExit(f"Expected DuckDB 2.0, found {duckdb.__version__}")
+requirements = (root / "test/scripts/duckdb-v2-requirements.txt").read_text()
+pinned = re.search(r"^duckdb==(\S+)", requirements, re.M).group(1)
+if duckdb.__version__ != pinned:
+    raise SystemExit(f"Expected the pinned DuckDB {pinned}, found {duckdb.__version__}")
 if not extension.is_file():
     raise SystemExit(f"Build the release extension first: {extension}")
 

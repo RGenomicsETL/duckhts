@@ -157,8 +157,9 @@ test-sql-lambda-syntax:
 	python3 test/scripts/check_sql_lambdas.py
 
 test-duckdb-v2: release test-sql-lambda-syntax
+	rm -rf .pi/duckdb-v2-venv
 	python3 -m venv .pi/duckdb-v2-venv
-	.pi/duckdb-v2-venv/bin/python -m pip install --pre 'duckdb>=2.0.0.dev0'
+	.pi/duckdb-v2-venv/bin/python -m pip install --require-hashes --no-deps -r test/scripts/duckdb-v2-requirements.txt
 	.pi/duckdb-v2-venv/bin/python test/scripts/test_duckdb_v2.py
 ifneq ($(filter linux_%,$(or $(DUCKDB_PLATFORM),$(shell sed -n '1p' configure/platform.txt 2>/dev/null))),)
 test_release: test-reader-alloc test-cigar-reserve-alloc test-extension-init test-named-attribute-columns test-extension-symbols
