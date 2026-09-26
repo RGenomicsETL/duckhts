@@ -2,7 +2,7 @@
 # Project configuration
 # =============================================================================
 
-.PHONY: help docs clean clean_all clean_local function_catalog test-function-catalog \
+.PHONY: help docs site clean clean_all clean_local function_catalog test-function-catalog \
 	test-duckvep-kernel test-duckvep-kernel-asan \
 	test-duckvep-kernel-ubsan test-duckvep-kernel-statistical \
 	duckvep-generated-check duckvep-upstream-git-check \
@@ -526,6 +526,10 @@ clean_local:
 # -----------------------------------------------------------------------------
 # Documentation and benchmark renders
 # -----------------------------------------------------------------------------
+
+# Build the project landing page and nested R package site.
+site:
+	Rscript scripts/build-site.R
 
 # Render README.md from README.Rmd (GitHub-flavored markdown).
 docs: check-benchmark-portability rdm
