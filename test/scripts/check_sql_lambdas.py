@@ -11,7 +11,7 @@ SQL_STRING = re.compile(r"'(?:''|[^'])*'")
 # arrow operators; write json_extract(...) instead so this guard stays exact.
 OLD_LAMBDA = re.compile(
     r"(?<![\w.])(?:[A-Za-z_]\w*|\(\s*[A-Za-z_]\w*"
-    r"(?:\s*,\s*[A-Za-z_]\w*)+\s*\))\s*->")
+    r"(?:\s*,\s*[A-Za-z_]\w*)*\s*\))\s*->")
 
 
 def deprecated_lambdas(source):
@@ -28,6 +28,7 @@ def main():
         (1, "(a, b) ->")]
     assert [e for _, e in deprecated_lambdas('"list_transform(xs, x -> 1)" "list_transform(xs, x -> \'c\')"')] == [
         "x ->", "x ->"]
+    assert [e for _, e in deprecated_lambdas('"list_transform(xs, (x) -> x)"')] == ["(x) ->"]
     assert not list(deprecated_lambdas('"\'a -> b\'" "lambda x: x + 1"'))
 
     root = Path(__file__).resolve().parents[2] / "src"
