@@ -6,7 +6,7 @@
       "description": "DuckDB extension for reading HTS file formats via htslib",
       "language": "C",
       "build": "cmake",
-      "license": "GPL-2.0-or-later",
+      "license": "MIT",
       "requires_toolchains": "python3",
       "excluded_platforms": "windows_amd64;windows_arm64",
       "maintainers": [

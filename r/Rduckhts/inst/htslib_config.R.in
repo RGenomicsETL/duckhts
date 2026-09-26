@@ -101,7 +101,7 @@ htslib_config <- function(link = htslib_default_link(), validate = TRUE,
             gcs = @HTSLIB_HAS_GCS@
         ),
         static_license_note = paste(
-            "Rduckhts is GPL-3; bundled htslib is distributed under its",
+            "Rduckhts is GPL (>= 2); bundled htslib is distributed under its",
             "permissive MIT/Expat-style license. Downstream packages remain",
             "responsible for the licenses of their complete static link."
         )

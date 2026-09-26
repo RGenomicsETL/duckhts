@@ -2,9 +2,8 @@
 
 # duckhts 1.5.2.9002
 
-- DuckHTS is licensed GPL-2.0-or-later everywhere: the community extension descriptor
-  (previously MIT), the R packages and the npm package now declare the same licence, and
-  the GPL-2 text is in the top-level `LICENSE`.
+- Licences are declared consistently: the DuckDB extension is MIT (top-level `LICENSE`),
+  the R packages are GPL (>= 2) and the npm package is GPL-2.0-or-later.
 
 - Publish the DuckHTS README as the project landing page and the Rduckhts pkgdown
   site under `/Rduckhts/`, with redirects for previous package documentation URLs.

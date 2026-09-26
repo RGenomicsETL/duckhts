@@ -2034,7 +2034,8 @@ dbDisconnect(con, shutdown = TRUE)
 
 ## License
 
-GPL (>= 2). Vendored third-party code keeps its own licences; see `inst/COPYRIGHT`.
+GPL (>= 2). The bundled DuckHTS extension sources are MIT-licensed, and other vendored
+third-party code keeps its own licences; see `inst/COPYRIGHT`.
 
 ## Credits
 

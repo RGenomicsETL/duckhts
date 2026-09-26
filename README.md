@@ -2689,10 +2689,10 @@ external-data cache.
 
 ## License
 
-DuckHTS is licensed under the GNU General Public License, version 2 or (at your option) any
-later version (GPL-2.0-or-later); see [LICENSE](LICENSE). This covers the DuckDB extension,
-the R packages and the npm package. Vendored and linked third-party code keeps its own
-licences: see [r/Rduckhts/inst/COPYRIGHT](r/Rduckhts/inst/COPYRIGHT) and
+The DuckHTS DuckDB extension is licensed under the MIT License; see [LICENSE](LICENSE).
+The R packages (Rduckhts, duckhtsbench) are licensed GPL (>= 2), and the `duckhts` npm
+package GPL-2.0-or-later. Vendored and linked third-party code keeps its own licences:
+see [r/Rduckhts/inst/COPYRIGHT](r/Rduckhts/inst/COPYRIGHT) and
 [js/THIRD_PARTY_NOTICES.md](js/THIRD_PARTY_NOTICES.md).
 
 ## Credits

@@ -1,6 +1,6 @@
 # duckhtsbench 0.0.0.9001
 
-- licensed GPL (>= 2), matching DuckHTS (previously MIT)
+- licensed GPL (>= 2), like the other DuckHTS R packages (previously MIT)
 
 - require matching reference/read SHA-256 identities before reusing a staged
   ONT BAM; receipts without identities and changed inputs require derivation, while tool

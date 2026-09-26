@@ -1,5 +1,11 @@
 This package bundles third-party sources.
 
+DuckHTS DuckDB extension
+	Source: inst/duckhts_extension (files other than the third-party trees below)
+	Authors: DuckHTS contributors
+	License: MIT
+	Reference: https://github.com/RGenomicsETL/duckhts/blob/main/LICENSE
+
 HTSlib
 	Source: inst/duckhts_extension/htslib
 	Authors: Genome Research Ltd and contributors (see LICENSE in that directory)
