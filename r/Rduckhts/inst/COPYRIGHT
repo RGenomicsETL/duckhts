@@ -4,7 +4,7 @@ DuckHTS DuckDB extension
 	Source: inst/duckhts_extension (files other than the third-party trees below)
 	Authors: DuckHTS contributors
 	License: MIT
-	Reference: https://github.com/RGenomicsETL/duckhts/blob/main/LICENSE
+	Reference: inst/duckhts_extension/LICENSE (copyright and permission notice)
 
 HTSlib
 	Source: inst/duckhts_extension/htslib
