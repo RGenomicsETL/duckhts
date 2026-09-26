@@ -60,9 +60,16 @@ jobs:
       - run: npm ci
       - run: npm run check:version -- ${{ matrix.channel }} ${{ github.event_name == 'workflow_dispatch' && 'publish' || 'pr' }}
       - run: npm test
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:browser
-      - run: npm pack --dry-run
+      - name: Check dev artifact pin
+        id: dev-artifacts
+        if: matrix.channel == 'dev'
+        run: node scripts/check-dev-artifacts.mjs ${{ github.event_name == 'pull_request' && 'pr' || 'publish' }}
+      - if: steps.dev-artifacts.outputs.stage != 'false'
+        run: npx playwright install --with-deps chromium
+      - if: steps.dev-artifacts.outputs.stage != 'false'
+        run: npm run test:browser
+      - if: steps.dev-artifacts.outputs.stage != 'false'
+        run: npm pack --dry-run
 
       - name: Upload Playwright report
         if: failure()
@@ -97,6 +104,8 @@ jobs:
 
       - run: npm ci
       - run: npm run check:version -- ${{ inputs.channel }} publish
+      - if: inputs.channel == 'dev'
+        run: node scripts/check-dev-artifacts.mjs publish
       - run: npm publish --provenance --access public --tag ${{ inputs.channel == 'dev' && 'dev' || 'latest' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

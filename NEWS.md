@@ -2,6 +2,10 @@
 
 # duckhts 1.5.2.9002
 
+- Detect expired or missing pinned npm dev artifacts before downloading. Pull-request
+  checks report the expired pin and skip dev browser/pack steps while retaining unit
+  and version checks; dev publishing requires available, checksum-verified binaries.
+
 - `read_gff` and `read_gtf` accept `attributes := ['key', ...]` to expose requested
   attribute keys as projected VARCHAR columns with values matching `attributes_map`.
   Empty, duplicate and fixed/optional column names are rejected at bind.

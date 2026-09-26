@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeChannel } from "./channel.mjs";
+import { checkDevArtifacts } from "./dev-artifacts.mjs";
 
 const packageRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const channel = process.argv[2] ?? process.env.DUCKHTS_NPM_CHANNEL;
@@ -77,6 +78,7 @@ try {
     directory = await mkdtemp(path.join(tmpdir(), "duckhts-npm-dev-"));
     temporary = true;
     const artifacts = [...new Set(pending.map(({ pin }) => pin.artifact))];
+    checkDevArtifacts(manifest, artifacts);
     for (const artifact of artifacts) {
       const destination = path.join(directory, artifact);
       await mkdir(destination, { recursive: true });

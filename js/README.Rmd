@@ -26,7 +26,10 @@ The loader checks `current_setting('allow_unsigned_extensions')`; it never enabl
 Unsigned extensions are not authenticated by DuckDB's community signature. Only opt in
 when you trust the pinned commit and artifact checksums; enabling the setting applies
 to the database, not just DuckHTS. The staging script verifies each download's sha256
-against `artifacts-dev.json` before packaging. GitHub Actions artifacts expire; once
+against `artifacts-dev.json` before packaging. The pinned GitHub Actions run's artifacts
+expire (90 days by default, subject to repository retention settings). The dev pin is
+refreshed with each X.Y.Z.9NNN development version bump. A fresh staging run cannot
+download an expired pin; already verified local `dist` files still work offline. Once
 published to npm, the package tarball retains the verified binaries permanently.
 
 ## Use
@@ -127,8 +130,20 @@ from the repository root. Local-extension blob tests run through `make wasm-play
 
 Set `DUCKHTS_NPM_CHANNEL=signed|dev` for staging, browser tests and packaging.
 `npm run stage` is the only network step; `npm pack` and `npm publish` run it through
-`prepack`. For offline dev staging from an existing download tree, use
-`node scripts/stage.mjs dev js/artifacts-dev.json js/dist /path/to/gh-download`
+`prepack`. To stage your own wasm binaries, build from source using the repository
+[local duckdb-wasm setup](../README.md#browser-wasmduckdb-wasm-local-setup) or the
+`wasm-playwright-test` target in the root Makefile (both describe a `wasm_eh` build).
+Provide a checksum-pinned dev manifest with all three platform entries and an offline
+download tree with each artifact name as a directory containing
+`duckhts.duckdb_extension.wasm`:
+
+```sh
+node js/scripts/stage.mjs dev /path/to/my-artifacts.json /path/to/output /path/to/gh-download
+```
+
+The output directory is explicit for a custom manifest; staging verifies the sha256 of
+every file before writing it. For the pinned manifest, use
+`node js/scripts/stage.mjs dev js/artifacts-dev.json js/dist /path/to/gh-download`
 from the repository root. `npm run check:version` requires a matching version in
 `description.yml`, the selected manifest, `package.json` and `package-lock.json`.
 It accepts `-- <channel> <pr|publish>`; without a mode it uses strict publish checks.
