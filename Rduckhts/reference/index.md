@@ -1,0 +1,151 @@
+# Package index
+
+## All functions
+
+- [`detect_complex_types()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/detect_complex_types.md)
+  : Detect Complex Types in DuckDB Table
+- [`duckdb_type_mappings()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/duckdb_type_mappings.md)
+  : DuckDB to R Type Mappings
+- [`duckhts_bootstrap()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/duckhts_bootstrap.md)
+  : Bootstrap the duckhts extension sources into the R package
+- [`duckhts_build()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/duckhts_build.md)
+  : Retired manual DuckHTS extension builder
+- [`duckhts_load()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/duckhts_load.md)
+  : Load the duckhts extension into a DuckDB connection
+- [`extract_array_element()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/extract_array_element.md)
+  : Extract Array Elements Safely
+- [`extract_map_data()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/extract_map_data.md)
+  : Extract MAP Keys and Values
+- [`normalize_tabix_types()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/normalize_tabix_types.md)
+  : Normalize R Data Types to DuckDB Types for Tabix
+- [`rduckhts_bam()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam.md)
+  : Create SAM/BAM/CRAM Table
+- [`rduckhts_bam_bed_coverage()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_bed_coverage.md)
+  : Native BAM/CRAM BED Regional Coverage Summary
+- [`rduckhts_bam_bin_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_bin_counts.md)
+  : Native Fixed-Width BAM/CRAM Bin Counts
+- [`rduckhts_bam_convert_parquet()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_convert_parquet.md)
+  : Convert SAM/BAM/CRAM reader output to Parquet with DuckHTS metadata
+- [`rduckhts_bam_index()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_index.md)
+  : Build BAM or CRAM Index
+- [`rduckhts_bam_multi()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_multi.md)
+  : Read multiple BAM/SAM files into a DuckDB table
+- [`rduckhts_bcf()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bcf.md)
+  : Create VCF/BCF Table
+- [`rduckhts_bcf_convert_parquet()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bcf_convert_parquet.md)
+  : Convert VCF/BCF reader output to Parquet with DuckHTS metadata
+- [`rduckhts_bcf_index()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bcf_index.md)
+  : Build VCF or BCF Index
+- [`rduckhts_bcf_multi()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bcf_multi.md)
+  : Read multiple VCF/BCF files into a DuckDB table
+- [`rduckhts_bcf_samples()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bcf_samples.md)
+  : Read the VCF/BCF Sample Catalog
+- [`rduckhts_bcftools_norm()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bcftools_norm.md)
+  : Normalize Variant Alleles with bcftools-style Semantics
+- [`rduckhts_bed()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bed.md)
+  : Create BED Table
+- [`rduckhts_bed_multi()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bed_multi.md)
+  : Read multiple BED files into a DuckDB table
+- [`rduckhts_bgunzip()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bgunzip.md)
+  : BGZF Decompress a File
+- [`rduckhts_bgzip()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bgzip.md)
+  : BGZF Compress a File
+- [`rduckhts_bigwig()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bigwig.md)
+  : Create a BigWig Signal Table
+- [`rduckhts_connect()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_connect.md)
+  : Create a DuckDB connection with bundled DuckHTS loaded
+- [`rduckhts_detect_quality_encoding()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_detect_quality_encoding.md)
+  : Detect FASTQ Quality Encoding
+- [`rduckhts_fasta()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_fasta.md)
+  : Create FASTA Table
+- [`rduckhts_fasta_index()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_fasta_index.md)
+  : Build FASTA Index
+- [`rduckhts_fasta_multi()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_fasta_multi.md)
+  : Read multiple FASTA files into a DuckDB table
+- [`rduckhts_fasta_nuc()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_fasta_nuc.md)
+  : Compute FASTA Interval Nucleotide Composition
+- [`rduckhts_fastq()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_fastq.md)
+  : Create FASTQ Table
+- [`rduckhts_fastq_multi()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_fastq_multi.md)
+  : Read multiple FASTQ files into a DuckDB table
+- [`rduckhts_functions()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_functions.md)
+  : List DuckHTS Extension Functions
+- [`rduckhts_genbank()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_genbank.md)
+  : Create GenBank Feature Table
+- [`rduckhts_genbank_to_fasta()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_genbank_to_fasta.md)
+  : Write GenBank Sequence as FASTA
+- [`rduckhts_geno()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_geno.md)
+  : Read Record-Major Genotypes
+- [`rduckhts_gff()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_gff.md)
+  : Create GFF3 Table
+- [`rduckhts_gff_convert_parquet()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_gff_convert_parquet.md)
+  : Convert GFF3 reader output to Parquet with DuckHTS metadata
+- [`rduckhts_gff_multi()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_gff_multi.md)
+  : Read multiple GFF files into a DuckDB table
+- [`rduckhts_gtf()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_gtf.md)
+  : Create GTF Table
+- [`rduckhts_gtf_multi()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_gtf_multi.md)
+  : Read multiple GTF files into a DuckDB table
+- [`rduckhts_haplotypes()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_haplotypes.md)
+  : Replay Phased Transcript Haplotypes
+- [`rduckhts_hts_header()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_hts_header.md)
+  : Read HTS Header Metadata
+- [`rduckhts_hts_index()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_hts_index.md)
+  : Read HTS Index Metadata
+- [`rduckhts_hts_index_raw()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_hts_index_raw.md)
+  : Read Raw HTS Index Blob
+- [`rduckhts_hts_index_spans()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_hts_index_spans.md)
+  : Read HTS Index Spans
+- [`rduckhts_htslib_config()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_htslib_config.md)
+  : Get the Installed htslib Linking Contract
+- [`rduckhts_htslib_info()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_htslib_info.md)
+  : Inspect the Loaded htslib Build
+- [`rduckhts_htslib_version()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_htslib_version.md)
+  : Return the Loaded htslib Version
+- [`rduckhts_liftover()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_liftover.md)
+  : Lift Over Variant Coordinates Against a Query
+- [`rduckhts_load()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_load.md)
+  : Load DuckHTS Extension
+- [`rduckhts_mosdepth()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_mosdepth.md)
+  : Native mosdepth-Compatible Coverage Outputs
+- [`rduckhts_munge()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_munge.md)
+  : Munge Summary Statistics Rows
+- [`rduckhts_pileup()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_pileup.md)
+  : Create BAM Pileup Table
+- [`rduckhts_samtools_idxstats()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_samtools_idxstats.md)
+  : samtools idxstats-Compatible Alignment Summary
+- [`rduckhts_score()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_score.md)
+  : Compute Polygenic Scores
+- [`rduckhts_simd_backend()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_simd_backend.md)
+  [`rduckhts_simd_requested_backend()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_simd_backend.md)
+  [`rduckhts_simd_backend_compiled()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_simd_backend.md)
+  [`rduckhts_simd_backend_cpu_supported()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_simd_backend.md)
+  [`rduckhts_simd_backend_available()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_simd_backend.md)
+  [`rduckhts_simd_info()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_simd_backend.md)
+  [`rduckhts_simd_kernel_info()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_simd_backend.md)
+  [`rduckhts_simd_set_backend()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_simd_backend.md)
+  : DuckHTS SIMD backend diagnostics
+- [`rduckhts_somalier_bam_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_bam_counts.md)
+  : Extract Panel-Aligned Counts from BAM or CRAM
+- [`rduckhts_somalier_charr()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_charr.md)
+  : Estimate Per-Sample Contamination with CHARR
+- [`rduckhts_somalier_import_sites()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_import_sites.md)
+  : Import an Already Selected Somalier Sites VCF or BCF
+- [`rduckhts_somalier_matched_contamination()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_matched_contamination.md)
+  : Estimate Directional Contamination Against Matched Anchors
+- [`rduckhts_somalier_relatedness()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_relatedness.md)
+  : Compare Somalier-Derived Sample Sketches
+- [`rduckhts_somalier_sketches()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_sketches.md)
+  : Prepare Somalier-Derived Sample Sketches
+- [`rduckhts_somalier_vcf_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_vcf_counts.md)
+  : Extract Panel-Aligned Counts from VCF or BCF
+- [`rduckhts_tabix()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_tabix.md)
+  : Create Tabix-Indexed File Table
+- [`rduckhts_tabix_convert_parquet()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_tabix_convert_parquet.md)
+  : Convert generic tabix reader output to Parquet with DuckHTS metadata
+- [`rduckhts_tabix_index()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_tabix_index.md)
+  : Build Tabix Index
+- [`rduckhts_tabix_multi()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_tabix_multi.md)
+  : Read multiple tabix-indexed files into a DuckDB table
+- [`setup_hts_env()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/setup_hts_env.md)
+  : Setup HTSlib Environment
