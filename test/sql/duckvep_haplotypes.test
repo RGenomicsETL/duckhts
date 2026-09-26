@@ -42,8 +42,8 @@ ORDER BY c.sample_index,c.haplotype_lane;
 
 query IIII
 SELECT sum(carrier_count),count(*) FILTER (WHERE cds IS NULL AND sequence_status<>'incomplete_input'),
- count(*) FILTER (WHERE list_min(list_transform(carriers,c->c.phase_set))<>10),
- count(*) FILTER (WHERE list_min(list_transform(carriers,c->c.ploidy))<>3)
+ count(*) FILTER (WHERE list_min(list_transform(carriers,lambda c: c.phase_set))<>10),
+ count(*) FILTER (WHERE list_min(list_transform(carriers,lambda c: c.ploidy))<>3)
 FROM duckvep_haplotypes('SELECT * FROM hap_partial_calls','hap_partial_phase');
 ----
 10	0	0	0
@@ -1139,7 +1139,7 @@ FROM (SELECT cds,protein,sequence_status,unnest(coding_blocks) b
 ATGACNTGNGCC	MTXA	ok	ok	0
 
 query TTIT
-SELECT cds, protein, carrier_count, list_transform(contributors, c -> c.event_index)::VARCHAR
+SELECT cds, protein, carrier_count, list_transform(contributors, lambda c: c.event_index)::VARCHAR
 FROM duckvep_haplotypes('SELECT * FROM hap_calls ORDER BY event_index DESC', 'hap') ORDER BY cds;
 ----
 CAAAAAAAAAAA	QKKK	2	[1]
@@ -1306,7 +1306,7 @@ CREATE TABLE hap_codon_pairs AS SELECT t.transcript_index,t.seq_region,t.strand,
  WHEN r.aa='*' THEN 'stop_lost' WHEN a.aa='*' THEN 'stop_gained'
  WHEN r.aa=a.aa THEN 'synonymous_variant' ELSE 'missense_variant' END consequence
 FROM hap_codon_tx t JOIN hap_codons r ON r.i=t.transcript_index//2 CROSS JOIN hap_codons a
-WHERE list_sum(list_transform(range(1,4),p->
+WHERE list_sum(list_transform(range(1,4),lambda p:
  (substring(r.codon,p,1)<>substring(a.codon,p,1))::INTEGER)) >= 2;
 
 statement ok
@@ -1709,7 +1709,7 @@ ORDER BY transcript_index,c.haplotype_lane;
 
 query III
 SELECT count(*),sum(carrier_count),count(*) FILTER(WHERE nominal_length_diff<>
- list_sum(list_transform(coding_blocks,b->b.length_change)))
+ list_sum(list_transform(coding_blocks,lambda b: b.length_change)))
 FROM duckvep_haplotypes('SELECT * FROM hap_nominal_calls','hap_nominal',
  input_mode:='source_records',phase_policy:='vep116_compat');
 ----
@@ -1754,7 +1754,7 @@ CAAAAAAAAAAA	2
 # Duplicate source identity uses the complete ordered ALT list. Shadowed calls
 # remain contributors; only the selected source participates in physical replay.
 query TTT
-SELECT cds,list_transform(contributors,c -> c.projection_status),
+SELECT cds,list_transform(contributors,lambda c: c.projection_status),
  coding_blocks[1].event_indices FROM duckvep_haplotypes(
  'SELECT event_index,0 seq_region,100 AS position,''A'' AS reference,[''C''] alternates,
  0 transcript_index,0 sample_index,gt FROM (VALUES (1,''1|0''),(2,''0|1'')) r(event_index,gt)',
@@ -1764,7 +1764,7 @@ AAAAAAAAAAAA	[shadowed_duplicate]	NULL
 CAAAAAAAAAAA	[ok]	[2]
 
 query TI
-SELECT cds,list_count(list_filter(contributors,c -> c.projection_status='shadowed_duplicate'))
+SELECT cds,list_count(list_filter(contributors,lambda c: c.projection_status='shadowed_duplicate'))
  FROM duckvep_haplotypes(
  'SELECT event_index,0 seq_region,100 AS position,''A'' AS reference,alternates,
  0 transcript_index,0 sample_index,''1|1'' gt
@@ -1901,7 +1901,7 @@ SELECT loaded FROM duckvep_model_load('hap_twins','SELECT 0::UINTEGER seq_region
 
 query ITTIII
 SELECT transcript_index,cds,protein,carrier_count,len(contributors),
- len(list_distinct(list_transform(carriers,c -> c.sample_index)))
+ len(list_distinct(list_transform(carriers,lambda c: c.sample_index)))
 FROM duckvep_haplotypes('SELECT c.* REPLACE(t.transcript_index AS transcript_index,s.i::UINTEGER AS sample_index) FROM hap_calls c CROSS JOIN range(3000) s(i) CROSS JOIN (VALUES (0::UINTEGER),(1)) t(transcript_index)',
  'hap_twins',max_active_events := 3,max_active_transcripts := 2,max_active_projections := 6,
  max_allele_bytes := 6) ORDER BY transcript_index,cds;
@@ -2094,7 +2094,7 @@ SELECT loaded FROM duckvep_model_load('hap_stops','SELECT 0::UINTEGER seq_region
 
 query TTIIT
 SELECT cds,protein,sequence_flags,len(coding_blocks),
- list_transform(contributors,c -> c.event_index)::VARCHAR
+ list_transform(contributors,lambda c: c.event_index)::VARCHAR
 FROM duckvep_haplotypes('SELECT event_index,0 seq_region,position,reference,alternate,
  1 alt_index,0 transcript_index,0 sample_index,[1] alleles,[true] phase_before,
  NULL::BIGINT phase_set FROM (VALUES (1,103,''A'',''G''),(2,109,''C'',''A''))
@@ -2211,7 +2211,7 @@ CREATE TABLE hap_early_stop_calls AS SELECT event_index,0 seq_region,position,re
 query ITIIIITT
 SELECT transcript_index,protein,len(cds),sequence_flags,len(coding_blocks),
  coding_blocks[1].length_change,coding_blocks[1].event_indices,
- list_transform(contributors,c -> c.event_index)
+ list_transform(contributors,lambda c: c.event_index)
  FROM duckvep_haplotypes('SELECT * FROM hap_early_stop_calls','hap_early_stop')
  ORDER BY transcript_index;
 ----

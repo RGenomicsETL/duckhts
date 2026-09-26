@@ -2,6 +2,9 @@
 
 # duckhts 1.5.2.9002
 
+- DuckHTS loads on DuckDB 2.0; SQL lambdas use the `lambda x:` syntax
+  (DuckDB >= 1.3).
+
 - Licences are declared consistently: the DuckDB extension is MIT (top-level `LICENSE`),
   the R packages are GPL (>= 2) and the npm package is GPL-2.0-or-later.
 

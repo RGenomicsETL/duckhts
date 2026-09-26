@@ -105,12 +105,12 @@ test_phase_preparation <- function() {
     }
   }))
   expect_equal(many, expected_many)
-  expect_equal(nrow(prepared("list_transform(range(65535), x -> 1)", "NULL")), 65535L)
+  expect_equal(nrow(prepared("list_transform(range(65535), lambda x: 1)", "NULL")), 65535L)
   expect_error(prepared("[]", "[]"), pattern = "ploidy")
   expect_error(prepared("[0,1]", "[true]"), pattern = "equal length")
   expect_error(prepared("[0,-1]", "NULL"), pattern = "non-negative")
   expect_error(prepared("[0,1]", "NULL", "guess"), pattern = "phase_policy")
-  expect_error(prepared("list_transform(range(65536), x -> 1)", "NULL"), pattern = "ploidy")
+  expect_error(prepared("list_transform(range(65536), lambda x: 1)", "NULL"), pattern = "ploidy")
   expect_equal(dbGetQuery(con, "SELECT 42 n")$n, 42L)
 }
 
