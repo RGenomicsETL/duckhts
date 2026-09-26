@@ -2,6 +2,9 @@
 
 # duckhts 1.5.2.9002
 
+- Publish the DuckHTS README as the project landing page and the Rduckhts pkgdown
+  site under `/Rduckhts/`, with redirects for previous package documentation URLs.
+
 - On Windows, output overwrite removes a file symlink without writing through
   to its target; R table-creating wrappers reject an existing table before
   resolving input files when `overwrite = FALSE`.

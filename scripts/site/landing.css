@@ -1,0 +1,92 @@
+:root {
+  --site-blue: #276dc3;
+  --site-blue-dark: #174a8b;
+  --site-line: #d7dee7;
+  --site-surface: #f6f8fa;
+}
+
+body {
+  max-width: 1120px;
+}
+
+nav > p {
+  align-items: center;
+  display: flex;
+  gap: 0.35rem;
+}
+
+nav .project-home {
+  color: var(--site-blue-dark);
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-right: auto;
+}
+
+.frontmatter .title h1 {
+  color: var(--site-blue-dark);
+  font-size: clamp(2.5rem, 7vw, 4.5rem);
+  letter-spacing: -0.04em;
+  margin: 0.35em 0;
+}
+
+.body {
+  padding: clamp(1rem, 3vw, 2.5rem);
+}
+
+a,
+a:visited {
+  color: var(--site-blue);
+}
+
+pre > code {
+  background: var(--site-surface);
+  border: 1px solid var(--site-line);
+  border-radius: 0.35rem;
+  white-space: pre;
+}
+
+table {
+  border-color: var(--site-line);
+  width: 100%;
+}
+
+thead th {
+  text-align: left;
+}
+
+tbody td:first-child strong {
+  color: var(--site-blue);
+  font-family: "DejaVu Sans Mono", "Droid Sans Mono", Consolas, monospace;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  body {
+    padding: 0.75rem;
+  }
+
+  nav > p {
+    flex-wrap: wrap;
+  }
+
+  table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  th:first-child,
+  td:first-child {
+    min-width: 9rem;
+  }
+
+  th:nth-child(2),
+  td:nth-child(2) {
+    min-width: 28rem;
+  }
+
+  th:nth-child(3),
+  td:nth-child(3) {
+    min-width: 10rem;
+  }
+}

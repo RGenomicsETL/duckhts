@@ -60,6 +60,7 @@ DuckBedQC/
 cmrg-benchmarkset-manuscript/
 
 # Generated docs and benchmark renders
+/_site/
 README.html
 benchmarks/*.html
 benchmark_results.csv

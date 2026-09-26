@@ -1,4 +1,12 @@
-url: https://rgenomicsetl.github.io/duckhts/
+url: https://rgenomicsetl.github.io/duckhts/Rduckhts/
 template:
   bootstrap: 5
+navbar:
+  structure:
+    left: [reference, articles, news]
+    right: [project, search, github]
+  components:
+    project:
+      text: DuckHTS project
+      href: https://rgenomicsetl.github.io/duckhts/
 
