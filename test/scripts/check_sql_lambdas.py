@@ -34,7 +34,7 @@ def main():
     findings = [
         f"{path}:{line}: {expression}"
         for path in sorted(root.rglob("*.c"))
-        for line, expression in deprecated_lambdas(path.read_text())
+        for line, expression in deprecated_lambdas(path.read_text(encoding="utf-8"))
     ]
     if findings:
         raise SystemExit("Deprecated SQL lambda in C literal:\n" + "\n".join(findings))

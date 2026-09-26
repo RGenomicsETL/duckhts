@@ -9,7 +9,7 @@ import duckdb
 
 root = Path(__file__).resolve().parents[2]
 extension = root / "build/release/duckhts.duckdb_extension"
-requirements = (root / "test/scripts/duckdb-v2-requirements.txt").read_text()
+requirements = (root / "test/scripts/duckdb-v2-requirements.txt").read_text(encoding="utf-8")
 pinned = re.search(r"^duckdb==(\S+)", requirements, re.M).group(1)
 if duckdb.__version__ != pinned:
     raise SystemExit(f"Expected the pinned DuckDB {pinned}, found {duckdb.__version__}")
