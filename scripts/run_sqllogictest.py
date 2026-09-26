@@ -30,6 +30,8 @@ _COPY_OUTPUT = re.compile(r"\bTO\s+'([^']+)'", re.IGNORECASE)
 _MOSDEPTH_PREFIX = re.compile(r"\bduckhts_mosdepth\s*\(\s*'([^']+)'", re.IGNORECASE)
 _MOSDEPTH_SUFFIXES = (
     ".mosdepth.summary.txt",
+    ".mosdepth.global.dist.txt",
+    ".mosdepth.region.dist.txt",
     ".per-base.bed.gz",
     ".per-base.bed.gz.csi",
     ".regions.bed.gz",
