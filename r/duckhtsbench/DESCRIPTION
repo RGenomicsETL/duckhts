@@ -5,7 +5,7 @@ Version: 0.0.0.9001
 Authors@R: person("Sounkou", role = c("aut", "cre"), email = "sounkou@example.org")
 Description: Internal utilities that declare, stage, and validate reproducible
     benchmark and conformance inputs for DuckHTS.
-License: MIT + file LICENSE
+License: GPL (>= 2)
 Encoding: UTF-8
 Imports:
     digest,

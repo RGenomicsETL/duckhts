@@ -20,7 +20,7 @@ Description: Bundles the 'duckhts' 'DuckDB' extension for reading High Throughpu
     Sequencing file formats with 'DuckDB'. The 'DuckDB' C extension API
     <https://duckdb.org/docs/stable/clients/c/api> and its 'htslib' dependency are
     compiled from vendored sources during package installation. James K Bonfield and co-authors (2021) <doi:10.1093/gigascience/giab007>. VariantKey / RegionKey support follows Nicola Asuni (2018) <doi:10.1101/473744>.
-License: GPL-3
+License: GPL (>= 2)
 Copyright: See inst/COPYRIGHT
 Encoding: UTF-8
 SystemRequirements: GNU make, cmake, zlib, libbz2, liblzma, libcurl, openssl (development headers)

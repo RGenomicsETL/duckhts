@@ -2034,7 +2034,7 @@ dbDisconnect(con, shutdown = TRUE)
 
 ## License
 
-GPL-3.
+GPL (>= 2). Vendored third-party code keeps its own licences; see `inst/COPYRIGHT`.
 
 ## Credits
 
