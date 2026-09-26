@@ -48,6 +48,8 @@
   Packaging checks the selected channel and maps development versions to npm
   numeric prereleases.
 
+# duckhts 1.5.2.9001
+
 - Require DuckDB 1.4.0 or newer for the extension's SQL surface while retaining
   the stable v1.2.0 C API target. Register native functions before dependent SQL
   macros so DuckDB 1.4 can load the extension, register complete native overload
