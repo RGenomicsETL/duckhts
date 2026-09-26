@@ -679,14 +679,15 @@ rduckhts_bed <- function(
         "' already exists. Use overwrite = TRUE to replace it."
       )
     }
-    if (DBI::dbExistsTable(con, table_name)) {
-      DBI::dbRemoveTable(con, table_name)
-    }
   }
 
   if (!is.null(table_name)) {
+    # CREATE OR REPLACE runs as one statement: if read_bed rejects the arguments or
+    # the input, the existing table is left as it was.
+    prefix <- if (overwrite) "CREATE OR REPLACE TABLE" else "CREATE TABLE"
     create_query <- sprintf(
-      "CREATE TABLE %s AS SELECT * FROM read_bed(%s%s)",
+      "%s %s AS SELECT * FROM read_bed(%s%s)",
+      prefix,
       sql_quote_identifier(con, table_name),
       sql_quote_string(con, path),
       param_str

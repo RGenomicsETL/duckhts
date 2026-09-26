@@ -184,6 +184,11 @@ test_bed_error_policy <- function() {
   expect_error(rduckhts_bed(con, "bed_skip", path, overwrite = TRUE,
     error_policy = "other"), "error_policy must be")
   expect_true(DBI::dbExistsTable(con, "bed_skip"))
+  # A combination the SQL binder rejects (report with a region) also leaves it intact.
+  n_before <- DBI::dbGetQuery(con, "SELECT count(*) AS n FROM bed_skip")$n
+  expect_error(rduckhts_bed(con, "bed_skip", path, overwrite = TRUE,
+    region = "chr1:1-10", error_policy = "report"), "physical line numbers")
+  expect_equal(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM bed_skip")$n, n_before)
   expect_error(rduckhts_bed(con, "bed_region", path,
     region = "chr1:1-10", error_policy = "report"), "physical line numbers")
 }
