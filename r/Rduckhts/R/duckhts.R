@@ -649,19 +649,6 @@ rduckhts_bed <- function(
   overwrite = FALSE,
   error_policy = NULL
 ) {
-  if (!missing(table_name) && !is.null(table_name)) {
-    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
-      stop(
-        "Table '",
-        table_name,
-        "' already exists. Use overwrite = TRUE to replace it."
-      )
-    }
-    if (DBI::dbExistsTable(con, table_name)) {
-      DBI::dbRemoveTable(con, table_name)
-    }
-  }
-
   params <- list()
   if (!is.null(region)) {
     params$region <- sql_quote_string(con, region)
@@ -683,6 +670,19 @@ rduckhts_bed <- function(
     params$error_policy <- sql_quote_string(con, tolower(error_policy))
   }
   param_str <- build_param_str(params)
+
+  if (!missing(table_name) && !is.null(table_name)) {
+    if (DBI::dbExistsTable(con, table_name) && !overwrite) {
+      stop(
+        "Table '",
+        table_name,
+        "' already exists. Use overwrite = TRUE to replace it."
+      )
+    }
+    if (DBI::dbExistsTable(con, table_name)) {
+      DBI::dbRemoveTable(con, table_name)
+    }
+  }
 
   if (!is.null(table_name)) {
     create_query <- sprintf(

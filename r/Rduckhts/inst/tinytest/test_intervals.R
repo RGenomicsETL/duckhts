@@ -180,6 +180,10 @@ test_bed_error_policy <- function() {
   expect_equal(errors$line_number, c(5, 10))
   expect_equal(errors$raw_line, c("chr1\t7", "chr2"))
   expect_equal(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM bed_report")$n, 7)
+  # An invalid policy is rejected before overwrite = TRUE drops the existing table.
+  expect_error(rduckhts_bed(con, "bed_skip", path, overwrite = TRUE,
+    error_policy = "other"), "error_policy must be")
+  expect_true(DBI::dbExistsTable(con, "bed_skip"))
   expect_error(rduckhts_bed(con, "bed_region", path,
     region = "chr1:1-10", error_policy = "report"), "physical line numbers")
 }
