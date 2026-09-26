@@ -6,7 +6,7 @@ if [[ $(uname -s) != Linux ]]; then
     exit 0
 fi
 extension=$(realpath "${1:-build/release/duckhts.duckdb_extension}")
-cli=${DUCKDB_CLI:-duckdb}
+python=${DUCKHTS_TEST_PYTHON:-python3}
 root=$(mktemp -d)
 reader=
 cleanup() {
@@ -17,6 +17,19 @@ cleanup() {
     rm -rf "$root"
 }
 trap cleanup EXIT
+
+# Run one statement with the extension loaded, replacing the calling (sub)shell so a
+# backgrounded call's PID is the process that opens the FIFO. Uses the duckdb Python
+# module the SQL tests use (CI has no DuckDB CLI); DUCKDB_CLI selects a CLI instead.
+exec_sql() {
+    if [[ -n ${DUCKDB_CLI:-} ]]; then
+        exec "$DUCKDB_CLI" -unsigned -c "LOAD '$extension'; $1"
+    fi
+    exec "$python" -c 'import duckdb, sys
+con = duckdb.connect(config={"allow_unsigned_extensions": "true"})
+con.load_extension(sys.argv[1])
+print(con.execute(sys.argv[2]).fetchall())' "$extension" "$1"
+}
 
 run_case() {
     local name=$1
@@ -29,7 +42,7 @@ run_case() {
     else
         sql="SELECT * FROM duckhts_samtools_idxstats('$dir/input', output := '$dir/output', overwrite := false);"
     fi
-    "$cli" -unsigned -c "LOAD '$extension'; $sql" >"$dir/query.log" 2>&1 &
+    (exec_sql "$sql") >"$dir/query.log" 2>&1 &
     reader=$!
     for ((i = 0; i < 400; i++)); do
         if grep -q wait_for_partner "/proc/$reader/wchan" 2>/dev/null; then
@@ -42,7 +55,8 @@ run_case() {
         sleep 0.05
     done
     if [[ $blocked != true ]]; then
-        echo "$name: input-open synchronization failed" >&2
+        echo "$name: input-open synchronization failed; query log:" >&2
+        cat "$dir/query.log" >&2
         return 1
     fi
     printf 'independently published data\n' >"$dir/expected"
@@ -106,7 +120,7 @@ run_symlink_case() {
             ;;
         bgunzip)
             printf 'payload\n' >"$dir/plain"
-            "$cli" -unsigned -c "LOAD '$extension'; SELECT * FROM bgzip('$dir/plain', output_path := '$dir/input.gz', threads := 1);" >"$dir/prepare.log" 2>&1
+            (exec_sql "SELECT * FROM bgzip('$dir/plain', output_path := '$dir/input.gz', threads := 1);") >"$dir/prepare.log" 2>&1
             if [[ $outcome == failure ]]; then
                 printf '\377' | dd of="$dir/input.gz" bs=1 seek=20 conv=notrunc status=none
             fi
@@ -123,7 +137,7 @@ run_symlink_case() {
             sql="SELECT * FROM duckhts_samtools_idxstats('$input', output := '$dir/output', overwrite := true);"
             ;;
     esac
-    "$cli" -unsigned -c "LOAD '$extension'; $sql" >"$dir/query.log" 2>&1 || status=$?
+    (exec_sql "$sql") >"$dir/query.log" 2>&1 || status=$?
     if [[ $outcome == success ]]; then
         if [[ $status -ne 0 || ! -f $dir/output || -L $dir/output ]]; then
             echo "$name: overwrite must replace symlink with a regular output" >&2
