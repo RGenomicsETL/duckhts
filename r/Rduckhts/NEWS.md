@@ -15,6 +15,10 @@
   geometrically, including for CIGARs with long runs of leading zeroes,
   while decoding each text CIGAR once.
 
+- `rduckhts_bed()` accepts `error_policy` to skip short BED data lines or
+  include diagnostic rows with their physical line numbers and raw text in
+  the bundled extension. The default still raises an error.
+
 # Rduckhts 1.5.2.9001-0.1.5
 
 - Require duckdb 1.4.0 or newer. The bundled extension registers native

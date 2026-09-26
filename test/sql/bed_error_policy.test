@@ -1,0 +1,163 @@
+# name: test/sql/bed_error_policy.test
+# description: BED error policies and physical line diagnostics
+# group: [duckhts]
+
+require duckhts
+
+query IIII
+WITH standard AS (
+  SELECT * FROM read_bed('__WORKING_DIRECTORY__/test/data/targets.bed')
+), skipped AS (
+  SELECT * FROM read_bed('__WORKING_DIRECTORY__/test/data/targets.bed', error_policy := 'skip')
+), reported AS (
+  SELECT chrom, start, "end", name, score, strand, thick_start, thick_end,
+         item_rgb, block_count, block_sizes, block_starts, extra
+  FROM read_bed('__WORKING_DIRECTORY__/test/data/targets.bed', error_policy := 'report')
+)
+SELECT (SELECT count(*) FROM (SELECT * FROM standard EXCEPT ALL SELECT * FROM skipped)),
+       (SELECT count(*) FROM (SELECT * FROM skipped EXCEPT ALL SELECT * FROM standard)),
+       (SELECT count(*) FROM (SELECT * FROM standard EXCEPT ALL SELECT * FROM reported)),
+       (SELECT count(*) FROM (SELECT * FROM reported EXCEPT ALL SELECT * FROM standard));
+----
+0	0	0	0
+
+# The committed fixture has metadata at lines 1-3, short data lines at 5 and
+# 10, and a CRLF data line at 8. Numeric conversion is nullable; reversed
+# intervals are accepted by the existing reader.
+statement error
+SELECT count(*) FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed');
+----
+read_bed: BED line has fewer than 3 tab-delimited fields
+
+statement error
+SELECT count(*) FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed', error_policy := 'error', scan_mode := 'sequential');
+----
+read_bed: BED line has fewer than 3 tab-delimited fields
+
+query I
+SELECT count(*) FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed', error_policy := 'SKIP');
+----
+5
+
+query IT
+SELECT start, name FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed', error_policy := 'skip', scan_mode := 'sequential') WHERE name = 'first';
+----
+0	first
+
+query IIT
+SELECT start, "end", name FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed', error_policy := 'skip', scan_mode := 'sequential') WHERE name = 'bad_start';
+----
+NULL	12	bad_start
+
+query IIII
+SELECT count(*), count(start), count("end"), count(*) FILTER (WHERE "end" < start)
+FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed', error_policy := 'skip');
+----
+5	4	5	1
+
+query II
+WITH skipped AS (
+  SELECT chrom, start, "end", name, score, strand, thick_start, thick_end,
+         item_rgb, block_count, block_sizes, block_starts, extra
+  FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed', error_policy := 'skip')
+), reported AS (
+  SELECT chrom, start, "end", name, score, strand, thick_start, thick_end,
+         item_rgb, block_count, block_sizes, block_starts, extra
+  FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed', error_policy := 'report')
+  WHERE error IS NULL
+)
+SELECT (SELECT count(*) FROM (SELECT * FROM skipped EXCEPT ALL SELECT * FROM reported)),
+       (SELECT count(*) FROM (SELECT * FROM reported EXCEPT ALL SELECT * FROM skipped));
+----
+0	0
+
+query ITTT
+SELECT line_number, coalesce(chrom, '<null>'), coalesce(error, '<null>'), coalesce(replace(raw_line, chr(9), '|'), '<null>')
+FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed', error_policy := 'report', scan_mode := 'sequential') ORDER BY line_number;
+----
+4	chr1	<null>	<null>
+5	<null>	read_bed: BED line has fewer than 3 tab-delimited fields	chr1|7
+6	chr1	<null>	<null>
+7	chr1	<null>	<null>
+8	chr2	<null>	<null>
+9	chr2	<null>	<null>
+10	<null>	read_bed: BED line has fewer than 3 tab-delimited fields	chr2
+
+query IIII
+SELECT count(*), count(error), count(raw_line), count(*) FILTER (WHERE chrom IS NULL AND start IS NULL AND "end" IS NULL)
+FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed', error_policy := 'report');
+----
+7	2	2	2
+
+query II
+SELECT line_number, "end" FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed', error_policy := 'report') WHERE line_number = 8;
+----
+8	3
+
+query III
+SELECT count(*), count(start), count("end") FROM (
+  SELECT chrom, start, "end" FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed', error_policy := 'report')
+);
+----
+7	4	5
+
+statement error
+SELECT count(*) FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed.gzip');
+----
+read_bed: BED line has fewer than 3 tab-delimited fields
+
+statement error
+SELECT count(*) FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed.gz');
+----
+read_bed: BED line has fewer than 3 tab-delimited fields
+
+query II
+SELECT (SELECT count(*) FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed.gzip', error_policy := 'skip', scan_mode := 'sequential')),
+       (SELECT count(*) FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed.gz', error_policy := 'skip', scan_mode := 'sequential'));
+----
+5	5
+
+query II
+SELECT (SELECT count(error) FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed.gzip', error_policy := 'report')),
+       (SELECT count(error) FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed.gz', error_policy := 'report'));
+----
+2	2
+
+# The existing htslib URL transport also preserves report diagnostics.
+query IT
+SELECT line_number, replace(raw_line, chr(9), '|') FROM read_bed('data:,chr1%090%091%0Achr1%092%0A', error_policy := 'report') WHERE error IS NOT NULL;
+----
+2	chr1|2
+
+query II
+SELECT (SELECT max(line_number) FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed.gzip', error_policy := 'report') WHERE error IS NOT NULL),
+       (SELECT max(line_number) FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed.gz', error_policy := 'report') WHERE error IS NOT NULL);
+----
+10	10
+
+statement error
+SELECT * FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed', error_policy := 'ignore');
+----
+read_bed: error_policy must be 'error', 'skip', or 'report'
+
+statement error
+SELECT * FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_error_policy.bed.gz', region := 'chr1:1-10', error_policy := 'report');
+----
+read_bed: error_policy := 'report' requires a full-file scan; physical line numbers are unavailable for region queries
+
+# A region iterator still accepts skip; it has no physical line-number contract.
+statement ok
+SELECT * FROM bgzip('__WORKING_DIRECTORY__/test/data/targets.bed',
+  output_path := '__WORKING_DIRECTORY__/test_bed_policy_indexed.bed.gz',
+  keep := TRUE, overwrite := TRUE);
+
+statement ok
+SELECT * FROM tabix_index('__WORKING_DIRECTORY__/test_bed_policy_indexed.bed.gz',
+  preset := 'bed', index_path := '__WORKING_DIRECTORY__/test_bed_policy_indexed.bed.gz.tbi', threads := 1);
+
+query I
+SELECT count(*) FROM read_bed('__WORKING_DIRECTORY__/test_bed_policy_indexed.bed.gz',
+  region := 'CHROMOSOME_I:1-20',
+  index_path := '__WORKING_DIRECTORY__/test_bed_policy_indexed.bed.gz.tbi', error_policy := 'skip');
+----
+2
