@@ -255,7 +255,8 @@ expect_identical(
     "attributes_list",
     "attributes_pairs",
     "strict",
-    "overwrite"
+    "overwrite",
+    "attributes"
   )
 )
 expect_identical(
@@ -274,7 +275,8 @@ expect_identical(
     "attributes_map",
     "attributes_list",
     "attributes_pairs",
-    "overwrite"
+    "overwrite",
+    "attributes"
   )
 )
 expect_identical(

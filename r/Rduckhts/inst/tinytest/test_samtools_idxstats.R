@@ -67,6 +67,21 @@ test_samtools_idxstats <- function() {
     rduckhts_samtools_idxstats(con, mixed_bam, output = bam_out),
     pattern = "output already exists"
   )
+
+  sentinel <- tempfile("idxstats_sentinel_")
+  writeBin(charToRaw("independent output"), sentinel)
+  malformed <- tempfile("idxstats_malformed_", fileext = ".sam")
+  on.exit(unlink(c(sentinel, malformed)), add = TRUE)
+  writeLines(c("@HD\tVN:1.6", "@SQ\tSN:chr1\tLN:100",
+               "bad\t0\tchr1\t1\t60\t1M\t*\t0\t0\tA\tI",
+               "not a SAM record"), malformed)
+  expect_error(rduckhts_samtools_idxstats(con, malformed, output = sentinel))
+  expect_equal(readBin(sentinel, "raw", n = 100L), charToRaw("independent output"))
+
+  created <- tempfile("idxstats_failed_")
+  on.exit(unlink(created), add = TRUE)
+  expect_error(rduckhts_samtools_idxstats(con, malformed, output = created))
+  expect_false(file.exists(created))
 }
 
 test_samtools_idxstats()

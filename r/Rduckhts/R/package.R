@@ -11,6 +11,6 @@
 #' @references \url{https://github.com/RGenomicsETL/duckhts}
 #' @keywords internal
 #' @useDynLib Rduckhts, .registration = TRUE
-#' @importFrom DBI dbExecute dbExistsTable dbRemoveTable
+#' @importFrom DBI dbExecute dbExistsTable
 #' @importFrom duckdb duckdb
 "_PACKAGE"

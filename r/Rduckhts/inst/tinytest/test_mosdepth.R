@@ -43,6 +43,11 @@ test_mosdepth <- function() {
   )))
   expect_true(file.exists(file.path(tmp_dir, "range_fast.per-base.bed.gz")))
   expect_true(file.exists(file.path(tmp_dir, "range_fast.per-base.bed.gz.csi")))
+  summary_path <- file.path(tmp_dir, "range_fast.mosdepth.summary.txt")
+  summary_before <- readBin(summary_path, "raw", n = file.info(summary_path)$size)
+  expect_error(rduckhts_mosdepth(con, prefix_fast, bam_path,
+                                 index_path = bam_index_path, fast_mode = TRUE))
+  expect_equal(readBin(summary_path, "raw", n = length(summary_before)), summary_before)
 
   summary_lines <- readLines(file.path(
     tmp_dir,

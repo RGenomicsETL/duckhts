@@ -1,0 +1,264 @@
+# Named columns are raw scalar MAP lookups, including first-occurrence semantics.
+require duckhts
+
+statement ok
+CREATE TABLE gff_named AS SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['Parent','ID','encoded','spaced','empty','missing','odd-key','quote''key'], attributes_map := true, attributes_list := true, attributes_pairs := true);
+
+query I
+SELECT count(*) FROM gff_named WHERE Parent IS DISTINCT FROM attributes_map['Parent'] OR ID IS DISTINCT FROM attributes_map['ID'] OR encoded IS DISTINCT FROM attributes_map['encoded'] OR spaced IS DISTINCT FROM attributes_map['spaced'] OR empty IS DISTINCT FROM attributes_map['empty'] OR missing IS DISTINCT FROM attributes_map['missing'] OR "odd-key" IS DISTINCT FROM attributes_map['odd-key'] OR "quote'key" IS DISTINCT FROM attributes_map['quote''key'];
+----
+0
+
+query TTTTT
+SELECT ID, coalesce('[' || Parent || ']', 'NULL'), encoded, spaced, coalesce('[' || empty || ']', 'NULL') FROM gff_named ORDER BY seqname, start;
+----
+first	[p1,p2]	a%3Bb%20c	value	[]
+third	[p3]	%25	other	[]
+NULL	NULL	NULL	NULL	NULL
+fourth	[]	a=b	NULL	NULL
+last	NULL	NULL	NULL	NULL
+
+query T
+SELECT typeof(ID) FROM gff_named LIMIT 1;
+----
+VARCHAR
+
+statement ok
+CREATE TABLE gtf_named AS SELECT * FROM read_gtf('__WORKING_DIRECTORY__/test/data/gtf_named_attributes.gtf', attributes := ['transcript_id','gene_id','encoded','spaced','empty','missing','odd-key','quote''key'], attributes_map := true, attributes_list := true, attributes_pairs := true);
+
+query I
+SELECT count(*) FROM gtf_named WHERE transcript_id IS DISTINCT FROM attributes_map['transcript_id'] OR gene_id IS DISTINCT FROM attributes_map['gene_id'] OR encoded IS DISTINCT FROM attributes_map['encoded'] OR spaced IS DISTINCT FROM attributes_map['spaced'] OR empty IS DISTINCT FROM attributes_map['empty'] OR missing IS DISTINCT FROM attributes_map['missing'] OR "odd-key" IS DISTINCT FROM attributes_map['odd-key'] OR "quote'key" IS DISTINCT FROM attributes_map['quote''key'];
+----
+0
+
+query TTTTT
+SELECT gene_id, transcript_id, encoded, spaced, coalesce('[' || empty || ']', 'NULL') FROM gtf_named ORDER BY seqname, start;
+----
+first	p1,p2	a%3Bb%20c	value	[]
+third	p3	%25	other	[]
+NULL	NULL	NULL	NULL	NULL
+fourth	a;b	a=b	NULL	NULL
+last	NULL	NULL	NULL	NULL
+
+# Project only a subset, reordered, without materializing raw or derived containers.
+query TT
+SELECT "odd-key", ID FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['missing','ID','Parent','odd-key'], attributes_map := true, attributes_list := true, attributes_pairs := true) ORDER BY seqname, start;
+----
+x	first
+y	third
+NULL	NULL
+NULL	fourth
+NULL	last
+
+query TT
+SELECT ID AS first_copy, ID AS second_copy FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['ID']) WHERE ID IS NOT NULL ORDER BY seqname, start;
+----
+first	first
+third	third
+fourth	fourth
+last	last
+
+query I
+SELECT sum(start) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['ID','Parent','missing']);
+----
+45
+
+query I
+SELECT count(*) FROM read_gtf('__WORKING_DIRECTORY__/test/data/gtf_named_attributes.gtf', attributes := []::VARCHAR[]);
+----
+5
+
+query T
+SELECT id FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['id']) WHERE start = 11 AND seqname = 'chr2';
+----
+lower
+
+# Identifier collisions use DuckDB's ASCII case folding, not Unicode case folding.
+query TT
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['Ä','ä'])) WHERE column_name IN ('Ä','ä') ORDER BY column_name;
+----
+Ä	VARCHAR
+ä	VARCHAR
+
+statement error
+SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['ID','id']);
+----
+distinct column names
+
+statement error
+SELECT * FROM read_gtf('__WORKING_DIRECTORY__/test/data/gtf_named_attributes.gtf', attributes := ['gene_id','gene_id']);
+----
+distinct column names
+
+statement error
+SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['START']);
+----
+collides with a reader column name
+
+statement error
+SELECT * FROM read_gtf('__WORKING_DIRECTORY__/test/data/gtf_named_attributes.gtf', attributes := ['attributes_map'], attributes_map := true);
+----
+collides with a reader column name
+
+statement error
+SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['SEQNAME']);
+----
+collides with a reader column name
+
+statement error
+SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['SOURCE']);
+----
+collides with a reader column name
+
+statement error
+SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['FEATURE']);
+----
+collides with a reader column name
+
+statement error
+SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['END']);
+----
+collides with a reader column name
+
+statement error
+SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['SCORE']);
+----
+collides with a reader column name
+
+statement error
+SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['STRAND']);
+----
+collides with a reader column name
+
+statement error
+SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['FRAME']);
+----
+collides with a reader column name
+
+statement error
+SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['ATTRIBUTES']);
+----
+collides with a reader column name
+
+statement error
+SELECT * FROM read_gtf('__WORKING_DIRECTORY__/test/data/gtf_named_attributes.gtf', attributes := ['ATTRIBUTES_LIST'], attributes_list := true);
+----
+collides with a reader column name
+
+statement error
+SELECT * FROM read_gtf('__WORKING_DIRECTORY__/test/data/gtf_named_attributes.gtf', attributes := ['ATTRIBUTES_PAIRS'], attributes_pairs := true);
+----
+collides with a reader column name
+
+query I
+SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['attributes_map']);
+----
+5
+
+statement error
+SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['']);
+----
+nonempty
+
+statement error
+SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := [NULL]::VARCHAR[]);
+----
+non-NULL
+
+statement error
+SELECT * FROM read_gtf('__WORKING_DIRECTORY__/test/data/gtf_named_attributes.gtf', attributes := NULL);
+----
+non-NULL
+
+statement error
+SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := [repeat('x', 1025)]);
+----
+at most 1024 bytes
+
+statement error
+SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := list_transform(range(257), x -> 'key' || x));
+----
+at most 256 keys
+
+# Maximum admitted key count with reordered projections.
+query I
+SELECT count(key0) + count(key255) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := list_transform(range(256), x -> 'key' || x));
+----
+0
+
+statement error
+SELECT ID FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['ID'], strict := true);
+----
+InvalidAttribute
+
+query II
+SELECT count(*), count(missing) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_many_contigs.gff.gz', attributes := ['missing','ID','Parent']);
+----
+20000	0
+
+statement ok
+CREATE TABLE many_seq AS SELECT seqname, start, "end", ID, Parent, transcript_type, gene_type FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_many_contigs.gff.gz', scan_mode := 'sequential', attributes := ['Parent','ID','transcript_type','gene_type']);
+
+statement ok
+CREATE TABLE many_idx AS SELECT seqname, start, "end", ID, Parent, transcript_type, gene_type FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_many_contigs.gff.gz', attributes := ['Parent','ID','transcript_type','gene_type']);
+
+query II
+SELECT count(*), count(DISTINCT seqname) FROM many_seq;
+----
+20000	10000
+
+query I
+SELECT count(*) FROM ((SELECT * FROM many_seq EXCEPT ALL SELECT * FROM many_idx) UNION ALL (SELECT * FROM many_idx EXCEPT ALL SELECT * FROM many_seq));
+----
+0
+
+query I
+SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_many_contigs.gff.gz', attributes := ['Parent','ID','transcript_type','gene_type'], attributes_map := true) WHERE Parent IS DISTINCT FROM attributes_map['Parent'] OR ID IS DISTINCT FROM attributes_map['ID'] OR transcript_type IS DISTINCT FROM attributes_map['transcript_type'] OR gene_type IS DISTINCT FROM attributes_map['gene_type'];
+----
+0
+
+statement ok
+CREATE TABLE many_regions AS SELECT seqname, start, "end", ID, Parent, transcript_type, gene_type FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_many_contigs.gff.gz', region := array_to_string(list_transform(range(1, 10001), x -> 'contig' || lpad(x::VARCHAR, 5, '0') || ':1-100'), ','), attributes := ['Parent','ID','transcript_type','gene_type']);
+
+query I
+SELECT count(*) FROM many_regions;
+----
+20000
+
+query I
+SELECT count(*) FROM ((SELECT * FROM many_seq EXCEPT ALL SELECT * FROM many_regions) UNION ALL (SELECT * FROM many_regions EXCEPT ALL SELECT * FROM many_seq));
+----
+0
+
+# Indexed overlapping regions must equal the corresponding sequential row filter.
+statement ok
+CREATE TABLE region_seq AS SELECT seqname, start, "end", ID, Parent FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3.gz', scan_mode := 'sequential', attributes := ['Parent','ID']) WHERE seqname = 'chr1' AND start <= 20 AND "end" >= 5;
+
+statement ok
+CREATE TABLE region_idx AS SELECT seqname, start, "end", ID, Parent FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3.gz', region := 'chr1:5-15,chr1:14-20', attributes := ['Parent','ID']);
+
+query I
+SELECT count(*) FROM region_seq;
+----
+2
+
+query I
+SELECT count(*) FROM ((SELECT * FROM region_seq EXCEPT ALL SELECT * FROM region_idx) UNION ALL (SELECT * FROM region_idx EXCEPT ALL SELECT * FROM region_seq));
+----
+0
+
+statement ok
+CREATE TABLE gtf_region_seq AS SELECT seqname, start, gene_id, transcript_id FROM read_gtf('__WORKING_DIRECTORY__/test/data/gtf_named_attributes.gtf.gz', scan_mode := 'sequential', attributes := ['gene_id','transcript_id']) WHERE seqname = 'chr1' AND start <= 20 AND "end" >= 5;
+
+statement ok
+CREATE TABLE gtf_region_idx AS SELECT seqname, start, gene_id, transcript_id FROM read_gtf('__WORKING_DIRECTORY__/test/data/gtf_named_attributes.gtf.gz', region := 'chr1:5-15,chr1:14-20', attributes := ['gene_id','transcript_id']);
+
+query I
+SELECT count(*) FROM gtf_region_idx;
+----
+2
+
+query I
+SELECT count(*) FROM ((SELECT * FROM gtf_region_seq EXCEPT ALL SELECT * FROM gtf_region_idx) UNION ALL (SELECT * FROM gtf_region_idx EXCEPT ALL SELECT * FROM gtf_region_seq));
+----
+0

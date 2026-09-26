@@ -11,7 +11,8 @@ rduckhts_bed(
   region = NULL,
   index_path = NULL,
   scan_mode = NULL,
-  overwrite = FALSE
+  overwrite = FALSE,
+  error_policy = NULL
 )
 }
 \arguments{
@@ -31,6 +32,10 @@ instead of index-backed count paths. Sequential mode is incompatible with
 \code{region}.}
 
 \item{overwrite}{Logical. If TRUE, overwrites an existing table}
+
+\item{error_policy}{Optional short-line policy: \code{"error"} (default),
+\code{"skip"}, or \code{"report"}. Report adds diagnostic columns and
+requires a full-file scan rather than a region query.}
 }
 \value{
 Invisible TRUE on success

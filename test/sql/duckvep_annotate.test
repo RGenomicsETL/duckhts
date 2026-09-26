@@ -1864,18 +1864,18 @@ SELECT duckvep_model_drop('fixture'), duckvep_model_drop('fixture2'),
 # axis is intentionally larger than this query's memory limit and must remain
 # unevaluated when its mate is incomplete or nonintegral.
 statement ok
-SET memory_limit='16MB';
+SET memory_limit='36MB';
 
 query IT
 SELECT r.reference IS NULL,r.status FROM (SELECT duckvep_repeat_alleles(
- [{unit:'A',count:32000000}],[{unit:'A',count:NULL}],true,
- max_allele_bases:=32000000) r);
+ [{unit:'A',count:64000000}],[{unit:'A',count:NULL}],true,
+ max_allele_bases:=64000000) r);
 ----
 1	incomplete_input
 
 query IT
 SELECT r.alternate IS NULL,r.status FROM (SELECT duckvep_repeat_alleles(
- [{unit:'A',count:1.5}],[{unit:'A',count:32000000}],true,
- max_allele_bases:=32000000) r);
+ [{unit:'A',count:1.5}],[{unit:'A',count:64000000}],true,
+ max_allele_bases:=64000000) r);
 ----
 1	nonintegral_count

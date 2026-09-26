@@ -1,5 +1,10 @@
 test/data/*.fa text eol=lf
 test/data/*.fai text eol=lf
+# Preserve CRLF and terminal tabs in tabix field-split fixtures.
+test/data/tabix_split_edges.gff3 -text -whitespace
+test/data/tabix_split_edges.tsv -text -whitespace
+test/data/bed_error_policy.bed whitespace=cr-at-eol
+r/Rduckhts/inst/extdata/bed_error_policy.bed whitespace=cr-at-eol
 r/Rduckhts/inst/extdata/*.fa text eol=lf
 r/Rduckhts/inst/extdata/*.fai text eol=lf
 benchmarks/data/duckvep_fastvep/**/source-commit.bin binary

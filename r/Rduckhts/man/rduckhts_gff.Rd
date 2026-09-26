@@ -19,7 +19,8 @@ rduckhts_gff(
   attributes_list = FALSE,
   attributes_pairs = FALSE,
   strict = FALSE,
-  overwrite = FALSE
+  overwrite = FALSE,
+  attributes = NULL
 )
 }
 \arguments{
@@ -55,6 +56,8 @@ instead of index-backed count paths. Sequential mode is incompatible with
 \item{strict}{Logical. If TRUE, enforce GFF3 structural validation while scanning}
 
 \item{overwrite}{Logical. If TRUE, overwrites existing table}
+
+\item{attributes}{Character vector of attribute keys to expose as VARCHAR columns}
 }
 \value{
 Invisible TRUE on success

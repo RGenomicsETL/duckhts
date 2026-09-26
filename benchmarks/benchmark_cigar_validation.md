@@ -1,8 +1,7 @@
 CIGAR validation cost
 ================
 
-This focused comparison measures the old CIGAR implementation and the shared
-checked decoder in separate R processes on the same host and inputs. It measures
+This focused comparison measures the old CIGAR implementation and the shared checked decoder in separate R processes on the same host and inputs. It measures
 all seven metric helpers individually, `has_op('M')`, `has_op('P')`, and aligned
 blocks, for both text and packed CIGAR. Candidate calls use the default overload
 and explicit strict `FALSE` and `TRUE`. Every row is retained, including missing
@@ -27,6 +26,7 @@ revision and `HEAD:src` IDs for each build, and `uncommitted` if the extension
 was built from modified sources. Those IDs describe the base revision when the
 source is uncommitted; the loaded binary’s SHA256 identifies the measured binary.
 The driver records caller-supplied source metadata without certifying the build.
+The commands below use the CSV prefix benchmarks/data/cigar_validation.
 
 ``` sh
 # Set these to the local build paths and full Git object IDs for the measured builds.
@@ -36,7 +36,9 @@ taskset -c "$CPU" Rscript scripts/benchmark_cigar_validation.R baseline \
 taskset -c "$CPU" Rscript scripts/benchmark_cigar_validation.R candidate \
   "$CANDIDATE_EXTENSION" "$CANDIDATE_SOURCE" "$CANDIDATE_REVISION" "$CANDIDATE_SRC_TREE" \
   "$CANDIDATE_SOURCE_STATE" benchmarks/data/cigar_validation full 5
-Rscript -e 'rmarkdown::render("benchmarks/benchmark_cigar_validation.Rmd")'
+Rscript -e 'rmarkdown::render("benchmarks/benchmark_cigar_validation.Rmd",
+  params = list(prefix = "data/cigar_validation", comparison = "decoder"),
+  output_file = "benchmark_cigar_validation.md")'
 ```
 
 Each invocation loads exactly one extension. For a smoke check use `smoke 2`
@@ -167,9 +169,10 @@ timings include timer resolution and scheduling noise; a zero baseline median
 has no meaningful ratio. These measurements make no scaling or malformed-input
 performance claim.
 
-The declared outputs are `data/cigar_validation_{baseline,candidate}_{metadata,inputs,results,timings}.csv`
-(or the `cigar_validation_smoke` prefix), plus `*_mismatches.csv` on an oracle
-failure. They retain per-repeat elapsed times, minimum/median/maximum times,
+The declared outputs use the prefix above, followed by `_baseline_` or
+`_candidate_` and `metadata`, `inputs`, `results` or `timings` with a `.csv`
+suffix; an oracle failure retains `*_mismatches.csv`. They retain per-repeat
+elapsed times, minimum/median/maximum times,
 complete output counts and both identity-linked fingerprints, input
 denominators, and source/binary metadata. The report is rendered only after
 both runs pass their independent oracle checks.

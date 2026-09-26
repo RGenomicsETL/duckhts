@@ -102,8 +102,13 @@ test_ont_ecoli_derivation <- function() {
   receipt <- paste0(paths[["bam"]], ".provenance.tsv")
   expect_true(file.exists(receipt))
   fields <- utils::read.delim(receipt, colClasses = "character")
-  expect_true(all(c("aligner", "aligner_preset", "sorter") %in% fields$field))
+  expect_true(all(c("aligner", "aligner_preset", "sorter", "index_sha256", "index_bytes") %in% fields$field))
   expect_equal(fields$value[fields$field == "aligner_preset"], "map-ont")
+  index <- paste0(paths[["bam"]], ".bai")
+  expect_identical(fields$value[fields$field == "index_sha256"],
+                   digest::digest(file = index, algo = "sha256"))
+  expect_identical(fields$value[fields$field == "index_bytes"],
+                   as.character(file.info(index)$size))
   aligned <- system2(samtools, c("view", "-c", "-F", "4", shQuote(paths[["bam"]])), stdout = TRUE)
   expect_equal(as.integer(aligned), length(starts))
   expect_false(any(grepl("partial", list.files(dirname(paths[["bam"]])))))
@@ -167,6 +172,22 @@ test_ont_ecoli_derivation <- function() {
   writeLines("poisoned", paths[["bam"]])
   paths <- duckhts_bench_stage_ont_ecoli(fetch = FALSE, threads = 1L,
                                        samtools = samtools, minimap2 = minimap2)
+  aligned <- system2(samtools, c("view", "-c", "-F", "4", shQuote(paths[["bam"]])), stdout = TRUE)
+  expect_equal(as.integer(aligned), length(starts))
+
+  # A same-size replacement of the index cannot be reused with the old receipt.
+  index_bytes <- readBin(index, what = "raw", n = file.info(index)$size)
+  index_bytes[[1L]] <- as.raw(bitwXor(as.integer(index_bytes[[1L]]), 1L))
+  writeBin(index_bytes, index)
+  expect_error(duckhts_bench_stage_ont_ecoli(fetch = FALSE, samtools = samtools,
+                                             minimap2 = ""), "minimap2 is required")
+  paths <- duckhts_bench_stage_ont_ecoli(fetch = FALSE, threads = 1L,
+                                       samtools = samtools, minimap2 = minimap2)
+  expect_identical(readBin(paste0(paths[["bam"]], ".bai"), what = "raw", n = 4L),
+                   charToRaw("BAI\001"))
+  fields <- utils::read.delim(receipt, colClasses = "character")
+  expect_identical(fields$value[fields$field == "index_sha256"],
+                   digest::digest(file = index, algo = "sha256"))
   aligned <- system2(samtools, c("view", "-c", "-F", "4", shQuote(paths[["bam"]])), stdout = TRUE)
   expect_equal(as.integer(aligned), length(starts))
 

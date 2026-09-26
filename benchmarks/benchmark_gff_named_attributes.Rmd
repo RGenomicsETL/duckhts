@@ -1,0 +1,111 @@
+---
+title: "GENCODE GFF3 named-attribute projections"
+output: github_document
+---
+
+The source is the public GENCODE mouse vM25 BASIC GFF3, staged by
+`scripts/stage_tabix_split.R --offline` from the `tabix_split_gff3` registry
+artifact (24,025,067 compressed bytes; 1,299,172 annotation rows). Each query
+streams the whole file in sequential mode. Measured outputs are scalar
+aggregates of the stated columns, not `count(*)` shortcuts. Five measured runs
+follow one warm-up per workload and thread setting. Times include gzip decode,
+row scan, aggregation and R/DBI query execution. Default threads are the
+runtime's own default; the GFF reader uses one worker in either setting.
+The host is a 13th Gen Intel Core i5-13500 (20 logical CPUs); `uptime` before
+the run reported load averages of 1.51, 1.09, and 0.79.
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r benchmark, include=FALSE}
+Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath(
+  "r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE
+))
+stopifnot(requireNamespace("duckhtsbench", quietly = TRUE))
+stopifnot(requireNamespace("duckdb", quietly = TRUE))
+stopifnot(requireNamespace("DBI", quietly = TRUE))
+stopifnot(requireNamespace("knitr", quietly = TRUE))
+input <- duckhtsbench::duckhts_bench_artifact_path("tabix_split_gff3")
+duckhtsbench::duckhts_bench_validate_identity("tabix_split_gff3", input)
+input <- normalizePath(input, mustWork = TRUE)
+extension <- normalizePath("build/release/duckhts.duckdb_extension", mustWork = TRUE)
+quote_sql <- function(value) paste0("'", gsub("'", "''", value, fixed = TRUE), "'")
+revision <- system2("git", c("rev-parse", "HEAD"), stdout = TRUE)
+if (system2("git", c("diff", "--quiet", "HEAD", "--", "src"),
+            stdout = FALSE, stderr = FALSE) != 0L) {
+  stop("Build source must match the recorded HEAD")
+}
+driver <- duckdb::duckdb(shared_home = FALSE, config = list(allow_unsigned_extensions = "true"))
+con <- DBI::dbConnect(driver)
+DBI::dbExecute(con, paste("LOAD", quote_sql(extension)))
+default_threads <- DBI::dbGetQuery(con, "SELECT current_setting('threads')::INTEGER AS n")$n[[1L]]
+source_sql <- paste0("read_gff(", quote_sql(input), ", scan_mode := 'sequential'")
+plain <- paste0(source_sql, ")")
+named <- paste0(source_sql, ", attributes := ['Parent', 'ID', 'gene_type'])")
+map <- paste0(source_sql, ", attributes_map := true)")
+queries <- c(
+  plain_columns = paste0("SELECT count(*) n, sum(start + \"end\") metric FROM ", plain),
+  named_none_projected = paste0("SELECT count(*) n, sum(start + \"end\") metric FROM ", named),
+  attributes_string = paste0("SELECT count(*) n, sum(length(attributes)) metric FROM ", plain),
+  map_parent = paste0("SELECT count(*) n, count(attributes_map['Parent']) metric FROM ", map),
+  regexp_three = paste0("SELECT count(*) n, sum(length(regexp_extract(attributes, '(?:^|;)Parent=([^;]*)', 1)) + length(regexp_extract(attributes, '(?:^|;)ID=([^;]*)', 1)) + length(regexp_extract(attributes, '(?:^|;)gene_type=([^;]*)', 1))) metric FROM ", plain),
+  named_three = paste0("SELECT count(*) n, sum(length(coalesce(Parent, '')) + length(coalesce(ID, '')) + length(coalesce(gene_type, ''))) metric FROM ", named),
+  named_one_projected = paste0("SELECT count(*) n, sum(length(coalesce(Parent, ''))) metric FROM ", named)
+)
+rows <- list()
+measured_runs <- list()
+for (threads in c(1L, default_threads)) {
+  DBI::dbExecute(con, paste0("SET threads = ", threads))
+  for (kind in names(queries)) {
+    sql <- queries[[kind]]
+    invisible(DBI::dbGetQuery(con, sql))
+    elapsed <- numeric(5L)
+    result <- NULL
+    for (run in seq_along(elapsed)) {
+      start <- proc.time()[["elapsed"]]
+      result <- DBI::dbGetQuery(con, sql)
+      elapsed[[run]] <- proc.time()[["elapsed"]] - start
+    }
+    stopifnot(identical(as.numeric(result$n[[1L]]), 1299172))
+    thread_label <- if (threads == 1L) "1" else paste0("default (", threads, ")")
+    measured_runs[[length(measured_runs) + 1L]] <- data.frame(
+      threads = thread_label, workload = kind, run = seq_along(elapsed),
+      seconds = elapsed, input_rows = result$n[[1L]], output_rows = 1L,
+      metric = as.character(result$metric[[1L]])
+    )
+    rows[[length(rows) + 1L]] <- data.frame(
+      threads = thread_label,
+      workload = kind, input_rows = result$n[[1L]],
+      output_rows = 1L, metric = as.character(result$metric[[1L]]),
+      median_seconds = median(elapsed), runs = length(elapsed)
+    )
+  }
+}
+results <- do.call(rbind, rows)
+previous <- c(0.540, 0.542, 0.690, 2.326, 2.371, 0.900, 0.788,
+              0.542, 0.543, 0.691, 2.327, 2.376, 0.905, 0.784)
+stopifnot(identical(results$workload, rep(names(queries), 2L)))
+results$previous_median_seconds <- previous
+write.csv(do.call(rbind, measured_runs),
+          "benchmarks/benchmark_gff_named_attributes_runs.csv", row.names = FALSE)
+DBI::dbDisconnect(con, shutdown = TRUE)
+```
+
+Source revision: `r revision`. DuckDB runtime: `r as.character(packageVersion("duckdb"))`.
+Previous medians: source revision c4728030d2770b591f0875206aac0af9be9d2c26;
+extension SHA-256 1d868ba87527209147d86dfdbf796f00ee29ecd0cbc5d81951e8ee21a8331421.
+Extension SHA-256: `r strsplit(system2("sha256sum", extension, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`.
+Input SHA-256: `r strsplit(system2("sha256sum", input, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`.
+
+```{r results, echo=FALSE}
+knitr::kable(results, digits = 3)
+```
+
+The one-key projection requests three keys at bind but scans only `Parent`.
+`named_none_projected` requests three keys at bind but reads only the physical
+coordinate columns; its scan skips attribute parsing entirely. Comparisons across
+workloads reflect different aggregation and expression costs, not isolated
+parsing cycles. `make wasm-playwright-test` built the extension from this
+checkout for duckdb-wasm 1.31.0; all six Chromium tests passed, including
+`test/wasm/gff-attributes.spec.ts`. Browser wasm timings were not measured.

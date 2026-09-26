@@ -716,8 +716,12 @@ static void read_hts_header_scan(duckdb_function_info info, duckdb_data_chunk ou
                 duckdb_list_entry entry;
                 entry.offset = duckdb_list_vector_get_size(vec_kv);
                 entry.length = e->n_kv;
-                duckdb_list_vector_reserve(vec_kv, entry.offset + entry.length);
-                duckdb_list_vector_set_size(vec_kv, entry.offset + entry.length);
+                if (duckdb_list_vector_reserve(vec_kv, entry.offset + entry.length) == DuckDBError ||
+                    duckdb_list_vector_set_size(vec_kv, entry.offset + entry.length) == DuckDBError) {
+                    duckdb_function_set_error(info, "read_hts_header: out of memory reserving key_values map");
+                    duckdb_data_chunk_set_size(output, 0);
+                    return;
+                }
 
                 duckdb_vector child = duckdb_list_vector_get_child(vec_kv);
                 duckdb_vector key_vec = duckdb_struct_vector_get_child(child, 0);
