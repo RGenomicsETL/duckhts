@@ -25,7 +25,7 @@ rduckhts_somalier_import_sites <- function(
   con, path, assembly, max_sites = 1000000,
   table_name = NULL, overwrite = FALSE
 ) {
-  .somalier_validate_output(table_name, overwrite)
+  .somalier_validate_output(con, table_name, overwrite)
   .somalier_scalar_text(path, "path")
   .somalier_scalar_text(assembly, "assembly")
   if (nchar(assembly, type = "bytes") > 1024L) {
@@ -71,7 +71,7 @@ rduckhts_somalier_vcf_counts <- function(
   filter_policy = c("pass_or_unapplied", "include_all", "error"),
   table_name = NULL, overwrite = FALSE
 ) {
-  .somalier_validate_output(table_name, overwrite)
+  .somalier_validate_output(con, table_name, overwrite)
   .somalier_scalar_text(path, "path")
   if (!is.null(samples)) .somalier_scalar_text(samples, "samples", allow_empty = TRUE)
   filter_policy <- match.arg(filter_policy)
@@ -151,7 +151,7 @@ rduckhts_somalier_bam_counts <- function(
   remote_cache_bytes = 67108864, reference_cache_bytes = 67108864,
   table_name = NULL, overwrite = FALSE
 ) {
-  .somalier_validate_output(table_name, overwrite)
+  .somalier_validate_output(con, table_name, overwrite)
   .somalier_scalar_text(source_path, "source_path")
   .somalier_scalar_text(sample_id, "sample_id")
   .somalier_scalar_text(reference_path, "reference_path")
@@ -292,7 +292,7 @@ rduckhts_somalier_sketches <- function(
   sample_ids = NULL, min_depth = 7, min_het_balance = 0.3,
   hom_balance_cutoff = 0.01, max_sites = 1000000, overwrite = FALSE
 ) {
-  .somalier_validate_output(table_name, overwrite)
+  .somalier_validate_output(con, table_name, overwrite)
   min_depth <- .somalier_whole_number(min_depth, "min_depth", 2^53)
   max_sites <- .somalier_whole_number(max_sites, "max_sites", 100000000)
   min_het_balance <- .somalier_fraction(min_het_balance, "min_het_balance")
@@ -355,7 +355,7 @@ rduckhts_somalier_relatedness <- function(
   pairs_table = NULL, table_name = NULL, max_sites = 1000000,
   overwrite = FALSE
 ) {
-  .somalier_validate_output(table_name, overwrite)
+  .somalier_validate_output(con, table_name, overwrite)
   max_sites <- .somalier_whole_number(max_sites, "max_sites", 100000000)
   if (!is.null(pairs_table)) {
     .somalier_validate_name(pairs_table, "pairs_table")
@@ -451,7 +451,7 @@ rduckhts_somalier_charr <- function(
   max_depth = 1000000, hom_minor_rate = 0.12, hom_tail_alpha = 0.002,
   max_threshold_work = 16000000, max_sites = 1000000, overwrite = FALSE
 ) {
-  .somalier_validate_output(table_name, overwrite)
+  .somalier_validate_output(con, table_name, overwrite)
   min_depth <- .somalier_whole_number(min_depth, "min_depth", 1000000)
   max_depth <- .somalier_whole_number(max_depth, "max_depth", 1000000)
   max_threshold_work <- .somalier_whole_number(
@@ -548,7 +548,7 @@ rduckhts_somalier_matched_contamination <- function(
   refine_tolerance = 1e-10, max_evaluations = 4096,
   max_threshold_work = 16000000, max_sites = 1000000, overwrite = FALSE
 ) {
-  .somalier_validate_output(table_name, overwrite)
+  .somalier_validate_output(con, table_name, overwrite)
   min_depth <- .somalier_whole_number(min_depth, "min_depth", 1000000)
   max_depth <- .somalier_whole_number(max_depth, "max_depth", 1000000)
   max_evaluations <- .somalier_whole_number(
@@ -646,11 +646,12 @@ rduckhts_somalier_matched_contamination <- function(
   invisible(value)
 }
 
-.somalier_validate_output <- function(table_name, overwrite) {
+.somalier_validate_output <- function(con, table_name, overwrite) {
   if (!is.null(table_name)) .somalier_validate_name(table_name, "table_name")
   if (!is.logical(overwrite) || length(overwrite) != 1L || is.na(overwrite)) {
     stop("overwrite must be TRUE or FALSE", call. = FALSE)
   }
+  .duckhts_check_table_target(con, table_name, overwrite)
   invisible(TRUE)
 }
 
@@ -781,7 +782,6 @@ rduckhts_somalier_matched_contamination <- function(
 
 .somalier_publish_query <- function(con, query, table_name, overwrite) {
   if (is.null(table_name)) return(DBI::dbGetQuery(con, query))
-  prefix <- if (overwrite) "CREATE OR REPLACE TABLE " else "CREATE TABLE "
-  DBI::dbExecute(con, paste0(prefix, sql_quote_identifier(con, table_name), " AS ", query))
+  .duckhts_create_table(con, table_name, query, overwrite)
   invisible(TRUE)
 }

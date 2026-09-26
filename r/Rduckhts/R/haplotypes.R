@@ -127,6 +127,10 @@ rduckhts_haplotypes <- function(con, calls_query, model_name,
                                phase_policy = c("strict", "vep116_compat"),
                                ..., input_mode = c("alt_events", "source_records"),
                                hgvs = FALSE, table_name = NULL, overwrite = FALSE) {
+  if (!is.logical(overwrite) || length(overwrite) != 1L || is.na(overwrite)) {
+    stop("overwrite must be TRUE or FALSE", call. = FALSE)
+  }
+  .duckhts_check_table_target(con, table_name, overwrite)
   for (name in c("calls_query", "model_name")) {
     value <- get(name)
     if (!is.character(value) || length(value) != 1L || is.na(value) || !nzchar(value)) {
@@ -156,13 +160,9 @@ rduckhts_haplotypes <- function(con, calls_query, model_name,
     }
     params[[name]] <- format(value, scientific = FALSE, trim = TRUE)
   }
-  if (!is.logical(overwrite) || length(overwrite) != 1L || is.na(overwrite)) {
-    stop("overwrite must be TRUE or FALSE", call. = FALSE)
-  }
   query <- paste0("SELECT * FROM duckvep_haplotypes(", sql_quote_string(con, calls_query),
                   ",", sql_quote_string(con, model_name), build_param_str(params), ")")
   if (is.null(table_name)) return(DBI::dbGetQuery(con, query))
-  prefix <- if (overwrite) "CREATE OR REPLACE TABLE " else "CREATE TABLE "
-  DBI::dbExecute(con, paste0(prefix, sql_quote_identifier(con, table_name), " AS ", query))
+  .duckhts_create_table(con, table_name, query, overwrite)
   invisible(TRUE)
 }

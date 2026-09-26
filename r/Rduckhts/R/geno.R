@@ -50,15 +50,16 @@ rduckhts_geno <- function(con, table_name = NULL, path, region = NULL,
                           decompression_threads = 0, decode_error_policy = "null",
                           overwrite = FALSE, format_fields = NULL, raw_gt = FALSE,
                           include_filter = FALSE) {
+  if (!is.logical(overwrite) || length(overwrite) != 1L || is.na(overwrite)) {
+    stop("overwrite must be TRUE or FALSE", call. = FALSE)
+  }
+  .duckhts_check_table_target(con, table_name, overwrite)
   params <- list()
   if (!is.null(region)) params$region <- sql_quote_string(con, region)
   if (!is.null(index_path)) params$index_path <- sql_quote_string(con, index_path)
   if (!is.null(samples)) params$samples <- sql_quote_string(con, samples)
   if (!is.logical(non_reference_only) || length(non_reference_only) != 1L || is.na(non_reference_only)) {
     stop("non_reference_only must be TRUE or FALSE", call. = FALSE)
-  }
-  if (!is.logical(overwrite) || length(overwrite) != 1L || is.na(overwrite)) {
-    stop("overwrite must be TRUE or FALSE", call. = FALSE)
   }
   if (!is.logical(raw_gt) || length(raw_gt) != 1L || is.na(raw_gt)) {
     stop("raw_gt must be TRUE or FALSE", call. = FALSE)
@@ -76,8 +77,7 @@ rduckhts_geno <- function(con, table_name = NULL, path, region = NULL,
   params$raw_gt <- if (raw_gt) "true" else "false"
   query <- paste0("SELECT * FROM read_geno(", sql_quote_string(con, path), build_param_str(params), ")")
   if (is.null(table_name)) return(DBI::dbGetQuery(con, query))
-  prefix <- if (overwrite) "CREATE OR REPLACE TABLE " else "CREATE TABLE "
-  DBI::dbExecute(con, paste0(prefix, sql_quote_identifier(con, table_name), " AS ", query))
+  .duckhts_create_table(con, table_name, query, overwrite)
   invisible(TRUE)
 }
 
