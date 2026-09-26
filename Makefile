@@ -171,6 +171,12 @@ test-named-attribute-columns:
 			-o "$$tmp/named_attribute_columns_test"; \
 		"$$tmp/named_attribute_columns_test"
 
+test-writer-no-clobber-debug:
+	bash test/scripts/writer_no_clobber.sh build/debug/$(EXTENSION_NAME).duckdb_extension
+
+test-writer-no-clobber-release:
+	bash test/scripts/writer_no_clobber.sh build/release/$(EXTENSION_NAME).duckdb_extension
+
 DUCKDB_INIT_TEST_PYTHON ?= $(PYTHON_VENV_BIN)
 DUCKDB_INIT_TEST_EXPECT ?= supported
 
