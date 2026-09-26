@@ -57,4 +57,40 @@ library(DBI)
     rduckhts_bed(con, "preserved", missing_path),
     "Table 'preserved' already exists"
   )
+
+  missing_glob <- paste0(tempfile("duckhts_missing_"), "*")
+  multi_readers <- list(
+    bam = rduckhts_bam_multi,
+    bcf = rduckhts_bcf_multi,
+    fastq = rduckhts_fastq_multi,
+    fasta = rduckhts_fasta_multi,
+    bed = rduckhts_bed_multi,
+    tabix = rduckhts_tabix_multi,
+    gff = rduckhts_gff_multi,
+    gtf = rduckhts_gtf_multi
+  )
+  for (name in names(multi_readers)) {
+    warnings <- character()
+    result <- withCallingHandlers(
+      tryCatch(
+        do.call(multi_readers[[name]], list(
+          con = con, table_name = "preserved", files = missing_glob
+        )),
+        error = identity
+      ),
+      warning = function(warning) {
+        warnings <<- c(warnings, conditionMessage(warning))
+        invokeRestart("muffleWarning")
+      }
+    )
+    expect_inherits(result, "error", info = name)
+    if (inherits(result, "error")) {
+      expect_identical(
+        conditionMessage(result),
+        "Table 'preserved' already exists. Use overwrite = TRUE to replace it.",
+        info = name
+      )
+    }
+    expect_identical(warnings, character(), info = name)
+  }
 })()

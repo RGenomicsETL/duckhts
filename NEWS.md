@@ -2,6 +2,10 @@
 
 # duckhts 1.5.2.9002
 
+- On Windows, output overwrite removes a file symlink without writing through
+  to its target; R table-creating wrappers reject an existing table before
+  resolving input files when `overwrite = FALSE`.
+
 - R table-reading wrappers replace existing tables atomically with `overwrite = TRUE`;
   invalid options or failed file reads leave the previous table intact.
 
