@@ -150,7 +150,16 @@ test: test_debug
 test_debug test_release: test-function-catalog
 test_debug: test-cache-paths test-duckvep-kernel test-simd-kernels test-genbank-core test-liftover-property test-liftover-fuzz-debug test-sqllogictest-debug test-writer-no-clobber-debug
 test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-genbank-core test-genbank-oracle test-somalier-native test-bam-site-counts test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom test-hts-region-ownership test-writer-no-clobber-release
-test_release: test-reference-cache
+test_release: test-reference-cache test-sql-lambda-syntax
+
+.PHONY: test-sql-lambda-syntax test-duckdb-v2
+test-sql-lambda-syntax:
+	python3 test/scripts/check_sql_lambdas.py
+
+test-duckdb-v2: release test-sql-lambda-syntax
+	python3 -m venv .pi/duckdb-v2-venv
+	.pi/duckdb-v2-venv/bin/python -m pip install --pre 'duckdb>=2.0.0.dev0'
+	.pi/duckdb-v2-venv/bin/python test/scripts/test_duckdb_v2.py
 ifneq ($(filter linux_%,$(or $(DUCKDB_PLATFORM),$(shell sed -n '1p' configure/platform.txt 2>/dev/null))),)
 test_release: test-reader-alloc test-cigar-reserve-alloc test-extension-init test-named-attribute-columns test-extension-symbols
 endif
