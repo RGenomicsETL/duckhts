@@ -2,10 +2,6 @@
 
 # duckhts 1.5.2.9002
 
-- Detect expired or missing pinned npm dev artifacts before downloading. Pull-request
-  checks report the expired pin and skip dev browser/pack steps while retaining unit
-  and version checks; dev publishing requires available, checksum-verified binaries.
-
 - `read_gff` and `read_gtf` accept `attributes := ['key', ...]` to expose requested
   attribute keys as projected VARCHAR columns with values matching `attributes_map`.
   Empty, duplicate and fixed/optional column names are rejected at bind.
@@ -39,7 +35,12 @@
   umask's permissions. On POSIX, `overwrite := TRUE` replaces an existing
   symlink entry with a new file without writing through to its referent.
 
-# duckhts 1.5.2.9001
+- Detect expired or missing pinned npm dev artifacts before downloading. Pull-request
+  checks report the expired pin and skip dev browser/pack steps while retaining unit
+  and version checks; dev publishing requires available, checksum-verified binaries.
+
+- Check npm package identities against the checkout's release or development version;
+  pull requests test both channel runtimes, and dispatch requires a matching channel.
 
 - Stage unsigned npm binaries from GitHub Actions one artifact at a time so
   cached platforms can be reused when a single platform needs downloading.
