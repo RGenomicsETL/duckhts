@@ -1,5 +1,8 @@
 # Rduckhts 1.5.2.9002-0.1.5
 
+- Table-reading wrappers preserve an existing table when `overwrite = TRUE`
+  fails validation or cannot read an input file.
+
 - `rduckhts_gff()` and `rduckhts_gtf()` accept `attributes` to create named
   attribute columns. The bundled `read_gff` and `read_gtf` SQL readers also
   support `attributes := ['key', ...]` with values matching `attributes_map`.
