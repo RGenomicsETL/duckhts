@@ -1,4 +1,4 @@
-# Rduckhts 1.5.2.9002-0.1.5
+# Rduckhts 1.5.2.9003-0.1.5
 
 - The bundled DuckHTS extension loads on DuckDB 2.0; SQL lambdas use the
   `lambda x:` syntax (DuckDB >= 1.3).
@@ -6,6 +6,8 @@
 - The package is licensed GPL (>= 2) (previously declared GPL-3 while shipping an MIT
   licence file); the bundled DuckHTS extension sources remain MIT, as listed in
   `inst/COPYRIGHT`.
+
+# Rduckhts 1.5.2.9002-0.1.5
 
 - Bundled output writers preserve the target of a Windows file symlink on
   overwrite; table-creating wrappers reject an existing table before resolving
