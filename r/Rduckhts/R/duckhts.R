@@ -1,14 +1,19 @@
 # DuckHTS SQL wrapper functions. Keep transport and native computation in the
 # extension; these functions validate R inputs and compose SQL relations.
 
-.duckhts_create_table <- function(con, table_name, select_sql, overwrite) {
-  if (DBI::dbExistsTable(con, table_name) && !overwrite) {
+.duckhts_check_table_target <- function(con, table_name, overwrite) {
+  if (!missing(table_name) && !is.null(table_name) && !overwrite &&
+      DBI::dbExistsTable(con, table_name)) {
     stop(
       "Table '",
       table_name,
       "' already exists. Use overwrite = TRUE to replace it."
     )
   }
+}
+
+.duckhts_create_table <- function(con, table_name, select_sql, overwrite) {
+  .duckhts_check_table_target(con, table_name, overwrite)
   prefix <- if (overwrite) "CREATE OR REPLACE TABLE" else "CREATE TABLE"
   DBI::dbExecute(
     con,
@@ -79,6 +84,7 @@ rduckhts_bcf <- function(
   overwrite = FALSE,
   samples = NULL
 ) {
+  .duckhts_check_table_target(con, table_name, overwrite)
   params <- list()
   if (!is.null(samples)) params$samples <- sql_quote_string(con, samples)
   if (!is.null(region)) {
@@ -208,6 +214,7 @@ rduckhts_bam <- function(
   decompression_threads = 2,
   overwrite = FALSE
 ) {
+  .duckhts_check_table_target(con, table_name, overwrite)
   params <- list()
   if (!is.null(region)) {
     params$region <- sql_quote_string(con, region)
@@ -297,6 +304,7 @@ rduckhts_pileup <- function(
   flag_mask = 1796,
   overwrite = FALSE
 ) {
+  .duckhts_check_table_target(con, table_name, overwrite)
   if (
     is.null(region) || length(region) != 1L || is.na(region) || !nzchar(region)
   ) {
@@ -429,6 +437,7 @@ rduckhts_fasta <- function(
   scan_mode = NULL,
   overwrite = FALSE
 ) {
+  .duckhts_check_table_target(con, table_name, overwrite)
   params <- list()
   if (!is.null(region)) {
     params$region <- sql_quote_string(con, region)
@@ -491,6 +500,7 @@ rduckhts_bigwig <- function(
   blocks_per_iteration = 64L,
   overwrite = FALSE
 ) {
+  .duckhts_check_table_target(con, table_name, overwrite)
   if (
     !is.character(path) || length(path) != 1L || is.na(path) || !nzchar(path)
   ) {
@@ -576,6 +586,7 @@ rduckhts_bed <- function(
   overwrite = FALSE,
   error_policy = NULL
 ) {
+  .duckhts_check_table_target(con, table_name, overwrite)
   params <- list()
   if (!is.null(region)) {
     params$region <- sql_quote_string(con, region)
@@ -1253,6 +1264,7 @@ rduckhts_fastq <- function(
   scan_mode = NULL,
   overwrite = FALSE
 ) {
+  .duckhts_check_table_target(con, table_name, overwrite)
   params <- list()
   if (!is.null(mate_path)) {
     params$mate_path <- sql_quote_string(con, mate_path)
@@ -1365,6 +1377,7 @@ rduckhts_gff <- function(
   overwrite = FALSE,
   attributes = NULL
 ) {
+  .duckhts_check_table_target(con, table_name, overwrite)
   params <- list()
   if (!is.null(region)) {
     params$region <- sql_quote_string(con, region)
@@ -1486,6 +1499,7 @@ rduckhts_gtf <- function(
   overwrite = FALSE,
   attributes = NULL
 ) {
+  .duckhts_check_table_target(con, table_name, overwrite)
   params <- list()
   if (!is.null(region)) {
     params$region <- sql_quote_string(con, region)
@@ -1594,6 +1608,7 @@ rduckhts_genbank <- function(
   attributes_map = FALSE,
   overwrite = FALSE
 ) {
+  .duckhts_check_table_target(con, table_name, overwrite)
   if (
     !is.character(path) || length(path) != 1L || is.na(path) || !nzchar(path)
   ) {
@@ -1743,6 +1758,7 @@ rduckhts_tabix <- function(
   scan_mode = NULL,
   overwrite = FALSE
 ) {
+  .duckhts_check_table_target(con, table_name, overwrite)
   params <- list()
   if (!is.null(region)) {
     params$region <- sql_quote_string(con, region)
@@ -2674,6 +2690,7 @@ rduckhts_score <- function(
   .params,
   overwrite
 ) {
+  .duckhts_check_table_target(con, table_name, overwrite)
   # Validate .params
   if (!is.null(.params)) {
     if (!is.data.frame(.params)) {
