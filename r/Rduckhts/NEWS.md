@@ -19,13 +19,13 @@
   include diagnostic rows with their physical line numbers and raw text in
   the bundled extension. The default still raises an error.
 
-# Rduckhts 1.5.2.9001-0.1.5
-
 - Bundled bgzip, bgunzip, idxstats, and mosdepth outputs (including CSI indexes)
   use exclusive creation when `overwrite = FALSE`; a failed operation does not
   remove an output that the invocation did not open. On POSIX,
   `overwrite = TRUE` replaces a symlink output entry with a new file without
   writing through to its referent.
+
+# Rduckhts 1.5.2.9001-0.1.5
 
 - Require duckdb 1.4.0 or newer. The bundled extension registers native
   functions before dependent SQL macros, retains all supported native overloads
