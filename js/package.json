@@ -1,6 +1,6 @@
 {
   "name": "duckhts",
-  "version": "1.5.2",
+  "version": "1.5.2-9002",
   "description": "DuckHTS DuckDB extension for duckdb-wasm: read HTS formats (BAM, CRAM, VCF, BCF, FASTA, FASTQ, GFF, GTF, BED, GenBank, bigWig, tabix) with SQL in the browser",
   "type": "module",
   "license": "GPL-2.0-or-later",
@@ -35,14 +35,17 @@
     "src",
     "dist",
     "artifacts.json",
+    "artifacts-dev.json",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "stage": "node scripts/stage.mjs",
     "prepack": "node scripts/stage.mjs",
+    "pretest": "node scripts/channel.mjs",
     "test": "node --test test/*.test.mjs",
-    "test:browser": "node scripts/stage.mjs && playwright test --config test/browser/playwright.config.mjs"
+    "test:browser": "node scripts/stage.mjs && playwright test --config test/browser/playwright.config.mjs",
+    "check:version": "node scripts/check-version.mjs"
   },
   "peerDependencies": {
     "@duckdb/duckdb-wasm": "1.33.1-dev57.0 || >=1.33.1"

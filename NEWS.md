@@ -35,6 +35,24 @@
   umask's permissions. On POSIX, `overwrite := TRUE` replaces an existing
   symlink entry with a new file without writing through to its referent.
 
+- Detect expired or missing pinned npm dev artifacts before downloading. Pull-request
+  checks report the expired pin and skip dev browser/pack steps while retaining unit
+  and version checks; dev publishing requires available, checksum-verified binaries.
+
+- Check npm package identities against the checkout's release or development version;
+  pull requests test both channel runtimes, and dispatch requires a matching channel.
+
+- Stage unsigned npm binaries from GitHub Actions one artifact at a time so
+  cached platforms can be reused when a single platform needs downloading.
+  Run npm package checks on pull requests that change `description.yml`.
+
+- Add an npm `dev` channel with sha256-pinned unsigned wasm builds from a named
+  GitHub Actions run. The npm loader requires an explicit DuckDB unsigned-extension
+  setting on this channel and exposes `SIGNED` and blob-capable `localFileUrl`;
+  `latest` retains signed community binaries and rejects local object URLs.
+  Packaging checks the selected channel and maps development versions to npm
+  numeric prereleases.
+
 # duckhts 1.5.2.9001
 
 - Require DuckDB 1.4.0 or newer for the extension's SQL surface while retaining
