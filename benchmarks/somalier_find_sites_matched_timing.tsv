@@ -1,0 +1,7 @@
+chromosome	tool	active_threads	selection_seconds	process_seconds	peak_rss_kib	input_records	selected_sites
+chr22	Somalier v0.3.4	2 readers + 1 writer	NA	6.07	108912	1070401	2402
+chr22	DuckHTS	1 SQL + 0 decompression	10.404	10.81	480948	1070401	2402
+chr22	DuckHTS	1 SQL + 2 decompression	5.001	5.43	481220	1070401	2402
+chrX	Somalier v0.3.4	2 readers + 1 writer	NA	15.51	436696	2858184	10001
+chrX	DuckHTS	1 SQL + 0 decompression	21.183	21.67	1254476	2858184	10001
+chrX	DuckHTS	1 SQL + 2 decompression	13.379	13.81	1256376	2858184	10001

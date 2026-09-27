@@ -848,6 +848,22 @@
       ]
     },
     {
+      "name": "duckhts_somalier_spacing",
+      "kind": "scalar",
+      "category": "Sample Identity",
+      "signature": "duckhts_somalier_spacing(positions UBIGINT[], distance UBIGINT)",
+      "returns": "BOOLEAN[]",
+      "r_wrapper": "rduckhts_somalier_find_sites",
+      "description": "Greedily select ranked Somalier candidate positions at a minimum genomic distance.",
+      "details": {
+        "Ordering": "positions must be ordered by AF rank within one chromosome. The returned mask has one element per input position; the first position wins each conflict, with equal positions conflicting. Positions are positive one-based integers; distance is positive and candidates are limited to one million per call.",
+        "Recipe": "Filter a typed read_bcf-style relation in SQL, group candidates by chromosome with list(CAST(POS AS UBIGINT) ORDER BY score, deterministic_tie_key), call this scalar on the ordered list, expand its Boolean mask, apply class-specific caps, and number the final rows by chromosome and position. rduckhts_somalier_find_sites() composes the complete recipe on the caller connection, including caller TEMP tables. No private connection or init-time macro is involved."
+      },
+      "examples": [
+        "SELECT duckhts_somalier_spacing([100, 110, 109]::UBIGINT[], 10);"
+      ]
+    },
+    {
       "name": "duckhts_somalier_import_sites",
       "kind": "table_macro",
       "category": "Sample Identity",
