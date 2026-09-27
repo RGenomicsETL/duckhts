@@ -82,8 +82,15 @@ loading and all preceding cases; the baseline before the first run was
 knitr::kable(results, digits = 3)
 ```
 
-Failed gates are retained in the `failures` column for each repeat. There is no
-identical previously rendered ancestry workload for a longitudinal comparison.
+Failed gates are retained in the `failures` column for each repeat. The nearest
+identical synthetic workload is the earlier rendered
+`benchmarks/benchmark_ancestry.md` at repository revision `8ab38b99` (source
+revision `56aad9cf`): its three 17,000-site repeats had median 0.078 seconds,
+versus `r round(median(results$elapsed_seconds[results$variants_per_sample == 17000L]), 3)`
+seconds here. These are separate R processes with uncontrolled background load;
+this difference cannot establish a regression or equivalence. There is no
+ancestry-projection baseline on `develop` and neither report measures public
+reference products or BAM/CRAM depth sensitivity.
 
 ```{r cleanup, include=FALSE}
 dbDisconnect(con, shutdown = TRUE)

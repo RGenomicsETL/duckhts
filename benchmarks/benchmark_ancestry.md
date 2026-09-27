@@ -1,4 +1,4 @@
-Revision: 56aad9cfb624ba59515714ecb68e4556168c97f8. Workload:
+Revision: 03536163eec7de307cc74375bf1009fa7d885ecb. Workload:
 deterministic biallelic synthetic reference frequencies and PC loadings;
 three independently perturbed samples; 4 DuckDB threads; two reference
 groups; two PCs; `min_cor = 0.4`. Each variant is present in both groups
@@ -8,7 +8,7 @@ materialization together, not the 850 MB Figshare products.
 The correction vector is staged from the committed, checksummed bigsnpr
 vignette product. `VmHWM` is cumulative process high-water RSS (MiB),
 including package loading and all preceding cases; the baseline before
-the first run was 180.7 MiB. It is not per-query allocated memory.
+the first run was 179.7 MiB. It is not per-query allocated memory.
 
 <table>
 <colgroup>
@@ -49,8 +49,8 @@ the first run was 180.7 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">1</td>
-<td style="text-align: right;">0.040</td>
-<td style="text-align: right;">224.109</td>
+<td style="text-align: right;">0.039</td>
+<td style="text-align: right;">222.242</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="even">
@@ -63,7 +63,7 @@ the first run was 180.7 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">0.038</td>
-<td style="text-align: right;">229.109</td>
+<td style="text-align: right;">226.461</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="odd">
@@ -76,7 +76,7 @@ the first run was 180.7 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">3</td>
 <td style="text-align: right;">0.038</td>
-<td style="text-align: right;">238.016</td>
+<td style="text-align: right;">228.492</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="even">
@@ -88,8 +88,8 @@ the first run was 180.7 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">1</td>
-<td style="text-align: right;">0.049</td>
-<td style="text-align: right;">245.047</td>
+<td style="text-align: right;">0.051</td>
+<td style="text-align: right;">239.117</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="odd">
@@ -101,8 +101,8 @@ the first run was 180.7 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">2</td>
-<td style="text-align: right;">0.047</td>
-<td style="text-align: right;">246.297</td>
+<td style="text-align: right;">0.048</td>
+<td style="text-align: right;">241.930</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="even">
@@ -115,7 +115,7 @@ the first run was 180.7 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">3</td>
 <td style="text-align: right;">0.048</td>
-<td style="text-align: right;">247.234</td>
+<td style="text-align: right;">245.367</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="odd">
@@ -127,8 +127,8 @@ the first run was 180.7 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">1</td>
-<td style="text-align: right;">0.079</td>
-<td style="text-align: right;">261.766</td>
+<td style="text-align: right;">0.083</td>
+<td style="text-align: right;">259.742</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="even">
@@ -140,8 +140,8 @@ the first run was 180.7 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">2</td>
-<td style="text-align: right;">0.078</td>
-<td style="text-align: right;">268.328</td>
+<td style="text-align: right;">0.082</td>
+<td style="text-align: right;">265.055</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="odd">
@@ -153,13 +153,19 @@ the first run was 180.7 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">3</td>
-<td style="text-align: right;">0.077</td>
-<td style="text-align: right;">272.547</td>
+<td style="text-align: right;">0.082</td>
+<td style="text-align: right;">277.086</td>
 <td style="text-align: left;"></td>
 </tr>
 </tbody>
 </table>
 
-Failed gates are retained in the `failures` column for each repeat.
-There is no identical previously rendered ancestry workload for a
-longitudinal comparison.
+Failed gates are retained in the `failures` column for each repeat. The
+nearest identical synthetic workload is the earlier rendered
+`benchmarks/benchmark_ancestry.md` at repository revision `8ab38b99`
+(source revision `56aad9cf`): its three 17,000-site repeats had median
+0.078 seconds, versus 0.082 seconds here. These are separate R processes
+with uncontrolled background load; this difference cannot establish a
+regression or equivalence. There is no ancestry-projection baseline on
+`develop` and neither report measures public reference products or
+BAM/CRAM depth sensitivity.
