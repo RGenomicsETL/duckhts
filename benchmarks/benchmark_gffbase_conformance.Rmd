@@ -371,9 +371,9 @@ query is faster: its one SQL join handles all anchors; GFFBase also batches
 through its dedicated `children_batched` API. This result does not describe
 per-gene SQL lookups, where GFFBase's indexed batched API can avoid repeated
 query overhead. DuckDB's default memory limit is 80% of RAM; these DuckHTS
-runs set a limit explicitly. GENCODE DuckHTS peak RSS exceeds both that limit
-and GFFBase's measured RSS despite a smaller database. The DuckDB limit does
-not cap all process allocations.
+runs set a limit explicitly. Peak RSS is of the same order for both engines
+despite the much smaller DuckHTS database, and GENCODE DuckHTS peak RSS exceeds
+that limit: the DuckDB limit does not cap all process allocations.
 
 To restage inputs and the pinned wheel, repeat the measurements and render:
 

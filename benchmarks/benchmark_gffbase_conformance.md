@@ -138,23 +138,25 @@ MANE and GENCODE inputs and GFFBase v0.2.1; the conformance and parser
 sections above use v0.1.0.
 
 ``` sql
+-- Features keep their raw ID first; GFFBase-compatible unique IDs are assigned below.
 CREATE TABLE features AS
 WITH input AS (
   SELECT row_number() OVER () AS rid, ID, Parent, seqname, source, feature,
          start, "end", score, strand, frame, attributes_pairs
   FROM read_gff('{input}', attributes_pairs := true, attributes := ['ID', 'Parent'])
-), numbered AS (
-  SELECT *, row_number() OVER (PARTITION BY ID ORDER BY rid) - 1 AS occurrence
-  FROM input
 )
-SELECT rid,
-       CASE WHEN ID IS NULL THEN 'row:' || rid
-            WHEN occurrence = 0 THEN ID
-            ELSE ID || '_' || occurrence END AS id,
+SELECT rid, coalesce(ID, 'row:' || rid) AS id,
        seqname AS seqid, source, feature AS featuretype, start, "end", score,
        strand, frame, Parent AS parents, attributes_pairs AS attributes
-FROM numbered
+FROM input
 ORDER BY seqid, start, "end";
+
+-- @resolve-duplicate-ids
+-- GFFBase create_unique claims names in file order: a row whose ID is already
+-- claimed takes the next free <ID>_<n> from a per-ID counter, so a later physical
+-- "e1_1" can itself be renamed ("e1_1_1"). Only rows whose ID shares a stem (the ID
+-- without trailing _<digits> groups) with a duplicated ID can interact; the driver
+-- replays the rule over those rows and writes the renames back.
 
 CREATE TABLE relations AS
 SELECT DISTINCT f.id AS child, trim(p) AS parent, 1 AS level
@@ -204,10 +206,10 @@ variance estimate.
 
 | dataset                | engine  | passes | build_s | wall_s | peak_rss_GiB | database_GiB | descendants_s | windows_s |
 |:-----------------------|:--------|-------:|--------:|-------:|-------------:|-------------:|--------------:|----------:|
-| mane_v15_ensembl_gff3  | DuckHTS |      3 |    3.95 |   5.42 |         1.20 |          0.1 |          0.22 |      0.76 |
-| mane_v15_ensembl_gff3  | gffbase |      3 |   20.83 |  23.14 |         1.13 |          0.6 |          0.44 |      1.45 |
-| gencode_v49_basic_gff3 | DuckHTS |      1 |   40.80 |  43.53 |         9.42 |          1.0 |          0.46 |      1.00 |
-| gencode_v49_basic_gff3 | gffbase |      1 |  314.89 | 319.44 |         9.02 |          6.9 |          0.69 |      2.65 |
+| mane_v15_ensembl_gff3  | DuckHTS |      3 |    4.86 |   6.46 |         1.36 |         0.15 |          0.27 |      0.83 |
+| mane_v15_ensembl_gff3  | gffbase |      3 |   21.57 |  24.08 |         1.13 |         0.59 |          0.54 |      1.50 |
+| gencode_v49_basic_gff3 | DuckHTS |      1 |   51.61 |  54.63 |         8.50 |         1.48 |          0.54 |      1.18 |
+| gencode_v49_basic_gff3 | gffbase |      1 |  330.60 | 335.41 |         9.02 |         6.92 |          0.79 |      2.83 |
 
 | dataset                | input_sha256                                                     | gffbase_memory_cap |
 |:-----------------------|:-----------------------------------------------------------------|:-------------------|
@@ -216,7 +218,7 @@ variance estimate.
 
 | parameter            | value                                                            |
 |:---------------------|:-----------------------------------------------------------------|
-| revision             | 27e47c86d052364c235e0a54f134f54de1b7929d                         |
+| revision             | e2ad5660d3d12c32eabc08208af9bf9ad13dd5b6                         |
 | extension_sha256     | 847efdefbde57dcb00b56dd0df960558160163059bd48f9ddb773cab24dcaf97 |
 | host                 | Ubuntu-2404-noble-amd64-base                                     |
 | os                   | Linux-6.8.0-78-generic-x86_64-with-glibc2.39                     |
@@ -233,10 +235,10 @@ descendant query is faster: its one SQL join handles all anchors;
 GFFBase also batches through its dedicated `children_batched` API. This
 result does not describe per-gene SQL lookups, where GFFBase’s indexed
 batched API can avoid repeated query overhead. DuckDB’s default memory
-limit is 80% of RAM; these DuckHTS runs set a limit explicitly. GENCODE
-DuckHTS peak RSS exceeds both that limit and GFFBase’s measured RSS
-despite a smaller database. The DuckDB limit does not cap all process
-allocations.
+limit is 80% of RAM; these DuckHTS runs set a limit explicitly. Peak RSS
+is of the same order for both engines despite the much smaller DuckHTS
+database, and GENCODE DuckHTS peak RSS exceeds that limit: the DuckDB
+limit does not cap all process allocations.
 
 To restage inputs and the pinned wheel, repeat the measurements and
 render:
