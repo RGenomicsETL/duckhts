@@ -75,7 +75,9 @@ static void spacing_scalar(duckdb_function_info info, duckdb_data_chunk input,
         uint64_t gap = distances[row];
         size_t capacity = 2u;
         spacing_cell_t *cells;
-        while (capacity < (size_t)list.length * 2u) capacity *= 2u;
+        while (capacity < (size_t)list.length * 2u) {
+            capacity *= 2u;
+        }
         cells = duckdb_malloc(capacity * sizeof(*cells));
         if (cells == NULL) {
             duckdb_scalar_function_set_error(info,
@@ -101,7 +103,9 @@ static void spacing_scalar(duckdb_function_info info, duckdb_data_chunk input,
                         break;
                     }
                 }
-                if (neighbor == last) break;
+                if (neighbor == last) {
+                    break;
+                }
             }
             selected[offset + i] = keep;
             if (keep) {

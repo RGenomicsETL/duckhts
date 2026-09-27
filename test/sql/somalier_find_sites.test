@@ -30,3 +30,34 @@ statement error
 SELECT duckhts_somalier_spacing([100]::UBIGINT[], 0);
 ----
 positive distance
+
+statement ok
+CREATE TEMP TABLE find_sites_candidates AS SELECT * FROM (VALUES
+    ('chr2', 105::UBIGINT, 0.02::FLOAT),
+    ('chr1', 120::UBIGINT, 0.04::FLOAT),
+    ('chr1', 110::UBIGINT, 0.00::FLOAT),
+    ('chr1', 100::UBIGINT, 0.00::FLOAT)
+) AS candidates(region, position, score);
+
+query TII
+WITH ranked AS (
+    SELECT region, position,
+        row_number() OVER (PARTITION BY region ORDER BY score, position) AS rank
+    FROM find_sites_candidates
+), masks AS (
+    SELECT region,
+        duckhts_somalier_spacing(list(position ORDER BY rank), 20::UBIGINT) AS mask
+    FROM ranked GROUP BY region
+), expanded AS (
+    SELECT region, generate_subscripts(mask, 1) AS rank,
+        unnest(mask) AS selected FROM masks
+), selected AS (
+    SELECT r.region, r.position FROM ranked r JOIN expanded e USING (region, rank)
+    WHERE e.selected
+)
+SELECT region, position, row_number() OVER (ORDER BY region, position) - 1 AS site_index
+FROM selected ORDER BY region, position;
+----
+chr1	100	0
+chr1	120	1
+chr2	105	2
