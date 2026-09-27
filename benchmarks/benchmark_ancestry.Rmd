@@ -184,13 +184,15 @@ knitr::kable(real_epilepsy_full$group_parity[, c("group_id", "proportion", "orac
   "absolute_difference")], digits = 7)
 ```
 
-Genome-wide `cor_pred`: DuckHTS `r real_epilepsy_full$cor_pred`, bigsnpr
-`r real_epilepsy_full$oracle_cor_pred`. The conservative seven-decimal QP
-rounding correlation bound is `r real_epilepsy_full$rounding_bound`; the 0.4
-gate is farther away. On chr22, both return `r real_epilepsy$cor_pred` at
-seven decimals with group difference
+Genome-wide `cor_pred`: DuckHTS
+`r sprintf("%.12f", real_epilepsy_full$cor_pred)`, bigsnpr
+`r sprintf("%.12f", real_epilepsy_full$oracle_cor_pred)`. The conservative
+seven-decimal QP rounding correlation bound is
+`r sprintf("%.9f", real_epilepsy_full$rounding_bound)`; the 0.4 gate is
+farther away. On chr22, both return `r real_epilepsy$cor_pred` at seven
+decimals with group difference
 `r max(real_epilepsy$group_parity$absolute_difference)`; its rounding bound is
-`r real_epilepsy$rounding_bound`. Tolerance: 2e-4 per group.
+`r sprintf("%.9f", real_epilepsy$rounding_bound)`. Tolerance: 2e-4 per group.
 
 The individual input is restricted from `r real_individuals$vcf_snvs` unique
 biallelic SNVs to `r real_individuals$reference_overlap` same-assembly,
@@ -232,7 +234,8 @@ stopifnot(nrow(cram_sensitivity) == 36L,
   nrow(unique(cram_sensitivity[, c("sites", "panel_sha256")])) == 3L,
   all(with(cram_sensitivity, gate_distance[is.finite(gate_distance)] >
            rounding_bound[is.finite(gate_distance)])))
-knitr::kable(unique(cram_sensitivity[, c("sites", "panel_sha256")]))
+knitr::kable(unique(cram_sensitivity[, c("sites", "panel_sha256")]),
+             row.names = FALSE)
 knitr::kable(cram_sensitivity[, c("sample_id", "sites", "depth", "mode",
   "vcf_used", "bam_used", "depth_eligible", "median_depth", "allele_reads",
   "vcf_cor_pred", "cor_pred", "status", "max_group_difference",
