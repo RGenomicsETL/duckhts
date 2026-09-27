@@ -1,5 +1,5 @@
 ---
-title: "Somalier find-sites: 1000 Genomes 30x phased chromosome 22"
+title: "Somalier find-sites: 1000 Genomes 30x phased chr22 and chrX"
 output: github_document
 ---
 
@@ -31,6 +31,15 @@ is staged through `duckhtsbench` (SHA-256
 519,930,289 bytes, GRCh38). Its declared INFO/AF and INFO/AN are used without
 recomputing from genotypes. Somalier skips sample genotypes; DuckHTS reads the
 physical VCF in sequential mode with `samples := ''`. The cache VCF is not committed.
+
+## Selection rules
+
+| Rule | Somalier v0.3.4 and DuckHTS default | DuckHTS named alternative |
+|:--|:--|:--|
+| Human contigs | Exclude autosomal REF=C; X zero-based positions 2,781,479..154,931,044 | `compatibility_mode = "generic"` does not classify human sex contigs |
+| AF rank ties | Retain input order on equal AF scores; a reversed-position two-site probe selects the first input record with pinned Somalier | `tie_order = "lexical"` orders by position and allele |
+| Spacing | Greedy autosomal distance 10,000 by default; X/Y selections do not update spacing state | `sex_spacing = "enforced"` applies X distance 1,000 and Y distance 200 |
+| Caps | Up to 65,535 autosomal, 10,001 X, and 5,001 Y selections after ranking | Named per-sex maximum arguments |
 
 - Source revision: `r observations$revision`. Workload: `--min-AN 6000`,
   `--snp-dist 10000`, minimum AF 0.15, AF target 0.48, no interval or
@@ -84,9 +93,11 @@ The unmodified [1000 Genomes 30x phased chrX VCF](https://ftp.1000genomes.ebi.ac
 records in PAR1 (before POS 2,781,480) and
 `r format(xpar$par2_records, big.mark = ",")` records in PAR2 (after POS
 154,931,045). The physical first and last positions are
-`r xpar$first_position` and `r xpar$last_position`.
+`r format(xpar$first_position, big.mark = ",")` and
+`r format(xpar$last_position, big.mark = ",")`.
 Somalier's pinned X-range rule admits only zero-based positions
-2,781,479..154,931,044; the physical PAR records exercise that filter.
+2,781,479..154,931,044. The `r format(xpar$par1_records + xpar$par2_records, big.mark = ",")`
+PAR records account for the drop from source to eligible records.
 Somalier's log says “0 autosomal variants” for this X-only input; the
 actual compressed output VCF, not that autosomal-only log counter, is used
 for the selected-site denominator and keyed comparison.
@@ -98,9 +109,9 @@ for the selected-site denominator and keyed comparison.
   DuckHTS gated candidates;
   `r format(xobservations$max_per_chromosome_candidates, big.mark = ",")`
   spacing inputs (below the 1,000,000 limit).
-- Selected: `r xobservations$upstream_sites` Somalier and
-  `r xobservations$duckhts_sites` DuckHTS sites;
-  `r xobservations$common_sites` matching four-field keys.
+- Selected: `r format(xobservations$upstream_sites, big.mark = ",")` Somalier and
+  `r format(xobservations$duckhts_sites, big.mark = ",")` DuckHTS sites;
+  `r format(xobservations$common_sites, big.mark = ",")` matching four-field keys.
   Input and lexical tie policies differed on
   `r xobservations$lexical_tie_dependent_sites` selected sites.
   `r xobservations$duckhts_only` DuckHTS-only and
