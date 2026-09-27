@@ -17,6 +17,7 @@ import time
 
 import duckdb
 import gffbase
+import pyarrow as pa
 
 ROOT = Path(__file__).resolve().parent.parent
 REGISTRY = ROOT / "r/duckhtsbench/inst/benchmark_registry.tsv"
@@ -56,6 +57,40 @@ def input_identity(artifact_id):
     return path, digest
 
 
+def resolve_duplicate_ids(db):
+    """Assign GFFBase create_unique IDs to rows whose names can collide."""
+    rows = db.execute(r"""
+        WITH f AS (
+          SELECT rid, id, regexp_replace(id, '(_[0-9]+)+$', '') AS stem
+          FROM features WHERE NOT starts_with(id, 'row:')
+        ), duplicated AS (
+          SELECT DISTINCT stem FROM f WHERE id IN (SELECT id FROM f GROUP BY id HAVING count(*) > 1)
+        )
+        SELECT rid, id FROM f WHERE stem IN (SELECT stem FROM duplicated) ORDER BY rid
+    """).fetchall()
+    taken, counters, renames = set(), {}, []
+    for rid, raw in rows:
+        name = raw
+        while name in taken:
+            counters[raw] = counters.get(raw, 0) + 1
+            name = f"{raw}_{counters[raw]}"
+        taken.add(name)
+        if name != raw:
+            renames.append((rid, name))
+    if renames:
+        # MANE renames ~185k repeated CDS IDs: hand them over as Arrow (binding
+        # Python lists as parameters costs seconds) and rebuild the sorted table.
+        rids, ids = zip(*renames)
+        db.register("renames", pa.table({"rid": pa.array(rids, pa.int64()), "id": ids}))
+        db.execute("""
+            CREATE OR REPLACE TABLE features AS
+            SELECT f.* REPLACE (coalesce(r.id, f.id) AS id)
+            FROM features f LEFT JOIN renames r USING (rid)
+            ORDER BY seqid, start, "end"
+        """)
+        db.unregister("renames")
+
+
 def worker(engine, input_path, database, extension, threads, limit):
     if database.exists():
         database.unlink()
@@ -66,8 +101,13 @@ def worker(engine, input_path, database, extension, threads, limit):
         })
         db.execute("LOAD " + "'" + str(extension).replace("'", "''") + "'")
         sql = SQL.read_text().replace("{input}", str(input_path).replace("'", "''"))
-        for statement in sql.split(";\n"):
+        before, after = sql.split("-- @resolve-duplicate-ids", 1)
+        for statement in before.split(";\n"):
             if statement.strip():
+                db.execute(statement)
+        resolve_duplicate_ids(db)
+        for statement in after.split(";\n"):
+            if statement.strip() and not all(line.startswith("--") for line in statement.strip().splitlines()):
                 db.execute(statement)
     else:
         db = gffbase.create_db(str(input_path), str(database), force=True,

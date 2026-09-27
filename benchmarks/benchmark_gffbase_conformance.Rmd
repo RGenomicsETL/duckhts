@@ -115,7 +115,7 @@ if (needs_run) {
   if (include_create_db) cmd <- c(cmd, "--include-create-db")
 
   pythonpath <- Sys.getenv("PYTHONPATH", unset = "")
-  out <- system2("python3", cmd, stdout = TRUE, stderr = TRUE, env = c(sprintf("PYTHONPATH=%s", pythonpath)))
+  out <- system2(Sys.getenv("GFFBASE_FEATUREDB_PYTHON", unset = "python3"), cmd, stdout = TRUE, stderr = TRUE, env = c(sprintf("PYTHONPATH=%s", pythonpath)))
   status <- attr(out, "status")
   if (!is.null(status) && status != 0) {
     stop(paste(out, collapse = "\n"))

@@ -34,17 +34,22 @@ def main():
             output.write("chr1\ttest\tmRNA\t1\t100\t.\t+\t.\tID=t1;Parent=g1\n")
             output.write("chr1\ttest\texon\t1\t10\t.\t+\t.\tID=e1;Parent=t1\n")
             output.write("chr1\ttest\texon\t20\t30\t.\t+\t.\tID=e1;Parent=t1\n")
+            # A physical ID equal to a generated name, then a third duplicate: GFFBase
+            # yields e1, e1_1, e1_1_1 (the physical row renamed), e1_2.
+            output.write("chr1\ttest\texon\t40\t50\t.\t+\t.\tID=e1_1;Parent=t1\n")
+            output.write("chr1\ttest\texon\t60\t70\t.\t+\t.\tID=e1;Parent=t1\n")
         duck = build("DuckHTS", source, root / "duck.duckdb")
         base = build("gffbase", source, root / "base.duckdb")
         for key in ("features", "anchors", "windows", "anchors_sha256",
                     "windows_sha256", "descendants", "descendants_sha256",
                     "region_hits", "region_sha256"):
             assert duck[key] == base[key], (key, duck[key], base[key])
-        assert duck["features"] == 4
-        assert duck["descendants"] == 3
-        assert duck["region_hits"] == 4
+        assert duck["features"] == 6
+        assert duck["descendants"] == 5
         with duckdb.connect(str(root / "duck.duckdb"), read_only=True) as database:
+            ids = [row[0] for row in database.execute("SELECT id FROM features ORDER BY rid").fetchall()]
             attributes = database.execute("SELECT attributes FROM features WHERE id = 'g1'").fetchone()[0]
+        assert ids == ["g1", "t1", "e1", "e1_1", "e1_1_1", "e1_2"], ids
         assert [(pair["value"], pair["idx"]) for pair in attributes
                 if pair["key"] == "Alias"] == [("a", 0), ("b", 1)]
     print("feature database duplicate-ID parity: passed")

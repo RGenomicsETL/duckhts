@@ -611,7 +611,8 @@ GFFBASE_FEATUREDB_PYTHON ?= python3
 GFFBASE_FEATUREDB_MANE_PASSES ?= 3
 GFFBASE_FEATUREDB_GENCODE_PASSES ?= 1
 
-bench-gffbase-featuredb: stage-gffbase
+bench-gffbase-featuredb:
+	PYTHON_BIN="$(GFFBASE_FEATUREDB_PYTHON)" bash scripts/stage_gffbase.sh
 	@stage="$$(DUCKHTS_ROOT="$(PROJ_DIR)" GFFBASE_FEATUREDB_PYTHON="$(GFFBASE_FEATUREDB_PYTHON)" \
 		Rscript r/duckhtsbench/scripts/stage_gffbase_featuredb.R)" || exit 1; \
 		site="$${stage##*GFFBASE_FEATUREDB_SITE=}"; \
@@ -621,7 +622,7 @@ bench-gffbase-featuredb: stage-gffbase
 			--extension "$(PROJ_DIR)build/release/duckhts.duckdb_extension" \
 			--mane-passes "$(GFFBASE_FEATUREDB_MANE_PASSES)" \
 			--gencode-passes "$(GFFBASE_FEATUREDB_GENCODE_PASSES)"
-	$(MAKE) bench-gffbase
+	GFFBASE_FEATUREDB_PYTHON="$(GFFBASE_FEATUREDB_PYTHON)" $(MAKE) bench-gffbase
 
 bench-simd-seq-gc:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_simd_seq_gc.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
