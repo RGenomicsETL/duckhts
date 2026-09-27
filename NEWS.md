@@ -2,18 +2,16 @@
 
 # duckhts 1.5.2.9003
 
-- Somalier panel selection retains only qualifying site and narrow nearby-variant
-  inventories during the population scan, reducing whole-chromosome memory use.
+- Somalier panel selection (`rduckhts_somalier_find_sites()`) selects sites from
+  caller-visible population relations, including TEMP tables, with per-call filters
+  and site caps; `duckhts_somalier_spacing()` applies greedy minimum-distance spacing
+  over an ordered chromosome. Somalier v0.3.4 mode keeps input order for equal AF
+  scores and selects X/Y without spacing; lexical ties and enforced X/Y spacing are
+  opt-in. Nearby-variant exclusion runs in ordered position passes, and only
+  qualifying sites are retained during the scan.
 
-- Somalier panel selection computes nearby-indel exclusion and nearby-SNP counts
-  in ordered position passes, retaining physical-record tie order and the
-  pinned v0.3.4 site selection rules on whole-chromosome VCF inputs.
-
-- `duckhts_somalier_spacing()` selects an ordered chromosome's candidate positions
-  with greedy minimum-distance spacing. Somalier panel selection uses caller-visible
-  SQL relations, including TEMP tables, with per-call filtering and site caps.
-  Somalier v0.3.4 mode retains input order for equal AF scores and selects X/Y
-  without spacing; lexical tie order and enforced X/Y spacing are opt-in.
+- The GFFBase benchmark includes a registry-staged, parity-checked feature-database
+  comparison using SQL over `read_gff`, with reproducible process and query measurements.
 
 - DuckHTS loads on DuckDB 2.0; SQL lambdas use the `lambda x:` syntax
   (DuckDB >= 1.3).
