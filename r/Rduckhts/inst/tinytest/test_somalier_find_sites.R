@@ -20,9 +20,9 @@ test_somalier_find_sites_selection <- function() {
     "('chrY',900,'A',['G'],['PASS'],[0.05::FLOAT],99)",
     ") v(CHROM,POS,REF,ALT,FILTER,INFO_AF,INFO_AN)"
   ))
-  dbExecute(con, "CREATE TEMP TABLE region_exclude(chrom VARCHAR, start BIGINT, stop BIGINT)")
+  dbExecute(con, "CREATE TEMP TABLE region_exclude(chrom VARCHAR, start BIGINT, \"end\" BIGINT)")
   dbExecute(con, "INSERT INTO region_exclude VALUES ('chr1', 299, 300)")
-  dbExecute(con, "CREATE TEMP TABLE region_include(chrom VARCHAR, start BIGINT, stop BIGINT)")
+  dbExecute(con, "CREATE TEMP TABLE region_include(chrom VARCHAR, start BIGINT, \"end\" BIGINT)")
   dbExecute(con, paste(
     "INSERT INTO region_include VALUES ('chr1', 99, 400),",
     "('chrX', 2781479, 2781480), ('chrY', 899, 900)"
@@ -233,19 +233,30 @@ test_somalier_find_sites_flags_and_endpoints <- function() {
   )
   expect_equal(selected$position, c(100, 2781480, 154931045, 1200))
   expect_equal(selected$source_filter[[1]], "PASS")
-  dbExecute(con, "CREATE TEMP TABLE excluded(chrom VARCHAR, start BIGINT, stop BIGINT)")
+  dbExecute(con, "CREATE TEMP TABLE excluded(chrom VARCHAR, start BIGINT, \"end\" BIGINT)")
   dbExecute(con, "INSERT INTO excluded VALUES ('chr2', 105, 106)")
   not_overlapping <- rduckhts_somalier_find_sites(
     con, source_table = "annotated", assembly = "GRCh38", min_an = 100,
     snp_dist = 10, exclude_table = "excluded"
   )
   expect_equal(not_overlapping$position, selected$position)
-  dbExecute(con, "UPDATE excluded SET start = 104, stop = 105")
+  dbExecute(con, "UPDATE excluded SET start = 104, \"end\" = 105")
   overlapping <- rduckhts_somalier_find_sites(
     con, source_table = "annotated", assembly = "GRCh38", min_an = 100,
     snp_dist = 10, exclude_table = "excluded"
   )
   expect_equal(overlapping$position, selected$position[-1])
+  # A view directly over read_bed() supplies the same interval as an exclusion.
+  bed <- tempfile(fileext = ".bed")
+  writeLines("chr2\t104\t105", bed)
+  dbExecute(con, sprintf("CREATE TEMP VIEW bed_excluded AS SELECT * FROM read_bed('%s')",
+                         normalizePath(bed, winslash = "/")))
+  from_bed <- rduckhts_somalier_find_sites(
+    con, source_table = "annotated", assembly = "GRCh38", min_an = 100,
+    snp_dist = 10, exclude_table = "bed_excluded"
+  )
+  expect_equal(from_bed$position, overlapping$position)
+  unlink(bed)
   missing_af <- rduckhts_somalier_find_sites(
     con, source_table = "annotated", assembly = "GRCh38", min_an = 100,
     min_af = 0, snp_dist = 10

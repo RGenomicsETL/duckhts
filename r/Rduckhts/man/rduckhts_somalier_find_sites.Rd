@@ -71,7 +71,8 @@ Select typed population variants on the caller's DuckDB connection. A table
 or view may be populated by `read_bcf()`; Parquet and VCF/BCF paths are also
 supported. Input columns follow `read_bcf()` (`CHROM`, `POS`, `REF`, `ALT`,
 `FILTER`, and declared `INFO_*` fields). Interval relations have `chrom`,
-`start`, `stop` in zero-based half-open BED coordinates. A gnotate exclusion
+`start`, `end` in zero-based half-open BED coordinates, as returned by
+`read_bed()`. A gnotate exclusion
 relation has `chrom`, `pos`, `ref`, `alt` in one-based VCF coordinates.
 }
 \details{
