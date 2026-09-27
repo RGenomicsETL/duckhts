@@ -1,4 +1,4 @@
-Status: current implementation guidance; public reference staging remains open.
+Status: current implementation guidance.
 
 # Ancestry reference contract
 
@@ -19,7 +19,15 @@ https://privefl.github.io/bigsnpr/articles/ancestry.html. It is paired only
 with those loadings. The duckhtsbench registry checks its committed bytes
 before staging. The vector must not be applied to different PCA loadings.
 
-Figshare files require independently verified checksums before registration
-in the benchmark registry. A redirected or merged copy is not an acceptable
-identity for either original download. The published epilepsy and 1000 Genomes
-comparisons require the paired Figshare files and matching sample inputs.
+The duckhtsbench registry pins the compressed Figshare files by exact byte
+count and SHA-256. Automated fetches from some hosts receive HTTP 403 or a WAF
+browser challenge. Place browser-downloaded files at their registry cache paths
+and run `duckhts_bench_fetch(id)` to verify them without contacting Figshare.
+A redirected or merged copy is not an acceptable identity. The epilepsy
+input and public GRCh37 phase-3 1000 Genomes chr22 genotypes have independent
+registry identities. On chr22, their allele agreement with
+the reference products must be checked before site selection. GRCh38 30x CRAMs
+require the registered GRCh37-to-GRCh38 chain and source/destination FASTAs;
+retain the mapped, rejected, swapped, and duplicate-destination denominators
+before comparing aligned reads to phased genotypes. The ancestry comparison
+must retain its per-sample matching counts and correlation-gate failures.

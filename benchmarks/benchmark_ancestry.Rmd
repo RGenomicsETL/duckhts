@@ -1,5 +1,5 @@
 ---
-title: "Ancestry relational projection: synthetic site scaling"
+title: "Ancestry relational projection: synthetic scaling and public-reference parity"
 output: md_document
 ---
 
@@ -71,7 +71,8 @@ Revision: `r source_revision`. Workload: deterministic biallelic synthetic
 reference frequencies and PC loadings; three independently perturbed samples;
 4 DuckDB threads; two reference groups; two PCs; `min_cor = 0.4`. Each variant
 is present in both groups and PCs, and every input row matches. This report
-measures query and materialization together, not the 850 MB Figshare products.
+measures query and materialization together. The public-reference workload is
+measured separately below.
 
 The correction vector is staged from the committed, checksummed bigsnpr vignette
 product. `VmHWM` is cumulative process high-water RSS (MiB), including package
@@ -89,8 +90,165 @@ revision `56aad9cf`): its three 17,000-site repeats had median 0.078 seconds,
 versus `r round(median(results$elapsed_seconds[results$variants_per_sample == 17000L]), 3)`
 seconds here. These are separate R processes with uncontrolled background load;
 this difference cannot establish a regression or equivalence. There is no
-ancestry-projection baseline on `develop` and neither report measures public
-reference products or BAM/CRAM depth sensitivity.
+ancestry-projection baseline on `develop`; the synthetic rows are not evidence
+about real-reference loading or BAM/CRAM depth sensitivity.
+
+## Public reference and GRCh37 chr22 genotypes
+
+Two checksum-verified Figshare products each contain 5,816,590 rows: 21
+reference-frequency groups and 16 PC loadings. The epilepsy summary input has
+4,880,492 records. A separate public phase-3 chr22 VCF supplies 11 individuals
+from AFR (3), EUR (2), EAS (2), SAS (2) and AMR (2). Each workload uses four
+DuckDB threads and the bigsnpr vignette's 16 correction coefficients. These
+are complete-process peak RSS measurements, including package loading and
+preceding operations in that process; the SQL time excludes reading CSVs,
+matching sites, and materializing reference relations.
+
+```{r real-reference}
+real_epilepsy <- callr::r(function(repo) {
+  setwd(repo)
+  Sys.unsetenv("DUCKHTS_CACHE_DIR")
+  source("test/scripts/ancestry_bigsnpr_real.R", local = TRUE)
+  rss <- grep("^VmHWM:", readLines("/proc/self/status"), value = TRUE)
+  list(reference_load_seconds = load_seconds, query_seconds = elapsed,
+       peak_rss_mib = as.numeric(strsplit(trimws(rss), "[[:space:]]+")[[1L]][[2L]]) / 1024,
+       summary_input = nrow(sumstats), upstream_matched = nrow(matched),
+       eligible_chr22 = eligible, matched = nrow(input),
+       group_rows = nrow(parity), groups = length(shared),
+       cor_pred = result$cor_pred[[1L]], oracle_cor_pred = attr(shared, "cor_pred"),
+       rounding_bound = correlation_bound, group_parity = parity)
+}, args = list(repo = repo))
+real_epilepsy_full <- callr::r(function(repo) {
+  setwd(repo)
+  Sys.unsetenv("DUCKHTS_CACHE_DIR")
+  Sys.setenv(ANCESTRY_EPILEPSY_CHR22_ONLY = "false")
+  source("test/scripts/ancestry_bigsnpr_real.R", local = TRUE)
+  rss <- grep("^VmHWM:", readLines("/proc/self/status"), value = TRUE)
+  list(reference_load_seconds = load_seconds, query_seconds = elapsed,
+       peak_rss_mib = as.numeric(strsplit(trimws(rss), "[[:space:]]+")[[1L]][[2L]]) / 1024,
+       summary_input = nrow(sumstats), upstream_matched = nrow(matched),
+       eligible = eligible, matched = nrow(input), group_rows = nrow(parity),
+       groups = length(shared), cor_pred = result$cor_pred[[1L]],
+       oracle_cor_pred = attr(shared, "cor_pred"),
+       rounding_bound = correlation_bound, group_parity = parity)
+}, args = list(repo = repo))
+real_individuals <- callr::r(function(repo) {
+  setwd(repo)
+  Sys.unsetenv("DUCKHTS_CACHE_DIR")
+  source("test/scripts/ancestry_1000g_real.R", local = TRUE)
+  rss <- grep("^VmHWM:", readLines("/proc/self/status"), value = TRUE)
+  list(reference_load_seconds = load_seconds, query_seconds = elapsed,
+       peak_rss_mib = as.numeric(strsplit(trimws(rss), "[[:space:]]+")[[1L]][[2L]]) / 1024,
+       vcf_snvs = nrow(vcf), reference_overlap = nrow(joined),
+       samples = length(samples), sites_per_sample = nrow(site),
+       input_rows = nrow(input), group_rows = nrow(parity), groups = ncol(ref) - 5L,
+       summary = as.data.frame(summary))
+}, args = list(repo = repo))
+real_timings <- data.frame(
+  workload = c("epilepsy (chr22)", "epilepsy (genome-wide)",
+               "1000G phase-3 chr22 genotypes"),
+  samples = c(1L, 1L, real_individuals$samples),
+  variants_per_sample = c(real_epilepsy$matched, real_epilepsy_full$matched,
+                          real_individuals$sites_per_sample),
+  input_rows = c(real_epilepsy$matched, real_epilepsy_full$matched,
+                 real_individuals$input_rows),
+  output_group_rows = c(real_epilepsy$group_rows, real_epilepsy_full$group_rows,
+                        real_individuals$group_rows),
+  groups = c(real_epilepsy$groups, real_epilepsy_full$groups,
+             real_individuals$groups),
+  threads = 4L,
+  reference_rows = 5816590L,
+  reference_load_seconds = c(real_epilepsy$reference_load_seconds,
+                             real_epilepsy_full$reference_load_seconds,
+                             real_individuals$reference_load_seconds),
+  sql_seconds = c(real_epilepsy$query_seconds, real_epilepsy_full$query_seconds,
+                  real_individuals$query_seconds),
+  process_peak_rss_mib = c(real_epilepsy$peak_rss_mib,
+                           real_epilepsy_full$peak_rss_mib,
+                           real_individuals$peak_rss_mib))
+knitr::kable(real_timings, digits = 2)
+```
+
+Epilepsy matching audit: bigsnpr matched `r real_epilepsy_full$upstream_matched` /
+`r real_epilepsy_full$summary_input` records genome-wide (6 ambiguous SNPs
+excluded, 1,576,097 reversed, 0 strand-flipped). DuckHTS matched
+`r real_epilepsy_full$matched` / `r real_epilepsy_full$matched` pre-matched
+inputs, after matching against the real reference product. The independently
+selected, position-unique, unambiguous chr22 subset is
+`r real_epilepsy$matched` / `r real_epilepsy$eligible_chr22` eligible chr22
+matches, with `r real_epilepsy$matched` / `r real_epilepsy$matched` matched
+by DuckHTS. Both genome-wide solvers consume the same allele-aligned sites.
+
+```{r epilepsy-parity}
+knitr::kable(real_epilepsy_full$group_parity[, c("group_id", "proportion", "oracle",
+  "absolute_difference")], digits = 7)
+```
+
+Genome-wide `cor_pred`: DuckHTS `r real_epilepsy_full$cor_pred`, bigsnpr
+`r real_epilepsy_full$oracle_cor_pred`. The conservative seven-decimal QP
+rounding correlation bound is `r real_epilepsy_full$rounding_bound`; the 0.4
+gate is farther away. On chr22, both return `r real_epilepsy$cor_pred` at
+seven decimals with group difference
+`r max(real_epilepsy$group_parity$absolute_difference)`; its rounding bound is
+`r real_epilepsy$rounding_bound`. Tolerance: 2e-4 per group.
+
+The individual input is restricted from `r real_individuals$vcf_snvs` unique
+biallelic SNVs to `r real_individuals$reference_overlap` same-assembly,
+allele-agreeing, unambiguous reference overlaps before spaced site selection.
+Both solvers see the same per-sample genotypes. bigsnpr's
+imperfect-match warning (`cor_pred < 0.99`) is retained; passing the
+0.4 gate does not imply that the frequencies match perfectly.
+
+```{r individual-parity}
+knitr::kable(real_individuals$summary, digits = 7)
+```
+
+## Indexed 30x CRAM sensitivity
+
+Three public 30x CRAMs (NA18507/AFR, HG00188/EUR, HG00403/EAS) were
+read via their indexes at chr22:15,335,303–50,800,284 (GRCh38). The
+registered GRCh37-to-GRCh38 chain maps 19,981/20,000 selected GRCh37
+loci onto chr22; 430 mapped loci require reference swaps. The 19,551
+unswapped, unique SNVs provide a spaced 17,000-site panel. No whole
+CRAM was downloaded. Each 25% read subsample uses samtools seed 42;
+median depth and allele-read totals are measured after downsampling.
+Each mode sees the same `min_depth = 7` criterion and the same VCF site
+subset. Each query emits 21 group rows with four DuckDB threads and
+two htslib workers. Peak RSS is the R process high-water mark (MiB)
+after reference loading and regional CRAM staging; it excludes samtools
+child-process RSS and is not incremental SQL memory. The `seconds`
+column is the ancestry BAM query alone, excluding CRAM staging and
+depth audit.
+The native and quarter-depth columns retain every status, including
+failed gates and their `cor_pred` values.
+
+```{r cram-sensitivity}
+cram_sensitivity <- utils::read.delim("ancestry_30x_sensitivity.tsv",
+  stringsAsFactors = FALSE)
+stopifnot(nrow(cram_sensitivity) == 36L,
+  all(cram_sensitivity$sites %in% c(1000L, 5000L, 17000L)),
+  length(unique(cram_sensitivity$sample_id)) == 3L,
+  all(c("allele_fraction", "called_genotype") %in% cram_sensitivity$mode),
+  nrow(unique(cram_sensitivity[, c("sites", "panel_sha256")])) == 3L,
+  all(with(cram_sensitivity, gate_distance[is.finite(gate_distance)] >
+           rounding_bound[is.finite(gate_distance)])))
+knitr::kable(unique(cram_sensitivity[, c("sites", "panel_sha256")]))
+knitr::kable(cram_sensitivity[, c("sample_id", "sites", "depth", "mode",
+  "vcf_used", "bam_used", "depth_eligible", "median_depth", "allele_reads",
+  "vcf_cor_pred", "cor_pred", "status", "max_group_difference",
+  "rounding_bound", "gate_distance", "seconds", "process_peak_rss_mib")], digits = 4)
+```
+
+`r sum(cram_sensitivity$status != "ok")` / `r nrow(cram_sensitivity)`
+correlation gates failed. The minimum distance from the 0.4 gate among
+the measurable cases is `r min(cram_sensitivity$gate_distance, na.rm = TRUE)`;
+the largest
+coefficient-rounding correlation bound across the three site counts is
+`r max(cram_sensitivity$rounding_bound)`.
+Called-genotype frequency excludes sites whose balance rule makes no call;
+its `bam_used` denominator is therefore smaller than the depth-eligible
+count. Maximum group differences compare the same-site VCF result with
+each BAM/CRAM mode; they are sensitivity, not an equality assertion.
 
 ```{r cleanup, include=FALSE}
 dbDisconnect(con, shutdown = TRUE)

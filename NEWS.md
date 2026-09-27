@@ -2,6 +2,12 @@
 
 # duckhts 1.5.2.9003
 
+- The benchmark registry pins the paired bigsnpr ancestry reference products,
+  epilepsy summary statistics, and GRCh37 phase-3 chr22 genotypes. The ancestry
+  benchmark compares published bigsnpr coefficients and public individual
+  genotypes using those checked inputs; indexed 30x CRAM comparisons retain
+  depth and correlation-gate outcomes.
+
 - `duckhts_ancestry_proportions` solves nonnegative reference-group projections
   from SQL-aggregated PC products, using a bounded nearest-positive-definite
   repair and a native constrained solver. The catalog documents relational
