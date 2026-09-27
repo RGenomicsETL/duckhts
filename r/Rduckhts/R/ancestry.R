@@ -48,12 +48,16 @@ rduckhts_ancestry_proportions <- function(
     "SELECT (SELECT count(DISTINCT group_id) FROM ", relations[[2L]], ") AS groups, ",
     "(SELECT count(DISTINCT pc) FROM ", relations[[3L]], ") AS pcs, ",
     "(SELECT count(*) FROM ", relations[[4L]], ") AS corrections, ",
-    "(SELECT count(DISTINCT pc) FROM ", relations[[4L]], ") AS corrected_pcs"
+    "(SELECT count(DISTINCT pc) FROM ", relations[[4L]], ") AS corrected_pcs, ",
+    "(SELECT count(*) FROM (SELECT DISTINCT pc FROM ", relations[[3L]], ") l ",
+    "FULL OUTER JOIN ", relations[[4L]], " c USING (pc) ",
+    "WHERE l.pc IS NULL OR c.pc IS NULL) AS mismatched_pcs"
   ))
   if (dimensions$groups < 1 || dimensions$groups > 30 ||
       dimensions$pcs < 1 || dimensions$pcs > 64 ||
       dimensions$corrections != dimensions$pcs ||
-      dimensions$corrected_pcs != dimensions$pcs) {
+      dimensions$corrected_pcs != dimensions$pcs ||
+      dimensions$mismatched_pcs != 0) {
     stop("reference requires 1..30 groups and 1..64 PCs with one correction per PC",
          call. = FALSE)
   }
@@ -83,9 +87,10 @@ rduckhts_ancestry_proportions <- function(
     "OR length(i.allele_b) != 1 OR i.allele_a NOT IN ('A','C','G','T') ",
     "OR i.allele_b NOT IN ('A','C','G','T') OR i.allele_a = i.allele_b ",
     "THEN 'invalid_alleles' ",
+    "WHEN i.allele_a || i.allele_b IN ('AT','TA','CG','GC') ",
+    "OR s.ra || s.rb IN ('AT','TA','CG','GC') THEN 'ambiguous' ",
     "WHEN i.f IS NULL OR NOT isfinite(i.f) OR i.f < 0 OR i.f > 1 THEN 'missing_frequency' ",
     "WHEN s.ra IS NULL THEN 'missing_reference' ",
-    "WHEN s.ra || s.rb IN ('AT','TA','CG','GC') THEN 'ambiguous' ",
     "WHEN i.allele_a = s.ra AND i.allele_b = s.rb THEN 'direct' ",
     "WHEN i.allele_a = s.rb AND i.allele_b = s.ra THEN 'reversed' ",
     "WHEN translate(i.allele_a, 'ACGT', 'TGCA') = s.ra ",

@@ -43,14 +43,16 @@ test_ancestry_relations <- function() {
   dbExecute(con, "UPDATE ancestry_input SET frequency = NULL WHERE position = 107")
   dbExecute(con, "INSERT INTO ancestry_input SELECT * FROM ancestry_input WHERE position = 106")
   dbExecute(con, "INSERT INTO ancestry_input VALUES ('S', 'chr1', 999, 'A', 'G', 0.5)")
+  dbExecute(con, "INSERT INTO ancestry_input VALUES ('S', 'chr1', 998, 'A', 'T', 0.5)")
   out <- rduckhts_ancestry_proportions(con, "ancestry_input", "ancestry_ref",
                                        "ancestry_pc", "ancestry_correction", min_cor = 0)
   expect_equal(out$status, rep("ok", 2L))
   expect_equal(out$used_variants, rep(6, 2L))
-  expect_equal(out$input_variants, rep(10, 2L))
+  expect_equal(out$input_variants, rep(11, 2L))
   expect_equal(out$reversed_variants, rep(1, 2L))
   expect_equal(out$flipped_variants, rep(1, 2L))
   expect_equal(out$duplicate_variants, rep(2, 2L))
+  expect_equal(out$ambiguous_variants, rep(1, 2L))
   expect_equal(out$unmatched_variants, rep(1, 2L))
   expect_equal(out$missing_variants, rep(1, 2L))
   ref <- dbGetQuery(con, "SELECT position, group_id, frequency FROM ancestry_ref WHERE position BETWEEN 100 AND 105 ORDER BY position, group_id")
@@ -67,6 +69,21 @@ test_ancestry_relations <- function() {
                                          "ancestry_pc", "ancestry_correction", min_cor = 1)
   expect_equal(gated$status, rep("low_correlation", 2L))
   expect_true(all(is.na(gated$proportion)))
+  dbExecute(con, paste(
+    "CREATE TABLE ancestry_correlated_ref AS SELECT chromosome, position, allele_a, allele_b,",
+    "group_id, CASE WHEN group_id='A' THEN 0.1+(position-100)*0.05",
+    "ELSE 0.25+(position-100)*0.04 END AS frequency FROM ancestry_ref"
+  ))
+  dbExecute(con, paste(
+    "CREATE TABLE ancestry_wrong_orientation AS SELECT 'S' AS sample_id, chromosome, position,",
+    "allele_a, allele_b, 1-sum(CASE WHEN group_id='A' THEN 0.7 ELSE 0.3 END * frequency) AS frequency",
+    "FROM ancestry_correlated_ref GROUP BY chromosome, position, allele_a, allele_b"
+  ))
+  reversed <- rduckhts_ancestry_proportions(
+    con, "ancestry_wrong_orientation", "ancestry_correlated_ref",
+    "ancestry_pc", "ancestry_correction", min_cor = -1)
+  expect_equal(reversed$status, rep("reversed_alleles", 2L))
+  expect_true(all(is.na(reversed$proportion)))
   dbExecute(con, paste(
     "CREATE TABLE ancestry_scaled AS SELECT 'S' AS sample_id, chromosome, position,",
     "allele_a, allele_b, sum(CASE WHEN group_id = 'A' THEN 0.35 ELSE 0.15 END * frequency) AS frequency",
@@ -91,6 +108,11 @@ test_ancestry_relations <- function() {
   expect_equal(genotype$sample_id, rep("S", 2L))
   expect_equal(genotype$used_variants, rep(7, 2L))
   expect_equal(genotype$missing_variants, rep(1, 2L))
+  dbExecute(con, "CREATE TABLE ancestry_bad_correction AS SELECT * FROM ancestry_correction")
+  dbExecute(con, "UPDATE ancestry_bad_correction SET pc = 3 WHERE pc = 2")
+  expect_error(rduckhts_ancestry_proportions(
+    con, "ancestry_input", "ancestry_ref", "ancestry_pc", "ancestry_bad_correction"),
+    pattern = "one correction per PC")
   expect_error(rduckhts_ancestry_proportions(con, "ancestry_input", "ancestry_ref",
                                               "ancestry_pc", "ancestry_correction", min_cor = 2))
 }
