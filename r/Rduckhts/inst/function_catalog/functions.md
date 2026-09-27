@@ -120,6 +120,7 @@ This section is generated from `functions.yaml`.
 
 | Function | Kind | R helper | Description |
 | --- | --- | --- | --- |
+| [`duckhts_somalier_spacing`](reference.md#duckhts_somalier_spacing) | scalar | `rduckhts_somalier_find_sites` | Greedily select ranked Somalier candidate positions at a minimum genomic distance. |
 | [`duckhts_somalier_import_sites`](reference.md#duckhts_somalier_import_sites) | table_macro | `rduckhts_somalier_import_sites` | Import an already selected Somalier sites VCF/BCF as one canonical panel and population-frequency relation. |
 | [`duckhts_somalier_vcf_counts`](reference.md#duckhts_somalier_vcf_counts) | table_macro | `rduckhts_somalier_vcf_counts` | Extract a complete panel-aligned A/B/other count relation from VCF/BCF FORMAT/AD. |
 | [`duckhts_somalier_bam_counts`](reference.md#duckhts_somalier_bam_counts) | table | `rduckhts_somalier_bam_counts` | Extract complete panel-aligned A/B/other base counts from one indexed BAM or CRAM source. |

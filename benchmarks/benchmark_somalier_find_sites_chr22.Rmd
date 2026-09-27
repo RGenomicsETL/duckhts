@@ -1,0 +1,289 @@
+---
+title: "Somalier find-sites: 1000 Genomes 30x phased chr22 and chrX"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+root <- normalizePath("..", mustWork = TRUE)
+read_result <- function(name) utils::read.delim(
+  file.path(root, "benchmarks", name), check.names = FALSE
+)
+observations <- read_result("somalier_find_sites_chr22_observations.tsv")
+gates <- read_result("somalier_find_sites_chr22_gates.tsv")
+timing <- read_result("somalier_find_sites_chr22_timing.tsv")
+classes <- read_result("somalier_find_sites_chr22_disagreement_summary.tsv")
+disagreements <- read_result("somalier_find_sites_chr22_disagreements.tsv")
+xobservations <- read_result("somalier_find_sites_chrx_observations.tsv")
+xgates <- read_result("somalier_find_sites_chrx_gates.tsv")
+xtiming <- read_result("somalier_find_sites_chrx_timing.tsv")
+xclasses <- read_result("somalier_find_sites_chrx_disagreement_summary.tsv")
+xdisagreements <- read_result("somalier_find_sites_chrx_disagreements.tsv")
+xpar <- read_result("somalier_find_sites_chrx_par_records.tsv")
+profile <- read_result("somalier_find_sites_chrx_profile.tsv")
+matched <- read_result("somalier_find_sites_matched_timing.tsv")
+memory <- read_result("somalier_find_sites_memory.tsv")
+baselines <- subset(memory, input == "empty")
+memory_runs <- subset(memory, input == "VCF")
+rownames(memory_runs) <- NULL
+keys <- c("chromosome", "phase", "decompression_workers")
+baseline_index <- match(do.call(paste, memory_runs[keys]),
+                        do.call(paste, baselines[keys]))
+memory_runs$baseline_rss_kib <- baselines$peak_rss_kib[baseline_index]
+memory_runs$net_bytes_per_input_variant <- round(
+  1024 * (memory_runs$peak_rss_kib - memory_runs$baseline_rss_kib) /
+    memory_runs$input_records
+)
+memory_runs$net_bytes_per_candidate <- round(
+  1024 * (memory_runs$peak_rss_kib - memory_runs$baseline_rss_kib) /
+    memory_runs$gated_candidates
+)
+```
+
+This is a whole-chromosome differential of DuckHTS and pinned Somalier
+[v0.3.4](https://github.com/brentp/somalier/tree/ff58fdade8f4f8293d904f10e0a4a13f1fac808d)
+(binary SHA-256 `18717c205a9c4b65d479f1d2cf069a30b047a5378edf544d403d4081f06a3a78`).
+The unmodified [1000 Genomes high-coverage 30x phased chr22 VCF](https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20201028_3202_phased/CCDG_14151_B01_GRM_WGS_2020-08-05_chr22.filtered.shapeit2-duohmm-phased.vcf.gz)
+is staged through `duckhtsbench` (SHA-256
+`70ff24cfd01eab24c6f4c6e825f55a2b3475ff595f6e12e179c4ef06b9cc4df6`,
+519,930,289 bytes, GRCh38). Its declared INFO/AF and INFO/AN are used without
+recomputing from genotypes. Somalier skips sample genotypes; DuckHTS reads the
+physical VCF in sequential mode with `samples := ''`. The cache VCF is not committed.
+
+## Selection rules
+
+| Rule | Somalier v0.3.4 and DuckHTS default | DuckHTS named alternative |
+|:--|:--|:--|
+| Human contigs | Exclude autosomal REF=C; X zero-based positions 2,781,479..154,931,044 | `compatibility_mode = "generic"` does not classify human sex contigs |
+| AF rank ties | Retain input order on equal AF scores; a reversed-position two-site probe selects the first input record with pinned Somalier | `tie_order = "lexical"` orders by position and allele |
+| Spacing | Greedy autosomal distance 10,000 by default; X/Y selections do not update spacing state | `sex_spacing = "enforced"` applies X distance 1,000 and Y distance 200 |
+| Caps | Up to 65,535 autosomal, 10,001 X, and 5,001 Y selections after ranking | Named per-sex maximum arguments |
+
+- Source revision: `r observations$revision`. Workload: `--min-AN 6000`,
+  `--snp-dist 10000`, minimum AF 0.15, AF target 0.48, no interval or
+  gnotate exclusion. One run per tool, warm filesystem cache, GNU `/usr/bin/time -v`.
+- Denominators: `r format(observations$source_records, big.mark = ",")` input
+  records; `r format(observations$upstream_candidates, big.mark = ",")` Somalier
+  candidates and `r format(observations$duckhts_candidates, big.mark = ",")`
+  DuckHTS candidates before nearby-variant exclusion;
+  `r format(observations$max_per_chromosome_candidates, big.mark = ",")`
+  chr22 spacing inputs. The native spacing kernel's per-list limit is
+  1,000,000 candidates; this chromosome's largest list is below it.
+- Selected: `r observations$upstream_sites` Somalier sites and
+  `r observations$duckhts_sites` DuckHTS sites;
+  `r observations$common_sites` shared four-field keys
+  `(region, position, source_ref, source_alt)`. Input-order and lexical
+  tie policies differed on `r observations$lexical_tie_dependent_sites`
+  selected sites on this chromosome.
+- Threads: Somalier uses two reader/decompression threads and one writer
+  thread (pinned source); DuckHTS uses one DuckDB thread and a sequential
+  reader. The timed DuckHTS process also verifies its cached input and
+  starts R/DuckDB; Somalier timing covers the CLI only. These single-process
+  measurements are not matched-concurrency speedups.
+
+```{r gates}
+knitr::kable(gates, caption = "Whole-chromosome stage counts. Indels and snps are exclusion-neighbor inventories, not sequential pass counts. NA denotes stages the pinned Somalier executable does not expose; its own log reports the gated candidate count.")
+```
+
+```{r timing}
+knitr::kable(timing, caption = paste(
+  "Wall seconds and peak RSS KiB for each timed process, including its own",
+  "initialization and I/O. Single runs are not a variance estimate."))
+```
+
+```{r disagreement-summary}
+knitr::kable(classes, caption = "Keyed disagreement classes (all records counted).")
+```
+
+The retained `somalier_find_sites_chr22_disagreements.tsv` contains the first
+100 disagreement keys and origins; `r nrow(disagreements)` rows are present.
+An empty table means no disagreements, not an absent comparison. The
+`somalier_find_sites_chr22_observations.tsv` and gate table retain the full
+comparison denominators. The previous
+[`benchmark_somalier_find_sites.md`](benchmark_somalier_find_sites.md)
+uses two small fixture slices and is not a comparable whole-chromosome baseline.
+
+## Chromosome X, including physical PAR records
+
+The unmodified [1000 Genomes 30x phased chrX VCF](https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20201028_3202_phased/CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.eagle2-phased.v2.vcf.gz)
+(SHA-256 `f42c786cba67ff74c30e9bd37254b5a605a5957cfe3a5dc54e7dd41d9c9d8edc`,
+2,800,398,832 bytes) contains `r format(xpar$par1_records, big.mark = ",")`
+records in PAR1 (before POS 2,781,480) and
+`r format(xpar$par2_records, big.mark = ",")` records in PAR2 (after POS
+154,931,045). The physical first and last positions are
+`r format(xpar$first_position, big.mark = ",")` and
+`r format(xpar$last_position, big.mark = ",")`.
+Somalier's pinned X-range rule admits only zero-based positions
+2,781,479..154,931,044. The `r format(xpar$par1_records + xpar$par2_records, big.mark = ",")`
+PAR records account for the drop from source to eligible records.
+Somalier's log says “0 autosomal variants” for this X-only input; the
+actual compressed output VCF, not that autosomal-only log counter, is used
+for the selected-site denominator and keyed comparison.
+
+- Source revision: `r xobservations$revision`.
+- Denominators: `r format(xobservations$source_records, big.mark = ",")`
+  input records; `r format(xobservations$upstream_candidates, big.mark = ",")`
+  Somalier candidates and `r format(xobservations$duckhts_candidates, big.mark = ",")`
+  DuckHTS gated candidates;
+  `r format(xobservations$max_per_chromosome_candidates, big.mark = ",")`
+  spacing inputs (below the 1,000,000 limit).
+- Selected: `r format(xobservations$upstream_sites, big.mark = ",")` Somalier and
+  `r format(xobservations$duckhts_sites, big.mark = ",")` DuckHTS sites;
+  `r format(xobservations$common_sites, big.mark = ",")` matching four-field keys.
+  Input and lexical tie policies differed on
+  `r xobservations$lexical_tie_dependent_sites` selected sites.
+  `r xobservations$duckhts_only` DuckHTS-only and
+  `r xobservations$upstream_only` Somalier-only keys.
+
+```{r x-gates}
+knitr::kable(xgates, caption = "chrX stage counts; NA denotes stages not reported by the pinned executable.")
+```
+
+```{r x-timing}
+knitr::kable(xtiming, caption = "chrX whole-process wall seconds and peak RSS KiB; thread and measurement caveats above also apply.")
+```
+
+```{r x-disagreement-summary}
+knitr::kable(xclasses, caption = sprintf(
+  "chrX keyed disagreement classes. First 100 rows in somalier_find_sites_chrx_disagreements.tsv; retained: %s rows.",
+  nrow(xdisagreements)))
+```
+
+## Operator profile and matched-thread selection
+
+The before/after chrX profile uses source revisions `396f9599` and
+`99d2f443` on the same 2,858,184 physical VCF records, with one DuckDB
+thread, warm filesystem cache, no sample genotype decode, and the same
+250,641 gated candidates and 234,367 spacing inputs. Each complete query
+was profiled with DuckDB JSON profiling (query latency and operator timing);
+`EXPLAIN ANALYZE` also checked the ordered-stream plan. The 14 named gate
+counts were collected by one query with
+shared materialized CTEs. Operator times are pipelined and **not additive**.
+No gate count or keyed denominator was dropped to obtain these timings.
+
+```{r operator-profile}
+knitr::kable(profile, digits = 4, caption = paste(
+  "chrX seconds. Named gate rows are FILTER operators; join/window rows",
+  "isolate nearby-variant work; the mask projection bounds the spacing",
+  "kernel and its projection rather than timing the kernel alone."))
+```
+
+A separate `count(*)` over `read_bcf` took 16.700 s; decoding and summing
+only `INFO_AF[1]` and `INFO_AN` took 18.265 s. The selector's `READ_BCF`
+operator took 19.237 s before and 19.330 s after. Its projected columns
+are `CHROM`, `POS`, `REF`, `ALT`, `FILTER`, `INFO_AF`, `INFO_AN`,
+`INFO_BaseQRankSum`, `INFO_ClippingRankSum`, `INFO_FS`, `INFO_MQ`,
+`INFO_MQRankSum`, `INFO_QD`, and `INFO_ReadPosRankSum`; no genotype columns
+or other INFO fields are materialized. These are separate full scans, not
+additive decode components. The positional and QC predicates run after the
+reader; this table function does not push them into VCF decoding. Sampling
+with `perf` was unavailable (`perf_event_paranoid=4`).
+
+For the matched-thread runs below, DuckHTS uses one SQL worker and either
+zero or two htslib BGZF decompression workers; Somalier uses its pinned two
+readers and one writer. DuckDB is set to one thread in both DuckHTS runs.
+A separate warm-cache process profiles one selection per row; `process_seconds`
+adds R startup, the connection, and result transfer to `selection_seconds`,
+but excludes the input cache checksum. Somalier's CLI process includes its
+own startup and VCF writer; these distinct scopes are reported, not treated
+as a controlled throughput ratio. Values are single runs, not variance
+estimates. The official one-thread `select` workflow *includes* cache
+verification and took `r timing$wall_seconds[timing$tool == "DuckHTS"]` s
+on chr22 and `r xtiming$wall_seconds[xtiming$tool == "DuckHTS"]` s on chrX.
+Isolated warm-cache `duckhts_bench_fetch()` calls took 0.285 s and 1.440 s,
+respectively; R and library startup added about 0.3 s and opening a DuckDB
+connection about 0.04 s. All 2,402 chr22 and 10,001 chrX keys also agree
+between one-worker and three-worker DuckHTS selections.
+
+```{r matched-threads}
+knitr::kable(matched, digits = 3, caption = paste(
+  "Warm-cache whole-chromosome selection: input/output denominators,",
+  "wall seconds and peak process RSS KiB. NA: Somalier has no separate",
+  "in-process SQL selection timing."))
+```
+
+The ordered position passes reduce the chrX selection query from 219.640 s
+to approximately 21 s at one thread. The initial ordered query (revision
+`dd87028e0c33b9b0ed807e71a6aeeed7a3eec764`) still
+materializes the full source and eligible relations. The filtered query
+materializes only records contributing an indel inventory, a nearby-SNP
+inventory, or an AF/AN-qualified site (code revision
+`70ef384cc023350b7e10bfd01881ca9f26417498`). Indel and SNP inventory relations
+hold only chromosome, position and span/count data. Both queries use the
+same installed Rduckhts extension, source VCFs and pinned selection rules.
+The 14 diagnostic gate counts share one source scan; that diagnostic query
+retains the full source relation and is not included in this selection-only
+memory comparison.
+
+GNU time reports peak process RSS. DuckDB JSON profiling reports the query's
+peak buffer-manager allocation, **not** total resident memory or a sample
+synchronized to peak RSS. After the query, `duckdb_memory()` reports zero
+buffer bytes for every row in this table. Each empty input keeps the reader
+schema (`WHERE false`) and measures R, DuckDB, extension startup and query
+planning in a fresh process. Net bytes per variant subtract the paired empty
+process RSS, then divide by the physical input records; bytes per candidate
+use the `gated` denominator (before the indel/SNP neighborhood passes).
+The inventories contain more records than `gated`, so the latter is not a
+complete allocation denominator. Times include JSON profiling, but exclude
+cache checksum and initial input staging. Single runs are not a variance
+estimate.
+
+```{r memory}
+knitr::kable(memory_runs[, c(
+  "chromosome", "phase", "decompression_workers", "input_records",
+  "gated_candidates", "selected_sites", "baseline_rss_kib", "peak_rss_kib",
+  "net_bytes_per_input_variant", "net_bytes_per_candidate",
+  "query_peak_buffer_bytes", "selection_seconds", "process_seconds"
+)], caption = paste("Fresh-process selection and paired empty-input baseline.",
+                   "RSS in KiB; DuckDB peak buffer allocations in bytes."))
+```
+
+At three active workers, chrX RSS falls from 1,225,804 to 560,992 KiB
+and chr22 RSS from 453,552 to 212,312 KiB. The corresponding query times
+are 13.420 vs 13.149 seconds on chrX and 5.068 vs 5.044 seconds on chr22.
+The same physical chromosome inputs produce 10,001 and 2,402 selected keys;
+one-worker and three-worker results are identical, with zero keyed
+disagreements against pinned Somalier. Memory is still bounded below by R,
+DuckDB and the extension (~134,000 KiB here); the retained candidate rows,
+indel/SNP inventories, reader decode buffers and downstream sorts contribute
+to the additional resident memory; these measurements do not isolate their
+shares. Predicate pushdown into `read_bcf()` is not part of this selection
+query.
+
+Reproduce from the repository root with installed `Rduckhts` and
+`duckhtsbench`, the pinned binary staged in `duckhtsbench`, and GNU time:
+
+```bash
+export DUCKHTSBENCH_REGISTRY="$PWD/r/duckhtsbench/inst/benchmark_registry.tsv"
+Rscript test/scripts/somalier_find_sites_chromosome.R upstream "$PWD" chr22
+time_file="$(Rscript -e 'cat(file.path(dirname(duckhtsbench::duckhts_bench_artifact_path("somalier_find_sites_chr22_source")), "chr22.duckhts.time"))')"
+/usr/bin/time -v -o "$time_file" \
+  Rscript test/scripts/somalier_find_sites_chromosome.R select "$PWD" chr22
+Rscript test/scripts/somalier_find_sites_chromosome.R compare "$PWD" chr22
+Rscript test/scripts/somalier_find_sites_chromosome.R upstream "$PWD" chrX
+x_time_file="$(Rscript -e 'cat(file.path(dirname(duckhtsbench::duckhts_bench_artifact_path("somalier_find_sites_chrx_source")), "chrX.duckhts.time"))')"
+/usr/bin/time -v -o "$x_time_file" \
+  Rscript test/scripts/somalier_find_sites_chromosome.R select "$PWD" chrX
+Rscript test/scripts/somalier_find_sites_chromosome.R compare "$PWD" chrX
+# Compare both query revisions using the same installed Rduckhts extension.
+old_query="$(mktemp)"
+trap 'rm -f "$old_query"' EXIT
+git show dd87028e:r/Rduckhts/R/somalier_find_sites.R > "$old_query"
+for phase in before after; do
+  if [ "$phase" = before ]; then
+    export DUCKHTS_FIND_SITES_SOURCE="$old_query"
+  else
+    export DUCKHTS_FIND_SITES_SOURCE="$PWD/r/Rduckhts/R/somalier_find_sites.R"
+  fi
+  for chrom in chr22 chrX; do
+    for decompression_workers in 0 2; do
+      for input in empty input; do
+        /usr/bin/time -f 'peak_rss_kib: %M process_seconds: %e' \
+          Rscript scripts/benchmark_somalier_find_sites_profile.R \
+            "$chrom" "$decompression_workers" "$input"
+      done
+    done
+  done
+done
+cd benchmarks && Rscript -e "rmarkdown::render('benchmark_somalier_find_sites_chr22.Rmd')"
+```

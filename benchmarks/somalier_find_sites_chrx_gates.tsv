@@ -1,0 +1,15 @@
+gate	records	somalier_records
+src	2858184	2858184
+eligible	2720630	NA
+pass_snv	2286442	NA
+af_an	250641	NA
+annotation_gate	250641	NA
+qc_gate	250641	NA
+interval_gate	250641	NA
+gated	250641	250641
+indels	110112	NA
+snps	441703	NA
+indel_clear	243716	NA
+neighbors	234367	NA
+kept	234367	NA
+selected	10001	10001

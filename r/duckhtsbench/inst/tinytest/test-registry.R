@@ -246,6 +246,46 @@ Sys.setenv(DUCKHTSBENCH_REGISTRY = gff_registry, DUCKHTS_CACHE_DIR = file.path(t
 gff_site <- duckhts_bench_stage_gffbase(file.path(tmp, "gff-site"), python)
 expect_true(dir.exists(file.path(gff_site, "gffbase")))
 expect_true(file.exists(file.path(gff_site, "provenance.tsv")))
+
+featuredb_registry <- file.path(tmp, "featuredb.tsv")
+featuredb_input <- file.path(tmp, "featuredb.gff3.gz")
+writeLines("##gff-version 3", featuredb_input)
+checksum <- function(path) {
+  sha256_bin <- Sys.which("sha256sum")
+  if (!nzchar(sha256_bin)) sha256_bin <- Sys.which("shasum")
+  args <- if (basename(sha256_bin) == "shasum") c("-a", "256", shQuote(path)) else shQuote(path)
+  fields <- strsplit(trimws(system2(sha256_bin, args, stdout = TRUE)),
+                     "[[:space:]]+")[[1L]]
+  paste0("sha256=", fields[[1L]], ";bytes=", file.info(path)$size)
+}
+featuredb_rows <- list(
+  c("mane_v15_ensembl_gff3", "gffbase-featuredb", "gff3", "test",
+    paste0("file://", featuredb_input), "public", "inputs/mane.gff3.gz",
+    "direct_download", "tinytest", "1", checksum(featuredb_input)),
+  c("gencode_v49_basic_gff3", "gffbase-featuredb", "gff3", "test",
+    paste0("file://", featuredb_input), "public", "inputs/gencode.gff3.gz",
+    "direct_download", "tinytest", "2", checksum(featuredb_input)),
+  c("gffbase_021_linux_x86_64_wheel", "gffbase-featuredb", "python_wheel", "test",
+    paste0("file://", gff_wheel), "public", "wheel.whl", "direct_download",
+    "tinytest", "3", checksum(gff_wheel)),
+  c("gffbase_021", "gffbase-featuredb", "python_package", "test",
+    "artifact:gffbase_021_linux_x86_64_wheel", "local_derived", "site-021",
+    "pip_install_verified_wheel", "tinytest", "4", "")
+)
+writeLines(c(paste(names(registry), collapse = "\t"),
+             vapply(featuredb_rows, paste, character(1), collapse = "\t")), featuredb_registry)
+Sys.setenv(DUCKHTSBENCH_REGISTRY = featuredb_registry,
+           DUCKHTS_CACHE_DIR = file.path(tmp, "featuredb-cache"))
+for (id in c("mane_v15_ensembl_gff3", "gencode_v49_basic_gff3")) {
+  staged <- duckhts_bench_fetch(id)
+  expect_equal(readLines(staged), "##gff-version 3")
+  expect_true(file.exists(paste0(staged, ".provenance.tsv")))
+}
+featuredb_site <- duckhts_bench_stage_gffbase(
+  python = python, artifact_id = "gffbase_021")
+expect_equal(featuredb_site, duckhts_bench_artifact_path("gffbase_021"))
+expect_true(dir.exists(file.path(featuredb_site, "gffbase")))
+expect_true(any(grepl("version\\t0.2.1", readLines(file.path(featuredb_site, "provenance.tsv")))))
 if (is.na(old_registry)) Sys.unsetenv("DUCKHTSBENCH_REGISTRY") else Sys.setenv(DUCKHTSBENCH_REGISTRY = old_registry)
 if (is.na(old_cache)) Sys.unsetenv("DUCKHTS_CACHE_DIR") else Sys.setenv(DUCKHTS_CACHE_DIR = old_cache)
 
