@@ -5,8 +5,11 @@ Sys.setenv(DUCKHTSBENCH_REGISTRY = file.path(package_root, "inst", "benchmark_re
 for (file in c("registry.R", "stage.R", "gffbase.R")) {
   source(file.path(package_root, "R", file))
 }
-for (id in c("mane_v15_ensembl_gff3", "gencode_v49_basic_gff3")) {
-  duckhts_bench_fetch(id)
+# The duplicate-ID test writes its own fixture and needs only the pinned wheel.
+if (!identical(Sys.getenv("GFFBASE_FEATUREDB_WHEEL_ONLY"), "1")) {
+  for (id in c("mane_v15_ensembl_gff3", "gencode_v49_basic_gff3")) {
+    duckhts_bench_fetch(id)
+  }
 }
 site <- duckhts_bench_stage_gffbase(
   site_dir = duckhts_bench_artifact_path("gffbase_021"),
