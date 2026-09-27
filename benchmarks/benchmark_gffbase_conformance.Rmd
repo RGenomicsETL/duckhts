@@ -14,8 +14,8 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>", message = FALSE, warning 
 # Benchmark
 
 This benchmark compares DuckHTS `read_gff(...)` with
-[GFFBase](https://github.com/Kuanhao-Chao/gffbase) around two related but
-different workload shapes:
+[GFFBase](https://github.com/Kuanhao-Chao/gffbase) across parser,
+conformance, scan and feature-database workloads:
 
 1. **GFFBase audit:** record whether GFFBase is using its Rust parser or Python
    fallback, check Rust/Python parser parity when both are available, and verify
@@ -26,6 +26,8 @@ different workload shapes:
    commit `78714cf30a9d799eab544e00a79a4da9754987ca`.
 3. **Direct scan/parser throughput:** DuckHTS scans the same GFF3 files through
    `read_gff(...)`; GFFBase parses them with `parse_gff(strict = TRUE)`.
+4. **Feature-database core:** SQL over `read_gff(...)` materializes features,
+   parent edges and descendants for comparison with `gffbase.create_db`.
 
 DuckHTS supports GFF3 through `read_gff(...)`, GTF through `read_gtf(...)`, and
 plain tabix-style GFF/GTF-like rows through `read_tabix(...)`. The new
@@ -77,10 +79,19 @@ human_gff <- strsplit(Sys.getenv("GFFBASE_HUMAN_GFF", unset = ""), ",", fixed = 
 human_gff <- human_gff[nzchar(human_gff)]
 human_gff <- normalizePath(human_gff, mustWork = FALSE)
 extension_path <- normalizePath(file.path(repo_root, "build", "release", "duckhts.duckdb_extension"), mustWork = TRUE)
+python_bin <- Sys.getenv("GFFBASE_FEATUREDB_PYTHON", unset = "python3")
+# Same format as the script's metadata: interpreter|Python version|DuckDB version.
+python_runtime <- system2(python_bin, c("-c", shQuote(paste0(
+  "import os, sys, platform, duckdb; ",
+  "print(f'{os.path.abspath(sys.executable)}|{platform.python_version()}|{duckdb.__version__}')"))),
+  stdout = TRUE)
 current_identity <- list(
-  duckhts_git_rev = trimws(system2("git", c("-C", repo_root, "rev-parse", "HEAD"), stdout = TRUE, stderr = FALSE)),
+  python_runtime = python_runtime,
   duckhts_extension = extension_path,
   duckhts_extension_md5 = unname(tools::md5sum(extension_path)),
+  # The script's hash, not the git revision: committing rendered results must
+  # not invalidate them, but a changed benchmark implementation must.
+  benchmark_script_md5 = unname(tools::md5sum(file.path(repo_root, "scripts", "gffbase_conformance_benchmark.py"))),
   gffbase_site = normalizePath(gffbase_site, mustWork = TRUE),
   rows = rows, passes = passes, warmup = warmup,
   include_create_db = include_create_db, human_gff = human_gff
@@ -89,9 +100,10 @@ current_identity <- list(
 needs_run <- force || !file.exists(audit_csv) || !file.exists(conformance_csv) || !file.exists(performance_csv) || !file.exists(metadata_json)
 if (!needs_run && file.exists(metadata_json)) {
   old_meta <- tryCatch(jsonlite::fromJSON(metadata_json), error = function(error) list())
-  identity_matches <- identical(as.character(old_meta$duckhts_git_rev), current_identity$duckhts_git_rev) &&
+  identity_matches <- identical(as.character(old_meta$python_runtime), current_identity$python_runtime) &&
     identical(as.character(old_meta$duckhts_extension), current_identity$duckhts_extension) &&
     identical(as.character(old_meta$duckhts_extension_md5), current_identity$duckhts_extension_md5) &&
+    identical(as.character(old_meta$benchmark_script_md5), current_identity$benchmark_script_md5) &&
     startsWith(as.character(old_meta$gffbase_site), current_identity$gffbase_site) &&
     identical(as.integer(old_meta$rows), current_identity$rows) &&
     identical(as.integer(old_meta$passes), current_identity$passes) &&
@@ -115,7 +127,7 @@ if (needs_run) {
   if (include_create_db) cmd <- c(cmd, "--include-create-db")
 
   pythonpath <- Sys.getenv("PYTHONPATH", unset = "")
-  out <- system2("python3", cmd, stdout = TRUE, stderr = TRUE, env = c(sprintf("PYTHONPATH=%s", pythonpath)))
+  out <- system2(python_bin, cmd, stdout = TRUE, stderr = TRUE, env = c(sprintf("PYTHONPATH=%s", pythonpath)))
   status <- attr(out, "status")
   if (!is.null(status) && status != 0) {
     stop(paste(out, collapse = "\n"))
@@ -161,7 +173,7 @@ knitr::kable(
     ),
     value = c(
       duckhts_rev,
-      meta$duckhts_extension,
+      file.path("build", "release", "duckhts.duckdb_extension"),
       meta$gffbase_version,
       as.character(meta$gffbase_native_available),
       substr(meta$gffbase_upstream_commit, 1, 12),
@@ -267,3 +279,122 @@ knitr::kable(perf_show[, show_cols], row.names = FALSE)
   feature database API. Set `GFFBASE_HUMAN_GFF` to real GENCODE/RefSeq/MANE files
   for human-scale rows, and enable `GFFBASE_BENCH_INCLUDE_CREATE_DB=1` when the
   workload of interest is database materialization plus hierarchy indexing.
+
+# Exercise the thesis: a feature database from `read_gff`
+
+DuckHTS observes GFF3 records; SQL builds the persistent, position-sorted
+feature table (including ordered, repeated attributes), parent edges and
+transitive closure. This section uses the registered MANE and GENCODE inputs
+and GFFBase v0.2.1; the conformance and parser sections above use v0.1.0.
+
+```{r featuredb-sql, echo=FALSE, results='asis'}
+cat("```sql\n", paste(readLines(file.path(repo_root, "scripts/gffbase_featuredb.sql")),
+                      collapse = "\n"), "\n```\n", sep = "")
+```
+
+`gffbase.create_db` uses `force=True`, `merge_strategy="create_unique"`,
+`force_gff=True`, `pragmas={"threads": threads}` and `validation=None`.
+Validation modes are not run. SQL assigns suffixes to repeated physical IDs
+in source order to match `create_unique`; both sides retain every input row.
+
+```{r featuredb-data, include=FALSE}
+featuredb_dir <- file.path(repo_root, "benchmarks/data")
+parity <- read.csv(file.path(featuredb_dir, "gffbase_featuredb_parity.csv"),
+                   stringsAsFactors = FALSE)
+times <- read.csv(file.path(featuredb_dir, "gffbase_featuredb_timings.csv"),
+                  stringsAsFactors = FALSE)
+stopifnot(nrow(parity) > 0, all(parity$parity == "PASS"),
+          nrow(times) == 2 * nrow(parity),
+          !anyDuplicated(parity[c("dataset", "pass_number")]),
+          !anyDuplicated(times[c("dataset", "pass_number", "engine")]))
+stopifnot(setequal(unique(times$engine), c("DuckHTS", "gffbase")))
+joined <- merge(times, parity, by = c("dataset", "pass_number"),
+                suffixes = c("_measured", "_parity"))
+stopifnot(nrow(joined) == nrow(times))
+for (column in c("features", "anchors", "windows", "descendants",
+                 "descendants_sha256", "region_hits", "region_sha256")) {
+  stopifnot(all(joined[[paste0(column, "_measured")]] ==
+                joined[[paste0(column, "_parity")]]))
+}
+for (column in c("anchors_sha256", "windows_sha256")) {
+  stopifnot(all(vapply(split(times[[column]],
+                             interaction(times$dataset, times$pass_number, drop = TRUE)),
+                       function(values) length(unique(values)) == 1L, logical(1))))
+}
+```
+
+## Parity before timing
+
+Seeded genes and windows are identical across engines; sorted descendant rows
+compare anchor, descendant ID, chromosome, source, type, coordinates, score,
+strand, frame, source order and depth (missing numeric score is rendered as
+`'.'` on the SQL side). Region hits compare sorted feature IDs for every
+window, not just the total count.
+
+```{r featuredb-parity, echo=FALSE}
+parity_show <- parity[!duplicated(parity$dataset),
+                      c("dataset", "features", "anchors", "windows", "descendants",
+                        "region_hits", "parity")]
+parity_show$passes <- as.integer(table(parity$dataset)[parity_show$dataset])
+knitr::kable(parity_show, row.names = FALSE)
+```
+
+## Materialization and queries
+
+Wall time and peak resident memory include process startup, build, and both
+queries; build time covers database creation only. Each pass starts with a new
+process and database. File sizes follow a closed checkpoint. The GENCODE
+GFFBase process runs in a `systemd-run` scope with memory cap
+`r unique(times$gffbase_memory_cap[grepl("^gencode", times$dataset)])`.
+GENCODE has a single pass, so it supplies no run-to-run variance estimate.
+
+```{r featuredb-timing, echo=FALSE}
+timing_show <- do.call(rbind, lapply(split(times, list(times$dataset, times$engine),
+                                            drop = TRUE), function(group) {
+  data.frame(dataset = group$dataset[[1]], engine = group$engine[[1]],
+             passes = nrow(group),
+             build_s = round(stats::median(group$build_s), 2),
+             wall_s = round(stats::median(group$wall_s), 2),
+             peak_rss_GiB = round(stats::median(group$peak_rss_kb) / 1024^2, 2),
+             database_GiB = round(stats::median(group$db_bytes) / 1024^3, 2),
+             descendants_s = round(stats::median(group$descendant_s), 2),
+             windows_s = round(stats::median(group$region_s), 2))
+}))
+timing_show <- timing_show[order(match(timing_show$dataset, unique(parity$dataset)),
+                                 match(timing_show$engine, c("DuckHTS", "gffbase"))), ]
+knitr::kable(timing_show, row.names = FALSE)
+```
+
+```{r featuredb-provenance, echo=FALSE}
+input_provenance <- unique(times[c("dataset", "input_sha256", "gffbase_memory_cap")])
+knitr::kable(input_provenance, row.names = FALSE)
+
+run_provenance <- times[1, c("revision", "extension_sha256", "host", "os", "cpu",
+                             "threads", "duckdb_version", "gffbase_version",
+                             "duckhts_memory_limit", "validation")]
+knitr::kable(data.frame(parameter = names(run_provenance),
+                        value = unname(unlist(run_provenance, use.names = FALSE))),
+              row.names = FALSE)
+```
+
+This is the storage and query core, not GFFBase's validation modes, GTF
+synthesis, gffutils API or R-tree. The recorded DuckHTS batched descendant
+query is faster: its one SQL join handles all anchors; GFFBase also batches
+through its dedicated `children_batched` API. This result does not describe
+per-gene SQL lookups, where GFFBase's indexed batched API can avoid repeated
+query overhead. DuckDB's default memory limit is 80% of RAM; these DuckHTS
+runs set a limit explicitly. Peak RSS is of the same order for both engines
+despite the much smaller DuckHTS database, and GENCODE DuckHTS peak RSS exceeds
+that limit: the DuckDB limit does not cap all process allocations.
+
+To restage inputs and the pinned wheel, repeat the measurements and render:
+
+```sh
+make bench-gffbase-featuredb
+```
+
+`GFFBASE_FEATUREDB_PYTHON` selects a Python with DuckDB and PyArrow installed;
+`DUCKHTS_CACHE_DIR` selects the registry cache. Set
+`GFFBASE_FEATUREDB_MANE_PASSES` and `GFFBASE_FEATUREDB_GENCODE_PASSES` to
+increase repetitions. Python dependencies are installed from the verified wheel
+without network access during the measurement; staging may download inputs.

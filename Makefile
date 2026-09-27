@@ -27,7 +27,8 @@
 	check-benchmark-portability \
 	stage-norm-1000g-dragen-gvcf stage-liftover-references \
 	stage-giab-v4.2.1 stage-riker-wgs stage-duckvep-conformance-corpora \
-	stage-gffbase stage-duckbedqc-data stage-variantkey-providers \
+	stage-gffbase stage-gffbase-featuredb test-gffbase-featuredb bench-gffbase-featuredb \
+	stage-duckbedqc-data stage-variantkey-providers \
 	test-cache-paths test-benchmark-registry test-variantkey-provider-staging \
 	test-duckvep-corpus-staging test-cgranges-benchmark-r \
 	test-liftover-property test-liftover-property-asan \
@@ -581,6 +582,10 @@ stage-duckvep-conformance-corpora:
 stage-gffbase:
 	bash scripts/stage_gffbase.sh
 
+stage-gffbase-featuredb:
+	DUCKHTS_ROOT="$(PROJ_DIR)" GFFBASE_FEATUREDB_PYTHON="$(GFFBASE_FEATUREDB_PYTHON)" \
+		Rscript r/duckhtsbench/scripts/stage_gffbase_featuredb.R
+
 stage-duckbedqc-data:
 	bash scripts/stage_duckbedqc_data.sh
 
@@ -601,6 +606,31 @@ bench-munge:
 
 bench-gffbase:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_gffbase_conformance.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
+
+GFFBASE_FEATUREDB_PYTHON ?= python3
+GFFBASE_FEATUREDB_MANE_PASSES ?= 3
+GFFBASE_FEATUREDB_GENCODE_PASSES ?= 1
+
+# Needs the staged GFFBase wheel, so it runs before the benchmark rather than in test_release.
+test-gffbase-featuredb:
+	@stage="$$(DUCKHTS_ROOT="$(PROJ_DIR)" GFFBASE_FEATUREDB_PYTHON="$(GFFBASE_FEATUREDB_PYTHON)" GFFBASE_FEATUREDB_WHEEL_ONLY=1 \
+		Rscript r/duckhtsbench/scripts/stage_gffbase_featuredb.R)" || exit 1; \
+		site="$${stage##*GFFBASE_FEATUREDB_SITE=}"; \
+		test -d "$$site" || { echo "GFFBase staging did not return a site directory" >&2; exit 1; }; \
+		PYTHONPATH="$$site:$${PYTHONPATH:-}" "$(GFFBASE_FEATUREDB_PYTHON)" test/scripts/test_gffbase_featuredb.py
+
+bench-gffbase-featuredb: test-gffbase-featuredb
+	PYTHON_BIN="$(GFFBASE_FEATUREDB_PYTHON)" bash scripts/stage_gffbase.sh
+	@stage="$$(DUCKHTS_ROOT="$(PROJ_DIR)" GFFBASE_FEATUREDB_PYTHON="$(GFFBASE_FEATUREDB_PYTHON)" \
+		Rscript r/duckhtsbench/scripts/stage_gffbase_featuredb.R)" || exit 1; \
+		site="$${stage##*GFFBASE_FEATUREDB_SITE=}"; \
+		test -d "$$site" || { echo "GFFBase staging did not return a site directory" >&2; exit 1; }; \
+		PYTHONPATH="$$site:$${PYTHONPATH:-}" "$(GFFBASE_FEATUREDB_PYTHON)" \
+			scripts/gffbase_featuredb_benchmark.py \
+			--extension "$(PROJ_DIR)build/release/duckhts.duckdb_extension" \
+			--mane-passes "$(GFFBASE_FEATUREDB_MANE_PASSES)" \
+			--gencode-passes "$(GFFBASE_FEATUREDB_GENCODE_PASSES)"
+	GFFBASE_FEATUREDB_PYTHON="$(GFFBASE_FEATUREDB_PYTHON)" $(MAKE) bench-gffbase
 
 bench-simd-seq-gc:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_simd_seq_gc.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
