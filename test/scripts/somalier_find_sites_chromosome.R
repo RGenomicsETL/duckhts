@@ -6,20 +6,23 @@ library(Rduckhts)
 library(duckhtsbench)
 
 args <- commandArgs(TRUE)
-if (length(args) != 2L || !args[[1L]] %in% c("upstream", "select", "compare")) {
-  stop("usage: somalier_find_sites_chr22.R upstream|select|compare REPO_ROOT")
+if (length(args) != 3L || !args[[1L]] %in% c("upstream", "select", "compare") ||
+    !args[[3L]] %in% c("chr22", "chrX")) {
+  stop("usage: somalier_find_sites_chromosome.R upstream|select|compare REPO_ROOT chr22|chrX")
 }
 root <- normalizePath(args[[2L]], mustWork = TRUE)
-id <- "somalier_find_sites_chr22_source"
+chromosome <- args[[3L]]
+prefix <- paste0("somalier_find_sites_", tolower(chromosome), "_")
+id <- paste0(prefix, "source")
 input <- duckhts_bench_fetch(id)
 cache <- dirname(input)
-upstream_file <- file.path(cache, "chr22.upstream.vcf.gz")
-selected_file <- file.path(cache, "chr22.duckhts.tsv")
+upstream_file <- file.path(cache, paste0(chromosome, ".upstream.vcf.gz"))
+selected_file <- file.path(cache, paste0(chromosome, ".duckhts.tsv"))
 
 if (args[[1L]] == "upstream") {
   executable <- duckhtsbench:::duckhts_bench_stage_somalier_v034()
-  log_file <- file.path(cache, "chr22.upstream.log")
-  time_file <- file.path(cache, "chr22.upstream.time")
+  log_file <- file.path(cache, paste0(chromosome, ".upstream.log"))
+  time_file <- file.path(cache, paste0(chromosome, ".upstream.time"))
   status <- system2("/usr/bin/time", c(
     "-v", "-o", shQuote(time_file), shQuote(executable), "find-sites",
     "--min-AN", "6000", "--output-vcf", shQuote(upstream_file),
@@ -111,7 +114,7 @@ if (args[[1L]] == "compare") {
     tie_order = "lexical"
   )
   lexical_diff <- nrow(merge(selected[, keys], lexical[, keys], by = keys))
-  log <- readLines(file.path(cache, "chr22.upstream.log"))
+  log <- readLines(file.path(cache, paste0(chromosome, ".upstream.log")))
   candidates <- grep("^[0-9]+ candidate variants$", log, value = TRUE)
   if (length(candidates) != 1L) stop("missing upstream candidate denominator")
   candidates <- as.integer(sub(" candidate variants$", "", candidates))
@@ -129,18 +132,30 @@ if (args[[1L]] == "compare") {
       wall_seconds = sum(parts * 60^(seq_along(parts) - 1L)),
       peak_rss_kib = as.integer(rss))
   }
-  timing <- rbind(time_value(file.path(cache, "chr22.upstream.time"), "Somalier v0.3.4"),
-                  time_value(file.path(cache, "chr22.duckhts.time"), "DuckHTS"))
+  timing <- rbind(
+    time_value(file.path(cache, paste0(chromosome, ".upstream.time")),
+               "Somalier v0.3.4"),
+    time_value(file.path(cache, paste0(chromosome, ".duckhts.time")),
+               "DuckHTS")
+  )
   dir.create(file.path(root, "benchmarks"), showWarnings = FALSE)
   write_tsv <- function(data, name) utils::write.table(data,
     file.path(root, "benchmarks", name), sep = "\t", row.names = FALSE,
     quote = FALSE)
-  write_tsv(counts, "somalier_find_sites_chr22_gates.tsv")
+  write_tsv(counts, paste0(prefix, "gates.tsv"))
+  if (chromosome == "chrX") {
+    par <- dbGetQuery(con, paste(
+      "SELECT min(POS) AS first_position, max(POS) AS last_position,",
+      "count_if(POS < 2781480) AS par1_records,",
+      "count_if(POS > 154931045) AS par2_records FROM population"
+    ))
+    write_tsv(par, paste0(prefix, "par_records.tsv"))
+  }
   write_tsv(utils::head(disagreements, 100L),
-            "somalier_find_sites_chr22_disagreements.tsv")
+            paste0(prefix, "disagreements.tsv"))
   write_tsv(data.frame(class = c("DuckHTS only", "Somalier only"),
     records = c(nrow(duck_only), nrow(upstream_only))),
-    "somalier_find_sites_chr22_disagreement_summary.tsv")
+    paste0(prefix, "disagreement_summary.tsv"))
   summary <- data.frame(
     revision = system2("git", "rev-parse HEAD", stdout = TRUE),
     source_records = counts$records[counts$gate == "src"],
@@ -154,13 +169,13 @@ if (args[[1L]] == "compare") {
     threads_duckhts = 1L, threads_somalier_reader = 2L,
     threads_somalier_writer = 1L
   )
-  write_tsv(summary, "somalier_find_sites_chr22_observations.tsv")
-  write_tsv(timing, "somalier_find_sites_chr22_timing.tsv")
+  write_tsv(summary, paste0(prefix, "observations.tsv"))
+  write_tsv(timing, paste0(prefix, "timing.tsv"))
   print(summary)
   print(counts)
   print(timing)
   print(utils::head(disagreements, 10L))
   if (nrow(disagreements) || candidates != summary$duckhts_candidates) {
-    stop("chr22 differential disagrees; inspect retained evidence")
+    stop(chromosome, " differential disagrees; inspect retained evidence")
   }
 }
