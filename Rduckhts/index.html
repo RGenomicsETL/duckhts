@@ -22,7 +22,7 @@
 
     <a class="navbar-brand me-2" href="index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9003-0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9004-0.1.5</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -675,7 +675,7 @@ Show generated function catalog
 <td><a href="inst/function_catalog/reference.html#read_bed"><code>read_bed</code></a></td>
 <td>table</td>
 <td><code>rduckhts_bed</code></td>
-<td>Read BED3-BED12 interval files with canonical typed columns and optional tabix-backed region filtering. scan_mode := ‘sequential’ forces full-file streaming/counting instead of index-backed count paths and is incompatible with region.</td>
+<td>Read BED3-BED12 interval files with canonical typed columns and optional tabix-backed region filtering.</td>
 </tr>
 <tr class="odd">
 <td><a href="inst/function_catalog/reference.html#fasta_nuc"><code>fasta_nuc</code></a></td>
@@ -699,13 +699,13 @@ Show generated function catalog
 <td><a href="inst/function_catalog/reference.html#read_gff"><code>read_gff</code></a></td>
 <td>table</td>
 <td><code>rduckhts_gff</code></td>
-<td>Read GFF annotations with optional raw scalar and parsed list/pair attributes, strict GFF3 validation and indexed region selection.</td>
+<td>Read GFF annotations with optional parsed attributes, strict GFF3 validation and indexed region selection.</td>
 </tr>
 <tr class="odd">
 <td><a href="inst/function_catalog/reference.html#read_gtf"><code>read_gtf</code></a></td>
 <td>table</td>
 <td><code>rduckhts_gtf</code></td>
-<td>Read GTF annotations with optional raw scalar and parsed list/pair attributes and indexed region selection.</td>
+<td>Read GTF annotations with optional parsed attributes and indexed region selection.</td>
 </tr>
 <tr class="even">
 <td><a href="inst/function_catalog/reference.html#read_genbank"><code>read_genbank</code></a></td>
@@ -1064,54 +1064,60 @@ Show generated function catalog
 <td>Extract complete panel-aligned A/B/other base counts from one indexed BAM or CRAM source.</td>
 </tr>
 <tr class="even">
+<td><a href="inst/function_catalog/reference.html#duckhts_somalier_spacing"><code>duckhts_somalier_spacing</code></a></td>
+<td>scalar</td>
+<td><code>rduckhts_somalier_find_sites</code></td>
+<td>Greedily select ranked Somalier candidate positions at a minimum genomic distance.</td>
+</tr>
+<tr class="odd">
 <td><a href="inst/function_catalog/reference.html#duckhts_somalier_panel_sha256"><code>duckhts_somalier_panel_sha256</code></a></td>
 <td>scalar_macro</td>
 <td></td>
 <td>Derive a stable SHA-256 identity for an ordered biallelic sample-fingerprinting panel.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><a href="inst/function_catalog/reference.html#duckhts_somalier_frequency_sha256"><code>duckhts_somalier_frequency_sha256</code></a></td>
 <td>scalar_macro</td>
 <td></td>
 <td>Derive a stable identity for panel-aligned population-B allele frequencies.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><a href="inst/function_catalog/reference.html#duckhts_somalier_classify"><code>duckhts_somalier_classify</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Classify one measured A/B/other count tuple for Somalier-derived autosomal relatedness.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><a href="inst/function_catalog/reference.html#duckhts_somalier_prepare_sketches"><code>duckhts_somalier_prepare_sketches</code></a></td>
 <td>table_macro</td>
 <td><code>rduckhts_somalier_sketches</code></td>
 <td>Build one panel-verified packed relatedness sketch per sample from typed count evidence.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><a href="inst/function_catalog/reference.html#duckhts_somalier_verify_sketches"><code>duckhts_somalier_verify_sketches</code></a></td>
 <td>scalar_macro</td>
 <td></td>
 <td>Verify persisted relatedness sketches against their retained raw count evidence.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><a href="inst/function_catalog/reference.html#duckhts_somalier_relatedness"><code>duckhts_somalier_relatedness</code></a></td>
 <td>scalar</td>
 <td><code>rduckhts_somalier_relatedness</code></td>
 <td>Compute fused Somalier-derived relatedness and concordance statistics for two prepared sketches.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><a href="inst/function_catalog/reference.html#duckhts_somalier_verify_relatedness"><code>duckhts_somalier_verify_relatedness</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Verify a typed relatedness result against its two sealed sketches.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><a href="inst/function_catalog/reference.html#duckhts_somalier_charr"><code>duckhts_somalier_charr</code></a></td>
 <td>table_macro</td>
 <td><code>rduckhts_somalier_charr</code></td>
 <td>Estimate per-sample contamination with a bounded Somalier-derived CHARR reduction.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><a href="inst/function_catalog/reference.html#duckhts_somalier_matched_contamination"><code>duckhts_somalier_matched_contamination</code></a></td>
 <td>table_macro</td>
 <td><code>rduckhts_somalier_matched_contamination</code></td>

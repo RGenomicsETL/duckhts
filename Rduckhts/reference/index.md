@@ -129,6 +129,8 @@
   : Extract Panel-Aligned Counts from BAM or CRAM
 - [`rduckhts_somalier_charr()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_charr.md)
   : Estimate Per-Sample Contamination with CHARR
+- [`rduckhts_somalier_find_sites()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_find_sites.md)
+  : Select a Somalier Panel from Population Variants
 - [`rduckhts_somalier_import_sites()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_import_sites.md)
   : Import an Already Selected Somalier Sites VCF or BCF
 - [`rduckhts_somalier_matched_contamination()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_matched_contamination.md)

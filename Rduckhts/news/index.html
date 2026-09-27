@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9003-0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9004-0.1.5</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -33,6 +33,11 @@
       <small>Source: <a href="https://github.com/RGenomicsETL/duckhts/blob/main/NEWS.md" class="external-link"><code>NEWS.md</code></a></small>
     </div>
 
+    <div class="section level2">
+<h2 class="pkg-version" data-toc-text="1.5.2.9004-0.1.5" id="rduckhts-1529004-015">Rduckhts 1.5.2.9004-0.1.5<a class="anchor" aria-label="anchor" href="#rduckhts-1529004-015"></a></h2>
+<ul><li>
+<code><a href="../reference/rduckhts_somalier_find_sites.html">rduckhts_somalier_find_sites()</a></code> selects canonical, provenance-bearing Somalier panels from typed population relations, Parquet, or VCF/BCF with caller-visible interval and allele exclusions. Interval relations use <code>chrom</code>, <code>start</code>, <code>end</code>, so a view over <code>read_bed()</code> can be passed directly. Equal AF scores retain input scan order and X/Y sites remain unspaced by default, matching Somalier v0.3.4. The <code>tie_order = "lexical"</code> and <code>sex_spacing = "enforced"</code> options provide deterministic lexical ties and X/Y minimum-distance spacing.</li>
+</ul></div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="1.5.2.9003-0.1.5" id="rduckhts-1529003-015">Rduckhts 1.5.2.9003-0.1.5<a class="anchor" aria-label="anchor" href="#rduckhts-1529003-015"></a></h2>
 <ul><li>The bundled DuckHTS extension loads on DuckDB 2.0; SQL lambdas use the <code>lambda x:</code> syntax (DuckDB &gt;= 1.3).</li>
