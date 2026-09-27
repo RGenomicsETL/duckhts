@@ -2,6 +2,11 @@
 
 # duckhts 1.5.2.9003
 
+- `duckhts_ancestry_proportions` solves nonnegative reference-group projections
+  from SQL-aggregated PC products, using a bounded nearest-positive-definite
+  repair and a native constrained solver. The catalog documents relational
+  matching, quality gates, and genotype missingness.
+
 - DuckHTS loads on DuckDB 2.0; SQL lambdas use the `lambda x:` syntax
   (DuckDB >= 1.3).
 

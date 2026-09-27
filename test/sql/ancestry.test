@@ -33,6 +33,49 @@ FROM unnest(duckhts_ancestry_proportions(
 ----
 true
 
+# The same oriented site relations are used by the R wrapper tests.
+statement ok
+CREATE TEMP TABLE ancestry_ref AS SELECT * FROM (VALUES
+  (1, 'A', 'G', 'A', 0.2), (1, 'A', 'G', 'B', 0.8),
+  (2, 'C', 'T', 'A', 0.3), (2, 'C', 'T', 'B', 0.7),
+  (3, 'A', 'C', 'A', 0.4), (3, 'A', 'C', 'B', 0.6)
+) t(position, allele_a, allele_b, group_id, frequency);
+
+statement ok
+CREATE TEMP TABLE ancestry_input AS SELECT * FROM (VALUES
+  (1, 'T', 'C', 0.35), (2, 'T', 'C', 0.6), (3, 'A', 'C', 0.45)
+) t(position, allele_a, allele_b, frequency);
+
+query I
+WITH oriented AS (
+  SELECT i.position,
+    CASE WHEN i.allele_a = r.allele_b AND i.allele_b = r.allele_a
+      THEN 1 - i.frequency ELSE i.frequency END AS frequency
+  FROM ancestry_input i JOIN (SELECT DISTINCT position, allele_a, allele_b FROM ancestry_ref) r
+    USING (position)
+  WHERE (i.allele_a = r.allele_b AND i.allele_b = r.allele_a)
+     OR (translate(i.allele_a, 'ACGT', 'TGCA') = r.allele_a
+         AND translate(i.allele_b, 'ACGT', 'TGCA') = r.allele_b)
+     OR (i.allele_a = r.allele_a AND i.allele_b = r.allele_b)
+), projection AS (
+  SELECT position, pc, CASE WHEN pc = 1 THEN 1.0
+    WHEN position = 1 THEN 1.0 WHEN position = 2 THEN 0.0 ELSE -1.0 END AS loading
+  FROM (SELECT DISTINCT position FROM ancestry_ref), (VALUES (1), (2)) t(pc)
+), x AS (
+  SELECT p.pc, r.group_id, sum(p.loading * r.frequency) AS value
+  FROM projection p JOIN ancestry_ref r USING (position) GROUP BY p.pc, r.group_id
+), y AS (
+  SELECT p.pc, sum(p.loading * i.frequency) AS value
+  FROM projection p JOIN oriented i USING (position) GROUP BY p.pc
+), solved AS (
+  SELECT duckhts_ancestry_proportions(
+    (SELECT list(value ORDER BY pc, group_id) FROM x),
+    (SELECT list(value ORDER BY pc) FROM y), 2, true) AS q
+)
+SELECT abs(q[1] - 0.75) < 0.000001 FROM solved;
+----
+true
+
 statement error
 SELECT duckhts_ancestry_proportions([1.0, 2.0], [1.0], 1, true);
 ----

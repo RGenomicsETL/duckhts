@@ -1,5 +1,11 @@
 # Rduckhts 1.5.2.9003-0.1.5
 
+- `rduckhts_ancestry_proportions()` matches allele-frequency or diploid-dosage
+  relations to caller-owned reference products, projects them by PC, and reports
+  proportions with matching audits and correlation gates. Missing genotypes are
+  dropped. `rduckhts_ancestry_bam()` obtains site counts directly from indexed
+  BAM/CRAM and offers allele-fraction or balance-rule genotype frequencies.
+
 - The bundled DuckHTS extension loads on DuckDB 2.0; SQL lambdas use the
   `lambda x:` syntax (DuckDB >= 1.3).
 

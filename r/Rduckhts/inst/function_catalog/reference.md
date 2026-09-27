@@ -1704,6 +1704,44 @@ panel_table must name a committed table or view visible to the database; caller-
 CREATE TABLE allele_counts AS SELECT * FROM duckhts_somalier_bam_counts('sample.bam', 'fingerprint_panel', 'sample-1', 'reference.fa');
 ```
 
+## duckhts_ancestry_proportions
+
+Solve a nearest-positive-definite constrained ancestry projection from aggregated PC products.
+
+Signature:
+
+```sql
+duckhts_ancestry_proportions(x_pc_major, y_pc, group_count, sum_to_one := true)
+```
+
+Returns:
+
+```
+DOUBLE[]
+```
+
+### Input
+
+x_pc_major is a flat DOUBLE[] in PC-major, group-minor order for X = P^T F_ref; y_pc is a DOUBLE[] with one value per PC for (P^T f) times the shrinkage correction. Groups are ordered identically within each PC. 1 to 30 groups and 1 to 64 PCs are supported. All values must be finite. sum_to_one=true enforces nonnegative q summing to one; false allows a sum at most one. The result contains one group proportion in input order, rounded to seven decimals.
+
+### Repair
+
+The Gram matrix X^T X follows Matrix::nearPD defaults: Dykstra alternating projections, relative eigen cutoff 1e-6, infinity-norm convergence tolerance 1e-7 and at most 100 iterations, then eigenvalue floor 1e-8 times the largest absolute eigenvalue with diagonal rescaling. A nonconverged repair errors. The native solver is independent of bigsnpr and quadprog code.
+
+### SQL recipe
+
+Match sample_id, chromosome, position and alleles from the caller's input-frequency relation against reference frequencies and PC loadings. Reverse the input frequency (1 - f) for reversed alleles; explicitly audit strand flips and drop ambiguous, duplicate, missing and mismatched sites. GROUP BY sample_id, pc, group_id to compute sum(loading * reference_frequency) as X; GROUP BY sample_id, pc to compute sum(loading * aligned_frequency) * correction as y. Form list(X ORDER BY pc, group_id) and list(y ORDER BY pc) and call this scalar. Compare cor(F_ref q, f) with min_cor and expose cor_each per group; gate failed proportions to NULL. rduckhts_ancestry_proportions implements this recipe on four caller-owned relations without creating a macro or a connection.
+
+### Missing data
+
+Input genotypes are diploid dosage / 2; NULL genotypes and frequencies are dropped, not imputed. bigsnpr imputes missing individual genotypes before calling snp_ancestry_summary, so parity comparisons must use the same retained sites. The default min_cor is 0.4 as in bigsnpr 1.12.21; callers may select a stricter gate for cohorts or low-depth count frequencies.
+
+### Examples
+
+```sql
+SELECT duckhts_ancestry_proportions([1.0, 0.0, 0.0, 1.0], [0.25, 0.75], 2, true);
+```
+
 ## duckhts_somalier_panel_sha256
 
 Derive a stable SHA-256 identity for an ordered biallelic sample-fingerprinting panel.
