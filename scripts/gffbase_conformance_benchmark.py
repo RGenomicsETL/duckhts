@@ -925,6 +925,7 @@ def main(argv: list[str] | None = None) -> int:
         "duckhts_extension": str(args.extension.resolve()),
         "duckhts_extension_size": args.extension.stat().st_size,
         "duckhts_extension_md5": file_md5(args.extension),
+        "benchmark_script_md5": file_md5(Path(__file__)),
         "gffbase_site": str(Path(gffbase.__file__).resolve().parent),
         "gffbase_version": getattr(gffbase, "__version__", ""),
         "gffbase_native_available": bool(gffbase.native_available()),

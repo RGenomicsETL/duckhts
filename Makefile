@@ -27,7 +27,7 @@
 	check-benchmark-portability \
 	stage-norm-1000g-dragen-gvcf stage-liftover-references \
 	stage-giab-v4.2.1 stage-riker-wgs stage-duckvep-conformance-corpora \
-	stage-gffbase stage-gffbase-featuredb bench-gffbase-featuredb \
+	stage-gffbase stage-gffbase-featuredb test-gffbase-featuredb bench-gffbase-featuredb \
 	stage-duckbedqc-data stage-variantkey-providers \
 	test-cache-paths test-benchmark-registry test-variantkey-provider-staging \
 	test-duckvep-corpus-staging test-cgranges-benchmark-r \
@@ -611,8 +611,16 @@ GFFBASE_FEATUREDB_PYTHON ?= python3
 GFFBASE_FEATUREDB_MANE_PASSES ?= 3
 GFFBASE_FEATUREDB_GENCODE_PASSES ?= 1
 
-bench-gffbase-featuredb:
+# Needs the staged GFFBase wheel, so it runs before the benchmark rather than in test_release.
+test-gffbase-featuredb:
 	PYTHON_BIN="$(GFFBASE_FEATUREDB_PYTHON)" bash scripts/stage_gffbase.sh
+	@stage="$$(DUCKHTS_ROOT="$(PROJ_DIR)" GFFBASE_FEATUREDB_PYTHON="$(GFFBASE_FEATUREDB_PYTHON)" \
+		Rscript r/duckhtsbench/scripts/stage_gffbase_featuredb.R)" || exit 1; \
+		site="$${stage##*GFFBASE_FEATUREDB_SITE=}"; \
+		test -d "$$site" || { echo "GFFBase staging did not return a site directory" >&2; exit 1; }; \
+		PYTHONPATH="$$site:$${PYTHONPATH:-}" "$(GFFBASE_FEATUREDB_PYTHON)" test/scripts/test_gffbase_featuredb.py
+
+bench-gffbase-featuredb: test-gffbase-featuredb
 	@stage="$$(DUCKHTS_ROOT="$(PROJ_DIR)" GFFBASE_FEATUREDB_PYTHON="$(GFFBASE_FEATUREDB_PYTHON)" \
 		Rscript r/duckhtsbench/scripts/stage_gffbase_featuredb.R)" || exit 1; \
 		site="$${stage##*GFFBASE_FEATUREDB_SITE=}"; \
