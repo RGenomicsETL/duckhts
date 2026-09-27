@@ -2,6 +2,10 @@
 
 # duckhts 1.5.2.9003
 
+- Somalier panel selection computes nearby-indel exclusion and nearby-SNP counts
+  in ordered position passes, retaining physical-record tie order and the
+  pinned v0.3.4 site selection rules on whole-chromosome VCF inputs.
+
 - `duckhts_somalier_spacing()` selects an ordered chromosome's candidate positions
   with greedy minimum-distance spacing. Somalier panel selection uses caller-visible
   SQL relations, including TEMP tables, with per-call filtering and site caps.

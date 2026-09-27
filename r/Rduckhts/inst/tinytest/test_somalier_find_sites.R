@@ -129,6 +129,36 @@ test_somalier_find_sites_nearby <- function() {
   expect_equal(excluded$position, 430)
 }
 
+test_somalier_find_sites_sorted_neighbors <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  dbExecute(con, paste(
+    "CREATE TEMP TABLE population AS SELECT * FROM (VALUES",
+    "('chr1',100,'A',['G'],['PASS'],[0.48::FLOAT],120000),",
+    "('chr1',100,'A',['G'],['PASS'],[0.48::FLOAT],120000),",
+    "('chr1',160,repeat('A',50),['A'],['q10'],[0.03::FLOAT],120000),",
+    "('chr1',190,'AT',['A'],['q10'],[0.03::FLOAT],120000),",
+    "('chr1',200,'A',['G'],['PASS'],[0.48::FLOAT],120000),",
+    "('chr1',300,'A',['G'],['PASS'],[0.48::FLOAT],120000),",
+    "('chr1',302,'G',['A'],['PASS'],[0.03::FLOAT],120000),",
+    "('chr1',400,'A',['G'],['PASS'],[0.48::FLOAT],120000)",
+    ") v(CHROM,POS,REF,ALT,FILTER,INFO_AF,INFO_AN)"
+  ))
+  selected <- rduckhts_somalier_find_sites(
+    con, source_table = "population", assembly = "GRCh38"
+  )
+  expect_equal(selected$position, 400)
+  counts <- dbGetQuery(con, Rduckhts:::.somalier_find_sites_query(
+    con, "population", "GRCh38", 0.15, 115000, "AF", "AN", 10000, 0.48,
+    list(include = NULL, exclude = NULL, gnotate = NULL),
+    "somalier_v0.3.4", 65535, 10001, 5001, diagnostics = TRUE
+  ))
+  expect_equal(counts$records[counts$gate == "indels"], 2)
+  expect_equal(counts$records[counts$gate == "snps"], 6)
+  expect_equal(counts$records[counts$gate == "indel_clear"], 4)
+  expect_equal(counts$records[counts$gate == "neighbors"], 1)
+}
+
 test_somalier_find_sites_flags_and_endpoints <- function() {
   con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE))
@@ -258,6 +288,7 @@ test_somalier_find_sites_vcf <- function() {
 test_somalier_find_sites_selection()
 test_somalier_find_sites_ties_and_sex_spacing()
 test_somalier_find_sites_nearby()
+test_somalier_find_sites_sorted_neighbors()
 test_somalier_find_sites_flags_and_endpoints()
 test_somalier_find_sites_af_edges()
 test_somalier_find_sites_vcf()

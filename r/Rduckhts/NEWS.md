@@ -1,5 +1,8 @@
 # Rduckhts 1.5.2.9003-0.1.5
 
+- `rduckhts_somalier_find_sites()` uses ordered nearby-variant passes to
+  select panels from whole-chromosome VCF inputs without quadratic range joins.
+
 - `rduckhts_somalier_find_sites()` selects canonical, provenance-bearing Somalier
   panels from typed population relations, Parquet, or VCF/BCF with caller-visible
   interval and allele exclusions. Equal AF scores retain input scan order and
