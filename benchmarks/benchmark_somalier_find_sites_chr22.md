@@ -23,7 +23,7 @@ The cache VCF is not committed.
 | Spacing       | Greedy autosomal distance 10,000 by default; X/Y selections do not update spacing state                                       | `sex_spacing = "enforced"` applies X distance 1,000 and Y distance 200 |
 | Caps          | Up to 65,535 autosomal, 10,001 X, and 5,001 Y selections after ranking                                                        | Named per-sex maximum arguments                                        |
 
-- Source revision: a1b97537c7148e792479024c0d8b5ae3fa70d976. Workload:
+- Source revision: 99d2f4438e52fae5d47c9e3e0b523408a9f67a5b. Workload:
   `--min-AN 6000`, `--snp-dist 10000`, minimum AF 0.15, AF target 0.48,
   no interval or gnotate exclusion. One run per tool, warm filesystem
   cache, GNU `/usr/bin/time -v`.
@@ -66,7 +66,7 @@ candidate count.
 | tool            | wall_seconds | peak_rss_kib |
 |:----------------|-------------:|-------------:|
 | Somalier v0.3.4 |         6.07 |       108912 |
-| DuckHTS         |        20.48 |       452192 |
+| DuckHTS         |        11.08 |       452576 |
 
 Wall seconds and peak RSS KiB for each timed process, including its own
 initialization and I/O. Single runs are not a variance estimate.
@@ -103,7 +103,7 @@ variants” for this X-only input; the actual compressed output VCF, not
 that autosomal-only log counter, is used for the selected-site
 denominator and keyed comparison.
 
-- Source revision: bcc09032f76ef23b95caa47fe700b25a5b287047.
+- Source revision: 99d2f4438e52fae5d47c9e3e0b523408a9f67a5b.
 - Denominators: 2,858,184 input records; 250,641 Somalier candidates and
   250,641 DuckHTS gated candidates; 234,367 spacing inputs (below the
   1,000,000 limit).
@@ -134,7 +134,7 @@ executable.
 | tool            | wall_seconds | peak_rss_kib |
 |:----------------|-------------:|-------------:|
 | Somalier v0.3.4 |        15.51 |       436696 |
-| DuckHTS         |       222.91 |      1266148 |
+| DuckHTS         |        23.25 |      1226680 |
 
 chrX whole-process wall seconds and peak RSS KiB; thread and measurement
 caveats above also apply.
@@ -146,6 +146,91 @@ caveats above also apply.
 
 chrX keyed disagreement classes. First 100 rows in
 somalier_find_sites_chrx_disagreements.tsv; retained: 0 rows.
+
+## Operator profile and matched-thread selection
+
+The before/after chrX profile uses source revisions `396f9599` and
+`99d2f443` on the same 2,858,184 physical VCF records, with one DuckDB
+thread, warm filesystem cache, no sample genotype decode, and the same
+250,641 gated candidates and 234,367 spacing inputs. Each complete query
+was profiled with DuckDB JSON profiling (query latency and operator
+timing); `EXPLAIN ANALYZE` also checked the ordered-stream plan. The 14
+named gate counts were collected by one query with shared materialized
+CTEs. Operator times are pipelined and **not additive**. No gate count
+or keyed denominator was dropped to obtain these timings.
+
+| component                               | baseline_seconds | ordered_seconds | measurement                                              |
+|:----------------------------------------|-----------------:|----------------:|:---------------------------------------------------------|
+| Full selection query                    |         219.6400 |         21.2760 | DuckDB JSON profile latency                              |
+| All named gate counts                   |         220.3170 |         21.3400 | DuckDB JSON profile latency                              |
+| READ_BCF scan and projected INFO decode |          19.2370 |         19.3300 | READ_BCF operator in selection                           |
+| Eligible position and allele filters    |           0.0970 |          0.0930 | Two FILTER operators in gate-count query                 |
+| PASS SNV gate                           |           0.2080 |          0.2060 | FILTER operator in gate-count query                      |
+| AF and AN gate                          |           0.0170 |          0.0170 | FILTER operator in gate-count query                      |
+| Annotation gate                         |           0.0050 |          0.0050 | FILTER operator in gate-count query                      |
+| QC gate                                 |           0.0010 |          0.0010 | FILTER operator in gate-count query                      |
+| Optional interval and gnotate gates     |           0.0012 |          0.0012 | No intervals or gnotate input; remaining FILTER operator |
+| Indel inventory filter                  |           0.0236 |          0.0236 | FILTER operator in gate-count query                      |
+| SNP inventory filter                    |           0.0340 |          0.0365 | FILTER operator in gate-count query                      |
+| Nearby-indel exclusion                  |          40.9320 |          0.0740 | Range HASH_JOIN versus ordered WINDOW in selection       |
+| Nearby-SNP counting                     |         158.5790 |          0.7920 | Range HASH_JOIN versus grouped RANGE WINDOW in selection |
+| AF ranking window                       |           0.1240 |          0.1250 | WINDOW operator in selection                             |
+| List aggregation                        |           0.0110 |          0.0130 | HASH_GROUP_BY with list in selection                     |
+| Spacing kernel projection               |           0.0064 |          0.0003 | Single-row mask PROJECTION in selection                  |
+| Selection cap filter                    |           0.0001 |          0.0004 | FILTER operator in gate-count query                      |
+
+chrX seconds. Named gate rows are FILTER operators; join/window rows
+isolate nearby-variant work; the mask projection bounds the spacing
+kernel and its projection rather than timing the kernel alone.
+
+A separate `count(*)` over `read_bcf` took 16.700 s; decoding and
+summing only `INFO_AF[1]` and `INFO_AN` took 18.265 s. The selector’s
+`READ_BCF` operator took 19.237 s before and 19.330 s after. Its
+projected columns are `CHROM`, `POS`, `REF`, `ALT`, `FILTER`, `INFO_AF`,
+`INFO_AN`, `INFO_BaseQRankSum`, `INFO_ClippingRankSum`, `INFO_FS`,
+`INFO_MQ`, `INFO_MQRankSum`, `INFO_QD`, and `INFO_ReadPosRankSum`; no
+genotype columns or other INFO fields are materialized. These are
+separate full scans, not additive decode components. The positional and
+QC predicates run after the reader; this table function does not push
+them into VCF decoding. Sampling with `perf` was unavailable
+(`perf_event_paranoid=4`).
+
+For the matched-thread runs below, DuckHTS uses one SQL worker and
+either zero or two htslib BGZF decompression workers; Somalier uses its
+pinned two readers and one writer. DuckDB is set to one thread in both
+DuckHTS runs. A separate warm-cache process profiles one selection per
+row; `process_seconds` adds R startup, the connection, and result
+transfer to `selection_seconds`, but excludes the input cache checksum.
+Somalier’s CLI process includes its own startup and VCF writer; these
+distinct scopes are reported, not treated as a controlled throughput
+ratio. Values are single runs, not variance estimates. The official
+one-thread `select` workflow *includes* cache verification and took
+11.08 s on chr22 and 23.25 s on chrX. Isolated warm-cache
+`duckhts_bench_fetch()` calls took 0.285 s and 1.440 s, respectively; R
+and library startup added about 0.3 s and opening a DuckDB connection
+about 0.04 s. All 2,402 chr22 and 10,001 chrX keys also agree between
+one-worker and three-worker DuckHTS selections.
+
+| chromosome | tool            | active_threads          | selection_seconds | process_seconds | peak_rss_kib | input_records | selected_sites |
+|:-----------|:----------------|:------------------------|------------------:|----------------:|-------------:|--------------:|---------------:|
+| chr22      | Somalier v0.3.4 | 2 readers + 1 writer    |                NA |            6.07 |       108912 |       1070401 |           2402 |
+| chr22      | DuckHTS         | 1 SQL + 0 decompression |            10.404 |           10.81 |       480948 |       1070401 |           2402 |
+| chr22      | DuckHTS         | 1 SQL + 2 decompression |             5.001 |            5.43 |       481220 |       1070401 |           2402 |
+| chrX       | Somalier v0.3.4 | 2 readers + 1 writer    |                NA |           15.51 |       436696 |       2858184 |          10001 |
+| chrX       | DuckHTS         | 1 SQL + 0 decompression |            21.183 |           21.67 |      1254476 |       2858184 |          10001 |
+| chrX       | DuckHTS         | 1 SQL + 2 decompression |            13.379 |           13.81 |      1256376 |       2858184 |          10001 |
+
+Warm-cache whole-chromosome selection: input/output denominators, wall
+seconds and peak process RSS KiB. NA: Somalier has no separate
+in-process SQL selection timing.
+
+The ordered position passes reduce the chrX selection query from 219.640
+s to 21.276 s at one thread. At three active workers, DuckHTS takes
+13.81 s versus Somalier’s 15.51 s; peak RSS remains about 1.25 GB rather
+than 0.44 GB. `READ_BCF` and its necessary projected INFO fields now
+dominate the single-thread wall time. Reducing this memory or decode
+cost would require reader-level filtering or a different candidate
+representation, not another change to the nearby-variant join.
 
 Reproduce from the repository root with installed `Rduckhts` and
 `duckhtsbench`, the pinned binary staged in `duckhtsbench`, and GNU
@@ -163,5 +248,12 @@ x_time_file="$(Rscript -e 'cat(file.path(dirname(duckhtsbench::duckhts_bench_art
 /usr/bin/time -v -o "$x_time_file" \
   Rscript test/scripts/somalier_find_sites_chromosome.R select "$PWD" chrX
 Rscript test/scripts/somalier_find_sites_chromosome.R compare "$PWD" chrX
+# Selection-only process timings exclude the cache checksum:
+for chrom in chr22 chrX; do
+  for decompression_workers in 0 2; do
+    /usr/bin/time -v Rscript scripts/benchmark_somalier_find_sites_profile.R \
+      "$chrom" "$decompression_workers"
+  done
+done
 cd benchmarks && Rscript -e "rmarkdown::render('benchmark_somalier_find_sites_chr22.Rmd')"
 ```

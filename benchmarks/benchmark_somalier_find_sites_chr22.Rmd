@@ -20,6 +20,8 @@ xtiming <- read_result("somalier_find_sites_chrx_timing.tsv")
 xclasses <- read_result("somalier_find_sites_chrx_disagreement_summary.tsv")
 xdisagreements <- read_result("somalier_find_sites_chrx_disagreements.tsv")
 xpar <- read_result("somalier_find_sites_chrx_par_records.tsv")
+profile <- read_result("somalier_find_sites_chrx_profile.tsv")
+matched <- read_result("somalier_find_sites_matched_timing.tsv")
 ```
 
 This is a whole-chromosome differential of DuckHTS and pinned Somalier
@@ -131,6 +133,68 @@ knitr::kable(xclasses, caption = sprintf(
   nrow(xdisagreements)))
 ```
 
+## Operator profile and matched-thread selection
+
+The before/after chrX profile uses source revisions `396f9599` and
+`99d2f443` on the same 2,858,184 physical VCF records, with one DuckDB
+thread, warm filesystem cache, no sample genotype decode, and the same
+250,641 gated candidates and 234,367 spacing inputs. Each complete query
+was profiled with DuckDB JSON profiling (query latency and operator timing);
+`EXPLAIN ANALYZE` also checked the ordered-stream plan. The 14 named gate
+counts were collected by one query with
+shared materialized CTEs. Operator times are pipelined and **not additive**.
+No gate count or keyed denominator was dropped to obtain these timings.
+
+```{r operator-profile}
+knitr::kable(profile, digits = 4, caption = paste(
+  "chrX seconds. Named gate rows are FILTER operators; join/window rows",
+  "isolate nearby-variant work; the mask projection bounds the spacing",
+  "kernel and its projection rather than timing the kernel alone."))
+```
+
+A separate `count(*)` over `read_bcf` took 16.700 s; decoding and summing
+only `INFO_AF[1]` and `INFO_AN` took 18.265 s. The selector's `READ_BCF`
+operator took 19.237 s before and 19.330 s after. Its projected columns
+are `CHROM`, `POS`, `REF`, `ALT`, `FILTER`, `INFO_AF`, `INFO_AN`,
+`INFO_BaseQRankSum`, `INFO_ClippingRankSum`, `INFO_FS`, `INFO_MQ`,
+`INFO_MQRankSum`, `INFO_QD`, and `INFO_ReadPosRankSum`; no genotype columns
+or other INFO fields are materialized. These are separate full scans, not
+additive decode components. The positional and QC predicates run after the
+reader; this table function does not push them into VCF decoding. Sampling
+with `perf` was unavailable (`perf_event_paranoid=4`).
+
+For the matched-thread runs below, DuckHTS uses one SQL worker and either
+zero or two htslib BGZF decompression workers; Somalier uses its pinned two
+readers and one writer. DuckDB is set to one thread in both DuckHTS runs.
+A separate warm-cache process profiles one selection per row; `process_seconds`
+adds R startup, the connection, and result transfer to `selection_seconds`,
+but excludes the input cache checksum. Somalier's CLI process includes its
+own startup and VCF writer; these distinct scopes are reported, not treated
+as a controlled throughput ratio. Values are single runs, not variance
+estimates. The official one-thread `select` workflow *includes* cache
+verification and took `r timing$wall_seconds[timing$tool == "DuckHTS"]` s
+on chr22 and `r xtiming$wall_seconds[xtiming$tool == "DuckHTS"]` s on chrX.
+Isolated warm-cache `duckhts_bench_fetch()` calls took 0.285 s and 1.440 s,
+respectively; R and library startup added about 0.3 s and opening a DuckDB
+connection about 0.04 s. All 2,402 chr22 and 10,001 chrX keys also agree
+between one-worker and three-worker DuckHTS selections.
+
+```{r matched-threads}
+knitr::kable(matched, digits = 3, caption = paste(
+  "Warm-cache whole-chromosome selection: input/output denominators,",
+  "wall seconds and peak process RSS KiB. NA: Somalier has no separate",
+  "in-process SQL selection timing."))
+```
+
+The ordered position passes reduce the chrX selection query from 219.640 s
+to 21.276 s at one thread. At three active workers, DuckHTS takes 13.81 s
+versus Somalier's 15.51 s; peak RSS remains about 1.25 GB rather than
+0.44 GB.
+`READ_BCF` and its necessary projected INFO fields now dominate the
+single-thread wall time. Reducing this memory or decode cost would require
+reader-level filtering or a different candidate representation, not another
+change to the nearby-variant join.
+
 Reproduce from the repository root with installed `Rduckhts` and
 `duckhtsbench`, the pinned binary staged in `duckhtsbench`, and GNU time:
 
@@ -146,5 +210,12 @@ x_time_file="$(Rscript -e 'cat(file.path(dirname(duckhtsbench::duckhts_bench_art
 /usr/bin/time -v -o "$x_time_file" \
   Rscript test/scripts/somalier_find_sites_chromosome.R select "$PWD" chrX
 Rscript test/scripts/somalier_find_sites_chromosome.R compare "$PWD" chrX
+# Selection-only process timings exclude the cache checksum:
+for chrom in chr22 chrX; do
+  for decompression_workers in 0 2; do
+    /usr/bin/time -v Rscript scripts/benchmark_somalier_find_sites_profile.R \
+      "$chrom" "$decompression_workers"
+  done
+done
 cd benchmarks && Rscript -e "rmarkdown::render('benchmark_somalier_find_sites_chr22.Rmd')"
 ```
