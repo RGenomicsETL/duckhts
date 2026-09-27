@@ -34,6 +34,7 @@ extern void register_fasta_index_function(duckdb_connection connection);
 /* fastq_qc.c */
 extern void register_duckhts_fastq_qc_function(duckdb_connection connection);
 extern void register_duckhts_somalier_functions(duckdb_connection connection);
+extern void register_duckhts_ancestry_functions(duckdb_connection connection);
 extern void register_duckhts_somalier_contamination_functions(
     duckdb_connection connection);
 extern void register_duckhts_somalier_matched_functions(
@@ -220,6 +221,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_read_fastq_function(connection);
     register_duckhts_fastq_qc_function(connection);
     register_duckhts_somalier_functions(connection);
+    register_duckhts_ancestry_functions(connection);
     if (!register_duckhts_somalier_bam_extract_functions(
             &registration, *access->get_database(info))) {
         return false;
