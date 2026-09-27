@@ -116,7 +116,7 @@ main <- function() {
     leaves <- DBI::dbGetQuery(con, "SELECT * FROM hap_output")
     rows <- DBI::dbGetQuery(con, paste("SELECT transcript_index,cds,protein,sequence_flags,projection_status,sequence_status,stop_in_displaced_frame,",
       "c.sample_index,c.phase_set,c.haplotype_lane,c.ploidy,",
-      "list_transform(contributors,x -> x.event_index) event_ids FROM hap_output,unnest(carriers) u(c)"))
+      "list_transform(contributors,lambda x: x.event_index) event_ids FROM hap_output,unnest(carriers) u(c)"))
     saveRDS(list(leaves = leaves, carriers = rows), file.path(out, paste0(policy, ".rds")))
     expected <- do.call(rbind, lapply(seq_along(cases), function(i) {
       paths <- native[[cases[[i]]$transcript]]
@@ -284,8 +284,8 @@ main <- function() {
         DBI::dbQuoteString(con, augmented_query), ",'public_hap',phase_policy:=", DBI::dbQuoteString(con, policy), ")"))
       actual <- DBI::dbGetQuery(con, paste("SELECT transcript_index,cds,protein,sequence_flags,projection_status,sequence_status,",
         "c.sample_index,c.phase_set,c.haplotype_lane,c.ploidy,",
-        "list_transform(contributors,x -> x.event_index) event_ids,",
-        "list_transform(contributors,x -> x.projection_status) event_statuses",
+        "list_transform(contributors,lambda x: x.event_index) event_ids,",
+        "list_transform(contributors,lambda x: x.projection_status) event_statuses",
         "FROM hap_noncoding_output,unnest(carriers) u(c)"))
       agrees <- function(x) {
         keys <- paste(x$transcript_index, x$sample_index, x$haplotype_lane, sep = "/")

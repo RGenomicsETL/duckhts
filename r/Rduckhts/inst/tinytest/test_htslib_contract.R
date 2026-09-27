@@ -32,6 +32,7 @@ test_htslib_contract <- function() {
   expect_true(is.list(config$features))
   expect_true(is.numeric(config$runtime_feature_bits))
   expect_true(nzchar(config$runtime_feature_string))
+  expect_true(startsWith(config$static_license_note, "Rduckhts is GPL (>= 2);"))
 
   con <- rduckhts_connect()
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)

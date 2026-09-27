@@ -238,7 +238,7 @@ main <- function() {
       # transcript-exon display phase. This is a wrong-policy control, not an
       # alteration of the oracle or the valid model loaded by the kernel.
       DBI::dbExecute(con, "CREATE OR REPLACE TABLE wrong_projection_phase AS
-        SELECT * REPLACE(list_transform(exons, e -> struct_pack(
+        SELECT * REPLACE(list_transform(exons, lambda e: struct_pack(
           exon_start := e.exon_start, exon_end := e.exon_end,
           exon_cdna_start := e.exon_cdna_start, exon_cdna_end := e.exon_cdna_end,
           phase := CASE WHEN e.exon_cdna_start=1 THEN exons[2].phase ELSE e.phase END,

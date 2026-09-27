@@ -215,10 +215,10 @@ FROM read_fastq('http://127.0.0.1:8001/extdata/r1.fq');</textarea>
       if (gc !== "0.500") throw new Error(`expected seq_gc_content 0.500, got ${gc}`);
 
       const validNt16 =
-        "list_transform(range(4096), i -> CASE i % 5 " +
+        "list_transform(range(4096), lambda i: CASE i % 5 " +
         "WHEN 0 THEN 1 WHEN 1 THEN 2 WHEN 2 THEN 4 WHEN 3 THEN 8 ELSE 15 END)::UTINYINT[]";
       const invalidNt16 =
-        "list_transform(range(4096), i -> CASE WHEN i = 4093 THEN 3 ELSE " +
+        "list_transform(range(4096), lambda i: CASE WHEN i = 4093 THEN 3 ELSE " +
         "CASE i % 5 WHEN 0 THEN 1 WHEN 1 THEN 2 WHEN 2 THEN 4 WHEN 3 THEN 8 ELSE 15 END END)::UTINYINT[]";
 
       await conn.query("SELECT backend FROM duckhts_simd_set_backend('scalar')");

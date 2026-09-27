@@ -127,7 +127,7 @@ FROM duckvep_transcript_projection('projection_events', 'projection_repeated', '
 statement ok
 CREATE TABLE projection_reverse AS SELECT * REPLACE(-1::TINYINT AS strand,
   seq_revcomp(decode(cds_sequence))::BLOB AS cds_sequence,
-  list_reverse(list_transform(exons, e -> struct_pack(exon_start := e.exon_start,
+  list_reverse(list_transform(exons, lambda e: struct_pack(exon_start := e.exon_start,
     exon_end := e.exon_end, exon_cdna_start := (16-e.exon_cdna_end)::UBIGINT,
     exon_cdna_end := (16-e.exon_cdna_start)::UBIGINT, phase := e.phase,
     end_phase := e.end_phase))) AS exons) FROM projection_transcripts;
@@ -219,7 +219,7 @@ W	*	tGa	tAa
 statement ok
 CREATE TABLE projection_later_phase AS SELECT * REPLACE(25::UBIGINT AS cds_start,
   'NGGGTAA'::BLOB AS cds_sequence, 'ATGAAACCC'::BLOB AS pre_cds_sequence,
-  list_transform(exons, e -> struct_pack(exon_start := e.exon_start, exon_end := e.exon_end,
+  list_transform(exons, lambda e: struct_pack(exon_start := e.exon_start, exon_end := e.exon_end,
     exon_cdna_start := e.exon_cdna_start, exon_cdna_end := e.exon_cdna_end,
     phase := CASE WHEN e.exon_cdna_start=1 THEN -1::TINYINT ELSE 1::TINYINT END,
     end_phase := -1::TINYINT)) AS exons) FROM projection_transcripts;
@@ -281,7 +281,7 @@ true
 
 statement ok
 UPDATE projection_later_phase SET cds_sequence='NNGGGTAA'::BLOB,
-  exons=list_transform(exons, e -> struct_pack(exon_start := e.exon_start, exon_end := e.exon_end,
+  exons=list_transform(exons, lambda e: struct_pack(exon_start := e.exon_start, exon_end := e.exon_end,
     exon_cdna_start := e.exon_cdna_start, exon_cdna_end := e.exon_cdna_end,
     phase := CASE WHEN e.exon_cdna_start=1 THEN -1::TINYINT ELSE 2::TINYINT END,
     end_phase := -1::TINYINT));

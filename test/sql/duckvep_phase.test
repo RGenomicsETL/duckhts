@@ -21,10 +21,10 @@ WITH expected(r,gt,phases,lanes,statuses) AS (VALUES
  FROM (SELECT record_index r,calls[1] c FROM read_geno('test/data/geno_phase_partial.vcf'))
 )
 SELECT count(*),count(*) FILTER (WHERE c.alleles IS NOT DISTINCT FROM gt AND c.phase_before=phases),
- count(*) FILTER (WHERE list_transform(assignments,x->x.haplotype_lane) IS NOT DISTINCT FROM lanes
- AND list_transform(assignments,x->x.status)=statuses),
- count(*) FILTER (WHERE c.phase_set=10 AND list_transform(assignments,x->x.phase_set)
- IS NOT DISTINCT FROM list_transform(lanes,x->CASE WHEN x IS NOT NULL THEN 10 END))
+ count(*) FILTER (WHERE list_transform(assignments,lambda x: x.haplotype_lane) IS NOT DISTINCT FROM lanes
+ AND list_transform(assignments,lambda x: x.status)=statuses),
+ count(*) FILTER (WHERE c.phase_set=10 AND list_transform(assignments,lambda x: x.phase_set)
+ IS NOT DISTINCT FROM list_transform(lanes,lambda x: CASE WHEN x IS NOT NULL THEN 10 END))
 FROM observed JOIN expected USING(r);
 ----
 12	12	12	12
@@ -159,7 +159,7 @@ SELECT count(*), count(*) FILTER (WHERE a.status='missing'),
 
 query III
 SELECT len(a), a[65535].input_slot, a[65535].haplotype_lane
-FROM (SELECT duckvep_phase_call(list_transform(range(65535), x -> 1), NULL) a)
+FROM (SELECT duckvep_phase_call(list_transform(range(65535), lambda x: 1), NULL) a)
 ----
 65535	65535	65535
 
@@ -179,7 +179,7 @@ SELECT duckvep_phase_call([], []);
 ploidy
 
 statement error
-SELECT duckvep_phase_call(list_transform(range(65536), x -> 1), NULL);
+SELECT duckvep_phase_call(list_transform(range(65536), lambda x: 1), NULL);
 ----
 ploidy
 

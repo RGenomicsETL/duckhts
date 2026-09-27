@@ -34,8 +34,8 @@ genotype_reader_run <- function(extension, input, reader, workload, selector,
     # (or by a known haploid). PS is copied only for a declared benchmark field.
     normalized <- function(table) paste0(
       "SELECT CHROM,POS,ID,REF,ALT,s.sample_index,",
-      "list_transform(tokens,x->CASE WHEN x='.' THEN NULL ELSE x::INTEGER END) AS alleles,",
-      "list_transform(range(1,len(tokens)+1),i->CASE WHEN i=1 THEN CASE WHEN len(tokens)=1 ",
+      "list_transform(tokens,lambda x: CASE WHEN x='.' THEN NULL ELSE x::INTEGER END) AS alleles,",
+      "list_transform(range(1,len(tokens)+1),lambda i: CASE WHEN i=1 THEN CASE WHEN len(tokens)=1 ",
       "THEN tokens[1]<>'.' ELSE NOT contains(FORMAT_GT,'/') END ELSE separators[i-1]='|' END) AS phase_before,",
       if (phase_set_field) "FORMAT_PS::BIGINT AS phase_set " else "NULL::BIGINT AS phase_set ",
       "FROM (SELECT *,regexp_split_to_array(FORMAT_GT,'[|/]') AS tokens,",

@@ -64,6 +64,11 @@ duckhts_bootstrap <- function(repo_root = NULL) {
     file.path(dest, "duckhts_sources.tsv"),
     overwrite = TRUE
   )
+  # The extension sources are MIT-licensed; ship the notice with them, since the
+  # repository-level LICENSE is outside the R package tree.
+  if (!file.copy(file.path(repo_root, "LICENSE"), file.path(dest, "LICENSE"), overwrite = TRUE)) {
+    stop("Failed to copy the DuckHTS extension LICENSE", call. = FALSE)
+  }
 
   duckvep_dest <- file.path(dest, "duckvep")
   dir.create(duckvep_dest, recursive = TRUE, showWarnings = FALSE)

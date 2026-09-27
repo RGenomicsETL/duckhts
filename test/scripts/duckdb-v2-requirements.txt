@@ -1,0 +1,6 @@
+# DuckDB 2.0 pre-release used by `make test-duckdb-v2`. Pinned with hashes so the tested
+# engine only changes with this file; bump it deliberately (and to the 2.0.0 release once out).
+duckdb==2.0.0.dev2609250715 \
+    --hash=sha256:6484fa12f565678f012e8261b0551fd2a7de74feb69570c07630128bf4cc2065 \
+    --hash=sha256:b0c8efd7f1578860f46616ee69cb0440d29d099834ec5e3dd5331eb6b385b959 \
+    --hash=sha256:8fcb96c9a5ef3ef92f7077d468a075e681b4345f8b582128f79ece34d88a6310
