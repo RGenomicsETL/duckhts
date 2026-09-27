@@ -4,7 +4,8 @@
 #' or view may be populated by `read_bcf()`; Parquet and VCF/BCF paths are also
 #' supported. Input columns follow `read_bcf()` (`CHROM`, `POS`, `REF`, `ALT`,
 #' `FILTER`, and declared `INFO_*` fields). Interval relations have `chrom`,
-#' `start`, `stop` in zero-based half-open BED coordinates. A gnotate exclusion
+#' `start`, `end` in zero-based half-open BED coordinates, as returned by
+#' `read_bed()`. A gnotate exclusion
 #' relation has `chrom`, `pos`, `ref`, `alt` in one-based VCF coordinates.
 #'
 #' `somalier_v0.3.4` names the pinned human-contig rules. Upstream skips
@@ -165,17 +166,18 @@ rduckhts_somalier_find_sites <- function(
   )
   interval_sql <- function(name, names, types) {
     table <- intervals[[name]]
+    quoted <- vapply(names, function(x) sql_quote_identifier(con, x), character(1))
     if (is.null(table)) {
-      fields <- paste0("NULL::", types, " AS ", names)
+      fields <- paste0("NULL::", types, " AS ", quoted)
       return(paste0("SELECT ", paste(fields, collapse = ", "), " WHERE false"))
     }
-    paste0("SELECT ", paste(sprintf("CAST(%s AS %s) AS %s", names, types, names),
+    paste0("SELECT ", paste(sprintf("CAST(%s AS %s) AS %s", quoted, types, quoted),
                             collapse = ", "), " FROM ",
            sql_quote_identifier(con, table))
   }
-  include <- interval_sql("include", c("chrom", "start", "stop"),
+  include <- interval_sql("include", c("chrom", "start", "end"),
                           c("VARCHAR", "BIGINT", "BIGINT"))
-  exclude <- interval_sql("exclude", c("chrom", "start", "stop"),
+  exclude <- interval_sql("exclude", c("chrom", "start", "end"),
                           c("VARCHAR", "BIGINT", "BIGINT"))
   gnotate <- interval_sql("gnotate", c("chrom", "pos", "ref", "alt"),
                           c("VARCHAR", "BIGINT", "VARCHAR", "VARCHAR"))
@@ -269,10 +271,10 @@ rduckhts_somalier_find_sites <- function(
     " AND (QD IS NULL OR abs(QD) >= 12) AND (MQ IS NULL OR MQ >= 50))), ",
     "interval_gate AS (SELECT * FROM qc_gate s WHERE ",
     "NOT EXISTS (SELECT 1 FROM excl e WHERE e.chrom = s.chrom ",
-    "AND e.start < s.pos + 5 AND e.stop > greatest(0, s.pos - 6)) ",
+    "AND e.start < s.pos + 5 AND e.\"end\" > greatest(0, s.pos - 6)) ",
     if (!is.null(intervals$include)) paste0(
       "AND EXISTS (SELECT 1 FROM incl i WHERE i.chrom = s.chrom ",
-      "AND i.start < s.pos AND i.stop > s.pos - 1) "
+      "AND i.start < s.pos AND i.\"end\" > s.pos - 1) "
     ) else "",
     "), gated AS MATERIALIZED (SELECT * FROM interval_gate s WHERE ",
     "s.sex = 'X' OR NOT EXISTS (SELECT 1 FROM gno g WHERE ",
