@@ -2,6 +2,9 @@
 
 # duckhts 1.5.2.9003
 
+- The GFFBase benchmark includes a registry-staged, parity-checked feature-database
+  comparison using SQL over `read_gff`, with reproducible process and query measurements.
+
 - DuckHTS loads on DuckDB 2.0; SQL lambdas use the `lambda x:` syntax
   (DuckDB >= 1.3).
 
