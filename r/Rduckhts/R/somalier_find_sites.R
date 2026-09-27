@@ -9,10 +9,12 @@
 #'
 #' `somalier_v0.3.4` names the pinned human-contig rules. Upstream skips
 #' autosomal REF=C and restricts X to the inclusive zero-based range
-#' 2781479..154931044; this selector applies the documented X/Y spacing,
-#' whereas the upstream implementation does not insert X/Y sites into its
-#' spacing state. Equal AF scores use lexical chromosome, position, and allele
-#' ordering, rather than the upstream sort's unspecified tie order. Only
+#' 2781479..154931044. By default X/Y selections do not enter the spacing
+#' state, as in upstream v0.3.4. `sex_spacing = "enforced"` applies the X/Y
+#' distances to every selection. Upstream's stable AF-score sort retains input
+#' order on ties; this selector uses scan order by default, or lexical position
+#' and allele order with `tie_order = "lexical"`. For a table or view, scan order
+#' is only reliable when its query explicitly orders the records. Only
 #' uppercase A/C/G/T biallelic SNVs enter the canonical panel. `generic` does
 #' not interpret contig names as human sex chromosomes. The result can include
 #' X/Y, whereas `duckhts_somalier_import_sites()` admits autosomes only;
@@ -32,6 +34,10 @@
 #' @param gnotate_exclude_table Optional allele-specific exclusion relation in
 #'   place of Somalier's gnotate zip.
 #' @param compatibility_mode Named contig and REF=C policy.
+#' @param sex_spacing Whether to reproduce upstream's unspaced X/Y selection
+#'   or enforce X/Y distances.
+#' @param tie_order Retain input scan order or use lexical position and allele
+#'   order for equal AF scores.
 #' @param max_autosomal,max_x,max_y Site caps after greedy selection.
 #' @param table_name Optional output table, otherwise return a data frame.
 #' @param overwrite Whether to replace an existing output table.
@@ -45,7 +51,8 @@ rduckhts_somalier_find_sites <- function(
   exclude_table = NULL, gnotate_exclude_table = NULL,
   compatibility_mode = c("somalier_v0.3.4", "generic"),
   max_autosomal = 65535, max_x = 10001, max_y = 5001,
-  table_name = NULL, overwrite = FALSE
+  table_name = NULL, overwrite = FALSE,
+  sex_spacing = c("upstream", "enforced"), tie_order = c("input", "lexical")
 ) {
   .somalier_validate_output(con, table_name, overwrite)
   .somalier_scalar_text(assembly, "assembly")
@@ -53,6 +60,8 @@ rduckhts_somalier_find_sites <- function(
     stop("assembly must be at most 1024 bytes", call. = FALSE)
   }
   compatibility_mode <- match.arg(compatibility_mode)
+  sex_spacing <- match.arg(sex_spacing)
+  tie_order <- match.arg(tie_order)
   min_af <- .somalier_fraction(min_af, "min_af")
   target_af <- .somalier_fraction(target_af, "target_af")
   min_an <- .somalier_bounded_whole_number(min_an, "min_an", 0, 2147483647)
@@ -101,7 +110,8 @@ rduckhts_somalier_find_sites <- function(
     snp_dist, target_af, interval_sources, compatibility_mode,
     max_autosomal, max_x, max_y,
     if (!is.null(source_table)) source_table else if (!is.null(source_parquet))
-      source_parquet else source_vcf
+      source_parquet else source_vcf, sex_spacing = sex_spacing,
+    tie_order = tie_order
   )
   .somalier_publish_query(con, query, table_name, overwrite)
 }
@@ -118,7 +128,8 @@ rduckhts_somalier_find_sites <- function(
 .somalier_find_sites_query <- function(
   con, source, assembly, min_af, min_an, af_field, an_field,
   snp_dist, target_af, intervals, mode, max_autosomal, max_x, max_y,
-  source_label = source, diagnostics = FALSE
+  source_label = source, diagnostics = FALSE,
+  sex_spacing = "upstream", tie_order = "input"
 ) {
   quote <- function(value) sql_quote_string(con, value)
   qsource <- sql_quote_identifier(con, source)
@@ -177,8 +188,16 @@ rduckhts_somalier_find_sites <- function(
   ) else "'autosome'"
   af_literal <- format(min_af, digits = 17, scientific = FALSE)
   target <- format(target_af, digits = 17, scientific = FALSE)
+  rank_tie <- if (tie_order == "input") "source_ordinal" else
+    "pos, ref, alts[1], af, an, source_ordinal"
+  sex_mask <- if (sex_spacing == "upstream" && human) paste0(
+    "CASE WHEN max(sex) IN ('X','Y') THEN ",
+    "list_transform(list(CAST(pos AS UBIGINT) ORDER BY chrom_rank), ",
+    "lambda p: true) ELSE "
+  ) else ""
   query <- paste0(
-    "WITH src AS MATERIALIZED (SELECT CAST(CHROM AS VARCHAR) AS chrom, ",
+    "WITH src AS MATERIALIZED (SELECT row_number() OVER () AS source_ordinal, ",
+    "CAST(CHROM AS VARCHAR) AS chrom, ",
     "CAST(POS AS BIGINT) AS pos, CAST(REF AS VARCHAR) AS ref, ",
     "CAST(ALT AS VARCHAR[]) AS alts, CAST(FILTER AS VARCHAR[]) AS filters, ",
     af, " AS af_source, ", an, " AS an, ", paste(annotation, collapse = ", "),
@@ -241,16 +260,20 @@ rduckhts_somalier_find_sites <- function(
     "ranked AS MATERIALIZED (SELECT *, ",
     "abs(CAST(af AS DOUBLE) - CAST(", target, " AS DOUBLE)) AS selection_score, ",
     "row_number() OVER (PARTITION BY chrom ORDER BY selection_score, ",
-    "pos, ref, alts[1], af, an) AS chrom_rank FROM neighbors), ",
+    rank_tie, ") AS chrom_rank FROM neighbors), ",
     "spaced AS (SELECT chrom, generate_subscripts(mask, 1) AS chrom_rank, ",
-    "unnest(mask) AS selected FROM (SELECT chrom, ",
+    "unnest(mask) AS selected FROM (SELECT chrom, ", sex_mask,
     "duckhts_somalier_spacing(list(CAST(pos AS UBIGINT) ORDER BY chrom_rank), ",
     "CAST(max(CASE WHEN sex = 'X' THEN 1000 WHEN sex = 'Y' THEN 200 ",
-    "ELSE ", snp_dist, " END) AS UBIGINT)) AS mask FROM ranked GROUP BY chrom)), ",
+    "ELSE ", snp_dist, " END) AS UBIGINT)) ",
+    if (nzchar(sex_mask)) "END " else "", "AS mask FROM ranked GROUP BY chrom)), ",
     "kept AS (SELECT r.* FROM ranked r JOIN spaced p USING(chrom, chrom_rank) ",
     "WHERE p.selected), ",
     "capped AS (SELECT *, row_number() OVER (PARTITION BY sex ",
-    "ORDER BY selection_score, chrom, pos, ref, alts[1], af, an) AS cap_rank ",
+    "ORDER BY selection_score, ",
+    if (tie_order == "input") "source_ordinal" else
+      "chrom, pos, ref, alts[1], af, an, source_ordinal",
+    ") AS cap_rank ",
     "FROM kept) "
   )
   if (diagnostics) {

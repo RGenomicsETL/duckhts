@@ -6,20 +6,29 @@ local({
                                      "somalier_find_sites_gnomad")))
   repo <- tempfile("find-sites-repo-")
   cache <- tempfile("find-sites-cache-")
+  registry_file <- tempfile(fileext = ".tsv")
   old_cache <- Sys.getenv("DUCKHTS_CACHE_DIR", unset = NA_character_)
-  Sys.setenv(DUCKHTS_CACHE_DIR = cache)
+  old_registry <- Sys.getenv("DUCKHTSBENCH_REGISTRY", unset = NA_character_)
   on.exit({
     if (is.na(old_cache)) Sys.unsetenv("DUCKHTS_CACHE_DIR") else
       Sys.setenv(DUCKHTS_CACHE_DIR = old_cache)
+    if (is.na(old_registry)) Sys.unsetenv("DUCKHTSBENCH_REGISTRY") else
+      Sys.setenv(DUCKHTSBENCH_REGISTRY = old_registry)
     unlink(c(repo, cache), recursive = TRUE)
+    unlink(registry_file)
   }, add = TRUE)
   for (i in seq_len(nrow(plan))) {
-    source <- system.file("extdata", basename(plan$locator[[i]]),
-                          package = "duckhtsbench", mustWork = TRUE)
-    destination <- file.path(repo, sub("^repo:", "", plan$locator[[i]]))
-    dir.create(dirname(destination), recursive = TRUE, showWarnings = FALSE)
-    expect_true(file.copy(source, destination))
+    source <- file.path(repo, sub("^repo:", "", plan$locator[[i]]))
+    dir.create(dirname(source), recursive = TRUE, showWarnings = FALSE)
+    writeLines(c("##fileformat=VCFv4.2", "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO",
+                 paste0("chr1\t", i, "\t.\tA\tG\t.\tPASS\tAF=0.5;AN=6")), source)
+    plan$supplier_identity[[i]] <- paste0(
+      "md5=", unname(tools::md5sum(source)),
+      ";bytes=", file.info(source)$size)
   }
+  utils::write.table(plan, registry_file, sep = "\t", row.names = FALSE,
+                     quote = FALSE)
+  Sys.setenv(DUCKHTS_CACHE_DIR = cache, DUCKHTSBENCH_REGISTRY = registry_file)
   paths <- duckhts_bench_stage_repository_fixtures(repo, "somalier-find-sites")
   expect_equal(length(paths), 2L)
   expect_true(all(file.exists(paths)))

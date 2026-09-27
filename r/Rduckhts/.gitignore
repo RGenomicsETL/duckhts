@@ -1,6 +1,7 @@
 inst/extdata/*.duckdb_extension*
 inst/extdata/*.tmp
 inst/extdata/*.raw
+inst/extdata/somalier_population_1000g.vcf.gz
 *.tar.gz
 *.tgz
 *.Rcheck

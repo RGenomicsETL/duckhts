@@ -5,6 +5,8 @@
 - `duckhts_somalier_spacing()` selects an ordered chromosome's candidate positions
   with greedy minimum-distance spacing. Somalier panel selection uses caller-visible
   SQL relations, including TEMP tables, with per-call filtering and site caps.
+  Somalier v0.3.4 mode retains input order for equal AF scores and selects X/Y
+  without spacing; lexical tie order and enforced X/Y spacing are opt-in.
 
 - DuckHTS loads on DuckDB 2.0; SQL lambdas use the `lambda x:` syntax
   (DuckDB >= 1.3).

@@ -61,18 +61,45 @@ test_somalier_find_sites_selection <- function() {
   dbExecute(con, "SET threads=1")
   first <- rduckhts_somalier_find_sites(
     con, source_table = "reversed", assembly = "GRCh38", snp_dist = 20,
-    exclude_table = "region_exclude", include_table = "region_include"
+    exclude_table = "region_exclude", include_table = "region_include",
+    tie_order = "lexical"
   )
   dbExecute(con, "SET threads=4")
   second <- rduckhts_somalier_find_sites(
     con, source_table = "population", assembly = "GRCh38", snp_dist = 20,
-    exclude_table = "region_exclude", include_table = "region_include"
+    exclude_table = "region_exclude", include_table = "region_include",
+    tie_order = "lexical"
   )
   expect_equal(first[, names(first) != "source_path"],
                second[, names(second) != "source_path"])
   expect_error(rduckhts_somalier_find_sites(
     con, source_table = "population", assembly = "GRCh38", min_af = -1
   ), pattern = "min_af")
+}
+
+test_somalier_find_sites_ties_and_sex_spacing <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  dbExecute(con, "SET threads=1")
+  dbExecute(con, paste(
+    "CREATE TEMP TABLE population AS SELECT * FROM (VALUES",
+    "('chr1',200,'A',['G'],['PASS'],[0.48::FLOAT],120000),",
+    "('chr1',100,'A',['G'],['PASS'],[0.48::FLOAT],120000),",
+    "('chrX',2781500,'A',['G'],['PASS'],[0.48::FLOAT],120000),",
+    "('chrX',2781600,'A',['G'],['PASS'],[0.48::FLOAT],120000),",
+    "('chrY',1000,'A',['G'],['PASS'],[0.48::FLOAT],120000),",
+    "('chrY',1100,'A',['G'],['PASS'],[0.48::FLOAT],120000)",
+    ") v(CHROM,POS,REF,ALT,FILTER,INFO_AF,INFO_AN)"
+  ))
+  input <- rduckhts_somalier_find_sites(
+    con, source_table = "population", assembly = "GRCh38", snp_dist = 1000
+  )
+  expect_equal(input$position, c(200, 2781500, 2781600, 1000, 1100))
+  lexical <- rduckhts_somalier_find_sites(
+    con, source_table = "population", assembly = "GRCh38", snp_dist = 1000,
+    tie_order = "lexical", sex_spacing = "enforced"
+  )
+  expect_equal(lexical$position, c(100, 2781500, 1000))
 }
 
 test_somalier_find_sites_nearby <- function() {
@@ -229,6 +256,7 @@ test_somalier_find_sites_vcf <- function() {
 }
 
 test_somalier_find_sites_selection()
+test_somalier_find_sites_ties_and_sex_spacing()
 test_somalier_find_sites_nearby()
 test_somalier_find_sites_flags_and_endpoints()
 test_somalier_find_sites_af_edges()

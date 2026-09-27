@@ -1,0 +1,80 @@
+---
+title: "Somalier find-sites: 1000 Genomes 30x phased chromosome 22"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+root <- normalizePath("..", mustWork = TRUE)
+read_result <- function(name) utils::read.delim(
+  file.path(root, "benchmarks", name), check.names = FALSE
+)
+observations <- read_result("somalier_find_sites_chr22_observations.tsv")
+gates <- read_result("somalier_find_sites_chr22_gates.tsv")
+timing <- read_result("somalier_find_sites_chr22_timing.tsv")
+classes <- read_result("somalier_find_sites_chr22_disagreement_summary.tsv")
+disagreements <- read_result("somalier_find_sites_chr22_disagreements.tsv")
+```
+
+This is a whole-chromosome differential of DuckHTS and pinned Somalier
+[v0.3.4](https://github.com/brentp/somalier/tree/ff58fdade8f4f8293d904f10e0a4a13f1fac808d)
+(binary SHA-256 `18717c205a9c4b65d479f1d2cf069a30b047a5378edf544d403d4081f06a3a78`).
+The unmodified [1000 Genomes high-coverage 30x phased chr22 VCF](https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20201028_3202_phased/CCDG_14151_B01_GRM_WGS_2020-08-05_chr22.filtered.shapeit2-duohmm-phased.vcf.gz)
+is staged through `duckhtsbench` (SHA-256
+`70ff24cfd01eab24c6f4c6e825f55a2b3475ff595f6e12e179c4ef06b9cc4df6`,
+519,930,289 bytes, GRCh38). Its declared INFO/AF and INFO/AN are used without
+recomputing from genotypes. Somalier skips sample genotypes; DuckHTS reads the
+physical VCF in sequential mode with `samples := ''`. The cache VCF is not committed.
+
+- Source revision: `r observations$revision`. Workload: `--min-AN 6000`,
+  `--snp-dist 10000`, minimum AF 0.15, AF target 0.48, no interval or
+  gnotate exclusion. One run per tool, warm filesystem cache, GNU `/usr/bin/time -v`.
+- Denominators: `r format(observations$source_records, big.mark = ",")` input
+  records; `r format(observations$upstream_candidates, big.mark = ",")` Somalier
+  candidates and `r format(observations$duckhts_candidates, big.mark = ",")`
+  DuckHTS candidates before nearby-variant exclusion;
+  `r format(observations$max_per_chromosome_candidates, big.mark = ",")`
+  chr22 spacing inputs. The native spacing kernel's per-list limit is
+  1,000,000 candidates; this chromosome's largest list is below it.
+- Selected: `r observations$upstream_sites` Somalier sites and
+  `r observations$duckhts_sites` DuckHTS sites;
+  `r observations$common_sites` shared four-field keys
+  `(region, position, source_ref, source_alt)`. Input-order and lexical
+  tie policies differed on `r observations$lexical_tie_dependent_sites`
+  selected sites on this chromosome.
+- Threads: Somalier uses two reader/decompression threads and one writer
+  thread (pinned source); DuckHTS uses one DuckDB thread and a sequential
+  reader. These process measurements are not matched-concurrency speedups.
+
+```{r gates}
+knitr::kable(gates, caption = "Whole-chromosome stage counts. Indels and snps are exclusion-neighbor inventories, not sequential pass counts. NA denotes stages the pinned Somalier executable does not expose; its own log reports the gated candidate count.")
+```
+
+```{r timing}
+knitr::kable(timing, caption = "Whole-process wall seconds and peak RSS KiB, including initialization and I/O. Single runs, not a variance estimate.")
+```
+
+```{r disagreement-summary}
+knitr::kable(classes, caption = "Keyed disagreement classes (all records counted).")
+```
+
+The retained `somalier_find_sites_chr22_disagreements.tsv` contains the first
+100 disagreement keys and origins; `r nrow(disagreements)` rows are present.
+An empty table means no disagreements, not an absent comparison. The
+`somalier_find_sites_chr22_observations.tsv` and gate table retain the full
+comparison denominators. The previous
+[`benchmark_somalier_find_sites.md`](benchmark_somalier_find_sites.md)
+uses two small fixture slices and is not a comparable whole-chromosome baseline.
+
+Reproduce from the repository root with installed `Rduckhts` and
+`duckhtsbench`, the pinned binary staged in `duckhtsbench`, and GNU time:
+
+```bash
+export DUCKHTSBENCH_REGISTRY="$PWD/r/duckhtsbench/inst/benchmark_registry.tsv"
+Rscript test/scripts/somalier_find_sites_chr22.R upstream "$PWD"
+time_file="$(Rscript -e 'cat(file.path(dirname(duckhtsbench::duckhts_bench_artifact_path("somalier_find_sites_chr22_source")), "chr22.duckhts.time"))')"
+/usr/bin/time -v -o "$time_file" \
+  Rscript test/scripts/somalier_find_sites_chr22.R select "$PWD"
+Rscript test/scripts/somalier_find_sites_chr22.R compare "$PWD"
+cd benchmarks && Rscript -e "rmarkdown::render('benchmark_somalier_find_sites_chr22.Rmd')"
+```

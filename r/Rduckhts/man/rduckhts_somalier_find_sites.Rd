@@ -24,7 +24,9 @@ rduckhts_somalier_find_sites(
   max_x = 10001,
   max_y = 5001,
   table_name = NULL,
-  overwrite = FALSE
+  overwrite = FALSE,
+  sex_spacing = c("upstream", "enforced"),
+  tie_order = c("input", "lexical")
 )
 }
 \arguments{
@@ -53,6 +55,12 @@ place of Somalier's gnotate zip.}
 \item{table_name}{Optional output table, otherwise return a data frame.}
 
 \item{overwrite}{Whether to replace an existing output table.}
+
+\item{sex_spacing}{Whether to reproduce upstream's unspaced X/Y selection
+or enforce X/Y distances.}
+
+\item{tie_order}{Retain input scan order or use lexical position and allele
+order for equal AF scores.}
 }
 \value{
 A canonical panel relation with selection score, source AN and
@@ -69,10 +77,12 @@ relation has `chrom`, `pos`, `ref`, `alt` in one-based VCF coordinates.
 \details{
 `somalier_v0.3.4` names the pinned human-contig rules. Upstream skips
 autosomal REF=C and restricts X to the inclusive zero-based range
-2781479..154931044; this selector applies the documented X/Y spacing,
-whereas the upstream implementation does not insert X/Y sites into its
-spacing state. Equal AF scores use lexical chromosome, position, and allele
-ordering, rather than the upstream sort's unspecified tie order. Only
+2781479..154931044. By default X/Y selections do not enter the spacing
+state, as in upstream v0.3.4. `sex_spacing = "enforced"` applies the X/Y
+distances to every selection. Upstream's stable AF-score sort retains input
+order on ties; this selector uses scan order by default, or lexical position
+and allele order with `tie_order = "lexical"`. For a table or view, scan order
+is only reliable when its query explicitly orders the records. Only
 uppercase A/C/G/T biallelic SNVs enter the canonical panel. `generic` does
 not interpret contig names as human sex chromosomes. The result can include
 X/Y, whereas `duckhts_somalier_import_sites()` admits autosomes only;

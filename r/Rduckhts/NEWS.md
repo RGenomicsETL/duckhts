@@ -2,8 +2,10 @@
 
 - `rduckhts_somalier_find_sites()` selects canonical, provenance-bearing Somalier
   panels from typed population relations, Parquet, or VCF/BCF with caller-visible
-  interval and allele exclusions. The bundled `duckhts_somalier_spacing()` SQL
-  function provides deterministic greedy site spacing.
+  interval and allele exclusions. Equal AF scores retain input scan order and
+  X/Y sites remain unspaced by default, matching Somalier v0.3.4. The
+  `tie_order = "lexical"` and `sex_spacing = "enforced"` options provide
+  deterministic lexical ties and X/Y minimum-distance spacing.
 
 - The bundled DuckHTS extension loads on DuckDB 2.0; SQL lambdas use the
   `lambda x:` syntax (DuckDB >= 1.3).
