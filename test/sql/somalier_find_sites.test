@@ -1,0 +1,32 @@
+# name: test/sql/somalier_find_sites.test
+# description: Greedy ordered position selection for Somalier find-sites recipes
+# group: [duckhts]
+
+require duckhts
+
+query I
+SELECT duckhts_somalier_spacing([100, 109, 110, 95, 120]::UBIGINT[], 10) =
+       [true, false, true, false, true];
+----
+1
+
+query I
+SELECT duckhts_somalier_spacing([100, 100, 101]::UBIGINT[], 1) =
+       [true, false, true];
+----
+1
+
+query I
+SELECT duckhts_somalier_spacing([]::UBIGINT[], 10000) = []::BOOLEAN[];
+----
+1
+
+statement error
+SELECT duckhts_somalier_spacing([100, NULL]::UBIGINT[], 10);
+----
+positions must be positive and non-NULL
+
+statement error
+SELECT duckhts_somalier_spacing([100]::UBIGINT[], 0);
+----
+positive distance
