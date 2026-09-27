@@ -1,5 +1,8 @@
 # Rduckhts 1.5.2.9003-0.1.5
 
+- `rduckhts_somalier_find_sites()` materializes filtered site candidates and
+  nearby-variant inventories rather than full population rows.
+
 - `rduckhts_somalier_find_sites()` uses ordered nearby-variant passes to
   select panels from whole-chromosome VCF inputs without quadratic range joins.
 

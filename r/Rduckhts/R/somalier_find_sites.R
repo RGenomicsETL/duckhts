@@ -195,8 +195,34 @@ rduckhts_somalier_find_sites <- function(
     "list_transform(list(CAST(pos AS UBIGINT) ORDER BY chrom_rank), ",
     "lambda p: true) ELSE "
   ) else ""
+  snv_pred <- paste0(
+    "len(ref) = 1 AND len(alts) = 1 AND len(alts[1]) = 1 ",
+    "AND ref IN ('A','C','G','T') AND alts[1] IN ('A','C','G','T') ",
+    "AND ref != alts[1] AND filters = ['PASS']"
+  )
+  af_an_pred <- paste0(
+    "(an IS NULL OR sex != 'autosome' OR an >= ", min_an, ") ",
+    "AND isfinite(af) AND ",
+    "CAST(af AS DOUBLE) BETWEEN CASE WHEN sex = 'autosome' THEN ", af_literal,
+    " ELSE 0.04 END AND CASE WHEN sex = 'autosome' THEN 1 - ",
+    af_literal, " ELSE 0.96 END"
+  )
+  indel_pred <- paste0(
+    "(len(ref) != 1 OR len(alts) != 1 OR len(alts[1]) != 1) AND af > 0.02"
+  )
+  snp_pred <- paste0(
+    "len(ref) = 1 AND len(alts) = 1 AND len(alts[1]) = 1 ",
+    "AND filters = ['PASS'] AND af > 0.01"
+  )
+  event_filter <- if (diagnostics) "" else paste0(
+    " WHERE (", indel_pred, ") OR (", snp_pred, ") OR ((",
+    snv_pred, ") AND (", af_an_pred, "))"
+  )
+  inventory_source <- if (diagnostics) "eligible" else "events"
+  materialization <- if (diagnostics) "MATERIALIZED" else "NOT MATERIALIZED"
   query <- paste0(
-    "WITH src AS MATERIALIZED (SELECT row_number() OVER () AS source_ordinal, ",
+    "WITH src AS ", materialization, " (SELECT ",
+    "row_number() OVER () AS source_ordinal, ",
     "CAST(CHROM AS VARCHAR) AS chrom, ",
     "CAST(POS AS BIGINT) AS pos, CAST(REF AS VARCHAR) AS ref, ",
     "CAST(ALT AS VARCHAR[]) AS alts, CAST(FILTER AS VARCHAR[]) AS filters, ",
@@ -204,34 +230,28 @@ rduckhts_somalier_find_sites <- function(
     " FROM ", qsource, "), ",
     "incl AS (", include, "), excl AS (", exclude, "), ",
     "gno AS (", gnotate, "), ",
-    "classified AS MATERIALIZED (SELECT *, coalesce(af_source, 0::FLOAT) ",
+    "classified AS NOT MATERIALIZED (SELECT *, coalesce(af_source, 0::FLOAT) ",
     "AS af, ", sex, " AS sex FROM src), ",
-    "eligible AS MATERIALIZED (SELECT * FROM classified s WHERE ",
+    "eligible AS ", materialization,
+    " (SELECT * FROM classified s WHERE ",
     "pos > 0 AND ref IS NOT NULL AND alts IS NOT NULL AND len(alts) > 0 ",
     if (human) "AND (sex != 'autosome' OR ref != 'C') " else "",
     if (human) "AND (sex != 'X' OR pos - 1 BETWEEN 2781479 AND 154931044) " else "",
     "), ",
+    "events AS MATERIALIZED (SELECT * FROM eligible", event_filter, "), ",
     "indels AS MATERIALIZED (SELECT chrom, greatest(0, pos - 8) AS lo, ",
-    "pos - 1 + len(ref) + 7 AS hi FROM eligible WHERE ",
-    "(len(ref) != 1 OR len(alts) != 1 OR len(alts[1]) != 1) AND af > 0.02), ",
-    "snps AS MATERIALIZED (SELECT chrom, pos FROM eligible WHERE ",
-    "len(ref) = 1 AND len(alts) = 1 AND len(alts[1]) = 1 AND ",
-    "filters = ['PASS'] AND af > 0.01), ",
+    "pos - 1 + len(ref) + 7 AS hi FROM ", inventory_source, " WHERE ",
+    indel_pred, "), ",
+    "snps AS MATERIALIZED (SELECT chrom, pos FROM ", inventory_source,
+    " WHERE ", snp_pred, "), ",
     "snp_positions AS (SELECT chrom, pos, count(*) AS n FROM snps ",
     "GROUP BY chrom, pos), ",
     "snp_neighbors AS (SELECT chrom, pos, sum(n) OVER (PARTITION BY chrom ",
     "ORDER BY pos RANGE BETWEEN 2 PRECEDING AND 2 FOLLOWING) AS n ",
     "FROM snp_positions), ",
-    "pass_snv AS (SELECT * FROM eligible WHERE ",
-    "len(ref) = 1 AND len(alts) = 1 AND len(alts[1]) = 1 ",
-    "AND ref IN ('A','C','G','T') AND alts[1] IN ('A','C','G','T') ",
-    "AND ref != alts[1] AND filters = ['PASS']), ",
-    "af_an AS (SELECT * FROM pass_snv WHERE ",
-    "(an IS NULL OR sex != 'autosome' OR an >= ", min_an, ") ",
-    "AND isfinite(af) AND ",
-    "CAST(af AS DOUBLE) BETWEEN CASE WHEN sex = 'autosome' THEN ", af_literal,
-    " ELSE 0.04 END AND CASE WHEN sex = 'autosome' THEN 1 - ",
-    af_literal, " ELSE 0.96 END), ",
+    "pass_snv AS (SELECT * FROM ", inventory_source, " WHERE ",
+    snv_pred, "), ",
+    "af_an AS (SELECT * FROM pass_snv WHERE ", af_an_pred, "), ",
     "annotation_gate AS (SELECT * FROM af_an WHERE ",
     "(as_status IS NULL OR as_status = 'PASS') ",
     "AND old_multiallelic IS NULL AND old_variant IS NULL ",

@@ -159,6 +159,43 @@ test_somalier_find_sites_sorted_neighbors <- function() {
   expect_equal(counts$records[counts$gate == "neighbors"], 1)
 }
 
+test_somalier_find_sites_sparse_events <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  dbExecute(con, paste(
+    "CREATE TEMP TABLE population AS SELECT * FROM (VALUES",
+    "('chr1',100,'C',['T'],['PASS'],[0.48::FLOAT],120000),",
+    "('chr1',200,'A',['G'],['q10'],[0.48::FLOAT],120000),",
+    "('chr1',300,'A',['G'],['PASS'],[0.0::FLOAT],120000)",
+    ") v(CHROM,POS,REF,ALT,FILTER,INFO_AF,INFO_AN)"
+  ))
+  selected <- rduckhts_somalier_find_sites(
+    con, source_table = "population", assembly = "GRCh38", min_af = 0
+  )
+  expect_equal(selected$position, 300)
+  counts <- dbGetQuery(con, Rduckhts:::.somalier_find_sites_query(
+    con, "population", "GRCh38", 0, 115000, "AF", "AN", 10000, 0.48,
+    list(include = NULL, exclude = NULL, gnotate = NULL),
+    "somalier_v0.3.4", 65535, 10001, 5001, diagnostics = TRUE
+  ))
+  expect_equal(counts$records[counts$gate == "src"], 3)
+  expect_equal(counts$records[counts$gate == "eligible"], 2)
+  expect_equal(counts$records[counts$gate == "snps"], 0)
+  expect_equal(counts$records[counts$gate == "selected"], 1)
+  dbExecute(con, "DELETE FROM population WHERE REF != 'C'")
+  empty <- rduckhts_somalier_find_sites(
+    con, source_table = "population", assembly = "GRCh38"
+  )
+  expect_equal(nrow(empty), 0L)
+  counts <- dbGetQuery(con, Rduckhts:::.somalier_find_sites_query(
+    con, "population", "GRCh38", 0.15, 115000, "AF", "AN", 10000, 0.48,
+    list(include = NULL, exclude = NULL, gnotate = NULL),
+    "somalier_v0.3.4", 65535, 10001, 5001, diagnostics = TRUE
+  ))
+  expect_equal(counts$records[counts$gate == "src"], 1)
+  expect_equal(counts$records[counts$gate == "eligible"], 0)
+}
+
 test_somalier_find_sites_flags_and_endpoints <- function() {
   con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE))

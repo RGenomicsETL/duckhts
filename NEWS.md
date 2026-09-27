@@ -2,6 +2,9 @@
 
 # duckhts 1.5.2.9003
 
+- Somalier panel selection retains only qualifying site and narrow nearby-variant
+  inventories during the population scan, reducing whole-chromosome memory use.
+
 - Somalier panel selection computes nearby-indel exclusion and nearby-SNP counts
   in ordered position passes, retaining physical-record tie order and the
   pinned v0.3.4 site selection rules on whole-chromosome VCF inputs.
