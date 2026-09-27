@@ -257,6 +257,8 @@ rduckhts_somalier_find_sites <- function(
     "AND old_multiallelic IS NULL AND old_variant IS NULL ",
     "AND (sex = 'Y' OR NOT coalesce(segdup, false)) ",
     "AND NOT coalesce(lcr, false)), ",
+    # Somalier v0.3.4 findsites.nim:214-224 takes abs() of every QC statistic,
+    # QD included (rejects abs(QD) < 12), so QD is symmetric here too.
     "qc_gate AS (SELECT * FROM annotation_gate WHERE ",
     "sex != 'autosome' OR (",
     paste(sprintf("(%s IS NULL OR abs(%s) <= 2.4)",
