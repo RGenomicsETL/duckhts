@@ -62,18 +62,11 @@ message("chr22 VCF biallelic SNVs: ", nrow(vcf), "; reference overlap: ", nrow(j
 stopifnot(nrow(joined) >= 20000L)
 site <- joined[unique(as.integer(round(seq(1, nrow(joined), length.out = 20000L))))]
 index <- site$ref_index
-keys <- data.frame(chromosome = "22", position = site$pos,
-                   allele_a = site$a0, allele_b = site$a1)
-ref_long <- cbind(keys[rep(seq_len(nrow(keys)), times = ncol(ref) - 5L), ],
-  group_id = rep(names(ref)[-(1:5)], each = nrow(keys)),
-  frequency = unlist(ref[index, -(1:5), with = FALSE], use.names = FALSE))
-pc_long <- cbind(keys[rep(seq_len(nrow(keys)), times = ncol(pc) - 5L), ],
-  pc = rep(seq_len(ncol(pc) - 5L), each = nrow(keys)),
-  loading = unlist(pc[index, -(1:5), with = FALSE], use.names = FALSE))
 con <- rduckhts_connect()
 dbExecute(con, "SET threads=4")
-dbWriteTable(con, "real_reference", ref_long, overwrite = TRUE)
-dbWriteTable(con, "real_loadings", pc_long, overwrite = TRUE)
+reference_parquet <- duckhts_bench_stage_ancestry_parquet()
+dbExecute(con, paste0("CREATE VIEW real_reference AS SELECT * FROM read_parquet(",
+                      as.character(DBI::dbQuoteString(con, reference_parquet)), ")"))
 dbWriteTable(con, "real_correction", data.frame(pc = seq_along(correction),
   coefficient = correction), overwrite = TRUE)
 input <- rbindlist(lapply(samples, function(sample) {
@@ -85,9 +78,15 @@ input <- rbindlist(lapply(samples, function(sample) {
              allele_a = site$a, allele_b = site$b, frequency = dosage / 2)
 }))
 dbWriteTable(con, "real_input", input, overwrite = TRUE)
+input_parquet <- Sys.getenv("DUCKHTS_ANCESTRY_INPUT_PARQUET")
+if (nzchar(input_parquet)) {
+  dbExecute(con, paste0("COPY real_input TO ",
+                        as.character(DBI::dbQuoteString(con, input_parquet)),
+                        " (FORMAT PARQUET)"))
+}
 start <- proc.time()[["elapsed"]]
-result <- rduckhts_ancestry_proportions(con, "real_input", "real_reference",
-                                        "real_loadings", "real_correction", min_cor = 0.4)
+result <- rduckhts_ancestry_proportions_wide(con, "real_input", "real_reference",
+                                             "real_correction", min_cor = 0.4)
 elapsed <- proc.time()[["elapsed"]] - start
 comparisons <- rbindlist(lapply(samples, function(sample) {
   rows <- input[sample_id == sample]
@@ -135,6 +134,6 @@ message("DuckHTS chr22 query time: ", elapsed, " s; ", nrow(parity),
         "; minimum gate distance: ", min(summary$gate_distance))
 stopifnot(nrow(parity) == length(samples) * 21L,
           all(summary$status == "ok"), all(summary$oracle_error == ""),
-          all(summary$max_group_difference < 2e-4),
+          all(round(parity$proportion, 7L) == round(parity$oracle, 7L)),
           all(summary$gate_distance > summary$rounding_bound))
 dbDisconnect(con, shutdown = TRUE)

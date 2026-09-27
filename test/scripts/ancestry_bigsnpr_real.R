@@ -79,22 +79,21 @@ dbExecute(con, "SET threads=4")
 input <- data.frame(sample_id = "epilepsy", chromosome = paste0("chr", site$chr[keep]),
                     position = site$pos[keep], allele_a = site$a0[keep],
                     allele_b = site$a1[keep], frequency = matched$freq[keep])
-keys <- data.frame(chromosome = input$chromosome, position = input$position,
-                   allele_a = input$allele_a, allele_b = input$allele_b)
-ref_long <- cbind(keys[rep(seq_len(nrow(keys)), times = ncol(ref) - 5L), ],
-                  group_id = rep(names(ref)[-(1:5)], each = nrow(keys)),
-                  frequency = unlist(ref[index, -(1:5), with = FALSE], use.names = FALSE))
-pc_long <- cbind(keys[rep(seq_len(nrow(keys)), times = ncol(pc) - 5L), ],
-                 pc = rep(seq_len(ncol(pc) - 5L), each = nrow(keys)),
-                 loading = unlist(pc[index, -(1:5), with = FALSE], use.names = FALSE))
+reference_parquet <- duckhts_bench_stage_ancestry_parquet()
+dbExecute(con, paste0("CREATE VIEW real_reference AS SELECT * FROM read_parquet(",
+                      as.character(DBI::dbQuoteString(con, reference_parquet)), ")"))
 dbWriteTable(con, "real_input", input, overwrite = TRUE)
-dbWriteTable(con, "real_reference", ref_long, overwrite = TRUE)
-dbWriteTable(con, "real_loadings", pc_long, overwrite = TRUE)
+input_parquet <- Sys.getenv("DUCKHTS_ANCESTRY_INPUT_PARQUET")
+if (nzchar(input_parquet)) {
+  dbExecute(con, paste0("COPY real_input TO ",
+                        as.character(DBI::dbQuoteString(con, input_parquet)),
+                        " (FORMAT PARQUET)"))
+}
 dbWriteTable(con, "real_correction", data.frame(pc = seq_along(correction),
                                                coefficient = correction), overwrite = TRUE)
 start <- proc.time()[["elapsed"]]
-result <- rduckhts_ancestry_proportions(con, "real_input", "real_reference",
-                                        "real_loadings", "real_correction")
+result <- rduckhts_ancestry_proportions_wide(con, "real_input", "real_reference",
+                                             "real_correction")
 elapsed <- proc.time()[["elapsed"]] - start
 parity <- merge(result, data.frame(group_id = names(shared), oracle = as.numeric(shared)),
                 by = "group_id", sort = FALSE)
@@ -113,6 +112,7 @@ message("shared bigsnpr cor_pred: ", attr(shared, "cor_pred"),
         correlation_bound, "; gate 0.4 distance: ",
         abs(result$cor_pred[[1L]] - 0.4),
         "; DuckHTS time: ", elapsed, " s")
-stopifnot(all(parity$status == "ok"), max(parity$absolute_difference) < 2e-4,
+stopifnot(all(parity$status == "ok"),
+          all(round(parity$proportion, 7L) == round(parity$oracle, 7L)),
           abs(result$cor_pred[[1L]] - 0.4) > correlation_bound)
 dbDisconnect(con, shutdown = TRUE)

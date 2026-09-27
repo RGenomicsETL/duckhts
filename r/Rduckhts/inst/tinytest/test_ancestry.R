@@ -65,6 +65,40 @@ test_ancestry_relations <- function() {
   delta <- x[, 1L] - x[, 2L]
   expected_a <- max(0, min(1, sum(delta * (y - x[, 2L])) / sum(delta^2)))
   expect_true(max(abs(out$proportion - c(expected_a, 1 - expected_a))) < 1e-6)
+  dbExecute(con, paste0(
+    "CREATE VIEW ancestry_wide AS SELECT try_cast(regexp_replace(r.chromosome, '^chr', '') ",
+    "AS INTEGER) AS chromosome, r.position, r.allele_a, r.allele_b, ",
+    "max(p.loading) FILTER (WHERE p.pc = 1) AS PC1, ",
+    "max(p.loading) FILTER (WHERE p.pc = 2) AS PC2, ",
+    paste(paste0("0.0::DOUBLE AS PC", 3:16), collapse = ", "), ", ",
+    "max(r.frequency) FILTER (WHERE r.group_id = 'A') AS A, ",
+    "max(r.frequency) FILTER (WHERE r.group_id = 'B') AS B ",
+    "FROM ancestry_ref r JOIN ancestry_pc p USING (chromosome, position, allele_a, allele_b) ",
+    "GROUP BY r.chromosome, r.position, r.allele_a, r.allele_b"
+  ))
+  dbExecute(con, paste0("CREATE VIEW ancestry_wide_correction AS SELECT * FROM ancestry_correction ",
+                        "UNION ALL SELECT i, 1.0 FROM range(3, 17) t(i)"))
+  wide <- rduckhts_ancestry_proportions_wide(
+    con, "ancestry_input", "ancestry_wide", "ancestry_wide_correction", min_cor = 0)
+  expect_equal(wide$group_id, out$group_id)
+  expect_equal(wide$status, out$status)
+  expect_equal(wide$proportion, out$proportion, tolerance = 1e-6)
+  expect_equal(wide$cor_pred, out$cor_pred, tolerance = 1e-6)
+  expect_equal(wide$used_variants, out$used_variants)
+  expect_equal(wide$input_variants, out$input_variants)
+  wide_gated <- rduckhts_ancestry_proportions_wide(
+    con, "ancestry_input", "ancestry_wide", "ancestry_wide_correction", min_cor = 1)
+  expect_equal(wide_gated$status, rep("low_correlation", 2L))
+  expect_true(all(is.na(wide_gated$proportion)))
+  dbExecute(con, paste0("CREATE VIEW ancestry_duplicate_input AS ",
+                        "SELECT * FROM ancestry_input UNION ALL ",
+                        "SELECT * FROM ancestry_input WHERE position = 100"))
+  wide_audit <- rduckhts_ancestry_proportions_wide(
+    con, "ancestry_duplicate_input", "ancestry_wide", "ancestry_wide_correction",
+    min_cor = -1)
+  expect_equal(unique(wide_audit$input_variants), 12)
+  expect_equal(unique(wide_audit$used_variants), 5)
+  expect_equal(unique(wide_audit$duplicate_variants), 4)
   gated <- rduckhts_ancestry_proportions(con, "ancestry_input", "ancestry_ref",
                                          "ancestry_pc", "ancestry_correction", min_cor = 1)
   expect_equal(gated$status, rep("low_correlation", 2L))
@@ -84,6 +118,21 @@ test_ancestry_relations <- function() {
     "ancestry_pc", "ancestry_correction", min_cor = -1)
   expect_equal(reversed$status, rep("reversed_alleles", 2L))
   expect_true(all(is.na(reversed$proportion)))
+  dbExecute(con, paste0(
+    "CREATE VIEW ancestry_correlated_wide AS SELECT w.chromosome, w.position, ",
+    "w.allele_a, w.allele_b, ",
+    paste(paste0("w.PC", 1:16), collapse = ", "), ", ",
+    "max(r.frequency) FILTER (WHERE r.group_id = 'A') AS A, ",
+    "max(r.frequency) FILTER (WHERE r.group_id = 'B') AS B ",
+    "FROM ancestry_wide w JOIN ancestry_correlated_ref r ",
+    "ON r.position = w.position AND r.allele_a = w.allele_a ",
+    "AND r.allele_b = w.allele_b GROUP BY ALL"
+  ))
+  wide_reversed <- rduckhts_ancestry_proportions_wide(
+    con, "ancestry_wrong_orientation", "ancestry_correlated_wide",
+    "ancestry_wide_correction", min_cor = -1)
+  expect_equal(wide_reversed$status, reversed$status)
+  expect_true(all(is.na(wide_reversed$proportion)))
   dbExecute(con, paste(
     "CREATE TABLE ancestry_scaled AS SELECT 'S' AS sample_id, chromosome, position,",
     "allele_a, allele_b, sum(CASE WHEN group_id = 'A' THEN 0.35 ELSE 0.15 END * frequency) AS frequency",
@@ -94,6 +143,11 @@ test_ancestry_relations <- function() {
                                           sum_to_one = FALSE, min_cor = 0)
   expect_true(all(scaled$status == "ok"))
   expect_true(abs(sum(scaled$proportion) - 0.5) < 1e-5)
+  wide_scaled <- rduckhts_ancestry_proportions_wide(
+    con, "ancestry_scaled", "ancestry_wide", "ancestry_wide_correction",
+    sum_to_one = FALSE, min_cor = 0)
+  expect_equal(wide_scaled$status, scaled$status)
+  expect_equal(wide_scaled$proportion, scaled$proportion, tolerance = 1e-6)
   dbExecute(con, paste(
     "CREATE TABLE ancestry_geno_calls AS SELECT chromosome AS CHROM, position AS POS,",
     "allele_a AS REF, [allele_b] AS ALT,",
@@ -115,6 +169,11 @@ test_ancestry_relations <- function() {
     pattern = "one correction per PC")
   expect_error(rduckhts_ancestry_proportions(con, "ancestry_input", "ancestry_ref",
                                               "ancestry_pc", "ancestry_correction", min_cor = 2))
+  expect_error(rduckhts_ancestry_proportions_wide(
+    con, "ancestry_input", "ancestry_wide", "ancestry_bad_correction"),
+    pattern = "one finite coefficient")
+  expect_error(rduckhts_ancestry_proportions_wide(
+    con, "ancestry_input", "ancestry_wide", "ancestry_wide_correction", min_cor = 2))
 }
 
 test_ancestry_relations()

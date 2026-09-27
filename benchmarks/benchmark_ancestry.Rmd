@@ -95,14 +95,21 @@ about real-reference loading or BAM/CRAM depth sensitivity.
 
 ## Public reference and GRCh37 chr22 genotypes
 
-Two checksum-verified Figshare products each contain 5,816,590 rows: 21
-reference-frequency groups and 16 PC loadings. The epilepsy summary input has
-4,880,492 records. A separate public phase-3 chr22 VCF supplies 11 individuals
+Two checksum-verified Figshare CSV products each contain 5,816,590 rows:
+21 reference-frequency groups and 16 PC loadings. A staged, key-sorted Parquet
+join holds the four site-key columns, 16 DOUBLE loadings and 21 DOUBLE
+frequencies. Its SHA-256 is
+`8f0b5f7d3cd98fafd1b0598c63e743d07697d7536526c89948883d5aff791489`;
+the staging receipt binds this digest to both registered CSV digests and DuckDB
+1.5.5. The one-time conversion from checksum-verified CSVs took 322.26 seconds
+and peaked at 15,269 MiB RSS; it is not included in the query measurements.
+The epilepsy summary input has 4,880,492 records. A separate public phase-3 chr22 VCF supplies 11 individuals
 from AFR (3), EUR (2), EAS (2), SAS (2) and AMR (2). Each workload uses four
 DuckDB threads and the bigsnpr vignette's 16 correction coefficients. These
-are complete-process peak RSS measurements, including package loading and
-preceding operations in that process; the SQL time excludes reading CSVs,
-matching sites, and materializing reference relations.
+are complete-process peak RSS measurements, including package loading,
+CSV-based bigsnpr oracles and preceding operations in that process. The SQL
+time includes scanning the staged Parquet view, matching sites and aggregation,
+but excludes loading the oracle CSVs.
 
 ```{r real-reference}
 real_epilepsy <- callr::r(function(repo) {
@@ -192,21 +199,92 @@ seven-decimal QP rounding correlation bound is
 farther away. On chr22, both return `r real_epilepsy$cor_pred` at seven
 decimals with group difference
 `r max(real_epilepsy$group_parity$absolute_difference)`; its rounding bound is
-`r sprintf("%.9f", real_epilepsy$rounding_bound)`. Tolerance: 2e-4 per group.
+`r sprintf("%.9f", real_epilepsy$rounding_bound)`. All 21 genome-wide
+coefficients agree at seven decimals; the script checks rounded equality.
 
 The individual input is restricted from `r real_individuals$vcf_snvs` unique
 biallelic SNVs to `r real_individuals$reference_overlap` same-assembly,
 allele-agreeing, unambiguous reference overlaps before spaced site selection.
 Both solvers see the same per-sample genotypes. bigsnpr's
 imperfect-match warning (`cor_pred < 0.99`) is retained; passing the
-0.4 gate does not imply that the frequencies match perfectly.
+0.4 gate does not imply that the frequencies match perfectly. The 11
+individuals' 231 coefficients agree with bigsnpr at seven decimals.
 
 ```{r individual-parity}
 knitr::kable(real_individuals$summary, digits = 7)
 ```
 
+## Keyed Parquet profile and input scaling
+
+The pre-conversion genome-wide DuckDB JSON profile, on revision
+`0a5fd898c2bb8449259e01dd7aff161bb4dc3bc8`, measured 30.27 s and
+40,232 MiB peak buffer memory. Its complete R process peaked at 38,783 MiB
+RSS while retaining the CSV-based bigsnpr oracle. The 53,491,760-row
+materialized `basis` and 1,123,326,960-row `x` join dominate cardinality;
+`pred_sites` separately groups 3,343,235 variants after a long-reference
+join. The old `list()` calls assemble only the small post-aggregation solver
+vectors; there is no per-variant list construction. The profile also shows
+hash joins and grouping over the long reference, but DuckDB does not
+attribute its single reported peak buffer value to individual operators.
+CSV parsing occurs in R before this SQL profile, not in a DuckDB scan
+operator. Sorting is limited to the input window partition and final group
+ordering.
+
+The keyed query instead scans projected Parquet columns and aggregates 336
+`sum(PC * group_frequency)` values, 16 corrected `sum(PC * aligned_frequency)`
+values and group correlations per sample. Its only `list_value()` expressions
+assemble the 336-element solver vector and 21 group correlations **after**
+aggregation. It retains narrow site classification and aligned-frequency
+rows; the 5,816,590-site reference hash/group and joins are the dominant
+build-side state. The four-thread full-epilepsy query took 3.39 s with
+3,806 MiB peak DuckDB buffer, zero temp spill and 8,898 MiB process peak
+RSS including the CSV oracle. Standalone Parquet-only query process RSS is
+reported below; it does not retain CSV reference tables or a bigsnpr oracle.
+Buffer peaks describe DuckDB's accounting, not resident bytes, and cannot
+be added to RSS.
+
+`benchmark_ancestry_reference_load.R` scans every numeric column in each
+source CSV and the staged Parquet product with DuckDB; neither scan
+materializes 5.8 million rows in R. These timings differ from the CSV
+`fread()` oracle-loading times above and have their own denominator.
+
+```{r reference-load-comparison}
+reference_load <- utils::read.delim("ancestry_reference_load.tsv")
+stopifnot(nrow(reference_load) == 2L,
+          identical(reference_load$threads, c(1L, 4L)),
+          all(reference_load$reference_rows == 5816590L),
+          all(reference_load$numeric_columns == 37L))
+knitr::kable(reference_load, digits = 2)
+```
+
+`benchmark_ancestry_memory.R` uses fresh R processes and the same staged
+Parquet reference for each row. Epilepsy 1×/2×/4× are nested prefixes of
+835,809/1,671,618/3,343,235 physical input variants (one sample).
+Genotype 11/22/44 is the same 20,000 physical chr22 sites per individual
+with copied sample IDs; the extra sample IDs are a scaling probe, not new
+independent genotypes. Every input row participates, and each group produces
+one output row. Peak RSS includes DuckDB, the input Parquet reader and R
+package loading; peak buffer is DuckDB's query-session maximum. Query time
+includes reading Parquet, site joins, aggregation, the solver and quality
+correlations, but not one-time conversion or source-CSV checksum validation.
+The full epilepsy and 11-individual coefficient tables also agree at seven
+decimals between one and four threads (21 and 231 keyed rows, respectively).
+
+```{r parquet-scaling}
+scaling <- utils::read.delim("ancestry_memory_scaling.tsv")
+stopifnot(nrow(scaling) == 12L,
+          all(scaling$threads %in% c(1L, 4L)),
+          all(scaling$scale %in% c(1L, 2L, 4L)),
+          all(scaling$input_rows == scaling$used_variants),
+          all(scaling$output_rows == scaling$samples * 21L))
+knitr::kable(scaling, digits = 2)
+```
+
 ## Indexed 30x CRAM sensitivity
 
+These retained measurements were produced at
+`0a5fd898c2bb8449259e01dd7aff161bb4dc3bc8` with the existing long-form
+BAM ancestry path, not remeasured for the keyed Parquet projection.
 Three public 30x CRAMs (NA18507/AFR, HG00188/EUR, HG00403/EAS) were
 read via their indexes at chr22:15,335,303–50,800,284 (GRCh38). The
 registered GRCh37-to-GRCh38 chain maps 19,981/20,000 selected GRCh37

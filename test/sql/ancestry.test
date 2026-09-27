@@ -76,6 +76,34 @@ SELECT abs(q[1] - 0.75) < 0.000001 FROM solved;
 ----
 true
 
+# Wide keyed rows need only one aggregate row per cohort before solver lists.
+query I
+WITH reference AS (
+  SELECT position,
+    max(frequency) FILTER (WHERE group_id = 'A') AS a,
+    max(frequency) FILTER (WHERE group_id = 'B') AS b,
+    1.0 AS pc1,
+    CASE position WHEN 1 THEN 1.0 WHEN 2 THEN 0.0 ELSE -1.0 END AS pc2
+  FROM ancestry_ref GROUP BY position
+), oriented AS (
+  SELECT i.position, CASE WHEN i.allele_a = r.allele_b AND i.allele_b = r.allele_a
+    THEN 1-i.frequency ELSE i.frequency END AS frequency
+  FROM ancestry_input i JOIN (SELECT DISTINCT position, allele_a, allele_b FROM ancestry_ref) r
+    USING (position)
+), moments AS (
+  SELECT sum(r.pc1*r.a) AS x11, sum(r.pc1*r.b) AS x12,
+    sum(r.pc2*r.a) AS x21, sum(r.pc2*r.b) AS x22,
+    sum(r.pc1*i.frequency) AS y1, sum(r.pc2*i.frequency) AS y2
+  FROM reference r JOIN oriented i USING (position)
+), solved AS (
+  SELECT duckhts_ancestry_proportions(
+    list_value(x11, x12, x21, x22), list_value(y1, y2), 2, true) AS q
+  FROM moments
+)
+SELECT abs(q[1] - 0.75) < 0.000001 FROM solved;
+----
+true
+
 statement error
 SELECT duckhts_ancestry_proportions([1.0, 2.0], [1.0], 1, true);
 ----

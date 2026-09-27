@@ -33,13 +33,7 @@ rduckhts_ancestry_proportions <- function(
   table_name = NULL, overwrite = FALSE
 ) {
   input_kind <- match.arg(input_kind)
-  if (!is.logical(sum_to_one) || length(sum_to_one) != 1L || is.na(sum_to_one)) {
-    stop("sum_to_one must be one non-missing logical value", call. = FALSE)
-  }
-  if (!is.numeric(min_cor) || length(min_cor) != 1L || !is.finite(min_cor) ||
-      min_cor < -1 || min_cor > 1) {
-    stop("min_cor must be a finite correlation in [-1, 1]", call. = FALSE)
-  }
+  .ancestry_validate_options(sum_to_one, min_cor)
   .somalier_validate_output(con, table_name, overwrite)
   names <- list(input_table, reference_table, loadings_table, correction_table)
   for (i in seq_along(names)) .somalier_validate_name(names[[i]], "relation")
@@ -66,6 +60,16 @@ rduckhts_ancestry_proportions <- function(
                            if (sum_to_one) "true" else "false",
                            .somalier_quote_number(con, min_cor))
   .somalier_publish_query(con, query, table_name, overwrite)
+}
+
+.ancestry_validate_options <- function(sum_to_one, min_cor) {
+  if (!is.logical(sum_to_one) || length(sum_to_one) != 1L || is.na(sum_to_one)) {
+    stop("sum_to_one must be one non-missing logical value", call. = FALSE)
+  }
+  if (!is.numeric(min_cor) || length(min_cor) != 1L || !is.finite(min_cor) ||
+      min_cor < -1 || min_cor > 1) {
+    stop("min_cor must be a finite correlation in [-1, 1]", call. = FALSE)
+  }
 }
 
 .ancestry_query <- function(relations, frequency, equality, gate) {

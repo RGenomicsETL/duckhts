@@ -2,6 +2,10 @@
 
 # duckhts 1.5.2.9003
 
+- A checksum-bound, sorted Parquet ancestry reference combines the pinned
+  bigsnpr CSV frequencies and loadings as DOUBLE columns. The wide ancestry
+  query aggregates PC products by sample without a per-variant PC-by-group join.
+
 - The benchmark registry pins the paired bigsnpr ancestry reference products,
   epilepsy summary statistics, and GRCh37 phase-3 chr22 genotypes. The ancestry
   benchmark compares published bigsnpr coefficients and public individual

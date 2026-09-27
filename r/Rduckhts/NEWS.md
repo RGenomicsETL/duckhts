@@ -1,5 +1,9 @@
 # Rduckhts 1.5.2.9003-0.1.5
 
+- `rduckhts_ancestry_proportions_wide()` accepts a keyed wide reference relation,
+  including a view over the staged Parquet ancestry product, and accumulates
+  projection sums without materializing per-variant PC-by-group rows.
+
 - `rduckhts_ancestry_proportions()` matches allele-frequency or diploid-dosage
   relations to caller-owned reference products, projects them by PC, and reports
   proportions with matching audits and correlation gates. Missing genotypes are
