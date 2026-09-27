@@ -127,7 +127,7 @@ main <- function() {
   counts <- DBI::dbGetQuery(con, paste0("SELECT count(*)::VARCHAR records,
     count(*) FILTER (WHERE len(ALT) > 0)::VARCHAR records_with_alt,
     sum(len(ALT))::VARCHAR alt_alleles,
-    sum(len(list_filter(ALT, a -> regexp_full_match(REF, '[ACGTNacgtn]+')
+    sum(len(list_filter(ALT, lambda a: regexp_full_match(REF, '[ACGTNacgtn]+')
       AND regexp_full_match(a, '[ACGTNacgtn]+') AND upper(REF) <> upper(a))))::VARCHAR
       eligible_literal_alleles FROM read_bcf(", DBI::dbQuoteString(con, paths[["input"]]),
     ", scan_mode := 'sequential', decompression_threads := 0)"))

@@ -178,7 +178,7 @@ sql <- function(job, input) {
     sum(hash(to_json(h))::HUGEINT)::VARCHAR replay_sum_hash FROM (
       SELECT * EXCLUDE(hgvsp,hgvsp_status,nominal_length_diff)
         REPLACE(list_sort(carriers) AS carriers,list_sort(contributors) AS contributors,
-        list_transform(coding_blocks,b->struct_pack(cds_start:=b.cds_start,reference:=b.reference,
+        list_transform(coding_blocks,lambda b: struct_pack(cds_start:=b.cds_start,reference:=b.reference,
           alternate:=b.alternate,alt_start0:=b.alt_start0,length_change:=b.length_change,
           sequence_flags:=b.sequence_flags,event_indices:=b.event_indices)) AS coding_blocks)
       FROM measured) h")
@@ -200,7 +200,7 @@ sql <- function(job, input) {
       if (records) "" else "WHERE alleles[lane]=1 ", "GROUP BY ALL"))
     DBI::dbExecute(con, "CREATE VIEW actual_carriers AS SELECT transcript_index,c.sample_index,
       c.haplotype_lane lane,c.phase_set,c.ploidy,
-      list_sort(list_transform(contributors,x->x.event_index)) events
+      list_sort(list_transform(contributors,lambda x: x.event_index)) events
       FROM measured,unnest(carriers) u(c)")
     exact <- function() DBI::dbGetQuery(con, "SELECT count(*)=0 ok FROM (
       (SELECT * FROM expected_carriers EXCEPT ALL SELECT * FROM actual_carriers)
@@ -210,14 +210,14 @@ sql <- function(job, input) {
       AND m.nominal_length_diff=e.nominal_length_diff
       AND %s
       AND m.evidence_flags=CASE WHEN e.mask=0 THEN 0 ELSE 1 END
-      AND list_unique(list_transform(m.contributors,x->x.event_index))=length(m.contributors)
-      AND coalesce(list_sum(list_transform(m.coding_blocks,x->length(x.event_indices))),0)=m.edit_count
+      AND list_unique(list_transform(m.contributors,lambda x: x.event_index))=length(m.contributors)
+      AND coalesce(list_sum(list_transform(m.coding_blocks,lambda x: length(x.event_indices))),0)=m.edit_count
       AND %s,false)) ok FROM measured m JOIN expected_sequences e
       ON e.mask=coalesce(list_sum(list_transform(m.contributors,
-        x->(1::BIGINT << ((x.event_index-1)%%4)))),0)",
+        lambda x: (1::BIGINT << ((x.event_index-1)%%4)))),0)",
       if (hgvs) "m.hgvsp IS NOT NULL AND m.hgvsp_status='ok'" else
         "m.hgvsp IS NULL AND m.hgvsp_status='not_requested'",
-      if (records) "len(list_filter(m.contributors,x->x.alt_index IS DISTINCT FROM 1))=0"
+      if (records) "len(list_filter(m.contributors,lambda x: x.alt_index IS DISTINCT FROM 1))=0"
         else "true"))$ok
     hgvs_equal <- function() TRUE
     if (hgvs) {
@@ -258,12 +258,12 @@ sql <- function(job, input) {
         invented_hgvs = "UPDATE measured SET hgvsp='p.(Met1Leu)'",
         hgvs_status = paste0("UPDATE measured SET hgvsp_status='",
           if (hgvs) "not_requested" else "ok", "'"),
-        carrier = "UPDATE measured SET carriers=list_transform(carriers,c->struct_update(c,sample_index:=4294967295::UINTEGER))",
-        missing_ploidy = "UPDATE measured SET carriers=list_transform(carriers,c->struct_update(c,ploidy:=NULL::USMALLINT))",
-        contributor = "UPDATE measured SET contributors=list_transform(contributors,c->struct_update(c,event_index:=0::UBIGINT))",
+        carrier = "UPDATE measured SET carriers=list_transform(carriers,lambda c: struct_update(c,sample_index:=4294967295::UINTEGER))",
+        missing_ploidy = "UPDATE measured SET carriers=list_transform(carriers,lambda c: struct_update(c,ploidy:=NULL::USMALLINT))",
+        contributor = "UPDATE measured SET contributors=list_transform(contributors,lambda c: struct_update(c,event_index:=0::UBIGINT))",
         dropped_row = "DELETE FROM measured WHERE transcript_index=0")
       if (records) mutations <- c(mutations,
-        missing_alt_index = "UPDATE measured SET contributors=list_transform(contributors,c->struct_update(c,alt_index:=NULL::UINTEGER))")
+        missing_alt_index = "UPDATE measured SET contributors=list_transform(contributors,lambda c: struct_update(c,alt_index:=NULL::UINTEGER))")
       if (hgvs) mutations <- c(mutations,
         missing_hgvs = "UPDATE measured SET hgvsp=NULL",
         malformed_hgvs = "UPDATE measured SET hgvsp=replace(hgvsp,'Ala','(Ala)')")

@@ -97,12 +97,12 @@ duckvep_fastvep_prepare_source <- function(con, input) {
   # the physical record; IDs and Location are not per-ALT normalized keys.
   execute("CREATE TEMP TABLE fastvep_source_spelling AS
     WITH anchored AS (
-      SELECT *, len(list_filter(alternates, x -> len(x) != len(reference))) > 0
+      SELECT *, len(list_filter(alternates, lambda x: len(x) != len(reference))) > 0
         AND NOT (len(alternates) = 1 AND alternates[1] IN ('<NON_REF>', '<*>'))
-        AND len(list_filter(alternates, x -> starts_with(x, '<') AND ends_with(x, '>')
+        AND len(list_filter(alternates, lambda x: starts_with(x, '<') AND ends_with(x, '>')
           AND x NOT IN ('<NON_REF>', '<*>'))) = 0
-        AND len(list_filter(alternates, x -> NOT contains(x, '*'))) > 0
-        AND len(list_filter(alternates, x -> NOT contains(x, '*')
+        AND len(list_filter(alternates, lambda x: NOT contains(x, '*'))) > 0
+        AND len(list_filter(alternates, lambda x: NOT contains(x, '*')
           AND left(x, 1) != left(reference, 1))) = 0 AS strip_anchor
       FROM fastvep_source
     ), alleles AS (
@@ -110,7 +110,7 @@ duckvep_fastvep_prepare_source <- function(con, input) {
         position + len(reference) - 1 AS native_end,
         CASE WHEN strip_anchor THEN coalesce(nullif(substring(reference, 2), ''), '-')
           ELSE reference END AS native_reference,
-        list_transform(alternates, x -> CASE WHEN strip_anchor AND NOT contains(x, '*')
+        list_transform(alternates, lambda x: CASE WHEN strip_anchor AND NOT contains(x, '*')
           THEN coalesce(nullif(substring(x, 2), ''), '-') ELSE x END) AS native_alternates
       FROM anchored
     ) SELECT *, chrom || ':' || native_start::VARCHAR || CASE
