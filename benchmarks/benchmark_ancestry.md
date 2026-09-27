@@ -1,4 +1,4 @@
-Revision: c235ef57fefa94b8ea90a2d154b76193079cc861. Workload:
+Revision: 0d40f90193775ad3838e5a5e4bb2f3f9bbf775ec. Workload:
 deterministic biallelic synthetic reference frequencies and PC loadings;
 three independently perturbed samples; 4 DuckDB threads; two reference
 groups; two PCs; `min_cor = 0.4`. Each variant is present in both groups
@@ -9,7 +9,7 @@ separately below.
 The correction vector is staged from the committed, checksummed bigsnpr
 vignette product. `VmHWM` is cumulative process high-water RSS (MiB),
 including package loading and all preceding cases; the baseline before
-the first run was 183.9 MiB. It is not per-query allocated memory.
+the first run was 183.2 MiB. It is not per-query allocated memory.
 
 <table>
 <colgroup>
@@ -51,7 +51,7 @@ the first run was 183.9 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">1</td>
 <td style="text-align: right;">0.039</td>
-<td style="text-align: right;">222.660</td>
+<td style="text-align: right;">227.754</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="even">
@@ -63,8 +63,8 @@ the first run was 183.9 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">2</td>
-<td style="text-align: right;">0.040</td>
-<td style="text-align: right;">232.504</td>
+<td style="text-align: right;">0.039</td>
+<td style="text-align: right;">239.629</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="odd">
@@ -76,8 +76,8 @@ the first run was 183.9 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">3</td>
-<td style="text-align: right;">0.041</td>
-<td style="text-align: right;">241.879</td>
+<td style="text-align: right;">0.038</td>
+<td style="text-align: right;">241.660</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="even">
@@ -89,8 +89,8 @@ the first run was 183.9 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">1</td>
-<td style="text-align: right;">0.049</td>
-<td style="text-align: right;">245.160</td>
+<td style="text-align: right;">0.050</td>
+<td style="text-align: right;">247.754</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="odd">
@@ -102,8 +102,8 @@ the first run was 183.9 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">2</td>
-<td style="text-align: right;">0.049</td>
-<td style="text-align: right;">247.660</td>
+<td style="text-align: right;">0.048</td>
+<td style="text-align: right;">248.848</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="even">
@@ -115,8 +115,8 @@ the first run was 183.9 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">3</td>
-<td style="text-align: right;">0.049</td>
-<td style="text-align: right;">250.941</td>
+<td style="text-align: right;">0.051</td>
+<td style="text-align: right;">256.191</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="odd">
@@ -128,8 +128,8 @@ the first run was 183.9 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">1</td>
-<td style="text-align: right;">0.085</td>
-<td style="text-align: right;">267.660</td>
+<td style="text-align: right;">0.084</td>
+<td style="text-align: right;">271.348</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="even">
@@ -142,7 +142,7 @@ the first run was 183.9 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">0.081</td>
-<td style="text-align: right;">271.566</td>
+<td style="text-align: right;">272.754</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="odd">
@@ -154,8 +154,8 @@ the first run was 183.9 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">3</td>
-<td style="text-align: right;">0.082</td>
-<td style="text-align: right;">275.473</td>
+<td style="text-align: right;">0.081</td>
+<td style="text-align: right;">273.066</td>
 <td style="text-align: left;"></td>
 </tr>
 </tbody>
@@ -165,7 +165,7 @@ Failed gates are retained in the `failures` column for each repeat. The
 nearest identical synthetic workload is the earlier rendered
 `benchmarks/benchmark_ancestry.md` at repository revision `8ab38b99`
 (source revision `56aad9cf`): its three 17,000-site repeats had median
-0.078 seconds, versus 0.082 seconds here. These are separate R processes
+0.078 seconds, versus 0.081 seconds here. These are separate R processes
 with uncontrolled background load; this difference cannot establish a
 regression or equivalence. There is no ancestry-projection baseline on
 `develop`; the synthetic rows are not evidence about real-reference
@@ -173,15 +173,22 @@ loading or BAM/CRAM depth sensitivity.
 
 ## Public reference and GRCh37 chr22 genotypes
 
-Two checksum-verified Figshare products each contain 5,816,590 rows: 21
-reference-frequency groups and 16 PC loadings. The epilepsy summary
-input has 4,880,492 records. A separate public phase-3 chr22 VCF
-supplies 11 individuals from AFR (3), EUR (2), EAS (2), SAS (2) and AMR
-(2). Each workload uses four DuckDB threads and the bigsnpr vignette’s
-16 correction coefficients. These are complete-process peak RSS
-measurements, including package loading and preceding operations in that
-process; the SQL time excludes reading CSVs, matching sites, and
-materializing reference relations.
+Two checksum-verified Figshare CSV products each contain 5,816,590 rows:
+21 reference-frequency groups and 16 PC loadings. A staged, key-sorted
+Parquet join holds the four site-key columns, 16 DOUBLE loadings and 21
+DOUBLE frequencies. Its SHA-256 is
+`8f0b5f7d3cd98fafd1b0598c63e743d07697d7536526c89948883d5aff791489`; the
+staging receipt binds this digest to both registered CSV digests and
+DuckDB 1.5.5. The one-time conversion from checksum-verified CSVs took
+322.26 seconds and peaked at 15,269 MiB RSS; it is not included in the
+query measurements. The epilepsy summary input has 4,880,492 records. A
+separate public phase-3 chr22 VCF supplies 11 individuals from AFR (3),
+EUR (2), EAS (2), SAS (2) and AMR (2). Each workload uses four DuckDB
+threads and the bigsnpr vignette’s 16 correction coefficients. These are
+complete-process peak RSS measurements, including package loading,
+CSV-based bigsnpr oracles and preceding operations in that process. The
+SQL time includes scanning the staged Parquet view, matching sites and
+aggregation, but excludes loading the oracle CSVs.
 
 <table style="width:100%;">
 <colgroup>
@@ -222,9 +229,9 @@ materializing reference relations.
 <td style="text-align: right;">21</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">5816590</td>
-<td style="text-align: right;">25.45</td>
-<td style="text-align: right;">0.22</td>
-<td style="text-align: right;">7596.47</td>
+<td style="text-align: right;">25.43</td>
+<td style="text-align: right;">0.39</td>
+<td style="text-align: right;">7596.40</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">epilepsy (genome-wide)</td>
@@ -235,9 +242,9 @@ materializing reference relations.
 <td style="text-align: right;">21</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">5816590</td>
-<td style="text-align: right;">25.48</td>
-<td style="text-align: right;">31.09</td>
-<td style="text-align: right;">37337.41</td>
+<td style="text-align: right;">25.46</td>
+<td style="text-align: right;">3.35</td>
+<td style="text-align: right;">8558.21</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">1000G phase-3 chr22 genotypes</td>
@@ -248,9 +255,9 @@ materializing reference relations.
 <td style="text-align: right;">21</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">5816590</td>
-<td style="text-align: right;">26.64</td>
-<td style="text-align: right;">1.10</td>
-<td style="text-align: right;">4871.58</td>
+<td style="text-align: right;">26.93</td>
+<td style="text-align: right;">0.56</td>
+<td style="text-align: right;">4872.06</td>
 </tr>
 </tbody>
 </table>
@@ -406,14 +413,16 @@ Genome-wide `cor_pred`: DuckHTS 0.999629260844, bigsnpr 0.999629260942.
 The conservative seven-decimal QP rounding correlation bound is
 0.000008450; the 0.4 gate is farther away. On chr22, both return
 0.9995518 at seven decimals with group difference 0; its rounding bound
-is 0.000008978. Tolerance: 2e-4 per group.
+is 0.000008978. All 21 genome-wide coefficients agree at seven decimals;
+the script checks rounded equality.
 
 The individual input is restricted from 1055452 unique biallelic SNVs to
 70371 same-assembly, allele-agreeing, unambiguous reference overlaps
 before spaced site selection. Both solvers see the same per-sample
 genotypes. bigsnpr’s imperfect-match warning (`cor_pred < 0.99`) is
 retained; passing the 0.4 gate does not imply that the frequencies match
-perfectly.
+perfectly. The 11 individuals’ 231 coefficients agree with bigsnpr at
+seven decimals.
 
 <table>
 <colgroup>
@@ -604,8 +613,284 @@ perfectly.
 </tbody>
 </table>
 
+## Keyed Parquet profile and input scaling
+
+The pre-conversion genome-wide DuckDB JSON profile, on revision
+`0a5fd898c2bb8449259e01dd7aff161bb4dc3bc8`, measured 30.27 s and 40,232
+MiB peak buffer memory. Its complete R process peaked at 38,783 MiB RSS
+while retaining the CSV-based bigsnpr oracle. The 53,491,760-row
+materialized `basis` and 1,123,326,960-row `x` join dominate
+cardinality; `pred_sites` separately groups 3,343,235 variants after a
+long-reference join. The old `list()` calls assemble only the small
+post-aggregation solver vectors; there is no per-variant list
+construction. The profile also shows hash joins and grouping over the
+long reference, but DuckDB does not attribute its single reported peak
+buffer value to individual operators. CSV parsing occurs in R before
+this SQL profile, not in a DuckDB scan operator. Sorting is limited to
+the input window partition and final group ordering.
+
+The keyed query instead scans projected Parquet columns and aggregates
+336 `sum(PC * group_frequency)` values, 16 corrected
+`sum(PC * aligned_frequency)` values and group correlations per sample.
+Its only `list_value()` expressions assemble the 336-element solver
+vector and 21 group correlations **after** aggregation. It retains
+narrow site classification and aligned-frequency rows; the
+5,816,590-site reference hash/group and joins are the dominant
+build-side state. The four-thread full-epilepsy query took 3.39 s with
+3,806 MiB peak DuckDB buffer, zero temp spill and 8,898 MiB process peak
+RSS including the CSV oracle. Standalone Parquet-only query process RSS
+is reported below; it does not retain CSV reference tables or a bigsnpr
+oracle. Buffer peaks describe DuckDB’s accounting, not resident bytes,
+and cannot be added to RSS.
+
+`benchmark_ancestry_reference_load.R` scans every numeric column in each
+source CSV and the staged Parquet product with DuckDB; neither scan
+materializes 5.8 million rows in R. These timings differ from the CSV
+`fread()` oracle-loading times above and have their own denominator.
+
+<table>
+<colgroup>
+<col style="width: 8%" />
+<col style="width: 16%" />
+<col style="width: 17%" />
+<col style="width: 26%" />
+<col style="width: 30%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: right;">threads</th>
+<th style="text-align: right;">reference_rows</th>
+<th style="text-align: right;">numeric_columns</th>
+<th style="text-align: right;">csv_full_column_seconds</th>
+<th style="text-align: right;">parquet_full_column_seconds</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">5816590</td>
+<td style="text-align: right;">37</td>
+<td style="text-align: right;">19.62</td>
+<td style="text-align: right;">1.57</td>
+</tr>
+<tr class="even">
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">5816590</td>
+<td style="text-align: right;">37</td>
+<td style="text-align: right;">14.28</td>
+<td style="text-align: right;">0.44</td>
+</tr>
+</tbody>
+</table>
+
+`benchmark_ancestry_memory.R` uses fresh R processes and the same staged
+Parquet reference for each row. Epilepsy 1×/2×/4× are nested prefixes of
+835,809/1,671,618/3,343,235 physical input variants (one sample).
+Genotype 11/22/44 is the same 20,000 physical chr22 sites per individual
+with copied sample IDs; the extra sample IDs are a scaling probe, not
+new independent genotypes. Every input row participates, and each group
+produces one output row. Peak RSS includes DuckDB, the input Parquet
+reader and R package loading; peak buffer is DuckDB’s query-session
+maximum. Query time includes reading Parquet, site joins, aggregation,
+the solver and quality correlations, but not one-time conversion or
+source-CSV checksum validation. The full epilepsy and 11-individual
+coefficient tables also agree at seven decimals between one and four
+threads (21 and 231 keyed rows, respectively).
+
+<table>
+<colgroup>
+<col style="width: 8%" />
+<col style="width: 6%" />
+<col style="width: 5%" />
+<col style="width: 6%" />
+<col style="width: 9%" />
+<col style="width: 11%" />
+<col style="width: 10%" />
+<col style="width: 6%" />
+<col style="width: 10%" />
+<col style="width: 13%" />
+<col style="width: 11%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: left;">workload</th>
+<th style="text-align: right;">threads</th>
+<th style="text-align: right;">scale</th>
+<th style="text-align: right;">samples</th>
+<th style="text-align: right;">input_rows</th>
+<th style="text-align: right;">used_variants</th>
+<th style="text-align: right;">output_rows</th>
+<th style="text-align: right;">seconds</th>
+<th style="text-align: right;">peak_rss_mib</th>
+<th style="text-align: right;">peak_buffer_mib</th>
+<th style="text-align: right;">peak_temp_mib</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">epilepsy</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">835809</td>
+<td style="text-align: right;">835809</td>
+<td style="text-align: right;">21</td>
+<td style="text-align: right;">3.89</td>
+<td style="text-align: right;">877.57</td>
+<td style="text-align: right;">1210.64</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">epilepsy</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1671618</td>
+<td style="text-align: right;">1671618</td>
+<td style="text-align: right;">21</td>
+<td style="text-align: right;">6.35</td>
+<td style="text-align: right;">1005.39</td>
+<td style="text-align: right;">1559.88</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">epilepsy</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">3343235</td>
+<td style="text-align: right;">3343235</td>
+<td style="text-align: right;">21</td>
+<td style="text-align: right;">11.60</td>
+<td style="text-align: right;">1769.77</td>
+<td style="text-align: right;">2996.53</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">epilepsy</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">835809</td>
+<td style="text-align: right;">835809</td>
+<td style="text-align: right;">21</td>
+<td style="text-align: right;">1.35</td>
+<td style="text-align: right;">1066.92</td>
+<td style="text-align: right;">1404.67</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">epilepsy</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1671618</td>
+<td style="text-align: right;">1671618</td>
+<td style="text-align: right;">21</td>
+<td style="text-align: right;">1.88</td>
+<td style="text-align: right;">1106.41</td>
+<td style="text-align: right;">1740.59</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">epilepsy</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">3343235</td>
+<td style="text-align: right;">3343235</td>
+<td style="text-align: right;">21</td>
+<td style="text-align: right;">3.43</td>
+<td style="text-align: right;">1872.41</td>
+<td style="text-align: right;">3174.94</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">genotypes</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">11</td>
+<td style="text-align: right;">220000</td>
+<td style="text-align: right;">220000</td>
+<td style="text-align: right;">231</td>
+<td style="text-align: right;">1.37</td>
+<td style="text-align: right;">695.71</td>
+<td style="text-align: right;">849.84</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">genotypes</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">22</td>
+<td style="text-align: right;">440000</td>
+<td style="text-align: right;">440000</td>
+<td style="text-align: right;">462</td>
+<td style="text-align: right;">1.72</td>
+<td style="text-align: right;">695.96</td>
+<td style="text-align: right;">890.09</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">genotypes</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">44</td>
+<td style="text-align: right;">880000</td>
+<td style="text-align: right;">880000</td>
+<td style="text-align: right;">924</td>
+<td style="text-align: right;">2.40</td>
+<td style="text-align: right;">750.57</td>
+<td style="text-align: right;">1081.69</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">genotypes</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">11</td>
+<td style="text-align: right;">220000</td>
+<td style="text-align: right;">220000</td>
+<td style="text-align: right;">231</td>
+<td style="text-align: right;">0.53</td>
+<td style="text-align: right;">655.62</td>
+<td style="text-align: right;">962.30</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">genotypes</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">22</td>
+<td style="text-align: right;">440000</td>
+<td style="text-align: right;">440000</td>
+<td style="text-align: right;">462</td>
+<td style="text-align: right;">0.70</td>
+<td style="text-align: right;">698.44</td>
+<td style="text-align: right;">1029.94</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">genotypes</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">44</td>
+<td style="text-align: right;">880000</td>
+<td style="text-align: right;">880000</td>
+<td style="text-align: right;">924</td>
+<td style="text-align: right;">1.05</td>
+<td style="text-align: right;">827.65</td>
+<td style="text-align: right;">1222.04</td>
+<td style="text-align: right;">0</td>
+</tr>
+</tbody>
+</table>
+
 ## Indexed 30x CRAM sensitivity
 
+These retained measurements were produced at
+`0a5fd898c2bb8449259e01dd7aff161bb4dc3bc8` with the existing long-form
+BAM ancestry path, not remeasured for the keyed Parquet projection.
 Three public 30x CRAMs (NA18507/AFR, HG00188/EUR, HG00403/EAS) were read
 via their indexes at chr22:15,335,303–50,800,284 (GRCh38). The
 registered GRCh37-to-GRCh38 chain maps 19,981/20,000 selected GRCh37
