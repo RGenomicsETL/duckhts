@@ -1,17 +1,20 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.2.9003
+# duckhts 1.5.2.9004
 
 - Somalier panel selection (`rduckhts_somalier_find_sites()`) selects sites from
   caller-visible population relations, including TEMP tables, with per-call filters
-  and site caps; `duckhts_somalier_spacing()` applies greedy minimum-distance spacing
-  over an ordered chromosome. Somalier v0.3.4 mode keeps input order for equal AF
+  and site caps; include and exclude intervals use `chrom`, `start`, `end` as
+  `read_bed()` returns them. `duckhts_somalier_spacing()` applies greedy
+  minimum-distance spacing over an ordered chromosome. Somalier v0.3.4 mode keeps input order for equal AF
   scores and selects X/Y without spacing; lexical ties and enforced X/Y spacing are
   opt-in. Nearby-variant exclusion runs in ordered position passes, and only
   qualifying sites are retained during the scan.
 
 - The GFFBase benchmark includes a registry-staged, parity-checked feature-database
   comparison using SQL over `read_gff`, with reproducible process and query measurements.
+
+# duckhts 1.5.2.9003
 
 - DuckHTS loads on DuckDB 2.0; SQL lambdas use the `lambda x:` syntax
   (DuckDB >= 1.3).
