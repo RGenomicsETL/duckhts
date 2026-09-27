@@ -61,3 +61,22 @@ FROM selected ORDER BY region, position;
 chr1	100	0
 chr1	120	1
 chr2	105	2
+
+# The candidate cap applies per chromosome list. Lists stored in a table reach the
+# scalar in one chunk: four 300,000-position lists exceed 1,000,000 together, but
+# each is within the cap (a per-chunk total rejected this).
+statement ok
+CREATE TABLE spacing_lists AS
+SELECT g, list(CAST(i + 1 AS UBIGINT) ORDER BY i) AS positions
+FROM range(4) t(g), range(300000) r(i) GROUP BY g;
+
+query II
+SELECT count(*), sum(len(duckhts_somalier_spacing(positions, 1::UBIGINT))) FROM spacing_lists;
+----
+4	1200000
+
+statement error
+SELECT duckhts_somalier_spacing(
+    list_transform(range(1000001), lambda i: CAST(i + 1 AS UBIGINT)), 1::UBIGINT);
+----
+at most 1000000 candidates per list

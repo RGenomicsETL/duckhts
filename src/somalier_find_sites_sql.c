@@ -45,9 +45,11 @@ static void spacing_scalar(duckdb_function_info info, duckdb_data_chunk input,
             distances[row] == 0u || list.offset > child_size ||
             list.length > child_size - list.offset ||
             list.length > FIND_SITES_MAX_CANDIDATES ||
-            list.length > FIND_SITES_MAX_CANDIDATES - total) {
+            list.length > (idx_t)-1 - total) {
+            /* The cap bounds one chromosome's list (its spacing hash); a chunk
+             * may hold many lists whose sum exceeds it. */
             duckdb_scalar_function_set_error(info,
-                "duckhts_somalier_spacing: require non-NULL positions, positive distance, and at most 1000000 candidates per chunk");
+                "duckhts_somalier_spacing: require non-NULL positions, positive distance, and at most 1000000 candidates per list");
             return;
         }
         for (idx_t i = 0u; i < list.length; i++) {
