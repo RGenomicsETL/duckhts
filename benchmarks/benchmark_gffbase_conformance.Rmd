@@ -79,7 +79,14 @@ human_gff <- strsplit(Sys.getenv("GFFBASE_HUMAN_GFF", unset = ""), ",", fixed = 
 human_gff <- human_gff[nzchar(human_gff)]
 human_gff <- normalizePath(human_gff, mustWork = FALSE)
 extension_path <- normalizePath(file.path(repo_root, "build", "release", "duckhts.duckdb_extension"), mustWork = TRUE)
+python_bin <- Sys.getenv("GFFBASE_FEATUREDB_PYTHON", unset = "python3")
+# Same format as the script's metadata: interpreter|Python version|DuckDB version.
+python_runtime <- system2(python_bin, c("-c", shQuote(paste0(
+  "import os, sys, platform, duckdb; ",
+  "print(f'{os.path.abspath(sys.executable)}|{platform.python_version()}|{duckdb.__version__}')"))),
+  stdout = TRUE)
 current_identity <- list(
+  python_runtime = python_runtime,
   duckhts_extension = extension_path,
   duckhts_extension_md5 = unname(tools::md5sum(extension_path)),
   # The script's hash, not the git revision: committing rendered results must
@@ -93,7 +100,8 @@ current_identity <- list(
 needs_run <- force || !file.exists(audit_csv) || !file.exists(conformance_csv) || !file.exists(performance_csv) || !file.exists(metadata_json)
 if (!needs_run && file.exists(metadata_json)) {
   old_meta <- tryCatch(jsonlite::fromJSON(metadata_json), error = function(error) list())
-  identity_matches <- identical(as.character(old_meta$duckhts_extension), current_identity$duckhts_extension) &&
+  identity_matches <- identical(as.character(old_meta$python_runtime), current_identity$python_runtime) &&
+    identical(as.character(old_meta$duckhts_extension), current_identity$duckhts_extension) &&
     identical(as.character(old_meta$duckhts_extension_md5), current_identity$duckhts_extension_md5) &&
     identical(as.character(old_meta$benchmark_script_md5), current_identity$benchmark_script_md5) &&
     startsWith(as.character(old_meta$gffbase_site), current_identity$gffbase_site) &&
@@ -119,7 +127,7 @@ if (needs_run) {
   if (include_create_db) cmd <- c(cmd, "--include-create-db")
 
   pythonpath <- Sys.getenv("PYTHONPATH", unset = "")
-  out <- system2(Sys.getenv("GFFBASE_FEATUREDB_PYTHON", unset = "python3"), cmd, stdout = TRUE, stderr = TRUE, env = c(sprintf("PYTHONPATH=%s", pythonpath)))
+  out <- system2(python_bin, cmd, stdout = TRUE, stderr = TRUE, env = c(sprintf("PYTHONPATH=%s", pythonpath)))
   status <- attr(out, "status")
   if (!is.null(status) && status != 0) {
     stop(paste(out, collapse = "\n"))
