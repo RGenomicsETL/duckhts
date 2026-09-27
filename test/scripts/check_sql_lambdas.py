@@ -43,28 +43,35 @@ def deprecated_lambdas(source):
             yield source.count("\n", 0, start) + 1, match.group()
 
 
-# Scripts (R, Rmd, Python, shell, JavaScript, HTML, SQL) carry SQL in string
-# literals, and their prose also uses arrows ("history -> {path}", comments). There
-# only string literals are scanned, and only an arrow in argument position (after
-# "(" or ",") counts, which is where a lambda parameter always sits.
-SCRIPT_SUFFIXES = {".R", ".Rmd", ".py", ".sql", ".sh", ".js", ".mjs", ".html"}
-SCRIPT_STRING = re.compile(r'"(?:\\.|[^"\\])*"', re.S)
-SQL_CHUNK = re.compile(r"^```\{sql[^}]*\}\n(.*?)^```", re.S | re.M)
+# Scripts and SQL tests embed SQL in every string form their language has (single,
+# double and triple quotes, R raw strings, JavaScript templates, sqllogictest
+# records). Rather than parse each form, scan all text outside comments and flag
+# only an arrow in argument position (right after "(" or ","), which is where a
+# lambda parameter always sits; prose such as "history -> {path}" never does.
+SCRIPT_SUFFIXES = {".R", ".Rmd", ".py", ".sql", ".sh", ".js", ".mjs", ".html", ".test"}
+HASH_COMMENTS = {".R", ".Rmd", ".py", ".sh", ".test"}
 ARGUMENT_LAMBDA = re.compile(
     r"[(,]\s*((?:[A-Za-z_]\w*|\(\s*[A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*\s*\))\s*->)")
 EXCLUDED = ("third_party/", "r/Rduckhts/inst/duckhts_extension/", "test/scripts/check_sql_lambdas.py")
 
 
+def strip_comments(source, suffix):
+    lines = []
+    for line in source.split("\n"):
+        if suffix in HASH_COMMENTS:
+            line = "" if line.lstrip().startswith("#") else re.sub(r"\s#\s.*$", "", line)
+        if suffix in (".sql", ".test"):
+            line = re.sub(r"--.*$", "", line)
+        if suffix in (".js", ".mjs", ".html"):
+            line = re.sub(r"(^|\s)//.*$", "", line)
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def script_lambdas(source, suffix):
-    if suffix == ".sql":
-        texts = [(0, source)]
-    else:
-        texts = [(m.start(), m.group()) for m in SCRIPT_STRING.finditer(source)]
-        if suffix == ".Rmd":
-            texts += [(m.start(1), m.group(1)) for m in SQL_CHUNK.finditer(source)]
-    for start, text in texts:
-        for match in ARGUMENT_LAMBDA.finditer(SQL_STRING.sub("''", text)):
-            yield source.count("\n", 0, start) + 1, match.group(1)
+    text = strip_comments(source, suffix)
+    for match in ARGUMENT_LAMBDA.finditer(text):
+        yield text.count("\n", 0, match.start()) + 1, match.group(1)
 
 
 def main():
@@ -81,10 +88,14 @@ def main():
     assert not list(deprecated_lambdas('"\'a -> b\'" "lambda x: x + 1"'))
 
     assert [e for _, e in script_lambdas('q <- "SELECT list_transform(xs,x->x)"', ".R")] == ["x->"]
-    assert [e for _, e in script_lambdas('"list_reduce(xs, (a, b) -> a + b)"', ".py")] == ["(a, b) ->"]
-    assert not list(script_lambdas('cat(glue("history -> {path}")) # empty -> NULL', ".R"))
+    assert [e for _, e in script_lambdas("q <- 'SELECT list_transform(xs, x -> x)'", ".R")] == ["x ->"]
+    assert [e for _, e in script_lambdas("q = '''SELECT list_filter(xs, (x) -> x > 1)'''", ".py")] == ["(x) ->"]
+    assert [e for _, e in script_lambdas("q = `SELECT list_reduce(xs, (a, b) -> a + b)`;", ".mjs")] == ["(a, b) ->"]
     assert [e for _, e in script_lambdas('```{sql}\nSELECT list_filter(xs, x -> x > 1);\n```\n', ".Rmd")] == ["x ->"]
     assert [e for _, e in script_lambdas("SELECT list_filter(xs, x -> x > 1);", ".sql")] == ["x ->"]
+    assert [e for _, e in script_lambdas("query I\nSELECT list_transform([1], x -> x);\n----\n[1]\n", ".test")] == ["x ->"]
+    assert not list(script_lambdas('cat(glue("history -> {path}"))\n# empty, a -> b\nx <- 1  # A,M -> NULL', ".R"))
+    assert not list(script_lambdas("-- list_transform(xs, x -> x)\n# (x) -> y", ".test"))
 
     repo = Path(__file__).resolve().parents[2]
     findings = [
