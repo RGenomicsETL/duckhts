@@ -5,14 +5,17 @@
 \title{Stage the pinned GFFBase Python package for conformance benchmarks.}
 \usage{
 duckhts_bench_stage_gffbase(
-  site_dir = duckhts_bench_artifact_path("gffbase_010"),
-  python = Sys.which("python3")
+  site_dir = duckhts_bench_artifact_path(artifact_id),
+  python = Sys.which("python3"),
+  artifact_id = "gffbase_010"
 )
 }
 \arguments{
 \item{site_dir}{Python target directory, defaulting to its registry cache path.}
 
 \item{python}{Path to Python.}
+
+\item{artifact_id}{Registry ID for the pinned Python package.}
 }
 \value{
 The staged Python site directory, invisibly.

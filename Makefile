@@ -612,9 +612,10 @@ GFFBASE_FEATUREDB_MANE_PASSES ?= 3
 GFFBASE_FEATUREDB_GENCODE_PASSES ?= 1
 
 bench-gffbase-featuredb: stage-gffbase
-	@site="$$(DUCKHTS_ROOT="$(PROJ_DIR)" GFFBASE_FEATUREDB_PYTHON="$(GFFBASE_FEATUREDB_PYTHON)" \
-		Rscript r/duckhtsbench/scripts/stage_gffbase_featuredb.R | tail -n 1)"; \
-		site="$${site#GFFBASE_FEATUREDB_SITE=}"; \
+	@stage="$$(DUCKHTS_ROOT="$(PROJ_DIR)" GFFBASE_FEATUREDB_PYTHON="$(GFFBASE_FEATUREDB_PYTHON)" \
+		Rscript r/duckhtsbench/scripts/stage_gffbase_featuredb.R)" || exit 1; \
+		site="$${stage##*GFFBASE_FEATUREDB_SITE=}"; \
+		test -d "$$site" || { echo "GFFBase staging did not return a site directory" >&2; exit 1; }; \
 		PYTHONPATH="$$site:$${PYTHONPATH:-}" "$(GFFBASE_FEATUREDB_PYTHON)" \
 			scripts/gffbase_featuredb_benchmark.py \
 			--extension "$(PROJ_DIR)build/release/duckhts.duckdb_extension" \

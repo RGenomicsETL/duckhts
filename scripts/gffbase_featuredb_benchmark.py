@@ -21,7 +21,10 @@ import gffbase
 ROOT = Path(__file__).resolve().parent.parent
 REGISTRY = ROOT / "r/duckhtsbench/inst/benchmark_registry.tsv"
 SQL = ROOT / "scripts/gffbase_featuredb.sql"
-FIELDS = ("anchor", "descendant_id", "seqid", "featuretype", "start", "end", "depth")
+FIELDS = ("anchor", "descendant_id", "seqid", "source", "featuretype", "start",
+          "end", "score", "strand", "frame", "file_order", "depth")
+PARITY_KEYS = ("features", "anchors", "windows", "anchors_sha256", "windows_sha256",
+               "descendants", "descendants_sha256", "region_hits", "region_sha256")
 
 
 def digest_rows(table):
@@ -84,8 +87,10 @@ def worker(engine, input_path, database, extension, threads, limit):
     if engine == "DuckHTS":
         db.execute("CREATE TEMP TABLE anchors AS SELECT unnest($1::VARCHAR[]) AS id", [anchors])
         descendants = db.execute("""
-            SELECT a.id AS anchor, f.id AS descendant_id, f.seqid, f.featuretype,
-                   f.start, f."end", c.level AS depth
+            SELECT a.id AS anchor, f.id AS descendant_id, f.seqid, f.source,
+                   f.featuretype, f.start, f."end",
+                   coalesce(cast(f.score AS VARCHAR), '.') AS score,
+                   f.strand, f.frame, f.rid AS file_order, c.level AS depth
             FROM anchors a JOIN closure c ON c.ancestor = a.id
             JOIN features f ON f.id = c.descendant
         """).fetch_arrow_table()
@@ -96,12 +101,12 @@ def worker(engine, input_path, database, extension, threads, limit):
 
     started = time.perf_counter()
     if engine == "DuckHTS":
-        hits = [db.execute(
-            'SELECT count(*) FROM features WHERE seqid = ? AND start <= ? AND "end" >= ?',
-            [seqid, end, start]).fetchone()[0] for seqid, start, end in regions]
+        region_ids = [[row[0] for row in db.execute(
+            'SELECT id FROM features WHERE seqid = ? AND start <= ? AND "end" >= ? ORDER BY id',
+            [seqid, end, start]).fetchall()] for seqid, start, end in regions]
     else:
-        hits = [sum(1 for _ in db.region(seqid=seqid, start=start, end=end))
-                for seqid, start, end in regions]
+        region_ids = [sorted(feature.id for feature in db.region(
+            seqid=seqid, start=start, end=end)) for seqid, start, end in regions]
     region_s = time.perf_counter() - started
     output = {
         "features": db.execute("SELECT count(*) FROM features").fetchone()[0],
@@ -109,8 +114,8 @@ def worker(engine, input_path, database, extension, threads, limit):
         "anchors_sha256": hashlib.sha256(json.dumps(anchors).encode()).hexdigest(),
         "windows_sha256": hashlib.sha256(json.dumps(regions).encode()).hexdigest(),
         "descendants": count, "descendants_sha256": keyed_digest,
-        "region_hits": sum(hits),
-        "region_sha256": hashlib.sha256(json.dumps(hits).encode()).hexdigest(),
+        "region_hits": sum(map(len, region_ids)),
+        "region_sha256": hashlib.sha256(json.dumps(region_ids).encode()).hexdigest(),
         "build_s": build_s, "descendant_s": descendant_s, "region_s": region_s,
     }
     db.close()
@@ -181,12 +186,11 @@ def main():
                     results[engine] = result
                     database.unlink()
                 duck, base = results["DuckHTS"], results["gffbase"]
-                keys = ("features", "anchors", "windows", "anchors_sha256", "windows_sha256", "descendants",
-                        "descendants_sha256", "region_hits", "region_sha256")
-                if any(duck[key] != base[key] for key in keys):
+                disagreements = {key: [duck[key], base[key]] for key in PARITY_KEYS
+                                 if duck[key] != base[key]}
+                if disagreements:
                     raise ValueError(f"parity failure for {artifact} pass {pass_number}: "
-                                     + json.dumps({key: [duck[key], base[key]] for key in keys
-                                                   if duck[key] != base[key]}))
+                                     + json.dumps(disagreements))
                 checks.append(dict(dataset=artifact, pass_number=pass_number,
                                    features=duck["features"], anchors=duck["anchors"],
                                    windows=duck["windows"], descendants=duck["descendants"],
@@ -202,7 +206,9 @@ def main():
                                         gffbase_version=gffbase.__version__,
                                         duckhts_memory_limit=args.limit,
                                         gffbase_memory_cap="45G" if artifact == "gencode_v49_basic_gff3" else "none",
-                                        validation="not run", **{key: result[key] for key in (
+                                        validation="not run",
+                                        **{key: result[key] for key in PARITY_KEYS},
+                                        **{key: result[key] for key in (
                                             "build_s", "wall_s", "peak_rss_kb", "db_bytes",
                                             "descendant_s", "region_s")}))
                 print(f"{artifact} pass {pass_number}/{passes}: parity PASS", flush=True)
@@ -210,7 +216,7 @@ def main():
     for filename, rows in (("gffbase_featuredb_parity.csv", checks),
                            ("gffbase_featuredb_timings.csv", timings)):
         with (args.out_dir / filename).open("w", newline="") as output:
-            writer = csv.DictWriter(output, fieldnames=list(rows[0]))
+            writer = csv.DictWriter(output, fieldnames=list(rows[0]), lineterminator="\n")
             writer.writeheader()
             writer.writerows(rows)
 

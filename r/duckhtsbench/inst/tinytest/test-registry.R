@@ -282,7 +282,8 @@ for (id in c("mane_v15_ensembl_gff3", "gencode_v49_basic_gff3")) {
   expect_true(file.exists(paste0(staged, ".provenance.tsv")))
 }
 featuredb_site <- duckhts_bench_stage_gffbase(
-  file.path(tmp, "featuredb-site"), python, "gffbase_021")
+  python = python, artifact_id = "gffbase_021")
+expect_equal(featuredb_site, duckhts_bench_artifact_path("gffbase_021"))
 expect_true(dir.exists(file.path(featuredb_site, "gffbase")))
 expect_true(any(grepl("version\\t0.2.1", readLines(file.path(featuredb_site, "provenance.tsv")))))
 if (is.na(old_registry)) Sys.unsetenv("DUCKHTSBENCH_REGISTRY") else Sys.setenv(DUCKHTSBENCH_REGISTRY = old_registry)
