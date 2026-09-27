@@ -43,7 +43,7 @@ matched[, freq := fifelse(`_REV_`, 1 - freq, freq)]
 message("bigsnpr matched: ", nrow(matched), "; reversed: ",
         sum(matched$`_REV_`), "; flipped: ", sum(matched$`_FLIP_`))
 stopifnot(nrow(matched) > 1000L)
-# Published upstream result includes sites that our declared SNV policy excludes.
+# Compare on unique, unambiguous SNVs with finite observed frequency.
 start <- proc.time()[["elapsed"]]
 upstream <- bigsnpr::snp_ancestry_summary(
   matched$freq, ref[matched$`_NUM_ID_`, -(1:5), with = FALSE],

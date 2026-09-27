@@ -1,4 +1,4 @@
-# GRCh38 1000 Genomes chr22 genotype parity against bigsnpr 1.12.21.
+# GRCh37 phase-3 chr22 genotype parity against bigsnpr 1.12.21.
 # Run from the repository root with bcftools, Rduckhts, bigsnpr and duckhtsbench.
 library(data.table)
 library(DBI)
