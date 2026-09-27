@@ -265,8 +265,8 @@ bool duckvep_register_phase_call(duckhts_registration_t *registration) {
     const char *sql[] = {
         "CREATE OR REPLACE MACRO duckvep_phase_call(alleles, phase_before, ",
         "phase_set := NULL, phase_policy := 'strict') AS ",
-        "_duckvep_phase_call(list_transform(alleles, a -> CAST(a AS INTEGER)), ",
-        "list_transform(phase_before, p -> CAST(p AS BOOLEAN)), ",
+        "_duckvep_phase_call(list_transform(alleles, lambda a: CAST(a AS INTEGER)), ",
+        "list_transform(phase_before, lambda p: CAST(p AS BOOLEAN)), ",
         "CAST(phase_set AS BIGINT), CAST(phase_policy AS VARCHAR))"
     };
     return duckhts_register_sql_parts(registration, sql, sizeof(sql) / sizeof(sql[0]));

@@ -2111,7 +2111,7 @@ local({
       "200::UBIGINT AS cds_start,",
       "(repeat('N', %d) || substring(decode(cds_sequence),32))::BLOB AS cds_sequence,",
       "(decode(pre_cds_sequence) || substring(decode(cds_sequence),1,31))::BLOB AS pre_cds_sequence,",
-      "list_transform(exons, e -> struct_pack(exon_start := e.exon_start, exon_end := e.exon_end,",
+      "list_transform(exons, lambda e: struct_pack(exon_start := e.exon_start, exon_end := e.exon_end,",
       "exon_cdna_start := e.exon_cdna_start, exon_cdna_end := e.exon_cdna_end,",
       "phase := CASE WHEN e.exon_cdna_start=1 THEN -1::TINYINT ELSE %d::TINYINT END,",
       "end_phase := e.end_phase)) AS exons) FROM duckvep_r_projection_model"

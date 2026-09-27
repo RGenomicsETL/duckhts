@@ -176,13 +176,13 @@ SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff
 at most 1024 bytes
 
 statement error
-SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := list_transform(range(257), x -> 'key' || x));
+SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := list_transform(range(257), lambda x: 'key' || x));
 ----
 at most 256 keys
 
 # Maximum admitted key count with reordered projections.
 query I
-SELECT count(key0) + count(key255) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := list_transform(range(256), x -> 'key' || x));
+SELECT count(key0) + count(key255) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := list_transform(range(256), lambda x: 'key' || x));
 ----
 0
 
@@ -218,7 +218,7 @@ SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_many_contigs.
 0
 
 statement ok
-CREATE TABLE many_regions AS SELECT seqname, start, "end", ID, Parent, transcript_type, gene_type FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_many_contigs.gff.gz', region := array_to_string(list_transform(range(1, 10001), x -> 'contig' || lpad(x::VARCHAR, 5, '0') || ':1-100'), ','), attributes := ['Parent','ID','transcript_type','gene_type']);
+CREATE TABLE many_regions AS SELECT seqname, start, "end", ID, Parent, transcript_type, gene_type FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_many_contigs.gff.gz', region := array_to_string(list_transform(range(1, 10001), lambda x: 'contig' || lpad(x::VARCHAR, 5, '0') || ':1-100'), ','), attributes := ['Parent','ID','transcript_type','gene_type']);
 
 query I
 SELECT count(*) FROM many_regions;

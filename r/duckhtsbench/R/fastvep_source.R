@@ -111,7 +111,7 @@ duckhts_bench_stage_fastvep_source_map <- function(repo, extension,
   DBI::dbExecute(con, paste("SET temp_directory =", q(file.path(staging, "spill"))))
   counts <- DBI::dbGetQuery(con, paste0("SELECT count(*)::VARCHAR AS records,
     sum(len(ALT))::VARCHAR AS alleles,
-    sum(len(list_filter(ALT, a -> regexp_full_match(REF, '[ACGTNacgtn]+')
+    sum(len(list_filter(ALT, lambda a: regexp_full_match(REF, '[ACGTNacgtn]+')
       AND regexp_full_match(a, '[ACGTNacgtn]+') AND upper(REF) <> upper(a))))::VARCHAR
       AS eligible_alleles FROM read_bcf(", q(input),
     ", scan_mode := 'sequential', decompression_threads := 0)"))

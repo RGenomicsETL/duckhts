@@ -402,7 +402,7 @@ static int raw_prepare(haplotype_state_t *s, const haplotype_bind_t *b,
         "FROM __duckvep_haplotype_raw GROUP BY event_index,sample_index), "
         "calls AS MATERIALIZED (SELECT *, count(*) OVER(PARTITION BY event_index,transcript_index,sample_index) copies, "
         "CASE WHEN alternates IS NULL OR len(alternates)>2147483647 OR "
-        "len(list_filter(alternates,a -> a IS NULL OR len(a)=0 OR len(a)>65535))>0 "
+        "len(list_filter(alternates,lambda a: a IS NULL OR len(a)=0 OR len(a)>65535))>0 "
         "THEN error('duckvep_haplotypes: invalid source ALT list') ELSE len(alternates) END alt_count "
         "FROM __duckvep_haplotype_raw JOIN ordered USING(event_index)), "
         "parsed AS MATERIALIZED (SELECT *, _duckvep_raw_gt(gt,alt_count::UINTEGER) raw_gt FROM calls), "
@@ -449,7 +449,7 @@ static int input_open(haplotype_state_t *s, const haplotype_bind_t *b, char *err
     const char *middle =
         ") source), calls AS MATERIALIZED (SELECT *, "
         "list_contains(list_transform(duckvep_phase_call(alleles,phase_before,phase_set := phase_set), "
-        "a -> a.phase_scope), 'phase_set') scoped FROM raw), domains AS (SELECT transcript_index, sample_index, ";
+        "lambda a: a.phase_scope), 'phase_set') scoped FROM raw), domains AS (SELECT transcript_index, sample_index, ";
     const char *domain = b->policy == DUCKVEP_PHASE_STRICT ?
         "coalesce(list(DISTINCT phase_set ORDER BY phase_set NULLS FIRST) FILTER(WHERE scoped), [NULL]::BIGINT[]) AS domain_sets " :
         "[NULL]::BIGINT[] AS domain_sets ";

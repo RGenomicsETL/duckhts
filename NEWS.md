@@ -1,5 +1,10 @@
 # DuckHTS Extension News
 
+# duckhts 1.5.2.9003
+
+- DuckHTS loads on DuckDB 2.0; SQL lambdas use the `lambda x:` syntax
+  (DuckDB >= 1.3).
+
 # duckhts 1.5.2.9002
 
 - Licences are declared consistently: the DuckDB extension is MIT (top-level `LICENSE`),

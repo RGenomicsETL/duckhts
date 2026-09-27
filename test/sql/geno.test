@@ -642,7 +642,7 @@ FROM read_geno('__WORKING_DIRECTORY__/test/data/tidy_chunk_boundary.vcf');
 1	2053	2052
 
 query II
-SELECT len(calls),len(list_filter(calls,c -> c.raw_gt = '0/1'))
+SELECT len(calls),len(list_filter(calls,lambda c: c.raw_gt = '0/1'))
 FROM read_geno('__WORKING_DIRECTORY__/test/data/tidy_chunk_boundary.vcf', raw_gt := true);
 ----
 2053	2053

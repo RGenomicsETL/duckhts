@@ -1,3 +1,8 @@
+# Rduckhts 1.5.2.9003-0.1.5
+
+- The bundled DuckHTS extension loads on DuckDB 2.0; SQL lambdas use the
+  `lambda x:` syntax (DuckDB >= 1.3).
+
 # Rduckhts 1.5.2.9002-0.1.5
 
 - The package is licensed GPL (>= 2) (previously declared GPL-3 while shipping an MIT
