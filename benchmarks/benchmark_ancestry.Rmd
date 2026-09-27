@@ -1,0 +1,91 @@
+---
+title: "Ancestry relational projection: synthetic site scaling"
+output: md_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+library(DBI)
+library(Rduckhts)
+library(duckhtsbench)
+repo <- normalizePath("..")
+source_revision <- system2("git", c("-C", shQuote(repo), "rev-parse", "HEAD"), stdout = TRUE)
+registry <- file.path(repo, "r/duckhtsbench/inst/benchmark_registry.tsv")
+cache <- tempfile("duckhts-ancestry-benchmark-")
+dir.create(cache)
+Sys.setenv(DUCKHTSBENCH_REGISTRY = registry, DUCKHTS_CACHE_DIR = cache)
+correction_file <- duckhts_bench_stage_repository_fixtures(repo, "ancestry-projection")[["ancestry_correction"]]
+con <- rduckhts_connect()
+dbExecute(con, "SET threads=4")
+dbExecute(con, paste(
+  "CREATE TABLE bench_ancestry_ref AS SELECT 'chr1' AS chromosome,",
+  "(100000+i)::INTEGER AS position, 'A' AS allele_a, 'G' AS allele_b,",
+  "g.group_id, CASE WHEN g.group_id='A' THEN 0.25 + 0.16*sin(i*0.017)",
+  "ELSE 0.68 + 0.12*cos(i*0.019) END AS frequency",
+  "FROM range(17000) t(i), (VALUES ('A'),('B')) g(group_id)"
+))
+dbExecute(con, paste(
+  "CREATE TABLE bench_ancestry_pc AS SELECT DISTINCT chromosome, position, allele_a, allele_b,",
+  "pc, CASE WHEN pc=1 THEN sin(position*0.031) ELSE cos(position*0.027) END AS loading",
+  "FROM bench_ancestry_ref, (VALUES (1),(2)) t(pc)"
+))
+dbExecute(con, sprintf(
+  "CREATE TABLE bench_ancestry_correction AS SELECT pc::INTEGER AS pc, coefficient::DOUBLE AS coefficient FROM read_csv_auto(%s, delim='\\t', header=true) WHERE pc<=2",
+  as.character(dbQuoteString(con, correction_file))
+))
+dbExecute(con, paste(
+  "CREATE TABLE bench_ancestry_input AS SELECT sample_id, chromosome, position, allele_a, allele_b,",
+  "sum(CASE WHEN group_id='A' THEN a_share ELSE 1-a_share END * frequency)",
+  "+ 0.002*sin(position * sample_number) AS frequency",
+  "FROM bench_ancestry_ref, (VALUES ('S1',0.7,1),('S2',0.4,2),('S3',0.1,3))",
+  "s(sample_id,a_share,sample_number)",
+  "GROUP BY sample_id, sample_number, chromosome, position, allele_a, allele_b"
+))
+peak_rss_mb <- function() {
+  status <- grep("^VmHWM:", readLines("/proc/self/status"), value = TRUE)
+  as.numeric(strsplit(trimws(status), "[[:space:]]+")[[1L]][[2L]]) / 1024
+}
+baseline_rss_mb <- peak_rss_mb()
+run_sites <- function(n, repeat_id) {
+  dbExecute(con, sprintf("CREATE OR REPLACE TEMP VIEW bench_ancestry_slice AS SELECT * FROM bench_ancestry_input WHERE position < %d", 100000 + n))
+  start <- proc.time()[["elapsed"]]
+  out <- rduckhts_ancestry_proportions(
+    con, "bench_ancestry_slice", "bench_ancestry_ref", "bench_ancestry_pc",
+    "bench_ancestry_correction", min_cor = 0.4
+  )
+  elapsed <- proc.time()[["elapsed"]] - start
+  stopifnot(nrow(out) == 6L, all(out$used_variants == n))
+  data.frame(samples = 3L, variants_per_sample = n, input_rows = 3L*n,
+             output_group_rows = nrow(out), groups = 2L, pcs = 2L,
+             threads = 4L, repeat_id = repeat_id, elapsed_seconds = elapsed,
+             process_peak_rss_mb = peak_rss_mb(),
+             failures = paste(unique(out$status[out$status != "ok"]), collapse = ";"))
+}
+invisible(run_sites(1000L, 0L))
+results <- do.call(rbind, lapply(c(1000L, 5000L, 17000L), function(n) {
+  do.call(rbind, lapply(seq_len(3L), function(rep) run_sites(n, rep)))
+}))
+```
+
+Revision: `r source_revision`. Workload: deterministic biallelic synthetic
+reference frequencies and PC loadings; three independently perturbed samples;
+4 DuckDB threads; two reference groups; two PCs; `min_cor = 0.4`. Each variant
+is present in both groups and PCs, and every input row matches. This report
+measures query and materialization together, not the 850 MB Figshare products.
+
+The correction vector is staged from the committed, checksummed bigsnpr vignette
+product. `VmHWM` is cumulative process high-water RSS (MiB), including package
+loading and all preceding cases; the baseline before the first run was
+`r round(baseline_rss_mb, 1)` MiB. It is not per-query allocated memory.
+
+```{r results}
+knitr::kable(results, digits = 3)
+```
+
+Failed gates are retained in the `failures` column for each repeat. There is no
+identical previously rendered ancestry workload for a longitudinal comparison.
+
+```{r cleanup, include=FALSE}
+dbDisconnect(con, shutdown = TRUE)
+unlink(cache, recursive = TRUE)
+```
