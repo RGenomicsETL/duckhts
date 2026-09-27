@@ -1,5 +1,8 @@
 # Rduckhts 1.5.2.9003-0.1.5
 
+- The bundled Somalier VCF-count extraction uses less peak memory when a
+  source VCF is large relative to the selected panel.
+
 - The bundled DuckHTS extension loads on DuckDB 2.0; SQL lambdas use the
   `lambda x:` syntax (DuckDB >= 1.3).
 

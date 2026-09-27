@@ -2,6 +2,9 @@
 
 # duckhts 1.5.2.9003
 
+- Somalier VCF count extraction avoids materializing all decoded VCF records
+  before joining to a site panel, reducing peak buffer use for large sources.
+
 - The GFFBase benchmark includes a registry-staged, parity-checked feature-database
   comparison using SQL over `read_gff`, with reproducible process and query measurements.
 

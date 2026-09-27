@@ -99,7 +99,7 @@ bool register_duckhts_somalier_vcf_extract_sql(duckhts_registration_t *registrat
         "), __dht_panel AS MATERIALIZED ("
         "SELECT p.* FROM __dht_panel_raw p CROSS JOIN __dht_ad_header h "
         "CROSS JOIN __dht_panel_identity i WHERE h.valid AND i.panel_sha256 IS NOT NULL",
-        "), __dht_source_records AS MATERIALIZED ("
+        "), __dht_source_records AS ("
         "SELECT record_index, CAST(CHROM AS VARCHAR) AS source_region, "
         "CAST(POS AS UBIGINT) AS source_position, CAST(REF AS VARCHAR) AS source_ref, "
         "CAST(ALT AS VARCHAR[]) AS source_alt, CAST(FILTER AS VARCHAR[]) AS source_filter, "
