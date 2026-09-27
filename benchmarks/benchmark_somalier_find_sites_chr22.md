@@ -23,7 +23,7 @@ The cache VCF is not committed.
 | Spacing       | Greedy autosomal distance 10,000 by default; X/Y selections do not update spacing state                                       | `sex_spacing = "enforced"` applies X distance 1,000 and Y distance 200 |
 | Caps          | Up to 65,535 autosomal, 10,001 X, and 5,001 Y selections after ranking                                                        | Named per-sex maximum arguments                                        |
 
-- Source revision: 99d2f4438e52fae5d47c9e3e0b523408a9f67a5b. Workload:
+- Source revision: 70ef384cc023350b7e10bfd01881ca9f26417498. Workload:
   `--min-AN 6000`, `--snp-dist 10000`, minimum AF 0.15, AF target 0.48,
   no interval or gnotate exclusion. One run per tool, warm filesystem
   cache, GNU `/usr/bin/time -v`.
@@ -66,7 +66,7 @@ candidate count.
 | tool            | wall_seconds | peak_rss_kib |
 |:----------------|-------------:|-------------:|
 | Somalier v0.3.4 |         6.07 |       108912 |
-| DuckHTS         |        11.08 |       452576 |
+| DuckHTS         |        11.10 |       210996 |
 
 Wall seconds and peak RSS KiB for each timed process, including its own
 initialization and I/O. Single runs are not a variance estimate.
@@ -103,7 +103,7 @@ variants” for this X-only input; the actual compressed output VCF, not
 that autosomal-only log counter, is used for the selected-site
 denominator and keyed comparison.
 
-- Source revision: 99d2f4438e52fae5d47c9e3e0b523408a9f67a5b.
+- Source revision: 70ef384cc023350b7e10bfd01881ca9f26417498.
 - Denominators: 2,858,184 input records; 250,641 Somalier candidates and
   250,641 DuckHTS gated candidates; 234,367 spacing inputs (below the
   1,000,000 limit).
@@ -134,7 +134,7 @@ executable.
 | tool            | wall_seconds | peak_rss_kib |
 |:----------------|-------------:|-------------:|
 | Somalier v0.3.4 |        15.51 |       436696 |
-| DuckHTS         |        23.25 |      1226680 |
+| DuckHTS         |        22.90 |       562144 |
 
 chrX whole-process wall seconds and peak RSS KiB; thread and measurement
 caveats above also apply.
@@ -204,8 +204,8 @@ transfer to `selection_seconds`, but excludes the input cache checksum.
 Somalier’s CLI process includes its own startup and VCF writer; these
 distinct scopes are reported, not treated as a controlled throughput
 ratio. Values are single runs, not variance estimates. The official
-one-thread `select` workflow *includes* cache verification and took
-11.08 s on chr22 and 23.25 s on chrX. Isolated warm-cache
+one-thread `select` workflow *includes* cache verification and took 11.1
+s on chr22 and 22.9 s on chrX. Isolated warm-cache
 `duckhts_bench_fetch()` calls took 0.285 s and 1.440 s, respectively; R
 and library startup added about 0.3 s and opening a DuckDB connection
 about 0.04 s. All 2,402 chr22 and 10,001 chrX keys also agree between
@@ -225,12 +225,56 @@ seconds and peak process RSS KiB. NA: Somalier has no separate
 in-process SQL selection timing.
 
 The ordered position passes reduce the chrX selection query from 219.640
-s to 21.276 s at one thread. At three active workers, DuckHTS takes
-13.81 s versus Somalier’s 15.51 s; peak RSS remains about 1.25 GB rather
-than 0.44 GB. `READ_BCF` and its necessary projected INFO fields now
-dominate the single-thread wall time. Reducing this memory or decode
-cost would require reader-level filtering or a different candidate
-representation, not another change to the nearby-variant join.
+s to approximately 21 s at one thread. The initial ordered query
+(revision `dd87028e0c33b9b0ed807e71a6aeeed7a3eec764`) still materializes
+the full source and eligible relations. The filtered query materializes
+only records contributing an indel inventory, a nearby-SNP inventory, or
+an AF/AN-qualified site (code revision
+`70ef384cc023350b7e10bfd01881ca9f26417498`). Indel and SNP inventory
+relations hold only chromosome, position and span/count data. Both
+queries use the same installed Rduckhts extension, source VCFs and
+pinned selection rules. The 14 diagnostic gate counts share one source
+scan; that diagnostic query retains the full source relation and is not
+included in this selection-only memory comparison.
+
+GNU time reports peak process RSS. DuckDB JSON profiling reports the
+query’s peak buffer-manager allocation, **not** total resident memory or
+a sample synchronized to peak RSS. After the query, `duckdb_memory()`
+reports zero buffer bytes for every row in this table. Each empty input
+keeps the reader schema (`WHERE false`) and measures R, DuckDB,
+extension startup and query planning in a fresh process. Net bytes per
+variant subtract the paired empty process RSS, then divide by the
+physical input records; bytes per candidate use the `gated` denominator
+(before the indel/SNP neighborhood passes). The inventories contain more
+records than `gated`, so the latter is not a complete allocation
+denominator. Times include JSON profiling, but exclude cache checksum
+and initial input staging. Single runs are not a variance estimate.
+
+| chromosome | phase  | decompression_workers | input_records | gated_candidates | selected_sites | baseline_rss_kib | peak_rss_kib | net_bytes_per_input_variant | net_bytes_per_candidate | query_peak_buffer_bytes | selection_seconds | process_seconds |
+|:-----------|:-------|----------------------:|--------------:|-----------------:|---------------:|-----------------:|-------------:|----------------------------:|------------------------:|------------------------:|------------------:|----------------:|
+| chr22      | before |                     0 |       1070401 |            40521 |           2402 |           134736 |       453344 |                         305 |                    8051 |               830177280 |            10.475 |           10.85 |
+| chr22      | before |                     2 |       1070401 |            40521 |           2402 |           135008 |       453552 |                         305 |                    8050 |               830160896 |             5.068 |            5.44 |
+| chrX       | before |                     0 |       2858184 |           250641 |          10001 |           134888 |      1225968 |                         391 |                    4458 |              2626232320 |            21.712 |           22.14 |
+| chrX       | before |                     2 |       2858184 |           250641 |          10001 |           134916 |      1225804 |                         391 |                    4457 |              2626179072 |            13.420 |           13.90 |
+| chr22      | after  |                     0 |       1070401 |            40521 |           2402 |           133920 |       210640 |                          73 |                    1939 |               196280320 |            10.395 |           10.77 |
+| chr22      | after  |                     2 |       1070401 |            40521 |           2402 |           133608 |       212312 |                          75 |                    1989 |               196288512 |             5.044 |            5.40 |
+| chrX       | after  |                     0 |       2858184 |           250641 |          10001 |           133872 |       560612 |                         153 |                    1743 |               878780416 |            20.945 |           21.32 |
+| chrX       | after  |                     2 |       2858184 |           250641 |          10001 |           133580 |       560992 |                         153 |                    1746 |               878739456 |            13.149 |           13.52 |
+
+Fresh-process selection and paired empty-input baseline. RSS in KiB;
+DuckDB peak buffer allocations in bytes.
+
+At three active workers, chrX RSS falls from 1,225,804 to 560,992 KiB
+and chr22 RSS from 453,552 to 212,312 KiB. The corresponding query times
+are 13.420 vs 13.149 seconds on chrX and 5.068 vs 5.044 seconds on
+chr22. The same physical chromosome inputs produce 10,001 and 2,402
+selected keys; one-worker and three-worker results are identical, with
+zero keyed disagreements against pinned Somalier. Memory is still
+bounded below by R, DuckDB and the extension (~134,000 KiB here); the
+retained candidate rows, indel/SNP inventories, reader decode buffers
+and downstream sorts contribute to the additional resident memory; these
+measurements do not isolate their shares. Predicate pushdown into
+`read_bcf()` is not part of this selection query.
 
 Reproduce from the repository root with installed `Rduckhts` and
 `duckhtsbench`, the pinned binary staged in `duckhtsbench`, and GNU
@@ -248,11 +292,24 @@ x_time_file="$(Rscript -e 'cat(file.path(dirname(duckhtsbench::duckhts_bench_art
 /usr/bin/time -v -o "$x_time_file" \
   Rscript test/scripts/somalier_find_sites_chromosome.R select "$PWD" chrX
 Rscript test/scripts/somalier_find_sites_chromosome.R compare "$PWD" chrX
-# Selection-only process timings exclude the cache checksum:
-for chrom in chr22 chrX; do
-  for decompression_workers in 0 2; do
-    /usr/bin/time -v Rscript scripts/benchmark_somalier_find_sites_profile.R \
-      "$chrom" "$decompression_workers"
+# Compare both query revisions using the same installed Rduckhts extension.
+old_query="$(mktemp)"
+trap 'rm -f "$old_query"' EXIT
+git show dd87028e:r/Rduckhts/R/somalier_find_sites.R > "$old_query"
+for phase in before after; do
+  if [ "$phase" = before ]; then
+    export DUCKHTS_FIND_SITES_SOURCE="$old_query"
+  else
+    export DUCKHTS_FIND_SITES_SOURCE="$PWD/r/Rduckhts/R/somalier_find_sites.R"
+  fi
+  for chrom in chr22 chrX; do
+    for decompression_workers in 0 2; do
+      for input in empty input; do
+        /usr/bin/time -f 'peak_rss_kib: %M process_seconds: %e' \
+          Rscript scripts/benchmark_somalier_find_sites_profile.R \
+            "$chrom" "$decompression_workers" "$input"
+      done
+    done
   done
 done
 cd benchmarks && Rscript -e "rmarkdown::render('benchmark_somalier_find_sites_chr22.Rmd')"
