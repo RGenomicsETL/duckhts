@@ -17,7 +17,9 @@
 #' not interpret contig names as human sex chromosomes. The result can include
 #' X/Y, whereas `duckhts_somalier_import_sites()` admits autosomes only;
 #' filter `region` for autosome-only consumers. Gnotate zip input is not
-#' supported: use an allele-specific exclusion relation.
+#' supported: use an allele-specific exclusion relation. `assembly` labels
+#' the input coordinates; this function does not run the liftover steps in
+#' Somalier's `scripts/find_sites.sh`.
 #'
 #' @param con A DuckDB connection with DuckHTS loaded.
 #' @param source_table A typed source table or view, including a view over read_bcf().
@@ -196,39 +198,45 @@ rduckhts_somalier_find_sites <- function(
     "snps AS MATERIALIZED (SELECT chrom, pos FROM eligible WHERE ",
     "len(ref) = 1 AND len(alts) = 1 AND len(alts[1]) = 1 AND ",
     "filters = ['PASS'] AND af > 0.01), ",
-    "gated AS MATERIALIZED (SELECT * FROM eligible s WHERE ",
+    "pass_snv AS (SELECT * FROM eligible WHERE ",
     "len(ref) = 1 AND len(alts) = 1 AND len(alts[1]) = 1 ",
     "AND ref IN ('A','C','G','T') AND alts[1] IN ('A','C','G','T') ",
-    "AND ref != alts[1] AND filters = ['PASS'] ",
-    "AND (an IS NULL OR sex != 'autosome' OR an >= ", min_an, ") ",
+    "AND ref != alts[1] AND filters = ['PASS']), ",
+    "af_an AS (SELECT * FROM pass_snv WHERE ",
+    "(an IS NULL OR sex != 'autosome' OR an >= ", min_an, ") ",
     "AND isfinite(af) AND ",
     "CAST(af AS DOUBLE) BETWEEN CASE WHEN sex = 'autosome' THEN ", af_literal,
     " ELSE 0.04 END AND CASE WHEN sex = 'autosome' THEN 1 - ",
-    af_literal, " ELSE 0.96 END ",
-    "AND (as_status IS NULL OR as_status = 'PASS') ",
+    af_literal, " ELSE 0.96 END), ",
+    "annotation_gate AS (SELECT * FROM af_an WHERE ",
+    "(as_status IS NULL OR as_status = 'PASS') ",
     "AND old_multiallelic IS NULL AND old_variant IS NULL ",
     "AND (sex = 'Y' OR NOT coalesce(segdup, false)) ",
-    "AND NOT coalesce(lcr, false) ",
-    "AND (sex != 'autosome' OR (",
+    "AND NOT coalesce(lcr, false)), ",
+    "qc_gate AS (SELECT * FROM annotation_gate WHERE ",
+    "sex != 'autosome' OR (",
     paste(sprintf("(%s IS NULL OR abs(%s) <= 2.4)",
                   c("BaseQRankSum", "MQRankSum", "ClippingRankSum",
                     "ReadPosRankSum", "FS"),
                   c("BaseQRankSum", "MQRankSum", "ClippingRankSum",
                     "ReadPosRankSum", "FS")), collapse = " AND "),
-    " AND (QD IS NULL OR abs(QD) >= 12) AND (MQ IS NULL OR MQ >= 50))) ",
-    "AND NOT EXISTS (SELECT 1 FROM excl e WHERE e.chrom = s.chrom ",
+    " AND (QD IS NULL OR abs(QD) >= 12) AND (MQ IS NULL OR MQ >= 50))), ",
+    "interval_gate AS (SELECT * FROM qc_gate s WHERE ",
+    "NOT EXISTS (SELECT 1 FROM excl e WHERE e.chrom = s.chrom ",
     "AND e.start < s.pos + 5 AND e.stop > greatest(0, s.pos - 6)) ",
     if (!is.null(intervals$include)) paste0(
       "AND EXISTS (SELECT 1 FROM incl i WHERE i.chrom = s.chrom ",
       "AND i.start < s.pos AND i.stop > s.pos - 1) "
     ) else "",
-    "AND (s.sex = 'X' OR NOT EXISTS (SELECT 1 FROM gno g WHERE ",
+    "), gated AS MATERIALIZED (SELECT * FROM interval_gate s WHERE ",
+    "s.sex = 'X' OR NOT EXISTS (SELECT 1 FROM gno g WHERE ",
     "g.chrom = s.chrom AND g.pos = s.pos AND g.ref = s.ref ",
-    "AND g.alt = s.alts[1]))), ",
-    "neighbors AS MATERIALIZED (SELECT * FROM gated s WHERE ",
+    "AND g.alt = s.alts[1])), ",
+    "indel_clear AS MATERIALIZED (SELECT * FROM gated s WHERE ",
     "NOT EXISTS (SELECT 1 FROM indels i WHERE i.chrom = s.chrom ",
-    "AND i.lo < s.pos + 1 AND i.hi > greatest(0, s.pos - 2)) ",
-    "AND (SELECT count(*) FROM snps n WHERE n.chrom = s.chrom ",
+    "AND i.lo < s.pos + 1 AND i.hi > greatest(0, s.pos - 2))), ",
+    "neighbors AS MATERIALIZED (SELECT * FROM indel_clear s WHERE ",
+    "(SELECT count(*) FROM snps n WHERE n.chrom = s.chrom ",
     "AND n.pos BETWEEN s.pos - 2 AND s.pos + 2) <= 1), ",
     "ranked AS MATERIALIZED (SELECT *, ",
     "abs(CAST(af AS DOUBLE) - CAST(", target, " AS DOUBLE)) AS selection_score, ",
@@ -246,8 +254,9 @@ rduckhts_somalier_find_sites <- function(
     "FROM kept) "
   )
   if (diagnostics) {
-    stages <- c("src", "eligible", "indels", "snps", "gated",
-                "neighbors", "kept")
+    stages <- c("src", "eligible", "pass_snv", "af_an",
+                "annotation_gate", "qc_gate", "interval_gate", "gated",
+                "indels", "snps", "indel_clear", "neighbors", "kept")
     counts <- paste0("SELECT '", stages, "' AS gate, count(*) AS records FROM ",
                      stages)
     counts <- c(counts, paste0(

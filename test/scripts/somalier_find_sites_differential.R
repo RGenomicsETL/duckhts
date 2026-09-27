@@ -53,9 +53,14 @@ run_differential <- function(root) {
     "CREATE TEMP VIEW input_variants AS SELECT * FROM read_bcf(%s, samples := '', scan_mode := 'sequential')",
     as.character(dbQuoteString(con, input))
   ))
-  parameters <- list(con, "input_variants", "GRCh37", 0.15, 6, "AF", "AN",
-    100, 0.48, list(include = NULL, exclude = NULL, gnotate = NULL),
-    "somalier_v0.3.4", 65535, 10001, 5001)
+  parameters <- list(
+    con = con, source = "input_variants", assembly = "GRCh37",
+    min_af = 0.15, min_an = 6, af_field = "AF", an_field = "AN",
+    snp_dist = 100, target_af = 0.48,
+    intervals = list(include = NULL, exclude = NULL, gnotate = NULL),
+    mode = "somalier_v0.3.4", max_autosomal = 65535,
+    max_x = 10001, max_y = 5001
+  )
   counts <- dbGetQuery(con, do.call(Rduckhts:::.somalier_find_sites_query,
     c(parameters, list(diagnostics = TRUE))))
   times <- numeric(5L)
@@ -90,8 +95,8 @@ run_differential <- function(root) {
     as.character(dbQuoteString(con, second))
   ))
   second_parameters <- parameters
-  second_parameters[[2L]] <- "gnomad_variants"
-  second_parameters[[5L]] <- 100L
+  second_parameters$source <- "gnomad_variants"
+  second_parameters$min_an <- 100L
   second_counts <- dbGetQuery(con, do.call(Rduckhts:::.somalier_find_sites_query,
     c(second_parameters, list(diagnostics = TRUE))))
   second_selected <- rduckhts_somalier_find_sites(con,

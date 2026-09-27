@@ -39,6 +39,12 @@ test_somalier_find_sites_selection <- function() {
   expect_equal(round(selected$population_b_af[2], 2), 0.75)
   expect_equal(selected$source_an[4], 99)
   expect_equal(selected$source_alt_af[1], 0.48, tolerance = 1e-6)
+  limited <- rduckhts_somalier_find_sites(
+    con, source_table = "population", assembly = "GRCh38", snp_dist = 20,
+    exclude_table = "region_exclude", include_table = "region_include",
+    max_autosomal = 1, max_x = 1, max_y = 1
+  )
+  expect_equal(limited$position, c(100, 2781480, 900))
   dbExecute(con, paste(
     "CREATE TEMP VIEW custom_fields AS SELECT *, INFO_AF AS INFO_POP_AF,",
     "INFO_AN AS INFO_POP_AN FROM population"

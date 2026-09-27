@@ -77,5 +77,7 @@ uppercase A/C/G/T biallelic SNVs enter the canonical panel. `generic` does
 not interpret contig names as human sex chromosomes. The result can include
 X/Y, whereas `duckhts_somalier_import_sites()` admits autosomes only;
 filter `region` for autosome-only consumers. Gnotate zip input is not
-supported: use an allele-specific exclusion relation.
+supported: use an allele-specific exclusion relation. `assembly` labels
+the input coordinates; this function does not run the liftover steps in
+Somalier's `scripts/find_sites.sh`.
 }
