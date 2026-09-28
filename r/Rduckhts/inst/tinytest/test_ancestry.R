@@ -36,6 +36,22 @@ test_ancestry_relations <- function() {
   expect_equal(null_panel$sites, 5)
   expect_equal(dbGetQuery(con, "SELECT position FROM ancestry_null_panel ORDER BY site_index")$position,
                101:105)
+  # Sites whose loadings are not finite, or whose frequencies fall outside [0, 1],
+  # are not selected.
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_bad_loading_pc AS SELECT * REPLACE ",
+    "(CASE WHEN position = 100 AND pc = 2 THEN NULL ",
+    "WHEN position = 101 AND pc = 1 THEN 'inf'::DOUBLE ELSE loading END AS loading) ",
+    "FROM ancestry_pc"))
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_bad_frequency_ref AS SELECT * REPLACE ",
+    "(CASE WHEN position = 102 AND group_id = 'B' THEN 1.2 ELSE frequency END ",
+    "AS frequency) FROM ancestry_ref"))
+  invalid_panel <- rduckhts_ancestry_panel(
+    con, "ancestry_bad_frequency_ref", "ancestry_bad_loading_pc", "ancestry_invalid_panel",
+    "GRCh38", spacing_bp = 1, max_sites = 5)
+  expect_equal(dbGetQuery(con, "SELECT position FROM ancestry_invalid_panel ORDER BY site_index")$position,
+               103:107)
   dbExecute(con, "CREATE TABLE ancestry_candidates AS SELECT region, position, allele_a, allele_b FROM ancestry_selected")
   matched_panel <- rduckhts_ancestry_panel(con, "ancestry_ref", "ancestry_pc",
                                            "ancestry_matched", "GRCh38",

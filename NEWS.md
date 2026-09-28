@@ -1,23 +1,28 @@
 # DuckHTS Extension News
 
+# duckhts 1.5.2.9005
+
+- `duckhts_ancestry_proportions()` estimates reference-group ancestry proportions by
+  bigsnpr's `snp_ancestry_summary` method. SQL aggregates the PC projections of matched
+  variants; the native solver applies a bounded nearest-positive-definite repair and the
+  constrained fit, invariant to uniform rescaling of the projections. The three-argument
+  call applies sum-to-one constraints. Coefficients keep full precision for the
+  correlation gates; for a fixed input, the returned seven-decimal proportions are
+  stable across calls and thread counts.
+
+- Ancestry inputs are allele frequencies from summary statistics, dense diploid
+  genotypes, or BAM/CRAM allele counts. Reference loci touching any input locus must be
+  unique; matched loci need finite loadings and frequencies in [0, 1]; positions are
+  positive whole numbers and PC identifiers are consecutive whole numbers. Every sample
+  returns a row for every reference group, with NULL proportions when no variant
+  matches. Group identifiers round-trip exactly.
+
+- The benchmark registry pins bigsnpr's reference frequencies and loadings, staged once
+  as a checksum-bound sorted Parquet product whose receipt certifies unique loci and
+  complete, in-range values, together with the epilepsy summary statistics and GRCh37
+  phase-3 chr22 genotypes used for parity with bigsnpr and 30x CRAM comparisons.
+
 # duckhts 1.5.2.9004
-
-- Ancestry long-reference group IDs remain distinct from PC loading columns;
-  output retains exact group spelling, including IDs resembling PC names.
-  Genotype ancestry validates the supplied sample-name mapping before estimation.
-  Ancestry input positions must be positive whole numbers; panel selection
-  requires non-null alleles in every reference group.
-
-- Ancestry genotype estimation requires an explicit dense `read_geno` declaration
-  (`non_reference_only = FALSE`); sparse call lists cannot supply zero dosages.
-  Reference PC ordinals must be exact consecutive whole numbers.
-
-- BAM/CRAM ancestry panels emit forward-strand reference alleles for complemented
-  candidate matches. Panel creation validates the SHA-256 before commit; an empty
-  panel leaves no destination and failed replacements preserve the existing table.
-
-- Ancestry reference group frequencies must be in [0, 1]; staged Parquet
-  products certify this range along with finite numeric values.
 
 - Somalier panel selection (`rduckhts_somalier_find_sites()`) selects sites from
   caller-visible population relations, including TEMP tables, with per-call filters
@@ -30,28 +35,6 @@
 
 - The GFFBase benchmark includes a registry-staged, parity-checked feature-database
   comparison using SQL over `read_gff`, with reproducible process and query measurements.
-
-- `duckhts_ancestry_proportions()` estimates reference-group ancestry proportions by
-  bigsnpr's `snp_ancestry_summary` method: SQL aggregates PC projections of matched
-  variants, and a native solver applies a bounded nearest-positive-definite repair and
-  the constrained fit. Solver results are invariant to uniform rescaling of PC
-  projections, and the three-argument scalar call uses sum-to-one constraints.
-  The scalar retains full precision; the R wrapper applies correlation gates
-  before rounding returned proportions. Inputs are allele
-  frequencies from summary statistics, diploid genotypes, or BAM/CRAM
-  allele counts. Reference loci touching any normalised input locus must be
-  unique before classification; matched loci require complete finite frequencies
-  and loadings. Duplicate input loci use normalised chromosome keys. For a fixed
-  input, returned seven-decimal coefficients are
-  stable across repeated calls and DuckDB thread counts; raw correlations need
-  not be bitwise identical. Each audited sample returns a row for every reference
-  group, including samples with no matched variants (NULL proportions).
-  The keyed reference Parquet receipt certifies complete finite columns and
-  unique loci against the source and output checksums.
-
-- The benchmark registry pins bigsnpr's reference frequencies and loadings, staged once
-  as a checksum-bound sorted Parquet product, with the epilepsy summary statistics and
-  GRCh37 phase-3 chr22 genotypes used for parity with bigsnpr and 30x CRAM comparisons.
 
 # duckhts 1.5.2.9003
 
