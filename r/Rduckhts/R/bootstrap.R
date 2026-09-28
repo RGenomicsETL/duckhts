@@ -167,6 +167,14 @@ duckhts_bootstrap <- function(repo_root = NULL) {
     overwrite = TRUE
   )
   message("  Copied vendored read-only libBigWig sources and test fixture")
+  somalier_sites <- file.path(repo_root, "test", "data", "somalier",
+                              "1000G_3samples.vcf.gz")
+  if (!file.copy(somalier_sites,
+                 file.path(extdata_dest, "somalier_population_1000g.vcf.gz"),
+                 overwrite = TRUE)) {
+    stop("Failed to bundle Somalier population fixture: ", somalier_sites,
+         call. = FALSE)
+  }
 
   # DuckDB C API headers
   capi_dest <- file.path(dest, "duckdb_capi")

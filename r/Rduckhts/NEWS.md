@@ -1,3 +1,34 @@
+# Rduckhts 1.5.2.9005-0.1.5
+
+- `rduckhts_ancestry_proportions()` estimates ancestry proportions from
+  allele-frequency or diploid-dosage relations against keyed wide or long reference
+  products, with matching audits and correlation gates on unrounded coefficients.
+  Reference loci touching any input locus must be unique; matched loci need finite
+  loadings and frequencies in [0, 1]. Every sample returns a row for every reference
+  group, with NULL proportions and `no_matched_variants` when nothing matches. Group
+  identifiers round-trip exactly; wide references can map columns to identifiers with
+  `group_ids`. Missing genotypes are dropped.
+
+- `rduckhts_ancestry_geno()` takes dense `read_geno` call lists and requires the
+  declaration `non_reference_only = FALSE`; sparse call lists cannot supply zero
+  dosages.
+
+- `rduckhts_ancestry_bam()` counts reference-panel sites in indexed BAM/CRAM, using
+  allele-fraction or balance-rule genotype frequencies, and applies the same
+  proportion engine. `rduckhts_ancestry_panel()` selects biallelic unambiguous SNVs
+  with complete, valid reference values and forward-strand alleles, and publishes
+  the panel only after it validates.
+
+# Rduckhts 1.5.2.9004-0.1.5
+
+- `rduckhts_somalier_find_sites()` selects canonical, provenance-bearing Somalier
+  panels from typed population relations, Parquet, or VCF/BCF with caller-visible
+  interval and allele exclusions. Interval relations use `chrom`, `start`, `end`,
+  so a view over `read_bed()` can be passed directly. Equal AF scores retain input scan order and
+  X/Y sites remain unspaced by default, matching Somalier v0.3.4. The
+  `tie_order = "lexical"` and `sex_spacing = "enforced"` options provide
+  deterministic lexical ties and X/Y minimum-distance spacing.
+
 # Rduckhts 1.5.2.9003-0.1.5
 
 - The bundled Somalier VCF-count extraction uses less peak memory when a

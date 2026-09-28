@@ -1602,6 +1602,36 @@ SELECT duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc FROM read_fastq('reads.fastq.gz
 WITH q AS (SELECT duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc FROM read_fastq('reads.fastq.gz')) SELECT cycle.* FROM q, UNNEST(qc.cycles) AS u(cycle);
 ```
 
+## duckhts_somalier_spacing
+
+Greedily select ranked Somalier candidate positions at a minimum genomic distance.
+
+Signature:
+
+```sql
+duckhts_somalier_spacing(positions UBIGINT[], distance UBIGINT)
+```
+
+Returns:
+
+```
+BOOLEAN[]
+```
+
+### Ordering
+
+positions must be ordered by AF rank within one chromosome. The returned mask has one element per input position; the first position wins each conflict, with equal positions conflicting. Positions are positive one-based integers; distance is positive and candidates are limited to one million per call.
+
+### Recipe
+
+Filter a typed read_bcf-style relation in SQL, group candidates by chromosome with list(CAST(POS AS UBIGINT) ORDER BY score, deterministic_tie_key), call this scalar on the ordered list, expand its Boolean mask, apply class-specific caps, and number the final rows by chromosome and position. rduckhts_somalier_find_sites() composes the complete recipe on the caller connection, including caller TEMP tables. No private connection or init-time macro is involved.
+
+### Examples
+
+```sql
+SELECT duckhts_somalier_spacing([100, 110, 109]::UBIGINT[], 10);
+```
+
 ## duckhts_somalier_import_sites
 
 Import an already selected Somalier sites VCF/BCF as one canonical panel and population-frequency relation.
@@ -1702,6 +1732,44 @@ panel_table must name a committed table or view visible to the database; caller-
 
 ```sql
 CREATE TABLE allele_counts AS SELECT * FROM duckhts_somalier_bam_counts('sample.bam', 'fingerprint_panel', 'sample-1', 'reference.fa');
+```
+
+## duckhts_ancestry_proportions
+
+Solve a nearest-positive-definite constrained ancestry projection from aggregated PC products.
+
+Signature:
+
+```sql
+duckhts_ancestry_proportions(x_pc_major, y_pc, group_count, sum_to_one := true)
+```
+
+Returns:
+
+```
+DOUBLE[]
+```
+
+### Input
+
+x_pc_major is a flat DOUBLE[] in PC-major, group-minor order for X = P^T F_ref; y_pc is a DOUBLE[] with one value per PC for (P^T f) times the shrinkage correction. Groups are ordered identically within each PC. 1 to 30 groups and 1 to 64 PCs are supported. All values must be finite. sum_to_one=true enforces nonnegative q summing to one; false allows a sum at most one. The scalar returns full-precision group proportions in input order; the R wrapper rounds displayed proportions to seven decimals after correlation gating.
+
+### Repair
+
+The Gram matrix X^T X follows Matrix::nearPD defaults: Dykstra alternating projections, relative eigen cutoff 1e-6, infinity-norm convergence tolerance 1e-7 and at most 100 iterations, then eigenvalue floor 1e-8 times the largest absolute eigenvalue with diagonal rescaling. A nonconverged repair errors. The native solver is independent of bigsnpr and quadprog code.
+
+### SQL recipe
+
+rduckhts_ancestry_proportions normalises long or keyed wide reference products to one row per locus with PC and group columns, checks long-reference completeness, unique input-matched reference loci and finite values at aligned sites, and matches sample_id, chromosome, positive one-based whole-number position and alleles from the caller's input-frequency relation. It reverses input frequency (1 - f) for reversed alleles, audits strand flips, and drops ambiguous, duplicate, missing and mismatched input sites. A bounded aligned Parquet relation holds the retained physical rows. Per-sample sums of loading * reference_frequency form X in PC-major, group-minor order; sums of loading * aligned_frequency times correction form y in PC order. The native scalar solves for q at full precision; cor(F_ref q, f) and per-group cor_each are evaluated before failed proportions are gated to NULL and returned proportions rounded. The scratch Parquet is removed after the call; no private connection or macro is created.
+
+### Missing data
+
+Input genotypes are diploid dosage / 2; NULL genotypes and frequencies are dropped, not imputed. bigsnpr imputes missing individual genotypes before calling snp_ancestry_summary, so parity comparisons must use the same retained sites. The default min_cor is 0.4 as in bigsnpr 1.12.21; callers may select a stricter gate for cohorts or low-depth count frequencies.
+
+### Examples
+
+```sql
+SELECT duckhts_ancestry_proportions([1.0, 0.0, 0.0, 1.0], [0.25, 0.75], 2, true);
 ```
 
 ## duckhts_somalier_panel_sha256

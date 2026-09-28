@@ -1,0 +1,2 @@
+revision	source_records	upstream_candidates	duckhts_candidates	max_per_chromosome_candidates	upstream_sites	duckhts_sites	common_sites	duckhts_only	upstream_only	lexical_tie_dependent_sites	threads_duckhts	threads_somalier_reader	threads_somalier_writer
+70ef384cc023350b7e10bfd01881ca9f26417498	2858184	250641	250641	234367	10001	10001	10001	0	0	0	1	2	1

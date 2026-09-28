@@ -1,12 +1,45 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.2.9003
+# duckhts 1.5.2.9005
+
+- `duckhts_ancestry_proportions()` estimates reference-group ancestry proportions by
+  bigsnpr's `snp_ancestry_summary` method. SQL aggregates the PC projections of matched
+  variants; the native solver applies a bounded nearest-positive-definite repair and the
+  constrained fit, invariant to uniform rescaling of the projections. The three-argument
+  call applies sum-to-one constraints. Coefficients keep full precision for the
+  correlation gates; for a fixed input, the returned seven-decimal proportions are
+  stable across calls and thread counts.
+
+- Ancestry inputs are allele frequencies from summary statistics, dense diploid
+  genotypes, or BAM/CRAM allele counts. Reference loci touching any input locus must be
+  unique; matched loci need finite loadings and frequencies in [0, 1]; positions are
+  positive whole numbers and PC identifiers are consecutive whole numbers. Every sample
+  returns a row for every reference group, with NULL proportions when no variant
+  matches. Group identifiers round-trip exactly.
+
+- The benchmark registry pins bigsnpr's reference frequencies and loadings, staged once
+  as a checksum-bound sorted Parquet product whose receipt certifies unique loci and
+  complete, in-range values, together with the epilepsy summary statistics and GRCh37
+  phase-3 chr22 genotypes used for parity with bigsnpr and 30x CRAM comparisons.
+
+# duckhts 1.5.2.9004
+
+- Somalier panel selection (`rduckhts_somalier_find_sites()`) selects sites from
+  caller-visible population relations, including TEMP tables, with per-call filters
+  and site caps; include and exclude intervals use `chrom`, `start`, `end` as
+  `read_bed()` returns them. `duckhts_somalier_spacing()` applies greedy
+  minimum-distance spacing over an ordered chromosome. Somalier v0.3.4 mode keeps input order for equal AF
+  scores and selects X/Y without spacing; lexical ties and enforced X/Y spacing are
+  opt-in. Nearby-variant exclusion runs in ordered position passes, and only
+  qualifying sites are retained during the scan.
 
 - Somalier VCF count extraction avoids materializing all decoded VCF records
   before joining to a site panel, reducing peak buffer use for large sources.
 
 - The GFFBase benchmark includes a registry-staged, parity-checked feature-database
   comparison using SQL over `read_gff`, with reproducible process and query measurements.
+
+# duckhts 1.5.2.9003
 
 - DuckHTS loads on DuckDB 2.0; SQL lambdas use the `lambda x:` syntax
   (DuckDB >= 1.3).

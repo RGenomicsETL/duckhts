@@ -13,7 +13,7 @@ its channel's manifest before packaging. `SIGNED` reports which channel supplied
 | npm dist-tag | Install | Binary source | DuckHTS version |
 |---|---|---|---|
 | `latest` | `npm install duckhts@latest` | signed community repository (`artifacts.json`) | released version |
-| `dev` | `npm install duckhts@dev` | unsigned GitHub Actions run (`artifacts-dev.json`) | `1.5.2.9003` as npm `1.5.2-9003` |
+| `dev` | `npm install duckhts@dev` | unsigned GitHub Actions run (`artifacts-dev.json`) | `1.5.2.9005` as npm `1.5.2-9005` |
 
 The `dev` loader refuses to load unless DuckDB has `allow_unsigned_extensions=true`.
 For duckdb-wasm, opt in explicitly when opening the database:

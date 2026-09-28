@@ -1,0 +1,18 @@
+component	baseline_seconds	ordered_seconds	measurement
+Full selection query	219.640	21.276	DuckDB JSON profile latency
+All named gate counts	220.317	21.340	DuckDB JSON profile latency
+READ_BCF scan and projected INFO decode	19.237	19.330	READ_BCF operator in selection
+Eligible position and allele filters	0.097	0.093	Two FILTER operators in gate-count query
+PASS SNV gate	0.208	0.206	FILTER operator in gate-count query
+AF and AN gate	0.017	0.017	FILTER operator in gate-count query
+Annotation gate	0.005	0.005	FILTER operator in gate-count query
+QC gate	0.001	0.001	FILTER operator in gate-count query
+Optional interval and gnotate gates	0.0012	0.0012	No intervals or gnotate input; remaining FILTER operator
+Indel inventory filter	0.0236	0.0236	FILTER operator in gate-count query
+SNP inventory filter	0.0340	0.0365	FILTER operator in gate-count query
+Nearby-indel exclusion	40.932	0.074	Range HASH_JOIN versus ordered WINDOW in selection
+Nearby-SNP counting	158.579	0.792	Range HASH_JOIN versus grouped RANGE WINDOW in selection
+AF ranking window	0.124	0.125	WINDOW operator in selection
+List aggregation	0.011	0.013	HASH_GROUP_BY with list in selection
+Spacing kernel projection	0.0064	0.0003	Single-row mask PROJECTION in selection
+Selection cap filter	0.0001	0.0004	FILTER operator in gate-count query

@@ -130,6 +130,8 @@ the comparable workload at the PR revision and compare it with the nearest ident
 recorded workload. Do not claim "no regression" when workloads or environments differ.
 If no checked-in benchmark exercises the changed path, state that explicitly in the
 section, cite the nearest rendered baseline, and say what measurement is still missing.
+For SQL or kernels whose work grows with input, the section also carries the scaling
+evidence that `STYLE.md` (Scale) requires: the 1×/2×/4× measurements and the memory budget.
 
 ### Pull Request Codex Review — Mandatory
 
