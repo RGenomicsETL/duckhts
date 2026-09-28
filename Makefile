@@ -12,8 +12,8 @@
 	stage-norm-1000g-dragen-gvcf stage-liftover-references \
 	stage-giab-v4.2.1 stage-riker-wgs \
 	stage-gffbase stage-gffbase-featuredb test-gffbase-featuredb bench-gffbase-featuredb \
-	stage-duckbedqc-data stage-variantkey-providers \
-	test-cache-paths test-benchmark-registry test-variantkey-provider-staging \
+	stage-duckbedqc-data stage-giab-benchmark-vcf \
+	test-cache-paths test-benchmark-registry test-giab-benchmark-staging \
 	test-cgranges-benchmark-r \
 	test-liftover-property test-liftover-property-asan \
 	test-liftover-property-ubsan test-liftover-fuzz test-liftover-fuzz-debug \
@@ -69,7 +69,7 @@ help:
 		'Build: make [debug|release|test|test_release]' \
 		'Docs: make [docs|function_catalog]' \
 		'SIMD: make [test-simd-kernels|bench-simd-kernels]' \
-		'Data: make stage-[giab-v4.2.1|liftover-references|norm-1000g-dragen-gvcf|riker-wgs|gffbase|duckbedqc-data|variantkey-providers]' \
+		'Data: make stage-[giab-v4.2.1|liftover-references|norm-1000g-dragen-gvcf|riker-wgs|gffbase|duckbedqc-data|giab-benchmark-vcf]' \
 		'Wasm: make wasm-playwright-test' \
 		'Cleanup: make [clean|clean_all|clean_local]'
 
@@ -439,7 +439,7 @@ test-cache-paths:
 	bash test/scripts/test_liftover_registry_batch.sh
 	bash test/scripts/test_conformance_plugin_cache.sh
 
-test-benchmark-registry: release test-variantkey-provider-staging
+test-benchmark-registry: release test-giab-benchmark-staging
 	Rscript test/scripts/test_cigar_blocks_benchmark.R build/release/duckhts.duckdb_extension
 	Rscript test/scripts/test_genotype_format_benchmark.R
 	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
@@ -447,8 +447,8 @@ test-benchmark-registry: release test-variantkey-provider-staging
 	R CMD INSTALL -l "$$tmp" "$$tmp"/duckhtsbench_*.tar.gz; \
 	DUCKHTS_REPO="$(PROJ_DIR)" Rscript -e '.libPaths(c("'"$$tmp"'", .libPaths())); tinytest::test_package("duckhtsbench", testdir = "tinytest")'
 
-test-variantkey-provider-staging:
-	bash test/scripts/test_variantkey_provider_staging.sh
+test-giab-benchmark-staging:
+	bash test/scripts/test_giab_benchmark_staging.sh
 
 test-cgranges-benchmark-r:
 	bash test/scripts/test_cgranges_benchmark_r.sh
@@ -546,17 +546,14 @@ stage-gffbase-featuredb:
 stage-duckbedqc-data:
 	bash scripts/stage_duckbedqc_data.sh
 
-stage-variantkey-providers:
-	Rscript r/duckhtsbench/scripts/stage_variantkey_providers.R
+stage-giab-benchmark-vcf:
+	Rscript r/duckhtsbench/scripts/stage_giab_benchmark_vcf.R
 
 bench-mosdepth:
 	Rscript -e "rmarkdown::render('benchmarks/Benchmarks_mosdepth.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
 bench-variantkey:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_variantkey_conformance.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
-
-bench-variantkey-join:
-	Rscript -e "rmarkdown::render('benchmarks/benchmark_variantkey_join_overlap.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
 bench-munge:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_munge.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"

@@ -17,9 +17,10 @@ expect_true(all(nzchar(registry$id)))
 expect_equal(length(unique(registry$id)), nrow(registry))
 expect_true(all(!grepl("^/", registry$cache_relpath)))
 expect_true(all(!grepl("\\.\\.", registry$cache_relpath)))
-expect_true(any(registry$id == "revel_v13_grch37"))
-expect_match(duckhts_bench_artifact_path("revel_v13_grch37"), "revel_grch37\\.parquet$")
-expect_equal(nrow(duckhts_bench_stage_plan("variantkey-providers")), sum(registry$workload == "variantkey-providers"))
+expect_true(any(registry$id == "variantkey_giab_hg002_v421"))
+expect_match(duckhts_bench_artifact_path("variantkey_giab_hg002_v421"), "HG002_GRCh38_1_22_v4\\.2\\.1_benchmark\\.vcf\\.gz$")
+expect_equal(registry$id[registry$workload == "giab-benchmark-vcf"], "variantkey_giab_hg002_v421")
+expect_equal(nrow(duckhts_bench_stage_plan("giab-benchmark-vcf")), 1L)
 expect_match(registry$consumer[registry$id == "variantkey_giab_hg002_v421"],
   "benchmark_bcf_record_cache.Rmd", fixed = TRUE)
 expect_match(registry$consumer[registry$id == "variantkey_giab_hg002_v421"],

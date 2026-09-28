@@ -21,11 +21,10 @@ expected record count, complete schema, and all-field checksum.
 First-run outputs additionally undergo exact multiset comparison in both
 directions, including duplicate rows.
 
-This workload does not measure DuckVEP, CRAM, indexed interval
-selection, or reader scaling across thread counts. The nearest broader
-reader baselines are [BCF record
-caching](benchmark_bcf_record_cache.md), [multi-region
-readers](benchmark_multi_region_readers.md), and [FASTQ
+This workload does not measure CRAM, indexed interval selection, or
+reader scaling across thread counts. The nearest broader reader
+baselines are [BCF record caching](benchmark_bcf_record_cache.md),
+[multi-region readers](benchmark_multi_region_readers.md), and [FASTQ
 reading](benchmark_fastq_reader.md); their inputs/projections differ, so
 the matched baseline in this report is the performance comparator.
 
