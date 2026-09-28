@@ -58,7 +58,7 @@ benchmark_assert_checkout <- function(root, revision, allowed_outputs = characte
              "description.yml", "src", "third_party/htslib"),
     "cannot inspect untracked build inputs"
   )
-  inputs <- inputs[grepl("\\.(c|cc|cpp|h|hpp|inc|def|o|cmake)$|(^|/)(Makefile|CMakeLists[.]txt)$",
+  inputs <- inputs[grepl("\\.(c|cc|cpp|h|hpp|inc|def|cmake)$|(^|/)(Makefile|CMakeLists[.]txt)$",
                          inputs)]
   inputs <- setdiff(inputs, c("third_party/htslib/config.h",
                               "third_party/htslib/config_vars.h",
