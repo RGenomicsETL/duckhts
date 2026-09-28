@@ -3,6 +3,8 @@
 - `rduckhts_ancestry_proportions()` estimates ancestry proportions from
   allele-frequency or diploid-dosage relations against keyed wide or long reference
   products, with matching audits and correlation gates on unrounded coefficients.
+  `reversed_variants` counts every site read as `1 - f`, including strand-flipped
+  reversals; `flipped_variants` counts every strand-flipped site.
   Reference loci touching any input locus must be unique; matched loci need finite
   loadings and frequencies in [0, 1]. Every sample returns a row for every reference
   group, with NULL proportions and `no_matched_variants` when nothing matches. Group

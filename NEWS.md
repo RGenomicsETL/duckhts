@@ -15,7 +15,8 @@
   unique; matched loci need finite loadings and frequencies in [0, 1]; positions are
   positive whole numbers and PC identifiers are consecutive whole numbers. Every sample
   returns a row for every reference group, with NULL proportions when no variant
-  matches. Group identifiers round-trip exactly.
+  matches. Group identifiers round-trip exactly. Matching audits count reversed sites
+  (including strand-flipped reversals, read as `1 - f`) and flipped sites.
 
 - The benchmark registry pins bigsnpr's reference frequencies and loadings, staged once
   as a checksum-bound sorted Parquet product whose receipt certifies unique loci and
