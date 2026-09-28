@@ -3,7 +3,8 @@
 - Ancestry long-reference group IDs round-trip exactly, including PC-like IDs,
   spaces, quotes and case distinctions. Wide references can map distinct frequency
   column aliases to output IDs with `group_ids`. Genotype ancestry rejects
-  missing or ambiguous sample-name mappings.
+  missing or ambiguous sample-name mappings. Input positions must be positive
+  whole numbers, and panel selection excludes sites with NULL group alleles.
 
 - `rduckhts_ancestry_geno()` requires `non_reference_only = FALSE` for dense
   `read_geno` call lists, including homozygous-reference calls; sparse input is

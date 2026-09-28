@@ -1,7 +1,8 @@
 #' Estimate projected ancestry proportions from frequency or dosage relations
 #'
 #' Input columns are sample_id, chromosome, position, allele_a, allele_b and
-#' frequency (or dosage), describing allele_b. Reference data may be a keyed
+#' frequency (or dosage), describing allele_b. Positions are positive one-based
+#' whole numbers. Reference data may be a keyed
 #' wide relation with consecutive PC1..PCn columns and one frequency column per group, or a long
 #' relation with group_id and frequency plus a keyed pc/loading relation.
 #' Corrections contain pc and coefficient. Groups (1..30), PCs (1..64),
@@ -106,11 +107,13 @@ rduckhts_ancestry_proportions <- function(
     "lp AS (SELECT ", keys, ", count(*) AS n, count(DISTINCT pc) AS distinct_n ",
     "FROM l GROUP BY ", keys, ") ",
     "SELECT EXISTS (SELECT 1 FROM r WHERE chromosome IS NULL OR position IS NULL ",
+    "OR NOT isfinite(position) OR position < 1 OR position != floor(position) ",
     "OR allele_a IS NULL OR allele_b IS NULL OR group_id IS NULL ",
     "OR frequency IS NULL OR NOT isfinite(frequency)) OR EXISTS (SELECT 1 FROM rg ",
     "WHERE n != ", length(groups), " OR distinct_n != ", length(groups),
     ") AS bad_reference, EXISTS (SELECT 1 FROM l WHERE chromosome IS NULL ",
-    "OR position IS NULL OR allele_a IS NULL OR allele_b IS NULL OR pc IS NULL ",
+    "OR position IS NULL OR NOT isfinite(position) OR position < 1 ",
+    "OR position != floor(position) OR allele_a IS NULL OR allele_b IS NULL OR pc IS NULL ",
     "OR loading IS NULL OR NOT isfinite(loading)) OR EXISTS (SELECT 1 FROM lp WHERE n != ",
     length(pcs), " OR distinct_n != ", length(pcs), ") OR EXISTS (",
     "SELECT 1 FROM rg LEFT JOIN lp USING (", keys, ") WHERE lp.n IS NULL) ",

@@ -26,6 +26,16 @@ test_ancestry_relations <- function() {
   selected <- dbGetQuery(con, "SELECT site_index, position FROM ancestry_selected ORDER BY site_index")
   expect_equal(selected$site_index, 0:4)
   expect_equal(selected$position, 100:104)
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_null_allele_ref AS SELECT * REPLACE ",
+    "(CASE WHEN position = 100 AND group_id = 'A' THEN NULL ELSE allele_a END ",
+    "AS allele_a) FROM ancestry_ref"))
+  null_panel <- rduckhts_ancestry_panel(
+    con, "ancestry_null_allele_ref", "ancestry_pc", "ancestry_null_panel",
+    "GRCh38", spacing_bp = 1, max_sites = 5)
+  expect_equal(null_panel$sites, 5)
+  expect_equal(dbGetQuery(con, "SELECT position FROM ancestry_null_panel ORDER BY site_index")$position,
+               101:105)
   dbExecute(con, "CREATE TABLE ancestry_candidates AS SELECT region, position, allele_a, allele_b FROM ancestry_selected")
   matched_panel <- rduckhts_ancestry_panel(con, "ancestry_ref", "ancestry_pc",
                                            "ancestry_matched", "GRCh38",
@@ -141,6 +151,22 @@ test_ancestry_relations <- function() {
     con, "ancestry_zero_input", "ancestry_one_group_pc", "ancestry_one_correction")
   expect_equal(nrow(zero), 0L)
   expect_equal(names(zero), names(one))
+  for (bad_position in c(0, -1, 1.5)) {
+    dbExecute(con, paste0(
+      "CREATE OR REPLACE TEMP VIEW ancestry_bad_position AS ",
+      "SELECT * REPLACE (CASE WHEN position = 100 THEN ", bad_position,
+      " ELSE position END AS position) FROM ancestry_input"))
+    expect_error(rduckhts_ancestry_proportions(
+      con, "ancestry_bad_position", "ancestry_wide", "ancestry_wide_correction"),
+      pattern = "input positions must be positive whole numbers")
+  }
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_bad_long_ref AS SELECT * REPLACE ",
+    "(CASE WHEN position = 100 THEN 0 ELSE position END AS position) ",
+    "FROM ancestry_ref"))
+  expect_error(rduckhts_ancestry_proportions(
+    con, "ancestry_input", "ancestry_bad_long_ref", "ancestry_pc",
+    "ancestry_correction"), pattern = "reference sites require")
   local({
     observed <- character()
     previous <- getOption("duckhts.ancestry_step_hook")

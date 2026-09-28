@@ -50,7 +50,8 @@ A row per sample and reference group, with status and matching audit.
 }
 \description{
 Input columns are sample_id, chromosome, position, allele_a, allele_b and
-frequency (or dosage), describing allele_b. Reference data may be a keyed
+frequency (or dosage), describing allele_b. Positions are positive one-based
+whole numbers. Reference data may be a keyed
 wide relation with consecutive PC1..PCn columns and one frequency column per group, or a long
 relation with group_id and frequency plus a keyed pc/loading relation.
 Corrections contain pc and coefficient. Groups (1..30), PCs (1..64),

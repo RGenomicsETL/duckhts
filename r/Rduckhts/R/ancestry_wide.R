@@ -133,6 +133,12 @@
   null_sample <- DBI::dbGetQuery(con, paste0("SELECT EXISTS (SELECT 1 FROM ",
     relations[[1L]], " WHERE sample_id IS NULL) AS present"))$present
   if (null_sample) stop("sample_id must not be NULL", call. = FALSE)
+  invalid_position <- DBI::dbGetQuery(con, paste0(
+    "SELECT EXISTS (SELECT 1 FROM ", relations[[1L]],
+    " WHERE position IS NULL OR NOT isfinite(position) OR position < 1 ",
+    "OR position != floor(position)) AS present"))$present
+  if (invalid_position) stop("input positions must be positive whole numbers",
+                             call. = FALSE)
   corrections <- DBI::dbGetQuery(con, paste0("SELECT pc, coefficient FROM ", relations[[3L]],
                                              " ORDER BY pc"))
   if (nrow(corrections) != length(pcs) ||

@@ -40,7 +40,8 @@ A one-row data frame with panel SHA-256 and selected site count.
 }
 \description{
 Sites are biallelic unambiguous SNVs present in every reference group and
-every PC loading. With `candidate_table`, only matching candidate loci and
+every PC loading. Positions are positive one-based whole numbers and all
+group alleles must be present. With `candidate_table`, only matching candidate loci and
 alleles are retained. Otherwise one site is selected per chromosome/spaced
 genomic window. Results are sorted by chromosome and position and assigned
 dense zero-based panel ordinals. Keep the returned panel SHA-256 and the

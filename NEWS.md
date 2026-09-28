@@ -5,6 +5,8 @@
 - Ancestry long-reference group IDs remain distinct from PC loading columns;
   output retains exact group spelling, including IDs resembling PC names.
   Genotype ancestry validates the supplied sample-name mapping before estimation.
+  Ancestry input positions must be positive whole numbers; panel selection
+  requires non-null alleles in every reference group.
 
 - Ancestry genotype estimation requires an explicit dense `read_geno` declaration
   (`non_reference_only = FALSE`); sparse call lists cannot supply zero dosages.

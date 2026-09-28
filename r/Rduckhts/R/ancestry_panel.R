@@ -1,7 +1,8 @@
 #' Create a deterministic ancestry site panel for BAM/CRAM counts
 #'
 #' Sites are biallelic unambiguous SNVs present in every reference group and
-#' every PC loading. With `candidate_table`, only matching candidate loci and
+#' every PC loading. Positions are positive one-based whole numbers and all
+#' group alleles must be present. With `candidate_table`, only matching candidate loci and
 #' alleles are retained. Otherwise one site is selected per chromosome/spaced
 #' genomic window. Results are sorted by chromosome and position and assigned
 #' dense zero-based panel ordinals. Keep the returned panel SHA-256 and the
@@ -59,7 +60,9 @@ rduckhts_ancestry_panel <- function(
   query <- paste0(
     "WITH site_groups AS (SELECT chromosome, position, min(allele_a) AS ra, ",
     "min(allele_b) AS rb FROM ", reference, " GROUP BY chromosome, position ",
-    "HAVING count(DISTINCT allele_a || '>' || allele_b) = 1 ",
+    "HAVING position >= 1 AND position = floor(position) ",
+    "AND count(allele_a || '>' || allele_b) = count(*) ",
+    "AND count(DISTINCT allele_a || '>' || allele_b) = 1 ",
     "AND count(*) = count(DISTINCT group_id) ",
     "AND count(DISTINCT group_id) = (SELECT count(DISTINCT group_id) FROM ", reference, ") ",
     "AND length(min(allele_a)) = 1 AND length(min(allele_b)) = 1 ",
