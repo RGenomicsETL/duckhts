@@ -1,5 +1,10 @@
 # Rduckhts 1.5.2.9004-0.1.5
 
+- `rduckhts_ancestry_geno()` requires `non_reference_only = FALSE` for dense
+  `read_geno` call lists, including homozygous-reference calls; sparse input is
+  unsupported. Ancestry reference PC identifiers must be exact consecutive
+  whole numbers, including when supplied as numeric strings.
+
 - `rduckhts_ancestry_panel()` writes forward-strand reference alleles for
   complemented candidate matches. Empty panels leave no destination table;
   failed replacements preserve existing tables.

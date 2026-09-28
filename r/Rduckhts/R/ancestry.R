@@ -65,6 +65,12 @@ rduckhts_ancestry_proportions <- function(
                                 input_kind, sum_to_one, min_cor, table_name, overwrite)
 }
 
+.ancestry_consecutive_pcs <- function(pcs) {
+  if (!is.numeric(pcs) && !is.character(pcs)) return(FALSE)
+  values <- suppressWarnings(as.numeric(pcs))
+  identical(sort(values), as.numeric(seq_along(pcs)))
+}
+
 .ancestry_long_adapter <- function(con, reference_table, loadings_table, wide) {
   quote_id <- function(x) as.character(DBI::dbQuoteIdentifier(con, x))
   r <- quote_id(reference_table)
@@ -75,7 +81,7 @@ rduckhts_ancestry_proportions <- function(
                                       " ORDER BY pc"))$pc
   if (length(groups) < 1L || length(groups) > 30L || anyNA(groups) ||
       length(pcs) < 1L || length(pcs) > 64L ||
-      !identical(as.integer(pcs), seq_along(pcs))) {
+      !.ancestry_consecutive_pcs(pcs)) {
     stop("reference requires 1..30 groups and consecutive 1..64 PCs", call. = FALSE)
   }
   chromosome <- paste0("coalesce(try_cast(regexp_replace(chromosome::VARCHAR, '^chr', '') ",

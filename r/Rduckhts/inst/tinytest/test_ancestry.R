@@ -124,6 +124,58 @@ test_ancestry_relations <- function() {
   expect_equal(wide$cor_pred, out$cor_pred, tolerance = 1e-6)
   expect_equal(wide$used_variants, out$used_variants)
   expect_equal(wide$input_variants, out$input_variants)
+  for (format in c("wide", "long")) {
+    source <- if (format == "wide") "ancestry_wide_correction" else "ancestry_pc"
+    pc_cases <- list(
+      numeric_strings = "pc::VARCHAR",
+      fractional = "CASE WHEN pc = 2 THEN 2.5 ELSE pc END",
+      fractional_strings = "(CASE WHEN pc = 2 THEN 2.5 ELSE pc END)::VARCHAR",
+      gap = "CASE WHEN pc = 2 THEN 17 ELSE pc END",
+      duplicate = "CASE WHEN pc = 2 THEN 1 ELSE pc END"
+    )
+    for (kind in names(pc_cases)) {
+      dbExecute(con, paste0("CREATE OR REPLACE TEMP VIEW ancestry_test_pc AS ",
+                            "SELECT * REPLACE (", pc_cases[[kind]], " AS pc) FROM ", source))
+      if (kind == "numeric_strings") {
+        actual <- if (format == "wide") {
+          rduckhts_ancestry_proportions(
+            con, "ancestry_input", "ancestry_wide", "ancestry_test_pc", min_cor = 0)
+        } else {
+          rduckhts_ancestry_proportions(
+            con, "ancestry_input", "ancestry_ref", "ancestry_test_pc",
+            "ancestry_correction", min_cor = 0)
+        }
+        expect_equal(actual$proportion, out$proportion, tolerance = 1e-6)
+      } else if (format == "wide") {
+        expect_error(rduckhts_ancestry_proportions(
+          con, "ancestry_input", "ancestry_wide", "ancestry_test_pc"),
+          pattern = "one finite coefficient for every PC")
+      } else {
+        expected_error <- if (kind == "duplicate") {
+          "one finite loading per PC"
+        } else {
+          "consecutive 1..64 PCs"
+        }
+        expect_error(rduckhts_ancestry_proportions(
+          con, "ancestry_input", "ancestry_ref", "ancestry_test_pc",
+          "ancestry_correction"), pattern = expected_error)
+      }
+    }
+  }
+  dbExecute(con, paste(
+    "CREATE TEMP VIEW ancestry_ordered_correction AS SELECT pc, pc::DOUBLE AS coefficient",
+    "FROM ancestry_wide_correction"
+  ))
+  dbExecute(con, paste(
+    "CREATE TEMP VIEW ancestry_string_correction AS SELECT pc::VARCHAR AS pc,",
+    "pc::DOUBLE AS coefficient FROM ancestry_wide_correction"
+  ))
+  numeric_order <- rduckhts_ancestry_proportions(
+    con, "ancestry_input", "ancestry_wide", "ancestry_ordered_correction", min_cor = -1)
+  string_order <- rduckhts_ancestry_proportions(
+    con, "ancestry_input", "ancestry_wide", "ancestry_string_correction", min_cor = -1)
+  expect_true(any(!is.na(numeric_order$proportion)))
+  expect_equal(string_order$proportion, numeric_order$proportion)
   for (value in c(-0.01, 1.01)) {
     dbExecute(con, paste0(
       "CREATE OR REPLACE TEMP VIEW ancestry_range_wide AS SELECT * REPLACE ",
@@ -251,10 +303,41 @@ test_ancestry_relations <- function() {
   dbExecute(con, "CREATE TABLE ancestry_samples AS SELECT 0 AS sample_index, 'S' AS sample_name")
   genotype <- rduckhts_ancestry_geno(con, "ancestry_geno_calls", "ancestry_ref",
                                       "ancestry_pc", "ancestry_correction",
-                                      samples_table = "ancestry_samples", min_cor = 0)
+                                      samples_table = "ancestry_samples", min_cor = 0,
+                                      non_reference_only = FALSE)
   expect_equal(genotype$sample_id, rep("S", 2L))
   expect_equal(genotype$used_variants, rep(7, 2L))
   expect_equal(genotype$missing_variants, rep(1, 2L))
+  dbExecute(con, paste(
+    "CREATE VIEW ancestry_ref_only_calls AS SELECT * REPLACE",
+    "([struct_pack(sample_index := 1, alleles := [0, 0])] AS calls)",
+    "FROM ancestry_geno_calls"
+  ))
+  dbExecute(con, "INSERT INTO ancestry_samples VALUES (1, 'S_ref')")
+  reference_only <- rduckhts_ancestry_geno(
+    con, "ancestry_ref_only_calls", "ancestry_ref", "ancestry_pc",
+    "ancestry_correction", samples_table = "ancestry_samples", min_cor = 0,
+    non_reference_only = FALSE)
+  expect_equal(reference_only$sample_id, rep("S_ref", 2L))
+  expect_equal(reference_only$input_variants, rep(8, 2L))
+  expect_equal(reference_only$used_variants, rep(8, 2L))
+  path <- system.file("extdata", "geno_calls.vcf", package = "Rduckhts")
+  rduckhts_geno(con, "ancestry_dense_fixture", path, samples = "S2")
+  rduckhts_geno(con, "ancestry_sparse_fixture", path, samples = "S2",
+                non_reference_only = TRUE)
+  expect_equal(dbGetQuery(con, paste(
+    "SELECT len(calls) AS n FROM ancestry_dense_fixture WHERE POS = 20"))$n,
+    c(1, 1))
+  expect_equal(dbGetQuery(con, paste(
+    "SELECT len(calls) AS n FROM ancestry_sparse_fixture WHERE POS = 20"))$n,
+    c(0, 0))
+  expect_error(rduckhts_ancestry_geno(
+    con, "ancestry_sparse_fixture", "ancestry_ref", "ancestry_pc",
+    "ancestry_correction", non_reference_only = TRUE),
+    pattern = "non_reference_only = FALSE")
+  expect_error(rduckhts_ancestry_geno(
+    con, "ancestry_dense_fixture", "ancestry_ref", "ancestry_pc",
+    "ancestry_correction"), pattern = "non_reference_only = FALSE")
   dbExecute(con, "CREATE TABLE ancestry_bad_correction AS SELECT * FROM ancestry_correction")
   dbExecute(con, "UPDATE ancestry_bad_correction SET pc = 3 WHERE pc = 2")
   expect_error(rduckhts_ancestry_proportions(

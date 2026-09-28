@@ -2,6 +2,10 @@
 
 # duckhts 1.5.2.9004
 
+- Ancestry genotype estimation requires an explicit dense `read_geno` declaration
+  (`non_reference_only = FALSE`); sparse call lists cannot supply zero dosages.
+  Reference PC ordinals must be exact consecutive whole numbers.
+
 - BAM/CRAM ancestry panels emit forward-strand reference alleles for complemented
   candidate matches. Panel creation validates the SHA-256 before commit; an empty
   panel leaves no destination and failed replacements preserve the existing table.

@@ -12,14 +12,16 @@ rduckhts_ancestry_geno(
   correction_table,
   samples_table = NULL,
   sum_to_one = TRUE,
-  min_cor = 0.4
+  min_cor = 0.4,
+  non_reference_only
 )
 }
 \arguments{
 \item{con}{Connection with DuckHTS loaded.}
 
 \item{geno_table}{Materialized `read_geno` rows with CHROM, POS, REF, ALT
-and calls columns.}
+and calls columns. Each site must contain a call for every selected sample,
+including homozygous-reference calls.}
 
 \item{reference_table, loadings_table, correction_table}{Reference products.}
 
@@ -27,6 +29,10 @@ and calls columns.}
 and sample_name.}
 
 \item{sum_to_one, min_cor}{Quality/constraint arguments for the solver.}
+
+\item{non_reference_only}{Required declaration of the `read_geno` setting used
+to create `geno_table`. Must be `FALSE`: sparse call lists omit zero dosages
+and cannot be identified from the materialized relation's schema.}
 }
 \value{
 A row per sample and group with the matching audit.

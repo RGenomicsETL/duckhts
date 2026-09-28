@@ -108,10 +108,11 @@
   corrections <- DBI::dbGetQuery(con, paste0("SELECT pc, coefficient FROM ", relations[[3L]],
                                              " ORDER BY pc"))
   if (nrow(corrections) != length(pcs) ||
-      !identical(as.integer(corrections$pc), seq_along(pcs)) ||
+      !.ancestry_consecutive_pcs(corrections$pc) ||
       any(!is.finite(corrections$coefficient))) {
     stop("correction requires one finite coefficient for every PC", call. = FALSE)
   }
+  corrections <- corrections[order(as.numeric(corrections$pc)), , drop = FALSE]
   chromosome_type <- DBI::dbGetQuery(con, paste0("DESCRIBE SELECT chromosome FROM ",
                                              relations[[2L]]))$column_type
   numeric_chromosome <- chromosome_type %in% c("TINYINT", "SMALLINT", "INTEGER",

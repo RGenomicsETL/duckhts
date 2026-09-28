@@ -7,17 +7,26 @@
 #'
 #' @param con Connection with DuckHTS loaded.
 #' @param geno_table Materialized `read_geno` rows with CHROM, POS, REF, ALT
-#'   and calls columns.
+#'   and calls columns. Each site must contain a call for every selected sample,
+#'   including homozygous-reference calls.
 #' @param reference_table,loadings_table,correction_table Reference products.
 #' @param samples_table Optional `read_bcf_samples` relation with sample_index
 #'   and sample_name.
 #' @param sum_to_one,min_cor Quality/constraint arguments for the solver.
+#' @param non_reference_only Required declaration of the `read_geno` setting used
+#'   to create `geno_table`. Must be `FALSE`: sparse call lists omit zero dosages
+#'   and cannot be identified from the materialized relation's schema.
 #' @return A row per sample and group with the matching audit.
 #' @export
 rduckhts_ancestry_geno <- function(
   con, geno_table, reference_table, loadings_table, correction_table,
-  samples_table = NULL, sum_to_one = TRUE, min_cor = 0.4
+  samples_table = NULL, sum_to_one = TRUE, min_cor = 0.4,
+  non_reference_only
 ) {
+  if (missing(non_reference_only) || !identical(non_reference_only, FALSE)) {
+    stop("ancestry requires dense read_geno calls: specify non_reference_only = FALSE; TRUE is unsupported",
+         call. = FALSE)
+  }
   .somalier_validate_name(geno_table, "geno_table")
   if (!is.null(samples_table)) .somalier_validate_name(samples_table, "samples_table")
   frequencies <- basename(tempfile("rduckhts_ancestry_geno_"))
