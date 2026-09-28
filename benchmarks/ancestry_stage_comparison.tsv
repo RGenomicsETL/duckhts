@@ -1,0 +1,4 @@
+implementation	source_revision	threads	reference_rows	pc_columns	group_columns	seconds	peak_rss_mib
+wide_csv_join	29f3e695489e172dbec04a7d5323159cf78a38c7	4	5816590	16	21	322.26	15269
+astra_narrow_parquet	independent_prototype	4	5816590	16	21	24.92	2491.38
+keyed_narrow_parquet	5494ebdf5d80d324b6dc8efee749b87361b7be55	4	5816590	16	21	28.93	2480.53

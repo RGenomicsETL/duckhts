@@ -99,11 +99,29 @@ Two checksum-verified Figshare CSV products each contain 5,816,590 rows:
 21 reference-frequency groups and 16 PC loadings. A staged, key-sorted Parquet
 join holds the four site-key columns, 16 DOUBLE loadings and 21 DOUBLE
 frequencies. Its SHA-256 is
-`8f0b5f7d3cd98fafd1b0598c63e743d07697d7536526c89948883d5aff791489`;
+`a0bf01ae16db605ff0add59e5ebb747c35454406900c11fd8596f23c167fe02b`;
 the staging receipt binds this digest to both registered CSV digests and DuckDB
-1.5.5. The one-time conversion from checksum-verified CSVs took 322.26 seconds
-and peaked at 15,269 MiB RSS; it is not included in the query measurements.
-The epilepsy summary input has 4,880,492 records. A separate public phase-3 chr22 VCF supplies 11 individuals
+1.5.5. The one-time conversion is excluded from query times. Converting each
+compressed CSV to narrow typed Parquet before the keyed sort keeps the CSV
+scanner and sort from holding wide decompressed rows simultaneously; reading
+just the compressed header also avoids a full R-side CSV scan.
+
+```{r staging-comparison}
+staging <- utils::read.delim("ancestry_stage_comparison.tsv")
+stopifnot(nrow(staging) == 3L, all(staging$reference_rows == 5816590L),
+          all(staging$pc_columns == 16L), all(staging$group_columns == 21L))
+staging$budget_mib <- 2560
+staging$within_budget <- staging$peak_rss_mib <= staging$budget_mib
+stopifnot(staging$within_budget[staging$implementation == "keyed_narrow_parquet"],
+          staging$seconds[staging$implementation == "keyed_narrow_parquet"] <= 30)
+knitr::kable(staging, digits = 2)
+```
+
+All three staging rows use the same two public CSV products and four threads.
+The independently run Astra prototype is an external comparator, not a DuckHTS
+revision. Source conversion and digest validation are included in staging RSS;
+these figures are not query memory. The epilepsy summary input has 4,880,492
+records. A separate public phase-3 chr22 VCF supplies 11 individuals
 from AFR (3), EUR (2), EAS (2), SAS (2) and AMR (2). Each workload uses four
 DuckDB threads and the bigsnpr vignette's 16 correction coefficients. These
 are complete-process peak RSS measurements, including package loading,
@@ -230,18 +248,42 @@ CSV parsing occurs in R before this SQL profile, not in a DuckDB scan
 operator. Sorting is limited to the input window partition and final group
 ordering.
 
-The keyed query instead scans projected Parquet columns and aggregates 336
+The keyed query scans projected Parquet columns and aggregates 336
 `sum(PC * group_frequency)` values, 16 corrected `sum(PC * aligned_frequency)`
-values and group correlations per sample. Its only `list_value()` expressions
-assemble the 336-element solver vector and 21 group correlations **after**
-aggregation. It retains narrow site classification and aligned-frequency
-rows; the 5,816,590-site reference hash/group and joins are the dominant
-build-side state. The four-thread full-epilepsy query took 3.39 s with
-3,806 MiB peak DuckDB buffer, zero temp spill and 8,898 MiB process peak
-RSS including the CSV oracle. Standalone Parquet-only query process RSS is
-reported below; it does not retain CSV reference tables or a bigsnpr oracle.
-Buffer peaks describe DuckDB's accounting, not resident bytes, and cannot
-be added to RSS.
+values and group correlations per sample. The 336-element solver vector and
+21 group correlations are assembled **after** aggregation. The earlier keyed
+plan grouped all 5,816,590 reference loci into a site hash and retained
+3,343,235 classified rows while the correlation branch rebuilt aligned
+input. Its four-thread fresh-process run took 3.43 s, 1,872 MiB RSS and
+3,175 MiB DuckDB peak buffer. The old JSON profile attributes 0.80 s to
+the reference grouping and has two large join branches; profile peak memory
+is query-wide, not operator-attributed.
+
+Astra's external plan converts CSVs to narrow Parquet, then builds its solver
+hash from the 3,343,235 matched inputs, not the 5,816,590 reference sites.
+Its solver-only process ran 2.39–2.43 s with 587 MiB RSS and zero spill under
+`memory_limit='1GB'`; classification/preparation ran separately. DuckHTS
+keeps classification and its complete audit in the measured wrapper call:
+it writes a temporary 3,343,235-row, approximately 22.6 MiB aligned Parquet relation,
+then materializes only per-sample moments, solver output and correlation.
+The single-sample reductions use ungrouped aggregates. For multiple samples,
+the 1..N sample index from the small audit table is the group key: a string
+`GROUP BY sample_id` led DuckDB to estimate 440,000 groups for 22 samples
+and spill 951 MiB with one thread, while the indexed 44-sample query has
+zero spill. The temporary Parquet file is removed before returning; its
+bytes are explicit bounded intermediate I/O, not a DuckDB spill.
+
+The hash-build input is 95.65 MiB of decoded key/frequency payload for the
+full epilepsy run (3,343,235 rows, measured by
+`benchmark_ancestry_query_stages.R`). With a fixed 512 MiB R/DuckDB overhead
+and 3× this payload, the process-RSS budget is 799 MiB, further capped at
+1 GiB under `memory_limit='1GB'`. Its measured 4-thread RSS below is within
+both limits. Every stage's JSON profile reported zero temp spill; the largest
+query-session DuckDB buffer estimate was 1,218 MiB. DuckDB buffer accounting
+is not resident process RSS and must not be added to it. Genotype 44-sample
+build payload is 27.69 MiB (880,000 rows, including the four-byte
+sample index used for aggregation), for a 595 MiB budget; the
+one-thread process measured 476 MiB RSS with zero spill.
 
 `benchmark_ancestry_reference_load.R` scans every numeric column in each
 source CSV and the staged Parquet product with DuckDB; neither scan
@@ -260,24 +302,42 @@ knitr::kable(reference_load, digits = 2)
 `benchmark_ancestry_memory.R` uses fresh R processes and the same staged
 Parquet reference for each row. Epilepsy 1×/2×/4× are nested prefixes of
 835,809/1,671,618/3,343,235 physical input variants (one sample).
-Genotype 11/22/44 is the same 20,000 physical chr22 sites per individual
-with copied sample IDs; the extra sample IDs are a scaling probe, not new
-independent genotypes. Every input row participates, and each group produces
-one output row. Peak RSS includes DuckDB, the input Parquet reader and R
-package loading; peak buffer is DuckDB's query-session maximum. Query time
-includes reading Parquet, site joins, aggregation, the solver and quality
-correlations, but not one-time conversion or source-CSV checksum validation.
-The full epilepsy and 11-individual coefficient tables also agree at seven
-decimals between one and four threads (21 and 231 keyed rows, respectively).
+Genotype 11/22/44 uses 44 **distinct phase-3 VCF sample IDs**, with a
+nested 11/22/44 subset and 20,000 measured chr22 sites per person. No
+sample IDs or genotypes are cloned. Every input row participates, and each
+group produces one output row. Fresh-process peak RSS includes DuckDB, the
+input Parquet reader and R package loading; peak buffer is DuckDB's
+query-session maximum. Query time includes reading Parquet, site joins,
+aggregation, the solver and quality correlations, but not one-time conversion
+or source-CSV checksum validation. The 21 full-epilepsy coefficients and 231
+individual coefficients agree with bigsnpr at seven decimals.
 
 ```{r parquet-scaling}
+scaling_before <- utils::read.delim("ancestry_memory_scaling_before.tsv")
 scaling <- utils::read.delim("ancestry_memory_scaling.tsv")
-stopifnot(nrow(scaling) == 12L,
+stopifnot(nrow(scaling) == 12L, nrow(scaling_before) == 12L,
           all(scaling$threads %in% c(1L, 4L)),
           all(scaling$scale %in% c(1L, 2L, 4L)),
           all(scaling$input_rows == scaling$used_variants),
-          all(scaling$output_rows == scaling$samples * 21L))
-knitr::kable(scaling, digits = 2)
+          all(scaling$output_rows == scaling$samples * 21L),
+          all(scaling$peak_temp_mib == 0),
+          all(scaling$peak_rss_mib <= 1024))
+knitr::kable(scaling_before, digits = 2, caption =
+  "Keyed-query baseline at 29f3e695; genotype 22/44 repeated sample IDs")
+knitr::kable(scaling, digits = 2, caption =
+  "Narrow-query workload; genotype 11/22/44 independent individuals")
+budget <- scaling[
+  (scaling$workload == "epilepsy" & scaling$threads == 4L & scaling$scale == 4L) |
+    (scaling$workload == "genotypes" & scaling$scale == 4L),
+  c("workload", "threads", "samples", "input_rows", "output_rows",
+    "peak_rss_mib", "peak_temp_mib")]
+budget$build_payload_mib <- c(95.65, 27.69, 27.69)
+budget$budget_mib <- pmin(1024, 512 + 3 * budget$build_payload_mib)
+budget$within_budget <- budget$peak_rss_mib <= budget$budget_mib &
+  budget$peak_temp_mib == 0
+stopifnot(all(budget$within_budget))
+knitr::kable(budget, digits = 2,
+  caption = "512 MiB fixed overhead + 3× decoded build payload, capped at 1 GiB")
 ```
 
 ## Indexed 30x CRAM sensitivity
