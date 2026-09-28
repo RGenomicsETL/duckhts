@@ -7,12 +7,19 @@ output: github_document
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
 root <- normalizePath("..", mustWork = TRUE)
 runs <- utils::read.delim(file.path(root, "benchmarks", "ancestry_panel_scaling.tsv"),
-                          colClasses = c(panel_sha256 = "character"))
+                          colClasses = c(panel_sha256 = "character",
+                                         package_code_sha256 = "character",
+                                         extension_sha256 = "character"))
 identity <- utils::read.delim(file.path(root, "benchmarks", "ancestry_panel_implementations.tsv"),
                               colClasses = "character")
 tree_blob <- system2("git", c("-C", root, "hash-object", "r/Rduckhts/R/ancestry_panel.R"), stdout = TRUE)
+# Every measured row carries the hashes of the build its process loaded; they must equal
+# the recorded build of its implementation.
+recorded <- identity[match(runs$implementation, identity$implementation), ]
 stopifnot(setequal(identity$implementation, unique(runs$implementation)),
-          identical(identity$builder_blob[identity$implementation == "final"], tree_blob))
+          identical(identity$builder_blob[identity$implementation == "final"], tree_blob),
+          identical(runs$package_code_sha256, recorded$package_code_sha256),
+          identical(runs$extension_sha256, recorded$extension_sha256))
 mib <- function(bytes) bytes / 1048576
 # Budget, declared before measuring: fixed overhead plus three times the live state the
 # builder needs, which is its per-locus eligibility state. Each reference locus keeps a
@@ -97,7 +104,8 @@ This report measures three builders on the same inputs:
 Each builder is an installed Rduckhts library recorded by
 `benchmark_ancestry_panel_identity.R`: the commit it was built from, the git blob of its
 `ancestry_panel.R` (verified against the source tree it was built from), and hashes of
-the installed package code and extension. The develop library was built from the
+the installed package code and extension. Every measured process records the hashes of
+the build it loaded, and the report requires them to match. The develop library was built from the
 DuckVEP-removal branch's merge of `develop`, whose panel builder is byte-identical to
 `develop` at `d8475811`. The final builder's source equals this tree's.
 

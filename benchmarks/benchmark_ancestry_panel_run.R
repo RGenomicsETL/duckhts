@@ -20,6 +20,14 @@ if (identical(args[1], "--worker")) {
   suppressPackageStartupMessages({
     library(DBI); library(Rduckhts); library(duckhtsbench)
   })
+  # Identify the Rduckhts build this process loaded, before any work that could fail.
+  loaded <- find.package("Rduckhts")
+  extension <- list.files(file.path(loaded, "duckhts_extension"), pattern = "\\.duckdb_extension$",
+                          recursive = TRUE, full.names = TRUE)
+  stopifnot(length(extension) == 1L)
+  cat(sprintf("BUILD\t%s\t%s\n",
+              digest::digest(file = file.path(loaded, "R", "Rduckhts.rdb"), algo = "sha256"),
+              digest::digest(file = extension, algo = "sha256")))
   parquet <- duckhts_bench_stage_ancestry_parquet()
   con <- rduckhts_connect()
   spill <- tempfile("panel-spill-")
@@ -98,7 +106,7 @@ names(libs) <- vapply(strsplit(args[-1], "=", fixed = TRUE), `[`, "", 1)
 fields <- c("loci", "groups", "pcs", "sites", "contigs", "panel_sha256", "seconds",
             "peak_buffer_bytes", "peak_temp_bytes", "peak_rss_kib")
 columns <- c("implementation", "mode", "quarters", "threads", "repetition", "memory_limit",
-             "status", fields)
+             "status", "package_code_sha256", "extension_sha256", fields)
 # Rows are appended as they finish, so an interrupted matrix resumes where it stopped.
 done <- if (file.exists(out_path)) utils::read.delim(out_path, colClasses = "character") else NULL
 if (is.null(done)) cat(paste(columns, collapse = "\t"), "\n", sep = "", file = out_path)
@@ -110,6 +118,8 @@ run <- function(impl, quarters, mode, threads, rep) {
   out <- suppressWarnings(system2("Rscript", shQuote(c(script, "--worker", libs[[impl]], quarters,
                                                        mode, threads)),
                                   stdout = TRUE, stderr = TRUE))
+  build <- strsplit(grep("^BUILD\t", out, value = TRUE), "\t")[[1]][-1]
+  stopifnot(length(build) == 2L)
   line <- grep("^RESULT\t", out, value = TRUE)
   if (length(line) == 1L) {
     values <- strsplit(line, "\t")[[1]][-1]
@@ -121,7 +131,7 @@ run <- function(impl, quarters, mode, threads, rep) {
   } else {
     stop(paste(out, collapse = "\n"))
   }
-  row <- c(key, memory_limit, status, values)
+  row <- c(key, memory_limit, status, build, values)
   message(paste(row, collapse = " "))
   cat(paste(row, collapse = "\t"), "\n", sep = "", file = out_path, append = TRUE)
 }
