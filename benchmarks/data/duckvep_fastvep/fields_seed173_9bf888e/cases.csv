@@ -1,9 +1,0 @@
-"case","input_records","input_alleles","prepared"
-"forward",1268,1268,TRUE
-"reverse",1264,1264,TRUE
-"three_exon_phase2",1389,1389,TRUE
-"partial_cds_end",1385,1385,TRUE
-"noncoding_first_exon",1389,1389,TRUE
-"noncoding",1198,1198,TRUE
-"noncoding_first_exon_phase1",1389,1389,TRUE
-"noncoding_first_exon_phase2",1389,1389,TRUE

@@ -1,2 +1,0 @@
-Annotating: /root/.cache/duckhts/benchmarks/variantkey-providers/raw/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz -> /dev/shm/duckvep-fastvep-312fbb27bc1f72/output.tsv
-Loaded 646577 transcripts from cache /root/.cache/duckhts/models/fastvep/ensembl-116-grch38-18177c26a0d1d2419fe43c3e8f6d4a0b5c4a3eb6/transcripts.cache

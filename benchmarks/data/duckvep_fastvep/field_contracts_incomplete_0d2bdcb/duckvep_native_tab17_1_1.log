@@ -1,4 +1,0 @@
-Terminated
-Error in run("Rscript", args) : benchmark command failed: Rscript (143)
-Calls: main -> duckvep_fastvep_run_job -> run
-Execution halted

@@ -1,5 +1,0 @@
-Annotating: test/duckvep/conformance/results/fastvep_fields_0d2bdcb_seed173/forward/input.vcf -> test/duckvep/conformance/results/fastvep_fields_0d2bdcb_seed173/forward/fastvep_native_tab17.tsv
-Loaded 1 transcripts from test/duckvep/conformance/results/fastvep_fields_0d2bdcb_seed173/forward/forward.gff3 (source label: forward.gff3)
-Memory-mapped reference FASTA from /root/.cache/duckhts/benchmarks/duckvep-projection/inputs/minimal.fa (using .fai index)
-Built sequences for 1 coding transcripts
-Saved transcript cache to test/duckvep/conformance/results/fastvep_fields_0d2bdcb_seed173/forward/fastvep.cache

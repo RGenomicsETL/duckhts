@@ -1,4 +1,0 @@
-Annotating: /root/.cache/duckhts/benchmarks/variantkey-providers/raw/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz -> /tmp/duckvep-fastvep-37812170c7c13d/output.tsv.vcf
-Loaded 644427 transcripts from cache /root/.cache/duckhts/models/fastvep/ensembl-116-grch38-duckvep-38da573c-fastvep-18177c2/transcripts.cache
-Memory-mapped reference FASTA from /root/.cache/duckhts/benchmarks/variantkey-providers/raw/Homo_sapiens.GRCh38.dna.primary_assembly.fa (using .fai index)
-[1] 47632503
