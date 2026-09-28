@@ -20,7 +20,8 @@
   proportion engine. `rduckhts_ancestry_panel()` selects biallelic unambiguous SNVs
   with complete, valid reference values and forward-strand alleles, and publishes
   the panel only after it validates. When more sites are eligible than `max_sites`,
-  it keeps every k-th site in genome order, so the panel spans every contig.
+  every contig keeps at least one site and the rest are shared in proportion to
+  each contig's eligible sites, spread evenly along it.
 
 # Rduckhts 1.5.2.9004-0.1.5
 

@@ -16,7 +16,9 @@
   positive whole numbers and PC identifiers are consecutive whole numbers. Every sample
   returns a row for every reference group, with NULL proportions when no variant
   matches. Group identifiers round-trip exactly. Matching audits count reversed sites
-  (including strand-flipped reversals, read as `1 - f`) and flipped sites.
+  (including strand-flipped reversals, read as `1 - f`) and flipped sites. BAM/CRAM
+  site panels capped at `max_sites` keep every contig, sharing the remaining sites in
+  proportion to each contig's eligible sites.
 
 - The benchmark registry pins bigsnpr's reference frequencies and loadings, staged once
   as a checksum-bound sorted Parquet product whose receipt certifies unique loci and

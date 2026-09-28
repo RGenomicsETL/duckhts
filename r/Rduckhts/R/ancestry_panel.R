@@ -17,8 +17,10 @@
 #'   region, position, allele_a and allele_b.
 #' @param spacing_bp Genomic window width for deterministic spacing.
 #' @param max_sites Maximum number of selected sites. When more sites are
-#'   eligible, every k-th eligible site in genome order is kept
-#'   (k = ceiling(eligible / max_sites)), so the panel spans every contig.
+#'   eligible, each contig keeps at least one site (the largest contigs, when
+#'   `max_sites` is below the contig count), the rest are shared in proportion
+#'   to each contig's eligible sites, and each contig's sites are spread evenly
+#'   along it.
 #' @param overwrite Replace an existing destination.
 #' @return A one-row data frame with panel SHA-256 and selected site count.
 #' @export
@@ -80,16 +82,34 @@ rduckhts_ancestry_panel <- function(
     "GROUP BY l.chromosome, l.position HAVING count(*) = count(DISTINCT l.pc) ",
     "AND bool_and(l.loading IS NOT NULL AND isfinite(l.loading)) ",
     "AND count(DISTINCT l.pc) = (SELECT count(DISTINCT pc) FROM ", loadings, "))), ",
-    # When more sites are eligible than max_sites, keep every k-th in genome order
-    # (k = ceil(n / max_sites)): at most max_sites, spread across every contig,
-    # deterministic. Truncating the sorted list would fill the panel from the
-    # first contigs only.
+    # Cap at max_sites without dropping contigs: every contig first gets one site
+    # (the largest contigs, when max_sites is below the contig count), the rest
+    # are shared in proportion to each contig's remaining eligible sites by
+    # largest remainders, and each contig's allocation is spread evenly over its
+    # position order. Integer arithmetic keeps the allocation exact.
     "chosen AS (", candidates, "), ordered AS (SELECT region, position, ",
     "least(allele_a,allele_b) AS allele_a, greatest(allele_a,allele_b) AS allele_b, ",
-    "row_number() OVER (ORDER BY region, position, least(allele_a,allele_b), ",
-    "greatest(allele_a,allele_b)) - 1 AS rank, count(*) OVER () AS eligible FROM chosen), ",
-    "limited AS (SELECT region, position, allele_a, allele_b FROM ordered ",
-    "WHERE rank % CAST(ceil(eligible::DOUBLE / ", max_sites, ") AS BIGINT) = 0) ",
+    "row_number() OVER (PARTITION BY region ORDER BY position, least(allele_a,allele_b), ",
+    "greatest(allele_a,allele_b)) - 1 AS r, count(*) OVER (PARTITION BY region) AS n_c ",
+    "FROM chosen), ",
+    "contigs AS (SELECT region, any_value(n_c) AS n_c FROM ordered GROUP BY region), ",
+    "totals AS (SELECT sum(n_c) AS n, count(*) AS c FROM contigs), ",
+    "shares AS (SELECT region, n_c, n, c, ",
+    "CASE WHEN n > ", max_sites, " AND c <= ", max_sites, " THEN ",
+    "((", max_sites, " - c) * (n_c - 1)) // (n - c) ELSE 0 END AS base, ",
+    "CASE WHEN n > ", max_sites, " AND c <= ", max_sites, " THEN ",
+    "((", max_sites, " - c) * (n_c - 1)) % (n - c) ELSE 0 END AS rest ",
+    "FROM contigs, totals), ",
+    "allocation AS (SELECT region, CASE ",
+    "WHEN n <= ", max_sites, " THEN n_c ",
+    "WHEN c <= ", max_sites, " THEN 1 + base + CASE WHEN ",
+    "row_number() OVER (ORDER BY rest DESC, region) <= ",
+    "(", max_sites, " - c) - (SELECT sum(base) FROM shares) THEN 1 ELSE 0 END ",
+    "ELSE CASE WHEN row_number() OVER (ORDER BY n_c DESC, region) <= ", max_sites,
+    " THEN 1 ELSE 0 END END AS a FROM shares), ",
+    "limited AS (SELECT o.region, o.position, o.allele_a, o.allele_b FROM ordered o ",
+    "JOIN allocation USING (region) WHERE a > 0 AND ",
+    "(o.r = 0 OR (o.r * a) // o.n_c > ((o.r - 1) * a) // o.n_c)) ",
     "SELECT ", sql_quote_string(con, assembly), " AS assembly, ",
     "(row_number() OVER (ORDER BY region, position, allele_a, allele_b)-1)::UBIGINT AS site_index, ",
     "region, position::UBIGINT AS position, allele_a, allele_b FROM limited"
