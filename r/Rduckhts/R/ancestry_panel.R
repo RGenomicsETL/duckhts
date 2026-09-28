@@ -43,7 +43,7 @@ rduckhts_ancestry_panel <- function(
     ), spacing_bp)
   } else {
     paste0(
-      "SELECT s.chromosome AS region, s.position, p.allele_a, p.allele_b FROM sites s ",
+      "SELECT s.chromosome AS region, s.position, s.ra AS allele_a, s.rb AS allele_b FROM sites s ",
       "JOIN (SELECT region, position, min(allele_a) AS allele_a, min(allele_b) AS allele_b ",
       "FROM ", sql_quote_identifier(con, candidate_table),
       " GROUP BY region, position HAVING count(*) = 1) p ",
@@ -78,7 +78,11 @@ rduckhts_ancestry_panel <- function(
     "(row_number() OVER (ORDER BY region, position, allele_a, allele_b)-1)::UBIGINT AS site_index, ",
     "region, position::UBIGINT AS position, allele_a, allele_b FROM limited"
   )
-  .duckhts_create_table(con, table_name, query, overwrite)
-  DBI::dbGetQuery(con, sprintf("SELECT count(*) AS sites, duckhts_somalier_panel_sha256(%s) AS panel_sha256 FROM %s",
-                                sql_quote_string(con, table_name), sql_quote_identifier(con, table_name)))
+  DBI::dbWithTransaction(con, {
+    .duckhts_create_table(con, table_name, query, overwrite)
+    DBI::dbGetQuery(con, sprintf(
+      "SELECT count(*) AS sites, duckhts_somalier_panel_sha256(%s) AS panel_sha256 FROM %s",
+      sql_quote_string(con, table_name), sql_quote_identifier(con, table_name)
+    ))
+  })
 }

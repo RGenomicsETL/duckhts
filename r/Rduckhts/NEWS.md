@@ -1,5 +1,9 @@
 # Rduckhts 1.5.2.9004-0.1.5
 
+- `rduckhts_ancestry_panel()` writes forward-strand reference alleles for
+  complemented candidate matches. Empty panels leave no destination table;
+  failed replacements preserve existing tables.
+
 - Ancestry reference group frequencies must be in [0, 1] on matched wide
   sites and throughout validated long references. The bundled reference
   staging receipt certifies the same range.

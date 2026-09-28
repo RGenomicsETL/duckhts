@@ -2,6 +2,10 @@
 
 # duckhts 1.5.2.9004
 
+- BAM/CRAM ancestry panels emit forward-strand reference alleles for complemented
+  candidate matches. Panel creation validates the SHA-256 before commit; an empty
+  panel leaves no destination and failed replacements preserve the existing table.
+
 - Ancestry reference group frequencies must be in [0, 1]; staged Parquet
   products certify this range along with finite numeric values.
 

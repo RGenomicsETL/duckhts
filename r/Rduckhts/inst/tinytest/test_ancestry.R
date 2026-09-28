@@ -31,6 +31,28 @@ test_ancestry_relations <- function() {
                                            "ancestry_matched", "GRCh38",
                                            candidate_table = "ancestry_candidates")
   expect_equal(matched_panel$panel_sha256, panel$panel_sha256)
+  dbExecute(con, "CREATE TABLE ancestry_empty_candidates AS SELECT * FROM ancestry_candidates WHERE false")
+  expect_error(rduckhts_ancestry_panel(
+    con, "ancestry_ref", "ancestry_pc", "ancestry_retry", "GRCh38",
+    candidate_table = "ancestry_empty_candidates"), pattern = "panel is empty")
+  expect_false(dbExistsTable(con, "ancestry_retry"))
+  expect_error(rduckhts_ancestry_panel(
+    con, "ancestry_ref", "ancestry_pc", "ancestry_matched", "GRCh38",
+    candidate_table = "ancestry_empty_candidates", overwrite = TRUE),
+    pattern = "panel is empty")
+  expect_equal(dbGetQuery(con, "SELECT count(*) AS sites FROM ancestry_matched")$sites, 5)
+  expect_equal(dbGetQuery(con,
+    "SELECT duckhts_somalier_panel_sha256('ancestry_matched') AS hash")$hash,
+    matched_panel$panel_sha256)
+  dbExecute(con, "INSERT INTO ancestry_empty_candidates SELECT * FROM ancestry_candidates WHERE position = 100")
+  retry <- rduckhts_ancestry_panel(
+    con, "ancestry_ref", "ancestry_pc", "ancestry_retry", "GRCh38",
+    candidate_table = "ancestry_empty_candidates", overwrite = FALSE)
+  expect_equal(retry$sites, 1)
+  replaced <- rduckhts_ancestry_panel(
+    con, "ancestry_ref", "ancestry_pc", "ancestry_matched", "GRCh38",
+    candidate_table = "ancestry_empty_candidates", overwrite = TRUE)
+  expect_equal(replaced$panel_sha256, retry$panel_sha256)
   dbExecute(con, paste(
     "CREATE TABLE ancestry_input AS SELECT 'S' AS sample_id, chromosome, position, allele_a, allele_b,",
     "sum(CASE WHEN group_id = 'A' THEN 0.7 ELSE 0.3 END * frequency) AS frequency",
@@ -260,6 +282,26 @@ test_ancestry_bam_cram <- function() {
     "FROM ancestry_bam_panel, (VALUES (1), (2)) p(pc)"
   ))
   dbExecute(con, "CREATE TABLE ancestry_bam_correction AS SELECT 1 AS pc, 1.0 AS coefficient UNION ALL SELECT 2, 1.0")
+  dbExecute(con, paste(
+    "CREATE TABLE ancestry_complement_candidate AS SELECT 'CHROMOSOME_I' AS region,",
+    "914 AS position, 'T' AS allele_a, 'G' AS allele_b"
+  ))
+  flipped_panel <- rduckhts_ancestry_panel(
+    con, "ancestry_bam_ref", "ancestry_bam_pc", "ancestry_forward_panel", "WBcel235",
+    candidate_table = "ancestry_complement_candidate")
+  expect_equal(flipped_panel$sites, 1)
+  expect_equal(dbGetQuery(con,
+    "SELECT allele_a, allele_b FROM ancestry_forward_panel"),
+    data.frame(allele_a = "A", allele_b = "C"))
+  for (source in c("range.bam", "range.cram")) {
+    index <- if (source == "range.bam") "range.bam.bai" else "range.cram.crai"
+    counts <- rduckhts_somalier_bam_counts(
+      con, paths(source), "S", paths("ce.fa"),
+      panel_table = "ancestry_forward_panel", index_path = paths(index),
+      reference_index_path = paths("ce.fa.fai"))
+    expect_equal(counts$status, "measured")
+    expect_equal(c(counts$a, counts$b), c(1, 0))
+  }
   bam <- rduckhts_ancestry_bam(
     con, paths("range.bam"), "S", paths("ce.fa"), "ancestry_bam_panel",
     "ancestry_bam_ref", "ancestry_bam_pc", "ancestry_bam_correction",
