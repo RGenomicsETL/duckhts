@@ -1602,6 +1602,36 @@ SELECT duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc FROM read_fastq('reads.fastq.gz
 WITH q AS (SELECT duckhts_fastq_qc(SEQUENCE, QUALITY) AS qc FROM read_fastq('reads.fastq.gz')) SELECT cycle.* FROM q, UNNEST(qc.cycles) AS u(cycle);
 ```
 
+## duckhts_somalier_spacing
+
+Greedily select ranked Somalier candidate positions at a minimum genomic distance.
+
+Signature:
+
+```sql
+duckhts_somalier_spacing(positions UBIGINT[], distance UBIGINT)
+```
+
+Returns:
+
+```
+BOOLEAN[]
+```
+
+### Ordering
+
+positions must be ordered by AF rank within one chromosome. The returned mask has one element per input position; the first position wins each conflict, with equal positions conflicting. Positions are positive one-based integers; distance is positive and candidates are limited to one million per call.
+
+### Recipe
+
+Filter a typed read_bcf-style relation in SQL, group candidates by chromosome with list(CAST(POS AS UBIGINT) ORDER BY score, deterministic_tie_key), call this scalar on the ordered list, expand its Boolean mask, apply class-specific caps, and number the final rows by chromosome and position. rduckhts_somalier_find_sites() composes the complete recipe on the caller connection, including caller TEMP tables. No private connection or init-time macro is involved.
+
+### Examples
+
+```sql
+SELECT duckhts_somalier_spacing([100, 110, 109]::UBIGINT[], 10);
+```
+
 ## duckhts_somalier_import_sites
 
 Import an already selected Somalier sites VCF/BCF as one canonical panel and population-frequency relation.

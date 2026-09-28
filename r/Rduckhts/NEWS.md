@@ -1,15 +1,21 @@
-# Rduckhts 1.5.2.9003-0.1.5
+# Rduckhts 1.5.2.9004-0.1.5
 
-- `rduckhts_ancestry_proportions_wide()` accepts a keyed wide reference relation,
-  including a view over the staged Parquet ancestry product. It uses a temporary
-  keyed Parquet relation for allele-aligned frequencies and computes projection
-  and quality aggregates without materializing per-variant PC-by-group rows.
+- `rduckhts_somalier_find_sites()` selects canonical, provenance-bearing Somalier
+  panels from typed population relations, Parquet, or VCF/BCF with caller-visible
+  interval and allele exclusions. Interval relations use `chrom`, `start`, `end`,
+  so a view over `read_bed()` can be passed directly. Equal AF scores retain input scan order and
+  X/Y sites remain unspaced by default, matching Somalier v0.3.4. The
+  `tie_order = "lexical"` and `sex_spacing = "enforced"` options provide
+  deterministic lexical ties and X/Y minimum-distance spacing.
 
 - `rduckhts_ancestry_proportions()` matches allele-frequency or diploid-dosage
-  relations to caller-owned reference products, projects them by PC, and reports
-  proportions with matching audits and correlation gates. Missing genotypes are
-  dropped. `rduckhts_ancestry_bam()` obtains site counts directly from indexed
-  BAM/CRAM and offers allele-fraction or balance-rule genotype frequencies.
+  relations to caller-owned reference products and reports ancestry proportions with
+  matching audits and correlation gates; missing genotypes are dropped.
+  `rduckhts_ancestry_proportions_wide()` takes a keyed wide reference relation, such as
+  a view over the staged Parquet product. `rduckhts_ancestry_bam()` obtains site counts
+  from indexed BAM/CRAM with allele-fraction or balance-rule genotype frequencies.
+
+# Rduckhts 1.5.2.9003-0.1.5
 
 - The bundled DuckHTS extension loads on DuckDB 2.0; SQL lambdas use the
   `lambda x:` syntax (DuckDB >= 1.3).

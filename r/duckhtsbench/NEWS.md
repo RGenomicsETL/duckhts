@@ -1,5 +1,8 @@
 # duckhtsbench 0.0.0.9001
 
+- register checksum-verified MANE and GENCODE GFF3 inputs and a pinned GFFBase
+  wheel for the feature-database benchmark
+
 - licensed GPL (>= 2), like the other DuckHTS R packages (previously MIT)
 
 - require matching reference/read SHA-256 identities before reusing a staged

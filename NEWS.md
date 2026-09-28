@@ -1,23 +1,30 @@
 # DuckHTS Extension News
 
+# duckhts 1.5.2.9004
+
+- Somalier panel selection (`rduckhts_somalier_find_sites()`) selects sites from
+  caller-visible population relations, including TEMP tables, with per-call filters
+  and site caps; include and exclude intervals use `chrom`, `start`, `end` as
+  `read_bed()` returns them. `duckhts_somalier_spacing()` applies greedy
+  minimum-distance spacing over an ordered chromosome. Somalier v0.3.4 mode keeps input order for equal AF
+  scores and selects X/Y without spacing; lexical ties and enforced X/Y spacing are
+  opt-in. Nearby-variant exclusion runs in ordered position passes, and only
+  qualifying sites are retained during the scan.
+
+- The GFFBase benchmark includes a registry-staged, parity-checked feature-database
+  comparison using SQL over `read_gff`, with reproducible process and query measurements.
+
+- `duckhts_ancestry_proportions()` estimates reference-group ancestry proportions by
+  bigsnpr's `snp_ancestry_summary` method: SQL aggregates PC projections of matched
+  variants, and a native solver applies a bounded nearest-positive-definite repair and
+  the constrained fit, with correlation quality gates. Inputs are allele frequencies
+  from summary statistics, diploid genotypes, or BAM/CRAM allele counts.
+
+- The benchmark registry pins bigsnpr's reference frequencies and loadings, staged once
+  as a checksum-bound sorted Parquet product, with the epilepsy summary statistics and
+  GRCh37 phase-3 chr22 genotypes used for parity with bigsnpr and 30x CRAM comparisons.
+
 # duckhts 1.5.2.9003
-
-- A checksum-bound, sorted Parquet ancestry reference combines the pinned
-  bigsnpr CSV frequencies and loadings as DOUBLE columns. Narrow Parquet
-  conversion bounds cold staging memory. The wide ancestry query aligns
-  variants into a temporary keyed relation and aggregates projection and
-  quality moments without a per-variant PC-by-group join.
-
-- The benchmark registry pins the paired bigsnpr ancestry reference products,
-  epilepsy summary statistics, and GRCh37 phase-3 chr22 genotypes. The ancestry
-  benchmark compares published bigsnpr coefficients and public individual
-  genotypes using those checked inputs; indexed 30x CRAM comparisons retain
-  depth and correlation-gate outcomes.
-
-- `duckhts_ancestry_proportions` solves nonnegative reference-group projections
-  from SQL-aggregated PC products, using a bounded nearest-positive-definite
-  repair and a native constrained solver. The catalog documents relational
-  matching, quality gates, and genotype missingness.
 
 - DuckHTS loads on DuckDB 2.0; SQL lambdas use the `lambda x:` syntax
   (DuckDB >= 1.3).

@@ -1,0 +1,15 @@
+gate	records
+src	11
+eligible	10
+pass_snv	10
+af_an	3
+annotation_gate	3
+qc_gate	3
+interval_gate	3
+gated	3
+indels	0
+snps	8
+indel_clear	3
+neighbors	3
+kept	3
+selected	3
