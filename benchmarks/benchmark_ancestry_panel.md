@@ -24,20 +24,22 @@ Each builder is an installed Rduckhts library verified by
 from: every tracked code file of `r/Rduckhts` at that commit is
 byte-identical in the tree the library was built from, which holds
 nothing else but build outputs, and every function in the installed
-namespace equals the function that commit’s R sources define. Builds are
-not bit-reproducible across build directories, so the hashes of the
-installed package code and extension then tie each measured run to its
-library. Every measured process records the hashes of the build it
-loaded, and the report requires them to match. The develop library was
-built from the DuckVEP-removal branch’s merge of `develop`, whose panel
-builder is byte-identical to `develop` at `d8475811`. The final
-builder’s source equals this tree’s.
+namespace equals the function that commit’s R sources define, and the
+installed extension binary equals one rebuilt from that commit, apart
+from R’s temporary install path embedded in it and the GNU build-id
+derived from that path. The hashes of the installed package code and
+extension then tie each measured run to its library. Every measured
+process records the hashes of the build it loaded, and the report
+requires them to match. The develop library was built from the
+DuckVEP-removal branch’s merge of `develop`, whose panel builder is
+byte-identical to `develop` at `d8475811`. The final builder’s source
+equals this tree’s.
 
-| implementation | commit       | builder_blob | verified_code_files | verified_functions | package_code_sha256 | extension_sha256 |
-|:---------------|:-------------|:-------------|:--------------------|:-------------------|:--------------------|:-----------------|
-| develop        | af8dd4ac705c | 69ade4e3e9a2 | 1444                | 141                | f0c752ff0a72        | c7876673b03f     |
-| distinct       | 36c212ba6112 | 6e72fea378d0 | 1543                | 143                | 36bd0e3dada4        | 4e97043b5372     |
-| final          | 5090db2465dc | 9fdc2acf13d7 | 1543                | 143                | 31427abdbb52        | 88d173d8be15     |
+| implementation | commit       | builder_blob | verified_code_files | verified_functions | extension_rebuilt_equal | package_code_sha256 | extension_sha256 |
+|:---------------|:-------------|:-------------|:--------------------|:-------------------|:------------------------|:--------------------|:-----------------|
+| develop        | af8dd4ac705c | 69ade4e3e9a2 | 1444                | 141                | TRUE                    | f0c752ff0a72        | c7876673b03f     |
+| distinct       | 36c212ba6112 | 6e72fea378d0 | 1543                | 143                | TRUE                    | 36bd0e3dada4        | 4e97043b5372     |
+| final          | 5090db2465dc | 9fdc2acf13d7 | 1543                | 143                | TRUE                    | 31427abdbb52        | 88d173d8be15     |
 
 `benchmark_ancestry_panel_run.R` stages bigsnpr’s reference through the
 benchmark registry (`ancestry_reference_parquet`: 5,816,590 loci, 21

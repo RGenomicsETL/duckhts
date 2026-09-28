@@ -11,8 +11,11 @@
 #   (NEWS, README, man/) is not compared;
 # - every function in the installed Rduckhts namespace equals the function its R
 #   sources at <commit> define, compared without source references.
-# Builds are not bit-reproducible across build directories, so hashes of the installed
-# package code and extension are recorded to tie measured runs to these libraries.
+# - the installed extension binary equals one rebuilt from <commit> (git archive, R CMD
+#   build and INSTALL), after masking the two fields a build directory changes: R's
+#   temporary install path embedded in the binary and the GNU build-id derived from it.
+# Hashes of the installed package code and extension then tie measured runs to these
+# libraries.
 args <- commandArgs(TRUE)
 
 if (identical(args[1], "--functions")) {
@@ -34,6 +37,34 @@ if (identical(args[1], "--functions")) {
                            paste(head(differ, 10), collapse = ", "))
   cat(length(names), "\n")
   quit(save = "no")
+}
+
+# Mask R's temporary install path and the GNU build-id note; everything else must match.
+masked_extension <- function(path) {
+  bytes <- readBin(path, "raw", file.info(path)$size)
+  text <- rawToChar(replace(bytes, bytes == as.raw(0), as.raw(1)))
+  hit <- gregexpr("/tmp/Rtmp[A-Za-z0-9]{6}/R\\.INSTALL[0-9a-f]+", text, useBytes = TRUE)[[1]]
+  if (hit[1] > 0) for (i in seq_along(hit)) {
+    bytes[hit[i]:(hit[i] + attr(hit, "match.length")[i] - 1L)] <- as.raw(0x23)
+  }
+  note <- system2("readelf", c("-S", "-W", shQuote(path)), stdout = TRUE)
+  note <- grep("\\.note\\.gnu\\.build-id", note, value = TRUE)
+  stopifnot(length(note) == 1L)
+  offset <- strtoi(strsplit(trimws(sub(".*NOTE", "", note)), "[[:space:]]+")[[1]][2], 16L)
+  bytes[(offset + 17L):(offset + 36L)] <- as.raw(0)
+  bytes
+}
+
+rebuilt_extension <- function(commit) {
+  work <- tempfile("rduckhts-rebuild-")
+  dir.create(file.path(work, "lib"), recursive = TRUE)
+  system2("sh", c("-c", shQuote(sprintf(
+    "cd %s && git -C %s archive %s r/Rduckhts | tar -x && R CMD build --no-build-vignettes --no-manual r/Rduckhts >build.log 2>&1 && MAKEFLAGS=-j16 R CMD INSTALL -l lib Rduckhts_*.tar.gz >install.log 2>&1",
+    shQuote(work), shQuote(getwd()), commit))))
+  found <- list.files(file.path(work, "lib", "Rduckhts", "duckhts_extension"),
+                      pattern = "\\.duckdb_extension$", recursive = TRUE, full.names = TRUE)
+  if (length(found) != 1L) stop("rebuilding ", commit, " did not produce one extension; see ", work)
+  found
 }
 
 stopifnot(length(args) >= 2L)
@@ -68,11 +99,22 @@ rows <- lapply(strsplit(args[-1], "=", fixed = TRUE), function(p) {
   extension <- list.files(file.path(pkg, "duckhts_extension"), pattern = "\\.duckdb_extension$",
                           recursive = TRUE, full.names = TRUE)
   stopifnot(length(extension) == 1L)
+  rebuilt <- rebuilt_extension(commit)
+  installed_bytes <- masked_extension(extension)
+  rebuilt_bytes <- masked_extension(rebuilt)
+  if (!identical(installed_bytes, rebuilt_bytes)) {
+    n <- min(length(installed_bytes), length(rebuilt_bytes))
+    differ <- which(installed_bytes[seq_len(n)] != rebuilt_bytes[seq_len(n)])
+    stop(p[1], ": installed extension differs from one rebuilt from ", commit, " (sizes ",
+         length(installed_bytes), " and ", length(rebuilt_bytes), "; first differing bytes ",
+         paste(head(differ, 5), collapse = ", "), "); the rebuild is kept at ", rebuilt)
+  }
   description <- read.dcf(file.path(pkg, "DESCRIPTION"), fields = c("Version", "Packaged"))
   data.frame(implementation = p[1], commit = commit,
              builder_blob = git("rev-parse", paste0(commit, ":r/Rduckhts/R/ancestry_panel.R")),
              verified_code_files = length(code),
              verified_functions = as.integer(trimws(tail(functions, 1))),
+             extension_rebuilt_equal = TRUE,
              package_version = description[1, "Version"],
              package_code_sha256 = digest::digest(file = file.path(pkg, "R", "Rduckhts.rdb"),
                                                   algo = "sha256"),
