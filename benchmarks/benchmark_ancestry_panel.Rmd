@@ -17,6 +17,8 @@ tree_blob <- system2("git", c("-C", root, "hash-object", "r/Rduckhts/R/ancestry_
 # the recorded build of its implementation.
 recorded <- identity[match(runs$implementation, identity$implementation), ]
 stopifnot(setequal(identity$implementation, unique(runs$implementation)),
+          all(as.integer(identity$verified_code_files) > 0L),
+          all(as.integer(identity$verified_functions) > 0L),
           identical(identity$builder_blob[identity$implementation == "final"], tree_blob),
           identical(runs$package_code_sha256, recorded$package_code_sha256),
           identical(runs$extension_sha256, recorded$extension_sha256))
@@ -101,18 +103,22 @@ This report measures three builders on the same inputs:
 
 ## Method
 
-Each builder is an installed Rduckhts library recorded by
-`benchmark_ancestry_panel_identity.R`: the commit it was built from, the git blob of its
-`ancestry_panel.R` (verified against the source tree it was built from), and hashes of
-the installed package code and extension. Every measured process records the hashes of
+Each builder is an installed Rduckhts library verified by
+`benchmark_ancestry_panel_identity.R` against the commit it was built from: every
+tracked code file of `r/Rduckhts` at that commit is byte-identical in the tree the
+library was built from, which holds nothing else but build outputs, and every function
+in the installed namespace equals the function that commit's R sources define. Builds
+are not bit-reproducible across build directories, so the hashes of the installed
+package code and extension then tie each measured run to its library. Every measured process records the hashes of
 the build it loaded, and the report requires them to match. The develop library was built from the
 DuckVEP-removal branch's merge of `develop`, whose panel builder is byte-identical to
 `develop` at `d8475811`. The final builder's source equals this tree's.
 
 ```{r identity}
-shown <- identity[c("implementation", "commit", "builder_blob", "package_code_sha256",
-                    "extension_sha256")]
-shown[-1] <- lapply(shown[-1], substr, 1, 12)
+shown <- identity[c("implementation", "commit", "builder_blob", "verified_code_files",
+                    "verified_functions", "package_code_sha256", "extension_sha256")]
+hashes <- c("commit", "builder_blob", "package_code_sha256", "extension_sha256")
+shown[hashes] <- lapply(shown[hashes], substr, 1, 12)
 knitr::kable(shown)
 ```
 
