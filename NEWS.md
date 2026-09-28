@@ -2,6 +2,9 @@
 
 # duckhts 1.5.2.9004
 
+- Ancestry reference group frequencies must be in [0, 1]; staged Parquet
+  products certify this range along with finite numeric values.
+
 - Somalier panel selection (`rduckhts_somalier_find_sites()`) selects sites from
   caller-visible population relations, including TEMP tables, with per-call filters
   and site caps; include and exclude intervals use `chrom`, `start`, `end` as

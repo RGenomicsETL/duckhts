@@ -53,13 +53,20 @@
                                               groups)))
   invalid <- paste0("(", numeric_columns, " IS NULL OR NOT isfinite(",
                     numeric_columns, "))", collapse = " OR ")
+  group_columns <- paste0("r.", quote_id(groups))
+  out_of_range <- paste0("(", group_columns, " < 0 OR ", group_columns,
+                         " > 1)", collapse = " OR ")
   invalid_site <- DBI::dbGetQuery(con, paste0(
-    "SELECT EXISTS (SELECT 1 FROM ", indexed_source, " a JOIN ",
-    reference_source, " r ON a.chromosome = r.chromosome ",
-    "AND a.position = r.position AND a.allele_a = r.allele_a ",
-    "AND a.allele_b = r.allele_b WHERE ", invalid, ") AS present"))$present
-  if (invalid_site) {
+    "SELECT coalesce(bool_or(", invalid, "), false) AS nonfinite, ",
+    "coalesce(bool_or(", out_of_range, "), false) AS out_of_range FROM ",
+    indexed_source, " a JOIN ", reference_source,
+    " r ON a.chromosome = r.chromosome AND a.position = r.position ",
+    "AND a.allele_a = r.allele_a AND a.allele_b = r.allele_b"))
+  if (invalid_site$nonfinite) {
     stop("reference sites require finite frequencies and loadings", call. = FALSE)
+  }
+  if (invalid_site$out_of_range) {
+    stop("reference sites require frequencies in [0, 1]", call. = FALSE)
   }
   DBI::dbExecute(con, paste0("CREATE TEMP TABLE ", quote_id(moments), " AS ",
     .ancestry_moments_query(con, reference_source, groups, coefficients,

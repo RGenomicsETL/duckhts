@@ -1,5 +1,9 @@
 # Rduckhts 1.5.2.9004-0.1.5
 
+- Ancestry reference group frequencies must be in [0, 1] on matched wide
+  sites and throughout validated long references. The bundled reference
+  staging receipt certifies the same range.
+
 - `rduckhts_somalier_find_sites()` selects canonical, provenance-bearing Somalier
   panels from typed population relations, Parquet, or VCF/BCF with caller-visible
   interval and allele exclusions. Interval relations use `chrom`, `start`, `end`,

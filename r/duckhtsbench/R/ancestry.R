@@ -5,7 +5,7 @@
 #' (chromosome, position, allele_a, allele_b), ordered by that key. A receipt
 #' binds its checksum to both source checksums, the registry derivation and the
 #' DuckDB writer version, and certifies one normalized locus per row with
-#' complete finite numeric fields.
+#' complete finite numeric fields and group frequencies in [0, 1].
 #'
 #' @return The cached Parquet path.
 #' @export
@@ -30,7 +30,7 @@ duckhts_bench_stage_ancestry_parquet <- function() {
   version <- as.character(utils::packageVersion("duckdb"))
   expected <- data.frame(id = c(source_ids, "duckdb", "derivation", "validation", "parquet"),
                          sha256 = c(source_hashes, version, derivation,
-                                    "finite_unique_v1", ""))
+                                    "frequency_unit_unique_v2", ""))
   if (file.exists(output) && file.exists(receipt)) {
     stored <- tryCatch(utils::read.delim(receipt, colClasses = "character"),
                        error = function(e) NULL)
@@ -106,10 +106,12 @@ duckhts_bench_stage_ancestry_parquet <- function() {
   numeric_columns <- c(pcs, groups)
   complete <- paste0("(", quote_id(numeric_columns), " IS NULL OR NOT isfinite(",
                      quote_id(numeric_columns), "))", collapse = " OR ")
+  frequency_range <- paste0("(", quote_id(groups), " < 0 OR ", quote_id(groups),
+                            " > 1)", collapse = " OR ")
   counts <- DBI::dbGetQuery(con, paste0(
     "SELECT count(*) AS n, count(DISTINCT (chromosome, position)) ",
     "AS unique_loci, count(*) FILTER (WHERE chromosome IS NULL OR position IS NULL ",
-    "OR allele_a IS NULL OR allele_b IS NULL OR ", complete,
+    "OR allele_a IS NULL OR allele_b IS NULL OR ", complete, " OR ", frequency_range,
     ") AS invalid FROM read_parquet(", quote_str(temporary), ")"))
   if (counts$n != row_counts[[1L]] || counts$n != row_counts[[2L]] ||
       counts$unique_loci != counts$n || counts$invalid != 0) {

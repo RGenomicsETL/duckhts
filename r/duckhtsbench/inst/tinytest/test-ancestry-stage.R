@@ -33,7 +33,7 @@ if (requireNamespace("DBI", quietly = TRUE) &&
   Sys.setenv(DUCKHTSBENCH_REGISTRY = registry, DUCKHTS_CACHE_DIR = root)
   path <- duckhts_bench_stage_ancestry_parquet()
   receipt <- utils::read.delim(paste0(path, ".sources.tsv"), colClasses = "character")
-  expect_equal(receipt$sha256[receipt$id == "validation"], "finite_unique_v1")
+  expect_equal(receipt$sha256[receipt$id == "validation"], "frequency_unit_unique_v2")
   expect_equal(receipt$sha256[receipt$id == "derivation"],
                digest::digest(plan$transform[plan$id == "ancestry_reference_parquet"],
                               algo = "sha256", serialize = FALSE))
@@ -70,6 +70,19 @@ if (requireNamespace("DBI", quietly = TRUE) &&
     digest::digest(file = source_path, algo = "sha256"))
   utils::write.table(plan, registry, sep = "\t", row.names = FALSE, quote = FALSE)
   expect_error(duckhts_bench_stage_ancestry_parquet(), pattern = "complete keyed row per locus")
+  for (value in c(-0.01, 1.01)) {
+    frequencies <- sources[["ancestry_ref_freqs"]]
+    frequencies$group1[1L] <- value
+    source_connection <- gzfile(source_path, "wt")
+    utils::write.csv(frequencies, source_connection, row.names = FALSE)
+    close(source_connection)
+    plan$supplier_identity[plan$id == "ancestry_ref_freqs"] <- paste0(
+      "bytes=", file.info(source_path)$size, ";sha256=",
+      digest::digest(file = source_path, algo = "sha256"))
+    utils::write.table(plan, registry, sep = "\t", row.names = FALSE, quote = FALSE)
+    expect_error(duckhts_bench_stage_ancestry_parquet(),
+                 pattern = "complete keyed row per locus")
+  }
   frequencies <- sources[["ancestry_ref_freqs"]]
   frequencies[1L, names(keys)] <- frequencies[2L, names(keys)]
   source_path <- file.path(root, plan$cache_relpath[plan$id == "ancestry_ref_freqs"])

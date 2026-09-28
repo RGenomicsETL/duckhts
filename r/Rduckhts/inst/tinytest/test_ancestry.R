@@ -91,6 +91,22 @@ test_ancestry_relations <- function() {
   expect_equal(wide$cor_pred, out$cor_pred, tolerance = 1e-6)
   expect_equal(wide$used_variants, out$used_variants)
   expect_equal(wide$input_variants, out$input_variants)
+  for (value in c(-0.01, 1.01)) {
+    dbExecute(con, paste0(
+      "CREATE OR REPLACE TEMP VIEW ancestry_range_wide AS SELECT * REPLACE ",
+      "(CASE WHEN position = 100 THEN ", value, " ELSE A END AS A) FROM ancestry_wide"))
+    expect_error(rduckhts_ancestry_proportions(
+      con, "ancestry_input", "ancestry_range_wide", "ancestry_wide_correction"),
+      pattern = "reference sites require frequencies in \\[0, 1\\]")
+    dbExecute(con, paste0(
+      "CREATE OR REPLACE TEMP VIEW ancestry_range_long AS SELECT * REPLACE ",
+      "(CASE WHEN position = 100 AND group_id = 'A' THEN ", value,
+      " ELSE frequency END AS frequency) FROM ancestry_ref"))
+    expect_error(rduckhts_ancestry_proportions(
+      con, "ancestry_input", "ancestry_range_long", "ancestry_pc",
+      "ancestry_correction"),
+      pattern = "reference sites require frequencies in \\[0, 1\\]")
+  }
   wide_gated <- rduckhts_ancestry_proportions(
     con, "ancestry_input", "ancestry_wide", "ancestry_wide_correction", min_cor = 1)
   expect_equal(wide_gated$status, rep("low_correlation", 2L))

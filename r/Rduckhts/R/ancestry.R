@@ -6,8 +6,9 @@
 #' relation with group_id and frequency plus a keyed pc/loading relation.
 #' Corrections contain pc and coefficient. Groups (1..30), PCs (1..64),
 #' frequencies and loadings must be complete and finite at each contributing
-#' reference locus; duplicate loci matching the input are rejected. Long
-#' references require complete keyed rows during pivoting. Inputs and
+#' reference locus; group frequencies must lie in [0, 1]. Duplicate loci
+#' matching the input are rejected. Long references require complete keyed
+#' rows during pivoting. Inputs and
 #' references must share an assembly, uppercase biallelic SNV alleles and
 #' reference orientation. Numeric chromosomes match
 #' after removing a `chr` prefix; other chromosome names match literally.
@@ -99,9 +100,11 @@ rduckhts_ancestry_proportions <- function(
     "OR loading IS NULL OR NOT isfinite(loading)) OR EXISTS (SELECT 1 FROM lp WHERE n != ",
     length(pcs), " OR distinct_n != ", length(pcs), ") OR EXISTS (",
     "SELECT 1 FROM rg LEFT JOIN lp USING (", keys, ") WHERE lp.n IS NULL) ",
-    "AS bad_loadings"))
+    "AS bad_loadings, EXISTS (SELECT 1 FROM r WHERE frequency < 0 OR frequency > 1) ",
+    "AS out_of_range"))
   if (invalid$bad_reference) stop("reference sites require one finite frequency per group", call. = FALSE)
   if (invalid$bad_loadings) stop("reference sites require one finite loading per PC", call. = FALSE)
+  if (invalid$out_of_range) stop("reference sites require frequencies in [0, 1]", call. = FALSE)
   quote_str <- function(x) as.character(DBI::dbQuoteString(con, x))
   frequency <- vapply(groups, function(g) paste0(
     "max(frequency) FILTER (WHERE group_id = ", quote_str(g), ") AS ", quote_id(g)),
