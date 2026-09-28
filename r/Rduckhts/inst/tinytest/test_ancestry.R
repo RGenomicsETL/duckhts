@@ -21,11 +21,21 @@ test_ancestry_relations <- function() {
   panel <- rduckhts_ancestry_panel(con, "ancestry_ref", "ancestry_pc",
                                    "ancestry_selected", "GRCh38", spacing_bp = 1,
                                    max_sites = 5)
-  expect_equal(panel$sites, 5)
+  # 8 eligible sites, max_sites = 5: every ceiling(8 / 5) = 2nd site in genome order.
+  expect_equal(panel$sites, 4)
   expect_equal(nchar(panel$panel_sha256), 64L)
   selected <- dbGetQuery(con, "SELECT site_index, position FROM ancestry_selected ORDER BY site_index")
-  expect_equal(selected$site_index, 0:4)
-  expect_equal(selected$position, 100:104)
+  expect_equal(selected$site_index, 0:3)
+  expect_equal(selected$position, c(100, 102, 104, 106))
+  # A capped panel spans every contig rather than filling from the first one.
+  dbExecute(con, "CREATE TEMP VIEW ancestry_two_contig_ref AS SELECT * FROM ancestry_ref UNION ALL SELECT * REPLACE ('chr2' AS chromosome) FROM ancestry_ref")
+  dbExecute(con, "CREATE TEMP VIEW ancestry_two_contig_pc AS SELECT * FROM ancestry_pc UNION ALL SELECT * REPLACE ('chr2' AS chromosome) FROM ancestry_pc")
+  two_contig <- rduckhts_ancestry_panel(con, "ancestry_two_contig_ref", "ancestry_two_contig_pc",
+                                        "ancestry_two_contig", "GRCh38", spacing_bp = 1,
+                                        max_sites = 8)
+  expect_equal(two_contig$sites, 8)
+  expect_equal(dbGetQuery(con, "SELECT region, count(*)::INTEGER AS n FROM ancestry_two_contig GROUP BY region ORDER BY region")$n,
+               c(4L, 4L))
   dbExecute(con, paste0(
     "CREATE TEMP VIEW ancestry_null_allele_ref AS SELECT * REPLACE ",
     "(CASE WHEN position = 100 AND group_id = 'A' THEN NULL ELSE allele_a END ",
@@ -33,9 +43,9 @@ test_ancestry_relations <- function() {
   null_panel <- rduckhts_ancestry_panel(
     con, "ancestry_null_allele_ref", "ancestry_pc", "ancestry_null_panel",
     "GRCh38", spacing_bp = 1, max_sites = 5)
-  expect_equal(null_panel$sites, 5)
+  expect_equal(null_panel$sites, 4)
   expect_equal(dbGetQuery(con, "SELECT position FROM ancestry_null_panel ORDER BY site_index")$position,
-               101:105)
+               c(101, 103, 105, 107))
   # Sites whose loadings are not finite, or whose frequencies fall outside [0, 1],
   # are not selected.
   dbExecute(con, paste0(
@@ -72,7 +82,7 @@ test_ancestry_relations <- function() {
     con, "ancestry_ref", "ancestry_pc", "ancestry_matched", "GRCh38",
     candidate_table = "ancestry_empty_candidates", overwrite = TRUE),
     pattern = "panel is empty")
-  expect_equal(dbGetQuery(con, "SELECT count(*) AS sites FROM ancestry_matched")$sites, 5)
+  expect_equal(dbGetQuery(con, "SELECT count(*) AS sites FROM ancestry_matched")$sites, 4)
   expect_equal(dbGetQuery(con,
     "SELECT duckhts_somalier_panel_sha256('ancestry_matched') AS hash")$hash,
     matched_panel$panel_sha256)

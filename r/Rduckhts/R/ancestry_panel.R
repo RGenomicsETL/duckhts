@@ -16,7 +16,9 @@
 #' @param candidate_table Optional site panel, e.g. a Somalier panel with
 #'   region, position, allele_a and allele_b.
 #' @param spacing_bp Genomic window width for deterministic spacing.
-#' @param max_sites Maximum number of selected sites.
+#' @param max_sites Maximum number of selected sites. When more sites are
+#'   eligible, every k-th eligible site in genome order is kept
+#'   (k = ceiling(eligible / max_sites)), so the panel spans every contig.
 #' @param overwrite Replace an existing destination.
 #' @return A one-row data frame with panel SHA-256 and selected site count.
 #' @export
@@ -78,9 +80,16 @@ rduckhts_ancestry_panel <- function(
     "GROUP BY l.chromosome, l.position HAVING count(*) = count(DISTINCT l.pc) ",
     "AND bool_and(l.loading IS NOT NULL AND isfinite(l.loading)) ",
     "AND count(DISTINCT l.pc) = (SELECT count(DISTINCT pc) FROM ", loadings, "))), ",
-    "chosen AS (", candidates, "), limited AS (SELECT region, position, ",
-    "least(allele_a,allele_b) AS allele_a, greatest(allele_a,allele_b) AS allele_b ",
-    "FROM chosen ORDER BY region, position, allele_a, allele_b LIMIT ", max_sites, ") ",
+    # When more sites are eligible than max_sites, keep every k-th in genome order
+    # (k = ceil(n / max_sites)): at most max_sites, spread across every contig,
+    # deterministic. Truncating the sorted list would fill the panel from the
+    # first contigs only.
+    "chosen AS (", candidates, "), ordered AS (SELECT region, position, ",
+    "least(allele_a,allele_b) AS allele_a, greatest(allele_a,allele_b) AS allele_b, ",
+    "row_number() OVER (ORDER BY region, position, least(allele_a,allele_b), ",
+    "greatest(allele_a,allele_b)) - 1 AS rank, count(*) OVER () AS eligible FROM chosen), ",
+    "limited AS (SELECT region, position, allele_a, allele_b FROM ordered ",
+    "WHERE rank % CAST(ceil(eligible::DOUBLE / ", max_sites, ") AS BIGINT) = 0) ",
     "SELECT ", sql_quote_string(con, assembly), " AS assembly, ",
     "(row_number() OVER (ORDER BY region, position, allele_a, allele_b)-1)::UBIGINT AS site_index, ",
     "region, position::UBIGINT AS position, allele_a, allele_b FROM limited"

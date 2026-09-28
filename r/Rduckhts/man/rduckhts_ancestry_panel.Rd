@@ -31,7 +31,9 @@ region, position, allele_a and allele_b.}
 
 \item{spacing_bp}{Genomic window width for deterministic spacing.}
 
-\item{max_sites}{Maximum number of selected sites.}
+\item{max_sites}{Maximum number of selected sites. When more sites are
+eligible, every k-th eligible site in genome order is kept
+(k = ceiling(eligible / max_sites)), so the panel spans every contig.}
 
 \item{overwrite}{Replace an existing destination.}
 }
