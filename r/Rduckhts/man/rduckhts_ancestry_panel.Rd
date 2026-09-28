@@ -34,8 +34,8 @@ region, position, allele_a and allele_b.}
 \item{max_sites}{Maximum number of selected sites. When more sites are
 eligible, each contig keeps at least one site (the largest contigs, when
 `max_sites` is below the contig count), the rest are shared in proportion
-to each contig's eligible sites, and each contig's sites are spread evenly
-along it.}
+to each contig's remaining eligible sites (beyond that first one), and each
+contig's sites are spread evenly along it.}
 
 \item{overwrite}{Replace an existing destination.}
 }
