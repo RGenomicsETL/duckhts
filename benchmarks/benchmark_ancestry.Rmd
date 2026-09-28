@@ -301,7 +301,8 @@ knitr::kable(reference_load, digits = 2)
 
 `benchmark_ancestry_scaling.R` runs three independent R processes per point
 with one or four DuckDB threads and the same registry-staged
-`ancestry_reference_parquet`. Input Parquet is emitted by
+`ancestry_reference_parquet`. Files are reused from the local cache across
+processes; the OS page cache is not cleared between repetitions. Input Parquet is emitted by
 `test/scripts/ancestry_bigsnpr_real.R` and `test/scripts/ancestry_1000g_real.R`
 from registry-staged `ancestry_epilepsy`, `ancestry_1000g_chr22` and the
 1000G sample panel; the scaling driver accepts those output paths as arguments.
