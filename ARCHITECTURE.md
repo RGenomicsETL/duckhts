@@ -82,8 +82,6 @@ small adapter boundary.
 
 - Long-lived registries are keyed by DuckDB database instance, never hidden process-wide
   singletons.
-- Named transcript/reference models are immutable after publication and may coexist in
-  one process.
 - Mutable htslib handles, interval cursors, sequence windows, result builders, and scratch
   arenas belong to one scan or worker.
 - Locks protect registry structure and lifetime transitions. They do not serialize kernel
@@ -93,23 +91,10 @@ small adapter boundary.
 
 ## Variant annotation and clinical evidence
 
-DuckVEP's deterministic consequence engine is a C kernel over an immutable transcript
-model. DuckDB prepares and verifies that model, streams sorted variants, joins population
-and clinical annotations, and materializes structured consequence rows. HGVS consumes the
-same lossless projected edit facts; it is not string formatting embedded in the hot
-consequence loop.
-
-Phased edits and structural events are first-class event shapes, not post-processing of
-independent SNV labels. The stateful stream must group phased edits by model, transcript,
-sample, phase set, and haplotype, and must retain every contributing variant identifier.
-
-ACMG/AMP reasoning, phenotype evidence, ClinVar, gnomAD, and similar knowledge belong in
-typed SQL relations above the deterministic engine. Rules should emit inspectable evidence
-and provenance, not only a final opaque classification. The C engine computes genomic
-facts; SQL composes the case-specific argument.
-
-The current transcript-model build, ownership, execution, and validation map is
-[`design/duckvep.md`](design/duckvep.md).
+DuckHTS reads VCF/BCF records and parses existing CSQ/ANN/BCSQ annotations. Consequence
+prediction is provided by [DuckVEP](https://github.com/RGenomicsETL/DuckVEP), a separate
+DuckDB extension and R package. DuckHTS readers and DuckVEP annotation compose through
+SQL; clinical evidence and provenance can be joined as typed relations.
 
 ## Interface rules
 
