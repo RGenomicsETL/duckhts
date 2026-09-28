@@ -129,6 +129,17 @@ test_ancestry_relations <- function() {
   expect_equal(out$input_variants, rep(11, 2L))
   expect_equal(out$reversed_variants, rep(1, 2L))
   expect_equal(out$flipped_variants, rep(1, 2L))
+  # A site matching only after both strand flip and allele swap (flipped_reversed)
+  # is the same evidence as its direct spelling: same fit, counted as a reversal
+  # and a flip.
+  dbExecute(con, "CREATE TABLE ancestry_input_flip_rev AS SELECT * FROM ancestry_input")
+  dbExecute(con, paste("UPDATE ancestry_input_flip_rev SET allele_a = 'A', allele_b = 'G',",
+                       "frequency = 1 - frequency WHERE position = 103"))
+  flip_rev <- rduckhts_ancestry_proportions(con, "ancestry_input_flip_rev", "ancestry_ref",
+                                            "ancestry_pc", "ancestry_correction", min_cor = 0)
+  expect_equal(flip_rev$proportion, out$proportion)
+  expect_equal(flip_rev$reversed_variants, rep(2, 2L))
+  expect_equal(flip_rev$flipped_variants, rep(2, 2L))
   expect_equal(out$duplicate_variants, rep(2, 2L))
   expect_equal(out$ambiguous_variants, rep(1, 2L))
   expect_equal(out$unmatched_variants, rep(1, 2L))
