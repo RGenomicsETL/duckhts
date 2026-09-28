@@ -80,22 +80,32 @@ rduckhts_ancestry_proportions <- function(
   identical(sort(values), as.numeric(seq_along(pcs)))
 }
 
-.ancestry_long_adapter <- function(con, reference_table, loadings_table, wide) {
+# The global long-reference contract, shared by the proportion adapter and the panel
+# builder so a published panel is always usable with its source products.
+.ancestry_long_contract <- function(con, reference_table, loadings_table) {
   quote_id <- function(x) as.character(DBI::dbQuoteIdentifier(con, x))
-  r <- quote_id(reference_table)
-  l <- quote_id(loadings_table)
   # Group identifiers are labels: read them as DuckDB's VARCHAR spelling (so numeric
   # IDs such as 1e6 keep their SQL form), ordered by the original values.
   groups <- DBI::dbGetQuery(con, paste0("SELECT CAST(g AS VARCHAR) AS group_id FROM ",
-                                        "(SELECT DISTINCT group_id AS g FROM ", r,
-                                        ") ORDER BY g"))$group_id
-  pcs <- DBI::dbGetQuery(con, paste0("SELECT DISTINCT pc FROM ", l,
+                                        "(SELECT DISTINCT group_id AS g FROM ",
+                                        quote_id(reference_table), ") ORDER BY g"))$group_id
+  pcs <- DBI::dbGetQuery(con, paste0("SELECT DISTINCT pc FROM ", quote_id(loadings_table),
                                       " ORDER BY pc"))$pc
   if (length(groups) < 1L || length(groups) > 30L || anyNA(groups) ||
       length(pcs) < 1L || length(pcs) > 64L ||
       !.ancestry_consecutive_pcs(pcs)) {
     stop("reference requires 1..30 groups and consecutive 1..64 PCs", call. = FALSE)
   }
+  list(groups = groups, pcs = pcs)
+}
+
+.ancestry_long_adapter <- function(con, reference_table, loadings_table, wide) {
+  quote_id <- function(x) as.character(DBI::dbQuoteIdentifier(con, x))
+  r <- quote_id(reference_table)
+  l <- quote_id(loadings_table)
+  contract <- .ancestry_long_contract(con, reference_table, loadings_table)
+  groups <- contract$groups
+  pcs <- contract$pcs
   chromosome <- paste0("coalesce(try_cast(regexp_replace(chromosome::VARCHAR, '^chr', '') ",
                        "AS INTEGER)::VARCHAR, chromosome::VARCHAR)")
   ref_sites <- paste0("SELECT ", chromosome, " AS chromosome, position, allele_a, ",

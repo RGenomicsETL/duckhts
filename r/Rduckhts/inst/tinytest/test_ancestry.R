@@ -47,6 +47,12 @@ test_ancestry_relations <- function() {
     "CREATE TEMP VIEW ancestry_bad_frequency_ref AS SELECT * REPLACE ",
     "(CASE WHEN position = 102 AND group_id = 'B' THEN 1.2 ELSE frequency END ",
     "AS frequency) FROM ancestry_ref"))
+  # A non-consecutive global PC set would give a panel its source products reject.
+  dbExecute(con, "CREATE TEMP VIEW ancestry_shifted_pc AS SELECT * REPLACE (pc + 1 AS pc) FROM ancestry_pc")
+  expect_error(rduckhts_ancestry_panel(
+    con, "ancestry_ref", "ancestry_shifted_pc", "ancestry_shifted_panel", "GRCh38"),
+    pattern = "consecutive 1..64 PCs")
+  expect_false(dbExistsTable(con, "ancestry_shifted_panel"))
   invalid_panel <- rduckhts_ancestry_panel(
     con, "ancestry_bad_frequency_ref", "ancestry_bad_loading_pc", "ancestry_invalid_panel",
     "GRCh38", spacing_bp = 1, max_sites = 5)

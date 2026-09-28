@@ -33,6 +33,7 @@ rduckhts_ancestry_panel <- function(
   .somalier_validate_name(assembly, "assembly")
   spacing_bp <- .somalier_bounded_whole_number(spacing_bp, "spacing_bp", 1, 100000000)
   max_sites <- .somalier_bounded_whole_number(max_sites, "max_sites", 1, 1000000)
+  .ancestry_long_contract(con, reference_table, loadings_table)
   reference <- sql_quote_identifier(con, reference_table)
   loadings <- sql_quote_identifier(con, loadings_table)
   candidates <- if (is.null(candidate_table)) {
