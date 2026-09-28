@@ -558,6 +558,11 @@ rdm: function_catalog
 bench-lift:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_liftover.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
+# Measure with benchmarks/benchmark_ancestry_panel_run.R <old_lib> <new_lib>
+# benchmarks/ancestry_panel_scaling.tsv, then render the report.
+bench-ancestry-panel:
+	Rscript -e "rmarkdown::render('benchmarks/benchmark_ancestry_panel.Rmd', output_format = rmarkdown::github_document(html_preview = FALSE))"
+
 bench-score:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_score.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 

@@ -1,0 +1,94 @@
+---
+title: "Ancestry panel building: per-contig allocation at scale"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+root <- normalizePath("..", mustWork = TRUE)
+runs <- utils::read.delim(file.path(root, "benchmarks", "ancestry_panel_scaling.tsv"))
+runs$peak_rss_gib <- runs$peak_rss_kb / 1024^2
+keys <- c("implementation", "mode", "quarters")
+medians <- aggregate(cbind(seconds, peak_rss_gib, sites, contigs) ~ implementation + mode + quarters,
+                     data = runs, FUN = stats::median)
+old <- subset(medians, implementation == "old")
+new <- subset(medians, implementation == "new")
+paired <- merge(old, new, by = c("mode", "quarters"), suffixes = c("_old", "_new"))
+paired$time_ratio <- paired$seconds_new / paired$seconds_old
+paired$rss_delta_mib <- 1024 * (paired$peak_rss_gib_new - paired$peak_rss_gib_old)
+exponents <- do.call(rbind, lapply(split(new, new$mode), function(d) data.frame(
+  mode = d$mode[1],
+  time_exponent = unname(stats::coef(stats::lm(log(seconds) ~ log(quarters), d))[2]),
+  memory_exponent = unname(stats::coef(stats::lm(log(peak_rss_gib) ~ log(quarters), d))[2]))))
+stopifnot(nrow(runs) == 36L, all(table(runs$implementation, runs$mode, runs$quarters) == 3L),
+          all(runs$sites == 17000L),
+          all(paired$time_ratio <= 1.10), all(paired$rss_delta_mib <= 64),
+          all(runs$contigs[runs$implementation == "new"] == 22L),
+          all(exponents$time_exponent <= 1.25))
+```
+
+`rduckhts_ancestry_panel()` caps a panel at `max_sites`. The previous builder kept
+the first `max_sites` candidates in genomic order, so a 17,000-site panel over
+bigsnpr's reference came entirely from chromosome 1. The current builder gives each
+contig one site, shares the rest in proportion to each contig's eligible sites
+minus that one, and spreads each contig's sites evenly along it. That adds
+per-contig row numbers and counts over every candidate, where the old builder
+kept a bounded top-N. This report measures what that costs.
+
+## Method
+
+`benchmark_ancestry_panel_run.R` stages bigsnpr's reference and loadings
+(`ancestry_reference_parquet`, 5,816,590 loci, 21 groups, 16 PCs) and keeps 1, 2 or 4
+quarters of its loci by hash. Each run expands them into the long frequency and
+loading relations the builder reads, builds a committed 17,000-site panel, and
+counts it. Every run is a fresh single-thread process; peak RSS comes from GNU time.
+There are three repetitions of each implementation, mode and scale, in interleaved
+order. `spaced` uses the default 5 kb window spacing; `candidates` offers every
+locus as a candidate, the largest input the allocation windows can see. `old` is
+the builder at the commit before this change and `new` is the per-contig builder.
+
+## Results
+
+Medians of three runs:
+
+```{r results}
+out <- medians[order(medians$mode, medians$quarters, medians$implementation != "old"),
+               c(keys, "sites", "contigs", "seconds", "peak_rss_gib")]
+out$peak_rss_gib <- round(out$peak_rss_gib, 2)
+rownames(out) <- NULL
+knitr::kable(out)
+```
+
+The new builder against the old one at each scale:
+
+```{r paired}
+cmp <- paired[order(paired$mode, paired$quarters),
+              c("mode", "quarters", "time_ratio", "rss_delta_mib")]
+cmp$time_ratio <- round(cmp$time_ratio, 3)
+cmp$rss_delta_mib <- round(cmp$rss_delta_mib, 1)
+rownames(cmp) <- NULL
+knitr::kable(cmp)
+```
+
+Scaling exponents of the new builder over 1, 2 and 4 quarters:
+
+```{r exponents}
+exponents$time_exponent <- round(exponents$time_exponent, 2)
+exponents$memory_exponent <- round(exponents$memory_exponent, 2)
+rownames(exponents) <- NULL
+knitr::kable(exponents)
+```
+
+## Reading
+
+The allocation adds at most `r sprintf("%.1f", 100 * (max(paired$time_ratio) - 1))`%
+to the median time and `r sprintf("%.0f", max(paired$rss_delta_mib))` MiB to peak
+memory at any scale, and every new panel spans all 22 autosomes. Time grows
+linearly with the reference in both builders.
+
+Peak memory also grows linearly in both builders, to about
+`r sprintf("%.1f", max(runs$peak_rss_gib))` GiB at full scale. That growth
+predates this change: the builder groups the whole long reference (loci × groups)
+to find eligible sites before any capping happens. Reducing it belongs to the
+builder's site-eligibility stage and is tracked in
+[#293](https://github.com/RGenomicsETL/duckhts/issues/293).
