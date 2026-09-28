@@ -78,11 +78,19 @@ rduckhts_ancestry_panel <- function(
     "(row_number() OVER (ORDER BY region, position, allele_a, allele_b)-1)::UBIGINT AS site_index, ",
     "region, position::UBIGINT AS position, allele_a, allele_b FROM limited"
   )
-  DBI::dbWithTransaction(con, {
-    .duckhts_create_table(con, table_name, query, overwrite)
-    DBI::dbGetQuery(con, sprintf(
-      "SELECT count(*) AS sites, duckhts_somalier_panel_sha256(%s) AS panel_sha256 FROM %s",
-      sql_quote_string(con, table_name), sql_quote_identifier(con, table_name)
-    ))
-  })
+  # Validate in a scratch TEMP table before publishing, so a failed panel leaves no
+  # destination table; this works inside or outside a caller's transaction.
+  .duckhts_check_table_target(con, table_name, overwrite)
+  scratch <- gsub("[^A-Za-z0-9_]", "_", basename(tempfile("__duckhts_ancestry_panel_")))
+  on.exit(try(DBI::dbExecute(con, paste("DROP TABLE IF EXISTS",
+                                        sql_quote_identifier(con, scratch))),
+              silent = TRUE), add = TRUE)
+  DBI::dbExecute(con, paste("CREATE TEMP TABLE", sql_quote_identifier(con, scratch), "AS", query))
+  summary <- DBI::dbGetQuery(con, sprintf(
+    "SELECT count(*) AS sites, duckhts_somalier_panel_sha256(%s) AS panel_sha256 FROM %s",
+    sql_quote_string(con, scratch), sql_quote_identifier(con, scratch)
+  ))
+  .duckhts_create_table(con, table_name,
+                        paste("SELECT * FROM", sql_quote_identifier(con, scratch)), overwrite)
+  summary
 }

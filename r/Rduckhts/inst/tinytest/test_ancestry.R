@@ -53,6 +53,17 @@ test_ancestry_relations <- function() {
     con, "ancestry_ref", "ancestry_pc", "ancestry_matched", "GRCh38",
     candidate_table = "ancestry_empty_candidates", overwrite = TRUE)
   expect_equal(replaced$panel_sha256, retry$panel_sha256)
+  # Inside a caller's transaction: the panel builds, and rollback removes it.
+  dbBegin(con)
+  in_transaction <- rduckhts_ancestry_panel(
+    con, "ancestry_ref", "ancestry_pc", "ancestry_in_transaction", "GRCh38",
+    candidate_table = "ancestry_candidates")
+  expect_equal(in_transaction$panel_sha256, matched_panel$panel_sha256)
+  dbRollback(con)
+  expect_false(dbExistsTable(con, "ancestry_in_transaction"))
+  expect_equal(dbGetQuery(con, paste(
+    "SELECT count(*) AS n FROM duckdb_tables()",
+    "WHERE table_name LIKE '__duckhts_ancestry_panel_%'"))$n, 0)
   dbExecute(con, paste(
     "CREATE TABLE ancestry_input AS SELECT 'S' AS sample_id, chromosome, position, allele_a, allele_b,",
     "sum(CASE WHEN group_id = 'A' THEN 0.7 ELSE 0.3 END * frequency) AS frequency",
