@@ -90,13 +90,20 @@ if (length(args) == 6L && args[[1L]] == "--child") {
   } else {
     dbExecute(con, query)
     seconds <- proc.time()[["elapsed"]] - started
+    profile <- jsonlite::fromJSON(profile_file)
+    saved_profile <- Sys.getenv("DUCKHTS_SCALING_PROFILE", "")
+    if (nzchar(saved_profile)) file.copy(profile_file, saved_profile, overwrite = TRUE)
     rows <- dbGetQuery(con, "SELECT count(*) AS n FROM result")$n[[1L]]
   }
   dbExecute(con, "PRAGMA disable_profiling")
-  profile <- jsonlite::fromJSON(profile_file)
+  if (startsWith(case, "r_")) {
+    profile <- NULL
+  }
   saved_result <- Sys.getenv("DUCKHTS_SCALING_RESULT", "")
   if (nzchar(saved_result)) {
-    dbExecute(con, paste0("COPY (SELECT * FROM result ORDER BY sample_id, site_index) TO ",
+    stopifnot(case %in% c("vcf_counts", "import_sites"))
+    keys <- if (case == "vcf_counts") "sample_id, site_index" else "site_index"
+    dbExecute(con, paste0("COPY (SELECT * FROM result ORDER BY ", keys, ") TO ",
                           quote_string(saved_result), " (FORMAT PARQUET)"))
   }
   rss <- readLines("/proc/self/status", warn = FALSE)
@@ -110,12 +117,15 @@ if (length(args) == 6L && args[[1L]] == "--child") {
   }
   write.table(data.frame(case, multiplier, threads, input_records, seconds,
                          peak_rss_kib,
-                         peak_buffer_mib = profile$system_peak_buffer_memory / 1048576,
+                         peak_buffer_mib = if (is.null(profile)) NA_real_ else {
+                           profile$system_peak_buffer_memory / 1048576
+                         },
+                         peak_spill_mib = if (is.null(profile)) NA_real_ else {
+                           profile$system_peak_temp_dir_size / 1048576
+                         },
                          result_rows = rows), stdout(), sep = "\t", row.names = FALSE,
               col.names = FALSE, quote = FALSE)
   dbDisconnect(con, shutdown = TRUE)
-  saved_profile <- Sys.getenv("DUCKHTS_SCALING_PROFILE", "")
-  if (nzchar(saved_profile)) file.copy(profile_file, saved_profile, overwrite = TRUE)
   unlink(profile_file)
 } else {
   stopifnot(length(args) %in% c(1L, 2L), file.exists(args[[1L]]))
@@ -133,7 +143,8 @@ if (length(args) == 6L && args[[1L]] == "--child") {
       munge_metal = "epilepsy", liftover = "phase3_source")
   }
   header <- paste(c("case", "multiplier", "threads", "input_records", "seconds",
-                    "peak_rss_kib", "peak_buffer_mib", "result_rows"), collapse = "\t")
+                    "peak_rss_kib", "peak_buffer_mib", "peak_spill_mib",
+                    "result_rows"), collapse = "\t")
   writeLines(header, output)
   for (case in names(inputs)) {
     for (multiplier in c(1L, 2L, 4L)) {
