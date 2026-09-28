@@ -9,6 +9,21 @@ drv <- duckdb::duckdb(shared_home = FALSE, config = list(allow_unsigned_extensio
 con <- dbConnect(drv)
 on.exit(dbDisconnect(con, shutdown = TRUE))
 dbExecute(con, sprintf("LOAD %s", dbQuoteString(con, normalizePath(args[[1L]]))))
+sql_list <- function(v) paste0("[", paste(sprintf("%.17g", v), collapse = ","), "]")
+solve_native <- function(x, y, groups, equal) {
+  query <- sprintf("SELECT duckhts_ancestry_proportions(%s, %s, %d, %s) AS q",
+                   sql_list(as.vector(t(x))), sql_list(y), groups,
+                   if (equal) "true" else "false")
+  dbGetQuery(con, query)$q[[1L]]
+}
+
+example_x <- diag(c(1e-6, 1e-6))
+example_y <- c(2.5e-7, 7.5e-7)
+for (scale in c(1e-12, 1, 1e6)) {
+  got <- solve_native(example_x * scale, example_y * scale, 2L, TRUE)
+  stopifnot(max(abs(got - c(0.25, 0.75))) < 1e-8)
+  cat(sprintf("example scale=%g q=(%.9g, %.9g)\n", scale, got[[1L]], got[[2L]]))
+}
 set.seed(228)
 for (trial in seq_len(32L)) {
   n <- 40L
@@ -27,13 +42,11 @@ for (trial in seq_len(32L)) {
     cbind(-1, diag(groups)), c(-1, rep(0, groups)),
     meq = as.integer(equal)
   )$solution
-  sql_list <- function(v) paste0("[", paste(sprintf("%.17g", v), collapse = ","), "]")
-  query <- sprintf("SELECT duckhts_ancestry_proportions(%s, %s, %d, %s) AS q",
-                   sql_list(as.vector(t(x))), sql_list(y), groups,
-                   if (equal) "true" else "false")
-  got <- dbGetQuery(con, query)$q[[1L]]
-  error <- max(abs(got - expected))
-  cat(sprintf("trial=%d groups=%d pcs=%d equality=%s max_error=%.9g\n",
-              trial, groups, pcs, equal, error))
-  stopifnot(error < 2e-4)
+  for (scale in c(1e-12, 1, 1e6)) {
+    got <- solve_native(x * scale, y * scale, groups, equal)
+    error <- max(abs(got - expected))
+    cat(sprintf("trial=%d groups=%d pcs=%d equality=%s scale=%g max_error=%.9g\n",
+                trial, groups, pcs, equal, scale, error))
+    stopifnot(error < 2e-4)
+  }
 }

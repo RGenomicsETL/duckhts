@@ -33,7 +33,7 @@ static bool eigen_symmetric(const double *a, int n, double *values, double *vect
             double v = fabs(work[i * n + j]);
             if (v > largest) { largest = v; p = i; q = j; }
         }
-        if (largest <= 1e-14 * fmax(1, matrix_norm(work, n))) {
+        if (largest <= 1e-14 * matrix_norm(work, n)) {
             for (int i = 0; i < n; i++) values[i] = work[i * n + i];
             return true;
         }
@@ -201,17 +201,18 @@ static void ancestry_scalar(duckdb_function_info info, duckdb_data_chunk input, 
     duckdb_vector xvec = duckdb_data_chunk_get_vector(input, 0);
     duckdb_vector yvec = duckdb_data_chunk_get_vector(input, 1);
     duckdb_vector kvec = duckdb_data_chunk_get_vector(input, 2);
-    duckdb_vector eqvec = duckdb_data_chunk_get_vector(input, 3);
+    bool has_equality = duckdb_data_chunk_get_column_count(input) == 4;
+    duckdb_vector eqvec = has_equality ? duckdb_data_chunk_get_vector(input, 3) : NULL;
     duckdb_vector xc = duckdb_list_vector_get_child(xvec);
     duckdb_vector yc = duckdb_list_vector_get_child(yvec);
     duckdb_list_entry *xe = duckdb_vector_get_data(xvec), *ye = duckdb_vector_get_data(yvec);
     int32_t *ks = duckdb_vector_get_data(kvec);
-    bool *equalities = duckdb_vector_get_data(eqvec);
+    bool *equalities = has_equality ? duckdb_vector_get_data(eqvec) : NULL;
     double *xs = duckdb_vector_get_data(xc), *ys = duckdb_vector_get_data(yc);
     duckdb_list_vector_set_size(output, 0);
     for (idx_t row = 0; row < duckdb_data_chunk_get_size(input); row++) {
         if (!valid_at(xvec, row) || !valid_at(yvec, row) || !valid_at(kvec, row) ||
-            !valid_at(eqvec, row)) {
+            (has_equality && !valid_at(eqvec, row))) {
             duckdb_vector_ensure_validity_writable(output);
             duckdb_validity_set_row_invalid(duckdb_vector_get_validity(output), row);
             continue;
@@ -225,23 +226,34 @@ static void ancestry_scalar(duckdb_function_info info, duckdb_data_chunk input, 
         }
         double h[ANCESTRY_GROUPS * ANCESTRY_GROUPS] = {0};
         double d[ANCESTRY_GROUPS] = {0}, q[ANCESTRY_DIM] = {0};
+        double scale = 0;
         for (idx_t pc = 0; pc < pcs; pc++) {
             if (!valid_at(yc, ye[row].offset + pc) || !isfinite(ys[ye[row].offset + pc])) goto invalid;
             for (int i = 0; i < k; i++) {
                 idx_t at = xe[row].offset + pc * (idx_t)k + (idx_t)i;
                 if (!valid_at(xc, at) || !isfinite(xs[at])) goto invalid;
-                double xi = xs[at];
-                d[i] += xi * ys[ye[row].offset + pc];
+                scale = fmax(scale, fabs(xs[at]));
             }
+        }
+        if (scale == 0) {
+            duckdb_scalar_function_set_error(info, "duckhts_ancestry_proportions: singular X");
+            return;
+        }
+        for (idx_t pc = 0; pc < pcs; pc++) {
+            double yi = ys[ye[row].offset + pc] / scale;
+            if (!isfinite(yi)) goto invalid_scale;
             for (int i = 0; i < k; i++) {
-                double xi = xs[xe[row].offset + pc * (idx_t)k + (idx_t)i];
+                double xi = xs[xe[row].offset + pc * (idx_t)k + (idx_t)i] / scale;
+                d[i] += xi * yi;
                 for (int j = 0; j < k; j++) {
-                    double xj = xs[xe[row].offset + pc * (idx_t)k + (idx_t)j];
+                    double xj = xs[xe[row].offset + pc * (idx_t)k + (idx_t)j] / scale;
                     h[i * k + j] += xi * xj;
                 }
             }
         }
-        if (!nearest_pd(h, k) || !simplex_qp(h, d, k, equalities[row], q)) {
+        for (int i = 0; i < k; i++) if (!isfinite(d[i])) goto invalid_scale;
+        if (!nearest_pd(h, k) || !simplex_qp(h, d, k,
+                                            has_equality ? equalities[row] : true, q)) {
             duckdb_scalar_function_set_error(info, "duckhts_ancestry_proportions: nearest-PD or QP did not converge");
             return;
         }
@@ -261,6 +273,9 @@ static void ancestry_scalar(duckdb_function_info info, duckdb_data_chunk input, 
 invalid:
         duckdb_scalar_function_set_error(info, "duckhts_ancestry_proportions: X and y must be finite without NULLs");
         return;
+invalid_scale:
+        duckdb_scalar_function_set_error(info, "duckhts_ancestry_proportions: scaled X and y exceed finite range");
+        return;
     }
 }
 
@@ -275,6 +290,16 @@ void register_duckhts_ancestry_functions(duckdb_connection connection) {
     duckdb_scalar_function_add_parameter(function, values);
     duckdb_scalar_function_add_parameter(function, integer);
     duckdb_scalar_function_add_parameter(function, boolean);
+    duckdb_scalar_function_set_return_type(function, values);
+    duckdb_scalar_function_set_special_handling(function);
+    duckdb_scalar_function_set_function(function, ancestry_scalar);
+    duckdb_register_scalar_function(connection, function);
+    duckdb_destroy_scalar_function(&function);
+    function = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(function, "duckhts_ancestry_proportions");
+    duckdb_scalar_function_add_parameter(function, values);
+    duckdb_scalar_function_add_parameter(function, values);
+    duckdb_scalar_function_add_parameter(function, integer);
     duckdb_scalar_function_set_return_type(function, values);
     duckdb_scalar_function_set_special_handling(function);
     duckdb_scalar_function_set_function(function, ancestry_scalar);

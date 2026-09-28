@@ -29,8 +29,21 @@ main <- function(args) {
                     " ORDER BY sample_id LIMIT ", samples, "))")
   }
   reference <- paste0("read_parquet(", quote_str(normalizePath(args[[2L]])), ")")
+  dbExecute(con, paste0("CREATE TEMP VIEW stage_input AS SELECT * FROM ", input))
+  dbExecute(con, paste0("CREATE TEMP VIEW stage_reference AS SELECT * FROM ", reference))
+  input <- "stage_input"
+  reference <- "stage_reference"
+  correction_path <- duckhts_bench_stage_repository_fixtures(
+    normalizePath("."), "ancestry-projection")[["ancestry_correction"]]
+  correction <- utils::read.delim(correction_path)
+  dbWriteTable(con, "stage_correction", correction, temporary = TRUE)
+  contract <- Rduckhts:::.ancestry_check_site_contract(
+    con, reference, c(input, reference, "stage_correction"))
+  reference <- contract$reference_source
+  groups <- contract$groups
+  coefficients <- contract$coefficients
   classification <- Rduckhts:::.ancestry_classification_query(
-    c(input, reference), "frequency")
+    c(input, reference), "frequency", contract$numeric_chromosome)
   rows <- list()
   record <- function(name, query) {
     dbExecute(con, "PRAGMA enable_profiling='json'")
@@ -59,12 +72,6 @@ main <- function(args) {
     Rduckhts:::.ancestry_aligned_query(classification), ") TO ", quote_str(aligned),
     " (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 32768)"))
   aligned_source <- paste0("read_parquet(", quote_str(aligned), ")")
-  fields <- dbGetQuery(con, paste0("DESCRIBE SELECT * FROM ", reference))$column_name
-  groups <- sort(setdiff(fields, c("chromosome", "position", "allele_a", "allele_b",
-                                    paste0("PC", seq_len(16L)))))
-  correction_path <- duckhts_bench_stage_repository_fixtures(
-    normalizePath("."), "ancestry-projection")[["ancestry_correction"]]
-  coefficients <- utils::read.delim(correction_path)$coefficient
   indexed_source <- if (one_sample) aligned_source else paste0(
     "(SELECT a.*, i.sample_index FROM ", aligned_source,
     " a JOIN audit i USING (sample_id))")
@@ -72,7 +79,7 @@ main <- function(args) {
     Rduckhts:::.ancestry_moments_query(con, reference, groups, coefficients,
                                       indexed_source, one_sample)))
   record("solver", paste0("CREATE TEMP TABLE solved AS SELECT m.sample_id, ",
-    Rduckhts:::.ancestry_solver_expression(groups, TRUE), " AS q FROM moments m"))
+    Rduckhts:::.ancestry_solver_expression(groups, length(coefficients), TRUE), " AS q FROM moments m"))
   proportions <- if (one_sample) dbGetQuery(con, "SELECT q FROM solved")$q[[1L]] else NULL
   record("prediction", paste0("CREATE TEMP TABLE prediction AS ",
     Rduckhts:::.ancestry_prediction_query(con, reference, groups, aligned_source,

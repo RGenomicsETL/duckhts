@@ -44,6 +44,11 @@ test_ancestry_relations <- function() {
   dbExecute(con, "INSERT INTO ancestry_input SELECT * FROM ancestry_input WHERE position = 106")
   dbExecute(con, "INSERT INTO ancestry_input VALUES ('S', 'chr1', 999, 'A', 'G', 0.5)")
   dbExecute(con, "INSERT INTO ancestry_input VALUES ('S', 'chr1', 998, 'A', 'T', 0.5)")
+  default_q <- dbGetQuery(con, paste(
+    "SELECT duckhts_ancestry_proportions(",
+    "[1.0, 0.0, 0.0, 1.0], [0.25, 0.75], 2) AS q"
+  ))$q[[1L]]
+  expect_equal(default_q, c(0.25, 0.75))
   out <- rduckhts_ancestry_proportions(con, "ancestry_input", "ancestry_ref",
                                        "ancestry_pc", "ancestry_correction", min_cor = 0)
   expect_equal(out$status, rep("ok", 2L))
@@ -116,8 +121,23 @@ test_ancestry_relations <- function() {
   ))
   unmatched <- rduckhts_ancestry_proportions(
     con, "ancestry_unmatched_input", "ancestry_wide", "ancestry_wide_correction")
-  expect_equal(unmatched$status, "no_matched_variants")
-  expect_equal(unmatched$used_variants, 0)
+  expect_equal(unmatched$group_id, c("A", "B"))
+  expect_equal(unmatched$status, rep("no_matched_variants", 2L))
+  expect_true(all(is.na(unmatched$proportion)))
+  expect_equal(unmatched$used_variants, rep(0, 2L))
+  dbExecute(con, paste(
+    "CREATE VIEW ancestry_cohort_input AS SELECT * FROM ancestry_input",
+    "UNION ALL SELECT * FROM ancestry_unmatched_input"
+  ))
+  cohort <- rduckhts_ancestry_proportions(
+    con, "ancestry_cohort_input", "ancestry_wide", "ancestry_wide_correction",
+    min_cor = -1)
+  expect_equal(cohort$group_id[cohort$sample_id == "U"], c("A", "B"))
+  expect_equal(cohort$status[cohort$sample_id == "U"],
+               rep("no_matched_variants", 2L))
+  expect_true(all(is.na(cohort$proportion[cohort$sample_id == "U"])))
+  expect_equal(cohort$proportion[cohort$sample_id == "S"], wide$proportion)
+  expect_equal(nrow(cohort), 4L)
   expect_equal(dbGetQuery(con, paste(
     "SELECT count(*) AS n FROM duckdb_tables() WHERE temporary",
     "AND (table_name LIKE 'ancestry_audit_%' OR table_name LIKE 'ancestry_moments_%'",

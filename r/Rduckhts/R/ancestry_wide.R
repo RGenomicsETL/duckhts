@@ -267,8 +267,8 @@
     "a.ambiguous_variants, a.unmatched_variants, a.invalid_variants, a.missing_variants, ",
     equality, " AS sum_to_one, ", gate, "::DOUBLE AS min_cor ",
     "FROM ", audit, " a JOIN quality q USING (sample_id) ",
+    "CROSS JOIN (VALUES ", group_rows, ") g(group_index, group_id) ",
     "LEFT JOIN ", solved, " s ON s.sample_id = a.sample_id ",
-    "LEFT JOIN (VALUES ", group_rows, ") g(group_index, group_id) ON s.sample_id IS NOT NULL ",
     "LEFT JOIN each_cor e ON e.sample_id = a.sample_id AND e.group_index = g.group_index ",
     "ORDER BY a.sample_id, g.group_id"
   )
