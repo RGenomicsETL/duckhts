@@ -219,6 +219,9 @@ decimals with group difference
 `r max(real_epilepsy$group_parity$absolute_difference)`; its rounding bound is
 `r sprintf("%.9f", real_epilepsy$rounding_bound)`. All 21 genome-wide
 coefficients agree at seven decimals; the script checks rounded equality.
+The maximum absolute genome-wide group difference is
+`r max(real_epilepsy_full$group_parity$absolute_difference)` (21/21),
+the same as the `48f58192` report.
 
 The individual input is restricted from `r real_individuals$vcf_snvs` unique
 biallelic SNVs to `r real_individuals$reference_overlap` same-assembly,
@@ -227,6 +230,9 @@ Both solvers see the same per-sample genotypes. bigsnpr's
 imperfect-match warning (`cor_pred < 0.99`) is retained; passing the
 0.4 gate does not imply that the frequencies match perfectly. The 11
 individuals' 231 coefficients agree with bigsnpr at seven decimals.
+Their maximum absolute group difference is
+`r max(real_individuals$summary$max_group_difference)`, also the same as
+`48f58192` (231/231).
 
 ```{r individual-parity}
 knitr::kable(real_individuals$summary, digits = 7)
@@ -461,26 +467,26 @@ knitr::kable(comparison, digits = 2,
 full_epilepsy <- scaling[scaling$workload == "epilepsy" &
                          scaling$threads == 4L & scaling$scale == 4L, ]
 full_comparison <- data.frame(
-  revision = c("b30d2c2", substr(source_revision, 1L, 8L)),
+  revision = c("48f58192", substr(source_revision, 1L, 8L)),
   physical_rows = rep(3343235L, 2L), threads = rep(4L, 2L),
-  median_warm_s = c(4.182, full_epilepsy$query_s),
-  max_rss_mib = c(743.85, full_epilepsy$max_rss_mib),
+  median_warm_s = c(4.358, full_epilepsy$query_s),
+  max_rss_mib = c(752.20, full_epilepsy$max_rss_mib),
   rss_budget_mib = rep(798.95, 2L))
 knitr::kable(full_comparison, digits = 2,
-  caption = "Comparable three-process full-input epilepsy measurements; b30d2c2 measurements rendered at db8a265c; sub-five-second series are memory profiles")
+  caption = "Comparable three-process full-input epilepsy measurements; 48f58192 measurements rendered at 32b1fea2; sub-five-second series are memory profiles")
 ```
 
 For the unchanged full-input epilepsy scan (3,343,235 physical rows, 21
 coefficients, four DuckDB threads, 1 GB DuckDB memory limit), the three
-repetitions of code `b30d2c2` recorded a 4.182 s median warm query and
-743.85 MiB maximum process RSS (`benchmarks/ancestry_memory_repetitions.tsv`
-rendered at `db8a265c`). The comparable run at `r substr(source_revision, 1L, 8L)` measures
+repetitions of code `48f58192` recorded a 4.358 s median warm query and
+752.20 MiB maximum process RSS (`benchmarks/ancestry_memory_repetitions.tsv`
+rendered at `32b1fea2`). The comparable run at `r substr(source_revision, 1L, 8L)` measures
 `r round(scaling$query_s[scaling$workload == "epilepsy" & scaling$threads == 4L & scaling$scale == 4L], 3)` s
 median and `r round(scaling$max_rss_mib[scaling$workload == "epilepsy" & scaling$threads == 4L & scaling$scale == 4L], 2)` MiB
-maximum RSS. Relative to `b30d2c2`, the warm median changed by
-`r round(scaling$query_s[scaling$workload == "epilepsy" & scaling$threads == 4L & scaling$scale == 4L] - 4.182, 3)` s
+maximum RSS. Relative to `48f58192`, the warm median changed by
+`r round(scaling$query_s[scaling$workload == "epilepsy" & scaling$threads == 4L & scaling$scale == 4L] - 4.358, 3)` s
 and maximum RSS changed by
-`r round(scaling$max_rss_mib[scaling$workload == "epilepsy" & scaling$threads == 4L & scaling$scale == 4L] - 743.85, 2)` MiB
+`r round(scaling$max_rss_mib[scaling$workload == "epilepsy" & scaling$threads == 4L & scaling$scale == 4L] - 752.20, 2)` MiB
 (positive values mean an increase). DuckDB spill was
 `r max(repetitions$peak_temp_mib)` MiB. The one-thread 1× floor classifies
 this series as memory-only; timing differences are observations, not timing
