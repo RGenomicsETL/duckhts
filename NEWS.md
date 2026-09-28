@@ -2,6 +2,10 @@
 
 # duckhts 1.5.2.9004
 
+- Ancestry long-reference group IDs remain distinct from PC loading columns;
+  output retains exact group spelling, including IDs resembling PC names.
+  Genotype ancestry validates the supplied sample-name mapping before estimation.
+
 - Ancestry genotype estimation requires an explicit dense `read_geno` declaration
   (`non_reference_only = FALSE`); sparse call lists cannot supply zero dosages.
   Reference PC ordinals must be exact consecutive whole numbers.

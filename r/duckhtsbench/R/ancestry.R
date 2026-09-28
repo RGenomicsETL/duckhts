@@ -74,7 +74,9 @@ duckhts_bench_stage_ancestry_parquet <- function() {
   temporary <- paste0(output, ".partial-", Sys.getpid(), ".parquet")
   intermediate <- paste0(output, ".columns-", Sys.getpid(), c("-ref.parquet", "-pc.parquet"))
   spill <- paste0(output, ".spill-", Sys.getpid())
-  on.exit(unlink(c(temporary, intermediate, spill), recursive = TRUE), add = TRUE)
+  temporary_receipt <- paste0(receipt, ".partial-", Sys.getpid())
+  on.exit(unlink(c(temporary, temporary_receipt, intermediate, spill),
+                 recursive = TRUE), add = TRUE)
   DBI::dbExecute(con, "SET threads=4")
   DBI::dbExecute(con, "SET memory_limit='1800MB'")
   DBI::dbExecute(con, "SET preserve_insertion_order=false")
@@ -119,7 +121,12 @@ duckhts_bench_stage_ancestry_parquet <- function() {
          call. = FALSE)
   }
   expected$sha256[[6L]] <- unname(digest::digest(file = temporary, algo = "sha256"))
+  utils::write.table(expected, temporary_receipt, sep = "\t",
+                     row.names = FALSE, quote = FALSE)
   if (!file.rename(temporary, output)) stop("cannot publish ancestry Parquet", call. = FALSE)
-  utils::write.table(expected, receipt, sep = "\t", row.names = FALSE, quote = FALSE)
+  if (!file.rename(temporary_receipt, receipt)) {
+    unlink(output)
+    stop("cannot publish ancestry Parquet receipt", call. = FALSE)
+  }
   output
 }

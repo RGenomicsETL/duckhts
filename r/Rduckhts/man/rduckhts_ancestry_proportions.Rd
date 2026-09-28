@@ -14,7 +14,8 @@ rduckhts_ancestry_proportions(
   sum_to_one = TRUE,
   min_cor = 0.4,
   table_name = NULL,
-  overwrite = FALSE
+  overwrite = FALSE,
+  group_ids = NULL
 )
 }
 \arguments{
@@ -37,6 +38,10 @@ bigsnpr 1.12.21. A stricter gate may suit a specific panel.}
 \item{table_name}{Optional destination; NULL returns a data frame.}
 
 \item{overwrite}{Replace an existing destination.}
+
+\item{group_ids}{Optional named character vector for wide references, mapping
+frequency column names to output group IDs. Use distinct frequency column
+aliases when a group ID is also a PC column name or differs only by case.}
 }
 \value{
 A row per sample and reference group, with status and matching audit.

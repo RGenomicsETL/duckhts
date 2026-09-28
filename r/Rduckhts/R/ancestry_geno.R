@@ -4,6 +4,7 @@
 #' partially missing, or multiallelic call has NULL dosage and is counted in
 #' the missing-site audit. Original sample indices identify the calls unless a
 #' `read_bcf_samples` relation is provided for original-header sample names.
+#' That relation must give every selected sample index one distinct non-null name.
 #'
 #' @param con Connection with DuckHTS loaded.
 #' @param geno_table Materialized `read_geno` rows with CHROM, POS, REF, ALT
@@ -28,7 +29,23 @@ rduckhts_ancestry_geno <- function(
          call. = FALSE)
   }
   .somalier_validate_name(geno_table, "geno_table")
-  if (!is.null(samples_table)) .somalier_validate_name(samples_table, "samples_table")
+  if (!is.null(samples_table)) {
+    .somalier_validate_name(samples_table, "samples_table")
+    samples <- sql_quote_identifier(con, samples_table)
+    geno <- sql_quote_identifier(con, geno_table)
+    invalid <- DBI::dbGetQuery(con, paste0(
+      "WITH selected AS (SELECT DISTINCT c.sample_index FROM ", geno,
+      " g, unnest(g.calls) u(c)), mapped AS (SELECT sample_index, ",
+      "count(*) AS n, count(sample_name) AS named FROM ", samples,
+      " GROUP BY sample_index) SELECT EXISTS (SELECT 1 FROM ", samples,
+      " WHERE sample_index IS NULL OR sample_name IS NULL) OR EXISTS ",
+      "(SELECT 1 FROM mapped WHERE n != 1 OR named != 1) OR ",
+      "(SELECT count(*) != count(DISTINCT sample_name) FROM ", samples,
+      ") OR EXISTS (SELECT 1 FROM selected i LEFT JOIN mapped m ",
+      "ON i.sample_index = m.sample_index WHERE m.n IS NULL) AS bad"))$bad
+    if (invalid) stop("samples_table must map each selected sample index to a distinct non-null name",
+                      call. = FALSE)
+  }
   frequencies <- basename(tempfile("rduckhts_ancestry_geno_"))
   on.exit(invisible(try(DBI::dbExecute(con, paste("DROP VIEW IF EXISTS",
     sql_quote_identifier(con, frequencies))), silent = TRUE)), add = TRUE)

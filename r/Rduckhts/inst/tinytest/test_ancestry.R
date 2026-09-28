@@ -124,6 +124,77 @@ test_ancestry_relations <- function() {
   expect_equal(wide$cor_pred, out$cor_pred, tolerance = 1e-6)
   expect_equal(wide$used_variants, out$used_variants)
   expect_equal(wide$input_variants, out$input_variants)
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_one_group_pc AS SELECT chromosome, position, ",
+    "allele_a, allele_b, A, PC1 FROM ancestry_wide"))
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_one_correction AS SELECT * ",
+    "FROM ancestry_wide_correction WHERE pc = 1"))
+  one <- rduckhts_ancestry_proportions(
+    con, "ancestry_input", "ancestry_one_group_pc", "ancestry_one_correction",
+    min_cor = 0)
+  expect_equal(nrow(one), 1L)
+  expect_equal(one$group_id, "A")
+  expect_equal(one$input_variants, 11L)
+  dbExecute(con, "CREATE TEMP VIEW ancestry_zero_input AS SELECT * FROM ancestry_input WHERE false")
+  zero <- rduckhts_ancestry_proportions(
+    con, "ancestry_zero_input", "ancestry_one_group_pc", "ancestry_one_correction")
+  expect_equal(nrow(zero), 0L)
+  expect_equal(names(zero), names(one))
+  local({
+    observed <- character()
+    previous <- getOption("duckhts.ancestry_step_hook")
+    on.exit(options(duckhts.ancestry_step_hook = previous))
+    options(duckhts.ancestry_step_hook = function(stage) {
+      observed <<- c(observed, stage)
+    })
+    rduckhts_ancestry_proportions(
+      con, "ancestry_input", "ancestry_wide", "ancestry_wide_correction",
+      min_cor = 0)
+    expect_equal(observed, c("entry", "validation", "duplicate", "audit",
+                             "alignment", "sample_index", "finite", "moments",
+                             "solver", "prediction", "publish"))
+  })
+  for (labels in list(c("PC1", "pc1"), c("group with space", "O'Brien"),
+                      c("__g1", "PC1"))) {
+    dbExecute(con, paste0(
+      "CREATE OR REPLACE TEMP VIEW ancestry_named_ref AS SELECT * REPLACE ",
+      "(CASE group_id WHEN 'A' THEN ", dbQuoteString(con, labels[[1L]]),
+      " ELSE ", dbQuoteString(con, labels[[2L]]),
+      " END AS group_id) FROM ancestry_ref"))
+    named <- rduckhts_ancestry_proportions(
+      con, "ancestry_input", "ancestry_named_ref", "ancestry_pc",
+      "ancestry_correction", min_cor = 0)
+    expect_equal(sort(named$group_id), sort(labels))
+    expect_equal(named$proportion[match(labels, named$group_id)], out$proportion)
+    expect_equal(named$used_variants, out$used_variants)
+    dbExecute(con, paste0(
+      "CREATE OR REPLACE TEMP VIEW ancestry_named_wide AS ",
+      "SELECT * EXCLUDE (A, B), A AS __g1, B AS __g2 FROM ancestry_wide"))
+    mapped <- rduckhts_ancestry_proportions(
+      con, "ancestry_input", "ancestry_named_wide", "ancestry_wide_correction",
+      min_cor = 0, group_ids = stats::setNames(labels, c("__g1", "__g2")))
+    expect_equal(sort(mapped$group_id), sort(labels))
+    expect_equal(mapped$proportion[match(labels, mapped$group_id)], out$proportion,
+                 tolerance = 1e-6)
+    expect_equal(mapped$used_variants, out$used_variants)
+  }
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_quoted_wide AS SELECT * EXCLUDE (A, B), ",
+    "A AS \"group with space\", B AS \"O'Brien\" FROM ancestry_wide"))
+  quoted <- rduckhts_ancestry_proportions(
+    con, "ancestry_input", "ancestry_quoted_wide", "ancestry_wide_correction",
+    min_cor = 0)
+  expect_equal(sort(quoted$group_id), sort(c("group with space", "O'Brien")))
+  expect_equal(quoted$proportion[match(c("group with space", "O'Brien"),
+                                      quoted$group_id)], out$proportion,
+               tolerance = 1e-6)
+  expect_error(rduckhts_ancestry_proportions(
+    con, "ancestry_input", "ancestry_wide", "ancestry_wide_correction",
+    group_ids = c(A = "PC1")), pattern = "group_ids must map every")
+  expect_error(rduckhts_ancestry_proportions(
+    con, "ancestry_input", "ancestry_wide", "ancestry_wide_correction",
+    group_ids = c(A = "PC1", B = "PC1")), pattern = "group_ids must map every")
   for (format in c("wide", "long")) {
     source <- if (format == "wide") "ancestry_wide_correction" else "ancestry_pc"
     pc_cases <- list(
@@ -321,6 +392,19 @@ test_ancestry_relations <- function() {
   expect_equal(reference_only$sample_id, rep("S_ref", 2L))
   expect_equal(reference_only$input_variants, rep(8, 2L))
   expect_equal(reference_only$used_variants, rep(8, 2L))
+  dbExecute(con, "CREATE TABLE ancestry_bad_samples AS SELECT * FROM ancestry_samples")
+  for (change in c("DELETE FROM ancestry_bad_samples WHERE sample_index = 1",
+                   "INSERT INTO ancestry_bad_samples VALUES (1, 'S_other')",
+                   "INSERT INTO ancestry_bad_samples VALUES (2, 'S_ref')",
+                   "UPDATE ancestry_bad_samples SET sample_name = NULL WHERE sample_index = 1")) {
+    dbExecute(con, "DELETE FROM ancestry_bad_samples")
+    dbExecute(con, "INSERT INTO ancestry_bad_samples SELECT * FROM ancestry_samples")
+    dbExecute(con, change)
+    expect_error(rduckhts_ancestry_geno(
+      con, "ancestry_ref_only_calls", "ancestry_ref", "ancestry_pc",
+      "ancestry_correction", samples_table = "ancestry_bad_samples",
+      non_reference_only = FALSE), pattern = "samples_table must map")
+  }
   path <- system.file("extdata", "geno_calls.vcf", package = "Rduckhts")
   rduckhts_geno(con, "ancestry_dense_fixture", path, samples = "S2")
   rduckhts_geno(con, "ancestry_sparse_fixture", path, samples = "S2",

@@ -42,4 +42,5 @@ Converts each diploid, biallelic call to ALT dosage / 2. A haploid,
 partially missing, or multiallelic call has NULL dosage and is counted in
 the missing-site audit. Original sample indices identify the calls unless a
 `read_bcf_samples` relation is provided for original-header sample names.
+That relation must give every selected sample index one distinct non-null name.
 }

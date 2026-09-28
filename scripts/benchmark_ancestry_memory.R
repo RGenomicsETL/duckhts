@@ -58,78 +58,28 @@ dbExecute(con, paste0("PRAGMA profiling_output=", quoted(profile)))
 setup_seconds <- proc.time()[["elapsed"]] - script_start
 profile_steps <- Sys.getenv("DUCKHTS_ANCESTRY_PROFILE_STEPS", unset = "")
 if (nzchar(profile_steps)) {
-  .ancestry_steps <- new.env(parent = emptyenv())
-  original <- get(".ancestry_bounded_proportions", asNamespace("Rduckhts"))
-  statements <- as.list(body(original))[-1L]
-  step_positions <- if (length(statements) == 39L) {
-    c(entry = 2L, validation = 3L, duplicate = 19L, audit = 22L,
-      alignment = 23L, sample_index = 26L, finite = 30L,
-      moments = 32L, solver = 33L, prediction = 36L,
-      publish = 38L, cleanup = 40L)
-  } else if (length(statements) == 38L) {
-    c(entry = 2L, validation = 3L, audit = 19L,
-      alignment = 20L, duplicate = 23L, sample_index = 25L,
-      finite = 29L, moments = 31L, solver = 32L,
-      prediction = 35L, publish = 37L, cleanup = 39L)
-  } else if (length(statements) == 32L) {
-    c(entry = 2L, validation = 3L, audit = 19L,
-      alignment = 20L, sample_index = 23L, moments = 25L,
-      solver = 26L, prediction = 29L, publish = 31L, cleanup = 33L)
-  } else {
-    stop("unrecognized ancestry query shape")
-  }
-  instrumented <- list(as.name("{"))
-  for (position in seq_along(statements)) {
-    label <- names(step_positions)[step_positions == position + 1L]
-    if (length(label)) {
-      instrumented <- c(instrumented, list(bquote(assign(
-        .(label), proc.time()[["elapsed"]], envir = .GlobalEnv$.ancestry_steps))))
+  step_times <- numeric()
+  options(duckhts.ancestry_step_hook = function(stage) {
+    if (!is.character(stage) || length(stage) != 1L || is.na(stage) ||
+        !nzchar(stage) || stage %in% names(step_times)) {
+      stop("invalid or repeated ancestry profile stage")
     }
-    instrumented <- c(instrumented, list(statements[[position]]))
-  }
-  measured <- original
-  body(measured) <- as.call(instrumented)
-  assignInNamespace(".ancestry_bounded_proportions", measured, ns = "Rduckhts")
-  if (length(statements) == 32L) {
-    contract_positions <- c(contract_entry = 2L, full_duplicate = 9L,
-                            full_finite = 11L, null_sample = 12L,
-                            corrections = 14L, contract_exit = 17L)
-    original_contract <- get(".ancestry_check_site_contract", asNamespace("Rduckhts"))
-    contract_statements <- as.list(body(original_contract))[-1L]
-    stopifnot(length(contract_statements) == 16L)
-    contract_body <- list(as.name("{"))
-    for (position in seq_along(contract_statements)) {
-      label <- names(contract_positions)[contract_positions == position + 1L]
-      if (length(label)) {
-        contract_body <- c(contract_body, list(bquote(assign(
-          .(label), proc.time()[["elapsed"]], envir = .GlobalEnv$.ancestry_steps))))
-      }
-      contract_body <- c(contract_body, list(contract_statements[[position]]))
-    }
-    measured_contract <- original_contract
-    body(measured_contract) <- as.call(contract_body)
-    assignInNamespace(".ancestry_check_site_contract", measured_contract, ns = "Rduckhts")
-  }
+    step_times <<- c(step_times, stats::setNames(proc.time()[["elapsed"]], stage))
+  })
 }
 start <- proc.time()[["elapsed"]]
 first <- rduckhts_ancestry_proportions(
   con, "real_input", "real_reference", "real_correction")
 first_query_seconds <- proc.time()[["elapsed"]] - start
 if (nzchar(profile_steps)) {
-  labels <- c(names(step_positions), if (exists("contract_positions"))
-    names(contract_positions))
-  step_times <- unlist(as.list(.ancestry_steps)[labels])
-  stopifnot(length(step_times) == length(labels), all(is.finite(step_times)))
-  step_table <- data.frame(stage = labels, seconds_from_query = step_times - start)
-  step_table <- rbind(step_table,
-                      data.frame(stage = "returned", seconds_from_query =
-                                   proc.time()[["elapsed"]] - start))
+  options(duckhts.ancestry_step_hook = NULL)
+  stopifnot(length(step_times) > 0L, all(is.finite(step_times)),
+            !is.unsorted(step_times))
+  step_table <- data.frame(stage = c(names(step_times), "returned"),
+                           seconds_from_query = c(step_times,
+                             proc.time()[["elapsed"]]) - start)
   utils::write.table(step_table, profile_steps, sep = "\t",
                      row.names = FALSE, quote = FALSE)
-  assignInNamespace(".ancestry_bounded_proportions", original, ns = "Rduckhts")
-  if (exists("original_contract")) {
-    assignInNamespace(".ancestry_check_site_contract", original_contract, ns = "Rduckhts")
-  }
 }
 start <- proc.time()[["elapsed"]]
 result <- rduckhts_ancestry_proportions(

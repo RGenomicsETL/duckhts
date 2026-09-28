@@ -1,11 +1,25 @@
 .ancestry_bounded_proportions <- function(
   con, input_table, reference_table, correction_table, input_kind,
-  sum_to_one, min_cor, table_name, overwrite
+  sum_to_one, min_cor, table_name, overwrite, group_labels = NULL
 ) {
+  .ancestry_profile_stage("entry")
   relations <- vapply(list(input_table, reference_table, correction_table),
                       function(x) sql_quote_identifier(con, x), character(1L))
   contract <- .ancestry_check_site_contract(con, reference_table, relations)
   groups <- contract$groups
+  if (is.null(group_labels)) {
+    group_labels <- groups
+  } else if (is.character(group_labels) && length(group_labels) == length(groups) &&
+             !anyNA(group_labels) && !anyDuplicated(group_labels) &&
+             !is.null(names(group_labels)) && !anyNA(names(group_labels)) &&
+             !anyDuplicated(names(group_labels)) &&
+             setequal(names(group_labels), groups)) {
+    group_labels <- unname(group_labels[match(groups, names(group_labels))])
+  } else {
+    stop("group_ids must map every wide frequency column to a distinct group ID",
+         call. = FALSE)
+  }
+  .ancestry_profile_stage("validation")
   coefficients <- contract$coefficients
   reference_source <- contract$reference_source
   quote_id <- function(x) as.character(DBI::dbQuoteIdentifier(con, x))
@@ -35,17 +49,21 @@
   if (duplicated) {
     stop("duplicate reference locus", call. = FALSE)
   }
+  .ancestry_profile_stage("duplicate")
   classification <- .ancestry_classification_query(sources, frequency,
                                                     contract$numeric_chromosome)
   DBI::dbExecute(con, paste0("CREATE TEMP TABLE ", quote_id(audit),
     " AS ", .ancestry_indexed_audit_query(classification)))
+  .ancestry_profile_stage("audit")
   DBI::dbExecute(con, paste0("COPY (", .ancestry_aligned_query(classification),
     ") TO ", quote_str(aligned),
     " (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 32768)"))
+  .ancestry_profile_stage("alignment")
   aligned_bytes <- file.info(aligned)$size
   aligned_source <- paste0("read_parquet(", quote_str(aligned), ")")
   one_sample <- DBI::dbGetQuery(con, paste0("SELECT count(*) AS n FROM ",
                                          quote_id(audit)))$n == 1L
+  .ancestry_profile_stage("sample_index")
   indexed_source <- if (one_sample) aligned_source else paste0(
     "(SELECT a.*, i.sample_index FROM ", aligned_source, " a JOIN ",
     quote_id(audit), " i USING (sample_id))")
@@ -68,12 +86,15 @@
   if (invalid_site$out_of_range) {
     stop("reference sites require frequencies in [0, 1]", call. = FALSE)
   }
+  .ancestry_profile_stage("finite")
   DBI::dbExecute(con, paste0("CREATE TEMP TABLE ", quote_id(moments), " AS ",
     .ancestry_moments_query(con, reference_source, groups, coefficients,
                             indexed_source, one_sample)))
+  .ancestry_profile_stage("moments")
   DBI::dbExecute(con, paste0("CREATE TEMP TABLE ", quote_id(solved), " AS SELECT ",
     "m.sample_id, ", .ancestry_solver_expression(groups, length(coefficients), sum_to_one),
     " AS q FROM ", quote_id(moments), " m"))
+  .ancestry_profile_stage("solver")
   single_proportions <- NULL
   if (one_sample) {
     proportions <- DBI::dbGetQuery(con, paste0("SELECT q FROM ", quote_id(solved)))
@@ -84,11 +105,18 @@
   DBI::dbExecute(con, paste0("CREATE TEMP TABLE ", quote_id(prediction), " AS ",
     .ancestry_prediction_query(con, reference_source, groups, aligned_source,
                                quote_id(solved), one_sample, single_proportions)))
-  query <- .ancestry_wide_query(con, groups, quote_id(audit), quote_id(moments),
+  .ancestry_profile_stage("prediction")
+  query <- .ancestry_wide_query(con, group_labels, quote_id(audit), quote_id(moments),
                                 quote_id(solved), quote_id(prediction), sum_to_one, min_cor)
+  .ancestry_profile_stage("publish")
   result <- .somalier_publish_query(con, query, table_name, overwrite)
   if (is.null(table_name)) attr(result, "aligned_bytes") <- aligned_bytes
   result
+}
+
+.ancestry_profile_stage <- function(stage) {
+  callback <- getOption("duckhts.ancestry_step_hook")
+  if (!is.null(callback)) callback(stage)
 }
 
 .ancestry_check_site_contract <- function(con, reference_table, relations) {

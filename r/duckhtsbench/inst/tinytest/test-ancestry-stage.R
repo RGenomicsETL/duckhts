@@ -70,6 +70,8 @@ if (requireNamespace("DBI", quietly = TRUE) &&
     digest::digest(file = source_path, algo = "sha256"))
   utils::write.table(plan, registry, sep = "\t", row.names = FALSE, quote = FALSE)
   expect_error(duckhts_bench_stage_ancestry_parquet(), pattern = "complete keyed row per locus")
+  expect_false(file.exists(path))
+  expect_false(file.exists(paste0(path, ".sources.tsv")))
   for (value in c(-0.01, 1.01)) {
     frequencies <- sources[["ancestry_ref_freqs"]]
     frequencies$group1[1L] <- value

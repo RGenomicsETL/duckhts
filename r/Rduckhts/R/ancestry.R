@@ -29,6 +29,9 @@
 #' @param sum_to_one Require coefficients to sum to one; otherwise at most one.
 #' @param min_cor Minimum predicted-frequency correlation, default 0.4 as in
 #'   bigsnpr 1.12.21. A stricter gate may suit a specific panel.
+#' @param group_ids Optional named character vector for wide references, mapping
+#'   frequency column names to output group IDs. Use distinct frequency column
+#'   aliases when a group ID is also a PC column name or differs only by case.
 #' @param table_name Optional destination; NULL returns a data frame.
 #' @param overwrite Replace an existing destination.
 #' @return A row per sample and reference group, with status and matching audit.
@@ -38,7 +41,7 @@
 rduckhts_ancestry_proportions <- function(
   con, input_table, reference_table, loadings_table, correction_table = NULL,
   input_kind = c("frequency", "dosage"), sum_to_one = TRUE, min_cor = 0.4,
-  table_name = NULL, overwrite = FALSE
+  table_name = NULL, overwrite = FALSE, group_ids = NULL
 ) {
   input_kind <- match.arg(input_kind)
   if (!is.logical(sum_to_one) || length(sum_to_one) != 1L || is.na(sum_to_one)) {
@@ -55,14 +58,19 @@ rduckhts_ancestry_proportions <- function(
   if (is.null(correction_table)) {
     return(.ancestry_bounded_proportions(
       con, input_table, reference_table, loadings_table, input_kind,
-      sum_to_one, min_cor, table_name, overwrite))
+      sum_to_one, min_cor, table_name, overwrite, group_ids))
+  }
+  if (!is.null(group_ids)) {
+    stop("group_ids applies only to wide references", call. = FALSE)
   }
   wide <- basename(tempfile("ancestry_reference_"))
   on.exit(invisible(try(DBI::dbExecute(con, paste0("DROP VIEW IF EXISTS ",
     sql_quote_identifier(con, wide))), silent = TRUE)), add = TRUE)
-  .ancestry_long_adapter(con, reference_table, loadings_table, wide)
+  groups <- .ancestry_long_adapter(con, reference_table, loadings_table, wide)
   .ancestry_bounded_proportions(con, input_table, wide, correction_table,
-                                input_kind, sum_to_one, min_cor, table_name, overwrite)
+                                input_kind, sum_to_one, min_cor, table_name, overwrite,
+                                group_labels = stats::setNames(
+                                  groups, paste0("__g", seq_along(groups))))
 }
 
 .ancestry_consecutive_pcs <- function(pcs) {
@@ -112,9 +120,9 @@ rduckhts_ancestry_proportions <- function(
   if (invalid$bad_loadings) stop("reference sites require one finite loading per PC", call. = FALSE)
   if (invalid$out_of_range) stop("reference sites require frequencies in [0, 1]", call. = FALSE)
   quote_str <- function(x) as.character(DBI::dbQuoteString(con, x))
-  frequency <- vapply(groups, function(g) paste0(
-    "max(frequency) FILTER (WHERE group_id = ", quote_str(g), ") AS ", quote_id(g)),
-    character(1L))
+  frequency <- vapply(seq_along(groups), function(i) paste0(
+    "max(frequency) FILTER (WHERE group_id = ", quote_str(groups[[i]]),
+    ") AS ", quote_id(paste0("__g", i))), character(1L))
   loading <- vapply(seq_along(pcs), function(i) paste0(
     "max(loading) FILTER (WHERE pc = ", i, ") AS PC", i), character(1L))
   query <- paste0("CREATE TEMP VIEW ", quote_id(wide), " AS WITH r AS (", ref_sites,
@@ -124,4 +132,5 @@ rduckhts_ancestry_proportions <- function(
     paste(loading, collapse = ", "), " FROM l GROUP BY ", keys,
     ") l USING (", keys, ")")
   DBI::dbExecute(con, query)
+  groups
 }
