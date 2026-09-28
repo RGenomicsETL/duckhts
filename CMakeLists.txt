@@ -147,8 +147,6 @@ endif()
 
 # Include own headers
 target_include_directories(${EXTENSION_NAME} PRIVATE src/include)
-target_include_directories(${EXTENSION_NAME} PRIVATE src/duckvep/kernel/include)
-target_include_directories(${EXTENSION_NAME} PRIVATE src/duckvep/kernel/src)
 target_include_directories(${EXTENSION_NAME} PRIVATE third_party/cgranges)
 target_include_directories(${EXTENSION_NAME} PRIVATE third_party/libBigWig)
 target_include_directories(${EXTENSION_NAME} PRIVATE third_party/variantkey/include)
