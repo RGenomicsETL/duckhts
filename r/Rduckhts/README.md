@@ -278,11 +278,11 @@ charr <- rduckhts_somalier_charr(
   frequency_table = "identity_panel", min_depth = 7,
   hom_minor_rate = 0.10, hom_tail_alpha = 0.001, max_sites = 2
 )
-charr[order(charr$sample_id),
-      c("sample_id", "status", "usable_sites", "estimate")]
-#>   sample_id status usable_sites estimate
-#> 2        S1     ok            1        1
-#> 1        S2     ok            1        0
+print(charr[order(charr$sample_id),
+            c("sample_id", "status", "usable_sites", "estimate")], row.names = FALSE)
+#>  sample_id status usable_sites estimate
+#>         S1     ok            1        1
+#>         S2     ok            1        0
 
 invisible(dbExecute(con, paste(
   "CREATE TEMP TABLE contamination_pairs AS",
@@ -429,13 +429,10 @@ fq_files <- c(
   system.file("extdata", "r2.fq", package = "Rduckhts")
 )
 rduckhts_fastq_multi(con, "fq_multi", fq_files, overwrite = TRUE)
-dbGetQuery(con, "SELECT filename, count(*) AS n FROM fq_multi GROUP BY ALL ORDER BY filename")
-#>                                                                                                                   filename
-#> 1 <Rduckhts>/extdata/r1.fq
-#> 2 <Rduckhts>/extdata/r2.fq
-#>   n
-#> 1 5
-#> 2 5
+dbGetQuery(con, "SELECT parse_filename(filename) AS file, count(*) AS n FROM fq_multi GROUP BY ALL ORDER BY file")
+#>    file n
+#> 1 r1.fq 5
+#> 2 r2.fq 5
 ```
 
 Per-file parameters are supported via a `.params` data.frame with a
