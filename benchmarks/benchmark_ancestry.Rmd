@@ -304,9 +304,10 @@ wrapper and the typed-key matched-reference wrapper used the same staged
 1,462,608,079-byte Parquet reference (5,816,590 loci). The profiled first
 call isolates each operation; fresh-process totals include two calls. The
 reference receipt binds source and output SHA-256 digests, writer version and
-`finite_unique_v1` admission. The view passed to the wrapper has no portable
-receipt identity, so the wrapper also checks contributing rows; this costs
-0.098 s in the first-call probe but needs no whole-reference audit. Profiling
+`frequency_unit_unique_v2` admission, which checks group frequencies in [0, 1].
+The view passed to the wrapper has no portable receipt identity, so the wrapper
+also checks contributing rows; the earlier finite-only admission cost 0.098 s
+in the first-call probe. The current check also validates the frequency range. Profiling
 uses the step recorder in
 `benchmark_ancestry_memory.R` and separate installed source revisions;
 process clocks include R startup. The original full-reference duplicate
@@ -457,19 +458,35 @@ comparison$extra_seconds <- comparison$query_s - comparison$seconds
 comparison$extra_rss_mib <- comparison$max_rss_mib - comparison$peak_rss_mib
 knitr::kable(comparison, digits = 2,
   caption = "Nearest identical input baseline (single run, 58fb3264) versus warm matched-reference wrapper; absolute differences are not a no-regression claim")
+full_epilepsy <- scaling[scaling$workload == "epilepsy" &
+                         scaling$threads == 4L & scaling$scale == 4L, ]
+full_comparison <- data.frame(
+  revision = c("b30d2c2", substr(source_revision, 1L, 8L)),
+  physical_rows = rep(3343235L, 2L), threads = rep(4L, 2L),
+  median_warm_s = c(4.182, full_epilepsy$query_s),
+  max_rss_mib = c(743.85, full_epilepsy$max_rss_mib),
+  rss_budget_mib = rep(798.95, 2L))
+knitr::kable(full_comparison, digits = 2,
+  caption = "Comparable three-process full-input epilepsy measurements; b30d2c2 measurements rendered at db8a265c; sub-five-second series are memory profiles")
 ```
 
 For the unchanged full-input epilepsy scan (3,343,235 physical rows, 21
 coefficients, four DuckDB threads, 1 GB DuckDB memory limit), the three
-repetitions at `5d67b4f0` recorded a 4.172 s median warm query and 735.67 MiB
-maximum process RSS (`benchmarks/ancestry_memory_repetitions.tsv` at that
-revision). Admission against all input loci at `r substr(source_revision, 1L, 8L)`
-measures `r round(scaling$query_s[scaling$workload == "epilepsy" & scaling$threads == 4L & scaling$scale == 4L], 3)` s
+repetitions of code `b30d2c2` recorded a 4.182 s median warm query and
+743.85 MiB maximum process RSS (`benchmarks/ancestry_memory_repetitions.tsv`
+rendered at `db8a265c`). The comparable run at `r substr(source_revision, 1L, 8L)` measures
+`r round(scaling$query_s[scaling$workload == "epilepsy" & scaling$threads == 4L & scaling$scale == 4L], 3)` s
 median and `r round(scaling$max_rss_mib[scaling$workload == "epilepsy" & scaling$threads == 4L & scaling$scale == 4L], 2)` MiB
-maximum RSS, with `r max(repetitions$peak_temp_mib)` MiB DuckDB spill.
-This is an end-to-end wrapper comparison, not an isolated SQL-predicate
-measurement. The locus uniqueness check also visits sites whose input rows
-will not contribute to the fit.
+maximum RSS. Relative to `b30d2c2`, the warm median changed by
+`r round(scaling$query_s[scaling$workload == "epilepsy" & scaling$threads == 4L & scaling$scale == 4L] - 4.182, 3)` s
+and maximum RSS changed by
+`r round(scaling$max_rss_mib[scaling$workload == "epilepsy" & scaling$threads == 4L & scaling$scale == 4L] - 743.85, 2)` MiB
+(positive values mean an increase). DuckDB spill was
+`r max(repetitions$peak_temp_mib)` MiB. The one-thread 1× floor classifies
+this series as memory-only; timing differences are observations, not timing
+verdicts. These are end-to-end wrapper measurements, not isolated admission
+predicate costs. The locus uniqueness check also visits sites whose input
+rows will not contribute to the fit.
 
 With fixed physical input rows, the reported seven-decimal coefficients
 are identical across first and warm calls, fresh processes and one/four-thread
