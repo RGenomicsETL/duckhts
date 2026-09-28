@@ -1,0 +1,21 @@
+stage	original_s	matched_typed_s
+R process startup	0.138	0.122
+R libraries	0.153	0.151
+Extension connection/load	0.055	0.057
+Reference view open	0.016	0.017
+Other setup (input/correction)	0.108	0.113
+Reference/input contract excluding scans	0.016	0.031
+Duplicate reference check	1.006	0.022
+Finite reference check	1.923	0.076
+Input audit	0.865	0.142
+Aligned file creation	0.907	0.180
+Sample index	0.002	0.002
+Moments	2.178	0.245
+Solver	0.010	0.010
+Prediction	1.473	0.128
+Result publication	0.006	0.005
+Call cleanup	0.004	0.004
+First call total	8.389	0.845
+Warm call total	8.375	0.881
+Process cleanup/output	0.016	0.014
+Two-call process total	17.25	2.20

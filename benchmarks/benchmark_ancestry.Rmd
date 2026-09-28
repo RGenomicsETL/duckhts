@@ -299,6 +299,33 @@ stopifnot(nrow(reference_load) == 2L,
 knitr::kable(reference_load, digits = 2)
 ```
 
+For the 11-person, 220,000-row, one-thread probe, the original a011c61a
+wrapper and the typed-key matched-reference wrapper used the same staged
+1,462,608,079-byte Parquet reference (5,816,590 loci). The profiled first
+call isolates each operation; fresh-process totals include two calls. The
+reference receipt binds source and output SHA-256 digests, writer version and
+`finite_unique_v1` admission. The view passed to the wrapper has no portable
+receipt identity, so the wrapper also checks contributing rows; this costs
+0.098 s in the first-call probe but needs no whole-reference audit. Profiling
+uses the step recorder in
+`benchmark_ancestry_memory.R` and separate installed source revisions;
+process clocks include R startup. The original full-reference duplicate
+check grouped normalized keys across all 5.8 million loci; two independent
+finite scans read 16 PCs and 21 groups. The current checks touch only
+matched loci, and the staged UTINYINT chromosome key avoids per-reference-row
+regex normalization during joins.
+
+```{r fixed-cost-breakdown}
+fixed_cost <- utils::read.delim("ancestry_fixed_cost.tsv", check.names = FALSE)
+stopifnot(nrow(fixed_cost) == 20L,
+          abs(sum(fixed_cost$original_s[6:16]) -
+                fixed_cost$original_s[17L]) < 0.02,
+          abs(sum(fixed_cost$matched_typed_s[6:16]) -
+                fixed_cost$matched_typed_s[17L]) < 0.02)
+knitr::kable(fixed_cost, digits = 3,
+  caption = "First-call step durations and two-call fresh-process costs (seconds; single probe per revision)")
+```
+
 `benchmark_ancestry_scaling.R` runs three independent R processes per point
 with one or four DuckDB threads and the same registry-staged
 `ancestry_reference_parquet`. Files are reused from the local cache across
@@ -312,9 +339,12 @@ person while selecting 11/22/44 distinct phase-3 VCF individuals. The joint
 series selects 5,000/10,000/20,000 sites for 11/22/44 individuals: both axes
 grow, with 55,000/220,000/880,000 input rows. No sample IDs or genotypes
 are cloned. Every input row participates; each group produces one output row.
-Query time covers the public wrapper, including reference validation, aligned
-file I/O, solver, quality gates and result materialisation, but excludes
-one-time input staging, source checksums and bigsnpr oracle runs. Peak RSS
+Each fresh process calls the public wrapper twice. Warm in-process query time
+measures the second call, including matched-site validation, aligned file I/O,
+solver, quality gates and result materialisation. Process time includes both
+calls, R start, package/extension load, connection setup, reference view open,
+input staging and cleanup; it is not a single-call latency. Source checksums,
+reference derivation and bigsnpr oracle runs are outside both clocks. Peak RSS
 includes R and DuckDB; DuckDB buffer peaks are not process RSS. The aligned
 Parquet size is reported separately from DuckDB temporary spill. The
 single-thread 1× floor determines whether a workload has a timing verdict;
@@ -324,7 +354,7 @@ ceilings are 512 MiB fixed overhead plus three times the full-scale decoded
 required-column payload: 798.95 MiB for epilepsy (95.65 MiB decoded), and
 595.07 MiB for both sample and joint cases (27.69 MiB decoded), capped at
 1 GiB. These ceilings apply to every point, including the joint series. The keyed
-reference scans 5,816,590 loci with 16 DOUBLE PC and 21 DOUBLE group columns
+reference contains 5,816,590 loci with 16 DOUBLE PC and 21 DOUBLE group columns
 (296 decoded numeric bytes per row plus four keys). The admitted aligned
 relation holds at most the physical input row count: 3,343,235 dense
 summary-statistic sites or 880,000 joint genotype rows, not
@@ -362,8 +392,10 @@ scaling <- do.call(rbind, lapply(points, function(point) data.frame(
   scale = point$scale[1L], samples = point$samples[1L],
   input_rows = point$input_rows[1L], output_rows = point$output_rows[1L],
   decoded_mib = point$decoded_required_column_mib[1L],
-  median_s = median(point$seconds), iqr_s = IQR(point$seconds),
-  min_s = min(point$seconds), max_s = max(point$seconds),
+  query_s = median(point$query_seconds), query_iqr_s = IQR(point$query_seconds),
+  query_min_s = min(point$query_seconds), query_max_s = max(point$query_seconds),
+  process_s = median(point$process_seconds),
+  first_query_s = median(point$first_query_seconds),
   max_rss_mib = max(point$peak_rss_mib),
   max_buffer_mib = max(point$peak_buffer_mib),
   aligned_file_mib = max(point$aligned_file_mib),
@@ -373,42 +405,53 @@ scaling$exponent <- NA_real_
 for (workload in unique(scaling$workload)) {
   for (threads in c(1L, 4L)) {
     rows <- which(scaling$workload == workload & scaling$threads == threads)
-    scaling$exponent[rows[-1L]] <- log(scaling$median_s[rows[-1L]] /
-                                     scaling$median_s[rows[-length(rows)]]) /
+    scaling$exponent[rows[-1L]] <- log(scaling$query_s[rows[-1L]] /
+                                     scaling$query_s[rows[-length(rows)]]) /
       log(scaling$input_rows[rows[-1L]] /
           scaling$input_rows[rows[-length(rows)]])
   }
 }
-meets_floor <- tapply(scaling$median_s[scaling$threads == 1L & scaling$scale == 1L],
+meets_floor <- tapply(scaling$query_s[scaling$threads == 1L & scaling$scale == 1L],
                 scaling$workload[scaling$threads == 1L & scaling$scale == 1L],
                 function(seconds) seconds >= 5)
 scaling$timing_verdict <- ifelse(meets_floor[scaling$workload], "timed", "memory only")
 stopifnot(all(scaling$max_rss_mib <= scaling$budget_mib),
-          all(scaling$spill_mib == 0))
+          all(scaling$spill_mib == 0),
+          all(is.finite(repetitions$repeat_max_difference)))
 knitr::kable(scaling_before, digits = 2, caption =
   "Keyed-query baseline at 29f3e695; genotype 22/44 repeated sample IDs")
 knitr::kable(prior_scaling, digits = 2, caption =
   "Single-run bounded-engine baseline at 58fb3264; reference admission contract differs")
 knitr::kable(scaling, digits = 2, caption =
-  "Three fresh processes per point; spread is IQR and range; exponent is log median-time ratio / log input-row ratio to preceding scale")
+  "Three fresh processes per point; process includes two queries; query spread is IQR and range; exponent uses warm query medians only; memory-only rows have no timing verdict")
+cat("Maximum first/warm coefficient difference:",
+    max(repetitions$repeat_max_difference), "\n")
 comparison <- merge(
   scaling[scaling$threads == 4L & scaling$scale == 4L &
           scaling$workload %in% c("epilepsy", "genotypes"),
-          c("workload", "input_rows", "median_s", "max_rss_mib")],
+          c("workload", "input_rows", "query_s", "max_rss_mib")],
   prior_scaling[prior_scaling$threads == 4L & prior_scaling$scale == 4L,
                 c("workload", "input_rows", "seconds", "peak_rss_mib")],
   by = c("workload", "input_rows"))
 stopifnot(nrow(comparison) == 2L)
-comparison$extra_seconds <- comparison$median_s - comparison$seconds
+comparison$extra_seconds <- comparison$query_s - comparison$seconds
 comparison$extra_rss_mib <- comparison$max_rss_mib - comparison$peak_rss_mib
 knitr::kable(comparison, digits = 2,
-  caption = "Nearest identical input baseline (single run, 58fb3264) versus repeated checked-reference wrapper; absolute differences are not a no-regression claim")
+  caption = "Nearest identical input baseline (single run, 58fb3264) versus warm matched-reference wrapper; absolute differences are not a no-regression claim")
 ```
 
-Full-reference duplicate and finite-column admission scans account for additional
-fixed work across all input scales, especially the smaller sample runs. The
-comparison uses the same staged input denominators but different validation
-contracts; the latency/RSS trade-off requires explicit review before merging.
+The four-thread epilepsy 1× and 2× subsets yield different first/warm
+coefficients despite identical statuses (maximum absolute difference
+`r max(repetitions$repeat_max_difference)`). A first/warm probe of the
+original a011c61a wrapper on the same 1× subset differed by 0.107393.
+The full 4× input and all 11-person runs did not show this discrepancy;
+the subsets are retained for memory evidence, not output-stability claims.
+The independent 58fb3264 keyed baseline measured 0.694 s for 11 individuals
+at one thread and 0.394 s at four threads. The predecessor at a011c61a
+measured 8.408 s on the 11-individual series in the pass-4 comparison. The
+current process and query columns are separate: comparing a two-query process
+to a single-query baseline would misstate the regression. Sub-five-second 1×
+query series have memory results and descriptive exponents, not a timing verdict.
 
 ## Indexed 30x CRAM sensitivity
 

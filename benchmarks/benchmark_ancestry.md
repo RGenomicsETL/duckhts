@@ -1,4 +1,4 @@
-Revision: f1498fbe6a2b8d67fdbcdd9f08a48f90ca50d4f5. Workload:
+Revision: 96ba5360f920172485cd5abe647d4f23cfe1370b. Workload:
 deterministic biallelic synthetic reference frequencies and PC loadings;
 three independently perturbed samples; 4 DuckDB threads; two reference
 groups; two PCs; `min_cor = 0.4`. Each variant is present in both groups
@@ -9,7 +9,7 @@ separately below.
 The correction vector is staged from the committed, checksummed bigsnpr
 vignette product. `VmHWM` is cumulative process high-water RSS (MiB),
 including package loading and all preceding cases; the baseline before
-the first run was 178 MiB. It is not per-query allocated memory.
+the first run was 180.3 MiB. It is not per-query allocated memory.
 
 <table>
 <colgroup>
@@ -50,8 +50,8 @@ the first run was 178 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">1</td>
-<td style="text-align: right;">0.089</td>
-<td style="text-align: right;">219.887</td>
+<td style="text-align: right;">0.079</td>
+<td style="text-align: right;">223.004</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="even">
@@ -63,8 +63,8 @@ the first run was 178 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">2</td>
-<td style="text-align: right;">0.086</td>
-<td style="text-align: right;">221.449</td>
+<td style="text-align: right;">0.076</td>
+<td style="text-align: right;">224.723</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="odd">
@@ -76,8 +76,8 @@ the first run was 178 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">3</td>
-<td style="text-align: right;">0.083</td>
-<td style="text-align: right;">223.793</td>
+<td style="text-align: right;">0.077</td>
+<td style="text-align: right;">225.660</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="even">
@@ -89,8 +89,8 @@ the first run was 178 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">1</td>
-<td style="text-align: right;">0.101</td>
-<td style="text-align: right;">226.137</td>
+<td style="text-align: right;">0.094</td>
+<td style="text-align: right;">226.910</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="odd">
@@ -102,8 +102,8 @@ the first run was 178 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">2</td>
-<td style="text-align: right;">0.099</td>
-<td style="text-align: right;">227.074</td>
+<td style="text-align: right;">0.093</td>
+<td style="text-align: right;">228.316</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="even">
@@ -115,8 +115,8 @@ the first run was 178 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">3</td>
-<td style="text-align: right;">0.098</td>
-<td style="text-align: right;">229.262</td>
+<td style="text-align: right;">0.093</td>
+<td style="text-align: right;">230.973</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="odd">
@@ -128,8 +128,8 @@ the first run was 178 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">1</td>
-<td style="text-align: right;">0.143</td>
-<td style="text-align: right;">234.574</td>
+<td style="text-align: right;">0.144</td>
+<td style="text-align: right;">240.035</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="even">
@@ -141,8 +141,8 @@ the first run was 178 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">2</td>
-<td style="text-align: right;">0.143</td>
-<td style="text-align: right;">238.168</td>
+<td style="text-align: right;">0.141</td>
+<td style="text-align: right;">243.941</td>
 <td style="text-align: left;"></td>
 </tr>
 <tr class="odd">
@@ -154,8 +154,8 @@ the first run was 178 MiB. It is not per-query allocated memory.
 <td style="text-align: right;">2</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">3</td>
-<td style="text-align: right;">0.146</td>
-<td style="text-align: right;">242.699</td>
+<td style="text-align: right;">0.139</td>
+<td style="text-align: right;">246.910</td>
 <td style="text-align: left;"></td>
 </tr>
 </tbody>
@@ -165,7 +165,7 @@ Failed gates are retained in the `failures` column for each repeat. The
 nearest identical synthetic workload is the earlier rendered
 `benchmarks/benchmark_ancestry.md` at repository revision `8ab38b99`
 (source revision `56aad9cf`): its three 17,000-site repeats had median
-0.078 seconds, versus 0.143 seconds here. These are separate R processes
+0.078 seconds, versus 0.141 seconds here. These are separate R processes
 with uncontrolled background load; this difference cannot establish a
 regression or equivalence. There is no ancestry-projection baseline on
 `develop`; the synthetic rows are not evidence about real-reference
@@ -306,9 +306,9 @@ aggregation, but excludes loading the oracle CSVs.
 <td style="text-align: right;">21</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">5816590</td>
-<td style="text-align: right;">25.51</td>
-<td style="text-align: right;">2.24</td>
-<td style="text-align: right;">7595.44</td>
+<td style="text-align: right;">25.62</td>
+<td style="text-align: right;">0.27</td>
+<td style="text-align: right;">7596.84</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">epilepsy (genome-wide)</td>
@@ -319,9 +319,9 @@ aggregation, but excludes loading the oracle CSVs.
 <td style="text-align: right;">21</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">5816590</td>
-<td style="text-align: right;">25.55</td>
-<td style="text-align: right;">4.91</td>
-<td style="text-align: right;">7740.84</td>
+<td style="text-align: right;">25.73</td>
+<td style="text-align: right;">4.66</td>
+<td style="text-align: right;">7644.04</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">1000G phase-3 chr22 genotypes</td>
@@ -332,9 +332,9 @@ aggregation, but excludes loading the oracle CSVs.
 <td style="text-align: right;">21</td>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">5816590</td>
-<td style="text-align: right;">26.84</td>
-<td style="text-align: right;">2.54</td>
-<td style="text-align: right;">4871.47</td>
+<td style="text-align: right;">27.28</td>
+<td style="text-align: right;">0.55</td>
+<td style="text-align: right;">4871.19</td>
 </tr>
 </tbody>
 </table>
@@ -787,6 +787,140 @@ materializes 5.8 million rows in R. These timings differ from the CSV
 </tbody>
 </table>
 
+For the 11-person, 220,000-row, one-thread probe, the original a011c61a
+wrapper and the typed-key matched-reference wrapper used the same staged
+1,462,608,079-byte Parquet reference (5,816,590 loci). The profiled
+first call isolates each operation; fresh-process totals include two
+calls. The reference receipt binds source and output SHA-256 digests,
+writer version and `finite_unique_v1` admission. The view passed to the
+wrapper has no portable receipt identity, so the wrapper also checks
+contributing rows; this costs 0.098 s in the first-call probe but needs
+no whole-reference audit. Profiling uses the step recorder in
+`benchmark_ancestry_memory.R` and separate installed source revisions;
+process clocks include R startup. The original full-reference duplicate
+check grouped normalized keys across all 5.8 million loci; two
+independent finite scans read 16 PCs and 21 groups. The current checks
+touch only matched loci, and the staged UTINYINT chromosome key avoids
+per-reference-row regex normalization during joins.
+
+<table>
+<caption>First-call step durations and two-call fresh-process costs
+(seconds; single probe per revision)</caption>
+<thead>
+<tr class="header">
+<th style="text-align: left;">stage</th>
+<th style="text-align: right;">original_s</th>
+<th style="text-align: right;">matched_typed_s</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">R process startup</td>
+<td style="text-align: right;">0.138</td>
+<td style="text-align: right;">0.122</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">R libraries</td>
+<td style="text-align: right;">0.153</td>
+<td style="text-align: right;">0.151</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Extension connection/load</td>
+<td style="text-align: right;">0.055</td>
+<td style="text-align: right;">0.057</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Reference view open</td>
+<td style="text-align: right;">0.016</td>
+<td style="text-align: right;">0.017</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Other setup (input/correction)</td>
+<td style="text-align: right;">0.108</td>
+<td style="text-align: right;">0.113</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Reference/input contract excluding
+scans</td>
+<td style="text-align: right;">0.016</td>
+<td style="text-align: right;">0.031</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Duplicate reference check</td>
+<td style="text-align: right;">1.006</td>
+<td style="text-align: right;">0.022</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Finite reference check</td>
+<td style="text-align: right;">1.923</td>
+<td style="text-align: right;">0.076</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Input audit</td>
+<td style="text-align: right;">0.865</td>
+<td style="text-align: right;">0.142</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Aligned file creation</td>
+<td style="text-align: right;">0.907</td>
+<td style="text-align: right;">0.180</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Sample index</td>
+<td style="text-align: right;">0.002</td>
+<td style="text-align: right;">0.002</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Moments</td>
+<td style="text-align: right;">2.178</td>
+<td style="text-align: right;">0.245</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Solver</td>
+<td style="text-align: right;">0.010</td>
+<td style="text-align: right;">0.010</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Prediction</td>
+<td style="text-align: right;">1.473</td>
+<td style="text-align: right;">0.128</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Result publication</td>
+<td style="text-align: right;">0.006</td>
+<td style="text-align: right;">0.005</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Call cleanup</td>
+<td style="text-align: right;">0.004</td>
+<td style="text-align: right;">0.004</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">First call total</td>
+<td style="text-align: right;">8.389</td>
+<td style="text-align: right;">0.845</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Warm call total</td>
+<td style="text-align: right;">8.375</td>
+<td style="text-align: right;">0.881</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Process cleanup/output</td>
+<td style="text-align: right;">0.016</td>
+<td style="text-align: right;">0.014</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Two-call process total</td>
+<td style="text-align: right;">17.250</td>
+<td style="text-align: right;">2.200</td>
+</tr>
+</tbody>
+</table>
+
+First-call step durations and two-call fresh-process costs (seconds;
+single probe per revision)
+
 `benchmark_ancestry_scaling.R` runs three independent R processes per
 point with one or four DuckDB threads and the same registry-staged
 `ancestry_reference_parquet`. Files are reused from the local cache
@@ -801,34 +935,38 @@ chr22 sites per person while selecting 11/22/44 distinct phase-3 VCF
 individuals. The joint series selects 5,000/10,000/20,000 sites for
 11/22/44 individuals: both axes grow, with 55,000/220,000/880,000 input
 rows. No sample IDs or genotypes are cloned. Every input row
-participates; each group produces one output row. Query time covers the
-public wrapper, including reference validation, aligned file I/O,
-solver, quality gates and result materialisation, but excludes one-time
-input staging, source checksums and bigsnpr oracle runs. Peak RSS
-includes R and DuckDB; DuckDB buffer peaks are not process RSS. The
-aligned Parquet size is reported separately from DuckDB temporary spill.
-The single-thread 1× floor determines whether a workload has a timing
-verdict; sub-five-second series are memory profiles only. Each
-repetition has a 1 GB DuckDB memory limit and zero DuckDB spill
-allowance. The declared process-RSS ceilings are 512 MiB fixed overhead
-plus three times the full-scale decoded required-column payload: 798.95
-MiB for epilepsy (95.65 MiB decoded), and 595.07 MiB for both sample and
-joint cases (27.69 MiB decoded), capped at 1 GiB. These ceilings apply
-to every point, including the joint series. The keyed reference scans
-5,816,590 loci with 16 DOUBLE PC and 21 DOUBLE group columns (296
-decoded numeric bytes per row plus four keys). The admitted aligned
-relation holds at most the physical input row count: 3,343,235 dense
-summary-statistic sites or 880,000 joint genotype rows, not sites × PCs
-× groups. The largest per-sample aggregate consumes 3,343,235 sites and
-emits 16 × (21 + 1) numeric moments; each fitted sample returns 21 rows.
-The aligned file is written once and scanned for moments and prediction;
-its reported size is logical file I/O, not DuckDB spill or measured
-physical disk traffic. An optional single-run TEMP-table probe retained
-identical proportions and zero spill, but its full-epilepsy peak was
-approximately 865 MiB, above the 798.95 MiB ceiling. It is not a
-repeated comparable workload; the measured path here keeps the aligned
-Parquet file. The 21 full-epilepsy coefficients and 231 individual
-coefficients agree with bigsnpr at seven decimals.
+participates; each group produces one output row. Each fresh process
+calls the public wrapper twice. Warm in-process query time measures the
+second call, including matched-site validation, aligned file I/O,
+solver, quality gates and result materialisation. Process time includes
+both calls, R start, package/extension load, connection setup, reference
+view open, input staging and cleanup; it is not a single-call latency.
+Source checksums, reference derivation and bigsnpr oracle runs are
+outside both clocks. Peak RSS includes R and DuckDB; DuckDB buffer peaks
+are not process RSS. The aligned Parquet size is reported separately
+from DuckDB temporary spill. The single-thread 1× floor determines
+whether a workload has a timing verdict; sub-five-second series are
+memory profiles only. Each repetition has a 1 GB DuckDB memory limit and
+zero DuckDB spill allowance. The declared process-RSS ceilings are 512
+MiB fixed overhead plus three times the full-scale decoded
+required-column payload: 798.95 MiB for epilepsy (95.65 MiB decoded),
+and 595.07 MiB for both sample and joint cases (27.69 MiB decoded),
+capped at 1 GiB. These ceilings apply to every point, including the
+joint series. The keyed reference contains 5,816,590 loci with 16 DOUBLE
+PC and 21 DOUBLE group columns (296 decoded numeric bytes per row plus
+four keys). The admitted aligned relation holds at most the physical
+input row count: 3,343,235 dense summary-statistic sites or 880,000
+joint genotype rows, not sites × PCs × groups. The largest per-sample
+aggregate consumes 3,343,235 sites and emits 16 × (21 + 1) numeric
+moments; each fitted sample returns 21 rows. The aligned file is written
+once and scanned for moments and prediction; its reported size is
+logical file I/O, not DuckDB spill or measured physical disk traffic. An
+optional single-run TEMP-table probe retained identical proportions and
+zero spill, but its full-epilepsy peak was approximately 865 MiB, above
+the 798.95 MiB ceiling. It is not a repeated comparable workload; the
+measured path here keeps the aligned Parquet file. The 21 full-epilepsy
+coefficients and 231 individual coefficients agree with bigsnpr at seven
+decimals.
 
 <table>
 <caption>Keyed-query baseline at 29f3e695; genotype 22/44 repeated
@@ -1217,30 +1355,32 @@ admission contract differs</caption>
 Single-run bounded-engine baseline at 58fb3264; reference admission
 contract differs
 
-<table>
-<caption>Three fresh processes per point; spread is IQR and range;
-exponent is log median-time ratio / log input-row ratio to preceding
-scale</caption>
+<table style="width:100%;">
+<caption>Three fresh processes per point; process includes two queries;
+query spread is IQR and range; exponent uses warm query medians only;
+memory-only rows have no timing verdict</caption>
 <colgroup>
-<col style="width: 7%" />
 <col style="width: 5%" />
 <col style="width: 4%" />
 <col style="width: 3%" />
+<col style="width: 2%" />
+<col style="width: 3%" />
 <col style="width: 4%" />
+<col style="width: 5%" />
+<col style="width: 5%" />
+<col style="width: 3%" />
+<col style="width: 5%" />
+<col style="width: 5%" />
+<col style="width: 5%" />
+<col style="width: 4%" />
+<col style="width: 5%" />
 <col style="width: 5%" />
 <col style="width: 6%" />
-<col style="width: 6%" />
+<col style="width: 7%" />
+<col style="width: 4%" />
 <col style="width: 4%" />
 <col style="width: 3%" />
-<col style="width: 3%" />
-<col style="width: 3%" />
 <col style="width: 6%" />
-<col style="width: 7%" />
-<col style="width: 8%" />
-<col style="width: 5%" />
-<col style="width: 5%" />
-<col style="width: 4%" />
-<col style="width: 7%" />
 </colgroup>
 <thead>
 <tr class="header">
@@ -1252,10 +1392,12 @@ scale</caption>
 <th style="text-align: right;">input_rows</th>
 <th style="text-align: right;">output_rows</th>
 <th style="text-align: right;">decoded_mib</th>
-<th style="text-align: right;">median_s</th>
-<th style="text-align: right;">iqr_s</th>
-<th style="text-align: right;">min_s</th>
-<th style="text-align: right;">max_s</th>
+<th style="text-align: right;">query_s</th>
+<th style="text-align: right;">query_iqr_s</th>
+<th style="text-align: right;">query_min_s</th>
+<th style="text-align: right;">query_max_s</th>
+<th style="text-align: right;">process_s</th>
+<th style="text-align: right;">first_query_s</th>
 <th style="text-align: right;">max_rss_mib</th>
 <th style="text-align: right;">max_buffer_mib</th>
 <th style="text-align: right;">aligned_file_mib</th>
@@ -1275,17 +1417,19 @@ scale</caption>
 <td style="text-align: right;">835809</td>
 <td style="text-align: right;">21</td>
 <td style="text-align: right;">23.91</td>
-<td style="text-align: right;">10.01</td>
+<td style="text-align: right;">3.92</td>
 <td style="text-align: right;">0.02</td>
-<td style="text-align: right;">10.01</td>
-<td style="text-align: right;">10.05</td>
-<td style="text-align: right;">558.45</td>
-<td style="text-align: right;">746.04</td>
+<td style="text-align: right;">3.91</td>
+<td style="text-align: right;">3.95</td>
+<td style="text-align: right;">8.33</td>
+<td style="text-align: right;">3.96</td>
+<td style="text-align: right;">316.96</td>
+<td style="text-align: right;">264.50</td>
 <td style="text-align: right;">5.60</td>
 <td style="text-align: right;">0</td>
 <td style="text-align: right;">798.95</td>
 <td style="text-align: right;">NA</td>
-<td style="text-align: left;">timed</td>
+<td style="text-align: left;">memory only</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">epilepsy.1.2</td>
@@ -1296,17 +1440,19 @@ scale</caption>
 <td style="text-align: right;">1671618</td>
 <td style="text-align: right;">21</td>
 <td style="text-align: right;">47.83</td>
-<td style="text-align: right;">12.00</td>
-<td style="text-align: right;">0.03</td>
-<td style="text-align: right;">11.98</td>
-<td style="text-align: right;">12.04</td>
-<td style="text-align: right;">558.40</td>
-<td style="text-align: right;">772.39</td>
+<td style="text-align: right;">7.85</td>
+<td style="text-align: right;">0.02</td>
+<td style="text-align: right;">7.82</td>
+<td style="text-align: right;">7.86</td>
+<td style="text-align: right;">16.21</td>
+<td style="text-align: right;">7.88</td>
+<td style="text-align: right;">445.17</td>
+<td style="text-align: right;">479.53</td>
 <td style="text-align: right;">11.18</td>
 <td style="text-align: right;">0</td>
 <td style="text-align: right;">798.95</td>
-<td style="text-align: right;">0.26</td>
-<td style="text-align: left;">timed</td>
+<td style="text-align: right;">1.00</td>
+<td style="text-align: left;">memory only</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">epilepsy.1.4</td>
@@ -1317,17 +1463,19 @@ scale</caption>
 <td style="text-align: right;">3343235</td>
 <td style="text-align: right;">21</td>
 <td style="text-align: right;">95.65</td>
-<td style="text-align: right;">16.12</td>
-<td style="text-align: right;">0.03</td>
-<td style="text-align: right;">16.09</td>
-<td style="text-align: right;">16.16</td>
-<td style="text-align: right;">654.05</td>
-<td style="text-align: right;">931.67</td>
+<td style="text-align: right;">13.90</td>
+<td style="text-align: right;">0.01</td>
+<td style="text-align: right;">13.90</td>
+<td style="text-align: right;">13.92</td>
+<td style="text-align: right;">28.34</td>
+<td style="text-align: right;">13.96</td>
+<td style="text-align: right;">698.93</td>
+<td style="text-align: right;">861.74</td>
 <td style="text-align: right;">22.41</td>
 <td style="text-align: right;">0</td>
 <td style="text-align: right;">798.95</td>
-<td style="text-align: right;">0.43</td>
-<td style="text-align: left;">timed</td>
+<td style="text-align: right;">0.82</td>
+<td style="text-align: left;">memory only</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">epilepsy.4.1</td>
@@ -1338,17 +1486,19 @@ scale</caption>
 <td style="text-align: right;">835809</td>
 <td style="text-align: right;">21</td>
 <td style="text-align: right;">23.91</td>
-<td style="text-align: right;">2.94</td>
-<td style="text-align: right;">0.02</td>
-<td style="text-align: right;">2.91</td>
-<td style="text-align: right;">2.96</td>
-<td style="text-align: right;">475.47</td>
-<td style="text-align: right;">675.84</td>
+<td style="text-align: right;">1.33</td>
+<td style="text-align: right;">0.01</td>
+<td style="text-align: right;">1.32</td>
+<td style="text-align: right;">1.34</td>
+<td style="text-align: right;">3.15</td>
+<td style="text-align: right;">1.34</td>
+<td style="text-align: right;">417.91</td>
+<td style="text-align: right;">490.12</td>
 <td style="text-align: right;">5.65</td>
 <td style="text-align: right;">0</td>
 <td style="text-align: right;">798.95</td>
 <td style="text-align: right;">NA</td>
-<td style="text-align: left;">timed</td>
+<td style="text-align: left;">memory only</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">epilepsy.4.2</td>
@@ -1359,17 +1509,19 @@ scale</caption>
 <td style="text-align: right;">1671618</td>
 <td style="text-align: right;">21</td>
 <td style="text-align: right;">47.83</td>
-<td style="text-align: right;">3.48</td>
-<td style="text-align: right;">0.02</td>
-<td style="text-align: right;">3.47</td>
-<td style="text-align: right;">3.51</td>
-<td style="text-align: right;">547.62</td>
-<td style="text-align: right;">740.28</td>
+<td style="text-align: right;">2.45</td>
+<td style="text-align: right;">0.01</td>
+<td style="text-align: right;">2.45</td>
+<td style="text-align: right;">2.46</td>
+<td style="text-align: right;">5.40</td>
+<td style="text-align: right;">2.47</td>
+<td style="text-align: right;">529.64</td>
+<td style="text-align: right;">697.82</td>
 <td style="text-align: right;">11.30</td>
 <td style="text-align: right;">0</td>
 <td style="text-align: right;">798.95</td>
-<td style="text-align: right;">0.24</td>
-<td style="text-align: left;">timed</td>
+<td style="text-align: right;">0.88</td>
+<td style="text-align: left;">memory only</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">epilepsy.4.4</td>
@@ -1380,17 +1532,19 @@ scale</caption>
 <td style="text-align: right;">3343235</td>
 <td style="text-align: right;">21</td>
 <td style="text-align: right;">95.65</td>
-<td style="text-align: right;">4.71</td>
+<td style="text-align: right;">4.17</td>
 <td style="text-align: right;">0.01</td>
-<td style="text-align: right;">4.70</td>
-<td style="text-align: right;">4.72</td>
-<td style="text-align: right;">742.08</td>
-<td style="text-align: right;">1124.17</td>
-<td style="text-align: right;">22.59</td>
+<td style="text-align: right;">4.16</td>
+<td style="text-align: right;">4.18</td>
+<td style="text-align: right;">8.83</td>
+<td style="text-align: right;">4.17</td>
+<td style="text-align: right;">735.67</td>
+<td style="text-align: right;">1040.75</td>
+<td style="text-align: right;">22.60</td>
 <td style="text-align: right;">0</td>
 <td style="text-align: right;">798.95</td>
-<td style="text-align: right;">0.43</td>
-<td style="text-align: left;">timed</td>
+<td style="text-align: right;">0.77</td>
+<td style="text-align: left;">memory only</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">genotypes.1.1</td>
@@ -1401,17 +1555,19 @@ scale</caption>
 <td style="text-align: right;">220000</td>
 <td style="text-align: right;">231</td>
 <td style="text-align: right;">6.92</td>
-<td style="text-align: right;">8.41</td>
-<td style="text-align: right;">0.02</td>
-<td style="text-align: right;">8.39</td>
-<td style="text-align: right;">8.43</td>
-<td style="text-align: right;">558.56</td>
-<td style="text-align: right;">773.39</td>
+<td style="text-align: right;">0.82</td>
+<td style="text-align: right;">0.00</td>
+<td style="text-align: right;">0.82</td>
+<td style="text-align: right;">0.83</td>
+<td style="text-align: right;">2.13</td>
+<td style="text-align: right;">0.84</td>
+<td style="text-align: right;">260.42</td>
+<td style="text-align: right;">174.96</td>
 <td style="text-align: right;">0.39</td>
 <td style="text-align: right;">0</td>
 <td style="text-align: right;">595.07</td>
 <td style="text-align: right;">NA</td>
-<td style="text-align: left;">timed</td>
+<td style="text-align: left;">memory only</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">genotypes.1.2</td>
@@ -1422,17 +1578,19 @@ scale</caption>
 <td style="text-align: right;">440000</td>
 <td style="text-align: right;">462</td>
 <td style="text-align: right;">13.85</td>
-<td style="text-align: right;">8.96</td>
-<td style="text-align: right;">0.05</td>
-<td style="text-align: right;">8.89</td>
-<td style="text-align: right;">8.99</td>
-<td style="text-align: right;">558.69</td>
-<td style="text-align: right;">773.39</td>
+<td style="text-align: right;">1.34</td>
+<td style="text-align: right;">0.01</td>
+<td style="text-align: right;">1.34</td>
+<td style="text-align: right;">1.35</td>
+<td style="text-align: right;">3.17</td>
+<td style="text-align: right;">1.36</td>
+<td style="text-align: right;">331.07</td>
+<td style="text-align: right;">300.46</td>
 <td style="text-align: right;">0.76</td>
 <td style="text-align: right;">0</td>
 <td style="text-align: right;">595.07</td>
-<td style="text-align: right;">0.09</td>
-<td style="text-align: left;">timed</td>
+<td style="text-align: right;">0.70</td>
+<td style="text-align: left;">memory only</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">genotypes.1.4</td>
@@ -1443,17 +1601,19 @@ scale</caption>
 <td style="text-align: right;">880000</td>
 <td style="text-align: right;">924</td>
 <td style="text-align: right;">27.69</td>
-<td style="text-align: right;">9.95</td>
-<td style="text-align: right;">0.04</td>
-<td style="text-align: right;">9.93</td>
-<td style="text-align: right;">10.01</td>
-<td style="text-align: right;">558.33</td>
-<td style="text-align: right;">779.01</td>
+<td style="text-align: right;">2.38</td>
+<td style="text-align: right;">0.02</td>
+<td style="text-align: right;">2.37</td>
+<td style="text-align: right;">2.41</td>
+<td style="text-align: right;">5.27</td>
+<td style="text-align: right;">2.41</td>
+<td style="text-align: right;">475.11</td>
+<td style="text-align: right;">548.48</td>
 <td style="text-align: right;">1.32</td>
 <td style="text-align: right;">0</td>
 <td style="text-align: right;">595.07</td>
-<td style="text-align: right;">0.15</td>
-<td style="text-align: left;">timed</td>
+<td style="text-align: right;">0.82</td>
+<td style="text-align: left;">memory only</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">genotypes.4.1</td>
@@ -1464,17 +1624,19 @@ scale</caption>
 <td style="text-align: right;">220000</td>
 <td style="text-align: right;">231</td>
 <td style="text-align: right;">6.92</td>
-<td style="text-align: right;">2.51</td>
+<td style="text-align: right;">0.47</td>
 <td style="text-align: right;">0.01</td>
-<td style="text-align: right;">2.50</td>
-<td style="text-align: right;">2.52</td>
-<td style="text-align: right;">474.15</td>
-<td style="text-align: right;">649.24</td>
+<td style="text-align: right;">0.46</td>
+<td style="text-align: right;">0.48</td>
+<td style="text-align: right;">1.43</td>
+<td style="text-align: right;">0.49</td>
+<td style="text-align: right;">311.06</td>
+<td style="text-align: right;">255.04</td>
 <td style="text-align: right;">0.40</td>
 <td style="text-align: right;">0</td>
 <td style="text-align: right;">595.07</td>
 <td style="text-align: right;">NA</td>
-<td style="text-align: left;">timed</td>
+<td style="text-align: left;">memory only</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">genotypes.4.2</td>
@@ -1485,17 +1647,19 @@ scale</caption>
 <td style="text-align: right;">440000</td>
 <td style="text-align: right;">462</td>
 <td style="text-align: right;">13.85</td>
-<td style="text-align: right;">2.71</td>
+<td style="text-align: right;">0.68</td>
 <td style="text-align: right;">0.00</td>
-<td style="text-align: right;">2.70</td>
-<td style="text-align: right;">2.71</td>
-<td style="text-align: right;">469.12</td>
-<td style="text-align: right;">676.83</td>
+<td style="text-align: right;">0.68</td>
+<td style="text-align: right;">0.69</td>
+<td style="text-align: right;">1.86</td>
+<td style="text-align: right;">0.70</td>
+<td style="text-align: right;">369.81</td>
+<td style="text-align: right;">375.35</td>
 <td style="text-align: right;">0.76</td>
 <td style="text-align: right;">0</td>
 <td style="text-align: right;">595.07</td>
-<td style="text-align: right;">0.11</td>
-<td style="text-align: left;">timed</td>
+<td style="text-align: right;">0.51</td>
+<td style="text-align: left;">memory only</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">genotypes.4.4</td>
@@ -1506,17 +1670,19 @@ scale</caption>
 <td style="text-align: right;">880000</td>
 <td style="text-align: right;">924</td>
 <td style="text-align: right;">27.69</td>
-<td style="text-align: right;">3.15</td>
-<td style="text-align: right;">0.01</td>
-<td style="text-align: right;">3.14</td>
-<td style="text-align: right;">3.17</td>
-<td style="text-align: right;">567.76</td>
-<td style="text-align: right;">733.14</td>
-<td style="text-align: right;">1.30</td>
+<td style="text-align: right;">1.08</td>
+<td style="text-align: right;">0.00</td>
+<td style="text-align: right;">1.08</td>
+<td style="text-align: right;">1.09</td>
+<td style="text-align: right;">2.67</td>
+<td style="text-align: right;">1.11</td>
+<td style="text-align: right;">515.16</td>
+<td style="text-align: right;">621.14</td>
+<td style="text-align: right;">1.31</td>
 <td style="text-align: right;">0</td>
 <td style="text-align: right;">595.07</td>
-<td style="text-align: right;">0.22</td>
-<td style="text-align: left;">timed</td>
+<td style="text-align: right;">0.68</td>
+<td style="text-align: left;">memory only</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">joint.1.1</td>
@@ -1527,17 +1693,19 @@ scale</caption>
 <td style="text-align: right;">55000</td>
 <td style="text-align: right;">231</td>
 <td style="text-align: right;">1.73</td>
-<td style="text-align: right;">8.00</td>
-<td style="text-align: right;">0.05</td>
-<td style="text-align: right;">7.99</td>
-<td style="text-align: right;">8.09</td>
-<td style="text-align: right;">559.06</td>
-<td style="text-align: right;">781.27</td>
+<td style="text-align: right;">0.41</td>
+<td style="text-align: right;">0.00</td>
+<td style="text-align: right;">0.41</td>
+<td style="text-align: right;">0.42</td>
+<td style="text-align: right;">1.31</td>
+<td style="text-align: right;">0.42</td>
+<td style="text-align: right;">202.50</td>
+<td style="text-align: right;">86.54</td>
 <td style="text-align: right;">0.10</td>
 <td style="text-align: right;">0</td>
 <td style="text-align: right;">595.07</td>
 <td style="text-align: right;">NA</td>
-<td style="text-align: left;">timed</td>
+<td style="text-align: left;">memory only</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">joint.1.2</td>
@@ -1548,17 +1716,19 @@ scale</caption>
 <td style="text-align: right;">220000</td>
 <td style="text-align: right;">462</td>
 <td style="text-align: right;">6.92</td>
-<td style="text-align: right;">8.43</td>
-<td style="text-align: right;">0.02</td>
-<td style="text-align: right;">8.40</td>
-<td style="text-align: right;">8.44</td>
-<td style="text-align: right;">559.26</td>
-<td style="text-align: right;">781.27</td>
+<td style="text-align: right;">0.83</td>
+<td style="text-align: right;">0.01</td>
+<td style="text-align: right;">0.82</td>
+<td style="text-align: right;">0.84</td>
+<td style="text-align: right;">2.16</td>
+<td style="text-align: right;">0.86</td>
+<td style="text-align: right;">260.28</td>
+<td style="text-align: right;">175.82</td>
 <td style="text-align: right;">0.39</td>
 <td style="text-align: right;">0</td>
 <td style="text-align: right;">595.07</td>
-<td style="text-align: right;">0.04</td>
-<td style="text-align: left;">timed</td>
+<td style="text-align: right;">0.50</td>
+<td style="text-align: left;">memory only</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">joint.1.4</td>
@@ -1569,17 +1739,19 @@ scale</caption>
 <td style="text-align: right;">880000</td>
 <td style="text-align: right;">924</td>
 <td style="text-align: right;">27.69</td>
-<td style="text-align: right;">10.02</td>
+<td style="text-align: right;">2.45</td>
 <td style="text-align: right;">0.02</td>
-<td style="text-align: right;">9.99</td>
-<td style="text-align: right;">10.03</td>
-<td style="text-align: right;">559.07</td>
-<td style="text-align: right;">781.27</td>
+<td style="text-align: right;">2.43</td>
+<td style="text-align: right;">2.46</td>
+<td style="text-align: right;">5.41</td>
+<td style="text-align: right;">2.44</td>
+<td style="text-align: right;">474.86</td>
+<td style="text-align: right;">548.52</td>
 <td style="text-align: right;">1.32</td>
 <td style="text-align: right;">0</td>
 <td style="text-align: right;">595.07</td>
-<td style="text-align: right;">0.13</td>
-<td style="text-align: left;">timed</td>
+<td style="text-align: right;">0.78</td>
+<td style="text-align: left;">memory only</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">joint.4.1</td>
@@ -1590,17 +1762,19 @@ scale</caption>
 <td style="text-align: right;">55000</td>
 <td style="text-align: right;">231</td>
 <td style="text-align: right;">1.73</td>
-<td style="text-align: right;">2.39</td>
-<td style="text-align: right;">0.02</td>
-<td style="text-align: right;">2.36</td>
-<td style="text-align: right;">2.40</td>
-<td style="text-align: right;">468.70</td>
-<td style="text-align: right;">676.74</td>
+<td style="text-align: right;">0.39</td>
+<td style="text-align: right;">0.00</td>
+<td style="text-align: right;">0.38</td>
+<td style="text-align: right;">0.39</td>
+<td style="text-align: right;">1.27</td>
+<td style="text-align: right;">0.40</td>
+<td style="text-align: right;">260.91</td>
+<td style="text-align: right;">95.12</td>
 <td style="text-align: right;">0.10</td>
 <td style="text-align: right;">0</td>
 <td style="text-align: right;">595.07</td>
 <td style="text-align: right;">NA</td>
-<td style="text-align: left;">timed</td>
+<td style="text-align: left;">memory only</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">joint.4.2</td>
@@ -1611,17 +1785,19 @@ scale</caption>
 <td style="text-align: right;">220000</td>
 <td style="text-align: right;">462</td>
 <td style="text-align: right;">6.92</td>
-<td style="text-align: right;">2.63</td>
+<td style="text-align: right;">0.62</td>
 <td style="text-align: right;">0.01</td>
-<td style="text-align: right;">2.61</td>
-<td style="text-align: right;">2.63</td>
-<td style="text-align: right;">466.92</td>
-<td style="text-align: right;">676.48</td>
+<td style="text-align: right;">0.61</td>
+<td style="text-align: right;">0.62</td>
+<td style="text-align: right;">1.72</td>
+<td style="text-align: right;">0.63</td>
+<td style="text-align: right;">301.49</td>
+<td style="text-align: right;">231.00</td>
 <td style="text-align: right;">0.38</td>
 <td style="text-align: right;">0</td>
 <td style="text-align: right;">595.07</td>
-<td style="text-align: right;">0.07</td>
-<td style="text-align: left;">timed</td>
+<td style="text-align: right;">0.34</td>
+<td style="text-align: left;">memory only</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">joint.4.4</td>
@@ -1632,32 +1808,37 @@ scale</caption>
 <td style="text-align: right;">880000</td>
 <td style="text-align: right;">924</td>
 <td style="text-align: right;">27.69</td>
-<td style="text-align: right;">3.16</td>
-<td style="text-align: right;">0.03</td>
-<td style="text-align: right;">3.16</td>
-<td style="text-align: right;">3.22</td>
-<td style="text-align: right;">564.49</td>
-<td style="text-align: right;">731.61</td>
+<td style="text-align: right;">1.13</td>
+<td style="text-align: right;">0.01</td>
+<td style="text-align: right;">1.12</td>
+<td style="text-align: right;">1.14</td>
+<td style="text-align: right;">2.77</td>
+<td style="text-align: right;">1.14</td>
+<td style="text-align: right;">513.34</td>
+<td style="text-align: right;">619.81</td>
 <td style="text-align: right;">1.30</td>
 <td style="text-align: right;">0</td>
 <td style="text-align: right;">595.07</td>
-<td style="text-align: right;">0.13</td>
-<td style="text-align: left;">timed</td>
+<td style="text-align: right;">0.43</td>
+<td style="text-align: left;">memory only</td>
 </tr>
 </tbody>
 </table>
 
-Three fresh processes per point; spread is IQR and range; exponent is
-log median-time ratio / log input-row ratio to preceding scale
+Three fresh processes per point; process includes two queries; query
+spread is IQR and range; exponent uses warm query medians only;
+memory-only rows have no timing verdict
+
+    ## Maximum first/warm coefficient difference: 0.1002976
 
 <table>
 <caption>Nearest identical input baseline (single run, 58fb3264) versus
-repeated checked-reference wrapper; absolute differences are not a
+warm matched-reference wrapper; absolute differences are not a
 no-regression claim</caption>
 <colgroup>
-<col style="width: 10%" />
+<col style="width: 11%" />
 <col style="width: 12%" />
-<col style="width: 9%" />
+<col style="width: 8%" />
 <col style="width: 13%" />
 <col style="width: 8%" />
 <col style="width: 14%" />
@@ -1668,7 +1849,7 @@ no-regression claim</caption>
 <tr class="header">
 <th style="text-align: left;">workload</th>
 <th style="text-align: right;">input_rows</th>
-<th style="text-align: right;">median_s</th>
+<th style="text-align: right;">query_s</th>
 <th style="text-align: right;">max_rss_mib</th>
 <th style="text-align: right;">seconds</th>
 <th style="text-align: right;">peak_rss_mib</th>
@@ -1680,35 +1861,43 @@ no-regression claim</caption>
 <tr class="odd">
 <td style="text-align: left;">epilepsy</td>
 <td style="text-align: right;">3343235</td>
-<td style="text-align: right;">4.71</td>
-<td style="text-align: right;">742.08</td>
+<td style="text-align: right;">4.17</td>
+<td style="text-align: right;">735.67</td>
 <td style="text-align: right;">3.26</td>
 <td style="text-align: right;">690.68</td>
-<td style="text-align: right;">1.46</td>
-<td style="text-align: right;">51.39</td>
+<td style="text-align: right;">0.92</td>
+<td style="text-align: right;">44.98</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">genotypes</td>
 <td style="text-align: right;">880000</td>
-<td style="text-align: right;">3.15</td>
-<td style="text-align: right;">567.76</td>
+<td style="text-align: right;">1.08</td>
+<td style="text-align: right;">515.16</td>
 <td style="text-align: right;">0.96</td>
 <td style="text-align: right;">494.19</td>
-<td style="text-align: right;">2.18</td>
-<td style="text-align: right;">73.57</td>
+<td style="text-align: right;">0.12</td>
+<td style="text-align: right;">20.97</td>
 </tr>
 </tbody>
 </table>
 
-Nearest identical input baseline (single run, 58fb3264) versus repeated
-checked-reference wrapper; absolute differences are not a no-regression
+Nearest identical input baseline (single run, 58fb3264) versus warm
+matched-reference wrapper; absolute differences are not a no-regression
 claim
 
-Full-reference duplicate and finite-column admission scans account for
-additional fixed work across all input scales, especially the smaller
-sample runs. The comparison uses the same staged input denominators but
-different validation contracts; the latency/RSS trade-off requires
-explicit review before merging.
+The four-thread epilepsy 1× and 2× subsets yield different first/warm
+coefficients despite identical statuses (maximum absolute difference
+0.1002976). A first/warm probe of the original a011c61a wrapper on the
+same 1× subset differed by 0.107393. The full 4× input and all 11-person
+runs did not show this discrepancy; the subsets are retained for memory
+evidence, not output-stability claims. The independent 58fb3264 keyed
+baseline measured 0.694 s for 11 individuals at one thread and 0.394 s
+at four threads. The predecessor at a011c61a measured 8.408 s on the
+11-individual series in the pass-4 comparison. The current process and
+query columns are separate: comparing a two-query process to a
+single-query baseline would misstate the regression. Sub-five-second 1×
+query series have memory results and descriptive exponents, not a timing
+verdict.
 
 ## Indexed 30x CRAM sensitivity
 
