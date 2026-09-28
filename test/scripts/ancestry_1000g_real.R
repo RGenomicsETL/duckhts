@@ -89,7 +89,7 @@ if (nzchar(input_parquet)) {
                         " (FORMAT PARQUET)"))
 }
 start <- proc.time()[["elapsed"]]
-result <- rduckhts_ancestry_proportions_wide(con, "real_input", "real_reference",
+result <- rduckhts_ancestry_proportions(con, "real_input", "real_reference",
                                              "real_correction", min_cor = 0.4)
 elapsed <- proc.time()[["elapsed"]] - start
 comparisons <- rbindlist(lapply(samples, function(sample) {

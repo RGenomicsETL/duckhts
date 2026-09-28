@@ -254,7 +254,7 @@ static void ancestry_scalar(duckdb_function_info info, duckdb_data_chunk input, 
             }
             duckdb_vector child = duckdb_list_vector_get_child(output);
             double *values = duckdb_vector_get_data(child);
-            for (int i = 0; i < k; i++) values[offset + (idx_t)i] = round(q[i] * 1e7) / 1e7;
+            for (int i = 0; i < k; i++) values[offset + (idx_t)i] = q[i];
             ((duckdb_list_entry *)duckdb_vector_get_data(output))[row] = (duckdb_list_entry){offset, (idx_t)k};
         }
         continue;

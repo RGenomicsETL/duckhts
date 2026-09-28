@@ -1,8 +1,8 @@
 #!/usr/bin/env Rscript
 # Measure the keyed Parquet ancestry query in an independent R process.
 args <- commandArgs(trailingOnly = TRUE)
-if (length(args) != 5L || !args[[1L]] %in% c("epilepsy", "genotypes")) {
-  stop("Usage: benchmark_ancestry_memory.R epilepsy|genotypes input.parquet reference.parquet threads scale")
+if (length(args) != 5L || !args[[1L]] %in% c("epilepsy", "genotypes", "joint")) {
+  stop("Usage: benchmark_ancestry_memory.R epilepsy|genotypes|joint input.parquet reference.parquet threads scale")
 }
 workload <- args[[1L]]
 input_path <- normalizePath(args[[2L]], mustWork = TRUE)
@@ -29,10 +29,13 @@ if (workload == "epilepsy") {
   dbExecute(con, paste0("CREATE VIEW real_input AS SELECT * FROM read_parquet(",
                         quoted(input_path), ") LIMIT ", n))
 } else {
+  site_limit <- if (workload == "joint") paste0(" AND position IN (SELECT position ",
+    "FROM read_parquet(", quoted(input_path), ") GROUP BY position ",
+    "ORDER BY position LIMIT ", 5000L * scale, ")") else ""
   dbExecute(con, paste0("CREATE VIEW real_input AS SELECT * FROM read_parquet(",
                         quoted(input_path), ") WHERE sample_id IN (",
                         "SELECT DISTINCT sample_id FROM read_parquet(", quoted(input_path),
-                        ") ORDER BY sample_id LIMIT ", 11L * scale, ")"))
+                        ") ORDER BY sample_id LIMIT ", 11L * scale, ")", site_limit))
 }
 correction_path <- duckhts_bench_stage_repository_fixtures(
   normalizePath("."), "ancestry-projection")[["ancestry_correction"]]
@@ -43,7 +46,7 @@ profile <- tempfile("ancestry-profile-", fileext = ".json")
 dbExecute(con, "PRAGMA enable_profiling='json'")
 dbExecute(con, paste0("PRAGMA profiling_output=", quoted(profile)))
 start <- proc.time()[["elapsed"]]
-result <- rduckhts_ancestry_proportions_wide(
+result <- rduckhts_ancestry_proportions(
   con, "real_input", "real_reference", "real_correction")
 seconds <- proc.time()[["elapsed"]] - start
 stopifnot(nrow(result) == 21L * if (workload == "epilepsy") 1L else 11L * scale,
@@ -63,6 +66,7 @@ output <- data.frame(workload = workload, threads = threads, scale = scale,
                        result[c("sample_id", "used_variants")])$used_variants),
                      output_rows = nrow(result), seconds = seconds,
                      peak_rss_mib = rss_mib,
+                     aligned_file_mib = as.numeric(attr(result, "aligned_bytes")) / 1048576,
                      peak_buffer_mib = metrics$system_peak_buffer_memory / 1048576,
                      peak_temp_mib = metrics$system_peak_temp_dir_size / 1048576)
 write.table(output, stdout(), sep = "\t", row.names = FALSE, quote = FALSE)

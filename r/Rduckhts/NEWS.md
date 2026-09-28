@@ -9,11 +9,13 @@
   deterministic lexical ties and X/Y minimum-distance spacing.
 
 - `rduckhts_ancestry_proportions()` matches allele-frequency or diploid-dosage
-  relations to caller-owned reference products and reports ancestry proportions with
-  matching audits and correlation gates; missing genotypes are dropped.
-  `rduckhts_ancestry_proportions_wide()` takes a keyed wide reference relation, such as
-  a view over the staged Parquet product. `rduckhts_ancestry_bam()` obtains site counts
-  from indexed BAM/CRAM with allele-fraction or balance-rule genotype frequencies.
+  relations to keyed wide or long reference products with one bounded engine.
+  It requires unique reference loci, complete finite frequencies and loadings,
+  and non-NULL sample IDs; duplicate input loci use normalised chromosome keys.
+  Correlation gates use unrounded coefficients; returned proportions are rounded
+  to seven decimals. Missing genotypes are dropped. `rduckhts_ancestry_bam()`
+  obtains site counts from indexed BAM/CRAM with allele-fraction or balance-rule
+  genotype frequencies and uses the same proportion engine.
 
 # Rduckhts 1.5.2.9003-0.1.5
 

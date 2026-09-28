@@ -21,8 +21,8 @@ rduckhts_ancestry_geno <- function(
   .somalier_validate_name(geno_table, "geno_table")
   if (!is.null(samples_table)) .somalier_validate_name(samples_table, "samples_table")
   frequencies <- basename(tempfile("rduckhts_ancestry_geno_"))
-  on.exit(DBI::dbExecute(con, paste("DROP VIEW IF EXISTS", sql_quote_identifier(con, frequencies))),
-          add = TRUE)
+  on.exit(invisible(try(DBI::dbExecute(con, paste("DROP VIEW IF EXISTS",
+    sql_quote_identifier(con, frequencies))), silent = TRUE)), add = TRUE)
   sample_join <- if (is.null(samples_table)) "" else paste0(
     " LEFT JOIN ", sql_quote_identifier(con, samples_table),
     " s ON s.sample_index = c.sample_index"

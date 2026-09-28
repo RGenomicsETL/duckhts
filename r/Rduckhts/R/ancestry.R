@@ -1,68 +1,43 @@
-#' Estimate projected reference-group proportions from frequency or dosage relations
+#' Estimate projected ancestry proportions from frequency or dosage relations
 #'
-#' `input_table` has sample_id, chromosome, position, allele_a, allele_b,
-#' and frequency (or dosage for `input_kind = "dosage"`). Frequencies describe
-#' allele_b. `reference_table` has the same site columns, group_id and frequency;
-#' `loadings_table` has the site columns, pc and loading; `correction_table`
-#' has pc and coefficient. Reference groups and PC loadings must be complete
-#' and unique at every participating site. All tables must use the same genome
-#' assembly, uppercase single-base alleles, and a common PC numbering scheme.
-#' Reference orientation must agree with the loadings. Input sites with missing
-#' frequencies/dosages, duplicates at a sample/locus, or palindromic allele pairs
-#' are dropped; other biallelic SNVs can be matched directly, reversed, strand
-#' complemented or both. Missing genotypes are dropped, not imputed as in
-#' bigsnpr. Audit columns count all input rows including dropped rows.
-#' Correlation gates return NULL proportions and a named status, never a forced
-#' assignment. The native solver uses at most 30 groups and 64 PCs.
+#' Input columns are sample_id, chromosome, position, allele_a, allele_b and
+#' frequency (or dosage), describing allele_b. Reference data may be a keyed
+#' wide relation with consecutive PC1..PCn columns and one frequency column per group, or a long
+#' relation with group_id and frequency plus a keyed pc/loading relation.
+#' Corrections contain pc and coefficient. Groups (1..30), PCs (1..64),
+#' frequencies and loadings must be complete and finite at each unique
+#' reference locus. Inputs and references must share an assembly, uppercase
+#' biallelic SNV alleles and reference orientation. Numeric chromosomes match
+#' after removing a `chr` prefix; other chromosome names match literally.
+#' Input duplicates at a sample/locus, palindromic alleles and missing
+#' frequencies are dropped; other alleles match directly, reversed, strand
+#' complemented or both. Reversed alleles use 1-frequency. Missing genotypes
+#' are not imputed. Audit counts include dropped physical input rows.
+#' The solver and correlation gates use full precision; returned proportions
+#' are rounded to seven decimals. Aligned scratch Parquet in `tempdir()` is
+#' removed on return. Correlation failures return NULL proportions and a status.
 #'
-#' @param con A DuckDB connection with DuckHTS loaded.
-#' @param input_table,reference_table,loadings_table,correction_table Caller-owned
-#'   relation names on the current connection.
-#' @param input_kind `"frequency"` (cohort or individual) or `"dosage"` (diploid
-#'   genotype with dosage 0, 1, or 2; converted to dosage / 2).
+#' @param con DuckDB connection with DuckHTS loaded.
+#' @param input_table,reference_table Caller-owned relation names.
+#' @param loadings_table Long-format PC loading relation; for wide references,
+#'   pass the correction relation here with `correction_table = NULL`.
+#' @param correction_table PC correction relation for long references.
+#' @param input_kind `frequency` or diploid `dosage` (divided by two).
 #' @param sum_to_one Require coefficients to sum to one; otherwise at most one.
-#' @param min_cor Minimum predicted-frequency correlation; defaults to 0.4,
-#'   as in bigsnpr 1.12.21. Higher gates may be chosen for a particular panel.
-#' @param table_name Optional destination table. NULL returns a data frame.
-#' @param overwrite Whether an existing destination may be replaced.
-#' @return A row per sample and reference group, with quality status and audit.
+#' @param min_cor Minimum predicted-frequency correlation, default 0.4 as in
+#'   bigsnpr 1.12.21. A stricter gate may suit a specific panel.
+#' @param table_name Optional destination; NULL returns a data frame.
+#' @param overwrite Replace an existing destination.
+#' @return A row per sample and reference group, with status and matching audit.
+#'   Data-frame results carry `aligned_bytes`, the size of temporary aligned
+#'   Parquet written during the call.
 #' @export
 rduckhts_ancestry_proportions <- function(
-  con, input_table, reference_table, loadings_table, correction_table,
+  con, input_table, reference_table, loadings_table, correction_table = NULL,
   input_kind = c("frequency", "dosage"), sum_to_one = TRUE, min_cor = 0.4,
   table_name = NULL, overwrite = FALSE
 ) {
   input_kind <- match.arg(input_kind)
-  .ancestry_validate_options(sum_to_one, min_cor)
-  .somalier_validate_output(con, table_name, overwrite)
-  names <- list(input_table, reference_table, loadings_table, correction_table)
-  for (i in seq_along(names)) .somalier_validate_name(names[[i]], "relation")
-  relations <- vapply(names, function(x) sql_quote_identifier(con, x), character(1L))
-  dimensions <- DBI::dbGetQuery(con, paste0(
-    "SELECT (SELECT count(DISTINCT group_id) FROM ", relations[[2L]], ") AS groups, ",
-    "(SELECT count(DISTINCT pc) FROM ", relations[[3L]], ") AS pcs, ",
-    "(SELECT count(*) FROM ", relations[[4L]], ") AS corrections, ",
-    "(SELECT count(DISTINCT pc) FROM ", relations[[4L]], ") AS corrected_pcs, ",
-    "(SELECT count(*) FROM (SELECT DISTINCT pc FROM ", relations[[3L]], ") l ",
-    "FULL OUTER JOIN ", relations[[4L]], " c USING (pc) ",
-    "WHERE l.pc IS NULL OR c.pc IS NULL) AS mismatched_pcs"
-  ))
-  if (dimensions$groups < 1 || dimensions$groups > 30 ||
-      dimensions$pcs < 1 || dimensions$pcs > 64 ||
-      dimensions$corrections != dimensions$pcs ||
-      dimensions$corrected_pcs != dimensions$pcs ||
-      dimensions$mismatched_pcs != 0) {
-    stop("reference requires 1..30 groups and 1..64 PCs with one correction per PC",
-         call. = FALSE)
-  }
-  frequency <- if (input_kind == "dosage") "dosage / 2.0" else "frequency"
-  query <- .ancestry_query(relations, frequency,
-                           if (sum_to_one) "true" else "false",
-                           .somalier_quote_number(con, min_cor))
-  .somalier_publish_query(con, query, table_name, overwrite)
-}
-
-.ancestry_validate_options <- function(sum_to_one, min_cor) {
   if (!is.logical(sum_to_one) || length(sum_to_one) != 1L || is.na(sum_to_one)) {
     stop("sum_to_one must be one non-missing logical value", call. = FALSE)
   }
@@ -70,112 +45,72 @@ rduckhts_ancestry_proportions <- function(
       min_cor < -1 || min_cor > 1) {
     stop("min_cor must be a finite correlation in [-1, 1]", call. = FALSE)
   }
+  .somalier_validate_output(con, table_name, overwrite)
+  names <- list(input_table, reference_table, loadings_table)
+  if (!is.null(correction_table)) names <- c(names, list(correction_table))
+  for (name in names) .somalier_validate_name(name, "relation")
+  if (is.null(correction_table)) {
+    return(.ancestry_bounded_proportions(
+      con, input_table, reference_table, loadings_table, input_kind,
+      sum_to_one, min_cor, table_name, overwrite))
+  }
+  wide <- basename(tempfile("ancestry_reference_"))
+  on.exit(invisible(try(DBI::dbExecute(con, paste0("DROP VIEW IF EXISTS ",
+    sql_quote_identifier(con, wide))), silent = TRUE)), add = TRUE)
+  .ancestry_long_adapter(con, reference_table, loadings_table, wide)
+  .ancestry_bounded_proportions(con, input_table, wide, correction_table,
+                                input_kind, sum_to_one, min_cor, table_name, overwrite)
 }
 
-.ancestry_query <- function(relations, frequency, equality, gate) {
-  input <- relations[[1L]]
-  reference <- relations[[2L]]
-  loadings <- relations[[3L]]
-  correction <- relations[[4L]]
-  paste0(
-    "WITH raw AS (SELECT sample_id, chromosome, position, allele_a, allele_b, ",
-    frequency, " AS f, count(*) OVER (PARTITION BY sample_id, chromosome, position) AS copies FROM ", input, "), ",
-    "sites AS (SELECT chromosome, position, min(allele_a) AS ra, min(allele_b) AS rb ",
-    "FROM ", reference, " GROUP BY chromosome, position ",
-    "HAVING count(DISTINCT allele_a || '>' || allele_b) = 1 ",
-    "AND count(*) = count(DISTINCT group_id) ",
-    "AND count(DISTINCT group_id) = (SELECT count(DISTINCT group_id) FROM ", reference, ")), ",
-    "classified AS (SELECT i.*, s.ra, s.rb, CASE ",
-    "WHEN i.copies > 1 THEN 'duplicate' ",
-    "WHEN i.allele_a IS NULL OR i.allele_b IS NULL OR length(i.allele_a) != 1 ",
-    "OR length(i.allele_b) != 1 OR i.allele_a NOT IN ('A','C','G','T') ",
-    "OR i.allele_b NOT IN ('A','C','G','T') OR i.allele_a = i.allele_b ",
-    "THEN 'invalid_alleles' ",
-    "WHEN i.allele_a || i.allele_b IN ('AT','TA','CG','GC') ",
-    "OR s.ra || s.rb IN ('AT','TA','CG','GC') THEN 'ambiguous' ",
-    "WHEN i.f IS NULL OR NOT isfinite(i.f) OR i.f < 0 OR i.f > 1 THEN 'missing_frequency' ",
-    "WHEN s.ra IS NULL THEN 'missing_reference' ",
-    "WHEN i.allele_a = s.ra AND i.allele_b = s.rb THEN 'direct' ",
-    "WHEN i.allele_a = s.rb AND i.allele_b = s.ra THEN 'reversed' ",
-    "WHEN translate(i.allele_a, 'ACGT', 'TGCA') = s.ra ",
-    "AND translate(i.allele_b, 'ACGT', 'TGCA') = s.rb THEN 'flipped' ",
-    "WHEN translate(i.allele_a, 'ACGT', 'TGCA') = s.rb ",
-    "AND translate(i.allele_b, 'ACGT', 'TGCA') = s.ra THEN 'flipped_reversed' ",
-    "ELSE 'allele_mismatch' END AS orientation ",
-    "FROM raw i LEFT JOIN sites s USING (chromosome, position)), ",
-    "audit_rows AS (SELECT *, CASE WHEN orientation IN ",
-    "('direct','reversed','flipped','flipped_reversed') ",
-    "AND NOT EXISTS (SELECT 1 FROM ", loadings, " l ",
-    "WHERE l.chromosome = classified.chromosome ",
-    "AND l.position = classified.position AND l.allele_a = classified.ra ",
-    "AND l.allele_b = classified.rb GROUP BY l.chromosome, l.position ",
-    "HAVING count(*) = count(DISTINCT l.pc) AND count(DISTINCT l.pc) = ",
-    "(SELECT count(DISTINCT pc) FROM ", loadings, ")) ",
-    "THEN 'missing_loading' ELSE orientation END AS match_status FROM classified), ",
-    "aligned AS (SELECT *, CASE WHEN match_status IN ('reversed','flipped_reversed') ",
-    "THEN 1 - f ELSE f END AS aligned_f FROM audit_rows ",
-    "WHERE match_status IN ('direct','reversed','flipped','flipped_reversed')), ",
-    "audit AS (SELECT sample_id, count(*) AS input_variants, ",
-    "count(*) FILTER (WHERE match_status IN ('direct','reversed','flipped','flipped_reversed')) AS used_variants, ",
-    "count(*) FILTER (WHERE match_status = 'reversed') AS reversed_variants, ",
-    "count(*) FILTER (WHERE match_status IN ('flipped','flipped_reversed')) AS flipped_variants, ",
-    "count(*) FILTER (WHERE match_status = 'duplicate') AS duplicate_variants, ",
-    "count(*) FILTER (WHERE match_status = 'ambiguous') AS ambiguous_variants, ",
-    "count(*) FILTER (WHERE match_status IN ('missing_reference','missing_loading','allele_mismatch')) ",
-    "AS unmatched_variants, ",
-    "count(*) FILTER (WHERE match_status = 'invalid_alleles') AS invalid_variants, ",
-    "count(*) FILTER (WHERE match_status = 'missing_frequency') AS missing_variants ",
-    "FROM audit_rows GROUP BY sample_id), ",
-    "basis AS (SELECT a.sample_id, a.chromosome, a.position, a.aligned_f, ",
-    "l.pc, l.loading FROM aligned a JOIN ", loadings, " l ",
-    "ON l.chromosome = a.chromosome AND l.position = a.position ",
-    "AND l.allele_a = a.ra AND l.allele_b = a.rb), ",
-    "x AS (SELECT b.sample_id, b.pc, r.group_id, sum(b.loading * r.frequency) AS value ",
-    "FROM basis b JOIN ", reference, " r ON r.chromosome = b.chromosome ",
-    "AND r.position = b.position GROUP BY b.sample_id, b.pc, r.group_id), ",
-    "y AS (SELECT b.sample_id, b.pc, sum(b.loading * b.aligned_f) * max(c.coefficient) AS value ",
-    "FROM basis b JOIN ", correction, " c ON c.pc = b.pc GROUP BY b.sample_id, b.pc), ",
-    "groups AS (SELECT sample_id, group_id, row_number() OVER ",
-    "(PARTITION BY sample_id ORDER BY group_id) AS group_index FROM ",
-    "(SELECT DISTINCT sample_id, group_id FROM x)), ",
-    "xvec AS (SELECT g.sample_id, count(DISTINCT g.group_id)::INTEGER AS k, ",
-    "list(coalesce(x.value, 0) ORDER BY y.pc, g.group_id) AS values_x ",
-    "FROM groups g JOIN y ON y.sample_id = g.sample_id ",
-    "LEFT JOIN x ON x.sample_id = g.sample_id AND x.group_id = g.group_id AND x.pc = y.pc ",
-    "GROUP BY g.sample_id), ",
-    "yvec AS (SELECT sample_id, list(value ORDER BY pc) AS values_y FROM y GROUP BY sample_id), ",
-    "solved AS (SELECT xvec.sample_id, duckhts_ancestry_proportions(",
-    "xvec.values_x, yvec.values_y, xvec.k, ", equality, ") AS q ",
-    "FROM xvec JOIN yvec USING (sample_id)), ",
-    "each_cor AS (SELECT a.sample_id, r.group_id, corr(a.aligned_f, r.frequency) AS cor_each ",
-    "FROM aligned a JOIN ", reference, " r USING (chromosome, position) ",
-    "GROUP BY a.sample_id, r.group_id), ",
-    "pred_sites AS (SELECT a.sample_id, a.chromosome, a.position, ",
-    "any_value(a.aligned_f) AS observed, sum(r.frequency * s.q[g.group_index]) AS predicted ",
-    "FROM aligned a JOIN ", reference, " r USING (chromosome, position) ",
-    "JOIN groups g ON g.sample_id = a.sample_id AND g.group_id = r.group_id ",
-    "JOIN solved s ON s.sample_id = a.sample_id ",
-    "GROUP BY a.sample_id, a.chromosome, a.position), ",
-    "pred_cor AS (SELECT sample_id, corr(observed, predicted) AS cor_pred ",
-    "FROM pred_sites GROUP BY sample_id), ",
-    "quality AS (SELECT a.sample_id, p.cor_pred, CASE ",
-    "WHEN a.used_variants = 0 THEN 'no_matched_variants' ",
-    "WHEN (SELECT avg(e.cor_each) FROM each_cor e WHERE e.sample_id = a.sample_id) < -0.2 ",
-    "THEN 'reversed_alleles' WHEN p.cor_pred IS NULL OR NOT isfinite(p.cor_pred) ",
-    "OR p.cor_pred < ", gate,
-    " THEN 'low_correlation' ELSE 'ok' END AS status FROM audit a ",
-    "LEFT JOIN pred_cor p USING (sample_id)) ",
-    "SELECT a.sample_id, g.group_id, CASE WHEN q.status = 'ok' ",
-    "THEN s.q[g.group_index] ELSE NULL END AS proportion, ",
-    "q.cor_pred, e.cor_each, q.status, a.input_variants, a.used_variants, ",
-    "a.input_variants - a.used_variants AS dropped_variants, ",
-    "a.reversed_variants, a.flipped_variants, a.duplicate_variants, ",
-    "a.ambiguous_variants, a.unmatched_variants, a.invalid_variants, a.missing_variants, ",
-    equality, " AS sum_to_one, ", gate, "::DOUBLE AS min_cor ",
-    "FROM audit a JOIN quality q USING (sample_id) ",
-    "LEFT JOIN groups g ON g.sample_id = a.sample_id ",
-    "LEFT JOIN solved s ON s.sample_id = a.sample_id ",
-    "LEFT JOIN each_cor e ON e.sample_id = a.sample_id AND e.group_id = g.group_id ",
-    "ORDER BY a.sample_id, g.group_id"
-  )
+.ancestry_long_adapter <- function(con, reference_table, loadings_table, wide) {
+  quote_id <- function(x) as.character(DBI::dbQuoteIdentifier(con, x))
+  r <- quote_id(reference_table)
+  l <- quote_id(loadings_table)
+  groups <- DBI::dbGetQuery(con, paste0("SELECT DISTINCT group_id FROM ", r,
+                                        " ORDER BY group_id"))$group_id
+  pcs <- DBI::dbGetQuery(con, paste0("SELECT DISTINCT pc FROM ", l,
+                                      " ORDER BY pc"))$pc
+  if (length(groups) < 1L || length(groups) > 30L || anyNA(groups) ||
+      length(pcs) < 1L || length(pcs) > 64L ||
+      !identical(as.integer(pcs), seq_along(pcs))) {
+    stop("reference requires 1..30 groups and consecutive 1..64 PCs", call. = FALSE)
+  }
+  chromosome <- paste0("coalesce(try_cast(regexp_replace(chromosome::VARCHAR, '^chr', '') ",
+                       "AS INTEGER)::VARCHAR, chromosome::VARCHAR)")
+  ref_sites <- paste0("SELECT ", chromosome, " AS chromosome, position, allele_a, ",
+                      "allele_b, group_id, frequency FROM ", r)
+  pc_sites <- paste0("SELECT ", chromosome, " AS chromosome, position, allele_a, ",
+                     "allele_b, pc, loading FROM ", l)
+  keys <- "chromosome, position, allele_a, allele_b"
+  invalid <- DBI::dbGetQuery(con, paste0(
+    "WITH r AS (", ref_sites, "), l AS (", pc_sites, "), ",
+    "rg AS (SELECT ", keys, ", count(*) AS n, count(DISTINCT group_id) AS distinct_n ",
+    "FROM r GROUP BY ", keys, "), ",
+    "lp AS (SELECT ", keys, ", count(*) AS n, count(DISTINCT pc) AS distinct_n ",
+    "FROM l GROUP BY ", keys, ") ",
+    "SELECT EXISTS (SELECT 1 FROM r WHERE chromosome IS NULL OR position IS NULL ",
+    "OR allele_a IS NULL OR allele_b IS NULL OR group_id IS NULL ",
+    "OR frequency IS NULL OR NOT isfinite(frequency)) OR EXISTS (SELECT 1 FROM rg ",
+    "WHERE n != ", length(groups), " OR distinct_n != ", length(groups),
+    ") AS bad_reference, EXISTS (SELECT 1 FROM l WHERE chromosome IS NULL ",
+    "OR position IS NULL OR allele_a IS NULL OR allele_b IS NULL OR pc IS NULL ",
+    "OR loading IS NULL OR NOT isfinite(loading)) OR EXISTS (SELECT 1 FROM lp WHERE n != ",
+    length(pcs), " OR distinct_n != ", length(pcs), ") OR EXISTS (",
+    "SELECT 1 FROM rg LEFT JOIN lp USING (", keys, ") WHERE lp.n IS NULL) ",
+    "AS bad_loadings"))
+  if (invalid$bad_reference) stop("reference sites require one finite frequency per group", call. = FALSE)
+  if (invalid$bad_loadings) stop("reference sites require one finite loading per PC", call. = FALSE)
+  quote_str <- function(x) as.character(DBI::dbQuoteString(con, x))
+  frequency <- vapply(groups, function(g) paste0(
+    "max(frequency) FILTER (WHERE group_id = ", quote_str(g), ") AS ", quote_id(g)),
+    character(1L))
+  loading <- vapply(seq_along(pcs), function(i) paste0(
+    "max(loading) FILTER (WHERE pc = ", i, ") AS PC", i), character(1L))
+  query <- paste0("CREATE TEMP VIEW ", quote_id(wide), " AS WITH r AS (", ref_sites,
+    "), l AS (", pc_sites, ") SELECT r.*, l.* EXCLUDE (chromosome, position, allele_a, allele_b) ",
+    "FROM (SELECT ", keys, ", ", paste(frequency, collapse = ", "),
+    " FROM r GROUP BY ", keys, ") r JOIN (SELECT ", keys, ", ",
+    paste(loading, collapse = ", "), " FROM l GROUP BY ", keys,
+    ") l USING (", keys, ")")
+  DBI::dbExecute(con, query)
 }

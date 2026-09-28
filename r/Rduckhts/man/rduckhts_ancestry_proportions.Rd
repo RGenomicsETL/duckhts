@@ -2,14 +2,14 @@
 % Please edit documentation in R/ancestry.R
 \name{rduckhts_ancestry_proportions}
 \alias{rduckhts_ancestry_proportions}
-\title{Estimate projected reference-group proportions from frequency or dosage relations}
+\title{Estimate projected ancestry proportions from frequency or dosage relations}
 \usage{
 rduckhts_ancestry_proportions(
   con,
   input_table,
   reference_table,
   loadings_table,
-  correction_table,
+  correction_table = NULL,
   input_kind = c("frequency", "dosage"),
   sum_to_one = TRUE,
   min_cor = 0.4,
@@ -18,39 +18,46 @@ rduckhts_ancestry_proportions(
 )
 }
 \arguments{
-\item{con}{A DuckDB connection with DuckHTS loaded.}
+\item{con}{DuckDB connection with DuckHTS loaded.}
 
-\item{input_table, reference_table, loadings_table, correction_table}{Caller-owned
-relation names on the current connection.}
+\item{input_table, reference_table}{Caller-owned relation names.}
 
-\item{input_kind}{`"frequency"` (cohort or individual) or `"dosage"` (diploid
-genotype with dosage 0, 1, or 2; converted to dosage / 2).}
+\item{loadings_table}{Long-format PC loading relation; for wide references,
+pass the correction relation here with `correction_table = NULL`.}
+
+\item{correction_table}{PC correction relation for long references.}
+
+\item{input_kind}{`frequency` or diploid `dosage` (divided by two).}
 
 \item{sum_to_one}{Require coefficients to sum to one; otherwise at most one.}
 
-\item{min_cor}{Minimum predicted-frequency correlation; defaults to 0.4,
-as in bigsnpr 1.12.21. Higher gates may be chosen for a particular panel.}
+\item{min_cor}{Minimum predicted-frequency correlation, default 0.4 as in
+bigsnpr 1.12.21. A stricter gate may suit a specific panel.}
 
-\item{table_name}{Optional destination table. NULL returns a data frame.}
+\item{table_name}{Optional destination; NULL returns a data frame.}
 
-\item{overwrite}{Whether an existing destination may be replaced.}
+\item{overwrite}{Replace an existing destination.}
 }
 \value{
-A row per sample and reference group, with quality status and audit.
+A row per sample and reference group, with status and matching audit.
+  Data-frame results carry `aligned_bytes`, the size of temporary aligned
+  Parquet written during the call.
 }
 \description{
-`input_table` has sample_id, chromosome, position, allele_a, allele_b,
-and frequency (or dosage for `input_kind = "dosage"`). Frequencies describe
-allele_b. `reference_table` has the same site columns, group_id and frequency;
-`loadings_table` has the site columns, pc and loading; `correction_table`
-has pc and coefficient. Reference groups and PC loadings must be complete
-and unique at every participating site. All tables must use the same genome
-assembly, uppercase single-base alleles, and a common PC numbering scheme.
-Reference orientation must agree with the loadings. Input sites with missing
-frequencies/dosages, duplicates at a sample/locus, or palindromic allele pairs
-are dropped; other biallelic SNVs can be matched directly, reversed, strand
-complemented or both. Missing genotypes are dropped, not imputed as in
-bigsnpr. Audit columns count all input rows including dropped rows.
-Correlation gates return NULL proportions and a named status, never a forced
-assignment. The native solver uses at most 30 groups and 64 PCs.
+Input columns are sample_id, chromosome, position, allele_a, allele_b and
+frequency (or dosage), describing allele_b. Reference data may be a keyed
+wide relation with consecutive PC1..PCn columns and one frequency column per group, or a long
+relation with group_id and frequency plus a keyed pc/loading relation.
+Corrections contain pc and coefficient. Groups (1..30), PCs (1..64),
+frequencies and loadings must be complete and finite at each unique
+reference locus. Inputs and references must share an assembly, uppercase
+biallelic SNV alleles and reference orientation. Numeric chromosomes match
+after removing a `chr` prefix; other chromosome names match literally.
+Input duplicates at a sample/locus, palindromic alleles and missing
+frequencies are dropped; other alleles match directly, reversed, strand
+complemented or both. Reversed alleles use 1-frequency. Missing genotypes
+are not imputed. Audit counts include dropped physical input rows.
+The solver and correlation gates use full precision; returned proportions
+are rounded to seven decimals. Aligned scratch Parquet in `tempdir()` is
+removed on return. Correlation failures return NULL proportions and a status.
 }

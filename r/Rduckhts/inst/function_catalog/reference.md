@@ -1752,7 +1752,7 @@ DOUBLE[]
 
 ### Input
 
-x_pc_major is a flat DOUBLE[] in PC-major, group-minor order for X = P^T F_ref; y_pc is a DOUBLE[] with one value per PC for (P^T f) times the shrinkage correction. Groups are ordered identically within each PC. 1 to 30 groups and 1 to 64 PCs are supported. All values must be finite. sum_to_one=true enforces nonnegative q summing to one; false allows a sum at most one. The result contains one group proportion in input order, rounded to seven decimals.
+x_pc_major is a flat DOUBLE[] in PC-major, group-minor order for X = P^T F_ref; y_pc is a DOUBLE[] with one value per PC for (P^T f) times the shrinkage correction. Groups are ordered identically within each PC. 1 to 30 groups and 1 to 64 PCs are supported. All values must be finite. sum_to_one=true enforces nonnegative q summing to one; false allows a sum at most one. The scalar returns full-precision group proportions in input order; the R wrapper rounds displayed proportions to seven decimals after correlation gating.
 
 ### Repair
 
@@ -1760,7 +1760,7 @@ The Gram matrix X^T X follows Matrix::nearPD defaults: Dykstra alternating proje
 
 ### SQL recipe
 
-Match sample_id, chromosome, position and alleles from the caller's input-frequency relation against reference frequencies and PC loadings. Reverse the input frequency (1 - f) for reversed alleles; explicitly audit strand flips and drop ambiguous, duplicate, missing and mismatched sites. GROUP BY sample_id, pc, group_id to compute sum(loading * reference_frequency) as X; GROUP BY sample_id, pc to compute sum(loading * aligned_frequency) * correction as y. Form list(X ORDER BY pc, group_id) and list(y ORDER BY pc) and call this scalar. Compare cor(F_ref q, f) with min_cor and expose cor_each per group; gate failed proportions to NULL. rduckhts_ancestry_proportions implements this recipe on four caller-owned relations without creating a macro or a connection.
+rduckhts_ancestry_proportions normalises long or keyed wide reference products to one row per locus with PC and group columns, checks unique loci and complete finite reference values, and matches sample_id, chromosome, position and alleles from the caller's input-frequency relation. It reverses input frequency (1 - f) for reversed alleles, audits strand flips, and drops ambiguous, duplicate, missing and mismatched input sites. A bounded aligned Parquet relation holds the retained physical rows. Per-sample sums of loading * reference_frequency form X in PC-major, group-minor order; sums of loading * aligned_frequency times correction form y in PC order. The native scalar solves for q at full precision; cor(F_ref q, f) and per-group cor_each are evaluated before failed proportions are gated to NULL and returned proportions rounded. The scratch Parquet is removed after the call; no private connection or macro is created.
 
 ### Missing data
 

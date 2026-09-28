@@ -1,53 +1,17 @@
-#' Infer ancestry proportions from a keyed wide reference relation.
-#'
-#' The reference relation has `chromosome` (integer), `position` (one-based),
-#' `allele_a`, `allele_b`, `PC1` through `PC16`, and one DOUBLE frequency column
-#' per reference group. It can be a view over the Parquet product staged by
-#' `duckhtsbench::duckhts_bench_stage_ancestry_parquet()`. Each site must have
-#' exactly one reference row. The input and correction schemas, audit statuses,
-#' and QP solver contract are those of [rduckhts_ancestry_proportions()].
-#' Allele-aligned input frequencies are written to a temporary Parquet file in
-#' `tempdir()` and removed before the function returns.
-#'
-#' @param con DuckDB DBI connection with DuckHTS loaded.
-#' @param input_table Relation with per-sample allele frequencies or dosages.
-#' @param reference_table Wide reference relation (or view over staged Parquet).
-#' @param correction_table Relation of PC number and correction coefficient.
-#' @param input_kind Either `frequency` or `dosage`.
-#' @param sum_to_one Constrain the nonnegative solution to sum to one.
-#' @param min_cor Minimum predicted-frequency correlation for an `ok` status.
-#' @param table_name Optional destination table; NULL returns a data frame.
-#' @param overwrite Whether an existing destination may be replaced.
-#' @return A row per sample and reference group, with quality status and audit.
-#' @export
-rduckhts_ancestry_proportions_wide <- function(
-  con, input_table, reference_table, correction_table,
-  input_kind = c("frequency", "dosage"), sum_to_one = TRUE, min_cor = 0.4,
-  table_name = NULL, overwrite = FALSE
+.ancestry_bounded_proportions <- function(
+  con, input_table, reference_table, correction_table, input_kind,
+  sum_to_one, min_cor, table_name, overwrite
 ) {
-  input_kind <- match.arg(input_kind)
-  .ancestry_validate_options(sum_to_one, min_cor)
-  .somalier_validate_output(con, table_name, overwrite)
-  names <- list(input_table, reference_table, correction_table)
-  for (name in names) .somalier_validate_name(name, "relation")
-  relations <- vapply(names, function(x) sql_quote_identifier(con, x), character(1L))
-  fields <- DBI::dbListFields(con, reference_table)
-  keys <- c("chromosome", "position", "allele_a", "allele_b")
-  pcs <- paste0("PC", seq_len(16L))
-  groups <- sort(setdiff(fields, c(keys, pcs)))
-  if (!all(c(keys, pcs) %in% fields) || length(groups) < 1L ||
-      length(groups) > 30L || anyDuplicated(fields)) {
-    stop("wide reference requires keyed sites, PC1..PC16 and 1..30 groups", call. = FALSE)
-  }
-  corrections <- DBI::dbGetQuery(con, paste0("SELECT pc, coefficient FROM ", relations[[3L]],
-                                             " ORDER BY pc"))
-  if (nrow(corrections) != length(pcs) ||
-      !identical(as.integer(corrections$pc), seq_along(pcs)) ||
-      any(!is.finite(corrections$coefficient))) {
-    stop("correction requires one finite coefficient for every PC", call. = FALSE)
-  }
-  frequency <- if (input_kind == "dosage") "dosage / 2.0" else "frequency"
+  relations <- vapply(list(input_table, reference_table, correction_table),
+                      function(x) sql_quote_identifier(con, x), character(1L))
+  contract <- .ancestry_check_site_contract(con, reference_table, relations)
+  groups <- contract$groups
+  coefficients <- contract$coefficients
+  reference_source <- contract$reference_source
   quote_id <- function(x) as.character(DBI::dbQuoteIdentifier(con, x))
+  sources <- relations
+  sources[[2L]] <- reference_source
+  frequency <- if (input_kind == "dosage") "dosage / 2.0" else "frequency"
   quote_str <- function(x) as.character(DBI::dbQuoteString(con, x))
   audit <- basename(tempfile("ancestry_audit_"))
   moments <- basename(tempfile("ancestry_moments_"))
@@ -56,17 +20,18 @@ rduckhts_ancestry_proportions_wide <- function(
   aligned <- tempfile("ancestry_aligned_", fileext = ".parquet")
   on.exit({
     unlink(aligned)
-    DBI::dbExecute(con, paste0("DROP TABLE IF EXISTS ", quote_id(prediction)))
-    DBI::dbExecute(con, paste0("DROP TABLE IF EXISTS ", quote_id(solved)))
-    DBI::dbExecute(con, paste0("DROP TABLE IF EXISTS ", quote_id(moments)))
-    DBI::dbExecute(con, paste0("DROP TABLE IF EXISTS ", quote_id(audit)))
+    for (name in c(prediction, solved, moments, audit)) {
+      invisible(try(DBI::dbExecute(con, paste0("DROP TABLE IF EXISTS ",
+                                            quote_id(name))), silent = TRUE))
+    }
   }, add = TRUE)
-  classification <- .ancestry_classification_query(relations, frequency)
+  classification <- .ancestry_classification_query(sources, frequency)
   DBI::dbExecute(con, paste0("CREATE TEMP TABLE ", quote_id(audit),
     " AS ", .ancestry_indexed_audit_query(classification)))
   DBI::dbExecute(con, paste0("COPY (", .ancestry_aligned_query(classification),
     ") TO ", quote_str(aligned),
     " (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 32768)"))
+  aligned_bytes <- file.info(aligned)$size
   aligned_source <- paste0("read_parquet(", quote_str(aligned), ")")
   one_sample <- DBI::dbGetQuery(con, paste0("SELECT count(*) AS n FROM ",
                                          quote_id(audit)))$n == 1L
@@ -74,10 +39,10 @@ rduckhts_ancestry_proportions_wide <- function(
     "(SELECT a.*, i.sample_index FROM ", aligned_source, " a JOIN ",
     quote_id(audit), " i USING (sample_id))")
   DBI::dbExecute(con, paste0("CREATE TEMP TABLE ", quote_id(moments), " AS ",
-    .ancestry_moments_query(con, relations[[2L]], groups, corrections$coefficient,
+    .ancestry_moments_query(con, reference_source, groups, coefficients,
                             indexed_source, one_sample)))
   DBI::dbExecute(con, paste0("CREATE TEMP TABLE ", quote_id(solved), " AS SELECT ",
-    "m.sample_id, ", .ancestry_solver_expression(groups, sum_to_one),
+    "m.sample_id, ", .ancestry_solver_expression(groups, length(coefficients), sum_to_one),
     " AS q FROM ", quote_id(moments), " m"))
   single_proportions <- NULL
   if (one_sample) {
@@ -87,11 +52,57 @@ rduckhts_ancestry_proportions_wide <- function(
     }
   }
   DBI::dbExecute(con, paste0("CREATE TEMP TABLE ", quote_id(prediction), " AS ",
-    .ancestry_prediction_query(con, relations[[2L]], groups, aligned_source,
+    .ancestry_prediction_query(con, reference_source, groups, aligned_source,
                                quote_id(solved), one_sample, single_proportions)))
   query <- .ancestry_wide_query(con, groups, quote_id(audit), quote_id(moments),
                                 quote_id(solved), quote_id(prediction), sum_to_one, min_cor)
-  .somalier_publish_query(con, query, table_name, overwrite)
+  result <- .somalier_publish_query(con, query, table_name, overwrite)
+  if (is.null(table_name)) attr(result, "aligned_bytes") <- aligned_bytes
+  result
+}
+
+.ancestry_check_site_contract <- function(con, reference_table, relations) {
+  fields <- DBI::dbListFields(con, reference_table)
+  keys <- c("chromosome", "position", "allele_a", "allele_b")
+  pcs <- paste0("PC", seq_len(sum(grepl("^PC[1-9][0-9]*$", fields))))
+  groups <- sort(setdiff(fields, c(keys, pcs)))
+  if (length(pcs) < 1L || length(pcs) > 64L ||
+      !all(c(keys, pcs) %in% fields) || length(groups) < 1L ||
+      length(groups) > 30L || anyDuplicated(fields)) {
+    stop("wide reference requires keyed sites, consecutive PC1..PCn (n <= 64) and 1..30 groups", call. = FALSE)
+  }
+  quote_id <- function(x) as.character(DBI::dbQuoteIdentifier(con, x))
+  chromosome_key <- paste0("coalesce(try_cast(regexp_replace(chromosome::VARCHAR, '^chr', '') ",
+                           "AS INTEGER)::VARCHAR, chromosome::VARCHAR)")
+  duplicated <- DBI::dbGetQuery(con, paste0(
+    "SELECT EXISTS (SELECT 1 FROM (SELECT ", chromosome_key,
+    ", position FROM ", relations[[2L]], " GROUP BY ", chromosome_key,
+    ", position HAVING count(*) > 1)) AS present"))$present
+  if (duplicated) stop("duplicate reference locus", call. = FALSE)
+  for (columns in list(pcs, groups)) {
+    complete <- paste0("r.", quote_id(columns))
+    invalid <- DBI::dbGetQuery(con, paste0(
+      "SELECT EXISTS (SELECT 1 FROM ", relations[[2L]], " r WHERE chromosome IS NULL ",
+      "OR position IS NULL OR allele_a IS NULL OR allele_b IS NULL OR ",
+      paste0("(", complete, " IS NULL OR NOT isfinite(", complete, "))",
+             collapse = " OR "), ") AS present"))$present
+    if (invalid) stop("reference sites require finite frequencies and loadings", call. = FALSE)
+  }
+  null_sample <- DBI::dbGetQuery(con, paste0("SELECT EXISTS (SELECT 1 FROM ",
+    relations[[1L]], " WHERE sample_id IS NULL) AS present"))$present
+  if (null_sample) stop("sample_id must not be NULL", call. = FALSE)
+  corrections <- DBI::dbGetQuery(con, paste0("SELECT pc, coefficient FROM ", relations[[3L]],
+                                             " ORDER BY pc"))
+  if (nrow(corrections) != length(pcs) ||
+      !identical(as.integer(corrections$pc), seq_along(pcs)) ||
+      any(!is.finite(corrections$coefficient))) {
+    stop("correction requires one finite coefficient for every PC", call. = FALSE)
+  }
+  reference_source <- paste0("(SELECT ", chromosome_key,
+                             " AS chromosome, * EXCLUDE (chromosome) FROM ",
+                             relations[[2L]], ")")
+  list(groups = groups, coefficients = corrections$coefficient,
+       reference_source = reference_source)
 }
 
 .ancestry_classification_query <- function(relations, frequency) {
@@ -99,10 +110,15 @@ rduckhts_ancestry_proportions_wide <- function(
   reference <- relations[[2L]]
   paste0(
     "raw AS (SELECT sample_id, chromosome, position, allele_a, allele_b, ",
-    "try_cast(regexp_replace(chromosome, '^chr', '') AS INTEGER) AS ref_chr, ",
-    frequency, " AS f, count(*) OVER (PARTITION BY sample_id, chromosome, position) AS copies ",
+    "coalesce(try_cast(regexp_replace(chromosome::VARCHAR, '^chr', '') AS INTEGER)::VARCHAR, ",
+    "chromosome::VARCHAR) AS ref_chr, ", frequency,
+    " AS f, count(*) OVER (PARTITION BY sample_id, ",
+    "coalesce(try_cast(regexp_replace(chromosome::VARCHAR, '^chr', '') AS INTEGER)::VARCHAR, ",
+    "chromosome::VARCHAR), position) AS copies ",
     "FROM ", input, "), ",
-    "sites AS (SELECT chromosome, position, allele_a AS ra, allele_b AS rb ",
+    "sites AS (SELECT coalesce(try_cast(regexp_replace(chromosome::VARCHAR, '^chr', '') ",
+    "AS INTEGER)::VARCHAR, chromosome::VARCHAR) AS chromosome, ",
+    "position, allele_a AS ra, allele_b AS rb ",
     "FROM ", reference, "), ",
     "classified AS (SELECT i.*, s.ra, s.rb, CASE ",
     "WHEN i.copies > 1 THEN 'duplicate' ",
@@ -174,12 +190,12 @@ rduckhts_ancestry_proportions_wide <- function(
          "AND a.allele_b = r.allele_b ", aggregate)
 }
 
-.ancestry_solver_expression <- function(groups, sum_to_one) {
-  x_names <- unlist(lapply(seq_len(16L), function(k) {
+.ancestry_solver_expression <- function(groups, pcs, sum_to_one) {
+  x_names <- unlist(lapply(seq_len(pcs), function(k) {
     paste0("m.x", k, "_", seq_along(groups))
   }), use.names = FALSE)
   paste0("duckhts_ancestry_proportions(list_value(", paste(x_names, collapse = ", "),
-         "), list_value(", paste0("m.y", seq_len(16L), collapse = ", "), "), ",
+         "), list_value(", paste0("m.y", seq_len(pcs), collapse = ", "), "), ",
          length(groups), ", ", if (sum_to_one) "true" else "false", ")")
 }
 
@@ -224,7 +240,7 @@ rduckhts_ancestry_proportions_wide <- function(
     "OR p.cor_pred < ", gate, " THEN 'low_correlation' ELSE 'ok' END AS status ",
     "FROM ", audit, " a LEFT JOIN ", prediction, " p USING (sample_id)) ",
     "SELECT a.sample_id, g.group_id, CASE WHEN q.status = 'ok' ",
-    "THEN s.q[g.group_index] ELSE NULL END AS proportion, ",
+    "THEN round(s.q[g.group_index], 7) ELSE NULL END AS proportion, ",
     "q.cor_pred, e.cor_each, q.status, a.input_variants, a.used_variants, ",
     "a.input_variants - a.used_variants AS dropped_variants, ",
     "a.reversed_variants, a.flipped_variants, a.duplicate_variants, ",

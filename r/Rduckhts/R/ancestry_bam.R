@@ -11,7 +11,10 @@
 #' @param sample_id Sample identifier in the output.
 #' @param reference_path FASTA path for reference checks and CRAM decoding.
 #' @param panel_table Committed panel relation with canonical site identity.
-#' @param reference_table,loadings_table,correction_table Reference product relations.
+#' @param reference_table Keyed wide or long reference relation.
+#' @param loadings_table PC loadings for long references; pass the correction
+#'   relation here for wide references.
+#' @param correction_table PC correction relation for long references; NULL for wide.
 #' @param frequency_method `"allele_fraction"` for B/(A+B) or `"called_genotype"`
 #'   for the Somalier balance-rule genotype divided by two.
 #' @param min_depth Minimum measured A+B depth to retain a site.
@@ -22,7 +25,7 @@
 #' @export
 rduckhts_ancestry_bam <- function(
   con, source_path, sample_id, reference_path, panel_table,
-  reference_table, loadings_table, correction_table,
+  reference_table, loadings_table, correction_table = NULL,
   frequency_method = c("allele_fraction", "called_genotype"),
   min_depth = 7, min_cor = 0.4, ...
 ) {
@@ -31,8 +34,10 @@ rduckhts_ancestry_bam <- function(
   counts <- basename(tempfile("rduckhts_ancestry_counts_"))
   frequencies <- basename(tempfile("rduckhts_ancestry_frequency_"))
   on.exit({
-    DBI::dbExecute(con, paste("DROP VIEW IF EXISTS", sql_quote_identifier(con, frequencies)))
-    DBI::dbExecute(con, paste("DROP TABLE IF EXISTS", sql_quote_identifier(con, counts)))
+    invisible(try(DBI::dbExecute(con, paste("DROP VIEW IF EXISTS",
+      sql_quote_identifier(con, frequencies))), silent = TRUE))
+    invisible(try(DBI::dbExecute(con, paste("DROP TABLE IF EXISTS",
+      sql_quote_identifier(con, counts))), silent = TRUE))
   }, add = TRUE)
   rduckhts_somalier_bam_counts(
     con, source_path, sample_id, reference_path, panel_table = panel_table,

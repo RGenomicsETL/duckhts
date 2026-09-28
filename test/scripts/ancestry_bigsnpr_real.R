@@ -92,7 +92,7 @@ if (nzchar(input_parquet)) {
 dbWriteTable(con, "real_correction", data.frame(pc = seq_along(correction),
                                                coefficient = correction), overwrite = TRUE)
 start <- proc.time()[["elapsed"]]
-result <- rduckhts_ancestry_proportions_wide(con, "real_input", "real_reference",
+result <- rduckhts_ancestry_proportions(con, "real_input", "real_reference",
                                              "real_correction")
 elapsed <- proc.time()[["elapsed"]] - start
 parity <- merge(result, data.frame(group_id = names(shared), oracle = as.numeric(shared)),

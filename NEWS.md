@@ -17,8 +17,11 @@
 - `duckhts_ancestry_proportions()` estimates reference-group ancestry proportions by
   bigsnpr's `snp_ancestry_summary` method: SQL aggregates PC projections of matched
   variants, and a native solver applies a bounded nearest-positive-definite repair and
-  the constrained fit, with correlation quality gates. Inputs are allele frequencies
-  from summary statistics, diploid genotypes, or BAM/CRAM allele counts.
+  the constrained fit. The scalar retains full precision; the R wrapper applies
+  correlation gates before rounding returned proportions. Inputs are allele
+  frequencies from summary statistics, diploid genotypes, or BAM/CRAM
+  allele counts. Reference loci are unique with complete finite frequencies and
+  loadings; duplicate input loci use normalised chromosome keys.
 
 - The benchmark registry pins bigsnpr's reference frequencies and loadings, staged once
   as a checksum-bound sorted Parquet product, with the epilepsy summary statistics and

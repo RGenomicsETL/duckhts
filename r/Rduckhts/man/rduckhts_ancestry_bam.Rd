@@ -12,7 +12,7 @@ rduckhts_ancestry_bam(
   panel_table,
   reference_table,
   loadings_table,
-  correction_table,
+  correction_table = NULL,
   frequency_method = c("allele_fraction", "called_genotype"),
   min_depth = 7,
   min_cor = 0.4,
@@ -30,7 +30,12 @@ rduckhts_ancestry_bam(
 
 \item{panel_table}{Committed panel relation with canonical site identity.}
 
-\item{reference_table, loadings_table, correction_table}{Reference product relations.}
+\item{reference_table}{Keyed wide or long reference relation.}
+
+\item{loadings_table}{PC loadings for long references; pass the correction
+relation here for wide references.}
+
+\item{correction_table}{PC correction relation for long references; NULL for wide.}
 
 \item{frequency_method}{`"allele_fraction"` for B/(A+B) or `"called_genotype"`
 for the Somalier balance-rule genotype divided by two.}

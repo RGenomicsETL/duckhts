@@ -25,6 +25,13 @@ SELECT q[1], q[2] FROM solved;
 ----
 0.1	0.2
 
+# Projection coefficients retain precision for subsequent quality correlations.
+query I
+SELECT abs(duckhts_ancestry_proportions([1.0], [0.123456789], 1, false)[1]
+           - 0.123456789) < 0.0000000001;
+----
+true
+
 # Collinear columns (three groups, two PCs) require a positive-definite repair.
 query I
 SELECT abs(sum(q) - 1) < 0.0000001
