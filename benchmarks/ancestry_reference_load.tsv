@@ -1,0 +1,3 @@
+threads	reference_rows	numeric_columns	csv_full_column_seconds	parquet_full_column_seconds
+1	5816590	37	19.623	1.567
+4	5816590	37	14.278	0.442

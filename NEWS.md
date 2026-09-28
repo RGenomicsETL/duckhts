@@ -1,5 +1,27 @@
 # DuckHTS Extension News
 
+# duckhts 1.5.2.9005
+
+- `duckhts_ancestry_proportions()` estimates reference-group ancestry proportions by
+  bigsnpr's `snp_ancestry_summary` method. SQL aggregates the PC projections of matched
+  variants; the native solver applies a bounded nearest-positive-definite repair and the
+  constrained fit, invariant to uniform rescaling of the projections. The three-argument
+  call applies sum-to-one constraints. Coefficients keep full precision for the
+  correlation gates; for a fixed input, the returned seven-decimal proportions are
+  stable across calls and thread counts.
+
+- Ancestry inputs are allele frequencies from summary statistics, dense diploid
+  genotypes, or BAM/CRAM allele counts. Reference loci touching any input locus must be
+  unique; matched loci need finite loadings and frequencies in [0, 1]; positions are
+  positive whole numbers and PC identifiers are consecutive whole numbers. Every sample
+  returns a row for every reference group, with NULL proportions when no variant
+  matches. Group identifiers round-trip exactly.
+
+- The benchmark registry pins bigsnpr's reference frequencies and loadings, staged once
+  as a checksum-bound sorted Parquet product whose receipt certifies unique loci and
+  complete, in-range values, together with the epilepsy summary statistics and GRCh37
+  phase-3 chr22 genotypes used for parity with bigsnpr and 30x CRAM comparisons.
+
 # duckhts 1.5.2.9004
 
 - Somalier panel selection (`rduckhts_somalier_find_sites()`) selects sites from

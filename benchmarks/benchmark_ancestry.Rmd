@@ -1,0 +1,564 @@
+---
+title: "Ancestry projection: public-input scaling and reference parity"
+output: md_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+library(DBI)
+library(Rduckhts)
+library(duckhtsbench)
+repo <- normalizePath("..")
+source_revision <- system2("git", c("-C", shQuote(repo), "rev-parse", "HEAD"), stdout = TRUE)
+registry <- file.path(repo, "r/duckhtsbench/inst/benchmark_registry.tsv")
+cache <- tempfile("duckhts-ancestry-benchmark-")
+dir.create(cache)
+Sys.setenv(DUCKHTSBENCH_REGISTRY = registry, DUCKHTS_CACHE_DIR = cache)
+correction_file <- duckhts_bench_stage_repository_fixtures(repo, "ancestry-projection")[["ancestry_correction"]]
+con <- rduckhts_connect()
+dbExecute(con, "SET threads=4")
+dbExecute(con, paste(
+  "CREATE TABLE bench_ancestry_ref AS SELECT 'chr1' AS chromosome,",
+  "(100000+i)::INTEGER AS position, 'A' AS allele_a, 'G' AS allele_b,",
+  "g.group_id, CASE WHEN g.group_id='A' THEN 0.25 + 0.16*sin(i*0.017)",
+  "ELSE 0.68 + 0.12*cos(i*0.019) END AS frequency",
+  "FROM range(17000) t(i), (VALUES ('A'),('B')) g(group_id)"
+))
+dbExecute(con, paste(
+  "CREATE TABLE bench_ancestry_pc AS SELECT DISTINCT chromosome, position, allele_a, allele_b,",
+  "pc, CASE WHEN pc=1 THEN sin(position*0.031) ELSE cos(position*0.027) END AS loading",
+  "FROM bench_ancestry_ref, (VALUES (1),(2)) t(pc)"
+))
+dbExecute(con, sprintf(
+  "CREATE TABLE bench_ancestry_correction AS SELECT pc::INTEGER AS pc, coefficient::DOUBLE AS coefficient FROM read_csv_auto(%s, delim='\\t', header=true) WHERE pc<=2",
+  as.character(dbQuoteString(con, correction_file))
+))
+dbExecute(con, paste(
+  "CREATE TABLE bench_ancestry_input AS SELECT sample_id, chromosome, position, allele_a, allele_b,",
+  "sum(CASE WHEN group_id='A' THEN a_share ELSE 1-a_share END * frequency)",
+  "+ 0.002*sin(position * sample_number) AS frequency",
+  "FROM bench_ancestry_ref, (VALUES ('S1',0.7,1),('S2',0.4,2),('S3',0.1,3))",
+  "s(sample_id,a_share,sample_number)",
+  "GROUP BY sample_id, sample_number, chromosome, position, allele_a, allele_b"
+))
+peak_rss_mb <- function() {
+  status <- grep("^VmHWM:", readLines("/proc/self/status"), value = TRUE)
+  as.numeric(strsplit(trimws(status), "[[:space:]]+")[[1L]][[2L]]) / 1024
+}
+baseline_rss_mb <- peak_rss_mb()
+run_sites <- function(n, repeat_id) {
+  dbExecute(con, sprintf("CREATE OR REPLACE TEMP VIEW bench_ancestry_slice AS SELECT * FROM bench_ancestry_input WHERE position < %d", 100000 + n))
+  start <- proc.time()[["elapsed"]]
+  out <- rduckhts_ancestry_proportions(
+    con, "bench_ancestry_slice", "bench_ancestry_ref", "bench_ancestry_pc",
+    "bench_ancestry_correction", min_cor = 0.4
+  )
+  elapsed <- proc.time()[["elapsed"]] - start
+  stopifnot(nrow(out) == 6L, all(out$used_variants == n))
+  data.frame(samples = 3L, variants_per_sample = n, input_rows = 3L*n,
+             output_group_rows = nrow(out), groups = 2L, pcs = 2L,
+             threads = 4L, repeat_id = repeat_id, elapsed_seconds = elapsed,
+             process_peak_rss_mb = peak_rss_mb(),
+             failures = paste(unique(out$status[out$status != "ok"]), collapse = ";"))
+}
+invisible(run_sites(1000L, 0L))
+results <- do.call(rbind, lapply(c(1000L, 5000L, 17000L), function(n) {
+  do.call(rbind, lapply(seq_len(3L), function(rep) run_sites(n, rep)))
+}))
+```
+
+Revision: `r source_revision`. Workload: deterministic biallelic synthetic
+reference frequencies and PC loadings; three independently perturbed samples;
+4 DuckDB threads; two reference groups; two PCs; `min_cor = 0.4`. Each variant
+is present in both groups and PCs, and every input row matches. This report
+measures query and materialization together. The public-reference workload is
+measured separately below.
+
+The correction vector is staged from the committed, checksummed bigsnpr vignette
+product. `VmHWM` is cumulative process high-water RSS (MiB), including package
+loading and all preceding cases; the baseline before the first run was
+`r round(baseline_rss_mb, 1)` MiB. It is not per-query allocated memory.
+
+```{r results}
+knitr::kable(results, digits = 3)
+```
+
+Failed gates are retained in the `failures` column for each repeat. The nearest
+identical synthetic workload is the earlier rendered
+`benchmarks/benchmark_ancestry.md` at repository revision `8ab38b99` (source
+revision `56aad9cf`): its three 17,000-site repeats had median 0.078 seconds,
+versus `r round(median(results$elapsed_seconds[results$variants_per_sample == 17000L]), 3)`
+seconds here. These are separate R processes with uncontrolled background load;
+this difference cannot establish a regression or equivalence. There is no
+ancestry-projection baseline on `develop`; the synthetic rows are not evidence
+about real-reference loading or BAM/CRAM depth sensitivity.
+
+## Public reference and GRCh37 chr22 genotypes
+
+Two checksum-verified Figshare CSV products each contain 5,816,590 rows:
+21 reference-frequency groups and 16 PC loadings. A staged, key-sorted Parquet
+join holds the four site-key columns, 16 DOUBLE loadings and 21 DOUBLE
+frequencies. Its SHA-256 is
+`a0bf01ae16db605ff0add59e5ebb747c35454406900c11fd8596f23c167fe02b`;
+the staging receipt binds this digest to both registered CSV digests and DuckDB
+1.5.5. The one-time conversion is excluded from query times. Converting each
+compressed CSV to narrow typed Parquet before the keyed sort keeps the CSV
+scanner and sort from holding wide decompressed rows simultaneously; reading
+just the compressed header also avoids a full R-side CSV scan.
+
+```{r staging-comparison}
+staging <- utils::read.delim("ancestry_stage_comparison.tsv")
+stopifnot(nrow(staging) == 3L, all(staging$reference_rows == 5816590L),
+          all(staging$pc_columns == 16L), all(staging$group_columns == 21L))
+staging$budget_mib <- 2560
+staging$within_budget <- staging$peak_rss_mib <= staging$budget_mib
+stopifnot(staging$within_budget[staging$implementation == "keyed_narrow_parquet"],
+          staging$seconds[staging$implementation == "keyed_narrow_parquet"] <= 30)
+knitr::kable(staging, digits = 2)
+```
+
+All three staging rows use the same two public CSV products and four threads.
+The independently run Astra prototype is an external comparator, not a DuckHTS
+revision. Source conversion and digest validation are included in staging RSS;
+these figures are not query memory. The epilepsy summary input has 4,880,492
+records. A separate public phase-3 chr22 VCF supplies 11 individuals
+from AFR (3), EUR (2), EAS (2), SAS (2) and AMR (2). Each workload uses four
+DuckDB threads and the bigsnpr vignette's 16 correction coefficients. These
+are complete-process peak RSS measurements, including package loading,
+CSV-based bigsnpr oracles and preceding operations in that process. The SQL
+time includes scanning the staged Parquet view, matching sites and aggregation,
+but excludes loading the oracle CSVs.
+
+```{r real-reference}
+real_epilepsy <- callr::r(function(repo) {
+  setwd(repo)
+  Sys.unsetenv("DUCKHTS_CACHE_DIR")
+  source("test/scripts/ancestry_bigsnpr_real.R", local = TRUE)
+  rss <- grep("^VmHWM:", readLines("/proc/self/status"), value = TRUE)
+  list(reference_load_seconds = load_seconds, query_seconds = elapsed,
+       peak_rss_mib = as.numeric(strsplit(trimws(rss), "[[:space:]]+")[[1L]][[2L]]) / 1024,
+       summary_input = nrow(sumstats), upstream_matched = nrow(matched),
+       eligible_chr22 = eligible, matched = nrow(input),
+       group_rows = nrow(parity), groups = length(shared),
+       cor_pred = result$cor_pred[[1L]], oracle_cor_pred = attr(shared, "cor_pred"),
+       rounding_bound = correlation_bound, group_parity = parity)
+}, args = list(repo = repo))
+real_epilepsy_full <- callr::r(function(repo) {
+  setwd(repo)
+  Sys.unsetenv("DUCKHTS_CACHE_DIR")
+  Sys.setenv(ANCESTRY_EPILEPSY_CHR22_ONLY = "false")
+  source("test/scripts/ancestry_bigsnpr_real.R", local = TRUE)
+  rss <- grep("^VmHWM:", readLines("/proc/self/status"), value = TRUE)
+  list(reference_load_seconds = load_seconds, query_seconds = elapsed,
+       peak_rss_mib = as.numeric(strsplit(trimws(rss), "[[:space:]]+")[[1L]][[2L]]) / 1024,
+       summary_input = nrow(sumstats), upstream_matched = nrow(matched),
+       eligible = eligible, matched = nrow(input), group_rows = nrow(parity),
+       groups = length(shared), cor_pred = result$cor_pred[[1L]],
+       oracle_cor_pred = attr(shared, "cor_pred"),
+       rounding_bound = correlation_bound, group_parity = parity)
+}, args = list(repo = repo))
+real_individuals <- callr::r(function(repo) {
+  setwd(repo)
+  Sys.unsetenv("DUCKHTS_CACHE_DIR")
+  source("test/scripts/ancestry_1000g_real.R", local = TRUE)
+  rss <- grep("^VmHWM:", readLines("/proc/self/status"), value = TRUE)
+  list(reference_load_seconds = load_seconds, query_seconds = elapsed,
+       peak_rss_mib = as.numeric(strsplit(trimws(rss), "[[:space:]]+")[[1L]][[2L]]) / 1024,
+       vcf_snvs = nrow(vcf), reference_overlap = nrow(joined),
+       samples = length(samples), sites_per_sample = nrow(site),
+       input_rows = nrow(input), group_rows = nrow(parity), groups = ncol(ref) - 5L,
+       summary = as.data.frame(summary))
+}, args = list(repo = repo))
+real_timings <- data.frame(
+  workload = c("epilepsy (chr22)", "epilepsy (genome-wide)",
+               "1000G phase-3 chr22 genotypes"),
+  samples = c(1L, 1L, real_individuals$samples),
+  variants_per_sample = c(real_epilepsy$matched, real_epilepsy_full$matched,
+                          real_individuals$sites_per_sample),
+  input_rows = c(real_epilepsy$matched, real_epilepsy_full$matched,
+                 real_individuals$input_rows),
+  output_group_rows = c(real_epilepsy$group_rows, real_epilepsy_full$group_rows,
+                        real_individuals$group_rows),
+  groups = c(real_epilepsy$groups, real_epilepsy_full$groups,
+             real_individuals$groups),
+  threads = 4L,
+  reference_rows = 5816590L,
+  reference_load_seconds = c(real_epilepsy$reference_load_seconds,
+                             real_epilepsy_full$reference_load_seconds,
+                             real_individuals$reference_load_seconds),
+  sql_seconds = c(real_epilepsy$query_seconds, real_epilepsy_full$query_seconds,
+                  real_individuals$query_seconds),
+  process_peak_rss_mib = c(real_epilepsy$peak_rss_mib,
+                           real_epilepsy_full$peak_rss_mib,
+                           real_individuals$peak_rss_mib))
+knitr::kable(real_timings, digits = 2)
+```
+
+Epilepsy matching audit: bigsnpr matched `r real_epilepsy_full$upstream_matched` /
+`r real_epilepsy_full$summary_input` records genome-wide (6 ambiguous SNPs
+excluded, 1,576,097 reversed, 0 strand-flipped). DuckHTS matched
+`r real_epilepsy_full$matched` / `r real_epilepsy_full$matched` pre-matched
+inputs, after matching against the real reference product. The independently
+selected, position-unique, unambiguous chr22 subset is
+`r real_epilepsy$matched` / `r real_epilepsy$eligible_chr22` eligible chr22
+matches, with `r real_epilepsy$matched` / `r real_epilepsy$matched` matched
+by DuckHTS. Both genome-wide solvers consume the same allele-aligned sites.
+
+```{r epilepsy-parity}
+knitr::kable(real_epilepsy_full$group_parity[, c("group_id", "proportion", "oracle",
+  "absolute_difference")], digits = 7)
+```
+
+Genome-wide `cor_pred`: DuckHTS
+`r sprintf("%.12f", real_epilepsy_full$cor_pred)`, bigsnpr
+`r sprintf("%.12f", real_epilepsy_full$oracle_cor_pred)`. The conservative
+seven-decimal QP rounding correlation bound is
+`r sprintf("%.9f", real_epilepsy_full$rounding_bound)`; the 0.4 gate is
+farther away. On chr22, both return `r real_epilepsy$cor_pred` at seven
+decimals with group difference
+`r max(real_epilepsy$group_parity$absolute_difference)`; its rounding bound is
+`r sprintf("%.9f", real_epilepsy$rounding_bound)`. All 21 genome-wide
+coefficients agree at seven decimals; the script checks rounded equality.
+The maximum absolute genome-wide group difference is
+`r max(real_epilepsy_full$group_parity$absolute_difference)` (21/21),
+the same as the `48f58192` report.
+
+The individual input is restricted from `r real_individuals$vcf_snvs` unique
+biallelic SNVs to `r real_individuals$reference_overlap` same-assembly,
+allele-agreeing, unambiguous reference overlaps before spaced site selection.
+Both solvers see the same per-sample genotypes. bigsnpr's
+imperfect-match warning (`cor_pred < 0.99`) is retained; passing the
+0.4 gate does not imply that the frequencies match perfectly. The 11
+individuals' 231 coefficients agree with bigsnpr at seven decimals.
+Their maximum absolute group difference is
+`r max(real_individuals$summary$max_group_difference)`, also the same as
+`48f58192` (231/231).
+
+```{r individual-parity}
+knitr::kable(real_individuals$summary, digits = 7)
+```
+
+## Keyed Parquet profile and input scaling
+
+The pre-conversion genome-wide DuckDB JSON profile, on revision
+`0a5fd898c2bb8449259e01dd7aff161bb4dc3bc8`, measured 30.27 s and
+40,232 MiB peak buffer memory. Its complete R process peaked at 38,783 MiB
+RSS while retaining the CSV-based bigsnpr oracle. The 53,491,760-row
+materialized `basis` and 1,123,326,960-row `x` join dominate cardinality;
+`pred_sites` separately groups 3,343,235 variants after a long-reference
+join. The old `list()` calls assemble only the small post-aggregation solver
+vectors; there is no per-variant list construction. The profile also shows
+hash joins and grouping over the long reference, but DuckDB does not
+attribute its single reported peak buffer value to individual operators.
+CSV parsing occurs in R before this SQL profile, not in a DuckDB scan
+operator. Sorting is limited to the input window partition and final group
+ordering.
+
+The keyed query scans projected Parquet columns and aggregates 336
+`sum(PC * group_frequency)` values, 16 corrected `sum(PC * aligned_frequency)`
+values and group correlations per sample. The 336-element solver vector and
+21 group correlations are assembled **after** aggregation. The earlier keyed
+plan grouped all 5,816,590 reference loci into a site hash and retained
+3,343,235 classified rows while the correlation branch rebuilt aligned
+input. Its four-thread fresh-process run took 3.43 s, 1,872 MiB RSS and
+3,175 MiB DuckDB peak buffer. The old JSON profile attributes 0.80 s to
+the reference grouping and has two large join branches; profile peak memory
+is query-wide, not operator-attributed.
+
+Astra's external plan converts CSVs to narrow Parquet, then builds its solver
+hash from the 3,343,235 matched inputs, not the 5,816,590 reference sites.
+Its solver-only process ran 2.39–2.43 s with 587 MiB RSS and zero spill under
+`memory_limit='1GB'`; classification/preparation ran separately. DuckHTS
+keeps classification and its complete audit in the measured wrapper call:
+it writes a temporary 3,343,235-row, approximately 22.6 MiB aligned Parquet relation,
+then materializes only per-sample moments, solver output and correlation.
+The single-sample reductions use ungrouped aggregates. For multiple samples,
+the 1..N sample index from the small audit table is the group key: a string
+`GROUP BY sample_id` led DuckDB to estimate 440,000 groups for 22 samples
+and spill 951 MiB with one thread, while the indexed 44-sample query has
+zero spill. The temporary Parquet file is removed before returning; its
+bytes are explicit bounded intermediate I/O, not a DuckDB spill.
+
+The hash-build input is 95.65 MiB of decoded key/frequency payload for the
+full epilepsy run (3,343,235 rows, measured by
+`benchmark_ancestry_query_stages.R`). With a fixed 512 MiB R/DuckDB overhead
+and 3× this payload, the process-RSS budget is 799 MiB, further capped at
+1 GiB under `memory_limit='1GB'`. Its measured 4-thread RSS below is within
+both limits. Every stage's JSON profile reported zero temp spill; the largest
+query-session DuckDB buffer estimate was 1,218 MiB. DuckDB buffer accounting
+is not resident process RSS and must not be added to it. Genotype 44-sample
+build payload is 27.69 MiB (880,000 rows, including the four-byte
+sample index used for aggregation), for a 595 MiB budget; the
+one-thread process measured 476 MiB RSS with zero spill.
+
+`benchmark_ancestry_reference_load.R` scans every numeric column in each
+source CSV and the staged Parquet product with DuckDB; neither scan
+materializes 5.8 million rows in R. These timings differ from the CSV
+`fread()` oracle-loading times above and have their own denominator.
+
+```{r reference-load-comparison}
+reference_load <- utils::read.delim("ancestry_reference_load.tsv")
+stopifnot(nrow(reference_load) == 2L,
+          identical(reference_load$threads, c(1L, 4L)),
+          all(reference_load$reference_rows == 5816590L),
+          all(reference_load$numeric_columns == 37L))
+knitr::kable(reference_load, digits = 2)
+```
+
+For the 11-person, 220,000-row, one-thread probe, the original a011c61a
+wrapper and the typed-key matched-reference wrapper used the same staged
+1,462,608,079-byte Parquet reference (5,816,590 loci). The profiled first
+call isolates each operation; fresh-process totals include two calls. The
+reference receipt binds source and output SHA-256 digests, writer version and
+`frequency_unit_unique_v2` admission, which checks group frequencies in [0, 1].
+The view passed to the wrapper has no portable receipt identity, so the wrapper
+also checks contributing rows; the earlier finite-only admission cost 0.098 s
+in the first-call probe. The current check also validates the frequency range. Profiling
+uses the step recorder in
+`benchmark_ancestry_memory.R` and separate installed source revisions;
+process clocks include R startup. The original full-reference duplicate
+check grouped normalized keys across all 5.8 million loci; two independent
+finite scans read 16 PCs and 21 groups. The current checks touch only
+matched loci, and the staged UTINYINT chromosome key avoids per-reference-row
+regex normalization during joins.
+
+```{r fixed-cost-breakdown}
+fixed_cost <- utils::read.delim("ancestry_fixed_cost.tsv", check.names = FALSE)
+stopifnot(nrow(fixed_cost) == 20L,
+          abs(sum(fixed_cost$original_s[6:16]) -
+                fixed_cost$original_s[17L]) < 0.02,
+          abs(sum(fixed_cost$matched_typed_s[6:16]) -
+                fixed_cost$matched_typed_s[17L]) < 0.02)
+knitr::kable(fixed_cost, digits = 3,
+  caption = "First-call step durations and two-call fresh-process costs (seconds; single probe per revision)")
+```
+
+`benchmark_ancestry_scaling.R` runs three independent R processes per point
+with one or four DuckDB threads and the same registry-staged
+`ancestry_reference_parquet`. Files are reused from the local cache across
+processes; the OS page cache is not cleared between repetitions. Input Parquet is emitted by
+`test/scripts/ancestry_bigsnpr_real.R` and `test/scripts/ancestry_1000g_real.R`
+from registry-staged `ancestry_epilepsy`, `ancestry_1000g_chr22` and the
+1000G sample panel; the scaling driver accepts those output paths as arguments.
+Epilepsy 1×/2× uses `file_row_number < 835809` / `< 1671618` on the
+same physical Parquet file, excluding the row-number column from the input;
+4× retains the original `LIMIT 3343235` over the full scan, without a
+row-number projection. The 1×/2× selections are fixed physical prefixes;
+the 4× query reads all 3,343,235 variants (one sample).
+The input SHA-256 and selection rule for every process are in the repetitions
+file. The driver fails if the seven-decimal returned coefficients differ
+between first and warm calls, across three fresh processes, or between one
+and four DuckDB threads for the same workload and scale. The sample series
+keeps 20,000 chr22 sites per person while selecting 11/22/44 distinct
+phase-3 VCF individuals. The joint
+series selects 5,000/10,000/20,000 sites for 11/22/44 individuals: both axes
+grow, with 55,000/220,000/880,000 input rows. No sample IDs or genotypes
+are cloned. Every input row participates; each group produces one output row.
+Each fresh process calls the public wrapper twice. Warm in-process query time
+measures the second call, including matched-site validation, aligned file I/O,
+solver, quality gates and result materialisation. Process time includes both
+calls, R start, package/extension load, connection setup, reference view open,
+input staging and cleanup; it is not a single-call latency. Source checksums,
+reference derivation and bigsnpr oracle runs are outside both clocks. Peak RSS
+includes R and DuckDB; DuckDB buffer peaks are not process RSS. The aligned
+Parquet size is reported separately from DuckDB temporary spill. The
+single-thread 1× floor determines whether a workload has a timing verdict;
+sub-five-second series are memory profiles only. Each repetition has a 1 GB
+DuckDB memory limit and zero DuckDB spill allowance. The declared process-RSS
+ceilings are 512 MiB fixed overhead plus three times the full-scale decoded
+required-column payload: 798.95 MiB for epilepsy (95.65 MiB decoded), and
+595.07 MiB for both sample and joint cases (27.69 MiB decoded), capped at
+1 GiB. These ceilings apply to every point, including the joint series. The keyed
+reference contains 5,816,590 loci with 16 DOUBLE PC and 21 DOUBLE group columns
+(296 decoded numeric bytes per row plus four keys). The admitted aligned
+relation holds at most the physical input row count: 3,343,235 dense
+summary-statistic sites or 880,000 joint genotype rows, not
+sites × PCs × groups. The largest per-sample aggregate consumes 3,343,235
+sites and emits 16 × (21 + 1) numeric moments; each fitted sample returns
+21 rows. The aligned file is written once and scanned for moments and
+prediction; its reported size is logical file I/O, not DuckDB spill or
+measured physical disk traffic.
+An optional single-run TEMP-table probe retained identical proportions and
+zero spill, but its full-epilepsy peak was approximately 865 MiB, above the
+798.95 MiB ceiling. It is not a repeated comparable workload; the measured
+path here keeps the aligned Parquet file. The 21 full-epilepsy
+coefficients and 231 individual coefficients agree with bigsnpr at seven decimals.
+
+```{r parquet-scaling}
+scaling_before <- utils::read.delim("ancestry_memory_scaling_before.tsv")
+prior_scaling <- utils::read.delim("ancestry_memory_scaling.tsv")
+repetitions <- utils::read.delim("ancestry_memory_repetitions.tsv")
+stopifnot(nrow(repetitions) == 54L, nrow(scaling_before) == 12L,
+          nrow(prior_scaling) == 12L,
+          all(repetitions$stable_7dp),
+          all(repetitions$repeat_max_difference == 0),
+          all(grepl("^[0-9a-f]{64}$", repetitions$input_sha256)),
+          all(vapply(split(repetitions$input_sha256, repetitions$workload),
+                     function(x) length(unique(x)) == 1L, logical(1L))),
+          all(repetitions$threads %in% c(1L, 4L)),
+          all(repetitions$scale %in% c(1L, 2L, 4L)),
+          all(repetitions$input_rows == repetitions$used_variants),
+          all(repetitions$output_rows == repetitions$samples * 21L),
+          all(repetitions$peak_temp_mib == 0),
+          all(repetitions$peak_rss_mib <= repetitions$budget_mib))
+points <- split(repetitions, interaction(repetitions$workload,
+                                        repetitions$threads, repetitions$scale,
+                                        drop = TRUE))
+stopifnot(length(points) == 18L,
+          all(vapply(points, function(point)
+            identical(sort(point$repetition), 1:3), logical(1L))))
+scaling <- do.call(rbind, lapply(points, function(point) data.frame(
+  workload = point$workload[1L], threads = point$threads[1L],
+  scale = point$scale[1L], samples = point$samples[1L],
+  input_rows = point$input_rows[1L], output_rows = point$output_rows[1L],
+  decoded_mib = point$decoded_required_column_mib[1L],
+  query_s = median(point$query_seconds), query_iqr_s = IQR(point$query_seconds),
+  query_min_s = min(point$query_seconds), query_max_s = max(point$query_seconds),
+  process_s = median(point$process_seconds),
+  first_query_s = median(point$first_query_seconds),
+  max_rss_mib = max(point$peak_rss_mib),
+  max_buffer_mib = max(point$peak_buffer_mib),
+  aligned_file_mib = max(point$aligned_file_mib),
+  spill_mib = max(point$peak_temp_mib), budget_mib = point$budget_mib[1L])))
+scaling <- scaling[order(scaling$workload, scaling$threads, scaling$scale), ]
+scaling$exponent <- NA_real_
+for (workload in unique(scaling$workload)) {
+  for (threads in c(1L, 4L)) {
+    rows <- which(scaling$workload == workload & scaling$threads == threads)
+    scaling$exponent[rows[-1L]] <- log(scaling$query_s[rows[-1L]] /
+                                     scaling$query_s[rows[-length(rows)]]) /
+      log(scaling$input_rows[rows[-1L]] /
+          scaling$input_rows[rows[-length(rows)]])
+  }
+}
+meets_floor <- tapply(scaling$query_s[scaling$threads == 1L & scaling$scale == 1L],
+                scaling$workload[scaling$threads == 1L & scaling$scale == 1L],
+                function(seconds) seconds >= 5)
+scaling$timing_verdict <- ifelse(meets_floor[scaling$workload], "timed", "memory only")
+stopifnot(all(scaling$max_rss_mib <= scaling$budget_mib),
+          all(scaling$spill_mib == 0),
+          all(is.finite(repetitions$repeat_max_difference)))
+knitr::kable(scaling_before, digits = 2, caption =
+  "Keyed-query baseline at 29f3e695; genotype 22/44 repeated sample IDs")
+knitr::kable(prior_scaling, digits = 2, caption =
+  "Single-run bounded-engine baseline at 58fb3264; reference admission contract differs")
+knitr::kable(scaling, digits = 2, caption =
+  "Three fresh processes per point; process includes two queries; query spread is IQR and range; exponent uses warm query medians only; memory-only rows have no timing verdict")
+cat("Seven-decimal stability gates passed:", nrow(repetitions),
+    "first/warm pairs and 9 workload/scale groups across threads and repeats.\n",
+    "Maximum first/warm coefficient difference:",
+    max(repetitions$repeat_max_difference), "\n")
+knitr::kable(unique(repetitions[
+  repetitions$workload == "epilepsy" & repetitions$scale < 4L,
+  c("input_sha256", "scale", "selection_rule")]), row.names = FALSE,
+  caption = "Epilepsy input checksum and fixed-prefix selection rules")
+comparison <- merge(
+  scaling[scaling$threads == 4L & scaling$scale == 4L &
+          scaling$workload %in% c("epilepsy", "genotypes"),
+          c("workload", "input_rows", "query_s", "max_rss_mib")],
+  prior_scaling[prior_scaling$threads == 4L & prior_scaling$scale == 4L,
+                c("workload", "input_rows", "seconds", "peak_rss_mib")],
+  by = c("workload", "input_rows"))
+stopifnot(nrow(comparison) == 2L)
+comparison$extra_seconds <- comparison$query_s - comparison$seconds
+comparison$extra_rss_mib <- comparison$max_rss_mib - comparison$peak_rss_mib
+knitr::kable(comparison, digits = 2,
+  caption = "Nearest identical input baseline (single run, 58fb3264) versus warm matched-reference wrapper; absolute differences are not a no-regression claim")
+full_epilepsy <- scaling[scaling$workload == "epilepsy" &
+                         scaling$threads == 4L & scaling$scale == 4L, ]
+full_comparison <- data.frame(
+  revision = c("48f58192", substr(source_revision, 1L, 8L)),
+  physical_rows = rep(3343235L, 2L), threads = rep(4L, 2L),
+  median_warm_s = c(4.358, full_epilepsy$query_s),
+  max_rss_mib = c(752.20, full_epilepsy$max_rss_mib),
+  rss_budget_mib = rep(798.95, 2L))
+knitr::kable(full_comparison, digits = 2,
+  caption = "Comparable three-process full-input epilepsy measurements; 48f58192 measurements rendered at 32b1fea2; sub-five-second series are memory profiles")
+```
+
+For the unchanged full-input epilepsy scan (3,343,235 physical rows, 21
+coefficients, four DuckDB threads, 1 GB DuckDB memory limit), the three
+repetitions of code `48f58192` recorded a 4.358 s median warm query and
+752.20 MiB maximum process RSS (`benchmarks/ancestry_memory_repetitions.tsv`
+rendered at `32b1fea2`). The comparable run at `r substr(source_revision, 1L, 8L)` measures
+`r round(scaling$query_s[scaling$workload == "epilepsy" & scaling$threads == 4L & scaling$scale == 4L], 3)` s
+median and `r round(scaling$max_rss_mib[scaling$workload == "epilepsy" & scaling$threads == 4L & scaling$scale == 4L], 2)` MiB
+maximum RSS. Relative to `48f58192`, the warm median changed by
+`r round(scaling$query_s[scaling$workload == "epilepsy" & scaling$threads == 4L & scaling$scale == 4L] - 4.358, 3)` s
+and maximum RSS changed by
+`r round(scaling$max_rss_mib[scaling$workload == "epilepsy" & scaling$threads == 4L & scaling$scale == 4L] - 752.20, 2)` MiB
+(positive values mean an increase). DuckDB spill was
+`r max(repetitions$peak_temp_mib)` MiB. The one-thread 1× floor classifies
+this series as memory-only; timing differences are observations, not timing
+verdicts. These are end-to-end wrapper measurements, not isolated admission
+predicate costs. The locus uniqueness check also visits sites whose input
+rows will not contribute to the fit.
+
+With fixed physical input rows, the reported seven-decimal coefficients
+are identical across first and warm calls, fresh processes and one/four-thread
+runs for each scale. This is a returned-coefficient contract, not a claim of
+bitwise thread independence for raw correlations. An unordered `LIMIT` under
+`preserve_insertion_order=false` selected different epilepsy 1×/2× rows
+across parallel scans; those measurements are not coefficient-stability evidence.
+The independent 58fb3264 keyed baseline measured 0.694 s for 11 individuals
+at one thread and 0.394 s at four threads. The predecessor at a011c61a
+measured 8.408 s on the 11-individual series in the pass-4 comparison. The
+current process and query columns are separate: comparing a two-query process
+to a single-query baseline would misstate the regression. Sub-five-second 1×
+query series have memory results and descriptive exponents, not a timing verdict.
+
+## Indexed 30x CRAM sensitivity
+
+These retained measurements were produced at
+`0a5fd898c2bb8449259e01dd7aff161bb4dc3bc8` with the existing long-form
+BAM ancestry path, not remeasured for the keyed Parquet projection.
+Three public 30x CRAMs (NA18507/AFR, HG00188/EUR, HG00403/EAS) were
+read via their indexes at chr22:15,335,303–50,800,284 (GRCh38). The
+registered GRCh37-to-GRCh38 chain maps 19,981/20,000 selected GRCh37
+loci onto chr22; 430 mapped loci require reference swaps. The 19,551
+unswapped, unique SNVs provide a spaced 17,000-site panel. No whole
+CRAM was downloaded. Each 25% read subsample uses samtools seed 42;
+median depth and allele-read totals are measured after downsampling.
+Each mode sees the same `min_depth = 7` criterion and the same VCF site
+subset. Each query emits 21 group rows with four DuckDB threads and
+two htslib workers. Peak RSS is the R process high-water mark (MiB)
+after reference loading and regional CRAM staging; it excludes samtools
+child-process RSS and is not incremental SQL memory. The `seconds`
+column is the ancestry BAM query alone, excluding CRAM staging and
+depth audit.
+The native and quarter-depth columns retain every status, including
+failed gates and their `cor_pred` values.
+
+```{r cram-sensitivity}
+cram_sensitivity <- utils::read.delim("ancestry_30x_sensitivity.tsv",
+  stringsAsFactors = FALSE)
+stopifnot(nrow(cram_sensitivity) == 36L,
+  all(cram_sensitivity$sites %in% c(1000L, 5000L, 17000L)),
+  length(unique(cram_sensitivity$sample_id)) == 3L,
+  all(c("allele_fraction", "called_genotype") %in% cram_sensitivity$mode),
+  nrow(unique(cram_sensitivity[, c("sites", "panel_sha256")])) == 3L,
+  all(with(cram_sensitivity, gate_distance[is.finite(gate_distance)] >
+           rounding_bound[is.finite(gate_distance)])))
+knitr::kable(unique(cram_sensitivity[, c("sites", "panel_sha256")]),
+             row.names = FALSE)
+knitr::kable(cram_sensitivity[, c("sample_id", "sites", "depth", "mode",
+  "vcf_used", "bam_used", "depth_eligible", "median_depth", "allele_reads",
+  "vcf_cor_pred", "cor_pred", "status", "max_group_difference",
+  "rounding_bound", "gate_distance", "seconds", "process_peak_rss_mib")], digits = 4)
+```
+
+`r sum(cram_sensitivity$status != "ok")` / `r nrow(cram_sensitivity)`
+correlation gates failed. The minimum distance from the 0.4 gate among
+the measurable cases is `r min(cram_sensitivity$gate_distance, na.rm = TRUE)`;
+the largest
+coefficient-rounding correlation bound across the three site counts is
+`r max(cram_sensitivity$rounding_bound)`.
+Called-genotype frequency excludes sites whose balance rule makes no call;
+its `bam_used` denominator is therefore smaller than the depth-eligible
+count. Maximum group differences compare the same-site VCF result with
+each BAM/CRAM mode; they are sensitivity, not an equality assertion.
+
+```{r cleanup, include=FALSE}
+dbDisconnect(con, shutdown = TRUE)
+unlink(cache, recursive = TRUE)
+```
