@@ -84,8 +84,11 @@ main <- function(args) {
     "length(allele_a) + length(allele_b) + 4 + 8 + 8) AS bytes FROM ",
     aligned_source))
   stopifnot(dbGetQuery(con, "SELECT count(*) AS n FROM output")$n == 21L * samples)
-  cat(sprintf("matched_rows=%s build_payload_mib=%.2f aligned_parquet_mib=%.2f\n",
-              matched$n, matched$bytes / 1048576, file.info(aligned)$size / 1048576))
+  build_bytes <- matched$bytes + if (one_sample) 0 else 4 * matched$n
+  cat(sprintf(paste0("matched_rows=%s aligned_payload_mib=%.2f ",
+                     "build_payload_mib=%.2f aligned_parquet_mib=%.2f\n"),
+              matched$n, matched$bytes / 1048576, build_bytes / 1048576,
+              file.info(aligned)$size / 1048576))
   utils::write.table(do.call(rbind, rows), stdout(), sep = "\t",
                      row.names = FALSE, quote = FALSE)
 }
