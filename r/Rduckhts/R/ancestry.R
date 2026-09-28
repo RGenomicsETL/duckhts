@@ -84,8 +84,11 @@ rduckhts_ancestry_proportions <- function(
   quote_id <- function(x) as.character(DBI::dbQuoteIdentifier(con, x))
   r <- quote_id(reference_table)
   l <- quote_id(loadings_table)
-  groups <- DBI::dbGetQuery(con, paste0("SELECT DISTINCT group_id FROM ", r,
-                                        " ORDER BY group_id"))$group_id
+  # Group identifiers are labels: read them as DuckDB's VARCHAR spelling (so numeric
+  # IDs such as 1e6 keep their SQL form), ordered by the original values.
+  groups <- DBI::dbGetQuery(con, paste0("SELECT CAST(g AS VARCHAR) AS group_id FROM ",
+                                        "(SELECT DISTINCT group_id AS g FROM ", r,
+                                        ") ORDER BY g"))$group_id
   pcs <- DBI::dbGetQuery(con, paste0("SELECT DISTINCT pc FROM ", l,
                                       " ORDER BY pc"))$pc
   if (length(groups) < 1L || length(groups) > 30L || anyNA(groups) ||
@@ -124,7 +127,7 @@ rduckhts_ancestry_proportions <- function(
   if (invalid$out_of_range) stop("reference sites require frequencies in [0, 1]", call. = FALSE)
   quote_str <- function(x) as.character(DBI::dbQuoteString(con, x))
   frequency <- vapply(seq_along(groups), function(i) paste0(
-    "max(frequency) FILTER (WHERE group_id = ", quote_str(groups[[i]]),
+    "max(frequency) FILTER (WHERE CAST(group_id AS VARCHAR) = ", quote_str(groups[[i]]),
     ") AS ", quote_id(paste0("__g", i))), character(1L))
   loading <- vapply(seq_along(pcs), function(i) paste0(
     "max(loading) FILTER (WHERE pc = ", i, ") AS PC", i), character(1L))

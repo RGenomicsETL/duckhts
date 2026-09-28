@@ -110,6 +110,14 @@ test_ancestry_relations <- function() {
   expect_equal(default_q, c(0.25, 0.75))
   out <- rduckhts_ancestry_proportions(con, "ancestry_input", "ancestry_ref",
                                        "ancestry_pc", "ancestry_correction", min_cor = 0)
+  # Numeric long-format group IDs are labels: same fit, returned as their SQL text.
+  dbExecute(con, paste(
+    "CREATE TEMP VIEW ancestry_numeric_ref AS SELECT * REPLACE",
+    "(CASE WHEN group_id = 'A' THEN 1 ELSE 1000000 END AS group_id) FROM ancestry_ref"))
+  numeric_ids <- rduckhts_ancestry_proportions(con, "ancestry_input", "ancestry_numeric_ref",
+                                               "ancestry_pc", "ancestry_correction", min_cor = 0)
+  expect_equal(numeric_ids$group_id, c("1", "1000000"))
+  expect_equal(numeric_ids$proportion, out$proportion)
   expect_equal(out$status, rep("ok", 2L))
   expect_equal(out$used_variants, rep(6, 2L))
   expect_equal(out$input_variants, rep(11, 2L))
