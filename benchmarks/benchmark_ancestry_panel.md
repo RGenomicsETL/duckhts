@@ -19,6 +19,20 @@ on the same inputs:
 
 ## Method
 
+Each builder is an installed Rduckhts library recorded by
+`benchmark_ancestry_panel_identity.R`: the commit it was built from, the
+git blob of its `ancestry_panel.R` (verified against the source tree it
+was built from), and hashes of the installed package code and extension.
+The develop library was built from the DuckVEP-removal branch’s merge of
+`develop`, whose panel builder is byte-identical to `develop` at
+`d8475811`. The final builder’s source equals this tree’s.
+
+| implementation | commit       | builder_blob | package_code_sha256 | extension_sha256 |
+|:---------------|:-------------|:-------------|:--------------------|:-----------------|
+| develop        | af8dd4ac705c | 69ade4e3e9a2 | f0c752ff0a72        | c7876673b03f     |
+| distinct       | 36c212ba6112 | 6e72fea378d0 | 36bd0e3dada4        | 4e97043b5372     |
+| final          | 5090db2465dc | 9fdc2acf13d7 | 31427abdbb52        | 88d173d8be15     |
+
 `benchmark_ancestry_panel_run.R` stages bigsnpr’s reference through the
 benchmark registry (`ancestry_reference_parquet`: 5,816,590 loci, 21
 groups, 16 PCs) and keeps 1, 2 or 4 quarters of its loci by hash, the

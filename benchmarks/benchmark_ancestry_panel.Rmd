@@ -8,6 +8,11 @@ knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
 root <- normalizePath("..", mustWork = TRUE)
 runs <- utils::read.delim(file.path(root, "benchmarks", "ancestry_panel_scaling.tsv"),
                           colClasses = c(panel_sha256 = "character"))
+identity <- utils::read.delim(file.path(root, "benchmarks", "ancestry_panel_implementations.tsv"),
+                              colClasses = "character")
+tree_blob <- system2("git", c("-C", root, "hash-object", "r/Rduckhts/R/ancestry_panel.R"), stdout = TRUE)
+stopifnot(setequal(identity$implementation, unique(runs$implementation)),
+          identical(identity$builder_blob[identity$implementation == "final"], tree_blob))
 mib <- function(bytes) bytes / 1048576
 # Budget, declared before measuring: fixed overhead plus three times the live state the
 # builder needs, which is its per-locus eligibility state. Each reference locus keeps a
@@ -88,6 +93,20 @@ This report measures three builders on the same inputs:
   once.
 
 ## Method
+
+Each builder is an installed Rduckhts library recorded by
+`benchmark_ancestry_panel_identity.R`: the commit it was built from, the git blob of its
+`ancestry_panel.R` (verified against the source tree it was built from), and hashes of
+the installed package code and extension. The develop library was built from the
+DuckVEP-removal branch's merge of `develop`, whose panel builder is byte-identical to
+`develop` at `d8475811`. The final builder's source equals this tree's.
+
+```{r identity}
+shown <- identity[c("implementation", "commit", "builder_blob", "package_code_sha256",
+                    "extension_sha256")]
+shown[-1] <- lapply(shown[-1], substr, 1, 12)
+knitr::kable(shown)
+```
 
 `benchmark_ancestry_panel_run.R` stages bigsnpr's reference through the benchmark
 registry (`ancestry_reference_parquet`: 5,816,590 loci, 21 groups, 16 PCs) and keeps 1,
