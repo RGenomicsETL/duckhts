@@ -32,6 +32,20 @@ SELECT q[1], q[2] FROM (SELECT duckhts_ancestry_proportions(
 ----
 0.25	0.75
 
+# A group column far weaker than the largest still enters the fit: the optimality
+# test is per coordinate, not an absolute reduced-cost cutoff.
+query I
+WITH scales(s) AS (VALUES (1e-12), (1.0), (1e6)),
+  solutions AS (
+    SELECT duckhts_ancestry_proportions(
+      [1.0*s, 0.0, 0.0, 1e-4*s], [0.0, 5e-6*s], 2, false) AS q
+    FROM scales
+  )
+SELECT count(*) FROM solutions WHERE abs(q[1]) < 1e-12
+  AND abs(q[2] - 0.05) < 1e-9;
+----
+3
+
 # Uniform PC-product units do not change the optimum or nearest-PD repair.
 query I
 WITH scales(s) AS (VALUES (1e-12), (1.0), (1e6)),

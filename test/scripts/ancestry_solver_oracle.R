@@ -50,3 +50,30 @@ for (trial in seq_len(32L)) {
     stopifnot(error < 2e-4)
   }
 }
+
+# Group columns whose scales differ by up to 10^6 must fit no worse than the reference:
+# compare objectives under the repaired quadratic, since ill-conditioned problems can
+# leave the reference slightly short of the optimum.
+for (trial in seq_len(200L)) {
+  pcs <- c(3L, 8L, 16L)[trial %% 3L + 1L]
+  groups <- c(2L, 4L, 6L, 21L)[trial %% 4L + 1L]
+  f_ref <- matrix(runif(n * groups, 0.1, 0.9), nrow = n)
+  projection <- matrix(rnorm(n * pcs), nrow = n)
+  weights <- runif(groups); weights[sample(groups, max(0L, groups - 3L))] <- 0
+  weights <- weights / sum(weights)
+  equal <- trial %% 2L == 0L
+  if (!equal) weights <- weights * runif(1, 0.3, 1)
+  x <- crossprod(projection, f_ref) %*% diag(10^runif(groups, -3, 3), groups)
+  y <- drop(x %*% weights) + rnorm(pcs, sd = 1e-3 * sqrt(mean((x %*% weights)^2)))
+  gram <- Matrix::nearPD(crossprod(x), base.matrix = TRUE)
+  if (!gram$converged) next
+  linear <- drop(crossprod(y, x))
+  expected <- quadprog::solve.QP(gram$mat, linear, cbind(-1, diag(groups)),
+                                 c(-1, rep(0, groups)), meq = as.integer(equal))$solution
+  got <- solve_native(x, y, groups, equal)
+  objective <- function(q) drop(0.5 * crossprod(q, gram$mat %*% q) - sum(linear * q))
+  excess <- (objective(got) - objective(expected)) / max(abs(objective(expected)), 1e-300)
+  cat(sprintf("column-scaled trial=%d groups=%d pcs=%d equality=%s objective_excess=%.3g\n",
+              trial, groups, pcs, equal, excess))
+  stopifnot(excess < 1e-9)
+}

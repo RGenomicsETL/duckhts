@@ -1,6 +1,7 @@
 /* Bounded nearest-PD and simplex QP for aggregated ancestry projections. */
 #include "duckdb_extension.h"
 DUCKDB_EXTENSION_EXTERN
+#include <float.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -178,13 +179,25 @@ static bool simplex_qp(const double *h, const double *d, int k, bool equality, d
             for (int i = 0; i < m; i++) if (q[indices[i]] == 0) active[indices[i]] = false;
             continue;
         }
-        double multiplier = target[m], worst = -1e-9;
+        /* KKT check per coordinate. A coordinate enters when its reduced cost is
+         * negative beyond the rounding noise of the terms that form it, so a weak
+         * group column (small H_ii) is not dismissed by an absolute cutoff; it is
+         * ranked by r_i / sqrt(H_ii), the descent rate in proportion units. */
+        double multiplier = target[m], worst = 0, largest_h = 0;
+        for (int i = 0; i < k; i++) largest_h = fmax(largest_h, h[i * k + i]);
         int add = -1;
         for (int i = 0; i < n; i++) if (!active[i]) {
             double gradient = i == k ? 0 : -d[i];
-            if (i != k) for (int j = 0; j < k; j++) gradient += h[i * k + j] * q[j];
+            double magnitude = fabs(multiplier) + (i == k ? 0 : fabs(d[i]));
+            if (i != k) for (int j = 0; j < k; j++) {
+                gradient += h[i * k + j] * q[j];
+                magnitude += fabs(h[i * k + j] * q[j]);
+            }
             double reduced = gradient + multiplier;
-            if (reduced < worst) { worst = reduced; add = i; }
+            if (reduced >= -64 * DBL_EPSILON * magnitude) continue;
+            double curvature = i == k ? largest_h : h[i * k + i];
+            double score = reduced / sqrt(fmax(curvature, DBL_MIN));
+            if (add < 0 || score < worst) { worst = score; add = i; }
         }
         if (add < 0) return true;
         active[add] = true;
