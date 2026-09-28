@@ -91,10 +91,8 @@ small adapter boundary.
 
 ## Variant annotation and clinical evidence
 
-DuckHTS reads VCF/BCF records and parses existing CSQ/ANN/BCSQ annotations. Consequence
-prediction is provided by [DuckVEP](https://github.com/RGenomicsETL/DuckVEP), a separate
-DuckDB extension and R package. DuckHTS readers and DuckVEP annotation compose through
-SQL; clinical evidence and provenance can be joined as typed relations.
+DuckHTS reads VCF/BCF records and parses existing CSQ/ANN/BCSQ annotations. Clinical
+evidence and provenance can be joined as typed relations.
 
 ## Interface rules
 
