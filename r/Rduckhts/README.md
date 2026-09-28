@@ -430,9 +430,12 @@ fq_files <- c(
 )
 rduckhts_fastq_multi(con, "fq_multi", fq_files, overwrite = TRUE)
 dbGetQuery(con, "SELECT filename, count(*) AS n FROM fq_multi GROUP BY ALL ORDER BY filename")
-#>                                                    filename n
-#> 1 <Rduckhts>/extdata/r1.fq 5
-#> 2 <Rduckhts>/extdata/r2.fq 5
+#>                                                                                                                   filename
+#> 1 <Rduckhts>/extdata/r1.fq
+#> 2 <Rduckhts>/extdata/r2.fq
+#>   n
+#> 1 5
+#> 2 5
 ```
 
 Per-file parameters are supported via a `.params` data.frame with a
@@ -487,25 +490,6 @@ This section is generated from `functions.yaml`.
 | [`duckhts_duckdb_type_supported`](inst/function_catalog/reference.md#duckhts_duckdb_type_supported)           | scalar_macro |                                       | Return whether the currently open DuckDB runtime advertises a logical type with the given name through duckdb_types(). This is a catalog-level runtime probe for feature gating SQL/macros across DuckDB versions.                                                                                                                                                               |
 | [`duckhts_duckdb_supports_variant`](inst/function_catalog/reference.md#duckhts_duckdb_supports_variant)       | scalar_macro |                                       | Return whether the currently open DuckDB runtime advertises the VARIANT logical type. Use this to gate optional SQL that depends on DuckDB VARIANT support.                                                                                                                                                                                                                      |
 | [`duckhts_duckdb_supports_geometry`](inst/function_catalog/reference.md#duckhts_duckdb_supports_geometry)     | scalar_macro |                                       | Return whether the currently open DuckDB runtime advertises the GEOMETRY logical type. Use this to gate optional SQL that depends on DuckDB GEOMETRY support.                                                                                                                                                                                                                    |
-
-### Variant Annotation
-
-| Function                                                                                                        | Kind         | R helper              | Description                                                                                                                                                                                                                                     |
-|-----------------------------------------------------------------------------------------------------------------|--------------|-----------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [`duckvep_ensembl_regions`](inst/function_catalog/reference.md#duckvep_ensembl_regions)                         | table_macro  |                       | Match tiled FASTA sequence to one Ensembl core assembly and assign dense model-local sequence-region ordinals.                                                                                                                                  |
-| [`duckvep_ensembl_transcripts`](inst/function_catalog/reference.md#duckvep_ensembl_transcripts)                 | table_macro  |                       | Build validated VEP-116 Ensembl core transcript models from core tables and matching tiled FASTA sequence.                                                                                                                                      |
-| [`duckvep_ensembl_regulation_features`](inst/function_catalog/reference.md#duckvep_ensembl_regulation_features) | table_macro  |                       | Prepare VEP-116 RegulatoryFeature and MotifFeature intervals for a DuckVEP model.                                                                                                                                                               |
-| [`duckvep_model_receipt`](inst/function_catalog/reference.md#duckvep_model_receipt)                             | table_macro  |                       | Create a deterministic provenance receipt and semantic hash for prepared DuckVEP model relations.                                                                                                                                               |
-| [`duckvep_model_load`](inst/function_catalog/reference.md#duckvep_model_load)                                   | table        |                       | Load a validated immutable consequence model under a name in the current DuckDB database; return one TRUE row.                                                                                                                                  |
-| [`duckvep_model_drop`](inst/function_catalog/reference.md#duckvep_model_drop)                                   | scalar       |                       | Remove a named resident DuckVEP consequence model and release its transcript and regulation-feature interval indexes, sequences, and cached worker state. Returns FALSE when the name is absent or the model is in use by an annotation vector. |
-| [`duckvep_allele_geometry`](inst/function_catalog/reference.md#duckvep_allele_geometry)                         | scalar       |                       | Separate uploaded, VEP-116 feature and minimized-edit geometry for one literal biallelic allele.                                                                                                                                                |
-| [`duckvep_transcript_projection`](inst/function_catalog/reference.md#duckvep_transcript_projection)             | table_macro  |                       | Project independent literal alleles and existing DuckVEP annotations into typed, unshifted VEP-116 transcript display fields.                                                                                                                   |
-| [`duckvep_repeat_alleles`](inst/function_catalog/reference.md#duckvep_repeat_alleles)                           | scalar_macro |                       | Prepare bounded literal reference and alternate alleles from exact ordered repeat descriptions.                                                                                                                                                 |
-| [`duckvep_breakend_geometry`](inst/function_catalog/reference.md#duckvep_breakend_geometry)                     | scalar       |                       | Parse one raw VCF 4.5 breakend ALT into mate coordinates, orientation and retained replacement sequence.                                                                                                                                        |
-| [`duckvep_haplotypes`](inst/function_catalog/reference.md#duckvep_haplotypes)                                   | table        | `rduckhts_haplotypes` | Replay literal phased CDS/protein paths with carriers, source contributors, coding blocks, aligned differences and optional protein HGVS.                                                                                                       |
-| [`duckvep_phase_call`](inst/function_catalog/reference.md#duckvep_phase_call)                                   | scalar       |                       | Assign decoded GT/PS allele slots to haplotype lanes under strict or pinned VEP-116 phase policy.                                                                                                                                               |
-| [`duckvep_annotate`](inst/function_catalog/reference.md#duckvep_annotate)                                       | table        |                       | Annotate independent literal alleles, exact typed structural events and paired breakends against a resident VEP-116-compatible model.                                                                                                           |
-| [`duckvep_so_terms`](inst/function_catalog/reference.md#duckvep_so_terms)                                       | table        |                       | Return VEP-116 Sequence Ontology terms, consequence-mask bits, impact, severity rank and evaluator tier.                                                                                                                                        |
 
 ### Readers
 
@@ -587,10 +571,11 @@ This section is generated from `functions.yaml`.
 
 | Function                                                                                                              | Kind         | R helper                                  | Description                                                                                                 |
 |-----------------------------------------------------------------------------------------------------------------------|--------------|-------------------------------------------|-------------------------------------------------------------------------------------------------------------|
+| [`duckhts_somalier_spacing`](inst/function_catalog/reference.md#duckhts_somalier_spacing)                             | scalar       | `rduckhts_somalier_find_sites`            | Greedily select ranked Somalier candidate positions at a minimum genomic distance.                          |
 | [`duckhts_somalier_import_sites`](inst/function_catalog/reference.md#duckhts_somalier_import_sites)                   | table_macro  | `rduckhts_somalier_import_sites`          | Import an already selected Somalier sites VCF/BCF as one canonical panel and population-frequency relation. |
 | [`duckhts_somalier_vcf_counts`](inst/function_catalog/reference.md#duckhts_somalier_vcf_counts)                       | table_macro  | `rduckhts_somalier_vcf_counts`            | Extract a complete panel-aligned A/B/other count relation from VCF/BCF FORMAT/AD.                           |
 | [`duckhts_somalier_bam_counts`](inst/function_catalog/reference.md#duckhts_somalier_bam_counts)                       | table        | `rduckhts_somalier_bam_counts`            | Extract complete panel-aligned A/B/other base counts from one indexed BAM or CRAM source.                   |
-| [`duckhts_somalier_spacing`](inst/function_catalog/reference.md#duckhts_somalier_spacing)                             | scalar       | `rduckhts_somalier_find_sites`            | Greedily select ranked Somalier candidate positions at a minimum genomic distance.                          |
+| [`duckhts_ancestry_proportions`](inst/function_catalog/reference.md#duckhts_ancestry_proportions)                     | scalar       | `rduckhts_ancestry_proportions`           | Solve a nearest-positive-definite constrained ancestry projection from aggregated PC products.              |
 | [`duckhts_somalier_panel_sha256`](inst/function_catalog/reference.md#duckhts_somalier_panel_sha256)                   | scalar_macro |                                           | Derive a stable SHA-256 identity for an ordered biallelic sample-fingerprinting panel.                      |
 | [`duckhts_somalier_frequency_sha256`](inst/function_catalog/reference.md#duckhts_somalier_frequency_sha256)           | scalar_macro |                                           | Derive a stable identity for panel-aligned population-B allele frequencies.                                 |
 | [`duckhts_somalier_classify`](inst/function_catalog/reference.md#duckhts_somalier_classify)                           | scalar       |                                           | Classify one measured A/B/other count tuple for Somalier-derived autosomal relatedness.                     |
@@ -839,176 +824,10 @@ dbGetQuery(
 #> 1 b80001f78000387a     TRUE
 ```
 
-### DuckVEP consequence and HGVS annotation
+### Consequence annotation
 
-#### Design and validation
-
-DuckVEP annotates a narrow event relation against an immutable named
-transcript model. Production models come from receipted Ensembl
-relations; this compact non-coding transcript keeps the README
-deterministic while exercising the same public DBI surface. The bundled
-extension shares one read-only model across DuckDB workers and gives
-each worker private mutable annotation state. Compact masks/codes are
-the high-cardinality interface; rich consequence text and
-independent-event HGVS are optional projections of the same candidate
-sweep.
-
-DuckVEP returns a relation rather than owning a closed annotation-cache
-format. Any source DuckDB can scan–local or S3 Parquet, a DuckLake
-snapshot, VCF/BCF, tabix text, or an attached database–can provide exact
-allele, interval, gene, or disease annotations through ordinary joins.
-The root [DuckHTS
-README](https://github.com/RGenomicsETL/duckhts#duckvep-a-resident-ensembl-vep-consequence-engine)
-shows the complete real HG002 WGS + Ensembl 116 +
-ClinVar/ClinvArbitration + AlphaMissense + gnomAD + interval workflow
-and its materialized timing evidence; the illustrated [*DuckVEP: the
-fastest Ensembl VEP-compatible consequence predictor in the
-West?*](https://github.com/RGenomicsETL/duckhts/blob/main/benchmarks/benchmark_duckvep_fastvep.md)
-report presents the whole-genome speed, memory, and VEP-conformance
-evidence. It also directly benchmarks the same dated ClinVar payload
-through FastVEP fastSA and DuckDB’s typed collision-safe join, then
-covers AlphaMissense, assembly-correct REVEL, BigWig conservation,
-algorithm design, and the layered fuzz/differential/sanitizer
-infrastructure. The small example below remains only the CRAN/offline
-executable check.
-
-The release gate combines pure-C property/statistical tests, SQL and R
-end-to-end tests, source-labelled Ensembl fixtures, and fail-closed
-differentials against executable VEP 116. Complete ClinVar/GIAB and
-selected GRCh37 campaigns retain every compared allele/object pair. The
-large-campaign `{targets}`/`blit`/micromamba workflow lives in the
-DuckHTS source repository; it is not reimplemented in the R package.
-
-#### Current scope
-
-The current surface covers independent small variants, exact span SVs,
-paired BNDs, regulation/motif consequences, NMD, and independent-event
-HGVSc/HGVSn/HGVSp. Combined phased haplotype consequences/HGVS,
-imprecise-SV confidence intervals, STR-specific rules, and arbitrary
-producer-specific symbolic interpretation remain explicit follow-up
-work. Supplementary population and clinical annotations remain typed
-DuckDB/Parquet/DuckLake relations joined after consequence filtering.
-
-The resident kernel accepts any transcript catalog that satisfies its
-checked model contract. The bundled builder currently compiles the
-Ensembl core transcript set, not VEP’s `--refseq` or `--merged` sets. It
-retains GENCODE Basic and Primary flags for SQL filtering but does not
-prefilter the model to either set. The builder withholds sequence for
-source rows marked with transcript-level sequence corrections. A model
-with inserted or deleted transcript bases relative to its genomic exons
-also needs a richer coordinate map than the current resident interface.
-Mitochondrial genetic codes and ordinary MT coordinates are supported;
-coordinates that cross a circular sequence origin are not.
-
-#### Minimal R example
-
-``` r
-duckvep_reference <- system.file(
-  "extdata", "fixture_ref.fa", package = "Rduckhts", mustWork = TRUE
-)
-
-dbExecute(con, "
-  CREATE OR REPLACE TABLE readme_duckvep_regions AS
-  SELECT 1::UINTEGER AS seq_region, 50000::UBIGINT AS sequence_length,
-         '11'::VARCHAR AS seq_region_name
-")
-#> [1] 1
-dbExecute(con, "
-  CREATE OR REPLACE TABLE readme_duckvep_transcripts AS
-  SELECT 0::UINTEGER AS transcript_index, 1::UINTEGER AS seq_region,
-         100::UBIGINT AS transcript_start, 150::UBIGINT AS transcript_end,
-         1::TINYINT AS strand, 0::UINTEGER AS gene_index,
-         0::UBIGINT AS transcript_flags, NULL::UBIGINT AS cds_start,
-         NULL::UBIGINT AS cds_end, NULL::BLOB AS cds_sequence,
-         NULL::UTINYINT AS codon_table, NULL::BLOB AS pre_cds_sequence,
-         NULL::BLOB AS post_cds_sequence
-")
-#> [1] 1
-dbExecute(con, "
-  CREATE OR REPLACE TABLE readme_duckvep_exons AS
-  SELECT 0::UINTEGER AS transcript_index, 100::UBIGINT AS exon_start,
-         150::UBIGINT AS exon_end, 1::UBIGINT AS exon_cdna_start,
-         51::UBIGINT AS exon_cdna_end, -1::TINYINT AS phase,
-         -1::TINYINT AS end_phase
-")
-#> [1] 1
-
-duckvep_model_queries <- c(
-  "SELECT * FROM readme_duckvep_regions ORDER BY seq_region",
-  "SELECT * FROM readme_duckvep_transcripts
-   ORDER BY seq_region, transcript_start, transcript_index",
-  "SELECT * FROM readme_duckvep_exons
-   ORDER BY transcript_index, exon_cdna_start"
-)
-quoted_model <- vapply(
-  c("readme", duckvep_model_queries, duckvep_reference),
-  function(x) as.character(dbQuoteString(con, x)),
-  character(1)
-)
-dbGetQuery(
-  con,
-  sprintf(
-    "SELECT loaded FROM duckvep_model_load(
-       %s, %s, %s, %s, reference_fasta := %s
-     )",
-    quoted_model[[1]], quoted_model[[2]], quoted_model[[3]],
-    quoted_model[[4]], quoted_model[[5]]
-  )
-)
-#>   loaded
-#> 1   TRUE
-
-dbExecute(con, "
-  CREATE OR REPLACE TABLE readme_duckvep_events AS
-  SELECT * FROM (VALUES
-    (1::UBIGINT, 1::UINTEGER, 124::UBIGINT, 'A'::VARCHAR, 'G'::VARCHAR,
-     NULL::UBIGINT, NULL::VARCHAR, NULL::VARCHAR,
-     NULL::UINTEGER, NULL::UBIGINT)
-  ) AS e(event_index, seq_region, position, reference, alternate,
-         end_position, structural_type, copy_change,
-         mate_seq_region, mate_position)
-")
-#> [1] 1
-
-dbGetQuery(con, "
-  SELECT a.event_index, a.transcript_index,
-         string_agg(t.consequence, '&' ORDER BY t.severity_rank) AS consequence,
-         a.transcript_hgvs, a.protein_hgvs
-  FROM duckvep_annotate(
-    'readme_duckvep_events', 'readme', hgvs := true,
-    upstream_distance := 0, downstream_distance := 0
-  ) AS a
-  JOIN duckvep_so_terms() AS t
-    ON (a.consequence_mask & t.consequence_mask) <> 0
-  GROUP BY ALL
-  ORDER BY a.event_index, a.transcript_index
-")
-#>   event_index transcript_index                        consequence
-#> 1           1                0 non_coding_transcript_exon_variant
-#>   transcript_hgvs protein_hgvs
-#> 1         n.25A>G         <NA>
-
-dbGetQuery(con, "SELECT duckvep_model_drop('readme') AS dropped")
-#>   dropped
-#> 1    TRUE
-```
-
-The bundled extension also exposes
-`duckvep_transcript_projection(events, annotations, transcripts)`
-through DBI. It is the SQL reference for full cDNA/CDS/protein ranges,
-transcript-oriented codon and amino-acid strings, exon/intron ordinal
-ranges, distance, and CDS quality flags for literal independent alleles.
-Supply the same validated prepared model relation used for annotation,
-with transcript-ordered nested exons and peptide edits. NULL range
-endpoints remain independent; insertions retain an explicit `interbase`
-flag. Duplicate annotation rows are preserved. Unavailable coding
-sequence leaves codon and amino-acid fields NULL, not `-`.
-Canonical/MANE/CCDS/GENCODE/biotype attributes remain relational joins,
-not extra hot consequence payload; canonical status is not a VEP quality
-flag. The [DuckHTS projection
-example](https://github.com/RGenomicsETL/duckhts#canonical-event-relation-and-output-choices)
-shows those joins and the literal-allele scope. No additional R wrapper
-or reference handle is needed.
+Consequence annotation lives in the [DuckVEP
+extension](https://github.com/RGenomicsETL/DuckVEP).
 
 ### Interval + reference helpers
 
@@ -2035,8 +1854,9 @@ dbDisconnect(con, shutdown = TRUE)
 
 ## License
 
-GPL (>= 2). The bundled DuckHTS extension sources are MIT-licensed, and other vendored
-third-party code keeps its own licences; see `inst/COPYRIGHT`.
+GPL (\>= 2). The bundled DuckHTS extension sources are MIT-licensed, and
+other vendored third-party code keeps its own licences; see
+`inst/COPYRIGHT`.
 
 ## Credits
 

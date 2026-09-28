@@ -70,42 +70,6 @@ duckhts_bootstrap <- function(repo_root = NULL) {
     stop("Failed to copy the DuckHTS extension LICENSE", call. = FALSE)
   }
 
-  duckvep_dest <- file.path(dest, "duckvep")
-  dir.create(duckvep_dest, recursive = TRUE, showWarnings = FALSE)
-  duckvep_headers <- list.files(file.path(src_dir, "duckvep"), pattern = "[.]h$", full.names = TRUE)
-  if (!length(duckvep_headers) || !all(file.copy(duckvep_headers, duckvep_dest))) {
-    stop("Failed to copy DuckVEP adapter headers", call. = FALSE)
-  }
-  duckvep_kernel_headers <- c("duckvep_kernel.h", "duckvep_so.h")
-  duckvep_kernel_private_headers <- list.files(
-    file.path(src_dir, "duckvep", "kernel", "src"),
-    pattern = "[.](h|inc)$"
-  )
-  duckvep_kernel_dest <- file.path(duckvep_dest, "kernel")
-  dir.create(
-    file.path(duckvep_kernel_dest, "include"),
-    recursive = TRUE,
-    showWarnings = FALSE
-  )
-  dir.create(
-    file.path(duckvep_kernel_dest, "src"),
-    recursive = TRUE,
-    showWarnings = FALSE
-  )
-  file.copy(
-    file.path(src_dir, "duckvep", "kernel", "include", duckvep_kernel_headers),
-    file.path(duckvep_kernel_dest, "include")
-  )
-  file.copy(
-    file.path(
-      src_dir,
-      "duckvep",
-      "kernel",
-      "src",
-      duckvep_kernel_private_headers
-    ),
-    file.path(duckvep_kernel_dest, "src")
-  )
   message(
     "  Copied ",
     nrow(source_rows),

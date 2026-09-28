@@ -96,10 +96,6 @@ library(DBI)
 
   missing_parquet <- tempfile(fileext = ".parquet")
   expect_false(file.exists(missing_parquet))
-  missing_calls <- paste0(
-    "SELECT * FROM read_parquet(",
-    as.character(dbQuoteString(con, missing_parquet)), ")"
-  )
   creators <- list(
     somalier_import_sites = list(
       fun = rduckhts_somalier_import_sites,
@@ -132,11 +128,7 @@ library(DBI)
       args = list(evidence_parquet = missing_parquet, panel_parquet = missing_parquet,
                   frequency_parquet = missing_parquet, pairs_parquet = missing_parquet)
     ),
-    geno = list(fun = rduckhts_geno, args = list(path = missing_path)),
-    haplotypes = list(
-      fun = rduckhts_haplotypes,
-      args = list(calls_query = missing_calls, model_name = "missing_model")
-    )
+    geno = list(fun = rduckhts_geno, args = list(path = missing_path))
   )
   for (name in names(creators)) {
     creator <- creators[[name]]
