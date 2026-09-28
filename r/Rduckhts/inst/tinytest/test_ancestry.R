@@ -45,6 +45,24 @@ test_ancestry_relations <- function() {
   expect_equal(uneven$sites, 4)
   expect_equal(dbGetQuery(con, "SELECT region, count(*)::INTEGER AS n FROM ancestry_uneven GROUP BY region ORDER BY region")$n,
                c(3L, 1L))
+  # After one site each, the rest follow eligible sites minus one: 2, 2 and 100
+  # sites with max_sites = 50 share 47 remaining slots by weights 1, 1 and 99,
+  # giving 2, 1 and 47 (the tie between the small contigs goes by region order).
+  dbExecute(con, paste0(
+    "CREATE TEMP TABLE ancestry_weight_sites AS SELECT * FROM (VALUES ('chrA', 2), ",
+    "('chrB', 2), ('chrC', 100)) t(chromosome, n), range(n) r(i)"))
+  for (side in c("ref", "pc")) {
+    dbExecute(con, sprintf(paste0(
+      "CREATE TEMP VIEW ancestry_weight_%s AS SELECT a.* REPLACE (s.chromosome AS chromosome, ",
+      "1000 + 10 * s.i AS position) FROM ancestry_%s a, ancestry_weight_sites s ",
+      "WHERE a.position = 100"), side, side))
+  }
+  weighted <- rduckhts_ancestry_panel(con, "ancestry_weight_ref", "ancestry_weight_pc",
+                                      "ancestry_weighted", "GRCh38", spacing_bp = 1,
+                                      max_sites = 50)
+  expect_equal(weighted$sites, 50)
+  expect_equal(dbGetQuery(con, "SELECT region, count(*)::INTEGER AS n FROM ancestry_weighted GROUP BY region ORDER BY region")$n,
+               c(2L, 1L, 47L))
   dbExecute(con, paste0(
     "CREATE TEMP VIEW ancestry_null_allele_ref AS SELECT * REPLACE ",
     "(CASE WHEN position = 100 AND group_id = 'A' THEN NULL ELSE allele_a END ",

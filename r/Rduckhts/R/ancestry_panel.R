@@ -18,9 +18,10 @@
 #' @param spacing_bp Genomic window width for deterministic spacing.
 #' @param max_sites Maximum number of selected sites. When more sites are
 #'   eligible, each contig keeps at least one site (the largest contigs, when
-#'   `max_sites` is below the contig count), the rest are shared in proportion
-#'   to each contig's remaining eligible sites (beyond that first one), and each
-#'   contig's sites are spread evenly along it.
+#'   `max_sites` is below the contig count), the rest are shared by largest
+#'   remainders in proportion to each contig's eligible sites minus that one
+#'   (its remaining capacity, so no contig is offered more than it has), and
+#'   each contig's sites are spread evenly along it.
 #' @param overwrite Replace an existing destination.
 #' @return A one-row data frame with panel SHA-256 and selected site count.
 #' @export
@@ -84,7 +85,7 @@ rduckhts_ancestry_panel <- function(
     "AND count(DISTINCT l.pc) = (SELECT count(DISTINCT pc) FROM ", loadings, "))), ",
     # Cap at max_sites without dropping contigs: every contig first gets one site
     # (the largest contigs, when max_sites is below the contig count), the rest
-    # are shared in proportion to each contig's remaining eligible sites by
+    # are shared in proportion to each contig's eligible sites minus one by
     # largest remainders, and each contig's allocation is spread evenly over its
     # position order. Integer arithmetic keeps the allocation exact.
     "chosen AS (", candidates, "), ordered AS (SELECT region, position, ",

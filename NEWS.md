@@ -19,7 +19,7 @@
   (including strand-flipped reversals, read as `1 - f`) and flipped sites. BAM/CRAM
   site panels capped at `max_sites` keep one site per contig (only the largest
   `max_sites` contigs when there are more contigs than that) and share the remaining
-  sites in proportion to each contig's remaining eligible sites.
+  sites in proportion to each contig's eligible sites minus that one.
 
 - The benchmark registry pins bigsnpr's reference frequencies and loadings, staged once
   as a checksum-bound sorted Parquet product whose receipt certifies unique loci and
