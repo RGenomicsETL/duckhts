@@ -1,3 +1,11 @@
+# Rduckhts 1.5.2.9006-0.1.5
+
+- Consequence prediction has moved to DuckVEP and its R package, Rduckvep
+  (<https://github.com/RGenomicsETL/DuckVEP>). `rduckhts_haplotypes()` and the bundled
+  consequence fixtures are removed; the bundled extension no longer carries the DuckVEP
+  functions. Load DuckVEP with `Rduckvep::rduckvep_load(con)` on an Rduckhts connection
+  for annotation. CSQ, ANN and BCSQ parsing in `rduckhts_bcf()` is unchanged.
+
 # Rduckhts 1.5.2.9005-0.1.5
 
 - `rduckhts_ancestry_proportions()` estimates ancestry proportions from
