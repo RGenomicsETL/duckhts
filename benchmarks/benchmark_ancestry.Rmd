@@ -333,9 +333,17 @@ processes; the OS page cache is not cleared between repetitions. Input Parquet i
 `test/scripts/ancestry_bigsnpr_real.R` and `test/scripts/ancestry_1000g_real.R`
 from registry-staged `ancestry_epilepsy`, `ancestry_1000g_chr22` and the
 1000G sample panel; the scaling driver accepts those output paths as arguments.
-Epilepsy 1×/2×/4× contains nested prefixes of 835,809/1,671,618/3,343,235 physical
-input variants (one sample). The sample series keeps 20,000 chr22 sites per
-person while selecting 11/22/44 distinct phase-3 VCF individuals. The joint
+Epilepsy 1×/2× uses `file_row_number < 835809` / `< 1671618` on the
+same physical Parquet file, excluding the row-number column from the input;
+4× retains the original `LIMIT 3343235` over the full scan, without a
+row-number projection. The 1×/2× selections are fixed physical prefixes;
+the 4× query reads all 3,343,235 variants (one sample).
+The input SHA-256 and selection rule for every process are in the repetitions
+file. The driver fails if the seven-decimal returned coefficients differ
+between first and warm calls, across three fresh processes, or between one
+and four DuckDB threads for the same workload and scale. The sample series
+keeps 20,000 chr22 sites per person while selecting 11/22/44 distinct
+phase-3 VCF individuals. The joint
 series selects 5,000/10,000/20,000 sites for 11/22/44 individuals: both axes
 grow, with 55,000/220,000/880,000 input rows. No sample IDs or genotypes
 are cloned. Every input row participates; each group produces one output row.
@@ -375,6 +383,11 @@ prior_scaling <- utils::read.delim("ancestry_memory_scaling.tsv")
 repetitions <- utils::read.delim("ancestry_memory_repetitions.tsv")
 stopifnot(nrow(repetitions) == 54L, nrow(scaling_before) == 12L,
           nrow(prior_scaling) == 12L,
+          all(repetitions$stable_7dp),
+          all(repetitions$repeat_max_difference == 0),
+          all(grepl("^[0-9a-f]{64}$", repetitions$input_sha256)),
+          all(vapply(split(repetitions$input_sha256, repetitions$workload),
+                     function(x) length(unique(x)) == 1L, logical(1L))),
           all(repetitions$threads %in% c(1L, 4L)),
           all(repetitions$scale %in% c(1L, 2L, 4L)),
           all(repetitions$input_rows == repetitions$used_variants),
@@ -424,8 +437,14 @@ knitr::kable(prior_scaling, digits = 2, caption =
   "Single-run bounded-engine baseline at 58fb3264; reference admission contract differs")
 knitr::kable(scaling, digits = 2, caption =
   "Three fresh processes per point; process includes two queries; query spread is IQR and range; exponent uses warm query medians only; memory-only rows have no timing verdict")
-cat("Maximum first/warm coefficient difference:",
+cat("Seven-decimal stability gates passed:", nrow(repetitions),
+    "first/warm pairs and 9 workload/scale groups across threads and repeats.\n",
+    "Maximum first/warm coefficient difference:",
     max(repetitions$repeat_max_difference), "\n")
+knitr::kable(unique(repetitions[
+  repetitions$workload == "epilepsy" & repetitions$scale < 4L,
+  c("input_sha256", "scale", "selection_rule")]), row.names = FALSE,
+  caption = "Epilepsy input checksum and fixed-prefix selection rules")
 comparison <- merge(
   scaling[scaling$threads == 4L & scaling$scale == 4L &
           scaling$workload %in% c("epilepsy", "genotypes"),
@@ -440,12 +459,24 @@ knitr::kable(comparison, digits = 2,
   caption = "Nearest identical input baseline (single run, 58fb3264) versus warm matched-reference wrapper; absolute differences are not a no-regression claim")
 ```
 
-The four-thread epilepsy 1× and 2× subsets yield different first/warm
-coefficients despite identical statuses (maximum absolute difference
-`r max(repetitions$repeat_max_difference)`). A first/warm probe of the
-original a011c61a wrapper on the same 1× subset differed by 0.107393.
-The full 4× input and all 11-person runs did not show this discrepancy;
-the subsets are retained for memory evidence, not output-stability claims.
+For the unchanged full-input epilepsy scan (3,343,235 physical rows, 21
+coefficients, four DuckDB threads, 1 GB DuckDB memory limit), the three
+repetitions at `5d67b4f0` recorded a 4.172 s median warm query and 735.67 MiB
+maximum process RSS (`benchmarks/ancestry_memory_repetitions.tsv` at that
+revision). Admission against all input loci at `r substr(source_revision, 1L, 8L)`
+measures `r round(scaling$query_s[scaling$workload == "epilepsy" & scaling$threads == 4L & scaling$scale == 4L], 3)` s
+median and `r round(scaling$max_rss_mib[scaling$workload == "epilepsy" & scaling$threads == 4L & scaling$scale == 4L], 2)` MiB
+maximum RSS, with `r max(repetitions$peak_temp_mib)` MiB DuckDB spill.
+This is an end-to-end wrapper comparison, not an isolated SQL-predicate
+measurement. The locus uniqueness check also visits sites whose input rows
+will not contribute to the fit.
+
+With fixed physical input rows, the reported seven-decimal coefficients
+are identical across first and warm calls, fresh processes and one/four-thread
+runs for each scale. This is a returned-coefficient contract, not a claim of
+bitwise thread independence for raw correlations. An unordered `LIMIT` under
+`preserve_insertion_order=false` selected different epilepsy 1×/2× rows
+across parallel scans; those measurements are not coefficient-stability evidence.
 The independent 58fb3264 keyed baseline measured 0.694 s for 11 individuals
 at one thread and 0.394 s at four threads. The predecessor at a011c61a
 measured 8.408 s on the 11-individual series in the pass-4 comparison. The
