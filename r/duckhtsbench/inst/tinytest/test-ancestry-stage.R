@@ -58,7 +58,21 @@ if (requireNamespace("DBI", quietly = TRUE) &&
     "bytes=", file.info(source_path)$size, ";sha256=",
     digest::digest(file = source_path, algo = "sha256"))
   utils::write.table(plan, registry, sep = "\t", row.names = FALSE, quote = FALSE)
-  expect_error(duckhts_bench_stage_ancestry_parquet(), pattern = "unique, complete")
+  expect_error(duckhts_bench_stage_ancestry_parquet(), pattern = "complete keyed row per locus")
+  for (id in names(sources)) {
+    duplicate <- sources[[id]][2L, , drop = FALSE]
+    duplicate$a1 <- "A"
+    staged_source <- rbind(sources[[id]], duplicate)
+    source_path <- file.path(root, plan$cache_relpath[plan$id == id])
+    source_connection <- gzfile(source_path, "wt")
+    utils::write.csv(staged_source, source_connection, row.names = FALSE)
+    close(source_connection)
+    plan$supplier_identity[plan$id == id] <- paste0(
+      "bytes=", file.info(source_path)$size, ";sha256=",
+      digest::digest(file = source_path, algo = "sha256"))
+  }
+  utils::write.table(plan, registry, sep = "\t", row.names = FALSE, quote = FALSE)
+  expect_error(duckhts_bench_stage_ancestry_parquet(), pattern = "one complete keyed row per locus")
 })
 
 local({

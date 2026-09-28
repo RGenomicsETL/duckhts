@@ -45,4 +45,6 @@ per reference group. It can be a view over the Parquet product staged by
 `duckhtsbench::duckhts_bench_stage_ancestry_parquet()`. Each site must have
 exactly one reference row. The input and correction schemas, audit statuses,
 and QP solver contract are those of [rduckhts_ancestry_proportions()].
+Allele-aligned input frequencies are written to a temporary Parquet file in
+`tempdir()` and removed before the function returns.
 }

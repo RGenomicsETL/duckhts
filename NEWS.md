@@ -3,8 +3,10 @@
 # duckhts 1.5.2.9003
 
 - A checksum-bound, sorted Parquet ancestry reference combines the pinned
-  bigsnpr CSV frequencies and loadings as DOUBLE columns. The wide ancestry
-  query aggregates PC products by sample without a per-variant PC-by-group join.
+  bigsnpr CSV frequencies and loadings as DOUBLE columns. Narrow Parquet
+  conversion bounds cold staging memory. The wide ancestry query aligns
+  variants into a temporary keyed relation and aggregates projection and
+  quality moments without a per-variant PC-by-group join.
 
 - The benchmark registry pins the paired bigsnpr ancestry reference products,
   epilepsy summary statistics, and GRCh37 phase-3 chr22 genotypes. The ancestry

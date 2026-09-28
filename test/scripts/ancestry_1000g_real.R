@@ -26,9 +26,13 @@ superpopulation <- setNames(sample_panel$superpopulation[
   match(samples, sample_panel$sample_id)], samples)
 stopifnot(identical(unname(superpopulation),
   c(rep("AFR", 3L), rep("EUR", 2L), rep("EAS", 2L), rep("SAS", 2L), rep("AMR", 2L))))
-selected_path <- file.path(dirname(ref_path), "chr22.ten-samples.vcf.gz")
+cohort_size <- as.integer(Sys.getenv("DUCKHTS_ANCESTRY_COHORT_SIZE", "11"))
+stopifnot(cohort_size %in% c(11L, 44L))
+cohort <- c(samples, head(setdiff(sample_panel$sample_id, samples), cohort_size - 11L))
+stopifnot(length(cohort) == cohort_size, !anyDuplicated(cohort))
+selected_path <- file.path(dirname(ref_path), paste0("chr22.", cohort_size, "-samples.vcf.gz"))
 sample_file <- tempfile("ancestry-samples-")
-writeLines(samples, sample_file)
+writeLines(cohort, sample_file)
 status <- system2("bcftools", c("view", "--threads", "2", "-S",
   shQuote(sample_file), "-v", "snps", "-m2", "-M2", "-Oz", "-o",
   shQuote(selected_path), shQuote(vcf_path)))
@@ -36,7 +40,7 @@ unlink(sample_file)
 stopifnot(status == 0L)
 stopifnot(system2("bcftools", c("index", "-f", "-t", shQuote(selected_path))) == 0L)
 vcf_samples <- system2("bcftools", c("query", "-l", shQuote(selected_path)), stdout = TRUE)
-stopifnot(setequal(samples, vcf_samples))
+stopifnot(setequal(cohort, vcf_samples))
 format <- "%CHROM\\t%POS\\t%REF\\t%ALT[\\t%GT]\\n"
 query <- sprintf("bcftools query -f %s %s", shQuote(format), shQuote(selected_path))
 vcf <- fread(cmd = query, header = FALSE, sep = "\t",
@@ -69,7 +73,7 @@ dbExecute(con, paste0("CREATE VIEW real_reference AS SELECT * FROM read_parquet(
                       as.character(DBI::dbQuoteString(con, reference_parquet)), ")"))
 dbWriteTable(con, "real_correction", data.frame(pc = seq_along(correction),
   coefficient = correction), overwrite = TRUE)
-input <- rbindlist(lapply(samples, function(sample) {
+input <- rbindlist(lapply(cohort, function(sample) {
   gt <- site[[sample]]
   dosage <- fifelse(gt %in% c("0|0", "0/0"), 0,
                     fifelse(gt %in% c("0|1", "1|0", "0/1", "1/0"), 1,

@@ -45,7 +45,10 @@ duckhts_bench_stage_ancestry_parquet <- function() {
   con <- DBI::dbConnect(do.call(duckdb::duckdb, driver_args))
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE))
   headers <- lapply(sources, function(path) {
-    names(utils::read.csv(gzfile(path), nrows = 0L, check.names = FALSE))
+    stream <- gzfile(path)
+    on.exit(close(stream))
+    line <- readLines(stream, n = 1L, warn = FALSE)
+    names(utils::read.csv(text = line, nrows = 0L, check.names = FALSE))
   })
   keys <- c("chr", "pos", "a0", "a1")
   groups <- setdiff(headers[[1L]], c(keys, "rsid"))
@@ -60,30 +63,43 @@ duckhts_bench_stage_ancestry_parquet <- function() {
   quote_str <- function(x) as.character(DBI::dbQuoteString(con, x))
   dir.create(dirname(output), recursive = TRUE, showWarnings = FALSE)
   temporary <- paste0(output, ".partial-", Sys.getpid(), ".parquet")
+  intermediate <- paste0(output, ".columns-", Sys.getpid(), c("-ref.parquet", "-pc.parquet"))
   spill <- paste0(output, ".spill-", Sys.getpid())
-  on.exit(unlink(c(temporary, spill), recursive = TRUE), add = TRUE)
-  DBI::dbExecute(con, "SET memory_limit='3GB'")
+  on.exit(unlink(c(temporary, intermediate, spill), recursive = TRUE), add = TRUE)
+  DBI::dbExecute(con, "SET threads=4")
+  DBI::dbExecute(con, "SET memory_limit='1800MB'")
+  DBI::dbExecute(con, "SET preserve_insertion_order=false")
   DBI::dbExecute(con, paste0("SET temp_directory=", quote_str(spill)))
-  selected <- c("p.chr::INTEGER AS chromosome", "p.pos::BIGINT AS position",
-                "p.a0::VARCHAR AS allele_a", "p.a1::VARCHAR AS allele_b",
-                paste0("p.", quote_id(pcs), "::DOUBLE AS ", quote_id(pcs)),
-                paste0("r.", quote_id(groups), "::DOUBLE AS ", quote_id(groups)))
   csv_sources <- paste0("read_csv_auto(", quote_str(sources),
                         ", types={'a0':'VARCHAR','a1':'VARCHAR'})")
+  for (index in seq_along(sources)) {
+    columns <- if (index == 1L) groups else pcs
+    selected <- c("chr::UTINYINT AS chromosome", "pos::UINTEGER AS position",
+                  "a0 AS allele_a", "a1 AS allele_b",
+                  paste0(quote_id(columns), "::DOUBLE AS ", quote_id(columns)))
+    DBI::dbExecute(con, paste0(
+      "COPY (SELECT ", paste(selected, collapse = ", "), " FROM ", csv_sources[[index]],
+      ") TO ", quote_str(intermediate[[index]]),
+      " (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 32768)"))
+  }
+  row_counts <- vapply(intermediate, function(path) DBI::dbGetQuery(con, paste0(
+    "SELECT count(*) AS n FROM read_parquet(", quote_str(path), ")"))$n, numeric(1L))
+  selected <- c("p.chromosome", "p.position", "p.allele_a", "p.allele_b",
+                paste0("p.", quote_id(pcs)), paste0("r.", quote_id(groups)))
   query <- paste0("COPY (SELECT ", paste(selected, collapse = ", "),
-                  " FROM ", csv_sources[[2L]], " p JOIN ", csv_sources[[1L]], " r ",
-                  "ON p.chr=r.chr AND p.pos=r.pos AND p.a0=r.a0 AND p.a1=r.a1 ",
-                  "ORDER BY p.chr, p.pos, p.a0, p.a1) TO ", quote_str(temporary),
-                  " (FORMAT PARQUET, COMPRESSION ZSTD)")
+                  " FROM read_parquet(", quote_str(intermediate[[2L]]), ") p JOIN ",
+                  "read_parquet(", quote_str(intermediate[[1L]]), ") r ",
+                  "USING (chromosome, position, allele_a, allele_b) ",
+                  "ORDER BY chromosome, position, allele_a, allele_b) TO ",
+                  quote_str(temporary),
+                  " (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 32768)")
   DBI::dbExecute(con, query)
-  row_counts <- vapply(csv_sources, function(source) DBI::dbGetQuery(con, paste0(
-    "SELECT count(*) AS n FROM ", source))$n, numeric(1L))
   counts <- DBI::dbGetQuery(con, paste0(
-    "SELECT count(*) AS n, count(DISTINCT (chromosome, position, allele_a, allele_b)) ",
-    "AS unique_keys FROM read_parquet(", quote_str(temporary), ")"))
+    "SELECT count(*) AS n, count(DISTINCT (chromosome, position)) ",
+    "AS unique_loci FROM read_parquet(", quote_str(temporary), ")"))
   if (counts$n != row_counts[[1L]] || counts$n != row_counts[[2L]] ||
-      counts$unique_keys != counts$n) {
-    stop("ancestry Parquet requires a unique, complete key match between CSVs",
+      counts$unique_loci != counts$n) {
+    stop("ancestry Parquet requires one complete keyed row per locus",
          call. = FALSE)
   }
   expected$sha256[[4L]] <- unname(digest::digest(file = temporary, algo = "sha256"))

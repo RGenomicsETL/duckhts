@@ -99,6 +99,30 @@ test_ancestry_relations <- function() {
   expect_equal(unique(wide_audit$input_variants), 12)
   expect_equal(unique(wide_audit$used_variants), 5)
   expect_equal(unique(wide_audit$duplicate_variants), 4)
+  dbExecute(con, paste(
+    "CREATE VIEW ancestry_multi_input AS SELECT * FROM ancestry_input UNION ALL",
+    "SELECT 'T' AS sample_id, chromosome, position, allele_a, allele_b,",
+    "1-frequency AS frequency FROM ancestry_input"
+  ))
+  multi <- rduckhts_ancestry_proportions_wide(
+    con, "ancestry_multi_input", "ancestry_wide", "ancestry_wide_correction",
+    min_cor = 0)
+  expect_equal(sort(unique(multi$sample_id)), c("S", "T"))
+  expect_equal(multi$proportion[multi$sample_id == "S"], wide$proportion)
+  expect_equal(unique(multi$used_variants), 6)
+  dbExecute(con, paste(
+    "CREATE VIEW ancestry_unmatched_input AS SELECT 'U' AS sample_id, chromosome,",
+    "position + 1000 AS position, allele_a, allele_b, frequency FROM ancestry_input"
+  ))
+  unmatched <- rduckhts_ancestry_proportions_wide(
+    con, "ancestry_unmatched_input", "ancestry_wide", "ancestry_wide_correction")
+  expect_equal(unmatched$status, "no_matched_variants")
+  expect_equal(unmatched$used_variants, 0)
+  expect_equal(dbGetQuery(con, paste(
+    "SELECT count(*) AS n FROM duckdb_tables() WHERE temporary",
+    "AND (table_name LIKE 'ancestry_audit_%' OR table_name LIKE 'ancestry_moments_%'",
+    "OR table_name LIKE 'ancestry_solved_%' OR table_name LIKE 'ancestry_prediction_%')"
+  ))$n, 0)
   gated <- rduckhts_ancestry_proportions(con, "ancestry_input", "ancestry_ref",
                                          "ancestry_pc", "ancestry_correction", min_cor = 1)
   expect_equal(gated$status, rep("low_correlation", 2L))
