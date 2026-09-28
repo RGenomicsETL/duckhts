@@ -1,94 +1,159 @@
 ---
-title: "Ancestry panel building: per-contig allocation at scale"
+title: "Ancestry panel building at scale"
 output: github_document
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
 root <- normalizePath("..", mustWork = TRUE)
-runs <- utils::read.delim(file.path(root, "benchmarks", "ancestry_panel_scaling.tsv"))
-runs$peak_rss_gib <- runs$peak_rss_kb / 1024^2
-keys <- c("implementation", "mode", "quarters")
-medians <- aggregate(cbind(seconds, peak_rss_gib, sites, contigs) ~ implementation + mode + quarters,
-                     data = runs, FUN = stats::median)
-old <- subset(medians, implementation == "old")
-new <- subset(medians, implementation == "new")
-paired <- merge(old, new, by = c("mode", "quarters"), suffixes = c("_old", "_new"))
-paired$time_ratio <- paired$seconds_new / paired$seconds_old
-paired$rss_delta_mib <- 1024 * (paired$peak_rss_gib_new - paired$peak_rss_gib_old)
-exponents <- do.call(rbind, lapply(split(new, new$mode), function(d) data.frame(
-  mode = d$mode[1],
-  time_exponent = unname(stats::coef(stats::lm(log(seconds) ~ log(quarters), d))[2]),
-  memory_exponent = unname(stats::coef(stats::lm(log(peak_rss_gib) ~ log(quarters), d))[2]))))
-stopifnot(nrow(runs) == 36L, all(table(runs$implementation, runs$mode, runs$quarters) == 3L),
-          all(runs$sites == 17000L),
-          all(paired$time_ratio <= 1.10), all(paired$rss_delta_mib <= 64),
-          all(runs$contigs[runs$implementation == "new"] == 22L),
-          all(exponents$time_exponent <= 1.25))
+runs <- utils::read.delim(file.path(root, "benchmarks", "ancestry_panel_scaling.tsv"),
+                          colClasses = c(panel_sha256 = "character"))
+mib <- function(bytes) bytes / 1048576
+# Budget, declared before measuring: fixed overhead plus three times the live state the
+# builder needs, which is its per-locus eligibility state. Each reference locus keeps a
+# group key and constant aggregate state on the frequency side (chromosome and position
+# key 20 B; four counts 32 B; min/max of both alleles 64 B; group mask 8 B; validity
+# flag 1 B) and on the loading side (key 20 B; count 8 B; PC mask 16 B; flag 1 B):
+# 170 B per locus. Spill is not allowed.
+state_bytes_per_locus <- 170
+overhead <- subset(runs, mode == "overhead")
+overhead_mib <- stats::median(overhead$peak_rss_kib) / 1024
+runs <- subset(runs, mode != "overhead")
+# Loci, groups and PCs depend only on the scale; fill them for runs that ran out of memory.
+shape <- unique(subset(runs, status == "ok")[c("quarters", "loci", "groups", "pcs")])
+stopifnot(!anyDuplicated(shape$quarters))
+runs[c("loci", "groups", "pcs")] <- shape[match(runs$quarters, shape$quarters), c("loci", "groups", "pcs")]
+runs$long_reference_rows <- runs$loci * runs$groups
+runs$long_loading_rows <- runs$loci * runs$pcs
+# Decoded required columns as DuckDB vectors: VARCHAR 16 B, UINTEGER/INTEGER 4 B, DOUBLE 8 B.
+runs$decoded_input_mib <- mib(runs$long_reference_rows * (16 + 4 + 16 + 16 + 16 + 8) +
+                                runs$long_loading_rows * (16 + 4 + 16 + 16 + 4 + 8))
+runs$budget_mib <- overhead_mib + 3 * mib(runs$loci * state_bytes_per_locus)
+runs$peak_rss_mib <- runs$peak_rss_kib / 1024
+runs$peak_buffer_mib <- mib(runs$peak_buffer_bytes)
+runs$spill_mib <- mib(runs$peak_temp_bytes)
+keys <- c("implementation", "threads", "mode", "quarters")
+summary <- do.call(rbind, lapply(split(runs, runs[keys], drop = TRUE), function(d) {
+  ok <- d[d$status == "ok", ]
+  data.frame(
+    d[1, c(keys, "loci", "long_reference_rows")],
+    decoded_input_mib = round(d$decoded_input_mib[1]),
+    completed = sprintf("%d/%d", nrow(ok), nrow(d)),
+    sites = if (nrow(ok)) ok$sites[1] else NA, contigs = if (nrow(ok)) ok$contigs[1] else NA,
+    median_s = if (nrow(ok)) stats::median(ok$seconds) else NA,
+    min_s = if (nrow(ok)) min(ok$seconds) else NA, max_s = if (nrow(ok)) max(ok$seconds) else NA,
+    peak_rss_mib = if (nrow(ok)) round(max(ok$peak_rss_mib)) else NA,
+    peak_buffer_mib = if (nrow(ok)) round(max(ok$peak_buffer_mib)) else NA,
+    spill_mib = if (nrow(ok)) max(ok$spill_mib) else NA, budget_mib = round(d$budget_mib[1]),
+    hashes = length(unique(ok$panel_sha256)),
+    panel_sha256 = if (nrow(ok)) ok$panel_sha256[1] else NA)
+}))
+summary <- summary[order(summary$threads, summary$mode, summary$quarters,
+                         match(summary$implementation, c("develop", "distinct", "final"))), ]
+rownames(summary) <- NULL
+final <- subset(summary, implementation == "final")
+distinct <- subset(summary, implementation == "distinct")
+same <- merge(final, subset(distinct, completed == "3/3"), by = c("threads", "mode", "quarters"))
+failed <- subset(summary, completed != "3/3")
+exponent <- function(d, y) unname(stats::coef(stats::lm(log(d[[y]]) ~ log(d$quarters)))[2])
+exponents <- do.call(rbind, lapply(split(final, final[c("threads", "mode")], drop = TRUE),
+  function(d) data.frame(threads = d$threads[1], mode = d$mode[1],
+                         time_exponent = round(exponent(d, "median_s"), 2),
+                         rss_exponent = round(exponent(d, "peak_rss_mib"), 2))))
+rownames(exponents) <- NULL
+stopifnot(
+  nrow(overhead) == 9L, all(table(runs$implementation, runs$threads, runs$mode, runs$quarters) == 3L),
+  all(runs$status %in% c("ok", "out_of_memory")), all(final$completed == "3/3"),
+  all(runs$sites[runs$status == "ok"] == 17000L),
+  all(summary$hashes[summary$completed != "0/3"] == 1L), nrow(same) > 0L,
+  all(same$panel_sha256.x == same$panel_sha256.y),
+  all(final$contigs == 22L), all(subset(summary, implementation == "develop")$contigs %in% c(1L, NA)),
+  all(final$peak_rss_mib <= final$budget_mib), all(final$spill_mib == 0),
+  all(final$min_s[final$threads == 1L & final$quarters == 1L] >= 5),
+  all(exponents$time_exponent <= 1.25))
 ```
 
-`rduckhts_ancestry_panel()` caps a panel at `max_sites`. The previous builder kept
-the first `max_sites` candidates in genomic order, so a 17,000-site panel over
-bigsnpr's reference came entirely from chromosome 1. The current builder gives each
-contig one site, shares the rest in proportion to each contig's eligible sites
-minus that one, and spreads each contig's sites evenly along it. That adds
-per-contig row numbers and counts over every candidate, where the old builder
-kept a bounded top-N. This report measures what that costs.
+`rduckhts_ancestry_panel()` reads a long reference (loci × groups frequency rows and
+loci × PCs loading rows), keeps the eligible loci, and caps the panel at `max_sites`.
+This report measures three builders on the same inputs:
+
+- **develop** keeps the first `max_sites` eligible loci in genomic order and checks
+  eligibility with distinct aggregates (one allele pair, every group and PC once).
+- **distinct** allocates the cap per contig (one site each, the rest in proportion to
+  each contig's eligible sites minus one, spread along the contig) with the same
+  distinct-aggregate eligibility checks.
+- **final** keeps the per-contig allocation and checks eligibility with constant
+  per-locus state: `min = max` for each allele, and a row count equal to the group (or
+  PC) count whose ordinal bits cover the full mask, so each group and PC occurs exactly
+  once.
 
 ## Method
 
-`benchmark_ancestry_panel_run.R` stages bigsnpr's reference and loadings
-(`ancestry_reference_parquet`, 5,816,590 loci, 21 groups, 16 PCs) and keeps 1, 2 or 4
-quarters of its loci by hash. Each run expands them into the long frequency and
-loading relations the builder reads, builds a committed 17,000-site panel, and
-counts it. Every run is a fresh single-thread process; peak RSS comes from GNU time.
-There are three repetitions of each implementation, mode and scale, in interleaved
-order. `spaced` uses the default 5 kb window spacing; `candidates` offers every
-locus as a candidate, the largest input the allocation windows can see. `old` is
-the builder at the commit before this change and `new` is the per-contig builder.
+`benchmark_ancestry_panel_run.R` stages bigsnpr's reference through the benchmark
+registry (`ancestry_reference_parquet`: 5,816,590 loci, 21 groups, 16 PCs) and keeps 1,
+2 or 4 quarters of its loci by hash, the one growth dimension (groups and PCs are fixed
+by the reference). Each run expands them into the long relations the builder reads,
+builds a committed 17,000-site panel through the public function, and records the
+panel hash. `spaced` uses the default 5 kb spacing; `candidates` offers every locus as
+a candidate, the largest input the allocation windows see. Every run is a fresh process
+with `memory_limit = '`r runs$memory_limit[1]`'` and its own empty temporary directory, at
+one and four threads, three repetitions interleaved across builders. The reference
+Parquet file is read from a warm page cache. DuckDB peak buffer memory and spill are
+the maxima of the per-statement profiles over every statement the builder runs; peak
+RSS is the process high-water mark. Other jobs shared the machine; builders were
+interleaved so they saw the same conditions.
+
+The memory budget is fixed overhead
+(`r round(overhead_mib)` MiB: packages, connection and extension load, measured by
+runs that build no panel) plus three times the eligibility live state, 170 bytes per
+locus of group key and constant aggregate state; spill must be zero. Decoded input is
+the required long columns as DuckDB vectors.
 
 ## Results
 
-Medians of three runs:
-
 ```{r results}
-out <- medians[order(medians$mode, medians$quarters, medians$implementation != "old"),
-               c(keys, "sites", "contigs", "seconds", "peak_rss_gib")]
-out$peak_rss_gib <- round(out$peak_rss_gib, 2)
-rownames(out) <- NULL
-knitr::kable(out)
+knitr::kable(summary[c(keys, "loci", "long_reference_rows", "decoded_input_mib", "completed", "median_s",
+                       "min_s", "max_s", "peak_rss_mib", "peak_buffer_mib", "spill_mib",
+                       "budget_mib", "contigs")])
 ```
 
-The new builder against the old one at each scale:
-
-```{r paired}
-cmp <- paired[order(paired$mode, paired$quarters),
-              c("mode", "quarters", "time_ratio", "rss_delta_mib")]
-cmp$time_ratio <- round(cmp$time_ratio, 3)
-cmp$rss_delta_mib <- round(cmp$rss_delta_mib, 1)
-rownames(cmp) <- NULL
-knitr::kable(cmp)
+```{r failures, results = "asis"}
+if (nrow(failed)) {
+  cat("These runs stopped with DuckDB's out-of-memory error at the",
+      runs$memory_limit[1], "limit:",
+      paste0(paste(sprintf("%s at %d thread%s, %s, %d quarters", failed$implementation,
+                           failed$threads, ifelse(failed$threads == 1, "", "s"), failed$mode,
+                           failed$quarters), collapse = "; "), ".\n"))
+}
 ```
 
-Scaling exponents of the new builder over 1, 2 and 4 quarters:
+Scaling exponents of the final builder over 1, 2 and 4 quarters:
 
 ```{r exponents}
-exponents$time_exponent <- round(exponents$time_exponent, 2)
-exponents$memory_exponent <- round(exponents$memory_exponent, 2)
-rownames(exponents) <- NULL
 knitr::kable(exponents)
 ```
 
 ## Reading
 
-The allocation adds at most `r sprintf("%.1f", 100 * (max(paired$time_ratio) - 1))`%
-to the median time and `r sprintf("%.0f", max(paired$rss_delta_mib))` MiB to peak
-memory at any scale, and every new panel spans all 22 autosomes. Time grows
-linearly with the reference in both builders.
+```{r reading-values}
+pick <- function(d, threads, column) d[[column]][d$threads == threads & d$mode == "spaced" & d$quarters == 4]
+old_spill <- max(subset(summary, implementation != "final" & quarters == 4 & threads == 1)$spill_mib)
+```
 
-Peak memory also grows linearly in both builders, to about
-`r sprintf("%.1f", max(runs$peak_rss_gib))` GiB at full scale. That growth
-predates this change: the builder groups the whole long reference (loci × groups)
-to find eligible sites before any capping happens. Reducing it belongs to the
-builder's site-eligibility stage and is tracked in
-[#293](https://github.com/RGenomicsETL/duckhts/issues/293).
+The final builder produces the same panel hash as the distinct builder wherever the
+distinct builder completed, so the constant-state checks select exactly the same loci.
+At the full reference with one thread it takes
+`r sprintf("%.1f", pick(final, 1, "median_s"))` s and
+`r format(pick(final, 1, "peak_rss_mib"), big.mark = ",")` MiB peak RSS, against
+`r sprintf("%.1f", pick(distinct, 1, "median_s"))` s and
+`r format(pick(distinct, 1, "peak_rss_mib"), big.mark = ",")` MiB with distinct
+aggregates, which hold a set of alleles, groups or PCs per locus across the whole
+reference: they exceed the budget from the first quarter, spill up to
+`r format(round(old_spill), big.mark = ",")` MiB at full scale with one thread, and run
+out of memory at four threads. Every final run is within its budget with no spill; with
+four threads the full reference takes `r sprintf("%.1f", pick(final, 4, "median_s"))` s.
+Time and memory grow no faster than the reference.
+
+The per-contig allocation itself is cheap: the develop and distinct builders differ only
+in allocation and take similar time and memory. Every develop panel comes from
+chromosome 1; every final panel spans all 22 autosomes.

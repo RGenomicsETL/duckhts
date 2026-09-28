@@ -63,6 +63,24 @@ test_ancestry_relations <- function() {
   expect_equal(weighted$sites, 50)
   expect_equal(dbGetQuery(con, "SELECT region, count(*)::INTEGER AS n FROM ancestry_weighted GROUP BY region ORDER BY region")$n,
                c(2L, 1L, 47L))
+  # A locus needs one allele pair, and every group and every PC exactly once: a
+  # repeated group (101), a missing group (102), a second allele pair (103), a
+  # repeated PC (104) and a missing PC (105) each exclude only their locus.
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_locus_ref AS SELECT * REPLACE (",
+    "CASE WHEN position = 101 THEN 'A' ELSE group_id END AS group_id, ",
+    "CASE WHEN position = 103 AND group_id = 'B' THEN 'A' ELSE allele_b END AS allele_b) ",
+    "FROM ancestry_ref WHERE NOT (position = 102 AND group_id = 'B')"))
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_locus_pc AS SELECT * REPLACE ",
+    "(CASE WHEN position = 104 THEN 1 ELSE pc END AS pc) FROM ancestry_pc ",
+    "WHERE NOT (position = 105 AND pc = 2)"))
+  locus <- rduckhts_ancestry_panel(con, "ancestry_locus_ref", "ancestry_locus_pc",
+                                   "ancestry_locus", "GRCh38", spacing_bp = 1,
+                                   max_sites = 100)
+  expect_equal(locus$sites, 3)
+  expect_equal(dbGetQuery(con, "SELECT position FROM ancestry_locus ORDER BY site_index")$position,
+               c(100, 106, 107))
   dbExecute(con, paste0(
     "CREATE TEMP VIEW ancestry_null_allele_ref AS SELECT * REPLACE ",
     "(CASE WHEN position = 100 AND group_id = 'A' THEN NULL ELSE allele_a END ",
