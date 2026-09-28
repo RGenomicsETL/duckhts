@@ -16,7 +16,9 @@ for (workload in names(inputs)) {
       for (repetition in seq_len(3L)) {
         output <- tempfile("ancestry-scaling-")
         log <- tempfile("ancestry-scaling-log-")
-        status <- system2("Rscript", c("--vanilla", "scripts/benchmark_ancestry_memory.R",
+        elapsed <- tempfile("ancestry-scaling-elapsed-")
+        status <- system2("/usr/bin/time", c("-f", "%e", "-o", elapsed,
+          "Rscript", "--vanilla", "scripts/benchmark_ancestry_memory.R",
           workload, inputs[[workload]], reference, threads, scale),
           stdout = output, stderr = log)
         if (status != 0L) {
@@ -27,8 +29,10 @@ for (workload in names(inputs)) {
         header <- grep("^workload\\tthreads\\tscale\\t", lines)
         stopifnot(length(header) == 1L, length(lines) == header + 1L)
         row <- utils::read.delim(text = lines[header:length(lines)])
+        row$process_seconds <- as.numeric(readLines(elapsed))
         stopifnot(nrow(row) == 1L, row$input_rows == row$used_variants,
-                  row$peak_temp_mib == 0)
+                  row$peak_temp_mib == 0,
+                  row$process_seconds >= row$query_seconds + row$first_query_seconds)
         row$repetition <- repetition
         decoded_full_mib <- if (workload == "epilepsy") 95.65 else 27.69
         row$decoded_required_column_mib <- if (workload == "epilepsy") {
@@ -45,9 +49,11 @@ for (workload in names(inputs)) {
                " > ", row$budget_mib, " MiB")
         }
         rows[[length(rows) + 1L]] <- row
-        unlink(c(output, log))
+        unlink(c(output, log, elapsed))
         message(workload, " ", threads, "t ", scale, "x rep ", repetition,
-                ": ", round(row$seconds, 3), "s / ", round(row$peak_rss_mib), " MiB")
+                ": warm ", round(row$query_seconds, 3), "s, process ",
+                round(row$process_seconds, 3), "s / ",
+                round(row$peak_rss_mib), " MiB")
       }
     }
   }

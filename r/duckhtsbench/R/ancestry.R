@@ -3,7 +3,9 @@
 #' The two checksum-validated CSV products are the upstream authority. The
 #' derived product stores 16 DOUBLE loadings and 21 DOUBLE frequencies per
 #' (chromosome, position, allele_a, allele_b), ordered by that key. A receipt
-#' binds its checksum to both source checksums and the DuckDB writer version.
+#' binds its checksum to both source checksums, the registry derivation and the
+#' DuckDB writer version, and certifies one normalized locus per row with
+#' complete finite numeric fields.
 #'
 #' @return The cached Parquet path.
 #' @export
@@ -17,18 +19,25 @@ duckhts_bench_stage_ancestry_parquet <- function() {
   if (any(nchar(source_hashes) != 64L)) {
     stop("ancestry CSV registry requires pinned SHA-256", call. = FALSE)
   }
+  product <- registry[match("ancestry_reference_parquet", registry$id), , drop = FALSE]
+  if (nrow(product) != 1L || is.na(product$transform) ||
+      !nzchar(product$transform)) {
+    stop("missing ancestry Parquet derivation", call. = FALSE)
+  }
+  derivation <- digest::digest(product$transform, algo = "sha256", serialize = FALSE)
   output <- duckhts_bench_artifact_path("ancestry_reference_parquet")
   receipt <- paste0(output, ".sources.tsv")
   version <- as.character(utils::packageVersion("duckdb"))
-  expected <- data.frame(id = c(source_ids, "duckdb", "parquet"),
-                         sha256 = c(source_hashes, version, ""))
+  expected <- data.frame(id = c(source_ids, "duckdb", "derivation", "validation", "parquet"),
+                         sha256 = c(source_hashes, version, derivation,
+                                    "finite_unique_v1", ""))
   if (file.exists(output) && file.exists(receipt)) {
     stored <- tryCatch(utils::read.delim(receipt, colClasses = "character"),
                        error = function(e) NULL)
     if (!is.null(stored) && identical(stored$id, expected$id) &&
-        identical(stored$sha256[1:3], expected$sha256[1:3]) &&
+        identical(stored$sha256[1:5], expected$sha256[1:5]) &&
         identical(unname(digest::digest(file = output, algo = "sha256")),
-                  stored$sha256[[4L]])) {
+                  stored$sha256[[6L]])) {
       return(output)
     }
     stop("cached ancestry Parquet identity does not match its sources: ", output,
@@ -94,15 +103,20 @@ duckhts_bench_stage_ancestry_parquet <- function() {
                   quote_str(temporary),
                   " (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 32768)")
   DBI::dbExecute(con, query)
+  numeric_columns <- c(pcs, groups)
+  complete <- paste0("(", quote_id(numeric_columns), " IS NULL OR NOT isfinite(",
+                     quote_id(numeric_columns), "))", collapse = " OR ")
   counts <- DBI::dbGetQuery(con, paste0(
     "SELECT count(*) AS n, count(DISTINCT (chromosome, position)) ",
-    "AS unique_loci FROM read_parquet(", quote_str(temporary), ")"))
+    "AS unique_loci, count(*) FILTER (WHERE chromosome IS NULL OR position IS NULL ",
+    "OR allele_a IS NULL OR allele_b IS NULL OR ", complete,
+    ") AS invalid FROM read_parquet(", quote_str(temporary), ")"))
   if (counts$n != row_counts[[1L]] || counts$n != row_counts[[2L]] ||
-      counts$unique_loci != counts$n) {
+      counts$unique_loci != counts$n || counts$invalid != 0) {
     stop("ancestry Parquet requires one complete keyed row per locus",
          call. = FALSE)
   }
-  expected$sha256[[4L]] <- unname(digest::digest(file = temporary, algo = "sha256"))
+  expected$sha256[[6L]] <- unname(digest::digest(file = temporary, algo = "sha256"))
   if (!file.rename(temporary, output)) stop("cannot publish ancestry Parquet", call. = FALSE)
   utils::write.table(expected, receipt, sep = "\t", row.names = FALSE, quote = FALSE)
   output

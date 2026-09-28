@@ -43,6 +43,17 @@ test_ancestry_checked_sites <- function() {
   dbExecute(con, paste0("CREATE VIEW aliased_ref AS SELECT * FROM ref UNION ALL ",
                         "SELECT * REPLACE ('chr1' AS chromosome) FROM ref WHERE position=1"))
   expect_error(run(reference_table = "aliased_ref"), "duplicate reference locus")
+  dbExecute(con, paste0("CREATE VIEW alternate_ref AS SELECT * FROM ref UNION ALL ",
+                        "SELECT * REPLACE ('T' AS allele_b) FROM ref WHERE position=1"))
+  expect_error(run(reference_table = "alternate_ref"), "duplicate reference locus")
+  dbExecute(con, paste0("CREATE VIEW unused_invalid_ref AS SELECT * FROM ref UNION ALL ",
+                        "SELECT * REPLACE (13 AS position, NULL::DOUBLE AS A) ",
+                        "FROM ref WHERE position=1"))
+  expect_equal(run(reference_table = "unused_invalid_ref")$proportion,
+               baseline$proportion)
+  dbExecute(con, "CREATE VIEW integer_ref AS SELECT * REPLACE (1::INTEGER AS chromosome) FROM ref")
+  expect_equal(run(reference_table = "integer_ref")$proportion,
+               baseline$proportion)
   dbExecute(con, "CREATE VIEW missing_ref AS SELECT * REPLACE (CASE WHEN position=1 THEN NULL ELSE A END AS A) FROM ref")
   expect_error(run(reference_table = "missing_ref"), "finite frequencies and loadings")
   dbExecute(con, "CREATE VIEW missing_pc AS SELECT * REPLACE (CASE WHEN position=1 THEN NULL ELSE PC1 END AS PC1) FROM ref")

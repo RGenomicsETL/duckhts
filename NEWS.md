@@ -20,8 +20,10 @@
   the constrained fit. The scalar retains full precision; the R wrapper applies
   correlation gates before rounding returned proportions. Inputs are allele
   frequencies from summary statistics, diploid genotypes, or BAM/CRAM
-  allele counts. Reference loci are unique with complete finite frequencies and
-  loadings; duplicate input loci use normalised chromosome keys.
+  allele counts. Matched reference loci must be unique with complete finite
+  frequencies and loadings; duplicate input loci use normalised chromosome keys.
+  The keyed reference Parquet receipt certifies complete finite columns and
+  unique loci against the source and output checksums.
 
 - The benchmark registry pins bigsnpr's reference frequencies and loadings, staged once
   as a checksum-bound sorted Parquet product, with the epilepsy summary statistics and

@@ -49,9 +49,11 @@ frequency (or dosage), describing allele_b. Reference data may be a keyed
 wide relation with consecutive PC1..PCn columns and one frequency column per group, or a long
 relation with group_id and frequency plus a keyed pc/loading relation.
 Corrections contain pc and coefficient. Groups (1..30), PCs (1..64),
-frequencies and loadings must be complete and finite at each unique
-reference locus. Inputs and references must share an assembly, uppercase
-biallelic SNV alleles and reference orientation. Numeric chromosomes match
+frequencies and loadings must be complete and finite at each contributing
+reference locus; duplicate loci matching the input are rejected. Long
+references require complete keyed rows during pivoting. Inputs and
+references must share an assembly, uppercase biallelic SNV alleles and
+reference orientation. Numeric chromosomes match
 after removing a `chr` prefix; other chromosome names match literally.
 Input duplicates at a sample/locus, palindromic alleles and missing
 frequencies are dropped; other alleles match directly, reversed, strand

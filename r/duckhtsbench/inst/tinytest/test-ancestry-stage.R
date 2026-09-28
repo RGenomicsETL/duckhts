@@ -32,7 +32,18 @@ if (requireNamespace("DBI", quietly = TRUE) &&
   }, add = TRUE)
   Sys.setenv(DUCKHTSBENCH_REGISTRY = registry, DUCKHTS_CACHE_DIR = root)
   path <- duckhts_bench_stage_ancestry_parquet()
+  receipt <- utils::read.delim(paste0(path, ".sources.tsv"), colClasses = "character")
+  expect_equal(receipt$sha256[receipt$id == "validation"], "finite_unique_v1")
+  expect_equal(receipt$sha256[receipt$id == "derivation"],
+               digest::digest(plan$transform[plan$id == "ancestry_reference_parquet"],
+                              algo = "sha256", serialize = FALSE))
   expect_identical(duckhts_bench_stage_ancestry_parquet(), path)
+  changed <- plan
+  changed$transform[changed$id == "ancestry_reference_parquet"] <- paste0(
+    changed$transform[changed$id == "ancestry_reference_parquet"], ";revision=other")
+  utils::write.table(changed, registry, sep = "\t", row.names = FALSE, quote = FALSE)
+  expect_error(duckhts_bench_stage_ancestry_parquet(), pattern = "identity")
+  utils::write.table(plan, registry, sep = "\t", row.names = FALSE, quote = FALSE)
   driver_args <- list(dbdir = ":memory:")
   if ("shared_home" %in% names(formals(duckdb::duckdb))) {
     driver_args$shared_home <- FALSE
@@ -48,6 +59,17 @@ if (requireNamespace("DBI", quietly = TRUE) &&
   writeLines("corrupt", path)
   expect_error(duckhts_bench_stage_ancestry_parquet(), pattern = "identity")
   unlink(c(path, paste0(path, ".sources.tsv")))
+  frequencies <- sources[["ancestry_ref_freqs"]]
+  frequencies$group1[1L] <- Inf
+  source_path <- file.path(root, plan$cache_relpath[plan$id == "ancestry_ref_freqs"])
+  source_connection <- gzfile(source_path, "wt")
+  utils::write.csv(frequencies, source_connection, row.names = FALSE)
+  close(source_connection)
+  plan$supplier_identity[plan$id == "ancestry_ref_freqs"] <- paste0(
+    "bytes=", file.info(source_path)$size, ";sha256=",
+    digest::digest(file = source_path, algo = "sha256"))
+  utils::write.table(plan, registry, sep = "\t", row.names = FALSE, quote = FALSE)
+  expect_error(duckhts_bench_stage_ancestry_parquet(), pattern = "complete keyed row per locus")
   frequencies <- sources[["ancestry_ref_freqs"]]
   frequencies[1L, names(keys)] <- frequencies[2L, names(keys)]
   source_path <- file.path(root, plan$cache_relpath[plan$id == "ancestry_ref_freqs"])

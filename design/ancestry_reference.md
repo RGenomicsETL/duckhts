@@ -20,7 +20,12 @@ with those loadings. The duckhtsbench registry checks its committed bytes
 before staging. The vector must not be applied to different PCA loadings.
 
 The duckhtsbench registry pins the compressed Figshare files by exact byte
-count and SHA-256. Automated fetches from some hosts receive HTTP 403 or a WAF
+count and SHA-256. The typed, sorted Parquet derivation certifies one locus per
+row and finite group frequencies and PC loadings; its receipt binds those
+checks to the source hashes, registry derivation, writer version, and output
+hash. A table or view passed to the ancestry wrapper has no receipt identity:
+only matched reference loci must be unique and have finite model values.
+Automated fetches from some hosts receive HTTP 403 or a WAF
 browser challenge. Place browser-downloaded files at their registry cache paths
 and run `duckhts_bench_fetch(id)` to verify them without contacting Figshare.
 A redirected or merged copy is not an acceptable identity. The epilepsy

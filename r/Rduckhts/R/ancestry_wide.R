@@ -25,7 +25,8 @@
                                             quote_id(name))), silent = TRUE))
     }
   }, add = TRUE)
-  classification <- .ancestry_classification_query(sources, frequency)
+  classification <- .ancestry_classification_query(sources, frequency,
+                                                    contract$numeric_chromosome)
   DBI::dbExecute(con, paste0("CREATE TEMP TABLE ", quote_id(audit),
     " AS ", .ancestry_indexed_audit_query(classification)))
   DBI::dbExecute(con, paste0("COPY (", .ancestry_aligned_query(classification),
@@ -33,11 +34,31 @@
     " (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 32768)"))
   aligned_bytes <- file.info(aligned)$size
   aligned_source <- paste0("read_parquet(", quote_str(aligned), ")")
+  duplicated <- DBI::dbGetQuery(con, paste0(
+    "SELECT EXISTS (SELECT 1 FROM ", reference_source, " r JOIN ",
+    "(SELECT DISTINCT chromosome, position FROM ", aligned_source,
+    ") a ON r.chromosome = a.chromosome AND r.position = a.position ",
+    "GROUP BY r.chromosome, r.position HAVING count(*) > 1) AS present"))$present
+  if (duplicated) {
+    stop("duplicate reference locus", call. = FALSE)
+  }
   one_sample <- DBI::dbGetQuery(con, paste0("SELECT count(*) AS n FROM ",
                                          quote_id(audit)))$n == 1L
   indexed_source <- if (one_sample) aligned_source else paste0(
     "(SELECT a.*, i.sample_index FROM ", aligned_source, " a JOIN ",
     quote_id(audit), " i USING (sample_id))")
+  numeric_columns <- paste0("r.", quote_id(c(paste0("PC", seq_along(coefficients)),
+                                              groups)))
+  invalid <- paste0("(", numeric_columns, " IS NULL OR NOT isfinite(",
+                    numeric_columns, "))", collapse = " OR ")
+  invalid_site <- DBI::dbGetQuery(con, paste0(
+    "SELECT EXISTS (SELECT 1 FROM ", indexed_source, " a JOIN ",
+    reference_source, " r ON a.chromosome = r.chromosome ",
+    "AND a.position = r.position AND a.allele_a = r.allele_a ",
+    "AND a.allele_b = r.allele_b WHERE ", invalid, ") AS present"))$present
+  if (invalid_site) {
+    stop("reference sites require finite frequencies and loadings", call. = FALSE)
+  }
   DBI::dbExecute(con, paste0("CREATE TEMP TABLE ", quote_id(moments), " AS ",
     .ancestry_moments_query(con, reference_source, groups, coefficients,
                             indexed_source, one_sample)))
@@ -71,23 +92,8 @@
       length(groups) > 30L || anyDuplicated(fields)) {
     stop("wide reference requires keyed sites, consecutive PC1..PCn (n <= 64) and 1..30 groups", call. = FALSE)
   }
-  quote_id <- function(x) as.character(DBI::dbQuoteIdentifier(con, x))
   chromosome_key <- paste0("coalesce(try_cast(regexp_replace(chromosome::VARCHAR, '^chr', '') ",
                            "AS INTEGER)::VARCHAR, chromosome::VARCHAR)")
-  duplicated <- DBI::dbGetQuery(con, paste0(
-    "SELECT EXISTS (SELECT 1 FROM (SELECT ", chromosome_key,
-    ", position FROM ", relations[[2L]], " GROUP BY ", chromosome_key,
-    ", position HAVING count(*) > 1)) AS present"))$present
-  if (duplicated) stop("duplicate reference locus", call. = FALSE)
-  for (columns in list(pcs, groups)) {
-    complete <- paste0("r.", quote_id(columns))
-    invalid <- DBI::dbGetQuery(con, paste0(
-      "SELECT EXISTS (SELECT 1 FROM ", relations[[2L]], " r WHERE chromosome IS NULL ",
-      "OR position IS NULL OR allele_a IS NULL OR allele_b IS NULL OR ",
-      paste0("(", complete, " IS NULL OR NOT isfinite(", complete, "))",
-             collapse = " OR "), ") AS present"))$present
-    if (invalid) stop("reference sites require finite frequencies and loadings", call. = FALSE)
-  }
   null_sample <- DBI::dbGetQuery(con, paste0("SELECT EXISTS (SELECT 1 FROM ",
     relations[[1L]], " WHERE sample_id IS NULL) AS present"))$present
   if (null_sample) stop("sample_id must not be NULL", call. = FALSE)
@@ -98,27 +104,39 @@
       any(!is.finite(corrections$coefficient))) {
     stop("correction requires one finite coefficient for every PC", call. = FALSE)
   }
-  reference_source <- paste0("(SELECT ", chromosome_key,
-                             " AS chromosome, * EXCLUDE (chromosome) FROM ",
-                             relations[[2L]], ")")
+  chromosome_type <- DBI::dbGetQuery(con, paste0("DESCRIBE SELECT chromosome FROM ",
+                                             relations[[2L]]))$column_type
+  numeric_chromosome <- chromosome_type %in% c("TINYINT", "SMALLINT", "INTEGER",
+                                               "UTINYINT", "USMALLINT")
+  reference_source <- if (numeric_chromosome) relations[[2L]] else paste0(
+    "(SELECT ", chromosome_key, " AS chromosome, * EXCLUDE (chromosome) FROM ",
+    relations[[2L]], ")")
   list(groups = groups, coefficients = corrections$coefficient,
-       reference_source = reference_source)
+       reference_source = reference_source, numeric_chromosome = numeric_chromosome)
 }
 
-.ancestry_classification_query <- function(relations, frequency) {
+.ancestry_classification_query <- function(relations, frequency,
+                                           numeric_chromosome) {
   input <- relations[[1L]]
   reference <- relations[[2L]]
   paste0(
     "raw AS (SELECT sample_id, chromosome, position, allele_a, allele_b, ",
-    "coalesce(try_cast(regexp_replace(chromosome::VARCHAR, '^chr', '') AS INTEGER)::VARCHAR, ",
-    "chromosome::VARCHAR) AS ref_chr, ", frequency,
+    if (numeric_chromosome) {
+      "try_cast(regexp_replace(chromosome::VARCHAR, '^chr', '') AS INTEGER)"
+    } else {
+      paste0("coalesce(try_cast(regexp_replace(chromosome::VARCHAR, '^chr', '') ",
+             "AS INTEGER)::VARCHAR, chromosome::VARCHAR)")
+    }, " AS ref_chr, ", frequency,
     " AS f, count(*) OVER (PARTITION BY sample_id, ",
     "coalesce(try_cast(regexp_replace(chromosome::VARCHAR, '^chr', '') AS INTEGER)::VARCHAR, ",
     "chromosome::VARCHAR), position) AS copies ",
     "FROM ", input, "), ",
-    "sites AS (SELECT coalesce(try_cast(regexp_replace(chromosome::VARCHAR, '^chr', '') ",
-    "AS INTEGER)::VARCHAR, chromosome::VARCHAR) AS chromosome, ",
-    "position, allele_a AS ra, allele_b AS rb ",
+    "sites AS (SELECT ", if (numeric_chromosome) {
+      "chromosome"
+    } else {
+      paste0("coalesce(try_cast(regexp_replace(chromosome::VARCHAR, '^chr', '') ",
+             "AS INTEGER)::VARCHAR, chromosome::VARCHAR)")
+    }, " AS chromosome, position, allele_a AS ra, allele_b AS rb ",
     "FROM ", reference, "), ",
     "classified AS (SELECT i.*, s.ra, s.rb, CASE ",
     "WHEN i.copies > 1 THEN 'duplicate' ",
@@ -184,7 +202,8 @@
   cor_terms <- paste0("corr(a.aligned_f, ", group, ") AS cor", seq_along(group))
   sample <- "any_value(a.sample_id) AS sample_id"
   aggregate <- if (one_sample) "HAVING count(*) > 0" else "GROUP BY a.sample_index"
-  paste0("SELECT ", sample, ", ", paste(c(x_terms, y_terms, cor_terms), collapse = ", "),
+  paste0("SELECT ", sample, ", ",
+         paste(c(x_terms, y_terms, cor_terms), collapse = ", "),
          " FROM ", aligned, " a JOIN ", reference, " r ON a.chromosome = r.chromosome ",
          "AND a.position = r.position AND a.allele_a = r.allele_a ",
          "AND a.allele_b = r.allele_b ", aggregate)
