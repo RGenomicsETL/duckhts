@@ -10,11 +10,14 @@
 
 - `rduckhts_ancestry_proportions()` matches allele-frequency or diploid-dosage
   relations to keyed wide or long reference products with one bounded engine.
-  It requires unique contributing reference loci, complete finite frequencies
-  and loadings on matched rows, and non-NULL sample IDs; duplicate input loci
-  use normalised chromosome keys.
+  It requires unique reference loci wherever they touch normalised input loci,
+  including input rows later discarded by classification, complete finite
+  frequencies and loadings on matched rows, and non-NULL sample IDs; duplicate
+  input loci use normalised chromosome keys.
   Correlation gates use unrounded coefficients; returned proportions are rounded
-  to seven decimals. Missing genotypes are dropped. `rduckhts_ancestry_bam()`
+  to seven decimals and stable across repeated calls and DuckDB thread counts
+  for a fixed input. Raw correlations need not be bitwise identical. Missing
+  genotypes are dropped. `rduckhts_ancestry_bam()`
   obtains site counts from indexed BAM/CRAM with allele-fraction or balance-rule
   genotype frequencies and uses the same proportion engine.
 

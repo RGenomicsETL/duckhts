@@ -30,9 +30,14 @@ dbExecute(con, paste0("CREATE VIEW real_reference AS SELECT * FROM read_parquet(
 reference_open_seconds <- proc.time()[["elapsed"]] - script_start -
   library_seconds - extension_seconds
 if (workload == "epilepsy") {
-  n <- min(3343235L, 835809L * scale)
-  dbExecute(con, paste0("CREATE VIEW real_input AS SELECT * FROM read_parquet(",
-                        quoted(input_path), ") LIMIT ", n))
+  input_scan <- if (scale == 4L) {
+    paste0("SELECT * FROM read_parquet(", quoted(input_path), ") LIMIT 3343235")
+  } else {
+    paste0("SELECT * EXCLUDE (file_row_number) FROM read_parquet(",
+           quoted(input_path), ", file_row_number=true) WHERE file_row_number < ",
+           835809L * scale)
+  }
+  dbExecute(con, paste0("CREATE VIEW real_input AS ", input_scan))
 } else {
   site_limit <- if (workload == "joint") paste0(" AND position IN (SELECT position ",
     "FROM read_parquet(", quoted(input_path), ") GROUP BY position ",
@@ -56,7 +61,12 @@ if (nzchar(profile_steps)) {
   .ancestry_steps <- new.env(parent = emptyenv())
   original <- get(".ancestry_bounded_proportions", asNamespace("Rduckhts"))
   statements <- as.list(body(original))[-1L]
-  step_positions <- if (length(statements) == 38L) {
+  step_positions <- if (length(statements) == 39L) {
+    c(entry = 2L, validation = 3L, duplicate = 19L, audit = 22L,
+      alignment = 23L, sample_index = 26L, finite = 30L,
+      moments = 32L, solver = 33L, prediction = 36L,
+      publish = 38L, cleanup = 40L)
+  } else if (length(statements) == 38L) {
     c(entry = 2L, validation = 3L, audit = 19L,
       alignment = 20L, duplicate = 23L, sample_index = 25L,
       finite = 29L, moments = 31L, solver = 32L,
@@ -125,8 +135,8 @@ start <- proc.time()[["elapsed"]]
 result <- rduckhts_ancestry_proportions(
   con, "real_input", "real_reference", "real_correction")
 query_seconds <- proc.time()[["elapsed"]] - start
-stopifnot(identical(first[c("sample_id", "group_id", "status")],
-                    result[c("sample_id", "group_id", "status")]))
+stopifnot(identical(first[c("sample_id", "group_id", "status", "proportion")],
+                    result[c("sample_id", "group_id", "status", "proportion")]))
 repeat_difference <- max(abs(first$proportion - result$proportion))
 stopifnot(nrow(result) == 21L * if (workload == "epilepsy") 1L else 11L * scale,
           all(result$status == "ok"),

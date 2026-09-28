@@ -39,7 +39,27 @@ test_ancestry_checked_sites <- function() {
   expect_equal(unique(alias$used_variants), 11)
   expect_equal(unique(alias$duplicate_variants), 2)
   dbExecute(con, "CREATE VIEW duplicated_ref AS SELECT * FROM ref UNION ALL SELECT * FROM ref WHERE position=1")
+  expect_equal(dbGetQuery(con, paste0("SELECT count(*) AS n FROM input i JOIN ",
+    "duplicated_ref r ON regexp_replace(i.chromosome::VARCHAR, '^chr', '') = ",
+    "r.chromosome::VARCHAR AND i.position = r.position"))$n, 13)
   expect_error(run(reference_table = "duplicated_ref"), "duplicate reference locus")
+  dbExecute(con, paste0("CREATE VIEW discarded_missing AS SELECT * REPLACE (",
+    "CASE WHEN position=1 THEN NULL ELSE frequency END AS frequency) FROM input"))
+  dbExecute(con, paste0("CREATE VIEW discarded_ambiguous AS SELECT * REPLACE (",
+    "CASE WHEN position=1 THEN 'T' ELSE allele_b END AS allele_b) FROM input"))
+  dbExecute(con, paste0("CREATE VIEW discarded_unmatched AS SELECT * REPLACE (",
+    "CASE WHEN position=1 THEN 'C' ELSE allele_b END AS allele_b) FROM input"))
+  for (view in c("discarded_missing", "discarded_ambiguous", "discarded_unmatched")) {
+    expect_equal(dbGetQuery(con, paste0("SELECT count(*) AS n FROM ", view))$n, 12)
+    expect_error(run(view, "duplicated_ref"), "duplicate reference locus")
+  }
+  dbExecute(con, paste0("CREATE VIEW duplicated_input AS SELECT * FROM input UNION ALL ",
+                        "SELECT * FROM input WHERE position=1"))
+  expect_equal(dbGetQuery(con, "SELECT count(*) AS n FROM duplicated_input")$n, 13)
+  expect_equal(dbGetQuery(con, paste0("SELECT count(*) AS n FROM duplicated_input i ",
+    "JOIN duplicated_ref r ON regexp_replace(i.chromosome::VARCHAR, '^chr', '') = ",
+    "r.chromosome::VARCHAR AND i.position = r.position"))$n, 15)
+  expect_error(run("duplicated_input", "duplicated_ref"), "duplicate reference locus")
   dbExecute(con, paste0("CREATE VIEW aliased_ref AS SELECT * FROM ref UNION ALL ",
                         "SELECT * REPLACE ('chr1' AS chromosome) FROM ref WHERE position=1"))
   expect_error(run(reference_table = "aliased_ref"), "duplicate reference locus")
@@ -50,6 +70,12 @@ test_ancestry_checked_sites <- function() {
                         "SELECT * REPLACE (13 AS position, NULL::DOUBLE AS A) ",
                         "FROM ref WHERE position=1"))
   expect_equal(run(reference_table = "unused_invalid_ref")$proportion,
+               baseline$proportion)
+  dbExecute(con, paste0("CREATE VIEW unused_duplicated_ref AS SELECT * FROM ref ",
+                        "UNION ALL SELECT * REPLACE (13 AS position) FROM ref ",
+                        "WHERE position=1 UNION ALL SELECT * REPLACE (13 AS position) ",
+                        "FROM ref WHERE position=1"))
+  expect_equal(run(reference_table = "unused_duplicated_ref")$proportion,
                baseline$proportion)
   dbExecute(con, "CREATE VIEW integer_ref AS SELECT * REPLACE (1::INTEGER AS chromosome) FROM ref")
   expect_equal(run(reference_table = "integer_ref")$proportion,

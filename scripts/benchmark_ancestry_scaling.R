@@ -10,17 +10,23 @@ reference <- duckhtsbench::duckhts_bench_stage_ancestry_parquet()
 inputs <- c(epilepsy = args[[1L]], genotypes = args[[2L]], joint = args[[2L]])
 stopifnot(all(file.exists(inputs)))
 rows <- list()
+coefficient_baselines <- list()
 for (workload in names(inputs)) {
+  input_sha256 <- strsplit(system2("sha256sum", inputs[[workload]], stdout = TRUE),
+                           "[[:space:]]+")[[1L]][[1L]]
+  stopifnot(grepl("^[0-9a-f]{64}$", input_sha256))
   for (threads in c(1L, 4L)) {
     for (scale in c(1L, 2L, 4L)) {
       for (repetition in seq_len(3L)) {
         output <- tempfile("ancestry-scaling-")
         log <- tempfile("ancestry-scaling-log-")
         elapsed <- tempfile("ancestry-scaling-elapsed-")
+        coefficients <- tempfile("ancestry-scaling-coefficients-")
         status <- system2("/usr/bin/time", c("-f", "%e", "-o", elapsed,
           "Rscript", "--vanilla", "scripts/benchmark_ancestry_memory.R",
           workload, inputs[[workload]], reference, threads, scale),
-          stdout = output, stderr = log)
+          stdout = output, stderr = log,
+          env = paste0("DUCKHTS_ANCESTRY_PROPORTIONS=", shQuote(coefficients)))
         if (status != 0L) {
           stop("Scaling failure at ", workload, "/", threads, "/", scale,
                " repetition ", repetition, ": ", paste(readLines(log), collapse = "\n"))
@@ -29,6 +35,25 @@ for (workload in names(inputs)) {
         header <- grep("^workload\\tthreads\\tscale\\t", lines)
         stopifnot(length(header) == 1L, length(lines) == header + 1L)
         row <- utils::read.delim(text = lines[header:length(lines)])
+        observed <- utils::read.delim(coefficients)
+        key <- paste(workload, scale, sep = "/")
+        if (is.null(coefficient_baselines[[key]])) {
+          coefficient_baselines[[key]] <- observed
+        } else if (!identical(coefficient_baselines[[key]], observed)) {
+          stop("Seven-decimal coefficients differ across repetitions or threads at ",
+               key, ": ", threads, " threads, repetition ", repetition)
+        }
+        row$input_sha256 <- input_sha256
+        row$selection_rule <- if (workload == "epilepsy") {
+          if (scale == 4L) "full scan, LIMIT 3343235" else
+            paste0("file_row_number < ", 835809L * scale)
+        } else if (workload == "joint") {
+          paste0("first ", 11L * scale, " ordered sample IDs; first ",
+                 5000L * scale, " ordered positions")
+        } else {
+          paste0("first ", 11L * scale, " ordered sample IDs")
+        }
+        row$stable_7dp <- TRUE
         row$process_seconds <- as.numeric(readLines(elapsed))
         stopifnot(nrow(row) == 1L, row$input_rows == row$used_variants,
                   row$peak_temp_mib == 0,
@@ -49,7 +74,7 @@ for (workload in names(inputs)) {
                " > ", row$budget_mib, " MiB")
         }
         rows[[length(rows) + 1L]] <- row
-        unlink(c(output, log, elapsed))
+        unlink(c(output, log, elapsed, coefficients))
         message(workload, " ", threads, "t ", scale, "x rep ", repetition,
                 ": warm ", round(row$query_seconds, 3), "s, process ",
                 round(row$process_seconds, 3), "s / ",

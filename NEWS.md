@@ -20,8 +20,12 @@
   the constrained fit. The scalar retains full precision; the R wrapper applies
   correlation gates before rounding returned proportions. Inputs are allele
   frequencies from summary statistics, diploid genotypes, or BAM/CRAM
-  allele counts. Matched reference loci must be unique with complete finite
-  frequencies and loadings; duplicate input loci use normalised chromosome keys.
+  allele counts. Reference loci touching any normalised input locus must be
+  unique before classification; matched loci require complete finite frequencies
+  and loadings. Duplicate input loci use normalised chromosome keys. For a fixed
+  input, returned seven-decimal coefficients are
+  stable across repeated calls and DuckDB thread counts; raw correlations need
+  not be bitwise identical.
   The keyed reference Parquet receipt certifies complete finite columns and
   unique loci against the source and output checksums.
 
