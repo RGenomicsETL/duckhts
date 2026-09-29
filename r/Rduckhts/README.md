@@ -504,9 +504,9 @@ This section is generated from `functions.yaml`.
 
 ### Utilities
 
-| Function                                                                                    | Kind           | R helper | Description                                                                     |
-|---------------------------------------------------------------------------------------------|----------------|----------|---------------------------------------------------------------------------------|
-| [`duckhts_macro_definitions`](inst/function_catalog/reference.md#duckhts_macro_definitions) | table_function |          | Export the ordered DuckHTS macro definitions for connection-local installation. |
+| Function                                                                                    | Kind  | R helper | Description                                                                     |
+|---------------------------------------------------------------------------------------------|-------|----------|---------------------------------------------------------------------------------|
+| [`duckhts_macro_definitions`](inst/function_catalog/reference.md#duckhts_macro_definitions) | table |          | Export the ordered DuckHTS macro definitions for connection-local installation. |
 
 ### Diagnostics
 
@@ -569,33 +569,31 @@ This section is generated from `functions.yaml`.
 
 ### Intervals
 
-| Function                                                                                                  | Kind   | R helper | Description                                                                                                                                                                                                                                                                                                                                                                                                                  |
-|-----------------------------------------------------------------------------------------------------------|--------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [`duckhts_cgranges_create`](inst/function_catalog/reference.md#duckhts_cgranges_create)                   | scalar |          | Create an empty session-scoped cgranges registry entry that can be populated with intervals and finalized for overlap queries.                                                                                                                                                                                                                                                                                               |
-| [`duckhts_cgranges_add`](inst/function_catalog/reference.md#duckhts_cgranges_add)                         | scalar |          | Append an interval to a session-scoped cgranges registry entry before finalization. Labels may be BIGINT-like, DOUBLE, VARCHAR, or BOOLEAN.                                                                                                                                                                                                                                                                                  |
-| [`duckhts_cgranges_index`](inst/function_catalog/reference.md#duckhts_cgranges_index)                     | scalar |          | Finalize a populated cgranges registry entry and build its immutable overlap index for subsequent queries.                                                                                                                                                                                                                                                                                                                   |
-| [`duckhts_cgranges_destroy`](inst/function_catalog/reference.md#duckhts_cgranges_destroy)                 | scalar |          | Destroy a session-scoped cgranges registry entry and release its indexed interval storage when it is not in active use.                                                                                                                                                                                                                                                                                                      |
-| [`duckhts_cgranges_from_query`](inst/function_catalog/reference.md#duckhts_cgranges_from_query)           | scalar |          | Execute a SQL query on an extension-owned DuckDB connection, append its interval rows into a session-scoped cgranges registry entry, and leave the populated index ready for explicit finalization with duckhts_cgranges_index(…).                                                                                                                                                                                           |
-| [`duckhts_cgranges_from_table`](inst/function_catalog/reference.md#duckhts_cgranges_from_table)           | scalar |          | Reserved convenience constructor for bulk cgranges population from a table name. The current implementation is intentionally deferred and directs callers to duckhts_cgranges_from_query(…).                                                                                                                                                                                                                                 |
-| [`duckhts_cgranges_has_overlap`](inst/function_catalog/reference.md#duckhts_cgranges_has_overlap)         | scalar |          | Vectorized scalar predicate for streaming provider rows through a finalized session-scoped cgranges index. Returns TRUE when the query interval overlaps at least one indexed interval, or when mode = ‘contain’ and it fully contains at least one indexed interval; NULL inputs return NULL.                                                                                                                               |
-| [`duckhts_cgranges_count_overlaps`](inst/function_catalog/reference.md#duckhts_cgranges_count_overlaps)   | scalar |          | Vectorized scalar overlap counter for streaming provider rows through a finalized session-scoped cgranges index. Returns the number of indexed intervals that overlap the query interval, or with mode = ‘contain’ the number fully contained by it; NULL inputs return NULL.                                                                                                                                                |
-| [`duckhts_cgranges_overlaps_list`](inst/function_catalog/reference.md#duckhts_cgranges_overlaps_list)     | scalar |          | Vectorized scalar overlap expander for streaming provider rows through a finalized session-scoped cgranges index. Returns a LIST of hit STRUCTs that can be expanded with UNNEST, preserving provider columns while emitting one row per matching indexed interval. Because scalar return types are fixed, labels are returned as text with label_type describing the original cgranges label kind; NULL inputs return NULL. |
-| [`duckhts_cgranges_overlaps`](inst/function_catalog/reference.md#duckhts_cgranges_overlaps)               | table  |          | Query a finalized session-scoped cgranges registry entry and return one row per overlapping or containing indexed interval, preserving the original label type and interval coordinates.                                                                                                                                                                                                                                     |
-| [`duckhts_cgranges_overlaps_bulk`](inst/function_catalog/reference.md#duckhts_cgranges_overlaps_bulk)     | table  |          | Run a SQL query that yields overlap probes, stream those rows through a finalized session-scoped cgranges registry entry, and return one row per matching indexed interval. The probe query runs on the extension-owned helper connection, so it must reference regular tables/views rather than connection-local temp tables. When query_row_id_col is omitted, query_row_id defaults to the 1-based probe row ordinal.     |
-| [`regionkey`](inst/function_catalog/reference.md#regionkey)                                               | scalar |          | Encode a genomic interval as an official RegionKey-compatible 64-bit unsigned integer. Start and end use 0-based half-open interval semantics, matching BED-style coordinates; strand accepts -1, 0, or 1.                                                                                                                                                                                                                   |
-| [`regionkey_hex`](inst/function_catalog/reference.md#regionkey_hex)                                       | scalar |          | Render a RegionKey as its lowercase 16-character hexadecimal string representation.                                                                                                                                                                                                                                                                                                                                          |
-| [`parse_regionkey_hex`](inst/function_catalog/reference.md#parse_regionkey_hex)                           | scalar |          | Parse a 16-character hexadecimal RegionKey string back into its UBIGINT code. Invalid or non-hex strings return NULL.                                                                                                                                                                                                                                                                                                        |
-| [`encode_regionkey`](inst/function_catalog/reference.md#encode_regionkey)                                 | scalar |          | Encode the raw upstream RegionKey fields directly: chromosome code, 0-based start, 0-based end, and strand code (0 = unknown, 1 = +, 2 = -).                                                                                                                                                                                                                                                                                 |
-| [`extract_regionkey_chrom`](inst/function_catalog/reference.md#extract_regionkey_chrom)                   | scalar |          | Extract the raw upstream RegionKey chromosome code.                                                                                                                                                                                                                                                                                                                                                                          |
-| [`extract_regionkey_startpos`](inst/function_catalog/reference.md#extract_regionkey_startpos)             | scalar |          | Extract the raw upstream RegionKey 0-based start position.                                                                                                                                                                                                                                                                                                                                                                   |
-| [`extract_regionkey_endpos`](inst/function_catalog/reference.md#extract_regionkey_endpos)                 | scalar |          | Extract the raw upstream RegionKey 0-based end position.                                                                                                                                                                                                                                                                                                                                                                     |
-| [`extract_regionkey_strand`](inst/function_catalog/reference.md#extract_regionkey_strand)                 | scalar |          | Extract the raw upstream RegionKey strand code (0 = unknown, 1 = +, 2 = -).                                                                                                                                                                                                                                                                                                                                                  |
-| [`decode_regionkey`](inst/function_catalog/reference.md#decode_regionkey)                                 | scalar |          | Decode a RegionKey into its raw upstream numeric fields: chrom_code, start, end, and strand_code.                                                                                                                                                                                                                                                                                                                            |
-| [`reverse_regionkey`](inst/function_catalog/reference.md#reverse_regionkey)                               | scalar |          | Decode a RegionKey into a STRUCT with chrom, chrom_code, start, end, strand, and strand_code.                                                                                                                                                                                                                                                                                                                                |
-| [`extend_regionkey`](inst/function_catalog/reference.md#extend_regionkey)                                 | scalar |          | Extend a RegionKey interval by a fixed number of bases on both sides, clamping to the official 28-bit RegionKey position range.                                                                                                                                                                                                                                                                                              |
-| [`are_overlapping_regions`](inst/function_catalog/reference.md#are_overlapping_regions)                   | scalar |          | Return TRUE when two explicit 0-based half-open intervals overlap on the same canonical chromosome.                                                                                                                                                                                                                                                                                                                          |
-| [`are_overlapping_region_regionkey`](inst/function_catalog/reference.md#are_overlapping_region_regionkey) | scalar |          | Return TRUE when a 0-based half-open interval overlaps the supplied RegionKey interval.                                                                                                                                                                                                                                                                                                                                      |
-| [`are_overlapping_regionkeys`](inst/function_catalog/reference.md#are_overlapping_regionkeys)             | scalar |          | Return TRUE when two RegionKeys overlap.                                                                                                                                                                                                                                                                                                                                                                                     |
+| Function                                                                                                  | Kind        | R helper | Description                                                                                                                                                                                                                                                                                                                                                                                                                  |
+|-----------------------------------------------------------------------------------------------------------|-------------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| [`duckhts_cgranges_create`](inst/function_catalog/reference.md#duckhts_cgranges_create)                   | scalar      |          | Create an empty session-scoped cgranges registry entry that can be populated with intervals and finalized for overlap queries.                                                                                                                                                                                                                                                                                               |
+| [`duckhts_cgranges_add`](inst/function_catalog/reference.md#duckhts_cgranges_add)                         | scalar      |          | Append an interval to a session-scoped cgranges registry entry before finalization. Labels may be BIGINT-like, DOUBLE, VARCHAR, or BOOLEAN.                                                                                                                                                                                                                                                                                  |
+| [`duckhts_cgranges_index`](inst/function_catalog/reference.md#duckhts_cgranges_index)                     | scalar      |          | Finalize a populated cgranges registry entry and build its immutable overlap index for subsequent queries.                                                                                                                                                                                                                                                                                                                   |
+| [`duckhts_cgranges_destroy`](inst/function_catalog/reference.md#duckhts_cgranges_destroy)                 | scalar      |          | Destroy a session-scoped cgranges registry entry and release its indexed interval storage when it is not in active use.                                                                                                                                                                                                                                                                                                      |
+| [`duckhts_cgranges_from_table`](inst/function_catalog/reference.md#duckhts_cgranges_from_table)           | table_macro |          | Create, populate and finalize a session-scoped cgranges registry entry from the rows of a table or view, on the caller’s connection.                                                                                                                                                                                                                                                                                         |
+| [`duckhts_cgranges_has_overlap`](inst/function_catalog/reference.md#duckhts_cgranges_has_overlap)         | scalar      |          | Vectorized scalar predicate for streaming provider rows through a finalized session-scoped cgranges index. Returns TRUE when the query interval overlaps at least one indexed interval, or when mode = ‘contain’ and it fully contains at least one indexed interval; NULL inputs return NULL.                                                                                                                               |
+| [`duckhts_cgranges_count_overlaps`](inst/function_catalog/reference.md#duckhts_cgranges_count_overlaps)   | scalar      |          | Vectorized scalar overlap counter for streaming provider rows through a finalized session-scoped cgranges index. Returns the number of indexed intervals that overlap the query interval, or with mode = ‘contain’ the number fully contained by it; NULL inputs return NULL.                                                                                                                                                |
+| [`duckhts_cgranges_overlaps_list`](inst/function_catalog/reference.md#duckhts_cgranges_overlaps_list)     | scalar      |          | Vectorized scalar overlap expander for streaming provider rows through a finalized session-scoped cgranges index. Returns a LIST of hit STRUCTs that can be expanded with UNNEST, preserving provider columns while emitting one row per matching indexed interval. Because scalar return types are fixed, labels are returned as text with label_type describing the original cgranges label kind; NULL inputs return NULL. |
+| [`duckhts_cgranges_overlaps`](inst/function_catalog/reference.md#duckhts_cgranges_overlaps)               | table       |          | Query a finalized session-scoped cgranges registry entry and return one row per overlapping or containing indexed interval, preserving the original label type and interval coordinates.                                                                                                                                                                                                                                     |
+| [`regionkey`](inst/function_catalog/reference.md#regionkey)                                               | scalar      |          | Encode a genomic interval as an official RegionKey-compatible 64-bit unsigned integer. Start and end use 0-based half-open interval semantics, matching BED-style coordinates; strand accepts -1, 0, or 1.                                                                                                                                                                                                                   |
+| [`regionkey_hex`](inst/function_catalog/reference.md#regionkey_hex)                                       | scalar      |          | Render a RegionKey as its lowercase 16-character hexadecimal string representation.                                                                                                                                                                                                                                                                                                                                          |
+| [`parse_regionkey_hex`](inst/function_catalog/reference.md#parse_regionkey_hex)                           | scalar      |          | Parse a 16-character hexadecimal RegionKey string back into its UBIGINT code. Invalid or non-hex strings return NULL.                                                                                                                                                                                                                                                                                                        |
+| [`encode_regionkey`](inst/function_catalog/reference.md#encode_regionkey)                                 | scalar      |          | Encode the raw upstream RegionKey fields directly: chromosome code, 0-based start, 0-based end, and strand code (0 = unknown, 1 = +, 2 = -).                                                                                                                                                                                                                                                                                 |
+| [`extract_regionkey_chrom`](inst/function_catalog/reference.md#extract_regionkey_chrom)                   | scalar      |          | Extract the raw upstream RegionKey chromosome code.                                                                                                                                                                                                                                                                                                                                                                          |
+| [`extract_regionkey_startpos`](inst/function_catalog/reference.md#extract_regionkey_startpos)             | scalar      |          | Extract the raw upstream RegionKey 0-based start position.                                                                                                                                                                                                                                                                                                                                                                   |
+| [`extract_regionkey_endpos`](inst/function_catalog/reference.md#extract_regionkey_endpos)                 | scalar      |          | Extract the raw upstream RegionKey 0-based end position.                                                                                                                                                                                                                                                                                                                                                                     |
+| [`extract_regionkey_strand`](inst/function_catalog/reference.md#extract_regionkey_strand)                 | scalar      |          | Extract the raw upstream RegionKey strand code (0 = unknown, 1 = +, 2 = -).                                                                                                                                                                                                                                                                                                                                                  |
+| [`decode_regionkey`](inst/function_catalog/reference.md#decode_regionkey)                                 | scalar      |          | Decode a RegionKey into its raw upstream numeric fields: chrom_code, start, end, and strand_code.                                                                                                                                                                                                                                                                                                                            |
+| [`reverse_regionkey`](inst/function_catalog/reference.md#reverse_regionkey)                               | scalar      |          | Decode a RegionKey into a STRUCT with chrom, chrom_code, start, end, strand, and strand_code.                                                                                                                                                                                                                                                                                                                                |
+| [`extend_regionkey`](inst/function_catalog/reference.md#extend_regionkey)                                 | scalar      |          | Extend a RegionKey interval by a fixed number of bases on both sides, clamping to the official 28-bit RegionKey position range.                                                                                                                                                                                                                                                                                              |
+| [`are_overlapping_regions`](inst/function_catalog/reference.md#are_overlapping_regions)                   | scalar      |          | Return TRUE when two explicit 0-based half-open intervals overlap on the same canonical chromosome.                                                                                                                                                                                                                                                                                                                          |
+| [`are_overlapping_region_regionkey`](inst/function_catalog/reference.md#are_overlapping_region_regionkey) | scalar      |          | Return TRUE when a 0-based half-open interval overlaps the supplied RegionKey interval.                                                                                                                                                                                                                                                                                                                                      |
+| [`are_overlapping_regionkeys`](inst/function_catalog/reference.md#are_overlapping_regionkeys)             | scalar      |          | Return TRUE when two RegionKeys overlap.                                                                                                                                                                                                                                                                                                                                                                                     |
 
 ### Quality Control
 
@@ -907,18 +905,17 @@ unlink(fai_path)
 
 The bundled extension also exposes SQL-first `duckhts_cgranges_*` entry
 points. These are session-scoped interval indexes that you can populate
-either row-wise or in bulk from a SQL query, then query through
+either row-wise or in bulk from a table or view with
+`duckhts_cgranges_from_table(...)`, which runs on your connection and so
+also sees TEMP objects, then query through
 `duckhts_cgranges_overlaps(...)`. For row-preserving filters or count
 annotations over provider rows, use the vectorized scalar helpers
 `duckhts_cgranges_has_overlap(...)` and
 `duckhts_cgranges_count_overlaps(...)` directly in queries over
 `read_bed(...)`, `read_bam(...)`, `read_bcf(...)`, or regular tables.
 For streaming one-row-per-hit expansion while keeping provider columns,
-use `duckhts_cgranges_overlaps_list(...)` with `UNNEST(...)`. The older
-`duckhts_cgranges_overlaps_bulk(...)` table function still accepts a
-probe query and emits matching indexed intervals in one table-function
-call; that bulk query runs on the extension-owned helper connection, so
-use a regular table or view rather than a temp table. There is no
+use `duckhts_cgranges_overlaps_list(...)` with `UNNEST(...)` in the
+SELECT list, which also covers bulk probing of any relation. There is no
 dedicated R wrapper yet, so use them through `DBI`.
 
 ``` r
@@ -944,21 +941,24 @@ DBI::dbGetQuery(
 #>   interval_ordinal label interval_chrom interval_start interval_end
 #> 1                1     b           chr1             30           40
 
+DBI::dbExecute(
+  con,
+  paste(
+    "CREATE TEMP VIEW readme_targets AS SELECT * FROM (VALUES",
+    "('chr2', 100, 110, 'alpha'), ('chr2', 150, 170, 'beta')",
+    ") AS t(chrom, start, \"end\", label)"
+  )
+)
+#> [1] 0
 DBI::dbGetQuery(
   con,
   paste(
-    "SELECT duckhts_cgranges_from_query(",
-    "  'readme_qry_idx',",
-    "  'SELECT * FROM (VALUES (''chr2'', 100, 110, ''alpha''), (''chr2'', 150, 170, ''beta'')) AS t(chrom, start, \"end\", label)',",
-    "  'chrom', 'start', 'end', 'label'",
-    ") AS ok"
+    "SELECT * FROM duckhts_cgranges_from_table(",
+    "'readme_qry_idx', 'readme_targets', 'chrom', 'start', 'end', 'label')"
   )
 )
-#>     ok
-#> 1 TRUE
-DBI::dbGetQuery(con, "SELECT duckhts_cgranges_index('readme_qry_idx') AS ok")
-#>     ok
-#> 1 TRUE
+#>   indexed
+#> 1    TRUE
 DBI::dbGetQuery(
   con,
   paste(
@@ -982,37 +982,19 @@ DBI::dbExecute(
 DBI::dbGetQuery(
   con,
   paste(
-    "SELECT p.probe_id, hit.interval_ordinal, hit.label, hit.label_type,",
+    "SELECT probe_id, hit.interval_ordinal, hit.label, hit.label_type,",
     "  hit.interval_chrom, hit.interval_start, hit.interval_end",
-    "FROM readme_probes AS p",
-    "CROSS JOIN UNNEST(",
-    "  duckhts_cgranges_overlaps_list('readme_qry_idx', p.chrom, p.start, p.\"end\")",
-    ") AS u(hit)",
-    "ORDER BY p.probe_id, hit.interval_ordinal"
+    "FROM (",
+    "  SELECT p.probe_id,",
+    "    unnest(duckhts_cgranges_overlaps_list('readme_qry_idx', p.chrom, p.start, p.\"end\")) AS hit",
+    "  FROM readme_probes AS p",
+    ")",
+    "ORDER BY probe_id, hit.interval_ordinal"
   )
 )
 #>   probe_id interval_ordinal label label_type interval_chrom interval_start
 #> 1       10                0 alpha    VARCHAR           chr2            100
 #> 2       20                1  beta    VARCHAR           chr2            150
-#>   interval_end
-#> 1          110
-#> 2          170
-DBI::dbGetQuery(
-  con,
-  paste(
-    "SELECT query_row_id, interval_ordinal, label, interval_chrom, interval_start, interval_end",
-    "FROM duckhts_cgranges_overlaps_bulk(",
-    "  'readme_qry_idx',",
-    "  'SELECT probe_id, chrom, start, \"end\" FROM readme_probes',",
-    "  'chrom', 'start', 'end',",
-    "  query_row_id_col := 'probe_id'",
-    ")",
-    "ORDER BY query_row_id, interval_ordinal"
-  )
-)
-#>   query_row_id interval_ordinal label interval_chrom interval_start
-#> 1           10                0 alpha           chr2            100
-#> 2           20                1  beta           chr2            150
 #>   interval_end
 #> 1          110
 #> 2          170
