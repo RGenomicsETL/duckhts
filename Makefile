@@ -137,7 +137,7 @@ test_release: test-reference-cache test-sql-lambda-syntax
 
 .PHONY: test-sql-lambda-syntax test-duckdb-v2 test-macro-catalog
 test-macro-catalog:
-	./configure/venv/bin/python3 test/scripts/test_macro_catalog.py
+	$(PYTHON_VENV_BIN) test/scripts/test_macro_catalog.py
 
 test-sql-lambda-syntax:
 	python3 test/scripts/check_sql_lambdas.py
