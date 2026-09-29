@@ -261,6 +261,95 @@ compare_cohort <- function(duckdb, extension, somalier, sites_path, reference,
   do.call(rbind, rows)
 }
 
+# The BAM/CRAM path counts every panel site in one pass. A small alignment
+# fixture with chr1, chrX and chrY sites must give Somalier's autosomal, X and
+# Y counts exactly.
+write_bam_fixture <- function(directory) {
+  contigs <- c("chr1", "chrX", "chrY")
+  reference <- file.path(directory, "bam-reference.fa")
+  writeLines(unlist(lapply(contigs, function(name) {
+    c(paste0(">", name), rep(strrep("A", 60L), 5L))
+  })), reference)
+  run("samtools", c("faidx", shQuote(reference)), "samtools faidx")
+  sites <- data.frame(chrom = c("chr1", "chr1", "chrX", "chrX", "chrY"),
+    pos = c(50L, 150L, 60L, 160L, 70L), ref = "A", alt = "C", af = 0.3,
+    stringsAsFactors = FALSE)
+  sites_path <- write_sites(file.path(directory, "bam-sites.vcf"), sites)
+  read <- function(name, chrom, site, base, flag = 0L) {
+    bases <- replace_base(strrep("A", 40L), site - (site - 10L) + 1L, base)
+    paste(name, flag, chrom, site - 10L, 60L, "40M", "*", 0L, 0L, bases,
+      strrep("I", 40L), sep = "\t")
+  }
+  bases <- list(chr1 = list("50" = c("A", "A", "C", "G"), "150" = c("C", "C", "C")),
+    chrX = list("60" = c("A", "C", "A", "A", "T"), "160" = c("C", "C", "C", "C")),
+    chrY = list("70" = c("A", "A", "C")))
+  records <- character()
+  for (chrom in names(bases)) {
+    for (site in names(bases[[chrom]])) {
+      for (i in seq_along(bases[[chrom]][[site]])) {
+        records <- c(records, read(sprintf("%s-%s-%d", chrom, site, i), chrom,
+          as.integer(site), bases[[chrom]][[site]][[i]]))
+      }
+    }
+  }
+  header <- c("@HD\tVN:1.6\tSO:coordinate", sprintf("@SQ\tSN:%s\tLN:300", contigs),
+    "@RG\tID:rg1\tSM:bam-sample")
+  sam <- file.path(directory, "reads.sam")
+  writeLines(c(header, records[order(match(sub("-.*", "", records), contigs),
+    as.integer(vapply(strsplit(records, "\t"), `[[`, "", 4L)))]), sam)
+  bam <- file.path(directory, "reads.bam")
+  run("samtools", c("sort", "-o", shQuote(bam), shQuote(sam)), "samtools sort")
+  run("samtools", c("index", shQuote(bam)), "samtools index")
+  list(reference = reference, sites = sites_path, bam = bam)
+}
+
+replace_base <- function(sequence, index1, base) {
+  substr(sequence, index1, index1) <- base
+  sequence
+}
+
+read_digest <- function(path) {
+  connection <- file(path, "rb")
+  on.exit(close(connection))
+  readBin(connection, integer(), 1L, size = 1L, signed = FALSE)
+  name_length <- readBin(connection, integer(), 1L, size = 1L, signed = FALSE)
+  readBin(connection, raw(), name_length)
+  sizes <- readBin(connection, integer(), 3L, size = 2L, signed = FALSE,
+    endian = "little")
+  values <- readBin(connection, integer(), 3L * sum(sizes), size = 4L,
+    endian = "little")
+  matrix(values, ncol = 3L, byrow = TRUE)
+}
+
+compare_bam <- function(duckdb, extension, somalier, directory) {
+  fixture <- write_bam_fixture(directory)
+  out <- file.path(directory, "bam-extract")
+  dir.create(out)
+  run(somalier, c("extract", "--sites", shQuote(fixture$sites), "--fasta",
+    shQuote(fixture$reference), "--out-dir", shQuote(out), shQuote(fixture$bam)),
+    "somalier extract BAM")
+  expected <- read_digest(list.files(out, pattern = "[.]somalier$", full.names = TRUE))
+  panel <- file.path(directory, "bam-panel.parquet")
+  output <- file.path(directory, "bam-duckhts.tsv")
+  sql <- paste0(
+    "LOAD ", sql_quote(extension), ";",
+    "COPY (SELECT * FROM duckhts_somalier_import_sites(", sql_quote(fixture$sites),
+    ", 'synthetic')) TO ", sql_quote(panel), " (FORMAT parquet);",
+    "COPY (SELECT site_index, region, a, b, other FROM duckhts_somalier_bam_counts(",
+    sql_quote(fixture$bam), ", NULL, 'bam-sample', ", sql_quote(fixture$reference),
+    ", panel_parquet := ", sql_quote(panel), ") ORDER BY site_index) TO ",
+    sql_quote(output), " (FORMAT CSV, HEADER, DELIMITER '\t');")
+  run(duckdb, c("-unsigned", "-c", shQuote(sql)), "DuckHTS BAM counts")
+  observed <- utils::read.delim(output, stringsAsFactors = FALSE)
+  if (!identical(unname(as.matrix(observed[c("a", "b", "other")])), expected) ||
+      !identical(observed$region, c("chr1", "chr1", "chrX", "chrX", "chrY"))) {
+    print(observed)
+    print(expected)
+    fail("BAM counts differ from Somalier on autosomal, X and Y sites")
+  }
+  nrow(observed)
+}
+
 main <- function(args) {
   if (length(args) != 3L) {
     fail("usage: Rscript somalier_sex_differential.R <duckdb-cli> ",
@@ -295,6 +384,8 @@ main <- function(args) {
     file.path(directory, "gate.vcf.gz"), "sample",
     file.path(directory, "gate-sample.tsv"))
 
+  bam_sites <- compare_bam(duckdb, extension, somalier, directory)
+
   calls <- rbind(main_rows, gate_rows)
   # Somalier leaves the sex unset (-9) for samples that fail its autosomal
   # quality gate and for X dosage between its two thresholds; DuckHTS reports
@@ -320,7 +411,8 @@ main <- function(args) {
     fail("cohort and per-sample Y gates did not diverge as designed")
   }
   print(calls, row.names = FALSE)
-  cat("Somalier sex differential passed:", nrow(calls), "sample comparisons\n")
+  cat("Somalier sex differential passed:", nrow(calls), "sample comparisons,",
+    bam_sites, "BAM sites\n")
 }
 
 if (!interactive() && Sys.getenv("SEX_LIB") == "") main(commandArgs(trailingOnly = TRUE))
