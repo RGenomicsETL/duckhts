@@ -14,7 +14,8 @@ C, R, and SQL discipline.
 
 DuckHTS is a library-first C extension that makes sequencing data and genomics algorithms
 composable in DuckDB. htslib supplies HTS transport and format semantics; reusable native
-kernels supply coverage, interval, sequence, normalization, and consequence mechanics;
+kernels supply coverage, interval, sequence, and normalization mechanics (consequence
+prediction belongs to DuckVEP);
 SQL supplies planning, joins, supplementary annotation, provenance, and explainable
 clinical evidence. The same extension is packaged on CRAN as `Rduckhts`.
 

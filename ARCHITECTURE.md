@@ -54,7 +54,8 @@ reader concerns. Decompression workers are not DuckDB scan workers.
 
 Kernels receive typed arrays or compact views and know nothing about SQL strings, R
 objects, or file paths. They implement sequence classification, interval operations,
-coverage accumulation, normalization, liftover mechanics, and variant consequences.
+coverage accumulation, normalization, and liftover mechanics. Consequence prediction
+belongs to the DuckVEP extension; DuckHTS parses existing CSQ, ANN and BCSQ annotations.
 Scalar reference implementations remain the correctness authority for SIMD backends.
 
 ### DuckDB adapters
