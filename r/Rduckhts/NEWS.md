@@ -1,5 +1,9 @@
 # Rduckhts 1.5.2.9006-0.1.5
 
+- The bundled function catalog documents `bam_bin_counts(include_unmapped := FALSE)`
+  and its synthetic no-coordinate row. Package tests compare catalog kinds and
+  native table options with the loaded extension.
+
 - Consequence prediction has moved to DuckVEP and its R package, Rduckvep
   (<https://github.com/RGenomicsETL/DuckVEP>). `rduckhts_haplotypes()` and the bundled
   consequence fixtures are removed; the bundled extension no longer carries the DuckVEP

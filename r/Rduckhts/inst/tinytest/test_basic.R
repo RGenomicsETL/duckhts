@@ -585,6 +585,34 @@ expect_equal(
   "CIGAR Utils"
 )
 
+# Catalog kinds and native table options must match the loaded extension.
+local({
+  con <- rduckhts_connect()
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE))
+  registered <- DBI::dbGetQuery(con, paste(
+    "SELECT function_name, function_type, parameters",
+    "FROM duckdb_functions()"
+  ))
+  for (i in seq_len(nrow(catalog))) {
+    entry <- catalog[i, ]
+    kind <- if (entry$kind == "scalar_macro") "macro" else entry$kind
+    found <- registered[
+      registered$function_name == entry$name & registered$function_type == kind,
+      , drop = FALSE
+    ]
+    expect_true(nrow(found) > 0L, info = entry$name)
+    if (entry$kind != "table" || !nrow(found)) next
+
+    actual <- unique(as.character(unlist(found$parameters, use.names = FALSE)))
+    actual <- actual[!grepl("^col[0-9]+$", actual)]
+    named <- regmatches(entry$signature, gregexpr(
+      "[[:alnum:]_]+[[:space:]]*:=", entry$signature
+    ))[[1L]]
+    documented <- sub("[[:space:]]*:=", "", named)
+    expect_identical(sort(actual), sort(documented), info = entry$name)
+  }
+})
+
 # Test parameter validation - these should fail gracefully without a connection
 expect_error(rduckhts_bcf(NULL, "test", "nonexistent.vcf"))
 expect_error(rduckhts_bam(NULL, "test", "nonexistent.bam"))

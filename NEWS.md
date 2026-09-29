@@ -2,6 +2,10 @@
 
 # duckhts 1.5.2.9006
 
+- The function catalog documents `bam_bin_counts(include_unmapped := FALSE)` and
+  its synthetic no-coordinate row; catalog tests compare documented kinds and
+  native table options with the loaded extension.
+
 - Consequence prediction has moved to the [DuckVEP extension](https://github.com/RGenomicsETL/DuckVEP),
   its single source. DuckHTS no longer ships the DuckVEP functions and macros
   (`duckvep_ensembl_regions`, `duckvep_ensembl_transcripts`,
