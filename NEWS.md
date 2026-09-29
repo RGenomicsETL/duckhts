@@ -6,6 +6,7 @@
   its synthetic no-coordinate row, and names the type-probe macro's parameter as
   registered: `duckhts_duckdb_type_supported(candidate_type_name)`. Catalog tests
   compare every entry with a registered overload of the loaded extension: kinds,
+  scalar and aggregate argument counts,
   native table options, and macro parameter names.
 
 - Consequence prediction has moved to the [DuckVEP extension](https://github.com/RGenomicsETL/DuckVEP),

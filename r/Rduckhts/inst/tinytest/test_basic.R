@@ -587,13 +587,14 @@ expect_equal(
 
 # Catalog kinds and parameters must match the loaded extension. For each entry, at
 # least one registered overload must match the documented signature on its own:
-# native table functions by positional count and exact named options, macros by
-# every argument name in order.
+# scalar and aggregate functions by argument count (or variable arguments), native
+# table functions by positional count and exact named options, and macros by every
+# argument name in order.
 local({
   con <- rduckhts_connect()
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE))
   registered <- DBI::dbGetQuery(con, paste(
-    "SELECT function_name, function_type, parameters",
+    "SELECT function_name, function_type, parameters, varargs",
     "FROM duckdb_functions()"
   ))
   # Split a signature's top-level arguments, ignoring commas inside brackets or quotes.
@@ -633,11 +634,13 @@ local({
       , drop = FALSE
     ]
     expect_true(nrow(found) > 0L, info = entry$name)
-    if (!nrow(found) || !(entry$kind %in% c("table", names(kinds)))) next
+    if (!nrow(found)) next
     documented <- signature_args(entry$signature)
-    matches <- vapply(found$parameters, function(params) {
-      params <- as.character(params)
-      if (entry$kind == "table") {
+    matches <- vapply(seq_len(nrow(found)), function(j) {
+      params <- as.character(found$parameters[[j]])
+      if (entry$kind %in% c("scalar", "aggregate")) {
+        length(params) == nrow(documented) || !is.na(found$varargs[[j]])
+      } else if (entry$kind == "table") {
         positional <- grepl("^col[0-9]+$", params)
         sum(positional) == sum(!documented$named) &&
           setequal(params[!positional], documented$name[documented$named])

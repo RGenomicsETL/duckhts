@@ -3,7 +3,8 @@
 - The bundled function catalog documents `bam_bin_counts(include_unmapped := FALSE)`
   and its synthetic no-coordinate row, and names the type-probe macro's parameter as
   registered (`candidate_type_name`). Package tests compare every catalog entry with
-  a registered overload of the loaded extension: kinds, native table options, and
+  a registered overload of the loaded extension: kinds, scalar and aggregate
+  argument counts, native table options, and
   macro parameter names.
 
 - Consequence prediction has moved to DuckVEP and its R package, Rduckvep
