@@ -49,6 +49,8 @@ extern void register_duckhts_somalier_contamination_functions(
     duckdb_connection connection);
 extern void register_duckhts_somalier_matched_functions(
     duckdb_connection connection);
+extern bool register_duckhts_somalier_sex_sql(
+    duckhts_registration_t *registration);
 extern bool register_duckhts_somalier_vcf_extract_sql(
     duckhts_registration_t *registration);
 extern bool register_duckhts_somalier_bam_extract_functions(
@@ -1136,7 +1138,8 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         }
     }
 
-    if (!register_duckhts_somalier_vcf_extract_sql(&registration)) {
+    if (!register_duckhts_somalier_vcf_extract_sql(&registration) ||
+        !register_duckhts_somalier_sex_sql(&registration)) {
         return false;
     }
     return duckhts_macro_registration_end(&registration);
