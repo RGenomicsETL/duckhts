@@ -32,21 +32,21 @@ wrapper, short description, and example SQL.
 catalog <- rduckhts_functions()
 subset(catalog, category == "Sequence UDFs", select = c("name", "description"))
 #>                name
-#> 123     seq_revcomp
-#> 124   seq_canonical
-#> 125   seq_hash_2bit
-#> 126 seq_encode_4bit
-#> 127 seq_decode_4bit
-#> 128  seq_gc_content
-#> 129       seq_kmers
+#> 124     seq_revcomp
+#> 125   seq_canonical
+#> 126   seq_hash_2bit
+#> 127 seq_encode_4bit
+#> 128 seq_decode_4bit
+#> 129  seq_gc_content
+#> 130       seq_kmers
 #>                                                                                                                                                                                                                                                                                                                                                                                                             description
-#> 123 Compute the reverse complement of a DNA sequence using A, C, G, T, and N bases. Overloaded: accepts either a VARCHAR text sequence (returns VARCHAR) or a UTINYINT[] of htslib nt16 codes as produced by read_bam(sequence_encoding := 'nt16') (returns UTINYINT[]); the nt16 overload is bit-identical to the text path after decoding, so BAM pipelines can reverse-complement without leaving the nt16 encoding.
-#> 124                                          Return the lexicographically smaller of a sequence and its reverse complement. Overloaded: accepts either a VARCHAR text sequence (returns VARCHAR) or a UTINYINT[] of htslib nt16 codes as produced by read_bam(sequence_encoding := 'nt16') (returns UTINYINT[]); the nt16 overload compares by decoded base order and is bit-identical to the text path after decoding.
-#> 125                                                                                                                                                                                  Encode a short DNA sequence as a 2-bit unsigned integer hash. Overloaded to also accept a UTINYINT[] of htslib nt16 codes (from read_bam(sequence_encoding := 'nt16')); non-ACGT codes yield NULL, bit-identical to the text path.
-#> 126                                                                                                                                                                                                                                                                                                               Encode an IUPAC DNA sequence as a list of 4-bit base codes, preserving ambiguity symbols including N.
-#> 127                                                                                                                                                                                                                                                                                                                                            Decode a list of 4-bit IUPAC DNA base codes back into a sequence string.
-#> 128                                        Compute GC fraction for a DNA sequence as a value between 0 and 1. Overloaded: accepts either a VARCHAR text sequence or a UTINYINT[] of htslib nt16 codes as produced by read_bam(sequence_encoding := 'nt16'); the nt16 overload classifies codes directly and is bit-identical to the text path, so BAM pipelines can compute GC without decoding sequences back to text.
-#> 129                                                                                                                                                                                                                                                                                                                                            Expand a sequence into positional k-mers with optional canonicalization.
+#> 124 Compute the reverse complement of a DNA sequence using A, C, G, T, and N bases. Overloaded: accepts either a VARCHAR text sequence (returns VARCHAR) or a UTINYINT[] of htslib nt16 codes as produced by read_bam(sequence_encoding := 'nt16') (returns UTINYINT[]); the nt16 overload is bit-identical to the text path after decoding, so BAM pipelines can reverse-complement without leaving the nt16 encoding.
+#> 125                                          Return the lexicographically smaller of a sequence and its reverse complement. Overloaded: accepts either a VARCHAR text sequence (returns VARCHAR) or a UTINYINT[] of htslib nt16 codes as produced by read_bam(sequence_encoding := 'nt16') (returns UTINYINT[]); the nt16 overload compares by decoded base order and is bit-identical to the text path after decoding.
+#> 126                                                                                                                                                                                  Encode a short DNA sequence as a 2-bit unsigned integer hash. Overloaded to also accept a UTINYINT[] of htslib nt16 codes (from read_bam(sequence_encoding := 'nt16')); non-ACGT codes yield NULL, bit-identical to the text path.
+#> 127                                                                                                                                                                                                                                                                                                               Encode an IUPAC DNA sequence as a list of 4-bit base codes, preserving ambiguity symbols including N.
+#> 128                                                                                                                                                                                                                                                                                                                                            Decode a list of 4-bit IUPAC DNA base codes back into a sequence string.
+#> 129                                        Compute GC fraction for a DNA sequence as a value between 0 and 1. Overloaded: accepts either a VARCHAR text sequence or a UTINYINT[] of htslib nt16 codes as produced by read_bam(sequence_encoding := 'nt16'); the nt16 overload classifies codes directly and is bit-identical to the text path, so BAM pipelines can compute GC without decoding sequences back to text.
+#> 130                                                                                                                                                                                                                                                                                                                                            Expand a sequence into positional k-mers with optional canonicalization.
 subset(rduckhts_functions(kind = "table"), select = c("name", "r_wrapper"))
 #>                              name                        r_wrapper
 #> 1               duckhts_simd_info               rduckhts_simd_info

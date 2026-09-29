@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9004-0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9005-0.1.5</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -33,6 +33,12 @@
       <small>Source: <a href="https://github.com/RGenomicsETL/duckhts/blob/main/NEWS.md" class="external-link"><code>NEWS.md</code></a></small>
     </div>
 
+    <div class="section level2">
+<h2 class="pkg-version" data-toc-text="1.5.2.9005-0.1.5" id="rduckhts-1529005-015">Rduckhts 1.5.2.9005-0.1.5<a class="anchor" aria-label="anchor" href="#rduckhts-1529005-015"></a></h2>
+<ul><li><p><code><a href="../reference/rduckhts_ancestry_proportions.html">rduckhts_ancestry_proportions()</a></code> estimates ancestry proportions from allele-frequency or diploid-dosage relations against keyed wide or long reference products, with matching audits and correlation gates on unrounded coefficients. <code>reversed_variants</code> counts every site read as <code>1 - f</code>, including strand-flipped reversals; <code>flipped_variants</code> counts every strand-flipped site. Reference loci touching any input locus must be unique; matched loci need finite loadings and frequencies in [0, 1]. Every sample returns a row for every reference group, with NULL proportions and <code>no_matched_variants</code> when nothing matches. Group identifiers round-trip exactly; wide references can map columns to identifiers with <code>group_ids</code>. Missing genotypes are dropped.</p></li>
+<li><p><code><a href="../reference/rduckhts_ancestry_geno.html">rduckhts_ancestry_geno()</a></code> takes dense <code>read_geno</code> call lists and requires the declaration <code>non_reference_only = FALSE</code>; sparse call lists cannot supply zero dosages.</p></li>
+<li><p><code><a href="../reference/rduckhts_ancestry_bam.html">rduckhts_ancestry_bam()</a></code> counts reference-panel sites in indexed BAM/CRAM, using allele-fraction or balance-rule genotype frequencies, and applies the same proportion engine. <code><a href="../reference/rduckhts_ancestry_panel.html">rduckhts_ancestry_panel()</a></code> selects biallelic unambiguous SNVs with complete, valid reference values and forward-strand alleles, and publishes the panel only after it validates. When more sites are eligible than <code>max_sites</code>, every contig keeps at least one site (only the largest <code>max_sites</code> contigs when there are more contigs than that) and the rest are shared in proportion to each contig’s eligible sites minus that one, spread evenly along it. Eligibility checks keep constant state per locus, so building a panel from a full genome-wide reference needs a fraction of the memory it did.</p></li>
+</ul></div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="1.5.2.9004-0.1.5" id="rduckhts-1529004-015">Rduckhts 1.5.2.9004-0.1.5<a class="anchor" aria-label="anchor" href="#rduckhts-1529004-015"></a></h2>
 <ul><li>

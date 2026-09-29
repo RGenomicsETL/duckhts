@@ -1,5 +1,40 @@
 # Changelog
 
+## Rduckhts 1.5.2.9005-0.1.5
+
+- [`rduckhts_ancestry_proportions()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_ancestry_proportions.md)
+  estimates ancestry proportions from allele-frequency or diploid-dosage
+  relations against keyed wide or long reference products, with matching
+  audits and correlation gates on unrounded coefficients.
+  `reversed_variants` counts every site read as `1 - f`, including
+  strand-flipped reversals; `flipped_variants` counts every
+  strand-flipped site. Reference loci touching any input locus must be
+  unique; matched loci need finite loadings and frequencies in \[0, 1\].
+  Every sample returns a row for every reference group, with NULL
+  proportions and `no_matched_variants` when nothing matches. Group
+  identifiers round-trip exactly; wide references can map columns to
+  identifiers with `group_ids`. Missing genotypes are dropped.
+
+- [`rduckhts_ancestry_geno()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_ancestry_geno.md)
+  takes dense `read_geno` call lists and requires the declaration
+  `non_reference_only = FALSE`; sparse call lists cannot supply zero
+  dosages.
+
+- [`rduckhts_ancestry_bam()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_ancestry_bam.md)
+  counts reference-panel sites in indexed BAM/CRAM, using
+  allele-fraction or balance-rule genotype frequencies, and applies the
+  same proportion engine.
+  [`rduckhts_ancestry_panel()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_ancestry_panel.md)
+  selects biallelic unambiguous SNVs with complete, valid reference
+  values and forward-strand alleles, and publishes the panel only after
+  it validates. When more sites are eligible than `max_sites`, every
+  contig keeps at least one site (only the largest `max_sites` contigs
+  when there are more contigs than that) and the rest are shared in
+  proportion to each contig’s eligible sites minus that one, spread
+  evenly along it. Eligibility checks keep constant state per locus, so
+  building a panel from a full genome-wide reference needs a fraction of
+  the memory it did.
+
 ## Rduckhts 1.5.2.9004-0.1.5
 
 - [`rduckhts_somalier_find_sites()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_find_sites.md)

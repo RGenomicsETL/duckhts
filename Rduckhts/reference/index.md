@@ -18,6 +18,15 @@
   : Extract MAP Keys and Values
 - [`normalize_tabix_types()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/normalize_tabix_types.md)
   : Normalize R Data Types to DuckDB Types for Tabix
+- [`rduckhts_ancestry_bam()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_ancestry_bam.md)
+  : Project ancestry directly from an indexed BAM or CRAM
+- [`rduckhts_ancestry_geno()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_ancestry_geno.md)
+  : Estimate ancestry from a materialized \`read_geno\` relation
+- [`rduckhts_ancestry_panel()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_ancestry_panel.md)
+  : Create a deterministic ancestry site panel for BAM/CRAM counts
+- [`rduckhts_ancestry_proportions()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_ancestry_proportions.md)
+  : Estimate projected ancestry proportions from frequency or dosage
+  relations
 - [`rduckhts_bam()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam.md)
   : Create SAM/BAM/CRAM Table
 - [`rduckhts_bam_bed_coverage()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_bed_coverage.md)
