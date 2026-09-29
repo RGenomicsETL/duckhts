@@ -8,13 +8,14 @@ test_somalier_sites_import <- function() {
   expect_true(nzchar(source) && file.exists(source))
 
   sites <- rduckhts_somalier_import_sites(con, source, "GRCh38")
-  expect_equal(sites$site_index, 0:2)
-  expect_equal(sites$region, c("chr1", "chr1", "chr2"))
-  expect_equal(sites$allele_a, c("A", "A", "C"))
-  expect_equal(sites$allele_b, c("G", "G", "T"))
-  expect_equal(round(sites$population_b_af, 2), c(0.20, 0.25, 0.70))
-  expect_equal(sites$source_ref, c("G", "A", "T"))
-  expect_equal(sites$source_alt, c("A", "G", "C"))
+  # The chrX record is a sex-chromosome site numbered after every autosomal one.
+  expect_equal(sites$site_index, 0:3)
+  expect_equal(sites$region, c("chr1", "chr1", "chr2", "chrX"))
+  expect_equal(sites$allele_a, c("A", "A", "C", "A"))
+  expect_equal(sites$allele_b, c("G", "G", "T", "C"))
+  expect_equal(round(sites$population_b_af, 2), c(0.20, 0.25, 0.70, 0.40))
+  expect_equal(sites$source_ref, c("G", "A", "T", "A"))
+  expect_equal(sites$source_alt, c("A", "G", "C", "C"))
 
   expect_true(rduckhts_somalier_import_sites(
     con, source, "GRCh38", table_name = "imported_sites"

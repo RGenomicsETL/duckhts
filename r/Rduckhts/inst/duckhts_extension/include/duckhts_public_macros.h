@@ -19,6 +19,7 @@ static const char *const duckhts_public_macros[] = {
     "duckhts_somalier_matched_contamination",
     "duckhts_somalier_panel_sha256",
     "duckhts_somalier_prepare_sketches",
+    "duckhts_somalier_sex",
     "duckhts_somalier_vcf_counts",
     "duckhts_somalier_verify_sketches",
     "duckhts_tabix_convert_parquet_sql",
