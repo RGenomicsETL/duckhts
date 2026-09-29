@@ -2,6 +2,9 @@
 
 # duckhts 1.5.2.9006
 
+- ONT BAM staging receipts record the BAM SHA-256 and byte size; reuse requires
+  matching reference, read, index and BAM identities.
+
 - Consequence prediction has moved to the [DuckVEP extension](https://github.com/RGenomicsETL/DuckVEP),
   its single source. DuckHTS no longer ships the DuckVEP functions and macros
   (`duckvep_ensembl_regions`, `duckvep_ensembl_transcripts`,

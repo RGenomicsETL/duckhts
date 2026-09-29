@@ -92,6 +92,107 @@ test_ont_ecoli_derivation <- function() {
   }
   expect_error(duckhts_bench_stage_ont_ecoli(fetch = FALSE, samtools = samtools, minimap2 = ""),
                "minimap2 is required")
+
+  test_bam_receipt_identity <- function() {
+    ids <- c("ont_ecoli_k12_reference_fna_gz", "ont_ecoli_k12_reference_fna",
+             "ont_ecoli_k12_reads_fastq_gz", "ont_ecoli_k12_bam")
+    paths <- stats::setNames(vapply(ids, duckhts_bench_artifact_path, character(1L)),
+                             c("reference_gz", "reference", "reads", "bam"))
+    bam <- paths[["bam"]]
+    index <- paste0(bam, ".bai")
+    receipt <- paste0(bam, ".provenance.tsv")
+    dir.create(dirname(bam), recursive = TRUE, showWarnings = FALSE)
+
+    fasta <- readLines(paths[["reference"]], warn = FALSE)
+    contig_line <- which(startsWith(fasta, ">"))[[1L]]
+    contig <- sub("^>", "", fasta[[contig_line]])
+    reference_length <- sum(nchar(fasta[!startsWith(fasta, ">")]))
+    fastq_connection <- gzfile(paths[["reads"]])
+    fastq <- readLines(fastq_connection, warn = FALSE)
+    close(fastq_connection)
+    read_starts <- seq.int(1L, length(fastq), by = 4L)
+    alignments <- vapply(seq_along(read_starts), function(i) {
+      line <- read_starts[[i]]
+      paste(sub("^@", "", fastq[[line]]), "0", contig,
+            as.character((i - 1L) * 100L + 1L), "60",
+            paste0(nchar(fastq[[line + 1L]]), "M"), "*", "0", "0",
+            fastq[[line + 1L]], fastq[[line + 3L]], sep = "\t")
+    }, character(1L))
+    sam <- file.path(directory, "receipt-fixture.sam")
+    writeLines(c("@HD\tVN:1.6\tSO:coordinate",
+                 paste0("@SQ\tSN:", contig, "\tLN:", reference_length),
+                 alignments), sam)
+
+    rebuild_minimap2 <- minimap2
+    if (!nzchar(rebuild_minimap2) && .Platform$OS.type == "unix") {
+      rebuild_minimap2 <- file.path(directory, "minimap2-mock")
+      mock <- c(
+        "#!/bin/sh",
+        "if [ \"$1\" = \"--version\" ]; then",
+        "  printf '%s\\n' 'minimap2 receipt test mock'",
+        "  exit 0",
+        "fi",
+        "output=",
+        "while [ \"$#\" -gt 0 ]; do",
+        "  if [ \"$1\" = \"-o\" ]; then",
+        "    shift",
+        "    output=$1",
+        "  fi",
+        "  shift",
+        "done",
+        paste0("cp ", shQuote(sam, type = "sh"), " \"$output\"")
+      )
+      writeLines(mock, rebuild_minimap2)
+      Sys.chmod(rebuild_minimap2, mode = "0755")
+    }
+    if (!nzchar(rebuild_minimap2)) return(invisible(NULL))
+
+    duckhts_bench_stage_ont_ecoli(fetch = FALSE, threads = 1L,
+                                 samtools = samtools, minimap2 = rebuild_minimap2)
+    expect_identical(duckhts_bench_stage_ont_ecoli(fetch = FALSE, samtools = samtools,
+                                                   minimap2 = ""),
+                     paths[c("reference", "reads", "bam")])
+    expect_receipt_identity <- function() {
+      fields <- utils::read.delim(receipt, colClasses = "character")
+      expect_true(all(c("bam_sha256", "bam_bytes") %in% fields$field))
+      expect_identical(fields$value[match(c("bam_sha256", "bam_bytes"), fields$field)],
+                       c(digest::digest(file = bam, algo = "sha256"),
+                         as.character(file.info(bam)$size)))
+    }
+    expect_receipt_identity()
+    original_bam <- readBin(bam, what = "raw", n = file.info(bam)$size)
+    original_eof <- tail(original_bam, 28L)
+
+    header_path <- file.path(directory, "changed-header.sam")
+    header <- system2(samtools, c("view", "-H", shQuote(bam)), stdout = TRUE)
+    writeLines(c(header, "@CO\tchanged BAM content"), header_path)
+    changed_bam <- file.path(directory, "changed-header.bam")
+    expect_equal(system2(samtools, c("reheader", shQuote(header_path), shQuote(bam)),
+                         stdout = changed_bam), 0L)
+    changed_bytes <- readBin(changed_bam, what = "raw", n = file.info(changed_bam)$size)
+    expect_identical(tail(changed_bytes, 28L), original_eof)
+    expect_false(identical(digest::digest(file = changed_bam, algo = "sha256"),
+                           digest::digest(file = bam, algo = "sha256")))
+    writeBin(changed_bytes, bam)
+    expect_equal(system2(samtools, c("quickcheck", shQuote(bam))), 0L)
+    expect_error(duckhts_bench_stage_ont_ecoli(fetch = FALSE, samtools = samtools,
+                                               minimap2 = ""), "minimap2 is required")
+    duckhts_bench_stage_ont_ecoli(fetch = FALSE, threads = 1L,
+                                 samtools = samtools, minimap2 = rebuild_minimap2)
+    expect_receipt_identity()
+
+    fields <- utils::read.delim(receipt, colClasses = "character")
+    legacy <- fields[!fields$field %in% c("bam_sha256", "bam_bytes"), ]
+    utils::write.table(legacy, receipt, sep = "\t", row.names = FALSE, quote = FALSE)
+    expect_error(duckhts_bench_stage_ont_ecoli(fetch = FALSE, samtools = samtools,
+                                               minimap2 = ""), "minimap2 is required")
+    duckhts_bench_stage_ont_ecoli(fetch = FALSE, threads = 1L,
+                                 samtools = samtools, minimap2 = rebuild_minimap2)
+    expect_receipt_identity()
+    unlink(c(bam, index, receipt), force = TRUE)
+  }
+
+  test_bam_receipt_identity()
   if (!nzchar(minimap2)) return(invisible(NULL))
 
   paths <- duckhts_bench_stage_ont_ecoli(fetch = FALSE, threads = 1L,
@@ -102,13 +203,18 @@ test_ont_ecoli_derivation <- function() {
   receipt <- paste0(paths[["bam"]], ".provenance.tsv")
   expect_true(file.exists(receipt))
   fields <- utils::read.delim(receipt, colClasses = "character")
-  expect_true(all(c("aligner", "aligner_preset", "sorter", "index_sha256", "index_bytes") %in% fields$field))
+  expect_true(all(c("aligner", "aligner_preset", "sorter", "index_sha256", "index_bytes",
+                    "bam_sha256", "bam_bytes") %in% fields$field))
   expect_equal(fields$value[fields$field == "aligner_preset"], "map-ont")
   index <- paste0(paths[["bam"]], ".bai")
   expect_identical(fields$value[fields$field == "index_sha256"],
                    digest::digest(file = index, algo = "sha256"))
   expect_identical(fields$value[fields$field == "index_bytes"],
                    as.character(file.info(index)$size))
+  expect_identical(fields$value[fields$field == "bam_sha256"],
+                   digest::digest(file = paths[["bam"]], algo = "sha256"))
+  expect_identical(fields$value[fields$field == "bam_bytes"],
+                   as.character(file.info(paths[["bam"]])$size))
   aligned <- system2(samtools, c("view", "-c", "-F", "4", shQuote(paths[["bam"]])), stdout = TRUE)
   expect_equal(as.integer(aligned), length(starts))
   expect_false(any(grepl("partial", list.files(dirname(paths[["bam"]])))))
