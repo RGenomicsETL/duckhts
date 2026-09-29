@@ -1,3 +1,10 @@
+# Rduckhts 1.5.2.9007-0.1.5
+
+- `rduckhts_genbank()` accepts `attributes` to expose qualifier keys as
+  VARCHAR columns that equal `attributes_map[key]`, computed only when
+  selected. Tests compare every named column with the map lookup on the bundled
+  phiX174 record and cover the rejected names.
+
 # Rduckhts 1.5.2.9006-0.1.5
 
 - The bundled function catalog documents `bam_bin_counts(include_unmapped := FALSE)`
