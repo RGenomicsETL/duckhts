@@ -13,7 +13,7 @@ query I
 SELECT count(*) FROM duckhts_somalier_import_sites(
   'test/data/somalier_sites.vcf', 'GRCh38');
 ----
-3
+4
 
 query IT
 SELECT cigar_query_length('5M2I'), duckhts_quote_ident('two words');

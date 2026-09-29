@@ -29,7 +29,8 @@ leading `^` exclusion, `"-"` for all, or `""` for none.}
 
 \item{filter_policy}{Record FILTER policy: `"pass_or_unapplied"` makes named
 failures unavailable, `"include_all"` uses their AD, and `"error"` rejects
-a selected panel record with a named failure.}
+a selected panel record with a named failure. X/Y sites ignore the policy
+and always use their AD, as Somalier extraction does.}
 
 \item{table_name}{Optional output table. `NULL` returns a data frame.}
 
@@ -40,7 +41,7 @@ A data frame if `table_name` is `NULL`; otherwise invisible `TRUE`.
 }
 \description{
 Produce the complete sample-by-panel count relation consumed by the
-Somalier-derived relatedness and contamination functions. `FORMAT/AD` must
+Somalier-derived relatedness, contamination and sex functions. `FORMAT/AD` must
 declare `Number=R,Type=Integer`; A and B slots are matched by exact REF/ALT
 identity, and `other` sums only the remaining declared-allele slots. Missing
 sites and unavailable AD remain rows with three NULL counts, distinct from

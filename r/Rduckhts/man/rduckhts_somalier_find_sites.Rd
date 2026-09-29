@@ -86,8 +86,8 @@ and allele order with `tie_order = "lexical"`. For a table or view, scan order
 is only reliable when its query explicitly orders the records. Only
 uppercase A/C/G/T biallelic SNVs enter the canonical panel. `generic` does
 not interpret contig names as human sex chromosomes. The result can include
-X/Y, whereas `duckhts_somalier_import_sites()` admits autosomes only;
-filter `region` for autosome-only consumers. Gnotate zip input is not
+X/Y, which `duckhts_somalier_import_sites()` keeps as sex-chromosome sites
+for `rduckhts_somalier_sex()`. Gnotate zip input is not
 supported: use an allele-specific exclusion relation. `assembly` labels
 the input coordinates; this function does not run the liftover steps in
 Somalier's `scripts/find_sites.sh`.

@@ -2,6 +2,32 @@
 
 # duckhts 1.5.2.9007
 
+- Breaking: the Somalier panel now carries X/Y sites, and its identity changes.
+  `duckhts_somalier_import_sites()` keeps records on the exact Somalier v0.3.4
+  X/Y aliases (it used to drop them) and numbers every autosomal site before any
+  X/Y site; a sites file still needs an autosomal record. There is no PAR
+  filtering on import or count extraction, as in Somalier, so choose X sites
+  outside the PAR when selecting the file. `duckhts_somalier_panel_sha256()`
+  accepts X/Y regions, requires autosomal `site_index` values to precede them,
+  and uses a new versioned domain, so every panel, frequency and sketch digest
+  differs from earlier builds even for autosomal-only panels: recompute
+  persisted digests and sketches. `duckhts_somalier_vcf_counts()` and
+  `duckhts_somalier_bam_counts()` count every panel site in one pass; X/Y sites
+  ignore `filter_policy`, as Somalier extraction does. Sketches, verification,
+  the frequency digest, CHARR and matched contamination ignore X/Y panel and
+  evidence rows, and their numeric results on the autosomal sites are unchanged.
+
+- New `duckhts_somalier_sex(counts_table, panel_table, ...)` reports, per
+  sample, X and Y depth relative to autosomal depth, usable X site and
+  het/hom-alt counts, an XX, XY or ambiguous call from documented thresholds,
+  a Y signal, review flags, a status, and the panel identity, following
+  Somalier v0.3.4 `relate.nim`. It is review evidence, not a diagnosis.
+  Somalier's Y check depends on the cohort; `y_gate := 'sample'` (default) uses
+  the sample alone and `'cohort'` reproduces it. Integer counts equal the
+  pinned Somalier `extract` and `relate` output on VCF and BAM fixtures
+  (`test/scripts/somalier_sex_differential.R`). The count of public macros is
+  now 24.
+
 - A closed database is now released. `LOAD` used to open private connections
   into the loading database for cgranges and for Somalier BAM/CRAM panel reading
   and keep them until the process ended. Each connection referenced the database
