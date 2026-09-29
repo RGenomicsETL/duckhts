@@ -275,10 +275,16 @@ duckhts_sql <- function(extension, source, index, fixture, output,
   panel_values <- paste(sprintf("('test', %d, '%s', %d, '%s', '%s')",
     fixture$panel$site_index, fixture$panel$region, fixture$panel$position,
     fixture$panel$allele_a, fixture$panel$allele_b), collapse = ",")
+  panel_file <- if (nzchar(output)) {
+    paste0(output, ".panel.parquet")
+  } else {
+    tempfile(fileext = ".parquet")
+  }
   query <- paste0(
     "SELECT site_index, region, position, allele_a, allele_b, a, b, other, status ",
     "FROM duckhts_somalier_bam_counts(", sql_quote(source),
-    ", 'panel', 'sample-1', ", sql_quote(fixture$reference),
+    ", NULL, 'sample-1', ", sql_quote(fixture$reference),
+    ", panel_parquet := ", sql_quote(panel_file),
     ", index_path := ", sql_quote(index),
     if (is.null(reference_index)) "" else paste0(
       ", reference_index_path := ", sql_quote(reference_index)
@@ -292,7 +298,8 @@ duckhts_sql <- function(extension, source, index, fixture, output,
     "SET threads = ", max(1L, worker_count), ";",
     "CREATE TABLE panel(assembly VARCHAR, site_index UBIGINT, region VARCHAR, ",
     "position UBIGINT, allele_a VARCHAR, allele_b VARCHAR);",
-    "INSERT INTO panel VALUES ", panel_values, ";", statement, ";")
+    "INSERT INTO panel VALUES ", panel_values, ";",
+    "COPY panel TO ", sql_quote(panel_file), " (FORMAT parquet);", statement, ";")
 }
 
 duckhts_counts <- function(duckdb, extension, source, index, fixture, directory,

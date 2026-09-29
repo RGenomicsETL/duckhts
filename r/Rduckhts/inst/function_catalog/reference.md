@@ -852,48 +852,38 @@ BOOLEAN
 SELECT duckhts_cgranges_destroy('targets_idx');
 ```
 
-## duckhts_cgranges_from_query
-
-Execute a SQL query on an extension-owned DuckDB connection, append its interval rows into a session-scoped cgranges registry entry, and leave the populated index ready for explicit finalization with duckhts_cgranges_index(...).
-
-Signature:
-
-```sql
-duckhts_cgranges_from_query(name, query, chrom_col, start_col, end_col[, label_col])
-```
-
-Returns:
-
-```
-BOOLEAN
-```
-
-### Examples
-
-```sql
-SELECT duckhts_cgranges_from_query('targets_idx', 'SELECT chrom, start, "end", name FROM targets', 'chrom', 'start', 'end', 'name');
-```
-
 ## duckhts_cgranges_from_table
 
-Reserved convenience constructor for bulk cgranges population from a table name. The current implementation is intentionally deferred and directs callers to duckhts_cgranges_from_query(...).
+Create, populate and finalize a session-scoped cgranges registry entry from the rows of a table or view, on the caller's connection.
 
 Signature:
 
 ```sql
-duckhts_cgranges_from_table(name, table_name, chrom_col, start_col, end_col[, label_col])
+duckhts_cgranges_from_table(name, table_name, chrom_col, start_col, end_col, label_col)
 ```
 
 Returns:
 
 ```
-BOOLEAN
+table(indexed BOOLEAN)
 ```
+
+### Source
+
+table_name is any relation visible to the calling connection, including TEMP tables, views and uncommitted rows; build it from a query with CREATE TEMP VIEW. chrom_col, start_col, end_col and label_col name its columns; label_col may be omitted (five arguments) for unlabeled intervals. The entry is created, filled and finalized in one statement and returns one TRUE row, so duckhts_cgranges_index(...) is not needed afterwards.
+
+### Errors
+
+The name must be new in the session. A failure while filling (NULL chrom, start or end, an unsupported label type, a coordinate outside int32) leaves the partly filled entry in place; remove it with duckhts_cgranges_destroy(...) before retrying.
+
+### Order
+
+Without label_col the label and interval_ordinal follow insertion order. A parallel scan of a large table does not fix that order, so pass label_col when a stable identity is needed.
 
 ### Examples
 
 ```sql
-SELECT duckhts_cgranges_from_table('targets_idx', 'targets', 'chrom', 'start', 'end', 'name');
+SELECT * FROM duckhts_cgranges_from_table('targets_idx', 'targets', 'chrom', 'start', 'end', 'name');
 ```
 
 ## duckhts_cgranges_has_overlap
@@ -956,10 +946,14 @@ Returns:
 STRUCT(interval_ordinal BIGINT, label VARCHAR, label_type VARCHAR, interval_chrom VARCHAR, interval_start INTEGER, interval_end INTEGER)[]
 ```
 
+### Bulk probing
+
+This is the bulk overlap path for any relation of probes. Expand the list in the SELECT list, as in the example: a select-list UNNEST streams the hits, whereas CROSS JOIN UNNEST over the same list plans a lateral join that was several times slower in measurement. Use row_number() OVER () or an existing key to identify probes.
+
 ### Examples
 
 ```sql
-SELECT q.*, hit.interval_chrom, hit.interval_start, hit.interval_end, hit.label FROM read_bed('queries.bed') AS q CROSS JOIN UNNEST(duckhts_cgranges_overlaps_list('targets_idx', q.chrom, q.start, q."end")) AS u(hit);
+SELECT q.chrom, q.start, q."end", unnest(duckhts_cgranges_overlaps_list('targets_idx', q.chrom, q.start, q."end")) AS hit FROM read_bed('queries.bed') AS q;
 ```
 
 ## duckhts_cgranges_overlaps
@@ -982,28 +976,6 @@ table
 
 ```sql
 SELECT * FROM duckhts_cgranges_overlaps('targets_idx', 'chr1', 100, 150);
-```
-
-## duckhts_cgranges_overlaps_bulk
-
-Run a SQL query that yields overlap probes, stream those rows through a finalized session-scoped cgranges registry entry, and return one row per matching indexed interval. The probe query runs on the extension-owned helper connection, so it must reference regular tables/views rather than connection-local temp tables. When query_row_id_col is omitted, query_row_id defaults to the 1-based probe row ordinal.
-
-Signature:
-
-```sql
-duckhts_cgranges_overlaps_bulk(name, query, chrom_col, start_col, end_col, mode := 'overlap', query_row_id_col := NULL)
-```
-
-Returns:
-
-```
-table
-```
-
-### Examples
-
-```sql
-SELECT * FROM duckhts_cgranges_overlaps_bulk('targets_idx', 'SELECT probe_id, chrom, start, "end" FROM probes', 'chrom', 'start', 'end', query_row_id_col := 'probe_id');
 ```
 
 ## read_fastq
@@ -1200,7 +1172,7 @@ table
 
 ### Execution
 
-Exactly one of panel_table or panel_parquet supplies the canonical typed six-column panel. The panel is materialized and validated once, then worker_count partitions it into at most 64 DuckDB scan jobs. Each worker-local job owns one alignment handle, index, multi-region iterator, pileup, reference handle and bounded overlap workspace; no mutable htslib or faidx state is shared. DuckDB's connection thread setting limits concurrent jobs. decompression_threads separately controls htslib workers per alignment handle. Parallel output order is unspecified; use ORDER BY site_index when order matters.
+panel_parquet supplies the canonical typed six-column panel; panel_table is retained for signature compatibility and must be NULL. The panel is read from a local Parquet file, materialized and validated once on a private in-memory DuckDB instance opened and closed for the call, then worker_count partitions it into at most 64 DuckDB scan jobs. Each worker-local job owns one alignment handle, index, multi-region iterator, pileup, reference handle and bounded overlap workspace; no mutable htslib or faidx state is shared. DuckDB's connection thread setting limits concurrent jobs. decompression_threads separately controls htslib workers per alignment handle. Parallel output order is unspecified; use ORDER BY site_index when order matters.
 
 ### Evidence
 
@@ -1208,12 +1180,12 @@ A and B are exact uppercase panel bases; other counts every other observed base.
 
 ### Limits and transport
 
-panel_table must name a committed table or view visible to the database; caller-local TEMP objects and uncommitted changes are not visible to panel preparation. One retained-connection preparation slot is shared by concurrent calls: nested or concurrent preparation returns a busy error and callers may retry. panel_parquet reads an ordinary Parquet file directly. max_sites bounds the shared panel. max_depth, max_overlap_qnames and max_region_bytes bound each active scan job; concurrent workspace can therefore grow with worker_count. remote_block_bytes, remote_cache_bytes and reference_cache_bytes apply per worker-owned handle, and zero disables that cache override. Explicit non-colocated BAM/CRAM and FASTA indexes are honored; CRAM keeps the alignment file's original @SQ lengths and does not create a default FASTA-index sidecar. overlap_policy='hileup_v0.1.0' pins encounter-order mate suppression only, while 'none' counts every retained observation.
+The private reader keeps no connection into the caller's database, so a closed database is released; it also cannot see the caller's tables, so write the panel with COPY ... TO 'panel.parquet' first (rduckhts_somalier_bam_counts does this for a panel_table). panel_parquet must be a local ordinary Parquet file: remote URLs are not read. max_sites bounds the shared panel. max_depth, max_overlap_qnames and max_region_bytes bound each active scan job; concurrent workspace can therefore grow with worker_count. remote_block_bytes, remote_cache_bytes and reference_cache_bytes apply per worker-owned handle, and zero disables that cache override. Explicit non-colocated BAM/CRAM and FASTA indexes are honored; CRAM keeps the alignment file's original @SQ lengths and does not create a default FASTA-index sidecar. overlap_policy='hileup_v0.1.0' pins encounter-order mate suppression only, while 'none' counts every retained observation.
 
 ### Examples
 
 ```sql
-CREATE TABLE allele_counts AS SELECT * FROM duckhts_somalier_bam_counts('sample.bam', 'fingerprint_panel', 'sample-1', 'reference.fa');
+CREATE TABLE allele_counts AS SELECT * FROM duckhts_somalier_bam_counts('sample.bam', NULL, 'sample-1', 'reference.fa', panel_parquet := 'fingerprint_panel.parquet');
 ```
 
 ## duckhts_ancestry_proportions

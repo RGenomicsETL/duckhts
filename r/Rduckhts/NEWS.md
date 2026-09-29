@@ -1,3 +1,24 @@
+# Rduckhts 1.5.2.9007-0.1.5
+
+- A closed database file is released and can be reopened in the same R process
+  after cgranges or `rduckhts_somalier_bam_counts()` have been used; the bundled
+  extension no longer keeps connections into the loading database. This fixes
+  reopening on Windows. A tinytest closes and reopens a file database after
+  using both.
+
+- Breaking: `duckhts_cgranges_from_query()` and `duckhts_cgranges_overlaps_bulk()`
+  are removed from the bundled extension. Use the table macro
+  `SELECT * FROM duckhts_cgranges_from_table(name, table_name, chrom_col,
+  start_col, end_col[, label_col])` over any table, view or TEMP table on your
+  connection, and `SELECT ..., unnest(duckhts_cgranges_overlaps_list(...))` for
+  bulk probing. The README examples use them.
+
+- `rduckhts_somalier_bam_counts()` and `rduckhts_ancestry_bam()` keep their
+  arguments. The native reader takes a local Parquet panel, so `panel_table` is
+  now written to a scratch Parquet file for the call; temporary tables and
+  uncommitted rows are therefore accepted. Remote `panel_parquet` paths are no
+  longer read.
+
 # Rduckhts 1.5.2.9006-0.1.5
 
 - The bundled function catalog documents `bam_bin_counts(include_unmapped := FALSE)`

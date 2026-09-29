@@ -1,5 +1,43 @@
 # DuckHTS Extension News
 
+# duckhts 1.5.2.9007
+
+- A closed database is now released. `LOAD` used to open private connections
+  into the loading database for cgranges and for Somalier BAM/CRAM panel reading
+  and keep them until the process ended. Each connection referenced the database
+  instance, so the instance outlived the client shutdown: it kept a database file
+  open (Windows could not reopen it in the same process) and never freed its
+  memory. `LOAD` now keeps no connection, and a regression test closes a file
+  database after using both function families and reopens it.
+
+- Breaking: `duckhts_cgranges_from_query(...)` and
+  `duckhts_cgranges_overlaps_bulk(...)` are removed, because each ran a query on
+  a private connection. Replacements run on the caller's connection:
+  - `duckhts_cgranges_from_table(name, table_name, chrom_col, start_col, end_col[, label_col])`
+    is now a table macro (it was an unimplemented scalar) that creates, fills
+    and finalizes the index in one statement and returns one `indexed` row, so
+    `SELECT * FROM duckhts_cgranges_from_table(...)` replaces
+    `SELECT duckhts_cgranges_from_query(...)` plus `duckhts_cgranges_index(...)`.
+    Build the relation from a query with `CREATE TEMP VIEW`; TEMP tables, views
+    and uncommitted rows are visible. Without `label_col`, labels and ordinals
+    follow insertion order, which a parallel scan of a large table does not fix.
+    A failure while filling leaves the partly filled entry for
+    `duckhts_cgranges_destroy(...)`. The count of public macros is now 23.
+  - Bulk probing is
+    `SELECT ..., unnest(duckhts_cgranges_overlaps_list(name, chrom, start, end))`.
+    Expand in the SELECT list: `CROSS JOIN UNNEST` over the same list was about
+    six times slower. Hits equal `duckhts_cgranges_overlaps_bulk` hit for hit;
+    the list returns labels as text with a `label_type` column.
+
+- Breaking: `duckhts_somalier_bam_counts` reads its panel from Parquet only.
+  The panel is read on a private in-memory DuckDB instance opened and closed for
+  that call, so `panel_table` (which needed a retained connection into the
+  caller's database) is rejected: pass NULL and set `panel_parquet` to a local
+  Parquet file, for example one written with `COPY panel TO 'panel.parquet'`.
+  `panel_parquet` no longer reads remote URLs through the caller's `httpfs`.
+  The shared preparation slot and its busy/recursive error are gone. The panel
+  validation macro is defined once and installed in the private instance.
+
 # duckhts 1.5.2.9006
 
 - The function catalog documents `bam_bin_counts(include_unmapped := FALSE)` and

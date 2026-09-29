@@ -102,18 +102,19 @@ rduckhts_somalier_vcf_counts <- function(
 #' `decompression_threads` separately controls htslib decompression workers per
 #' source handle.
 #' Valid uncovered sites are measured zero depth; reference or alignment-header
-#' mismatches remain rows with NULL counts and a named status. The panel can be
-#' a committed table/view or an ordinary Parquet file. Caller-local temporary
-#' relations and uncommitted changes are not visible during panel preparation.
-#' One retained-connection preparation slot is shared by concurrent calls;
-#' nested or concurrent preparation errors and callers may retry.
+#' mismatches remain rows with NULL counts and a named status. The native
+#' function reads the panel from a local Parquet file on a private in-memory
+#' instance. A panel table or view is therefore written to a scratch Parquet
+#' file for the call, which also makes caller-local temporary relations and
+#' uncommitted rows visible.
 #'
 #' @param con A DuckDB connection with DuckHTS loaded.
 #' @param source_path One indexed BAM/CRAM path or URI.
 #' @param sample_id Nonempty sample identity assigned to the extracted rows.
 #' @param reference_path Reference FASTA matching the panel and alignments.
-#' @param panel_table Name of a committed ordered panel table or view.
-#' @param panel_parquet Ordinary panel Parquet path, instead of `panel_table`.
+#' @param panel_table Name of an ordered panel table or view visible to `con`.
+#' @param panel_parquet Local ordinary panel Parquet path, instead of
+#'   `panel_table`.
 #' @param index_path Optional explicit BAM/CRAM index path.
 #' @param reference_index_path Optional explicit FASTA index path.
 #' @param min_mapq Minimum alignment mapping quality.
@@ -205,16 +206,24 @@ rduckhts_somalier_bam_counts <- function(
   }
   if (!is.null(panel_table)) {
     .somalier_validate_name(panel_table, "panel_table")
+    panel_parquet <- tempfile("rduckhts_somalier_panel_", fileext = ".parquet")
+    on.exit(unlink(panel_parquet), add = TRUE)
+    DBI::dbExecute(con, sprintf(
+      paste0(
+        "COPY (SELECT assembly, site_index, region, position, allele_a, ",
+        "allele_b FROM %s) TO %s (FORMAT parquet)"
+      ),
+      sql_quote_identifier(con, panel_table),
+      sql_quote_string(con, normalizePath(panel_parquet, winslash = "/",
+                                          mustWork = FALSE))
+    ))
   } else {
     .somalier_validate_name(panel_parquet, "panel_parquet")
   }
   arguments <- c(
-    sql_quote_string(con, source_path),
-    if (is.null(panel_table)) "NULL" else sql_quote_string(con, panel_table),
+    sql_quote_string(con, source_path), "NULL",
     sql_quote_string(con, sample_id), sql_quote_string(con, reference_path),
-    if (!is.null(panel_parquet)) {
-      paste0("panel_parquet := ", sql_quote_string(con, panel_parquet))
-    },
+    paste0("panel_parquet := ", sql_quote_string(con, panel_parquet)),
     if (!is.null(index_path)) {
       paste0("index_path := ", sql_quote_string(con, index_path))
     },
