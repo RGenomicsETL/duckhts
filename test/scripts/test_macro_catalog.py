@@ -176,7 +176,7 @@ def main():
         subprocess.run([sys.executable, __file__, "attached", str(path)], check=True)
         assert digest(path) == before
         subprocess.run([sys.executable, __file__, "rollback", str(path)], check=True)
-        print("macro catalog: 32 definitions, 23 public, file/readonly/rollback/two connections OK")
+        print("macro catalog: 33 definitions, 24 public, file/readonly/rollback/two connections OK")
 
 
 if __name__ == "__main__":
