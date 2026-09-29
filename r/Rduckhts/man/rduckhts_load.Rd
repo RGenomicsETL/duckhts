@@ -27,6 +27,8 @@ underlying DuckDB diagnostic in the initialization error.
 The connection must permit unsigned extension loading. With current versions
 of the \pkg{duckdb} R package, its driver must also permit extension loading.
 Prefer \code{rduckhts_connect()} when Rduckhts owns the connection.
+File-backed connections receive TEMP macros on this connection after LOAD.
+Use \code{rduckhts_install_macros()} on additional connections.
 }
 \examples{
 con <- rduckhts_connect()

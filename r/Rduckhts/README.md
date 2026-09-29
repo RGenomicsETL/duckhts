@@ -145,6 +145,39 @@ Security behavior of this config:
 - The config can be updated or cleared between queries if different
   hosts need different policies.
 
+## Using DuckHTS with a database file
+
+`rduckhts_connect(dbdir = "file.duckdb")` and `rduckhts_load(con)`
+install the macros as connection-local `TEMP` macros when `LOAD` does
+not create them. They work on read-only database files without changing
+the file catalog. For another DBI or pool connection with DuckHTS
+loaded, call `rduckhts_install_macros(con)` on that connection.
+Installation is idempotent; inside a caller transaction it follows the
+transaction’s rollback.
+
+Other clients can install the definitions in order on each connection:
+
+``` python
+con.execute("LOAD duckhts")
+for (sql,) in con.execute("SELECT sql FROM duckhts_macro_definitions() ORDER BY install_order").fetchall():
+    con.execute(sql)
+```
+
+For the DuckDB CLI, generate a script and read it on the connection that
+needs macros (replace the extension path):
+
+``` sh
+DB=example.duckdb
+EXT=/absolute/path/to/duckhts.duckdb_extension
+duckdb -unsigned "$DB" "LOAD '$EXT'; COPY (SELECT sql || ';' FROM duckhts_macro_definitions() ORDER BY install_order) TO 'duckhts_macros.sql' (HEADER false, DELIMITER E'\\t', QUOTE '', ESCAPE '');"
+printf "LOAD '%s';\n.read duckhts_macros.sql\nSELECT duckhts_quote_ident('a');\n" "$EXT" | duckdb -unsigned "$DB"
+```
+
+`TEMP` macros shadow, without deleting, persistent macros left by older
+versions. Inspect those through `duckdb_functions()` with
+`database_name` equal to the file catalog name, and drop them explicitly
+if wanted.
+
 ## Quick Start
 
 Create a package-owned connection with `rduckhts_connect()`, which
@@ -468,6 +501,12 @@ Show generated function catalog
 ## Extension Function Catalog
 
 This section is generated from `functions.yaml`.
+
+### Utilities
+
+| Function                                                                                    | Kind           | R helper | Description                                                                     |
+|---------------------------------------------------------------------------------------------|----------------|----------|---------------------------------------------------------------------------------|
+| [`duckhts_macro_definitions`](inst/function_catalog/reference.md#duckhts_macro_definitions) | table_function |          | Export the ordered DuckHTS macro definitions for connection-local installation. |
 
 ### Diagnostics
 

@@ -9,6 +9,12 @@
   scalar and aggregate argument counts,
   native table options, and macro parameter names.
 
+- `LOAD` installs SQL macros only when the default database is writable and
+  in memory. For file-backed or read-only defaults, native functions load
+  without catalog writes; execute the ordered `TEMP` statements from
+  `duckhts_macro_definitions()` on each connection that needs macros. These
+  shadow persistent macros in existing files without deleting them.
+
 - Consequence prediction has moved to the [DuckVEP extension](https://github.com/RGenomicsETL/DuckVEP),
   its single source. DuckHTS no longer ships the DuckVEP functions and macros
   (`duckvep_ensembl_regions`, `duckvep_ensembl_transcripts`,

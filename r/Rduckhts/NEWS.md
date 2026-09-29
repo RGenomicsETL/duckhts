@@ -7,6 +7,12 @@
   argument counts, native table options, and
   macro parameter names.
 
+- `rduckhts_connect()` and `rduckhts_load()` install connection-local macros
+  automatically for database files, including read-only files, without
+  modifying the file catalog. Use `rduckhts_install_macros(con)` for other
+  DBI or pool connections with the extension loaded; it is idempotent and
+  follows a caller transaction's rollback.
+
 - Consequence prediction has moved to DuckVEP and its R package, Rduckvep
   (<https://github.com/RGenomicsETL/DuckVEP>). `rduckhts_haplotypes()` and the bundled
   consequence fixtures are removed; the bundled extension no longer carries the DuckVEP
