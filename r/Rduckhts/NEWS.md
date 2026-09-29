@@ -27,7 +27,12 @@
   allele-fraction or balance-rule genotype frequencies, and applies the same
   proportion engine. `rduckhts_ancestry_panel()` selects biallelic unambiguous SNVs
   with complete, valid reference values and forward-strand alleles, and publishes
-  the panel only after it validates.
+  the panel only after it validates. When more sites are eligible than `max_sites`,
+  every contig keeps at least one site (only the largest `max_sites` contigs when
+  there are more contigs than that) and the rest are shared in proportion to each
+  contig's eligible sites minus that one, spread evenly along it. Eligibility checks
+  keep constant state per locus, so building a panel from a full genome-wide reference
+  needs a fraction of the memory it did.
 
 # Rduckhts 1.5.2.9004-0.1.5
 

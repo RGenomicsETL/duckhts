@@ -21,11 +21,108 @@ test_ancestry_relations <- function() {
   panel <- rduckhts_ancestry_panel(con, "ancestry_ref", "ancestry_pc",
                                    "ancestry_selected", "GRCh38", spacing_bp = 1,
                                    max_sites = 5)
+  # 8 eligible sites on one contig, max_sites = 5: 5 sites spread along it.
   expect_equal(panel$sites, 5)
   expect_equal(nchar(panel$panel_sha256), 64L)
   selected <- dbGetQuery(con, "SELECT site_index, position FROM ancestry_selected ORDER BY site_index")
   expect_equal(selected$site_index, 0:4)
-  expect_equal(selected$position, 100:104)
+  expect_equal(selected$position, c(100, 102, 104, 105, 107))
+  # A capped panel spans every contig rather than filling from the first one.
+  dbExecute(con, "CREATE TEMP VIEW ancestry_two_contig_ref AS SELECT * FROM ancestry_ref UNION ALL SELECT * REPLACE ('chr2' AS chromosome) FROM ancestry_ref")
+  dbExecute(con, "CREATE TEMP VIEW ancestry_two_contig_pc AS SELECT * FROM ancestry_pc UNION ALL SELECT * REPLACE ('chr2' AS chromosome) FROM ancestry_pc")
+  two_contig <- rduckhts_ancestry_panel(con, "ancestry_two_contig_ref", "ancestry_two_contig_pc",
+                                        "ancestry_two_contig", "GRCh38", spacing_bp = 1,
+                                        max_sites = 8)
+  expect_equal(two_contig$sites, 8)
+  expect_equal(dbGetQuery(con, "SELECT region, count(*)::INTEGER AS n FROM ancestry_two_contig GROUP BY region ORDER BY region")$n,
+               c(4L, 4L))
+  # Uneven contigs keep every contig: 7 sites on chr1 and 1 on chr2 with
+  # max_sites = 4 give chr1 three sites and chr2 its only one.
+  dbExecute(con, "CREATE TEMP VIEW ancestry_uneven_ref AS SELECT * FROM ancestry_ref WHERE position < 107 UNION ALL SELECT * REPLACE ('chr2' AS chromosome) FROM ancestry_ref WHERE position = 107")
+  dbExecute(con, "CREATE TEMP VIEW ancestry_uneven_pc AS SELECT * FROM ancestry_pc WHERE position < 107 UNION ALL SELECT * REPLACE ('chr2' AS chromosome) FROM ancestry_pc WHERE position = 107")
+  uneven <- rduckhts_ancestry_panel(con, "ancestry_uneven_ref", "ancestry_uneven_pc",
+                                    "ancestry_uneven", "GRCh38", spacing_bp = 1, max_sites = 4)
+  expect_equal(uneven$sites, 4)
+  expect_equal(dbGetQuery(con, "SELECT region, count(*)::INTEGER AS n FROM ancestry_uneven GROUP BY region ORDER BY region")$n,
+               c(3L, 1L))
+  # After one site each, the rest follow eligible sites minus one: 2, 2 and 100
+  # sites with max_sites = 50 share 47 remaining slots by weights 1, 1 and 99,
+  # giving 2, 1 and 47 (the tie between the small contigs goes by region order).
+  dbExecute(con, paste0(
+    "CREATE TEMP TABLE ancestry_weight_sites AS SELECT * FROM (VALUES ('chrA', 2), ",
+    "('chrB', 2), ('chrC', 100)) t(chromosome, n), range(n) r(i)"))
+  for (side in c("ref", "pc")) {
+    dbExecute(con, sprintf(paste0(
+      "CREATE TEMP VIEW ancestry_weight_%s AS SELECT a.* REPLACE (s.chromosome AS chromosome, ",
+      "1000 + 10 * s.i AS position) FROM ancestry_%s a, ancestry_weight_sites s ",
+      "WHERE a.position = 100"), side, side))
+  }
+  weighted <- rduckhts_ancestry_panel(con, "ancestry_weight_ref", "ancestry_weight_pc",
+                                      "ancestry_weighted", "GRCh38", spacing_bp = 1,
+                                      max_sites = 50)
+  expect_equal(weighted$sites, 50)
+  expect_equal(dbGetQuery(con, "SELECT region, count(*)::INTEGER AS n FROM ancestry_weighted GROUP BY region ORDER BY region")$n,
+               c(2L, 1L, 47L))
+  # A locus needs one allele pair, and every group and every PC exactly once: a
+  # repeated group (101), a missing group (102), a second allele pair (103), a
+  # repeated PC (104) and a missing PC (105) each exclude only their locus.
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_locus_ref AS SELECT * REPLACE (",
+    "CASE WHEN position = 101 THEN 'A' ELSE group_id END AS group_id, ",
+    "CASE WHEN position = 103 AND group_id = 'B' THEN 'A' ELSE allele_b END AS allele_b) ",
+    "FROM ancestry_ref WHERE NOT (position = 102 AND group_id = 'B')"))
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_locus_pc AS SELECT * REPLACE ",
+    "(CASE WHEN position = 104 THEN 1 ELSE pc END AS pc) FROM ancestry_pc ",
+    "WHERE NOT (position = 105 AND pc = 2)"))
+  locus <- rduckhts_ancestry_panel(con, "ancestry_locus_ref", "ancestry_locus_pc",
+                                   "ancestry_locus", "GRCh38", spacing_bp = 1,
+                                   max_sites = 100)
+  expect_equal(locus$sites, 3)
+  expect_equal(dbGetQuery(con, "SELECT position FROM ancestry_locus ORDER BY site_index")$position,
+               c(100, 106, 107))
+  # With fewer slots than contigs, the largest contigs keep one site each, and equal
+  # contigs are taken in region order.
+  contig_panel <- function(label, sizes, max_sites) {
+    dbExecute(con, sprintf(paste0(
+      "CREATE OR REPLACE TEMP TABLE %s_sites AS SELECT * FROM (VALUES %s) t(chromosome, n), ",
+      "range(n) r(i)"), label,
+      paste(sprintf("('%s', %d)", names(sizes), sizes), collapse = ", ")))
+    for (side in c("ref", "pc")) {
+      dbExecute(con, sprintf(paste0(
+        "CREATE OR REPLACE TEMP VIEW %s_%s AS SELECT a.* REPLACE (s.chromosome AS chromosome, ",
+        "1000 + 10 * s.i AS position) FROM ancestry_%s a, %s_sites s WHERE a.position = 100"),
+        label, side, side, label))
+    }
+    rduckhts_ancestry_panel(con, paste0(label, "_ref"), paste0(label, "_pc"), label, "GRCh38",
+                            spacing_bp = 1, max_sites = max_sites)
+    dbGetQuery(con, sprintf("SELECT region, count(*)::INTEGER AS n FROM %s GROUP BY region ORDER BY region",
+                            label))
+  }
+  largest <- contig_panel("ancestry_largest", c(chrA = 1, chrB = 5, chrC = 3), 2)
+  expect_equal(largest$region, c("chrB", "chrC"))
+  expect_equal(largest$n, c(1L, 1L))
+  tied <- contig_panel("ancestry_tied", c(chrC = 2, chrA = 2, chrB = 2), 2)
+  expect_equal(tied$region, c("chrA", "chrB"))
+  # Group and PC masks at the contract limits: 30 groups (one with a quote in its
+  # identifier) and 64 PCs. A locus missing the highest-ordinal group (1001) or PC 64
+  # (1002) is excluded; the complete locus (1000) is kept.
+  dbExecute(con, paste0(
+    "CREATE TEMP TABLE ancestry_mask_groups AS SELECT CASE WHEN g = 30 THEN 'O''Neil' ",
+    "ELSE printf('g%02d', g) END AS group_id FROM range(1, 31) t(g)"))
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_mask_ref AS SELECT 'chr1' AS chromosome, p AS position, ",
+    "'A' AS allele_a, 'G' AS allele_b, group_id, 0.3 AS frequency ",
+    "FROM range(1000, 1003) t(p), ancestry_mask_groups ",
+    "WHERE NOT (p = 1001 AND group_id = 'g29')"))
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_mask_pc AS SELECT 'chr1' AS chromosome, p AS position, ",
+    "'A' AS allele_a, 'G' AS allele_b, pc, sin(p * pc) AS loading ",
+    "FROM range(1000, 1003) t(p), range(1, 65) u(pc) WHERE NOT (p = 1002 AND pc = 64)"))
+  mask <- rduckhts_ancestry_panel(con, "ancestry_mask_ref", "ancestry_mask_pc",
+                                  "ancestry_mask", "GRCh38", spacing_bp = 1, max_sites = 10)
+  expect_equal(mask$sites, 1)
+  expect_equal(dbGetQuery(con, "SELECT position FROM ancestry_mask")$position, 1000)
   dbExecute(con, paste0(
     "CREATE TEMP VIEW ancestry_null_allele_ref AS SELECT * REPLACE ",
     "(CASE WHEN position = 100 AND group_id = 'A' THEN NULL ELSE allele_a END ",
@@ -35,7 +132,7 @@ test_ancestry_relations <- function() {
     "GRCh38", spacing_bp = 1, max_sites = 5)
   expect_equal(null_panel$sites, 5)
   expect_equal(dbGetQuery(con, "SELECT position FROM ancestry_null_panel ORDER BY site_index")$position,
-               101:105)
+               c(101, 103, 104, 106, 107))
   # Sites whose loadings are not finite, or whose frequencies fall outside [0, 1],
   # are not selected.
   dbExecute(con, paste0(

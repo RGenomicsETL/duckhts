@@ -16,7 +16,12 @@
 #' @param candidate_table Optional site panel, e.g. a Somalier panel with
 #'   region, position, allele_a and allele_b.
 #' @param spacing_bp Genomic window width for deterministic spacing.
-#' @param max_sites Maximum number of selected sites.
+#' @param max_sites Maximum number of selected sites. When more sites are
+#'   eligible, each contig keeps at least one site (the largest contigs, when
+#'   `max_sites` is below the contig count), the rest are shared by largest
+#'   remainders in proportion to each contig's eligible sites minus that one
+#'   (its remaining capacity, so no contig is offered more than it has), and
+#'   each contig's sites are spread evenly along it.
 #' @param overwrite Replace an existing destination.
 #' @return A one-row data frame with panel SHA-256 and selected site count.
 #' @export
@@ -33,8 +38,15 @@ rduckhts_ancestry_panel <- function(
   .somalier_validate_name(assembly, "assembly")
   spacing_bp <- .somalier_bounded_whole_number(spacing_bp, "spacing_bp", 1, 100000000)
   max_sites <- .somalier_bounded_whole_number(max_sites, "max_sites", 1, 1000000)
-  .ancestry_long_contract(con, reference_table, loadings_table)
+  contract <- .ancestry_long_contract(con, reference_table, loadings_table)
   reference <- sql_quote_identifier(con, reference_table)
+  # Per-locus checks keep constant state: a locus has every group (or PC) exactly once
+  # when it has as many rows as groups and their ordinal bits cover the full mask.
+  # Distinct aggregates would hold a set per locus across the whole reference.
+  group_count <- length(contract$groups)
+  pc_count <- length(contract$pcs)
+  group_list <- paste0("[", paste(vapply(contract$groups, function(g) sql_quote_string(con, g), ""),
+                                  collapse = ", "), "]")
   loadings <- sql_quote_identifier(con, loadings_table)
   candidates <- if (is.null(candidate_table)) {
     sprintf(paste0(
@@ -62,10 +74,11 @@ rduckhts_ancestry_panel <- function(
     "WITH site_groups AS (SELECT chromosome, position, min(allele_a) AS ra, ",
     "min(allele_b) AS rb FROM ", reference, " GROUP BY chromosome, position ",
     "HAVING position >= 1 AND position = floor(position) ",
-    "AND count(allele_a || '>' || allele_b) = count(*) ",
-    "AND count(DISTINCT allele_a || '>' || allele_b) = 1 ",
-    "AND count(*) = count(DISTINCT group_id) ",
-    "AND count(DISTINCT group_id) = (SELECT count(DISTINCT group_id) FROM ", reference, ") ",
+    "AND count(allele_a) = count(*) AND count(allele_b) = count(*) ",
+    "AND min(allele_a) = max(allele_a) AND min(allele_b) = max(allele_b) ",
+    "AND count(*) = ", group_count, " ",
+    "AND bit_or(1::BIGINT << (list_position(", group_list, ", group_id::VARCHAR) - 1)) = ",
+    "(1::BIGINT << ", group_count, ") - 1 ",
     "AND bool_and(frequency IS NOT NULL AND isfinite(frequency) ",
     "AND frequency >= 0 AND frequency <= 1) ",
     "AND length(min(allele_a)) = 1 AND length(min(allele_b)) = 1 ",
@@ -75,12 +88,38 @@ rduckhts_ancestry_panel <- function(
     "sites AS (SELECT s.* FROM site_groups s WHERE EXISTS (SELECT 1 FROM ", loadings, " l ",
     "WHERE l.chromosome = s.chromosome AND l.position = s.position ",
     "AND l.allele_a = s.ra AND l.allele_b = s.rb ",
-    "GROUP BY l.chromosome, l.position HAVING count(*) = count(DISTINCT l.pc) ",
+    "GROUP BY l.chromosome, l.position HAVING count(*) = ", pc_count, " ",
     "AND bool_and(l.loading IS NOT NULL AND isfinite(l.loading)) ",
-    "AND count(DISTINCT l.pc) = (SELECT count(DISTINCT pc) FROM ", loadings, "))), ",
-    "chosen AS (", candidates, "), limited AS (SELECT region, position, ",
-    "least(allele_a,allele_b) AS allele_a, greatest(allele_a,allele_b) AS allele_b ",
-    "FROM chosen ORDER BY region, position, allele_a, allele_b LIMIT ", max_sites, ") ",
+    "AND bit_or(1::HUGEINT << (CAST(CAST(l.pc AS DOUBLE) AS INTEGER) - 1)) = ",
+    "(1::HUGEINT << ", pc_count, ") - 1)), ",
+    # Cap at max_sites without dropping contigs: every contig first gets one site
+    # (the largest contigs, when max_sites is below the contig count), the rest
+    # are shared in proportion to each contig's eligible sites minus one by
+    # largest remainders, and each contig's allocation is spread evenly over its
+    # position order. Integer arithmetic keeps the allocation exact.
+    "chosen AS (", candidates, "), ordered AS (SELECT region, position, ",
+    "least(allele_a,allele_b) AS allele_a, greatest(allele_a,allele_b) AS allele_b, ",
+    "row_number() OVER (PARTITION BY region ORDER BY position, least(allele_a,allele_b), ",
+    "greatest(allele_a,allele_b)) - 1 AS r, count(*) OVER (PARTITION BY region) AS n_c ",
+    "FROM chosen), ",
+    "contigs AS (SELECT region, any_value(n_c) AS n_c FROM ordered GROUP BY region), ",
+    "totals AS (SELECT sum(n_c) AS n, count(*) AS c FROM contigs), ",
+    "shares AS (SELECT region, n_c, n, c, ",
+    "CASE WHEN n > ", max_sites, " AND c <= ", max_sites, " THEN ",
+    "((", max_sites, " - c) * (n_c - 1)) // (n - c) ELSE 0 END AS base, ",
+    "CASE WHEN n > ", max_sites, " AND c <= ", max_sites, " THEN ",
+    "((", max_sites, " - c) * (n_c - 1)) % (n - c) ELSE 0 END AS rest ",
+    "FROM contigs, totals), ",
+    "allocation AS (SELECT region, CASE ",
+    "WHEN n <= ", max_sites, " THEN n_c ",
+    "WHEN c <= ", max_sites, " THEN 1 + base + CASE WHEN ",
+    "row_number() OVER (ORDER BY rest DESC, region) <= ",
+    "(", max_sites, " - c) - (SELECT sum(base) FROM shares) THEN 1 ELSE 0 END ",
+    "ELSE CASE WHEN row_number() OVER (ORDER BY n_c DESC, region) <= ", max_sites,
+    " THEN 1 ELSE 0 END END AS a FROM shares), ",
+    "limited AS (SELECT o.region, o.position, o.allele_a, o.allele_b FROM ordered o ",
+    "JOIN allocation USING (region) WHERE a > 0 AND ",
+    "(o.r = 0 OR (o.r * a) // o.n_c > ((o.r - 1) * a) // o.n_c)) ",
     "SELECT ", sql_quote_string(con, assembly), " AS assembly, ",
     "(row_number() OVER (ORDER BY region, position, allele_a, allele_b)-1)::UBIGINT AS site_index, ",
     "region, position::UBIGINT AS position, allele_a, allele_b FROM limited"
