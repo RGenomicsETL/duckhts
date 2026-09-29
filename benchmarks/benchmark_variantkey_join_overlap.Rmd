@@ -572,4 +572,3 @@ overlap_pair_results <- rbind(
 stopifnot(length(unique(overlap_pair_results$result_rows)) == 1L)
 overlap_pair_results
 ```
-
