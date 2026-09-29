@@ -69,7 +69,7 @@ run_sql() {
 run_sql "clip-pad alignment exceeds the 4194304-cell limit" \
   "SELECT bcftools_liftover('chrS',2,substr(repeat('ACGT',551),2,2200),'C','test/data/liftover_nw_limit.chain','test/data/liftover_nw_limit_dst.fa','test/data/liftover_nw_limit_src.fa',1,250,false,NULL::BIGINT,true);"
 run_sql "mode must be 'overlap' or 'contain'" \
-  "CREATE TABLE cgr_san(chrom VARCHAR,start BIGINT,stop BIGINT); INSERT INTO cgr_san VALUES ('chr1',0,1); SELECT duckhts_cgranges_from_query('cgr_san_idx','SELECT * FROM cgr_san','chrom','start','stop'); SELECT * FROM duckhts_cgranges_overlaps('cgr_san_idx','chr1',0,1,mode:='bad');"
+  "CREATE TABLE cgr_san(chrom VARCHAR,start BIGINT,stop BIGINT); INSERT INTO cgr_san VALUES ('chr1',0,1); SELECT * FROM duckhts_cgranges_from_table('cgr_san_idx','cgr_san','chrom','start','stop'); SELECT * FROM duckhts_cgranges_overlaps('cgr_san_idx','chr1',0,1,mode:='bad');"
 run_sql "read_bcf: failed to read or parse BCF/VCF record" \
   "SELECT count(*) FROM read_bcf('test/data/malformed_bad_pos.vcf',tidy_format:=true);"
 for format in bcf full.vcf.gz; do

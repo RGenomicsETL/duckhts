@@ -99,11 +99,14 @@ subject_sql <- sql_string(normalizePath(inputs$subject))
 query_sql <- sql_string(normalizePath(inputs$query))
 index_name <- "bench_idx"
 build_started <- proc.time()[["elapsed"]]
-DBI::dbGetQuery(con, sprintf(
-  "SELECT duckhts_cgranges_from_query('%s', 'SELECT chrom, start, \"end\" FROM read_bed(''%s'')', 'chrom', 'start', 'end')",
-  index_name, subject_sql
+DBI::dbExecute(con, sprintf(
+  "CREATE TEMP VIEW cgr_subject AS SELECT chrom, start, \"end\" FROM read_bed('%s')",
+  subject_sql
 ))
-DBI::dbGetQuery(con, sprintf("SELECT duckhts_cgranges_index('%s')", index_name))
+DBI::dbGetQuery(con, sprintf(
+  "SELECT * FROM duckhts_cgranges_from_table('%s', 'cgr_subject', 'chrom', 'start', 'end')",
+  index_name
+))
 build_seconds <- proc.time()[["elapsed"]] - build_started
 on.exit(DBI::dbGetQuery(con, sprintf("SELECT duckhts_cgranges_destroy('%s')", index_name)), add = TRUE)
 

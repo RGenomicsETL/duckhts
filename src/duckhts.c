@@ -88,7 +88,7 @@ extern void register_duckhts_samtools_idxstats_function(duckdb_connection connec
 /* bam_bed_coverage.c */
 extern void register_duckhts_bam_bed_coverage_function(duckdb_connection connection);
 /* cgranges_api.c */
-extern bool register_duckhts_cgranges_functions(duckdb_connection connection, duckdb_database database);
+extern bool register_duckhts_cgranges_functions(duckdb_connection connection);
 /* variantkey_udf.c */
 extern bool register_variantkey_functions(duckdb_connection connection);
 /* simd/duckhts_simd_dispatch.c */
@@ -255,7 +255,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         return duckhts_registration_error(&registration,
             "DuckHTS could not register regionkey overloads");
     }
-    if (!register_duckhts_cgranges_functions(connection, *access->get_database(info))) {
+    if (!register_duckhts_cgranges_functions(connection)) {
         return duckhts_registration_error(&registration,
             "DuckHTS could not register cgranges functions");
     }
@@ -295,6 +295,23 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckhts_duckdb_supports_geometry() AS ("
         "duckhts_duckdb_type_supported('GEOMETRY'))")) {
+        return false;
+    }
+    /* Builds on the caller's connection, so TEMP objects and uncommitted rows are visible. */
+    if (!duckhts_register_sql(&registration,
+        "CREATE OR REPLACE MACRO duckhts_cgranges_from_table("
+        "name, table_name, chrom_col, start_col, end_col) AS TABLE ("
+        "WITH __dht_created AS MATERIALIZED (SELECT duckhts_cgranges_create(name) AS created), "
+        "__dht_added AS MATERIALIZED (SELECT count(duckhts_cgranges_add("
+        "name, t[chrom_col], t[start_col], t[end_col])) AS added "
+        "FROM query_table(table_name) AS t CROSS JOIN __dht_created) "
+        "SELECT duckhts_cgranges_index(name) AS indexed FROM __dht_added), "
+        "(name, table_name, chrom_col, start_col, end_col, label_col) AS TABLE ("
+        "WITH __dht_created AS MATERIALIZED (SELECT duckhts_cgranges_create(name) AS created), "
+        "__dht_added AS MATERIALIZED (SELECT count(duckhts_cgranges_add("
+        "name, t[chrom_col], t[start_col], t[end_col], t[label_col])) AS added "
+        "FROM query_table(table_name) AS t CROSS JOIN __dht_created) "
+        "SELECT duckhts_cgranges_index(name) AS indexed FROM __dht_added)")) {
         return false;
     }
     {

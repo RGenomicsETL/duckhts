@@ -98,19 +98,11 @@ test_cgranges_api <- function() {
     DBI::dbGetQuery(
       con,
       paste(
-        "SELECT duckhts_cgranges_from_query(",
-        "  'qry_idx',",
-        "  'SELECT chrom, start, \"end\", label FROM cgr_src',",
-        "  'chrom', 'start', 'end', 'label'",
-        ") AS ok"
+        "SELECT * FROM duckhts_cgranges_from_table(",
+        "  'qry_idx', 'cgr_src', 'chrom', 'start', 'end', 'label'",
+        ") AS t(ok)"
       )
     )$ok[1],
-    TRUE
-  )
-  expect_equal(
-    DBI::dbGetQuery(con, "SELECT duckhts_cgranges_index('qry_idx') AS ok")$ok[
-      1
-    ],
     TRUE
   )
 
@@ -223,34 +215,37 @@ test_cgranges_api <- function() {
   expect_equal(null_list_probe$is_null[1], TRUE)
 
   bed_path <- system.file("extdata", "targets.bed", package = "Rduckhts")
-  bed_query <- paste0(
-    "SELECT chrom, start, \"end\" FROM read_bed(",
-    DBI::dbQuoteString(con, bed_path),
-    ")"
+  DBI::dbExecute(
+    con,
+    paste0(
+      "CREATE TEMP VIEW cgr_bed_targets AS ",
+      "SELECT chrom, start, \"end\" FROM read_bed(",
+      DBI::dbQuoteString(con, bed_path),
+      ")"
+    )
   )
   expect_equal(
     DBI::dbGetQuery(
       con,
       paste0(
-        "SELECT duckhts_cgranges_from_query('bed_from_query_idx', ",
-        DBI::dbQuoteString(con, bed_query),
-        ", 'chrom', 'start', 'end') AS ok"
+        "SELECT * FROM duckhts_cgranges_from_table('bed_from_table_idx', ",
+        "'cgr_bed_targets', 'chrom', 'start', 'end') AS t(ok)"
       )
     )$ok[1],
     TRUE
   )
-  bed_from_query_hits <- DBI::dbGetQuery(
+  bed_from_table_hits <- DBI::dbGetQuery(
     con,
     paste(
       "SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end",
-      "FROM duckhts_cgranges_overlaps('bed_from_query_idx', 'CHROMOSOME_I', 5, 15)",
+      "FROM duckhts_cgranges_overlaps('bed_from_table_idx', 'CHROMOSOME_I', 5, 15)",
       "ORDER BY interval_ordinal"
     )
   )
-  expect_equal(bed_from_query_hits$interval_ordinal, c(0, 1))
-  expect_equal(bed_from_query_hits$label, c(0, 1))
+  expect_equal(bed_from_table_hits$interval_ordinal, c(0, 1))
+  expect_equal(bed_from_table_hits$label, c(0, 1))
   expect_equal(
-    bed_from_query_hits$interval_chrom,
+    bed_from_table_hits$interval_chrom,
     c("CHROMOSOME_I", "CHROMOSOME_I")
   )
 
@@ -312,14 +307,13 @@ test_cgranges_api <- function() {
   bulk_hits <- DBI::dbGetQuery(
     con,
     paste(
-      "SELECT query_row_id, interval_ordinal, label, interval_start, interval_end",
-      "FROM duckhts_cgranges_overlaps_bulk(",
-      "  'qry_idx',",
-      "  'SELECT qid, chrom, start, \"end\" FROM cgr_probe_src',",
-      "  'chrom', 'start', 'end',",
-      "  query_row_id_col := 'qid'",
+      "SELECT query_row_id, hit.interval_ordinal, hit.label, hit.interval_start, hit.interval_end",
+      "FROM (",
+      "  SELECT p.qid AS query_row_id,",
+      "    unnest(duckhts_cgranges_overlaps_list('qry_idx', p.chrom, p.start, p.\"end\")) AS hit",
+      "  FROM cgr_probe_src AS p",
       ")",
-      "ORDER BY query_row_id, interval_ordinal"
+      "ORDER BY query_row_id, hit.interval_ordinal"
     )
   )
   expect_equal(nrow(bulk_hits), 3)
@@ -335,13 +329,16 @@ test_cgranges_api <- function() {
   auto_qid_hits <- DBI::dbGetQuery(
     con,
     paste(
-      "SELECT query_row_id, interval_ordinal, label, interval_start, interval_end",
-      "FROM duckhts_cgranges_overlaps_bulk(",
-      "  'qry_idx',",
-      "  'SELECT chrom, start, \"end\" FROM cgr_probe_src',",
-      "  'chrom', 'start', 'end'",
+      "SELECT query_row_id, hit.interval_ordinal, hit.label, hit.interval_start, hit.interval_end",
+      "FROM (",
+      "  SELECT p.query_row_id,",
+      "    unnest(duckhts_cgranges_overlaps_list('qry_idx', p.chrom, p.start, p.\"end\")) AS hit",
+      "  FROM (",
+      "    SELECT row_number() OVER () AS query_row_id, chrom, start, \"end\"",
+      "    FROM cgr_probe_src",
+      "  ) AS p",
       ")",
-      "ORDER BY query_row_id, interval_ordinal"
+      "ORDER BY query_row_id, hit.interval_ordinal"
     )
   )
   expect_equal(auto_qid_hits$query_row_id, c(1, 2, 4))
@@ -350,15 +347,13 @@ test_cgranges_api <- function() {
   contain_hits <- DBI::dbGetQuery(
     con,
     paste(
-      "SELECT query_row_id, interval_ordinal, label, interval_start, interval_end",
-      "FROM duckhts_cgranges_overlaps_bulk(",
-      "  'qry_idx',",
-      "  'SELECT qid, chrom, start, \"end\" FROM cgr_probe_src',",
-      "  'chrom', 'start', 'end',",
-      "  mode := 'contain',",
-      "  query_row_id_col := 'qid'",
+      "SELECT query_row_id, hit.interval_ordinal, hit.label, hit.interval_start, hit.interval_end",
+      "FROM (",
+      "  SELECT p.qid AS query_row_id,",
+      "    unnest(duckhts_cgranges_overlaps_list('qry_idx', p.chrom, p.start, p.\"end\", 'contain')) AS hit",
+      "  FROM cgr_probe_src AS p",
       ")",
-      "ORDER BY query_row_id, interval_ordinal"
+      "ORDER BY query_row_id, hit.interval_ordinal"
     )
   )
   expect_equal(contain_hits$query_row_id, 40)
