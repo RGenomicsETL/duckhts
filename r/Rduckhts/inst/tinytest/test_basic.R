@@ -587,7 +587,7 @@ expect_equal(
 
 # Catalog kinds and parameters must match the loaded extension. For each entry, at
 # least one registered overload must match the documented signature on its own:
-# scalar and aggregate functions by argument count (or variable arguments), native
+# scalar and aggregate functions by every documented arity (or variable arguments), native
 # table functions by positional count and exact named options, and macros by every
 # argument name in order.
 local({
@@ -636,11 +636,22 @@ local({
     expect_true(nrow(found) > 0L, info = entry$name)
     if (!nrow(found)) next
     documented <- signature_args(entry$signature)
+    if (entry$kind %in% c("scalar", "aggregate")) {
+      # `[, name]` marks an optional trailing argument: every arity from the
+      # required count up to the full count needs its own overload (or varargs).
+      optional <- lengths(regmatches(entry$signature,
+                                     gregexpr("\\[[[:space:]]*,", entry$signature)))
+      arities <- nrow(documented) + seq.int(0L, optional)
+      counts <- lengths(found$parameters)
+      varargs <- any(!is.na(found$varargs))
+      for (arity in arities) {
+        expect_true(varargs || arity %in% counts, info = paste(entry$name, "arity", arity))
+      }
+      next
+    }
     matches <- vapply(seq_len(nrow(found)), function(j) {
       params <- as.character(found$parameters[[j]])
-      if (entry$kind %in% c("scalar", "aggregate")) {
-        length(params) == nrow(documented) || !is.na(found$varargs[[j]])
-      } else if (entry$kind == "table") {
+      if (entry$kind == "table") {
         positional <- grepl("^col[0-9]+$", params)
         sum(positional) == sum(!documented$named) &&
           setequal(params[!positional], documented$name[documented$named])
