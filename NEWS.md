@@ -15,6 +15,9 @@
   `duckhts_macro_definitions()` on each connection that needs macros. These
   shadow persistent macros in existing files without deleting them.
 
+- ONT BAM staging receipts record the BAM SHA-256 and byte size; reuse requires
+  matching reference, read, index and BAM identities.
+
 - Consequence prediction has moved to the [DuckVEP extension](https://github.com/RGenomicsETL/DuckVEP),
   its single source. DuckHTS no longer ships the DuckVEP functions and macros
   (`duckvep_ensembl_regions`, `duckvep_ensembl_transcripts`,

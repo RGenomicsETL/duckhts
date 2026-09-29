@@ -12,6 +12,9 @@
   ONT BAM; receipts without identities and changed inputs require derivation, while tool
   version changes alone do not
 
+- record the staged ONT BAM's SHA-256 and byte size in its receipt so in-place
+  BAM changes and receipts from the previous format require derivation
+
 # duckhtsbench 0.0.0.9000
 
 - identify both aligned-block and CIGAR-validation benchmarks as consumers of
