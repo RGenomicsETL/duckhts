@@ -185,6 +185,19 @@ SELECT * FROM duckhts_somalier_sex('sex_short', 'sex_panel');
 ----
 every sample requires one count row for every panel site
 
+# A repeated ordinal that keeps the row count (site 24 replaced by a copy of
+# site 23) is also a coverage error.
+statement ok
+CREATE TEMP TABLE sex_repeated AS
+SELECT * FROM sex_counts WHERE NOT (sample_id = 'xy' AND site_index = 24)
+UNION ALL
+SELECT * FROM sex_counts WHERE sample_id = 'xy' AND site_index = 23;
+
+statement error
+SELECT * FROM duckhts_somalier_sex('sex_repeated', 'sex_panel');
+----
+every sample requires one count row for every panel site
+
 statement ok
 CREATE TEMP TABLE sex_moved AS
 SELECT * REPLACE(CASE WHEN site_index = 12 THEN 999::UBIGINT ELSE position END AS position)

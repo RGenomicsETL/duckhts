@@ -1,7 +1,12 @@
 #include "duckhts_somalier.h"
 #include "duckhts_registration.h"
 
-/* Genetic-sex evidence from X/Y dosage, following Somalier v0.3.4
+/* Per-sample panel coverage is checked with the row count plus the sum and XOR of
+   a 64-bit hash of site_index against the panel's: a per-sample DISTINCT set
+   would hold samples x sites entries. Missing or repeated ordinals therefore
+   pass only by an accidental collision of both hashes.
+
+   Genetic-sex evidence from X/Y dosage, following Somalier v0.3.4
    (ff58fdade8f4f8293d904f10e0a4a13f1fac808d) relate.nim: fill_sample_info
    for the X/Y depth and genotype statistics, and the sex and Y-signal
    checks in the pedigree pass. Depth is normalised by the mean A+B depth of
@@ -55,6 +60,8 @@ bool register_duckhts_somalier_sex_sql(duckhts_registration_t *registration) {
         "), __dht_identity AS MATERIALIZED (SELECT "
         "duckhts_somalier_panel_sha256(panel_table) AS panel_sha256, "
         "count(*)::UBIGINT AS site_count, "
+        "sum(CAST(hash(site_index) AS HUGEINT)) AS ordinal_hash_sum, "
+        "bit_xor(hash(site_index)) AS ordinal_hash_xor, "
         "count(*) FILTER (WHERE region NOT IN " DUCKHTS_SOMALIER_SEX_REGIONS_SQL ")::UBIGINT "
         "AS autosomal_sites, "
         "count(*) FILTER (WHERE region IN " DUCKHTS_SOMALIER_X_REGIONS_SQL ")::UBIGINT "
@@ -89,7 +96,10 @@ bool register_duckhts_somalier_sex_sql(duckhts_registration_t *registration) {
         "error('duckhts_somalier_sex: measured counts must fit UINTEGER') "
         "WHEN (SELECT count(*) FROM (SELECT sample_id FROM __dht_checked GROUP BY sample_id "
         "HAVING count(*) != (SELECT site_count FROM __dht_identity) "
-        "OR count(DISTINCT site_index) != count(*))) != 0 THEN "
+        "OR sum(CAST(hash(site_index) AS HUGEINT)) != "
+        "(SELECT ordinal_hash_sum FROM __dht_identity) "
+        "OR bit_xor(hash(site_index)) != (SELECT ordinal_hash_xor FROM __dht_identity))) "
+        "!= 0 THEN "
         "error('duckhts_somalier_sex: every sample requires one count row for every "
         "panel site') ELSE true END AS valid FROM __dht_checked"
         "), __dht_sites AS NOT MATERIALIZED (SELECT c.sample_id, c.assembly, "
