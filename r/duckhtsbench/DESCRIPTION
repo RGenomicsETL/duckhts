@@ -16,6 +16,7 @@ Suggests:
     jsonlite,
     optparse,
     RBCFTools (>= 1.24-1.1.0),
+    Rduckhts,
     tinytest
 Additional_repositories: https://rgenomicsetl.r-universe.dev
 Roxygen: list(markdown = TRUE)
