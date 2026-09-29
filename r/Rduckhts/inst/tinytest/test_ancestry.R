@@ -81,6 +81,48 @@ test_ancestry_relations <- function() {
   expect_equal(locus$sites, 3)
   expect_equal(dbGetQuery(con, "SELECT position FROM ancestry_locus ORDER BY site_index")$position,
                c(100, 106, 107))
+  # With fewer slots than contigs, the largest contigs keep one site each, and equal
+  # contigs are taken in region order.
+  contig_panel <- function(label, sizes, max_sites) {
+    dbExecute(con, sprintf(paste0(
+      "CREATE OR REPLACE TEMP TABLE %s_sites AS SELECT * FROM (VALUES %s) t(chromosome, n), ",
+      "range(n) r(i)"), label,
+      paste(sprintf("('%s', %d)", names(sizes), sizes), collapse = ", ")))
+    for (side in c("ref", "pc")) {
+      dbExecute(con, sprintf(paste0(
+        "CREATE OR REPLACE TEMP VIEW %s_%s AS SELECT a.* REPLACE (s.chromosome AS chromosome, ",
+        "1000 + 10 * s.i AS position) FROM ancestry_%s a, %s_sites s WHERE a.position = 100"),
+        label, side, side, label))
+    }
+    rduckhts_ancestry_panel(con, paste0(label, "_ref"), paste0(label, "_pc"), label, "GRCh38",
+                            spacing_bp = 1, max_sites = max_sites)
+    dbGetQuery(con, sprintf("SELECT region, count(*)::INTEGER AS n FROM %s GROUP BY region ORDER BY region",
+                            label))
+  }
+  largest <- contig_panel("ancestry_largest", c(chrA = 1, chrB = 5, chrC = 3), 2)
+  expect_equal(largest$region, c("chrB", "chrC"))
+  expect_equal(largest$n, c(1L, 1L))
+  tied <- contig_panel("ancestry_tied", c(chrC = 2, chrA = 2, chrB = 2), 2)
+  expect_equal(tied$region, c("chrA", "chrB"))
+  # Group and PC masks at the contract limits: 30 groups (one with a quote in its
+  # identifier) and 64 PCs. A locus missing the highest-ordinal group (1001) or PC 64
+  # (1002) is excluded; the complete locus (1000) is kept.
+  dbExecute(con, paste0(
+    "CREATE TEMP TABLE ancestry_mask_groups AS SELECT CASE WHEN g = 30 THEN 'O''Neil' ",
+    "ELSE printf('g%02d', g) END AS group_id FROM range(1, 31) t(g)"))
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_mask_ref AS SELECT 'chr1' AS chromosome, p AS position, ",
+    "'A' AS allele_a, 'G' AS allele_b, group_id, 0.3 AS frequency ",
+    "FROM range(1000, 1003) t(p), ancestry_mask_groups ",
+    "WHERE NOT (p = 1001 AND group_id = 'g29')"))
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_mask_pc AS SELECT 'chr1' AS chromosome, p AS position, ",
+    "'A' AS allele_a, 'G' AS allele_b, pc, sin(p * pc) AS loading ",
+    "FROM range(1000, 1003) t(p), range(1, 65) u(pc) WHERE NOT (p = 1002 AND pc = 64)"))
+  mask <- rduckhts_ancestry_panel(con, "ancestry_mask_ref", "ancestry_mask_pc",
+                                  "ancestry_mask", "GRCh38", spacing_bp = 1, max_sites = 10)
+  expect_equal(mask$sites, 1)
+  expect_equal(dbGetQuery(con, "SELECT position FROM ancestry_mask")$position, 1000)
   dbExecute(con, paste0(
     "CREATE TEMP VIEW ancestry_null_allele_ref AS SELECT * REPLACE ",
     "(CASE WHEN position = 100 AND group_id = 'A' THEN NULL ELSE allele_a END ",
