@@ -9,7 +9,8 @@ rduckhts_genbank(
   table_name = NULL,
   path,
   attributes_map = FALSE,
-  overwrite = FALSE
+  overwrite = FALSE,
+  attributes = NULL
 )
 }
 \arguments{
@@ -24,6 +25,11 @@ rduckhts_genbank(
 \code{MAP(VARCHAR, VARCHAR)} column alongside the raw attribute string}
 
 \item{overwrite}{Logical. If TRUE, overwrites an existing table}
+
+\item{attributes}{Character vector of qualifier keys to expose as VARCHAR
+columns. Each equals \code{attributes_map[key]}, including comma-joined
+repeated qualifiers and \code{NA} for an absent key, and is computed only
+when the query selects it}
 }
 \value{
 Invisible TRUE on success

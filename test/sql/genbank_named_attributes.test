@@ -1,0 +1,147 @@
+# name: test/sql/genbank_named_attributes.test
+# description: read_genbank named qualifier columns equal attributes_map lookups
+# group: [duckhts]
+
+require duckhts
+
+# One CDS with a repeated qualifier (db_xref), a valueless one (pseudo), a value
+# needing percent-encoding (note), and the synthesized ID and Name keys.
+query TTTTTTTT
+SELECT feature, db_xref, product, pseudo, missing, locus_tag, ID, Parent
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attributes := ['db_xref', 'product', 'pseudo', 'missing', 'locus_tag', 'ID', 'Parent']);
+----
+CDS	GeneID:1,UniProtKB/Swiss-Prot:P1	protein one	true	NULL	d1	CDS-1	NULL
+
+query T
+SELECT note
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attributes := ['note']);
+----
+he said "hi"%3B then a%3Db%2C and c%26d 100%25 done
+
+# Column order follows the request and follows attributes_map when it is present.
+query TT
+SELECT column_name, column_type
+FROM (DESCRIBE SELECT * FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attributes := ['product', 'db_xref']))
+OFFSET 9;
+----
+product	VARCHAR
+db_xref	VARCHAR
+
+query TT
+SELECT column_name, column_type
+FROM (DESCRIBE SELECT * FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attributes_map := true, attributes := ['product']))
+OFFSET 9;
+----
+attributes_map	MAP(VARCHAR, VARCHAR)
+product	VARCHAR
+
+# Parity with attributes_map on real records, for present, repeated and absent keys.
+query I
+SELECT count(*)
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/lambda.gb', attributes_map := true, attributes := ['gene', 'product', 'locus_tag', 'note', 'db_xref', 'ID', 'Name', 'Parent', 'codon_start', 'transl_table', 'missing'])
+WHERE gene IS DISTINCT FROM attributes_map['gene']
+   OR product IS DISTINCT FROM attributes_map['product']
+   OR locus_tag IS DISTINCT FROM attributes_map['locus_tag']
+   OR note IS DISTINCT FROM attributes_map['note']
+   OR db_xref IS DISTINCT FROM attributes_map['db_xref']
+   OR ID IS DISTINCT FROM attributes_map['ID']
+   OR Name IS DISTINCT FROM attributes_map['Name']
+   OR Parent IS DISTINCT FROM attributes_map['Parent']
+   OR codon_start IS DISTINCT FROM attributes_map['codon_start']
+   OR transl_table IS DISTINCT FROM attributes_map['transl_table']
+   OR missing IS DISTINCT FROM attributes_map['missing'];
+----
+0
+
+query I
+SELECT count(*)
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/phix174.gb', attributes_map := true, attributes := ['gene', 'product', 'locus_tag', 'note', 'db_xref', 'ID', 'Name', 'Parent', 'codon_start', 'missing'])
+WHERE gene IS DISTINCT FROM attributes_map['gene']
+   OR product IS DISTINCT FROM attributes_map['product']
+   OR locus_tag IS DISTINCT FROM attributes_map['locus_tag']
+   OR note IS DISTINCT FROM attributes_map['note']
+   OR db_xref IS DISTINCT FROM attributes_map['db_xref']
+   OR ID IS DISTINCT FROM attributes_map['ID']
+   OR Name IS DISTINCT FROM attributes_map['Name']
+   OR Parent IS DISTINCT FROM attributes_map['Parent']
+   OR codon_start IS DISTINCT FROM attributes_map['codon_start']
+   OR missing IS DISTINCT FROM attributes_map['missing'];
+----
+0
+
+# The parity comparison above must not be vacuous.
+query III
+SELECT count(*), count(gene), count(db_xref)
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/lambda.gb', attributes := ['gene', 'db_xref']);
+----
+284	193	188
+
+# Projection: a subset, reordered, duplicated, and none.
+query TT
+SELECT locus_tag, ID
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attributes := ['missing', 'ID', 'locus_tag', 'product']);
+----
+d1	CDS-1
+
+query TT
+SELECT ID AS first_copy, ID AS second_copy
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attributes := ['ID']);
+----
+CDS-1	CDS-1
+
+query II
+SELECT count(*), sum(start)
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attributes := ['product', 'note']);
+----
+1	1
+
+query T
+SELECT typeof(product)
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attributes := ['product']);
+----
+VARCHAR
+
+# An empty list adds no columns.
+query I
+SELECT count(*) FROM (DESCRIBE SELECT * FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attributes := []::VARCHAR[]));
+----
+9
+
+# Rejections: duplicate, reserved (fixed and optional), empty, NULL.
+statement error
+SELECT * FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attributes := ['product', 'PRODUCT']);
+----
+distinct column names
+
+statement error
+SELECT * FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attributes := ['Start']);
+----
+collides with a reader column name
+
+statement error
+SELECT * FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attributes := ['attributes']);
+----
+collides with a reader column name
+
+statement error
+SELECT * FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attributes := ['attributes_map'], attributes_map := true);
+----
+collides with a reader column name
+
+# Without attributes_map the name is not reserved.
+query I
+SELECT count(*) FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attributes := ['attributes_map']);
+----
+1
+
+statement error
+SELECT * FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attributes := ['']);
+----
+
+statement error
+SELECT * FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attributes := [NULL]::VARCHAR[]);
+----
+
+statement error
+SELECT * FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attributes := NULL);
+----

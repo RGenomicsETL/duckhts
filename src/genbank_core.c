@@ -866,15 +866,23 @@ static gb_status_t gb_emit_value(const gb_parser_t *p, const gb_feature_t *f, si
     return GB_OK;
 }
 
+gb_status_t gb_feature_attr_key(const gb_parser_t *p, size_t feature, size_t index, kstring_t *key) {
+    key->l = 0;
+    if (key->s) key->s[0] = '\0';
+    return gb_emit_key(p, &p->feats[feature], index, key);
+}
+
+gb_status_t gb_feature_attr_value(const gb_parser_t *p, size_t feature, size_t index, kstring_t *value) {
+    value->l = 0;
+    if (value->s) value->s[0] = '\0';
+    return gb_emit_value(p, &p->feats[feature], index, value);
+}
+
 gb_status_t gb_feature_attr_at(const gb_parser_t *p, size_t feature, size_t index, kstring_t *key,
                                kstring_t *value) {
-    const gb_feature_t *f = &p->feats[feature];
-    key->l = value->l = 0;
-    if (key->s) key->s[0] = '\0';
-    if (value->s) value->s[0] = '\0';
-    gb_status_t r = gb_emit_key(p, f, index, key);
+    gb_status_t r = gb_feature_attr_key(p, feature, index, key);
     if (r != GB_OK) return r;
-    return gb_emit_value(p, f, index, value);
+    return gb_feature_attr_value(p, feature, index, value);
 }
 
 gb_status_t gb_feature_attributes(const gb_parser_t *p, size_t feature, kstring_t *out) {

@@ -64,6 +64,15 @@
   The shared preparation slot and its busy/recursive error are gone. The panel
   validation macro is defined once and installed in the private instance.
 
+- `read_genbank(attributes := [...])` adds one VARCHAR column per requested
+  qualifier key, on the shared named-attribute helper that `read_gff` and
+  `read_gtf` use. Each column equals `attributes_map[key]` byte for byte,
+  including GenBank's comma-joined repeated qualifiers, the synthesized `ID`,
+  `Name` and `Parent`, and NULL for an absent key. Values are computed only for
+  projected columns, so a query needing one qualifier no longer builds the whole
+  `attributes_map`. Bind rejects empty, duplicate, and reserved names.
+  `benchmarks/benchmark_genbank_named_attributes.md` reports the comparison.
+
 # duckhts 1.5.2.9006
 
 - The function catalog documents `bam_bin_counts(include_unmapped := FALSE)` and

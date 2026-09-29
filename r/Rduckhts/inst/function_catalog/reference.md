@@ -1643,7 +1643,7 @@ Read GenBank flat-file features in read_gff's column shape, with optional parsed
 Signature:
 
 ```sql
-read_genbank(path, attributes_map := FALSE)
+read_genbank(path, attributes_map := FALSE, attributes := []::VARCHAR[])
 ```
 
 Returns:
@@ -1660,6 +1660,10 @@ seqname is VERSION, else ACCESSION, else the LOCUS name; a segment on a remote a
 
 Synthesized GFF3 keys ID, Name and Parent accompany the original qualifiers. ID is gene-<locus_tag> for genes and <key>-<n> otherwise, with n the feature's 0-based position in the file. Parent links a feature to the gene sharing its /locus_tag (or /gene) anywhere in the record. Repeated qualifiers become one key with comma-joined values, valueless qualifiers read 'true', and ; = & , % are percent-encoded. attributes_map := TRUE adds the same pairs as a MAP.
 
+### Named attributes
+
+attributes := ['gene', 'product'] appends VARCHAR columns named for the requested keys, after attributes_map when that is requested. Each value equals attributes_map[key] byte for byte: repeated qualifiers are comma-joined, a valueless qualifier reads 'true', values stay percent-encoded, the synthesized ID, Name and Parent are addressable, and an absent key is NULL. Keys must be nonempty, unique under ASCII case-insensitive column naming, and distinct from the fixed columns and attributes_map when it is requested. Only projected keys are computed during scanning.
+
 ### Errors
 
 Records stream one at a time, so memory follows the largest record. A record without a terminating //, a FEATURES table with no sequence section, a malformed location, an unsupported location form (one-of, gap, bond, nested join/order, a.b), an origin-spanning span on a linear record, or a /codon_start outside 1..3 is an error naming the feature and line. Table layout and these rules follow BioPython's GenBank scanner, and test/scripts/genbank_oracle_test.py diffs the reader against it.
@@ -1668,6 +1672,10 @@ Records stream one at a time, so memory follows the largest record. A record wit
 
 ```sql
 SELECT seqname, feature, start, "end" FROM read_genbank('phix174.gb') LIMIT 5;
+```
+
+```sql
+SELECT feature, locus_tag, product FROM read_genbank('phix174.gb', attributes := ['locus_tag', 'product']) WHERE feature = 'CDS';
 ```
 
 ## genbank_to_fasta
