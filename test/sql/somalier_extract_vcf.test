@@ -5,8 +5,10 @@
 require duckhts
 
 # The importer is deliberately narrower than Somalier find-sites: it consumes
-# an already selected sites VCF, assigns stable lexical-order site ordinals,
-# and keeps AF oriented to the same B allele as downstream counts.
+# an already selected sites VCF, assigns stable lexical-order site ordinals
+# with every autosomal site before any X/Y site, and keeps AF oriented to the
+# same B allele as downstream counts. X/Y records are kept as they are:
+# excluding PAR sites is the site selector's job, as in Somalier.
 query ITITTRTTRT
 SELECT site_index, region, position, allele_a, allele_b,
        round(population_b_af, 2), source_ref, source_alt,
@@ -18,6 +20,7 @@ FROM duckhts_somalier_import_sites(
 0	chr1	10	A	G	0.20	G	A	0.80	[PASS]
 1	chr1	30	A	G	0.25	A	G	0.25	[q10]
 2	chr2	20	C	T	0.70	T	C	0.30	[PASS]
+3	chrX	100	A	C	0.40	A	C	0.40	[PASS]
 
 statement ok
 CREATE TEMP TABLE somalier_imported_sites AS
@@ -33,7 +36,7 @@ SELECT (SELECT count(*) FROM somalier_imported_sites),
        length(duckhts_somalier_frequency_sha256(
          'somalier_imported_sites', 'somalier_imported_sites'));
 ----
-3	64	64
+4	64	64
 
 statement error
 SELECT * FROM duckhts_somalier_import_sites(
@@ -49,13 +52,54 @@ SELECT * FROM duckhts_somalier_import_sites(
 ----
 sites file exceeds max_sites
 
-# max_sites bounds every physical input record, including excluded X/Y rows.
+# max_sites bounds every physical input record, including X/Y rows.
 statement error
 SELECT * FROM duckhts_somalier_import_sites(
   '__WORKING_DIRECTORY__/test/data/somalier_sites.vcf', 'GRCh38', max_sites := 3
 );
 ----
 sites file exceeds max_sites
+
+# Sex-chromosome aliases sort after every autosomal site even when their name
+# sorts first lexically ('X' precedes 'chr1'); the panel identity requires it.
+statement ok
+COPY (
+  SELECT replace(line, E'chrX\t100\t', E'X\t100\t') AS line
+  FROM (
+    SELECT unnest(string_split(trim(content, E'\n'), E'\n')) AS line
+    FROM read_text('__WORKING_DIRECTORY__/test/data/somalier_sites.vcf')
+  )
+) TO '__WORKING_DIRECTORY__/test_somalier_sites_x_alias.vcf'
+  (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+query IT
+SELECT site_index, region
+FROM duckhts_somalier_import_sites(
+  '__WORKING_DIRECTORY__/test_somalier_sites_x_alias.vcf', 'GRCh38'
+)
+ORDER BY site_index;
+----
+0	chr1
+1	chr1
+2	chr2
+3	X
+
+# A sites file without an autosomal record cannot normalise sex-chromosome depth.
+statement ok
+COPY (
+  SELECT line FROM (
+    SELECT unnest(string_split(trim(content, E'\n'), E'\n')) AS line
+    FROM read_text('__WORKING_DIRECTORY__/test/data/somalier_sites.vcf')
+  ) WHERE starts_with(line, '#') OR starts_with(line, E'chrX\t')
+) TO '__WORKING_DIRECTORY__/test_somalier_sites_only_x.vcf'
+  (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+statement error
+SELECT * FROM duckhts_somalier_import_sites(
+  '__WORKING_DIRECTORY__/test_somalier_sites_only_x.vcf', 'GRCh38'
+);
+----
+sites file has no autosomal records
 
 statement error
 SELECT * FROM duckhts_somalier_import_sites(
@@ -282,6 +326,39 @@ SELECT * FROM duckhts_somalier_vcf_counts(
 );
 ----
 filter_policy must be pass_or_unapplied, include_all or error
+
+# X/Y sites ignore the FILTER policy, as in Somalier extraction: the q10 record
+# at POS 200 is relabelled chrX, so it stays measured under every policy while
+# the autosomal FILTER failures above remain unavailable or an error.
+statement ok
+COPY (
+  SELECT replace(line, E'chr1\t200\t', E'chrX\t200\t') AS line
+  FROM (
+    SELECT unnest(string_split(trim(content, E'\n'), E'\n')) AS line
+    FROM read_text('__WORKING_DIRECTORY__/test_somalier_vcf_filters.vcf')
+  )
+) TO '__WORKING_DIRECTORY__/test_somalier_vcf_x_filter.vcf'
+  (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+statement ok
+CREATE TEMP TABLE somalier_x_filter_panel AS
+SELECT * FROM (VALUES
+  ('GRCh38', 0::UBIGINT, 'chr1', 100::UBIGINT, 'A', 'C'),
+  ('GRCh38', 1::UBIGINT, 'chrX', 200::UBIGINT, 'A', 'G')
+) AS p(assembly, site_index, region, position, allele_a, allele_b);
+
+query TIIITT
+SELECT sample_id, site_index, a, b, status, source_filter::VARCHAR
+FROM duckhts_somalier_vcf_counts(
+  '__WORKING_DIRECTORY__/test_somalier_vcf_x_filter.vcf',
+  'somalier_x_filter_panel', filter_policy := 'error'
+)
+ORDER BY source_sample_index, site_index;
+----
+S1	0	9	3	measured	NULL
+S1	1	5	9	measured	[q10]
+S2	0	0	20	measured	NULL
+S2	1	0	10	measured	[q10]
 
 # A physical source record that lacks either exact panel allele is unavailable;
 # the producer does not orient by assuming ALT 1.

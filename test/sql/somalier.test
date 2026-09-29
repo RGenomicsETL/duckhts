@@ -81,18 +81,33 @@ SELECT duckhts_somalier_panel_sha256('somalier_panel_base') <>
 ----
 1
 
-foreach nonauto X chrX NC_000023.10 NC_000023.11 Y chrY NC_000024.9 NC_000024.10
+# X/Y sites belong to the panel but must follow every autosomal site in
+# site_index, so an autosomal prefix stays dense from zero. Each exact
+# Somalier v0.3.4 alias is accepted in the trailing position and changes the
+# panel identity; a sex-chromosome row before an autosomal row is rejected.
+foreach sex X chrX NC_000023.10 NC_000023.11 Y chrY NC_000024.9 NC_000024.10
 
 statement ok
-CREATE OR REPLACE TEMP VIEW somalier_nonauto AS
-SELECT * REPLACE(CASE WHEN site_index = 0 THEN '${nonauto}'
-                    ELSE region END AS region)
+CREATE OR REPLACE TEMP VIEW somalier_sex_last AS
+SELECT * REPLACE(CASE WHEN site_index = 7 THEN '${sex}' ELSE region END AS region)
+FROM somalier_panel_base;
+
+query I
+SELECT length(duckhts_somalier_panel_sha256('somalier_sex_last')) = 64 AND
+       duckhts_somalier_panel_sha256('somalier_sex_last') <>
+       duckhts_somalier_panel_sha256('somalier_panel_base');
+----
+1
+
+statement ok
+CREATE OR REPLACE TEMP VIEW somalier_sex_first AS
+SELECT * REPLACE(CASE WHEN site_index = 0 THEN '${sex}' ELSE region END AS region)
 FROM somalier_panel_base;
 
 statement error
-SELECT duckhts_somalier_panel_sha256('somalier_nonauto');
+SELECT duckhts_somalier_panel_sha256('somalier_sex_first');
 ----
-autosomal panel sites require
+autosomal sites must precede X/Y sites
 
 endloop
 
