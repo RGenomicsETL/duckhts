@@ -585,7 +585,10 @@ expect_equal(
   "CIGAR Utils"
 )
 
-# Catalog kinds and native table options must match the loaded extension.
+# Catalog kinds and parameters must match the loaded extension. For each entry, at
+# least one registered overload must match the documented signature on its own:
+# native table functions by positional count and exact named options, macros by
+# argument count with every documented `:=` argument present by name.
 local({
   con <- rduckhts_connect()
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE))
@@ -593,23 +596,57 @@ local({
     "SELECT function_name, function_type, parameters",
     "FROM duckdb_functions()"
   ))
+  # Split a signature's top-level arguments, ignoring commas inside brackets or quotes.
+  signature_args <- function(signature) {
+    inner <- sub("^[^(]*\\((.*)\\)[[:space:]]*$", "\\1", signature)
+    chars <- strsplit(inner, "")[[1L]]
+    args <- character()
+    depth <- 0L
+    quote <- ""
+    start <- 1L
+    for (k in seq_along(chars)) {
+      ch <- chars[[k]]
+      if (nzchar(quote)) {
+        if (ch == quote) quote <- ""
+      } else if (ch %in% c("'", "\"")) {
+        quote <- ch
+      } else if (ch %in% c("(", "[", "{")) {
+        depth <- depth + 1L
+      } else if (ch %in% c(")", "]", "}")) {
+        depth <- depth - 1L
+      } else if (ch == "," && depth == 0L) {
+        args <- c(args, paste(chars[start:(k - 1L)], collapse = ""))
+        start <- k + 1L
+      }
+    }
+    if (start <= length(chars)) args <- c(args, paste(chars[start:length(chars)], collapse = ""))
+    args <- trimws(args)
+    args <- args[nzchar(args)]
+    data.frame(name = trimws(sub(":=.*", "", args)), named = grepl(":=", args, fixed = TRUE))
+  }
+  kinds <- c(scalar_macro = "macro", table_macro = "table_macro")
   for (i in seq_len(nrow(catalog))) {
     entry <- catalog[i, ]
-    kind <- if (entry$kind == "scalar_macro") "macro" else entry$kind
+    kind <- if (entry$kind %in% names(kinds)) kinds[[entry$kind]] else entry$kind
     found <- registered[
       registered$function_name == entry$name & registered$function_type == kind,
       , drop = FALSE
     ]
     expect_true(nrow(found) > 0L, info = entry$name)
-    if (entry$kind != "table" || !nrow(found)) next
-
-    actual <- unique(as.character(unlist(found$parameters, use.names = FALSE)))
-    actual <- actual[!grepl("^col[0-9]+$", actual)]
-    named <- regmatches(entry$signature, gregexpr(
-      "[[:alnum:]_]+[[:space:]]*:=", entry$signature
-    ))[[1L]]
-    documented <- sub("[[:space:]]*:=", "", named)
-    expect_identical(sort(actual), sort(documented), info = entry$name)
+    if (!nrow(found) || !(entry$kind %in% c("table", names(kinds)))) next
+    documented <- signature_args(entry$signature)
+    matches <- vapply(found$parameters, function(params) {
+      params <- as.character(params)
+      if (entry$kind == "table") {
+        positional <- grepl("^col[0-9]+$", params)
+        sum(positional) == sum(!documented$named) &&
+          setequal(params[!positional], documented$name[documented$named])
+      } else {
+        length(params) == nrow(documented) &&
+          all(documented$name[documented$named] %in% params)
+      }
+    }, logical(1))
+    expect_true(any(matches), info = entry$name)
   }
 })
 
