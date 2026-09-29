@@ -214,14 +214,15 @@ test_somalier_bam_count_extraction <- function() {
     ),
     pattern = "worker_count"
   )
+  # The wrapper stages the panel as Parquet for the native reader, so
+  # caller-local TEMP relations and uncommitted rows are visible.
   dbExecute(con, "CREATE TEMP TABLE bam_temp_panel AS SELECT * FROM bam_extraction_panel")
-  expect_error(
-    rduckhts_somalier_bam_counts(
-      con, paths[["range.bam"]], "sample-1", paths[["ce.fa"]],
-      panel_table = "bam_temp_panel"
-    ),
-    pattern = "does not exist"
-  )
+  temp_panel <- canonical(rduckhts_somalier_bam_counts(
+    con, paths[["range.bam"]], "sample-1", paths[["ce.fa"]],
+    panel_table = "bam_temp_panel", index_path = paths[["range.bam.bai"]],
+    reference_index_path = paths[["ce.fa.fai"]]
+  ))
+  expect_equal(temp_panel, bam)
 }
 
 test_somalier_sites_import()

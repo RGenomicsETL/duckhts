@@ -24,6 +24,9 @@ INSERT INTO somalier_bam_panel VALUES
   ('WBcel235', 2, 'CHROMOSOME_I', 2, 'A', 'G'),
   ('WBcel235', 3, 'NOT_IN_REFERENCE', 1, 'A', 'C');
 
+statement ok
+COPY somalier_bam_panel TO '__WORKING_DIRECTORY__/test_somalier_bam_panel.parquet' (FORMAT parquet);
+
 # An uncovered valid site is measured zero. Missing reference sequence and a
 # reference/allele mismatch are unavailable rather than fabricated zeros.
 query TTTTTTTTT
@@ -32,9 +35,10 @@ SELECT site_index::VARCHAR, region, position::VARCHAR,
        status
 FROM duckhts_somalier_bam_counts(
   '__WORKING_DIRECTORY__/test/data/range.bam',
-  'somalier_bam_panel',
+  NULL,
   'sample-1',
   '__WORKING_DIRECTORY__/test/data/ce.fa',
+  panel_parquet := '__WORKING_DIRECTORY__/test_somalier_bam_panel.parquet',
   index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai',
   reference_index_path := '__WORKING_DIRECTORY__/test/data/ce.fa.fai'
 )
@@ -49,9 +53,10 @@ query I
 SELECT count(*)
 FROM duckhts_somalier_bam_counts(
   '__WORKING_DIRECTORY__/test/data/range.bam',
-  'somalier_bam_panel',
+  NULL,
   'sample-1',
   '__WORKING_DIRECTORY__/test/data/ce.fa',
+  panel_parquet := '__WORKING_DIRECTORY__/test_somalier_bam_panel.parquet',
   index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai',
   reference_index_path := '__WORKING_DIRECTORY__/test/data/ce.fa.fai'
 )
@@ -73,12 +78,16 @@ SELECT 'synthetic' AS assembly, 0::UBIGINT AS site_index,
        'ctg}part' AS region, 10::UBIGINT AS position,
        'A' AS allele_a, 'G' AS allele_b;
 
+statement ok
+COPY somalier_brace_panel TO '__WORKING_DIRECTORY__/test_somalier_brace_panel.parquet' (FORMAT parquet);
+
 query TTTT
 SELECT a::VARCHAR, b::VARCHAR, other::VARCHAR, status
 FROM duckhts_somalier_bam_counts(
   '__WORKING_DIRECTORY__/test/data/somalier_brace.bam',
-  'somalier_brace_panel', 'brace-sample',
+  NULL, 'brace-sample',
   '__WORKING_DIRECTORY__/test/data/somalier_brace.fa',
+  panel_parquet := '__WORKING_DIRECTORY__/test_somalier_brace_panel.parquet',
   index_path := '__WORKING_DIRECTORY__/test/data/somalier_brace.bam.bai',
   reference_index_path := '__WORKING_DIRECTORY__/test/data/somalier_brace.fa.fai'
 );
@@ -91,8 +100,9 @@ statement ok
 CREATE TEMP TABLE somalier_one_worker AS
 SELECT * FROM duckhts_somalier_bam_counts(
   '__WORKING_DIRECTORY__/test/data/range.bam',
-  'somalier_bam_panel', 'sample-1',
+  NULL, 'sample-1',
   '__WORKING_DIRECTORY__/test/data/ce.fa',
+  panel_parquet := '__WORKING_DIRECTORY__/test_somalier_bam_panel.parquet',
   index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai',
   reference_index_path := '__WORKING_DIRECTORY__/test/data/ce.fa.fai',
   worker_count := 1
@@ -102,8 +112,9 @@ statement ok
 CREATE TEMP TABLE somalier_four_workers AS
 SELECT * FROM duckhts_somalier_bam_counts(
   '__WORKING_DIRECTORY__/test/data/range.bam',
-  'somalier_bam_panel', 'sample-1',
+  NULL, 'sample-1',
   '__WORKING_DIRECTORY__/test/data/ce.fa',
+  panel_parquet := '__WORKING_DIRECTORY__/test_somalier_bam_panel.parquet',
   index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai',
   reference_index_path := '__WORKING_DIRECTORY__/test/data/ce.fa.fai',
   worker_count := 4
@@ -125,8 +136,9 @@ query I
 SELECT count(*)
 FROM duckhts_somalier_bam_counts(
   '__WORKING_DIRECTORY__/test/data/range.bam',
-  'somalier_bam_panel', 'sample-1',
+  NULL, 'sample-1',
   '__WORKING_DIRECTORY__/test/data/ce.fa',
+  panel_parquet := '__WORKING_DIRECTORY__/test_somalier_bam_panel.parquet',
   worker_count := 8
 );
 ----
@@ -137,9 +149,10 @@ query I
 SELECT count(*)
 FROM duckhts_somalier_bam_counts(
   '__WORKING_DIRECTORY__/test/data/range.bam',
-  'somalier_bam_panel',
+  NULL,
   'sample-1',
-  '__WORKING_DIRECTORY__/test/data/ce.fa'
+  '__WORKING_DIRECTORY__/test/data/ce.fa',
+  panel_parquet := '__WORKING_DIRECTORY__/test_somalier_bam_panel.parquet'
 );
 ----
 4
@@ -151,8 +164,9 @@ CREATE TEMP TABLE somalier_bam_rows AS
 SELECT * EXCLUDE(source_path)
 FROM duckhts_somalier_bam_counts(
   '__WORKING_DIRECTORY__/test/data/range.bam',
-  'somalier_bam_panel', 'sample-1',
+  NULL, 'sample-1',
   '__WORKING_DIRECTORY__/test/data/ce.fa',
+  panel_parquet := '__WORKING_DIRECTORY__/test_somalier_bam_panel.parquet',
   index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai',
   reference_index_path := '__WORKING_DIRECTORY__/test/data/ce.fa.fai'
 );
@@ -162,8 +176,9 @@ CREATE TEMP TABLE somalier_cram_rows AS
 SELECT * EXCLUDE(source_path)
 FROM duckhts_somalier_bam_counts(
   '__WORKING_DIRECTORY__/test/data/range.cram',
-  'somalier_bam_panel', 'sample-1',
+  NULL, 'sample-1',
   '__WORKING_DIRECTORY__/test/data/ce.fa',
+  panel_parquet := '__WORKING_DIRECTORY__/test_somalier_bam_panel.parquet',
   index_path := '__WORKING_DIRECTORY__/test/data/range.cram.crai',
   reference_index_path := '__WORKING_DIRECTORY__/test/data/ce.fa.fai'
 );
@@ -184,8 +199,9 @@ query TTTT
 SELECT a::VARCHAR, b::VARCHAR, other::VARCHAR, status
 FROM duckhts_somalier_bam_counts(
   '__WORKING_DIRECTORY__/test/data/range.bam',
-  'somalier_bam_panel', 'sample-1',
+  NULL, 'sample-1',
   '__WORKING_DIRECTORY__/test/data/ce.fa',
+  panel_parquet := '__WORKING_DIRECTORY__/test_somalier_bam_panel.parquet',
   index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai',
   reference_index_path := '__WORKING_DIRECTORY__/test/data/ce.fa.fai',
   min_mapq := 24
@@ -197,8 +213,9 @@ WHERE site_index = 1;
 statement error
 SELECT * FROM duckhts_somalier_bam_counts(
   '__WORKING_DIRECTORY__/test/data/range.bam',
-  'somalier_bam_panel', 'sample-1',
+  NULL, 'sample-1',
   '__WORKING_DIRECTORY__/test/data/ce.fa',
+  panel_parquet := '__WORKING_DIRECTORY__/test_somalier_bam_panel.parquet',
   index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai',
   reference_index_path := '__WORKING_DIRECTORY__/test/data/ce.fa.fai',
   overlap_policy := 'unspecified'
@@ -209,8 +226,9 @@ overlap_policy must be
 statement error
 SELECT * FROM duckhts_somalier_bam_counts(
   '__WORKING_DIRECTORY__/test/data/range.bam',
-  'somalier_bam_panel', 'sample-1',
+  NULL, 'sample-1',
   '__WORKING_DIRECTORY__/test/data/ce.fa',
+  panel_parquet := '__WORKING_DIRECTORY__/test_somalier_bam_panel.parquet',
   index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai',
   reference_index_path := '__WORKING_DIRECTORY__/test/data/ce.fa.fai',
   max_region_bytes := 8
@@ -221,62 +239,58 @@ max_region_bytes
 statement error
 SELECT * FROM duckhts_somalier_bam_counts(
   '__WORKING_DIRECTORY__/test/data/range.bam',
-  'somalier_bam_panel', 'sample-1',
+  NULL, 'sample-1',
   '__WORKING_DIRECTORY__/test/data/ce.fa',
+  panel_parquet := '__WORKING_DIRECTORY__/test_somalier_bam_panel.parquet',
   worker_count := 0
 );
 ----
 worker_count must be an integer in [1, 64]
 
-# Native parallel preparation uses a retained connection. Caller-local TEMP
-# relations are deliberately not a second panel transport contract.
-statement ok
-CREATE TEMP TABLE somalier_temp_panel AS SELECT * FROM somalier_bam_panel;
-
+# The panel is read from Parquet on a private in-memory instance, so the
+# caller's relations are not a panel transport: panel_table is rejected.
 statement error
 SELECT * FROM duckhts_somalier_bam_counts(
   '__WORKING_DIRECTORY__/test/data/range.bam',
-  'somalier_temp_panel', 'sample-1',
+  'somalier_bam_panel', 'sample-1',
   '__WORKING_DIRECTORY__/test/data/ce.fa'
 );
 ----
-does not exist
-
-# A committed view may invoke other table functions, but it cannot recursively
-# use this function as the panel source for another extraction.
-statement ok
-CREATE VIEW somalier_nested_panel AS
-SELECT assembly, site_index, region, position, allele_a, allele_b
-FROM duckhts_somalier_bam_counts(
-  '__WORKING_DIRECTORY__/test/data/range.bam',
-  'somalier_bam_panel', 'sample-1',
-  '__WORKING_DIRECTORY__/test/data/ce.fa',
-  index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai',
-  reference_index_path := '__WORKING_DIRECTORY__/test/data/ce.fa.fai'
-);
+panel_table is no longer supported
 
 statement error
 SELECT * FROM duckhts_somalier_bam_counts(
   '__WORKING_DIRECTORY__/test/data/range.bam',
-  'somalier_nested_panel', 'sample-1',
-  '__WORKING_DIRECTORY__/test/data/ce.fa',
-  index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai',
-  reference_index_path := '__WORKING_DIRECTORY__/test/data/ce.fa.fai'
+  NULL, 'sample-1',
+  '__WORKING_DIRECTORY__/test/data/ce.fa'
 );
 ----
-panel preparation is busy or recursive
+panel_parquet is required
 
-# A failed nested preparation releases the slot for the next ordinary query.
-query I
-SELECT count(*)
-FROM duckhts_somalier_bam_counts(
+statement error
+SELECT * FROM duckhts_somalier_bam_counts(
   '__WORKING_DIRECTORY__/test/data/range.bam',
-  'somalier_bam_panel', 'sample-1',
+  NULL, 'sample-1',
   '__WORKING_DIRECTORY__/test/data/ce.fa',
-  reference_index_path := '__WORKING_DIRECTORY__/test/data/ce.fa.fai'
+  panel_parquet := '__WORKING_DIRECTORY__/test_somalier_missing_panel.parquet'
 );
 ----
-4
+test_somalier_missing_panel.parquet
+
+# A panel that fails validation is reported by the private reader.
+statement ok
+COPY (SELECT * FROM somalier_bam_panel WHERE site_index > 0)
+TO '__WORKING_DIRECTORY__/test_somalier_gap_panel.parquet' (FORMAT parquet);
+
+statement error
+SELECT * FROM duckhts_somalier_bam_counts(
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  NULL, 'sample-1',
+  '__WORKING_DIRECTORY__/test/data/ce.fa',
+  panel_parquet := '__WORKING_DIRECTORY__/test_somalier_gap_panel.parquet'
+);
+----
+site_index must be unique and dense from zero
 
 # A valid FAI does not turn a truncated reference read into biological
 # unavailability: transport/read failure aborts extraction.
@@ -293,8 +307,9 @@ TO '__WORKING_DIRECTORY__/test_somalier_truncated.fa.fai'
 statement error
 SELECT * FROM duckhts_somalier_bam_counts(
   '__WORKING_DIRECTORY__/test/data/range.bam',
-  'somalier_bam_panel', 'sample-1',
+  NULL, 'sample-1',
   '__WORKING_DIRECTORY__/test_somalier_truncated.fa',
+  panel_parquet := '__WORKING_DIRECTORY__/test_somalier_bam_panel.parquet',
   index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai',
   reference_index_path := '__WORKING_DIRECTORY__/test_somalier_truncated.fa.fai'
 );
@@ -304,8 +319,9 @@ reference lookup failed
 statement error
 SELECT * FROM duckhts_somalier_bam_counts(
   '__WORKING_DIRECTORY__/test/data/range.bam',
-  'somalier_bam_panel', 'sample-1',
+  NULL, 'sample-1',
   '__WORKING_DIRECTORY__/test/data/ce.fa',
+  panel_parquet := '__WORKING_DIRECTORY__/test_somalier_bam_panel.parquet',
   worker_count := 1.5
 );
 ----

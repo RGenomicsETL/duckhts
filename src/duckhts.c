@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include "duckhts_somalier.h"
+#include "duckhts_somalier_panel_sql.h"
 #include "duckhts_registration.h"
 #include "duckhts_simd.h"
 #include "wasm_http_hfile.h"
@@ -43,7 +44,7 @@ extern void register_duckhts_somalier_matched_functions(
 extern bool register_duckhts_somalier_vcf_extract_sql(
     duckhts_registration_t *registration);
 extern bool register_duckhts_somalier_bam_extract_functions(
-    duckhts_registration_t *registration, duckdb_database database);
+    duckhts_registration_t *registration);
 /* interval_udf.c */
 extern void register_read_bed_function(duckdb_connection connection);
 extern void register_fasta_nuc_function(duckdb_connection connection);
@@ -219,8 +220,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_duckhts_somalier_functions(connection);
     register_duckhts_somalier_spacing(connection);
     register_duckhts_ancestry_functions(connection);
-    if (!register_duckhts_somalier_bam_extract_functions(
-            &registration, *access->get_database(info))) {
+    if (!register_duckhts_somalier_bam_extract_functions(&registration)) {
         return false;
     }
     register_duckhts_somalier_contamination_functions(connection);
@@ -315,80 +315,17 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         return false;
     }
     {
-        char max_identity_bytes[16];
-        static const char somalier_panel_sha256_sql_a[] =
-        "CREATE OR REPLACE MACRO duckhts_somalier_panel_sha256(panel_table) AS ("
-        "WITH __dht_panel_rows AS MATERIALIZED ("
-        "SELECT CAST(assembly AS VARCHAR) AS assembly, "
-        "CAST(site_index AS UBIGINT) AS site_index, CAST(region AS VARCHAR) AS region, "
-        "CAST(position AS UBIGINT) AS position, CAST(allele_a AS VARCHAR) AS allele_a, "
-        "CAST(allele_b AS VARCHAR) AS allele_b FROM query_table(panel_table)"
-        "), __dht_string_validation AS MATERIALIZED (SELECT CASE "
-        "WHEN count(*) FILTER (WHERE strlen(assembly) > ";
-        static const char somalier_panel_sha256_sql_b[] =
-        " OR strlen(region) > ";
-        static const char somalier_panel_sha256_sql_c[] =
-        ") != 0 THEN error('duckhts_somalier_panel_sha256: panel assembly and region "
-        "must be at most ";
-        static const char somalier_panel_sha256_sql_d[] =
-        " bytes') ELSE true END AS valid FROM __dht_panel_rows), "
-        "__dht_bounded_panel_rows AS MATERIALIZED (SELECT p.* FROM __dht_panel_rows p "
-        "CROSS JOIN __dht_string_validation sv WHERE sv.valid), "
-        "__dht_validation AS MATERIALIZED (SELECT CASE "
-        "WHEN count(*) = 0 THEN error('duckhts_somalier_panel_sha256: panel is empty') "
-        "WHEN count(*) FILTER (WHERE assembly IS NULL OR site_index IS NULL "
-        "OR region IS NULL OR position IS NULL "
-        "OR allele_a IS NULL OR allele_b IS NULL) != 0 THEN "
-        "error('duckhts_somalier_panel_sha256: panel identity fields cannot be NULL') "
-        "WHEN count(DISTINCT assembly) != 1 OR min(assembly) = '' THEN "
-        "error('duckhts_somalier_panel_sha256: panel must use one assembly') "
-        "WHEN count(*) > 100000000 THEN "
-        "error('duckhts_somalier_panel_sha256: panel exceeds 100000000 sites') "
-        "WHEN count(DISTINCT site_index) != count(*) OR min(site_index) != 0 "
-        "OR max(site_index) != count(*) - 1 THEN "
-        "error('duckhts_somalier_panel_sha256: site_index must be unique and dense from zero') "
-        "WHEN count(*) FILTER (WHERE region = '' OR position = 0 "
-        "OR region IN ('X', 'chrX', 'NC_000023.10', 'NC_000023.11', "
-        "'Y', 'chrY', 'NC_000024.9', 'NC_000024.10') "
-        "OR NOT regexp_matches(allele_a, '^[ACGT]$') "
-        "OR NOT regexp_matches(allele_b, '^[ACGT]$') "
-        "OR allele_a >= allele_b) != 0 THEN "
-        "error('duckhts_somalier_panel_sha256: autosomal panel sites require a positive "
-        "position and canonical distinct uppercase biallelic SNP alleles A < B') "
-        "WHEN count(DISTINCT struct_pack(region := region, pos1 := position)) "
-        "!= count(*) THEN "
-        "error('duckhts_somalier_panel_sha256: duplicate physical region and position') "
-        "ELSE true END AS valid FROM __dht_bounded_panel_rows), "
-        "__dht_validated_panel_rows AS MATERIALIZED (SELECT p.* "
-        "FROM __dht_bounded_panel_rows p CROSS JOIN __dht_validation v WHERE v.valid), "
-        "__dht_row_hashes AS MATERIALIZED (SELECT site_index, "
-        "sha256(site_index::VARCHAR || ':' || hex(encode(region)) || ':' || "
-        "position::VARCHAR || ':' || hex(encode(allele_a)) || ':' || "
-        "hex(encode(allele_b))) AS row_hash FROM __dht_validated_panel_rows), "
-        "__dht_block_hashes AS MATERIALIZED (SELECT site_index // 4096 AS block_index, "
-        "sha256(string_agg(row_hash, '' ORDER BY site_index)) AS block_hash "
-        "FROM __dht_row_hashes GROUP BY block_index), "
-        "__dht_panel_summary AS MATERIALIZED (SELECT min(assembly) AS assembly, "
-        "count(*) AS site_count FROM __dht_validated_panel_rows) "
-        "SELECT sha256('duckhts-somalier-panel-v2;autosomal-diploid-biallelic-snp;' || "
-        "hex(encode(ps.assembly)) || ';' || ps.site_count::VARCHAR || ';' || "
-        "string_agg(b.block_hash, '' ORDER BY b.block_index)) "
-        "FROM __dht_block_hashes b CROSS JOIN __dht_panel_summary ps "
-        "GROUP BY ps.assembly, ps.site_count)";
-        const char *const somalier_panel_sha256_sql[] = {
-            somalier_panel_sha256_sql_a, max_identity_bytes,
-            somalier_panel_sha256_sql_b, max_identity_bytes,
-            somalier_panel_sha256_sql_c, max_identity_bytes,
-            somalier_panel_sha256_sql_d
-        };
+        char *panel_sha256_sql = duckhts_somalier_panel_sha256_macro_sql();
 
-        snprintf(max_identity_bytes, sizeof(max_identity_bytes), "%u",
-                 (unsigned int)DUCKHTS_SOMALIER_MAX_IDENTITY_BYTES);
-        if (!duckhts_register_sql_parts(&registration, somalier_panel_sha256_sql,
-                sizeof(somalier_panel_sha256_sql) /
-                    sizeof(somalier_panel_sha256_sql[0]))) {
+        if (panel_sha256_sql == NULL) {
+            return duckhts_registration_error(&registration,
+                "DuckHTS could not build the Somalier panel macro");
+        }
+        if (!duckhts_register_sql(&registration, panel_sha256_sql)) {
+            free(panel_sha256_sql);
             return false;
         }
+        free(panel_sha256_sql);
     }
     if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckhts_somalier_prepare_sketches("
