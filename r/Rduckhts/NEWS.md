@@ -1,8 +1,18 @@
+# Rduckhts 1.5.2.9006-0.1.5
+
+- Consequence prediction has moved to DuckVEP and its R package, Rduckvep
+  (<https://github.com/RGenomicsETL/DuckVEP>). `rduckhts_haplotypes()` and the bundled
+  consequence fixtures are removed; the bundled extension no longer carries the DuckVEP
+  functions. Load DuckVEP with `Rduckvep::rduckvep_load(con)` on an Rduckhts connection
+  for annotation. CSQ, ANN and BCSQ parsing in `rduckhts_bcf()` is unchanged.
+
 # Rduckhts 1.5.2.9005-0.1.5
 
 - `rduckhts_ancestry_proportions()` estimates ancestry proportions from
   allele-frequency or diploid-dosage relations against keyed wide or long reference
   products, with matching audits and correlation gates on unrounded coefficients.
+  `reversed_variants` counts every site read as `1 - f`, including strand-flipped
+  reversals; `flipped_variants` counts every strand-flipped site.
   Reference loci touching any input locus must be unique; matched loci need finite
   loadings and frequencies in [0, 1]. Every sample returns a row for every reference
   group, with NULL proportions and `no_matched_variants` when nothing matches. Group
@@ -17,7 +27,12 @@
   allele-fraction or balance-rule genotype frequencies, and applies the same
   proportion engine. `rduckhts_ancestry_panel()` selects biallelic unambiguous SNVs
   with complete, valid reference values and forward-strand alleles, and publishes
-  the panel only after it validates.
+  the panel only after it validates. When more sites are eligible than `max_sites`,
+  every contig keeps at least one site (only the largest `max_sites` contigs when
+  there are more contigs than that) and the rest are shared in proportion to each
+  contig's eligible sites minus that one, spread evenly along it. Eligibility checks
+  keep constant state per locus, so building a panel from a full genome-wide reference
+  needs a fraction of the memory it did.
 
 # Rduckhts 1.5.2.9004-0.1.5
 

@@ -98,17 +98,6 @@ test_package_owned_connection <- function() {
     )$arity,
     c(3, 4)
   )
-  expect_equal(
-    dbGetQuery(
-      con,
-      paste(
-        "SELECT count(*) AS n FROM duckvep_so_terms()",
-        "WHERE consequence = 'missense_variant'"
-      )
-    )$n,
-    1
-  )
-
   json_state <- dbGetQuery(
     con,
     paste(

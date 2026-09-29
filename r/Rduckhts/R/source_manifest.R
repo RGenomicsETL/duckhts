@@ -22,10 +22,3 @@ duckhts_source_manifest <- function() {
     file.path(duckhts_extension_dir(), "duckhts_sources.tsv")
   )
 }
-
-duckhts_duckvep_kernel_source_files <- function() {
-  paths <- duckhts_source_manifest()$package_path
-  prefix <- "duckvep/kernel/src/"
-  paths <- paths[startsWith(paths, prefix) & grepl("[.]c$", paths)]
-  sub(prefix, "", paths, fixed = TRUE)
-}

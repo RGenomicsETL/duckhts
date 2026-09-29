@@ -2,10 +2,9 @@
 # Run from the repository root; never fetch a whole public CRAM.
 source("test/scripts/ancestry_1000g_real.R", local = TRUE)
 
-bundle <- c(source_fasta = duckhts_bench_artifact_path("liftover_grch37_fasta"),
-  destination_fasta = duckhts_bench_fetch("liftover_grch38_fasta"),
-  chain = duckhts_bench_fetch("liftover_grch37_grch38_chain"))
-stopifnot(all(file.exists(bundle)))
+# Stage (download, decompress and index) the whole liftover bundle on a clean cache.
+bundle <- duckhts_bench_stage_liftover()
+stopifnot(all(file.exists(bundle)), all(file.exists(paste0(bundle[c("source_fasta", "destination_fasta")], ".fai"))))
 con <- rduckhts_connect()
 dbExecute(con, "SET threads=4")
 source_sites <- data.frame(chrom = "22", pos = as.integer(site$pos),

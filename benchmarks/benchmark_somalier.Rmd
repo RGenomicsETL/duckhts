@@ -62,12 +62,12 @@ whose source revision and extension SHA-256 match the checkout and measured
 binary:
 
 ```{r clean-build, eval=FALSE, echo=TRUE}
-source("scripts/duckvep_evidence.R")
+source("scripts/benchmark_extension_receipt.R")
 root <- normalizePath(".")
-revision <- duckvep_evidence_revision(root)
-extension <- duckvep_evidence_build_extension(root,
+revision <- benchmark_evidence_revision(root)
+extension <- benchmark_evidence_build_extension(root,
   "build/release/duckhts.duckdb_extension", revision)
-duckvep_evidence_write_extension_receipt(
+benchmark_evidence_write_extension_receipt(
   "/tmp/somalier-extension.tsv", revision, extension
 )
 ```
@@ -110,7 +110,7 @@ Sys.setenv(DUCKHTSBENCH_REGISTRY =
 benchmark_sources <- c("benchmarks/benchmark_somalier.Rmd",
   "benchmarks/benchmark_somalier_run.R", "r/duckhtsbench/R/registry.R",
   "r/duckhtsbench/R/stage.R", "r/duckhtsbench/R/somalier.R",
-  "r/duckhtsbench/inst/benchmark_registry.tsv", "scripts/duckvep_evidence.R")
+  "r/duckhtsbench/inst/benchmark_registry.tsv", "scripts/benchmark_extension_receipt.R")
 dirty <- system2("git", c("status", "--porcelain", "--untracked-files=all", "--",
                          "src", benchmark_sources), stdout = TRUE, stderr = TRUE)
 if (length(dirty)) stop("Render the Somalier benchmark from committed src/ and benchmark inputs")
@@ -148,9 +148,9 @@ receipt_setting <- Sys.getenv("SOMALIER_BENCHMARK_EXTENSION_RECEIPT", unset = ""
 if (!nzchar(receipt_setting)) {
   stop("SOMALIER_BENCHMARK_EXTENSION_RECEIPT must name a verified release build receipt")
 }
-source("scripts/duckvep_evidence.R")
+source("scripts/benchmark_extension_receipt.R")
 receipt_path <- normalizePath(receipt_setting, mustWork = TRUE)
-build <- duckvep_evidence_read_extension_receipt(receipt_path, normalizePath("."),
+build <- benchmark_evidence_read_extension_receipt(receipt_path, normalizePath("."),
                                                   extension, source_revision)
 stopifnot(identical(build$sha256, extension_sha256))
 binary_binding <- paste("verified release receipt:", build$binding)

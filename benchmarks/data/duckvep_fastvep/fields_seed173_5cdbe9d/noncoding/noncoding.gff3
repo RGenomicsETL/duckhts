@@ -1,5 +1,0 @@
-##gff-version 3
-chrDuck	duckvep	gene	100	250	.	+	.	ID=gene:DUCK1;Name=DUCK1;biotype=lncRNA
-chrDuck	duckvep	ncRNA	100	250	.	+	.	ID=transcript:DUCK1-201;Parent=gene:DUCK1;Name=DUCK1-201;biotype=lncRNA
-chrDuck	duckvep	exon	100	150	.	+	.	ID=exon:DUCK1-1;Parent=transcript:DUCK1-201;rank=1
-chrDuck	duckvep	exon	200	250	.	+	.	ID=exon:DUCK1-2;Parent=transcript:DUCK1-201;rank=2

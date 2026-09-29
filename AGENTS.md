@@ -14,7 +14,8 @@ C, R, and SQL discipline.
 
 DuckHTS is a library-first C extension that makes sequencing data and genomics algorithms
 composable in DuckDB. htslib supplies HTS transport and format semantics; reusable native
-kernels supply coverage, interval, sequence, normalization, and consequence mechanics;
+kernels supply coverage, interval, sequence, and normalization mechanics (consequence
+prediction belongs to DuckVEP);
 SQL supplies planning, joins, supplementary annotation, provenance, and explainable
 clinical evidence. The same extension is packaged on CRAN as `Rduckhts`.
 
@@ -35,11 +36,6 @@ clinical evidence. The same extension is packaged on CRAN as `Rduckhts`.
 3. When mirroring external tool behavior, consult `.sync/` mirrors before secondary sources.
 4. Keep changes focused. Do not create branches, commits, large generated diffs, or workflow sprawl unless explicitly requested.
 5. Preserve existing public APIs unless the task explicitly asks for an API change.
-   DuckVEP is alpha and has no backward-compatibility requirement: redesign or delete its
-   APIs and intermediate representations when that simplifies ownership or semantic
-   authority. Update callers directly; do not retain compatibility-only shims or parallel
-   implementations. Preserve pinned biological semantics, physical input records, fuzzing
-   coverage, comparison denominators, and failure controls.
 6. When referring to public GitHub issues or PRs, use full GitHub URLs.
 
 ### Reviewable work and evidence integrity
@@ -67,7 +63,6 @@ clinical evidence. The same extension is packaged on CRAN as `Rduckhts`.
   random trials, weakening assertions, widening tolerances, or accepting implementation
   output as its own expectation. A genuine expected-behavior correction requires an
   independently justified contract and an explicit test change with retained evidence.
-  Follow `design/duckvep_corpus_workflow.md` for biological conformance campaigns.
 - Delegate only bounded work with named file ownership, an interface or question,
   validation requirements, and a stop condition. Subagents follow the same rules and
   cannot expand the task themselves. The supervising agent reads their diffs, reconciles
@@ -241,7 +236,7 @@ When DuckHTS ports or rewrites an existing tool, follow compatibility-rewrite di
 5. document unsupported features and validation commands;
 6. credit original authors and avoid vague compatibility claims.
 
-This applies especially to mosdepth-, bcftools-, samtools-, and VEP-inspired behavior.
+This applies especially to mosdepth-, bcftools-, and samtools-inspired behavior.
 
 ## Coverage and Interval Work
 Current implemented surfaces include `read_pileup`, `bam_bin_counts`, `duckhts_bam_bed_coverage`, `duckhts_mosdepth`, `duckhts_samtools_idxstats`, `fasta_nuc`, and cgranges-backed overlap functions.

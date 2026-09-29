@@ -10,7 +10,7 @@ mapping	phased_genotype_fields.vcf	Phased and arbitrary-ploidy GT plus PL/GP/DS/
 mapping	genotype_ploidy_edge_cases.vcf	Compact GT-only haploid/phased/polyploid/large-allele fixture for read_bcf projection tests
 mapping	tidy_chunk_boundary.vcf	Single-record 2053-sample fixture that exercises GT and CSQ record ownership across DuckDB output chunks
 mapping	test_vep_tidy.vcf	Compact CSQ plus two-sample FORMAT fixture for read_bcf VEP-cache reuse across tidy sample rows
-mapping	duckvep/minimal_bcsq.vcf	Tiny BCSQ-tagged fixture for DuckVEP/csq parser and DuckDB exact/range join plumbing
+mapping	csq/minimal_bcsq.vcf	Tiny BCSQ-tagged fixture for read_bcf() BCSQ parsing and DuckDB exact/range joins
 regression	bcf_filter_list_regression.vcf	FILTER list materialization for unapplied, PASS and multi-entry values
 regression	malformed_bad_pos.vcf	Valid first record followed by malformed POS to verify BCF/VCF scan errors are surfaced instead of treated as EOF
 regression	bcf_cache_lifecycle.vcf	Synthetic three-record cache reset, missing fields, growing FORMAT arrays, ploidy and CSQ descriptor reuse

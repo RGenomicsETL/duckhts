@@ -213,7 +213,7 @@
   paste0(
     "SELECT sample_id, count(*) AS input_variants, ",
     "count(*) FILTER (WHERE match_status IN ('direct','reversed','flipped','flipped_reversed')) AS used_variants, ",
-    "count(*) FILTER (WHERE match_status = 'reversed') AS reversed_variants, ",
+    "count(*) FILTER (WHERE match_status IN ('reversed','flipped_reversed')) AS reversed_variants, ",
     "count(*) FILTER (WHERE match_status IN ('flipped','flipped_reversed')) AS flipped_variants, ",
     "count(*) FILTER (WHERE match_status = 'duplicate') AS duplicate_variants, ",
     "count(*) FILTER (WHERE match_status = 'ambiguous') AS ambiguous_variants, ",

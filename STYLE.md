@@ -57,8 +57,8 @@ It is not a brace-placement contest and it is not permission to manufacture tiny
 
 ### Names and layout
 
-- Prefix externally visible symbols with `duckhts_` or the owning library name such as
-  `duckvep_`. Keep file-private helpers `static`; do not export a helper in anticipation of
+- Prefix externally visible symbols with `duckhts_` or the owning library name.
+  Keep file-private helpers `static`; do not export a helper in anticipation of
   another caller.
 - Name operations with verbs and stored facts with nouns. Names should expose the unit or
   coordinate convention when confusion is possible, such as `pos1`, `byte_len`, or

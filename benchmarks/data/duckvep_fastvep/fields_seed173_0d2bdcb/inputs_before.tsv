@@ -1,4 +1,0 @@
-id	path	sha256	size	mtime	ctime
-projection_reference	/root/.cache/duckhts/benchmarks/duckvep-projection/inputs/minimal.fa	01d1f025213063a747cb0c53cdcbea67262f32ab1dbdb56aa4131d72142e6d26	282	1789259964.747346878	1789259964.747346878
-projection_reference_fai	/root/.cache/duckhts/benchmarks/duckvep-projection/inputs/minimal.fa.fai	154cbe4408697b2c220bb086d5f2f283f58feebb185b1729199dab94087849e4	41	1789259964.777347088	1789259964.777347088
-projection_model_gff	/root/.cache/duckhts/benchmarks/duckvep-projection/inputs/minimal.gff3	41defe13bfea82d43afc45dd1016c678fc199e634eab215309477ee0bc821685	540	1789259964.783346891	1789259964.783346891

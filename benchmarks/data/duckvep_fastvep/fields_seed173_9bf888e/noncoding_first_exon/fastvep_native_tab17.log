@@ -1,5 +1,0 @@
-Annotating: /tmp/duckhts-fastvep-fields-seed173-9bf888e/noncoding_first_exon/input.vcf -> /tmp/duckhts-fastvep-fields-seed173-9bf888e/noncoding_first_exon/fastvep_native_tab17.tsv
-Loaded 1 transcripts from /tmp/duckhts-fastvep-fields-seed173-9bf888e/noncoding_first_exon/noncoding_first_exon.gff3 (source label: noncoding_first_exon.gff3)
-Memory-mapped reference FASTA from /root/.cache/duckhts/benchmarks/duckvep-projection/inputs/minimal.fa (using .fai index)
-Built sequences for 1 coding transcripts
-Saved transcript cache to /tmp/duckhts-fastvep-fields-seed173-9bf888e/noncoding_first_exon/fastvep.cache

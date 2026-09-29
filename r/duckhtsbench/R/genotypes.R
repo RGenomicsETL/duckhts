@@ -1,3 +1,53 @@
+duckhts_bench_publish_files <- function(temporaries, targets) {
+  if (!length(temporaries) || length(temporaries) != length(targets) ||
+      anyDuplicated(targets) || !all(file.exists(temporaries))) {
+    stop("publication requires distinct targets and one existing temporary per target",
+      call. = FALSE)
+  }
+  backups <- paste0(targets, ".backup-", Sys.getpid())
+  unlink(backups, force = TRUE)
+  backed_up <- logical(length(targets))
+  for (index in seq_along(targets)) {
+    if (file.exists(targets[[index]])) {
+      if (!file.rename(targets[[index]], backups[[index]])) {
+        for (restore in which(backed_up)) file.rename(backups[[restore]], targets[[restore]])
+        stop("could not preserve existing artifact: ", targets[[index]], call. = FALSE)
+      }
+      backed_up[[index]] <- TRUE
+    }
+  }
+  published <- logical(length(targets))
+  for (index in seq_along(targets)) {
+    if (!file.rename(temporaries[[index]], targets[[index]])) {
+      for (remove in which(published)) unlink(targets[[remove]], force = TRUE)
+      for (restore in which(backed_up)) file.rename(backups[[restore]], targets[[restore]])
+      stop("could not publish complete artifact set: ", targets[[index]], call. = FALSE)
+    }
+    published[[index]] <- TRUE
+  }
+  unlink(backups, force = TRUE)
+  invisible(targets)
+}
+
+duckhts_bench_write_genotype_receipt <- function(fields, path) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  temporary <- paste0(path, ".partial-", Sys.getpid())
+  backup <- paste0(path, ".backup-", Sys.getpid())
+  unlink(c(temporary, backup), force = TRUE)
+  utils::write.table(fields, temporary, sep = "\t", row.names = FALSE, quote = FALSE)
+  if (file.exists(path) && !file.rename(path, backup)) {
+    unlink(temporary, force = TRUE)
+    stop("could not preserve existing receipt before publication: ", path, call. = FALSE)
+  }
+  if (!file.rename(temporary, path)) {
+    if (file.exists(backup)) file.rename(backup, path)
+    unlink(temporary, force = TRUE)
+    stop("could not publish receipt: ", path, call. = FALSE)
+  }
+  unlink(backup, force = TRUE)
+  invisible(path)
+}
+
 # Encode the same regional records in both formats, retaining all samples and
 # all fields. Also used by the network-free staging test with a local source.
 duckhts_bench_genotype_pair <- function(source, region, outputs, bcftools) {
@@ -224,16 +274,31 @@ duckhts_bench_stage_genotypes <- function() {
   plan <- duckhts_bench_stage_plan("genotype-reader")
   stopifnot(identical(plan$id, c("geno_hprc_vcfgz", "geno_hprc_bcf")))
   rows <- duckhts_bench_registry()
-  definition <- duckhts_bench_duckvep_corpus_definitions()[["hprc-african4-chr22"]]
-  source <- duckhts_bench_duckvep_corpus_row(rows, definition$source)
-  stopifnot(identical(plan$locator, c(
-    paste0("artifact:", definition$source, ";artifact:", definition$source_index),
-    "artifact:geno_hprc_vcfgz")), all(plan$release == source$release))
+  source_id <- "geno_hprc_source"
+  index_id <- "geno_hprc_source_tbi"
+  source <- rows[rows$id == source_id, , drop = FALSE]
+  source_index <- rows[rows$id == index_id, , drop = FALSE]
+  stopifnot(nrow(source) == 1L, nrow(source_index) == 1L,
+            identical(plan$locator, c(
+              paste0("artifact:", source_id, ";artifact:", index_id),
+              "artifact:geno_hprc_vcfgz")), all(plan$release == source$release))
   identity <- duckhts_bench_identity_fields(plan$supplier_identity[[1]])
   stopifnot(identical(unname(identity[c("region", "all_samples", "genotypes_removed")]),
                       c("chr22:20000000-21000000", "true", "false")))
-  index <- duckhts_bench_fetch(definition$source_index)
-  duckhts_bench_duckvep_validate_source(rows, definition, index, NULL, Sys.which("curl"))
+  index <- duckhts_bench_fetch(index_id)
+  source_identity <- duckhts_bench_identity_fields(source$supplier_identity)
+  index_identity <- duckhts_bench_identity_fields(source_index$supplier_identity)
+  if (!file.exists(index) || !file.info(index)$size ||
+      !all(c("version_id", "bytes") %in% names(source_identity)) ||
+      !nzchar(source_identity[["version_id"]]) ||
+      !all(c("version_id", "sha256", "bytes") %in% names(index_identity)) ||
+      !grepl(paste0("versionId=", source_identity[["version_id"]]),
+             source$locator, fixed = TRUE) ||
+      !grepl(paste0("versionId=", index_identity[["version_id"]]),
+             source_index$locator, fixed = TRUE)) {
+    stop("HPRC source and index must retain their registered S3 version IDs",
+         call. = FALSE)
+  }
   outputs <- stats::setNames(
     vapply(plan$id, duckhts_bench_artifact_path, character(1)), c("vcf", "bcf")
   )
@@ -249,11 +314,11 @@ duckhts_bench_stage_genotypes <- function() {
     fields <- rbind(fields, data.frame(
       field = c("source_supplier_identity", "source_index_artifact", "bcftools_version",
                 "observed_md5", "observed_bytes", "records", "samples"),
-      value = c(source$supplier_identity, definition$source_index,
+      value = c(source$supplier_identity, index_id,
                 system2("bcftools", "--version", stdout = TRUE)[[1]],
                 unname(tools::md5sum(staged_outputs[[i]])), file.info(staged_outputs[[i]])$size,
                 counts$records, counts$samples)))
-    duckhts_bench_duckvep_atomic_table(fields, receipt)
+    duckhts_bench_write_genotype_receipt(fields, receipt)
   }
   duckhts_bench_publish_genotype_bundle(staged_outputs, outputs)
   outputs
@@ -328,7 +393,7 @@ duckhts_bench_stage_genotype_phase_set <- function(bcftools = Sys.which("bcftool
                 digest::digest(file = staged_outputs[[i]], algo = "sha256"), counts),
       stringsAsFactors = FALSE
     ))
-    duckhts_bench_duckvep_atomic_table(fields, receipt)
+    duckhts_bench_write_genotype_receipt(fields, receipt)
   }
   duckhts_bench_publish_genotype_bundle(staged_outputs, outputs)
   outputs

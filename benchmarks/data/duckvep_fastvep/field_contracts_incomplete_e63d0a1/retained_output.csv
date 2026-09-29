@@ -1,2 +1,0 @@
-"artifact","path","bytes","sha256","retained_path","retained_encoding","retained_sha256"
-"fastvep_raw_vcf","/dev/shm/duckvep-fastvep-18af717f555ad4/output.tsv.vcf","12368254878","bce2b7f6dfc11c37342c14721c25df3981dcc681478e1856e965439fec788c41","/dev/shm/duckvep-fastvep-18af717f555ad4/output.tsv.vcf.gz","gzip","0c9ce71bb5b5e693c9cb0500ed2a22086718b0c973dea655ea3da7d3f7369d7a"

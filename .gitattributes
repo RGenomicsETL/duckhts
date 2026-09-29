@@ -7,8 +7,3 @@ test/data/bed_error_policy.bed whitespace=cr-at-eol
 r/Rduckhts/inst/extdata/bed_error_policy.bed whitespace=cr-at-eol
 r/Rduckhts/inst/extdata/*.fa text eol=lf
 r/Rduckhts/inst/extdata/*.fai text eol=lf
-benchmarks/data/duckvep_fastvep/**/source-commit.bin binary
-test/duckvep/upstream/ensembl-tools/** -whitespace
-test/duckvep/upstream/ensembl-variation/** -whitespace
-test/duckvep/upstream/ensembl-vep/** -whitespace
-test/duckvep/upstream/receipts/*.tap -whitespace

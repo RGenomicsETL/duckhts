@@ -1,5 +1,17 @@
 # DuckHTS Extension News
 
+# duckhts 1.5.2.9006
+
+- Consequence prediction has moved to the [DuckVEP extension](https://github.com/RGenomicsETL/DuckVEP),
+  its single source. DuckHTS no longer ships the DuckVEP functions and macros
+  (`duckvep_ensembl_regions`, `duckvep_ensembl_transcripts`,
+  `duckvep_ensembl_regulation_features`, `duckvep_model_receipt`, `duckvep_model_load`,
+  `duckvep_model_drop`, `duckvep_allele_geometry`, `duckvep_transcript_projection`,
+  `duckvep_repeat_alleles`, `duckvep_breakend_geometry`, `duckvep_haplotypes`,
+  `duckvep_phase_call`, `duckvep_annotate`, `duckvep_so_terms`), their conformance tests,
+  corpora and benchmarks. Load DuckVEP alongside DuckHTS for annotation. Parsing of
+  existing CSQ, ANN and BCSQ annotations in `read_bcf()` is unchanged.
+
 # duckhts 1.5.2.9005
 
 - `duckhts_ancestry_proportions()` estimates reference-group ancestry proportions by
@@ -15,7 +27,16 @@
   unique; matched loci need finite loadings and frequencies in [0, 1]; positions are
   positive whole numbers and PC identifiers are consecutive whole numbers. Every sample
   returns a row for every reference group, with NULL proportions when no variant
-  matches. Group identifiers round-trip exactly.
+  matches. Group identifiers round-trip exactly. Matching audits count reversed sites
+  (including strand-flipped reversals, read as `1 - f`) and flipped sites. BAM/CRAM
+  site panels capped at `max_sites` keep one site per contig (only the largest
+  `max_sites` contigs when there are more contigs than that) and share the remaining
+  sites in proportion to each contig's eligible sites minus that one.
+  Site eligibility (one allele pair, every group and PC exactly once) is checked with
+  constant per-locus state instead of distinct aggregates, selecting the same sites: on
+  bigsnpr's full reference a one-thread build takes 38 s and 1.7 GiB instead of 115 s
+  and 16 GiB with 2.5 GiB of spill, and four threads no longer run out of memory at 16 GB
+  (`benchmarks/benchmark_ancestry_panel.md`).
 
 - The benchmark registry pins bigsnpr's reference frequencies and loadings, staged once
   as a checksum-bound sorted Parquet product whose receipt certifies unique loci and

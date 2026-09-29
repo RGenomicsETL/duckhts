@@ -1,2 +1,0 @@
-"tool","output_contract","threads","run","timing_file","row_count","bytes","lines","sha256","multiset_checked","fingerprint_scope","xor_hash","low32_sum","high32_sum"
-"duckvep","operational17",4,2,"duckvep_operational17_4_2.time","47629345","6174109722","47629346","f5ea4fac99e7cf6d87755506f1b50b2d4e9e7d5a284fcb6ffdb265bf6789e0c6",TRUE,"full_row","18223619526324871212","102287819165955858","102295857388603848"

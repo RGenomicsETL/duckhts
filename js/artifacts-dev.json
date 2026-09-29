@@ -1,24 +1,24 @@
 {
-  "duckhts": "1.5.2.9005",
+  "duckhts": "1.5.2.9006",
   "signed": false,
   "source": {
     "repository": "RGenomicsETL/duckhts",
-    "run": 36393890648,
-    "commit": "62f6dad72d31165e5996449eb9e107a58e5a2432",
-    "url": "https://github.com/RGenomicsETL/duckhts/actions/runs/36393890648"
+    "run": 36527294619,
+    "commit": "b2b060578a34f58bf710c63ab179214a51886c9f",
+    "url": "https://github.com/RGenomicsETL/duckhts/actions/runs/36527294619"
   },
   "platforms": {
     "wasm_mvp": {
       "artifact": "duckhts-v1.5.0-extension-wasm_mvp",
-      "sha256": "e44a1ff82bfd3a8fe3ae1423036841345dbbdcde1de8672c4947f5acec1bc936"
+      "sha256": "84ef7d4af4e75d0b12f421d8cfc04961c2691ce6e81824e9f78f8e39a46c45e7"
     },
     "wasm_eh": {
       "artifact": "duckhts-v1.5.0-extension-wasm_eh",
-      "sha256": "755b0a545ae4118c0070c3b8efc5e0b3f1d97fd421fd549cfd71415684dd68f5"
+      "sha256": "90d091715d4a6912882d2889b295cb34bad307b5dbc4a578b085507b7f305516"
     },
     "wasm_threads": {
       "artifact": "duckhts-v1.5.0-extension-wasm_threads",
-      "sha256": "10d7c69d59387b2049459d43ddecdceb58ddb34d0e1146c3d787ac13b16a7a25"
+      "sha256": "13590b3aaf48c53106b54d7a141e185b6051657962e35738645164dae6424f11"
     }
   }
 }

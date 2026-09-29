@@ -21,25 +21,6 @@ This section is generated from `functions.yaml`.
 | [`duckhts_duckdb_supports_variant`](reference.md#duckhts_duckdb_supports_variant) | scalar_macro |  | Return whether the currently open DuckDB runtime advertises the VARIANT logical type. Use this to gate optional SQL that depends on DuckDB VARIANT support. |
 | [`duckhts_duckdb_supports_geometry`](reference.md#duckhts_duckdb_supports_geometry) | scalar_macro |  | Return whether the currently open DuckDB runtime advertises the GEOMETRY logical type. Use this to gate optional SQL that depends on DuckDB GEOMETRY support. |
 
-### Variant Annotation
-
-| Function | Kind | R helper | Description |
-| --- | --- | --- | --- |
-| [`duckvep_ensembl_regions`](reference.md#duckvep_ensembl_regions) | table_macro |  | Match tiled FASTA sequence to one Ensembl core assembly and assign dense model-local sequence-region ordinals. |
-| [`duckvep_ensembl_transcripts`](reference.md#duckvep_ensembl_transcripts) | table_macro |  | Build validated VEP-116 Ensembl core transcript models from core tables and matching tiled FASTA sequence. |
-| [`duckvep_ensembl_regulation_features`](reference.md#duckvep_ensembl_regulation_features) | table_macro |  | Prepare VEP-116 RegulatoryFeature and MotifFeature intervals for a DuckVEP model. |
-| [`duckvep_model_receipt`](reference.md#duckvep_model_receipt) | table_macro |  | Create a deterministic provenance receipt and semantic hash for prepared DuckVEP model relations. |
-| [`duckvep_model_load`](reference.md#duckvep_model_load) | table |  | Load a validated immutable consequence model under a name in the current DuckDB database; return one TRUE row. |
-| [`duckvep_model_drop`](reference.md#duckvep_model_drop) | scalar |  | Remove a named resident DuckVEP consequence model and release its transcript and regulation-feature interval indexes, sequences, and cached worker state. Returns FALSE when the name is absent or the model is in use by an annotation vector. |
-| [`duckvep_allele_geometry`](reference.md#duckvep_allele_geometry) | scalar |  | Separate uploaded, VEP-116 feature and minimized-edit geometry for one literal biallelic allele. |
-| [`duckvep_transcript_projection`](reference.md#duckvep_transcript_projection) | table_macro |  | Project independent literal alleles and existing DuckVEP annotations into typed, unshifted VEP-116 transcript display fields. |
-| [`duckvep_repeat_alleles`](reference.md#duckvep_repeat_alleles) | scalar_macro |  | Prepare bounded literal reference and alternate alleles from exact ordered repeat descriptions. |
-| [`duckvep_breakend_geometry`](reference.md#duckvep_breakend_geometry) | scalar |  | Parse one raw VCF 4.5 breakend ALT into mate coordinates, orientation and retained replacement sequence. |
-| [`duckvep_haplotypes`](reference.md#duckvep_haplotypes) | table | `rduckhts_haplotypes` | Replay literal phased CDS/protein paths with carriers, source contributors, coding blocks, aligned differences and optional protein HGVS. |
-| [`duckvep_phase_call`](reference.md#duckvep_phase_call) | scalar |  | Assign decoded GT/PS allele slots to haplotype lanes under strict or pinned VEP-116 phase policy. |
-| [`duckvep_annotate`](reference.md#duckvep_annotate) | table |  | Annotate independent literal alleles, exact typed structural events and paired breakends against a resident VEP-116-compatible model. |
-| [`duckvep_so_terms`](reference.md#duckvep_so_terms) | table |  | Return VEP-116 Sequence Ontology terms, consequence-mask bits, impact, severity rank and evaluator tier. |
-
 ### Readers
 
 | Function | Kind | R helper | Description |
