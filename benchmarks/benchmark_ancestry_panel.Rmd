@@ -115,7 +115,8 @@ hashes of the installed package code and extension then tie each measured run to
 library. Every measured process records the hashes of
 the build it loaded, and the report requires them to match. The develop library was built from the
 DuckVEP-removal branch's merge of `develop`, whose panel builder is byte-identical to
-`develop` at `d8475811`. The final builder's source equals this tree's.
+`develop` at `d8475811`; the tag `bench/ancestry-panel-baseline-develop` keeps that
+commit reachable. The final builder's source equals this tree's.
 
 ```{r identity}
 shown <- identity[c("implementation", "commit", "builder_blob", "verified_code_files",

@@ -32,8 +32,9 @@ extension then tie each measured run to its library. Every measured
 process records the hashes of the build it loaded, and the report
 requires them to match. The develop library was built from the
 DuckVEP-removal branch’s merge of `develop`, whose panel builder is
-byte-identical to `develop` at `d8475811`. The final builder’s source
-equals this tree’s.
+byte-identical to `develop` at `d8475811`; the tag
+`bench/ancestry-panel-baseline-develop` keeps that commit reachable. The
+final builder’s source equals this tree’s.
 
 | implementation | commit       | builder_blob | verified_code_files | verified_functions | extension_rebuilt_equal | package_code_sha256 | extension_sha256 |
 |:---------------|:-------------|:-------------|:--------------------|:-------------------|:------------------------|:--------------------|:-----------------|
