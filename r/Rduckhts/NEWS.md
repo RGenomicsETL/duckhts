@@ -1,5 +1,22 @@
 # Rduckhts 1.5.2.9007-0.1.5
 
+- Breaking: the Somalier panel now carries X/Y sites and its identity changes.
+  `rduckhts_somalier_import_sites()` keeps records on the Somalier v0.3.4 X/Y
+  aliases, numbered after every autosomal site, and the panel, frequency and
+  sketch digests differ from earlier versions even for autosomal-only panels, so
+  recompute persisted digests and sketches. Counts from
+  `rduckhts_somalier_vcf_counts()` and `rduckhts_somalier_bam_counts()` include
+  X/Y sites (which ignore `filter_policy`), while sketches, relatedness, CHARR
+  and matched contamination use only the autosomal sites, with unchanged
+  numeric results.
+
+- New `rduckhts_somalier_sex()` reports X/Y dosage evidence per sample: depth
+  relative to autosomal depth, usable X site and het/hom-alt counts, a Y
+  signal, and an XX, XY or ambiguous call with a status, following Somalier
+  v0.3.4. It is review evidence, not a diagnosis. `y_gate = "sample"` (default)
+  avoids the dependence of Somalier's Y check on the rest of the batch;
+  `"cohort"` reproduces it.
+
 - A closed database file is released and can be reopened in the same R process
   after cgranges or `rduckhts_somalier_bam_counts()` have been used; the bundled
   extension no longer keeps connections into the loading database. This fixes
