@@ -283,7 +283,7 @@ Return whether the currently open DuckDB runtime advertises a logical type with 
 Signature:
 
 ```sql
-duckhts_duckdb_type_supported(type_name)
+duckhts_duckdb_type_supported(candidate_type_name)
 ```
 
 Returns:

@@ -194,7 +194,7 @@
       "name": "duckhts_duckdb_type_supported",
       "kind": "scalar_macro",
       "category": "Diagnostics",
-      "signature": "duckhts_duckdb_type_supported(type_name)",
+      "signature": "duckhts_duckdb_type_supported(candidate_type_name)",
       "returns": "BOOLEAN",
       "r_wrapper": "",
       "description": "Return whether the currently open DuckDB runtime advertises a logical type with the given name through duckdb_types(). This is a catalog-level runtime probe for feature gating SQL/macros across DuckDB versions.",

@@ -588,7 +588,7 @@ expect_equal(
 # Catalog kinds and parameters must match the loaded extension. For each entry, at
 # least one registered overload must match the documented signature on its own:
 # native table functions by positional count and exact named options, macros by
-# argument count with every documented `:=` argument present by name.
+# every argument name in order.
 local({
   con <- rduckhts_connect()
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE))
@@ -642,8 +642,7 @@ local({
         sum(positional) == sum(!documented$named) &&
           setequal(params[!positional], documented$name[documented$named])
       } else {
-        length(params) == nrow(documented) &&
-          all(documented$name[documented$named] %in% params)
+        identical(params, documented$name)
       }
     }, logical(1))
     expect_true(any(matches), info = entry$name)
