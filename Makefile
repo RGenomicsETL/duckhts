@@ -137,7 +137,11 @@ test_release: test-reference-cache test-sql-lambda-syntax
 
 .PHONY: test-sql-lambda-syntax test-duckdb-v2 test-macro-catalog
 test-macro-catalog:
-	$(PYTHON_VENV_BIN) test/scripts/test_macro_catalog.py
+	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
+		echo "Skipping macro catalog test: the Python DuckDB wheel is windows_amd64, not windows_amd64_mingw"; \
+	else \
+		$(PYTHON_VENV_BIN) test/scripts/test_macro_catalog.py; \
+	fi
 
 test-sql-lambda-syntax:
 	python3 test/scripts/check_sql_lambdas.py
