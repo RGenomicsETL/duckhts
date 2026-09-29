@@ -9,10 +9,45 @@ Status](https://www.r-pkg.org/badges/version/Rduckhts)](https://cran.r-project.o
 version](https://RGenomicsETL.r-universe.dev/Rduckhts/badges/version)](https://RGenomicsETL.r-universe.dev/Rduckhts)
 
 Read VCF, BCF, BAM, CRAM, FASTA, FASTQ, BigWig, GTF, GFF, GenBank, BED,
-and tabix-indexed files directly in [DuckDB](https://duckdb.org/).
-DuckHTS uses [htslib](https://github.com/samtools/htslib) for HTS
-formats and provides SQL functions for intervals, coverage, sequence
-operations, compression, indexing, and export.
+and tabix-indexed files directly in [DuckDB](https://duckdb.org/),
+locally or over HTTP and S3. DuckHTS uses
+[htslib](https://github.com/samtools/htslib) for HTS formats and
+provides SQL functions for intervals, coverage, sequence operations,
+Somalier-style sample identity, ancestry proportions, compression,
+indexing and export. Consequence annotation lives in the sibling
+[DuckVEP](https://github.com/RGenomicsETL/DuckVEP) extension and its R
+package Rduckvep.
+
+The same extension ships three ways:
+
+- **R**: [`Rduckhts`](https://RGenomicsETL.r-universe.dev/Rduckhts)
+  bundles the extension and wraps its readers;
+  `install.packages("Rduckhts")` from CRAN, or the development build
+  from r-universe:
+  `install.packages("Rduckhts", repos = c("https://rgenomicsetl.r-universe.dev", "https://cloud.r-project.org"))`.
+- **DuckDB** (CLI, Python, any client):
+  `INSTALL duckhts FROM community; LOAD duckhts;`.
+- **Browser**: the [`duckhts`](https://www.npmjs.com/package/duckhts)
+  npm package for duckdb-wasm.
+
+In R, a connection comes with the extension loaded and every reader is
+plain SQL:
+
+``` r
+library(DBI)
+library(Rduckhts)
+con <- rduckhts_connect()
+vcf <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
+dbGetQuery(con, sprintf(
+  "SELECT CHROM, POS, REF, ALT, SAMPLE_ID, FORMAT_GT
+   FROM read_bcf(%s, tidy_format := true) LIMIT 4", dbQuoteString(con, vcf)))
+#>   CHROM     POS REF ALT SAMPLE_ID FORMAT_GT
+#> 1     1 3000150   C   T         A       0/1
+#> 2     1 3000150   C   T         B       0/1
+#> 3     1 3000151   C   T         A       0/1
+#> 4     1 3000151   C   T         B       0/1
+dbDisconnect(con, shutdown = TRUE)
+```
 
 ## Runtime compatibility
 
@@ -27,24 +62,45 @@ release numbers.
 
 `LOAD` creates the 31 SQL macros only when the default database is
 writable and in memory. With a file-backed or read-only default database
-it registers native functions but does not change the database catalog.
-Install the exported macros as connection-local `TEMP` macros on each
-connection that uses them:
+it registers native functions and leaves the database file untouched;
+the macros are then installed as connection-local `TEMP` macros.
+`rduckhts_connect()` does that for you, and `rduckhts_install_macros()`
+covers any other DBI connection:
 
-``` python
-con.execute("LOAD duckhts")
-for (sql,) in con.execute("SELECT sql FROM duckhts_macro_definitions() ORDER BY install_order").fetchall():
-    con.execute(sql)
+``` r
+db <- tempfile(fileext = ".duckdb")
+con <- rduckhts_connect(dbdir = db)
+dbGetQuery(con, "
+  SELECT database_name, count(*) AS duckhts_macros
+  FROM duckdb_functions()
+  WHERE function_name IN (SELECT name FROM duckhts_macro_definitions())
+  GROUP BY ALL")
+#>   database_name duckhts_macros
+#> 1          temp             31
+dbGetQuery(con, "SELECT duckhts_quote_ident('my column') AS quoted")
+#>        quoted
+#> 1 "my column"
+dbDisconnect(con, shutdown = TRUE)
 ```
 
-With the DuckDB CLI, generate a script and read it on the connection
-that needs the macros (use the actual path to your extension):
+With the DuckDB CLI, write the exported statements once and `.read` them
+on the connection that needs the macros:
 
-``` sh
-DB=example.duckdb
-EXT=/absolute/path/to/duckhts.duckdb_extension
-duckdb -unsigned "$DB" "LOAD '$EXT'; COPY (SELECT sql || ';' FROM duckhts_macro_definitions() ORDER BY install_order) TO 'duckhts_macros.sql' (HEADER false, DELIMITER E'\\t', QUOTE '', ESCAPE '');"
-printf "LOAD '%s';\n.read duckhts_macros.sql\nSELECT duckhts_quote_ident('a');\n" "$EXT" | duckdb -unsigned "$DB"
+``` bash
+cd "$(mktemp -d)"
+"$DUCKDB" -unsigned example.duckdb "
+  SET allow_extensions_metadata_mismatch = true;
+  LOAD '$DUCKHTS_EXTENSION';
+  COPY (SELECT sql || ';' FROM duckhts_macro_definitions() ORDER BY install_order)
+    TO 'duckhts_macros.sql' (HEADER false, QUOTE '', ESCAPE '');"
+printf "SET allow_extensions_metadata_mismatch = true;\nLOAD '%s';\n.read duckhts_macros.sql\nSELECT duckhts_quote_ident('my column') AS quoted;\n" \
+  "$DUCKHTS_EXTENSION" | "$DUCKDB" -unsigned example.duckdb
+#> ┌─────────────┐
+#> │   quoted    │
+#> │   varchar   │
+#> ├─────────────┤
+#> │ "my column" │
+#> └─────────────┘
 ```
 
 `TEMP` macros shadow persistent macros written by older DuckHTS
@@ -66,9 +122,9 @@ This section is generated from `functions.yaml`.
 
 ### Utilities
 
-| Function                                                                                               | Kind           | R helper | Description                                                                     |
-|--------------------------------------------------------------------------------------------------------|----------------|----------|---------------------------------------------------------------------------------|
-| [`duckhts_macro_definitions`](r/Rduckhts/inst/function_catalog/reference.md#duckhts_macro_definitions) | table_function |          | Export the ordered DuckHTS macro definitions for connection-local installation. |
+| Function                                                                                               | Kind  | R helper | Description                                                                     |
+|--------------------------------------------------------------------------------------------------------|-------|----------|---------------------------------------------------------------------------------|
+| [`duckhts_macro_definitions`](r/Rduckhts/inst/function_catalog/reference.md#duckhts_macro_definitions) | table |          | Export the ordered DuckHTS macro definitions for connection-local installation. |
 
 ### Diagnostics
 
@@ -295,9 +351,10 @@ sequence-row contract.
 
 ## Examples
 
-Executed examples use bundled local test files through the DuckDB CLI
-and load the extension bundled in the installed `Rduckhts` package.
-Remote examples are unevaluated usage snippets.
+Every example below runs when this README is rendered, through the
+DuckDB CLI with the extension bundled in the installed `Rduckhts`
+package. Most read the repository’s test files; the BigWig and
+remote-URL examples read public HTTP and S3 data.
 
 ### Core readers
 
@@ -405,13 +462,20 @@ track rather than converting it to an intermediate text file:
 
 ``` sql
 SELECT count(*) AS stored_intervals,
-       min(VALUE)::DOUBLE AS minimum,
-       max(VALUE)::DOUBLE AS maximum
+       round(min(VALUE)::DOUBLE, 3) AS minimum,
+       round(max(VALUE)::DOUBLE, 3) AS maximum
 FROM read_bigwig(
   'https://hgdownload.soe.ucsc.edu/goldenPath/hg38/phyloP100way/hg38.phyloP100way.bw',
   region := 'chr22:20000000-20099999'
 );
 ```
+
+    ┌──────────────────┬─────────┬─────────┐
+    │ stored_intervals │ minimum │ maximum │
+    │      int64       │ double  │ double  │
+    ├──────────────────┼─────────┼─────────┤
+    │            96783 │ -10.787 │   9.602 │
+    └──────────────────┴─────────┴─────────┘
 
 ### Variant normalization
 
@@ -1379,6 +1443,13 @@ FROM read_bcf('s3://1000genomes-dragen-v3.7.6/data/cohorts/gvcf-genotyper-dragen
               region := 'chr22:16050000-16050500')
 GROUP BY CHROM;
 ```
+
+    ┌─────────┬───────┐
+    │  CHROM  │   n   │
+    │ varchar │ int64 │
+    ├─────────┼───────┤
+    │ chr22   │    11 │
+    └─────────┴───────┘
 
 For a direct DuckDB CLI process, set `HTS_PATH` explicitly before its
 first HTS read, for example:
