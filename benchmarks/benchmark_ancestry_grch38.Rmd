@@ -1,0 +1,271 @@
+---
+title: "Ancestry projection: GRCh38 reference product and 30x CRAM acceptance"
+output: md_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+library(DBI)
+library(Rduckhts)
+library(duckhtsbench)
+repo <- normalizePath("..")
+source_revision <- system2("git", c("-C", shQuote(repo), "rev-parse", "HEAD"), stdout = TRUE)
+Sys.setenv(DUCKHTSBENCH_REGISTRY = file.path(repo, "r/duckhtsbench/inst/benchmark_registry.tsv"))
+
+# Declared before any result was computed. The acceptance criterion is a
+# per-sample maximum absolute difference between the 21 group proportions of the
+# CRAM result (GRCh38 product) and of the phased-genotype result (GRCh37
+# product) at the same panel loci, for both CRAM frequency methods. A sample
+# also fails when either side fails the correlation gate or when the two
+# largest-proportion groups differ.
+tolerance <- 0.05
+min_cor <- 0.4
+min_depth <- 7L
+
+peak_rss_mib <- function() {
+  status <- grep("^VmHWM:", readLines("/proc/self/status"), value = TRUE)
+  as.numeric(strsplit(trimws(status), "[[:space:]]+")[[1L]][[2L]]) / 1024
+}
+timed <- function(expr) {
+  start <- proc.time()[["elapsed"]]
+  value <- force(expr)
+  list(value = value, seconds = proc.time()[["elapsed"]] - start)
+}
+```
+
+```{r stage}
+staged_product <- timed(duckhts_bench_stage_ancestry_grch38_parquet())
+product <- staged_product$value
+product_receipt <- utils::read.delim(paste0(product, ".sources.tsv"), colClasses = "character")
+receipt_value <- function(field) product_receipt$value[product_receipt$field == field]
+source_reference <- duckhts_bench_stage_ancestry_parquet()
+staged_acceptance <- timed(duckhts_bench_stage_ancestry_grch38_acceptance())
+genotypes_path <- staged_acceptance$value
+acceptance_receipt <- utils::read.delim(paste0(genotypes_path, ".sources.tsv"),
+                                        colClasses = "character")
+acceptance_value <- function(field) acceptance_receipt$value[acceptance_receipt$field == field]
+samples <- strsplit(acceptance_value("samples"), ",", fixed = TRUE)[[1L]]
+stopifnot(identical(receipt_value("output_sha256"),
+                    acceptance_value("ancestry_reference_grch38_output_sha256")))
+correction_file <- duckhts_bench_stage_repository_fixtures(repo, "ancestry-projection")[["ancestry_correction"]]
+destination_fasta <- duckhts_bench_fetch("liftover_grch38_fasta")
+sample_panel <- utils::read.table(duckhts_bench_fetch("ancestry_1000g_panel"), header = FALSE,
+  col.names = c("sample_id", "population", "superpopulation", "sex"))
+```
+
+The GRCh38 ancestry reference is derived from the keyed GRCh37 product by
+`duckdb_liftover` and checked here against the GRCh37 phased genotypes of the
+same 1000 Genomes individuals. Revision: `r source_revision`.
+
+## GRCh38 reference product
+
+`duckhts_bench_stage_ancestry_grch38_parquet()` lifts each of the 5,816,590
+loci of the keyed GRCh37 Parquet with the registered Ensembl GRCh37-to-GRCh38
+chain, the registered `human_g1k_v37` source FASTA and the registered Broad
+`Homo_sapiens_assembly38` destination FASTA. The coded allele of a locus is
+`allele_b`, the allele that the 21 group frequencies and 16 PC loadings
+describe. Liftover reports its destination spelling through
+`reverse_complemented`; the derived key is `allele_a` = the other allele and
+`allele_b` = the coded allele, and every frequency and loading is copied
+unchanged. This is the reversal convention of `rduckhts_ancestry_proportions()`:
+a reversed input meets an unchanged reference row. Rewriting a swapped locus as
+`1 - f` with negated loadings is not equivalent once the per-PC correction
+coefficients apply (the constant shift of `-sum(U)` in each PC is multiplied by
+the coefficient on one side only), so it is not done. The output is sorted by
+`(chromosome, position, allele_a, allele_b)` with the same columns, types and
+row groups as the GRCh37 product, so the panel builder and the proportion
+wrapper consume it unchanged. A liftover map Parquet retains the source locus of
+every output locus.
+
+```{r denominators}
+denominator_fields <- c("input_loci", "mapped", "rejected",
+  grep("^rejected_", product_receipt$field, value = TRUE), "reverse_complemented",
+  "swapped", "duplicate_destination_dropped", "output_loci")
+denominators <- data.frame(
+  quantity = sub("^rejected_", "  rejected: ", denominator_fields),
+  loci = as.integer(vapply(denominator_fields, receipt_value, "")))
+knitr::kable(denominators, format.args = list(big.mark = ","))
+```
+
+`mapped` counts loci for which liftover reported a destination, before the
+later classification. Every input locus is in exactly one of rejected,
+duplicate-destination dropped or output
+(`r paste(receipt_value("rejected"), receipt_value("duplicate_destination_dropped"), receipt_value("output_loci"), sep = " + ")`
+= `r receipt_value("input_loci")`). `swapped` and `reverse_complemented` count
+output loci. Non-single-base source loci are rejected because ancestry panels
+select biallelic SNVs and an indel has no coded allele that survives
+left-alignment. The receipt binds these counts to the source Parquet, chain,
+both FASTAs, the output and the DuckDB `r receipt_value("duckdb_version")`,
+htslib `r receipt_value("duckhts_htslib_version")` and Rduckhts
+`r receipt_value("rduckhts_version")` versions:
+
+```{r receipt}
+knitr::kable(product_receipt[product_receipt$field %in% c("source_parquet_sha256",
+  "chain_sha256", "source_fasta_sha256", "destination_fasta_sha256", "output_sha256",
+  "liftover_map_sha256"), ], row.names = FALSE)
+```
+
+## Acceptance comparison
+
+```{r inputs}
+con <- rduckhts_connect()
+dbExecute(con, "SET threads=4")
+quote_str <- function(x) as.character(dbQuoteString(con, x))
+dbExecute(con, paste("CREATE VIEW ref37 AS SELECT * FROM read_parquet(",
+                     quote_str(source_reference), ")"))
+dbExecute(con, paste("CREATE VIEW ref38 AS SELECT * FROM read_parquet(",
+                     quote_str(product), ")"))
+dbExecute(con, sprintf(
+  "CREATE TABLE ancestry_correction AS SELECT pc::INTEGER AS pc, coefficient::DOUBLE AS coefficient FROM read_csv_auto(%s, delim='\\t', header=true)",
+  quote_str(correction_file)))
+dbExecute(con, sprintf("CREATE TABLE phase3 AS SELECT * FROM read_parquet(%s)", quote_str(genotypes_path)))
+dbExecute(con, paste(
+  "CREATE TABLE ancestry_panel AS SELECT 'GRCh38' AS assembly,",
+  "(row_number() OVER (ORDER BY site_index) - 1)::UBIGINT AS site_index,",
+  "chromosome AS region, position::UBIGINT AS position,",
+  "least(allele_a, allele_b) AS allele_a, greatest(allele_a, allele_b) AS allele_b",
+  "FROM (SELECT DISTINCT site_index, chromosome, position, allele_a, allele_b",
+  "FROM phase3) ORDER BY site_index"))
+panel_sha256 <- dbGetQuery(con,
+  "SELECT duckhts_somalier_panel_sha256('ancestry_panel') AS s")$s[[1L]]
+stopifnot(identical(panel_sha256, acceptance_value("panel_sha256")))
+panel_sites <- dbGetQuery(con, "SELECT count(*) AS n FROM ancestry_panel")$n
+```
+
+The panel is the 1,000-site genome-wide output of `rduckhts_ancestry_panel()`
+on the GRCh38 product (5,000 bp windows, GRCh38 assembly); its SHA-256 is
+`r panel_sha256`, verified equal to the staging receipt. Each panel site's
+GRCh37 source locus comes from the liftover map. The GRCh37 side reads the
+public phase-3 VCFs (`ALL.chrN.phase3_shapeit2_mvncall_integrated_v5b`) by
+indexed `read_bcf(region := ...)` at only those loci, for
+`r paste(samples, collapse = ", ")`; keeping REF/ALT that match the source
+alleles in either orientation left `r acceptance_value("genotype_rows")`
+sample-locus rows of `r panel_sites * length(samples)` possible. The GRCh38 side
+is the registered 30x CRAM of each individual, cut by
+`samtools view -M -L` to the reads that overlap a panel site and indexed
+(`<sample>.panel-sites.cram`), because the whole-genome CRAMs are 14 to 16 GB.
+Both stagings have a receipt with remote byte counts, ETags and output SHA-256
+values.
+
+```{r compare}
+dose <- paste(
+  "CASE WHEN gt ~ '^[01][|/][01]$' THEN CASE WHEN ref = source_allele_a THEN",
+  "length(gt) - length(replace(gt, '1', '')) ELSE 2 - (length(gt) - length(replace(gt, '1', ''))) END END")
+dbExecute(con, sprintf(paste(
+  "CREATE TABLE genotype37 AS SELECT sample_id, source_chromosome AS chromosome,",
+  "source_position AS position, source_allele_a AS allele_a, source_allele_b AS allele_b,",
+  "(%s) / 2.0 AS frequency FROM phase3"), dose))
+groups <- setdiff(dbGetQuery(con, "DESCRIBE SELECT * FROM ref38")$column_name,
+                  c("chromosome", "position", "allele_a", "allele_b", paste0("PC", 1:16)))
+results <- list()
+proportions <- list()
+for (sample in samples) {
+  dbExecute(con, "DROP VIEW IF EXISTS genotype_input")
+  dbExecute(con, sprintf(paste(
+    "CREATE VIEW genotype_input AS SELECT * FROM genotype37 WHERE sample_id = %s",
+    "AND frequency IS NOT NULL"), quote_str(sample)))
+  called <- dbGetQuery(con, sprintf(paste(
+    "SELECT count(*) AS n FROM phase3 WHERE sample_id = %s"), quote_str(sample)))$n
+  genotype <- timed(rduckhts_ancestry_proportions(con, "genotype_input", "ref37",
+    "ancestry_correction", min_cor = min_cor))
+  genotype_result <- genotype$value
+  cram <- file.path(dirname(genotypes_path), paste0(sample, ".panel-sites.cram"))
+  for (method in c("allele_fraction", "called_genotype")) {
+    counted <- timed(rduckhts_ancestry_bam(con, cram, sample, destination_fasta,
+      "ancestry_panel", "ref38", "ancestry_correction", frequency_method = method,
+      min_depth = min_depth, min_cor = min_cor, worker_count = 2L))
+    result <- counted$value
+    both_ok <- identical(unique(genotype_result$status), "ok") &&
+      identical(unique(result$status), "ok")
+    matched <- match(genotype_result$group_id, result$group_id)
+    difference <- if (both_ok) max(abs(result$proportion[matched] -
+                                       genotype_result$proportion)) else NA_real_
+    top <- function(x) sort(x$group_id[order(-x$proportion)][1:2])
+    top_agree <- both_ok && identical(top(result), top(genotype_result))
+    results[[length(results) + 1L]] <- data.frame(
+      sample_id = sample,
+      superpopulation = sample_panel$superpopulation[match(sample, sample_panel$sample_id)],
+      method = method, panel_sites = panel_sites, phase3_called = called,
+      genotype_matched = genotype_result$used_variants[[1L]],
+      cram_matched = result$used_variants[[1L]],
+      genotype_cor = genotype_result$cor_pred[[1L]], cram_cor = result$cor_pred[[1L]],
+      genotype_gate = unique(genotype_result$status), cram_gate = unique(result$status),
+      max_abs_difference = difference, top2_agree = top_agree,
+      within_tolerance = both_ok && difference <= tolerance && top_agree,
+      cram_seconds = counted$seconds, genotype_seconds = genotype$seconds,
+      process_peak_rss_mib = peak_rss_mib())
+    proportions[[length(proportions) + 1L]] <- data.frame(
+      sample_id = sample, method = method, group_id = genotype_result$group_id,
+      genotype_grch37 = genotype_result$proportion,
+      cram_grch38 = result$proportion[matched])
+  }
+}
+results <- do.call(rbind, results)
+proportions <- do.call(rbind, proportions)
+```
+
+Declared tolerance (fixed in this report's source before any result): the
+maximum absolute difference over the 21 groups is at most `r tolerance` for each
+CRAM frequency method (`allele_fraction`, `called_genotype`), both sides pass the
+correlation gate (`cor_pred` at least `r min_cor`), and the two largest groups agree. `min_depth` is
+`r min_depth`. Per sample, matched sites are the panel loci that survive
+allele matching; gate failures are retained as `status` and would make the
+difference undefined.
+
+```{r acceptance}
+shown <- results[, c("sample_id", "superpopulation", "method", "panel_sites",
+  "genotype_matched", "cram_matched", "genotype_cor", "cram_cor", "genotype_gate",
+  "cram_gate", "max_abs_difference", "top2_agree", "within_tolerance")]
+knitr::kable(shown, digits = 4)
+```
+
+Gate failures: `r sum(results$genotype_gate != "ok")` genotype and
+`r sum(results$cram_gate != "ok")` CRAM of `r nrow(results)` comparisons.
+Samples within tolerance: `r sum(results$within_tolerance)` of `r nrow(results)`.
+Largest difference: `r round(max(results$max_abs_difference, na.rm = TRUE), 4)`
+against the `r tolerance` tolerance.
+
+Proportions, group by group (GRCh37 phased genotypes against the GRCh37 product
+versus the GRCh38 CRAM against the GRCh38 product):
+
+```{r proportions}
+wide <- reshape(proportions, idvar = c("group_id", "sample_id"), timevar = "method",
+                direction = "wide")
+wide <- wide[order(wide$sample_id, -wide$genotype_grch37.allele_fraction), ]
+names(wide) <- sub("cram_grch38\\.", "cram_", sub("genotype_grch37\\.[a-z_]+", "genotype", names(wide)))
+wide <- wide[, c("sample_id", "group_id", "genotype", "cram_allele_fraction", "cram_called_genotype")]
+knitr::kable(wide, digits = 4, row.names = FALSE)
+```
+
+## Timing and memory
+
+```{r timing}
+timing <- data.frame(
+  step = c("GRCh38 product staging call (cache hit: hashes of the sources)",
+           "acceptance staging call (cache hit)"),
+  seconds = c(staged_product$seconds, staged_acceptance$seconds))
+knitr::kable(timing, digits = 1)
+knitr::kable(results[, c("sample_id", "method", "genotype_seconds", "cram_seconds",
+                         "process_peak_rss_mib")], digits = 2)
+```
+
+Scale notes. Dimensions: 1,000 panel sites, 3 samples, 21 groups, 16 PCs,
+5,012,826 reference loci. Each call reads the panel-site CRAM once, then joins at
+most 1,000 counted sites to the 5.0 million-locus Parquet reference, so the
+matched relation and the aggregates hold at most 1,000 x 37 numeric values plus
+21 x 16 solver terms per sample. Every measured call is under the 5 s floor of
+`STYLE.md` on one input size with one fresh process, so this report gives
+timing and peak RSS (cumulative `VmHWM` of the render process, including package
+loading and the preceding calls) without a scaling or speed claim. It is a
+correctness benchmark: it does not vary sites, samples or threads, and it does not
+replace the 1x/2x/4x measurements of `benchmark_ancestry.md`. The one-time
+staging (product derivation, remote fetches) is measured outside these tables.
+
+Restrictions. The panel has 1,000 genome-wide sites, not the 17,000 of the
+default panel, because cutting each 30x CRAM to the panel sites by indexed remote
+access costs one region fetch per site. Sites without a phase-3 record whose
+alleles match the source alleles, or with a missing genotype or depth below
+`r min_depth`, drop out of the corresponding side; the matched counts above are
+the audit of that loss. Phased 1000 Genomes genotypes and the 30x CRAMs come from
+different sequencing datasets of the same individuals, so agreement includes
+genotype-call and library differences, not only the GRCh37-to-GRCh38 derivation.

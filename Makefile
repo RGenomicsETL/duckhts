@@ -538,6 +538,11 @@ bench-lift:
 bench-ancestry-panel:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_ancestry_panel.Rmd', output_format = rmarkdown::github_document(html_preview = FALSE))"
 
+# Stages the GRCh38 reference product and the acceptance inputs (remote indexed
+# reads of public 1000 Genomes files) on first use, then renders the report.
+bench-ancestry-grch38:
+	Rscript -e "rmarkdown::render('benchmarks/benchmark_ancestry_grch38.Rmd', output_format = rmarkdown::github_document(html_preview = FALSE))"
+
 bench-score:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_score.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
