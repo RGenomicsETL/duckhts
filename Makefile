@@ -3,7 +3,7 @@
 # =============================================================================
 
 .PHONY: help docs site clean clean_all clean_local function_catalog test-function-catalog \
-	bench-mosdepth \
+	bench-mosdepth bench-variantkey-join \
 	test-simd-kernels bench-simd-kernels \
 	test-sqllogictest-debug test-sqllogictest-release \
 	test-writer-no-clobber-debug test-writer-no-clobber-release \
@@ -560,6 +560,9 @@ bench-mosdepth:
 
 bench-variantkey:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_variantkey_conformance.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
+
+bench-variantkey-join:
+	Rscript -e "rmarkdown::render('benchmarks/benchmark_variantkey_join_overlap.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
 bench-munge:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_munge.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
