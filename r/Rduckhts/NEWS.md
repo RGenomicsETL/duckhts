@@ -1,5 +1,12 @@
 # Rduckhts 1.5.2.9006-0.1.5
 
+- The bundled function catalog documents `bam_bin_counts(include_unmapped := FALSE)`
+  and its synthetic no-coordinate row, and names the type-probe macro's parameter as
+  registered (`candidate_type_name`). Package tests compare every catalog entry with
+  a registered overload of the loaded extension: kinds, scalar and aggregate
+  argument counts, native table options, and
+  macro parameter names.
+
 - Consequence prediction has moved to DuckVEP and its R package, Rduckvep
   (<https://github.com/RGenomicsETL/DuckVEP>). `rduckhts_haplotypes()` and the bundled
   consequence fixtures are removed; the bundled extension no longer carries the DuckVEP
