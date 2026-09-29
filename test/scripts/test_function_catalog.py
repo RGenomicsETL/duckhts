@@ -132,8 +132,22 @@ class FunctionCatalogTests(unittest.TestCase):
         self.assertNotIn(functions[0]["returns"], summary)
         self.assertNotIn(functions[0]["details"]["Limits"], summary)
 
+    def test_macro_identifiers_are_checked_for_c_generation(self) -> None:
+        manifest = manifest_fixture()
+        manifest["functions"][1]["name"] = 'unsafe"name'
+        manifest["functions"][1]["kind"] = "scalar_macro"
+        with tempfile.TemporaryDirectory(prefix="duckhts-catalog-test-") as directory:
+            root = Path(directory)
+            (root / "functions.yaml").write_text(json.dumps(manifest), encoding="utf-8")
+            (root / "description.yml").write_text("version: 1.5.2\n", encoding="utf-8")
+            with contextlib.redirect_stderr(io.StringIO()) as error:
+                with self.assertRaises(SystemExit):
+                    catalog.main(["render_function_catalog.py", str(root)])
+            self.assertIn("Invalid public macro identifier", error.getvalue())
+
     def test_main_writes_reference_and_keeps_the_tsv_schema(self) -> None:
         manifest = manifest_fixture()
+        manifest["functions"][1]["kind"] = "scalar_macro"
         with tempfile.TemporaryDirectory(prefix="duckhts-catalog-test-") as directory:
             root = Path(directory)
             (root / "functions.yaml").write_text(json.dumps(manifest), encoding="utf-8")
@@ -141,6 +155,8 @@ class FunctionCatalogTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(catalog.main(["render_function_catalog.py", str(root)]), 0)
             generated = root / "r/Rduckhts/inst/function_catalog"
+            macro_header = (root / "src/include/duckhts_public_macros.h").read_text()
+            self.assertIn('    "sample_version",', macro_header)
             self.assertEqual(json.loads((generated / "functions.yaml").read_text()), manifest)
             self.assertEqual((generated / "reference.md").read_text(),
                              catalog.render_reference(manifest["functions"]) + "\n")

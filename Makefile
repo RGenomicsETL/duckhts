@@ -132,10 +132,13 @@ endif
 test: test_debug
 test_debug test_release: test-function-catalog
 test_debug: test-cache-paths test-simd-kernels test-genbank-core test-liftover-property test-liftover-fuzz-debug test-sqllogictest-debug test-writer-no-clobber-debug
-test_release: test-cache-paths test-simd-kernels test-genbank-core test-genbank-oracle test-somalier-native test-bam-site-counts test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom test-hts-region-ownership test-writer-no-clobber-release
+test_release: test-cache-paths test-simd-kernels test-genbank-core test-genbank-oracle test-somalier-native test-bam-site-counts test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom test-hts-region-ownership test-writer-no-clobber-release test-macro-catalog
 test_release: test-reference-cache test-sql-lambda-syntax
 
-.PHONY: test-sql-lambda-syntax test-duckdb-v2
+.PHONY: test-sql-lambda-syntax test-duckdb-v2 test-macro-catalog
+test-macro-catalog:
+	./configure/venv/bin/python3 test/scripts/test_macro_catalog.py
+
 test-sql-lambda-syntax:
 	python3 test/scripts/check_sql_lambdas.py
 

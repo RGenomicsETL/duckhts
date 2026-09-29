@@ -2,6 +2,36 @@
 
 Generated from `functions.yaml`.
 
+## duckhts_macro_definitions
+
+Export the ordered DuckHTS macro definitions for connection-local installation.
+
+Signature:
+
+```sql
+duckhts_macro_definitions()
+```
+
+Returns:
+
+```
+TABLE
+```
+
+### Installation
+
+LOAD creates macros in a writable in-memory default database. For file-backed or read-only default databases LOAD creates no macros: execute the exported TEMP statements in install_order on each connection that needs them (R: rduckhts_install_macros). TEMP macros shadow, but do not delete, persistent macros in older files. The definitions_sha256 value identifies the entire ordered definition set.
+
+### Columns
+
+install_order UINTEGER, name VARCHAR, public BOOLEAN (listed in functions.yaml), sql VARCHAR (CREATE OR REPLACE TEMP MACRO statement), definitions_sha256 VARCHAR.
+
+### Examples
+
+```sql
+SELECT install_order, name, sql FROM duckhts_macro_definitions() ORDER BY install_order;
+```
+
 ## duckhts_htslib_version
 
 Return the runtime version reported by the htslib library loaded with DuckHTS. Rduckhts uses this value to reject a downstream linking receipt whose source/header version does not match the loaded library.

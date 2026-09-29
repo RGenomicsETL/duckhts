@@ -49,6 +49,22 @@
   },
   "functions": [
     {
+      "name": "duckhts_macro_definitions",
+      "kind": "table_function",
+      "category": "Utilities",
+      "signature": "duckhts_macro_definitions()",
+      "returns": "TABLE",
+      "r_wrapper": "",
+      "description": "Export the ordered DuckHTS macro definitions for connection-local installation.",
+      "details": {
+        "Installation": "LOAD creates macros in a writable in-memory default database. For file-backed or read-only default databases LOAD creates no macros: execute the exported TEMP statements in install_order on each connection that needs them (R: rduckhts_install_macros). TEMP macros shadow, but do not delete, persistent macros in older files. The definitions_sha256 value identifies the entire ordered definition set.",
+        "Columns": "install_order UINTEGER, name VARCHAR, public BOOLEAN (listed in functions.yaml), sql VARCHAR (CREATE OR REPLACE TEMP MACRO statement), definitions_sha256 VARCHAR."
+      },
+      "examples": [
+        "SELECT install_order, name, sql FROM duckhts_macro_definitions() ORDER BY install_order;"
+      ]
+    },
+    {
       "name": "duckhts_htslib_version",
       "kind": "scalar",
       "category": "Diagnostics",

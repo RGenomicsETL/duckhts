@@ -259,6 +259,14 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         return duckhts_registration_error(&registration,
             "DuckHTS could not register cgranges functions");
     }
+    if (!duckhts_register_macro_definitions(&registration)) {
+        return false;
+    }
+    /* Only the writable, in-memory default database receives LOAD-time macros.
+       File catalogs and attached databases never receive macro DDL at LOAD. */
+    if (!duckhts_macro_registration_begin(&registration)) {
+        return false;
+    }
     if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckhts_quote_ident(x) AS "
         "CASE WHEN x IS NULL THEN NULL ELSE '\"' || replace(x, '\"', '\"\"') || '\"' END")) {
@@ -1158,5 +1166,8 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         }
     }
 
-    return register_duckhts_somalier_vcf_extract_sql(&registration);
+    if (!register_duckhts_somalier_vcf_extract_sql(&registration)) {
+        return false;
+    }
+    return duckhts_macro_registration_end(&registration);
 }
