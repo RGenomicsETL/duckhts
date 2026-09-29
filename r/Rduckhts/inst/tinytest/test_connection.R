@@ -87,7 +87,7 @@ test_package_owned_connection <- function() {
       dbQuoteString(con, sites), ", 'GRCh38')"
     )
   )
-  expect_equal(imported$n, 3)
+  expect_equal(imported$n, 4)
   expect_equal(
     dbGetQuery(
       con,
