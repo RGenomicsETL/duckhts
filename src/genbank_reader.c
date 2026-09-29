@@ -1,12 +1,14 @@
 /**
  * DuckHTS GenBank reader: DuckDB glue over genbank_core.
  *
- * read_genbank(path, attributes_map := FALSE) emits one row per feature
+ * read_genbank(path, attributes_map := FALSE, attributes := []) emits one row per feature
  * segment in read_gff's column shape. Bind declares the schema, init opens
  * the hFILE, and each scan pulls the next record from the core as the chunk
  * drains, so memory is bounded by the largest record. Only projected columns
  * are materialized; the GFF3 attribute string is built once per feature and
- * only when attributes or attributes_map is requested.
+ * only when attributes or attributes_map is requested. attributes := [...]
+ * adds one VARCHAR column per qualifier key, equal to attributes_map[key];
+ * a value is computed only for a projected key.
  *
  * genbank_to_fasta(path, output_path := NULL, line_width := 70, overwrite := FALSE)
  * writes each record's ORIGIN under the name read_genbank reports as seqname.
@@ -29,6 +31,7 @@ DUCKDB_EXTENSION_EXTERN
 #include "duckdb_alloc.h"
 #include "duckdb_list.h"
 #include "genbank_core.h"
+#include "include/named_attribute_columns.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -94,11 +97,13 @@ static gb_span_t gb_contig(const gb_parser_t *p) {
 typedef struct {
     char *path;
     bool include_attr_map;
+    duckhts_attribute_columns named_attributes;
 } gb_bind_t;
 
 static void gb_bind_destroy(void *data) {
     gb_bind_t *bd = (gb_bind_t *)data;
     if (!bd) return;
+    duckhts_attribute_columns_destroy(&bd->named_attributes);
     duckdb_free(bd->path);
     duckdb_free(bd);
 }
@@ -125,6 +130,15 @@ static void read_genbank_bind(duckdb_bind_info info) {
     if (val && !duckdb_is_null_value(val)) bd->include_attr_map = duckdb_get_bool(val);
     if (val) duckdb_destroy_value(&val);
 
+    const char *reserved[] = {"seqname", "source", "feature", "start", "end", "score",
+                              "strand", "frame", "attributes", "attributes_map"};
+    size_t reserved_count = GB_COL_ATTRIBUTES_MAP + (bd->include_attr_map ? 1 : 0);
+    if (!duckhts_attribute_columns_bind(info, "attributes", reserved, reserved_count,
+                                        &bd->named_attributes)) {
+        gb_bind_destroy(bd);
+        return;
+    }
+
     duckdb_logical_type vc = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_logical_type bi = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
     duckdb_logical_type db = duckdb_create_logical_type(DUCKDB_TYPE_DOUBLE);
@@ -149,6 +163,7 @@ static void read_genbank_bind(duckdb_bind_info info) {
         duckdb_destroy_logical_type(&vt);
         duckdb_destroy_logical_type(&mt);
     }
+    duckhts_attribute_columns_declare(info, &bd->named_attributes, reserved_count);
     duckdb_bind_set_bind_data(info, bd, gb_bind_destroy);
 }
 
@@ -170,6 +185,10 @@ typedef struct {
     kstring_t key, value;
     idx_t *column_ids;
     idx_t n_projected;
+    duckhts_projected_attribute *projected_attributes;
+    idx_t n_projected_attributes;
+    kstring_t *attribute_values; /* one buffer per projected attribute */
+    duckdb_vector *vectors;      /* output vectors of the current chunk */
 } gb_init_t;
 
 static void gb_init_destroy(void *data) {
@@ -182,6 +201,12 @@ static void gb_init_destroy(void *data) {
     free(st->value.s);
     gb_parser_destroy(&st->parser);
     free(st->column_ids);
+    free(st->projected_attributes);
+    for (idx_t i = 0; st->attribute_values && i < st->n_projected_attributes; i++) {
+        free(st->attribute_values[i].s);
+    }
+    free(st->attribute_values);
+    free(st->vectors);
     free(st);
 }
 
@@ -214,6 +239,21 @@ static void read_genbank_init(duckdb_init_info info) {
             return;
         }
         for (idx_t i = 0; i < st->n_projected; i++) st->column_ids[i] = duckdb_init_get_column_index(info, i);
+    }
+    if (bd->named_attributes.count && st->n_projected) {
+        st->projected_attributes = duckhts_attribute_columns_project(
+            &bd->named_attributes, st->column_ids, st->n_projected, &st->n_projected_attributes);
+        if (st->n_projected_attributes) {
+            st->attribute_values = (kstring_t *)calloc(st->n_projected_attributes,
+                                                       sizeof(*st->attribute_values));
+            st->vectors = (duckdb_vector *)calloc(st->n_projected, sizeof(*st->vectors));
+        }
+        if (st->n_projected_attributes &&
+            (!st->projected_attributes || !st->attribute_values || !st->vectors)) {
+            duckdb_init_set_error(info, "read_genbank: out of memory");
+            gb_init_destroy(st);
+            return;
+        }
     }
     duckdb_init_set_max_threads(info, 1);
     duckdb_init_set_init_data(info, st, gb_init_destroy);
@@ -272,6 +312,38 @@ static bool gb_fill_attr_map(gb_init_t *st, duckdb_vector vec, idx_t row, size_t
         duckdb_vector_assign_string_element_len(val_vec, entry.offset + i, st->value.s, st->value.l);
     }
     ((duckdb_list_entry *)duckdb_vector_get_data(vec))[row] = entry;
+    return true;
+}
+
+/* Point each projected attribute at the value attributes_map[key] would hold, or
+ * NULL when the key is absent. The first pair with a key wins, as in a MAP lookup.
+ * Values are encoded only for matching keys. False only on allocation failure. */
+static bool gb_find_projected_attributes(gb_init_t *st, size_t feature) {
+    duckhts_projected_attribute *projected = st->projected_attributes;
+    idx_t remaining = st->n_projected_attributes;
+    for (idx_t i = 0; i < remaining; i++) projected[i].value = NULL;
+
+    size_t n = gb_feature_attr_count(&st->parser, feature);
+    for (size_t index = 0; index < n && remaining; index++) {
+        if (gb_feature_attr_key(&st->parser, feature, index, &st->key) != GB_OK) return false;
+        bool value_ready = false;
+        for (idx_t i = 0; i < st->n_projected_attributes; i++) {
+            if (projected[i].value || projected[i].key->length != st->key.l ||
+                memcmp(projected[i].key->name, st->key.s, st->key.l) != 0) {
+                continue;
+            }
+            if (!value_ready) {
+                if (gb_feature_attr_value(&st->parser, feature, index, &st->value) != GB_OK) return false;
+                value_ready = true;
+            }
+            kstring_t *owned = &st->attribute_values[i];
+            owned->l = 0;
+            if (kputsn(st->value.s ? st->value.s : "", st->value.l, owned) == EOF) return false;
+            projected[i].value = owned->s;
+            projected[i].value_length = owned->l;
+            remaining--;
+        }
+    }
     return true;
 }
 
@@ -344,8 +416,22 @@ static void read_genbank_scan(duckdb_function_info info, duckdb_data_chunk outpu
         const gb_feature_t *f = &p->feats[r->feature];
         if (f->key.len == 6 && memcmp(gb_str(p, f->key), "source", 6) == 0) continue;
 
+        if (st->n_projected_attributes) {
+            for (idx_t c = 0; c < chunk_cols; c++) {
+                st->vectors[c] = duckdb_data_chunk_get_vector(output, c);
+            }
+            if (!gb_find_projected_attributes(st, r->feature)) {
+                duckdb_function_set_error(info, "read_genbank: out of memory building attributes");
+                duckdb_data_chunk_set_size(output, 0);
+                return;
+            }
+            duckhts_attribute_columns_write(st->projected_attributes, st->n_projected_attributes,
+                                            st->vectors, row);
+        }
         for (idx_t c = 0; c < chunk_cols; c++) {
-            if (!gb_fill_column(st, duckdb_data_chunk_get_vector(output, c), st->column_ids[c], row, r)) {
+            idx_t column = st->column_ids[c];
+            if (column >= bd->named_attributes.first_column) continue; /* named column, written above */
+            if (!gb_fill_column(st, duckdb_data_chunk_get_vector(output, c), column, row, r)) {
                 duckdb_function_set_error(info, "read_genbank: out of memory building attributes");
                 duckdb_data_chunk_set_size(output, 0);
                 return;
@@ -363,6 +449,9 @@ void register_read_genbank_function(duckdb_connection connection) {
     duckdb_logical_type bl = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
     duckdb_table_function_add_parameter(tf, vc);
     duckdb_table_function_add_named_parameter(tf, "attributes_map", bl);
+    duckdb_logical_type keys = duckdb_create_list_type(vc);
+    duckdb_table_function_add_named_parameter(tf, "attributes", keys);
+    duckdb_destroy_logical_type(&keys);
     duckdb_table_function_set_bind(tf, read_genbank_bind);
     duckdb_table_function_set_init(tf, read_genbank_init);
     duckdb_table_function_set_function(tf, read_genbank_scan);
