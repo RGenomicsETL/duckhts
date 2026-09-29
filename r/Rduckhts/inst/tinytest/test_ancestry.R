@@ -1,0 +1,684 @@
+library(tinytest)
+library(DBI)
+
+test_ancestry_relations <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  dbExecute(con, paste(
+    "CREATE TABLE ancestry_ref AS SELECT 'chr1' AS chromosome, (100+i)::INTEGER AS position,",
+    "CASE WHEN i % 2 = 0 THEN 'A' ELSE 'C' END AS allele_a,",
+    "CASE WHEN i % 2 = 0 THEN 'G' ELSE 'T' END AS allele_b,",
+    "g.group_id, CASE WHEN g.group_id = 'A' THEN 0.15 + i*0.06",
+    "ELSE 0.8 - i*0.04 END AS frequency",
+    "FROM range(8) t(i), (VALUES ('A'), ('B')) g(group_id)"
+  ))
+  dbExecute(con, paste(
+    "CREATE TABLE ancestry_pc AS SELECT DISTINCT chromosome, position, allele_a, allele_b,",
+    "pc, CASE WHEN pc = 1 THEN position - 103.0 ELSE sin(position) END AS loading",
+    "FROM ancestry_ref, (VALUES (1), (2)) p(pc)"
+  ))
+  dbExecute(con, "CREATE TABLE ancestry_correction AS SELECT 1 AS pc, 1.0 AS coefficient UNION ALL SELECT 2, 1.0")
+  panel <- rduckhts_ancestry_panel(con, "ancestry_ref", "ancestry_pc",
+                                   "ancestry_selected", "GRCh38", spacing_bp = 1,
+                                   max_sites = 5)
+  # 8 eligible sites on one contig, max_sites = 5: 5 sites spread along it.
+  expect_equal(panel$sites, 5)
+  expect_equal(nchar(panel$panel_sha256), 64L)
+  selected <- dbGetQuery(con, "SELECT site_index, position FROM ancestry_selected ORDER BY site_index")
+  expect_equal(selected$site_index, 0:4)
+  expect_equal(selected$position, c(100, 102, 104, 105, 107))
+  # A capped panel spans every contig rather than filling from the first one.
+  dbExecute(con, "CREATE TEMP VIEW ancestry_two_contig_ref AS SELECT * FROM ancestry_ref UNION ALL SELECT * REPLACE ('chr2' AS chromosome) FROM ancestry_ref")
+  dbExecute(con, "CREATE TEMP VIEW ancestry_two_contig_pc AS SELECT * FROM ancestry_pc UNION ALL SELECT * REPLACE ('chr2' AS chromosome) FROM ancestry_pc")
+  two_contig <- rduckhts_ancestry_panel(con, "ancestry_two_contig_ref", "ancestry_two_contig_pc",
+                                        "ancestry_two_contig", "GRCh38", spacing_bp = 1,
+                                        max_sites = 8)
+  expect_equal(two_contig$sites, 8)
+  expect_equal(dbGetQuery(con, "SELECT region, count(*)::INTEGER AS n FROM ancestry_two_contig GROUP BY region ORDER BY region")$n,
+               c(4L, 4L))
+  # Uneven contigs keep every contig: 7 sites on chr1 and 1 on chr2 with
+  # max_sites = 4 give chr1 three sites and chr2 its only one.
+  dbExecute(con, "CREATE TEMP VIEW ancestry_uneven_ref AS SELECT * FROM ancestry_ref WHERE position < 107 UNION ALL SELECT * REPLACE ('chr2' AS chromosome) FROM ancestry_ref WHERE position = 107")
+  dbExecute(con, "CREATE TEMP VIEW ancestry_uneven_pc AS SELECT * FROM ancestry_pc WHERE position < 107 UNION ALL SELECT * REPLACE ('chr2' AS chromosome) FROM ancestry_pc WHERE position = 107")
+  uneven <- rduckhts_ancestry_panel(con, "ancestry_uneven_ref", "ancestry_uneven_pc",
+                                    "ancestry_uneven", "GRCh38", spacing_bp = 1, max_sites = 4)
+  expect_equal(uneven$sites, 4)
+  expect_equal(dbGetQuery(con, "SELECT region, count(*)::INTEGER AS n FROM ancestry_uneven GROUP BY region ORDER BY region")$n,
+               c(3L, 1L))
+  # After one site each, the rest follow eligible sites minus one: 2, 2 and 100
+  # sites with max_sites = 50 share 47 remaining slots by weights 1, 1 and 99,
+  # giving 2, 1 and 47 (the tie between the small contigs goes by region order).
+  dbExecute(con, paste0(
+    "CREATE TEMP TABLE ancestry_weight_sites AS SELECT * FROM (VALUES ('chrA', 2), ",
+    "('chrB', 2), ('chrC', 100)) t(chromosome, n), range(n) r(i)"))
+  for (side in c("ref", "pc")) {
+    dbExecute(con, sprintf(paste0(
+      "CREATE TEMP VIEW ancestry_weight_%s AS SELECT a.* REPLACE (s.chromosome AS chromosome, ",
+      "1000 + 10 * s.i AS position) FROM ancestry_%s a, ancestry_weight_sites s ",
+      "WHERE a.position = 100"), side, side))
+  }
+  weighted <- rduckhts_ancestry_panel(con, "ancestry_weight_ref", "ancestry_weight_pc",
+                                      "ancestry_weighted", "GRCh38", spacing_bp = 1,
+                                      max_sites = 50)
+  expect_equal(weighted$sites, 50)
+  expect_equal(dbGetQuery(con, "SELECT region, count(*)::INTEGER AS n FROM ancestry_weighted GROUP BY region ORDER BY region")$n,
+               c(2L, 1L, 47L))
+  # A locus needs one allele pair, and every group and every PC exactly once: a
+  # repeated group (101), a missing group (102), a second allele pair (103), a
+  # repeated PC (104) and a missing PC (105) each exclude only their locus.
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_locus_ref AS SELECT * REPLACE (",
+    "CASE WHEN position = 101 THEN 'A' ELSE group_id END AS group_id, ",
+    "CASE WHEN position = 103 AND group_id = 'B' THEN 'A' ELSE allele_b END AS allele_b) ",
+    "FROM ancestry_ref WHERE NOT (position = 102 AND group_id = 'B')"))
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_locus_pc AS SELECT * REPLACE ",
+    "(CASE WHEN position = 104 THEN 1 ELSE pc END AS pc) FROM ancestry_pc ",
+    "WHERE NOT (position = 105 AND pc = 2)"))
+  locus <- rduckhts_ancestry_panel(con, "ancestry_locus_ref", "ancestry_locus_pc",
+                                   "ancestry_locus", "GRCh38", spacing_bp = 1,
+                                   max_sites = 100)
+  expect_equal(locus$sites, 3)
+  expect_equal(dbGetQuery(con, "SELECT position FROM ancestry_locus ORDER BY site_index")$position,
+               c(100, 106, 107))
+  # With fewer slots than contigs, the largest contigs keep one site each, and equal
+  # contigs are taken in region order.
+  contig_panel <- function(label, sizes, max_sites) {
+    dbExecute(con, sprintf(paste0(
+      "CREATE OR REPLACE TEMP TABLE %s_sites AS SELECT * FROM (VALUES %s) t(chromosome, n), ",
+      "range(n) r(i)"), label,
+      paste(sprintf("('%s', %d)", names(sizes), sizes), collapse = ", ")))
+    for (side in c("ref", "pc")) {
+      dbExecute(con, sprintf(paste0(
+        "CREATE OR REPLACE TEMP VIEW %s_%s AS SELECT a.* REPLACE (s.chromosome AS chromosome, ",
+        "1000 + 10 * s.i AS position) FROM ancestry_%s a, %s_sites s WHERE a.position = 100"),
+        label, side, side, label))
+    }
+    rduckhts_ancestry_panel(con, paste0(label, "_ref"), paste0(label, "_pc"), label, "GRCh38",
+                            spacing_bp = 1, max_sites = max_sites)
+    dbGetQuery(con, sprintf("SELECT region, count(*)::INTEGER AS n FROM %s GROUP BY region ORDER BY region",
+                            label))
+  }
+  largest <- contig_panel("ancestry_largest", c(chrA = 1, chrB = 5, chrC = 3), 2)
+  expect_equal(largest$region, c("chrB", "chrC"))
+  expect_equal(largest$n, c(1L, 1L))
+  tied <- contig_panel("ancestry_tied", c(chrC = 2, chrA = 2, chrB = 2), 2)
+  expect_equal(tied$region, c("chrA", "chrB"))
+  # Group and PC masks at the contract limits: 30 groups (one with a quote in its
+  # identifier) and 64 PCs. A locus missing the highest-ordinal group (1001) or PC 64
+  # (1002) is excluded; the complete locus (1000) is kept.
+  dbExecute(con, paste0(
+    "CREATE TEMP TABLE ancestry_mask_groups AS SELECT CASE WHEN g = 30 THEN 'O''Neil' ",
+    "ELSE printf('g%02d', g) END AS group_id FROM range(1, 31) t(g)"))
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_mask_ref AS SELECT 'chr1' AS chromosome, p AS position, ",
+    "'A' AS allele_a, 'G' AS allele_b, group_id, 0.3 AS frequency ",
+    "FROM range(1000, 1003) t(p), ancestry_mask_groups ",
+    "WHERE NOT (p = 1001 AND group_id = 'g29')"))
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_mask_pc AS SELECT 'chr1' AS chromosome, p AS position, ",
+    "'A' AS allele_a, 'G' AS allele_b, pc, sin(p * pc) AS loading ",
+    "FROM range(1000, 1003) t(p), range(1, 65) u(pc) WHERE NOT (p = 1002 AND pc = 64)"))
+  mask <- rduckhts_ancestry_panel(con, "ancestry_mask_ref", "ancestry_mask_pc",
+                                  "ancestry_mask", "GRCh38", spacing_bp = 1, max_sites = 10)
+  expect_equal(mask$sites, 1)
+  expect_equal(dbGetQuery(con, "SELECT position FROM ancestry_mask")$position, 1000)
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_null_allele_ref AS SELECT * REPLACE ",
+    "(CASE WHEN position = 100 AND group_id = 'A' THEN NULL ELSE allele_a END ",
+    "AS allele_a) FROM ancestry_ref"))
+  null_panel <- rduckhts_ancestry_panel(
+    con, "ancestry_null_allele_ref", "ancestry_pc", "ancestry_null_panel",
+    "GRCh38", spacing_bp = 1, max_sites = 5)
+  expect_equal(null_panel$sites, 5)
+  expect_equal(dbGetQuery(con, "SELECT position FROM ancestry_null_panel ORDER BY site_index")$position,
+               c(101, 103, 104, 106, 107))
+  # Sites whose loadings are not finite, or whose frequencies fall outside [0, 1],
+  # are not selected.
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_bad_loading_pc AS SELECT * REPLACE ",
+    "(CASE WHEN position = 100 AND pc = 2 THEN NULL ",
+    "WHEN position = 101 AND pc = 1 THEN 'inf'::DOUBLE ELSE loading END AS loading) ",
+    "FROM ancestry_pc"))
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_bad_frequency_ref AS SELECT * REPLACE ",
+    "(CASE WHEN position = 102 AND group_id = 'B' THEN 1.2 ELSE frequency END ",
+    "AS frequency) FROM ancestry_ref"))
+  # A non-consecutive global PC set would give a panel its source products reject.
+  dbExecute(con, "CREATE TEMP VIEW ancestry_shifted_pc AS SELECT * REPLACE (pc + 1 AS pc) FROM ancestry_pc")
+  expect_error(rduckhts_ancestry_panel(
+    con, "ancestry_ref", "ancestry_shifted_pc", "ancestry_shifted_panel", "GRCh38"),
+    pattern = "consecutive 1..64 PCs")
+  expect_false(dbExistsTable(con, "ancestry_shifted_panel"))
+  invalid_panel <- rduckhts_ancestry_panel(
+    con, "ancestry_bad_frequency_ref", "ancestry_bad_loading_pc", "ancestry_invalid_panel",
+    "GRCh38", spacing_bp = 1, max_sites = 5)
+  expect_equal(dbGetQuery(con, "SELECT position FROM ancestry_invalid_panel ORDER BY site_index")$position,
+               103:107)
+  dbExecute(con, "CREATE TABLE ancestry_candidates AS SELECT region, position, allele_a, allele_b FROM ancestry_selected")
+  matched_panel <- rduckhts_ancestry_panel(con, "ancestry_ref", "ancestry_pc",
+                                           "ancestry_matched", "GRCh38",
+                                           candidate_table = "ancestry_candidates")
+  expect_equal(matched_panel$panel_sha256, panel$panel_sha256)
+  dbExecute(con, "CREATE TABLE ancestry_empty_candidates AS SELECT * FROM ancestry_candidates WHERE false")
+  expect_error(rduckhts_ancestry_panel(
+    con, "ancestry_ref", "ancestry_pc", "ancestry_retry", "GRCh38",
+    candidate_table = "ancestry_empty_candidates"), pattern = "panel is empty")
+  expect_false(dbExistsTable(con, "ancestry_retry"))
+  expect_error(rduckhts_ancestry_panel(
+    con, "ancestry_ref", "ancestry_pc", "ancestry_matched", "GRCh38",
+    candidate_table = "ancestry_empty_candidates", overwrite = TRUE),
+    pattern = "panel is empty")
+  expect_equal(dbGetQuery(con, "SELECT count(*) AS sites FROM ancestry_matched")$sites, 5)
+  expect_equal(dbGetQuery(con,
+    "SELECT duckhts_somalier_panel_sha256('ancestry_matched') AS hash")$hash,
+    matched_panel$panel_sha256)
+  dbExecute(con, "INSERT INTO ancestry_empty_candidates SELECT * FROM ancestry_candidates WHERE position = 100")
+  retry <- rduckhts_ancestry_panel(
+    con, "ancestry_ref", "ancestry_pc", "ancestry_retry", "GRCh38",
+    candidate_table = "ancestry_empty_candidates", overwrite = FALSE)
+  expect_equal(retry$sites, 1)
+  replaced <- rduckhts_ancestry_panel(
+    con, "ancestry_ref", "ancestry_pc", "ancestry_matched", "GRCh38",
+    candidate_table = "ancestry_empty_candidates", overwrite = TRUE)
+  expect_equal(replaced$panel_sha256, retry$panel_sha256)
+  # Inside a caller's transaction: the panel builds, and rollback removes it.
+  dbBegin(con)
+  in_transaction <- rduckhts_ancestry_panel(
+    con, "ancestry_ref", "ancestry_pc", "ancestry_in_transaction", "GRCh38",
+    candidate_table = "ancestry_candidates")
+  expect_equal(in_transaction$panel_sha256, matched_panel$panel_sha256)
+  dbRollback(con)
+  expect_false(dbExistsTable(con, "ancestry_in_transaction"))
+  expect_equal(dbGetQuery(con, paste(
+    "SELECT count(*) AS n FROM duckdb_tables()",
+    "WHERE table_name LIKE '__duckhts_ancestry_panel_%'"))$n, 0)
+  dbExecute(con, paste(
+    "CREATE TABLE ancestry_input AS SELECT 'S' AS sample_id, chromosome, position, allele_a, allele_b,",
+    "sum(CASE WHEN group_id = 'A' THEN 0.7 ELSE 0.3 END * frequency) AS frequency",
+    "FROM ancestry_ref GROUP BY chromosome, position, allele_a, allele_b"
+  ))
+  dbExecute(con, "UPDATE ancestry_input SET allele_a = 'T', allele_b = 'C' WHERE position = 100")
+  dbExecute(con, paste("UPDATE ancestry_input SET allele_a = 'T', allele_b = 'C',",
+                       "frequency = 1 - frequency WHERE position = 101"))
+  dbExecute(con, "UPDATE ancestry_input SET frequency = frequency + 0.04 WHERE position = 102")
+  dbExecute(con, "UPDATE ancestry_input SET frequency = NULL WHERE position = 107")
+  dbExecute(con, "INSERT INTO ancestry_input SELECT * FROM ancestry_input WHERE position = 106")
+  dbExecute(con, "INSERT INTO ancestry_input VALUES ('S', 'chr1', 999, 'A', 'G', 0.5)")
+  dbExecute(con, "INSERT INTO ancestry_input VALUES ('S', 'chr1', 998, 'A', 'T', 0.5)")
+  default_q <- dbGetQuery(con, paste(
+    "SELECT duckhts_ancestry_proportions(",
+    "[1.0, 0.0, 0.0, 1.0], [0.25, 0.75], 2) AS q"
+  ))$q[[1L]]
+  expect_equal(default_q, c(0.25, 0.75))
+  out <- rduckhts_ancestry_proportions(con, "ancestry_input", "ancestry_ref",
+                                       "ancestry_pc", "ancestry_correction", min_cor = 0)
+  # Numeric long-format group IDs are labels: same fit, returned as their SQL text.
+  dbExecute(con, paste(
+    "CREATE TEMP VIEW ancestry_numeric_ref AS SELECT * REPLACE",
+    "(CASE WHEN group_id = 'A' THEN 1 ELSE 1000000 END AS group_id) FROM ancestry_ref"))
+  numeric_ids <- rduckhts_ancestry_proportions(con, "ancestry_input", "ancestry_numeric_ref",
+                                               "ancestry_pc", "ancestry_correction", min_cor = 0)
+  expect_equal(numeric_ids$group_id, c("1", "1000000"))
+  expect_equal(numeric_ids$proportion, out$proportion)
+  expect_equal(out$status, rep("ok", 2L))
+  expect_equal(out$used_variants, rep(6, 2L))
+  expect_equal(out$input_variants, rep(11, 2L))
+  expect_equal(out$reversed_variants, rep(1, 2L))
+  expect_equal(out$flipped_variants, rep(1, 2L))
+  # A site matching only after both strand flip and allele swap (flipped_reversed)
+  # is the same evidence as its direct spelling: same fit, counted as a reversal
+  # and a flip.
+  dbExecute(con, "CREATE TABLE ancestry_input_flip_rev AS SELECT * FROM ancestry_input")
+  dbExecute(con, paste("UPDATE ancestry_input_flip_rev SET allele_a = 'A', allele_b = 'G',",
+                       "frequency = 1 - frequency WHERE position = 103"))
+  flip_rev <- rduckhts_ancestry_proportions(con, "ancestry_input_flip_rev", "ancestry_ref",
+                                            "ancestry_pc", "ancestry_correction", min_cor = 0)
+  expect_equal(flip_rev$proportion, out$proportion)
+  expect_equal(flip_rev$reversed_variants, rep(2, 2L))
+  expect_equal(flip_rev$flipped_variants, rep(2, 2L))
+  expect_equal(out$duplicate_variants, rep(2, 2L))
+  expect_equal(out$ambiguous_variants, rep(1, 2L))
+  expect_equal(out$unmatched_variants, rep(1, 2L))
+  expect_equal(out$missing_variants, rep(1, 2L))
+  ref <- dbGetQuery(con, "SELECT position, group_id, frequency FROM ancestry_ref WHERE position BETWEEN 100 AND 105 ORDER BY position, group_id")
+  f <- matrix(ref$frequency, ncol = 2L, byrow = TRUE)[1:6, ]
+  input <- dbGetQuery(con, "SELECT position, frequency FROM ancestry_input WHERE position BETWEEN 100 AND 105 ORDER BY position")
+  input$frequency[input$position == 101L] <- 1 - input$frequency[input$position == 101L]
+  p <- cbind((100:105) - 103, sin(100:105))
+  x <- crossprod(p, f)
+  y <- drop(crossprod(p, input$frequency))
+  delta <- x[, 1L] - x[, 2L]
+  expected_a <- max(0, min(1, sum(delta * (y - x[, 2L])) / sum(delta^2)))
+  expect_true(max(abs(out$proportion - c(expected_a, 1 - expected_a))) < 1e-6)
+  dbExecute(con, paste0(
+    "CREATE VIEW ancestry_wide AS SELECT try_cast(regexp_replace(r.chromosome, '^chr', '') ",
+    "AS INTEGER) AS chromosome, r.position, r.allele_a, r.allele_b, ",
+    "max(p.loading) FILTER (WHERE p.pc = 1) AS PC1, ",
+    "max(p.loading) FILTER (WHERE p.pc = 2) AS PC2, ",
+    paste(paste0("0.0::DOUBLE AS PC", 3:16), collapse = ", "), ", ",
+    "max(r.frequency) FILTER (WHERE r.group_id = 'A') AS A, ",
+    "max(r.frequency) FILTER (WHERE r.group_id = 'B') AS B ",
+    "FROM ancestry_ref r JOIN ancestry_pc p USING (chromosome, position, allele_a, allele_b) ",
+    "GROUP BY r.chromosome, r.position, r.allele_a, r.allele_b"
+  ))
+  dbExecute(con, paste0("CREATE VIEW ancestry_wide_correction AS SELECT * FROM ancestry_correction ",
+                        "UNION ALL SELECT i, 1.0 FROM range(3, 17) t(i)"))
+  wide <- rduckhts_ancestry_proportions(
+    con, "ancestry_input", "ancestry_wide", "ancestry_wide_correction", min_cor = 0)
+  expect_equal(wide$group_id, out$group_id)
+  expect_equal(wide$status, out$status)
+  expect_equal(wide$proportion, out$proportion, tolerance = 1e-6)
+  expect_equal(wide$cor_pred, out$cor_pred, tolerance = 1e-6)
+  expect_equal(wide$used_variants, out$used_variants)
+  expect_equal(wide$input_variants, out$input_variants)
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_one_group_pc AS SELECT chromosome, position, ",
+    "allele_a, allele_b, A, PC1 FROM ancestry_wide"))
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_one_correction AS SELECT * ",
+    "FROM ancestry_wide_correction WHERE pc = 1"))
+  one <- rduckhts_ancestry_proportions(
+    con, "ancestry_input", "ancestry_one_group_pc", "ancestry_one_correction",
+    min_cor = 0)
+  expect_equal(nrow(one), 1L)
+  expect_equal(one$group_id, "A")
+  expect_equal(one$input_variants, 11L)
+  dbExecute(con, "CREATE TEMP VIEW ancestry_zero_input AS SELECT * FROM ancestry_input WHERE false")
+  zero <- rduckhts_ancestry_proportions(
+    con, "ancestry_zero_input", "ancestry_one_group_pc", "ancestry_one_correction")
+  expect_equal(nrow(zero), 0L)
+  expect_equal(names(zero), names(one))
+  for (bad_position in c(0, -1, 1.5)) {
+    dbExecute(con, paste0(
+      "CREATE OR REPLACE TEMP VIEW ancestry_bad_position AS ",
+      "SELECT * REPLACE (CASE WHEN position = 100 THEN ", bad_position,
+      " ELSE position END AS position) FROM ancestry_input"))
+    expect_error(rduckhts_ancestry_proportions(
+      con, "ancestry_bad_position", "ancestry_wide", "ancestry_wide_correction"),
+      pattern = "input positions must be positive whole numbers")
+  }
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_bad_long_ref AS SELECT * REPLACE ",
+    "(CASE WHEN position = 100 THEN 0 ELSE position END AS position) ",
+    "FROM ancestry_ref"))
+  expect_error(rduckhts_ancestry_proportions(
+    con, "ancestry_input", "ancestry_bad_long_ref", "ancestry_pc",
+    "ancestry_correction"), pattern = "reference sites require")
+  local({
+    observed <- character()
+    previous <- getOption("duckhts.ancestry_step_hook")
+    on.exit(options(duckhts.ancestry_step_hook = previous))
+    options(duckhts.ancestry_step_hook = function(stage) {
+      observed <<- c(observed, stage)
+    })
+    rduckhts_ancestry_proportions(
+      con, "ancestry_input", "ancestry_wide", "ancestry_wide_correction",
+      min_cor = 0)
+    expect_equal(observed, c("entry", "validation", "duplicate", "audit",
+                             "alignment", "sample_index", "finite", "moments",
+                             "solver", "prediction", "publish"))
+  })
+  for (labels in list(c("PC1", "pc1"), c("group with space", "O'Brien"),
+                      c("__g1", "PC1"))) {
+    dbExecute(con, paste0(
+      "CREATE OR REPLACE TEMP VIEW ancestry_named_ref AS SELECT * REPLACE ",
+      "(CASE group_id WHEN 'A' THEN ", dbQuoteString(con, labels[[1L]]),
+      " ELSE ", dbQuoteString(con, labels[[2L]]),
+      " END AS group_id) FROM ancestry_ref"))
+    named <- rduckhts_ancestry_proportions(
+      con, "ancestry_input", "ancestry_named_ref", "ancestry_pc",
+      "ancestry_correction", min_cor = 0)
+    expect_equal(sort(named$group_id), sort(labels))
+    expect_equal(named$proportion[match(labels, named$group_id)], out$proportion)
+    expect_equal(named$used_variants, out$used_variants)
+    dbExecute(con, paste0(
+      "CREATE OR REPLACE TEMP VIEW ancestry_named_wide AS ",
+      "SELECT * EXCLUDE (A, B), A AS __g1, B AS __g2 FROM ancestry_wide"))
+    mapped <- rduckhts_ancestry_proportions(
+      con, "ancestry_input", "ancestry_named_wide", "ancestry_wide_correction",
+      min_cor = 0, group_ids = stats::setNames(labels, c("__g1", "__g2")))
+    expect_equal(sort(mapped$group_id), sort(labels))
+    expect_equal(mapped$proportion[match(labels, mapped$group_id)], out$proportion,
+                 tolerance = 1e-6)
+    expect_equal(mapped$used_variants, out$used_variants)
+  }
+  dbExecute(con, paste0(
+    "CREATE TEMP VIEW ancestry_quoted_wide AS SELECT * EXCLUDE (A, B), ",
+    "A AS \"group with space\", B AS \"O'Brien\" FROM ancestry_wide"))
+  quoted <- rduckhts_ancestry_proportions(
+    con, "ancestry_input", "ancestry_quoted_wide", "ancestry_wide_correction",
+    min_cor = 0)
+  expect_equal(sort(quoted$group_id), sort(c("group with space", "O'Brien")))
+  expect_equal(quoted$proportion[match(c("group with space", "O'Brien"),
+                                      quoted$group_id)], out$proportion,
+               tolerance = 1e-6)
+  expect_error(rduckhts_ancestry_proportions(
+    con, "ancestry_input", "ancestry_wide", "ancestry_wide_correction",
+    group_ids = c(A = "PC1")), pattern = "group_ids must map every")
+  expect_error(rduckhts_ancestry_proportions(
+    con, "ancestry_input", "ancestry_wide", "ancestry_wide_correction",
+    group_ids = c(A = "PC1", B = "PC1")), pattern = "group_ids must map every")
+  for (format in c("wide", "long")) {
+    source <- if (format == "wide") "ancestry_wide_correction" else "ancestry_pc"
+    pc_cases <- list(
+      numeric_strings = "pc::VARCHAR",
+      fractional = "CASE WHEN pc = 2 THEN 2.5 ELSE pc END",
+      fractional_strings = "(CASE WHEN pc = 2 THEN 2.5 ELSE pc END)::VARCHAR",
+      gap = "CASE WHEN pc = 2 THEN 17 ELSE pc END",
+      duplicate = "CASE WHEN pc = 2 THEN 1 ELSE pc END"
+    )
+    for (kind in names(pc_cases)) {
+      dbExecute(con, paste0("CREATE OR REPLACE TEMP VIEW ancestry_test_pc AS ",
+                            "SELECT * REPLACE (", pc_cases[[kind]], " AS pc) FROM ", source))
+      if (kind == "numeric_strings") {
+        actual <- if (format == "wide") {
+          rduckhts_ancestry_proportions(
+            con, "ancestry_input", "ancestry_wide", "ancestry_test_pc", min_cor = 0)
+        } else {
+          rduckhts_ancestry_proportions(
+            con, "ancestry_input", "ancestry_ref", "ancestry_test_pc",
+            "ancestry_correction", min_cor = 0)
+        }
+        expect_equal(actual$proportion, out$proportion, tolerance = 1e-6)
+      } else if (format == "wide") {
+        expect_error(rduckhts_ancestry_proportions(
+          con, "ancestry_input", "ancestry_wide", "ancestry_test_pc"),
+          pattern = "one finite coefficient for every PC")
+      } else {
+        expected_error <- if (kind == "duplicate") {
+          "one finite loading per PC"
+        } else {
+          "consecutive 1..64 PCs"
+        }
+        expect_error(rduckhts_ancestry_proportions(
+          con, "ancestry_input", "ancestry_ref", "ancestry_test_pc",
+          "ancestry_correction"), pattern = expected_error)
+      }
+    }
+  }
+  dbExecute(con, paste(
+    "CREATE TEMP VIEW ancestry_ordered_correction AS SELECT pc, pc::DOUBLE AS coefficient",
+    "FROM ancestry_wide_correction"
+  ))
+  dbExecute(con, paste(
+    "CREATE TEMP VIEW ancestry_string_correction AS SELECT pc::VARCHAR AS pc,",
+    "pc::DOUBLE AS coefficient FROM ancestry_wide_correction"
+  ))
+  numeric_order <- rduckhts_ancestry_proportions(
+    con, "ancestry_input", "ancestry_wide", "ancestry_ordered_correction", min_cor = -1)
+  string_order <- rduckhts_ancestry_proportions(
+    con, "ancestry_input", "ancestry_wide", "ancestry_string_correction", min_cor = -1)
+  expect_true(any(!is.na(numeric_order$proportion)))
+  expect_equal(string_order$proportion, numeric_order$proportion)
+  for (value in c(-0.01, 1.01)) {
+    dbExecute(con, paste0(
+      "CREATE OR REPLACE TEMP VIEW ancestry_range_wide AS SELECT * REPLACE ",
+      "(CASE WHEN position = 100 THEN ", value, " ELSE A END AS A) FROM ancestry_wide"))
+    expect_error(rduckhts_ancestry_proportions(
+      con, "ancestry_input", "ancestry_range_wide", "ancestry_wide_correction"),
+      pattern = "reference sites require frequencies in \\[0, 1\\]")
+    dbExecute(con, paste0(
+      "CREATE OR REPLACE TEMP VIEW ancestry_range_long AS SELECT * REPLACE ",
+      "(CASE WHEN position = 100 AND group_id = 'A' THEN ", value,
+      " ELSE frequency END AS frequency) FROM ancestry_ref"))
+    expect_error(rduckhts_ancestry_proportions(
+      con, "ancestry_input", "ancestry_range_long", "ancestry_pc",
+      "ancestry_correction"),
+      pattern = "reference sites require frequencies in \\[0, 1\\]")
+  }
+  wide_gated <- rduckhts_ancestry_proportions(
+    con, "ancestry_input", "ancestry_wide", "ancestry_wide_correction", min_cor = 1)
+  expect_equal(wide_gated$status, rep("low_correlation", 2L))
+  expect_true(all(is.na(wide_gated$proportion)))
+  dbExecute(con, paste0("CREATE VIEW ancestry_duplicate_input AS ",
+                        "SELECT * FROM ancestry_input UNION ALL ",
+                        "SELECT * FROM ancestry_input WHERE position = 100"))
+  wide_audit <- rduckhts_ancestry_proportions(
+    con, "ancestry_duplicate_input", "ancestry_wide", "ancestry_wide_correction",
+    min_cor = -1)
+  expect_equal(unique(wide_audit$input_variants), 12)
+  expect_equal(unique(wide_audit$used_variants), 5)
+  expect_equal(unique(wide_audit$duplicate_variants), 4)
+  dbExecute(con, paste(
+    "CREATE VIEW ancestry_multi_input AS SELECT * FROM ancestry_input UNION ALL",
+    "SELECT 'T' AS sample_id, chromosome, position, allele_a, allele_b,",
+    "1-frequency AS frequency FROM ancestry_input"
+  ))
+  multi <- rduckhts_ancestry_proportions(
+    con, "ancestry_multi_input", "ancestry_wide", "ancestry_wide_correction",
+    min_cor = 0)
+  expect_equal(sort(unique(multi$sample_id)), c("S", "T"))
+  expect_equal(multi$proportion[multi$sample_id == "S"], wide$proportion)
+  expect_equal(unique(multi$used_variants), 6)
+  dbExecute(con, paste(
+    "CREATE VIEW ancestry_unmatched_input AS SELECT 'U' AS sample_id, chromosome,",
+    "position + 1000 AS position, allele_a, allele_b, frequency FROM ancestry_input"
+  ))
+  unmatched <- rduckhts_ancestry_proportions(
+    con, "ancestry_unmatched_input", "ancestry_wide", "ancestry_wide_correction")
+  expect_equal(unmatched$group_id, c("A", "B"))
+  expect_equal(unmatched$status, rep("no_matched_variants", 2L))
+  expect_true(all(is.na(unmatched$proportion)))
+  expect_equal(unmatched$used_variants, rep(0, 2L))
+  dbExecute(con, paste(
+    "CREATE VIEW ancestry_cohort_input AS SELECT * FROM ancestry_input",
+    "UNION ALL SELECT * FROM ancestry_unmatched_input"
+  ))
+  cohort <- rduckhts_ancestry_proportions(
+    con, "ancestry_cohort_input", "ancestry_wide", "ancestry_wide_correction",
+    min_cor = -1)
+  expect_equal(cohort$group_id[cohort$sample_id == "U"], c("A", "B"))
+  expect_equal(cohort$status[cohort$sample_id == "U"],
+               rep("no_matched_variants", 2L))
+  expect_true(all(is.na(cohort$proportion[cohort$sample_id == "U"])))
+  expect_equal(cohort$proportion[cohort$sample_id == "S"], wide$proportion)
+  expect_equal(nrow(cohort), 4L)
+  expect_equal(dbGetQuery(con, paste(
+    "SELECT count(*) AS n FROM duckdb_tables() WHERE temporary",
+    "AND (table_name LIKE 'ancestry_audit_%' OR table_name LIKE 'ancestry_moments_%'",
+    "OR table_name LIKE 'ancestry_solved_%' OR table_name LIKE 'ancestry_prediction_%')"
+  ))$n, 0)
+  gated <- rduckhts_ancestry_proportions(con, "ancestry_input", "ancestry_ref",
+                                         "ancestry_pc", "ancestry_correction", min_cor = 1)
+  expect_equal(gated$status, rep("low_correlation", 2L))
+  expect_true(all(is.na(gated$proportion)))
+  dbExecute(con, paste(
+    "CREATE TABLE ancestry_correlated_ref AS SELECT chromosome, position, allele_a, allele_b,",
+    "group_id, CASE WHEN group_id='A' THEN 0.1+(position-100)*0.05",
+    "ELSE 0.25+(position-100)*0.04 END AS frequency FROM ancestry_ref"
+  ))
+  dbExecute(con, paste(
+    "CREATE TABLE ancestry_wrong_orientation AS SELECT 'S' AS sample_id, chromosome, position,",
+    "allele_a, allele_b, 1-sum(CASE WHEN group_id='A' THEN 0.7 ELSE 0.3 END * frequency) AS frequency",
+    "FROM ancestry_correlated_ref GROUP BY chromosome, position, allele_a, allele_b"
+  ))
+  reversed <- rduckhts_ancestry_proportions(
+    con, "ancestry_wrong_orientation", "ancestry_correlated_ref",
+    "ancestry_pc", "ancestry_correction", min_cor = -1)
+  expect_equal(reversed$status, rep("reversed_alleles", 2L))
+  expect_true(all(is.na(reversed$proportion)))
+  dbExecute(con, paste0(
+    "CREATE VIEW ancestry_correlated_wide AS SELECT w.chromosome, w.position, ",
+    "w.allele_a, w.allele_b, ",
+    paste(paste0("w.PC", 1:16), collapse = ", "), ", ",
+    "max(r.frequency) FILTER (WHERE r.group_id = 'A') AS A, ",
+    "max(r.frequency) FILTER (WHERE r.group_id = 'B') AS B ",
+    "FROM ancestry_wide w JOIN ancestry_correlated_ref r ",
+    "ON r.position = w.position AND r.allele_a = w.allele_a ",
+    "AND r.allele_b = w.allele_b GROUP BY ALL"
+  ))
+  wide_reversed <- rduckhts_ancestry_proportions(
+    con, "ancestry_wrong_orientation", "ancestry_correlated_wide",
+    "ancestry_wide_correction", min_cor = -1)
+  expect_equal(wide_reversed$status, reversed$status)
+  expect_true(all(is.na(wide_reversed$proportion)))
+  dbExecute(con, paste(
+    "CREATE TABLE ancestry_scaled AS SELECT 'S' AS sample_id, chromosome, position,",
+    "allele_a, allele_b, sum(CASE WHEN group_id = 'A' THEN 0.35 ELSE 0.15 END * frequency) AS frequency",
+    "FROM ancestry_ref GROUP BY chromosome, position, allele_a, allele_b"
+  ))
+  scaled <- rduckhts_ancestry_proportions(con, "ancestry_scaled", "ancestry_ref",
+                                          "ancestry_pc", "ancestry_correction",
+                                          sum_to_one = FALSE, min_cor = 0)
+  expect_true(all(scaled$status == "ok"))
+  expect_true(abs(sum(scaled$proportion) - 0.5) < 1e-5)
+  wide_scaled <- rduckhts_ancestry_proportions(
+    con, "ancestry_scaled", "ancestry_wide", "ancestry_wide_correction",
+    sum_to_one = FALSE, min_cor = 0)
+  expect_equal(wide_scaled$status, scaled$status)
+  expect_equal(wide_scaled$proportion, scaled$proportion, tolerance = 1e-6)
+  dbExecute(con, paste(
+    "CREATE TABLE ancestry_geno_calls AS SELECT chromosome AS CHROM, position AS POS,",
+    "allele_a AS REF, [allele_b] AS ALT,",
+    "[struct_pack(sample_index := 0, alleles := CASE WHEN position = 107",
+    "THEN [NULL::INTEGER, 1] ELSE [0, 1] END)] AS calls",
+    "FROM ancestry_ref GROUP BY chromosome, position, allele_a, allele_b"
+  ))
+  dbExecute(con, "CREATE TABLE ancestry_samples AS SELECT 0 AS sample_index, 'S' AS sample_name")
+  genotype <- rduckhts_ancestry_geno(con, "ancestry_geno_calls", "ancestry_ref",
+                                      "ancestry_pc", "ancestry_correction",
+                                      samples_table = "ancestry_samples", min_cor = 0,
+                                      non_reference_only = FALSE)
+  expect_equal(genotype$sample_id, rep("S", 2L))
+  expect_equal(genotype$used_variants, rep(7, 2L))
+  expect_equal(genotype$missing_variants, rep(1, 2L))
+  dbExecute(con, paste(
+    "CREATE VIEW ancestry_ref_only_calls AS SELECT * REPLACE",
+    "([struct_pack(sample_index := 1, alleles := [0, 0])] AS calls)",
+    "FROM ancestry_geno_calls"
+  ))
+  dbExecute(con, "INSERT INTO ancestry_samples VALUES (1, 'S_ref')")
+  reference_only <- rduckhts_ancestry_geno(
+    con, "ancestry_ref_only_calls", "ancestry_ref", "ancestry_pc",
+    "ancestry_correction", samples_table = "ancestry_samples", min_cor = 0,
+    non_reference_only = FALSE)
+  expect_equal(reference_only$sample_id, rep("S_ref", 2L))
+  expect_equal(reference_only$input_variants, rep(8, 2L))
+  expect_equal(reference_only$used_variants, rep(8, 2L))
+  dbExecute(con, "CREATE TABLE ancestry_bad_samples AS SELECT * FROM ancestry_samples")
+  for (change in c("DELETE FROM ancestry_bad_samples WHERE sample_index = 1",
+                   "INSERT INTO ancestry_bad_samples VALUES (1, 'S_other')",
+                   "INSERT INTO ancestry_bad_samples VALUES (2, 'S_ref')",
+                   "UPDATE ancestry_bad_samples SET sample_name = NULL WHERE sample_index = 1")) {
+    dbExecute(con, "DELETE FROM ancestry_bad_samples")
+    dbExecute(con, "INSERT INTO ancestry_bad_samples SELECT * FROM ancestry_samples")
+    dbExecute(con, change)
+    expect_error(rduckhts_ancestry_geno(
+      con, "ancestry_ref_only_calls", "ancestry_ref", "ancestry_pc",
+      "ancestry_correction", samples_table = "ancestry_bad_samples",
+      non_reference_only = FALSE), pattern = "samples_table must map")
+  }
+  path <- system.file("extdata", "geno_calls.vcf", package = "Rduckhts")
+  rduckhts_geno(con, "ancestry_dense_fixture", path, samples = "S2")
+  rduckhts_geno(con, "ancestry_sparse_fixture", path, samples = "S2",
+                non_reference_only = TRUE)
+  expect_equal(dbGetQuery(con, paste(
+    "SELECT len(calls) AS n FROM ancestry_dense_fixture WHERE POS = 20"))$n,
+    c(1, 1))
+  expect_equal(dbGetQuery(con, paste(
+    "SELECT len(calls) AS n FROM ancestry_sparse_fixture WHERE POS = 20"))$n,
+    c(0, 0))
+  expect_error(rduckhts_ancestry_geno(
+    con, "ancestry_sparse_fixture", "ancestry_ref", "ancestry_pc",
+    "ancestry_correction", non_reference_only = TRUE),
+    pattern = "non_reference_only = FALSE")
+  expect_error(rduckhts_ancestry_geno(
+    con, "ancestry_dense_fixture", "ancestry_ref", "ancestry_pc",
+    "ancestry_correction"), pattern = "non_reference_only = FALSE")
+  dbExecute(con, "CREATE TABLE ancestry_bad_correction AS SELECT * FROM ancestry_correction")
+  dbExecute(con, "UPDATE ancestry_bad_correction SET pc = 3 WHERE pc = 2")
+  expect_error(rduckhts_ancestry_proportions(
+    con, "ancestry_input", "ancestry_ref", "ancestry_pc", "ancestry_bad_correction"),
+    pattern = "one finite coefficient for every PC")
+  expect_error(rduckhts_ancestry_proportions(con, "ancestry_input", "ancestry_ref",
+                                              "ancestry_pc", "ancestry_correction", min_cor = 2))
+  expect_error(rduckhts_ancestry_proportions(
+    con, "ancestry_input", "ancestry_wide", "ancestry_bad_correction"),
+    pattern = "one finite coefficient")
+  expect_error(rduckhts_ancestry_proportions(
+    con, "ancestry_input", "ancestry_wide", "ancestry_wide_correction", min_cor = 2))
+}
+
+test_ancestry_relations()
+
+test_ancestry_bam_cram <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  paths <- function(x) system.file("extdata", x, package = "Rduckhts")
+  dbExecute(con, paste(
+    "CREATE TABLE ancestry_bam_panel AS SELECT * FROM (VALUES",
+    "('WBcel235', 0::UBIGINT, 'CHROMOSOME_I', 1::UBIGINT, 'A', 'G'),",
+    "('WBcel235', 1::UBIGINT, 'CHROMOSOME_I', 914::UBIGINT, 'A', 'C'),",
+    "('WBcel235', 2::UBIGINT, 'CHROMOSOME_I', 2::UBIGINT, 'A', 'G'))",
+    "p(assembly, site_index, region, position, allele_a, allele_b)"
+  ))
+  dbExecute(con, paste(
+    "CREATE TABLE ancestry_bam_ref AS SELECT region AS chromosome, position,",
+    "allele_a, allele_b, group_id, CASE WHEN group_id='A' THEN 0.2 ELSE 0.8 END AS frequency",
+    "FROM ancestry_bam_panel, (VALUES ('A'), ('B')) g(group_id)"
+  ))
+  dbExecute(con, paste(
+    "CREATE TABLE ancestry_bam_pc AS SELECT region AS chromosome, position,",
+    "allele_a, allele_b, pc, CASE WHEN pc=1 THEN 1.0 ELSE position/1000.0 END AS loading",
+    "FROM ancestry_bam_panel, (VALUES (1), (2)) p(pc)"
+  ))
+  dbExecute(con, "CREATE TABLE ancestry_bam_correction AS SELECT 1 AS pc, 1.0 AS coefficient UNION ALL SELECT 2, 1.0")
+  dbExecute(con, paste(
+    "CREATE TABLE ancestry_complement_candidate AS SELECT 'CHROMOSOME_I' AS region,",
+    "914 AS position, 'T' AS allele_a, 'G' AS allele_b"
+  ))
+  flipped_panel <- rduckhts_ancestry_panel(
+    con, "ancestry_bam_ref", "ancestry_bam_pc", "ancestry_forward_panel", "WBcel235",
+    candidate_table = "ancestry_complement_candidate")
+  expect_equal(flipped_panel$sites, 1)
+  expect_equal(dbGetQuery(con,
+    "SELECT allele_a, allele_b FROM ancestry_forward_panel"),
+    data.frame(allele_a = "A", allele_b = "C"))
+  for (source in c("range.bam", "range.cram")) {
+    index <- if (source == "range.bam") "range.bam.bai" else "range.cram.crai"
+    counts <- rduckhts_somalier_bam_counts(
+      con, paths(source), "S", paths("ce.fa"),
+      panel_table = "ancestry_forward_panel", index_path = paths(index),
+      reference_index_path = paths("ce.fa.fai"))
+    expect_equal(counts$status, "measured")
+    expect_equal(c(counts$a, counts$b), c(1, 0))
+  }
+  bam <- rduckhts_ancestry_bam(
+    con, paths("range.bam"), "S", paths("ce.fa"), "ancestry_bam_panel",
+    "ancestry_bam_ref", "ancestry_bam_pc", "ancestry_bam_correction",
+    min_depth = 1, min_cor = 0, index_path = paths("range.bam.bai"),
+    reference_index_path = paths("ce.fa.fai")
+  )
+  cram <- rduckhts_ancestry_bam(
+    con, paths("range.cram"), "S", paths("ce.fa"), "ancestry_bam_panel",
+    "ancestry_bam_ref", "ancestry_bam_pc", "ancestry_bam_correction",
+    frequency_method = "called_genotype", min_depth = 1, min_cor = 0,
+    index_path = paths("range.cram.crai"), reference_index_path = paths("ce.fa.fai")
+  )
+  dbExecute(con, paste0(
+    "CREATE VIEW ancestry_bam_wide AS SELECT chromosome, position, allele_a, ",
+    "allele_b, max(loading) FILTER (WHERE pc=1) AS PC1, ",
+    "max(loading) FILTER (WHERE pc=2) AS PC2, ",
+    "max(frequency) FILTER (WHERE group_id='A') AS A, ",
+    "max(frequency) FILTER (WHERE group_id='B') AS B ",
+    "FROM ancestry_bam_ref JOIN ancestry_bam_pc ",
+    "USING (chromosome, position, allele_a, allele_b) ",
+    "GROUP BY chromosome, position, allele_a, allele_b"))
+  wide_bam <- rduckhts_ancestry_bam(
+    con, paths("range.bam"), "S", paths("ce.fa"), "ancestry_bam_panel",
+    "ancestry_bam_wide", "ancestry_bam_correction",
+    min_depth = 1, min_cor = 0, index_path = paths("range.bam.bai"),
+    reference_index_path = paths("ce.fa.fai")
+  )
+  expect_equal(wide_bam$used_variants, bam$used_variants)
+  expect_equal(wide_bam$status, bam$status)
+  expect_equal(bam$frequency_method, rep("allele_fraction", 2L))
+  expect_equal(cram$frequency_method, rep("called_genotype", 2L))
+  expect_equal(bam$used_variants, rep(1, 2L))
+  expect_equal(cram$used_variants, rep(1, 2L))
+  expect_equal(bam$status, rep("low_correlation", 2L))
+  expect_true(all(is.na(cram$proportion)))
+}
+
+test_ancestry_bam_cram()

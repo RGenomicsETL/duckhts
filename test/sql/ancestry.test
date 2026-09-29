@@ -1,0 +1,170 @@
+# name: test/sql/ancestry.test
+# description: Nearest-PD constrained projection over PC-major relations
+# group: [duckhts]
+
+require duckhts
+
+query I
+SELECT count(*) FROM unnest(duckhts_ancestry_proportions(
+    [1.0, 0.0, 0.0, 1.0], [0.25, 0.75], 2, true));
+----
+2
+
+query I
+SELECT abs(sum(q) - 1) < 0.0000001 FROM unnest(duckhts_ancestry_proportions(
+    [1.0, 0.0, 0.0, 1.0], [0.25, 0.75], 2, true)) t(q);
+----
+true
+
+query II
+WITH solved AS (
+  SELECT duckhts_ancestry_proportions([1.0, 0.0, 0.0, 1.0],
+                                      [0.1, 0.2], 2, false) AS q
+)
+SELECT q[1], q[2] FROM solved;
+----
+0.1	0.2
+
+# The catalogued three-argument form defaults to equality mode.
+query II
+SELECT q[1], q[2] FROM (SELECT duckhts_ancestry_proportions(
+    [1.0, 0.0, 0.0, 1.0], [0.25, 0.75], 2) AS q);
+----
+0.25	0.75
+
+# A group column far weaker than the largest still enters the fit: the optimality
+# test is per coordinate, not an absolute reduced-cost cutoff.
+query I
+WITH scales(s) AS (VALUES (1e-12), (1.0), (1e6)),
+  solutions AS (
+    SELECT duckhts_ancestry_proportions(
+      [1.0*s, 0.0, 0.0, 1e-4*s], [0.0, 5e-6*s], 2, false) AS q
+    FROM scales
+  )
+SELECT count(*) FROM solutions WHERE abs(q[1]) < 1e-12
+  AND abs(q[2] - 0.05) < 1e-9;
+----
+3
+
+# Uniform PC-product units do not change the optimum or nearest-PD repair.
+query I
+WITH scales(s) AS (VALUES (1e-12), (1.0), (1e6)),
+  solutions AS (
+    SELECT duckhts_ancestry_proportions(
+      [1e-6*s, 0.0, 0.0, 1e-6*s], [2.5e-7*s, 7.5e-7*s], 2, true) AS q
+    FROM scales
+  )
+SELECT count(*) FROM solutions WHERE abs(q[1] - 0.25) < 1e-8
+  AND abs(q[2] - 0.75) < 1e-8;
+----
+3
+
+query I
+WITH scales(s) AS (VALUES (1e-12), (1.0), (1e6)),
+  solutions AS (
+    SELECT duckhts_ancestry_proportions(
+      [s, 0.0, 0.5*s, 0.0, s, 0.5*s], [0.4*s, 0.6*s], 3, true) AS q
+    FROM scales
+  )
+SELECT count(*) FROM solutions
+WHERE abs(q[1] - (SELECT q[1] FROM solutions LIMIT 1)) < 1e-7
+  AND abs(q[2] - (SELECT q[2] FROM solutions LIMIT 1)) < 1e-7
+  AND abs(q[3] - (SELECT q[3] FROM solutions LIMIT 1)) < 1e-7;
+----
+3
+
+# Projection coefficients retain precision for subsequent quality correlations.
+query I
+SELECT abs(duckhts_ancestry_proportions([1.0], [0.123456789], 1, false)[1]
+           - 0.123456789) < 0.0000000001;
+----
+true
+
+# Collinear columns (three groups, two PCs) require a positive-definite repair.
+query I
+SELECT abs(sum(q) - 1) < 0.0000001
+FROM unnest(duckhts_ancestry_proportions(
+  [1.0, 0.0, 0.5, 0.0, 1.0, 0.5], [0.4, 0.6], 3, true)) t(q);
+----
+true
+
+# The same oriented site relations are used by the R wrapper tests.
+statement ok
+CREATE TEMP TABLE ancestry_ref AS SELECT * FROM (VALUES
+  (1, 'A', 'G', 'A', 0.2), (1, 'A', 'G', 'B', 0.8),
+  (2, 'C', 'T', 'A', 0.3), (2, 'C', 'T', 'B', 0.7),
+  (3, 'A', 'C', 'A', 0.4), (3, 'A', 'C', 'B', 0.6)
+) t(position, allele_a, allele_b, group_id, frequency);
+
+statement ok
+CREATE TEMP TABLE ancestry_input AS SELECT * FROM (VALUES
+  (1, 'T', 'C', 0.35), (2, 'T', 'C', 0.6), (3, 'A', 'C', 0.45)
+) t(position, allele_a, allele_b, frequency);
+
+query I
+WITH oriented AS (
+  SELECT i.position,
+    CASE WHEN i.allele_a = r.allele_b AND i.allele_b = r.allele_a
+      THEN 1 - i.frequency ELSE i.frequency END AS frequency
+  FROM ancestry_input i JOIN (SELECT DISTINCT position, allele_a, allele_b FROM ancestry_ref) r
+    USING (position)
+  WHERE (i.allele_a = r.allele_b AND i.allele_b = r.allele_a)
+     OR (translate(i.allele_a, 'ACGT', 'TGCA') = r.allele_a
+         AND translate(i.allele_b, 'ACGT', 'TGCA') = r.allele_b)
+     OR (i.allele_a = r.allele_a AND i.allele_b = r.allele_b)
+), projection AS (
+  SELECT position, pc, CASE WHEN pc = 1 THEN 1.0
+    WHEN position = 1 THEN 1.0 WHEN position = 2 THEN 0.0 ELSE -1.0 END AS loading
+  FROM (SELECT DISTINCT position FROM ancestry_ref), (VALUES (1), (2)) t(pc)
+), x AS (
+  SELECT p.pc, r.group_id, sum(p.loading * r.frequency) AS value
+  FROM projection p JOIN ancestry_ref r USING (position) GROUP BY p.pc, r.group_id
+), y AS (
+  SELECT p.pc, sum(p.loading * i.frequency) AS value
+  FROM projection p JOIN oriented i USING (position) GROUP BY p.pc
+), solved AS (
+  SELECT duckhts_ancestry_proportions(
+    (SELECT list(value ORDER BY pc, group_id) FROM x),
+    (SELECT list(value ORDER BY pc) FROM y), 2, true) AS q
+)
+SELECT abs(q[1] - 0.75) < 0.000001 FROM solved;
+----
+true
+
+# Wide keyed rows need only one aggregate row per cohort before solver lists.
+query I
+WITH reference AS (
+  SELECT position,
+    max(frequency) FILTER (WHERE group_id = 'A') AS a,
+    max(frequency) FILTER (WHERE group_id = 'B') AS b,
+    1.0 AS pc1,
+    CASE position WHEN 1 THEN 1.0 WHEN 2 THEN 0.0 ELSE -1.0 END AS pc2
+  FROM ancestry_ref GROUP BY position
+), oriented AS (
+  SELECT i.position, CASE WHEN i.allele_a = r.allele_b AND i.allele_b = r.allele_a
+    THEN 1-i.frequency ELSE i.frequency END AS frequency
+  FROM ancestry_input i JOIN (SELECT DISTINCT position, allele_a, allele_b FROM ancestry_ref) r
+    USING (position)
+), moments AS (
+  SELECT sum(r.pc1*r.a) AS x11, sum(r.pc1*r.b) AS x12,
+    sum(r.pc2*r.a) AS x21, sum(r.pc2*r.b) AS x22,
+    sum(r.pc1*i.frequency) AS y1, sum(r.pc2*i.frequency) AS y2
+  FROM reference r JOIN oriented i USING (position)
+), solved AS (
+  SELECT duckhts_ancestry_proportions(
+    list_value(x11, x12, x21, x22), list_value(y1, y2), 2, true) AS q
+  FROM moments
+)
+SELECT abs(q[1] - 0.75) < 0.000001 FROM solved;
+----
+true
+
+statement error
+SELECT duckhts_ancestry_proportions([1.0, 2.0], [1.0], 1, true);
+----
+expected 1..30 groups
+
+statement error
+SELECT duckhts_ancestry_proportions([NULL::DOUBLE], [1.0], 1, true);
+----
+X and y must be finite

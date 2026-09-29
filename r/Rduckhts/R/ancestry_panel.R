@@ -1,0 +1,142 @@
+#' Create a deterministic ancestry site panel for BAM/CRAM counts
+#'
+#' Sites are biallelic unambiguous SNVs present in every reference group and
+#' every PC loading. Positions are positive one-based whole numbers and all
+#' group alleles must be present. With `candidate_table`, only matching candidate loci and
+#' alleles are retained. Otherwise one site is selected per chromosome/spaced
+#' genomic window. Results are sorted by chromosome and position and assigned
+#' dense zero-based panel ordinals. Keep the returned panel SHA-256 and the
+#' reference release with the materialized panel as its versioned identity.
+#'
+#' @param con A connection with DuckHTS loaded.
+#' @param reference_table,loadings_table Reference products on the connection.
+#' @param table_name Destination committed panel relation, visible to the
+#'   BAM/CRAM panel preparation path.
+#' @param assembly Reference genome assembly label.
+#' @param candidate_table Optional site panel, e.g. a Somalier panel with
+#'   region, position, allele_a and allele_b.
+#' @param spacing_bp Genomic window width for deterministic spacing.
+#' @param max_sites Maximum number of selected sites. When more sites are
+#'   eligible, each contig keeps at least one site (the largest contigs, when
+#'   `max_sites` is below the contig count), the rest are shared by largest
+#'   remainders in proportion to each contig's eligible sites minus that one
+#'   (its remaining capacity, so no contig is offered more than it has), and
+#'   each contig's sites are spread evenly along it.
+#' @param overwrite Replace an existing destination.
+#' @return A one-row data frame with panel SHA-256 and selected site count.
+#' @export
+rduckhts_ancestry_panel <- function(
+  con, reference_table, loadings_table, table_name, assembly,
+  candidate_table = NULL, spacing_bp = 5000, max_sites = 17000,
+  overwrite = FALSE
+) {
+  .somalier_validate_output(con, table_name, overwrite)
+  .somalier_validate_name(table_name, "table_name")
+  .somalier_validate_name(reference_table, "reference_table")
+  .somalier_validate_name(loadings_table, "loadings_table")
+  if (!is.null(candidate_table)) .somalier_validate_name(candidate_table, "candidate_table")
+  .somalier_validate_name(assembly, "assembly")
+  spacing_bp <- .somalier_bounded_whole_number(spacing_bp, "spacing_bp", 1, 100000000)
+  max_sites <- .somalier_bounded_whole_number(max_sites, "max_sites", 1, 1000000)
+  contract <- .ancestry_long_contract(con, reference_table, loadings_table)
+  reference <- sql_quote_identifier(con, reference_table)
+  # Per-locus checks keep constant state: a locus has every group (or PC) exactly once
+  # when it has as many rows as groups and their ordinal bits cover the full mask.
+  # Distinct aggregates would hold a set per locus across the whole reference.
+  group_count <- length(contract$groups)
+  pc_count <- length(contract$pcs)
+  group_list <- paste0("[", paste(vapply(contract$groups, function(g) sql_quote_string(con, g), ""),
+                                  collapse = ", "), "]")
+  loadings <- sql_quote_identifier(con, loadings_table)
+  candidates <- if (is.null(candidate_table)) {
+    sprintf(paste0(
+      "SELECT chromosome AS region, position, least(ra,rb) AS allele_a, ",
+      "greatest(ra,rb) AS allele_b FROM sites QUALIFY ",
+      "row_number() OVER (PARTITION BY chromosome, floor((position-1)/%d) ",
+      "ORDER BY position, ra, rb) = 1"
+    ), spacing_bp)
+  } else {
+    paste0(
+      "SELECT s.chromosome AS region, s.position, s.ra AS allele_a, s.rb AS allele_b FROM sites s ",
+      "JOIN (SELECT region, position, min(allele_a) AS allele_a, min(allele_b) AS allele_b ",
+      "FROM ", sql_quote_identifier(con, candidate_table),
+      " GROUP BY region, position HAVING count(*) = 1) p ",
+      "ON p.region = s.chromosome AND p.position = s.position ",
+      "WHERE (p.allele_a = s.ra AND p.allele_b = s.rb) ",
+      "OR (p.allele_a = s.rb AND p.allele_b = s.ra) ",
+      "OR (translate(p.allele_a,'ACGT','TGCA') = s.ra ",
+      "AND translate(p.allele_b,'ACGT','TGCA') = s.rb) ",
+      "OR (translate(p.allele_a,'ACGT','TGCA') = s.rb ",
+      "AND translate(p.allele_b,'ACGT','TGCA') = s.ra)"
+    )
+  }
+  query <- paste0(
+    "WITH site_groups AS (SELECT chromosome, position, min(allele_a) AS ra, ",
+    "min(allele_b) AS rb FROM ", reference, " GROUP BY chromosome, position ",
+    "HAVING position >= 1 AND position = floor(position) ",
+    "AND count(allele_a) = count(*) AND count(allele_b) = count(*) ",
+    "AND min(allele_a) = max(allele_a) AND min(allele_b) = max(allele_b) ",
+    "AND count(*) = ", group_count, " ",
+    "AND bit_or(1::BIGINT << (list_position(", group_list, ", group_id::VARCHAR) - 1)) = ",
+    "(1::BIGINT << ", group_count, ") - 1 ",
+    "AND bool_and(frequency IS NOT NULL AND isfinite(frequency) ",
+    "AND frequency >= 0 AND frequency <= 1) ",
+    "AND length(min(allele_a)) = 1 AND length(min(allele_b)) = 1 ",
+    "AND min(allele_a) IN ('A','C','G','T') AND min(allele_b) IN ('A','C','G','T') ",
+    "AND min(allele_a) != min(allele_b) ",
+    "AND min(allele_a) || min(allele_b) NOT IN ('AT','TA','CG','GC')), ",
+    "sites AS (SELECT s.* FROM site_groups s WHERE EXISTS (SELECT 1 FROM ", loadings, " l ",
+    "WHERE l.chromosome = s.chromosome AND l.position = s.position ",
+    "AND l.allele_a = s.ra AND l.allele_b = s.rb ",
+    "GROUP BY l.chromosome, l.position HAVING count(*) = ", pc_count, " ",
+    "AND bool_and(l.loading IS NOT NULL AND isfinite(l.loading)) ",
+    "AND bit_or(1::HUGEINT << (CAST(CAST(l.pc AS DOUBLE) AS INTEGER) - 1)) = ",
+    "(1::HUGEINT << ", pc_count, ") - 1)), ",
+    # Cap at max_sites without dropping contigs: every contig first gets one site
+    # (the largest contigs, when max_sites is below the contig count), the rest
+    # are shared in proportion to each contig's eligible sites minus one by
+    # largest remainders, and each contig's allocation is spread evenly over its
+    # position order. Integer arithmetic keeps the allocation exact.
+    "chosen AS (", candidates, "), ordered AS (SELECT region, position, ",
+    "least(allele_a,allele_b) AS allele_a, greatest(allele_a,allele_b) AS allele_b, ",
+    "row_number() OVER (PARTITION BY region ORDER BY position, least(allele_a,allele_b), ",
+    "greatest(allele_a,allele_b)) - 1 AS r, count(*) OVER (PARTITION BY region) AS n_c ",
+    "FROM chosen), ",
+    "contigs AS (SELECT region, any_value(n_c) AS n_c FROM ordered GROUP BY region), ",
+    "totals AS (SELECT sum(n_c) AS n, count(*) AS c FROM contigs), ",
+    "shares AS (SELECT region, n_c, n, c, ",
+    "CASE WHEN n > ", max_sites, " AND c <= ", max_sites, " THEN ",
+    "((", max_sites, " - c) * (n_c - 1)) // (n - c) ELSE 0 END AS base, ",
+    "CASE WHEN n > ", max_sites, " AND c <= ", max_sites, " THEN ",
+    "((", max_sites, " - c) * (n_c - 1)) % (n - c) ELSE 0 END AS rest ",
+    "FROM contigs, totals), ",
+    "allocation AS (SELECT region, CASE ",
+    "WHEN n <= ", max_sites, " THEN n_c ",
+    "WHEN c <= ", max_sites, " THEN 1 + base + CASE WHEN ",
+    "row_number() OVER (ORDER BY rest DESC, region) <= ",
+    "(", max_sites, " - c) - (SELECT sum(base) FROM shares) THEN 1 ELSE 0 END ",
+    "ELSE CASE WHEN row_number() OVER (ORDER BY n_c DESC, region) <= ", max_sites,
+    " THEN 1 ELSE 0 END END AS a FROM shares), ",
+    "limited AS (SELECT o.region, o.position, o.allele_a, o.allele_b FROM ordered o ",
+    "JOIN allocation USING (region) WHERE a > 0 AND ",
+    "(o.r = 0 OR (o.r * a) // o.n_c > ((o.r - 1) * a) // o.n_c)) ",
+    "SELECT ", sql_quote_string(con, assembly), " AS assembly, ",
+    "(row_number() OVER (ORDER BY region, position, allele_a, allele_b)-1)::UBIGINT AS site_index, ",
+    "region, position::UBIGINT AS position, allele_a, allele_b FROM limited"
+  )
+  # Validate in a scratch TEMP table before publishing, so a failed panel leaves no
+  # destination table; this works inside or outside a caller's transaction.
+  .duckhts_check_table_target(con, table_name, overwrite)
+  scratch <- gsub("[^A-Za-z0-9_]", "_", basename(tempfile("__duckhts_ancestry_panel_")))
+  on.exit(try(DBI::dbExecute(con, paste("DROP TABLE IF EXISTS",
+                                        sql_quote_identifier(con, scratch))),
+              silent = TRUE), add = TRUE)
+  DBI::dbExecute(con, paste("CREATE TEMP TABLE", sql_quote_identifier(con, scratch), "AS", query))
+  summary <- DBI::dbGetQuery(con, sprintf(
+    "SELECT count(*) AS sites, duckhts_somalier_panel_sha256(%s) AS panel_sha256 FROM %s",
+    sql_quote_string(con, scratch), sql_quote_identifier(con, scratch)
+  ))
+  .duckhts_create_table(con, table_name,
+                        paste("SELECT * FROM", sql_quote_identifier(con, scratch)), overwrite)
+  summary
+}

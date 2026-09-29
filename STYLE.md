@@ -123,6 +123,58 @@ It is not a brace-placement contest and it is not permission to manufacture tiny
 - SQL that constructs a resident model or invokes a native kernel must expose its schema,
   assembly/release identity, input hashes, and sort contract.
 
+## Scale
+
+Applies to SQL, R SQL builders, and native kernels whose work grows with their input.
+
+- Name the dimensions (records, samples, sites, groups, components, bases) and state
+  intermediate row counts, decoded widths, maximum aggregate-group size, and output size in
+  those terms. A product-of-dimensions intermediate (variants × components × groups,
+  samples × sites × pairs) needs a justified bound within the workload budget or a
+  different representation.
+- Budget all simultaneously live state: hash builds, sorts, aggregate groups, materialized
+  relations, worker buffers, and retained output. Filter and project early without changing
+  validation or error semantics. Justify and size each large materialization; avoid
+  full-width copies before selective joins. Confirm build sides and repeated physical scans
+  in `EXPLAIN ANALYZE`.
+- Match coordinate-neighbourhood algorithms to the required result: ordered windows for
+  adjacency, ASOF for one nearest match in a stated direction, interval kernels or range
+  joins for all overlaps. Justify an inequality join by its physical plan and candidate-pair
+  count; do not expand all pairs merely to test existence.
+- Reduce to the statistic the consumer needs (sums, counts, sketches) as early as possible.
+  Compare the cost of a second narrow scan with retaining a wide matched relation.
+- A per-group `list()` or `string_agg` over unbounded input needs a cap enforced per group,
+  not per chunk, with an explicit error.
+- Stage large, reused tabular references once in a typed, keyed layout with source
+  checksums and derivation identity; prefer sorted Parquet for scan-heavy access. Do not
+  reparse text references per call.
+- Output that is inherently superlinear, such as all sample pairs, states its size contract
+  and caps.
+
+### Scaling evidence
+
+- Measure 1×, 2×, and 4× along each material growth dimension, holding the others fixed,
+  plus a joint-scale case for interacting dimensions and at least one real public workload
+  at the claimed operating scale, staged through `r/duckhtsbench`. Include relevant stress
+  shapes (dense coordinates, large groups, wide nested values). The 1× run takes at least
+  5 s on one thread; below that, report memory without a timing verdict. Synthetic cases
+  supplement real inputs; upstream parity does not certify scale.
+- Use at least three fresh-process repetitions at 1 and a stated multi-thread count.
+  Record median time and spread, peak RSS, DuckDB peak buffer memory, spill bytes, input
+  and output rows, decoded required-column bytes, cache conditions, and memory and temp
+  limits. Consume the required output; `count(*)` can prune the work under test.
+- Measure the public execution path end to end, including wrapper preparation and result
+  materialization. Report one-time staging and oracle runs separately; DuckDB buffer memory
+  is not total process memory.
+- Investigate a time exponent above 1.25 at either doubling for expected linear or sorting
+  work, memory growth beyond the stated model, and regressions against a comparable
+  baseline. Identify the responsible stage and fix it, or record a reviewed exception,
+  before merging.
+- Growth alone is not the bar. Set each workload's peak-RSS ceiling and spill limit before
+  measuring, by default fixed runtime overhead plus three times the required decoded live
+  state. Exceeding a limit blocks merge like a failing test; raising one needs independent
+  review.
+
 ## Interfaces and documentation
 
 - Prose states the current contract and stands on its own. Replace superseded wording
@@ -144,6 +196,10 @@ It is not a brace-placement contest and it is not permission to manufacture tiny
 - Can malformed input crash DuckDB or read outside a buffer?
 - Is mutable state worker-local, and is lock ownership visible?
 - Does the hot path exploit its promised order and representation?
+- What is the largest intermediate relation in terms of the input dimensions, and which
+  side of each join is built in memory?
+- Do scaling measurements cover the claimed dimensions and operating scale, within the
+  reviewed memory and spill limits?
 - Is the public surface free of code that does not exist?
 - Do properties, differential cases, sanitizers, and package tests cover the changed
   boundary?

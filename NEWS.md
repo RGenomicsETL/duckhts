@@ -1,5 +1,36 @@
 # DuckHTS Extension News
 
+# duckhts 1.5.2.9005
+
+- `duckhts_ancestry_proportions()` estimates reference-group ancestry proportions by
+  bigsnpr's `snp_ancestry_summary` method. SQL aggregates the PC projections of matched
+  variants; the native solver applies a bounded nearest-positive-definite repair and the
+  constrained fit, invariant to uniform rescaling of the projections. The three-argument
+  call applies sum-to-one constraints. Coefficients keep full precision for the
+  correlation gates; for a fixed input, the returned seven-decimal proportions are
+  stable across calls and thread counts.
+
+- Ancestry inputs are allele frequencies from summary statistics, dense diploid
+  genotypes, or BAM/CRAM allele counts. Reference loci touching any input locus must be
+  unique; matched loci need finite loadings and frequencies in [0, 1]; positions are
+  positive whole numbers and PC identifiers are consecutive whole numbers. Every sample
+  returns a row for every reference group, with NULL proportions when no variant
+  matches. Group identifiers round-trip exactly. Matching audits count reversed sites
+  (including strand-flipped reversals, read as `1 - f`) and flipped sites. BAM/CRAM
+  site panels capped at `max_sites` keep one site per contig (only the largest
+  `max_sites` contigs when there are more contigs than that) and share the remaining
+  sites in proportion to each contig's eligible sites minus that one.
+  Site eligibility (one allele pair, every group and PC exactly once) is checked with
+  constant per-locus state instead of distinct aggregates, selecting the same sites: on
+  bigsnpr's full reference a one-thread build takes 38 s and 1.7 GiB instead of 115 s
+  and 16 GiB with 2.5 GiB of spill, and four threads no longer run out of memory at 16 GB
+  (`benchmarks/benchmark_ancestry_panel.md`).
+
+- The benchmark registry pins bigsnpr's reference frequencies and loadings, staged once
+  as a checksum-bound sorted Parquet product whose receipt certifies unique loci and
+  complete, in-range values, together with the epilepsy summary statistics and GRCh37
+  phase-3 chr22 genotypes used for parity with bigsnpr and 30x CRAM comparisons.
+
 # duckhts 1.5.2.9004
 
 - Somalier panel selection (`rduckhts_somalier_find_sites()`) selects sites from
