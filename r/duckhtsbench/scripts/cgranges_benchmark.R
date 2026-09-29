@@ -49,7 +49,7 @@ write_synthetic_bed <- function(path, n, seed, query = FALSE) {
   chroms <- paste0("chr", 1:4)
   index <- seq_len(n) - 1L
   width <- if (query) 30L + index %% 120L else 50L + index %% 200L
-  starts <- floor(stats::runif(n, 0, 5000000L - width))
+  starts <- as.integer(floor(stats::runif(n, 0, 5000000L - width)))
   chrom <- chroms[if (query) (index * 3L) %% length(chroms) + 1L else index %% length(chroms) + 1L]
   write.table(data.frame(chrom, starts, starts + width, if (query) paste0("q", index) else paste0("s", index)),
     path, sep = "\t", row.names = FALSE, col.names = FALSE, quote = FALSE)
