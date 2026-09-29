@@ -2,6 +2,13 @@
 
 # duckhts 1.5.2.9006
 
+- The function catalog documents `bam_bin_counts(include_unmapped := FALSE)` and
+  its synthetic no-coordinate row, and names the type-probe macro's parameter as
+  registered: `duckhts_duckdb_type_supported(candidate_type_name)`. Catalog tests
+  compare every entry with a registered overload of the loaded extension: kinds,
+  scalar and aggregate argument counts,
+  native table options, and macro parameter names.
+
 - `LOAD` installs SQL macros only when the default database is writable and
   in memory. For file-backed or read-only defaults, native functions load
   without catalog writes; execute the ordered `TEMP` statements from

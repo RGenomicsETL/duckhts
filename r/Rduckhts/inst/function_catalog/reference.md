@@ -313,7 +313,7 @@ Return whether the currently open DuckDB runtime advertises a logical type with 
 Signature:
 
 ```sql
-duckhts_duckdb_type_supported(type_name)
+duckhts_duckdb_type_supported(candidate_type_name)
 ```
 
 Returns:
@@ -1847,7 +1847,7 @@ Count BAM or CRAM read starts into fixed-width bins. Returns one row per bin acr
 Signature:
 
 ```sql
-bam_bin_counts(path, bin_width, chrom := NULL, reference := NULL, index_path := NULL, mapq := 0, require_flags := 0, exclude_flags := 0, rmdup := 'none', stats := NULL)
+bam_bin_counts(path, bin_width, chrom := NULL, include_unmapped := FALSE, reference := NULL, index_path := NULL, mapq := 0, require_flags := 0, exclude_flags := 0, rmdup := 'none', stats := NULL)
 ```
 
 Returns:
@@ -1855,6 +1855,10 @@ Returns:
 ```
 table
 ```
+
+### Unmapped records
+
+include_unmapped := TRUE appends one synthetic row with chrom = '*' for no-coordinate records, even when no such records are present; start, end and bin_id are NULL. The default FALSE omits this row. SAM-flag filters, MAPQ filtering and flag-based duplicate removal apply to these records; streaming duplicate removal is not applied to them. Reference-GC fields are NULL for this row.
 
 ### Examples
 
