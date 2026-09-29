@@ -1,5 +1,9 @@
 # Rduckhts 1.5.2.9006-0.1.5
 
+- `rduckhts_somalier_vcf_counts()` retains call payloads only for panel-matching
+  coordinates, so retained memory follows the panel rather than VCF length. Count,
+  status and validation semantics are unchanged.
+
 - Consequence prediction has moved to DuckVEP and its R package, Rduckvep
   (<https://github.com/RGenomicsETL/DuckVEP>). `rduckhts_haplotypes()` and the bundled
   consequence fixtures are removed; the bundled extension no longer carries the DuckVEP

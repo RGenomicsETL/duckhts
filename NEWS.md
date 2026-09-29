@@ -2,6 +2,10 @@
 
 # duckhts 1.5.2.9006
 
+- `duckhts_somalier_vcf_counts()` retains call payloads only for panel-matching
+  coordinates, so retained memory follows the panel rather than VCF length. Count,
+  status and validation semantics are unchanged.
+
 - Consequence prediction has moved to the [DuckVEP extension](https://github.com/RGenomicsETL/DuckVEP),
   its single source. DuckHTS no longer ships the DuckVEP functions and macros
   (`duckvep_ensembl_regions`, `duckvep_ensembl_transcripts`,
