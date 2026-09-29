@@ -82,6 +82,34 @@ separate interface version; it does not imply support for DuckDB 1.2 SQL.
 For duckdb-wasm, check the embedded DuckDB engine version rather than comparing
 npm package version numbers with DuckDB release numbers.
 
+## Using DuckHTS with a database file
+
+`LOAD` creates the 31 SQL macros only when the default database is writable
+and in memory. With a file-backed or read-only default database it registers
+native functions but does not change the database catalog. Install the exported
+macros as connection-local `TEMP` macros on each connection that uses them:
+
+```python
+con.execute("LOAD duckhts")
+for (sql,) in con.execute("SELECT sql FROM duckhts_macro_definitions() ORDER BY install_order").fetchall():
+    con.execute(sql)
+```
+
+With the DuckDB CLI, generate a script and read it on the connection that needs
+the macros (use the actual path to your extension):
+
+```sh
+DB=example.duckdb
+EXT=/absolute/path/to/duckhts.duckdb_extension
+duckdb -unsigned "$DB" "LOAD '$EXT'; COPY (SELECT sql || ';' FROM duckhts_macro_definitions() ORDER BY install_order) TO 'duckhts_macros.sql' (HEADER false, DELIMITER E'\\t', QUOTE '', ESCAPE '');"
+printf "LOAD '%s';\n.read duckhts_macros.sql\nSELECT duckhts_quote_ident('a');\n" "$EXT" | duckdb -unsigned "$DB"
+```
+
+`TEMP` macros shadow persistent macros written by older DuckHTS versions; no
+persistent macro is deleted. Inspect them with `duckdb_functions()` where
+`database_name` equals the file's catalog name, and drop them explicitly if
+wanted. Attaching a database after `LOAD` does not install macros into it.
+
 ## Functions
 
 <details>

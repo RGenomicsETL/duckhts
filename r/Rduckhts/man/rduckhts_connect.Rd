@@ -27,7 +27,9 @@ in-memory database.}
 file. If \code{NULL}, uses the extension bundled with Rduckhts.}
 }
 \value{
-A DuckDB connection with DuckHTS loaded.
+A DuckDB connection with DuckHTS loaded. File-backed connections
+  also have connection-local TEMP macros installed without modifying the
+  database catalog.
 }
 \description{
 Creates a DuckDB connection that explicitly permits loading the package-built

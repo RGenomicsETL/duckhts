@@ -34,7 +34,9 @@
 #' @param extension_path Optional path to a DuckHTS \code{.duckdb_extension}
 #'   file. If \code{NULL}, uses the extension bundled with Rduckhts.
 #'
-#' @return A DuckDB connection with DuckHTS loaded.
+#' @return A DuckDB connection with DuckHTS loaded. File-backed connections
+#'   also have connection-local TEMP macros installed without modifying the
+#'   database catalog.
 #'
 #' @examples
 #' con <- rduckhts_connect()
@@ -137,6 +139,8 @@ rduckhts_connect <- function(
 #' The connection must permit unsigned extension loading. With current versions
 #' of the \pkg{duckdb} R package, its driver must also permit extension loading.
 #' Prefer \code{rduckhts_connect()} when Rduckhts owns the connection.
+#' File-backed connections receive TEMP macros on this connection after LOAD.
+#' Use \code{rduckhts_install_macros()} on additional connections.
 #'
 #' @param con A DuckDB connection object.
 #' @param extension_path Optional path to the DuckHTS extension file. If
@@ -188,5 +192,60 @@ rduckhts_load <- function(con, extension_path = NULL) {
 
   quoted_extension <- sql_quote_string(con, extension_path)
   result <- DBI::dbExecute(con, paste("LOAD", quoted_extension))
-  return(result == 0)
+  definitions <- DBI::dbGetQuery(
+    con,
+    "SELECT name, public FROM duckhts_macro_definitions() ORDER BY install_order"
+  )
+  visible <- DBI::dbGetQuery(
+    con,
+    "SELECT DISTINCT function_name, database_name FROM duckdb_functions() WHERE function_type IN ('macro', 'table_macro')"
+  )
+  database <- DBI::dbGetQuery(
+    con,
+    "SELECT path, readonly, internal, type, database_name FROM duckdb_databases() WHERE database_name = current_database()"
+  )
+  # Trust persistent definitions only in the writable in-memory DuckDB
+  # default catalog; a file or another storage engine needs TEMP definitions.
+  catalog <- if (
+    nrow(database) == 1L &&
+      (is.na(database$path[[1L]]) || !nzchar(database$path[[1L]])) &&
+      !database$readonly[[1L]] &&
+      !database$internal[[1L]] &&
+      identical(database$type[[1L]], "duckdb")
+  ) database$database_name[[1L]] else "temp"
+  installed <- visible$function_name[visible$database_name %in% c("temp", catalog)]
+  if (identical(catalog, "temp") ||
+      !all(definitions$name[definitions$public] %in% installed)) {
+    rduckhts_install_macros(con)
+  }
+  result == 0
+}
+
+#' Install DuckHTS macros on a connection
+#'
+#' Executes the ordered definitions exported by the loaded DuckHTS extension as
+#' connection-local TEMP macros. Use this on DBI or pool connections that did
+#' not come from \code{rduckhts_connect()}. The operation is idempotent and
+#' shadows same-named persistent macros without deleting them. Inspect old
+#' persistent macros in \code{duckdb_functions()} using the file's
+#' \code{database_name}; drop them explicitly if no longer wanted.
+#'
+#' @details
+#' This function does not begin or commit a transaction. Inside a caller
+#' transaction its DDL participates in that transaction: rollback removes
+#' newly installed TEMP macros, and the caller can install them again after
+#' rollback. Call it separately for each connection, including pool connections.
+#'
+#' @param con A DBI connection with DuckHTS loaded.
+#' @return Invisibly returns the definitions SHA-256 digest.
+#' @export
+rduckhts_install_macros <- function(con) {
+  definitions <- DBI::dbGetQuery(
+    con,
+    "SELECT sql, definitions_sha256 FROM duckhts_macro_definitions() ORDER BY install_order"
+  )
+  for (sql in definitions$sql) {
+    DBI::dbExecute(con, sql)
+  }
+  invisible(definitions$definitions_sha256[[1L]])
 }
