@@ -522,6 +522,8 @@ function_catalog: test-function-catalog
 	python3 scripts/render_function_catalog.py
 rdm: function_catalog
 	Rscript -e "rmarkdown::render('README.Rmd', output_format = 'github_document')"
+bench-genbank-named:
+	Rscript -e "rmarkdown::render('benchmarks/benchmark_genbank_named_attributes.Rmd', output_format = rmarkdown::github_document(html_preview = FALSE))"
 bench-lift:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_liftover.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 

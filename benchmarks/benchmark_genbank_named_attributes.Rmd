@@ -1,0 +1,134 @@
+---
+title: "GenBank named-attribute projections"
+output:
+  github_document:
+    html_preview: false
+---
+
+`read_genbank(attributes := [...])` adds one VARCHAR column per qualifier key.
+The C API table function learns which columns a query projects, never which MAP
+keys, so a query that needs one qualifier used to build the whole
+`attributes_map` for every feature. This report compares that MAP projection
+with named columns.
+
+The input is the registered NCBI RefSeq record for *Escherichia coli* K-12
+MG1655 (`genbank_ecoli_k12_gbff`, staged by
+`duckhtsbench::duckhts_bench_stage_genbank()`), 11,450,954 bytes yielding 9,306
+feature rows. Each measurement is one query in a fresh R process with one DuckDB
+thread: the extension is loaded, the query runs once, and the process reports
+elapsed seconds and its peak resident set (`VmHWM`). Three fresh processes per
+workload run in an interleaved order; the table reports medians, and the
+individual runs are in `benchmark_genbank_named_attributes_runs.csv`. Every
+query returns one aggregate row, so transport is not measured. Named columns
+carry the same values as the map lookups (`n` and `metric` agree between paired
+workloads, and the SQL and R tests compare every column with the lookup).
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r benchmark, include=FALSE}
+stopifnot(requireNamespace("duckhtsbench", quietly = TRUE))
+stopifnot(requireNamespace("knitr", quietly = TRUE))
+input <- normalizePath(
+  duckhtsbench::duckhts_bench_stage_genbank(fetch = FALSE)[["gbff"]],
+  mustWork = TRUE
+)
+extension <- normalizePath(
+  Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension"),
+  mustWork = TRUE
+)
+worker <- normalizePath("benchmarks/benchmark_genbank_named_attributes_worker.R",
+                        mustWork = TRUE)
+revision <- system2("git", c("rev-parse", "HEAD"), stdout = TRUE)
+if (system2("git", c("diff", "--quiet", "HEAD", "--", "src"),
+            stdout = FALSE, stderr = FALSE) != 0L) {
+  stop("Build source must match the recorded HEAD")
+}
+quote_sql <- function(value) paste0("'", gsub("'", "''", value, fixed = TRUE), "'")
+source_sql <- function(options = "") {
+  paste0("read_genbank(", quote_sql(input), options, ")")
+}
+plain <- source_sql()
+map <- source_sql(", attributes_map := true")
+named <- source_sql(", attributes := ['product', 'locus_tag', 'gene']")
+queries <- c(
+  plain_columns = paste0("SELECT count(*) n, sum(start + \"end\") metric FROM ", plain),
+  attributes_string = paste0("SELECT count(*) n, sum(length(attributes)) metric FROM ", plain),
+  map_one = paste0("SELECT count(*) n, count(attributes_map['product']) metric FROM ", map),
+  named_one = paste0("SELECT count(*) n, count(product) metric FROM ", named),
+  map_three = paste0("SELECT count(*) n, count(attributes_map['product']) + count(attributes_map['locus_tag']) + count(attributes_map['gene']) metric FROM ", map),
+  named_three = paste0("SELECT count(*) n, count(product) + count(locus_tag) + count(gene) metric FROM ", named),
+  named_none_projected = paste0("SELECT count(*) n, sum(start + \"end\") metric FROM ", named)
+)
+repeats <- 3L
+runs <- list()
+for (run in seq_len(repeats)) {
+  for (kind in names(queries)) {
+    line <- system2("Rscript", c(shQuote(worker), shQuote(extension), shQuote(queries[[kind]])),
+                    stdout = TRUE)
+    field <- strsplit(line, "\t", fixed = TRUE)[[1L]]
+    runs[[length(runs) + 1L]] <- data.frame(
+      workload = kind, run = run, seconds = as.numeric(field[[1L]]),
+      rss_before_query_mib = as.numeric(field[[2L]]),
+      peak_rss_mib = as.numeric(field[[3L]]),
+      input_rows = as.numeric(field[[4L]]), output_rows = 1L, metric = field[[5L]]
+    )
+  }
+}
+runs <- do.call(rbind, runs)
+write.csv(runs, "benchmarks/benchmark_genbank_named_attributes_runs.csv", row.names = FALSE)
+summary <- do.call(rbind, lapply(names(queries), function(kind) {
+  rows <- runs[runs$workload == kind, ]
+  stopifnot(length(unique(rows$metric)) == 1L, length(unique(rows$input_rows)) == 1L)
+  data.frame(
+    workload = kind, input_rows = rows$input_rows[[1L]], output_rows = 1L,
+    metric = rows$metric[[1L]], median_seconds = median(rows$seconds),
+    median_peak_rss_mib = median(rows$peak_rss_mib),
+    input_mib_per_second = 11450954 / 1048576 / median(rows$seconds), runs = nrow(rows)
+  )
+}))
+stopifnot(summary$metric[summary$workload == "map_one"] == summary$metric[summary$workload == "named_one"])
+stopifnot(summary$metric[summary$workload == "map_three"] == summary$metric[summary$workload == "named_three"])
+```
+
+Source revision: `r revision`. Extension SHA-256: `r strsplit(system2("sha256sum", extension, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`.
+Input SHA-256: `r strsplit(system2("sha256sum", input, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`.
+DuckDB runtime: `r as.character(packageVersion("duckdb"))`. Host: `r trimws(sub("^Model name:", "", grep("^Model name:", system2("lscpu", stdout = TRUE), value = TRUE)[[1L]]))`; `uptime` before rendering: `r trimws(system2("uptime", stdout = TRUE))`.
+
+```{r results, echo=FALSE}
+knitr::kable(summary, digits = 3)
+```
+
+```{r ratios, echo=FALSE}
+med <- function(kind, column) summary[[column]][summary$workload == kind]
+ratio <- data.frame(
+  keys = c(1L, 3L),
+  map_seconds = c(med("map_one", "median_seconds"), med("map_three", "median_seconds")),
+  named_seconds = c(med("named_one", "median_seconds"), med("named_three", "median_seconds")),
+  map_peak_rss_mib = c(med("map_one", "median_peak_rss_mib"), med("map_three", "median_peak_rss_mib")),
+  named_peak_rss_mib = c(med("named_one", "median_peak_rss_mib"), med("named_three", "median_peak_rss_mib"))
+)
+ratio$speedup <- ratio$map_seconds / ratio$named_seconds
+knitr::kable(ratio, digits = 3)
+```
+
+## Reading the result
+
+This is a single 1x input. Its runtime is below the 5 s floor that `STYLE.md`
+(Scale) sets for timing claims, so the report makes no claim about how time
+scales with input size and has no 2x/4x series. It reports the measured seconds,
+peak resident memory and input throughput for this file only. Memory is the
+process peak, dominated by DuckDB and R baseline plus the parser's one-record
+buffers; `benchmark_genbank_memory.md` is the report for the memory budget across
+input sizes.
+
+`named_none_projected` requests three keys at bind but projects none, so the scan
+computes no qualifier values. `map_one` builds the entire MAP for each feature to
+read a single key, which is the cost named columns avoid; `named_one` and
+`named_three` compute values only for matching keys. The paired workloads must
+return identical metrics, and the render stops if they differ. Workloads with
+different aggregation expressions are not isolated parsing costs. No earlier
+recorded GenBank named-attribute workload exists; the nearest report for this
+change is `benchmark_gff_named_attributes.md`, which measures a different
+format on a different input and is not comparable.
