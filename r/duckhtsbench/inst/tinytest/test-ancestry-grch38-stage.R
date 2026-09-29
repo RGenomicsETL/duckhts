@@ -7,7 +7,8 @@ if (requireNamespace("DBI", quietly = TRUE) && requireNamespace("duckdb", quietl
   on.exit(unlink(root, recursive = TRUE))
   ids <- c("ancestry_ref_freqs", "ancestry_projection", "ancestry_reference_parquet",
            "ancestry_reference_grch38_parquet", "liftover_grch37_grch38_chain",
-           "liftover_grch37_fasta", "liftover_grch38_fasta")
+           "liftover_grch37_fasta", "liftover_grch38_fasta",
+           "ancestry_grch38_acceptance_genotypes")
   registry <- duckhts_bench_registry()
   plan <- registry[match(ids, registry$id), , drop = FALSE]
   expect_equal(plan$transform[plan$id == "ancestry_reference_grch38_parquet"],
@@ -142,6 +143,71 @@ if (requireNamespace("DBI", quietly = TRUE) && requireNamespace("duckdb", quietl
   expect_equal(mapped$swapped, c(FALSE, TRUE, TRUE, FALSE))
   expect_equal(mapped$reverse_complemented, c(FALSE, FALSE, TRUE, TRUE))
   expect_identical(duckhts_bench_stage_ancestry_grch38_parquet(), output)
+
+  # Acceptance inputs: a two-site panel, local stand-ins for the public VCFs and CRAMs.
+  if (all(nzchar(Sys.which(c("samtools", "bgzip", "tabix"))))) {
+    samples <- c("S1", "S2")
+    vcf <- function(chrom) {
+      records <- list("1" = "1\t10\t.\tA\tG\t.\t.\t.\tGT\t0|1\t1|1",
+                      "2" = "2\t40\t.\tC\tA\t.\t.\t.\tGT\t0|0\t1|0")
+      path <- file.path(root, paste0("phase3-", chrom, ".vcf"))
+      writeLines(c("##fileformat=VCFv4.2", '##FORMAT=<ID=GT,Number=1,Type=String,Description="GT">',
+                   "##contig=<ID=1,length=100>", "##contig=<ID=2,length=100>",
+                   paste0("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t",
+                          paste(samples, collapse = "\t")), records[[chrom]]), path)
+      stopifnot(system2("bgzip", c("-f", shQuote(path))) == 0L,
+                system2("tabix", c("-f", "-p", "vcf", shQuote(paste0(path, ".gz")))) == 0L)
+      paste0(path, ".gz")
+    }
+    sam <- file.path(root, "reads.sam")
+    read_line <- function(name, chrom, pos, length) paste(
+      name, 0L, chrom, pos, 60L, paste0(length, "M"), "*", 0L, 0L,
+      paste(rep("A", length), collapse = ""), paste(rep("I", length), collapse = ""), sep = "\t")
+    writeLines(c("@HD\tVN:1.6\tSO:coordinate", "@SQ\tSN:chr1\tLN:100", "@SQ\tSN:chr2\tLN:100",
+                 "@SQ\tSN:chrX\tLN:100", read_line("near1", "chr1", 5L, 10L),
+                 read_line("far1", "chr1", 80L, 10L), read_line("near2", "chr2", 55L, 10L)), sam)
+    crams <- setNames(file.path(root, paste0(samples, ".input.cram")), samples)
+    for (path in crams) {
+      stopifnot(system2("samtools", c("view", "-C", "-T", shQuote(path_of("liftover_grch38_fasta")),
+                                      "-o", shQuote(path), shQuote(sam))) == 0L,
+                system2("samtools", c("index", shQuote(path))) == 0L)
+    }
+    plan$supplier_identity[plan$id == "ancestry_grch38_acceptance_genotypes"] <- ""
+    utils::write.table(plan, registry_path, sep = "\t", row.names = FALSE, quote = FALSE)
+    genotypes <- duckhts_bench_stage_ancestry_grch38_acceptance(
+      samples, max_sites = 10L, spacing_bp = 5000L, vcf_url = vcf, cram_url = crams)
+    expect_equal(genotypes, path_of("ancestry_grch38_acceptance_genotypes"))
+    acceptance <- utils::read.delim(paste0(genotypes, ".sources.tsv"), colClasses = "character")
+    got <- function(field) acceptance$value[acceptance$field == field]
+    expect_equal(got("panel_sites"), "2")
+    expect_equal(got("genotype_rows"), "4")
+    expect_equal(got("ancestry_reference_grch38_output_sha256"), value("output_sha256"))
+    expect_equal(got("ancestry_reference_grch38_liftover_map_sha256"), value("liftover_map_sha256"))
+    expect_equal(got("genotypes_sha256"), digest::digest(file = genotypes, algo = "sha256"))
+    expect_equal(got("cram_S1_sha256"),
+                 digest::digest(file = file.path(dirname(genotypes), "S1.panel-sites.cram"),
+                                algo = "sha256"))
+    expect_true(nzchar(got("source_vcf_chr1")) && nzchar(got("source_cram_S2")))
+    rows <- DBI::dbGetQuery(con, paste0("SELECT * FROM read_parquet(",
+      as.character(DBI::dbQuoteString(con, genotypes)), ") ORDER BY site_index, sample_id"))
+    expect_equal(rows$sample_id, c("S1", "S2", "S1", "S2"))
+    expect_equal(rows$source_position, c(10L, 10L, 40L, 40L))
+    expect_equal(rows$position, c(10L, 10L, 61L, 61L))
+    expect_equal(rows$gt, c("0|1", "1|1", "0|0", "1|0"))
+    expect_equal(rows$ref, c("A", "A", "C", "C"))
+    reads <- system2("samtools", c("view", shQuote(file.path(dirname(genotypes), "S1.panel-sites.cram")),
+                                   "-T", shQuote(path_of("liftover_grch38_fasta"))), stdout = TRUE)
+    expect_equal(sub("\t.*", "", reads), c("near1", "near2"))
+    expect_identical(duckhts_bench_stage_ancestry_grch38_acceptance(
+      samples, max_sites = 10L, spacing_bp = 5000L, vcf_url = vcf, cram_url = crams), genotypes)
+    expect_error(duckhts_bench_stage_ancestry_grch38_acceptance(
+      samples, max_sites = 1L, spacing_bp = 5000L, vcf_url = vcf, cram_url = crams),
+      pattern = "do not match")
+    writeLines("changed", file.path(dirname(genotypes), "S2.panel-sites.cram"))
+    expect_error(duckhts_bench_stage_ancestry_grch38_acceptance(
+      samples, max_sites = 10L, spacing_bp = 5000L, vcf_url = vcf, cram_url = crams),
+      pattern = "do not match")
+  }
 
   # A changed source binds nothing to the old receipt.
   fasta(path_of("liftover_grch37_fasta"), utils::modifyList(source_bases, list("4" = rep("C", 100L))))

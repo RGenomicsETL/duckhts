@@ -37,5 +37,8 @@ SHA-256 of the source Parquet, chain, source FASTA and destination FASTA, the
 registry derivation, the DuckDB, DuckHTS htslib and Rduckhts versions and the
 output SHA-256 to the denominators: input loci, mapped, rejected by reason,
 reverse-complemented, swapped, duplicate-destination dropped and output loci.
+The companion \verb{<output>} with suffix \code{.liftover.parquet} maps each output locus
+to its GRCh37 source locus, source alleles and orientation flags; the receipt
+binds its SHA-256 as \code{liftover_map_sha256}.
 A cached product whose receipt does not match its sources is an error.
 }
