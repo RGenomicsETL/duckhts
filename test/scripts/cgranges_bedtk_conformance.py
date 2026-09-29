@@ -59,9 +59,8 @@ def run_duckhts(subject_rows, query_rows):
         )
         con.executemany("INSERT INTO cgr_subject VALUES (?, ?, ?, ?)", subject_rows)
         con.execute(
-            "SELECT duckhts_cgranges_from_query('bedtk_idx', "
-            "'SELECT chrom, start, \"end\", label FROM cgr_subject', "
-            "'chrom', 'start', 'end', 'label')"
+            "SELECT * FROM duckhts_cgranges_from_table('bedtk_idx', "
+            "'cgr_subject', 'chrom', 'start', 'end', 'label')"
         )
         con.execute("SELECT duckhts_cgranges_index('bedtk_idx')")
 

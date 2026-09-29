@@ -132,15 +132,22 @@ endif
 test: test_debug
 test_debug test_release: test-function-catalog
 test_debug: test-cache-paths test-simd-kernels test-genbank-core test-liftover-property test-liftover-fuzz-debug test-sqllogictest-debug test-writer-no-clobber-debug
-test_release: test-cache-paths test-simd-kernels test-genbank-core test-genbank-oracle test-somalier-native test-bam-site-counts test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom test-hts-region-ownership test-writer-no-clobber-release test-macro-catalog
+test_release: test-cache-paths test-simd-kernels test-genbank-core test-genbank-oracle test-somalier-native test-bam-site-counts test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom test-hts-region-ownership test-writer-no-clobber-release test-macro-catalog test-database-lifetime
 test_release: test-reference-cache test-sql-lambda-syntax
 
-.PHONY: test-sql-lambda-syntax test-duckdb-v2 test-macro-catalog
+.PHONY: test-sql-lambda-syntax test-duckdb-v2 test-macro-catalog test-database-lifetime
 test-macro-catalog:
 	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
 		echo "Skipping macro catalog test: the Python DuckDB wheel is windows_amd64, not windows_amd64_mingw"; \
 	else \
 		$(PYTHON_VENV_BIN) test/scripts/test_macro_catalog.py; \
+	fi
+
+test-database-lifetime:
+	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
+		echo "Skipping database lifetime test: the Python DuckDB wheel is windows_amd64, not windows_amd64_mingw"; \
+	else \
+		$(PYTHON_VENV_BIN) test/scripts/database_lifetime_test.py; \
 	fi
 
 test-sql-lambda-syntax:

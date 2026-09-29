@@ -25,14 +25,13 @@ query TT
 SELECT function_name, list_sort(list(len(parameters)))::VARCHAR
 FROM duckdb_functions()
 WHERE function_name IN (
-  'regionkey', 'duckhts_cgranges_add', 'duckhts_cgranges_from_query',
+  'regionkey', 'duckhts_cgranges_add',
   'duckhts_cgranges_from_table', 'duckhts_cgranges_has_overlap',
   'duckhts_cgranges_count_overlaps', 'duckhts_cgranges_overlaps_list')
 GROUP BY function_name ORDER BY function_name;
 ----
 duckhts_cgranges_add	[4, 5, 5, 5, 5]
 duckhts_cgranges_count_overlaps	[4, 5]
-duckhts_cgranges_from_query	[5, 6]
 duckhts_cgranges_from_table	[5, 6]
 duckhts_cgranges_has_overlap	[4, 5]
 duckhts_cgranges_overlaps_list	[4, 5]

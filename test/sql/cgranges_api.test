@@ -59,17 +59,27 @@ SELECT * FROM (VALUES
   ('chr2', 150, 170, 'beta')
 ) AS t(chrom, start, "end", label);
 
-statement error
-SELECT duckhts_cgranges_from_table('tbl_idx', 'cgr_src', 'chrom', 'start', 'end', 'label');
+query I
+SELECT * FROM duckhts_cgranges_from_table('tbl_idx', 'cgr_src', 'chrom', 'start', 'end', 'label');
 ----
-duckhts_cgranges_from_table: not implemented; use duckhts_cgranges_from_query instead
+1
+
+query IIIII
+SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
+FROM duckhts_cgranges_overlaps('tbl_idx', 'chr2', 105, 106);
+----
+0	alpha	chr2	100	110
+
+statement error
+SELECT * FROM duckhts_cgranges_from_table('tbl_idx', 'cgr_src', 'chrom', 'start', 'end', 'label');
+----
+duckhts_cgranges_create: index already exists in this session
+
+statement ok
+CREATE TEMP VIEW cgr_beta AS SELECT chrom, start, "end", label FROM cgr_src WHERE label = 'beta';
 
 query I
-SELECT duckhts_cgranges_from_query(
-  'qry_idx',
-  'SELECT chrom, start, "end", label FROM cgr_src WHERE label = ''beta''',
-  'chrom', 'start', 'end', 'label'
-);
+SELECT * FROM duckhts_cgranges_from_table('qry_idx', 'cgr_beta', 'chrom', 'start', 'end', 'label');
 ----
 1
 
@@ -176,18 +186,18 @@ SELECT duckhts_cgranges_overlaps_list('qry_idx', NULL::VARCHAR, 1, 2) IS NULL;
 ----
 1
 
+statement ok
+CREATE TEMP VIEW cgr_bed_targets AS
+SELECT chrom, start, "end" FROM read_bed('__WORKING_DIRECTORY__/test/data/targets.bed');
+
 query I
-SELECT duckhts_cgranges_from_query(
-  'bed_from_query_idx',
-  'SELECT chrom, start, "end" FROM read_bed(''__WORKING_DIRECTORY__/test/data/targets.bed'')',
-  'chrom', 'start', 'end'
-);
+SELECT * FROM duckhts_cgranges_from_table('bed_from_table_idx', 'cgr_bed_targets', 'chrom', 'start', 'end');
 ----
 1
 
 query IIIII
 SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
-FROM duckhts_cgranges_overlaps('bed_from_query_idx', 'CHROMOSOME_I', 5, 15)
+FROM duckhts_cgranges_overlaps('bed_from_table_idx', 'CHROMOSOME_I', 5, 15)
 ORDER BY interval_ordinal;
 ----
 0	0	CHROMOSOME_I	0	10
@@ -237,18 +247,17 @@ CHROMOSOME_I	10	20	0	0	ORDINAL	5	15
 query IIIIII
 SELECT
   query_row_id,
-  interval_ordinal,
-  label,
-  interval_chrom,
-  interval_start,
-  interval_end
-FROM duckhts_cgranges_overlaps_bulk(
-  'qry_idx',
-  'SELECT qid, chrom, start, "end" FROM cgr_probe_src',
-  'chrom', 'start', 'end',
-  query_row_id_col := 'qid'
-)
-ORDER BY query_row_id, interval_ordinal;
+  hit.interval_ordinal,
+  hit.label,
+  hit.interval_chrom,
+  hit.interval_start,
+  hit.interval_end
+FROM (
+  SELECT p.qid AS query_row_id,
+         unnest(duckhts_cgranges_overlaps_list('qry_idx', p.chrom, p.start, p."end")) AS hit
+  FROM cgr_probe_src AS p
+) AS o
+ORDER BY query_row_id, hit.interval_ordinal;
 ----
 20	0	beta	chr2	150	170
 40	0	beta	chr2	150	170
@@ -256,17 +265,20 @@ ORDER BY query_row_id, interval_ordinal;
 query IIIIII
 SELECT
   query_row_id,
-  interval_ordinal,
-  label,
-  interval_chrom,
-  interval_start,
-  interval_end
-FROM duckhts_cgranges_overlaps_bulk(
-  'qry_idx',
-  'SELECT chrom, start, "end" FROM cgr_probe_src',
-  'chrom', 'start', 'end'
-)
-ORDER BY query_row_id, interval_ordinal;
+  hit.interval_ordinal,
+  hit.label,
+  hit.interval_chrom,
+  hit.interval_start,
+  hit.interval_end
+FROM (
+  SELECT p.query_row_id,
+         unnest(duckhts_cgranges_overlaps_list('qry_idx', p.chrom, p.start, p."end")) AS hit
+  FROM (
+    SELECT row_number() OVER () AS query_row_id, chrom, start, "end"
+    FROM cgr_probe_src
+  ) AS p
+) AS o
+ORDER BY query_row_id, hit.interval_ordinal;
 ----
 2	0	beta	chr2	150	170
 4	0	beta	chr2	150	170
@@ -274,19 +286,17 @@ ORDER BY query_row_id, interval_ordinal;
 query IIIIII
 SELECT
   query_row_id,
-  interval_ordinal,
-  label,
-  interval_chrom,
-  interval_start,
-  interval_end
-FROM duckhts_cgranges_overlaps_bulk(
-  'qry_idx',
-  'SELECT qid, chrom, start, "end" FROM cgr_probe_src',
-  'chrom', 'start', 'end',
-  mode := 'contain',
-  query_row_id_col := 'qid'
-)
-ORDER BY query_row_id, interval_ordinal;
+  hit.interval_ordinal,
+  hit.label,
+  hit.interval_chrom,
+  hit.interval_start,
+  hit.interval_end
+FROM (
+  SELECT p.qid AS query_row_id,
+         unnest(duckhts_cgranges_overlaps_list('qry_idx', p.chrom, p.start, p."end", 'contain')) AS hit
+  FROM cgr_probe_src AS p
+) AS o
+ORDER BY query_row_id, hit.interval_ordinal;
 ----
 40	0	beta	chr2	150	170
 
@@ -299,11 +309,7 @@ SELECT * FROM (VALUES
 ) AS t(chrom, start, "end", label_i64, label_f64, label_bool);
 
 query I
-SELECT duckhts_cgranges_from_query(
-  'qry_i64',
-  'SELECT chrom, start, "end", label_i64 FROM cgr_num_src',
-  'chrom', 'start', 'end', 'label_i64'
-);
+SELECT * FROM duckhts_cgranges_from_table('qry_i64', 'cgr_num_src', 'chrom', 'start', 'end', 'label_i64');
 ----
 1
 
@@ -337,11 +343,7 @@ FROM UNNEST(duckhts_cgranges_overlaps_list('qry_i64', 'chr3', 22, 24)) AS u(hit)
 1	NULL	BIGINT	20	35
 
 query I
-SELECT duckhts_cgranges_from_query(
-  'qry_f64',
-  'SELECT chrom, start, "end", label_f64 FROM cgr_num_src',
-  'chrom', 'start', 'end', 'label_f64'
-);
+SELECT * FROM duckhts_cgranges_from_table('qry_f64', 'cgr_num_src', 'chrom', 'start', 'end', 'label_f64');
 ----
 1
 
@@ -357,11 +359,7 @@ FROM duckhts_cgranges_overlaps('qry_f64', 'chr3', 10, 12);
 0	1.5	chr3	5	15
 
 query I
-SELECT duckhts_cgranges_from_query(
-  'qry_bool',
-  'SELECT chrom, start, "end", label_bool FROM cgr_num_src',
-  'chrom', 'start', 'end', 'label_bool'
-);
+SELECT * FROM duckhts_cgranges_from_table('qry_bool', 'cgr_num_src', 'chrom', 'start', 'end', 'label_bool');
 ----
 1
 
@@ -383,11 +381,7 @@ FROM duckhts_cgranges_overlaps('qry_bool', 'chr3', 45, 46);
 2	false	chr3	40	50
 
 query I
-SELECT duckhts_cgranges_from_query(
-  'qry_nolabel',
-  'SELECT chrom, start, "end" FROM cgr_num_src',
-  'chrom', 'start', 'end'
-);
+SELECT * FROM duckhts_cgranges_from_table('qry_nolabel', 'cgr_num_src', 'chrom', 'start', 'end');
 ----
 1
 
@@ -407,32 +401,48 @@ SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
 FROM duckhts_cgranges_overlaps('qry_nolabel', 'chr3', 100, 101);
 ----
 
-statement error
-SELECT duckhts_cgranges_from_query(
-  'qry_bad_label',
-  'SELECT chrom, start, "end", [1,2] AS label FROM cgr_num_src LIMIT 1',
-  'chrom', 'start', 'end', 'label'
-);
-----
-duckhts_cgranges_from_query: label column type is unsupported
+statement ok
+CREATE TEMP VIEW cgr_bad_label AS
+SELECT chrom, start, "end", [1, 2] AS label FROM cgr_num_src LIMIT 1;
 
 statement error
-SELECT duckhts_cgranges_from_query(
-  'qry_missing_col',
-  'SELECT chrom, start, "end" FROM cgr_num_src',
-  'chrom', 'start', 'stop'
-);
+SELECT * FROM duckhts_cgranges_from_table('qry_bad_label', 'cgr_bad_label', 'chrom', 'start', 'end', 'label');
 ----
-duckhts_cgranges_from_query: required columns not found in query result
+No function matches the given name and argument types
 
 statement error
-SELECT duckhts_cgranges_from_query(
-  'qry_null_coord',
-  'SELECT chrom, NULL::BIGINT AS start, "end" FROM cgr_num_src LIMIT 1',
-  'chrom', 'start', 'end'
-);
+SELECT * FROM duckhts_cgranges_from_table('qry_missing_col', 'cgr_num_src', 'chrom', 'start', 'stop');
 ----
-duckhts_cgranges_from_query: null chrom/start/end encountered at row 1
+Could not find key "stop" in struct
+
+statement ok
+CREATE TEMP VIEW cgr_null_coord AS
+SELECT chrom, NULL::BIGINT AS start, "end" FROM cgr_num_src LIMIT 1;
+
+statement error
+SELECT * FROM duckhts_cgranges_from_table('qry_null_coord', 'cgr_null_coord', 'chrom', 'start', 'end');
+----
+duckhts_cgranges_add: name, chrom, start, and end must be non-null
+
+# The macro runs on the caller's connection: uncommitted TEMP rows are visible.
+statement ok
+BEGIN TRANSACTION;
+
+statement ok
+CREATE TEMP TABLE cgr_txn_src AS SELECT 'chr9' AS chrom, 100 AS start, 200 AS "end";
+
+query I
+SELECT * FROM duckhts_cgranges_from_table('txn_idx', 'cgr_txn_src', 'chrom', 'start', 'end');
+----
+1
+
+statement ok
+ROLLBACK;
+
+query I
+SELECT duckhts_cgranges_count_overlaps('txn_idx', 'chr9', 150, 151);
+----
+1
 
 statement error
 SELECT * FROM duckhts_cgranges_overlaps('qry_idx', 'chr2', 160, 161, mode := 'bad');

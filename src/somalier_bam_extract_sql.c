@@ -6,7 +6,6 @@ DUCKDB_EXTENSION_EXTERN
 #include <inttypes.h>
 #include <limits.h>
 #include <math.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -20,6 +19,7 @@ DUCKDB_EXTENSION_EXTERN
 
 #include "include/bam_site_counts.h"
 #include "duckhts_registration.h"
+#include "duckhts_somalier_panel_sql.h"
 
 #define BAM_EXTRACT_MAX_PATH_BYTES 16384u
 #define BAM_EXTRACT_MAX_IDENTITY_BYTES 1024u
@@ -63,15 +63,7 @@ typedef enum bam_extract_site_status {
     BAM_SITE_ALIGNMENT_POSITION_UNAVAILABLE
 } bam_extract_site_status_t;
 
-typedef struct bam_extract_registry {
-    pthread_mutex_t query_mutex;
-    duckdb_connection query_connection;
-} bam_extract_registry_t;
-
-static _Thread_local unsigned bam_extract_preparation_depth;
-
 typedef struct bam_extract_bind {
-    bam_extract_registry_t *registry;
     char *source_path;
     char *panel_table;
     char *panel_parquet;
@@ -461,16 +453,6 @@ static char *cram_reference_locator(const char *reference_path,
     return locator;
 }
 
-static void bam_extract_registry_destroy(void *pointer) {
-    bam_extract_registry_t *registry = pointer;
-    if (!registry) return;
-    if (registry->query_connection) {
-        duckdb_disconnect(&registry->query_connection);
-    }
-    pthread_mutex_destroy(&registry->query_mutex);
-    duckdb_free(registry);
-}
-
 static void bam_extract_bind_destroy(void *pointer) {
     bam_extract_bind_t *bind = pointer;
     if (!bind) return;
@@ -622,7 +604,6 @@ static void bam_extract_bind(duckdb_bind_info info) {
         return;
     }
     memset(bind, 0, sizeof(*bind));
-    bind->registry = duckdb_bind_get_extra_info(info);
     bind->source_path = bind_positional_string(info, 0u, false,
         BAM_EXTRACT_MAX_PATH_BYTES, "source_path", error, sizeof(error));
     bind->panel_table = bind_positional_string(info, 1u, true,
@@ -639,9 +620,15 @@ static void bam_extract_bind(duckdb_bind_info info) {
         "reference_index_path", true, BAM_EXTRACT_MAX_PATH_BYTES,
         error, sizeof(error));
     if (error[0] != '\0') goto fail;
-    if ((bind->panel_table == NULL) == (bind->panel_parquet == NULL)) {
+    if (bind->panel_table != NULL) {
         copy_error(error, sizeof(error),
-            "duckhts_somalier_bam_counts: provide exactly one of panel_table or panel_parquet");
+            "duckhts_somalier_bam_counts: panel_table is no longer supported; "
+            "pass NULL and read the panel with panel_parquet");
+        goto fail;
+    }
+    if (bind->panel_parquet == NULL) {
+        copy_error(error, sizeof(error),
+            "duckhts_somalier_bam_counts: panel_parquet is required");
         goto fail;
     }
 
@@ -772,10 +759,6 @@ static bool load_panel_rows(duckdb_connection connection,
                             const bam_extract_bind_t *bind,
                             bam_extract_global_t *global,
                             char *error, size_t error_size) {
-    static const char create_table[] =
-        "CREATE OR REPLACE TEMP TABLE " BAM_EXTRACT_PANEL_TABLE
-        " AS SELECT assembly, site_index, region, position, allele_a, allele_b "
-        "FROM query_table(?) LIMIT ?";
     static const char create_parquet[] =
         "CREATE OR REPLACE TEMP TABLE " BAM_EXTRACT_PANEL_TABLE
         " AS SELECT assembly, site_index, region, position, allele_a, allele_b "
@@ -790,23 +773,18 @@ static bool load_panel_rows(duckdb_connection connection,
         "SELECT assembly::VARCHAR, site_index::UBIGINT, region::VARCHAR, "
         "position::UBIGINT, allele_a::VARCHAR, allele_b::VARCHAR FROM "
         BAM_EXTRACT_PANEL_TABLE " ORDER BY site_index";
-    static const char drop[] = "DROP TABLE IF EXISTS " BAM_EXTRACT_PANEL_TABLE;
     duckdb_result result = {0};
     duckdb_data_chunk chunk = NULL;
     size_t region_bytes;
     size_t region_capacity;
     size_t region_offset = 0u;
     size_t site_offset = 0u;
-    bool created = false;
     bool ok = false;
 
-    if (!execute_prepared_source(connection,
-            bind->panel_table ? create_table : create_parquet,
-            bind->panel_table ? bind->panel_table : bind->panel_parquet,
-            bind->max_sites + 1u, error, error_size)) {
+    if (!execute_prepared_source(connection, create_parquet,
+            bind->panel_parquet, bind->max_sites + 1u, error, error_size)) {
         goto cleanup;
     }
-    created = true;
     if (!execute_query(connection, stats, &result, error, error_size)) {
         goto cleanup;
     }
@@ -942,14 +920,57 @@ static bool load_panel_rows(duckdb_connection connection,
 cleanup:
     if (chunk) duckdb_destroy_data_chunk(&chunk);
     duckdb_destroy_result(&result);
-    if (created) {
-        duckdb_result drop_result = {0};
-        if (duckdb_query(connection, drop, &drop_result) != DuckDBSuccess && ok) {
-            copy_error(error, error_size, duckdb_result_error(&drop_result));
-            ok = false;
-        }
-        duckdb_destroy_result(&drop_result);
+    return ok;
+}
+
+/* Reads the panel on a private in-memory instance that lives only for this
+   call. A connection kept from LOAD would pin the caller's database instance
+   for the life of the process; this one holds nothing after it returns. */
+static bool load_panel_rows_private(const bam_extract_bind_t *bind,
+                                    bam_extract_global_t *global,
+                                    char *error, size_t error_size) {
+    duckdb_config config = NULL;
+    duckdb_database database = NULL;
+    duckdb_connection connection = NULL;
+    duckdb_result result = {0};
+    char *macro_sql = NULL;
+    char *open_error = NULL;
+    bool ok = false;
+
+    if (duckdb_create_config(&config) != DuckDBSuccess ||
+        duckdb_set_config(config, "threads", "1") != DuckDBSuccess) {
+        copy_error(error, error_size,
+            "duckhts_somalier_bam_counts: could not configure the panel reader");
+        goto cleanup;
     }
+    if (duckdb_open_ext(NULL, &database, config, &open_error) != DuckDBSuccess) {
+        copy_error(error, error_size, open_error ? open_error :
+            "duckhts_somalier_bam_counts: could not open the panel reader");
+        goto cleanup;
+    }
+    if (duckdb_connect(database, &connection) != DuckDBSuccess) {
+        copy_error(error, error_size,
+            "duckhts_somalier_bam_counts: could not connect the panel reader");
+        goto cleanup;
+    }
+    macro_sql = duckhts_somalier_panel_sha256_macro_sql();
+    if (!macro_sql) {
+        copy_error(error, error_size,
+            "duckhts_somalier_bam_counts: out of memory preparing panel validation");
+        goto cleanup;
+    }
+    if (!execute_query(connection, macro_sql, &result, error, error_size)) {
+        goto cleanup;
+    }
+    ok = load_panel_rows(connection, bind, global, error, error_size);
+
+cleanup:
+    duckdb_destroy_result(&result);
+    free(macro_sql);
+    if (open_error) duckdb_free(open_error);
+    if (connection) duckdb_disconnect(&connection);
+    if (database) duckdb_close(&database);
+    if (config) duckdb_destroy_config(&config);
     return ok;
 }
 
@@ -965,24 +986,11 @@ static void bam_extract_global_init(duckdb_init_info info) {
         return;
     }
     memset(global, 0, sizeof(*global));
-    if (bam_extract_preparation_depth != 0u ||
-        pthread_mutex_trylock(&bind->registry->query_mutex) != 0) {
-        duckdb_init_set_error(info,
-            "duckhts_somalier_bam_counts: panel preparation is busy or recursive");
-        bam_extract_global_destroy(global);
-        return;
-    }
-    bam_extract_preparation_depth++;
-    if (!load_panel_rows(bind->registry->query_connection, bind, global,
-                         error, sizeof(error))) {
-        bam_extract_preparation_depth--;
-        pthread_mutex_unlock(&bind->registry->query_mutex);
+    if (!load_panel_rows_private(bind, global, error, sizeof(error))) {
         duckdb_init_set_error(info, error);
         bam_extract_global_destroy(global);
         return;
     }
-    bam_extract_preparation_depth--;
-    pthread_mutex_unlock(&bind->registry->query_mutex);
 
     jobs = bind->worker_count;
     if ((size_t)jobs > global->site_count) jobs = (uint32_t)global->site_count;
@@ -1220,30 +1228,13 @@ static void bam_extract_scan(duckdb_function_info info,
 }
 
 bool register_duckhts_somalier_bam_extract_functions(
-    duckhts_registration_t *registration, duckdb_database database) {
-    bam_extract_registry_t *registry = duckdb_malloc(sizeof(*registry));
+    duckhts_registration_t *registration) {
     duckdb_table_function function = NULL;
     duckdb_logical_type varchar_type = NULL;
     duckdb_logical_type ubigint_type = NULL;
     duckdb_logical_type double_type = NULL;
     bool ok = false;
 
-    if (!registry) {
-        return duckhts_registration_error(registration,
-            "DuckHTS could not allocate Somalier BAM registration state");
-    }
-    memset(registry, 0, sizeof(*registry));
-    if (pthread_mutex_init(&registry->query_mutex, NULL) != 0) {
-        duckdb_free(registry);
-        return duckhts_registration_error(registration,
-            "DuckHTS could not initialize the Somalier BAM registration mutex");
-    }
-    if (duckdb_connect(database, &registry->query_connection) != DuckDBSuccess ||
-        !registry->query_connection) {
-        bam_extract_registry_destroy(registry);
-        return duckhts_registration_error(registration,
-            "DuckHTS could not open the Somalier BAM registration connection");
-    }
     function = duckdb_create_table_function();
     varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     ubigint_type = duckdb_create_logical_type(DUCKDB_TYPE_UBIGINT);
@@ -1286,8 +1277,6 @@ bool register_duckhts_somalier_bam_extract_functions(
                                                ubigint_type);
     duckdb_table_function_add_named_parameter(function, "reference_cache_bytes",
                                                ubigint_type);
-    duckdb_table_function_set_extra_info(function, registry,
-                                         bam_extract_registry_destroy);
     duckdb_table_function_set_bind(function, bam_extract_bind);
     duckdb_table_function_set_init(function, bam_extract_global_init);
     duckdb_table_function_set_local_init(function, bam_extract_local_init);
