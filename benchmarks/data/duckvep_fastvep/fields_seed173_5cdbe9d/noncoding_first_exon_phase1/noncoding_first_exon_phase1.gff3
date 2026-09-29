@@ -1,8 +1,0 @@
-##gff-version 3
-chrDuck	duckvep	gene	100	250	.	+	.	ID=gene:DUCK1;Name=DUCK1;biotype=protein_coding
-chrDuck	duckvep	mRNA	100	250	.	+	.	ID=transcript:DUCK1-201;Parent=gene:DUCK1;Name=DUCK1-201;biotype=protein_coding
-chrDuck	duckvep	exon	100	125	.	+	.	ID=exon:DUCK1-1;Parent=transcript:DUCK1-201;rank=1
-chrDuck	duckvep	exon	150	180	.	+	.	ID=exon:DUCK1-2;Parent=transcript:DUCK1-201;rank=2
-chrDuck	duckvep	CDS	158	180	.	+	2	ID=CDS:DUCK1-2;Parent=transcript:DUCK1-201;protein_id=DUCK1-P
-chrDuck	duckvep	exon	220	250	.	+	.	ID=exon:DUCK1-3;Parent=transcript:DUCK1-201;rank=3
-chrDuck	duckvep	CDS	220	240	.	+	0	ID=CDS:DUCK1-3;Parent=transcript:DUCK1-201;protein_id=DUCK1-P

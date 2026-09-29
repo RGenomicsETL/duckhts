@@ -5,14 +5,11 @@
 # local pinned upstream mirrors named below.
 #
 # Prerequisites: samtools, bcftools, bgzip, tabix (all from htslib/samtools).
-#
-# Usage:  ./test/scripts/prepare_test_data.sh [--duckvep-only]
 
 set -euo pipefail
 
-MODE="${1:-}"
-if [[ -n "$MODE" && "$MODE" != "--duckvep-only" ]]; then
-  echo "usage: $0 [--duckvep-only]" >&2
+if [[ $# -ne 0 ]]; then
+  echo "usage: $0" >&2
   exit 2
 fi
 
@@ -26,49 +23,6 @@ mkdir -p "$DST"
 mkdir -p "$PKG_DST"
 
 echo "==> Preparing test data in $DST"
-
-# ---- Pinned Ensembl model-build acceptance fixture ----
-DUCKVEP_FIXTURE_SRC="$DST/duckvep/ensembl_core"
-DUCKVEP_FIXTURE_DST="$PKG_DST/duckvep/ensembl_core"
-rm -rf "$DUCKVEP_FIXTURE_DST"
-mkdir -p "$DUCKVEP_FIXTURE_DST"
-cp -a "$DUCKVEP_FIXTURE_SRC/." "$DUCKVEP_FIXTURE_DST/"
-echo "  DuckVEP Ensembl core fixture"
-
-# ---- DuckVEP terminal partial-codon fixtures ----
-mkdir -p "$DST/duckvep"
-cat > "$DST/duckvep/terminal_partial.fa" <<'EOF'
->partial
-AAAAAAAAAAAAAAAAAAAAATGCCCAAAGGGTCAAAAAAAAAAAAAAAAAAAA
-EOF
-samtools faidx "$DST/duckvep/terminal_partial.fa"
-# Exact Ensembl 116 GRCh38 1:45011916-45014703 reference slice used by the
-# ENST00000650713 / ClinVar 1:45013701:C:CTAG regression. The committed bases
-# are the fixture authority; verify their source digest before rebuilding the
-# index or copying the fixture into the R package.
-CLINVAR_PARTIAL_FASTA="$DST/duckvep/clinvar_terminal_partial.fa"
-CLINVAR_PARTIAL_SHA256="55af53489858b09a2d482d8953320bdf7cecc33d74c1272dfcd1e02fc4d1de0b"
-observed_clinvar_partial_sha256="$(
-  { tail -n +2 "$CLINVAR_PARTIAL_FASTA" || true; } |
-    tr -d '\n' |
-    sha256sum |
-    cut -d' ' -f1
-)"
-if [[ "$observed_clinvar_partial_sha256" != "$CLINVAR_PARTIAL_SHA256" ]]; then
-  echo "ClinVar terminal-partial reference fixture digest mismatch" >&2
-  exit 1
-fi
-samtools faidx "$CLINVAR_PARTIAL_FASTA"
-cp "$DST/duckvep/terminal_partial.fa" "$PKG_DST/duckvep_terminal_partial.fa"
-cp "$DST/duckvep/terminal_partial.fa.fai" "$PKG_DST/duckvep_terminal_partial.fa.fai"
-cp "$CLINVAR_PARTIAL_FASTA" "$PKG_DST/duckvep_clinvar_terminal_partial.fa"
-cp "$CLINVAR_PARTIAL_FASTA.fai" "$PKG_DST/duckvep_clinvar_terminal_partial.fa.fai"
-echo "  DuckVEP terminal partial-codon fixtures"
-
-if [[ "$MODE" == "--duckvep-only" ]]; then
-  echo "==> DuckVEP fixture sync complete"
-  exit 0
-fi
 
 # ---- BAM (copy + index) ----
 # Synthetic region-union authority is the committed VCF, including its two
@@ -427,30 +381,8 @@ RS
 
 echo "  read_bcf projection/ploidy regression fixtures"
 
-# ---- DuckVEP / bcftools csq fixture plumbing ----
-mkdir -p "$DST/duckvep"
-cat > "$DST/duckvep/minimal.fa" <<'EOF'
->chrDuck
-ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT
-EOF
-cat > "$DST/duckvep/minimal.gff3" <<'EOF'
-##gff-version 3
-chrDuck	duckvep	gene	100	300	.	+	.	ID=gene:DUCK1;Name=DUCK1;biotype=protein_coding
-chrDuck	duckvep	mRNA	100	300	.	+	.	ID=transcript:DUCK1-201;Parent=gene:DUCK1;Name=DUCK1-201;biotype=protein_coding
-chrDuck	duckvep	exon	100	150	.	+	.	ID=exon:DUCK1-1;Parent=transcript:DUCK1-201;rank=1
-chrDuck	duckvep	CDS	120	240	.	+	0	ID=CDS:DUCK1;Parent=transcript:DUCK1-201
-chrDuck	duckvep	exon	200	300	.	+	.	ID=exon:DUCK1-2;Parent=transcript:DUCK1-201;rank=2
-EOF
-cat > "$DST/duckvep/minimal_bcsq.vcf" <<'EOF'
-##fileformat=VCFv4.2
-##contig=<ID=chrDuck,length=256>
-##INFO=<ID=BCSQ,Number=.,Type=String,Description="Local consequence annotation from BCFtools/csq fixture. Format: Consequence|gene|transcript|biotype|strand|amino_acid_change|dna_change">
-#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
-chrDuck	125	duck_missense	A	C	.	PASS	BCSQ=missense_variant|DUCK1|DUCK1-201|protein_coding|+|M1T|125A>C
-chrDuck	160	duck_intron	C	T	.	PASS	BCSQ=intron_variant|DUCK1|DUCK1-201|protein_coding|+||160C>T
-chrDuck	350	duck_intergenic	G	A	.	PASS	BCSQ=intergenic_variant||||||350G>A
-EOF
-cat > "$DST/duckvep/ensembl_release_consequences.vcf" <<'EOF'
+# ---- Ensembl CSQ reader regression fixture, also bundled for R tests ----
+cat > "$PKG_DST/ensembl_release_consequences.vcf" <<'EOF'
 ##fileformat=VCFv4.2
 ##source=ensembl;version=116;url=https://e116.ensembl.org/homo_sapiens
 ##INFO=<ID=VE,Number=.,Type=String,Description="Variant effect of a variant overlapping a sequence feature as computed by the ensembl variant effect pipeline. Format=Consequence|Index|Feature_type|Feature_id. Index indentifies for which variant sequence the effect is described for.">
@@ -459,9 +391,7 @@ cat > "$DST/duckvep/ensembl_release_consequences.vcf" <<'EOF'
 22	15528196	rs1312204123	A	G	.	.	VE=missense_variant|0|mRNA|ENST00000643195,non_coding_transcript_variant|0|ncRNA|ENST00000775238,intron_variant|0|primary_transcript|ENST00000775238;CSQ=G|intron_variant|primary_transcript|ENST00000775238||,G|missense_variant|mRNA|ENST00000643195|N/S|deleterious_-_low_confidence(0.05)
 22	15528198	rs1985999326	G	A,T	.	.	VE=missense_variant|0|mRNA|ENST00000643195,missense_variant|1|mRNA|ENST00000643195,non_coding_transcript_variant|0|ncRNA|ENST00000775238,intron_variant|0|primary_transcript|ENST00000775238,non_coding_transcript_variant|1|ncRNA|ENST00000775238,intron_variant|1|primary_transcript|ENST00000775238;CSQ=A|missense_variant|mRNA|ENST00000643195|V/I|tolerated_-_low_confidence(1),A|intron_variant|primary_transcript|ENST00000775238||,T|intron_variant|primary_transcript|ENST00000775238||,T|missense_variant|mRNA|ENST00000643195|V/F|tolerated_-_low_confidence(0.16)
 EOF
-cp "$DST/duckvep/ensembl_release_consequences.vcf" \
-  "$PKG_DST/ensembl_release_consequences.vcf"
-echo "  DuckVEP/csq minimal and Ensembl release consequence fixtures"
+echo "  Ensembl release consequence reader fixture"
 
 # ---- Parallel empty-contig VCF/BCF regression fixtures ----
 for out_dir in "$DST" "$PKG_DST"; do

@@ -1,4 +1,0 @@
-Annotating: /tmp/duckhts-fastvep-fields-seed173-9bf888e/three_exon_phase2/input.vcf -> /tmp/duckhts-fastvep-fields-seed173-9bf888e/three_exon_phase2/fastvep_vep_csq.vcf
-warning: --transcript-cache /tmp/duckhts-fastvep-fields-seed173-9bf888e/three_exon_phase2/fastvep.cache takes precedence over --gff3 ["/tmp/duckhts-fastvep-fields-seed173-9bf888e/three_exon_phase2/three_exon_phase2.gff3"]; the GFF3 file(s) will NOT be parsed. Drop --transcript-cache to load from GFF3 instead, or remove the --gff3 flags to silence this warning.
-Loaded 1 transcripts from cache /tmp/duckhts-fastvep-fields-seed173-9bf888e/three_exon_phase2/fastvep.cache
-Memory-mapped reference FASTA from /root/.cache/duckhts/benchmarks/duckvep-projection/inputs/minimal.fa (using .fai index)

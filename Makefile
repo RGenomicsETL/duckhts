@@ -3,34 +3,18 @@
 # =============================================================================
 
 .PHONY: help docs site clean clean_all clean_local function_catalog test-function-catalog \
-	test-duckvep-kernel test-duckvep-kernel-asan \
-	test-duckvep-kernel-ubsan test-duckvep-kernel-statistical \
-	duckvep-generated-check duckvep-upstream-git-check \
-	duckvep-state-current-check duckvep-release-conformance-audit \
-	test-duckvep-targets-contract duckvep-targets duckvep-cache-receipt \
-	test-duckvep-so-conformance \
-	duckvep-so-spec duckvep-so-spec-check \
-	test-duckvep-witnesses test-duckvep-differential \
-	test-duckvep-gvcf-differential \
-	test-duckvep-haplotype-mechanics \
-	test-duckvep-projection \
-	test-duckvep-state-exploration \
-	test-duckvep-release-vcf \
-	duckvep-corpus-differential duckvep-statistical-report \
-	duckvep-record-conformance duckvep-record-properties \
-	bench-duckvep-throughput bench-duckvep-release-parquet bench-mosdepth \
-	duckvep-render-reports \
+	bench-mosdepth bench-variantkey-join \
 	test-simd-kernels bench-simd-kernels \
 	test-sqllogictest-debug test-sqllogictest-release \
 	test-writer-no-clobber-debug test-writer-no-clobber-release \
 	test-sqllogictest-runner \
 	check-benchmark-portability \
 	stage-norm-1000g-dragen-gvcf stage-liftover-references \
-	stage-giab-v4.2.1 stage-riker-wgs stage-duckvep-conformance-corpora \
+	stage-giab-v4.2.1 stage-riker-wgs \
 	stage-gffbase stage-gffbase-featuredb test-gffbase-featuredb bench-gffbase-featuredb \
-	stage-duckbedqc-data stage-variantkey-providers \
-	test-cache-paths test-benchmark-registry test-variantkey-provider-staging \
-	test-duckvep-corpus-staging test-cgranges-benchmark-r \
+	stage-duckbedqc-data stage-giab-benchmark-vcf \
+	test-cache-paths test-benchmark-registry test-giab-benchmark-staging \
+	test-cgranges-benchmark-r \
 	test-liftover-property test-liftover-property-asan \
 	test-liftover-property-ubsan test-liftover-fuzz test-liftover-fuzz-debug \
 	test-bcftools-filter-recovery test-sanitized-extension test-sanitizers
@@ -85,9 +69,7 @@ help:
 		'Build: make [debug|release|test|test_release]' \
 		'Docs: make [docs|function_catalog]' \
 		'SIMD: make [test-simd-kernels|bench-simd-kernels]' \
-		'DuckVEP: make [test-duckvep-kernel|test-duckvep-differential]' \
-		'Reports: make [bench-duckvep-throughput|duckvep-render-reports]' \
-		'Data: make stage-[giab-v4.2.1|liftover-references|norm-1000g-dragen-gvcf|riker-wgs|gffbase|duckbedqc-data|variantkey-providers]' \
+		'Data: make stage-[giab-v4.2.1|liftover-references|norm-1000g-dragen-gvcf|riker-wgs|gffbase|duckbedqc-data|giab-benchmark-vcf]' \
 		'Wasm: make wasm-playwright-test' \
 		'Cleanup: make [clean|clean_all|clean_local]'
 
@@ -149,11 +131,18 @@ endif
 
 test: test_debug
 test_debug test_release: test-function-catalog
-test_debug: test-cache-paths test-duckvep-kernel test-simd-kernels test-genbank-core test-liftover-property test-liftover-fuzz-debug test-sqllogictest-debug test-writer-no-clobber-debug
-test_release: test-cache-paths test-duckvep-kernel test-simd-kernels test-genbank-core test-genbank-oracle test-somalier-native test-bam-site-counts test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom test-hts-region-ownership test-writer-no-clobber-release
+test_debug: test-cache-paths test-simd-kernels test-genbank-core test-liftover-property test-liftover-fuzz-debug test-sqllogictest-debug test-writer-no-clobber-debug
+test_release: test-cache-paths test-simd-kernels test-genbank-core test-genbank-oracle test-somalier-native test-bam-site-counts test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom test-hts-region-ownership test-writer-no-clobber-release test-macro-catalog
 test_release: test-reference-cache test-sql-lambda-syntax
 
-.PHONY: test-sql-lambda-syntax test-duckdb-v2
+.PHONY: test-sql-lambda-syntax test-duckdb-v2 test-macro-catalog
+test-macro-catalog:
+	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
+		echo "Skipping macro catalog test: the Python DuckDB wheel is windows_amd64, not windows_amd64_mingw"; \
+	else \
+		$(PYTHON_VENV_BIN) test/scripts/test_macro_catalog.py; \
+	fi
+
 test-sql-lambda-syntax:
 	python3 test/scripts/check_sql_lambdas.py
 
@@ -457,38 +446,16 @@ test-cache-paths:
 	bash test/scripts/test_liftover_registry_batch.sh
 	bash test/scripts/test_conformance_plugin_cache.sh
 
-test-benchmark-registry: release test-variantkey-provider-staging test-duckvep-corpus-staging
+test-benchmark-registry: release test-giab-benchmark-staging
 	Rscript test/scripts/test_cigar_blocks_benchmark.R build/release/duckhts.duckdb_extension
 	Rscript test/scripts/test_genotype_format_benchmark.R
-	Rscript test/scripts/test_hgvs_cis_codon.R
-	Rscript test/scripts/test_ambiguous_codon.R
-	Rscript test/scripts/test_ambiguous_indel.R
-	Rscript test/scripts/test_ambiguous_indel_evidence.R
-	Rscript test/scripts/test_indel_predicate_witnesses.R
-	Rscript test/scripts/test_reference_translation.R
-	Rscript test/scripts/test_haplotype_geometry.R
-	Rscript test/scripts/test_haplotype_phase_history.R
-	Rscript test/scripts/test_haplotype_model_history.R
-	Rscript test/scripts/test_fastvep_receipt.R
-	Rscript test/scripts/test_fastvep_field_compare.R
-	Rscript test/scripts/test_fastvep_field_extract.R
-	Rscript test/scripts/test_fastvep_source_coverage.R
-	Rscript test/scripts/test_fastvep_field_projection.R
-	Rscript test/scripts/test_fastvep_field_report.R
-	Rscript test/scripts/test_fastvep_field_publish.R
-	Rscript test/scripts/test_fastvep_field_replay.R
-	Rscript test/scripts/test_vep_cache_staging.R
-	Rscript test/scripts/test_duckvep_model_relations.R
 	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
 	(cd "$$tmp" && R CMD build --no-build-vignettes --no-manual "$(PROJ_DIR)r/duckhtsbench"); \
 	R CMD INSTALL -l "$$tmp" "$$tmp"/duckhtsbench_*.tar.gz; \
 	DUCKHTS_REPO="$(PROJ_DIR)" Rscript -e '.libPaths(c("'"$$tmp"'", .libPaths())); tinytest::test_package("duckhtsbench", testdir = "tinytest")'
 
-test-variantkey-provider-staging:
-	bash test/scripts/test_variantkey_provider_staging.sh
-
-test-duckvep-corpus-staging:
-	bash test/scripts/test_duckvep_corpus_staging.sh
+test-giab-benchmark-staging:
+	bash test/scripts/test_giab_benchmark_staging.sh
 
 test-cgranges-benchmark-r:
 	bash test/scripts/test_cgranges_benchmark_r.sh
@@ -582,9 +549,6 @@ stage-giab-v4.2.1:
 stage-riker-wgs:
 	bash scripts/stage_riker_wgs_bam.sh
 
-stage-duckvep-conformance-corpora:
-	bash scripts/stage_duckvep_conformance_corpora.sh
-
 stage-gffbase:
 	bash scripts/stage_gffbase.sh
 
@@ -595,8 +559,8 @@ stage-gffbase-featuredb:
 stage-duckbedqc-data:
 	bash scripts/stage_duckbedqc_data.sh
 
-stage-variantkey-providers:
-	Rscript r/duckhtsbench/scripts/stage_variantkey_providers.R
+stage-giab-benchmark-vcf:
+	Rscript r/duckhtsbench/scripts/stage_giab_benchmark_vcf.R
 
 bench-mosdepth:
 	Rscript -e "rmarkdown::render('benchmarks/Benchmarks_mosdepth.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
@@ -690,272 +654,6 @@ bench-simd-kernels:
 		$(SIMD_KERNEL_TEST_SOURCES) -o "$$tmp/simd_kernels"; \
 	"$$tmp/simd_kernels" --check; \
 	"$$tmp/simd_kernels" --bench $(BENCH_ARGS)
-
-# =============================================================================
-# DuckVEP kernel and conformance
-# =============================================================================
-
-# Pure-C consequence-engine tests ported with the kernel from
-# /root/duckvep-c@9f922c8.  The engine is tested through its borrowed-array ABI,
-# without DuckDB or htslib.  Each randomized property has an independent
-# brute-force, base-walk, genetic-code, rebuild, or composition oracle.
-DUCKVEP_KERNEL_SOURCES = \
-	src/duckvep/kernel/src/duckvep_kernel.c \
-	src/duckvep/kernel/src/duckvep_so.c \
-	src/duckvep/kernel/src/duckvep_sweep.c \
-	src/duckvep/kernel/src/duckvep_classify.c \
-	src/duckvep/kernel/src/duckvep_effect.c \
-	src/duckvep/kernel/src/duckvep_sv.c \
-	src/duckvep/kernel/src/duckvep_delta.c \
-	src/duckvep/kernel/src/duckvep_projection.c \
-	src/duckvep/kernel/src/duckvep_transcript_edit.c \
-	src/duckvep/kernel/src/duckvep_hgvs.c \
-	src/duckvep/kernel/src/duckvep_codon.c \
-	src/duckvep/kernel/src/duckvep_coding.c \
-	src/duckvep/kernel/src/duckvep_haplotype.c \
-	src/duckvep/kernel/src/duckvep_sequence_diff.c \
-	src/duckvep/kernel/src/duckvep_carriers.c \
-	src/duckvep/kernel/src/duckvep_phase.c \
-	src/duckvep/kernel/src/duckvep_haplotype_stream.c
-DUCKVEP_PROPERTY_SOURCES = $(addprefix test/duckvep/property/,$(shell cat test/duckvep/property/sources.tsv))
-DUCKVEP_THEFT_PATCH = test/duckvep/vendor/patches/theft-mingw-no-fork.patch
-DUCKVEP_PROPERTY_CPPFLAGS ?=
-DUCKVEP_PROPERTY_CFLAGS = -std=c11 -g -O1 -Wall -Wextra -Werror -Wpedantic -pedantic-errors \
-	-Wno-unused-function -D_DEFAULT_SOURCE -DTHEFT_USE_FLOATING_POINT=0 \
-	-I test/duckvep/vendor/greatest \
-	-I src/duckvep/kernel/include \
-	-I src/duckvep/kernel/src \
-	-I src/duckvep
-
-VEP_PREFIX ?= /root/miniconda3/envs/vep
-VEP_RUN ?= micromamba run -p $(VEP_PREFIX)
-VEP_INSTALL ?= $(firstword $(wildcard $(VEP_PREFIX)/share/ensembl-vep-116*))
-VEP_CONSTANTS ?= $(VEP_INSTALL)/Bio/EnsEMBL/Variation/Utils/Constants.pm
-VEP_CONSTANTS_SHA256 ?= 98021460cfada22118c6d6b7865bbed3b25c501ca484ba2399380662f1012051
-
-duckvep-so-spec:
-	$(VEP_RUN) perl test/duckvep/conformance/extract_so_spec.pl \
-		--sha256 $(VEP_CONSTANTS_SHA256) \
-		--output test/duckvep/conformance/data/so_consequences.tsv \
-		$(VEP_CONSTANTS)
-
-duckvep-so-spec-check:
-	$(VEP_RUN) perl test/duckvep/conformance/extract_so_spec.pl \
-		--sha256 $(VEP_CONSTANTS_SHA256) \
-		--check test/duckvep/conformance/data/so_consequences.tsv \
-		$(VEP_CONSTANTS)
-
-duckvep-generated-check:
-	perl test/duckvep/conformance/generate_effect_rules.pl --check \
-		src/duckvep/kernel/src/duckvep_effect_rules.inc
-	perl test/duckvep/conformance/generate_so_metadata.pl --check \
-		src/duckvep/kernel/src/duckvep_so_metadata.inc
-	perl test/duckvep/conformance/check_state_machine_contract.pl
-	perl test/duckvep/property/inventory_test.pl
-	perl test/duckvep/upstream/check_sources.pl
-
-duckvep-upstream-git-check:
-	perl test/duckvep/upstream/check_sources.pl --verify-upstream-git
-
-duckvep-state-current-check:
-	perl test/duckvep/conformance/check_state_machine_contract.pl --require-current
-
-duckvep-release-conformance-audit: duckvep-generated-check \
-		duckvep-upstream-git-check duckvep-state-current-check
-
-test-duckvep-kernel: duckvep-generated-check
-	@set -e; \
-	tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/duckhts-duckvep-kernel.XXXXXX"); \
-	trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
-	cp -R test/duckvep/vendor/theft "$$tmp/theft"; \
-	patch --silent --fuzz=0 -d "$$tmp/theft" -p1 < $(DUCKVEP_THEFT_PATCH); \
-	$(CC) $(DUCKVEP_PROPERTY_CPPFLAGS) $(DUCKVEP_PROPERTY_CFLAGS) \
-		-I "$$tmp/theft/inc" -I "$$tmp/theft/src" \
-		$(DUCKVEP_KERNEL_SOURCES) $(DUCKVEP_PROPERTY_SOURCES) \
-		"$$tmp"/theft/src/*.c \
-		-pthread -o "$$tmp/duckvep_kernel_property"; \
-	"$$tmp/duckvep_kernel_property" $(DUCKVEP_PROPERTY_ARGS)
-
-test-duckvep-kernel-asan: duckvep-generated-check
-	@set -e; \
-	tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/duckhts-duckvep-kernel-asan.XXXXXX"); \
-	trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
-	cp -R test/duckvep/vendor/theft "$$tmp/theft"; \
-	patch --silent --fuzz=0 -d "$$tmp/theft" -p1 < $(DUCKVEP_THEFT_PATCH); \
-	$(CC) $(DUCKVEP_PROPERTY_CPPFLAGS) $(DUCKVEP_PROPERTY_CFLAGS) -fsanitize=address \
-		-fno-omit-frame-pointer \
-		-I "$$tmp/theft/inc" -I "$$tmp/theft/src" \
-		$(DUCKVEP_KERNEL_SOURCES) $(DUCKVEP_PROPERTY_SOURCES) \
-		"$$tmp"/theft/src/*.c \
-		-pthread -fsanitize=address -o "$$tmp/duckvep_kernel_property"; \
-	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 \
-		"$$tmp/duckvep_kernel_property" $(DUCKVEP_PROPERTY_ARGS)
-
-test-duckvep-kernel-ubsan: duckvep-generated-check
-	@set -e; \
-	tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/duckhts-duckvep-kernel-ubsan.XXXXXX"); \
-	trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
-	cp -R test/duckvep/vendor/theft "$$tmp/theft"; \
-	patch --silent --fuzz=0 -d "$$tmp/theft" -p1 < $(DUCKVEP_THEFT_PATCH); \
-	$(CC) $(DUCKVEP_PROPERTY_CPPFLAGS) $(DUCKVEP_PROPERTY_CFLAGS) -fsanitize=undefined \
-		-fno-omit-frame-pointer \
-		-I "$$tmp/theft/inc" -I "$$tmp/theft/src" \
-		$(DUCKVEP_KERNEL_SOURCES) $(DUCKVEP_PROPERTY_SOURCES) \
-		"$$tmp"/theft/src/*.c \
-		-pthread -fsanitize=undefined -o "$$tmp/duckvep_kernel_property"; \
-	UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
-		"$$tmp/duckvep_kernel_property" $(DUCKVEP_PROPERTY_ARGS)
-
-# Longer deterministic run for rare-state exploration.  Override either value
-# to reproduce or extend a run, for example:
-#   make test-duckvep-kernel-statistical DUCKVEP_PROP_TRIALS=1000000 DUCKVEP_PROP_SEED=17
-# Greatest test-name filtering remains available through
-# DUCKVEP_PROPERTY_ARGS, for example `-t hgvs` or `-t haplotype`.  An official
-# property-history run leaves that argument empty so the ledger covers the
-# complete state machine rather than a favorable subset.
-test-duckvep-kernel-statistical:
-	DUCKVEP_PROP_TRIALS=$${DUCKVEP_PROP_TRIALS:-100000} \
-	DUCKVEP_PROP_SEED=$${DUCKVEP_PROP_SEED:-0xd0c0ffee12345678} \
-		$(MAKE) test-duckvep-kernel
-
-test-duckvep-so-conformance:
-	Rscript test/duckvep/conformance/so_conformance.R .
-
-test-duckvep-witnesses: release
-	Rscript test/duckvep/conformance/generate_witnesses.R \
-		--ext build/release/duckhts.duckdb_extension --check
-
-# -----------------------------------------------------------------------------
-# Executable VEP differentials
-# -----------------------------------------------------------------------------
-
-# VEP 116 is the sole behavioral oracle.  The short target runs all formal
-# witnesses against the checked-in transcript fixture.  The corpus target uses
-# the same runner for a real VCF and a prepared model database; pass paths and
-# sampling size through DUCKVEP_DIFFERENTIAL_ARGS.
-test-duckvep-differential: release
-	VEP_PREFIX=$(VEP_PREFIX) Rscript test/duckvep/conformance/corpus_differential.R \
-		--extension build/release/duckhts.duckdb_extension \
-		--sample-per-shape 0 --hgvs
-
-# Independent Haplosaurus oracle for native edit-set mechanics, including calls
-# decoded by the extension. This does not certify public phased execution.
-test-duckvep-projection: release
-	Rscript test/duckvep/conformance/test_projection_differential.R
-	Rscript test/duckvep/conformance/projection_differential.R $(ARGS)
-
-test-duckvep-haplotype-mechanics: release
-	VEP_PREFIX=$(VEP_PREFIX) Rscript test/duckvep/conformance/haplotype_differential.R \
-		$(DUCKVEP_HAPLOTYPE_ARGS)
-
-# VEP receives one single-ALT record for each expanded input allele. This pins
-# both ALT orders in mixed gVCF records without asking either engine to infer
-# genotype remapping or record-level block semantics.
-test-duckvep-gvcf-differential: release
-	VEP_PREFIX=$(VEP_PREFIX) Rscript test/duckvep/conformance/corpus_differential.R \
-		--corpus gvcf_semantics \
-		--vcf test/duckvep/conformance/data/gvcf_semantics.vcf \
-		--extension build/release/duckhts.duckdb_extension \
-		--split-multiallelic --sample-per-shape 0 --distance 0 \
-		--max-allele-length 171
-
-# Reproducible rare-state exploration. The generated VCF, pair-level Parquet, and
-# statistical summaries remain under the ignored results directory so every failure
-# retains its seed and exact allele while large artifacts stay out of git.
-test-duckvep-state-exploration: release
-	@set -e; \
-	cases=$${DUCKVEP_STATE_CASES:-20000}; \
-	seed=$${DUCKVEP_STATE_SEED:-17}; \
-	max_len=$${DUCKVEP_STATE_MAX_LENGTH:-10}; \
-	trials=$${DUCKVEP_PROP_TRIALS:-100000}; \
-	Rscript test/duckvep/conformance/property_history.R \
-		--trials $$trials --seed $$seed \
-		--history test/duckvep/conformance/results/state_exploration_seed_$${seed}_properties.csv \
-		--coverage-history test/duckvep/conformance/results/state_exploration_seed_$${seed}_coverage.csv \
-		--failure-log-dir test/duckvep/conformance/results; \
-	vcf=test/duckvep/conformance/results/state_exploration_seed_$${seed}.vcf; \
-	Rscript test/duckvep/conformance/generate_witnesses.R \
-		--ext build/release/duckhts.duckdb_extension \
-		--random-cases $$cases --max-random-length $$max_len \
-		--seed $$seed --out $$vcf; \
-	VEP_PREFIX=$(VEP_PREFIX) Rscript test/duckvep/conformance/corpus_differential.R \
-		--corpus state_exploration_seed_$${seed} \
-		--vcf $$vcf --extension build/release/duckhts.duckdb_extension \
-		--sample-per-shape 0 --seed $$seed \
-		--max-allele-length $$((max_len + 1)) --hgvs
-
-# Compare a receipt-matched DuckVEP model with the lossless VE relation in an
-# official Ensembl variation release VCF. Pass the source/model/receipt paths
-# through DUCKVEP_RELEASE_DIFFERENTIAL_ARGS; the runner rebuilds and binds the
-# extension to the clean source revision unless explicitly put in diagnostic
-# mode.
-test-duckvep-release-vcf:
-	Rscript test/duckvep/conformance/release_vcf_differential.R \
-		--extension build/release/duckhts.duckdb_extension \
-		$(DUCKVEP_RELEASE_DIFFERENTIAL_ARGS)
-
-duckvep-corpus-differential: release
-	VEP_PREFIX=$(VEP_PREFIX) Rscript test/duckvep/conformance/corpus_differential.R \
-		--extension build/release/duckhts.duckdb_extension \
-		$(DUCKVEP_DIFFERENTIAL_ARGS)
-
-# -----------------------------------------------------------------------------
-# Optional corpus campaigns and evidence receipts
-# -----------------------------------------------------------------------------
-
-# Optional coarse-grained campaign orchestration. {targets} owns invalidation and
-# resume behavior; corpus_differential.R and blit retain semantic and process ownership.
-duckvep-targets:
-	Rscript pipelines/duckvep/run.R
-
-# Inventory a VEP cache once after checksum-verified acquisition. Runtime
-# campaigns recheck the compact path/size/mtime inventory, not every cache byte.
-duckvep-cache-receipt:
-	Rscript scripts/duckvep_cache_receipt.R $(DUCKVEP_CACHE_RECEIPT_ARGS)
-
-test-duckvep-targets-contract:
-	Rscript test/duckvep/conformance/targets_contract.R
-
-# Reads a Parquet annotation dump produced by the corpus differential. This is
-# deliberately not in the ordinary test target because it needs external data.
-duckvep-statistical-report:
-	Rscript test/duckvep/conformance/statistical_conformance.R \
-		$(DUCKVEP_STATISTICAL_ARGS)
-
-# Regenerate the real VEP witness output, then replace this revision's rows in
-# the append-only audit ledger. No counts are entered by hand.
-duckvep-record-conformance: test-duckvep-differential
-	Rscript test/duckvep/conformance/hgvs_history.R \
-		--pairs test/duckvep/conformance/results/witnesses_hgvs_pairs.parquet \
-		--history test/duckvep/conformance/data/hgvs_history.csv
-	Rscript test/duckvep/conformance/statistical_conformance.R \
-		--annotations test/duckvep/conformance/results/witnesses_annotations.parquet \
-		--history test/duckvep/conformance/data/conformance_history.csv
-
-duckvep-record-properties:
-	Rscript test/duckvep/conformance/property_history.R \
-		$(DUCKVEP_PROPERTY_HISTORY_ARGS)
-
-# -----------------------------------------------------------------------------
-# DuckVEP benchmark and report rendering
-# -----------------------------------------------------------------------------
-
-# `configure` refreshes extension metadata from description.yml before timing.
-bench-duckvep-throughput: configure release
-	Rscript benchmarks/duckvep_throughput.R $(DUCKVEP_THROUGHPUT_ARGS)
-
-# Materialize an official Ensembl consequence VCF in both complete typed and
-# narrow release-product projections. The large input and Parquet files remain external.
-bench-duckvep-release-parquet: release
-	Rscript benchmarks/duckvep_release_parquet.R \
-		--extension build/release/duckhts.duckdb_extension \
-		$(DUCKVEP_RELEASE_PARQUET_ARGS)
-
-duckvep-render-reports:
-	DUCKHTS_REPO_ROOT=$(PROJ_DIR) Rscript -e \
-		"rmarkdown::render('benchmarks/duckvep_conformance.Rmd', quiet = TRUE)"
-	DUCKHTS_REPO_ROOT=$(PROJ_DIR) Rscript -e \
-		"rmarkdown::render('benchmarks/duckvep_throughput.Rmd', quiet = TRUE)"
 
 # =============================================================================
 # Browser WebAssembly smoke test

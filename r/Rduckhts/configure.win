@@ -423,7 +423,7 @@ if [ ! -s "${SOURCE_MANIFEST}" ]; then
     exit 1
 fi
 C_SOURCES=`awk -F'|' 'NF >= 2 && $1 !~ /^#/ {print $2}' "${SOURCE_MANIFEST}"`
-INCLUDES="-I./include -I./duckdb_capi -I./htslib -I./libBigWig -I./duckvep/kernel/include -I./duckvep/kernel/src"
+INCLUDES="-I./include -I./duckdb_capi -I./htslib -I./libBigWig"
 
 echo "Compiling extension sources for Windows..."
 OBJECT_FILES=""

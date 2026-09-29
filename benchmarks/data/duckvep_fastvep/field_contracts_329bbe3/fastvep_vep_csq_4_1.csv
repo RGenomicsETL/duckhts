@@ -1,2 +1,0 @@
-"tool","output_contract","threads","run","timing_file","row_count","bytes","lines","sha256","multiset_checked","fingerprint_scope","xor_hash","low32_sum","high32_sum"
-"fastvep","vep_csq",4,1,"fastvep_vep_csq_4_1.time","47845809","8865286368","47845810","d86cf5be9ef83bb3e46cb39cf33440485559e2fb2d388a53f174585d3711a61e",TRUE,"full_row","5824388110231263002","102735654308654088","102745054639131470"

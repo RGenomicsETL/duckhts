@@ -1,9 +1,0 @@
-##fileformat=VCFv4.2
-##source=duckvep/generate_witnesses.R;tx=DUCK1-201
-##duckvep_state_exploration=<seed=173,random_cases=1000,max_random_length=10>
-##INFO=<ID=CLASS,Number=1,Type=String,Description="coarse genomic-geometry class">
-##INFO=<ID=TX,Number=1,Type=String,Description="target transcript id">
-##INFO=<ID=SHAPE,Number=1,Type=String,Description="allele shape (snv/del1/ins1/ins3/mnv2/del2/del3/delins2to1/delins1to2)">
-##contig=<ID=chrDuck>
-#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
-chrDuck	158	projection_00000589	C	A	.	.	CLASS=start_codon;TX=DUCK1-201;SHAPE=snv

@@ -1,2 +1,0 @@
-"actual_rows","expected_rows","union_keys","missing_keys","extra_keys","actual_duplicate_keys","expected_duplicate_keys","invalid_keys","compared_keys","source_rows","source_alleles","source_duplicate_alleles","source_invalid_alleles","actual_missing_source_alleles","expected_missing_source_alleles","actual_unknown_alleles","expected_unknown_alleles","compared_fields","field_failures","passed"
-1389,1389,1389,0,0,0,0,0,1389,1389,1389,0,0,0,0,0,0,31,3947,FALSE

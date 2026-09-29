@@ -89,11 +89,6 @@ extern void register_duckhts_samtools_idxstats_function(duckdb_connection connec
 extern void register_duckhts_bam_bed_coverage_function(duckdb_connection connection);
 /* cgranges_api.c */
 extern bool register_duckhts_cgranges_functions(duckdb_connection connection, duckdb_database database);
-/* duckvep resident model and annotation adapter */
-extern bool register_duckvep_functions(duckdb_connection connection, duckdb_database database);
-extern bool register_duckvep_sql_kernels(duckhts_registration_t *registration);
-extern bool register_duckvep_ensembl_functions(duckhts_registration_t *registration);
-extern bool register_duckvep_sql_functions(duckhts_registration_t *registration);
 /* variantkey_udf.c */
 extern bool register_variantkey_functions(duckdb_connection connection);
 /* simd/duckhts_simd_dispatch.c */
@@ -264,14 +259,14 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         return duckhts_registration_error(&registration,
             "DuckHTS could not register cgranges functions");
     }
-    if (!register_duckvep_functions(connection, *access->get_database(info))) {
-        return duckhts_registration_error(&registration,
-            "DuckHTS could not register DuckVEP scalar overloads");
-    }
-    if (!register_duckvep_sql_kernels(&registration)) {
+    if (!duckhts_register_macro_definitions(&registration)) {
         return false;
     }
-
+    /* Only the writable, in-memory default database receives LOAD-time macros.
+       File catalogs and attached databases never receive macro DDL at LOAD. */
+    if (!duckhts_macro_registration_begin(&registration)) {
+        return false;
+    }
     if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckhts_quote_ident(x) AS "
         "CASE WHEN x IS NULL THEN NULL ELSE '\"' || replace(x, '\"', '\"\"') || '\"' END")) {
@@ -1171,7 +1166,8 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         }
     }
 
-    return register_duckvep_sql_functions(&registration) &&
-           register_duckvep_ensembl_functions(&registration) &&
-           register_duckhts_somalier_vcf_extract_sql(&registration);
+    if (!register_duckhts_somalier_vcf_extract_sql(&registration)) {
+        return false;
+    }
+    return duckhts_macro_registration_end(&registration);
 }

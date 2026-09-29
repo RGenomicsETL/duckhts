@@ -1,3 +1,24 @@
+# Rduckhts 1.5.2.9006-0.1.5
+
+- The bundled function catalog documents `bam_bin_counts(include_unmapped := FALSE)`
+  and its synthetic no-coordinate row, and names the type-probe macro's parameter as
+  registered (`candidate_type_name`). Package tests compare every catalog entry with
+  a registered overload of the loaded extension: kinds, scalar and aggregate
+  argument counts, native table options, and
+  macro parameter names.
+
+- `rduckhts_connect()` and `rduckhts_load()` install connection-local macros
+  automatically for database files, including read-only files, without
+  modifying the file catalog. Use `rduckhts_install_macros(con)` for other
+  DBI or pool connections with the extension loaded; it is idempotent and
+  follows a caller transaction's rollback.
+
+- Consequence prediction has moved to DuckVEP and its R package, Rduckvep
+  (<https://github.com/RGenomicsETL/DuckVEP>). `rduckhts_haplotypes()` and the bundled
+  consequence fixtures are removed; the bundled extension no longer carries the DuckVEP
+  functions. Load DuckVEP with `Rduckvep::rduckvep_load(con)` on an Rduckhts connection
+  for annotation. CSQ, ANN and BCSQ parsing in `rduckhts_bcf()` is unchanged.
+
 # Rduckhts 1.5.2.9005-0.1.5
 
 - `rduckhts_ancestry_proportions()` estimates ancestry proportions from

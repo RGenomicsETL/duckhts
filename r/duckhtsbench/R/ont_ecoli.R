@@ -10,11 +10,10 @@
 #' `minimap2 -x map-ont` and sorting with `samtools`. Network access occurs only
 #' in this explicit staging step; with `fetch = FALSE` both sources must already
 #' be cached, which is how the report renders. A cached BAM that passes
-#' `samtools quickcheck` is reused when its receipt's reference, read and index
-#' SHA-256 identities and index byte size match the cached files. Missing
-#' identities or changed inputs require derivation; tool-version changes alone
-#' do not. `minimap2` is needed
-#' only to derive the BAM.
+#' `samtools quickcheck` is reused when its receipt's reference, read, index and
+#' BAM SHA-256 identities and index and BAM byte sizes match the cached files.
+#' Missing identities or changed inputs require derivation; tool-version changes
+#' alone do not. `minimap2` is needed only to derive the BAM.
 #' @param fetch Whether to download a missing or invalid source.
 #' @param threads Aligner, sort and index threads.
 #' @param minimap2 Path to `minimap2`.
@@ -71,7 +70,9 @@ duckhts_bench_stage_ont_ecoli <- function(fetch = TRUE, threads = 8L,
     fields <- utils::read.delim(receipt, colClasses = "character", quote = "", comment.char = "")
     expected <- c(source_hashes,
                   index_sha256 = digest::digest(file = index, algo = "sha256"),
-                  index_bytes = as.character(file.info(index)$size))
+                  index_bytes = as.character(file.info(index)$size),
+                  bam_sha256 = digest::digest(file = bam, algo = "sha256"),
+                  bam_bytes = as.character(file.info(bam)$size))
     recorded <- fields$value[match(names(expected), fields$field)]
     if (identical(recorded, unname(expected))) {
       return(invisible(paths[c("reference", "reads", "bam")]))
@@ -103,11 +104,12 @@ duckhts_bench_stage_ont_ecoli <- function(fetch = TRUE, threads = 8L,
     data.frame(
       field = c("run_accession", "study_accession", "sample_accession", "reference", "reads",
                 "aligner", "aligner_preset", "sorter", "threads", names(source_hashes),
-                "index_sha256", "index_bytes"),
+                "index_sha256", "index_bytes", "bam_sha256", "bam_bytes"),
       value = c("ERR14686255", "PRJEB86481", "SAMEA117787661", paths[["reference"]], paths[["reads"]],
                 paste("minimap2", tool_version(minimap2)), "map-ont", tool_version(samtools),
                 as.character(threads), unname(source_hashes),
-                digest::digest(file = index, algo = "sha256"), as.character(file.info(index)$size)),
+                digest::digest(file = index, algo = "sha256"), as.character(file.info(index)$size),
+                digest::digest(file = bam, algo = "sha256"), as.character(file.info(bam)$size)),
       stringsAsFactors = FALSE
     )
   )
