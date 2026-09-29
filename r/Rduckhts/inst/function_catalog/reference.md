@@ -1526,7 +1526,7 @@ table
 
 ### Inputs
 
-counts_table is the sample-by-panel relation from duckhts_somalier_vcf_counts() or duckhts_somalier_bam_counts() over a panel that includes X/Y sites; each sample needs one row for every panel site with the panel's geometry and A/B orientation. Autosomal sites give the depth normaliser, X and Y sites the metrics. Without a usable X site the panel is still accepted and the status says so.
+counts_table is the sample-by-panel relation from duckhts_somalier_vcf_counts() or duckhts_somalier_bam_counts() over a panel that includes X/Y sites; each sample needs one row for every panel site with the panel's geometry and A/B orientation. Coverage is checked per sample from the row count plus the sum and XOR of a 64-bit hash of site_index against the panel's, because a per-sample DISTINCT set would hold samples x sites entries: a missing or repeated ordinal changes the count or the hashes and is rejected, while a different multiset of ordinals with the same count passes only if both hashes collide. Autosomal sites give the depth normaliser, X and Y sites the metrics. Without a usable X site the panel is still accepted and the status says so.
 
 ### Metrics
 
@@ -1546,7 +1546,7 @@ The call is evidence of X/Y dosage for review, not a diagnosis or a legal determ
 
 ### Memory
 
-One pass over the counts relation: state is one aggregate group of a few numbers per sample plus the panel; no product of samples and sites is retained beyond the counts relation itself.
+See benchmarks/benchmark_somalier_sex.md for measured scaling. One pass over the counts relation: state is one aggregate group of a few numbers per sample plus the panel; no product of samples and sites is retained beyond the counts relation itself.
 
 ### Examples
 

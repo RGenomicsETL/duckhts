@@ -538,6 +538,12 @@ bench-lift:
 bench-ancestry-panel:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_ancestry_panel.Rmd', output_format = rmarkdown::github_document(html_preview = FALSE))"
 
+# Generate the synthetic counts with benchmarks/benchmark_somalier_sex_run.R --data <dir> <lib>,
+# measure with benchmarks/benchmark_somalier_sex_run.R benchmarks/somalier_sex_scaling.tsv <dir> <lib>,
+# then render the report.
+bench-somalier-sex:
+	Rscript -e "rmarkdown::render('benchmarks/benchmark_somalier_sex.Rmd', output_format = rmarkdown::github_document(html_preview = FALSE))"
+
 bench-score:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_score.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
