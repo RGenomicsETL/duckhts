@@ -13,6 +13,16 @@ macro_catalog <- function(con, catalog) {
   )$function_name
 }
 
+# Release the database file before reopening it: Windows refuses to reopen a file
+# that a live instance still holds, and a disconnected connection object can keep
+# its driver's instance alive.
+close_database <- function(con) {
+  driver <- methods::slot(con, "driver")
+  dbDisconnect(con)
+  duckdb::duckdb_shutdown(driver)
+  invisible(gc())
+}
+
 file <- tempfile("rduckhts_macros_", fileext = ".duckdb")
 con <- rduckhts_connect(dbdir = file)
 catalog <- dbGetQuery(con, "SELECT current_database()")[[1L]]
@@ -30,9 +40,10 @@ expect_equal(
   '"b"'
 )
 dbDisconnect(second)
+rm(second)
 expect_equal(length(rduckhts_install_macros(con)), 1L)
 expect_equal(length(macro_catalog(con, "temp")), 31L)
-dbDisconnect(con, shutdown = TRUE)
+close_database(con)
 
 readonly_before <- tools::md5sum(file)
 con <- rduckhts_connect(dbdir = file, read_only = TRUE)
@@ -42,7 +53,7 @@ dbBegin(con)
 rduckhts_install_macros(con)
 dbRollback(con)
 expect_equal(length(macro_catalog(con, "temp")), 31L)
-dbDisconnect(con, shutdown = TRUE)
+close_database(con)
 expect_identical(unname(tools::md5sum(file)), unname(readonly_before))
 
 # Installation inside a caller transaction is rolled back with that transaction.
@@ -56,5 +67,5 @@ dbRollback(con)
 expect_false("duckhts_quote_ident" %in% macro_catalog(con, "temp"))
 rduckhts_install_macros(con)
 expect_true("duckhts_quote_ident" %in% macro_catalog(con, "temp"))
-dbDisconnect(con, shutdown = TRUE)
+close_database(con)
 unlink(file)
