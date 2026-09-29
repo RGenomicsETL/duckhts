@@ -1,5 +1,33 @@
 # Changelog
 
+## Rduckhts 1.5.2.9006-0.1.5
+
+- The bundled function catalog documents
+  `bam_bin_counts(include_unmapped := FALSE)` and its synthetic
+  no-coordinate row, and names the type-probe macro’s parameter as
+  registered (`candidate_type_name`). Package tests compare every
+  catalog entry with a registered overload of the loaded extension:
+  kinds, scalar and aggregate argument counts, native table options, and
+  macro parameter names.
+
+- [`rduckhts_connect()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_connect.md)
+  and
+  [`rduckhts_load()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_load.md)
+  install connection-local macros automatically for database files,
+  including read-only files, without modifying the file catalog. Use
+  `rduckhts_install_macros(con)` for other DBI or pool connections with
+  the extension loaded; it is idempotent and follows a caller
+  transaction’s rollback.
+
+- Consequence prediction has moved to DuckVEP and its R package,
+  Rduckvep (<https://github.com/RGenomicsETL/DuckVEP>).
+  `rduckhts_haplotypes()` and the bundled consequence fixtures are
+  removed; the bundled extension no longer carries the DuckVEP
+  functions. Load DuckVEP with `Rduckvep::rduckvep_load(con)` on an
+  Rduckhts connection for annotation. CSQ, ANN and BCSQ parsing in
+  [`rduckhts_bcf()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bcf.md)
+  is unchanged.
+
 ## Rduckhts 1.5.2.9005-0.1.5
 
 - [`rduckhts_ancestry_proportions()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_ancestry_proportions.md)
@@ -285,13 +313,11 @@ This package bundles DuckHTS 1.5.2.
 
 ### DuckVEP annotation and haplotype replay
 
-- Add
-  [`rduckhts_haplotypes()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_haplotypes.md)
-  for shared CDS/protein paths with complete carrier and contributor
-  evidence, coding blocks, local coding status and aligned CDS/protein
-  differences. Per-call capacities bound native replay, alignment and
-  HGVS storage; exhaustion raises errors. DuckDB input/output memory is
-  outside the native workspace limit.
+- Add `rduckhts_haplotypes()` for shared CDS/protein paths with complete
+  carrier and contributor evidence, coding blocks, local coding status
+  and aligned CDS/protein differences. Per-call capacities bound native
+  replay, alignment and HGVS storage; exhaustion raises errors. DuckDB
+  input/output memory is outside the native workspace limit.
 - Support explicit decoded-call phase policies and
   `input_mode = "source_records"` for original GT spelling and complete
   ALT lists. Preserve missing/unphased, conditional, overwritten and

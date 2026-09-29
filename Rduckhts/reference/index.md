@@ -95,8 +95,6 @@
   : Create GTF Table
 - [`rduckhts_gtf_multi()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_gtf_multi.md)
   : Read multiple GTF files into a DuckDB table
-- [`rduckhts_haplotypes()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_haplotypes.md)
-  : Replay Phased Transcript Haplotypes
 - [`rduckhts_hts_header()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_hts_header.md)
   : Read HTS Header Metadata
 - [`rduckhts_hts_index()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_hts_index.md)
@@ -111,6 +109,8 @@
   : Inspect the Loaded htslib Build
 - [`rduckhts_htslib_version()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_htslib_version.md)
   : Return the Loaded htslib Version
+- [`rduckhts_install_macros()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_install_macros.md)
+  : Install DuckHTS macros on a connection
 - [`rduckhts_liftover()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_liftover.md)
   : Lift Over Variant Coordinates Against a Query
 - [`rduckhts_load()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_load.md)

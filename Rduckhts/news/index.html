@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9005-0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9006-0.1.5</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -33,6 +33,12 @@
       <small>Source: <a href="https://github.com/RGenomicsETL/duckhts/blob/main/NEWS.md" class="external-link"><code>NEWS.md</code></a></small>
     </div>
 
+    <div class="section level2">
+<h2 class="pkg-version" data-toc-text="1.5.2.9006-0.1.5" id="rduckhts-1529006-015">Rduckhts 1.5.2.9006-0.1.5<a class="anchor" aria-label="anchor" href="#rduckhts-1529006-015"></a></h2>
+<ul><li><p>The bundled function catalog documents <code>bam_bin_counts(include_unmapped := FALSE)</code> and its synthetic no-coordinate row, and names the type-probe macro’s parameter as registered (<code>candidate_type_name</code>). Package tests compare every catalog entry with a registered overload of the loaded extension: kinds, scalar and aggregate argument counts, native table options, and macro parameter names.</p></li>
+<li><p><code><a href="../reference/rduckhts_connect.html">rduckhts_connect()</a></code> and <code><a href="../reference/rduckhts_load.html">rduckhts_load()</a></code> install connection-local macros automatically for database files, including read-only files, without modifying the file catalog. Use <code>rduckhts_install_macros(con)</code> for other DBI or pool connections with the extension loaded; it is idempotent and follows a caller transaction’s rollback.</p></li>
+<li><p>Consequence prediction has moved to DuckVEP and its R package, Rduckvep (<a href="https://github.com/RGenomicsETL/DuckVEP" class="external-link uri">https://github.com/RGenomicsETL/DuckVEP</a>). <code>rduckhts_haplotypes()</code> and the bundled consequence fixtures are removed; the bundled extension no longer carries the DuckVEP functions. Load DuckVEP with <code>Rduckvep::rduckvep_load(con)</code> on an Rduckhts connection for annotation. CSQ, ANN and BCSQ parsing in <code><a href="../reference/rduckhts_bcf.html">rduckhts_bcf()</a></code> is unchanged.</p></li>
+</ul></div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="1.5.2.9005-0.1.5" id="rduckhts-1529005-015">Rduckhts 1.5.2.9005-0.1.5<a class="anchor" aria-label="anchor" href="#rduckhts-1529005-015"></a></h2>
 <ul><li><p><code><a href="../reference/rduckhts_ancestry_proportions.html">rduckhts_ancestry_proportions()</a></code> estimates ancestry proportions from allele-frequency or diploid-dosage relations against keyed wide or long reference products, with matching audits and correlation gates on unrounded coefficients. <code>reversed_variants</code> counts every site read as <code>1 - f</code>, including strand-flipped reversals; <code>flipped_variants</code> counts every strand-flipped site. Reference loci touching any input locus must be unique; matched loci need finite loadings and frequencies in [0, 1]. Every sample returns a row for every reference group, with NULL proportions and <code>no_matched_variants</code> when nothing matches. Group identifiers round-trip exactly; wide references can map columns to identifiers with <code>group_ids</code>. Missing genotypes are dropped.</p></li>
@@ -111,7 +117,7 @@
 </ul></div>
 <div class="section level3">
 <h3 id="duckvep-annotation-and-haplotype-replay-1-5-2-0-1-5">DuckVEP annotation and haplotype replay<a class="anchor" aria-label="anchor" href="#duckvep-annotation-and-haplotype-replay-1-5-2-0-1-5"></a></h3>
-<ul><li>Add <code><a href="../reference/rduckhts_haplotypes.html">rduckhts_haplotypes()</a></code> for shared CDS/protein paths with complete carrier and contributor evidence, coding blocks, local coding status and aligned CDS/protein differences. Per-call capacities bound native replay, alignment and HGVS storage; exhaustion raises errors. DuckDB input/output memory is outside the native workspace limit.</li>
+<ul><li>Add <code>rduckhts_haplotypes()</code> for shared CDS/protein paths with complete carrier and contributor evidence, coding blocks, local coding status and aligned CDS/protein differences. Per-call capacities bound native replay, alignment and HGVS storage; exhaustion raises errors. DuckDB input/output memory is outside the native workspace limit.</li>
 <li>Support explicit decoded-call phase policies and <code>input_mode = "source_records"</code> for original GT spelling and complete ALT lists. Preserve missing/unphased, conditional, overwritten and noncoding contributors. Known REF slots remain distinct from selected skipped ALTs. Model/REF failures retain unavailable sequence rather than fabricated output.</li>
 <li>Add <code>hgvs = TRUE</code> for supported protein HGVS with explicit unsupported states and <code>max_hgvs_reference_bytes</code>. Frame restoration does not erase physical edits or downstream contributors; <code>stop_in_displaced_frame</code> is not a protein rescue prediction. <code>nominal_length_diff</code> differs from rebuilt CDS length when source replacement clipping changes the applied span.</li>
 <li>Correct bundled SNV/MNV/indel consequences and protein HGVS around phase-padded CDS starts, partial terminal codons, UTR/CDS transitions and transcript ends. N-containing codons use pinned VEP-116 consensus where defined; literal REF validation and unavailable-context states remain explicit.</li>

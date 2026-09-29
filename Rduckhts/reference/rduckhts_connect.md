@@ -43,7 +43,9 @@ rduckhts_connect(
 
 ## Value
 
-A DuckDB connection with DuckHTS loaded.
+A DuckDB connection with DuckHTS loaded. File-backed connections also
+have connection-local TEMP macros installed without modifying the
+database catalog.
 
 ## Details
 

@@ -51,7 +51,6 @@
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_gff_multi.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_gtf.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_gtf_multi.html</loc></url>
-<url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_haplotypes.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_hts_header.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_hts_index.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_hts_index_raw.html</loc></url>
@@ -59,6 +58,7 @@
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_htslib_config.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_htslib_info.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_htslib_version.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_install_macros.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_liftover.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_load.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_mosdepth.html</loc></url>

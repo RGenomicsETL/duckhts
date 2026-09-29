@@ -35,7 +35,10 @@ The connection must permit unsigned extension loading. With current
 versions of the duckdb R package, its driver must also permit extension
 loading. Prefer
 [`rduckhts_connect()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_connect.md)
-when Rduckhts owns the connection.
+when Rduckhts owns the connection. File-backed connections receive TEMP
+macros on this connection after LOAD. Use
+[`rduckhts_install_macros()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_install_macros.md)
+on additional connections.
 
 ## Examples
 
