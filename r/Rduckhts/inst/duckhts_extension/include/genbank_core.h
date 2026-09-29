@@ -195,6 +195,10 @@ static inline const char *gb_str(const gb_parser_t *p, gb_span_t s) {
 size_t gb_feature_attr_count(const gb_parser_t *p, size_t feature);
 gb_status_t gb_feature_attr_at(const gb_parser_t *p, size_t feature, size_t index,
                                kstring_t *key, kstring_t *value);
+/* Key and value of one attribute, emitted separately so a caller that needs only
+ * some pairs can skip encoding the values it discards. attr_at is both. */
+gb_status_t gb_feature_attr_key(const gb_parser_t *p, size_t feature, size_t index, kstring_t *key);
+gb_status_t gb_feature_attr_value(const gb_parser_t *p, size_t feature, size_t index, kstring_t *value);
 gb_status_t gb_feature_attributes(const gb_parser_t *p, size_t feature, kstring_t *out);
 
 #endif

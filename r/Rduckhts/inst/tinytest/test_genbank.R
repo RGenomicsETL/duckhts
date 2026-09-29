@@ -235,6 +235,66 @@ test_genbank_semantics <- function() {
   expect_equal(parents$parent, c("gene-g1", "", "gene-g2", "", ""))
 }
 
-test_genbank_semantics()
+test_genbank_named_attributes <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  genbank_path <- system.file(
+    "extdata",
+    "phix174.gb",
+    package = "Rduckhts",
+    mustWork = TRUE
+  )
+
+  # Named qualifier columns equal attributes_map lookups, including absent keys.
+  keys <- c("locus_tag", "product", "note", "db_xref", "ID", "Parent", "missing")
+  expect_silent(rduckhts_genbank(
+    con,
+    "phix_named",
+    genbank_path,
+    attributes = keys,
+    attributes_map = TRUE,
+    overwrite = TRUE
+  ))
+  named <- dbGetQuery(con, "SELECT * FROM phix_named")
+  expect_equal(names(named)[10:17], c("attributes_map", keys))
+  for (key in keys) {
+    same <- dbGetQuery(
+      con,
+      sprintf(
+        "SELECT bool_and(%s IS NOT DISTINCT FROM attributes_map[%s]) AS same FROM phix_named",
+        dbQuoteIdentifier(con, key),
+        dbQuoteString(con, key)
+      )
+    )$same
+    expect_true(same, info = key)
+  }
+  expect_true(any(!is.na(named$product)))
+  expect_true(all(is.na(named$missing)))
+
+  expect_silent(rduckhts_genbank(
+    con,
+    "phix_unmapped",
+    genbank_path,
+    attributes = "locus_tag",
+    overwrite = TRUE
+  ))
+  expect_equal(names(dbGetQuery(con, "SELECT * FROM phix_unmapped LIMIT 1"))[10L], "locus_tag")
+  expect_silent(rduckhts_genbank(
+    con,
+    "phix_no_keys",
+    genbank_path,
+    attributes = character(),
+    overwrite = TRUE
+  ))
+  expect_equal(ncol(dbGetQuery(con, "SELECT * FROM phix_no_keys LIMIT 1")), 9L)
+
+  expect_error(rduckhts_genbank(con, "bad", genbank_path, attributes = 1), "character vector")
+  expect_error(rduckhts_genbank(con, "bad", genbank_path, attributes = NA_character_), "NA")
+  expect_error(rduckhts_genbank(con, "bad", genbank_path, attributes = ""), "empty")
+  expect_error(rduckhts_genbank(con, "bad", genbank_path, attributes = "START"), "collides")
+  expect_error(rduckhts_genbank(con, "bad", genbank_path, attributes = c("ID", "id")), "distinct")
+}
 
 test_genbank()
+test_genbank_semantics()
+test_genbank_named_attributes()
