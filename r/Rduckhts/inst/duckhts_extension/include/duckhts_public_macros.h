@@ -1,0 +1,28 @@
+/* Generated from functions.yaml by scripts/render_function_catalog.py. */
+#ifndef DUCKHTS_PUBLIC_MACROS_H
+#define DUCKHTS_PUBLIC_MACROS_H
+static const char *const duckhts_public_macros[] = {
+    "duckdb_liftover",
+    "duckdb_munge",
+    "duckdb_munge_metal",
+    "duckhts_bam_convert_parquet_sql",
+    "duckhts_bcf_convert_parquet_sql",
+    "duckhts_bcftools_norm",
+    "duckhts_duckdb_supports_geometry",
+    "duckhts_duckdb_supports_variant",
+    "duckhts_duckdb_type_supported",
+    "duckhts_gff_convert_parquet_sql",
+    "duckhts_somalier_charr",
+    "duckhts_somalier_frequency_sha256",
+    "duckhts_somalier_import_sites",
+    "duckhts_somalier_matched_contamination",
+    "duckhts_somalier_panel_sha256",
+    "duckhts_somalier_prepare_sketches",
+    "duckhts_somalier_vcf_counts",
+    "duckhts_somalier_verify_sketches",
+    "duckhts_tabix_convert_parquet_sql",
+    "hts_region_union_query",
+    "hts_union_query",
+    "read_hts_index_raw",
+};
+#endif

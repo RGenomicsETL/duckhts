@@ -2,6 +2,12 @@
 
 This section is generated from `functions.yaml`.
 
+### Utilities
+
+| Function | Kind | R helper | Description |
+| --- | --- | --- | --- |
+| [`duckhts_macro_definitions`](reference.md#duckhts_macro_definitions) | table |  | Export the ordered DuckHTS macro definitions for connection-local installation. |
+
 ### Diagnostics
 
 | Function | Kind | R helper | Description |
