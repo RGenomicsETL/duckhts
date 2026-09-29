@@ -184,13 +184,6 @@ fi
   --test-dir test/sql --file-path test/sql/geno.test --external-extension "$extension"
 "${python_runtime[@]}" ./configure/venv/bin/python3 scripts/run_sqllogictest.py \
   --test-dir test/sql --file-path test/sql/bcf_malformed_error.test --external-extension "$extension"
-# Cover query-owned phased replay, nested preparation errors and chunk reuse.
-"${python_runtime[@]}" ./configure/venv/bin/python3 scripts/run_sqllogictest.py \
-  --test-dir test/sql --file-path test/sql/duckvep_haplotypes.test --external-extension "$extension"
-# The shared registry also serves independent annotation, including models
-# with known regions that have no transcript or regulatory intervals.
-"${python_runtime[@]}" ./configure/venv/bin/python3 scripts/run_sqllogictest.py \
-  --test-dir test/sql --file-path test/sql/duckvep_annotate.test --external-extension "$extension"
 # CIGAR checks assert numeric results as well as memory safety: UBSan does not
 # diagnose unsigned wraparound, and invalid rows must not leak list entries.
 for cigar_test in cigar_utils cigar_aligned_blocks bam_cigar_binary; do

@@ -1,5 +1,0 @@
-field	value
-source_revision	e363b28e7e248c26b7a56a3d5df5055001d230db
-path	/root/duckhts/build/release/duckhts.duckdb_extension
-binding	htslib_distclean_make_release
-sha256	4d91b77694576fe53e7185f933fb66a8fc7ed5eb8a002c3cea2683a14ce9d8bf

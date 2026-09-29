@@ -1,5 +1,0 @@
-Annotating: /root/duckhts/test/duckvep/conformance/results/fastvep_fields_seed173_5cdbe9d/noncoding_first_exon_phase1/input.vcf -> /root/duckhts/test/duckvep/conformance/results/fastvep_fields_seed173_5cdbe9d/noncoding_first_exon_phase1/fastvep_native_tab17.tsv
-Loaded 1 transcripts from /root/duckhts/test/duckvep/conformance/results/fastvep_fields_seed173_5cdbe9d/noncoding_first_exon_phase1/noncoding_first_exon_phase1.gff3 (source label: noncoding_first_exon_phase1.gff3)
-Memory-mapped reference FASTA from /root/.cache/duckhts/benchmarks/duckvep-projection/inputs/minimal.fa (using .fai index)
-Built sequences for 1 coding transcripts
-Saved transcript cache to /root/duckhts/test/duckvep/conformance/results/fastvep_fields_seed173_5cdbe9d/noncoding_first_exon_phase1/fastvep.cache

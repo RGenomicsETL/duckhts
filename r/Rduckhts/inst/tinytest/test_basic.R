@@ -539,24 +539,6 @@ expect_true(file.exists(system.file(
   package = "Rduckhts"
 )))
 
-# The installed rebuild path and package bootstrap share one DuckVEP source
-# inventory. Every listed source must be present in the bundled tree.
-duckvep_kernel_sources <- getFromNamespace(
-  "duckhts_duckvep_kernel_source_files",
-  "Rduckhts"
-)()
-expect_true(length(duckvep_kernel_sources) > 0L)
-expect_true(all(file.exists(file.path(
-  system.file(
-    "duckhts_extension",
-    "duckvep",
-    "kernel",
-    "src",
-    package = "Rduckhts"
-  ),
-  duckvep_kernel_sources
-))))
-
 catalog <- rduckhts_functions()
 expect_true(is.data.frame(catalog))
 expect_identical(

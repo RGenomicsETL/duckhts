@@ -1,5 +1,17 @@
 # DuckHTS Extension News
 
+# duckhts 1.5.2.9006
+
+- Consequence prediction has moved to the [DuckVEP extension](https://github.com/RGenomicsETL/DuckVEP),
+  its single source. DuckHTS no longer ships the DuckVEP functions and macros
+  (`duckvep_ensembl_regions`, `duckvep_ensembl_transcripts`,
+  `duckvep_ensembl_regulation_features`, `duckvep_model_receipt`, `duckvep_model_load`,
+  `duckvep_model_drop`, `duckvep_allele_geometry`, `duckvep_transcript_projection`,
+  `duckvep_repeat_alleles`, `duckvep_breakend_geometry`, `duckvep_haplotypes`,
+  `duckvep_phase_call`, `duckvep_annotate`, `duckvep_so_terms`), their conformance tests,
+  corpora and benchmarks. Load DuckVEP alongside DuckHTS for annotation. Parsing of
+  existing CSQ, ANN and BCSQ annotations in `read_bcf()` is unchanged.
+
 # duckhts 1.5.2.9005
 
 - `duckhts_ancestry_proportions()` estimates reference-group ancestry proportions by

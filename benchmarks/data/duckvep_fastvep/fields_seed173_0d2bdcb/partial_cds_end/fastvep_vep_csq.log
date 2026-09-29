@@ -1,4 +1,0 @@
-Annotating: test/duckvep/conformance/results/fastvep_fields_0d2bdcb_seed173/partial_cds_end/input.vcf -> test/duckvep/conformance/results/fastvep_fields_0d2bdcb_seed173/partial_cds_end/fastvep_vep_csq.vcf
-warning: --transcript-cache test/duckvep/conformance/results/fastvep_fields_0d2bdcb_seed173/partial_cds_end/fastvep.cache takes precedence over --gff3 ["test/duckvep/conformance/results/fastvep_fields_0d2bdcb_seed173/partial_cds_end/partial_cds_end.gff3"]; the GFF3 file(s) will NOT be parsed. Drop --transcript-cache to load from GFF3 instead, or remove the --gff3 flags to silence this warning.
-Loaded 1 transcripts from cache test/duckvep/conformance/results/fastvep_fields_0d2bdcb_seed173/partial_cds_end/fastvep.cache
-Memory-mapped reference FASTA from /root/.cache/duckhts/benchmarks/duckvep-projection/inputs/minimal.fa (using .fai index)

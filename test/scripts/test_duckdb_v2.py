@@ -48,9 +48,4 @@ ORDER BY source_sample_index, site_index
     ("S2", 1, 0, 10, 5, "measured"),
     ("S2", 2, None, None, None, "unavailable_no_record"),
 ])
-check("SELECT __duckvep_projection_residue('AAA', repeat('K', 64))", [("K",)])
-check("""
-SELECT __duckvep_projection_base(
-  [struct_pack(exon_start := 1, exon_end := 3, exon_cdna_start := 1)], 1, 2)
-""", [(2,)])
-print(f"DuckDB {duckdb.__version__}: LOAD, read_bcf, Somalier, DuckVEP passed")
+print(f"DuckDB {duckdb.__version__}: LOAD, read_bcf, Somalier passed")
