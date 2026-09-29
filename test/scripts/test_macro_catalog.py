@@ -36,7 +36,7 @@ def definitions(con):
         "SELECT name, public, sql, definitions_sha256 "
         "FROM duckhts_macro_definitions() ORDER BY install_order"
     ).fetchall()
-    assert len(rows) == 32
+    assert len(rows) == 33
     assert len({row[3] for row in rows}) == 1
     ordered = b"".join(
         bytes([int(exposed)]) +

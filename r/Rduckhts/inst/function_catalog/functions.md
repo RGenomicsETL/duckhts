@@ -106,7 +106,7 @@ This section is generated from `functions.yaml`.
 | Function | Kind | R helper | Description |
 | --- | --- | --- | --- |
 | [`duckhts_somalier_spacing`](reference.md#duckhts_somalier_spacing) | scalar | `rduckhts_somalier_find_sites` | Greedily select ranked Somalier candidate positions at a minimum genomic distance. |
-| [`duckhts_somalier_import_sites`](reference.md#duckhts_somalier_import_sites) | table_macro | `rduckhts_somalier_import_sites` | Import an already selected Somalier sites VCF/BCF as one canonical panel and population-frequency relation. |
+| [`duckhts_somalier_import_sites`](reference.md#duckhts_somalier_import_sites) | table_macro | `rduckhts_somalier_import_sites` | Import an already selected Somalier sites VCF/BCF as one canonical panel and population-frequency relation, autosomal and X/Y sites together. |
 | [`duckhts_somalier_vcf_counts`](reference.md#duckhts_somalier_vcf_counts) | table_macro | `rduckhts_somalier_vcf_counts` | Extract a complete panel-aligned A/B/other count relation from VCF/BCF FORMAT/AD. |
 | [`duckhts_somalier_bam_counts`](reference.md#duckhts_somalier_bam_counts) | table | `rduckhts_somalier_bam_counts` | Extract complete panel-aligned A/B/other base counts from one indexed BAM or CRAM source. |
 | [`duckhts_ancestry_proportions`](reference.md#duckhts_ancestry_proportions) | scalar | `rduckhts_ancestry_proportions` | Solve a nearest-positive-definite constrained ancestry projection from aggregated PC products. |
@@ -119,6 +119,7 @@ This section is generated from `functions.yaml`.
 | [`duckhts_somalier_verify_relatedness`](reference.md#duckhts_somalier_verify_relatedness) | scalar |  | Verify a typed relatedness result against its two sealed sketches. |
 | [`duckhts_somalier_charr`](reference.md#duckhts_somalier_charr) | table_macro | `rduckhts_somalier_charr` | Estimate per-sample contamination with a bounded Somalier-derived CHARR reduction. |
 | [`duckhts_somalier_matched_contamination`](reference.md#duckhts_somalier_matched_contamination) | table_macro | `rduckhts_somalier_matched_contamination` | Estimate directional contamination for explicitly selected receiver/anchor sample pairs. |
+| [`duckhts_somalier_sex`](reference.md#duckhts_somalier_sex) | table_macro | `rduckhts_somalier_sex` | Report X/Y dosage evidence and a review-only XX, XY or ambiguous call per sample from panel counts. |
 
 ### Metadata
 
