@@ -16,7 +16,15 @@
   positive whole numbers and PC identifiers are consecutive whole numbers. Every sample
   returns a row for every reference group, with NULL proportions when no variant
   matches. Group identifiers round-trip exactly. Matching audits count reversed sites
-  (including strand-flipped reversals, read as `1 - f`) and flipped sites.
+  (including strand-flipped reversals, read as `1 - f`) and flipped sites. BAM/CRAM
+  site panels capped at `max_sites` keep one site per contig (only the largest
+  `max_sites` contigs when there are more contigs than that) and share the remaining
+  sites in proportion to each contig's eligible sites minus that one.
+  Site eligibility (one allele pair, every group and PC exactly once) is checked with
+  constant per-locus state instead of distinct aggregates, selecting the same sites: on
+  bigsnpr's full reference a one-thread build takes 38 s and 1.7 GiB instead of 115 s
+  and 16 GiB with 2.5 GiB of spill, and four threads no longer run out of memory at 16 GB
+  (`benchmarks/benchmark_ancestry_panel.md`).
 
 - The benchmark registry pins bigsnpr's reference frequencies and loadings, staged once
   as a checksum-bound sorted Parquet product whose receipt certifies unique loci and
