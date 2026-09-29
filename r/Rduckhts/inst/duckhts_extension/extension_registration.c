@@ -20,6 +20,9 @@ static duckhts_macro_t macros[DUCKHTS_MAX_MACROS];
 static size_t macro_count;
 static char definitions_sha256[65];
 static atomic_flag macro_lock = ATOMIC_FLAG_INIT;
+/* The definition list is built under macro_lock by the first successful LOAD in the
+   process and never changes afterwards. Readers use it only once it is published. */
+static atomic_bool definitions_published = false;
 
 bool duckhts_registration_error(duckhts_registration_t *registration, const char *message) {
     registration->access->set_error(registration->info, message);
@@ -38,7 +41,7 @@ static bool macro_is_public(const char *name) {
 bool duckhts_macro_registration_begin(duckhts_registration_t *registration) {
     while (atomic_flag_test_and_set_explicit(&macro_lock, memory_order_acquire)) {
     }
-    if (definitions_sha256[0] == '\0') {
+    if (!atomic_load_explicit(&definitions_published, memory_order_acquire)) {
         for (size_t i = 0; i < macro_count; i++) {
             free(macros[i].name);
             free(macros[i].sql);
@@ -48,6 +51,9 @@ bool duckhts_macro_registration_begin(duckhts_registration_t *registration) {
         macro_count = 0;
     }
 
+    /* The decision concerns the database instance's default catalog, which is what the
+       extension's initialization connection sees; a caller's USE of another catalog
+       before LOAD does not change it. Those callers install the TEMP definitions. */
     duckdb_result result;
     duckdb_state state = duckdb_query(registration->connection,
         "SELECT count(*) = 1 AND coalesce(bool_and(path IS NULL OR path = ''), false) "
@@ -126,8 +132,11 @@ bool duckhts_macro_registration_end(duckhts_registration_t *registration) {
     bool ok = registration->macro_index == macro_count;
     if (!ok) {
         duckhts_registration_error(registration, "Inconsistent DuckHTS macro registration order");
-    } else if (definitions_sha256[0] == '\0') {
+    } else if (!atomic_load_explicit(&definitions_published, memory_order_acquire)) {
         ok = macro_digest(registration);
+        if (ok) {
+            atomic_store_explicit(&definitions_published, true, memory_order_release);
+        }
     }
     atomic_flag_clear_explicit(&macro_lock, memory_order_release);
     return ok;
@@ -240,6 +249,10 @@ static void macro_scan_destroy(void *ptr) {
 }
 
 static void macro_definitions_init(duckdb_init_info info) {
+    if (!atomic_load_explicit(&definitions_published, memory_order_acquire)) {
+        duckdb_init_set_error(info, "DuckHTS macro definitions are not available until DuckHTS has loaded");
+        return;
+    }
     macro_scan_t *scan = duckdb_malloc(sizeof(*scan));
     if (scan == NULL) {
         duckdb_init_set_error(info, "Cannot allocate macro scan");

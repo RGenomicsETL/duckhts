@@ -145,6 +145,23 @@ class FunctionCatalogTests(unittest.TestCase):
                     catalog.main(["render_function_catalog.py", str(root)])
             self.assertIn("Invalid public macro identifier", error.getvalue())
 
+    def test_checked_in_public_macro_header_matches_the_manifest(self) -> None:
+        repo = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory(prefix="duckhts-catalog-test-") as directory:
+            root = Path(directory)
+            # The header depends only on the function list; pin the descriptor's git
+            # ref so rendering needs no repository.
+            manifest = json.loads((repo / "functions.yaml").read_text(encoding="utf-8"))
+            manifest["community_extension"]["repo"]["ref"] = "test-revision"
+            (root / "functions.yaml").write_text(json.dumps(manifest), encoding="utf-8")
+            (root / "description.yml").write_text(
+                (repo / "description.yml").read_text(encoding="utf-8"), encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(catalog.main(["render_function_catalog.py", str(root)]), 0)
+            self.assertEqual(
+                (root / "src/include/duckhts_public_macros.h").read_text(encoding="utf-8"),
+                (repo / "src/include/duckhts_public_macros.h").read_text(encoding="utf-8"))
+
     def test_main_writes_reference_and_keeps_the_tsv_schema(self) -> None:
         manifest = manifest_fixture()
         manifest["functions"][1]["kind"] = "scalar_macro"

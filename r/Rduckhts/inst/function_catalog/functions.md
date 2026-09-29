@@ -6,7 +6,7 @@ This section is generated from `functions.yaml`.
 
 | Function | Kind | R helper | Description |
 | --- | --- | --- | --- |
-| [`duckhts_macro_definitions`](reference.md#duckhts_macro_definitions) | table_function |  | Export the ordered DuckHTS macro definitions for connection-local installation. |
+| [`duckhts_macro_definitions`](reference.md#duckhts_macro_definitions) | table |  | Export the ordered DuckHTS macro definitions for connection-local installation. |
 
 ### Diagnostics
 

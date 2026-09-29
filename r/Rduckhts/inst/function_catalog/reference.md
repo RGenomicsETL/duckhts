@@ -20,7 +20,7 @@ TABLE
 
 ### Installation
 
-LOAD creates macros in a writable in-memory default database. For file-backed or read-only default databases LOAD creates no macros: execute the exported TEMP statements in install_order on each connection that needs them (R: rduckhts_install_macros). TEMP macros shadow, but do not delete, persistent macros in older files. The definitions_sha256 value identifies the entire ordered definition set.
+LOAD creates macros in a writable in-memory default database. For file-backed or read-only default databases LOAD creates no macros: execute the exported TEMP statements in install_order on each connection that needs them (R: rduckhts_install_macros). The decision concerns the database instance's default database; a connection that USEs another catalog before or after LOAD installs the TEMP statements too. TEMP macros shadow, but do not delete, persistent macros in older files. The definitions_sha256 value identifies the entire ordered definition set.
 
 ### Columns
 
