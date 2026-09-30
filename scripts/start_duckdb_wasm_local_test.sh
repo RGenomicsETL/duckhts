@@ -10,7 +10,7 @@ LOCAL_WASM_IMAGE=${LOCAL_WASM_IMAGE:-duckhts/duckdb-wasm-local:latest}
 LOCAL_WASM_DOCKERFILE=${LOCAL_WASM_DOCKERFILE:-scripts/docker/duckdb-wasm-local.Dockerfile}
 # duckdb-wasm 1.29.0 is based on DuckDB v1.1.1 and traps while loading our
 # current extension build; use the first 1.4.x-aligned runtime by default.
-DUCKDB_WASM_NPM_VERSION=${DUCKDB_WASM_NPM_VERSION:-1.31.0}
+DUCKDB_WASM_NPM_VERSION=${DUCKDB_WASM_NPM_VERSION:-1.33.1-dev57.0}
 # SERVE=1 (default) builds the site then serves it with python http.server.
 # SERVE=0 builds the site and exits, printing SITE_ROOT/PORT so an external
 # driver (e.g. Playwright's webServer) can own the HTTP server lifecycle.
@@ -98,14 +98,10 @@ RUNTIME_BASE="https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@${DUCKDB_WASM_NPM
 RUNTIME_CACHE="$(duckhts_cache_subdir "runtime/duckdb-wasm/${DUCKDB_WASM_NPM_VERSION}")"
 runtime_sha256() { # filename; npm package dist assets
   case "$DUCKDB_WASM_NPM_VERSION/$1" in
-    1.31.0/duckdb-browser.mjs) printf '%s\n' '660ee2979e878cfd1d70122ab6d511d4454c5e687f59977e77ff70097730a8a0' ;;
-    1.31.0/duckdb-browser-eh.worker.js) printf '%s\n' 'fb692cd56e87c71849ff545e14fef54c91ed4cdef295f16172ab27be8de76b5d' ;;
-    1.31.0/duckdb-eh.wasm) printf '%s\n' '07993a5cda534ebb303d476cbdf3d1f7271841c1298709a4b4a5713d8c78b156' ;;
-    1.31.0/duckdb-browser-eh.worker.js.map) printf '%s\n' 'e3750fb2ea26e4e1e1baf49f3a2b2f3d722d3a0bd840830f2abd431f8546dc90' ;;
-    1.32.0/duckdb-browser.mjs) printf '%s\n' '4f8c0bb3c23d1ec457a451cc27418597b9a40dd772cceacc436a2cb7b9a49c18' ;;
-    1.32.0/duckdb-browser-eh.worker.js) printf '%s\n' 'f8ab72b6b90b3ad83077d47426d4a99d5d9a4c7e07cba1a2be37d655adc7c1ab' ;;
-    1.32.0/duckdb-eh.wasm) printf '%s\n' '4c221bfa59c11f24dbd750e70c90b9252eca6eec5633936e6a2ec766e55fd879' ;;
-    1.32.0/duckdb-browser-eh.worker.js.map) printf '%s\n' '10ad23ff9cd7171dd4a67b18b236fbf469c605b613862aa9ba72579d9d6e1060' ;;
+    1.33.1-dev57.0/duckdb-browser.mjs) printf '%s\n' '95ea0678ebf4a817464f81ec07c9c4188470f361967975ef6ca85fd674cfc6ec' ;;
+    1.33.1-dev57.0/duckdb-browser-eh.worker.js) printf '%s\n' 'fa889e6068c40426dea67c08cf16ce0cad7404eae94f6a2522adcabb5898eb93' ;;
+    1.33.1-dev57.0/duckdb-eh.wasm) printf '%s\n' '3abdec74989dcc54d2f2ea5621f611f3c45db1e7dff2f408476014d82beb2029' ;;
+    1.33.1-dev57.0/duckdb-browser-eh.worker.js.map) printf '%s\n' '9d4144d9a1e98d73cbf01dc59bce30aff59354b8b033c54e510eb26c03d2c806' ;;
     *) return 2 ;;
   esac
 }

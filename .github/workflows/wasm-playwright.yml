@@ -23,7 +23,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runtime: ['1.31.0', '1.32.0']
+        # DuckHTS requires DuckDB 1.5.0 or newer; 1.33.1-dev57.0 ships DuckDB v1.5.4.
+        runtime: ['1.33.1-dev57.0']
     env:
       DUCKDB_WASM_NPM_VERSION: ${{ matrix.runtime }}
     steps:
