@@ -3,6 +3,9 @@
  * The caller builds per-sample, per-chromosome lists with list(... ORDER BY pos). One
  * row is decoded at a time, so peak memory follows the longest list, not the chunk.
  */
+#if defined(__MINGW32__) && !defined(__USE_MINGW_ANSI_STDIO)
+#define __USE_MINGW_ANSI_STDIO 1
+#endif
 #include "duckdb_extension.h"
 DUCKDB_EXTENSION_EXTERN
 
@@ -57,7 +60,15 @@ static roh_list_t open_list(duckdb_vector vector, idx_t row) {
     return list;
 }
 
-static void roh_error(duckdb_function_info info, const char *format, ...) __attribute__((format(printf, 2, 3)));
+/* MinGW's GCC treats the printf archetype as Microsoft's format rules, which
+ * reject %lld/%llu. Use its C99-conforming stdio and check formats as such. */
+#if defined(__MINGW32__)
+#define ROH_PRINTF_ARCHETYPE gnu_printf
+#else
+#define ROH_PRINTF_ARCHETYPE printf
+#endif
+static void roh_error(duckdb_function_info info, const char *format, ...)
+    __attribute__((format(ROH_PRINTF_ARCHETYPE, 2, 3)));
 
 static void roh_error(duckdb_function_info info, const char *format, ...) {
     char message[ROH_ERRLEN];
