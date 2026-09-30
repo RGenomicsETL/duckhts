@@ -33,7 +33,17 @@ released, which fixes reopening a database file in the same process on Windows.
   `R CMD check --as-cran --no-manual` with `_R_CHECK_FORCE_SUGGESTS_=false`:
   Ubuntu 24.04, x86_64, R 4.6.0 (2026-04-24), GCC 13.3.0, `duckdb` R 1.5.5.
 
-<!-- CI matrix: filled in by the lead -->
+- GitHub Actions, R-CMD-check run 36750177321 on the release-preparation head:
+  - Ubuntu 24.04, R 4.6.1 and R-devel (4.7.0): passed.
+  - macOS 26 (aarch64), R 4.6.1: passed.
+  - Windows Server 2022, R 4.6.1 (ucrt): passed.
+  - Fedora 44, clang 22, R 4.6.1, CRAN-like with warnings as errors: 2 NOTEs.
+    One is the update count; the URL check also could not connect from the
+    container. The other lists compiler flags that Fedora's R configuration
+    supplies (`-march=x86-64`, `-mtls-dialect=gnu2`, `-D_FORTIFY_SOURCE=3`
+    and others), not flags the package adds.
+  - Fedora, GCC 16, R-devel (2026-09-29 r90598): 1 NOTE, the update count.
+  - Linux ARM64 and Windows ARM64 package contract checks: passed.
 
 ## R CMD check results
 
