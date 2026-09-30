@@ -1,5 +1,14 @@
 # duckhtsbench 0.0.0.9001
 
+- register the `genbank-plasmid` workload: the first four
+  `plasmid.N.genomic.gbff.gz` parts of NCBI RefSeq release 237, each pinned by
+  NCBI's published MD5, and three derived record files joining 1, 2 and 4 of
+  them through a new `gunzip_concatenate` transform
+  (`duckhts_bench_stage_gunzip_concatenate()`), staged by
+  `duckhts_bench_stage_genbank_plasmid()` with a network-free staging test; it
+  is the record-count scaling input `benchmark_genbank_named_attributes.Rmd`
+  reads
+
 - register `ancestry_reference_grch38_parquet`, the keyed ancestry reference
   lifted from GRCh37 with `duckdb_liftover` (registered chain and FASTAs), and
   stage it with `duckhts_bench_stage_ancestry_grch38_parquet()`. Its receipt binds

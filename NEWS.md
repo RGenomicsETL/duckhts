@@ -300,7 +300,9 @@ Preview of 2.0.0, still in development: ROH (#318) has begun with the bcftools-c
   (`benchmarks/benchmark_init_readers.md`); checked CIGAR projection costs on
   matched ONT and synthetic long-CIGAR inputs, including all strict modes
   (`benchmarks/benchmark_cigar_validation.md`); the GenBank named-attribute
-  comparison (`benchmarks/benchmark_genbank_named_attributes.md`); a
+  comparison (`benchmarks/benchmark_genbank_named_attributes.md`), measured on
+  the first four RefSeq release 237 plasmid parts joined 1, 2 and 4 at a time,
+  with row-level parity against `attributes_map` and a memory ceiling; a
   registry-staged, parity-checked GFFBase feature-database comparison using SQL
   over `read_gff`. The aligned-block benchmark oracle is NULL-aware and compares
   every physical record before timing, with duplicate/NULL corruption controls.
