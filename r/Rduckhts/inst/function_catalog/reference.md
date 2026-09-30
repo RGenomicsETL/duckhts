@@ -1610,7 +1610,7 @@ table
 
 ### Attributes
 
-attributes := ['Parent', 'ID'] appends VARCHAR columns named for the requested keys. Each value equals attributes_map[key], including NULL for absent keys; repeated keys use the first value and GFF3 percent encoding is retained. Keys must be nonempty, unique under ASCII case-insensitive column naming, and distinct from fixed and optional attribute column names. Only projected keys are parsed during scanning.
+attributes := ['Parent', 'ID'] appends VARCHAR columns named for the requested keys. Each value equals attributes_map[key], including NULL for absent keys; repeated keys use the first value and GFF3 percent encoding is retained. Key lookup is case-sensitive, as GFF3 tags are: attributes := ['id'] on a file that uses ID returns a column of NULLs. Keys must be nonempty and distinct from fixed and optional attribute column names; because column names ignore case, two keys that differ only in case are rejected. Only projected keys are parsed during scanning.
 
 ### Scanning
 
@@ -1640,7 +1640,7 @@ table
 
 ### Attributes
 
-attributes := ['gene_id', 'transcript_id'] appends VARCHAR columns named for the requested keys. Each value equals attributes_map[key], including NULL for absent keys; repeated keys use the first value. Keys must be nonempty, unique under ASCII case-insensitive column naming, and distinct from fixed and optional attribute column names. Only projected keys are parsed during scanning.
+attributes := ['gene_id', 'transcript_id'] appends VARCHAR columns named for the requested keys. Each value equals attributes_map[key], including NULL for absent keys; repeated keys use the first value. Key lookup is case-sensitive: attributes := ['Gene_ID'] on a file that uses gene_id returns a column of NULLs. Keys must be nonempty and distinct from fixed and optional attribute column names; because column names ignore case, two keys that differ only in case are rejected. Only projected keys are parsed during scanning.
 
 ### Scanning
 
@@ -1678,7 +1678,7 @@ Synthesized GFF3 keys ID, Name and Parent accompany the original qualifiers. ID 
 
 ### Named attributes
 
-attributes := ['gene', 'product'] appends VARCHAR columns named for the requested keys, after attributes_map when that is requested. Each value equals attributes_map[key] byte for byte: repeated qualifiers are comma-joined, a valueless qualifier reads 'true', values stay percent-encoded, the synthesized ID, Name and Parent are addressable, and an absent key is NULL. Keys must be nonempty, unique under ASCII case-insensitive column naming, and distinct from the fixed columns and attributes_map when it is requested. Only projected keys are computed during scanning.
+attributes := ['gene', 'product'] appends VARCHAR columns named for the requested keys, after attributes_map when that is requested. Each value equals attributes_map[key] byte for byte: repeated qualifiers are comma-joined, a valueless qualifier reads 'true', values stay percent-encoded, the synthesized ID, Name and Parent are addressable, and an absent key is NULL. Key lookup is case-sensitive, like qualifier keys themselves: attributes := ['ec_number'] on features that carry /EC_number returns a column of NULLs. Keys must be nonempty and distinct from the fixed columns and attributes_map when it is requested; because column names ignore case, two keys that differ only in case are rejected. Only projected keys are computed during scanning.
 
 ### Errors
 

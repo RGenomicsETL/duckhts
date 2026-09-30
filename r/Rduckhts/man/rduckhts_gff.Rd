@@ -57,7 +57,9 @@ instead of index-backed count paths. Sequential mode is incompatible with
 
 \item{overwrite}{Logical. If TRUE, overwrites existing table}
 
-\item{attributes}{Character vector of attribute keys to expose as VARCHAR columns}
+\item{attributes}{Character vector of attribute keys to expose as VARCHAR
+columns. Key matching is case-sensitive: \code{"id"} does not match
+\code{ID}, and an unmatched key gives a column of \code{NA}}
 }
 \value{
 Invisible TRUE on success
