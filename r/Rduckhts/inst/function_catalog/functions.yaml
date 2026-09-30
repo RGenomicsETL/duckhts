@@ -683,6 +683,62 @@
       ]
     },
     {
+      "name": "duckhts_roh_segments",
+      "kind": "scalar",
+      "category": "Variants",
+      "signature": "duckhts_roh_segments(positions, af, pl, map_pos, map_cm, rec_rate, hw_to_az, az_to_hw)",
+      "returns": "STRUCT(start BIGINT, \"end\" BIGINT, n_markers INTEGER, quality DOUBLE)[]",
+      "r_wrapper": "",
+      "description": "Decode runs of homozygosity from one sample's sorted per-chromosome site lists, reproducing bcftools roh.",
+      "details": {
+        "Overloads": "duckhts_roh_segments(positions, af, pl, map_pos, map_cm, rec_rate, hw_to_az, az_to_hw) takes phred-scaled likelihoods as INTEGER[][] (three values per site: RR, RA, AA). duckhts_roh_segments(positions, af, dosage, gt_error, map_pos, map_cm, rec_rate, hw_to_az, az_to_hw) takes INTEGER[] genotype dosages 0, 1 or 2 and a phred gt_error, as bcftools roh -G does. All arguments are positional; the duckhts_roh macro supplies the defaults.",
+        "Input": "positions is a BIGINT[] of one-based coordinates, sorted ascending and all in 1..2147483647; af is a DOUBLE[] of ALT allele frequencies and pl or dosage a list of the same length, one entry per site. Build them per sample and chromosome with list(... ORDER BY pos). Lists of unequal length, NULL positions, unsorted positions, an af outside [0, 1], a dosage outside 0..2 and a hw_to_az or az_to_hw outside [0, 1] are errors that name the problem. A NULL list returns NULL; an empty list returns an empty list. One list is decoded at a time, so memory follows the longest list.",
+        "Skipped sites": "As in bcftools roh, a site is skipped when its position repeats the previous entry, its af is NULL, NaN or exactly 0, its genotype evidence is NULL or has NULL elements, its PL does not have three values or has a negative value, all three PL values are equal, or the likelihoods sum to zero. PL values above 255 count as 255. Skipped sites are not markers and do not break a run.",
+        "Model": "A two-state hidden Markov model, autozygous (AZ) and Hardy-Weinberg (HW), with initial probabilities 1/2, emissions P(D|AZ) = P(D|RR)(1-f) + P(D|AA)f and P(D|HW) = P(D|RR)(1-f)^2 + 2P(D|RA)f(1-f) + P(D|AA)f^2, and transitions hw_to_az (default 6.7e-8) and az_to_hw (default 5e-9) per base pair compounded over the physical distance between sites. Segments are the Viterbi AZ runs; quality is the mean forward-backward phred score of the sites in the run. start and end are the first and last marker of the run, inclusive.",
+        "Genetic map": "map_pos (BIGINT[], one-based, strictly ascending) and map_cm (DOUBLE[], cumulative centimorgans) are the nodes of a genetic map, the positions and third column of an IMPUTE2 map file. When both are given, the crossover terms between two sites are scaled by the map distance in Morgans, interpolated as bcftools roh -m does (the slope between the nodes that bracket the two sites, zero outside the map), and rec_rate, when given, scales it further. With no map and a positive rec_rate, the scale is the physical distance times rec_rate, as bcftools roh -M does. With neither, only the per-base-pair compounding applies. NULL map_pos and map_cm mean no map; giving one without the other, lists of unequal length or an empty map are errors.",
+        "Parity": "The arithmetic follows the pinned bcftools vcfroh.c and HMM.c operation for operation, so positions and marker counts equal bcftools roh and qualities agree to the one decimal bcftools prints; differences could arise only from the floating-point contraction choices of a different compiler or CPU."
+      },
+      "examples": [
+        "SELECT duckhts_roh_segments([100, 200, 300], [0.3, 0.3, 0.3], [[0, 30, 60], [0, 30, 60], [0, 30, 60]], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);"
+      ]
+    },
+    {
+      "name": "duckhts_roh",
+      "kind": "table_macro",
+      "category": "Variants",
+      "signature": "duckhts_roh(path, af_tag, genetic_map, hw_to_az := 6.7e-8, az_to_hw := 5e-9, gt_error := NULL, rec_rate := NULL, samples := NULL)",
+      "returns": "table(sample VARCHAR, chrom VARCHAR, start BIGINT, \"end\" BIGINT, length BIGINT, n_markers INTEGER, quality DOUBLE)",
+      "r_wrapper": "rduckhts_roh",
+      "description": "Find runs of homozygosity in a VCF/BCF with the bcftools roh model, using allele frequencies from an INFO tag.",
+      "details": {
+        "Input": "path is a VCF/BCF with FORMAT/PL (default) or FORMAT/GT (gt_error set), read with read_bcf(tidy_format := true) on the caller's connection. af_tag names an INFO tag declared Type=Float, Number=A; its first value is the ALT allele frequency. Sites with an absent or missing tag, or a frequency of exactly 0, are skipped as bcftools roh skips them. Records with more than one ALT, no ALT, or a first ALT that is symbolic (<*>, <NON_REF>) are not analysed. samples uses read_bcf's selectors.",
+        "Output": "One row per run: sample, chrom, start and end (one-based, inclusive, the first and last marker), length = end - start + 1, n_markers and quality (mean forward-backward phred score), the RG lines of bcftools roh. Rows are not ordered; ORDER BY sample, chrom, start. Chromosomes are decoded separately and a run never spans two.",
+        "Genotype evidence": "gt_error NULL uses PL. A numeric gt_error (phred, bcftools -G, for example 30) uses diploid GT calls 0/0, 0/1 and 1/1 and ignores PL; other or missing genotypes are skipped, and FORMAT/PL need not exist.",
+        "Transitions": "hw_to_az and az_to_hw are the per-base-pair transition probabilities (bcftools -a and -H). rec_rate is a constant recombination rate per base pair (bcftools -M). The overload with a third positional argument takes genetic_map, a table name, with columns chrom, pos and cm (cumulative centimorgans at one-based positions, for example an IMPUTE2 map), interpolated as bcftools -m does; chromosomes without map rows are skipped, as bcftools skips a chromosome with no map file.",
+        "Limits": "Duplicate positions on a chromosome keep one record, and which one is not fixed by the file order; deduplicate upstream when it matters. bcftools' default AC/AN frequencies, --AF-dflt, --estimate-AF, --include/--exclude, --skip-indels, --ignore-homref, --buffer-size and --viterbi-training are not offered."
+      },
+      "examples": [
+        "SELECT * FROM duckhts_roh('cohort.vcf.gz', 'AF') ORDER BY sample, chrom, start;",
+        "SELECT * FROM duckhts_roh('cohort.vcf.gz', 'AF', 'genetic_map', gt_error := 30) ORDER BY sample, chrom, start;"
+      ]
+    },
+    {
+      "name": "duckhts_roh_af_table",
+      "kind": "table_macro",
+      "category": "Variants",
+      "signature": "duckhts_roh_af_table(path, af_table, genetic_map, hw_to_az := 6.7e-8, az_to_hw := 5e-9, gt_error := NULL, rec_rate := NULL, samples := NULL)",
+      "returns": "table(sample VARCHAR, chrom VARCHAR, start BIGINT, \"end\" BIGINT, length BIGINT, n_markers INTEGER, quality DOUBLE)",
+      "r_wrapper": "rduckhts_roh",
+      "description": "Find runs of homozygosity in a VCF/BCF with the bcftools roh model, using allele frequencies from a caller relation.",
+      "details": {
+        "Frequencies": "af_table is a table or view name with columns chrom, pos (one-based), ref, alt and af, like a bcftools --AF-file. A record takes the frequency of the row matching its chrom, pos, REF and its ALT alleles joined by commas; records without a matching row, or with a NULL af, are skipped. Give one row per key; af must be in [0, 1], and exactly 0 skips the site. This is the entry point for per-sample frequencies, for example ancestry-tuned ones, by running it once per relation.",
+        "Otherwise": "Everything else is as duckhts_roh: the same output, genotype evidence (PL, or GT with gt_error), transition parameters, optional genetic_map overload and limits."
+      },
+      "examples": [
+        "SELECT * FROM duckhts_roh_af_table('cohort.vcf.gz', 'site_frequencies') ORDER BY sample, chrom, start;"
+      ]
+    },
+    {
       "name": "duckhts_somalier_panel_sha256",
       "kind": "scalar_macro",
       "category": "Sample Identity",

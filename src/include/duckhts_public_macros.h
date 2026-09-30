@@ -13,6 +13,8 @@ static const char *const duckhts_public_macros[] = {
     "duckhts_duckdb_supports_variant",
     "duckhts_duckdb_type_supported",
     "duckhts_gff_convert_parquet_sql",
+    "duckhts_roh",
+    "duckhts_roh_af_table",
     "duckhts_somalier_charr",
     "duckhts_somalier_frequency_sha256",
     "duckhts_somalier_import_sites",

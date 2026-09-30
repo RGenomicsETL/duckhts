@@ -31,6 +31,9 @@ src/somalier_matched_sql.c|somalier_matched_sql.c
 src/somalier_sql.c|somalier_sql.c
 src/somalier_find_sites_sql.c|somalier_find_sites_sql.c
 src/ancestry_sql.c|ancestry_sql.c
+src/roh_hmm.c|roh_hmm.c
+src/roh_udf.c|roh_udf.c
+src/roh_sql.c|roh_sql.c
 src/somalier_bam_extract_sql.c|somalier_bam_extract_sql.c
 src/somalier_panel_sql.c|somalier_panel_sql.c
 src/somalier_sex_sql.c|somalier_sex_sql.c
