@@ -145,11 +145,13 @@ local({
                 duckhts_bench_stage_plan("ancestry-30x-cram"))
   expect_equal(plan$id, c("ancestry_ref_freqs", "ancestry_projection",
                           "ancestry_epilepsy", "ancestry_reference_parquet",
+                          "ancestry_reference_grch38_parquet",
                           "ancestry_1000g_chr22", "ancestry_1000g_panel",
                           "ancestry_30x_na18507", "ancestry_30x_hg00403"))
   direct <- plan$transform == "direct_download"
   expect_true(all(grepl("^https://", plan$locator[direct])))
-  expect_equal(plan$transform[!direct], "duckhts_bench_stage_ancestry_parquet")
+  expect_equal(plan$transform[!direct], c("duckhts_bench_stage_ancestry_parquet",
+                                          "duckhts_bench_stage_ancestry_grch38_parquet"))
   root <- tempfile("ancestry-reference-stage-")
   dir.create(root)
   on.exit(unlink(root, recursive = TRUE))
