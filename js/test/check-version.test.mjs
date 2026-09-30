@@ -93,6 +93,15 @@ test("release checkout checks signed identity and skips dev identity only in PR 
     const stalePin = await check(js, "signed", "publish");
     assert.equal(stalePin.code, 1);
     assert.match(stalePin.stderr, /signed manifest 1\.5\.2 disagrees with description\.yml 1\.5\.3/);
+    const pendingPin = await check(js, "signed", "pr");
+    assert.equal(pendingPin.code, 0, pendingPin.stderr);
+    assert.match(pendingPin.stdout, /signed: artifacts\.json pins 1\.5\.2; publishing npm 1\.5\.3 requires the signed 1\.5\.3 artifacts/);
+
+    await writeFile(path.join(js, "package.json"), JSON.stringify({ version: "1.5.2" }));
+    const pendingStalePackage = await check(js, "signed", "pr");
+    assert.equal(pendingStalePackage.code, 1);
+    assert.match(pendingStalePackage.stderr, /signed npm version must be 1\.5\.3/);
+    await writeFile(path.join(js, "package.json"), JSON.stringify({ version: "1.5.3" }));
 
     await writeFile(path.join(js, "artifacts.json"), JSON.stringify({ duckhts: "1.5.3" }));
     await writeFile(path.join(js, "package.json"), JSON.stringify({ version: "1.5.2" }));
