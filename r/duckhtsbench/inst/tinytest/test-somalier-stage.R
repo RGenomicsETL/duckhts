@@ -184,7 +184,7 @@ test_somalier_stage <- function() {
     }
     count <- suppressWarnings(system2(
       samtools, c(arguments, shQuote(alignment_paths[[format]])),
-      stdout = TRUE, stderr = TRUE
+      stdout = TRUE, stderr = FALSE
     ))
     expect_equal(as.numeric(count), 17000)
   }

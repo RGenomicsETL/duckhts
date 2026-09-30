@@ -1,5 +1,9 @@
 # Rduckhts 1.5.2.9007-0.1.5
 
+- `rduckhts_somalier_vcf_counts()` streams the VCF into its panel join and keeps
+  call payloads only for panel coordinates, so peak memory follows the panel
+  rather than the VCF length. Counts, statuses and validation are unchanged.
+
 - Breaking: the Somalier panel now carries X/Y sites and its identity changes.
   `rduckhts_somalier_import_sites()` keeps records on the Somalier v0.3.4 X/Y
   aliases, numbered after every autosomal site, and the panel, frequency and

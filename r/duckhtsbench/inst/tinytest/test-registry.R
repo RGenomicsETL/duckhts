@@ -31,6 +31,18 @@ expect_equal(registry$id[registry$workload == "genotype-source"],
              c("geno_hprc_source", "geno_hprc_source_tbi"))
 expect_equal(registry$transform[registry$id == "geno_hprc_source_tbi"],
              "direct_download")
+expect_equal(registry$transform[registry$id == "sql_scaling_vcf_counts_duplicate_million"],
+             "repeat_first_biallelic_chr1_snp_gt_ad_1000000")
+expect_match(registry$locator[registry$id == "sql_scaling_vcf_counts_duplicate_million"],
+             "artifact:sql_scaling_giab_1x", fixed = TRUE)
+
+write_repeated_vcf <- getFromNamespace("duckhts_bench_write_repeated_vcf", "duckhtsbench")
+duplicate_vcf <- tempfile("duckhtsbench-duplicate-vcf-")
+header <- c("##fileformat=VCFv4.2", "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG002")
+record <- "chr1\t10\t.\tA\tC\t50\tPASS\t.\tGT:AD\t0/1:9,3"
+write_repeated_vcf(header, record, duplicate_vcf, records = 3L)
+expect_equal(readLines(duplicate_vcf), c(header, rep(record, 3L)))
+unlink(duplicate_vcf)
 
 old_registry <- Sys.getenv("DUCKHTSBENCH_REGISTRY", unset = NA_character_)
 old_cache <- Sys.getenv("DUCKHTS_CACHE_DIR", unset = NA_character_)
