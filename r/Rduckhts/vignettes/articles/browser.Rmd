@@ -1,0 +1,76 @@
+---
+title: "Browser and webR"
+---
+
+In browser wasm/webR builds, remote `http`/`https` access does not use htslib `libcurl`.
+
+- The bundled extension enables a custom htslib `hFILE` backend in `src/wasm_http_hfile.c` for `http` and `https`.
+- This backend uses synchronous worker-side XHR for range reads and tabix index access.
+- htslib `libcurl`/`S3`/`GCS` paths are intentionally disabled for wasm in the package build.
+
+What this means in practice:
+
+- Same-origin URLs are the simplest setup and work well for local browser testing.
+- Remote URLs work only when browser CORS policy allows them.
+- CORS must allow both the primary file and index sidecars (`.tbi`/`.csi`), including range requests.
+- htslib may probe a `.csi` sidecar before falling back to `.tbi`; a `.csi` `404` is not a regression if the `.tbi` path succeeds.
+- `ALL_PROXY` and websocket proxy settings do not affect this wasm XHR backend.
+- Local test servers should return `Accept-Ranges: bytes` and `206 Partial
+  Content` for both the data file and its index sidecars. An R-native option is
+  [`goserveR`](https://github.com/sounkou-bioinfo/goserveR). Without byte-range
+  support the backend warns and falls back to fetching the complete object before
+  slicing it locally.
+
+## `Module.duckhtsWasmHttpConfig`
+
+The browser HTTP backend reads optional request/auth settings from `Module.duckhtsWasmHttpConfig`.
+
+- In plain browser JavaScript, set it in the page/worker before running queries.
+- In webR, consumers can set it from R with `webr::eval_js()`; they do not need to hand-edit the host HTML/JS as long as they can run that call before the relevant HTTP reads.
+
+Plain JavaScript example:
+
+```js
+Module.duckhtsWasmHttpConfig = {
+  headers: {
+    Authorization: "Bearer <short-lived-token>",
+    "X-Request-Source": "webr-local"
+  },
+  allowHosts: ["ftp.ebi.ac.uk", ".ebi.ac.uk"],
+  enforceHostAllowlist: true,
+  withCredentials: false,
+  allowInsecureAuth: false
+};
+```
+
+Inside webR, set the same config through `webr::eval_js()` because the code runs inside the webR worker:
+
+```r
+webr::eval_js("
+  Module.duckhtsWasmHttpConfig = {
+    headers: {
+      Authorization: 'Bearer <short-lived-token>',
+      'X-Request-Source': 'webr-local'
+    },
+    allowHosts: ['ftp.ebi.ac.uk', '.ebi.ac.uk'],
+    enforceHostAllowlist: true,
+    withCredentials: false,
+    allowInsecureAuth: false
+  };
+")
+```
+
+Configuration fields:
+
+- `headers`: named request headers to attach to matching hosts.
+- `allowHosts`: hostname allowlist for header injection. Entries can be exact hosts (`"ftp.ebi.ac.uk"`) or suffix matches with a leading dot (`".ebi.ac.uk"`).
+- `enforceHostAllowlist`: when `true`, block requests to hosts outside `allowHosts` instead of merely omitting configured headers.
+- `withCredentials`: when `true`, send cookies/credentials with XHR requests.
+- `allowInsecureAuth`: when `true`, allow `Authorization` headers on non-HTTPS URLs. The default is `false`.
+
+Security behavior of this config:
+
+- Headers are only attached when URL hostnames match `allowHosts`.
+- `Authorization` is blocked for non-HTTPS URLs unless `allowInsecureAuth: true` is set.
+- Cookies/credentials are only sent when `withCredentials: true` is set.
+- The config can be updated or cleared between queries if different hosts need different policies.

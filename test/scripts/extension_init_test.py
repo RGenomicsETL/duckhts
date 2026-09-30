@@ -14,7 +14,7 @@ class ExtensionInitialization(unittest.TestCase):
             load = "LOAD '" + str(args.extension).replace("'", "''") + "'"
             if args.expect == "unsupported":
                 with self.assertRaisesRegex(
-                    duckdb.Error, "DuckHTS requires DuckDB 1.4.0 or newer"
+                    duckdb.Error, "DuckHTS requires DuckDB 1.5.0 or newer"
                 ) as failure:
                     connection.execute(load)
                 self.assertNotIsInstance(failure.exception, duckdb.FatalException)

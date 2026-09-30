@@ -1366,7 +1366,9 @@ rduckhts_detect_quality_encoding <- function(con, path, max_records = 10000) {
 #'   instead of index-backed count paths. Sequential mode is incompatible with
 #'   \code{region}.
 #' @param attributes_map Logical. If TRUE, returns raw attributes as a scalar MAP column
-#' @param attributes Character vector of attribute keys to expose as VARCHAR columns
+#' @param attributes Character vector of attribute keys to expose as VARCHAR
+#'   columns. Key matching is case-sensitive: \code{"id"} does not match
+#'   \code{ID}, and an unmatched key gives a column of \code{NA}
 #' @param attributes_list Logical. If TRUE, returns attributes as MAP(VARCHAR, VARCHAR[])
 #' @param attributes_pairs Logical. If TRUE, returns attributes as a LIST of key/value/index structs
 #' @param strict Logical. If TRUE, enforce GFF3 structural validation while scanning
@@ -1490,7 +1492,9 @@ rduckhts_gff <- function(
 #'   instead of index-backed count paths. Sequential mode is incompatible with
 #'   \code{region}.
 #' @param attributes_map Logical. If TRUE, returns raw attributes as a scalar MAP column
-#' @param attributes Character vector of attribute keys to expose as VARCHAR columns
+#' @param attributes Character vector of attribute keys to expose as VARCHAR
+#'   columns. Key matching is case-sensitive: \code{"id"} does not match
+#'   \code{ID}, and an unmatched key gives a column of \code{NA}
 #' @param attributes_list Logical. If TRUE, returns attributes as MAP(VARCHAR, VARCHAR[])
 #' @param attributes_pairs Logical. If TRUE, returns attributes as a LIST of key/value/index structs
 #' @param overwrite Logical. If TRUE, overwrites existing table
@@ -1615,7 +1619,8 @@ rduckhts_gtf <- function(
 #' @param attributes Character vector of qualifier keys to expose as VARCHAR
 #'   columns. Each equals \code{attributes_map[key]}, including comma-joined
 #'   repeated qualifiers and \code{NA} for an absent key, and is computed only
-#'   when the query selects it
+#'   when the query selects it. Key matching is case-sensitive:
+#'   \code{"ec_number"} does not match \code{/EC_number}
 #' @param overwrite Logical. If TRUE, overwrites an existing table
 #'
 #' @return Invisible TRUE on success

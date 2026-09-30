@@ -1,11 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 import { SIGNED } from "../../src/index.js";
+import { BLOB_CAPABLE } from "../../src/channel.js";
 
 // Test the staged binary on the selected channel, using independent fixture rows.
 
 const BED_FIXTURE = new URL("../../../test/data/fixture_mixed_regions.bed", import.meta.url);
-const signedManifest = JSON.parse(await readFile(new URL("../../artifacts.json", import.meta.url), "utf8"));
 
 async function bedFixtureRows() {
   const text = await readFile(BED_FIXTURE, "utf8");
@@ -36,13 +36,18 @@ test("DuckDB v1.5 loads the selected binary and reads over HTTP and blob where s
     ok: true,
     value: [{ seqname: "chr1", feature: "gene", start: 1, end: 10 }],
   });
-  if (!SIGNED) expect(result.bedBlob).toEqual({ ok: true, value: await bedFixtureRows() });
+  if (BLOB_CAPABLE) {
+    const rows = await bedFixtureRows();
+    expect(result.bedBlob).toEqual({ ok: true, value: rows });
+    expect(result.bedBufferBlob).toEqual({ ok: true, value: rows });
+  }
 });
 
 // Files registered with duckdb-wasm live in its virtual file system, which
-// htslib does not open.  This records the current contract; when
-// https://github.com/RGenomicsETL/duckhts/issues/246 gains support, this test
-// fails and must be turned into a positive check.
+// htslib does not open.  DuckDB exposes its file system to extensions only in
+// the unstable C API, which the stable-ABI builds cannot use, so this is the
+// supported contract (https://github.com/RGenomicsETL/duckhts/issues/294):
+// pages pass the same bytes as a blob: URL, checked in the test above.
 test("registered duckdb-wasm files are not visible to DuckHTS readers", async ({ page }) => {
   const result = await probe(page, "next");
 
@@ -59,13 +64,4 @@ test("dev loader rejects an unsigned-disallowed connection before LOAD", async (
   expect(result.unsignedAllowed).toBe(false);
   expect(result.load).toEqual({ ok: false,
     error: expect.stringContaining("dev channel requires allow_unsigned_extensions=true") });
-});
-
-test("DuckDB v1.4 runtime loads the binary", async ({ page }) => {
-  test.fail(SIGNED && signedManifest.duckhts === "1.5.2",
-    "signed DuckHTS 1.5.2 predates the DuckDB 1.4 initialization fix");
-  const result = await probe(page, "stable");
-
-  expect(result.duckdb).toMatch(/^v1\.4\./);
-  expect(result.load).toEqual({ ok: true, value: { platform: "wasm_eh" } });
 });

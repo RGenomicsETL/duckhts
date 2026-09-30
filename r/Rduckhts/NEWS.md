@@ -1,4 +1,48 @@
-# Rduckhts 1.5.2.9007-0.1.5
+# Rduckhts 2.0.0.0.1.5
+
+## Breaking changes
+
+- Requires duckdb 1.5.0 or newer; loading the bundled extension on an older
+  DuckDB now fails. Its stable C API target (v1.2.0) is an ABI floor and does not
+  imply support for older DuckDB releases.
+
+- Consequence prediction has moved to DuckVEP and its R package, Rduckvep
+  (<https://github.com/RGenomicsETL/DuckVEP>). `rduckhts_haplotypes()` and the bundled
+  consequence fixtures are removed; the bundled extension no longer carries the DuckVEP
+  functions. Load DuckVEP with `Rduckvep::rduckvep_load(con)` on an Rduckhts connection
+  for annotation. CSQ, ANN and BCSQ parsing in `rduckhts_bcf()` is unchanged.
+
+- The bundled extension installs SQL macros into the database catalog only for a
+  writable in-memory default database. `rduckhts_connect()` and `rduckhts_load()`
+  instead install connection-local macros automatically for database files,
+  including read-only files, without modifying the file catalog. Use
+  `rduckhts_install_macros(con)` for other DBI or pool connections with the
+  extension loaded; it is idempotent and follows a caller transaction's rollback.
+
+- `duckhts_cgranges_from_query()` and `duckhts_cgranges_overlaps_bulk()`
+  are removed from the bundled extension. Use the table macro
+  `SELECT * FROM duckhts_cgranges_from_table(name, table_name, chrom_col,
+  start_col, end_col[, label_col])` over any table, view or TEMP table on your
+  connection, and `SELECT ..., unnest(duckhts_cgranges_overlaps_list(...))` for
+  bulk probing. The README examples use them.
+
+- `rduckhts_somalier_bam_counts()` and `rduckhts_ancestry_bam()` keep their
+  arguments, but the native reader now takes a local Parquet panel, so
+  `panel_table` is written to a scratch Parquet file for the call; temporary tables
+  and uncommitted rows are therefore accepted. Remote `panel_parquet` paths are no
+  longer read.
+
+- The Somalier panel now carries X/Y sites and its identity changes.
+  `rduckhts_somalier_import_sites()` keeps records on the Somalier v0.3.4 X/Y
+  aliases, numbered after every autosomal site, and the panel, frequency and
+  sketch digests differ from earlier versions even for autosomal-only panels, so
+  recompute persisted digests and sketches. Counts from
+  `rduckhts_somalier_vcf_counts()` and `rduckhts_somalier_bam_counts()` include
+  X/Y sites (which ignore `filter_policy`), while sketches, relatedness, CHARR
+  and matched contamination use only the autosomal sites, with unchanged
+  numeric results.
+
+## New features
 
 - New `regions_var` argument on `rduckhts_geno()` and `rduckhts_bcf()` names a
   session variable holding typed 0-based half-open intervals for
@@ -15,20 +59,6 @@
   split, flipped or lifted over. Its session variable and temporary request
   table are removed on exit, including after an error.
 
-- `rduckhts_somalier_vcf_counts()` streams the VCF into its panel join and keeps
-  call payloads only for panel coordinates, so peak memory follows the panel
-  rather than the VCF length. Counts, statuses and validation are unchanged.
-
-- Breaking: the Somalier panel now carries X/Y sites and its identity changes.
-  `rduckhts_somalier_import_sites()` keeps records on the Somalier v0.3.4 X/Y
-  aliases, numbered after every autosomal site, and the panel, frequency and
-  sketch digests differ from earlier versions even for autosomal-only panels, so
-  recompute persisted digests and sketches. Counts from
-  `rduckhts_somalier_vcf_counts()` and `rduckhts_somalier_bam_counts()` include
-  X/Y sites (which ignore `filter_policy`), while sketches, relatedness, CHARR
-  and matched contamination use only the autosomal sites, with unchanged
-  numeric results.
-
 - New `rduckhts_somalier_sex()` reports X/Y dosage evidence per sample: depth
   relative to autosomal depth, usable X site and het/hom-alt counts, a Y
   signal, and an XX, XY or ambiguous call with a status, following Somalier
@@ -36,52 +66,13 @@
   avoids the dependence of Somalier's Y check on the rest of the batch;
   `"cohort"` reproduces it.
 
-- A closed database file is released and can be reopened in the same R process
-  after cgranges or `rduckhts_somalier_bam_counts()` have been used; the bundled
-  extension no longer keeps connections into the loading database. This fixes
-  reopening on Windows. A tinytest closes and reopens a file database after
-  using both.
-
-- Breaking: `duckhts_cgranges_from_query()` and `duckhts_cgranges_overlaps_bulk()`
-  are removed from the bundled extension. Use the table macro
-  `SELECT * FROM duckhts_cgranges_from_table(name, table_name, chrom_col,
-  start_col, end_col[, label_col])` over any table, view or TEMP table on your
-  connection, and `SELECT ..., unnest(duckhts_cgranges_overlaps_list(...))` for
-  bulk probing. The README examples use them.
-
-- `rduckhts_somalier_bam_counts()` and `rduckhts_ancestry_bam()` keep their
-  arguments. The native reader takes a local Parquet panel, so `panel_table` is
-  now written to a scratch Parquet file for the call; temporary tables and
-  uncommitted rows are therefore accepted. Remote `panel_parquet` paths are no
-  longer read.
-
-- `rduckhts_genbank()` accepts `attributes` to expose qualifier keys as
-  VARCHAR columns that equal `attributes_map[key]`, computed only when
-  selected. Tests compare every named column with the map lookup on the bundled
-  phiX174 record and cover the rejected names.
-
-# Rduckhts 1.5.2.9006-0.1.5
-
-- The bundled function catalog documents `bam_bin_counts(include_unmapped := FALSE)`
-  and its synthetic no-coordinate row, and names the type-probe macro's parameter as
-  registered (`candidate_type_name`). Package tests compare every catalog entry with
-  a registered overload of the loaded extension: kinds, scalar and aggregate
-  argument counts, native table options, and
-  macro parameter names.
-
-- `rduckhts_connect()` and `rduckhts_load()` install connection-local macros
-  automatically for database files, including read-only files, without
-  modifying the file catalog. Use `rduckhts_install_macros(con)` for other
-  DBI or pool connections with the extension loaded; it is idempotent and
-  follows a caller transaction's rollback.
-
-- Consequence prediction has moved to DuckVEP and its R package, Rduckvep
-  (<https://github.com/RGenomicsETL/DuckVEP>). `rduckhts_haplotypes()` and the bundled
-  consequence fixtures are removed; the bundled extension no longer carries the DuckVEP
-  functions. Load DuckVEP with `Rduckvep::rduckvep_load(con)` on an Rduckhts connection
-  for annotation. CSQ, ANN and BCSQ parsing in `rduckhts_bcf()` is unchanged.
-
-# Rduckhts 1.5.2.9005-0.1.5
+- `rduckhts_somalier_find_sites()` selects canonical, provenance-bearing Somalier
+  panels from typed population relations, Parquet, or VCF/BCF with caller-visible
+  interval and allele exclusions. Interval relations use `chrom`, `start`, `end`,
+  so a view over `read_bed()` can be passed directly. Equal AF scores retain input
+  scan order and X/Y sites remain unspaced by default, matching Somalier v0.3.4. The
+  `tie_order = "lexical"` and `sex_spacing = "enforced"` options provide
+  deterministic lexical ties and X/Y minimum-distance spacing.
 
 - `rduckhts_ancestry_proportions()` estimates ancestry proportions from
   allele-frequency or diploid-dosage relations against keyed wide or long reference
@@ -109,37 +100,65 @@
   keep constant state per locus, so building a panel from a full genome-wide reference
   needs a fraction of the memory it did.
 
-# Rduckhts 1.5.2.9004-0.1.5
-
-- `rduckhts_somalier_find_sites()` selects canonical, provenance-bearing Somalier
-  panels from typed population relations, Parquet, or VCF/BCF with caller-visible
-  interval and allele exclusions. Interval relations use `chrom`, `start`, `end`,
-  so a view over `read_bed()` can be passed directly. Equal AF scores retain input scan order and
-  X/Y sites remain unspaced by default, matching Somalier v0.3.4. The
-  `tie_order = "lexical"` and `sex_spacing = "enforced"` options provide
-  deterministic lexical ties and X/Y minimum-distance spacing.
-
-# Rduckhts 1.5.2.9003-0.1.5
-
-- The bundled DuckHTS extension loads on DuckDB 2.0; SQL lambdas use the
-  `lambda x:` syntax (DuckDB >= 1.3).
-
-# Rduckhts 1.5.2.9002-0.1.5
-
-- The package is licensed GPL (>= 2) (previously declared GPL-3 while shipping an MIT
-  licence file); the bundled DuckHTS extension sources remain MIT, as listed in
-  `inst/COPYRIGHT`.
-
-- Bundled output writers preserve the target of a Windows file symlink on
-  overwrite; table-creating wrappers reject an existing table before resolving
-  input files when `overwrite = FALSE`.
-
-- Table-reading wrappers preserve an existing table when `overwrite = TRUE`
-  fails validation or cannot read an input file.
+- `rduckhts_genbank()` accepts `attributes` to expose qualifier keys as
+  VARCHAR columns that equal `attributes_map[key]`, computed only when
+  selected. Tests compare every named column with the map lookup on the bundled
+  phiX174 record and cover the rejected names.
 
 - `rduckhts_gff()` and `rduckhts_gtf()` accept `attributes` to create named
   attribute columns. The bundled `read_gff` and `read_gtf` SQL readers also
   support `attributes := ['key', ...]` with values matching `attributes_map`.
+
+- `rduckhts_bed()` accepts `error_policy` to skip short BED data lines or
+  include diagnostic rows with their physical line numbers and raw text in
+  the bundled extension. The default still raises an error.
+
+- The bundled CIGAR SQL functions accept an optional final `strict` BOOLEAN.
+  FALSE is the default; TRUE raises an error for invalid input under the
+  checked grammar. Errors name the function and the 1-based packed-op index or
+  text operation-start byte where available. SQL NULL arguments and no-CIGAR
+  sentinels retain their per-function outcomes.
+
+- Add `cigar_aligned_blocks(cigar, pos)`: extracts contiguous aligned segments
+  (M, =, X) from a CIGAR string or binary array into a STRUCT of parallel
+  lists (`ref_start`, `query_start`, `width`). Use it to convert alignments
+  into genomic intervals for coverage, junction, and range overlap analysis
+  without custom SQL loops.
+
+- The bundled Emscripten extension accepts read-only `blob:` URLs in webR. A
+  browser File can be exposed as an object URL, with a separate `index_path` URL
+  for region queries; callers must retain both URLs until queries finish.
+  Chromium 148.0.7778.96 worker XHR tests found HEAD fails with status 0, ranged
+  GET returns 206 with size in `Content-Range`, ranges crossing EOF are truncated,
+  and out-of-range or revoked URLs fail with status 0. Native builds are unchanged.
+  In webR, `blob:` URLs are exempt from `Module.duckhtsWasmHttpConfig`'s
+  `enforceHostAllowlist`, since they have no hostname and make no network request.
+
+## Fixes
+
+- A closed database file is released and can be reopened in the same R process
+  after cgranges or `rduckhts_somalier_bam_counts()` have been used; the bundled
+  extension no longer keeps connections into the loading database. This fixes
+  reopening on Windows. A tinytest closes and reopens a file database after
+  using both.
+
+- `rduckhts_somalier_vcf_counts()` streams the VCF into its panel join and keeps
+  call payloads only for panel coordinates, so peak memory follows the panel
+  rather than the VCF length. Counts, statuses and validation are unchanged.
+
+- The bundled DuckHTS extension loads on DuckDB 2.0; SQL lambdas use the
+  `lambda x:` syntax (DuckDB >= 1.3). It registers native functions before
+  dependent SQL macros and includes the underlying diagnostic in initialization
+  errors.
+
+- The bundled extension validates complete text and packed CIGARs with checked
+  lengths and consumed spans. CIGAR metrics and presence checks return NULL for
+  malformed suffixes or arithmetic outside BIGINT, including a bad suffix after
+  a matching operator. Unsupported requested operators return NULL in both forms.
+  Requested-operator case folding is ASCII and locale-independent. Full-input
+  checking adds validation work to operator-presence calls. `cigar_aligned_blocks`
+  grows text-output child lists geometrically, including for CIGARs with long
+  runs of leading zeroes, while decoding each text CIGAR once.
 
 - The bundled extension scans tabix, GFF3 and GTF fields once up to the last
   projected field, including attributes when requested. Strict GFF3 validation
@@ -148,68 +167,39 @@
 - The bundled `read_hts_header` reports a scan error if it cannot reserve or
   size its parsed `key_values` MAP list.
 
-- The bundled `cigar_aligned_blocks` grows text-output child lists
-  geometrically, including for CIGARs with long runs of leading zeroes,
-  while decoding each text CIGAR once.
-
-- `rduckhts_bed()` accepts `error_policy` to skip short BED data lines or
-  include diagnostic rows with their physical line numbers and raw text in
-  the bundled extension. The default still raises an error.
-
 - Bundled bgzip, bgunzip, idxstats, and mosdepth outputs (including CSI indexes)
   use exclusive creation when `overwrite = FALSE`; a failed operation does not
   remove an output that the invocation did not open. On POSIX,
   `overwrite = TRUE` replaces a symlink output entry with a new file without
-  writing through to its referent.
+  writing through to its referent. On Windows, overwrite preserves the target of
+  a file symlink.
 
-# Rduckhts 1.5.2.9001-0.1.5
-
-- Require duckdb 1.4.0 or newer. The bundled extension registers native
-  functions before dependent SQL macros, retains all supported native overloads
-  on DuckDB 1.4, and includes the underlying diagnostic in initialization errors.
-  DuckVEP repeat and transcript-presentation SQL support the older binder.
-
-- The bundled extension validates complete text and packed CIGARs with checked
-  lengths and consumed spans. CIGAR metrics and presence checks return NULL for
-  malformed suffixes or arithmetic outside BIGINT, including a bad suffix after
-  a matching operator. Unsupported requested operators return NULL in both forms.
-  Requested-operator case folding is ASCII and locale-independent. Full-input
-  checking adds validation work to operator-presence calls.
-- The bundled CIGAR SQL functions accept an optional final `strict` BOOLEAN.
-  FALSE is the default; TRUE raises an error for invalid input under the same
-  checked grammar. Errors name the function and the 1-based packed-op index or
-  text operation-start byte where available. SQL NULL arguments and no-CIGAR
-  sentinels retain their per-function outcomes.
-
-# Rduckhts 1.5.2.9000-0.1.5
-
-- In webR, an explicit `blob:` `index_path` is no longer copied into the in-memory
-  filesystem and kept for the rest of the session.
-
-- In webR, an empty `blob:` File reads as an empty input (zero rows), matching a
-  zero-byte file natively, instead of failing to open.
-
-- In webR, `blob:` URLs are exempt from `Module.duckhtsWasmHttpConfig`'s
-  `enforceHostAllowlist`: they have no hostname and make no network request, so
-  no `allowHosts` entry could authorise them before.
-
-- The bundled Emscripten extension accepts read-only `blob:` URLs in webR. A
-  browser File can be exposed as an object URL, with a separate `index_path` URL
-  for region queries; callers must retain both URLs until queries finish.
-  Chromium 148.0.7778.96 worker XHR tests found HEAD fails with status 0, ranged
-  GET returns 206 with size in `Content-Range`, ranges crossing EOF are truncated,
-  and out-of-range or revoked URLs fail with status 0. Native builds are unchanged.
+- Table-reading wrappers preserve an existing table when `overwrite = TRUE`
+  fails validation or cannot read an input file, and table-creating wrappers
+  reject an existing table before resolving input files when `overwrite = FALSE`.
 
 - The bundled extension reports consistent Somalier CHARR count errors whether
   public SQL validation or the native aggregate rejects the input first.
 
-- Show contributor avatars and credit Ryan Ward / Nurture Bio for GenBank
-  support in the package README footer, with links to upstream acknowledgements.
-- Add `cigar_aligned_blocks(cigar, pos)`: Extracts contiguous aligned segments
-  (M, =, X) from a CIGAR string or binary array into a STRUCT of parallel
-  lists (`ref_start`, `query_start`, `width`). Use it to convert alignments
-  into genomic intervals for coverage, junction, and range overlap analysis
-  without custom SQL loops.
+- In webR, an explicit `blob:` `index_path` is no longer copied into the in-memory
+  filesystem and kept for the rest of the session, and an empty `blob:` File reads
+  as an empty input (zero rows), matching a zero-byte file natively, instead of
+  failing to open.
+
+## Documentation
+
+- The package is licensed GPL (>= 2) (previously declared GPL-3 while shipping an MIT
+  licence file); the bundled DuckHTS extension sources remain MIT, as listed in
+  `inst/COPYRIGHT`.
+
+- The bundled function catalog documents `bam_bin_counts(include_unmapped := FALSE)`
+  and its synthetic no-coordinate row, and names the type-probe macro's parameter as
+  registered (`candidate_type_name`). Package tests compare every catalog entry with
+  a registered overload of the loaded extension: kinds, scalar and aggregate
+  argument counts, native table options, and macro parameter names.
+
+- The package README footer shows contributor avatars and credits Ryan Ward /
+  Nurture Bio for GenBank support, with links to upstream acknowledgements.
 
 # Rduckhts 1.5.2-0.1.5
 

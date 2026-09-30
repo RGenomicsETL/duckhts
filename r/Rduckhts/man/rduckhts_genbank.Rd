@@ -29,7 +29,8 @@ rduckhts_genbank(
 \item{attributes}{Character vector of qualifier keys to expose as VARCHAR
 columns. Each equals \code{attributes_map[key]}, including comma-joined
 repeated qualifiers and \code{NA} for an absent key, and is computed only
-when the query selects it}
+when the query selects it. Key matching is case-sensitive:
+\code{"ec_number"} does not match \code{/EC_number}}
 }
 \value{
 Invisible TRUE on success

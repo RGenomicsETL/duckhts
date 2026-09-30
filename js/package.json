@@ -1,6 +1,6 @@
 {
   "name": "duckhts",
-  "version": "1.5.2-9007",
+  "version": "2.0.0",
   "description": "DuckHTS DuckDB extension for duckdb-wasm: read HTS formats (BAM, CRAM, VCF, BCF, FASTA, FASTQ, GFF, GTF, BED, GenBank, bigWig, tabix) with SQL in the browser",
   "type": "module",
   "license": "GPL-2.0-or-later",
@@ -60,7 +60,6 @@
   },
   "devDependencies": {
     "@playwright/test": "1.60.0",
-    "duckdb-wasm-next": "npm:@duckdb/duckdb-wasm@1.33.1-dev57.0",
-    "duckdb-wasm-stable": "npm:@duckdb/duckdb-wasm@1.32.0"
+    "duckdb-wasm-next": "npm:@duckdb/duckdb-wasm@1.33.1-dev57.0"
   }
 }

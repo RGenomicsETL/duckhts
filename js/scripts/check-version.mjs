@@ -30,10 +30,17 @@ const lock = JSON.parse(await readFile(path.join(root, "package-lock.json"), "ut
 const manifest = JSON.parse(await readFile(path.join(root,
   channel === "dev" ? "artifacts-dev.json" : "artifacts.json"), "utf8"));
 const expected = sourceChannel === "dev" ? `${version[1]}-${version[2]}` : sourceVersion;
-if (manifest.duckhts !== sourceVersion) {
-  throw new Error(`${channel} manifest ${manifest.duckhts} disagrees with description.yml ${sourceVersion}`);
-}
 if (packageJson.version !== expected || lock.version !== expected || lock.packages[""].version !== expected) {
   throw new Error(`${channel} npm version must be ${expected} in package.json and package-lock.json`);
+}
+if (manifest.duckhts !== sourceVersion) {
+  // A release commit precedes its signed community artifacts, so its pull request
+  // still carries the previous signed manifest. Publishing waits for the new one.
+  if (channel === "signed" && mode === "pr") {
+    console.log(`signed: artifacts.json pins ${manifest.duckhts}; publishing npm ${expected} ` +
+      `requires the signed ${sourceVersion} artifacts`);
+    process.exit(0);
+  }
+  throw new Error(`${channel} manifest ${manifest.duckhts} disagrees with description.yml ${sourceVersion}`);
 }
 console.log(`${channel}: DuckHTS ${sourceVersion} -> npm ${expected}`);
