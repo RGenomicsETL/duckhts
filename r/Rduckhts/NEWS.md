@@ -1,8 +1,64 @@
+# Rduckhts 1.5.2.9007-0.1.5
+
+- `rduckhts_somalier_vcf_counts()` streams the VCF into its panel join and keeps
+  call payloads only for panel coordinates, so peak memory follows the panel
+  rather than the VCF length. Counts, statuses and validation are unchanged.
+
+- Breaking: the Somalier panel now carries X/Y sites and its identity changes.
+  `rduckhts_somalier_import_sites()` keeps records on the Somalier v0.3.4 X/Y
+  aliases, numbered after every autosomal site, and the panel, frequency and
+  sketch digests differ from earlier versions even for autosomal-only panels, so
+  recompute persisted digests and sketches. Counts from
+  `rduckhts_somalier_vcf_counts()` and `rduckhts_somalier_bam_counts()` include
+  X/Y sites (which ignore `filter_policy`), while sketches, relatedness, CHARR
+  and matched contamination use only the autosomal sites, with unchanged
+  numeric results.
+
+- New `rduckhts_somalier_sex()` reports X/Y dosage evidence per sample: depth
+  relative to autosomal depth, usable X site and het/hom-alt counts, a Y
+  signal, and an XX, XY or ambiguous call with a status, following Somalier
+  v0.3.4. It is review evidence, not a diagnosis. `y_gate = "sample"` (default)
+  avoids the dependence of Somalier's Y check on the rest of the batch;
+  `"cohort"` reproduces it.
+
+- A closed database file is released and can be reopened in the same R process
+  after cgranges or `rduckhts_somalier_bam_counts()` have been used; the bundled
+  extension no longer keeps connections into the loading database. This fixes
+  reopening on Windows. A tinytest closes and reopens a file database after
+  using both.
+
+- Breaking: `duckhts_cgranges_from_query()` and `duckhts_cgranges_overlaps_bulk()`
+  are removed from the bundled extension. Use the table macro
+  `SELECT * FROM duckhts_cgranges_from_table(name, table_name, chrom_col,
+  start_col, end_col[, label_col])` over any table, view or TEMP table on your
+  connection, and `SELECT ..., unnest(duckhts_cgranges_overlaps_list(...))` for
+  bulk probing. The README examples use them.
+
+- `rduckhts_somalier_bam_counts()` and `rduckhts_ancestry_bam()` keep their
+  arguments. The native reader takes a local Parquet panel, so `panel_table` is
+  now written to a scratch Parquet file for the call; temporary tables and
+  uncommitted rows are therefore accepted. Remote `panel_parquet` paths are no
+  longer read.
+
+- `rduckhts_genbank()` accepts `attributes` to expose qualifier keys as
+  VARCHAR columns that equal `attributes_map[key]`, computed only when
+  selected. Tests compare every named column with the map lookup on the bundled
+  phiX174 record and cover the rejected names.
+
 # Rduckhts 1.5.2.9006-0.1.5
 
-- `rduckhts_somalier_vcf_counts()` retains call payloads only for panel-matching
-  coordinates, so retained memory follows the panel rather than VCF length. Count,
-  status and validation semantics are unchanged.
+- The bundled function catalog documents `bam_bin_counts(include_unmapped := FALSE)`
+  and its synthetic no-coordinate row, and names the type-probe macro's parameter as
+  registered (`candidate_type_name`). Package tests compare every catalog entry with
+  a registered overload of the loaded extension: kinds, scalar and aggregate
+  argument counts, native table options, and
+  macro parameter names.
+
+- `rduckhts_connect()` and `rduckhts_load()` install connection-local macros
+  automatically for database files, including read-only files, without
+  modifying the file catalog. Use `rduckhts_install_macros(con)` for other
+  DBI or pool connections with the extension loaded; it is idempotent and
+  follows a caller transaction's rollback.
 
 - Consequence prediction has moved to DuckVEP and its R package, Rduckvep
   (<https://github.com/RGenomicsETL/DuckVEP>). `rduckhts_haplotypes()` and the bundled
@@ -49,9 +105,6 @@
   deterministic lexical ties and X/Y minimum-distance spacing.
 
 # Rduckhts 1.5.2.9003-0.1.5
-
-- The bundled Somalier VCF-count extraction uses less peak memory when a
-  source VCF is large relative to the selected panel.
 
 - The bundled DuckHTS extension loads on DuckDB 2.0; SQL lambdas use the
   `lambda x:` syntax (DuckDB >= 1.3).

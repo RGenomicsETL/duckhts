@@ -1596,6 +1596,10 @@ rduckhts_gtf <- function(
 #' @param path Path to the GenBank flat file, optionally bgzipped
 #' @param attributes_map Logical. If \code{TRUE}, add a parsed
 #'   \code{MAP(VARCHAR, VARCHAR)} column alongside the raw attribute string
+#' @param attributes Character vector of qualifier keys to expose as VARCHAR
+#'   columns. Each equals \code{attributes_map[key]}, including comma-joined
+#'   repeated qualifiers and \code{NA} for an absent key, and is computed only
+#'   when the query selects it
 #' @param overwrite Logical. If TRUE, overwrites an existing table
 #'
 #' @return Invisible TRUE on success
@@ -1606,7 +1610,8 @@ rduckhts_genbank <- function(
   table_name = NULL,
   path,
   attributes_map = FALSE,
-  overwrite = FALSE
+  overwrite = FALSE,
+  attributes = NULL
 ) {
   .duckhts_check_table_target(con, table_name, overwrite)
   if (
@@ -1623,6 +1628,9 @@ rduckhts_genbank <- function(
   }
 
   params <- list()
+  if (!is.null(attributes)) {
+    params$attributes <- sql_varchar_list_literal(con, attributes, "attributes")
+  }
   if (attributes_map) {
     params$attributes_map <- "true"
   }

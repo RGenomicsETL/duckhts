@@ -274,7 +274,7 @@ knitr::kable(vcf_counts_file_doublings, row.names = FALSE)
 knitr::kable(vcf_counts_output_identity, row.names = FALSE)
 ```
 
-The raw per-run records are `sql_scaling_vcf_counts_runs.tsv`. The following tables identify the exact builds and staged inputs used by those runs; the baseline source commit is `296d44a4d9c190c0551257b5e94740988332966e` and its empty dirty-diff hash identifies the clean commit tree.
+The raw per-run records are `sql_scaling_vcf_counts_runs.tsv`. The following tables identify the exact builds and staged inputs used by those runs; the baseline source commit is `r unique(vcf_counts_runs$source_git_sha[vcf_counts_runs$implementation == "prechange"])` and its empty dirty-diff hash identifies the clean commit tree.
 
 ```{r vcf-counts-build-identity, results='asis'}
 knitr::kable(vcf_counts_build_identity, row.names = FALSE)

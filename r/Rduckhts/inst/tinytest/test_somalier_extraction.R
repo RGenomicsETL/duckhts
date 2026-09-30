@@ -8,13 +8,14 @@ test_somalier_sites_import <- function() {
   expect_true(nzchar(source) && file.exists(source))
 
   sites <- rduckhts_somalier_import_sites(con, source, "GRCh38")
-  expect_equal(sites$site_index, 0:2)
-  expect_equal(sites$region, c("chr1", "chr1", "chr2"))
-  expect_equal(sites$allele_a, c("A", "A", "C"))
-  expect_equal(sites$allele_b, c("G", "G", "T"))
-  expect_equal(round(sites$population_b_af, 2), c(0.20, 0.25, 0.70))
-  expect_equal(sites$source_ref, c("G", "A", "T"))
-  expect_equal(sites$source_alt, c("A", "G", "C"))
+  # The chrX record is a sex-chromosome site numbered after every autosomal one.
+  expect_equal(sites$site_index, 0:3)
+  expect_equal(sites$region, c("chr1", "chr1", "chr2", "chrX"))
+  expect_equal(sites$allele_a, c("A", "A", "C", "A"))
+  expect_equal(sites$allele_b, c("G", "G", "T", "C"))
+  expect_equal(round(sites$population_b_af, 2), c(0.20, 0.25, 0.70, 0.40))
+  expect_equal(sites$source_ref, c("G", "A", "T", "A"))
+  expect_equal(sites$source_alt, c("A", "G", "C", "C"))
 
   expect_true(rduckhts_somalier_import_sites(
     con, source, "GRCh38", table_name = "imported_sites"
@@ -487,14 +488,15 @@ test_somalier_bam_count_extraction <- function() {
     ),
     pattern = "worker_count"
   )
+  # The wrapper stages the panel as Parquet for the native reader, so
+  # caller-local TEMP relations and uncommitted rows are visible.
   dbExecute(con, "CREATE TEMP TABLE bam_temp_panel AS SELECT * FROM bam_extraction_panel")
-  expect_error(
-    rduckhts_somalier_bam_counts(
-      con, paths[["range.bam"]], "sample-1", paths[["ce.fa"]],
-      panel_table = "bam_temp_panel"
-    ),
-    pattern = "does not exist"
-  )
+  temp_panel <- canonical(rduckhts_somalier_bam_counts(
+    con, paths[["range.bam"]], "sample-1", paths[["ce.fa"]],
+    panel_table = "bam_temp_panel", index_path = paths[["range.bam.bai"]],
+    reference_index_path = paths[["ce.fa.fai"]]
+  ))
+  expect_equal(temp_panel, bam)
 }
 
 test_somalier_sites_import()

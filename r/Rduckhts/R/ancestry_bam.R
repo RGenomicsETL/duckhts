@@ -10,7 +10,7 @@
 #' @param source_path Indexed BAM/CRAM path.
 #' @param sample_id Sample identifier in the output.
 #' @param reference_path FASTA path for reference checks and CRAM decoding.
-#' @param panel_table Committed panel relation with canonical site identity.
+#' @param panel_table Panel relation with canonical site identity.
 #' @param reference_table Keyed wide or long reference relation.
 #' @param loadings_table PC loadings for long references; pass the correction
 #'   relation here for wide references.

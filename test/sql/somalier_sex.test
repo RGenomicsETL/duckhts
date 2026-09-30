@@ -1,0 +1,321 @@
+# name: test/sql/somalier_sex.test
+# description: X/Y dosage sex evidence from panel counts and autosomal restriction of the other Somalier functions
+# group: [duckhts]
+
+require duckhts
+
+# One panel: ten autosomal sites, twelve X sites and three Y sites, autosomal
+# sites first.
+statement ok
+CREATE TEMP TABLE sex_panel AS
+SELECT 'GRCh38' AS assembly, i::UBIGINT AS site_index,
+       CASE WHEN i < 10 THEN 'chr1' WHEN i < 22 THEN 'chrX' ELSE 'chrY' END AS region,
+       (1000 + i)::UBIGINT AS position, 'A' AS allele_a, 'G' AS allele_b,
+       0.4 AS population_b_af
+FROM range(25) sites(i);
+
+# Per-sample profiles: autosomal (a, b), the X genotype pattern over the twelve
+# X sites k = 0..11, and the Y depth. Genotype codes: R hom-ref (20, 0),
+# H het (10, 10), A hom-alt (0, 20), L below the depth gate (1, 1).
+#   xx = 6 H then 6 A          xy = 11 R then 1 A       ambiguous = 2 H then 10 A
+#   all_het = 12 H             few = 5 R then 7 L       none = 12 L
+statement ok
+CREATE TEMP TABLE sex_profiles AS
+SELECT * FROM (VALUES
+  ('xx', 15, 15, 'xx', 0),
+  ('xy', 15, 15, 'xy', 10),
+  ('few_x', 15, 15, 'few', 0),
+  ('no_x', 15, 15, 'none', 0),
+  ('zero_auto', 0, 0, 'xx', 0),
+  ('ambiguous', 15, 15, 'ambiguous', 0),
+  ('all_het', 15, 15, 'all_het', 0),
+  ('xx_y', 15, 15, 'xx', 15)
+) AS p(sample_id, auto_a, auto_b, x_kind, y_depth);
+
+statement ok
+CREATE TEMP TABLE sex_counts AS
+WITH sites AS (
+  SELECT p.sample_id, p.auto_a, p.auto_b, p.y_depth, s.*,
+    CASE WHEN s.region <> 'chrX' THEN NULL ELSE CASE p.x_kind
+      WHEN 'xx' THEN CASE WHEN s.site_index - 10 < 6 THEN 'H' ELSE 'A' END
+      WHEN 'xy' THEN CASE WHEN s.site_index - 10 = 11 THEN 'A' ELSE 'R' END
+      WHEN 'ambiguous' THEN CASE WHEN s.site_index - 10 < 2 THEN 'H' ELSE 'A' END
+      WHEN 'all_het' THEN 'H'
+      WHEN 'few' THEN CASE WHEN s.site_index - 10 < 5 THEN 'R' ELSE 'L' END
+      ELSE 'L' END END AS x_genotype
+  FROM sex_profiles p CROSS JOIN sex_panel s
+)
+SELECT sample_id, assembly, site_index, region, position, allele_a, allele_b,
+  CASE region WHEN 'chr1' THEN auto_a
+    WHEN 'chrX' THEN CASE x_genotype WHEN 'R' THEN 20 WHEN 'H' THEN 10 WHEN 'A' THEN 0 ELSE 1 END
+    ELSE y_depth END::UBIGINT AS a,
+  CASE region WHEN 'chr1' THEN auto_b
+    WHEN 'chrX' THEN CASE x_genotype WHEN 'R' THEN 0 WHEN 'H' THEN 10 WHEN 'A' THEN 20 ELSE 1 END
+    ELSE 0 END::UBIGINT AS b,
+  0::UBIGINT AS other
+FROM sites;
+
+# One unavailable autosomal record and one autosomal record dominated by other
+# reads leave the mean depth over the remaining genotyped sites.
+statement ok
+UPDATE sex_counts SET a = NULL, b = NULL, other = NULL
+WHERE sample_id = 'xx' AND site_index = 9;
+
+statement ok
+UPDATE sex_counts SET other = 10
+WHERE sample_id = 'xx' AND site_index = 8;
+
+# Integer evidence is exact; the depth ratios are 2 * mean depth over usable
+# sites divided by the mean A+B depth of the autosomal sites that pass the
+# relatedness allele-balance gate (depth >= 7 and other <= 10%).
+query TTTTTTTTTTT
+SELECT sample_id, autosomal_genotyped_sites, x_usable_sites, x_hom_ref, x_het, x_hom_alt,
+       CASE WHEN x_het_hom_alt_ratio = 'Infinity' THEN 'inf'
+            ELSE coalesce(round(x_het_hom_alt_ratio, 3)::VARCHAR, 'NULL') END,
+       coalesce(round(x_depth_ratio, 4)::VARCHAR, 'NULL'), y_usable_sites,
+       coalesce(round(y_depth_ratio, 4)::VARCHAR, 'NULL'), inferred_sex
+FROM duckhts_somalier_sex('sex_counts', 'sex_panel', y_gate := 'sample')
+ORDER BY sample_id;
+----
+all_het	10	12	0	12	0	inf	1.3333	0	NULL	XX
+ambiguous	10	12	0	2	10	0.2	1.3333	0	NULL	ambiguous
+few_x	10	5	5	0	0	NULL	1.3333	0	NULL	ambiguous
+no_x	10	0	0	0	0	NULL	NULL	0	NULL	ambiguous
+xx	8	12	0	6	6	1.0	1.3333	0	NULL	XX
+xx_y	10	12	0	6	6	1.0	1.3333	3	1.0	ambiguous
+xy	10	12	11	0	1	0.0	1.3333	3	0.6667	XY
+zero_auto	0	12	0	6	6	1.0	NULL	0	NULL	XX
+
+# Status separates the metric-limiting conditions from the call. No usable X
+# site or no autosomal depth leaves the ratios NULL; the counts stay integers.
+query TTTTT
+SELECT sample_id, status, y_signal, review_flags::VARCHAR, cohort_has_y
+FROM duckhts_somalier_sex('sex_counts', 'sex_panel')
+ORDER BY sample_id;
+----
+all_het	ok	NULL	[]	true
+ambiguous	ok	NULL	[]	true
+few_x	insufficient_x_sites	NULL	[]	true
+no_x	no_usable_x_sites	NULL	[]	true
+xx	ok	NULL	[]	true
+xx_y	ok	present	[apparent_y_with_xx_dosage]	true
+xy	ok	present	[]	true
+zero_auto	no_autosomal_depth	NULL	[]	true
+
+# Somalier gates its Y check on the cohort (more than five samples, or more
+# than 10%, with Y depth). Eleven XX samples plus one XX sample with Y reads
+# close the gate: Somalier keeps XX, so y_gate := 'cohort' does too, while the
+# default per-sample gate reports the apparent Y and returns ambiguous.
+statement ok
+CREATE TEMP TABLE sex_gate_counts AS
+SELECT * FROM sex_counts WHERE sample_id IN ('xx', 'xx_y')
+UNION ALL
+SELECT 'dup' || lpad(d::VARCHAR, 2, '0'), assembly, site_index, region, position,
+       allele_a, allele_b, a, b, other
+FROM sex_counts, range(9) dups(d) WHERE sample_id = 'xx';
+
+query TTTT
+SELECT sample_id, cohort_has_y, y_signal, inferred_sex
+FROM duckhts_somalier_sex('sex_gate_counts', 'sex_panel', y_gate := 'cohort')
+WHERE sample_id IN ('xx', 'xx_y') ORDER BY sample_id;
+----
+xx	false	NULL	XX
+xx_y	false	NULL	XX
+
+query T
+SELECT inferred_sex FROM duckhts_somalier_sex('sex_gate_counts', 'sex_panel')
+WHERE sample_id = 'xx_y';
+----
+ambiguous
+
+# Thresholds are arguments: a stricter usable-site minimum makes the ambiguous
+# call for xx, and a wider XY het ratio turns the ambiguous sample into XY.
+query T
+SELECT inferred_sex FROM duckhts_somalier_sex('sex_counts', 'sex_panel',
+  min_usable_x_sites := 13) WHERE sample_id = 'xx';
+----
+ambiguous
+
+query T
+SELECT inferred_sex FROM duckhts_somalier_sex('sex_counts', 'sex_panel',
+  xy_max_het_ratio := 0.25, xx_min_het_ratio := 0.3) WHERE sample_id = 'ambiguous';
+----
+XY
+
+# Identity: the whole-panel digest and the autosomal/X denominators.
+query TIIT
+SELECT DISTINCT panel_sha256 = duckhts_somalier_panel_sha256('sex_panel'),
+       autosomal_sites, x_sites, interpretation LIKE 'review_only%'
+FROM duckhts_somalier_sex('sex_counts', 'sex_panel');
+----
+true	10	12	true
+
+statement error
+SELECT * FROM duckhts_somalier_sex('sex_counts', 'sex_panel', y_gate := 'always');
+----
+y_gate must be sample or cohort
+
+statement error
+SELECT * FROM duckhts_somalier_sex('sex_counts', 'sex_panel', min_het_balance := 0.7);
+----
+allele-balance limits
+
+statement error
+SELECT * FROM duckhts_somalier_sex('sex_counts', 'sex_panel',
+  xy_max_het_ratio := 0.5, xx_min_het_ratio := 0.1);
+----
+thresholds must be finite
+
+statement error
+SELECT * FROM duckhts_somalier_sex('sex_counts', 'sex_panel', min_depth := 0);
+----
+min_depth and min_sex_site_depth must be integers
+
+statement error
+SELECT * FROM duckhts_somalier_sex('sex_counts', 'sex_panel', min_usable_x_sites := 0);
+----
+min_usable_x_sites must be an integer
+
+# Every sample needs the complete panel, in the panel's geometry and A/B order.
+statement ok
+CREATE TEMP TABLE sex_short AS SELECT * FROM sex_counts WHERE NOT (sample_id = 'xy' AND site_index = 24);
+
+statement error
+SELECT * FROM duckhts_somalier_sex('sex_short', 'sex_panel');
+----
+every sample requires one count row for every panel site
+
+# A repeated ordinal that keeps the row count (site 24 replaced by a copy of
+# site 23) is also a coverage error.
+statement ok
+CREATE TEMP TABLE sex_repeated AS
+SELECT * FROM sex_counts WHERE NOT (sample_id = 'xy' AND site_index = 24)
+UNION ALL
+SELECT * FROM sex_counts WHERE sample_id = 'xy' AND site_index = 23;
+
+statement error
+SELECT * FROM duckhts_somalier_sex('sex_repeated', 'sex_panel');
+----
+every sample requires one count row for every panel site
+
+statement ok
+CREATE TEMP TABLE sex_moved AS
+SELECT * REPLACE(CASE WHEN site_index = 12 THEN 999::UBIGINT ELSE position END AS position)
+FROM sex_counts;
+
+statement error
+SELECT * FROM duckhts_somalier_sex('sex_moved', 'sex_panel');
+----
+does not match the ordered panel
+
+statement ok
+CREATE TEMP TABLE sex_partial AS
+SELECT * REPLACE(CASE WHEN sample_id = 'xy' AND site_index = 12 THEN NULL::UBIGINT ELSE a END AS a)
+FROM sex_counts;
+
+statement error
+SELECT * FROM duckhts_somalier_sex('sex_partial', 'sex_panel');
+----
+counts must be all measured or all unavailable
+
+statement ok
+CREATE TEMP TABLE sex_empty AS SELECT * FROM sex_counts WHERE false;
+
+statement error
+SELECT * FROM duckhts_somalier_sex('sex_empty', 'sex_panel');
+----
+counts are empty
+
+# A panel without an X site reports no usable X evidence rather than failing.
+statement ok
+CREATE TEMP TABLE sex_auto_panel AS SELECT * FROM sex_panel WHERE region = 'chr1';
+
+statement ok
+CREATE TEMP TABLE sex_auto_counts AS SELECT * FROM sex_counts WHERE region = 'chr1';
+
+query TTT
+SELECT sample_id, status, inferred_sex
+FROM duckhts_somalier_sex('sex_auto_counts', 'sex_auto_panel')
+WHERE sample_id = 'xx';
+----
+xx	no_usable_x_sites	ambiguous
+
+# Relatedness sketches, CHARR and matched contamination are autosomal
+# statistics. Given the sex-inclusive panel and its X/Y counts they read only
+# the autosomal sites, and every numeric result equals the result on the
+# autosomal-only panel (the identity digests differ, as they hash the panel).
+statement ok
+CREATE TEMP TABLE sex_auto_frequency AS SELECT * FROM sex_auto_panel;
+
+query I
+SELECT count(*) FROM (
+  SELECT f.sketch.sample_id, f.sketch.site_count, f.sketch.hom_a, f.sketch.het, f.sketch.hom_b,
+         f.sketch.middling_balance_count, f.sketch.unavailable_count
+  FROM duckhts_somalier_prepare_sketches('sex_counts', 'sex_panel', 7, 0.3, 0.01) f
+  EXCEPT
+  SELECT a.sketch.sample_id, a.sketch.site_count, a.sketch.hom_a, a.sketch.het, a.sketch.hom_b,
+         a.sketch.middling_balance_count, a.sketch.unavailable_count
+  FROM duckhts_somalier_prepare_sketches('sex_auto_counts', 'sex_auto_panel', 7, 0.3, 0.01) a
+);
+----
+0
+
+query II
+SELECT count(*), count(DISTINCT sketch.sample_id)
+FROM duckhts_somalier_prepare_sketches('sex_counts', 'sex_panel', 7, 0.3, 0.01);
+----
+8	8
+
+query I
+SELECT count(*) FROM (
+  SELECT c.contamination.sample_id, c.contamination.status, c.contamination.site_count,
+         c.contamination.usable_sites, c.contamination.estimate
+  FROM duckhts_somalier_charr('sex_counts', 'sex_panel', 'sex_panel', min_depth := 7) c
+  EXCEPT
+  SELECT c.contamination.sample_id, c.contamination.status, c.contamination.site_count,
+         c.contamination.usable_sites, c.contamination.estimate
+  FROM duckhts_somalier_charr('sex_auto_counts', 'sex_auto_panel', 'sex_auto_frequency',
+                              min_depth := 7) c
+);
+----
+0
+
+query I
+SELECT count(*) FROM duckhts_somalier_charr('sex_counts', 'sex_panel', 'sex_panel');
+----
+8
+
+statement ok
+CREATE TEMP TABLE sex_full_sketches AS
+SELECT sketch FROM duckhts_somalier_prepare_sketches('sex_counts', 'sex_panel', 7, 0.3, 0.01);
+
+query I
+SELECT duckhts_somalier_verify_sketches('sex_counts', 'sex_panel', 'sex_full_sketches');
+----
+true
+
+statement ok
+CREATE TEMP TABLE sex_pairs AS
+SELECT * FROM (VALUES ('xx_y', 'xx'), ('xy', 'xx')) AS p(receiver_id, anchor_id);
+
+query I
+SELECT count(*) FROM (
+  SELECT m.contamination.receiver_id, m.contamination.anchor_id, m.contamination.status,
+         m.contamination.site_count, m.contamination.usable_sites, m.contamination.alpha
+  FROM duckhts_somalier_matched_contamination(
+    'sex_counts', 'sex_panel', 'sex_panel', 'sex_pairs', min_depth := 7) m
+  EXCEPT
+  SELECT m.contamination.receiver_id, m.contamination.anchor_id, m.contamination.status,
+         m.contamination.site_count, m.contamination.usable_sites, m.contamination.alpha
+  FROM duckhts_somalier_matched_contamination(
+    'sex_auto_counts', 'sex_auto_panel', 'sex_auto_frequency', 'sex_pairs', min_depth := 7) m
+);
+----
+0
+
+query II
+SELECT count(*), min(contamination.site_count)
+FROM duckhts_somalier_matched_contamination(
+  'sex_counts', 'sex_panel', 'sex_panel', 'sex_pairs', min_depth := 7);
+----
+2	10

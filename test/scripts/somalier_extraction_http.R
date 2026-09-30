@@ -73,12 +73,16 @@ main <- function(args) {
     "('WBcel235', 3::UBIGINT, 'NOT_IN_REFERENCE', 1::UBIGINT, 'A', 'C'))",
     "p(assembly, site_index, region, position, allele_a, allele_b)"
   ))
+  panel_file <- tempfile(fileext = ".parquet")
+  on.exit(unlink(panel_file), add = TRUE, after = FALSE)
+  DBI::dbExecute(con, paste("COPY panel TO", quote(panel_file), "(FORMAT parquet)"))
 
   extract <- function(
     source, reference, index = NULL, reference_index = NULL, worker_count = 1L
   ) {
     arguments <- c(
-      quote(source), "'panel'", "'sample-1'", quote(reference),
+      quote(source), "NULL", "'sample-1'", quote(reference),
+      paste0("panel_parquet := ", quote(panel_file)),
       if (!is.null(index)) paste0("index_path := ", quote(index)),
       if (!is.null(reference_index)) {
         paste0("reference_index_path := ", quote(reference_index))

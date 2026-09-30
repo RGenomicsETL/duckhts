@@ -9,7 +9,7 @@ This benchmark measures the cgranges path that matters for provider
 streaming:
 
 - build one session-scoped cgranges target index with
-  `duckhts_cgranges_from_query(...)` / `duckhts_cgranges_index(...)`
+  `duckhts_cgranges_from_table(...)`
 - stream query intervals from `read_bed(...)`
 - filter query rows with the vectorized scalar predicate
   `duckhts_cgranges_has_overlap(...)`
@@ -32,23 +32,23 @@ streaming provider path. The current scripts avoid that pattern.
 Synthetic, deterministic default used for the rendered table:
 
 ``` sh
-python3 scripts/cgranges_benchmark.py \
+Rscript r/duckhtsbench/scripts/cgranges_benchmark.R \
   --extension build/release/duckhts.duckdb_extension \
   --bedtk .sync/bedtk/bedtk \
   --bedtools bedtools \
   --subjects 50000 \
   --queries 5000 \
-  --passes 3 \
-  --out-dir .tmp/cgranges_benchmark
+  --passes 3
 ```
 
-Real DuckBedQC BED files can be benchmarked with:
+Real DuckBedQC BED files can be benchmarked after staging their pinned
+source revision:
 
 ``` sh
+make stage-duckbedqc-data
 python3 scripts/cgranges_benchmark_real.py \
   --extension build/release/duckhts.duckdb_extension \
-  --passes 1 \
-  --out-dir .tmp/cgranges_benchmark_real
+  --passes 1
 ```
 
 For a shell/CLI-only smoke path that still avoids generated bulk-query
@@ -73,13 +73,13 @@ scripts/cgranges_benchmark_cli.sh
 
 | tool     | variant         | subject_intervals | query_intervals | passes | build_index_sec | query_total_sec | query_pass_1_sec | total_elapsed_sec | peak_rss_mb | matched_query_intervals | total_hits | time_per_query_ms |
 |:---------|:----------------|------------------:|----------------:|-------:|----------------:|----------------:|-----------------:|------------------:|------------:|------------------------:|-----------:|------------------:|
-| duckhts  | scalar_filter   |             50000 |            5000 |      3 |           0.011 |           0.005 |            0.001 |             0.107 |        68.6 |                    2239 |         NA |            0.0003 |
-| duckhts  | scalar_count    |             50000 |            5000 |      3 |           0.011 |           0.005 |            0.002 |             0.106 |        68.4 |                    2239 |       3000 |            0.0003 |
-| duckhts  | scalar_expand   |             50000 |            5000 |      3 |           0.011 |           0.021 |            0.008 |             0.118 |        93.4 |                    2239 |       3000 |            0.0014 |
-| bedtk    | flt             |             50000 |            5000 |      3 |           0.000 |           0.026 |            0.007 |             0.057 |        15.0 |                    2239 |         NA |            0.0017 |
-| bedtools | intersect_u     |             50000 |            5000 |      3 |           0.000 |           0.058 |            0.020 |             0.103 |        21.9 |                    2239 |         NA |            0.0039 |
-| bedtools | intersect_c     |             50000 |            5000 |      3 |           0.000 |           0.065 |            0.022 |             0.098 |        21.9 |                    2239 |       3000 |            0.0043 |
-| bedtools | intersect_wa_wb |             50000 |            5000 |      3 |           0.000 |           0.070 |            0.027 |             0.099 |        21.7 |                    2239 |       3000 |            0.0047 |
+| duckhts  | scalar_filter   |             50000 |            5000 |      3 |           0.019 |           0.006 |            0.002 |             0.025 |          NA |                    2261 |         NA |            0.0004 |
+| duckhts  | scalar_count    |             50000 |            5000 |      3 |           0.019 |           0.009 |            0.002 |             0.028 |          NA |                    2261 |       2942 |            0.0006 |
+| duckhts  | scalar_expand   |             50000 |            5000 |      3 |           0.019 |           0.023 |            0.008 |             0.042 |          NA |                    2261 |       2942 |            0.0015 |
+| bedtk    | flt             |             50000 |            5000 |      3 |           0.000 |           0.050 |            0.015 |             0.050 |          NA |                    2261 |         NA |            0.0033 |
+| bedtools | intersect_u     |             50000 |            5000 |      3 |           0.000 |           0.083 |            0.026 |             0.083 |          NA |                    2261 |         NA |            0.0055 |
+| bedtools | intersect_c     |             50000 |            5000 |      3 |           0.000 |           0.085 |            0.028 |             0.085 |          NA |                    2261 |       2942 |            0.0057 |
+| bedtools | intersect_wa_wb |             50000 |            5000 |      3 |           0.000 |           0.114 |            0.038 |             0.114 |          NA |                    2261 |       2942 |            0.0076 |
 
 # Semantic checks
 

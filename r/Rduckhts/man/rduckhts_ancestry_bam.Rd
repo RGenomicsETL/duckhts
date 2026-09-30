@@ -28,7 +28,7 @@ rduckhts_ancestry_bam(
 
 \item{reference_path}{FASTA path for reference checks and CRAM decoding.}
 
-\item{panel_table}{Committed panel relation with canonical site identity.}
+\item{panel_table}{Panel relation with canonical site identity.}
 
 \item{reference_table}{Keyed wide or long reference relation.}
 

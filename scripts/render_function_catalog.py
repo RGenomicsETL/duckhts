@@ -352,6 +352,23 @@ def main(argv: list[str]) -> int:
     description_path = repo_root / "community-extensions" / "extensions" / "duckhts" / "description.yml"
     description_path.parent.mkdir(parents=True, exist_ok=True)
 
+    macro_names = sorted(
+        str(entry["name"]) for entry in functions
+        if entry["kind"] in ("scalar_macro", "table_macro")
+    )
+    for name in macro_names:
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) is None:
+            die(f"Invalid public macro identifier: {name}")
+    macro_header = repo_root / "src" / "include" / "duckhts_public_macros.h"
+    macro_header.parent.mkdir(parents=True, exist_ok=True)
+    macro_header.write_text(
+        "/* Generated from functions.yaml by scripts/render_function_catalog.py. */\n"
+        "#ifndef DUCKHTS_PUBLIC_MACROS_H\n#define DUCKHTS_PUBLIC_MACROS_H\n"
+        "static const char *const duckhts_public_macros[] = {\n"
+        + "".join(f'    "{name}",\n' for name in macro_names)
+        + "};\n#endif\n",
+        encoding="utf-8",
+    )
     shutil.copyfile(manifest_path, catalog_dir / "functions.yaml")
     (catalog_dir / "functions.md").write_text(render_markdown(functions) + "\n", encoding="utf-8")
     (catalog_dir / "reference.md").write_text(render_reference(functions) + "\n", encoding="utf-8")

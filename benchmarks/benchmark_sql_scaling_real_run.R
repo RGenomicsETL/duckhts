@@ -123,6 +123,14 @@ prepare_vcf_count_panels <- function(extension, source_path, duplicate_path) {
   list(directory = panel_dir, panels = panels)
 }
 
+baseline_git_sha <- function() {
+  sha <- Sys.getenv("DUCKHTS_BASELINE_SHA")
+  if (!grepl("^[0-9a-f]{40}$", sha)) {
+    stop("DUCKHTS_BASELINE_SHA must name the full commit the baseline extension was built from")
+  }
+  sha
+}
+
 matrix_build_identity <- function(implementation, branch_extension,
                                   baseline_extension, run_dir) {
   if (implementation == "prechange") {
@@ -132,7 +140,7 @@ matrix_build_identity <- function(implementation, branch_extension,
     }
     return(list(
       extension = extension,
-      source_git_sha = "296d44a4d9c190c0551257b5e94740988332966e",
+      source_git_sha = baseline_git_sha(),
       source_dirty_diff_sha256 = paste0(
         "e3b0c44298fc1c149afbf4c8996fb924",
         "27ae41e4649b934ca495991b7852b855")

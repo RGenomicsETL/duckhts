@@ -34,10 +34,14 @@ A data frame if `table_name` is `NULL`; otherwise invisible `TRUE`.
 \description{
 Convert an existing Somalier-compatible sites file into the canonical typed
 panel and population-frequency relation used by DuckHTS extraction,
-relatedness, and contamination functions. REF and ALT are oriented into
+relatedness, contamination, and sex functions. REF and ALT are oriented into
 lexical A/B order and alternate-allele frequency is flipped with the alleles,
-so `population_b_af` always describes `allele_b`. Exact Somalier v0.3.4 X/Y
-aliases are excluded, matching its autosomal frequency importer.
+so `population_b_af` always describes `allele_b`. Records on the exact
+Somalier v0.3.4 X/Y aliases are kept as sex-chromosome sites, numbered after
+every autosomal site; relatedness and contamination functions ignore them
+and `rduckhts_somalier_sex()` reads them. No pseudo-autosomal filtering
+happens on import or extraction, as in Somalier: select X sites outside the
+PAR when choosing the sites file. At least one autosomal record is required.
 }
 \details{
 This function does not select sites from a population VCF. Somalier's

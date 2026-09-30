@@ -1,0 +1,27 @@
+# name: test/sql/macro_definitions.test
+# description: Ordered native macro definitions and in-memory LOAD behavior.
+# group: [duckhts]
+
+require duckhts
+
+query IIIII
+SELECT count(*)::INTEGER, count(DISTINCT install_order)::INTEGER,
+       count(DISTINCT definitions_sha256)::INTEGER,
+       count(*) FILTER (WHERE sql LIKE 'CREATE OR REPLACE TEMP MACRO %')::INTEGER,
+       count(*) FILTER (WHERE length(definitions_sha256) = 64)::INTEGER
+FROM duckhts_macro_definitions();
+----
+33	33	1	33	33
+
+query II
+SELECT count(DISTINCT d.name)::INTEGER,
+       count(DISTINCT d.name) FILTER (WHERE f.database_name = current_database())::INTEGER
+FROM duckhts_macro_definitions() d
+JOIN duckdb_functions() f ON f.function_name = d.name AND f.function_type IN ('macro', 'table_macro');
+----
+33	33
+
+query I
+SELECT duckhts_quote_ident('a"b');
+----
+"a""b"
