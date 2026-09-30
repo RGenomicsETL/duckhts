@@ -1,33 +1,108 @@
-This package bundles third-party sources.
+Rduckhts is distributed under GPL (>= 2), as declared in DESCRIPTION.
+
+This package bundles third-party sources. Holders and licences below are taken
+from the notices in the bundled files; paths are relative to the installed
+package unless they start with a directory of the source tarball.
 
 DuckHTS DuckDB extension
-	Source: inst/duckhts_extension (files other than the third-party trees below)
-	Authors: DuckHTS contributors
+	Source: inst/duckhts_extension (files other than the third-party components below)
+	Holder: DuckHTS Contributors (Copyright (c) 2026)
 	License: MIT
-	Reference: inst/duckhts_extension/LICENSE (copyright and permission notice)
+	Reference: inst/duckhts_extension/LICENSE
+	Note: inst/duckhts_extension/bcf_reader.c carries "Copyright (c) 2026 RBCFTools Authors" and
+	inst/duckhts_extension/include/vep_parser.h records "Ported from RBCFTools"; both are part of
+	the MIT-licensed extension sources.
 
 HTSlib
 	Source: inst/duckhts_extension/htslib
-	Authors: Genome Research Ltd and contributors (see LICENSE in that directory)
-	License: MIT/Expat for files outside cram/ and Modified BSD 3-Clause for cram/
+	Holders: Genome Research Ltd (files carry "Copyright (C) 2008-2026 Genome Research Ltd" and
+	         similar year ranges); some files also name Broad Institute and Massachusetts
+	         Institute of Technology, and Heng Li
+	License: MIT/Expat for files outside cram/; Modified BSD 3-Clause for cram/
 	Reference: inst/duckhts_extension/htslib/LICENSE
+	Notes: HTSlib itself bundles or contains the following, each under the terms stated in its own file:
+	- htscodecs (inst/duckhts_extension/htslib/htscodecs): Copyright Genome Research Limited, BSD
+	  (see htslib/htscodecs/LICENSE.md). c_range_coder.h is Public Domain, derived from work by
+	  Eugene Shelwien; rANS_byte.h and rANS_word.h are derived from Fabian Giesen's Public Domain
+	  ryg_rans (CC0).
+	- khash.h, kseq.h, klist.h, kfunc.h, kstring.h and kstring.c carry "Copyright ... Attractive
+	  Chaos <attractor@live.co.uk>" (2008-2011) alongside Genome Research Ltd; other files (for
+	  example vcf.h, tbx.c, faidx.c, errmod.c) carry Broad Institute and/or Massachusetts Institute
+	  of Technology notices, and a file naming Heng Li as author (for example faidx.c, tbx.c,
+	  vcf.h) keeps that attribution. The permission notice in each file governs it.
+	- Some files in cram/ (misc.h, os.h, open_trace_file.c and open_trace_file.h) carry
+	  "Copyright (c) 1993-2002 MEDICAL RESEARCH COUNCIL" (Modified BSD, stated in each file).
+	- hts_time_funcs.h: time-zone code in the public domain ("clarified as of 1996-06-05 by
+	  Arthur David Olson"); non-derived code is copyright as stated in the file.
+	- os/lzma_stub.h: placed in the public domain, as stated in the file.
+	- md5.c: Alexander Peslyak (Solar Designer), placed in the public domain; the file gives a
+	  fallback licence permitting redistribution and modification.
+	- os/rand.c: Copyright (c) 1993 Martin Birgmeier (terms stated in the file).
+	- ref_cache/ sources: Copyright (C) 2025 Genome Research Ltd (MIT/Expat, stated in each file).
+	- config.guess and config.sub: Copyright 1992-2025 Free Software Foundation, Inc.
+	  (GNU General Public License version 3 or later, with the Autoconf configure-script exception
+	  stated in each file).
+	- m4/ macros: hts_check_compile_flags_needed.m4 (Copyright (c) 2008 Guido U. Draheim),
+	  hts_hide_dynamic_syms.m4 (Copyright (C) 2018 Genome Research Ltd, MIT/Expat),
+	  hts_prog_cc_warnings.m4 (AllPermissive), pkg.m4 (Copyright 2004 Scott James Remnant,
+	  Copyright 2012-2015 Dan Nicholson); terms as stated in each file.
+	The HTSlib sample programs under inst/duckhts_extension/htslib/samples are HTSlib project files
+	covered by the HTSlib LICENSE.
 
-DuckDB C API headers
-	Source: inst/duckhts_extension/duckdb_capi/duckdb.h and duckdb_extension.h
-	Authors: DuckDB contributors
-	License: See the DuckDB project license for the version of these headers
+bcftools filter expression engine
+	Source: inst/duckhts_extension/bcftools_filter.c, inst/duckhts_extension/include/filter.h
+	Holder: Genome Research Ltd (Copyright (C) 2013-2025 in bcftools_filter.c;
+	        Copyright (C) 2013-2024 in filter.h)
+	Author: Petr Danecek <pd3@sanger.ac.uk>
+	License: MIT (permission notice reproduced in each file)
+	Note: bcftools_filter.c is bcftools filter.c with local patches; see
+	inst/duckhts_extension/include/bcftools_shim.h and bcftools_filter_config.h for the
+	compatibility shims (no separate notice).
+
+cgranges
+	Source: inst/duckhts_extension/cgranges.c, inst/duckhts_extension/include/cgranges.h,
+	        inst/duckhts_extension/include/khash.h
+	Holders: Dana-Farber Cancer Institute (Copyright (c) 2019, cgranges.h);
+	         Attractive Chaos <attractor@live.co.uk> (Copyright (c) 2008, 2009, 2011, khash.h)
+	License: MIT ("The MIT License", notice in each header)
+	Reference: inst/duckhts_extension/include/cgranges.h and inst/duckhts_extension/include/khash.h
+	Note: cgranges.c has no notice of its own and is covered by cgranges.h; it is upstream
+	cgranges (https://github.com/lh3/cgranges) with one local patch.
+
+libBigWig
+	Source: inst/duckhts_extension/libBigWig, inst/duckhts_extension/libbigwig_hfile_io.c
+	Holder: Devon Ryan (Copyright (c) 2015)
+	License: MIT
+	Reference: inst/duckhts_extension/libBigWig/LICENSE
+	Upstream commit: see inst/duckhts_extension/libBigWig/COMMIT
+	Note: inst/extdata/libbigwig_test.bw is the upstream libBigWig test file.
 
 VariantKey / RegionKey C API
 	Source: inst/duckhts_extension/include/variantkey/{hex.h,variantkey.h,regionkey.h}
-	Authors: Nicola Asuni and contributors
+	Holders: GENOMICS plc (Copyright (c) 2017-2018 in each header; the upstream LICENSE names
+	         2017-2019, 2023); Nicola Asuni - Tecnick.com (Copyright (c) 2017-2018, binsearch,
+	         named in the upstream LICENSE)
+	Author: Nicola Asuni <nicola.asuni@genomicsplc.com>
 	License: MIT
-	Reference: inst/duckhts_extension/include/variantkey/variantkey.h and inst/duckhts_extension/include/variantkey/regionkey.h
+	Reference: inst/duckhts_extension/include/variantkey/LICENSE
 
-libBigWig
-	Source: inst/duckhts_extension/libBigWig
-	Author: Devon Ryan
+DuckDB C extension API headers
+	Source: inst/duckhts_extension/duckdb_capi/duckdb.h and duckdb_extension.h
+	Holder: Stichting DuckDB Foundation
 	License: MIT
-	Reference: inst/duckhts_extension/libBigWig/LICENSE
+	Reference: inst/duckhts_extension/duckdb_capi/LICENSE (text reproduced below)
+	Note: The headers are generated from DuckDB and carry no per-file copyright notice. They are
+	DuckDB C API headers refreshed to v1.5.3 with one local patch
+	(inst/patches/duckdb_capi_strict_prototypes.patch, C prototypes only). DuckDB's
+	MIT licence applies to them; its text, taken from the DuckDB v1.5.3 LICENSE file, is:
+
+	Copyright 2018-2025 Stichting DuckDB Foundation
+
+	Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+	The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+	THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 Mosdepth test fixtures
 	Source: inst/extdata/{bad.bed,big.bam,empty-tids.*,full-fragment-pairs.*,missing.bed,nanopore.*,overlapping-pairs.*,ovl.*,track.bed,unordered.bed}
@@ -36,7 +111,8 @@ Mosdepth test fixtures
 	Reference: upstream mosdepth project LICENSE
 
 Somalier-derived numerical methods
-	Source: inst/duckhts_extension/somalier.c
+	Source: inst/duckhts_extension/somalier.c, inst/duckhts_extension/include/duckhts_somalier.h,
+	        inst/duckhts_extension/include/bam_site_counts.h
 	Author: Brent Pedersen and Somalier contributors
 	License: MIT
 	Reference: Somalier v0.3.4, commit ff58fdade8f4f8293d904f10e0a4a13f1fac808d
