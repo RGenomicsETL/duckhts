@@ -84,3 +84,70 @@ for (multiplier in c(1L, 2L, 4L)) {
     })
   }
 }
+
+duplicate_id <- "sql_scaling_vcf_counts_duplicate_million"
+duplicate_source_id <- "sql_scaling_giab_1x"
+duplicate_source <- duckhts_bench_artifact_path(duplicate_source_id)
+duplicate_output <- duckhts_bench_artifact_path(duplicate_id)
+if (!file.exists(paste0(duplicate_source, ".tbi"))) {
+  stop("indexed 1x GIAB input is required to stage the duplicate-error case")
+}
+header <- system2(bcftools, c("view", "-h", shQuote(duplicate_source)), stdout = TRUE)
+if (!any(grepl("^##FORMAT=<ID=AD,", header))) {
+  stop("registered 1x GIAB input does not declare FORMAT/AD")
+}
+seed_rows <- system2(
+  bcftools,
+  c("view", "-H", "-r", "chr1:1-2000000", "-m2", "-M2", "-v", "snps",
+    shQuote(duplicate_source)),
+  stdout = TRUE)
+seed_fields <- strsplit(seed_rows, "\t", fixed = TRUE)
+valid_seed <- vapply(seed_fields, function(fields) {
+  if (length(fields) < 10L || fields[[1L]] != "chr1" ||
+      !fields[[4L]] %in% c("A", "C", "G", "T") ||
+      !fields[[5L]] %in% c("A", "C", "G", "T") ||
+      fields[[4L]] == fields[[5L]]) {
+    return(FALSE)
+  }
+  format_fields <- strsplit(fields[[9L]], ":", fixed = TRUE)[[1L]]
+  sample_fields <- strsplit(fields[[10L]], ":", fixed = TRUE)[[1L]]
+  format_indices <- match(c("GT", "AD"), format_fields)
+  !anyNA(format_indices) && length(sample_fields) >= max(format_indices) &&
+    !any(sample_fields[format_indices] %in% c("", ".")) &&
+    grepl("^[0-9]+,[0-9]+$", sample_fields[[format_indices[[2L]]]])
+}, logical(1))
+if (!any(valid_seed)) stop("could not find a biallelic chr1 SNP with FORMAT/AD")
+seed_fields <- seed_fields[[which(valid_seed)[[1L]]]]
+format_fields <- strsplit(seed_fields[[9L]], ":", fixed = TRUE)[[1L]]
+sample_fields <- strsplit(seed_fields[[10L]], ":", fixed = TRUE)[[1L]]
+format_indices <- match(c("GT", "AD"), format_fields)
+if (anyNA(format_indices) || length(sample_fields) < max(format_indices) ||
+    any(sample_fields[format_indices] %in% c("", ".")) ||
+    !grepl("^[0-9]+,[0-9]+$", sample_fields[[format_indices[[2L]]]])) {
+  stop("selected chr1 SNP lacks a usable GT:AD sample call")
+}
+seed_record <- paste(c(seed_fields[[1L]], seed_fields[[2L]], ".",
+                       seed_fields[[4L]], seed_fields[[5L]], ".", "PASS", ".",
+                       "GT:AD", paste(sample_fields[format_indices], collapse = ":")),
+                     collapse = "\t")
+registry <- duckhts_bench_registry()
+duplicate_row <- registry[registry$id == duplicate_id, , drop = FALSE]
+expected_records <- as.integer(duckhts_bench_identity_fields(
+  duplicate_row$supplier_identity[[1L]])[["records"]])
+dir.create(dirname(duplicate_output), recursive = TRUE, showWarnings = FALSE)
+temporary_output <- paste0(duplicate_output, ".partial-", Sys.getpid())
+tryCatch({
+  duckhts_bench_write_repeated_vcf(header, seed_record, temporary_output,
+                                   expected_records)
+  record_count <- as.integer(system2(
+    "grep", c("-vc", shQuote("^#"), shQuote(temporary_output)), stdout = TRUE))
+  if (!identical(record_count, expected_records)) {
+    stop("duplicate-error VCF record count mismatch")
+  }
+  if (file.exists(duplicate_output)) unlink(duplicate_output)
+  if (!file.rename(temporary_output, duplicate_output)) {
+    stop("could not publish duplicate-error VCF")
+  }
+  duckhts_bench_write_provenance(duplicate_id, duplicate_output)
+  message(duplicate_id, ": ", record_count, " duplicate records")
+}, finally = unlink(temporary_output))
