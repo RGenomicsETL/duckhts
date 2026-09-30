@@ -2,21 +2,16 @@
 
 # duckhts 1.5.2.9007
 
-- New `regions := STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[]` argument
-  on `read_bcf()` and `read_geno()` fetches typed 0-based half-open intervals
-  (VCF position `p` is `[p - 1, p)`) with one native indexed scan built directly
-  from contig ids, without region strings. Contig names are literal, so
-  `HLA-A*01:01` or `chr1:2` need no braces. NULL keeps the ordinary scan, an
-  empty list returns no records (also for `COUNT(*)`), and `region` with
-  `regions`, a missing index or `scan_mode := 'sequential'` are errors, as are
-  NULL fields, `start < 0` and `end <= start`. Overlapping and adjacent intervals
-  are merged per contig; the caps are 1,000,000 intervals and 128 MiB. Prepare the
-  list with `SET VARIABLE` on the caller connection and pass
-  `regions := getvariable('name')`; wrap `list()` in `coalesce(..., [])` so an
-  empty request set is not NULL. Exact requested alleles are restored with an
-  equality join on `unnest(ALT)` and `generate_subscripts(ALT, 1)` (documented in
-  the function catalog); `list_contains` in the join condition plans a nested loop.
-  No performance claim is made.
+- `read_bcf()` and `read_geno()` take `regions := STRUCT(chrom VARCHAR, start
+  BIGINT, "end" BIGINT)[]`: 0-based half-open intervals (VCF position `p` is
+  `[p - 1, p)`) read in one indexed scan built from contig ids, without region
+  strings. Contig names are literal, so `HLA-A*01:01` needs no braces. NULL keeps
+  the ordinary scan and an empty list returns no records. Combining it with
+  `region`, a missing index or `scan_mode := 'sequential'` is an error. Overlapping
+  and adjacent intervals are merged; the caps are 1,000,000 intervals and 128 MiB.
+  Build the list with `SET VARIABLE` on the calling connection and pass
+  `regions := getvariable('name')`; the function catalog shows the exact-allele
+  join.
 
 - Breaking: the Somalier panel now carries X/Y sites, and its identity changes.
   `duckhts_somalier_import_sites()` keeps records on the exact Somalier v0.3.4
