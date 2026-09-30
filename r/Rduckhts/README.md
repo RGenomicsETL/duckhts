@@ -40,8 +40,8 @@ install.packages("Rduckhts")
 
 ## System Requirements
 
-The package requires `duckdb` 1.4.0 or newer and a DuckDB runtime of at
-least 1.4.0. The bundled extension’s v1.2.0 stable C API target is
+The package requires `duckdb` 1.5.0 or newer and a DuckDB runtime of at
+least 1.5.0. The bundled extension’s v1.2.0 stable C API target is
 distinct from this SQL-runtime requirement.
 
 Installation requires `htslib` dependencies such as zlib and libbz2, and

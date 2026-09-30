@@ -133,7 +133,7 @@ rduckhts_connect <- function(
 #' \code{rduckhts_connect()}.
 #'
 #' @details
-#' DuckDB 1.4.0 or newer is required. SQL registration errors retain the
+#' DuckDB 1.5.0 or newer is required. SQL registration errors retain the
 #' underlying DuckDB diagnostic in the initialization error.
 #'
 #' The connection must permit unsigned extension loading. With current versions
