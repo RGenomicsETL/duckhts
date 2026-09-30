@@ -102,8 +102,8 @@ if (!SIGNED) {
 }
 ```
 
-On `latest` (DuckHTS 1.5.2), `localFileUrl` throws because the signed binaries predate
-the handler. `SIGNED` lets applications select a supported input path.
+Signed builds before DuckHTS 1.5.3 predate the handler. On those, including 1.5.2,
+`localFileUrl` throws; signed builds from 2.0.0 include it. `SIGNED` reports the channel.
 
 Keep the URL live until every query or result stream using it finishes, including
 queries against views that retain it. Object URLs have no sibling filenames: automatic
@@ -112,9 +112,30 @@ index passed as `index_path := '<index blob URL>'`. If a transport ignores Range
 backend caches the full response in JavaScript, which costs browser memory
 proportional to the file size.
 
-Files registered with duckdb-wasm (`registerFileBuffer`, `registerFileHandle`,
-`registerFileText`) remain **invisible** to DuckHTS readers. The file-system integration
-is a separate option in https://github.com/RGenomicsETL/duckhts/issues/246.
+### Files registered with duckdb-wasm
+
+DuckHTS readers cannot see files registered with duckdb-wasm (`registerFileBuffer`,
+`registerFileHandle`, `registerFileText`).
+
+- **Why:** htslib opens files itself. DuckDB offers extensions its file system only through
+  its unstable C API, which the signed stable-ABI builds cannot use.
+- **What to do instead:** pass the same bytes as a `blob:` URL. The two routes read
+  identical data, and a browser test covers both
+  (https://github.com/RGenomicsETL/duckhts/issues/294):
+
+```js
+// Instead of db.registerFileBuffer("sample.bed", bytes):
+const local = localFileUrl(new Blob([bytes]));
+// Instead of db.registerFileHandle("sample.bed", file, ...):
+// const local = localFileUrl(file);
+try {
+  await conn.query(`SELECT * FROM read_bed('${local.url}')`);
+} finally {
+  local.revoke();
+}
+```
+
+For text, pass `new Blob([text])`.
 
 ## Development
 

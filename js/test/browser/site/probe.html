@@ -12,6 +12,7 @@
 </script>
 <script type="module">
   import { loadDuckhts, localFileUrl } from "/src/index.js";
+  import { BLOB_CAPABLE } from "/src/channel.js";
 
   // Open duckdb-wasm from this origin with unsigned extensions disallowed,
   // load DuckHTS through the package loader, and report what each read path
@@ -69,13 +70,21 @@
     );
 
     const bedBytes = new Uint8Array(await (await fetch(bedUrl)).arrayBuffer());
-    if (allowUnsigned) {
+    if (BLOB_CAPABLE) {
       const local = localFileUrl(new File([bedBytes], "dropped.bed"));
       try {
         result.bedBlob = await attempt(async () =>
           plain(await conn.query(`SELECT chrom, start, "end", name FROM read_bed('${local.url}') ORDER BY start`)));
       } finally {
         local.revoke();
+      }
+      // The documented replacement for registerFileBuffer: the same bytes as a Blob.
+      const buffered = localFileUrl(new Blob([bedBytes]));
+      try {
+        result.bedBufferBlob = await attempt(async () =>
+          plain(await conn.query(`SELECT chrom, start, "end", name FROM read_bed('${buffered.url}') ORDER BY start`)));
+      } finally {
+        buffered.revoke();
       }
     }
     await db.registerFileBuffer("dropped_buffer.bed", bedBytes);
