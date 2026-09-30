@@ -69,7 +69,8 @@ expect_identical(
     "decompression_threads",
     "decode_error_policy",
     "overwrite",
-    "samples"
+    "samples",
+    "regions_var"
   )
 )
 expect_identical(

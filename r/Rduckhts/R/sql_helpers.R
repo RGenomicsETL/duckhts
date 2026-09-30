@@ -24,6 +24,26 @@ build_param_str <- function(params) {
   paste0(", ", paste(names(params), ":=", params, collapse = ", "))
 }
 
+# `regions := getvariable('<name>')`, naming a session variable that holds a
+# STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[] value. The name is a
+# quoted SQL string literal; it is never spliced as an identifier.
+.duckhts_regions_expression <- function(con, regions_var) {
+  if (!is.character(regions_var) || length(regions_var) != 1L || is.na(regions_var) ||
+      !nzchar(regions_var)) {
+    stop("regions_var must be a single non-missing, non-empty string naming a session variable",
+         call. = FALSE)
+  }
+  # getvariable() of an unknown name is NULL, which would silently mean a full
+  # scan. A typo must be an error; an existing NULL variable is still NULL.
+  known <- DBI::dbGetQuery(con, paste0(
+    "SELECT count(*) AS n FROM duckdb_variables() WHERE name = ", sql_quote_string(con, regions_var)))$n
+  if (!isTRUE(known > 0)) {
+    stop("regions_var: no session variable named '", regions_var,
+         "' exists on this connection; create it with SET VARIABLE", call. = FALSE)
+  }
+  paste0("getvariable(", sql_quote_string(con, regions_var), ")")
+}
+
 sql_varchar_list_literal <- function(con, x, name = "value") {
   if (is.null(x) || !length(x)) return("[]::VARCHAR[]")
   if (!is.character(x) || anyNA(x) || any(!nzchar(x))) {
