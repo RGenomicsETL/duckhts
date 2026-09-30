@@ -65,8 +65,10 @@ so a `>=` floor on a prerelease would admit older builds.
 
 | duckdb-wasm | DuckDB | Status |
 |---|---|---|
-| `1.33.1-dev57.0` | v1.5.4 | Both channels: HTTP readers; `dev` also reads `blob:` files after unsigned opt-in |
-| `1.32.0` | v1.4.3 | `dev` loads; signed DuckHTS 1.5.2 fails: https://github.com/RGenomicsETL/duckhts/issues/247 |
+| `1.33.1-dev57.0` | v1.5.4 | HTTP readers on both channels; `blob:` files on signed builds from 2.0.0 and on `dev` after unsigned opt-in |
+
+DuckHTS 2.0.0 requires DuckDB 1.5.0 or newer, so duckdb-wasm 1.32.0 (DuckDB 1.4) and
+older are not supported.
 
 ## Browser file access
 

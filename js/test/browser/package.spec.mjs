@@ -5,7 +5,6 @@ import { SIGNED } from "../../src/index.js";
 // Test the staged binary on the selected channel, using independent fixture rows.
 
 const BED_FIXTURE = new URL("../../../test/data/fixture_mixed_regions.bed", import.meta.url);
-const signedManifest = JSON.parse(await readFile(new URL("../../artifacts.json", import.meta.url), "utf8"));
 
 async function bedFixtureRows() {
   const text = await readFile(BED_FIXTURE, "utf8");
@@ -59,13 +58,4 @@ test("dev loader rejects an unsigned-disallowed connection before LOAD", async (
   expect(result.unsignedAllowed).toBe(false);
   expect(result.load).toEqual({ ok: false,
     error: expect.stringContaining("dev channel requires allow_unsigned_extensions=true") });
-});
-
-test("DuckDB v1.4 runtime loads the binary", async ({ page }) => {
-  test.fail(SIGNED && signedManifest.duckhts === "1.5.2",
-    "signed DuckHTS 1.5.2 predates the DuckDB 1.4 initialization fix");
-  const result = await probe(page, "stable");
-
-  expect(result.duckdb).toMatch(/^v1\.4\./);
-  expect(result.load).toEqual({ ok: true, value: { platform: "wasm_eh" } });
 });
