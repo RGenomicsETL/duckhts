@@ -1,6 +1,8 @@
 # DuckHTS Extension News
 
-# duckhts 2.0.0
+# duckhts 1.5.2.9008
+
+Preview of 2.0.0, still in development: ROH (#318) is still to come. The sections below describe what 2.0.0 will contain.
 
 ## Breaking changes
 

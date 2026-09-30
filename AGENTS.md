@@ -179,6 +179,7 @@ Additional R package rules:
 - Increment the development suffix for each published user-facing development update:
   `X.Y.Z.9000` -> `X.Y.Z.9001` -> `X.Y.Z.9002`, keeping the same prefix in the R
   package version and retaining packaging revision `A` unless packaging needs its own revision.
+- Before a release, including a major one, development stays on the `X.Y.Z.9NNN` line of the last release. Label the NEWS section as the upcoming release's preview; do not set the release version until the release is being tagged.
 - For a release, remove the current development suffix (`.9000`, `.9001`, etc.)
   while retaining the current R packaging revision `A`.
 - Do not hand-edit `configure/extension_version.txt`, rendered README/catalog files, or the local `community-extensions/` descriptor for a version-only bump. Normal configure, bootstrap, and catalog rendering carry the authoritative versions forward.
