@@ -30,6 +30,7 @@ DUCKDB_EXTENSION_EXTERN
 #include "include/duckdb_alloc.h"
 #include "include/duckdb_list.h"
 #include "include/region_list.h"
+#include "include/regions_bind.h"
 #include "include/bcf_scan.h"
 #include "include/bcf_field_vector.h"
 #include "include/bcf_filter_vector.h"
@@ -117,6 +118,9 @@ typedef struct {
     duckhts_bcf_decode_policy_t decode_error_policy; // null|warn|error for BCF decode mismatches
     char** regions;            // Parsed comma-separated regions
     unsigned int n_regions;
+    duckhts_interval_plan_t plan; // Immutable typed intervals when typed_regions
+    int typed_regions;
+    int has_selector;          // Region string or typed regions present, even if empty
     int n_samples;             // Number of samples
     char** sample_names;       // Borrowed from immutable selected_samples
     duckhts_bcf_samples_t selected_samples;
@@ -249,6 +253,7 @@ static void destroy_bind_data(void* data) {
     if (bind->region) duckdb_free(bind->region);
     if (bind->additional_csq_column_types) duckdb_free(bind->additional_csq_column_types);
     free(bind->regions); /* one region-list allocation, including strings */
+    duckhts_interval_plan_destroy(&bind->plan);
 
     duckhts_bcf_samples_destroy(&bind->selected_samples);
 
@@ -922,6 +927,28 @@ static void bcf_read_bind(duckdb_bind_info info) {
         duckdb_bind_set_error(info, region_error);
         goto bind_error;
     }
+    char regions_error[256];
+    if (!duckhts_regions_bind(info, &bind->plan, &bind->typed_regions,
+                              regions_error, sizeof(regions_error))) {
+        char detail[300];
+        snprintf(detail, sizeof(detail), "%s: %s", reader_name, regions_error);
+        duckdb_bind_set_error(info, detail);
+        goto bind_error;
+    }
+    if (bind->typed_regions && region) {
+        char detail[128];
+        snprintf(detail, sizeof(detail), "%s: region and regions are mutually exclusive", reader_name);
+        duckdb_bind_set_error(info, detail);
+        goto bind_error;
+    }
+    bind->has_selector = bind->n_regions > 0 || bind->typed_regions;
+    if (bind->typed_regions && bind->scan_sequential) {
+        char detail[160];
+        snprintf(detail, sizeof(detail),
+                 "%s: scan_mode := 'sequential' is incompatible with regions queries", reader_name);
+        duckdb_bind_set_error(info, detail);
+        goto bind_error;
+    }
     duckdb_value samples_val = duckdb_bind_get_named_parameter(info, "samples");
     char *sample_selector = NULL;
     if (samples_val && !duckdb_is_null_value(samples_val)) {
@@ -1200,15 +1227,20 @@ static void bcf_read_bind(duckdb_bind_info info) {
 
         int loaded = duckhts_bcf_index_load(&bind->index, fmt, file_path, index_path, flags);
         if (loaded < 0) goto bind_oom;
-        if (!loaded && bind->n_regions > 0) {
+        if (!loaded && bind->has_selector) {
             char err[512];
-            snprintf(err, sizeof(err),
-                     "%s: region query requires an index file (.tbi or .csi). Region: %s",
-                     reader_name, bind->region);
+            if (bind->typed_regions) {
+                snprintf(err, sizeof(err),
+                         "%s: regions query requires an index file (.tbi or .csi)", reader_name);
+            } else {
+                snprintf(err, sizeof(err),
+                         "%s: region query requires an index file (.tbi or .csi). Region: %s",
+                         reader_name, bind->region);
+            }
             duckdb_bind_set_error(info, err);
             goto bind_error;
         }
-        if (loaded && bind->n_regions == 0) {
+        if (loaded && !bind->has_selector) {
             const hts_idx_t *idx = bind->index.bcf ? bind->index.bcf : bind->index.tabix->idx;
             int tidy_rows = bind->tidy_format && bind->n_samples > 0;
             uint64_t row_multiplier = tidy_rows ? (uint64_t)bind->n_samples : 1;
@@ -1262,7 +1294,7 @@ static void bcf_read_global_init(duckdb_init_info info) {
     }
 
     global->current_contig = 0;
-    global->has_region = (bind->n_regions > 0);
+    global->has_region = bind->has_selector;
 
     // Enable parallel scan if:
     // 1. Index exists
@@ -1325,7 +1357,7 @@ static void bcf_read_local_init(duckdb_init_info info) {
         }
     }
 
-    if (local->column_count == 0 && !bind->scan_sequential && bind->n_regions == 0 && bind->index_row_count_valid) {
+    if (local->column_count == 0 && !bind->scan_sequential && !bind->has_selector && bind->index_row_count_valid) {
         local->count_only = 1;
         local->count_remaining = bind->index_row_count;
         local->done = (local->count_remaining == 0);
@@ -1342,7 +1374,7 @@ static void bcf_read_local_init(duckdb_init_info info) {
     }
 
     // Check if we're in parallel mode based on bind data
-    int is_parallel = (!bind->scan_sequential && bind->n_contigs > 1 && bind->n_regions == 0);
+    int is_parallel = (!bind->scan_sequential && bind->n_contigs > 1 && !bind->has_selector);
 
     // Initialize parallel scan state
     local->is_parallel = is_parallel;
@@ -1351,7 +1383,7 @@ static void bcf_read_local_init(duckdb_init_info info) {
     char open_error[512];
     if (!duckhts_bcf_scan_open(&local->scan, bind->file_path, &bind->index,
                                bind->decompression_threads,
-                               is_parallel || bind->n_regions > 0
+                               is_parallel || bind->has_selector
                                    ? DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION
                                    : DUCKHTS_HTS_IO_PROFILE_STREAMING,
                                reader_name, open_error, sizeof(open_error))) {
@@ -1378,10 +1410,13 @@ static void bcf_read_local_init(duckdb_init_info info) {
     }
 
     // Set up region query if user specified a region (non-parallel case)
-    if (!is_parallel && bind->n_regions > 0) {
+    if (!is_parallel && bind->has_selector) {
         char region_error[256];
-        if (!duckhts_bcf_scan_regions(&local->scan, bind->regions, bind->n_regions,
-                                      region_error, sizeof(region_error))) {
+        int selected = bind->typed_regions
+            ? duckhts_bcf_scan_intervals(&local->scan, &bind->plan, region_error, sizeof(region_error))
+            : duckhts_bcf_scan_regions(&local->scan, bind->regions, bind->n_regions,
+                                       region_error, sizeof(region_error));
+        if (!selected) {
             duckdb_init_set_error(info, region_error);
             destroy_init_data(local);
             return;
@@ -2018,6 +2053,11 @@ void register_read_bcf_function(duckdb_connection connection) {
     duckdb_table_function_add_named_parameter(tf, "tidy_format", bool_type);  // optional tidy format
     duckdb_table_function_add_named_parameter(tf, "additional_csq_column_types", varchar_type);  // optional bcftools-style CSQ/ANN/BCSQ type overrides
     duckdb_table_function_add_named_parameter(tf, "decompression_threads", bigint_type);  // optional htslib worker threads
+    {
+        duckdb_logical_type regions_type = duckhts_regions_parameter_type();
+        duckdb_table_function_add_named_parameter(tf, "regions", regions_type);
+        duckdb_destroy_logical_type(&regions_type);
+    }
     duckdb_table_function_add_named_parameter(tf, "scan_mode", varchar_type);  // 'auto' or 'sequential'
     duckdb_table_function_add_named_parameter(tf, "decode_error_policy", varchar_type);  // 'null', 'warn', or 'error'
     duckdb_table_function_add_named_parameter(tf, "samples", varchar_type);

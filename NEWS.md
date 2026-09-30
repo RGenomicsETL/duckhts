@@ -2,6 +2,17 @@
 
 # duckhts 1.5.2.9007
 
+- `read_bcf()` and `read_geno()` take `regions := STRUCT(chrom VARCHAR, start
+  BIGINT, "end" BIGINT)[]`: 0-based half-open intervals (VCF position `p` is
+  `[p - 1, p)`) read in one indexed scan built from contig ids, without region
+  strings. Contig names are literal, so `HLA-A*01:01` needs no braces. NULL keeps
+  the ordinary scan and an empty list returns no records. Combining it with
+  `region`, a missing index or `scan_mode := 'sequential'` is an error. Overlapping
+  and adjacent intervals are merged; the caps are 1,000,000 intervals and 128 MiB.
+  Build the list with `SET VARIABLE` on the calling connection and pass
+  `regions := getvariable('name')`; the function catalog shows the exact-allele
+  join.
+
 - `duckhts_somalier_vcf_counts()` streams the VCF into its panel join and keeps
   call payloads only for panel coordinates, so peak memory follows the panel
   rather than the VCF length. Counts, statuses and validation are unchanged.

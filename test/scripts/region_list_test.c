@@ -110,8 +110,75 @@ static int properties(void) {
     return 1;
 }
 
+static int plan_add(duckhts_interval_plan_t *plan, const char *chrom, int64_t start, int64_t end,
+                    size_t item) {
+    char error[256];
+    return duckhts_interval_plan_add(plan, chrom, start, end, item, error, sizeof(error));
+}
+
+static int intervals(void) {
+    char error[256];
+    duckhts_interval_plan_t plan = {0};
+    /* Empty plans are valid. */
+    CHECK(duckhts_interval_plan_finish(&plan, error, sizeof(error)));
+    CHECK(plan.finished && plan.count == 0);
+    duckhts_interval_plan_destroy(&plan);
+    duckhts_interval_plan_destroy(&plan);
+    /* Sort by (name, start); merge overlap and adjacency; never broaden a gap. */
+    CHECK(plan_add(&plan, "b", 10, 20, 1) && plan_add(&plan, "a", 30, 40, 2) &&
+          plan_add(&plan, "a", 5, 10, 3) && plan_add(&plan, "a", 10, 12, 4) &&
+          plan_add(&plan, "a", 11, 13, 5) && plan_add(&plan, "a", 14, 15, 6) &&
+          plan_add(&plan, "b", 10, 20, 7) && plan_add(&plan, "a:1", 0, 1, 8) &&
+          plan_add(&plan, "a", 0, INT64_MAX, 9));
+    CHECK(duckhts_interval_plan_finish(&plan, error, sizeof(error)));
+    CHECK(plan.count == 3 && plan.added == 9);
+    CHECK(strcmp(plan.items[0].chrom, "a") == 0 && plan.items[0].start == 0 &&
+          plan.items[0].end == INT64_MAX);
+    CHECK(strcmp(plan.items[1].chrom, "a:1") == 0 && plan.items[1].start == 0 && plan.items[1].end == 1);
+    CHECK(strcmp(plan.items[2].chrom, "b") == 0 && plan.items[2].start == 10 && plan.items[2].end == 20);
+    duckhts_interval_plan_destroy(&plan);
+    CHECK(plan_add(&plan, "a", 5, 10, 1) && plan_add(&plan, "a", 30, 40, 2) &&
+          plan_add(&plan, "a", 10, 12, 3) && plan_add(&plan, "a", 14, 15, 4) &&
+          plan_add(&plan, "a", 11, 13, 5));
+    CHECK(duckhts_interval_plan_finish(&plan, error, sizeof(error)));
+    CHECK(plan.count == 3);
+    CHECK(plan.items[0].start == 5 && plan.items[0].end == 13);
+    CHECK(plan.items[1].start == 14 && plan.items[1].end == 15);
+    CHECK(plan.items[2].start == 30 && plan.items[2].end == 40);
+    duckhts_interval_plan_destroy(&plan);
+    /* Invalid intervals are explicit and leave the plan unchanged. */
+    CHECK(!duckhts_interval_plan_add(&plan, NULL, 0, 1, 3, error, sizeof(error)) &&
+          strstr(error, "interval 3") && strstr(error, "NULL chrom"));
+    CHECK(!duckhts_interval_plan_add(&plan, "a", -1, 1, 4, error, sizeof(error)) &&
+          strstr(error, "negative start"));
+    CHECK(!duckhts_interval_plan_add(&plan, "a", 5, 5, 5, error, sizeof(error)) &&
+          strstr(error, "end <= start"));
+    CHECK(!duckhts_interval_plan_add(&plan, "a", 6, 5, 6, error, sizeof(error)) &&
+          strstr(error, "end <= start"));
+    CHECK(plan.count == 0);
+    /* Both caps are checked before storage, with overflow-safe arithmetic. */
+    plan.added = DUCKHTS_INTERVAL_PLAN_MAX_INTERVALS;
+    CHECK(!duckhts_interval_plan_add(&plan, "a", 0, 1, 7, error, sizeof(error)) &&
+          strstr(error, "cap is 1000000"));
+    plan.added = 0;
+    plan.payload = DUCKHTS_INTERVAL_PLAN_MAX_BYTES - 1;
+    CHECK(!duckhts_interval_plan_add(&plan, "a", 0, 1, 8, error, sizeof(error)) &&
+          strstr(error, "128 MiB"));
+    plan.payload = UINT64_MAX;
+    CHECK(!duckhts_interval_plan_add(&plan, "a", 0, 1, 9, error, sizeof(error)) &&
+          strstr(error, "128 MiB"));
+    plan.payload = 0;
+    CHECK(plan.count == 0);
+    duckhts_interval_plan_destroy(&plan);
+    /* A finished plan is immutable. */
+    CHECK(duckhts_interval_plan_finish(&plan, error, sizeof(error)));
+    CHECK(!duckhts_interval_plan_add(&plan, "a", 0, 1, 1, error, sizeof(error)));
+    duckhts_interval_plan_destroy(&plan);
+    return 1;
+}
+
 int main(void) {
-    if (!examples() || !properties()) return 1;
-    puts("region list: 10000 trials, seed=190; allocation failure/recovery and exact item order: OK");
+    if (!examples() || !properties() || !intervals()) return 1;
+    puts("region list: 10000 trials, seed=190; allocation failure/recovery, exact item order and typed interval plans: OK");
     return 0;
 }

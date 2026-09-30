@@ -504,6 +504,81 @@ DROP TABLE region_actual;
 statement ok
 DROP TABLE region_oracle;
 
+# Typed regions (0-based half-open) select exactly what the region strings above select,
+# without region-string parsing or a second index path.
+foreach name region_union.bcf region_union.vcf.gz
+
+
+query II
+SELECT (SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}', tidy_format := false,
+   regions := [{'chrom':'chr1','start':17,'end':18},{'chrom':'chr1','start':9,'end':20},{'chrom':'chr1','start':10,'end':11},
+               {'chrom':'chr1','start':11,'end':14},{'chrom':'chr1','start':17,'end':18}])),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}', tidy_format := false,
+     regions := [{'chrom':'chr1','start':17,'end':18},{'chrom':'chr1','start':9,'end':20},{'chrom':'chr1','start':10,'end':11},
+                 {'chrom':'chr1','start':11,'end':14},{'chrom':'chr1','start':17,'end':18}])
+   EXCEPT ALL SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}', tidy_format := false,
+     region := 'chr1:18-18,chr1:10-20,chr1:11-11,chr1:12-14,chr1:18-18'))
+  UNION ALL
+  (SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}', tidy_format := false,
+     region := 'chr1:18-18,chr1:10-20,chr1:11-11,chr1:12-14,chr1:18-18')
+   EXCEPT ALL SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}', tidy_format := false,
+     regions := [{'chrom':'chr1','start':17,'end':18},{'chrom':'chr1','start':9,'end':20},{'chrom':'chr1','start':10,'end':11},
+                 {'chrom':'chr1','start':11,'end':14},{'chrom':'chr1','start':17,'end':18}]))));
+----
+6	0
+
+
+query II
+SELECT (SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}', tidy_format := true,
+   regions := [{'chrom':'chr1','start':17,'end':18},{'chrom':'chr1','start':9,'end':20},{'chrom':'chr1','start':10,'end':11},
+               {'chrom':'chr1','start':11,'end':14},{'chrom':'chr1','start':17,'end':18}])),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}', tidy_format := true,
+     regions := [{'chrom':'chr1','start':17,'end':18},{'chrom':'chr1','start':9,'end':20},{'chrom':'chr1','start':10,'end':11},
+                 {'chrom':'chr1','start':11,'end':14},{'chrom':'chr1','start':17,'end':18}])
+   EXCEPT ALL SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}', tidy_format := true,
+     region := 'chr1:18-18,chr1:10-20,chr1:11-11,chr1:12-14,chr1:18-18'))
+  UNION ALL
+  (SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}', tidy_format := true,
+     region := 'chr1:18-18,chr1:10-20,chr1:11-11,chr1:12-14,chr1:18-18')
+   EXCEPT ALL SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}', tidy_format := true,
+     regions := [{'chrom':'chr1','start':17,'end':18},{'chrom':'chr1','start':9,'end':20},{'chrom':'chr1','start':10,'end':11},
+                 {'chrom':'chr1','start':11,'end':14},{'chrom':'chr1','start':17,'end':18}]))));
+----
+12	0
+
+endloop
+
+query I
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.bcf', tidy_format := false,
+  regions := [{'chrom':'absent','start':0,'end':10},{'chrom':'chr1','start':10,'end':11}]);
+----
+2
+
+query I
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.vcf.gz', tidy_format := false,
+  regions := [{'chrom':'chr1','start':79,'end':90}]);
+----
+0
+
+# An index whose contig dictionary is not in the VCF header still resolves literal names.
+query I
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union_no_contig.vcf.gz',
+  index_path := '__WORKING_DIRECTORY__/test/data/region_union_no_contig.index.tbi',
+  regions := [{'chrom':'chr1','start':10,'end':11},{'chrom':'chr1','start':18,'end':19}]);
+----
+2
+
+# Zero-column scans still honour a typed selector, empty or not.
+query II
+SELECT (SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.bcf', tidy_format := false,
+  regions := [{'chrom':'chr1','start':10,'end':11}])),
+ (SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/region_union.bcf', tidy_format := false,
+  regions := []::STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[]));
+----
+2	0
+
 query I
 SELECT 4242;
 ----

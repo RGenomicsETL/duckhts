@@ -383,7 +383,7 @@ Read VCF/BCF with header-typed INFO/FORMAT, typed CSQ/ANN/BCSQ annotations, samp
 Signature:
 
 ```sql
-read_bcf(path, region := NULL, index_path := NULL, tidy_format := FALSE, additional_csq_column_types := NULL, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null', samples := NULL)
+read_bcf(path, region := NULL, index_path := NULL, tidy_format := FALSE, additional_csq_column_types := NULL, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null', samples := NULL, regions := NULL)
 ```
 
 Returns:
@@ -412,6 +412,10 @@ HTSlib selectors: NULL/'-' keeps all, empty string keeps none, comma-separated n
 
 Comma-separated indexed regions use a union iterator, emitting each physical record once across overlaps. NULL/empty region means no filter; empty list items and malformed known-contig intervals error. Unknown contigs follow HTSlib's skip policy.
 
+### Typed regions
+
+Typed regions: regions := STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[] selects 0-based half-open intervals (VCF POS p is [p-1, p)) with one native multi-region iterator built directly from header/index contig ids, not region strings. NULL or omitted regions keeps the ordinary behaviour; a non-NULL empty list selects zero records, including COUNT(*), and never falls back to a scan (list() over no rows is NULL, so wrap it as coalesce(list(...), []::STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[])). region and non-NULL regions are mutually exclusive; regions requires a usable index (.tbi/.csi) and is incompatible with scan_mode := 'sequential'. chrom is a literal contig name, so names such as 'HLA-A*01:01' or 'chr1:2' need no braces; a contig absent from the header/index yields no records for that interval, like an unknown contig in region. NULL fields, start < 0 and end <= start error. Intervals are sorted and overlapping or adjacent ones merged per contig without broadening; a physical record is returned once however many intervals overlap it, and physical duplicates stay separate. Records that merely overlap an interval (a deletion spanning it) are returned: filter POS in SQL for exact positions. Caps: 1,000,000 intervals and 128 MiB of native payload, checked before storage; they do not bound the caller's own list aggregation. Prepare the plan on the caller connection with SET VARIABLE p = (SELECT coalesce(list({'chrom': chrom, 'start': pos - 1, 'end': pos}), []::STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[]) FROM (SELECT DISTINCT chrom, pos FROM requests)) and pass regions := getvariable('p'). An unknown variable name is NULL to DuckDB (a full scan), so rduckhts_bcf(regions_var =) and rduckhts_geno(regions_var =) check that the variable exists.
+
 ### Scanning
 
 scan_mode='sequential' streams without loading an index. auto streams if no usable index was available at bind; region queries require one. Index-only counts do not validate data contents. Automatic/region plans retain the parsed bind-time index, including remote/explicit index_path: subsequent index removal, replacement or corruption does not change the plan. Supply an initially matching pair and keep data/header contents unchanged; this is not a snapshot or validation of an unrelated index. Reprepare to use a new index.
@@ -433,7 +437,7 @@ Read one row per VCF/BCF record with typed arbitrary-ploidy GT/PS calls, selecte
 Signature:
 
 ```sql
-read_geno(path, region := NULL, index_path := NULL, samples := NULL, non_reference_only := FALSE, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null', format_fields := NULL, raw_gt := FALSE, include_filter := FALSE)
+read_geno(path, region := NULL, index_path := NULL, samples := NULL, non_reference_only := FALSE, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null', format_fields := NULL, raw_gt := FALSE, include_filter := FALSE, regions := NULL)
 ```
 
 Returns:
@@ -452,7 +456,7 @@ samples uses read_bcf's selectors. non_reference_only removes calls without a ca
 
 ### Ordering
 
-Full scans stream in physical input order regardless of index availability, with one scan worker and separate HTSlib decompression threads. record_index is zero-based and scan-local, not a persistent file locator. Indexed region unions restart at zero in HTSlib iterator order; overlapping regions visit a physical record once while preserving distinct duplicates. Use ORDER BY record_index when order matters. Sequential mode rejects regions.
+Full scans stream in physical input order regardless of index availability, with one scan worker and separate HTSlib decompression threads. record_index is zero-based and scan-local, not a persistent file locator. Indexed region unions restart at zero in HTSlib iterator order; overlapping regions visit a physical record once while preserving distinct duplicates. Use ORDER BY record_index when order matters. Sequential mode rejects regions and typed regions.
 
 ### FORMAT
 
@@ -470,10 +474,22 @@ Header/type/cardinality mismatches follow decode_error_policy. Scalar cardinalit
 
 raw_gt := TRUE appends calls.raw_gt VARCHAR after any format struct, preserving exact original VCF separators, leading phase markers and allele spelling. Absent GT is NULL; literal '.' stays text. FALSE preserves the default schema. BCF rejects TRUE even when calls is unprojected. Text follows original-header sample selection and scan ordinals, including region unions; it does not emulate a downstream parser.
 
+### Typed regions
+
+regions := STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[] has the same contract as read_bcf: 0-based half-open, NULL vs empty, literal contig names, index required, 1,000,000 interval and 128 MiB caps; see read_bcf. Ordinals restart at zero in HTSlib iterator order.
+
+### Exact alleles
+
+Exact alleles: regions plus SQL restore requested (chrom, pos, REF, ALT) alleles without changing the reader. Keep requests unchanged, plan I/O with SELECT DISTINCT chrom, pos, read with non_reference_only := false and format_fields such as ['GP','DS','HS'] so hom-ref and missing calls are returned, expand ALT with its ordinal, and join on equality: WITH alleles AS (SELECT record_index, CHROM, POS, REF, ALT AS full_alt, calls, unnest(ALT) AS match_alt, generate_subscripts(ALT, 1) AS alt_index FROM read_geno('f.bcf', regions := getvariable('p'), non_reference_only := false)) SELECT s.*, a.record_index, a.full_alt, a.alt_index, a.calls FROM requests s LEFT JOIN alleles a ON s.chrom = a.CHROM AND s.pos = a.POS AND s.ref = a.REF AND s.alt = a.match_alt. Use equality on the expanded ALT: list_contains(a.ALT, s.alt) in the join condition plans a nested-loop join. Multi-ALT records keep every ALT in file order with the matched 1-based alt_index, and a request matching two ALT slots or two physical records returns a row each. GP, DS, HS and phase are full-site values: no allele splitting, GP remapping, dosage selection, trimming, strand flip or liftover, so a shifted indel representation is not matched. An ALT-less record disappears under unnest, so diagnosing unmatched requests needs a second step; rduckhts_geno_sites() composes the complete recipe on the caller connection, labelling each request matched, allele_not_at_site, ref_mismatch or absent (position-level diagnostics only, never a fabricated genotype). record_index is scan-local; order with ORDER BY request_id, record_index, alt_index. The reader does not deduplicate requests.
+
 ### Examples
 
 ```sql
 SELECT record_index, CHROM, POS, unnest(calls) AS call FROM read_geno('geno_calls.bcf', non_reference_only := TRUE) ORDER BY record_index;
+```
+
+```sql
+SET VARIABLE p = [{'chrom': 'chr1', 'start': 99, 'end': 100}, {'chrom': 'HLA-A*01:01', 'start': 9, 'end': 10}]; SELECT record_index, CHROM, POS, REF, ALT FROM read_geno('geno_sites.bcf', regions := getvariable('p'), non_reference_only := FALSE, format_fields := ['GP', 'DS', 'HS']);
 ```
 
 ## read_bcf_samples
