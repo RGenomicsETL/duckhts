@@ -2,8 +2,9 @@
 
 ## Breaking changes
 
-- Requires duckdb 1.5.0 or newer. The bundled extension's stable C API target
-  (v1.2.0) is an ABI floor and does not imply support for older DuckDB releases.
+- Requires duckdb 1.5.0 or newer; loading the bundled extension on an older
+  DuckDB now fails. Its stable C API target (v1.2.0) is an ABI floor and does not
+  imply support for older DuckDB releases.
 
 - Consequence prediction has moved to DuckVEP and its R package, Rduckvep
   (<https://github.com/RGenomicsETL/DuckVEP>). `rduckhts_haplotypes()` and the bundled

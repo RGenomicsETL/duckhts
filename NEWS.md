@@ -4,9 +4,10 @@
 
 ## Breaking changes
 
-- DuckHTS supports DuckDB 1.5.0 or newer. The stable C API target `C_STRUCT`
-  v1.2.0 recorded in the extension metadata is an ABI floor, not a statement of
-  supported DuckDB versions.
+- DuckHTS supports DuckDB 1.5.0 or newer, and `LOAD` now fails on older runtimes
+  (it used to admit 1.4). The stable C API target `C_STRUCT` v1.2.0 recorded in
+  the extension metadata is an ABI floor, not a statement of supported DuckDB
+  versions.
 
 - Consequence prediction has moved to the
   [DuckVEP extension](https://github.com/RGenomicsETL/DuckVEP), its single
