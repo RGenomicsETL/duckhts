@@ -255,10 +255,10 @@ static void geno_bind(duckdb_bind_info info, int catalog) {
             goto fail;
         }
         if (!duckhts_region_list_parse(region, &bind->regions, &bind->region_count, error, sizeof(error))) goto fail;
-        if (!duckhts_regions_bind(info, &bind->plan, &bind->typed_regions, error, sizeof(error))) {
-            char detail[512];
-            snprintf(detail, sizeof(detail), "read_geno: %s", error);
-            memcpy(error, detail, sizeof(error));
+        char regions_error[256];
+        if (!duckhts_regions_bind(info, &bind->plan, &bind->typed_regions,
+                                  regions_error, sizeof(regions_error))) {
+            snprintf(error, sizeof(error), "read_geno: %s", regions_error);
             goto fail;
         }
         if (bind->typed_regions && region) {
