@@ -88,7 +88,9 @@ rduckhts_gtf(
 
 - attributes:
 
-  Character vector of attribute keys to expose as VARCHAR columns
+  Character vector of attribute keys to expose as VARCHAR columns. Key
+  matching is case-sensitive: `"id"` does not match `ID`, and an
+  unmatched key gives a column of `NA`
 
 ## Value
 

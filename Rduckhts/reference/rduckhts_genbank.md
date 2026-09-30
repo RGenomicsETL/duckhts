@@ -55,7 +55,8 @@ rduckhts_genbank(
   Character vector of qualifier keys to expose as VARCHAR columns. Each
   equals `attributes_map[key]`, including comma-joined repeated
   qualifiers and `NA` for an absent key, and is computed only when the
-  query selects it
+  query selects it. Key matching is case-sensitive: `"ec_number"` does
+  not match `/EC_number`
 
 ## Value
 
