@@ -168,14 +168,14 @@ THREADS=4 make test
 Additional R package rules:
 - **Never** run `R CMD INSTALL .` from `r/Rduckhts/` — it mutates `inst/duckhts_extension/htslib` in place. Always build a tarball and install the tarball.
 - When new extension translation units are added, update `src/duckhts_sources.tsv`; CMake, R bootstrap, and Unix/Windows package configure consume that manifest.
-- Version scheme: `duckhtsVersion-x` (for example `1.1.5-0.0.1`).
+- Version scheme: the DuckHTS version, a dot, then the three-part R packaging revision, dots only (for example `2.0.0.0.1.5`, or `2.0.0.9000.0.1.5` in development). The last three components are always the packaging revision. Releases up to 1.5.2 used a hyphen (`1.5.2-0.1.5`); R reads both forms as the same number.
 - All R changes must maintain CRAN compatibility.
 - A new public function is incomplete until its C source is wired through both the extension build and the R package build on Unix and Windows.
 
 ### Version Bump Workflow
 - The authoritative extension version is `version:` in the root `description.yml`.
-- The authoritative R package version is `Version:` in `r/Rduckhts/DESCRIPTION`; keep the DuckHTS version before the hyphen and the R packaging revision after it.
-- After releasing `X.Y.Z` to both CRAN and the DuckDB community extension repository, start the next development cycle by changing only those two declarations: `X.Y.Z` -> `X.Y.Z.9000` and `X.Y.Z-A` -> `X.Y.Z.9000-A`.
+- The authoritative R package version is `Version:` in `r/Rduckhts/DESCRIPTION`; it is the DuckHTS version followed by the three-part packaging revision `A`, joined by a dot.
+- After releasing `X.Y.Z` to both CRAN and the DuckDB community extension repository, start the next development cycle by changing only those two declarations: `X.Y.Z` -> `X.Y.Z.9000` and `X.Y.Z.A` -> `X.Y.Z.9000.A`.
 - Increment the development suffix for each published user-facing development update:
   `X.Y.Z.9000` -> `X.Y.Z.9001` -> `X.Y.Z.9002`, keeping the same prefix in the R
   package version and retaining packaging revision `A` unless packaging needs its own revision.
