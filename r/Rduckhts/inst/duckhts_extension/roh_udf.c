@@ -61,8 +61,9 @@ static roh_list_t open_list(duckdb_vector vector, idx_t row) {
 }
 
 /* MinGW's GCC treats the printf archetype as Microsoft's format rules, which
- * reject %lld/%llu. Use its C99-conforming stdio and check formats as such. */
-#if defined(__MINGW32__)
+ * reject %lld/%llu. Use its C99-conforming stdio and check formats as such.
+ * Clang (Windows ARM64) has no gnu_printf archetype and accepts %llu as printf. */
+#if defined(__MINGW32__) && !defined(__clang__)
 #define ROH_PRINTF_ARCHETYPE gnu_printf
 #else
 #define ROH_PRINTF_ARCHETYPE printf
