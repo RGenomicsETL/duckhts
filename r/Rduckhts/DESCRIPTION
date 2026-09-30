@@ -1,6 +1,6 @@
 Package: Rduckhts
 Title: 'DuckDB' High Throughput Sequencing File Formats Reader Extension
-Version: 1.5.2.9007-0.1.5
+Version: 2.0.0-0.1.5
 Authors@R: c(
     person(given = "Sounkou Mahamane", family = "Toure",
     email = "sounkoutoure@gmail.com",
@@ -10,11 +10,20 @@ Authors@R: c(
     role = "aut", comment = "GenBank reader and FASTA converter"),
     person("Nurture Bio", role = "cph", comment = "GenBank reader and FASTA converter"),
     person(given = "James K Bonfield, John Marshall,Petr Danecek ,Heng Li , Valeriu Ohan, Andrew Whitwham,Thomas Keane , Robert M Davies", role = "ctb", comment = "Htslib Authors"),
+    person("DuckHTS Contributors", role = "cph", comment = "DuckHTS DuckDB extension (MIT)"),
+    person("RBCFTools Authors", role = "cph", comment = "Copyright notice in bcf_reader.c"),
+    person("Genome Research Ltd", role = "cph", comment = "HTSlib, htscodecs and the bcftools filter engine (Petr Danecek)"),
+    person("Broad Institute", role = "cph", comment = "Portions of HTSlib"),
+    person("Massachusetts Institute of Technology", role = "cph", comment = "Portions of HTSlib"),
+    person("Medical Research Council", role = "cph", comment = "Portions of HTSlib CRAM code"),
+    person("Attractive Chaos", role = "cph", comment = "khash, kseq and related HTSlib and cgranges headers"),
+    person("Dana-Farber Cancer Institute", role = "cph", comment = "cgranges"),
     person(given = "Brent", family = "Pedersen", role = "cph", comment = "Original author of mosdepth and Somalier"),
     person(given = "Giulio", family = "Genovese", email = "giulio.genovese@gmail.com", role = "cph", comment = "Author of BCFTools munge,score,liftover plugins"),
+    person("GENOMICS plc", role = "cph", comment = "VariantKey and RegionKey C API"),
     person(given = "Nicola", family = "Asuni", role = "cph", comment = "Author of the VariantKey and RegionKey C API"),
     person(given = "Devon", family = "Ryan", role = "cph", comment = "Author of libBigWig"),
-    person(given = "DuckDB C Extension API Authors", role = "ctb")
+    person("Stichting DuckDB Foundation", role = "cph", comment = "DuckDB C extension API headers")
     )
 Description: Bundles the 'duckhts' 'DuckDB' extension for reading High Throughput
     Sequencing file formats with 'DuckDB'. The 'DuckDB' C extension API
@@ -29,7 +38,7 @@ Depends:
     R (>= 4.4.0)
 Imports:
     DBI,
-    duckdb (>= 1.4.0),
+    duckdb (>= 1.5.0),
     methods,
     utils
 Suggests:

@@ -206,10 +206,10 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     unsigned major = 0;
     unsigned minor = 0;
     if (sscanf(version, "v%u.%u", &major, &minor) != 2 ||
-        major < 1 || (major == 1 && minor < 4)) {
+        major < 1 || (major == 1 && minor < 5)) {
         char message[160];
         snprintf(message, sizeof(message),
-                 "DuckHTS requires DuckDB 1.4.0 or newer; loaded runtime is %s", version);
+                 "DuckHTS requires DuckDB 1.5.0 or newer; loaded runtime is %s", version);
         return duckhts_registration_error(&registration, message);
     }
 

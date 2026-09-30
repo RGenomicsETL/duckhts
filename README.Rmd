@@ -103,7 +103,7 @@ dbDisconnect(con, shutdown = TRUE)
 
 ## Runtime compatibility
 
-DuckHTS requires DuckDB **1.4.0 or newer** for its SQL functions and macros.
+DuckHTS requires DuckDB **1.5.0 or newer** for its SQL functions and macros.
 The stable **v1.2.0 C API** recorded in `C_STRUCT` extension metadata is a
 separate interface version; it does not imply support for DuckDB 1.2 SQL.
 For duckdb-wasm, check the embedded DuckDB engine version rather than comparing

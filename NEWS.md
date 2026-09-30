@@ -1,23 +1,61 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.2.9007
+# duckhts 2.0.0
 
-- `read_bcf()` and `read_geno()` take `regions := STRUCT(chrom VARCHAR, start
-  BIGINT, "end" BIGINT)[]`: 0-based half-open intervals (VCF position `p` is
-  `[p - 1, p)`) read in one indexed scan built from contig ids, without region
-  strings. Contig names are literal, so `HLA-A*01:01` needs no braces. NULL keeps
-  the ordinary scan and an empty list returns no records. Combining it with
-  `region`, a missing index or `scan_mode := 'sequential'` is an error. Overlapping
-  and adjacent intervals are merged; the caps are 1,000,000 intervals and 128 MiB.
-  Build the list with `SET VARIABLE` on the calling connection and pass
-  `regions := getvariable('name')`; the function catalog shows the exact-allele
-  join.
+## Breaking changes
 
-- `duckhts_somalier_vcf_counts()` streams the VCF into its panel join and keeps
-  call payloads only for panel coordinates, so peak memory follows the panel
-  rather than the VCF length. Counts, statuses and validation are unchanged.
+- DuckHTS supports DuckDB 1.5.0 or newer, and `LOAD` now fails on older runtimes
+  (it used to admit 1.4). The stable C API target `C_STRUCT` v1.2.0 recorded in
+  the extension metadata is an ABI floor, not a statement of supported DuckDB
+  versions.
 
-- Breaking: the Somalier panel now carries X/Y sites, and its identity changes.
+- Consequence prediction has moved to the
+  [DuckVEP extension](https://github.com/RGenomicsETL/DuckVEP), its single
+  source. DuckHTS no longer ships the DuckVEP functions and macros
+  (`duckvep_ensembl_regions`, `duckvep_ensembl_transcripts`,
+  `duckvep_ensembl_regulation_features`, `duckvep_model_receipt`,
+  `duckvep_model_load`, `duckvep_model_drop`, `duckvep_allele_geometry`,
+  `duckvep_transcript_projection`, `duckvep_repeat_alleles`,
+  `duckvep_breakend_geometry`, `duckvep_haplotypes`, `duckvep_phase_call`,
+  `duckvep_annotate`, `duckvep_so_terms`), their conformance tests, corpora and
+  benchmarks. Load DuckVEP alongside DuckHTS for annotation. Parsing of existing
+  CSQ, ANN and BCSQ annotations in `read_bcf()` is unchanged.
+
+- `LOAD` installs SQL macros only when the default database is writable and in
+  memory. For file-backed or read-only defaults, native functions load without
+  catalog writes; execute the ordered `TEMP` statements from
+  `duckhts_macro_definitions()` on each connection that needs macros. These
+  shadow persistent macros in existing files without deleting them.
+
+- `duckhts_cgranges_from_query(...)` and `duckhts_cgranges_overlaps_bulk(...)`
+  are removed, because each ran a query on a private connection. Replacements
+  run on the caller's connection:
+  - `duckhts_cgranges_from_table(name, table_name, chrom_col, start_col, end_col[, label_col])`
+    is now a table macro (it was an unimplemented scalar) that creates, fills
+    and finalizes the index in one statement and returns one `indexed` row, so
+    `SELECT * FROM duckhts_cgranges_from_table(...)` replaces
+    `SELECT duckhts_cgranges_from_query(...)` plus `duckhts_cgranges_index(...)`.
+    Build the relation from a query with `CREATE TEMP VIEW`; TEMP tables, views
+    and uncommitted rows are visible. Without `label_col`, labels and ordinals
+    follow insertion order, which a parallel scan of a large table does not fix.
+    A failure while filling leaves the partly filled entry for
+    `duckhts_cgranges_destroy(...)`.
+  - Bulk probing is
+    `SELECT ..., unnest(duckhts_cgranges_overlaps_list(name, chrom, start, end))`.
+    Expand in the SELECT list: `CROSS JOIN UNNEST` over the same list was about
+    six times slower. Hits equal `duckhts_cgranges_overlaps_bulk` hit for hit;
+    the list returns labels as text with a `label_type` column.
+
+- `duckhts_somalier_bam_counts` reads its panel from Parquet only. The panel is
+  read on a private in-memory DuckDB instance opened and closed for that call,
+  so `panel_table` (which needed a retained connection into the caller's
+  database) is rejected: pass NULL and set `panel_parquet` to a local Parquet
+  file, for example one written with `COPY panel TO 'panel.parquet'`.
+  `panel_parquet` no longer reads remote URLs through the caller's `httpfs`. The
+  shared preparation slot and its busy/recursive error are gone. The panel
+  validation macro is defined once and installed in the private instance.
+
+- The Somalier panel now carries X/Y sites, and its identity changes.
   `duckhts_somalier_import_sites()` keeps records on the exact Somalier v0.3.4
   X/Y aliases (it used to drop them) and numbers every autosomal site before any
   X/Y site; a sites file still needs an autosomal record. There is no PAR
@@ -32,6 +70,19 @@
   the frequency digest, CHARR and matched contamination ignore X/Y panel and
   evidence rows, and their numeric results on the autosomal sites are unchanged.
 
+## New features
+
+- `read_bcf()` and `read_geno()` take `regions := STRUCT(chrom VARCHAR, start
+  BIGINT, "end" BIGINT)[]`: 0-based half-open intervals (VCF position `p` is
+  `[p - 1, p)`) read in one indexed scan built from contig ids, without region
+  strings. Contig names are literal, so `HLA-A*01:01` needs no braces. NULL keeps
+  the ordinary scan and an empty list returns no records. Combining it with
+  `region`, a missing index or `scan_mode := 'sequential'` is an error. Overlapping
+  and adjacent intervals are merged; the caps are 1,000,000 intervals and 128 MiB.
+  Build the list with `SET VARIABLE` on the calling connection and pass
+  `regions := getvariable('name')`; the function catalog shows the exact-allele
+  join.
+
 - New `duckhts_somalier_sex(counts_table, panel_table, ...)` reports, per
   sample, X and Y depth relative to autosomal depth, usable X site and
   het/hom-alt counts, an XX, XY or ambiguous call from documented thresholds,
@@ -43,41 +94,39 @@
   (`test/scripts/somalier_sex_differential.R`). The count of public macros is
   now 24.
 
-- A closed database is now released. `LOAD` used to open private connections
-  into the loading database for cgranges and for Somalier BAM/CRAM panel reading
-  and keep them until the process ended. Each connection referenced the database
-  instance, so the instance outlived the client shutdown: it kept a database file
-  open (Windows could not reopen it in the same process) and never freed its
-  memory. `LOAD` now keeps no connection, and a regression test closes a file
-  database after using both function families and reopens it.
+- `duckhts_ancestry_proportions()` estimates reference-group ancestry proportions by
+  bigsnpr's `snp_ancestry_summary` method. SQL aggregates the PC projections of matched
+  variants; the native solver applies a bounded nearest-positive-definite repair and the
+  constrained fit, invariant to uniform rescaling of the projections. The three-argument
+  call applies sum-to-one constraints. Coefficients keep full precision for the
+  correlation gates; for a fixed input, the returned seven-decimal proportions are
+  stable across calls and thread counts.
+  - Inputs are allele frequencies from summary statistics, dense diploid
+    genotypes, or BAM/CRAM allele counts. Reference loci touching any input locus
+    must be unique; matched loci need finite loadings and frequencies in [0, 1];
+    positions are positive whole numbers and PC identifiers are consecutive whole
+    numbers. Every sample returns a row for every reference group, with NULL
+    proportions when no variant matches. Group identifiers round-trip exactly.
+    Matching audits count reversed sites (including strand-flipped reversals, read
+    as `1 - f`) and flipped sites.
+  - BAM/CRAM site panels capped at `max_sites` keep one site per contig (only the
+    largest `max_sites` contigs when there are more contigs than that) and share
+    the remaining sites in proportion to each contig's eligible sites minus that
+    one. Site eligibility (one allele pair, every group and PC exactly once) is
+    checked with constant per-locus state instead of distinct aggregates,
+    selecting the same sites: on bigsnpr's full reference a one-thread build takes
+    38 s and 1.7 GiB instead of 115 s and 16 GiB with 2.5 GiB of spill, and four
+    threads no longer run out of memory at 16 GB
+    (`benchmarks/benchmark_ancestry_panel.md`).
 
-- Breaking: `duckhts_cgranges_from_query(...)` and
-  `duckhts_cgranges_overlaps_bulk(...)` are removed, because each ran a query on
-  a private connection. Replacements run on the caller's connection:
-  - `duckhts_cgranges_from_table(name, table_name, chrom_col, start_col, end_col[, label_col])`
-    is now a table macro (it was an unimplemented scalar) that creates, fills
-    and finalizes the index in one statement and returns one `indexed` row, so
-    `SELECT * FROM duckhts_cgranges_from_table(...)` replaces
-    `SELECT duckhts_cgranges_from_query(...)` plus `duckhts_cgranges_index(...)`.
-    Build the relation from a query with `CREATE TEMP VIEW`; TEMP tables, views
-    and uncommitted rows are visible. Without `label_col`, labels and ordinals
-    follow insertion order, which a parallel scan of a large table does not fix.
-    A failure while filling leaves the partly filled entry for
-    `duckhts_cgranges_destroy(...)`. The count of public macros is now 23.
-  - Bulk probing is
-    `SELECT ..., unnest(duckhts_cgranges_overlaps_list(name, chrom, start, end))`.
-    Expand in the SELECT list: `CROSS JOIN UNNEST` over the same list was about
-    six times slower. Hits equal `duckhts_cgranges_overlaps_bulk` hit for hit;
-    the list returns labels as text with a `label_type` column.
-
-- Breaking: `duckhts_somalier_bam_counts` reads its panel from Parquet only.
-  The panel is read on a private in-memory DuckDB instance opened and closed for
-  that call, so `panel_table` (which needed a retained connection into the
-  caller's database) is rejected: pass NULL and set `panel_parquet` to a local
-  Parquet file, for example one written with `COPY panel TO 'panel.parquet'`.
-  `panel_parquet` no longer reads remote URLs through the caller's `httpfs`.
-  The shared preparation slot and its busy/recursive error are gone. The panel
-  validation macro is defined once and installed in the private instance.
+- Somalier panel selection (`rduckhts_somalier_find_sites()`) selects sites from
+  caller-visible population relations, including TEMP tables, with per-call filters
+  and site caps; include and exclude intervals use `chrom`, `start`, `end` as
+  `read_bed()` returns them. `duckhts_somalier_spacing()` applies greedy
+  minimum-distance spacing over an ordered chromosome. Somalier v0.3.4 mode keeps
+  input order for equal AF scores and selects X/Y without spacing; lexical ties and
+  enforced X/Y spacing are opt-in. Nearby-variant exclusion runs in ordered position
+  passes, and only qualifying sites are retained during the scan.
 
 - `read_genbank(attributes := [...])` adds one VARCHAR column per requested
   qualifier key, on the shared named-attribute helper that `read_gff` and
@@ -86,186 +135,111 @@
   `Name` and `Parent`, and NULL for an absent key. Values are computed only for
   projected columns, so a query needing one qualifier no longer builds the whole
   `attributes_map`. Bind rejects empty, duplicate, and reserved names.
-  `benchmarks/benchmark_genbank_named_attributes.md` reports the comparison.
-
-# duckhts 1.5.2.9006
-
-- The function catalog documents `bam_bin_counts(include_unmapped := FALSE)` and
-  its synthetic no-coordinate row, and names the type-probe macro's parameter as
-  registered: `duckhts_duckdb_type_supported(candidate_type_name)`. Catalog tests
-  compare every entry with a registered overload of the loaded extension: kinds,
-  scalar and aggregate argument counts,
-  native table options, and macro parameter names.
-
-- `LOAD` installs SQL macros only when the default database is writable and
-  in memory. For file-backed or read-only defaults, native functions load
-  without catalog writes; execute the ordered `TEMP` statements from
-  `duckhts_macro_definitions()` on each connection that needs macros. These
-  shadow persistent macros in existing files without deleting them.
-
-- ONT BAM staging receipts record the BAM SHA-256 and byte size; reuse requires
-  matching reference, read, index and BAM identities.
-
-- Consequence prediction has moved to the [DuckVEP extension](https://github.com/RGenomicsETL/DuckVEP),
-  its single source. DuckHTS no longer ships the DuckVEP functions and macros
-  (`duckvep_ensembl_regions`, `duckvep_ensembl_transcripts`,
-  `duckvep_ensembl_regulation_features`, `duckvep_model_receipt`, `duckvep_model_load`,
-  `duckvep_model_drop`, `duckvep_allele_geometry`, `duckvep_transcript_projection`,
-  `duckvep_repeat_alleles`, `duckvep_breakend_geometry`, `duckvep_haplotypes`,
-  `duckvep_phase_call`, `duckvep_annotate`, `duckvep_so_terms`), their conformance tests,
-  corpora and benchmarks. Load DuckVEP alongside DuckHTS for annotation. Parsing of
-  existing CSQ, ANN and BCSQ annotations in `read_bcf()` is unchanged.
-
-# duckhts 1.5.2.9005
-
-- `duckhts_ancestry_proportions()` estimates reference-group ancestry proportions by
-  bigsnpr's `snp_ancestry_summary` method. SQL aggregates the PC projections of matched
-  variants; the native solver applies a bounded nearest-positive-definite repair and the
-  constrained fit, invariant to uniform rescaling of the projections. The three-argument
-  call applies sum-to-one constraints. Coefficients keep full precision for the
-  correlation gates; for a fixed input, the returned seven-decimal proportions are
-  stable across calls and thread counts.
-
-- Ancestry inputs are allele frequencies from summary statistics, dense diploid
-  genotypes, or BAM/CRAM allele counts. Reference loci touching any input locus must be
-  unique; matched loci need finite loadings and frequencies in [0, 1]; positions are
-  positive whole numbers and PC identifiers are consecutive whole numbers. Every sample
-  returns a row for every reference group, with NULL proportions when no variant
-  matches. Group identifiers round-trip exactly. Matching audits count reversed sites
-  (including strand-flipped reversals, read as `1 - f`) and flipped sites. BAM/CRAM
-  site panels capped at `max_sites` keep one site per contig (only the largest
-  `max_sites` contigs when there are more contigs than that) and share the remaining
-  sites in proportion to each contig's eligible sites minus that one.
-  Site eligibility (one allele pair, every group and PC exactly once) is checked with
-  constant per-locus state instead of distinct aggregates, selecting the same sites: on
-  bigsnpr's full reference a one-thread build takes 38 s and 1.7 GiB instead of 115 s
-  and 16 GiB with 2.5 GiB of spill, and four threads no longer run out of memory at 16 GB
-  (`benchmarks/benchmark_ancestry_panel.md`).
-
-- The benchmark registry pins bigsnpr's reference frequencies and loadings, staged once
-  as a checksum-bound sorted Parquet product whose receipt certifies unique loci and
-  complete, in-range values, together with the epilepsy summary statistics and GRCh37
-  phase-3 chr22 genotypes used for parity with bigsnpr and 30x CRAM comparisons.
-
-# duckhts 1.5.2.9004
-
-- Somalier panel selection (`rduckhts_somalier_find_sites()`) selects sites from
-  caller-visible population relations, including TEMP tables, with per-call filters
-  and site caps; include and exclude intervals use `chrom`, `start`, `end` as
-  `read_bed()` returns them. `duckhts_somalier_spacing()` applies greedy
-  minimum-distance spacing over an ordered chromosome. Somalier v0.3.4 mode keeps input order for equal AF
-  scores and selects X/Y without spacing; lexical ties and enforced X/Y spacing are
-  opt-in. Nearby-variant exclusion runs in ordered position passes, and only
-  qualifying sites are retained during the scan.
-
-- The GFFBase benchmark includes a registry-staged, parity-checked feature-database
-  comparison using SQL over `read_gff`, with reproducible process and query measurements.
-
-# duckhts 1.5.2.9003
-
-- DuckHTS loads on DuckDB 2.0; SQL lambdas use the `lambda x:` syntax
-  (DuckDB >= 1.3).
-
-# duckhts 1.5.2.9002
-
-- Licences are declared consistently: the DuckDB extension is MIT (top-level `LICENSE`),
-  the R packages are GPL (>= 2) and the npm package is GPL-2.0-or-later.
-
-- Publish the DuckHTS README as the project landing page and the Rduckhts pkgdown
-  site under `/Rduckhts/`, with redirects for previous package documentation URLs.
-
-- On Windows, output overwrite removes a file symlink without writing through
-  to its target; R table-creating wrappers reject an existing table before
-  resolving input files when `overwrite = FALSE`.
-
-- R table-reading wrappers replace existing tables atomically with `overwrite = TRUE`;
-  invalid options or failed file reads leave the previous table intact.
 
 - `read_gff` and `read_gtf` accept `attributes := ['key', ...]` to expose requested
   attribute keys as projected VARCHAR columns with values matching `attributes_map`.
   Empty, duplicate and fixed/optional column names are rejected at bind.
-
-- Scan tabix, GFF3 and GTF fields once up to the last projected field; parsed
-  attribute outputs include the attributes field, and strict GFF3 checks count
-  the entire line. Values, NULLs and strict diagnostics retain their existing
-  contracts.
-
-- Stage the tabix-split BED benchmark artifact through a checksum-validated
-  temporary file, rebuilding corrupt cached outputs; test its offline derivation
-  and cache reuse with synthetic GFF3/GTF inputs.
-
-- Report a scan error when `read_hts_header` cannot reserve or size its parsed
-  `key_values` MAP list, rather than writing child values after a failed request.
-
-- Bound `cigar_aligned_blocks` child-list growth geometrically for text CIGARs,
-  including long runs of leading zeroes. Decode each text CIGAR once.
-
-- Validate the staged ONT benchmark's BAM index against its SHA-256 and byte
-  size receipt before reusing the cache.
 
 - `read_bed` accepts `error_policy := 'error'` (default), `'skip'`, or
   `'report'` for short data lines. Report mode exposes physical line numbers,
   raw rejected lines, and error text in three additional columns; it requires
   a full-file scan.
 
+- Add `cigar_aligned_blocks(cigar, pos)`: extracts contiguous aligned segments
+  (M, =, X) from a CIGAR string or binary array into a STRUCT of parallel
+  lists (`ref_start`, `query_start`, `width`). Use it to convert alignments
+  into genomic intervals for coverage, junction, and range overlap analysis
+  without custom SQL loops.
+
+- The CIGAR metrics, operator test and aligned-block functions take an optional
+  final `strict` BOOLEAN. Its default is FALSE; TRUE raises an error for invalid
+  input under the checked grammar below. Diagnostics identify the function and
+  1-based packed-op index or text operation-start byte where available. SQL NULL
+  arguments and no-CIGAR sentinels retain their per-function outcomes.
+
+- Emscripten builds accept read-only `blob:` URLs through the htslib XHR backend,
+  including local File reads and explicit `index_path` object URLs for indexed
+  regions. Missing auto-discovered sidecars allow streaming; callers own URL
+  revocation. Range-ignoring transports retain the full-body JavaScript cache
+  fallback, copying only requested chunks into Wasm memory. DuckDB VFS
+  registrations remain separate and invisible to htslib. Chromium 148.0.7778.96
+  worker-synchronous XHR measurements show `HEAD blob:` fails with `NetworkError`
+  (status 0), ranged GET returns 206 with the total in `Content-Range`, and ranges
+  crossing EOF are truncated; out-of-range and revoked URLs fail with
+  `NetworkError` (status 0). Browser tests cover these observations.
+
+- The wasm HTTP policy is reachable in duckdb-wasm: the extension reads
+  `globalThis.duckhtsWasmHttpConfig` in the thread running DuckDB (set it in the
+  duckdb-wasm worker), as `Module.duckhtsWasmHttpConfig` could only be set in
+  webR. With `enforceHostAllowlist`, `blob:` URLs (no hostname, no network
+  request) are exempt from the host allowlist and never receive custom headers.
+
+- New `duckhts` npm package under `js/` for `@duckdb/duckdb-wasm`
+  (https://github.com/RGenomicsETL/duckhts/issues/246). It ships the signed
+  community-repository wasm builds byte for byte, staged by `js/scripts/stage.mjs`
+  against pinned sha256 values in `js/artifacts.json`, and a
+  `loadDuckhts(conn, { baseUrl })` loader that picks the build for `PRAGMA platform`,
+  so web applications can serve the extension from their own origin with unsigned
+  extensions disallowed. The package is GPL-2.0-or-later and ships `js/LICENSE`
+  and `js/THIRD_PARTY_NOTICES.md`, which reproduce the licences of everything
+  linked into the wasm binaries (HTSlib, htscodecs, libBigWig, cgranges,
+  VariantKey, zlib, bzip2, liblzma). The peer range is
+  `@duckdb/duckdb-wasm` `1.33.1-dev57.0 || >=1.33.1`: npm compares prerelease tags
+  as text, so a `>=` prerelease floor admitted older builds such as `dev6`, and a
+  bare install gets stable 1.32.0, which cannot load this extension (#247).
+  A Playwright test loads it into duckdb-wasm `1.33.1-dev57.0` (DuckDB v1.5.4)
+  and reads BED and GFF over same-origin HTTP. An `npm` `dev` channel carries
+  sha256-pinned unsigned wasm builds from a named GitHub Actions run; its loader
+  requires an explicit DuckDB unsigned-extension setting, and exposes `SIGNED` and
+  blob-capable `localFileUrl` (`latest` keeps signed community binaries and
+  rejects local object URLs). Development versions map to npm numeric prereleases.
+
+## Fixes
+
+- A closed database is now released. `LOAD` used to open private connections
+  into the loading database for cgranges and for Somalier BAM/CRAM panel reading
+  and keep them until the process ended. Each connection referenced the database
+  instance, so the instance outlived the client shutdown: it kept a database file
+  open (Windows could not reopen it in the same process) and never freed its
+  memory. `LOAD` now keeps no connection, and a regression test closes a file
+  database after using both function families and reopens it.
+
+- `duckhts_somalier_vcf_counts()` streams the VCF into its panel join and keeps
+  call payloads only for panel coordinates, so peak memory follows the panel
+  rather than the VCF length. Counts, statuses and validation are unchanged.
+
+- DuckHTS loads on DuckDB 2.0; SQL lambdas use the `lambda x:` syntax
+  (DuckDB >= 1.3). Native functions are registered before dependent SQL macros,
+  complete native overload sets are registered, and initialization failures are
+  reported through DuckDB with their underlying diagnostics.
+
+- CIGAR handling validates complete text and packed CIGARs with shared checked
+  decoding and consumed-span arithmetic. Metrics and presence checks return NULL for
+  malformed suffixes or lengths/spans outside BIGINT, including invalid suffixes after
+  an operator match. Unsupported requested operators return NULL in both forms.
+  Requested-operator case folding is ASCII and locale-independent. Full-input
+  checking adds validation work to operator-presence calls.
+  `cigar_aligned_blocks` bounds child-list growth geometrically for text CIGARs,
+  including long runs of leading zeroes, and decodes each text CIGAR once.
+
+- Scan tabix, GFF3 and GTF fields once up to the last projected field; parsed
+  attribute outputs include the attributes field, and strict GFF3 checks count
+  the entire line. Values, NULLs and strict diagnostics retain their existing
+  contracts.
+
+- Report a scan error when `read_hts_header` cannot reserve or size its parsed
+  `key_values` MAP list, rather than writing child values after a failed request.
+
 - Enforce no-overwrite at file creation for bgzip, bgunzip, idxstats, and
   mosdepth output files, including CSI indexes. Failed writes clean up only
   paths opened by that invocation; newly created files retain the process
   umask's permissions. On POSIX, `overwrite := TRUE` replaces an existing
-  symlink entry with a new file without writing through to its referent.
+  symlink entry with a new file without writing through to its referent. On
+  Windows, output overwrite removes a file symlink without writing through to its
+  target.
 
-- Detect expired or missing pinned npm dev artifacts before downloading. Pull-request
-  checks report the expired pin and skip dev browser/pack steps while retaining unit
-  and version checks; dev publishing requires available, checksum-verified binaries.
-
-- Check npm package identities against the checkout's release or development version;
-  pull requests test both channel runtimes, and dispatch requires a matching channel.
-
-- Stage unsigned npm binaries from GitHub Actions one artifact at a time so
-  cached platforms can be reused when a single platform needs downloading.
-  Run npm package checks on pull requests that change `description.yml`.
-
-- Add an npm `dev` channel with sha256-pinned unsigned wasm builds from a named
-  GitHub Actions run. The npm loader requires an explicit DuckDB unsigned-extension
-  setting on this channel and exposes `SIGNED` and blob-capable `localFileUrl`;
-  `latest` retains signed community binaries and rejects local object URLs.
-  Packaging checks the selected channel and maps development versions to npm
-  numeric prereleases.
-
-# duckhts 1.5.2.9001
-
-- Require DuckDB 1.4.0 or newer for the extension's SQL surface while retaining
-  the stable v1.2.0 C API target. Register native functions before dependent SQL
-  macros so DuckDB 1.4 can load the extension, register complete native overload
-  sets, and report initialization failures through DuckDB with their underlying
-  diagnostics. DuckVEP repeat and transcript-presentation SQL preserve their
-  results without triggering older-runtime binder failures.
-- Record matched all-column BAM, BCF, VCF, FASTQ and FASTA reader timings and
-  exact-output comparisons in `benchmarks/benchmark_init_readers.md`.
-
-- Make the aligned-block benchmark oracle NULL-aware, compare every physical
-  record before timing, and retain duplicate/NULL corruption controls with
-  record-keyed XOR and sum checks. Recorded timings retain their stated
-  aggregate-only validation limits; recorded-data rendering does not rerun them.
-- Reuse staged ONT BAMs only when receipt source hashes match the verified
-  reference and reads; missing identities and changed inputs require derivation.
-
-- Validate complete text and packed CIGARs with shared checked decoding and
-  consumed-span arithmetic. Metrics and presence checks return NULL for malformed
-  suffixes or lengths/spans outside BIGINT, including invalid suffixes after an
-  operator match. Unsupported requested operators return NULL in both forms.
-  Requested-operator case folding is ASCII and locale-independent. Full-input
-  checking adds validation work to operator-presence calls.
-- Add an optional final `strict` BOOLEAN to the CIGAR metrics, operator test and
-  aligned-block functions. Its default is FALSE; TRUE raises an error for invalid
-  input under the same checked grammar. Diagnostics identify the function and
-  1-based packed-op index or text operation-start byte where available. SQL NULL
-  arguments and no-CIGAR sentinels retain their per-function outcomes.
-- Measure checked CIGAR projection costs on matched ONT and synthetic long-CIGAR
-  inputs in `benchmarks/benchmark_cigar_validation.md`, including all strict modes,
-  retained output denominators, and the cost of full-input operator checks.
-
-# duckhts 1.5.2.9000
+- Keep Somalier CHARR count-error diagnostics consistent between the public SQL
+  validation and native aggregate, regardless of which rejects the input first.
 
 - Do not save a `blob:` index to a local file. `HTS_IDX_SAVE_REMOTE` made htslib copy
   an explicit `blob:` `index_path` into the Emscripten worker's in-memory filesystem and
@@ -273,86 +247,63 @@
   `duckhts_index_save_remote_flag()` (in `src/include/hts_io_tuning.h`) now withholds the
   flag when the data or index path is a `blob:` URL, at every index load that set it
   (tabix readers, mosdepth, `duckhts_bam_bed_coverage`, `duckhts_samtools_idxstats`).
-  Network paths keep htslib's behaviour, and native behaviour is unchanged. Reported by
-  Codex review on https://github.com/RGenomicsETL/duckhts/pull/248.
-
-- npm package: pin the documented install to `@duckdb/duckdb-wasm@1.33.1-dev57.0` (a bare
-  install gets stable 1.32.0, which cannot load this extension, #247), and declare the
-  peer range as `1.33.1-dev57.0 || >=1.33.1`, since npm compares prerelease tags as text
-  and a `>=` prerelease floor admitted older builds such as `dev6`. Reported by Codex
-  review on https://github.com/RGenomicsETL/duckhts/pull/248.
+  Network paths keep htslib's behaviour, and native behaviour is unchanged.
 
 - Read an empty `blob:` File as an empty input, as native htslib reads a zero-byte
   file (`read_bed` / `read_gff` return zero rows). Chromium rejects every Range request
   on an empty Blob with the same `NetworkError` as a revoked URL, so after a failed
   open-time peek a plain `GET` now tells them apart: 200 with no bytes means empty.
-  Browser test: an empty File gives zero rows from both readers; without the fallback
-  it fails to open (negative control). Reported by Codex review on
-  https://github.com/RGenomicsETL/duckhts/pull/248.
 
-- License the `duckhts` npm package as GPL-2.0-or-later and ship `js/LICENSE` (GPL-2
-  text) and `js/THIRD_PARTY_NOTICES.md` in its tarball. The notices reproduce the
-  licences of everything linked into the wasm binaries (HTSlib, htscodecs, libBigWig,
-  cgranges, VariantKey, zlib, bzip2, liblzma), taken from the wasm build's link inputs.
-  Reported by Codex review on https://github.com/RGenomicsETL/duckhts/pull/248.
+- The function catalog documents `bam_bin_counts(include_unmapped := FALSE)` and
+  its synthetic no-coordinate row, and names the type-probe macro's parameter as
+  registered: `duckhts_duckdb_type_supported(candidate_type_name)`.
 
-- Make the wasm HTTP policy reachable in duckdb-wasm and exempt `blob:` URLs from
-  its host allowlist. duckdb-wasm keeps its Emscripten `Module` private, so
-  `Module.duckhtsWasmHttpConfig` could only be set in webR; the extension now also
-  reads `globalThis.duckhtsWasmHttpConfig` in the thread running DuckDB (set it in
-  the duckdb-wasm worker). With `enforceHostAllowlist`, `blob:` URLs (no hostname,
-  no network request) were refused whatever `allowHosts` said; they are now exempt
-  and still never receive custom headers. A browser test sets the policy on the
-  worker global, checks that a non-listed host is refused, and reads a `blob:` file
-  under the same policy; without the exemption it fails (negative control). Reported
-  by Codex review on https://github.com/RGenomicsETL/duckhts/pull/248.
+## Documentation and tooling
 
-- Test the native half of the "readers take URLs, not only paths" contract in
-  `test/sql/htslib_contract.test`: `read_bed` over `data:` URLs (percent-encoded and
-  base64) and `preload:` of a committed fixture, with expected rows taken from the
-  literal inputs. Browser builds cover `blob:` in `test/wasm/blob-readers.spec.ts`.
+- Licences are declared consistently: the DuckDB extension is MIT (top-level `LICENSE`),
+  the R packages are GPL (>= 2) and the npm package is GPL-2.0-or-later.
 
-- Emscripten builds accept read-only `blob:` URLs through the htslib XHR backend,
-  including local File reads and explicit `index_path` object URLs for indexed
-  regions. Missing auto-discovered sidecars allow streaming; callers own URL
-  revocation. Range-ignoring transports retain the full-body JavaScript cache
-  fallback, copying only requested chunks into Wasm memory.
-  DuckDB VFS registrations remain separate and invisible to htslib. The npm
-  package's pinned signed binaries do not yet contain this handler.
-- Add `js/src/local-file.js` (`localFileUrl(file)` → `{ url, revoke }`) for browser
-  Files and Blobs. It is deliberately not exported from the npm package entry until
-  `artifacts.json` pins DuckHTS builds that contain the `blob:` handler; a test
-  enforces this (Codex review P1). Chromium 148.0.7778.96
-  worker-synchronous XHR measurements show `HEAD blob:` fails with `NetworkError`
-  (status 0), ranged GET returns 206 with the total in `Content-Range`, and ranges
-  crossing EOF are truncated. Out-of-range and revoked URLs fail with
-  `NetworkError` (status 0). These observations are covered by browser tests.
+- Catalog tests compare every entry with a registered overload of the loaded
+  extension: kinds, scalar and aggregate argument counts, native table options,
+  and macro parameter names.
 
-- Add the `duckhts` npm package under `js/` for `@duckdb/duckdb-wasm`
-  (https://github.com/RGenomicsETL/duckhts/issues/246). It ships the signed
-  community-repository wasm builds of DuckHTS 1.5.2 byte for byte (staged by
-  `js/scripts/stage.mjs` against pinned sha256 values in `js/artifacts.json`), and a
-  `loadDuckhts(conn, { baseUrl })` loader that picks the build for `PRAGMA platform`,
-  so web applications can serve the extension from their own origin with unsigned
-  extensions disallowed. A Playwright test loads it into duckdb-wasm
-  `1.33.1-dev57.0` (DuckDB v1.5.4) and reads BED and GFF over same-origin HTTP. It
-  records two current limits: files registered with duckdb-wasm are not visible to
-  htslib-backed readers, and LOAD fails on DuckDB v1.4.x
-  (https://github.com/RGenomicsETL/duckhts/issues/247).
+- The DuckHTS README is the project landing page and the Rduckhts pkgdown site is
+  published under `/Rduckhts/`, with redirects for previous package documentation
+  URLs. The README footer shows contributor avatars and credits Ryan Ward / Nurture
+  Bio for GenBank support, with links to upstream acknowledgements.
 
-- Keep Somalier CHARR count-error diagnostics consistent between the public SQL
-  validation and native aggregate, regardless of which rejects the input first.
+- Benchmarks: matched all-column BAM, BCF, VCF, FASTQ and FASTA reader timings
+  (`benchmarks/benchmark_init_readers.md`); checked CIGAR projection costs on
+  matched ONT and synthetic long-CIGAR inputs, including all strict modes
+  (`benchmarks/benchmark_cigar_validation.md`); the GenBank named-attribute
+  comparison (`benchmarks/benchmark_genbank_named_attributes.md`); a
+  registry-staged, parity-checked GFFBase feature-database comparison using SQL
+  over `read_gff`. The aligned-block benchmark oracle is NULL-aware and compares
+  every physical record before timing, with duplicate/NULL corruption controls.
+  The benchmark registry pins bigsnpr's reference frequencies and loadings, staged
+  once as a checksum-bound sorted Parquet product whose receipt certifies unique
+  loci and complete, in-range values, together with the epilepsy summary statistics
+  and GRCh37 phase-3 chr22 genotypes used for parity with bigsnpr and 30x CRAM
+  comparisons.
 
-- Let ONT benchmark staging use samtools bundled by the optional RBCFTools
-  package when it is absent from PATH, and cover unavailable tools in staging tests.
+- Benchmark staging: the tabix-split BED artifact is staged through a
+  checksum-validated temporary file, rebuilding corrupt cached outputs. Staged ONT
+  BAMs are reused only when receipt source hashes match the verified reference and
+  reads (receipts record the BAM SHA-256 and byte size, and the index is validated
+  against its receipt); missing identities and changed inputs require derivation.
+  Staging uses samtools bundled by the optional RBCFTools package when it is absent
+  from PATH.
 
-- Show contributor avatars and credit Ryan Ward / Nurture Bio for GenBank
-  support in the README footer, with links to upstream acknowledgements.
-- Add `cigar_aligned_blocks(cigar, pos)`: Extracts contiguous aligned segments
-  (M, =, X) from a CIGAR string or binary array into a STRUCT of parallel
-  lists (`ref_start`, `query_start`, `width`). Use it to convert alignments
-  into genomic intervals for coverage, junction, and range overlap analysis
-  without custom SQL loops.
+- npm and CI: dev artifacts are staged from GitHub Actions one at a time so cached
+  platforms are reused; expired or missing pins are detected before downloading
+  (pull-request checks report them and skip dev browser/pack steps; dev publishing
+  requires available, checksum-verified binaries). Package identities are checked
+  against the checkout's release or development version, pull requests test both
+  channel runtimes, and dispatch requires a matching channel. npm package checks run
+  on pull requests that change `description.yml`. Native test for the "readers take
+  URLs, not only paths" contract (`test/sql/htslib_contract.test`): `read_bed` over
+  `data:` URLs and `preload:` of a committed fixture; browser builds cover `blob:`
+  in `test/wasm/blob-readers.spec.ts`.
 
 # duckhts 1.5.2
 

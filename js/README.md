@@ -13,7 +13,7 @@ its channel's manifest before packaging. `SIGNED` reports which channel supplied
 | npm dist-tag | Install | Binary source | DuckHTS version |
 |---|---|---|---|
 | `latest` | `npm install duckhts@latest` | signed community repository (`artifacts.json`) | released version |
-| `dev` | `npm install duckhts@dev` | unsigned GitHub Actions run (`artifacts-dev.json`) | `1.5.2.9007` as npm `1.5.2-9007` |
+| `dev` | `npm install duckhts@dev` | unsigned GitHub Actions run (`artifacts-dev.json`) | the current development build, published as npm `X.Y.Z-9NNN` for source version `X.Y.Z.9NNN` |
 
 The `dev` loader refuses to load unless DuckDB has `allow_unsigned_extensions=true`.
 For duckdb-wasm, opt in explicitly when opening the database:
@@ -65,8 +65,10 @@ so a `>=` floor on a prerelease would admit older builds.
 
 | duckdb-wasm | DuckDB | Status |
 |---|---|---|
-| `1.33.1-dev57.0` | v1.5.4 | Both channels: HTTP readers; `dev` also reads `blob:` files after unsigned opt-in |
-| `1.32.0` | v1.4.3 | `dev` loads; signed DuckHTS 1.5.2 fails: https://github.com/RGenomicsETL/duckhts/issues/247 |
+| `1.33.1-dev57.0` | v1.5.4 | HTTP readers on both channels; `blob:` files on signed builds from 2.0.0 and on `dev` after unsigned opt-in |
+
+DuckHTS 2.0.0 requires DuckDB 1.5.0 or newer, so duckdb-wasm 1.32.0 (DuckDB 1.4) and
+older are not supported.
 
 ## Browser file access
 
