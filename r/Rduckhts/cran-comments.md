@@ -1,6 +1,6 @@
 ## Submission
 
-Rduckhts 2.0.0-0.1.5 packages DuckHTS 2.0.0. It is a major release with
+Rduckhts 2.0.0.0.1.5 packages DuckHTS 2.0.0. It is a major release with
 breaking changes; details are in `NEWS.md`.
 
 - Requires `duckdb` 1.5.0 or newer (previously 1.4.0).
