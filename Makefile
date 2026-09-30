@@ -132,15 +132,22 @@ endif
 test: test_debug
 test_debug test_release: test-function-catalog
 test_debug: test-cache-paths test-simd-kernels test-genbank-core test-liftover-property test-liftover-fuzz-debug test-sqllogictest-debug test-writer-no-clobber-debug
-test_release: test-cache-paths test-simd-kernels test-genbank-core test-genbank-oracle test-somalier-native test-bam-site-counts test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom test-hts-region-ownership test-writer-no-clobber-release test-macro-catalog
+test_release: test-cache-paths test-simd-kernels test-genbank-core test-genbank-oracle test-somalier-native test-bam-site-counts test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom test-hts-region-ownership test-writer-no-clobber-release test-macro-catalog test-database-lifetime
 test_release: test-reference-cache test-sql-lambda-syntax
 
-.PHONY: test-sql-lambda-syntax test-duckdb-v2 test-macro-catalog
+.PHONY: test-sql-lambda-syntax test-duckdb-v2 test-macro-catalog test-database-lifetime
 test-macro-catalog:
 	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
 		echo "Skipping macro catalog test: the Python DuckDB wheel is windows_amd64, not windows_amd64_mingw"; \
 	else \
 		$(PYTHON_VENV_BIN) test/scripts/test_macro_catalog.py; \
+	fi
+
+test-database-lifetime:
+	@if [ "$(DUCKDB_PLATFORM)" = "windows_amd64_mingw" ]; then \
+		echo "Skipping database lifetime test: the Python DuckDB wheel is windows_amd64, not windows_amd64_mingw"; \
+	else \
+		$(PYTHON_VENV_BIN) test/scripts/database_lifetime_test.py; \
 	fi
 
 test-sql-lambda-syntax:
@@ -522,6 +529,8 @@ function_catalog: test-function-catalog
 	python3 scripts/render_function_catalog.py
 rdm: function_catalog
 	Rscript -e "rmarkdown::render('README.Rmd', output_format = 'github_document')"
+bench-genbank-named:
+	Rscript -e "rmarkdown::render('benchmarks/benchmark_genbank_named_attributes.Rmd', output_format = rmarkdown::github_document(html_preview = FALSE))"
 bench-lift:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_liftover.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
@@ -530,6 +539,17 @@ bench-lift:
 # then render the report.
 bench-ancestry-panel:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_ancestry_panel.Rmd', output_format = rmarkdown::github_document(html_preview = FALSE))"
+
+# Stages the GRCh38 reference product and the acceptance inputs (remote indexed
+# reads of public 1000 Genomes files) on first use, then renders the report.
+bench-ancestry-grch38:
+	Rscript -e "rmarkdown::render('benchmarks/benchmark_ancestry_grch38.Rmd', output_format = rmarkdown::github_document(html_preview = FALSE))"
+
+# Generate the synthetic counts with benchmarks/benchmark_somalier_sex_run.R --data <dir> <lib>,
+# measure with benchmarks/benchmark_somalier_sex_run.R benchmarks/somalier_sex_scaling.tsv <dir> <lib>,
+# then render the report.
+bench-somalier-sex:
+	Rscript -e "rmarkdown::render('benchmarks/benchmark_somalier_sex.Rmd', output_format = rmarkdown::github_document(html_preview = FALSE))"
 
 bench-score:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_score.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"

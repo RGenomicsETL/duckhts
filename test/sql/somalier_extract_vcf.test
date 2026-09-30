@@ -5,8 +5,10 @@
 require duckhts
 
 # The importer is deliberately narrower than Somalier find-sites: it consumes
-# an already selected sites VCF, assigns stable lexical-order site ordinals,
-# and keeps AF oriented to the same B allele as downstream counts.
+# an already selected sites VCF, assigns stable lexical-order site ordinals
+# with every autosomal site before any X/Y site, and keeps AF oriented to the
+# same B allele as downstream counts. X/Y records are kept as they are:
+# excluding PAR sites is the site selector's job, as in Somalier.
 query ITITTRTTRT
 SELECT site_index, region, position, allele_a, allele_b,
        round(population_b_af, 2), source_ref, source_alt,
@@ -18,6 +20,7 @@ FROM duckhts_somalier_import_sites(
 0	chr1	10	A	G	0.20	G	A	0.80	[PASS]
 1	chr1	30	A	G	0.25	A	G	0.25	[q10]
 2	chr2	20	C	T	0.70	T	C	0.30	[PASS]
+3	chrX	100	A	C	0.40	A	C	0.40	[PASS]
 
 statement ok
 CREATE TEMP TABLE somalier_imported_sites AS
@@ -33,7 +36,7 @@ SELECT (SELECT count(*) FROM somalier_imported_sites),
        length(duckhts_somalier_frequency_sha256(
          'somalier_imported_sites', 'somalier_imported_sites'));
 ----
-3	64	64
+4	64	64
 
 statement error
 SELECT * FROM duckhts_somalier_import_sites(
@@ -49,13 +52,54 @@ SELECT * FROM duckhts_somalier_import_sites(
 ----
 sites file exceeds max_sites
 
-# max_sites bounds every physical input record, including excluded X/Y rows.
+# max_sites bounds every physical input record, including X/Y rows.
 statement error
 SELECT * FROM duckhts_somalier_import_sites(
   '__WORKING_DIRECTORY__/test/data/somalier_sites.vcf', 'GRCh38', max_sites := 3
 );
 ----
 sites file exceeds max_sites
+
+# Sex-chromosome aliases sort after every autosomal site even when their name
+# sorts first lexically ('X' precedes 'chr1'); the panel identity requires it.
+statement ok
+COPY (
+  SELECT replace(line, E'chrX\t100\t', E'X\t100\t') AS line
+  FROM (
+    SELECT unnest(string_split(trim(content, E'\n'), E'\n')) AS line
+    FROM read_text('__WORKING_DIRECTORY__/test/data/somalier_sites.vcf')
+  )
+) TO '__WORKING_DIRECTORY__/test_somalier_sites_x_alias.vcf'
+  (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+query IT
+SELECT site_index, region
+FROM duckhts_somalier_import_sites(
+  '__WORKING_DIRECTORY__/test_somalier_sites_x_alias.vcf', 'GRCh38'
+)
+ORDER BY site_index;
+----
+0	chr1
+1	chr1
+2	chr2
+3	X
+
+# A sites file without an autosomal record cannot normalise sex-chromosome depth.
+statement ok
+COPY (
+  SELECT line FROM (
+    SELECT unnest(string_split(trim(content, E'\n'), E'\n')) AS line
+    FROM read_text('__WORKING_DIRECTORY__/test/data/somalier_sites.vcf')
+  ) WHERE starts_with(line, '#') OR starts_with(line, E'chrX\t')
+) TO '__WORKING_DIRECTORY__/test_somalier_sites_only_x.vcf'
+  (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+statement error
+SELECT * FROM duckhts_somalier_import_sites(
+  '__WORKING_DIRECTORY__/test_somalier_sites_only_x.vcf', 'GRCh38'
+);
+----
+sites file has no autosomal records
 
 statement error
 SELECT * FROM duckhts_somalier_import_sites(
@@ -283,6 +327,39 @@ SELECT * FROM duckhts_somalier_vcf_counts(
 ----
 filter_policy must be pass_or_unapplied, include_all or error
 
+# X/Y sites ignore the FILTER policy, as in Somalier extraction: the q10 record
+# at POS 200 is relabelled chrX, so it stays measured under every policy while
+# the autosomal FILTER failures above remain unavailable or an error.
+statement ok
+COPY (
+  SELECT replace(line, E'chr1\t200\t', E'chrX\t200\t') AS line
+  FROM (
+    SELECT unnest(string_split(trim(content, E'\n'), E'\n')) AS line
+    FROM read_text('__WORKING_DIRECTORY__/test_somalier_vcf_filters.vcf')
+  )
+) TO '__WORKING_DIRECTORY__/test_somalier_vcf_x_filter.vcf'
+  (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+statement ok
+CREATE TEMP TABLE somalier_x_filter_panel AS
+SELECT * FROM (VALUES
+  ('GRCh38', 0::UBIGINT, 'chr1', 100::UBIGINT, 'A', 'C'),
+  ('GRCh38', 1::UBIGINT, 'chrX', 200::UBIGINT, 'A', 'G')
+) AS p(assembly, site_index, region, position, allele_a, allele_b);
+
+query TIIITT
+SELECT sample_id, site_index, a, b, status, source_filter::VARCHAR
+FROM duckhts_somalier_vcf_counts(
+  '__WORKING_DIRECTORY__/test_somalier_vcf_x_filter.vcf',
+  'somalier_x_filter_panel', filter_policy := 'error'
+)
+ORDER BY source_sample_index, site_index;
+----
+S1	0	9	3	measured	NULL
+S1	1	5	9	measured	[q10]
+S2	0	0	20	measured	NULL
+S2	1	0	10	measured	[q10]
+
 # A physical source record that lacks either exact panel allele is unavailable;
 # the producer does not orient by assuming ALT 1.
 statement ok
@@ -488,3 +565,251 @@ SELECT count(*) FROM (
 );
 ----
 0
+
+# A reordered sample selector still returns the source sample identities and
+# exact panel-aligned counts.
+query TIIIIIT
+SELECT sample_id, source_sample_index::INTEGER, site_index::INTEGER,
+       a::INTEGER, b::INTEGER, other::INTEGER, status
+FROM duckhts_somalier_vcf_counts(
+  '__WORKING_DIRECTORY__/test/data/mapping_number_families.vcf',
+  'somalier_filter_panel', samples := 'S2,S1'
+)
+ORDER BY source_sample_index, site_index;
+----
+S1	0	0	9	3	0	measured
+S1	0	1	5	9	4	measured
+S2	1	0	0	20	0	measured
+S2	1	1	0	10	5	measured
+
+query I
+SELECT count(*)::INTEGER
+FROM duckhts_somalier_vcf_counts(
+  '__WORKING_DIRECTORY__/test/data/mapping_number_families.vcf',
+  'somalier_filter_panel', samples := ''
+);
+----
+0
+
+# A header-only VCF yields the complete requested sample-by-panel grid.
+statement ok
+COPY (
+  SELECT line
+  FROM (
+    SELECT unnest(string_split(trim(content, E'\n'), E'\n')) AS line
+    FROM read_text('__WORKING_DIRECTORY__/test/data/mapping_number_families.vcf')
+  )
+  WHERE starts_with(line, '#')
+) TO '__WORKING_DIRECTORY__/test_somalier_counts_empty.vcf'
+  (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+query TIT
+SELECT sample_id, site_index::INTEGER, status
+FROM duckhts_somalier_vcf_counts(
+  '__WORKING_DIRECTORY__/test_somalier_counts_empty.vcf',
+  'somalier_filter_panel'
+)
+ORDER BY source_sample_index, site_index;
+----
+S1	0	unavailable_no_record
+S1	1	unavailable_no_record
+S2	0	unavailable_no_record
+S2	1	unavailable_no_record
+
+# A selected sample's invalid GT is rejected even when its record is off-panel;
+# the same invalid allele is harmless when that sample is not selected.
+statement ok
+COPY (
+  WITH lines AS (
+    SELECT unnest(string_split(trim(content, E'\n'), E'\n')) AS line
+    FROM read_text('__WORKING_DIRECTORY__/test/data/mapping_number_families.vcf')
+  )
+  SELECT CASE WHEN starts_with(line, E'chr1\t200\t')
+              THEN replace(line, '1/2:18:9,5,4:', '0/3:18:9,5,4:')
+              ELSE line END
+  FROM lines
+) TO '__WORKING_DIRECTORY__/test_somalier_offpanel_invalid_gt.vcf'
+  (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+statement ok
+CREATE TEMP TABLE somalier_offpanel_panel AS
+SELECT 'GRCh38' AS assembly, 0::UBIGINT AS site_index, 'chr1' AS region,
+       100::UBIGINT AS position, 'A' AS allele_a, 'C' AS allele_b;
+
+statement error
+SELECT * FROM duckhts_somalier_vcf_counts(
+  '__WORKING_DIRECTORY__/test_somalier_offpanel_invalid_gt.vcf',
+  'somalier_offpanel_panel', samples := 'S1'
+);
+----
+invalid FORMAT/GT allele
+
+query TIIIT
+SELECT sample_id, source_sample_index::INTEGER, a::INTEGER,
+       b::INTEGER, status
+FROM duckhts_somalier_vcf_counts(
+  '__WORKING_DIRECTORY__/test_somalier_offpanel_invalid_gt.vcf',
+  'somalier_offpanel_panel', samples := 'S2'
+);
+----
+S2	1	0	20	measured
+
+# Malformed AD on an off-panel multiallelic record does not invalidate counts
+# at the selected biallelic site.
+statement ok
+COPY (
+  WITH lines AS (
+    SELECT unnest(string_split(trim(content, E'\n'), E'\n')) AS line
+    FROM read_text('__WORKING_DIRECTORY__/test/data/mapping_number_families.vcf')
+  )
+  SELECT CASE
+    WHEN starts_with(line, E'chr1\t200\t')
+      THEN replace(
+        replace(line, '1/2:18:9,5,4:', '1/2:18:9,5:'),
+        '0/2:15:10,0,5:', '0/2:15:10,-1,5,2:'
+      )
+    ELSE line
+  END
+  FROM lines
+) TO '__WORKING_DIRECTORY__/test_somalier_offpanel_bad_ad.vcf'
+  (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+query TIIIT
+SELECT sample_id, source_sample_index::INTEGER, a::INTEGER,
+       b::INTEGER, status
+FROM duckhts_somalier_vcf_counts(
+  '__WORKING_DIRECTORY__/test_somalier_offpanel_bad_ad.vcf',
+  'somalier_offpanel_panel', samples := 'S1,S2'
+)
+ORDER BY source_sample_index;
+----
+S1	0	9	3	measured
+S2	1	0	20	measured
+
+# Nonadjacent duplicate positions are rejected before malformed AD, duplicate
+# allele, and failing-FILTER handling at that panel site.
+statement ok
+COPY (
+  WITH lines AS (
+    SELECT unnest(string_split(trim(content, E'\n'), E'\n')) AS line,
+           generate_subscripts(
+             string_split(trim(content, E'\n'), E'\n'), 1
+           ) AS ordinal
+    FROM read_text('__WORKING_DIRECTORY__/test/data/mapping_number_families.vcf')
+  ), rewritten AS (
+    SELECT ordinal * 10 AS sort_key, line
+    FROM lines
+    UNION ALL
+    SELECT ordinal * 10 - 1, '##FILTER=<ID=q10,Description="Low quality">'
+    FROM lines
+    WHERE starts_with(line, '#CHROM')
+    UNION ALL
+    SELECT 1000000 + ordinal, line
+    FROM (VALUES
+      (1, E'chr1\t300\tfirst\tC\tT\t.\tPASS\t.\tGT:DP:AD:PL:FT:LAA\t0/1:10:4,6:0,10,20:PASS:1\t1/1:20:0,10:50,5,0:PASS:1'),
+      (2, E'chr1\t400\tbetween\tT\tG\t.\tPASS\t.\tGT:DP:AD:PL:FT:LAA\t0/1:10:4,6:0,10,20:PASS:1\t1/1:20:0,10:50,5,0:PASS:1'),
+      (3, E'chr1\t100\tbad_ad\tA\tG\t.\tPASS\t.\tGT:DP:AD:PL:FT:LAA\t0/1:12:9:0,10,20:PASS:1\t1/1:20:0,20:50,5,0:PASS:1'),
+      (4, E'chr1\t200\tduplicate_alt\tG\tA,A\t.\tPASS\t.\tGT:DP:AD:PL:FT:LAA\t1/2:18:9,5,4:0,10,20,30,40,50:PASS:1,2\t0/2:15:10,0,5:0,15,25,35,45,55:PASS:2'),
+      (5, E'chr1\t300\tfailing_filter\tC\tT\t.\tq10\t.\tGT:DP:AD:PL:FT:LAA\t0/1:10:4,6:0,10,20:PASS:1\t1/1:20:0,10:50,5,0:PASS:1')
+    ) AS additions(ordinal, line)
+  )
+  SELECT line FROM rewritten ORDER BY sort_key
+) TO '__WORKING_DIRECTORY__/test_somalier_duplicate_edges.vcf'
+  (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+statement ok
+CREATE TEMP TABLE somalier_duplicate_panel_100 AS
+SELECT 'GRCh38' AS assembly, 0::UBIGINT AS site_index, 'chr1' AS region,
+       100::UBIGINT AS position, 'A' AS allele_a, 'C' AS allele_b;
+
+statement ok
+CREATE TEMP TABLE somalier_duplicate_panel_200 AS
+SELECT 'GRCh38' AS assembly, 0::UBIGINT AS site_index, 'chr1' AS region,
+       200::UBIGINT AS position, 'A' AS allele_a, 'G' AS allele_b;
+
+statement ok
+CREATE TEMP TABLE somalier_duplicate_panel_300 AS
+SELECT 'GRCh38' AS assembly, 0::UBIGINT AS site_index, 'chr1' AS region,
+       300::UBIGINT AS position, 'C' AS allele_a, 'T' AS allele_b;
+
+statement error
+SELECT * FROM duckhts_somalier_vcf_counts(
+  '__WORKING_DIRECTORY__/test_somalier_duplicate_edges.vcf',
+  'somalier_duplicate_panel_100',
+  samples := 'S1'
+);
+----
+multiple source records occur at a panel site
+
+statement error
+SELECT * FROM duckhts_somalier_vcf_counts(
+  '__WORKING_DIRECTORY__/test_somalier_duplicate_edges.vcf',
+  'somalier_duplicate_panel_200',
+  samples := 'S1'
+);
+----
+multiple source records occur at a panel site
+
+statement error
+SELECT * FROM duckhts_somalier_vcf_counts(
+  '__WORKING_DIRECTORY__/test_somalier_duplicate_edges.vcf',
+  'somalier_duplicate_panel_300',
+  samples := 'S1'
+);
+----
+multiple source records occur at a panel site
+
+# Output pruning cannot remove the duplicate-source validation.
+statement error
+SELECT count(*) FROM duckhts_somalier_vcf_counts(
+  '__WORKING_DIRECTORY__/test_somalier_duplicate_edges.vcf',
+  'somalier_duplicate_panel_100',
+  samples := 'S1'
+);
+----
+multiple source records occur at a panel site
+
+statement error
+SELECT status FROM duckhts_somalier_vcf_counts(
+  '__WORKING_DIRECTORY__/test_somalier_duplicate_edges.vcf',
+  'somalier_duplicate_panel_100',
+  samples := 'S1'
+);
+----
+multiple source records occur at a panel site
+
+# One million repeated panel-coordinate records produce the duplicate-source
+# diagnostic under a bounded DuckDB memory budget.
+statement ok
+COPY (
+  SELECT line
+  FROM (
+    SELECT * FROM (VALUES
+      (0::BIGINT, '##fileformat=VCFv4.2'),
+      (1::BIGINT, '##contig=<ID=chr1>'),
+      (2::BIGINT, '##FILTER=<ID=PASS,Description="All filters passed">'),
+      (3::BIGINT, '##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">'),
+      (4::BIGINT, '##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Allelic depths">'),
+      (5::BIGINT, E'#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1')
+    ) AS header(ordinal, line)
+    UNION ALL
+    SELECT 6 + i, E'chr1\t100\t.\tA\tC\t.\tPASS\t.\tGT:AD\t0/1:9,3'
+    FROM range(1000000) AS records(i)
+  ) AS vcf_lines(ordinal, line)
+  ORDER BY ordinal
+) TO '__WORKING_DIRECTORY__/test_somalier_duplicate_stress.vcf'
+  (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+statement ok
+SET memory_limit='128MB';
+
+statement error
+SELECT * FROM duckhts_somalier_vcf_counts(
+  '__WORKING_DIRECTORY__/test_somalier_duplicate_stress.vcf',
+  'somalier_offpanel_panel', samples := 'S1'
+);
+----
+multiple source records occur at a panel site
+
+statement ok
+SET memory_limit='1GB';

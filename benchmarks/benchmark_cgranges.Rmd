@@ -16,7 +16,7 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>", message = FALSE, warning 
 This benchmark measures the cgranges path that matters for provider streaming:
 
 - build one session-scoped cgranges target index with
-  `duckhts_cgranges_from_query(...)` / `duckhts_cgranges_index(...)`
+  `duckhts_cgranges_from_table(...)`
 - stream query intervals from `read_bed(...)`
 - filter query rows with the vectorized scalar predicate
   `duckhts_cgranges_has_overlap(...)`

@@ -73,13 +73,9 @@ run_duckdb_variant() {
 
   cat > "$sql" <<SQL
 LOAD '$ext_q';
+CREATE TEMP VIEW cgr_subject AS SELECT chrom, start, "end" FROM read_bed('$subject_q');
 CREATE TABLE cgr_build AS
-  SELECT duckhts_cgranges_from_query(
-    'bench',
-    'SELECT chrom, start, "end" FROM read_bed(''$subject_q'')',
-    'chrom', 'start', 'end'
-  ) AS ok;
-CREATE TABLE cgr_index AS SELECT duckhts_cgranges_index('bench') AS ok;
+  SELECT * FROM duckhts_cgranges_from_table('bench', 'cgr_subject', 'chrom', 'start', 'end');
 SQL
 
   if [[ "$variant" == "scalar_filter" ]]; then

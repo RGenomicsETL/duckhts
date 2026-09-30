@@ -1,9 +1,8 @@
 library(tinytest)
 library(DBI)
 
-# Each phase opens the database file in its own R process: the extension's private
-# connections keep a database instance alive until its process exits, and Windows
-# does not let a process reopen a file that one of its instances still holds.
+# Each phase opens the database file in its own R process so that connection-local
+# TEMP macros and installed state cannot leak between phases.
 run_phase <- function(file, body) {
   script <- tempfile("rduckhts_macro_phase_", fileext = ".R")
   result <- tempfile("rduckhts_macro_result_", fileext = ".rds")
@@ -11,11 +10,11 @@ run_phase <- function(file, body) {
   writeLines(c(
     sprintf(".libPaths(%s)", paste(deparse(.libPaths()), collapse = "")),
     "suppressPackageStartupMessages({ library(DBI); library(Rduckhts) })",
-    "macro_catalog <- function(con, catalog) dbGetQuery(con, paste0(",
+    "macro_catalog <- function(con, catalog) unique(dbGetQuery(con, paste0(",
     "  \"SELECT function_name FROM duckdb_functions() \",",
     "  \"WHERE function_type IN ('macro', 'table_macro') \",",
     "  \"AND database_name = \", dbQuoteString(con, catalog),",
-    "  \" AND function_name IN (SELECT name FROM duckhts_macro_definitions())\"))$function_name",
+    "  \" AND function_name IN (SELECT name FROM duckhts_macro_definitions())\"))$function_name)",
     sprintf("file <- %s", deparse(file)),
     body,
     sprintf("saveRDS(result, %s)", deparse(result))
@@ -50,7 +49,7 @@ writable <- run_phase(file, c(
   "result$temp_after <- length(macro_catalog(con, 'temp'))",
   "dbDisconnect(con, shutdown = TRUE)"
 ))
-expect_equal(writable$temp, 31L)
+expect_equal(writable$temp, 33L)
 expect_equal(writable$persistent, 0L)
 expect_equal(writable$quoted, '"a"')
 expect_false(writable$second_before)
@@ -59,7 +58,7 @@ expect_equal(writable$second_installed, 1L)
 expect_equal(writable$second_quoted, '"a"')
 expect_equal(writable$cte, '"b"')
 expect_equal(writable$reinstalled, 1L)
-expect_equal(writable$temp_after, 31L)
+expect_equal(writable$temp_after, 33L)
 
 # A read-only file: LOAD succeeds, installation works inside a transaction that is
 # rolled back, and the file is left byte-identical.
@@ -75,9 +74,9 @@ readonly <- run_phase(file, c(
   "result$temp_after <- length(macro_catalog(con, 'temp'))",
   "dbDisconnect(con, shutdown = TRUE)"
 ))
-expect_equal(readonly$temp, 31L)
+expect_equal(readonly$temp, 33L)
 expect_equal(readonly$persistent, 0L)
-expect_equal(readonly$temp_after, 31L)
+expect_equal(readonly$temp_after, 33L)
 expect_identical(unname(tools::md5sum(file)), readonly_before)
 
 # Installation inside a caller transaction is rolled back with that transaction.

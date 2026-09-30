@@ -36,6 +36,8 @@ extension_path <- system.file(
   "duckhts_extension", "build", "duckhts.duckdb_extension",
   package = "Rduckhts", mustWork = TRUE
 )
+# Bash chunks run the same DuckDB CLI and bundled extension as the SQL chunks.
+Sys.setenv(DUCKDB = duckknit:::find_duckdb(), DUCKHTS_EXTENSION = extension_path)
 local({
   ns  <- asNamespace("duckknit")
   cmd <- duckknit:::find_duckdb()
@@ -69,10 +71,35 @@ local({
 [![R-universe version](https://RGenomicsETL.r-universe.dev/Rduckhts/badges/version)](https://RGenomicsETL.r-universe.dev/Rduckhts)
 
 Read VCF, BCF, BAM, CRAM, FASTA, FASTQ, BigWig, GTF, GFF, GenBank, BED, and
-tabix-indexed files directly in [DuckDB](https://duckdb.org/). DuckHTS uses
-[htslib](https://github.com/samtools/htslib) for HTS formats and provides SQL
-functions for intervals, coverage, sequence operations, compression, indexing,
-and export.
+tabix-indexed files directly in [DuckDB](https://duckdb.org/), locally or over
+HTTP and S3. DuckHTS uses [htslib](https://github.com/samtools/htslib) for HTS
+formats and provides SQL functions for intervals, coverage, sequence operations,
+Somalier-style sample identity, ancestry proportions, compression, indexing and
+export. Consequence annotation lives in the sibling
+[DuckVEP](https://github.com/RGenomicsETL/DuckVEP) extension and its R package
+Rduckvep.
+
+The same extension ships three ways:
+
+- **R**: [`Rduckhts`](https://RGenomicsETL.r-universe.dev/Rduckhts) bundles the
+  extension and wraps its readers; `install.packages("Rduckhts")` from CRAN, or
+  the development build from r-universe:
+  `install.packages("Rduckhts", repos = c("https://rgenomicsetl.r-universe.dev", "https://cloud.r-project.org"))`.
+- **DuckDB** (CLI, Python, any client): `INSTALL duckhts FROM community; LOAD duckhts;`.
+- **Browser**: the [`duckhts`](https://www.npmjs.com/package/duckhts) npm package for duckdb-wasm.
+
+In R, a connection comes with the extension loaded and every reader is plain SQL:
+
+```{r r-quickstart}
+library(DBI)
+library(Rduckhts)
+con <- rduckhts_connect()
+vcf <- system.file("extdata", "vcf_file.bcf", package = "Rduckhts")
+dbGetQuery(con, sprintf(
+  "SELECT CHROM, POS, REF, ALT, SAMPLE_ID, FORMAT_GT
+   FROM read_bcf(%s, tidy_format := true) LIMIT 4", dbQuoteString(con, vcf)))
+dbDisconnect(con, shutdown = TRUE)
+```
 
 ## Runtime compatibility
 
@@ -86,23 +113,34 @@ npm package version numbers with DuckDB release numbers.
 
 `LOAD` creates the 31 SQL macros only when the default database is writable
 and in memory. With a file-backed or read-only default database it registers
-native functions but does not change the database catalog. Install the exported
-macros as connection-local `TEMP` macros on each connection that uses them:
+native functions and leaves the database file untouched; the macros are then
+installed as connection-local `TEMP` macros. `rduckhts_connect()` does that for
+you, and `rduckhts_install_macros()` covers any other DBI connection:
 
-```python
-con.execute("LOAD duckhts")
-for (sql,) in con.execute("SELECT sql FROM duckhts_macro_definitions() ORDER BY install_order").fetchall():
-    con.execute(sql)
+```{r database-file}
+db <- tempfile(fileext = ".duckdb")
+con <- rduckhts_connect(dbdir = db)
+dbGetQuery(con, "
+  SELECT database_name, count(*) AS duckhts_macros
+  FROM duckdb_functions()
+  WHERE function_name IN (SELECT name FROM duckhts_macro_definitions())
+  GROUP BY ALL")
+dbGetQuery(con, "SELECT duckhts_quote_ident('my column') AS quoted")
+dbDisconnect(con, shutdown = TRUE)
 ```
 
-With the DuckDB CLI, generate a script and read it on the connection that needs
-the macros (use the actual path to your extension):
+With the DuckDB CLI, write the exported statements once and `.read` them on the
+connection that needs the macros:
 
-```sh
-DB=example.duckdb
-EXT=/absolute/path/to/duckhts.duckdb_extension
-duckdb -unsigned "$DB" "LOAD '$EXT'; COPY (SELECT sql || ';' FROM duckhts_macro_definitions() ORDER BY install_order) TO 'duckhts_macros.sql' (HEADER false, DELIMITER E'\\t', QUOTE '', ESCAPE '');"
-printf "LOAD '%s';\n.read duckhts_macros.sql\nSELECT duckhts_quote_ident('a');\n" "$EXT" | duckdb -unsigned "$DB"
+```{bash database-file-cli}
+cd "$(mktemp -d)"
+"$DUCKDB" -unsigned example.duckdb "
+  SET allow_extensions_metadata_mismatch = true;
+  LOAD '$DUCKHTS_EXTENSION';
+  COPY (SELECT sql || ';' FROM duckhts_macro_definitions() ORDER BY install_order)
+    TO 'duckhts_macros.sql' (HEADER false, QUOTE '', ESCAPE '');"
+printf "SET allow_extensions_metadata_mismatch = true;\nLOAD '%s';\n.read duckhts_macros.sql\nSELECT duckhts_quote_ident('my column') AS quoted;\n" \
+  "$DUCKHTS_EXTENSION" | "$DUCKDB" -unsigned example.duckdb
 ```
 
 `TEMP` macros shadow persistent macros written by older DuckHTS versions; no
@@ -130,9 +168,10 @@ cat(paste(catalog, collapse = "\n"))
 
 ## Examples
 
-Executed examples use bundled local test files through the DuckDB CLI and load
-the extension bundled in the installed `Rduckhts` package. Remote examples are
-unevaluated usage snippets.
+Every example below runs when this README is rendered, through the DuckDB CLI
+with the extension bundled in the installed `Rduckhts` package. Most read the
+repository's test files; the BigWig and remote-URL examples read public HTTP and
+S3 data.
 
 ### Core readers
 
@@ -177,10 +216,10 @@ not the number of workers.
 This query reads a real 100 kb slice of the UCSC GRCh38 phyloP 100-way track
 rather than converting it to an intermediate text file:
 
-```{sql eval=FALSE, collapse=FALSE, comment=""}
+```{sql eval=TRUE, collapse=FALSE, comment=""}
 SELECT count(*) AS stored_intervals,
-       min(VALUE)::DOUBLE AS minimum,
-       max(VALUE)::DOUBLE AS maximum
+       round(min(VALUE)::DOUBLE, 3) AS minimum,
+       round(max(VALUE)::DOUBLE, 3) AS maximum
 FROM read_bigwig(
   'https://hgdownload.soe.ucsc.edu/goldenPath/hg38/phyloP100way/hg38.phyloP100way.bw',
   region := 'chr22:20000000-20099999'
@@ -247,17 +286,15 @@ FROM fasta_nuc('test/data/ce.fa', bin_width := 10, region := 'CHROMOSOME_I:1-20'
 `duckhts_cgranges_*` exposes a session-scoped immutable interval index for
 native overlap queries. You can either build it row-wise with
 `duckhts_cgranges_create(...)` + `duckhts_cgranges_add(...)`, or bulk-load it
-from SQL with `duckhts_cgranges_from_query(...)`. For row-preserving filters or
+from any table or view with `duckhts_cgranges_from_table(...)`, which runs on
+your connection and so also sees TEMP objects. For row-preserving filters or
 count annotations over provider rows, use the vectorized scalar helpers
 `duckhts_cgranges_has_overlap(...)` and
 `duckhts_cgranges_count_overlaps(...)` directly in queries over `read_bed(...)`,
 `read_bam(...)`, `read_bcf(...)`, or regular tables. For streaming
 one-row-per-hit expansion while keeping provider columns, use
-`duckhts_cgranges_overlaps_list(...)` with `UNNEST(...)`. The older
-`duckhts_cgranges_overlaps_bulk(...)` table function still accepts a probe query
-and emits matching indexed intervals in one table-function call; that bulk query
-runs on the extension-owned helper connection, so use a regular table or view
-rather than a temp table.
+`duckhts_cgranges_overlaps_list(...)` with `UNNEST(...)` in the SELECT list,
+which also covers bulk probing of any relation.
 
 ```{sql eval=TRUE, collapse=FALSE, comment=""}
 SELECT duckhts_cgranges_create('readme_idx');
@@ -268,12 +305,12 @@ SELECT duckhts_cgranges_index('readme_idx');
 SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
 FROM duckhts_cgranges_overlaps('readme_idx', 'chr1', 35, 36, query_row_id := 7);
 
-SELECT duckhts_cgranges_from_query(
-  'readme_qry_idx',
-  'SELECT * FROM (VALUES (''chr2'', 100, 110, ''alpha''), (''chr2'', 150, 170, ''beta'')) AS t(chrom, start, "end", label)',
-  'chrom', 'start', 'end', 'label'
+CREATE TEMP VIEW readme_targets AS
+SELECT * FROM (VALUES ('chr2', 100, 110, 'alpha'), ('chr2', 150, 170, 'beta'))
+  AS t(chrom, start, "end", label);
+SELECT * FROM duckhts_cgranges_from_table(
+  'readme_qry_idx', 'readme_targets', 'chrom', 'start', 'end', 'label'
 );
-SELECT duckhts_cgranges_index('readme_qry_idx');
 
 SELECT interval_ordinal, label, interval_chrom, interval_start, interval_end
 FROM duckhts_cgranges_overlaps('readme_qry_idx', 'chr2', 140, 170, mode := 'contain');
@@ -286,31 +323,25 @@ SELECT * FROM (VALUES
 ) AS t(probe_id, chrom, start, "end");
 
 SELECT
-  p.probe_id,
+  probe_id,
   hit.interval_ordinal,
   hit.label,
   hit.label_type,
   hit.interval_chrom,
   hit.interval_start,
   hit.interval_end
-FROM readme_probes AS p
-CROSS JOIN UNNEST(
-  duckhts_cgranges_overlaps_list('readme_qry_idx', p.chrom, p.start, p."end")
-) AS u(hit)
-ORDER BY p.probe_id, hit.interval_ordinal;
-
-SELECT query_row_id, interval_ordinal, label, interval_chrom, interval_start, interval_end
-FROM duckhts_cgranges_overlaps_bulk(
-  'readme_qry_idx',
-  'SELECT probe_id, chrom, start, "end" FROM readme_probes',
-  'chrom', 'start', 'end',
-  query_row_id_col := 'probe_id'
+FROM (
+  SELECT
+    p.probe_id,
+    unnest(duckhts_cgranges_overlaps_list('readme_qry_idx', p.chrom, p.start, p."end")) AS hit
+  FROM readme_probes AS p
 )
-ORDER BY query_row_id, interval_ordinal;
+ORDER BY probe_id, hit.interval_ordinal;
 
 SELECT duckhts_cgranges_destroy('readme_idx');
 SELECT duckhts_cgranges_destroy('readme_qry_idx');
 DROP TABLE readme_probes;
+DROP VIEW readme_targets;
 ```
 
 ### Fixed-bin native counting
@@ -637,14 +668,14 @@ Remote URLs (S3/GCS/HTTP/S) can work in two htslib build modes:
 
 Use `HTS_PATH` only when you want dynamic plugin discovery (for example, to point at an external htslib plugin directory). `Rduckhts` users only need to call the public helper before the first HTS file is opened:
 
-```r
+```{r setup-hts-env}
 library(Rduckhts)
 setup_hts_env()
 ```
 
 Example (works in static-handler mode and plugin mode):
 
-```{sql, eval=FALSE, collapse=FALSE, comment=""}
+```{sql, eval=TRUE, collapse=FALSE, comment=""}
 SELECT CHROM, COUNT(*) AS n
 FROM read_bcf('s3://1000genomes-dragen-v3.7.6/data/cohorts/gvcf-genotyper-dragen-3.7.6/hg19/3202-samples-cohort/3202_samples_cohort_gg_chr22.vcf.gz',
               region := 'chr22:16050000-16050500')

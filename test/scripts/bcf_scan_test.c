@@ -757,6 +757,66 @@ static void check_shifted(const duckhts_bcf_index_t *original,
     assert(different);
 }
 
+/* Typed interval plans resolve header/index contig ids directly. */
+static void typed_intervals(void) {
+    static const char *files[] = {"test/data/geno_sites.bcf", "test/data/geno_sites.vcf.gz"};
+    for (int kind = 0; kind < 2; kind++) {
+        char error[512], index_path[512];
+        snprintf(index_path, sizeof(index_path), "%s.%s", files[kind], kind ? "tbi" : "csi");
+        duckhts_bcf_index_t index = {0};
+        assert(duckhts_bcf_index_load(&index, kind ? vcf : bcf, files[kind], index_path, 0) == 1);
+        duckhts_bcf_scan_t reader = {0};
+        assert(duckhts_bcf_scan_open(&reader, files[kind], &index, 0,
+            DUCKHTS_HTS_IO_PROFILE_METADATA, "test", error, sizeof(error)));
+        bcf1_t *record = bcf_init();
+        assert(record);
+        struct { const char *chrom; int64_t start, end; int expected; } cases[] = {
+            {"chr1", 99, 100, 2}, {"chr1", 0, INT64_MAX, 5}, {"chr1:2", 0, 100, 1},
+            {"HLA-A*01:01", 9, 10, 1}, {"chr1", 500, 502, 1}, {"chr1", 502, 503, 0},
+            {"chr3", 0, 100, 0}, {"unknown", 0, 100, 0}, {"chr1:100-100", 0, 1000, 0}
+        };
+        for (unsigned i = 0; i < sizeof(cases) / sizeof(*cases); i++) {
+            duckhts_interval_plan_t plan = {0};
+            assert(duckhts_interval_plan_add(&plan, cases[i].chrom, cases[i].start, cases[i].end, 1,
+                                             error, sizeof(error)));
+            assert(duckhts_interval_plan_finish(&plan, error, sizeof(error)));
+            assert(duckhts_bcf_scan_intervals(&reader, &plan, error, sizeof(error)));
+            int count = 0, ret;
+            while ((ret = duckhts_bcf_scan_next(&reader, record)) >= 0) count++;
+            assert(ret == -1 && count == cases[i].expected);
+            duckhts_interval_plan_destroy(&plan);
+        }
+        /* Multiple contigs, unsorted input, unknown names and overlaps: each record once. */
+        duckhts_interval_plan_t plan = {0};
+        assert(duckhts_interval_plan_add(&plan, "chr2", 49, 100, 1, error, sizeof(error)));
+        assert(duckhts_interval_plan_add(&plan, "nope", 0, 5, 2, error, sizeof(error)));
+        assert(duckhts_interval_plan_add(&plan, "chr1", 99, 100, 3, error, sizeof(error)));
+        assert(duckhts_interval_plan_add(&plan, "chr1", 99, 300, 4, error, sizeof(error)));
+        assert(duckhts_interval_plan_add(&plan, "chr1:2", 9, 10, 5, error, sizeof(error)));
+        assert(duckhts_interval_plan_finish(&plan, error, sizeof(error)));
+        assert(duckhts_bcf_scan_intervals(&reader, &plan, error, sizeof(error)));
+        int count = 0, ret;
+        while ((ret = duckhts_bcf_scan_next(&reader, record)) >= 0) count++;
+        assert(ret == -1 && count == 2 + 1 + 1 + 1 + 1 + 1); /* chr1 100 x2, 200, 300, chr2 50, 100, chr1:2 10 */
+        duckhts_interval_plan_destroy(&plan);
+        /* Empty plans select nothing and never stream. */
+        duckhts_interval_plan_t empty = {0};
+        assert(duckhts_interval_plan_finish(&empty, error, sizeof(error)));
+        assert(duckhts_bcf_scan_intervals(&reader, &empty, error, sizeof(error)));
+        assert(!reader.itr && duckhts_bcf_scan_next(&reader, record) == -1);
+        /* Unfinished plans and missing indexes are refused. */
+        duckhts_interval_plan_t open_plan = {0};
+        assert(!duckhts_bcf_scan_intervals(&reader, &open_plan, error, sizeof(error)));
+        reader.index = NULL;
+        assert(!duckhts_bcf_scan_intervals(&reader, &empty, error, sizeof(error)));
+        assert(duckhts_bcf_scan_next(&reader, record) == -1);
+        duckhts_interval_plan_destroy(&empty);
+        bcf_destroy(record);
+        duckhts_bcf_scan_close(&reader);
+        duckhts_bcf_index_destroy(&index);
+    }
+}
+
 int main(int argc, char **argv) {
     assert(argc == 2); // Caller-owned temporary directory; no fixture mutation.
     hts_set_log_level(HTS_LOG_ERROR);
@@ -798,6 +858,7 @@ int main(int argc, char **argv) {
         assert(unlink(index_path) == 0);
     }
     decode_errors();
+    typed_intervals();
     raw_genotypes(argv[1]);
     genotype_values();
     format_values();

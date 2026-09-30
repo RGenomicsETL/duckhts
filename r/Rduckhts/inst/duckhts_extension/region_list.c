@@ -110,3 +110,123 @@ int duckhts_region_list_validate(char *const *items, unsigned int count,
     }
     return 1;
 }
+
+/* ---- Typed interval plans ---------------------------------------------- */
+
+void duckhts_interval_plan_destroy(duckhts_interval_plan_t *plan) {
+    if (!plan) return;
+    free(plan->items);
+    free(plan->names);
+    memset(plan, 0, sizeof(*plan));
+}
+
+static int interval_grow(void **buffer, size_t *capacity, size_t needed, size_t element) {
+    if (needed <= *capacity) return 1;
+    size_t next = *capacity ? *capacity : 16;
+    while (next < needed) {
+        if (next > SIZE_MAX / 2) return 0;
+        next *= 2;
+    }
+    if (next > SIZE_MAX / element) return 0;
+    void *grown = realloc(*buffer, next * element);
+    if (!grown) return 0;
+    *buffer = grown;
+    *capacity = next;
+    return 1;
+}
+
+int duckhts_interval_plan_add(duckhts_interval_plan_t *plan, const char *chrom,
+                              int64_t start, int64_t end, size_t item,
+                              char *error, size_t error_size) {
+    if (plan->finished) {
+        snprintf(error, error_size, "regions: interval plan is already finished");
+        return 0;
+    }
+    if (!chrom) {
+        snprintf(error, error_size, "regions: interval %zu has a NULL chrom", item);
+        return 0;
+    }
+    if (start < 0) {
+        snprintf(error, error_size, "regions: interval %zu has a negative start (%lld)",
+                 item, (long long)start);
+        return 0;
+    }
+    if (end <= start) {
+        snprintf(error, error_size,
+                 "regions: interval %zu has end <= start ([%lld, %lld) is empty or inverted)",
+                 item, (long long)start, (long long)end);
+        return 0;
+    }
+    if (plan->added >= DUCKHTS_INTERVAL_PLAN_MAX_INTERVALS) {
+        snprintf(error, error_size,
+                 "regions: more than %u intervals; the cap is %u intervals per query",
+                 DUCKHTS_INTERVAL_PLAN_MAX_INTERVALS, DUCKHTS_INTERVAL_PLAN_MAX_INTERVALS);
+        return 0;
+    }
+    size_t length = strlen(chrom);
+    uint64_t cost = (uint64_t)length + 1 + (uint64_t)sizeof(duckhts_interval_t);
+    if (cost < length || plan->payload > UINT64_MAX - cost ||
+        plan->payload + cost > DUCKHTS_INTERVAL_PLAN_MAX_BYTES) {
+        snprintf(error, error_size,
+                 "regions: native payload exceeds the cap of %llu MiB",
+                 (unsigned long long)(DUCKHTS_INTERVAL_PLAN_MAX_BYTES >> 20));
+        return 0;
+    }
+    if (!interval_grow((void **)&plan->items, &plan->capacity, plan->count + 1,
+                       sizeof(*plan->items))) goto oom;
+    /* Consecutive intervals on one contig share a single stored name. */
+    size_t offset;
+    if (plan->count &&
+        strcmp(plan->names + plan->items[plan->count - 1].name_offset, chrom) == 0) {
+        offset = plan->items[plan->count - 1].name_offset;
+    } else {
+        if (length + 1 > SIZE_MAX - plan->names_length) goto oom;
+        if (!interval_grow((void **)&plan->names, &plan->names_capacity,
+                           plan->names_length + length + 1, 1)) goto oom;
+        offset = plan->names_length;
+        memcpy(plan->names + offset, chrom, length + 1);
+        plan->names_length += length + 1;
+    }
+    plan->items[plan->count++] = (duckhts_interval_t){NULL, start, end, offset};
+    plan->added++;
+    plan->payload += cost;
+    return 1;
+oom:
+    snprintf(error, error_size, "regions: out of memory storing intervals");
+    return 0;
+}
+
+static int interval_compare(const void *a, const void *b) {
+    const duckhts_interval_t *x = a, *y = b;
+    int c = strcmp(x->chrom, y->chrom);
+    if (c) return c;
+    if (x->start != y->start) return x->start < y->start ? -1 : 1;
+    if (x->end != y->end) return x->end < y->end ? -1 : 1;
+    return 0;
+}
+
+int duckhts_interval_plan_finish(duckhts_interval_plan_t *plan, char *error, size_t error_size) {
+    (void)error;
+    (void)error_size;
+    if (plan->finished) return 1;
+    /* The name buffer no longer grows, so pointers into it are stable. */
+    for (size_t i = 0; i < plan->count; i++)
+        plan->items[i].chrom = plan->names + plan->items[i].name_offset;
+    if (plan->count > 1) {
+        qsort(plan->items, plan->count, sizeof(*plan->items), interval_compare);
+        size_t out = 0;
+        for (size_t i = 1; i < plan->count; i++) {
+            duckhts_interval_t *cur = &plan->items[out];
+            const duckhts_interval_t *next = &plan->items[i];
+            if (strcmp(cur->chrom, next->chrom) == 0 &&
+                next->start <= cur->end) {
+                if (next->end > cur->end) cur->end = next->end;
+            } else {
+                plan->items[++out] = *next;
+            }
+        }
+        plan->count = out + 1;
+    }
+    plan->finished = 1;
+    return 1;
+}

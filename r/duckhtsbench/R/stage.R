@@ -183,3 +183,30 @@ duckhts_bench_write_provenance <- function(id, output = duckhts_bench_artifact_p
   utils::write.table(fields, receipt, sep = "\t", row.names = FALSE, quote = FALSE)
   invisible(receipt)
 }
+
+duckhts_bench_write_repeated_vcf <- function(header, record, output, records) {
+  if (!is.numeric(records) || length(records) != 1L) {
+    stop("records must be a positive whole number", call. = FALSE)
+  }
+  if (!is.finite(records) || records < 1 ||
+      records > .Machine$integer.max) {
+    stop("records must be a positive whole number", call. = FALSE)
+  }
+  if (records != floor(records)) {
+    stop("records must be a positive whole number", call. = FALSE)
+  }
+  if (grepl("\r", record, fixed = TRUE) || grepl("\n", record, fixed = TRUE)) {
+    stop("record must be one VCF data line", call. = FALSE)
+  }
+
+  connection <- file(output, open = "wt")
+  on.exit(close(connection), add = TRUE)
+  writeLines(header, connection)
+  remaining <- as.integer(records)
+  while (remaining > 0L) {
+    chunk_size <- min(remaining, 10000L)
+    writeLines(rep(record, chunk_size), connection)
+    remaining <- remaining - chunk_size
+  }
+  invisible(output)
+}

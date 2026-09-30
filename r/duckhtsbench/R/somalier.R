@@ -237,13 +237,18 @@ duckhts_bench_somalier_site_panel <- function() {
 duckhts_bench_somalier_samtools <- function(samtools, arguments, error,
                                             capture = FALSE) {
   if (capture) {
+    # Parse stdout only: samtools warnings (for example an index older than
+    # its data file) go to stderr and must not become parsed rows.
+    stderr_file <- tempfile("duckhtsbench-samtools-")
+    on.exit(unlink(stderr_file), add = TRUE)
     output <- suppressWarnings(system2(
-      samtools, arguments, stdout = TRUE, stderr = TRUE
+      samtools, arguments, stdout = TRUE, stderr = stderr_file
     ))
     status <- attr(output, "status")
     if (is.null(status)) status <- 0L
     if (status != 0L) {
-      stop(error, if (length(output)) paste0(": ", utils::tail(output, 1L)) else "",
+      messages <- c(output, readLines(stderr_file, warn = FALSE))
+      stop(error, if (length(messages)) paste0(": ", utils::tail(messages, 1L)) else "",
            call. = FALSE)
     }
     return(output)

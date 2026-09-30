@@ -1,5 +1,93 @@
 # DuckHTS Extension News
 
+# duckhts 1.5.2.9007
+
+- `read_bcf()` and `read_geno()` take `regions := STRUCT(chrom VARCHAR, start
+  BIGINT, "end" BIGINT)[]`: 0-based half-open intervals (VCF position `p` is
+  `[p - 1, p)`) read in one indexed scan built from contig ids, without region
+  strings. Contig names are literal, so `HLA-A*01:01` needs no braces. NULL keeps
+  the ordinary scan and an empty list returns no records. Combining it with
+  `region`, a missing index or `scan_mode := 'sequential'` is an error. Overlapping
+  and adjacent intervals are merged; the caps are 1,000,000 intervals and 128 MiB.
+  Build the list with `SET VARIABLE` on the calling connection and pass
+  `regions := getvariable('name')`; the function catalog shows the exact-allele
+  join.
+
+- `duckhts_somalier_vcf_counts()` streams the VCF into its panel join and keeps
+  call payloads only for panel coordinates, so peak memory follows the panel
+  rather than the VCF length. Counts, statuses and validation are unchanged.
+
+- Breaking: the Somalier panel now carries X/Y sites, and its identity changes.
+  `duckhts_somalier_import_sites()` keeps records on the exact Somalier v0.3.4
+  X/Y aliases (it used to drop them) and numbers every autosomal site before any
+  X/Y site; a sites file still needs an autosomal record. There is no PAR
+  filtering on import or count extraction, as in Somalier, so choose X sites
+  outside the PAR when selecting the file. `duckhts_somalier_panel_sha256()`
+  accepts X/Y regions, requires autosomal `site_index` values to precede them,
+  and uses a new versioned domain, so every panel, frequency and sketch digest
+  differs from earlier builds even for autosomal-only panels: recompute
+  persisted digests and sketches. `duckhts_somalier_vcf_counts()` and
+  `duckhts_somalier_bam_counts()` count every panel site in one pass; X/Y sites
+  ignore `filter_policy`, as Somalier extraction does. Sketches, verification,
+  the frequency digest, CHARR and matched contamination ignore X/Y panel and
+  evidence rows, and their numeric results on the autosomal sites are unchanged.
+
+- New `duckhts_somalier_sex(counts_table, panel_table, ...)` reports, per
+  sample, X and Y depth relative to autosomal depth, usable X site and
+  het/hom-alt counts, an XX, XY or ambiguous call from documented thresholds,
+  a Y signal, review flags, a status, and the panel identity, following
+  Somalier v0.3.4 `relate.nim`. It is review evidence, not a diagnosis.
+  Somalier's Y check depends on the cohort; `y_gate := 'sample'` (default) uses
+  the sample alone and `'cohort'` reproduces it. Integer counts equal the
+  pinned Somalier `extract` and `relate` output on VCF and BAM fixtures
+  (`test/scripts/somalier_sex_differential.R`). The count of public macros is
+  now 24.
+
+- A closed database is now released. `LOAD` used to open private connections
+  into the loading database for cgranges and for Somalier BAM/CRAM panel reading
+  and keep them until the process ended. Each connection referenced the database
+  instance, so the instance outlived the client shutdown: it kept a database file
+  open (Windows could not reopen it in the same process) and never freed its
+  memory. `LOAD` now keeps no connection, and a regression test closes a file
+  database after using both function families and reopens it.
+
+- Breaking: `duckhts_cgranges_from_query(...)` and
+  `duckhts_cgranges_overlaps_bulk(...)` are removed, because each ran a query on
+  a private connection. Replacements run on the caller's connection:
+  - `duckhts_cgranges_from_table(name, table_name, chrom_col, start_col, end_col[, label_col])`
+    is now a table macro (it was an unimplemented scalar) that creates, fills
+    and finalizes the index in one statement and returns one `indexed` row, so
+    `SELECT * FROM duckhts_cgranges_from_table(...)` replaces
+    `SELECT duckhts_cgranges_from_query(...)` plus `duckhts_cgranges_index(...)`.
+    Build the relation from a query with `CREATE TEMP VIEW`; TEMP tables, views
+    and uncommitted rows are visible. Without `label_col`, labels and ordinals
+    follow insertion order, which a parallel scan of a large table does not fix.
+    A failure while filling leaves the partly filled entry for
+    `duckhts_cgranges_destroy(...)`. The count of public macros is now 23.
+  - Bulk probing is
+    `SELECT ..., unnest(duckhts_cgranges_overlaps_list(name, chrom, start, end))`.
+    Expand in the SELECT list: `CROSS JOIN UNNEST` over the same list was about
+    six times slower. Hits equal `duckhts_cgranges_overlaps_bulk` hit for hit;
+    the list returns labels as text with a `label_type` column.
+
+- Breaking: `duckhts_somalier_bam_counts` reads its panel from Parquet only.
+  The panel is read on a private in-memory DuckDB instance opened and closed for
+  that call, so `panel_table` (which needed a retained connection into the
+  caller's database) is rejected: pass NULL and set `panel_parquet` to a local
+  Parquet file, for example one written with `COPY panel TO 'panel.parquet'`.
+  `panel_parquet` no longer reads remote URLs through the caller's `httpfs`.
+  The shared preparation slot and its busy/recursive error are gone. The panel
+  validation macro is defined once and installed in the private instance.
+
+- `read_genbank(attributes := [...])` adds one VARCHAR column per requested
+  qualifier key, on the shared named-attribute helper that `read_gff` and
+  `read_gtf` use. Each column equals `attributes_map[key]` byte for byte,
+  including GenBank's comma-joined repeated qualifiers, the synthesized `ID`,
+  `Name` and `Parent`, and NULL for an absent key. Values are computed only for
+  projected columns, so a query needing one qualifier no longer builds the whole
+  `attributes_map`. Bind rejects empty, duplicate, and reserved names.
+  `benchmarks/benchmark_genbank_named_attributes.md` reports the comparison.
+
 # duckhts 1.5.2.9006
 
 - The function catalog documents `bam_bin_counts(include_unmapped := FALSE)` and

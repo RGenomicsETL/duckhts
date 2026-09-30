@@ -383,7 +383,7 @@ Read VCF/BCF with header-typed INFO/FORMAT, typed CSQ/ANN/BCSQ annotations, samp
 Signature:
 
 ```sql
-read_bcf(path, region := NULL, index_path := NULL, tidy_format := FALSE, additional_csq_column_types := NULL, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null', samples := NULL)
+read_bcf(path, region := NULL, index_path := NULL, tidy_format := FALSE, additional_csq_column_types := NULL, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null', samples := NULL, regions := NULL)
 ```
 
 Returns:
@@ -412,6 +412,10 @@ HTSlib selectors: NULL/'-' keeps all, empty string keeps none, comma-separated n
 
 Comma-separated indexed regions use a union iterator, emitting each physical record once across overlaps. NULL/empty region means no filter; empty list items and malformed known-contig intervals error. Unknown contigs follow HTSlib's skip policy.
 
+### Typed regions
+
+Typed regions: regions := STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[] selects 0-based half-open intervals (VCF POS p is [p-1, p)) with one native multi-region iterator built directly from header/index contig ids, not region strings. NULL or omitted regions keeps the ordinary behaviour; a non-NULL empty list selects zero records, including COUNT(*), and never falls back to a scan (list() over no rows is NULL, so wrap it as coalesce(list(...), []::STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[])). region and non-NULL regions are mutually exclusive; regions requires a usable index (.tbi/.csi) and is incompatible with scan_mode := 'sequential'. chrom is a literal contig name, so names such as 'HLA-A*01:01' or 'chr1:2' need no braces; a contig absent from the header/index yields no records for that interval, like an unknown contig in region. NULL fields, start < 0 and end <= start error. Intervals are sorted and overlapping or adjacent ones merged per contig without broadening; a physical record is returned once however many intervals overlap it, and physical duplicates stay separate. Records that merely overlap an interval (a deletion spanning it) are returned: filter POS in SQL for exact positions. Caps: 1,000,000 intervals and 128 MiB of native payload, checked before storage; they do not bound the caller's own list aggregation. Prepare the plan on the caller connection with SET VARIABLE p = (SELECT coalesce(list({'chrom': chrom, 'start': pos - 1, 'end': pos}), []::STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[]) FROM (SELECT DISTINCT chrom, pos FROM requests)) and pass regions := getvariable('p'). An unknown variable name is NULL to DuckDB (a full scan), so rduckhts_bcf(regions_var =) and rduckhts_geno(regions_var =) check that the variable exists.
+
 ### Scanning
 
 scan_mode='sequential' streams without loading an index. auto streams if no usable index was available at bind; region queries require one. Index-only counts do not validate data contents. Automatic/region plans retain the parsed bind-time index, including remote/explicit index_path: subsequent index removal, replacement or corruption does not change the plan. Supply an initially matching pair and keep data/header contents unchanged; this is not a snapshot or validation of an unrelated index. Reprepare to use a new index.
@@ -433,7 +437,7 @@ Read one row per VCF/BCF record with typed arbitrary-ploidy GT/PS calls, selecte
 Signature:
 
 ```sql
-read_geno(path, region := NULL, index_path := NULL, samples := NULL, non_reference_only := FALSE, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null', format_fields := NULL, raw_gt := FALSE, include_filter := FALSE)
+read_geno(path, region := NULL, index_path := NULL, samples := NULL, non_reference_only := FALSE, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null', format_fields := NULL, raw_gt := FALSE, include_filter := FALSE, regions := NULL)
 ```
 
 Returns:
@@ -452,7 +456,7 @@ samples uses read_bcf's selectors. non_reference_only removes calls without a ca
 
 ### Ordering
 
-Full scans stream in physical input order regardless of index availability, with one scan worker and separate HTSlib decompression threads. record_index is zero-based and scan-local, not a persistent file locator. Indexed region unions restart at zero in HTSlib iterator order; overlapping regions visit a physical record once while preserving distinct duplicates. Use ORDER BY record_index when order matters. Sequential mode rejects regions.
+Full scans stream in physical input order regardless of index availability, with one scan worker and separate HTSlib decompression threads. record_index is zero-based and scan-local, not a persistent file locator. Indexed region unions restart at zero in HTSlib iterator order; overlapping regions visit a physical record once while preserving distinct duplicates. Use ORDER BY record_index when order matters. Sequential mode rejects regions and typed regions.
 
 ### FORMAT
 
@@ -470,10 +474,22 @@ Header/type/cardinality mismatches follow decode_error_policy. Scalar cardinalit
 
 raw_gt := TRUE appends calls.raw_gt VARCHAR after any format struct, preserving exact original VCF separators, leading phase markers and allele spelling. Absent GT is NULL; literal '.' stays text. FALSE preserves the default schema. BCF rejects TRUE even when calls is unprojected. Text follows original-header sample selection and scan ordinals, including region unions; it does not emulate a downstream parser.
 
+### Typed regions
+
+regions := STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[] has the same contract as read_bcf: 0-based half-open, NULL vs empty, literal contig names, index required, 1,000,000 interval and 128 MiB caps; see read_bcf. Ordinals restart at zero in HTSlib iterator order.
+
+### Exact alleles
+
+Exact alleles: regions plus SQL restore requested (chrom, pos, REF, ALT) alleles without changing the reader. Keep requests unchanged, plan I/O with SELECT DISTINCT chrom, pos, read with non_reference_only := false and format_fields such as ['GP','DS','HS'] so hom-ref and missing calls are returned, expand ALT with its ordinal, and join on equality: WITH alleles AS (SELECT record_index, CHROM, POS, REF, ALT AS full_alt, calls, unnest(ALT) AS match_alt, generate_subscripts(ALT, 1) AS alt_index FROM read_geno('f.bcf', regions := getvariable('p'), non_reference_only := false)) SELECT s.*, a.record_index, a.full_alt, a.alt_index, a.calls FROM requests s LEFT JOIN alleles a ON s.chrom = a.CHROM AND s.pos = a.POS AND s.ref = a.REF AND s.alt = a.match_alt. Use equality on the expanded ALT: list_contains(a.ALT, s.alt) in the join condition plans a nested-loop join. Multi-ALT records keep every ALT in file order with the matched 1-based alt_index, and a request matching two ALT slots or two physical records returns a row each. GP, DS, HS and phase are full-site values: no allele splitting, GP remapping, dosage selection, trimming, strand flip or liftover, so a shifted indel representation is not matched. An ALT-less record disappears under unnest, so diagnosing unmatched requests needs a second step; rduckhts_geno_sites() composes the complete recipe on the caller connection, labelling each request matched, allele_not_at_site, ref_mismatch or absent (position-level diagnostics only, never a fabricated genotype). record_index is scan-local; order with ORDER BY request_id, record_index, alt_index. The reader does not deduplicate requests.
+
 ### Examples
 
 ```sql
 SELECT record_index, CHROM, POS, unnest(calls) AS call FROM read_geno('geno_calls.bcf', non_reference_only := TRUE) ORDER BY record_index;
+```
+
+```sql
+SET VARIABLE p = [{'chrom': 'chr1', 'start': 99, 'end': 100}, {'chrom': 'HLA-A*01:01', 'start': 9, 'end': 10}]; SELECT record_index, CHROM, POS, REF, ALT FROM read_geno('geno_sites.bcf', regions := getvariable('p'), non_reference_only := FALSE, format_fields := ['GP', 'DS', 'HS']);
 ```
 
 ## read_bcf_samples
@@ -852,48 +868,38 @@ BOOLEAN
 SELECT duckhts_cgranges_destroy('targets_idx');
 ```
 
-## duckhts_cgranges_from_query
-
-Execute a SQL query on an extension-owned DuckDB connection, append its interval rows into a session-scoped cgranges registry entry, and leave the populated index ready for explicit finalization with duckhts_cgranges_index(...).
-
-Signature:
-
-```sql
-duckhts_cgranges_from_query(name, query, chrom_col, start_col, end_col[, label_col])
-```
-
-Returns:
-
-```
-BOOLEAN
-```
-
-### Examples
-
-```sql
-SELECT duckhts_cgranges_from_query('targets_idx', 'SELECT chrom, start, "end", name FROM targets', 'chrom', 'start', 'end', 'name');
-```
-
 ## duckhts_cgranges_from_table
 
-Reserved convenience constructor for bulk cgranges population from a table name. The current implementation is intentionally deferred and directs callers to duckhts_cgranges_from_query(...).
+Create, populate and finalize a session-scoped cgranges registry entry from the rows of a table or view, on the caller's connection.
 
 Signature:
 
 ```sql
-duckhts_cgranges_from_table(name, table_name, chrom_col, start_col, end_col[, label_col])
+duckhts_cgranges_from_table(name, table_name, chrom_col, start_col, end_col, label_col)
 ```
 
 Returns:
 
 ```
-BOOLEAN
+table(indexed BOOLEAN)
 ```
+
+### Source
+
+table_name is any relation visible to the calling connection, including TEMP tables, views and uncommitted rows; build it from a query with CREATE TEMP VIEW. chrom_col, start_col, end_col and label_col name its columns; label_col may be omitted (five arguments) for unlabeled intervals. The entry is created, filled and finalized in one statement and returns one TRUE row, so duckhts_cgranges_index(...) is not needed afterwards.
+
+### Errors
+
+The name must be new in the session. A failure while filling (NULL chrom, start or end, an unsupported label type, a coordinate outside int32) leaves the partly filled entry in place; remove it with duckhts_cgranges_destroy(...) before retrying.
+
+### Order
+
+Without label_col the label and interval_ordinal follow insertion order. A parallel scan of a large table does not fix that order, so pass label_col when a stable identity is needed.
 
 ### Examples
 
 ```sql
-SELECT duckhts_cgranges_from_table('targets_idx', 'targets', 'chrom', 'start', 'end', 'name');
+SELECT * FROM duckhts_cgranges_from_table('targets_idx', 'targets', 'chrom', 'start', 'end', 'name');
 ```
 
 ## duckhts_cgranges_has_overlap
@@ -956,10 +962,14 @@ Returns:
 STRUCT(interval_ordinal BIGINT, label VARCHAR, label_type VARCHAR, interval_chrom VARCHAR, interval_start INTEGER, interval_end INTEGER)[]
 ```
 
+### Bulk probing
+
+This is the bulk overlap path for any relation of probes. Expand the list in the SELECT list, as in the example: a select-list UNNEST streams the hits, whereas CROSS JOIN UNNEST over the same list plans a lateral join that was several times slower in measurement. Use row_number() OVER () or an existing key to identify probes.
+
 ### Examples
 
 ```sql
-SELECT q.*, hit.interval_chrom, hit.interval_start, hit.interval_end, hit.label FROM read_bed('queries.bed') AS q CROSS JOIN UNNEST(duckhts_cgranges_overlaps_list('targets_idx', q.chrom, q.start, q."end")) AS u(hit);
+SELECT q.chrom, q.start, q."end", unnest(duckhts_cgranges_overlaps_list('targets_idx', q.chrom, q.start, q."end")) AS hit FROM read_bed('queries.bed') AS q;
 ```
 
 ## duckhts_cgranges_overlaps
@@ -982,28 +992,6 @@ table
 
 ```sql
 SELECT * FROM duckhts_cgranges_overlaps('targets_idx', 'chr1', 100, 150);
-```
-
-## duckhts_cgranges_overlaps_bulk
-
-Run a SQL query that yields overlap probes, stream those rows through a finalized session-scoped cgranges registry entry, and return one row per matching indexed interval. The probe query runs on the extension-owned helper connection, so it must reference regular tables/views rather than connection-local temp tables. When query_row_id_col is omitted, query_row_id defaults to the 1-based probe row ordinal.
-
-Signature:
-
-```sql
-duckhts_cgranges_overlaps_bulk(name, query, chrom_col, start_col, end_col, mode := 'overlap', query_row_id_col := NULL)
-```
-
-Returns:
-
-```
-table
-```
-
-### Examples
-
-```sql
-SELECT * FROM duckhts_cgranges_overlaps_bulk('targets_idx', 'SELECT probe_id, chrom, start, "end" FROM probes', 'chrom', 'start', 'end', query_row_id_col := 'probe_id');
 ```
 
 ## read_fastq
@@ -1116,7 +1104,7 @@ SELECT duckhts_somalier_spacing([100, 110, 109]::UBIGINT[], 10);
 
 ## duckhts_somalier_import_sites
 
-Import an already selected Somalier sites VCF/BCF as one canonical panel and population-frequency relation.
+Import an already selected Somalier sites VCF/BCF as one canonical panel and population-frequency relation, autosomal and X/Y sites together.
 
 Signature:
 
@@ -1132,11 +1120,11 @@ table
 
 ### Orientation
 
-Each autosomal biallelic SNV is oriented into lexical allele_a/allele_b order. INFO/AF is the source ALT frequency and is transformed with REF/ALT, so population_b_af always describes allele_b. Dense zero-based site_index follows Somalier v0.3.4's lexical region then position order.
+Each biallelic SNV is oriented into lexical allele_a/allele_b order. INFO/AF is the source ALT frequency and is transformed with REF/ALT, so population_b_af always describes allele_b. Dense zero-based site_index numbers every autosomal site first, in Somalier v0.3.4's lexical region then position order, and then the X/Y sites in the same order, so the autosomal ordinals are 0..n-1 whatever the X/Y region names sort as.
 
 ### Input
 
-INFO/AF must declare Number=A,Type=Float. Retained records must be distinct uppercase A/C/G/T biallelic SNVs with one finite AF in [0,1]. Exact Somalier v0.3.4 X/Y aliases are excluded. Existing FILTER values are retained as provenance because this imports an already selected sites file; it does not apply selection policy.
+INFO/AF must declare Number=A,Type=Float. Retained records must be distinct uppercase A/C/G/T biallelic SNVs with one finite AF in [0,1]. Records on the exact Somalier v0.3.4 X/Y aliases (X, chrX, NC_000023.10, NC_000023.11, Y, chrY, NC_000024.9, NC_000024.10) are kept as sex-chromosome sites and at least one autosomal record is required to normalise their depth. No pseudo-autosomal filtering happens here or at count time, as in Somalier: choose X sites outside the PAR when selecting the sites file (rduckhts_somalier_find_sites does for human builds). Existing FILTER values are retained as provenance because this imports an already selected sites file; it does not apply selection policy.
 
 ### Scope
 
@@ -1174,7 +1162,7 @@ FORMAT/AD must declare Number=R,Type=Integer. Exact REF/ALT identity selects A a
 
 ### Scope and FILTER
 
-Symbolic alleles are unavailable in this scope. filter_policy='pass_or_unapplied' accepts PASS and dot but makes named failures unavailable; 'include_all' uses their AD; 'error' rejects them. source_method, count_scope, status, FILTER, record/sample ordinals and matched allele slots preserve extraction provenance. Full scans are sequential and retain physical source-record identity; Parquet is optional downstream storage, not an input requirement.
+Every panel site, autosomal or X/Y, is counted in the one pass. Symbolic alleles are unavailable in this scope. filter_policy='pass_or_unapplied' accepts PASS and dot but makes named failures unavailable; 'include_all' uses their AD; 'error' rejects them. X/Y sites ignore filter_policy and always use their AD, as Somalier extraction does. source_method, count_scope, status, FILTER, record/sample ordinals and matched allele slots preserve extraction provenance. Full scans are sequential and retain physical source-record identity; Parquet is optional downstream storage, not an input requirement.
 
 ### Examples
 
@@ -1200,20 +1188,20 @@ table
 
 ### Execution
 
-Exactly one of panel_table or panel_parquet supplies the canonical typed six-column panel. The panel is materialized and validated once, then worker_count partitions it into at most 64 DuckDB scan jobs. Each worker-local job owns one alignment handle, index, multi-region iterator, pileup, reference handle and bounded overlap workspace; no mutable htslib or faidx state is shared. DuckDB's connection thread setting limits concurrent jobs. decompression_threads separately controls htslib workers per alignment handle. Parallel output order is unspecified; use ORDER BY site_index when order matters.
+panel_parquet supplies the canonical typed six-column panel; panel_table is retained for signature compatibility and must be NULL. The panel is read from a local Parquet file, materialized and validated once on a private in-memory DuckDB instance opened and closed for the call, then worker_count partitions it into at most 64 DuckDB scan jobs. Each worker-local job owns one alignment handle, index, multi-region iterator, pileup, reference handle and bounded overlap workspace; no mutable htslib or faidx state is shared. DuckDB's connection thread setting limits concurrent jobs. decompression_threads separately controls htslib workers per alignment handle. Parallel output order is unspecified; use ORDER BY site_index when order matters.
 
 ### Evidence
 
-A and B are exact uppercase panel bases; other counts every other observed base. Valid uncovered sites emit measured 0/0/0. Missing reference contigs or positions, reference mismatches, alignment-header contig absence and positions beyond a declared alignment contig emit NULL counts with a named unavailable status. Deletions and reference skips are not observed bases. MAPQ, base quality, required/excluded flags and overlap suppression are explicit per-call settings.
+Every panel site, autosomal or X/Y, is counted in the one scan. A and B are exact uppercase panel bases; other counts every other observed base. Valid uncovered sites emit measured 0/0/0. Missing reference contigs or positions, reference mismatches, alignment-header contig absence and positions beyond a declared alignment contig emit NULL counts with a named unavailable status. Deletions and reference skips are not observed bases. MAPQ, base quality, required/excluded flags and overlap suppression are explicit per-call settings.
 
 ### Limits and transport
 
-panel_table must name a committed table or view visible to the database; caller-local TEMP objects and uncommitted changes are not visible to panel preparation. One retained-connection preparation slot is shared by concurrent calls: nested or concurrent preparation returns a busy error and callers may retry. panel_parquet reads an ordinary Parquet file directly. max_sites bounds the shared panel. max_depth, max_overlap_qnames and max_region_bytes bound each active scan job; concurrent workspace can therefore grow with worker_count. remote_block_bytes, remote_cache_bytes and reference_cache_bytes apply per worker-owned handle, and zero disables that cache override. Explicit non-colocated BAM/CRAM and FASTA indexes are honored; CRAM keeps the alignment file's original @SQ lengths and does not create a default FASTA-index sidecar. overlap_policy='hileup_v0.1.0' pins encounter-order mate suppression only, while 'none' counts every retained observation.
+The private reader keeps no connection into the caller's database, so a closed database is released; it also cannot see the caller's tables, so write the panel with COPY ... TO 'panel.parquet' first (rduckhts_somalier_bam_counts does this for a panel_table). panel_parquet must be a local ordinary Parquet file: remote URLs are not read. max_sites bounds the shared panel. max_depth, max_overlap_qnames and max_region_bytes bound each active scan job; concurrent workspace can therefore grow with worker_count. remote_block_bytes, remote_cache_bytes and reference_cache_bytes apply per worker-owned handle, and zero disables that cache override. Explicit non-colocated BAM/CRAM and FASTA indexes are honored; CRAM keeps the alignment file's original @SQ lengths and does not create a default FASTA-index sidecar. overlap_policy='hileup_v0.1.0' pins encounter-order mate suppression only, while 'none' counts every retained observation.
 
 ### Examples
 
 ```sql
-CREATE TABLE allele_counts AS SELECT * FROM duckhts_somalier_bam_counts('sample.bam', 'fingerprint_panel', 'sample-1', 'reference.fa');
+CREATE TABLE allele_counts AS SELECT * FROM duckhts_somalier_bam_counts('sample.bam', NULL, 'sample-1', 'reference.fa', panel_parquet := 'fingerprint_panel.parquet');
 ```
 
 ## duckhts_ancestry_proportions
@@ -1272,7 +1260,7 @@ VARCHAR
 
 ### Panel contract
 
-panel_table has assembly, dense zero-based site_index, region, positive one-based position, allele_a and allele_b. Assembly and region are each limited to 1,024 bytes before hashing. One nonempty assembly, unique physical region/position and uppercase single-base A/C/G/T alleles in lexical A < B order are required. The pinned Somalier v0.3.4 X/Y aliases are rejected; other aliases cannot be biologically classified from a region string. The calculation assumes diploid three-state genotypes. The digest commits to this domain and every ordered site, independent of physical row order.
+panel_table has assembly, dense zero-based site_index, region, positive one-based position, allele_a and allele_b. Assembly and region are each limited to 1,024 bytes before hashing. One nonempty assembly, unique physical region/position and uppercase single-base A/C/G/T alleles in lexical A < B order are required. The pinned Somalier v0.3.4 X/Y aliases are sex-chromosome sites; every other region is autosomal, since other aliases cannot be classified from a region string. Every autosomal site_index must precede every X/Y site_index. The digest commits to this domain (panel version 3: biallelic SNVs, autosomal then sex-chromosome sites) and every ordered site, independent of physical row order. Panels digested before this version have different identities.
 
 ### Examples
 
@@ -1298,7 +1286,7 @@ VARCHAR
 
 ### Frequency contract
 
-frequency_table must cover every panel site exactly once with the same assembly, ordinal, coordinate and A/B orientation plus a finite population_b_af in [0,1]. The digest commits to the panel identity and every ordered frequency value.
+frequency_table must cover every autosomal panel site exactly once (X/Y rows are ignored) with the same assembly, ordinal, coordinate and A/B orientation plus a finite population_b_af in [0,1]. The digest commits to the panel identity and every ordered frequency value.
 
 ### Examples
 
@@ -1354,7 +1342,7 @@ table(sketch STRUCT)
 
 ### Evidence
 
-evidence_table contains sample_id, the six panel identity columns, and nullable a, b and other counts. Each sample must contain every panel ordinal exactly once. Count channels already follow the panel's canonical lexical A/B order; changed coordinates or orientation error. Counts are never inferred from GT or DP. All-NULL tuples are unavailable, all-zero tuples are measured zero depth, and partial NULL tuples error.
+evidence_table contains sample_id, the six panel identity columns, and nullable a, b and other counts. Each sample must contain every panel ordinal exactly once. Panel and evidence rows on the X/Y aliases are ignored: this is an autosomal statistic, and results equal those on the autosomal-only panel. The reported panel identity is the whole panel's. Count channels already follow the panel's canonical lexical A/B order; changed coordinates or orientation error. Counts are never inferred from GT or DP. All-NULL tuples are unavailable, all-zero tuples are measured zero depth, and partial NULL tuples error.
 
 ### Persistence
 
@@ -1474,7 +1462,7 @@ table(contamination STRUCT)
 
 ### Inputs
 
-Count evidence and population_b_af must match the panel's full ordered site identity. CHARR uses measured counts, its own homozygous-like binomial eligibility and the pinned 4% other-read filter; relatedness genotype masks are insufficient.
+Count evidence and population_b_af must match the panel's full ordered site identity. Panel and evidence rows on the X/Y aliases are ignored: this is an autosomal statistic, and results equal those on the autosomal-only panel. The reported panel identity is the whole panel's. CHARR uses measured counts, its own homozygous-like binomial eligibility and the pinned 4% other-read filter; relatedness genotype masks are insufficient.
 
 ### Results
 
@@ -1512,7 +1500,7 @@ table(contamination STRUCT)
 
 ### Direction
 
-pairs_table contains distinct receiver_id and anchor_id rows. The anchor supplies the receiver's expected uncontaminated homozygous genotype; it is not assumed to identify the contaminating donor. Reversing a pair is a different fit.
+pairs_table contains distinct receiver_id and anchor_id rows. Panel and evidence rows on the X/Y aliases are ignored: this is an autosomal statistic, and results equal those on the autosomal-only panel. The reported panel identity is the whole panel's. The anchor supplies the receiver's expected uncontaminated homozygous genotype; it is not assumed to identify the contaminating donor. Reversing a pair is a different fit.
 
 ### Results
 
@@ -1534,6 +1522,52 @@ DuckHTS searches a full 0.01 grid and refines a feasible local optimum rather th
 
 ```sql
 SELECT unnest(contamination) FROM duckhts_somalier_matched_contamination('allele_counts', 'fingerprint_panel', 'population_frequencies', 'receiver_anchor_pairs');
+```
+
+## duckhts_somalier_sex
+
+Report X/Y dosage evidence and a review-only XX, XY or ambiguous call per sample from panel counts.
+
+Signature:
+
+```sql
+duckhts_somalier_sex(counts_table, panel_table, min_depth := 7, min_sex_site_depth := 7, min_het_balance := 0.3, hom_balance_cutoff := 0.01, min_usable_x_sites := 11, xy_max_het_ratio := 0.05, xx_min_het_ratio := 0.4, y_signal_min := 0.4, y_gate := 'sample')
+```
+
+Returns:
+
+```
+table
+```
+
+### Inputs
+
+counts_table is the sample-by-panel relation from duckhts_somalier_vcf_counts() or duckhts_somalier_bam_counts() over a panel that includes X/Y sites; each sample needs one row for every panel site with the panel's geometry and A/B orientation. Coverage is checked per sample from the row count plus the sum and XOR of a 64-bit hash of site_index against the panel's, because a per-sample DISTINCT set would hold samples x sites entries: a missing or repeated ordinal changes the count or the hashes and is rejected, while a different multiset of ordinals with the same count passes only if both hashes collide. Autosomal sites give the depth normaliser, X and Y sites the metrics. Without a usable X site the panel is still accepted and the status says so.
+
+### Metrics
+
+Follows Somalier v0.3.4 relate.nim. autosomal_depth_mean is the mean A+B depth of autosomal sites with other <= 10% of all reads and A+B >= min_depth. An X or Y site is usable when other <= 4%, A+B >= min_sex_site_depth and its B balance is homozygous (below hom_balance_cutoff, above one minus it, or A or B zero) or heterozygous (between min_het_balance and one minus it); x_hom_ref, x_het and x_hom_alt count usable X sites by genotype. x_depth_ratio and y_depth_ratio are 2 * mean A+B depth over usable sites / autosomal_depth_mean, so a diploid X is about 2 and a single X about 1. x_het_hom_alt_ratio is x_het / x_hom_alt (Infinity when there is no hom-alt site and some het site, NULL when both are zero), the statistic Somalier thresholds. Ratios are NULL without usable sites or autosomal depth; the integer counts stay exact zeros. Floating means can differ from Somalier's running mean in the last bits.
+
+### Call
+
+inferred_sex is XY when there are at least min_usable_x_sites usable X sites (Somalier: more than 10) and x_het_hom_alt_ratio < xy_max_het_ratio, XX when it is > xx_min_het_ratio, otherwise ambiguous. y_signal is present when y_depth_ratio > y_signal_min and absent otherwise, NULL without usable Y sites. An XX dosage with a present Y signal is reported as ambiguous with the review flag apparent_y_with_xx_dosage, and an XY dosage with an absent Y signal keeps XY with apparent_y_loss, as Somalier notes. status is ok, no_usable_x_sites, insufficient_x_sites or no_autosomal_depth.
+
+### Y gate
+
+Somalier applies its Y check only when the cohort has Y depth (more than five samples, or more than 10%, with usable Y sites), so a sample's call depends on who else is in the batch. The default y_gate := 'sample' applies the check whenever the sample itself has a Y signal; y_gate := 'cohort' reproduces Somalier's gate, and cohort_has_y reports it. Somalier also leaves the sex unset for samples that fail its autosomal quality gate; DuckHTS reports the X dosage regardless and reports no_autosomal_depth when the normaliser is missing.
+
+### Interpretation
+
+The call is evidence of X/Y dosage for review, not a diagnosis or a legal determination of sex; aneuploidy, mosaicism, poor coverage and sample swaps all change it. Results also carry the whole-panel digest, panel denominators and every threshold used.
+
+### Memory
+
+See benchmarks/benchmark_somalier_sex.md for measured scaling. One pass over the counts relation: state is one aggregate group of a few numbers per sample plus the panel; no product of samples and sites is retained beyond the counts relation itself.
+
+### Examples
+
+```sql
+SELECT sample_id, inferred_sex, status, x_depth_ratio, y_depth_ratio FROM duckhts_somalier_sex('allele_counts', 'fingerprint_panel');
 ```
 
 ## detect_quality_encoding
@@ -1625,7 +1659,7 @@ Read GenBank flat-file features in read_gff's column shape, with optional parsed
 Signature:
 
 ```sql
-read_genbank(path, attributes_map := FALSE)
+read_genbank(path, attributes_map := FALSE, attributes := []::VARCHAR[])
 ```
 
 Returns:
@@ -1642,6 +1676,10 @@ seqname is VERSION, else ACCESSION, else the LOCUS name; a segment on a remote a
 
 Synthesized GFF3 keys ID, Name and Parent accompany the original qualifiers. ID is gene-<locus_tag> for genes and <key>-<n> otherwise, with n the feature's 0-based position in the file. Parent links a feature to the gene sharing its /locus_tag (or /gene) anywhere in the record. Repeated qualifiers become one key with comma-joined values, valueless qualifiers read 'true', and ; = & , % are percent-encoded. attributes_map := TRUE adds the same pairs as a MAP.
 
+### Named attributes
+
+attributes := ['gene', 'product'] appends VARCHAR columns named for the requested keys, after attributes_map when that is requested. Each value equals attributes_map[key] byte for byte: repeated qualifiers are comma-joined, a valueless qualifier reads 'true', values stay percent-encoded, the synthesized ID, Name and Parent are addressable, and an absent key is NULL. Keys must be nonempty, unique under ASCII case-insensitive column naming, and distinct from the fixed columns and attributes_map when it is requested. Only projected keys are computed during scanning.
+
 ### Errors
 
 Records stream one at a time, so memory follows the largest record. A record without a terminating //, a FEATURES table with no sequence section, a malformed location, an unsupported location form (one-of, gap, bond, nested join/order, a.b), an origin-spanning span on a linear record, or a /codon_start outside 1..3 is an error naming the feature and line. Table layout and these rules follow BioPython's GenBank scanner, and test/scripts/genbank_oracle_test.py diffs the reader against it.
@@ -1650,6 +1688,10 @@ Records stream one at a time, so memory follows the largest record. A record wit
 
 ```sql
 SELECT seqname, feature, start, "end" FROM read_genbank('phix174.gb') LIMIT 5;
+```
+
+```sql
+SELECT feature, locus_tag, product FROM read_genbank('phix174.gb', attributes := ['locus_tag', 'product']) WHERE feature = 'CDS';
 ```
 
 ## genbank_to_fasta

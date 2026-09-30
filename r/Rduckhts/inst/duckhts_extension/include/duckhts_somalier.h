@@ -20,6 +20,15 @@ extern "C" {
 #define DUCKHTS_SOMALIER_MAX_IDENTITY_BYTES UINT32_C(1024)
 #define DUCKHTS_SOMALIER_THRESHOLD_CACHE_SIZE 64u
 
+/* SQL string-literal lists of the exact Somalier v0.3.4 X and Y contig
+ * aliases (common.nim isAutosomal, somalier.nim extraction). Every other
+ * region is an autosomal site. */
+#define DUCKHTS_SOMALIER_X_REGIONS_SQL \
+    "('X', 'chrX', 'NC_000023.10', 'NC_000023.11')"
+#define DUCKHTS_SOMALIER_SEX_REGIONS_SQL \
+    "('X', 'chrX', 'NC_000023.10', 'NC_000023.11', " \
+    "'Y', 'chrY', 'NC_000024.9', 'NC_000024.10')"
+
 typedef enum duckhts_somalier_status {
     DUCKHTS_SOMALIER_OK = 0,
     DUCKHTS_SOMALIER_NO_EVIDENCE,

@@ -18,7 +18,8 @@ rduckhts_geno(
   overwrite = FALSE,
   format_fields = NULL,
   raw_gt = FALSE,
-  include_filter = FALSE
+  include_filter = FALSE,
+  regions_var = NULL
 )
 }
 \arguments{
@@ -76,6 +77,12 @@ errors because its encoded genotypes do not retain the original text.}
 \item{include_filter}{Add the physical record's `FILTER` as a `VARCHAR[]`
 column. `PASS` is `c("PASS")`; an unapplied `.` filter is `NULL`; named
 failing filters retain header order. The default keeps the existing schema.}
+
+\item{regions_var}{Optional name of a session variable on `con` holding typed
+intervals, `STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[]`, with
+0-based half-open coordinates. See [rduckhts_bcf()] for the contract; the
+same rules apply. [rduckhts_geno_sites()] prepares such a plan from
+requested sites and joins exact alleles.}
 }
 \value{
 A data frame when `table_name` is `NULL`, otherwise invisible `TRUE`.
@@ -103,5 +110,5 @@ DBI::dbGetQuery(con, "SELECT record_index, len(calls) AS n FROM calls ORDER BY r
 DBI::dbDisconnect(con, shutdown = TRUE)
 }
 \seealso{
-[rduckhts_bcf_samples()]
+[rduckhts_bcf_samples()], [rduckhts_geno_sites()]
 }

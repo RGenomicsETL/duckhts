@@ -732,6 +732,416 @@ SELECT * FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_calls.bcf', decode
 ----
 decode_error_policy must
 
+# ---------------------------------------------------------------------------
+# Typed regions: 0-based half-open STRUCT(chrom, start, "end")[] intervals.
+# Fixture geno_sites: chr1 100 (x2 physical duplicate, ALT C,G), 200, 300 (ALT T,T),
+# 501 (AT>A); chr2 50, 100 (no ALT); literal contigs HLA-A*01:01:10 and chr1:2:10;
+# chr3 is declared without records.
+# ---------------------------------------------------------------------------
+
+foreach name geno_sites.vcf.gz geno_sites.bcf
+
+# Typed and string regions select the same rows (the string form is bcftools
+# view -r chr1:100,chr1:501-502,{HLA-A*01:01}:10-10 for the same fixture).
+query I
+SELECT count(*) FROM ((
+ FROM read_geno('__WORKING_DIRECTORY__/test/data/${name}', format_fields:=['GP','DS','HS'],
+   region:='chr1:100-100,chr1:501-502,{HLA-A*01:01}:10-10')
+ EXCEPT ALL
+ FROM read_geno('__WORKING_DIRECTORY__/test/data/${name}', format_fields:=['GP','DS','HS'],
+   regions:=[{'chrom':'HLA-A*01:01','start':9,'end':10},{'chrom':'chr1','start':500,'end':502},{'chrom':'chr1','start':99,'end':100}]))
+ UNION ALL (
+ FROM read_geno('__WORKING_DIRECTORY__/test/data/${name}', format_fields:=['GP','DS','HS'],
+   regions:=[{'chrom':'HLA-A*01:01','start':9,'end':10},{'chrom':'chr1','start':500,'end':502},{'chrom':'chr1','start':99,'end':100}])
+ EXCEPT ALL
+ FROM read_geno('__WORKING_DIRECTORY__/test/data/${name}', format_fields:=['GP','DS','HS'],
+   region:='chr1:100-100,chr1:501-502,{HLA-A*01:01}:10-10')));
+----
+0
+
+query I
+SELECT count(*) FROM ((
+ FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}', region:='chr1:100-100,chr1:501-502,{HLA-A*01:01}:10-10')
+ EXCEPT ALL
+ FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}',
+   regions:=[{'chrom':'chr1','start':99,'end':100},{'chrom':'chr1','start':500,'end':502},{'chrom':'HLA-A*01:01','start':9,'end':10}]))
+ UNION ALL (
+ FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}',
+   regions:=[{'chrom':'chr1','start':99,'end':100},{'chrom':'chr1','start':500,'end':502},{'chrom':'HLA-A*01:01','start':9,'end':10}])
+ EXCEPT ALL
+ FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}', region:='chr1:100-100,chr1:501-502,{HLA-A*01:01}:10-10')));
+----
+0
+
+# Order, duplicate intervals, overlap and adjacency never change the multiset.
+# Physical duplicate records stay separate; a record is not repeated by a
+# duplicated or overlapping interval. Expected rows: bcftools query.
+query ITIT
+SELECT record_index, CHROM, POS, REF||'>'||array_to_string(ALT, ',')
+FROM read_geno('__WORKING_DIRECTORY__/test/data/${name}',
+  regions:=[{'chrom':'chr1','start':99,'end':100},{'chrom':'chr1','start':99,'end':100},
+            {'chrom':'chr1','start':100,'end':199},{'chrom':'chr1','start':150,'end':250},
+            {'chrom':'chr1','start':500,'end':502}])
+ORDER BY record_index;
+----
+0	chr1	100	A>C,G
+1	chr1	100	A>C,G
+2	chr1	200	T>C
+3	chr1	501	AT>A
+
+# Overlap semantics are HTSlib's: a deletion at 501 spans 502, but a
+# neighbouring interval that does not touch [500,502) selects nothing.
+query I
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}',
+  regions:=[{'chrom':'chr1','start':501,'end':502}]);
+----
+1
+
+query I
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}',
+  regions:=[{'chrom':'chr1','start':502,'end':503}]);
+----
+0
+
+# Empty list means zero records, including COUNT(*) and zero-column scans.
+query I
+SELECT count(*) FROM read_geno('__WORKING_DIRECTORY__/test/data/${name}',
+  regions:=[]::STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[]);
+----
+0
+
+query I
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}',
+  regions:=[]::STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[]);
+----
+0
+
+query I
+SELECT count(POS) FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}',
+  regions:=[]::STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[]);
+----
+0
+
+# NULL and omitted regions retain the existing full scan.
+query I
+SELECT count(*) FROM read_geno('__WORKING_DIRECTORY__/test/data/${name}',
+  regions:=NULL::STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[]);
+----
+9
+
+query I
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}',
+  regions:=NULL::STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[]);
+----
+9
+
+query I
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}');
+----
+9
+
+# Names are literal: no region-expression parsing, no INFO/coordinate suffixes.
+query TI
+SELECT CHROM, POS FROM read_geno('__WORKING_DIRECTORY__/test/data/${name}',
+  regions:=[{'chrom':'chr1:2','start':0,'end':100},{'chrom':'HLA-A*01:01','start':0,'end':100}])
+ORDER BY record_index;
+----
+HLA-A*01:01	10
+chr1:2	10
+
+query TI
+SELECT CHROM, POS FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}',
+  regions:=[{'chrom':'chr1:2','start':9,'end':10}]);
+----
+chr1:2	10
+
+# 'chr1:2' is not the region chr1:2-2, and 'chr1:100-200' style text is not parsed.
+query I
+SELECT count(*) FROM read_geno('__WORKING_DIRECTORY__/test/data/${name}',
+  regions:=[{'chrom':'chr1:100-100','start':0,'end':1000},{'chrom':'chr1:','start':0,'end':10},{'chrom':'*','start':0,'end':10},{'chrom':'.','start':0,'end':10}]);
+----
+0
+
+# Unknown contigs, header-only contigs and the empty string select no records
+# (the same as a region string naming a contig absent from the header).
+query I
+SELECT count(*) FROM read_geno('__WORKING_DIRECTORY__/test/data/${name}',
+  regions:=[{'chrom':'chrUnknown','start':0,'end':1000},{'chrom':'chr3','start':0,'end':1000},{'chrom':'','start':0,'end':1000}]);
+----
+0
+
+query I
+SELECT count(*) FROM read_geno('__WORKING_DIRECTORY__/test/data/${name}',
+  regions:=[{'chrom':'chrUnknown','start':0,'end':1000},{'chrom':'chr2','start':99,'end':100}]);
+----
+1
+
+# The largest representable end and a start beyond the last record are valid.
+query I
+SELECT count(*) FROM read_geno('__WORKING_DIRECTORY__/test/data/${name}',
+  regions:=[{'chrom':'chr1','start':0,'end':9223372036854775807}]);
+----
+5
+
+query I
+SELECT count(*) FROM read_geno('__WORKING_DIRECTORY__/test/data/${name}',
+  regions:=[{'chrom':'chr1','start':90000,'end':9223372036854775807}]);
+----
+0
+
+# Sample selection and projection are unchanged by typed regions. Values are
+# checked against bcftools query on the fixture (GP Number=G, DS Number=A, HS).
+query IIIIT
+SELECT record_index, POS, c.sample_index, c.phase_set,
+  c.alleles::VARCHAR||'|'||c.phase_before::VARCHAR||'|'||c.format.GP::VARCHAR||'|'||c.format.DS::VARCHAR||'|'||c.format.HS::VARCHAR
+FROM read_geno('__WORKING_DIRECTORY__/test/data/${name}',
+  regions:=[{'chrom':'chr1','start':99,'end':100},{'chrom':'chr2','start':49,'end':50}],
+  samples:='S3,S1', format_fields:=['GP','DS','HS']), unnest(calls) u(c)
+WHERE record_index IN (0, 2)
+ORDER BY record_index, c.sample_index;
+----
+0	100	0	NULL	[0, 1]|[true, true]|[0.1, 0.8, 0.05, 0.02, 0.02, 0.01]|[0.9, 0.06]|[1, 2, 3, 4]
+0	100	2	NULL	[NULL, NULL]|[false, false]|[NULL]|[NULL]|[NULL, NULL, NULL, NULL]
+2	50	0	50	[0, 1]|[true, true]|[0.1, 0.8, 0.05, 0.02, 0.02, 0.01]|[0.9, 0.06]|[1, 2, 3, 4]
+2	50	2	50	[2, 0]|[true, true]|[0.2, 0.1, 0.1, 0.3, 0.2, 0.1]|[0.4, 0.7]|[1, 1, 2, 2]
+
+query TIT
+SELECT CHROM, POS, FORMAT_GP_S2::VARCHAR
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}', regions:=[{'chrom':'chr1','start':299,'end':300}]);
+----
+chr1	300	[0.2, 0.1, 0.1, 0.3, 0.2, 0.1]
+
+query IT
+SELECT POS, ALT::VARCHAR FROM read_bcf('__WORKING_DIRECTORY__/test/data/${name}',
+  regions:=[{'chrom':'chr1','start':299,'end':300}]);
+----
+300	[T, T]
+
+query I
+SELECT count(*) FROM read_geno('__WORKING_DIRECTORY__/test/data/${name}', samples:='',
+  regions:=[{'chrom':'chr1','start':99,'end':100}]);
+----
+2
+
+# A variable computed on this connection supplies the same plan.
+statement ok
+SET VARIABLE geno_sites_plan = (SELECT list({'chrom': chrom, 'start': pos - 1, 'end': pos} ORDER BY chrom, pos)
+  FROM (VALUES ('chr1', 200), ('chr1', 200), ('chr2', 50)) t(chrom, pos));
+
+query IT
+SELECT POS, REF FROM read_geno('__WORKING_DIRECTORY__/test/data/${name}',
+  regions:=getvariable('geno_sites_plan')) ORDER BY record_index;
+----
+200	T
+50	C
+
+endloop
+
+# Exactly one selector, an index, and a non-sequential scan are required.
+statement error
+SELECT * FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_sites.bcf', region:='chr1',
+  regions:=[{'chrom':'chr1','start':0,'end':10}]);
+----
+region and regions are mutually exclusive
+
+statement error
+SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/geno_sites.bcf', region:='',
+  regions:=[]::STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[]);
+----
+region and regions are mutually exclusive
+
+statement error
+SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/geno_sites.bcf', region:='chr1',
+  regions:=[{'chrom':'chr1','start':0,'end':10}]);
+----
+region and regions are mutually exclusive
+
+statement error
+SELECT * FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_ps_type.bcf',
+  regions:=[{'chrom':'chrG','start':0,'end':100}]);
+----
+regions query requires an index
+
+statement error
+SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/geno_ps_type.bcf',
+  regions:=[]::STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[]);
+----
+regions query requires an index
+
+statement error
+SELECT * FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_sites.vcf', regions:=[{'chrom':'chr1','start':0,'end':10}]);
+----
+regions query requires an index
+
+statement error
+SELECT * FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_sites.bcf', scan_mode:='sequential',
+  regions:=[{'chrom':'chr1','start':0,'end':10}]);
+----
+incompatible with regions
+
+statement error
+SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/geno_sites.bcf', scan_mode:='sequential',
+  regions:=[{'chrom':'chr1','start':0,'end':10}]);
+----
+incompatible with regions
+
+# An explicit index path is honoured by typed regions.
+query I
+SELECT count(*) FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_sites.vcf.gz',
+  index_path:='__WORKING_DIRECTORY__/test/data/geno_sites.vcf.gz.tbi',
+  regions:=[{'chrom':'chr1','start':199,'end':200}]);
+----
+1
+
+# Invalid intervals are explicit errors for both readers.
+foreach reader read_geno read_bcf
+
+statement error
+SELECT * FROM ${reader}('__WORKING_DIRECTORY__/test/data/geno_sites.bcf', regions:=[{'chrom':NULL,'start':0,'end':10}]);
+----
+NULL chrom, start or end
+
+statement error
+SELECT * FROM ${reader}('__WORKING_DIRECTORY__/test/data/geno_sites.bcf', regions:=[{'chrom':'chr1','start':NULL,'end':10}]);
+----
+NULL chrom, start or end
+
+statement error
+SELECT * FROM ${reader}('__WORKING_DIRECTORY__/test/data/geno_sites.bcf', regions:=[{'chrom':'chr1','start':0,'end':NULL}]);
+----
+NULL chrom, start or end
+
+statement error
+SELECT * FROM ${reader}('__WORKING_DIRECTORY__/test/data/geno_sites.bcf', regions:=[NULL::STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)]);
+----
+interval 1 is NULL
+
+statement error
+SELECT * FROM ${reader}('__WORKING_DIRECTORY__/test/data/geno_sites.bcf', regions:=[{'chrom':'chr1','start':-1,'end':10}]);
+----
+negative start
+
+statement error
+SELECT * FROM ${reader}('__WORKING_DIRECTORY__/test/data/geno_sites.bcf', regions:=[{'chrom':'chr1','start':5,'end':5}]);
+----
+end <= start
+
+statement error
+SELECT * FROM ${reader}('__WORKING_DIRECTORY__/test/data/geno_sites.bcf',
+  regions:=[{'chrom':'chr1','start':1,'end':2},{'chrom':'chr1','start':10,'end':3}]);
+----
+interval 2 has end <= start
+
+# Caps: 1,000,000 intervals and 128 MiB of native payload.
+statement error
+SELECT count(*) FROM ${reader}('__WORKING_DIRECTORY__/test/data/geno_sites.bcf',
+  regions:=list_transform(range(1000001), lambda x: {'chrom':'chr1','start':x,'end':x+1}));
+----
+cap of 1000000 intervals
+
+statement error
+SELECT count(*) FROM ${reader}('__WORKING_DIRECTORY__/test/data/geno_sites.bcf',
+  regions:=[{'chrom':repeat('x', 134217728),'start':0,'end':1}]);
+----
+cap of 128 MiB
+
+endloop
+
+# The cap counts intervals supplied, not intervals left after coalescing.
+query I
+SELECT count(*) FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_sites.bcf',
+  regions:=list_transform(range(1000000), lambda x: {'chrom':'chr1','start':x,'end':x+1}));
+----
+5
+
+# Exact-allele fetch. Requests keep identity; positions are only I/O planning.
+# Expected statuses were derived independently: bcftools query on the fixture.
+statement ok
+CREATE OR REPLACE TEMP TABLE geno_site_requests AS SELECT * FROM (VALUES
+ (1,'GRCh38','chr1',100,'A','C'),(2,'GRCh38','chr1',100,'A','G'),(3,'GRCh38','chr1',100,'A','T'),
+ (4,'GRCh38','chr1',100,'C','G'),(5,'GRCh38','chr1',300,'G','T'),(6,'GRCh38','chr1',502,'TA','T'),
+ (7,'GRCh38','chr1',501,'AT','A'),(8,'GRCh38','chr2',100,'G','C'),(9,'GRCh38','HLA-A*01:01',10,'A','G'),
+ (10,'GRCh38','chrUnknown',5,'A','C'),(11,'GRCh38','chr1',100,'A','C'),(12,'GRCh38','chr1:2',10,'C','T'),
+ (13,'GRCh38','chr2',50,'C','T')
+) t(request_id,build,chrom,pos,ref,alt);
+
+statement ok
+SET VARIABLE geno_site_plan = (SELECT coalesce(list({'chrom':chrom,'start':pos-1,'end':pos}),
+  []::STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[]) FROM (SELECT DISTINCT chrom, pos FROM geno_site_requests));
+
+foreach name geno_sites.vcf.gz geno_sites.bcf
+
+query ITIITIT
+WITH alleles AS (
+  SELECT record_index, CHROM, POS, REF, ALT AS full_alt, calls,
+         unnest(slots) AS match_alt, generate_subscripts(slots, 1) AS alt_index
+  FROM (SELECT *, CASE WHEN len(ALT) = 0 THEN [NULL::VARCHAR] ELSE ALT END AS slots
+        FROM read_geno('__WORKING_DIRECTORY__/test/data/${name}', regions := getvariable('geno_site_plan'),
+                       non_reference_only := false, format_fields := ['GP','DS','HS']))
+), joined AS (
+  SELECT s.*, a.record_index, a.full_alt, a.alt_index, a.calls,
+         a.CHROM IS NOT NULL AS at_pos, a.REF = s.ref AS ref_ok,
+         a.REF = s.ref AND a.match_alt = s.alt AS is_match
+  FROM geno_site_requests s LEFT JOIN alleles a ON s.chrom = a.CHROM AND s.pos = a.POS
+), flagged AS (
+  SELECT *, coalesce(bool_or(is_match) OVER w, false) AS any_match,
+         coalesce(bool_or(ref_ok) OVER w, false) AS any_ref,
+         row_number() OVER (w ORDER BY record_index, alt_index) AS rn
+  FROM joined WINDOW w AS (PARTITION BY request_id)
+)
+SELECT request_id, chrom, pos,
+  CASE WHEN is_match THEN record_index END AS record_index,
+  CASE WHEN is_match THEN full_alt::VARCHAR END AS full_alt,
+  CASE WHEN is_match THEN alt_index END AS alt_index,
+  CASE WHEN is_match THEN 'matched' WHEN any_ref THEN 'allele_not_at_site'
+       WHEN at_pos THEN 'ref_mismatch' ELSE 'absent' END AS match_status
+FROM flagged WHERE coalesce(is_match, false) OR (NOT any_match AND rn = 1)
+ORDER BY request_id, record_index, alt_index;
+----
+1	chr1	100	0	[C, G]	1	matched
+1	chr1	100	1	[C, G]	1	matched
+2	chr1	100	0	[C, G]	2	matched
+2	chr1	100	1	[C, G]	2	matched
+3	chr1	100	NULL	NULL	NULL	allele_not_at_site
+4	chr1	100	NULL	NULL	NULL	ref_mismatch
+5	chr1	300	2	[T, T]	1	matched
+5	chr1	300	2	[T, T]	2	matched
+6	chr1	502	NULL	NULL	NULL	absent
+7	chr1	501	3	[A]	1	matched
+8	chr2	100	NULL	NULL	NULL	allele_not_at_site
+9	HLA-A*01:01	10	6	[G]	1	matched
+10	chrUnknown	5	NULL	NULL	NULL	absent
+11	chr1	100	0	[C, G]	1	matched
+11	chr1	100	1	[C, G]	1	matched
+12	chr1:2	10	7	[T]	1	matched
+13	chr2	50	4	[G, T]	2	matched
+
+endloop
+
+# Plan regression: equality on the expanded ALT ordinal keeps a hash join.
+# list_contains(ALT, alt) in the join condition planned a nested-loop join.
+query II
+EXPLAIN SELECT s.request_id, a.record_index, a.alt_index
+FROM geno_site_requests s
+LEFT JOIN (
+  SELECT record_index, CHROM, POS, REF, unnest(ALT) AS match_alt, generate_subscripts(ALT, 1) AS alt_index
+  FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_sites.bcf', regions := getvariable('geno_site_plan'),
+                 non_reference_only := false)
+) a ON s.chrom = a.CHROM AND s.pos = a.POS AND s.ref = a.REF AND s.alt = a.match_alt;
+----
+physical_plan	<REGEX>:.*HASH_JOIN.*
+
+query II
+EXPLAIN SELECT s.request_id, a.record_index, a.alt_index
+FROM geno_site_requests s
+LEFT JOIN (
+  SELECT record_index, CHROM, POS, REF, unnest(ALT) AS match_alt, generate_subscripts(ALT, 1) AS alt_index
+  FROM read_geno('__WORKING_DIRECTORY__/test/data/geno_sites.bcf', regions := getvariable('geno_site_plan'),
+                 non_reference_only := false)
+) a ON s.chrom = a.CHROM AND s.pos = a.POS AND s.ref = a.REF AND s.alt = a.match_alt;
+----
+physical_plan	<!REGEX>:.*BLOCKWISE_NL_JOIN.*
+
 query I
 SELECT 42;
 ----

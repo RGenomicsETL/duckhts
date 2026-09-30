@@ -56,6 +56,18 @@
 #' @param samples Optional HTSlib sample selector: `NULL` or `"-"` keeps all,
 #'   `""` keeps none, comma-separated names include samples, and a leading
 #'   `"^"` excludes them. Unknown names error; selected samples retain header order.
+#' @param regions_var Optional name of a session variable on `con` that holds
+#'   typed intervals, `STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[]`
+#'   with 0-based half-open coordinates (a VCF position `p` is `[p - 1, p)`).
+#'   The name is quoted into `regions := getvariable('<name>')`; create the
+#'   variable with `SET VARIABLE` on the same connection. A `NULL` variable
+#'   value keeps the ordinary scan, an empty list selects no records, and
+#'   `region` and `regions_var` are mutually exclusive. Typed regions need an
+#'   index and are incompatible with `scan_mode = "sequential"`. Chromosome
+#'   names are literal (not region expressions); overlapping and adjacent
+#'   intervals are merged natively. Limits: 1,000,000 intervals and 128 MiB.
+#'   Aggregate with `coalesce(list(...), []::STRUCT(...)[])`: `list()` over no
+#'   rows is `NULL`, which means the ordinary full scan.
 #'
 #' @return Invisible TRUE on success
 #'
@@ -82,13 +94,17 @@ rduckhts_bcf <- function(
   decompression_threads = 0,
   decode_error_policy = "null",
   overwrite = FALSE,
-  samples = NULL
+  samples = NULL,
+  regions_var = NULL
 ) {
   .duckhts_check_table_target(con, table_name, overwrite)
   params <- list()
   if (!is.null(samples)) params$samples <- sql_quote_string(con, samples)
   if (!is.null(region)) {
     params$region <- sql_quote_string(con, region)
+  }
+  if (!is.null(regions_var)) {
+    params$regions <- .duckhts_regions_expression(con, regions_var)
   }
   if (!is.null(index_path)) {
     params$index_path <- sql_quote_string(con, index_path)
@@ -1596,6 +1612,10 @@ rduckhts_gtf <- function(
 #' @param path Path to the GenBank flat file, optionally bgzipped
 #' @param attributes_map Logical. If \code{TRUE}, add a parsed
 #'   \code{MAP(VARCHAR, VARCHAR)} column alongside the raw attribute string
+#' @param attributes Character vector of qualifier keys to expose as VARCHAR
+#'   columns. Each equals \code{attributes_map[key]}, including comma-joined
+#'   repeated qualifiers and \code{NA} for an absent key, and is computed only
+#'   when the query selects it
 #' @param overwrite Logical. If TRUE, overwrites an existing table
 #'
 #' @return Invisible TRUE on success
@@ -1606,7 +1626,8 @@ rduckhts_genbank <- function(
   table_name = NULL,
   path,
   attributes_map = FALSE,
-  overwrite = FALSE
+  overwrite = FALSE,
+  attributes = NULL
 ) {
   .duckhts_check_table_target(con, table_name, overwrite)
   if (
@@ -1623,6 +1644,9 @@ rduckhts_genbank <- function(
   }
 
   params <- list()
+  if (!is.null(attributes)) {
+    params$attributes <- sql_varchar_list_literal(con, attributes, "attributes")
+  }
   if (attributes_map) {
     params$attributes_map <- "true"
   }

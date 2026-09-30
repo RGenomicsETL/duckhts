@@ -1,5 +1,18 @@
 # duckhtsbench 0.0.0.9001
 
+- register `ancestry_reference_grch38_parquet`, the keyed ancestry reference
+  lifted from GRCh37 with `duckdb_liftover` (registered chain and FASTAs), and
+  stage it with `duckhts_bench_stage_ancestry_grch38_parquet()`. Its receipt binds
+  the source, chain, FASTA and output SHA-256 values and the tool versions to the
+  input, mapped, rejected-by-reason, swapped, duplicate-destination and output
+  locus counts; a companion map retains each output locus's GRCh37 source.
+
+- stage the GRCh38 acceptance inputs with
+  `duckhts_bench_stage_ancestry_grch38_acceptance()`: GRCh37 phase-3 genotypes at
+  the panel loci by indexed `read_bcf(region := ...)` and panel-site CRAMs cut
+  from the registered 30x CRAMs, with a receipt of remote identities and output
+  hashes
+
 - register checksum-verified MANE and GENCODE GFF3 inputs and a pinned GFFBase
   wheel for the feature-database benchmark
 

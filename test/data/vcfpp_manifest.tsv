@@ -19,3 +19,4 @@ mapping	geno_format.vcf	Selected FORMAT values retain sample and allele ordinals
 spec	bcf_scalar_counts.vcf	Numeric scalar overflow, missing elements, list controls and per-record recovery
 mapping	geno_format_case.vcf	Case-sensitive FORMAT tag identity and case-insensitive DuckDB member collisions
 mapping	somalier_sites.vcf	Somalier sites import with lexical allele orientation, flipped AF, source-order independence and autosomal scope
+mapping	geno_sites.vcf	Exact-allele fetch: multi-ALT GP/DS/HS, duplicate record and ALT slots, phase, shifted deletion, hom-ref site and literal punctuated contigs

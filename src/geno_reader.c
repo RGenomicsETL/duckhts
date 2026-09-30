@@ -7,6 +7,7 @@ DUCKDB_EXTENSION_EXTERN
 #include "include/duckdb_alloc.h"
 #include "include/duckdb_list.h"
 #include "include/region_list.h"
+#include "include/regions_bind.h"
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,6 +37,9 @@ typedef struct {
     char *index_path;
     char **regions;
     unsigned int region_count;
+    duckhts_interval_plan_t plan; /* immutable typed intervals, when typed_regions */
+    int typed_regions;
+    int selector; /* region string or typed regions present, even if empty */
     duckhts_bcf_index_t index;
     duckhts_bcf_samples_t samples;
     duckhts_bcf_decode_policy_t policy;
@@ -70,6 +74,7 @@ static void geno_bind_destroy(void *data) {
     duckdb_free(bind->path);
     duckdb_free(bind->index_path);
     free(bind->regions);
+    duckhts_interval_plan_destroy(&bind->plan);
     duckhts_bcf_index_destroy(&bind->index);
     duckhts_bcf_samples_destroy(&bind->samples);
     for (int i = 0; i < bind->field_count; i++) duckdb_free(bind->fields[i].name);
@@ -250,8 +255,20 @@ static void geno_bind(duckdb_bind_info info, int catalog) {
             goto fail;
         }
         if (!duckhts_region_list_parse(region, &bind->regions, &bind->region_count, error, sizeof(error))) goto fail;
-        if (sequential && bind->region_count) {
-            snprintf(error, sizeof(error), "read_geno: scan_mode := 'sequential' is incompatible with region queries");
+        char regions_error[256];
+        if (!duckhts_regions_bind(info, &bind->plan, &bind->typed_regions,
+                                  regions_error, sizeof(regions_error))) {
+            snprintf(error, sizeof(error), "read_geno: %s", regions_error);
+            goto fail;
+        }
+        if (bind->typed_regions && region) {
+            snprintf(error, sizeof(error), "read_geno: region and regions are mutually exclusive");
+            goto fail;
+        }
+        bind->selector = bind->region_count > 0 || bind->typed_regions;
+        if (sequential && bind->selector) {
+            snprintf(error, sizeof(error), "read_geno: scan_mode := 'sequential' is incompatible with %s",
+                     bind->typed_regions ? "regions queries" : "region queries");
             goto fail;
         }
         value = duckdb_bind_get_named_parameter(info, "decompression_threads");
@@ -283,12 +300,14 @@ static void geno_bind(duckdb_bind_info info, int catalog) {
     if (!catalog && !geno_bind_format(info, bind, metadata.hdr, error, sizeof(error))) goto fail;
     /* A full scan always follows the input stream, independent of index
      * availability. Only explicit regions need an immutable index snapshot. */
-    if (bind->region_count) {
+    if (bind->selector) {
         int loaded = duckhts_bcf_index_load(&bind->index, hts_get_format(metadata.fp)->format,
                                             bind->path, bind->index_path, HTS_IDX_SILENT_FAIL);
         if (loaded <= 0) {
             snprintf(error, sizeof(error), "read_geno: %s", loaded < 0
-                ? "out of memory finalizing index" : "region query requires an index file (.tbi or .csi)");
+                ? "out of memory finalizing index" : bind->typed_regions
+                ? "regions query requires an index file (.tbi or .csi)"
+                : "region query requires an index file (.tbi or .csi)");
             goto fail;
         }
     }
@@ -359,7 +378,7 @@ static void geno_local_init(duckdb_init_info info) {
             local->format_count = bind->field_count;
         }
         if (!duckhts_bcf_scan_open(&local->scan, bind->path, &bind->index, bind->decompression_threads,
-                bind->region_count ? DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION : DUCKHTS_HTS_IO_PROFILE_STREAMING,
+                bind->selector ? DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION : DUCKHTS_HTS_IO_PROFILE_STREAMING,
                 "read_geno", error, sizeof(error)) ||
             !duckhts_bcf_samples_apply(&bind->samples, local->scan.hdr, error, sizeof(error))) goto fail;
         if (bind->raw_gt && hts_get_format(local->scan.fp)->format != vcf) {
@@ -378,7 +397,9 @@ static void geno_local_init(duckdb_init_info info) {
             snprintf(error, sizeof(error), "read_geno: out of memory allocating BCF/VCF record");
             goto fail;
         }
-        if (bind->region_count && !duckhts_bcf_scan_regions(&local->scan, bind->regions,
+        if (bind->typed_regions) {
+            if (!duckhts_bcf_scan_intervals(&local->scan, &bind->plan, error, sizeof(error))) goto fail;
+        } else if (bind->region_count && !duckhts_bcf_scan_regions(&local->scan, bind->regions,
                 bind->region_count, error, sizeof(error))) goto fail;
     }
     duckdb_init_set_init_data(info, local, geno_local_destroy);
@@ -582,6 +603,7 @@ void register_read_geno_functions(duckdb_connection connection) {
     duckdb_logical_type boolean = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
     duckdb_logical_type bigint = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
     duckdb_logical_type fields = duckdb_create_list_type(text);
+    duckdb_logical_type regions = duckhts_regions_parameter_type();
     for (int catalog = 0; catalog < 2; catalog++) {
         duckdb_table_function function = duckdb_create_table_function();
         duckdb_table_function_set_name(function, catalog ? "read_bcf_samples" : "read_geno");
@@ -597,6 +619,7 @@ void register_read_geno_functions(duckdb_connection connection) {
             duckdb_table_function_add_named_parameter(function, "raw_gt", boolean);
             duckdb_table_function_add_named_parameter(function, "include_filter", boolean);
             duckdb_table_function_add_named_parameter(function, "format_fields", fields);
+            duckdb_table_function_add_named_parameter(function, "regions", regions);
         }
         duckdb_table_function_set_bind(function, catalog ? geno_samples_bind : geno_read_bind);
         duckdb_table_function_set_init(function, geno_global_init);
@@ -610,4 +633,5 @@ void register_read_geno_functions(duckdb_connection connection) {
     duckdb_destroy_logical_type(&boolean);
     duckdb_destroy_logical_type(&bigint);
     duckdb_destroy_logical_type(&fields);
+    duckdb_destroy_logical_type(&regions);
 }

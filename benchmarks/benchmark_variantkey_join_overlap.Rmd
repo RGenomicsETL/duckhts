@@ -263,17 +263,16 @@ try(DBI::dbGetQuery(con, sprintf("SELECT duckhts_cgranges_destroy('%s') AS ok", 
 DBI::dbGetQuery(
   con,
   paste0(
-    "SELECT duckhts_cgranges_from_query(",
+    "SELECT * FROM duckhts_cgranges_from_table(",
     sql_string(idx_name), ", ",
-    sql_string('SELECT chrom, start, "end", label FROM ov_subject'), ", ",
+    sql_string("ov_subject"), ", ",
     sql_string("chrom"), ", ",
     sql_string("start"), ", ",
     sql_string("end"), ", ",
     sql_string("label"),
-    ") AS ok"
+    ")"
   )
 )
-DBI::dbGetQuery(con, sprintf("SELECT duckhts_cgranges_index('%s') AS ok", idx_name))
 ```
 
 ## Benchmark settings

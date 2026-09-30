@@ -1,6 +1,7 @@
 /* Canonical HTSlib transport and decode checks, independent of DuckDB/R. */
 #include "include/bcf_scan.h"
 #include "include/region_list.h"
+#include <htslib/bgzf.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -170,6 +171,7 @@ int duckhts_bcf_scan_regions(duckhts_bcf_scan_t *scan, char **regions,
     if (scan->itr) hts_itr_destroy(scan->itr);
     scan->itr = NULL;
     scan->indexed = 1;
+    scan->typed_tabix = 0;
     const duckhts_bcf_index_t *index = scan->index;
     if (!index || (!index->bcf && !index->tabix) || !regions || count == 0) {
         snprintf(error, error_size, "BCF scan requires an index and a nonempty region list");
@@ -197,11 +199,115 @@ int duckhts_bcf_scan_regions(duckhts_bcf_scan_t *scan, char **regions,
     return 1;
 }
 
+/* BGZF seek/tell adapters for hts_itr_regions (HTSlib's own are internal). */
+static int interval_seek(void *fp, int64_t offset, int whence) {
+    return bgzf_seek((BGZF *)fp, offset, whence);
+}
+
+static int64_t interval_tell(void *fp) {
+    return fp ? bgzf_tell((BGZF *)fp) : -1;
+}
+
+/* Multi-region tabix iterators receive this wrapper as the record argument. */
+typedef struct {
+    kstring_t *line;
+    tbx_t *tbx;
+} interval_tbx_record_t;
+
+static int interval_tbx_readrec(BGZF *fp, void *unused, void *record,
+                                int *tid, hts_pos_t *beg, hts_pos_t *end) {
+    (void)unused;
+    const interval_tbx_record_t *wrapped = record;
+    return tbx_readrec(fp, wrapped->tbx, wrapped->line, tid, beg, end);
+}
+
+int duckhts_bcf_scan_intervals(duckhts_bcf_scan_t *scan, const duckhts_interval_plan_t *plan,
+                              char *error, size_t error_size) {
+    if (scan->itr) hts_itr_destroy(scan->itr);
+    scan->itr = NULL;
+    scan->indexed = 1;
+    scan->typed_tabix = 0;
+    const duckhts_bcf_index_t *index = scan->index;
+    if (!index || (!index->bcf && !index->tabix)) {
+        snprintf(error, error_size, "BCF scan requires an index for typed interval queries");
+        return 0;
+    }
+    if (!plan || !plan->finished) {
+        snprintf(error, error_size, "BCF scan: typed interval plan is not finished");
+        return 0;
+    }
+    if (!plan->count) return 1;
+    /* Items are grouped by literal name; count resolvable groups first. */
+    unsigned int groups = 0;
+    int tid;
+    for (size_t i = 0; i < plan->count; i++) {
+        if (i && strcmp(plan->items[i].chrom, plan->items[i - 1].chrom) == 0) continue;
+        tid = index->bcf ? bcf_hdr_name2id(scan->hdr, plan->items[i].chrom)
+                         : tbx_name2id(index->tabix, plan->items[i].chrom);
+        if (tid >= 0) groups++;
+    }
+    if (!groups) return 1;
+    hts_reglist_t *list = calloc(groups, sizeof(*list));
+    if (!list) goto oom;
+    unsigned int used = 0;
+    for (size_t i = 0; i < plan->count;) {
+        size_t j = i;
+        while (j < plan->count && strcmp(plan->items[j].chrom, plan->items[i].chrom) == 0) j++;
+        tid = index->bcf ? bcf_hdr_name2id(scan->hdr, plan->items[i].chrom)
+                         : tbx_name2id(index->tabix, plan->items[i].chrom);
+        if (tid >= 0) {
+            size_t n = j - i;
+            hts_reglist_t *entry = &list[used];
+            if (n > UINT32_MAX) {
+                hts_reglist_free(list, (int)used);
+                snprintf(error, error_size, "BCF scan: too many intervals on one contig");
+                return 0;
+            }
+            entry->intervals = malloc(n * sizeof(*entry->intervals));
+            if (!entry->intervals) {
+                hts_reglist_free(list, (int)used);
+                goto oom;
+            }
+            for (size_t k = 0; k < n; k++) {
+                entry->intervals[k].beg = plan->items[i + k].start;
+                entry->intervals[k].end = plan->items[i + k].end;
+            }
+            entry->tid = tid;
+            entry->count = (uint32_t)n;
+            entry->min_beg = entry->intervals[0].beg;
+            entry->max_end = entry->intervals[n - 1].end;
+            used++;
+        }
+        i = j;
+    }
+    errno = 0;
+    /* On failure HTSlib leaves the list with us; on success the iterator owns it. */
+    if (index->bcf) {
+        scan->itr = hts_itr_regions(index->bcf, list, (int)used, NULL, NULL,
+                                    hts_itr_multi_bam, bcf_readrec, interval_seek, interval_tell);
+    } else {
+        scan->itr = hts_itr_regions(index->tabix->idx, list, (int)used, NULL, NULL,
+                                    hts_itr_multi_bam, interval_tbx_readrec,
+                                    interval_seek, interval_tell);
+        scan->typed_tabix = 1;
+    }
+    if (!scan->itr) {
+        hts_reglist_free(list, (int)used);
+        snprintf(error, error_size, "BCF scan: failed to create typed interval iterator");
+        return 0;
+    }
+    return 1;
+oom:
+    snprintf(error, error_size, "BCF scan: out of memory creating typed interval iterator");
+    return 0;
+}
+
 int duckhts_bcf_scan_contig(duckhts_bcf_scan_t *scan, const char *name,
                            char *error, size_t error_size) {
     if (scan->itr) hts_itr_destroy(scan->itr);
     scan->itr = NULL;
     scan->indexed = 1;
+    scan->typed_tabix = 0;
     const duckhts_bcf_index_t *index = scan->index;
     if (!index || (!index->bcf && !index->tabix)) {
         snprintf(error, error_size, "BCF scan requires an index for contig queries");
@@ -321,6 +427,11 @@ int duckhts_bcf_scan_next(duckhts_bcf_scan_t *scan, bcf1_t *record) {
         return ret < 0 ? ret : parse_vcf_record(scan, record);
     }
     if (!scan->itr) return -1;
+    if (scan->index->tabix && scan->typed_tabix) {
+        interval_tbx_record_t wrapped = {&scan->line, scan->index->tabix};
+        int ret = hts_itr_multi_next(scan->fp, scan->itr, &wrapped);
+        return ret < 0 ? ret : parse_vcf_record(scan, record);
+    }
     if (scan->index->tabix) {
         int ret = tbx_itr_next(scan->fp, scan->index->tabix, scan->itr, &scan->line);
         return ret < 0 ? ret : parse_vcf_record(scan, record);
