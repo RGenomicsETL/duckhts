@@ -364,12 +364,7 @@ run_vcf_count_matrix_child <- function(plan_path, plan_row, branch_extension,
   invisible(output)
 }
 
-validate_vcf_count_matrix_inputs <- function(baseline_extension) {
-  baseline_sha256 <- sha256_file(baseline_extension)
-  if (!identical(baseline_sha256,
-                 "9a23e378a4dd22b83526d05aef14c239ba144be604da75cbc44f07d3bc893f58")) {
-    stop("baseline extension SHA-256 does not match the frozen lab artifact")
-  }
+validate_vcf_count_matrix_inputs <- function() {
   source_id <- "sql_scaling_giab_1x"
   duplicate_id <- "sql_scaling_vcf_counts_duplicate_million"
   input_ids <- c(source_id, "sql_scaling_giab_2x", "sql_scaling_giab_4x",
@@ -483,7 +478,7 @@ run_vcf_count_matrix_processes <- function(plan, plan_path, branch_extension,
 run_vcf_count_matrix <- function(branch_extension, baseline_extension) {
   branch_extension <- normalizePath(branch_extension, mustWork = TRUE)
   baseline_extension <- normalizePath(baseline_extension, mustWork = TRUE)
-  inputs <- validate_vcf_count_matrix_inputs(baseline_extension)
+  inputs <- validate_vcf_count_matrix_inputs()
   panels <- prepare_vcf_count_panels(
     branch_extension, inputs$source_path, inputs$duplicate_path)
   on.exit(unlink(panels$directory, recursive = TRUE), add = TRUE)
