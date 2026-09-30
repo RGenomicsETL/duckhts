@@ -1,9 +1,9 @@
 # Extract Panel-Aligned Counts from VCF or BCF
 
 Produce the complete sample-by-panel count relation consumed by the
-Somalier-derived relatedness and contamination functions. \`FORMAT/AD\`
-must declare \`Number=R,Type=Integer\`; A and B slots are matched by
-exact REF/ALT identity, and \`other\` sums only the remaining
+Somalier-derived relatedness, contamination and sex functions.
+\`FORMAT/AD\` must declare \`Number=R,Type=Integer\`; A and B slots are
+matched by exact REF/ALT identity, and \`other\` sums only the remaining
 declared-allele slots. Missing sites and unavailable AD remain rows with
 three NULL counts, distinct from measured zero depth. The panel can be
 any typed table/view or ordinary Parquet file with the canonical six
@@ -51,7 +51,8 @@ rduckhts_somalier_vcf_counts(
 
   Record FILTER policy: \`"pass_or_unapplied"\` makes named failures
   unavailable, \`"include_all"\` uses their AD, and \`"error"\` rejects
-  a selected panel record with a named failure.
+  a selected panel record with a named failure. X/Y sites ignore the
+  policy and always use their AD, as Somalier extraction does.
 
 - table_name:
 

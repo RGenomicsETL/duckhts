@@ -19,7 +19,7 @@ PS cardinality excludes vector-end padding retained after sample selection."></h
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9006-0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9007-0.1.5</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -72,7 +72,8 @@ PS cardinality excludes vector-end padding retained after sample selection.</p>
 <span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  format_fields <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  raw_gt <span class="op">=</span> <span class="cn">FALSE</span>,</span>
-<span>  include_filter <span class="op">=</span> <span class="cn">FALSE</span></span>
+<span>  include_filter <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  regions_var <span class="op">=</span> <span class="cn">NULL</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -162,6 +163,14 @@ errors because its encoded genotypes do not retain the original text.</p></dd>
 column. `PASS` is `c("PASS")`; an unapplied `.` filter is `NULL`; named
 failing filters retain header order. The default keeps the existing schema.</p></dd>
 
+
+<dt id="arg-regions-var">regions_var<a class="anchor" aria-label="anchor" href="#arg-regions-var"></a></dt>
+<dd><p>Optional name of a session variable on `con` holding typed
+intervals, `STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[]`, with
+0-based half-open coordinates. See [rduckhts_bcf()] for the contract; the
+same rules apply. [rduckhts_geno_sites()] prepares such a plan from
+requested sites and joins exact alleles.</p></dd>
+
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
@@ -176,7 +185,7 @@ Empty sample selection and sparse calls preserve every selected variant row.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
-    <div class="dont-index"><p>[rduckhts_bcf_samples()]</p></div>
+    <div class="dont-index"><p>[rduckhts_bcf_samples()], [rduckhts_geno_sites()]</p></div>
     </div>
 
     <div class="section level2">

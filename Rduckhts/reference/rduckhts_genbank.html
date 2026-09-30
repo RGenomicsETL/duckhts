@@ -29,7 +29,7 @@ naming the feature and line."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9006-0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9007-0.1.5</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -78,7 +78,8 @@ naming the feature and line.</p>
 <span>  table_name <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  <span class="va">path</span>,</span>
 <span>  attributes_map <span class="op">=</span> <span class="cn">FALSE</span>,</span>
-<span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span></span>
+<span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  attributes <span class="op">=</span> <span class="cn">NULL</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -106,6 +107,13 @@ naming the feature and line.</p>
 
 <dt id="arg-overwrite">overwrite<a class="anchor" aria-label="anchor" href="#arg-overwrite"></a></dt>
 <dd><p>Logical. If TRUE, overwrites an existing table</p></dd>
+
+
+<dt id="arg-attributes">attributes<a class="anchor" aria-label="anchor" href="#arg-attributes"></a></dt>
+<dd><p>Character vector of qualifier keys to expose as VARCHAR
+columns. Each equals <code>attributes_map[key]</code>, including comma-joined
+repeated qualifiers and <code>NA</code> for an absent key, and is computed only
+when the query selects it</p></dd>
 
 </dl></div>
     <div class="section level2">

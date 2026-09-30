@@ -19,7 +19,8 @@ rduckhts_bcf(
   decompression_threads = 0,
   decode_error_policy = "null",
   overwrite = FALSE,
-  samples = NULL
+  samples = NULL,
+  regions_var = NULL
 )
 ```
 
@@ -87,6 +88,22 @@ rduckhts_bcf(
   keeps none, comma-separated names include samples, and a leading
   \`"^"\` excludes them. Unknown names error; selected samples retain
   header order.
+
+- regions_var:
+
+  Optional name of a session variable on \`con\` that holds typed
+  intervals, \`STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)\[\]\`
+  with 0-based half-open coordinates (a VCF position \`p\` is \`\[p - 1,
+  p)\`). The name is quoted into \`regions := getvariable('\<name\>')\`;
+  create the variable with \`SET VARIABLE\` on the same connection. A
+  \`NULL\` variable value keeps the ordinary scan, an empty list selects
+  no records, and \`region\` and \`regions_var\` are mutually exclusive.
+  Typed regions need an index and are incompatible with \`scan_mode =
+  "sequential"\`. Chromosome names are literal (not region expressions);
+  overlapping and adjacent intervals are merged natively. Limits:
+  1,000,000 intervals and 128 MiB. Aggregate with \`coalesce(list(...),
+  \[\]::STRUCT(...)\[\])\`: \`list()\` over no rows is \`NULL\`, which
+  means the ordinary full scan.
 
 ## Value
 

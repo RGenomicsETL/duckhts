@@ -46,7 +46,7 @@ rduckhts_ancestry_bam(
 
 - panel_table:
 
-  Committed panel relation with canonical site identity.
+  Panel relation with canonical site identity.
 
 - reference_table:
 

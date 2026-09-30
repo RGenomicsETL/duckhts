@@ -8,12 +8,11 @@ DuckDB-scheduled panel shards; the connection's thread setting bounds
 how many can run concurrently. \`decompression_threads\` separately
 controls htslib decompression workers per source handle. Valid uncovered
 sites are measured zero depth; reference or alignment-header mismatches
-remain rows with NULL counts and a named status. The panel can be a
-committed table/view or an ordinary Parquet file. Caller-local temporary
-relations and uncommitted changes are not visible during panel
-preparation. One retained-connection preparation slot is shared by
-concurrent calls; nested or concurrent preparation errors and callers
-may retry.
+remain rows with NULL counts and a named status. The native function
+reads the panel from a local Parquet file on a private in-memory
+instance. A panel table or view is therefore written to a scratch
+Parquet file for the call, which also makes caller-local temporary
+relations and uncommitted rows visible.
 
 ## Usage
 
@@ -66,11 +65,11 @@ rduckhts_somalier_bam_counts(
 
 - panel_table:
 
-  Name of a committed ordered panel table or view.
+  Name of an ordered panel table or view visible to \`con\`.
 
 - panel_parquet:
 
-  Ordinary panel Parquet path, instead of \`panel_table\`.
+  Local ordinary panel Parquet path, instead of \`panel_table\`.
 
 - index_path:
 

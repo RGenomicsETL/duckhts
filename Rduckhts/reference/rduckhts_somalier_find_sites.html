@@ -19,7 +19,7 @@ relation has `chrom`, `pos`, `ref`, `alt` in one-based VCF coordinates."></head>
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9006-0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9007-0.1.5</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -165,8 +165,8 @@ and allele order with `tie_order = "lexical"`. For a table or view, scan order
 is only reliable when its query explicitly orders the records. Only
 uppercase A/C/G/T biallelic SNVs enter the canonical panel. `generic` does
 not interpret contig names as human sex chromosomes. The result can include
-X/Y, whereas `duckhts_somalier_import_sites()` admits autosomes only;
-filter `region` for autosome-only consumers. Gnotate zip input is not
+X/Y, which `duckhts_somalier_import_sites()` keeps as sex-chromosome sites
+for `rduckhts_somalier_sex()`. Gnotate zip input is not
 supported: use an allele-specific exclusion relation. `assembly` labels
 the input coordinates; this function does not run the liftover steps in
 Somalier's `scripts/find_sites.sh`.</p>

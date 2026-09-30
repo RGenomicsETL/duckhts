@@ -22,7 +22,7 @@
 
     <a class="navbar-brand me-2" href="index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9006-0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9007-0.1.5</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -436,10 +436,10 @@ Show generated function catalog
 </h3>
 <table class="table">
 <colgroup>
-<col width="46%">
-<col width="8%">
+<col width="48%">
+<col width="3%">
 <col width="5%">
-<col width="40%">
+<col width="42%">
 </colgroup>
 <thead><tr class="header">
 <th>Function</th>
@@ -449,7 +449,7 @@ Show generated function catalog
 </tr></thead>
 <tbody><tr class="odd">
 <td><a href="inst/function_catalog/reference.html#duckhts_macro_definitions"><code>duckhts_macro_definitions</code></a></td>
-<td>table_function</td>
+<td>table</td>
 <td></td>
 <td>Export the ordered DuckHTS macro definitions for connection-local installation.</td>
 </tr></tbody>
@@ -775,7 +775,7 @@ Show generated function catalog
 <table class="table">
 <colgroup>
 <col width="19%">
-<col width="1%">
+<col width="2%">
 <col width="1%">
 <col width="76%">
 </colgroup>
@@ -811,46 +811,34 @@ Show generated function catalog
 <td>Destroy a session-scoped cgranges registry entry and release its indexed interval storage when it is not in active use.</td>
 </tr>
 <tr class="odd">
-<td><a href="inst/function_catalog/reference.html#duckhts_cgranges_from_query"><code>duckhts_cgranges_from_query</code></a></td>
-<td>scalar</td>
+<td><a href="inst/function_catalog/reference.html#duckhts_cgranges_from_table"><code>duckhts_cgranges_from_table</code></a></td>
+<td>table_macro</td>
 <td></td>
-<td>Execute a SQL query on an extension-owned DuckDB connection, append its interval rows into a session-scoped cgranges registry entry, and leave the populated index ready for explicit finalization with duckhts_cgranges_index(…).</td>
+<td>Create, populate and finalize a session-scoped cgranges registry entry from the rows of a table or view, on the caller’s connection.</td>
 </tr>
 <tr class="even">
-<td><a href="inst/function_catalog/reference.html#duckhts_cgranges_from_table"><code>duckhts_cgranges_from_table</code></a></td>
-<td>scalar</td>
-<td></td>
-<td>Reserved convenience constructor for bulk cgranges population from a table name. The current implementation is intentionally deferred and directs callers to duckhts_cgranges_from_query(…).</td>
-</tr>
-<tr class="odd">
 <td><a href="inst/function_catalog/reference.html#duckhts_cgranges_has_overlap"><code>duckhts_cgranges_has_overlap</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Vectorized scalar predicate for streaming provider rows through a finalized session-scoped cgranges index. Returns TRUE when the query interval overlaps at least one indexed interval, or when mode = ‘contain’ and it fully contains at least one indexed interval; NULL inputs return NULL.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><a href="inst/function_catalog/reference.html#duckhts_cgranges_count_overlaps"><code>duckhts_cgranges_count_overlaps</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Vectorized scalar overlap counter for streaming provider rows through a finalized session-scoped cgranges index. Returns the number of indexed intervals that overlap the query interval, or with mode = ‘contain’ the number fully contained by it; NULL inputs return NULL.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><a href="inst/function_catalog/reference.html#duckhts_cgranges_overlaps_list"><code>duckhts_cgranges_overlaps_list</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Vectorized scalar overlap expander for streaming provider rows through a finalized session-scoped cgranges index. Returns a LIST of hit STRUCTs that can be expanded with UNNEST, preserving provider columns while emitting one row per matching indexed interval. Because scalar return types are fixed, labels are returned as text with label_type describing the original cgranges label kind; NULL inputs return NULL.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><a href="inst/function_catalog/reference.html#duckhts_cgranges_overlaps"><code>duckhts_cgranges_overlaps</code></a></td>
 <td>table</td>
 <td></td>
 <td>Query a finalized session-scoped cgranges registry entry and return one row per overlapping or containing indexed interval, preserving the original label type and interval coordinates.</td>
-</tr>
-<tr class="odd">
-<td><a href="inst/function_catalog/reference.html#duckhts_cgranges_overlaps_bulk"><code>duckhts_cgranges_overlaps_bulk</code></a></td>
-<td>table</td>
-<td></td>
-<td>Run a SQL query that yields overlap probes, stream those rows through a finalized session-scoped cgranges registry entry, and return one row per matching indexed interval. The probe query runs on the extension-owned helper connection, so it must reference regular tables/views rather than connection-local temp tables. When query_row_id_col is omitted, query_row_id defaults to the 1-based probe row ordinal.</td>
 </tr>
 <tr class="even">
 <td><a href="inst/function_catalog/reference.html#regionkey"><code>regionkey</code></a></td>
@@ -968,10 +956,10 @@ Show generated function catalog
 </h3>
 <table class="table">
 <colgroup>
-<col width="41%">
+<col width="37%">
 <col width="4%">
-<col width="15%">
-<col width="38%">
+<col width="13%">
+<col width="44%">
 </colgroup>
 <thead><tr class="header">
 <th>Function</th>
@@ -990,7 +978,7 @@ Show generated function catalog
 <td><a href="inst/function_catalog/reference.html#duckhts_somalier_import_sites"><code>duckhts_somalier_import_sites</code></a></td>
 <td>table_macro</td>
 <td><code>rduckhts_somalier_import_sites</code></td>
-<td>Import an already selected Somalier sites VCF/BCF as one canonical panel and population-frequency relation.</td>
+<td>Import an already selected Somalier sites VCF/BCF as one canonical panel and population-frequency relation, autosomal and X/Y sites together.</td>
 </tr>
 <tr class="odd">
 <td><a href="inst/function_catalog/reference.html#duckhts_somalier_vcf_counts"><code>duckhts_somalier_vcf_counts</code></a></td>
@@ -1063,6 +1051,12 @@ Show generated function catalog
 <td>table_macro</td>
 <td><code>rduckhts_somalier_matched_contamination</code></td>
 <td>Estimate directional contamination for explicitly selected receiver/anchor sample pairs.</td>
+</tr>
+<tr class="odd">
+<td><a href="inst/function_catalog/reference.html#duckhts_somalier_sex"><code>duckhts_somalier_sex</code></a></td>
+<td>table_macro</td>
+<td><code>rduckhts_somalier_sex</code></td>
+<td>Report X/Y dosage evidence and a review-only XX, XY or ambiguous call per sample from panel counts.</td>
 </tr>
 </tbody>
 </table>
@@ -1745,7 +1739,7 @@ Show generated function catalog
 <div class="section level3">
 <h3 id="cgranges-registry-entry-points">cgranges registry entry points<a class="anchor" aria-label="anchor" href="#cgranges-registry-entry-points"></a>
 </h3>
-<p>The bundled extension also exposes SQL-first <code>duckhts_cgranges_*</code> entry points. These are session-scoped interval indexes that you can populate either row-wise or in bulk from a SQL query, then query through <code>duckhts_cgranges_overlaps(...)</code>. For row-preserving filters or count annotations over provider rows, use the vectorized scalar helpers <code>duckhts_cgranges_has_overlap(...)</code> and <code>duckhts_cgranges_count_overlaps(...)</code> directly in queries over <code>read_bed(...)</code>, <code>read_bam(...)</code>, <code>read_bcf(...)</code>, or regular tables. For streaming one-row-per-hit expansion while keeping provider columns, use <code>duckhts_cgranges_overlaps_list(...)</code> with <code>UNNEST(...)</code>. The older <code>duckhts_cgranges_overlaps_bulk(...)</code> table function still accepts a probe query and emits matching indexed intervals in one table-function call; that bulk query runs on the extension-owned helper connection, so use a regular table or view rather than a temp table. There is no dedicated R wrapper yet, so use them through <code>DBI</code>.</p>
+<p>The bundled extension also exposes SQL-first <code>duckhts_cgranges_*</code> entry points. These are session-scoped interval indexes that you can populate either row-wise or in bulk from a table or view with <code>duckhts_cgranges_from_table(...)</code>, which runs on your connection and so also sees TEMP objects, then query through <code>duckhts_cgranges_overlaps(...)</code>. For row-preserving filters or count annotations over provider rows, use the vectorized scalar helpers <code>duckhts_cgranges_has_overlap(...)</code> and <code>duckhts_cgranges_count_overlaps(...)</code> directly in queries over <code>read_bed(...)</code>, <code>read_bam(...)</code>, <code>read_bcf(...)</code>, or regular tables. For streaming one-row-per-hit expansion while keeping provider columns, use <code>duckhts_cgranges_overlaps_list(...)</code> with <code>UNNEST(...)</code> in the SELECT list, which also covers bulk probing of any relation. There is no dedicated R wrapper yet, so use them through <code>DBI</code>.</p>
 <div class="sourceCode" id="cb19"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu">DBI</span><span class="fu">::</span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT duckhts_cgranges_create('readme_idx') AS ok"</span><span class="op">)</span></span>
 <span><span class="co">#&gt;     ok</span></span>
@@ -1769,21 +1763,24 @@ Show generated function catalog
 <span><span class="co">#&gt;   interval_ordinal label interval_chrom interval_start interval_end</span></span>
 <span><span class="co">#&gt; 1                1     b           chr1             30           40</span></span>
 <span></span>
+<span><span class="fu">DBI</span><span class="fu">::</span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbExecute.html" class="external-link">dbExecute</a></span><span class="op">(</span></span>
+<span>  <span class="va">con</span>,</span>
+<span>  <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste</a></span><span class="op">(</span></span>
+<span>    <span class="st">"CREATE TEMP VIEW readme_targets AS SELECT * FROM (VALUES"</span>,</span>
+<span>    <span class="st">"('chr2', 100, 110, 'alpha'), ('chr2', 150, 170, 'beta')"</span>,</span>
+<span>    <span class="st">") AS t(chrom, start, \"end\", label)"</span></span>
+<span>  <span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] 0</span></span>
 <span><span class="fu">DBI</span><span class="fu">::</span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>,</span>
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste</a></span><span class="op">(</span></span>
-<span>    <span class="st">"SELECT duckhts_cgranges_from_query("</span>,</span>
-<span>    <span class="st">"  'readme_qry_idx',"</span>,</span>
-<span>    <span class="st">"  'SELECT * FROM (VALUES (''chr2'', 100, 110, ''alpha''), (''chr2'', 150, 170, ''beta'')) AS t(chrom, start, \"end\", label)',"</span>,</span>
-<span>    <span class="st">"  'chrom', 'start', 'end', 'label'"</span>,</span>
-<span>    <span class="st">") AS ok"</span></span>
+<span>    <span class="st">"SELECT * FROM duckhts_cgranges_from_table("</span>,</span>
+<span>    <span class="st">"'readme_qry_idx', 'readme_targets', 'chrom', 'start', 'end', 'label')"</span></span>
 <span>  <span class="op">)</span></span>
 <span><span class="op">)</span></span>
-<span><span class="co">#&gt;     ok</span></span>
-<span><span class="co">#&gt; 1 TRUE</span></span>
-<span><span class="fu">DBI</span><span class="fu">::</span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT duckhts_cgranges_index('readme_qry_idx') AS ok"</span><span class="op">)</span></span>
-<span><span class="co">#&gt;     ok</span></span>
-<span><span class="co">#&gt; 1 TRUE</span></span>
+<span><span class="co">#&gt;   indexed</span></span>
+<span><span class="co">#&gt; 1    TRUE</span></span>
 <span><span class="fu">DBI</span><span class="fu">::</span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>,</span>
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste</a></span><span class="op">(</span></span>
@@ -1807,37 +1804,19 @@ Show generated function catalog
 <span><span class="fu">DBI</span><span class="fu">::</span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span></span>
 <span>  <span class="va">con</span>,</span>
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste</a></span><span class="op">(</span></span>
-<span>    <span class="st">"SELECT p.probe_id, hit.interval_ordinal, hit.label, hit.label_type,"</span>,</span>
+<span>    <span class="st">"SELECT probe_id, hit.interval_ordinal, hit.label, hit.label_type,"</span>,</span>
 <span>    <span class="st">"  hit.interval_chrom, hit.interval_start, hit.interval_end"</span>,</span>
-<span>    <span class="st">"FROM readme_probes AS p"</span>,</span>
-<span>    <span class="st">"CROSS JOIN UNNEST("</span>,</span>
-<span>    <span class="st">"  duckhts_cgranges_overlaps_list('readme_qry_idx', p.chrom, p.start, p.\"end\")"</span>,</span>
-<span>    <span class="st">") AS u(hit)"</span>,</span>
-<span>    <span class="st">"ORDER BY p.probe_id, hit.interval_ordinal"</span></span>
+<span>    <span class="st">"FROM ("</span>,</span>
+<span>    <span class="st">"  SELECT p.probe_id,"</span>,</span>
+<span>    <span class="st">"    unnest(duckhts_cgranges_overlaps_list('readme_qry_idx', p.chrom, p.start, p.\"end\")) AS hit"</span>,</span>
+<span>    <span class="st">"  FROM readme_probes AS p"</span>,</span>
+<span>    <span class="st">")"</span>,</span>
+<span>    <span class="st">"ORDER BY probe_id, hit.interval_ordinal"</span></span>
 <span>  <span class="op">)</span></span>
 <span><span class="op">)</span></span>
 <span><span class="co">#&gt;   probe_id interval_ordinal label label_type interval_chrom interval_start</span></span>
 <span><span class="co">#&gt; 1       10                0 alpha    VARCHAR           chr2            100</span></span>
 <span><span class="co">#&gt; 2       20                1  beta    VARCHAR           chr2            150</span></span>
-<span><span class="co">#&gt;   interval_end</span></span>
-<span><span class="co">#&gt; 1          110</span></span>
-<span><span class="co">#&gt; 2          170</span></span>
-<span><span class="fu">DBI</span><span class="fu">::</span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span></span>
-<span>  <span class="va">con</span>,</span>
-<span>  <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste</a></span><span class="op">(</span></span>
-<span>    <span class="st">"SELECT query_row_id, interval_ordinal, label, interval_chrom, interval_start, interval_end"</span>,</span>
-<span>    <span class="st">"FROM duckhts_cgranges_overlaps_bulk("</span>,</span>
-<span>    <span class="st">"  'readme_qry_idx',"</span>,</span>
-<span>    <span class="st">"  'SELECT probe_id, chrom, start, \"end\" FROM readme_probes',"</span>,</span>
-<span>    <span class="st">"  'chrom', 'start', 'end',"</span>,</span>
-<span>    <span class="st">"  query_row_id_col := 'probe_id'"</span>,</span>
-<span>    <span class="st">")"</span>,</span>
-<span>    <span class="st">"ORDER BY query_row_id, interval_ordinal"</span></span>
-<span>  <span class="op">)</span></span>
-<span><span class="op">)</span></span>
-<span><span class="co">#&gt;   query_row_id interval_ordinal label interval_chrom interval_start</span></span>
-<span><span class="co">#&gt; 1           10                0 alpha           chr2            100</span></span>
-<span><span class="co">#&gt; 2           20                1  beta           chr2            150</span></span>
 <span><span class="co">#&gt;   interval_end</span></span>
 <span><span class="co">#&gt; 1          110</span></span>
 <span><span class="co">#&gt; 2          170</span></span>

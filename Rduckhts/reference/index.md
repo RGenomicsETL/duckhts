@@ -85,6 +85,8 @@
   : Write GenBank Sequence as FASTA
 - [`rduckhts_geno()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_geno.md)
   : Read Record-Major Genotypes
+- [`rduckhts_geno_sites()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_geno_sites.md)
+  : Fetch Exact Alleles at Requested Sites
 - [`rduckhts_gff()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_gff.md)
   : Create GFF3 Table
 - [`rduckhts_gff_convert_parquet()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_gff_convert_parquet.md)
@@ -146,6 +148,8 @@
   : Estimate Directional Contamination Against Matched Anchors
 - [`rduckhts_somalier_relatedness()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_relatedness.md)
   : Compare Somalier-Derived Sample Sketches
+- [`rduckhts_somalier_sex()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_sex.md)
+  : Infer X/Y Dosage Sex Evidence
 - [`rduckhts_somalier_sketches()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_sketches.md)
   : Prepare Somalier-Derived Sample Sketches
 - [`rduckhts_somalier_vcf_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_vcf_counts.md)

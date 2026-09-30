@@ -26,7 +26,8 @@ rduckhts_geno(
   overwrite = FALSE,
   format_fields = NULL,
   raw_gt = FALSE,
-  include_filter = FALSE
+  include_filter = FALSE,
+  regions_var = NULL
 )
 ```
 
@@ -120,6 +121,14 @@ rduckhts_geno(
   named failing filters retain header order. The default keeps the
   existing schema.
 
+- regions_var:
+
+  Optional name of a session variable on \`con\` holding typed
+  intervals, \`STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)\[\]\`,
+  with 0-based half-open coordinates. See \[rduckhts_bcf()\] for the
+  contract; the same rules apply. \[rduckhts_geno_sites()\] prepares
+  such a plan from requested sites and joins exact alleles.
+
 ## Value
 
 A data frame when \`table_name\` is \`NULL\`, otherwise invisible
@@ -135,7 +144,7 @@ preserve every selected variant row.
 
 ## See also
 
-\[rduckhts_bcf_samples()\]
+\[rduckhts_bcf_samples()\], \[rduckhts_geno_sites()\]
 
 ## Examples
 

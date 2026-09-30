@@ -21,7 +21,8 @@ rduckhts_genbank(
   table_name = NULL,
   path,
   attributes_map = FALSE,
-  overwrite = FALSE
+  overwrite = FALSE,
+  attributes = NULL
 )
 ```
 
@@ -48,6 +49,13 @@ rduckhts_genbank(
 - overwrite:
 
   Logical. If TRUE, overwrites an existing table
+
+- attributes:
+
+  Character vector of qualifier keys to expose as VARCHAR columns. Each
+  equals `attributes_map[key]`, including comma-joined repeated
+  qualifiers and `NA` for an absent key, and is computed only when the
+  query selects it
 
 ## Value
 

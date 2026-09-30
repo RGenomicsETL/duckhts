@@ -46,6 +46,7 @@
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_genbank.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_genbank_to_fasta.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_geno.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_geno_sites.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_gff.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_gff_convert_parquet.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_gff_multi.html</loc></url>
@@ -73,6 +74,7 @@
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_import_sites.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_matched_contamination.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_relatedness.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_sex.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_sketches.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_vcf_counts.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_tabix.html</loc></url>

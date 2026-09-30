@@ -9,7 +9,7 @@ This follows the RBCFTools pattern of creating a table that can be queried."></h
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9006-0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9007-0.1.5</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -55,7 +55,8 @@ This follows the RBCFTools pattern of creating a table that can be queried.</p>
 <span>  decompression_threads <span class="op">=</span> <span class="fl">0</span>,</span>
 <span>  decode_error_policy <span class="op">=</span> <span class="st">"null"</span>,</span>
 <span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span>,</span>
-<span>  samples <span class="op">=</span> <span class="cn">NULL</span></span>
+<span>  samples <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  regions_var <span class="op">=</span> <span class="cn">NULL</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -121,6 +122,21 @@ for every selected sample on that record. Physical read errors and OOM always fa
 <dd><p>Optional HTSlib sample selector: `NULL` or `"-"` keeps all,
 `""` keeps none, comma-separated names include samples, and a leading
 `"^"` excludes them. Unknown names error; selected samples retain header order.</p></dd>
+
+
+<dt id="arg-regions-var">regions_var<a class="anchor" aria-label="anchor" href="#arg-regions-var"></a></dt>
+<dd><p>Optional name of a session variable on `con` that holds
+typed intervals, `STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[]`
+with 0-based half-open coordinates (a VCF position `p` is `[p - 1, p)`).
+The name is quoted into `regions := getvariable('&lt;name&gt;')`; create the
+variable with `SET VARIABLE` on the same connection. A `NULL` variable
+value keeps the ordinary scan, an empty list selects no records, and
+`region` and `regions_var` are mutually exclusive. Typed regions need an
+index and are incompatible with `scan_mode = "sequential"`. Chromosome
+names are literal (not region expressions); overlapping and adjacent
+intervals are merged natively. Limits: 1,000,000 intervals and 128 MiB.
+Aggregate with `coalesce(list(...), []::STRUCT(...)[])`: `list()` over no
+rows is `NULL`, which means the ordinary full scan.</p></dd>
 
 </dl></div>
     <div class="section level2">

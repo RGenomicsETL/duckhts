@@ -1,5 +1,85 @@
 # Changelog
 
+## Rduckhts 1.5.2.9007-0.1.5
+
+- New `regions_var` argument on
+  [`rduckhts_geno()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_geno.md)
+  and
+  [`rduckhts_bcf()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bcf.md)
+  names a session variable holding typed 0-based half-open intervals for
+  `read_geno(regions := ...)` / `read_bcf(regions := ...)`. The variable
+  must exist (an unknown name would otherwise mean an unrestricted
+  scan).
+
+- New
+  [`rduckhts_geno_sites()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_geno_sites.md)
+  fetches full-site genotypes for requested `(chrom, pos, ref, alt)`
+  alleles from an indexed VCF/BCF on the caller connection: it validates
+  the requests, plans distinct positions with `SET VARIABLE`, runs one
+  `read_geno()` scan and joins exact alleles, returning every request
+  with `record_index`, `full_alt`, `alt_index`, `calls` (including `GP`,
+  `DS` or `HS` via `format_fields`) and a position-level `match_status`
+  (`matched`, `allele_not_at_site`, `ref_mismatch`, `absent`). Nothing
+  is trimmed, split, flipped or lifted over. Its session variable and
+  temporary request table are removed on exit, including after an error.
+
+- [`rduckhts_somalier_vcf_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_vcf_counts.md)
+  streams the VCF into its panel join and keeps call payloads only for
+  panel coordinates, so peak memory follows the panel rather than the
+  VCF length. Counts, statuses and validation are unchanged.
+
+- Breaking: the Somalier panel now carries X/Y sites and its identity
+  changes.
+  [`rduckhts_somalier_import_sites()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_import_sites.md)
+  keeps records on the Somalier v0.3.4 X/Y aliases, numbered after every
+  autosomal site, and the panel, frequency and sketch digests differ
+  from earlier versions even for autosomal-only panels, so recompute
+  persisted digests and sketches. Counts from
+  [`rduckhts_somalier_vcf_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_vcf_counts.md)
+  and
+  [`rduckhts_somalier_bam_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_bam_counts.md)
+  include X/Y sites (which ignore `filter_policy`), while sketches,
+  relatedness, CHARR and matched contamination use only the autosomal
+  sites, with unchanged numeric results.
+
+- New
+  [`rduckhts_somalier_sex()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_sex.md)
+  reports X/Y dosage evidence per sample: depth relative to autosomal
+  depth, usable X site and het/hom-alt counts, a Y signal, and an XX, XY
+  or ambiguous call with a status, following Somalier v0.3.4. It is
+  review evidence, not a diagnosis. `y_gate = "sample"` (default) avoids
+  the dependence of Somalier’s Y check on the rest of the batch;
+  `"cohort"` reproduces it.
+
+- A closed database file is released and can be reopened in the same R
+  process after cgranges or
+  [`rduckhts_somalier_bam_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_bam_counts.md)
+  have been used; the bundled extension no longer keeps connections into
+  the loading database. This fixes reopening on Windows. A tinytest
+  closes and reopens a file database after using both.
+
+- Breaking: `duckhts_cgranges_from_query()` and
+  `duckhts_cgranges_overlaps_bulk()` are removed from the bundled
+  extension. Use the table macro
+  `SELECT * FROM duckhts_cgranges_from_table(name, table_name, chrom_col, start_col, end_col[, label_col])`
+  over any table, view or TEMP table on your connection, and
+  `SELECT ..., unnest(duckhts_cgranges_overlaps_list(...))` for bulk
+  probing. The README examples use them.
+
+- [`rduckhts_somalier_bam_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_bam_counts.md)
+  and
+  [`rduckhts_ancestry_bam()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_ancestry_bam.md)
+  keep their arguments. The native reader takes a local Parquet panel,
+  so `panel_table` is now written to a scratch Parquet file for the
+  call; temporary tables and uncommitted rows are therefore accepted.
+  Remote `panel_parquet` paths are no longer read.
+
+- [`rduckhts_genbank()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_genbank.md)
+  accepts `attributes` to expose qualifier keys as VARCHAR columns that
+  equal `attributes_map[key]`, computed only when selected. Tests
+  compare every named column with the map lookup on the bundled phiX174
+  record and cover the rejected names.
+
 ## Rduckhts 1.5.2.9006-0.1.5
 
 - The bundled function catalog documents

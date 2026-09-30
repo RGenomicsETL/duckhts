@@ -7,8 +7,10 @@ count evidence. The panel must contain `assembly`, zero-based `site_index`,
 are NULL for unavailable evidence; three measured zeros are not unavailable.
 The native SQL preparation checks every evidence site's geometry and A/B
 orientation against the ordered panel before computing its digest. Panel
-alleles must be distinct uppercase single-base A/C/G/T with lexical A &amp;lt; B;
-the exact X/Y aliases excluded by Somalier v0.3.4 are rejected. Other
+alleles must be distinct uppercase single-base A/C/G/T with lexical A &amp;lt; B.
+Rows on the exact Somalier v0.3.4 X/Y aliases are sex-chromosome sites that
+must follow every autosomal site in `site_index`; they and their evidence are
+ignored here, so results equal those on the autosomal-only panel. Other
 contig aliases cannot be classified biologically from the region string.
 The three-state calculation assumes diploid sites; count evidence alone
 does not prove sample ploidy."><meta property="og:description" content="Build packed, panel-verified relatedness sketches from measured A/B/other
@@ -19,8 +21,10 @@ count evidence. The panel must contain `assembly`, zero-based `site_index`,
 are NULL for unavailable evidence; three measured zeros are not unavailable.
 The native SQL preparation checks every evidence site's geometry and A/B
 orientation against the ordered panel before computing its digest. Panel
-alleles must be distinct uppercase single-base A/C/G/T with lexical A &amp;lt; B;
-the exact X/Y aliases excluded by Somalier v0.3.4 are rejected. Other
+alleles must be distinct uppercase single-base A/C/G/T with lexical A &amp;lt; B.
+Rows on the exact Somalier v0.3.4 X/Y aliases are sex-chromosome sites that
+must follow every autosomal site in `site_index`; they and their evidence are
+ignored here, so results equal those on the autosomal-only panel. Other
 contig aliases cannot be classified biologically from the region string.
 The three-state calculation assumes diploid sites; count evidence alone
 does not prove sample ploidy."></head><body>
@@ -31,7 +35,7 @@ does not prove sample ploidy."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9006-0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9007-0.1.5</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -67,8 +71,10 @@ count evidence. The panel must contain `assembly`, zero-based `site_index`,
 are NULL for unavailable evidence; three measured zeros are not unavailable.
 The native SQL preparation checks every evidence site's geometry and A/B
 orientation against the ordered panel before computing its digest. Panel
-alleles must be distinct uppercase single-base A/C/G/T with lexical A &lt; B;
-the exact X/Y aliases excluded by Somalier v0.3.4 are rejected. Other
+alleles must be distinct uppercase single-base A/C/G/T with lexical A &lt; B.
+Rows on the exact Somalier v0.3.4 X/Y aliases are sex-chromosome sites that
+must follow every autosomal site in `site_index`; they and their evidence are
+ignored here, so results equal those on the autosomal-only panel. Other
 contig aliases cannot be classified biologically from the region string.
 The three-state calculation assumes diploid sites; count evidence alone
 does not prove sample ploidy.</p>
