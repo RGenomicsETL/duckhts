@@ -1,0 +1,584 @@
+# name: test/sql/roh.test
+# description: Runs of homozygosity: kernel contract and bcftools roh parity
+# group: [duckhts]
+
+require duckhts
+
+# Parity with `bcftools roh` (1.23.1-70-g6dbd8fef) on test/data/roh_fixture.vcf.gz: four samples,
+# two contigs, planted homozygous stretches over heterozygous background, records with missing
+# AF, AF = 0, missing and uninformative genotypes, PL above 255, an indel, a multiallelic record
+# and a record without ALT. The expected rows are the RG lines printed by
+# test/scripts/roh_bcftools_expected.sh. Start, end, length and marker counts must be equal;
+# quality is compared at the one decimal that bcftools prints (%.1f), which is the only
+# tolerance and arises from the output format, not from the arithmetic.
+
+statement ok
+CREATE TEMP TABLE roh_af AS SELECT chrom, pos, split_part(alleles, ',', 1) AS ref,
+  split_part(alleles, ',', 2) AS alt, af
+FROM read_csv('__WORKING_DIRECTORY__/test/data/roh_af.tsv.gz', delim = '\t', header = false,
+  columns = {'chrom': 'VARCHAR', 'pos': 'BIGINT', 'alleles': 'VARCHAR', 'af': 'DOUBLE'});
+
+statement ok
+CREATE TEMP TABLE roh_map AS
+  SELECT 'chr1' AS chrom, position AS pos, "Genetic_Map(cM)" AS cm FROM read_csv('__WORKING_DIRECTORY__/test/data/roh_map_chr1.txt', delim = ' ')
+  UNION ALL
+  SELECT 'chr2', position, "Genetic_Map(cM)" FROM read_csv('__WORKING_DIRECTORY__/test/data/roh_map_chr2.txt', delim = ' ');
+
+statement ok
+CREATE TEMP TABLE roh_map_chr1 AS SELECT * FROM roh_map WHERE chrom = 'chr1';
+
+# PL emissions, frequencies from INFO/AF.
+# bcftools: bcftools roh --AF-tag AF
+query I
+WITH expected(sample, chrom, start, "end", length, n_markers, quality) AS (VALUES
+('S1', 'chr1', 1042655, 2396807, 1354153, 113, 32.0),
+ ('S4', 'chr1', 1876100, 3319712, 1443613, 131, 44.8),
+ ('S2', 'chr2', 693881, 1722963, 1029083, 114, 32.9),
+ ('S4', 'chr2', 23420, 2400223, 2376804, 239, 46.6)
+), observed AS (
+  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF')
+)
+SELECT count(*) FROM (
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected)
+  UNION ALL
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed));
+----
+0
+
+query I
+SELECT count(*) FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF');
+----
+4
+
+# GT emissions with phred 30 error (-G30); PL is ignored.
+# bcftools: bcftools roh -G30 --AF-tag AF
+query I
+WITH expected(sample, chrom, start, "end", length, n_markers, quality) AS (VALUES
+('S1', 'chr1', 1042655, 2396807, 1354153, 112, 40.6),
+ ('S4', 'chr1', 1876100, 3319712, 1443613, 131, 56.0),
+ ('S2', 'chr2', 693881, 1722963, 1029083, 114, 39.6),
+ ('S4', 'chr2', 23420, 2400223, 2376804, 239, 51.7)
+), observed AS (
+  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', gt_error := 30)
+)
+SELECT count(*) FROM (
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected)
+  UNION ALL
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed));
+----
+0
+
+query I
+SELECT count(*) FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', gt_error := 30);
+----
+4
+
+# Frequencies from a relation (--AF-file); three sites are absent from it.
+# bcftools: bcftools roh --AF-file test/data/roh_af.tsv.gz
+query I
+WITH expected(sample, chrom, start, "end", length, n_markers, quality) AS (VALUES
+('S1', 'chr1', 1042655, 2396807, 1354153, 113, 32.0),
+ ('S4', 'chr1', 1876100, 3319712, 1443613, 131, 44.9),
+ ('S2', 'chr2', 693881, 1722963, 1029083, 114, 33.2),
+ ('S4', 'chr2', 23420, 2400223, 2376804, 238, 46.5)
+), observed AS (
+  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'roh_af')
+)
+SELECT count(*) FROM (
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected)
+  UNION ALL
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed));
+----
+0
+
+query I
+SELECT count(*) FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'roh_af');
+----
+4
+
+# Constant recombination rate (-M).
+# bcftools: bcftools roh --AF-tag AF -M 1e-6
+query I
+WITH expected(sample, chrom, start, "end", length, n_markers, quality) AS (VALUES
+('S1', 'chr1', 1432927, 2396807, 963881, 95, 49.7),
+ ('S4', 'chr1', 1876100, 3319712, 1443613, 131, 66.6),
+ ('S2', 'chr2', 693881, 1722963, 1029083, 114, 40.7),
+ ('S4', 'chr2', 23420, 2400223, 2376804, 239, 79.2)
+), observed AS (
+  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', rec_rate := 1e-6)
+)
+SELECT count(*) FROM (
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected)
+  UNION ALL
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed));
+----
+0
+
+query I
+SELECT count(*) FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', rec_rate := 1e-6);
+----
+4
+
+# Genetic map (-m); sparse nodes, gaps over several nodes and a tail beyond the map.
+# bcftools: bcftools roh --AF-tag AF -m test/data/roh_map_{CHROM}.txt
+query I
+WITH expected(sample, chrom, start, "end", length, n_markers, quality) AS (VALUES
+('S1', 'chr1', 1432927, 2396807, 963881, 95, 41.4),
+ ('S4', 'chr1', 2246017, 3319712, 1073696, 121, 77.5),
+ ('S2', 'chr2', 693881, 1722963, 1029083, 114, 17.7),
+ ('S4', 'chr2', 23420, 2400223, 2376804, 239, 94.4)
+), observed AS (
+  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_map')
+)
+SELECT count(*) FROM (
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected)
+  UNION ALL
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed));
+----
+0
+
+query I
+SELECT count(*) FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_map');
+----
+4
+
+# Genetic map scaled by a rate (-m with -M).
+# bcftools: bcftools roh --AF-tag AF -m test/data/roh_map_{CHROM}.txt -M 0.5
+query I
+WITH expected(sample, chrom, start, "end", length, n_markers, quality) AS (VALUES
+('S1', 'chr1', 1432927, 2396807, 963881, 95, 37.1),
+ ('S4', 'chr1', 2246017, 3319712, 1073696, 121, 78.2),
+ ('S2', 'chr2', 693881, 1722963, 1029083, 114, 13.1),
+ ('S4', 'chr2', 23420, 2400223, 2376804, 239, 95.3)
+), observed AS (
+  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_map', rec_rate := 0.5)
+)
+SELECT count(*) FROM (
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected)
+  UNION ALL
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed));
+----
+0
+
+query I
+SELECT count(*) FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_map', rec_rate := 0.5);
+----
+4
+
+# A chromosome without map rows is skipped, as bcftools skips it.
+# bcftools: bcftools roh --AF-tag AF -m TMP/tmp.AFC6Fb1fe5/chr1_only_{CHROM}.txt
+query I
+WITH expected(sample, chrom, start, "end", length, n_markers, quality) AS (VALUES
+('S1', 'chr1', 1432927, 2396807, 963881, 95, 41.4),
+ ('S4', 'chr1', 2246017, 3319712, 1073696, 121, 77.5)
+), observed AS (
+  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_map_chr1')
+)
+SELECT count(*) FROM (
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected)
+  UNION ALL
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed));
+----
+0
+
+query I
+SELECT count(*) FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_map_chr1');
+----
+2
+
+# Non-default transition parameters (-a, -H) give several runs per sample.
+# bcftools: bcftools roh --AF-tag AF -a 1e-5 -H 1e-6
+query I
+WITH expected(sample, chrom, start, "end", length, n_markers, quality) AS (VALUES
+('S1', 'chr1', 1042655, 1763940, 721286, 68, 18.8),
+ ('S1', 'chr1', 1826286, 2396807, 570522, 38, 23.0),
+ ('S2', 'chr1', 420301, 730975, 310675, 19, 16.7),
+ ('S2', 'chr1', 798686, 873690, 75005, 11, 10.2),
+ ('S4', 'chr1', 1876100, 2454966, 578867, 42, 21.2),
+ ('S4', 'chr1', 2478084, 2539612, 61529, 11, 11.7),
+ ('S4', 'chr1', 2558687, 3210860, 652174, 61, 22.2),
+ ('S4', 'chr1', 3233468, 3319712, 86245, 13, 14.4),
+ ('S2', 'chr2', 693881, 1058709, 364829, 46, 17.7),
+ ('S2', 'chr2', 1091014, 1395612, 304599, 17, 11.4),
+ ('S2', 'chr2', 1410276, 1722963, 312688, 43, 21.8),
+ ('S4', 'chr2', 23420, 1058709, 1035290, 103, 16.2),
+ ('S4', 'chr2', 1087198, 1403884, 316687, 20, 9.6),
+ ('S4', 'chr2', 1420502, 1675216, 254715, 35, 21.8),
+ ('S4', 'chr2', 1695003, 1892660, 197658, 31, 24.8),
+ ('S4', 'chr2', 2148759, 2400223, 251465, 41, 16.5)
+), observed AS (
+  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', hw_to_az := 1e-5, az_to_hw := 1e-6)
+)
+SELECT count(*) FROM (
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected)
+  UNION ALL
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed));
+----
+0
+
+query I
+SELECT count(*) FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', hw_to_az := 1e-5, az_to_hw := 1e-6);
+----
+16
+
+# Relation frequencies, GT emissions and a map together.
+# bcftools: bcftools roh -G30 --AF-file test/data/roh_af.tsv.gz -m test/data/roh_map_{CHROM}.txt
+query I
+WITH expected(sample, chrom, start, "end", length, n_markers, quality) AS (VALUES
+('S1', 'chr1', 1432927, 2396807, 963881, 94, 61.7),
+ ('S4', 'chr1', 1876100, 3319712, 1443613, 131, 82.8),
+ ('S2', 'chr2', 693881, 1722963, 1029083, 114, 37.2),
+ ('S4', 'chr2', 23420, 2400223, 2376804, 238, 96.6)
+), observed AS (
+  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'roh_af', 'roh_map', gt_error := 30)
+)
+SELECT count(*) FROM (
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected)
+  UNION ALL
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed));
+----
+0
+
+query I
+SELECT count(*) FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'roh_af', 'roh_map', gt_error := 30);
+----
+4
+
+# Sample selection (-s).
+# bcftools: bcftools roh --AF-tag AF -s S2,S4
+query I
+WITH expected(sample, chrom, start, "end", length, n_markers, quality) AS (VALUES
+('S4', 'chr1', 1876100, 3319712, 1443613, 131, 44.8),
+ ('S2', 'chr2', 693881, 1722963, 1029083, 114, 32.9),
+ ('S4', 'chr2', 23420, 2400223, 2376804, 239, 46.6)
+), observed AS (
+  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', samples := 'S2,S4')
+)
+SELECT count(*) FROM (
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected)
+  UNION ALL
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed));
+----
+0
+
+query I
+SELECT count(*) FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', samples := 'S2,S4');
+----
+3
+
+# One-site and empty inputs. The one-site row is the bcftools roh RG line for roh_single_site.vcf
+# (--AF-tag AF, and -G30): S1 chr1 5000 5000 1 1 13.1. roh_empty.vcf has no records; bcftools
+# reports "No usable sites were found" and prints no RG line.
+query IIIIIII
+SELECT sample, chrom, start, "end", length, n_markers, round(quality, 1)
+FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_single_site.vcf', 'AF');
+----
+S1	chr1	5000	5000	1	1	13.1
+
+query IIIIIII
+SELECT sample, chrom, start, "end", length, n_markers, round(quality, 1)
+FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_single_site.vcf', 'AF', gt_error := 30);
+----
+S1	chr1	5000	5000	1	1	13.1
+
+query I
+SELECT count(*) FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_empty.vcf', 'AF');
+----
+0
+
+query I
+SELECT count(*) FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_empty.vcf', 'roh_af', 'roh_map');
+----
+0
+
+query I
+SELECT len(duckhts_roh_segments([]::BIGINT[], []::DOUBLE[], []::INTEGER[][], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9));
+----
+0
+
+query I
+SELECT len(duckhts_roh_segments([5000], [0.05], [[60, 30, 0]], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9));
+----
+1
+
+# A GT-only VCF with no FORMAT/PL: bcftools roh -G30 --AF-tag AF gives
+# S1 chr1 20000 70000 50001 51 43.9 and no row for the heterozygous S2.
+query IIIIIII
+SELECT sample, chrom, start, "end", length, n_markers, round(quality, 1)
+FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_gt_only.vcf', 'AF', gt_error := 30);
+----
+S1	chr1	20000	70000	50001	51	43.9
+
+statement error
+SELECT count(*) FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_gt_only.vcf', 'AF');
+----
+empty set of columns
+
+
+# Kernel: a run of 60 sites at 0.3 frequency with hom-ref PL is one segment (start 1000, end 60000,
+# quality 64.956...). Each kind of site bcftools skips must leave the result unchanged, to the bit.
+query IIII
+WITH s(pos) AS (SELECT i * 1000 FROM range(1, 61) AS t(i))
+SELECT r.start, r."end", r.n_markers, round(r.quality, 3) FROM (
+  SELECT unnest(duckhts_roh_segments(list(pos ORDER BY pos), list(0.3::DOUBLE ORDER BY pos),
+    list([0, 30, 60] ORDER BY pos), NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9)) AS r FROM s);
+----
+1000	60000	60	64.956
+
+# Skipped: missing (NULL) frequency.
+query I
+WITH base_sites(pos, seq, af, pl) AS (SELECT i * 1000 AS pos, 1 AS seq, 0.3::DOUBLE AS af, [0, 30, 60] AS pl FROM range(1, 61) AS t(i)),
+all_sites(pos, seq, af, pl) AS (
+  SELECT * FROM base_sites UNION ALL SELECT 30500, 1, NULL::DOUBLE, [60, 30, 0]
+), decoded AS (
+  SELECT
+    (SELECT duckhts_roh_segments(list(pos ORDER BY pos, seq), list(af ORDER BY pos, seq), list(pl ORDER BY pos, seq), NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9) FROM base_sites) AS expected,
+    (SELECT duckhts_roh_segments(list(pos ORDER BY pos, seq), list(af ORDER BY pos, seq), list(pl ORDER BY pos, seq), NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9) FROM all_sites) AS observed
+)
+SELECT expected = observed AND len(expected) = 1 AND expected[1].n_markers = 60 FROM decoded;
+----
+true
+
+# Skipped: frequency exactly 0, and NaN.
+query I
+WITH base_sites(pos, seq, af, pl) AS (SELECT i * 1000 AS pos, 1 AS seq, 0.3::DOUBLE AS af, [0, 30, 60] AS pl FROM range(1, 61) AS t(i)),
+all_sites(pos, seq, af, pl) AS (
+  SELECT * FROM base_sites UNION ALL SELECT 30500, 1, 0.0::DOUBLE, [60, 30, 0] UNION ALL SELECT 30600, 1, 'NaN'::DOUBLE, [60, 30, 0]
+), decoded AS (
+  SELECT
+    (SELECT duckhts_roh_segments(list(pos ORDER BY pos, seq), list(af ORDER BY pos, seq), list(pl ORDER BY pos, seq), NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9) FROM base_sites) AS expected,
+    (SELECT duckhts_roh_segments(list(pos ORDER BY pos, seq), list(af ORDER BY pos, seq), list(pl ORDER BY pos, seq), NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9) FROM all_sites) AS observed
+)
+SELECT expected = observed AND len(expected) = 1 AND expected[1].n_markers = 60 FROM decoded;
+----
+true
+
+# Skipped: PL values all equal, NULL PL, NULL element, wrong length, negative.
+query I
+WITH base_sites(pos, seq, af, pl) AS (SELECT i * 1000 AS pos, 1 AS seq, 0.3::DOUBLE AS af, [0, 30, 60] AS pl FROM range(1, 61) AS t(i)),
+all_sites(pos, seq, af, pl) AS (
+  SELECT * FROM base_sites UNION ALL SELECT 30100, 1, 0.3::DOUBLE, [0, 0, 0] UNION ALL SELECT 30200, 1, 0.3::DOUBLE, [7, 7, 7] UNION ALL SELECT 30300, 1, 0.3::DOUBLE, NULL UNION ALL SELECT 30400, 1, 0.3::DOUBLE, [60, NULL, 0] UNION ALL SELECT 30500, 1, 0.3::DOUBLE, [60, 0] UNION ALL SELECT 30600, 1, 0.3::DOUBLE, [60, 30, 0, 90] UNION ALL SELECT 30700, 1, 0.3::DOUBLE, [60, -1, 0]
+), decoded AS (
+  SELECT
+    (SELECT duckhts_roh_segments(list(pos ORDER BY pos, seq), list(af ORDER BY pos, seq), list(pl ORDER BY pos, seq), NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9) FROM base_sites) AS expected,
+    (SELECT duckhts_roh_segments(list(pos ORDER BY pos, seq), list(af ORDER BY pos, seq), list(pl ORDER BY pos, seq), NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9) FROM all_sites) AS observed
+)
+SELECT expected = observed AND len(expected) = 1 AND expected[1].n_markers = 60 FROM decoded;
+----
+true
+
+# Skipped: a repeated position keeps its first entry, as bcftools skips duplicate positions.
+query I
+WITH base_sites(pos, seq, af, pl) AS (SELECT i * 1000 AS pos, 1 AS seq, 0.3::DOUBLE AS af, [0, 30, 60] AS pl FROM range(1, 61) AS t(i)),
+all_sites(pos, seq, af, pl) AS (
+  SELECT * FROM base_sites UNION ALL SELECT 30000, 2, 0.3::DOUBLE, [60, 30, 0] UNION ALL SELECT 1000, 2, 0.3::DOUBLE, [60, 30, 0]
+), decoded AS (
+  SELECT
+    (SELECT duckhts_roh_segments(list(pos ORDER BY pos, seq), list(af ORDER BY pos, seq), list(pl ORDER BY pos, seq), NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9) FROM base_sites) AS expected,
+    (SELECT duckhts_roh_segments(list(pos ORDER BY pos, seq), list(af ORDER BY pos, seq), list(pl ORDER BY pos, seq), NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9) FROM all_sites) AS observed
+)
+SELECT expected = observed AND len(expected) = 1 AND expected[1].n_markers = 60 FROM decoded;
+----
+true
+
+# PL values above 255 count as 255.
+query I
+SELECT duckhts_roh_segments([1000, 2000, 3000], [0.3, 0.3, 0.3], [[0, 300, 400], [0, 255, 255], [0, 900, 255]], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9)
+     = duckhts_roh_segments([1000, 2000, 3000], [0.3, 0.3, 0.3], [[0, 255, 255], [0, 255, 255], [0, 255, 255]], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+true
+
+# GT dosage mode skips NULL dosages.
+query I
+SELECT duckhts_roh_segments([1000, 2000, 3000, 4000], [0.3, 0.3, 0.3, 0.3], [0, NULL, 0, 0], 30.0, NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9)
+     = duckhts_roh_segments([1000, 3000, 4000], [0.3, 0.3, 0.3], [0, 0, 0], 30.0, NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+true
+
+# NULL lists and NULL transition parameters give NULL; NULL map and rate mean no map and no rate.
+query III
+SELECT duckhts_roh_segments(NULL::BIGINT[], [0.3], [[0, 30, 60]], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9) IS NULL,
+       duckhts_roh_segments([1000], NULL::DOUBLE[], [[0, 30, 60]], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9) IS NULL,
+       duckhts_roh_segments([1000], [0.3], NULL::INTEGER[][], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9) IS NULL;
+----
+true	true	true
+
+query I
+SELECT duckhts_roh_segments([1000], [0.3], [[0, 30, 60]], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, NULL::DOUBLE, 5e-9) IS NULL;
+----
+true
+
+
+# Input validation: each error names the problem.
+
+# Lists of unequal length: positions and af.
+statement error
+SELECT duckhts_roh_segments([1000, 2000], [0.3], [[0, 30, 60], [0, 30, 60]], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+positions and af lists differ in length (2 vs 1)
+
+# Lists of unequal length: positions and PL.
+statement error
+SELECT duckhts_roh_segments([1000, 2000], [0.3, 0.3], [[0, 30, 60]], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+positions and PL lists differ in length (2 vs 1)
+
+# Lists of unequal length: positions and dosage.
+statement error
+SELECT duckhts_roh_segments([1000, 2000], [0.3, 0.3], [0], 30.0, NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+positions and genotype lists differ in length (2 vs 1)
+
+# Unsorted positions.
+statement error
+SELECT duckhts_roh_segments([2000, 1000], [0.3, 0.3], [[0, 30, 60], [0, 30, 60]], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+positions must be sorted ascending (entry 2 is 1000 after 2000)
+
+# NULL position.
+statement error
+SELECT duckhts_roh_segments([1000, NULL], [0.3, 0.3], [[0, 30, 60], [0, 30, 60]], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+positions cannot contain NULL (entry 2)
+
+# Position below 1.
+statement error
+SELECT duckhts_roh_segments([0], [0.3], [[0, 30, 60]], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+position 0 is outside 1..2147483647
+
+# Position above int32.
+statement error
+SELECT duckhts_roh_segments([2147483648], [0.3], [[0, 30, 60]], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+position 2147483648 is outside 1..2147483647
+
+# Frequency above 1.
+statement error
+SELECT duckhts_roh_segments([1000], [1.5], [[0, 30, 60]], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+af must be in [0, 1] (entry 1 is 1.5)
+
+# Negative frequency.
+statement error
+SELECT duckhts_roh_segments([1000], [-0.1], [[0, 30, 60]], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+af must be in [0, 1]
+
+# Dosage outside 0..2.
+statement error
+SELECT duckhts_roh_segments([1000], [0.3], [3], 30.0, NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+genotype dosage must be 0, 1 or 2 (entry 1 is 3)
+
+# Negative gt_error.
+statement error
+SELECT duckhts_roh_segments([1000], [0.3], [0], -1.0, NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+gt_error must be a finite phred value of at least 0
+
+# hw_to_az above 1.
+statement error
+SELECT duckhts_roh_segments([1000], [0.3], [[0, 30, 60]], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 2.0, 5e-9);
+----
+hw_to_az must be in [0, 1]
+
+# az_to_hw below 0.
+statement error
+SELECT duckhts_roh_segments([1000], [0.3], [[0, 30, 60]], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, -1.0);
+----
+az_to_hw must be in [0, 1]
+
+# Negative rec_rate.
+statement error
+SELECT duckhts_roh_segments([1000], [0.3], [[0, 30, 60]], NULL::BIGINT[], NULL::DOUBLE[], -1.0, 6.7e-8, 5e-9);
+----
+rec_rate must be finite and at least 0
+
+# Map positions without cM.
+statement error
+SELECT duckhts_roh_segments([1000], [0.3], [[0, 30, 60]], [1000]::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+genetic map positions and cM values must both be given or both NULL
+
+# Map lists of unequal length.
+statement error
+SELECT duckhts_roh_segments([1000], [0.3], [[0, 30, 60]], [1000, 2000]::BIGINT[], [0.0]::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+genetic map positions and cM values differ in length (2 vs 1)
+
+# Empty map.
+statement error
+SELECT duckhts_roh_segments([1000], [0.3], [[0, 30, 60]], []::BIGINT[], []::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+genetic map is empty
+
+# Unsorted map.
+statement error
+SELECT duckhts_roh_segments([1000], [0.3], [[0, 30, 60]], [2000, 1000]::BIGINT[], [0.1, 0.0]::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+genetic map positions must be strictly ascending
+
+# Repeated map position.
+statement error
+SELECT duckhts_roh_segments([1000], [0.3], [[0, 30, 60]], [1000, 1000]::BIGINT[], [0.0, 0.1]::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+genetic map positions must be strictly ascending
+
+# Map with a NULL cM.
+statement error
+SELECT duckhts_roh_segments([1000], [0.3], [[0, 30, 60]], [1000, 2000]::BIGINT[], [0.0, NULL]::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+genetic map entry 2 has a NULL position or cM value
+
+# Map with a non-finite cM.
+statement error
+SELECT duckhts_roh_segments([1000], [0.3], [[0, 30, 60]], [1000, 2000]::BIGINT[], [0.0, 'NaN'::DOUBLE]::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+genetic map cM values must be finite
+
+# Macro: a bad parameter reaches the kernel check.
+statement error
+SELECT * FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', hw_to_az := 2.0);
+----
+hw_to_az must be in [0, 1]
+
+# Macro: a map with a repeated position.
+statement ok
+CREATE TEMP TABLE roh_bad_map AS SELECT 'chr1' AS chrom, 1000 AS pos, 0.0 AS cm UNION ALL SELECT 'chr1', 1000, 0.1;
+
+statement error
+SELECT * FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_bad_map');
+----
+genetic map positions must be strictly ascending
+
+# Overloads: a string third argument is the genetic map, a number is hw_to_az.
+query I
+SELECT count(*) FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_map', az_to_hw := 5e-9);
+----
+4
+
+query I
+SELECT count(*) FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 1e-5, 1e-6);
+----
+16

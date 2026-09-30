@@ -1,0 +1,6 @@
+##fileformat=VCFv4.2
+##contig=<ID=chr1,length=100000>
+##INFO=<ID=AF,Number=A,Type=Float,Description="Alternate allele frequency">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=PL,Number=G,Type=Integer,Description="Phred-scaled genotype likelihoods">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1

@@ -113,6 +113,14 @@ run_sql "precision_digits must be between 0 and 18" \
 run_sql "" \
   "SELECT count(*) FROM bcftools_score('test/data/score_input.vcf','test/data/score_summary.tsv',use:='GT',columns:='PLINK');"
 run_sql "" \
+  "CREATE TEMP TABLE roh_map AS SELECT 'chr1' AS chrom, position AS pos, \"Genetic_Map(cM)\" AS cm FROM read_csv('test/data/roh_map_chr1.txt', delim = ' ') UNION ALL SELECT 'chr2', position, \"Genetic_Map(cM)\" FROM read_csv('test/data/roh_map_chr2.txt', delim = ' '); SELECT CASE WHEN count(*) = 4 AND sum(n_markers) = 597 THEN true ELSE error('roh PL segments') END FROM duckhts_roh('test/data/roh_fixture.vcf.gz', 'AF'); SELECT CASE WHEN count(*) = 4 AND sum(n_markers) = 596 THEN true ELSE error('roh GT segments') END FROM duckhts_roh('test/data/roh_fixture.vcf.gz', 'AF', gt_error := 30); SELECT CASE WHEN count(*) = 4 AND sum(n_markers) = 569 THEN true ELSE error('roh map segments') END FROM duckhts_roh('test/data/roh_fixture.vcf.gz', 'AF', 'roh_map', rec_rate := 0.5); SELECT CASE WHEN count(*) = 16 THEN true ELSE error('roh transition segments') END FROM duckhts_roh('test/data/roh_fixture.vcf.gz', 'AF', hw_to_az := 1e-5, az_to_hw := 1e-6); SELECT CASE WHEN len(duckhts_roh_segments([]::BIGINT[], []::DOUBLE[], []::INTEGER[][], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9)) = 0 AND len(duckhts_roh_segments([5000], [0.05], [[60, 30, 0]], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9)) = 1 THEN true ELSE error('roh degenerate lists') END;"
+run_sql "positions must be sorted ascending" \
+  "SELECT duckhts_roh_segments([200, 100], [0.3, 0.3], [[0, 30, 60], [0, 30, 60]], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);"
+run_sql "positions and af lists differ in length" \
+  "SELECT duckhts_roh_segments([100, 200], [0.3], [[0, 30, 60], [0, 30, 60]], NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);"
+run_sql "genetic map positions must be strictly ascending" \
+  "SELECT duckhts_roh_segments([100], [0.3], [[0, 30, 60]], [200, 100]::BIGINT[], [0.1, 0.2]::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);"
+run_sql "" \
   "SELECT CASE WHEN count(*)=2053 AND count(*) FILTER (WHERE VEP_SYMBOL=['GENE1'] AND VEP_DISTANCE=[12])=2053 THEN true ELSE error('tidy CSQ record lifetime') END FROM read_bcf('test/data/tidy_chunk_boundary.vcf',tidy_format:=true); SELECT POS,SAMPLE_ID,VEP_SYMBOL,INFO_DP,FORMAT_GT,FORMAT_AD,FORMAT_ST FROM read_bcf('test/data/bcf_cache_lifecycle.vcf',tidy_format:=true);"
 
 ${CC:-cc} -std=c11 -Wall -Wextra -Werror "${compile_flags[@]}" \

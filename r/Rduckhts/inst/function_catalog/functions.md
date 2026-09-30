@@ -121,6 +121,33 @@ This section is generated from `functions.yaml`.
 | [`duckhts_somalier_matched_contamination`](reference.md#duckhts_somalier_matched_contamination) | table_macro | `rduckhts_somalier_matched_contamination` | Estimate directional contamination for explicitly selected receiver/anchor sample pairs. |
 | [`duckhts_somalier_sex`](reference.md#duckhts_somalier_sex) | table_macro | `rduckhts_somalier_sex` | Report X/Y dosage evidence and a review-only XX, XY or ambiguous call per sample from panel counts. |
 
+### Variants
+
+| Function | Kind | R helper | Description |
+| --- | --- | --- | --- |
+| [`duckhts_roh_segments`](reference.md#duckhts_roh_segments) | scalar |  | Decode runs of homozygosity from one sample's sorted per-chromosome site lists, reproducing bcftools roh. |
+| [`duckhts_roh`](reference.md#duckhts_roh) | table_macro | `rduckhts_roh` | Find runs of homozygosity in a VCF/BCF with the bcftools roh model, using allele frequencies from an INFO tag. |
+| [`duckhts_roh_af_table`](reference.md#duckhts_roh_af_table) | table_macro | `rduckhts_roh` | Find runs of homozygosity in a VCF/BCF with the bcftools roh model, using allele frequencies from a caller relation. |
+| [`variantkey`](reference.md#variantkey) | scalar |  | Encode a normalized biallelic variant as an official VariantKey-compatible 64-bit unsigned integer. This DuckHTS wrapper accepts 1-based VCF/DuckHTS POS to match bcftools `%VKX` / `+add-variantkey`, internally converts to the upstream 0-based field, and preserves the official hashed nonreversible mode for large, ambiguous, and symbolic REF/ALT strings. Only CHROM, POS, REF, and ALT are encoded; END, SVLEN, mate breakend coordinates, and other SV metadata are not. |
+| [`variantkey_hex`](reference.md#variantkey_hex) | scalar |  | Render a VariantKey as its lowercase 16-character hexadecimal string representation. |
+| [`parse_variantkey_hex`](reference.md#parse_variantkey_hex) | scalar |  | Parse a 16-character hexadecimal VariantKey string back into its UBIGINT code. Invalid or non-hex strings return NULL. |
+| [`encode_variantkey`](reference.md#encode_variantkey) | scalar |  | Encode the raw upstream VariantKey fields directly: chromosome code, 0-based position, and 31-bit REF+ALT code. |
+| [`extract_variantkey_chrom`](reference.md#extract_variantkey_chrom) | scalar |  | Extract the raw upstream VariantKey chromosome code. |
+| [`extract_variantkey_pos`](reference.md#extract_variantkey_pos) | scalar |  | Extract the raw upstream VariantKey 0-based position field. |
+| [`extract_variantkey_refalt`](reference.md#extract_variantkey_refalt) | scalar |  | Extract the raw upstream 31-bit VariantKey REF+ALT code. |
+| [`decode_variantkey`](reference.md#decode_variantkey) | scalar |  | Decode a VariantKey into its raw upstream numeric fields: chrom_code, pos0, and refalt_code. |
+| [`reverse_variantkey`](reference.md#reverse_variantkey) | scalar |  | Decode a VariantKey into a STRUCT with chrom, chrom_code, 1-based pos, upstream 0-based pos0, ref, alt, refalt_code, and reversible. For hashed nonreversible keys, reversible is FALSE and ref/alt are returned as NULL because DuckHTS v1 does not ship the optional NRVK lookup sidecar. |
+| [`variantkey_range`](reference.md#variantkey_range) | scalar |  | Return the inclusive minimum and maximum VariantKey bounds for a chromosome plus 1-based VCF position range, suitable for numeric range filtering on precomputed VariantKeys. |
+| [`duckhts_contig_key`](reference.md#duckhts_contig_key) | scalar |  | Return a conservative contig join key by removing one non-empty leading chr prefix case-insensitively and normalizing M/MT to MT. X and Y are uppercased; all other suffixes are preserved. This does not map numeric sex chromosomes, accessions, patches, or alternate loci. |
+| [`bcftools_liftover`](reference.md#bcftools_liftover) | scalar | `rduckhts_liftover` | Row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with fields: src_chrom, src_pos, src_ref, src_alt, dest_chrom, dest_pos, dest_end, dest_ref, dest_alt, mapped, reverse_complemented, swap, reject_reason, and note. Set no_left_align := true to skip post-liftover left-alignment of lifted indels (mirrors --no-left-align in bcftools +liftover). |
+| [`duckdb_liftover`](reference.md#duckdb_liftover) | table_macro | `rduckhts_liftover` | DuckDB-specific wrapper over bcftools_liftover that takes either a table name or a derived-table expression plus column-name strings for chrom/pos/ref/alt and returns the lifted table. The no_left_align parameter mirrors --no-left-align in bcftools +liftover. |
+| [`bcftools_norm_row`](reference.md#bcftools_norm_row) | scalar |  | Normalize one variant against FASTA with bcftools/vt-style left alignment. |
+| [`duckhts_bcftools_norm`](reference.md#duckhts_bcftools_norm) | table_macro | `rduckhts_bcftools_norm` | Normalize variants from a table or derived-table expression while preserving input columns. |
+| [`bcftools_score`](reference.md#bcftools_score) | table | `rduckhts_score` | Compute polygenic scores from genotype VCF/BCF and summary statistics using bcftools +score dosage semantics. |
+| [`bcftools_munge_row`](reference.md#bcftools_munge_row) | scalar |  | Normalize one summary-statistics row into GWAS-VCF-style fields (chrom/pos/ref/alt/effect metrics), resolving REF/ALT orientation against a FASTA reference and applying swap-aware sign/frequency/count transforms. The output flag `alleles_swapped` means REF/ALT orientation was swapped to match the FASTA reference. |
+| [`duckdb_munge`](reference.md#duckdb_munge) | table_macro | `rduckhts_munge` | DuckDB macro wrapper over bcftools_munge_row that maps source columns (via preset or explicit map) and returns normalized GWAS-VCF-style rows with lean outputs and explicit `alleles_swapped` semantics. Output columns: chrom, pos, id, ref, alt, alleles_swapped, filter, ns, ez, nc, es, se, lp, af, ac, ne (16 columns). For METAL meta-analysis output with SI/I2/CQ/ED columns, use duckdb_munge_metal. |
+| [`duckdb_munge_metal`](reference.md#duckdb_munge_metal) | table_macro | `rduckhts_munge` | Extended munge macro with METAL meta-analysis output columns. Same as duckdb_munge but additionally emits: si (imputation info, from INFO input), i2 (Cochran's I² heterogeneity, from HET_I2), cq (Cochran's Q -log10 p, from HET_LP or -log10(HET_P)), and ed (effect direction string, from DIRE; +/- flipped on allele swap). The R wrapper rduckhts_munge() auto-dispatches to this macro when metal keys (INFO, HET_I2, HET_P, HET_LP, DIRE) are present in the resolved column map. |
+
 ### Metadata
 
 | Function | Kind | R helper | Description |
@@ -146,30 +173,6 @@ This section is generated from `functions.yaml`.
 | [`bam_index`](reference.md#bam_index) | table | `rduckhts_bam_index` | Build a BAM or CRAM index and report the written index path and format. |
 | [`bcf_index`](reference.md#bcf_index) | table | `rduckhts_bcf_index` | Build a TBI or CSI index for a VCF or BCF file and report the written index path and format. |
 | [`tabix_index`](reference.md#tabix_index) | table | `rduckhts_tabix_index` | Build a tabix index for a BGZF-compressed text file using a preset or explicit coordinate columns. |
-
-### Variants
-
-| Function | Kind | R helper | Description |
-| --- | --- | --- | --- |
-| [`variantkey`](reference.md#variantkey) | scalar |  | Encode a normalized biallelic variant as an official VariantKey-compatible 64-bit unsigned integer. This DuckHTS wrapper accepts 1-based VCF/DuckHTS POS to match bcftools `%VKX` / `+add-variantkey`, internally converts to the upstream 0-based field, and preserves the official hashed nonreversible mode for large, ambiguous, and symbolic REF/ALT strings. Only CHROM, POS, REF, and ALT are encoded; END, SVLEN, mate breakend coordinates, and other SV metadata are not. |
-| [`variantkey_hex`](reference.md#variantkey_hex) | scalar |  | Render a VariantKey as its lowercase 16-character hexadecimal string representation. |
-| [`parse_variantkey_hex`](reference.md#parse_variantkey_hex) | scalar |  | Parse a 16-character hexadecimal VariantKey string back into its UBIGINT code. Invalid or non-hex strings return NULL. |
-| [`encode_variantkey`](reference.md#encode_variantkey) | scalar |  | Encode the raw upstream VariantKey fields directly: chromosome code, 0-based position, and 31-bit REF+ALT code. |
-| [`extract_variantkey_chrom`](reference.md#extract_variantkey_chrom) | scalar |  | Extract the raw upstream VariantKey chromosome code. |
-| [`extract_variantkey_pos`](reference.md#extract_variantkey_pos) | scalar |  | Extract the raw upstream VariantKey 0-based position field. |
-| [`extract_variantkey_refalt`](reference.md#extract_variantkey_refalt) | scalar |  | Extract the raw upstream 31-bit VariantKey REF+ALT code. |
-| [`decode_variantkey`](reference.md#decode_variantkey) | scalar |  | Decode a VariantKey into its raw upstream numeric fields: chrom_code, pos0, and refalt_code. |
-| [`reverse_variantkey`](reference.md#reverse_variantkey) | scalar |  | Decode a VariantKey into a STRUCT with chrom, chrom_code, 1-based pos, upstream 0-based pos0, ref, alt, refalt_code, and reversible. For hashed nonreversible keys, reversible is FALSE and ref/alt are returned as NULL because DuckHTS v1 does not ship the optional NRVK lookup sidecar. |
-| [`variantkey_range`](reference.md#variantkey_range) | scalar |  | Return the inclusive minimum and maximum VariantKey bounds for a chromosome plus 1-based VCF position range, suitable for numeric range filtering on precomputed VariantKeys. |
-| [`duckhts_contig_key`](reference.md#duckhts_contig_key) | scalar |  | Return a conservative contig join key by removing one non-empty leading chr prefix case-insensitively and normalizing M/MT to MT. X and Y are uppercased; all other suffixes are preserved. This does not map numeric sex chromosomes, accessions, patches, or alternate loci. |
-| [`bcftools_liftover`](reference.md#bcftools_liftover) | scalar | `rduckhts_liftover` | Row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with fields: src_chrom, src_pos, src_ref, src_alt, dest_chrom, dest_pos, dest_end, dest_ref, dest_alt, mapped, reverse_complemented, swap, reject_reason, and note. Set no_left_align := true to skip post-liftover left-alignment of lifted indels (mirrors --no-left-align in bcftools +liftover). |
-| [`duckdb_liftover`](reference.md#duckdb_liftover) | table_macro | `rduckhts_liftover` | DuckDB-specific wrapper over bcftools_liftover that takes either a table name or a derived-table expression plus column-name strings for chrom/pos/ref/alt and returns the lifted table. The no_left_align parameter mirrors --no-left-align in bcftools +liftover. |
-| [`bcftools_norm_row`](reference.md#bcftools_norm_row) | scalar |  | Normalize one variant against FASTA with bcftools/vt-style left alignment. |
-| [`duckhts_bcftools_norm`](reference.md#duckhts_bcftools_norm) | table_macro | `rduckhts_bcftools_norm` | Normalize variants from a table or derived-table expression while preserving input columns. |
-| [`bcftools_score`](reference.md#bcftools_score) | table | `rduckhts_score` | Compute polygenic scores from genotype VCF/BCF and summary statistics using bcftools +score dosage semantics. |
-| [`bcftools_munge_row`](reference.md#bcftools_munge_row) | scalar |  | Normalize one summary-statistics row into GWAS-VCF-style fields (chrom/pos/ref/alt/effect metrics), resolving REF/ALT orientation against a FASTA reference and applying swap-aware sign/frequency/count transforms. The output flag `alleles_swapped` means REF/ALT orientation was swapped to match the FASTA reference. |
-| [`duckdb_munge`](reference.md#duckdb_munge) | table_macro | `rduckhts_munge` | DuckDB macro wrapper over bcftools_munge_row that maps source columns (via preset or explicit map) and returns normalized GWAS-VCF-style rows with lean outputs and explicit `alleles_swapped` semantics. Output columns: chrom, pos, id, ref, alt, alleles_swapped, filter, ns, ez, nc, es, se, lp, af, ac, ne (16 columns). For METAL meta-analysis output with SI/I2/CQ/ED columns, use duckdb_munge_metal. |
-| [`duckdb_munge_metal`](reference.md#duckdb_munge_metal) | table_macro | `rduckhts_munge` | Extended munge macro with METAL meta-analysis output columns. Same as duckdb_munge but additionally emits: si (imputation info, from INFO input), i2 (Cochran's I² heterogeneity, from HET_I2), cq (Cochran's Q -log10 p, from HET_LP or -log10(HET_P)), and ed (effect direction string, from DIRE; +/- flipped on allele swap). The R wrapper rduckhts_munge() auto-dispatches to this macro when metal keys (INFO, HET_I2, HET_P, HET_LP, DIRE) are present in the resolved column map. |
 
 ### Sequence UDFs
 

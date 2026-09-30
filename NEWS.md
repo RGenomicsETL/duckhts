@@ -1,8 +1,8 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.2.9008
+# duckhts 1.5.2.9009
 
-Preview of 2.0.0, still in development: ROH (#318) is still to come. The sections below describe what 2.0.0 will contain.
+Preview of 2.0.0, still in development: ROH (#318) has begun with the bcftools-compatible kernel; ancestry-tuned frequencies and count-based emissions are still to come. The sections below describe what 2.0.0 will contain.
 
 ## Breaking changes
 
@@ -73,6 +73,28 @@ Preview of 2.0.0, still in development: ROH (#318) is still to come. The section
   evidence rows, and their numeric results on the autosomal sites are unchanged.
 
 ## New features
+
+- Runs of homozygosity (#318, first phase). The native scalar
+  `duckhts_roh_segments(positions, af, pl, map_pos, map_cm, rec_rate, hw_to_az,
+  az_to_hw)` and its GT-dosage overload (with `gt_error`) decode one sample's
+  sorted per-chromosome lists into `STRUCT(start, "end", n_markers, quality)[]`.
+  It is a port of the `bcftools roh` model (`vcfroh.c` and `HMM.c`, MIT, Genome
+  Research Ltd): autozygous and Hardy-Weinberg states, per-base-pair transitions
+  compounded over physical distance, an optional genetic map or constant rate,
+  Viterbi segments and forward-backward quality. On the test fixture, start, end,
+  length and marker counts equal `bcftools roh` in PL, `-G`, `--AF-file`, `-M`,
+  `-m` and `-a`/`-H` modes; quality equals the one decimal bcftools prints.
+  Sites bcftools skips (missing or zero AF, missing or uninformative genotype
+  evidence, repeated position) are skipped, and malformed lists are errors that
+  name the problem.
+
+- New `duckhts_roh(path, af_tag, [genetic_map,] ...)` and
+  `duckhts_roh_af_table(path, af_table, [genetic_map,] ...)` macros read a
+  VCF/BCF, build the lists per sample and chromosome and return `(sample,
+  chrom, start, "end", length, n_markers, quality)`. Frequencies come from an
+  INFO tag or a `(chrom, pos, ref, alt, af)` relation; the optional map is a
+  `(chrom, pos, cm)` relation; `gt_error`, `rec_rate`, `hw_to_az`, `az_to_hw`
+  and `samples` are named arguments. GT mode needs no FORMAT/PL.
 
 - `read_bcf()` and `read_geno()` take `regions := STRUCT(chrom VARCHAR, start
   BIGINT, "end" BIGINT)[]`: 0-based half-open intervals (VCF position `p` is

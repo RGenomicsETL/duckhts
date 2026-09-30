@@ -59,6 +59,39 @@ bcftools filter expression engine
 	inst/duckhts_extension/include/bcftools_shim.h and bcftools_filter_config.h for the
 	compatibility shims (no separate notice).
 
+bcftools roh hidden Markov model
+	Source: inst/duckhts_extension/roh_hmm.c, inst/duckhts_extension/include/roh_hmm.h
+	Holder: Genome Research Ltd (Copyright (c) 2014-2026)
+	Author: Petr Danecek <pd3@sanger.ac.uk>
+	License: MIT; the upstream notice is reproduced below and at the head of roh_hmm.c.
+	Note: roh_hmm.c ports the model of bcftools vcfroh.c and HMM.c (commit 6dbd8fef): emission
+	probabilities, the precomputed transition matrices and genetic-map or constant-rate
+	rescaling, Viterbi decoding, forward-backward posteriors and the RG segment rules.
+	roh_udf.c and roh_sql.c are DuckHTS code (MIT) that call it.
+	  The MIT License
+
+	  Copyright (c) 2014-2026 Genome Research Ltd.
+
+	  Author: Petr Danecek <pd3@sanger.ac.uk>
+
+	  Permission is hereby granted, free of charge, to any person obtaining a copy
+	  of this software and associated documentation files (the "Software"), to deal
+	  in the Software without restriction, including without limitation the rights
+	  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+	  copies of the Software, and to permit persons to whom the Software is
+	  furnished to do so, subject to the following conditions:
+
+	  The above copyright notice and this permission notice shall be included in
+	  all copies or substantial portions of the Software.
+
+	  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+	  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+	  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+	  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+	  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+	  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+	  THE SOFTWARE.
+
 BCFtools +score plugin functions
 	Source: inst/duckhts_extension/score_udf.c. bcf_hdr_name2id_flexible() and
 	        tsv_read_float_and_minus_log10() are ported from bcftools plugins/score.h and
