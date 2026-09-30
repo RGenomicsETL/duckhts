@@ -1,5 +1,20 @@
 # Rduckhts 1.5.2.9007-0.1.5
 
+- New `regions_var` argument on `rduckhts_geno()` and `rduckhts_bcf()` names a
+  session variable holding typed 0-based half-open intervals for
+  `read_geno(regions := ...)` / `read_bcf(regions := ...)`. The variable must
+  exist (an unknown name would otherwise mean an unrestricted scan).
+
+- New `rduckhts_geno_sites()` fetches full-site genotypes for requested
+  `(chrom, pos, ref, alt)` alleles from an indexed VCF/BCF on the caller
+  connection: it validates the requests, plans distinct positions with
+  `SET VARIABLE`, runs one `read_geno()` scan and joins exact alleles, returning
+  every request with `record_index`, `full_alt`, `alt_index`, `calls` (including
+  `GP`, `DS` or `HS` via `format_fields`) and a position-level `match_status`
+  (`matched`, `allele_not_at_site`, `ref_mismatch`, `absent`). Nothing is trimmed,
+  split, flipped or lifted over. Its session variable and temporary request
+  table are removed on exit, including after an error.
+
 - Breaking: the Somalier panel now carries X/Y sites and its identity changes.
   `rduckhts_somalier_import_sites()` keeps records on the Somalier v0.3.4 X/Y
   aliases, numbered after every autosomal site, and the panel, frequency and
