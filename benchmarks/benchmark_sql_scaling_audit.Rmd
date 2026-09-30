@@ -162,6 +162,18 @@ vcf_counts_input_identity <- unique(vcf_counts_runs[c(
   "input_id", "input_sha256", "input_bytes", "input_records",
   "panel_source_id", "panel_source_sha256", "panel_source_bytes",
   "panel_sites", "panel_sha256")])
+vcf_nonerror <- vcf_counts_runs[vcf_counts_runs$cell != "duplicate_error_1m", ]
+vcf_branch_total <- sum(vcf_nonerror$implementation == "branch")
+vcf_branch_ok <- sum(vcf_nonerror$implementation == "branch" &
+                       vcf_nonerror$resource_verdict == "within_budget")
+vcf_prechange_total <- sum(vcf_nonerror$implementation == "prechange")
+vcf_prechange_oom <- sum(vcf_nonerror$implementation == "prechange" &
+                           vcf_nonerror$execution_status == "out_of_memory")
+import_rss_4x <- local({
+  rss <- import_repeats$peak_rss_kib[import_repeats$multiplier == 4L &
+                                       import_repeats$threads == 4L] / 1024
+  sprintf("%.0f–%.0f MiB", min(rss), max(rss))
+})
 stopifnot(all(table(interaction(real$case, real$threads)) == 3L),
           all(table(interaction(wrappers$case, wrappers$threads)) == 3L),
           all(real$multiplier %in% c(1L, 2L, 4L)),
@@ -283,7 +295,7 @@ knitr::kable(vcf_counts_input_identity, row.names = FALSE)
 
 ## Site import: real-input materialization
 
-The candidate build is the commit containing this report, based on `509190790a3ce9d51ec735b2313d0c46b0969a70`. The public phase-3 GRCh37 chr22 VCF supplies 124,658 / 274,567 / 562,061 biallelic SNVs; the importer emits exactly one row per site. Offline registry validation and VCF derivation (`stage_sql_scaling_audit.R`) are outside query timing. The full 562,061-row keyed differential on `(assembly, site_index)` is in `sql_scaling_import_keyed_differential.tsv`; zero duplicate keys, missing rows, or column disagreements. Its baseline and candidate Parquet exports were produced in separate fresh processes. The baseline physical plan materializes `__dht_source` (562,061 records), `__dht_autosomal`, and `__dht_oriented` before sorting; the candidate retains only the shared source, allowing validation and orientation to consume it without two further wide copies. `READ_BCF` runs once in either plan.
+The keyed differential and the paired baseline → candidate figures below come from candidate `a2e81c6f`, based on `509190790a3ce9d51ec735b2313d0c46b0969a70`. The repetitions table was measured again on the commit containing this report, after merging the Somalier X/Y panel change; chr22 input has no X/Y records, so the output rows are unchanged. The public phase-3 GRCh37 chr22 VCF supplies 124,658 / 274,567 / 562,061 biallelic SNVs; the importer emits exactly one row per site. Offline registry validation and VCF derivation (`stage_sql_scaling_audit.R`) are outside query timing. The full 562,061-row keyed differential on `(assembly, site_index)` is in `sql_scaling_import_keyed_differential.tsv`; zero duplicate keys, missing rows, or column disagreements. Its baseline and candidate Parquet exports were produced in separate fresh processes. The baseline physical plan materializes `__dht_source` (562,061 records), `__dht_autosomal`, and `__dht_oriented` before sorting; the candidate retains only the shared source, allowing validation and orientation to consume it without two further wide copies. `READ_BCF` runs once in either plan.
 
 Before measurement, the per-process budget was set at **256 MiB runtime + 3 × (64 bytes decoded source + 128 bytes materialized output) per physical input row**; query spill limit **0 MiB**. The three fresh-process repetitions per size at each of 1 and 4 threads are in `sql_scaling_import_repetitions.tsv`. Each measurement materializes every output row in a temporary table. Peak RSS includes connection and extension overhead; buffer/spill are taken from the measured query's JSON profile, before any row-count probe. Staging and oracle work are reported separately. The 1× one-thread time is <5 s, so **no timing exponent or timing scaling verdict** is asserted. Memory stays under the predetermined RSS budget with zero spill at both thread counts.
 
@@ -308,11 +320,11 @@ import_summary <- import_summary[order(import_summary$input_rows,
 knitr::kable(import_summary, row.names = FALSE)
 ```
 
-At one thread, baseline → candidate buffer for 1× / 2× / 4× is **222 / 469 / 942 → 149 / 309 / 614 MiB**. At 562,061 rows, the paired keyed-export runs show **687 → 527 MiB RSS**; both builds produced all 562,061 rows. The repeated candidate 4-thread 4× RSS is **537–539 MiB** against the **565 MiB** budget, with **0 MiB** spill. Reproduce query repetitions with `Rscript benchmarks/benchmark_sql_scaling_import_repetitions.R`; compare separately exported results with `Rscript benchmarks/check_sql_scaling_import_differential.R before.parquet after.parquet`. Timing excludes input staging, keyed exports, and result-count probes.
+At one thread, baseline → candidate buffer for 1× / 2× / 4× is **222 / 469 / 942 → 149 / 309 / 614 MiB**. At 562,061 rows, the paired keyed-export runs show **687 → 527 MiB RSS**; both builds produced all 562,061 rows. The repeated candidate 4-thread 4× RSS is **`r import_rss_4x`** against the **565 MiB** budget, with **0 MiB** spill. Reproduce query repetitions with `Rscript benchmarks/benchmark_sql_scaling_import_repetitions.R`; compare separately exported results with `Rscript benchmarks/check_sql_scaling_import_differential.R before.parquet after.parquet`. Timing excludes input staging, keyed exports, and result-count probes.
 
 ## Open findings, ranked by measured exposure
 
-1. **VCF-count join:** 612 MiB of DuckDB buffer for 1.24 million GIAB records and 2,000 output rows. `READ_GENO` is estimated at one row; the left join therefore builds a hash table from the full VCF source. An exploratory panel `SEMI JOIN` was planned as `RIGHT_SEMI`, still building the source (658 MiB buffer in a single-process diagnostic), so it was not retained. A genuinely selective indexed input or keyed stream join needs a separate design and keyed differential; this diagnostic is not a timing verdict.
+1. **VCF-count join (addressed on this branch):** the pre-change join built its hash table from every decoded VCF record (612 MiB of DuckDB buffer for 1.24 million GIAB records and 2,000 output rows). The branch keeps call payloads only for panel coordinates. In the capped matrix above, the branch completes `r vcf_branch_ok` of `r vcf_branch_total` non-error runs within the 256 MiB budgets, and the pre-change build runs out of memory in `r vcf_prechange_oom` of `r vcf_prechange_total`. Timings stay below the 5-second floor, so this is a memory result, not a timing verdict.
 2. **Site import:** the output grows one-to-one with input; the candidate reduces its 4× one-thread buffer from 942 to 614 MiB, but the 1× query is still below the timing floor. A larger public source is required before a time-scaling verdict.
 3. **Munge/Metal reference-backed modes:** the single-observation 200k / 400k / 800k real epilepsy probe approaches linear time, but does not meet the three-repetition timing gate. The 800k-row SQL output occupies about 779 MiB DuckDB buffer; COPY-to-disk output and any bounded streaming requirement are separate questions. The R wrapper 800k-row result reaches 645 MiB RSS (`r_munge`) and 710 MiB (`r_munge_metal`), consistent with returning a large R data frame.
 4. **Liftover:** the entire staged chr22 GRCh37 source holds only ~1.1 million variants; the current 250k baseline is below the timing floor. A larger public source, allele/mapped-output verification, and EXPLAIN ANALYZE at that scale are required.
