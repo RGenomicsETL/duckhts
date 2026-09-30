@@ -32,8 +32,47 @@ and run `duckhts_bench_fetch(id)` to verify them without contacting Figshare.
 A redirected or merged copy is not an acceptable identity. The epilepsy
 input and public GRCh37 phase-3 1000 Genomes chr22 genotypes have independent
 registry identities. On chr22, their allele agreement with
-the reference products must be checked before site selection. GRCh38 30x CRAMs
-require the registered GRCh37-to-GRCh38 chain and source/destination FASTAs;
-retain the mapped, rejected, swapped, and duplicate-destination denominators
-before comparing aligned reads to phased genotypes. The ancestry comparison
-must retain its per-sample matching counts and correlation-gate failures.
+the reference products must be checked before site selection. The ancestry
+comparison must retain its per-sample matching counts and correlation-gate
+failures.
+
+## GRCh38 product
+
+`ancestry_reference_grch38_parquet` is the GRCh38 derivation of the keyed
+Parquet product, made by `duckhts_bench_stage_ancestry_grch38_parquet()` with
+`duckdb_liftover`, the registered GRCh37-to-GRCh38 chain and the registered
+source and destination FASTAs. Its layout is that of the GRCh37 product, so the
+panel builder and `rduckhts_ancestry_proportions()` consume it unchanged.
+
+The coded allele of a locus is the source `allele_b`: the frequencies and
+loadings describe it. Liftover reports its destination spelling through
+`reverse_complemented`, and the derived key is `allele_a` = the other allele,
+`allele_b` = the coded allele. Every frequency and loading is copied unchanged,
+which is the wrapper's reversal convention (a reversed input meets an
+unchanged reference row). When the coded allele is the destination reference,
+liftover reports a swap; the locus is counted but not rewritten, because
+`1 - f` with negated loadings shifts each PC by `-sum(U)`, which the per-PC
+correction coefficients scale on one side only. Loci that do not map, are not
+single-base substitutions, land off chromosomes 1-22, keep neither destination
+allele, or share a destination position with another locus are dropped, and
+each is counted.
+
+The receipt (`reference.grch38.parquet.sources.tsv`, columns `field` and
+`value`) binds the SHA-256 of the source Parquet, chain, source FASTA and
+destination FASTA, the registry derivation, the DuckDB, DuckHTS htslib and
+Rduckhts versions and the output SHA-256 to the denominators: input loci,
+mapped, rejected by reason, reverse-complemented, swapped,
+duplicate-destination dropped and output loci. Every input locus is in exactly
+one of rejected, duplicate-destination dropped or output. A companion
+`reference.grch38.liftover.parquet` maps each output locus to its GRCh37 source
+locus and alleles; its hash is in the receipt. A cached product whose receipt
+does not match its sources is an error, not a rebuild.
+
+`benchmarks/benchmark_ancestry_grch38.md` is the acceptance comparison:
+ancestry proportions from the registered 30x GRCh38 CRAMs against the GRCh38
+product, and from the GRCh37 phase-3 phased genotypes of the same individuals
+against the GRCh37 product, at the same genome-wide panel loci. The genotypes
+are read by indexed `read_bcf(region := ...)` at the panel loci and the CRAMs are
+cut to the panel loci; `duckhts_bench_stage_ancestry_grch38_acceptance()`
+stages both with a receipt. The tolerance is declared in the report source; the
+per-sample matching counts and correlation-gate results are retained.

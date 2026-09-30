@@ -1,0 +1,334 @@
+---
+title: "Real-input SQL scaling audit: measured paths and open coverage"
+output: github_document
+---
+
+<!-- benchmark_sql_scaling_audit.md is rendered from this file. -->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+real <- utils::read.delim("benchmarks/sql_scaling_audit_real.tsv")
+wrappers <- utils::read.delim("benchmarks/sql_scaling_audit_wrappers.tsv")
+before <- utils::read.delim("benchmarks/sql_scaling_audit_vcf_before.tsv")
+vcf_counts_runs <- utils::read.delim(
+  "benchmarks/sql_scaling_vcf_counts_runs.tsv", stringsAsFactors = FALSE,
+  check.names = FALSE, na.strings = "NA")
+parity <- utils::read.delim("benchmarks/sql_scaling_vcf_keyed_differential.tsv")
+import_parity <- utils::read.delim("benchmarks/sql_scaling_import_keyed_differential.tsv")
+import_repeats <- utils::read.delim("benchmarks/sql_scaling_import_repetitions.tsv")
+stopifnot(nrow(import_parity) == 1L,
+          import_parity$rows_before == 562061L,
+          import_parity$rows_after == 562061L,
+          all(import_parity[c("duplicate_keys_before", "duplicate_keys_after",
+                              "keyed_disagreements", "lost", "gained")] == 0L),
+          nrow(import_repeats) == 18L,
+          all(table(interaction(import_repeats$multiplier,
+                                import_repeats$threads)) == 3L),
+          all(import_repeats$input_records == import_repeats$result_rows),
+          isTRUE(all.equal(import_repeats$rss_limit_mib,
+                           256 + 3 * 192 * import_repeats$input_records / 1048576)),
+          all(import_repeats$rss_verdict == ifelse(
+            import_repeats$peak_rss_kib / 1024 <= import_repeats$rss_limit_mib,
+            "within_budget", "over_budget")),
+          all(import_repeats$spill_verdict == ifelse(
+            import_repeats$peak_spill_mib <= import_repeats$spill_limit_mib,
+            "within_budget", "over_budget")))
+stopifnot(nrow(parity) == 1L, parity$rows_before == 2000L,
+          parity$rows_after == 2000L,
+          all(parity[c("duplicate_keys_before", "duplicate_keys_after",
+                       "lost", "gained")] == 0L))
+vcf_count_cells <- c(
+  "panel_1x_fixed_file_4x", "panel_2x_fixed_file_4x",
+  "panel_4x_fixed_file_4x", "file_1x_fixed_panel_1x",
+  "file_2x_fixed_panel_1x", "file_4x_fixed_panel_1x",
+  "joint_file_2x_panel_2x", "duplicate_error_1m")
+stopifnot(nrow(vcf_counts_runs) == 96L,
+          all(table(interaction(vcf_counts_runs$implementation,
+                                vcf_counts_runs$cell,
+                                vcf_counts_runs$threads)) == 3L),
+          setequal(unique(vcf_counts_runs$cell), vcf_count_cells),
+          setequal(unique(vcf_counts_runs$threads), c(1L, 4L)),
+          all(vcf_counts_runs$memory_limit == "256MB"),
+          all(vcf_counts_runs$max_temp_directory_size == "0B"),
+          all(nzchar(vcf_counts_runs$private_temp_directory)),
+          all(vcf_counts_runs$input_records > 0L),
+          all(vcf_counts_runs$panel_sites > 0L))
+format_metric <- function(values, digits = 1L) {
+  values <- values[is.finite(values)]
+  if (!length(values)) return("NA")
+  sprintf(paste0("%.", digits, "f [ %.", digits, "f, %.", digits, "f ]"),
+          median(values), min(values), max(values))
+}
+format_values <- function(values) {
+  paste(sort(unique(ifelse(is.na(values), "NA", as.character(values)))),
+        collapse = ", ")
+}
+summarize_vcf_counts <- function(implementation) {
+  data <- vcf_counts_runs[vcf_counts_runs$implementation == implementation, ]
+  keys <- unique(data[c("cell", "threads")])
+  keys <- keys[order(match(keys$cell, vcf_count_cells), keys$threads), ]
+  rows <- lapply(seq_len(nrow(keys)), function(index) {
+    group <- data[data$cell == keys$cell[[index]] &
+                    data$threads == keys$threads[[index]], ]
+    passed <- sum(group$resource_verdict == "within_budget")
+    verdict <- if (passed == 3L) "PASS" else {
+      paste0("FAIL/INCOMPLETE (", passed, "/3 within budget)")
+    }
+    data.frame(
+      cell = keys$cell[[index]], threads = keys$threads[[index]],
+      input_records = format_values(group$input_records),
+      panel_sites = format_values(group$panel_sites),
+      output_rows = format_values(group$output_rows),
+      execution = format_values(group$execution_status),
+      seconds_median_min_max = format_metric(group$seconds, 3L),
+      rss_mib_median_min_max = format_metric(group$peak_rss_mib),
+      buffer_mib_median_min_max = format_metric(group$peak_buffer_mib),
+      spill_mib_median_min_max = format_metric(group$peak_spill_mib),
+      budget_verdict = verdict,
+      stringsAsFactors = FALSE
+    )
+  })
+  do.call(rbind, rows)
+}
+vcf_counts_prechange <- summarize_vcf_counts("prechange")
+vcf_counts_branch <- summarize_vcf_counts("branch")
+vcf_counts_file_doublings <- local({
+  data <- vcf_counts_runs[vcf_counts_runs$axis == "file", ]
+  rows <- list()
+  index <- 0L
+  for (implementation in c("prechange", "branch")) {
+    for (threads in c(1L, 4L)) {
+      for (pair in list(c(1L, 2L), c(2L, 4L))) {
+        from_cell <- paste0("file_", pair[[1L]], "x_fixed_panel_1x")
+        to_cell <- paste0("file_", pair[[2L]], "x_fixed_panel_1x")
+        from <- data[data$implementation == implementation &
+                       data$threads == threads & data$cell == from_cell, ]
+        to <- data[data$implementation == implementation &
+                     data$threads == threads & data$cell == to_cell, ]
+        delta_rss <- median(to$peak_rss_mib, na.rm = TRUE) -
+          median(from$peak_rss_mib, na.rm = TRUE)
+        delta_buffer <- median(to$peak_buffer_mib, na.rm = TRUE) -
+          median(from$peak_buffer_mib, na.rm = TRUE)
+        measured <- is.finite(delta_rss) && is.finite(delta_buffer)
+        verdict <- if (!measured) "FAIL/INCOMPLETE (unmeasured)" else if (
+          delta_rss <= 16 && delta_buffer <= 16
+        ) "PASS" else "FAIL"
+        index <- index + 1L
+        rows[[index]] <- data.frame(
+          implementation = implementation, threads = threads,
+          doubling = paste0(pair[[1L]], "x to ", pair[[2L]], "x"),
+          median_rss_delta_mib = delta_rss,
+          median_buffer_delta_mib = delta_buffer,
+          verdict = verdict, stringsAsFactors = FALSE)
+      }
+    }
+  }
+  do.call(rbind, rows)
+})
+vcf_counts_output_identity <- local({
+  rows <- list()
+  index <- 0L
+  for (cell in vcf_count_cells) {
+    for (threads in c(1L, 4L)) {
+      group <- vcf_counts_runs[vcf_counts_runs$cell == cell &
+                                 vcf_counts_runs$threads == threads, ]
+      before_hash <- unique(na.omit(group$result_sha256[
+        group$implementation == "prechange"]))
+      branch_hash <- unique(na.omit(group$result_sha256[
+        group$implementation == "branch"]))
+      status <- if (!length(before_hash) || !length(branch_hash)) {
+        "comparison unavailable"
+      } else if (length(before_hash) == 1L && length(branch_hash) == 1L &&
+                 identical(before_hash, branch_hash)) {
+        "equal serialized full results"
+      } else {
+        "result hash disagreement"
+      }
+      index <- index + 1L
+      rows[[index]] <- data.frame(cell = cell, threads = threads,
+                                  output_identity = status,
+                                  stringsAsFactors = FALSE)
+    }
+  }
+  do.call(rbind, rows)
+})
+vcf_counts_build_identity <- unique(vcf_counts_runs[c(
+  "implementation", "source_git_sha", "source_dirty_diff_sha256",
+  "extension_sha256", "macro_text_sha256", "duckdb_version",
+  "duckdb_source_id", "R_version", "DBI_version", "duckdb_R_version",
+  "Rduckhts_installed_version", "Rduckhts_source_version",
+  "duckhtsbench_source_version", "htslib_version")])
+vcf_counts_input_identity <- unique(vcf_counts_runs[c(
+  "input_id", "input_sha256", "input_bytes", "input_records",
+  "panel_source_id", "panel_source_sha256", "panel_source_bytes",
+  "panel_sites", "panel_sha256")])
+vcf_nonerror <- vcf_counts_runs[vcf_counts_runs$cell != "duplicate_error_1m", ]
+vcf_branch_total <- sum(vcf_nonerror$implementation == "branch")
+vcf_branch_ok <- sum(vcf_nonerror$implementation == "branch" &
+                       vcf_nonerror$resource_verdict == "within_budget")
+vcf_prechange_total <- sum(vcf_nonerror$implementation == "prechange")
+vcf_prechange_oom <- sum(vcf_nonerror$implementation == "prechange" &
+                           vcf_nonerror$execution_status == "out_of_memory")
+import_rss_4x <- local({
+  rss <- import_repeats$peak_rss_kib[import_repeats$multiplier == 4L &
+                                       import_repeats$threads == 4L] / 1024
+  sprintf("%.0f–%.0f MiB", min(rss), max(rss))
+})
+stopifnot(all(table(interaction(real$case, real$threads)) == 3L),
+          all(table(interaction(wrappers$case, wrappers$threads)) == 3L),
+          all(real$multiplier %in% c(1L, 2L, 4L)),
+          all(wrappers$multiplier %in% c(1L, 2L, 4L)),
+          all(real$seconds > 0), all(real$result_rows > 0),
+          all(wrappers$seconds > 0), all(wrappers$result_rows > 0))
+summarize <- function(data) {
+  rows <- lapply(split(data, interaction(data$case, data$threads)), function(group) {
+    group <- group[order(group$multiplier), ]
+    data.frame(entry_point = group$case[[1L]], threads = group$threads[[1L]],
+               input_records = paste(format(group$input_records, big.mark = ",",
+                                            scientific = FALSE, trim = TRUE),
+                                     collapse = " / "),
+               output_rows = paste(format(group$result_rows, big.mark = ",",
+                                          scientific = FALSE, trim = TRUE),
+                                   collapse = " / "),
+               seconds = paste(sprintf("%.3f", group$seconds), collapse = " / "),
+               peak_rss_mib = paste(sprintf("%.0f", group$peak_rss_kib / 1024),
+                                    collapse = " / "),
+               peak_buffer_mib = paste(sprintf("%.0f", group$peak_buffer_mib),
+                                       collapse = " / "),
+               exponent = sprintf("%.2f", log(group$seconds[[3L]] /
+                                                  group$seconds[[1L]]) /
+                                            log(group$input_records[[3L]] /
+                                                  group$input_records[[1L]])))
+  })
+  result <- do.call(rbind, rows)
+  result[order(match(result$entry_point, unique(data$case)), result$threads), ]
+}
+qualified <- summarize(rbind(real[real$case %in% c("munge", "munge_metal"), ],
+                             wrappers))
+probes <- summarize(real[!real$case %in% c("munge", "munge_metal"), ])
+vcf_after <- real[real$case == "vcf_counts", ]
+vcf_pair <- merge(before, vcf_after, by = c("case", "multiplier", "threads",
+                                             "input_records"), suffixes = c("_before", "_after"))
+stopifnot(nrow(vcf_pair) == 6L,
+          all(vcf_pair$result_rows_before == vcf_pair$result_rows_after))
+```
+
+## Measurement contract
+
+Source: `a0e7949dae4e7958d87cb9954f3cfa8fce59943a` (candidate); `0b9f32a8f572c4b01f2346f00086602ece473c67` (legacy VCF-count baseline only). DuckDB R 1.5.5; Linux; these previously recorded broad-run cells use one fresh DuckDB process and one observation per case/size/thread. The capped VCF-count matrix below uses three fresh processes per cell. `seconds` measures the query, including source reading and temporary-table materialization, but not source VCF subset derivation, panel preparation, connection, or COPY used for keyed differential. RSS is process `VmHWM` (includes preparation); DuckDB buffer is the query JSON profile's `system_peak_buffer_memory`. Numbers are MiB. These measurements are not cross-machine performance comparisons.
+
+Source identity is checked against `r/duckhtsbench/inst/benchmark_registry.tsv`. `stage_sql_scaling_audit.R` derives real chromosome prefixes of the GIAB HG002 NIST v4.2.1 GRCh38 phased VCF (319,349 / 646,810 / 1,236,049 records), and unique biallelic SNV windows of the 1000 Genomes phase-3 GRCh37 chr22 VCF (124,658 / 274,567 / 562,061 records). VCF counts use 2,000 panel sites selected from each corresponding public VCF; import sites return one row per staged site. GRCh37 epilepsy METAL summary statistics supply genuine physical prefixes of 200,000 / 400,000 / 800,000 rows via a streaming `LIMIT`, with the registered GRCh37 FASTA supplied to both munge macros. Liftover uses 250,000 / 500,000 / 1,000,000 real phase-3 chr22 variants and the registered GRCh37→GRCh38 chain and FASTAs. Exponent is `log(t4/t1)/log(input4/input1)` on the displayed actual row counts. Source and output row counts are separate denominators.
+
+Reproduce from repository root with `bcftools` and the registered inputs already in the cache:
+
+```sh
+Rscript benchmarks/stage_sql_scaling_audit.R
+make release -j2
+Rscript benchmarks/benchmark_sql_scaling_real_run.R build/release/duckhts.duckdb_extension
+repo=$PWD
+mkdir -p /tmp/duckhts-scaling-r-lib
+(cd r/Rduckhts && Rscript bootstrap.R "$repo" && R_LIBS_USER=/tmp/duckhts-scaling-r-lib THREADS=4 make test)
+R_LIBS_USER=/tmp/duckhts-scaling-r-lib Rscript benchmarks/benchmark_sql_scaling_real_run.R build/release/duckhts.duckdb_extension --wrappers
+Rscript -e 'rmarkdown::render("benchmarks/benchmark_sql_scaling_audit.Rmd", knit_root_dir = getwd(), quiet = TRUE)'
+```
+
+Pass `--download` to the staging script to fetch missing direct-download inputs through the registry. The `0b9f32a8` VCF-count baseline is in `sql_scaling_audit_vcf_before.tsv`; `--wrappers` writes `sql_scaling_audit_wrappers.tsv`. The synthetic diagnostic inputs in `sql_scaling_audit_measurements.tsv`, `sql_scaling_audit_fixed_pairs.tsv`, and `sql_scaling_audit_norm.tsv` fall below the timing floor and are excluded from scaling conclusions.
+
+## Earlier above-floor probes (one observation per cell)
+
+Columns give 1× / 2× / 4× observations. The single-thread 1× workloads take 6–8 seconds. Both SQL macros and their R wrappers use reference-backed allele validation and emit all selected rows. The wrappers fetch the full result into R; their peak RSS includes the returned data frame, while the SQL timings materialize a DuckDB temporary table. The displayed exponents are exploratory: one observation per cell does not meet the three-repetition timing evidence requirement. These are distinct output-materialization workloads, not a wrapper-overhead comparison.
+
+```{r qualified, results='asis'}
+knitr::kable(qualified, row.names = FALSE)
+```
+
+## Real-input probes below the timing floor
+
+These probes identify allocation behavior but their time exponents are **not scaling verdicts**: all one-thread 1× queries finish in less than two seconds. The liftover denominator is capped by the single staged chr22 VCF; the count and site-import prefixes do not reach a 5-second 1× while retaining a 4× prefix of the same public source.
+
+```{r probes, results='asis'}
+knitr::kable(probes, row.names = FALSE)
+```
+
+## VCF counts: a materialized scan worth removing
+
+At 1,236,049 physical GIAB VCF records and 2,000 output panel rows, the legacy baseline JSON EXPLAIN ANALYZE shows `READ_GENO` (1,236,049 rows) under a materialized CTE feeding `HASH_JOIN`. Removing only `AS MATERIALIZED` from `__dht_source_records` lets the scan feed the join directly. At one thread, in that earlier uncapped one-observation run, before → after: **2.327 → 2.198 s**, **749 → 430 MiB peak RSS**, **1,367 → 612 MiB DuckDB buffer**. Across 319,349 / 646,810 / 1,236,049 records, before → after buffers (MiB) are **373 / 728 / 1,367 → 178 / 333 / 612**. Whole-result keyed differential on `(sample_id, site_index)` for the 4× input (full results from the 0b9f32a8 and candidate builds, exported separately to Parquet): 2,000 baseline and 2,000 candidate rows, zero duplicate keys; `EXCEPT ALL` in both directions returns zero rows. `check_sql_scaling_vcf_differential.R` reproduces the assertion from the two Parquet files; the checked-in receipt is `sql_scaling_vcf_keyed_differential.tsv`. This earlier allocation comparison is not a bounded-memory claim; the capped repeated matrix below applies the declared 256 MiB budgets.
+
+## duckhts_somalier_vcf_counts: capped before/after matrix
+
+This matrix uses the frozen pre-change extension and the extension built from the recorded branch revision. Every cell runs in three fresh serial processes at 1 and 4 DuckDB threads, and the query result is fetched with every output column consumed. The file-axis cells hold a 2,000-site panel fixed across the registered 1× / 2× / 4× GIAB inputs; the panel-axis cells hold the 4× file fixed and use nested 2,000 / 4,000 / 8,000-site panels. The joint-growth cell uses the 2× file and 4,000-site panel. The duplicate-error cell reads one million copies of a single registered chr1 biallelic SNP with its GT and AD calls and uses the matching one-site panel; the staging test exercises this deterministic transformation from a local VCF record without network access.
+
+Before these measurements, the benchmark source declared **process RSS ≤256 MiB**, **query-wide DuckDB buffer ≤256 MiB**, **spill exactly 0 MiB**, and for each file doubling at fixed panel **both median RSS and median query buffer increase by no more than 16 MiB**. Each child sets `memory_limit='256MB'`, `max_temp_directory_size='0B'`, and a private temporary directory. The raw run file records the per-process settings, all input and panel checksums, output row counts, timings, memory observations, versions, build identities, and the frozen/candidate macro hashes. Any failed or unmeasured metric remains a budget failure/incomplete result. The fastest 1× run is below the 5-second timing floor, so no timing exponent or timing-scaling verdict is made.
+
+### Frozen pre-change implementation
+
+```{r vcf-counts-prechange, results='asis'}
+knitr::kable(vcf_counts_prechange, row.names = FALSE)
+```
+
+### Branch implementation
+
+```{r vcf-counts-branch, results='asis'}
+knitr::kable(vcf_counts_branch, row.names = FALSE)
+```
+
+### File-doubling memory gates
+
+The `1×→2×` and `2×→4×` verdicts require both median memory deltas to remain at or below 16 MiB. Failures and unavailable profiles remain visible.
+
+```{r vcf-counts-file-doublings, results='asis'}
+knitr::kable(vcf_counts_file_doublings, row.names = FALSE)
+```
+
+### Per-cell output and provenance checks
+
+```{r vcf-counts-output-identity, results='asis'}
+knitr::kable(vcf_counts_output_identity, row.names = FALSE)
+```
+
+The raw per-run records are `sql_scaling_vcf_counts_runs.tsv`. The following tables identify the exact builds and staged inputs used by those runs; the baseline source commit is `r unique(vcf_counts_runs$source_git_sha[vcf_counts_runs$implementation == "prechange"])` and its empty dirty-diff hash identifies the clean commit tree.
+
+```{r vcf-counts-build-identity, results='asis'}
+knitr::kable(vcf_counts_build_identity, row.names = FALSE)
+knitr::kable(vcf_counts_input_identity, row.names = FALSE)
+```
+
+## Site import: real-input materialization
+
+The keyed differential and the paired baseline → candidate figures below come from candidate `a2e81c6f`, based on `509190790a3ce9d51ec735b2313d0c46b0969a70`. The repetitions table was measured again on the commit containing this report, after merging the Somalier X/Y panel change; chr22 input has no X/Y records, so the output rows are unchanged. The public phase-3 GRCh37 chr22 VCF supplies 124,658 / 274,567 / 562,061 biallelic SNVs; the importer emits exactly one row per site. Offline registry validation and VCF derivation (`stage_sql_scaling_audit.R`) are outside query timing. The full 562,061-row keyed differential on `(assembly, site_index)` is in `sql_scaling_import_keyed_differential.tsv`; zero duplicate keys, missing rows, or column disagreements. Its baseline and candidate Parquet exports were produced in separate fresh processes. The baseline physical plan materializes `__dht_source` (562,061 records), `__dht_autosomal`, and `__dht_oriented` before sorting; the candidate retains only the shared source, allowing validation and orientation to consume it without two further wide copies. `READ_BCF` runs once in either plan.
+
+Before measurement, the per-process budget was set at **256 MiB runtime + 3 × (64 bytes decoded source + 128 bytes materialized output) per physical input row**; query spill limit **0 MiB**. The three fresh-process repetitions per size at each of 1 and 4 threads are in `sql_scaling_import_repetitions.tsv`. Each measurement materializes every output row in a temporary table. Peak RSS includes connection and extension overhead; buffer/spill are taken from the measured query's JSON profile, before any row-count probe. Staging and oracle work are reported separately. The 1× one-thread time is <5 s, so **no timing exponent or timing scaling verdict** is asserted. Memory stays under the predetermined RSS budget with zero spill at both thread counts.
+
+```{r import-repetitions, results='asis'}
+import_summary <- do.call(rbind, lapply(
+  split(import_repeats, interaction(import_repeats$multiplier,
+                                    import_repeats$threads)), function(group) {
+    data.frame(input_rows = group$input_records[[1L]],
+               output_rows = group$result_rows[[1L]],
+               threads = group$threads[[1L]],
+               seconds = paste(sprintf("%.3f", group$seconds), collapse = " / "),
+               rss_mib = paste(sprintf("%.0f", group$peak_rss_kib / 1024),
+                               collapse = " / "),
+               rss_limit_mib = sprintf("%.0f", group$rss_limit_mib[[1L]]),
+               buffer_mib = paste(sprintf("%.0f", group$peak_buffer_mib),
+                                  collapse = " / "),
+               spill_mib = paste(sprintf("%.0f", group$peak_spill_mib),
+                                 collapse = " / "))
+  }))
+import_summary <- import_summary[order(import_summary$input_rows,
+                                       import_summary$threads), ]
+knitr::kable(import_summary, row.names = FALSE)
+```
+
+At one thread, baseline → candidate buffer for 1× / 2× / 4× is **222 / 469 / 942 → 149 / 309 / 614 MiB**. At 562,061 rows, the paired keyed-export runs show **687 → 527 MiB RSS**; both builds produced all 562,061 rows. The repeated candidate 4-thread 4× RSS is **`r import_rss_4x`** against the **565 MiB** budget, with **0 MiB** spill. Reproduce query repetitions with `Rscript benchmarks/benchmark_sql_scaling_import_repetitions.R`; compare separately exported results with `Rscript benchmarks/check_sql_scaling_import_differential.R before.parquet after.parquet`. Timing excludes input staging, keyed exports, and result-count probes.
+
+## Open findings, ranked by measured exposure
+
+1. **VCF-count join (addressed on this branch):** the pre-change join built its hash table from every decoded VCF record (612 MiB of DuckDB buffer for 1.24 million GIAB records and 2,000 output rows). The branch keeps call payloads only for panel coordinates. In the capped matrix above, the branch completes `r vcf_branch_ok` of `r vcf_branch_total` non-error runs within the 256 MiB budgets, and the pre-change build runs out of memory in `r vcf_prechange_oom` of `r vcf_prechange_total`. Timings stay below the 5-second floor, so this is a memory result, not a timing verdict.
+2. **Site import:** the output grows one-to-one with input; the candidate reduces its 4× one-thread buffer from 942 to 614 MiB, but the 1× query is still below the timing floor. A larger public source is required before a time-scaling verdict.
+3. **Munge/Metal reference-backed modes:** the single-observation 200k / 400k / 800k real epilepsy probe approaches linear time, but does not meet the three-repetition timing gate. The 800k-row SQL output occupies about 779 MiB DuckDB buffer; COPY-to-disk output and any bounded streaming requirement are separate questions. The R wrapper 800k-row result reaches 645 MiB RSS (`r_munge`) and 710 MiB (`r_munge_metal`), consistent with returning a large R data frame.
+4. **Liftover:** the entire staged chr22 GRCh37 source holds only ~1.1 million variants; the current 250k baseline is below the timing floor. A larger public source, allele/mapped-output verification, and EXPLAIN ANALYZE at that scale are required.
+5. **Not measured with real multi-sample evidence:** BAM/CRAM extraction, sketch preparation/verification, Charr, matched contamination and R all-pairs relatedness. The phased 1000 Genomes chr22 VCFs have GT but no FORMAT/AD. Public indexed 30× CRAM regional access was probed on HG00188 chr22:16,000,000–16,020,000 (2,680 alignments; 1.75 s; 37 MiB RSS) using the registered GRCh38 reference. This establishes feasibility, not a checksum-validated 16/32/64-sample staged cohort or a Somalier performance measurement. All-pairs relatedness needs a separately capped quadratic output-size and memory contract.
+6. **Not measured:** executed BAM/VCF/GFF `*_convert_parquet_sql` COPYs. These require physical multi-size public inputs, output denominator checks and independent disk-space limits.
+
+The first-pass synthetic and 10k–40k-row rows have no extrapolatable scaling conclusion. This report does not claim completion of the unmeasured entry points.
