@@ -1,0 +1,22 @@
+##fileformat=VCFv4.2
+##FILTER=<ID=PASS,Description="All filters passed">
+##contig=<ID=chr1,length=100000>
+##contig=<ID=chr2,length=100000>
+##contig=<ID=chr3,length=100000>
+##contig=<ID=HLA-A*01:01,length=100000>
+##contig=<ID=chr1:2,length=100000>
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=PS,Number=1,Type=Integer,Description="Phase set">
+##FORMAT=<ID=GP,Number=G,Type=Float,Description="Genotype posteriors">
+##FORMAT=<ID=DS,Number=A,Type=Float,Description="Genotype dosage per ALT allele">
+##FORMAT=<ID=HS,Number=4,Type=Integer,Description="GLIMPSE-like haplotype selection">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1	S2	S3
+chr1	100	multi	A	C,G	.	PASS	.	GT:GP:DS:HS	0|1:0.1,0.8,0.05,0.02,0.02,0.01:0.9,0.06:1,2,3,4	1|2:0.01,0.02,0.03,0.04,0.9,0.0:0.94,1.0:5,6,7,8	./.:.:.:.,.,.,.
+chr1	100	multi	A	C,G	.	PASS	.	GT:GP:DS:HS	0|1:0.1,0.8,0.05,0.02,0.02,0.01:0.9,0.06:1,2,3,4	1|2:0.01,0.02,0.03,0.04,0.9,0.0:0.94,1.0:5,6,7,8	./.:.:.:.,.,.,.
+chr1	200	bi	T	C	.	PASS	.	GT:GP:DS:HS	0/0:0.98,0.02,0:0.02:1,1,1,1	0/1:0.05,0.9,0.05:1:2,2,2,2	1/1:0,0.1,0.9:1.9:3,3,3,3
+chr1	300	dupalt	G	T,T	.	PASS	.	GT:GP:DS:HS	1/2:0.0,0.1,0.2,0.3,0.4,0.0:1,1:1,1,1,1	0/2:0.2,0.1,0.1,0.3,0.2,0.1:0.5,0.6:2,2,2,2	0/0:1,0,0,0,0,0:0,0:3,3,3,3
+chr1	501	del	AT	A	.	PASS	.	GT:GP:DS:HS	0|1:0.1,0.8,0.1:0.9:1,2,3,4	0|0:0.9,0.1,0:0.1:1,2,3,4	1|1:0,0.1,0.9:1.9:1,2,3,4
+chr2	50	ph	C	G,T	.	PASS	.	GT:PS:GP:DS:HS	0|1:50:0.1,0.8,0.05,0.02,0.02,0.01:0.9,0.06:1,2,3,4	1/2:.:0.3,0.1,0.1,0.2,0.2,0.1:0.5,0.5:4,3,2,1	2|0:50:0.2,0.1,0.1,0.3,0.2,0.1:0.4,0.7:1,1,2,2
+chr2	100	homref	G	.	.	PASS	.	GT	0/0	0/0	./.
+HLA-A*01:01	10	lit1	A	G	.	PASS	.	GT:GP	0/1:0.1,0.8,0.1	1/1:0,0.1,0.9	0/0:0.9,0.1,0
+chr1:2	10	lit2	C	T	.	PASS	.	GT:GP	0/1:0.1,0.8,0.1	0/0:0.9,0.1,0	1/1:0,0.1,0.9

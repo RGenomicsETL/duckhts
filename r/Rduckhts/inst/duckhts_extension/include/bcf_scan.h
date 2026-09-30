@@ -3,6 +3,7 @@
 
 #include "bcf_index_snapshot.h"
 #include "hts_io_tuning.h"
+#include "region_list.h"
 
 typedef struct duckhts_bcf_samples duckhts_bcf_samples_t;
 
@@ -30,6 +31,7 @@ typedef struct {
     duckhts_bcf_gt_span_t *raw_gt;
     const char *raw_gt_error; /* Static diagnostic for the most recent capture failure. */
     int indexed; // An empty indexed selection must never fall back to streaming.
+    int typed_tabix; // Iterator came from duckhts_bcf_scan_intervals on a tabix index.
 } duckhts_bcf_scan_t;
 
 int duckhts_bcf_scan_open(duckhts_bcf_scan_t *scan, const char *path,
@@ -43,6 +45,15 @@ void duckhts_bcf_scan_close(duckhts_bcf_scan_t *scan);
  * Replaces only this worker's iterator. */
 int duckhts_bcf_scan_regions(duckhts_bcf_scan_t *scan, char **regions,
                             unsigned int count, char *error, size_t error_size);
+
+/* Select a finished typed interval plan directly from header/index contig ids,
+ * without forming region strings. Names are literal dictionary lookups; a
+ * contig absent from the dictionary contributes no records (as with region
+ * strings). An empty plan, or one that resolves to nothing, is an empty
+ * indexed selection: never a streaming fallback. Returns 0 on failure with
+ * every partial allocation released; the plan is only borrowed. */
+int duckhts_bcf_scan_intervals(duckhts_bcf_scan_t *scan, const duckhts_interval_plan_t *plan,
+                              char *error, size_t error_size);
 
 /* Select one literal contig from the scan dictionary, not a region expression. */
 int duckhts_bcf_scan_contig(duckhts_bcf_scan_t *scan, const char *name,
