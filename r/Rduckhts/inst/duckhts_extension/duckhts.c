@@ -19,6 +19,14 @@
 #include "duckhts_simd.h"
 #include "wasm_http_hfile.h"
 
+/* Restricts a relation carrying `region` to autosomal sites. Relatedness and
+   contamination are diploid autosomal statistics; the panel also carries the
+   X/Y sites that only the sex function reads. A NULL region stays visible so
+   the identity checks still reject it. */
+#define DUCKHTS_SOMALIER_AUTOSOMAL_WHERE \
+    " WHERE region IS NULL OR CAST(region AS VARCHAR) NOT IN " \
+    DUCKHTS_SOMALIER_SEX_REGIONS_SQL
+
 DUCKDB_EXTENSION_EXTERN
 
 /* bcf_reader.c */
@@ -41,6 +49,8 @@ extern void register_duckhts_somalier_contamination_functions(
     duckdb_connection connection);
 extern void register_duckhts_somalier_matched_functions(
     duckdb_connection connection);
+extern bool register_duckhts_somalier_sex_sql(
+    duckhts_registration_t *registration);
 extern bool register_duckhts_somalier_vcf_extract_sql(
     duckhts_registration_t *registration);
 extern bool register_duckhts_somalier_bam_extract_functions(
@@ -334,13 +344,15 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "WITH __dht_panel AS MATERIALIZED (SELECT CAST(assembly AS VARCHAR) AS assembly, "
         "CAST(site_index AS UBIGINT) AS site_index, CAST(region AS VARCHAR) AS region, "
         "CAST(position AS UBIGINT) AS position, CAST(allele_a AS VARCHAR) AS allele_a, "
-        "CAST(allele_b AS VARCHAR) AS allele_b FROM query_table(panel_table)), "
+        "CAST(allele_b AS VARCHAR) AS allele_b FROM query_table(panel_table)"
+        DUCKHTS_SOMALIER_AUTOSOMAL_WHERE "), "
         "__dht_evidence AS NOT MATERIALIZED (SELECT CAST(sample_id AS VARCHAR) AS sample_id, "
         "CAST(assembly AS VARCHAR) AS assembly, CAST(site_index AS UBIGINT) AS site_index, "
         "CAST(region AS VARCHAR) AS region, CAST(position AS UBIGINT) AS position, "
         "CAST(allele_a AS VARCHAR) AS allele_a, CAST(allele_b AS VARCHAR) AS allele_b, "
         "CAST(a AS UBIGINT) AS a, CAST(b AS UBIGINT) AS b, CAST(other AS UBIGINT) AS other "
-        "FROM query_table(evidence_table)), "
+        "FROM query_table(evidence_table)"
+        DUCKHTS_SOMALIER_AUTOSOMAL_WHERE "), "
         "__dht_checked AS NOT MATERIALIZED (SELECT e.*, p.assembly AS panel_assembly, "
         "p.region AS panel_region, p.position AS panel_position, "
         "p.allele_a AS panel_allele_a, p.allele_b AS panel_allele_b "
@@ -420,13 +432,15 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "WITH __dht_panel AS MATERIALIZED (SELECT CAST(assembly AS VARCHAR) AS assembly, "
         "CAST(site_index AS UBIGINT) AS site_index, CAST(region AS VARCHAR) AS region, "
         "CAST(position AS UBIGINT) AS position, CAST(allele_a AS VARCHAR) AS allele_a, "
-        "CAST(allele_b AS VARCHAR) AS allele_b FROM query_table(panel_table)), "
+        "CAST(allele_b AS VARCHAR) AS allele_b FROM query_table(panel_table)"
+        DUCKHTS_SOMALIER_AUTOSOMAL_WHERE "), "
         "__dht_frequency AS MATERIALIZED (SELECT CAST(assembly AS VARCHAR) AS assembly, "
         "CAST(site_index AS UBIGINT) AS site_index, CAST(region AS VARCHAR) AS region, "
         "CAST(position AS UBIGINT) AS position, CAST(allele_a AS VARCHAR) AS allele_a, "
         "CAST(allele_b AS VARCHAR) AS allele_b, "
         "CAST(population_b_af AS DOUBLE) AS population_b_af "
-        "FROM query_table(frequency_table)), __dht_checked AS MATERIALIZED ("
+        "FROM query_table(frequency_table)"
+        DUCKHTS_SOMALIER_AUTOSOMAL_WHERE "), __dht_checked AS MATERIALIZED ("
         "SELECT f.*, p.assembly AS panel_assembly, p.region AS panel_region, "
         "p.position AS panel_position, p.allele_a AS panel_allele_a, "
         "p.allele_b AS panel_allele_b FROM __dht_frequency f "
@@ -470,7 +484,8 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "WITH __dht_panel AS MATERIALIZED (SELECT CAST(assembly AS VARCHAR) AS assembly, "
         "CAST(site_index AS UBIGINT) AS site_index, CAST(region AS VARCHAR) AS region, "
         "CAST(position AS UBIGINT) AS position, CAST(allele_a AS VARCHAR) AS allele_a, "
-        "CAST(allele_b AS VARCHAR) AS allele_b FROM query_table(panel_table)), "
+        "CAST(allele_b AS VARCHAR) AS allele_b FROM query_table(panel_table)"
+        DUCKHTS_SOMALIER_AUTOSOMAL_WHERE "), "
         "__dht_frequency AS MATERIALIZED (SELECT CAST(site_index AS UBIGINT) AS site_index, "
         "CAST(population_b_af AS DOUBLE) AS population_b_af "
         "FROM query_table(frequency_table)), __dht_evidence AS NOT MATERIALIZED ("
@@ -479,7 +494,8 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "CAST(region AS VARCHAR) AS region, CAST(position AS UBIGINT) AS position, "
         "CAST(allele_a AS VARCHAR) AS allele_a, CAST(allele_b AS VARCHAR) AS allele_b, "
         "CAST(a AS UBIGINT) AS a, CAST(b AS UBIGINT) AS b, CAST(other AS UBIGINT) AS other "
-        "FROM query_table(evidence_table)), __dht_checked AS NOT MATERIALIZED (SELECT e.*, "
+        "FROM query_table(evidence_table)"
+        DUCKHTS_SOMALIER_AUTOSOMAL_WHERE "), __dht_checked AS NOT MATERIALIZED (SELECT e.*, "
         "p.assembly AS panel_assembly, p.region AS panel_region, p.position AS panel_position, "
         "p.allele_a AS panel_allele_a, p.allele_b AS panel_allele_b, f.population_b_af "
         "FROM __dht_evidence e LEFT JOIN __dht_panel p USING (site_index) "
@@ -568,7 +584,8 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "WITH __dht_panel AS MATERIALIZED (SELECT CAST(assembly AS VARCHAR) AS assembly, "
         "CAST(site_index AS UBIGINT) AS site_index, CAST(region AS VARCHAR) AS region, "
         "CAST(position AS UBIGINT) AS position, CAST(allele_a AS VARCHAR) AS allele_a, "
-        "CAST(allele_b AS VARCHAR) AS allele_b FROM query_table(panel_table)), "
+        "CAST(allele_b AS VARCHAR) AS allele_b FROM query_table(panel_table)"
+        DUCKHTS_SOMALIER_AUTOSOMAL_WHERE "), "
         "__dht_frequency AS MATERIALIZED (SELECT CAST(site_index AS UBIGINT) AS site_index, "
         "CAST(population_b_af AS DOUBLE) AS population_b_af "
         "FROM query_table(frequency_table)), __dht_evidence AS NOT MATERIALIZED ("
@@ -577,7 +594,8 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "CAST(region AS VARCHAR) AS region, CAST(position AS UBIGINT) AS position, "
         "CAST(allele_a AS VARCHAR) AS allele_a, CAST(allele_b AS VARCHAR) AS allele_b, "
         "CAST(a AS UBIGINT) AS a, CAST(b AS UBIGINT) AS b, CAST(other AS UBIGINT) AS other "
-        "FROM query_table(evidence_table)), __dht_pairs AS MATERIALIZED ("
+        "FROM query_table(evidence_table)"
+        DUCKHTS_SOMALIER_AUTOSOMAL_WHERE "), __dht_pairs AS MATERIALIZED ("
         "SELECT CAST(receiver_id AS VARCHAR) AS receiver_id, "
         "CAST(anchor_id AS VARCHAR) AS anchor_id FROM query_table(pairs_table)), ";
         static const char matched_sql_b[] =
@@ -1120,7 +1138,8 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         }
     }
 
-    if (!register_duckhts_somalier_vcf_extract_sql(&registration)) {
+    if (!register_duckhts_somalier_vcf_extract_sql(&registration) ||
+        !register_duckhts_somalier_sex_sql(&registration)) {
         return false;
     }
     return duckhts_macro_registration_end(&registration);

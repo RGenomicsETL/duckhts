@@ -1088,7 +1088,7 @@ SELECT duckhts_somalier_spacing([100, 110, 109]::UBIGINT[], 10);
 
 ## duckhts_somalier_import_sites
 
-Import an already selected Somalier sites VCF/BCF as one canonical panel and population-frequency relation.
+Import an already selected Somalier sites VCF/BCF as one canonical panel and population-frequency relation, autosomal and X/Y sites together.
 
 Signature:
 
@@ -1104,11 +1104,11 @@ table
 
 ### Orientation
 
-Each autosomal biallelic SNV is oriented into lexical allele_a/allele_b order. INFO/AF is the source ALT frequency and is transformed with REF/ALT, so population_b_af always describes allele_b. Dense zero-based site_index follows Somalier v0.3.4's lexical region then position order.
+Each biallelic SNV is oriented into lexical allele_a/allele_b order. INFO/AF is the source ALT frequency and is transformed with REF/ALT, so population_b_af always describes allele_b. Dense zero-based site_index numbers every autosomal site first, in Somalier v0.3.4's lexical region then position order, and then the X/Y sites in the same order, so the autosomal ordinals are 0..n-1 whatever the X/Y region names sort as.
 
 ### Input
 
-INFO/AF must declare Number=A,Type=Float. Retained records must be distinct uppercase A/C/G/T biallelic SNVs with one finite AF in [0,1]. Exact Somalier v0.3.4 X/Y aliases are excluded. Existing FILTER values are retained as provenance because this imports an already selected sites file; it does not apply selection policy.
+INFO/AF must declare Number=A,Type=Float. Retained records must be distinct uppercase A/C/G/T biallelic SNVs with one finite AF in [0,1]. Records on the exact Somalier v0.3.4 X/Y aliases (X, chrX, NC_000023.10, NC_000023.11, Y, chrY, NC_000024.9, NC_000024.10) are kept as sex-chromosome sites and at least one autosomal record is required to normalise their depth. No pseudo-autosomal filtering happens here or at count time, as in Somalier: choose X sites outside the PAR when selecting the sites file (rduckhts_somalier_find_sites does for human builds). Existing FILTER values are retained as provenance because this imports an already selected sites file; it does not apply selection policy.
 
 ### Scope
 
@@ -1146,7 +1146,7 @@ FORMAT/AD must declare Number=R,Type=Integer. Exact REF/ALT identity selects A a
 
 ### Scope and FILTER
 
-Symbolic alleles are unavailable in this scope. filter_policy='pass_or_unapplied' accepts PASS and dot but makes named failures unavailable; 'include_all' uses their AD; 'error' rejects them. source_method, count_scope, status, FILTER, record/sample ordinals and matched allele slots preserve extraction provenance. Full scans are sequential and retain physical source-record identity; Parquet is optional downstream storage, not an input requirement.
+Every panel site, autosomal or X/Y, is counted in the one pass. Symbolic alleles are unavailable in this scope. filter_policy='pass_or_unapplied' accepts PASS and dot but makes named failures unavailable; 'include_all' uses their AD; 'error' rejects them. X/Y sites ignore filter_policy and always use their AD, as Somalier extraction does. source_method, count_scope, status, FILTER, record/sample ordinals and matched allele slots preserve extraction provenance. Full scans are sequential and retain physical source-record identity; Parquet is optional downstream storage, not an input requirement.
 
 ### Examples
 
@@ -1176,7 +1176,7 @@ panel_parquet supplies the canonical typed six-column panel; panel_table is reta
 
 ### Evidence
 
-A and B are exact uppercase panel bases; other counts every other observed base. Valid uncovered sites emit measured 0/0/0. Missing reference contigs or positions, reference mismatches, alignment-header contig absence and positions beyond a declared alignment contig emit NULL counts with a named unavailable status. Deletions and reference skips are not observed bases. MAPQ, base quality, required/excluded flags and overlap suppression are explicit per-call settings.
+Every panel site, autosomal or X/Y, is counted in the one scan. A and B are exact uppercase panel bases; other counts every other observed base. Valid uncovered sites emit measured 0/0/0. Missing reference contigs or positions, reference mismatches, alignment-header contig absence and positions beyond a declared alignment contig emit NULL counts with a named unavailable status. Deletions and reference skips are not observed bases. MAPQ, base quality, required/excluded flags and overlap suppression are explicit per-call settings.
 
 ### Limits and transport
 
@@ -1244,7 +1244,7 @@ VARCHAR
 
 ### Panel contract
 
-panel_table has assembly, dense zero-based site_index, region, positive one-based position, allele_a and allele_b. Assembly and region are each limited to 1,024 bytes before hashing. One nonempty assembly, unique physical region/position and uppercase single-base A/C/G/T alleles in lexical A < B order are required. The pinned Somalier v0.3.4 X/Y aliases are rejected; other aliases cannot be biologically classified from a region string. The calculation assumes diploid three-state genotypes. The digest commits to this domain and every ordered site, independent of physical row order.
+panel_table has assembly, dense zero-based site_index, region, positive one-based position, allele_a and allele_b. Assembly and region are each limited to 1,024 bytes before hashing. One nonempty assembly, unique physical region/position and uppercase single-base A/C/G/T alleles in lexical A < B order are required. The pinned Somalier v0.3.4 X/Y aliases are sex-chromosome sites; every other region is autosomal, since other aliases cannot be classified from a region string. Every autosomal site_index must precede every X/Y site_index. The digest commits to this domain (panel version 3: biallelic SNVs, autosomal then sex-chromosome sites) and every ordered site, independent of physical row order. Panels digested before this version have different identities.
 
 ### Examples
 
@@ -1270,7 +1270,7 @@ VARCHAR
 
 ### Frequency contract
 
-frequency_table must cover every panel site exactly once with the same assembly, ordinal, coordinate and A/B orientation plus a finite population_b_af in [0,1]. The digest commits to the panel identity and every ordered frequency value.
+frequency_table must cover every autosomal panel site exactly once (X/Y rows are ignored) with the same assembly, ordinal, coordinate and A/B orientation plus a finite population_b_af in [0,1]. The digest commits to the panel identity and every ordered frequency value.
 
 ### Examples
 
@@ -1326,7 +1326,7 @@ table(sketch STRUCT)
 
 ### Evidence
 
-evidence_table contains sample_id, the six panel identity columns, and nullable a, b and other counts. Each sample must contain every panel ordinal exactly once. Count channels already follow the panel's canonical lexical A/B order; changed coordinates or orientation error. Counts are never inferred from GT or DP. All-NULL tuples are unavailable, all-zero tuples are measured zero depth, and partial NULL tuples error.
+evidence_table contains sample_id, the six panel identity columns, and nullable a, b and other counts. Each sample must contain every panel ordinal exactly once. Panel and evidence rows on the X/Y aliases are ignored: this is an autosomal statistic, and results equal those on the autosomal-only panel. The reported panel identity is the whole panel's. Count channels already follow the panel's canonical lexical A/B order; changed coordinates or orientation error. Counts are never inferred from GT or DP. All-NULL tuples are unavailable, all-zero tuples are measured zero depth, and partial NULL tuples error.
 
 ### Persistence
 
@@ -1446,7 +1446,7 @@ table(contamination STRUCT)
 
 ### Inputs
 
-Count evidence and population_b_af must match the panel's full ordered site identity. CHARR uses measured counts, its own homozygous-like binomial eligibility and the pinned 4% other-read filter; relatedness genotype masks are insufficient.
+Count evidence and population_b_af must match the panel's full ordered site identity. Panel and evidence rows on the X/Y aliases are ignored: this is an autosomal statistic, and results equal those on the autosomal-only panel. The reported panel identity is the whole panel's. CHARR uses measured counts, its own homozygous-like binomial eligibility and the pinned 4% other-read filter; relatedness genotype masks are insufficient.
 
 ### Results
 
@@ -1484,7 +1484,7 @@ table(contamination STRUCT)
 
 ### Direction
 
-pairs_table contains distinct receiver_id and anchor_id rows. The anchor supplies the receiver's expected uncontaminated homozygous genotype; it is not assumed to identify the contaminating donor. Reversing a pair is a different fit.
+pairs_table contains distinct receiver_id and anchor_id rows. Panel and evidence rows on the X/Y aliases are ignored: this is an autosomal statistic, and results equal those on the autosomal-only panel. The reported panel identity is the whole panel's. The anchor supplies the receiver's expected uncontaminated homozygous genotype; it is not assumed to identify the contaminating donor. Reversing a pair is a different fit.
 
 ### Results
 
@@ -1506,6 +1506,52 @@ DuckHTS searches a full 0.01 grid and refines a feasible local optimum rather th
 
 ```sql
 SELECT unnest(contamination) FROM duckhts_somalier_matched_contamination('allele_counts', 'fingerprint_panel', 'population_frequencies', 'receiver_anchor_pairs');
+```
+
+## duckhts_somalier_sex
+
+Report X/Y dosage evidence and a review-only XX, XY or ambiguous call per sample from panel counts.
+
+Signature:
+
+```sql
+duckhts_somalier_sex(counts_table, panel_table, min_depth := 7, min_sex_site_depth := 7, min_het_balance := 0.3, hom_balance_cutoff := 0.01, min_usable_x_sites := 11, xy_max_het_ratio := 0.05, xx_min_het_ratio := 0.4, y_signal_min := 0.4, y_gate := 'sample')
+```
+
+Returns:
+
+```
+table
+```
+
+### Inputs
+
+counts_table is the sample-by-panel relation from duckhts_somalier_vcf_counts() or duckhts_somalier_bam_counts() over a panel that includes X/Y sites; each sample needs one row for every panel site with the panel's geometry and A/B orientation. Coverage is checked per sample from the row count plus the sum and XOR of a 64-bit hash of site_index against the panel's, because a per-sample DISTINCT set would hold samples x sites entries: a missing or repeated ordinal changes the count or the hashes and is rejected, while a different multiset of ordinals with the same count passes only if both hashes collide. Autosomal sites give the depth normaliser, X and Y sites the metrics. Without a usable X site the panel is still accepted and the status says so.
+
+### Metrics
+
+Follows Somalier v0.3.4 relate.nim. autosomal_depth_mean is the mean A+B depth of autosomal sites with other <= 10% of all reads and A+B >= min_depth. An X or Y site is usable when other <= 4%, A+B >= min_sex_site_depth and its B balance is homozygous (below hom_balance_cutoff, above one minus it, or A or B zero) or heterozygous (between min_het_balance and one minus it); x_hom_ref, x_het and x_hom_alt count usable X sites by genotype. x_depth_ratio and y_depth_ratio are 2 * mean A+B depth over usable sites / autosomal_depth_mean, so a diploid X is about 2 and a single X about 1. x_het_hom_alt_ratio is x_het / x_hom_alt (Infinity when there is no hom-alt site and some het site, NULL when both are zero), the statistic Somalier thresholds. Ratios are NULL without usable sites or autosomal depth; the integer counts stay exact zeros. Floating means can differ from Somalier's running mean in the last bits.
+
+### Call
+
+inferred_sex is XY when there are at least min_usable_x_sites usable X sites (Somalier: more than 10) and x_het_hom_alt_ratio < xy_max_het_ratio, XX when it is > xx_min_het_ratio, otherwise ambiguous. y_signal is present when y_depth_ratio > y_signal_min and absent otherwise, NULL without usable Y sites. An XX dosage with a present Y signal is reported as ambiguous with the review flag apparent_y_with_xx_dosage, and an XY dosage with an absent Y signal keeps XY with apparent_y_loss, as Somalier notes. status is ok, no_usable_x_sites, insufficient_x_sites or no_autosomal_depth.
+
+### Y gate
+
+Somalier applies its Y check only when the cohort has Y depth (more than five samples, or more than 10%, with usable Y sites), so a sample's call depends on who else is in the batch. The default y_gate := 'sample' applies the check whenever the sample itself has a Y signal; y_gate := 'cohort' reproduces Somalier's gate, and cohort_has_y reports it. Somalier also leaves the sex unset for samples that fail its autosomal quality gate; DuckHTS reports the X dosage regardless and reports no_autosomal_depth when the normaliser is missing.
+
+### Interpretation
+
+The call is evidence of X/Y dosage for review, not a diagnosis or a legal determination of sex; aneuploidy, mosaicism, poor coverage and sample swaps all change it. Results also carry the whole-panel digest, panel denominators and every threshold used.
+
+### Memory
+
+See benchmarks/benchmark_somalier_sex.md for measured scaling. One pass over the counts relation: state is one aggregate group of a few numbers per sample plus the panel; no product of samples and sites is retained beyond the counts relation itself.
+
+### Examples
+
+```sql
+SELECT sample_id, inferred_sex, status, x_depth_ratio, y_depth_ratio FROM duckhts_somalier_sex('allele_counts', 'fingerprint_panel');
 ```
 
 ## detect_quality_encoding
@@ -1597,7 +1643,7 @@ Read GenBank flat-file features in read_gff's column shape, with optional parsed
 Signature:
 
 ```sql
-read_genbank(path, attributes_map := FALSE)
+read_genbank(path, attributes_map := FALSE, attributes := []::VARCHAR[])
 ```
 
 Returns:
@@ -1614,6 +1660,10 @@ seqname is VERSION, else ACCESSION, else the LOCUS name; a segment on a remote a
 
 Synthesized GFF3 keys ID, Name and Parent accompany the original qualifiers. ID is gene-<locus_tag> for genes and <key>-<n> otherwise, with n the feature's 0-based position in the file. Parent links a feature to the gene sharing its /locus_tag (or /gene) anywhere in the record. Repeated qualifiers become one key with comma-joined values, valueless qualifiers read 'true', and ; = & , % are percent-encoded. attributes_map := TRUE adds the same pairs as a MAP.
 
+### Named attributes
+
+attributes := ['gene', 'product'] appends VARCHAR columns named for the requested keys, after attributes_map when that is requested. Each value equals attributes_map[key] byte for byte: repeated qualifiers are comma-joined, a valueless qualifier reads 'true', values stay percent-encoded, the synthesized ID, Name and Parent are addressable, and an absent key is NULL. Keys must be nonempty, unique under ASCII case-insensitive column naming, and distinct from the fixed columns and attributes_map when it is requested. Only projected keys are computed during scanning.
+
 ### Errors
 
 Records stream one at a time, so memory follows the largest record. A record without a terminating //, a FEATURES table with no sequence section, a malformed location, an unsupported location form (one-of, gap, bond, nested join/order, a.b), an origin-spanning span on a linear record, or a /codon_start outside 1..3 is an error naming the feature and line. Table layout and these rules follow BioPython's GenBank scanner, and test/scripts/genbank_oracle_test.py diffs the reader against it.
@@ -1622,6 +1672,10 @@ Records stream one at a time, so memory follows the largest record. A record wit
 
 ```sql
 SELECT seqname, feature, start, "end" FROM read_genbank('phix174.gb') LIMIT 5;
+```
+
+```sql
+SELECT feature, locus_tag, product FROM read_genbank('phix174.gb', attributes := ['locus_tag', 'product']) WHERE feature = 'CDS';
 ```
 
 ## genbank_to_fasta

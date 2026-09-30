@@ -31,7 +31,7 @@ class ExtensionInitialization(unittest.TestCase):
                         "SELECT count(*) FROM duckhts_somalier_import_sites(?, 'GRCh38')",
                         [str(sites)],
                     ).fetchone(),
-                    (3,),
+                    (4,),
                 )
                 self.assertEqual(
                     connection.execute(

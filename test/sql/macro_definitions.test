@@ -11,7 +11,7 @@ SELECT count(*)::INTEGER, count(DISTINCT install_order)::INTEGER,
        count(*) FILTER (WHERE length(definitions_sha256) = 64)::INTEGER
 FROM duckhts_macro_definitions();
 ----
-32	32	1	32	32
+33	33	1	33	33
 
 query II
 SELECT count(DISTINCT d.name)::INTEGER,
@@ -19,7 +19,7 @@ SELECT count(DISTINCT d.name)::INTEGER,
 FROM duckhts_macro_definitions() d
 JOIN duckdb_functions() f ON f.function_name = d.name AND f.function_type IN ('macro', 'table_macro');
 ----
-32	32
+33	33
 
 query I
 SELECT duckhts_quote_ident('a"b');

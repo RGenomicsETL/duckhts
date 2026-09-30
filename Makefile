@@ -529,6 +529,8 @@ function_catalog: test-function-catalog
 	python3 scripts/render_function_catalog.py
 rdm: function_catalog
 	Rscript -e "rmarkdown::render('README.Rmd', output_format = 'github_document')"
+bench-genbank-named:
+	Rscript -e "rmarkdown::render('benchmarks/benchmark_genbank_named_attributes.Rmd', output_format = rmarkdown::github_document(html_preview = FALSE))"
 bench-lift:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_liftover.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
 
@@ -542,6 +544,12 @@ bench-ancestry-panel:
 # reads of public 1000 Genomes files) on first use, then renders the report.
 bench-ancestry-grch38:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_ancestry_grch38.Rmd', output_format = rmarkdown::github_document(html_preview = FALSE))"
+
+# Generate the synthetic counts with benchmarks/benchmark_somalier_sex_run.R --data <dir> <lib>,
+# measure with benchmarks/benchmark_somalier_sex_run.R benchmarks/somalier_sex_scaling.tsv <dir> <lib>,
+# then render the report.
+bench-somalier-sex:
+	Rscript -e "rmarkdown::render('benchmarks/benchmark_somalier_sex.Rmd', output_format = rmarkdown::github_document(html_preview = FALSE))"
 
 bench-score:
 	Rscript -e "rmarkdown::render('benchmarks/benchmark_score.Rmd', output_format = 'github_document', knit_root_dir = normalizePath('.'))"
