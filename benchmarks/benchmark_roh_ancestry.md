@@ -17,14 +17,16 @@ is declared before calculating or comparing any arm:
   comparator, equality is required.
 
 No amendment to the truth threshold has been made. A truth segment is a
-merged run of windows (100 kb each) with at most one heterozygous call,
-supported when at least 90% of its length meets that window criterion.
-Truth calls use all biallelic SNVs in each full source VCF, not just
-ancestry-reference sites. The window distribution and separation check
-must be reviewed before any ROH-arm comparison; if inadequate, the
-threshold may only be amended here before computing arm results. The
-primary length threshold is 1 Mb, with 2 Mb and 5 Mb also reported. FROH
-is total called ROH length divided by callable autosomal length.
+merged run of 100 kb windows with at most one heterozygous call per
+window, and a retained run covers at least 1 Mb of actual bases. An ROH
+call is truth-supported when at least 90% of its length overlaps these
+truth intervals. Truth calls use all biallelic SNVs in each full source
+VCF, not just ancestry-reference sites. The window distribution and
+separation check must be reviewed before any ROH-arm comparison; if
+inadequate, the threshold may only be amended here before computing arm
+results. The primary length threshold is 1 Mb, with 2 Mb and 5 Mb also
+reported. FROH is total called ROH length divided by callable autosomal
+length.
 
 ## Data identity and processing status
 
@@ -48,19 +50,22 @@ Single-population AF uses AFR for ACB, ASW, YRI and ESN; AMR for CLM,
 MXL, PEL and PUR; EUR for CEU; and EAS for CHS.
 
 Chr20 has the complete chromosome-specific truth, q and arm evaluation.
-The 22-autosome truth-window table and retained intervals are now
-computed; chr20 windows were reused and the 102 retained chr20 intervals
-match the prior result exactly. Genome-wide q estimation and arm
-comparisons remain pending. The population child counts match the
-declared expectations: ACB 20, ASW 13, CLM 35, MXL 32, PEL 35, PUR 35,
-YRI 56, ESN 43, CEU 57 and CHS 51. The chr20 source VCF was copied from
-the supplied local file after its checksum was verified; its remote
-metadata is recorded above. bcftools reported `1.23.1-70-g6dbd8fef`; the
-source header had 3,202 samples and the children BCF has 377. The
-DuckHTS extension was rebuilt from revision `86f53052` for the arm
-measurements. The remote chr1 input was streamed through bcftools; its
-ETag, Last-Modified value, record count and output SHA-256 are recorded
-in [its receipt](results/roh-ancestry/chr1/input_receipt.tsv).
+The 22-autosome truth-window table and retained intervals are computed;
+chr20 windows were reused and the 102 retained chr20 intervals match the
+prior result exactly. Genome-wide q now contains 7,917 estimates (377
+children × 21 groups), all with `status=ok`; each child contributed
+4,883,749 matched loci and the `cor_pred` range is 0.643847–0.719384.
+Genome-wide arm comparisons remain pending. The population child counts
+match the declared expectations: ACB 20, ASW 13, CLM 35, MXL 32, PEL 35,
+PUR 35, YRI 56, ESN 43, CEU 57 and CHS 51. The chr20 source VCF was
+copied from the supplied local file after its checksum was verified; its
+remote metadata is recorded above. bcftools reported
+`1.23.1-70-g6dbd8fef`; the source header had 3,202 samples and the
+children BCF has 377. The DuckHTS extension was rebuilt from revision
+`86f53052` for the arm measurements. The remote chr1 input was streamed
+through bcftools; its ETag, Last-Modified value, record count and output
+SHA-256 are recorded in [its
+receipt](results/roh-ancestry/chr1/input_receipt.tsv).
 
 ## Autosome BCF staging
 
@@ -559,6 +564,244 @@ counts are [here](results/roh-ancestry/chr20/site_counts_by_child.csv).
 | NA19240   | ok     |   0.7144 |        108757 | Africa (West)       | 0.9840 | Sri Lanka           | 0.0160 | Africa (East)       | 0.0000 | YRI        | AFR             |
 | NA19249   | ok     |   0.7136 |        108757 | Africa (West)       | 1.0000 | Africa (East)       | 0.0000 | Africa (North)      | 0.0000 | YRI        | AFR             |
 | NA19258   | ok     |   0.7103 |        108757 | Africa (West)       | 1.0000 | Africa (East)       | 0.0000 | Africa (North)      | 0.0000 | YRI        | AFR             |
+
+### Full-autosome q estimates
+
+Genome-wide q uses all 22 child BCFs matched to GRCh38 non-palindromic
+biallelic reference sites and the bigsnpr 1.12.21 correction, with
+`min_cor = 0.4`. Eight-child batches were used under a 12 GB DuckDB
+memory limit. All 377 children have estimates for 21 groups, each
+child’s proportions sum to one, and every estimate has `status=ok`. The
+full per-child, per-group estimates and allele-harmonization counts are
+available in [the q table](results/roh-ancestry/autosome_q_by_child.csv)
+and [per-child site
+diagnostics](results/roh-ancestry/autosome_q_site_counts_by_child.csv).
+
+| Population | Superpopulation | children | used_variants_min | used_variants_max | cor_pred_min | cor_pred_median | cor_pred_max |
+|:-----------|:----------------|---------:|------------------:|------------------:|-------------:|----------------:|-------------:|
+| ACB        | AFR             |       20 |           4883749 |           4883749 |       0.6566 |          0.6897 |       0.6994 |
+| ASW        | AFR             |       13 |           4883749 |           4883749 |       0.6462 |          0.6699 |       0.6880 |
+| CEU        | EUR             |       57 |           4883749 |           4883749 |       0.6747 |          0.6800 |       0.6867 |
+| CHS        | EAS             |       51 |           4883749 |           4883749 |       0.7090 |          0.7147 |       0.7184 |
+| CLM        | AMR             |       35 |           4883749 |           4883749 |       0.6439 |          0.6585 |       0.6698 |
+| ESN        | AFR             |       43 |           4883749 |           4883749 |       0.7068 |          0.7106 |       0.7144 |
+| MXL        | AMR             |       32 |           4883749 |           4883749 |       0.6596 |          0.6703 |       0.7115 |
+| PEL        | AMR             |       35 |           4883749 |           4883749 |       0.6804 |          0.7070 |       0.7194 |
+| PUR        | AMR             |       35 |           4883749 |           4883749 |       0.6438 |          0.6537 |       0.6637 |
+| YRI        | AFR             |       56 |           4883749 |           4883749 |       0.7075 |          0.7107 |       0.7146 |
+
+| Population | Superpopulation | group_id            | proportion |
+|:-----------|:----------------|:--------------------|-----------:|
+| ACB        | AFR             | Africa (East)       |     0.0017 |
+| ACB        | AFR             | Africa (North)      |     0.0000 |
+| ACB        | AFR             | Africa (South)      |     0.0318 |
+| ACB        | AFR             | Africa (West)       |     0.8605 |
+| ACB        | AFR             | Ashkenazi           |     0.0004 |
+| ACB        | AFR             | Asia (East)         |     0.0008 |
+| ACB        | AFR             | Bangladesh          |     0.0034 |
+| ACB        | AFR             | Europe (North East) |     0.0040 |
+| ACB        | AFR             | Europe (South East) |     0.0000 |
+| ACB        | AFR             | Europe (South West) |     0.0044 |
+| ACB        | AFR             | Finland             |     0.0006 |
+| ACB        | AFR             | Ireland             |     0.0144 |
+| ACB        | AFR             | Italy               |     0.0036 |
+| ACB        | AFR             | Japan               |     0.0005 |
+| ACB        | AFR             | Middle East         |     0.0004 |
+| ACB        | AFR             | Pakistan            |     0.0007 |
+| ACB        | AFR             | Philippines         |     0.0012 |
+| ACB        | AFR             | Scandinavia         |     0.0242 |
+| ACB        | AFR             | South America       |     0.0042 |
+| ACB        | AFR             | Sri Lanka           |     0.0063 |
+| ACB        | AFR             | United Kingdom      |     0.0368 |
+| ASW        | AFR             | Africa (East)       |     0.0014 |
+| ASW        | AFR             | Africa (North)      |     0.0027 |
+| ASW        | AFR             | Africa (South)      |     0.1415 |
+| ASW        | AFR             | Africa (West)       |     0.6575 |
+| ASW        | AFR             | Ashkenazi           |     0.0023 |
+| ASW        | AFR             | Asia (East)         |     0.0015 |
+| ASW        | AFR             | Bangladesh          |     0.0015 |
+| ASW        | AFR             | Europe (North East) |     0.0095 |
+| ASW        | AFR             | Europe (South East) |     0.0000 |
+| ASW        | AFR             | Europe (South West) |     0.0202 |
+| ASW        | AFR             | Finland             |     0.0076 |
+| ASW        | AFR             | Ireland             |     0.0372 |
+| ASW        | AFR             | Italy               |     0.0000 |
+| ASW        | AFR             | Japan               |     0.0011 |
+| ASW        | AFR             | Middle East         |     0.0000 |
+| ASW        | AFR             | Pakistan            |     0.0000 |
+| ASW        | AFR             | Philippines         |     0.0016 |
+| ASW        | AFR             | Scandinavia         |     0.0357 |
+| ASW        | AFR             | South America       |     0.0136 |
+| ASW        | AFR             | Sri Lanka           |     0.0017 |
+| ASW        | AFR             | United Kingdom      |     0.0634 |
+| CEU        | EUR             | Africa (East)       |     0.0004 |
+| CEU        | EUR             | Africa (North)      |     0.0021 |
+| CEU        | EUR             | Africa (South)      |     0.0003 |
+| CEU        | EUR             | Africa (West)       |     0.0007 |
+| CEU        | EUR             | Ashkenazi           |     0.0046 |
+| CEU        | EUR             | Asia (East)         |     0.0004 |
+| CEU        | EUR             | Bangladesh          |     0.0000 |
+| CEU        | EUR             | Europe (North East) |     0.0181 |
+| CEU        | EUR             | Europe (South East) |     0.0148 |
+| CEU        | EUR             | Europe (South West) |     0.0501 |
+| CEU        | EUR             | Finland             |     0.0091 |
+| CEU        | EUR             | Ireland             |     0.0508 |
+| CEU        | EUR             | Italy               |     0.0109 |
+| CEU        | EUR             | Japan               |     0.0003 |
+| CEU        | EUR             | Middle East         |     0.0028 |
+| CEU        | EUR             | Pakistan            |     0.0007 |
+| CEU        | EUR             | Philippines         |     0.0003 |
+| CEU        | EUR             | Scandinavia         |     0.3076 |
+| CEU        | EUR             | South America       |     0.0021 |
+| CEU        | EUR             | Sri Lanka           |     0.0011 |
+| CEU        | EUR             | United Kingdom      |     0.5230 |
+| CHS        | EAS             | Africa (East)       |     0.0000 |
+| CHS        | EAS             | Africa (North)      |     0.0000 |
+| CHS        | EAS             | Africa (South)      |     0.0000 |
+| CHS        | EAS             | Africa (West)       |     0.0000 |
+| CHS        | EAS             | Ashkenazi           |     0.0000 |
+| CHS        | EAS             | Asia (East)         |     0.8919 |
+| CHS        | EAS             | Bangladesh          |     0.0000 |
+| CHS        | EAS             | Europe (North East) |     0.0000 |
+| CHS        | EAS             | Europe (South East) |     0.0000 |
+| CHS        | EAS             | Europe (South West) |     0.0000 |
+| CHS        | EAS             | Finland             |     0.0001 |
+| CHS        | EAS             | Ireland             |     0.0000 |
+| CHS        | EAS             | Italy               |     0.0000 |
+| CHS        | EAS             | Japan               |     0.1077 |
+| CHS        | EAS             | Middle East         |     0.0000 |
+| CHS        | EAS             | Pakistan            |     0.0000 |
+| CHS        | EAS             | Philippines         |     0.0000 |
+| CHS        | EAS             | Scandinavia         |     0.0000 |
+| CHS        | EAS             | South America       |     0.0002 |
+| CHS        | EAS             | Sri Lanka           |     0.0002 |
+| CHS        | EAS             | United Kingdom      |     0.0000 |
+| CLM        | AMR             | Africa (East)       |     0.0014 |
+| CLM        | AMR             | Africa (North)      |     0.0017 |
+| CLM        | AMR             | Africa (South)      |     0.0134 |
+| CLM        | AMR             | Africa (West)       |     0.0323 |
+| CLM        | AMR             | Ashkenazi           |     0.0016 |
+| CLM        | AMR             | Asia (East)         |     0.0000 |
+| CLM        | AMR             | Bangladesh          |     0.0000 |
+| CLM        | AMR             | Europe (North East) |     0.0000 |
+| CLM        | AMR             | Europe (South East) |     0.0000 |
+| CLM        | AMR             | Europe (South West) |     0.3626 |
+| CLM        | AMR             | Finland             |     0.0021 |
+| CLM        | AMR             | Ireland             |     0.0000 |
+| CLM        | AMR             | Italy               |     0.0362 |
+| CLM        | AMR             | Japan               |     0.0004 |
+| CLM        | AMR             | Middle East         |     0.0004 |
+| CLM        | AMR             | Pakistan            |     0.0000 |
+| CLM        | AMR             | Philippines         |     0.0002 |
+| CLM        | AMR             | Scandinavia         |     0.0014 |
+| CLM        | AMR             | South America       |     0.5453 |
+| CLM        | AMR             | Sri Lanka           |     0.0009 |
+| CLM        | AMR             | United Kingdom      |     0.0000 |
+| ESN        | AFR             | Africa (East)       |     0.0000 |
+| ESN        | AFR             | Africa (North)      |     0.0000 |
+| ESN        | AFR             | Africa (South)      |     0.0355 |
+| ESN        | AFR             | Africa (West)       |     0.9645 |
+| ESN        | AFR             | Ashkenazi           |     0.0000 |
+| ESN        | AFR             | Asia (East)         |     0.0000 |
+| ESN        | AFR             | Bangladesh          |     0.0000 |
+| ESN        | AFR             | Europe (North East) |     0.0000 |
+| ESN        | AFR             | Europe (South East) |     0.0000 |
+| ESN        | AFR             | Europe (South West) |     0.0000 |
+| ESN        | AFR             | Finland             |     0.0000 |
+| ESN        | AFR             | Ireland             |     0.0000 |
+| ESN        | AFR             | Italy               |     0.0000 |
+| ESN        | AFR             | Japan               |     0.0000 |
+| ESN        | AFR             | Middle East         |     0.0000 |
+| ESN        | AFR             | Pakistan            |     0.0000 |
+| ESN        | AFR             | Philippines         |     0.0000 |
+| ESN        | AFR             | Scandinavia         |     0.0000 |
+| ESN        | AFR             | South America       |     0.0000 |
+| ESN        | AFR             | Sri Lanka           |     0.0000 |
+| ESN        | AFR             | United Kingdom      |     0.0000 |
+| MXL        | AMR             | Africa (East)       |     0.0008 |
+| MXL        | AMR             | Africa (North)      |     0.0065 |
+| MXL        | AMR             | Africa (South)      |     0.0018 |
+| MXL        | AMR             | Africa (West)       |     0.0010 |
+| MXL        | AMR             | Ashkenazi           |     0.0061 |
+| MXL        | AMR             | Asia (East)         |     0.0021 |
+| MXL        | AMR             | Bangladesh          |     0.0000 |
+| MXL        | AMR             | Europe (North East) |     0.0005 |
+| MXL        | AMR             | Europe (South East) |     0.0047 |
+| MXL        | AMR             | Europe (South West) |     0.1034 |
+| MXL        | AMR             | Finland             |     0.0035 |
+| MXL        | AMR             | Ireland             |     0.0057 |
+| MXL        | AMR             | Italy               |     0.0348 |
+| MXL        | AMR             | Japan               |     0.0096 |
+| MXL        | AMR             | Middle East         |     0.0007 |
+| MXL        | AMR             | Pakistan            |     0.0000 |
+| MXL        | AMR             | Philippines         |     0.0003 |
+| MXL        | AMR             | Scandinavia         |     0.0085 |
+| MXL        | AMR             | South America       |     0.8083 |
+| MXL        | AMR             | Sri Lanka           |     0.0017 |
+| MXL        | AMR             | United Kingdom      |     0.0000 |
+| PEL        | AMR             | Africa (East)       |     0.0000 |
+| PEL        | AMR             | Africa (North)      |     0.0000 |
+| PEL        | AMR             | Africa (South)      |     0.0000 |
+| PEL        | AMR             | Africa (West)       |     0.0000 |
+| PEL        | AMR             | Ashkenazi           |     0.0000 |
+| PEL        | AMR             | Asia (East)         |     0.0007 |
+| PEL        | AMR             | Bangladesh          |     0.0000 |
+| PEL        | AMR             | Europe (North East) |     0.0000 |
+| PEL        | AMR             | Europe (South East) |     0.0000 |
+| PEL        | AMR             | Europe (South West) |     0.0000 |
+| PEL        | AMR             | Finland             |     0.0000 |
+| PEL        | AMR             | Ireland             |     0.0000 |
+| PEL        | AMR             | Italy               |     0.0000 |
+| PEL        | AMR             | Japan               |     0.0027 |
+| PEL        | AMR             | Middle East         |     0.0000 |
+| PEL        | AMR             | Pakistan            |     0.0000 |
+| PEL        | AMR             | Philippines         |     0.0000 |
+| PEL        | AMR             | Scandinavia         |     0.0000 |
+| PEL        | AMR             | South America       |     0.9966 |
+| PEL        | AMR             | Sri Lanka           |     0.0000 |
+| PEL        | AMR             | United Kingdom      |     0.0000 |
+| PUR        | AMR             | Africa (East)       |     0.0037 |
+| PUR        | AMR             | Africa (North)      |     0.0546 |
+| PUR        | AMR             | Africa (South)      |     0.0299 |
+| PUR        | AMR             | Africa (West)       |     0.0718 |
+| PUR        | AMR             | Ashkenazi           |     0.0068 |
+| PUR        | AMR             | Asia (East)         |     0.0005 |
+| PUR        | AMR             | Bangladesh          |     0.0000 |
+| PUR        | AMR             | Europe (North East) |     0.0059 |
+| PUR        | AMR             | Europe (South East) |     0.0052 |
+| PUR        | AMR             | Europe (South West) |     0.4885 |
+| PUR        | AMR             | Finland             |     0.0062 |
+| PUR        | AMR             | Ireland             |     0.0155 |
+| PUR        | AMR             | Italy               |     0.0280 |
+| PUR        | AMR             | Japan               |     0.0020 |
+| PUR        | AMR             | Middle East         |     0.0042 |
+| PUR        | AMR             | Pakistan            |     0.0005 |
+| PUR        | AMR             | Philippines         |     0.0004 |
+| PUR        | AMR             | Scandinavia         |     0.0012 |
+| PUR        | AMR             | South America       |     0.2731 |
+| PUR        | AMR             | Sri Lanka           |     0.0013 |
+| PUR        | AMR             | United Kingdom      |     0.0005 |
+| YRI        | AFR             | Africa (East)       |     0.0000 |
+| YRI        | AFR             | Africa (North)      |     0.0000 |
+| YRI        | AFR             | Africa (South)      |     0.0071 |
+| YRI        | AFR             | Africa (West)       |     0.9929 |
+| YRI        | AFR             | Ashkenazi           |     0.0000 |
+| YRI        | AFR             | Asia (East)         |     0.0000 |
+| YRI        | AFR             | Bangladesh          |     0.0000 |
+| YRI        | AFR             | Europe (North East) |     0.0000 |
+| YRI        | AFR             | Europe (South East) |     0.0000 |
+| YRI        | AFR             | Europe (South West) |     0.0000 |
+| YRI        | AFR             | Finland             |     0.0000 |
+| YRI        | AFR             | Ireland             |     0.0000 |
+| YRI        | AFR             | Italy               |     0.0000 |
+| YRI        | AFR             | Japan               |     0.0000 |
+| YRI        | AFR             | Middle East         |     0.0000 |
+| YRI        | AFR             | Pakistan            |     0.0000 |
+| YRI        | AFR             | Philippines         |     0.0000 |
+| YRI        | AFR             | Scandinavia         |     0.0000 |
+| YRI        | AFR             | South America       |     0.0000 |
+| YRI        | AFR             | Sri Lanka           |     0.0000 |
+| YRI        | AFR             | United Kingdom      |     0.0000 |
 
 ## ROH results
 

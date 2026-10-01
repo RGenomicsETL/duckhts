@@ -11,7 +11,7 @@ This report evaluates whether ancestry-tuned allele frequencies reduce unsupport
 - Its fraction of frequency-free truth-run length covered must be no more than 5% relatively below either comparator.
 - In controls, both unsupported-ROH count and truth coverage must remain within 5% relative of the single-population arm. For a zero comparator, equality is required.
 
-No amendment to the truth threshold has been made. A truth segment is a merged run of windows (100 kb each) with at most one heterozygous call, supported when at least 90% of its length meets that window criterion. Truth calls use all biallelic SNVs in each full source VCF, not just ancestry-reference sites. The window distribution and separation check must be reviewed before any ROH-arm comparison; if inadequate, the threshold may only be amended here before computing arm results. The primary length threshold is 1 Mb, with 2 Mb and 5 Mb also reported. FROH is total called ROH length divided by callable autosomal length.
+No amendment to the truth threshold has been made. A truth segment is a merged run of 100 kb windows with at most one heterozygous call per window, and a retained run covers at least 1 Mb of actual bases. An ROH call is truth-supported when at least 90% of its length overlaps these truth intervals. Truth calls use all biallelic SNVs in each full source VCF, not just ancestry-reference sites. The window distribution and separation check must be reviewed before any ROH-arm comparison; if inadequate, the threshold may only be amended here before computing arm results. The primary length threshold is 1 Mb, with 2 Mb and 5 Mb also reported. FROH is total called ROH length divided by callable autosomal length.
 
 ## Data identity and processing status
 
@@ -26,7 +26,7 @@ The phased high-coverage VCF source is `https://ftp.1000genomes.ebi.ac.uk/vol1/f
 
 The planned trio counts are ACB 20, ASW 13, CLM 35, MXL 32, PEL 35 and PUR 35 (admixed), and YRI 56, ESN 43, CEU 57 and CHS 51 (controls). Single-population AF uses AFR for ACB, ASW, YRI and ESN; AMR for CLM, MXL, PEL and PUR; EUR for CEU; and EAS for CHS.
 
-Chr20 has the complete chromosome-specific truth, q and arm evaluation. The 22-autosome truth-window table and retained intervals are now computed; chr20 windows were reused and the 102 retained chr20 intervals match the prior result exactly. Genome-wide q estimation and arm comparisons remain pending. The population child counts match the declared expectations: ACB 20, ASW 13, CLM 35, MXL 32, PEL 35, PUR 35, YRI 56, ESN 43, CEU 57 and CHS 51. The chr20 source VCF was copied from the supplied local file after its checksum was verified; its remote metadata is recorded above. bcftools reported `1.23.1-70-g6dbd8fef`; the source header had 3,202 samples and the children BCF has 377. The DuckHTS extension was rebuilt from revision `86f53052` for the arm measurements. The remote chr1 input was streamed through bcftools; its ETag, Last-Modified value, record count and output SHA-256 are recorded in [its receipt](results/roh-ancestry/chr1/input_receipt.tsv).
+Chr20 has the complete chromosome-specific truth, q and arm evaluation. The 22-autosome truth-window table and retained intervals are computed; chr20 windows were reused and the 102 retained chr20 intervals match the prior result exactly. Genome-wide q now contains 7,917 estimates (377 children × 21 groups), all with `status=ok`; each child contributed 4,883,749 matched loci and the `cor_pred` range is 0.643847–0.719384. Genome-wide arm comparisons remain pending. The population child counts match the declared expectations: ACB 20, ASW 13, CLM 35, MXL 32, PEL 35, PUR 35, YRI 56, ESN 43, CEU 57 and CHS 51. The chr20 source VCF was copied from the supplied local file after its checksum was verified; its remote metadata is recorded above. bcftools reported `1.23.1-70-g6dbd8fef`; the source header had 3,202 samples and the children BCF has 377. The DuckHTS extension was rebuilt from revision `86f53052` for the arm measurements. The remote chr1 input was streamed through bcftools; its ETag, Last-Modified value, record count and output SHA-256 are recorded in [its receipt](results/roh-ancestry/chr1/input_receipt.tsv).
 
 ## Autosome BCF staging
 
@@ -71,6 +71,17 @@ The three ROH arms used the same 108,757 sites for every child. The AF and ances
 
 ```{r, echo=FALSE}
 knitr::kable(utils::read.csv("results/roh-ancestry/chr20/q_by_child.csv"), digits = 4)
+```
+
+### Full-autosome q estimates
+
+Genome-wide q uses all 22 child BCFs matched to GRCh38 non-palindromic biallelic reference sites and the bigsnpr 1.12.21 correction, with `min_cor = 0.4`. Eight-child batches were used under a 12 GB DuckDB memory limit. All 377 children have estimates for 21 groups, each child's proportions sum to one, and every estimate has `status=ok`. The full per-child, per-group estimates and allele-harmonization counts are available in [the q table](results/roh-ancestry/autosome_q_by_child.csv) and [per-child site diagnostics](results/roh-ancestry/autosome_q_site_counts_by_child.csv).
+
+```{r, echo=FALSE}
+q_quality <- utils::read.csv("results/roh-ancestry/autosome_q_quality_by_population.csv")
+q_by_population <- utils::read.csv("results/roh-ancestry/autosome_q_summary_by_population.csv")
+knitr::kable(q_quality, digits = 4, row.names = FALSE)
+knitr::kable(q_by_population, digits = 4, row.names = FALSE)
 ```
 
 ## ROH results

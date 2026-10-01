@@ -1,0 +1,211 @@
+"Population","Superpopulation","group_id","proportion"
+"ACB","AFR","Africa (East)",0.001734355
+"ACB","AFR","Africa (North)",0
+"ACB","AFR","Africa (South)",0.03184692
+"ACB","AFR","Africa (West)",0.86052345
+"ACB","AFR","Ashkenazi",0.000441945
+"ACB","AFR","Asia (East)",0.000785545
+"ACB","AFR","Bangladesh",0.003360085
+"ACB","AFR","Europe (North East)",0.003989375
+"ACB","AFR","Europe (South East)",0
+"ACB","AFR","Europe (South West)",0.00443584
+"ACB","AFR","Finland",0.00060674
+"ACB","AFR","Ireland",0.01444175
+"ACB","AFR","Italy",0.003558205
+"ACB","AFR","Japan",0.000453005
+"ACB","AFR","Middle East",0.00037511
+"ACB","AFR","Pakistan",0.00073773
+"ACB","AFR","Philippines",0.001197735
+"ACB","AFR","Scandinavia",0.024168335
+"ACB","AFR","South America",0.00421618
+"ACB","AFR","Sri Lanka",0.00628515
+"ACB","AFR","United Kingdom",0.036842575
+"ASW","AFR","Africa (East)",0.00136526153846154
+"ASW","AFR","Africa (North)",0.00266059230769231
+"ASW","AFR","Africa (South)",0.141497815384615
+"ASW","AFR","Africa (West)",0.657532915384615
+"ASW","AFR","Ashkenazi",0.00226374615384615
+"ASW","AFR","Asia (East)",0.00149485384615385
+"ASW","AFR","Bangladesh",0.0015263
+"ASW","AFR","Europe (North East)",0.00946446923076923
+"ASW","AFR","Europe (South East)",0
+"ASW","AFR","Europe (South West)",0.0202431923076923
+"ASW","AFR","Finland",0.00763106923076923
+"ASW","AFR","Ireland",0.0372407384615385
+"ASW","AFR","Italy",0
+"ASW","AFR","Japan",0.00107401538461538
+"ASW","AFR","Middle East",0
+"ASW","AFR","Pakistan",0
+"ASW","AFR","Philippines",0.00161333076923077
+"ASW","AFR","Scandinavia",0.0357163307692308
+"ASW","AFR","South America",0.0135762076923077
+"ASW","AFR","Sri Lanka",0.00166796153846154
+"ASW","AFR","United Kingdom",0.0634312
+"CEU","EUR","Africa (East)",0.000413194736842105
+"CEU","EUR","Africa (North)",0.00205005438596491
+"CEU","EUR","Africa (South)",0.000279389473684211
+"CEU","EUR","Africa (West)",0.000713394736842105
+"CEU","EUR","Ashkenazi",0.00463413684210526
+"CEU","EUR","Asia (East)",0.000360738596491228
+"CEU","EUR","Bangladesh",4.40280701754386e-05
+"CEU","EUR","Europe (North East)",0.0180526122807018
+"CEU","EUR","Europe (South East)",0.014751850877193
+"CEU","EUR","Europe (South West)",0.0500653280701754
+"CEU","EUR","Finland",0.00905224736842105
+"CEU","EUR","Ireland",0.0508195438596491
+"CEU","EUR","Italy",0.0108749912280702
+"CEU","EUR","Japan",0.000334171929824561
+"CEU","EUR","Middle East",0.00279016315789474
+"CEU","EUR","Pakistan",0.000696649122807018
+"CEU","EUR","Philippines",0.000270287719298246
+"CEU","EUR","Scandinavia",0.30758731754386
+"CEU","EUR","South America",0.00214186140350877
+"CEU","EUR","Sri Lanka",0.00109360526315789
+"CEU","EUR","United Kingdom",0.522974454385965
+"CHS","EAS","Africa (East)",4.71509803921569e-05
+"CHS","EAS","Africa (North)",0
+"CHS","EAS","Africa (South)",0
+"CHS","EAS","Africa (West)",0
+"CHS","EAS","Ashkenazi",0
+"CHS","EAS","Asia (East)",0.8918684
+"CHS","EAS","Bangladesh",0
+"CHS","EAS","Europe (North East)",0
+"CHS","EAS","Europe (South East)",0
+"CHS","EAS","Europe (South West)",0
+"CHS","EAS","Finland",7.08294117647059e-05
+"CHS","EAS","Ireland",0
+"CHS","EAS","Italy",0
+"CHS","EAS","Japan",0.107660935294118
+"CHS","EAS","Middle East",0
+"CHS","EAS","Pakistan",0
+"CHS","EAS","Philippines",0
+"CHS","EAS","Scandinavia",0
+"CHS","EAS","South America",0.000199137254901961
+"CHS","EAS","Sri Lanka",0.000153543137254902
+"CHS","EAS","United Kingdom",0
+"CLM","AMR","Africa (East)",0.00141242
+"CLM","AMR","Africa (North)",0.00167479714285714
+"CLM","AMR","Africa (South)",0.0134088057142857
+"CLM","AMR","Africa (West)",0.0323163542857143
+"CLM","AMR","Ashkenazi",0.00160053714285714
+"CLM","AMR","Asia (East)",2.29828571428571e-05
+"CLM","AMR","Bangladesh",0
+"CLM","AMR","Europe (North East)",0
+"CLM","AMR","Europe (South East)",0
+"CLM","AMR","Europe (South West)",0.36260196
+"CLM","AMR","Finland",0.00214740571428571
+"CLM","AMR","Ireland",0
+"CLM","AMR","Italy",0.0362144942857143
+"CLM","AMR","Japan",0.000431591428571429
+"CLM","AMR","Middle East",0.000406694285714286
+"CLM","AMR","Pakistan",0
+"CLM","AMR","Philippines",0.000217908571428571
+"CLM","AMR","Scandinavia",0.00135238
+"CLM","AMR","South America",0.545267594285714
+"CLM","AMR","Sri Lanka",0.000924082857142857
+"CLM","AMR","United Kingdom",0
+"ESN","AFR","Africa (East)",0
+"ESN","AFR","Africa (North)",0
+"ESN","AFR","Africa (South)",0.0355038
+"ESN","AFR","Africa (West)",0.9644962
+"ESN","AFR","Ashkenazi",0
+"ESN","AFR","Asia (East)",0
+"ESN","AFR","Bangladesh",0
+"ESN","AFR","Europe (North East)",0
+"ESN","AFR","Europe (South East)",0
+"ESN","AFR","Europe (South West)",0
+"ESN","AFR","Finland",0
+"ESN","AFR","Ireland",0
+"ESN","AFR","Italy",0
+"ESN","AFR","Japan",0
+"ESN","AFR","Middle East",0
+"ESN","AFR","Pakistan",0
+"ESN","AFR","Philippines",0
+"ESN","AFR","Scandinavia",0
+"ESN","AFR","South America",0
+"ESN","AFR","Sri Lanka",0
+"ESN","AFR","United Kingdom",0
+"MXL","AMR","Africa (East)",0.000839659375
+"MXL","AMR","Africa (North)",0.00646005625
+"MXL","AMR","Africa (South)",0.001822053125
+"MXL","AMR","Africa (West)",0.000966271875
+"MXL","AMR","Ashkenazi",0.006147959375
+"MXL","AMR","Asia (East)",0.002088653125
+"MXL","AMR","Bangladesh",0
+"MXL","AMR","Europe (North East)",0.000519021875
+"MXL","AMR","Europe (South East)",0.004726825
+"MXL","AMR","Europe (South West)",0.10341104375
+"MXL","AMR","Finland",0.00352179375
+"MXL","AMR","Ireland",0.005653603125
+"MXL","AMR","Italy",0.034762084375
+"MXL","AMR","Japan",0.00959476875
+"MXL","AMR","Middle East",0.000671425
+"MXL","AMR","Pakistan",0
+"MXL","AMR","Philippines",0.00034646875
+"MXL","AMR","Scandinavia",0.00853475625
+"MXL","AMR","South America",0.808253659375
+"MXL","AMR","Sri Lanka",0.001679925
+"MXL","AMR","United Kingdom",0
+"PEL","AMR","Africa (East)",0
+"PEL","AMR","Africa (North)",0
+"PEL","AMR","Africa (South)",0
+"PEL","AMR","Africa (West)",0
+"PEL","AMR","Ashkenazi",0
+"PEL","AMR","Asia (East)",0.00073846
+"PEL","AMR","Bangladesh",0
+"PEL","AMR","Europe (North East)",0
+"PEL","AMR","Europe (South East)",0
+"PEL","AMR","Europe (South West)",0
+"PEL","AMR","Finland",0
+"PEL","AMR","Ireland",0
+"PEL","AMR","Italy",0
+"PEL","AMR","Japan",0.00266242285714286
+"PEL","AMR","Middle East",0
+"PEL","AMR","Pakistan",0
+"PEL","AMR","Philippines",0
+"PEL","AMR","Scandinavia",0
+"PEL","AMR","South America",0.996599117142857
+"PEL","AMR","Sri Lanka",0
+"PEL","AMR","United Kingdom",0
+"PUR","AMR","Africa (East)",0.00374122
+"PUR","AMR","Africa (North)",0.0546289685714286
+"PUR","AMR","Africa (South)",0.0299038285714286
+"PUR","AMR","Africa (West)",0.0718442657142857
+"PUR","AMR","Ashkenazi",0.00683300857142857
+"PUR","AMR","Asia (East)",0.00047264
+"PUR","AMR","Bangladesh",0
+"PUR","AMR","Europe (North East)",0.00593690285714286
+"PUR","AMR","Europe (South East)",0.00522141428571429
+"PUR","AMR","Europe (South West)",0.488492225714286
+"PUR","AMR","Finland",0.00616140857142857
+"PUR","AMR","Ireland",0.0154594285714286
+"PUR","AMR","Italy",0.0279664428571429
+"PUR","AMR","Japan",0.00202943142857143
+"PUR","AMR","Middle East",0.00423367714285714
+"PUR","AMR","Pakistan",0.000529551428571429
+"PUR","AMR","Philippines",0.000417042857142857
+"PUR","AMR","Scandinavia",0.00115982285714286
+"PUR","AMR","South America",0.273114211428571
+"PUR","AMR","Sri Lanka",0.00134402285714286
+"PUR","AMR","United Kingdom",0.000510508571428571
+"YRI","AFR","Africa (East)",0
+"YRI","AFR","Africa (North)",0
+"YRI","AFR","Africa (South)",0.0071482375
+"YRI","AFR","Africa (West)",0.9928517625
+"YRI","AFR","Ashkenazi",0
+"YRI","AFR","Asia (East)",0
+"YRI","AFR","Bangladesh",0
+"YRI","AFR","Europe (North East)",0
+"YRI","AFR","Europe (South East)",0
+"YRI","AFR","Europe (South West)",0
+"YRI","AFR","Finland",0
+"YRI","AFR","Ireland",0
+"YRI","AFR","Italy",0
+"YRI","AFR","Japan",0
+"YRI","AFR","Middle East",0
+"YRI","AFR","Pakistan",0
+"YRI","AFR","Philippines",0
+"YRI","AFR","Scandinavia",0
+"YRI","AFR","South America",0
+"YRI","AFR","Sri Lanka",0
+"YRI","AFR","United Kingdom",0
