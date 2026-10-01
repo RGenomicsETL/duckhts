@@ -123,6 +123,8 @@
   : Munge Summary Statistics Rows
 - [`rduckhts_pileup()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_pileup.md)
   : Create BAM Pileup Table
+- [`rduckhts_roh()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_roh.md)
+  : Find Runs of Homozygosity
 - [`rduckhts_samtools_idxstats()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_samtools_idxstats.md)
   : samtools idxstats-Compatible Alignment Summary
 - [`rduckhts_score()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_score.md)

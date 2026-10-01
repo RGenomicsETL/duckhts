@@ -1,6 +1,6 @@
 # Changelog
 
-## Rduckhts 1.5.2.9008.0.1.5
+## Rduckhts 1.5.2.9009.0.1.5
 
 Preview of 2.0.0, still in development. The sections below describe what
 2.0.0 will contain.
@@ -60,6 +60,19 @@ Preview of 2.0.0, still in development. The sections below describe what
   sites, with unchanged numeric results.
 
 ### New features
+
+- New
+  [`rduckhts_roh()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_roh.md)
+  finds runs of homozygosity in a VCF/BCF with the `bcftools roh` model,
+  returning `sample`, `chrom`, `start`, `end`, `length`, `n_markers` and
+  `quality`. Allele frequencies come from an INFO tag (`af_tag`) or a
+  table (`af_table`); `genetic_map` (a `chrom`, `pos`, `cm` table),
+  `rec_rate`, `hw_to_az`, `az_to_hw`, `gt_error` (GT-only emissions, no
+  FORMAT/PL needed) and `samples` are optional. Segments equal
+  `bcftools roh` on the bundled `roh_fixture.vcf.gz`; the native
+  `duckhts_roh_segments()` kernel is available from SQL. Start and end
+  positions are identical; quality matches the one decimal `bcftools`
+  prints.
 
 - New `regions_var` argument on
   [`rduckhts_geno()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_geno.md)
