@@ -102,6 +102,152 @@ SELECT count(*) FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_f
 ----
 4
 
+# Ancestry-specific reference and proportions use a deliberately reversed allele orientation.
+statement ok
+CREATE TEMP TABLE roh_ancestry_reference AS
+SELECT chrom AS chromosome, pos AS position, alt AS allele_a, ref AS allele_b,
+       'A' AS group_id, 0.2::DOUBLE AS frequency FROM roh_af
+WHERE NOT ((ref = 'A' AND alt = 'T') OR (ref = 'T' AND alt = 'A') OR
+           (ref = 'C' AND alt = 'G') OR (ref = 'G' AND alt = 'C'))
+UNION ALL
+SELECT chrom, pos, alt, ref, 'B', 0.4::DOUBLE FROM roh_af
+WHERE NOT ((ref = 'A' AND alt = 'T') OR (ref = 'T' AND alt = 'A') OR
+           (ref = 'C' AND alt = 'G') OR (ref = 'G' AND alt = 'C'));
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_proportions AS
+SELECT sample_id, group_id, proportion FROM (VALUES
+  ('S1', 'A', 1.0), ('S1', 'B', 0.0),
+  ('S2', 'A', 1.0), ('S2', 'B', 0.0),
+  ('S3', 'A', 1.0), ('S3', 'B', 0.0),
+  ('S4', 'A', 1.0), ('S4', 'B', 0.0)
+) AS p(sample_id, group_id, proportion);
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_af AS
+SELECT chrom, pos, ref, alt, 0.8::DOUBLE AS af FROM roh_af
+WHERE NOT ((ref = 'A' AND alt = 'T') OR (ref = 'T' AND alt = 'A') OR
+           (ref = 'C' AND alt = 'G') OR (ref = 'G' AND alt = 'C'));
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_reference_forward AS
+SELECT chrom AS chromosome, pos AS position, ref AS allele_a, alt AS allele_b,
+       'A' AS group_id, 0.2::DOUBLE AS frequency FROM roh_af
+WHERE NOT ((ref = 'A' AND alt = 'T') OR (ref = 'T' AND alt = 'A') OR
+           (ref = 'C' AND alt = 'G') OR (ref = 'G' AND alt = 'C'))
+UNION ALL
+SELECT chrom, pos, ref, alt, 'B', 0.4::DOUBLE FROM roh_af
+WHERE NOT ((ref = 'A' AND alt = 'T') OR (ref = 'T' AND alt = 'A') OR
+           (ref = 'C' AND alt = 'G') OR (ref = 'G' AND alt = 'C'));
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_af_forward AS
+SELECT chrom, pos, ref, alt, 0.2::DOUBLE AS af FROM roh_af
+WHERE NOT ((ref = 'A' AND alt = 'T') OR (ref = 'T' AND alt = 'A') OR
+           (ref = 'C' AND alt = 'G') OR (ref = 'G' AND alt = 'C'));
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_reference_zero AS
+SELECT chrom AS chromosome, pos AS position, ref AS allele_a, alt AS allele_b,
+       group_id, 0.0::DOUBLE AS frequency
+FROM roh_ancestry_proportions CROSS JOIN roh_af
+WHERE sample_id = 'S1' AND NOT ((ref = 'A' AND alt = 'T') OR (ref = 'T' AND alt = 'A') OR
+                                (ref = 'C' AND alt = 'G') OR (ref = 'G' AND alt = 'C'));
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_af_clamped AS
+SELECT chrom, pos, ref, alt, 0.001::DOUBLE AS af FROM roh_af
+WHERE NOT ((ref = 'A' AND alt = 'T') OR (ref = 'T' AND alt = 'A') OR
+           (ref = 'C' AND alt = 'G') OR (ref = 'G' AND alt = 'C'));
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_af_unclamped AS
+SELECT chrom, pos, ref, alt, 0.0::DOUBLE AS af FROM roh_af
+WHERE NOT ((ref = 'A' AND alt = 'T') OR (ref = 'T' AND alt = 'A') OR
+           (ref = 'C' AND alt = 'G') OR (ref = 'G' AND alt = 'C'));
+
+# The hand calculation is q_A * f_A + q_B * f_B = 1 * 0.2 + 0 * 0.4 = 0.2;
+# reversed alleles therefore yield 1 - 0.2 = 0.8.
+query I
+SELECT round(1.0 - list_inner_product([0.2, 0.4], [1.0, 0.0]), 6);
+----
+0.8
+
+# q=(1,0) selects group A's frequency for REF=allele_a, ALT=allele_b.
+query I
+WITH tuned AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_forward', 'roh_ancestry_proportions', gt_error := 30, samples := 'S1')),
+pooled AS (SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_af_forward', gt_error := 30, samples := 'S1'))
+SELECT count(*) FROM ((SELECT * FROM tuned EXCEPT ALL SELECT * FROM pooled)
+UNION ALL (SELECT * FROM pooled EXCEPT ALL SELECT * FROM tuned));
+----
+0
+
+# The default clamp keeps zero group frequencies at 0.001; zero disables the clamp.
+query I
+WITH tuned AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_zero', 'roh_ancestry_proportions', gt_error := 30, samples := 'S1')),
+pooled AS (SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_af_clamped', gt_error := 30, samples := 'S1'))
+SELECT count(*) FROM ((SELECT * FROM tuned EXCEPT ALL SELECT * FROM pooled)
+UNION ALL (SELECT * FROM pooled EXCEPT ALL SELECT * FROM tuned));
+----
+0
+
+query I
+WITH tuned AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_zero', 'roh_ancestry_proportions', af_clamp := 0,
+  gt_error := 30, samples := 'S1')),
+pooled AS (SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_af_unclamped', gt_error := 30, samples := 'S1'))
+SELECT count(*) FROM ((SELECT * FROM tuned EXCEPT ALL SELECT * FROM pooled)
+UNION ALL (SELECT * FROM pooled EXCEPT ALL SELECT * FROM tuned));
+----
+0
+
+# Per-sample AF equals the equivalent per-site table, with and without a map.
+query I
+WITH tuned AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference', 'roh_ancestry_proportions', gt_error := 30, samples := 'S1')),
+pooled AS (SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_af', gt_error := 30, samples := 'S1'))
+SELECT count(*) FROM ((SELECT * FROM tuned EXCEPT ALL SELECT * FROM pooled)
+UNION ALL (SELECT * FROM pooled EXCEPT ALL SELECT * FROM tuned));
+----
+0
+
+query I
+WITH tuned AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference', 'roh_ancestry_proportions', 'roh_map', gt_error := 30, samples := 'S1')),
+pooled AS (SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_af', 'roh_map', gt_error := 30, samples := 'S1'))
+SELECT count(*) FROM ((SELECT * FROM tuned EXCEPT ALL SELECT * FROM pooled)
+UNION ALL (SELECT * FROM pooled EXCEPT ALL SELECT * FROM tuned));
+----
+0
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_missing AS
+SELECT * FROM roh_ancestry_proportions WHERE sample_id <> 'S1';
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_mismatch AS
+SELECT sample_id, CASE WHEN group_id = 'B' THEN 'C' ELSE group_id END AS group_id,
+       proportion FROM roh_ancestry_proportions;
+
+statement error
+SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference', 'roh_ancestry_missing', gt_error := 30, samples := 'S1');
+----
+every VCF sample requires ancestry proportions
+
+statement error
+SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference', 'roh_ancestry_mismatch', gt_error := 30, samples := 'S1');
+----
+reference and proportions group sets must match exactly
+
 # Constant recombination rate (-M).
 # bcftools: bcftools roh --AF-tag AF -M 1e-6
 query I

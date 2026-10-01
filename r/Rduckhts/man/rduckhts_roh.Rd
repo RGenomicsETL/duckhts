@@ -16,7 +16,10 @@ rduckhts_roh(
   rec_rate = NULL,
   samples = NULL,
   table_name = NULL,
-  overwrite = FALSE
+  overwrite = FALSE,
+  reference_table = NULL,
+  proportions_table = NULL,
+  af_clamp = 0.001
 )
 }
 \arguments{
@@ -26,8 +29,8 @@ rduckhts_roh(
 
 \item{af_tag}{INFO tag holding the ALT allele frequency, for example `"AF"`.}
 
-\item{af_table}{Name of a table or view of allele frequencies, instead of
-`af_tag`. Exactly one of the two is required.}
+\item{af_table}{Name of a table or view of site allele frequencies, instead
+of `af_tag` or the ancestry inputs.}
 
 \item{genetic_map}{Optional name of a genetic-map table or view.}
 
@@ -44,6 +47,16 @@ leading `^` exclusion, `"-"` for all, or `""` for none.}
 \item{table_name}{Optional output table. `NULL` returns a data frame.}
 
 \item{overwrite}{Whether an existing output table may be replaced.}
+
+\item{reference_table}{Long-format reference with chromosome, position,
+allele_a, allele_b, group_id and frequency columns.}
+
+\item{proportions_table}{Long-format sample ancestry proportions with
+sample_id, group_id and proportion columns. Its group set must exactly
+match `reference_table`.}
+
+\item{af_clamp}{Clamp ancestry-tuned frequencies to `[af_clamp, 1-af_clamp]`;
+zero disables clamping. Must be in `[0, 0.5)`.}
 }
 \value{
 A data frame (or invisible `TRUE` when `table_name` is given) with one
@@ -67,6 +80,21 @@ must be declared `Type=Float,Number=A`) or from a relation (`af_table`, like
 each record by chromosome, position, REF and its ALT alleles joined by commas.
 Sites without a usable frequency (absent, missing or exactly 0) are skipped,
 as are records with more than one ALT or none.
+
+Alternatively, `reference_table` and `proportions_table` select the
+ancestry-tuned path. The reference is long-format with columns `chromosome`,
+`position`, `allele_a`, `allele_b`, `group_id` and `frequency` (frequency of
+`allele_b`); proportions have `sample_id`, `group_id` and `proportion`.
+Their group sets must match exactly, and each VCF sample must have a
+proportions row for every group. Per-site AF is the sum of each group's
+frequency weighted by the sample's proportion. REF=`allele_a`, ALT=`allele_b`
+uses that AF; reversed alleles use `1 - AF`. Other allele matches and
+palindromic sites are excluded. Chromosome names match after removing a
+leading `chr`. `af_clamp` limits nonzero-clamp frequencies to
+`[af_clamp, 1-af_clamp]`; the default keeps zero population frequencies from
+being treated as impossible, and zero disables clamping. Only called sites
+are frequency-weighted. Supply exactly one frequency source: `af_tag`,
+`af_table`, or both ancestry relations.
 
 Genotype evidence is FORMAT/PL unless `gt_error` is given, which uses the
 diploid GT calls with that phred error (`-G`) and needs no PL. With no

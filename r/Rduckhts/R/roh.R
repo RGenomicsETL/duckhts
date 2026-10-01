@@ -15,6 +15,21 @@
 #' Sites without a usable frequency (absent, missing or exactly 0) are skipped,
 #' as are records with more than one ALT or none.
 #'
+#' Alternatively, `reference_table` and `proportions_table` select the
+#' ancestry-tuned path. The reference is long-format with columns `chromosome`,
+#' `position`, `allele_a`, `allele_b`, `group_id` and `frequency` (frequency of
+#' `allele_b`); proportions have `sample_id`, `group_id` and `proportion`.
+#' Their group sets must match exactly, and each VCF sample must have a
+#' proportions row for every group. Per-site AF is the sum of each group's
+#' frequency weighted by the sample's proportion. REF=`allele_a`, ALT=`allele_b`
+#' uses that AF; reversed alleles use `1 - AF`. Other allele matches and
+#' palindromic sites are excluded. Chromosome names match after removing a
+#' leading `chr`. `af_clamp` limits nonzero-clamp frequencies to
+#' `[af_clamp, 1-af_clamp]`; the default keeps zero population frequencies from
+#' being treated as impossible, and zero disables clamping. Only called sites
+#' are frequency-weighted. Supply exactly one frequency source: `af_tag`,
+#' `af_table`, or both ancestry relations.
+#'
 #' Genotype evidence is FORMAT/PL unless `gt_error` is given, which uses the
 #' diploid GT calls with that phred error (`-G`) and needs no PL. With no
 #' recombination map, transitions are the per-base-pair probabilities
@@ -28,8 +43,15 @@
 #' @param con A DuckDB connection with DuckHTS loaded.
 #' @param path One VCF/BCF path or URI.
 #' @param af_tag INFO tag holding the ALT allele frequency, for example `"AF"`.
-#' @param af_table Name of a table or view of allele frequencies, instead of
-#'   `af_tag`. Exactly one of the two is required.
+#' @param af_table Name of a table or view of site allele frequencies, instead
+#'   of `af_tag` or the ancestry inputs.
+#' @param reference_table Long-format reference with chromosome, position,
+#'   allele_a, allele_b, group_id and frequency columns.
+#' @param proportions_table Long-format sample ancestry proportions with
+#'   sample_id, group_id and proportion columns. Its group set must exactly
+#'   match `reference_table`.
+#' @param af_clamp Clamp ancestry-tuned frequencies to `[af_clamp, 1-af_clamp]`;
+#'   zero disables clamping. Must be in `[0, 0.5)`.
 #' @param genetic_map Optional name of a genetic-map table or view.
 #' @param hw_to_az,az_to_hw Per-base-pair transition probabilities
 #'   Hardy-Weinberg to autozygous (`-a`) and back (`-H`), each in `[0, 1]`.
@@ -53,15 +75,26 @@
 rduckhts_roh <- function(
   con, path, af_tag = NULL, af_table = NULL, genetic_map = NULL,
   hw_to_az = 6.7e-8, az_to_hw = 5e-9, gt_error = NULL, rec_rate = NULL,
-  samples = NULL, table_name = NULL, overwrite = FALSE
+  samples = NULL, table_name = NULL, overwrite = FALSE,
+  reference_table = NULL, proportions_table = NULL, af_clamp = 1e-3
 ) {
   .somalier_validate_output(con, table_name, overwrite)
   .somalier_scalar_text(path, "path")
-  if (is.null(af_tag) == is.null(af_table)) {
-    stop("exactly one of af_tag and af_table is required", call. = FALSE)
+  ancestry <- !is.null(reference_table) || !is.null(proportions_table)
+  if (ancestry && (is.null(reference_table) || is.null(proportions_table))) {
+    stop("reference_table and proportions_table must be supplied together", call. = FALSE)
+  }
+  sources <- sum(!is.null(af_tag), !is.null(af_table), ancestry)
+  if (sources != 1L) {
+    stop("supply exactly one of af_tag, af_table, or ancestry relations", call. = FALSE)
   }
   if (!is.null(af_tag)) .somalier_scalar_text(af_tag, "af_tag")
   if (!is.null(af_table)) .somalier_validate_name(af_table, "af_table")
+  if (ancestry) {
+    .somalier_validate_name(reference_table, "reference_table")
+    .somalier_validate_name(proportions_table, "proportions_table")
+    af_clamp <- .roh_number(af_clamp, "af_clamp", maximum = 0.49999999999999994)
+  }
   if (!is.null(genetic_map)) .somalier_validate_name(genetic_map, "genetic_map")
   if (!is.null(samples)) .somalier_scalar_text(samples, "samples", allow_empty = TRUE)
   hw_to_az <- .roh_number(hw_to_az, "hw_to_az", maximum = 1)
@@ -71,15 +104,20 @@ rduckhts_roh <- function(
 
   arguments <- c(
     sql_quote_string(con, path),
-    sql_quote_string(con, if (is.null(af_tag)) af_table else af_tag),
+    if (ancestry) c(sql_quote_string(con, reference_table),
+                    sql_quote_string(con, proportions_table)) else
+      sql_quote_string(con, if (is.null(af_tag)) af_table else af_tag),
     if (!is.null(genetic_map)) sql_quote_string(con, genetic_map),
     paste0("hw_to_az := ", hw_to_az),
     paste0("az_to_hw := ", az_to_hw),
     if (!is.null(gt_error)) paste0("gt_error := ", gt_error),
     if (!is.null(rec_rate)) paste0("rec_rate := ", rec_rate),
+    if (ancestry) paste0("af_clamp := ", af_clamp),
     if (!is.null(samples)) paste0("samples := ", sql_quote_string(con, samples))
   )
-  macro <- if (is.null(af_tag)) "duckhts_roh_af_table" else "duckhts_roh"
+  macro <- if (ancestry) "duckhts_roh_ancestry" else if (is.null(af_tag)) {
+    "duckhts_roh_af_table"
+  } else "duckhts_roh"
   query <- paste0("SELECT * FROM ", macro, "(", paste(arguments, collapse = ", "), ")")
   .somalier_publish_query(con, query, table_name, overwrite)
 }

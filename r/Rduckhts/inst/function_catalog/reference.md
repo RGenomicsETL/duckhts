@@ -1364,6 +1364,40 @@ Everything else is as duckhts_roh: the same output, genotype evidence (PL, or GT
 SELECT * FROM duckhts_roh_af_table('cohort.vcf.gz', 'site_frequencies') ORDER BY sample, chrom, start;
 ```
 
+## duckhts_roh_ancestry
+
+Find runs of homozygosity using each sample's ancestry-weighted allele frequencies.
+
+Signature:
+
+```sql
+duckhts_roh_ancestry(path, reference_table, proportions_table, genetic_map, af_clamp := 1e-3, hw_to_az := 6.7e-8, az_to_hw := 5e-9, gt_error := NULL, rec_rate := NULL, samples := NULL)
+```
+
+Returns:
+
+```
+table(sample VARCHAR, chrom VARCHAR, start BIGINT, "end" BIGINT, length BIGINT, n_markers INTEGER, quality DOUBLE)
+```
+
+### Inputs
+
+reference_table is a long relation with chromosome, position (one-based), allele_a, allele_b, group_id and frequency (frequency of allele_b). proportions_table has sample_id, group_id and proportion. Both relations must use exactly the same group IDs; every called VCF sample needs proportions. Chromosome names match after removing a leading chr prefix.
+
+### Frequency model
+
+For each called site and sample, AF is the sum over groups of proportion times group frequency. The reference is aggregated once per site and proportions once per sample, then joined to called sites. REF=allele_a and ALT=allele_b uses the weighted frequency; the reversed orientation uses 1-AF. Other alleles and palindromic sites are excluded. af_clamp in [0, 0.5) clamps AF to [af_clamp, 1-af_clamp]; zero disables clamping. The default avoids interpreting a population frequency of zero as impossible.
+
+### Otherwise
+
+The output, genotype evidence, transitions, optional genetic_map overload and limits are as duckhts_roh_af_table.
+
+### Examples
+
+```sql
+SELECT * FROM duckhts_roh_ancestry('cohort.vcf.gz', 'reference_long', 'sample_proportions', gt_error := 30) ORDER BY sample, chrom, start;
+```
+
 ## duckhts_somalier_panel_sha256
 
 Derive a stable SHA-256 identity for an ordered biallelic sample-fingerprinting panel.
