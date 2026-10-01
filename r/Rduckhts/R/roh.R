@@ -72,14 +72,8 @@
 #' roh[order(roh$sample, roh$chrom, roh$start), ]
 #' DBI::dbDisconnect(con, shutdown = TRUE)
 #' @export
-rduckhts_roh <- function(
-  con, path, af_tag = NULL, af_table = NULL, genetic_map = NULL,
-  hw_to_az = 6.7e-8, az_to_hw = 5e-9, gt_error = NULL, rec_rate = NULL,
-  samples = NULL, table_name = NULL, overwrite = FALSE,
-  reference_table = NULL, proportions_table = NULL, af_clamp = 1e-3
-) {
-  .somalier_validate_output(con, table_name, overwrite)
-  .somalier_scalar_text(path, "path")
+.roh_frequency_source <- function(con, af_tag, af_table, reference_table,
+                                proportions_table, af_clamp) {
   ancestry <- !is.null(reference_table) || !is.null(proportions_table)
   if (ancestry && (is.null(reference_table) || is.null(proportions_table))) {
     stop("reference_table and proportions_table must be supplied together", call. = FALSE)
@@ -94,31 +88,56 @@ rduckhts_roh <- function(
     .somalier_validate_name(reference_table, "reference_table")
     .somalier_validate_name(proportions_table, "proportions_table")
     af_clamp <- .roh_number(af_clamp, "af_clamp", maximum = 0.49999999999999994)
+    arguments <- c(sql_quote_string(con, reference_table),
+                   sql_quote_string(con, proportions_table))
+    macro <- "duckhts_roh_ancestry"
+  } else {
+    arguments <- sql_quote_string(con, if (is.null(af_tag)) af_table else af_tag)
+    macro <- if (is.null(af_tag)) "duckhts_roh_af_table" else "duckhts_roh"
   }
+  list(ancestry = ancestry, af_clamp = af_clamp, arguments = arguments, macro = macro)
+}
+
+.roh_validated_options <- function(genetic_map, hw_to_az, az_to_hw, gt_error,
+                                   rec_rate, samples) {
   if (!is.null(genetic_map)) .somalier_validate_name(genetic_map, "genetic_map")
   if (!is.null(samples)) .somalier_scalar_text(samples, "samples", allow_empty = TRUE)
-  hw_to_az <- .roh_number(hw_to_az, "hw_to_az", maximum = 1)
-  az_to_hw <- .roh_number(az_to_hw, "az_to_hw", maximum = 1)
-  if (!is.null(gt_error)) gt_error <- .roh_number(gt_error, "gt_error")
-  if (!is.null(rec_rate)) rec_rate <- .roh_number(rec_rate, "rec_rate")
-
-  arguments <- c(
-    sql_quote_string(con, path),
-    if (ancestry) c(sql_quote_string(con, reference_table),
-                    sql_quote_string(con, proportions_table)) else
-      sql_quote_string(con, if (is.null(af_tag)) af_table else af_tag),
-    if (!is.null(genetic_map)) sql_quote_string(con, genetic_map),
-    paste0("hw_to_az := ", hw_to_az),
-    paste0("az_to_hw := ", az_to_hw),
-    if (!is.null(gt_error)) paste0("gt_error := ", gt_error),
-    if (!is.null(rec_rate)) paste0("rec_rate := ", rec_rate),
-    if (ancestry) paste0("af_clamp := ", af_clamp),
-    if (!is.null(samples)) paste0("samples := ", sql_quote_string(con, samples))
+  list(
+    genetic_map = genetic_map,
+    hw_to_az = .roh_number(hw_to_az, "hw_to_az", maximum = 1),
+    az_to_hw = .roh_number(az_to_hw, "az_to_hw", maximum = 1),
+    gt_error = if (is.null(gt_error)) NULL else .roh_number(gt_error, "gt_error"),
+    rec_rate = if (is.null(rec_rate)) NULL else .roh_number(rec_rate, "rec_rate"),
+    samples = samples
   )
-  macro <- if (ancestry) "duckhts_roh_ancestry" else if (is.null(af_tag)) {
-    "duckhts_roh_af_table"
-  } else "duckhts_roh"
-  query <- paste0("SELECT * FROM ", macro, "(", paste(arguments, collapse = ", "), ")")
+}
+
+rduckhts_roh <- function(
+  con, path, af_tag = NULL, af_table = NULL, genetic_map = NULL,
+  hw_to_az = 6.7e-8, az_to_hw = 5e-9, gt_error = NULL, rec_rate = NULL,
+  samples = NULL, table_name = NULL, overwrite = FALSE,
+  reference_table = NULL, proportions_table = NULL, af_clamp = 1e-3
+) {
+  .somalier_validate_output(con, table_name, overwrite)
+  .somalier_scalar_text(path, "path")
+  source <- .roh_frequency_source(con, af_tag, af_table, reference_table,
+                                  proportions_table, af_clamp)
+  options <- .roh_validated_options(genetic_map, hw_to_az, az_to_hw, gt_error,
+                                   rec_rate, samples)
+  arguments <- c(
+    sql_quote_string(con, path), source$arguments,
+    if (!is.null(options$genetic_map)) sql_quote_string(con, options$genetic_map),
+    paste0("hw_to_az := ", options$hw_to_az),
+    paste0("az_to_hw := ", options$az_to_hw),
+    if (!is.null(options$gt_error)) paste0("gt_error := ", options$gt_error),
+    if (!is.null(options$rec_rate)) paste0("rec_rate := ", options$rec_rate),
+    if (source$ancestry) paste0("af_clamp := ", source$af_clamp),
+    if (!is.null(options$samples)) {
+      paste0("samples := ", sql_quote_string(con, options$samples))
+    }
+  )
+  query <- paste0("SELECT * FROM ", source$macro, "(",
+                  paste(arguments, collapse = ", "), ")")
   .somalier_publish_query(con, query, table_name, overwrite)
 }
 
