@@ -803,6 +803,36 @@ diagnostics](results/roh-ancestry/autosome_q_site_counts_by_child.csv).
 | YRI        | AFR             | Sri Lanka           |     0.0000 |
 | YRI        | AFR             | United Kingdom      |     0.0000 |
 
+The AF and ancestry reference keys match on all 22 autosomes: 4,883,749
+keys in total, with zero AF-only or ancestry-only keys on every
+chromosome. The per-chromosome comparison is
+[here](results/roh-ancestry/autosome_site_set_equivalence.csv).
+
+| chromosome | af_site_count | ancestry_site_count | af_only_count | ancestry_only_count |
+|-----------:|--------------:|--------------------:|--------------:|--------------------:|
+|          1 |        376549 |              376549 |             0 |                   0 |
+|          2 |        404206 |              404206 |             0 |                   0 |
+|          3 |        352971 |              352971 |             0 |                   0 |
+|          4 |        361939 |              361939 |             0 |                   0 |
+|          5 |        310401 |              310401 |             0 |                   0 |
+|          6 |        331298 |              331298 |             0 |                   0 |
+|          7 |        290391 |              290391 |             0 |                   0 |
+|          8 |        265510 |              265510 |             0 |                   0 |
+|          9 |        208413 |              208413 |             0 |                   0 |
+|         10 |        247518 |              247518 |             0 |                   0 |
+|         11 |        242240 |              242240 |             0 |                   0 |
+|         12 |        235053 |              235053 |             0 |                   0 |
+|         13 |        182042 |              182042 |             0 |                   0 |
+|         14 |        157853 |              157853 |             0 |                   0 |
+|         15 |        139275 |              139275 |             0 |                   0 |
+|         16 |        145409 |              145409 |             0 |                   0 |
+|         17 |        127000 |              127000 |             0 |                   0 |
+|         18 |        144036 |              144036 |             0 |                   0 |
+|         19 |        115997 |              115997 |             0 |                   0 |
+|         20 |        108757 |              108757 |             0 |                   0 |
+|         21 |         69521 |               69521 |             0 |                   0 |
+|         22 |         67370 |               67370 |             0 |                   0 |
+
 ## ROH results
 
 All count and length summaries are per-child quantities and are

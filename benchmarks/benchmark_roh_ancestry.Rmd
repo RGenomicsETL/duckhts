@@ -84,6 +84,13 @@ knitr::kable(q_quality, digits = 4, row.names = FALSE)
 knitr::kable(q_by_population, digits = 4, row.names = FALSE)
 ```
 
+The AF and ancestry reference keys match on all 22 autosomes: 4,883,749 keys in total, with zero AF-only or ancestry-only keys on every chromosome. The per-chromosome comparison is [here](results/roh-ancestry/autosome_site_set_equivalence.csv).
+
+```{r, echo=FALSE}
+knitr::kable(utils::read.csv(
+  "results/roh-ancestry/autosome_site_set_equivalence.csv"), row.names = FALSE)
+```
+
 ## ROH results
 
 All count and length summaries are per-child quantities and are aggregated by population only after retaining each child's observations. The chr20-only FROH column is reported as a chromosome-length fraction; it is not the declared genome-wide FROH denominator.
