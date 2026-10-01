@@ -1,7 +1,0 @@
-"parts","records","workload","input_rows","median_max_rss_mib","max_max_rss_mib","duckdb_peak_buffer_mib","duckdb_peak_temp_bytes","observations"
-1,23713,"map_three",2563736,58.6,59.3,1.62,0,3
-1,23713,"named_three",2563736,58.1,58.1,0.49,0,3
-2,43922,"map_three",5263269,55.6,59.2,3.28,0,3
-2,43922,"named_three",5263269,57.5,57.5,0.49,0,3
-4,71677,"map_three",10670134,60.3,60.4,3.28,0,3
-4,71677,"named_three",10670134,58,58,0.49,0,3

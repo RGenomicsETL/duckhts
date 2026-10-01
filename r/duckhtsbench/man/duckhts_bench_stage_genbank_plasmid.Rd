@@ -23,3 +23,10 @@ input \code{benchmark_genbank_named_attributes.Rmd} reads. Network access occurs
 only in this explicit staging step; with \code{fetch = FALSE} every part must
 already be cached, which is how the report renders.
 }
+\details{
+NCBI serves only the current RefSeq release and archives its catalog, not
+its sequence files, so the parts can be downloaded only while the
+registered release is current. Before downloading, staging compares NCBI's
+\code{RELEASE_NUMBER} with the registered release and stops with re-pinning
+instructions when they differ.
+}

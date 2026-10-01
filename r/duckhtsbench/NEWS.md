@@ -7,7 +7,10 @@
   (`duckhts_bench_stage_gunzip_concatenate()`), staged by
   `duckhts_bench_stage_genbank_plasmid()` with a network-free staging test; it
   is the record-count scaling input `benchmark_genbank_named_attributes.Rmd`
-  reads
+  reads. NCBI serves only the current release's sequence files, so the parts
+  are registered as `public_current_release` and staging stops before
+  downloading, naming the archived release catalog, once NCBI has moved past
+  release 237. Gunzip derivations close every connection when a source fails
 
 - register `ancestry_reference_grch38_parquet`, the keyed ancestry reference
   lifted from GRCh37 with `duckdb_liftover` (registered chain and FASTAs), and

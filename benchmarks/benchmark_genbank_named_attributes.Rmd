@@ -12,52 +12,59 @@ ways a query could obtain the same qualifiers before it existed: the
 release 237's plasmid division (workload `genbank-plasmid`): its first
 `plasmid.N.genomic.gbff.gz` part alone, its first two parts joined, and its
 first four parts joined, each part pinned by NCBI's published MD5 and each
-joined file by its own SHA-256 and record count. Joining consecutive release
-parts grows the record count while every other dimension stays what the
-release supplies; the `records` column in every table is the LOCUS count of
-the input. A record whose only feature is `source` emits no row, so row counts
-are below record counts. Stage all four parts without network access at render
-time:
+joined file by its own SHA-256, byte size and record count. Joining consecutive
+release parts grows the input while the records themselves stay what the
+release supplies. The reader's work grows with feature rows and input bytes,
+not LOCUS records: feature density differs between parts, so the scaling table
+compares time with the feature-row and byte ratios. A record whose only
+feature is `source` emits no row, so row counts are not a multiple of record
+counts. Stage all four parts once; the render itself makes no network access:
 
 ``` sh
 Rscript -e 'duckhtsbench::duckhts_bench_stage_genbank_plasmid()'
 ```
 
+NCBI serves only the current RefSeq release's sequence files and archives the
+release catalog, not the files, so the parts can be staged only while release
+237 is current. Once NCBI moves on, staging stops before downloading and names
+the archived `release237.files.installed` catalog that still lists the
+registered MD5s; re-pinning to the current release and re-rendering restores
+the workload.
+
 Every workload is a DuckDB table macro whose parameters and output columns
-carry a `p_` prefix, so no name can resolve to a reader column, and the input
-path is bound at execution rather than pasted into SQL. Each workload returns
-one row: a row count and a scalar metric over the stated columns. Before any
-timing, the render asserts row-level parity: on every input, every named column
-equals `attributes_map[key]` on every row, or the render stops. The
-`named_three` and `map_three` workloads then compute the same metric over the
-same three keys through the two representations, and the render stops if they
-disagree, so the timed queries are known to return the same answer. Five timed
-repetitions follow one verified warm-up run per workload and input; the
-one-part run exceeds the five-second floor `STYLE.md` sets for a timing
-verdict. Memory is measured the way `benchmark_genbank_memory.Rmd` does: one
-fresh DuckDB CLI process per observation under `/usr/bin/time`, with the JSON
-profiler's peak buffer-manager and temporary-directory bytes, for the three-key
-MAP and named-column workloads at every scale, three observations each, with
-`max_temp_directory_size` set to zero so any spill is an error. The budget is
-the reader's contract, peak memory proportional to the largest record, not to
-records consumed: the ceiling is three times the one-part fresh-process peak
-RSS, applied to every observation. The one-thread condition is pinned to the
-highest logical CPU in the rendering process's affinity mask, so wrap the
-render in `taskset -c` to choose it; the table records the affinity.
-`read_genbank` declares one worker, so a multi-thread condition would time the
-same scan and is not recorded.
+carry a `p_` prefix, so no name can resolve to a reader column. The input path
+enters as a SQL variable read through `getvariable()`, so the macro body never
+contains it. Each workload returns one row: a row count and a scalar metric
+over the stated columns.
+
+Every observation is one fresh DuckDB CLI process under `/usr/bin/time`: it
+loads the extension, runs one workload with one thread, writes its row to a CSV
+file, and exits. The JSON profiler supplies the query latency and the peak
+buffer-manager and temporary-directory bytes; `/usr/bin/time` supplies the
+process's peak RSS. `max_temp_directory_size` is zero, so any spill fails the
+render. Before timing, one fresh process per input asserts row-level parity
+(every named column equals `attributes_map[key]` on every row), and one
+unrecorded warm-up per workload and input records the expected answer; every
+timed observation must reproduce it, and `named_three` and `map_three` must
+agree on the same three-key metric. Five timed repetitions follow. Each
+repetition visits the inputs in turn and runs the workloads in a rotated
+order, reversed on even repetitions, so no workload always runs first and
+every pair of workloads runs in both orders. The one-part run exceeds the
+five-second floor `STYLE.md` sets for a timing verdict.
+
+The memory budget is the reader's contract: peak memory proportional to the
+largest record, not to records consumed. The ceiling is three times the
+one-part `named_three` median peak RSS, applied to every observation of every
+workload. The one-thread condition is pinned to the highest logical CPU in the
+rendering process's affinity mask, which each CLI process inherits, so wrap the
+render in `taskset -c` to choose it. `read_genbank` declares one worker, so a
+multi-thread condition would time the same scan and is not recorded.
+`DUCKDB_CLI` selects the CLI (default: `duckdb` on `PATH`) and
+`DUCKHTS_EXTENSION` the extension build.
 
 ``` sh
 taskset -c 8-11 Rscript -e 'rmarkdown::render("benchmarks/benchmark_genbank_named_attributes.Rmd")'
 ```
-
----
-title: "GenBank named-qualifier projections"
-output:
-  github_document:
-    html_preview: false
-    pandoc_args: ["--wrap=preserve", "--columns=400"]
----
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
@@ -65,12 +72,9 @@ knitr::opts_knit$set(root.dir = normalizePath(".."))
 ```
 
 ```{r benchmark, echo=FALSE, message=FALSE}
-suppressPackageStartupMessages({
-  library(DBI)
-  library(duckdb)
-})
 stopifnot(requireNamespace("duckhtsbench", quietly = TRUE))
 stopifnot(requireNamespace("knitr", quietly = TRUE))
+stopifnot(requireNamespace("jsonlite", quietly = TRUE))
 
 Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath(
   "r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE
@@ -78,15 +82,15 @@ Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath(
 staged <- duckhtsbench::duckhts_bench_stage_genbank_plasmid(fetch = FALSE)
 plan <- duckhtsbench::duckhts_bench_stage_plan("genbank-plasmid")
 artifact_ids <- c("genbank_plasmid_records_1", "genbank_plasmid_records_2", "genbank_plasmid_records_4")
-registered_records <- vapply(artifact_ids, function(id) {
-  fields <- duckhtsbench:::duckhts_bench_identity_fields(plan$supplier_identity[[match(id, plan$id)]])
-  as.integer(fields[["records"]])
-}, integer(1L))
+registered <- lapply(artifact_ids, function(id) {
+  duckhtsbench:::duckhts_bench_identity_fields(plan$supplier_identity[[match(id, plan$id)]])
+})
 inputs <- data.frame(
   parts = c(1L, 2L, 4L),
   artifact = artifact_ids,
   path = normalizePath(unname(unlist(staged[c("records_1", "records_2", "records_4")])), mustWork = TRUE),
-  records = unname(registered_records),
+  records = vapply(registered, function(fields) as.integer(fields[["records"]]), integer(1L)),
+  bytes = vapply(registered, function(fields) as.numeric(fields[["bytes"]]), numeric(1L)),
   stringsAsFactors = FALSE
 )
 for (i in seq_len(nrow(inputs))) {
@@ -94,6 +98,9 @@ for (i in seq_len(nrow(inputs))) {
 }
 extension <- normalizePath(Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension"),
                            mustWork = TRUE)
+duckdb_cli <- Sys.getenv("DUCKDB_CLI", Sys.which("duckdb"))
+stopifnot(nzchar(duckdb_cli), file.exists("/usr/bin/time"))
+duckdb_runtime <- system2(duckdb_cli, "--version", stdout = TRUE)[[1L]]
 revision <- system2("git", c("rev-parse", "HEAD"), stdout = TRUE)
 # The rendered outputs are committed after rendering, which changes the commit
 # hash but not the measured source. The src tree hash is what a reviewer
@@ -122,16 +129,9 @@ host_cpus <- affinity_cpus()
 cpu_one <- as.character(host_cpus[[length(host_cpus)]])
 
 quote_literal <- function(value) paste0("'", gsub("'", "''", value, fixed = TRUE), "'")
-driver <- duckdb::duckdb(shared_home = FALSE, config = list(allow_unsigned_extensions = "true"))
-con <- DBI::dbConnect(driver)
-invisible(DBI::dbExecute(con, paste("LOAD", quote_literal(extension))))
-# The engine the queries run on, read from the connection rather than from the
-# R package index, so the render does not depend on where duckdb is installed.
-duckdb_runtime <- DBI::dbGetQuery(con, "SELECT version() AS p_version")$p_version[[1L]]
-invisible(DBI::dbExecute(con, "SET threads = 1"))
 
 # One table macro per workload. Parameters and outputs are p_-prefixed so they
-# cannot resolve to a reader column; the path is bound at execution.
+# cannot resolve to a reader column.
 keys <- "['gene', 'product', 'locus_tag']"
 macros <- c(
   plain_columns = "SELECT count(*) AS p_n, sum(start + \"end\") AS p_metric FROM read_genbank(p_path)",
@@ -149,165 +149,162 @@ macros <- c(
   named_one_projected = sprintf(
     "SELECT count(*) AS p_n, sum(length(coalesce(gene, ''))) AS p_metric FROM read_genbank(p_path, attributes := %s)", keys)
 )
-for (name in names(macros)) {
-  invisible(DBI::dbExecute(con, sprintf("CREATE MACRO bench_%s(p_path) AS TABLE %s", name, macros[[name]])))
-}
-run_workload <- function(name, path) {
-  DBI::dbGetQuery(con, sprintf("SELECT p_n, p_metric FROM bench_%s(?)", name), params = list(path))
-}
-same_answer <- function(observed, expected) {
-  identical(as.character(observed$p_n[[1L]]), as.character(expected$p_n[[1L]])) &&
-    identical(as.character(observed$p_metric[[1L]]), as.character(expected$p_metric[[1L]]))
-}
-
-# Row-level parity on every input: each named column must equal the MAP entry
-# on every row. p_-prefixed outputs; the path is bound.
-invisible(DBI::dbExecute(con, paste(
-  "CREATE MACRO bench_parity(p_path) AS TABLE",
+# Row-level parity: each named column must equal the MAP entry on every row.
+parity_macro <- paste(
   "SELECT count(*) AS p_rows, count(*) FILTER (WHERE",
   "gene IS DISTINCT FROM attributes_map['gene'] OR product IS DISTINCT FROM attributes_map['product']",
   "OR locus_tag IS DISTINCT FROM attributes_map['locus_tag']) AS p_mismatches",
   sprintf("FROM read_genbank(p_path, attributes_map := true, attributes := %s)", keys)
-)))
-parity <- do.call(rbind, lapply(seq_len(nrow(inputs)), function(i) {
-  observed <- DBI::dbGetQuery(con, "SELECT p_rows, p_mismatches FROM bench_parity(?)",
-                              params = list(inputs$path[[i]]))
-  stopifnot(as.numeric(observed$p_rows[[1L]]) > 0,
-            identical(as.numeric(observed$p_mismatches[[1L]]), 0))
-  data.frame(parts = inputs$parts[[i]], records = inputs$records[[i]], rows = observed$p_rows[[1L]],
-             mismatches = observed$p_mismatches[[1L]], stringsAsFactors = FALSE)
-}))
-inputs$rows <- as.numeric(parity$rows)
-
-set_affinity(cpu_one)
-rows <- list()
-measured_runs <- list()
-repetitions <- 5L
-for (i in seq_len(nrow(inputs))) {
-  path <- inputs$path[[i]]
-  expected_rows <- inputs$rows[[i]]
-  for (name in names(macros)) {
-    expected <- run_workload(name, path)
-    stopifnot(identical(as.numeric(expected$p_n[[1L]]), expected_rows))
-    seconds <- numeric(repetitions)
-    for (run in seq_len(repetitions)) {
-      started <- proc.time()[["elapsed"]]
-      observed <- run_workload(name, path)
-      seconds[[run]] <- proc.time()[["elapsed"]] - started
-      stopifnot(same_answer(observed, expected))
-    }
-    measured_runs[[length(measured_runs) + 1L]] <- data.frame(
-      parts = inputs$parts[[i]], records = inputs$records[[i]], workload = name, run = seq_len(repetitions), seconds = seconds,
-      input_rows = expected_rows, output_rows = 1L, metric = as.character(expected$p_metric[[1L]]),
-      stringsAsFactors = FALSE
-    )
-    rows[[length(rows) + 1L]] <- data.frame(
-      parts = inputs$parts[[i]], records = inputs$records[[i]], workload = name, affinity = cpu_one, input_rows = expected_rows,
-      output_rows = 1L, metric = as.character(expected$p_metric[[1L]]),
-      min_seconds = min(seconds), median_seconds = median(seconds), max_seconds = max(seconds),
-      repetitions = repetitions, stringsAsFactors = FALSE
-    )
-  }
-}
-results <- do.call(rbind, rows)
-# The named columns and the MAP must agree on the same three-key metric at
-# every scale, or the report is timing two different answers.
-for (parts in inputs$parts) {
-  pair <- results[results$parts == parts & results$workload %in% c("map_three", "named_three"), "metric"]
-  stopifnot(length(unique(pair)) == 1L)
-}
-write.csv(do.call(rbind, measured_runs),
-          "benchmarks/benchmark_genbank_named_attributes_runs.csv", row.names = FALSE)
-DBI::dbDisconnect(con, shutdown = TRUE)
-
-# Memory: one fresh DuckDB CLI process per observation, as benchmark_genbank_memory.Rmd
-# measures it. Spill is forbidden; the profiler reports peak buffer and temp bytes.
-duckdb_cli <- Sys.which("duckdb")
-stopifnot(nzchar(duckdb_cli), file.exists("/usr/bin/time"), requireNamespace("jsonlite", quietly = TRUE))
-memory_sql <- c(
-  map_three = macros[["map_three"]],
-  named_three = macros[["named_three"]]
 )
-profile_memory <- function(workload, path, expected_rows, expected_metric, repetition) {
-  scratch <- tempfile(sprintf("genbank-named-memory-%s-%d-", workload, repetition))
+
+# Run one table macro over one input in a fresh DuckDB CLI process with one
+# thread and spill forbidden. Returns its one result row (as character) with
+# the query latency, peak RSS, process wall time and DuckDB's peak buffer and
+# temporary-directory bytes.
+run_fresh <- function(macro, path) {
+  scratch <- tempfile("genbank-named-")
   dir.create(scratch)
   on.exit(unlink(scratch, recursive = TRUE), add = TRUE)
   sql_path <- file.path(scratch, "query.sql")
   result_path <- file.path(scratch, "result.csv")
   profile_path <- file.path(scratch, "profile.json")
   time_path <- file.path(scratch, "time.tsv")
-  # The path enters as a SQL variable set once and read through getvariable(),
-  # so the macro body never sees it as text. COPY cannot wrap EXECUTE, which is
-  # why this is not a prepared statement.
+  # COPY cannot wrap EXECUTE, so the path is a SQL variable rather than a
+  # prepared-statement parameter.
   writeLines(c(
     "SET threads = 1;",
     "SET max_temp_directory_size = '0KiB';",
     sprintf("LOAD %s;", quote_literal(extension)),
     sprintf("SET VARIABLE p_path = %s;", quote_literal(path)),
-    sprintf("CREATE MACRO bench_%s(p_path) AS TABLE %s;", workload, memory_sql[[workload]]),
+    sprintf("CREATE MACRO bench_query(p_path) AS TABLE %s;", macro),
     "PRAGMA enable_profiling = 'json';",
     sprintf("PRAGMA profiling_output = %s;", quote_literal(profile_path)),
-    sprintf("COPY (SELECT p_n, p_metric FROM bench_%s(getvariable('p_path'))) TO %s (HEADER);",
-            workload, quote_literal(result_path)),
+    sprintf("COPY (SELECT * FROM bench_query(getvariable('p_path'))) TO %s (HEADER);",
+            quote_literal(result_path)),
     "PRAGMA disable_profiling;"
   ), sql_path)
   status <- system2("/usr/bin/time",
                     c("-f", shQuote("%M\t%e"), "-o", shQuote(time_path),
-                      shQuote(duckdb_cli), "-unsigned", "-batch"),
+                      shQuote(duckdb_cli), "-unsigned", "-batch", "-bail"),
                     stdin = sql_path, stdout = FALSE, stderr = FALSE)
-  stopifnot(status == 0L)
-  observed <- utils::read.csv(result_path, check.names = FALSE, colClasses = "character")
-  stopifnot(identical(as.numeric(observed$p_n[[1L]]), expected_rows),
-            identical(observed$p_metric[[1L]], expected_metric))
+  if (status != 0L) stop("DuckDB CLI failed (status ", status, ") on: ", macro)
   profile <- jsonlite::fromJSON(profile_path, simplifyVector = TRUE)
-  timing <- utils::read.delim(time_path, header = FALSE, col.names = c("max_rss_kib", "elapsed_seconds"))
-  data.frame(workload = workload, repetition = repetition,
-             max_rss_kib = timing$max_rss_kib[[1L]],
-             duckdb_peak_buffer_bytes = as.numeric(profile$system_peak_buffer_memory),
-             duckdb_peak_temp_bytes = as.numeric(profile$system_peak_temp_dir_size),
-             stringsAsFactors = FALSE)
+  timing <- utils::read.delim(time_path, header = FALSE, col.names = c("max_rss_kib", "process_seconds"))
+  list(
+    result = utils::read.csv(result_path, check.names = FALSE, colClasses = "character"),
+    seconds = as.numeric(profile$latency),
+    process_seconds = timing$process_seconds[[1L]],
+    max_rss_kib = timing$max_rss_kib[[1L]],
+    duckdb_peak_buffer_bytes = as.numeric(profile$system_peak_buffer_memory),
+    duckdb_peak_temp_bytes = as.numeric(profile$system_peak_temp_dir_size)
+  )
 }
-memory_rows <- list()
+
+set_affinity(cpu_one)
+
+parity <- do.call(rbind, lapply(seq_len(nrow(inputs)), function(i) {
+  observed <- run_fresh(parity_macro, inputs$path[[i]])$result
+  stopifnot(as.numeric(observed$p_rows[[1L]]) > 0,
+            identical(as.numeric(observed$p_mismatches[[1L]]), 0))
+  data.frame(parts = inputs$parts[[i]], records = inputs$records[[i]],
+             rows = as.numeric(observed$p_rows[[1L]]),
+             mismatches = as.numeric(observed$p_mismatches[[1L]]), stringsAsFactors = FALSE)
+}))
+inputs$rows <- parity$rows
+
+# One unrecorded warm-up per workload and input records the expected answer.
+workloads <- names(macros)
+expected <- list()
 for (i in seq_len(nrow(inputs))) {
-  expected_rows <- inputs$rows[[i]]
-  for (workload in names(memory_sql)) {
-    expected_metric <- results$metric[results$parts == inputs$parts[[i]] & results$workload == workload]
-    observations <- do.call(rbind, lapply(seq_len(3L), function(repetition) {
-      profile_memory(workload, inputs$path[[i]], expected_rows, expected_metric, repetition)
-    }))
-    memory_rows[[length(memory_rows) + 1L]] <- data.frame(
-      parts = inputs$parts[[i]], records = inputs$records[[i]], workload = workload, input_rows = expected_rows,
-      median_max_rss_mib = round(median(observations$max_rss_kib) / 1024, 1),
-      max_max_rss_mib = round(max(observations$max_rss_kib) / 1024, 1),
-      duckdb_peak_buffer_mib = round(max(observations$duckdb_peak_buffer_bytes) / 2^20, 2),
-      duckdb_peak_temp_bytes = max(observations$duckdb_peak_temp_bytes),
-      observations = nrow(observations), stringsAsFactors = FALSE
-    )
+  for (name in workloads) {
+    answer <- run_fresh(macros[[name]], inputs$path[[i]])$result
+    stopifnot(identical(as.numeric(answer$p_n[[1L]]), inputs$rows[[i]]))
+    expected[[paste(inputs$parts[[i]], name)]] <- answer$p_metric[[1L]]
+  }
+  # The named columns and the MAP must agree on the same three-key metric, or
+  # the report is timing two different answers.
+  stopifnot(identical(expected[[paste(inputs$parts[[i]], "named_three")]],
+                      expected[[paste(inputs$parts[[i]], "map_three")]]))
+}
+
+repetitions <- 5L
+observations <- list()
+for (run in seq_len(repetitions)) {
+  order <- workloads[(seq_along(workloads) + run - 2L) %% length(workloads) + 1L]
+  if (run %% 2L == 0L) order <- rev(order)
+  for (i in seq_len(nrow(inputs))) {
+    for (position in seq_along(order)) {
+      name <- order[[position]]
+      observed <- run_fresh(macros[[name]], inputs$path[[i]])
+      stopifnot(identical(as.numeric(observed$result$p_n[[1L]]), inputs$rows[[i]]),
+                identical(observed$result$p_metric[[1L]], expected[[paste(inputs$parts[[i]], name)]]))
+      observations[[length(observations) + 1L]] <- data.frame(
+        run = run, position = position, parts = inputs$parts[[i]], records = inputs$records[[i]],
+        input_bytes = inputs$bytes[[i]], input_rows = inputs$rows[[i]], output_rows = 1L,
+        workload = name, metric = observed$result$p_metric[[1L]], affinity = cpu_one,
+        seconds = observed$seconds, process_seconds = observed$process_seconds,
+        max_rss_kib = observed$max_rss_kib,
+        duckdb_peak_buffer_bytes = observed$duckdb_peak_buffer_bytes,
+        duckdb_peak_temp_bytes = observed$duckdb_peak_temp_bytes,
+        stringsAsFactors = FALSE
+      )
+    }
   }
 }
-memory <- do.call(rbind, memory_rows)
-stopifnot(all(memory$duckdb_peak_temp_bytes == 0))
-# Budget: the reader streams one record at a time, so peak memory must not grow
-# with record count. Ceiling: three times the one-part named-column peak RSS.
-rss_ceiling_mib <- 3 * memory$median_max_rss_mib[memory$parts == 1L & memory$workload == "named_three"]
-stopifnot(all(memory$max_max_rss_mib <= rss_ceiling_mib))
-write.csv(memory, "benchmarks/benchmark_genbank_named_attributes_memory.csv", row.names = FALSE)
+runs <- do.call(rbind, observations)
+write.csv(runs, "benchmarks/benchmark_genbank_named_attributes_runs.csv", row.names = FALSE)
 
-# Scaling of the named-column path: two- and four-part medians over the one-part median,
-# beside the record-count ratios, since release parts are not equal in records.
+cells <- split(runs, list(runs$parts, factor(runs$workload, levels = workloads)), drop = TRUE)
+results <- do.call(rbind, lapply(cells, function(cell) {
+  data.frame(parts = cell$parts[[1L]], records = cell$records[[1L]], workload = cell$workload[[1L]],
+             input_rows = cell$input_rows[[1L]], output_rows = cell$output_rows[[1L]], metric = cell$metric[[1L]],
+             min_seconds = min(cell$seconds), median_seconds = median(cell$seconds), max_seconds = max(cell$seconds),
+             repetitions = nrow(cell), stringsAsFactors = FALSE)
+}))
+results <- results[order(results$parts, match(results$workload, workloads)), ]
+rownames(results) <- NULL
+
+memory <- do.call(rbind, lapply(cells, function(cell) {
+  data.frame(parts = cell$parts[[1L]], workload = cell$workload[[1L]], observations = nrow(cell),
+             min_max_rss_mib = round(min(cell$max_rss_kib) / 1024, 1),
+             median_max_rss_mib = round(median(cell$max_rss_kib) / 1024, 1),
+             max_max_rss_mib = round(max(cell$max_rss_kib) / 1024, 1),
+             max_duckdb_peak_buffer_mib = round(max(cell$duckdb_peak_buffer_bytes) / 2^20, 2),
+             max_duckdb_peak_temp_bytes = max(cell$duckdb_peak_temp_bytes),
+             stringsAsFactors = FALSE)
+}))
+memory <- memory[order(memory$parts, match(memory$workload, workloads)), ]
+rownames(memory) <- NULL
+stopifnot(all(runs$duckdb_peak_temp_bytes == 0))
+# Budget: the reader streams one record at a time, so peak memory must not grow
+# with input size. Ceiling: three times the one-part named-column median peak RSS.
+rss_ceiling_mib <- 3 * median(runs$max_rss_kib[runs$parts == 1L & runs$workload == "named_three"]) / 1024
+stopifnot(all(runs$max_rss_kib / 1024 <= rss_ceiling_mib))
+
+# Growth: the two- and four-part medians over the one-part median, beside the
+# feature-row and input-byte ratios the reader's work follows.
 scaling <- do.call(rbind, lapply(c("named_three", "map_three", "plain_columns"), function(name) {
   medians <- results$median_seconds[results$workload == name]
   data.frame(workload = name, seconds_1_part = medians[[1L]],
-             ratio_2_parts = medians[[2L]] / medians[[1L]], ratio_4_parts = medians[[3L]] / medians[[1L]],
-             records_ratio_2_parts = inputs$records[[2L]] / inputs$records[[1L]],
-             records_ratio_4_parts = inputs$records[[3L]] / inputs$records[[1L]],
+             time_ratio_2_parts = medians[[2L]] / medians[[1L]],
+             rows_ratio_2_parts = inputs$rows[[2L]] / inputs$rows[[1L]],
+             bytes_ratio_2_parts = inputs$bytes[[2L]] / inputs$bytes[[1L]],
+             time_ratio_4_parts = medians[[3L]] / medians[[1L]],
+             rows_ratio_4_parts = inputs$rows[[3L]] / inputs$rows[[1L]],
+             bytes_ratio_4_parts = inputs$bytes[[3L]] / inputs$bytes[[1L]],
              stringsAsFactors = FALSE)
 }))
 ```
 
-Source revision: `r revision`; measured `src` tree: `r src_tree` (compare with `git rev-parse HEAD:src` at the reviewed head, since committing this render moves the commit hash but not the tree). DuckDB runtime: `r duckdb_runtime`.
+Source revision: `r revision`; measured `src` tree: `r src_tree` (compare with `git rev-parse HEAD:src` at the reviewed head, since committing this render moves the commit hash but not the tree). DuckDB runtime: `r duckdb_runtime` (CLI).
 Extension SHA-256: `r strsplit(system2("sha256sum", extension, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`.
-Host load before the run: `r host_load`. One thread, affinity `r cpu_one`, `r repetitions` timed repetitions per cell.
+Host load before the run: `r host_load`. One thread, affinity `r cpu_one`, `r repetitions` timed fresh-process repetitions per cell; `seconds` is the profiler's query latency, and every observation is in [`benchmark_genbank_named_attributes_runs.csv`](benchmark_genbank_named_attributes_runs.csv).
+
+Inputs, with the registered byte sizes and the feature rows each emits:
+
+```{r inputs, echo=FALSE}
+knitr::kable(inputs[c("parts", "records", "rows", "bytes")])
+```
 
 ```{r results, echo=FALSE}
 knitr::kable(results, digits = 3)
@@ -319,13 +316,13 @@ Row-level parity of the three named columns against `attributes_map`, asserted b
 knitr::kable(parity)
 ```
 
-Growth with record count: the ratio of the two- and four-part medians to the one-part median, beside the ratio of their record counts (release parts are not equal in size, so linear growth means the time ratio tracks the record ratio):
+Growth with input size: the ratio of the two- and four-part medians to the one-part median, beside the ratios of feature rows and input bytes (release parts differ in size and feature density, so linear growth means the time ratio tracks those ratios):
 
 ```{r scaling, echo=FALSE}
 knitr::kable(scaling, digits = 3)
 ```
 
-Memory, one fresh DuckDB CLI process per observation, spill forbidden. The peak-RSS ceiling is `r rss_ceiling_mib` MiB (three times the one-part named-column median); the render stops if any observation exceeds it or spills:
+Memory over the same fresh-process observations, spill forbidden. The peak-RSS ceiling is `r round(rss_ceiling_mib, 1)` MiB (three times the one-part `named_three` median); the render stops if any observation exceeds it or spills:
 
 ```{r memory, echo=FALSE}
 knitr::kable(memory)

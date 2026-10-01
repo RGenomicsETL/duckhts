@@ -60,38 +60,7 @@ duckhts_bench_stage_gunzip_concatenate <- function(id, sources, destination) {
     stop("registry locator for ", id, " names ", length(declared), " sources; ",
          length(sources), " supplied", call. = FALSE)
   }
-  if (file.exists(destination)) {
-    valid <- tryCatch({
-      duckhts_bench_validate_identity(id, destination)
-      TRUE
-    }, error = function(error) FALSE)
-    if (valid) {
-      duckhts_bench_write_provenance(id, destination)
-      return(invisible(destination))
-    }
-    unlink(c(destination, paste0(destination, ".provenance.tsv")), force = TRUE)
-  }
-  dir.create(dirname(destination), recursive = TRUE, showWarnings = FALSE)
-  temporary <- paste0(destination, ".partial-", Sys.getpid())
-  unlink(temporary, force = TRUE)
-  on.exit(unlink(temporary, force = TRUE), add = TRUE)
-  output <- file(temporary, open = "wb")
-  for (source in sources) {
-    input <- gzfile(source, open = "rb")
-    repeat {
-      chunk <- readBin(input, what = "raw", n = 1048576L)
-      if (!length(chunk)) break
-      writeBin(chunk, output)
-    }
-    close(input)
-  }
-  close(output)
-  duckhts_bench_validate_identity(id, temporary)
-  if (!file.rename(temporary, destination)) {
-    stop("could not publish the concatenated artifact: ", destination, call. = FALSE)
-  }
-  duckhts_bench_write_provenance(id, destination)
-  invisible(destination)
+  duckhts_bench_stage_gunzip(id, sources, destination)
 }
 
 #' Stage the RefSeq Plasmid Release Parts for Record-Count Scaling
@@ -104,6 +73,12 @@ duckhts_bench_stage_gunzip_concatenate <- function(id, sources, destination) {
 #' input `benchmark_genbank_named_attributes.Rmd` reads. Network access occurs
 #' only in this explicit staging step; with `fetch = FALSE` every part must
 #' already be cached, which is how the report renders.
+#'
+#' NCBI serves only the current RefSeq release and archives its catalog, not
+#' its sequence files, so the parts can be downloaded only while the
+#' registered release is current. Before downloading, staging compares NCBI's
+#' `RELEASE_NUMBER` with the registered release and stops with re-pinning
+#' instructions when they differ.
 #' @param fetch Whether to download a missing or invalid part.
 #' @return Named cache paths `parts` (the four archives) and `records_1`,
 #'   `records_2`, `records_4` (the derived record files), invisibly.
@@ -119,7 +94,21 @@ duckhts_bench_stage_genbank_plasmid <- function(fetch = TRUE) {
     stop("genbank-plasmid registry rows must be four direct downloads and three gunzip concatenations",
          call. = FALSE)
   }
+  release <- unique(sub("^NCBI_RefSeq_release_([0-9]+)_plasmid$", "\\1", plan$release[1:4]))
+  if (length(release) != 1L || !grepl("^[0-9]+$", release)) {
+    stop("genbank-plasmid parts must name one NCBI_RefSeq_release_<N>_plasmid release", call. = FALSE)
+  }
   parts <- vapply(part_ids, duckhts_bench_artifact_path, character(1L))
+  cached <- vapply(seq_along(part_ids), function(k) {
+    file.exists(parts[[k]]) && tryCatch({
+      duckhts_bench_validate_identity(part_ids[[k]], parts[[k]])
+      TRUE
+    }, error = function(error) FALSE)
+  }, logical(1L))
+  if (fetch && !all(cached)) {
+    current <- trimws(readLines("https://ftp.ncbi.nlm.nih.gov/refseq/release/RELEASE_NUMBER", warn = FALSE)[[1L]])
+    duckhts_bench_refseq_release_check(release, current)
+  }
   for (k in seq_along(part_ids)) {
     if (fetch) {
       duckhts_bench_fetch(part_ids[[k]])
@@ -146,10 +135,11 @@ duckhts_bench_stage_genbank_plasmid <- function(fetch = TRUE) {
                  records_2 = derived[[2L]], records_4 = derived[[3L]]))
 }
 
-# Derive one registered gunzip artifact from its cached source. A cached output
-# that still matches its registered identity is kept and re-receipted; anything
-# else is rebuilt through a partial file so a failed derivation publishes nothing.
-duckhts_bench_stage_gunzip <- function(id, source, destination) {
+# Derive one registered artifact by decompressing its cached sources, in order.
+# A cached output that still matches its registered identity is kept and
+# re-receipted; anything else is rebuilt through a partial file so a failed
+# derivation publishes nothing.
+duckhts_bench_stage_gunzip <- function(id, sources, destination) {
   if (file.exists(destination)) {
     valid <- tryCatch({
       duckhts_bench_validate_identity(id, destination)
@@ -165,7 +155,7 @@ duckhts_bench_stage_gunzip <- function(id, source, destination) {
   temporary <- paste0(destination, ".partial-", Sys.getpid())
   unlink(temporary, force = TRUE)
   on.exit(unlink(temporary, force = TRUE), add = TRUE)
-  duckhts_bench_gunzip(source, temporary)
+  duckhts_bench_gunzip(sources, temporary)
   duckhts_bench_validate_identity(id, temporary)
   if (!file.rename(temporary, destination)) {
     stop("could not publish the uncompressed artifact: ", destination, call. = FALSE)
@@ -174,15 +164,37 @@ duckhts_bench_stage_gunzip <- function(id, source, destination) {
   invisible(destination)
 }
 
-duckhts_bench_gunzip <- function(source, destination) {
-  input <- gzfile(source, open = "rb")
-  on.exit(close(input), add = TRUE)
+# Decompress each source, in order, into destination. Every connection is
+# closed when this returns, including after a failed read or write, so the
+# caller can remove the partial output on any platform.
+duckhts_bench_gunzip <- function(sources, destination) {
   output <- file(destination, open = "wb")
   on.exit(close(output), add = TRUE)
+  for (source in sources) duckhts_bench_gunzip_append(source, output)
+  invisible(destination)
+}
+
+duckhts_bench_gunzip_append <- function(source, output) {
+  input <- gzfile(source, open = "rb")
+  on.exit(close(input), add = TRUE)
   repeat {
     chunk <- readBin(input, what = "raw", n = 1048576L)
     if (!length(chunk)) break
     writeBin(chunk, output)
   }
-  invisible(destination)
+}
+
+# NCBI serves only the current RefSeq release under /refseq/release/ and
+# archives catalogs, statistics and notes, not sequence files
+# (https://ftp.ncbi.nlm.nih.gov/refseq/release/README). A registered part is
+# therefore downloadable only while its release is current.
+duckhts_bench_refseq_release_check <- function(registered, current) {
+  if (!identical(current, registered)) {
+    stop("NCBI RefSeq is at release ", current, ", but genbank-plasmid is registered against release ",
+         registered, ", whose sequence files NCBI no longer serves. Its MD5s remain in ",
+         "https://ftp.ncbi.nlm.nih.gov/refseq/release/release-catalog/archive/release", registered,
+         ".files.installed. Re-pin the four parts and their derived records to the current release ",
+         "and re-render benchmark_genbank_named_attributes.Rmd.", call. = FALSE)
+  }
+  invisible(TRUE)
 }

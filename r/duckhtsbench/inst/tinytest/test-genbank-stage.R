@@ -16,6 +16,13 @@ expect_equal(plasmid_plan$id, c(part_ids, "genbank_plasmid_records_1",
 expect_equal(plasmid_plan$transform, c(rep("direct_download", 4L), rep("gunzip_concatenate", 3L)))
 expect_true(all(grepl("^https://ftp\\.ncbi\\.nlm\\.nih\\.gov/refseq/release/plasmid/plasmid\\.[1-4]\\.genomic\\.gbff\\.gz$",
                       plasmid_plan$locator[1:4])))
+# NCBI serves only the current release's sequence files, so the parts are
+# declared current-release-only and staging refuses once NCBI has moved on.
+expect_true(all(plasmid_plan$access[1:4] == "public_current_release"))
+expect_true(all(plasmid_plan$release[1:4] == "NCBI_RefSeq_release_237_plasmid"))
+expect_silent(duckhtsbench:::duckhts_bench_refseq_release_check("237", "237"))
+expect_error(duckhtsbench:::duckhts_bench_refseq_release_check("237", "238"),
+             "at release 238, but genbank-plasmid is registered against release 237")
 expect_equal(plasmid_plan$locator[5:7], c(
   "artifact:genbank_plasmid_part1_gbff_gz",
   paste(paste0("artifact:", part_ids[1:2]), collapse = ";"),
@@ -165,6 +172,15 @@ test_genbank_plasmid_derivation <- function() {
   expect_equal(readLines(staged$records_4), readLines(expected[[3L]]))
   expect_error(duckhtsbench::duckhts_bench_stage_gunzip_concatenate(
     "genbank_plasmid_records_2", staged$parts[1:3], staged$records_2), "names 2 sources")
+
+  # A source that fails part way leaves no open connection and no partial file.
+  failed <- file.path(directory, "failed", "records_2.gbff")
+  connections <- nrow(showConnections())
+  expect_error(suppressWarnings(duckhtsbench::duckhts_bench_stage_gunzip_concatenate(
+    "genbank_plasmid_records_2", c(staged$parts[[1L]], file.path(directory, "missing.gbff.gz")), failed)),
+    "cannot open")
+  expect_equal(nrow(showConnections()), connections)
+  expect_equal(list.files(dirname(failed)), character(0L))
 
   # A part that no longer matches its registered identity is refused.
   writeLines("not the archive", duckhts_bench_artifact_path("genbank_plasmid_part3_gbff_gz"))
