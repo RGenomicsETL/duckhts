@@ -22,11 +22,12 @@
 
 /* Records as bcftools roh sees them: one ALT other than the symbolic unseen
  * allele, and it is the first ALT. */
-#define ROH_RECORDS \
-    "FROM read_bcf(path, tidy_format := true, samples := samples, " \
-    "decode_error_policy := 'error') " \
+#define ROH_ALT_FILTER \
     "WHERE len(list_filter(ALT, lambda a: a NOT IN ('<*>', '<NON_REF>'))) = 1 " \
     "AND ALT[1] NOT IN ('<*>', '<NON_REF>')"
+#define ROH_RECORDS \
+    "FROM read_bcf(path, tidy_format := true, samples := samples, " \
+    "decode_error_policy := 'error') " ROH_ALT_FILTER
 
 static const char sites_from_info_tag[] =
     "WITH __dht_sites AS NOT MATERIALIZED (SELECT CHROM AS chrom, POS AS pos, "
@@ -96,16 +97,19 @@ static const char ancestry_sites[] =
     "__dht_prop_rows AS (SELECT CAST(sample_id AS VARCHAR) AS smp, "
     "CAST(group_id AS VARCHAR) AS group_id, CAST(proportion AS DOUBLE) AS proportion "
     "FROM query_table(proportions_table)), "
-    "__dht_calls AS MATERIALIZED (SELECT CHROM AS chrom, POS AS pos, REF AS ref, "
+    /* A sites-only scan finds the reference sites to pivot, so the per-sample
+     * calls stream into the lists instead of being held for reuse. */
+    "__dht_vcf_sites AS (SELECT DISTINCT regexp_replace(CHROM, '^chr', '') AS chrom, "
+    "POS AS pos, REF AS ref, ALT[1] AS alt "
+    "FROM read_bcf(path, decode_error_policy := 'error') " ROH_ALT_FILTER "), "
+    "__dht_calls AS NOT MATERIALIZED (SELECT CHROM AS chrom, POS AS pos, REF AS ref, "
     "ALT[1] AS alt, SAMPLE_ID AS smp, " ROH_EVIDENCE " AS evidence " ROH_RECORDS "), ";
 
 static const char ancestry_validations[] =
     "__dht_ref_matches AS (SELECT r.* FROM __dht_ref_rows AS r JOIN "
-    "(SELECT DISTINCT regexp_replace(chrom, '^chr', '') AS chrom, pos, ref, alt "
-    "FROM __dht_calls) AS c ON c.chrom = r.chrom AND c.pos = r.pos AND "
+    "__dht_vcf_sites AS c ON c.chrom = r.chrom AND c.pos = r.pos AND "
     "((c.ref = r.allele_a AND c.alt = r.allele_b) OR "
     "(c.ref = r.allele_b AND c.alt = r.allele_a))), "
-    "__dht_called_samples AS (SELECT DISTINCT smp FROM __dht_calls), "
     "__dht_group_guard AS (SELECT CASE "
     "WHEN (SELECT list_sort(list_distinct(list(group_id))) FROM __dht_ref_rows) != "
     "(SELECT list_sort(list_distinct(list(group_id))) FROM __dht_prop_rows) "
@@ -114,25 +118,26 @@ static const char ancestry_validations[] =
     "HAVING count(*) != (SELECT count(DISTINCT group_id) FROM __dht_ref_rows) OR "
     "count(DISTINCT group_id) != count(*)) "
     "THEN error('reference must have exactly one frequency per site and group') "
-    "WHEN EXISTS (SELECT 1 FROM __dht_prop_rows AS p JOIN __dht_called_samples AS s "
-    "USING (smp) GROUP BY smp HAVING count(*) != "
+    "WHEN EXISTS (SELECT 1 FROM __dht_prop_rows GROUP BY smp HAVING count(*) != "
     "(SELECT count(DISTINCT group_id) FROM __dht_ref_rows) OR count(DISTINCT group_id) != count(*)) "
-    "THEN error('each called sample must have exactly one proportion per group') "
+    "THEN error('each sample must have exactly one proportion per group') "
     "WHEN EXISTS (SELECT 1 FROM __dht_ref_matches WHERE frequency IS NULL OR "
     "NOT isfinite(frequency) OR frequency < 0 OR frequency > 1) OR "
-    "EXISTS (SELECT 1 FROM __dht_prop_rows AS p JOIN __dht_called_samples AS s "
-    "USING (smp) WHERE proportion IS NULL OR NOT isfinite(proportion) OR "
-    "proportion < 0 OR proportion > 1) "
+    "EXISTS (SELECT 1 FROM __dht_prop_rows WHERE proportion IS NULL OR "
+    "NOT isfinite(proportion) OR proportion < 0 OR proportion > 1) "
     "THEN error('frequencies and proportions must be finite values in [0, 1]') "
-    "WHEN EXISTS (SELECT 1 FROM __dht_prop_rows AS p JOIN __dht_called_samples AS s "
-    "USING (smp) GROUP BY smp HAVING abs(sum(proportion) - 1.0) > 1e-6) "
-    "THEN error('ancestry proportions must sum to one per sample') "
+    /* Proportions are normalised by their sum: the wrapper rounds each one to
+     * seven decimals, and sum_to_one = FALSE allows a sum below one. */
+    "WHEN EXISTS (SELECT 1 FROM __dht_prop_rows GROUP BY smp "
+    "HAVING NOT (sum(proportion) > 0 AND sum(proportion) <= 1.0 + 1e-6)) "
+    "THEN error('ancestry proportions must sum to more than 0 and at most 1 per sample') "
     "ELSE true END AS valid), "
     "__dht_ref AS (SELECT chrom, pos, allele_a, allele_b, "
     "list(frequency ORDER BY group_id) AS frequencies FROM __dht_ref_matches "
     "GROUP BY chrom, pos, allele_a, allele_b), "
-    "__dht_props AS (SELECT smp, list(proportion ORDER BY group_id) AS proportions "
-    "FROM __dht_prop_rows GROUP BY smp), "
+    "__dht_props AS (SELECT smp, list(proportion / total ORDER BY group_id) AS proportions "
+    "FROM (SELECT *, sum(proportion) OVER (PARTITION BY smp) AS total FROM __dht_prop_rows) "
+    "GROUP BY smp), "
     "__dht_sites AS NOT MATERIALIZED (SELECT c.chrom, c.pos, c.smp, "
     "CASE WHEN p.proportions IS NULL THEN error('every VCF sample requires ancestry proportions') "
     "WHEN NOT g.valid THEN error('reference and proportions group sets must match exactly') "

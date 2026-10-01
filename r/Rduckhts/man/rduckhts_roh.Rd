@@ -87,7 +87,9 @@ ancestry-tuned path. The reference is long-format with columns `chromosome`,
 `allele_b`); proportions have `sample_id`, `group_id` and `proportion`.
 Their group sets must match exactly, and each VCF sample must have a
 proportions row for every group. Per-site AF is the sum of each group's
-frequency weighted by the sample's proportion. REF=`allele_a`, ALT=`allele_b`
+frequency weighted by the sample's proportion, with the proportions divided
+by their sum (which must be above 0 and at most 1, so `sum_to_one = FALSE`
+results and rounded proportions are accepted). REF=`allele_a`, ALT=`allele_b`
 uses that AF; reversed alleles use `1 - AF`. Other allele matches and
 palindromic sites are excluded. Chromosome names match after removing a
 leading `chr`. `af_clamp` limits nonzero-clamp frequencies to

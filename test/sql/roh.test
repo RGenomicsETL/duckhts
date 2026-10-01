@@ -728,3 +728,50 @@ query I
 SELECT count(*) FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 1e-5, 1e-6);
 ----
 16
+
+# Mixed proportions go through the macro: q = (0.25, 0.75) gives
+# 0.25 * 0.2 + 0.75 * 0.4 at every site, and halving both proportions
+# (sum 0.5) gives the same frequencies after normalisation.
+statement ok
+CREATE TEMP TABLE roh_ancestry_mixed AS
+SELECT sample_id, group_id, CASE group_id WHEN 'A' THEN 0.25 ELSE 0.75 END::DOUBLE AS proportion
+FROM roh_ancestry_proportions;
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_half AS
+SELECT sample_id, group_id, proportion / 2 AS proportion FROM roh_ancestry_mixed;
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_af_mixed AS
+SELECT chrom, pos, ref, alt, list_inner_product([0.2, 0.4], [0.25, 0.75]) AS af
+FROM roh_ancestry_af_forward;
+
+query I
+WITH tuned AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_forward', 'roh_ancestry_mixed', gt_error := 30, samples := 'S1')),
+pooled AS (SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_af_mixed', gt_error := 30, samples := 'S1'))
+SELECT count(*) FROM ((SELECT * FROM tuned EXCEPT ALL SELECT * FROM pooled)
+UNION ALL (SELECT * FROM pooled EXCEPT ALL SELECT * FROM tuned));
+----
+0
+
+query I
+WITH tuned AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_forward', 'roh_ancestry_half', gt_error := 30, samples := 'S1')),
+pooled AS (SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_af_mixed', gt_error := 30, samples := 'S1'))
+SELECT count(*) FROM ((SELECT * FROM tuned EXCEPT ALL SELECT * FROM pooled)
+UNION ALL (SELECT * FROM pooled EXCEPT ALL SELECT * FROM tuned));
+----
+0
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_over_one AS
+SELECT sample_id, group_id, 0.6::DOUBLE AS proportion FROM roh_ancestry_proportions;
+
+statement error
+SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_forward', 'roh_ancestry_over_one', gt_error := 30, samples := 'S1');
+----
+ancestry proportions must sum to more than 0 and at most 1 per sample

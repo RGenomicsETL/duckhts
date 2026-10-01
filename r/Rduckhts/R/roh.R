@@ -21,7 +21,9 @@
 #' `allele_b`); proportions have `sample_id`, `group_id` and `proportion`.
 #' Their group sets must match exactly, and each VCF sample must have a
 #' proportions row for every group. Per-site AF is the sum of each group's
-#' frequency weighted by the sample's proportion. REF=`allele_a`, ALT=`allele_b`
+#' frequency weighted by the sample's proportion, with the proportions divided
+#' by their sum (which must be above 0 and at most 1, so `sum_to_one = FALSE`
+#' results and rounded proportions are accepted). REF=`allele_a`, ALT=`allele_b`
 #' uses that AF; reversed alleles use `1 - AF`. Other allele matches and
 #' palindromic sites are excluded. Chromosome names match after removing a
 #' leading `chr`. `af_clamp` limits nonzero-clamp frequencies to
@@ -72,6 +74,36 @@
 #' roh[order(roh$sample, roh$chrom, roh$start), ]
 #' DBI::dbDisconnect(con, shutdown = TRUE)
 #' @export
+rduckhts_roh <- function(
+  con, path, af_tag = NULL, af_table = NULL, genetic_map = NULL,
+  hw_to_az = 6.7e-8, az_to_hw = 5e-9, gt_error = NULL, rec_rate = NULL,
+  samples = NULL, table_name = NULL, overwrite = FALSE,
+  reference_table = NULL, proportions_table = NULL, af_clamp = 1e-3
+) {
+  .somalier_validate_output(con, table_name, overwrite)
+  .somalier_scalar_text(path, "path")
+  source <- .roh_frequency_source(con, af_tag, af_table, reference_table,
+                                  proportions_table, af_clamp)
+  options <- .roh_validated_options(genetic_map, hw_to_az, az_to_hw, gt_error,
+                                   rec_rate, samples)
+  arguments <- c(
+    sql_quote_string(con, path), source$arguments,
+    if (!is.null(options$genetic_map)) sql_quote_string(con, options$genetic_map),
+    paste0("hw_to_az := ", options$hw_to_az),
+    paste0("az_to_hw := ", options$az_to_hw),
+    if (!is.null(options$gt_error)) paste0("gt_error := ", options$gt_error),
+    if (!is.null(options$rec_rate)) paste0("rec_rate := ", options$rec_rate),
+    if (source$ancestry) paste0("af_clamp := ", source$af_clamp),
+    if (!is.null(options$samples)) {
+      paste0("samples := ", sql_quote_string(con, options$samples))
+    }
+  )
+  query <- paste0("SELECT * FROM ", source$macro, "(",
+                  paste(arguments, collapse = ", "), ")")
+  .somalier_publish_query(con, query, table_name, overwrite)
+}
+
+# A finite number in [0, maximum], formatted with full precision for SQL.
 .roh_frequency_source <- function(con, af_tag, af_table, reference_table,
                                 proportions_table, af_clamp) {
   ancestry <- !is.null(reference_table) || !is.null(proportions_table)
@@ -112,36 +144,6 @@
   )
 }
 
-rduckhts_roh <- function(
-  con, path, af_tag = NULL, af_table = NULL, genetic_map = NULL,
-  hw_to_az = 6.7e-8, az_to_hw = 5e-9, gt_error = NULL, rec_rate = NULL,
-  samples = NULL, table_name = NULL, overwrite = FALSE,
-  reference_table = NULL, proportions_table = NULL, af_clamp = 1e-3
-) {
-  .somalier_validate_output(con, table_name, overwrite)
-  .somalier_scalar_text(path, "path")
-  source <- .roh_frequency_source(con, af_tag, af_table, reference_table,
-                                  proportions_table, af_clamp)
-  options <- .roh_validated_options(genetic_map, hw_to_az, az_to_hw, gt_error,
-                                   rec_rate, samples)
-  arguments <- c(
-    sql_quote_string(con, path), source$arguments,
-    if (!is.null(options$genetic_map)) sql_quote_string(con, options$genetic_map),
-    paste0("hw_to_az := ", options$hw_to_az),
-    paste0("az_to_hw := ", options$az_to_hw),
-    if (!is.null(options$gt_error)) paste0("gt_error := ", options$gt_error),
-    if (!is.null(options$rec_rate)) paste0("rec_rate := ", options$rec_rate),
-    if (source$ancestry) paste0("af_clamp := ", source$af_clamp),
-    if (!is.null(options$samples)) {
-      paste0("samples := ", sql_quote_string(con, options$samples))
-    }
-  )
-  query <- paste0("SELECT * FROM ", source$macro, "(",
-                  paste(arguments, collapse = ", "), ")")
-  .somalier_publish_query(con, query, table_name, overwrite)
-}
-
-# A finite number in [0, maximum], formatted with full precision for SQL.
 .roh_number <- function(value, name, maximum = Inf) {
   if (!is.numeric(value) || length(value) != 1L || !is.finite(value) ||
       value < 0 || value > maximum) {
