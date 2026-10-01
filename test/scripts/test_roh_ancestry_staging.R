@@ -38,7 +38,8 @@ test_roh_ancestry_staging <- function() {
   result <- stage_roh_children(20L, vcf_path, pedigree_path, output,
                                bcftools = bcftools,
                                expected_source_sha256 = source_hash)
-  stopifnot(result$records == 1L, result$samples == 377L,
+  stopifnot(result$records == 1L, result$source_samples == 377L,
+            result$samples == 377L,
     identical(result$output_sha256, unname(digest::digest(file = output, algo = "sha256"))),
     identical(system2(bcftools, shQuote(c("query", "-l", output)),
                       stdout = TRUE), samples),

@@ -47,14 +47,18 @@ PUR 35 (admixed), and YRI 56, ESN 43, CEU 57 and CHS 51 (controls).
 Single-population AF uses AFR for ACB, ASW, YRI and ESN; AMR for CLM,
 MXL, PEL and PUR; EUR for CEU; and EAS for CHS.
 
-Chr20 is the only chromosome processed at this stage. The population
-child counts match the declared expectations: ACB 20, ASW 13, CLM 35,
-MXL 32, PEL 35, PUR 35, YRI 56, ESN 43, CEU 57 and CHS 51. The source
-VCF was copied from the supplied local file after its checksum was
-verified; its remote metadata is recorded above. bcftools reported
-`1.23.1-70-g6dbd8fef`; the source header had 3,202 samples and the
-children BCF has 377. The DuckHTS extension was rebuilt from revision
-`86f53052` for the arm measurements.
+Chr20 has the complete truth, q and arm evaluation. The chr1 children
+BCF is staged, with truth windows, genome-wide q and arm comparison
+still pending. The population child counts match the declared
+expectations: ACB 20, ASW 13, CLM 35, MXL 32, PEL 35, PUR 35, YRI 56,
+ESN 43, CEU 57 and CHS 51. The chr20 source VCF was copied from the
+supplied local file after its checksum was verified; its remote metadata
+is recorded above. bcftools reported `1.23.1-70-g6dbd8fef`; the source
+header had 3,202 samples and the children BCF has 377. The DuckHTS
+extension was rebuilt from revision `86f53052` for the arm measurements.
+The remote chr1 input was streamed through bcftools; its ETag,
+Last-Modified value, record count and output SHA-256 are recorded in
+[its receipt](results/roh-ancestry/chr1/input_receipt.tsv).
 
 ## Truth-window separation
 

@@ -83,6 +83,7 @@ stage_roh_children <- function(chromosome, source_vcf, pedigree, output,
     stop("could not publish the children BCF index", call. = FALSE)
   }
   list(chromosome = as.integer(chromosome), source = source_vcf,
-       source_sha256 = source_hash, samples = length(output_samples),
+       source_sha256 = source_hash, source_samples = length(header_samples),
+       samples = length(output_samples),
        records = record_count, output = output, output_sha256 = output_sha256)
 }
