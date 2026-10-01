@@ -43,19 +43,26 @@ file, and exits. The JSON profiler supplies the query latency and the peak
 buffer-manager and temporary-directory bytes; `/usr/bin/time` supplies the
 process's peak RSS. `max_temp_directory_size` is zero, so any spill fails the
 render. Before timing, one fresh process per input asserts row-level parity
-(every named column equals `attributes_map[key]` on every row), and one
-unrecorded warm-up per workload and input records the expected answer; every
-timed observation must reproduce it, and `named_three` and `map_three` must
-agree on the same three-key metric. Five timed repetitions follow. Each
+(every named column equals `attributes_map[key]` on every row). Each workload's
+metric then has an independent expectation computed through the other
+representation in a separate scan: a MAP-only scan gives the coordinate,
+`named_one_projected` and `named_three` metrics, and a named-only scan gives
+the `map_gene` and `map_three` metrics. `attributes_string` has no second
+representation and is checked for its row count. One unrecorded warm-up per
+workload and input must match its expectation, every timed observation must
+reproduce the warm-up answer, and `named_three` and `map_three` must agree on
+the same three-key metric. Five timed repetitions follow. Each
 repetition visits the inputs in turn and runs the workloads in a rotated
 order, reversed on even repetitions, so no workload always runs first and
 every pair of workloads runs in both orders. The one-part run exceeds the
 five-second floor `STYLE.md` sets for a timing verdict.
 
 The memory budget is the reader's contract: peak memory proportional to the
-largest record, not to records consumed. The ceiling is three times the
-one-part `named_three` median peak RSS, applied to every observation of every
-workload. The one-thread condition is pinned to the highest logical CPU in the
+largest record, not to records consumed. It is declared before any timed run:
+the fixed overhead (median peak RSS of three empty runs that load the extension
+and scan nothing) plus three times the reader's live state, taken as four times
+the largest record's bytes plus one 1 MiB output chunk. The ceiling applies to
+every observation of every workload at every input size. The one-thread condition is pinned to the highest logical CPU in the
 rendering process's affinity mask, which each CLI process inherits, so wrap the
 render in `taskset -c` to choose it. `read_genbank` declares one worker, so a
 multi-thread condition would time the same scan and is not recorded.
@@ -156,6 +163,32 @@ parity_macro <- paste(
   "OR locus_tag IS DISTINCT FROM attributes_map['locus_tag']) AS p_mismatches",
   sprintf("FROM read_genbank(p_path, attributes_map := true, attributes := %s)", keys)
 )
+# Independent expectations. Each timed workload's metric is derived through the
+# other representation in its own scan, never from the workload's own output: a
+# MAP-only scan supplies the coordinate and named-column metrics, and a
+# named-only scan supplies the MAP metrics. attributes_string has no second
+# representation; it is checked for its row count and must reproduce its
+# warm-up answer.
+oracle_macros <- c(
+  map = paste(
+    "SELECT count(*) AS p_n, sum(start + \"end\") AS p_coordinates,",
+    "sum(length(coalesce(attributes_map['gene'], ''))) AS p_gene_length,",
+    "sum(length(coalesce(attributes_map['gene'], '')) + length(coalesce(attributes_map['product'], ''))",
+    "+ length(coalesce(attributes_map['locus_tag'], ''))) AS p_three_length",
+    "FROM read_genbank(p_path, attributes_map := true)"),
+  named = sprintf(paste(
+    "SELECT count(*) AS p_n, count(gene) AS p_gene_count, sum(length(coalesce(gene, ''))",
+    "+ length(coalesce(product, '')) + length(coalesce(locus_tag, ''))) AS p_three_length",
+    "FROM read_genbank(p_path, attributes := %s)"), keys)
+)
+oracles <- data.frame(
+  workload = c("plain_columns", "named_none_projected", "map_gene", "map_three",
+               "named_three", "named_one_projected"),
+  oracle = c("map", "map", "named", "named", "map", "map"),
+  column = c("p_coordinates", "p_coordinates", "p_gene_count", "p_three_length",
+             "p_three_length", "p_gene_length"),
+  stringsAsFactors = FALSE
+)
 
 # Run one table macro over one input in a fresh DuckDB CLI process with one
 # thread and spill forbidden. Returns its one result row (as character) with
@@ -202,6 +235,29 @@ run_fresh <- function(macro, path) {
 
 set_affinity(cpu_one)
 
+# Budget, declared before measuring. read_genbank holds one record at a time: an
+# arena of its feature keys, locations and qualifier text, which is no larger
+# than the record, and per-feature, qualifier, segment, attribute and row arrays
+# of the same order. Growth by doubling can leave each at twice its used size,
+# so the live state is four times the largest record's bytes plus one
+# 2,048-row output chunk of at most 1 MiB. The four-part input contains every
+# record of the smaller inputs, so its largest record bounds all three. The
+# ceiling is the fixed overhead (median peak RSS of three empty runs: CLI start,
+# extension load, profiling, no scan) plus three times that live state. It is
+# the same at every input size because the reader's memory must not grow with
+# records consumed.
+largest_record_bytes <- as.numeric(system2(
+  "awk", c(shQuote('{ n += length($0) + 1 } $0 == "//" { if (n > m) m = n; n = 0 } END { print m + 0 }'),
+           shQuote(inputs$path[[3L]])),
+  stdout = TRUE, env = "LC_ALL=C"))
+stopifnot(length(largest_record_bytes) == 1L, largest_record_bytes > 0)
+empty_runs <- vapply(seq_len(3L), function(run) {
+  run_fresh("SELECT 1 AS p_n, 0 AS p_metric", inputs$path[[1L]])$max_rss_kib
+}, numeric(1L))
+overhead_mib <- median(empty_runs) / 1024
+live_state_mib <- 4 * largest_record_bytes / 2^20 + 1
+rss_budget_mib <- overhead_mib + 3 * live_state_mib
+
 parity <- do.call(rbind, lapply(seq_len(nrow(inputs)), function(i) {
   observed <- run_fresh(parity_macro, inputs$path[[i]])$result
   stopifnot(as.numeric(observed$p_rows[[1L]]) > 0,
@@ -212,13 +268,27 @@ parity <- do.call(rbind, lapply(seq_len(nrow(inputs)), function(i) {
 }))
 inputs$rows <- parity$rows
 
-# One unrecorded warm-up per workload and input records the expected answer.
+# One unrecorded warm-up per workload and input must match its independent
+# expectation; its answer is then what every timed observation must reproduce.
 workloads <- names(macros)
+stopifnot(setequal(c(oracles$workload, "attributes_string"), workloads))
 expected <- list()
 for (i in seq_len(nrow(inputs))) {
+  oracle_answers <- lapply(oracle_macros, function(macro) run_fresh(macro, inputs$path[[i]])$result)
+  for (answer in oracle_answers) {
+    stopifnot(identical(as.numeric(answer$p_n[[1L]]), inputs$rows[[i]]))
+  }
   for (name in workloads) {
     answer <- run_fresh(macros[[name]], inputs$path[[i]])$result
     stopifnot(identical(as.numeric(answer$p_n[[1L]]), inputs$rows[[i]]))
+    source <- oracles[oracles$workload == name, , drop = FALSE]
+    if (nrow(source)) {
+      oracle_metric <- oracle_answers[[source$oracle]][[source$column]][[1L]]
+      if (!identical(answer$p_metric[[1L]], oracle_metric)) {
+        stop(sprintf("%s on %d part(s) returned %s; the %s-only scan gives %s",
+                     name, inputs$parts[[i]], answer$p_metric[[1L]], source$oracle, oracle_metric))
+      }
+    }
     expected[[paste(inputs$parts[[i]], name)]] <- answer$p_metric[[1L]]
   }
   # The named columns and the MAP must agree on the same three-key metric, or
@@ -276,10 +346,7 @@ memory <- do.call(rbind, lapply(cells, function(cell) {
 memory <- memory[order(memory$parts, match(memory$workload, workloads)), ]
 rownames(memory) <- NULL
 stopifnot(all(runs$duckdb_peak_temp_bytes == 0))
-# Budget: the reader streams one record at a time, so peak memory must not grow
-# with input size. Ceiling: three times the one-part named-column median peak RSS.
-rss_ceiling_mib <- 3 * median(runs$max_rss_kib[runs$parts == 1L & runs$workload == "named_three"]) / 1024
-stopifnot(all(runs$max_rss_kib / 1024 <= rss_ceiling_mib))
+stopifnot(all(runs$max_rss_kib / 1024 <= rss_budget_mib))
 
 # Growth: the two- and four-part medians over the one-part median, beside the
 # feature-row and input-byte ratios the reader's work follows.
@@ -322,7 +389,7 @@ Growth with input size: the ratio of the two- and four-part medians to the one-p
 knitr::kable(scaling, digits = 3)
 ```
 
-Memory over the same fresh-process observations, spill forbidden. The peak-RSS ceiling is `r round(rss_ceiling_mib, 1)` MiB (three times the one-part `named_three` median); the render stops if any observation exceeds it or spills:
+Memory over the same fresh-process observations, spill forbidden. The peak-RSS ceiling, declared before measuring, is `r round(rss_budget_mib, 1)` MiB: `r round(overhead_mib, 1)` MiB fixed overhead (median of three empty runs) plus three times a live state of `r round(live_state_mib, 1)` MiB (four times the largest record, `r format(largest_record_bytes, big.mark = ",")` bytes, plus one 1 MiB output chunk). The render stops if any observation exceeds it or spills:
 
 ```{r memory, echo=FALSE}
 knitr::kable(memory)

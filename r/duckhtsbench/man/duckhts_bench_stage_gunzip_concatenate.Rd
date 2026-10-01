@@ -24,5 +24,6 @@ locator lists the source artifacts in order; the growth dimension for
 record-count scaling is then how many verified source parts a derived
 artifact joins. A cached destination that matches its registered identity
 is reused; otherwise it is rebuilt through a temporary file and validated
-before publication, as \code{\link[=duckhts_bench_stage_gunzip]{duckhts_bench_stage_gunzip()}} does.
+before publication, by the same derivation as the single-archive \code{gunzip}
+transform. Every connection is closed when a source or write fails.
 }

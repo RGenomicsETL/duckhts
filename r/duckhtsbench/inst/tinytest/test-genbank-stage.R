@@ -139,7 +139,22 @@ test_genbank_plasmid_derivation <- function() {
   }
   expected <- list(joined(1L), joined(2L), joined(4L))
 
+  # A local copy of NCBI's release layout: <release>/plasmid/plasmid.N.genomic.gbff.gz,
+  # with RELEASE_NUMBER at <release>/ written only by the fetch checks below.
+  release_root <- file.path(directory, "release")
+  dir.create(file.path(release_root, "plasmid"), recursive = TRUE)
+  for (k in 1:4) {
+    stopifnot(file.copy(parts[[k]], file.path(release_root, "plasmid", sprintf("plasmid.%d.genomic.gbff.gz", k))))
+  }
+  file_url <- function(path) {
+    path <- normalizePath(path, winslash = "/", mustWork = TRUE)
+    paste0(if (startsWith(path, "/")) "file://" else "file:///", path)
+  }
+
   registry <- duckhts_bench_stage_plan("genbank-plasmid")
+  registry$locator[1:4] <- vapply(1:4, function(k) {
+    file_url(file.path(release_root, "plasmid", sprintf("plasmid.%d.genomic.gbff.gz", k)))
+  }, character(1L))
   registry$supplier_identity <- c(
     vapply(parts, function(p) paste0("bytes=", file.info(p)$size, ";md5=", unname(tools::md5sum(p))), character(1L)),
     vapply(expected, function(p) paste0("bytes=", file.info(p)$size, ";md5=", unname(tools::md5sum(p)),
@@ -173,18 +188,43 @@ test_genbank_plasmid_derivation <- function() {
   expect_error(duckhtsbench::duckhts_bench_stage_gunzip_concatenate(
     "genbank_plasmid_records_2", staged$parts[1:3], staged$records_2), "names 2 sources")
 
-  # A source that fails part way leaves no open connection and no partial file.
+  # A source that fails part way leaves no partial file and no open connection.
+  # Garbage collection closes a leaked connection (and runs its finalizer outside
+  # any condition handler), so collect first and compare with getAllConnections(),
+  # which does not collect, immediately around the failing call.
   failed <- file.path(directory, "failed", "records_2.gbff")
-  connections <- nrow(showConnections())
-  expect_error(suppressWarnings(duckhtsbench::duckhts_bench_stage_gunzip_concatenate(
+  invisible(gc())
+  open_before <- getAllConnections()
+  outcome <- tryCatch(suppressWarnings(duckhtsbench::duckhts_bench_stage_gunzip_concatenate(
     "genbank_plasmid_records_2", c(staged$parts[[1L]], file.path(directory, "missing.gbff.gz")), failed)),
-    "cannot open")
-  expect_equal(nrow(showConnections()), connections)
+    error = function(condition) condition)
+  open_after <- getAllConnections()
+  expect_inherits(outcome, "error")
+  expect_equal(setdiff(open_after, open_before), integer(0L))
   expect_equal(list.files(dirname(failed)), character(0L))
 
   # A part that no longer matches its registered identity is refused.
-  writeLines("not the archive", duckhts_bench_artifact_path("genbank_plasmid_part3_gbff_gz"))
+  part3 <- duckhts_bench_artifact_path("genbank_plasmid_part3_gbff_gz")
+  writeLines("not the archive", part3)
   expect_error(duckhts_bench_stage_genbank_plasmid(fetch = FALSE), "identity does not match")
+
+  # fetch = TRUE reads RELEASE_NUMBER beside the registered parts only when a
+  # part must be downloaded, and downloads only while the registered release
+  # is current. A failed lookup or a newer release downloads nothing.
+  release_number <- file.path(release_root, "RELEASE_NUMBER")
+  expect_error(suppressWarnings(duckhts_bench_stage_genbank_plasmid(fetch = TRUE)), "cannot open")
+  expect_equal(readLines(part3), "not the archive")
+  writeLines("238", release_number)
+  expect_error(duckhts_bench_stage_genbank_plasmid(fetch = TRUE),
+               "at release 238, but genbank-plasmid is registered against release 237")
+  expect_equal(readLines(part3), "not the archive")
+  writeLines("237", release_number)
+  staged <- duckhts_bench_stage_genbank_plasmid(fetch = TRUE)
+  expect_equal(unname(tools::md5sum(part3)), unname(tools::md5sum(parts[[3L]])))
+  expect_equal(readLines(staged$records_4), readLines(expected[[3L]]))
+  unlink(release_number)
+  staged <- duckhts_bench_stage_genbank_plasmid(fetch = TRUE)
+  expect_equal(readLines(staged$records_4), readLines(expected[[3L]]))
 }
 
 test_genbank_plasmid_derivation()

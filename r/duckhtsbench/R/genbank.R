@@ -42,7 +42,8 @@ duckhts_bench_stage_genbank <- function(fetch = TRUE) {
 #' record-count scaling is then how many verified source parts a derived
 #' artifact joins. A cached destination that matches its registered identity
 #' is reused; otherwise it is rebuilt through a temporary file and validated
-#' before publication, as [duckhts_bench_stage_gunzip()] does.
+#' before publication, by the same derivation as the single-archive `gunzip`
+#' transform. Every connection is closed when a source or write fails.
 #' @param id Registry artifact identifier of the destination.
 #' @param sources Staged, verified gzipped source paths, in the locator's order.
 #' @param destination Cache path to publish.
@@ -98,6 +99,13 @@ duckhts_bench_stage_genbank_plasmid <- function(fetch = TRUE) {
   if (length(release) != 1L || !grepl("^[0-9]+$", release)) {
     stop("genbank-plasmid parts must name one NCBI_RefSeq_release_<N>_plasmid release", call. = FALSE)
   }
+  # NCBI publishes the current release number as RELEASE_NUMBER at the root of
+  # the release tree the registered part locators point into.
+  part_pattern <- "/plasmid/plasmid\\.[0-9]+\\.genomic\\.gbff\\.gz$"
+  release_root <- unique(sub(part_pattern, "", plan$locator[1:4]))
+  if (!all(grepl(part_pattern, plan$locator[1:4])) || length(release_root) != 1L) {
+    stop("genbank-plasmid part locators must share one <release>/plasmid/ directory", call. = FALSE)
+  }
   parts <- vapply(part_ids, duckhts_bench_artifact_path, character(1L))
   cached <- vapply(seq_along(part_ids), function(k) {
     file.exists(parts[[k]]) && tryCatch({
@@ -106,7 +114,7 @@ duckhts_bench_stage_genbank_plasmid <- function(fetch = TRUE) {
     }, error = function(error) FALSE)
   }, logical(1L))
   if (fetch && !all(cached)) {
-    current <- trimws(readLines("https://ftp.ncbi.nlm.nih.gov/refseq/release/RELEASE_NUMBER", warn = FALSE)[[1L]])
+    current <- trimws(readLines(paste0(release_root, "/RELEASE_NUMBER"), warn = FALSE)[[1L]])
     duckhts_bench_refseq_release_check(release, current)
   }
   for (k in seq_along(part_ids)) {
