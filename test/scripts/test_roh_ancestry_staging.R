@@ -1,6 +1,8 @@
 test_roh_ancestry_staging <- function() {
   bcftools <- Sys.which("bcftools")
-  if (!nzchar(bcftools)) stop("bcftools is required for the network-free staging test", call. = FALSE)
+  if (!nzchar(bcftools)) {
+    stop("bcftools is required for the network-free staging test", call. = FALSE)
+  }
   source("benchmarks/roh_ancestry_stage.R")
   directory <- tempfile("roh-ancestry-stage-")
   dir.create(directory)
@@ -35,9 +37,14 @@ test_roh_ancestry_staging <- function() {
     vcf_path)
   output <- file.path(directory, "children.bcf")
   source_hash <- unname(digest::digest(file = vcf_path, algo = "sha256"))
-  result <- stage_roh_children(20L, vcf_path, pedigree_path, output,
-                               bcftools = bcftools,
-                               expected_source_sha256 = source_hash)
+  registry <- data.frame(
+    id = c("roh_ancestry_chr20_source", "roh_ancestry_chr20_children_bcf"),
+    locator = c(vcf_path, "derived:source+pedigree"),
+    cache_relpath = c("source.vcf", "children.bcf"),
+    stringsAsFactors = FALSE)
+  result <- stage_roh_children_from_registry(
+    20L, registry, pedigree_path, output, bcftools = bcftools,
+    expected_source_sha256 = source_hash)
   stopifnot(result$records == 1L, result$source_samples == 377L,
             result$samples == 377L,
     identical(result$output_sha256, unname(digest::digest(file = output, algo = "sha256"))),

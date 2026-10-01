@@ -47,18 +47,52 @@ PUR 35 (admixed), and YRI 56, ESN 43, CEU 57 and CHS 51 (controls).
 Single-population AF uses AFR for ACB, ASW, YRI and ESN; AMR for CLM,
 MXL, PEL and PUR; EUR for CEU; and EAS for CHS.
 
-Chr20 has the complete truth, q and arm evaluation. The chr1 children
-BCF is staged, with truth windows, genome-wide q and arm comparison
-still pending. The population child counts match the declared
-expectations: ACB 20, ASW 13, CLM 35, MXL 32, PEL 35, PUR 35, YRI 56,
-ESN 43, CEU 57 and CHS 51. The chr20 source VCF was copied from the
-supplied local file after its checksum was verified; its remote metadata
-is recorded above. bcftools reported `1.23.1-70-g6dbd8fef`; the source
-header had 3,202 samples and the children BCF has 377. The DuckHTS
-extension was rebuilt from revision `86f53052` for the arm measurements.
-The remote chr1 input was streamed through bcftools; its ETag,
-Last-Modified value, record count and output SHA-256 are recorded in
-[its receipt](results/roh-ancestry/chr1/input_receipt.tsv).
+Chr20 has the complete truth, q and arm evaluation. All 22 children BCFs
+are now staged, but truth windows, genome-wide q and arm comparisons
+remain pending for the other chromosomes. The population child counts
+match the declared expectations: ACB 20, ASW 13, CLM 35, MXL 32, PEL 35,
+PUR 35, YRI 56, ESN 43, CEU 57 and CHS 51. The chr20 source VCF was
+copied from the supplied local file after its checksum was verified; its
+remote metadata is recorded above. bcftools reported
+`1.23.1-70-g6dbd8fef`; the source header had 3,202 samples and the
+children BCF has 377. The DuckHTS extension was rebuilt from revision
+`86f53052` for the arm measurements. The remote chr1 input was streamed
+through bcftools; its ETag, Last-Modified value, record count and output
+SHA-256 are recorded in [its
+receipt](results/roh-ancestry/chr1/input_receipt.tsv).
+
+## Autosome BCF staging
+
+Every children BCF has 377 samples. The per-chromosome source URL,
+Last-Modified value, ETag, record count and output SHA-256 are listed in
+[the staging
+summary](results/roh-ancestry/autosome_staging_summary.csv); raw source
+VCFs were streamed and not cached.
+
+| chromosome | source_last_modified          | source_etag              | source_samples | child_samples | child_records | output_sha256                                                    |
+|-----------:|:------------------------------|:-------------------------|---------------:|--------------:|--------------:|:-----------------------------------------------------------------|
+|          1 | Thu, 29 Oct 2020 17:17:41 GMT | “a63897e0-5b2d27518f740” |           3202 |           377 |       2930166 | 96a9c74a3e3051f74ac1b46b4acf716983ba16713c1e18c000ac0b92eed1fe43 |
+|          2 | Thu, 29 Oct 2020 17:19:45 GMT | “ae80101c-5b2d27c7d0e40” |           3202 |           377 |       3139480 | 1ce29c20d828e99420f5f8488c928cc487d309e3aea41f7482dfc75221c46485 |
+|          3 | Thu, 29 Oct 2020 17:20:33 GMT | “917b0cb8-5b2d27f597a40” |           3202 |           377 |       2598706 | c9c6c3da847123e437ebb99fd5b10e53c45019ababd4f938ef26e394bb834cc3 |
+|          4 | Thu, 29 Oct 2020 17:21:15 GMT | “906bc41b-5b2d281da58c0” |           3202 |           377 |       2575009 | 93127e17f01d424696804b47e996544f524d3113a704e6dcc47f102d3418b067 |
+|          5 | Thu, 29 Oct 2020 17:28:14 GMT | “83dd2c4e-5b2d29ad3c780” |           3202 |           377 |       2387322 | 359132848a57db194347242dc78ea9ca0360ea9cd68ba0af61373886c8be9b4d |
+|          6 | Thu, 29 Oct 2020 17:28:50 GMT | “81a4595f-5b2d29cf91880” |           3202 |           377 |       2265577 | 32b17e13e0239131c980cbd879ea686d11ea857e69c6f45b59815c73917152db |
+|          7 | Thu, 29 Oct 2020 17:29:25 GMT | “7972f934-5b2d29f0f2740” |           3202 |           377 |       2149504 | 7ba8639570bd38b44bee9935fcd4eba3f9f2948b25e3c3646fe1e10389893550 |
+|          8 | Thu, 29 Oct 2020 17:51:19 GMT | “705b4bda-5b2d2ed6133c0” |           3202 |           377 |       2036799 | 74c65b9f3dc65d110be11abc0927813260c5410c2609f14a2f731d2a46a935da |
+|          9 | Thu, 29 Oct 2020 17:51:45 GMT | “5bba6f2f-5b2d2eeedee40” |           3202 |           377 |       1651537 | bc7ce3156c2561c43c2126e1622d0637c92355222596d4ed25f428e9eb9e501d |
+|         10 | Thu, 29 Oct 2020 16:36:26 GMT | “676779b4-5b2d1e1937680” |           3202 |           377 |       1823834 | 05938cee249d0c17acc96d1de0ec0a03d7e84a6a6a4d22a4a0d7ad164082c83a |
+|         11 | Thu, 29 Oct 2020 16:36:57 GMT | “64264546-5b2d1e36c7c40” |           3202 |           377 |       1798385 | 63f1a70b3dcfa65cf06ae485600478fa695be0706a87fd071cecdc590f3711a9 |
+|         12 | Thu, 29 Oct 2020 16:38:48 GMT | “6231f666-5b2d1ea0a3600” |           3202 |           377 |       1729266 | f071c7dae1c6c76bb29fe06a2bd91d36d101e74522fd45d9dca123b8479075e4 |
+|         13 | Thu, 29 Oct 2020 17:06:58 GMT | “4a472041-5b2d24ec59080” |           3202 |           377 |       1303393 | 19c980ecbd9ef1e2dfb1fcae6aa442ccd74502b48f42a0d30b3705f9e22b3afc |
+|         14 | Thu, 29 Oct 2020 17:09:12 GMT | “43049970-5b2d256c23e00” |           3202 |           377 |       1188783 | 167df8da0f3b365fc84fb8328ddb4eecf82c430375c824de15d31d0be1f7fcf5 |
+|         15 | Thu, 29 Oct 2020 17:09:32 GMT | “3d7a622e-5b2d257f36b00” |           3202 |           377 |       1091118 | 3f14c31a2b5e21dff79b80301f1fb970e0d90570b55d1caaa8968e96dda838a9 |
+|         16 | Thu, 29 Oct 2020 17:12:05 GMT | “430843cd-5b2d261120340” |           3202 |           377 |       1212714 | 9f365903619abcdd476bfa0766812ba02e878191f36cbe5a6e2b642dfbdc2940 |
+|         17 | Thu, 29 Oct 2020 17:15:50 GMT | “3bdfac68-5b2d26e7b3d80” |           3202 |           377 |       1041119 | 18aa70829e5ee0dbf9086bfffb7265dd9abd1fc9edee5e7c51520b3d3160946b |
+|         18 | Thu, 29 Oct 2020 17:16:08 GMT | “39c4fcb9-5b2d26f8de600” |           3202 |           377 |       1028543 | e681322da2b28d9c6d13a308ea1fb99fbe5774c6ef5a3103f86db73e9e915859 |
+|         19 | Thu, 29 Oct 2020 17:17:00 GMT | “31a21292-5b2d272a75b00” |           3202 |           377 |        838108 | 892ae4ab2d21b19fb2564edf8b752d1e13b7a55bcf4b31697c722131df5da456 |
+|         20 | Thu, 29 Oct 2020 17:17:59 GMT | 2fbb7ed2-5b2d2762b9fc0   |           3202 |           377 |        849143 | a53f83cebd7de6fb4661c14ecd93e5346022ff453392095a085e0b7cda116541 |
+|         21 | Thu, 29 Oct 2020 17:18:31 GMT | “1d92bc4c-5b2d27813e7c0” |           3202 |           377 |        526031 | 576c8232cbddf3a6dff5f3daa7a402f5b5a91cfb125446f84bcd04db1858dfe1 |
+|         22 | Thu, 29 Oct 2020 17:19:03 GMT | “1efd81b1-5b2d279fc2fc0” |           3202 |           377 |        540617 | 8f6129e3587be10a8ca11dd2904d5e5a8931c2deeef37548a002353261f0be7b |
 
 ## Truth-window separation
 

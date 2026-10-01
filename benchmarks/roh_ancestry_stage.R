@@ -87,3 +87,23 @@ stage_roh_children <- function(chromosome, source_vcf, pedigree, output,
        samples = length(output_samples),
        records = record_count, output = output, output_sha256 = output_sha256)
 }
+
+stage_roh_children_from_registry <- function(
+  chromosome, registry, pedigree, output, source_vcf_override = NULL,
+  bcftools = "/usr/local/bin/bcftools", expected_source_sha256 = NULL
+) {
+  if (!is.data.frame(registry) || !all(c("id", "locator", "cache_relpath") %in% names(registry))) {
+    stop("registry must contain id, locator, and cache_relpath columns", call. = FALSE)
+  }
+  source_id <- sprintf("roh_ancestry_chr%d_source", as.integer(chromosome))
+  output_id <- sprintf("roh_ancestry_chr%d_children_bcf", as.integer(chromosome))
+  source_row <- registry[registry$id == source_id, , drop = FALSE]
+  output_row <- registry[registry$id == output_id, , drop = FALSE]
+  if (nrow(source_row) != 1L || nrow(output_row) != 1L ||
+      !nzchar(source_row$locator[[1L]]) || !nzchar(output_row$cache_relpath[[1L]])) {
+    stop("registry lacks one source and one children BCF artifact", call. = FALSE)
+  }
+  source_vcf <- if (is.null(source_vcf_override)) source_row$locator[[1L]] else source_vcf_override
+  stage_roh_children(chromosome, source_vcf, pedigree, output, bcftools,
+                     expected_source_sha256)
+}
