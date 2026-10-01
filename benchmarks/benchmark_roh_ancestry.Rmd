@@ -19,59 +19,68 @@ The phased high-coverage VCF source is `https://ftp.1000genomes.ebi.ac.uk/vol1/f
 
 | Input | Identity / SHA-256 | Status |
 |:--|:--|:--|
-| chr20 phased VCF | Source file SHA-256 `c2624c726c6cb27e288fe5908621125740379a3d523299dd07c13abf97645e4b` | Verified against the source file; not staged or processed for this evaluation |
-| GRCh38 ancestry reference | SHA-256 `4982810aa69b9c71924e9a02dcd454ccedccc34bd8bcf71506ce9752589847fa` | Available locally; not joined to the trio genotypes |
-| Pedigree | URL above | Not staged or checksummed |
+| chr20 phased VCF | Source SHA-256 `c2624c726c6cb27e288fe5908621125740379a3d523299dd07c13abf97645e4b`; remote ETag `2fbb7ed2-5b2d2762b9fc0`; Last-Modified `Thu, 29 Oct 2020 17:17:59 GMT` | Local source checksum verified; 3,202-sample source used to make the 377-child BCF |
+| chr20 children BCF | 849,143 records; SHA-256 `a53f83cebd7de6fb4661c14ecd93e5346022ff453392095a085e0b7cda116541` | All 377 eligible children present; biallelic SNVs with INFO/AF, INFO/AF_AFR/AMR/EAS/EUR retained |
+| GRCh38 ancestry reference | SHA-256 `4982810aa69b9c71924e9a02dcd454ccedccc34bd8bcf71506ce9752589847fa` | Chr20 wide rows converted to long form; 108,757 non-palindromic, matched dosage loci per child |
+| Pedigree | SHA-256 `4e164b717433fc9bfc16e29b20e5b4659b4216185b3275322d421fe3d323c132` | Downloaded; expected child counts matched in all ten populations; all 377 found in the chr20 VCF header |
 
 The planned trio counts are ACB 20, ASW 13, CLM 35, MXL 32, PEL 35 and PUR 35 (admixed), and YRI 56, ESN 43, CEU 57 and CHS 51 (controls). Single-population AF uses AFR for ACB, ASW, YRI and ESN; AMR for CLM, MXL, PEL and PUR; EUR for CEU; and EAS for CHS.
 
-No chromosomes were processed. The chromosome-level children-only BCFs, frequency-free truth inputs, data receipts, ancestry estimates, and ROH arms have not been generated. The chr20 checksum identifies the supplied file, but source identity, trio selection, and all requested output denominators have not been verified by a benchmark run.
+Chr20 is the only chromosome processed at this stage. The population child counts match the declared expectations: ACB 20, ASW 13, CLM 35, MXL 32, PEL 35, PUR 35, YRI 56, ESN 43, CEU 57 and CHS 51. The source VCF was copied from the supplied local file after its checksum was verified; its remote metadata is recorded above. bcftools reported `1.23.1-70-g6dbd8fef`; the source header had 3,202 samples and the children BCF has 377. The DuckHTS extension was rebuilt from revision `86f53052` for the arm measurements.
 
 ## Truth-window separation
 
-Not measured. No heterozygote-window distribution is available, so the truth definition has not been empirically assessed and no arm comparison is reported.
+The complete chr20 truth-window distribution contains 243,165 child-windows (645 windows per child, including the terminal partial window). Of these, 6,572 have zero heterozygotes and 2,840 have one; 9,412 (3.87%) meet the declared `<=1` criterion, while 233,753 (96.13%) have at least two. The binned distribution is [here](results/roh-ancestry/chr20/truth_window_bins.csv), and the exact per-count distribution is [here](results/roh-ancestry/chr20/truth_window_distribution.csv). This separates the low-heterozygosity tail from the remaining windows sufficiently to retain the preregistered cutoff; no amendment was made. The retained truth is 102 runs of at least 1 Mb across 92 children; the run counts and truth-base denominators by population are [here](results/roh-ancestry/chr20/truth_runs_by_population.csv).
+
+The binned distribution is summarized below; the exact per-count table is [here](results/roh-ancestry/chr20/truth_window_distribution.csv).
+
+```{r, echo=FALSE}
+knitr::kable(utils::read.csv("results/roh-ancestry/chr20/truth_window_bins.csv"))
+```
+
+The pooled and single-population comparisons began only after this distribution was reviewed.
+
+## Ancestry proportions
+
+Proportions were estimated from chr20 dosage input only, using the GRCh38 wide reference and the bigsnpr 1.12.21 correction. Each child contributed 108,757 matched, non-palindromic loci. Every child has `status=ok`; the `cor_pred` range and top three groups are reported per child in [this table](results/roh-ancestry/chr20/q_by_child.csv). This is a chr20-only estimate, not the final genome-wide q.
+
+The three ROH arms used the same 108,757 sites for every child. The AF and ancestry reference site keys have zero entries in either direction of their symmetric difference; the exact comparison is [here](results/roh-ancestry/chr20/site_set_equivalence.csv). The `INFO_AF*` values are array-valued Number=A fields; because the input BCF is biallelic, the AF relation takes its sole value and clamps it to `[1e-3, 0.999]`. The ancestry arm uses the same clamp. Per-child site counts are [here](results/roh-ancestry/chr20/site_counts_by_child.csv).
+
+```{r, echo=FALSE}
+knitr::kable(utils::read.csv("results/roh-ancestry/chr20/q_by_child.csv"), digits = 4)
+```
 
 ## ROH results
 
-No observations are available. All count and length summaries are per-child quantities and must be aggregated by population only after retaining each child's observations.
+All count and length summaries are per-child quantities and are aggregated by population only after retaining each child's observations. The chr20-only FROH column is reported as a chromosome-length fraction; it is not the declared genome-wide FROH denominator.
 
-| Population | Arm | Unsupported ROH count / child (>=1 Mb; >=2 Mb; >=5 Mb) | Unsupported length / child | Supported count / child | Supported length / child | FROH | Truth-run length covered |
-|:--|:--|--:|--:|--:|--:|--:|--:|
-| ACB | Pooled | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| ACB | Single population | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| ACB | Ancestry tuned | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| ASW | Pooled | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| ASW | Single population | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| ASW | Ancestry tuned | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| CLM | Pooled | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| CLM | Single population | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| CLM | Ancestry tuned | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| MXL | Pooled | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| MXL | Single population | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| MXL | Ancestry tuned | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| PEL | Pooled | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| PEL | Single population | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| PEL | Ancestry tuned | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| PUR | Pooled | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| PUR | Single population | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| PUR | Ancestry tuned | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| YRI | Single population | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| YRI | Ancestry tuned | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| ESN | Single population | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| ESN | Ancestry tuned | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| CEU | Single population | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| CEU | Ancestry tuned | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| CHS | Single population | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
-| CHS | Ancestry tuned | Not measured | Not measured | Not measured | Not measured | Not measured | Not measured |
+```{r, echo=FALSE}
+summary <- utils::read.csv("results/roh-ancestry/chr20/population_arm_summary.csv", check.names = FALSE)
+population_order <- c("ACB", "ASW", "CLM", "MXL", "PEL", "PUR", "YRI", "ESN", "CEU", "CHS")
+arm_order <- c("pooled", "single_population", "ancestry_tuned")
+summary$Population <- factor(summary$Population, levels = population_order)
+summary$Arm <- factor(summary$Arm, levels = arm_order)
+summary <- summary[order(summary$Population, summary$Arm), ]
+summary$Population <- as.character(summary$Population)
+summary$Arm <- c(pooled = "Pooled", single_population = "Single population",
+                 ancestry_tuned = "Ancestry tuned")[as.character(summary$Arm)]
+knitr::kable(summary, row.names = FALSE)
+```
 
-Child-level q estimates and correlation status have not been calculated. No arm result can establish the acceptance criterion. **Outcome: not evaluated; neither improvement nor equivalence is supported by this report.**
+## Criterion
+
+The chr20 criterion **`r if (all(utils::read.csv("results/roh-ancestry/chr20/criterion_by_population.csv")$criterion_pass)) "held" else "did not hold"`**. The comparison for each population is shown below.
+
+```{r, echo=FALSE}
+criterion <- utils::read.csv("results/roh-ancestry/chr20/criterion_by_population.csv")
+knitr::kable(criterion, digits = 4, row.names = FALSE)
+```
 
 ## Runtime and memory
 
-No ROH arm was run. Runtime and peak RSS were not measured, no fresh-process repetitions were performed, and thread count is not applicable.
+Each value is from a fresh R process using four DuckDB threads. The ancestry arm used 16-child batches after the 64-child batch exceeded the 12 GB DuckDB memory limit; other arms used 64-child batches. Per-replicate runtime and peak resident memory are reported below.
 
-| Chromosome | Pooled runtime / peak RSS | Single-population runtime / peak RSS | Ancestry-tuned runtime / peak RSS | Threads |
-|:--|:--|:--|:--|--:|
-| None processed | Not measured | Not measured | Not measured | Not applicable |
-
-The required per-chromosome fresh-process measurements remain outstanding.
+```{r, echo=FALSE}
+runtime <- utils::read.csv("results/roh-ancestry/chr20/runtime_replicates.csv")
+knitr::kable(runtime, digits = 2, row.names = FALSE)
+```
