@@ -47,19 +47,20 @@ PUR 35 (admixed), and YRI 56, ESN 43, CEU 57 and CHS 51 (controls).
 Single-population AF uses AFR for ACB, ASW, YRI and ESN; AMR for CLM,
 MXL, PEL and PUR; EUR for CEU; and EAS for CHS.
 
-Chr20 has the complete truth, q and arm evaluation. All 22 children BCFs
-are now staged, but truth windows, genome-wide q and arm comparisons
-remain pending for the other chromosomes. The population child counts
-match the declared expectations: ACB 20, ASW 13, CLM 35, MXL 32, PEL 35,
-PUR 35, YRI 56, ESN 43, CEU 57 and CHS 51. The chr20 source VCF was
-copied from the supplied local file after its checksum was verified; its
-remote metadata is recorded above. bcftools reported
-`1.23.1-70-g6dbd8fef`; the source header had 3,202 samples and the
-children BCF has 377. The DuckHTS extension was rebuilt from revision
-`86f53052` for the arm measurements. The remote chr1 input was streamed
-through bcftools; its ETag, Last-Modified value, record count and output
-SHA-256 are recorded in [its
-receipt](results/roh-ancestry/chr1/input_receipt.tsv).
+Chr20 has the complete chromosome-specific truth, q and arm evaluation.
+The 22-autosome truth-window table and retained intervals are now
+computed; chr20 windows were reused and the 102 retained chr20 intervals
+match the prior result exactly. Genome-wide q estimation and arm
+comparisons remain pending. The population child counts match the
+declared expectations: ACB 20, ASW 13, CLM 35, MXL 32, PEL 35, PUR 35,
+YRI 56, ESN 43, CEU 57 and CHS 51. The chr20 source VCF was copied from
+the supplied local file after its checksum was verified; its remote
+metadata is recorded above. bcftools reported `1.23.1-70-g6dbd8fef`; the
+source header had 3,202 samples and the children BCF has 377. The
+DuckHTS extension was rebuilt from revision `86f53052` for the arm
+measurements. The remote chr1 input was streamed through bcftools; its
+ETag, Last-Modified value, record count and output SHA-256 are recorded
+in [its receipt](results/roh-ancestry/chr1/input_receipt.tsv).
 
 ## Autosome BCF staging
 
@@ -123,8 +124,43 @@ is [here](results/roh-ancestry/chr20/truth_window_distribution.csv).
 | 20-49 |         31570 |
 | 50+   |        168888 |
 
-The pooled and single-population comparisons began only after this
-distribution was reviewed.
+### Full-autosome truth windows
+
+The full truth set contains all child BCF biallelic SNVs across
+autosomes 1–22. Window sizes are 100 kb; terminal windows use their
+actual GRCh38 primary-assembly length from the Ensembl 116 FASTA index.
+A retained truth run must cover at least 1,000,000 actual bases. The
+chr20 window Parquet was reused; its 102 intervals exactly match the
+chromosome-specific evaluation.
+
+Across 377 children there are 10,842,520 child-windows: 745,963 (6.88%)
+have at most one heterozygote and 10,096,557 (93.12%) have at least two.
+There are 7,965 retained 1 Mb-or-longer intervals across all 377
+children. The [exact per-count window
+distribution](results/roh-ancestry/autosome_truth_window_distribution.csv),
+[retained intervals](results/roh-ancestry/autosome_truth_intervals.csv),
+[per-child truth
+metrics](results/roh-ancestry/autosome_truth_by_child.csv) and
+[population
+summary](results/roh-ancestry/autosome_truth_by_population.csv) are
+available as result tables.
+
+| population | children | truth_runs |   truth_bp | mean_froh | runs_ge_2mb | runs_ge_5mb |
+|:-----------|---------:|-----------:|-----------:|----------:|------------:|------------:|
+| ACB        |       20 |        377 | 2519500000 |    0.0438 |         262 |         160 |
+| ASW        |       13 |        242 | 1637200000 |    0.0438 |         168 |         104 |
+| CEU        |       57 |       1189 | 7338700000 |    0.0448 |         755 |         458 |
+| CHS        |       51 |       1041 | 6544300000 |    0.0446 |         674 |         409 |
+| CLM        |       35 |        832 | 4894244167 |    0.0486 |         529 |         310 |
+| ESN        |       43 |        893 | 5563600000 |    0.0450 |         583 |         347 |
+| MXL        |       32 |        681 | 4171900000 |    0.0453 |         439 |         259 |
+| PEL        |       35 |        746 | 4581100000 |    0.0455 |         477 |         286 |
+| PUR        |       35 |        858 | 4859400000 |    0.0483 |         525 |         295 |
+| YRI        |       56 |       1106 | 7132100000 |    0.0443 |         745 |         448 |
+
+The pooled and single-population comparisons began only after the chr20
+truth distribution was reviewed. The full-autosome separation check also
+retains the preregistered cutoff.
 
 ## Ancestry proportions
 
