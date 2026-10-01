@@ -775,3 +775,37 @@ SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_f
   'roh_ancestry_reference_forward', 'roh_ancestry_over_one', gt_error := 30, samples := 'S1');
 ----
 ancestry proportions must sum to more than 0 and at most 1 per sample
+
+# Palindromic reference sites are dropped by the macro itself: a reference that
+# keeps them (180 of the fixture's 572 sites) gives the same segments as one
+# that leaves them out, while an AF table that keeps them does not.
+statement ok
+CREATE TEMP TABLE roh_ancestry_reference_all AS
+SELECT chrom AS chromosome, pos AS position, alt AS allele_a, ref AS allele_b,
+       'A' AS group_id, 0.2::DOUBLE AS frequency FROM roh_af
+UNION ALL
+SELECT chrom, pos, alt, ref, 'B', 0.4::DOUBLE FROM roh_af;
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_af_all AS
+SELECT chrom, pos, ref, alt, 0.8::DOUBLE AS af FROM roh_af;
+
+query I
+WITH kept AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_all', 'roh_ancestry_proportions', gt_error := 30, samples := 'S1')),
+dropped AS (SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_af', gt_error := 30, samples := 'S1'))
+SELECT count(*) FROM ((SELECT * FROM kept EXCEPT ALL SELECT * FROM dropped)
+UNION ALL (SELECT * FROM dropped EXCEPT ALL SELECT * FROM kept));
+----
+0
+
+query I
+WITH palindromes AS (SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_af_all', gt_error := 30, samples := 'S1')),
+dropped AS (SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_af', gt_error := 30, samples := 'S1'))
+SELECT count(*) > 0 FROM ((SELECT * FROM palindromes EXCEPT ALL SELECT * FROM dropped)
+UNION ALL (SELECT * FROM dropped EXCEPT ALL SELECT * FROM palindromes));
+----
+true

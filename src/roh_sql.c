@@ -102,19 +102,25 @@ static const char ancestry_sites[] =
     "__dht_vcf_sites AS (SELECT DISTINCT regexp_replace(CHROM, '^chr', '') AS chrom, "
     "POS AS pos, REF AS ref, ALT[1] AS alt "
     "FROM read_bcf(path, decode_error_policy := 'error') " ROH_ALT_FILTER "), "
-    "__dht_calls AS NOT MATERIALIZED (SELECT CHROM AS chrom, POS AS pos, REF AS ref, "
+    "__dht_calls AS NOT MATERIALIZED (SELECT CHROM AS chrom, "
+    "regexp_replace(CHROM, '^chr', '') AS chrom_key, POS AS pos, REF AS ref, "
     "ALT[1] AS alt, SAMPLE_ID AS smp, " ROH_EVIDENCE " AS evidence " ROH_RECORDS "), ";
 
+/* Every join below is on column equality. An OR over the two allele
+ * orientations in a join condition is planned as a nested-loop join, so
+ * alleles are compared as an unordered pair, and the reference is joined to
+ * the calls once per orientation. */
 static const char ancestry_validations[] =
     "__dht_ref_matches AS (SELECT r.* FROM __dht_ref_rows AS r JOIN "
     "__dht_vcf_sites AS c ON c.chrom = r.chrom AND c.pos = r.pos AND "
-    "((c.ref = r.allele_a AND c.alt = r.allele_b) OR "
-    "(c.ref = r.allele_b AND c.alt = r.allele_a))), "
+    "least(c.ref, c.alt) = least(r.allele_a, r.allele_b) AND "
+    "greatest(c.ref, c.alt) = greatest(r.allele_a, r.allele_b)), "
     "__dht_group_guard AS (SELECT CASE "
     "WHEN (SELECT list_sort(list_distinct(list(group_id))) FROM __dht_ref_rows) != "
     "(SELECT list_sort(list_distinct(list(group_id))) FROM __dht_prop_rows) "
     "THEN error('reference and proportions group sets must match exactly') "
-    "WHEN EXISTS (SELECT 1 FROM __dht_ref_matches GROUP BY chrom, pos, allele_a, allele_b "
+    "WHEN EXISTS (SELECT 1 FROM __dht_ref_matches GROUP BY chrom, pos, "
+    "least(allele_a, allele_b), greatest(allele_a, allele_b) "
     "HAVING count(*) != (SELECT count(DISTINCT group_id) FROM __dht_ref_rows) OR "
     "count(DISTINCT group_id) != count(*)) "
     "THEN error('reference must have exactly one frequency per site and group') "
@@ -134,7 +140,12 @@ static const char ancestry_validations[] =
     "ELSE true END AS valid), "
     "__dht_ref AS (SELECT chrom, pos, allele_a, allele_b, "
     "list(frequency ORDER BY group_id) AS frequencies FROM __dht_ref_matches "
+    "WHERE NOT ((allele_a = 'A' AND allele_b = 'T') OR (allele_a = 'T' AND allele_b = 'A') OR "
+    "(allele_a = 'C' AND allele_b = 'G') OR (allele_a = 'G' AND allele_b = 'C')) "
     "GROUP BY chrom, pos, allele_a, allele_b), "
+    "__dht_ref_oriented AS (SELECT chrom, pos, allele_a AS ref, allele_b AS alt, "
+    "false AS reversed, frequencies FROM __dht_ref UNION ALL "
+    "SELECT chrom, pos, allele_b, allele_a, true, frequencies FROM __dht_ref), "
     "__dht_props AS (SELECT smp, list(proportion / total ORDER BY group_id) AS proportions "
     "FROM (SELECT *, sum(proportion) OVER (PARTITION BY smp) AS total FROM __dht_prop_rows) "
     "GROUP BY smp), "
@@ -143,20 +154,13 @@ static const char ancestry_validations[] =
     "WHEN NOT g.valid THEN error('reference and proportions group sets must match exactly') "
     "WHEN r.frequencies IS NULL THEN NULL "
     "WHEN af_clamp < 0 OR af_clamp >= 0.5 THEN error('af_clamp must be 0 or in (0, 0.5)') "
-    "WHEN c.ref = r.allele_a AND c.alt = r.allele_b THEN "
-    "greatest(af_clamp, least(1.0 - af_clamp, "
+    "WHEN NOT r.reversed THEN greatest(af_clamp, least(1.0 - af_clamp, "
     "list_inner_product(r.frequencies, p.proportions))) "
-    "WHEN c.ref = r.allele_b AND c.alt = r.allele_a THEN "
-    "greatest(af_clamp, least(1.0 - af_clamp, "
+    "ELSE greatest(af_clamp, least(1.0 - af_clamp, "
     "1.0 - list_inner_product(r.frequencies, p.proportions))) END AS af, c.evidence "
     "FROM __dht_calls AS c CROSS JOIN __dht_group_guard AS g "
-    "LEFT JOIN __dht_ref AS r ON regexp_replace(c.chrom, '^chr', '') = r.chrom "
-    "AND c.pos = r.pos AND ((c.ref = r.allele_a AND c.alt = r.allele_b) OR "
-    "(c.ref = r.allele_b AND c.alt = r.allele_a)) "
-    "AND NOT ((r.allele_a = 'A' AND r.allele_b = 'T') OR "
-    "(r.allele_a = 'T' AND r.allele_b = 'A') OR "
-    "(r.allele_a = 'C' AND r.allele_b = 'G') OR "
-    "(r.allele_a = 'G' AND r.allele_b = 'C')) "
+    "LEFT JOIN __dht_ref_oriented AS r ON c.chrom_key = r.chrom AND c.pos = r.pos "
+    "AND c.ref = r.ref AND c.alt = r.alt "
     "LEFT JOIN __dht_props AS p ON p.smp = c.smp), ";
 
 #define ROH_MAX_PARTS 32
