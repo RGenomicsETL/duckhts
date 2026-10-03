@@ -24,8 +24,11 @@
 #' frequency weighted by the sample's proportion, with the proportions divided
 #' by their sum (which must be above 0 and at most 1, so `sum_to_one = FALSE`
 #' results and rounded proportions are accepted). REF=`allele_a`, ALT=`allele_b`
-#' uses that AF; reversed alleles use `1 - AF`. Other allele matches and
-#' palindromic sites are excluded. Chromosome names match after removing a
+#' uses that AF; reversed alleles use `1 - AF`. Reference alleles must be on
+#' the forward strand of the VCF's assembly, as in a FASTA-anchored panel; no
+#' strand flip is attempted, so palindromic (A/T, C/G) sites are oriented by REF
+#' like any other, and a site whose alleles match neither order is not used.
+#' Chromosome names match after removing a
 #' leading `chr`. `af_clamp` limits nonzero-clamp frequencies to
 #' `[af_clamp, 1-af_clamp]`; the default keeps zero population frequencies from
 #' being treated as impossible, and zero disables clamping. Only called sites

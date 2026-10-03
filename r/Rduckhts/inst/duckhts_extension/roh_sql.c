@@ -88,7 +88,10 @@ static const char from_lists_with_map[] =
     ") AS r FROM __dht_lists AS l JOIN __dht_map AS m ON m.m_chrom = l.chrom) AS seg";
 
 static const char ancestry_sites[] =
-    "WITH __dht_ref_rows AS (SELECT "
+    /* The long reference (sites x groups rows) is read where it is used rather
+     * than held: rescanning the caller's relation is cheaper than keeping
+     * millions of rows with string group names live for the whole query. */
+    "WITH __dht_ref_rows AS NOT MATERIALIZED (SELECT "
     "coalesce(try_cast(regexp_replace(CAST(chromosome AS VARCHAR), '^chr', '') AS INTEGER)::VARCHAR, "
     "CAST(chromosome AS VARCHAR)) AS chrom, CAST(position AS BIGINT) AS pos, "
     "CAST(allele_a AS VARCHAR) AS allele_a, CAST(allele_b AS VARCHAR) AS allele_b, "
@@ -97,6 +100,10 @@ static const char ancestry_sites[] =
     "__dht_prop_rows AS (SELECT CAST(sample_id AS VARCHAR) AS smp, "
     "CAST(group_id AS VARCHAR) AS group_id, CAST(proportion AS DOUBLE) AS proportion "
     "FROM query_table(proportions_table)), "
+    /* The reference group set, indexed once in group_id order; every per-site
+     * and per-sample list below is ordered by this index. */
+    "__dht_groups AS (SELECT group_id, row_number() OVER (ORDER BY group_id) AS g "
+    "FROM (SELECT DISTINCT group_id FROM __dht_ref_rows WHERE group_id IS NOT NULL)), "
     /* A sites-only scan finds the reference sites to pivot, so the per-sample
      * calls stream into the lists instead of being held for reuse. */
     "__dht_vcf_sites AS (SELECT DISTINCT regexp_replace(CHROM, '^chr', '') AS chrom, "
@@ -106,29 +113,48 @@ static const char ancestry_sites[] =
     "regexp_replace(CHROM, '^chr', '') AS chrom_key, POS AS pos, REF AS ref, "
     "ALT[1] AS alt, SAMPLE_ID AS smp, " ROH_EVIDENCE " AS evidence " ROH_RECORDS "), ";
 
-/* Every join below is on column equality. An OR over the two allele
+/* Reference alleles are taken to be on the forward strand of the VCF's
+ * assembly, as for a FASTA-anchored panel; no strand flip is attempted. Each
+ * site, palindromic (A/T, C/G) or not, is oriented by REF: a reference row
+ * whose alleles match REF/ALT in either order is used, any other is not.
+ *
+ * Every join below is on column equality. An OR over the two allele
  * orientations in a join condition is planned as a nested-loop join, so
  * alleles are compared as an unordered pair, and the reference is joined to
- * the calls once per orientation. */
+ * the calls once per orientation.
+ *
+ * The matched reference rows are aggregated once per called site (unordered
+ * allele pair): frequencies and group indexes in group order, and whether the
+ * frequencies are valid and the rows share one orientation. Every per-site
+ * check reads that site-level relation instead of the long rows. */
 static const char ancestry_validations[] =
-    "__dht_ref_matches AS (SELECT r.* FROM __dht_ref_rows AS r JOIN "
-    "__dht_vcf_sites AS c ON c.chrom = r.chrom AND c.pos = r.pos AND "
-    "least(c.ref, c.alt) = least(r.allele_a, r.allele_b) AND "
-    "greatest(c.ref, c.alt) = greatest(r.allele_a, r.allele_b)), "
+    "__dht_ref AS (SELECT r.chrom, r.pos, any_value(r.allele_a) AS allele_a, "
+    "any_value(r.allele_b) AS allele_b, count(*) AS n_rows, "
+    "list(g.g ORDER BY g.g) AS groups, list(r.frequency ORDER BY g.g) AS frequencies, "
+    "bool_and(r.frequency IS NOT NULL AND isfinite(r.frequency) AND r.frequency >= 0 "
+    "AND r.frequency <= 1) AS valid_frequencies, "
+    "min(r.allele_a) = max(r.allele_a) AS one_orientation "
+    "FROM __dht_ref_rows AS r JOIN __dht_vcf_sites AS c ON c.chrom = r.chrom AND c.pos = r.pos "
+    "AND least(c.ref, c.alt) = least(r.allele_a, r.allele_b) "
+    "AND greatest(c.ref, c.alt) = greatest(r.allele_a, r.allele_b) "
+    "LEFT JOIN __dht_groups AS g ON g.group_id = r.group_id "
+    "GROUP BY r.chrom, r.pos, least(r.allele_a, r.allele_b), greatest(r.allele_a, r.allele_b)), "
     "__dht_group_guard AS (SELECT CASE "
-    "WHEN (SELECT list_sort(list_distinct(list(group_id))) FROM __dht_ref_rows) != "
-    "(SELECT list_sort(list_distinct(list(group_id))) FROM __dht_prop_rows) "
+    "WHEN (SELECT list(group_id ORDER BY group_id) FROM __dht_groups) IS DISTINCT FROM "
+    "(SELECT list(group_id ORDER BY group_id) FROM "
+    "(SELECT DISTINCT group_id FROM __dht_prop_rows WHERE group_id IS NOT NULL)) "
     "THEN error('reference and proportions group sets must match exactly') "
-    "WHEN EXISTS (SELECT 1 FROM __dht_ref_matches GROUP BY chrom, pos, "
-    "least(allele_a, allele_b), greatest(allele_a, allele_b) "
-    "HAVING count(*) != (SELECT count(DISTINCT group_id) FROM __dht_ref_rows) OR "
-    "count(DISTINCT group_id) != count(*)) "
+    /* Exactly one row per group: the sorted group indexes are 1..G, and no
+     * row lacks a group (a NULL index sorts last and breaks the equality). */
+    "WHEN EXISTS (SELECT 1 FROM __dht_ref WHERE n_rows != (SELECT count(*) FROM __dht_groups) "
+    "OR groups IS DISTINCT FROM range(1, (SELECT count(*) FROM __dht_groups) + 1)) "
     "THEN error('reference must have exactly one frequency per site and group') "
+    "WHEN EXISTS (SELECT 1 FROM __dht_ref WHERE NOT one_orientation) "
+    "THEN error('reference rows of one site must use one allele orientation') "
     "WHEN EXISTS (SELECT 1 FROM __dht_prop_rows GROUP BY smp HAVING count(*) != "
-    "(SELECT count(DISTINCT group_id) FROM __dht_ref_rows) OR count(DISTINCT group_id) != count(*)) "
+    "(SELECT count(*) FROM __dht_groups) OR count(DISTINCT group_id) != count(*)) "
     "THEN error('each sample must have exactly one proportion per group') "
-    "WHEN EXISTS (SELECT 1 FROM __dht_ref_matches WHERE frequency IS NULL OR "
-    "NOT isfinite(frequency) OR frequency < 0 OR frequency > 1) OR "
+    "WHEN EXISTS (SELECT 1 FROM __dht_ref WHERE NOT valid_frequencies) OR "
     "EXISTS (SELECT 1 FROM __dht_prop_rows WHERE proportion IS NULL OR "
     "NOT isfinite(proportion) OR proportion < 0 OR proportion > 1) "
     "THEN error('frequencies and proportions must be finite values in [0, 1]') "
@@ -138,17 +164,12 @@ static const char ancestry_validations[] =
     "HAVING NOT (sum(proportion) > 0 AND sum(proportion) <= 1.0 + 1e-6)) "
     "THEN error('ancestry proportions must sum to more than 0 and at most 1 per sample') "
     "ELSE true END AS valid), "
-    "__dht_ref AS (SELECT chrom, pos, allele_a, allele_b, "
-    "list(frequency ORDER BY group_id) AS frequencies FROM __dht_ref_matches "
-    "WHERE NOT ((allele_a = 'A' AND allele_b = 'T') OR (allele_a = 'T' AND allele_b = 'A') OR "
-    "(allele_a = 'C' AND allele_b = 'G') OR (allele_a = 'G' AND allele_b = 'C')) "
-    "GROUP BY chrom, pos, allele_a, allele_b), "
     "__dht_ref_oriented AS (SELECT chrom, pos, allele_a AS ref, allele_b AS alt, "
     "false AS reversed, frequencies FROM __dht_ref UNION ALL "
     "SELECT chrom, pos, allele_b, allele_a, true, frequencies FROM __dht_ref), "
-    "__dht_props AS (SELECT smp, list(proportion / total ORDER BY group_id) AS proportions "
-    "FROM (SELECT *, sum(proportion) OVER (PARTITION BY smp) AS total FROM __dht_prop_rows) "
-    "GROUP BY smp), "
+    "__dht_props AS (SELECT p.smp, list(p.proportion / p.total ORDER BY g.g) AS proportions "
+    "FROM (SELECT *, sum(proportion) OVER (PARTITION BY smp) AS total FROM __dht_prop_rows) AS p "
+    "JOIN __dht_groups AS g ON g.group_id = p.group_id GROUP BY p.smp), "
     "__dht_sites AS NOT MATERIALIZED (SELECT c.chrom, c.pos, c.smp, "
     "CASE WHEN p.proportions IS NULL THEN error('every VCF sample requires ancestry proportions') "
     "WHEN NOT g.valid THEN error('reference and proportions group sets must match exactly') "
