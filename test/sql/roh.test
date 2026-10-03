@@ -102,6 +102,193 @@ SELECT count(*) FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_f
 ----
 4
 
+# Ancestry-specific reference and proportions use a deliberately reversed allele orientation.
+statement ok
+CREATE TEMP TABLE roh_ancestry_reference AS
+SELECT chrom AS chromosome, pos AS position, alt AS allele_a, ref AS allele_b,
+       'A' AS group_id, 0.2::DOUBLE AS frequency FROM roh_af
+WHERE NOT ((ref = 'A' AND alt = 'T') OR (ref = 'T' AND alt = 'A') OR
+           (ref = 'C' AND alt = 'G') OR (ref = 'G' AND alt = 'C'))
+UNION ALL
+SELECT chrom, pos, alt, ref, 'B', 0.4::DOUBLE FROM roh_af
+WHERE NOT ((ref = 'A' AND alt = 'T') OR (ref = 'T' AND alt = 'A') OR
+           (ref = 'C' AND alt = 'G') OR (ref = 'G' AND alt = 'C'));
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_proportions AS
+SELECT sample_id, group_id, proportion FROM (VALUES
+  ('S1', 'A', 1.0), ('S1', 'B', 0.0),
+  ('S2', 'A', 1.0), ('S2', 'B', 0.0),
+  ('S3', 'A', 1.0), ('S3', 'B', 0.0),
+  ('S4', 'A', 1.0), ('S4', 'B', 0.0)
+) AS p(sample_id, group_id, proportion);
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_af AS
+SELECT chrom, pos, ref, alt, 0.8::DOUBLE AS af FROM roh_af
+WHERE NOT ((ref = 'A' AND alt = 'T') OR (ref = 'T' AND alt = 'A') OR
+           (ref = 'C' AND alt = 'G') OR (ref = 'G' AND alt = 'C'));
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_reference_forward AS
+SELECT chrom AS chromosome, pos AS position, ref AS allele_a, alt AS allele_b,
+       'A' AS group_id, 0.2::DOUBLE AS frequency FROM roh_af
+WHERE NOT ((ref = 'A' AND alt = 'T') OR (ref = 'T' AND alt = 'A') OR
+           (ref = 'C' AND alt = 'G') OR (ref = 'G' AND alt = 'C'))
+UNION ALL
+SELECT chrom, pos, ref, alt, 'B', 0.4::DOUBLE FROM roh_af
+WHERE NOT ((ref = 'A' AND alt = 'T') OR (ref = 'T' AND alt = 'A') OR
+           (ref = 'C' AND alt = 'G') OR (ref = 'G' AND alt = 'C'));
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_af_forward AS
+SELECT chrom, pos, ref, alt, 0.2::DOUBLE AS af FROM roh_af
+WHERE NOT ((ref = 'A' AND alt = 'T') OR (ref = 'T' AND alt = 'A') OR
+           (ref = 'C' AND alt = 'G') OR (ref = 'G' AND alt = 'C'));
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_reference_zero AS
+SELECT chrom AS chromosome, pos AS position, ref AS allele_a, alt AS allele_b,
+       group_id, 0.0::DOUBLE AS frequency
+FROM roh_ancestry_proportions CROSS JOIN roh_af
+WHERE sample_id = 'S1' AND NOT ((ref = 'A' AND alt = 'T') OR (ref = 'T' AND alt = 'A') OR
+                                (ref = 'C' AND alt = 'G') OR (ref = 'G' AND alt = 'C'));
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_af_clamped AS
+SELECT chrom, pos, ref, alt, 0.001::DOUBLE AS af FROM roh_af
+WHERE NOT ((ref = 'A' AND alt = 'T') OR (ref = 'T' AND alt = 'A') OR
+           (ref = 'C' AND alt = 'G') OR (ref = 'G' AND alt = 'C'));
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_af_unclamped AS
+SELECT chrom, pos, ref, alt, 0.0::DOUBLE AS af FROM roh_af
+WHERE NOT ((ref = 'A' AND alt = 'T') OR (ref = 'T' AND alt = 'A') OR
+           (ref = 'C' AND alt = 'G') OR (ref = 'G' AND alt = 'C'));
+
+# The hand calculation is q_A * f_A + q_B * f_B = 1 * 0.2 + 0 * 0.4 = 0.2;
+# reversed alleles therefore yield 1 - 0.2 = 0.8.
+query I
+SELECT round(1.0 - list_inner_product([0.2, 0.4], [1.0, 0.0]), 6);
+----
+0.8
+
+# q=(1,0) selects group A's frequency for REF=allele_a, ALT=allele_b.
+query I
+WITH tuned AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_forward', 'roh_ancestry_proportions', gt_error := 30, samples := 'S1')),
+pooled AS (SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_af_forward', gt_error := 30, samples := 'S1'))
+SELECT count(*) FROM ((SELECT * FROM tuned EXCEPT ALL SELECT * FROM pooled)
+UNION ALL (SELECT * FROM pooled EXCEPT ALL SELECT * FROM tuned));
+----
+0
+
+# The default clamp keeps zero group frequencies at 0.001; zero disables the clamp.
+query I
+WITH tuned AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_zero', 'roh_ancestry_proportions', gt_error := 30, samples := 'S1')),
+pooled AS (SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_af_clamped', gt_error := 30, samples := 'S1'))
+SELECT count(*) FROM ((SELECT * FROM tuned EXCEPT ALL SELECT * FROM pooled)
+UNION ALL (SELECT * FROM pooled EXCEPT ALL SELECT * FROM tuned));
+----
+0
+
+query I
+WITH tuned AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_zero', 'roh_ancestry_proportions', af_clamp := 0,
+  gt_error := 30, samples := 'S1')),
+pooled AS (SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_af_unclamped', gt_error := 30, samples := 'S1'))
+SELECT count(*) FROM ((SELECT * FROM tuned EXCEPT ALL SELECT * FROM pooled)
+UNION ALL (SELECT * FROM pooled EXCEPT ALL SELECT * FROM tuned));
+----
+0
+
+# af_clamp is checked before any reference row is matched: a reference that matches no
+# VCF site still rejects a missing, non-finite or out-of-range clamp.
+statement ok
+CREATE TEMP TABLE roh_ancestry_reference_unmatched AS
+SELECT chromosome, position + 100000000 AS position, allele_a, allele_b, group_id, frequency
+FROM roh_ancestry_reference_forward;
+
+query I
+SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_unmatched', 'roh_ancestry_proportions', gt_error := 30, samples := 'S1');
+----
+0
+
+statement error
+SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_unmatched', 'roh_ancestry_proportions', af_clamp := NULL,
+  gt_error := 30, samples := 'S1');
+----
+af_clamp must be 0 or in (0, 0.5)
+
+statement error
+SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_unmatched', 'roh_ancestry_proportions', af_clamp := 'nan'::DOUBLE,
+  gt_error := 30, samples := 'S1');
+----
+af_clamp must be 0 or in (0, 0.5)
+
+statement error
+SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_unmatched', 'roh_ancestry_proportions', af_clamp := 0.5,
+  gt_error := 30, samples := 'S1');
+----
+af_clamp must be 0 or in (0, 0.5)
+
+statement error
+SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_unmatched', 'roh_ancestry_proportions', af_clamp := -0.1,
+  gt_error := 30, samples := 'S1');
+----
+af_clamp must be 0 or in (0, 0.5)
+
+# Per-sample AF equals the equivalent per-site table, with and without a map.
+query I
+WITH tuned AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference', 'roh_ancestry_proportions', gt_error := 30, samples := 'S1')),
+pooled AS (SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_af', gt_error := 30, samples := 'S1'))
+SELECT count(*) FROM ((SELECT * FROM tuned EXCEPT ALL SELECT * FROM pooled)
+UNION ALL (SELECT * FROM pooled EXCEPT ALL SELECT * FROM tuned));
+----
+0
+
+query I
+WITH tuned AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference', 'roh_ancestry_proportions', 'roh_map', gt_error := 30, samples := 'S1')),
+pooled AS (SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_af', 'roh_map', gt_error := 30, samples := 'S1'))
+SELECT count(*) FROM ((SELECT * FROM tuned EXCEPT ALL SELECT * FROM pooled)
+UNION ALL (SELECT * FROM pooled EXCEPT ALL SELECT * FROM tuned));
+----
+0
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_missing AS
+SELECT * FROM roh_ancestry_proportions WHERE sample_id <> 'S1';
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_mismatch AS
+SELECT sample_id, CASE WHEN group_id = 'B' THEN 'C' ELSE group_id END AS group_id,
+       proportion FROM roh_ancestry_proportions;
+
+statement error
+SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference', 'roh_ancestry_missing', gt_error := 30, samples := 'S1');
+----
+every VCF sample requires ancestry proportions
+
+statement error
+SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference', 'roh_ancestry_mismatch', gt_error := 30, samples := 'S1');
+----
+reference and proportions group sets must match exactly
+
 # Constant recombination rate (-M).
 # bcftools: bcftools roh --AF-tag AF -M 1e-6
 query I
@@ -582,3 +769,359 @@ query I
 SELECT count(*) FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 1e-5, 1e-6);
 ----
 16
+
+# Mixed proportions go through the macro: q = (0.25, 0.75) gives
+# 0.25 * 0.2 + 0.75 * 0.4 at every site, and halving both proportions
+# (sum 0.5) gives the same frequencies after normalisation.
+statement ok
+CREATE TEMP TABLE roh_ancestry_mixed AS
+SELECT sample_id, group_id, CASE group_id WHEN 'A' THEN 0.25 ELSE 0.75 END::DOUBLE AS proportion
+FROM roh_ancestry_proportions;
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_half AS
+SELECT sample_id, group_id, proportion / 2 AS proportion FROM roh_ancestry_mixed;
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_af_mixed AS
+SELECT chrom, pos, ref, alt, list_inner_product([0.2, 0.4], [0.25, 0.75]) AS af
+FROM roh_ancestry_af_forward;
+
+query I
+WITH tuned AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_forward', 'roh_ancestry_mixed', gt_error := 30, samples := 'S1')),
+pooled AS (SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_af_mixed', gt_error := 30, samples := 'S1'))
+SELECT count(*) FROM ((SELECT * FROM tuned EXCEPT ALL SELECT * FROM pooled)
+UNION ALL (SELECT * FROM pooled EXCEPT ALL SELECT * FROM tuned));
+----
+0
+
+query I
+WITH tuned AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_forward', 'roh_ancestry_half', gt_error := 30, samples := 'S1')),
+pooled AS (SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_af_mixed', gt_error := 30, samples := 'S1'))
+SELECT count(*) FROM ((SELECT * FROM tuned EXCEPT ALL SELECT * FROM pooled)
+UNION ALL (SELECT * FROM pooled EXCEPT ALL SELECT * FROM tuned));
+----
+0
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_over_one AS
+SELECT sample_id, group_id, 0.6::DOUBLE AS proportion FROM roh_ancestry_proportions;
+
+statement error
+SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_forward', 'roh_ancestry_over_one', gt_error := 30, samples := 'S1');
+----
+ancestry proportions must sum to more than 0 and at most 1 per sample
+
+# Palindromic (A/T, C/G) sites are kept and oriented by REF like any other site,
+# since reference alleles are taken to be on the forward strand: a reference that
+# includes them (180 of the fixture's 572 sites) gives the segments of an AF table
+# over all sites, and differs from an AF table without them.
+statement ok
+CREATE TEMP TABLE roh_ancestry_reference_all AS
+SELECT chrom AS chromosome, pos AS position, alt AS allele_a, ref AS allele_b,
+       'A' AS group_id, 0.2::DOUBLE AS frequency FROM roh_af
+UNION ALL
+SELECT chrom, pos, alt, ref, 'B', 0.4::DOUBLE FROM roh_af;
+
+statement ok
+CREATE TEMP TABLE roh_ancestry_af_all AS
+SELECT chrom, pos, ref, alt, 0.8::DOUBLE AS af FROM roh_af;
+
+query I
+WITH ancestry AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_all', 'roh_ancestry_proportions', gt_error := 30, samples := 'S1')),
+all_sites AS (SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_af_all', gt_error := 30, samples := 'S1'))
+SELECT count(*) FROM ((SELECT * FROM ancestry EXCEPT ALL SELECT * FROM all_sites)
+UNION ALL (SELECT * FROM all_sites EXCEPT ALL SELECT * FROM ancestry));
+----
+0
+
+query I
+WITH ancestry AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_all', 'roh_ancestry_proportions', gt_error := 30, samples := 'S1')),
+without_palindromes AS (SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_af', gt_error := 30, samples := 'S1'))
+SELECT count(*) > 0 FROM ((SELECT * FROM ancestry EXCEPT ALL SELECT * FROM without_palindromes)
+UNION ALL (SELECT * FROM without_palindromes EXCEPT ALL SELECT * FROM ancestry));
+----
+true
+
+# Non-numeric contigs join like numeric ones: the reference and the VCF share one
+# chromosome key (leading chr removed), so a reference naming the contig chrS or S
+# gives the AF-table result on a VCF whose contig is chrS. A high hw_to_az makes the
+# seven sites yield a run, so a missing frequency would show as a missing run.
+statement ok
+CREATE TEMP TABLE roh_contig_sites AS SELECT DISTINCT CHROM AS chrom, POS AS pos, REF AS ref,
+  ALT[1] AS alt FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.vcf.gz');
+
+statement ok
+CREATE TEMP TABLE roh_contig_af AS SELECT chrom, pos, ref, alt, 0.3::DOUBLE AS af FROM roh_contig_sites;
+
+statement ok
+CREATE TEMP TABLE roh_contig_reference AS
+SELECT chrom AS chromosome, pos AS position, ref AS allele_a, alt AS allele_b, g AS group_id,
+  0.3::DOUBLE AS frequency FROM roh_contig_sites, (VALUES ('A'), ('B')) AS t(g)
+UNION ALL
+SELECT regexp_replace(chrom, '^chr', ''), pos, ref, alt, g || '_bare', 0.3::DOUBLE
+FROM roh_contig_sites, (VALUES ('A'), ('B')) AS t(g);
+
+statement ok
+CREATE TEMP TABLE roh_contig_reference_chr AS
+SELECT * FROM roh_contig_reference WHERE NOT ends_with(group_id, '_bare');
+
+statement ok
+CREATE TEMP TABLE roh_contig_reference_bare AS
+SELECT chromosome, position, allele_a, allele_b, replace(group_id, '_bare', '') AS group_id, frequency
+FROM roh_contig_reference WHERE ends_with(group_id, '_bare');
+
+statement ok
+CREATE TEMP TABLE roh_contig_proportions AS
+SELECT s AS sample_id, g AS group_id, 0.5::DOUBLE AS proportion
+FROM (VALUES ('S1'), ('S2')) AS a(s), (VALUES ('A'), ('B')) AS b(g);
+
+query III
+WITH af AS (SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.vcf.gz',
+  'roh_contig_af', gt_error := 30, hw_to_az := 0.1)),
+chr AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.vcf.gz',
+  'roh_contig_reference_chr', 'roh_contig_proportions', af_clamp := 0, gt_error := 30, hw_to_az := 0.1)),
+bare AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.vcf.gz',
+  'roh_contig_reference_bare', 'roh_contig_proportions', af_clamp := 0, gt_error := 30, hw_to_az := 0.1))
+SELECT (SELECT count(*) FROM af) > 0,
+  (SELECT count(*) FROM ((SELECT * FROM chr EXCEPT ALL SELECT * FROM af) UNION ALL (SELECT * FROM af EXCEPT ALL SELECT * FROM chr))),
+  (SELECT count(*) FROM ((SELECT * FROM bare EXCEPT ALL SELECT * FROM af) UNION ALL (SELECT * FROM af EXCEPT ALL SELECT * FROM bare)));
+----
+true	0	0
+
+# Contig keys are not injective: a reference that names one VCF contig as both chrS and S
+# is rejected, even when the two names hold different positions.
+statement ok
+CREATE TEMP TABLE roh_contig_reference_both AS
+SELECT * FROM roh_contig_reference_chr
+UNION ALL
+SELECT chromosome, position + 1000000, allele_a, allele_b, group_id, frequency
+FROM roh_contig_reference_bare;
+
+statement error
+SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.vcf.gz',
+  'roh_contig_reference_both', 'roh_contig_proportions', af_clamp := 0, gt_error := 30, hw_to_az := 0.1);
+----
+two reference contig names match one VCF contig
+
+# Read-count emissions (duckhts_roh_counts and the counts overload of duckhts_roh_segments)
+# are a DuckHTS extension with no bcftools counterpart. Their oracle is the same read model
+# computed independently in SQL and rounded to phred-scaled PL: the PL path of the kernel
+# must then place exactly the runs of the count path. The data are deterministic: two samples
+# on two chromosomes, 200 sites 25 kb apart with depths 20-40, homozygous over sites 60-139
+# and drawn from Hardy-Weinberg proportions elsewhere, plus a contaminating individual of
+# the same population with its own draws. Expected read counts are rounded, not sampled.
+
+statement ok
+CREATE TEMP TABLE roh_counts_truth AS
+WITH s AS (SELECT smp, chrom, i,
+  0.15 + 0.7 * ((i * 37 + ascii(chrom) * 11) % 100) / 100.0 AS af,
+  ((i * 7919 + ascii(chrom) * 31 + ascii(right(smp, 1)) * 101) % 1000) / 1000.0 AS u1,
+  ((i * 104729 + ascii(chrom) * 17 + ascii(right(smp, 1)) * 53) % 1000) / 1000.0 AS u2,
+  ((i * 1299709 + ascii(chrom) * 7) % 1000) / 1000.0 AS v1,
+  ((i * 15485863 + ascii(chrom) * 3) % 1000) / 1000.0 AS v2,
+  20 + (i * 13) % 21 AS depth
+  FROM (VALUES ('S1'), ('S2')) AS a(smp), (VALUES ('1'), ('2')) AS b(chrom), range(1, 201) AS t(i))
+SELECT smp AS sample_id, chrom, i * 25000 AS pos, af, depth,
+  CASE WHEN i BETWEEN 60 AND 139 THEN 2 * (u1 < af)::INTEGER
+       ELSE (u1 < af)::INTEGER + (u2 < af)::INTEGER END AS g,
+  (v1 < af)::INTEGER + (v2 < af)::INTEGER AS gc
+FROM s;
+
+statement ok
+CREATE MACRO roh_counts_at(alpha, e) AS TABLE
+SELECT sample_id, chrom, pos, af, depth - alt AS ref_count, alt AS alt_count FROM (
+  SELECT *, round(depth * ((1 - alpha) * [e, 0.5, 1 - e][g + 1]
+                           + alpha * [e, 0.5, 1 - e][gc + 1]))::INTEGER AS alt
+  FROM roh_counts_truth);
+
+statement ok
+CREATE MACRO roh_counts_oracle_pl(counts_name, alpha, e) AS TABLE
+WITH ll AS (SELECT *, list_transform([e, 0.5, 1 - e], lambda q:
+    alt_count * ln((1 - alpha) * q + alpha * (af * (1 - e) + (1 - af) * e)) +
+    ref_count * ln(1 - ((1 - alpha) * q + alpha * (af * (1 - e) + (1 - af) * e)))) AS l
+  FROM query_table(counts_name))
+SELECT sample_id, chrom, pos, af,
+  list_transform(l, lambda x: least(255, round(-10 * (x - list_max(l)) / ln(10))::INTEGER)) AS pl
+FROM ll;
+
+statement ok
+CREATE MACRO roh_counts_pl_runs(pl_name) AS TABLE
+SELECT sample_id AS sample, chrom, r.start, r."end", r.n_markers, r.quality FROM (
+  SELECT sample_id, chrom, unnest(duckhts_roh_segments(list(pos ORDER BY pos), list(af ORDER BY pos),
+    list(pl ORDER BY pos), NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9)) AS r
+  FROM query_table(pl_name) GROUP BY sample_id, chrom);
+
+statement ok
+CREATE TEMP TABLE roh_counts_clean AS SELECT * FROM roh_counts_at(0.0, 1e-3);
+
+statement ok
+CREATE TEMP TABLE roh_counts_dirty AS SELECT * FROM roh_counts_at(0.10, 1e-3);
+
+statement ok
+CREATE TEMP TABLE roh_counts_clean_pl AS SELECT * FROM roh_counts_oracle_pl('roh_counts_clean', 0.0, 1e-3);
+
+statement ok
+CREATE TEMP TABLE roh_counts_dirty_pl AS SELECT * FROM roh_counts_oracle_pl('roh_counts_dirty', 0.10, 1e-3);
+
+# Every sample and chromosome has a run, and the count path equals the PL oracle: same
+# coordinates and marker counts, and qualities within 0.05, the only tolerance, which comes
+# from rounding the oracle likelihoods to integer PL and capping them at 255.
+query II
+WITH c AS (SELECT * FROM duckhts_roh_counts('roh_counts_clean')),
+o AS (SELECT * FROM roh_counts_pl_runs('roh_counts_clean_pl'))
+SELECT (SELECT count(DISTINCT (sample, chrom)) FROM c),
+  (SELECT count(*) FROM c FULL JOIN o USING (sample, chrom, start, "end", n_markers)
+   WHERE c.quality IS NULL OR o.quality IS NULL OR abs(c.quality - o.quality) > 0.05);
+----
+4	0
+
+# With 10% contamination the contamination-aware path equals its oracle in the same way.
+query I
+WITH c AS (SELECT * FROM duckhts_roh_counts('roh_counts_dirty', contamination := 0.10)),
+o AS (SELECT * FROM roh_counts_pl_runs('roh_counts_dirty_pl'))
+SELECT count(*) FROM c FULL JOIN o USING (sample, chrom, start, "end", n_markers)
+WHERE c.quality IS NULL OR o.quality IS NULL OR abs(c.quality - o.quality) > 0.05;
+----
+0
+
+# Titration: contaminant reads at homozygous sites look like heterozygous evidence. Without
+# the contamination term they shorten or weaken runs; with it the runs of the uncontaminated
+# data come back.
+query III
+WITH clean AS (SELECT * FROM duckhts_roh_counts('roh_counts_clean')),
+aware AS (SELECT * FROM duckhts_roh_counts('roh_counts_dirty', contamination := 0.10)),
+unaware AS (SELECT * FROM duckhts_roh_counts('roh_counts_dirty'))
+SELECT
+  (SELECT count(*) FROM ((SELECT sample, chrom, start, "end", n_markers FROM clean
+     EXCEPT ALL SELECT sample, chrom, start, "end", n_markers FROM aware)
+   UNION ALL (SELECT sample, chrom, start, "end", n_markers FROM aware
+     EXCEPT ALL SELECT sample, chrom, start, "end", n_markers FROM clean))),
+  (SELECT sum(length) FROM unaware) < (SELECT sum(length) FROM aware),
+  (SELECT bool_and(u.quality < a.quality) FROM unaware AS u JOIN aware AS a USING (sample, chrom));
+----
+0	true	true
+
+# Rows without usable evidence are skipped, not errors: NULL or zero-depth counts, and a
+# NULL, NaN or zero frequency. Adding such rows leaves the runs unchanged.
+statement ok
+CREATE TEMP TABLE roh_counts_with_skips AS
+SELECT * FROM roh_counts_clean
+UNION ALL SELECT 'S1', '1', 30012, 0.4, NULL, 5
+UNION ALL SELECT 'S1', '1', 30013, 0.4, 0, 0
+UNION ALL SELECT 'S1', '1', 30014, NULL, 10, 10
+UNION ALL SELECT 'S1', '1', 30015, 'NaN'::DOUBLE, 10, 10
+UNION ALL SELECT 'S1', '1', 30016, 0.0, 10, 10;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM duckhts_roh_counts('roh_counts_with_skips')
+  EXCEPT ALL SELECT * FROM duckhts_roh_counts('roh_counts_clean'))
+UNION ALL (SELECT * FROM duckhts_roh_counts('roh_counts_clean')
+  EXCEPT ALL SELECT * FROM duckhts_roh_counts('roh_counts_with_skips')));
+----
+0
+
+# The genetic-map overload decodes only chromosomes the map covers.
+statement ok
+CREATE TEMP TABLE roh_counts_map AS
+SELECT '1' AS chrom, p AS pos, p / 1e6 AS cm FROM range(1, 5000002, 500000) AS t(p);
+
+query I
+SELECT list_sort(list(DISTINCT chrom)) FROM duckhts_roh_counts('roh_counts_clean', 'roh_counts_map');
+----
+[1]
+
+# Invalid inputs are errors.
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_clean', seq_error := 0.0);
+----
+seq_error must be in (0, 0.5)
+
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_clean', seq_error := 0.5);
+----
+seq_error must be in (0, 0.5)
+
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_clean', contamination := 1.0);
+----
+contamination must be in [0, 1)
+
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_clean', contamination := -0.01);
+----
+contamination must be in [0, 1)
+
+statement error
+SELECT duckhts_roh_segments([100, 200], [0.3, 0.3], [30, -1], [0, 0], 1e-3, 0.0,
+  NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+read counts must be at least 0
+
+# A negative count is an error even when the other count of its site is NULL.
+statement error
+SELECT duckhts_roh_segments([100, 200], [0.3, 0.3], [30, -1], [0, NULL], 1e-3, 0.0,
+  NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+read counts must be at least 0 (entry 2 other-allele count is -1)
+
+statement error
+SELECT duckhts_roh_segments([100, 200], [0.3, 0.3], [30, NULL], [0, -1], 1e-3, 0.0,
+  NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+read counts must be at least 0 (entry 2 counted-allele count is -1)
+
+statement error
+SELECT duckhts_roh_segments([100, 200], [0.3, 0.3], [30, 30], [0], 1e-3, 0.0,
+  NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+positions and counted-allele count lists differ in length
+
+# A deep site whose frequency is 1 allows only the two-copy genotype, whose likelihood under
+# 110 reads of the other allele would underflow to zero; the likelihood floor (the PL path's
+# cap of 255) keeps the site uninformative instead of zeroing both emissions. The run over the
+# following homozygous sites is found with finite quality, as without the site.
+query III
+WITH with_site AS (SELECT unnest(duckhts_roh_segments(
+  [100] || list_transform(range(1, 121), lambda i: 100 + i * 25000),
+  [1.0] || list_transform(range(1, 121), lambda i: 0.5),
+  [110] || list_transform(range(1, 121), lambda i: 30),
+  [0] || list_transform(range(1, 121), lambda i: 0),
+  1e-3, 0.0, NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9)) AS r),
+without_site AS (SELECT unnest(duckhts_roh_segments(
+  list_transform(range(1, 121), lambda i: 100 + i * 25000),
+  list_transform(range(1, 121), lambda i: 0.5),
+  list_transform(range(1, 121), lambda i: 30),
+  list_transform(range(1, 121), lambda i: 0),
+  1e-3, 0.0, NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9)) AS r)
+SELECT (SELECT count(*) FROM with_site), (SELECT bool_and(isfinite(r.quality)) FROM with_site),
+  (SELECT max(r."end") FROM with_site) = (SELECT max(r."end") FROM without_site);
+----
+1	true	true
+
+# A seq_error so small that 1 - seq_error rounds to 1 keeps finite likelihoods: the
+# complementary read probability is formed without cancellation and empty terms are skipped.
+query II
+WITH s AS (SELECT unnest(duckhts_roh_segments(
+  list_transform(range(1, 121), lambda i: i * 25000), list_transform(range(1, 121), lambda i: 0.4),
+  list_transform(range(1, 121), lambda i: 0), list_transform(range(1, 121), lambda i: 30),
+  1e-18, 0.0, NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9)) AS r)
+SELECT count(*), bool_and(isfinite(r.quality)) FROM s;
+----
+1	true
+
+# A NULL model parameter makes that row's result NULL, as for the other overloads.
+query I
+SELECT duckhts_roh_segments([100, 200], [0.3, 0.3], [30, 30], [0, 0], NULL::DOUBLE, 0.0,
+  NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9) IS NULL;
+----
+true

@@ -1,0 +1,4 @@
+"rule","min_called_genotypes","intervals","children","truth_bp","same_intervals_as_amended"
+"preregistered",0,102,92,142444167,FALSE
+"amended",1,23,18,39200000,TRUE
+"sensitivity",50,23,18,39200000,TRUE

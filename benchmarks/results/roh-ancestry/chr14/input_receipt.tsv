@@ -1,0 +1,3 @@
+artifact	locator	remote_last_modified	remote_etag	samples	records	sha256	status
+source_vcf	https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20201028_3202_phased/CCDG_14151_B01_GRM_WGS_2020-08-05_chr14.filtered.shapeit2-duohmm-phased.vcf.gz	Thu, 29 Oct 2020 17:09:12 GMT	"43049970-5b2d256c23e00"	3202			remote metadata recorded; streamed by bcftools
+children_bcf	derived:chr14_source+pedigree			377	1188783	167df8da0f3b365fc84fb8328ddb4eecf82c430375c824de15d31d0be1f7fcf5	bcftools 1.23.1-70-g6dbd8fef; biallelic SNVs; INFO/AF fields retained
