@@ -55,24 +55,27 @@ chr20 windows were reused and the 102 retained chr20 intervals match the
 prior result exactly. Genome-wide q now contains 7,917 estimates (377
 children × 21 groups), all with `status=ok`; each child contributed
 4,883,749 matched loci and the `cor_pred` range is 0.643847–0.719384.
-The genome-wide comparison is in progress. The arms run once each over
-all autosomes; the pooled, AFR, AMR and EAS arms are complete, and the
-EUR and ancestry arms are running. The arms are deterministic: the three
+The genome-wide comparison is incomplete. The arms run once each over
+all autosomes. The pooled, AFR, AMR, EUR and EAS arms are complete. The
+ancestry arm, run with the previous reference stage, ran out of memory
+in its first batch: eight children over all 22 autosomes in one query,
+with a 12 GB DuckDB limit. It will be rerun one chromosome per query
+with the shipped macro (#329). The arms are deterministic: the three
 chr20 repetitions gave identical segments, and the summary requires any
 further genome-wide repetition to match the first. The genome-wide
-results and criterion will be added to this report when the remaining
-arms finish. The population child counts match the declared
-expectations: ACB 20, ASW 13, CLM 35, MXL 32, PEL 35, PUR 35, YRI 56,
-ESN 43, CEU 57 and CHS 51. The chr20 source VCF was copied from the
-supplied local file after its checksum was verified; its remote metadata
-is recorded above. bcftools reported `1.23.1-70-g6dbd8fef`; the source
-header had 3,202 samples and the children BCF has 377. All arms ran on
-extension builds of the `src` tree of revision `86f53052`; the later
-restructuring of `duckhts_roh_ancestry`’s reference stage reproduces the
-chr20 ancestry segments exactly, so the evaluated outputs are those of
-the shipped macro. The remote chr1 input was streamed through bcftools;
-its ETag, Last-Modified value, record count and output SHA-256 are
-recorded in [its receipt](results/roh-ancestry/chr1/input_receipt.tsv).
+results and criterion will be added to this report once that arm
+completes. The population child counts match the declared expectations:
+ACB 20, ASW 13, CLM 35, MXL 32, PEL 35, PUR 35, YRI 56, ESN 43, CEU 57
+and CHS 51. The chr20 source VCF was copied from the supplied local file
+after its checksum was verified; its remote metadata is recorded above.
+bcftools reported `1.23.1-70-g6dbd8fef`; the source header had 3,202
+samples and the children BCF has 377. All arms ran on extension builds
+of the `src` tree of revision `86f53052`; the later restructuring of
+`duckhts_roh_ancestry`’s reference stage reproduces the chr20 ancestry
+segments exactly, so the evaluated outputs are those of the shipped
+macro. The remote chr1 input was streamed through bcftools; its ETag,
+Last-Modified value, record count and output SHA-256 are recorded in
+[its receipt](results/roh-ancestry/chr1/input_receipt.tsv).
 
 ## Autosome BCF staging
 
