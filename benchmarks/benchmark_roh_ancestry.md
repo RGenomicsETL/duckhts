@@ -917,7 +917,13 @@ is shown below.
 Each value is from a fresh R process using four DuckDB threads. The
 ancestry arm used 16-child batches after the 64-child batch exceeded the
 12 GB DuckDB memory limit; other arms used 64-child batches.
-Per-replicate runtime and peak resident memory are reported below.
+Per-replicate runtime and peak resident memory are reported below. The
+ancestry rows were measured on the shipped `duckhts_roh_ancestry`, after
+its reference-stage restructuring. The pooled and single-population rows
+use `duckhts_roh_af_table`, which this work does not change, and were
+measured on the build of the `src` tree of revision `86f53052`. The
+1×/2×/4× scaling evidence and memory budget for both macros are in
+`benchmark_roh_scaling.md`, added with the read-count emissions (#331).
 
 | chromosome | arm        | repetition | elapsed_seconds | peak_rss_gib | threads | batch_size |
 |-----------:|:-----------|-----------:|----------------:|-------------:|--------:|-----------:|
@@ -936,9 +942,9 @@ Per-replicate runtime and peak resident memory are reported below.
 |         20 | single_EAS |          1 |           17.08 |        10.14 |       4 |         64 |
 |         20 | single_EAS |          2 |           17.37 |        10.16 |       4 |         64 |
 |         20 | single_EAS |          3 |           17.38 |        10.12 |       4 |         64 |
-|         20 | ancestry   |          1 |          208.83 |         4.58 |       4 |         16 |
-|         20 | ancestry   |          2 |          208.96 |         4.58 |       4 |         16 |
-|         20 | ancestry   |          3 |          208.90 |         4.54 |       4 |         16 |
+|         20 | ancestry   |          1 |          204.28 |         3.98 |       4 |         16 |
+|         20 | ancestry   |          2 |          203.59 |         3.95 |       4 |         16 |
+|         20 | ancestry   |          3 |          202.34 |         4.02 |       4 |         16 |
 
 ## Reproducing the evaluation
 
