@@ -1382,7 +1382,7 @@ table(sample VARCHAR, chrom VARCHAR, start BIGINT, "end" BIGINT, length BIGINT, 
 
 ### Inputs
 
-reference_table is a long relation with chromosome, position (one-based), allele_a, allele_b, group_id and frequency (frequency of allele_b). proportions_table has sample_id, group_id and proportion. Both relations must use exactly the same group IDs; every called VCF sample needs proportions. Chromosome names match after removing a leading chr prefix, and numeric names compare as integers, so chr1, 1 and 01 match, as do chrX and X. Each site must have one allele orientation across its group rows, and exactly one row per group.
+reference_table is a long relation with chromosome, position (one-based), allele_a, allele_b, group_id and frequency (frequency of allele_b). proportions_table has sample_id, group_id and proportion. Both relations must use exactly the same group IDs; every called VCF sample needs proportions. Contig names are matched with duckhts_contig_key(), resolved once per distinct name. It removes one leading chr case-insensitively, writes M/MT as MT and uppercases X and Y, so chr1 and 1 match, as do chrX and X. Accessions, patches and numeric sex chromosomes are not mapped. Each site must have one allele orientation across its group rows, and exactly one row per group.
 
 ### Frequency model
 

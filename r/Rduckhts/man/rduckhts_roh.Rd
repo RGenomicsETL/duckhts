@@ -94,9 +94,10 @@ uses that AF; reversed alleles use `1 - AF`. Reference alleles must be on
 the forward strand of the VCF's assembly, as in a FASTA-anchored panel; no
 strand flip is attempted, so palindromic (A/T, C/G) sites are oriented by REF
 like any other, and a site whose alleles match neither order is not used.
-Chromosome names match after removing a
-leading `chr`, and numeric names compare as integers (`chr1`, `1` and `01`
-match, as do `chrX` and `X`). `af_clamp` limits nonzero-clamp frequencies to
+Contig names are matched with `duckhts_contig_key()` once per distinct name
+(one leading `chr` removed, M/MT written as MT, X and Y uppercased), so
+`chr1` and `1` match, as do `chrX` and `X`; accessions, patches and numeric
+sex chromosomes are not mapped. `af_clamp` limits nonzero-clamp frequencies to
 `[af_clamp, 1-af_clamp]`; the default keeps zero population frequencies from
 being treated as impossible, and zero disables clamping. Only called sites
 are frequency-weighted. Supply exactly one frequency source: `af_tag`,
