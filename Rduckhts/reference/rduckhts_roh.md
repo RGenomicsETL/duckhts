@@ -25,7 +25,10 @@ rduckhts_roh(
   rec_rate = NULL,
   samples = NULL,
   table_name = NULL,
-  overwrite = FALSE
+  overwrite = FALSE,
+  reference_table = NULL,
+  proportions_table = NULL,
+  af_clamp = 0.001
 )
 ```
 
@@ -45,8 +48,8 @@ rduckhts_roh(
 
 - af_table:
 
-  Name of a table or view of allele frequencies, instead of \`af_tag\`.
-  Exactly one of the two is required.
+  Name of a table or view of site allele frequencies, instead of
+  \`af_tag\` or the ancestry inputs.
 
 - genetic_map:
 
@@ -78,6 +81,22 @@ rduckhts_roh(
 
   Whether an existing output table may be replaced.
 
+- reference_table:
+
+  Long-format reference with chromosome, position, allele_a, allele_b,
+  group_id and frequency columns.
+
+- proportions_table:
+
+  Long-format sample ancestry proportions with sample_id, group_id and
+  proportion columns. Its group set must exactly match
+  \`reference_table\`.
+
+- af_clamp:
+
+  Clamp ancestry-tuned frequencies to \`\[af_clamp, 1-af_clamp\]\`; zero
+  disables clamping. Must be in \`\[0, 0.5)\`.
+
 ## Value
 
 A data frame (or invisible \`TRUE\` when \`table_name\` is given) with
@@ -94,6 +113,31 @@ which must be declared \`Type=Float,Number=A\`) or from a relation
 position, REF and its ALT alleles joined by commas. Sites without a
 usable frequency (absent, missing or exactly 0) are skipped, as are
 records with more than one ALT or none.
+
+Alternatively, \`reference_table\` and \`proportions_table\` select the
+ancestry-tuned path. The reference is long-format with columns
+\`chromosome\`, \`position\`, \`allele_a\`, \`allele_b\`, \`group_id\`
+and \`frequency\` (frequency of \`allele_b\`); proportions have
+\`sample_id\`, \`group_id\` and \`proportion\`. Their group sets must
+match exactly, and each VCF sample must have a proportions row for every
+group. Per-site AF is the sum of each group's frequency weighted by the
+sample's proportion, with the proportions divided by their sum (which
+must be above 0 and at most 1, so \`sum_to_one = FALSE\` results and
+rounded proportions are accepted). REF=\`allele_a\`, ALT=\`allele_b\`
+uses that AF; reversed alleles use \`1 - AF\`. Reference alleles must be
+on the forward strand of the VCF's assembly, as in a FASTA-anchored
+panel; no strand flip is attempted, so palindromic (A/T, C/G) sites are
+oriented by REF like any other, and a site whose alleles match neither
+order is not used. Contig names are matched with
+\`duckhts_contig_key()\` once per distinct name (one leading \`chr\`
+removed, M/MT written as MT, X and Y uppercased), so \`chr1\` and \`1\`
+match, as do \`chrX\` and \`X\`; accessions, patches and numeric sex
+chromosomes are not mapped. \`af_clamp\` limits nonzero-clamp
+frequencies to \`\[af_clamp, 1-af_clamp\]\`; the default keeps zero
+population frequencies from being treated as impossible, and zero
+disables clamping. Only called sites are frequency-weighted. Supply
+exactly one frequency source: \`af_tag\`, \`af_table\`, or both ancestry
+relations.
 
 Genotype evidence is FORMAT/PL unless \`gt_error\` is given, which uses
 the diploid GT calls with that phred error (\`-G\`) and needs no PL.
@@ -113,9 +157,9 @@ path <- system.file("extdata", "roh_fixture.vcf.gz", package = "Rduckhts")
 roh <- rduckhts_roh(con, path, af_tag = "AF")
 roh[order(roh$sample, roh$chrom, roh$start), ]
 #>   sample chrom   start     end  length n_markers  quality
-#> 1     S1  chr1 1042655 2396807 1354153       113 31.96439
+#> 2     S1  chr1 1042655 2396807 1354153       113 31.96439
 #> 4     S2  chr2  693881 1722963 1029083       114 32.91658
-#> 3     S4  chr1 1876100 3319712 1443613       131 44.83104
-#> 2     S4  chr2   23420 2400223 2376804       239 46.64399
+#> 1     S4  chr1 1876100 3319712 1443613       131 44.83104
+#> 3     S4  chr2   23420 2400223 2376804       239 46.64399
 DBI::dbDisconnect(con, shutdown = TRUE)
 ```

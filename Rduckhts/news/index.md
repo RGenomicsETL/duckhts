@@ -1,9 +1,21 @@
 # Changelog
 
-## Rduckhts 1.5.2.9009.0.1.5
+## Rduckhts 1.5.2.9010.0.1.5
 
 Preview of 2.0.0, still in development. The sections below describe what
 2.0.0 will contain.
+
+- [`rduckhts_roh()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_roh.md)
+  accepts long ancestry reference and sample-proportion relations to
+  calculate ancestry-weighted allele frequencies, with optional
+  clamping.
+
+- Added
+  [`rduckhts_roh_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_roh_counts.md):
+  runs of homozygosity from a relation of allele read counts (for
+  example Somalier site counts from a BAM or CRAM), with a per-read
+  sequencing error and an optional contamination fraction
+  ([\#318](https://github.com/RGenomicsETL/duckhts/issues/318)).
 
 ### Breaking changes
 

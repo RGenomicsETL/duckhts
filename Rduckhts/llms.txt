@@ -354,6 +354,8 @@ builds on.
   : Create BAM Pileup Table
 - [`rduckhts_roh()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_roh.md)
   : Find Runs of Homozygosity
+- [`rduckhts_roh_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_roh_counts.md)
+  : Find Runs of Homozygosity from Read Counts
 - [`rduckhts_samtools_idxstats()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_samtools_idxstats.md)
   : samtools idxstats-Compatible Alignment Summary
 - [`rduckhts_score()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_score.md)
