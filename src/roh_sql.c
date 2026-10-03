@@ -154,6 +154,12 @@ static const char ancestry_validations[] =
     "__dht_group_guard AS (SELECT CASE "
     "WHEN af_clamp IS NULL OR NOT isfinite(af_clamp) OR af_clamp < 0 OR af_clamp >= 0.5 "
     "THEN error('af_clamp must be 0 or in (0, 0.5)') "
+    /* duckhts_contig_key() is not injective (1 and chr1 share a key), so each key
+     * must name one contig on each side, or one contig would be decoded twice. */
+    "WHEN EXISTS (SELECT 1 FROM __dht_contig_map GROUP BY chrom HAVING count(*) > 1) "
+    "THEN error('two reference contig names match one VCF contig; use one name per contig') "
+    "WHEN EXISTS (SELECT 1 FROM __dht_contig_map GROUP BY contig HAVING count(*) > 1) "
+    "THEN error('two VCF contig names match one reference contig; use one name per contig') "
     "WHEN (SELECT list(group_id ORDER BY group_id) FROM __dht_groups) IS DISTINCT FROM "
     "(SELECT list(group_id ORDER BY group_id) FROM "
     "(SELECT DISTINCT group_id FROM __dht_prop_rows WHERE group_id IS NOT NULL)) "

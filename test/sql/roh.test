@@ -897,3 +897,18 @@ SELECT (SELECT count(*) FROM af) > 0,
   (SELECT count(*) FROM ((SELECT * FROM bare EXCEPT ALL SELECT * FROM af) UNION ALL (SELECT * FROM af EXCEPT ALL SELECT * FROM bare)));
 ----
 true	0	0
+
+# Contig keys are not injective: a reference that names one VCF contig as both chrS and S
+# is rejected, even when the two names hold different positions.
+statement ok
+CREATE TEMP TABLE roh_contig_reference_both AS
+SELECT * FROM roh_contig_reference_chr
+UNION ALL
+SELECT chromosome, position + 1000000, allele_a, allele_b, group_id, frequency
+FROM roh_contig_reference_bare;
+
+statement error
+SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.vcf.gz',
+  'roh_contig_reference_both', 'roh_contig_proportions', af_clamp := 0, gt_error := 30, hw_to_az := 0.1);
+----
+two reference contig names match one VCF contig
