@@ -71,7 +71,11 @@ heterozygous evidence, which shortens runs and lowers FROH.
 Sites with no reads, a NULL count, or an `af` that is NULL, NaN or 0 are
 skipped; a repeated position keeps one row. Negative counts are an error.
 The model assumes biallelic sites, independent reads (no duplicate or
-strand modelling) and one error rate for all reads. The contamination
+strand modelling) and one error rate for all reads. A heterozygote is assumed
+to show each allele in half its reads; reference-biased mapping makes the
+other allele rarer, more so where flanking heterozygosity is high, so such
+heterozygotes can look homozygous and lengthen runs in divergent regions.
+The contamination
 fraction is supplied by the caller, for example from a separate estimate;
 it is not estimated here. A contaminant from a different population than
 `af` describes is approximated by `af`.

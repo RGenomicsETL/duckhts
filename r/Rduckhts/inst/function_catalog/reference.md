@@ -1428,7 +1428,7 @@ Sites with no reads, a NULL count, or an af that is NULL, NaN or 0 are skipped; 
 
 ### Limitations
 
-Biallelic sites only; one error rate for all reads, with no base- or mapping-quality, duplicate or strand modelling. The contamination fraction is supplied, not estimated, and a contaminant from a different population than af describes is approximated by af.
+Biallelic sites only; one error rate for all reads, with no base- or mapping-quality, duplicate or strand modelling. A heterozygote is assumed to show each allele in half its reads, but reference-biased mapping makes the other allele rarer, more so where flanking heterozygosity is high; such heterozygotes can look homozygous and lengthen runs in divergent regions. The contamination fraction is supplied, not estimated, and a contaminant from a different population than af describes is approximated by af.
 
 ### Otherwise
 

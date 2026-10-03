@@ -160,7 +160,14 @@ arms. The fixed 100 kb grid makes eligibility depend on where
 heterozygotes fall, and the 90%-overlap rule credits a short call inside
 truth more than a longer call that crosses a run’s grid-defined end.
 Shifted-grid and base-level sensitivity analyses are not part of this
-report.
+report. Because it uses no allele frequencies, the truth marks runs of
+low heterozygosity rather than autozygosity: population-common
+homozygous haplotypes, for example after selective sweeps, regions of
+low mutation rate or diversity, and the lower genome-wide heterozygosity
+of bottlenecked populations also pass it. These differ between
+populations, so truth length and FROH are not comparable across
+populations; the criterion compares arms within each population against
+the same truth, so its comparisons are not affected.
 
 The pooled and single-population comparisons began only after the chr20
 truth distribution was reviewed.
