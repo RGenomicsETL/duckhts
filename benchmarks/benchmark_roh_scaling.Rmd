@@ -11,7 +11,9 @@ runs-of-homozygosity entry points added for #318:
 
 - `duckhts_roh_counts` over a relation of read counts. Its growth dimensions are
   the sites per sample and chromosome (the length of one kernel list) and the
-  number of samples.
+  number of samples. Synthetic counts give the 1×/2×/4× series. A real public
+  workload adds read counts from three 1000 Genomes 30× CRAMs at the 108,757
+  chr20 sites of the ROH ancestry evaluation, decoded for 1, 2 and 3 samples.
 - `duckhts_roh_ancestry` over the registered chr20 children BCF of the ROH
   ancestry evaluation (849,143 records). It is measured along three series:
   - the number of samples decoded together (8, 16, 32) with the full reference;
@@ -30,11 +32,17 @@ at four threads, run in an order that alternates sizes. Each query reduces the
 runs it returns to a count and a total length, so the macro's output is
 consumed.
 
-The read counts are synthetic and deterministic. They are generated at render
+The synthetic read counts are deterministic. They are generated at render
 time into a temporary directory, which is untimed staging. Each sample has a
 2,000-site homozygous stretch every 10,000 sites over Hardy-Weinberg
 background, with genotypes drawn at each site's frequency and 30 reads per site,
-so every input yields runs. The ancestry
+so every input yields runs. The real counts are registry artifacts
+`roh_counts_chr20_na18507`, `roh_counts_chr20_hg00403` and
+`roh_counts_chr20_hg00188`: `duckhts_somalier_bam_counts` at the chr20
+evaluation sites of the registered public CRAMs, read by range requests, with
+MAPQ ≥ 20, base quality ≥ 13 and mate-overlap suppression
+(`benchmarks/roh_counts_stage.R`). Each is checked against its registered row
+count and counts digest before anything is measured. The ancestry
 inputs are registry artifacts `roh_ancestry_chr20_children_bcf`,
 `roh_ancestry_chr20_reference_long` and `roh_ancestry_chr20_q`. Their samples
 are the first 8, 16 or 32 sample IDs of the registered proportions, sorted.
@@ -155,6 +163,30 @@ for (k in seq_len(nrow(counts_inputs))) {
   stopifnot(system2(duckdb_cli, "-batch", input = generate, stdout = FALSE) == 0L)
 }
 
+# Real counts: registered artifacts, checked against their registered identity.
+source("benchmarks/roh_counts_stage.R")
+real_ids <- c("roh_counts_chr20_na18507", "roh_counts_chr20_hg00403", "roh_counts_chr20_hg00188")
+real_paths <- vapply(real_ids, duckhtsbench::duckhts_bench_artifact_path, character(1L))
+identity_con <- DBI::dbConnect(duckdb::duckdb(shared_home = FALSE))
+for (k in seq_along(real_ids)) {
+  registered <- duckhtsbench:::duckhts_bench_identity_fields(
+    duckhtsbench::duckhts_bench_registry()$supplier_identity[
+      match(real_ids[[k]], duckhtsbench::duckhts_bench_registry()$id)])
+  observed_identity <- roh_counts_identity(identity_con, real_paths[[k]])
+  stopifnot(observed_identity$rows == as.numeric(registered[["rows"]]),
+            identical(observed_identity$counts_sha256, registered[["counts_sha256"]]))
+}
+real_rows <- as.numeric(registered[["rows"]])
+DBI::dbDisconnect(identity_con, shutdown = TRUE)
+real_inputs <- data.frame(dimension = "real_samples", scale = 1:3, samples = 1:3,
+                          sites = real_rows, stringsAsFactors = FALSE)
+real_inputs$rows <- real_inputs$samples * real_inputs$sites
+real_inputs$source_sql <- vapply(real_inputs$samples, function(n) sprintf("read_parquet([%s])",
+  paste(vapply(real_paths[seq_len(n)], quote_literal, character(1L)), collapse = ", ")), character(1L))
+counts_inputs$source_sql <- sprintf("read_parquet(%s)", vapply(counts_inputs$path, quote_literal, character(1L)))
+counts_inputs <- rbind(counts_inputs[c("dimension", "scale", "samples", "sites", "rows", "source_sql")],
+                       real_inputs)
+
 # A fixed, reproducible subset: the registered proportions' sample IDs, sorted.
 children <- sort(unique(utils::read.csv(q_path, stringsAsFactors = FALSE)$sample_id))
 stopifnot(length(children) >= 32L)
@@ -203,11 +235,10 @@ ancestry_observations <- list()
 for (repetition in 1:3) {
   order <- if (repetition %% 2L == 1L) 1:3 else 3:1
   for (threads in c(1L, 4L)) {
-    for (dimension in c("sites", "samples")) {
+    for (dimension in c("sites", "samples", "real_samples")) {
       for (scale_index in order) {
         k <- which(counts_inputs$dimension == dimension)[[scale_index]]
-        setup <- sprintf("CREATE TEMP VIEW c AS SELECT * FROM read_parquet(%s);",
-                         quote_literal(counts_inputs$path[[k]]))
+        setup <- sprintf("CREATE TEMP VIEW c AS SELECT * FROM %s;", counts_inputs$source_sql[[k]])
         observed <- run_fresh(setup, counts_query, threads)
         observations[[length(observations) + 1L]] <- data.frame(
           macro = "duckhts_roh_counts", dimension = dimension, scale = counts_inputs$scale[[k]],
@@ -263,7 +294,14 @@ summary <- do.call(rbind, lapply(cells, function(cell) {
 }))
 summary <- summary[order(summary$macro, summary$dimension, summary$threads, summary$scale), ]
 rownames(summary) <- NULL
-exponents <- do.call(rbind, lapply(split(summary, list(summary$macro, summary$dimension, summary$threads), drop = TRUE),
+real_cell <- function(n) {
+  cell <- summary[summary$dimension == "real_samples" & summary$threads == 1L & summary$scale == n, ]
+  stopifnot(nrow(cell) == 1L)
+  cell
+}
+# The doubling series only: the real series grows by one sample at a time.
+doubling <- summary[summary$dimension != "real_samples", ]
+exponents <- do.call(rbind, lapply(split(doubling, list(doubling$macro, doubling$dimension, doubling$threads), drop = TRUE),
   function(s) {
     s <- s[order(s$scale), ]
     data.frame(macro = s$macro[[1L]], dimension = s$dimension[[1L]], threads = s$threads[[1L]],
@@ -291,8 +329,15 @@ knitr::kable(exponents, digits = 3)
 ## Findings
 
 `duckhts_roh_counts` stays within its declared budget at every size and
-thread count, and the render enforces that. Its one-thread 1× runs are under
-the 5-second floor, so it gets a memory verdict, not a timing verdict.
+thread count, synthetic and real, and the render enforces that. Its one-thread
+1× runs are under the 5-second floor, so it gets a memory verdict, not a timing
+verdict. On the real workload, one thread decodes one sample's 108,757 chr20
+sites in `r round(real_cell(1)$median_seconds, 3)` s at `r real_cell(1)$median_rss_mib` MiB
+peak RSS and three samples in `r round(real_cell(3)$median_seconds, 3)` s at
+`r real_cell(3)$median_rss_mib` MiB. The operating scale this report supports
+is what it measures: per-chromosome lists of up to 4 million synthetic sites,
+up to 32 synthetic samples, and three real 30× samples at 108,757 sites;
+larger panels and cohorts are not measured here.
 
 `duckhts_roh_ancestry` exceeds its declared model. Memory grows with the number of samples decoded together, because the per-(sample, chromosome) list aggregate keeps every sample's site list until the BCF scan ends, and DuckDB's list-aggregate state costs several times the 28 bytes of struct data per element. The reference stage adds a fixed cost that grows with reference rows (see the reference series). `duckhts_roh` and `duckhts_roh_af_table` share the list stage and are already on `main` (#323): the ancestry evaluation's eight-child, 21-autosome queries peaked at 16.5 GB.
 
