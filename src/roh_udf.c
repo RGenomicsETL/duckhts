@@ -329,16 +329,24 @@ static int decode_row(duckdb_function_info info, const roh_args_t *args, idx_t r
         } else if (counts) {
             idx_t at = ev_offset + i;
             idx_t counted_at = counted_offset + i;
-            usable = element_valid(evidence.child_validity, at) &&
-                     element_valid(counted.child_validity, counted_at);
+            bool other_valid = element_valid(evidence.child_validity, at);
+            bool counted_valid = element_valid(counted.child_validity, counted_at);
+            /* Each count present is checked on its own, so a negative count is
+             * an error even when the other count of its site is NULL. */
+            if (other_valid && flat[at] < 0) {
+                roh_error(info, "read counts must be at least 0 (entry %llu other-allele count is %d)",
+                          (unsigned long long)(i + 1), flat[at]);
+                return 0;
+            }
+            if (counted_valid && counted_values[counted_at] < 0) {
+                roh_error(info, "read counts must be at least 0 (entry %llu counted-allele count is %d)",
+                          (unsigned long long)(i + 1), counted_values[counted_at]);
+                return 0;
+            }
+            usable = other_valid && counted_valid;
             if (usable) {
                 int32_t other_count = flat[at];
                 int32_t counted_count = counted_values[counted_at];
-                if (other_count < 0 || counted_count < 0) {
-                    roh_error(info, "read counts must be at least 0 (entry %llu is %d, %d)",
-                              (unsigned long long)(i + 1), other_count, counted_count);
-                    return 0;
-                }
                 /* The read model needs the site's frequency; sites without a
                  * usable one are skipped below before the emission is used. */
                 usable = has_af && !isnan(alt_freq) && alt_freq > 0 &&

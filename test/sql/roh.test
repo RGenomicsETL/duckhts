@@ -1067,6 +1067,19 @@ SELECT duckhts_roh_segments([100, 200], [0.3, 0.3], [30, -1], [0, 0], 1e-3, 0.0,
 ----
 read counts must be at least 0
 
+# A negative count is an error even when the other count of its site is NULL.
+statement error
+SELECT duckhts_roh_segments([100, 200], [0.3, 0.3], [30, -1], [0, NULL], 1e-3, 0.0,
+  NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+read counts must be at least 0 (entry 2 other-allele count is -1)
+
+statement error
+SELECT duckhts_roh_segments([100, 200], [0.3, 0.3], [30, NULL], [0, -1], 1e-3, 0.0,
+  NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+read counts must be at least 0 (entry 2 counted-allele count is -1)
+
 statement error
 SELECT duckhts_roh_segments([100, 200], [0.3, 0.3], [30, 30], [0], 1e-3, 0.0,
   NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
