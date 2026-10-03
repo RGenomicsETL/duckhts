@@ -89,7 +89,10 @@ static const char from_lists_with_map[] =
 
 /* One chromosome key for the reference and the VCF: a leading "chr" is
  * removed and a numeric name is written as an integer, so chr1, 1 and 01 meet,
- * as do chrX and X. Both sides must use this same expression. */
+ * as do chrX and X. Both sides must use this same expression. It is evaluated
+ * on reference rows and distinct called sites only; the reference keeps each
+ * site's VCF spelling (raw_chrom), so per-sample calls join on raw CHROM
+ * without a per-row string transformation. */
 #define ROH_CHROM_KEY(expr) \
     "coalesce(try_cast(regexp_replace(" expr ", '^chr', '') AS INTEGER)::VARCHAR, " \
     "regexp_replace(" expr ", '^chr', ''))"
@@ -112,11 +115,11 @@ static const char ancestry_sites[] =
     "FROM (SELECT DISTINCT group_id FROM __dht_ref_rows WHERE group_id IS NOT NULL)), "
     /* A sites-only scan finds the reference sites to pivot, so the per-sample
      * calls stream into the lists instead of being held for reuse. */
-    "__dht_vcf_sites AS (SELECT DISTINCT " ROH_CHROM_KEY("CHROM") " AS chrom, "
+    "__dht_vcf_sites AS (SELECT DISTINCT CHROM AS raw_chrom, " ROH_CHROM_KEY("CHROM") " AS chrom, "
     "POS AS pos, REF AS ref, ALT[1] AS alt "
     "FROM read_bcf(path, decode_error_policy := 'error') " ROH_ALT_FILTER "), "
     "__dht_calls AS NOT MATERIALIZED (SELECT CHROM AS chrom, "
-    ROH_CHROM_KEY("CHROM") " AS chrom_key, POS AS pos, REF AS ref, "
+    "POS AS pos, REF AS ref, "
     "ALT[1] AS alt, SAMPLE_ID AS smp, " ROH_EVIDENCE " AS evidence " ROH_RECORDS "), ";
 
 /* Reference alleles are taken to be on the forward strand of the VCF's
@@ -134,7 +137,7 @@ static const char ancestry_sites[] =
  * frequencies are valid and the rows share one orientation. Every per-site
  * check reads that site-level relation instead of the long rows. */
 static const char ancestry_validations[] =
-    "__dht_ref AS (SELECT r.chrom, r.pos, any_value(r.allele_a) AS allele_a, "
+    "__dht_ref AS (SELECT c.raw_chrom, r.pos, any_value(r.allele_a) AS allele_a, "
     "any_value(r.allele_b) AS allele_b, count(*) AS n_rows, "
     "list(g.g ORDER BY g.g) AS groups, list(r.frequency ORDER BY g.g) AS frequencies, "
     "bool_and(r.frequency IS NOT NULL AND isfinite(r.frequency) AND r.frequency >= 0 "
@@ -144,7 +147,7 @@ static const char ancestry_validations[] =
     "AND least(c.ref, c.alt) = least(r.allele_a, r.allele_b) "
     "AND greatest(c.ref, c.alt) = greatest(r.allele_a, r.allele_b) "
     "LEFT JOIN __dht_groups AS g ON g.group_id = r.group_id "
-    "GROUP BY r.chrom, r.pos, least(r.allele_a, r.allele_b), greatest(r.allele_a, r.allele_b)), "
+    "GROUP BY c.raw_chrom, r.pos, least(r.allele_a, r.allele_b), greatest(r.allele_a, r.allele_b)), "
     "__dht_group_guard AS (SELECT CASE "
     "WHEN (SELECT list(group_id ORDER BY group_id) FROM __dht_groups) IS DISTINCT FROM "
     "(SELECT list(group_id ORDER BY group_id) FROM "
@@ -170,9 +173,9 @@ static const char ancestry_validations[] =
     "HAVING NOT (sum(proportion) > 0 AND sum(proportion) <= 1.0 + 1e-6)) "
     "THEN error('ancestry proportions must sum to more than 0 and at most 1 per sample') "
     "ELSE true END AS valid), "
-    "__dht_ref_oriented AS (SELECT chrom, pos, allele_a AS ref, allele_b AS alt, "
+    "__dht_ref_oriented AS (SELECT raw_chrom, pos, allele_a AS ref, allele_b AS alt, "
     "false AS reversed, frequencies FROM __dht_ref UNION ALL "
-    "SELECT chrom, pos, allele_b, allele_a, true, frequencies FROM __dht_ref), "
+    "SELECT raw_chrom, pos, allele_b, allele_a, true, frequencies FROM __dht_ref), "
     "__dht_props AS (SELECT p.smp, list(p.proportion / p.total ORDER BY g.g) AS proportions "
     "FROM (SELECT *, sum(proportion) OVER (PARTITION BY smp) AS total FROM __dht_prop_rows) AS p "
     "JOIN __dht_groups AS g ON g.group_id = p.group_id GROUP BY p.smp), "
@@ -186,7 +189,7 @@ static const char ancestry_validations[] =
     "ELSE greatest(af_clamp, least(1.0 - af_clamp, "
     "1.0 - list_inner_product(r.frequencies, p.proportions))) END AS af, c.evidence "
     "FROM __dht_calls AS c CROSS JOIN __dht_group_guard AS g "
-    "LEFT JOIN __dht_ref_oriented AS r ON c.chrom_key = r.chrom AND c.pos = r.pos "
+    "LEFT JOIN __dht_ref_oriented AS r ON c.chrom = r.raw_chrom AND c.pos = r.pos "
     "AND c.ref = r.ref AND c.alt = r.alt "
     "LEFT JOIN __dht_props AS p ON p.smp = c.smp), ";
 
