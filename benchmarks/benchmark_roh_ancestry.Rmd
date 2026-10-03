@@ -1,0 +1,130 @@
+---
+title: "Ancestry-tuned allele frequencies for ROH"
+output: github_document
+---
+
+## Evaluation protocol
+
+This report evaluates whether ancestry-tuned allele frequencies reduce unsupported long runs of homozygosity (ROH) in admixed 1000 Genomes trio children without changing non-admixed controls. The acceptance criterion is declared before calculating or comparing any arm:
+
+- In admixed children, ancestry-tuned AF must yield fewer unsupported ROH of at least 1 Mb than both pooled and single-population AF.
+- Its fraction of frequency-free truth-run length covered must be no more than 5% relatively below either comparator.
+- In controls, both unsupported-ROH count and truth coverage must remain within 5% relative of the single-population arm. For a zero comparator, equality is required.
+
+A truth segment is a merged run of 100 kb windows with at most one heterozygous call per window, and a retained run covers at least 1 Mb of actual bases. An ROH call is truth-supported when at least 90% of its length overlaps these truth intervals. Truth calls use all biallelic SNVs in each full source VCF, not just ancestry-reference sites. The window distribution and separation check must be reviewed before any ROH-arm comparison; if inadequate, the threshold may only be amended here before computing arm results. The primary length threshold is 1 Mb, with 2 Mb and 5 Mb also reported. FROH is total called ROH length divided by callable autosomal length.
+
+**Amendment, made after the arm results.** Review found that the truth windows gave a window without called genotypes zero heterozygotes, so missing evidence counted as homozygous evidence. The amended rule also requires at least one called genotype per window; a window without one is ineligible and breaks a run. This corrects how the declared rule was implemented, and it was made after the arm results were known, against the timing the protocol sets. It does not change the threshold of at most one heterozygous call. A sensitivity rule, fixed before it was computed, requires at least 50 called genotypes per window, after PLINK's 50-SNP `--homozyg-window-snp` default. The preregistered intervals, the amended intervals and the criterion under the preregistered truth are all kept (see *Truth-window separation* and *Criterion*).
+
+## Data identity and processing status
+
+The phased high-coverage VCF source is `https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20201028_3202_phased/CCDG_14151_B01_GRM_WGS_2020-08-05_chr{N}.filtered.shapeit2-duohmm-phased.vcf.gz`. The pedigree source is `https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/20130606_g1k_3202_samples_ped_population.txt`. The ancestry reference is registry artifact `ancestry_reference_grch38_parquet` (GRCh38, 5,012,826 sites).
+
+| Input | Identity / SHA-256 | Status |
+|:--|:--|:--|
+| chr20 phased VCF | Source SHA-256 `c2624c726c6cb27e288fe5908621125740379a3d523299dd07c13abf97645e4b`; remote ETag `2fbb7ed2-5b2d2762b9fc0`; Last-Modified `Thu, 29 Oct 2020 17:17:59 GMT` | Local source checksum verified; 3,202-sample source used to make the 377-child BCF |
+| chr20 children BCF | 849,143 records; SHA-256 `a53f83cebd7de6fb4661c14ecd93e5346022ff453392095a085e0b7cda116541` | All 377 eligible children present; biallelic SNVs with INFO/AF, INFO/AF_AFR/AMR/EAS/EUR retained |
+| GRCh38 ancestry reference | SHA-256 `4982810aa69b9c71924e9a02dcd454ccedccc34bd8bcf71506ce9752589847fa` | Chr20 wide rows converted to long form; 108,757 non-palindromic, matched dosage loci per child |
+| Pedigree | SHA-256 `4e164b717433fc9bfc16e29b20e5b4659b4216185b3275322d421fe3d323c132` | Downloaded; expected child counts matched in all ten populations; all 377 found in the chr20 VCF header |
+
+The planned trio counts are ACB 20, ASW 13, CLM 35, MXL 32, PEL 35 and PUR 35 (admixed), and YRI 56, ESN 43, CEU 57 and CHS 51 (controls). Single-population AF uses AFR for ACB, ASW, YRI and ESN; AMR for CLM, MXL, PEL and PUR; EUR for CEU; and EAS for CHS.
+
+This report evaluates chr20, with its complete chromosome-specific truth, q and arms. The genome-wide comparison is not part of this report. Its drivers and partial results were withdrawn after review found that their truth windows, cached-batch reuse and FROH denominator need the same correction as chr20 and more; they are recoverable from revision `68951a25` and continue in #329, together with the per-chromosome rerun of the ancestry arm. The 22 autosome BCFs are staged and recorded below for that work. The population child counts match the declared expectations: ACB 20, ASW 13, CLM 35, MXL 32, PEL 35, PUR 35, YRI 56, ESN 43, CEU 57 and CHS 51. The chr20 source VCF was copied from the supplied local file after its checksum was verified; its remote metadata is recorded above. bcftools reported `1.23.1-70-g6dbd8fef`; the source header had 3,202 samples and the children BCF has 377. All arms ran on extension builds of the `src` tree of revision `86f53052`; the later restructuring of `duckhts_roh_ancestry`'s reference stage reproduces the chr20 ancestry segments exactly, so the evaluated outputs are those of the shipped macro. The remote chr1 input was streamed through bcftools; its ETag, Last-Modified value, record count and output SHA-256 are recorded in [its receipt](results/roh-ancestry/chr1/input_receipt.tsv).
+
+## Autosome BCF staging
+
+Every children BCF has 377 samples. The per-chromosome source URL, Last-Modified value, ETag, record count and output SHA-256 are listed in [the staging summary](results/roh-ancestry/autosome_staging_summary.csv); raw source VCFs were streamed and not cached.
+
+```{r, echo=FALSE}
+staging <- utils::read.csv("results/roh-ancestry/autosome_staging_summary.csv")
+knitr::kable(staging[c("chromosome", "source_last_modified", "source_etag",
+  "source_samples", "child_samples", "child_records", "output_sha256")],
+  row.names = FALSE)
+```
+
+## Truth-window separation
+
+```{r, include=FALSE}
+truth_rules <- utils::read.csv("results/roh-ancestry/chr20/truth_rule_comparison.csv")
+truth_bins <- utils::read.csv("results/roh-ancestry/chr20/truth_window_bins.csv")
+rule <- function(name, field) truth_rules[[field]][truth_rules$rule == name]
+uncalled <- sum(truth_bins$child_windows[!grepl("^[0-9]", truth_bins$bin)])
+called_windows <- sum(truth_bins$child_windows) - uncalled
+eligible <- sum(truth_bins$child_windows[truth_bins$bin %in% c("0", "1")])
+fmt <- function(x) format(x, big.mark = ",", scientific = FALSE, trim = TRUE)
+```
+
+The chr20 truth windows are 645 per child, including the terminal partial window: `r fmt(sum(truth_bins$child_windows))` child-windows in all. Four windows (273, 275 and 277, next to the centromere, and the terminal window 644) hold no record, so `r fmt(uncalled)` child-windows have no called genotype; every genotype in the children BCF is called. Of the `r fmt(called_windows)` child-windows with called genotypes, `r fmt(eligible)` (`r sprintf("%.2f%%", 100 * eligible / called_windows)`) meet the `<=1` criterion. The binned distribution is below; the exact per-count distribution is [here](results/roh-ancestry/chr20/truth_window_distribution.csv). This separates the low-heterozygosity tail from the remaining windows sufficiently to retain the threshold.
+
+Under the preregistered rule, the truth was `r rule("preregistered", "intervals")` runs of at least 1 Mb across `r rule("preregistered", "children")` children, and 79 of them were runs next to the centromere that the three empty windows 273–277 joined into 1 Mb. The amended truth is `r rule("amended", "intervals")` runs across `r rule("amended", "children")` children; one of them, HG01499's run at the chromosome end, loses only the empty terminal window. The sensitivity rule gives `r if (rule("sensitivity", "same_intervals_as_amended")) "the same intervals" else "different intervals"`. The [rule comparison](results/roh-ancestry/chr20/truth_rule_comparison.csv), the [amended](results/roh-ancestry/chr20/truth_intervals.csv) and [preregistered](results/roh-ancestry/chr20/truth_intervals_preregistered.csv) intervals, and the run counts and truth-base denominators by population, [amended](results/roh-ancestry/chr20/truth_runs_by_population.csv) and [preregistered](results/roh-ancestry/chr20/truth_runs_by_population_preregistered.csv), are result tables.
+
+```{r, echo=FALSE}
+knitr::kable(truth_bins)
+```
+
+The truth is a proxy derived from the same hard calls as the GT-only emissions, so correlated genotype errors are not independent of the arms. The fixed 100 kb grid makes eligibility depend on where heterozygotes fall, and the 90%-overlap rule credits a short call inside truth more than a longer call that crosses a run's grid-defined end. Shifted-grid and base-level sensitivity analyses are not part of this report. Because it uses no allele frequencies, the truth marks runs of low heterozygosity rather than autozygosity: population-common homozygous haplotypes, for example after selective sweeps, regions of low mutation rate or diversity, and the lower genome-wide heterozygosity of bottlenecked populations also pass it. These differ between populations, so truth length and FROH are not comparable across populations; the criterion compares arms within each population against the same truth, so its comparisons are not affected.
+
+The pooled and single-population comparisons began only after the chr20 truth distribution was reviewed.
+
+## Ancestry proportions
+
+Proportions were estimated from chr20 dosage input only, using the GRCh38 wide reference and the bigsnpr 1.12.21 correction. Each child contributed 108,757 matched, non-palindromic loci. Every child has `status=ok`; the `cor_pred` range and top three groups are reported per child in [this table](results/roh-ancestry/chr20/q_by_child.csv). This is a chr20-only estimate, not the final genome-wide q.
+
+The GRCh38 reference contains no palindromic (A/T, C/G) sites, because the bigsnpr reference panel ships without them. `duckhts_roh_ancestry` takes reference alleles to be on the forward strand and orients palindromic sites by REF like any other, but none occur here, so the evaluated site sets are unaffected. The three ROH arms used the same 108,757 sites for every child. The AF and ancestry reference site keys have zero entries in either direction of their symmetric difference; the exact comparison is [here](results/roh-ancestry/chr20/site_set_equivalence.csv). The `INFO_AF*` values are array-valued Number=A fields; because the input BCF is biallelic, the AF relation takes its sole value and clamps it to `[1e-3, 0.999]`. The ancestry arm uses the same clamp. Per-child site counts are [here](results/roh-ancestry/chr20/site_counts_by_child.csv).
+
+```{r, echo=FALSE}
+knitr::kable(utils::read.csv("results/roh-ancestry/chr20/q_by_child.csv"), digits = 4)
+```
+
+## ROH results
+
+All count and length summaries are per-child quantities and are aggregated by population only after retaining each child's observations. The chr20-only FROH column is reported as a chromosome-length fraction; it is not the declared genome-wide FROH denominator.
+
+```{r, echo=FALSE}
+summary <- utils::read.csv("results/roh-ancestry/chr20/population_arm_summary.csv", check.names = FALSE)
+population_order <- c("ACB", "ASW", "CLM", "MXL", "PEL", "PUR", "YRI", "ESN", "CEU", "CHS")
+arm_order <- c("pooled", "single_population", "ancestry_tuned")
+summary$Population <- factor(summary$Population, levels = population_order)
+summary$Arm <- factor(summary$Arm, levels = arm_order)
+summary <- summary[order(summary$Population, summary$Arm), ]
+summary$Population <- as.character(summary$Population)
+summary$Arm <- c(pooled = "Pooled", single_population = "Single population",
+                 ancestry_tuned = "Ancestry tuned")[as.character(summary$Arm)]
+knitr::kable(summary, row.names = FALSE)
+```
+
+## Criterion
+
+```{r, include=FALSE}
+criterion <- utils::read.csv("results/roh-ancestry/chr20/criterion_by_population.csv")
+not_evaluable <- unique(criterion$Population[criterion$truth_bp == 0])
+verdict <- if (any(criterion$criterion_pass %in% FALSE)) {
+  "did not hold"
+} else if (anyNA(criterion$criterion_pass)) {
+  "could not be evaluated in every population"
+} else {
+  "held"
+}
+```
+
+The chr20 criterion **`r verdict`**. Under the amended truth, `r knitr::combine_words(not_evaluable, oxford_comma = FALSE)` have no truth length, so their truth-coverage check is not evaluable (NA) and never counts as a pass; their unsupported-count checks still apply. The comparison for each population is shown below. Under the preregistered truth the verdict was the same, and the unsupported counts and count checks are identical; that table is kept [here](results/roh-ancestry/chr20/criterion_by_population_preregistered_truth.csv).
+
+```{r, echo=FALSE}
+knitr::kable(criterion, digits = 4, row.names = FALSE)
+```
+
+## Runtime and memory
+
+Each value is from a fresh R process using four DuckDB threads. The ancestry arm used 16-child batches after the 64-child batch exceeded the 12 GB DuckDB memory limit; other arms used 64-child batches. Per-replicate runtime and peak resident memory are reported below. The ancestry rows were measured on the shipped `duckhts_roh_ancestry`, after its reference-stage restructuring. The pooled and single-population rows use `duckhts_roh_af_table`, which this work does not change, and were measured on the build of the `src` tree of revision `86f53052`. The 1×/2×/4× scaling evidence and memory budget for both macros are in `benchmark_roh_scaling.md`, added with the read-count emissions (#331).
+
+```{r, echo=FALSE}
+runtime <- utils::read.csv("results/roh-ancestry/chr20/runtime_replicates.csv")
+knitr::kable(runtime, digits = 2, row.names = FALSE)
+```
+
+## Reproducing the evaluation
+
+The drivers are in `benchmarks/roh_ancestry/` and run from the repository root. They resolve inputs through `r/duckhtsbench`: registry artifacts by identifier, and the cache directory with `duckhts_bench_cache_dir()`. They use the installed Rduckhts and the extension at `build/release/`; none compiles the package in place. The order is:
+
+1. staging: `stage_remote_chromosome.R` per autosome and `summarise_staging.R`. They take each source URL, the pedigree and the destination from the registry, and use `benchmarks/roh_ancestry_stage.R`. The evaluation's chr20 input was a verified local copy of its registered source; the same script stages it remotely.
+2. chr20: `prepare_chr20.R` (writes the children list and the chr20 reference relations), `truth_chr20.R`, `truth_intervals.R`, `q_chr20.R`, `sitecheck_chr20.R`, `verify_site_sets.R`, `run_chr20_arm.R` (per arm and repetition), `summarise_chr20.R`, `criterion_chr20.R` and `summarise_runtime.R`.
+3. render this report.

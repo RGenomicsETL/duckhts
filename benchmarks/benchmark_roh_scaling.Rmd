@@ -1,0 +1,344 @@
+---
+title: "ROH macro scaling"
+output:
+  github_document:
+    html_preview: false
+    pandoc_args: ["--wrap=preserve", "--columns=400"]
+---
+
+This report gives the 1×/2×/4× scaling evidence `STYLE.md` asks for, for the two
+runs-of-homozygosity entry points added for #318:
+
+- `duckhts_roh_counts` over a relation of read counts. Its growth dimensions are
+  the sites per sample and chromosome (the length of one kernel list) and the
+  number of samples. Synthetic counts give the 1×/2×/4× series. A real public
+  workload adds read counts from three 1000 Genomes 30× CRAMs at the 108,757
+  chr20 sites of the ROH ancestry evaluation, decoded for 1, 2 and 3 samples.
+- `duckhts_roh_ancestry` over the registered chr20 children BCF of the ROH
+  ancestry evaluation (849,143 records). It is measured along three series:
+  - the number of samples decoded together (8, 16, 32) with the full reference;
+  - the reference rows, with 8 samples and the chr20 reference cut at position
+    quantiles to a quarter, a half and all of its sites (the BCF is unchanged,
+    so only the reference stage grows);
+  - both together: (8, quarter), (16, half) and (32, all).
+
+  A configuration shared by several series is measured once and listed in each.
+
+Every observation is one fresh DuckDB CLI process under `/usr/bin/time`. The
+JSON profiler gives query latency and DuckDB's peak buffer and temporary
+bytes, and `/usr/bin/time` gives peak RSS. `max_temp_directory_size` is zero,
+so a spill fails the render. Each cell has three repetitions at one thread and
+at four threads, run in an order that alternates sizes. Each query reduces the
+runs it returns to a count and a total length, so the macro's output is
+consumed.
+
+The synthetic read counts are deterministic. They are generated at render
+time into a temporary directory, which is untimed staging. Each sample has a
+2,000-site homozygous stretch every 10,000 sites over Hardy-Weinberg
+background, with genotypes drawn at each site's frequency and 30 reads per site,
+so every input yields runs. The real counts are registry artifacts
+`roh_counts_chr20_na18507`, `roh_counts_chr20_hg00403` and
+`roh_counts_chr20_hg00188`: `duckhts_somalier_bam_counts` at the chr20
+evaluation sites of the registered public CRAMs, read by range requests, with
+MAPQ ≥ 20, base quality ≥ 13 and mate-overlap suppression
+(`benchmarks/roh_counts_stage.R`). Each is checked against its registered row
+count and counts digest before anything is measured. The ancestry
+inputs are registry artifacts `roh_ancestry_chr20_children_bcf`,
+`roh_ancestry_chr20_reference_long` and `roh_ancestry_chr20_q`. Their samples
+are the first 8, 16 or 32 sample IDs of the registered proportions, sorted.
+The reference cuts are the 25% and 50% position quantiles of its distinct sites.
+
+## Budgets, declared before measuring
+
+The overhead is the median peak RSS of three empty runs that start the CLI,
+load the extension and run no scan.
+
+- **`duckhts_roh_counts`.** The live state is every sample's site list, held by
+  the per-(sample, chromosome) list aggregate until the scan ends. That is 24
+  bytes of struct data per site (position, frequency and two counts), taken as
+  48 bytes with list-segment and validity overhead. On top of that come the
+  kernel arrays for the longest list (emission, path and position storage, 40
+  bytes per site). The ceiling is overhead + 3 × rows × 88 bytes. This budget
+  is a gate: the render stops if any counts observation exceeds it or spills.
+- **`duckhts_roh_ancestry`.** The same list aggregate holds samples × records
+  elements. Each element is 28 bytes of struct data (position, frequency and
+  genotype evidence), taken as 56 bytes. The reference join adds one hash
+  entry per reference row (64 bytes). The ceiling is overhead + 3 × (samples ×
+  records × 56 bytes + reference rows × 64 bytes). The report states whether
+  each cell meets it. See *Findings* for why this budget is reported rather
+  than gated.
+
+``` sh
+taskset -c 8-15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_roh_scaling.Rmd")'
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r benchmark, echo=FALSE, message=FALSE}
+stopifnot(requireNamespace("duckhtsbench", quietly = TRUE),
+          requireNamespace("jsonlite", quietly = TRUE),
+          requireNamespace("knitr", quietly = TRUE))
+Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath(
+  "r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+extension <- normalizePath(Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension"),
+                           mustWork = TRUE)
+duckdb_cli <- Sys.getenv("DUCKDB_CLI", Sys.which("duckdb"))
+stopifnot(nzchar(duckdb_cli), file.exists("/usr/bin/time"))
+duckdb_runtime <- system2(duckdb_cli, "--version", stdout = TRUE)[[1L]]
+revision <- system2("git", c("rev-parse", "HEAD"), stdout = TRUE)
+src_tree <- system2("git", c("rev-parse", "HEAD:src"), stdout = TRUE)
+if (system2("git", c("diff", "--quiet", "HEAD", "--", "src"), stdout = FALSE, stderr = FALSE) != 0L) {
+  stop("Build source must match the recorded HEAD")
+}
+host_load <- sub(".*load average: ", "", system2("uptime", stdout = TRUE))
+quote_literal <- function(value) paste0("'", gsub("'", "''", value, fixed = TRUE), "'")
+
+bcf <- duckhtsbench::duckhts_bench_artifact_path("roh_ancestry_chr20_children_bcf")
+reference_long <- duckhtsbench::duckhts_bench_artifact_path("roh_ancestry_chr20_reference_long")
+q_path <- duckhtsbench::duckhts_bench_artifact_path("roh_ancestry_chr20_q")
+for (id in c("roh_ancestry_chr20_children_bcf", "roh_ancestry_chr20_reference_long",
+             "roh_ancestry_chr20_q")) {
+  duckhtsbench::duckhts_bench_validate_identity(id, duckhtsbench::duckhts_bench_artifact_path(id))
+}
+
+# Run one SQL body in a fresh CLI process with the given threads and spill
+# forbidden; the last statement's single row is returned with latency and memory.
+run_fresh <- function(setup, query, threads) {
+  scratch <- tempfile("roh-scaling-")
+  dir.create(scratch)
+  on.exit(unlink(scratch, recursive = TRUE), add = TRUE)
+  sql_path <- file.path(scratch, "query.sql")
+  result_path <- file.path(scratch, "result.csv")
+  profile_path <- file.path(scratch, "profile.json")
+  time_path <- file.path(scratch, "time.tsv")
+  writeLines(c(
+    sprintf("SET threads = %d;", threads),
+    "SET max_temp_directory_size = '0KiB';",
+    sprintf("LOAD %s;", quote_literal(extension)),
+    setup,
+    "PRAGMA enable_profiling = 'json';",
+    sprintf("PRAGMA profiling_output = %s;", quote_literal(profile_path)),
+    sprintf("COPY (%s) TO %s (HEADER);", query, quote_literal(result_path)),
+    "PRAGMA disable_profiling;"
+  ), sql_path)
+  status <- system2("/usr/bin/time", c("-f", shQuote("%M\t%e"), "-o", shQuote(time_path),
+                                       shQuote(duckdb_cli), "-unsigned", "-batch", "-bail"),
+                    stdin = sql_path, stdout = FALSE, stderr = FALSE)
+  if (status != 0L) stop("DuckDB CLI failed (status ", status, ")")
+  profile <- jsonlite::fromJSON(profile_path, simplifyVector = TRUE)
+  timing <- utils::read.delim(time_path, header = FALSE, col.names = c("max_rss_kib", "process_seconds"))
+  data.frame(utils::read.csv(result_path, colClasses = "character"),
+             seconds = as.numeric(profile$latency), max_rss_kib = timing$max_rss_kib[[1L]],
+             peak_buffer_bytes = as.numeric(profile$system_peak_buffer_memory),
+             peak_temp_bytes = as.numeric(profile$system_peak_temp_dir_size))
+}
+
+# Synthetic counts, staged untimed: homozygous stretches of 2,000 sites every
+# 10,000 sites over a Hardy-Weinberg background, 30 reads per site.
+staging <- tempfile("roh-scaling-counts-")
+dir.create(staging)
+counts_inputs <- data.frame(
+  dimension = c(rep("sites", 3L), rep("samples", 3L)),
+  scale = rep(c(1L, 2L, 4L), 2L),
+  samples = c(1L, 1L, 1L, 8L, 16L, 32L),
+  sites = c(1000000L, 2000000L, 4000000L, 250000L, 250000L, 250000L),
+  stringsAsFactors = FALSE)
+counts_inputs$rows <- counts_inputs$samples * counts_inputs$sites
+counts_inputs$path <- file.path(staging, sprintf("counts_%s_%d.parquet",
+                                                 counts_inputs$dimension, counts_inputs$scale))
+for (k in seq_len(nrow(counts_inputs))) {
+  generate <- sprintf(paste(
+    "COPY (SELECT 'S' || s AS sample_id, '1' AS chrom, i * 50 AS pos, af,",
+    "30 - alt AS ref_count, alt AS alt_count FROM (",
+    "SELECT s, i, af,",
+    "CASE WHEN i %% 10000 < 2000 THEN 30 * (((i * 7919 + s * 13) %% 1000) / 1000.0 < af)::INTEGER",
+    "ELSE 15 * ((((i * 7919 + s * 13) %% 1000) / 1000.0 < af)::INTEGER +",
+    "(((i * 104729 + s * 17) %% 1000) / 1000.0 < af)::INTEGER) END AS alt",
+    "FROM (SELECT s, i, 0.15 + 0.7 * ((i * 37 + s * 11) %% 100) / 100.0 AS af",
+    "FROM range(0, %d) AS a(s), range(1, %d) AS t(i)))) TO %s (FORMAT parquet);"),
+    counts_inputs$samples[[k]], counts_inputs$sites[[k]] + 1L, quote_literal(counts_inputs$path[[k]]))
+  stopifnot(system2(duckdb_cli, "-batch", input = generate, stdout = FALSE) == 0L)
+}
+
+# Real counts: registered artifacts, checked against their registered identity.
+source("benchmarks/roh_counts_stage.R")
+real_ids <- c("roh_counts_chr20_na18507", "roh_counts_chr20_hg00403", "roh_counts_chr20_hg00188")
+real_paths <- vapply(real_ids, duckhtsbench::duckhts_bench_artifact_path, character(1L))
+identity_con <- DBI::dbConnect(duckdb::duckdb(shared_home = FALSE))
+for (k in seq_along(real_ids)) {
+  registered <- duckhtsbench:::duckhts_bench_identity_fields(
+    duckhtsbench::duckhts_bench_registry()$supplier_identity[
+      match(real_ids[[k]], duckhtsbench::duckhts_bench_registry()$id)])
+  observed_identity <- roh_counts_identity(identity_con, real_paths[[k]])
+  stopifnot(observed_identity$rows == as.numeric(registered[["rows"]]),
+            identical(observed_identity$counts_sha256, registered[["counts_sha256"]]))
+}
+real_rows <- as.numeric(registered[["rows"]])
+DBI::dbDisconnect(identity_con, shutdown = TRUE)
+real_inputs <- data.frame(dimension = "real_samples", scale = 1:3, samples = 1:3,
+                          sites = real_rows, stringsAsFactors = FALSE)
+real_inputs$rows <- real_inputs$samples * real_inputs$sites
+real_inputs$source_sql <- vapply(real_inputs$samples, function(n) sprintf("read_parquet([%s])",
+  paste(vapply(real_paths[seq_len(n)], quote_literal, character(1L)), collapse = ", ")), character(1L))
+counts_inputs$source_sql <- sprintf("read_parquet(%s)", vapply(counts_inputs$path, quote_literal, character(1L)))
+counts_inputs <- rbind(counts_inputs[c("dimension", "scale", "samples", "sites", "rows", "source_sql")],
+                       real_inputs)
+
+# A fixed, reproducible subset: the registered proportions' sample IDs, sorted.
+children <- sort(unique(utils::read.csv(q_path, stringsAsFactors = FALSE)$sample_id))
+stopifnot(length(children) >= 32L)
+identity <- function(id) {
+  plan <- duckhtsbench::duckhts_bench_registry()
+  duckhtsbench:::duckhts_bench_identity_fields(plan$supplier_identity[[match(id, plan$id)]])
+}
+bcf_records <- as.numeric(identity("roh_ancestry_chr20_children_bcf")[["records"]])
+reference_rows <- as.numeric(identity("roh_ancestry_chr20_reference_long")[["rows"]])
+# Reference growth keeps the BCF and samples fixed and cuts the chr20 reference at
+# position quantiles of its sites, so only the reference stage grows.
+cuts <- as.numeric(system2(duckdb_cli, c("-list", "-noheader"), input = sprintf(paste(
+  "SELECT unnest(quantile_disc(position, [0.25, 0.5])) FROM",
+  "(SELECT DISTINCT position FROM read_parquet(%s));"), quote_literal(reference_long)), stdout = TRUE))
+stopifnot(length(cuts) == 2L, all(is.finite(cuts)))
+ancestry_series <- data.frame(
+  dimension = rep(c("samples", "reference", "joint"), each = 3L),
+  scale = rep(c(1L, 2L, 4L), 3L),
+  samples = c(8L, 16L, 32L, 8L, 8L, 8L, 8L, 16L, 32L),
+  fraction = c(1, 1, 1, 0.25, 0.5, 1, 0.25, 0.5, 1),
+  stringsAsFactors = FALSE)
+ancestry_inputs <- unique(ancestry_series[c("samples", "fraction")])
+ancestry_inputs$max_position <- c(`0.25` = cuts[[1L]], `0.5` = cuts[[2L]], `1` = Inf)[
+  as.character(ancestry_inputs$fraction)]
+ancestry_inputs$reference_rows <- vapply(ancestry_inputs$max_position, function(limit) {
+  as.numeric(system2(duckdb_cli, c("-list", "-noheader"), input = sprintf(
+    "SELECT count(*) FROM read_parquet(%s) WHERE position <= %s;", quote_literal(reference_long),
+    if (is.finite(limit)) format(limit, scientific = FALSE) else "9223372036854775807"), stdout = TRUE))
+}, numeric(1L))
+
+empty_runs <- vapply(seq_len(3L), function(run) {
+  run_fresh(character(0), "SELECT 1 AS n, 0 AS len", 1L)$max_rss_kib
+}, numeric(1L))
+overhead_mib <- median(empty_runs) / 1024
+counts_inputs$budget_mib <- overhead_mib + 3 * counts_inputs$rows * 88 / 2^20
+ancestry_inputs$budget_mib <- overhead_mib +
+  3 * (ancestry_inputs$samples * bcf_records * 56 + ancestry_inputs$reference_rows * 64) / 2^20
+
+counts_query <- "SELECT count(*) AS n, sum(length) AS len FROM duckhts_roh_counts('c')"
+ancestry_query <- function(ids) sprintf(paste(
+  "SELECT count(*) AS n, sum(length) AS len FROM duckhts_roh_ancestry(%s, 'ref_long', 'q_table',",
+  "af_clamp := 1e-3, gt_error := 30, samples := %s)"), quote_literal(bcf), quote_literal(paste(ids, collapse = ",")))
+
+observations <- list()
+ancestry_observations <- list()
+for (repetition in 1:3) {
+  order <- if (repetition %% 2L == 1L) 1:3 else 3:1
+  for (threads in c(1L, 4L)) {
+    for (dimension in c("sites", "samples", "real_samples")) {
+      for (scale_index in order) {
+        k <- which(counts_inputs$dimension == dimension)[[scale_index]]
+        setup <- sprintf("CREATE TEMP VIEW c AS SELECT * FROM %s;", counts_inputs$source_sql[[k]])
+        observed <- run_fresh(setup, counts_query, threads)
+        observations[[length(observations) + 1L]] <- data.frame(
+          macro = "duckhts_roh_counts", dimension = dimension, scale = counts_inputs$scale[[k]],
+          samples = counts_inputs$samples[[k]], input_rows = counts_inputs$rows[[k]],
+          threads = threads, repetition = repetition, budget_mib = counts_inputs$budget_mib[[k]], observed)
+      }
+    }
+    config_order <- if (repetition %% 2L == 1L) seq_len(nrow(ancestry_inputs)) else rev(seq_len(nrow(ancestry_inputs)))
+    for (k in config_order) {
+      n <- ancestry_inputs$samples[[k]]
+      ids <- head(children, n)
+      limit <- ancestry_inputs$max_position[[k]]
+      setup <- c(
+        sprintf("CREATE TEMP VIEW ref_long AS SELECT * FROM read_parquet(%s)%s;", quote_literal(reference_long),
+                if (is.finite(limit)) sprintf(" WHERE position <= %s", format(limit, scientific = FALSE)) else ""),
+        sprintf(paste("CREATE TEMP TABLE q_table AS SELECT sample_id, group_id, proportion FROM read_csv(%s)",
+                      "WHERE sample_id IN (SELECT unnest(string_split(%s, ',')));"),
+                quote_literal(q_path), quote_literal(paste(ids, collapse = ","))))
+      observed <- run_fresh(setup, ancestry_query(ids), threads)
+      ancestry_observations[[length(ancestry_observations) + 1L]] <- data.frame(
+        samples = n, fraction = ancestry_inputs$fraction[[k]], reference_rows = ancestry_inputs$reference_rows[[k]],
+        input_rows = n * bcf_records, threads = threads, repetition = repetition,
+        budget_mib = ancestry_inputs$budget_mib[[k]], observed)
+    }
+  }
+}
+ancestry_runs <- do.call(rbind, ancestry_observations)
+# Each series reads the configurations it names; shared configurations are
+# measured once and appear in every series that uses them.
+ancestry_series_runs <- do.call(rbind, lapply(seq_len(nrow(ancestry_series)), function(j) {
+  cell <- ancestry_runs[ancestry_runs$samples == ancestry_series$samples[[j]] &
+                        ancestry_runs$fraction == ancestry_series$fraction[[j]], ]
+  data.frame(macro = "duckhts_roh_ancestry", dimension = ancestry_series$dimension[[j]],
+             scale = ancestry_series$scale[[j]], cell[setdiff(names(cell), c("fraction", "reference_rows"))])
+}))
+runs <- rbind(do.call(rbind, observations), ancestry_series_runs[names(do.call(rbind, observations))])
+stopifnot(all(runs$peak_temp_bytes == 0), all(as.numeric(runs$n) > 0))
+counts_runs <- runs[runs$macro == "duckhts_roh_counts", ]
+stopifnot(all(counts_runs$max_rss_kib / 1024 <= counts_runs$budget_mib))
+write.csv(runs, "benchmarks/benchmark_roh_scaling_runs.csv", row.names = FALSE)
+
+cells <- split(runs, list(runs$macro, runs$dimension, runs$scale, runs$threads), drop = TRUE)
+summary <- do.call(rbind, lapply(cells, function(cell) {
+  data.frame(macro = cell$macro[[1L]], dimension = cell$dimension[[1L]], scale = cell$scale[[1L]],
+             threads = cell$threads[[1L]], samples = cell$samples[[1L]], input_rows = cell$input_rows[[1L]],
+             runs_out = cell$n[[1L]], median_seconds = median(cell$seconds),
+             min_seconds = min(cell$seconds), max_seconds = max(cell$seconds),
+             median_rss_mib = round(median(cell$max_rss_kib) / 1024, 1),
+             max_rss_mib = round(max(cell$max_rss_kib) / 1024, 1),
+             budget_mib = round(cell$budget_mib[[1L]], 1),
+             within_budget = max(cell$max_rss_kib) / 1024 <= cell$budget_mib[[1L]],
+             stringsAsFactors = FALSE)
+}))
+summary <- summary[order(summary$macro, summary$dimension, summary$threads, summary$scale), ]
+rownames(summary) <- NULL
+real_cell <- function(n) {
+  cell <- summary[summary$dimension == "real_samples" & summary$threads == 1L & summary$scale == n, ]
+  stopifnot(nrow(cell) == 1L)
+  cell
+}
+# The doubling series only: the real series grows by one sample at a time.
+doubling <- summary[summary$dimension != "real_samples", ]
+exponents <- do.call(rbind, lapply(split(doubling, list(doubling$macro, doubling$dimension, doubling$threads), drop = TRUE),
+  function(s) {
+    s <- s[order(s$scale), ]
+    data.frame(macro = s$macro[[1L]], dimension = s$dimension[[1L]], threads = s$threads[[1L]],
+               time_exponent_2x = log2(s$median_seconds[[2L]] / s$median_seconds[[1L]]),
+               time_exponent_4x = log2(s$median_seconds[[3L]] / s$median_seconds[[2L]]),
+               rss_ratio_2x = s$median_rss_mib[[2L]] / s$median_rss_mib[[1L]],
+               rss_ratio_4x = s$median_rss_mib[[3L]] / s$median_rss_mib[[1L]],
+               one_x_seconds = s$median_seconds[[1L]], stringsAsFactors = FALSE)
+  }))
+rownames(exponents) <- NULL
+```
+
+Source revision: `r revision`; `src` tree `r src_tree`. DuckDB runtime: `r duckdb_runtime` (CLI). Extension SHA-256: `r strsplit(system2("sha256sum", extension, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`. Host load before the run: `r host_load`. Empty-run overhead: `r round(overhead_mib, 1)` MiB. Every observation is in [`benchmark_roh_scaling_runs.csv`](benchmark_roh_scaling_runs.csv).
+
+```{r summary, echo=FALSE}
+knitr::kable(summary, digits = 3)
+```
+
+Time exponents per doubling (log2 of the median ratio) and peak-RSS ratios to 1×:
+
+```{r exponents, echo=FALSE}
+knitr::kable(exponents, digits = 3)
+```
+
+## Findings
+
+`duckhts_roh_counts` stays within its declared budget at every size and
+thread count, synthetic and real, and the render enforces that. Its one-thread
+1× runs are under the 5-second floor, so it gets a memory verdict, not a timing
+verdict. On the real workload, one thread decodes one sample's 108,757 chr20
+sites in `r round(real_cell(1)$median_seconds, 3)` s at `r real_cell(1)$median_rss_mib` MiB
+peak RSS and three samples in `r round(real_cell(3)$median_seconds, 3)` s at
+`r real_cell(3)$median_rss_mib` MiB. The operating scale this report supports
+is what it measures: per-chromosome lists of up to 4 million synthetic sites,
+up to 32 synthetic samples, and three real 30× samples at 108,757 sites;
+larger panels and cohorts are not measured here.
+
+`duckhts_roh_ancestry` exceeds its declared model. Memory grows with the number of samples decoded together, because the per-(sample, chromosome) list aggregate keeps every sample's site list until the BCF scan ends, and DuckDB's list-aggregate state costs several times the 28 bytes of struct data per element. The reference stage adds a fixed cost that grows with reference rows (see the reference series). `duckhts_roh` and `duckhts_roh_af_table` share the list stage and are already on `main` (#323): the ancestry evaluation's eight-child, 21-autosome queries peaked at 16.5 GB.
+
+The maintainer approved this as a reviewed exception on 2026-10-03: the budget is reported, not gated, until #329 makes the decode memory-bounded. Until then, `samples :=` is the memory control. Decode in sample batches, as the evaluation does.

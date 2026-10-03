@@ -1260,7 +1260,7 @@ STRUCT(start BIGINT, "end" BIGINT, n_markers INTEGER, quality DOUBLE)[]
 
 ### Overloads
 
-duckhts_roh_segments(positions, af, pl, map_pos, map_cm, rec_rate, hw_to_az, az_to_hw) takes phred-scaled likelihoods as INTEGER[][] (three values per site: RR, RA, AA). duckhts_roh_segments(positions, af, dosage, gt_error, map_pos, map_cm, rec_rate, hw_to_az, az_to_hw) takes INTEGER[] genotype dosages 0, 1 or 2 and a phred gt_error, as bcftools roh -G does. All arguments are positional; the duckhts_roh macro supplies the defaults.
+duckhts_roh_segments(positions, af, pl, map_pos, map_cm, rec_rate, hw_to_az, az_to_hw) takes phred-scaled likelihoods as INTEGER[][] (three values per site: RR, RA, AA). duckhts_roh_segments(positions, af, dosage, gt_error, map_pos, map_cm, rec_rate, hw_to_az, az_to_hw) takes INTEGER[] genotype dosages 0, 1 or 2 and a phred gt_error, as bcftools roh -G does. duckhts_roh_segments(positions, af, ref_count, alt_count, seq_error, contamination, map_pos, map_cm, rec_rate, hw_to_az, az_to_hw) takes INTEGER[] read counts of the other allele and of the allele af refers to, a per-read seq_error in (0, 0.5) and a contamination fraction in [0, 1); duckhts_roh_counts describes that read model, which is a DuckHTS extension with no bcftools counterpart. All arguments are positional; the duckhts_roh macro supplies the defaults.
 
 ### Input
 
@@ -1362,6 +1362,82 @@ Everything else is as duckhts_roh: the same output, genotype evidence (PL, or GT
 
 ```sql
 SELECT * FROM duckhts_roh_af_table('cohort.vcf.gz', 'site_frequencies') ORDER BY sample, chrom, start;
+```
+
+## duckhts_roh_ancestry
+
+Find runs of homozygosity using each sample's ancestry-weighted allele frequencies.
+
+Signature:
+
+```sql
+duckhts_roh_ancestry(path, reference_table, proportions_table, genetic_map, af_clamp := 1e-3, hw_to_az := 6.7e-8, az_to_hw := 5e-9, gt_error := NULL, rec_rate := NULL, samples := NULL)
+```
+
+Returns:
+
+```
+table(sample VARCHAR, chrom VARCHAR, start BIGINT, "end" BIGINT, length BIGINT, n_markers INTEGER, quality DOUBLE)
+```
+
+### Inputs
+
+reference_table is a long relation with chromosome, position (one-based), allele_a, allele_b, group_id and frequency (frequency of allele_b). proportions_table has sample_id, group_id and proportion. Both relations must use exactly the same group IDs; every called VCF sample needs proportions. Contig names are matched with duckhts_contig_key(), resolved once per distinct name. It removes one leading chr case-insensitively, writes M/MT as MT and uppercases X and Y, so chr1 and 1 match, as do chrX and X. Accessions, patches and numeric sex chromosomes are not mapped. Each site must have one allele orientation across its group rows, and exactly one row per group.
+
+### Frequency model
+
+For each called site and sample, AF is the sum over groups of proportion times group frequency. The reference is aggregated once per site and proportions once per sample, then joined to called sites. REF=allele_a and ALT=allele_b uses the weighted frequency; the reversed orientation uses 1-AF. Reference alleles must be on the forward strand of the VCF's assembly, as in a FASTA-anchored panel; no strand flip is attempted, so palindromic (A/T, C/G) sites are oriented by REF like any other, and a site whose alleles match neither order is not used. af_clamp in [0, 0.5) clamps AF to [af_clamp, 1-af_clamp]; zero disables clamping. The default avoids interpreting a population frequency of zero as impossible.
+
+### Otherwise
+
+The output, genotype evidence, transitions, optional genetic_map overload and limits are as duckhts_roh_af_table.
+
+### Examples
+
+```sql
+SELECT * FROM duckhts_roh_ancestry('cohort.vcf.gz', 'reference_long', 'sample_proportions', gt_error := 30) ORDER BY sample, chrom, start;
+```
+
+## duckhts_roh_counts
+
+Find runs of homozygosity from allele read counts, with sequencing error and optional contamination.
+
+Signature:
+
+```sql
+duckhts_roh_counts(counts_table, genetic_map, seq_error := 1e-3, contamination := 0.0, hw_to_az := 6.7e-8, az_to_hw := 5e-9, rec_rate := NULL)
+```
+
+Returns:
+
+```
+table(sample VARCHAR, chrom VARCHAR, start BIGINT, "end" BIGINT, length BIGINT, n_markers INTEGER, quality DOUBLE)
+```
+
+### Input
+
+counts_table is a table or view with sample_id, chrom, pos (one-based), ref_count, alt_count and af, one row per sample and site. alt_count counts reads showing the allele whose population frequency is af; ref_count counts reads showing the other allele. Any frequency source composes in SQL first: an INFO tag, a frequency table or ancestry-weighted frequencies. Somalier site counts map as ref_count = a, alt_count = b and af = frequency of allele_b.
+
+### Read model
+
+Each read shows the counted allele with probability (1 - contamination) * q + contamination * c, where q is seq_error, 1/2 or 1 - seq_error for zero, one or two copies, and c = af * (1 - seq_error) + (1 - af) * seq_error is the chance that a read from a contaminating individual of the same population shows it. Reads are independent and the binomial coefficient is omitted. The resulting genotype likelihoods enter the bcftools roh model in place of PL. This emission is a DuckHTS extension; bcftools roh has no read-count mode.
+
+### Skipped sites
+
+Sites with no reads, a NULL count, or an af that is NULL, NaN or 0 are skipped; a repeated position keeps one row, as in the other overloads. Negative counts, seq_error outside (0, 0.5) and contamination outside [0, 1) are errors.
+
+### Limitations
+
+Biallelic sites only; one error rate for all reads, with no base- or mapping-quality, duplicate or strand modelling. A heterozygote is assumed to show each allele in half its reads, but reference-biased mapping makes the other allele rarer, more so where flanking heterozygosity is high; such heterozygotes can look homozygous and lengthen runs in divergent regions. The contamination fraction is supplied, not estimated, and a contaminant from a different population than af describes is approximated by af.
+
+### Otherwise
+
+Output, transitions, rec_rate and the optional genetic_map overload are as duckhts_roh.
+
+### Examples
+
+```sql
+SELECT * FROM duckhts_roh_counts('site_counts', contamination := 0.02) ORDER BY sample, chrom, start;
 ```
 
 ## duckhts_somalier_panel_sha256

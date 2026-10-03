@@ -287,6 +287,14 @@ test-somalier-upstream-source:
 test-somalier-upstream-staging:
 	Rscript test/scripts/test_somalier_upstream_staging.R
 
+.PHONY: test-roh-ancestry-staging
+test-roh-ancestry-staging:
+	Rscript test/scripts/test_roh_ancestry_staging.R
+
+.PHONY: test-roh-counts-staging
+test-roh-counts-staging:
+	Rscript test/scripts/test_roh_counts_staging.R
+
 test-somalier-statistical:
 	$(call compile_somalier_campaign_test,Rscript test/scripts/somalier_statistical_campaign.R "$$tmp/somalier_native_test")
 

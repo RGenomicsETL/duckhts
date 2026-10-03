@@ -36,7 +36,7 @@ def definitions(con):
         "SELECT name, public, sql, definitions_sha256 "
         "FROM duckhts_macro_definitions() ORDER BY install_order"
     ).fetchall()
-    assert len(rows) == 35
+    assert len(rows) == 37
     assert len({row[3] for row in rows}) == 1
     ordered = b"".join(
         bytes([int(exposed)]) +
@@ -176,7 +176,7 @@ def main():
         subprocess.run([sys.executable, __file__, "attached", str(path)], check=True)
         assert digest(path) == before
         subprocess.run([sys.executable, __file__, "rollback", str(path)], check=True)
-        print("macro catalog: 35 definitions, 26 public, file/readonly/rollback/two connections OK")
+        print("macro catalog: 37 definitions, 28 public, file/readonly/rollback/two connections OK")
 
 
 if __name__ == "__main__":
