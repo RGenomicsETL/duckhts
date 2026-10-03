@@ -4,6 +4,10 @@ Preview of 2.0.0, still in development. The sections below describe what 2.0.0 w
 
 - `rduckhts_roh()` accepts long ancestry reference and sample-proportion relations to calculate ancestry-weighted allele frequencies, with optional clamping.
 
+- Added `rduckhts_roh_counts()`: runs of homozygosity from a relation of allele read
+  counts (for example Somalier site counts from a BAM or CRAM), with a per-read
+  sequencing error and an optional contamination fraction (#318).
+
 ## Breaking changes
 
 - Requires duckdb 1.5.0 or newer; loading the bundled extension on an older

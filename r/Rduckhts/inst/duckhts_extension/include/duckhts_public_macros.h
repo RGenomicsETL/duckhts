@@ -16,6 +16,7 @@ static const char *const duckhts_public_macros[] = {
     "duckhts_roh",
     "duckhts_roh_af_table",
     "duckhts_roh_ancestry",
+    "duckhts_roh_counts",
     "duckhts_somalier_charr",
     "duckhts_somalier_frequency_sha256",
     "duckhts_somalier_import_sites",

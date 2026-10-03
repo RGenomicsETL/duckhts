@@ -26,7 +26,8 @@
    workspace object, and the output is an array of segments rather than RG
    text lines. The arithmetic, including the order of the floating-point
    operations, follows the pinned bcftools source so that Viterbi paths and
-   qualities reproduce `bcftools roh`.
+   qualities reproduce `bcftools roh`. duckhts_roh_pdg_from_counts() is a
+   DuckHTS addition with no bcftools counterpart.
  */
 #include "roh_hmm.h"
 
@@ -219,6 +220,25 @@ int duckhts_roh_pdg_from_gt(double gt_error, int dosage, double pdg[3]) {
         return 0;
     }
     return pdg[0] + pdg[1] + pdg[2] != 0;
+}
+
+/* DuckHTS extension: read-count emissions with sequencing error and
+ * contamination (see roh_hmm.h). Log likelihoods relative to the largest keep
+ * deep sites from underflowing; push() normalises the three values. */
+int duckhts_roh_pdg_from_counts(int32_t other_count, int32_t counted_count, double seq_error,
+                                double contamination, double af, double pdg[3]) {
+    if ((int64_t)other_count + counted_count == 0) return 0;
+    double contaminant = af * (1 - seq_error) + (1 - af) * seq_error;
+    double q[3] = {seq_error, 0.5, 1 - seq_error};
+    double log_likelihood[3];
+    double best = -INFINITY;
+    for (int g = 0; g < 3; g++) {
+        double p = (1 - contamination) * q[g] + contamination * contaminant;
+        log_likelihood[g] = counted_count * log(p) + other_count * log1p(-p);
+        if (log_likelihood[g] > best) best = log_likelihood[g];
+    }
+    for (int g = 0; g < 3; g++) pdg[g] = exp(log_likelihood[g] - best);
+    return 1;
 }
 
 void duckhts_roh_push(duckhts_roh_t *roh, int32_t pos0, const double pdg_in[3], double af) {

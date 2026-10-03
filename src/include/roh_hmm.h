@@ -73,6 +73,20 @@ int duckhts_roh_pdg_from_pl(const duckhts_roh_t *roh, int32_t pl_rr, int32_t pl_
  * (bcftools -G). Returns 0 for an unusable dosage. */
 int duckhts_roh_pdg_from_gt(double gt_error, int dosage, double pdg[3]);
 
+/* P(D|genotype) from allele read counts at a biallelic site. This is a DuckHTS
+ * extension, not part of bcftools roh. Reads are independent; each shows the
+ * counted allele (the one af refers to) with probability
+ *   (1 - contamination) * q_g + contamination * c,
+ * where q_g is seq_error, 1/2 and 1 - seq_error for the genotypes with zero,
+ * one and two copies, and c = af * (1 - seq_error) + (1 - af) * seq_error is
+ * the chance that a read from a contaminating individual of the same
+ * population shows it. The binomial coefficient is common to the three
+ * genotypes and omitted. The caller guarantees counts >= 0,
+ * 0 < seq_error < 1/2, 0 <= contamination < 1 and 0 < af <= 1. Returns 0 when
+ * the site has no reads. */
+int duckhts_roh_pdg_from_counts(int32_t other_count, int32_t counted_count, double seq_error,
+                                double contamination, double af, double pdg[3]);
+
 /* Appends a usable site: the pdg values are normalised here, as bcftools
  * does, then the emission probabilities for the allele frequency af follow. */
 void duckhts_roh_push(duckhts_roh_t *roh, int32_t pos0, const double pdg[3], double af);

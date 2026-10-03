@@ -6,6 +6,15 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
 
 - Added `duckhts_roh_ancestry()` for per-sample ancestry-weighted allele frequencies from long reference and proportion relations, with allele-orientation handling and optional frequency clamping.
 
+- Added `duckhts_roh_counts()` and a read-count overload of `duckhts_roh_segments()`:
+  runs of homozygosity from allele read counts, for example BAM/CRAM counts at panel
+  sites, with a binomial read model, a per-read sequencing error and an optional
+  contamination fraction (#318). Contaminant reads at homozygous sites look
+  heterozygous and erode runs; with the contamination term, a synthetic 10%
+  titration recovers the uncontaminated runs. The emission is a DuckHTS
+  extension, since `bcftools roh` has no read-count mode. SQL tests check it
+  against the same model computed independently in SQL and rounded to PL.
+
 ## Breaking changes
 
 - DuckHTS supports DuckDB 1.5.0 or newer, and `LOAD` now fails on older runtimes
