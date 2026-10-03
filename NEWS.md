@@ -1,6 +1,6 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.2.9009
+# duckhts 1.5.2.9010
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination; memory-bounded decoding follows in #329. The sections below describe what 2.0.0 will contain.
 
