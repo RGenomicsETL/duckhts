@@ -1,20 +1,37 @@
 /* duckhts_roh, duckhts_roh_af_table and duckhts_roh_ancestry: runs of homozygosity
  * from a VCF/BCF; duckhts_roh_counts: from read counts in a caller relation.
  *
- * The macros read records with read_bcf(tidy_format := true), build one
- * list(... ORDER BY pos) per sample and chromosome, and pass it to the native
- * duckhts_roh_segments kernel. Relations (frequencies, genetic map) are passed
- * by table name through query_table, as in duckhts_cgranges_from_table. A
- * macro cannot take an absent relation, so the genetic map is a separate
- * overload and the frequency source is chosen by macro name.
+ * The macros read records with read_bcf(tidy_format := true), collect the
+ * sites of each sample and chromosome with the native __duckhts_roh_sites
+ * aggregate, and decode each packed site list with __duckhts_roh_decode.
+ * Relations (frequencies, genetic map) are passed by table name through
+ * query_table, as in duckhts_cgranges_from_table. A macro cannot take an
+ * absent relation, so the genetic map is a separate overload and the frequency
+ * source is chosen by macro name.
+ *
+ * Memory. DuckDB manages and can spill the scans, joins and reference stages.
+ * The site lists are native buffers that DuckHTS bounds: max_sites per sample
+ * and chromosome, and max_site_bytes for all the lists held at once, each with
+ * an explicit error (roh_sites.c).
  */
 #include "duckhts_registration.h"
+#include "roh_sites.h"
 
 #include <stdbool.h>
 #include <stddef.h>
 
+/* The SQL below passes the evidence kinds as literals. */
+_Static_assert(DUCKHTS_ROH_SITES_PL == 1 && DUCKHTS_ROH_SITES_GT == 2 &&
+               DUCKHTS_ROH_SITES_COUNTS == 3, "the ROH macro SQL names these kinds 1, 2 and 3");
+_Static_assert(DUCKHTS_ROH_MAX_SITES >= 20000000, "the default max_sites is within the hard limit");
+
+#define ROH_LIMITS "max_sites := 20000000, max_site_bytes := 4294967296"
 #define ROH_OPTIONS \
-    "hw_to_az := 6.7e-8, az_to_hw := 5e-9, gt_error := NULL, rec_rate := NULL, samples := NULL"
+    "hw_to_az := 6.7e-8, az_to_hw := 5e-9, gt_error := NULL, rec_rate := NULL, samples := NULL, " \
+    ROH_LIMITS
+#define ROH_LIMIT_ARGUMENTS "CAST(max_sites AS BIGINT), CAST(max_site_bytes AS BIGINT)"
+/* PL evidence unless gt_error is given. */
+#define ROH_KIND "CASE WHEN gt_error IS NULL THEN 1 ELSE 2 END"
 
 /* The evidence column is chosen at bind time so that GT mode never needs
  * FORMAT/PL, and projection pushdown decodes only the columns used. */
@@ -36,6 +53,12 @@ static const char sites_from_info_tag[] =
     "CAST(list_extract(COLUMNS(lambda c: c = 'INFO_' || af_tag), 1) AS DOUBLE) AS af, "
     ROH_EVIDENCE " AS evidence " ROH_RECORDS "), ";
 
+/* A record without a matching frequency row is dropped here, before the sites
+ * are collected, so it never claims a repeated position. With a left join it
+ * would arrive before or after the matching record of its position as the
+ * hash join happens to emit them, and the record kept would depend on the plan.
+ * (bcftools roh --AF-file instead takes the first record at a listed position
+ * in file order and skips the position when its alleles differ.) */
 static const char sites_from_relation[] =
     "WITH __dht_freq AS (SELECT CAST(chrom AS VARCHAR) AS f_chrom, CAST(pos AS BIGINT) AS f_pos, "
     "CAST(ref AS VARCHAR) AS f_ref, CAST(alt AS VARCHAR) AS f_alt, CAST(af AS DOUBLE) AS f_af "
@@ -44,18 +67,22 @@ static const char sites_from_relation[] =
     "array_to_string(ALT, ',') AS alt, SAMPLE_ID AS smp, " ROH_EVIDENCE " AS evidence "
     ROH_RECORDS "), "
     "__dht_sites AS NOT MATERIALIZED (SELECT c.chrom, c.pos, c.smp, f.f_af AS af, c.evidence "
-    "FROM __dht_calls AS c LEFT JOIN __dht_freq AS f ON f.f_chrom = c.chrom "
+    "FROM __dht_calls AS c JOIN __dht_freq AS f ON f.f_chrom = c.chrom "
     "AND f.f_pos = c.pos AND f.f_ref = c.ref AND f.f_alt = c.alt), ";
 
-/* One sorted list per sample and chromosome. The columns travel in a single
- * struct list so that all of them share one ordering, including ties. */
+/* One packed site list per sample and chromosome. The evidence column is
+ * FORMAT_PL or FORMAT_GT, chosen at bind time, and only the branch of that
+ * kind is evaluated: the RR, RA and AA likelihoods (a NULL where FORMAT/PL has
+ * fewer than three values), or the dosage of a diploid biallelic call. */
 static const char site_lists[] =
-    "__dht_lists AS (SELECT smp, chrom, list(struct_pack(pos := pos, af := af, "
-    "pl := CASE WHEN gt_error IS NULL THEN (CAST(evidence AS INTEGER[]))[1:3] END, "
-    "dosage := CASE WHEN gt_error IS NOT NULL AND "
-    "regexp_matches(CAST(evidence AS VARCHAR), '^[01][/|][01]$') THEN "
+    "__dht_lists AS (SELECT smp, chrom, __duckhts_roh_sites(pos, af, "
+    "CASE WHEN gt_error IS NULL THEN (CAST(evidence AS INTEGER[]))[1] "
+    "WHEN regexp_matches(CAST(evidence AS VARCHAR), '^[01][/|][01]$') THEN "
     "CAST(substr(CAST(evidence AS VARCHAR), 1, 1) AS INTEGER) + "
-    "CAST(substr(CAST(evidence AS VARCHAR), 3, 1) AS INTEGER) END) ORDER BY pos) AS s "
+    "CAST(substr(CAST(evidence AS VARCHAR), 3, 1) AS INTEGER) END, "
+    "CASE WHEN gt_error IS NULL THEN (CAST(evidence AS INTEGER[]))[2] END, "
+    "CASE WHEN gt_error IS NULL THEN (CAST(evidence AS INTEGER[]))[3] END, "
+    ROH_KIND ", " ROH_LIMIT_ARGUMENTS ") AS s "
     "FROM __dht_sites GROUP BY smp, chrom)";
 
 static const char map_lists[] =
@@ -67,26 +94,43 @@ static const char no_map_arguments[] = "NULL::BIGINT[], NULL::DOUBLE[]";
 static const char map_arguments[] =
     "list_transform(m.m, lambda x: x.pos), list_transform(m.m, lambda x: x.cm)";
 
-static const char kernel_pl[] =
-    "CASE WHEN gt_error IS NULL THEN duckhts_roh_segments("
-    "list_transform(l.s, lambda x: x.pos), list_transform(l.s, lambda x: x.af), "
-    "list_transform(l.s, lambda x: x.pl), ";
-static const char kernel_gt[] =
-    ", CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE)) ELSE "
-    "duckhts_roh_segments(list_transform(l.s, lambda x: x.pos), "
-    "list_transform(l.s, lambda x: x.af), list_transform(l.s, lambda x: x.dosage), "
-    "CAST(gt_error AS DOUBLE), ";
-static const char kernel_end[] =
-    ", CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE)) END";
-
+/* __duckhts_roh_decode(sites, gt_error, seq_error, contamination, map_pos,
+ * map_cm, rec_rate, hw_to_az, az_to_hw): the model parameters of the evidence
+ * kind, then the map arguments, then the transitions. */
 static const char select_head[] =
     " SELECT seg.smp AS \"sample\", seg.chrom AS chrom, seg.r.start AS start, "
     "seg.r.\"end\" AS \"end\", seg.r.\"end\" - seg.r.start + 1 AS length, "
     "seg.r.n_markers AS n_markers, seg.r.quality AS quality "
-    "FROM (SELECT l.smp, l.chrom, unnest(";
+    "FROM (SELECT l.smp, l.chrom, unnest(__duckhts_roh_decode(l.s, ";
+static const char genotype_model[] = "CAST(gt_error AS DOUBLE), NULL::DOUBLE, NULL::DOUBLE, ";
+static const char counts_model[] =
+    "NULL::DOUBLE, CAST(seq_error AS DOUBLE), CAST(contamination AS DOUBLE), ";
+static const char decode_end[] =
+    ", CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE))";
 static const char from_lists[] = ") AS r FROM __dht_lists AS l) AS seg";
 static const char from_lists_with_map[] =
     ") AS r FROM __dht_lists AS l JOIN __dht_map AS m ON m.m_chrom = l.chrom) AS seg";
+
+/* A second arm that returns no row but always runs, so that an invalid model
+ * parameter or limit fails even when there is no site to decode.
+ * __duckhts_roh_valid_args() applies the checks of the decode itself. */
+#define ROH_GUARD_COLUMNS \
+    " UNION ALL SELECT NULL::VARCHAR, NULL::VARCHAR, NULL::BIGINT, NULL::BIGINT, NULL::BIGINT, " \
+    "NULL::INTEGER, NULL::DOUBLE "
+#define ROH_GENOTYPE_ARGUMENTS_VALID \
+    "__duckhts_roh_valid_args(" ROH_KIND ", CAST(gt_error AS DOUBLE), NULL::DOUBLE, NULL::DOUBLE, " \
+    "CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE), " \
+    ROH_LIMIT_ARGUMENTS ")"
+static const char genotype_guard[] = ROH_GUARD_COLUMNS "WHERE NOT " ROH_GENOTYPE_ARGUMENTS_VALID;
+/* The ancestry macro also runs its relation checks (__dht_group_guard) here,
+ * so they do not depend on a call matching a reference site. */
+static const char ancestry_guard[] =
+    ROH_GUARD_COLUMNS "FROM __dht_group_guard AS g WHERE NOT (g.valid AND "
+    ROH_GENOTYPE_ARGUMENTS_VALID ")";
+static const char counts_guard[] =
+    ROH_GUARD_COLUMNS "WHERE NOT __duckhts_roh_valid_args(3, NULL::DOUBLE, "
+    "CAST(seq_error AS DOUBLE), CAST(contamination AS DOUBLE), CAST(rec_rate AS DOUBLE), "
+    "CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE), " ROH_LIMIT_ARGUMENTS ")";
 
 static const char ancestry_sites[] =
     /* The long reference (sites x groups rows) is read where it is used rather
@@ -132,15 +176,24 @@ static const char ancestry_sites[] =
  * The matched reference rows are aggregated once per called site (unordered
  * allele pair): frequencies and group indexes in group order, and whether the
  * frequencies are valid and the rows share one orientation. Every per-site
- * check reads that site-level relation instead of the long rows. */
+ * check reads that site-level relation instead of the long rows.
+ *
+ * The (group index, frequency) pairs of a site are collected unordered and
+ * sorted per site. list(... ORDER BY ...) is not used: DuckDB's ordered
+ * aggregate keeps a 2048-row buffer for every group with more than 16 rows,
+ * which for the chr20 reference (111,058 sites, 21 groups) costs 903 MB where
+ * this form costs 159 MB. */
 static const char ancestry_validations[] =
     "__dht_contig_map AS (SELECT r.contig, v.chrom FROM "
     "(SELECT DISTINCT contig FROM __dht_ref_rows) AS r JOIN "
     "(SELECT DISTINCT chrom FROM __dht_vcf_sites) AS v "
     "ON duckhts_contig_key(CAST(r.contig AS VARCHAR)) = duckhts_contig_key(v.chrom)), "
-    "__dht_ref AS (SELECT c.chrom, r.pos, any_value(r.allele_a) AS allele_a, "
+    "__dht_ref AS (SELECT chrom, pos, allele_a, allele_b, n_rows, "
+    "list_transform(pairs, lambda x: x.g) AS groups, "
+    "list_transform(pairs, lambda x: x.f) AS frequencies, valid_frequencies, one_orientation "
+    "FROM (SELECT c.chrom, r.pos, any_value(r.allele_a) AS allele_a, "
     "any_value(r.allele_b) AS allele_b, count(*) AS n_rows, "
-    "list(g.g ORDER BY g.g) AS groups, list(r.frequency ORDER BY g.g) AS frequencies, "
+    "list_sort(list(struct_pack(g := g.g, f := r.frequency))) AS pairs, "
     "bool_and(r.frequency IS NOT NULL AND isfinite(r.frequency) AND r.frequency >= 0 "
     "AND r.frequency <= 1) AS valid_frequencies, "
     "min(r.allele_a) = max(r.allele_a) AS one_orientation "
@@ -149,10 +202,11 @@ static const char ancestry_validations[] =
     "AND least(c.ref, c.alt) = least(r.allele_a, r.allele_b) "
     "AND greatest(c.ref, c.alt) = greatest(r.allele_a, r.allele_b) "
     "LEFT JOIN __dht_groups AS g ON g.group_id = r.group_id "
-    "GROUP BY c.chrom, r.pos, least(r.allele_a, r.allele_b), greatest(r.allele_a, r.allele_b)), "
+    "GROUP BY c.chrom, r.pos, least(r.allele_a, r.allele_b), "
+    "greatest(r.allele_a, r.allele_b))), "
     /* The argument checks come first, so they never depend on which
      * reference rows match a VCF site. */
-    "__dht_group_guard AS (SELECT CASE "
+    "__dht_group_guard AS MATERIALIZED (SELECT CASE "
     "WHEN af_clamp IS NULL OR NOT isfinite(af_clamp) OR af_clamp < 0 OR af_clamp >= 0.5 "
     "THEN error('af_clamp must be 0 or in (0, 0.5)') "
     /* duckhts_contig_key() is not injective (1 and chr1 share a key), so each key
@@ -166,7 +220,7 @@ static const char ancestry_validations[] =
     "(SELECT DISTINCT group_id FROM __dht_prop_rows WHERE group_id IS NOT NULL)) "
     "THEN error('reference and proportions group sets must match exactly') "
     /* Exactly one row per group: the sorted group indexes are 1..G, and no
-     * row lacks a group (a NULL index sorts last and breaks the equality). */
+     * row lacks a group (a NULL index breaks the equality wherever it sorts). */
     "WHEN EXISTS (SELECT 1 FROM __dht_ref WHERE n_rows != (SELECT count(*) FROM __dht_groups) "
     "OR groups IS DISTINCT FROM range(1, (SELECT count(*) FROM __dht_groups) + 1)) "
     "THEN error('reference must have exactly one frequency per site and group') "
@@ -184,7 +238,11 @@ static const char ancestry_validations[] =
     "WHEN EXISTS (SELECT 1 FROM __dht_prop_rows GROUP BY smp "
     "HAVING NOT (sum(proportion) > 0 AND sum(proportion) <= 1.0 + 1e-6)) "
     "THEN error('ancestry proportions must sum to more than 0 and at most 1 per sample') "
-    "ELSE true END AS valid), "
+    "ELSE true END AS valid), ";
+
+/* Per-sample frequencies of the called sites: the proportion-weighted sum of
+ * the group frequencies, for REF = allele_a, or one minus it when reversed. */
+static const char ancestry_frequencies[] =
     "__dht_ref_oriented AS (SELECT chrom, pos, allele_a AS ref, allele_b AS alt, "
     "false AS reversed, frequencies FROM __dht_ref UNION ALL "
     "SELECT chrom, pos, allele_b, allele_a, true, frequencies FROM __dht_ref), "
@@ -194,13 +252,14 @@ static const char ancestry_validations[] =
     "__dht_sites AS NOT MATERIALIZED (SELECT c.chrom, c.pos, c.smp, "
     "CASE WHEN p.proportions IS NULL THEN error('every VCF sample requires ancestry proportions') "
     "WHEN NOT g.valid THEN error('reference and proportions group sets must match exactly') "
-    "WHEN r.frequencies IS NULL THEN NULL "
     "WHEN NOT r.reversed THEN greatest(af_clamp, least(1.0 - af_clamp, "
     "list_inner_product(r.frequencies, p.proportions))) "
     "ELSE greatest(af_clamp, least(1.0 - af_clamp, "
     "1.0 - list_inner_product(r.frequencies, p.proportions))) END AS af, c.evidence "
+    /* As in duckhts_roh_af_table, a call without a reference site is dropped
+     * here, so it never claims a repeated position. */
     "FROM __dht_calls AS c CROSS JOIN __dht_group_guard AS g "
-    "LEFT JOIN __dht_ref_oriented AS r ON c.chrom = r.chrom AND c.pos = r.pos "
+    "JOIN __dht_ref_oriented AS r ON c.chrom = r.chrom AND c.pos = r.pos "
     "AND c.ref = r.ref AND c.alt = r.alt "
     "LEFT JOIN __dht_props AS p ON p.smp = c.smp), ";
 
@@ -209,24 +268,23 @@ static const char ancestry_validations[] =
  * before the macro, for example counts at panel sites joined to INFO/AF, an
  * af_table or ancestry-weighted frequencies. */
 #define ROH_COUNTS_OPTIONS \
-    "seq_error := 1e-3, contamination := 0.0, hw_to_az := 6.7e-8, az_to_hw := 5e-9, rec_rate := NULL"
+    "seq_error := 1e-3, contamination := 0.0, hw_to_az := 6.7e-8, az_to_hw := 5e-9, " \
+    "rec_rate := NULL, " ROH_LIMITS
+
+/* A count is cast to INTEGER only when it is a whole number: the cast alone
+ * would round 2.5 to 3. */
+#define ROH_WHOLE_COUNT(column) \
+    "CASE WHEN CAST(" column " AS DOUBLE) != trunc(CAST(" column " AS DOUBLE)) " \
+    "THEN error('read counts must be whole numbers') ELSE CAST(" column " AS INTEGER) END"
 
 static const char counts_lists[] =
     "WITH __dht_counts AS (SELECT CAST(sample_id AS VARCHAR) AS smp, "
     "CAST(chrom AS VARCHAR) AS chrom, CAST(pos AS BIGINT) AS pos, "
-    "CAST(ref_count AS INTEGER) AS ref_count, CAST(alt_count AS INTEGER) AS alt_count, "
+    ROH_WHOLE_COUNT("ref_count") " AS ref_count, " ROH_WHOLE_COUNT("alt_count") " AS alt_count, "
     "CAST(af AS DOUBLE) AS af FROM query_table(counts_table)), "
-    "__dht_lists AS (SELECT smp, chrom, list(struct_pack(pos := pos, af := af, "
-    "other := ref_count, counted := alt_count) ORDER BY pos) AS s "
+    "__dht_lists AS (SELECT smp, chrom, __duckhts_roh_sites(pos, af, ref_count, alt_count, "
+    "NULL::INTEGER, 3, " ROH_LIMIT_ARGUMENTS ") AS s "
     "FROM __dht_counts GROUP BY smp, chrom)";
-
-static const char kernel_counts[] =
-    "duckhts_roh_segments(list_transform(l.s, lambda x: x.pos), "
-    "list_transform(l.s, lambda x: x.af), list_transform(l.s, lambda x: x.other), "
-    "list_transform(l.s, lambda x: x.counted), CAST(seq_error AS DOUBLE), "
-    "CAST(contamination AS DOUBLE), ";
-static const char kernel_counts_end[] =
-    ", CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE))";
 
 #define ROH_MAX_PARTS 32
 
@@ -248,12 +306,11 @@ static bool register_roh_macro(duckhts_registration_t *registration, const roh_s
     parts[count++] = source->sites;
     parts[count++] = site_lists;
     parts[count++] = select_head;
-    parts[count++] = kernel_pl;
+    parts[count++] = genotype_model;
     parts[count++] = no_map_arguments;
-    parts[count++] = kernel_gt;
-    parts[count++] = no_map_arguments;
-    parts[count++] = kernel_end;
+    parts[count++] = decode_end;
     parts[count++] = from_lists;
+    parts[count++] = genotype_guard;
     parts[count++] = "), (path, ";
     parts[count++] = source->source_parameter;
     parts[count++] = ", genetic_map VARCHAR, " ROH_OPTIONS ") AS TABLE (";
@@ -261,12 +318,11 @@ static bool register_roh_macro(duckhts_registration_t *registration, const roh_s
     parts[count++] = site_lists;
     parts[count++] = map_lists;
     parts[count++] = select_head;
-    parts[count++] = kernel_pl;
+    parts[count++] = genotype_model;
     parts[count++] = map_arguments;
-    parts[count++] = kernel_gt;
-    parts[count++] = map_arguments;
-    parts[count++] = kernel_end;
+    parts[count++] = decode_end;
     parts[count++] = from_lists_with_map;
+    parts[count++] = genotype_guard;
     parts[count++] = ")";
     return duckhts_register_sql_parts(registration, parts, count);
 }
@@ -278,27 +334,27 @@ static bool register_roh_ancestry_macro(duckhts_registration_t *registration) {
                      "proportions_table, af_clamp := 1e-3, " ROH_OPTIONS ") AS TABLE (";
     parts[count++] = ancestry_sites;
     parts[count++] = ancestry_validations;
+    parts[count++] = ancestry_frequencies;
     parts[count++] = site_lists;
     parts[count++] = select_head;
-    parts[count++] = kernel_pl;
+    parts[count++] = genotype_model;
     parts[count++] = no_map_arguments;
-    parts[count++] = kernel_gt;
-    parts[count++] = no_map_arguments;
-    parts[count++] = kernel_end;
+    parts[count++] = decode_end;
     parts[count++] = from_lists;
+    parts[count++] = ancestry_guard;
     parts[count++] = "), (path, reference_table, proportions_table, genetic_map VARCHAR, "
                      "af_clamp := 1e-3, " ROH_OPTIONS ") AS TABLE (";
     parts[count++] = ancestry_sites;
     parts[count++] = ancestry_validations;
+    parts[count++] = ancestry_frequencies;
     parts[count++] = site_lists;
     parts[count++] = map_lists;
     parts[count++] = select_head;
-    parts[count++] = kernel_pl;
+    parts[count++] = genotype_model;
     parts[count++] = map_arguments;
-    parts[count++] = kernel_gt;
-    parts[count++] = map_arguments;
-    parts[count++] = kernel_end;
+    parts[count++] = decode_end;
     parts[count++] = from_lists_with_map;
+    parts[count++] = ancestry_guard;
     parts[count++] = ")";
     return duckhts_register_sql_parts(registration, parts, count);
 }
@@ -310,18 +366,20 @@ static bool register_roh_counts_macro(duckhts_registration_t *registration) {
                      ROH_COUNTS_OPTIONS ") AS TABLE (";
     parts[count++] = counts_lists;
     parts[count++] = select_head;
-    parts[count++] = kernel_counts;
+    parts[count++] = counts_model;
     parts[count++] = no_map_arguments;
-    parts[count++] = kernel_counts_end;
+    parts[count++] = decode_end;
     parts[count++] = from_lists;
+    parts[count++] = counts_guard;
     parts[count++] = "), (counts_table, genetic_map VARCHAR, " ROH_COUNTS_OPTIONS ") AS TABLE (";
     parts[count++] = counts_lists;
     parts[count++] = map_lists;
     parts[count++] = select_head;
-    parts[count++] = kernel_counts;
+    parts[count++] = counts_model;
     parts[count++] = map_arguments;
-    parts[count++] = kernel_counts_end;
+    parts[count++] = decode_end;
     parts[count++] = from_lists_with_map;
+    parts[count++] = counts_guard;
     parts[count++] = ")";
     return duckhts_register_sql_parts(registration, parts, count);
 }

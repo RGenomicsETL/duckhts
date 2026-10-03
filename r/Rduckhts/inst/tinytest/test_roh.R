@@ -160,6 +160,17 @@ test_roh_validation <- function() {
   expect_error(rduckhts_roh(con, vcf, af_tag = "AF", gt_error = -1), "gt_error must be")
   expect_error(rduckhts_roh(con, vcf, af_tag = "AF", rec_rate = NA_real_), "rec_rate must be")
   expect_error(rduckhts_roh(con, NA_character_, af_tag = "AF"), "path must be")
+  # The memory limits are whole numbers of at least 1, checked in R, and the
+  # extension reports a group or a total that exceeds them.
+  expect_error(rduckhts_roh(con, vcf, af_tag = "AF", max_sites = 0), "max_sites must be")
+  expect_error(rduckhts_roh(con, vcf, af_tag = "AF", max_sites = 1e9), "max_sites must be at most")
+  expect_error(rduckhts_roh(con, vcf, af_tag = "AF", max_site_bytes = 1.5),
+               "max_site_bytes must be")
+  expect_error(rduckhts_roh(con, vcf, af_tag = "AF", max_sites = 3), "max_sites")
+  expect_error(rduckhts_roh(con, vcf, af_tag = "AF", max_site_bytes = 100), "max_site_bytes")
+  expect_equal(.roh_observed(rduckhts_roh(con, vcf, af_tag = "AF", max_sites = 1e6,
+                                          max_site_bytes = 1e6)),
+               .roh_observed(rduckhts_roh(con, vcf, af_tag = "AF")))
   # The kernel rejects unsorted positions and mismatched lists by name.
   expect_error(dbGetQuery(con, paste(
     "SELECT duckhts_roh_segments([200, 100], [0.3, 0.3], [[0, 30, 60], [0, 30, 60]],",
@@ -235,5 +246,8 @@ test_roh_counts <- function() {
   expect_error(rduckhts_roh_counts(con, "roh_counts", contamination = -0.1), "contamination must be")
   expect_error(rduckhts_roh_counts(con, "roh_counts", contamination = NA_real_), "contamination must be")
   expect_error(rduckhts_roh_counts(con, NA_character_), "counts_table")
+  expect_error(rduckhts_roh_counts(con, "roh_counts", max_sites = 0), "max_sites must be")
+  expect_error(rduckhts_roh_counts(con, "roh_counts", max_sites = 5), "max_sites")
+  expect_error(rduckhts_roh_counts(con, "roh_counts", max_site_bytes = 100), "max_site_bytes")
 }
 test_roh_counts()

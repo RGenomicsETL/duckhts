@@ -1295,7 +1295,7 @@ Find runs of homozygosity in a VCF/BCF with the bcftools roh model, using allele
 Signature:
 
 ```sql
-duckhts_roh(path, af_tag, genetic_map, hw_to_az := 6.7e-8, az_to_hw := 5e-9, gt_error := NULL, rec_rate := NULL, samples := NULL)
+duckhts_roh(path, af_tag, genetic_map, hw_to_az := 6.7e-8, az_to_hw := 5e-9, gt_error := NULL, rec_rate := NULL, samples := NULL, max_sites := 20000000, max_site_bytes := 4294967296)
 ```
 
 Returns:
@@ -1320,9 +1320,13 @@ gt_error NULL uses PL. A numeric gt_error (phred, bcftools -G, for example 30) u
 
 hw_to_az and az_to_hw are the per-base-pair transition probabilities (bcftools -a and -H). rec_rate is a constant recombination rate per base pair (bcftools -M). The overload with a third positional argument takes genetic_map, a table name, with columns chrom, pos and cm (cumulative centimorgans at one-based positions, for example an IMPUTE2 map), interpolated as bcftools -m does; chromosomes without map rows are skipped, as bcftools skips a chromosome with no map file.
 
+### Memory
+
+DuckDB manages, and can spill, the scan and the joins. The sites of each sample and chromosome are held in native buffers of 16 bytes per site until that sample and chromosome is decoded, so memory follows samples times sites. max_sites caps one sample and chromosome (default 20,000,000; at most 100,000,000). max_site_bytes caps the buffers of every sample and chromosome held at once (default 4 GiB) and is shared by the decodes running in the process. Exceeding either limit is an error: decode fewer samples per query with samples, or raise the limit. Decoding one sample and chromosome also needs 38 bytes per site of workspace in each thread. Model parameters and limits are checked even when the input has no record.
+
 ### Limits
 
-Duplicate positions on a chromosome keep one record, and which one is not fixed by the file order; deduplicate upstream when it matters. bcftools' default AC/AN frequencies, --AF-dflt, --estimate-AF, --include/--exclude, --skip-indels, --ignore-homref, --buffer-size and --viterbi-training are not offered.
+Duplicate positions on a chromosome keep the first record to arrive, as bcftools roh keeps the first record in the file. That is the file order when one scan thread reads both records; deduplicate upstream when it matters. With a frequency relation (duckhts_roh_af_table, duckhts_roh_ancestry), only the records that match a frequency row take part. bcftools' default AC/AN frequencies, --AF-dflt, --estimate-AF, --include/--exclude, --skip-indels, --ignore-homref, --buffer-size and --viterbi-training are not offered.
 
 ### Examples
 
@@ -1341,7 +1345,7 @@ Find runs of homozygosity in a VCF/BCF with the bcftools roh model, using allele
 Signature:
 
 ```sql
-duckhts_roh_af_table(path, af_table, genetic_map, hw_to_az := 6.7e-8, az_to_hw := 5e-9, gt_error := NULL, rec_rate := NULL, samples := NULL)
+duckhts_roh_af_table(path, af_table, genetic_map, hw_to_az := 6.7e-8, az_to_hw := 5e-9, gt_error := NULL, rec_rate := NULL, samples := NULL, max_sites := 20000000, max_site_bytes := 4294967296)
 ```
 
 Returns:
@@ -1352,11 +1356,11 @@ table(sample VARCHAR, chrom VARCHAR, start BIGINT, "end" BIGINT, length BIGINT, 
 
 ### Frequencies
 
-af_table is a table or view name with columns chrom, pos (one-based), ref, alt and af, like a bcftools --AF-file. A record takes the frequency of the row matching its chrom, pos, REF and its ALT alleles joined by commas; records without a matching row, or with a NULL af, are skipped. Give one row per key; af must be in [0, 1], and exactly 0 skips the site. This is the entry point for per-sample frequencies, for example ancestry-tuned ones, by running it once per relation.
+af_table is a table or view name with columns chrom, pos (one-based), ref, alt and af, like a bcftools --AF-file. A record takes the frequency of the row matching its chrom, pos, REF and its ALT alleles joined by commas; a record without a matching row is not used and does not claim a repeated position, and a record whose row has a NULL af is skipped. bcftools roh --AF-file differs at a repeated position: it takes the first record in file order and skips the position when that record's alleles differ from the file's. Give one row per key; af must be in [0, 1], and exactly 0 skips the site. This is the entry point for per-sample frequencies, for example ancestry-tuned ones, by running it once per relation.
 
 ### Otherwise
 
-Everything else is as duckhts_roh: the same output, genotype evidence (PL, or GT with gt_error), transition parameters, optional genetic_map overload and limits.
+Everything else is as duckhts_roh: the same output, genotype evidence (PL, or GT with gt_error), transition parameters, optional genetic_map overload, memory limits and limits.
 
 ### Examples
 
@@ -1371,7 +1375,7 @@ Find runs of homozygosity using each sample's ancestry-weighted allele frequenci
 Signature:
 
 ```sql
-duckhts_roh_ancestry(path, reference_table, proportions_table, genetic_map, af_clamp := 1e-3, hw_to_az := 6.7e-8, az_to_hw := 5e-9, gt_error := NULL, rec_rate := NULL, samples := NULL)
+duckhts_roh_ancestry(path, reference_table, proportions_table, genetic_map, af_clamp := 1e-3, hw_to_az := 6.7e-8, az_to_hw := 5e-9, gt_error := NULL, rec_rate := NULL, samples := NULL, max_sites := 20000000, max_site_bytes := 4294967296)
 ```
 
 Returns:
@@ -1386,11 +1390,11 @@ reference_table is a long relation with chromosome, position (one-based), allele
 
 ### Frequency model
 
-For each called site and sample, AF is the sum over groups of proportion times group frequency. The reference is aggregated once per site and proportions once per sample, then joined to called sites. REF=allele_a and ALT=allele_b uses the weighted frequency; the reversed orientation uses 1-AF. Reference alleles must be on the forward strand of the VCF's assembly, as in a FASTA-anchored panel; no strand flip is attempted, so palindromic (A/T, C/G) sites are oriented by REF like any other, and a site whose alleles match neither order is not used. af_clamp in [0, 0.5) clamps AF to [af_clamp, 1-af_clamp]; zero disables clamping. The default avoids interpreting a population frequency of zero as impossible.
+For each called site and sample, AF is the sum over groups of proportion times group frequency. The reference is aggregated once per site and proportions once per sample, then joined to called sites. REF=allele_a and ALT=allele_b uses the weighted frequency; the reversed orientation uses 1-AF. Reference alleles must be on the forward strand of the VCF's assembly, as in a FASTA-anchored panel; no strand flip is attempted, so palindromic (A/T, C/G) sites are oriented by REF like any other, and a record whose alleles match neither order is not used and does not claim a repeated position. af_clamp in [0, 0.5) clamps AF to [af_clamp, 1-af_clamp]; zero disables clamping. The default avoids interpreting a population frequency of zero as impossible.
 
 ### Otherwise
 
-The output, genotype evidence, transitions, optional genetic_map overload and limits are as duckhts_roh_af_table.
+The output, genotype evidence, transitions, optional genetic_map overload, memory limits and limits are as duckhts_roh_af_table.
 
 ### Examples
 
@@ -1405,7 +1409,7 @@ Find runs of homozygosity from allele read counts, with sequencing error and opt
 Signature:
 
 ```sql
-duckhts_roh_counts(counts_table, genetic_map, seq_error := 1e-3, contamination := 0.0, hw_to_az := 6.7e-8, az_to_hw := 5e-9, rec_rate := NULL)
+duckhts_roh_counts(counts_table, genetic_map, seq_error := 1e-3, contamination := 0.0, hw_to_az := 6.7e-8, az_to_hw := 5e-9, rec_rate := NULL, max_sites := 20000000, max_site_bytes := 4294967296)
 ```
 
 Returns:
@@ -1424,7 +1428,7 @@ Each read shows the counted allele with probability (1 - contamination) * q + co
 
 ### Skipped sites
 
-Sites with no reads, a NULL count, or an af that is NULL, NaN or 0 are skipped; a repeated position keeps one row, as in the other overloads. Negative counts, seq_error outside (0, 0.5) and contamination outside [0, 1) are errors.
+Sites with no reads, a NULL count, or an af that is NULL, NaN or 0 are skipped; a repeated position keeps one row, as in the other overloads. The relation need not be sorted. Negative counts, fractional counts, seq_error outside (0, 0.5) and contamination outside [0, 1) are errors.
 
 ### Limitations
 
@@ -1432,7 +1436,7 @@ Biallelic sites only; one error rate for all reads, with no base- or mapping-qua
 
 ### Otherwise
 
-Output, transitions, rec_rate and the optional genetic_map overload are as duckhts_roh.
+Output, transitions, rec_rate, the optional genetic_map overload and the memory limits are as duckhts_roh, with 24 bytes per site.
 
 ### Examples
 

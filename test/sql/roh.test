@@ -1125,3 +1125,267 @@ SELECT duckhts_roh_segments([100, 200], [0.3, 0.3], [30, 30], [0, 0], NULL::DOUB
   NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9) IS NULL;
 ----
 true
+
+# ---------------------------------------------------------------------------------------------
+# Memory semantics. The macros collect each sample and chromosome with the native
+# __duckhts_roh_sites aggregate (16 bytes per site, 24 for read counts) and decode its packed
+# list with __duckhts_roh_decode. The public duckhts_roh_segments list overloads are the
+# independent reference: both paths must place the same runs.
+
+# PL evidence, with every special case in one list: a NULL triple, a negative value, three equal
+# values, values above the 255 cap (usable, because they differ before the cap), a missing and
+# a zero frequency, and a repeated position. The repeated position's second row is inserted last:
+# a scan of this small table is single-threaded, so rows arrive in rowid order, and the first row
+# of the position must win in both paths.
+statement ok
+CREATE TEMP TABLE roh_packed_pl AS
+SELECT i * 20000 AS pos,
+  CASE WHEN i % 41 = 0 THEN NULL WHEN i % 43 = 0 THEN 0.0 ELSE 0.2 + 0.5 * ((i * 37) % 100) / 100.0 END AS af,
+  CASE WHEN i % 29 = 0 THEN NULL WHEN i BETWEEN 100 AND 300 THEN 0 WHEN i % 3 = 0 THEN 40 ELSE 0 END AS rr,
+  CASE WHEN i % 31 = 0 THEN -1 WHEN i BETWEEN 100 AND 300 THEN 300 WHEN i % 3 = 0 THEN 0 ELSE 30 END AS ra,
+  CASE WHEN i % 37 = 0 THEN 30 WHEN i BETWEEN 100 AND 300 THEN 600 WHEN i % 3 = 0 THEN 45 ELSE 30 END AS aa
+FROM range(1, 401) AS t(i)
+UNION ALL SELECT 200 * 20000, 0.3, 50, 0, 50;
+
+query II
+WITH lists AS (SELECT list(pos ORDER BY pos, rowid) AS p, list(af ORDER BY pos, rowid) AS f,
+    list(CASE WHEN rr IS NOT NULL THEN [rr, ra, aa] END ORDER BY pos, rowid) AS pl FROM roh_packed_pl),
+reference AS (SELECT duckhts_roh_segments(p, f, pl, NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9) AS r FROM lists),
+packed AS (SELECT __duckhts_roh_decode(
+    __duckhts_roh_sites(pos, af, rr, ra, aa, 1, 1000, 1000000),
+    NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9) AS r FROM roh_packed_pl)
+SELECT (SELECT len(r) FROM reference) > 0, (SELECT r FROM reference) = (SELECT r FROM packed);
+----
+true	true
+
+# GT evidence: dosages with NULLs, against the list overload.
+query II
+WITH data AS (SELECT pos, af, CASE WHEN rr IS NULL THEN NULL WHEN rr = 0 AND ra > 0 THEN 0
+    WHEN ra = 0 THEN 1 ELSE 2 END AS dosage FROM roh_packed_pl WHERE pos != 200 * 20000 OR rr = 0),
+reference AS (SELECT duckhts_roh_segments(list(pos ORDER BY pos), list(af ORDER BY pos),
+    list(dosage ORDER BY pos), 30.0, NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9) AS r FROM data),
+packed AS (SELECT __duckhts_roh_decode(__duckhts_roh_sites(pos, af, dosage, NULL, NULL, 2, 1000, 1000000),
+    30.0, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9) AS r FROM data)
+SELECT (SELECT len(r) FROM reference) > 0, (SELECT r FROM reference) = (SELECT r FROM packed);
+----
+true	true
+
+# Read counts: the macro equals the list overload on its own sorted lists.
+query I
+WITH reference AS (SELECT sample_id, chrom, unnest(duckhts_roh_segments(list(pos ORDER BY pos),
+    list(af ORDER BY pos), list(ref_count::INTEGER ORDER BY pos), list(alt_count::INTEGER ORDER BY pos), 1e-3, 0.0,
+    NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9)) AS r FROM roh_counts_clean GROUP BY ALL),
+flat AS (SELECT sample_id AS sample, chrom, r.start AS start, r."end" AS "end", r."end" - r.start + 1 AS length,
+    r.n_markers AS n_markers, r.quality AS quality FROM reference),
+macro AS (SELECT * FROM duckhts_roh_counts('roh_counts_clean'))
+SELECT count(*) FROM ((SELECT * FROM flat EXCEPT ALL SELECT * FROM macro)
+UNION ALL (SELECT * FROM macro EXCEPT ALL SELECT * FROM flat));
+----
+0
+
+# The input relation need not be sorted: the sites are sorted natively.
+statement ok
+CREATE TEMP TABLE roh_counts_shuffled AS SELECT * FROM roh_counts_clean ORDER BY hash(pos, sample_id);
+
+query II
+WITH sorted AS (SELECT * FROM duckhts_roh_counts('roh_counts_clean')),
+shuffled AS (SELECT * FROM duckhts_roh_counts('roh_counts_shuffled'))
+SELECT (SELECT count(*) FROM sorted) > 0, (SELECT count(*) FROM ((SELECT * FROM sorted EXCEPT ALL SELECT * FROM shuffled)
+UNION ALL (SELECT * FROM shuffled EXCEPT ALL SELECT * FROM sorted)));
+----
+true	0
+
+# A repeated position keeps one row: a relation that repeats every site decodes like the original.
+statement ok
+CREATE TEMP TABLE roh_counts_repeated AS SELECT * FROM roh_counts_clean UNION ALL SELECT * FROM roh_counts_clean;
+
+query I
+WITH once AS (SELECT * FROM duckhts_roh_counts('roh_counts_clean')),
+twice AS (SELECT * FROM duckhts_roh_counts('roh_counts_repeated'))
+SELECT count(*) FROM ((SELECT * FROM once EXCEPT ALL SELECT * FROM twice)
+UNION ALL (SELECT * FROM twice EXCEPT ALL SELECT * FROM once));
+----
+0
+
+# max_sites caps one sample and chromosome with an explicit error. roh_counts_clean has 200 sites
+# per sample and chromosome.
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_clean', max_sites := 199);
+----
+one sample and chromosome holds more than 199 sites (max_sites)
+
+query I
+SELECT count(*) > 0 FROM duckhts_roh_counts('roh_counts_clean', max_sites := 200);
+----
+true
+
+statement error
+SELECT count(*) FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', max_sites := 3);
+----
+one sample and chromosome holds more than 3 sites (max_sites)
+
+# max_site_bytes caps the site buffers held at once.
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_clean', max_site_bytes := 2000);
+----
+more than max_site_bytes = 2000
+
+# The buffers are released when a decode ends, with or without an error: a budget that fits one
+# decode still fits the sixth, also after a failed one.
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_clean', max_sites := 199, max_site_bytes := 100000);
+----
+(max_sites)
+
+loop i 0 6
+
+query I
+SELECT count(*) > 0 FROM duckhts_roh_counts('roh_counts_clean', max_site_bytes := 100000);
+----
+true
+
+endloop
+
+# Invalid limits are errors.
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_clean', max_sites := 0);
+----
+max_sites must be between 1 and 100000000
+
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_clean', max_sites := 100000001);
+----
+max_sites must be between 1 and 100000000
+
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_clean', max_site_bytes := NULL);
+----
+max_site_bytes must be at least 1
+
+# Arguments are checked even when there is nothing to decode: an empty counts relation and a VCF
+# without records still reject an invalid model parameter, limit or af_clamp.
+statement ok
+CREATE TEMP TABLE roh_counts_none AS SELECT * FROM roh_counts_clean WHERE false;
+
+query I
+SELECT count(*) FROM duckhts_roh_counts('roh_counts_none');
+----
+0
+
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_none', seq_error := 0);
+----
+seq_error must be in (0, 0.5)
+
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_none', contamination := 1);
+----
+contamination must be in [0, 1)
+
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_none', max_sites := 0);
+----
+max_sites must be between 1 and 100000000
+
+statement error
+SELECT count(*) FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_empty.vcf', 'AF', hw_to_az := 2);
+----
+hw_to_az must be in [0, 1]
+
+statement error
+SELECT count(*) FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_empty.vcf', 'roh_af', gt_error := -1);
+----
+gt_error must be a finite phred value of at least 0
+
+statement error
+SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_empty.vcf',
+  'roh_ancestry_reference_forward', 'roh_ancestry_proportions', af_clamp := 0.5);
+----
+af_clamp must be 0 or in (0, 0.5)
+
+statement error
+SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_empty.vcf',
+  'roh_ancestry_reference_forward', 'roh_ancestry_proportions', az_to_hw := -1);
+----
+az_to_hw must be in [0, 1]
+
+# A NULL model parameter is not an error: the decode returns no rows.
+query I
+SELECT count(*) FROM duckhts_roh_counts('roh_counts_clean', seq_error := NULL);
+----
+0
+
+# Read counts must be whole numbers: a fractional count is an error, never rounded.
+statement ok
+CREATE TEMP TABLE roh_counts_fractional AS
+SELECT sample_id, chrom, pos, ref_count + 0.5 AS ref_count, alt_count, af FROM roh_counts_clean;
+
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_fractional');
+----
+read counts must be whole numbers
+
+statement ok
+CREATE TEMP TABLE roh_counts_double AS
+SELECT sample_id, chrom, pos, ref_count::DOUBLE AS ref_count, alt_count::DOUBLE AS alt_count, af FROM roh_counts_clean;
+
+query I
+WITH whole AS (SELECT * FROM duckhts_roh_counts('roh_counts_clean')),
+as_double AS (SELECT * FROM duckhts_roh_counts('roh_counts_double'))
+SELECT count(*) FROM ((SELECT * FROM whole EXCEPT ALL SELECT * FROM as_double)
+UNION ALL (SELECT * FROM as_double EXCEPT ALL SELECT * FROM whole));
+----
+0
+
+# Errors raised while the sites are collected name the position.
+statement ok
+CREATE TEMP TABLE roh_counts_negative AS
+SELECT sample_id, chrom, pos, CASE WHEN pos = 50000 THEN -1 ELSE ref_count END AS ref_count, alt_count, af FROM roh_counts_clean;
+
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_negative');
+----
+read counts must be at least 0 (position 50000)
+
+statement ok
+CREATE TEMP TABLE roh_counts_bad_af AS
+SELECT sample_id, chrom, pos, ref_count, alt_count, CASE WHEN pos = 50000 THEN 1.5 ELSE af END AS af FROM roh_counts_clean;
+
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_bad_af');
+----
+af must be in [0, 1] (position 50000 is 1.5)
+
+# __duckhts_roh_decode checks its input: any BLOB may be passed to it.
+statement error
+SELECT __duckhts_roh_decode('abc'::BLOB, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9);
+----
+sites is not a packed site list
+
+# A header followed by part of a record.
+statement error
+SELECT __duckhts_roh_decode('DHRS\x01\x00\x00\x00\x00\x00\x00\x00\x00'::BLOB, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9);
+----
+sites is not a packed site list
+
+# An unknown evidence kind.
+statement error
+SELECT __duckhts_roh_decode('DHRS\x09\x00\x00\x00'::BLOB, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9);
+----
+sites is not a packed site list
+
+# A header without records is a list of no sites.
+query I
+SELECT len(__duckhts_roh_decode('DHRS\x01\x00\x00\x00'::BLOB, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9));
+----
+0
+
+statement error
+SELECT __duckhts_roh_decode(('DHRS\x01\x00\x00\x00' || repeat('\x00', 16))::BLOB, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9);
+----
+packed site 1 is out of order or out of range
+
+query I
+SELECT __duckhts_roh_decode(NULL::BLOB, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9) IS NULL;
+----
+true
