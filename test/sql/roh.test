@@ -206,6 +206,47 @@ UNION ALL (SELECT * FROM pooled EXCEPT ALL SELECT * FROM tuned));
 ----
 0
 
+# af_clamp is checked before any reference row is matched: a reference that matches no
+# VCF site still rejects a missing, non-finite or out-of-range clamp.
+statement ok
+CREATE TEMP TABLE roh_ancestry_reference_unmatched AS
+SELECT chromosome, position + 100000000 AS position, allele_a, allele_b, group_id, frequency
+FROM roh_ancestry_reference_forward;
+
+query I
+SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_unmatched', 'roh_ancestry_proportions', gt_error := 30, samples := 'S1');
+----
+0
+
+statement error
+SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_unmatched', 'roh_ancestry_proportions', af_clamp := NULL,
+  gt_error := 30, samples := 'S1');
+----
+af_clamp must be 0 or in (0, 0.5)
+
+statement error
+SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_unmatched', 'roh_ancestry_proportions', af_clamp := 'nan'::DOUBLE,
+  gt_error := 30, samples := 'S1');
+----
+af_clamp must be 0 or in (0, 0.5)
+
+statement error
+SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_unmatched', 'roh_ancestry_proportions', af_clamp := 0.5,
+  gt_error := 30, samples := 'S1');
+----
+af_clamp must be 0 or in (0, 0.5)
+
+statement error
+SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_unmatched', 'roh_ancestry_proportions', af_clamp := -0.1,
+  gt_error := 30, samples := 'S1');
+----
+af_clamp must be 0 or in (0, 0.5)
+
 # Per-sample AF equals the equivalent per-site table, with and without a map.
 query I
 WITH tuned AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
