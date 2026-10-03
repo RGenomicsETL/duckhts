@@ -1,8 +1,8 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.2.9010
+# duckhts 1.5.2.9009
 
-Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
+Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel and ancestry-tuned frequencies; read-count emissions are still to come. The sections below describe what 2.0.0 will contain.
 
 - Added `duckhts_roh_ancestry()` for per-sample ancestry-weighted allele frequencies from long reference and proportion relations, with allele-orientation handling and optional frequency clamping.
 

@@ -29,7 +29,8 @@
 #' strand flip is attempted, so palindromic (A/T, C/G) sites are oriented by REF
 #' like any other, and a site whose alleles match neither order is not used.
 #' Chromosome names match after removing a
-#' leading `chr`. `af_clamp` limits nonzero-clamp frequencies to
+#' leading `chr`, and numeric names compare as integers (`chr1`, `1` and `01`
+#' match, as do `chrX` and `X`). `af_clamp` limits nonzero-clamp frequencies to
 #' `[af_clamp, 1-af_clamp]`; the default keeps zero population frequencies from
 #' being treated as impossible, and zero disables clamping. Only called sites
 #' are frequency-weighted. Supply exactly one frequency source: `af_tag`,

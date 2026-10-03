@@ -810,3 +810,49 @@ SELECT count(*) > 0 FROM ((SELECT * FROM ancestry EXCEPT ALL SELECT * FROM witho
 UNION ALL (SELECT * FROM without_palindromes EXCEPT ALL SELECT * FROM ancestry));
 ----
 true
+
+# Non-numeric contigs join like numeric ones: the reference and the VCF share one
+# chromosome key (leading chr removed), so a reference naming the contig chrS or S
+# gives the AF-table result on a VCF whose contig is chrS. A high hw_to_az makes the
+# seven sites yield a run, so a missing frequency would show as a missing run.
+statement ok
+CREATE TEMP TABLE roh_contig_sites AS SELECT DISTINCT CHROM AS chrom, POS AS pos, REF AS ref,
+  ALT[1] AS alt FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.vcf.gz');
+
+statement ok
+CREATE TEMP TABLE roh_contig_af AS SELECT chrom, pos, ref, alt, 0.3::DOUBLE AS af FROM roh_contig_sites;
+
+statement ok
+CREATE TEMP TABLE roh_contig_reference AS
+SELECT chrom AS chromosome, pos AS position, ref AS allele_a, alt AS allele_b, g AS group_id,
+  0.3::DOUBLE AS frequency FROM roh_contig_sites, (VALUES ('A'), ('B')) AS t(g)
+UNION ALL
+SELECT regexp_replace(chrom, '^chr', ''), pos, ref, alt, g || '_bare', 0.3::DOUBLE
+FROM roh_contig_sites, (VALUES ('A'), ('B')) AS t(g);
+
+statement ok
+CREATE TEMP TABLE roh_contig_reference_chr AS
+SELECT * FROM roh_contig_reference WHERE NOT ends_with(group_id, '_bare');
+
+statement ok
+CREATE TEMP TABLE roh_contig_reference_bare AS
+SELECT chromosome, position, allele_a, allele_b, replace(group_id, '_bare', '') AS group_id, frequency
+FROM roh_contig_reference WHERE ends_with(group_id, '_bare');
+
+statement ok
+CREATE TEMP TABLE roh_contig_proportions AS
+SELECT s AS sample_id, g AS group_id, 0.5::DOUBLE AS proportion
+FROM (VALUES ('S1'), ('S2')) AS a(s), (VALUES ('A'), ('B')) AS b(g);
+
+query III
+WITH af AS (SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.vcf.gz',
+  'roh_contig_af', gt_error := 30, hw_to_az := 0.1)),
+chr AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.vcf.gz',
+  'roh_contig_reference_chr', 'roh_contig_proportions', af_clamp := 0, gt_error := 30, hw_to_az := 0.1)),
+bare AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.vcf.gz',
+  'roh_contig_reference_bare', 'roh_contig_proportions', af_clamp := 0, gt_error := 30, hw_to_az := 0.1))
+SELECT (SELECT count(*) FROM af) > 0,
+  (SELECT count(*) FROM ((SELECT * FROM chr EXCEPT ALL SELECT * FROM af) UNION ALL (SELECT * FROM af EXCEPT ALL SELECT * FROM chr))),
+  (SELECT count(*) FROM ((SELECT * FROM bare EXCEPT ALL SELECT * FROM af) UNION ALL (SELECT * FROM af EXCEPT ALL SELECT * FROM bare)));
+----
+true	0	0

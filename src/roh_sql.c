@@ -87,13 +87,19 @@ static const char from_lists[] = ") AS r FROM __dht_lists AS l) AS seg";
 static const char from_lists_with_map[] =
     ") AS r FROM __dht_lists AS l JOIN __dht_map AS m ON m.m_chrom = l.chrom) AS seg";
 
+/* One chromosome key for the reference and the VCF: a leading "chr" is
+ * removed and a numeric name is written as an integer, so chr1, 1 and 01 meet,
+ * as do chrX and X. Both sides must use this same expression. */
+#define ROH_CHROM_KEY(expr) \
+    "coalesce(try_cast(regexp_replace(" expr ", '^chr', '') AS INTEGER)::VARCHAR, " \
+    "regexp_replace(" expr ", '^chr', ''))"
+
 static const char ancestry_sites[] =
     /* The long reference (sites x groups rows) is read where it is used rather
      * than held: rescanning the caller's relation is cheaper than keeping
      * millions of rows with string group names live for the whole query. */
     "WITH __dht_ref_rows AS NOT MATERIALIZED (SELECT "
-    "coalesce(try_cast(regexp_replace(CAST(chromosome AS VARCHAR), '^chr', '') AS INTEGER)::VARCHAR, "
-    "CAST(chromosome AS VARCHAR)) AS chrom, CAST(position AS BIGINT) AS pos, "
+    ROH_CHROM_KEY("CAST(chromosome AS VARCHAR)") " AS chrom, CAST(position AS BIGINT) AS pos, "
     "CAST(allele_a AS VARCHAR) AS allele_a, CAST(allele_b AS VARCHAR) AS allele_b, "
     "CAST(group_id AS VARCHAR) AS group_id, CAST(frequency AS DOUBLE) AS frequency "
     "FROM query_table(reference_table)), "
@@ -106,11 +112,11 @@ static const char ancestry_sites[] =
     "FROM (SELECT DISTINCT group_id FROM __dht_ref_rows WHERE group_id IS NOT NULL)), "
     /* A sites-only scan finds the reference sites to pivot, so the per-sample
      * calls stream into the lists instead of being held for reuse. */
-    "__dht_vcf_sites AS (SELECT DISTINCT regexp_replace(CHROM, '^chr', '') AS chrom, "
+    "__dht_vcf_sites AS (SELECT DISTINCT " ROH_CHROM_KEY("CHROM") " AS chrom, "
     "POS AS pos, REF AS ref, ALT[1] AS alt "
     "FROM read_bcf(path, decode_error_policy := 'error') " ROH_ALT_FILTER "), "
     "__dht_calls AS NOT MATERIALIZED (SELECT CHROM AS chrom, "
-    "regexp_replace(CHROM, '^chr', '') AS chrom_key, POS AS pos, REF AS ref, "
+    ROH_CHROM_KEY("CHROM") " AS chrom_key, POS AS pos, REF AS ref, "
     "ALT[1] AS alt, SAMPLE_ID AS smp, " ROH_EVIDENCE " AS evidence " ROH_RECORDS "), ";
 
 /* Reference alleles are taken to be on the forward strand of the VCF's

@@ -3,7 +3,9 @@
 # The accuracy arms are deterministic, so one repetition (the default) answers the
 # criterion; summarise_genome.R requires any further repetitions to match the first.
 # A completed repetition (output, timing receipt and .ok marker) is reused only
-# when its marker records the same extension and proportions SHA-256 as now.
+# when its marker records the same SHA-256 for every input the arms read: the
+# extension, the arm script, the pedigree, the children list, the proportions,
+# and each autosome's children BCF, AF sites and long reference.
 args <- commandArgs(trailingOnly = TRUE)
 repetitions <- if (length(args)) as.integer(args[[1L]]) else 1L
 if (length(repetitions) != 1L || is.na(repetitions) || repetitions < 1L || repetitions > 3L) {
@@ -13,10 +15,20 @@ cache <- file.path(duckhtsbench::duckhts_bench_cache_dir(), "benchmarks", "roh-a
 script <- normalizePath("benchmarks/roh_ancestry/run_autosome_arm.R", mustWork = TRUE)
 arms <- c("pooled", "single_AFR", "single_AMR", "single_EUR", "single_EAS", "ancestry")
 sha256 <- function(path) strsplit(system2("sha256sum", shQuote(path), stdout = TRUE), " ")[[1L]][[1L]]
-identity <- c(
-  extension_sha256 = sha256(normalizePath("build/release/duckhts.duckdb_extension", mustWork = TRUE)),
-  proportions_sha256 = sha256(file.path(cache, "autosome.q.csv")))
-identity_lines <- paste0(names(identity), "=", identity)
+inputs <- c(
+  extension = normalizePath("build/release/duckhts.duckdb_extension", mustWork = TRUE),
+  arm_script = script,
+  pedigree = file.path(cache, "pedigree.txt"),
+  children = file.path(cache, "chr20.children.present.txt"),
+  proportions = file.path(cache, "autosome.q.csv"),
+  unlist(lapply(1:22, function(chromosome) {
+    stats::setNames(file.path(cache, sprintf(
+      c("chr%d.children.bcf", "chr%d.af_reference_sites.parquet", "chr%d.reference_long.parquet"),
+      chromosome)), paste0(c("bcf_", "af_sites_", "reference_"), chromosome))
+  })))
+missing <- inputs[!file.exists(inputs)]
+if (length(missing)) stop("missing arm inputs: ", paste(missing, collapse = ", "), call. = FALSE)
+identity_lines <- paste0(names(inputs), "=", vapply(inputs, sha256, character(1L)))
 
 for (arm in arms) {
   for (repetition in seq_len(repetitions)) {

@@ -19,7 +19,9 @@ header_value <- function(name) {
 last_modified <- header_value("Last-Modified")
 etag <- header_value("ETag")
 output <- duckhtsbench::duckhts_bench_artifact_path(sprintf("roh_ancestry_chr%d_children_bcf", chromosome))
-result <- stage_roh_children(chromosome, url,
+# The registry-aware entry point checks the derived BCF's registered record and
+# sample counts before publishing it.
+result <- stage_roh_children_from_registry(chromosome, registry,
   duckhtsbench::duckhts_bench_artifact_path("roh_ancestry_pedigree"), output,
   bcftools = Sys.getenv("BCFTOOLS", unname(Sys.which("bcftools"))))
 receipt <- data.frame(

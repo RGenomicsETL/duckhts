@@ -1,7 +1,12 @@
 # Stream a pedigree-selected, biallelic-SNV BCF for one autosome.
+# expected_output, when given, is list(records = , samples = ) for the derived
+# BCF; a mismatch is an error and publishes nothing. Its SHA-256 is not compared:
+# bcftools writes its command line and date into the header, so the bytes differ
+# between runs even when the records are identical.
 stage_roh_children <- function(chromosome, source_vcf, pedigree, output,
                                bcftools = "/usr/local/bin/bcftools",
-                               expected_source_sha256 = NULL) {
+                               expected_source_sha256 = NULL,
+                               expected_output = NULL) {
   if (length(chromosome) != 1L || !is.numeric(chromosome) ||
       !is.finite(chromosome) || chromosome != as.integer(chromosome) ||
       chromosome < 1L || chromosome > 22L) {
@@ -75,6 +80,13 @@ stage_roh_children <- function(chromosome, source_vcf, pedigree, output,
   record_count <- as.integer(count_text)
   if (is.na(record_count)) stop("children BCF record count is not an integer", call. = FALSE)
   output_sha256 <- unname(digest::digest(file = temporary, algo = "sha256"))
+  if (!is.null(expected_output) &&
+      (!identical(record_count, as.integer(expected_output$records)) ||
+       !identical(length(output_samples), as.integer(expected_output$samples)))) {
+    unlink(c(temporary, temporary_index), force = TRUE)
+    stop("children BCF differs from its registered identity: ", record_count, " records and ",
+         length(output_samples), " samples", call. = FALSE)
+  }
   if (!file.rename(temporary, output)) {
     stop("could not publish the children BCF", call. = FALSE)
   }
@@ -104,6 +116,16 @@ stage_roh_children_from_registry <- function(
     stop("registry lacks one source and one children BCF artifact", call. = FALSE)
   }
   source_vcf <- if (is.null(source_vcf_override)) source_row$locator[[1L]] else source_vcf_override
+  # The registered record and sample counts of the derived BCF are checked even
+  # when the source is streamed and cannot be checksummed.
+  expected_output <- NULL
+  if ("supplier_identity" %in% names(output_row)) {
+    pairs <- strsplit(strsplit(output_row$supplier_identity[[1L]], ";", fixed = TRUE)[[1L]], "=", fixed = TRUE)
+    fields <- stats::setNames(vapply(pairs, `[`, character(1L), 2L), vapply(pairs, `[`, character(1L), 1L))
+    if (all(c("records", "samples") %in% names(fields))) {
+      expected_output <- list(records = fields[["records"]], samples = fields[["samples"]])
+    }
+  }
   stage_roh_children(chromosome, source_vcf, pedigree, output, bcftools,
-                     expected_source_sha256)
+                     expected_source_sha256, expected_output)
 }

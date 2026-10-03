@@ -54,6 +54,27 @@ test_roh_ancestry_staging <- function() {
                                           output)), stdout = TRUE), "0.1\t0.2"),
     file.exists(paste0(output, ".csi")),
     !file.exists(paste0(output, ".samples.txt")))
+
+  # The registered record and sample counts are checked before publishing: a
+  # wrong count is an error that leaves nothing at the destination, and the right
+  # counts pass.
+  registered <- registry
+  registered$supplier_identity <- c("", "records=2;samples=377;sha256=0000")
+  rejected <- file.path(directory, "rejected.bcf")
+  failed <- tryCatch({
+    stage_roh_children_from_registry(20L, registered, pedigree_path, rejected,
+                                     bcftools = bcftools,
+                                     expected_source_sha256 = source_hash)
+    FALSE
+  }, error = function(error) grepl("differs from its registered identity", conditionMessage(error)))
+  stopifnot(failed, !file.exists(rejected), !file.exists(paste0(rejected, ".csi")))
+  registered$supplier_identity[[2L]] <- paste0("records=1;samples=377;sha256=", result$output_sha256)
+  # The SHA-256 is the evaluated file's identity, not a reproducibility check.
+  accepted <- file.path(directory, "accepted.bcf")
+  verified <- stage_roh_children_from_registry(20L, registered, pedigree_path, accepted,
+                                               bcftools = bcftools,
+                                               expected_source_sha256 = source_hash)
+  stopifnot(verified$records == 1L, verified$samples == 377L, file.exists(accepted))
 }
 
 test_roh_ancestry_staging()
