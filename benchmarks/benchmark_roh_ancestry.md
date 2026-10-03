@@ -16,17 +16,30 @@ is declared before calculating or comparing any arm:
   within 5% relative of the single-population arm. For a zero
   comparator, equality is required.
 
-No amendment to the truth threshold has been made. A truth segment is a
-merged run of 100 kb windows with at most one heterozygous call per
-window, and a retained run covers at least 1 Mb of actual bases. An ROH
-call is truth-supported when at least 90% of its length overlaps these
-truth intervals. Truth calls use all biallelic SNVs in each full source
-VCF, not just ancestry-reference sites. The window distribution and
-separation check must be reviewed before any ROH-arm comparison; if
-inadequate, the threshold may only be amended here before computing arm
-results. The primary length threshold is 1 Mb, with 2 Mb and 5 Mb also
-reported. FROH is total called ROH length divided by callable autosomal
-length.
+A truth segment is a merged run of 100 kb windows with at most one
+heterozygous call per window, and a retained run covers at least 1 Mb of
+actual bases. An ROH call is truth-supported when at least 90% of its
+length overlaps these truth intervals. Truth calls use all biallelic
+SNVs in each full source VCF, not just ancestry-reference sites. The
+window distribution and separation check must be reviewed before any
+ROH-arm comparison; if inadequate, the threshold may only be amended
+here before computing arm results. The primary length threshold is 1 Mb,
+with 2 Mb and 5 Mb also reported. FROH is total called ROH length
+divided by callable autosomal length.
+
+**Amendment, made after the arm results.** Review found that the truth
+windows gave a window without called genotypes zero heterozygotes, so
+missing evidence counted as homozygous evidence. The amended rule also
+requires at least one called genotype per window; a window without one
+is ineligible and breaks a run. This corrects how the declared rule was
+implemented, and it was made after the arm results were known, against
+the timing the protocol sets. It does not change the threshold of at
+most one heterozygous call. A sensitivity rule, fixed before it was
+computed, requires at least 50 called genotypes per window, after
+PLINK’s 50-SNP `--homozyg-window-snp` default. The preregistered
+intervals, the amended intervals and the criterion under the
+preregistered truth are all kept (see *Truth-window separation* and
+*Criterion*).
 
 ## Data identity and processing status
 
@@ -49,28 +62,21 @@ PUR 35 (admixed), and YRI 56, ESN 43, CEU 57 and CHS 51 (controls).
 Single-population AF uses AFR for ACB, ASW, YRI and ESN; AMR for CLM,
 MXL, PEL and PUR; EUR for CEU; and EAS for CHS.
 
-Chr20 has the complete chromosome-specific truth, q and arm evaluation.
-The 22-autosome truth-window table and retained intervals are computed;
-chr20 windows were reused and the 102 retained chr20 intervals match the
-prior result exactly. Genome-wide q now contains 7,917 estimates (377
-children × 21 groups), all with `status=ok`; each child contributed
-4,883,749 matched loci and the `cor_pred` range is 0.643847–0.719384.
-The genome-wide comparison is incomplete. The arms run once each over
-all autosomes. The pooled, AFR, AMR, EUR and EAS arms are complete. The
-ancestry arm, run with the previous reference stage, ran out of memory
-in its first batch: eight children over all 22 autosomes in one query,
-with a 12 GB DuckDB limit. It will be rerun one chromosome per query
-with the shipped macro (#329). The arms are deterministic: the three
-chr20 repetitions gave identical segments, and the summary requires any
-further genome-wide repetition to match the first. The genome-wide
-results and criterion will be added to this report once that arm
-completes. The population child counts match the declared expectations:
-ACB 20, ASW 13, CLM 35, MXL 32, PEL 35, PUR 35, YRI 56, ESN 43, CEU 57
-and CHS 51. The chr20 source VCF was copied from the supplied local file
-after its checksum was verified; its remote metadata is recorded above.
-bcftools reported `1.23.1-70-g6dbd8fef`; the source header had 3,202
-samples and the children BCF has 377. All arms ran on extension builds
-of the `src` tree of revision `86f53052`; the later restructuring of
+This report evaluates chr20, with its complete chromosome-specific
+truth, q and arms. The genome-wide comparison is not part of this
+report. Its drivers and partial results were withdrawn after review
+found that their truth windows, cached-batch reuse and FROH denominator
+need the same correction as chr20 and more; they are recoverable from
+revision `68951a25` and continue in \#329, together with the
+per-chromosome rerun of the ancestry arm. The 22 autosome BCFs are
+staged and recorded below for that work. The population child counts
+match the declared expectations: ACB 20, ASW 13, CLM 35, MXL 32, PEL 35,
+PUR 35, YRI 56, ESN 43, CEU 57 and CHS 51. The chr20 source VCF was
+copied from the supplied local file after its checksum was verified; its
+remote metadata is recorded above. bcftools reported
+`1.23.1-70-g6dbd8fef`; the source header had 3,202 samples and the
+children BCF has 377. All arms ran on extension builds of the `src` tree
+of revision `86f53052`; the later restructuring of
 `duckhts_roh_ancestry`’s reference stage reproduces the chr20 ancestry
 segments exactly, so the evaluated outputs are those of the shipped
 macro. The remote chr1 input was streamed through bcftools; its ETag,
@@ -112,70 +118,52 @@ VCFs were streamed and not cached.
 
 ## Truth-window separation
 
-The complete chr20 truth-window distribution contains 243,165
-child-windows (645 windows per child, including the terminal partial
-window). Of these, 6,572 have zero heterozygotes and 2,840 have one;
-9,412 (3.87%) meet the declared `<=1` criterion, while 233,753 (96.13%)
-have at least two. The binned distribution is
-[here](results/roh-ancestry/chr20/truth_window_bins.csv), and the exact
-per-count distribution is
+The chr20 truth windows are 645 per child, including the terminal
+partial window: 243,165 child-windows in all. Four windows (273, 275 and
+277, next to the centromere, and the terminal window 644) hold no
+record, so 1,508 child-windows have no called genotype; every genotype
+in the children BCF is called. Of the 241,657 child-windows with called
+genotypes, 7,904 (3.27%) meet the `<=1` criterion. The binned
+distribution is below; the exact per-count distribution is
 [here](results/roh-ancestry/chr20/truth_window_distribution.csv). This
 separates the low-heterozygosity tail from the remaining windows
-sufficiently to retain the preregistered cutoff; no amendment was made.
-The retained truth is 102 runs of at least 1 Mb across 92 children; the
-run counts and truth-base denominators by population are
-[here](results/roh-ancestry/chr20/truth_runs_by_population.csv).
+sufficiently to retain the threshold.
 
-The binned distribution is summarized below; the exact per-count table
-is [here](results/roh-ancestry/chr20/truth_window_distribution.csv).
+Under the preregistered rule, the truth was 102 runs of at least 1 Mb
+across 92 children, and 79 of them were runs next to the centromere that
+the three empty windows 273–277 joined into 1 Mb. The amended truth is
+23 runs across 18 children; one of them, HG01499’s run at the chromosome
+end, loses only the empty terminal window. The sensitivity rule gives
+the same intervals. The [rule
+comparison](results/roh-ancestry/chr20/truth_rule_comparison.csv), the
+[amended](results/roh-ancestry/chr20/truth_intervals.csv) and
+[preregistered](results/roh-ancestry/chr20/truth_intervals_preregistered.csv)
+intervals, and the run counts and truth-base denominators by population,
+[amended](results/roh-ancestry/chr20/truth_runs_by_population.csv) and
+[preregistered](results/roh-ancestry/chr20/truth_runs_by_population_preregistered.csv),
+are result tables.
 
-| bin   | child_windows |
-|:------|--------------:|
-| 0     |          6572 |
-| 1     |          2840 |
-| 2-4   |          8374 |
-| 5-9   |         11801 |
-| 10-19 |         13120 |
-| 20-49 |         31570 |
-| 50+   |        168888 |
+| bin                | child_windows |
+|:-------------------|--------------:|
+| no called genotype |          1508 |
+| 0                  |          5064 |
+| 1                  |          2840 |
+| 2-4                |          8374 |
+| 5-9                |         11801 |
+| 10-19              |         13120 |
+| 20-49              |         31570 |
+| 50+                |        168888 |
 
-### Full-autosome truth windows
-
-The full truth set contains all child BCF biallelic SNVs across
-autosomes 1–22. Window sizes are 100 kb; terminal windows use their
-actual GRCh38 primary-assembly length from the Ensembl 116 FASTA index.
-A retained truth run must cover at least 1,000,000 actual bases. The
-chr20 window Parquet was reused; its 102 intervals exactly match the
-chromosome-specific evaluation.
-
-Across 377 children there are 10,842,520 child-windows: 745,963 (6.88%)
-have at most one heterozygote and 10,096,557 (93.12%) have at least two.
-There are 7,965 retained 1 Mb-or-longer intervals across all 377
-children. The [exact per-count window
-distribution](results/roh-ancestry/autosome_truth_window_distribution.csv),
-[retained intervals](results/roh-ancestry/autosome_truth_intervals.csv),
-[per-child truth
-metrics](results/roh-ancestry/autosome_truth_by_child.csv) and
-[population
-summary](results/roh-ancestry/autosome_truth_by_population.csv) are
-available as result tables.
-
-| population | children | truth_runs |   truth_bp | mean_froh | runs_ge_2mb | runs_ge_5mb |
-|:-----------|---------:|-----------:|-----------:|----------:|------------:|------------:|
-| ACB        |       20 |        377 | 2519500000 |    0.0438 |         262 |         160 |
-| ASW        |       13 |        242 | 1637200000 |    0.0438 |         168 |         104 |
-| CEU        |       57 |       1189 | 7338700000 |    0.0448 |         755 |         458 |
-| CHS        |       51 |       1041 | 6544300000 |    0.0446 |         674 |         409 |
-| CLM        |       35 |        832 | 4894244167 |    0.0486 |         529 |         310 |
-| ESN        |       43 |        893 | 5563600000 |    0.0450 |         583 |         347 |
-| MXL        |       32 |        681 | 4171900000 |    0.0453 |         439 |         259 |
-| PEL        |       35 |        746 | 4581100000 |    0.0455 |         477 |         286 |
-| PUR        |       35 |        858 | 4859400000 |    0.0483 |         525 |         295 |
-| YRI        |       56 |       1106 | 7132100000 |    0.0443 |         745 |         448 |
+The truth is a proxy derived from the same hard calls as the GT-only
+emissions, so correlated genotype errors are not independent of the
+arms. The fixed 100 kb grid makes eligibility depend on where
+heterozygotes fall, and the 90%-overlap rule credits a short call inside
+truth more than a longer call that crosses a run’s grid-defined end.
+Shifted-grid and base-level sensitivity analyses are not part of this
+report.
 
 The pooled and single-population comparisons began only after the chr20
-truth distribution was reviewed. The full-autosome separation check also
-retains the preregistered cutoff.
+truth distribution was reviewed.
 
 ## Ancestry proportions
 
@@ -580,274 +568,6 @@ counts are [here](results/roh-ancestry/chr20/site_counts_by_child.csv).
 | NA19249   | ok     |   0.7136 |        108757 | Africa (West)       | 1.0000 | Africa (East)       | 0.0000 | Africa (North)      | 0.0000 | YRI        | AFR             |
 | NA19258   | ok     |   0.7103 |        108757 | Africa (West)       | 1.0000 | Africa (East)       | 0.0000 | Africa (North)      | 0.0000 | YRI        | AFR             |
 
-### Full-autosome q estimates
-
-Genome-wide q uses all 22 child BCFs matched to GRCh38 non-palindromic
-biallelic reference sites and the bigsnpr 1.12.21 correction, with
-`min_cor = 0.4`. Eight-child batches were used under a 12 GB DuckDB
-memory limit. All 377 children have estimates for 21 groups, each
-child’s proportions sum to one, and every estimate has `status=ok`. The
-full per-child, per-group estimates and allele-harmonization counts are
-available in [the q table](results/roh-ancestry/autosome_q_by_child.csv)
-and [per-child site
-diagnostics](results/roh-ancestry/autosome_q_site_counts_by_child.csv).
-
-| Population | Superpopulation | children | used_variants_min | used_variants_max | cor_pred_min | cor_pred_median | cor_pred_max |
-|:-----------|:----------------|---------:|------------------:|------------------:|-------------:|----------------:|-------------:|
-| ACB        | AFR             |       20 |           4883749 |           4883749 |       0.6566 |          0.6897 |       0.6994 |
-| ASW        | AFR             |       13 |           4883749 |           4883749 |       0.6462 |          0.6699 |       0.6880 |
-| CEU        | EUR             |       57 |           4883749 |           4883749 |       0.6747 |          0.6800 |       0.6867 |
-| CHS        | EAS             |       51 |           4883749 |           4883749 |       0.7090 |          0.7147 |       0.7184 |
-| CLM        | AMR             |       35 |           4883749 |           4883749 |       0.6439 |          0.6585 |       0.6698 |
-| ESN        | AFR             |       43 |           4883749 |           4883749 |       0.7068 |          0.7106 |       0.7144 |
-| MXL        | AMR             |       32 |           4883749 |           4883749 |       0.6596 |          0.6703 |       0.7115 |
-| PEL        | AMR             |       35 |           4883749 |           4883749 |       0.6804 |          0.7070 |       0.7194 |
-| PUR        | AMR             |       35 |           4883749 |           4883749 |       0.6438 |          0.6537 |       0.6637 |
-| YRI        | AFR             |       56 |           4883749 |           4883749 |       0.7075 |          0.7107 |       0.7146 |
-
-| Population | Superpopulation | group_id            | proportion |
-|:-----------|:----------------|:--------------------|-----------:|
-| ACB        | AFR             | Africa (East)       |     0.0017 |
-| ACB        | AFR             | Africa (North)      |     0.0000 |
-| ACB        | AFR             | Africa (South)      |     0.0318 |
-| ACB        | AFR             | Africa (West)       |     0.8605 |
-| ACB        | AFR             | Ashkenazi           |     0.0004 |
-| ACB        | AFR             | Asia (East)         |     0.0008 |
-| ACB        | AFR             | Bangladesh          |     0.0034 |
-| ACB        | AFR             | Europe (North East) |     0.0040 |
-| ACB        | AFR             | Europe (South East) |     0.0000 |
-| ACB        | AFR             | Europe (South West) |     0.0044 |
-| ACB        | AFR             | Finland             |     0.0006 |
-| ACB        | AFR             | Ireland             |     0.0144 |
-| ACB        | AFR             | Italy               |     0.0036 |
-| ACB        | AFR             | Japan               |     0.0005 |
-| ACB        | AFR             | Middle East         |     0.0004 |
-| ACB        | AFR             | Pakistan            |     0.0007 |
-| ACB        | AFR             | Philippines         |     0.0012 |
-| ACB        | AFR             | Scandinavia         |     0.0242 |
-| ACB        | AFR             | South America       |     0.0042 |
-| ACB        | AFR             | Sri Lanka           |     0.0063 |
-| ACB        | AFR             | United Kingdom      |     0.0368 |
-| ASW        | AFR             | Africa (East)       |     0.0014 |
-| ASW        | AFR             | Africa (North)      |     0.0027 |
-| ASW        | AFR             | Africa (South)      |     0.1415 |
-| ASW        | AFR             | Africa (West)       |     0.6575 |
-| ASW        | AFR             | Ashkenazi           |     0.0023 |
-| ASW        | AFR             | Asia (East)         |     0.0015 |
-| ASW        | AFR             | Bangladesh          |     0.0015 |
-| ASW        | AFR             | Europe (North East) |     0.0095 |
-| ASW        | AFR             | Europe (South East) |     0.0000 |
-| ASW        | AFR             | Europe (South West) |     0.0202 |
-| ASW        | AFR             | Finland             |     0.0076 |
-| ASW        | AFR             | Ireland             |     0.0372 |
-| ASW        | AFR             | Italy               |     0.0000 |
-| ASW        | AFR             | Japan               |     0.0011 |
-| ASW        | AFR             | Middle East         |     0.0000 |
-| ASW        | AFR             | Pakistan            |     0.0000 |
-| ASW        | AFR             | Philippines         |     0.0016 |
-| ASW        | AFR             | Scandinavia         |     0.0357 |
-| ASW        | AFR             | South America       |     0.0136 |
-| ASW        | AFR             | Sri Lanka           |     0.0017 |
-| ASW        | AFR             | United Kingdom      |     0.0634 |
-| CEU        | EUR             | Africa (East)       |     0.0004 |
-| CEU        | EUR             | Africa (North)      |     0.0021 |
-| CEU        | EUR             | Africa (South)      |     0.0003 |
-| CEU        | EUR             | Africa (West)       |     0.0007 |
-| CEU        | EUR             | Ashkenazi           |     0.0046 |
-| CEU        | EUR             | Asia (East)         |     0.0004 |
-| CEU        | EUR             | Bangladesh          |     0.0000 |
-| CEU        | EUR             | Europe (North East) |     0.0181 |
-| CEU        | EUR             | Europe (South East) |     0.0148 |
-| CEU        | EUR             | Europe (South West) |     0.0501 |
-| CEU        | EUR             | Finland             |     0.0091 |
-| CEU        | EUR             | Ireland             |     0.0508 |
-| CEU        | EUR             | Italy               |     0.0109 |
-| CEU        | EUR             | Japan               |     0.0003 |
-| CEU        | EUR             | Middle East         |     0.0028 |
-| CEU        | EUR             | Pakistan            |     0.0007 |
-| CEU        | EUR             | Philippines         |     0.0003 |
-| CEU        | EUR             | Scandinavia         |     0.3076 |
-| CEU        | EUR             | South America       |     0.0021 |
-| CEU        | EUR             | Sri Lanka           |     0.0011 |
-| CEU        | EUR             | United Kingdom      |     0.5230 |
-| CHS        | EAS             | Africa (East)       |     0.0000 |
-| CHS        | EAS             | Africa (North)      |     0.0000 |
-| CHS        | EAS             | Africa (South)      |     0.0000 |
-| CHS        | EAS             | Africa (West)       |     0.0000 |
-| CHS        | EAS             | Ashkenazi           |     0.0000 |
-| CHS        | EAS             | Asia (East)         |     0.8919 |
-| CHS        | EAS             | Bangladesh          |     0.0000 |
-| CHS        | EAS             | Europe (North East) |     0.0000 |
-| CHS        | EAS             | Europe (South East) |     0.0000 |
-| CHS        | EAS             | Europe (South West) |     0.0000 |
-| CHS        | EAS             | Finland             |     0.0001 |
-| CHS        | EAS             | Ireland             |     0.0000 |
-| CHS        | EAS             | Italy               |     0.0000 |
-| CHS        | EAS             | Japan               |     0.1077 |
-| CHS        | EAS             | Middle East         |     0.0000 |
-| CHS        | EAS             | Pakistan            |     0.0000 |
-| CHS        | EAS             | Philippines         |     0.0000 |
-| CHS        | EAS             | Scandinavia         |     0.0000 |
-| CHS        | EAS             | South America       |     0.0002 |
-| CHS        | EAS             | Sri Lanka           |     0.0002 |
-| CHS        | EAS             | United Kingdom      |     0.0000 |
-| CLM        | AMR             | Africa (East)       |     0.0014 |
-| CLM        | AMR             | Africa (North)      |     0.0017 |
-| CLM        | AMR             | Africa (South)      |     0.0134 |
-| CLM        | AMR             | Africa (West)       |     0.0323 |
-| CLM        | AMR             | Ashkenazi           |     0.0016 |
-| CLM        | AMR             | Asia (East)         |     0.0000 |
-| CLM        | AMR             | Bangladesh          |     0.0000 |
-| CLM        | AMR             | Europe (North East) |     0.0000 |
-| CLM        | AMR             | Europe (South East) |     0.0000 |
-| CLM        | AMR             | Europe (South West) |     0.3626 |
-| CLM        | AMR             | Finland             |     0.0021 |
-| CLM        | AMR             | Ireland             |     0.0000 |
-| CLM        | AMR             | Italy               |     0.0362 |
-| CLM        | AMR             | Japan               |     0.0004 |
-| CLM        | AMR             | Middle East         |     0.0004 |
-| CLM        | AMR             | Pakistan            |     0.0000 |
-| CLM        | AMR             | Philippines         |     0.0002 |
-| CLM        | AMR             | Scandinavia         |     0.0014 |
-| CLM        | AMR             | South America       |     0.5453 |
-| CLM        | AMR             | Sri Lanka           |     0.0009 |
-| CLM        | AMR             | United Kingdom      |     0.0000 |
-| ESN        | AFR             | Africa (East)       |     0.0000 |
-| ESN        | AFR             | Africa (North)      |     0.0000 |
-| ESN        | AFR             | Africa (South)      |     0.0355 |
-| ESN        | AFR             | Africa (West)       |     0.9645 |
-| ESN        | AFR             | Ashkenazi           |     0.0000 |
-| ESN        | AFR             | Asia (East)         |     0.0000 |
-| ESN        | AFR             | Bangladesh          |     0.0000 |
-| ESN        | AFR             | Europe (North East) |     0.0000 |
-| ESN        | AFR             | Europe (South East) |     0.0000 |
-| ESN        | AFR             | Europe (South West) |     0.0000 |
-| ESN        | AFR             | Finland             |     0.0000 |
-| ESN        | AFR             | Ireland             |     0.0000 |
-| ESN        | AFR             | Italy               |     0.0000 |
-| ESN        | AFR             | Japan               |     0.0000 |
-| ESN        | AFR             | Middle East         |     0.0000 |
-| ESN        | AFR             | Pakistan            |     0.0000 |
-| ESN        | AFR             | Philippines         |     0.0000 |
-| ESN        | AFR             | Scandinavia         |     0.0000 |
-| ESN        | AFR             | South America       |     0.0000 |
-| ESN        | AFR             | Sri Lanka           |     0.0000 |
-| ESN        | AFR             | United Kingdom      |     0.0000 |
-| MXL        | AMR             | Africa (East)       |     0.0008 |
-| MXL        | AMR             | Africa (North)      |     0.0065 |
-| MXL        | AMR             | Africa (South)      |     0.0018 |
-| MXL        | AMR             | Africa (West)       |     0.0010 |
-| MXL        | AMR             | Ashkenazi           |     0.0061 |
-| MXL        | AMR             | Asia (East)         |     0.0021 |
-| MXL        | AMR             | Bangladesh          |     0.0000 |
-| MXL        | AMR             | Europe (North East) |     0.0005 |
-| MXL        | AMR             | Europe (South East) |     0.0047 |
-| MXL        | AMR             | Europe (South West) |     0.1034 |
-| MXL        | AMR             | Finland             |     0.0035 |
-| MXL        | AMR             | Ireland             |     0.0057 |
-| MXL        | AMR             | Italy               |     0.0348 |
-| MXL        | AMR             | Japan               |     0.0096 |
-| MXL        | AMR             | Middle East         |     0.0007 |
-| MXL        | AMR             | Pakistan            |     0.0000 |
-| MXL        | AMR             | Philippines         |     0.0003 |
-| MXL        | AMR             | Scandinavia         |     0.0085 |
-| MXL        | AMR             | South America       |     0.8083 |
-| MXL        | AMR             | Sri Lanka           |     0.0017 |
-| MXL        | AMR             | United Kingdom      |     0.0000 |
-| PEL        | AMR             | Africa (East)       |     0.0000 |
-| PEL        | AMR             | Africa (North)      |     0.0000 |
-| PEL        | AMR             | Africa (South)      |     0.0000 |
-| PEL        | AMR             | Africa (West)       |     0.0000 |
-| PEL        | AMR             | Ashkenazi           |     0.0000 |
-| PEL        | AMR             | Asia (East)         |     0.0007 |
-| PEL        | AMR             | Bangladesh          |     0.0000 |
-| PEL        | AMR             | Europe (North East) |     0.0000 |
-| PEL        | AMR             | Europe (South East) |     0.0000 |
-| PEL        | AMR             | Europe (South West) |     0.0000 |
-| PEL        | AMR             | Finland             |     0.0000 |
-| PEL        | AMR             | Ireland             |     0.0000 |
-| PEL        | AMR             | Italy               |     0.0000 |
-| PEL        | AMR             | Japan               |     0.0027 |
-| PEL        | AMR             | Middle East         |     0.0000 |
-| PEL        | AMR             | Pakistan            |     0.0000 |
-| PEL        | AMR             | Philippines         |     0.0000 |
-| PEL        | AMR             | Scandinavia         |     0.0000 |
-| PEL        | AMR             | South America       |     0.9966 |
-| PEL        | AMR             | Sri Lanka           |     0.0000 |
-| PEL        | AMR             | United Kingdom      |     0.0000 |
-| PUR        | AMR             | Africa (East)       |     0.0037 |
-| PUR        | AMR             | Africa (North)      |     0.0546 |
-| PUR        | AMR             | Africa (South)      |     0.0299 |
-| PUR        | AMR             | Africa (West)       |     0.0718 |
-| PUR        | AMR             | Ashkenazi           |     0.0068 |
-| PUR        | AMR             | Asia (East)         |     0.0005 |
-| PUR        | AMR             | Bangladesh          |     0.0000 |
-| PUR        | AMR             | Europe (North East) |     0.0059 |
-| PUR        | AMR             | Europe (South East) |     0.0052 |
-| PUR        | AMR             | Europe (South West) |     0.4885 |
-| PUR        | AMR             | Finland             |     0.0062 |
-| PUR        | AMR             | Ireland             |     0.0155 |
-| PUR        | AMR             | Italy               |     0.0280 |
-| PUR        | AMR             | Japan               |     0.0020 |
-| PUR        | AMR             | Middle East         |     0.0042 |
-| PUR        | AMR             | Pakistan            |     0.0005 |
-| PUR        | AMR             | Philippines         |     0.0004 |
-| PUR        | AMR             | Scandinavia         |     0.0012 |
-| PUR        | AMR             | South America       |     0.2731 |
-| PUR        | AMR             | Sri Lanka           |     0.0013 |
-| PUR        | AMR             | United Kingdom      |     0.0005 |
-| YRI        | AFR             | Africa (East)       |     0.0000 |
-| YRI        | AFR             | Africa (North)      |     0.0000 |
-| YRI        | AFR             | Africa (South)      |     0.0071 |
-| YRI        | AFR             | Africa (West)       |     0.9929 |
-| YRI        | AFR             | Ashkenazi           |     0.0000 |
-| YRI        | AFR             | Asia (East)         |     0.0000 |
-| YRI        | AFR             | Bangladesh          |     0.0000 |
-| YRI        | AFR             | Europe (North East) |     0.0000 |
-| YRI        | AFR             | Europe (South East) |     0.0000 |
-| YRI        | AFR             | Europe (South West) |     0.0000 |
-| YRI        | AFR             | Finland             |     0.0000 |
-| YRI        | AFR             | Ireland             |     0.0000 |
-| YRI        | AFR             | Italy               |     0.0000 |
-| YRI        | AFR             | Japan               |     0.0000 |
-| YRI        | AFR             | Middle East         |     0.0000 |
-| YRI        | AFR             | Pakistan            |     0.0000 |
-| YRI        | AFR             | Philippines         |     0.0000 |
-| YRI        | AFR             | Scandinavia         |     0.0000 |
-| YRI        | AFR             | South America       |     0.0000 |
-| YRI        | AFR             | Sri Lanka           |     0.0000 |
-| YRI        | AFR             | United Kingdom      |     0.0000 |
-
-The AF and ancestry reference keys match on all 22 autosomes: 4,883,749
-keys in total, with zero AF-only or ancestry-only keys on every
-chromosome. The per-chromosome comparison is
-[here](results/roh-ancestry/autosome_site_set_equivalence.csv).
-
-| chromosome | af_site_count | ancestry_site_count | af_only_count | ancestry_only_count |
-|-----------:|--------------:|--------------------:|--------------:|--------------------:|
-|          1 |        376549 |              376549 |             0 |                   0 |
-|          2 |        404206 |              404206 |             0 |                   0 |
-|          3 |        352971 |              352971 |             0 |                   0 |
-|          4 |        361939 |              361939 |             0 |                   0 |
-|          5 |        310401 |              310401 |             0 |                   0 |
-|          6 |        331298 |              331298 |             0 |                   0 |
-|          7 |        290391 |              290391 |             0 |                   0 |
-|          8 |        265510 |              265510 |             0 |                   0 |
-|          9 |        208413 |              208413 |             0 |                   0 |
-|         10 |        247518 |              247518 |             0 |                   0 |
-|         11 |        242240 |              242240 |             0 |                   0 |
-|         12 |        235053 |              235053 |             0 |                   0 |
-|         13 |        182042 |              182042 |             0 |                   0 |
-|         14 |        157853 |              157853 |             0 |                   0 |
-|         15 |        139275 |              139275 |             0 |                   0 |
-|         16 |        145409 |              145409 |             0 |                   0 |
-|         17 |        127000 |              127000 |             0 |                   0 |
-|         18 |        144036 |              144036 |             0 |                   0 |
-|         19 |        115997 |              115997 |             0 |                   0 |
-|         20 |        108757 |              108757 |             0 |                   0 |
-|         21 |         69521 |               69521 |             0 |                   0 |
-|         22 |         67370 |               67370 |             0 |                   0 |
-
 ## ROH results
 
 All count and length summaries are per-child quantities and are
@@ -857,60 +577,65 @@ it is not the declared genome-wide FROH denominator.
 
 | Population | Arm               | Unsupported ROH count / child (\>=1 Mb; \>=2 Mb; \>=5 Mb) | Unsupported ROH length / child (\>=1 Mb; \>=2 Mb; \>=5 Mb) | Supported count / child | Supported length / child |     FROH | Truth-run length covered |
 |:-----------|:------------------|:----------------------------------------------------------|:-----------------------------------------------------------|------------------------:|-------------------------:|---------:|-------------------------:|
-| ACB        | Pooled            | 0.350; 0.100; 0.000                                       | 670900; 356078; 0                                          |                   0.000 |                        0 | 0.151113 |                    21.52 |
-| ACB        | Single population | 0.300; 0.050; 0.000                                       | 468436; 153856; 0                                          |                   0.000 |                        0 | 0.133340 |                    21.52 |
-| ACB        | Ancestry tuned    | 0.300; 0.050; 0.000                                       | 468436; 153856; 0                                          |                   0.000 |                        0 | 0.132315 |                    21.52 |
-| ASW        | Pooled            | 0.308; 0.231; 0.000                                       | 1031233; 950841; 0                                         |                   0.000 |                        0 | 0.161486 |                     0.00 |
-| ASW        | Single population | 0.231; 0.154; 0.000                                       | 641463; 561376; 0                                          |                   0.000 |                        0 | 0.143329 |                     0.00 |
-| ASW        | Ancestry tuned    | 0.308; 0.231; 0.000                                       | 956017; 875930; 0                                          |                   0.000 |                        0 | 0.147672 |                     0.00 |
-| CLM        | Pooled            | 0.914; 0.200; 0.029                                       | 1447021; 565503; 192631                                    |                   0.029 |                   101071 | 0.259322 |                    30.95 |
-| CLM        | Single population | 0.943; 0.200; 0.029                                       | 1474631; 565486; 192631                                    |                   0.029 |                   101071 | 0.244852 |                    30.95 |
-| CLM        | Ancestry tuned    | 0.886; 0.200; 0.029                                       | 1413754; 565486; 192631                                    |                   0.029 |                   101071 | 0.244794 |                    30.95 |
-| MXL        | Pooled            | 0.875; 0.125; 0.031                                       | 1325084; 421403; 211752                                    |                   0.031 |                    51818 | 0.281746 |                    28.30 |
-| MXL        | Single population | 0.750; 0.125; 0.031                                       | 1185224; 420997; 211473                                    |                   0.031 |                    51818 | 0.267161 |                    28.30 |
-| MXL        | Ancestry tuned    | 0.750; 0.125; 0.031                                       | 1188555; 420997; 211473                                    |                   0.031 |                    51818 | 0.267304 |                    28.30 |
-| PEL        | Pooled            | 1.886; 0.257; 0.000                                       | 2765371; 637938; 0                                         |                   0.000 |                        0 | 0.361562 |                     7.81 |
-| PEL        | Single population | 1.800; 0.257; 0.000                                       | 2662697; 637723; 0                                         |                   0.000 |                        0 | 0.341866 |                     7.81 |
-| PEL        | Ancestry tuned    | 1.829; 0.257; 0.000                                       | 2704393; 637290; 0                                         |                   0.000 |                        0 | 0.339094 |                     7.81 |
-| PUR        | Pooled            | 0.514; 0.057; 0.000                                       | 741818; 175457; 0                                          |                   0.057 |                   346568 | 0.229328 |                    59.65 |
-| PUR        | Single population | 0.429; 0.057; 0.000                                       | 645491; 175714; 0                                          |                   0.057 |                   343779 | 0.216111 |                    59.65 |
-| PUR        | Ancestry tuned    | 0.514; 0.057; 0.000                                       | 748088; 175714; 0                                          |                   0.057 |                   343779 | 0.217421 |                    59.65 |
-| YRI        | Pooled            | 0.429; 0.179; 0.018                                       | 1048185; 703952; 145594                                    |                   0.000 |                        0 | 0.166384 |                    46.76 |
-| YRI        | Single population | 0.393; 0.143; 0.018                                       | 897098; 561710; 146193                                     |                   0.000 |                        0 | 0.140664 |                    46.76 |
-| YRI        | Ancestry tuned    | 0.393; 0.143; 0.018                                       | 897079; 561710; 146193                                     |                   0.000 |                        0 | 0.140369 |                    46.76 |
-| ESN        | Pooled            | 0.512; 0.186; 0.093                                       | 1269975; 888192; 591068                                    |                   0.000 |                        0 | 0.170931 |                    33.85 |
-| ESN        | Single population | 0.419; 0.163; 0.070                                       | 1071104; 764335; 467527                                    |                   0.000 |                        0 | 0.143510 |                    15.38 |
-| ESN        | Ancestry tuned    | 0.419; 0.163; 0.070                                       | 1071104; 764335; 467527                                    |                   0.000 |                        0 | 0.142799 |                    15.38 |
-| CEU        | Pooled            | 0.649; 0.070; 0.018                                       | 993521; 293245; 105846                                     |                   0.000 |                        0 | 0.286503 |                    12.17 |
-| CEU        | Single population | 0.614; 0.070; 0.018                                       | 953874; 293245; 105846                                     |                   0.000 |                        0 | 0.260306 |                    12.17 |
-| CEU        | Ancestry tuned    | 0.632; 0.070; 0.018                                       | 966819; 293245; 105846                                     |                   0.000 |                        0 | 0.261963 |                    12.17 |
-| CHS        | Pooled            | 0.843; 0.078; 0.000                                       | 1194930; 170283; 0                                         |                   0.000 |                        0 | 0.329422 |                     0.00 |
-| CHS        | Single population | 0.824; 0.078; 0.000                                       | 1150715; 170482; 0                                         |                   0.000 |                        0 | 0.292096 |                     0.00 |
-| CHS        | Ancestry tuned    | 0.824; 0.078; 0.000                                       | 1150742; 170510; 0                                         |                   0.000 |                        0 | 0.294230 |                     0.00 |
+| ACB        | Pooled            | 0.350; 0.100; 0.000                                       | 670900; 356078; 0                                          |                   0.000 |                        0 | 0.151113 |                   100.00 |
+| ACB        | Single population | 0.300; 0.050; 0.000                                       | 468436; 153856; 0                                          |                   0.000 |                        0 | 0.133340 |                   100.00 |
+| ACB        | Ancestry tuned    | 0.300; 0.050; 0.000                                       | 468436; 153856; 0                                          |                   0.000 |                        0 | 0.132315 |                   100.00 |
+| ASW        | Pooled            | 0.308; 0.231; 0.000                                       | 1031233; 950841; 0                                         |                   0.000 |                        0 | 0.161486 |                       NA |
+| ASW        | Single population | 0.231; 0.154; 0.000                                       | 641463; 561376; 0                                          |                   0.000 |                        0 | 0.143329 |                       NA |
+| ASW        | Ancestry tuned    | 0.308; 0.231; 0.000                                       | 956017; 875930; 0                                          |                   0.000 |                        0 | 0.147672 |                       NA |
+| CLM        | Pooled            | 0.914; 0.200; 0.029                                       | 1447021; 565503; 192631                                    |                   0.029 |                   101071 | 0.259322 |                    98.84 |
+| CLM        | Single population | 0.943; 0.200; 0.029                                       | 1474631; 565486; 192631                                    |                   0.029 |                   101071 | 0.244852 |                    98.84 |
+| CLM        | Ancestry tuned    | 0.886; 0.200; 0.029                                       | 1413754; 565486; 192631                                    |                   0.029 |                   101071 | 0.244794 |                    98.84 |
+| MXL        | Pooled            | 0.875; 0.125; 0.031                                       | 1325084; 421403; 211752                                    |                   0.031 |                    51818 | 0.281746 |                   100.00 |
+| MXL        | Single population | 0.750; 0.125; 0.031                                       | 1185224; 420997; 211473                                    |                   0.031 |                    51818 | 0.267161 |                   100.00 |
+| MXL        | Ancestry tuned    | 0.750; 0.125; 0.031                                       | 1188555; 420997; 211473                                    |                   0.031 |                    51818 | 0.267304 |                   100.00 |
+| PEL        | Pooled            | 1.886; 0.257; 0.000                                       | 2765371; 637938; 0                                         |                   0.000 |                        0 | 0.361562 |                   100.00 |
+| PEL        | Single population | 1.800; 0.257; 0.000                                       | 2662697; 637723; 0                                         |                   0.000 |                        0 | 0.341866 |                   100.00 |
+| PEL        | Ancestry tuned    | 1.829; 0.257; 0.000                                       | 2704393; 637290; 0                                         |                   0.000 |                        0 | 0.339094 |                   100.00 |
+| PUR        | Pooled            | 0.514; 0.057; 0.000                                       | 741818; 175457; 0                                          |                   0.057 |                   346568 | 0.229328 |                   100.00 |
+| PUR        | Single population | 0.429; 0.057; 0.000                                       | 645491; 175714; 0                                          |                   0.057 |                   343779 | 0.216111 |                   100.00 |
+| PUR        | Ancestry tuned    | 0.514; 0.057; 0.000                                       | 748088; 175714; 0                                          |                   0.057 |                   343779 | 0.217421 |                   100.00 |
+| YRI        | Pooled            | 0.429; 0.179; 0.018                                       | 1048185; 703952; 145594                                    |                   0.000 |                        0 | 0.166384 |                   100.00 |
+| YRI        | Single population | 0.393; 0.143; 0.018                                       | 897098; 561710; 146193                                     |                   0.000 |                        0 | 0.140664 |                   100.00 |
+| YRI        | Ancestry tuned    | 0.393; 0.143; 0.018                                       | 897079; 561710; 146193                                     |                   0.000 |                        0 | 0.140369 |                   100.00 |
+| ESN        | Pooled            | 0.512; 0.186; 0.093                                       | 1269975; 888192; 591068                                    |                   0.000 |                        0 | 0.170931 |                   100.00 |
+| ESN        | Single population | 0.419; 0.163; 0.070                                       | 1071104; 764335; 467527                                    |                   0.000 |                        0 | 0.143510 |                   100.00 |
+| ESN        | Ancestry tuned    | 0.419; 0.163; 0.070                                       | 1071104; 764335; 467527                                    |                   0.000 |                        0 | 0.142799 |                   100.00 |
+| CEU        | Pooled            | 0.649; 0.070; 0.018                                       | 993521; 293245; 105846                                     |                   0.000 |                        0 | 0.286503 |                       NA |
+| CEU        | Single population | 0.614; 0.070; 0.018                                       | 953874; 293245; 105846                                     |                   0.000 |                        0 | 0.260306 |                       NA |
+| CEU        | Ancestry tuned    | 0.632; 0.070; 0.018                                       | 966819; 293245; 105846                                     |                   0.000 |                        0 | 0.261963 |                       NA |
+| CHS        | Pooled            | 0.843; 0.078; 0.000                                       | 1194930; 170283; 0                                         |                   0.000 |                        0 | 0.329422 |                       NA |
+| CHS        | Single population | 0.824; 0.078; 0.000                                       | 1150715; 170482; 0                                         |                   0.000 |                        0 | 0.292096 |                       NA |
+| CHS        | Ancestry tuned    | 0.824; 0.078; 0.000                                       | 1150742; 170510; 0                                         |                   0.000 |                        0 | 0.294230 |                       NA |
 
 ## Criterion
 
-The chr20 criterion **did not hold**. The comparison for each population
-is shown below.
+The chr20 criterion **did not hold**. Under the amended truth, ASW, CEU
+and CHS have no truth length, so their truth-coverage check is not
+evaluable (NA) and never counts as a pass; their unsupported-count
+checks still apply. The comparison for each population is shown below.
+Under the preregistered truth the verdict was the same, and the
+unsupported counts and count checks are identical; that table is kept
+[here](results/roh-ancestry/chr20/criterion_by_population_preregistered_truth.csv).
 
-| Population | comparison        | ancestry_unsupported_count | comparator_unsupported_count | ancestry_truth_coverage | comparator_truth_coverage | count_pass | truth_coverage_pass | criterion_pass |
-|:-----------|:------------------|---------------------------:|-----------------------------:|------------------------:|--------------------------:|:-----------|:--------------------|:---------------|
-| ACB        | pooled            |                     0.3000 |                       0.3500 |                  0.2152 |                    0.2152 | TRUE       | TRUE                | TRUE           |
-| ACB        | single_population |                     0.3000 |                       0.3000 |                  0.2152 |                    0.2152 | FALSE      | TRUE                | FALSE          |
-| ASW        | pooled            |                     0.3077 |                       0.3077 |                  0.0000 |                    0.0000 | FALSE      | TRUE                | FALSE          |
-| ASW        | single_population |                     0.3077 |                       0.2308 |                  0.0000 |                    0.0000 | FALSE      | TRUE                | FALSE          |
-| CEU        | single_population |                     0.6316 |                       0.6140 |                  0.1217 |                    0.1217 | TRUE       | TRUE                | TRUE           |
-| CHS        | single_population |                     0.8235 |                       0.8235 |                  0.0000 |                    0.0000 | TRUE       | TRUE                | TRUE           |
-| CLM        | pooled            |                     0.8857 |                       0.9143 |                  0.3095 |                    0.3095 | TRUE       | TRUE                | TRUE           |
-| CLM        | single_population |                     0.8857 |                       0.9429 |                  0.3095 |                    0.3095 | TRUE       | TRUE                | TRUE           |
-| ESN        | single_population |                     0.4186 |                       0.4186 |                  0.1538 |                    0.1538 | TRUE       | TRUE                | TRUE           |
-| MXL        | pooled            |                     0.7500 |                       0.8750 |                  0.2830 |                    0.2830 | TRUE       | TRUE                | TRUE           |
-| MXL        | single_population |                     0.7500 |                       0.7500 |                  0.2830 |                    0.2830 | FALSE      | TRUE                | FALSE          |
-| PEL        | pooled            |                     1.8286 |                       1.8857 |                  0.0781 |                    0.0781 | TRUE       | TRUE                | TRUE           |
-| PEL        | single_population |                     1.8286 |                       1.8000 |                  0.0781 |                    0.0781 | FALSE      | TRUE                | FALSE          |
-| PUR        | pooled            |                     0.5143 |                       0.5143 |                  0.5965 |                    0.5965 | FALSE      | TRUE                | FALSE          |
-| PUR        | single_population |                     0.5143 |                       0.4286 |                  0.5965 |                    0.5965 | FALSE      | TRUE                | FALSE          |
-| YRI        | single_population |                     0.3929 |                       0.3929 |                  0.4676 |                    0.4676 | TRUE       | TRUE                | TRUE           |
+| Population | comparison        | truth_bp | ancestry_unsupported_count | comparator_unsupported_count | ancestry_truth_coverage | comparator_truth_coverage | count_pass | truth_coverage_pass | criterion_pass |
+|:-----------|:------------------|---------:|---------------------------:|-----------------------------:|------------------------:|--------------------------:|:-----------|:--------------------|:---------------|
+| ACB        | pooled            |  1700000 |                     0.3000 |                       0.3500 |                  1.0000 |                    1.0000 | TRUE       | TRUE                | TRUE           |
+| ACB        | single_population |  1700000 |                     0.3000 |                       0.3000 |                  1.0000 |                    1.0000 | FALSE      | TRUE                | FALSE          |
+| ASW        | pooled            |        0 |                     0.3077 |                       0.3077 |                      NA |                        NA | FALSE      | NA                  | FALSE          |
+| ASW        | single_population |        0 |                     0.3077 |                       0.2308 |                      NA |                        NA | FALSE      | NA                  | FALSE          |
+| CEU        | single_population |        0 |                     0.6316 |                       0.6140 |                      NA |                        NA | TRUE       | NA                  | NA             |
+| CHS        | single_population |        0 |                     0.8235 |                       0.8235 |                      NA |                        NA | TRUE       | NA                  | NA             |
+| CLM        | pooled            |  5900000 |                     0.8857 |                       0.9143 |                  0.9884 |                    0.9884 | TRUE       | TRUE                | TRUE           |
+| CLM        | single_population |  5900000 |                     0.8857 |                       0.9429 |                  0.9884 |                    0.9884 | TRUE       | TRUE                | TRUE           |
+| ESN        | single_population |  1000000 |                     0.4186 |                       0.4186 |                  1.0000 |                    1.0000 | TRUE       | TRUE                | TRUE           |
+| MXL        | pooled            |  1500000 |                     0.7500 |                       0.8750 |                  1.0000 |                    1.0000 | TRUE       | TRUE                | TRUE           |
+| MXL        | single_population |  1500000 |                     0.7500 |                       0.7500 |                  1.0000 |                    1.0000 | FALSE      | TRUE                | FALSE          |
+| PEL        | pooled            |  1000000 |                     1.8286 |                       1.8857 |                  1.0000 |                    1.0000 | TRUE       | TRUE                | TRUE           |
+| PEL        | single_population |  1000000 |                     1.8286 |                       1.8000 |                  1.0000 |                    1.0000 | FALSE      | TRUE                | FALSE          |
+| PUR        | pooled            | 17000000 |                     0.5143 |                       0.5143 |                  1.0000 |                    1.0000 | FALSE      | TRUE                | FALSE          |
+| PUR        | single_population | 17000000 |                     0.5143 |                       0.4286 |                  1.0000 |                    1.0000 | FALSE      | TRUE                | FALSE          |
+| YRI        | single_population | 11100000 |                     0.3929 |                       0.3929 |                  1.0000 |                    1.0000 | TRUE       | TRUE                | TRUE           |
 
 ## Runtime and memory
 
@@ -953,8 +678,7 @@ repository root. They resolve inputs through `r/duckhtsbench`: registry
 artifacts by identifier, and the cache directory with
 `duckhts_bench_cache_dir()`. They use the installed Rduckhts and the
 extension at `build/release/`; none compiles the package in place. The
-GRCh38 autosome lengths are the committed `grch38_autosomes.fai`, lines
-1–22 of the Ensembl 116 primary-assembly FASTA index. The order is:
+order is:
 
 1.  staging: `stage_remote_chromosome.R` per autosome and
     `summarise_staging.R`. They take each source URL, the pedigree and
@@ -967,9 +691,4 @@ GRCh38 autosome lengths are the committed `grch38_autosomes.fai`, lines
     `q_chr20.R`, `sitecheck_chr20.R`, `verify_site_sets.R`,
     `run_chr20_arm.R` (per arm and repetition), `summarise_chr20.R`,
     `criterion_chr20.R` and `summarise_runtime.R`.
-3.  genome-wide: `prepare_genome_references.R`, `truth_genome.R`,
-    `q_genome.R`, `summarise_genome_q.R`, `verify_genome_site_sets.R`,
-    `run_autosome_arms.R` (one repetition by default; it calls
-    `run_autosome_arm.R` and reuses a run only when its receipt records
-    the same extension and proportions) and `summarise_genome.R`.
-4.  render this report.
+3.  render this report.
