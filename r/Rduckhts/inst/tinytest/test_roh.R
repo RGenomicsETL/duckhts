@@ -45,6 +45,20 @@ test_roh_parity <- function() {
     "split_part(alleles, ',', 2) AS alt, af FROM read_csv(%s, delim = '\\t', header = false,",
     "columns = {'chrom': 'VARCHAR', 'pos': 'BIGINT', 'alleles': 'VARCHAR', 'af': 'DOUBLE'})"),
     dbQuoteString(con, af_file)))
+  dbExecute(con, paste(
+    "CREATE TABLE roh_ancestry_reference AS SELECT chrom AS chromosome, pos AS position,",
+    "alt AS allele_a, ref AS allele_b, 'A' AS group_id, 0.2::DOUBLE AS frequency FROM roh_af",
+    "WHERE NOT ((ref='A' AND alt='T') OR (ref='T' AND alt='A') OR (ref='C' AND alt='G') OR (ref='G' AND alt='C'))",
+    "UNION ALL SELECT chrom, pos, alt, ref, 'B', 0.4::DOUBLE FROM roh_af",
+    "WHERE NOT ((ref='A' AND alt='T') OR (ref='T' AND alt='A') OR (ref='C' AND alt='G') OR (ref='G' AND alt='C'))"))
+  dbExecute(con, paste(
+    "CREATE TABLE roh_ancestry_proportions AS SELECT * FROM (VALUES",
+    "('S1', 'A', 1.0), ('S1', 'B', 0.0), ('S2', 'A', 1.0), ('S2', 'B', 0.0),",
+    "('S3', 'A', 1.0), ('S3', 'B', 0.0), ('S4', 'A', 1.0), ('S4', 'B', 0.0)",
+    ") AS p(sample_id, group_id, proportion)"))
+  dbExecute(con, paste(
+    "CREATE TABLE roh_ancestry_af AS SELECT chrom, pos, ref, alt, 0.8::DOUBLE AS af FROM roh_af",
+    "WHERE NOT ((ref='A' AND alt='T') OR (ref='T' AND alt='A') OR (ref='C' AND alt='G') OR (ref='G' AND alt='C'))"))
   dbExecute(con, sprintf(paste(
     "CREATE TABLE roh_map AS SELECT 'chr1' AS chrom, position AS pos, \"Genetic_Map(cM)\" AS cm",
     "FROM read_csv(%s, delim = ' ') UNION ALL SELECT 'chr2', position, \"Genetic_Map(cM)\"",
@@ -70,6 +84,20 @@ test_roh_parity <- function() {
     list("S4", "chr1", 1876100, 3319712, 1443613, 131, 44.9),
     list("S2", "chr2", 693881, 1722963, 1029083, 114, 33.2),
     list("S4", "chr2", 23420, 2400223, 2376804, 238, 46.5))))
+
+  # Ancestry-weighted AF is group A's 0.2, reversed to 0.8 for these sites.
+  ancestry <- rduckhts_roh(con, vcf, reference_table = "roh_ancestry_reference",
+                           proportions_table = "roh_ancestry_proportions", gt_error = 30,
+                           samples = "S1")
+  equivalent <- rduckhts_roh(con, vcf, af_table = "roh_ancestry_af", gt_error = 30,
+                             samples = "S1")
+  .roh_compare(.roh_observed(ancestry), .roh_observed(equivalent))
+  ancestry_map <- rduckhts_roh(con, vcf, reference_table = "roh_ancestry_reference",
+                               proportions_table = "roh_ancestry_proportions",
+                               genetic_map = "roh_map", gt_error = 30, samples = "S1")
+  equivalent_map <- rduckhts_roh(con, vcf, af_table = "roh_ancestry_af", genetic_map = "roh_map",
+                                 gt_error = 30, samples = "S1")
+  .roh_compare(.roh_observed(ancestry_map), .roh_observed(equivalent_map))
 
   # Constant recombination rate (-M 1e-6).
   .roh_compare(.roh_observed(rduckhts_roh(con, vcf, af_tag = "AF", rec_rate = 1e-6)), .roh_expected(list(
@@ -122,8 +150,11 @@ test_roh_validation <- function() {
   con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
   vcf <- system.file("extdata", "roh_fixture.vcf.gz", package = "Rduckhts")
-  expect_error(rduckhts_roh(con, vcf), "exactly one of af_tag and af_table")
-  expect_error(rduckhts_roh(con, vcf, af_tag = "AF", af_table = "x"), "exactly one of af_tag and af_table")
+  expect_error(rduckhts_roh(con, vcf), "exactly one of af_tag, af_table, or ancestry relations")
+  expect_error(rduckhts_roh(con, vcf, af_tag = "AF", af_table = "x"), "exactly one of af_tag, af_table, or ancestry relations")
+  expect_error(rduckhts_roh(con, vcf, reference_table = "x"), "must be supplied together")
+  expect_error(rduckhts_roh(con, vcf, reference_table = "x", proportions_table = "y",
+                            af_clamp = 0.5), "af_clamp must be")
   expect_error(rduckhts_roh(con, vcf, af_tag = "AF", hw_to_az = 2), "hw_to_az must be")
   expect_error(rduckhts_roh(con, vcf, af_tag = "AF", az_to_hw = -1), "az_to_hw must be")
   expect_error(rduckhts_roh(con, vcf, af_tag = "AF", gt_error = -1), "gt_error must be")

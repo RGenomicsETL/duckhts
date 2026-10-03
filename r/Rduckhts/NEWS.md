@@ -2,6 +2,8 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- `rduckhts_roh()` accepts long ancestry reference and sample-proportion relations to calculate ancestry-weighted allele frequencies, with optional clamping.
+
 ## Breaking changes
 
 - Requires duckdb 1.5.0 or newer; loading the bundled extension on an older
