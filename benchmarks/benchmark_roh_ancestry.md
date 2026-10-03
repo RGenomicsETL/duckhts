@@ -55,17 +55,24 @@ chr20 windows were reused and the 102 retained chr20 intervals match the
 prior result exactly. Genome-wide q now contains 7,917 estimates (377
 children × 21 groups), all with `status=ok`; each child contributed
 4,883,749 matched loci and the `cor_pred` range is 0.643847–0.719384.
-Genome-wide arm comparisons remain pending. The population child counts
-match the declared expectations: ACB 20, ASW 13, CLM 35, MXL 32, PEL 35,
-PUR 35, YRI 56, ESN 43, CEU 57 and CHS 51. The chr20 source VCF was
-copied from the supplied local file after its checksum was verified; its
-remote metadata is recorded above. bcftools reported
-`1.23.1-70-g6dbd8fef`; the source header had 3,202 samples and the
-children BCF has 377. The DuckHTS extension was rebuilt from revision
-`86f53052` for the arm measurements. The remote chr1 input was streamed
-through bcftools; its ETag, Last-Modified value, record count and output
-SHA-256 are recorded in [its
-receipt](results/roh-ancestry/chr1/input_receipt.tsv).
+The genome-wide comparison is in progress. The arms run once each over
+all autosomes; the pooled, AFR, AMR and EAS arms are complete, and the
+EUR and ancestry arms are running. The arms are deterministic: the three
+chr20 repetitions gave identical segments, and the summary requires any
+further genome-wide repetition to match the first. The genome-wide
+results and criterion will be added to this report when the remaining
+arms finish. The population child counts match the declared
+expectations: ACB 20, ASW 13, CLM 35, MXL 32, PEL 35, PUR 35, YRI 56,
+ESN 43, CEU 57 and CHS 51. The chr20 source VCF was copied from the
+supplied local file after its checksum was verified; its remote metadata
+is recorded above. bcftools reported `1.23.1-70-g6dbd8fef`; the source
+header had 3,202 samples and the children BCF has 377. All arms ran on
+extension builds of the `src` tree of revision `86f53052`; the later
+restructuring of `duckhts_roh_ancestry`’s reference stage reproduces the
+chr20 ancestry segments exactly, so the evaluated outputs are those of
+the shipped macro. The remote chr1 input was streamed through bcftools;
+its ETag, Last-Modified value, record count and output SHA-256 are
+recorded in [its receipt](results/roh-ancestry/chr1/input_receipt.tsv).
 
 ## Autosome BCF staging
 
@@ -176,9 +183,14 @@ contributed 108,757 matched, non-palindromic loci. Every child has
 child in [this table](results/roh-ancestry/chr20/q_by_child.csv). This
 is a chr20-only estimate, not the final genome-wide q.
 
-The three ROH arms used the same 108,757 sites for every child. The AF
-and ancestry reference site keys have zero entries in either direction
-of their symmetric difference; the exact comparison is
+The GRCh38 reference contains no palindromic (A/T, C/G) sites, because
+the bigsnpr reference panel ships without them. `duckhts_roh_ancestry`
+takes reference alleles to be on the forward strand and orients
+palindromic sites by REF like any other, but none occur here, so the
+evaluated site sets are unaffected. The three ROH arms used the same
+108,757 sites for every child. The AF and ancestry reference site keys
+have zero entries in either direction of their symmetric difference; the
+exact comparison is
 [here](results/roh-ancestry/chr20/site_set_equivalence.csv). The
 `INFO_AF*` values are array-valued Number=A fields; because the input
 BCF is biallelic, the AF relation takes its sole value and clamps it to
@@ -924,3 +936,31 @@ Per-replicate runtime and peak resident memory are reported below.
 |         20 | ancestry   |          1 |          208.83 |         4.58 |       4 |         16 |
 |         20 | ancestry   |          2 |          208.96 |         4.58 |       4 |         16 |
 |         20 | ancestry   |          3 |          208.90 |         4.54 |       4 |         16 |
+
+## Reproducing the evaluation
+
+The drivers are in `benchmarks/roh_ancestry/` and run from the
+repository root. They resolve inputs through `r/duckhtsbench`: registry
+artifacts by identifier, and the cache directory with
+`duckhts_bench_cache_dir()`. They use the installed Rduckhts and the
+extension at `build/release/`; none compiles the package in place. The
+GRCh38 autosome lengths are the committed `grch38_autosomes.fai`, lines
+1–22 of the Ensembl 116 primary-assembly FASTA index. The order is:
+
+1.  staging: `stage_remote_chromosome.R` per autosome and
+    `summarise_staging.R`. They take each source URL, the pedigree and
+    the destination from the registry, and use
+    `benchmarks/roh_ancestry_stage.R`. The evaluation’s chr20 input was
+    a verified local copy of its registered source; the same script
+    stages it remotely.
+2.  chr20: `prepare_chr20.R` (writes the children list and the chr20
+    reference relations), `truth_chr20.R`, `truth_intervals.R`,
+    `q_chr20.R`, `sitecheck_chr20.R`, `verify_site_sets.R`,
+    `run_chr20_arm.R` (per arm and repetition), `summarise_chr20.R`,
+    `criterion_chr20.R` and `summarise_runtime.R`.
+3.  genome-wide: `prepare_genome_references.R`, `truth_genome.R`,
+    `q_genome.R`, `summarise_genome_q.R`, `verify_genome_site_sets.R`,
+    `run_autosome_arms.R` (one repetition by default; it calls
+    `run_autosome_arm.R` and reuses a run only when its receipt records
+    the same extension and proportions) and `summarise_genome.R`.
+4.  render this report.
