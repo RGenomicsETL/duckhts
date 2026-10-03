@@ -75,13 +75,13 @@ PUR 35, YRI 56, ESN 43, CEU 57 and CHS 51. The chr20 source VCF was
 copied from the supplied local file after its checksum was verified; its
 remote metadata is recorded above. bcftools reported
 `1.23.1-70-g6dbd8fef`; the source header had 3,202 samples and the
-children BCF has 377. All arms ran on extension builds of the `src` tree
-of revision `86f53052`; the later restructuring of
-`duckhts_roh_ancestry`’s reference stage reproduces the chr20 ancestry
-segments exactly, so the evaluated outputs are those of the shipped
-macro. The remote chr1 input was streamed through bcftools; its ETag,
-Last-Modified value, record count and output SHA-256 are recorded in
-[its receipt](results/roh-ancestry/chr1/input_receipt.tsv).
+children BCF has 377. The arm segments were first produced on builds of
+the `src` tree of revision `86f53052`. Every later build reproduces them
+exactly, last the build of `src` tree `5908c1ad` (#329), where all six
+arms were rerun three times each; so the evaluated outputs are those of
+the shipped macros. The remote chr1 input was streamed through bcftools;
+its ETag, Last-Modified value, record count and output SHA-256 are
+recorded in [its receipt](results/roh-ancestry/chr1/input_receipt.tsv).
 
 ## Autosome BCF staging
 
@@ -647,36 +647,50 @@ unsupported counts and count checks are identical; that table is kept
 ## Runtime and memory
 
 Each value is from a fresh R process using four DuckDB threads. The
-ancestry arm used 16-child batches after the 64-child batch exceeded the
-12 GB DuckDB memory limit; other arms used 64-child batches.
-Per-replicate runtime and peak resident memory are reported below. The
-ancestry rows were measured on the shipped `duckhts_roh_ancestry`, after
-its reference-stage restructuring. The pooled and single-population rows
-use `duckhts_roh_af_table`, which this work does not change, and were
-measured on the build of the `src` tree of revision `86f53052`. The
-1×/2×/4× scaling evidence and memory budget for both macros are in
-`benchmark_roh_scaling.md`, added with the read-count emissions (#331).
+ancestry arm uses 16-child batches and the other arms 64-child batches.
+The rows below were measured on the build of `src` tree `5908c1ad`,
+which holds each sample’s sites in bounded native buffers (#329). All
+eighteen runs reproduce the published segments exactly.
 
 | chromosome | arm        | repetition | elapsed_seconds | peak_rss_gib | threads | batch_size |
 |-----------:|:-----------|-----------:|----------------:|-------------:|--------:|-----------:|
-|         20 | pooled     |          1 |          126.59 |        12.44 |       4 |         64 |
-|         20 | pooled     |          2 |          126.74 |        12.47 |       4 |         64 |
-|         20 | pooled     |          3 |          125.21 |        12.43 |       4 |         64 |
-|         20 | single_AFR |          1 |           44.90 |        12.53 |       4 |         64 |
-|         20 | single_AFR |          2 |           44.88 |        12.86 |       4 |         64 |
-|         20 | single_AFR |          3 |           44.55 |        12.18 |       4 |         64 |
-|         20 | single_AMR |          1 |           46.85 |        12.27 |       4 |         64 |
-|         20 | single_AMR |          2 |           46.69 |        12.35 |       4 |         64 |
-|         20 | single_AMR |          3 |           46.84 |        12.40 |       4 |         64 |
-|         20 | single_EUR |          1 |           19.37 |        10.75 |       4 |         64 |
-|         20 | single_EUR |          2 |           19.25 |        10.77 |       4 |         64 |
-|         20 | single_EUR |          3 |           19.06 |        10.75 |       4 |         64 |
-|         20 | single_EAS |          1 |           17.08 |        10.14 |       4 |         64 |
-|         20 | single_EAS |          2 |           17.37 |        10.16 |       4 |         64 |
-|         20 | single_EAS |          3 |           17.38 |        10.12 |       4 |         64 |
-|         20 | ancestry   |          1 |          204.28 |         3.98 |       4 |         16 |
-|         20 | ancestry   |          2 |          203.59 |         3.95 |       4 |         16 |
-|         20 | ancestry   |          3 |          202.34 |         4.02 |       4 |         16 |
+|         20 | pooled     |          1 |           69.72 |         0.44 |       4 |         64 |
+|         20 | pooled     |          2 |           71.05 |         0.46 |       4 |         64 |
+|         20 | pooled     |          3 |           70.68 |         0.45 |       4 |         64 |
+|         20 | single_AFR |          1 |           26.36 |         0.46 |       4 |         64 |
+|         20 | single_AFR |          2 |           26.35 |         0.43 |       4 |         64 |
+|         20 | single_AFR |          3 |           26.90 |         0.44 |       4 |         64 |
+|         20 | single_AMR |          1 |           26.54 |         0.45 |       4 |         64 |
+|         20 | single_AMR |          2 |           27.21 |         0.44 |       4 |         64 |
+|         20 | single_AMR |          3 |           29.32 |         0.44 |       4 |         64 |
+|         20 | single_EUR |          1 |           10.95 |         0.39 |       4 |         64 |
+|         20 | single_EUR |          2 |           10.93 |         0.40 |       4 |         64 |
+|         20 | single_EUR |          3 |           11.99 |         0.41 |       4 |         64 |
+|         20 | single_EAS |          1 |           10.04 |         0.39 |       4 |         64 |
+|         20 | single_EAS |          2 |            9.95 |         0.39 |       4 |         64 |
+|         20 | single_EAS |          3 |           11.19 |         0.40 |       4 |         64 |
+|         20 | ancestry   |          1 |          168.48 |         0.97 |       4 |         16 |
+|         20 | ancestry   |          2 |          149.84 |         0.98 |       4 |         16 |
+|         20 | ancestry   |          3 |          152.65 |         0.98 |       4 |         16 |
+
+The first measurement kept each sample’s sites in DuckDB list
+aggregates; its rows are retained in
+[`runtime_replicates_list_state.csv`](results/roh-ancestry/chr20/runtime_replicates_list_state.csv).
+The 16-child ancestry batch dates from it: a 64-child batch exceeded the
+12 GB DuckDB memory limit then. Medians of three, same host, drivers and
+batch sizes:
+
+| arm        | elapsed_seconds_list_state | peak_rss_gib_list_state | elapsed_seconds_native | peak_rss_gib_native |
+|:-----------|---------------------------:|------------------------:|-----------------------:|--------------------:|
+| ancestry   |                     203.59 |                    3.98 |                 152.65 |                0.98 |
+| pooled     |                     126.59 |                   12.44 |                  70.68 |                0.45 |
+| single_AFR |                      44.88 |                   12.53 |                  26.36 |                0.44 |
+| single_AMR |                      46.84 |                   12.35 |                  27.21 |                0.44 |
+| single_EAS |                      17.37 |                   10.14 |                  10.04 |                0.39 |
+| single_EUR |                      19.25 |                   10.75 |                  10.95 |                0.40 |
+
+The 1×/2×/4× scaling evidence and the gated memory budgets of both
+macros are in `benchmark_roh_scaling.md`.
 
 ## Reproducing the evaluation
 
