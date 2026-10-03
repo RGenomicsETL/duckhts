@@ -222,22 +222,40 @@ int duckhts_roh_pdg_from_gt(double gt_error, int dosage, double pdg[3]) {
     return pdg[0] + pdg[1] + pdg[2] != 0;
 }
 
+/* Relative likelihood floor for read counts: 10^(-255/10), the value of the PL
+ * path's cap (PL above 255 counts as 255). Without it a deep site whose
+ * frequency is 1 underflows the only likelihood its frequency allows, and both
+ * emissions become zero. */
+#define ROH_COUNTS_LIKELIHOOD_FLOOR 3.1622776601683794e-26
+
 /* DuckHTS extension: read-count emissions with sequencing error and
- * contamination (see roh_hmm.h). Log likelihoods relative to the largest keep
- * deep sites from underflowing; push() normalises the three values. */
+ * contamination (see roh_hmm.h). The probabilities that a read shows the
+ * counted allele and the other allele are both formed as sums of nonnegative
+ * terms, so neither cancels to zero when seq_error is tiny, and terms with no
+ * reads are skipped. Log likelihoods relative to the largest keep deep sites
+ * from underflowing; push() normalises the three values. */
 int duckhts_roh_pdg_from_counts(int32_t other_count, int32_t counted_count, double seq_error,
                                 double contamination, double af, double pdg[3]) {
     if ((int64_t)other_count + counted_count == 0) return 0;
-    double contaminant = af * (1 - seq_error) + (1 - af) * seq_error;
-    double q[3] = {seq_error, 0.5, 1 - seq_error};
+    double contaminant_counted = af * (1 - seq_error) + (1 - af) * seq_error;
+    double contaminant_other = af * seq_error + (1 - af) * (1 - seq_error);
+    double sample_counted[3] = {seq_error, 0.5, 1 - seq_error};
+    double sample_other[3] = {1 - seq_error, 0.5, seq_error};
     double log_likelihood[3];
     double best = -INFINITY;
     for (int g = 0; g < 3; g++) {
-        double p = (1 - contamination) * q[g] + contamination * contaminant;
-        log_likelihood[g] = counted_count * log(p) + other_count * log1p(-p);
-        if (log_likelihood[g] > best) best = log_likelihood[g];
+        double counted = (1 - contamination) * sample_counted[g] + contamination * contaminant_counted;
+        double other = (1 - contamination) * sample_other[g] + contamination * contaminant_other;
+        double ll = 0;
+        if (counted_count > 0) ll += counted_count * log(counted);
+        if (other_count > 0) ll += other_count * log(other);
+        log_likelihood[g] = ll;
+        if (ll > best) best = ll;
     }
-    for (int g = 0; g < 3; g++) pdg[g] = exp(log_likelihood[g] - best);
+    for (int g = 0; g < 3; g++) {
+        double relative = exp(log_likelihood[g] - best);
+        pdg[g] = relative > ROH_COUNTS_LIKELIHOOD_FLOOR ? relative : ROH_COUNTS_LIKELIHOOD_FLOOR;
+    }
     return 1;
 }
 

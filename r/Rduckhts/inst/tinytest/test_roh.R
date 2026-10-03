@@ -206,10 +206,12 @@ test_roh_counts <- function() {
     sum(pmax(0, pmin(roh$end, truth_end) - pmax(roh$start, truth_start) + 1))
   }
   alphas <- c(0, 0.02, 0.05, 0.10)
-  aware <- unaware <- numeric(length(alphas))
+  aware <- unaware <- aware_outside <- numeric(length(alphas))
   for (k in seq_along(alphas)) {
     dbWriteTable(con, "roh_counts", .roh_titration_counts(alphas[[k]]), overwrite = TRUE)
-    aware[[k]] <- covered(rduckhts_roh_counts(con, "roh_counts", contamination = alphas[[k]]))
+    calls <- rduckhts_roh_counts(con, "roh_counts", contamination = alphas[[k]])
+    aware[[k]] <- covered(calls)
+    aware_outside[[k]] <- sum(calls$length) - aware[[k]]
     unaware[[k]] <- covered(rduckhts_roh_counts(con, "roh_counts"))
   }
   # The truth run is found without contamination.
@@ -219,6 +221,9 @@ test_roh_counts <- function() {
   expect_true(unaware[[4]] < aware[[4]])
   expect_true(unaware[[4]] < unaware[[1]])
   expect_true(all(aware >= 0.9 * aware[[1]]))
+  # Recovery is not bought by overcalling: calls outside the truth run stay under
+  # 5% of its length at every contamination level.
+  expect_true(all(aware_outside <= 0.05 * (truth_end - truth_start + 1)))
 
   # The wrapper is the SQL macro, and NULL-free arguments are validated in R.
   sql <- dbGetQuery(con, "SELECT * FROM duckhts_roh_counts('roh_counts', contamination := 0.1)")

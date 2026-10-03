@@ -1073,6 +1073,39 @@ SELECT duckhts_roh_segments([100, 200], [0.3, 0.3], [30, 30], [0], 1e-3, 0.0,
 ----
 positions and counted-allele count lists differ in length
 
+# A deep site whose frequency is 1 allows only the two-copy genotype, whose likelihood under
+# 110 reads of the other allele would underflow to zero; the likelihood floor (the PL path's
+# cap of 255) keeps the site uninformative instead of zeroing both emissions. The run over the
+# following homozygous sites is found with finite quality, as without the site.
+query III
+WITH with_site AS (SELECT unnest(duckhts_roh_segments(
+  [100] || list_transform(range(1, 121), lambda i: 100 + i * 25000),
+  [1.0] || list_transform(range(1, 121), lambda i: 0.5),
+  [110] || list_transform(range(1, 121), lambda i: 30),
+  [0] || list_transform(range(1, 121), lambda i: 0),
+  1e-3, 0.0, NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9)) AS r),
+without_site AS (SELECT unnest(duckhts_roh_segments(
+  list_transform(range(1, 121), lambda i: 100 + i * 25000),
+  list_transform(range(1, 121), lambda i: 0.5),
+  list_transform(range(1, 121), lambda i: 30),
+  list_transform(range(1, 121), lambda i: 0),
+  1e-3, 0.0, NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9)) AS r)
+SELECT (SELECT count(*) FROM with_site), (SELECT bool_and(isfinite(r.quality)) FROM with_site),
+  (SELECT max(r."end") FROM with_site) = (SELECT max(r."end") FROM without_site);
+----
+1	true	true
+
+# A seq_error so small that 1 - seq_error rounds to 1 keeps finite likelihoods: the
+# complementary read probability is formed without cancellation and empty terms are skipped.
+query II
+WITH s AS (SELECT unnest(duckhts_roh_segments(
+  list_transform(range(1, 121), lambda i: i * 25000), list_transform(range(1, 121), lambda i: 0.4),
+  list_transform(range(1, 121), lambda i: 0), list_transform(range(1, 121), lambda i: 30),
+  1e-18, 0.0, NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9)) AS r)
+SELECT count(*), bool_and(isfinite(r.quality)) FROM s;
+----
+1	true
+
 # A NULL model parameter makes that row's result NULL, as for the other overloads.
 query I
 SELECT duckhts_roh_segments([100, 200], [0.3, 0.3], [30, 30], [0, 0], NULL::DOUBLE, 0.0,

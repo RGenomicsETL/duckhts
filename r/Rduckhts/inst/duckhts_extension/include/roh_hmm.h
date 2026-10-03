@@ -81,9 +81,11 @@ int duckhts_roh_pdg_from_gt(double gt_error, int dosage, double pdg[3]);
  * one and two copies, and c = af * (1 - seq_error) + (1 - af) * seq_error is
  * the chance that a read from a contaminating individual of the same
  * population shows it. The binomial coefficient is common to the three
- * genotypes and omitted. The caller guarantees counts >= 0,
- * 0 < seq_error < 1/2, 0 <= contamination < 1 and 0 < af <= 1. Returns 0 when
- * the site has no reads. */
+ * genotypes and omitted. Relative likelihoods are floored at 10^(-25.5), the
+ * PL path's cap of 255, so a site whose frequency is 1 cannot zero both
+ * emissions. The caller guarantees counts >= 0, 0 < seq_error < 1/2,
+ * 0 <= contamination < 1 and 0 < af <= 1. Returns 0 when the site has no
+ * reads. */
 int duckhts_roh_pdg_from_counts(int32_t other_count, int32_t counted_count, double seq_error,
                                 double contamination, double af, double pdg[3]);
 
