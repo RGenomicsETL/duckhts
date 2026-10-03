@@ -1,8 +1,8 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.2.9010
+# duckhts 1.5.2.9011
 
-Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination; memory-bounded decoding follows in #329. The sections below describe what 2.0.0 will contain.
+Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
 - Added `duckhts_roh_ancestry()` for per-sample ancestry-weighted allele frequencies from long reference and proportion relations, with allele-orientation handling and optional frequency clamping.
 
@@ -14,6 +14,30 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   titration recovers the uncontaminated runs. The emission is a DuckHTS
   extension, since `bcftools roh` has no read-count mode. SQL tests check it
   against the same model computed independently in SQL and rounded to PL.
+
+- ROH decoding has explicit memory limits (#329). `duckhts_roh`, `duckhts_roh_af_table`,
+  `duckhts_roh_ancestry` and `duckhts_roh_counts` now hold the sites of each sample and
+  chromosome in native buffers of 16 bytes per site (24 for read counts), where a DuckDB
+  list held about 240. Two new arguments bound them, each with an explicit error:
+  `max_sites` for one sample and chromosome, and `max_site_bytes` for all the buffers
+  held at once. The runs are unchanged: the chr20 evaluation reproduces its segments
+  exactly. `benchmarks/benchmark_roh_scaling.md` gates both macros on their memory
+  budget and compares this revision with the previous one.
+
+- An out-of-memory error in the ROH macros could abort the host process: while
+  cancelling the query, DuckDB re-pins evicted blocks to destroy list-aggregate states,
+  and that fails inside a destructor. The site lists are no longer DuckDB aggregate
+  state, and `duckhts_roh_ancestry` builds its reference without ordered list
+  aggregates (903 MB to 159 MB for the chr20 reference). A 64-sample chr20 decode
+  that aborted under a 3 GB DuckDB limit now completes.
+
+- `read_bcf` gives the planner its indexed row count, so a join to a small relation
+  no longer builds its hash table on the call rows.
+
+- ROH input contracts: model parameters and limits are checked even when the input
+  has no record; `duckhts_roh_counts` rejects fractional read counts, which were
+  rounded, and accepts a relation in any order; a repeated position keeps the first
+  record to arrive.
 
 ## Breaking changes
 

@@ -1,4 +1,4 @@
-# Rduckhts 1.5.2.9010.0.1.5
+# Rduckhts 1.5.2.9011.0.1.5
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
@@ -7,6 +7,19 @@ Preview of 2.0.0, still in development. The sections below describe what 2.0.0 w
 - Added `rduckhts_roh_counts()`: runs of homozygosity from a relation of allele read
   counts (for example Somalier site counts from a BAM or CRAM), with a per-read
   sequencing error and an optional contamination fraction (#318).
+
+- `rduckhts_roh()` and `rduckhts_roh_counts()` gain `max_sites` and `max_site_bytes`.
+  The bundled extension now holds the sites of each sample and chromosome in bounded
+  native buffers (16 bytes per site, 24 for read counts), and exceeding a limit is an
+  error (#329). Decoding many samples at once needs far less memory, and the runs are
+  unchanged.
+
+- An out-of-memory error during an ROH decode could abort the R session; the decode
+  no longer keeps its site lists in DuckDB aggregate state.
+
+- `rduckhts_roh_counts()` rejects fractional read counts, which were rounded, and
+  accepts a counts relation in any order. ROH arguments are checked even when the
+  input has no record.
 
 ## Breaking changes
 
