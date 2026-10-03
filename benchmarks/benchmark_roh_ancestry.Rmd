@@ -11,7 +11,9 @@ This report evaluates whether ancestry-tuned allele frequencies reduce unsupport
 - Its fraction of frequency-free truth-run length covered must be no more than 5% relatively below either comparator.
 - In controls, both unsupported-ROH count and truth coverage must remain within 5% relative of the single-population arm. For a zero comparator, equality is required.
 
-No amendment to the truth threshold has been made. A truth segment is a merged run of 100 kb windows with at most one heterozygous call per window, and a retained run covers at least 1 Mb of actual bases. An ROH call is truth-supported when at least 90% of its length overlaps these truth intervals. Truth calls use all biallelic SNVs in each full source VCF, not just ancestry-reference sites. The window distribution and separation check must be reviewed before any ROH-arm comparison; if inadequate, the threshold may only be amended here before computing arm results. The primary length threshold is 1 Mb, with 2 Mb and 5 Mb also reported. FROH is total called ROH length divided by callable autosomal length.
+A truth segment is a merged run of 100 kb windows with at most one heterozygous call per window, and a retained run covers at least 1 Mb of actual bases. An ROH call is truth-supported when at least 90% of its length overlaps these truth intervals. Truth calls use all biallelic SNVs in each full source VCF, not just ancestry-reference sites. The window distribution and separation check must be reviewed before any ROH-arm comparison; if inadequate, the threshold may only be amended here before computing arm results. The primary length threshold is 1 Mb, with 2 Mb and 5 Mb also reported. FROH is total called ROH length divided by callable autosomal length.
+
+**Amendment, made after the arm results.** Review found that the truth windows gave a window without called genotypes zero heterozygotes, so missing evidence counted as homozygous evidence. The amended rule also requires at least one called genotype per window; a window without one is ineligible and breaks a run. This corrects how the declared rule was implemented, and it was made after the arm results were known, against the timing the protocol sets. It does not change the threshold of at most one heterozygous call. A sensitivity rule, fixed before it was computed, requires at least 50 called genotypes per window, after PLINK's 50-SNP `--homozyg-window-snp` default. The preregistered intervals, the amended intervals and the criterion under the preregistered truth are all kept (see *Truth-window separation* and *Criterion*).
 
 ## Data identity and processing status
 
@@ -41,13 +43,25 @@ knitr::kable(staging[c("chromosome", "source_last_modified", "source_etag",
 
 ## Truth-window separation
 
-The complete chr20 truth-window distribution contains 243,165 child-windows (645 windows per child, including the terminal partial window). Of these, 6,572 have zero heterozygotes and 2,840 have one; 9,412 (3.87%) meet the declared `<=1` criterion, while 233,753 (96.13%) have at least two. The binned distribution is [here](results/roh-ancestry/chr20/truth_window_bins.csv), and the exact per-count distribution is [here](results/roh-ancestry/chr20/truth_window_distribution.csv). This separates the low-heterozygosity tail from the remaining windows sufficiently to retain the preregistered cutoff; no amendment was made. The retained truth is 102 runs of at least 1 Mb across 92 children; the run counts and truth-base denominators by population are [here](results/roh-ancestry/chr20/truth_runs_by_population.csv).
+```{r, include=FALSE}
+truth_rules <- utils::read.csv("results/roh-ancestry/chr20/truth_rule_comparison.csv")
+truth_bins <- utils::read.csv("results/roh-ancestry/chr20/truth_window_bins.csv")
+rule <- function(name, field) truth_rules[[field]][truth_rules$rule == name]
+uncalled <- sum(truth_bins$child_windows[!grepl("^[0-9]", truth_bins$bin)])
+called_windows <- sum(truth_bins$child_windows) - uncalled
+eligible <- sum(truth_bins$child_windows[truth_bins$bin %in% c("0", "1")])
+fmt <- function(x) format(x, big.mark = ",", scientific = FALSE, trim = TRUE)
+```
 
-The binned distribution is summarized below; the exact per-count table is [here](results/roh-ancestry/chr20/truth_window_distribution.csv).
+The chr20 truth windows are 645 per child, including the terminal partial window: `r fmt(sum(truth_bins$child_windows))` child-windows in all. Four windows (273, 275 and 277, next to the centromere, and the terminal window 644) hold no record, so `r fmt(uncalled)` child-windows have no called genotype; every genotype in the children BCF is called. Of the `r fmt(called_windows)` child-windows with called genotypes, `r fmt(eligible)` (`r sprintf("%.2f%%", 100 * eligible / called_windows)`) meet the `<=1` criterion. The binned distribution is below; the exact per-count distribution is [here](results/roh-ancestry/chr20/truth_window_distribution.csv). This separates the low-heterozygosity tail from the remaining windows sufficiently to retain the threshold.
+
+Under the preregistered rule, the truth was `r rule("preregistered", "intervals")` runs of at least 1 Mb across `r rule("preregistered", "children")` children, and 79 of them were runs next to the centromere that the three empty windows 273–277 joined into 1 Mb. The amended truth is `r rule("amended", "intervals")` runs across `r rule("amended", "children")` children; one of them, HG01499's run at the chromosome end, loses only the empty terminal window. The sensitivity rule gives `r if (rule("sensitivity", "same_intervals_as_amended")) "the same intervals" else "different intervals"`. The [rule comparison](results/roh-ancestry/chr20/truth_rule_comparison.csv), the [amended](results/roh-ancestry/chr20/truth_intervals.csv) and [preregistered](results/roh-ancestry/chr20/truth_intervals_preregistered.csv) intervals, and the run counts and truth-base denominators by population, [amended](results/roh-ancestry/chr20/truth_runs_by_population.csv) and [preregistered](results/roh-ancestry/chr20/truth_runs_by_population_preregistered.csv), are result tables.
 
 ```{r, echo=FALSE}
-knitr::kable(utils::read.csv("results/roh-ancestry/chr20/truth_window_bins.csv"))
+knitr::kable(truth_bins)
 ```
+
+The truth is a proxy derived from the same hard calls as the GT-only emissions, so correlated genotype errors are not independent of the arms. The fixed 100 kb grid makes eligibility depend on where heterozygotes fall, and the 90%-overlap rule credits a short call inside truth more than a longer call that crosses a run's grid-defined end. Shifted-grid and base-level sensitivity analyses are not part of this report.
 
 The pooled and single-population comparisons began only after the chr20 truth distribution was reviewed.
 
@@ -80,10 +94,21 @@ knitr::kable(summary, row.names = FALSE)
 
 ## Criterion
 
-The chr20 criterion **`r if (all(utils::read.csv("results/roh-ancestry/chr20/criterion_by_population.csv")$criterion_pass)) "held" else "did not hold"`**. The comparison for each population is shown below.
+```{r, include=FALSE}
+criterion <- utils::read.csv("results/roh-ancestry/chr20/criterion_by_population.csv")
+not_evaluable <- unique(criterion$Population[criterion$truth_bp == 0])
+verdict <- if (any(criterion$criterion_pass %in% FALSE)) {
+  "did not hold"
+} else if (anyNA(criterion$criterion_pass)) {
+  "could not be evaluated in every population"
+} else {
+  "held"
+}
+```
+
+The chr20 criterion **`r verdict`**. Under the amended truth, `r knitr::combine_words(not_evaluable, oxford_comma = FALSE)` have no truth length, so their truth-coverage check is not evaluable (NA) and never counts as a pass; their unsupported-count checks still apply. The comparison for each population is shown below. Under the preregistered truth the verdict was the same, and the unsupported counts and count checks are identical; that table is kept [here](results/roh-ancestry/chr20/criterion_by_population_preregistered_truth.csv).
 
 ```{r, echo=FALSE}
-criterion <- utils::read.csv("results/roh-ancestry/chr20/criterion_by_population.csv")
 knitr::kable(criterion, digits = 4, row.names = FALSE)
 ```
 
