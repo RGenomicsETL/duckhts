@@ -912,3 +912,203 @@ SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/bcf_s
   'roh_contig_reference_both', 'roh_contig_proportions', af_clamp := 0, gt_error := 30, hw_to_az := 0.1);
 ----
 two reference contig names match one VCF contig
+
+# Read-count emissions (duckhts_roh_counts and the counts overload of duckhts_roh_segments)
+# are a DuckHTS extension with no bcftools counterpart. Their oracle is the same read model
+# computed independently in SQL and rounded to phred-scaled PL: the PL path of the kernel
+# must then place exactly the runs of the count path. The data are deterministic: two samples
+# on two chromosomes, 200 sites 25 kb apart with depths 20-40, homozygous over sites 60-139
+# and drawn from Hardy-Weinberg proportions elsewhere, plus a contaminating individual of
+# the same population with its own draws. Expected read counts are rounded, not sampled.
+
+statement ok
+CREATE TEMP TABLE roh_counts_truth AS
+WITH s AS (SELECT smp, chrom, i,
+  0.15 + 0.7 * ((i * 37 + ascii(chrom) * 11) % 100) / 100.0 AS af,
+  ((i * 7919 + ascii(chrom) * 31 + ascii(right(smp, 1)) * 101) % 1000) / 1000.0 AS u1,
+  ((i * 104729 + ascii(chrom) * 17 + ascii(right(smp, 1)) * 53) % 1000) / 1000.0 AS u2,
+  ((i * 1299709 + ascii(chrom) * 7) % 1000) / 1000.0 AS v1,
+  ((i * 15485863 + ascii(chrom) * 3) % 1000) / 1000.0 AS v2,
+  20 + (i * 13) % 21 AS depth
+  FROM (VALUES ('S1'), ('S2')) AS a(smp), (VALUES ('1'), ('2')) AS b(chrom), range(1, 201) AS t(i))
+SELECT smp AS sample_id, chrom, i * 25000 AS pos, af, depth,
+  CASE WHEN i BETWEEN 60 AND 139 THEN 2 * (u1 < af)::INTEGER
+       ELSE (u1 < af)::INTEGER + (u2 < af)::INTEGER END AS g,
+  (v1 < af)::INTEGER + (v2 < af)::INTEGER AS gc
+FROM s;
+
+statement ok
+CREATE MACRO roh_counts_at(alpha, e) AS TABLE
+SELECT sample_id, chrom, pos, af, depth - alt AS ref_count, alt AS alt_count FROM (
+  SELECT *, round(depth * ((1 - alpha) * [e, 0.5, 1 - e][g + 1]
+                           + alpha * [e, 0.5, 1 - e][gc + 1]))::INTEGER AS alt
+  FROM roh_counts_truth);
+
+statement ok
+CREATE MACRO roh_counts_oracle_pl(counts_name, alpha, e) AS TABLE
+WITH ll AS (SELECT *, list_transform([e, 0.5, 1 - e], lambda q:
+    alt_count * ln((1 - alpha) * q + alpha * (af * (1 - e) + (1 - af) * e)) +
+    ref_count * ln(1 - ((1 - alpha) * q + alpha * (af * (1 - e) + (1 - af) * e)))) AS l
+  FROM query_table(counts_name))
+SELECT sample_id, chrom, pos, af,
+  list_transform(l, lambda x: least(255, round(-10 * (x - list_max(l)) / ln(10))::INTEGER)) AS pl
+FROM ll;
+
+statement ok
+CREATE MACRO roh_counts_pl_runs(pl_name) AS TABLE
+SELECT sample_id AS sample, chrom, r.start, r."end", r.n_markers, r.quality FROM (
+  SELECT sample_id, chrom, unnest(duckhts_roh_segments(list(pos ORDER BY pos), list(af ORDER BY pos),
+    list(pl ORDER BY pos), NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9)) AS r
+  FROM query_table(pl_name) GROUP BY sample_id, chrom);
+
+statement ok
+CREATE TEMP TABLE roh_counts_clean AS SELECT * FROM roh_counts_at(0.0, 1e-3);
+
+statement ok
+CREATE TEMP TABLE roh_counts_dirty AS SELECT * FROM roh_counts_at(0.10, 1e-3);
+
+statement ok
+CREATE TEMP TABLE roh_counts_clean_pl AS SELECT * FROM roh_counts_oracle_pl('roh_counts_clean', 0.0, 1e-3);
+
+statement ok
+CREATE TEMP TABLE roh_counts_dirty_pl AS SELECT * FROM roh_counts_oracle_pl('roh_counts_dirty', 0.10, 1e-3);
+
+# Every sample and chromosome has a run, and the count path equals the PL oracle: same
+# coordinates and marker counts, and qualities within 0.05, the only tolerance, which comes
+# from rounding the oracle likelihoods to integer PL and capping them at 255.
+query II
+WITH c AS (SELECT * FROM duckhts_roh_counts('roh_counts_clean')),
+o AS (SELECT * FROM roh_counts_pl_runs('roh_counts_clean_pl'))
+SELECT (SELECT count(DISTINCT (sample, chrom)) FROM c),
+  (SELECT count(*) FROM c FULL JOIN o USING (sample, chrom, start, "end", n_markers)
+   WHERE c.quality IS NULL OR o.quality IS NULL OR abs(c.quality - o.quality) > 0.05);
+----
+4	0
+
+# With 10% contamination the contamination-aware path equals its oracle in the same way.
+query I
+WITH c AS (SELECT * FROM duckhts_roh_counts('roh_counts_dirty', contamination := 0.10)),
+o AS (SELECT * FROM roh_counts_pl_runs('roh_counts_dirty_pl'))
+SELECT count(*) FROM c FULL JOIN o USING (sample, chrom, start, "end", n_markers)
+WHERE c.quality IS NULL OR o.quality IS NULL OR abs(c.quality - o.quality) > 0.05;
+----
+0
+
+# Titration: contaminant reads at homozygous sites look like heterozygous evidence. Without
+# the contamination term they shorten or weaken runs; with it the runs of the uncontaminated
+# data come back.
+query III
+WITH clean AS (SELECT * FROM duckhts_roh_counts('roh_counts_clean')),
+aware AS (SELECT * FROM duckhts_roh_counts('roh_counts_dirty', contamination := 0.10)),
+unaware AS (SELECT * FROM duckhts_roh_counts('roh_counts_dirty'))
+SELECT
+  (SELECT count(*) FROM ((SELECT sample, chrom, start, "end", n_markers FROM clean
+     EXCEPT ALL SELECT sample, chrom, start, "end", n_markers FROM aware)
+   UNION ALL (SELECT sample, chrom, start, "end", n_markers FROM aware
+     EXCEPT ALL SELECT sample, chrom, start, "end", n_markers FROM clean))),
+  (SELECT sum(length) FROM unaware) < (SELECT sum(length) FROM aware),
+  (SELECT bool_and(u.quality < a.quality) FROM unaware AS u JOIN aware AS a USING (sample, chrom));
+----
+0	true	true
+
+# Rows without usable evidence are skipped, not errors: NULL or zero-depth counts, and a
+# NULL, NaN or zero frequency. Adding such rows leaves the runs unchanged.
+statement ok
+CREATE TEMP TABLE roh_counts_with_skips AS
+SELECT * FROM roh_counts_clean
+UNION ALL SELECT 'S1', '1', 30012, 0.4, NULL, 5
+UNION ALL SELECT 'S1', '1', 30013, 0.4, 0, 0
+UNION ALL SELECT 'S1', '1', 30014, NULL, 10, 10
+UNION ALL SELECT 'S1', '1', 30015, 'NaN'::DOUBLE, 10, 10
+UNION ALL SELECT 'S1', '1', 30016, 0.0, 10, 10;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM duckhts_roh_counts('roh_counts_with_skips')
+  EXCEPT ALL SELECT * FROM duckhts_roh_counts('roh_counts_clean'))
+UNION ALL (SELECT * FROM duckhts_roh_counts('roh_counts_clean')
+  EXCEPT ALL SELECT * FROM duckhts_roh_counts('roh_counts_with_skips')));
+----
+0
+
+# The genetic-map overload decodes only chromosomes the map covers.
+statement ok
+CREATE TEMP TABLE roh_counts_map AS
+SELECT '1' AS chrom, p AS pos, p / 1e6 AS cm FROM range(1, 5000002, 500000) AS t(p);
+
+query I
+SELECT list_sort(list(DISTINCT chrom)) FROM duckhts_roh_counts('roh_counts_clean', 'roh_counts_map');
+----
+[1]
+
+# Invalid inputs are errors.
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_clean', seq_error := 0.0);
+----
+seq_error must be in (0, 0.5)
+
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_clean', seq_error := 0.5);
+----
+seq_error must be in (0, 0.5)
+
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_clean', contamination := 1.0);
+----
+contamination must be in [0, 1)
+
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_clean', contamination := -0.01);
+----
+contamination must be in [0, 1)
+
+statement error
+SELECT duckhts_roh_segments([100, 200], [0.3, 0.3], [30, -1], [0, 0], 1e-3, 0.0,
+  NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+read counts must be at least 0
+
+statement error
+SELECT duckhts_roh_segments([100, 200], [0.3, 0.3], [30, 30], [0], 1e-3, 0.0,
+  NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9);
+----
+positions and counted-allele count lists differ in length
+
+# A deep site whose frequency is 1 allows only the two-copy genotype, whose likelihood under
+# 110 reads of the other allele would underflow to zero; the likelihood floor (the PL path's
+# cap of 255) keeps the site uninformative instead of zeroing both emissions. The run over the
+# following homozygous sites is found with finite quality, as without the site.
+query III
+WITH with_site AS (SELECT unnest(duckhts_roh_segments(
+  [100] || list_transform(range(1, 121), lambda i: 100 + i * 25000),
+  [1.0] || list_transform(range(1, 121), lambda i: 0.5),
+  [110] || list_transform(range(1, 121), lambda i: 30),
+  [0] || list_transform(range(1, 121), lambda i: 0),
+  1e-3, 0.0, NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9)) AS r),
+without_site AS (SELECT unnest(duckhts_roh_segments(
+  list_transform(range(1, 121), lambda i: 100 + i * 25000),
+  list_transform(range(1, 121), lambda i: 0.5),
+  list_transform(range(1, 121), lambda i: 30),
+  list_transform(range(1, 121), lambda i: 0),
+  1e-3, 0.0, NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9)) AS r)
+SELECT (SELECT count(*) FROM with_site), (SELECT bool_and(isfinite(r.quality)) FROM with_site),
+  (SELECT max(r."end") FROM with_site) = (SELECT max(r."end") FROM without_site);
+----
+1	true	true
+
+# A seq_error so small that 1 - seq_error rounds to 1 keeps finite likelihoods: the
+# complementary read probability is formed without cancellation and empty terms are skipped.
+query II
+WITH s AS (SELECT unnest(duckhts_roh_segments(
+  list_transform(range(1, 121), lambda i: i * 25000), list_transform(range(1, 121), lambda i: 0.4),
+  list_transform(range(1, 121), lambda i: 0), list_transform(range(1, 121), lambda i: 30),
+  1e-18, 0.0, NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9)) AS r)
+SELECT count(*), bool_and(isfinite(r.quality)) FROM s;
+----
+1	true
+
+# A NULL model parameter makes that row's result NULL, as for the other overloads.
+query I
+SELECT duckhts_roh_segments([100, 200], [0.3, 0.3], [30, 30], [0, 0], NULL::DOUBLE, 0.0,
+  NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9) IS NULL;
+----
+true

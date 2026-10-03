@@ -1,10 +1,19 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.2.9009
+# duckhts 1.5.2.9010
 
-Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel and ancestry-tuned frequencies; read-count emissions are still to come. The sections below describe what 2.0.0 will contain.
+Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination; memory-bounded decoding follows in #329. The sections below describe what 2.0.0 will contain.
 
 - Added `duckhts_roh_ancestry()` for per-sample ancestry-weighted allele frequencies from long reference and proportion relations, with allele-orientation handling and optional frequency clamping.
+
+- Added `duckhts_roh_counts()` and a read-count overload of `duckhts_roh_segments()`:
+  runs of homozygosity from allele read counts, for example BAM/CRAM counts at panel
+  sites, with a binomial read model, a per-read sequencing error and an optional
+  contamination fraction (#318). Contaminant reads at homozygous sites look
+  heterozygous and erode runs; with the contamination term, a synthetic 10%
+  titration recovers the uncontaminated runs. The emission is a DuckHTS
+  extension, since `bcftools roh` has no read-count mode. SQL tests check it
+  against the same model computed independently in SQL and rounded to PL.
 
 ## Breaking changes
 

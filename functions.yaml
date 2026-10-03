@@ -691,7 +691,7 @@
       "r_wrapper": "",
       "description": "Decode runs of homozygosity from one sample's sorted per-chromosome site lists, reproducing bcftools roh.",
       "details": {
-        "Overloads": "duckhts_roh_segments(positions, af, pl, map_pos, map_cm, rec_rate, hw_to_az, az_to_hw) takes phred-scaled likelihoods as INTEGER[][] (three values per site: RR, RA, AA). duckhts_roh_segments(positions, af, dosage, gt_error, map_pos, map_cm, rec_rate, hw_to_az, az_to_hw) takes INTEGER[] genotype dosages 0, 1 or 2 and a phred gt_error, as bcftools roh -G does. All arguments are positional; the duckhts_roh macro supplies the defaults.",
+        "Overloads": "duckhts_roh_segments(positions, af, pl, map_pos, map_cm, rec_rate, hw_to_az, az_to_hw) takes phred-scaled likelihoods as INTEGER[][] (three values per site: RR, RA, AA). duckhts_roh_segments(positions, af, dosage, gt_error, map_pos, map_cm, rec_rate, hw_to_az, az_to_hw) takes INTEGER[] genotype dosages 0, 1 or 2 and a phred gt_error, as bcftools roh -G does. duckhts_roh_segments(positions, af, ref_count, alt_count, seq_error, contamination, map_pos, map_cm, rec_rate, hw_to_az, az_to_hw) takes INTEGER[] read counts of the other allele and of the allele af refers to, a per-read seq_error in (0, 0.5) and a contamination fraction in [0, 1); duckhts_roh_counts describes that read model, which is a DuckHTS extension with no bcftools counterpart. All arguments are positional; the duckhts_roh macro supplies the defaults.",
         "Input": "positions is a BIGINT[] of one-based coordinates, sorted ascending and all in 1..2147483647; af is a DOUBLE[] of ALT allele frequencies and pl or dosage a list of the same length, one entry per site. Build them per sample and chromosome with list(... ORDER BY pos). Lists of unequal length, NULL positions, unsorted positions, an af outside [0, 1], a dosage outside 0..2 and a hw_to_az or az_to_hw outside [0, 1] are errors that name the problem. A NULL list returns NULL; an empty list returns an empty list. One list is decoded at a time, so memory follows the longest list.",
         "Skipped sites": "As in bcftools roh, a site is skipped when its position repeats the previous entry, its af is NULL, NaN or exactly 0, its genotype evidence is NULL or has NULL elements, its PL does not have three values or has a negative value, all three PL values are equal, or the likelihoods sum to zero. PL values above 255 count as 255. Skipped sites are not markers and do not break a run.",
         "Model": "A two-state hidden Markov model, autozygous (AZ) and Hardy-Weinberg (HW), with initial probabilities 1/2, emissions P(D|AZ) = P(D|RR)(1-f) + P(D|AA)f and P(D|HW) = P(D|RR)(1-f)^2 + 2P(D|RA)f(1-f) + P(D|AA)f^2, and transitions hw_to_az (default 6.7e-8) and az_to_hw (default 5e-9) per base pair compounded over the physical distance between sites. Segments are the Viterbi AZ runs; quality is the mean forward-backward phred score of the sites in the run. start and end are the first and last marker of the run, inclusive.",
@@ -753,6 +753,25 @@
       },
       "examples": [
         "SELECT * FROM duckhts_roh_ancestry('cohort.vcf.gz', 'reference_long', 'sample_proportions', gt_error := 30) ORDER BY sample, chrom, start;"
+      ]
+    },
+    {
+      "name": "duckhts_roh_counts",
+      "kind": "table_macro",
+      "category": "Variants",
+      "signature": "duckhts_roh_counts(counts_table, genetic_map, seq_error := 1e-3, contamination := 0.0, hw_to_az := 6.7e-8, az_to_hw := 5e-9, rec_rate := NULL)",
+      "returns": "table(sample VARCHAR, chrom VARCHAR, start BIGINT, \"end\" BIGINT, length BIGINT, n_markers INTEGER, quality DOUBLE)",
+      "r_wrapper": "rduckhts_roh_counts",
+      "description": "Find runs of homozygosity from allele read counts, with sequencing error and optional contamination.",
+      "details": {
+        "Input": "counts_table is a table or view with sample_id, chrom, pos (one-based), ref_count, alt_count and af, one row per sample and site. alt_count counts reads showing the allele whose population frequency is af; ref_count counts reads showing the other allele. Any frequency source composes in SQL first: an INFO tag, a frequency table or ancestry-weighted frequencies. Somalier site counts map as ref_count = a, alt_count = b and af = frequency of allele_b.",
+        "Read model": "Each read shows the counted allele with probability (1 - contamination) * q + contamination * c, where q is seq_error, 1/2 or 1 - seq_error for zero, one or two copies, and c = af * (1 - seq_error) + (1 - af) * seq_error is the chance that a read from a contaminating individual of the same population shows it. Reads are independent and the binomial coefficient is omitted. The resulting genotype likelihoods enter the bcftools roh model in place of PL. This emission is a DuckHTS extension; bcftools roh has no read-count mode.",
+        "Skipped sites": "Sites with no reads, a NULL count, or an af that is NULL, NaN or 0 are skipped; a repeated position keeps one row, as in the other overloads. Negative counts, seq_error outside (0, 0.5) and contamination outside [0, 1) are errors.",
+        "Limitations": "Biallelic sites only; one error rate for all reads, with no base- or mapping-quality, duplicate or strand modelling. The contamination fraction is supplied, not estimated, and a contaminant from a different population than af describes is approximated by af.",
+        "Otherwise": "Output, transitions, rec_rate and the optional genetic_map overload are as duckhts_roh."
+      },
+      "examples": [
+        "SELECT * FROM duckhts_roh_counts('site_counts', contamination := 0.02) ORDER BY sample, chrom, start;"
       ]
     },
     {

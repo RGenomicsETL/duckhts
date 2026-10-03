@@ -24,9 +24,21 @@ DUCKDB_EXTENSION_EXTERN
 #define ROH_ERRLEN 256
 #define ROH_MAX_POS1 INT32_MAX
 
+/* Genotype evidence of one duckhts_roh_segments overload, attached to it as
+ * extra info. Zero is not a kind, so a missing extra info is never mistaken
+ * for one. */
+typedef enum {
+    ROH_EVIDENCE_PL = 1, /* phred-scaled likelihoods, INTEGER[][] */
+    ROH_EVIDENCE_GT,     /* dosages 0, 1 or 2 with a phred gt_error */
+    ROH_EVIDENCE_COUNTS  /* read counts with seq_error and contamination */
+} roh_evidence_t;
+
 typedef struct {
-    bool has_gt; /* dosage evidence with gt_error instead of PL */
-    duckdb_vector positions, af, evidence, gt_error, map_pos, map_cm, rec_rate, hw_to_az, az_to_hw;
+    roh_evidence_t kind;
+    /* evidence is the PL or dosage list, or for counts the other-allele counts;
+     * counted holds the counts of the allele af refers to. */
+    duckdb_vector positions, af, evidence, counted, gt_error, seq_error, contamination;
+    duckdb_vector map_pos, map_cm, rec_rate, hw_to_az, az_to_hw;
 } roh_args_t;
 
 typedef struct {
@@ -169,10 +181,13 @@ oom:
  * 0 after an error, and -1 for a NULL result. */
 static int decode_row(duckdb_function_info info, const roh_args_t *args, idx_t row,
                       duckhts_roh_t *roh, roh_map_t *map) {
-    double hw_to_az, az_to_hw, gt_error = 0, rec_rate = 0;
+    double hw_to_az, az_to_hw, gt_error = 0, seq_error = 0, contamination = 0, rec_rate = 0;
     if (!read_double_arg(args->hw_to_az, row, &hw_to_az) ||
         !read_double_arg(args->az_to_hw, row, &az_to_hw)) return -1;
-    if (args->has_gt && !read_double_arg(args->gt_error, row, &gt_error)) return -1;
+    if (args->kind == ROH_EVIDENCE_GT && !read_double_arg(args->gt_error, row, &gt_error)) return -1;
+    if (args->kind == ROH_EVIDENCE_COUNTS &&
+        (!read_double_arg(args->seq_error, row, &seq_error) ||
+         !read_double_arg(args->contamination, row, &contamination))) return -1;
     if (!isfinite(hw_to_az) || hw_to_az < 0 || hw_to_az > 1) {
         roh_error(info, "hw_to_az must be in [0, 1]");
         return 0;
@@ -181,21 +196,36 @@ static int decode_row(duckdb_function_info info, const roh_args_t *args, idx_t r
         roh_error(info, "az_to_hw must be in [0, 1]");
         return 0;
     }
-    if (args->has_gt && (!isfinite(gt_error) || gt_error < 0)) {
+    if (args->kind == ROH_EVIDENCE_GT && (!isfinite(gt_error) || gt_error < 0)) {
         roh_error(info, "gt_error must be a finite phred value of at least 0");
         return 0;
+    }
+    if (args->kind == ROH_EVIDENCE_COUNTS) {
+        if (!isfinite(seq_error) || seq_error <= 0 || seq_error >= 0.5) {
+            roh_error(info, "seq_error must be in (0, 0.5)");
+            return 0;
+        }
+        if (!isfinite(contamination) || contamination < 0 || contamination >= 1) {
+            roh_error(info, "contamination must be in [0, 1)");
+            return 0;
+        }
     }
     if (read_double_arg(args->rec_rate, row, &rec_rate) && (!isfinite(rec_rate) || rec_rate < 0)) {
         roh_error(info, "rec_rate must be finite and at least 0");
         return 0;
     }
 
+    bool counts = args->kind == ROH_EVIDENCE_COUNTS;
     roh_list_t positions = open_list(args->positions, row);
     roh_list_t af = open_list(args->af, row);
     roh_list_t evidence = open_list(args->evidence, row);
-    if (!positions.valid || !af.valid || !evidence.valid) return -1;
+    roh_list_t counted = {0};
+    if (counts) counted = open_list(args->counted, row);
+    if (!positions.valid || !af.valid || !evidence.valid || (counts && !counted.valid)) return -1;
     idx_t n = positions.entries[row].length;
-    const char *evidence_name = args->has_gt ? "genotype" : "PL";
+    const char *evidence_name = args->kind == ROH_EVIDENCE_GT ? "genotype"
+                                : counts                       ? "other-allele count"
+                                                               : "PL";
     if (af.entries[row].length != n) {
         roh_error(info, "positions and af lists differ in length (%llu vs %llu)",
                   (unsigned long long)n, (unsigned long long)af.entries[row].length);
@@ -204,6 +234,11 @@ static int decode_row(duckdb_function_info info, const roh_args_t *args, idx_t r
     if (evidence.entries[row].length != n) {
         roh_error(info, "positions and %s lists differ in length (%llu vs %llu)", evidence_name,
                   (unsigned long long)n, (unsigned long long)evidence.entries[row].length);
+        return 0;
+    }
+    if (counts && counted.entries[row].length != n) {
+        roh_error(info, "positions and counted-allele count lists differ in length (%llu vs %llu)",
+                  (unsigned long long)n, (unsigned long long)counted.entries[row].length);
         return 0;
     }
 
@@ -228,14 +263,21 @@ static int decode_row(duckdb_function_info info, const roh_args_t *args, idx_t r
     idx_t af_offset = af.entries[row].offset;
     idx_t ev_offset = evidence.entries[row].offset;
 
-    /* PL evidence is a list of lists; GT evidence is a flat list. */
+    /* PL evidence is a list of lists; GT evidence and counts are flat lists. */
     const duckdb_list_entry *pl_entries = NULL;
     const int32_t *pl_values = NULL;
     const uint64_t *pl_validity = NULL;
-    const int32_t *dosage = NULL;
-    if (args->has_gt) {
-        dosage = duckdb_vector_get_data(evidence.child);
-    } else {
+    const int32_t *flat = NULL;
+    const int32_t *counted_values = NULL;
+    idx_t counted_offset = 0;
+    if (args->kind != ROH_EVIDENCE_PL) {
+        flat = duckdb_vector_get_data(evidence.child);
+    }
+    if (counts) {
+        counted_values = duckdb_vector_get_data(counted.child);
+        counted_offset = counted.entries[row].offset;
+    }
+    if (args->kind == ROH_EVIDENCE_PL) {
         pl_entries = duckdb_vector_get_data(evidence.child);
         duckdb_vector pl_child = duckdb_list_vector_get_child(evidence.child);
         pl_values = duckdb_vector_get_data(pl_child);
@@ -272,17 +314,36 @@ static int decode_row(duckdb_function_info info, const roh_args_t *args, idx_t r
 
         double pdg[3];
         bool usable;
-        if (args->has_gt) {
+        if (args->kind == ROH_EVIDENCE_GT) {
             idx_t at = ev_offset + i;
             usable = element_valid(evidence.child_validity, at);
             if (usable) {
-                int32_t value = dosage[at];
+                int32_t value = flat[at];
                 if (value < 0 || value > 2) {
                     roh_error(info, "genotype dosage must be 0, 1 or 2 (entry %llu is %d)",
                               (unsigned long long)(i + 1), value);
                     return 0;
                 }
                 usable = duckhts_roh_pdg_from_gt(gt_error, value, pdg);
+            }
+        } else if (counts) {
+            idx_t at = ev_offset + i;
+            idx_t counted_at = counted_offset + i;
+            usable = element_valid(evidence.child_validity, at) &&
+                     element_valid(counted.child_validity, counted_at);
+            if (usable) {
+                int32_t other_count = flat[at];
+                int32_t counted_count = counted_values[counted_at];
+                if (other_count < 0 || counted_count < 0) {
+                    roh_error(info, "read counts must be at least 0 (entry %llu is %d, %d)",
+                              (unsigned long long)(i + 1), other_count, counted_count);
+                    return 0;
+                }
+                /* The read model needs the site's frequency; sites without a
+                 * usable one are skipped below before the emission is used. */
+                usable = has_af && !isnan(alt_freq) && alt_freq > 0 &&
+                         duckhts_roh_pdg_from_counts(other_count, counted_count, seq_error,
+                                                     contamination, alt_freq, pdg);
             }
         } else {
             idx_t at = ev_offset + i;
@@ -336,13 +397,22 @@ static bool write_segments(duckdb_function_info info, duckdb_vector output, idx_
 
 static void roh_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
     roh_args_t args = {0};
-    idx_t columns = duckdb_data_chunk_get_column_count(input);
-    args.has_gt = columns == 9;
+    args.kind = (roh_evidence_t)(uintptr_t)duckdb_scalar_function_get_extra_info(info);
+    if (args.kind != ROH_EVIDENCE_PL && args.kind != ROH_EVIDENCE_GT &&
+        args.kind != ROH_EVIDENCE_COUNTS) {
+        roh_error(info, "internal error: unknown evidence kind");
+        return;
+    }
     idx_t at = 0;
     args.positions = duckdb_data_chunk_get_vector(input, at++);
     args.af = duckdb_data_chunk_get_vector(input, at++);
     args.evidence = duckdb_data_chunk_get_vector(input, at++);
-    if (args.has_gt) args.gt_error = duckdb_data_chunk_get_vector(input, at++);
+    if (args.kind == ROH_EVIDENCE_GT) args.gt_error = duckdb_data_chunk_get_vector(input, at++);
+    if (args.kind == ROH_EVIDENCE_COUNTS) {
+        args.counted = duckdb_data_chunk_get_vector(input, at++);
+        args.seq_error = duckdb_data_chunk_get_vector(input, at++);
+        args.contamination = duckdb_data_chunk_get_vector(input, at++);
+    }
     args.map_pos = duckdb_data_chunk_get_vector(input, at++);
     args.map_cm = duckdb_data_chunk_get_vector(input, at++);
     args.rec_rate = duckdb_data_chunk_get_vector(input, at++);
@@ -370,7 +440,10 @@ static void roh_scalar(duckdb_function_info info, duckdb_data_chunk input, duckd
     duckhts_roh_destroy(roh);
 }
 
-static bool register_overload(duckdb_connection connection, bool has_gt) {
+/* Parameters, in order: positions, af, then the evidence of the kind (PL lists;
+ * dosages and gt_error; other-allele counts, counted-allele counts, seq_error
+ * and contamination), then map_pos, map_cm, rec_rate, hw_to_az and az_to_hw. */
+static bool register_overload(duckdb_connection connection, roh_evidence_t kind) {
     duckdb_logical_type bigint = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
     duckdb_logical_type integer = duckdb_create_logical_type(DUCKDB_TYPE_INTEGER);
     duckdb_logical_type real = duckdb_create_logical_type(DUCKDB_TYPE_DOUBLE);
@@ -387,8 +460,17 @@ static bool register_overload(duckdb_connection connection, bool has_gt) {
     duckdb_scalar_function_set_name(function, ROH_NAME);
     duckdb_scalar_function_add_parameter(function, bigint_list);
     duckdb_scalar_function_add_parameter(function, real_list);
-    duckdb_scalar_function_add_parameter(function, has_gt ? integer_list : pl_list);
-    if (has_gt) duckdb_scalar_function_add_parameter(function, real);
+    if (kind == ROH_EVIDENCE_PL) {
+        duckdb_scalar_function_add_parameter(function, pl_list);
+    } else if (kind == ROH_EVIDENCE_GT) {
+        duckdb_scalar_function_add_parameter(function, integer_list);
+        duckdb_scalar_function_add_parameter(function, real);
+    } else {
+        duckdb_scalar_function_add_parameter(function, integer_list);
+        duckdb_scalar_function_add_parameter(function, integer_list);
+        duckdb_scalar_function_add_parameter(function, real);
+        duckdb_scalar_function_add_parameter(function, real);
+    }
     duckdb_scalar_function_add_parameter(function, bigint_list);
     duckdb_scalar_function_add_parameter(function, real_list);
     duckdb_scalar_function_add_parameter(function, real);
@@ -396,6 +478,7 @@ static bool register_overload(duckdb_connection connection, bool has_gt) {
     duckdb_scalar_function_add_parameter(function, real);
     duckdb_scalar_function_set_return_type(function, segments);
     duckdb_scalar_function_set_special_handling(function);
+    duckdb_scalar_function_set_extra_info(function, (void *)(uintptr_t)kind, NULL);
     duckdb_scalar_function_set_function(function, roh_scalar);
     bool ok = duckdb_register_scalar_function(connection, function) == DuckDBSuccess;
     duckdb_destroy_scalar_function(&function);
@@ -413,5 +496,7 @@ static bool register_overload(duckdb_connection connection, bool has_gt) {
 }
 
 bool register_duckhts_roh_functions(duckdb_connection connection) {
-    return register_overload(connection, false) && register_overload(connection, true);
+    return register_overload(connection, ROH_EVIDENCE_PL) &&
+           register_overload(connection, ROH_EVIDENCE_GT) &&
+           register_overload(connection, ROH_EVIDENCE_COUNTS);
 }

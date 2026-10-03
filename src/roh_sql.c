@@ -1,4 +1,5 @@
-/* duckhts_roh and duckhts_roh_af_table: runs of homozygosity from a VCF/BCF.
+/* duckhts_roh, duckhts_roh_af_table and duckhts_roh_ancestry: runs of homozygosity
+ * from a VCF/BCF; duckhts_roh_counts: from read counts in a caller relation.
  *
  * The macros read records with read_bcf(tidy_format := true), build one
  * list(... ORDER BY pos) per sample and chromosome, and pass it to the native
@@ -203,6 +204,30 @@ static const char ancestry_validations[] =
     "AND c.ref = r.ref AND c.alt = r.alt "
     "LEFT JOIN __dht_props AS p ON p.smp = c.smp), ";
 
+/* Read counts from a caller relation: one row per sample and site, with the
+ * frequency of the counted allele. Any frequency source composes in SQL
+ * before the macro, for example counts at panel sites joined to INFO/AF, an
+ * af_table or ancestry-weighted frequencies. */
+#define ROH_COUNTS_OPTIONS \
+    "seq_error := 1e-3, contamination := 0.0, hw_to_az := 6.7e-8, az_to_hw := 5e-9, rec_rate := NULL"
+
+static const char counts_lists[] =
+    "WITH __dht_counts AS (SELECT CAST(sample_id AS VARCHAR) AS smp, "
+    "CAST(chrom AS VARCHAR) AS chrom, CAST(pos AS BIGINT) AS pos, "
+    "CAST(ref_count AS INTEGER) AS ref_count, CAST(alt_count AS INTEGER) AS alt_count, "
+    "CAST(af AS DOUBLE) AS af FROM query_table(counts_table)), "
+    "__dht_lists AS (SELECT smp, chrom, list(struct_pack(pos := pos, af := af, "
+    "other := ref_count, counted := alt_count) ORDER BY pos) AS s "
+    "FROM __dht_counts GROUP BY smp, chrom)";
+
+static const char kernel_counts[] =
+    "duckhts_roh_segments(list_transform(l.s, lambda x: x.pos), "
+    "list_transform(l.s, lambda x: x.af), list_transform(l.s, lambda x: x.other), "
+    "list_transform(l.s, lambda x: x.counted), CAST(seq_error AS DOUBLE), "
+    "CAST(contamination AS DOUBLE), ";
+static const char kernel_counts_end[] =
+    ", CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE))";
+
 #define ROH_MAX_PARTS 32
 
 typedef struct {
@@ -278,11 +303,35 @@ static bool register_roh_ancestry_macro(duckhts_registration_t *registration) {
     return duckhts_register_sql_parts(registration, parts, count);
 }
 
+static bool register_roh_counts_macro(duckhts_registration_t *registration) {
+    const char *parts[ROH_MAX_PARTS];
+    size_t count = 0;
+    parts[count++] = "CREATE OR REPLACE MACRO duckhts_roh_counts(counts_table, "
+                     ROH_COUNTS_OPTIONS ") AS TABLE (";
+    parts[count++] = counts_lists;
+    parts[count++] = select_head;
+    parts[count++] = kernel_counts;
+    parts[count++] = no_map_arguments;
+    parts[count++] = kernel_counts_end;
+    parts[count++] = from_lists;
+    parts[count++] = "), (counts_table, genetic_map VARCHAR, " ROH_COUNTS_OPTIONS ") AS TABLE (";
+    parts[count++] = counts_lists;
+    parts[count++] = map_lists;
+    parts[count++] = select_head;
+    parts[count++] = kernel_counts;
+    parts[count++] = map_arguments;
+    parts[count++] = kernel_counts_end;
+    parts[count++] = from_lists_with_map;
+    parts[count++] = ")";
+    return duckhts_register_sql_parts(registration, parts, count);
+}
+
 bool register_duckhts_roh_sql(duckhts_registration_t *registration) {
     static const roh_source_t from_info_tag = {"duckhts_roh", "af_tag", sites_from_info_tag};
     static const roh_source_t from_relation = {"duckhts_roh_af_table", "af_table",
                                                sites_from_relation};
     return register_roh_macro(registration, &from_info_tag) &&
            register_roh_macro(registration, &from_relation) &&
-           register_roh_ancestry_macro(registration);
+           register_roh_ancestry_macro(registration) &&
+           register_roh_counts_macro(registration);
 }
