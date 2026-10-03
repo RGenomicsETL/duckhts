@@ -68,13 +68,29 @@ test_roh_ancestry_staging <- function() {
     FALSE
   }, error = function(error) grepl("differs from its registered identity", conditionMessage(error)))
   stopifnot(failed, !file.exists(rejected), !file.exists(paste0(rejected, ".csi")))
-  registered$supplier_identity[[2L]] <- paste0("records=1;samples=377;sha256=", result$output_sha256)
-  # The SHA-256 is the evaluated file's identity, not a reproducibility check.
+
+  # The right counts with different record content are rejected too: the record
+  # SHA-256 identifies the cohort, independently of the header and compression.
+  registered$supplier_identity[[2L]] <- paste0(
+    "records=1;samples=377;records_sha256=", strrep("0", 64L), ";sha256=", result$output_sha256)
+  changed <- file.path(directory, "changed.bcf")
+  failed <- tryCatch({
+    stage_roh_children_from_registry(20L, registered, pedigree_path, changed,
+                                     bcftools = bcftools,
+                                     expected_source_sha256 = source_hash)
+    FALSE
+  }, error = function(error) grepl("differs from its registered identity", conditionMessage(error)))
+  stopifnot(failed, !file.exists(changed), !file.exists(paste0(changed, ".csi")),
+            grepl("^[0-9a-f]{64}$", result$records_sha256))
+  registered$supplier_identity[[2L]] <- paste0(
+    "records=1;samples=377;records_sha256=", result$records_sha256, ";sha256=", result$output_sha256)
+  # The file SHA-256 is the evaluated file's identity, not a reproducibility check.
   accepted <- file.path(directory, "accepted.bcf")
   verified <- stage_roh_children_from_registry(20L, registered, pedigree_path, accepted,
                                                bcftools = bcftools,
                                                expected_source_sha256 = source_hash)
-  stopifnot(verified$records == 1L, verified$samples == 377L, file.exists(accepted))
+  stopifnot(verified$records == 1L, verified$samples == 377L, file.exists(accepted),
+            identical(verified$records_sha256, result$records_sha256))
 }
 
 test_roh_ancestry_staging()
