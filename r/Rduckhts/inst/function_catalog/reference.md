@@ -1634,7 +1634,7 @@ table
 
 ### Input
 
-sketches_table names a relation with one non-NULL sketch column per sample, as duckhts_somalier_prepare_sketches returns. Two sketches of one sample, a NULL sketch, a sketch with more sites than max_sites, or a sketch whose masks do not match its stored content digest is an error. All sketches must share assembly, panel digest, site count and classification settings.
+sketches_table names a relation with one non-NULL sketch column per sample, as duckhts_somalier_prepare_sketches returns. Two sketches of one sample, a NULL sketch, a sketch with more sites than max_sites, or a sketch whose masks do not match its stored content digest is an error. All sketches must share assembly, panel digest, site count and classification settings; a mixed relation is an error. These checks run once over the relation, so they hold for a query that reads no pair column, for example count(*).
 
 ### Results
 

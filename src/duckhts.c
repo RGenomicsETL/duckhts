@@ -444,7 +444,16 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "__dht_guard AS MATERIALIZED (SELECT CASE "
         "WHEN count(*) != count(DISTINCT sketch.sample_id) THEN "
         "error('duckhts_somalier_relatedness_all_pairs: sketches must have one sketch "
-        "per distinct sample') ELSE true END AS valid FROM __dht_checked) "
+        "per distinct sample') "
+        /* Checked here and not only by the pair function: a query that reads
+         * no pair column must not skip the identity check. */
+        "WHEN count(DISTINCT struct_pack(assembly := sketch.assembly, "
+        "panel_sha256 := sketch.panel_sha256, site_count := sketch.site_count, "
+        "min_depth := sketch.min_depth, min_het_balance := sketch.min_het_balance, "
+        "hom_balance_cutoff := sketch.hom_balance_cutoff)) > 1 THEN "
+        "error('duckhts_somalier_relatedness_all_pairs: sketches must share one assembly, "
+        "panel digest, site count and classification settings') "
+        "ELSE true END AS valid FROM __dht_checked) "
         "SELECT unnest(__duckhts_somalier_relatedness_checked(a.sketch, b.sketch, "
         "CAST(max_sites AS UBIGINT))) "
         "FROM __dht_guard AS g JOIN __dht_checked AS a ON g.valid "

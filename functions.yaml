@@ -878,7 +878,7 @@
       "r_wrapper": "rduckhts_somalier_relatedness",
       "description": "Compute Somalier-derived relatedness and concordance statistics for every unordered sample pair of one sketch relation.",
       "details": {
-        "Input": "sketches_table names a relation with one non-NULL sketch column per sample, as duckhts_somalier_prepare_sketches returns. Two sketches of one sample, a NULL sketch, a sketch with more sites than max_sites, or a sketch whose masks do not match its stored content digest is an error. All sketches must share assembly, panel digest, site count and classification settings.",
+        "Input": "sketches_table names a relation with one non-NULL sketch column per sample, as duckhts_somalier_prepare_sketches returns. Two sketches of one sample, a NULL sketch, a sketch with more sites than max_sites, or a sketch whose masks do not match its stored content digest is an error. All sketches must share assembly, panel digest, site count and classification settings; a mixed relation is an error. These checks run once over the relation, so they hold for a query that reads no pair column, for example count(*).",
         "Results": "One row per unordered pair with sample_a < sample_b, with the fields of duckhts_somalier_relatedness as columns. The rows equal those of duckhts_somalier_relatedness over the same pairs. No row order is guaranteed.",
         "Execution": "Each sketch is content-checked once and the pairs are compared from the checked sketches, so the content checks grow with the number of samples and the comparisons with pairs times sites. The output has N(N-1)/2 rows for N samples and is not capped. The pair comparison runs in one thread."
       },

@@ -652,7 +652,23 @@ FROM somalier_sketches;
 statement error
 SELECT * FROM duckhts_somalier_relatedness_all_pairs('somalier_mixed_assembly', max_sites := 8);
 ----
-assembly identity mismatch
+sketches must share one assembly, panel digest, site count and classification settings
+
+# The guard holds for a query that reads no pair column.
+statement error
+SELECT count(*) FROM duckhts_somalier_relatedness_all_pairs('somalier_mixed_assembly', max_sites := 8);
+----
+sketches must share one assembly, panel digest, site count and classification settings
+
+statement error
+SELECT count(*) FROM duckhts_somalier_relatedness_all_pairs('somalier_one_corrupt_sketch', max_sites := 8);
+----
+corrupt sketch masks or settings
+
+statement error
+SELECT count(*) FROM duckhts_somalier_relatedness_all_pairs('somalier_repeated_sketch', max_sites := 8);
+----
+one sketch per distinct sample
 
 # Preparation must not silently omit a physical panel observation or accept a
 # malformed count tuple. The internal aggregate is tested separately for its
