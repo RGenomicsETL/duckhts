@@ -1,6 +1,6 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.2.9011
+# duckhts 1.5.2.9012
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
@@ -14,6 +14,21 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   titration recovers the uncontaminated runs. The emission is a DuckHTS
   extension, since `bcftools roh` has no read-count mode. SQL tests check it
   against the same model computed independently in SQL and rounded to PL.
+
+- Added `duckhts_somalier_relatedness_all_pairs(sketches_table, max_sites := 1000000)`:
+  relatedness for every unordered sample pair of a sketch relation. It checks the
+  contents of each sketch once and then compares the checked sketches, where
+  `duckhts_somalier_relatedness` over a self-join checked both sketches for every pair.
+  The rows are the same.
+
+- `duckhts_somalier_relatedness` is faster with unchanged results: it checked each
+  sketch's contents twice per pair and now checks them once, it tests mask words for
+  NULL in bulk, and the bit counts are inlined instead of one library call per word.
+
+- The `max_site_bytes` contract of the ROH functions is stated exactly: a decode does
+  not grow a buffer when the bytes held by all ROH decodes in the process would pass
+  its own `max_site_bytes`. Decodes that run at the same time with different values
+  each apply their own. The behaviour is unchanged.
 
 - ROH decoding has explicit memory limits (#329). `duckhts_roh`, `duckhts_roh_af_table`,
   `duckhts_roh_ancestry` and `duckhts_roh_counts` now hold the sites of each sample and

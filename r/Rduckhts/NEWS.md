@@ -1,6 +1,14 @@
-# Rduckhts 1.5.2.9011.0.1.5
+# Rduckhts 1.5.2.9012.0.1.5
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
+
+- `rduckhts_somalier_relatedness()` is faster for all pairs, with the same rows: it
+  checks the contents of each sketch once instead of twice per pair. The bundled
+  extension adds `duckhts_somalier_relatedness_all_pairs()` for this.
+
+- The `max_site_bytes` argument of `rduckhts_roh()` and `rduckhts_roh_counts()` is
+  documented exactly: each call applies its own limit to the bytes held by all ROH
+  decodes in the process.
 
 - `rduckhts_roh()` accepts long ancestry reference and sample-proportion relations to calculate ancestry-weighted allele frequencies, with optional clamping.
 
