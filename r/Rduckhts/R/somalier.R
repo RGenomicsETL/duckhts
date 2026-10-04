@@ -352,7 +352,9 @@ rduckhts_somalier_sketches <- function(
 #' columns. Missing or duplicate sample and pair identities error instead of
 #' silently dropping or multiplying requested comparisons. The native kernel
 #' checks assembly, ordered-panel digest, classification settings, mask shape,
-#' and mask contents for each comparison. No SQL row-order guarantee is implied.
+#' and mask contents. For all pairs it checks the contents of each sketch once
+#' and then compares the checked sketches; for selected pairs it checks both
+#' sketches of each comparison. No SQL row-order guarantee is implied.
 #'
 #' @param con A DuckDB connection with DuckHTS loaded.
 #' @param sketches_table Name of a prepared sketch table or view.
@@ -393,9 +395,10 @@ rduckhts_somalier_relatedness <- function(
   }
 
   if (is.null(pairs_table)) {
-    from_sql <- sprintf(
-      "FROM %s a JOIN %s b ON a.sketch.sample_id < b.sketch.sample_id",
-      sketch_relation, sketch_relation
+    query <- sprintf(
+      "SELECT * FROM duckhts_somalier_relatedness_all_pairs(%s, max_sites := %s)",
+      sql_quote_string(con, sketches$name),
+      .somalier_quote_number(con, max_sites)
     )
   } else {
     pair_relation <- sql_quote_identifier(con, pairs_table)
@@ -420,11 +423,11 @@ rduckhts_somalier_relatedness <- function(
              "JOIN %s b ON b.sketch.sample_id = p.sample_b"),
       pair_relation, sketch_relation, sketch_relation
     )
+    query <- sprintf(
+      "SELECT unnest(duckhts_somalier_relatedness(a.sketch, b.sketch, %s)) %s",
+      .somalier_quote_number(con, max_sites), from_sql
+    )
   }
-  query <- sprintf(
-    "SELECT unnest(duckhts_somalier_relatedness(a.sketch, b.sketch, %s)) %s",
-    .somalier_quote_number(con, max_sites), from_sql
-  )
   .somalier_publish_query(con, query, table_name, overwrite)
 }
 

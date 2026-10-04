@@ -1322,7 +1322,7 @@ hw_to_az and az_to_hw are the per-base-pair transition probabilities (bcftools -
 
 ### Memory
 
-DuckDB manages, and can spill, the scan and the joins. The sites of each sample and chromosome are held in native buffers of 16 bytes per site until that sample and chromosome is decoded, so memory follows samples times sites. max_sites caps one sample and chromosome (default 20,000,000; at most 100,000,000). max_site_bytes caps the buffers of every sample and chromosome held at once (default 4 GiB) and is shared by the decodes running in the process. Exceeding either limit is an error: decode fewer samples per query with samples, or raise the limit. Decoding one sample and chromosome also needs 38 bytes per site of workspace in each thread. Model parameters and limits are checked even when the input has no record.
+DuckDB manages, and can spill, the scan and the joins. The sites of each sample and chromosome are held in native buffers of 16 bytes per site until that sample and chromosome is decoded, so memory follows samples times sites. max_sites caps one sample and chromosome (default 20,000,000; at most 100,000,000). max_site_bytes (default 4 GiB) bounds the buffers held at once: a decode does not grow a buffer when the bytes held by all ROH decodes in the process would pass its own max_site_bytes. Decodes that run at the same time with different values each apply their own, so the process total can pass the smaller value while the decode with the larger value allocates. Exceeding either limit is an error: decode fewer samples per query with samples, or raise the limit. Decoding one sample and chromosome also needs 38 bytes per site of workspace in each thread. Model parameters and limits are checked even when the input has no record.
 
 ### Limits
 
@@ -1608,12 +1608,46 @@ The struct retains sample and panel identities, method version, status, jointly-
 
 ### Execution
 
-Both sketches must have identical panel digests, site counts and classification settings. Mask words are borrowed directly; comparison allocates no pair-sized workspace. SQL chooses the requested pair relation and output ordering.
+Both sketches must have identical panel digests, site counts and classification settings. The contents of both sketches are checked for every call, so comparing every pair of a cohort repeats that check for each pair; use duckhts_somalier_relatedness_all_pairs for all pairs. Mask words are borrowed directly; comparison allocates no pair-sized workspace. SQL chooses the requested pair relation and output ordering.
 
 ### Examples
 
 ```sql
-SELECT unnest(duckhts_somalier_relatedness(a.sketch, b.sketch, 1000000)) FROM sample_sketches a JOIN sample_sketches b ON a.sketch.sample_id < b.sketch.sample_id;
+SELECT unnest(duckhts_somalier_relatedness(a.sketch, b.sketch, 1000000)) FROM selected_pairs p JOIN sample_sketches a ON a.sketch.sample_id = p.sample_a JOIN sample_sketches b ON b.sketch.sample_id = p.sample_b;
+```
+
+## duckhts_somalier_relatedness_all_pairs
+
+Compute Somalier-derived relatedness and concordance statistics for every unordered sample pair of one sketch relation.
+
+Signature:
+
+```sql
+duckhts_somalier_relatedness_all_pairs(sketches_table, max_sites := 1000000)
+```
+
+Returns:
+
+```
+table
+```
+
+### Input
+
+sketches_table names a relation with one non-NULL sketch column per sample, as duckhts_somalier_prepare_sketches returns. Two sketches of one sample, a NULL sketch, a sketch with more sites than max_sites, or a sketch whose masks do not match its stored content digest is an error. All sketches must share assembly, panel digest, site count and classification settings; a mixed relation is an error. These checks run once over the relation, so they hold for a query that reads no pair column, for example count(*).
+
+### Results
+
+One row per unordered pair with sample_a < sample_b, with the fields of duckhts_somalier_relatedness as columns. The rows equal those of duckhts_somalier_relatedness over the same pairs. No row order is guaranteed.
+
+### Execution
+
+Each sketch is content-checked once and the pairs are compared from the checked sketches, so the content checks grow with the number of samples and the comparisons with pairs times sites. The output has N(N-1)/2 rows for N samples and is not capped. The pair comparison runs in one thread.
+
+### Examples
+
+```sql
+SELECT * FROM duckhts_somalier_relatedness_all_pairs('sample_sketches');
 ```
 
 ## duckhts_somalier_verify_relatedness

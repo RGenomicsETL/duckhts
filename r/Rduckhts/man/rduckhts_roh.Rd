@@ -63,10 +63,12 @@ zero disables clamping. Must be in `[0, 0.5)`.}
 \item{max_sites}{Most sites one sample and chromosome may hold, from 1 to
 100,000,000. A larger group is an error.}
 
-\item{max_site_bytes}{Most bytes the site buffers of all samples and
-chromosomes may hold at once (16 bytes per site, 24 for read counts),
-shared by the decodes running in the process. Exceeding it is an error:
-decode fewer samples per call or raise it.}
+\item{max_site_bytes}{Bound on the bytes the site buffers hold at once (16
+bytes per site, 24 for read counts). A decode does not grow a buffer when
+the bytes held by all ROH decodes in the process would pass its own
+`max_site_bytes`; decodes that run at the same time with different values
+each apply their own. Exceeding it is an error: decode fewer samples per
+call or raise it.}
 }
 \value{
 A data frame (or invisible `TRUE` when `table_name` is given) with one

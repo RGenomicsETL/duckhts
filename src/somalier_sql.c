@@ -121,6 +121,21 @@ static bool sql_valid(duckdb_vector vector, idx_t row) {
     return mask == NULL || duckdb_validity_row_is_valid(mask, row);
 }
 
+/* True when rows [offset, offset + length) of a vector are all non-NULL. */
+static bool sql_range_valid(duckdb_vector vector, idx_t offset, idx_t length) {
+    uint64_t *mask = duckdb_vector_get_validity(vector);
+    idx_t end = offset + length;
+    if (mask == NULL) return true;
+    while (offset < end) {
+        idx_t bit = offset % 64u;
+        idx_t take = 64u - bit < end - offset ? 64u - bit : end - offset;
+        uint64_t wanted = (take == 64u ? UINT64_MAX : (UINT64_C(1) << take) - 1u) << bit;
+        if ((mask[offset / 64u] & wanted) != wanted) return false;
+        offset += take;
+    }
+    return true;
+}
+
 static int hex_digit(char c) {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
@@ -770,8 +785,13 @@ typedef struct somalier_sql_sketch {
     duckdb_string_t *panel_sha256;
 } somalier_sql_sketch_t;
 
+/* Reads one sketch struct in place. The list bounds are always checked, so the
+ * masks are safe to read. With check_content the overlap, tail and stored
+ * content digest are checked too; without it the caller states that this
+ * sketch value already passed that check in the same query. */
 static bool read_sketch(duckdb_vector input, idx_t row, uint64_t max_sites,
-                        somalier_sql_sketch_t *sketch, const char **error) {
+                        bool check_content, somalier_sql_sketch_t *sketch,
+                        const char **error) {
     duckdb_vector fields[SKETCH_FIELD_COUNT];
     uint64_t sites, words;
     for (unsigned i = 0u; i < SKETCH_FIELD_COUNT; i++) {
@@ -831,18 +851,17 @@ static bool read_sketch(duckdb_vector input, idx_t row, uint64_t max_sites,
             *error = "duckhts_somalier_relatedness: mask word count or offset is invalid";
             return false;
         }
-        for (idx_t j = 0u; j < entry.length; j++) {
-            if (!sql_valid(child, entry.offset + j)) {
-                *error = "duckhts_somalier_relatedness: mask words cannot be NULL";
-                return false;
-            }
+        if (!sql_range_valid(child, entry.offset, entry.length)) {
+            *error = "duckhts_somalier_relatedness: mask words cannot be NULL";
+            return false;
         }
         data = duckdb_vector_get_data(child);
         if (i == SKETCH_HOM_A) sketch->masks.hom_a = words ? data + entry.offset : NULL;
         if (i == SKETCH_HET) sketch->masks.het = words ? data + entry.offset : NULL;
         if (i == SKETCH_HOM_B) sketch->masks.hom_b = words ? data + entry.offset : NULL;
     }
-    if (duckhts_somalier_validate_masks(&sketch->masks) != DUCKHTS_SOMALIER_OK) {
+    if (check_content &&
+        duckhts_somalier_validate_masks(&sketch->masks) != DUCKHTS_SOMALIER_OK) {
         *error = "duckhts_somalier_relatedness: corrupt sketch masks or settings";
         return false;
     }
@@ -862,8 +881,17 @@ static void pair_write_double(duckdb_vector vector, idx_t row, double value) {
     ((double *)duckdb_vector_get_data(vector))[row] = value;
 }
 
+/* Whether a pair scalar checks the content of each sketch it reads. */
+static const bool pair_checks_content = true;
+static const bool pair_trusts_content = false;
+
+/* duckhts_somalier_relatedness checks the content of both sketches for every
+ * pair. __duckhts_somalier_relatedness_checked does not: the all-pairs macro
+ * passes every sketch through __duckhts_somalier_sketch_valid once and then
+ * compares each one with many others. */
 static void somalier_pair_scalar(duckdb_function_info info,
                                  duckdb_data_chunk input, duckdb_vector output) {
+    const bool check_content = *(const bool *)duckdb_scalar_function_get_extra_info(info);
     duckdb_vector left = duckdb_data_chunk_get_vector(input, 0);
     duckdb_vector right = duckdb_data_chunk_get_vector(input, 1);
     duckdb_vector limit = duckdb_data_chunk_get_vector(input, 2);
@@ -895,8 +923,8 @@ static void somalier_pair_scalar(duckdb_function_info info,
                 "duckhts_somalier_relatedness: sketches and max_sites must be non-NULL; max_sites is 1..100000000");
             return;
         }
-        if (!read_sketch(left, row, max_sites[row], &a, &error) ||
-            !read_sketch(right, row, max_sites[row], &b, &error)) {
+        if (!read_sketch(left, row, max_sites[row], check_content, &a, &error) ||
+            !read_sketch(right, row, max_sites[row], check_content, &b, &error)) {
             duckdb_scalar_function_set_error(info, error);
             return;
         }
@@ -910,7 +938,7 @@ static void somalier_pair_scalar(duckdb_function_info info,
                 "duckhts_somalier_relatedness: assembly identity mismatch");
             return;
         }
-        status = duckhts_somalier_pair_stats(&a.masks, &b.masks, &stats);
+        status = duckhts_somalier_pair_stats_validated(&a.masks, &b.masks, &stats);
         if (status != DUCKHTS_SOMALIER_OK) {
             duckdb_scalar_function_set_error(info,
                 status == DUCKHTS_SOMALIER_IDENTITY_MISMATCH
@@ -963,6 +991,33 @@ static void somalier_pair_scalar(duckdb_function_info info,
             pair_write_double(result_fields[PAIR_ADJUSTED_CONCORDANCE], row,
                 stats.adjusted_concordance);
         }
+    }
+}
+
+/* __duckhts_somalier_sketch_valid(sketch, max_sites): true for a sketch whose
+ * shape, masks and stored content digest agree; an error otherwise. */
+static void somalier_sketch_valid_scalar(duckdb_function_info info,
+                                         duckdb_data_chunk input, duckdb_vector output) {
+    duckdb_vector sketches = duckdb_data_chunk_get_vector(input, 0);
+    duckdb_vector limit = duckdb_data_chunk_get_vector(input, 1);
+    uint64_t *max_sites = duckdb_vector_get_data(limit);
+    bool *valid = duckdb_vector_get_data(output);
+    idx_t rows = duckdb_data_chunk_get_size(input);
+
+    for (idx_t row = 0u; row < rows; row++) {
+        somalier_sql_sketch_t sketch = {0};
+        const char *error = NULL;
+        if (!sql_valid(sketches, row) || !sql_valid(limit, row) || max_sites[row] == 0u ||
+            max_sites[row] > SOMALIER_SQL_MAX_SITES) {
+            duckdb_scalar_function_set_error(info,
+                "duckhts_somalier_relatedness: sketches and max_sites must be non-NULL; max_sites is 1..100000000");
+            return;
+        }
+        if (!read_sketch(sketches, row, max_sites[row], true, &sketch, &error)) {
+            duckdb_scalar_function_set_error(info, error);
+            return;
+        }
+        valid[row] = true;
     }
 }
 
@@ -1044,8 +1099,8 @@ static void somalier_verify_pair_scalar(duckdb_function_info info,
         if (!sql_valid(pair, row) || !sql_valid(left, row) ||
             !sql_valid(right, row) || !sql_valid(limit, row) ||
             max_sites[row] == 0u || max_sites[row] > SOMALIER_SQL_MAX_SITES ||
-            !read_sketch(left, row, max_sites[row], &a, &error) ||
-            !read_sketch(right, row, max_sites[row], &b, &error)) continue;
+            !read_sketch(left, row, max_sites[row], true, &a, &error) ||
+            !read_sketch(right, row, max_sites[row], true, &b, &error)) continue;
         for (unsigned i = PAIR_SAMPLE_A; i <= PAIR_STATUS; i++) {
             if (!sql_valid(field[i], row)) {
                 text_valid = false;
@@ -1171,7 +1226,34 @@ void register_duckhts_somalier_functions(duckdb_connection connection) {
     duckdb_scalar_function_add_parameter(function, bigint);
     duckdb_scalar_function_set_return_type(function, pair);
     duckdb_scalar_function_set_special_handling(function);
+    duckdb_scalar_function_set_extra_info(function, (void *)&pair_checks_content, NULL);
     duckdb_scalar_function_set_function(function, somalier_pair_scalar);
+    duckdb_register_scalar_function(connection, function);
+    duckdb_destroy_scalar_function(&function);
+
+    function = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(function, "__duckhts_somalier_relatedness_checked");
+    duckdb_scalar_function_add_parameter(function, sketch);
+    duckdb_scalar_function_add_parameter(function, sketch);
+    duckdb_scalar_function_add_parameter(function, bigint);
+    duckdb_scalar_function_set_return_type(function, pair);
+    duckdb_scalar_function_set_special_handling(function);
+    duckdb_scalar_function_set_extra_info(function, (void *)&pair_trusts_content, NULL);
+    duckdb_scalar_function_set_function(function, somalier_pair_scalar);
+    duckdb_register_scalar_function(connection, function);
+    duckdb_destroy_scalar_function(&function);
+
+    function = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(function, "__duckhts_somalier_sketch_valid");
+    duckdb_scalar_function_add_parameter(function, sketch);
+    duckdb_scalar_function_add_parameter(function, bigint);
+    {
+        duckdb_logical_type boolean = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
+        duckdb_scalar_function_set_return_type(function, boolean);
+        duckdb_destroy_logical_type(&boolean);
+    }
+    duckdb_scalar_function_set_special_handling(function);
+    duckdb_scalar_function_set_function(function, somalier_sketch_valid_scalar);
     duckdb_register_scalar_function(connection, function);
     duckdb_destroy_scalar_function(&function);
 

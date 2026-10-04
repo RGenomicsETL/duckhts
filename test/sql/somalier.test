@@ -555,6 +555,121 @@ WHERE a.sketch.sample_id = 'A' AND b.sketch.sample_id = 'B';
 ----
 site_count exceeds max_sites
 
+# duckhts_somalier_relatedness_all_pairs checks each sketch once and returns
+# the rows of the per-pair function for every unordered pair.
+query I
+SELECT count(*) FROM duckhts_somalier_relatedness_all_pairs('somalier_sketches', max_sites := 8);
+----
+6
+
+query I
+SELECT count(*) FROM (
+  (SELECT unnest(duckhts_somalier_relatedness(a.sketch, b.sketch, 8))
+   FROM somalier_sketches a JOIN somalier_sketches b ON a.sketch.sample_id < b.sketch.sample_id
+   EXCEPT
+   SELECT * FROM duckhts_somalier_relatedness_all_pairs('somalier_sketches', max_sites := 8))
+  UNION ALL
+  (SELECT * FROM duckhts_somalier_relatedness_all_pairs('somalier_sketches', max_sites := 8)
+   EXCEPT
+   SELECT unnest(duckhts_somalier_relatedness(a.sketch, b.sketch, 8))
+   FROM somalier_sketches a JOIN somalier_sketches b ON a.sketch.sample_id < b.sketch.sample_id));
+----
+0
+
+query TTIIII
+SELECT sample_a, sample_b, jointly_called, ibs0, ibs2, shared_hets
+FROM duckhts_somalier_relatedness_all_pairs('somalier_sketches', max_sites := 8)
+WHERE sample_a = 'A' AND sample_b = 'B';
+----
+A	B	6	2	3	1
+
+# One sketch has no pair.
+statement ok
+CREATE TEMP VIEW somalier_single_sketch AS
+SELECT sketch FROM somalier_sketches WHERE sketch.sample_id = 'A';
+
+query I
+SELECT count(*) FROM duckhts_somalier_relatedness_all_pairs('somalier_single_sketch', max_sites := 8);
+----
+0
+
+# The single content check still rejects what the per-pair function rejects.
+statement ok
+CREATE TEMP VIEW somalier_one_corrupt_sketch AS
+SELECT CASE WHEN sketch.sample_id = 'B'
+            THEN struct_update(sketch, content_digest_0 := 0::UBIGINT)
+            ELSE sketch END AS sketch
+FROM somalier_sketches;
+
+statement error
+SELECT * FROM duckhts_somalier_relatedness_all_pairs('somalier_one_corrupt_sketch', max_sites := 8);
+----
+corrupt sketch masks or settings
+
+statement ok
+CREATE TEMP VIEW somalier_one_altered_mask AS
+SELECT CASE WHEN sketch.sample_id = 'B'
+            THEN struct_update(sketch, het := list_transform(sketch.het, lambda w: xor(w, 1::UBIGINT)))
+            ELSE sketch END AS sketch
+FROM somalier_sketches;
+
+statement error
+SELECT * FROM duckhts_somalier_relatedness_all_pairs('somalier_one_altered_mask', max_sites := 8);
+----
+corrupt sketch masks or settings
+
+statement error
+SELECT * FROM duckhts_somalier_relatedness_all_pairs('somalier_sketches', max_sites := 7);
+----
+site_count exceeds max_sites
+
+statement ok
+CREATE TEMP VIEW somalier_repeated_sketch AS
+SELECT sketch FROM somalier_sketches UNION ALL
+SELECT sketch FROM somalier_sketches WHERE sketch.sample_id = 'A';
+
+statement error
+SELECT * FROM duckhts_somalier_relatedness_all_pairs('somalier_repeated_sketch', max_sites := 8);
+----
+one sketch per distinct sample
+
+statement ok
+CREATE TEMP VIEW somalier_null_sketch AS
+SELECT sketch FROM somalier_sketches UNION ALL SELECT NULL;
+
+statement error
+SELECT * FROM duckhts_somalier_relatedness_all_pairs('somalier_null_sketch', max_sites := 8);
+----
+sketches and max_sites must be non-NULL
+
+# A mixed-assembly relation is an identity error, as for one pair.
+statement ok
+CREATE TEMP VIEW somalier_mixed_assembly AS
+SELECT CASE WHEN sketch.sample_id = 'B' THEN struct_update(sketch, assembly := 'GRCh37')
+            ELSE sketch END AS sketch
+FROM somalier_sketches;
+
+statement error
+SELECT * FROM duckhts_somalier_relatedness_all_pairs('somalier_mixed_assembly', max_sites := 8);
+----
+sketches must share one assembly, panel digest, site count and classification settings
+
+# The guard holds for a query that reads no pair column.
+statement error
+SELECT count(*) FROM duckhts_somalier_relatedness_all_pairs('somalier_mixed_assembly', max_sites := 8);
+----
+sketches must share one assembly, panel digest, site count and classification settings
+
+statement error
+SELECT count(*) FROM duckhts_somalier_relatedness_all_pairs('somalier_one_corrupt_sketch', max_sites := 8);
+----
+corrupt sketch masks or settings
+
+statement error
+SELECT count(*) FROM duckhts_somalier_relatedness_all_pairs('somalier_repeated_sketch', max_sites := 8);
+----
+one sketch per distinct sample
+
 # Preparation must not silently omit a physical panel observation or accept a
 # malformed count tuple. The internal aggregate is tested separately for its
 # own checked site_index contract.

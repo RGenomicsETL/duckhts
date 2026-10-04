@@ -83,17 +83,16 @@ static int contamination_other_is_high(const duckhts_somalier_counts_t *counts) 
     return (uint64_t)counts->other * 25u > total;
 }
 
-static uint64_t popcount64(uint64_t value) {
-#if defined(__GNUC__) || defined(__clang__)
-    return (uint64_t)__builtin_popcountll((unsigned long long)value);
-#else
-    uint64_t count = 0u;
-    while (value != 0u) {
-        value &= value - 1u;
-        count++;
-    }
-    return count;
-#endif
+/* Bits set in one word, by the parallel-sum method. It needs no CPU feature,
+ * and it stays inline: without a popcount instruction in the build's baseline,
+ * __builtin_popcountll is a library call per word, and the pair comparison
+ * counts bits about fourteen times per mask word. */
+static inline uint64_t popcount64(uint64_t value) {
+    value -= (value >> 1) & UINT64_C(0x5555555555555555);
+    value = (value & UINT64_C(0x3333333333333333)) +
+        ((value >> 2) & UINT64_C(0x3333333333333333));
+    value = (value + (value >> 4)) & UINT64_C(0x0f0f0f0f0f0f0f0f);
+    return (value * UINT64_C(0x0101010101010101)) >> 56;
 }
 
 static double clamp_unit(double value) {
@@ -435,6 +434,22 @@ duckhts_somalier_status_t duckhts_somalier_pair_stats(
     const duckhts_somalier_masks_t *b,
     duckhts_somalier_pair_stats_t *result) {
     duckhts_somalier_status_t status;
+
+    if (result == NULL || a == NULL || b == NULL) {
+        return DUCKHTS_SOMALIER_INVALID_ARGUMENT;
+    }
+    memset(result, 0, sizeof(*result));
+    status = duckhts_somalier_validate_masks(a);
+    if (status != DUCKHTS_SOMALIER_OK) return status;
+    status = duckhts_somalier_validate_masks(b);
+    if (status != DUCKHTS_SOMALIER_OK) return status;
+    return duckhts_somalier_pair_stats_validated(a, b, result);
+}
+
+duckhts_somalier_status_t duckhts_somalier_pair_stats_validated(
+    const duckhts_somalier_masks_t *a,
+    const duckhts_somalier_masks_t *b,
+    duckhts_somalier_pair_stats_t *result) {
     size_t i;
 
     if (result == NULL || a == NULL || b == NULL) {
@@ -447,10 +462,6 @@ duckhts_somalier_status_t duckhts_somalier_pair_stats(
     if ((uint64_t)a->site_count > UINT64_MAX / 2u) {
         return DUCKHTS_SOMALIER_LIMIT_EXCEEDED;
     }
-    status = duckhts_somalier_validate_masks(a);
-    if (status != DUCKHTS_SOMALIER_OK) return status;
-    status = duckhts_somalier_validate_masks(b);
-    if (status != DUCKHTS_SOMALIER_OK) return status;
     if (!sketch_identity_equal(&a->identity, &b->identity)) {
         return DUCKHTS_SOMALIER_IDENTITY_MISMATCH;
     }
