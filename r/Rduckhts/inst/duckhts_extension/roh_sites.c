@@ -11,8 +11,9 @@
  * Both limits raise query errors. Finalize sorts a group by position, hands it
  * to DuckDB as one BLOB (see roh_sites.h) and frees the buffer. Every native
  * buffer counts against max_site_bytes: the partial groups of each thread, the
- * copy DuckDB's combine step makes of them, and the scratch copy that sorting
- * a group that arrived out of order needs.
+ * copy DuckDB's combine step makes of them, the old and new block while a
+ * buffer grows, and the scratch copy that sorting a group that arrived out of
+ * order needs.
  *
  * The sort is stable: sites of one position keep their arrival order, so the
  * first record of a repeated position stays first, as bcftools sees the file.
@@ -120,23 +121,30 @@ static bool reserve_sites(roh_sites_state_t *state, uint64_t need, char *error) 
     if (capacity < need) capacity = need;
     if (capacity > state->max_sites) capacity = state->max_sites;
 
+    /* The new block is reserved in full before it exists and the old one is
+     * released only after the copy, so the budget covers the moment both live. */
     uint64_t old_bytes = state->buffer ? buffer_bytes(state->kind, state->capacity) : 0;
     uint64_t new_bytes = buffer_bytes(state->kind, capacity);
-    uint64_t added = new_bytes - old_bytes;
-    uint64_t held = atomic_fetch_add(&roh_site_bytes_held, added) + added;
+    uint64_t held = atomic_fetch_add(&roh_site_bytes_held, new_bytes) + new_bytes;
     if (held > state->max_site_bytes) {
-        atomic_fetch_sub(&roh_site_bytes_held, added);
+        atomic_fetch_sub(&roh_site_bytes_held, new_bytes);
         snprintf(error, SITES_ERRLEN,
                  "site buffers would hold %llu bytes, more than max_site_bytes = %llu; decode "
                  "fewer samples per query or raise max_site_bytes",
                  (unsigned long long)held, (unsigned long long)state->max_site_bytes);
         return false;
     }
-    unsigned char *grown = new_bytes <= SIZE_MAX ? realloc(state->buffer, (size_t)new_bytes) : NULL;
+    unsigned char *grown = new_bytes <= SIZE_MAX ? malloc((size_t)new_bytes) : NULL;
     if (grown == NULL) {
-        atomic_fetch_sub(&roh_site_bytes_held, added);
+        atomic_fetch_sub(&roh_site_bytes_held, new_bytes);
         snprintf(error, SITES_ERRLEN, "out of memory for %llu sites", (unsigned long long)capacity);
         return false;
+    }
+    if (state->buffer != NULL) {
+        memcpy(grown, state->buffer,
+               (size_t)buffer_bytes(state->kind, state->count));
+        free(state->buffer);
+        atomic_fetch_sub(&roh_site_bytes_held, old_bytes);
     }
     state->buffer = grown;
     state->capacity = capacity;
