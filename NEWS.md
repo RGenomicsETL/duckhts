@@ -65,7 +65,10 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   read-count runs. In a count-level contamination titration at 1% to 10%, the decode
   with the contamination term keeps the receiver's runs (Jaccard at least 0.91, FROH
   within 0.01); without the term FROH falls by 0.02 to 0.08 at 5% and by 0.12 to 0.27
-  at 10%.
+  at 10%. The FROH gap of the first check comes from the error parameters: `gt_error`
+  is an error of the site and lets a run pass one heterozygous call, and `seq_error` is
+  an error of one read and does not. The two decodes agree within 0.002 FROH at
+  `gt_error := 150`, and the function documentation now states this relation.
 
 ## Breaking changes
 

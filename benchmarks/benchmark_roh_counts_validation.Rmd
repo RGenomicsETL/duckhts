@@ -161,6 +161,96 @@ knitr::kable(data.frame(
 the declared tolerance. "none" means that neither decode has a run in the
 class.
 
+## What (a) compares, written after its result
+
+The declared comparison fails, and the reason is in what the two error
+parameters mean. This section was written after the result above. It changes
+no tolerance and no verdict.
+
+**`gt_error` is an error of the site.** With genotype evidence, a called
+genotype has likelihood close to 1 and a genotype one allele away has
+10^(−`gt_error`/10). At `gt_error := 30`, one heterozygous call can count
+against a run by a factor of 1,000 and no more, whatever caused it: a calling
+error, a mapping artefact or a wrong site. The run can continue through it.
+
+**`seq_error` is an error of one read.** With read counts, the reads of a site
+are independent and their probabilities multiply. A site with 16 reads of each
+allele has likelihood `seq_error`^16 under either homozygous genotype. No
+value of `seq_error` makes that site compatible with a run, and nothing in the
+read model says that a whole site can be wrong.
+
+So the read-count decode is the genotype decode with no tolerated genotype
+error. At `gt_error := 30` the genotype decode keeps runs through isolated
+heterozygous sites, and the read-count decode ends them there. The two paths
+then differ by design, not by a defect of either, and the declared tolerance
+compared them at settings that do not correspond.
+
+```{r diagnosis, include=FALSE}
+source("benchmarks/roh_counts_validation/diagnose.R")
+diagnosis <- roh_diagnosis_run(
+  extension = Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension"),
+  output_dir = "benchmarks/results/roh-counts-validation", threads = 2L)
+comparison_table <- function(rows, parameter) {
+  knitr::kable(data.frame(
+    parameter = format(rows[[parameter]], scientific = FALSE, drop0trailing = TRUE),
+    Sample = rows$sample,
+    `VCF FROH` = sprintf("%.4f", rows$reference_froh),
+    `Count FROH` = sprintf("%.4f", rows$test_froh),
+    `FROH difference` = sprintf("%+.4f", rows$froh_difference),
+    Jaccard = sprintf("%.3f", rows$jaccard),
+    check.names = FALSE), col.names = c(parameter, "Sample", "VCF FROH", "Count FROH",
+                                         "FROH difference", "Jaccard"),
+    align = "rlrrrr", row.names = FALSE)
+}
+```
+
+**The genotype decode approaches the read-count decode as `gt_error` rises.**
+The read-count decode is fixed at the default `seq_error`; all runs.
+
+```{r diagnosis-gt-error, echo=FALSE}
+comparison_table(diagnosis$by_gt_error, "gt_error")
+```
+
+**`seq_error` hardly moves the read-count decode.** The genotype decode is
+fixed at `gt_error := 30`; all runs.
+
+```{r diagnosis-seq-error, echo=FALSE}
+comparison_table(diagnosis$by_seq_error, "seq_error")
+```
+
+**The genotypes and the read counts agree at the sites.** Sites of the three
+samples, by called genotype and by the share of reads of the rarer allele:
+
+```{r diagnosis-sites, echo=FALSE}
+site_classes <- diagnosis$site_classes
+knitr::kable(stats::reshape(site_classes, idvar = "read_class", timevar = "genotype",
+                            direction = "wide"),
+             row.names = FALSE, format.args = list(big.mark = ","))
+```
+
+**The lost parts of genotype runs hold the heterozygous calls.** Sites inside
+the runs of the genotype decode at `gt_error := 30`, split by whether the
+read-count decode keeps the site in a run:
+
+```{r diagnosis-inside, echo=FALSE}
+knitr::kable(diagnosis$inside_runs, row.names = FALSE, format.args = list(big.mark = ","))
+```
+
+The observations are in `diagnosis_*.csv` under
+`benchmarks/results/roh-counts-validation/`.
+
+What this leaves open:
+
+- Which decode is closer to the truth is not measured here. A heterozygous
+  call with balanced reads inside a long run can be a real heterozygous site
+  that ends the run, or reads from a paralogous sequence at a site that is
+  homozygous.
+- The read model has no term for a site whose reads do not reflect the
+  sample's genotype. Such a term would be to read counts what `gt_error` is to
+  genotypes. It is not implemented.
+- A like-for-like check of the read model is the genotype-likelihood path
+  (FORMAT/PL) from the same reads. The staged genotypes carry FORMAT/GT only.
+
 ## (b) Count-level contamination titration
 
 Each row summarises the six ordered pairs at one α and one decode. The FROH
@@ -233,8 +323,9 @@ knitr::kable(data.frame(
 - One chromosome and three samples. The rows above are observations, not an
   estimate of a rate.
 - The two paths of (a) share their sequencing data, sites and frequencies.
-  Agreement shows that the read model and the genotype model decode the same
-  evidence alike. It does not show that either set of runs is true.
+  They do not share an error model: see "What (a) compares". Their agreement
+  at a large `gt_error` shows that the two paths decode the same evidence
+  alike. It does not show that either set of runs is true.
 - (b) thins and adds counts. It does not reproduce what a mixture of reads
   would change upstream: alignment, duplicate marking, base and mapping quality
   filters, or the correlation of reads within a fragment.

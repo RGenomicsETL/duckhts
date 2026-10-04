@@ -2,6 +2,10 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- The documentation of `rduckhts_roh_counts()` states how its per-read `seq_error`
+  relates to the per-site `gt_error` of `rduckhts_roh()`: the read-count decode ends
+  a run at a heterozygous site that the genotype decode at `gt_error = 30` passes.
+
 - `rduckhts_somalier_relatedness()` is faster for all pairs, with the same rows: it
   checks the contents of each sketch once instead of twice per pair. The bundled
   extension adds `duckhts_somalier_relatedness_all_pairs()` for this.
