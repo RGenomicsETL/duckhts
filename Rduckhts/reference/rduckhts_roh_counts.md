@@ -20,7 +20,9 @@ rduckhts_roh_counts(
   az_to_hw = 5e-09,
   rec_rate = NULL,
   table_name = NULL,
-  overwrite = FALSE
+  overwrite = FALSE,
+  max_sites = 2e+07,
+  max_site_bytes = 2^32
 )
 ```
 
@@ -62,6 +64,18 @@ rduckhts_roh_counts(
 - overwrite:
 
   Whether an existing output table may be replaced.
+
+- max_sites:
+
+  Most sites one sample and chromosome may hold, from 1 to 100,000,000.
+  A larger group is an error.
+
+- max_site_bytes:
+
+  Most bytes the site buffers of all samples and chromosomes may hold at
+  once (16 bytes per site, 24 for read counts), shared by the decodes
+  running in the process. Exceeding it is an error: decode fewer samples
+  per call or raise it.
 
 ## Value
 

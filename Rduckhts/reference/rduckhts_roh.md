@@ -28,7 +28,9 @@ rduckhts_roh(
   overwrite = FALSE,
   reference_table = NULL,
   proportions_table = NULL,
-  af_clamp = 0.001
+  af_clamp = 0.001,
+  max_sites = 2e+07,
+  max_site_bytes = 2^32
 )
 ```
 
@@ -97,6 +99,18 @@ rduckhts_roh(
   Clamp ancestry-tuned frequencies to \`\[af_clamp, 1-af_clamp\]\`; zero
   disables clamping. Must be in \`\[0, 0.5)\`.
 
+- max_sites:
+
+  Most sites one sample and chromosome may hold, from 1 to 100,000,000.
+  A larger group is an error.
+
+- max_site_bytes:
+
+  Most bytes the site buffers of all samples and chromosomes may hold at
+  once (16 bytes per site, 24 for read counts), shared by the decodes
+  running in the process. Exceeding it is an error: decode fewer samples
+  per call or raise it.
+
 ## Value
 
 A data frame (or invisible \`TRUE\` when \`table_name\` is given) with
@@ -127,15 +141,15 @@ rounded proportions are accepted). REF=\`allele_a\`, ALT=\`allele_b\`
 uses that AF; reversed alleles use \`1 - AF\`. Reference alleles must be
 on the forward strand of the VCF's assembly, as in a FASTA-anchored
 panel; no strand flip is attempted, so palindromic (A/T, C/G) sites are
-oriented by REF like any other, and a site whose alleles match neither
-order is not used. Contig names are matched with
-\`duckhts_contig_key()\` once per distinct name (one leading \`chr\`
-removed, M/MT written as MT, X and Y uppercased), so \`chr1\` and \`1\`
-match, as do \`chrX\` and \`X\`; accessions, patches and numeric sex
-chromosomes are not mapped. \`af_clamp\` limits nonzero-clamp
-frequencies to \`\[af_clamp, 1-af_clamp\]\`; the default keeps zero
-population frequencies from being treated as impossible, and zero
-disables clamping. Only called sites are frequency-weighted. Supply
+oriented by REF like any other, and a record whose alleles match neither
+order is not used and does not claim a repeated position. Contig names
+are matched with \`duckhts_contig_key()\` once per distinct name (one
+leading \`chr\` removed, M/MT written as MT, X and Y uppercased), so
+\`chr1\` and \`1\` match, as do \`chrX\` and \`X\`; accessions, patches
+and numeric sex chromosomes are not mapped. \`af_clamp\` limits
+nonzero-clamp frequencies to \`\[af_clamp, 1-af_clamp\]\`; the default
+keeps zero population frequencies from being treated as impossible, and
+zero disables clamping. Only called sites are frequency-weighted. Supply
 exactly one frequency source: \`af_tag\`, \`af_table\`, or both ancestry
 relations.
 
@@ -158,8 +172,8 @@ roh <- rduckhts_roh(con, path, af_tag = "AF")
 roh[order(roh$sample, roh$chrom, roh$start), ]
 #>   sample chrom   start     end  length n_markers  quality
 #> 2     S1  chr1 1042655 2396807 1354153       113 31.96439
-#> 4     S2  chr2  693881 1722963 1029083       114 32.91658
-#> 1     S4  chr1 1876100 3319712 1443613       131 44.83104
+#> 1     S2  chr2  693881 1722963 1029083       114 32.91658
+#> 4     S4  chr1 1876100 3319712 1443613       131 44.83104
 #> 3     S4  chr2   23420 2400223 2376804       239 46.64399
 DBI::dbDisconnect(con, shutdown = TRUE)
 ```

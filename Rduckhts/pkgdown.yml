@@ -4,7 +4,7 @@ pkgdown_sha: ~
 articles:
   articles/browser: browser.html
   articles/workflows: workflows.html
-last_built: 2026-10-03T22:03Z
+last_built: 2026-10-04T13:01Z
 urls:
   reference: https://rgenomicsetl.github.io/duckhts/Rduckhts/reference
   article: https://rgenomicsetl.github.io/duckhts/Rduckhts/articles

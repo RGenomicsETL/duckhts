@@ -17,7 +17,7 @@ read-count mode."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9010.0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9011.0.1.5</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -70,7 +70,9 @@ read-count mode.</p>
 <span>  az_to_hw <span class="op">=</span> <span class="fl">5e-09</span>,</span>
 <span>  rec_rate <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  table_name <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span></span>
+<span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  max_sites <span class="op">=</span> <span class="fl">2e+07</span>,</span>
+<span>  max_site_bytes <span class="op">=</span> <span class="fl">2</span><span class="op">^</span><span class="fl">32</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -115,6 +117,18 @@ Hardy-Weinberg to autozygous (`-a`) and back (`-H`), each in `[0, 1]`.</p></dd>
 
 <dt id="arg-overwrite">overwrite<a class="anchor" aria-label="anchor" href="#arg-overwrite"></a></dt>
 <dd><p>Whether an existing output table may be replaced.</p></dd>
+
+
+<dt id="arg-max-sites">max_sites<a class="anchor" aria-label="anchor" href="#arg-max-sites"></a></dt>
+<dd><p>Most sites one sample and chromosome may hold, from 1 to
+100,000,000. A larger group is an error.</p></dd>
+
+
+<dt id="arg-max-site-bytes">max_site_bytes<a class="anchor" aria-label="anchor" href="#arg-max-site-bytes"></a></dt>
+<dd><p>Most bytes the site buffers of all samples and
+chromosomes may hold at once (16 bytes per site, 24 for read counts),
+shared by the decodes running in the process. Exceeding it is an error:
+decode fewer samples per call or raise it.</p></dd>
 
 </dl></div>
     <div class="section level2">
