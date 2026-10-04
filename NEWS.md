@@ -1,6 +1,6 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.2.9012
+# duckhts 1.5.2.9013
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
@@ -291,8 +291,18 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   Without one the planner took the scan for one row and could build a hash join
   on the reader's rows instead of on the smaller relation. The estimate is
   reported only for a whole-file indexed scan: no region, no
-  `scan_mode := 'sequential'`, complete index statistics, and for `read_bed`
-  the default `error_policy := 'error'`.
+  `scan_mode := 'sequential'`, and for `read_bed` the default
+  `error_policy := 'error'`. `read_tabix` and `read_bed` need complete index
+  statistics. `read_bam` sums the statistics the index has, so a BAM whose index
+  lacks them for references without reads still gets an estimate; an index with
+  no statistics, and a CRAM index, give none.
+
+- `read_bam`, `read_hts_index` and `read_hts_index_spans` no longer read BAI/CSI
+  fields from a CRAM index. htslib returns a CRAM index as a smaller object
+  behind the same pointer type, and these readers read its reference count and
+  metadata past the end of that object. The results were unchanged on the test
+  files (`read_bam` returned its rows, the index readers returned none), but the
+  read was undefined behaviour; valgrind reported it and reports none now.
 
 - A closed database is now released. `LOAD` used to open private connections
   into the loading database for cgranges and for Somalier BAM/CRAM panel reading
