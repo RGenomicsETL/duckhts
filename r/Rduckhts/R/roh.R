@@ -27,7 +27,8 @@
 #' uses that AF; reversed alleles use `1 - AF`. Reference alleles must be on
 #' the forward strand of the VCF's assembly, as in a FASTA-anchored panel; no
 #' strand flip is attempted, so palindromic (A/T, C/G) sites are oriented by REF
-#' like any other, and a site whose alleles match neither order is not used.
+#' like any other, and a record whose alleles match neither order is not used
+#' and does not claim a repeated position.
 #' Contig names are matched with `duckhts_contig_key()` once per distinct name
 #' (one leading `chr` removed, M/MT written as MT, X and Y uppercased), so
 #' `chr1` and `1` match, as do `chrX` and `X`; accessions, patches and numeric
@@ -68,6 +69,12 @@
 #'   leading `^` exclusion, `"-"` for all, or `""` for none.
 #' @param table_name Optional output table. `NULL` returns a data frame.
 #' @param overwrite Whether an existing output table may be replaced.
+#' @param max_sites Most sites one sample and chromosome may hold, from 1 to
+#'   100,000,000. A larger group is an error.
+#' @param max_site_bytes Most bytes the site buffers of all samples and
+#'   chromosomes may hold at once (16 bytes per site, 24 for read counts),
+#'   shared by the decodes running in the process. Exceeding it is an error:
+#'   decode fewer samples per call or raise it.
 #' @return A data frame (or invisible `TRUE` when `table_name` is given) with one
 #'   row per run: `sample`, `chrom`, `start` and `end` (one-based, inclusive,
 #'   the first and last marker), `length` (`end - start + 1`), `n_markers` and
@@ -83,7 +90,8 @@ rduckhts_roh <- function(
   con, path, af_tag = NULL, af_table = NULL, genetic_map = NULL,
   hw_to_az = 6.7e-8, az_to_hw = 5e-9, gt_error = NULL, rec_rate = NULL,
   samples = NULL, table_name = NULL, overwrite = FALSE,
-  reference_table = NULL, proportions_table = NULL, af_clamp = 1e-3
+  reference_table = NULL, proportions_table = NULL, af_clamp = 1e-3,
+  max_sites = 2e7, max_site_bytes = 2^32
 ) {
   .somalier_validate_output(con, table_name, overwrite)
   .somalier_scalar_text(path, "path")
@@ -101,7 +109,8 @@ rduckhts_roh <- function(
     if (source$ancestry) paste0("af_clamp := ", source$af_clamp),
     if (!is.null(options$samples)) {
       paste0("samples := ", sql_quote_string(con, options$samples))
-    }
+    },
+    .roh_limit_arguments(max_sites, max_site_bytes)
   )
   query <- paste0("SELECT * FROM ", source$macro, "(",
                   paste(arguments, collapse = ", "), ")")
@@ -169,7 +178,7 @@ rduckhts_roh <- function(
 rduckhts_roh_counts <- function(
   con, counts_table, seq_error = 1e-3, contamination = 0, genetic_map = NULL,
   hw_to_az = 6.7e-8, az_to_hw = 5e-9, rec_rate = NULL,
-  table_name = NULL, overwrite = FALSE
+  table_name = NULL, overwrite = FALSE, max_sites = 2e7, max_site_bytes = 2^32
 ) {
   .somalier_validate_output(con, table_name, overwrite)
   .somalier_validate_name(counts_table, "counts_table")
@@ -190,14 +199,14 @@ rduckhts_roh_counts <- function(
     paste0("contamination := ", sprintf("%.17g", contamination)),
     paste0("hw_to_az := ", options$hw_to_az),
     paste0("az_to_hw := ", options$az_to_hw),
-    if (!is.null(options$rec_rate)) paste0("rec_rate := ", options$rec_rate)
+    if (!is.null(options$rec_rate)) paste0("rec_rate := ", options$rec_rate),
+    .roh_limit_arguments(max_sites, max_site_bytes)
   )
   query <- paste0("SELECT * FROM duckhts_roh_counts(",
                   paste(arguments, collapse = ", "), ")")
   .somalier_publish_query(con, query, table_name, overwrite)
 }
 
-# A finite number in [0, maximum], formatted with full precision for SQL.
 .roh_frequency_source <- function(con, af_tag, af_table, reference_table,
                                 proportions_table, af_clamp) {
   ancestry <- !is.null(reference_table) || !is.null(proportions_table)
@@ -238,6 +247,22 @@ rduckhts_roh_counts <- function(
   )
 }
 
+# The two memory limits as SQL arguments: whole numbers of at least 1.
+.roh_limit_arguments <- function(max_sites, max_site_bytes) {
+  limits <- list(max_sites = max_sites, max_site_bytes = max_site_bytes)
+  for (name in names(limits)) {
+    value <- limits[[name]]
+    if (!is.numeric(value) || length(value) != 1L || !is.finite(value) ||
+        value < 1 || value != floor(value) || value > 2^53) {
+      stop(name, " must be one whole number of at least 1", call. = FALSE)
+    }
+  }
+  if (max_sites > 1e8) stop("max_sites must be at most 100000000", call. = FALSE)
+  sprintf("%s := %s", names(limits),
+          vapply(limits, format, character(1L), scientific = FALSE, trim = TRUE))
+}
+
+# A finite number in [0, maximum], formatted with full precision for SQL.
 .roh_number <- function(value, name, maximum = Inf) {
   if (!is.numeric(value) || length(value) != 1L || !is.finite(value) ||
       value < 0 || value > maximum) {

@@ -19,7 +19,9 @@ rduckhts_roh(
   overwrite = FALSE,
   reference_table = NULL,
   proportions_table = NULL,
-  af_clamp = 0.001
+  af_clamp = 0.001,
+  max_sites = 2e+07,
+  max_site_bytes = 2^32
 )
 }
 \arguments{
@@ -57,6 +59,14 @@ match `reference_table`.}
 
 \item{af_clamp}{Clamp ancestry-tuned frequencies to `[af_clamp, 1-af_clamp]`;
 zero disables clamping. Must be in `[0, 0.5)`.}
+
+\item{max_sites}{Most sites one sample and chromosome may hold, from 1 to
+100,000,000. A larger group is an error.}
+
+\item{max_site_bytes}{Most bytes the site buffers of all samples and
+chromosomes may hold at once (16 bytes per site, 24 for read counts),
+shared by the decodes running in the process. Exceeding it is an error:
+decode fewer samples per call or raise it.}
 }
 \value{
 A data frame (or invisible `TRUE` when `table_name` is given) with one
@@ -93,7 +103,8 @@ results and rounded proportions are accepted). REF=`allele_a`, ALT=`allele_b`
 uses that AF; reversed alleles use `1 - AF`. Reference alleles must be on
 the forward strand of the VCF's assembly, as in a FASTA-anchored panel; no
 strand flip is attempted, so palindromic (A/T, C/G) sites are oriented by REF
-like any other, and a site whose alleles match neither order is not used.
+like any other, and a record whose alleles match neither order is not used
+and does not claim a repeated position.
 Contig names are matched with `duckhts_contig_key()` once per distinct name
 (one leading `chr` removed, M/MT written as MT, X and Y uppercased), so
 `chr1` and `1` match, as do `chrX` and `X`; accessions, patches and numeric

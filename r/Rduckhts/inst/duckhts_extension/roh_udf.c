@@ -1,7 +1,14 @@
-/* duckhts_roh_segments: vectorised runs-of-homozygosity kernel over one list per row.
+/* Runs-of-homozygosity kernel: one sample and chromosome is decoded per row.
  *
- * The caller builds per-sample, per-chromosome lists with list(... ORDER BY pos). One
- * row is decoded at a time, so peak memory follows the longest list, not the chunk.
+ *   - duckhts_roh_segments(), public, takes DuckDB lists sorted by position.
+ *   - __duckhts_roh_decode(), used by the ROH macros, takes the packed site
+ *     list that __duckhts_roh_sites() builds (roh_sites.h).
+ *   - __duckhts_roh_valid_args() checks the model parameters and memory limits
+ *     of a macro call without reading a site, so that invalid arguments fail
+ *     on empty input too.
+ *
+ * One row is decoded at a time, so the kernel workspace follows the longest
+ * list, not the chunk.
  */
 #if defined(__MINGW32__) && !defined(__USE_MINGW_ANSI_STDIO)
 #define __USE_MINGW_ANSI_STDIO 1
@@ -19,27 +26,39 @@ DUCKDB_EXTENSION_EXTERN
 
 #include "duckdb_list.h"
 #include "roh_hmm.h"
+#include "roh_sites.h"
 
 #define ROH_NAME "duckhts_roh_segments"
 #define ROH_ERRLEN 256
 #define ROH_MAX_POS1 INT32_MAX
 
-/* Genotype evidence of one duckhts_roh_segments overload, attached to it as
- * extra info. Zero is not a kind, so a missing extra info is never mistaken
- * for one. */
-typedef enum {
-    ROH_EVIDENCE_PL = 1, /* phred-scaled likelihoods, INTEGER[][] */
-    ROH_EVIDENCE_GT,     /* dosages 0, 1 or 2 with a phred gt_error */
-    ROH_EVIDENCE_COUNTS  /* read counts with seq_error and contamination */
-} roh_evidence_t;
+/* Model parameters: the vectors of a call, and the values of one row. A
+ * parameter the evidence kind does not use has no vector and stays 0. */
+typedef struct {
+    duckdb_vector gt_error, seq_error, contamination;
+    duckdb_vector map_pos, map_cm, rec_rate, hw_to_az, az_to_hw;
+} roh_model_args_t;
 
 typedef struct {
-    roh_evidence_t kind;
+    double hw_to_az, az_to_hw, gt_error, seq_error, contamination, rec_rate;
+} roh_model_t;
+
+/* Arguments of duckhts_roh_segments. The evidence kind of an overload is
+ * attached to it as extra info: PL lists (INTEGER[][]), dosages with a phred
+ * gt_error, or read counts with seq_error and contamination. */
+typedef struct {
+    duckhts_roh_sites_kind_t kind;
     /* evidence is the PL or dosage list, or for counts the other-allele counts;
      * counted holds the counts of the allele af refers to. */
-    duckdb_vector positions, af, evidence, counted, gt_error, seq_error, contamination;
-    duckdb_vector map_pos, map_cm, rec_rate, hw_to_az, az_to_hw;
+    duckdb_vector positions, af, evidence, counted;
+    roh_model_args_t model;
 } roh_args_t;
+
+/* Arguments of __duckhts_roh_decode. */
+typedef struct {
+    duckdb_vector sites;
+    roh_model_args_t model;
+} roh_packed_args_t;
 
 typedef struct {
     int32_t *map_pos0;
@@ -105,6 +124,54 @@ static bool read_double_arg(duckdb_vector vector, idx_t row, double *value) {
     return true;
 }
 
+/* Reads the model parameters a kind uses. Returns false when a required one is
+ * NULL: the row then has a NULL result. A NULL rec_rate means no rate. */
+static bool read_model(duckhts_roh_sites_kind_t kind, const roh_model_args_t *args, idx_t row,
+                       roh_model_t *model) {
+    memset(model, 0, sizeof(*model));
+    if (!read_double_arg(args->hw_to_az, row, &model->hw_to_az) ||
+        !read_double_arg(args->az_to_hw, row, &model->az_to_hw)) return false;
+    if (kind == DUCKHTS_ROH_SITES_GT && !read_double_arg(args->gt_error, row, &model->gt_error)) {
+        return false;
+    }
+    if (kind == DUCKHTS_ROH_SITES_COUNTS &&
+        (!read_double_arg(args->seq_error, row, &model->seq_error) ||
+         !read_double_arg(args->contamination, row, &model->contamination))) return false;
+    if (!read_double_arg(args->rec_rate, row, &model->rec_rate)) model->rec_rate = 0;
+    return true;
+}
+
+/* Returns NULL, or the text of the first invalid model parameter. */
+static const char *check_model(duckhts_roh_sites_kind_t kind, const roh_model_t *model) {
+    if (!isfinite(model->hw_to_az) || model->hw_to_az < 0 || model->hw_to_az > 1) {
+        return "hw_to_az must be in [0, 1]";
+    }
+    if (!isfinite(model->az_to_hw) || model->az_to_hw < 0 || model->az_to_hw > 1) {
+        return "az_to_hw must be in [0, 1]";
+    }
+    if (kind == DUCKHTS_ROH_SITES_GT && (!isfinite(model->gt_error) || model->gt_error < 0)) {
+        return "gt_error must be a finite phred value of at least 0";
+    }
+    if (kind == DUCKHTS_ROH_SITES_COUNTS) {
+        if (!isfinite(model->seq_error) || model->seq_error <= 0 || model->seq_error >= 0.5) {
+            return "seq_error must be in (0, 0.5)";
+        }
+        if (!isfinite(model->contamination) || model->contamination < 0 ||
+            model->contamination >= 1) {
+            return "contamination must be in [0, 1)";
+        }
+    }
+    if (!isfinite(model->rec_rate) || model->rec_rate < 0) return "rec_rate must be finite and at least 0";
+    return NULL;
+}
+
+/* bcftools skips a repeated position, a site without a usable frequency
+ * (missing, NaN or exactly 0) and a site without usable genotype evidence. A
+ * site without a frequency arrives here with af NaN. */
+static bool site_enters_model(bool duplicate, bool usable, double af) {
+    return !duplicate && usable && !isnan(af) && af != 0.0;
+}
+
 static void free_map(roh_map_t *map) {
     free(map->map_pos0);
     free(map->map_rate);
@@ -112,8 +179,8 @@ static void free_map(roh_map_t *map) {
 
 /* Loads the map nodes of one row. Returns 1 with *present set, or 0 after
  * reporting an error. */
-static int load_map(duckdb_function_info info, const roh_args_t *args, idx_t row, roh_map_t *map,
-                    size_t *count) {
+static int load_map(duckdb_function_info info, const roh_model_args_t *args, idx_t row,
+                    roh_map_t *map, size_t *count) {
     roh_list_t pos_list = open_list(args->map_pos, row);
     roh_list_t cm_list = open_list(args->map_cm, row);
     *count = 0;
@@ -177,45 +244,41 @@ oom:
     return 0;
 }
 
+/* Loads the genetic map of a row and starts a run of at most `sites` sites.
+ * Returns false after reporting an error. */
+static bool begin_decode(duckdb_function_info info, const roh_model_args_t *args,
+                         const roh_model_t *model, idx_t row, size_t sites, duckhts_roh_t *roh,
+                         roh_map_t *map) {
+    size_t map_count;
+    if (!load_map(info, args, row, map, &map_count)) return false;
+    duckhts_roh_params_t params = {
+        .hw_to_az = model->hw_to_az,
+        .az_to_hw = model->az_to_hw,
+        .rec_rate = model->rec_rate,
+        .map_pos0 = map_count ? map->map_pos0 : NULL,
+        .map_rate = map_count ? map->map_rate : NULL,
+        .map_n = map_count,
+    };
+    if (duckhts_roh_begin(roh, &params, sites) != 0) {
+        roh_error(info, "out of memory for %llu sites", (unsigned long long)sites);
+        return false;
+    }
+    return true;
+}
+
 /* Decodes one row. Returns 1 when the row holds a result (segments are in roh),
  * 0 after an error, and -1 for a NULL result. */
 static int decode_row(duckdb_function_info info, const roh_args_t *args, idx_t row,
                       duckhts_roh_t *roh, roh_map_t *map) {
-    double hw_to_az, az_to_hw, gt_error = 0, seq_error = 0, contamination = 0, rec_rate = 0;
-    if (!read_double_arg(args->hw_to_az, row, &hw_to_az) ||
-        !read_double_arg(args->az_to_hw, row, &az_to_hw)) return -1;
-    if (args->kind == ROH_EVIDENCE_GT && !read_double_arg(args->gt_error, row, &gt_error)) return -1;
-    if (args->kind == ROH_EVIDENCE_COUNTS &&
-        (!read_double_arg(args->seq_error, row, &seq_error) ||
-         !read_double_arg(args->contamination, row, &contamination))) return -1;
-    if (!isfinite(hw_to_az) || hw_to_az < 0 || hw_to_az > 1) {
-        roh_error(info, "hw_to_az must be in [0, 1]");
-        return 0;
-    }
-    if (!isfinite(az_to_hw) || az_to_hw < 0 || az_to_hw > 1) {
-        roh_error(info, "az_to_hw must be in [0, 1]");
-        return 0;
-    }
-    if (args->kind == ROH_EVIDENCE_GT && (!isfinite(gt_error) || gt_error < 0)) {
-        roh_error(info, "gt_error must be a finite phred value of at least 0");
-        return 0;
-    }
-    if (args->kind == ROH_EVIDENCE_COUNTS) {
-        if (!isfinite(seq_error) || seq_error <= 0 || seq_error >= 0.5) {
-            roh_error(info, "seq_error must be in (0, 0.5)");
-            return 0;
-        }
-        if (!isfinite(contamination) || contamination < 0 || contamination >= 1) {
-            roh_error(info, "contamination must be in [0, 1)");
-            return 0;
-        }
-    }
-    if (read_double_arg(args->rec_rate, row, &rec_rate) && (!isfinite(rec_rate) || rec_rate < 0)) {
-        roh_error(info, "rec_rate must be finite and at least 0");
+    roh_model_t model;
+    if (!read_model(args->kind, &args->model, row, &model)) return -1;
+    const char *model_error = check_model(args->kind, &model);
+    if (model_error != NULL) {
+        roh_error(info, "%s", model_error);
         return 0;
     }
 
-    bool counts = args->kind == ROH_EVIDENCE_COUNTS;
+    bool counts = args->kind == DUCKHTS_ROH_SITES_COUNTS;
     roh_list_t positions = open_list(args->positions, row);
     roh_list_t af = open_list(args->af, row);
     roh_list_t evidence = open_list(args->evidence, row);
@@ -223,7 +286,7 @@ static int decode_row(duckdb_function_info info, const roh_args_t *args, idx_t r
     if (counts) counted = open_list(args->counted, row);
     if (!positions.valid || !af.valid || !evidence.valid || (counts && !counted.valid)) return -1;
     idx_t n = positions.entries[row].length;
-    const char *evidence_name = args->kind == ROH_EVIDENCE_GT ? "genotype"
+    const char *evidence_name = args->kind == DUCKHTS_ROH_SITES_GT ? "genotype"
                                 : counts                       ? "other-allele count"
                                                                : "PL";
     if (af.entries[row].length != n) {
@@ -242,20 +305,7 @@ static int decode_row(duckdb_function_info info, const roh_args_t *args, idx_t r
         return 0;
     }
 
-    size_t map_count;
-    if (!load_map(info, args, row, map, &map_count)) return 0;
-    duckhts_roh_params_t params = {
-        .hw_to_az = hw_to_az,
-        .az_to_hw = az_to_hw,
-        .rec_rate = rec_rate,
-        .map_pos0 = map_count ? map->map_pos0 : NULL,
-        .map_rate = map_count ? map->map_rate : NULL,
-        .map_n = map_count,
-    };
-    if (duckhts_roh_begin(roh, &params, n) != 0) {
-        roh_error(info, "out of memory for %llu sites", (unsigned long long)n);
-        return 0;
-    }
+    if (!begin_decode(info, &args->model, &model, row, n, roh, map)) return 0;
 
     const int64_t *pos = duckdb_vector_get_data(positions.child);
     const double *freq = duckdb_vector_get_data(af.child);
@@ -270,14 +320,14 @@ static int decode_row(duckdb_function_info info, const roh_args_t *args, idx_t r
     const int32_t *flat = NULL;
     const int32_t *counted_values = NULL;
     idx_t counted_offset = 0;
-    if (args->kind != ROH_EVIDENCE_PL) {
+    if (args->kind != DUCKHTS_ROH_SITES_PL) {
         flat = duckdb_vector_get_data(evidence.child);
     }
     if (counts) {
         counted_values = duckdb_vector_get_data(counted.child);
         counted_offset = counted.entries[row].offset;
     }
-    if (args->kind == ROH_EVIDENCE_PL) {
+    if (args->kind == DUCKHTS_ROH_SITES_PL) {
         pl_entries = duckdb_vector_get_data(evidence.child);
         duckdb_vector pl_child = duckdb_list_vector_get_child(evidence.child);
         pl_values = duckdb_vector_get_data(pl_child);
@@ -314,7 +364,7 @@ static int decode_row(duckdb_function_info info, const roh_args_t *args, idx_t r
 
         double pdg[3];
         bool usable;
-        if (args->kind == ROH_EVIDENCE_GT) {
+        if (args->kind == DUCKHTS_ROH_SITES_GT) {
             idx_t at = ev_offset + i;
             usable = element_valid(evidence.child_validity, at);
             if (usable) {
@@ -324,7 +374,7 @@ static int decode_row(duckdb_function_info info, const roh_args_t *args, idx_t r
                               (unsigned long long)(i + 1), value);
                     return 0;
                 }
-                usable = duckhts_roh_pdg_from_gt(gt_error, value, pdg);
+                usable = duckhts_roh_pdg_from_gt(model.gt_error, value, pdg);
             }
         } else if (counts) {
             idx_t at = ev_offset + i;
@@ -350,8 +400,8 @@ static int decode_row(duckdb_function_info info, const roh_args_t *args, idx_t r
                 /* The read model needs the site's frequency; sites without a
                  * usable one are skipped below before the emission is used. */
                 usable = has_af && !isnan(alt_freq) && alt_freq > 0 &&
-                         duckhts_roh_pdg_from_counts(other_count, counted_count, seq_error,
-                                                     contamination, alt_freq, pdg);
+                         duckhts_roh_pdg_from_counts(other_count, counted_count, model.seq_error,
+                                                     model.contamination, alt_freq, pdg);
             }
         } else {
             idx_t at = ev_offset + i;
@@ -367,10 +417,108 @@ static int decode_row(duckdb_function_info info, const roh_args_t *args, idx_t r
             }
         }
 
-        /* bcftools skips repeated positions, sites without a usable AF (missing or
-         * exactly 0) and sites without usable genotype evidence. */
-        if (duplicate || !usable || !has_af || isnan(alt_freq) || alt_freq == 0.0) continue;
+        if (!site_enters_model(duplicate, usable, has_af ? alt_freq : NAN)) continue;
         duckhts_roh_push(roh, (int32_t)(pos1 - 1), pdg, alt_freq);
+    }
+    if (duckhts_roh_decode(roh) != 0) {
+        roh_error(info, "out of memory while decoding");
+        return 0;
+    }
+    return 1;
+}
+
+/* Decodes one packed site list (roh_sites.h). Same return values as
+ * decode_row. The list comes from __duckhts_roh_sites(), but the function is
+ * callable with any BLOB, so every field is checked before it is used. */
+static int decode_packed_row(duckdb_function_info info, const roh_packed_args_t *args, idx_t row,
+                             duckhts_roh_t *roh, roh_map_t *map) {
+    if (!row_valid(args->sites, row)) return -1;
+    duckdb_string_t *blobs = duckdb_vector_get_data(args->sites);
+    const unsigned char *data = (const unsigned char *)duckdb_string_t_data(&blobs[row]);
+    size_t length = duckdb_string_t_length(blobs[row]);
+
+    duckhts_roh_sites_header_t header;
+    if (length < sizeof(header)) {
+        roh_error(info, "sites is not a packed site list");
+        return 0;
+    }
+    memcpy(&header, data, sizeof(header));
+    size_t size = (size_t)duckhts_roh_site_size(header.kind);
+    if (memcmp(header.magic, DUCKHTS_ROH_SITES_MAGIC, DUCKHTS_ROH_SITES_MAGIC_LENGTH) != 0 ||
+        size == 0 || (length - sizeof(header)) % size != 0) {
+        roh_error(info, "sites is not a packed site list");
+        return 0;
+    }
+    duckhts_roh_sites_kind_t kind = (duckhts_roh_sites_kind_t)header.kind;
+    size_t n = (length - sizeof(header)) / size;
+    /* The aggregate never builds a longer list; a hand-made one must not size
+     * the decoder workspace either. */
+    if (n > DUCKHTS_ROH_MAX_SITES) {
+        roh_error(info, "sites holds more than %d sites", DUCKHTS_ROH_MAX_SITES);
+        return 0;
+    }
+    const unsigned char *records = data + sizeof(header);
+
+    roh_model_t model;
+    if (!read_model(kind, &args->model, row, &model)) return -1;
+    const char *model_error = check_model(kind, &model);
+    if (model_error != NULL) {
+        roh_error(info, "%s", model_error);
+        return 0;
+    }
+    if (!begin_decode(info, &args->model, &model, row, n, roh, map)) return 0;
+
+    uint32_t prev_pos1 = 0;
+    for (size_t i = 0; i < n; i++) {
+        /* The BLOB is not aligned for the records, so each one is copied out. */
+        duckhts_roh_site_t site;
+        duckhts_roh_count_site_t count_site;
+        double af;
+        uint32_t pos1;
+        if (kind == DUCKHTS_ROH_SITES_COUNTS) {
+            memcpy(&count_site, records + i * size, sizeof(count_site));
+            af = count_site.af;
+            pos1 = count_site.pos1;
+        } else {
+            memcpy(&site, records + i * size, sizeof(site));
+            af = site.af;
+            pos1 = site.pos1;
+        }
+        if (pos1 < 1 || pos1 > (uint32_t)ROH_MAX_POS1 || pos1 < prev_pos1 ||
+            (!isnan(af) && (af < 0 || af > 1))) {
+            roh_error(info, "packed site %llu is out of order or out of range",
+                      (unsigned long long)(i + 1));
+            return 0;
+        }
+        bool duplicate = pos1 == prev_pos1;
+        prev_pos1 = pos1;
+
+        double pdg[3];
+        bool usable;
+        if (kind == DUCKHTS_ROH_SITES_GT) {
+            if (site.evidence[0] > 2) {
+                roh_error(info, "packed site %llu has dosage %d", (unsigned long long)(i + 1),
+                          (int)site.evidence[0]);
+                return 0;
+            }
+            usable = site.usable && duckhts_roh_pdg_from_gt(model.gt_error, site.evidence[0], pdg);
+        } else if (kind == DUCKHTS_ROH_SITES_COUNTS) {
+            if (count_site.usable && (count_site.other < 0 || count_site.counted < 0)) {
+                roh_error(info, "packed site %llu has a negative read count",
+                          (unsigned long long)(i + 1));
+                return 0;
+            }
+            /* The read model needs the site's frequency. */
+            usable = count_site.usable && !isnan(af) && af > 0 &&
+                     duckhts_roh_pdg_from_counts(count_site.other, count_site.counted,
+                                                 model.seq_error, model.contamination, af, pdg);
+        } else {
+            usable = site.usable != 0;
+            if (usable) duckhts_roh_pdg_from_capped_pl(roh, site.evidence, pdg);
+        }
+
+        if (!site_enters_model(duplicate, usable, af)) continue;
+        duckhts_roh_push(roh, (int32_t)(pos1 - 1), pdg, af);
     }
     if (duckhts_roh_decode(roh) != 0) {
         roh_error(info, "out of memory while decoding");
@@ -405,9 +553,9 @@ static bool write_segments(duckdb_function_info info, duckdb_vector output, idx_
 
 static void roh_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
     roh_args_t args = {0};
-    args.kind = (roh_evidence_t)(uintptr_t)duckdb_scalar_function_get_extra_info(info);
-    if (args.kind != ROH_EVIDENCE_PL && args.kind != ROH_EVIDENCE_GT &&
-        args.kind != ROH_EVIDENCE_COUNTS) {
+    args.kind = (duckhts_roh_sites_kind_t)(uintptr_t)duckdb_scalar_function_get_extra_info(info);
+    if (args.kind != DUCKHTS_ROH_SITES_PL && args.kind != DUCKHTS_ROH_SITES_GT &&
+        args.kind != DUCKHTS_ROH_SITES_COUNTS) {
         roh_error(info, "internal error: unknown evidence kind");
         return;
     }
@@ -415,17 +563,19 @@ static void roh_scalar(duckdb_function_info info, duckdb_data_chunk input, duckd
     args.positions = duckdb_data_chunk_get_vector(input, at++);
     args.af = duckdb_data_chunk_get_vector(input, at++);
     args.evidence = duckdb_data_chunk_get_vector(input, at++);
-    if (args.kind == ROH_EVIDENCE_GT) args.gt_error = duckdb_data_chunk_get_vector(input, at++);
-    if (args.kind == ROH_EVIDENCE_COUNTS) {
-        args.counted = duckdb_data_chunk_get_vector(input, at++);
-        args.seq_error = duckdb_data_chunk_get_vector(input, at++);
-        args.contamination = duckdb_data_chunk_get_vector(input, at++);
+    if (args.kind == DUCKHTS_ROH_SITES_GT) {
+        args.model.gt_error = duckdb_data_chunk_get_vector(input, at++);
     }
-    args.map_pos = duckdb_data_chunk_get_vector(input, at++);
-    args.map_cm = duckdb_data_chunk_get_vector(input, at++);
-    args.rec_rate = duckdb_data_chunk_get_vector(input, at++);
-    args.hw_to_az = duckdb_data_chunk_get_vector(input, at++);
-    args.az_to_hw = duckdb_data_chunk_get_vector(input, at++);
+    if (args.kind == DUCKHTS_ROH_SITES_COUNTS) {
+        args.counted = duckdb_data_chunk_get_vector(input, at++);
+        args.model.seq_error = duckdb_data_chunk_get_vector(input, at++);
+        args.model.contamination = duckdb_data_chunk_get_vector(input, at++);
+    }
+    args.model.map_pos = duckdb_data_chunk_get_vector(input, at++);
+    args.model.map_cm = duckdb_data_chunk_get_vector(input, at++);
+    args.model.rec_rate = duckdb_data_chunk_get_vector(input, at++);
+    args.model.hw_to_az = duckdb_data_chunk_get_vector(input, at++);
+    args.model.az_to_hw = duckdb_data_chunk_get_vector(input, at++);
 
     duckhts_roh_t *roh = duckhts_roh_create();
     roh_map_t map = {0};
@@ -448,10 +598,94 @@ static void roh_scalar(duckdb_function_info info, duckdb_data_chunk input, duckd
     duckhts_roh_destroy(roh);
 }
 
+/* __duckhts_roh_decode(sites, gt_error, seq_error, contamination, map_pos,
+ * map_cm, rec_rate, hw_to_az, az_to_hw). The evidence kind is in the site list. */
+static void roh_packed_scalar(duckdb_function_info info, duckdb_data_chunk input,
+                              duckdb_vector output) {
+    roh_packed_args_t args = {0};
+    idx_t at = 0;
+    args.sites = duckdb_data_chunk_get_vector(input, at++);
+    args.model.gt_error = duckdb_data_chunk_get_vector(input, at++);
+    args.model.seq_error = duckdb_data_chunk_get_vector(input, at++);
+    args.model.contamination = duckdb_data_chunk_get_vector(input, at++);
+    args.model.map_pos = duckdb_data_chunk_get_vector(input, at++);
+    args.model.map_cm = duckdb_data_chunk_get_vector(input, at++);
+    args.model.rec_rate = duckdb_data_chunk_get_vector(input, at++);
+    args.model.hw_to_az = duckdb_data_chunk_get_vector(input, at++);
+    args.model.az_to_hw = duckdb_data_chunk_get_vector(input, at++);
+
+    duckhts_roh_t *roh = duckhts_roh_create();
+    roh_map_t map = {0};
+    if (roh == NULL) {
+        roh_error(info, "out of memory");
+        return;
+    }
+    duckdb_list_vector_set_size(output, 0);
+    idx_t rows = duckdb_data_chunk_get_size(input);
+    for (idx_t row = 0; row < rows; row++) {
+        int status = decode_packed_row(info, &args, row, roh, &map);
+        if (status == 0) break;
+        if (status < 0) {
+            set_row_null(output, row);
+            continue;
+        }
+        if (!write_segments(info, output, row, roh)) break;
+    }
+    free_map(&map);
+    duckhts_roh_destroy(roh);
+}
+
+/* __duckhts_roh_valid_args(kind, gt_error, seq_error, contamination, rec_rate,
+ * hw_to_az, az_to_hw, max_sites, max_site_bytes): TRUE, or the error the decode
+ * would raise. A NULL model parameter is not an error: the decode returns NULL. */
+static void roh_valid_args_scalar(duckdb_function_info info, duckdb_data_chunk input,
+                                  duckdb_vector output) {
+    roh_model_args_t args = {0};
+    idx_t at = 0;
+    duckdb_vector kinds = duckdb_data_chunk_get_vector(input, at++);
+    args.gt_error = duckdb_data_chunk_get_vector(input, at++);
+    args.seq_error = duckdb_data_chunk_get_vector(input, at++);
+    args.contamination = duckdb_data_chunk_get_vector(input, at++);
+    args.rec_rate = duckdb_data_chunk_get_vector(input, at++);
+    args.hw_to_az = duckdb_data_chunk_get_vector(input, at++);
+    args.az_to_hw = duckdb_data_chunk_get_vector(input, at++);
+    duckdb_vector max_sites = duckdb_data_chunk_get_vector(input, at++);
+    duckdb_vector max_site_bytes = duckdb_data_chunk_get_vector(input, at++);
+
+    bool *valid = duckdb_vector_get_data(output);
+    idx_t rows = duckdb_data_chunk_get_size(input);
+    for (idx_t row = 0; row < rows; row++) {
+        bool has_max_sites = row_valid(max_sites, row);
+        bool has_max_site_bytes = row_valid(max_site_bytes, row);
+        const char *limit_error = duckhts_roh_check_limits(
+            has_max_sites, has_max_sites ? ((const int64_t *)duckdb_vector_get_data(max_sites))[row] : 0,
+            has_max_site_bytes,
+            has_max_site_bytes ? ((const int64_t *)duckdb_vector_get_data(max_site_bytes))[row] : 0);
+        if (limit_error != NULL) {
+            roh_error(info, "%s", limit_error);
+            return;
+        }
+        int32_t kind = row_valid(kinds, row) ? ((const int32_t *)duckdb_vector_get_data(kinds))[row] : 0;
+        if (duckhts_roh_site_size((uint32_t)kind) == 0) {
+            roh_error(info, "internal error: unknown evidence kind");
+            return;
+        }
+        roh_model_t model;
+        if (read_model((duckhts_roh_sites_kind_t)kind, &args, row, &model)) {
+            const char *model_error = check_model((duckhts_roh_sites_kind_t)kind, &model);
+            if (model_error != NULL) {
+                roh_error(info, "%s", model_error);
+                return;
+            }
+        }
+        valid[row] = true;
+    }
+}
+
 /* Parameters, in order: positions, af, then the evidence of the kind (PL lists;
  * dosages and gt_error; other-allele counts, counted-allele counts, seq_error
  * and contamination), then map_pos, map_cm, rec_rate, hw_to_az and az_to_hw. */
-static bool register_overload(duckdb_connection connection, roh_evidence_t kind) {
+static bool register_overload(duckdb_connection connection, duckhts_roh_sites_kind_t kind) {
     duckdb_logical_type bigint = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
     duckdb_logical_type integer = duckdb_create_logical_type(DUCKDB_TYPE_INTEGER);
     duckdb_logical_type real = duckdb_create_logical_type(DUCKDB_TYPE_DOUBLE);
@@ -468,9 +702,9 @@ static bool register_overload(duckdb_connection connection, roh_evidence_t kind)
     duckdb_scalar_function_set_name(function, ROH_NAME);
     duckdb_scalar_function_add_parameter(function, bigint_list);
     duckdb_scalar_function_add_parameter(function, real_list);
-    if (kind == ROH_EVIDENCE_PL) {
+    if (kind == DUCKHTS_ROH_SITES_PL) {
         duckdb_scalar_function_add_parameter(function, pl_list);
-    } else if (kind == ROH_EVIDENCE_GT) {
+    } else if (kind == DUCKHTS_ROH_SITES_GT) {
         duckdb_scalar_function_add_parameter(function, integer_list);
         duckdb_scalar_function_add_parameter(function, real);
     } else {
@@ -503,8 +737,88 @@ static bool register_overload(duckdb_connection connection, roh_evidence_t kind)
     return ok;
 }
 
+static duckdb_logical_type segments_type(void) {
+    duckdb_logical_type bigint = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
+    duckdb_logical_type integer = duckdb_create_logical_type(DUCKDB_TYPE_INTEGER);
+    duckdb_logical_type real = duckdb_create_logical_type(DUCKDB_TYPE_DOUBLE);
+    duckdb_logical_type member_types[4] = {bigint, bigint, integer, real};
+    const char *member_names[4] = {"start", "end", "n_markers", "quality"};
+    duckdb_logical_type segment = duckdb_create_struct_type(member_types, member_names, 4);
+    duckdb_logical_type segments = duckdb_create_list_type(segment);
+    duckdb_destroy_logical_type(&segment);
+    duckdb_destroy_logical_type(&real);
+    duckdb_destroy_logical_type(&integer);
+    duckdb_destroy_logical_type(&bigint);
+    return segments;
+}
+
+static bool register_packed_decode(duckdb_connection connection) {
+    duckdb_logical_type blob = duckdb_create_logical_type(DUCKDB_TYPE_BLOB);
+    duckdb_logical_type bigint = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
+    duckdb_logical_type real = duckdb_create_logical_type(DUCKDB_TYPE_DOUBLE);
+    duckdb_logical_type bigint_list = duckdb_create_list_type(bigint);
+    duckdb_logical_type real_list = duckdb_create_list_type(real);
+    duckdb_logical_type segments = segments_type();
+
+    duckdb_scalar_function function = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(function, "__duckhts_roh_decode");
+    duckdb_scalar_function_add_parameter(function, blob);        /* sites */
+    duckdb_scalar_function_add_parameter(function, real);        /* gt_error */
+    duckdb_scalar_function_add_parameter(function, real);        /* seq_error */
+    duckdb_scalar_function_add_parameter(function, real);        /* contamination */
+    duckdb_scalar_function_add_parameter(function, bigint_list); /* map_pos */
+    duckdb_scalar_function_add_parameter(function, real_list);   /* map_cm */
+    duckdb_scalar_function_add_parameter(function, real);        /* rec_rate */
+    duckdb_scalar_function_add_parameter(function, real);        /* hw_to_az */
+    duckdb_scalar_function_add_parameter(function, real);        /* az_to_hw */
+    duckdb_scalar_function_set_return_type(function, segments);
+    duckdb_scalar_function_set_special_handling(function);
+    duckdb_scalar_function_set_function(function, roh_packed_scalar);
+    bool ok = duckdb_register_scalar_function(connection, function) == DuckDBSuccess;
+    duckdb_destroy_scalar_function(&function);
+
+    duckdb_destroy_logical_type(&segments);
+    duckdb_destroy_logical_type(&real_list);
+    duckdb_destroy_logical_type(&bigint_list);
+    duckdb_destroy_logical_type(&real);
+    duckdb_destroy_logical_type(&bigint);
+    duckdb_destroy_logical_type(&blob);
+    return ok;
+}
+
+static bool register_valid_args(duckdb_connection connection) {
+    duckdb_logical_type integer = duckdb_create_logical_type(DUCKDB_TYPE_INTEGER);
+    duckdb_logical_type bigint = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
+    duckdb_logical_type real = duckdb_create_logical_type(DUCKDB_TYPE_DOUBLE);
+    duckdb_logical_type boolean = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
+
+    duckdb_scalar_function function = duckdb_create_scalar_function();
+    duckdb_scalar_function_set_name(function, "__duckhts_roh_valid_args");
+    duckdb_scalar_function_add_parameter(function, integer); /* kind */
+    /* gt_error, seq_error, contamination, rec_rate, hw_to_az, az_to_hw */
+    for (int i = 0; i < 6; i++) duckdb_scalar_function_add_parameter(function, real);
+    duckdb_scalar_function_add_parameter(function, bigint); /* max_sites */
+    duckdb_scalar_function_add_parameter(function, bigint); /* max_site_bytes */
+    duckdb_scalar_function_set_return_type(function, boolean);
+    duckdb_scalar_function_set_special_handling(function);
+    duckdb_scalar_function_set_function(function, roh_valid_args_scalar);
+    bool ok = duckdb_register_scalar_function(connection, function) == DuckDBSuccess;
+    duckdb_destroy_scalar_function(&function);
+
+    duckdb_destroy_logical_type(&boolean);
+    duckdb_destroy_logical_type(&real);
+    duckdb_destroy_logical_type(&bigint);
+    duckdb_destroy_logical_type(&integer);
+    return ok;
+}
+
+/* The site-collecting aggregate is in roh_sites.c. */
+extern bool register_duckhts_roh_sites(duckdb_connection connection);
+
 bool register_duckhts_roh_functions(duckdb_connection connection) {
-    return register_overload(connection, ROH_EVIDENCE_PL) &&
-           register_overload(connection, ROH_EVIDENCE_GT) &&
-           register_overload(connection, ROH_EVIDENCE_COUNTS);
+    return register_overload(connection, DUCKHTS_ROH_SITES_PL) &&
+           register_overload(connection, DUCKHTS_ROH_SITES_GT) &&
+           register_overload(connection, DUCKHTS_ROH_SITES_COUNTS) &&
+           register_packed_decode(connection) && register_valid_args(connection) &&
+           register_duckhts_roh_sites(connection);
 }

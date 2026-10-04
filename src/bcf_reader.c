@@ -1247,6 +1247,12 @@ static void bcf_read_bind(duckdb_bind_info info) {
             bind->index_row_count_valid = bcf_try_get_index_row_count(idx,
                                                                       row_multiplier,
                                                                       &bind->index_row_count);
+            /* Without an estimate the planner takes this scan for a small one
+             * and may build a hash join on its rows (samples times records in
+             * tidy format) instead of on the relation it is joined to. */
+            if (bind->index_row_count_valid) {
+                duckdb_bind_set_cardinality(info, (idx_t)bind->index_row_count, false);
+            }
             if (!bcf_bind_contig_names(bind, hdr, bind->index.tabix)) goto bind_oom;
         }
     }

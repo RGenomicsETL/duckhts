@@ -7,7 +7,9 @@ output:
 ---
 
 This report gives the 1×/2×/4× scaling evidence `STYLE.md` asks for, for the two
-runs-of-homozygosity entry points added for #318:
+runs-of-homozygosity entry points added for #318. Since #329 the sites of each
+sample and chromosome are held in native buffers that DuckHTS bounds, instead
+of DuckDB lists; the last section compares this revision with the one before.
 
 - `duckhts_roh_counts` over a relation of read counts. Its growth dimensions are
   the sites per sample and chromosome (the length of one kernel list) and the
@@ -53,20 +55,30 @@ The reference cuts are the 25% and 50% position quantiles of its distinct sites.
 The overhead is the median peak RSS of three empty runs that start the CLI,
 load the extension and run no scan.
 
-- **`duckhts_roh_counts`.** The live state is every sample's site list, held by
-  the per-(sample, chromosome) list aggregate until the scan ends. That is 24
-  bytes of struct data per site (position, frequency and two counts), taken as
-  48 bytes with list-segment and validity overhead. On top of that come the
-  kernel arrays for the longest list (emission, path and position storage, 40
-  bytes per site). The ceiling is overhead + 3 × rows × 88 bytes. This budget
-  is a gate: the render stops if any counts observation exceeds it or spills.
-- **`duckhts_roh_ancestry`.** The same list aggregate holds samples × records
-  elements. Each element is 28 bytes of struct data (position, frequency and
-  genotype evidence), taken as 56 bytes. The reference join adds one hash
-  entry per reference row (64 bytes). The ceiling is overhead + 3 × (samples ×
-  records × 56 bytes + reference rows × 64 bytes). The report states whether
-  each cell meets it. See *Findings* for why this budget is reported rather
-  than gated.
+Each ceiling is overhead + 3 × the live state below, and each is a gate: the
+render stops if any observation exceeds its ceiling or spills.
+
+- **`duckhts_roh_counts`.** The live state is:
+  - every sample's packed site list, 24 bytes per row (position, frequency and
+    two counts), held natively until the scan ends and then by DuckDB as one
+    BLOB per sample and chromosome;
+  - the kernel workspace of each thread for the longest list, 38 bytes per site
+    (position, two emissions, the Viterbi path and the forward-backward values).
+
+  That is rows × 24 + threads × sites per list × 38 bytes.
+- **`duckhts_roh_ancestry`.** A record without a reference site is dropped
+  before the sites are collected, so the lists hold reference sites only: the
+  reference rows divided by its number of groups. The live state is:
+  - the packed site lists, 16 bytes per sample and reference site (position,
+    frequency and genotype evidence);
+  - the distinct called sites and the hash table that joins the reference to
+    them, 64 bytes per BCF record each;
+  - the reference join and the per-site frequency lists, 64 bytes per reference
+    row;
+  - the kernel workspace, 38 bytes per reference site and thread.
+
+  That is samples × reference sites × 16 + records × 128 + reference rows × 64 +
+  threads × reference sites × 38 bytes.
 
 ``` sh
 taskset -c 8-15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_roh_scaling.Rmd")'
@@ -221,9 +233,18 @@ empty_runs <- vapply(seq_len(3L), function(run) {
   run_fresh(character(0), "SELECT 1 AS n, 0 AS len", 1L)$max_rss_kib
 }, numeric(1L))
 overhead_mib <- median(empty_runs) / 1024
-counts_inputs$budget_mib <- overhead_mib + 3 * counts_inputs$rows * 88 / 2^20
-ancestry_inputs$budget_mib <- overhead_mib +
-  3 * (ancestry_inputs$samples * bcf_records * 56 + ancestry_inputs$reference_rows * 64) / 2^20
+# Ceilings in MiB: overhead + 3 x the live state declared above.
+counts_budget <- function(k, threads) {
+  overhead_mib + 3 * (counts_inputs$rows[[k]] * 24 + threads * counts_inputs$sites[[k]] * 38) / 2^20
+}
+reference_groups <- as.numeric(system2(duckdb_cli, c("-list", "-noheader"), input = sprintf(
+  "SELECT count(DISTINCT group_id) FROM read_parquet(%s);", quote_literal(reference_long)), stdout = TRUE))
+stopifnot(length(reference_groups) == 1L, is.finite(reference_groups), reference_groups > 0)
+ancestry_budget <- function(k, threads) {
+  reference_sites <- ancestry_inputs$reference_rows[[k]] / reference_groups
+  overhead_mib + 3 * (ancestry_inputs$samples[[k]] * reference_sites * 16 + bcf_records * 128 +
+                      ancestry_inputs$reference_rows[[k]] * 64 + threads * reference_sites * 38) / 2^20
+}
 
 counts_query <- "SELECT count(*) AS n, sum(length) AS len FROM duckhts_roh_counts('c')"
 ancestry_query <- function(ids) sprintf(paste(
@@ -243,7 +264,7 @@ for (repetition in 1:3) {
         observations[[length(observations) + 1L]] <- data.frame(
           macro = "duckhts_roh_counts", dimension = dimension, scale = counts_inputs$scale[[k]],
           samples = counts_inputs$samples[[k]], input_rows = counts_inputs$rows[[k]],
-          threads = threads, repetition = repetition, budget_mib = counts_inputs$budget_mib[[k]], observed)
+          threads = threads, repetition = repetition, budget_mib = counts_budget(k, threads), observed)
       }
     }
     config_order <- if (repetition %% 2L == 1L) seq_len(nrow(ancestry_inputs)) else rev(seq_len(nrow(ancestry_inputs)))
@@ -261,7 +282,7 @@ for (repetition in 1:3) {
       ancestry_observations[[length(ancestry_observations) + 1L]] <- data.frame(
         samples = n, fraction = ancestry_inputs$fraction[[k]], reference_rows = ancestry_inputs$reference_rows[[k]],
         input_rows = n * bcf_records, threads = threads, repetition = repetition,
-        budget_mib = ancestry_inputs$budget_mib[[k]], observed)
+        budget_mib = ancestry_budget(k, threads), observed)
     }
   }
 }
@@ -276,9 +297,12 @@ ancestry_series_runs <- do.call(rbind, lapply(seq_len(nrow(ancestry_series)), fu
 }))
 runs <- rbind(do.call(rbind, observations), ancestry_series_runs[names(do.call(rbind, observations))])
 stopifnot(all(runs$peak_temp_bytes == 0), all(as.numeric(runs$n) > 0))
-counts_runs <- runs[runs$macro == "duckhts_roh_counts", ]
-stopifnot(all(counts_runs$max_rss_kib / 1024 <= counts_runs$budget_mib))
 write.csv(runs, "benchmarks/benchmark_roh_scaling_runs.csv", row.names = FALSE)
+over_budget <- runs[runs$max_rss_kib / 1024 > runs$budget_mib, ]
+if (nrow(over_budget)) {
+  print(over_budget[c("macro", "dimension", "scale", "threads", "max_rss_kib", "budget_mib")])
+  stop("observations exceed their declared memory budget", call. = FALSE)
+}
 
 cells <- split(runs, list(runs$macro, runs$dimension, runs$scale, runs$threads), drop = TRUE)
 summary <- do.call(rbind, lapply(cells, function(cell) {
@@ -328,17 +352,64 @@ knitr::kable(exponents, digits = 3)
 
 ## Findings
 
-`duckhts_roh_counts` stays within its declared budget at every size and
-thread count, synthetic and real, and the render enforces that. Its one-thread
-1× runs are under the 5-second floor, so it gets a memory verdict, not a timing
-verdict. On the real workload, one thread decodes one sample's 108,757 chr20
-sites in `r round(real_cell(1)$median_seconds, 3)` s at `r real_cell(1)$median_rss_mib` MiB
+Both macros stay within their declared budgets at every size and thread count,
+synthetic and real, and the render enforces that.
+
+`duckhts_roh_counts`: its one-thread 1× runs are under the 5-second floor, so
+it gets a memory verdict, not a timing verdict. On the real workload, one
+thread decodes one sample's 108,757 chr20 sites in
+`r round(real_cell(1)$median_seconds, 3)` s at `r real_cell(1)$median_rss_mib` MiB
 peak RSS and three samples in `r round(real_cell(3)$median_seconds, 3)` s at
 `r real_cell(3)$median_rss_mib` MiB. The operating scale this report supports
 is what it measures: per-chromosome lists of up to 4 million synthetic sites,
 up to 32 synthetic samples, and three real 30× samples at 108,757 sites;
 larger panels and cohorts are not measured here.
 
-`duckhts_roh_ancestry` exceeds its declared model. Memory grows with the number of samples decoded together, because the per-(sample, chromosome) list aggregate keeps every sample's site list until the BCF scan ends, and DuckDB's list-aggregate state costs several times the 28 bytes of struct data per element. The reference stage adds a fixed cost that grows with reference rows (see the reference series). `duckhts_roh` and `duckhts_roh_af_table` share the list stage and are already on `main` (#323): the ancestry evaluation's eight-child, 21-autosome queries peaked at 16.5 GB.
+`duckhts_roh_ancestry`: memory still grows with the number of samples decoded
+together, because one pass over the BCF needs every sample's sites. Each
+sample now adds 16 bytes per reference site. `samples :=` chooses the batch, and
+`max_sites` and `max_site_bytes` turn an oversized one into an explicit error.
 
-The maintainer approved this as a reviewed exception on 2026-10-03: the budget is reported, not gated, until #329 makes the decode memory-bounded. Until then, `samples :=` is the memory control. Decode in sample batches, as the evaluation does.
+## Change from the previous revision
+
+```{r baseline, echo=FALSE}
+# The observations of the previous revision, read from git: the same cells on
+# the same host, with the sites held in DuckDB list aggregates.
+baseline_revision <- "a5f3b47a"
+baseline_text <- system2("git", c("show", paste0(baseline_revision, ":benchmarks/benchmark_roh_scaling_runs.csv")),
+                         stdout = TRUE)
+stopifnot(is.null(attr(baseline_text, "status")))
+baseline <- utils::read.csv(text = baseline_text, stringsAsFactors = FALSE)
+cell_medians <- function(x) {
+  x$rss_mib <- x$max_rss_kib / 1024
+  aggregate(cbind(seconds, rss_mib) ~ macro + dimension + scale + threads, x, median)
+}
+comparison <- merge(cell_medians(baseline), cell_medians(runs),
+                    by = c("macro", "dimension", "scale", "threads"), suffixes = c("_before", "_after"))
+comparison <- comparison[comparison$threads == 1L, setdiff(names(comparison), "threads")]
+comparison$time_ratio <- comparison$seconds_after / comparison$seconds_before
+comparison$rss_ratio <- comparison$rss_mib_after / comparison$rss_mib_before
+comparison <- comparison[order(comparison$macro, comparison$dimension, comparison$scale), ]
+rownames(comparison) <- NULL
+stopifnot(nrow(comparison) > 0)
+largest <- comparison[comparison$macro == "duckhts_roh_ancestry" & comparison$dimension == "samples" &
+                      comparison$scale == 4, ]
+stopifnot(nrow(largest) == 1L)
+```
+
+The previous revision, `r baseline_revision`, held each sample's sites in a
+DuckDB list aggregate, kept the records without a reference site in those
+lists, built the ancestry reference with ordered list aggregates and gave the
+planner no row estimate for `read_bcf`. Its
+observations are read from git; they were made with the same driver and inputs
+on the same host. One thread, median of three:
+
+```{r comparison, echo=FALSE}
+knitr::kable(comparison, digits = 3)
+```
+
+With 32 samples and the full reference, `duckhts_roh_ancestry` went from
+`r round(largest$rss_mib_before)` MiB to `r round(largest$rss_mib_after)` MiB and
+from `r round(largest$seconds_before, 1)` s to `r round(largest$seconds_after, 1)` s.
+The segments are unchanged: the chr20 evaluation arms reproduce their 51,083
+(ancestry) and 60,204 (pooled) segments exactly.

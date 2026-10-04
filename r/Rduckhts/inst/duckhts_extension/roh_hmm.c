@@ -192,10 +192,21 @@ int duckhts_roh_begin(duckhts_roh_t *roh, const duckhts_roh_params_t *params, si
     return 0;
 }
 
-int duckhts_roh_pdg_from_pl(const duckhts_roh_t *roh, int32_t pl_rr, int32_t pl_ra,
-                            int32_t pl_aa, double pdg[3]) {
+int duckhts_roh_pl_usable(int32_t pl_rr, int32_t pl_ra, int32_t pl_aa) {
     if (pl_rr < 0 || pl_ra < 0 || pl_aa < 0) return 0;
     if (pl_rr == pl_ra && pl_rr == pl_aa) return 0;
+    return 1;
+}
+
+void duckhts_roh_pdg_from_capped_pl(const duckhts_roh_t *roh, const uint8_t pl[3], double pdg[3]) {
+    pdg[0] = roh->pl2p[pl[0]];
+    pdg[1] = roh->pl2p[pl[1]];
+    pdg[2] = roh->pl2p[pl[2]];
+}
+
+int duckhts_roh_pdg_from_pl(const duckhts_roh_t *roh, int32_t pl_rr, int32_t pl_ra,
+                            int32_t pl_aa, double pdg[3]) {
+    if (!duckhts_roh_pl_usable(pl_rr, pl_ra, pl_aa)) return 0;
     int max = DUCKHTS_ROH_PHRED_TABLE - 1;
     pdg[0] = roh->pl2p[pl_rr < max ? pl_rr : max];
     pdg[1] = roh->pl2p[pl_ra < max ? pl_ra : max];

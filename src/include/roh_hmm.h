@@ -69,6 +69,15 @@ int duckhts_roh_begin(duckhts_roh_t *roh, const duckhts_roh_params_t *params, si
 int duckhts_roh_pdg_from_pl(const duckhts_roh_t *roh, int32_t pl_rr, int32_t pl_ra,
                             int32_t pl_aa, double pdg[3]);
 
+/* Whether three phred-scaled likelihoods are usable evidence: none is negative
+ * and they are not all equal. duckhts_roh_pdg_from_pl() applies the same test. */
+int duckhts_roh_pl_usable(int32_t pl_rr, int32_t pl_ra, int32_t pl_aa);
+
+/* P(D|genotype) for likelihoods already found usable and capped at 255, as a
+ * packed site list stores them. The values are those duckhts_roh_pdg_from_pl()
+ * gives for the uncapped likelihoods. */
+void duckhts_roh_pdg_from_capped_pl(const duckhts_roh_t *roh, const uint8_t pl[3], double pdg[3]);
+
 /* P(D|genotype) for a called dosage 0, 1 or 2 with error phred gt_error
  * (bcftools -G). Returns 0 for an unusable dosage. */
 int duckhts_roh_pdg_from_gt(double gt_error, int dosage, double pdg[3]);
