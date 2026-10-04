@@ -1,0 +1,627 @@
+---
+title: "Somalier cohort relatedness scaling"
+output:
+  github_document:
+    html_preview: false
+    pandoc_args: ["--wrap=preserve", "--columns=400"]
+---
+
+This report gives the 1×/2×/4× scaling evidence `STYLE.md` asks for, for the
+multi-sample Somalier path from count evidence to pairwise relatedness. It
+measures four stages, each as its own fresh process:
+
+- `sketches`: `duckhts_somalier_prepare_sketches` over a count-evidence
+  relation, written with `COPY ... TO` Parquet. One sketch row per sample.
+- `pairs_reduce`: `duckhts_somalier_relatedness_all_pairs` over the stored
+  sketches, reduced to a count and sums of its fields.
+- `pairs_copy`: the same all-pairs result, every field, written with
+  `COPY ... TO` Parquet.
+- `pairs_scalar`: the per-pair function `duckhts_somalier_relatedness` over a
+  self-join of the stored sketches, reduced like `pairs_reduce`. This was the
+  only all-pairs form before `duckhts_somalier_relatedness_all_pairs`.
+
+The all-pairs macro checks the contents of each sketch once. The per-pair
+function checks both sketches of every pair. [Before and after](#before-and-after)
+compares both with the observations of revision `a5f3b47a`.
+
+## What was already measured
+
+| path | existing evidence | gap |
+|:--|:--|:--|
+| `duckhts_somalier_vcf_counts` | `benchmark_sql_scaling_audit.md`: file, panel and joint doublings, three fresh processes at 1 and 4 threads, 256 MiB caps | none for memory; all cells are below the 5-second floor |
+| `duckhts_somalier_import_sites` | `benchmark_sql_scaling_audit.md`: three real sizes, repeated, with an RSS budget | no timing verdict (below the floor) |
+| `duckhts_somalier_bam_counts` | `benchmark_somalier_site_extraction.md`: one 17,000-site synthetic workload | no 1×/2×/4× series, no budget |
+| `duckhts_somalier_sex` | `benchmark_somalier_sex.md`: 500/1,000/2,000 samples, budget gated | sites are fixed; synthetic only |
+| panel selection (`rduckhts_somalier_find_sites`) | `benchmark_somalier_find_sites_chr22.md`: whole chr22 and chrX, memory recorded | one size per chromosome |
+| sketches and all-pair relatedness | `benchmark_somalier_reviewed.md`: one size (250 samples, 17,000 sites), 4 threads | no series, no budget, no buffer or spill record: **measured here** |
+| `COPY ... TO` of the relatedness result | `benchmark_somalier_reviewed.md`: inside one end-to-end case at one size | **measured here** |
+| sketch verification, CHARR, matched contamination | `benchmark_somalier_reviewed.md`: one size | not measured here |
+| `*_convert_parquet_sql` COPY statements (BAM, VCF, GFF) | none; listed as open finding 6 of `benchmark_sql_scaling_audit.md` | not measured here; they are not Somalier paths |
+
+Open findings 5 and 6 of `benchmark_sql_scaling_audit.md` are the source of the
+"multi-sample Somalier cohort and COPY workloads" item. Finding 5 asks for a
+capped quadratic contract for all-pairs relatedness, which this report gives.
+Finding 6 concerns the reader `*_convert_parquet_sql` COPY statements, which
+this report does not measure.
+
+## Growth dimensions and size contract
+
+The dimensions are samples `N`, panel sites `S` and pairs `P = N (N - 1) / 2`.
+
+- Count evidence has `N × S` rows.
+- A sketch holds three bit masks of `ceiling(S / 64)` 64-bit words: `3 S / 8`
+  bytes per sample. Sketch output has `N` rows.
+- The all-pairs output has `P` rows of 30 fixed-width fields. It is quadratic
+  in `N` and does not depend on `S`. No intermediate has `N × S × P` rows: a
+  pair is computed from two sketches, not from site rows.
+- Pair work is `P × S / 64` word operations.
+- Caps: `max_sites` bounds `S` per sketch (default 1,000,000; hard limit
+  100,000,000). The SQL has no cap on `P`. The caller chooses the pair
+  relation; a `pairs_table` join gives a linear selection instead of all pairs.
+
+The series are:
+
+- samples: 125, 250, 500 at 17,000 sites (7,750, 31,125 and 124,750 pairs);
+- sites: 17,000, 34,000, 68,000 at 250 samples;
+- joint: (125 samples, 4,250 sites), (250, 8,500), (500, 17,000).
+
+A configuration shared by two series is measured once and listed in each.
+
+## Inputs
+
+The synthetic count evidence is deterministic arithmetic data. It is generated
+at render time into a temporary directory, which is untimed staging. It uses
+the formulas of the registered `somalier-synthetic` generator
+(`r/duckhtsbench/R/somalier.R`) with the number of sites as a parameter. Rows
+are ordered by sample and then site, as a concatenation of per-sample count
+extractions is. About 1% of the rows are unavailable (NULL counts).
+
+The real public workload uses the registry artifacts
+`roh_counts_chr20_na18507`, `roh_counts_chr20_hg00403` and
+`roh_counts_chr20_hg00188`. They hold read counts that
+`duckhts_somalier_bam_counts` made from three 1000 Genomes 30× CRAMs at 108,757
+chr20 sites. Each file is checked against its registered row count and counts
+digest before anything is measured. The render derives a panel from the sites
+(dense `site_index` in position order, alleles in lexical A/B order) and
+orients the reference and alternate counts into A and B counts. This
+derivation is untimed and is not written to the cache.
+
+No registered input holds count evidence for more samples. The registered
+1000 Genomes phased VCFs have GT but no `FORMAT/AD`, and counts are never
+inferred from GT. The real workload therefore covers the site dimension
+(108,757 sites) with three samples and three pairs. It does not cover a real
+cohort. Staging one would need range reads of many 30× CRAMs, which this
+report does not do.
+
+## Method
+
+Every observation is one fresh DuckDB CLI process under `/usr/bin/time`. The
+JSON profiler gives the latency of the measured statement and DuckDB's peak
+buffer and temporary bytes. `/usr/bin/time` gives peak RSS for the whole
+process. `max_temp_directory_size` is zero, so a spill fails the render.
+`memory_limit` is the DuckDB default. Each cell has three repetitions at one
+thread and at four threads, in an order that alternates sizes. The process is
+pinned to CPUs 0-3. Input Parquet files are read from a warm page cache.
+
+Each statement consumes its output. `sketches` and `pairs_copy` write every
+output column to Parquet; a second, untimed process reads the file back and
+checks the row count. `pairs_reduce` and `pairs_scalar` sum fields of every
+pair. The three pair stages must agree on the row count and on the sum of
+`jointly_called`.
+
+The pair stages read sketches that an untimed process staged with the same
+`sketches` statement.
+
+## Budgets
+
+The budgets were declared before the first measurement, at revision
+`a5f3b47a`. That run stopped at its own gate: the real cell of three pairs
+used 42.5 to 44.1 MiB against a ceiling of 41.5 MiB. The first model scaled
+the join output by the number of pairs, so three pairs were budgeted three
+rows. DuckDB allocates whole 2,048-row vectors for the 30-field result in each
+operator, whatever the row count. The model below adds that fixed term, and
+the sketch relation the macro materializes. No other term changed. The
+observations of the first run are kept in
+[`benchmark_somalier_cohort_scaling_runs_a5f3b47a.csv`](benchmark_somalier_cohort_scaling_runs_a5f3b47a.csv).
+
+The overhead is the median peak RSS of three empty runs per thread count. An
+empty run starts the CLI, loads the extension, and copies a one-row Parquet
+file to a one-row Parquet file.
+
+Each ceiling is overhead + 3 × the live state below, and each is a gate: the
+render stops if any observation exceeds its ceiling or spills. `W` is
+`ceiling(S / 64)`, and a sketch is `3 × W × 8 + 256` bytes.
+
+- **`sketches`.** The live state is:
+  - the panel, which the macro and the panel digest materialize several times,
+    with its row hashes and the hash table that joins it to the evidence:
+    600 bytes per site;
+  - the aggregate states: four masks of `W` words per sample, in one hash table
+    per thread and in the combined table: `(threads + 1) × N × 4 × W × 8` bytes;
+  - the sketches, in the aggregate result and in the Parquet writer:
+    `2 × N` sketches;
+  - the evidence scan: one Parquet row group (122,880 rows) of 120 decoded
+    bytes per row and thread. The evidence itself is streamed.
+- **`pairs_reduce`** and **`pairs_scalar`.** The live state is:
+  - the sketch relation, compressed and decoded, the checked copy the macro
+    materializes, and both sides of the join: `6 × N` sketches;
+  - one join output vector per thread. The join compares `sample_id`, and the
+    pair function receives both sketches of each row:
+    `min(P, threads × 2,048) × 2` sketches;
+  - the result vectors, fixed per thread: four operators hold one 2,048-row
+    vector of the 30-field result at 16 bytes per field,
+    `threads × 4 × 2,048 × 30 × 16` bytes.
+- **`pairs_copy`.** The live state of `pairs_reduce`, and the Parquet writer's
+  row group: `min(P, threads × 122,880)` rows of 400 bytes.
+
+A time exponent is the log of the median time ratio divided by the log of the
+work ratio, per doubling. The work is `N × S` for `sketches` and `P × S` for
+the pair stages, so a pair stage that is quadratic in samples and linear in
+pairs has exponent 1. An exponent above 1.25 needs an investigation. A series
+whose one-thread 1× run is under 5 seconds gets a memory verdict only.
+
+``` sh
+taskset -c 0-3 Rscript -e 'rmarkdown::render("benchmarks/benchmark_somalier_cohort_scaling.Rmd")'
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r benchmark, echo=FALSE, message=FALSE}
+stopifnot(requireNamespace("duckhtsbench", quietly = TRUE),
+          requireNamespace("jsonlite", quietly = TRUE),
+          requireNamespace("knitr", quietly = TRUE))
+Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath(
+  "r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+extension <- normalizePath(Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension"),
+                           mustWork = TRUE)
+duckdb_cli <- Sys.getenv("DUCKDB_CLI", Sys.which("duckdb"))
+stopifnot(nzchar(duckdb_cli), file.exists("/usr/bin/time"))
+duckdb_runtime <- system2(duckdb_cli, "--version", stdout = TRUE)[[1L]]
+revision <- system2("git", c("rev-parse", "HEAD"), stdout = TRUE)
+src_tree <- system2("git", c("rev-parse", "HEAD:src"), stdout = TRUE)
+if (system2("git", c("diff", "--quiet", "HEAD", "--", "src"), stdout = FALSE, stderr = FALSE) != 0L) {
+  stop("Build source must match the recorded HEAD")
+}
+host_load <- function() sub(".*load average: ", "", system2("uptime", stdout = TRUE))
+load_before <- host_load()
+cpu_affinity <- sub(".*: ", "", system2("taskset", c("-cp", Sys.getpid()), stdout = TRUE))
+quote_literal <- function(value) paste0("'", gsub("'", "''", value, fixed = TRUE), "'")
+
+# Run untimed SQL in a CLI process; the last statement's rows are returned.
+run_untimed <- function(sql, load_extension = FALSE) {
+  lines <- c(if (load_extension) sprintf("LOAD %s;", quote_literal(extension)), sql)
+  output <- system2(duckdb_cli, c("-unsigned", "-batch", "-bail", "-csv"), input = lines, stdout = TRUE)
+  if (!is.null(attr(output, "status"))) stop("DuckDB CLI staging failed", call. = FALSE)
+  if (length(output)) utils::read.csv(text = output, colClasses = "character") else NULL
+}
+
+# Run one measured statement in a fresh CLI process with the given threads and
+# spill forbidden. Only the measured statement is profiled.
+run_fresh <- function(setup, statement, threads) {
+  scratch <- tempfile("somalier-cohort-run-")
+  dir.create(scratch)
+  on.exit(unlink(scratch, recursive = TRUE), add = TRUE)
+  sql_path <- file.path(scratch, "query.sql")
+  profile_path <- file.path(scratch, "profile.json")
+  time_path <- file.path(scratch, "time.tsv")
+  writeLines(c(
+    sprintf("SET threads = %d;", threads),
+    "SET max_temp_directory_size = '0KiB';",
+    sprintf("LOAD %s;", quote_literal(extension)),
+    setup,
+    "PRAGMA enable_profiling = 'json';",
+    sprintf("PRAGMA profiling_output = %s;", quote_literal(profile_path)),
+    statement,
+    "PRAGMA disable_profiling;"
+  ), sql_path)
+  status <- system2("/usr/bin/time", c("-f", shQuote("%M\t%e"), "-o", shQuote(time_path),
+                                       shQuote(duckdb_cli), "-unsigned", "-batch", "-bail"),
+                    stdin = sql_path, stdout = FALSE, stderr = FALSE)
+  if (status != 0L) stop("DuckDB CLI failed (status ", status, ")")
+  profile <- jsonlite::fromJSON(profile_path, simplifyVector = TRUE)
+  timing <- utils::read.delim(time_path, header = FALSE, col.names = c("max_rss_kib", "process_seconds"))
+  data.frame(seconds = as.numeric(profile$latency), max_rss_kib = timing$max_rss_kib[[1L]],
+             peak_buffer_bytes = as.numeric(profile$system_peak_buffer_memory),
+             peak_temp_bytes = as.numeric(profile$system_peak_temp_dir_size))
+}
+
+series <- data.frame(
+  dimension = rep(c("samples", "sites", "joint"), each = 3L),
+  scale = rep(c(1L, 2L, 4L), 3L),
+  samples = c(125L, 250L, 500L, 250L, 250L, 250L, 125L, 250L, 500L),
+  sites = c(17000L, 17000L, 17000L, 17000L, 34000L, 68000L, 4250L, 8500L, 17000L),
+  stringsAsFactors = FALSE)
+real_sites <- 108757L
+series <- rbind(series, data.frame(dimension = "real", scale = 1L, samples = 3L, sites = real_sites,
+                                   stringsAsFactors = FALSE))
+configs <- unique(series[c("samples", "sites")])
+configs$source <- ifelse(configs$sites == real_sites, "real", "synthetic")
+configs$pairs <- configs$samples * (configs$samples - 1) / 2
+configs$rows <- as.numeric(configs$samples) * configs$sites
+rownames(configs) <- NULL
+
+staging <- tempfile("somalier-cohort-inputs-")
+dir.create(staging)
+configs$panel <- file.path(staging, sprintf("panel_%d_%d.parquet", configs$samples, configs$sites))
+configs$evidence <- file.path(staging, sprintf("evidence_%d_%d.parquet", configs$samples, configs$sites))
+configs$sketches <- file.path(staging, sprintf("sketches_%d_%d.parquet", configs$samples, configs$sites))
+
+# Synthetic evidence: the registered somalier-synthetic formulas, with the
+# number of sites as a parameter, ordered by sample and site.
+panel_sql <- function(sites, path) sprintf(paste(
+  "COPY (SELECT 'GRCh38' AS assembly, i::UBIGINT AS site_index, 'chr' || (i %% 22 + 1) AS region,",
+  "(1000000 + (i // 22) * 101)::UBIGINT AS position,",
+  "CASE i %% 4 WHEN 0 THEN 'A' WHEN 1 THEN 'A' WHEN 2 THEN 'C' ELSE 'G' END AS allele_a,",
+  "CASE i %% 4 WHEN 0 THEN 'C' WHEN 1 THEN 'G' ELSE 'T' END AS allele_b",
+  "FROM range(%d) AS t(i) ORDER BY i) TO %s (FORMAT parquet);"), sites, quote_literal(path))
+evidence_sql <- function(samples, panel, path) sprintf(paste(
+  "COPY (SELECT printf('sample%%04d', n) AS sample_id, assembly, site_index, region, position, allele_a, allele_b,",
+  "CASE WHEN unavailable THEN NULL WHEN genotype <= 3 THEN 30 - minor WHEN genotype <= 6 THEN 15 ELSE minor END::UBIGINT AS a,",
+  "CASE WHEN unavailable THEN NULL WHEN genotype <= 3 THEN minor WHEN genotype <= 6 THEN 15 ELSE 30 - minor END::UBIGINT AS b,",
+  "CASE WHEN unavailable THEN NULL ELSE 0 END::UBIGINT AS other",
+  "FROM (SELECT p.*, n, (site_index * 7 + n * 13) %% 10 AS genotype,",
+  "(site_index + n * 17) %% 97 = 0 AS unavailable,",
+  "((site_index + n * 11) %% 23 = 0)::INTEGER AS minor",
+  "FROM range(1, %d) AS s(n), read_parquet(%s) AS p)",
+  "ORDER BY n, site_index) TO %s (FORMAT parquet);"),
+  samples + 1L, quote_literal(panel), quote_literal(path))
+for (k in which(configs$source == "synthetic")) {
+  run_untimed(c(panel_sql(configs$sites[[k]], configs$panel[[k]]),
+                evidence_sql(configs$samples[[k]], configs$panel[[k]], configs$evidence[[k]])))
+}
+
+# Real counts: registered artifacts, checked against their registered identity,
+# then oriented into panel A/B order.
+source("benchmarks/roh_counts_stage.R")
+real_ids <- c("roh_counts_chr20_na18507", "roh_counts_chr20_hg00403", "roh_counts_chr20_hg00188")
+real_paths <- vapply(real_ids, duckhtsbench::duckhts_bench_artifact_path, character(1L))
+identity_con <- DBI::dbConnect(duckdb::duckdb(shared_home = FALSE))
+for (k in seq_along(real_ids)) {
+  registered <- duckhtsbench:::duckhts_bench_identity_fields(
+    duckhtsbench::duckhts_bench_registry()$supplier_identity[
+      match(real_ids[[k]], duckhtsbench::duckhts_bench_registry()$id)])
+  observed_identity <- roh_counts_identity(identity_con, real_paths[[k]])
+  stopifnot(observed_identity$rows == real_sites, as.numeric(registered[["rows"]]) == real_sites,
+            identical(observed_identity$counts_sha256, registered[["counts_sha256"]]),
+            identical(registered[["assembly"]], "GRCh38"))
+}
+DBI::dbDisconnect(identity_con, shutdown = TRUE)
+real <- which(configs$source == "real")
+real_list <- sprintf("read_parquet([%s])", paste(vapply(real_paths, quote_literal, character(1L)), collapse = ", "))
+real_check <- run_untimed(c(
+  sprintf(paste(
+    "COPY (SELECT 'GRCh38' AS assembly, (row_number() OVER (ORDER BY pos) - 1)::UBIGINT AS site_index,",
+    "chrom AS region, pos::UBIGINT AS position, least(ref, alt) AS allele_a, greatest(ref, alt) AS allele_b",
+    "FROM read_parquet(%s) ORDER BY pos) TO %s (FORMAT parquet);"),
+    quote_literal(real_paths[[1L]]), quote_literal(configs$panel[[real]])),
+  sprintf(paste(
+    "COPY (SELECT c.sample_id, p.assembly, p.site_index, p.region, p.position, p.allele_a, p.allele_b,",
+    "(CASE WHEN c.ref = p.allele_a THEN c.ref_count ELSE c.alt_count END)::UBIGINT AS a,",
+    "(CASE WHEN c.ref = p.allele_a THEN c.alt_count ELSE c.ref_count END)::UBIGINT AS b,",
+    "c.other_count::UBIGINT AS other",
+    "FROM %s AS c JOIN read_parquet(%s) AS p ON p.region = c.chrom AND p.position = c.pos",
+    "AND p.allele_a = least(c.ref, c.alt) AND p.allele_b = greatest(c.ref, c.alt)",
+    "WHERE c.status = 'measured' ORDER BY c.sample_id, p.site_index) TO %s (FORMAT parquet);"),
+    real_list, quote_literal(configs$panel[[real]]), quote_literal(configs$evidence[[real]])),
+  sprintf("SELECT count(*) AS n, count(DISTINCT sample_id) AS samples FROM read_parquet(%s);",
+          quote_literal(configs$evidence[[real]]))))
+stopifnot(as.numeric(real_check$n) == configs$rows[[real]], as.numeric(real_check$samples) == 3)
+
+# The measured statements.
+sketch_setup <- function(k) c(
+  sprintf("CREATE TEMP VIEW panel AS SELECT * FROM read_parquet(%s);", quote_literal(configs$panel[[k]])),
+  sprintf("CREATE TEMP VIEW evidence AS SELECT * FROM read_parquet(%s);", quote_literal(configs$evidence[[k]])))
+sketch_statement <- function(output) sprintf(paste(
+  "COPY (SELECT * FROM duckhts_somalier_prepare_sketches('evidence', 'panel', 7, 0.3, 0.01,",
+  "max_sites := 1000000)) TO %s (FORMAT parquet);"), quote_literal(output))
+pair_setup <- function(k) sprintf("CREATE TEMP VIEW sketches AS SELECT * FROM read_parquet(%s);",
+                                  quote_literal(configs$sketches[[k]]))
+all_pairs <- "duckhts_somalier_relatedness_all_pairs('sketches', max_sites := 1000000)"
+pair_reduce_statement <- function(output) sprintf(paste(
+  "COPY (SELECT count(*) AS output_rows, sum(jointly_called) AS checksum, sum(ibs0) AS ibs0,",
+  "sum(ibs2) AS ibs2, sum(relatedness) AS relatedness FROM %s) TO %s (HEADER);"),
+  all_pairs, quote_literal(output))
+pair_copy_statement <- function(output) sprintf(
+  "COPY (SELECT * FROM %s) TO %s (FORMAT parquet);", all_pairs, quote_literal(output))
+pair_scalar_statement <- function(output) sprintf(paste(
+  "COPY (SELECT count(*) AS output_rows, sum(pair.jointly_called) AS checksum, sum(pair.ibs0) AS ibs0,",
+  "sum(pair.ibs2) AS ibs2, sum(pair.relatedness) AS relatedness",
+  "FROM (SELECT duckhts_somalier_relatedness(a.sketch, b.sketch, 1000000) AS pair",
+  "FROM sketches AS a JOIN sketches AS b ON a.sketch.sample_id < b.sketch.sample_id)) TO %s (HEADER);"),
+  quote_literal(output))
+
+# Sketches for the pair stages, staged untimed with the measured statement.
+for (k in seq_len(nrow(configs))) {
+  run_untimed(c(sketch_setup(k), sketch_statement(configs$sketches[[k]])), load_extension = TRUE)
+}
+configs$evidence_bytes <- file.size(configs$evidence)
+configs$sketch_bytes <- file.size(configs$sketches)
+
+# Ceilings in MiB: overhead + 3 x the live state declared above.
+words <- function(k) ceiling(configs$sites[[k]] / 64)
+sketch_size <- function(k) 3 * words(k) * 8 + 256
+live_bytes <- function(stage, k, threads) {
+  n <- configs$samples[[k]]
+  pairs <- configs$pairs[[k]]
+  pair_state <- 6 * n * sketch_size(k) + min(pairs, threads * 2048) * 2 * sketch_size(k) +
+    threads * 4 * 2048 * 30 * 16
+  switch(stage,
+    sketches = configs$sites[[k]] * 600 + (threads + 1) * n * 4 * words(k) * 8 +
+      2 * n * sketch_size(k) + threads * 122880 * 120,
+    pairs_reduce = pair_state,
+    pairs_scalar = pair_state,
+    pairs_copy = pair_state + min(pairs, threads * 122880) * 400)
+}
+
+empty_input <- file.path(staging, "empty.parquet")
+run_untimed(sprintf("COPY (SELECT 1 AS n) TO %s (FORMAT parquet);", quote_literal(empty_input)))
+thread_counts <- c(1L, 4L)
+empty_runs <- do.call(rbind, lapply(thread_counts, function(threads) {
+  do.call(rbind, lapply(seq_len(3L), function(run) {
+    output <- tempfile("somalier-cohort-empty-", fileext = ".parquet")
+    on.exit(unlink(output), add = TRUE)
+    data.frame(threads = threads, run_fresh(character(0), sprintf(
+      "COPY (SELECT * FROM read_parquet(%s)) TO %s (FORMAT parquet);",
+      quote_literal(empty_input), quote_literal(output)), threads))
+  }))
+}))
+overhead_mib <- vapply(thread_counts, function(threads) {
+  median(empty_runs$max_rss_kib[empty_runs$threads == threads]) / 1024
+}, numeric(1L))
+names(overhead_mib) <- thread_counts
+budget_mib <- function(stage, k, threads) {
+  overhead_mib[[as.character(threads)]] + 3 * live_bytes(stage, k, threads) / 2^20
+}
+
+# One observation: run the stage, then read its output back in a second,
+# untimed process.
+observe <- function(stage, k, threads) {
+  reduced <- stage %in% c("pairs_reduce", "pairs_scalar")
+  output <- tempfile("somalier-cohort-output-", fileext = if (reduced) ".csv" else ".parquet")
+  on.exit(unlink(output), add = TRUE)
+  observed <- switch(stage,
+    sketches = run_fresh(sketch_setup(k), sketch_statement(output), threads),
+    pairs_reduce = run_fresh(pair_setup(k), pair_reduce_statement(output), threads),
+    pairs_scalar = run_fresh(pair_setup(k), pair_scalar_statement(output), threads),
+    pairs_copy = run_fresh(pair_setup(k), pair_copy_statement(output), threads))
+  check <- switch(stage,
+    sketches = run_untimed(sprintf(
+      "SELECT count(*) AS output_rows, sum(sketch.site_count) AS checksum FROM read_parquet(%s);",
+      quote_literal(output))),
+    pairs_reduce = ,
+    pairs_scalar = utils::read.csv(output, colClasses = "character")[c("output_rows", "checksum")],
+    pairs_copy = run_untimed(sprintf(
+      "SELECT count(*) AS output_rows, sum(jointly_called) AS checksum FROM read_parquet(%s);",
+      quote_literal(output))))
+  data.frame(stage = stage, samples = configs$samples[[k]], sites = configs$sites[[k]],
+             pairs = configs$pairs[[k]], input_rows = if (stage == "sketches") configs$rows[[k]] else configs$samples[[k]],
+             output_rows = as.numeric(check$output_rows), checksum = as.numeric(check$checksum),
+             output_bytes = file.size(output), threads = threads,
+             budget_mib = budget_mib(stage, k, threads), observed)
+}
+
+stages <- c("sketches", "pairs_reduce", "pairs_copy", "pairs_scalar")
+observations <- list()
+for (repetition in 1:3) {
+  config_order <- if (repetition %% 2L == 1L) seq_len(nrow(configs)) else rev(seq_len(nrow(configs)))
+  for (threads in thread_counts) {
+    for (stage in stages) {
+      for (k in config_order) {
+        observations[[length(observations) + 1L]] <- data.frame(repetition = repetition, observe(stage, k, threads))
+      }
+    }
+  }
+}
+config_runs <- do.call(rbind, observations)
+load_after <- host_load()
+
+# Output checks: every row is present and the two pair stages agree.
+expected_rows <- ifelse(config_runs$stage == "sketches", config_runs$samples, config_runs$pairs)
+stopifnot(all(config_runs$output_rows == expected_rows), all(config_runs$checksum > 0),
+          all(config_runs$checksum[config_runs$stage == "sketches"] ==
+              (as.numeric(config_runs$samples) * config_runs$sites)[config_runs$stage == "sketches"]))
+pair_checksums <- aggregate(checksum ~ samples + sites, config_runs[config_runs$stage != "sketches", ],
+                            function(x) length(unique(x)))
+stopifnot(all(pair_checksums$checksum == 1L))
+
+# Each series reads the configurations it names.
+runs <- do.call(rbind, lapply(seq_len(nrow(series)), function(j) {
+  cell <- config_runs[config_runs$samples == series$samples[[j]] & config_runs$sites == series$sites[[j]], ]
+  data.frame(dimension = series$dimension[[j]], scale = series$scale[[j]], cell)
+}))
+write.csv(runs, "benchmarks/benchmark_somalier_cohort_scaling_runs.csv", row.names = FALSE)
+if (any(config_runs$peak_temp_bytes != 0)) stop("observations spilled", call. = FALSE)
+over_budget <- config_runs[config_runs$max_rss_kib / 1024 > config_runs$budget_mib, ]
+if (nrow(over_budget)) {
+  print(over_budget[c("stage", "samples", "sites", "threads", "max_rss_kib", "budget_mib")])
+  stop("observations exceed their declared memory budget", call. = FALSE)
+}
+
+cells <- split(runs, list(runs$stage, runs$dimension, runs$scale, runs$threads), drop = TRUE)
+summary <- do.call(rbind, lapply(cells, function(cell) {
+  data.frame(stage = cell$stage[[1L]], dimension = cell$dimension[[1L]], scale = cell$scale[[1L]],
+             threads = cell$threads[[1L]], samples = cell$samples[[1L]], sites = cell$sites[[1L]],
+             input_rows = cell$input_rows[[1L]], output_rows = cell$output_rows[[1L]],
+             output_kib = round(median(cell$output_bytes) / 1024, 1),
+             median_seconds = median(cell$seconds),
+             min_seconds = min(cell$seconds), max_seconds = max(cell$seconds),
+             median_rss_mib = round(median(cell$max_rss_kib) / 1024, 1),
+             max_rss_mib = round(max(cell$max_rss_kib) / 1024, 1),
+             peak_buffer_mib = round(max(cell$peak_buffer_bytes) / 2^20, 1),
+             spill_bytes = max(cell$peak_temp_bytes),
+             budget_mib = round(cell$budget_mib[[1L]], 1),
+             within_budget = max(cell$max_rss_kib) / 1024 <= cell$budget_mib[[1L]],
+             stringsAsFactors = FALSE)
+}))
+summary$stage <- factor(summary$stage, levels = stages)
+summary$dimension <- factor(summary$dimension, levels = c("samples", "sites", "joint", "real"))
+summary <- summary[order(summary$stage, summary$dimension, summary$threads, summary$scale), ]
+rownames(summary) <- NULL
+stage_summary <- function(stage) summary[summary$stage == stage, setdiff(names(summary), c("stage", "work"))]
+
+# Work per stage: evidence rows for sketches, pairs x sites for the pair stages.
+summary$work <- ifelse(summary$stage == "sketches", as.numeric(summary$samples) * summary$sites,
+                       summary$samples * (summary$samples - 1) / 2 * summary$sites)
+doubling <- summary[summary$dimension != "real", ]
+exponents <- do.call(rbind, lapply(
+  split(doubling, list(doubling$stage, doubling$dimension, doubling$threads), drop = TRUE), function(s) {
+    s <- s[order(s$scale), ]
+    data.frame(stage = s$stage[[1L]], dimension = s$dimension[[1L]], threads = s$threads[[1L]],
+               time_exponent_2x = log(s$median_seconds[[2L]] / s$median_seconds[[1L]]) / log(s$work[[2L]] / s$work[[1L]]),
+               time_exponent_4x = log(s$median_seconds[[3L]] / s$median_seconds[[2L]]) / log(s$work[[3L]] / s$work[[2L]]),
+               rss_ratio_2x = s$median_rss_mib[[2L]] / s$median_rss_mib[[1L]],
+               rss_ratio_4x = s$median_rss_mib[[3L]] / s$median_rss_mib[[1L]],
+               one_x_seconds = s$median_seconds[[1L]], stringsAsFactors = FALSE)
+  }))
+exponents <- exponents[order(exponents$stage, exponents$dimension, exponents$threads), ]
+rownames(exponents) <- NULL
+one_thread <- exponents$threads == 1L
+exponents$one_thread_1x_seconds <- exponents$one_x_seconds[one_thread][
+  match(paste(exponents$stage, exponents$dimension),
+        paste(exponents$stage[one_thread], exponents$dimension[one_thread]))]
+exponents$timing_verdict <- ifelse(
+  exponents$one_thread_1x_seconds < 5, "none: 1x under 5 s",
+  ifelse(pmax(exponents$time_exponent_2x, exponents$time_exponent_4x) > 1.25, "investigate", "within 1.25"))
+exponents$exponent_above_1.25 <- pmax(exponents$time_exponent_2x, exponents$time_exponent_4x) > 1.25
+exponents$one_x_seconds <- NULL
+cell_of <- function(stage, dimension, scale, threads) {
+  cell <- summary[summary$stage == stage & summary$dimension == dimension & summary$scale == scale &
+                  summary$threads == threads, ]
+  stopifnot(nrow(cell) == 1L)
+  cell
+}
+largest_fraction <- max(summary$max_rss_mib / summary$budget_mib)
+unlink(staging, recursive = TRUE)
+```
+
+Source revision: `r revision`; `src` tree `r src_tree`. DuckDB runtime: `r duckdb_runtime` (CLI). Extension SHA-256: `r strsplit(system2("sha256sum", extension, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`. CPU affinity: `r cpu_affinity`. Host load before the run: `r load_before`; after: `r load_after`. Empty-run overhead: `r round(overhead_mib[["1"]], 1)` MiB at one thread and `r round(overhead_mib[["4"]], 1)` MiB at four. Every observation is in [`benchmark_somalier_cohort_scaling_runs.csv`](benchmark_somalier_cohort_scaling_runs.csv).
+
+## Inputs as measured
+
+`evidence_kib` and `sketch_kib` are the Parquet file sizes. The decoded evidence is about 120 bytes per row.
+
+```{r inputs, echo=FALSE}
+inputs <- data.frame(source = configs$source, samples = configs$samples, sites = configs$sites,
+                     evidence_rows = configs$rows, pairs = configs$pairs,
+                     evidence_kib = round(configs$evidence_bytes / 1024, 1),
+                     sketch_kib = round(configs$sketch_bytes / 1024, 1))
+knitr::kable(inputs, format.args = list(big.mark = ","))
+```
+
+## `sketches`: count evidence to sketches, written to Parquet
+
+```{r sketches, echo=FALSE}
+knitr::kable(stage_summary("sketches"), digits = 3)
+```
+
+## `pairs_reduce`: all pairs, reduced
+
+```{r pairs-reduce, echo=FALSE}
+knitr::kable(stage_summary("pairs_reduce"), digits = 3)
+```
+
+## `pairs_copy`: all pairs, written to Parquet
+
+```{r pairs-copy, echo=FALSE}
+knitr::kable(stage_summary("pairs_copy"), digits = 3)
+```
+
+## `pairs_scalar`: all pairs through the per-pair function, reduced
+
+```{r pairs-scalar, echo=FALSE}
+knitr::kable(stage_summary("pairs_scalar"), digits = 3)
+```
+
+## Before and after
+
+`before` is the `pairs_reduce` stage of revision `a5f3b47a`, which ran the
+per-pair function over a self-join; its observations are in
+[`benchmark_somalier_cohort_scaling_runs_a5f3b47a.csv`](benchmark_somalier_cohort_scaling_runs_a5f3b47a.csv).
+`per_pair_function` and `all_pairs_macro` are the `pairs_scalar` and
+`pairs_reduce` stages of this revision. All three produce the same rows from
+the same sketches, with the same statement shape, host, CPU set and DuckDB
+CLI. The two runs were made at different times on a shared host, so the
+ratios carry that noise. Times are median seconds of three fresh processes.
+
+```{r before-after, echo=FALSE}
+before_runs <- utils::read.csv("benchmarks/benchmark_somalier_cohort_scaling_runs_a5f3b47a.csv")
+before_runs <- before_runs[before_runs$stage == "pairs_reduce" & before_runs$dimension != "real", ]
+median_of <- function(data, stage) {
+  data <- data[data$stage == stage, ]
+  stats::aggregate(seconds ~ samples + sites + pairs + threads, data, stats::median)
+}
+comparison <- merge(median_of(unique(before_runs[setdiff(names(before_runs), c("dimension", "scale"))]), "pairs_reduce"),
+                    merge(median_of(config_runs, "pairs_scalar"), median_of(config_runs, "pairs_reduce"),
+                          by = c("samples", "sites", "pairs", "threads"),
+                          suffixes = c("_per_pair_function", "_all_pairs_macro")),
+                    by = c("samples", "sites", "pairs", "threads"))
+names(comparison) <- sub("^seconds$", "before", sub("^seconds_", "", names(comparison)))
+comparison$macro_speedup <- comparison$before / comparison$all_pairs_macro
+comparison <- comparison[order(comparison$threads, comparison$sites, comparison$samples), ]
+rownames(comparison) <- NULL
+stopifnot(nrow(comparison) == 2L * sum(configs$source == "synthetic"))
+largest <- comparison[comparison$samples == 500L & comparison$sites == 17000L & comparison$threads == 1L, ]
+knitr::kable(comparison, digits = 3, format.args = list(big.mark = ","))
+```
+
+## Time exponents and memory ratios
+
+Time exponents per doubling, against the work of each stage, and peak-RSS ratios to 1×:
+
+```{r exponents, echo=FALSE}
+knitr::kable(exponents[setdiff(names(exponents), "one_thread_1x_seconds")], digits = 3)
+```
+
+## Findings
+
+Every observation is within its declared budget and none spills; the render
+enforces both. The largest observation uses
+`r round(100 * largest_fraction)`% of its ceiling.
+
+The largest all-pairs cell (500 samples, 17,000 sites, 124,750 pairs) takes
+`r round(cell_of("pairs_copy", "samples", 4L, 1L)$median_seconds, 2)` s on one thread and
+`r round(cell_of("pairs_copy", "samples", 4L, 4L)$median_seconds, 2)` s on four when written to Parquet, at
+`r cell_of("pairs_copy", "samples", 4L, 1L)$median_rss_mib` and
+`r cell_of("pairs_copy", "samples", 4L, 4L)$median_rss_mib` MiB peak RSS. The Parquet output is
+`r cell_of("pairs_copy", "samples", 4L, 1L)$output_kib` KiB.
+
+On the real counts, one thread builds three sketches of 108,757 sites in
+`r round(cell_of("sketches", "real", 1L, 1L)$median_seconds, 3)` s at
+`r cell_of("sketches", "real", 1L, 1L)$median_rss_mib` MiB peak RSS, and writes the three pairs in
+`r round(cell_of("pairs_copy", "real", 1L, 1L)$median_seconds, 3)` s at
+`r cell_of("pairs_copy", "real", 1L, 1L)$median_rss_mib` MiB.
+
+For 124,750 pairs of 17,000 sites on one thread, the per-pair function took
+`r round(largest$before, 2)` s at revision `a5f3b47a` and takes
+`r round(largest$per_pair_function, 2)` s now; the all-pairs macro takes
+`r round(largest$all_pairs_macro, 2)` s, `r round(largest$macro_speedup, 1)` times faster than before.
+The pair stages still grow with pairs times sites, which is the size of the
+comparison itself. They do not use more than one thread:
+`r round(cell_of("pairs_reduce", "samples", 4L, 1L)$median_seconds, 2)` s on one thread and
+`r round(cell_of("pairs_reduce", "samples", 4L, 4L)$median_seconds, 2)` s on four. DuckDB splits a
+scan by row groups, and a relation of a few hundred sketches is one row group.
+
+`r sum(exponents$timing_verdict == "none: 1x under 5 s")` of the `r nrow(exponents)` series have a one-thread 1× run under 5 seconds and get a memory verdict only.
+`r sum(exponents$exponent_above_1.25)` series have a time exponent above 1.25 at either doubling.
+
+## Limitations
+
+- The host was shared with other work during the run. The load averages are
+  recorded above. Times can be inflated and their spread widened; peak RSS,
+  buffer and spill values do not depend on the load.
+- The series are synthetic. The real workload has three samples and three
+  pairs, so no real cohort is measured.
+- The operating scale this report supports is what it measures: up to 500
+  samples, 68,000 synthetic sites, 108,757 real sites and 124,750 pairs.
+- Evidence is ordered by sample. Evidence that interleaves samples is not
+  measured.
+- The pair comparison runs in one thread, and the number of output pairs is
+  not capped.
+- Count extraction, sketch verification, CHARR, matched contamination, the R
+  wrappers and the reader `*_convert_parquet_sql` COPY statements are not
+  measured here.
+- The DuckDB CLI is `r duckdb_runtime`; the R package and other hosts can
+  differ.
