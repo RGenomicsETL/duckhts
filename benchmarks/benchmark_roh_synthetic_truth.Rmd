@@ -1,0 +1,201 @@
+---
+title: "ROH arms against a planted truth"
+output:
+  github_document:
+    html_preview: false
+---
+
+```{r, include=FALSE}
+results <- "results/roh-synthetic"
+read_result <- function(name) utils::read.csv(file.path(results, name), stringsAsFactors = FALSE)
+fmt <- function(x) format(x, big.mark = ",", scientific = FALSE, trim = TRUE)
+percent <- function(x) sprintf("%.2f%%", 100 * x)
+```
+
+## Question
+
+`benchmark_roh_ancestry.md` asks whether ancestry-tuned allele frequencies (`duckhts_roh_ancestry`) call fewer unsupported runs of homozygosity (ROH) than pooled or single-population frequencies (`duckhts_roh_af_table`). Its truth is a heuristic with 23 intervals in 18 children, so its criterion compares means that differ by one to three calls (https://github.com/RGenomicsETL/duckhts/issues/329).
+
+This report asks the same question against a truth that is known exactly. Autozygous segments are planted into the 377 trio children of chr20, and each arm is scored on the planted bases.
+
+## Evaluation protocol
+
+This section was written and committed before any arm ran on the synthetic children. Nothing in it was changed after the arm results were known.
+
+### Planting
+
+The source is registry artifact `roh_ancestry_chr20_children_bcf`: 377 children, 849,143 biallelic SNV records, phased genotypes. Every child receives three planted segments, one each of 5 Mb, 2 Mb and 1 Mb, drawn in that order. That is 1,131 segments and 8 Mb per child.
+
+- A start is uniform over the positions that keep the segment between the first and the last record of the BCF. The generator is R's Mersenne-Twister with rejection sampling, seed `20261004`. The children are drawn in BCF sample order.
+- A draw is rejected when the segment overlaps a 100 kb window that holds fewer than 100 records, or when it lies within 1 Mb of a segment already planted in the same child. The record count of a window comes from the source BCF only. This rule keeps segments out of the windows next to the centromere and out of the last window.
+- Inside a planted segment, haplotype 1 is copied onto haplotype 2: every genotype becomes homozygous for the allele of haplotype 1. Outside, the genotypes are the source's. Sites, INFO and sample names are copied. INFO is not recomputed.
+
+The planted intervals are the truth. They depend on the seed, the sample order and the record positions. They do not depend on any ROH call.
+
+### Call sets
+
+An arm's calls are the segments its macro returns, with the arguments of `benchmarks/roh_ancestry/run_chr20_arm.R`. The primary call set holds the calls of at least 500 kb. That is half the shortest planted length, so a call that trims the ends of a 1 Mb segment still counts. The same measures are also reported for all calls and for the calls of at least 1 Mb. They are not part of the criterion.
+
+### Measures
+
+Each measure is a ratio of base counts, summed over the children of one population.
+
+- **Sensitivity** is the planted bases that calls cover, divided by the planted bases. It is also reported for each planted length.
+- **False discovery** is the unsupported called bases divided by the called bases.
+
+A called base outside the planted segments is not always false, because the source children have real ROH. Each called base therefore falls into exactly one of four categories, tested in this order:
+
+1. *planted*: inside a planted segment of the child;
+2. *source low heterozygosity*: in a 100 kb window where the source child has at least one called genotype and at most one heterozygous call. This is the window rule of the heuristic truth of `benchmark_roh_ancestry.md`, without its 1 Mb run length. The windows are registry artifact `roh_ancestry_chr20_truth_windows`;
+3. *no record*: in a 100 kb window without any record;
+4. *unsupported*: every other base.
+
+Only the fourth category counts as false. The fraction of called bases outside the planted segments, whatever their category, is reported next to it.
+
+### Comparison
+
+The arms are ancestry-tuned, pooled (`INFO/AF`) and single-population frequencies. The single-population arm uses AFR for ACB, ASW, YRI and ESN, AMR for CLM, MXL, PEL and PUR, EUR for CEU and EAS for CHS.
+
+Within one population, the ancestry-tuned arm is compared with one other arm by two differences, ancestry-tuned minus comparator: the sensitivity difference and the false-discovery difference. Each difference has a 95% percentile interval from a paired bootstrap over the children of the population: 2,000 resamples, seed `20261005`, the same resampled children for both arms.
+
+- Ancestry-tuned is **better** when the interval of the false-discovery difference lies below zero and the lower end of the sensitivity-difference interval is above -0.01.
+- Ancestry-tuned is **not worse** when the upper end of the false-discovery-difference interval is below +0.01 and the lower end of the sensitivity-difference interval is above -0.01.
+
+The criterion holds when both of these are true:
+
+- in each admixed population (ACB, ASW, CLM, MXL, PEL, PUR), ancestry-tuned is better than the pooled arm and better than the single-population arm;
+- in each control population (YRI, ESN, CEU, CHS), ancestry-tuned is not worse than the single-population arm.
+
+A population where an arm has no call in the primary call set has no false-discovery ratio. Its check is not evaluable and does not count as a pass. The comparison of the control populations with the pooled arm is reported and is not part of the criterion.
+
+### Assumption on the ancestry proportions
+
+The ancestry-tuned arm uses the proportions of registry artifact `roh_ancestry_chr20_q`. They were estimated from the source children. Planting changes genotypes only inside the segments, 8 Mb of 64.4 Mb per child, and replaces a heterozygous genotype by a homozygous one for an allele the child carries. The evaluation assumes that the proportions of a synthetic child equal those of its source child. They were not estimated again.
+
+## Data identity
+
+```{r, echo=FALSE}
+registry <- duckhtsbench::duckhts_bench_registry()
+identity <- registry[registry$id %in% c("roh_ancestry_chr20_children_bcf",
+  "roh_synthetic_chr20_children_bcf", "roh_synthetic_chr20_truth",
+  "roh_ancestry_chr20_truth_windows", "roh_ancestry_chr20_af_sites",
+  "roh_ancestry_chr20_reference_long", "roh_ancestry_chr20_q"),
+  c("id", "locator", "transform", "supplier_identity")]
+identity$supplier_identity <- gsub(";", "; ", identity$supplier_identity, fixed = TRUE)
+identity$locator <- gsub(";", "; ", identity$locator, fixed = TRUE)
+knitr::kable(identity, row.names = FALSE)
+```
+
+`benchmarks/roh_synthetic_stage.R` stages the synthetic children and the truth from the registry and refuses to publish them when their record count, sample count, record digest or truth digest differs from the registered identity. The record digest is the SHA-256 of the record lines that `bcftools view -H` prints; the truth digest is the SHA-256 of the truth CSV. `make test-roh-synthetic-staging` tests the staging without network access.
+
+## Planted truth
+
+```{r, echo=FALSE}
+planted <- read_result("planted_truth_by_population.csv")
+verification <- read_result("planting_verification.csv")
+knitr::kable(planted, format.args = list(big.mark = ","), row.names = FALSE)
+```
+
+The truth holds `r fmt(sum(planted$segments))` segments in `r fmt(sum(planted$children))` children and `r fmt(sum(planted$planted_bp))` planted bases. The segments cover `r fmt(sum(planted$records))` genotypes, of which `r fmt(sum(planted$source_heterozygous))` were heterozygous in the source and are homozygous in the synthetic children. The full truth table is [`planted_truth.csv`](results/roh-synthetic/planted_truth.csv).
+
+`benchmarks/roh_synthetic/verify_planting.R` compares the staged BCF with its source through `read_bcf`, apart from the staging code. All `r fmt(sum(verification$genotypes[c(1L, nrow(verification))]))` genotypes of each BCF are in one group per child and segment, or in the child's group outside the segments.
+
+```{r, echo=FALSE}
+knitr::kable(verification, format.args = list(big.mark = ","), row.names = FALSE)
+```
+
+## Results
+
+```{r, include=FALSE}
+summary <- read_result("population_arm_summary.csv")
+arm_label <- c(pooled = "Pooled", single_population = "Single population",
+               ancestry_tuned = "Ancestry tuned")
+summary_table <- function(minimum) {
+  x <- summary[summary$min_call_bp == minimum, , drop = FALSE]
+  data.frame(Population = x$Population, Arm = arm_label[x$arm], Children = x$children,
+    Sensitivity = percent(x$sensitivity), `5 Mb` = percent(x$sensitivity_5mb),
+    `2 Mb` = percent(x$sensitivity_2mb), `1 Mb` = percent(x$sensitivity_1mb),
+    `False discovery` = percent(x$false_discovery),
+    `Outside planted` = percent(x$outside_planted),
+    `Called bp / child` = fmt(round(x$called_bp_per_child)),
+    `Unsupported bp / child` = fmt(round(x$unsupported_bp_per_child)),
+    `Low-heterozygosity bp / child` = fmt(round(x$low_heterozygosity_bp_per_child)),
+    `No-record bp / child` = fmt(round(x$no_record_bp_per_child)),
+    check.names = FALSE, stringsAsFactors = FALSE)
+}
+```
+
+Each arm ran once, in a fresh R process with four DuckDB threads and a 12 GB memory limit, on the extension built from this tree. The columns `5 Mb`, `2 Mb` and `1 Mb` are the sensitivity for the planted segments of that length. The per-child values are in [`child_metrics.csv`](results/roh-synthetic/child_metrics.csv).
+
+### Primary call set: calls of at least 500 kb
+
+```{r, echo=FALSE}
+knitr::kable(summary_table(500000), row.names = FALSE)
+```
+
+### All calls
+
+```{r, echo=FALSE}
+knitr::kable(summary_table(0), row.names = FALSE)
+```
+
+### Calls of at least 1 Mb
+
+```{r, echo=FALSE}
+knitr::kable(summary_table(1000000), row.names = FALSE)
+```
+
+## Criterion
+
+```{r, include=FALSE}
+criterion <- read_result("criterion_by_population.csv")
+required <- criterion[criterion$required != "none", , drop = FALSE]
+verdict <- if (any(required$criterion_pass %in% FALSE)) {
+  "did not hold"
+} else if (anyNA(required$criterion_pass)) {
+  "could not be evaluated in every population"
+} else {
+  "held"
+}
+signed <- function(x) sprintf("%+.4f", x)
+criterion_table <- data.frame(
+  Population = criterion$Population, Group = criterion$group,
+  Comparator = arm_label[criterion$comparison],
+  `Sensitivity difference` = sprintf("%s [%s, %s]", signed(criterion$sensitivity_difference),
+    signed(criterion$sensitivity_difference_low), signed(criterion$sensitivity_difference_high)),
+  `False-discovery difference` = sprintf("%s [%s, %s]",
+    signed(criterion$false_discovery_difference),
+    signed(criterion$false_discovery_difference_low),
+    signed(criterion$false_discovery_difference_high)),
+  Better = criterion$better, `Not worse` = criterion$not_worse,
+  Required = criterion$required, Pass = criterion$criterion_pass,
+  check.names = FALSE, stringsAsFactors = FALSE)
+```
+
+The criterion **`r verdict`**: `r sum(required$criterion_pass %in% TRUE)` of the `r nrow(required)` required checks pass, `r sum(required$criterion_pass %in% FALSE)` fail and `r sum(is.na(required$criterion_pass))` are not evaluable. Differences are ancestry-tuned minus comparator, as fractions, with their 95% paired-bootstrap intervals. The values are in [`criterion_by_population.csv`](results/roh-synthetic/criterion_by_population.csv).
+
+```{r, echo=FALSE}
+knitr::kable(criterion_table, row.names = FALSE)
+```
+
+## Limitations
+
+- A planted segment has no genotype error: every genotype in it is exactly homozygous. A real autozygous segment carries a few heterozygous calls from genotype error, so the sensitivities here are upper limits for real segments of the same lengths.
+- The planted haplotype is a real haplotype of the child, so its allele frequencies are those of its population. Copying it makes a segment that is autozygous at zero generations; real autozygous segments of 1 Mb to 5 Mb are older and have had time for mutation and gene conversion.
+- The lengths are 1 Mb, 2 Mb and 5 Mb. The report says nothing about shorter segments.
+- The category *source low heterozygosity* is a heuristic on a fixed 100 kb grid. It uses no allele frequency, so it also excuses calls in windows that are homozygous for common haplotypes. A real ROH that covers only part of a window with two or more heterozygous calls counts as unsupported. The false-discovery ratio is therefore not an absolute error rate; the comparison between arms uses the same windows for every arm.
+- The ancestry proportions are those of the source children (see the protocol).
+- This is chr20 only, 377 children, one seed. A second seed or other chromosomes were not run.
+- Every arm ran once. `benchmark_roh_ancestry.md` shows three identical repetitions of every arm on the source children; repeatability on the synthetic children was not measured again.
+- The arms' site set is the 108,757 sites of `roh_ancestry_chr20_af_sites`, while the planting changes all 849,143 records. The truth is defined on bases, so it does not depend on the site set.
+- No timing or memory claim is made. `benchmark_roh_scaling.md` holds the scaling evidence of the macros.
+
+## Reproducing the evaluation
+
+The drivers run from the repository root and resolve every input through `r/duckhtsbench`. They load the extension from `build/release/`.
+
+1. `Rscript benchmarks/roh_synthetic/stage.R` stages the synthetic children and the truth and checks their registered identity.
+2. `Rscript benchmarks/roh_synthetic/verify_planting.R` checks the staged children against the source.
+3. `Rscript benchmarks/roh_synthetic/run_arm.R ARM` for `pooled`, `single_AFR`, `single_AMR`, `single_EUR`, `single_EAS` and `ancestry`.
+4. `Rscript benchmarks/roh_synthetic/summarise.R` writes the result tables.
+5. Render this report.
