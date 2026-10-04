@@ -3,9 +3,9 @@
   "signed": false,
   "source": {
     "repository": "RGenomicsETL/duckhts",
-    "run": 37214009137,
-    "commit": "111c94d97b69ecbb62ee0f97e54ce88423e53bd9",
-    "url": "https://github.com/RGenomicsETL/duckhts/actions/runs/37214009137"
+    "run": 37216716283,
+    "commit": "bba5b238e47c9c03f693768d95e4eecaea6f536a",
+    "url": "https://github.com/RGenomicsETL/duckhts/actions/runs/37216716283"
   },
   "platforms": {
     "wasm_mvp": {
