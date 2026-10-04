@@ -9,9 +9,10 @@
  *   - max_site_bytes caps the buffers of every live group in the process, so
  *     concurrent decodes share it.
  * Both limits raise query errors. Finalize sorts a group by position, hands it
- * to DuckDB as one BLOB (see roh_sites.h) and frees the buffer, so a group is
- * never held twice. Sorting a group that arrived out of order needs a scratch
- * copy of that one group; it is not counted against max_site_bytes.
+ * to DuckDB as one BLOB (see roh_sites.h) and frees the buffer. Every native
+ * buffer counts against max_site_bytes: the partial groups of each thread, the
+ * copy DuckDB's combine step makes of them, and the scratch copy that sorting
+ * a group that arrived out of order needs.
  *
  * The sort is stable: sites of one position keep their arrival order, so the
  * first record of a repeated position stays first, as bcftools sees the file.
@@ -376,15 +377,31 @@ static uint64_t merge_runs(const unsigned char *from, unsigned char *to, uint64_
 }
 
 /* Sorts the records of a state by position, keeping the arrival order of equal
- * positions. Returns false when the scratch copy cannot be allocated. */
-static bool sort_sites(roh_sites_state_t *state) {
+ * positions. The scratch copy counts against max_site_bytes. Returns false
+ * with `error` written when it exceeds the limit or cannot be allocated. */
+static bool sort_sites(roh_sites_state_t *state, char *error) {
     uint64_t size = duckhts_roh_site_size(state->kind);
     unsigned char *records = records_of(state->buffer);
     if (run_end(records, 0, state->count, size) == state->count) return true;
 
     uint64_t scratch_bytes = buffer_bytes(state->kind, state->count);
+    uint64_t held = atomic_fetch_add(&roh_site_bytes_held, scratch_bytes) + scratch_bytes;
+    if (held > state->max_site_bytes) {
+        atomic_fetch_sub(&roh_site_bytes_held, scratch_bytes);
+        snprintf(error, SITES_ERRLEN,
+                 "sorting one sample and chromosome would bring the site buffers to %llu bytes, "
+                 "more than max_site_bytes = %llu; decode fewer samples per query or raise "
+                 "max_site_bytes",
+                 (unsigned long long)held, (unsigned long long)state->max_site_bytes);
+        return false;
+    }
     unsigned char *scratch = scratch_bytes <= SIZE_MAX ? malloc((size_t)scratch_bytes) : NULL;
-    if (scratch == NULL) return false;
+    if (scratch == NULL) {
+        atomic_fetch_sub(&roh_site_bytes_held, scratch_bytes);
+        snprintf(error, SITES_ERRLEN,
+                 "out of memory while sorting the sites of one sample and chromosome");
+        return false;
+    }
     unsigned char *from = records;
     unsigned char *to = records_of(scratch);
     uint64_t runs;
@@ -398,10 +415,11 @@ static bool sort_sites(roh_sites_state_t *state) {
     /* `from` now holds the sorted records. Keep the buffer that owns them. */
     if (from == records) {
         free(scratch);
+        atomic_fetch_sub(&roh_site_bytes_held, scratch_bytes);
         return true;
     }
-    uint64_t old_bytes = buffer_bytes(state->kind, state->capacity);
-    atomic_fetch_sub(&roh_site_bytes_held, old_bytes - scratch_bytes);
+    /* The scratch copy is already counted; the old buffer goes. */
+    atomic_fetch_sub(&roh_site_bytes_held, buffer_bytes(state->kind, state->capacity));
     free(state->buffer);
     state->buffer = scratch;
     state->capacity = state->count;
@@ -431,8 +449,9 @@ static void sites_finalize(duckdb_function_info info, duckdb_aggregate_state *so
             duckdb_validity_set_row_invalid(validity, row);
             continue;
         }
-        if (!sort_sites(state)) {
-            sites_error(info, "out of memory while sorting the sites of one sample and chromosome");
+        char error[SITES_ERRLEN];
+        if (!sort_sites(state, error)) {
+            sites_error(info, error);
             return;
         }
         duckhts_roh_sites_header_t header = {.kind = (uint8_t)state->kind};

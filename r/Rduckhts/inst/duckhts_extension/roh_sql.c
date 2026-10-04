@@ -238,6 +238,11 @@ static const char ancestry_validations[] =
     "WHEN EXISTS (SELECT 1 FROM __dht_prop_rows GROUP BY smp "
     "HAVING NOT (sum(proportion) > 0 AND sum(proportion) <= 1.0 + 1e-6)) "
     "THEN error('ancestry proportions must sum to more than 0 and at most 1 per sample') "
+    /* The selected samples come from the header, so this does not depend on
+     * a call matching a reference site. */
+    "WHEN EXISTS (SELECT 1 FROM read_bcf_samples(path, samples := samples) AS s "
+    "WHERE s.sample_name NOT IN (SELECT smp FROM __dht_prop_rows WHERE smp IS NOT NULL)) "
+    "THEN error('every VCF sample requires ancestry proportions') "
     "ELSE true END AS valid), ";
 
 /* Per-sample frequencies of the called sites: the proportion-weighted sum of
@@ -250,8 +255,7 @@ static const char ancestry_frequencies[] =
     "FROM (SELECT *, sum(proportion) OVER (PARTITION BY smp) AS total FROM __dht_prop_rows) AS p "
     "JOIN __dht_groups AS g ON g.group_id = p.group_id GROUP BY p.smp), "
     "__dht_sites AS NOT MATERIALIZED (SELECT c.chrom, c.pos, c.smp, "
-    "CASE WHEN p.proportions IS NULL THEN error('every VCF sample requires ancestry proportions') "
-    "WHEN NOT g.valid THEN error('reference and proportions group sets must match exactly') "
+    "CASE WHEN NOT g.valid THEN error('reference and proportions group sets must match exactly') "
     "WHEN NOT r.reversed THEN greatest(af_clamp, least(1.0 - af_clamp, "
     "list_inner_product(r.frequencies, p.proportions))) "
     "ELSE greatest(af_clamp, least(1.0 - af_clamp, "
@@ -261,7 +265,7 @@ static const char ancestry_frequencies[] =
     "FROM __dht_calls AS c CROSS JOIN __dht_group_guard AS g "
     "JOIN __dht_ref_oriented AS r ON c.chrom = r.chrom AND c.pos = r.pos "
     "AND c.ref = r.ref AND c.alt = r.alt "
-    "LEFT JOIN __dht_props AS p ON p.smp = c.smp), ";
+    "JOIN __dht_props AS p ON p.smp = c.smp), ";
 
 /* Read counts from a caller relation: one row per sample and site, with the
  * frequency of the counted allele. Any frequency source composes in SQL

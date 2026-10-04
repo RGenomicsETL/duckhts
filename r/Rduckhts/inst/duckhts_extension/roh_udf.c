@@ -451,6 +451,12 @@ static int decode_packed_row(duckdb_function_info info, const roh_packed_args_t 
     }
     duckhts_roh_sites_kind_t kind = (duckhts_roh_sites_kind_t)header.kind;
     size_t n = (length - sizeof(header)) / size;
+    /* The aggregate never builds a longer list; a hand-made one must not size
+     * the decoder workspace either. */
+    if (n > DUCKHTS_ROH_MAX_SITES) {
+        roh_error(info, "sites holds more than %d sites", DUCKHTS_ROH_MAX_SITES);
+        return 0;
+    }
     const unsigned char *records = data + sizeof(header);
 
     roh_model_t model;

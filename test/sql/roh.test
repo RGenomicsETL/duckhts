@@ -1230,17 +1230,18 @@ SELECT * FROM duckhts_roh_counts('roh_counts_clean', max_site_bytes := 2000);
 ----
 more than max_site_bytes = 2000
 
-# The buffers are released when a decode ends, with or without an error: a budget that fits one
-# decode still fits the sixth, also after a failed one.
+# The buffers are released when a decode ends, with or without an error. One decode holds
+# 19,200 bytes of sites, and up to a few times that while DuckDB combines its threads' partial
+# groups. A leak of one decode per run would pass 400,000 bytes within 21 runs; 30 runs fit.
 statement error
-SELECT * FROM duckhts_roh_counts('roh_counts_clean', max_sites := 199, max_site_bytes := 100000);
+SELECT * FROM duckhts_roh_counts('roh_counts_clean', max_sites := 199, max_site_bytes := 400000);
 ----
 (max_sites)
 
-loop i 0 6
+loop i 0 30
 
 query I
-SELECT count(*) > 0 FROM duckhts_roh_counts('roh_counts_clean', max_site_bytes := 100000);
+SELECT count(*) > 0 FROM duckhts_roh_counts('roh_counts_clean', max_site_bytes := 400000);
 ----
 true
 
@@ -1308,6 +1309,23 @@ SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_e
   'roh_ancestry_reference_forward', 'roh_ancestry_proportions', az_to_hw := -1);
 ----
 az_to_hw must be in [0, 1]
+
+# A sample without proportions is reported even when no call matches the reference.
+statement ok
+CREATE TEMP TABLE roh_ancestry_proportions_s1 AS
+SELECT * FROM roh_ancestry_proportions WHERE sample_id = 'S1';
+
+statement error
+SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_unmatched', 'roh_ancestry_proportions_s1', gt_error := 30);
+----
+every VCF sample requires ancestry proportions
+
+query I
+SELECT count(*) FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+  'roh_ancestry_reference_unmatched', 'roh_ancestry_proportions_s1', gt_error := 30, samples := 'S1');
+----
+0
 
 # A NULL model parameter is not an error: the decode returns no rows.
 query I
