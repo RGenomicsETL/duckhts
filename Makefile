@@ -295,6 +295,10 @@ test-roh-ancestry-staging:
 test-roh-counts-staging:
 	Rscript test/scripts/test_roh_counts_staging.R
 
+.PHONY: test-roh-synthetic-staging
+test-roh-synthetic-staging:
+	Rscript test/scripts/test_roh_synthetic_staging.R
+
 test-somalier-statistical:
 	$(call compile_somalier_campaign_test,Rscript test/scripts/somalier_statistical_campaign.R "$$tmp/somalier_native_test")
 
