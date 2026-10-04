@@ -104,10 +104,22 @@ thread and at four threads, in an order that alternates sizes. The process is
 pinned to CPUs 0-3. Input Parquet files are read from a warm page cache.
 
 Each statement consumes its output. `sketches` and `pairs_copy` write every
-output column to Parquet; a second, untimed process reads the file back and
-checks the row count. `pairs_reduce` and `pairs_scalar` sum fields of every
-pair. The three pair stages must agree on the row count and on the sum of
-`jointly_called`.
+output column to Parquet; a second, untimed process reads the file back.
+`pairs_reduce` and `pairs_scalar` sum fields of every pair.
+
+The pair stages are checked against a reference: every field of
+`duckhts_somalier_relatedness` for every pair, written once per configuration
+by an untimed process. The render stops unless:
+
+- the rows of `duckhts_somalier_relatedness_all_pairs` equal the reference
+  rows, every field, for every configuration;
+- the Parquet file of every `pairs_copy` observation equals the reference
+  rows, every field;
+- every `pairs_reduce` and `pairs_scalar` observation reports the reference's
+  row count and its sums of `jointly_called`, `ibs0` and `ibs2` exactly, and
+  its sum of `relatedness` within a relative 1e-9. That sum adds doubles in an
+  order the plan chooses, so it is not compared bit for bit; the row
+  comparisons above compare each `relatedness` value exactly.
 
 The pair stages read sketches that an untimed process staged with the same
 `sketches` statement.
@@ -324,6 +336,7 @@ pair_reduce_statement <- function(output) sprintf(paste(
   "COPY (SELECT count(*) AS output_rows, sum(jointly_called) AS checksum, sum(ibs0) AS ibs0,",
   "sum(ibs2) AS ibs2, sum(relatedness) AS relatedness FROM %s) TO %s (HEADER);"),
   all_pairs, quote_literal(output))
+pair_fields <- c("output_rows", "checksum", "ibs0", "ibs2", "relatedness")
 pair_copy_statement <- function(output) sprintf(
   "COPY (SELECT * FROM %s) TO %s (FORMAT parquet);", all_pairs, quote_literal(output))
 pair_scalar_statement <- function(output) sprintf(paste(
@@ -339,6 +352,30 @@ for (k in seq_len(nrow(configs))) {
 }
 configs$evidence_bytes <- file.size(configs$evidence)
 configs$sketch_bytes <- file.size(configs$sketches)
+
+# The reference of the pair stages: every field of the per-pair function for
+# every pair, written untimed. Rows that differ between two relations are
+# counted in both directions.
+configs$reference <- file.path(staging, sprintf("pairs_%d_%d.parquet", configs$samples, configs$sites))
+pair_aggregates <- paste("count(*) AS output_rows, sum(jointly_called) AS checksum, sum(ibs0) AS ibs0,",
+                         "sum(ibs2) AS ibs2, sum(relatedness) AS relatedness")
+differing_rows <- function(left, right) sprintf(paste(
+  "(SELECT count(*) FROM ((SELECT * FROM %s EXCEPT SELECT * FROM %s)",
+  "UNION ALL (SELECT * FROM %s EXCEPT SELECT * FROM %s)))"), left, right, right, left)
+reference_of <- function(k) sprintf("read_parquet(%s)", quote_literal(configs$reference[[k]]))
+reference_checks <- do.call(rbind, lapply(seq_len(nrow(configs)), function(k) {
+  run_untimed(c(pair_setup(k), sprintf(paste(
+    "COPY (SELECT unnest(duckhts_somalier_relatedness(a.sketch, b.sketch, 1000000))",
+    "FROM sketches AS a JOIN sketches AS b ON a.sketch.sample_id < b.sketch.sample_id)",
+    "TO %s (FORMAT parquet);"), quote_literal(configs$reference[[k]]))), load_extension = TRUE)
+  run_untimed(c(pair_setup(k), sprintf("SELECT %s, %s AS macro_differing_rows FROM %s;",
+                                       pair_aggregates, differing_rows(all_pairs, reference_of(k)),
+                                       reference_of(k))), load_extension = TRUE)
+}))
+reference_checks[] <- lapply(reference_checks, as.numeric)
+names(reference_checks)[1:5] <- paste0("reference_", names(reference_checks)[1:5])
+configs <- cbind(configs, reference_checks)
+stopifnot(all(configs$reference_output_rows == configs$pairs), all(configs$macro_differing_rows == 0))
 
 # Ceilings in MiB: overhead + 3 x the live state declared above.
 words <- function(k) ceiling(configs$sites[[k]] / 64)
@@ -387,19 +424,22 @@ observe <- function(stage, k, threads) {
     pairs_reduce = run_fresh(pair_setup(k), pair_reduce_statement(output), threads),
     pairs_scalar = run_fresh(pair_setup(k), pair_scalar_statement(output), threads),
     pairs_copy = run_fresh(pair_setup(k), pair_copy_statement(output), threads))
+  # The pair fields of the output. A sketch stage has only a row count and a
+  # checksum; only pairs_copy has rows to compare with the reference.
+  written <- sprintf("read_parquet(%s)", quote_literal(output))
   check <- switch(stage,
-    sketches = run_untimed(sprintf(
-      "SELECT count(*) AS output_rows, sum(sketch.site_count) AS checksum FROM read_parquet(%s);",
-      quote_literal(output))),
+    sketches = cbind(run_untimed(sprintf(
+      "SELECT count(*) AS output_rows, sum(sketch.site_count) AS checksum FROM %s;", written)),
+      ibs0 = NA, ibs2 = NA, relatedness = NA, differing_rows = NA),
     pairs_reduce = ,
-    pairs_scalar = utils::read.csv(output, colClasses = "character")[c("output_rows", "checksum")],
-    pairs_copy = run_untimed(sprintf(
-      "SELECT count(*) AS output_rows, sum(jointly_called) AS checksum FROM read_parquet(%s);",
-      quote_literal(output))))
+    pairs_scalar = cbind(utils::read.csv(output, colClasses = "character")[pair_fields],
+                         differing_rows = NA),
+    pairs_copy = run_untimed(sprintf("SELECT %s, %s AS differing_rows FROM %s;", pair_aggregates,
+                                     differing_rows(written, reference_of(k)), written)))
+  check[] <- lapply(check, as.numeric)
   data.frame(stage = stage, samples = configs$samples[[k]], sites = configs$sites[[k]],
              pairs = configs$pairs[[k]], input_rows = if (stage == "sketches") configs$rows[[k]] else configs$samples[[k]],
-             output_rows = as.numeric(check$output_rows), checksum = as.numeric(check$checksum),
-             output_bytes = file.size(output), threads = threads,
+             check, output_bytes = file.size(output), threads = threads,
              budget_mib = budget_mib(stage, k, threads), observed)
 }
 
@@ -418,14 +458,22 @@ for (repetition in 1:3) {
 config_runs <- do.call(rbind, observations)
 load_after <- host_load()
 
-# Output checks: every row is present and the two pair stages agree.
+# Output checks: every row is present, and every pair observation agrees with
+# the reference of its configuration.
 expected_rows <- ifelse(config_runs$stage == "sketches", config_runs$samples, config_runs$pairs)
 stopifnot(all(config_runs$output_rows == expected_rows), all(config_runs$checksum > 0),
           all(config_runs$checksum[config_runs$stage == "sketches"] ==
               (as.numeric(config_runs$samples) * config_runs$sites)[config_runs$stage == "sketches"]))
-pair_checksums <- aggregate(checksum ~ samples + sites, config_runs[config_runs$stage != "sketches", ],
-                            function(x) length(unique(x)))
-stopifnot(all(pair_checksums$checksum == 1L))
+pair_runs <- config_runs[config_runs$stage != "sketches", ]
+reference <- configs[match(paste(pair_runs$samples, pair_runs$sites),
+                           paste(configs$samples, configs$sites)), ]
+copied <- pair_runs$stage == "pairs_copy"
+stopifnot(all(pair_runs$checksum == reference$reference_checksum),
+          all(pair_runs$ibs0 == reference$reference_ibs0),
+          all(pair_runs$ibs2 == reference$reference_ibs2),
+          all(abs(pair_runs$relatedness - reference$reference_relatedness) <=
+              1e-9 * abs(reference$reference_relatedness)),
+          all(pair_runs$differing_rows[copied] == 0), all(is.na(pair_runs$differing_rows[!copied])))
 
 # Each series reads the configurations it names.
 runs <- do.call(rbind, lapply(seq_len(nrow(series)), function(j) {
@@ -501,13 +549,14 @@ Source revision: `r revision`; `src` tree `r src_tree`. DuckDB runtime: `r duckd
 
 ## Inputs as measured
 
-`evidence_kib` and `sketch_kib` are the Parquet file sizes. The decoded evidence is about 120 bytes per row.
+`evidence_kib` and `sketch_kib` are the Parquet file sizes. The decoded evidence is about 120 bytes per row. `macro_differing_rows` counts the rows, over every field, that differ between `duckhts_somalier_relatedness_all_pairs` and the per-pair function.
 
 ```{r inputs, echo=FALSE}
 inputs <- data.frame(source = configs$source, samples = configs$samples, sites = configs$sites,
                      evidence_rows = configs$rows, pairs = configs$pairs,
                      evidence_kib = round(configs$evidence_bytes / 1024, 1),
-                     sketch_kib = round(configs$sketch_bytes / 1024, 1))
+                     sketch_kib = round(configs$sketch_bytes / 1024, 1),
+                     macro_differing_rows = configs$macro_differing_rows)
 knitr::kable(inputs, format.args = list(big.mark = ","))
 ```
 
