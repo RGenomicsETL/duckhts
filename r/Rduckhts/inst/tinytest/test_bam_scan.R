@@ -51,4 +51,32 @@ test_bam_full_scan <- function() {
   expect_equal(dbGetQuery(con, "SELECT 4242 AS n")$n, 4242L)
 }
 
+# The planner's row estimate of a whole-file indexed scan, read from the plan.
+test_bam_row_estimate <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  estimate <- function(path) {
+    plan <- dbGetQuery(con, sprintf("EXPLAIN (FORMAT json) SELECT * FROM read_bam(%s)",
+                                    dbQuoteString(con, path)))[[2L]]
+    found <- regmatches(plan, regexpr('"Estimated Cardinality": "[0-9]+"', plan))
+    as.numeric(gsub("[^0-9]", "", found))
+  }
+  bundled <- function(name) {
+    path <- system.file("extdata", name, package = "Rduckhts")
+    expect_true(nzchar(path))
+    path
+  }
+  # Every reference of this BAM is empty; the estimate is its unplaced reads.
+  expect_equal(estimate(bundled("bam_scan_all_unplaced.bam")), 2053)
+  # 186 of 199 references have no reads and no index statistics.
+  expect_equal(estimate(bundled("empty-tids.bam")), 12495)
+  # A CRAM index has no statistics: the count is right and no estimate is 5.
+  cram <- bundled("bam_scan_mixed.cram")
+  expect_equal(dbGetQuery(con, sprintf("SELECT count(*) AS n FROM read_bam(%s)",
+                                       dbQuoteString(con, cram)))$n, 5)
+  expect_false(identical(estimate(cram), 5))
+  expect_equal(nrow(rduckhts_hts_index(con, cram)), 0L)
+}
+
 test_bam_full_scan()
+test_bam_row_estimate()

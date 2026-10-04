@@ -363,8 +363,14 @@ static int bam_parse_scan_mode(const char *mode, int *scan_sequential) {
     return 0;
 }
 
+/* A CRAM index is a different, smaller object behind the same pointer type
+ * and has no per-reference statistics; only its format may be read. */
+static int bam_index_is_bai_or_csi(hts_idx_t *idx) {
+    return idx != NULL && hts_idx_fmt(idx) != HTS_FMT_CRAI;
+}
+
 static int bam_try_get_index_row_count(hts_idx_t *idx, uint64_t *out_total) {
-    if (!idx || !out_total) return 0;
+    if (!bam_index_is_bai_or_csi(idx) || !out_total) return 0;
 
     int nseq = hts_idx_nseq(idx);
     uint64_t total = hts_idx_get_n_no_coor(idx);
@@ -382,6 +388,30 @@ static int bam_try_get_index_row_count(hts_idx_t *idx, uint64_t *out_total) {
     }
 
     *out_total = total;
+    return 1;
+}
+
+/* A whole-file row estimate for the planner. It need not be exact, so it is
+ * looser than bam_try_get_index_row_count: a reference without reads has no
+ * statistics in the index and counts as zero, and the no-coordinate count may
+ * be zero. An index with no statistics at all (an old BAI or CSI, or a CRAI)
+ * gives no estimate. */
+static int bam_index_row_estimate(hts_idx_t *idx, uint64_t *out_estimate) {
+    if (!bam_index_is_bai_or_csi(idx) || !out_estimate) return 0;
+
+    int nseq = hts_idx_nseq(idx);
+    uint64_t total = hts_idx_get_n_no_coor(idx);
+    int has_statistics = total > 0;
+    for (int tid = 0; tid < nseq; tid++) {
+        uint64_t mapped = 0, unmapped = 0;
+        if (hts_idx_get_stat(idx, tid, &mapped, &unmapped) != 0) continue;
+        has_statistics = 1;
+        if (mapped > UINT64_MAX - total || unmapped > UINT64_MAX - total - mapped) return 0;
+        total += mapped + unmapped;
+    }
+    if (!has_statistics) return 0;
+
+    *out_estimate = total;
     return 1;
 }
 
@@ -596,8 +626,9 @@ static void bam_read_bind(duckdb_bind_info info) {
             /* Without an estimate the planner takes this scan for a small one
              * and may build a hash join on its rows. The index total covers
              * the whole file, so a region query reports no estimate. */
-            if (bind->index_row_count_valid && bind->n_regions == 0) {
-                duckdb_bind_set_cardinality(info, (idx_t)bind->index_row_count, false);
+            uint64_t row_estimate = 0;
+            if (bind->n_regions == 0 && bam_index_row_estimate(idx, &row_estimate)) {
+                duckdb_bind_set_cardinality(info, (idx_t)row_estimate, false);
             }
             hts_idx_destroy(idx);
         }

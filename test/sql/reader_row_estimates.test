@@ -26,6 +26,50 @@ JOIN range(2) t(x) ON r.POS = t.x;
 ----
 physical_plan	<REGEX>:.*"name": "READ_BAM".*"Estimated Cardinality": "3".*"name": "RANGE".*
 
+# An estimate does not need complete statistics. empty-tids.bam has 12,495
+# records, 186 of its 199 references have no reads, and its index has no
+# no-coordinate count; the estimate is the sum over the references with reads.
+query I
+SELECT count(*) FROM (SELECT FLAG FROM read_bam('__WORKING_DIRECTORY__/test/data/empty-tids.bam'));
+----
+12495
+
+query II
+EXPLAIN (FORMAT json)
+SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/empty-tids.bam');
+----
+physical_plan	<REGEX>:.*"name": "READ_BAM".*"Estimated Cardinality": "12495".*
+
+# bam_scan_all_unplaced.bam has 2,053 records, none of them placed.
+query II
+EXPLAIN (FORMAT json)
+SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam');
+----
+physical_plan	<REGEX>:.*"name": "READ_BAM".*"Estimated Cardinality": "2053".*
+
+# A CRAM index has no statistics, so an indexed CRAM reports no estimate, and
+# the index readers return no rows for it.
+query I
+SELECT count(*) FROM (SELECT FLAG FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram'));
+----
+5
+
+query II
+EXPLAIN (FORMAT json)
+SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram');
+----
+physical_plan	<!REGEX>:.*"Estimated Cardinality": "5".*
+
+query I
+SELECT count(*) FROM read_hts_index('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram');
+----
+0
+
+query I
+SELECT count(*) FROM read_hts_index_spans('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram');
+----
+0
+
 # A region narrows the scan, so the whole-file count is not reported.
 query II
 EXPLAIN (FORMAT json)
