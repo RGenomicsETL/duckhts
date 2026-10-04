@@ -179,6 +179,15 @@ duckhts_somalier_status_t duckhts_somalier_pair_stats(
     const duckhts_somalier_masks_t *b,
     duckhts_somalier_pair_stats_t *result);
 
+/* pair_stats without the content check of each sketch. The caller must have
+ * passed both sketches through validate_masks since they were last written;
+ * this checks only that the two shapes and identities agree. It lets a caller
+ * that compares one sketch with many others validate it once. */
+duckhts_somalier_status_t duckhts_somalier_pair_stats_validated(
+    const duckhts_somalier_masks_t *a,
+    const duckhts_somalier_masks_t *b,
+    duckhts_somalier_pair_stats_t *result);
+
 /* Recompute all integer and floating metrics without allocation. The reported
  * status is OK when jointly_called > 0, NO_EVIDENCE otherwise. */
 duckhts_somalier_status_t duckhts_somalier_verify_pair_result(

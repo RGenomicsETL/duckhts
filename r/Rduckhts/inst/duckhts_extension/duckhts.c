@@ -432,6 +432,25 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "FROM __dht_compared)")) {
         return false;
     }
+    /* All unordered sample pairs of one sketch relation. Each sketch passes
+     * the content check once, in a materialized relation; the pair function
+     * then compares checked sketches without repeating that check, so the
+     * content checks grow with samples and not with pairs. */
+    if (!duckhts_register_sql(&registration,
+        "CREATE OR REPLACE MACRO duckhts_somalier_relatedness_all_pairs("
+        "sketches_table, max_sites := 1000000) AS TABLE "
+        "WITH __dht_checked AS MATERIALIZED (SELECT sketch FROM query_table(sketches_table) "
+        "WHERE __duckhts_somalier_sketch_valid(sketch, CAST(max_sites AS UBIGINT))), "
+        "__dht_guard AS MATERIALIZED (SELECT CASE "
+        "WHEN count(*) != count(DISTINCT sketch.sample_id) THEN "
+        "error('duckhts_somalier_relatedness_all_pairs: sketches must have one sketch "
+        "per distinct sample') ELSE true END AS valid FROM __dht_checked) "
+        "SELECT unnest(__duckhts_somalier_relatedness_checked(a.sketch, b.sketch, "
+        "CAST(max_sites AS UBIGINT))) "
+        "FROM __dht_guard AS g JOIN __dht_checked AS a ON g.valid "
+        "JOIN __dht_checked AS b ON a.sketch.sample_id < b.sketch.sample_id")) {
+        return false;
+    }
     if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckhts_somalier_frequency_sha256("
         "frequency_table, panel_table) AS ("

@@ -6,8 +6,10 @@
  * spill. This aggregate keeps 16 bytes per site (24 for read counts) in native
  * buffers that DuckHTS bounds itself:
  *   - max_sites caps one sample and chromosome, checked as rows arrive;
- *   - max_site_bytes caps the buffers of every live group in the process, so
- *     concurrent decodes share it.
+ *   - max_site_bytes bounds the buffers of every live group in the process:
+ *     a group does not grow when the bytes held by all groups would pass its
+ *     own max_site_bytes. Concurrent decodes share the count of bytes held and
+ *     each applies its own limit to it.
  * Both limits raise query errors. Finalize sorts a group by position, hands it
  * to DuckDB as one BLOB (see roh_sites.h) and frees the buffer. Every native
  * buffer counts against max_site_bytes: the partial groups of each thread, the
