@@ -112,9 +112,9 @@ taskset -c 4-7 Rscript -e 'rmarkdown::render("benchmarks/benchmark_roh_counts_va
 
 | Item                | Value                                    |
 |:--------------------|:-----------------------------------------|
-| revision            | bdddcaeeeddb5dfc4b582961dfcd13dc3ac510d8 |
+| revision            | 44d68758e60289c55b93186ee9a71dda4f47c52c |
 | tracked_changes     | no                                       |
-| extension_version   | 1.5.2.9011                               |
+| extension_version   | 1.5.2.9012                               |
 | duckdb_version      | v1.5.5                                   |
 | r_version           | R version 4.6.0 (2026-04-24)             |
 | rng_kind            | Mersenne-Twister/Inversion/Rejection     |
@@ -146,6 +146,108 @@ taskset -c 4-7 Rscript -e 'rmarkdown::render("benchmarks/benchmark_roh_counts_va
 2 of 6 sample and run-class rows meet
 the declared tolerance. “none” means that neither decode has a run in the
 class.
+
+## What (a) compares, written after its result
+
+The declared comparison fails, and the reason is in what the two error
+parameters mean. This section was written after the result above. It changes
+no tolerance and no verdict.
+
+**`gt_error` is an error of the site.** With genotype evidence, a called
+genotype has likelihood close to 1 and a genotype one allele away has
+10^(−`gt_error`/10). At `gt_error := 30`, one heterozygous call can count
+against a run by a factor of 1,000 and no more, whatever caused it: a calling
+error, a mapping artefact or a wrong site. The run can continue through it.
+
+**`seq_error` is an error of one read.** With read counts, the reads of a site
+are independent and their probabilities multiply. A site with 16 reads of each
+allele has likelihood `seq_error`^16 under either homozygous genotype. No
+value of `seq_error` makes that site compatible with a run, and nothing in the
+read model says that a whole site can be wrong.
+
+So the read-count decode is the genotype decode with no tolerated genotype
+error. At `gt_error := 30` the genotype decode keeps runs through isolated
+heterozygous sites, and the read-count decode ends them there. The two paths
+then differ by design, not by a defect of either, and the declared tolerance
+compared them at settings that do not correspond.
+
+**The genotype decode approaches the read-count decode as `gt_error` rises.**
+The read-count decode is fixed at the default `seq_error`; all runs.
+
+| gt_error | Sample  | VCF FROH | Count FROH | FROH difference | Jaccard |
+|---------:|:--------|---------:|-----------:|----------------:|--------:|
+|       30 | NA18507 |   0.1772 |     0.1469 |         -0.0304 |   0.824 |
+|       30 | HG00403 |   0.3411 |     0.3030 |         -0.0381 |   0.883 |
+|       30 | HG00188 |   0.3382 |     0.2822 |         -0.0559 |   0.834 |
+|       60 | NA18507 |   0.1543 |     0.1469 |         -0.0075 |   0.945 |
+|       60 | HG00403 |   0.3205 |     0.3030 |         -0.0175 |   0.934 |
+|       60 | HG00188 |   0.3036 |     0.2822 |         -0.0214 |   0.929 |
+|      100 | NA18507 |   0.1477 |     0.1469 |         -0.0009 |   0.986 |
+|      100 | HG00403 |   0.3054 |     0.3030 |         -0.0024 |   0.975 |
+|      100 | HG00188 |   0.2856 |     0.2822 |         -0.0034 |   0.981 |
+|      150 | NA18507 |   0.1468 |     0.1469 |         +0.0000 |   0.992 |
+|      150 | HG00403 |   0.3045 |     0.3030 |         -0.0016 |   0.977 |
+|      150 | HG00188 |   0.2834 |     0.2822 |         -0.0012 |   0.988 |
+|      250 | NA18507 |   0.1468 |     0.1469 |         +0.0000 |   0.992 |
+|      250 | HG00403 |   0.3045 |     0.3030 |         -0.0016 |   0.977 |
+|      250 | HG00188 |   0.2834 |     0.2822 |         -0.0012 |   0.988 |
+
+**`seq_error` hardly moves the read-count decode.** The genotype decode is
+fixed at `gt_error := 30`; all runs.
+
+| seq_error | Sample  | VCF FROH | Count FROH | FROH difference | Jaccard |
+|----------:|:--------|---------:|-----------:|----------------:|--------:|
+|    0.0001 | NA18507 |   0.1772 |     0.1456 |         -0.0317 |   0.817 |
+|    0.0001 | HG00403 |   0.3411 |     0.3012 |         -0.0398 |   0.878 |
+|    0.0001 | HG00188 |   0.3382 |     0.2802 |         -0.0579 |   0.828 |
+|     0.001 | NA18507 |   0.1772 |     0.1469 |         -0.0304 |   0.824 |
+|     0.001 | HG00403 |   0.3411 |     0.3030 |         -0.0381 |   0.883 |
+|     0.001 | HG00188 |   0.3382 |     0.2822 |         -0.0559 |   0.834 |
+|      0.01 | NA18507 |   0.1772 |     0.1477 |         -0.0296 |   0.829 |
+|      0.01 | HG00403 |   0.3411 |     0.3060 |         -0.0351 |   0.892 |
+|      0.01 | HG00188 |   0.3382 |     0.2850 |         -0.0531 |   0.842 |
+|       0.1 | NA18507 |   0.1772 |     0.1596 |         -0.0176 |   0.886 |
+|       0.1 | HG00403 |   0.3411 |     0.3264 |         -0.0147 |   0.937 |
+|       0.1 | HG00188 |   0.3382 |     0.3063 |         -0.0319 |   0.902 |
+
+**The genotypes and the read counts agree at the sites.** Sites of the three
+samples, by called genotype and by the share of reads of the rarer allele:
+
+| read_class               | sites.heterozygous | sites.homozygous |
+|:-------------------------|-------------------:|-----------------:|
+| minor allele 10% to 25%  |                662 |              226 |
+| minor allele 25% or more |             93,581 |              184 |
+| minor allele under 10%   |                 33 |            1,385 |
+| no reads                 |                  1 |               56 |
+| one allele only          |                113 |          230,030 |
+
+**The lost parts of genotype runs hold the heterozygous calls.** Sites inside
+the runs of the genotype decode at `gt_error := 30`, split by whether the
+read-count decode keeps the site in a run:
+
+| sample  | kept  |  sites | heterozygous_genotypes | homozygous_with_balanced_reads |
+|:--------|:------|-------:|-----------------------:|-------------------------------:|
+| HG00188 | FALSE |  4,664 |                    199 |                             10 |
+| HG00188 | TRUE  | 33,231 |                      7 |                              1 |
+| HG00403 | FALSE |  4,579 |                    189 |                             11 |
+| HG00403 | TRUE  | 33,950 |                     12 |                              0 |
+| NA18507 | FALSE |  3,834 |                    162 |                              6 |
+| NA18507 | TRUE  | 17,549 |                      3 |                              0 |
+
+The observations are in `diagnosis_*.csv` under
+`benchmarks/results/roh-counts-validation/`.
+
+What this leaves open:
+
+- Which decode is closer to the truth is not measured here. A heterozygous
+  call with balanced reads inside a long run can be a real heterozygous site
+  that ends the run, or reads from a paralogous sequence at a site that is
+  homozygous.
+- The read model has no term for a site whose reads do not reflect the
+  sample’s genotype. Such a term would be to read counts what `gt_error` is to
+  genotypes. It is not implemented.
+- A like-for-like check of the read model is the genotype-likelihood path
+  (FORMAT/PL) from the same reads. The staged genotypes carry FORMAT/GT only.
 
 ## (b) Count-level contamination titration
 
@@ -289,8 +391,9 @@ of α in every cell, and the mean depth of a mixture is between
   estimate of a rate.
 
 - The two paths of (a) share their sequencing data, sites and frequencies.
-  Agreement shows that the read model and the genotype model decode the same
-  evidence alike. It does not show that either set of runs is true.
+  They do not share an error model: see “What (a) compares”. Their agreement
+  at a large `gt_error` shows that the two paths decode the same evidence
+  alike. It does not show that either set of runs is true.
 
 - 2)  thins and adds counts. It does not reproduce what a mixture of reads
       would change upstream: alignment, duplicate marking, base and mapping quality

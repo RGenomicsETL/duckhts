@@ -1,0 +1,11 @@
+"genotype","read_class","sites"
+"heterozygous","minor allele 10% to 25%",662
+"heterozygous","minor allele 25% or more",93581
+"heterozygous","minor allele under 10%",33
+"heterozygous","no reads",1
+"heterozygous","one allele only",113
+"homozygous","minor allele 10% to 25%",226
+"homozygous","minor allele 25% or more",184
+"homozygous","minor allele under 10%",1385
+"homozygous","no reads",56
+"homozygous","one allele only",230030
