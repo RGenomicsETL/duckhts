@@ -606,6 +606,11 @@ scan by row groups, and a relation of a few hundred sketches is one row group.
 
 `r sum(exponents$timing_verdict == "none: 1x under 5 s")` of the `r nrow(exponents)` series have a one-thread 1× run under 5 seconds and get a memory verdict only.
 `r sum(exponents$exponent_above_1.25)` series have a time exponent above 1.25 at either doubling.
+The pair stages along sites exceed 1.25 at the second doubling, from 34,000 to
+68,000 sites. The cause is not established. One candidate, not tested, is that
+250 sketches of 68,000 sites no longer fit the CPU cache. Flags on the
+`sketches` stage follow the host load: the minimum times of that stage scale
+linearly in the tables above.
 
 ## Limitations
 
