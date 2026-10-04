@@ -19,7 +19,10 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   relatedness for every unordered sample pair of a sketch relation. It checks the
   contents of each sketch once and then compares the checked sketches, where
   `duckhts_somalier_relatedness` over a self-join checked both sketches for every pair.
-  The rows are the same.
+  The rows are the same. `benchmarks/benchmark_somalier_cohort_scaling.md` measures the
+  sketch and all-pairs stages over 1×/2×/4× samples and sites with gated memory
+  budgets: 124,750 pairs of 17,000 sites take 0.72 s on one thread, against 4.40 s for
+  the per-pair function before this change.
 
 - `duckhts_somalier_relatedness` is faster with unchanged results: it checked each
   sketch's contents twice per pair and now checks them once, it tests mask words for
