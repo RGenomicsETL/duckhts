@@ -7,6 +7,7 @@ options(scipen = 999)
 artifact <- duckhtsbench::duckhts_bench_artifact_path
 cache <- file.path(duckhtsbench::duckhts_bench_cache_dir(), "benchmarks", "roh-synthetic")
 results <- "benchmarks/results/roh-synthetic"
+dir.create(results, recursive = TRUE, showWarnings = FALSE)
 
 chromosome_bp <- 64444167
 window_bp <- 100000

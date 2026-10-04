@@ -24,6 +24,12 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   exactly. `benchmarks/benchmark_roh_scaling.md` gates both macros on their memory
   budget and compares this revision with the previous one.
 
+- `benchmarks/benchmark_roh_synthetic_truth.md` scores the ancestry-tuned, pooled and
+  single-population ROH arms against a planted truth (#329): 1,131 autozygous segments
+  of 1, 2 and 5 Mb copied from haplotype 1 into the 377 chr20 trio children, staged as
+  registry artifacts with a network-free staging test. Every arm covers more than 99%
+  of the planted bases, and the criterion declared before the arms ran did not hold.
+
 - An out-of-memory error in the ROH macros could abort the host process: while
   cancelling the query, DuckDB re-pins evicted blocks to destroy list-aggregate states,
   and that fails inside a destructor. The site lists are no longer DuckDB aggregate

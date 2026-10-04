@@ -93,7 +93,9 @@ knitr::kable(identity, row.names = FALSE)
 ```{r, echo=FALSE}
 planted <- read_result("planted_truth_by_population.csv")
 verification <- read_result("planting_verification.csv")
-knitr::kable(planted, format.args = list(big.mark = ","), row.names = FALSE)
+planted_table <- planted
+planted_table[-1L] <- lapply(planted_table[-1L], fmt)
+knitr::kable(planted_table, align = "lrrrrr", row.names = FALSE)
 ```
 
 The truth holds `r fmt(sum(planted$segments))` segments in `r fmt(sum(planted$children))` children and `r fmt(sum(planted$planted_bp))` planted bases. The segments cover `r fmt(sum(planted$records))` genotypes, of which `r fmt(sum(planted$source_heterozygous))` were heterozygous in the source and are homozygous in the synthetic children. The full truth table is [`planted_truth.csv`](results/roh-synthetic/planted_truth.csv).
@@ -125,7 +127,7 @@ summary_table <- function(minimum) {
 }
 ```
 
-Each arm ran once, in a fresh R process with four DuckDB threads and a 12 GB memory limit, on the extension built from this tree. The columns `5 Mb`, `2 Mb` and `1 Mb` are the sensitivity for the planted segments of that length. The per-child values are in [`child_metrics.csv`](results/roh-synthetic/child_metrics.csv).
+Each arm ran once, in a fresh R process with four DuckDB threads and a 12 GB memory limit, on the extension built from the `src` tree of revision `d0af7e98`, which this branch does not change. The columns `5 Mb`, `2 Mb` and `1 Mb` are the sensitivity for the planted segments of that length. The per-child values are in [`child_metrics.csv`](results/roh-synthetic/child_metrics.csv).
 
 ### Primary call set: calls of at least 500 kb
 
@@ -177,6 +179,23 @@ The criterion **`r verdict`**: `r sum(required$criterion_pass %in% TRUE)` of the
 ```{r, echo=FALSE}
 knitr::kable(criterion_table, row.names = FALSE)
 ```
+
+```{r, include=FALSE}
+primary <- summary[summary$min_call_bp == 500000, , drop = FALSE]
+admixed_rows <- criterion[criterion$group == "admixed", , drop = FALSE]
+one_megabase <- summary[summary$min_call_bp == 1000000, , drop = FALSE]
+```
+
+### What the results show
+
+These notes were written after the results. They describe the tables and change nothing in the protocol.
+
+- Sensitivity does not separate the arms. In the primary call set it lies between `r percent(min(primary$sensitivity))` and `r percent(max(primary$sensitivity))` for every population and arm, and the largest sensitivity difference between ancestry-tuned and a comparator is `r sprintf("%.4f", max(abs(criterion$sensitivity_difference)))`. Every arm finds the planted segments.
+- The false-discovery differences in the admixed populations lie between `r signed(min(admixed_rows$false_discovery_difference))` and `r signed(max(admixed_rows$false_discovery_difference))`. In `r sum(admixed_rows$better)` of the `r nrow(admixed_rows)` admixed comparisons the interval lies below zero. In `r sum(admixed_rows$false_discovery_difference_low > 0)` it lies above zero. In the other comparisons the interval contains zero, so this design shows no difference there.
+- In ASW and PUR the point estimate of the ancestry-tuned arm is above that of the single-population arm, and the upper end of the interval is above the +0.01 margin.
+- The control check passes in all four control populations: the ancestry-tuned arm is within the margin of the single-population arm.
+- Called bases outside the planted segments are a large share of every arm's calls: `r percent(min(primary$outside_planted))` to `r percent(max(primary$outside_planted))` of the called bases in the primary call set. The window rule excuses part of them. The rest counts as unsupported, but nothing here shows that it is false: the source children's ROH between 500 kb and a few megabases is in this category when its windows hold two or more heterozygous calls. The planted truth is exact for sensitivity only. The false-discovery side still rests on the window heuristic.
+- With the calls of at least 1 Mb, the sensitivity for the 1 Mb segments falls to between `r percent(min(one_megabase$sensitivity_1mb))` and `r percent(max(one_megabase$sensitivity_1mb))`. The calls that cover those segments in the primary call set are shorter than 1 Mb, so they leave that call set. This is the effect the 500 kb primary threshold was declared to avoid.
 
 ## Limitations
 

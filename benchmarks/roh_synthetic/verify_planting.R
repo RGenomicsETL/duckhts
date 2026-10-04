@@ -11,6 +11,7 @@
 # carries it. Outside, the genotypes are the source's: the counts and an
 # order-free digest of (POS, GT) agree.
 results <- "benchmarks/results/roh-synthetic"
+dir.create(results, recursive = TRUE, showWarnings = FALSE)
 cache <- file.path(duckhtsbench::duckhts_bench_cache_dir(), "benchmarks", "roh-synthetic")
 dir.create(file.path(cache, "duckdb-tmp"), recursive = TRUE, showWarnings = FALSE)
 driver <- duckdb::duckdb(dbdir = ":memory:", shared_home = FALSE,

@@ -1,0 +1,6 @@
+"check","groups","genotypes","failures"
+"planted segments hold the truth's record counts",1131,40349194,0
+"planted segments replaced the truth's heterozygous counts",1131,40349194,0
+"synthetic planted segments hold no heterozygous genotype",1131,40349194,0
+"synthetic planted segments are homozygous for haplotype 1's allele",1131,40349194,0
+"genotypes outside planted segments are unchanged",377,279777717,0
