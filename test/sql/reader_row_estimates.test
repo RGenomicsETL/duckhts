@@ -1,0 +1,130 @@
+# name: test/sql/reader_row_estimates.test
+# description: Indexed readers give the planner their whole-file row count as an estimate
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+PRAGMA threads=4
+
+# The JSON plan lists a hash join's probe child first and its build child
+# second, so "reader before RANGE" means the hash table is built on RANGE.
+# Without an estimate DuckDB takes a table function for one row and builds the
+# hash table on the reader instead.
+
+# read_bam: bam_scan_single.bam has 3 records and an index with full statistics.
+query I
+SELECT count(*) FROM (SELECT FLAG FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam'));
+----
+3
+
+query II
+EXPLAIN (FORMAT json)
+SELECT count(*)
+FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam') r
+JOIN range(2) t(x) ON r.POS = t.x;
+----
+physical_plan	<REGEX>:.*"name": "READ_BAM".*"Estimated Cardinality": "3".*"name": "RANGE".*
+
+# A region narrows the scan, so the whole-file count is not reported.
+query II
+EXPLAIN (FORMAT json)
+SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', region := 'chr1');
+----
+physical_plan	<!REGEX>:.*"Estimated Cardinality": "3".*
+
+# A sequential scan does not load the index.
+query II
+EXPLAIN (FORMAT json)
+SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam', scan_mode := 'sequential');
+----
+physical_plan	<!REGEX>:.*"Estimated Cardinality": "3".*
+
+# read_tabix and read_gff: gff_file.gff.gz has 62 data lines.
+query I
+SELECT count(*) FROM (SELECT column0 FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz'));
+----
+62
+
+query II
+EXPLAIN (FORMAT json)
+SELECT count(*)
+FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz') r
+JOIN range(10) t(x) ON CAST(r.column3 AS BIGINT) = t.x;
+----
+physical_plan	<REGEX>:.*"name": "READ_TABIX".*"Estimated Cardinality": "62".*"name": "RANGE".*
+
+query II
+EXPLAIN (FORMAT json)
+SELECT count(*)
+FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz') r
+JOIN range(10) t(x) ON r.start = t.x;
+----
+physical_plan	<REGEX>:.*"name": "READ_GFF".*"Estimated Cardinality": "62".*"name": "RANGE".*
+
+query II
+EXPLAIN (FORMAT json)
+SELECT * FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := 'X:2934816-2935190');
+----
+physical_plan	<!REGEX>:.*"Estimated Cardinality": "62".*
+
+query II
+EXPLAIN (FORMAT json)
+SELECT * FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', scan_mode := 'sequential');
+----
+physical_plan	<!REGEX>:.*"Estimated Cardinality": "62".*
+
+# The index counts the header line of header_tabix.tsv.gz as a record; the
+# reader returns 2 rows with header := true and estimates 2, not 3.
+query I
+SELECT count(*) FROM (SELECT * FROM read_tabix('__WORKING_DIRECTORY__/test/data/header_tabix.tsv.gz', header := true));
+----
+2
+
+query II
+EXPLAIN (FORMAT json)
+SELECT * FROM read_tabix('__WORKING_DIRECTORY__/test/data/header_tabix.tsv.gz', header := true);
+----
+physical_plan	<REGEX>:.*"Estimated Cardinality": "2".*
+
+# read_bed: targets.bed has 4 intervals; index a bgzip copy.
+statement ok
+SELECT * FROM bgzip('__WORKING_DIRECTORY__/test/data/targets.bed',
+  output_path := '__WORKING_DIRECTORY__/test_reader_row_estimates.bed.gz',
+  keep := TRUE, overwrite := TRUE);
+
+statement ok
+SELECT * FROM tabix_index('__WORKING_DIRECTORY__/test_reader_row_estimates.bed.gz',
+  preset := 'bed', index_path := '__WORKING_DIRECTORY__/test_reader_row_estimates.bed.gz.tbi', threads := 1);
+
+query I
+SELECT count(*) FROM (SELECT chrom FROM read_bed('__WORKING_DIRECTORY__/test_reader_row_estimates.bed.gz'));
+----
+4
+
+query II
+EXPLAIN (FORMAT json)
+SELECT count(*)
+FROM read_bed('__WORKING_DIRECTORY__/test_reader_row_estimates.bed.gz') r
+JOIN range(2) t(x) ON r.start = t.x;
+----
+physical_plan	<REGEX>:.*"name": "READ_BED".*"Estimated Cardinality": "4".*"name": "RANGE".*
+
+query II
+EXPLAIN (FORMAT json)
+SELECT * FROM read_bed('__WORKING_DIRECTORY__/test_reader_row_estimates.bed.gz', region := 'CHROMOSOME_I:1-20');
+----
+physical_plan	<!REGEX>:.*"Estimated Cardinality": "4".*
+
+query II
+EXPLAIN (FORMAT json)
+SELECT * FROM read_bed('__WORKING_DIRECTORY__/test_reader_row_estimates.bed.gz', scan_mode := 'sequential');
+----
+physical_plan	<!REGEX>:.*"Estimated Cardinality": "4".*
+
+# The tolerant policies may drop malformed lines, so they report no estimate.
+query II
+EXPLAIN (FORMAT json)
+SELECT * FROM read_bed('__WORKING_DIRECTORY__/test_reader_row_estimates.bed.gz', error_policy := 'skip');
+----
+physical_plan	<!REGEX>:.*"Estimated Cardinality": "4".*

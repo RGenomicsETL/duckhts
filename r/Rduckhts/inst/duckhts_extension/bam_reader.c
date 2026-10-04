@@ -593,6 +593,12 @@ static void bam_read_bind(duckdb_bind_info info) {
         if (idx) {
             bind->has_index = 1;
             bind->index_row_count_valid = bam_try_get_index_row_count(idx, &bind->index_row_count);
+            /* Without an estimate the planner takes this scan for a small one
+             * and may build a hash join on its rows. The index total covers
+             * the whole file, so a region query reports no estimate. */
+            if (bind->index_row_count_valid && bind->n_regions == 0) {
+                duckdb_bind_set_cardinality(info, (idx_t)bind->index_row_count, false);
+            }
             hts_idx_destroy(idx);
         }
     }

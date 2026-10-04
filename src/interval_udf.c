@@ -434,6 +434,12 @@ static void read_bed_bind(duckdb_bind_info info) {
         if (tbx_stats) {
             bind->index_row_count_valid =
                 bed_try_get_index_row_count(tbx_stats, &bind->index_row_count);
+            /* Without an estimate the planner takes this scan for a small one
+             * and may build a hash join on its rows. This branch runs only for
+             * a whole-file indexed scan, which the index total describes. */
+            if (bind->index_row_count_valid) {
+                duckdb_bind_set_cardinality(info, (idx_t)bind->index_row_count, false);
+            }
             tbx_destroy(tbx_stats);
         }
     }

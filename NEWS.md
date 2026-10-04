@@ -286,6 +286,14 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
 
 ## Fixes
 
+- `read_bam`, `read_tabix`, `read_gff`, `read_gtf` and `read_bed` now give
+  DuckDB's planner the whole-file row count from the index as an estimate.
+  Without one the planner took the scan for one row and could build a hash join
+  on the reader's rows instead of on the smaller relation. The estimate is
+  reported only for a whole-file indexed scan: no region, no
+  `scan_mode := 'sequential'`, complete index statistics, and for `read_bed`
+  the default `error_policy := 'error'`.
+
 - A closed database is now released. `LOAD` used to open private connections
   into the loading database for cgranges and for Somalier BAM/CRAM panel reading
   and keep them until the process ended. Each connection referenced the database
