@@ -661,17 +661,22 @@ static void bam_read_bind(duckdb_bind_info info) {
         hts_idx_t *idx = sam_index_load3(fp, file_path, index_path, HTS_IDX_SILENT_FAIL);
         if (idx) {
             bind->has_index = 1;
-            /* A CRAM index locates its own reads without coordinates. */
-            bind->index_splits_by_reference =
-                !bam_index_is_bai_or_csi(idx) || bam_index_statistics_cover_alignments(idx);
-            bind->index_row_count_valid = bam_try_get_index_row_count(idx, &bind->index_row_count);
-            /* Without an estimate the planner takes this scan for a small one
-             * and may build a hash join on its rows. The index total covers
-             * the whole file, so a region query reports no estimate. */
-            uint64_t row_estimate = 0;
-            if (bind->n_regions == 0 && bind->index_splits_by_reference &&
-                bam_index_row_estimate(idx, &row_estimate)) {
-                duckdb_bind_set_cardinality(info, (idx_t)row_estimate, false);
+            /* The index totals describe the whole file. Only a full-file scan
+             * reads them, so a region query does not walk every reference of
+             * the index at bind. */
+            if (bind->n_regions == 0) {
+                /* A CRAM index locates its own reads without coordinates. */
+                bind->index_splits_by_reference =
+                    !bam_index_is_bai_or_csi(idx) || bam_index_statistics_cover_alignments(idx);
+                bind->index_row_count_valid =
+                    bam_try_get_index_row_count(idx, &bind->index_row_count);
+                /* Without an estimate the planner takes this scan for a small
+                 * one and may build a hash join on its rows. */
+                uint64_t row_estimate = 0;
+                if (bind->index_splits_by_reference &&
+                    bam_index_row_estimate(idx, &row_estimate)) {
+                    duckdb_bind_set_cardinality(info, (idx_t)row_estimate, false);
+                }
             }
             hts_idx_destroy(idx);
         }
