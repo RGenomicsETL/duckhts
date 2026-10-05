@@ -31,6 +31,7 @@ roh_diagnosis_run <- function(extension, output_dir, threads = 2L,
   count_paths <- vapply(declaration$count_artifacts[samples],
                         duckhtsbench::duckhts_bench_artifact_path, character(1L))
   genotype_path <- duckhtsbench::duckhts_bench_artifact_path(declaration$genotype_artifact)
+  roh_validation_check_inputs(con, declaration)
 
   DBI::dbExecute(con, sprintf(paste0(
     "CREATE TABLE counts AS SELECT sample_id, chrom, pos, ref, alt, ref_count, alt_count, af ",

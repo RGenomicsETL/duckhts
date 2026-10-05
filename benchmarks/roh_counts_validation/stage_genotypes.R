@@ -19,6 +19,33 @@ roh_validation_site_ids <- function(af_sites) {
     DBI::dbQuoteString(con, af_sites)))
 }
 
+# The identity of a genotype BCF as it is on disk: its record count, its
+# sample list in header order, and the SHA-256 of its records as
+# `bcftools view -H` writes them. Staging registers this identity and the
+# validation run checks it before decoding.
+roh_validation_genotype_identity <- function(path, bcftools = "/usr/local/bin/bcftools") {
+  if (length(path) != 1L || !file.exists(path) ||
+      length(bcftools) != 1L || !file.exists(bcftools)) {
+    stop("a genotype BCF and bcftools must be supplied", call. = FALSE)
+  }
+  run <- function(command) {
+    value <- system2("/bin/bash", c("-o", "pipefail", "-c", shQuote(command)), stdout = TRUE)
+    if (!is.null(attr(value, "status"))) {
+      stop("bcftools could not read the genotype BCF: ", path, call. = FALSE)
+    }
+    value
+  }
+  records <- paste(shQuote(bcftools), "view -H", shQuote(path))
+  digest <- run(paste(records, "| sha256sum"))
+  count <- run(paste(records, "| wc -l"))
+  if (length(digest) != 1L || length(count) != 1L) {
+    stop("could not digest the genotype BCF records", call. = FALSE)
+  }
+  sample_list <- run(paste(shQuote(bcftools), "query -l", shQuote(path)))
+  list(records = as.integer(count), samples = length(sample_list),
+       sample_list = sample_list, records_sha256 = sub(" .*$", "", digest))
+}
+
 stage_roh_validation_genotypes <- function(source_vcf, af_sites, samples, output,
                                            bcftools = "/usr/local/bin/bcftools",
                                            expected_source_sha256 = NULL,
@@ -89,13 +116,11 @@ stage_roh_validation_genotypes <- function(source_vcf, af_sites, samples, output
     stop("genotype BCF has ", length(record_ids), " records for ", length(site_ids),
          " AF sites; each site needs exactly one record", call. = FALSE)
   }
-  records_sha256 <- system2("/bin/bash", c("-o", "pipefail", "-c", shQuote(paste(
-    shQuote(bcftools), "view -H", shQuote(temporary), "| sha256sum"))), stdout = TRUE)
-  if (!is.null(attr(records_sha256, "status")) || length(records_sha256) != 1L) {
-    stop("could not digest the genotype BCF records", call. = FALSE)
+  identity <- roh_validation_genotype_identity(temporary, bcftools)[
+    c("records", "samples", "records_sha256")]
+  if (identity$records != length(record_ids) || identity$samples != length(samples)) {
+    stop("genotype BCF identity does not match its records and samples", call. = FALSE)
   }
-  identity <- list(records = length(record_ids), samples = length(samples),
-                   records_sha256 = sub(" .*$", "", records_sha256))
   if (!is.null(expected) &&
       (!identical(identity$records, as.integer(expected$records)) ||
        !identical(identity$samples, as.integer(expected$samples)) ||

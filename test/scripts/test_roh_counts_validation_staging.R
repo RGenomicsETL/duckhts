@@ -2,6 +2,8 @@
 # and cache hold a small VCF and an AF-site Parquet. Staging must keep the
 # requested samples in order, GT only, and exactly one record per AF site, and
 # must refuse to publish a BCF whose identity differs from the registered one.
+# The input checks of the validation run must refuse a cached genotype BCF or
+# counts Parquet that differs from its registered identity.
 # The run comparison used by the report is checked on hand-computed intervals.
 test_roh_counts_validation_staging <- function() {
   bcftools <- Sys.which("bcftools")
@@ -82,9 +84,11 @@ test_roh_counts_validation_staging <- function() {
               "transform", "consumer", "stage_order", "supplier_identity")
   row <- function(...) paste(c(...), collapse = "\t")
   source_sha256 <- unname(digest::digest(file = vcf_path, algo = "sha256"))
-  write_registry <- function(source_identity, identity) {
+  write_registry <- function(source_identity, identity, counts_identity = "") {
     path <- file.path(cache, "registry.tsv")
     writeLines(c(paste(header, collapse = "\t"),
+      row("fixture_counts", "test", "read_counts", "test", "local", "local_generated",
+          "fixture/counts.parquet", "copy_committed_fixture", "test", "1", counts_identity),
       row("fixture_source", "test", "source_vcf", "test", "local", "local_generated",
           "fixture/source.vcf", "copy_committed_fixture", "test", "1", source_identity),
       row("fixture_sites", "test", "af_sites", "test", "local", "local_generated",
@@ -123,6 +127,58 @@ test_roh_counts_validation_staging <- function() {
   accepted <- stage_roh_validation_genotypes_from_registry("fixture_genotypes", bcftools)
   stopifnot(file.exists(destination), file.exists(paste0(destination, ".csi")),
             identical(accepted$records_sha256, first$records_sha256))
+
+  # The identity read back from a published BCF is the one staging reported.
+  observed <- roh_validation_genotype_identity(destination, bcftools)
+  stopifnot(observed$records == 3L, observed$samples == 3L,
+            identical(observed$sample_list, c("S5", "S1", "S3")),
+            identical(observed$records_sha256, first$records_sha256))
+
+  # The run's input check accepts the registered BCF for the registered
+  # samples, and refuses another sample order or a replaced file.
+  source("benchmarks/roh_counts_validation/inputs.R")
+  refuses <- function(check, pattern) {
+    tryCatch({
+      check()
+      FALSE
+    }, error = function(error) grepl(pattern, conditionMessage(error)))
+  }
+  check_genotypes <- function(samples) {
+    roh_validation_check_genotypes("fixture_genotypes", samples, bcftools)
+  }
+  check_genotypes(c("S5", "S1", "S3"))
+  stopifnot(refuses(function() check_genotypes(c("S1", "S3", "S5")),
+                    "differs from the registered identity"))
+  replacement <- stage_roh_validation_genotypes(
+    source_vcf = vcf_path, af_sites = sites, samples = c("S5", "S1", "S2"),
+    output = file.path(cache, "replacement.bcf"), bcftools = bcftools)
+  stopifnot(file.copy(replacement$output, destination, overwrite = TRUE))
+  stopifnot(refuses(function() check_genotypes(c("S5", "S1", "S3")),
+                    "differs from the registered identity"))
+
+  # The same for read counts: one changed count changes the identity.
+  counts_path <- file.path(cache, "fixture", "counts.parquet")
+  con <- DBI::dbConnect(duckdb::duckdb(shared_home = FALSE))
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  write_counts <- function(alt_count) {
+    DBI::dbExecute(con, sprintf(paste(
+      "COPY (SELECT 'S1' AS sample_id, 'chr20' AS chrom, pos, 'A' AS ref, 'C' AS alt,",
+      "30 AS ref_count, alt_count, 0 AS other_count, 0.25::DOUBLE AS af, 'measured' AS status",
+      "FROM (VALUES (10::BIGINT, 0), (20::BIGINT, %d)) AS t(pos, alt_count))",
+      "TO %s (FORMAT PARQUET)"), alt_count, DBI::dbQuoteString(con, counts_path)))
+  }
+  write_counts(15L)
+  registered_counts <- roh_counts_identity(con, counts_path)
+  Sys.setenv(DUCKHTSBENCH_REGISTRY = write_registry(
+    paste0("sha256=", source_sha256), right_identity,
+    sprintf("sample=S1;rows=%d;counts_sha256=%s", registered_counts$rows,
+            registered_counts$counts_sha256)))
+  roh_validation_check_counts(con, "fixture_counts", "S1")
+  stopifnot(refuses(function() roh_validation_check_counts(con, "fixture_counts", "S2"),
+                    "differ from the registered identity"))
+  write_counts(14L)
+  stopifnot(refuses(function() roh_validation_check_counts(con, "fixture_counts", "S1"),
+                    "differ from the registered identity"))
 }
 
 # Hand-computed intervals, one-based and inclusive. Test runs cover 100 + 51
