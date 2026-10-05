@@ -78,5 +78,36 @@ test_bam_row_estimate <- function() {
   expect_equal(nrow(rduckhts_hts_index(con, cram)), 0L)
 }
 
+# An index that has alignments of a reference and no statistics for it cannot
+# locate the reads without coordinates. A full scan with it must still return
+# each record once, at any thread count.
+test_bam_index_without_statistics <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  bam <- system.file("extdata", "bam_scan_mixed.bam", package = "Rduckhts")
+  expect_true(nzchar(bam))
+  expected <- dbGetQuery(con, sprintf(paste(
+    "SELECT QNAME, FLAG, RNAME, POS FROM read_bam(%s, scan_mode := 'sequential',",
+    "decompression_threads := 0) ORDER BY ALL"), dbQuoteString(con, bam)))
+  expect_equal(nrow(expected), 5L)
+  for (index in c("nostats.bai", "nostats.legacy.bai")) {
+    index_path <- paste0(bam, ".", index)
+    expect_true(file.exists(index_path))
+    for (threads in c(1L, 2L, 4L, 8L)) {
+      dbExecute(con, sprintf("SET threads=%d", threads))
+      scanned <- dbGetQuery(con, sprintf(paste(
+        "SELECT QNAME, FLAG, RNAME, POS FROM read_bam(%s, index_path := %s,",
+        "decompression_threads := 0) ORDER BY ALL"),
+        dbQuoteString(con, bam), dbQuoteString(con, index_path)))
+      expect_equal(scanned, expected)
+    }
+    in_region <- dbGetQuery(con, sprintf(
+      "SELECT count(*) AS n FROM read_bam(%s, index_path := %s, region := 'chr2')",
+      dbQuoteString(con, bam), dbQuoteString(con, index_path)))
+    expect_equal(as.integer(in_region$n), 1L)
+  }
+}
+
 test_bam_full_scan()
 test_bam_row_estimate()
+test_bam_index_without_statistics()

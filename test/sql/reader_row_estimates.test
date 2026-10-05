@@ -47,6 +47,16 @@ SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.ba
 ----
 physical_plan	<REGEX>:.*"name": "READ_BAM".*"Estimated Cardinality": "2053".*
 
+# An index with alignments of a reference and no statistics for it reports no
+# estimate: a total without that reference could be far too low. Here the
+# index has only its no-coordinate count of 2, and the file has 5 records.
+query II
+EXPLAIN (FORMAT json)
+SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam',
+  index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.bai');
+----
+physical_plan	<!REGEX>:.*"Estimated Cardinality": "[25]".*
+
 # A CRAM index has no statistics, so an indexed CRAM reports no estimate, and
 # the index readers return no rows for it.
 query I

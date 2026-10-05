@@ -540,7 +540,7 @@ FILE_OFFSET is the BGZF virtual position immediately after each compressed BAM r
 
 ### Scanning
 
-scan_mode='sequential' streams rather than using indexed count/parallel paths and rejects region. NULL/empty region means no filter; empty comma-separated items and malformed known-contig intervals error. Unknown contigs follow HTSlib's skip policy.
+scan_mode='sequential' streams rather than using indexed count/parallel paths and rejects region. NULL/empty region means no filter; empty comma-separated items and malformed known-contig intervals error. Unknown contigs follow HTSlib's skip policy. An indexed full-file scan is split by reference across DuckDB threads and reports the index's row total to the planner as an estimate. Both need the optional per-reference statistics of a BAI or CSI: when a reference has alignments and no statistics, the scan is one sequential stream and no estimate is reported. A CRAM scan is split by reference and reports no estimate.
 
 ### Threads
 
