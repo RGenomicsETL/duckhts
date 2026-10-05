@@ -108,6 +108,47 @@ test_bam_index_without_statistics <- function() {
   }
 }
 
+# Region items "." (the whole file) and "*" (the reads without coordinates) need
+# positions that htslib takes from optional index statistics. Every index
+# variant must give the rows of a sequential scan filtered in R.
+test_bam_special_region_items <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  columns <- "QNAME, FLAG, RNAME, POS"
+  scan <- function(bam, index = NULL, region = NULL) {
+    arguments <- c(dbQuoteString(con, bam),
+      if (!is.null(index)) sprintf("index_path := %s", dbQuoteString(con, paste0(bam, ".", index))),
+      if (is.null(region)) "scan_mode := 'sequential'" else sprintf("region := %s", dbQuoteString(con, region)),
+      "decompression_threads := 0")
+    dbGetQuery(con, sprintf("SELECT %s FROM read_bam(%s) ORDER BY ALL",
+                            columns, paste(arguments, collapse = ", ")))
+  }
+  cases <- list(
+    mixed = list(indexes = c("bai", "csi", "legacy.bai", "legacy.csi", "nostats.bai", "nostats.legacy.bai"),
+                 regions = list("*" = "*", "chr1,*" = c("chr1", "*"), "." = NULL)),
+    all_unplaced = list(indexes = c("bai", "csi", "legacy.bai", "legacy.csi"),
+                        regions = list("*" = "*", "." = NULL)))
+  for (name in names(cases)) {
+    bam <- system.file("extdata", paste0("bam_scan_", name, ".bam"), package = "Rduckhts")
+    expect_true(nzchar(bam))
+    all_records <- scan(bam)
+    for (region in names(cases[[name]]$regions)) {
+      references <- cases[[name]]$regions[[region]]
+      expected <- if (is.null(references)) all_records else {
+        kept <- all_records[all_records$RNAME %in% references, , drop = FALSE]
+        rownames(kept) <- NULL
+        kept
+      }
+      expect_true(nrow(expected) > 0L)
+      for (index in cases[[name]]$indexes) {
+        expect_equal(scan(bam, index, region), expected,
+                     info = paste(name, index, region))
+      }
+    }
+  }
+}
+
 test_bam_full_scan()
 test_bam_row_estimate()
 test_bam_index_without_statistics()
+test_bam_special_region_items()

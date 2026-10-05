@@ -228,6 +228,12 @@ typedef struct {
     hts_idx_t *idx;
     hts_itr_t *itr;
 
+    /* Region scan of a BGZF BAM; see bam_region_scan_begin(). */
+    char **named_regions;        /* region items other than "*"; the strings belong to the bind data */
+    int unplaced_pending;        /* "*" was requested and is not read yet */
+    int unplaced_only;           /* keep only the records without a reference */
+    int64_t first_record_offset; /* BGZF position of the first record; -1 when the file is not a BGZF BAM */
+
     int done;
     int is_parallel;
     int needs_next_contig;
@@ -278,6 +284,7 @@ static void destroy_bam_local(void *data) {
     bam_local_init_data_t *l = (bam_local_init_data_t *)data;
     if (!l) return;
     if (l->itr) hts_itr_destroy(l->itr);
+    if (l->named_regions) duckdb_free(l->named_regions);
     if (l->idx) hts_idx_destroy(l->idx);
     if (l->rec) bam_destroy1(l->rec);
     if (l->hdr) sam_hdr_destroy(l->hdr);
@@ -452,6 +459,20 @@ static int bam_index_row_estimate(hts_idx_t *idx, uint64_t *out_estimate) {
 
     *out_estimate = total;
     return 1;
+}
+
+/* Whether a BAI or CSI gives the position where the reads without coordinates
+ * start. htslib derives it from the statistics of the references before them,
+ * so the statistics must cover every reference with alignments, and at least
+ * one reference must have statistics. */
+static int bam_index_locates_unplaced_reads(hts_idx_t *idx) {
+    if (!bam_index_is_bai_or_csi(idx) || !bam_index_statistics_cover_alignments(idx)) return 0;
+    int nseq = hts_idx_nseq(idx);
+    for (int tid = 0; tid < nseq; tid++) {
+        uint64_t mapped = 0, unmapped = 0;
+        if (hts_idx_get_stat(idx, tid, &mapped, &unmapped) == 0) return 1;
+    }
+    return 0;
 }
 
 /* ================================================================
@@ -802,6 +823,89 @@ static void bam_read_global_init(duckdb_init_info info) {
 }
 
 /* ================================================================
+ * Region scans
+ *
+ * Named regions go to htslib's multi-region iterator, which removes the
+ * overlap between them. Two items need positions that htslib takes from the
+ * optional statistics of a BAI or CSI: "." (the whole file) and "*" (the reads
+ * without coordinates). When the statistics are absent, that iterator seeks
+ * to the header and fails, or returns no record at all. For a BGZF BAM,
+ * read_bam therefore reads these two items itself:
+ *   - "." is the whole file: no iterator, one sequential read from the first
+ *     record. It includes every other item of the list.
+ *   - "*" is read after the named regions: from the position where the reads
+ *     without coordinates start when the index locates it, otherwise from the
+ *     first record, and only the records without a reference are kept.
+ * A CRAM index locates both, so a CRAM keeps htslib's iterator for the whole
+ * list.
+ * ================================================================ */
+
+/* Starts the read of the records without a reference. Returns 0 on failure. */
+static int bam_unplaced_reads_begin(bam_local_init_data_t *local) {
+    if (local->itr) {
+        hts_itr_destroy(local->itr);
+        local->itr = NULL;
+    }
+    int64_t offset = local->first_record_offset;
+    if (bam_index_locates_unplaced_reads(local->idx)) {
+        hts_itr_t *tail = sam_itr_queryi(local->idx, HTS_IDX_NOCOOR, 0, 0);
+        if (tail) {
+            if (tail->curr_off != 0) offset = (int64_t)tail->curr_off;
+            hts_itr_destroy(tail);
+        }
+    }
+    if (offset < 0 || bgzf_seek(local->fp->fp.bgzf, offset, SEEK_SET) < 0) return 0;
+    local->unplaced_pending = 0;
+    local->unplaced_only = 1;
+    return 1;
+}
+
+/* Prepares a region scan. Returns 0 and writes `error` on failure. */
+static int bam_region_scan_begin(const bam_bind_data_t *bind, bam_local_init_data_t *local,
+                                 char *error, size_t error_size) {
+    char **regions = bind->regions;
+    unsigned int region_count = bind->n_regions;
+
+    if (local->first_record_offset >= 0) {
+        int whole_file = 0;
+        int unplaced = 0;
+        for (unsigned int i = 0; i < bind->n_regions; i++) {
+            if (strcmp(bind->regions[i], ".") == 0) whole_file = 1;
+            if (strcmp(bind->regions[i], "*") == 0) unplaced = 1;
+        }
+        /* No iterator: the scan reads every record from the first one. */
+        if (whole_file) return 1;
+        if (unplaced) {
+            local->named_regions = duckdb_malloc(bind->n_regions * sizeof(*local->named_regions));
+            if (!local->named_regions) {
+                snprintf(error, error_size, "read_bam: out of memory preparing the region list");
+                return 0;
+            }
+            region_count = 0;
+            for (unsigned int i = 0; i < bind->n_regions; i++) {
+                if (strcmp(bind->regions[i], "*") != 0) {
+                    local->named_regions[region_count++] = bind->regions[i];
+                }
+            }
+            regions = local->named_regions;
+            local->unplaced_pending = 1;
+        }
+    }
+
+    if (region_count > 0) {
+        local->itr = sam_itr_regarray(local->idx, local->hdr, regions, region_count);
+    }
+    if (local->itr) return 1;
+    if (local->unplaced_pending) {
+        if (bam_unplaced_reads_begin(local)) return 1;
+        snprintf(error, error_size, "read_bam: failed to position at the reads without coordinates");
+        return 0;
+    }
+    snprintf(error, error_size, "No reads found for region(s): %s", bind->region);
+    return 0;
+}
+
+/* ================================================================
  * Local Init — per-thread: own file handle, index, iterator
  * ================================================================ */
 
@@ -885,6 +989,14 @@ static void bam_read_local_init(duckdb_init_info info) {
         return;
     }
 
+    /* A BGZF BAM can be read again from its first record. */
+    {
+        const htsFormat *format = hts_get_format(local->fp);
+        local->first_record_offset =
+            (local->fp->is_bgzf && format->format == bam && format->compression == bgzf)
+                ? bgzf_tell(local->fp->fp.bgzf) : -1;
+    }
+
     /* Allocate a reusable bam1_t record */
     local->rec = bam_init1();
     if (!local->rec) {
@@ -910,15 +1022,10 @@ static void bam_read_local_init(duckdb_init_info info) {
         }
     }
 
-    /* User-supplied region(s): use sam_itr_regarray for multi-region support.
-     * htslib handles overlap deduplication internally. */
+    /* User-supplied region(s). */
     if (!is_parallel && bind->n_regions > 0 && local->idx) {
-        local->itr = sam_itr_regarray(local->idx, local->hdr,
-                                       bind->regions, bind->n_regions);
-        if (!local->itr) {
-            char err[512];
-            snprintf(err, sizeof(err), "No reads found for region(s): %s",
-                     bind->region);
+        char err[512];
+        if (!bam_region_scan_begin(bind, local, err, sizeof(err))) {
             duckdb_init_set_error(info, err);
             destroy_bam_local(local);
             return;
@@ -1029,6 +1136,17 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 duckdb_data_chunk_set_size(output, 0);
                 return;
             }
+            if (local->unplaced_pending) {
+                /* The named regions are done; the reads without coordinates follow. */
+                if (!bam_unplaced_reads_begin(local)) {
+                    duckdb_function_set_error(info,
+                        "read_bam: failed to position at the reads without coordinates");
+                    local->done = 1;
+                    duckdb_data_chunk_set_size(output, 0);
+                    return;
+                }
+                continue;
+            }
             if (local->is_parallel && ret == -1) {
                 /* Try next contig and keep filling this chunk if we can. */
                 local->needs_next_contig = 1;
@@ -1051,6 +1169,8 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
 
         bam1_t *b = local->rec;
         int seq_len = 0;
+
+        if (local->unplaced_only && b->core.tid >= 0) continue;
 
         if (local->need_seq_buffers) {
             seq_len = b->core.l_qseq;

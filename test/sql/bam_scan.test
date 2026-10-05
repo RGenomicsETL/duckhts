@@ -813,3 +813,322 @@ SELECT
    EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.legacy.bai', decompression_threads := 0))));
 ----
 5	5	0
+
+# Region items "." (the whole file) and "*" (the reads without coordinates).
+# htslib locates both from the optional statistics of a BAI or CSI. Each case
+# is compared with a sequential scan filtered in SQL, for every index variant:
+# with statistics, without the trailing count, and without statistics.
+statement ok
+SET threads=4;
+
+# mixed: bam/bai, region '*'. The two reads without coordinates.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.bai', region := '*', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.bai', region := '*', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.bai', region := '*', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME = '*'))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME = '*') EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.bai', region := '*', decompression_threads := 0))));
+----
+2	2	0
+
+# mixed: bam/bai, region 'chr1,*'. A named region, then the reads without coordinates.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.bai', region := 'chr1,*', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.bai', region := 'chr1,*', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.bai', region := 'chr1,*', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME IN ('chr1', '*')))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME IN ('chr1', '*')) EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.bai', region := 'chr1,*', decompression_threads := 0))));
+----
+4	4	0
+
+# mixed: bam/bai, region '.'. The whole file.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.bai', region := '.', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.bai', region := '.', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.bai', region := '.', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE true))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE true) EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.bai', region := '.', decompression_threads := 0))));
+----
+5	5	0
+
+# mixed: bam/csi, region '*'. The two reads without coordinates.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.csi', region := '*', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.csi', region := '*', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.csi', region := '*', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME = '*'))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME = '*') EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.csi', region := '*', decompression_threads := 0))));
+----
+2	2	0
+
+# mixed: bam/csi, region 'chr1,*'. A named region, then the reads without coordinates.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.csi', region := 'chr1,*', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.csi', region := 'chr1,*', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.csi', region := 'chr1,*', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME IN ('chr1', '*')))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME IN ('chr1', '*')) EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.csi', region := 'chr1,*', decompression_threads := 0))));
+----
+4	4	0
+
+# mixed: bam/csi, region '.'. The whole file.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.csi', region := '.', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.csi', region := '.', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.csi', region := '.', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE true))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE true) EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.csi', region := '.', decompression_threads := 0))));
+----
+5	5	0
+
+# mixed: bam/legacy.bai, region '*'. The two reads without coordinates.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.bai', region := '*', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.bai', region := '*', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.bai', region := '*', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME = '*'))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME = '*') EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.bai', region := '*', decompression_threads := 0))));
+----
+2	2	0
+
+# mixed: bam/legacy.bai, region 'chr1,*'. A named region, then the reads without coordinates.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.bai', region := 'chr1,*', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.bai', region := 'chr1,*', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.bai', region := 'chr1,*', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME IN ('chr1', '*')))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME IN ('chr1', '*')) EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.bai', region := 'chr1,*', decompression_threads := 0))));
+----
+4	4	0
+
+# mixed: bam/legacy.bai, region '.'. The whole file.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.bai', region := '.', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.bai', region := '.', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.bai', region := '.', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE true))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE true) EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.bai', region := '.', decompression_threads := 0))));
+----
+5	5	0
+
+# mixed: bam/legacy.csi, region '*'. The two reads without coordinates.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.csi', region := '*', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.csi', region := '*', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.csi', region := '*', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME = '*'))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME = '*') EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.csi', region := '*', decompression_threads := 0))));
+----
+2	2	0
+
+# mixed: bam/legacy.csi, region 'chr1,*'. A named region, then the reads without coordinates.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.csi', region := 'chr1,*', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.csi', region := 'chr1,*', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.csi', region := 'chr1,*', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME IN ('chr1', '*')))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME IN ('chr1', '*')) EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.csi', region := 'chr1,*', decompression_threads := 0))));
+----
+4	4	0
+
+# mixed: bam/legacy.csi, region '.'. The whole file.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.csi', region := '.', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.csi', region := '.', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.csi', region := '.', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE true))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE true) EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.legacy.csi', region := '.', decompression_threads := 0))));
+----
+5	5	0
+
+# mixed: bam/nostats.bai, region '*'. The two reads without coordinates.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.bai', region := '*', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.bai', region := '*', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.bai', region := '*', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME = '*'))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME = '*') EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.bai', region := '*', decompression_threads := 0))));
+----
+2	2	0
+
+# mixed: bam/nostats.bai, region 'chr1,*'. A named region, then the reads without coordinates.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.bai', region := 'chr1,*', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.bai', region := 'chr1,*', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.bai', region := 'chr1,*', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME IN ('chr1', '*')))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME IN ('chr1', '*')) EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.bai', region := 'chr1,*', decompression_threads := 0))));
+----
+4	4	0
+
+# mixed: bam/nostats.bai, region '.'. The whole file.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.bai', region := '.', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.bai', region := '.', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.bai', region := '.', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE true))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE true) EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.bai', region := '.', decompression_threads := 0))));
+----
+5	5	0
+
+# mixed: bam/nostats.legacy.bai, region '*'. The two reads without coordinates.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.legacy.bai', region := '*', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.legacy.bai', region := '*', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.legacy.bai', region := '*', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME = '*'))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME = '*') EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.legacy.bai', region := '*', decompression_threads := 0))));
+----
+2	2	0
+
+# mixed: bam/nostats.legacy.bai, region 'chr1,*'. A named region, then the reads without coordinates.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.legacy.bai', region := 'chr1,*', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.legacy.bai', region := 'chr1,*', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.legacy.bai', region := 'chr1,*', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME IN ('chr1', '*')))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME IN ('chr1', '*')) EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.legacy.bai', region := 'chr1,*', decompression_threads := 0))));
+----
+4	4	0
+
+# mixed: bam/nostats.legacy.bai, region '.'. The whole file.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.legacy.bai', region := '.', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.legacy.bai', region := '.', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.legacy.bai', region := '.', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE true))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE true) EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam.nostats.legacy.bai', region := '.', decompression_threads := 0))));
+----
+5	5	0
+
+# all_unplaced: bam/bai, region '*'. No reference has alignments.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.bai', region := '*', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.bai', region := '*', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.bai', region := '*', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME = '*'))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME = '*') EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.bai', region := '*', decompression_threads := 0))));
+----
+2053	2053	0
+
+# all_unplaced: bam/bai, region '.'. The whole file.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.bai', region := '.', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.bai', region := '.', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.bai', region := '.', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE true))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE true) EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.bai', region := '.', decompression_threads := 0))));
+----
+2053	2053	0
+
+# all_unplaced: bam/csi, region '*'. No reference has alignments.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.csi', region := '*', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.csi', region := '*', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.csi', region := '*', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME = '*'))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME = '*') EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.csi', region := '*', decompression_threads := 0))));
+----
+2053	2053	0
+
+# all_unplaced: bam/csi, region '.'. The whole file.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.csi', region := '.', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.csi', region := '.', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.csi', region := '.', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE true))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE true) EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.csi', region := '.', decompression_threads := 0))));
+----
+2053	2053	0
+
+# all_unplaced: bam/legacy.bai, region '*'. No reference has alignments.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.bai', region := '*', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.bai', region := '*', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.bai', region := '*', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME = '*'))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME = '*') EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.bai', region := '*', decompression_threads := 0))));
+----
+2053	2053	0
+
+# all_unplaced: bam/legacy.bai, region '.'. The whole file.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.bai', region := '.', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.bai', region := '.', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.bai', region := '.', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE true))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE true) EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.bai', region := '.', decompression_threads := 0))));
+----
+2053	2053	0
+
+# all_unplaced: bam/legacy.csi, region '*'. No reference has alignments.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.csi', region := '*', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.csi', region := '*', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.csi', region := '*', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME = '*'))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE RNAME = '*') EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.csi', region := '*', decompression_threads := 0))));
+----
+2053	2053	0
+
+# all_unplaced: bam/legacy.csi, region '.'. The whole file.
+query III
+SELECT
+ (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.csi', region := '.', decompression_threads := 0)),
+ (SELECT count(QNAME) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.csi', region := '.', decompression_threads := 0)),
+ (SELECT count(*) FROM (
+  (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.csi', region := '.', decompression_threads := 0) EXCEPT ALL SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE true))
+  UNION ALL
+  (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE true) EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.csi', region := '.', decompression_threads := 0))));
+----
+2053	2053	0

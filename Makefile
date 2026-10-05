@@ -299,6 +299,12 @@ test-roh-counts-staging:
 test-roh-counts-validation-staging:
 	Rscript test/scripts/test_roh_counts_validation_staging.R
 
+# Maintainer check: read_bam against samtools over every indexed fixture, index
+# variant and region list. It needs samtools and a built release extension.
+.PHONY: test-bam-scan-matrix
+test-bam-scan-matrix:
+	Rscript test/scripts/check_bam_scan_matrix.R build/release/duckhts.duckdb_extension
+
 test-somalier-statistical:
 	$(call compile_somalier_campaign_test,Rscript test/scripts/somalier_statistical_campaign.R "$$tmp/somalier_native_test")
 
