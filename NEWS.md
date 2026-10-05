@@ -298,6 +298,24 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   lacks them for a reference with alignments, an index with no statistics, and
   a CRAM index give none.
 
+- `read_bam` now returns the right rows for the region items `*` (the reads
+  without coordinates) and `.` (the whole file) whatever statistics the index
+  has. htslib locates both from the optional per-reference statistics of a BAI
+  or CSI. Without them, `region := '*'` failed with "failed to read
+  SAM/BAM/CRAM record" or returned no rows, and `region := '.'` could return no
+  rows; an all-unplaced BAM failed even with a normal index. For a BAM,
+  `read_bam` now reads these two items itself: from the position where the
+  reads without coordinates start when the index locates it, otherwise
+  sequentially. `samtools view -M` has the same failures. Named regions and
+  CRAM are unchanged. `make test-bam-scan-matrix` compares `read_bam` with
+  samtools over every indexed fixture, index variant and region list (964
+  cells).
+
+- A `read_bam` region query no longer walks every reference of the index at
+  bind. The index totals and the split-by-reference check describe the whole
+  file, so only a full-file scan computes them. No timing is claimed: no
+  checked-in benchmark separates the bind time of a region query.
+
 - `read_bam` no longer repeats rows when a BAI or CSI has alignments of a
   reference and no statistics for it. The SAM specification makes those
   statistics optional, and htslib uses them to find where the reads without
