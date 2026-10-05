@@ -6,6 +6,11 @@ Preview of 2.0.0, still in development. The sections below describe what 2.0.0 w
   `read_bed()` plans better: the bundled extension now gives DuckDB a row
   estimate for a whole-file indexed scan.
 
+- `rduckhts_bam()` and `read_bam()` return the right rows for the region items
+  `*` (reads without coordinates) and `.` (the whole file) when a BAM index has
+  no per-reference statistics, and for a BAM in which no read is placed. These
+  cases failed or returned no rows.
+
 - `rduckhts_bam()` and `read_bam()` with a `region` no longer walk every
   reference of the index when the query is prepared; only a full-file scan
   needs that work.
