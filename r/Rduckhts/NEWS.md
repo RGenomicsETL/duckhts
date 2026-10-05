@@ -6,6 +6,11 @@ Preview of 2.0.0, still in development. The sections below describe what 2.0.0 w
   `read_bed()` plans better: the bundled extension now gives DuckDB a row
   estimate for a whole-file indexed scan.
 
+- `rduckhts_bam()` and `read_bam()` no longer repeat rows when a BAI or CSI index
+  has alignments of a reference and no statistics for it (the statistics are
+  optional in both formats). A full-file scan with more than one thread could
+  return some records twice.
+
 - Reading an indexed CRAM with `rduckhts_bam()`, `rduckhts_hts_index()` or
   `rduckhts_hts_index_spans()` no longer reads past the end of the CRAM index
   object. Results are unchanged.

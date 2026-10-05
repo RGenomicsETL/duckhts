@@ -294,8 +294,17 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   `scan_mode := 'sequential'`, and for `read_bed` the default
   `error_policy := 'error'`. `read_tabix` and `read_bed` need complete index
   statistics. `read_bam` sums the statistics the index has, so a BAM whose index
-  lacks them for references without reads still gets an estimate; an index with
-  no statistics, and a CRAM index, give none.
+  lacks them for references without reads still gets an estimate. An index that
+  lacks them for a reference with alignments, an index with no statistics, and
+  a CRAM index give none.
+
+- `read_bam` no longer repeats rows when a BAI or CSI has alignments of a
+  reference and no statistics for it. The SAM specification makes those
+  statistics optional, and htslib uses them to find where the reads without
+  coordinates start. Without them a full-file scan split by reference started
+  its last partition at the wrong place: a 5-record file returned 5, 6 or 8
+  rows depending on the thread count. Such an index now gives one sequential
+  scan. Region queries were not affected.
 
 - `read_bam`, `read_hts_index` and `read_hts_index_spans` no longer read BAI/CSI
   fields from a CRAM index. htslib returns a CRAM index as a smaller object
