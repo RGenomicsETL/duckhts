@@ -1,5 +1,13 @@
 # duckhtsbench 0.0.0.9001
 
+- register `roh_counts_validation_chr20_genotypes`: FORMAT/GT genotypes of
+  NA18507, HG00403 and HG00188 at the chr20 ROH evaluation sites, derived from
+  `roh_ancestry_chr20_source` and `roh_ancestry_chr20_af_sites` by
+  `benchmarks/roh_counts_validation/stage_genotypes.R`, with a record and sample
+  identity and a network-free staging test. `benchmark_roh_counts_validation.Rmd`
+  reads it with the three `roh_counts_chr20_*` artifacts and checks all four
+  identities before decoding.
+
 - register the `genbank-plasmid` workload: the first four
   `plasmid.N.genomic.gbff.gz` parts of NCBI RefSeq release 237, each pinned by
   NCBI's published MD5, and three derived record files joining 1, 2 and 4 of

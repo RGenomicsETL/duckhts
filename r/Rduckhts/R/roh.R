@@ -71,10 +71,12 @@
 #' @param overwrite Whether an existing output table may be replaced.
 #' @param max_sites Most sites one sample and chromosome may hold, from 1 to
 #'   100,000,000. A larger group is an error.
-#' @param max_site_bytes Most bytes the site buffers of all samples and
-#'   chromosomes may hold at once (16 bytes per site, 24 for read counts),
-#'   shared by the decodes running in the process. Exceeding it is an error:
-#'   decode fewer samples per call or raise it.
+#' @param max_site_bytes Bound on the bytes the site buffers hold at once (16
+#'   bytes per site, 24 for read counts). A decode does not grow a buffer when
+#'   the bytes held by all ROH decodes in the process would pass its own
+#'   `max_site_bytes`; decodes that run at the same time with different values
+#'   each apply their own. Exceeding it is an error: decode fewer samples per
+#'   call or raise it.
 #' @return A data frame (or invisible `TRUE` when `table_name` is given) with one
 #'   row per run: `sample`, `chrom`, `start` and `end` (one-based, inclusive,
 #'   the first and last marker), `length` (`end - start + 1`), `n_markers` and
@@ -153,6 +155,14 @@ rduckhts_roh <- function(
 #' fraction is supplied by the caller, for example from a separate estimate;
 #' it is not estimated here. A contaminant from a different population than
 #' `af` describes is approximated by `af`.
+#'
+#' `seq_error` is an error of one read, and the reads of a site multiply. A
+#' site with balanced reads excludes both homozygous genotypes whatever
+#' `seq_error` is. The `gt_error` of [rduckhts_roh()] is an error of the site,
+#' so a run can continue through one heterozygous call. The read-count decode
+#' therefore corresponds to the genotype decode with no tolerated genotype
+#' error, and reports fewer bases in runs than `rduckhts_roh(gt_error = 30)`
+#' on the same sample.
 #'
 #' @param con A DuckDB connection with DuckHTS loaded.
 #' @param counts_table Name of a table or view of read counts (see Details).

@@ -432,6 +432,34 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "FROM __dht_compared)")) {
         return false;
     }
+    /* All unordered sample pairs of one sketch relation. Each sketch passes
+     * the content check once, in a materialized relation; the pair function
+     * then compares checked sketches without repeating that check, so the
+     * content checks grow with samples and not with pairs. */
+    if (!duckhts_register_sql(&registration,
+        "CREATE OR REPLACE MACRO duckhts_somalier_relatedness_all_pairs("
+        "sketches_table, max_sites := 1000000) AS TABLE "
+        "WITH __dht_checked AS MATERIALIZED (SELECT sketch FROM query_table(sketches_table) "
+        "WHERE __duckhts_somalier_sketch_valid(sketch, CAST(max_sites AS UBIGINT))), "
+        "__dht_guard AS MATERIALIZED (SELECT CASE "
+        "WHEN count(*) != count(DISTINCT sketch.sample_id) THEN "
+        "error('duckhts_somalier_relatedness_all_pairs: sketches must have one sketch "
+        "per distinct sample') "
+        /* Checked here and not only by the pair function: a query that reads
+         * no pair column must not skip the identity check. */
+        "WHEN count(DISTINCT struct_pack(assembly := sketch.assembly, "
+        "panel_sha256 := sketch.panel_sha256, site_count := sketch.site_count, "
+        "min_depth := sketch.min_depth, min_het_balance := sketch.min_het_balance, "
+        "hom_balance_cutoff := sketch.hom_balance_cutoff)) > 1 THEN "
+        "error('duckhts_somalier_relatedness_all_pairs: sketches must share one assembly, "
+        "panel digest, site count and classification settings') "
+        "ELSE true END AS valid FROM __dht_checked) "
+        "SELECT unnest(__duckhts_somalier_relatedness_checked(a.sketch, b.sketch, "
+        "CAST(max_sites AS UBIGINT))) "
+        "FROM __dht_guard AS g JOIN __dht_checked AS a ON g.valid "
+        "JOIN __dht_checked AS b ON a.sketch.sample_id < b.sketch.sample_id")) {
+        return false;
+    }
     if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckhts_somalier_frequency_sha256("
         "frequency_table, panel_table) AS ("

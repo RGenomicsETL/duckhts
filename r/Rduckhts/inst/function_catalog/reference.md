@@ -1314,7 +1314,7 @@ One row per run: sample, chrom, start and end (one-based, inclusive, the first a
 
 ### Genotype evidence
 
-gt_error NULL uses PL. A numeric gt_error (phred, bcftools -G, for example 30) uses diploid GT calls 0/0, 0/1 and 1/1 and ignores PL; other or missing genotypes are skipped, and FORMAT/PL need not exist.
+gt_error NULL uses PL. A numeric gt_error (phred, bcftools -G, for example 30) uses diploid GT calls 0/0, 0/1 and 1/1 and ignores PL; other or missing genotypes are skipped, and FORMAT/PL need not exist. gt_error is an error of the site: the called genotype has likelihood close to 1 and a genotype one allele away has 10^(-gt_error/10), so one call that contradicts a run counts against it by that factor and no more, whatever caused it. A run can therefore continue through an isolated heterozygous call; a larger gt_error makes that rarer.
 
 ### Transitions
 
@@ -1322,7 +1322,7 @@ hw_to_az and az_to_hw are the per-base-pair transition probabilities (bcftools -
 
 ### Memory
 
-DuckDB manages, and can spill, the scan and the joins. The sites of each sample and chromosome are held in native buffers of 16 bytes per site until that sample and chromosome is decoded, so memory follows samples times sites. max_sites caps one sample and chromosome (default 20,000,000; at most 100,000,000). max_site_bytes caps the buffers of every sample and chromosome held at once (default 4 GiB) and is shared by the decodes running in the process. Exceeding either limit is an error: decode fewer samples per query with samples, or raise the limit. Decoding one sample and chromosome also needs 38 bytes per site of workspace in each thread. Model parameters and limits are checked even when the input has no record.
+DuckDB manages, and can spill, the scan and the joins. The sites of each sample and chromosome are held in native buffers of 16 bytes per site until that sample and chromosome is decoded, so memory follows samples times sites. max_sites caps one sample and chromosome (default 20,000,000; at most 100,000,000). max_site_bytes (default 4 GiB) bounds the buffers held at once: a decode does not grow a buffer when the bytes held by all ROH decodes in the process would pass its own max_site_bytes. Decodes that run at the same time with different values each apply their own, so the process total can pass the smaller value while the decode with the larger value allocates. Exceeding either limit is an error: decode fewer samples per query with samples, or raise the limit. Decoding one sample and chromosome also needs 38 bytes per site of workspace in each thread. Model parameters and limits are checked even when the input has no record.
 
 ### Limits
 
@@ -1425,6 +1425,10 @@ counts_table is a table or view with sample_id, chrom, pos (one-based), ref_coun
 ### Read model
 
 Each read shows the counted allele with probability (1 - contamination) * q + contamination * c, where q is seq_error, 1/2 or 1 - seq_error for zero, one or two copies, and c = af * (1 - seq_error) + (1 - af) * seq_error is the chance that a read from a contaminating individual of the same population shows it. Reads are independent and the binomial coefficient is omitted. The resulting genotype likelihoods enter the bcftools roh model in place of PL. This emission is a DuckHTS extension; bcftools roh has no read-count mode.
+
+### Relation to genotype evidence
+
+seq_error is an error of one read, and the reads of a site multiply. A site with balanced reads excludes both homozygous genotypes whatever seq_error is, and the read model has no term for a site whose reads do not reflect the sample's genotype. The read-count decode therefore corresponds to the GT decode with no tolerated genotype error: it ends a run at a heterozygous site that duckhts_roh with gt_error := 30 would pass through, and reports fewer bases in runs. benchmarks/benchmark_roh_counts_validation.md measures this on three 1000 Genomes samples.
 
 ### Skipped sites
 
@@ -1608,12 +1612,46 @@ The struct retains sample and panel identities, method version, status, jointly-
 
 ### Execution
 
-Both sketches must have identical panel digests, site counts and classification settings. Mask words are borrowed directly; comparison allocates no pair-sized workspace. SQL chooses the requested pair relation and output ordering.
+Both sketches must have identical panel digests, site counts and classification settings. The contents of both sketches are checked for every call, so comparing every pair of a cohort repeats that check for each pair; use duckhts_somalier_relatedness_all_pairs for all pairs. Mask words are borrowed directly; comparison allocates no pair-sized workspace. SQL chooses the requested pair relation and output ordering.
 
 ### Examples
 
 ```sql
-SELECT unnest(duckhts_somalier_relatedness(a.sketch, b.sketch, 1000000)) FROM sample_sketches a JOIN sample_sketches b ON a.sketch.sample_id < b.sketch.sample_id;
+SELECT unnest(duckhts_somalier_relatedness(a.sketch, b.sketch, 1000000)) FROM selected_pairs p JOIN sample_sketches a ON a.sketch.sample_id = p.sample_a JOIN sample_sketches b ON b.sketch.sample_id = p.sample_b;
+```
+
+## duckhts_somalier_relatedness_all_pairs
+
+Compute Somalier-derived relatedness and concordance statistics for every unordered sample pair of one sketch relation.
+
+Signature:
+
+```sql
+duckhts_somalier_relatedness_all_pairs(sketches_table, max_sites := 1000000)
+```
+
+Returns:
+
+```
+table
+```
+
+### Input
+
+sketches_table names a relation with one non-NULL sketch column per sample, as duckhts_somalier_prepare_sketches returns. Two sketches of one sample, a NULL sketch, a sketch with more sites than max_sites, or a sketch whose masks do not match its stored content digest is an error. All sketches must share assembly, panel digest, site count and classification settings; a mixed relation is an error. These checks run once over the relation, so they hold for a query that reads no pair column, for example count(*).
+
+### Results
+
+One row per unordered pair with sample_a < sample_b, with the fields of duckhts_somalier_relatedness as columns. The rows equal those of duckhts_somalier_relatedness over the same pairs. No row order is guaranteed.
+
+### Execution
+
+Each sketch is content-checked once and the pairs are compared from the checked sketches, so the content checks grow with the number of samples and the comparisons with pairs times sites. The output has N(N-1)/2 rows for N samples and is not capped. The pair comparison runs in one thread.
+
+### Examples
+
+```sql
+SELECT * FROM duckhts_somalier_relatedness_all_pairs('sample_sketches');
 ```
 
 ## duckhts_somalier_verify_relatedness

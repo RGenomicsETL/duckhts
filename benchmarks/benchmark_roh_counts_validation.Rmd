@@ -1,0 +1,346 @@
+---
+title: "ROH from read counts: real-data validation on chr20"
+output:
+  github_document:
+    html_preview: false
+    pandoc_args: ["--wrap=preserve", "--columns=400"]
+---
+
+`duckhts_roh_counts` finds runs of homozygosity from allele read counts, with a
+per-read error and a contamination fraction. Its SQL tests compare it with the
+same model computed in SQL and with a synthetic titration. This report adds two
+checks on real data, as section 2 of
+<https://github.com/RGenomicsETL/duckhts/issues/329> asks:
+
+- **(a) Agreement.** The read-count path against the VCF genotype path, on the
+  same samples, sites and allele frequencies.
+- **(b) Titration.** Real read counts of two samples mixed at a known fraction,
+  decoded without and with the contamination term.
+
+The scope is small on purpose: chr20, three samples, no timing. It makes no
+performance claim.
+
+## Inputs
+
+All inputs are `r/duckhtsbench` registry artifacts.
+
+- Read counts of NA18507, HG00403 and HG00188 at the 108,757 chr20 evaluation
+  sites of the ROH ancestry evaluation: `roh_counts_chr20_na18507`,
+  `roh_counts_chr20_hg00403` and `roh_counts_chr20_hg00188`. They come from the
+  1000 Genomes 30× CRAMs (`benchmarks/roh_counts_stage.R`). Each row has the
+  site's `af`, the source VCF's INFO/AF of the ALT allele, clamped to
+  [0.001, 0.999].
+- Genotypes of the same three samples at the same sites:
+  `roh_counts_validation_chr20_genotypes`. It is derived from the phased chr20
+  VCF of the 3,202 samples (`roh_ancestry_chr20_source`) and the site list
+  (`roh_ancestry_chr20_af_sites`) by
+  `benchmarks/roh_counts_validation/stage_genotypes.R`: three samples, FORMAT/GT
+  only, exactly one record per site. Staging checks the SHA-256 of the cached
+  source and the record digest of the output.
+
+Before any decode, the run compares each cached input with the identity its
+registry row records: the sample, row count and canonical counts digest of
+each read-count file, and the sample order, record count and record digest of
+the genotype BCF (`benchmarks/roh_counts_validation/inputs.R`). A file that
+differs stops the render.
+
+The read counts and the genotypes come from the same 30× sequencing of the
+1000 Genomes samples. The VCF path is an independent decode path, with joint calling and phasing behind its
+genotypes. It is not an independent measurement of the samples.
+
+## Design, declared before any run was decoded
+
+The values below are in `benchmarks/roh_counts_validation/declaration.R`. That
+file and this section were committed before the first decode.
+
+**Denominator.** FROH is the bases in runs divided by the span from the first
+to the last evaluation site on chr20, inclusive. A run's bases are
+`end - start + 1`.
+
+**Run classes.** Every metric is given for all runs and for long runs, those of
+at least 1,000,000 bases. Each decode is filtered by its own run lengths.
+
+**Metrics**, per sample and run class, for a test decode against a reference:
+
+- FROH of each decode and the difference, test minus reference;
+- the base-level overlap as a Jaccard index: bases in the runs of both decodes
+  divided by bases in the runs of either. It is undefined when neither decode
+  has a run in the class.
+
+**Tolerance.**
+
+- The absolute FROH difference is at most 0.01.
+- The Jaccard index is at least 0.9 for long runs and at least 0.7 for all runs.
+- A class in which neither decode has a run agrees. A class in which only one
+  decode has a run has a Jaccard index of 0 and fails.
+
+Justification: both paths use the same sites, frequencies and hidden Markov
+model, and differ only in the genotype evidence (a called genotype at phred 30,
+or about 30 reads at the default `seq_error`). A long run rests on hundreds of
+sites and should not depend on that difference. A short run rests on a few
+sites, so its ends can move.
+
+**(a) Agreement.** The reference is `duckhts_roh_af_table(..., gt_error := 30)`
+on the genotype BCF, with the `af` of the counts as the frequency relation. The
+test is `duckhts_roh_counts` on the counts with the default `seq_error` (0.001)
+and `contamination := 0`. A sample passes a run class when it meets the
+tolerance.
+
+**(b) Titration.** For each ordered pair (receiver, contaminant) of the three
+samples and each α in 1%, 2%, 5% and 10%, the mixed count of each allele at
+each site is
+
+    Binomial(receiver count, 1 − α) + Binomial(contaminant count, α).
+
+This thins real counts and adds them. It is not a mixture of reads in a CRAM:
+no read is realigned, filtered or counted again, and the two samples' counts
+are drawn independently at each site. The mean depth stays close to that of
+one sample.
+
+Cell *k* of the grid, in the order receiver, contaminant, α, draws with
+`set.seed(20261004 + k)` and R's default generators. The draws are, in order:
+receiver REF, contaminant REF, receiver ALT, contaminant ALT.
+
+Each mixture is decoded twice: with `contamination := 0` and with
+`contamination := α`. The reference is the decode of the receiver's unmixed
+counts from (a). The same metrics and tolerance apply. The declared expectation
+is for the decode with `contamination := α`; the decode without the term is the
+control that shows what the term changes.
+
+The contaminant is one individual, and `duckhts_roh_counts` models a
+contaminant read by the population frequency `af`. That approximation is part
+of what (b) measures.
+
+All observations are kept: every run of every decode is in
+`benchmarks/results/roh-counts-validation/`.
+
+``` sh
+Rscript benchmarks/roh_counts_validation/stage.R
+taskset -c 4-7 Rscript -e 'rmarkdown::render("benchmarks/benchmark_roh_counts_validation.Rmd")'
+```
+
+Staging and the render use the same `bcftools`: the `BCFTOOLS` environment
+variable when it is set, otherwise `/usr/local/bin/bcftools`.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r run, include=FALSE}
+Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath(
+  "r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+source("benchmarks/roh_counts_validation/run.R")
+results <- roh_validation_run(
+  extension = Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension"),
+  output_dir = "benchmarks/results/roh-counts-validation", threads = 2L)
+declaration <- roh_validation_declaration
+verdict <- function(pass) ifelse(pass, "pass", "fail")
+class_label <- c(all = "all runs", long = "runs ≥ 1 Mb")
+```
+
+## Run
+
+```{r metadata, echo=FALSE}
+knitr::kable(results$metadata, col.names = c("Item", "Value"))
+```
+
+## (a) Read counts against VCF genotypes
+
+`reference` is the VCF genotype path and `test` is the read-count path.
+
+```{r agreement, echo=FALSE}
+agreement <- results$agreement
+knitr::kable(data.frame(
+  Sample = agreement$sample,
+  `Run class` = class_label[agreement$run_class],
+  `VCF runs` = agreement$reference_runs,
+  `Count runs` = agreement$test_runs,
+  `VCF FROH` = sprintf("%.4f", agreement$reference_froh),
+  `Count FROH` = sprintf("%.4f", agreement$test_froh),
+  `FROH difference` = sprintf("%+.4f", agreement$froh_difference),
+  `Shared bases` = format(agreement$shared_bases, big.mark = ","),
+  `Bases in either` = format(agreement$either_bases, big.mark = ","),
+  Jaccard = ifelse(is.na(agreement$jaccard), "none", sprintf("%.3f", agreement$jaccard)),
+  FROH = verdict(agreement$froh_pass),
+  Overlap = verdict(agreement$jaccard_pass),
+  Verdict = verdict(agreement$pass),
+  check.names = FALSE), align = "llrrrrrrrrlll")
+```
+
+`r sum(agreement$pass)` of `r nrow(agreement)` sample and run-class rows meet
+the declared tolerance. "none" means that neither decode has a run in the
+class.
+
+## What (a) compares, written after its result
+
+The declared comparison fails, and the reason is in what the two error
+parameters mean. This section was written after the result above. It changes
+no tolerance and no verdict.
+
+**`gt_error` is an error of the site.** With genotype evidence, a called
+genotype has likelihood close to 1 and a genotype one allele away has
+10^(−`gt_error`/10). At `gt_error := 30`, one heterozygous call can count
+against a run by a factor of 1,000 and no more, whatever caused it: a calling
+error, a mapping artefact or a wrong site. The run can continue through it.
+
+**`seq_error` is an error of one read.** With read counts, the reads of a site
+are independent and their probabilities multiply. A site with 16 reads of each
+allele has likelihood `seq_error`^16 under either homozygous genotype. No
+value of `seq_error` makes that site compatible with a run, and nothing in the
+read model says that a whole site can be wrong.
+
+So the read-count decode is the genotype decode with no tolerated genotype
+error. At `gt_error := 30` the genotype decode keeps runs through isolated
+heterozygous sites, and the read-count decode ends them there. The two paths
+then differ by design, not by a defect of either, and the declared tolerance
+compared them at settings that do not correspond.
+
+```{r diagnosis, include=FALSE}
+source("benchmarks/roh_counts_validation/diagnose.R")
+diagnosis <- roh_diagnosis_run(
+  extension = Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension"),
+  output_dir = "benchmarks/results/roh-counts-validation", threads = 2L)
+comparison_table <- function(rows, parameter) {
+  knitr::kable(data.frame(
+    parameter = format(rows[[parameter]], scientific = FALSE, drop0trailing = TRUE),
+    Sample = rows$sample,
+    `VCF FROH` = sprintf("%.4f", rows$reference_froh),
+    `Count FROH` = sprintf("%.4f", rows$test_froh),
+    `FROH difference` = sprintf("%+.4f", rows$froh_difference),
+    Jaccard = sprintf("%.3f", rows$jaccard),
+    check.names = FALSE), col.names = c(parameter, "Sample", "VCF FROH", "Count FROH",
+                                         "FROH difference", "Jaccard"),
+    align = "rlrrrr", row.names = FALSE)
+}
+```
+
+**The genotype decode approaches the read-count decode as `gt_error` rises.**
+The read-count decode is fixed at the default `seq_error`; all runs.
+
+```{r diagnosis-gt-error, echo=FALSE}
+comparison_table(diagnosis$by_gt_error, "gt_error")
+```
+
+**`seq_error` hardly moves the read-count decode.** The genotype decode is
+fixed at `gt_error := 30`; all runs.
+
+```{r diagnosis-seq-error, echo=FALSE}
+comparison_table(diagnosis$by_seq_error, "seq_error")
+```
+
+**The genotypes and the read counts agree at the sites.** Sites of the three
+samples, by called genotype and by the share of reads of the rarer allele:
+
+```{r diagnosis-sites, echo=FALSE}
+site_classes <- diagnosis$site_classes
+knitr::kable(stats::reshape(site_classes, idvar = "read_class", timevar = "genotype",
+                            direction = "wide"),
+             row.names = FALSE, format.args = list(big.mark = ","))
+```
+
+**The lost parts of genotype runs hold the heterozygous calls.** Sites inside
+the runs of the genotype decode at `gt_error := 30`, split by whether the
+read-count decode keeps the site in a run:
+
+```{r diagnosis-inside, echo=FALSE}
+knitr::kable(diagnosis$inside_runs, row.names = FALSE, format.args = list(big.mark = ","))
+```
+
+The observations are in `diagnosis_*.csv` under
+`benchmarks/results/roh-counts-validation/`.
+
+What this leaves open:
+
+- Which decode is closer to the truth is not measured here. A heterozygous
+  call with balanced reads inside a long run can be a real heterozygous site
+  that ends the run, or reads from a paralogous sequence at a site that is
+  homozygous.
+- The read model has no term for a site whose reads do not reflect the
+  sample's genotype. Such a term would be to read counts what `gt_error` is to
+  genotypes. It is not implemented.
+- A like-for-like check of the read model is the genotype-likelihood path
+  (FORMAT/PL) from the same reads. The staged genotypes carry FORMAT/GT only.
+
+## (b) Count-level contamination titration
+
+Each row summarises the six ordered pairs at one α and one decode. The FROH
+difference and the Jaccard index are against the receiver's unmixed decode;
+they are shown as the median and the range over the pairs.
+
+```{r titration-summary, echo=FALSE}
+titration <- results$titration
+titration$contamination_term <- factor(titration$contamination_term, levels = c("none", "alpha"))
+range_text <- function(values, pattern) {
+  if (all(is.na(values))) return("none")
+  sprintf(paste0(pattern, " (", pattern, " to ", pattern, ")"),
+          stats::median(values, na.rm = TRUE), min(values, na.rm = TRUE),
+          max(values, na.rm = TRUE))
+}
+groups <- split(titration, list(titration$contamination_term, titration$alpha,
+                                titration$run_class), drop = TRUE)
+summary_rows <- do.call(rbind, lapply(groups, function(group) {
+  data.frame(
+    `Run class` = class_label[[group$run_class[[1L]]]],
+    alpha = sprintf("%.0f%%", 100 * group$alpha[[1L]]),
+    `Contamination term` = if (group$contamination_term[[1L]] == "none") "0" else "α",
+    `FROH difference` = range_text(group$froh_difference, "%+.4f"),
+    Jaccard = range_text(group$jaccard, "%.3f"),
+    `Pairs without runs` = sum(is.na(group$jaccard)),
+    `Pairs passing` = sprintf("%d of %d", sum(group$pass), nrow(group)),
+    check.names = FALSE)
+}))
+names(summary_rows)[[2L]] <- "α"
+knitr::kable(summary_rows, row.names = FALSE, align = "lllllrl")
+```
+
+```{r titration-verdict, echo=FALSE}
+with_term <- titration[titration$contamination_term == "alpha", ]
+without_term <- titration[titration$contamination_term == "none", ]
+```
+
+With `contamination := α`, `r sum(with_term$pass)` of `r nrow(with_term)` pair,
+α and run-class rows meet the declared tolerance. With `contamination := 0`,
+`r sum(without_term$pass)` of `r nrow(without_term)` do.
+
+The realised contaminant read fraction of the mixtures, over all sites, is
+within `r sprintf("%.4f", max(abs(titration$realised_alpha - titration$alpha)))`
+of α in every cell, and the mean depth of a mixture is between
+`r sprintf("%.1f", min(titration$mean_depth))` and
+`r sprintf("%.1f", max(titration$mean_depth))` reads per site.
+
+### Every pair
+
+```{r titration-pairs, echo=FALSE}
+pairs <- titration[order(titration$run_class, titration$cell, titration$contamination_term), ]
+knitr::kable(data.frame(
+  `Run class` = class_label[pairs$run_class],
+  Receiver = pairs$receiver,
+  Contaminant = pairs$contaminant,
+  alpha = sprintf("%.0f%%", 100 * pairs$alpha),
+  `Contamination term` = ifelse(pairs$contamination_term == "none", "0", "α"),
+  `Reference runs` = pairs$reference_runs,
+  Runs = pairs$test_runs,
+  `Reference FROH` = sprintf("%.4f", pairs$reference_froh),
+  FROH = sprintf("%.4f", pairs$test_froh),
+  `FROH difference` = sprintf("%+.4f", pairs$froh_difference),
+  Jaccard = ifelse(is.na(pairs$jaccard), "none", sprintf("%.3f", pairs$jaccard)),
+  Verdict = verdict(pairs$pass),
+  check.names = FALSE), row.names = FALSE, align = "lllllrrrrrrl")
+```
+
+## Limitations
+
+- One chromosome and three samples. The rows above are observations, not an
+  estimate of a rate.
+- The two paths of (a) share their sequencing data, sites and frequencies.
+  They do not share an error model: see "What (a) compares". Their agreement
+  at a large `gt_error` shows that the two paths decode the same evidence
+  alike. It does not show that either set of runs is true.
+- (b) thins and adds counts. It does not reproduce what a mixture of reads
+  would change upstream: alignment, duplicate marking, base and mapping quality
+  filters, or the correlation of reads within a fragment.
+- The contamination fraction is supplied to the decode. Nothing here estimates
+  it.
+- The reference of (b) is the receiver's own decode, so (b) measures how much
+  a mixture moves the runs, not whether the runs are true.

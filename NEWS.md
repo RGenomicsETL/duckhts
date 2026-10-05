@@ -1,6 +1,6 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.2.9011
+# duckhts 1.5.2.9012
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
@@ -14,6 +14,24 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   titration recovers the uncontaminated runs. The emission is a DuckHTS
   extension, since `bcftools roh` has no read-count mode. SQL tests check it
   against the same model computed independently in SQL and rounded to PL.
+
+- Added `duckhts_somalier_relatedness_all_pairs(sketches_table, max_sites := 1000000)`:
+  relatedness for every unordered sample pair of a sketch relation. It checks the
+  contents of each sketch once and then compares the checked sketches, where
+  `duckhts_somalier_relatedness` over a self-join checked both sketches for every pair.
+  The rows are the same. `benchmarks/benchmark_somalier_cohort_scaling.md` measures the
+  sketch and all-pairs stages over 1×/2×/4× samples and sites with gated memory
+  budgets: 124,750 pairs of 17,000 sites take 0.73 s on one thread, against 4.40 s for
+  the per-pair function before this change.
+
+- `duckhts_somalier_relatedness` is faster with unchanged results: it checked each
+  sketch's contents twice per pair and now checks them once, it tests mask words for
+  NULL in bulk, and the bit counts are inlined instead of one library call per word.
+
+- The `max_site_bytes` contract of the ROH functions is stated exactly: a decode does
+  not grow a buffer when the bytes held by all ROH decodes in the process would pass
+  its own `max_site_bytes`. Decodes that run at the same time with different values
+  each apply their own. The behaviour is unchanged.
 
 - ROH decoding has explicit memory limits (#329). `duckhts_roh`, `duckhts_roh_af_table`,
   `duckhts_roh_ancestry` and `duckhts_roh_counts` now hold the sites of each sample and
@@ -38,6 +56,19 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   has no record; `duckhts_roh_counts` rejects fractional read counts, which were
   rounded, and accepts a relation in any order; a repeated position keeps the first
   record to arrive.
+
+- `benchmarks/benchmark_roh_counts_validation.md` checks `duckhts_roh_counts` on real
+  chr20 read counts of three 1000 Genomes samples (#329), with metrics and tolerance
+  declared before decoding. Against the VCF genotype path, the overlap of all runs
+  meets the tolerance (Jaccard 0.82 to 0.88), but the read-count FROH is 0.03 to 0.06
+  lower and fails it, and the one VCF-path run of at least 1 Mb is split into shorter
+  read-count runs. In a count-level contamination titration at 1% to 10%, the decode
+  with the contamination term keeps the receiver's runs (Jaccard at least 0.91, FROH
+  within 0.01); without the term FROH falls by 0.02 to 0.08 at 5% and by 0.12 to 0.27
+  at 10%. The FROH gap of the first check comes from the error parameters: `gt_error`
+  is an error of the site and lets a run pass one heterozygous call, and `seq_error` is
+  an error of one read and does not. The two decodes agree within 0.002 FROH at
+  `gt_error := 150`, and the function documentation now states this relation.
 
 ## Breaking changes
 

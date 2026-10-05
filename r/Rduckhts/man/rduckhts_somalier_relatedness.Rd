@@ -43,5 +43,7 @@ Selected pairs are an ordinary relation with `sample_a` and `sample_b`
 columns. Missing or duplicate sample and pair identities error instead of
 silently dropping or multiplying requested comparisons. The native kernel
 checks assembly, ordered-panel digest, classification settings, mask shape,
-and mask contents for each comparison. No SQL row-order guarantee is implied.
+and mask contents. For all pairs it checks the contents of each sketch once
+and then compares the checked sketches; for selected pairs it checks both
+sketches of each comparison. No SQL row-order guarantee is implied.
 }
