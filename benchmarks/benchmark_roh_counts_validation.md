@@ -114,13 +114,17 @@ Rscript benchmarks/roh_counts_validation/stage.R
 taskset -c 4-7 Rscript -e 'rmarkdown::render("benchmarks/benchmark_roh_counts_validation.Rmd")'
 ```
 
+Staging and the render use the same `bcftools`: the `BCFTOOLS` environment
+variable when it is set, otherwise `/usr/local/bin/bcftools`.
+
 ## Run
 
 | Item                | Value                                    |
 |:--------------------|:-----------------------------------------|
-| revision            | c81955f85c1807a5f2810c98e7e91825be135909 |
+| revision            | 5970eeccb7d19860669aa887557a706cae1437c8 |
 | tracked_changes     | no                                       |
 | input_identities    | match the registry                       |
+| bcftools            | bcftools 1.23.1-70-g6dbd8fef             |
 | extension_version   | 1.5.2.9012                               |
 | duckdb_version      | v1.5.5                                   |
 | r_version           | R version 4.6.0 (2026-04-24)             |
