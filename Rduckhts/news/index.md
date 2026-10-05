@@ -1,9 +1,29 @@
 # Changelog
 
-## Rduckhts 1.5.2.9011.0.1.5
+## Rduckhts 1.5.2.9012.0.1.5
 
 Preview of 2.0.0, still in development. The sections below describe what
 2.0.0 will contain.
+
+- The documentation of
+  [`rduckhts_roh_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_roh_counts.md)
+  states how its per-read `seq_error` relates to the per-site `gt_error`
+  of
+  [`rduckhts_roh()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_roh.md):
+  the read-count decode ends a run at a heterozygous site that the
+  genotype decode at `gt_error = 30` passes.
+
+- [`rduckhts_somalier_relatedness()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_relatedness.md)
+  is faster for all pairs, with the same rows: it checks the contents of
+  each sketch once instead of twice per pair. The bundled extension adds
+  `duckhts_somalier_relatedness_all_pairs()` for this.
+
+- The `max_site_bytes` argument of
+  [`rduckhts_roh()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_roh.md)
+  and
+  [`rduckhts_roh_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_roh_counts.md)
+  is documented exactly: each call applies its own limit to the bytes
+  held by all ROH decodes in the process.
 
 - [`rduckhts_roh()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_roh.md)
   accepts long ancestry reference and sample-proportion relations to

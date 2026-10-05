@@ -106,10 +106,12 @@ rduckhts_roh(
 
 - max_site_bytes:
 
-  Most bytes the site buffers of all samples and chromosomes may hold at
-  once (16 bytes per site, 24 for read counts), shared by the decodes
-  running in the process. Exceeding it is an error: decode fewer samples
-  per call or raise it.
+  Bound on the bytes the site buffers hold at once (16 bytes per site,
+  24 for read counts). A decode does not grow a buffer when the bytes
+  held by all ROH decodes in the process would pass its own
+  \`max_site_bytes\`; decodes that run at the same time with different
+  values each apply their own. Exceeding it is an error: decode fewer
+  samples per call or raise it.
 
 ## Value
 
@@ -171,9 +173,9 @@ path <- system.file("extdata", "roh_fixture.vcf.gz", package = "Rduckhts")
 roh <- rduckhts_roh(con, path, af_tag = "AF")
 roh[order(roh$sample, roh$chrom, roh$start), ]
 #>   sample chrom   start     end  length n_markers  quality
-#> 2     S1  chr1 1042655 2396807 1354153       113 31.96439
+#> 3     S1  chr1 1042655 2396807 1354153       113 31.96439
 #> 1     S2  chr2  693881 1722963 1029083       114 32.91658
-#> 4     S4  chr1 1876100 3319712 1443613       131 44.83104
-#> 3     S4  chr2   23420 2400223 2376804       239 46.64399
+#> 2     S4  chr1 1876100 3319712 1443613       131 44.83104
+#> 4     S4  chr2   23420 2400223 2376804       239 46.64399
 DBI::dbDisconnect(con, shutdown = TRUE)
 ```

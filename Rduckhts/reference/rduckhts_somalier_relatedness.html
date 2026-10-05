@@ -6,14 +6,18 @@ Selected pairs are an ordinary relation with `sample_a` and `sample_b`
 columns. Missing or duplicate sample and pair identities error instead of
 silently dropping or multiplying requested comparisons. The native kernel
 checks assembly, ordered-panel digest, classification settings, mask shape,
-and mask contents for each comparison. No SQL row-order guarantee is implied."><meta property="og:description" content="Compute the named relatedness and concordance statistics for either every
+and mask contents. For all pairs it checks the contents of each sketch once
+and then compares the checked sketches; for selected pairs it checks both
+sketches of each comparison. No SQL row-order guarantee is implied."><meta property="og:description" content="Compute the named relatedness and concordance statistics for either every
 distinct pair in one sketch relation or the ordered pairs in `pairs_table`.
 The sketch relation must contain one non-NULL `sketch` struct per sample.
 Selected pairs are an ordinary relation with `sample_a` and `sample_b`
 columns. Missing or duplicate sample and pair identities error instead of
 silently dropping or multiplying requested comparisons. The native kernel
 checks assembly, ordered-panel digest, classification settings, mask shape,
-and mask contents for each comparison. No SQL row-order guarantee is implied."></head><body>
+and mask contents. For all pairs it checks the contents of each sketch once
+and then compares the checked sketches; for selected pairs it checks both
+sketches of each comparison. No SQL row-order guarantee is implied."></head><body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
 
 
@@ -21,7 +25,7 @@ and mask contents for each comparison. No SQL row-order guarantee is implied."><
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9011.0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9012.0.1.5</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -61,7 +65,9 @@ Selected pairs are an ordinary relation with `sample_a` and `sample_b`
 columns. Missing or duplicate sample and pair identities error instead of
 silently dropping or multiplying requested comparisons. The native kernel
 checks assembly, ordered-panel digest, classification settings, mask shape,
-and mask contents for each comparison. No SQL row-order guarantee is implied.</p>
+and mask contents. For all pairs it checks the contents of each sketch once
+and then compares the checked sketches; for selected pairs it checks both
+sketches of each comparison. No SQL row-order guarantee is implied.</p>
     </div>
 
     <div class="section level2">
