@@ -1,9 +1,27 @@
 # Changelog
 
-## Rduckhts 1.5.2.9012.0.1.5
+## Rduckhts 1.5.2.9013.0.1.5
 
 Preview of 2.0.0, still in development. The sections below describe what
 2.0.0 will contain.
+
+- SQL that joins `read_bam()`, `read_tabix()`, `read_gff()`,
+  `read_gtf()` or `read_bed()` plans better: the bundled extension now
+  gives DuckDB a row estimate for a whole-file indexed scan.
+
+- [`rduckhts_bam()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam.md)
+  and `read_bam()` no longer repeat rows when a BAI or CSI index has
+  alignments of a reference and no statistics for it (the statistics are
+  optional in both formats). A full-file scan with more than one thread
+  could return some records twice.
+
+- Reading an indexed CRAM with
+  [`rduckhts_bam()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam.md),
+  [`rduckhts_hts_index()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_hts_index.md)
+  or
+  [`rduckhts_hts_index_spans()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_hts_index_spans.md)
+  no longer reads past the end of the CRAM index object. Results are
+  unchanged.
 
 - The documentation of
   [`rduckhts_roh_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_roh_counts.md)

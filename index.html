@@ -103,7 +103,7 @@ tbody td:first-child strong {
   }
 }
 </style>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xiee/utils@1.14.87/css/prism-xcode.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xiee/utils@1.14.89/css/prism-xcode.min.css">
 </head>
 <body>
 <nav aria-label="Project"><p>
@@ -298,7 +298,7 @@ Show generated function catalog
 <th>Description</th>
 </tr></thead>
 <tbody><tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_macro_definitions"><code>duckhts_macro_definitions</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_macro_definitions"><code>duckhts_macro_definitions</code></a></td>
 <td>table</td>
 <td></td>
 <td>Export the ordered DuckHTS macro definitions for connection-local installation.</td>
@@ -314,85 +314,85 @@ Show generated function catalog
 </tr></thead>
 <tbody>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_htslib_version"><code>duckhts_htslib_version</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_htslib_version"><code>duckhts_htslib_version</code></a></td>
 <td>scalar</td>
 <td><code>rduckhts_htslib_version</code></td>
 <td>Return the runtime version reported by the htslib library loaded with DuckHTS. Rduckhts uses this value to reject a downstream linking receipt whose source/header version does not match the loaded library.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_htslib_features"><code>duckhts_htslib_features</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_htslib_features"><code>duckhts_htslib_features</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Return the htslib runtime feature bitfield reported by hts_features(). Use duckhts_htslib_feature_string() for the corresponding build description.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_htslib_feature_string"><code>duckhts_htslib_feature_string</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_htslib_feature_string"><code>duckhts_htslib_feature_string</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Return htslib’s runtime build-feature description, including configured transports, compression libraries, compiler, and build flags. DuckHTS snapshots it once while loading the extension so parallel SQL calls read immutable text.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_simd_backend"><code>duckhts_simd_backend</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_simd_backend"><code>duckhts_simd_backend</code></a></td>
 <td>scalar</td>
 <td><code>rduckhts_simd_backend</code></td>
 <td>Return the current DuckHTS SIMD dispatch label. For explicit scalar or concrete backend requests this is the requested policy; for auto it is the single selected backend when all logical kernels resolve to the same backend, or mixed when per-kernel auto-dispatch resolves to multiple backends. Use duckhts_simd_kernel_info() for per-kernel details.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_simd_requested_backend"><code>duckhts_simd_requested_backend</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_simd_requested_backend"><code>duckhts_simd_requested_backend</code></a></td>
 <td>scalar</td>
 <td><code>rduckhts_simd_requested_backend</code></td>
 <td>Return the current explicit SIMD backend request, usually auto unless <code>SELECT backend FROM duckhts_simd_set_backend('auto'|'scalar'|backend)</code> was called. The selected per-kernel backend may differ under auto-dispatch across x86, ARM, wasm, and scalar-only builds.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_simd_backend_compiled"><code>duckhts_simd_backend_compiled</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_simd_backend_compiled"><code>duckhts_simd_backend_compiled</code></a></td>
 <td>scalar</td>
 <td><code>rduckhts_simd_backend_compiled</code></td>
 <td>Return whether a concrete DuckHTS SIMD backend was compiled into this build. This is independent of whether the current CPU/runtime supports executing that backend; for example avx512 can be compiled but not CPU-supported on the running host.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_simd_backend_cpu_supported"><code>duckhts_simd_backend_cpu_supported</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_simd_backend_cpu_supported"><code>duckhts_simd_backend_cpu_supported</code></a></td>
 <td>scalar</td>
 <td><code>rduckhts_simd_backend_cpu_supported</code></td>
 <td>Return whether the current CPU/runtime supports a concrete DuckHTS SIMD backend, independent of whether DuckHTS compiled an implementation for it. Availability is the intersection of compiled and CPU-supported.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_simd_backend_available"><code>duckhts_simd_backend_available</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_simd_backend_available"><code>duckhts_simd_backend_available</code></a></td>
 <td>scalar</td>
 <td><code>rduckhts_simd_backend_available</code></td>
 <td>Return whether a concrete SIMD backend is usable in the current process. Availability means the backend is compiled into DuckHTS and supported by the current CPU/runtime. auto is a selection request rather than a concrete backend and is not reported as available here.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_simd_info"><code>duckhts_simd_info</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_simd_info"><code>duckhts_simd_info</code></a></td>
 <td>table</td>
 <td><code>rduckhts_simd_info</code></td>
 <td>Report compiled, runtime-supported and selected status for each concrete DuckHTS SIMD backend.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_simd_kernel_info"><code>duckhts_simd_kernel_info</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_simd_kernel_info"><code>duckhts_simd_kernel_info</code></a></td>
 <td>table</td>
 <td><code>rduckhts_simd_kernel_info</code></td>
 <td>Return one row per logical DuckHTS SIMD kernel showing the concrete backend selected by the current immutable dispatch table, the selected capability, the requested backend policy, whether scalar was used as a per-kernel fallback, and the dispatch mode. This is the authoritative diagnostic for mixed auto-dispatch when different kernels resolve to different backends.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_simd_set_backend"><code>duckhts_simd_set_backend</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_simd_set_backend"><code>duckhts_simd_set_backend</code></a></td>
 <td>table</td>
 <td><code>rduckhts_simd_set_backend</code></td>
 <td>Explicitly select the DuckHTS SIMD dispatch policy for this process using a one-row table-function call and return the current dispatch label in a backend column. Use auto for per-kernel runtime dispatch or scalar for a portable baseline; unavailable platform-specific requests such as avx512 on non-AVX-512 CPUs raise an error instead of silently falling back.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_duckdb_type_supported"><code>duckhts_duckdb_type_supported</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_duckdb_type_supported"><code>duckhts_duckdb_type_supported</code></a></td>
 <td>scalar_macro</td>
 <td></td>
 <td>Return whether the currently open DuckDB runtime advertises a logical type with the given name through duckdb_types(). This is a catalog-level runtime probe for feature gating SQL/macros across DuckDB versions.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_duckdb_supports_variant"><code>duckhts_duckdb_supports_variant</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_duckdb_supports_variant"><code>duckhts_duckdb_supports_variant</code></a></td>
 <td>scalar_macro</td>
 <td></td>
 <td>Return whether the currently open DuckDB runtime advertises the VARIANT logical type. Use this to gate optional SQL that depends on DuckDB VARIANT support.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_duckdb_supports_geometry"><code>duckhts_duckdb_supports_geometry</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_duckdb_supports_geometry"><code>duckhts_duckdb_supports_geometry</code></a></td>
 <td>scalar_macro</td>
 <td></td>
 <td>Return whether the currently open DuckDB runtime advertises the GEOMETRY logical type. Use this to gate optional SQL that depends on DuckDB GEOMETRY support.</td>
@@ -409,97 +409,97 @@ Show generated function catalog
 </tr></thead>
 <tbody>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#read_bcf"><code>read_bcf</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#read_bcf"><code>read_bcf</code></a></td>
 <td>table</td>
 <td><code>rduckhts_bcf</code></td>
 <td>Read VCF/BCF with header-typed INFO/FORMAT, typed CSQ/ANN/BCSQ annotations, sample selection and optional tidy sample rows.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#read_geno"><code>read_geno</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#read_geno"><code>read_geno</code></a></td>
 <td>table</td>
 <td><code>rduckhts_geno</code></td>
 <td>Read one row per VCF/BCF record with typed arbitrary-ploidy GT/PS calls, selected FORMAT fields and optional original VCF genotype text.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#read_bcf_samples"><code>read_bcf_samples</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#read_bcf_samples"><code>read_bcf_samples</code></a></td>
 <td>table</td>
 <td><code>rduckhts_bcf_samples</code></td>
 <td>Read the typed VCF/BCF sample catalog as sample_index UINTEGER and sample_name VARCHAR without reading records. Indices are zero-based positions in the original header, remain stable under selection and join read_geno calls from the same unchanged file. NULL or ‘-’ selects all; an empty string selects none; comma-separated names include samples; ‘^’ excludes them. Names are validated by HTSlib, selected rows retain header order, and unknown names error.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#read_bam"><code>read_bam</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#read_bam"><code>read_bam</code></a></td>
 <td>table</td>
 <td><code>rduckhts_bam</code></td>
 <td>Read SAM/BAM/CRAM alignments with optional typed SAM tags, auxiliary maps and packed sequence, quality or CIGAR output.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#read_fasta"><code>read_fasta</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#read_fasta"><code>read_fasta</code></a></td>
 <td>table</td>
 <td><code>rduckhts_fasta</code></td>
 <td>Read full FASTA records or indexed regions with text or packed sequence output.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#read_bed"><code>read_bed</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#read_bed"><code>read_bed</code></a></td>
 <td>table</td>
 <td><code>rduckhts_bed</code></td>
 <td>Read BED3-BED12 interval files with canonical typed columns and optional tabix-backed region filtering.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#fasta_nuc"><code>fasta_nuc</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#fasta_nuc"><code>fasta_nuc</code></a></td>
 <td>table</td>
 <td><code>rduckhts_fasta_nuc</code></td>
 <td>Compute bedtools nuc-style nucleotide composition for supplied BED intervals or generated fixed-width bins over a FASTA reference. A failed reference fetch fails the query with the file and zero-based half-open interval; requested intervals are not silently omitted. For bgzipped FASTA, gzi_path may point to an explicit .gzi sidecar when it is not colocated with the FASTA.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#read_fastq"><code>read_fastq</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#read_fastq"><code>read_fastq</code></a></td>
 <td>table</td>
 <td><code>rduckhts_fastq</code></td>
 <td>Read single-end, paired-end, or interleaved FASTQ files with optional legacy quality decoding. By default, FASTQ qualities are interpreted as modern Phred+33 input. Use sequence_encoding := ‘nt16’ to return SEQUENCE as UTINYINT[] and quality_representation := ‘phred’ to return QUALITY as UTINYINT[] instead of VARCHAR. input_quality_encoding accepts ‘phred33’, ‘auto’, ‘phred64’, or ‘solexa64’. scan_mode := ‘sequential’ forces raw streaming/counting instead of index-backed count paths.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#read_bigwig"><code>read_bigwig</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#read_bigwig"><code>read_bigwig</code></a></td>
 <td>table</td>
 <td><code>rduckhts_bigwig</code></td>
 <td>Read stored BigWig signal intervals as CHROM, START0, END0 and VALUE.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#read_gff"><code>read_gff</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#read_gff"><code>read_gff</code></a></td>
 <td>table</td>
 <td><code>rduckhts_gff</code></td>
 <td>Read GFF annotations with optional parsed attributes, strict GFF3 validation and indexed region selection.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#read_gtf"><code>read_gtf</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#read_gtf"><code>read_gtf</code></a></td>
 <td>table</td>
 <td><code>rduckhts_gtf</code></td>
 <td>Read GTF annotations with optional parsed attributes and indexed region selection.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#read_genbank"><code>read_genbank</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#read_genbank"><code>read_genbank</code></a></td>
 <td>table</td>
 <td><code>rduckhts_genbank</code></td>
 <td>Read GenBank flat-file features in read_gff’s column shape, with optional parsed qualifier MAP.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#read_tabix"><code>read_tabix</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#read_tabix"><code>read_tabix</code></a></td>
 <td>table</td>
 <td><code>rduckhts_tabix</code></td>
 <td>Read tabix-indexed text with optional header handling, inferred types and region selection.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#fasta_index"><code>fasta_index</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#fasta_index"><code>fasta_index</code></a></td>
 <td>table</td>
 <td><code>rduckhts_fasta_index</code></td>
 <td>Build a FASTA index (.fai) and return a single row with columns success (BOOLEAN) and index_path (VARCHAR).</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#hts_union_query"><code>hts_union_query</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#hts_union_query"><code>hts_union_query</code></a></td>
 <td>scalar_macro</td>
 <td><code>rduckhts_bam_multi, rduckhts_bcf_multi, rduckhts_fastq_multi, rduckhts_fasta_multi, rduckhts_bed_multi, rduckhts_tabix_multi, rduckhts_gff_multi, rduckhts_gtf_multi</code></td>
 <td>Generate a UNION ALL BY NAME query string that reads every file matching a glob pattern through the named reader function. The result includes a ‘filename’ column identifying the source file for each row. Assign to a variable with SET VARIABLE and execute via query(getvariable(…)). Optional params string is appended to each reader call. In R, use the typed rduckhts_*_multi() helpers instead, which accept file vectors with optional per-file parameters and create DuckDB tables directly.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#hts_region_union_query"><code>hts_region_union_query</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#hts_region_union_query"><code>hts_region_union_query</code></a></td>
 <td>scalar_macro</td>
 <td></td>
 <td>Generate UNION ALL BY NAME SQL over separate per-region scans of one HTS file.</td>
@@ -516,31 +516,31 @@ Show generated function catalog
 </tr></thead>
 <tbody>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_bcf_convert_parquet_sql"><code>duckhts_bcf_convert_parquet_sql</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_bcf_convert_parquet_sql"><code>duckhts_bcf_convert_parquet_sql</code></a></td>
 <td>scalar_macro</td>
 <td><code>rduckhts_bcf_convert_parquet</code></td>
 <td>Build COPY SQL for read_bcf() output with Parquet metadata, VCF header text and selected columns, filters or partitions.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_bam_convert_parquet_sql"><code>duckhts_bam_convert_parquet_sql</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_bam_convert_parquet_sql"><code>duckhts_bam_convert_parquet_sql</code></a></td>
 <td>scalar_macro</td>
 <td><code>rduckhts_bam_convert_parquet</code></td>
 <td>Build COPY SQL for read_bam() output with Parquet metadata, SAM header text and selected columns, filters or partitions.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_gff_convert_parquet_sql"><code>duckhts_gff_convert_parquet_sql</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_gff_convert_parquet_sql"><code>duckhts_gff_convert_parquet_sql</code></a></td>
 <td>scalar_macro</td>
 <td><code>rduckhts_gff_convert_parquet</code></td>
 <td>Build COPY SQL for read_gff() output with Parquet metadata, GFF/tabix header text and selected columns, filters or partitions.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_tabix_convert_parquet_sql"><code>duckhts_tabix_convert_parquet_sql</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_tabix_convert_parquet_sql"><code>duckhts_tabix_convert_parquet_sql</code></a></td>
 <td>scalar_macro</td>
 <td><code>rduckhts_tabix_convert_parquet</code></td>
 <td>Build COPY SQL for read_tabix() output with Parquet metadata, header text and selected columns, filters or partitions.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#genbank_to_fasta"><code>genbank_to_fasta</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#genbank_to_fasta"><code>genbank_to_fasta</code></a></td>
 <td>table</td>
 <td><code>rduckhts_genbank_to_fasta</code></td>
 <td>Write the ORIGIN sequence of each GenBank record as FASTA and return success, output_path and records_written.</td>
@@ -557,25 +557,25 @@ Show generated function catalog
 </tr></thead>
 <tbody>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#read_pileup"><code>read_pileup</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#read_pileup"><code>read_pileup</code></a></td>
 <td>table</td>
 <td><code>rduckhts_pileup</code></td>
 <td>Construct a region-scoped BAM pileup with one row per covered position, emitting chrom, 1-based position, depth, observed bases, and Phred+33 qualities after SAM flag and MAPQ filtering. This is a compact htslib pileup view, not samtools mpileup text parity.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#bam_bin_counts"><code>bam_bin_counts</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#bam_bin_counts"><code>bam_bin_counts</code></a></td>
 <td>table</td>
 <td><code>rduckhts_bam_bin_counts</code></td>
 <td>Count BAM or CRAM read starts into fixed-width bins. Returns one row per bin across the selected contig span, including zero-count bins, with total, forward, and reverse counts; <code>rmdup := 'streaming'</code> applies the WisecondorX-style larp/larp2 consecutive-position deduplication, <code>rmdup := 'flag'</code> drops SAM duplicate-flagged reads, and <code>stats := 'gc'</code>, <code>'mq'</code>, or <code>'gc,mq'</code> adds per-bin pre/post-filter GC and MAPQ sufficient statistics, including reference GC when <code>reference</code> is provided.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_bam_bed_coverage"><code>duckhts_bam_bed_coverage</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_bam_bed_coverage"><code>duckhts_bam_bed_coverage</code></a></td>
 <td>table</td>
 <td><code>rduckhts_bam_bed_coverage</code></td>
 <td>Compute samtools coverage-like regional summaries for BAM or CRAM input over a BED target set, returning one row per BED interval with DuckHTS-specific pre/post-filter read counts, covered bases, percentage covered, mean depth, mean baseQ, mean mapQ, and strand-specific post-filter summaries in read mode. Indexed BAM/CRAM input is required in the current implementation. decompression_threads controls htslib worker threads for BAM/CRAM decoding; use 0 to disable them.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_mosdepth"><code>duckhts_mosdepth</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_mosdepth"><code>duckhts_mosdepth</code></a></td>
 <td>table</td>
 <td><code>rduckhts_mosdepth</code></td>
 <td>Write mosdepth-compatible coverage files from indexed BAM/CRAM.</td>
@@ -592,139 +592,139 @@ Show generated function catalog
 </tr></thead>
 <tbody>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_cgranges_create"><code>duckhts_cgranges_create</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_cgranges_create"><code>duckhts_cgranges_create</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Create an empty session-scoped cgranges registry entry that can be populated with intervals and finalized for overlap queries.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_cgranges_add"><code>duckhts_cgranges_add</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_cgranges_add"><code>duckhts_cgranges_add</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Append an interval to a session-scoped cgranges registry entry before finalization. Labels may be BIGINT-like, DOUBLE, VARCHAR, or BOOLEAN.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_cgranges_index"><code>duckhts_cgranges_index</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_cgranges_index"><code>duckhts_cgranges_index</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Finalize a populated cgranges registry entry and build its immutable overlap index for subsequent queries.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_cgranges_destroy"><code>duckhts_cgranges_destroy</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_cgranges_destroy"><code>duckhts_cgranges_destroy</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Destroy a session-scoped cgranges registry entry and release its indexed interval storage when it is not in active use.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_cgranges_from_table"><code>duckhts_cgranges_from_table</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_cgranges_from_table"><code>duckhts_cgranges_from_table</code></a></td>
 <td>table_macro</td>
 <td></td>
 <td>Create, populate and finalize a session-scoped cgranges registry entry from the rows of a table or view, on the caller’s connection.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_cgranges_has_overlap"><code>duckhts_cgranges_has_overlap</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_cgranges_has_overlap"><code>duckhts_cgranges_has_overlap</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Vectorized scalar predicate for streaming provider rows through a finalized session-scoped cgranges index. Returns TRUE when the query interval overlaps at least one indexed interval, or when mode = ‘contain’ and it fully contains at least one indexed interval; NULL inputs return NULL.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_cgranges_count_overlaps"><code>duckhts_cgranges_count_overlaps</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_cgranges_count_overlaps"><code>duckhts_cgranges_count_overlaps</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Vectorized scalar overlap counter for streaming provider rows through a finalized session-scoped cgranges index. Returns the number of indexed intervals that overlap the query interval, or with mode = ‘contain’ the number fully contained by it; NULL inputs return NULL.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_cgranges_overlaps_list"><code>duckhts_cgranges_overlaps_list</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_cgranges_overlaps_list"><code>duckhts_cgranges_overlaps_list</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Vectorized scalar overlap expander for streaming provider rows through a finalized session-scoped cgranges index. Returns a LIST of hit STRUCTs that can be expanded with UNNEST, preserving provider columns while emitting one row per matching indexed interval. Because scalar return types are fixed, labels are returned as text with label_type describing the original cgranges label kind; NULL inputs return NULL.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_cgranges_overlaps"><code>duckhts_cgranges_overlaps</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_cgranges_overlaps"><code>duckhts_cgranges_overlaps</code></a></td>
 <td>table</td>
 <td></td>
 <td>Query a finalized session-scoped cgranges registry entry and return one row per overlapping or containing indexed interval, preserving the original label type and interval coordinates.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#regionkey"><code>regionkey</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#regionkey"><code>regionkey</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Encode a genomic interval as an official RegionKey-compatible 64-bit unsigned integer. Start and end use 0-based half-open interval semantics, matching BED-style coordinates; strand accepts -1, 0, or 1.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#regionkey_hex"><code>regionkey_hex</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#regionkey_hex"><code>regionkey_hex</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Render a RegionKey as its lowercase 16-character hexadecimal string representation.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#parse_regionkey_hex"><code>parse_regionkey_hex</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#parse_regionkey_hex"><code>parse_regionkey_hex</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Parse a 16-character hexadecimal RegionKey string back into its UBIGINT code. Invalid or non-hex strings return NULL.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#encode_regionkey"><code>encode_regionkey</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#encode_regionkey"><code>encode_regionkey</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Encode the raw upstream RegionKey fields directly: chromosome code, 0-based start, 0-based end, and strand code (0 = unknown, 1 = +, 2 = -).</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#extract_regionkey_chrom"><code>extract_regionkey_chrom</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#extract_regionkey_chrom"><code>extract_regionkey_chrom</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Extract the raw upstream RegionKey chromosome code.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#extract_regionkey_startpos"><code>extract_regionkey_startpos</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#extract_regionkey_startpos"><code>extract_regionkey_startpos</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Extract the raw upstream RegionKey 0-based start position.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#extract_regionkey_endpos"><code>extract_regionkey_endpos</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#extract_regionkey_endpos"><code>extract_regionkey_endpos</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Extract the raw upstream RegionKey 0-based end position.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#extract_regionkey_strand"><code>extract_regionkey_strand</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#extract_regionkey_strand"><code>extract_regionkey_strand</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Extract the raw upstream RegionKey strand code (0 = unknown, 1 = +, 2 = -).</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#decode_regionkey"><code>decode_regionkey</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#decode_regionkey"><code>decode_regionkey</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Decode a RegionKey into its raw upstream numeric fields: chrom_code, start, end, and strand_code.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#reverse_regionkey"><code>reverse_regionkey</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#reverse_regionkey"><code>reverse_regionkey</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Decode a RegionKey into a STRUCT with chrom, chrom_code, start, end, strand, and strand_code.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#extend_regionkey"><code>extend_regionkey</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#extend_regionkey"><code>extend_regionkey</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Extend a RegionKey interval by a fixed number of bases on both sides, clamping to the official 28-bit RegionKey position range.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#are_overlapping_regions"><code>are_overlapping_regions</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#are_overlapping_regions"><code>are_overlapping_regions</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Return TRUE when two explicit 0-based half-open intervals overlap on the same canonical chromosome.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#are_overlapping_region_regionkey"><code>are_overlapping_region_regionkey</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#are_overlapping_region_regionkey"><code>are_overlapping_region_regionkey</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Return TRUE when a 0-based half-open interval overlaps the supplied RegionKey interval.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#are_overlapping_regionkeys"><code>are_overlapping_regionkeys</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#are_overlapping_regionkeys"><code>are_overlapping_regionkeys</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Return TRUE when two RegionKeys overlap.</td>
@@ -740,7 +740,7 @@ Show generated function catalog
 <th>Description</th>
 </tr></thead>
 <tbody><tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_fastq_qc"><code>duckhts_fastq_qc</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_fastq_qc"><code>duckhts_fastq_qc</code></a></td>
 <td>aggregate</td>
 <td></td>
 <td>Aggregate canonical sequence and Phred+33 quality strings directly into exact read/base/Q20/Q30/Q40, nucleotide, quality-sum, and per-cycle sufficient statistics. The nested cycles list supports mean-quality, nucleotide-content, GC, and read-length curves without expanding one SQL row per base. Rows with any NULL input are ignored. Per-cycle state defaults to at most 1,048,576 cycles; pass a constant max_cycles per aggregate group to choose a larger explicit limit, up to 16,777,216.</td>
@@ -756,91 +756,91 @@ Show generated function catalog
 </tr></thead>
 <tbody>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_spacing"><code>duckhts_somalier_spacing</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_spacing"><code>duckhts_somalier_spacing</code></a></td>
 <td>scalar</td>
 <td><code>rduckhts_somalier_find_sites</code></td>
 <td>Greedily select ranked Somalier candidate positions at a minimum genomic distance.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_import_sites"><code>duckhts_somalier_import_sites</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_import_sites"><code>duckhts_somalier_import_sites</code></a></td>
 <td>table_macro</td>
 <td><code>rduckhts_somalier_import_sites</code></td>
 <td>Import an already selected Somalier sites VCF/BCF as one canonical panel and population-frequency relation, autosomal and X/Y sites together.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_vcf_counts"><code>duckhts_somalier_vcf_counts</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_vcf_counts"><code>duckhts_somalier_vcf_counts</code></a></td>
 <td>table_macro</td>
 <td><code>rduckhts_somalier_vcf_counts</code></td>
 <td>Extract a complete panel-aligned A/B/other count relation from VCF/BCF FORMAT/AD.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_bam_counts"><code>duckhts_somalier_bam_counts</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_bam_counts"><code>duckhts_somalier_bam_counts</code></a></td>
 <td>table</td>
 <td><code>rduckhts_somalier_bam_counts</code></td>
 <td>Extract complete panel-aligned A/B/other base counts from one indexed BAM or CRAM source.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_ancestry_proportions"><code>duckhts_ancestry_proportions</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_ancestry_proportions"><code>duckhts_ancestry_proportions</code></a></td>
 <td>scalar</td>
 <td><code>rduckhts_ancestry_proportions</code></td>
 <td>Solve a nearest-positive-definite constrained ancestry projection from aggregated PC products.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_panel_sha256"><code>duckhts_somalier_panel_sha256</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_panel_sha256"><code>duckhts_somalier_panel_sha256</code></a></td>
 <td>scalar_macro</td>
 <td></td>
 <td>Derive a stable SHA-256 identity for an ordered biallelic sample-fingerprinting panel.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_frequency_sha256"><code>duckhts_somalier_frequency_sha256</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_frequency_sha256"><code>duckhts_somalier_frequency_sha256</code></a></td>
 <td>scalar_macro</td>
 <td></td>
 <td>Derive a stable identity for panel-aligned population-B allele frequencies.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_classify"><code>duckhts_somalier_classify</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_classify"><code>duckhts_somalier_classify</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Classify one measured A/B/other count tuple for Somalier-derived autosomal relatedness.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_prepare_sketches"><code>duckhts_somalier_prepare_sketches</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_prepare_sketches"><code>duckhts_somalier_prepare_sketches</code></a></td>
 <td>table_macro</td>
 <td><code>rduckhts_somalier_sketches</code></td>
 <td>Build one panel-verified packed relatedness sketch per sample from typed count evidence.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_verify_sketches"><code>duckhts_somalier_verify_sketches</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_verify_sketches"><code>duckhts_somalier_verify_sketches</code></a></td>
 <td>scalar_macro</td>
 <td></td>
 <td>Verify persisted relatedness sketches against their retained raw count evidence.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_relatedness"><code>duckhts_somalier_relatedness</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_relatedness"><code>duckhts_somalier_relatedness</code></a></td>
 <td>scalar</td>
 <td><code>rduckhts_somalier_relatedness</code></td>
 <td>Compute fused Somalier-derived relatedness and concordance statistics for two prepared sketches.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_verify_relatedness"><code>duckhts_somalier_verify_relatedness</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_verify_relatedness"><code>duckhts_somalier_verify_relatedness</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Verify a typed relatedness result against its two sealed sketches.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_charr"><code>duckhts_somalier_charr</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_charr"><code>duckhts_somalier_charr</code></a></td>
 <td>table_macro</td>
 <td><code>rduckhts_somalier_charr</code></td>
 <td>Estimate per-sample contamination with a bounded Somalier-derived CHARR reduction.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_matched_contamination"><code>duckhts_somalier_matched_contamination</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_matched_contamination"><code>duckhts_somalier_matched_contamination</code></a></td>
 <td>table_macro</td>
 <td><code>rduckhts_somalier_matched_contamination</code></td>
 <td>Estimate directional contamination for explicitly selected receiver/anchor sample pairs.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_sex"><code>duckhts_somalier_sex</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_somalier_sex"><code>duckhts_somalier_sex</code></a></td>
 <td>table_macro</td>
 <td><code>rduckhts_somalier_sex</code></td>
 <td>Report X/Y dosage evidence and a review-only XX, XY or ambiguous call per sample from panel counts.</td>
@@ -857,37 +857,37 @@ Show generated function catalog
 </tr></thead>
 <tbody>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#detect_quality_encoding"><code>detect_quality_encoding</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#detect_quality_encoding"><code>detect_quality_encoding</code></a></td>
 <td>table</td>
 <td><code>rduckhts_detect_quality_encoding</code></td>
 <td>Inspect a FASTQ file’s observed quality ASCII range and report compatible legacy encodings with a heuristic guessed encoding.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_samtools_idxstats"><code>duckhts_samtools_idxstats</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_samtools_idxstats"><code>duckhts_samtools_idxstats</code></a></td>
 <td>table</td>
 <td><code>rduckhts_samtools_idxstats</code></td>
 <td>Write samtools idxstats-compatible TAB-delimited output for BAM, CRAM, or SAM input. Indexed BAM uses <code>hts_idx_get_stat(...)</code> for the fast path; CRAM, SAM, and unindexed BAM fall back to a full scan while preserving samtools-style contig rows plus the final <code>*</code> row.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#read_hts_header"><code>read_hts_header</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#read_hts_header"><code>read_hts_header</code></a></td>
 <td>table</td>
 <td><code>rduckhts_hts_header</code></td>
 <td>Inspect HTS headers in parsed, raw, or combined form across supported formats. Raw VCF/BCF mode includes the final <code>#CHROM</code> sample header line so the returned text is suitable for Parquet metadata and future VCF/BCF regeneration.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#read_hts_index"><code>read_hts_index</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#read_hts_index"><code>read_hts_index</code></a></td>
 <td>table</td>
 <td><code>rduckhts_hts_index</code></td>
 <td>Inspect high-level HTS index metadata such as sequence names and mapped counts.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#read_hts_index_spans"><code>read_hts_index_spans</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#read_hts_index_spans"><code>read_hts_index_spans</code></a></td>
 <td>table</td>
 <td><code>rduckhts_hts_index_spans</code></td>
 <td>Expand index metadata into span and chunk rows suitable for low-level index inspection.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#read_hts_index_raw"><code>read_hts_index_raw</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#read_hts_index_raw"><code>read_hts_index_raw</code></a></td>
 <td>table_macro</td>
 <td><code>rduckhts_hts_index_raw</code></td>
 <td>Return the raw on-disk HTS index blob together with basic identifying metadata.</td>
@@ -904,13 +904,13 @@ Show generated function catalog
 </tr></thead>
 <tbody>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#bgzip"><code>bgzip</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#bgzip"><code>bgzip</code></a></td>
 <td>table</td>
 <td><code>rduckhts_bgzip</code></td>
 <td>Compress a plain file to BGZF and return the created output path and byte counts.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#bgunzip"><code>bgunzip</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#bgunzip"><code>bgunzip</code></a></td>
 <td>table</td>
 <td><code>rduckhts_bgunzip</code></td>
 <td>Decompress a BGZF-compressed file and return the created output path and byte counts.</td>
@@ -927,19 +927,19 @@ Show generated function catalog
 </tr></thead>
 <tbody>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#bam_index"><code>bam_index</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#bam_index"><code>bam_index</code></a></td>
 <td>table</td>
 <td><code>rduckhts_bam_index</code></td>
 <td>Build a BAM or CRAM index and report the written index path and format.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#bcf_index"><code>bcf_index</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#bcf_index"><code>bcf_index</code></a></td>
 <td>table</td>
 <td><code>rduckhts_bcf_index</code></td>
 <td>Build a TBI or CSI index for a VCF or BCF file and report the written index path and format.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#tabix_index"><code>tabix_index</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#tabix_index"><code>tabix_index</code></a></td>
 <td>table</td>
 <td><code>rduckhts_tabix_index</code></td>
 <td>Build a tabix index for a BGZF-compressed text file using a preset or explicit coordinate columns.</td>
@@ -956,115 +956,115 @@ Show generated function catalog
 </tr></thead>
 <tbody>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#variantkey"><code>variantkey</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#variantkey"><code>variantkey</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Encode a normalized biallelic variant as an official VariantKey-compatible 64-bit unsigned integer. This DuckHTS wrapper accepts 1-based VCF/DuckHTS POS to match bcftools <code>%VKX</code> / <code>+add-variantkey</code>, internally converts to the upstream 0-based field, and preserves the official hashed nonreversible mode for large, ambiguous, and symbolic REF/ALT strings. Only CHROM, POS, REF, and ALT are encoded; END, SVLEN, mate breakend coordinates, and other SV metadata are not.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#variantkey_hex"><code>variantkey_hex</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#variantkey_hex"><code>variantkey_hex</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Render a VariantKey as its lowercase 16-character hexadecimal string representation.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#parse_variantkey_hex"><code>parse_variantkey_hex</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#parse_variantkey_hex"><code>parse_variantkey_hex</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Parse a 16-character hexadecimal VariantKey string back into its UBIGINT code. Invalid or non-hex strings return NULL.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#encode_variantkey"><code>encode_variantkey</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#encode_variantkey"><code>encode_variantkey</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Encode the raw upstream VariantKey fields directly: chromosome code, 0-based position, and 31-bit REF+ALT code.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#extract_variantkey_chrom"><code>extract_variantkey_chrom</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#extract_variantkey_chrom"><code>extract_variantkey_chrom</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Extract the raw upstream VariantKey chromosome code.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#extract_variantkey_pos"><code>extract_variantkey_pos</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#extract_variantkey_pos"><code>extract_variantkey_pos</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Extract the raw upstream VariantKey 0-based position field.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#extract_variantkey_refalt"><code>extract_variantkey_refalt</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#extract_variantkey_refalt"><code>extract_variantkey_refalt</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Extract the raw upstream 31-bit VariantKey REF+ALT code.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#decode_variantkey"><code>decode_variantkey</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#decode_variantkey"><code>decode_variantkey</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Decode a VariantKey into its raw upstream numeric fields: chrom_code, pos0, and refalt_code.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#reverse_variantkey"><code>reverse_variantkey</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#reverse_variantkey"><code>reverse_variantkey</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Decode a VariantKey into a STRUCT with chrom, chrom_code, 1-based pos, upstream 0-based pos0, ref, alt, refalt_code, and reversible. For hashed nonreversible keys, reversible is FALSE and ref/alt are returned as NULL because DuckHTS v1 does not ship the optional NRVK lookup sidecar.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#variantkey_range"><code>variantkey_range</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#variantkey_range"><code>variantkey_range</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Return the inclusive minimum and maximum VariantKey bounds for a chromosome plus 1-based VCF position range, suitable for numeric range filtering on precomputed VariantKeys.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_contig_key"><code>duckhts_contig_key</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_contig_key"><code>duckhts_contig_key</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Return a conservative contig join key by removing one non-empty leading chr prefix case-insensitively and normalizing M/MT to MT. X and Y are uppercased; all other suffixes are preserved. This does not map numeric sex chromosomes, accessions, patches, or alternate loci.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#bcftools_liftover"><code>bcftools_liftover</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#bcftools_liftover"><code>bcftools_liftover</code></a></td>
 <td>scalar</td>
 <td><code>rduckhts_liftover</code></td>
 <td>Row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with fields: src_chrom, src_pos, src_ref, src_alt, dest_chrom, dest_pos, dest_end, dest_ref, dest_alt, mapped, reverse_complemented, swap, reject_reason, and note. Set no_left_align := true to skip post-liftover left-alignment of lifted indels (mirrors –no-left-align in bcftools +liftover).</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckdb_liftover"><code>duckdb_liftover</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckdb_liftover"><code>duckdb_liftover</code></a></td>
 <td>table_macro</td>
 <td><code>rduckhts_liftover</code></td>
 <td>DuckDB-specific wrapper over bcftools_liftover that takes either a table name or a derived-table expression plus column-name strings for chrom/pos/ref/alt and returns the lifted table. The no_left_align parameter mirrors –no-left-align in bcftools +liftover.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#bcftools_norm_row"><code>bcftools_norm_row</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#bcftools_norm_row"><code>bcftools_norm_row</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Normalize one variant against FASTA with bcftools/vt-style left alignment.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckhts_bcftools_norm"><code>duckhts_bcftools_norm</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckhts_bcftools_norm"><code>duckhts_bcftools_norm</code></a></td>
 <td>table_macro</td>
 <td><code>rduckhts_bcftools_norm</code></td>
 <td>Normalize variants from a table or derived-table expression while preserving input columns.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#bcftools_score"><code>bcftools_score</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#bcftools_score"><code>bcftools_score</code></a></td>
 <td>table</td>
 <td><code>rduckhts_score</code></td>
 <td>Compute polygenic scores from genotype VCF/BCF and summary statistics using bcftools +score dosage semantics.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#bcftools_munge_row"><code>bcftools_munge_row</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#bcftools_munge_row"><code>bcftools_munge_row</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Normalize one summary-statistics row into GWAS-VCF-style fields (chrom/pos/ref/alt/effect metrics), resolving REF/ALT orientation against a FASTA reference and applying swap-aware sign/frequency/count transforms. The output flag <code>alleles_swapped</code> means REF/ALT orientation was swapped to match the FASTA reference.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckdb_munge"><code>duckdb_munge</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckdb_munge"><code>duckdb_munge</code></a></td>
 <td>table_macro</td>
 <td><code>rduckhts_munge</code></td>
 <td>DuckDB macro wrapper over bcftools_munge_row that maps source columns (via preset or explicit map) and returns normalized GWAS-VCF-style rows with lean outputs and explicit <code>alleles_swapped</code> semantics. Output columns: chrom, pos, id, ref, alt, alleles_swapped, filter, ns, ez, nc, es, se, lp, af, ac, ne (16 columns). For METAL meta-analysis output with SI/I2/CQ/ED columns, use duckdb_munge_metal.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#duckdb_munge_metal"><code>duckdb_munge_metal</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#duckdb_munge_metal"><code>duckdb_munge_metal</code></a></td>
 <td>table_macro</td>
 <td><code>rduckhts_munge</code></td>
 <td>Extended munge macro with METAL meta-analysis output columns. Same as duckdb_munge but additionally emits: si (imputation info, from INFO input), i2 (Cochran’s I² heterogeneity, from HET_I2), cq (Cochran’s Q -log10 p, from HET_LP or -log10(HET_P)), and ed (effect direction string, from DIRE; +/- flipped on allele swap). The R wrapper rduckhts_munge() auto-dispatches to this macro when metal keys (INFO, HET_I2, HET_P, HET_LP, DIRE) are present in the resolved column map.</td>
@@ -1081,43 +1081,43 @@ Show generated function catalog
 </tr></thead>
 <tbody>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#seq_revcomp"><code>seq_revcomp</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#seq_revcomp"><code>seq_revcomp</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Compute the reverse complement of a DNA sequence using A, C, G, T, and N bases. Overloaded: accepts either a VARCHAR text sequence (returns VARCHAR) or a UTINYINT[] of htslib nt16 codes as produced by read_bam(sequence_encoding := ‘nt16’) (returns UTINYINT[]); the nt16 overload is bit-identical to the text path after decoding, so BAM pipelines can reverse-complement without leaving the nt16 encoding.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#seq_canonical"><code>seq_canonical</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#seq_canonical"><code>seq_canonical</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Return the lexicographically smaller of a sequence and its reverse complement. Overloaded: accepts either a VARCHAR text sequence (returns VARCHAR) or a UTINYINT[] of htslib nt16 codes as produced by read_bam(sequence_encoding := ‘nt16’) (returns UTINYINT[]); the nt16 overload compares by decoded base order and is bit-identical to the text path after decoding.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#seq_hash_2bit"><code>seq_hash_2bit</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#seq_hash_2bit"><code>seq_hash_2bit</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Encode a short DNA sequence as a 2-bit unsigned integer hash. Overloaded to also accept a UTINYINT[] of htslib nt16 codes (from read_bam(sequence_encoding := ‘nt16’)); non-ACGT codes yield NULL, bit-identical to the text path.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#seq_encode_4bit"><code>seq_encode_4bit</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#seq_encode_4bit"><code>seq_encode_4bit</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Encode an IUPAC DNA sequence as a list of 4-bit base codes, preserving ambiguity symbols including N.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#seq_decode_4bit"><code>seq_decode_4bit</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#seq_decode_4bit"><code>seq_decode_4bit</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Decode a list of 4-bit IUPAC DNA base codes back into a sequence string.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#seq_gc_content"><code>seq_gc_content</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#seq_gc_content"><code>seq_gc_content</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Compute GC fraction for a DNA sequence as a value between 0 and 1. Overloaded: accepts either a VARCHAR text sequence or a UTINYINT[] of htslib nt16 codes as produced by read_bam(sequence_encoding := ‘nt16’); the nt16 overload classifies codes directly and is bit-identical to the text path, so BAM pipelines can compute GC without decoding sequences back to text.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#seq_kmers"><code>seq_kmers</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#seq_kmers"><code>seq_kmers</code></a></td>
 <td>table</td>
 <td></td>
 <td>Expand a sequence into positional k-mers with optional canonicalization.</td>
@@ -1134,91 +1134,91 @@ Show generated function catalog
 </tr></thead>
 <tbody>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#sam_flag_bits"><code>sam_flag_bits</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#sam_flag_bits"><code>sam_flag_bits</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Decode a SAM flag into a struct of boolean bit fields using explicit SAM-oriented names such as <code>is_paired</code>, <code>is_proper_pair</code>, <code>is_next_segment_unmapped</code>, and <code>is_supplementary</code>.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#sam_flag_has"><code>sam_flag_has</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#sam_flag_has"><code>sam_flag_has</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Test whether any bits from the provided SAM flag mask are set in a flag value.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#is_forward_aligned"><code>is_forward_aligned</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#is_forward_aligned"><code>is_forward_aligned</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Test whether a mapped segment is aligned to the forward strand. Returns <code>NULL</code> for unmapped segments because SAM flag <code>0x10</code> does not define genomic strand when <code>0x4</code> is set.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#is_paired"><code>is_paired</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#is_paired"><code>is_paired</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Test whether the SAM flag indicates that the template has multiple segments in sequencing (<code>0x1</code>).</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#is_proper_pair"><code>is_proper_pair</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#is_proper_pair"><code>is_proper_pair</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Test whether the SAM flag indicates that each segment is properly aligned according to the aligner (<code>0x2</code>).</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#is_unmapped"><code>is_unmapped</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#is_unmapped"><code>is_unmapped</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Test whether the read itself is unmapped according to the SAM flag.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#is_next_segment_unmapped"><code>is_next_segment_unmapped</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#is_next_segment_unmapped"><code>is_next_segment_unmapped</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Test whether the next segment in the template is flagged as unmapped (<code>0x8</code>).</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#is_reverse_complemented"><code>is_reverse_complemented</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#is_reverse_complemented"><code>is_reverse_complemented</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Test whether <code>SEQ</code> is stored reverse complemented (<code>0x10</code>); for mapped reads this corresponds to reverse-strand alignment.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#is_next_segment_reverse_complemented"><code>is_next_segment_reverse_complemented</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#is_next_segment_reverse_complemented"><code>is_next_segment_reverse_complemented</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Test whether <code>SEQ</code> of the next segment in the template is stored reverse complemented (<code>0x20</code>).</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#is_first_segment"><code>is_first_segment</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#is_first_segment"><code>is_first_segment</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Test whether the read is marked as the first segment in the template.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#is_last_segment"><code>is_last_segment</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#is_last_segment"><code>is_last_segment</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Test whether the read is marked as the last segment in the template.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#is_secondary"><code>is_secondary</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#is_secondary"><code>is_secondary</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Test whether the alignment is marked as secondary.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#is_qc_fail"><code>is_qc_fail</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#is_qc_fail"><code>is_qc_fail</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Test whether the read failed vendor or pipeline quality checks.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#is_duplicate"><code>is_duplicate</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#is_duplicate"><code>is_duplicate</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Test whether the alignment is flagged as a duplicate.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#is_supplementary"><code>is_supplementary</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#is_supplementary"><code>is_supplementary</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Test whether the alignment is marked as supplementary.</td>
@@ -1235,55 +1235,55 @@ Show generated function catalog
 </tr></thead>
 <tbody>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#cigar_has_soft_clip"><code>cigar_has_soft_clip</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#cigar_has_soft_clip"><code>cigar_has_soft_clip</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Test whether a CIGAR string contains any soft-clipped segment (<code>S</code>). Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#cigar_has_hard_clip"><code>cigar_has_hard_clip</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#cigar_has_hard_clip"><code>cigar_has_hard_clip</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Test whether a CIGAR string contains any hard-clipped segment (<code>H</code>). Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#cigar_left_soft_clip"><code>cigar_left_soft_clip</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#cigar_left_soft_clip"><code>cigar_left_soft_clip</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Return the left-end soft-clipped length from a CIGAR string, or zero if the alignment does not start with <code>S</code>. Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#cigar_right_soft_clip"><code>cigar_right_soft_clip</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#cigar_right_soft_clip"><code>cigar_right_soft_clip</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Return the right-end soft-clipped length from a CIGAR string, or zero if the alignment does not end with <code>S</code>. Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#cigar_query_length"><code>cigar_query_length</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#cigar_query_length"><code>cigar_query_length</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Return the query-consuming length from a CIGAR string, counting <code>M</code>, <code>I</code>, <code>S</code>, <code>=</code>, and <code>X</code>. Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#cigar_aligned_query_length"><code>cigar_aligned_query_length</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#cigar_aligned_query_length"><code>cigar_aligned_query_length</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Return the aligned query length from a CIGAR string, counting <code>M</code>, <code>=</code>, and <code>X</code> but excluding clips and insertions. Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#cigar_reference_length"><code>cigar_reference_length</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#cigar_reference_length"><code>cigar_reference_length</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Return the reference-consuming length from a CIGAR string, counting <code>M</code>, <code>D</code>, <code>N</code>, <code>=</code>, and <code>X</code>. Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#cigar_has_op"><code>cigar_has_op</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#cigar_has_op"><code>cigar_has_op</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Test whether a CIGAR string contains at least one instance of the requested operator. Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path.</td>
 </tr>
 <tr>
-<td><a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/function_catalog/reference.md#cigar_aligned_blocks"><code>cigar_aligned_blocks</code></a></td>
+<td><a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/function_catalog/reference.md#cigar_aligned_blocks"><code>cigar_aligned_blocks</code></a></td>
 <td>scalar</td>
 <td></td>
 <td>Return the aligned blocks of a CIGAR as a struct of three parallel BIGINT lists: ref_start, query_start and width, one entry per M, = or X op in CIGAR order. Overloaded to also accept a UINTEGER[] binary CIGAR (as produced by read_bam(cigar_representation := ‘binary’)); the binary overload is bit-identical to the text path.</td>
@@ -2421,11 +2421,11 @@ external-data cache.</p>
 </ul>
 <h2 id="sec:license">License</h2>
 <p>The DuckHTS DuckDB extension is licensed under the MIT License; see
-<a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/LICENSE">LICENSE</a>. The R packages (Rduckhts, duckhtsbench) are licensed
+<a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/LICENSE">LICENSE</a>. The R packages (Rduckhts, duckhtsbench) are licensed
 GPL (&gt;= 2), and the <code>duckhts</code> npm package GPL-2.0-or-later. Vendored
 and linked third-party code keeps its own licences: see
-<a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/COPYRIGHT">r/Rduckhts/inst/COPYRIGHT</a> and
-<a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/js/THIRD_PARTY_NOTICES.md">js/THIRD_PARTY_NOTICES.md</a>.</p>
+<a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/COPYRIGHT">r/Rduckhts/inst/COPYRIGHT</a> and
+<a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/js/THIRD_PARTY_NOTICES.md">js/THIRD_PARTY_NOTICES.md</a>.</p>
 <h2 id="sec:credits">Credits</h2>
 <p><a href="https://github.com/RGenomicsETL/duckhts/graphs/contributors"><img src="https://contrib.rocks/image?repo=RGenomicsETL/duckhts" alt="Contributors"></a></p>
 <p>The GenBank reader and FASTA converter were contributed by <a href="https://github.com/ryandward">Ryan
@@ -2433,8 +2433,8 @@ Ward</a> of <a href="https://github.com/Nurture-Bio">Nurture
 Bio</a>.</p>
 <p>Thanks to all
 <a href="https://github.com/RGenomicsETL/duckhts/graphs/contributors">contributors</a>.
-See the <a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/DESCRIPTION">package author credits</a> and
-<a href="https://github.com/RGenomicsETL/duckhts/blob/f7eeb6de6c7bfb5718bd8705bfb6a844aad9c494/r/Rduckhts/inst/COPYRIGHT">third-party notices</a> for upstream
+See the <a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/DESCRIPTION">package author credits</a> and
+<a href="https://github.com/RGenomicsETL/duckhts/blob/1a623541c2fb89e7d246a1d5266ab03e0457d8a8/r/Rduckhts/inst/COPYRIGHT">third-party notices</a> for upstream
 acknowledgements.</p>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-core.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/plugins/autoloader/prism-autoloader.min.js" defer></script>
