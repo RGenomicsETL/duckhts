@@ -1,0 +1,220 @@
+# name: test/sql/bam_mismatch_counts.test
+# description: duckhts_bam_mismatch_counts against hand-derived counts and an independent count in SQL
+# group: [duckhts]
+
+require duckhts
+
+# The fixtures are written by test/scripts/prepare_bam_mismatch_fixtures.R. Each
+# alignment has its own base quality, so a quality names an alignment:
+#   40 pair1 first mate (20M, no mismatch) and other_contig (ref2, 20M, one mismatch)
+#   35 pair1 second mate, reverse (20M, one mismatch at stored offset 3)
+#   30 clip_ins (5S10M2I8M, one mismatch at stored offset 23)
+#   20 deletion, reverse (10M3D10M, mismatches at stored offsets 8 and 17)
+#   25 hardclip (3H12M2H)
+#   -- noqual (12M, no base qualities)
+#   10 masked (20M over the mask records, an N at offset 0, mismatches at 173 and 190)
+# duplicate (flag 1024) and lowmapq (MAPQ 5) are left out by the default filters.
+# The mask has an SNV at 173, a deletion at 180-181 and a symbolic deletion at 186-188.
+
+query TT
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM duckhts_bam_mismatch_counts(
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.bam', '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa'));
+----
+mate	TINYINT
+cycle	INTEGER
+base_quality	TINYINT
+reference_base	VARCHAR
+read_base	VARCHAR
+bases	BIGINT
+
+# Default flank of 5 bases, with the mask. By hand:
+#   clip_ins: the soft clip leaves out stored offsets 5-9 and the insertion 10-21, so 22-24 stay: 3 bases.
+#   deletion: offsets 5-14 are left out, so 10 bases stay, with the mismatch at offset 17.
+#   masked:   the mask covers 173 and, with the flank, 175-193. With the N at 171, positions 172 and 174 stay.
+query IIII
+SELECT base_quality, mate, sum(bases)::INTEGER, sum(CASE WHEN reference_base != read_base THEN bases ELSE 0 END)::INTEGER
+FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa',
+  mask := '__WORKING_DIRECTORY__/test/data/bam_mismatch.mask.vcf.gz')
+GROUP BY ALL ORDER BY base_quality NULLS LAST, mate;
+----
+10	0	2	0
+20	0	10	1
+25	0	12	0
+30	0	3	1
+35	2	20	1
+40	0	20	1
+40	1	20	0
+NULL	0	12	0
+
+# Cycles and strand. Hard clips shift the cycle: the 12 stored bases of hardclip are cycles 4 to 15.
+query II
+SELECT min(cycle), max(cycle)
+FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa') WHERE base_quality = 25;
+----
+4	15
+
+# A reverse alignment is counted on the strand of the read. The second mate of
+# pair1 shows T where the forward reference has G, at stored offset 3 of 20:
+# cycle 17, and C>A on the read. The deletion read shows A for T at offset 17:
+# cycle 3, and A>T on the read.
+query IITT
+SELECT base_quality, cycle, reference_base, read_base
+FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa')
+WHERE base_quality IN (20, 35) AND reference_base != read_base ORDER BY base_quality;
+----
+20	3	A	T
+35	17	C	A
+
+# Without a flank, every aligned base outside the mask is counted: clip_ins 18,
+# deletion 20 with both mismatches, masked 13 with the mismatch at 190.
+query II
+SELECT sum(bases)::INTEGER, sum(CASE WHEN reference_base != read_base THEN bases ELSE 0 END)::INTEGER
+FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa',
+  mask := '__WORKING_DIRECTORY__/test/data/bam_mismatch.mask.vcf.gz', indel_flank := 0);
+----
+135	6
+
+# Without a mask and without a flank, the masked read gives 19 bases and both mismatches.
+query II
+SELECT sum(bases)::INTEGER, sum(CASE WHEN reference_base != read_base THEN bases ELSE 0 END)::INTEGER
+FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa', indel_flank := 0);
+----
+141	7
+
+# The same counts made in SQL from read_bam, cigar_aligned_blocks, read_fasta
+# and read_bcf, without a flank. Every row must be equal.
+statement ok
+CREATE TEMP TABLE mismatch_oracle AS
+WITH reads AS (
+  SELECT FLAG, RNAME, SEQ, QUAL, len(SEQ) AS n, cigar_aligned_blocks(CIGAR, POS) AS blocks,
+    coalesce(TRY_CAST(regexp_extract(CIGAR, '^([0-9]+)H', 1) AS BIGINT), 0) AS hard_left,
+    coalesce(TRY_CAST(regexp_extract(CIGAR, '([0-9]+)H$', 1) AS BIGINT), 0) AS hard_right
+  FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam')
+  WHERE (FLAG & 3844) = 0 AND MAPQ >= 20
+), aligned AS (
+  SELECT FLAG, RNAME, SEQ, QUAL, n, hard_left, hard_right, unnest(blocks.ref_start) AS ref_start,
+    unnest(blocks.query_start) AS query_start, unnest(blocks.width) AS width
+  FROM reads
+), read_bases AS (
+  SELECT FLAG, RNAME, n, hard_left, hard_right, ref_start + i AS pos, query_start + i AS query_offset,
+    substr(SEQ, query_start + i + 1, 1) AS base,
+    CASE WHEN QUAL IS NULL OR QUAL = '*' THEN NULL ELSE ord(substr(QUAL, query_start + i + 1, 1)) - 33 END AS quality
+  FROM aligned, LATERAL (SELECT unnest(range(width)) AS i)
+), reference AS (
+  SELECT NAME, unnest(range(1, len(SEQUENCE) + 1)) AS pos, unnest(string_split(upper(SEQUENCE), '')) AS reference_base
+  FROM read_fasta('__WORKING_DIRECTORY__/test/data/bam_mismatch.fa')
+), masked AS (
+  SELECT DISTINCT CHROM, unnest(range(POS, coalesce(INFO_END, POS + len(REF) - 1) + 1)) AS pos
+  FROM read_bcf('__WORKING_DIRECTORY__/test/data/bam_mismatch.mask.vcf.gz')
+)
+SELECT
+  CASE WHEN (FLAG & 1) = 0 THEN 0 WHEN (FLAG & 64) != 0 THEN 1 WHEN (FLAG & 128) != 0 THEN 2 ELSE 0 END AS mate,
+  CASE WHEN (FLAG & 16) != 0 THEN hard_right + n - query_offset ELSE hard_left + query_offset + 1 END AS cycle,
+  quality AS base_quality,
+  CASE WHEN (FLAG & 16) != 0 THEN translate(r.reference_base, 'ACGT', 'TGCA') ELSE r.reference_base END AS reference_base,
+  CASE WHEN (FLAG & 16) != 0 THEN translate(b.base, 'ACGT', 'TGCA') ELSE b.base END AS read_base,
+  count(*) AS bases
+FROM read_bases b JOIN reference r ON r.NAME = b.RNAME AND r.pos = b.pos
+WHERE b.base IN ('A', 'C', 'G', 'T') AND r.reference_base IN ('A', 'C', 'G', 'T')
+  AND NOT EXISTS (SELECT 1 FROM masked m WHERE m.CHROM = b.RNAME AND m.pos = b.pos)
+GROUP BY ALL;
+
+query III
+WITH observed AS (
+  SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+    '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa',
+    mask := '__WORKING_DIRECTORY__/test/data/bam_mismatch.mask.vcf.gz', indel_flank := 0)
+)
+SELECT (SELECT sum(bases)::INTEGER FROM mismatch_oracle),
+  (SELECT count(*) FROM (SELECT * FROM observed EXCEPT SELECT * FROM mismatch_oracle)),
+  (SELECT count(*) FROM (SELECT * FROM mismatch_oracle EXCEPT SELECT * FROM observed));
+----
+135	0	0
+
+# A BCF mask and a VCF mask give the same rows, and so do CRAM and BAM.
+query II
+WITH vcf AS (SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+    '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa', mask := '__WORKING_DIRECTORY__/test/data/bam_mismatch.mask.vcf.gz')),
+  bcf AS (SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.cram',
+    '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa', mask := '__WORKING_DIRECTORY__/test/data/bam_mismatch.mask.bcf'))
+SELECT (SELECT sum(bases)::INTEGER FROM vcf),
+  (SELECT count(*) FROM (SELECT * FROM vcf EXCEPT SELECT * FROM bcf)) +
+  (SELECT count(*) FROM (SELECT * FROM bcf EXCEPT SELECT * FROM vcf));
+----
+99	0
+
+# Regions select alignments by overlap; all aligned bases of a selected alignment are counted.
+query I
+SELECT sum(bases)::INTEGER FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa', region := 'ref1:1-45');
+----
+40
+
+query I
+SELECT sum(bases)::INTEGER FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa', region := 'ref1:1-45,ref2');
+----
+60
+
+# Filters. Without them the duplicate and the low-MAPQ alignments add 20 bases each.
+query I
+SELECT sum(bases)::INTEGER FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa',
+  mask := '__WORKING_DIRECTORY__/test/data/bam_mismatch.mask.vcf.gz', exclude_flags := 0, min_mapq := 0);
+----
+139
+
+# Reverse alignments only: the second mate of pair1 and the deletion read.
+query I
+SELECT sum(bases)::INTEGER FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa', require_flags := 16);
+----
+30
+
+# Contig names are compared byte for byte, and a miss is an error, not an empty mask.
+statement error
+SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa',
+  mask := '__WORKING_DIRECTORY__/test/data/bam_mismatch.other_names.vcf.gz');
+----
+mask has no contig named ref1
+
+statement error
+SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+  '__WORKING_DIRECTORY__/test/data/fixture_ref.fa');
+----
+reference has no contig named ref1
+
+statement error
+SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa', region := '*');
+----
+region items must name a contig or an interval
+
+statement error
+SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa', indel_flank := -1);
+----
+indel_flank in [0, 1000]
+
+statement error
+SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa', mask := '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa');
+----
+mask must be a BCF or a bgzip-compressed VCF
+
+statement error
+SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/no_such_file.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa');
+----
+cannot open
+
+statement error
+SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam', NULL);
+----
+requires an alignment path and a reference FASTA path

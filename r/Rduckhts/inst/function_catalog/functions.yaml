@@ -1145,6 +1145,26 @@
       ]
     },
     {
+      "name": "duckhts_bam_mismatch_counts",
+      "kind": "table",
+      "category": "Coverage",
+      "signature": "duckhts_bam_mismatch_counts(path, reference, region := NULL, mask := NULL, index_path := NULL, reference_index_path := NULL, mask_index_path := NULL, min_mapq := 20, require_flags := 0, exclude_flags := 3844, indel_flank := 5)",
+      "returns": "table",
+      "r_wrapper": "rduckhts_bam_mismatch_counts",
+      "details": {
+        "Input": "path is a SAM, BAM or CRAM file and reference is its indexed FASTA; fasta_index() builds the index. region is a comma-separated list of contigs or intervals and needs an alignment index; without it the whole file is read. Alignments are kept when MAPQ is at least min_mapq, every bit of require_flags is set and no bit of exclude_flags is set; the default 3844 leaves out unmapped, secondary, failed, duplicate and supplementary alignments.",
+        "Output": "One row for each combination that occurs: mate (1 or 2 for a paired read, 0 otherwise), cycle (the one-based position of the base in the read as sequenced, hard clips included), base_quality (NULL when the read stores no qualities), reference_base and read_base (both on the strand of the read, so a reverse alignment is complemented), and bases, the number of aligned bases. Rows with reference_base equal to read_base are the matches, so a rate is a ratio of two sums. Rows come in the order of mate, cycle, base_quality, reference_base, read_base.",
+        "What is counted": "Every aligned base (CIGAR M, = or X) of a kept alignment whose read base and reference base are both A, C, G or T. A base within indel_flank read bases of an insertion, a deletion, a reference skip or a soft clip is left out, because bases next to a gap are often misaligned. A region selects alignments by overlap; all aligned bases of a selected alignment are counted, also those outside the region.",
+        "Mask": "mask is an indexed BCF or a bgzip-compressed VCF with a tabix index, for example known variants. Every reference position of a mask record is left out. A record with an indel or a symbolic allele also leaves out indel_flank bases on each side; a symbolic allele ends at INFO/END. With a mask of the known variants of the sample or its population, the mismatches that remain are errors of the read, the library or the alignment.",
+        "Contig names": "The contig names of the alignment header, the reference and the mask are compared byte for byte. A contig with a kept alignment that the reference does not have is an error. So is a contig that the mask does not know, in its header or in its index: a silent miss would count known variants as errors.",
+        "Limits": "One worker. Memory is fixed: 36.5 MB of counters, one reference window of 1 MiB with its mask, and the alignment in hand. A cycle above 1000 is counted as 1000 and a base quality above 93 as 93. An alignment that spans more than 64 MiB of reference is an error. Alignments are expected in coordinate order; an unsorted file is counted correctly but fetches a reference window for each alignment."
+      },
+      "description": "Count aligned read bases against the reference by mate, cycle, base quality and substitution, optionally leaving out masked positions such as known variants.",
+      "examples": [
+        "SELECT base_quality, sum(bases) FILTER (WHERE reference_base != read_base) / sum(bases) AS mismatch_rate FROM duckhts_bam_mismatch_counts('sample.bam', 'reference.fa', region := 'chr20:10000000-12000000', mask := 'known_variants.vcf.gz') GROUP BY base_quality ORDER BY base_quality;"
+      ]
+    },
+    {
       "name": "duckhts_bam_bed_coverage",
       "kind": "table",
       "category": "Coverage",

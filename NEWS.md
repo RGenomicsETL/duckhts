@@ -4,6 +4,18 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- Added `duckhts_bam_mismatch_counts()`: the aligned read bases of a SAM, BAM
+  or CRAM file counted against the reference by mate, cycle, base quality and
+  substitution, in one pass with fixed memory. A `mask` of known variants (a
+  BCF or a bgzip-compressed VCF) leaves those positions out, so the mismatches
+  that remain are errors of the read, the library or the alignment. This is the
+  error-only count for the read-error and contamination work (#332): a second
+  genome cannot produce a mismatch at a masked-out invariant site. Bases next
+  to a gap or a soft clip are left out by `indel_flank`. Contig names are
+  compared byte for byte, and a contig that the reference or the mask does not
+  know is an error. SQL tests check the function against hand-derived counts
+  and against the same counts made independently in SQL.
+
 - The function reference now states how each function compares contig names
   across two sources, under "Contig names": `duckhts_roh()`,
   `duckhts_roh_af_table()` and `duckhts_roh_counts()` compare byte for byte, so

@@ -54,6 +54,7 @@ src/quality_encoding_reader.c|quality_encoding_reader.c
 src/score_udf.c|score_udf.c
 src/mosdepth_table.c|mosdepth_table.c
 src/bam_bin_counts.c|bam_bin_counts.c
+src/bam_mismatch_counts.c|bam_mismatch_counts.c
 src/samtools_idxstats_table.c|samtools_idxstats_table.c
 src/bam_bed_coverage.c|bam_bed_coverage.c
 src/cgranges_api.c|cgranges_api.c
