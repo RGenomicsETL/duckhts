@@ -1,6 +1,7 @@
 "key","value"
-"revision","44d68758e60289c55b93186ee9a71dda4f47c52c"
+"revision","c81955f85c1807a5f2810c98e7e91825be135909"
 "tracked_changes","no"
+"input_identities","match the registry"
 "extension_version","1.5.2.9012"
 "duckdb_version","v1.5.5"
 "r_version","R version 4.6.0 (2026-04-24)"

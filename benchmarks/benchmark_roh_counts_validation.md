@@ -33,6 +33,12 @@ All inputs are `r/duckhtsbench` registry artifacts.
   only, exactly one record per site. Staging checks the SHA-256 of the cached
   source and the record digest of the output.
 
+Before any decode, the run compares each cached input with the identity its
+registry row records: the sample, row count and canonical counts digest of
+each read-count file, and the sample order, record count and record digest of
+the genotype BCF (`benchmarks/roh_counts_validation/inputs.R`). A file that
+differs stops the render.
+
 The read counts and the genotypes come from the same 30× sequencing of the
 1000 Genomes samples. The VCF path is an independent decode path, with joint calling and phasing behind its
 genotypes. It is not an independent measurement of the samples.
@@ -112,8 +118,9 @@ taskset -c 4-7 Rscript -e 'rmarkdown::render("benchmarks/benchmark_roh_counts_va
 
 | Item                | Value                                    |
 |:--------------------|:-----------------------------------------|
-| revision            | 44d68758e60289c55b93186ee9a71dda4f47c52c |
+| revision            | c81955f85c1807a5f2810c98e7e91825be135909 |
 | tracked_changes     | no                                       |
+| input_identities    | match the registry                       |
 | extension_version   | 1.5.2.9012                               |
 | duckdb_version      | v1.5.5                                   |
 | r_version           | R version 4.6.0 (2026-04-24)             |
