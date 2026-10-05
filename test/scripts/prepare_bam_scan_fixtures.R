@@ -4,6 +4,45 @@
 # Originally generated with samtools 1.23 / HTSlib 1.23; no external reference.
 stopifnot(file.exists("src/bam_reader.c"), nzchar(Sys.which("samtools")), nzchar(Sys.which("bgzip")))
 
+# Copies a BAI without its per-reference statistics. The SAM specification
+# makes the statistics optional: they are a pseudo-bin, number 37450, of each
+# reference. The data bins, the linear index and the trailing no-coordinate
+# count are copied unchanged.
+write_bai_without_statistics <- function(source, output) {
+  input <- file(source, "rb")
+  on.exit(close(input), add = TRUE)
+  copied <- rawConnection(raw(0L), "wb")
+  on.exit(close(copied), add = TRUE)
+  read_int32 <- function() readBin(input, "integer", n = 1L, size = 4L, endian = "little")
+  write_int32 <- function(value) writeBin(as.integer(value), copied, size = 4L, endian = "little")
+  magic <- readBin(input, "raw", n = 4L)
+  stopifnot(identical(magic, as.raw(c(0x42, 0x41, 0x49, 0x01))))
+  writeBin(magic, copied)
+  reference_count <- read_int32()
+  write_int32(reference_count)
+  for (reference in seq_len(reference_count)) {
+    bins <- lapply(seq_len(read_int32()), function(bin) {
+      number <- read_int32()
+      chunk_count <- read_int32()
+      list(number = number, chunk_count = chunk_count,
+           chunks = readBin(input, "raw", n = 16L * chunk_count))
+    })
+    kept <- Filter(function(bin) bin$number != 37450L, bins)
+    write_int32(length(kept))
+    for (bin in kept) {
+      write_int32(bin$number)
+      write_int32(bin$chunk_count)
+      writeBin(bin$chunks, copied)
+    }
+    interval_count <- read_int32()
+    write_int32(interval_count)
+    writeBin(readBin(input, "raw", n = 8L * interval_count), copied)
+  }
+  writeBin(readBin(input, "raw", n = 8L), copied)
+  stopifnot(length(readBin(input, "raw", n = 1L)) == 0L)
+  writeBin(rawConnectionValue(copied), output)
+}
+
 prepare_bam_scan_fixtures <- function() {
   tmp <- tempfile("bam-scan-fixtures-")
   dir.create(tmp)
@@ -48,6 +87,18 @@ prepare_bam_scan_fixtures <- function() {
         stopifnot(file.copy(plain, legacy, overwrite = TRUE))
       }
       stopifnot(file.copy(legacy, "r/Rduckhts/inst/extdata", overwrite = TRUE))
+    }
+    # Indexes with alignments of chr1 and chr2 and no statistics for them, with
+    # and without the trailing no-coordinate count. htslib cannot locate the
+    # reads without coordinates from either.
+    if (name == "mixed") {
+      without_statistics <- paste0(bam, ".nostats.bai")
+      write_bai_without_statistics(paste0(bam, ".bai"), without_statistics)
+      bytes <- readBin(without_statistics, "raw", n = file.size(without_statistics))
+      without_count <- paste0(bam, ".nostats.legacy.bai")
+      writeBin(head(bytes, -8L), without_count)
+      stopifnot(all(file.copy(c(without_statistics, without_count),
+                              "r/Rduckhts/inst/extdata", overwrite = TRUE)))
     }
     run(c("view", "--no-PG", "-C", "--output-fmt-option", "no_ref=1", "-o", cram, sam))
     run(c("index", cram))

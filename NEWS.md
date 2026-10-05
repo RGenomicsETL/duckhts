@@ -1,6 +1,6 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.2.9012
+# duckhts 1.5.2.9013
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
@@ -285,6 +285,33 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   rejects local object URLs). Development versions map to npm numeric prereleases.
 
 ## Fixes
+
+- `read_bam`, `read_tabix`, `read_gff`, `read_gtf` and `read_bed` now give
+  DuckDB's planner the whole-file row count from the index as an estimate.
+  Without one the planner took the scan for one row and could build a hash join
+  on the reader's rows instead of on the smaller relation. The estimate is
+  reported only for a whole-file indexed scan: no region, no
+  `scan_mode := 'sequential'`, and for `read_bed` the default
+  `error_policy := 'error'`. `read_tabix` and `read_bed` need complete index
+  statistics. `read_bam` sums the statistics the index has, so a BAM whose index
+  lacks them for references without reads still gets an estimate. An index that
+  lacks them for a reference with alignments, an index with no statistics, and
+  a CRAM index give none.
+
+- `read_bam` no longer repeats rows when a BAI or CSI has alignments of a
+  reference and no statistics for it. The SAM specification makes those
+  statistics optional, and htslib uses them to find where the reads without
+  coordinates start. Without them a full-file scan split by reference started
+  its last partition at the wrong place: a 5-record file returned 5, 6 or 8
+  rows depending on the thread count. Such an index now gives one sequential
+  scan. Region queries were not affected.
+
+- `read_bam`, `read_hts_index` and `read_hts_index_spans` no longer read BAI/CSI
+  fields from a CRAM index. htslib returns a CRAM index as a smaller object
+  behind the same pointer type, and these readers read its reference count and
+  metadata past the end of that object. The results were unchanged on the test
+  files (`read_bam` returned its rows, the index readers returned none), but the
+  read was undefined behaviour; valgrind reported it and reports none now.
 
 - A closed database is now released. `LOAD` used to open private connections
   into the loading database for cgranges and for Somalier BAM/CRAM panel reading
