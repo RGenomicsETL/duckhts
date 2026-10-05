@@ -9,6 +9,8 @@
  *   - Global init advertises max_threads = min(n_contigs, 16)
  *   - Each DuckDB thread opens its own samFile + hts_idx_t
  *   - Threads claim contigs and one no-coordinate tail via an atomic counter
+ *   - A BAI/CSI that lacks statistics for a reference with alignments cannot
+ *     locate that tail, so its full-file scan is one sequential stream
  *   - Per-thread hts_set_threads for htslib I/O decompression
  *
  * For user-supplied region queries the multi-region iterator
@@ -185,6 +187,10 @@ typedef struct {
     unsigned int n_regions;
 
     int has_index;
+    /* Whether a full-file scan may be split by reference; see
+     * bam_index_statistics_cover_alignments(). Without it the scan is one
+     * sequential stream. */
+    int index_splits_by_reference;
     int n_contigs;      /* sam_hdr_nref(); used for parallel partitioning */
     int standard_tags;
     int auxiliary_tags;
@@ -363,8 +369,14 @@ static int bam_parse_scan_mode(const char *mode, int *scan_sequential) {
     return 0;
 }
 
+/* A CRAM index is a different, smaller object behind the same pointer type
+ * and has no per-reference statistics; only its format may be read. */
+static int bam_index_is_bai_or_csi(hts_idx_t *idx) {
+    return idx != NULL && hts_idx_fmt(idx) != HTS_FMT_CRAI;
+}
+
 static int bam_try_get_index_row_count(hts_idx_t *idx, uint64_t *out_total) {
-    if (!idx || !out_total) return 0;
+    if (!bam_index_is_bai_or_csi(idx) || !out_total) return 0;
 
     int nseq = hts_idx_nseq(idx);
     uint64_t total = hts_idx_get_n_no_coor(idx);
@@ -382,6 +394,63 @@ static int bam_try_get_index_row_count(hts_idx_t *idx, uint64_t *out_total) {
     }
 
     *out_total = total;
+    return 1;
+}
+
+/* Whether the index holds no alignment of a reference: 1 when it holds none,
+ * 0 when it holds some, -1 when that cannot be determined. An iterator over
+ * the whole reference is finished as soon as it is made exactly when the
+ * reference has no bins. */
+static int bam_index_reference_is_empty(hts_idx_t *idx, int tid) {
+    hts_itr_t *itr = sam_itr_queryi(idx, tid, 0, HTS_POS_MAX);
+    if (!itr) return -1;
+    int is_empty = itr->finished ? 1 : 0;
+    hts_itr_destroy(itr);
+    return is_empty;
+}
+
+/* Whether every reference of a BAI or CSI that has alignments also has
+ * statistics. The statistics are optional in both formats. Two things depend
+ * on them:
+ *   - htslib finds where the reads without coordinates start from the
+ *     statistics of the references before them, so a scan can be split by
+ *     reference only when they are complete; otherwise the last partition
+ *     starts at the wrong place and repeats rows;
+ *   - a row total that leaves out a reference with alignments could be far
+ *     too low. */
+static int bam_index_statistics_cover_alignments(hts_idx_t *idx) {
+    int nseq = hts_idx_nseq(idx);
+    for (int tid = 0; tid < nseq; tid++) {
+        uint64_t mapped = 0, unmapped = 0;
+        if (hts_idx_get_stat(idx, tid, &mapped, &unmapped) != 0 &&
+            bam_index_reference_is_empty(idx, tid) != 1) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* A whole-file row estimate for the planner, for a BAI or CSI whose
+ * statistics cover its alignments. It need not be exact, so it is looser than
+ * bam_try_get_index_row_count: the no-coordinate count may be zero, and a
+ * reference without alignments has no statistics and counts as zero. An index
+ * with no statistics at all gives no estimate. */
+static int bam_index_row_estimate(hts_idx_t *idx, uint64_t *out_estimate) {
+    if (!bam_index_is_bai_or_csi(idx) || !out_estimate) return 0;
+
+    int nseq = hts_idx_nseq(idx);
+    uint64_t total = hts_idx_get_n_no_coor(idx);
+    int has_statistics = total > 0;
+    for (int tid = 0; tid < nseq; tid++) {
+        uint64_t mapped = 0, unmapped = 0;
+        if (hts_idx_get_stat(idx, tid, &mapped, &unmapped) != 0) continue;
+        has_statistics = 1;
+        if (mapped > UINT64_MAX - total || unmapped > UINT64_MAX - total - mapped) return 0;
+        total += mapped + unmapped;
+    }
+    if (!has_statistics) return 0;
+
+    *out_estimate = total;
     return 1;
 }
 
@@ -592,7 +661,18 @@ static void bam_read_bind(duckdb_bind_info info) {
         hts_idx_t *idx = sam_index_load3(fp, file_path, index_path, HTS_IDX_SILENT_FAIL);
         if (idx) {
             bind->has_index = 1;
+            /* A CRAM index locates its own reads without coordinates. */
+            bind->index_splits_by_reference =
+                !bam_index_is_bai_or_csi(idx) || bam_index_statistics_cover_alignments(idx);
             bind->index_row_count_valid = bam_try_get_index_row_count(idx, &bind->index_row_count);
+            /* Without an estimate the planner takes this scan for a small one
+             * and may build a hash join on its rows. The index total covers
+             * the whole file, so a region query reports no estimate. */
+            uint64_t row_estimate = 0;
+            if (bind->n_regions == 0 && bind->index_splits_by_reference &&
+                bam_index_row_estimate(idx, &row_estimate)) {
+                duckdb_bind_set_cardinality(info, (idx_t)row_estimate, false);
+            }
             hts_idx_destroy(idx);
         }
     }
@@ -702,7 +782,8 @@ static void bam_read_global_init(duckdb_init_info info) {
     if (column_count == 0 && bind->index_row_count_valid && !global->has_region) {
         global->n_contigs = 0;
         duckdb_init_set_max_threads(info, 1);
-    } else if (bind->has_index && bind->n_contigs > 1 && !global->has_region) {
+    } else if (bind->has_index && bind->index_splits_by_reference && bind->n_contigs > 1 &&
+               !global->has_region) {
         global->n_contigs = bind->n_contigs;
         idx_t max_threads = (idx_t)bind->n_contigs;
         if (max_threads > 16) max_threads = 16;
@@ -752,7 +833,9 @@ static void bam_read_local_init(duckdb_init_info info) {
         return;
     }
 
-    int is_parallel = (!bind->scan_sequential && bind->has_index && bind->n_contigs > 1 && bind->n_regions == 0);
+    int is_parallel = (!bind->scan_sequential && bind->has_index &&
+                       bind->index_splits_by_reference && bind->n_contigs > 1 &&
+                       bind->n_regions == 0);
     local->is_parallel = is_parallel;
     local->needs_next_contig = is_parallel;
     local->qual_repr = bind->qual_repr;
