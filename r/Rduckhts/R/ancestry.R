@@ -11,8 +11,11 @@
 #' matching the input are rejected. Long references require complete keyed
 #' rows during pivoting. Inputs and
 #' references must share an assembly, uppercase biallelic SNV alleles and
-#' reference orientation. Numeric chromosomes match
-#' after removing a `chr` prefix; other chromosome names match literally.
+#' reference orientation. Chromosome names are compared with
+#' `duckhts_contig_key()`: one leading `chr` is removed in any letter case,
+#' `M` and `MT` become `MT`, and `X` and `Y` are uppercased. Any other name
+#' must match byte for byte, so `01` does not match `1`. A reference whose
+#' chromosome column is an integer compares that key as an integer.
 #' Input duplicates at a sample/locus, palindromic alleles and missing
 #' frequencies are dropped; other alleles match directly, reversed, strand
 #' complemented or both. Reversed alleles use 1-frequency. Missing genotypes
@@ -106,8 +109,7 @@ rduckhts_ancestry_proportions <- function(
   contract <- .ancestry_long_contract(con, reference_table, loadings_table)
   groups <- contract$groups
   pcs <- contract$pcs
-  chromosome <- paste0("coalesce(try_cast(regexp_replace(chromosome::VARCHAR, '^chr', '') ",
-                       "AS INTEGER)::VARCHAR, chromosome::VARCHAR)")
+  chromosome <- .ancestry_chromosome_key(FALSE)
   ref_sites <- paste0("SELECT ", chromosome, " AS chromosome, position, allele_a, ",
                       "allele_b, group_id, frequency FROM ", r)
   pc_sites <- paste0("SELECT ", chromosome, " AS chromosome, position, allele_a, ",

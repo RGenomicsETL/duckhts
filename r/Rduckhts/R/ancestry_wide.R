@@ -158,13 +158,13 @@
        reference_source = reference_source, numeric_chromosome = numeric_chromosome)
 }
 
+# The chromosome join key, as SQL. Names are compared with duckhts_contig_key(),
+# the one contig key of the extension. A reference whose chromosome column is
+# an integer compares that key as an integer, so the reference rows need no
+# conversion.
 .ancestry_chromosome_key <- function(numeric_chromosome) {
-  if (numeric_chromosome) {
-    "try_cast(regexp_replace(chromosome::VARCHAR, '^chr', '') AS INTEGER)"
-  } else {
-    paste0("coalesce(try_cast(regexp_replace(chromosome::VARCHAR, '^chr', '') ",
-           "AS INTEGER)::VARCHAR, chromosome::VARCHAR)")
-  }
+  key <- "duckhts_contig_key(chromosome::VARCHAR)"
+  if (numeric_chromosome) paste0("try_cast(", key, " AS INTEGER)") else key
 }
 
 .ancestry_classification_query <- function(relations, frequency,

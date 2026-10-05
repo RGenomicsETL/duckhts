@@ -4,6 +4,16 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- The function reference now states how each function compares contig names
+  across two sources, under "Contig names": `duckhts_roh()`,
+  `duckhts_roh_af_table()` and `duckhts_roh_counts()` compare byte for byte, so
+  a frequency table or a genetic map that says `1` where the VCF says `chr1`
+  gives no rows and no error; `bcftools_score()`, `bcftools_liftover()`,
+  `bcftools_norm_row()` and `bcftools_munge_row()` each state their lookup
+  order; `variantkey()` states that its chromosome code is not a contig key.
+  `duckhts_contig_key()` is documented as the explicit key for such joins, with
+  what it does not map. No function changes its behaviour.
+
 - Added `duckhts_roh_ancestry()` for per-sample ancestry-weighted allele frequencies from long reference and proportion relations, with allele-orientation handling and optional frequency clamping.
 
 - Added `duckhts_roh_counts()` and a read-count overload of `duckhts_roh_segments()`:

@@ -1328,6 +1328,10 @@ DuckDB manages, and can spill, the scan and the joins. The sites of each sample 
 
 Duplicate positions on a chromosome keep the first record to arrive, as bcftools roh keeps the first record in the file. That is the file order when one scan thread reads both records; deduplicate upstream when it matters. With a frequency relation (duckhts_roh_af_table, duckhts_roh_ancestry), only the records that match a frequency row take part. bcftools' default AC/AN frequencies, --AF-dflt, --estimate-AF, --include/--exclude, --skip-indels, --ignore-homref, --buffer-size and --viterbi-training are not offered.
 
+### Contig names
+
+The chrom of genetic_map is compared byte for byte with the contig names of the sites. A chromosome that the map spells differently (1 and chr1) is skipped like a chromosome without map rows, without an error. Rename the map's contigs in a view first.
+
 ### Examples
 
 ```sql
@@ -1361,6 +1365,10 @@ af_table is a table or view name with columns chrom, pos (one-based), ref, alt a
 ### Otherwise
 
 Everything else is as duckhts_roh: the same output, genotype evidence (PL, or GT with gt_error), transition parameters, optional genetic_map overload, memory limits and limits.
+
+### Contig names
+
+The chrom of af_table is compared with the VCF's CHROM byte for byte. When the two spell contigs differently (1 and chr1), no record finds a frequency and the function returns no rows, without an error. Rename the contigs of af_table to the VCF's spelling in a view first; duckhts_contig_key() gives a common key.
 
 ### Examples
 
@@ -1441,6 +1449,10 @@ Biallelic sites only; one error rate for all reads, with no base- or mapping-qua
 ### Otherwise
 
 Output, transitions, rec_rate, the optional genetic_map overload and the memory limits are as duckhts_roh, with 24 bytes per site.
+
+### Contig names
+
+The chrom of genetic_map is compared byte for byte with the contig names of the sites. A chromosome that the map spells differently (1 and chr1) is skipped like a chromosome without map rows, without an error. Rename the map's contigs in a view first.
 
 ### Examples
 
@@ -2330,6 +2342,10 @@ Returns:
 UBIGINT
 ```
 
+### Chromosome code
+
+The chromosome part of a VariantKey is a code of the upstream format, not a contig key. A leading chr is removed in any letter case. An all-digit name becomes its number modulo 256, with no range check. X, Y, and M or MT, in any letter case, become 23, 24 and 25. Any other name becomes 0. So 25 and MT share a code, and all scaffolds and accessions share code 0. Use duckhts_contig_key() to join on contig names.
+
 ### Examples
 
 ```sql
@@ -2792,6 +2808,14 @@ Returns:
 VARCHAR
 ```
 
+### Use
+
+Readers and region arguments compare contig names byte for byte. This function is the explicit key for a join of two sources that spell contigs differently: join on duckhts_contig_key(a.chrom) = duckhts_contig_key(b.chrom), or rename one side. Two names of one source can share a key (1 and chr1), so a join on the key repeats rows when one side has both. duckhts_roh_ancestry and the R ancestry wrappers use this key. Functions with another rule state it under Contig names.
+
+### Not mapped
+
+Leading zeros (01 is not 1), numeric sex and mitochondrial codes (23, 24, 25, 26), accessions such as NC_000001.11, patches, alternate loci and unplaced scaffolds. The letter case of other names is kept.
+
 ### Examples
 
 ```sql
@@ -2880,6 +2904,10 @@ Returns:
 STRUCT
 ```
 
+### Contig names
+
+Input names and chain source names are compared after one rule: a leading chr is removed in any letter case; M, MT and 26 become MT; 23, 25, X, XY, XX, PAR1 and PAR2 become X; 24 and Y become Y. A lifted record carries the first name that the destination FASTA index has among: the chain's destination name; that name with chr added or removed; its form under the rule above, without and with chr; and for the mitochondrion MT, chrM and M. A FASTA that holds two of these names is not an error. A mitochondrial record that passes through without lifting takes the first of chrM, MT and M that the destination FASTA has.
+
 ### Examples
 
 ```sql
@@ -2935,6 +2963,10 @@ alt accepts comma-delimited VARCHAR or VARCHAR[]. Symbolic `<DEL>` may use end_p
 ### Output
 
 Return pos_normed, end_pos_normed, ref_normed, alt_normed (always VARCHAR[]), nullable normed and norm_status. gVCF `<NON_REF>`/`<*>` reference blocks pass through with GVCFReferenceBlock. Mixed real/gVCF-symbolic rows normalize real alleles while preserving symbolic alleles and supplied reference-block END.
+
+### Contig names
+
+The reference sequence of a record is looked up in the FASTA index under, in order: the record's name; the name without chr (any letter case), or with chr added when it has none; and for M, MT or chrM also MT, chrM and M. The first name that the index has is used. A FASTA that holds both 1 and chr1 is not an error.
 
 ### Examples
 
@@ -3004,6 +3036,10 @@ With NULL second argument, summaries_list_file reads paths from a file or direct
 
 log_path writes per-PRS loaded/matched/allele-mismatch/duplicate-marker counts.
 
+### Contig names
+
+Chromosome names of the summary statistics are looked up in the genotype VCF header as the upstream plugin does, in this order: the exact name; the name without a lowercase chr prefix; chr plus a name of at most two characters; 23, 25, XY, XX, PAR1 and PAR2 as X or chrX; 24 as Y or chrY; 26, MT and chrM as MT or chrM. The lookup is case-sensitive, and M alone does not find MT. A marker whose chromosome is not found is skipped without an error.
+
 ### Examples
 
 ```sql
@@ -3033,6 +3069,10 @@ Returns:
 ```
 STRUCT
 ```
+
+### Contig names
+
+The reference sequence of a record is looked up in the FASTA index under, in order: the record's name; the name without chr (any letter case), or with chr added when it has none; and for M, MT or chrM also MT, chrM and M. The first name that the index has is used. A FASTA that holds both 1 and chr1 is not an error.
 
 ### Examples
 

@@ -716,7 +716,8 @@
         "Genotype evidence": "gt_error NULL uses PL. A numeric gt_error (phred, bcftools -G, for example 30) uses diploid GT calls 0/0, 0/1 and 1/1 and ignores PL; other or missing genotypes are skipped, and FORMAT/PL need not exist. gt_error is an error of the site: the called genotype has likelihood close to 1 and a genotype one allele away has 10^(-gt_error/10), so one call that contradicts a run counts against it by that factor and no more, whatever caused it. A run can therefore continue through an isolated heterozygous call; a larger gt_error makes that rarer.",
         "Transitions": "hw_to_az and az_to_hw are the per-base-pair transition probabilities (bcftools -a and -H). rec_rate is a constant recombination rate per base pair (bcftools -M). The overload with a third positional argument takes genetic_map, a table name, with columns chrom, pos and cm (cumulative centimorgans at one-based positions, for example an IMPUTE2 map), interpolated as bcftools -m does; chromosomes without map rows are skipped, as bcftools skips a chromosome with no map file.",
         "Memory": "DuckDB manages, and can spill, the scan and the joins. The sites of each sample and chromosome are held in native buffers of 16 bytes per site until that sample and chromosome is decoded, so memory follows samples times sites. max_sites caps one sample and chromosome (default 20,000,000; at most 100,000,000). max_site_bytes (default 4 GiB) bounds the buffers held at once: a decode does not grow a buffer when the bytes held by all ROH decodes in the process would pass its own max_site_bytes. Decodes that run at the same time with different values each apply their own, so the process total can pass the smaller value while the decode with the larger value allocates. Exceeding either limit is an error: decode fewer samples per query with samples, or raise the limit. Decoding one sample and chromosome also needs 38 bytes per site of workspace in each thread. Model parameters and limits are checked even when the input has no record.",
-        "Limits": "Duplicate positions on a chromosome keep the first record to arrive, as bcftools roh keeps the first record in the file. That is the file order when one scan thread reads both records; deduplicate upstream when it matters. With a frequency relation (duckhts_roh_af_table, duckhts_roh_ancestry), only the records that match a frequency row take part. bcftools' default AC/AN frequencies, --AF-dflt, --estimate-AF, --include/--exclude, --skip-indels, --ignore-homref, --buffer-size and --viterbi-training are not offered."
+        "Limits": "Duplicate positions on a chromosome keep the first record to arrive, as bcftools roh keeps the first record in the file. That is the file order when one scan thread reads both records; deduplicate upstream when it matters. With a frequency relation (duckhts_roh_af_table, duckhts_roh_ancestry), only the records that match a frequency row take part. bcftools' default AC/AN frequencies, --AF-dflt, --estimate-AF, --include/--exclude, --skip-indels, --ignore-homref, --buffer-size and --viterbi-training are not offered.",
+        "Contig names": "The chrom of genetic_map is compared byte for byte with the contig names of the sites. A chromosome that the map spells differently (1 and chr1) is skipped like a chromosome without map rows, without an error. Rename the map's contigs in a view first."
       },
       "examples": [
         "SELECT * FROM duckhts_roh('cohort.vcf.gz', 'AF') ORDER BY sample, chrom, start;",
@@ -733,7 +734,8 @@
       "description": "Find runs of homozygosity in a VCF/BCF with the bcftools roh model, using allele frequencies from a caller relation.",
       "details": {
         "Frequencies": "af_table is a table or view name with columns chrom, pos (one-based), ref, alt and af, like a bcftools --AF-file. A record takes the frequency of the row matching its chrom, pos, REF and its ALT alleles joined by commas; a record without a matching row is not used and does not claim a repeated position, and a record whose row has a NULL af is skipped. bcftools roh --AF-file differs at a repeated position: it takes the first record in file order and skips the position when that record's alleles differ from the file's. Give one row per key; af must be in [0, 1], and exactly 0 skips the site. This is the entry point for per-sample frequencies, for example ancestry-tuned ones, by running it once per relation.",
-        "Otherwise": "Everything else is as duckhts_roh: the same output, genotype evidence (PL, or GT with gt_error), transition parameters, optional genetic_map overload, memory limits and limits."
+        "Otherwise": "Everything else is as duckhts_roh: the same output, genotype evidence (PL, or GT with gt_error), transition parameters, optional genetic_map overload, memory limits and limits.",
+        "Contig names": "The chrom of af_table is compared with the VCF's CHROM byte for byte. When the two spell contigs differently (1 and chr1), no record finds a frequency and the function returns no rows, without an error. Rename the contigs of af_table to the VCF's spelling in a view first; duckhts_contig_key() gives a common key."
       },
       "examples": [
         "SELECT * FROM duckhts_roh_af_table('cohort.vcf.gz', 'site_frequencies') ORDER BY sample, chrom, start;"
@@ -770,7 +772,8 @@
         "Relation to genotype evidence": "seq_error is an error of one read, and the reads of a site multiply. A site with balanced reads excludes both homozygous genotypes whatever seq_error is, and the read model has no term for a site whose reads do not reflect the sample's genotype. The read-count decode therefore corresponds to the GT decode with no tolerated genotype error: it ends a run at a heterozygous site that duckhts_roh with gt_error := 30 would pass through, and reports fewer bases in runs. benchmarks/benchmark_roh_counts_validation.md measures this on three 1000 Genomes samples.",
         "Skipped sites": "Sites with no reads, a NULL count, or an af that is NULL, NaN or 0 are skipped; a repeated position keeps one row, as in the other overloads. The relation need not be sorted. Negative counts, fractional counts, seq_error outside (0, 0.5) and contamination outside [0, 1) are errors.",
         "Limitations": "Biallelic sites only; one error rate for all reads, with no base- or mapping-quality, duplicate or strand modelling. A heterozygote is assumed to show each allele in half its reads, but reference-biased mapping makes the other allele rarer, more so where flanking heterozygosity is high; such heterozygotes can look homozygous and lengthen runs in divergent regions. The contamination fraction is supplied, not estimated, and a contaminant from a different population than af describes is approximated by af.",
-        "Otherwise": "Output, transitions, rec_rate, the optional genetic_map overload and the memory limits are as duckhts_roh, with 24 bytes per site."
+        "Otherwise": "Output, transitions, rec_rate, the optional genetic_map overload and the memory limits are as duckhts_roh, with 24 bytes per site.",
+        "Contig names": "The chrom of genetic_map is compared byte for byte with the contig names of the sites. A chromosome that the map spells differently (1 and chr1) is skipped like a chromosome without map rows, without an error. Rename the map's contigs in a view first."
       },
       "examples": [
         "SELECT * FROM duckhts_roh_counts('site_counts', contamination := 0.02) ORDER BY sample, chrom, start;"
@@ -1237,6 +1240,9 @@
       "signature": "variantkey(chrom, pos, ref, alt)",
       "returns": "UBIGINT",
       "r_wrapper": "",
+      "details": {
+        "Chromosome code": "The chromosome part of a VariantKey is a code of the upstream format, not a contig key. A leading chr is removed in any letter case. An all-digit name becomes its number modulo 256, with no range check. X, Y, and M or MT, in any letter case, become 23, 24 and 25. Any other name becomes 0. So 25 and MT share a code, and all scaffolds and accessions share code 0. Use duckhts_contig_key() to join on contig names."
+      },
       "description": "Encode a normalized biallelic variant as an official VariantKey-compatible 64-bit unsigned integer. This DuckHTS wrapper accepts 1-based VCF/DuckHTS POS to match bcftools `%VKX` / `+add-variantkey`, internally converts to the upstream 0-based field, and preserves the official hashed nonreversible mode for large, ambiguous, and symbolic REF/ALT strings. Only CHROM, POS, REF, and ALT are encoded; END, SVLEN, mate breakend coordinates, and other SV metadata are not.",
       "examples": [
         "SELECT variantkey_hex(variantkey('1', 324684, 'C', 'G'));"
@@ -1489,6 +1495,10 @@
       "signature": "duckhts_contig_key(contig)",
       "returns": "VARCHAR",
       "r_wrapper": "",
+      "details": {
+        "Use": "Readers and region arguments compare contig names byte for byte. This function is the explicit key for a join of two sources that spell contigs differently: join on duckhts_contig_key(a.chrom) = duckhts_contig_key(b.chrom), or rename one side. Two names of one source can share a key (1 and chr1), so a join on the key repeats rows when one side has both. duckhts_roh_ancestry and the R ancestry wrappers use this key. Functions with another rule state it under Contig names.",
+        "Not mapped": "Leading zeros (01 is not 1), numeric sex and mitochondrial codes (23, 24, 25, 26), accessions such as NC_000001.11, patches, alternate loci and unplaced scaffolds. The letter case of other names is kept."
+      },
       "description": "Return a conservative contig join key by removing one non-empty leading chr prefix case-insensitively and normalizing M/MT to MT. X and Y are uppercased; all other suffixes are preserved. This does not map numeric sex chromosomes, accessions, patches, or alternate loci.",
       "examples": [
         "SELECT duckhts_contig_key('chr1'), duckhts_contig_key('chrM');"
@@ -1537,6 +1547,9 @@
       "signature": "bcftools_liftover(chrom, pos, ref, alt, chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc, lift_mt, end_pos, no_left_align)",
       "returns": "STRUCT",
       "r_wrapper": "rduckhts_liftover",
+      "details": {
+        "Contig names": "Input names and chain source names are compared after one rule: a leading chr is removed in any letter case; M, MT and 26 become MT; 23, 25, X, XY, XX, PAR1 and PAR2 become X; 24 and Y become Y. A lifted record carries the first name that the destination FASTA index has among: the chain's destination name; that name with chr added or removed; its form under the rule above, without and with chr; and for the mitochondrion MT, chrM and M. A FASTA that holds two of these names is not an error. A mitochondrial record that passes through without lifting takes the first of chrM, MT and M that the destination FASTA has."
+      },
       "description": "Row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with fields: src_chrom, src_pos, src_ref, src_alt, dest_chrom, dest_pos, dest_end, dest_ref, dest_alt, mapped, reverse_complemented, swap, reject_reason, and note. Set no_left_align := true to skip post-liftover left-alignment of lifted indels (mirrors --no-left-align in bcftools +liftover).",
       "examples": [
         "SELECT (bcftools_liftover(chrom, pos, ref, alt, 'hg19ToHg38.over.chain.gz', 'hg38.fa', 'hg19.fa', 1, 250, false, NULL::BIGINT, false)).dest_pos FROM variants;"
@@ -1565,7 +1578,8 @@
       "description": "Normalize one variant against FASTA with bcftools/vt-style left alignment.",
       "details": {
         "Input": "alt accepts comma-delimited VARCHAR or VARCHAR[]. Symbolic `<DEL>` may use end_pos; `<DUP>` may use svlen.",
-        "Output": "Return pos_normed, end_pos_normed, ref_normed, alt_normed (always VARCHAR[]), nullable normed and norm_status. gVCF `<NON_REF>`/`<*>` reference blocks pass through with GVCFReferenceBlock. Mixed real/gVCF-symbolic rows normalize real alleles while preserving symbolic alleles and supplied reference-block END."
+        "Output": "Return pos_normed, end_pos_normed, ref_normed, alt_normed (always VARCHAR[]), nullable normed and norm_status. gVCF `<NON_REF>`/`<*>` reference blocks pass through with GVCFReferenceBlock. Mixed real/gVCF-symbolic rows normalize real alleles while preserving symbolic alleles and supplied reference-block END.",
+        "Contig names": "The reference sequence of a record is looked up in the FASTA index under, in order: the record's name; the name without chr (any letter case), or with chr added when it has none; and for M, MT or chrM also MT, chrM and M. The first name that the index has is used. A FASTA that holds both 1 and chr1 is not an error."
       },
       "examples": [
         "SELECT nr.pos_normed, nr.ref_normed, nr.alt_normed FROM (SELECT bcftools_norm_row('chr1', 100, 'AC', 'A', 'ref.fa', NULL::BIGINT, NULL::BIGINT, NULL, NULL) AS nr);"
@@ -1599,7 +1613,8 @@
       "details": {
         "Input": "Support GT/DS/HDS/AP/GP/AS dosage, sample subsets and region/target/FILTER-string controls. The second argument accepts one path or a list. TSV/SSF inputs yield one PRS column per file in a single genotype scan; GWAS-VCF yields one per FORMAT sample.",
         "Summary discovery": "With NULL second argument, summaries_list_file reads paths from a file or directory. List entries are interpreted as written; directories scan supported regular files lexicographically and omit index sidecars.",
-        "Audit": "log_path writes per-PRS loaded/matched/allele-mismatch/duplicate-marker counts."
+        "Audit": "log_path writes per-PRS loaded/matched/allele-mismatch/duplicate-marker counts.",
+        "Contig names": "Chromosome names of the summary statistics are looked up in the genotype VCF header as the upstream plugin does, in this order: the exact name; the name without a lowercase chr prefix; chr plus a name of at most two characters; 23, 25, XY, XX, PAR1 and PAR2 as X or chrX; 24 as Y or chrY; 26, MT and chrM as MT or chrM. The lookup is case-sensitive, and M alone does not find MT. A marker whose chromosome is not found is skipped without an error."
       },
       "examples": [
         "SELECT * FROM bcftools_score('cohort.bcf', 'gwas.tsv.gz', columns := 'PLINK') LIMIT 5;",
@@ -1614,6 +1629,9 @@
       "signature": "bcftools_munge_row(chrom, pos, a1, a2, id, p, z, or, beta, n, n_cas, n_con, info, frq, se, lp, ac, neff, neffdiv2, het_i2, het_p, het_lp, dire, fasta_ref, iffy_tag := 'IFFY', mismatch_tag := 'REF_MISMATCH', ns := NULL, nc := NULL, ne := NULL)",
       "returns": "STRUCT",
       "r_wrapper": "",
+      "details": {
+        "Contig names": "The reference sequence of a record is looked up in the FASTA index under, in order: the record's name; the name without chr (any letter case), or with chr added when it has none; and for M, MT or chrM also MT, chrM and M. The first name that the index has is used. A FASTA that holds both 1 and chr1 is not an error."
+      },
       "description": "Normalize one summary-statistics row into GWAS-VCF-style fields (chrom/pos/ref/alt/effect metrics), resolving REF/ALT orientation against a FASTA reference and applying swap-aware sign/frequency/count transforms. The output flag `alleles_swapped` means REF/ALT orientation was swapped to match the FASTA reference.",
       "examples": [
         "SELECT (bcftools_munge_row('chr1', 12345, 'A', 'G', 'rs1', 0.01, NULL, NULL, 0.12, 1000, NULL, NULL, NULL, 0.3, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'ref.fa')).ref;"

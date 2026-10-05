@@ -2,6 +2,17 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- `rduckhts_ancestry_proportions()` compares chromosome names with
+  `duckhts_contig_key()`, the contig key of the extension, in place of a regular
+  expression and integer casts in SQL. `chrX` now matches `X`, `chrM` matches
+  `MT`, and the letter case of `chr` does not matter. A leading zero is now
+  another name for a text reference: `chr01` no longer matches `1`. A reference
+  with an integer chromosome column still compares numbers.
+
+- The function reference states, under "Contig names", how each function
+  compares contig names across two sources, including the cases that return no
+  rows without an error.
+
 - SQL that joins `read_bam()`, `read_tabix()`, `read_gff()`, `read_gtf()` or
   `read_bed()` plans better: the bundled extension now gives DuckDB a row
   estimate for a whole-file indexed scan.

@@ -80,6 +80,20 @@ test_ancestry_checked_sites <- function() {
   dbExecute(con, "CREATE VIEW integer_ref AS SELECT * REPLACE (1::INTEGER AS chromosome) FROM ref")
   expect_equal(run(reference_table = "integer_ref")$proportion,
                baseline$proportion)
+  # Chromosome names are compared with duckhts_contig_key(): the letter case of
+  # chr does not matter and sex chromosomes join across spellings. A leading
+  # zero is another name for a text reference, and the same integer for an
+  # integer reference.
+  dbExecute(con, "CREATE VIEW upper_input AS SELECT * REPLACE ('CHR1' AS chromosome) FROM input")
+  expect_equal(run("upper_input")$proportion, baseline$proportion)
+  dbExecute(con, "CREATE VIEW text_ref AS SELECT * REPLACE ('1' AS chromosome) FROM ref")
+  expect_equal(run("upper_input", "text_ref")$proportion, baseline$proportion)
+  dbExecute(con, "CREATE VIEW x_ref AS SELECT * REPLACE ('X' AS chromosome) FROM ref")
+  dbExecute(con, "CREATE VIEW x_input AS SELECT * REPLACE ('chrX' AS chromosome) FROM input")
+  expect_equal(run("x_input", "x_ref")$proportion, baseline$proportion)
+  dbExecute(con, "CREATE VIEW zero_input AS SELECT * REPLACE ('chr01' AS chromosome) FROM input")
+  expect_equal(run("zero_input", "integer_ref")$proportion, baseline$proportion)
+  expect_equal(unique(run("zero_input", "text_ref")$used_variants), 0)
   dbExecute(con, "CREATE VIEW missing_ref AS SELECT * REPLACE (CASE WHEN position=1 THEN NULL ELSE A END AS A) FROM ref")
   expect_error(run(reference_table = "missing_ref"), "finite frequencies and loadings")
   dbExecute(con, "CREATE VIEW missing_pc AS SELECT * REPLACE (CASE WHEN position=1 THEN NULL ELSE PC1 END AS PC1) FROM ref")
