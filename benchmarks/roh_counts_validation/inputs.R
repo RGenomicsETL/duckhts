@@ -4,7 +4,8 @@
 # Before any decode, each input is compared with the identity its registry row
 # records, so the report cannot certify results from other inputs. The
 # identities are those staging computes: roh_counts_identity() for the read
-# counts and roh_validation_genotype_identity() for the genotype BCF.
+# counts and roh_validation_genotype_identity() for the genotype BCF. bcftools
+# is the executable staging uses, roh_validation_bcftools().
 #
 # Run from the repository root.
 
@@ -42,7 +43,7 @@ roh_validation_check_counts <- function(con, id, sample) {
 
 # The genotype BCF: its registered samples in order, record count and record
 # digest. `samples` are the samples the run decodes.
-roh_validation_check_genotypes <- function(id, samples, bcftools = "/usr/local/bin/bcftools") {
+roh_validation_check_genotypes <- function(id, samples, bcftools = roh_validation_bcftools()) {
   registered <- roh_validation_registered_identity(id)
   roh_validation_require_fields(id, registered,
                                 c("sample_list", "records", "samples", "records_sha256"))
@@ -63,7 +64,7 @@ roh_validation_check_genotypes <- function(id, samples, bcftools = "/usr/local/b
 
 # Every input of the declared validation.
 roh_validation_check_inputs <- function(con, declaration,
-                                        bcftools = "/usr/local/bin/bcftools") {
+                                        bcftools = roh_validation_bcftools()) {
   for (sample in declaration$samples) {
     roh_validation_check_counts(con, declaration$count_artifacts[[sample]], sample)
   }

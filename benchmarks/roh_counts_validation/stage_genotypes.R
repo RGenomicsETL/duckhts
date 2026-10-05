@@ -19,11 +19,17 @@ roh_validation_site_ids <- function(af_sites) {
     DBI::dbQuoteString(con, af_sites)))
 }
 
+# The bcftools executable of staging and of the validation run: the BCFTOOLS
+# environment variable when it is set, otherwise /usr/local/bin/bcftools.
+roh_validation_bcftools <- function() {
+  Sys.getenv("BCFTOOLS", "/usr/local/bin/bcftools")
+}
+
 # The identity of a genotype BCF as it is on disk: its record count, its
 # sample list in header order, and the SHA-256 of its records as
 # `bcftools view -H` writes them. Staging registers this identity and the
 # validation run checks it before decoding.
-roh_validation_genotype_identity <- function(path, bcftools = "/usr/local/bin/bcftools") {
+roh_validation_genotype_identity <- function(path, bcftools = roh_validation_bcftools()) {
   if (length(path) != 1L || !file.exists(path) ||
       length(bcftools) != 1L || !file.exists(bcftools)) {
     stop("a genotype BCF and bcftools must be supplied", call. = FALSE)
@@ -47,7 +53,7 @@ roh_validation_genotype_identity <- function(path, bcftools = "/usr/local/bin/bc
 }
 
 stage_roh_validation_genotypes <- function(source_vcf, af_sites, samples, output,
-                                           bcftools = "/usr/local/bin/bcftools",
+                                           bcftools = roh_validation_bcftools(),
                                            expected_source_sha256 = NULL,
                                            expected = NULL) {
   if (length(source_vcf) != 1L || !nzchar(source_vcf) ||
@@ -141,7 +147,7 @@ stage_roh_validation_genotypes <- function(source_vcf, af_sites, samples, output
 # and the AF-site Parquet. Its supplier identity holds the comma-separated
 # sample list and the expected records, samples and records_sha256.
 stage_roh_validation_genotypes_from_registry <- function(
-  id, bcftools = "/usr/local/bin/bcftools"
+  id, bcftools = roh_validation_bcftools()
 ) {
   registry <- duckhtsbench::duckhts_bench_registry()
   row <- registry[registry$id == id, , drop = FALSE]

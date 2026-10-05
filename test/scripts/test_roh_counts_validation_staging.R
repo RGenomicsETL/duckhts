@@ -14,7 +14,7 @@ test_roh_counts_validation_staging <- function() {
   cache <- tempfile("roh-counts-validation-stage-")
   dir.create(file.path(cache, "fixture"), recursive = TRUE)
   on.exit(unlink(cache, recursive = TRUE), add = TRUE)
-  old <- Sys.getenv(c("DUCKHTS_CACHE_DIR", "DUCKHTSBENCH_REGISTRY"), unset = NA)
+  old <- Sys.getenv(c("DUCKHTS_CACHE_DIR", "DUCKHTSBENCH_REGISTRY", "BCFTOOLS"), unset = NA)
   on.exit({
     for (name in names(old)) {
       if (is.na(old[[name]])) Sys.unsetenv(name) else do.call(Sys.setenv, as.list(old[name]))
@@ -149,6 +149,17 @@ test_roh_counts_validation_staging <- function() {
   check_genotypes(c("S5", "S1", "S3"))
   stopifnot(refuses(function() check_genotypes(c("S1", "S3", "S5")),
                     "differs from the registered identity"))
+
+  # Without an explicit executable, the check uses the one BCFTOOLS names, as
+  # staging does; a path that does not exist is an error, not a fallback.
+  Sys.setenv(BCFTOOLS = bcftools)
+  stopifnot(identical(roh_validation_bcftools(), unname(bcftools)))
+  roh_validation_check_genotypes("fixture_genotypes", c("S5", "S1", "S3"))
+  Sys.setenv(BCFTOOLS = file.path(cache, "no-such-bcftools"))
+  stopifnot(refuses(function() {
+    roh_validation_check_genotypes("fixture_genotypes", c("S5", "S1", "S3"))
+  }, "bcftools must be supplied"))
+  Sys.setenv(BCFTOOLS = bcftools)
   replacement <- stage_roh_validation_genotypes(
     source_vcf = vcf_path, af_sites = sites, samples = c("S5", "S1", "S2"),
     output = file.path(cache, "replacement.bcf"), bcftools = bcftools)

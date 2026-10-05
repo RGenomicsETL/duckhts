@@ -119,6 +119,9 @@ Rscript benchmarks/roh_counts_validation/stage.R
 taskset -c 4-7 Rscript -e 'rmarkdown::render("benchmarks/benchmark_roh_counts_validation.Rmd")'
 ```
 
+Staging and the render use the same `bcftools`: the `BCFTOOLS` environment
+variable when it is set, otherwise `/usr/local/bin/bcftools`.
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 knitr::opts_knit$set(root.dir = normalizePath(".."))

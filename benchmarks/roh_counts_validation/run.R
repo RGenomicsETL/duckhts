@@ -162,12 +162,13 @@ roh_validation_run <- function(extension, output_dir, threads = 2L,
   extension_version <- DBI::dbGetQuery(con, paste0(
     "SELECT extension_version FROM duckdb_extensions() WHERE extension_name = 'duckhts'"))
   metadata <- data.frame(
-    key = c("revision", "tracked_changes", "input_identities", "extension_version",
+    key = c("revision", "tracked_changes", "input_identities", "bcftools", "extension_version",
             "duckdb_version", "r_version",
             "rng_kind", "seed", "threads", "sites", "first_pos", "last_pos", "span_bases",
             "gt_error", "long_run_bases", "max_froh_difference", "min_jaccard_long",
             "min_jaccard_all"),
     value = c(revision, if (dirty) "yes" else "no", "match the registry",
+              system2(roh_validation_bcftools(), "--version", stdout = TRUE)[[1L]],
               extension_version$extension_version[[1L]],
               DBI::dbGetQuery(con, "SELECT version() AS v")$v, R.version.string,
               paste(RNGkind(), collapse = "/"), declaration$seed, threads,
