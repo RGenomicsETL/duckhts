@@ -57,6 +57,19 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   rounded, and accepts a relation in any order; a repeated position keeps the first
   record to arrive.
 
+- `benchmarks/benchmark_roh_counts_validation.md` checks `duckhts_roh_counts` on real
+  chr20 read counts of three 1000 Genomes samples (#329), with metrics and tolerance
+  declared before decoding. Against the VCF genotype path, the overlap of all runs
+  meets the tolerance (Jaccard 0.82 to 0.88), but the read-count FROH is 0.03 to 0.06
+  lower and fails it, and the one VCF-path run of at least 1 Mb is split into shorter
+  read-count runs. In a count-level contamination titration at 1% to 10%, the decode
+  with the contamination term keeps the receiver's runs (Jaccard at least 0.91, FROH
+  within 0.01); without the term FROH falls by 0.02 to 0.08 at 5% and by 0.12 to 0.27
+  at 10%. The FROH gap of the first check comes from the error parameters: `gt_error`
+  is an error of the site and lets a run pass one heterozygous call, and `seq_error` is
+  an error of one read and does not. The two decodes agree within 0.002 FROH at
+  `gt_error := 150`, and the function documentation now states this relation.
+
 ## Breaking changes
 
 - DuckHTS supports DuckDB 1.5.0 or newer, and `LOAD` now fails on older runtimes

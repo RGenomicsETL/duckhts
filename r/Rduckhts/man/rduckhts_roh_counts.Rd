@@ -91,6 +91,14 @@ The contamination
 fraction is supplied by the caller, for example from a separate estimate;
 it is not estimated here. A contaminant from a different population than
 `af` describes is approximated by `af`.
+
+`seq_error` is an error of one read, and the reads of a site multiply. A
+site with balanced reads excludes both homozygous genotypes whatever
+`seq_error` is. The `gt_error` of [rduckhts_roh()] is an error of the site,
+so a run can continue through one heterozygous call. The read-count decode
+therefore corresponds to the genotype decode with no tolerated genotype
+error, and reports fewer bases in runs than `rduckhts_roh(gt_error = 30)`
+on the same sample.
 }
 \examples{
 con <- rduckhts_connect()

@@ -1314,7 +1314,7 @@ One row per run: sample, chrom, start and end (one-based, inclusive, the first a
 
 ### Genotype evidence
 
-gt_error NULL uses PL. A numeric gt_error (phred, bcftools -G, for example 30) uses diploid GT calls 0/0, 0/1 and 1/1 and ignores PL; other or missing genotypes are skipped, and FORMAT/PL need not exist.
+gt_error NULL uses PL. A numeric gt_error (phred, bcftools -G, for example 30) uses diploid GT calls 0/0, 0/1 and 1/1 and ignores PL; other or missing genotypes are skipped, and FORMAT/PL need not exist. gt_error is an error of the site: the called genotype has likelihood close to 1 and a genotype one allele away has 10^(-gt_error/10), so one call that contradicts a run counts against it by that factor and no more, whatever caused it. A run can therefore continue through an isolated heterozygous call; a larger gt_error makes that rarer.
 
 ### Transitions
 
@@ -1425,6 +1425,10 @@ counts_table is a table or view with sample_id, chrom, pos (one-based), ref_coun
 ### Read model
 
 Each read shows the counted allele with probability (1 - contamination) * q + contamination * c, where q is seq_error, 1/2 or 1 - seq_error for zero, one or two copies, and c = af * (1 - seq_error) + (1 - af) * seq_error is the chance that a read from a contaminating individual of the same population shows it. Reads are independent and the binomial coefficient is omitted. The resulting genotype likelihoods enter the bcftools roh model in place of PL. This emission is a DuckHTS extension; bcftools roh has no read-count mode.
+
+### Relation to genotype evidence
+
+seq_error is an error of one read, and the reads of a site multiply. A site with balanced reads excludes both homozygous genotypes whatever seq_error is, and the read model has no term for a site whose reads do not reflect the sample's genotype. The read-count decode therefore corresponds to the GT decode with no tolerated genotype error: it ends a run at a heterozygous site that duckhts_roh with gt_error := 30 would pass through, and reports fewer bases in runs. benchmarks/benchmark_roh_counts_validation.md measures this on three 1000 Genomes samples.
 
 ### Skipped sites
 
