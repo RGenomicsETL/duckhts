@@ -190,6 +190,49 @@ SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_m
 ----
 reference has no contig named ref1
 
+# An alignment that reaches past the 1 MiB reference window: 20 bases at
+# 101-120, a reference skip of 1,100,000 bases, and 20 bases at
+# 1,100,121-1,100,140 with one mismatch at 1,100,131. The window moves to the
+# far block, comes back for the read at 201 and moves again for the read at
+# 1,100,301. With the default flank the skip leaves out five bases on each
+# side, so the read gives 15 + 15 bases at cycles 1-15 and 26-40.
+query IIIII
+SELECT base_quality, sum(bases), coalesce(sum(bases) FILTER (WHERE reference_base != read_base), 0),
+       min(cycle), max(cycle)
+FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.long.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.long.fa.gz')
+GROUP BY base_quality ORDER BY base_quality;
+----
+30	30	1	1	40
+31	20	0	1	20
+32	20	0	1	20
+
+# Without the flank every aligned base is counted: 40 + 20 + 20.
+query II
+SELECT sum(bases), sum(bases) FILTER (WHERE reference_base != read_base)
+FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.long.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.long.fa.gz', indel_flank := 0);
+----
+80	1
+
+# The mask record at 1,100,131 is read with the far window: the mismatch goes.
+query II
+SELECT sum(bases), coalesce(sum(bases) FILTER (WHERE reference_base != read_base), 0)
+FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.long.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.long.fa.gz',
+  mask := '__WORKING_DIRECTORY__/test/data/bam_mismatch.long.mask.vcf.gz');
+----
+69	0
+
+# A region on the far side selects the skipping read by overlap, and the read
+# at 1,100,301: 30 + 20 bases.
+query II
+SELECT sum(bases), sum(bases) FILTER (WHERE reference_base != read_base)
+FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.long.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.long.fa.gz', region := 'long1:1100000-1200000');
+----
+50	1
+
 # A symbolic mask record at 186 whose stated end is far past the contig masks
 # ref1 from 181 on with the default flank. Without a mask the counts are 116
 # bases and 6 mismatches; the read at 171-190 then keeps its bases at 172-180

@@ -35,13 +35,12 @@ enum {
 
 #define MISMATCH_CELLS \
     ((size_t)MISMATCH_MATES * (MISMATCH_CYCLE_MAX + 1) * MISMATCH_QUALITIES * MISMATCH_BASES * MISMATCH_BASES)
-/* Reference bases fetched at once, and the longest reference span of one alignment. */
+/* Reference bases held at once. The window moves along an alignment that is
+ * longer, so this is also the most reference one alignment needs in memory. */
 #define MISMATCH_WINDOW_BASES ((hts_pos_t)1 << 20)
-#define MISMATCH_SPAN_MAX ((hts_pos_t)1 << 26)
 
 _Static_assert(MISMATCH_CYCLE_MAX + 1 <= INT32_MAX && MISMATCH_QUALITY_MISSING == MISMATCH_QUALITY_MAX + 1 &&
                MISMATCH_QUALITIES == MISMATCH_QUALITY_MISSING + 1, "counter axes");
-_Static_assert(MISMATCH_WINDOW_BASES <= MISMATCH_SPAN_MAX, "one window fits the span limit");
 
 typedef struct {
     char *path;
@@ -73,15 +72,16 @@ typedef struct {
     kstring_t line;
 } mismatch_mask_t;
 
-/* One reference window [beg0, end0) of contig tid, with one mask byte per base. */
+/* One reference window [beg0, end0) of contig tid, with one mask byte per base.
+ * It holds at most MISMATCH_WINDOW_BASES bases. */
 typedef struct {
     faidx_t *fai;
     int tid;
     hts_pos_t beg0;
     hts_pos_t end0;
+    hts_pos_t contig_length; /* of contig tid in the reference */
     char *bases;     /* owned by htslib's allocator: free() */
-    uint8_t *masked; /* owned (malloc family), mask_capacity bytes */
-    size_t mask_capacity;
+    uint8_t *masked; /* owned (malloc family), MISMATCH_WINDOW_BASES bytes */
 } mismatch_window_t;
 
 static size_t mismatch_cell(int mate, int cycle, int quality, int from, int to) {
@@ -291,62 +291,66 @@ failed:
     return 0;
 }
 
-/* Make the window cover [beg0, end0) of contig tid. Alignments arrive in
- * coordinate order, so a new window starts at the alignment and runs ahead. */
-static int window_cover(mismatch_window_t *window, mismatch_mask_t *mask, int tid, const char *contig,
-                        hts_pos_t beg0, hts_pos_t end0, int flank, char *error, size_t error_size) {
-    hts_pos_t contig_length, new_end, fetched = 0;
-    if (window->bases && window->tid == tid && beg0 >= window->beg0 && end0 <= window->end0) return 1;
-    contig_length = faidx_seq_len64(window->fai, contig);
-    if (contig_length < 0) {
-        snprintf(error, error_size,
-                 "duckhts_bam_mismatch_counts: reference has no contig named %s; contig names are compared byte for byte",
-                 contig);
-        return 0;
+/* Load the window that starts at beg0 on contig tid: MISMATCH_WINDOW_BASES
+ * bases, or fewer at the end of the contig, with their mask. beg0 is on the
+ * contig. */
+static int window_fetch(mismatch_window_t *window, mismatch_mask_t *mask, int tid, const char *contig,
+                        hts_pos_t beg0, int flank, char *error, size_t error_size) {
+    hts_pos_t end0 = beg0 + MISMATCH_WINDOW_BASES;
+    hts_pos_t fetched = 0;
+    if (end0 > window->contig_length) end0 = window->contig_length;
+    if (!window->masked) {
+        window->masked = malloc((size_t)MISMATCH_WINDOW_BASES);
+        if (!window->masked) {
+            snprintf(error, error_size, "duckhts_bam_mismatch_counts: out of memory");
+            return 0;
+        }
     }
-    if (end0 - beg0 > MISMATCH_SPAN_MAX) {
-        snprintf(error, error_size,
-                 "duckhts_bam_mismatch_counts: an alignment on %s spans more than %lld reference bases",
-                 contig, (long long)MISMATCH_SPAN_MAX);
-        return 0;
-    }
-    /* A contig the reference has but shorter than the alignment says is a
-     * reference that does not match the alignment header; skipping the bases
-     * past its end would give plausible but incomplete counts. */
-    if (end0 > contig_length) {
-        snprintf(error, error_size,
-                 "duckhts_bam_mismatch_counts: an alignment on %s ends at %lld, past the reference contig length %lld; "
-                 "the reference does not match the alignment header",
-                 contig, (long long)end0, (long long)contig_length);
-        return 0;
-    }
-    new_end = beg0 + MISMATCH_WINDOW_BASES;
-    if (new_end < end0) new_end = end0;
-    if (new_end > contig_length) new_end = contig_length;
     free(window->bases);
     window->bases = NULL;
     window->tid = tid;
     window->beg0 = beg0;
     window->end0 = beg0; /* empty until the fetch succeeds */
-    window->bases = faidx_fetch_seq64(window->fai, contig, beg0, new_end - 1, &fetched);
-    if (!window->bases || fetched != new_end - beg0) {
+    window->bases = faidx_fetch_seq64(window->fai, contig, beg0, end0 - 1, &fetched);
+    if (!window->bases || fetched != end0 - beg0) {
         snprintf(error, error_size, "duckhts_bam_mismatch_counts: cannot fetch %s:%lld-%lld from the reference",
-                 contig, (long long)beg0 + 1, (long long)new_end);
+                 contig, (long long)beg0 + 1, (long long)end0);
         return 0;
     }
-    window->end0 = new_end;
-    if ((size_t)fetched > window->mask_capacity) {
-        uint8_t *grown = realloc(window->masked, (size_t)fetched);
-        if (!grown) {
-            snprintf(error, error_size, "duckhts_bam_mismatch_counts: out of memory");
-            return 0;
-        }
-        window->masked = grown;
-        window->mask_capacity = (size_t)fetched;
-    }
+    window->end0 = end0;
     memset(window->masked, 0, (size_t)fetched);
     if (mask->file) return window_fill_mask(window, mask, contig, flank, error, error_size);
     return 1;
+}
+
+/* Check that the alignment [beg0, end0) lies on the reference contig and make
+ * the window hold its start. Alignments arrive in coordinate order, so a new
+ * window starts at the alignment and runs ahead. An alignment that reaches
+ * past the window moves it during the walk. */
+static int window_cover(mismatch_window_t *window, mismatch_mask_t *mask, int tid, const char *contig,
+                        hts_pos_t beg0, hts_pos_t end0, int flank, char *error, size_t error_size) {
+    if (window->bases && window->tid == tid && beg0 >= window->beg0 && end0 <= window->end0) return 1;
+    if (window->tid != tid || !window->bases) {
+        window->contig_length = faidx_seq_len64(window->fai, contig);
+        if (window->contig_length < 0) {
+            snprintf(error, error_size,
+                     "duckhts_bam_mismatch_counts: reference has no contig named %s; "
+                     "contig names are compared byte for byte",
+                     contig);
+            return 0;
+        }
+    }
+    /* A contig the reference has but shorter than the alignment says is a
+     * reference that does not match the alignment header; skipping the bases
+     * past its end would give plausible but incomplete counts. */
+    if (end0 > window->contig_length) {
+        snprintf(error, error_size,
+                 "duckhts_bam_mismatch_counts: an alignment on %s ends at %lld, past the reference contig length %lld; "
+                 "the reference does not match the alignment header",
+                 contig, (long long)end0, (long long)window->contig_length);
+        return 0;
+    }
+    return window_fetch(window, mask, tid, contig, beg0, flank, error, error_size);
 }
 
 /* A CIGAR operation next to which bases are left out. */
@@ -429,7 +433,12 @@ static int count_alignment(const bam1_t *alignment, const char *contig, int flan
                 int quality, from, to;
                 int64_t cycle;
                 if (at < left_out_until || at >= left_out_from) continue;
-                if (pos0 < window->beg0 || pos0 >= window->end0) continue;
+                if (pos0 < window->beg0 || pos0 >= window->end0) {
+                    /* The alignment reaches past the window: move the window to this base. */
+                    if (!window_fetch(window, mask, alignment->core.tid, contig, pos0, flank, error, error_size)) {
+                        return 0;
+                    }
+                }
                 if (window->masked[pos0 - window->beg0]) continue;
                 from = base_code(window->bases[pos0 - window->beg0]);
                 to = nt16_code(bam_seqi(sequence, at));

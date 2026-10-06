@@ -6,7 +6,9 @@ Preview of 2.0.0, still in development. The sections below describe what 2.0.0 w
   `duckhts_bam_mismatch_counts()`: aligned read bases counted against the
   reference by mate, cycle, base quality and substitution, with an optional
   mask of known variants. With such a mask, the mismatches that remain are
-  errors of the read, the library or the alignment. Small fixtures
+  mostly errors of the read, the library or the alignment, with the variants
+  that the mask does not hold, so their rate is an upper bound on the error
+  rate. Small fixtures
   (`bam_mismatch.*`) are bundled for the example and the tests.
 
 - `rduckhts_ancestry_proportions()` compares chromosome names with

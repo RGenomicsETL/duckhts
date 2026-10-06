@@ -79,10 +79,8 @@ The live state is:
 
 - the counters: 3 mates × 1,001 cycles × 95 base qualities × 16 substitutions
   × 8 bytes = 36,516,480 bytes;
-- one reference window of 1 MiB and its mask of 1 MiB. An alignment that
-  spans more reference than that grows both to its span, up to the 64 MiB
-  limit; the render checks from the CIGARs that no alignment of this file
-  spans more than 1 MiB, so the window stays at 1 MiB;
+- one reference window of 1 MiB and its mask of 1 MiB. The window moves along
+  an alignment that reaches past it, so no alignment needs more;
 - htslib's state for the three files: the CRAM container in work with its
   decoded alignments, the reference of that container's span, the indexes and
   the file buffers. 16 MiB is allowed for it. The function sets no decoder
@@ -163,12 +161,13 @@ query_untimed <- function(sql) {
                     input = c(sprintf("LOAD %s;", quote_literal(extension)), sql), stdout = TRUE)
   utils::read.csv(text = output, colClasses = "numeric")
 }
-# The window stays at its 1 MiB floor only while no alignment spans more.
-long_spans <- query_untimed(sprintf(paste(
-  "SELECT count(*) AS alignments, coalesce(max(cigar_reference_length(CIGAR)), 0) AS widest_span",
-  "FROM read_bam(%s, reference := %s) WHERE cigar_reference_length(CIGAR) > %d;"),
-  quote_literal(cram), quote_literal(reference), 2^20))
-stopifnot(long_spans$alignments == 0)
+# Whether this file has an alignment that reaches past the 1 MiB window, which
+# the function serves by moving the window: the report states it, because a
+# file without one does not time that path.
+alignment_spans <- query_untimed(sprintf(paste(
+  "SELECT count(*) FILTER (WHERE span > %d) AS past_window, max(span) AS widest",
+  "FROM (SELECT cigar_reference_length(CIGAR) AS span FROM read_bam(%s, reference := %s));"),
+  2^20, quote_literal(cram), quote_literal(reference)))
 
 # Run one SQL body in a fresh CLI process with the given threads and spill
 # forbidden; the last statement's single row is returned with latency and memory.
@@ -494,7 +493,14 @@ the number of alignments.
 The operating scale this report supports is what it measures: one contig of
 one 30× short-read sample, read from CRAM, with a mask of
 `r format(mask_identity$records, big.mark = ",")` records. It does not measure
-a whole genome in one call, BAM input, unsorted input or long reads.
+a whole genome in one call, BAM input, unsorted input or long reads. It also
+does not time an alignment that reaches past the reference window, which the
+function serves by moving the window: this file has
+`r format(alignment_spans$past_window, big.mark = ",")` such alignments, and
+its widest alignment spans `r format(alignment_spans$widest, big.mark = ",")`
+reference bases. That path costs a window fetch on each side of the alignment
+and no memory; the SQL tests check its counts on a reference skip of
+1,100,000 bases.
 
 ## What the counts say
 
@@ -507,4 +513,5 @@ knitr::kable(by_quality, digits = c(0, 0, 0, 6, 4, 4), format.args = list(big.ma
 The mask leaves out every position of a panel record, and the sample is one of
 the panel's samples. So these mismatches are errors of the read, the library
 or the alignment, together with the variants of the sample that the panel
-does not hold.
+does not hold. Their rate is an upper bound on the error rate, not the error
+rate.

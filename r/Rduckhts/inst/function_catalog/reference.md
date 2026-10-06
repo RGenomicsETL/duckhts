@@ -2190,7 +2190,7 @@ Every aligned base (CIGAR M, = or X) of a kept alignment whose read base and ref
 
 ### Mask
 
-mask is an indexed BCF or a bgzip-compressed VCF with a tabix index, for example known variants. Every reference position of a mask record is left out. A record with an indel or a symbolic allele also leaves out indel_flank bases on each side; a symbolic allele ends at INFO/END. With a mask of the known variants of the sample or its population, the mismatches that remain are errors of the read, the library or the alignment.
+mask is an indexed BCF or a bgzip-compressed VCF with a tabix index, for example known variants. Every reference position of a mask record is left out. A record with an indel or a symbolic allele also leaves out indel_flank bases on each side; a symbolic allele ends at INFO/END. The mask removes the variants it holds and no others: a variant of the sample that the mask does not hold, such as a private, de novo or somatic variant or an allele of a second genome, is still counted as a mismatch. So with a mask of known variants the mismatches that remain are mostly errors of the read, the library or the alignment, and their rate is an upper bound on the error rate; it is the error rate only when the mask holds every variant site of the genomes in the sample.
 
 ### Contig names
 
@@ -2198,7 +2198,7 @@ The contig names of the alignment header, the reference and the mask are compare
 
 ### Limits
 
-One worker. Memory is fixed: 36.5 MB of counters, one reference window of 1 MiB with its mask, and the alignment in hand, plus htslib's state for the file. For CRAM that includes the reference of the slice being decoded; a slice over a sparse region can span many megabases. A cycle above 1000 is counted as 1000 and a base quality above 93 as 93. An alignment that spans more reference than the window, for example a reference skip of several megabases, grows the window and its mask to its span while it is counted, so the most one alignment can need is 64 MiB of each; an alignment that spans more than 64 MiB of reference is an error. Alignments are expected in coordinate order; an unsorted file is counted correctly but fetches a reference window for each alignment.
+One worker. Memory is fixed: 36.5 MB of counters, one reference window of 1 MiB with its mask, and the alignment in hand, plus htslib's state for the file. For CRAM that includes the reference of the slice being decoded; a slice over a sparse region can span many megabases. A cycle above 1000 is counted as 1000 and a base quality above 93 as 93. The window moves along an alignment that reaches past it, so no alignment needs more reference in memory; an alignment with a reference skip of more than 1 MiB fetches a window on each side of the skip, and many such alignments are slow. Alignments are expected in coordinate order; an unsorted file is counted correctly but fetches a reference window for each alignment.
 
 ### Examples
 

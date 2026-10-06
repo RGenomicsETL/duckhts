@@ -7,7 +7,7 @@
 stopifnot(file.exists("src/bam_mismatch_counts.c"), requireNamespace("RBCFTools", quietly = TRUE),
           utils::packageVersion("RBCFTools") >= "1.24.1.1.0")
 tools <- c(samtools = RBCFTools::samtools_path(), bcftools = RBCFTools::bcftools_path(),
-           tabix = RBCFTools::tabix_path())
+           tabix = RBCFTools::tabix_path(), bgzip = RBCFTools::bgzip_path())
 stopifnot(all(file.exists(tools)))
 
 data_dir <- "test/data"
@@ -22,21 +22,23 @@ contig_bases <- function(length, shift) {
 reference <- list(ref1 = contig_bases(260L, 0L), ref2 = contig_bases(80L, 1L))
 
 # The stored sequence of an alignment that starts at pos1: reference bases for
-# M, the given bases for I and S, nothing for D and H. `substitutions` are
+# M, the given bases for I and S, nothing for D, N and H. `substitutions` are
 # zero-based offsets in the stored sequence whose base is replaced by the next
-# base of A, C, G, T, so the read differs from the reference there.
-aligned_sequence <- function(contig, pos1, operations, substitutions = integer(), unknown = integer()) {
+# base of A, C, G, T, so the read differs from the reference there. `sequences`
+# are the contigs the alignment is on.
+aligned_sequence <- function(contig, pos1, operations, substitutions = integer(), unknown = integer(),
+                             sequences = reference) {
   sequence <- character()
   at <- pos1
   for (operation in operations) {
     code <- operation[[1L]]
     length <- as.integer(operation[[2L]])
     if (code == "M") {
-      sequence <- c(sequence, reference[[contig]][seq.int(at, length.out = length)])
+      sequence <- c(sequence, sequences[[contig]][seq.int(at, length.out = length)])
       at <- at + length
     } else if (code %in% c("I", "S")) {
       sequence <- c(sequence, rep_len(c("T", "G"), length))
-    } else if (code == "D") {
+    } else if (code %in% c("D", "N")) {
       at <- at + length
     }
   }
@@ -142,6 +144,36 @@ writeLines(c(
   paste("ref1", 186L, ".", reference$ref1[[186L]], "<DEL>", ".", ".", "END=536870911", sep = "\t")), far_end)
 run("bcftools", c("view", "--no-version", "-Oz", "-o", paste0(prefix, ".far_end.vcf.gz"), far_end))
 run("tabix", c("-f", "-p", "vcf", paste0(prefix, ".far_end.vcf.gz")))
+
+# A contig longer than the 1 MiB reference window of the function, with an
+# alignment whose reference skip of 1,100,000 bases carries it past the window:
+# 20 bases at 101-120 and 20 at 1,100,121-1,100,140, the eleventh of which
+# (1,100,131) is a mismatch. A read at 201 then needs the first window again,
+# and a read at 1,100,301 the far one. The mask has one record, at 1,100,131.
+# The sequence has a short period, so the bgzip-compressed FASTA is small.
+long_reference <- list(long1 = contig_bases(1200300L, 2L))
+long_prefix <- paste0(prefix, ".long")
+long_fasta <- paste0(long_prefix, ".fa")
+writeLines(c(">long1", paste(long_reference$long1, collapse = "")), long_fasta)
+run("bgzip", c("-f", long_fasta))
+run("samtools", c("faidx", paste0(long_fasta, ".gz")))
+long_sam <- tempfile(fileext = ".sam")
+writeLines(c(
+  "@HD\tVN:1.6\tSO:coordinate", sprintf("@SQ\tSN:long1\tLN:%d", length(long_reference$long1)),
+  sam_line("skip", 0L, "long1", 101L, 60L, list(m(20L), list("N", 1100000L), m(20L)), 30L,
+           substitutions = 30L, sequences = long_reference),
+  sam_line("near", 0L, "long1", 201L, 60L, list(m(20L)), 31L, sequences = long_reference),
+  sam_line("far", 0L, "long1", 1100301L, 60L, list(m(20L)), 32L, sequences = long_reference)), long_sam)
+run("samtools", c("view", "--no-PG", "-b", "-o", paste0(long_prefix, ".bam"), long_sam))
+run("samtools", c("index", paste0(long_prefix, ".bam")))
+long_mask <- tempfile(fileext = ".vcf")
+writeLines(c(
+  "##fileformat=VCFv4.2", sprintf("##contig=<ID=long1,length=%d>", length(long_reference$long1)),
+  "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO",
+  paste("long1", 1100131L, ".", long_reference$long1[[1100131L]],
+        bases[(match(long_reference$long1[[1100131L]], bases) %% 4L) + 1L], ".", ".", ".", sep = "\t")), long_mask)
+run("bcftools", c("view", "--no-version", "-Oz", "-o", paste0(long_prefix, ".mask.vcf.gz"), long_mask))
+run("tabix", c("-f", "-p", "vcf", paste0(long_prefix, ".mask.vcf.gz")))
 
 # The R package tests read the BAM, the CRAM, the reference and the BCF mask.
 package_files <- paste0(prefix, c(".fa", ".fa.fai", ".bam", ".bam.bai", ".cram", ".cram.crai",

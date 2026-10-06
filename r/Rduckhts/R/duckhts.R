@@ -880,7 +880,9 @@ rduckhts_bam_bin_counts <- function(
 #' Counts the aligned bases of a SAM, BAM or CRAM file against the reference
 #' by mate, cycle, base quality and substitution. With a mask of the known
 #' variants of the sample or its population, the mismatches that remain are
-#' errors of the read, the library or the alignment.
+#' mostly errors of the read, the library or the alignment. A variant that the
+#' mask does not hold is still counted, so their rate is an upper bound on the
+#' error rate.
 #'
 #' Contig names of the alignment header, the reference and the mask are
 #' compared byte for byte. A contig that the reference or the mask does not

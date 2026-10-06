@@ -8,9 +8,12 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   or CRAM file counted against the reference by mate, cycle, base quality and
   substitution, in one pass with fixed memory. A `mask` of known variants (a
   BCF or a bgzip-compressed VCF) leaves those positions out, so the mismatches
-  that remain are errors of the read, the library or the alignment. This is the
-  error-only count for the read-error and contamination work (#332): a second
-  genome cannot produce a mismatch at a masked-out invariant site. Bases next
+  that remain are mostly errors of the read, the library or the alignment,
+  with the variants that the mask does not hold. This is the count for the
+  read-error and contamination work (#332): at a site where no genome in the
+  sample varies, a second genome adds no mismatch, so the rate is an upper
+  bound on the error rate, and it is the error rate when the mask holds every
+  variant site of those genomes. Bases next
   to a gap or a soft clip are left out by `indel_flank`. Contig names are
   compared byte for byte, and a contig that the reference or the mask does not
   know is an error. SQL tests check the function against hand-derived counts
@@ -45,11 +48,12 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   alignment header in that case. For CRAM input, `reference_index_path` now
   reaches the CRAM decoder too, through the same `reference##idx##index`
   locator that `duckhts_somalier_bam_counts()` builds, so a FASTA index that is
-  not next to the FASTA is read and none is built beside it. The catalog's
-  limits state the most one alignment can need: an alignment that spans more
-  reference than the 1 MiB window grows the window and its mask to its span,
-  up to 64 MiB each. The walk over an alignment keeps no list of its gaps, so
-  its state does not grow with the number of CIGAR operations.
+  not next to the FASTA is read and none is built beside it. The reference
+  window stays at 1 MiB: it moves along an alignment that reaches past it, for
+  example over a reference skip of more than 1 MiB, in place of growing to the
+  alignment's span, and the walk over an alignment keeps no list of its gaps.
+  So the state of the function does not grow with the span or the number of
+  CIGAR operations of an alignment, and no span is refused.
 
 - Added `duckhts_roh_ancestry()` for per-sample ancestry-weighted allele frequencies from long reference and proportion relations, with allele-orientation handling and optional frequency clamping.
 
