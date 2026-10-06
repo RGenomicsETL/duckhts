@@ -14,8 +14,9 @@
 #' reference orientation. Chromosome names are compared with
 #' `duckhts_contig_key()`: one leading `chr` is removed in any letter case,
 #' `M` and `MT` become `MT`, and `X` and `Y` are uppercased. Any other name
-#' must match byte for byte, so `01` does not match `1`. A reference whose
-#' chromosome column is an integer compares that key as an integer.
+#' must match byte for byte, so `01` does not match `1`. A reference, wide or
+#' long, whose chromosome column has an integer type compares that key as an
+#' integer, so `chr01` joins `1`.
 #' Input duplicates at a sample/locus, palindromic alleles and missing
 #' frequencies are dropped; other alleles match directly, reversed, strand
 #' complemented or both. Reversed alleles use 1-frequency. Missing genotypes
@@ -109,11 +110,20 @@ rduckhts_ancestry_proportions <- function(
   contract <- .ancestry_long_contract(con, reference_table, loadings_table)
   groups <- contract$groups
   pcs <- contract$pcs
-  chromosome <- .ancestry_chromosome_key(FALSE)
+  # A long reference with an integer chromosome column keeps an integer key, so
+  # the wide view compares numbers as an integer wide reference does. A loading
+  # row whose name gives no integer belongs to no locus of such a reference and
+  # is left out; a NULL chromosome stays, for the check below to report.
+  numeric_chromosome <- .ancestry_integer_type(DBI::dbGetQuery(con, paste0(
+    "DESCRIBE SELECT chromosome FROM ", r))$column_type)
+  chromosome <- .ancestry_chromosome_key(numeric_chromosome)
   ref_sites <- paste0("SELECT ", chromosome, " AS chromosome, position, allele_a, ",
                       "allele_b, group_id, frequency FROM ", r)
   pc_sites <- paste0("SELECT ", chromosome, " AS chromosome, position, allele_a, ",
-                     "allele_b, pc, loading FROM ", l)
+                     "allele_b, pc, loading FROM ", l, " AS source",
+                     if (numeric_chromosome) paste0(
+                       " WHERE source.chromosome IS NULL OR ",
+                       .ancestry_chromosome_key(TRUE, "source.chromosome"), " IS NOT NULL"))
   keys <- "chromosome, position, allele_a, allele_b"
   invalid <- DBI::dbGetQuery(con, paste0(
     "WITH r AS (", ref_sites, "), l AS (", pc_sites, "), ",

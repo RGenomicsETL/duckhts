@@ -149,9 +149,7 @@
   corrections <- corrections[order(as.numeric(corrections$pc)), , drop = FALSE]
   chromosome_type <- DBI::dbGetQuery(con, paste0("DESCRIBE SELECT chromosome FROM ",
                                              relations[[2L]]))$column_type
-  numeric_chromosome <- chromosome_type %in% c(
-    "TINYINT", "SMALLINT", "INTEGER", "BIGINT", "HUGEINT",
-    "UTINYINT", "USMALLINT", "UINTEGER", "UBIGINT", "UHUGEINT")
+  numeric_chromosome <- .ancestry_integer_type(chromosome_type)
   reference_source <- if (numeric_chromosome) relations[[2L]] else paste0(
     "(SELECT ", chromosome_key, " AS chromosome, * EXCLUDE (chromosome) FROM ",
     relations[[2L]], ")")
@@ -159,12 +157,19 @@
        reference_source = reference_source, numeric_chromosome = numeric_chromosome)
 }
 
+# A reference whose chromosome column has one of these DuckDB types compares
+# chromosomes as numbers.
+.ancestry_integer_type <- function(column_type) {
+  column_type %in% c("TINYINT", "SMALLINT", "INTEGER", "BIGINT", "HUGEINT",
+                     "UTINYINT", "USMALLINT", "UINTEGER", "UBIGINT", "UHUGEINT")
+}
+
 # The chromosome join key, as SQL. Names are compared with duckhts_contig_key(),
 # the one contig key of the extension. A reference whose chromosome column is
 # an integer compares that key as an integer, so the reference rows need no
 # conversion.
-.ancestry_chromosome_key <- function(numeric_chromosome) {
-  key <- "duckhts_contig_key(chromosome::VARCHAR)"
+.ancestry_chromosome_key <- function(numeric_chromosome, column = "chromosome") {
+  key <- paste0("duckhts_contig_key(", column, "::VARCHAR)")
   if (numeric_chromosome) paste0("try_cast(", key, " AS BIGINT)") else key
 }
 

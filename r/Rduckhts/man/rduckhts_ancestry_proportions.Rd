@@ -63,8 +63,9 @@ references must share an assembly, uppercase biallelic SNV alleles and
 reference orientation. Chromosome names are compared with
 `duckhts_contig_key()`: one leading `chr` is removed in any letter case,
 `M` and `MT` become `MT`, and `X` and `Y` are uppercased. Any other name
-must match byte for byte, so `01` does not match `1`. A reference whose
-chromosome column is an integer compares that key as an integer.
+must match byte for byte, so `01` does not match `1`. A reference, wide or
+long, whose chromosome column has an integer type compares that key as an
+integer, so `chr01` joins `1`.
 Input duplicates at a sample/locus, palindromic alleles and missing
 frequencies are dropped; other alleles match directly, reversed, strand
 complemented or both. Reversed alleles use 1-frequency. Missing genotypes
