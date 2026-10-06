@@ -35,11 +35,18 @@ three series.
   bases grow alone. The difference between the two series is the whole cost
   of the mask at each size.
 - The `mask records` series doubles the mask records alone. Its alignments
-  are fixed: one two-base region at every megabase of the contig, so every
-  1 MiB reference window is visited once and nearly every mask record is read
-  while few alignments are counted. Its masks are the same panel records
-  thinned to the positions divisible by 4 (`bam_mismatch_chr1_mask_quarter_bcf`),
-  by 2 (`bam_mismatch_chr1_mask_half_bcf`) and not at all, so 1×, 2× and 4×
+  are fixed: one two-base region every 2 MiB of the contig. The function reads
+  the mask one reference window at a time, and a window starts at the first
+  kept alignment that the last window does not hold and is 1 MiB long. A
+  region 2 MiB after the last one is therefore outside the last window, and
+  each region opens one window of its own. The render derives these windows
+  from the first kept alignment of each region, checks that no alignment of a
+  region leaves its window or reaches the next one, and counts the mask
+  records that the windows hold; that count, not the size of the mask file,
+  is the denominator of the series. The windows cover about half of the
+  contig. The masks are the same panel records thinned to the positions
+  divisible by 4 (`bam_mismatch_chr1_mask_quarter_bcf`), by 2
+  (`bam_mismatch_chr1_mask_half_bcf`) and not at all, so 1×, 2× and 4×
   records; a run without a mask gives the cost of the alignments alone.
 
 The cuts and the input denominators of each region are computed at render
@@ -87,9 +94,9 @@ That is 52.8 MiB, so the ceiling is overhead + 158.5 MiB.
 The render also stops if a time exponent of the `mask` or `no mask` series is
 above 1.25 at either doubling, or if their 1× run on one thread takes less
 than 5 s, which is the least that `STYLE.md` accepts for a timing verdict.
-The `mask records` series reads about six million records in a few seconds,
-so its 1× run is expected under 5 s: it gets the memory verdict in full and
-its times are reported without a verdict, as `STYLE.md` provides.
+The `mask records` series reads a few million records in a few seconds, so
+its 1× run is expected under 5 s: it gets the memory verdict in full and its
+times are reported without a verdict, as `STYLE.md` provides.
 
 ``` sh
 taskset -c 8-15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_bam_mismatch_counts.Rmd")'
@@ -223,9 +230,36 @@ count_query <- function(region, mask_path = NULL) sprintf(paste(
   "FROM duckhts_bam_mismatch_counts(%s, %s, region := %s%s)"),
   quote_literal(cram), quote_literal(reference), quote_literal(region),
   if (is.null(mask_path)) "" else paste0(", mask := ", quote_literal(mask_path)))
-# The fixed alignments of the mask-records series: two bases at every megabase.
-sparse_region <- paste(sprintf("%s:%d-%d", contig, seq_len((contig_length - 2) %/% 1e6) * 1e6,
-                               seq_len((contig_length - 2) %/% 1e6) * 1e6 + 1), collapse = ",")
+# The fixed alignments of the mask-records series: two bases every 2 MiB,
+# which is twice the reference window of the function.
+window_bases <- 2^20
+targets <- seq(window_bases, contig_length - 2, by = 2 * window_bases)
+sparse_region <- paste(sprintf("%s:%d-%d", contig, targets, targets + 1), collapse = ",")
+# The windows the function fetches for these regions. An alignment is kept by
+# the default filters of the function; the first kept alignment of a region
+# starts the region's window. Coordinates are zero-based and half-open.
+kept <- query_untimed(sprintf(paste(
+  "SELECT POS - 1 AS beg0, POS - 1 + cigar_reference_length(CIGAR) AS end0",
+  "FROM read_bam(%s, reference := %s, region := %s)",
+  "WHERE (FLAG & 3844) = 0 AND MAPQ >= 20 AND CIGAR != '*' AND len(SEQ) > 0;"),
+  quote_literal(cram), quote_literal(reference), quote_literal(sparse_region)))
+kept$target <- findInterval(kept$beg0, targets - window_bases)
+windows <- data.frame(beg0 = tapply(kept$beg0, kept$target, min), last_end0 = tapply(kept$end0, kept$target, max))
+windows$end0 <- pmin(windows$beg0 + window_bases, contig_length)
+# One window for each region holds only if no alignment of a region leaves its
+# window and the next region starts past it.
+stopifnot(nrow(windows) > 1L, all(windows$last_end0 <= windows$end0),
+          all(windows$beg0[-1L] >= windows$end0[-nrow(windows)]))
+# The function asks the mask for the window with the indel flank on each side.
+default_flank <- 5
+window_values <- paste(sprintf("(%.0f, %.0f)", pmax(windows$beg0 - default_flank, 0), windows$end0 + default_flank),
+                       collapse = ", ")
+mask_sizes$window_records <- vapply(mask_sizes$path, function(path) {
+  if (is.na(path)) return(0)
+  query_untimed(sprintf(paste(
+    "SELECT count(*) AS records FROM read_bcf(%s) m JOIN (VALUES %s) w(beg0, end0)",
+    "ON m.POS - 1 < w.end0 AND m.POS - 1 + len(m.REF) > w.beg0;"), quote_literal(path), window_values))$records
+}, numeric(1L))
 
 empty_runs <- vapply(seq_len(3L), function(run) run_fresh("SELECT 1 AS output_rows", 1L)$max_rss_kib, numeric(1L))
 overhead_mib <- median(empty_runs) / 1024
@@ -249,7 +283,7 @@ for (repetition in 1:3) {
       mask_path <- if (is.na(mask_sizes$path[[k]])) NULL else mask_sizes$path[[k]]
       observed <- run_fresh(count_query(sparse_region, mask_path), threads)
       observations[[length(observations) + 1L]] <- data.frame(
-        series = "mask records", scale = mask_sizes$scale[[k]], region = "two bases at every megabase",
+        series = "mask records", scale = mask_sizes$scale[[k]], region = "two bases every 2 MiB",
         threads = threads, repetition = repetition, observed, budget_mib = budget_mib,
         stringsAsFactors = FALSE)
     }
@@ -306,7 +340,7 @@ rownames(exponents) <- NULL
 # The mask-records series: its growth is measured against the records, for
 # the whole run and for the mask's own cost, the run without a mask taken off.
 mask_series <- summary[summary$series == "mask records", ]
-mask_series$mask_records <- mask_sizes$records[match(mask_series$scale, mask_sizes$scale)]
+mask_series$mask_records <- mask_sizes$window_records[match(mask_series$scale, mask_sizes$scale)]
 mask_series <- mask_series[order(mask_series$threads, mask_series$scale), ]
 rownames(mask_series) <- NULL
 mask_exponents <- do.call(rbind, lapply(split(mask_series, mask_series$threads), function(s) {
@@ -393,8 +427,11 @@ The cost of the mask on one thread, as the difference of the two series:
 knitr::kable(mask_cost, digits = 3, format.args = list(big.mark = ","))
 ```
 
-The mask-records series, at fixed alignments (scale 0 is the same regions
-without a mask):
+The mask-records series, at fixed alignments. Its `r nrow(windows)` windows
+hold `r format(sum(windows$end0 - windows$beg0), big.mark = ",")` reference
+bases, and `mask_records` are the records of each mask that those windows
+hold, out of `r format(mask_identity$records, big.mark = ",")` in the full
+mask file. Scale 0 is the same regions without a mask:
 
 ```{r mask-series, echo=FALSE}
 knitr::kable(mask_series[c("scale", "threads", "mask_records", "bases", "mismatches", "output_rows", "median_seconds",
@@ -418,12 +455,13 @@ are the same in every repetition and at both thread settings. This report
 does not check the counts themselves; the SQL tests do, against counts
 derived by hand and against the same counts made independently in SQL.
 
-Mask records alone: reading all `r format(mask_full$mask_records, big.mark = ",")`
-records of the contig costs `r round(mask_full$median_seconds - mask_none$median_seconds, 2)` s
+Mask records alone: reading the `r format(mask_full$mask_records, big.mark = ",")`
+records that the `r nrow(windows)` windows hold in the full mask costs
+`r round(mask_full$median_seconds - mask_none$median_seconds, 2)` s
 on one thread (`r round(records_per_second / 1e6, 2)` million records a
 second) on top of the `r round(mask_none$median_seconds, 2)` s of the fixed
 alignments, and peak RSS is `r mask_none$median_rss_mib` MiB without a mask
-and `r mask_full$median_rss_mib` MiB with all records: the mask window is
+and `r mask_full$median_rss_mib` MiB with the full mask: the mask window is
 1 MiB whatever the mask holds. The whole-run time exponents at one thread are
 `r round(mask_exponents$time_exponent_2x[mask_exponents$threads == 1L], 2)` and
 `r round(mask_exponents$time_exponent_4x[mask_exponents$threads == 1L], 2)`, and
