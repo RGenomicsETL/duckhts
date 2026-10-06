@@ -17,11 +17,12 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   and against the same counts made independently in SQL.
   `benchmarks/benchmark_bam_mismatch_counts.md` measures it on chr1 of a
   public 30× CRAM with the chr1 panel records as the mask: 7.05 billion
-  counted bases in 61 s on one thread (116 million a second), time linear in
-  the bases, and peak RSS from 67.9 MiB at a quarter of the contig to 83.1 MiB
+  counted bases in 62 s on one thread (114 million a second), time linear in
+  the bases, and peak RSS from 67.9 MiB at a quarter of the contig to 83.0 MiB
   at the whole contig, where the step is htslib holding the reference of one
   18 Mb CRAM slice over the sparse 1q12 region. Mask records alone are read
-  at 1.4 million a second, linear in the records, with no change in memory. The inputs are registry artifacts staged by
+  at 1.4 million a second, linear in the records, with no change in memory.
+  The inputs are registry artifacts staged by
   `benchmarks/bam_mismatch_stage.R` with the RBCFTools binaries, with a
   network-free staging test (`make test-bam-mismatch-staging`).
 
