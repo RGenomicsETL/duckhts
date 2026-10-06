@@ -130,6 +130,18 @@ write_mask(mask, names(reference), "ref1")
 run("bcftools", c("view", "--no-version", "-Ob", "-o", paste0(prefix, ".mask.bcf"), mask))
 run("bcftools", c("index", "-f", paste0(prefix, ".mask.bcf")))
 write_mask(paste0(prefix, ".other_names.vcf.gz"), paste0("chr", names(reference)), "chrref1")
+# One symbolic record whose stated end is the largest a tabix index stores, far
+# past the contig: with the flank it masks ref1 from 181 to the end.
+far_end <- tempfile(fileext = ".vcf")
+writeLines(c(
+  "##fileformat=VCFv4.2",
+  sprintf("##contig=<ID=%s,length=%d>", names(reference), lengths(reference)),
+  "##ALT=<ID=DEL,Description=\"Deletion\">",
+  "##INFO=<ID=END,Number=1,Type=Integer,Description=\"End position\">",
+  "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO",
+  paste("ref1", 186L, ".", reference$ref1[[186L]], "<DEL>", ".", ".", "END=536870911", sep = "\t")), far_end)
+run("bcftools", c("view", "--no-version", "-Oz", "-o", paste0(prefix, ".far_end.vcf.gz"), far_end))
+run("tabix", c("-f", "-p", "vcf", paste0(prefix, ".far_end.vcf.gz")))
 
 # The R package tests read the BAM, the CRAM, the reference and the BCF mask.
 package_files <- paste0(prefix, c(".fa", ".fa.fai", ".bam", ".bam.bai", ".cram", ".cram.crai",

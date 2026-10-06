@@ -164,11 +164,17 @@ static void window_mark(mismatch_window_t *window, hts_pos_t beg0, hts_pos_t end
  * A record with an indel or a symbolic allele also masks flank bases on each side. */
 static void window_mark_variant(mismatch_window_t *window, hts_pos_t pos0, hts_pos_t reference_length,
                                 int same_length, int flank) {
+    hts_pos_t end0;
     if (reference_length < 1) reference_length = 1;
+    /* A mark is clipped to the window, so an end past the window is the
+     * window's end. A stated end (INFO/END) can be any number; stopping it
+     * here keeps the sums below in range. */
+    end0 = (pos0 >= window->end0 || reference_length > window->end0 - pos0) ? window->end0
+                                                                            : pos0 + reference_length;
     if (same_length) {
-        window_mark(window, pos0, pos0 + reference_length);
+        window_mark(window, pos0, end0);
     } else {
-        window_mark(window, pos0 - flank, pos0 + reference_length + flank);
+        window_mark(window, pos0 - flank, end0 + flank);
     }
 }
 

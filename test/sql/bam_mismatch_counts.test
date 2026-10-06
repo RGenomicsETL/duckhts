@@ -190,6 +190,25 @@ SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_m
 ----
 reference has no contig named ref1
 
+# A symbolic mask record at 186 whose stated end is far past the contig masks
+# ref1 from 181 on with the default flank. Without a mask the counts are 116
+# bases and 6 mismatches; the read at 171-190 then keeps its bases at 172-180
+# (171 is an N), with its mismatch at 173 and without the one at 190.
+query II
+SELECT sum(bases), sum(bases) FILTER (WHERE reference_base != read_base)
+FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa');
+----
+116	6
+
+query II
+SELECT sum(bases), sum(bases) FILTER (WHERE reference_base != read_base)
+FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa',
+  mask := '__WORKING_DIRECTORY__/test/data/bam_mismatch.far_end.vcf.gz');
+----
+106	5
+
 # A reference whose ref1 is shorter than the alignment at 171-190 says.
 statement error
 SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
