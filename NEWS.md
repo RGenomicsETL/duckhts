@@ -47,7 +47,8 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   not next to the FASTA is read and none is built beside it. The catalog's
   limits state the most one alignment can need: an alignment that spans more
   reference than the 1 MiB window grows the window and its mask to its span,
-  up to 64 MiB each.
+  up to 64 MiB each. The walk over an alignment keeps no list of its gaps, so
+  its state does not grow with the number of CIGAR operations.
 
 - Added `duckhts_roh_ancestry()` for per-sample ancestry-weighted allele frequencies from long reference and proportion relations, with allele-orientation handling and optional frequency clamping.
 

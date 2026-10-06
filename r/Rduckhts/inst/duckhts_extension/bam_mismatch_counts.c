@@ -84,13 +84,6 @@ typedef struct {
     size_t mask_capacity;
 } mismatch_window_t;
 
-/* Query intervals [lo, hi) of one read to leave out, in CIGAR order. */
-typedef struct {
-    int64_t *bounds; /* lo, hi pairs, owned (malloc family) */
-    size_t count;
-    size_t capacity;
-} mismatch_skips_t;
-
 static size_t mismatch_cell(int mate, int cycle, int quality, int from, int to) {
     return ((((size_t)mate * (MISMATCH_CYCLE_MAX + 1) + (size_t)cycle) * MISMATCH_QUALITIES +
              (size_t)quality) * MISMATCH_BASES + (size_t)from) * MISMATCH_BASES + (size_t)to;
@@ -350,25 +343,21 @@ static int window_cover(mismatch_window_t *window, mismatch_mask_t *mask, int ti
     return 1;
 }
 
-static int skips_add(mismatch_skips_t *skips, int64_t lo, int64_t hi) {
-    if (skips->count == skips->capacity) {
-        size_t capacity = skips->capacity ? skips->capacity * 2 : 16;
-        int64_t *grown = realloc(skips->bounds, capacity * 2 * sizeof(int64_t));
-        if (!grown) return 0;
-        skips->bounds = grown;
-        skips->capacity = capacity;
-    }
-    skips->bounds[2 * skips->count] = lo;
-    skips->bounds[2 * skips->count + 1] = hi;
-    skips->count++;
-    return 1;
+/* A CIGAR operation next to which bases are left out. */
+static int cigar_is_gap(int code) {
+    return code == BAM_CINS || code == BAM_CSOFT_CLIP || code == BAM_CDEL || code == BAM_CREF_SKIP;
 }
 
 /* Count the aligned bases of one alignment. Bases within flank query bases of
  * an insertion, a deletion, a reference skip or a soft clip are left out, with
- * masked positions and bases that are not A, C, G or T on either side. */
+ * masked positions and bases that are not A, C, G or T on either side.
+ *
+ * Gaps come in query order, so only two of them decide whether a base is left
+ * out: the last gap behind it and the next gap ahead of it. The walk keeps
+ * those two bounds and no list of gaps, so its state does not grow with the
+ * number of CIGAR operations. */
 static int count_alignment(const bam1_t *alignment, const char *contig, int flank,
-                           mismatch_window_t *window, mismatch_mask_t *mask, mismatch_skips_t *skips,
+                           mismatch_window_t *window, mismatch_mask_t *mask,
                            uint64_t *cells, char *error, size_t error_size) {
     const uint32_t *cigar = bam_get_cigar(alignment);
     const uint8_t *sequence = bam_get_seq(alignment);
@@ -379,9 +368,16 @@ static int count_alignment(const bam1_t *alignment, const char *contig, int flan
     const hts_pos_t beg0 = alignment->core.pos;
     const hts_pos_t end0 = bam_endpos(alignment);
     int mate = 0;
+    const uint32_t operations = alignment->core.n_cigar;
     int64_t hard_left = 0, hard_right = 0, query = 0;
     hts_pos_t reference = beg0;
-    size_t skip_at = 0;
+    /* Bases are left out before left_out_until (the end of the last gap behind,
+     * plus the flank) and from left_out_from on (the start of the next gap
+     * ahead, minus the flank). next_gap is the operation that set
+     * left_out_from, or `operations` when no gap is ahead. */
+    int64_t left_out_until = 0;
+    int64_t left_out_from = INT64_MAX;
+    uint32_t next_gap = 0;
 
     if (query_length <= 0 || alignment->core.n_cigar == 0) return 1;
     if (alignment->core.flag & BAM_FPAIRED) {
@@ -389,34 +385,44 @@ static int count_alignment(const bam1_t *alignment, const char *contig, int flan
     }
     if (!window_cover(window, mask, alignment->core.tid, contig, beg0, end0, flank, error, error_size)) return 0;
 
-    skips->count = 0;
-    for (uint32_t op = 0; op < alignment->core.n_cigar; op++) {
+    for (uint32_t op = 0; op < operations; op++) {
         const int code = bam_cigar_op(cigar[op]);
         const int64_t length = bam_cigar_oplen(cigar[op]);
         if (code == BAM_CHARD_CLIP) {
             if (op == 0) hard_left = length; else hard_right = length;
-        } else if (flank > 0 && (code == BAM_CINS || code == BAM_CSOFT_CLIP)) {
-            if (!skips_add(skips, query - flank, query + length + flank)) goto out_of_memory;
-        } else if (flank > 0 && (code == BAM_CDEL || code == BAM_CREF_SKIP)) {
-            if (!skips_add(skips, query - flank, query + flank)) goto out_of_memory;
         }
         if (bam_cigar_type(code) & 1) query += length;
     }
     if (query != query_length) return 1; /* CIGAR and sequence disagree: no base is trusted */
 
     query = 0;
-    for (uint32_t op = 0; op < alignment->core.n_cigar; op++) {
+    for (uint32_t op = 0; op < operations; op++) {
         const int code = bam_cigar_op(cigar[op]);
         const int type = bam_cigar_type(code);
         const int64_t length = bam_cigar_oplen(cigar[op]);
+        if (flank > 0 && next_gap <= op) {
+            /* The next gap after this operation. The search starts where the
+             * last one ended, so every operation is looked at once. */
+            int64_t ahead = query + ((type & 1) ? length : 0);
+            next_gap = op + 1;
+            while (next_gap < operations && !cigar_is_gap(bam_cigar_op(cigar[next_gap]))) {
+                if (bam_cigar_type(bam_cigar_op(cigar[next_gap])) & 1) ahead += bam_cigar_oplen(cigar[next_gap]);
+                next_gap++;
+            }
+            left_out_from = next_gap < operations ? ahead - flank : INT64_MAX;
+        }
+        if (flank > 0 && cigar_is_gap(code)) {
+            /* An insertion or a soft clip holds query bases; a deletion or a
+             * reference skip sits between two of them. */
+            left_out_until = query + ((type & 1) ? length : 0) + flank;
+        }
         if (type == 3) {
             for (int64_t step = 0; step < length; step++) {
                 const int64_t at = query + step;
                 const hts_pos_t pos0 = reference + step;
                 int quality, from, to;
                 int64_t cycle;
-                while (skip_at < skips->count && skips->bounds[2 * skip_at + 1] <= at) skip_at++;
-                if (skip_at < skips->count && skips->bounds[2 * skip_at] <= at) continue;
+                if (at < left_out_until || at >= left_out_from) continue;
                 if (pos0 < window->beg0 || pos0 >= window->end0) continue;
                 if (window->masked[pos0 - window->beg0]) continue;
                 from = base_code(window->bases[pos0 - window->beg0]);
@@ -437,10 +443,6 @@ static int count_alignment(const bam1_t *alignment, const char *contig, int flan
         if (type & 2) reference += length;
     }
     return 1;
-
-out_of_memory:
-    snprintf(error, error_size, "duckhts_bam_mismatch_counts: out of memory");
-    return 0;
 }
 
 static int region_name2id(void *header, const char *name) {
@@ -459,13 +461,11 @@ static int count_alignments(const mismatch_bind_t *bind, uint64_t *cells, char *
     unsigned int region_count = 0;
     mismatch_mask_t mask;
     mismatch_window_t window;
-    mismatch_skips_t skips;
     int read_status = 0;
     int ok = 0;
 
     memset(&mask, 0, sizeof(mask));
     memset(&window, 0, sizeof(window));
-    memset(&skips, 0, sizeof(skips));
     window.tid = -1;
 
     file = sam_open(bind->path, "r");
@@ -534,8 +534,7 @@ static int count_alignments(const mismatch_bind_t *bind, uint64_t *cells, char *
         if (alignment->core.qual < bind->min_mapq) continue;
         contig = sam_hdr_tid2name(header, alignment->core.tid);
         if (!contig) continue;
-        if (!count_alignment(alignment, contig, bind->indel_flank, &window, &mask, &skips, cells,
-                             error, error_size)) {
+        if (!count_alignment(alignment, contig, bind->indel_flank, &window, &mask, cells, error, error_size)) {
             goto cleanup;
         }
     }
@@ -546,7 +545,6 @@ static int count_alignments(const mismatch_bind_t *bind, uint64_t *cells, char *
     ok = 1;
 
 cleanup:
-    free(skips.bounds);
     free(window.masked);
     free(window.bases);
     if (window.fai) fai_destroy(window.fai);
