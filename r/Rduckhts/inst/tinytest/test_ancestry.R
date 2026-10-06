@@ -221,6 +221,25 @@ test_ancestry_relations <- function() {
                                                "ancestry_pc", "ancestry_correction", min_cor = 0)
   expect_equal(numeric_ids$group_id, c("1", "1000000"))
   expect_equal(numeric_ids$proportion, out$proportion)
+  # A long reference with an integer chromosome column compares numbers, as an
+  # integer wide reference does: chr01 joins 1, whether the loadings name the
+  # contig as a number or as text. Loadings on a name that gives no integer
+  # belong to no locus of such a reference and change nothing.
+  dbExecute(con, "CREATE TEMP VIEW ancestry_integer_ref AS SELECT * REPLACE (1::INTEGER AS chromosome) FROM ancestry_ref")
+  dbExecute(con, "CREATE TEMP VIEW ancestry_integer_pc AS SELECT * REPLACE (1::BIGINT AS chromosome) FROM ancestry_pc")
+  dbExecute(con, "CREATE TEMP VIEW ancestry_chr01_input AS SELECT * REPLACE ('chr01' AS chromosome) FROM ancestry_input")
+  dbExecute(con, paste("CREATE TEMP VIEW ancestry_extra_pc AS SELECT * FROM ancestry_pc UNION ALL",
+                       "SELECT * REPLACE ('chrX' AS chromosome) FROM ancestry_pc"))
+  for (loadings in c("ancestry_pc", "ancestry_integer_pc", "ancestry_extra_pc")) {
+    integer_long <- rduckhts_ancestry_proportions(con, "ancestry_chr01_input", "ancestry_integer_ref",
+                                                  loadings, "ancestry_correction", min_cor = 0)
+    expect_equal(integer_long$proportion, out$proportion, info = loadings)
+    expect_equal(integer_long$used_variants, out$used_variants, info = loadings)
+  }
+  # The same input joins nothing of the text reference: 01 is another name.
+  text_long <- rduckhts_ancestry_proportions(con, "ancestry_chr01_input", "ancestry_ref",
+                                             "ancestry_pc", "ancestry_correction", min_cor = 0)
+  expect_equal(text_long$used_variants, rep(0, 2L))
   expect_equal(out$status, rep("ok", 2L))
   expect_equal(out$used_variants, rep(6, 2L))
   expect_equal(out$input_variants, rep(11, 2L))

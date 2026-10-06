@@ -80,6 +80,43 @@ test_ancestry_checked_sites <- function() {
   dbExecute(con, "CREATE VIEW integer_ref AS SELECT * REPLACE (1::INTEGER AS chromosome) FROM ref")
   expect_equal(run(reference_table = "integer_ref")$proportion,
                baseline$proportion)
+  # Chromosome names are compared with duckhts_contig_key(): the letter case of
+  # chr does not matter and sex chromosomes join across spellings. A leading
+  # zero is another name for a text reference, and the same integer for an
+  # integer reference.
+  dbExecute(con, "CREATE VIEW upper_input AS SELECT * REPLACE ('CHR1' AS chromosome) FROM input")
+  expect_equal(run("upper_input")$proportion, baseline$proportion)
+  dbExecute(con, "CREATE VIEW text_ref AS SELECT * REPLACE ('1' AS chromosome) FROM ref")
+  expect_equal(run("upper_input", "text_ref")$proportion, baseline$proportion)
+  dbExecute(con, "CREATE VIEW x_ref AS SELECT * REPLACE ('X' AS chromosome) FROM ref")
+  dbExecute(con, "CREATE VIEW x_input AS SELECT * REPLACE ('chrX' AS chromosome) FROM input")
+  expect_equal(run("x_input", "x_ref")$proportion, baseline$proportion)
+  dbExecute(con, "CREATE VIEW zero_input AS SELECT * REPLACE ('chr01' AS chromosome) FROM input")
+  expect_equal(run("zero_input", "integer_ref")$proportion, baseline$proportion)
+  expect_equal(unique(run("zero_input", "text_ref")$used_variants), 0)
+  # Two spellings of one locus are duplicates under the key that joins them:
+  # both spellings join an integer reference, so neither is used; only one
+  # joins a text reference, so that one is used.
+  dbExecute(con, paste0("CREATE VIEW mixed_input AS SELECT * FROM input UNION ALL ",
+                        "SELECT * REPLACE ('chr01' AS chromosome) FROM input WHERE position=1"))
+  expect_equal(unique(run("mixed_input", "integer_ref")$used_variants), 11)
+  expect_equal(unique(run("mixed_input", "text_ref")$used_variants), 12)
+  # Every integer type of the reference compares numbers, so chr01 joins 1.
+  for (type in c("TINYINT", "SMALLINT", "BIGINT", "HUGEINT", "UTINYINT", "USMALLINT",
+                 "UINTEGER", "UBIGINT", "UHUGEINT")) {
+    dbExecute(con, sprintf("CREATE OR REPLACE VIEW typed_ref AS SELECT * REPLACE (1::%s AS chromosome) FROM ref",
+                           type))
+    expect_equal(run("zero_input", "typed_ref")$proportion, baseline$proportion, info = type)
+  }
+  # Two names that give no integer join nothing for an integer reference. They
+  # are two unmatched rows, not duplicates of each other.
+  dbExecute(con, paste0("CREATE VIEW sex_input AS SELECT * FROM input UNION ALL ",
+                        "SELECT * REPLACE ('X' AS chromosome) FROM input WHERE position=1 UNION ALL ",
+                        "SELECT * REPLACE ('Y' AS chromosome) FROM input WHERE position=1"))
+  sex <- run("sex_input", "integer_ref")
+  expect_equal(unique(sex$used_variants), 12)
+  expect_equal(unique(sex$duplicate_variants), 0)
+  expect_equal(unique(sex$unmatched_variants), 2)
   dbExecute(con, "CREATE VIEW missing_ref AS SELECT * REPLACE (CASE WHEN position=1 THEN NULL ELSE A END AS A) FROM ref")
   expect_error(run(reference_table = "missing_ref"), "finite frequencies and loadings")
   dbExecute(con, "CREATE VIEW missing_pc AS SELECT * REPLACE (CASE WHEN position=1 THEN NULL ELSE PC1 END AS PC1) FROM ref")

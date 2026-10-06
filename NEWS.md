@@ -4,6 +4,61 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- Added `duckhts_bam_mismatch_counts()`: the aligned read bases of a SAM, BAM
+  or CRAM file counted against the reference by mate, cycle, base quality and
+  substitution, in one pass with fixed memory. A `mask` of known variants (a
+  BCF or a bgzip-compressed VCF) leaves those positions out, so the mismatches
+  that remain are mostly errors of the read, the library or the alignment,
+  with the variants that the mask does not hold. This is the count for the
+  read-error and contamination work (#332): at a site where no genome in the
+  sample varies, a second genome adds no mismatch, so the rate is an upper
+  bound on the error rate, and it is the error rate when the mask holds every
+  variant site of those genomes. Bases next
+  to a gap or a soft clip are left out by `indel_flank`. Contig names are
+  compared byte for byte, and a contig that the reference or the mask does not
+  know is an error. SQL tests check the function against hand-derived counts
+  and against the same counts made independently in SQL.
+  `benchmarks/benchmark_bam_mismatch_counts.md` measures it on chr1 of a
+  public 30× CRAM with the chr1 panel records as the mask: 7.05 billion
+  counted bases in 60 s on one thread (117 million a second), time linear in
+  the bases, and peak RSS from 68.1 MiB at a quarter of the contig to 81.9 MiB
+  at the whole contig, where the step is htslib holding the reference of one
+  18 Mb CRAM slice over the sparse 1q12 region. Mask records alone are read
+  at 1.4 million a second, linear in the records, with no change in memory.
+  The inputs are registry artifacts staged by
+  `benchmarks/bam_mismatch_stage.R` with the RBCFTools binaries, with a
+  network-free staging test (`make test-bam-mismatch-staging`).
+
+- The function reference now states how each function compares contig names
+  across two sources, under "Contig names": `duckhts_roh()`,
+  `duckhts_roh_af_table()` and `duckhts_roh_counts()` compare byte for byte, so
+  a frequency table or a genetic map that says `1` where the VCF says `chr1`
+  gives no rows and no error; `bcftools_score()`, `bcftools_liftover()`,
+  `bcftools_norm_row()` and `bcftools_munge_row()` each state their lookup
+  order; `variantkey()` states that its chromosome code is not a contig key.
+  `duckhts_contig_key()` is documented as the explicit key for such joins, with
+  what it does not map. No function changes its behaviour. The R wrapper
+  `rduckhts_ancestry_proportions()` uses that key, counts duplicates by the
+  same key as its join, and compares numbers for a reference of any integer
+  type.
+
+- `duckhts_bam_mismatch_counts()` stops with an error when a kept alignment
+  ends past the length of its contig in the reference, instead of leaving the
+  bases past the end out of the counts; the reference does not match the
+  alignment header in that case. For CRAM input, `reference_index_path` now
+  reaches the CRAM decoder too, through the same `reference##idx##index`
+  locator that `duckhts_somalier_bam_counts()` builds, so a FASTA index that is
+  not next to the FASTA is read and none is built beside it. The reference
+  window stays at 1 MiB: it moves along an alignment that reaches past it, for
+  example over a reference skip of more than 1 MiB, in place of growing to the
+  alignment's span, and the walk over an alignment keeps no list of its gaps.
+  So the state of the function does not grow with the span or the number of
+  CIGAR operations of an alignment, and no span is refused. A VCF mask line
+  is parsed by htslib, so a record has one span as VCF and as BCF, also when
+  a symbolic allele states it by `SVLEN` or a reference block by `FORMAT/LEN`;
+  the line is read up to INFO unless its FORMAT names `LEN`, so the sample
+  columns of a population VCF are not parsed.
+
 - Added `duckhts_roh_ancestry()` for per-sample ancestry-weighted allele frequencies from long reference and proportion relations, with allele-orientation handling and optional frequency clamping.
 
 - Added `duckhts_roh_counts()` and a read-count overload of `duckhts_roh_segments()`:

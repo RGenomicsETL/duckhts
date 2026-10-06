@@ -1328,6 +1328,10 @@ DuckDB manages, and can spill, the scan and the joins. The sites of each sample 
 
 Duplicate positions on a chromosome keep the first record to arrive, as bcftools roh keeps the first record in the file. That is the file order when one scan thread reads both records; deduplicate upstream when it matters. With a frequency relation (duckhts_roh_af_table, duckhts_roh_ancestry), only the records that match a frequency row take part. bcftools' default AC/AN frequencies, --AF-dflt, --estimate-AF, --include/--exclude, --skip-indels, --ignore-homref, --buffer-size and --viterbi-training are not offered.
 
+### Contig names
+
+The chrom of genetic_map is compared byte for byte with the contig names of the sites. A chromosome that the map spells differently (1 and chr1) is skipped like a chromosome without map rows, without an error. Rename the map's contigs in a view first.
+
 ### Examples
 
 ```sql
@@ -1361,6 +1365,10 @@ af_table is a table or view name with columns chrom, pos (one-based), ref, alt a
 ### Otherwise
 
 Everything else is as duckhts_roh: the same output, genotype evidence (PL, or GT with gt_error), transition parameters, optional genetic_map overload, memory limits and limits.
+
+### Contig names
+
+The chrom of af_table is compared with the VCF's CHROM byte for byte. When the two spell contigs differently (1 and chr1), no record finds a frequency and the function returns no rows, without an error. Rename the contigs of af_table to the VCF's spelling in a view first; duckhts_contig_key() gives a common key.
 
 ### Examples
 
@@ -1441,6 +1449,10 @@ Biallelic sites only; one error rate for all reads, with no base- or mapping-qua
 ### Otherwise
 
 Output, transitions, rec_rate, the optional genetic_map overload and the memory limits are as duckhts_roh, with 24 bytes per site.
+
+### Contig names
+
+The chrom of genetic_map is compared byte for byte with the contig names of the sites. A chromosome that the map spells differently (1 and chr1) is skipped like a chromosome without map rows, without an error. Rename the map's contigs in a view first.
 
 ### Examples
 
@@ -2148,6 +2160,52 @@ include_unmapped := TRUE appends one synthetic row with chrom = '*' for no-coord
 SELECT * FROM bam_bin_counts('fixture_mixed.cram', 5000, reference := 'fixture_ref.fa', rmdup := 'streaming', stats := 'gc,mq');
 ```
 
+## duckhts_bam_mismatch_counts
+
+Count aligned read bases against the reference by mate, cycle, base quality and substitution, optionally leaving out masked positions such as known variants.
+
+Signature:
+
+```sql
+duckhts_bam_mismatch_counts(path, reference, region := NULL, mask := NULL, index_path := NULL, reference_index_path := NULL, mask_index_path := NULL, min_mapq := 20, require_flags := 0, exclude_flags := 3844, indel_flank := 5)
+```
+
+Returns:
+
+```
+table
+```
+
+### Input
+
+path is a SAM, BAM or CRAM file and reference is its indexed FASTA; fasta_index() builds the index. region is a comma-separated list of contigs or intervals and needs an alignment index; without it the whole file is read. Alignments are kept when MAPQ is at least min_mapq, every bit of require_flags is set and no bit of exclude_flags is set; the default 3844 leaves out unmapped, secondary, failed, duplicate and supplementary alignments.
+
+### Output
+
+One row for each combination that occurs: mate (1 or 2 for a paired read, 0 otherwise), cycle (the one-based position of the base in the read as sequenced, hard clips included), base_quality (NULL when the read stores no qualities), reference_base and read_base (both on the strand of the read, so a reverse alignment is complemented), and bases, the number of aligned bases. Rows with reference_base equal to read_base are the matches, so a rate is a ratio of two sums. Rows come in the order of mate, cycle, base_quality, reference_base, read_base.
+
+### What is counted
+
+Every aligned base (CIGAR M, = or X) of a kept alignment whose read base and reference base are both A, C, G or T. A base within indel_flank read bases of an insertion, a deletion, a reference skip or a soft clip is left out, because bases next to a gap are often misaligned. A region selects alignments by overlap; all aligned bases of a selected alignment are counted, also those outside the region.
+
+### Mask
+
+mask is an indexed BCF or a bgzip-compressed VCF with a tabix index, for example known variants. Every reference position of a mask record is left out. A record with an indel or a symbolic allele also leaves out indel_flank bases on each side. The span of a record is the one htslib gives it, the same for a BCF and a VCF mask: the longest of REF, INFO/END, INFO/SVLEN of a deletion, duplication or copy-number allele, and FORMAT/LEN of a reference block. A VCF mask line is read up to INFO unless its FORMAT names LEN, so the sample columns of a population VCF cost nothing. The mask removes the variants it holds and no others: a variant of the sample that the mask does not hold, such as a private, de novo or somatic variant or an allele of a second genome, is still counted as a mismatch. So with a mask of known variants the mismatches that remain are mostly errors of the read, the library or the alignment, and their rate is an upper bound on the error rate; it is the error rate only when the mask holds every variant site of the genomes in the sample.
+
+### Contig names
+
+The contig names of the alignment header, the reference and the mask are compared byte for byte. A contig with a kept alignment that the reference does not have is an error. So is a contig that the mask does not know, in its header or in its index: a silent miss would count known variants as errors.
+
+### Limits
+
+One worker. Memory is fixed: 36.5 MB of counters, one reference window of 1 MiB with its mask, and the alignment in hand, plus htslib's state for the file. For CRAM that includes the reference of the slice being decoded; a slice over a sparse region can span many megabases. A cycle above 1000 is counted as 1000 and a base quality above 93 as 93. The window moves along an alignment that reaches past it, so no alignment needs more reference in memory; an alignment with a reference skip of more than 1 MiB fetches a window on each side of the skip, and many such alignments are slow. Alignments are expected in coordinate order; an unsorted file is counted correctly but fetches a reference window for each alignment.
+
+### Examples
+
+```sql
+SELECT base_quality, sum(bases) FILTER (WHERE reference_base != read_base) / sum(bases) AS mismatch_rate FROM duckhts_bam_mismatch_counts('sample.bam', 'reference.fa', region := 'chr20:10000000-12000000', mask := 'known_variants.vcf.gz') GROUP BY base_quality ORDER BY base_quality;
+```
+
 ## duckhts_bam_bed_coverage
 
 Compute samtools coverage-like regional summaries for BAM or CRAM input over a BED target set, returning one row per BED interval with DuckHTS-specific pre/post-filter read counts, covered bases, percentage covered, mean depth, mean baseQ, mean mapQ, and strand-specific post-filter summaries in read mode. Indexed BAM/CRAM input is required in the current implementation. decompression_threads controls htslib worker threads for BAM/CRAM decoding; use 0 to disable them.
@@ -2329,6 +2387,10 @@ Returns:
 ```
 UBIGINT
 ```
+
+### Chromosome code
+
+The chromosome part of a VariantKey is a code of the upstream format, not a contig key. A leading chr is removed in any letter case. An all-digit name becomes its number modulo 256, with no range check, so 257 shares the code of 1. X, Y, and M or MT, in any letter case, become 23, 24 and 25, so 25 and MT share a code. Any other name has no code, and neither has a number that comes to 0: variantkey() and regionkey() return NULL for it, so scaffolds and accessions have no key rather than a shared one. Use duckhts_contig_key() to join on contig names.
 
 ### Examples
 
@@ -2792,6 +2854,14 @@ Returns:
 VARCHAR
 ```
 
+### Use
+
+Readers and region arguments compare contig names byte for byte. This function is the explicit key for a join of two sources that spell contigs differently: join on duckhts_contig_key(a.chrom) = duckhts_contig_key(b.chrom), or rename one side. Two names of one source can share a key (1 and chr1), so a join on the key repeats rows when one side has both. duckhts_roh_ancestry and the R ancestry wrappers use this key. Functions with another rule state it under Contig names.
+
+### Not mapped
+
+Leading zeros (01 is not 1), numeric sex and mitochondrial codes (23, 24, 25, 26), accessions such as NC_000001.11, patches, alternate loci and unplaced scaffolds. The letter case of other names is kept.
+
 ### Examples
 
 ```sql
@@ -2880,6 +2950,10 @@ Returns:
 STRUCT
 ```
 
+### Contig names
+
+Input names and chain source names are compared after one rule: a leading chr is removed in any letter case; M, MT and 26 become MT; 23, 25, X, XY, XX, PAR1 and PAR2 become X; 24 and Y become Y. A lifted record carries the first name that the destination FASTA index has among: the chain's destination name; that name with chr added or removed; its form under the rule above, without and with chr; and for the mitochondrion MT, chrM and M. A FASTA that holds two of these names is not an error. A mitochondrial record that passes through without lifting takes the first of chrM, MT and M that the destination FASTA has.
+
 ### Examples
 
 ```sql
@@ -2935,6 +3009,10 @@ alt accepts comma-delimited VARCHAR or VARCHAR[]. Symbolic `<DEL>` may use end_p
 ### Output
 
 Return pos_normed, end_pos_normed, ref_normed, alt_normed (always VARCHAR[]), nullable normed and norm_status. gVCF `<NON_REF>`/`<*>` reference blocks pass through with GVCFReferenceBlock. Mixed real/gVCF-symbolic rows normalize real alleles while preserving symbolic alleles and supplied reference-block END.
+
+### Contig names
+
+The reference sequence of a record is looked up in the FASTA index under, in order: the record's name; the name without chr (any letter case), or with chr added when it has none; and for M, MT or chrM also MT, chrM and M. The first name that the index has is used. A FASTA that holds both 1 and chr1 is not an error.
 
 ### Examples
 
@@ -3004,6 +3082,10 @@ With NULL second argument, summaries_list_file reads paths from a file or direct
 
 log_path writes per-PRS loaded/matched/allele-mismatch/duplicate-marker counts.
 
+### Contig names
+
+Chromosome names of the summary statistics are looked up in the genotype VCF header as the upstream plugin does, in this order: the exact name; the name without a lowercase chr prefix; chr plus a name of at most two characters; 23, 25, XY, XX, PAR1 and PAR2 as X or chrX; 24 as Y or chrY; 26, MT and chrM as MT or chrM. The lookup is case-sensitive, and M alone does not find MT. A marker whose chromosome is not found is skipped without an error.
+
 ### Examples
 
 ```sql
@@ -3033,6 +3115,10 @@ Returns:
 ```
 STRUCT
 ```
+
+### Contig names
+
+The reference sequence of a record is looked up in the FASTA index under, in order: the record's name; the name without chr (any letter case), or with chr added when it has none; and for M, MT or chrM also MT, chrM and M. The first name that the index has is used. A FASTA that holds both 1 and chr1 is not an error.
 
 ### Examples
 

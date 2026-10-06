@@ -96,6 +96,7 @@ extern void register_bcftools_score_function(duckdb_connection connection);
 extern void register_duckhts_mosdepth_function(duckdb_connection connection);
 /* bam_bin_counts.c */
 extern void register_bam_bin_counts_function(duckdb_connection connection);
+extern void register_duckhts_bam_mismatch_counts_function(duckdb_connection connection);
 /* samtools_idxstats_table.c */
 extern void register_duckhts_samtools_idxstats_function(duckdb_connection connection);
 /* bam_bed_coverage.c */
@@ -265,6 +266,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_bcftools_score_function(connection);
     register_duckhts_mosdepth_function(connection);
     register_bam_bin_counts_function(connection);
+    register_duckhts_bam_mismatch_counts_function(connection);
     register_duckhts_samtools_idxstats_function(connection);
     register_duckhts_bam_bed_coverage_function(connection);
     if (!register_variantkey_functions(connection)) {

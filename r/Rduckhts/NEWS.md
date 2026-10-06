@@ -2,6 +2,39 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- Added `rduckhts_bam_mismatch_counts()` and the bundled
+  `duckhts_bam_mismatch_counts()`: aligned read bases counted against the
+  reference by mate, cycle, base quality and substitution, with an optional
+  mask of known variants. With such a mask, the mismatches that remain are
+  mostly errors of the read, the library or the alignment, with the variants
+  that the mask does not hold, so their rate is an upper bound on the error
+  rate. Small fixtures
+  (`bam_mismatch.*`) are bundled for the example and the tests.
+
+- `rduckhts_ancestry_proportions()` compares chromosome names with
+  `duckhts_contig_key()`, the contig key of the extension, in place of a regular
+  expression and integer casts in SQL. `chrX` now matches `X`, `chrM` matches
+  `MT`, and the letter case of `chr` does not matter. A leading zero is now
+  another name for a text reference: `chr01` no longer matches `1`. A reference
+  with an integer chromosome column still compares numbers, for every DuckDB
+  integer type and for long references as for wide ones, and duplicates are
+  counted by the same key as the join, so `chr01` and `chr1` at one position
+  are duplicates for an integer reference instead of two variants. Names that
+  give no number, such as `X` and `Y`, join nothing for an integer reference
+  and are not duplicates of each other.
+
+- `rduckhts_bam_mismatch_counts()` stops with an error when a kept alignment
+  ends past the length of its contig in the reference, instead of leaving the
+  bases past the end out of the counts; the reference does not match the
+  alignment header in that case. For CRAM input, `reference_index_path` now
+  reaches the CRAM decoder too, so a FASTA index that is not next to the FASTA
+  is read and none is built beside it; the CRAM fixture (`bam_mismatch.cram`)
+  is bundled for that test.
+
+- The function reference states, under "Contig names", how each function
+  compares contig names across two sources, including the cases that return no
+  rows without an error.
+
 - SQL that joins `read_bam()`, `read_tabix()`, `read_gff()`, `read_gtf()` or
   `read_bed()` plans better: the bundled extension now gives DuckDB a row
   estimate for a whole-file indexed scan.
