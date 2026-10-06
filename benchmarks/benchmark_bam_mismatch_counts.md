@@ -20,19 +20,25 @@ measures, and it checks the reference against its registered size and MD5.
 Those checks read all three files in full, so every measured run reads from a
 warm page cache.
 
-There are two growth dimensions: the aligned bases and the mask records.
+There are two growth dimensions, the aligned bases and the mask records, and
+three series.
 
 - The `mask` series doubles both together. Its 1× and 2× regions end at the
   25% and 50% quantiles of the alignment start positions of the slice, and its
   4× region is the whole contig. The mask records under a region grow with it.
 - The `no mask` series reads the same regions without a mask, so the aligned
-  bases grow alone.
-
-The mask records are not doubled alone. The difference between the two series
-is the whole cost of the mask, and the report gives it at each size.
+  bases grow alone. The difference between the two series is the whole cost
+  of the mask at each size.
+- The `mask records` series doubles the mask records alone. Its alignments
+  are fixed: one two-base region at every megabase of the contig, so every
+  1 MiB reference window is visited once and nearly every mask record is read
+  while few alignments are counted. Its masks are the same panel records
+  thinned to the positions divisible by 4 (`bam_mismatch_chr1_mask_quarter_bcf`),
+  by 2 (`bam_mismatch_chr1_mask_half_bcf`) and not at all, so 1×, 2× and 4×
+  records; a run without a mask gives the cost of the alignments alone.
 
 The cuts and the input denominators of each region are computed at render
-time. That is untimed staging, as is the one-time staging of the two files.
+time. That is untimed staging, as is the one-time staging of the files.
 
 Every observation is one fresh DuckDB CLI process under `/usr/bin/time`. The
 JSON profiler gives the query latency and DuckDB’s peak buffer and temporary
@@ -70,19 +76,22 @@ The live state is:
 
 That is 52.8 MiB, so the ceiling is overhead + 158.5 MiB.
 
-The render also stops if a time exponent is above 1.25 at either doubling, or
-if the 1× run on one thread takes less than 5 s, which is the least that
-`STYLE.md` accepts for a timing verdict.
+The render also stops if a time exponent of the `mask` or `no mask` series is
+above 1.25 at either doubling, or if their 1× run on one thread takes less
+than 5 s, which is the least that `STYLE.md` accepts for a timing verdict.
+The `mask records` series reads about six million records in a few seconds,
+so its 1× run is expected under 5 s: it gets the memory verdict in full and
+its times are reported without a verdict, as `STYLE.md` provides.
 
 ``` sh
 taskset -c 8-15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_bam_mismatch_counts.Rmd")'
 ```
 
-Source revision: 37b438ca55a09d335c6d2fb218ca053730930ec4; `src` tree 1f7c4e3dbbd535d8b1ea6f59cedf0993ca1eb4e4. DuckDB runtime: v1.5.1 (Variegata) 7dbb2e646f (CLI). Extension SHA-256: f8e0276f8d94671a91700e8142c281cdb551f9cc9efbb158dd9f05cc375d4675. Host load at start: 6.17, 6.90, 7.42. DuckDB memory limit: 50.0 GiB (the default); temporary directory limit: 0.
+Source revision: 68ae1e7861a9a3f88dc73b4410d0e955fb40f5fd; `src` tree 528976e9f738687340374b9dcb346fabecf9c29a. DuckDB runtime: v1.5.1 (Variegata) 7dbb2e646f (CLI). Extension SHA-256: ffdd5d55928d5a0e747a6b91917edc2a7e598e40d36592be083329648d007473. Host load at start: 2.28, 2.15, 2.22. DuckDB memory limit: 50.0 GiB (the default); temporary directory limit: 0.
 
-Staged inputs: the slice has 62,660,978 alignments (position sum 7728419844834032, 9,399,146,700 stored bases) in 6,270 CRAM slices, of which the widest starts at 125,183,655 and spans 18,001,341 reference bases; the mask has 5,769,087 records.
+Staged inputs: the slice has 62,660,978 alignments (position sum 7728419844834032, 9,399,146,700 stored bases) in 6,270 CRAM slices, of which the widest starts at 125,183,655 and spans 18,001,341 reference bases; the mask has 5,769,087 records, its half 2,884,829 and its quarter 1,441,811.
 
-Overhead: 38.6 MiB. Ceiling: 197 MiB.
+Overhead: 38.3 MiB. Ceiling: 196.8 MiB.
 
 ## Inputs of each region
 
@@ -100,58 +109,94 @@ the mask records that the region selects.
 ## Measurements
 
 `bases`, `mismatches` and `output_rows` are the result of the query. Times are
-the query latency of three repetitions.
+the query latency of three repetitions. The two alignment series:
 
-| series  | scale | threads |         bases | mismatches | output_rows | median_seconds | min_seconds | max_seconds | median_rss_mib | max_rss_mib | max_buffer_mib | budget_mib |
-|:--------|------:|--------:|--------------:|-----------:|------------:|---------------:|------------:|------------:|---------------:|------------:|---------------:|-----------:|
-| mask    |     1 |       1 | 1,920,445,937 |  4,034,678 |      17,756 |         16.552 |      15.451 |      20.093 |           67.6 |        67.6 |            0.3 |        197 |
-| mask    |     2 |       1 | 3,733,164,470 |  7,164,101 |      17,810 |         32.380 |      30.514 |      38.069 |           67.4 |        67.5 |            0.3 |        197 |
-| mask    |     4 |       1 | 7,053,095,954 | 14,515,783 |      17,839 |         65.996 |      59.774 |      80.851 |           83.5 |        83.5 |            0.3 |        197 |
-| mask    |     1 |       4 | 1,920,445,937 |  4,034,678 |      17,756 |         15.969 |      15.414 |      31.107 |           68.8 |        68.8 |            0.3 |        197 |
-| mask    |     2 |       4 | 3,733,164,470 |  7,164,101 |      17,810 |         35.274 |      31.428 |      42.297 |           67.8 |        68.5 |            0.3 |        197 |
-| mask    |     4 |       4 | 7,053,095,954 | 14,515,783 |      17,839 |         68.034 |      61.035 |      77.057 |           86.3 |        86.6 |            0.3 |        197 |
-| no mask |     1 |       1 | 2,015,065,094 |  6,059,797 |      17,807 |         15.296 |      14.131 |      21.515 |           65.7 |        66.1 |            0.3 |        197 |
-| no mask |     2 |       1 | 3,908,455,277 | 11,109,173 |      17,832 |         31.173 |      27.690 |      36.799 |           65.8 |        67.0 |            0.3 |        197 |
-| no mask |     4 |       1 | 7,378,304,736 | 21,938,306 |      17,839 |         60.987 |      54.096 |      72.025 |           80.0 |        81.3 |            0.3 |        197 |
-| no mask |     1 |       4 | 2,015,065,094 |  6,059,797 |      17,807 |         14.494 |      14.372 |      19.483 |           66.8 |        67.4 |            0.3 |        197 |
-| no mask |     2 |       4 | 3,908,455,277 | 11,109,173 |      17,832 |         28.354 |      28.297 |      41.230 |           67.3 |        67.4 |            0.3 |        197 |
-| no mask |     4 |       4 | 7,378,304,736 | 21,938,306 |      17,839 |         55.035 |      54.060 |      70.933 |           83.1 |        85.7 |            0.3 |        197 |
+|     | series  | scale | threads |         bases | mismatches | output_rows | median_seconds | min_seconds | max_seconds | median_rss_mib | max_rss_mib | max_buffer_mib | budget_mib |
+|:----|:--------|------:|--------:|--------------:|-----------:|------------:|---------------:|------------:|------------:|---------------:|------------:|---------------:|-----------:|
+| 1   | mask    |     1 |       1 | 1,920,445,937 |  4,034,678 |      17,756 |         15.662 |      15.652 |      15.850 |           67.7 |        67.9 |            0.3 |      196.8 |
+| 2   | mask    |     2 |       1 | 3,733,164,470 |  7,164,101 |      17,810 |         30.492 |      30.479 |      31.315 |           67.6 |        68.1 |            0.3 |      196.8 |
+| 3   | mask    |     4 |       1 | 7,053,095,954 | 14,515,783 |      17,839 |         61.071 |      61.025 |      61.197 |           83.2 |        83.8 |            0.2 |      196.8 |
+| 4   | mask    |     1 |       4 | 1,920,445,937 |  4,034,678 |      17,756 |         16.284 |      16.060 |      18.264 |           69.1 |        69.5 |            0.3 |      196.8 |
+| 5   | mask    |     2 |       4 | 3,733,164,470 |  7,164,101 |      17,810 |         32.033 |      31.431 |      34.680 |           69.0 |        69.0 |            0.3 |      196.8 |
+| 6   | mask    |     4 |       4 | 7,053,095,954 | 14,515,783 |      17,839 |         65.795 |      62.444 |      69.974 |           84.1 |        86.4 |            0.3 |      196.8 |
+| 15  | no mask |     1 |       1 | 2,015,065,094 |  6,059,797 |      17,807 |         14.366 |      14.039 |      16.309 |           65.8 |        66.1 |            0.3 |      196.8 |
+| 16  | no mask |     2 |       1 | 3,908,455,277 | 11,109,173 |      17,832 |         27.883 |      27.866 |      32.697 |           66.8 |        67.3 |            0.3 |      196.8 |
+| 17  | no mask |     4 |       1 | 7,378,304,736 | 21,938,306 |      17,839 |         54.875 |      54.618 |      55.558 |           80.0 |        80.0 |            0.2 |      196.8 |
+| 18  | no mask |     1 |       4 | 2,015,065,094 |  6,059,797 |      17,807 |         14.644 |      14.467 |      14.763 |           66.4 |        67.1 |            0.3 |      196.8 |
+| 19  | no mask |     2 |       4 | 3,908,455,277 | 11,109,173 |      17,832 |         29.312 |      28.421 |      29.632 |           66.4 |        67.9 |            0.3 |      196.8 |
+| 20  | no mask |     4 |       4 | 7,378,304,736 | 21,938,306 |      17,839 |         62.432 |      55.372 |      71.663 |           81.9 |        82.9 |            0.3 |      196.8 |
 
 Growth of the median time against the bases counted (an exponent of 1 is linear), and peak-RSS ratios to 1×:
 
 | series  | threads | one_x_seconds | bases_ratio_2x | bases_ratio_4x | time_exponent_2x | time_exponent_4x | rss_ratio_2x | rss_ratio_4x |
 |:--------|--------:|--------------:|---------------:|---------------:|-----------------:|-----------------:|-------------:|-------------:|
-| mask    |       1 |        16.552 |          1.944 |          1.889 |            1.010 |            1.119 |        0.997 |        1.235 |
-| mask    |       4 |        15.969 |          1.944 |          1.889 |            1.192 |            1.032 |        0.985 |        1.254 |
-| no mask |       1 |        15.296 |          1.940 |          1.888 |            1.075 |            1.056 |        1.002 |        1.218 |
-| no mask |       4 |        14.494 |          1.940 |          1.888 |            1.013 |            1.044 |        1.007 |        1.244 |
+| mask    |       1 |        15.662 |          1.944 |          1.889 |            1.002 |            1.092 |        0.999 |        1.229 |
+| mask    |       4 |        16.284 |          1.944 |          1.889 |            1.018 |            1.131 |        0.999 |        1.217 |
+| no mask |       1 |        14.366 |          1.940 |          1.888 |            1.001 |            1.065 |        1.015 |        1.216 |
+| no mask |       4 |        14.644 |          1.940 |          1.888 |            1.047 |            1.190 |        1.000 |        1.233 |
 
 The cost of the mask on one thread, as the difference of the two series:
 
 | scale | mask_records | seconds_with_mask | seconds_without_mask | mask_seconds | bases_left_out | rss_mib_with_mask | rss_mib_without_mask |
 |------:|-------------:|------------------:|---------------------:|-------------:|---------------:|------------------:|---------------------:|
-|     1 |    1,567,146 |            16.552 |               15.296 |        1.255 |     94,619,157 |              67.6 |                 65.7 |
-|     2 |    3,074,594 |            32.380 |               31.173 |        1.207 |    175,290,807 |              67.4 |                 65.8 |
-|     4 |    5,769,087 |            65.996 |               60.987 |        5.009 |    325,208,782 |              83.5 |                 80.0 |
+|     1 |    1,567,146 |            15.662 |               14.366 |        1.296 |     94,619,157 |              67.7 |                 65.8 |
+|     2 |    3,074,594 |            30.492 |               27.883 |        2.609 |    175,290,807 |              67.6 |                 66.8 |
+|     4 |    5,769,087 |            61.071 |               54.875 |        6.197 |    325,208,782 |              83.2 |                 80.0 |
+
+The mask-records series, at fixed alignments (scale 0 is the same regions
+without a mask):
+
+| scale | threads | mask_records |     bases | mismatches | output_rows | median_seconds | min_seconds | max_seconds | median_rss_mib | max_rss_mib | budget_mib |
+|------:|--------:|-------------:|----------:|-----------:|------------:|---------------:|------------:|------------:|---------------:|------------:|-----------:|
+|     0 |       1 |            0 | 1,072,858 |      2,951 |       5,934 |          1.029 |       1.018 |       1.096 |           76.2 |        76.7 |      196.8 |
+|     1 |       1 |    1,441,811 | 1,057,474 |      2,572 |       5,689 |          1.579 |       1.566 |       1.784 |           77.7 |        77.9 |      196.8 |
+|     2 |       1 |    2,884,829 | 1,044,519 |      2,312 |       5,509 |          2.252 |       2.171 |       2.415 |           77.5 |        77.5 |      196.8 |
+|     4 |       1 |    5,769,087 | 1,023,626 |      1,754 |       5,025 |          3.360 |       3.233 |       3.701 |           77.4 |        77.6 |      196.8 |
+|     0 |       4 |            0 | 1,072,858 |      2,951 |       5,934 |          1.054 |       1.053 |       1.092 |           76.9 |        77.2 |      196.8 |
+|     1 |       4 |    1,441,811 | 1,057,474 |      2,572 |       5,689 |          1.598 |       1.545 |       1.609 |           79.6 |        80.0 |      196.8 |
+|     2 |       4 |    2,884,829 | 1,044,519 |      2,312 |       5,509 |          2.142 |       2.118 |       2.158 |           79.8 |        79.9 |      196.8 |
+|     4 |       4 |    5,769,087 | 1,023,626 |      1,754 |       5,025 |          3.232 |       3.188 |       3.253 |           79.8 |        80.6 |      196.8 |
+
+Its growth against the mask records, for the whole run and for the mask’s own cost (the run without a mask taken off), without a timing verdict:
+
+| threads | no_mask_seconds | one_x_seconds | records_ratio_2x | records_ratio_4x | time_exponent_2x | time_exponent_4x | mask_cost_exponent_2x | mask_cost_exponent_4x | rss_ratio_4x |
+|--------:|----------------:|--------------:|-----------------:|-----------------:|-----------------:|-----------------:|----------------------:|----------------------:|-------------:|
+|       1 |           1.029 |         1.579 |            2.001 |                2 |            0.512 |            0.577 |                 1.153 |                 0.931 |        0.996 |
+|       4 |           1.054 |         1.598 |            2.001 |                2 |            0.423 |            0.594 |                 1.000 |                 1.001 |        1.003 |
 
 ## Findings
 
-Every observation is within the ceiling and none spills. The 1× runs on one
-thread take at least 5 s and no time exponent is above 1.25. The render
-enforces all of this. It also stops unless the number of rows, the counted
-bases and the mismatches of a region are the same in every repetition and at
-both thread settings. This report does not check the counts themselves; the
-SQL tests do, against counts derived by hand and against the same counts made
-independently in SQL.
+Every observation is within the ceiling and none spills. The 1× runs of the
+two alignment series on one thread take at least 5 s and none of their time
+exponents is above 1.25. The render enforces all of this. It also stops
+unless the number of rows, the counted bases and the mismatches of a region
+are the same in every repetition and at both thread settings. This report
+does not check the counts themselves; the SQL tests do, against counts
+derived by hand and against the same counts made independently in SQL.
+
+Mask records alone: reading all 5,769,087
+records of the contig costs 2.33 s
+on one thread (2.48 million records a
+second) on top of the 1.03 s of the fixed
+alignments, and peak RSS is 76.2 MiB without a mask
+and 77.4 MiB with all records: the mask window is
+1 MiB whatever the mask holds. The whole-run time exponents at one thread are
+0.51 and
+0.58, and
+the mask’s own cost grows with exponents
+1.15 and
+0.93.
+These times carry no verdict, because the 1× run takes
+1.58 s.
 
 With the mask on one thread, the whole contig takes
-66 s for 7,053,095,954
-counted bases, which is 107 million counted bases
-a second, at 83.5 MiB peak RSS. The 1× region takes
-16.6 s at 67.6 MiB.
-Peak RSS at 4× is 1.24
+61.1 s for 7,053,095,954
+counted bases, which is 115 million counted bases
+a second, at 83.2 MiB peak RSS. The 1× region takes
+15.7 s at 67.7 MiB.
+Peak RSS at 4× is 1.23
 times the 1× value, and the largest peak RSS of any run is
-86.6 MiB against the ceiling of 197 MiB.
+86.4 MiB against the ceiling of 196.8 MiB.
 
 The difference between the sizes in peak RSS is htslib’s, not the function’s.
 The decoder holds the reference of the CRAM slice in hand, and the widest
@@ -167,8 +212,7 @@ the number of alignments.
 The operating scale this report supports is what it measures: one contig of
 one 30× short-read sample, read from CRAM, with a mask of
 5,769,087 records. It does not measure
-a whole genome in one call, BAM input, unsorted input, long reads, or a mask
-whose records are doubled alone.
+a whole genome in one call, BAM input, unsorted input or long reads.
 
 ## What the counts say
 
