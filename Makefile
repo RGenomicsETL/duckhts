@@ -299,6 +299,10 @@ test-roh-counts-staging:
 test-roh-counts-validation-staging:
 	Rscript test/scripts/test_roh_counts_validation_staging.R
 
+.PHONY: test-bam-mismatch-staging
+test-bam-mismatch-staging:
+	Rscript test/scripts/test_bam_mismatch_staging.R
+
 # Maintainer check: read_bam against samtools over every indexed fixture, index
 # variant and region list. It needs samtools and a built release extension.
 .PHONY: test-bam-scan-matrix

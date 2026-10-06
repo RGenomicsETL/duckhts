@@ -1,0 +1,378 @@
+---
+title: "Base mismatch count scaling"
+output:
+  github_document:
+    html_preview: false
+    pandoc_args: ["--wrap=preserve", "--columns=400"]
+---
+
+This report gives the 1×/2×/4× scaling evidence `STYLE.md` asks for, for
+`duckhts_bam_mismatch_counts()`. The function reads alignments once and counts
+their aligned bases against the reference by mate, cycle, base quality and
+substitution. Its state is meant to be fixed, so the memory verdict is the main
+one. No earlier report measures this function; this is its first baseline.
+
+## Workload
+
+The workload is real and public: chr1, the largest contig, of the
+1000 Genomes 30× CRAM of HG00403, staged as a CRAM slice (registry artifact
+`bam_mismatch_hg00403_chr1_cram`), with every chr1 record of the phased
+1000 Genomes panel as the mask (`bam_mismatch_chr1_mask_bcf`) and the
+registered GRCh38 FASTA as the reference (`liftover_grch38_fasta`).
+`benchmarks/bam_mismatch_stage.R` stages both derived files and checks them
+against their registered identities. This report checks them again before it
+measures, and it checks the reference against its registered size and MD5.
+Those checks read all three files in full, so every measured run reads from a
+warm page cache.
+
+There are two growth dimensions: the aligned bases and the mask records.
+
+- The `mask` series doubles both together. Its 1× and 2× regions end at the
+  25% and 50% quantiles of the alignment start positions of the slice, and its
+  4× region is the whole contig. The mask records under a region grow with it.
+- The `no mask` series reads the same regions without a mask, so the aligned
+  bases grow alone.
+
+The mask records are not doubled alone. The difference between the two series
+is the whole cost of the mask, and the report gives it at each size.
+
+The cuts and the input denominators of each region are computed at render
+time. That is untimed staging, as is the one-time staging of the two files.
+
+Every observation is one fresh DuckDB CLI process under `/usr/bin/time`. The
+JSON profiler gives the query latency and DuckDB's peak buffer and temporary
+bytes, and `/usr/bin/time` gives the peak RSS. The host is shared, so the
+render command pins the processes to eight cores and each measured process
+runs at scheduling priority −15 (`nice`), which makes other load on those
+cores yield to it; the host load at the start is recorded, and the spread of
+the repetitions shows what interference remained. `max_temp_directory_size` is
+zero, so a spill fails the render; DuckDB's memory limit is left at its
+default, which the report records. Each cell has three repetitions at one
+thread and at four threads, run in an order that alternates sizes. The
+function has one worker, so the thread setting should not change it, and the
+four-thread cells show whether that holds for time and memory. Each query
+reduces the rows of the function to their number, the counted bases and the
+mismatches, so every row is produced and consumed. The R wrapper only builds
+this SQL call; it is not timed here.
+
+## Budget, declared before measuring
+
+The overhead is the median peak RSS of three empty runs that start the CLI,
+load the extension and scan nothing.
+
+The ceiling is overhead + 3 × the live state. It is the same at every size,
+and it is a gate: the render stops if any observation exceeds it or spills.
+The live state is:
+
+- the counters: 3 mates × 1,001 cycles × 95 base qualities × 16 substitutions
+  × 8 bytes = 36,516,480 bytes;
+- one reference window of 1 MiB and its mask of 1 MiB;
+- htslib's state for the three files: the CRAM container in work with its
+  decoded alignments, the reference of that container's span, the indexes and
+  the file buffers. 16 MiB is allowed for it. The function sets no decoder
+  threads, and for sorted input without them htslib's `cram_get_ref()` loads
+  the reference of one slice's span, not the contig.
+
+That is 52.8 MiB, so the ceiling is overhead + 158.5 MiB.
+
+The render also stops if a time exponent is above 1.25 at either doubling, or
+if the 1× run on one thread takes less than 5 s, which is the least that
+`STYLE.md` accepts for a timing verdict.
+
+``` sh
+taskset -c 8-15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_bam_mismatch_counts.Rmd")'
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r benchmark, echo=FALSE, message=FALSE}
+stopifnot(requireNamespace("duckhtsbench", quietly = TRUE),
+          requireNamespace("jsonlite", quietly = TRUE),
+          requireNamespace("knitr", quietly = TRUE))
+Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath(
+  "r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+extension <- normalizePath(Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension"),
+                           mustWork = TRUE)
+duckdb_cli <- Sys.getenv("DUCKDB_CLI", Sys.which("duckdb"))
+stopifnot(nzchar(duckdb_cli), file.exists("/usr/bin/time"))
+duckdb_runtime <- system2(duckdb_cli, "--version", stdout = TRUE)[[1L]]
+revision <- system2("git", c("rev-parse", "HEAD"), stdout = TRUE)
+src_tree <- system2("git", c("rev-parse", "HEAD:src"), stdout = TRUE)
+if (system2("git", c("diff", "--quiet", "HEAD", "--", "src"), stdout = FALSE, stderr = FALSE) != 0L) {
+  stop("Build source must match the recorded HEAD")
+}
+host_load <- sub(".*load average: ", "", system2("uptime", stdout = TRUE))
+quote_literal <- function(value) paste0("'", gsub("'", "''", value, fixed = TRUE), "'")
+
+source("benchmarks/bam_mismatch_stage.R")
+slice_id <- "bam_mismatch_hg00403_chr1_cram"
+mask_id <- "bam_mismatch_chr1_mask_bcf"
+slice_identity <- bam_mismatch_check_staged(slice_id, extension)
+mask_identity <- bam_mismatch_check_staged(mask_id, extension)
+cram <- duckhtsbench::duckhts_bench_artifact_path(slice_id)
+mask <- duckhtsbench::duckhts_bench_artifact_path(mask_id)
+reference <- duckhtsbench::duckhts_bench_artifact_path("liftover_grch38_fasta")
+duckhtsbench::duckhts_bench_validate_identity("liftover_grch38_fasta", reference)
+# The slice is one whole contig; its length comes from the reference index.
+contig <- bam_mismatch_registry_row(slice_id)$fields[["region"]]
+reference_index <- utils::read.delim(paste0(reference, ".fai"), header = FALSE)
+contig_length <- reference_index[[2L]][reference_index[[1L]] == contig]
+stopifnot(length(contig_length) == 1L, identical(bam_mismatch_registry_row(mask_id)$fields[["contig"]], contig))
+# The CRAM index lists each slice's start and reference span. htslib's decoder
+# holds the reference of the slice in hand, so the widest span bounds that part
+# of the live state.
+slices <- utils::read.delim(gzfile(paste0(cram, ".crai")), header = FALSE,
+                            col.names = c("sequence", "start", "span", "container", "slice", "size"))
+widest_slice <- slices[which.max(slices$span), ]
+widest_slice_mib <- widest_slice$span / 2^20
+
+# One untimed query in its own CLI process; its rows come back as numbers.
+query_untimed <- function(sql) {
+  output <- system2(duckdb_cli, c("-unsigned", "-csv"),
+                    input = c(sprintf("LOAD %s;", quote_literal(extension)), sql), stdout = TRUE)
+  utils::read.csv(text = output, colClasses = "numeric")
+}
+
+# Run one SQL body in a fresh CLI process with the given threads and spill
+# forbidden; the last statement's single row is returned with latency and memory.
+run_fresh <- function(query, threads) {
+  scratch <- tempfile("bam-mismatch-scaling-")
+  dir.create(scratch)
+  on.exit(unlink(scratch, recursive = TRUE), add = TRUE)
+  sql_path <- file.path(scratch, "query.sql")
+  result_path <- file.path(scratch, "result.csv")
+  profile_path <- file.path(scratch, "profile.json")
+  time_path <- file.path(scratch, "time.tsv")
+  writeLines(c(
+    sprintf("SET threads = %d;", threads),
+    "SET max_temp_directory_size = '0KiB';",
+    sprintf("LOAD %s;", quote_literal(extension)),
+    "PRAGMA enable_profiling = 'json';",
+    sprintf("PRAGMA profiling_output = %s;", quote_literal(profile_path)),
+    sprintf("COPY (%s) TO %s (HEADER);", query, quote_literal(result_path)),
+    "PRAGMA disable_profiling;"
+  ), sql_path)
+  status <- system2("/usr/bin/time", c("-f", shQuote("%M\t%e"), "-o", shQuote(time_path),
+                                       "nice", "-n", "-15", shQuote(duckdb_cli), "-unsigned", "-batch", "-bail"),
+                    stdin = sql_path, stdout = FALSE, stderr = FALSE)
+  if (status != 0L) stop("DuckDB CLI failed (status ", status, ")")
+  profile <- jsonlite::fromJSON(profile_path, simplifyVector = TRUE)
+  timing <- utils::read.delim(time_path, header = FALSE, col.names = c("max_rss_kib", "process_seconds"))
+  data.frame(utils::read.csv(result_path, colClasses = "character"),
+             seconds = as.numeric(profile$latency), max_rss_kib = timing$max_rss_kib[[1L]],
+             peak_buffer_bytes = as.numeric(profile$system_peak_buffer_memory),
+             peak_temp_bytes = as.numeric(profile$system_peak_temp_dir_size))
+}
+
+# Untimed staging: the region ends at which a quarter and a half of the
+# alignments of the slice have started, and what each region holds.
+cuts <- query_untimed(sprintf(
+  "SELECT quantile_disc(POS, 0.25)::BIGINT AS quarter, quantile_disc(POS, 0.5)::BIGINT AS half FROM read_bam(%s, reference := %s);",
+  quote_literal(cram), quote_literal(reference)))
+stopifnot(nrow(cuts) == 1L, cuts$quarter < cuts$half, cuts$half < contig_length)
+inputs <- data.frame(scale = c(1L, 2L, 4L), region_end = c(cuts$quarter, cuts$half, contig_length))
+inputs$region <- sprintf("%s:1-%s", contig, format(inputs$region_end, scientific = FALSE, trim = TRUE))
+region_inputs <- do.call(rbind, lapply(inputs$region, function(region) {
+  alignments <- query_untimed(sprintf(
+    "SELECT count(*) AS alignments, sum(len(SEQ))::BIGINT AS stored_bases FROM read_bam(%s, reference := %s, region := %s);",
+    quote_literal(cram), quote_literal(reference), quote_literal(region)))
+  records <- query_untimed(sprintf("SELECT count(*) AS mask_records FROM read_bcf(%s, region := %s);",
+                                   quote_literal(mask), quote_literal(region)))
+  cbind(alignments, records)
+}))
+inputs <- cbind(inputs, region_inputs)
+# htslib hands the function each alignment as a BAM record: four bits for a
+# base and eight for its quality.
+inputs$decoded_base_mib <- inputs$stored_bases * 1.5 / 2^20
+memory_limit <- system2(duckdb_cli, c("-list", "-noheader"),
+                        input = "SELECT current_setting('memory_limit');", stdout = TRUE)[[1L]]
+
+count_query <- function(region, masked) sprintf(paste(
+  "SELECT count(*) AS output_rows, sum(bases)::BIGINT AS bases,",
+  "sum(bases) FILTER (WHERE reference_base != read_base)::BIGINT AS mismatches",
+  "FROM duckhts_bam_mismatch_counts(%s, %s, region := %s%s)"),
+  quote_literal(cram), quote_literal(reference), quote_literal(region),
+  if (masked) paste0(", mask := ", quote_literal(mask)) else "")
+
+empty_runs <- vapply(seq_len(3L), function(run) run_fresh("SELECT 1 AS output_rows", 1L)$max_rss_kib, numeric(1L))
+overhead_mib <- median(empty_runs) / 1024
+live_state_bytes <- 3 * 1001 * 95 * 16 * 8 + 2 * 2^20 + 16 * 2^20
+budget_mib <- overhead_mib + 3 * live_state_bytes / 2^20
+
+observations <- list()
+for (repetition in 1:3) {
+  order <- if (repetition %% 2L == 1L) 1:3 else 3:1
+  for (threads in c(1L, 4L)) {
+    for (masked in c(TRUE, FALSE)) {
+      for (k in order) {
+        observed <- run_fresh(count_query(inputs$region[[k]], masked), threads)
+        observations[[length(observations) + 1L]] <- data.frame(
+          series = if (masked) "mask" else "no mask", scale = inputs$scale[[k]], region = inputs$region[[k]],
+          threads = threads, repetition = repetition, observed, budget_mib = budget_mib,
+          stringsAsFactors = FALSE)
+      }
+    }
+  }
+}
+runs <- do.call(rbind, observations)
+for (column in c("output_rows", "bases", "mismatches")) runs[[column]] <- as.numeric(runs[[column]])
+stopifnot(all(runs$peak_temp_bytes == 0), all(runs$bases > 0))
+write.csv(runs, "benchmarks/benchmark_bam_mismatch_counts_runs.csv", row.names = FALSE)
+over_budget <- runs[runs$max_rss_kib / 1024 > runs$budget_mib, ]
+if (nrow(over_budget)) {
+  print(over_budget[c("series", "scale", "threads", "max_rss_kib", "budget_mib")])
+  stop("observations exceed the declared memory budget", call. = FALSE)
+}
+
+cells <- split(runs, list(runs$scale, runs$threads, runs$series), drop = TRUE)
+summary <- do.call(rbind, lapply(cells, function(cell) {
+  # Every repetition of a cell must count the same bases.
+  stopifnot(length(unique(cell$bases)) == 1L, length(unique(cell$mismatches)) == 1L,
+            length(unique(cell$output_rows)) == 1L)
+  data.frame(series = cell$series[[1L]], scale = cell$scale[[1L]], threads = cell$threads[[1L]],
+             bases = cell$bases[[1L]], mismatches = cell$mismatches[[1L]], output_rows = cell$output_rows[[1L]],
+             median_seconds = median(cell$seconds), min_seconds = min(cell$seconds),
+             max_seconds = max(cell$seconds),
+             median_rss_mib = round(median(cell$max_rss_kib) / 1024, 1),
+             max_rss_mib = round(max(cell$max_rss_kib) / 1024, 1),
+             max_buffer_mib = round(max(cell$peak_buffer_bytes) / 2^20, 1),
+             budget_mib = round(cell$budget_mib[[1L]], 1), stringsAsFactors = FALSE)
+}))
+summary <- summary[order(summary$series, summary$threads, summary$scale), ]
+rownames(summary) <- NULL
+# The three numbers of a query must be the same at both thread settings.
+counted <- c("series", "scale", "bases", "mismatches", "output_rows")
+stopifnot(isTRUE(all.equal(summary[summary$threads == 1L, counted], summary[summary$threads == 4L, counted],
+                           check.attributes = FALSE)))
+
+# The growth is measured against the bases counted, which the quantile cuts
+# double only approximately.
+exponents <- do.call(rbind, lapply(split(summary, list(summary$threads, summary$series), drop = TRUE), function(s) {
+  s <- s[order(s$scale), ]
+  growth <- function(low, high) {
+    log(s$median_seconds[[high]] / s$median_seconds[[low]]) / log(s$bases[[high]] / s$bases[[low]])
+  }
+  data.frame(series = s$series[[1L]], threads = s$threads[[1L]], one_x_seconds = s$median_seconds[[1L]],
+             bases_ratio_2x = s$bases[[2L]] / s$bases[[1L]], bases_ratio_4x = s$bases[[3L]] / s$bases[[2L]],
+             time_exponent_2x = growth(1L, 2L), time_exponent_4x = growth(2L, 3L),
+             rss_ratio_2x = s$median_rss_mib[[2L]] / s$median_rss_mib[[1L]],
+             rss_ratio_4x = s$median_rss_mib[[3L]] / s$median_rss_mib[[1L]], stringsAsFactors = FALSE)
+}))
+rownames(exponents) <- NULL
+one_thread <- summary[summary$threads == 1L, ]
+masked_one <- one_thread[one_thread$series == "mask", ]
+unmasked_one <- one_thread[one_thread$series == "no mask", ]
+stopifnot(identical(masked_one$scale, unmasked_one$scale), identical(masked_one$scale, inputs$scale),
+          all(one_thread$median_seconds[one_thread$scale == 1L] >= 5),
+          all(exponents$time_exponent_2x <= 1.25), all(exponents$time_exponent_4x <= 1.25))
+mask_cost <- data.frame(
+  scale = masked_one$scale, mask_records = inputs$mask_records,
+  seconds_with_mask = masked_one$median_seconds, seconds_without_mask = unmasked_one$median_seconds,
+  mask_seconds = masked_one$median_seconds - unmasked_one$median_seconds,
+  bases_left_out = unmasked_one$bases - masked_one$bases,
+  rss_mib_with_mask = masked_one$median_rss_mib, rss_mib_without_mask = unmasked_one$median_rss_mib)
+largest <- masked_one[masked_one$scale == 4L, ]
+megabases_per_second <- largest$bases / largest$median_seconds / 1e6
+
+# Untimed: the counts of the whole contig by base quality, with the mask.
+by_quality <- query_untimed(sprintf(paste(
+  "SELECT base_quality, sum(bases)::BIGINT AS bases,",
+  "coalesce(sum(bases) FILTER (WHERE reference_base != read_base), 0)::BIGINT AS mismatches",
+  "FROM duckhts_bam_mismatch_counts(%s, %s, region := %s, mask := %s) GROUP BY base_quality ORDER BY base_quality;"),
+  quote_literal(cram), quote_literal(reference), quote_literal(contig), quote_literal(mask)))
+stopifnot(sum(by_quality$bases) == largest$bases, sum(by_quality$mismatches) == largest$mismatches)
+by_quality$mismatch_rate <- by_quality$mismatches / by_quality$bases
+by_quality$share_of_bases <- by_quality$bases / sum(by_quality$bases)
+by_quality$share_of_mismatches <- by_quality$mismatches / sum(by_quality$mismatches)
+```
+
+Source revision: `r revision`; `src` tree `r src_tree`. DuckDB runtime: `r duckdb_runtime` (CLI). Extension SHA-256: `r strsplit(system2("sha256sum", extension, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`. Host load at start: `r host_load`. DuckDB memory limit: `r memory_limit` (the default); temporary directory limit: 0.
+
+Staged inputs: the slice has `r format(slice_identity$alignments, big.mark = ",")` alignments (position sum `r format(slice_identity$position_sum, scientific = FALSE)`, `r format(slice_identity$base_sum, scientific = FALSE, big.mark = ",")` stored bases) in `r format(nrow(slices), big.mark = ",")` CRAM slices, of which the widest starts at `r format(widest_slice$start, big.mark = ",")` and spans `r format(widest_slice$span, big.mark = ",")` reference bases; the mask has `r format(mask_identity$records, big.mark = ",")` records.
+
+Overhead: `r round(overhead_mib, 1)` MiB. Ceiling: `r round(budget_mib, 1)` MiB.
+
+## Inputs of each region
+
+`alignments` and `stored_bases` are what the region selects before the
+function's own filters; `decoded_base_mib` is their bases and qualities as
+htslib hands them over, at 1.5 bytes for each stored base. `mask_records` are
+the mask records that the region selects.
+
+```{r inputs, echo=FALSE}
+knitr::kable(inputs[c("scale", "region", "alignments", "stored_bases", "decoded_base_mib", "mask_records")],
+             digits = 1, format.args = list(big.mark = ","))
+```
+
+## Measurements
+
+`bases`, `mismatches` and `output_rows` are the result of the query. Times are
+the query latency of three repetitions.
+
+```{r summary, echo=FALSE}
+knitr::kable(summary, digits = 3, format.args = list(big.mark = ","))
+```
+
+Growth of the median time against the bases counted (an exponent of 1 is linear), and peak-RSS ratios to 1×:
+
+```{r exponents, echo=FALSE}
+knitr::kable(exponents, digits = 3)
+```
+
+The cost of the mask on one thread, as the difference of the two series:
+
+```{r mask-cost, echo=FALSE}
+knitr::kable(mask_cost, digits = 3, format.args = list(big.mark = ","))
+```
+
+## Findings
+
+Every observation is within the ceiling and none spills. The 1× runs on one
+thread take at least 5 s and no time exponent is above 1.25. The render
+enforces all of this. It also stops unless the number of rows, the counted
+bases and the mismatches of a region are the same in every repetition and at
+both thread settings. This report does not check the counts themselves; the
+SQL tests do, against counts derived by hand and against the same counts made
+independently in SQL.
+
+With the mask on one thread, the whole contig takes
+`r round(largest$median_seconds, 1)` s for `r format(largest$bases, big.mark = ",")`
+counted bases, which is `r round(megabases_per_second)` million counted bases
+a second, at `r largest$median_rss_mib` MiB peak RSS. The 1× region takes
+`r round(masked_one$median_seconds[[1L]], 1)` s at `r masked_one$median_rss_mib[[1L]]` MiB.
+Peak RSS at 4× is `r round(exponents$rss_ratio_4x[exponents$threads == 1L & exponents$series == "mask"], 2)`
+times the 1× value, and the largest peak RSS of any run is
+`r max(summary$max_rss_mib)` MiB against the ceiling of `r round(budget_mib, 1)` MiB.
+
+The difference between the sizes in peak RSS is htslib's, not the function's.
+The decoder holds the reference of the CRAM slice in hand, and the widest
+slice of this file spans `r format(widest_slice$span, big.mark = ",")` bases
+(`r round(widest_slice_mib, 1)` MiB of reference) from position
+`r format(widest_slice$start, big.mark = ",")`, over the sparse region of the
+contig. Only the whole-contig runs read that slice. That one span is above the
+16 MiB the budget allows for all of htslib's state, so the allowance was too
+small for this file; the ceiling, which is what gates the render, held with a
+wide margin. The step depends on how the file's slices are laid out, not on
+the number of alignments.
+
+The operating scale this report supports is what it measures: one contig of
+one 30× short-read sample, read from CRAM, with a mask of
+`r format(mask_identity$records, big.mark = ",")` records. It does not measure
+a whole genome in one call, BAM input, unsorted input, long reads, or a mask
+whose records are doubled alone.
+
+## What the counts say
+
+The whole contig with the mask, by base quality, from one untimed run:
+
+```{r quality, echo=FALSE}
+knitr::kable(by_quality, digits = c(0, 0, 0, 6, 4, 4), format.args = list(big.mark = ","))
+```
+
+The mask leaves out every position of a panel record, and the sample is one of
+the panel's samples. So these mismatches are errors of the read, the library
+or the alignment, together with the variants of the sample that the panel
+does not hold.

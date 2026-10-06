@@ -1,5 +1,17 @@
 # duckhtsbench 0.0.0.9001
 
+- register the `bam-mismatch` workload for
+  `benchmark_bam_mismatch_counts.Rmd`: `bam_mismatch_hg00403_chr1_cram`, the
+  chr1 alignments of the public 30× CRAM `ancestry_30x_hg00403` as a CRAM
+  slice; `bam_mismatch_panel_chr1_source`, the chr1 file of the phased
+  1000 Genomes panel; and `bam_mismatch_chr1_mask_bcf`, its records without
+  genotypes as an indexed BCF. `benchmarks/bam_mismatch_stage.R` stages the two
+  derived files with the samtools and bcftools of RBCFTools, reading each
+  source from its cached copy or, without one, from its registered URL. A
+  slice is pinned by its alignment count, position sum and stored-base sum, and
+  a mask by its record count and position sum; staging publishes nothing when
+  they differ. `make test-bam-mismatch-staging` is the network-free test.
+
 - register `roh_counts_validation_chr20_genotypes`: FORMAT/GT genotypes of
   NA18507, HG00403 and HG00188 at the chr20 ROH evaluation sites, derived from
   `roh_ancestry_chr20_source` and `roh_ancestry_chr20_af_sites` by

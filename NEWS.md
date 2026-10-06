@@ -15,6 +15,14 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   compared byte for byte, and a contig that the reference or the mask does not
   know is an error. SQL tests check the function against hand-derived counts
   and against the same counts made independently in SQL.
+  `benchmarks/benchmark_bam_mismatch_counts.md` measures it on chr1 of a
+  public 30× CRAM with the chr1 panel records as the mask: 7.05 billion
+  counted bases in 66 s on one thread (107 million a second), time linear in
+  the bases, and peak RSS from 67.6 MiB at a quarter of the contig to 83.5 MiB
+  at the whole contig, where the step is htslib holding the reference of one
+  18 Mb CRAM slice over the sparse 1q12 region. The two inputs are registry
+  artifacts staged by `benchmarks/bam_mismatch_stage.R` with the RBCFTools
+  binaries, with a network-free staging test (`make test-bam-mismatch-staging`).
 
 - The function reference now states how each function compares contig names
   across two sources, under "Contig names": `duckhts_roh()`,

@@ -2198,7 +2198,7 @@ The contig names of the alignment header, the reference and the mask are compare
 
 ### Limits
 
-One worker. Memory is fixed: 36.5 MB of counters, one reference window of 1 MiB with its mask, and the alignment in hand. A cycle above 1000 is counted as 1000 and a base quality above 93 as 93. An alignment that spans more than 64 MiB of reference is an error. Alignments are expected in coordinate order; an unsorted file is counted correctly but fetches a reference window for each alignment.
+One worker. Memory is fixed: 36.5 MB of counters, one reference window of 1 MiB with its mask, and the alignment in hand, plus htslib's state for the file. For CRAM that includes the reference of the slice being decoded; a slice over a sparse region can span many megabases. A cycle above 1000 is counted as 1000 and a base quality above 93 as 93. An alignment that spans more than 64 MiB of reference is an error. Alignments are expected in coordinate order; an unsorted file is counted correctly but fetches a reference window for each alignment.
 
 ### Examples
 
