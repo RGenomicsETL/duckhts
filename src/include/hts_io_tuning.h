@@ -4,6 +4,7 @@
 #include <htslib/faidx.h>
 #include <htslib/hfile.h>
 #include <htslib/hts.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* htslib exports this function but declares it only inside hwrite() in the
@@ -45,6 +46,28 @@ static inline int duckhts_index_save_remote_flag(const char *path, const char *i
 
 static inline int duckhts_is_remote_path(const char *path) {
     return path && path[0] != '\0' && hisremote(path);
+}
+
+/* The reference locator a CRAM decoder takes when the FASTA index is not the
+ * adjacent .fai: "reference" HTS_IDX_DELIM "index", as hts_set_fai_filename()
+ * and CRAM_OPT_REFERENCE read it. Without an index path the reference path
+ * itself is the locator. The result is owned by the caller (malloc family);
+ * NULL means out of memory. */
+static inline char *duckhts_reference_locator(const char *reference, const char *index_path) {
+    const size_t reference_length = strlen(reference);
+    const size_t delimiter_length = sizeof(HTS_IDX_DELIM) - 1u;
+    const size_t index_length = index_path ? strlen(index_path) : 0u;
+    char *locator;
+    if (reference_length > SIZE_MAX - delimiter_length - index_length - 1u) return NULL;
+    locator = (char *)malloc(reference_length + (index_path ? delimiter_length + index_length : 0u) + 1u);
+    if (!locator) return NULL;
+    memcpy(locator, reference, reference_length);
+    if (index_path) {
+        memcpy(locator + reference_length, HTS_IDX_DELIM, delimiter_length);
+        memcpy(locator + reference_length + delimiter_length, index_path, index_length);
+    }
+    locator[reference_length + (index_path ? delimiter_length + index_length : 0u)] = '\0';
+    return locator;
 }
 
 static inline int duckhts_remote_block_size_bytes(duckhts_hts_io_profile_t profile) {

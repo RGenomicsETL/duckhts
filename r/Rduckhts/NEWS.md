@@ -21,7 +21,10 @@ Preview of 2.0.0, still in development. The sections below describe what 2.0.0 w
 - `rduckhts_bam_mismatch_counts()` stops with an error when a kept alignment
   ends past the length of its contig in the reference, instead of leaving the
   bases past the end out of the counts; the reference does not match the
-  alignment header in that case.
+  alignment header in that case. For CRAM input, `reference_index_path` now
+  reaches the CRAM decoder too, so a FASTA index that is not next to the FASTA
+  is read and none is built beside it; the CRAM fixture (`bam_mismatch.cram`)
+  is bundled for that test.
 
 - The function reference states, under "Contig names", how each function
   compares contig names across two sources, including the cases that return no

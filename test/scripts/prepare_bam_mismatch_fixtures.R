@@ -131,6 +131,7 @@ run("bcftools", c("view", "--no-version", "-Ob", "-o", paste0(prefix, ".mask.bcf
 run("bcftools", c("index", "-f", paste0(prefix, ".mask.bcf")))
 write_mask(paste0(prefix, ".other_names.vcf.gz"), paste0("chr", names(reference)), "chrref1")
 
-# The R package tests read the BAM, the reference and the BCF mask.
-package_files <- paste0(prefix, c(".fa", ".fa.fai", ".bam", ".bam.bai", ".mask.bcf", ".mask.bcf.csi"))
+# The R package tests read the BAM, the CRAM, the reference and the BCF mask.
+package_files <- paste0(prefix, c(".fa", ".fa.fai", ".bam", ".bam.bai", ".cram", ".cram.crai",
+                                  ".mask.bcf", ".mask.bcf.csi"))
 stopifnot(all(file.copy(package_files, package_dir, overwrite = TRUE)))

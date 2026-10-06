@@ -41,7 +41,13 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
 - `duckhts_bam_mismatch_counts()` stops with an error when a kept alignment
   ends past the length of its contig in the reference, instead of leaving the
   bases past the end out of the counts; the reference does not match the
-  alignment header in that case.
+  alignment header in that case. For CRAM input, `reference_index_path` now
+  reaches the CRAM decoder too, through the same `reference##idx##index`
+  locator that `duckhts_somalier_bam_counts()` builds, so a FASTA index that is
+  not next to the FASTA is read and none is built beside it. The catalog's
+  limits state the most one alignment can need: an alignment that spans more
+  reference than the 1 MiB window grows the window and its mask to its span,
+  up to 64 MiB each.
 
 - Added `duckhts_roh_ancestry()` for per-sample ancestry-weighted allele frequencies from long reference and proportion relations, with allele-orientation handling and optional frequency clamping.
 

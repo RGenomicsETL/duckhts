@@ -72,7 +72,10 @@ The live state is:
 
 - the counters: 3 mates × 1,001 cycles × 95 base qualities × 16 substitutions
   × 8 bytes = 36,516,480 bytes;
-- one reference window of 1 MiB and its mask of 1 MiB;
+- one reference window of 1 MiB and its mask of 1 MiB. An alignment that
+  spans more reference than that grows both to its span, up to the 64 MiB
+  limit; the render checks from the CIGARs that no alignment of this file
+  spans more than 1 MiB, so the window stays at 1 MiB;
 - htslib's state for the three files: the CRAM container in work with its
   decoded alignments, the reference of that container's span, the indexes and
   the file buffers. 16 MiB is allowed for it. The function sets no decoder
@@ -153,6 +156,12 @@ query_untimed <- function(sql) {
                     input = c(sprintf("LOAD %s;", quote_literal(extension)), sql), stdout = TRUE)
   utils::read.csv(text = output, colClasses = "numeric")
 }
+# The window stays at its 1 MiB floor only while no alignment spans more.
+long_spans <- query_untimed(sprintf(paste(
+  "SELECT count(*) AS alignments, coalesce(max(cigar_reference_length(CIGAR)), 0) AS widest_span",
+  "FROM read_bam(%s, reference := %s) WHERE cigar_reference_length(CIGAR) > %d;"),
+  quote_literal(cram), quote_literal(reference), 2^20))
+stopifnot(long_spans$alignments == 0)
 
 # Run one SQL body in a fresh CLI process with the given threads and spill
 # forbidden; the last statement's single row is returned with latency and memory.

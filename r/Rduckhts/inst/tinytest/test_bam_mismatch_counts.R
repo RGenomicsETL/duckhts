@@ -45,6 +45,20 @@ test_bam_mismatch_counts <- function() {
                "one non-missing character string")
   expect_error(rduckhts_bam_mismatch_counts(con, bam, extdata("fixture_ref.fa")),
                "reference has no contig named ref1")
+
+  # CRAM gives the BAM's counts, also with a reference whose index is not next
+  # to it: the CRAM decoder reads the index named by reference_index_path and
+  # builds none beside the FASTA.
+  cram <- extdata("bam_mismatch.cram")
+  expect_equal(rduckhts_bam_mismatch_counts(con, cram, reference, mask = mask), counts)
+  moved <- file.path(tempfile("reference-"), "reference.fa")
+  dir.create(dirname(moved))
+  on.exit(unlink(dirname(moved), recursive = TRUE), add = TRUE)
+  expect_true(file.copy(reference, moved))
+  explicit <- rduckhts_bam_mismatch_counts(con, cram, moved, mask = mask,
+                                           reference_index_path = paste0(reference, ".fai"))
+  expect_equal(explicit, counts)
+  expect_identical(list.files(dirname(moved)), "reference.fa")
 }
 
 test_bam_mismatch_counts()

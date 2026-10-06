@@ -19,6 +19,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/tbx.h>
 #include <htslib/vcf.h>
 
+#include "include/hts_io_tuning.h"
 #include "include/region_list.h"
 
 enum {
@@ -454,6 +455,7 @@ static int count_alignments(const mismatch_bind_t *bind, uint64_t *cells, char *
     hts_itr_t *iterator = NULL;
     bam1_t *alignment = NULL;
     char **regions = NULL;
+    char *reference_locator = NULL;
     unsigned int region_count = 0;
     mismatch_mask_t mask;
     mismatch_window_t window;
@@ -471,7 +473,14 @@ static int count_alignments(const mismatch_bind_t *bind, uint64_t *cells, char *
         snprintf(error, error_size, "duckhts_bam_mismatch_counts: cannot open %s", bind->path);
         goto cleanup;
     }
-    if (hts_set_fai_filename(file, bind->reference) != 0) {
+    /* The CRAM decoder reads the FASTA index from the locator, so an index
+     * that is not the adjacent .fai travels with the reference path. */
+    reference_locator = duckhts_reference_locator(bind->reference, bind->reference_index_path);
+    if (!reference_locator) {
+        snprintf(error, error_size, "duckhts_bam_mismatch_counts: out of memory");
+        goto cleanup;
+    }
+    if (hts_set_fai_filename(file, reference_locator) != 0) {
         snprintf(error, error_size, "duckhts_bam_mismatch_counts: cannot use reference %s", bind->reference);
         goto cleanup;
     }
@@ -543,6 +552,7 @@ cleanup:
     if (window.fai) fai_destroy(window.fai);
     mask_close(&mask);
     free(regions);
+    free(reference_locator);
     if (iterator) hts_itr_destroy(iterator);
     if (index) hts_idx_destroy(index);
     if (alignment) bam_destroy1(alignment);

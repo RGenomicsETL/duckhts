@@ -18,6 +18,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/sam.h>
 
 #include "include/bam_site_counts.h"
+#include "include/hts_io_tuning.h"
 #include "duckhts_registration.h"
 #include "duckhts_somalier_panel_sql.h"
 
@@ -422,41 +423,10 @@ static bool set_remote_tuning(htsFile *fp, const char *path,
     return true;
 }
 
-static char *cram_reference_locator(const char *reference_path,
-                                    const char *reference_index_path,
-                                    const char **error) {
-    size_t reference_length;
-    size_t index_length;
-    size_t delimiter_length = sizeof(HTS_IDX_DELIM) - 1u;
-    size_t required;
-    char *locator;
-
-    if (!reference_index_path) return NULL;
-    reference_length = strlen(reference_path);
-    index_length = strlen(reference_index_path);
-    if (reference_length > SIZE_MAX - delimiter_length ||
-        reference_length + delimiter_length > SIZE_MAX - index_length - 1u) {
-        *error = "duckhts_somalier_bam_counts: CRAM reference locator is too large";
-        return NULL;
-    }
-    required = reference_length + delimiter_length + index_length + 1u;
-    locator = duckdb_malloc(required);
-    if (!locator) {
-        *error = "duckhts_somalier_bam_counts: out of memory building CRAM reference locator";
-        return NULL;
-    }
-    memcpy(locator, reference_path, reference_length);
-    memcpy(locator + reference_length, HTS_IDX_DELIM, delimiter_length);
-    memcpy(locator + reference_length + delimiter_length,
-           reference_index_path, index_length);
-    locator[required - 1u] = '\0';
-    return locator;
-}
-
 static void bam_extract_bind_destroy(void *pointer) {
     bam_extract_bind_t *bind = pointer;
     if (!bind) return;
-    duckdb_free(bind->cram_reference);
+    free(bind->cram_reference);
     duckdb_free(bind->reference_index_path);
     duckdb_free(bind->index_path);
     duckdb_free(bind->reference_path);
@@ -595,7 +565,6 @@ static void add_result_column(duckdb_bind_info info, const char *name,
 static void bam_extract_bind(duckdb_bind_info info) {
     bam_extract_bind_t *bind = duckdb_malloc(sizeof(*bind));
     char error[BAM_EXTRACT_ERROR_BYTES] = {0};
-    const char *locator_error = NULL;
     uint64_t value;
 
     if (!bind) {
@@ -698,10 +667,11 @@ static void bam_extract_bind(duckdb_bind_info info) {
         if (error[0] != '\0') goto fail;
     }
     if (bind->reference_index_path) {
-        bind->cram_reference = cram_reference_locator(bind->reference_path,
-            bind->reference_index_path, &locator_error);
+        bind->cram_reference = duckhts_reference_locator(bind->reference_path,
+                                                         bind->reference_index_path);
         if (!bind->cram_reference) {
-            copy_error(error, sizeof(error), locator_error);
+            copy_error(error, sizeof(error),
+                       "duckhts_somalier_bam_counts: out of memory building CRAM reference locator");
             goto fail;
         }
     }
