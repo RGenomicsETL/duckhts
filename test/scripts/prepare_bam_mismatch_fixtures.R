@@ -145,6 +145,22 @@ writeLines(c(
 run("bcftools", c("view", "--no-version", "-Oz", "-o", paste0(prefix, ".far_end.vcf.gz"), far_end))
 run("tabix", c("-f", "-p", "vcf", paste0(prefix, ".far_end.vcf.gz")))
 
+# One symbolic deletion at 186 that states its span by SVLEN and has no END.
+# htslib gives the record the span 186-188, the anchor base and two more, in
+# the VCF and in the BCF encoding; the mask must do the same for both.
+svlen_vcf <- tempfile(fileext = ".vcf")
+writeLines(c(
+  "##fileformat=VCFv4.2",
+  sprintf("##contig=<ID=%s,length=%d>", names(reference), lengths(reference)),
+  "##ALT=<ID=DEL,Description=\"Deletion\">",
+  "##INFO=<ID=SVLEN,Number=.,Type=Integer,Description=\"Length of the variant\">",
+  "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO",
+  paste("ref1", 186L, ".", reference$ref1[[186L]], "<DEL>", ".", ".", "SVLEN=-2", sep = "\t")), svlen_vcf)
+run("bcftools", c("view", "--no-version", "-Oz", "-o", paste0(prefix, ".svlen.vcf.gz"), svlen_vcf))
+run("tabix", c("-f", "-p", "vcf", paste0(prefix, ".svlen.vcf.gz")))
+run("bcftools", c("view", "--no-version", "-Ob", "-o", paste0(prefix, ".svlen.bcf"), paste0(prefix, ".svlen.vcf.gz")))
+run("bcftools", c("index", "-f", paste0(prefix, ".svlen.bcf")))
+
 # A contig longer than the 1 MiB reference window of the function, with an
 # alignment whose reference skip of 1,100,000 bases carries it past the window:
 # 20 bases at 101-120 and 20 at 1,100,121-1,100,140, the eleventh of which

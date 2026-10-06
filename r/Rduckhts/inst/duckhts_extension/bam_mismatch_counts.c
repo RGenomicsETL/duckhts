@@ -178,57 +178,21 @@ static void window_mark_variant(mismatch_window_t *window, hts_pos_t pos0, hts_p
     }
 }
 
-/* REF, ALT and INFO/END of one VCF text line. Returns 0 when the line has no
- * POS, REF and ALT fields. */
-static int mask_parse_vcf_line(const char *line, hts_pos_t *pos0, hts_pos_t *reference_length,
-                               int *same_length) {
-    const char *field[9] = {0};
-    size_t length[9] = {0};
-    int fields = 0;
-    const char *cursor = line;
-    char *number_end = NULL;
-    long long pos1;
-    while (fields < 9) {
-        const char *tab = strchr(cursor, '\t');
-        field[fields] = cursor;
-        length[fields] = tab ? (size_t)(tab - cursor) : strlen(cursor);
-        fields++;
-        if (!tab) break;
-        cursor = tab + 1;
-    }
-    if (fields < 5) return 0;
-    pos1 = strtoll(field[1], &number_end, 10);
-    if (number_end == field[1] || pos1 < 1) return 0;
-    *pos0 = (hts_pos_t)pos1 - 1;
-    *reference_length = (hts_pos_t)length[3];
-    *same_length = 1;
-    for (size_t at = 0, start = 0; at <= length[4]; at++) {
-        if (at < length[4] && field[4][at] != ',') continue;
-        const char *allele = field[4] + start;
-        size_t allele_length = at - start;
-        if (!(allele_length == 1 && allele[0] == '.') &&
-            (allele_length != length[3] || allele[0] == '<' || allele[0] == '*' ||
-             memchr(allele, '[', allele_length) || memchr(allele, ']', allele_length))) {
-            *same_length = 0;
-        }
-        start = at + 1;
-    }
-    if (fields >= 8) {
-        /* A symbolic allele states its end in INFO/END, one-based and inclusive. */
-        const char *info = field[7];
-        size_t at = 0;
-        while (at < length[7]) {
-            size_t stop = at;
-            while (stop < length[7] && info[stop] != ';') stop++;
-            if (stop - at > 4 && strncmp(info + at, "END=", 4) == 0) {
-                long long end1 = strtoll(info + at + 4, &number_end, 10);
-                if (number_end != info + at + 4 && end1 >= pos1) {
-                    *reference_length = (hts_pos_t)(end1 - pos1 + 1);
-                }
-            }
-            at = stop + 1;
+/* Mark one mask record in the window. Its span is the one htslib gives the
+ * record, for a BCF record and for a parsed VCF line alike: the longest of
+ * REF, INFO/END, INFO/SVLEN of a deletion, duplication or copy-number allele,
+ * and FORMAT/LEN. */
+static int window_mark_record(mismatch_window_t *window, bcf1_t *record, int flank) {
+    int same_length = 1;
+    if (bcf_unpack(record, BCF_UN_STR) != 0) return 0;
+    for (int allele = 1; allele < record->n_allele; allele++) {
+        const char *text = record->d.allele[allele];
+        if (strlen(text) != strlen(record->d.allele[0]) || text[0] == '<' || text[0] == '*' ||
+            strchr(text, '[') || strchr(text, ']')) {
+            same_length = 0;
         }
     }
+    window_mark_variant(window, record->pos, record->rlen, same_length, flank);
     return 1;
 }
 
@@ -247,16 +211,7 @@ static int window_fill_mask(mismatch_window_t *window, mismatch_mask_t *mask, co
         iterator = bcf_itr_queryi(mask->bcf_index, header_id, beg0, end0);
         if (!iterator) goto failed;
         while ((status = bcf_itr_next(mask->file, iterator, mask->record)) >= 0) {
-            int same_length = 1;
-            if (bcf_unpack(mask->record, BCF_UN_STR) != 0) goto failed;
-            for (int allele = 1; allele < mask->record->n_allele; allele++) {
-                const char *text = mask->record->d.allele[allele];
-                if (strlen(text) != strlen(mask->record->d.allele[0]) || text[0] == '<' || text[0] == '*' ||
-                    strchr(text, '[') || strchr(text, ']')) {
-                    same_length = 0;
-                }
-            }
-            window_mark_variant(window, mask->record->pos, mask->record->rlen, same_length, flank);
+            if (!window_mark_record(window, mask->record, flank)) goto failed;
         }
     } else {
         int tabix_id = tbx_name2id(mask->tabix, contig);
@@ -267,10 +222,9 @@ static int window_fill_mask(mismatch_window_t *window, mismatch_mask_t *mask, co
         iterator = tbx_itr_queryi(mask->tabix, tabix_id, beg0, end0);
         if (!iterator) goto failed;
         while ((status = tbx_itr_next(mask->file, mask->tabix, iterator, &mask->line)) >= 0) {
-            hts_pos_t pos0 = 0, reference_length = 0;
-            int same_length = 1;
-            if (!mask_parse_vcf_line(mask->line.s, &pos0, &reference_length, &same_length)) goto failed;
-            window_mark_variant(window, pos0, reference_length, same_length, flank);
+            /* htslib parses the line, so a VCF record has the span its BCF form has. */
+            if (vcf_parse(&mask->line, mask->header, mask->record) < 0) goto failed;
+            if (!window_mark_record(window, mask->record, flank)) goto failed;
         }
     }
     hts_itr_destroy(iterator);
