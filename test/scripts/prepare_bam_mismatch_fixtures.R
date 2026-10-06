@@ -169,6 +169,23 @@ run("tabix", c("-f", "-p", "vcf", paste0(prefix, ".svlen.vcf.gz")))
 run("bcftools", c("view", "--no-version", "-Ob", "-o", paste0(prefix, ".svlen.bcf"), paste0(prefix, ".svlen.vcf.gz")))
 run("bcftools", c("index", "-f", paste0(prefix, ".svlen.bcf")))
 
+# One reference block at 186 that states its span only in FORMAT/LEN, as a
+# gVCF does: htslib gives it the span 186-188 in both encodings. The VCF mask
+# must read FORMAT for it, although it reads no sample column otherwise.
+len_vcf <- tempfile(fileext = ".vcf")
+writeLines(c(
+  "##fileformat=VCFv4.5",
+  sprintf("##contig=<ID=%s,length=%d>", names(reference), lengths(reference)),
+  "##ALT=<ID=*,Description=\"Unobserved allele\">",
+  "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">",
+  "##FORMAT=<ID=LEN,Number=1,Type=Integer,Description=\"Length of the reference block\">",
+  "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1",
+  paste("ref1", 186L, ".", reference$ref1[[186L]], "<*>", ".", ".", ".", "GT:LEN", "0/0:3", sep = "\t")), len_vcf)
+run("bcftools", c("view", "--no-version", "-Oz", "-o", paste0(prefix, ".len.vcf.gz"), len_vcf))
+run("tabix", c("-f", "-p", "vcf", paste0(prefix, ".len.vcf.gz")))
+run("bcftools", c("view", "--no-version", "-Ob", "-o", paste0(prefix, ".len.bcf"), paste0(prefix, ".len.vcf.gz")))
+run("bcftools", c("index", "-f", paste0(prefix, ".len.bcf")))
+
 # A contig longer than the 1 MiB reference window of the function, with an
 # alignment whose reference skip of 1,100,000 bases carries it past the window:
 # 20 bases at 101-120 and 20 at 1,100,121-1,100,140, the eleventh of which

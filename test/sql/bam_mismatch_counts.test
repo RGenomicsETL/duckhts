@@ -290,6 +290,39 @@ GROUP BY mask ORDER BY mask;
 bcf	106	5
 vcf	106	5
 
+# A reference block at 186 that states its span only in FORMAT/LEN (3), as a
+# gVCF does, masks 186-188 as a VCF and as a BCF: the VCF mask reads FORMAT
+# when it names LEN. The counts are those of the SVLEN record above.
+query III
+SELECT mask, sum(bases), sum(bases) FILTER (WHERE reference_base != read_base)
+FROM (
+  SELECT 'vcf' AS mask, * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+    '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa',
+    mask := '__WORKING_DIRECTORY__/test/data/bam_mismatch.len.vcf.gz', indel_flank := 0)
+  UNION ALL
+  SELECT 'bcf' AS mask, * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+    '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa',
+    mask := '__WORKING_DIRECTORY__/test/data/bam_mismatch.len.bcf', indel_flank := 0))
+GROUP BY mask ORDER BY mask;
+----
+bcf	138	7
+vcf	138	7
+
+query III
+SELECT mask, sum(bases), sum(bases) FILTER (WHERE reference_base != read_base)
+FROM (
+  SELECT 'vcf' AS mask, * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+    '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa',
+    mask := '__WORKING_DIRECTORY__/test/data/bam_mismatch.len.vcf.gz')
+  UNION ALL
+  SELECT 'bcf' AS mask, * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+    '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa',
+    mask := '__WORKING_DIRECTORY__/test/data/bam_mismatch.len.bcf'))
+GROUP BY mask ORDER BY mask;
+----
+bcf	106	5
+vcf	106	5
+
 # A symbolic mask record at 186 whose stated end is far past the contig masks
 # ref1 from 181 on with the default flank. Without a mask the counts are 116
 # bases and 6 mismatches; the read at 171-190 then keeps its bases at 172-180
