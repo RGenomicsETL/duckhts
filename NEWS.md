@@ -20,9 +20,8 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   counted bases in 61 s on one thread (116 million a second), time linear in
   the bases, and peak RSS from 67.9 MiB at a quarter of the contig to 83.1 MiB
   at the whole contig, where the step is htslib holding the reference of one
-  18 Mb CRAM slice over the sparse 1q12 region. Reading the mask's 5.77
-  million records alone costs 2.2 s, linear in the records, with no change in
-  memory. The inputs are registry artifacts staged by
+  18 Mb CRAM slice over the sparse 1q12 region. Mask records alone are read
+  at 1.4 million a second, linear in the records, with no change in memory. The inputs are registry artifacts staged by
   `benchmarks/bam_mismatch_stage.R` with the RBCFTools binaries, with a
   network-free staging test (`make test-bam-mismatch-staging`).
 
