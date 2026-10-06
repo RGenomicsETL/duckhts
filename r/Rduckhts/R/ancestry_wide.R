@@ -149,8 +149,9 @@
   corrections <- corrections[order(as.numeric(corrections$pc)), , drop = FALSE]
   chromosome_type <- DBI::dbGetQuery(con, paste0("DESCRIBE SELECT chromosome FROM ",
                                              relations[[2L]]))$column_type
-  numeric_chromosome <- chromosome_type %in% c("TINYINT", "SMALLINT", "INTEGER",
-                                               "UTINYINT", "USMALLINT")
+  numeric_chromosome <- chromosome_type %in% c(
+    "TINYINT", "SMALLINT", "INTEGER", "BIGINT", "HUGEINT",
+    "UTINYINT", "USMALLINT", "UINTEGER", "UBIGINT", "UHUGEINT")
   reference_source <- if (numeric_chromosome) relations[[2L]] else paste0(
     "(SELECT ", chromosome_key, " AS chromosome, * EXCLUDE (chromosome) FROM ",
     relations[[2L]], ")")
@@ -164,7 +165,17 @@
 # conversion.
 .ancestry_chromosome_key <- function(numeric_chromosome) {
   key <- "duckhts_contig_key(chromosome::VARCHAR)"
-  if (numeric_chromosome) paste0("try_cast(", key, " AS INTEGER)") else key
+  if (numeric_chromosome) paste0("try_cast(", key, " AS BIGINT)") else key
+}
+
+# The keys, as SQL, that make two input rows one locus: the join key. A name
+# that gives no integer for an integer reference joins nothing; it keeps its
+# own name, so two such names at one position are not duplicates of each other.
+.ancestry_duplicate_keys <- function(numeric_chromosome) {
+  name_key <- .ancestry_chromosome_key(FALSE)
+  if (!numeric_chromosome) return(name_key)
+  number_key <- .ancestry_chromosome_key(TRUE)
+  paste0(number_key, ", CASE WHEN ", number_key, " IS NULL THEN ", name_key, " END")
 }
 
 .ancestry_classification_query <- function(relations, frequency,
@@ -177,7 +188,7 @@
     # Duplicates are counted by the key the join uses, so two spellings that
     # join to one reference locus are duplicates, not two variants.
     " AS f, count(*) OVER (PARTITION BY sample_id, ",
-    .ancestry_chromosome_key(numeric_chromosome), ", position) AS copies ",
+    .ancestry_duplicate_keys(numeric_chromosome), ", position) AS copies ",
     "FROM ", input, "), ",
     "sites AS (SELECT ", if (numeric_chromosome) "chromosome" else
       .ancestry_chromosome_key(FALSE),

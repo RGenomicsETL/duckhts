@@ -35,8 +35,9 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   order; `variantkey()` states that its chromosome code is not a contig key.
   `duckhts_contig_key()` is documented as the explicit key for such joins, with
   what it does not map. No function changes its behaviour. The R wrapper
-  `rduckhts_ancestry_proportions()` uses that key and counts duplicates by the
-  same key as its join.
+  `rduckhts_ancestry_proportions()` uses that key, counts duplicates by the
+  same key as its join, and compares numbers for a reference of any integer
+  type.
 
 - `duckhts_bam_mismatch_counts()` stops with an error when a kept alignment
   ends past the length of its contig in the reference, instead of leaving the
