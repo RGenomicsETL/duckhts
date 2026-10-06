@@ -11,8 +11,12 @@ contributing reference locus; group frequencies must lie in \[0, 1\].
 Duplicate loci matching the input are rejected. Long references require
 complete keyed rows during pivoting. Inputs and references must share an
 assembly, uppercase biallelic SNV alleles and reference orientation.
-Numeric chromosomes match after removing a \`chr\` prefix; other
-chromosome names match literally. Input duplicates at a sample/locus,
+Chromosome names are compared with \`duckhts_contig_key()\`: one leading
+\`chr\` is removed in any letter case, \`M\` and \`MT\` become \`MT\`,
+and \`X\` and \`Y\` are uppercased. Any other name must match byte for
+byte, so \`01\` does not match \`1\`. A reference, wide or long, whose
+chromosome column has an integer type compares that key as an integer,
+so \`chr01\` joins \`1\`. Input duplicates at a sample/locus,
 palindromic alleles and missing frequencies are dropped; other alleles
 match directly, reversed, strand complemented or both. Reversed alleles
 use 1-frequency. Missing genotypes are not imputed. Audit counts include
