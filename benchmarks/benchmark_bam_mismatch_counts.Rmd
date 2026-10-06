@@ -298,6 +298,7 @@ rownames(exponents) <- NULL
 mask_series <- summary[summary$series == "mask records", ]
 mask_series$mask_records <- mask_sizes$records[match(mask_series$scale, mask_sizes$scale)]
 mask_series <- mask_series[order(mask_series$threads, mask_series$scale), ]
+rownames(mask_series) <- NULL
 mask_exponents <- do.call(rbind, lapply(split(mask_series, mask_series$threads), function(s) {
   base_seconds <- s$median_seconds[s$scale == 0L]
   s <- s[s$scale > 0L, ]
