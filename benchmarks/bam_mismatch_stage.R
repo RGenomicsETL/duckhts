@@ -122,13 +122,19 @@ stage_bam_mismatch_slice <- function(source, region, reference, output, extensio
 }
 
 # The records of one contig of `source` (a local file, or a URL read as a
-# stream), without genotypes, as an indexed BCF.
-stage_bam_mismatch_mask <- function(source, contig, output, extension, expected = NULL) {
+# stream), without genotypes, as an indexed BCF. A `modulo` above 1 keeps the
+# records whose position is a multiple of it: a thinner mask of the same file,
+# for scaling the mask records alone.
+stage_bam_mismatch_mask <- function(source, contig, output, extension, expected = NULL, modulo = 1L) {
   bam_mismatch_require_source(source)
+  if (!is.numeric(modulo) || length(modulo) != 1L || modulo < 1 || modulo != floor(modulo)) {
+    stop("modulo must be a whole number of at least 1", call. = FALSE)
+  }
   dir.create(dirname(output), recursive = TRUE, showWarnings = FALSE)
   temporary <- paste0(output, ".partial-", Sys.getpid(), ".bcf")
   on.exit(unlink(c(temporary, paste0(temporary, ".csi")), force = TRUE), add = TRUE)
-  bam_mismatch_run("bcftools", c("view", "--no-version", "-G", "-t", contig, "-Ob", "-o", temporary, source))
+  thinning <- if (modulo > 1) c("-i", sprintf("POS %% %d == 0", as.integer(modulo))) else character()
+  bam_mismatch_run("bcftools", c("view", "--no-version", "-G", "-t", contig, thinning, "-Ob", "-o", temporary, source))
   bam_mismatch_run("bcftools", c("index", "-f", temporary))
   identity <- bam_mismatch_mask_identity(temporary, extension)
   bam_mismatch_publish(temporary, output, ".csi", identity, expected, "mask")
@@ -178,17 +184,19 @@ stage_bam_mismatch_slice_from_registry <- function(id, extension) {
 }
 
 # A mask artifact's locator names the variant source. Its supplier identity
-# holds the contig and the expected identity.
+# holds the contig, the thinning modulo when there is one, and the expected
+# identity.
 stage_bam_mismatch_mask_from_registry <- function(id, extension) {
   row <- bam_mismatch_registry_row(id)
   identity_fields <- c("records", "position_sum")
   bam_mismatch_require_fields(id, row$fields, c("contig", identity_fields))
   if (length(row$inputs) != 1L) stop("mask artifact must name one variant source", call. = FALSE)
+  modulo <- if ("modulo" %in% names(row$fields)) as.integer(row$fields[["modulo"]]) else 1L
   stage_bam_mismatch_mask(
     source = bam_mismatch_registry_source(row$registry, row$inputs[[1L]]),
     contig = row$fields[["contig"]],
     output = duckhtsbench::duckhts_bench_artifact_path(id), extension = extension,
-    expected = as.list(row$fields[identity_fields]))
+    expected = as.list(row$fields[identity_fields]), modulo = modulo)
 }
 
 # The staged file of a registered artifact has its registered identity.

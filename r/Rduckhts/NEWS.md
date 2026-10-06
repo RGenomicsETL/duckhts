@@ -14,7 +14,14 @@ Preview of 2.0.0, still in development. The sections below describe what 2.0.0 w
   expression and integer casts in SQL. `chrX` now matches `X`, `chrM` matches
   `MT`, and the letter case of `chr` does not matter. A leading zero is now
   another name for a text reference: `chr01` no longer matches `1`. A reference
-  with an integer chromosome column still compares numbers.
+  with an integer chromosome column still compares numbers, and duplicates are
+  counted by the same key as the join, so `chr01` and `chr1` at one position are
+  duplicates for an integer reference instead of two variants.
+
+- `rduckhts_bam_mismatch_counts()` stops with an error when a kept alignment
+  ends past the length of its contig in the reference, instead of leaving the
+  bases past the end out of the counts; the reference does not match the
+  alignment header in that case.
 
 - The function reference states, under "Contig names", how each function
   compares contig names across two sources, including the cases that return no

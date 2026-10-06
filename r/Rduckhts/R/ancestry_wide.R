@@ -174,8 +174,10 @@
   paste0(
     "raw AS (SELECT sample_id, chromosome, position, allele_a, allele_b, ",
     .ancestry_chromosome_key(numeric_chromosome), " AS ref_chr, ", frequency,
+    # Duplicates are counted by the key the join uses, so two spellings that
+    # join to one reference locus are duplicates, not two variants.
     " AS f, count(*) OVER (PARTITION BY sample_id, ",
-    .ancestry_chromosome_key(FALSE), ", position) AS copies ",
+    .ancestry_chromosome_key(numeric_chromosome), ", position) AS copies ",
     "FROM ", input, "), ",
     "sites AS (SELECT ", if (numeric_chromosome) "chromosome" else
       .ancestry_chromosome_key(FALSE),

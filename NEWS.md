@@ -32,7 +32,14 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   `bcftools_norm_row()` and `bcftools_munge_row()` each state their lookup
   order; `variantkey()` states that its chromosome code is not a contig key.
   `duckhts_contig_key()` is documented as the explicit key for such joins, with
-  what it does not map. No function changes its behaviour.
+  what it does not map. No function changes its behaviour. The R wrapper
+  `rduckhts_ancestry_proportions()` uses that key and counts duplicates by the
+  same key as its join.
+
+- `duckhts_bam_mismatch_counts()` stops with an error when a kept alignment
+  ends past the length of its contig in the reference, instead of leaving the
+  bases past the end out of the counts; the reference does not match the
+  alignment header in that case.
 
 - Added `duckhts_roh_ancestry()` for per-sample ancestry-weighted allele frequencies from long reference and proportion relations, with allele-orientation handling and optional frequency clamping.
 

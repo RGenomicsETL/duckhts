@@ -182,8 +182,8 @@ static void window_mark_variant(mismatch_window_t *window, hts_pos_t pos0, hts_p
  * POS, REF and ALT fields. */
 static int mask_parse_vcf_line(const char *line, hts_pos_t *pos0, hts_pos_t *reference_length,
                                int *same_length) {
-    const char *field[9];
-    size_t length[9];
+    const char *field[9] = {0};
+    size_t length[9] = {0};
     int fields = 0;
     const char *cursor = line;
     char *number_end = NULL;
@@ -310,6 +310,16 @@ static int window_cover(mismatch_window_t *window, mismatch_mask_t *mask, int ti
                  contig, (long long)MISMATCH_SPAN_MAX);
         return 0;
     }
+    /* A contig the reference has but shorter than the alignment says is a
+     * reference that does not match the alignment header; skipping the bases
+     * past its end would give plausible but incomplete counts. */
+    if (end0 > contig_length) {
+        snprintf(error, error_size,
+                 "duckhts_bam_mismatch_counts: an alignment on %s ends at %lld, past the reference contig length %lld; "
+                 "the reference does not match the alignment header",
+                 contig, (long long)end0, (long long)contig_length);
+        return 0;
+    }
     new_end = beg0 + MISMATCH_WINDOW_BASES;
     if (new_end < end0) new_end = end0;
     if (new_end > contig_length) new_end = contig_length;
@@ -318,7 +328,6 @@ static int window_cover(mismatch_window_t *window, mismatch_mask_t *mask, int ti
     window->tid = tid;
     window->beg0 = beg0;
     window->end0 = beg0; /* empty until the fetch succeeds */
-    if (new_end <= beg0) return 1; /* the alignment starts at or past the contig end */
     window->bases = faidx_fetch_seq64(window->fai, contig, beg0, new_end - 1, &fetched);
     if (!window->bases || fetched != new_end - beg0) {
         snprintf(error, error_size, "duckhts_bam_mismatch_counts: cannot fetch %s:%lld-%lld from the reference",

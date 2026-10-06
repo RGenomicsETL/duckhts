@@ -94,6 +94,13 @@ test_ancestry_checked_sites <- function() {
   dbExecute(con, "CREATE VIEW zero_input AS SELECT * REPLACE ('chr01' AS chromosome) FROM input")
   expect_equal(run("zero_input", "integer_ref")$proportion, baseline$proportion)
   expect_equal(unique(run("zero_input", "text_ref")$used_variants), 0)
+  # Two spellings of one locus are duplicates under the key that joins them:
+  # both spellings join an integer reference, so neither is used; only one
+  # joins a text reference, so that one is used.
+  dbExecute(con, paste0("CREATE VIEW mixed_input AS SELECT * FROM input UNION ALL ",
+                        "SELECT * REPLACE ('chr01' AS chromosome) FROM input WHERE position=1"))
+  expect_equal(unique(run("mixed_input", "integer_ref")$used_variants), 11)
+  expect_equal(unique(run("mixed_input", "text_ref")$used_variants), 12)
   dbExecute(con, "CREATE VIEW missing_ref AS SELECT * REPLACE (CASE WHEN position=1 THEN NULL ELSE A END AS A) FROM ref")
   expect_error(run(reference_table = "missing_ref"), "finite frequencies and loadings")
   dbExecute(con, "CREATE VIEW missing_pc AS SELECT * REPLACE (CASE WHEN position=1 THEN NULL ELSE PC1 END AS PC1) FROM ref")

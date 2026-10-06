@@ -190,6 +190,21 @@ SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_m
 ----
 reference has no contig named ref1
 
+# A reference whose ref1 is shorter than the alignment at 171-190 says.
+statement error
+SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.short.fa');
+----
+an alignment on ref1 ends at 190, past the reference contig length 180
+
+# The same reference counts the alignments that fit in it: the pair (20 + 20),
+# clip_ins (3), deletion (10), hardclip (12), noqual (12) and other_contig (20).
+query I
+SELECT sum(bases) FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.short.fa', region := 'ref1:1-170,ref2');
+----
+97
+
 statement error
 SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
   '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa', region := '*');

@@ -91,6 +91,12 @@ run <- function(tool, arguments) {
   if (status != 0L) stop(tool, " failed: ", paste(arguments, collapse = " "), call. = FALSE)
 }
 run("samtools", c("faidx", fasta))
+# The same contigs with ref1 cut to 180 bases: the alignment at 171-190 ends
+# past it, which must be an error, not a silent skip of its last bases.
+short_fasta <- paste0(prefix, ".short.fa")
+writeLines(c(">ref1", paste(reference$ref1[1:180], collapse = ""),
+             ">ref2", paste(reference$ref2, collapse = "")), short_fasta)
+run("samtools", c("faidx", short_fasta))
 
 sam <- tempfile(fileext = ".sam")
 writeLines(c("@HD\tVN:1.6\tSO:coordinate",

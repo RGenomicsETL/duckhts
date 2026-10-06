@@ -67,7 +67,11 @@ test_bam_mismatch_staging <- function() {
           paste0("contig=ref1;", mask_identity)),
       row("absent_mask", "test", "known_variant_mask", "test", "artifact:absent_variants",
           "local_derived", "staged/absent_mask.bcf", "stage_bam_mismatch_mask_from_registry", "test", "2",
-          paste0("contig=ref1;", mask_identity))), path)
+          paste0("contig=ref1;", mask_identity)),
+      # A thinned mask derived from the staged mask: the records at even positions.
+      row("half_mask", "test", "known_variant_mask", "test", "artifact:fixture_mask",
+          "local_derived", "staged/half_mask.bcf", "stage_bam_mismatch_mask_from_registry", "test", "3",
+          "contig=ref1;modulo=2;records=2;position_sum=366")), path)
     path
   }
   Sys.setenv(DUCKHTS_CACHE_DIR = cache)
@@ -106,6 +110,11 @@ test_bam_mismatch_staging <- function() {
                       error = function(error) conditionMessage(error))
   stopifnot(is.character(failure), grepl("is not cached and its locator is not a URL", failure, fixed = TRUE),
             !file.exists(file.path(cache, "staged", "absent_mask.bcf")))
+
+  # The thinned mask keeps the records at 180 and 186, not the one at 173.
+  half_mask <- stage_bam_mismatch_mask_from_registry("half_mask", extension)
+  stopifnot(half_mask$records == 2, half_mask$position_sum == 180 + 186)
+  bam_mismatch_check_staged("half_mask", extension)
 
   # The staged files give the counts of the three alignments: 20 + 20 bases for
   # the pair and 3 for clip_ins with the default flank, with two mismatches.
