@@ -178,10 +178,24 @@ static void window_mark_variant(mismatch_window_t *window, hts_pos_t pos0, hts_p
     }
 }
 
-/* Mark one mask record in the window. Its span is the one htslib gives the
- * record, for a BCF record and for a parsed VCF line alike: the longest of
- * REF, INFO/END, INFO/SVLEN of a deletion, duplication or copy-number allele,
- * and FORMAT/LEN. */
+/* Cut a VCF line after INFO, its eighth field. The mask needs the site fields
+ * only, and htslib would otherwise parse every sample column of a line, which
+ * for a population VCF is most of the line. */
+static void vcf_line_keep_site_fields(kstring_t *line) {
+    size_t tabs = 0;
+    for (size_t at = 0; at < line->l; at++) {
+        if (line->s[at] == '\t' && ++tabs == 8) {
+            line->s[at] = '\0';
+            line->l = at;
+            return;
+        }
+    }
+}
+
+/* Mark one mask record in the window. Its span is htslib's rlen: the longest
+ * of REF, INFO/END and INFO/SVLEN of a deletion, duplication or copy-number
+ * allele. A BCF record carries the rlen it was written with, which can also
+ * include FORMAT/LEN; a VCF line is parsed without its sample columns. */
 static int window_mark_record(mismatch_window_t *window, bcf1_t *record, int flank) {
     int same_length = 1;
     if (bcf_unpack(record, BCF_UN_STR) != 0) return 0;
@@ -222,7 +236,9 @@ static int window_fill_mask(mismatch_window_t *window, mismatch_mask_t *mask, co
         iterator = tbx_itr_queryi(mask->tabix, tabix_id, beg0, end0);
         if (!iterator) goto failed;
         while ((status = tbx_itr_next(mask->file, mask->tabix, iterator, &mask->line)) >= 0) {
-            /* htslib parses the line, so a VCF record has the span its BCF form has. */
+            /* htslib parses the site fields of the line, so a VCF record has
+             * the span that the same fields give its BCF form. */
+            vcf_line_keep_site_fields(&mask->line);
             if (vcf_parse(&mask->line, mask->header, mask->record) < 0) goto failed;
             if (!window_mark_record(window, mask->record, flank)) goto failed;
         }

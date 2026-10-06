@@ -53,9 +53,10 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   example over a reference skip of more than 1 MiB, in place of growing to the
   alignment's span, and the walk over an alignment keeps no list of its gaps.
   So the state of the function does not grow with the span or the number of
-  CIGAR operations of an alignment, and no span is refused. A VCF mask line is
-  parsed by htslib, so a record has one span as VCF and as BCF, also when a
-  symbolic allele states it by `SVLEN`.
+  CIGAR operations of an alignment, and no span is refused. The site fields
+  of a VCF mask line are parsed by htslib, so a record has one span as VCF and
+  as BCF, also when a symbolic allele states it by `SVLEN`; sample columns of
+  a VCF mask are not read.
 
 - Added `duckhts_roh_ancestry()` for per-sample ancestry-weighted allele frequencies from long reference and proportion relations, with allele-orientation handling and optional frequency clamping.
 

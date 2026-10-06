@@ -233,6 +233,28 @@ FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.l
 ----
 50	1
 
+# A VCF mask with sample columns gives the rows of the same mask without them:
+# the mask reads the site fields of a line and not its genotypes.
+query II
+SELECT (SELECT count(*) FROM (
+          SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+            '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa',
+            mask := '__WORKING_DIRECTORY__/test/data/bam_mismatch.samples.vcf.gz')
+          EXCEPT
+          SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+            '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa',
+            mask := '__WORKING_DIRECTORY__/test/data/bam_mismatch.mask.vcf.gz'))),
+       (SELECT count(*) FROM (
+          SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+            '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa',
+            mask := '__WORKING_DIRECTORY__/test/data/bam_mismatch.mask.vcf.gz')
+          EXCEPT
+          SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+            '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa',
+            mask := '__WORKING_DIRECTORY__/test/data/bam_mismatch.samples.vcf.gz')));
+----
+0	0
+
 # A symbolic deletion at 186 that states its span by SVLEN=-2 and has no END
 # masks 186-188 as a VCF and as a BCF: htslib gives the record that span in
 # both. Without the flank, the 141 bases and 7 mismatches counted with no mask

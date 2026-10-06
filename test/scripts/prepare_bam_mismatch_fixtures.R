@@ -112,18 +112,23 @@ run("samtools", c("index", cram))
 
 # The mask. `contigs` are the header contig lines; `names` rename the contig
 # of the records, for the fixture whose names differ from the alignment's.
-write_mask <- function(output, contigs, record_contig) {
+write_mask <- function(output, contigs, record_contig, samples = character()) {
   ref_at <- function(pos1, length) paste(reference$ref1[seq.int(pos1, length.out = length)], collapse = "")
+  # With samples, every record carries a genotype for each of them.
+  genotypes <- if (length(samples)) paste(c("GT", rep_len(c("0|1", "1|1"), length(samples))), collapse = "\t")
+  record <- function(...) paste(c(..., genotypes), collapse = "\t")
   vcf <- tempfile(fileext = ".vcf")
   writeLines(c(
     "##fileformat=VCFv4.2",
     sprintf("##contig=<ID=%s,length=%d>", contigs, lengths(reference)),
     "##ALT=<ID=DEL,Description=\"Deletion\">",
     "##INFO=<ID=END,Number=1,Type=Integer,Description=\"End position\">",
-    "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO",
-    paste(record_contig, 173L, ".", ref_at(173L, 1L), "T", ".", ".", ".", sep = "\t"),
-    paste(record_contig, 180L, ".", ref_at(180L, 2L), ref_at(180L, 1L), ".", ".", ".", sep = "\t"),
-    paste(record_contig, 186L, ".", ref_at(186L, 1L), "<DEL>", ".", ".", "END=188", sep = "\t")), vcf)
+    if (length(samples)) "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">",
+    paste(c("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO", if (length(samples)) c("FORMAT", samples)),
+          collapse = "\t"),
+    record(record_contig, 173L, ".", ref_at(173L, 1L), "T", ".", ".", "."),
+    record(record_contig, 180L, ".", ref_at(180L, 2L), ref_at(180L, 1L), ".", ".", "."),
+    record(record_contig, 186L, ".", ref_at(186L, 1L), "<DEL>", ".", ".", "END=188")), vcf)
   run("bcftools", c("view", "--no-version", "-Oz", "-o", output, vcf))
   run("tabix", c("-f", "-p", "vcf", output))
 }
@@ -132,6 +137,9 @@ write_mask(mask, names(reference), "ref1")
 run("bcftools", c("view", "--no-version", "-Ob", "-o", paste0(prefix, ".mask.bcf"), mask))
 run("bcftools", c("index", "-f", paste0(prefix, ".mask.bcf")))
 write_mask(paste0(prefix, ".other_names.vcf.gz"), paste0("chr", names(reference)), "chrref1")
+# The same records with two samples and their genotypes. The mask reads the
+# site fields of a line and must give what the mask without samples gives.
+write_mask(paste0(prefix, ".samples.vcf.gz"), names(reference), "ref1", samples = c("S1", "S2"))
 # One symbolic record whose stated end is the largest a tabix index stores, far
 # past the contig: with the flank it masks ref1 from 181 to the end.
 far_end <- tempfile(fileext = ".vcf")
