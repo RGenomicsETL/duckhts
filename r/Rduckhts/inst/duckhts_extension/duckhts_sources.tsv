@@ -35,6 +35,10 @@ src/roh_hmm.c|roh_hmm.c
 src/roh_udf.c|roh_udf.c
 src/roh_sites.c|roh_sites.c
 src/roh_sql.c|roh_sql.c
+src/count_cells.c|count_cells.c
+src/count_error_model.c|count_error_model.c
+src/count_error_udf.c|count_error_udf.c
+src/count_error_sql.c|count_error_sql.c
 src/somalier_bam_extract_sql.c|somalier_bam_extract_sql.c
 src/somalier_panel_sql.c|somalier_panel_sql.c
 src/somalier_sex_sql.c|somalier_sex_sql.c

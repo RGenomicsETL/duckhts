@@ -281,3 +281,87 @@ rduckhts_roh_counts <- function(
   }
   sprintf("%.17g", value)
 }
+
+#' Fit Read Error and Contamination from Allele Read Counts
+#'
+#' Fits, for each sample, the read error, the share of reads from a second
+#' genome, the allele balance at heterozygous sites, two spreads, an artefact
+#' weight and an excess of homozygosity by maximum likelihood from allele read
+#' counts at sites of known population frequency. The input is the relation of
+#' [rduckhts_roh_counts()]; the fit is meant to supply that decode's
+#' `seq_error` and `contamination`.
+#'
+#' The likelihood depends on a site only through its two counts and its
+#' frequency, so the fit runs on a histogram of (block, frequency bin, depth,
+#' alt count) cells that DuckDB builds and the native code holds in a bounded
+#' buffer. Each block of `block_bases` bases with at least `min_block_sites`
+#' sites is refitted for contamination with the other parameters held, and
+#' `contamination_sd` is the standard deviation of those block estimates
+#' divided by the square root of their number: an interval from the blocks,
+#' not from the likelihood, because sites are linked. The same cells are also
+#' fitted with a parent or child as the second genome
+#' (`contamination_relative`, `log_likelihood_relative`), since the unrelated
+#' model gives a relative about half its share.
+#'
+#' `homozygosity_excess` is a nuisance parameter: it also absorbs a difference
+#' between the sample's population and the frequencies given, so it is not
+#' inbreeding. A second genome of another population biases `contamination`
+#' upward under the receiver's frequencies.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded.
+#' @param counts_table Name of a table or view with `sample_id`, `chrom`,
+#'   `pos`, `ref_count`, `alt_count` and `af`, as for [rduckhts_roh_counts()].
+#' @param block_bases Bases per block for the block refits, at least 1.
+#' @param freq_bins Frequency bins of the histogram, 1 to 1024.
+#' @param max_depth Sites with more reads are left out, 1 to 65535.
+#' @param min_block_sites Sites a block needs to be refitted, at least 1.
+#' @param max_cells Most histogram cells of one sample; an error above it.
+#' @param max_cell_bytes Most bytes the histogram buffers of all fits in the
+#'   process hold at once; an error above it.
+#' @inheritParams rduckhts_roh
+#' @return A data frame (or invisible `TRUE` when `table_name` is given) with
+#'   one row per sample: `sample`, `sites`, `reads`, `mean_depth`, `blocks`,
+#'   `seq_error`, `contamination`, `contamination_sd`, `homozygosity_excess`,
+#'   `allele_balance`, `spread_hom`, `spread_het`, `artefact_weight`,
+#'   `log_likelihood`, `contamination_relative`, `log_likelihood_relative`,
+#'   `status` (`ok`, `few_sites`, `few_blocks`, `at_bound`, `no_convergence`
+#'   or `no_convergence_relative`) and `method`.
+#' @examples
+#' con <- rduckhts_connect()
+#' DBI::dbExecute(con, paste(
+#'   "CREATE TEMP TABLE counts AS SELECT 'S1' AS sample_id, '1' AS chrom,",
+#'   "i * 2500 AS pos, 0.1 + 0.8 * ((i * 37) % 100) / 100.0 AS af,",
+#'   "30 - ((i * 7) % 3) * 15 AS ref_count, ((i * 7) % 3) * 15 AS alt_count",
+#'   "FROM range(1, 4001) AS t(i)"
+#' ))
+#' rduckhts_count_error_fit(con, "counts")[, c("sample", "seq_error", "contamination", "status")]
+#' DBI::dbDisconnect(con, shutdown = TRUE)
+#' @export
+rduckhts_count_error_fit <- function(
+  con, counts_table, block_bases = 1e7, freq_bins = 64, max_depth = 1000,
+  min_block_sites = 1000, table_name = NULL, overwrite = FALSE,
+  max_cells = 5e6, max_cell_bytes = 2^30
+) {
+  .somalier_validate_output(con, table_name, overwrite)
+  .somalier_validate_name(counts_table, "counts_table")
+  whole <- function(value, name, low, high) {
+    if (!is.numeric(value) || length(value) != 1L || !is.finite(value) ||
+        value != floor(value) || value < low || value > high) {
+      stop(sprintf("%s must be one whole number from %s to %s", name,
+                   format(low, scientific = FALSE), format(high, scientific = FALSE)), call. = FALSE)
+    }
+    sprintf("%.0f", value)
+  }
+  arguments <- c(
+    sql_quote_string(con, counts_table),
+    paste0("block_bases := ", whole(block_bases, "block_bases", 1, 2^62)),
+    paste0("freq_bins := ", whole(freq_bins, "freq_bins", 1, 1024)),
+    paste0("max_depth := ", whole(max_depth, "max_depth", 1, 65535)),
+    paste0("min_block_sites := ", whole(min_block_sites, "min_block_sites", 1, 2^62)),
+    paste0("max_cells := ", whole(max_cells, "max_cells", 1, 1e8)),
+    paste0("max_cell_bytes := ", whole(max_cell_bytes, "max_cell_bytes", 1, 2^62))
+  )
+  query <- paste0("SELECT * FROM duckhts_count_error_fit(",
+                  paste(arguments, collapse = ", "), ")")
+  .somalier_publish_query(con, query, table_name, overwrite)
+}

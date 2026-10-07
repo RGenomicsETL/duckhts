@@ -47,6 +47,8 @@ extern void register_duckhts_somalier_spacing(duckdb_connection connection);
 extern void register_duckhts_ancestry_functions(duckdb_connection connection);
 extern bool register_duckhts_roh_functions(duckdb_connection connection);
 extern bool register_duckhts_roh_sql(duckhts_registration_t *registration);
+extern bool register_duckhts_count_error_functions(duckdb_connection connection);
+extern bool register_duckhts_count_error_sql(duckhts_registration_t *registration);
 extern void register_duckhts_somalier_contamination_functions(
     duckdb_connection connection);
 extern void register_duckhts_somalier_matched_functions(
@@ -236,6 +238,10 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     if (!register_duckhts_roh_functions(connection)) {
         return duckhts_registration_error(&registration,
             "DuckHTS could not register duckhts_roh_segments");
+    }
+    if (!register_duckhts_count_error_functions(connection)) {
+        return duckhts_registration_error(&registration,
+            "DuckHTS could not register duckhts_count_error_fit");
     }
     if (!register_duckhts_somalier_bam_extract_functions(&registration)) {
         return false;
@@ -1176,7 +1182,8 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
 
     if (!register_duckhts_somalier_vcf_extract_sql(&registration) ||
         !register_duckhts_somalier_sex_sql(&registration) ||
-        !register_duckhts_roh_sql(&registration)) {
+        !register_duckhts_roh_sql(&registration) ||
+        !register_duckhts_count_error_sql(&registration)) {
         return false;
     }
     return duckhts_macro_registration_end(&registration);

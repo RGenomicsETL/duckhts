@@ -1,0 +1,210 @@
+# name: test/sql/count_error_fit.test
+# description: duckhts_count_error_fit: read error and contamination fitted from allele read counts
+# group: [duckhts]
+
+require duckhts
+
+# Synthetic truth with known parameters. Every draw is a hash of its coordinates, so the data are
+# deterministic: 20,000 sites on two chromosomes 2,500 bases apart, depth 25-35, frequencies 0.05-0.95,
+# genotypes from Hardy-Weinberg proportions with an excess of homozygosity of 0.1, a second genome of
+# the same population with its own draws, read error 1e-3 and allele balance 1/2. Three samples share
+# the genotypes and differ in the share of the second genome: 0, 0.03 and 0.10.
+statement ok
+CREATE MACRO fit_u(salt, chrom, pos, i) AS (hash(salt, chrom, pos, i) % 1000003) / 1000003.0;
+
+statement ok
+CREATE TEMP TABLE fit_truth AS
+WITH s AS (SELECT chrom, i * 2500 AS pos, 0.05 + 0.9 * fit_u(1, chrom, i * 2500, 0) AS af, 25 + (i % 11) AS depth
+           FROM (VALUES ('1'), ('2')) c(chrom), range(1, 10001) t(i))
+SELECT *, CASE WHEN fit_u(2, chrom, pos, 0) < 0.1 THEN 2 * (fit_u(3, chrom, pos, 0) < af)::INTEGER
+               ELSE (fit_u(3, chrom, pos, 0) < af)::INTEGER + (fit_u(4, chrom, pos, 0) < af)::INTEGER END AS g,
+       (fit_u(5, chrom, pos, 0) < af)::INTEGER + (fit_u(6, chrom, pos, 0) < af)::INTEGER AS h
+FROM s;
+
+statement ok
+CREATE TEMP TABLE fit_counts AS
+SELECT 'c' || CAST(alpha AS VARCHAR) AS sample_id, chrom, pos, af, depth - alt AS ref_count, alt AS alt_count
+FROM (
+  SELECT alpha, chrom, pos, af, depth,
+    (SELECT count(*) FROM range(depth) r(i)
+     WHERE fit_u(7, chrom, pos, i) < (1 - alpha) * [1e-3, 0.5, 1 - 1e-3][g + 1] + alpha * [1e-3, 0.5, 1 - 1e-3][h + 1]) AS alt
+  FROM fit_truth, (VALUES (0.0), (0.03), (0.10)) v(alpha));
+
+# Schema and one row per sample.
+query I
+SELECT column_name || ' ' || column_type FROM (DESCRIBE SELECT * FROM duckhts_count_error_fit('fit_counts')) ORDER BY ALL;
+----
+allele_balance DOUBLE
+artefact_weight DOUBLE
+blocks INTEGER
+contamination DOUBLE
+contamination_relative DOUBLE
+contamination_sd DOUBLE
+homozygosity_excess DOUBLE
+log_likelihood DOUBLE
+log_likelihood_relative DOUBLE
+mean_depth DOUBLE
+method VARCHAR
+reads BIGINT
+sample VARCHAR
+seq_error DOUBLE
+sites BIGINT
+spread_het DOUBLE
+spread_hom DOUBLE
+status VARCHAR
+
+statement ok
+CREATE TEMP TABLE fit AS SELECT * FROM duckhts_count_error_fit('fit_counts');
+
+# Recovery, with tolerances declared from the sampling spread of 20,000 sites at depth 30: the share of
+# the second genome within 0.005 of the truth, the read error within 0.0003 of 1e-3, the allele balance
+# within 0.01 of 1/2, the excess homozygosity within 0.03 of 0.1, and the artefact weight below 0.002.
+# Each chromosome of 25 Mb gives 3 blocks of 10 Mb, so the block interval exists.
+query TIITTTTTT
+SELECT sample, sites, blocks, status,
+  abs(contamination - CAST(substr(sample, 2) AS DOUBLE)) < 0.005,
+  abs(seq_error - 1e-3) < 0.0003, abs(allele_balance - 0.5) < 0.01,
+  abs(homozygosity_excess - 0.1) < 0.03, artefact_weight < 0.002
+FROM fit ORDER BY sample;
+----
+c0.00	20000	6	ok	true	true	true	true	true
+c0.03	20000	6	ok	true	true	true	true	true
+c0.10	20000	6	ok	true	true	true	true	true
+
+# The second genome is unrelated, so the relative hypothesis fits worse and puts it at a larger share;
+# without a second genome the two hypotheses do not differ (0.5 is the optimizer's tolerance).
+query TTT
+SELECT sample, log_likelihood_relative <= log_likelihood + 0.5,
+  CASE WHEN contamination < 0.001 THEN contamination_relative < 0.001 ELSE contamination_relative > contamination END
+FROM fit ORDER BY sample;
+----
+c0.00	true	true
+c0.03	true	true
+c0.10	true	true
+
+# The block interval: the spread of six block estimates is well under the share.
+query TT
+SELECT sample, contamination_sd < 0.003 FROM fit WHERE sample != 'c0.00' ORDER BY sample;
+----
+c0.03	true
+c0.10	true
+
+# The histogram is order-free: shuffled rows on one thread give the same fit for each sample. The
+# mean frequency of a cell is a floating-point mean whose rounding depends on the order of its rows,
+# so the numbers are compared within 1e-6 and the rest exactly.
+statement ok
+CREATE TEMP TABLE fit_shuffled AS SELECT * FROM fit_counts ORDER BY hash(sample_id, chrom, pos, 11);
+
+statement ok
+SET threads = 1;
+
+statement ok
+CREATE TEMP TABLE fit_again AS SELECT * FROM duckhts_count_error_fit('fit_shuffled');
+
+statement ok
+RESET threads;
+
+query I
+SELECT count(*) FROM fit a JOIN fit_again b USING (sample)
+WHERE a.sites = b.sites AND a.reads = b.reads AND a.blocks = b.blocks AND a.status = b.status
+  AND abs(a.seq_error - b.seq_error) < 1e-6 AND abs(a.contamination - b.contamination) < 1e-6
+  AND abs(a.homozygosity_excess - b.homozygosity_excess) < 1e-6 AND abs(a.allele_balance - b.allele_balance) < 1e-6
+  AND abs(a.artefact_weight - b.artefact_weight) < 1e-6 AND abs(a.log_likelihood - b.log_likelihood) < 1e-3;
+----
+3
+
+# Rows without usable evidence are skipped, not errors: NULL counts, no reads, a NULL, NaN, 0 or 1
+# frequency, and sites deeper than max_depth. Adding such rows changes nothing.
+statement ok
+CREATE TEMP TABLE fit_with_skips AS
+SELECT * FROM fit_counts WHERE sample_id = 'c0.03'
+UNION ALL SELECT 'c0.03', '1', 3, 0.4, NULL, 5
+UNION ALL SELECT 'c0.03', '1', 5, 0.4, 0, 0
+UNION ALL SELECT 'c0.03', '1', 7, NULL, 10, 10
+UNION ALL SELECT 'c0.03', '1', 9, 'NaN'::DOUBLE, 10, 10
+UNION ALL SELECT 'c0.03', '1', 11, 0.0, 10, 10
+UNION ALL SELECT 'c0.03', '1', 13, 1.0, 10, 10
+UNION ALL SELECT 'c0.03', '1', 15, 0.4, 1000, 1000;
+
+query I
+SELECT count(*) FROM fit a JOIN duckhts_count_error_fit('fit_with_skips') b USING (sample)
+WHERE a.sites = b.sites AND a.reads = b.reads AND a.blocks = b.blocks AND a.status = b.status
+  AND abs(a.contamination - b.contamination) < 1e-6 AND abs(a.log_likelihood - b.log_likelihood) < 1e-3;
+----
+1
+
+# Few sites or blocks are reported, not hidden.
+query TI
+SELECT status, blocks FROM duckhts_count_error_fit('fit_counts', block_bases := 100000000) WHERE sample = 'c0.00';
+----
+few_blocks	2
+
+statement ok
+CREATE TEMP TABLE fit_few AS SELECT * FROM fit_counts WHERE sample_id = 'c0.00' AND pos <= 400 * 2500;
+
+query TI
+SELECT status, sites FROM duckhts_count_error_fit('fit_few');
+----
+few_sites	800
+
+# An empty relation gives no row, and its arguments are still checked.
+statement ok
+CREATE TEMP TABLE fit_empty AS SELECT * FROM fit_counts WHERE false;
+
+query I
+SELECT count(*) FROM duckhts_count_error_fit('fit_empty');
+----
+0
+
+statement error
+SELECT * FROM duckhts_count_error_fit('fit_empty', freq_bins := 0);
+----
+freq_bins must be between 1 and 1024
+
+statement error
+SELECT * FROM duckhts_count_error_fit('fit_empty', max_depth := 70000);
+----
+max_depth must be between 1 and 65535
+
+statement error
+SELECT * FROM duckhts_count_error_fit('fit_empty', max_cells := 0);
+----
+max_cells must be between 1 and 100000000
+
+statement error
+SELECT * FROM duckhts_count_error_fit('fit_empty', block_bases := 0);
+----
+block_bases must be at least 1
+
+statement error
+SELECT * FROM duckhts_count_error_fit('fit_empty', min_block_sites := 0);
+----
+min_block_sites must be at least 1
+
+# Bad counts are errors.
+statement ok
+CREATE TEMP VIEW fit_negative AS SELECT * REPLACE (-1 AS ref_count) FROM fit_counts;
+
+statement error
+SELECT * FROM duckhts_count_error_fit('fit_negative');
+----
+read counts must not be negative
+
+statement ok
+CREATE TEMP VIEW fit_fraction AS SELECT * REPLACE (2.5 AS alt_count) FROM fit_counts;
+
+statement error
+SELECT * FROM duckhts_count_error_fit('fit_fraction');
+----
+read counts must be whole numbers
+
+# The memory limits are explicit errors: more cells than max_cells, and more bytes than max_cell_bytes.
+statement error
+SELECT * FROM duckhts_count_error_fit('fit_counts', max_cells := 100);
+----
+max_cells
+
+statement error
+SELECT * FROM duckhts_count_error_fit('fit_counts', max_cell_bytes := 1000);
+----
+max_cell_bytes

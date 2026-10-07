@@ -14,6 +14,7 @@
  * and chromosome, and max_site_bytes for all the lists held at once, each with
  * an explicit error (roh_sites.c).
  */
+#include "count_sql.h"
 #include "duckhts_registration.h"
 #include "roh_sites.h"
 
@@ -275,16 +276,10 @@ static const char ancestry_frequencies[] =
     "seq_error := 1e-3, contamination := 0.0, hw_to_az := 6.7e-8, az_to_hw := 5e-9, " \
     "rec_rate := NULL, " ROH_LIMITS
 
-/* A count is cast to INTEGER only when it is a whole number: the cast alone
- * would round 2.5 to 3. */
-#define ROH_WHOLE_COUNT(column) \
-    "CASE WHEN CAST(" column " AS DOUBLE) != trunc(CAST(" column " AS DOUBLE)) " \
-    "THEN error('read counts must be whole numbers') ELSE CAST(" column " AS INTEGER) END"
-
 static const char counts_lists[] =
     "WITH __dht_counts AS (SELECT CAST(sample_id AS VARCHAR) AS smp, "
     "CAST(chrom AS VARCHAR) AS chrom, CAST(pos AS BIGINT) AS pos, "
-    ROH_WHOLE_COUNT("ref_count") " AS ref_count, " ROH_WHOLE_COUNT("alt_count") " AS alt_count, "
+    DUCKHTS_WHOLE_COUNT("ref_count") " AS ref_count, " DUCKHTS_WHOLE_COUNT("alt_count") " AS alt_count, "
     "CAST(af AS DOUBLE) AS af FROM query_table(counts_table)), "
     "__dht_lists AS (SELECT smp, chrom, __duckhts_roh_sites(pos, af, ref_count, alt_count, "
     "NULL::INTEGER, 3, " ROH_LIMIT_ARGUMENTS ") AS s "

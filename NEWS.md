@@ -4,6 +4,21 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- Added `duckhts_count_error_fit()`: the read error, the share of reads of a
+  second genome, the allele balance at heterozygous sites, two spreads, an
+  artefact weight and an excess of homozygosity of each sample, fitted by
+  maximum likelihood from allele read counts at sites of known population
+  frequency, the relation `duckhts_roh_counts()` takes. The fit runs on a
+  histogram of (block, frequency bin, depth, alt count) cells that DuckDB
+  builds and the native code holds in a bounded buffer (`max_cells`,
+  `max_cell_bytes`), so its state does not grow with the sites. Each 10 Mb
+  block is refitted for the share, and the spread of the block estimates gives
+  an interval; the same cells are fitted with a parent or child as the second
+  genome, which the unrelated model puts at half its share. SQL tests recover
+  known parameters from deterministic synthetic counts, and the R tests check
+  the native optimum against an independent fit in R. This is counting model 1
+  of #332 and the first step of its estimator.
+
 - Added `duckhts_bam_mismatch_counts()`: the aligned read bases of a SAM, BAM
   or CRAM file counted against the reference by mate, cycle, base quality and
   substitution, in one pass with fixed memory. A `mask` of known variants (a
