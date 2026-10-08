@@ -24,7 +24,8 @@ typedef struct {
 
 typedef struct {
     uint32_t sites; /* sites in the cell */
-    float af;       /* mean frequency of the counted allele over those sites, in (0, 1) */
+    float af;       /* mean frequency of the counted allele over those sites, in (0, 1):
+                       the nearest float inside when the double rounds to an end */
     uint16_t block; /* block of the genome, from 0 */
     uint16_t depth; /* reads at each site */
     uint16_t alt;   /* reads of the counted allele at each site, at most depth */

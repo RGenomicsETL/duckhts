@@ -263,6 +263,10 @@ static void cells_update(duckdb_function_info info, duckdb_data_chunk input,
         }
         cell.sites = (uint32_t)sites[row];
         cell.af = (float)frequencies[row];
+        /* A double inside (0, 1) can round to 0 or 1 as a float; the cell
+         * keeps the nearest float inside, as count_cells.h promises. */
+        if (cell.af >= 1.0f) cell.af = nextafterf(1.0f, 0.0f);
+        if (cell.af <= 0.0f) cell.af = nextafterf(0.0f, 1.0f);
         cell.block = (uint16_t)blocks[row];
         cell.depth = (uint16_t)depths[row];
         cell.alt = (uint16_t)alts[row];

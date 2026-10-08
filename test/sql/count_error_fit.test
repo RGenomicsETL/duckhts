@@ -155,6 +155,26 @@ ORDER BY sample;
 c0.03	20000	6	ok	false	duckhts_count_error_fit v1
 empty	0	0	no_sites	true	duckhts_count_error_fit v1
 
+# A NULL sample_id is one sample and keeps its fit; a frequency that rounds to 1 or 0 in single
+# precision is kept inside (0, 1) and its site is used.
+statement ok
+CREATE TEMP VIEW fit_null_sample AS SELECT * REPLACE (NULL AS sample_id) FROM fit_counts WHERE sample_id = 'c0.03';
+
+query TIT
+SELECT sample IS NULL, sites, status FROM duckhts_count_error_fit('fit_null_sample');
+----
+true	20000	ok
+
+statement ok
+CREATE TEMP TABLE fit_edge AS SELECT * FROM fit_counts WHERE sample_id = 'c0.03'
+UNION ALL SELECT 'c0.03', '1', 2501, 0.999999999, 1, 29
+UNION ALL SELECT 'c0.03', '1', 2502, 1e-9, 29, 1;
+
+query IT
+SELECT sites, status FROM duckhts_count_error_fit('fit_edge');
+----
+20002	ok
+
 # pos is one-based: block k holds the positions k * block_bases + 1 to (k + 1) * block_bases. The last
 # site of each chromosome, at 25,000,000, is in the first block of 25,000,000 bases, so each chromosome
 # is one block. A position below 1 is an error.
@@ -266,6 +286,39 @@ statement error
 SELECT * FROM duckhts_count_error_fit('fit_fraction');
 ----
 read counts must be whole numbers
+
+# The whole-number test is exact on the value's type: a DECIMAL with more digits than a DOUBLE holds.
+statement ok
+CREATE TEMP VIEW fit_decimal AS SELECT * REPLACE (1.00000000000000000001::DECIMAL(38,20) AS ref_count) FROM fit_counts;
+
+statement error
+SELECT * FROM duckhts_count_error_fit('fit_decimal');
+----
+read counts must be whole numbers
+
+statement error
+SELECT * FROM duckhts_count_error_fit('fit_empty', freq_bins := 1.00000000000000000001::DECIMAL(38,20));
+----
+freq_bins must be a whole number
+
+# A malformed row is an error even when its frequency or counts would have it skipped.
+statement ok
+CREATE TEMP VIEW fit_bad_skipped AS SELECT * FROM fit_counts
+UNION ALL SELECT 'c0.03', '1', 0, NULL, 10, 10;
+
+statement error
+SELECT * FROM duckhts_count_error_fit('fit_bad_skipped');
+----
+pos must be a one-based position
+
+statement ok
+CREATE TEMP VIEW fit_negative_skipped AS SELECT * FROM fit_counts
+UNION ALL SELECT 'c0.03', '1', 2501, NULL, -1, 10;
+
+statement error
+SELECT * FROM duckhts_count_error_fit('fit_negative_skipped');
+----
+read counts must not be negative
 
 # The fit takes any BLOB, so a crafted histogram is an error and not a crash: one with the header
 # and no cell, and one whose cell has more alternate reads than depth.
