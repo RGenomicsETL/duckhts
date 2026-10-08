@@ -17,7 +17,8 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   genome, which the unrelated model puts at half its share. SQL tests recover
   known parameters from deterministic synthetic counts, and the R tests check
   the native optimum against an independent fit in R. This is counting model 1
-  of #332 and the first step of its estimator.
+  of https://github.com/RGenomicsETL/duckhts/issues/332 and the first step of
+  its estimator.
 
 - Added `duckhts_bam_mismatch_counts()`: the aligned read bases of a SAM, BAM
   or CRAM file counted against the reference by mate, cycle, base quality and
@@ -25,7 +26,8 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   BCF or a bgzip-compressed VCF) leaves those positions out, so the mismatches
   that remain are mostly errors of the read, the library or the alignment,
   with the variants that the mask does not hold. This is the count for the
-  read-error and contamination work (#332): at a site where no genome in the
+  read-error and contamination work
+  (https://github.com/RGenomicsETL/duckhts/issues/332): at a site where no genome in the
   sample varies, a second genome adds no mismatch, so the rate is an upper
   bound on the error rate, and it is the error rate when the mask holds every
   variant site of those genomes. Bases next

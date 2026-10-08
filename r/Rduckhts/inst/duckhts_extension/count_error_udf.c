@@ -1,8 +1,9 @@
 /* __duckhts_count_error_fit(cells, min_block_sites, max_cell_bytes): the
  * count-error fit of one sample from its packed histogram (count_cells.h), as
- * one STRUCT row. __duckhts_count_error_valid_args(...): TRUE, or the error
- * the macro's arguments would raise, so that bad arguments fail on empty
- * input too.
+ * one STRUCT row; a NULL histogram is a sample with no usable site and gives
+ * the no_sites row. __duckhts_count_error_valid_args(...): TRUE, or the
+ * error the macro's arguments would raise, so that bad arguments fail on
+ * empty input too.
  *
  * The pooled fit uses every cell; the relative fit refits the same cells with
  * a parent or child as the second genome. Each block is refitted for
@@ -207,6 +208,18 @@ static int fit_sample(duckhts_count_cell_t *cells, size_t count, int64_t min_blo
     return 1;
 }
 
+/* The result of a sample with no usable site: counts of 0, numbers NULL. */
+static void no_sites_result(fit_result_t *result) {
+    double *pooled = (double *)&result->pooled.params;
+    double *relative = (double *)&result->relative.params;
+    memset(result, 0, sizeof(*result));
+    for (int i = 0; i < DUCKHTS_COUNT_ERROR_PARAMETERS; i++) pooled[i] = relative[i] = NAN;
+    result->pooled.log_likelihood = NAN;
+    result->relative.log_likelihood = NAN;
+    result->contamination_sd = NAN;
+    result->status = "no_sites";
+}
+
 static void set_double(duckdb_vector vector, idx_t row, double value) {
     if (isnan(value)) {
         duckdb_vector_ensure_validity_writable(vector);
@@ -233,11 +246,6 @@ static void count_error_fit_scalar(duckdb_function_info info, duckdb_data_chunk 
         duckhts_count_cell_t *cells;
         fit_result_t result;
         int fitted;
-        if (!row_valid(cells_vector, row)) {
-            duckdb_vector_ensure_validity_writable(output);
-            duckdb_validity_set_row_invalid(duckdb_vector_get_validity(output), row);
-            continue;
-        }
         if (!row_valid(min_block_vector, row) || min_block_sites[row] < 1) {
             fit_error(info, "min_block_sites must be at least 1");
             return;
@@ -246,16 +254,21 @@ static void count_error_fit_scalar(duckdb_function_info info, duckdb_data_chunk 
             fit_error(info, "max_cell_bytes must be at least 1");
             return;
         }
-        cells = read_cells(&blobs[row], &count, (uint64_t)max_cell_bytes[row], error);
-        if (!cells) {
-            fit_error(info, error);
-            return;
-        }
-        fitted = fit_sample(cells, count, min_block_sites[row], (uint64_t)max_cell_bytes[row], &result, error);
-        release_cells(cells, count);
-        if (!fitted) {
-            fit_error(info, error);
-            return;
+        if (!row_valid(cells_vector, row)) {
+            /* The macro gives a sample with no usable site a NULL histogram. */
+            no_sites_result(&result);
+        } else {
+            cells = read_cells(&blobs[row], &count, (uint64_t)max_cell_bytes[row], error);
+            if (!cells) {
+                fit_error(info, error);
+                return;
+            }
+            fitted = fit_sample(cells, count, min_block_sites[row], (uint64_t)max_cell_bytes[row], &result, error);
+            release_cells(cells, count);
+            if (!fitted) {
+                fit_error(info, error);
+                return;
+            }
         }
         ((int64_t *)duckdb_vector_get_data(out[OUT_SITES]))[row] = (int64_t)result.sites;
         ((int64_t *)duckdb_vector_get_data(out[OUT_READS]))[row] = (int64_t)result.reads;

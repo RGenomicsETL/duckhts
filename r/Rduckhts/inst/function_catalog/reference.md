@@ -1478,7 +1478,7 @@ table(sample VARCHAR, sites BIGINT, reads BIGINT, mean_depth DOUBLE, blocks INTE
 
 ### Input
 
-counts_table is the relation duckhts_roh_counts takes: sample_id, chrom, pos (one-based), ref_count, alt_count and af, one row per sample and site, where alt_count counts reads showing the allele whose population frequency is af. Any frequency source composes in SQL first, for example ancestry-weighted frequencies. Sites with a NULL count, no reads, more than max_depth reads, or an af that is NULL, NaN, 0 or 1 are skipped. Negative or fractional counts are errors, as is a NULL or non-positive pos. Block k of a chromosome holds the positions k * block_bases + 1 to (k + 1) * block_bases.
+counts_table is the relation duckhts_roh_counts takes: sample_id, chrom, pos (one-based), ref_count, alt_count and af, one row per sample and site, where alt_count counts reads showing the allele whose population frequency is af. Any frequency source composes in SQL first, for example ancestry-weighted frequencies. Sites with a NULL count, no reads, more than max_depth reads (the two counts are summed as BIGINT), or an af that is NULL, NaN, 0 or 1 are skipped; a sample whose sites are all skipped keeps its row. Negative or fractional counts are errors, as is a NULL or non-positive pos. Block k of a chromosome holds the positions k * block_bases + 1 to (k + 1) * block_bases.
 
 ### Model
 
@@ -1486,7 +1486,7 @@ A site's sample genotype has 0, 1 or 2 copies of the counted allele with Hardy-W
 
 ### Output
 
-One row per sample: the fitted seven numbers, the log-likelihood, and contamination_relative with log_likelihood_relative from the same cells with a parent or child as the second genome; the sites and reads used and their mean depth. Each block of block_bases bases with at least min_block_sites sites is refitted for contamination with the other parameters held, and contamination_sd is the standard deviation of those block estimates divided by the square root of their number (NULL with fewer than three blocks). status is ok, few_sites (under 1,000 sites), few_blocks, at_bound (contamination, seq_error or artefact_weight at its upper bound) or no_convergence; method names the fit and its version.
+One row per sample: the fitted seven numbers, the log-likelihood, and contamination_relative with log_likelihood_relative from the same cells with a parent or child as the second genome; the sites and reads used and their mean depth. Each block of block_bases bases with at least min_block_sites sites is refitted for contamination with the other parameters held, and contamination_sd is the standard deviation of those block estimates divided by the square root of their number (NULL with fewer than three blocks). status is ok, no_sites (a sample whose sites were all skipped: sites 0, the numbers NULL), few_sites (under 1,000 sites), few_blocks (under three refitted blocks), at_bound (contamination, seq_error or artefact_weight at its upper bound), no_convergence or no_convergence_relative; method names the fit and its version.
 
 ### What the numbers are
 

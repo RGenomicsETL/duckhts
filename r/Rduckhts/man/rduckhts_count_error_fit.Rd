@@ -46,8 +46,9 @@ A data frame (or invisible `TRUE` when `table_name` is given) with
   `seq_error`, `contamination`, `contamination_sd`, `homozygosity_excess`,
   `allele_balance`, `spread_hom`, `spread_het`, `artefact_weight`,
   `log_likelihood`, `contamination_relative`, `log_likelihood_relative`,
-  `status` (`ok`, `few_sites`, `few_blocks`, `at_bound`, `no_convergence`
-  or `no_convergence_relative`) and `method`.
+  `status` (`ok`, `no_sites` for a sample whose sites were all skipped,
+  `few_sites`, `few_blocks`, `at_bound`, `no_convergence` or
+  `no_convergence_relative`) and `method`.
 }
 \description{
 Fits, for each sample, the read error, the share of reads from a second

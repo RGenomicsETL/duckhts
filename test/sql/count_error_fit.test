@@ -133,6 +133,22 @@ WHERE a.sites = b.sites AND a.reads = b.reads AND a.blocks = b.blocks AND a.stat
 ----
 1
 
+# A sample whose sites are all skipped keeps its row: status no_sites, sites 0, the numbers NULL. A
+# count near the INTEGER limit is summed as BIGINT, so that site is deeper than max_depth and skipped.
+statement ok
+CREATE TEMP TABLE fit_unusable AS SELECT * FROM fit_counts WHERE sample_id = 'c0.03'
+UNION ALL SELECT 'c0.03', '1', 2501, 0.4, 2147483647, 1
+UNION ALL SELECT 'empty', '1', 2500, NULL, 10, 10
+UNION ALL SELECT 'empty', '1', 5000, 0.4, 0, 0
+UNION ALL SELECT 'empty', '1', 7500, 0.4, 2147483647, 1;
+
+query TIITTT
+SELECT sample, sites, blocks, status, contamination IS NULL, method FROM duckhts_count_error_fit('fit_unusable')
+ORDER BY sample;
+----
+c0.03	20000	6	ok	false	duckhts_count_error_fit v1
+empty	0	0	no_sites	true	duckhts_count_error_fit v1
+
 # pos is one-based: block k holds the positions k * block_bases + 1 to (k + 1) * block_bases. The last
 # site of each chromosome, at 25,000,000, is in the first block of 25,000,000 bases, so each chromosome
 # is one block. A position below 1 is an error.

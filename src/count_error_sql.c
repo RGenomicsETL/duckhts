@@ -1,5 +1,6 @@
 /* duckhts_count_error_fit(counts_table, ...): read error, contamination and
- * related quantities fitted from allele read counts, one row per sample.
+ * related quantities fitted from allele read counts, one row per sample of
+ * the input, including a sample with no usable site (status no_sites).
  *
  * The relation is the one duckhts_roh_counts takes: sample_id, chrom, pos,
  * ref_count, alt_count and af. DuckDB builds the histogram of (block,
@@ -36,7 +37,7 @@ static const char *const count_error_fit_sql[] = {
     "THEN error('pos must be a one-based position, at least 1') "
     "ELSE (pos - 1) // CAST(block_bases AS BIGINT) END AS block_index, af, "
     "CASE WHEN ref_count < 0 OR alt_count < 0 THEN error('read counts must not be negative') "
-    "ELSE ref_count + alt_count END AS depth, alt_count AS alt "
+    "ELSE CAST(ref_count AS BIGINT) + CAST(alt_count AS BIGINT) END AS depth, alt_count AS alt "
     "FROM __dht_counts WHERE ref_count IS NOT NULL AND alt_count IS NOT NULL "
     "AND af IS NOT NULL AND isfinite(af) AND af > 0 AND af < 1), ",
     /* The histogram: one row per cell, with the mean frequency of its sites.
@@ -50,9 +51,12 @@ static const char *const count_error_fit_sql[] = {
     "__dht_hist AS (SELECT smp, __duckhts_count_cells(CAST(block AS INTEGER), af, CAST(depth AS INTEGER), "
     "CAST(alt AS INTEGER), sites, CAST(max_cells AS BIGINT), CAST(max_cell_bytes AS BIGINT)) AS cells "
     "FROM __dht_blocks GROUP BY smp), ",
+    /* Every sample of the input keeps its row: one with no usable site gets a
+     * NULL histogram, which the fit reports as no_sites. */
+    "__dht_samples AS (SELECT DISTINCT smp FROM __dht_counts), "
     "__dht_fit AS (SELECT smp, __duckhts_count_error_fit(cells, CAST(min_block_sites AS BIGINT), "
     "CAST(max_cell_bytes AS BIGINT)) AS f "
-    "FROM __dht_hist) ",
+    "FROM __dht_samples LEFT JOIN __dht_hist USING (smp)) ",
     "SELECT smp AS \"sample\", f.sites, f.reads, f.mean_depth, f.blocks, f.seq_error, f.contamination, "
     "f.contamination_sd, f.homozygosity_excess, f.allele_balance, f.spread_hom, f.spread_het, "
     "f.artefact_weight, f.log_likelihood, f.contamination_relative, f.log_likelihood_relative, "
