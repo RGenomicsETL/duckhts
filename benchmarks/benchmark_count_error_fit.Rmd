@@ -202,7 +202,7 @@ inputs <- rbind(inputs, real_inputs)
 # histogram cells and the distinct (depth, alt) pairs, with the default
 # options of the macro.
 denominators <- do.call(rbind, lapply(inputs$source_sql, function(source) query_untimed(sprintf(paste(
-  "WITH r AS (SELECT sample_id, chrom, pos // 10000000 AS block_index, floor(af * 64) AS bin,",
+  "WITH r AS (SELECT sample_id, chrom, (pos - 1) // 10000000 AS block_index, floor(af * 64) AS bin,",
   "ref_count + alt_count AS depth, alt_count AS alt FROM %s",
   "WHERE ref_count IS NOT NULL AND alt_count IS NOT NULL AND af > 0 AND af < 1",
   "AND ref_count + alt_count BETWEEN 1 AND 1000)",

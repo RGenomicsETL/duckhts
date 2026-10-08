@@ -20,36 +20,42 @@
     "block_bases := 10000000, freq_bins := 64, max_depth := 1000, min_block_sites := 1000, " \
     "max_cells := 5000000, max_cell_bytes := 1073741824"
 
-/* The macro's arguments as the native functions take them. */
+/* The macro's arguments as the native functions take them: whole numbers,
+ * checked before the cast so that 1.5 is an error and not 2. */
 #define FIT_ARGUMENTS \
-    "CAST(block_bases AS BIGINT), CAST(freq_bins AS BIGINT), CAST(max_depth AS BIGINT), " \
-    "CAST(min_block_sites AS BIGINT), CAST(max_cells AS BIGINT), CAST(max_cell_bytes AS BIGINT)"
+    DUCKHTS_WHOLE_OPTION("block_bases") ", " DUCKHTS_WHOLE_OPTION("freq_bins") ", " \
+    DUCKHTS_WHOLE_OPTION("max_depth") ", " DUCKHTS_WHOLE_OPTION("min_block_sites") ", " \
+    DUCKHTS_WHOLE_OPTION("max_cells") ", " DUCKHTS_WHOLE_OPTION("max_cell_bytes")
 
 static const char *const count_error_fit_sql[] = {
     "CREATE OR REPLACE MACRO duckhts_count_error_fit(counts_table, " FIT_OPTIONS ") AS TABLE (",
-    /* Rows as the decode reads them. A negative count is an error. */
+    /* Rows as the decode reads them, with the counts kept wide until the
+     * depth filter, so that a count beyond INTEGER makes a skipped site and
+     * not a conversion error. A negative count is an error. */
     "WITH __dht_counts AS (SELECT CAST(sample_id AS VARCHAR) AS smp, CAST(chrom AS VARCHAR) AS chrom, "
-    "CAST(pos AS BIGINT) AS pos, " DUCKHTS_WHOLE_COUNT("ref_count") " AS ref_count, "
-    DUCKHTS_WHOLE_COUNT("alt_count") " AS alt_count, CAST(af AS DOUBLE) AS af "
+    "CAST(pos AS BIGINT) AS pos, " DUCKHTS_WHOLE_COUNT_AS("ref_count", "BIGINT") " AS ref_count, "
+    DUCKHTS_WHOLE_COUNT_AS("alt_count", "BIGINT") " AS alt_count, CAST(af AS DOUBLE) AS af "
     "FROM query_table(counts_table)), ",
     /* pos is one-based, so block k holds k * block_bases + 1 to (k + 1) * block_bases. */
     "__dht_sites AS (SELECT smp, chrom, CASE WHEN pos IS NULL OR pos < 1 "
     "THEN error('pos must be a one-based position, at least 1') "
-    "ELSE (pos - 1) // CAST(block_bases AS BIGINT) END AS block_index, af, "
+    "ELSE (pos - 1) // " DUCKHTS_WHOLE_OPTION("block_bases") " END AS block_index, af, "
     "CASE WHEN ref_count < 0 OR alt_count < 0 THEN error('read counts must not be negative') "
-    "ELSE CAST(ref_count AS BIGINT) + CAST(alt_count AS BIGINT) END AS depth, alt_count AS alt "
+    "ELSE ref_count + alt_count END AS depth, alt_count AS alt "
     "FROM __dht_counts WHERE ref_count IS NOT NULL AND alt_count IS NOT NULL "
     "AND af IS NOT NULL AND isfinite(af) AND af > 0 AND af < 1), ",
     /* The histogram: one row per cell, with the mean frequency of its sites.
      * Sites deeper than max_depth are left out, which bounds the cells. */
-    "__dht_cells AS (SELECT smp, chrom, block_index, CAST(floor(af * freq_bins) AS INTEGER) AS bin, "
+    "__dht_cells AS (SELECT smp, chrom, block_index, "
+    "CAST(floor(af * " DUCKHTS_WHOLE_OPTION("freq_bins") ") AS INTEGER) AS bin, "
     "depth, alt, count(*) AS sites, avg(af) AS af FROM __dht_sites "
-    "WHERE depth >= 1 AND depth <= CAST(max_depth AS BIGINT) GROUP BY ALL), ",
+    "WHERE depth >= 1 AND depth <= " DUCKHTS_WHOLE_OPTION("max_depth") " GROUP BY ALL), ",
     /* Blocks of a sample are numbered from 0 in chromosome and position order. */
     "__dht_blocks AS (SELECT *, dense_rank() OVER (PARTITION BY smp ORDER BY chrom, block_index) - 1 AS block "
     "FROM __dht_cells), ",
     "__dht_hist AS (SELECT smp, __duckhts_count_cells(CAST(block AS INTEGER), af, CAST(depth AS INTEGER), "
-    "CAST(alt AS INTEGER), sites, CAST(max_cells AS BIGINT), CAST(max_cell_bytes AS BIGINT)) AS cells "
+    "CAST(alt AS INTEGER), sites, " DUCKHTS_WHOLE_OPTION("max_cells") ", "
+    DUCKHTS_WHOLE_OPTION("max_cell_bytes") ") AS cells "
     "FROM __dht_blocks GROUP BY smp), ",
     /* Every sample of the input keeps its row: one with no usable site gets a
      * NULL histogram, which the fit reports as no_sites. The sample set reads
@@ -57,8 +63,8 @@ static const char *const count_error_fit_sql[] = {
      * rows once into the histogram instead of materialising the CTE it
      * would otherwise reference twice. */
     "__dht_samples AS (SELECT DISTINCT CAST(sample_id AS VARCHAR) AS smp FROM query_table(counts_table)), "
-    "__dht_fit AS (SELECT smp, __duckhts_count_error_fit(cells, CAST(min_block_sites AS BIGINT), "
-    "CAST(max_cell_bytes AS BIGINT)) AS f "
+    "__dht_fit AS (SELECT smp, __duckhts_count_error_fit(cells, " DUCKHTS_WHOLE_OPTION("min_block_sites") ", "
+    DUCKHTS_WHOLE_OPTION("max_cell_bytes") ") AS f "
     "FROM __dht_samples LEFT JOIN __dht_hist USING (smp)) ",
     "SELECT smp AS \"sample\", f.sites, f.reads, f.mean_depth, f.blocks, f.seq_error, f.contamination, "
     "f.contamination_sd, f.homozygosity_excess, f.allele_balance, f.spread_hom, f.spread_het, "
