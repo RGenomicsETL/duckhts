@@ -1478,7 +1478,7 @@ table(sample VARCHAR, sites BIGINT, reads BIGINT, mean_depth DOUBLE, blocks INTE
 
 ### Input
 
-counts_table is the relation duckhts_roh_counts takes: sample_id, chrom, pos (one-based), ref_count, alt_count and af, one row per sample and site, where alt_count counts reads showing the allele whose population frequency is af. Any frequency source composes in SQL first, for example ancestry-weighted frequencies. Sites with a NULL count, no reads, more than max_depth reads (the two counts are summed as BIGINT), or an af that is NULL, NaN, 0 or 1 are skipped; a sample whose sites are all skipped keeps its row. Negative or fractional counts are errors, as is a NULL or non-positive pos, or a fractional option. Block k of a chromosome holds the positions k * block_bases + 1 to (k + 1) * block_bases.
+counts_table is the relation duckhts_roh_counts takes: sample_id, chrom, pos (one-based), ref_count, alt_count and af, one row per sample and site, where alt_count counts reads showing the allele whose population frequency is af. Any frequency source composes in SQL first, for example ancestry-weighted frequencies. Sites with a NULL count, no reads, more than max_depth reads (the two counts are summed as BIGINT), or an af that is NULL, NaN, 0 or 1 are skipped; a sample whose sites are all skipped keeps its row. Negative or fractional counts are errors, as is a NULL, non-positive or fractional pos, or a fractional option. Block k of a chromosome holds the positions k * block_bases + 1 to (k + 1) * block_bases.
 
 ### Model
 

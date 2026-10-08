@@ -177,8 +177,15 @@ static int fit_sample(duckhts_count_cell_t *cells, size_t count, int64_t min_blo
     result->contamination_sd = NAN;
     qsort(cells, count, sizeof(*cells), compare_cells);
     for (size_t i = 0; i < count; i++) {
+        /* sites * depth is below 2^48 per cell; the sums are reported as
+         * BIGINT, so a crafted histogram past that is an error, not a wrap. */
+        const uint64_t cell_reads = (uint64_t)cells[i].sites * cells[i].depth;
+        if (result->sites > (uint64_t)INT64_MAX - cells[i].sites || result->reads > (uint64_t)INT64_MAX - cell_reads) {
+            snprintf(error, FIT_ERRLEN, "internal error: histogram sites or reads exceed BIGINT");
+            return 0;
+        }
         result->sites += cells[i].sites;
-        result->reads += (uint64_t)cells[i].sites * cells[i].depth;
+        result->reads += cell_reads;
     }
     if (!duckhts_count_error_fit(cells, count, DUCKHTS_COUNT_ERROR_UNRELATED, max_cell_bytes, &result->pooled,
                                  error, FIT_ERRLEN) ||

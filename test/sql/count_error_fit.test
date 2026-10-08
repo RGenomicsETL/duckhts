@@ -311,6 +311,16 @@ SELECT * FROM duckhts_count_error_fit('fit_bad_skipped');
 ----
 pos must be a one-based position
 
+# A fractional position is an error, not a rounded coordinate.
+statement ok
+CREATE TEMP VIEW fit_fraction_pos AS SELECT * FROM fit_counts
+UNION ALL SELECT 'c0.03', '1', 2500.5, 0.4, 10, 10;
+
+statement error
+SELECT * FROM duckhts_count_error_fit('fit_fraction_pos');
+----
+pos must be a whole number
+
 statement ok
 CREATE TEMP VIEW fit_negative_skipped AS SELECT * FROM fit_counts
 UNION ALL SELECT 'c0.03', '1', 2501, NULL, -1, 10;
@@ -338,6 +348,15 @@ statement error
 SELECT __duckhts_count_error_fit('DHCX\x00\x00\x00\x00'::BLOB, 1000, 1073741824);
 ----
 unknown layout
+
+# The sites and reads are reported as BIGINT: 32,769 crafted cells of 4,294,967,295 sites at depth
+# 65,535 hold more reads than BIGINT, an error and not a wrapped number.
+statement error
+SELECT __duckhts_count_error_fit(
+  ('DHCC\x00\x00\x00\x00' || repeat(('\xFF\xFF\xFF\xFF' || '\x00\x00\x00\x3F' || '\x00\x00' || '\xFF\xFF' || '\x00\x00' || '\x00\x00')::BLOB, 32769))::BLOB,
+  1000, 1073741824);
+----
+reads exceed BIGINT
 
 # The memory limits are explicit errors: more cells than max_cells, and more bytes than max_cell_bytes.
 statement error

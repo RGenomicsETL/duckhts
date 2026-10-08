@@ -23,6 +23,8 @@
 /* The errors of a malformed row, raised wherever the row is seen. */
 #define FIT_POS_ERROR "error('pos must be a one-based position, at least 1')"
 #define FIT_NEGATIVE_ERROR "error('read counts must not be negative')"
+/* A position is cast only when it is a whole number. */
+#define FIT_WHOLE_POS DUCKHTS_WHOLE_AS("pos", "BIGINT", "pos must be a whole number")
 
 /* The macro's arguments as the native functions take them: whole numbers,
  * checked before the cast so that 1.5 is an error and not 2. */
@@ -37,7 +39,7 @@ static const char *const count_error_fit_sql[] = {
      * depth test, so that a count beyond INTEGER makes a skipped site and
      * not a conversion error. A negative count is an error. */
     "WITH __dht_counts AS (SELECT CAST(sample_id AS VARCHAR) AS smp, CAST(chrom AS VARCHAR) AS chrom, "
-    "CAST(pos AS BIGINT) AS pos, " DUCKHTS_WHOLE_COUNT_AS("ref_count", "BIGINT") " AS ref_count, "
+    FIT_WHOLE_POS " AS pos, " DUCKHTS_WHOLE_COUNT_AS("ref_count", "BIGINT") " AS ref_count, "
     DUCKHTS_WHOLE_COUNT_AS("alt_count", "BIGINT") " AS alt_count, CAST(af AS DOUBLE) AS af "
     "FROM query_table(counts_table)), ",
     /* pos is one-based, so block k holds k * block_bases + 1 to (k + 1) * block_bases. */
@@ -73,7 +75,8 @@ static const char *const count_error_fit_sql[] = {
      * their own checks ran. */
     "__dht_samples AS (SELECT CASE WHEN bad_pos > 0 THEN " FIT_POS_ERROR " "
     "WHEN bad_counts > 0 THEN " FIT_NEGATIVE_ERROR " ELSE smp END AS smp FROM ("
-    "SELECT CAST(sample_id AS VARCHAR) AS smp, count(*) FILTER (WHERE pos IS NULL OR pos < 1) AS bad_pos, "
+    "SELECT CAST(sample_id AS VARCHAR) AS smp, "
+    "count(*) FILTER (WHERE " FIT_WHOLE_POS " IS NULL OR " FIT_WHOLE_POS " < 1) AS bad_pos, "
     "count(*) FILTER (WHERE " DUCKHTS_WHOLE_COUNT_AS("ref_count", "BIGINT") " < 0 OR "
     DUCKHTS_WHOLE_COUNT_AS("alt_count", "BIGINT") " < 0) AS bad_counts "
     "FROM query_table(counts_table) GROUP BY smp)), ",
