@@ -52,8 +52,11 @@ static const char *const count_error_fit_sql[] = {
     "CAST(alt AS INTEGER), sites, CAST(max_cells AS BIGINT), CAST(max_cell_bytes AS BIGINT)) AS cells "
     "FROM __dht_blocks GROUP BY smp), ",
     /* Every sample of the input keeps its row: one with no usable site gets a
-     * NULL histogram, which the fit reports as no_sites. */
-    "__dht_samples AS (SELECT DISTINCT smp FROM __dht_counts), "
+     * NULL histogram, which the fit reports as no_sites. The sample set reads
+     * the input again rather than __dht_counts, so that DuckDB streams the
+     * rows once into the histogram instead of materialising the CTE it
+     * would otherwise reference twice. */
+    "__dht_samples AS (SELECT DISTINCT CAST(sample_id AS VARCHAR) AS smp FROM query_table(counts_table)), "
     "__dht_fit AS (SELECT smp, __duckhts_count_error_fit(cells, CAST(min_block_sites AS BIGINT), "
     "CAST(max_cell_bytes AS BIGINT)) AS f "
     "FROM __dht_samples LEFT JOIN __dht_hist USING (smp)) ",
