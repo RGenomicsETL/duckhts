@@ -99,8 +99,14 @@ static int compare_cells(const void *a, const void *b) {
     return 0;
 }
 
+static void release_cells(duckhts_count_cell_t *cells, size_t count) {
+    free(cells);
+    duckhts_count_bytes_release((uint64_t)count * sizeof(*cells));
+}
+
 /* Reads the cells of one BLOB into an owned, aligned array of `count` cells,
- * charged against max_cell_bytes; release_cells gives both back. */
+ * charged against max_cell_bytes; release_cells gives both back. The BLOB
+ * must hold at least one cell, and every cell must be in range. */
 static duckhts_count_cell_t *read_cells(duckdb_string_t *blob, size_t *count, uint64_t max_cell_bytes,
                                         char *error) {
     const char *data = duckdb_string_is_inlined(*blob) ? blob->value.inlined.inlined : blob->value.pointer.ptr;
@@ -119,7 +125,11 @@ static duckhts_count_cell_t *read_cells(duckdb_string_t *blob, size_t *count, ui
         return NULL;
     }
     *count = (length - sizeof(header)) / sizeof(duckhts_count_cell_t);
-    bytes = (uint64_t)(*count ? *count : 1) * sizeof(*cells);
+    if (*count == 0) {
+        snprintf(error, FIT_ERRLEN, "internal error: histogram has no cell");
+        return NULL;
+    }
+    bytes = (uint64_t)*count * sizeof(*cells);
     if (!duckhts_count_bytes_charge(bytes, max_cell_bytes, &would_hold)) {
         snprintf(error, FIT_ERRLEN,
                  "a fit would hold %llu bytes of histogram memory, more than max_cell_bytes = %llu; "
@@ -134,12 +144,18 @@ static duckhts_count_cell_t *read_cells(duckdb_string_t *blob, size_t *count, ui
         return NULL;
     }
     memcpy(cells, data + sizeof(header), *count * sizeof(*cells));
+    /* The function takes any BLOB, so every cell is checked as the aggregate
+     * checked it (count_cells.c) before the model indexes tables by it. */
+    for (size_t i = 0; i < *count; i++) {
+        const duckhts_count_cell_t *cell = &cells[i];
+        if (cell->depth < 1 || cell->alt > cell->depth || cell->sites < 1 || !(cell->af > 0 && cell->af < 1)) {
+            snprintf(error, FIT_ERRLEN, "internal error: histogram cell %llu is out of range",
+                     (unsigned long long)i);
+            release_cells(cells, *count);
+            return NULL;
+        }
+    }
     return cells;
-}
-
-static void release_cells(duckhts_count_cell_t *cells, size_t count) {
-    free(cells);
-    duckhts_count_bytes_release((uint64_t)(count ? count : 1) * sizeof(*cells));
 }
 
 typedef struct {

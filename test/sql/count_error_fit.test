@@ -134,16 +134,19 @@ WHERE a.sites = b.sites AND a.reads = b.reads AND a.blocks = b.blocks AND a.stat
 1
 
 # A sample whose sites are all skipped keeps its row: status no_sites, sites 0, the numbers NULL. The
-# counts stay BIGINT until the depth filter, so a count near or beyond the INTEGER limit makes a site
-# deeper than max_depth that is skipped, not an overflow or conversion error.
+# counts stay BIGINT and a count above max_depth makes a skipped site before any sum, so a count near
+# or beyond the INTEGER limit, or at the BIGINT limit, is a skipped site and not an overflow or
+# conversion error.
 statement ok
 CREATE TEMP TABLE fit_unusable AS SELECT * FROM fit_counts WHERE sample_id = 'c0.03'
 UNION ALL SELECT 'c0.03', '1', 2501, 0.4, 2147483647, 1
 UNION ALL SELECT 'c0.03', '1', 2502, 0.4, 2147483648, 0
+UNION ALL SELECT 'c0.03', '1', 2503, 0.4, 9223372036854775807, 1
 UNION ALL SELECT 'empty', '1', 2500, NULL, 10, 10
 UNION ALL SELECT 'empty', '1', 5000, 0.4, 0, 0
 UNION ALL SELECT 'empty', '1', 7500, 0.4, 2147483647, 1
-UNION ALL SELECT 'empty', '1', 10000, 0.4, 0, 2147483648;
+UNION ALL SELECT 'empty', '1', 10000, 0.4, 0, 2147483648
+UNION ALL SELECT 'empty', '1', 12500, 0.4, 1, 9223372036854775807;
 
 query TIITTT
 SELECT sample, sites, blocks, status, contamination IS NULL, method FROM duckhts_count_error_fit('fit_unusable')
@@ -263,6 +266,25 @@ statement error
 SELECT * FROM duckhts_count_error_fit('fit_fraction');
 ----
 read counts must be whole numbers
+
+# The fit takes any BLOB, so a crafted histogram is an error and not a crash: one with the header
+# and no cell, and one whose cell has more alternate reads than depth.
+statement error
+SELECT __duckhts_count_error_fit('DHCC\x00\x00\x00\x00'::BLOB, 1000, 1073741824);
+----
+histogram has no cell
+
+statement error
+SELECT __duckhts_count_error_fit(
+  ('DHCC\x00\x00\x00\x00' || '\x01\x00\x00\x00' || '\x00\x00\x00\x3F' || '\x00\x00' || '\x0A\x00' || '\x0B\x00' || '\x00\x00')::BLOB,
+  1000, 1073741824);
+----
+histogram cell 0 is out of range
+
+statement error
+SELECT __duckhts_count_error_fit('DHCX\x00\x00\x00\x00'::BLOB, 1000, 1073741824);
+----
+unknown layout
 
 # The memory limits are explicit errors: more cells than max_cells, and more bytes than max_cell_bytes.
 statement error

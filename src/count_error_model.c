@@ -226,6 +226,7 @@ static double problem_log_likelihood(count_problem_t *problem, const duckhts_cou
     double total = 0;
     const double f_share = params->homozygosity_excess;
     problem->evaluations++;
+    if (problem->count == 0) return 0; /* no cells, so no tables to fill */
     fill_pair_probabilities(problem, params);
     for (size_t i = 0; i < problem->count; i++) {
         const duckhts_count_cell_t *cell = &problem->cells[i];

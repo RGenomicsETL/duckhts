@@ -30,7 +30,7 @@
 static const char *const count_error_fit_sql[] = {
     "CREATE OR REPLACE MACRO duckhts_count_error_fit(counts_table, " FIT_OPTIONS ") AS TABLE (",
     /* Rows as the decode reads them, with the counts kept wide until the
-     * depth filter, so that a count beyond INTEGER makes a skipped site and
+     * depth test, so that a count beyond INTEGER makes a skipped site and
      * not a conversion error. A negative count is an error. */
     "WITH __dht_counts AS (SELECT CAST(sample_id AS VARCHAR) AS smp, CAST(chrom AS VARCHAR) AS chrom, "
     "CAST(pos AS BIGINT) AS pos, " DUCKHTS_WHOLE_COUNT_AS("ref_count", "BIGINT") " AS ref_count, "
@@ -40,8 +40,11 @@ static const char *const count_error_fit_sql[] = {
     "__dht_sites AS (SELECT smp, chrom, CASE WHEN pos IS NULL OR pos < 1 "
     "THEN error('pos must be a one-based position, at least 1') "
     "ELSE (pos - 1) // " DUCKHTS_WHOLE_OPTION("block_bases") " END AS block_index, af, "
+    /* A count above max_depth makes a skipped site before any sum, so the
+     * sum of two counts at most max_depth cannot overflow. */
     "CASE WHEN ref_count < 0 OR alt_count < 0 THEN error('read counts must not be negative') "
-    "ELSE ref_count + alt_count END AS depth, alt_count AS alt "
+    "WHEN ref_count > " DUCKHTS_WHOLE_OPTION("max_depth") " OR alt_count > " DUCKHTS_WHOLE_OPTION("max_depth") " "
+    "THEN NULL ELSE ref_count + alt_count END AS depth, alt_count AS alt "
     "FROM __dht_counts WHERE ref_count IS NOT NULL AND alt_count IS NOT NULL "
     "AND af IS NOT NULL AND isfinite(af) AND af > 0 AND af < 1), ",
     /* The histogram: one row per cell, with the mean frequency of its sites.
