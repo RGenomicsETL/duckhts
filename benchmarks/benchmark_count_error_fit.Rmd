@@ -63,10 +63,12 @@ peak buffer count is its own accounting of what its buffer manager held at
 most; it is reported beside the RSS and not gated. The live state of one
 query is, summed over its samples:
 
-- the packed cells, 16 bytes each, held natively while the histogram is
-  built and then by DuckDB as one BLOB per sample (two copies at the
-  hand-over), plus one copy and the model's pair tables in the fit: 16 × 3
-  bytes per cell, plus 72 bytes per distinct (depth, alt) pair;
+- the packed cells, 16 bytes each: held natively by the aggregate, up to
+  three times that while its buffer doubles, then by DuckDB as one BLOB per
+  sample, then as one sorted copy in the fit with its pair index, 24 bytes
+  per cell, plus 88 bytes per distinct (depth, alt) pair and 24 bytes per
+  depth up to the deepest, 1,000 at most; the native part of this is what
+  `max_cell_bytes` charges;
 - DuckDB's hash aggregate that builds the cells from the rows, 160 bytes
   per cell, and the window that numbers the blocks, 64 bytes per cell, both
   of which DuckDB manages and could spill. The rows themselves stream from
@@ -210,7 +212,8 @@ denominators <- do.call(rbind, lapply(inputs$source_sql, function(source) query_
 inputs <- cbind(inputs, denominators)
 inputs$rows[is.na(inputs$rows)] <- inputs$rows_used[is.na(inputs$rows)]
 inputs$sites[is.na(inputs$sites)] <- inputs$rows_used[is.na(inputs$sites)] / inputs$samples_used[is.na(inputs$sites)]
-inputs$live_state_bytes <- inputs$cells * (16 * 3 + 160 + 64) + inputs$pairs * 72
+inputs$live_state_bytes <- inputs$cells * (48 + 16 + 24 + 160 + 64) + inputs$pairs * 88 +
+  24 * 1001 * inputs$samples_used
 
 # The macro reads a named table; each run gives it a view of its Parquet input.
 fit_query <- paste(

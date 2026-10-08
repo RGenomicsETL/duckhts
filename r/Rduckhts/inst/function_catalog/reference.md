@@ -1478,7 +1478,7 @@ table(sample VARCHAR, sites BIGINT, reads BIGINT, mean_depth DOUBLE, blocks INTE
 
 ### Input
 
-counts_table is the relation duckhts_roh_counts takes: sample_id, chrom, pos (one-based), ref_count, alt_count and af, one row per sample and site, where alt_count counts reads showing the allele whose population frequency is af. Any frequency source composes in SQL first, for example ancestry-weighted frequencies. Sites with a NULL count, no reads, more than max_depth reads, or an af that is NULL, NaN, 0 or 1 are skipped. Negative or fractional counts are errors.
+counts_table is the relation duckhts_roh_counts takes: sample_id, chrom, pos (one-based), ref_count, alt_count and af, one row per sample and site, where alt_count counts reads showing the allele whose population frequency is af. Any frequency source composes in SQL first, for example ancestry-weighted frequencies. Sites with a NULL count, no reads, more than max_depth reads, or an af that is NULL, NaN, 0 or 1 are skipped. Negative or fractional counts are errors, as is a NULL or non-positive pos. Block k of a chromosome holds the positions k * block_bases + 1 to (k + 1) * block_bases.
 
 ### Model
 
@@ -1494,7 +1494,7 @@ seq_error is the chance that a read shows the other allele at a homozygous site.
 
 ### Limits
 
-Memory: DuckDB builds the histogram and can spill it; the native buffer of a sample holds 16 bytes per cell, at most max_cells cells, and max_cell_bytes bounds the buffers of all fits held in the process at once, each with an explicit error. A sample has at most 65,536 blocks and 1,024 frequency bins. Depth is capped by max_depth, which bounds the cells; deeper sites are left out. One fit runs on one thread; the fits of a query's samples run in the threads that hold their rows, so more threads fit more samples at once (the report measures the gain at four threads).
+Memory: DuckDB builds the histogram and can spill it; the native buffer of a sample holds 16 bytes per cell, at most max_cells cells. max_cell_bytes bounds the native histogram memory of the process at once, each limit with an explicit error: the buffers of the aggregate (16 bytes per cell, up to three times that while a buffer grows) and the working memory of the running fits (24 bytes per cell, 88 bytes per distinct (depth, alt count) pair and 24 bytes per depth up to the deepest). The BLOB that carries a sample's cells from the aggregate to its fit is DuckDB's memory, under its memory_limit. When a query fails while the histogram is being built, DuckDB (1.5.1) does not destroy every state of the parallel aggregate; the buffers of the states it keeps stay charged against max_cell_bytes until the process ends. A sample has at most 65,536 blocks and 1,024 frequency bins. Depth is capped by max_depth, which bounds the cells; deeper sites are left out. One fit runs on one thread; the fits of a query's samples run in the threads that hold their rows, so more threads fit more samples at once (the report measures the gain at four threads).
 
 ### Examples
 

@@ -31,7 +31,10 @@ static const char *const count_error_fit_sql[] = {
     "CAST(pos AS BIGINT) AS pos, " DUCKHTS_WHOLE_COUNT("ref_count") " AS ref_count, "
     DUCKHTS_WHOLE_COUNT("alt_count") " AS alt_count, CAST(af AS DOUBLE) AS af "
     "FROM query_table(counts_table)), ",
-    "__dht_sites AS (SELECT smp, chrom, pos // CAST(block_bases AS BIGINT) AS block_index, af, "
+    /* pos is one-based, so block k holds k * block_bases + 1 to (k + 1) * block_bases. */
+    "__dht_sites AS (SELECT smp, chrom, CASE WHEN pos IS NULL OR pos < 1 "
+    "THEN error('pos must be a one-based position, at least 1') "
+    "ELSE (pos - 1) // CAST(block_bases AS BIGINT) END AS block_index, af, "
     "CASE WHEN ref_count < 0 OR alt_count < 0 THEN error('read counts must not be negative') "
     "ELSE ref_count + alt_count END AS depth, alt_count AS alt "
     "FROM __dht_counts WHERE ref_count IS NOT NULL AND alt_count IS NOT NULL "
@@ -47,7 +50,8 @@ static const char *const count_error_fit_sql[] = {
     "__dht_hist AS (SELECT smp, __duckhts_count_cells(CAST(block AS INTEGER), af, CAST(depth AS INTEGER), "
     "CAST(alt AS INTEGER), sites, CAST(max_cells AS BIGINT), CAST(max_cell_bytes AS BIGINT)) AS cells "
     "FROM __dht_blocks GROUP BY smp), ",
-    "__dht_fit AS (SELECT smp, __duckhts_count_error_fit(cells, CAST(min_block_sites AS BIGINT)) AS f "
+    "__dht_fit AS (SELECT smp, __duckhts_count_error_fit(cells, CAST(min_block_sites AS BIGINT), "
+    "CAST(max_cell_bytes AS BIGINT)) AS f "
     "FROM __dht_hist) ",
     "SELECT smp AS \"sample\", f.sites, f.reads, f.mean_depth, f.blocks, f.seq_error, f.contamination, "
     "f.contamination_sd, f.homozygosity_excess, f.allele_balance, f.spread_hom, f.spread_het, "

@@ -3,6 +3,8 @@
 #include "include/count_error_model.h"
 
 #include <math.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -60,7 +62,17 @@ typedef struct {
     int fixed[DUCKHTS_COUNT_ERROR_PARAMETERS]; /* 1 where a parameter is held */
     double held[DUCKHTS_COUNT_ERROR_PARAMETERS];
     long evaluations;
+    uint64_t max_cell_bytes;    /* the limit the working memory is charged against */
+    uint64_t charged;           /* bytes this problem holds against it */
 } count_problem_t;
+
+/* A (depth, alt) pair as one key whose order is depth, then alt. */
+static uint32_t pair_key(uint16_t depth, uint16_t alt) { return ((uint32_t)depth << 16) | alt; }
+
+static int compare_keys(const void *a, const void *b) {
+    const uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
+    return x < y ? -1 : x > y;
+}
 
 static int compare_pairs(const void *a, const void *b) {
     const count_pair_t *x = a, *y = b;
@@ -69,55 +81,91 @@ static int compare_pairs(const void *a, const void *b) {
     return 0;
 }
 
+/* Working memory of a problem: charged against max_cell_bytes before it is
+ * allocated, released with the problem. */
+static void *problem_alloc(count_problem_t *problem, uint64_t bytes, char *error, size_t error_length) {
+    uint64_t would_hold = 0;
+    void *memory;
+    if (!duckhts_count_bytes_charge(bytes, problem->max_cell_bytes, &would_hold)) {
+        snprintf(error, error_length,
+                 "a fit would hold %llu bytes of histogram memory, more than max_cell_bytes = %llu; "
+                 "fit fewer samples per query or raise max_cell_bytes",
+                 (unsigned long long)would_hold, (unsigned long long)problem->max_cell_bytes);
+        return NULL;
+    }
+    memory = bytes <= SIZE_MAX ? malloc((size_t)bytes) : NULL;
+    if (memory == NULL) {
+        duckhts_count_bytes_release(bytes);
+        snprintf(error, error_length, "out of memory for %llu bytes of a fit", (unsigned long long)bytes);
+        return NULL;
+    }
+    problem->charged += bytes;
+    return memory;
+}
+
+static void problem_free(count_problem_t *problem, void *memory, uint64_t bytes) {
+    free(memory);
+    duckhts_count_bytes_release(bytes);
+    problem->charged -= bytes;
+}
+
 static void problem_release(count_problem_t *problem) {
     free(problem->pairs);
     free(problem->pair_of);
     free(problem->pair_probability);
     free(problem->gamma_table);
+    duckhts_count_bytes_release(problem->charged);
     memset(problem, 0, sizeof(*problem));
 }
 
+/* Returns 1, or 0 with `error` written when the working memory passes
+ * max_cell_bytes or cannot be allocated. */
 static int problem_init(count_problem_t *problem, const duckhts_count_cell_t *cells, size_t count,
-                        duckhts_count_error_relation_t relation) {
-    count_pair_t *sorted;
+                        duckhts_count_error_relation_t relation, uint64_t max_cell_bytes,
+                        char *error, size_t error_length) {
+    uint32_t *keys;
+    const uint64_t key_bytes = (uint64_t)count * sizeof(*keys);
     memset(problem, 0, sizeof(*problem));
     problem->cells = cells;
     problem->count = count;
     problem->relation = relation;
+    problem->max_cell_bytes = max_cell_bytes;
     if (count == 0) return 1;
-    sorted = malloc(count * sizeof(*sorted));
-    problem->pair_of = malloc(count * sizeof(*problem->pair_of));
-    if (!sorted || !problem->pair_of) {
-        free(sorted);
-        problem_release(problem);
+    /* The distinct pairs: the keys of the cells sorted, then counted. */
+    keys = problem_alloc(problem, key_bytes, error, error_length);
+    if (keys == NULL) return 0;
+    for (size_t i = 0; i < count; i++) keys[i] = pair_key(cells[i].depth, cells[i].alt);
+    qsort(keys, count, sizeof(*keys), compare_keys);
+    for (size_t i = 0; i < count; i++) {
+        if (i == 0 || keys[i] != keys[i - 1]) problem->pair_count++;
+    }
+    problem->pairs = problem_alloc(problem, (uint64_t)problem->pair_count * sizeof(*problem->pairs),
+                                   error, error_length);
+    if (problem->pairs == NULL) {
+        problem_free(problem, keys, key_bytes);
         return 0;
     }
-    for (size_t i = 0; i < count; i++) {
-        sorted[i].depth = cells[i].depth;
-        sorted[i].alt = cells[i].alt;
-        sorted[i].log_choose = 0;
-    }
-    qsort(sorted, count, sizeof(*sorted), compare_pairs);
-    problem->pairs = malloc(count * sizeof(*problem->pairs));
-    if (!problem->pairs) {
-        free(sorted);
-        problem_release(problem);
-        return 0;
-    }
-    for (size_t i = 0; i < count; i++) {
-        if (problem->pair_count == 0 || compare_pairs(&sorted[i], &problem->pairs[problem->pair_count - 1]) != 0) {
-            count_pair_t *pair = &problem->pairs[problem->pair_count++];
-            pair->depth = sorted[i].depth;
-            pair->alt = sorted[i].alt;
+    for (size_t i = 0, at = 0; i < count; i++) {
+        if (i == 0 || keys[i] != keys[i - 1]) {
+            count_pair_t *pair = &problem->pairs[at++];
+            pair->depth = (uint16_t)(keys[i] >> 16);
+            pair->alt = (uint16_t)(keys[i] & 0xFFFFu);
             pair->log_choose = lgamma(pair->depth + 1.0) - lgamma(pair->alt + 1.0) -
                                lgamma(pair->depth - pair->alt + 1.0);
         }
     }
-    free(sorted);
+    problem_free(problem, keys, key_bytes);
     problem->max_depth = problem->pairs[problem->pair_count - 1].depth;
-    problem->pair_probability = malloc(problem->pair_count * PAIRS * sizeof(double));
-    problem->gamma_table = malloc(3 * (problem->max_depth + 1u) * sizeof(double));
-    if (!problem->pair_probability || !problem->gamma_table) {
+    problem->pair_of = problem_alloc(problem, (uint64_t)count * sizeof(*problem->pair_of), error, error_length);
+    if (problem->pair_of != NULL) {
+        problem->pair_probability = problem_alloc(problem, (uint64_t)problem->pair_count * PAIRS * sizeof(double),
+                                                  error, error_length);
+    }
+    if (problem->pair_probability != NULL) {
+        problem->gamma_table = problem_alloc(problem, 3u * ((uint64_t)problem->max_depth + 1u) * sizeof(double),
+                                             error, error_length);
+    }
+    if (problem->gamma_table == NULL) {
         problem_release(problem);
         return 0;
     }
@@ -209,17 +257,6 @@ static double problem_log_likelihood(count_problem_t *problem, const duckhts_cou
         total += cell->sites * log(mixture > LOG_FLOOR ? mixture : LOG_FLOOR);
     }
     return total;
-}
-
-double duckhts_count_error_log_likelihood(const duckhts_count_cell_t *cells, size_t count,
-                                          const duckhts_count_error_params_t *params,
-                                          duckhts_count_error_relation_t relation) {
-    count_problem_t problem;
-    double value;
-    if (!problem_init(&problem, cells, count, relation)) return -HUGE_VAL;
-    value = problem_log_likelihood(&problem, params);
-    problem_release(&problem);
-    return value;
 }
 
 /* The objective of the optimizer: minus the log-likelihood at a working
@@ -355,14 +392,15 @@ static void fit_from(count_problem_t *problem, const duckhts_count_error_params_
 }
 
 int duckhts_count_error_fit(const duckhts_count_cell_t *cells, size_t count,
-                            duckhts_count_error_relation_t relation, duckhts_count_error_fit_t *fit) {
+                            duckhts_count_error_relation_t relation, uint64_t max_cell_bytes,
+                            duckhts_count_error_fit_t *fit, char *error, size_t error_length) {
     /* The starts differ in contamination, where the likelihood can have more
      * than one optimum; the other starts are usual values. */
     static const double contamination_starts[] = {0.005, 0.1};
     count_problem_t problem;
     duckhts_count_error_fit_t best;
     int have_best = 0;
-    if (!problem_init(&problem, cells, count, relation)) return 0;
+    if (!problem_init(&problem, cells, count, relation, max_cell_bytes, error, error_length)) return 0;
     for (size_t s = 0; s < sizeof(contamination_starts) / sizeof(contamination_starts[0]); s++) {
         duckhts_count_error_params_t start = {1e-3, contamination_starts[s], 0.05, 0.48, 1e-3, 1e-3, 1e-3};
         duckhts_count_error_fit_t candidate;
@@ -378,10 +416,13 @@ int duckhts_count_error_fit(const duckhts_count_cell_t *cells, size_t count,
 }
 
 int duckhts_count_error_fit_block(const duckhts_count_cell_t *cells, size_t count,
-                                  const duckhts_count_error_params_t *fixed,
-                                  duckhts_count_error_fit_t *fit) {
+                                  const duckhts_count_error_params_t *fixed, uint64_t max_cell_bytes,
+                                  duckhts_count_error_fit_t *fit, char *error, size_t error_length) {
     count_problem_t problem;
-    if (!problem_init(&problem, cells, count, DUCKHTS_COUNT_ERROR_UNRELATED)) return 0;
+    if (!problem_init(&problem, cells, count, DUCKHTS_COUNT_ERROR_UNRELATED, max_cell_bytes, error,
+                      error_length)) {
+        return 0;
+    }
     for (int i = 0; i < DUCKHTS_COUNT_ERROR_PARAMETERS; i++) problem.fixed[i] = 1;
     problem.fixed[1] = 0; /* contamination */
     fit_from(&problem, fixed, 400, fit);

@@ -1,13 +1,17 @@
-/* __duckhts_count_error_fit(cells, min_block_sites): the count-error fit of
- * one sample from its packed histogram (count_cells.h), as one STRUCT row.
- * __duckhts_count_error_valid_args(...): TRUE, or the error the macro's
- * arguments would raise, so that bad arguments fail on empty input too.
+/* __duckhts_count_error_fit(cells, min_block_sites, max_cell_bytes): the
+ * count-error fit of one sample from its packed histogram (count_cells.h), as
+ * one STRUCT row. __duckhts_count_error_valid_args(...): TRUE, or the error
+ * the macro's arguments would raise, so that bad arguments fail on empty
+ * input too.
  *
  * The pooled fit uses every cell; the relative fit refits the same cells with
  * a parent or child as the second genome. Each block is refitted for
  * contamination with the other parameters held at the pooled values, and the
- * spread of the block estimates gives contamination_sd. Memory: one copy of the cells, the pair tables of the
- * model, and the cells of one block at a time.
+ * spread of the block estimates gives contamination_sd. Memory: one sorted
+ * copy of the cells (16 bytes each) for the whole fit, and the working memory
+ * of one problem at a time (count_error_model.h), all charged against
+ * max_cell_bytes with the aggregate's buffers (count_cells.c); the BLOB the
+ * cells arrive in is DuckDB's.
  */
 #if defined(__MINGW32__) && !defined(__USE_MINGW_ANSI_STDIO)
 #define __USE_MINGW_ANSI_STDIO 1
@@ -30,6 +34,7 @@ DUCKDB_EXTENSION_EXTERN
 #define FIT_METHOD "duckhts_count_error_fit v1"
 #define FIT_FEW_SITES 1000
 #define FIT_FEW_BLOCKS 3
+#define FIT_ERRLEN 256
 
 enum {
     OUT_SITES = 0,
@@ -93,30 +98,47 @@ static int compare_cells(const void *a, const void *b) {
     return 0;
 }
 
-/* Reads the cells of one BLOB into an owned, aligned array. */
-static duckhts_count_cell_t *read_cells(duckdb_string_t *blob, size_t *count, const char **error) {
+/* Reads the cells of one BLOB into an owned, aligned array of `count` cells,
+ * charged against max_cell_bytes; release_cells gives both back. */
+static duckhts_count_cell_t *read_cells(duckdb_string_t *blob, size_t *count, uint64_t max_cell_bytes,
+                                        char *error) {
     const char *data = duckdb_string_is_inlined(*blob) ? blob->value.inlined.inlined : blob->value.pointer.ptr;
     uint32_t length = blob->value.inlined.length;
     duckhts_count_cells_header_t header;
     duckhts_count_cell_t *cells;
+    uint64_t bytes, would_hold = 0;
     if (length < sizeof(header)) {
-        *error = "internal error: histogram is too short";
+        snprintf(error, FIT_ERRLEN, "internal error: histogram is too short");
         return NULL;
     }
     memcpy(&header, data, sizeof(header));
     if (memcmp(header.magic, DUCKHTS_COUNT_CELLS_MAGIC, DUCKHTS_COUNT_CELLS_MAGIC_LENGTH) != 0 ||
         (length - sizeof(header)) % sizeof(duckhts_count_cell_t) != 0) {
-        *error = "internal error: histogram has an unknown layout";
+        snprintf(error, FIT_ERRLEN, "internal error: histogram has an unknown layout");
         return NULL;
     }
     *count = (length - sizeof(header)) / sizeof(duckhts_count_cell_t);
-    cells = malloc((*count ? *count : 1) * sizeof(*cells));
+    bytes = (uint64_t)(*count ? *count : 1) * sizeof(*cells);
+    if (!duckhts_count_bytes_charge(bytes, max_cell_bytes, &would_hold)) {
+        snprintf(error, FIT_ERRLEN,
+                 "a fit would hold %llu bytes of histogram memory, more than max_cell_bytes = %llu; "
+                 "fit fewer samples per query or raise max_cell_bytes",
+                 (unsigned long long)would_hold, (unsigned long long)max_cell_bytes);
+        return NULL;
+    }
+    cells = malloc((size_t)bytes);
     if (!cells) {
-        *error = "out of memory";
+        duckhts_count_bytes_release(bytes);
+        snprintf(error, FIT_ERRLEN, "out of memory for %llu bytes of a fit", (unsigned long long)bytes);
         return NULL;
     }
     memcpy(cells, data + sizeof(header), *count * sizeof(*cells));
     return cells;
+}
+
+static void release_cells(duckhts_count_cell_t *cells, size_t count) {
+    free(cells);
+    duckhts_count_bytes_release((uint64_t)(count ? count : 1) * sizeof(*cells));
 }
 
 typedef struct {
@@ -129,9 +151,9 @@ typedef struct {
     const char *status;
 } fit_result_t;
 
-/* The whole fit of one sample. Returns NULL, or the error. */
-static const char *fit_sample(duckhts_count_cell_t *cells, size_t count, int64_t min_block_sites,
-                              fit_result_t *result) {
+/* The whole fit of one sample. Returns 1, or 0 with `error` written. */
+static int fit_sample(duckhts_count_cell_t *cells, size_t count, int64_t min_block_sites,
+                      uint64_t max_cell_bytes, fit_result_t *result, char *error) {
     size_t at = 0;
     double sum = 0, sum_squares = 0;
     memset(result, 0, sizeof(*result));
@@ -141,9 +163,11 @@ static const char *fit_sample(duckhts_count_cell_t *cells, size_t count, int64_t
         result->sites += cells[i].sites;
         result->reads += (uint64_t)cells[i].sites * cells[i].depth;
     }
-    if (!duckhts_count_error_fit(cells, count, DUCKHTS_COUNT_ERROR_UNRELATED, &result->pooled) ||
-        !duckhts_count_error_fit(cells, count, DUCKHTS_COUNT_ERROR_RELATIVE, &result->relative)) {
-        return "out of memory";
+    if (!duckhts_count_error_fit(cells, count, DUCKHTS_COUNT_ERROR_UNRELATED, max_cell_bytes, &result->pooled,
+                                 error, FIT_ERRLEN) ||
+        !duckhts_count_error_fit(cells, count, DUCKHTS_COUNT_ERROR_RELATIVE, max_cell_bytes, &result->relative,
+                                 error, FIT_ERRLEN)) {
+        return 0;
     }
     /* Blocks are contiguous after the sort. */
     while (at < count) {
@@ -152,8 +176,9 @@ static const char *fit_sample(duckhts_count_cell_t *cells, size_t count, int64_t
         duckhts_count_error_fit_t fit;
         while (end < count && cells[end].block == cells[at].block) block_sites += cells[end++].sites;
         if (block_sites >= (uint64_t)min_block_sites) {
-            if (!duckhts_count_error_fit_block(cells + at, end - at, &result->pooled.params, &fit)) {
-                return "out of memory";
+            if (!duckhts_count_error_fit_block(cells + at, end - at, &result->pooled.params, max_cell_bytes, &fit,
+                                               error, FIT_ERRLEN)) {
+                return 0;
             }
             sum += fit.params.contamination;
             sum_squares += fit.params.contamination * fit.params.contamination;
@@ -179,7 +204,7 @@ static const char *fit_sample(duckhts_count_cell_t *cells, size_t count, int64_t
     } else {
         result->status = "ok";
     }
-    return NULL;
+    return 1;
 }
 
 static void set_double(duckdb_vector vector, idx_t row, double value) {
@@ -194,17 +219,20 @@ static void set_double(duckdb_vector vector, idx_t row, double value) {
 static void count_error_fit_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
     duckdb_vector cells_vector = duckdb_data_chunk_get_vector(input, 0);
     duckdb_vector min_block_vector = duckdb_data_chunk_get_vector(input, 1);
+    duckdb_vector max_bytes_vector = duckdb_data_chunk_get_vector(input, 2);
     duckdb_string_t *blobs = duckdb_vector_get_data(cells_vector);
     const int64_t *min_block_sites = duckdb_vector_get_data(min_block_vector);
+    const int64_t *max_cell_bytes = duckdb_vector_get_data(max_bytes_vector);
     duckdb_vector out[OUT_COUNT];
     idx_t rows = duckdb_data_chunk_get_size(input);
     for (int i = 0; i < OUT_COUNT; i++) out[i] = duckdb_struct_vector_get_child(output, i);
 
     for (idx_t row = 0; row < rows; row++) {
-        const char *error = NULL;
+        char error[FIT_ERRLEN];
         size_t count = 0;
         duckhts_count_cell_t *cells;
         fit_result_t result;
+        int fitted;
         if (!row_valid(cells_vector, row)) {
             duckdb_vector_ensure_validity_writable(output);
             duckdb_validity_set_row_invalid(duckdb_vector_get_validity(output), row);
@@ -214,14 +242,18 @@ static void count_error_fit_scalar(duckdb_function_info info, duckdb_data_chunk 
             fit_error(info, "min_block_sites must be at least 1");
             return;
         }
-        cells = read_cells(&blobs[row], &count, &error);
+        if (!row_valid(max_bytes_vector, row) || max_cell_bytes[row] < 1) {
+            fit_error(info, "max_cell_bytes must be at least 1");
+            return;
+        }
+        cells = read_cells(&blobs[row], &count, (uint64_t)max_cell_bytes[row], error);
         if (!cells) {
             fit_error(info, error);
             return;
         }
-        error = fit_sample(cells, count, min_block_sites[row], &result);
-        free(cells);
-        if (error) {
+        fitted = fit_sample(cells, count, min_block_sites[row], (uint64_t)max_cell_bytes[row], &result, error);
+        release_cells(cells, count);
+        if (!fitted) {
             fit_error(info, error);
             return;
         }
@@ -297,6 +329,7 @@ bool register_duckhts_count_error_functions(duckdb_connection connection) {
     duckdb_scalar_function_set_name(function, FIT_NAME);
     duckdb_scalar_function_add_parameter(function, blob);
     duckdb_scalar_function_add_parameter(function, bigint); /* min_block_sites */
+    duckdb_scalar_function_add_parameter(function, bigint); /* max_cell_bytes */
     duckdb_scalar_function_set_return_type(function, result);
     duckdb_scalar_function_set_special_handling(function);
     duckdb_scalar_function_set_function(function, count_error_fit_scalar);

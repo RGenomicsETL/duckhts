@@ -57,21 +57,22 @@ typedef struct {
     int at_bound;      /* contamination or the artefact weight is at its upper bound */
 } duckhts_count_error_fit_t;
 
-/* Log-likelihood of the cells under `params` and `relation`, summed with the
- * site count of each cell. Cells with a depth of 0 contribute nothing. */
-double duckhts_count_error_log_likelihood(const duckhts_count_cell_t *cells, size_t count,
-                                          const duckhts_count_error_params_t *params,
-                                          duckhts_count_error_relation_t relation);
+/* Both fits charge their working memory against max_cell_bytes
+ * (duckhts_count_bytes_charge) and release it before returning: 8 bytes per
+ * cell, 88 bytes per distinct (depth, alt) pair and 24 bytes per depth up to
+ * the deepest. On a limit or an allocation failure they return 0 and write
+ * the reason to `error`. */
 
 /* Fits all parameters by maximum likelihood from a fixed set of starts and
- * returns the best. Returns 0 on an allocation failure. */
+ * returns the best. */
 int duckhts_count_error_fit(const duckhts_count_cell_t *cells, size_t count,
-                            duckhts_count_error_relation_t relation, duckhts_count_error_fit_t *fit);
+                            duckhts_count_error_relation_t relation, uint64_t max_cell_bytes,
+                            duckhts_count_error_fit_t *fit, char *error, size_t error_length);
 
 /* Fits contamination only, the other parameters held at `fixed`, from `fixed`
  * as the start. For the per-block fits. */
 int duckhts_count_error_fit_block(const duckhts_count_cell_t *cells, size_t count,
-                                  const duckhts_count_error_params_t *fixed,
-                                  duckhts_count_error_fit_t *fit);
+                                  const duckhts_count_error_params_t *fixed, uint64_t max_cell_bytes,
+                                  duckhts_count_error_fit_t *fit, char *error, size_t error_length);
 
 #endif

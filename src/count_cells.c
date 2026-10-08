@@ -6,18 +6,27 @@
  * that work. This aggregate then keeps 16 bytes per cell in native buffers
  * that DuckHTS bounds:
  *   - max_cells caps one sample, checked as rows arrive;
- *   - max_cell_bytes bounds the buffers of every live group in the process:
- *     a group does not grow when the bytes held by all groups would pass its
- *     own max_cell_bytes. Concurrent fits share the count of bytes held and
- *     each applies its own limit to it. This count is separate from the ROH
- *     site buffers' (roh_sites.c).
+ *   - max_cell_bytes bounds the native histogram memory of the process: a
+ *     group does not grow when the bytes held by all groups and all running
+ *     fits would pass its own max_cell_bytes. Concurrent queries share the
+ *     count of bytes held and each applies its own limit to it. This count
+ *     is separate from the ROH site buffers' (roh_sites.c).
  * Both limits raise query errors. Finalize hands a group to DuckDB as one
- * BLOB (see count_cells.h) and frees the buffer. Every native buffer counts
- * against max_cell_bytes: the partial groups of each thread, the copy
- * DuckDB's combine step makes of them, and the old and new block while a
- * buffer grows. Cells need no order, so no sort and no ORDER BY: DuckDB's
+ * BLOB (see count_cells.h), which is DuckDB's memory, and frees the buffer.
+ * Every native buffer counts against max_cell_bytes: the partial groups of
+ * each thread, the copy DuckDB's combine step makes of them, the old and new
+ * block while a buffer grows, and the working memory of the fit that reads
+ * the BLOB (count_error_udf.c, count_error_model.c). Cells need no order
+ * here (the fit sorts them), so no sort and no ORDER BY: DuckDB's
  * ordered-aggregate wrapper does not initialise the states of a C API
  * aggregate (https://github.com/duckdb/duckdb/issues/26109).
+ *
+ * Measured with DuckDB 1.5.1: when a query fails inside this aggregate with
+ * many threads, DuckDB destroys the states of some threads and not others
+ * (14 of 14 states of a 20-thread run were never destroyed, 0 of 1 with one
+ * thread), not even at process exit. The buffers of such states are leaked
+ * and stay charged against max_cell_bytes, so the count stays truthful. The
+ * ROH site buffers (roh_sites.c) have the same exposure.
  */
 #if defined(__MINGW32__) && !defined(__USE_MINGW_ANSI_STDIO)
 #define __USE_MINGW_ANSI_STDIO 1
@@ -61,8 +70,22 @@ typedef struct {
     uint64_t max_cell_bytes;
 } count_cells_state_t;
 
-/* Bytes of cell buffers held by the live states of this process. */
+/* Bytes of native histogram memory held by this process. */
 static atomic_uint_fast64_t count_cell_bytes_held;
+
+int duckhts_count_bytes_charge(uint64_t bytes, uint64_t max_cell_bytes, uint64_t *would_hold) {
+    uint64_t held = atomic_fetch_add(&count_cell_bytes_held, bytes) + bytes;
+    if (held > max_cell_bytes) {
+        atomic_fetch_sub(&count_cell_bytes_held, bytes);
+        *would_hold = held;
+        return 0;
+    }
+    return 1;
+}
+
+void duckhts_count_bytes_release(uint64_t bytes) {
+    atomic_fetch_sub(&count_cell_bytes_held, bytes);
+}
 
 static void cells_error(duckdb_function_info info, const char *message) {
     char full[CELLS_ERRLEN + 32];
@@ -85,7 +108,7 @@ static duckhts_count_cell_t *cells_of(unsigned char *buffer) {
 
 static void release_state(count_cells_state_t *state) {
     if (state->buffer != NULL) {
-        atomic_fetch_sub(&count_cell_bytes_held, buffer_bytes(state->capacity));
+        duckhts_count_bytes_release(buffer_bytes(state->capacity));
         free(state->buffer);
     }
     state->buffer = NULL;
@@ -110,25 +133,24 @@ static bool reserve_cells(count_cells_state_t *state, uint64_t need, char *error
      * released only after the copy, so the budget covers the moment both live. */
     uint64_t old_bytes = state->buffer ? buffer_bytes(state->capacity) : 0;
     uint64_t new_bytes = buffer_bytes(capacity);
-    uint64_t held = atomic_fetch_add(&count_cell_bytes_held, new_bytes) + new_bytes;
-    if (held > state->max_cell_bytes) {
-        atomic_fetch_sub(&count_cell_bytes_held, new_bytes);
+    uint64_t would_hold = 0;
+    if (!duckhts_count_bytes_charge(new_bytes, state->max_cell_bytes, &would_hold)) {
         snprintf(error, CELLS_ERRLEN,
                  "histogram buffers would hold %llu bytes, more than max_cell_bytes = %llu; fit "
                  "fewer samples per query or raise max_cell_bytes",
-                 (unsigned long long)held, (unsigned long long)state->max_cell_bytes);
+                 (unsigned long long)would_hold, (unsigned long long)state->max_cell_bytes);
         return false;
     }
     unsigned char *grown = new_bytes <= SIZE_MAX ? malloc((size_t)new_bytes) : NULL;
     if (grown == NULL) {
-        atomic_fetch_sub(&count_cell_bytes_held, new_bytes);
+        duckhts_count_bytes_release(new_bytes);
         snprintf(error, CELLS_ERRLEN, "out of memory for %llu cells", (unsigned long long)capacity);
         return false;
     }
     if (state->buffer != NULL) {
         memcpy(grown, state->buffer, (size_t)buffer_bytes(state->count));
         free(state->buffer);
-        atomic_fetch_sub(&count_cell_bytes_held, old_bytes);
+        duckhts_count_bytes_release(old_bytes);
     }
     state->buffer = grown;
     state->capacity = capacity;

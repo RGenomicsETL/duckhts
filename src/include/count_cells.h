@@ -39,6 +39,14 @@ _Static_assert(sizeof(duckhts_count_cell_t) == 16, "a cell is 16 bytes");
 #define DUCKHTS_COUNT_MAX_BLOCKS 65535
 #define DUCKHTS_COUNT_MAX_DEPTH 65535
 
+/* Native histogram memory held by this process: the buffers of the aggregate
+ * and the working memory of the fits (count_cells.c). Charge adds `bytes`
+ * when the total stays within max_cell_bytes and returns 1; otherwise it
+ * adds nothing, writes the total that would have been held, and returns 0.
+ * Release subtracts what a charge added. */
+int duckhts_count_bytes_charge(uint64_t bytes, uint64_t max_cell_bytes, uint64_t *would_hold);
+void duckhts_count_bytes_release(uint64_t bytes);
+
 /* Checks the two memory limits of a fit. Returns NULL when they are valid,
  * otherwise the error text. has_* is 0 for a SQL NULL. */
 static inline const char *duckhts_count_check_limits(int has_max_cells, int64_t max_cells,
