@@ -1494,7 +1494,7 @@ seq_error is the chance that a read shows the other allele at a homozygous site.
 
 ### Limits
 
-Memory: DuckDB builds the histogram and can spill it; the native buffer of a sample holds 16 bytes per cell, at most max_cells cells, and max_cell_bytes bounds the buffers of all fits held in the process at once, each with an explicit error. A sample has at most 65,536 blocks and 1,024 frequency bins. Depth is capped by max_depth, which bounds the cells; deeper sites are left out. One fit runs on one thread, in the thread that holds its sample's row; the thread count speeds up the histogram.
+Memory: DuckDB builds the histogram and can spill it; the native buffer of a sample holds 16 bytes per cell, at most max_cells cells, and max_cell_bytes bounds the buffers of all fits held in the process at once, each with an explicit error. A sample has at most 65,536 blocks and 1,024 frequency bins. Depth is capped by max_depth, which bounds the cells; deeper sites are left out. One fit runs on one thread; the fits of a query's samples run in the threads that hold their rows, so more threads fit more samples at once (the report measures the gain at four threads).
 
 ### Examples
 

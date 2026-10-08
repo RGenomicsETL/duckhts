@@ -47,9 +47,9 @@ that alternates sizes. The JSON profiler gives the query latency and DuckDB's
 peak buffer and temporary bytes; `/usr/bin/time` gives the peak RSS.
 `max_temp_directory_size` is zero, so a spill fails the render; the memory
 limit is DuckDB's default, which the report records. Each query consumes
-every row of the fit. The fits of the samples of one query run one after
-another in the thread that holds their rows; the thread count changes the
-histogram only.
+every row of the fit. One fit runs on one thread; the fits of a query's
+samples run in the threads that hold their rows, so the four-thread cells
+measure both the histogram and that spread of the samples over threads.
 
 ## Budget, declared before measuring
 
@@ -57,8 +57,11 @@ The overhead is the median peak RSS of three empty runs that start the CLI,
 load the extension and scan nothing.
 
 The ceiling is overhead + 3 × the live state of the largest input of each
-workload, and it is a gate: the render stops if any observation exceeds it
-or spills. The live state of one query is, summed over its samples:
+workload, and it is a gate on the peak RSS: the render stops if any
+observation's peak RSS exceeds it or if any observation spills. DuckDB's
+peak buffer count is its own accounting of what its buffer manager held at
+most; it is reported beside the RSS and not gated. The live state of one
+query is, summed over its samples:
 
 - the packed cells, 16 bytes each, held natively while the histogram is
   built and then by DuckDB as one BLOB per sample (two copies at the
@@ -277,7 +280,7 @@ stopifnot(all(one_thread$median_seconds[one_thread$scale == 1L] >= 5),
 
 # Untimed: the fit of the three real samples, what the function is for.
 real_fit <- utils::read.csv(text = system2(duckdb_cli, c("-unsigned", "-csv"), input = c(
-  sprintf("LOAD %s;", quote_literal(extension)), fit_setup(real_inputs$source_sql[[3L]]), paste(
+  sprintf("LOAD %s;", quote_literal(extension)), fit_setup(real_inputs$source_sql[[1L]]), paste(
   "SELECT sample, sites, round(mean_depth, 1) AS depth, blocks, seq_error, contamination, contamination_sd,",
   "allele_balance, spread_hom, spread_het, artefact_weight, contamination_relative,",
   "round(log_likelihood_relative - log_likelihood, 1) AS relative_minus_unrelated, status",
@@ -343,11 +346,12 @@ samples4 <- summary[summary$workload == "samples" & summary$threads == 4L, ]
 real <- summary[summary$workload == "real" & summary$threads == 1L, ]
 cat(sprintf(paste(
   "One sample of %s sites takes %.1f s on one thread (%.1f s at %s sites) at %s MiB peak RSS;",
-  "32 samples of 250,000 sites take %.1f s on one thread and %.1f s on four, at %s MiB.",
+  "32 samples of 250,000 sites take %.1f s on one thread and %.1f s on four, at %s MiB and %s MiB.",
+  "Four threads do not speed up one sample's fit, and spread the fits of 32 samples over the threads.",
   "The three real chr20 samples take %.1f s on one thread at %s MiB.\n"),
-  format(sites$rows[[1L]], big.mark = ","), sites$median_seconds[[1L]], sites$median_seconds[[3L]],
-  format(sites$rows[[3L]], big.mark = ","), sites$max_rss_mib[[3L]],
-  samples$median_seconds[[3L]], samples4$median_seconds[[3L]], samples$max_rss_mib[[3L]],
+  format(sites$rows[[1L]], big.mark = ",", scientific = FALSE), sites$median_seconds[[1L]], sites$median_seconds[[3L]],
+  format(sites$rows[[3L]], big.mark = ",", scientific = FALSE), sites$max_rss_mib[[3L]],
+  samples$median_seconds[[3L]], samples4$median_seconds[[3L]], samples$max_rss_mib[[3L]], samples4$max_rss_mib[[3L]],
   real$median_seconds[[1L]], real$max_rss_mib[[1L]]))
 ```
 
