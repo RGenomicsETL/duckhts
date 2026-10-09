@@ -1460,6 +1460,48 @@ The chrom of genetic_map is compared byte for byte with the contig names of the 
 SELECT * FROM duckhts_roh_counts('site_counts', contamination := 0.02) ORDER BY sample, chrom, start;
 ```
 
+## duckhts_count_error_fit
+
+Fit read error, contamination and allele balance of each sample by maximum likelihood from allele read counts at sites of known population frequency.
+
+Signature:
+
+```sql
+duckhts_count_error_fit(counts_table, block_bases := 10000000, freq_bins := 64, max_depth := 1000, min_block_sites := 1000, max_cells := 5000000, max_cell_bytes := 1073741824)
+```
+
+Returns:
+
+```
+table(sample VARCHAR, sites BIGINT, reads BIGINT, mean_depth DOUBLE, blocks INTEGER, seq_error DOUBLE, contamination DOUBLE, contamination_sd DOUBLE, homozygosity_excess DOUBLE, allele_balance DOUBLE, spread_hom DOUBLE, spread_het DOUBLE, artefact_weight DOUBLE, log_likelihood DOUBLE, contamination_relative DOUBLE, log_likelihood_relative DOUBLE, status VARCHAR, method VARCHAR)
+```
+
+### Input
+
+counts_table is the relation duckhts_roh_counts takes: sample_id, chrom, pos (one-based), ref_count, alt_count and af, one row per sample and site, where alt_count counts reads showing the allele whose population frequency is af. Any frequency source composes in SQL first, for example ancestry-weighted frequencies. Sites with a NULL count, no reads, more than max_depth reads (the two counts are summed as BIGINT), or an af that is NULL, NaN, 0 or 1 are skipped; a sample whose sites are all skipped keeps its row. Negative or fractional counts are errors, as is a NULL, non-positive or fractional pos, or a fractional option. Block k of a chromosome holds the positions k * block_bases + 1 to (k + 1) * block_bases.
+
+### Model
+
+A site's sample genotype has 0, 1 or 2 copies of the counted allele with Hardy-Weinberg chances at af, moved toward homozygosity by homozygosity_excess; a second genome contributes a share contamination of the reads, with its own genotype drawn once per site (unrelated: Hardy-Weinberg; relative: one allele of the sample's genotype and one draw at af). A read shows the allele with chance seq_error, allele_balance or 1 - seq_error for 0, 1 or 2 copies, mixed over the two genomes. The alt count is beta-binomial with spread spread_hom at homozygous and spread_het at heterozygous sites (0 is the binomial). With chance artefact_weight a site's alt count is uniform on 0..depth whatever its genotype. All seven are fitted together by Nelder-Mead from two starts on the histogram of (block, frequency bin, depth, alt count) cells, so the likelihood depends on a site only through its counts and the mean frequency of its cell.
+
+### Output
+
+One row per sample: the fitted seven numbers, the log-likelihood, and contamination_relative with log_likelihood_relative from the same cells with a parent or child as the second genome; the sites and reads used and their mean depth. Each block of block_bases bases with at least min_block_sites sites is refitted for contamination with the other parameters held, and contamination_sd is the standard deviation of those block estimates divided by the square root of their number (NULL with fewer than three blocks). status is ok, no_sites (a sample whose sites were all skipped: sites 0, the numbers NULL), few_sites (under 1,000 sites), few_blocks (under three refitted blocks), at_bound (contamination, seq_error or artefact_weight at its upper bound), no_convergence or no_convergence_relative; method names the fit and its version.
+
+### What the numbers are
+
+seq_error is the chance that a read shows the other allele at a homozygous site. With a mask of known variants absent, it holds site artefacts that artefact_weight does not absorb. homozygosity_excess is a nuisance parameter: it also absorbs any difference between the sample's population and the frequencies given, so it is not inbreeding. contamination is the share of reads of a second genome of the frequencies' population; a second genome of another population biases it upward (benchmarks/benchmark_count_error_fit.md measures the size on a count-level mixture of two 1000 Genomes samples of different populations), and a relative is fitted at about half its share by the unrelated model, which contamination_relative reports under the other hypothesis. The intervals come from the blocks, not from the likelihood, because sites are linked.
+
+### Limits
+
+Memory: DuckDB builds the histogram and can spill it; the native buffer of a sample holds 16 bytes per cell, at most max_cells cells. max_cell_bytes bounds the native histogram memory of the process at once, each limit with an explicit error: the buffers of the aggregate (16 bytes per cell, up to three times that while a buffer grows) and the working memory of the running fits (24 bytes per cell, 88 bytes per distinct (depth, alt count) pair and 24 bytes per depth up to the deepest). The BLOB that carries a sample's cells from the aggregate to its fit is DuckDB's memory, under its memory_limit. When a query fails while the histogram is being built, DuckDB (1.5.1) does not destroy every state of the parallel aggregate; the buffers of the states it keeps stay charged against max_cell_bytes until the process ends. A sample has at most 65,536 blocks and 1,024 frequency bins. Depth is capped by max_depth, which bounds the cells; deeper sites are left out. One fit runs on one thread; the fits of a query's samples run in the threads that hold their rows, so more threads fit more samples at once (the report measures the gain at four threads).
+
+### Examples
+
+```sql
+SELECT sample, seq_error, contamination, contamination_sd, status FROM duckhts_count_error_fit('site_counts');
+```
+
 ## duckhts_somalier_panel_sha256
 
 Derive a stable SHA-256 identity for an ordered biallelic sample-fingerprinting panel.

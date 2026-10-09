@@ -9,6 +9,7 @@ static const char *const duckhts_public_macros[] = {
     "duckhts_bcf_convert_parquet_sql",
     "duckhts_bcftools_norm",
     "duckhts_cgranges_from_table",
+    "duckhts_count_error_fit",
     "duckhts_duckdb_supports_geometry",
     "duckhts_duckdb_supports_variant",
     "duckhts_duckdb_type_supported",

@@ -1,0 +1,375 @@
+---
+title: "Count error fit scaling"
+output:
+  github_document:
+    html_preview: false
+    pandoc_args: ["--wrap=preserve", "--columns=400"]
+---
+
+This report gives the 1×/2×/4× scaling evidence `STYLE.md` asks for, for
+`duckhts_count_error_fit()`, and its first measurement on real counts. The
+function fits read error, contamination and five related numbers of each
+sample from allele read counts at sites of known frequency. DuckDB builds a
+histogram of (block, frequency bin, depth, alt count) cells; the native code
+packs a sample's cells into one bounded buffer and fits the model on it. So
+the work has two parts: the histogram, which grows with the rows, and the
+fit, which grows with the cells and not with the rows. No earlier report
+measures this function; this is its first baseline.
+
+## Workloads
+
+- **Sites.** One synthetic sample of 2, 4 and 8 million sites, depth 20 to
+  40, Hardy-Weinberg genotypes at frequencies 0.15 to 0.85 with a second
+  genome at 2%, read error 1e-3. The positions are 100 bases apart, so the
+  sample spans 200, 400 and 800 Mb and has 20, 40 and 80 blocks of 10 Mb.
+- **Samples.** 8, 16 and 32 synthetic samples of 250,000 sites each, the same
+  model with the second genome at 2%, each sample spanning 25 Mb and three
+  blocks. The buffers of the samples share one byte budget.
+- **Real.** The three staged chr20 count tables of 1000 Genomes samples
+  (`roh_counts_chr20_na18507`, `roh_counts_chr20_hg00403`,
+  `roh_counts_chr20_hg00188`: `duckhts_somalier_bam_counts` at the chr20
+  sites of the ancestry panel, about 32× each), checked against their
+  registered identities before anything is measured. One chromosome of one
+  sample fits in under the 5 s floor that `STYLE.md` sets for a timing
+  verdict, so this workload is measured at its one size, three samples, and
+  carries no scaling verdict: it records what the function costs on real
+  counts and what it finds in them. A genome is 45 times one chromosome and
+  is not measured here.
+
+The synthetic inputs are generated untimed at render time, with every draw a
+hash of its coordinates, and the number of histogram cells of each input is
+counted untimed: it is the input denominator of the fit.
+
+Every observation is one fresh DuckDB CLI process under `/usr/bin/time`,
+pinned to eight cores by the render command and run at scheduling priority
+−15, with three repetitions at one thread and at four threads in an order
+that alternates sizes. The JSON profiler gives the query latency and DuckDB's
+peak buffer and temporary bytes; `/usr/bin/time` gives the peak RSS.
+`max_temp_directory_size` is zero, so a spill fails the render; the memory
+limit is DuckDB's default, which the report records. Each query consumes
+every row of the fit. One fit runs on one thread; the fits of a query's
+samples run in the threads that hold their rows, so the four-thread cells
+measure both the histogram and that spread of the samples over threads.
+
+## Budget, declared before measuring
+
+The overhead is the median peak RSS of three empty runs that start the CLI,
+load the extension and scan nothing.
+
+The ceiling is overhead + 3 × the live state of the largest input of each
+workload, and it is a gate on the peak RSS: the render stops if any
+observation's peak RSS exceeds it or if any observation spills. DuckDB's
+peak buffer count is its own accounting of what its buffer manager held at
+most; it is reported beside the RSS and not gated. The live state of one
+query is, summed over its samples:
+
+- the packed cells, 16 bytes each: held natively by the aggregate, up to
+  three times that while its buffer doubles, then by DuckDB as one BLOB per
+  sample, then as one sorted copy in the fit with its pair index, 24 bytes
+  per cell, plus 88 bytes per distinct (depth, alt) pair and 24 bytes per
+  depth up to the deepest, 1,000 at most; the native part of this is what
+  `max_cell_bytes` charges;
+- DuckDB's hash aggregate that builds the cells from the rows, 160 bytes
+  per cell, and the window that numbers the blocks, 64 bytes per cell, both
+  of which DuckDB manages and could spill. The rows themselves stream from
+  Parquet into the aggregate and are not held.
+
+The cells are counted from the input before measuring, so the budget is a
+number for each workload, written below with the measurements.
+
+The render also stops if a time exponent of a synthetic workload is above
+1.25 at either doubling, or if its 1× run takes less than 5 s on one thread,
+which is the least that `STYLE.md` accepts for a timing verdict.
+
+``` sh
+taskset -c 8-15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_count_error_fit.Rmd")'
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r benchmark, echo=FALSE, message=FALSE}
+stopifnot(requireNamespace("duckhtsbench", quietly = TRUE),
+          requireNamespace("jsonlite", quietly = TRUE),
+          requireNamespace("knitr", quietly = TRUE))
+Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath(
+  "r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+extension <- normalizePath(Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension"),
+                           mustWork = TRUE)
+duckdb_cli <- Sys.getenv("DUCKDB_CLI", Sys.which("duckdb"))
+stopifnot(nzchar(duckdb_cli), file.exists("/usr/bin/time"))
+duckdb_runtime <- system2(duckdb_cli, "--version", stdout = TRUE)[[1L]]
+revision <- system2("git", c("rev-parse", "HEAD"), stdout = TRUE)
+src_tree <- system2("git", c("rev-parse", "HEAD:src"), stdout = TRUE)
+if (system2("git", c("diff", "--quiet", "HEAD", "--", "src"), stdout = FALSE, stderr = FALSE) != 0L) {
+  stop("Build source must match the recorded HEAD")
+}
+host_load <- sub(".*load average: ", "", system2("uptime", stdout = TRUE))
+quote_literal <- function(value) paste0("'", gsub("'", "''", value, fixed = TRUE), "'")
+
+# One untimed query in its own CLI process; its rows come back as numbers.
+query_untimed <- function(sql) {
+  output <- system2(duckdb_cli, c("-unsigned", "-csv"),
+                    input = c(sprintf("LOAD %s;", quote_literal(extension)), sql), stdout = TRUE)
+  utils::read.csv(text = output, colClasses = "numeric")
+}
+memory_limit <- system2(duckdb_cli, c("-list", "-noheader"),
+                        input = "SELECT current_setting('memory_limit');", stdout = TRUE)[[1L]]
+
+# Run one SQL body in a fresh CLI process with the given threads and spill
+# forbidden, after an untimed setup statement; the query's single row is
+# returned with latency and memory.
+run_fresh <- function(query, threads, setup = NULL) {
+  scratch <- tempfile("count-error-scaling-")
+  dir.create(scratch)
+  on.exit(unlink(scratch, recursive = TRUE), add = TRUE)
+  sql_path <- file.path(scratch, "query.sql")
+  result_path <- file.path(scratch, "result.csv")
+  profile_path <- file.path(scratch, "profile.json")
+  time_path <- file.path(scratch, "time.tsv")
+  writeLines(c(
+    sprintf("SET threads = %d;", threads),
+    "SET max_temp_directory_size = '0KiB';",
+    sprintf("LOAD %s;", quote_literal(extension)),
+    setup,
+    "PRAGMA enable_profiling = 'json';",
+    sprintf("PRAGMA profiling_output = %s;", quote_literal(profile_path)),
+    sprintf("COPY (%s) TO %s (HEADER);", query, quote_literal(result_path)),
+    "PRAGMA disable_profiling;"
+  ), sql_path)
+  status <- system2("/usr/bin/time", c("-f", shQuote("%M\t%e"), "-o", shQuote(time_path),
+                                       "nice", "-n", "-15", shQuote(duckdb_cli), "-unsigned", "-batch", "-bail"),
+                    stdin = sql_path, stdout = FALSE, stderr = FALSE)
+  if (status != 0L) stop("DuckDB CLI failed (status ", status, ")")
+  profile <- jsonlite::fromJSON(profile_path, simplifyVector = TRUE)
+  timing <- utils::read.delim(time_path, header = FALSE, col.names = c("max_rss_kib", "process_seconds"))
+  data.frame(utils::read.csv(result_path, colClasses = "character"),
+             seconds = as.numeric(profile$latency), max_rss_kib = timing$max_rss_kib[[1L]],
+             peak_buffer_bytes = as.numeric(profile$system_peak_buffer_memory),
+             peak_temp_bytes = as.numeric(profile$system_peak_temp_dir_size))
+}
+
+# Synthetic counts, staged untimed. Every draw is a hash of its coordinates.
+staging <- tempfile("count-error-scaling-counts-")
+dir.create(staging)
+inputs <- data.frame(
+  workload = c(rep("sites", 3L), rep("samples", 3L)),
+  scale = rep(c(1L, 2L, 4L), 2L),
+  samples = c(1L, 1L, 1L, 8L, 16L, 32L),
+  sites = c(2000000L, 4000000L, 8000000L, 250000L, 250000L, 250000L),
+  stringsAsFactors = FALSE)
+inputs$rows <- inputs$samples * inputs$sites
+inputs$path <- file.path(staging, sprintf("counts_%s_%d.parquet", inputs$workload, inputs$scale))
+for (k in seq_len(nrow(inputs))) {
+  generate <- sprintf(paste(
+    "COPY (SELECT 'S' || s AS sample_id, '1' AS chrom, i * 100 + 1 AS pos, af, depth - alt AS ref_count, alt AS alt_count",
+    "FROM (SELECT s, i, af, depth, (SELECT count(*) FROM range(depth) r(j) WHERE (hash(7, s, i, j) %% 1000003) / 1000003.0 <",
+    "0.98 * [1e-3, 0.5, 1 - 1e-3][g + 1] + 0.02 * [1e-3, 0.5, 1 - 1e-3][h + 1]) AS alt",
+    "FROM (SELECT s, i, af, 20 + (hash(8, s, i, 0) %% 21)::INTEGER AS depth,",
+    "((hash(3, s, i, 0) %% 1000003) / 1000003.0 < af)::INTEGER + ((hash(4, s, i, 0) %% 1000003) / 1000003.0 < af)::INTEGER AS g,",
+    "((hash(5, s, i, 0) %% 1000003) / 1000003.0 < af)::INTEGER + ((hash(6, s, i, 0) %% 1000003) / 1000003.0 < af)::INTEGER AS h",
+    "FROM (SELECT s, i, 0.15 + 0.7 * ((hash(1, i, 0, 0) %% 1000003) / 1000003.0) AS af",
+    "FROM range(0, %d) AS a(s), range(0, %d) AS t(i))))) TO %s (FORMAT parquet);"),
+    inputs$samples[[k]], inputs$sites[[k]], quote_literal(inputs$path[[k]]))
+  stopifnot(system2(duckdb_cli, "-batch", input = generate, stdout = FALSE) == 0L)
+}
+inputs$source_sql <- sprintf("read_parquet(%s)", vapply(inputs$path, quote_literal, character(1L)))
+
+# Real counts: registered artifacts, checked against their registered identity.
+source("benchmarks/roh_counts_stage.R")
+real_ids <- c("roh_counts_chr20_na18507", "roh_counts_chr20_hg00403", "roh_counts_chr20_hg00188")
+real_paths <- vapply(real_ids, duckhtsbench::duckhts_bench_artifact_path, character(1L))
+identity_con <- DBI::dbConnect(duckdb::duckdb(shared_home = FALSE))
+real_rows <- 0
+for (k in seq_along(real_ids)) {
+  registry <- duckhtsbench::duckhts_bench_registry()
+  registered <- duckhtsbench:::duckhts_bench_identity_fields(registry$supplier_identity[match(real_ids[[k]], registry$id)])
+  observed_identity <- roh_counts_identity(identity_con, real_paths[[k]])
+  stopifnot(observed_identity$rows == as.numeric(registered[["rows"]]),
+            identical(observed_identity$counts_sha256, registered[["counts_sha256"]]))
+  real_rows <- real_rows + as.numeric(registered[["rows"]])
+}
+DBI::dbDisconnect(identity_con, shutdown = TRUE)
+real_inputs <- data.frame(workload = "real", scale = 1L, samples = 3L, sites = NA, rows = NA,
+                          path = NA, stringsAsFactors = FALSE)
+real_inputs$source_sql <- sprintf("read_parquet([%s])",
+  paste(vapply(real_paths, quote_literal, character(1L)), collapse = ", "))
+inputs <- rbind(inputs, real_inputs)
+
+# The denominators of each input, counted untimed: rows the fit uses, the
+# histogram cells and the distinct (depth, alt) pairs, with the default
+# options of the macro.
+denominators <- do.call(rbind, lapply(inputs$source_sql, function(source) query_untimed(sprintf(paste(
+  "WITH r AS (SELECT sample_id, chrom, (pos - 1) // 10000000 AS block_index, floor(af * 64) AS bin,",
+  "ref_count + alt_count AS depth, alt_count AS alt FROM %s",
+  "WHERE ref_count IS NOT NULL AND alt_count IS NOT NULL AND af > 0 AND af < 1",
+  "AND ref_count + alt_count BETWEEN 1 AND 1000)",
+  "SELECT count(*) AS rows_used, (SELECT count(*) FROM (SELECT DISTINCT sample_id, chrom, block_index, bin, depth, alt FROM r)) AS cells,",
+  "(SELECT count(*) FROM (SELECT DISTINCT sample_id, depth, alt FROM r)) AS pairs,",
+  "count(DISTINCT sample_id) AS samples_used FROM r;"), source))))
+inputs <- cbind(inputs, denominators)
+inputs$rows[is.na(inputs$rows)] <- inputs$rows_used[is.na(inputs$rows)]
+inputs$sites[is.na(inputs$sites)] <- inputs$rows_used[is.na(inputs$sites)] / inputs$samples_used[is.na(inputs$sites)]
+inputs$live_state_bytes <- inputs$cells * (48 + 16 + 24 + 160 + 64) + inputs$pairs * 88 +
+  24 * 1001 * inputs$samples_used
+
+# The macro reads a named table; each run gives it a view of its Parquet input.
+fit_query <- paste(
+  "SELECT count(*) AS fits, count(*) FILTER (WHERE status = 'ok') AS ok,",
+  "round(avg(contamination), 6) AS mean_contamination, sum(sites)::BIGINT AS sites",
+  "FROM duckhts_count_error_fit('counts')")
+fit_setup <- function(source) sprintf("CREATE TEMP VIEW counts AS SELECT * FROM %s;", source)
+
+empty_runs <- vapply(seq_len(3L), function(run) run_fresh("SELECT 1 AS fits", 1L)$max_rss_kib, numeric(1L))
+overhead_mib <- median(empty_runs) / 1024
+budgets <- aggregate(live_state_bytes ~ workload, inputs, max)
+budgets$budget_mib <- overhead_mib + 3 * budgets$live_state_bytes / 2^20
+inputs$budget_mib <- budgets$budget_mib[match(inputs$workload, budgets$workload)]
+
+observations <- list()
+for (repetition in 1:3) {
+  order <- if (repetition %% 2L == 1L) seq_len(nrow(inputs)) else rev(seq_len(nrow(inputs)))
+  for (threads in c(1L, 4L)) {
+    for (k in order) {
+      observed <- run_fresh(fit_query, threads, fit_setup(inputs$source_sql[[k]]))
+      observations[[length(observations) + 1L]] <- data.frame(
+        workload = inputs$workload[[k]], scale = inputs$scale[[k]], samples = inputs$samples[[k]],
+        rows = inputs$rows[[k]], cells = inputs$cells[[k]], threads = threads, repetition = repetition,
+        observed, budget_mib = inputs$budget_mib[[k]], stringsAsFactors = FALSE)
+    }
+  }
+}
+runs <- do.call(rbind, observations)
+for (column in c("fits", "ok", "mean_contamination", "sites")) runs[[column]] <- as.numeric(runs[[column]])
+stopifnot(all(runs$peak_temp_bytes == 0), all(runs$fits == runs$samples), all(runs$ok == runs$fits))
+write.csv(runs, "benchmarks/benchmark_count_error_fit_runs.csv", row.names = FALSE)
+over_budget <- runs[runs$max_rss_kib / 1024 > runs$budget_mib, ]
+if (nrow(over_budget)) {
+  print(over_budget[c("workload", "scale", "threads", "max_rss_kib", "budget_mib")])
+  stop("observations exceed the declared memory budget", call. = FALSE)
+}
+
+cells <- split(runs, list(runs$scale, runs$threads, runs$workload), drop = TRUE)
+summary <- do.call(rbind, lapply(cells, function(cell) {
+  stopifnot(length(unique(cell$mean_contamination)) == 1L, length(unique(cell$sites)) == 1L)
+  data.frame(workload = cell$workload[[1L]], scale = cell$scale[[1L]], threads = cell$threads[[1L]],
+             samples = cell$samples[[1L]], rows = cell$rows[[1L]], cells = cell$cells[[1L]],
+             mean_contamination = cell$mean_contamination[[1L]],
+             median_seconds = median(cell$seconds), min_seconds = min(cell$seconds), max_seconds = max(cell$seconds),
+             median_rss_mib = round(median(cell$max_rss_kib) / 1024, 1),
+             max_rss_mib = round(max(cell$max_rss_kib) / 1024, 1),
+             max_buffer_mib = round(max(cell$peak_buffer_bytes) / 2^20, 1),
+             budget_mib = round(cell$budget_mib[[1L]], 1), stringsAsFactors = FALSE)
+}))
+summary <- summary[order(summary$workload, summary$threads, summary$scale), ]
+rownames(summary) <- NULL
+
+synthetic <- summary[summary$workload != "real", ]
+exponents <- do.call(rbind, lapply(split(synthetic, list(synthetic$threads, synthetic$workload), drop = TRUE), function(s) {
+  s <- s[order(s$scale), ]
+  dimension <- if (s$workload[[1L]] == "samples") s$samples else s$rows
+  growth <- function(low, high) log(s$median_seconds[[high]] / s$median_seconds[[low]]) / log(dimension[[high]] / dimension[[low]])
+  data.frame(workload = s$workload[[1L]], threads = s$threads[[1L]], one_x_seconds = s$median_seconds[[1L]],
+             time_exponent_2x = growth(1L, 2L), time_exponent_4x = growth(2L, 3L),
+             rss_ratio_2x = s$median_rss_mib[[2L]] / s$median_rss_mib[[1L]],
+             rss_ratio_4x = s$median_rss_mib[[3L]] / s$median_rss_mib[[1L]], stringsAsFactors = FALSE)
+}))
+rownames(exponents) <- NULL
+one_thread <- synthetic[synthetic$threads == 1L, ]
+stopifnot(all(one_thread$median_seconds[one_thread$scale == 1L] >= 5),
+          all(exponents$time_exponent_2x <= 1.25), all(exponents$time_exponent_4x <= 1.25))
+
+# Untimed: the fit of the three real samples, what the function is for.
+real_fit <- utils::read.csv(text = system2(duckdb_cli, c("-unsigned", "-csv"), input = c(
+  sprintf("LOAD %s;", quote_literal(extension)), fit_setup(real_inputs$source_sql[[1L]]), paste(
+  "SELECT sample, sites, round(mean_depth, 1) AS depth, blocks, seq_error, contamination, contamination_sd,",
+  "allele_balance, spread_hom, spread_het, artefact_weight, contamination_relative,",
+  "round(log_likelihood_relative - log_likelihood, 1) AS relative_minus_unrelated, status",
+  "FROM duckhts_count_error_fit('counts') ORDER BY sample;")), stdout = TRUE))
+
+# Untimed: a count-level mixture of two real samples. Each read of the
+# receiver is kept with chance 1 - share and each read of the other sample
+# is added with chance share, every draw a hash of (position, read); the
+# receiver's frequencies are the panel's.
+mixture_sql <- c(
+  sprintf("LOAD %s;", quote_literal(extension)),
+  sprintf("CREATE TEMP TABLE receiver AS SELECT * FROM read_parquet(%s);", quote_literal(real_paths[["roh_counts_chr20_hg00403"]])),
+  sprintf("CREATE TEMP TABLE other AS SELECT * FROM read_parquet(%s);", quote_literal(real_paths[["roh_counts_chr20_na18507"]])),
+  "CREATE MACRO thin(n, keep, salt, pos) AS (SELECT count(*) FROM range(n) t(i) WHERE (hash(pos, salt, i) % 1000000) / 1000000.0 < keep);",
+  paste("CREATE TEMP VIEW counts AS SELECT share AS sample_id, a.chrom, a.pos, a.af,",
+        "thin(a.ref_count, 1 - share, 1, a.pos) + thin(b.ref_count, share, 2, a.pos) AS ref_count,",
+        "thin(a.alt_count, 1 - share, 3, a.pos) + thin(b.alt_count, share, 4, a.pos) AS alt_count",
+        "FROM receiver a JOIN other b USING (chrom, pos), (VALUES (0.0), (0.02), (0.05), (0.20)) v(share)",
+        "WHERE a.ref_count IS NOT NULL AND a.alt_count IS NOT NULL AND b.ref_count IS NOT NULL AND b.alt_count IS NOT NULL;"),
+  paste("SELECT sample AS share, sites, round(mean_depth, 1) AS depth, seq_error, contamination, contamination_sd,",
+        "homozygosity_excess, allele_balance, artefact_weight, contamination_relative,",
+        "round(log_likelihood_relative - log_likelihood, 1) AS relative_minus_unrelated, status",
+        "FROM duckhts_count_error_fit('counts') ORDER BY CAST(sample AS DOUBLE);"))
+mixture_fit <- utils::read.csv(text = system2(duckdb_cli, c("-unsigned", "-csv"), input = mixture_sql, stdout = TRUE))
+unlink(staging, recursive = TRUE)
+```
+
+Source revision: `r revision`; `src` tree `r src_tree`. DuckDB runtime: `r duckdb_runtime` (CLI). Extension SHA-256: `r strsplit(system2("sha256sum", extension, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`. Host load at start: `r host_load`. DuckDB memory limit: `r memory_limit` (the default); temporary directory limit: 0.
+
+Overhead: `r round(overhead_mib, 1)` MiB. Ceilings: `r paste(sprintf("%s %s MiB", budgets$workload, round(budgets$budget_mib, 1)), collapse = ", ")`.
+
+## Inputs
+
+`rows_used` are the rows the fit keeps, `cells` the histogram cells they make and `pairs` the distinct (depth, alt count) pairs, all with the default options.
+
+```{r inputs, echo=FALSE}
+knitr::kable(inputs[c("workload", "scale", "samples", "sites", "rows_used", "cells", "pairs", "budget_mib")],
+             digits = 1, format.args = list(big.mark = ","))
+```
+
+## Measurements
+
+`mean_contamination` is the mean fitted share over the samples of the query, the same in every repetition. Times are the query latency of three repetitions.
+
+```{r summary, echo=FALSE}
+knitr::kable(summary, digits = 3, format.args = list(big.mark = ","))
+```
+
+Growth of the median time of the synthetic workloads against the rows (sites) or the samples (an exponent of 1 is linear), and peak-RSS ratios to 1×:
+
+```{r exponents, echo=FALSE}
+knitr::kable(exponents, digits = 3)
+```
+
+## Findings
+
+Every observation is within its ceiling and none spills; every synthetic 1× run on one thread takes at least 5 s and no time exponent is above 1.25. The render enforces all of this, and that every fit of every run reports `ok` and the same estimates in every repetition.
+
+```{r findings, echo=FALSE, results="asis"}
+sites <- summary[summary$workload == "sites" & summary$threads == 1L, ]
+samples <- summary[summary$workload == "samples" & summary$threads == 1L, ]
+samples4 <- summary[summary$workload == "samples" & summary$threads == 4L, ]
+real <- summary[summary$workload == "real" & summary$threads == 1L, ]
+cat(sprintf(paste(
+  "One sample of %s sites takes %.1f s on one thread (%.1f s at %s sites) at %s MiB peak RSS;",
+  "32 samples of 250,000 sites take %.1f s on one thread and %.1f s on four, at %s MiB and %s MiB.",
+  "Four threads do not speed up one sample's fit, and spread the fits of 32 samples over the threads.",
+  "The three real chr20 samples take %.1f s on one thread at %s MiB.\n"),
+  format(sites$rows[[1L]], big.mark = ",", scientific = FALSE), sites$median_seconds[[1L]], sites$median_seconds[[3L]],
+  format(sites$rows[[3L]], big.mark = ",", scientific = FALSE), sites$max_rss_mib[[3L]],
+  samples$median_seconds[[3L]], samples4$median_seconds[[3L]], samples$max_rss_mib[[3L]], samples4$max_rss_mib[[3L]],
+  real$median_seconds[[1L]], real$max_rss_mib[[1L]]))
+```
+
+## The real samples
+
+The fit of the three staged chr20 samples with the default options, untimed. These are single 30× samples with no second genome known, so `contamination` is the share the model attributes to one; `seq_error` is the chance that a read shows the other panel allele at a homozygous site, with site artefacts that `artefact_weight` does not absorb.
+
+```{r real, echo=FALSE}
+knitr::kable(real_fit, digits = 6)
+```
+
+## A second genome of another population
+
+The same function on a count-level mixture of two of those samples, untimed: HG00403 (CHS) receives reads of NA18507 (YRI) at a share of 0, 0.02, 0.05 and 0.20, each read of the receiver kept with chance 1 − share and each read of the other sample added with chance share, with the receiver's panel frequencies. The fitted `contamination` is the number to compare with `share`. The other sample's genotypes do not follow the receiver's frequencies, which the unrelated model takes them to, so the fit attributes more reads to it than the share: this is the bias the catalog entry of `duckhts_count_error_fit()` names. The sites common to both tables are used, so the share-0 row is the receiver alone on those sites and differs slightly from its row above.
+
+```{r mixture, echo=FALSE}
+knitr::kable(mixture_fit, digits = 6)
+```
