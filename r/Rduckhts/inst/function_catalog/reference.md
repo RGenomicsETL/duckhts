@@ -1430,6 +1430,10 @@ table(sample VARCHAR, chrom VARCHAR, start BIGINT, "end" BIGINT, length BIGINT, 
 
 counts_table is a table or view with sample_id, chrom, pos (one-based), ref_count, alt_count and af, one row per sample and site. alt_count counts reads showing the allele whose population frequency is af; ref_count counts reads showing the other allele. Any frequency source composes in SQL first: an INFO tag, a frequency table or ancestry-weighted frequencies. Somalier site counts map as ref_count = a, alt_count = b and af = frequency of allele_b.
 
+### Fitted parameters
+
+Use duckhts_roh_counts_fitted(counts_table, fit_table, ...) to supply one seq_error and contamination per sample from a caller-named relation; in R, pass fit_table to rduckhts_roh_counts.
+
 ### Read model
 
 Each read shows the counted allele with probability (1 - contamination) * q + contamination * c, where q is seq_error, 1/2 or 1 - seq_error for zero, one or two copies, and c = af * (1 - seq_error) + (1 - af) * seq_error is the chance that a read from a contaminating individual of the same population shows it. Reads are independent and the binomial coefficient is omitted. The resulting genotype likelihoods enter the bcftools roh model in place of PL. This emission is a DuckHTS extension; bcftools roh has no read-count mode.
@@ -1458,6 +1462,36 @@ The chrom of genetic_map is compared byte for byte with the contig names of the 
 
 ```sql
 SELECT * FROM duckhts_roh_counts('site_counts', contamination := 0.02) ORDER BY sample, chrom, start;
+```
+
+## duckhts_roh_counts_fitted
+
+Find runs of homozygosity from allele read counts using per-sample fitted error and contamination.
+
+Signature:
+
+```sql
+duckhts_roh_counts_fitted(counts_table, fit_table, genetic_map, hw_to_az := 6.7e-8, az_to_hw := 5e-9, rec_rate := NULL, max_sites := 20000000, max_site_bytes := 4294967296)
+```
+
+Returns:
+
+```
+table(sample VARCHAR, chrom VARCHAR, start BIGINT, "end" BIGINT, length BIGINT, n_markers INTEGER, quality DOUBLE)
+```
+
+### Fit relation
+
+fit_table is a caller-named table or view with one row per sample and columns sample, seq_error and contamination, such as the output of duckhts_count_error_fit. sample joins to counts_table.sample_id. A missing fit or NULL parameter is an explicit error naming the sample and problem; duplicate fit rows are errors. seq_error must be finite and in (0, 0.5); contamination must be finite and in [0, 1), as for the scalar arguments of duckhts_roh_counts. Fit status filtering belongs in the caller's SQL. Spreads and artefact weight are not used.
+
+### Decode
+
+Counts, emissions, outputs, transitions, optional genetic_map and memory limits are identical to duckhts_roh_counts. Only seq_error and contamination vary by sample. In R, pass fit_table to rduckhts_roh_counts; its scalar seq_error and contamination arguments are unused.
+
+### Examples
+
+```sql
+SELECT * FROM duckhts_roh_counts_fitted('site_counts', 'sample_fits') ORDER BY sample, chrom, start;
 ```
 
 ## duckhts_count_error_fit

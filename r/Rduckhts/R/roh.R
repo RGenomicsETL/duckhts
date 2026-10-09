@@ -166,6 +166,10 @@ rduckhts_roh <- function(
 #'
 #' @param con A DuckDB connection with DuckHTS loaded.
 #' @param counts_table Name of a table or view of read counts (see Details).
+#' @param fit_table Optional table or view with one row per `sample`, containing
+#'   non-NULL `seq_error` and `contamination`. These replace the scalar arguments
+#'   for each matching `sample_id`. Missing fits are errors. Filter fit status in
+#'   the caller's SQL; spreads and artefact weight are not used.
 #' @param seq_error Per-read probability of showing the other allele, in
 #'   `(0, 0.5)`.
 #' @param contamination Fraction of reads from a contaminating individual, in
@@ -188,32 +192,37 @@ rduckhts_roh <- function(
 rduckhts_roh_counts <- function(
   con, counts_table, seq_error = 1e-3, contamination = 0, genetic_map = NULL,
   hw_to_az = 6.7e-8, az_to_hw = 5e-9, rec_rate = NULL,
-  table_name = NULL, overwrite = FALSE, max_sites = 2e7, max_site_bytes = 2^32
+  table_name = NULL, overwrite = FALSE, max_sites = 2e7, max_site_bytes = 2^32,
+  fit_table = NULL
 ) {
   .somalier_validate_output(con, table_name, overwrite)
   .somalier_validate_name(counts_table, "counts_table")
-  if (!is.numeric(seq_error) || length(seq_error) != 1L || !is.finite(seq_error) ||
-      seq_error <= 0 || seq_error >= 0.5) {
+  if (!is.null(fit_table)) .somalier_validate_name(fit_table, "fit_table")
+  if (is.null(fit_table) && (!is.numeric(seq_error) || length(seq_error) != 1L || !is.finite(seq_error) ||
+      seq_error <= 0 || seq_error >= 0.5)) {
     stop("seq_error must be one finite number in (0, 0.5)", call. = FALSE)
   }
-  if (!is.numeric(contamination) || length(contamination) != 1L ||
-      !is.finite(contamination) || contamination < 0 || contamination >= 1) {
+  if (is.null(fit_table) && (!is.numeric(contamination) || length(contamination) != 1L ||
+      !is.finite(contamination) || contamination < 0 || contamination >= 1)) {
     stop("contamination must be one finite number in [0, 1)", call. = FALSE)
   }
   options <- .roh_validated_options(genetic_map, hw_to_az, az_to_hw, NULL,
                                    rec_rate, NULL)
   arguments <- c(
     sql_quote_string(con, counts_table),
+    if (!is.null(fit_table)) sql_quote_string(con, fit_table),
     if (!is.null(options$genetic_map)) sql_quote_string(con, options$genetic_map),
-    paste0("seq_error := ", sprintf("%.17g", seq_error)),
-    paste0("contamination := ", sprintf("%.17g", contamination)),
+    if (is.null(fit_table)) c(
+      paste0("seq_error := ", sprintf("%.17g", seq_error)),
+      paste0("contamination := ", sprintf("%.17g", contamination))
+    ),
     paste0("hw_to_az := ", options$hw_to_az),
     paste0("az_to_hw := ", options$az_to_hw),
     if (!is.null(options$rec_rate)) paste0("rec_rate := ", options$rec_rate),
     .roh_limit_arguments(max_sites, max_site_bytes)
   )
-  query <- paste0("SELECT * FROM duckhts_roh_counts(",
-                  paste(arguments, collapse = ", "), ")")
+  macro <- if (is.null(fit_table)) "duckhts_roh_counts" else "duckhts_roh_counts_fitted"
+  query <- paste0("SELECT * FROM ", macro, "(", paste(arguments, collapse = ", "), ")")
   .somalier_publish_query(con, query, table_name, overwrite)
 }
 

@@ -1374,6 +1374,116 @@ SELECT * FROM duckhts_roh_counts('roh_counts_bad_af');
 ----
 af must be in [0, 1] (position 50000 is 1.5)
 
+# Per-sample fits use exactly the scalar emission parameters, including quality bits.
+statement ok
+CREATE TEMP TABLE roh_fits AS
+SELECT sample_id AS sample, 0.001::DOUBLE AS seq_error, 0.0::DOUBLE AS contamination,
+       'caller_selected' AS status, 123.0 AS artefact_weight
+FROM roh_counts_clean GROUP BY sample_id;
+
+query I
+WITH fitted AS (SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits')),
+scalar AS (SELECT * FROM duckhts_roh_counts('roh_counts_clean'))
+SELECT count(*) FROM ((SELECT * FROM fitted EXCEPT ALL SELECT * FROM scalar)
+UNION ALL (SELECT * FROM scalar EXCEPT ALL SELECT * FROM fitted));
+----
+0
+
+statement ok
+UPDATE roh_fits SET seq_error = 0.02, contamination = 0.1 WHERE sample = 'S2';
+
+# Separate scalar calls are the oracle; both samples must produce runs.
+query II
+WITH fitted AS (SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits')),
+scalar AS (
+  SELECT * FROM duckhts_roh_counts('roh_counts_clean') WHERE sample = 'S1'
+  UNION ALL
+  SELECT * FROM duckhts_roh_counts('roh_counts_clean', seq_error := 0.02, contamination := 0.1)
+  WHERE sample = 'S2')
+SELECT (SELECT count(DISTINCT sample) FROM fitted), count(*) FROM (
+  (SELECT * FROM fitted EXCEPT ALL SELECT * FROM scalar)
+  UNION ALL (SELECT * FROM scalar EXCEPT ALL SELECT * FROM fitted));
+----
+2	0
+
+query I
+WITH fitted AS (
+  SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits', 'roh_counts_map')),
+scalar AS (
+  SELECT * FROM duckhts_roh_counts('roh_counts_clean', 'roh_counts_map') WHERE sample = 'S1'
+  UNION ALL
+  SELECT * FROM duckhts_roh_counts('roh_counts_clean', 'roh_counts_map',
+                                 seq_error := 0.02, contamination := 0.1) WHERE sample = 'S2')
+SELECT count(*) FROM ((SELECT * FROM fitted EXCEPT ALL SELECT * FROM scalar)
+UNION ALL (SELECT * FROM scalar EXCEPT ALL SELECT * FROM fitted));
+----
+0
+
+statement ok
+CREATE TEMP TABLE roh_bad_fits AS SELECT * FROM roh_fits WHERE sample = 'S1';
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits');
+----
+missing fit row for sample S2
+
+statement ok
+INSERT INTO roh_bad_fits SELECT * FROM roh_fits WHERE sample = 'S2';
+
+statement ok
+UPDATE roh_bad_fits SET seq_error = NULL WHERE sample = 'S2';
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits');
+----
+NULL seq_error for sample S2
+
+statement ok
+UPDATE roh_bad_fits SET seq_error = 0.001, contamination = NULL WHERE sample = 'S2';
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits');
+----
+NULL contamination for sample S2
+
+statement ok
+UPDATE roh_bad_fits SET seq_error = 0.5, contamination = 0.0 WHERE sample = 'S2';
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits');
+----
+seq_error must be in (0, 0.5)
+
+statement ok
+UPDATE roh_bad_fits SET seq_error = 0.001, contamination = 1.0 WHERE sample = 'S2';
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits');
+----
+contamination must be in [0, 1)
+
+# Validation also visits samples whose chromosomes have no map nodes.
+statement ok
+CREATE TEMP VIEW roh_no_map AS SELECT * FROM roh_counts_map WHERE false;
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits', 'roh_no_map');
+----
+contamination must be in [0, 1)
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_none', 'roh_fits', max_sites := 0);
+----
+max_sites must be
+
+statement ok
+CREATE TEMP VIEW roh_duplicate_fits AS SELECT * FROM roh_fits UNION ALL SELECT * FROM roh_fits;
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_duplicate_fits');
+----
+More than one row returned by a subquery
+
 # __duckhts_roh_decode checks its input: any BLOB may be passed to it.
 statement error
 SELECT __duckhts_roh_decode('abc'::BLOB, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9);

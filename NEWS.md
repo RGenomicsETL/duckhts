@@ -4,6 +4,11 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- `duckhts_roh_counts_fitted` decodes each sample using a caller-named fit relation's
+  `seq_error` and `contamination`; `rduckhts_roh_counts(fit_table = ...)` exposes it
+  in R. Missing fits and NULL parameters are errors; fit status filtering remains
+  caller SQL, and spreads and artefact weight do not enter the emission model.
+
 - Added `duckhts_count_error_fit()`: the read error, the share of reads of a
   second genome, the allele balance at heterozygous sites, two spreads, an
   artefact weight and an excess of homozygosity of each sample, fitted by

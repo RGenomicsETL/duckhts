@@ -4,6 +4,7 @@
 
 require duckhts
 
+# The inventory includes the separate fitted-count ROH macro.
 query IIIII
 SELECT count(*)::INTEGER, count(DISTINCT install_order)::INTEGER,
        count(DISTINCT definitions_sha256)::INTEGER,
@@ -11,7 +12,7 @@ SELECT count(*)::INTEGER, count(DISTINCT install_order)::INTEGER,
        count(*) FILTER (WHERE length(definitions_sha256) = 64)::INTEGER
 FROM duckhts_macro_definitions();
 ----
-39	39	1	39	39
+40	40	1	40	40
 
 query II
 SELECT count(DISTINCT d.name)::INTEGER,
@@ -19,7 +20,7 @@ SELECT count(DISTINCT d.name)::INTEGER,
 FROM duckhts_macro_definitions() d
 JOIN duckdb_functions() f ON f.function_name = d.name AND f.function_type IN ('macro', 'table_macro');
 ----
-39	39
+40	40
 
 query I
 SELECT duckhts_quote_ident('a"b');

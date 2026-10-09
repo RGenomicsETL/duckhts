@@ -2,6 +2,11 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- `rduckhts_roh_counts(fit_table = ...)` uses each sample's fitted `seq_error` and
+  `contamination` through the bundled `duckhts_roh_counts_fitted` macro. Missing
+  fits and NULL parameters are errors; fit status filtering remains caller SQL,
+  and spreads and artefact weight do not enter the emission model.
+
 - Added `rduckhts_count_error_fit()` and the bundled
   `duckhts_count_error_fit()`: read error, the share of reads of a second
   genome, allele balance, spreads and an artefact weight fitted from allele

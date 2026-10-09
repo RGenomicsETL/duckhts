@@ -128,10 +128,14 @@ static const char genotype_guard[] = ROH_GUARD_COLUMNS "WHERE NOT " ROH_GENOTYPE
 static const char ancestry_guard[] =
     ROH_GUARD_COLUMNS "FROM __dht_group_guard AS g WHERE NOT (g.valid AND "
     ROH_GENOTYPE_ARGUMENTS_VALID ")";
-static const char counts_guard[] =
-    ROH_GUARD_COLUMNS "WHERE NOT __duckhts_roh_valid_args(3, NULL::DOUBLE, "
-    "CAST(seq_error AS DOUBLE), CAST(contamination AS DOUBLE), CAST(rec_rate AS DOUBLE), "
-    "CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE), " ROH_LIMIT_ARGUMENTS ")";
+#define ROH_COUNTS_ARGUMENTS_VALID \
+    "__duckhts_roh_valid_args(3, NULL::DOUBLE, CAST(seq_error AS DOUBLE), " \
+    "CAST(contamination AS DOUBLE), CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), " \
+    "CAST(az_to_hw AS DOUBLE), " ROH_LIMIT_ARGUMENTS ")"
+static const char counts_guard[] = ROH_GUARD_COLUMNS "WHERE NOT " ROH_COUNTS_ARGUMENTS_VALID;
+static const char fitted_counts_guard[] =
+    ROH_GUARD_COLUMNS "FROM (SELECT seq_error, contamination FROM __dht_fit "
+    "UNION ALL SELECT 0.001, 0.0) AS fits WHERE NOT " ROH_COUNTS_ARGUMENTS_VALID;
 
 static const char ancestry_sites[] =
     /* The long reference (sites x groups rows) is read where it is used rather
@@ -272,9 +276,10 @@ static const char ancestry_frequencies[] =
  * frequency of the counted allele. Any frequency source composes in SQL
  * before the macro, for example counts at panel sites joined to INFO/AF, an
  * af_table or ancestry-weighted frequencies. */
+#define ROH_COUNTS_FITTED_OPTIONS \
+    "hw_to_az := 6.7e-8, az_to_hw := 5e-9, rec_rate := NULL, " ROH_LIMITS
 #define ROH_COUNTS_OPTIONS \
-    "seq_error := 1e-3, contamination := 0.0, hw_to_az := 6.7e-8, az_to_hw := 5e-9, " \
-    "rec_rate := NULL, " ROH_LIMITS
+    "seq_error := 1e-3, contamination := 0.0, " ROH_COUNTS_FITTED_OPTIONS
 
 static const char counts_lists[] =
     "WITH __dht_counts AS (SELECT CAST(sample_id AS VARCHAR) AS smp, "
@@ -284,6 +289,21 @@ static const char counts_lists[] =
     "__dht_lists AS (SELECT smp, chrom, __duckhts_roh_sites(pos, af, ref_count, alt_count, "
     "NULL::INTEGER, 3, " ROH_LIMIT_ARGUMENTS ") AS s "
     "FROM __dht_counts GROUP BY smp, chrom)";
+
+/* A scalar subquery admits one fit per sample; DuckDB rejects duplicate rows.
+ * Materialize the sample lookup, not a fit lookup for every site. */
+static const char fitted_counts[] =
+    ", __dht_fit AS MATERIALIZED (SELECT smp, "
+    "CASE WHEN fit IS NULL THEN error('missing fit row for sample ' || smp) "
+    "WHEN fit.seq_error IS NULL THEN error('NULL seq_error for sample ' || smp) "
+    "ELSE fit.seq_error END AS seq_error, "
+    "CASE WHEN fit IS NULL THEN error('missing fit row for sample ' || smp) "
+    "WHEN fit.contamination IS NULL THEN error('NULL contamination for sample ' || smp) "
+    "ELSE fit.contamination END AS contamination "
+    "FROM (SELECT smp, (SELECT struct_pack(seq_error := CAST(f.seq_error AS DOUBLE), "
+    "contamination := CAST(f.contamination AS DOUBLE)) FROM query_table(fit_table) AS f "
+    "WHERE CAST(f.sample AS VARCHAR) = samples.smp) AS fit "
+    "FROM (SELECT DISTINCT smp FROM __dht_counts) AS samples))";
 
 #define ROH_MAX_PARTS 32
 
@@ -358,27 +378,39 @@ static bool register_roh_ancestry_macro(duckhts_registration_t *registration) {
     return duckhts_register_sql_parts(registration, parts, count);
 }
 
-static bool register_roh_counts_macro(duckhts_registration_t *registration) {
+static bool register_roh_counts_macro(duckhts_registration_t *registration, bool fitted) {
     const char *parts[ROH_MAX_PARTS];
     size_t count = 0;
-    parts[count++] = "CREATE OR REPLACE MACRO duckhts_roh_counts(counts_table, "
-                     ROH_COUNTS_OPTIONS ") AS TABLE (";
+    parts[count++] = fitted
+        ? "CREATE OR REPLACE MACRO duckhts_roh_counts_fitted(counts_table, fit_table, "
+          ROH_COUNTS_FITTED_OPTIONS ") AS TABLE ("
+        : "CREATE OR REPLACE MACRO duckhts_roh_counts(counts_table, "
+          ROH_COUNTS_OPTIONS ") AS TABLE (";
     parts[count++] = counts_lists;
+    if (fitted) parts[count++] = fitted_counts;
     parts[count++] = select_head;
     parts[count++] = counts_model;
     parts[count++] = no_map_arguments;
     parts[count++] = decode_end;
-    parts[count++] = from_lists;
-    parts[count++] = counts_guard;
-    parts[count++] = "), (counts_table, genetic_map VARCHAR, " ROH_COUNTS_OPTIONS ") AS TABLE (";
+    parts[count++] = fitted
+        ? ") AS r FROM __dht_lists AS l JOIN __dht_fit USING (smp)) AS seg"
+        : from_lists;
+    parts[count++] = fitted ? fitted_counts_guard : counts_guard;
+    parts[count++] = fitted
+        ? "), (counts_table, fit_table, genetic_map VARCHAR, " ROH_COUNTS_FITTED_OPTIONS ") AS TABLE ("
+        : "), (counts_table, genetic_map VARCHAR, " ROH_COUNTS_OPTIONS ") AS TABLE (";
     parts[count++] = counts_lists;
+    if (fitted) parts[count++] = fitted_counts;
     parts[count++] = map_lists;
     parts[count++] = select_head;
     parts[count++] = counts_model;
     parts[count++] = map_arguments;
     parts[count++] = decode_end;
-    parts[count++] = from_lists_with_map;
-    parts[count++] = counts_guard;
+    parts[count++] = fitted
+        ? ") AS r FROM __dht_lists AS l JOIN __dht_fit USING (smp) "
+          "JOIN __dht_map AS m ON m.m_chrom = l.chrom) AS seg"
+        : from_lists_with_map;
+    parts[count++] = fitted ? fitted_counts_guard : counts_guard;
     parts[count++] = ")";
     return duckhts_register_sql_parts(registration, parts, count);
 }
@@ -390,5 +422,6 @@ bool register_duckhts_roh_sql(duckhts_registration_t *registration) {
     return register_roh_macro(registration, &from_info_tag) &&
            register_roh_macro(registration, &from_relation) &&
            register_roh_ancestry_macro(registration) &&
-           register_roh_counts_macro(registration);
+           register_roh_counts_macro(registration, false) &&
+           register_roh_counts_macro(registration, true);
 }

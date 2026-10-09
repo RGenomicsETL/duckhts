@@ -251,3 +251,64 @@ test_roh_counts <- function() {
   expect_error(rduckhts_roh_counts(con, "roh_counts", max_site_bytes = 100), "max_site_bytes")
 }
 test_roh_counts()
+
+test_roh_counts_fitted <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  counts <- .roh_titration_counts(0.1)
+  counts$sample_id <- "S1"
+  second <- counts
+  second$sample_id <- "S2"
+  dbWriteTable(con, "counts", rbind(counts, second))
+  fits <- data.frame(sample = c("S1", "S2"), seq_error = 0.001, contamination = 0.1,
+                     status = "caller_selected", artefact_weight = 123)
+  dbWriteTable(con, "fits", fits)
+  ordered <- function(rows) {
+    rows <- rows[order(rows$sample, rows$chrom, rows$start), ]
+    rownames(rows) <- NULL
+    rows
+  }
+  scalar <- rduckhts_roh_counts(con, "counts", contamination = 0.1)
+  fitted <- rduckhts_roh_counts(con, "counts", fit_table = "fits")
+  expect_identical(ordered(fitted), ordered(scalar))
+  # Unused scalar arguments do not constrain fitted parameters.
+  expect_identical(ordered(rduckhts_roh_counts(
+    con, "counts", fit_table = "fits", seq_error = NA, contamination = -1
+  )), ordered(scalar))
+
+  fits$seq_error[[2]] <- 0.02
+  fits$contamination[[2]] <- 0.2
+  dbWriteTable(con, "fits", fits, overwrite = TRUE)
+  dbWriteTable(con, "map", data.frame(chrom = "1", pos = c(1, 5000000), cm = c(0, 5)))
+  for (map in list(NULL, "map")) {
+    fitted <- rduckhts_roh_counts(con, "counts", fit_table = "fits", genetic_map = map)
+    scalar <- lapply(seq_len(nrow(fits)), function(i) {
+      rows <- rduckhts_roh_counts(con, "counts", genetic_map = map,
+                                  seq_error = fits$seq_error[[i]],
+                                  contamination = fits$contamination[[i]])
+      rows[rows$sample == fits$sample[[i]], ]
+    })
+    expect_equal(length(unique(fitted$sample)), 2L)
+    expect_identical(ordered(fitted), ordered(do.call(rbind, scalar)))
+  }
+  expect_error(rduckhts_roh_counts(con, "counts", fit_table = NA_character_), "fit_table")
+  expect_error(rduckhts_roh_counts(con, "counts", fit_table = c("fits", "fits")), "fit_table")
+  dbWriteTable(con, "bad_fits", fits[1, ], overwrite = TRUE)
+  expect_error(rduckhts_roh_counts(con, "counts", fit_table = "bad_fits"),
+               "missing fit row for sample S2")
+  for (parameter in c("seq_error", "contamination")) {
+    bad <- fits
+    bad[[parameter]][[2]] <- NA_real_
+    dbWriteTable(con, "bad_fits", bad, overwrite = TRUE)
+    expect_error(rduckhts_roh_counts(con, "counts", fit_table = "bad_fits"),
+                 paste("NULL", parameter, "for sample S2"))
+    bad[[parameter]][[2]] <- if (parameter == "seq_error") 0.5 else 1
+    dbWriteTable(con, "bad_fits", bad, overwrite = TRUE)
+    expect_error(rduckhts_roh_counts(con, "counts", fit_table = "bad_fits"),
+                 paste(parameter, "must be in"))
+  }
+  dbWriteTable(con, "bad_fits", rbind(fits, fits), overwrite = TRUE)
+  expect_error(rduckhts_roh_counts(con, "counts", fit_table = "bad_fits"),
+               "More than one row returned by a subquery")
+}
+test_roh_counts_fitted()
