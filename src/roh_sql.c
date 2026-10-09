@@ -291,7 +291,10 @@ static const char counts_lists[] =
     "FROM __dht_counts GROUP BY smp, chrom)";
 
 /* A scalar subquery admits one fit per sample; DuckDB rejects duplicate rows.
- * Materialize the sample lookup, not a fit lookup for every site. */
+ * Materialize the sample lookup, not a fit lookup for every site. The sample
+ * set reads the input relation again rather than __dht_counts: a CTE that
+ * two branches reference is materialised whole, which held every row of the
+ * input in memory. */
 static const char fitted_counts[] =
     ", __dht_fit AS MATERIALIZED (SELECT smp, "
     "CASE WHEN fit IS NULL THEN error('missing fit row for sample ' || smp) "
@@ -303,7 +306,7 @@ static const char fitted_counts[] =
     "FROM (SELECT smp, (SELECT struct_pack(seq_error := CAST(f.seq_error AS DOUBLE), "
     "contamination := CAST(f.contamination AS DOUBLE)) FROM query_table(fit_table) AS f "
     "WHERE CAST(f.sample AS VARCHAR) = samples.smp) AS fit "
-    "FROM (SELECT DISTINCT smp FROM __dht_counts) AS samples))";
+    "FROM (SELECT DISTINCT CAST(sample_id AS VARCHAR) AS smp FROM query_table(counts_table)) AS samples))";
 
 #define ROH_MAX_PARTS 32
 
