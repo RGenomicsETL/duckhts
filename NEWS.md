@@ -4,6 +4,10 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- ROH decoding packs Viterbi traceback into two bits per site, reducing per-thread
+  site workspace from 38 to approximately 36.25 bytes per site. Emissions and
+  forward/posterior probabilities remain doubles; output values are unchanged.
+
 - GenBank named qualifiers are resolved once per feature, reusing their values
   across joined-location segments. Reader documentation explains that requested
   keys absent from every feature yield all-NULL columns in GenBank, GFF and GTF,

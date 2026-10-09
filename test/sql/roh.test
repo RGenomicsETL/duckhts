@@ -1484,6 +1484,28 @@ SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_duplicate_fits'
 ----
 More than one row returned by a subquery
 
+# Independent transitions (both 0.5) make homozygous sites AZ and balanced sites HW.
+# Lengths 1..9 exercise every two-bit offset and partially filled traceback bytes.
+statement ok
+CREATE TEMP TABLE roh_short_counts AS
+SELECT CAST(n AS VARCHAR) AS sample_id, '1' AS chrom, i::BIGINT AS pos,
+       CASE WHEN i % 3 = 0 THEN 15 ELSE 30 END::BIGINT AS ref_count,
+       CASE WHEN i % 3 = 0 THEN 15 ELSE 0 END::BIGINT AS alt_count, 0.5 AS af
+FROM range(1, 10) AS samples(n), LATERAL range(1, n + 1) AS sites(i);
+
+query II
+WITH observed AS (
+  SELECT sample, start, "end", n_markers
+  FROM duckhts_roh_counts('roh_short_counts', hw_to_az := 0.5, az_to_hw := 0.5)),
+expected AS (
+  SELECT sample_id AS sample, min(pos) AS start, max(pos) AS "end", count(*)::INTEGER AS n_markers
+  FROM roh_short_counts WHERE pos % 3 != 0 GROUP BY sample_id, (pos - 1) // 3)
+SELECT (SELECT count(*) FROM observed), count(*) FROM (
+  (SELECT * FROM observed EXCEPT ALL SELECT * FROM expected)
+  UNION ALL (SELECT * FROM expected EXCEPT ALL SELECT * FROM observed));
+----
+18	0
+
 # __duckhts_roh_decode checks its input: any BLOB may be passed to it.
 statement error
 SELECT __duckhts_roh_decode('abc'::BLOB, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9);

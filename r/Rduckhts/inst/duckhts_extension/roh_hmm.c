@@ -28,6 +28,13 @@
    operations, follows the pinned bcftools source so that Viterbi paths and
    qualities reproduce `bcftools roh`. duckhts_roh_pdg_from_counts() is a
    DuckHTS addition with no bcftools counterpart.
+
+   Per-thread site workspace uses 36.25 bytes per site: 4 for position, 16 for
+   emissions, 16 for forward/posterior probabilities and 2 traceback bits.
+   Capacity n allocates 36*n + ceil(n/4) + 16 bytes, excluding fixed tables and
+   output segments. Emissions cannot be recomputed without retaining their
+   inputs; both forward states are needed for posterior normalization. Keep
+   both arrays as doubles to preserve the exact arithmetic and output bits.
  */
 #include "roh_hmm.h"
 
@@ -39,6 +46,8 @@
 #define STATE_HW 0 /* Hardy-Weinberg */
 #define STATE_AZ 1 /* autozygous */
 #define NSTATES 2
+#define VPATH_SITES_PER_BYTE 4 /* one predecessor bit for each of two states */
+_Static_assert(NSTATES * VPATH_SITES_PER_BYTE == CHAR_BIT, "traceback packing requires two states");
 #define NTPROB 10000 /* precomputed transition matrices, bcftools hmm_init(..., 10000) */
 #define MAT(matrix, i, j) (matrix)[NSTATES * (i) + (j)] /* P(i|j): transition j -> i */
 
@@ -55,7 +64,7 @@ struct duckhts_roh {
     size_t nsites, msites;
     uint32_t *sites; /* zero-based positions */
     double *eprob;   /* [NSTATES * nsites] */
-    uint8_t *vpath;  /* [NSTATES * nsites] */
+    uint8_t *vpath;  /* [ceil(nsites / VPATH_SITES_PER_BYTE)] */
     double *fwd;     /* [NSTATES * (nsites + 1)] */
 
     size_t nseg, mseg;
@@ -181,7 +190,8 @@ int duckhts_roh_begin(duckhts_roh_t *roh, const duckhts_roh_params_t *params, si
         double *eprob = realloc(roh->eprob, max_sites * NSTATES * sizeof(*eprob));
         if (eprob == NULL) return -1;
         roh->eprob = eprob;
-        uint8_t *vpath = realloc(roh->vpath, max_sites * NSTATES * sizeof(*vpath));
+        size_t path_bytes = (max_sites + VPATH_SITES_PER_BYTE - 1) / VPATH_SITES_PER_BYTE;
+        uint8_t *vpath = realloc(roh->vpath, path_bytes);
         if (vpath == NULL) return -1;
         roh->vpath = vpath;
         double *fwd = realloc(roh->fwd, (max_sites + 1) * NSTATES * sizeof(*fwd));
@@ -292,6 +302,17 @@ static double phred_score(double prob) {
     return prob > 99 ? 99 : prob;
 }
 
+static int vpath_get(const uint8_t *path, size_t site, int state) {
+    unsigned shift = (unsigned)(site % VPATH_SITES_PER_BYTE) * NSTATES + (unsigned)state;
+    return (path[site / VPATH_SITES_PER_BYTE] >> shift) & 1;
+}
+
+static void vpath_set(uint8_t *path, size_t site, int state, int predecessor) {
+    unsigned shift = (unsigned)(site % VPATH_SITES_PER_BYTE) * NSTATES + (unsigned)state;
+    uint8_t *byte = &path[site / VPATH_SITES_PER_BYTE];
+    *byte = (uint8_t)((*byte & ~(1u << shift)) | ((unsigned)predecessor << shift));
+}
+
 static void run_viterbi(duckhts_roh_t *roh) {
     size_t n = roh->nsites;
     double vprob_a[NSTATES] = {1. / NSTATES, 1. / NSTATES};
@@ -300,8 +321,8 @@ static void run_viterbi(duckhts_roh_t *roh) {
     double curr[NSTATES * NSTATES];
     uint32_t prev_pos = roh->sites[0];
 
+    memset(roh->vpath, 0, (n + VPATH_SITES_PER_BYTE - 1) / VPATH_SITES_PER_BYTE);
     for (size_t i = 0; i < n; i++) {
-        uint8_t *vpath = &roh->vpath[i * NSTATES];
         const double *eprob = &roh->eprob[i * NSTATES];
 
         set_tprob(roh, prev_pos, roh->sites[i], curr);
@@ -318,7 +339,7 @@ static void run_viterbi(duckhts_roh_t *roh) {
                     k_vmax = k;
                 }
             }
-            vpath[j] = (uint8_t)k_vmax;
+            vpath_set(roh->vpath, i, j, k_vmax);
             vprob_tmp[j] = vmax * eprob[j];
             vnorm += vprob_tmp[j];
         }
@@ -333,10 +354,10 @@ static void run_viterbi(duckhts_roh_t *roh) {
         if (vprob[iptr] < vprob[i]) iptr = i;
     }
 
-    /* Trace back, reusing vpath[i * NSTATES] for the chosen state. */
+    /* Trace back, reusing the first predecessor bit for the chosen state. */
     for (size_t i = n; i-- > 0;) {
-        int iptr_prev = roh->vpath[i * NSTATES + (size_t)iptr];
-        roh->vpath[i * NSTATES] = (uint8_t)iptr;
+        int iptr_prev = vpath_get(roh->vpath, i, iptr);
+        vpath_set(roh->vpath, i, STATE_HW, iptr);
         iptr = iptr_prev;
     }
 }
@@ -427,7 +448,7 @@ int duckhts_roh_decode(duckhts_roh_t *roh) {
     uint32_t beg = 0, end = 0, nqual = 0;
     double qual_sum = 0;
     for (size_t i = 0; i < roh->nsites; i++) {
-        int state = roh->vpath[i * NSTATES] == STATE_AZ ? 1 : 0;
+        int state = vpath_get(roh->vpath, i, STATE_HW) == STATE_AZ ? 1 : 0;
         double qual = phred_score(1.0 - roh->fwd[NSTATES * (i + 1) + (size_t)state]);
         if (state != rg_state) {
             if (!state) {

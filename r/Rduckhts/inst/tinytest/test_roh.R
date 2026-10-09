@@ -312,3 +312,25 @@ test_roh_counts_fitted <- function() {
                "More than one row returned by a subquery")
 }
 test_roh_counts_fitted()
+
+# Equal 0.5 transitions make sites independent: homozygous pairs form AZ runs,
+# and every third (balanced) site is HW. Lengths 1..9 cover partial traceback bytes.
+test_roh_short_traceback <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  for (n in seq_len(9L)) {
+    pos <- seq_len(n)
+    counts <- data.frame(sample_id = "S1", chrom = "1", pos = pos,
+                         ref_count = ifelse(pos %% 3L == 0L, 15L, 30L),
+                         alt_count = ifelse(pos %% 3L == 0L, 15L, 0L), af = 0.5)
+    dbWriteTable(con, "short_counts", counts, overwrite = TRUE)
+    runs <- rduckhts_roh_counts(con, "short_counts", hw_to_az = 0.5, az_to_hw = 0.5)
+    runs <- runs[order(runs$start), ]
+    starts <- seq.int(1L, n, by = 3L)
+    ends <- pmin(starts + 1L, n)
+    expect_equal(as.integer(runs$start), starts)
+    expect_equal(as.integer(runs$end), ends)
+    expect_equal(runs$n_markers, ends - starts + 1L)
+  }
+}
+test_roh_short_traceback()

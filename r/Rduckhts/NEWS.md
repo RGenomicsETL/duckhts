@@ -2,6 +2,10 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- Bundled ROH decoding uses two traceback bits per site, reducing per-thread
+  site workspace from 38 to approximately 36.25 bytes per site without changing
+  output values. Emissions and forward/posterior probabilities remain doubles.
+
 - The bundled GenBank reader reuses named qualifier values across a feature's
   joined-location segments. The function reference documents all-NULL columns
   for requested keys absent from every GenBank, GFF or GTF feature, with SQL
