@@ -6,6 +6,14 @@ Preview of 2.0.0, still in development. The sections below describe what
 2.0.0 will contain.
 
 - Added
+  [`rduckhts_count_error_fit()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_count_error_fit.md)
+  and the bundled `duckhts_count_error_fit()`: read error, the share of
+  reads of a second genome, allele balance, spreads and an artefact
+  weight fitted from allele read counts at sites of known frequency, one
+  row per sample, with an interval from 10 Mb blocks and a second fit
+  for a related second genome.
+
+- Added
   [`rduckhts_bam_mismatch_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_mismatch_counts.md)
   and the bundled `duckhts_bam_mismatch_counts()`: aligned read bases
   counted against the reference by mate, cycle, base quality and

@@ -294,6 +294,8 @@ builds on.
   : Create a BigWig Signal Table
 - [`rduckhts_connect()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_connect.md)
   : Create a DuckDB connection with bundled DuckHTS loaded
+- [`rduckhts_count_error_fit()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_count_error_fit.md)
+  : Fit Read Error and Contamination from Allele Read Counts
 - [`rduckhts_detect_quality_encoding()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_detect_quality_encoding.md)
   : Detect FASTQ Quality Encoding
 - [`rduckhts_fasta()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_fasta.md)
