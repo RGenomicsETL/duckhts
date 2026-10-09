@@ -188,6 +188,7 @@ typedef struct {
     duckhts_projected_attribute *projected_attributes;
     idx_t n_projected_attributes;
     kstring_t *attribute_values; /* one buffer per projected attribute */
+    size_t projected_feature;    /* cached feature index; SIZE_MAX when none */
     duckdb_vector *vectors;      /* output vectors of the current chunk */
 } gb_init_t;
 
@@ -220,6 +221,7 @@ static void read_genbank_init(duckdb_init_info info) {
     gb_parser_init(&st->parser, GB_MODE_FEATURES);
     st->parser.flags = GB_FLAG_DROP_TRANSLATION;
     st->attr_feature = SIZE_MAX;
+    st->projected_feature = SIZE_MAX;
 
     st->fp = hts_open(bd->path, "r");
     if (!st->fp) {
@@ -263,6 +265,7 @@ static void read_genbank_init(duckdb_init_info info) {
 static int gb_next_record(gb_init_t *st, const char *path, char *msg, size_t msg_len) {
     st->state = GB_SCAN_PULL;
     st->attr_feature = SIZE_MAX;
+    st->projected_feature = SIZE_MAX;
     for (;;) {
         int n = hts_getline(st->fp, KS_SEP_LINE, &st->line);
         if (n < -1) {
@@ -317,8 +320,10 @@ static bool gb_fill_attr_map(gb_init_t *st, duckdb_vector vec, idx_t row, size_t
 
 /* Point each projected attribute at the value attributes_map[key] would hold, or
  * NULL when the key is absent. The first pair with a key wins, as in a MAP lookup.
- * Values are encoded only for matching keys. False only on allocation failure. */
-static bool gb_find_projected_attributes(gb_init_t *st, size_t feature) {
+ * Values are encoded once per feature for matching keys and owned by attribute_values.
+ * False only on allocation failure. */
+static bool gb_ensure_projected_attributes(gb_init_t *st, size_t feature) {
+    if (st->projected_feature == feature) return true;
     duckhts_projected_attribute *projected = st->projected_attributes;
     idx_t remaining = st->n_projected_attributes;
     for (idx_t i = 0; i < remaining; i++) projected[i].value = NULL;
@@ -344,6 +349,7 @@ static bool gb_find_projected_attributes(gb_init_t *st, size_t feature) {
             remaining--;
         }
     }
+    st->projected_feature = feature;
     return true;
 }
 
@@ -420,7 +426,7 @@ static void read_genbank_scan(duckdb_function_info info, duckdb_data_chunk outpu
             for (idx_t c = 0; c < chunk_cols; c++) {
                 st->vectors[c] = duckdb_data_chunk_get_vector(output, c);
             }
-            if (!gb_find_projected_attributes(st, r->feature)) {
+            if (!gb_ensure_projected_attributes(st, r->feature)) {
                 duckdb_function_set_error(info, "read_genbank: out of memory building attributes");
                 duckdb_data_chunk_set_size(output, 0);
                 return;

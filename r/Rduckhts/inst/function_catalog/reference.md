@@ -1936,6 +1936,10 @@ Returns:
 table
 ```
 
+### Missing keys
+
+A requested key absent from every feature yields NULL on every row, exactly as attributes_map[key] does. GFF declares no attribute vocabulary, so binding does not scan the file to validate key presence; that would require a full extra pass. Assert presence with an aggregate, for example: SELECT CASE WHEN count(ID) > 0 THEN true ELSE error('ID is all NULL') END FROM read_gff('annotations.gff', attributes := ['ID']);
+
 ### Attributes
 
 attributes := ['Parent', 'ID'] appends VARCHAR columns named for the requested keys. Each value equals attributes_map[key], including NULL for absent keys; repeated keys use the first value and GFF3 percent encoding is retained. Key lookup is case-sensitive, as GFF3 tags are: attributes := ['id'] on a file that uses ID returns a column of NULLs. Keys must be nonempty and distinct from fixed and optional attribute column names; because column names ignore case, two keys that differ only in case are rejected. Only projected keys are parsed during scanning.
@@ -1965,6 +1969,10 @@ Returns:
 ```
 table
 ```
+
+### Missing keys
+
+A requested key absent from every feature yields NULL on every row, exactly as attributes_map[key] does. GTF declares no attribute vocabulary, so binding does not scan the file to validate key presence; that would require a full extra pass. Assert presence with an aggregate, for example: SELECT CASE WHEN count(gene_id) > 0 THEN true ELSE error('gene_id is all NULL') END FROM read_gtf('annotations.gtf', attributes := ['gene_id']);
 
 ### Attributes
 
@@ -2003,6 +2011,10 @@ seqname is VERSION, else ACCESSION, else the LOCUS name; a segment on a remote a
 ### Attributes
 
 Synthesized GFF3 keys ID, Name and Parent accompany the original qualifiers. ID is gene-<locus_tag> for genes and <key>-<n> otherwise, with n the feature's 0-based position in the file. Parent links a feature to the gene sharing its /locus_tag (or /gene) anywhere in the record. Repeated qualifiers become one key with comma-joined values, valueless qualifiers read 'true', and ; = & , % are percent-encoded. attributes_map := TRUE adds the same pairs as a MAP.
+
+### Missing keys
+
+A requested key absent from every feature yields NULL on every row, exactly as attributes_map[key] does. GenBank declares no qualifier vocabulary, so binding does not scan the file to validate key presence; that would require a full extra pass. Assert presence with an aggregate, for example: SELECT CASE WHEN count(product) > 0 THEN true ELSE error('product is all NULL') END FROM read_genbank('phix174.gb', attributes := ['product']);
 
 ### Named attributes
 

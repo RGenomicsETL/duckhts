@@ -18,6 +18,37 @@ FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attri
 ----
 he said "hi"%3B then a%3Db%2C and c%26d 100%25 done
 
+# A 200-segment joined CDS reuses qualifier values on every emitted row.
+query III
+SELECT count(*), count(*) FILTER (WHERE locus_tag = 'L1'),
+       count(*) FILTER (WHERE locus_tag IS DISTINCT FROM attributes_map['locus_tag']
+                          OR ID IS DISTINCT FROM attributes_map['ID']
+                          OR missing IS DISTINCT FROM attributes_map['missing'])
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_long_location.gb',
+                  attributes_map := true, attributes := ['locus_tag', 'ID', 'missing']);
+----
+200	200	0
+
+# Feature indexes repeat across records; qualifier values belong to their record.
+query TTI rowsort
+SELECT seqname, locus_tag,
+       (locus_tag IS NOT DISTINCT FROM attributes_map['locus_tag'])::INTEGER
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_mixed_sequence.gb',
+                  attributes_map := true, attributes := ['locus_tag']);
+----
+NOSEQ2.1	n2	1
+WITHSEQ.1	w1	1
+
+# Features with joined locations have different keys and values, including NULLs.
+query III
+SELECT count(*), count(*) FILTER (WHERE codon_start IS NULL),
+       count(*) FILTER (WHERE locus_tag IS DISTINCT FROM attributes_map['locus_tag']
+                          OR codon_start IS DISTINCT FROM attributes_map['codon_start'])
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_phase.gb',
+                  attributes_map := true, attributes := ['locus_tag', 'codon_start']);
+----
+10	4	0
+
 # Column order follows the request and follows attributes_map when it is present.
 query TT
 SELECT column_name, column_type

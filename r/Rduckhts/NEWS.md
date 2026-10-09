@@ -2,6 +2,11 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- The bundled GenBank reader reuses named qualifier values across a feature's
+  joined-location segments. The function reference documents all-NULL columns
+  for requested keys absent from every GenBank, GFF or GTF feature, with SQL
+  examples for asserting key presence.
+
 - `rduckhts_roh_counts(fit_table = ...)` uses each sample's fitted `seq_error` and
   `contamination` through the bundled `duckhts_roh_counts_fitted` macro. Missing
   fits and NULL parameters are errors; fit status filtering remains caller SQL,

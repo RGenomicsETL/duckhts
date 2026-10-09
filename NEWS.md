@@ -4,6 +4,11 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- GenBank named qualifiers are resolved once per feature, reusing their values
+  across joined-location segments. Reader documentation explains that requested
+  keys absent from every feature yield all-NULL columns in GenBank, GFF and GTF,
+  and shows how to assert key presence without a bind-time scan.
+
 - `duckhts_roh_counts_fitted` decodes each sample using a caller-named fit relation's
   `seq_error` and `contamination`; `rduckhts_roh_counts(fit_table = ...)` exposes it
   in R. Missing fits and NULL parameters are errors; fit status filtering remains
