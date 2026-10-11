@@ -1479,10 +1479,39 @@ max_sites must be
 statement ok
 CREATE TEMP VIEW roh_duplicate_fits AS SELECT * FROM roh_fits UNION ALL SELECT * FROM roh_fits;
 
+# Duplicates are counted explicitly, so the error does not depend on DuckDB's
+# scalar_subquery_error_on_multiple_rows setting.
 statement error
 SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_duplicate_fits');
 ----
-More than one row returned by a subquery
+duplicate fit rows for sample
+
+statement ok
+SET scalar_subquery_error_on_multiple_rows = false;
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_duplicate_fits', 'roh_counts_map');
+----
+duplicate fit rows for sample
+
+statement ok
+RESET scalar_subquery_error_on_multiple_rows;
+
+# Fit rows are checked for the samples of the counts relation. With no counts
+# there is no sample to check, so a malformed fit gives no rows; the other
+# arguments are still checked.
+statement ok
+CREATE TEMP TABLE roh_null_fits AS SELECT sample, NULL::DOUBLE AS seq_error, contamination FROM roh_fits;
+
+query I
+SELECT count(*) FROM duckhts_roh_counts_fitted('roh_counts_none', 'roh_null_fits');
+----
+0
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_none', 'roh_null_fits', hw_to_az := 2.0);
+----
+hw_to_az must be in [0, 1]
 
 # A NULL sample is a sample: the scalar decode keeps its runs, so the fitted decode
 # must match it with a NULL-sample fit row and must refuse it without one.

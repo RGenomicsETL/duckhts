@@ -21,8 +21,8 @@ Preview of 2.0.0, still in development. The sections below describe what 2.0.0 w
   examples for asserting key presence.
 
 - `rduckhts_roh_counts(fit_table = ...)` uses each sample's fitted `seq_error` and
-  `contamination` through the bundled `duckhts_roh_counts_fitted` macro. Missing
-  fits and NULL parameters are errors; fit status filtering remains caller SQL,
+  `contamination` through the bundled `duckhts_roh_counts_fitted` macro. A missing
+  fit, a NULL parameter or a duplicate fit row is an error; fit status filtering remains caller SQL,
   and spreads and artefact weight do not enter the emission model.
 
 - Added `rduckhts_count_error_fit()` and the bundled

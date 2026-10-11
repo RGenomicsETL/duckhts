@@ -308,8 +308,9 @@ test_roh_counts_fitted <- function() {
                  paste(parameter, "must be in"))
   }
   dbWriteTable(con, "bad_fits", rbind(fits, fits), overwrite = TRUE)
+  # Duplicates are counted, so the error does not depend on a DuckDB setting.
   expect_error(rduckhts_roh_counts(con, "counts", fit_table = "bad_fits"),
-               "More than one row returned by a subquery")
+               "duplicate fit rows for sample")
 }
 test_roh_counts_fitted()
 

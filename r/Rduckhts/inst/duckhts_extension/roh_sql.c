@@ -133,9 +133,28 @@ static const char ancestry_guard[] =
     "CAST(contamination AS DOUBLE), CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), " \
     "CAST(az_to_hw AS DOUBLE), " ROH_LIMIT_ARGUMENTS ")"
 static const char counts_guard[] = ROH_GUARD_COLUMNS "WHERE NOT " ROH_COUNTS_ARGUMENTS_VALID;
+
+/* One fitted parameter of the sample `sample`, read from the relation `from`
+ * that carries __dht_fit's columns: an error when the sample has no fit row,
+ * several, or a NULL value. */
+#define ROH_FIT_VALUE(from, column, sample) \
+    "CASE WHEN " from ".fit_rows IS NULL THEN error('missing fit row for sample ' || coalesce(" sample ", 'NULL')) " \
+    "WHEN " from ".fit_rows > 1 THEN error('duplicate fit rows for sample ' || coalesce(" sample ", 'NULL')) " \
+    "WHEN " from "." column " IS NULL THEN error('NULL " column " for sample ' || coalesce(" sample ", 'NULL')) " \
+    "ELSE " from "." column " END"
+static const char fitted_counts_model[] =
+    "NULL::DOUBLE, " ROH_FIT_VALUE("l", "seq_error", "l.smp") ", " ROH_FIT_VALUE("l", "contamination", "l.smp") ", ";
+/* Every sample of the counts relation is checked against its fit, also one
+ * whose chromosomes the genetic map drops from the decode; the second arm
+ * checks the other arguments when there is no sample. */
 static const char fitted_counts_guard[] =
-    ROH_GUARD_COLUMNS "FROM (SELECT seq_error, contamination FROM __dht_fit "
-    "UNION ALL SELECT 0.001, 0.0) AS fits WHERE NOT " ROH_COUNTS_ARGUMENTS_VALID;
+    ROH_GUARD_COLUMNS "FROM (SELECT DISTINCT CAST(sample_id AS VARCHAR) AS smp FROM query_table(counts_table)) AS s "
+    "LEFT JOIN __dht_fit AS fit ON fit.smp IS NOT DISTINCT FROM s.smp "
+    "WHERE NOT __duckhts_roh_valid_args(3, NULL::DOUBLE, " ROH_FIT_VALUE("fit", "seq_error", "s.smp") ", "
+    ROH_FIT_VALUE("fit", "contamination", "s.smp") ", CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), "
+    "CAST(az_to_hw AS DOUBLE), " ROH_LIMIT_ARGUMENTS ")"
+    ROH_GUARD_COLUMNS "FROM (SELECT 0.001 AS seq_error, 0.0 AS contamination) AS defaults "
+    "WHERE NOT " ROH_COUNTS_ARGUMENTS_VALID;
 
 static const char ancestry_sites[] =
     /* The long reference (sites x groups rows) is read where it is used rather
@@ -281,34 +300,35 @@ static const char ancestry_frequencies[] =
 #define ROH_COUNTS_OPTIONS \
     "seq_error := 1e-3, contamination := 0.0, " ROH_COUNTS_FITTED_OPTIONS
 
-static const char counts_lists[] =
-    "WITH __dht_counts AS (SELECT CAST(sample_id AS VARCHAR) AS smp, "
-    "CAST(chrom AS VARCHAR) AS chrom, CAST(pos AS BIGINT) AS pos, "
-    DUCKHTS_WHOLE_COUNT("ref_count") " AS ref_count, " DUCKHTS_WHOLE_COUNT("alt_count") " AS alt_count, "
+#define ROH_COUNTS_INPUT \
+    "WITH __dht_counts AS (SELECT CAST(sample_id AS VARCHAR) AS smp, " \
+    "CAST(chrom AS VARCHAR) AS chrom, CAST(pos AS BIGINT) AS pos, " \
+    DUCKHTS_WHOLE_COUNT("ref_count") " AS ref_count, " DUCKHTS_WHOLE_COUNT("alt_count") " AS alt_count, " \
     "CAST(af AS DOUBLE) AS af FROM query_table(counts_table)), "
+
+static const char counts_lists[] =
+    ROH_COUNTS_INPUT
     "__dht_lists AS (SELECT smp, chrom, __duckhts_roh_sites(pos, af, ref_count, alt_count, "
     "NULL::INTEGER, 3, " ROH_LIMIT_ARGUMENTS ") AS s "
     "FROM __dht_counts GROUP BY smp, chrom)";
 
-/* A scalar subquery admits one fit per sample; DuckDB rejects duplicate rows.
- * A NULL sample is a sample, as in the scalar decode and the count-error fit,
- * so both joins are NULL-safe.
- * Materialize the sample lookup, not a fit lookup for every site. The sample
- * set reads the input relation again rather than __dht_counts: a CTE that
- * two branches reference is materialised whole, which held every row of the
- * input in memory. */
-static const char fitted_counts[] =
-    ", __dht_fit AS MATERIALIZED (SELECT smp, "
-    "CASE WHEN fit IS NULL THEN error('missing fit row for sample ' || coalesce(smp, 'NULL')) "
-    "WHEN fit.seq_error IS NULL THEN error('NULL seq_error for sample ' || coalesce(smp, 'NULL')) "
-    "ELSE fit.seq_error END AS seq_error, "
-    "CASE WHEN fit IS NULL THEN error('missing fit row for sample ' || coalesce(smp, 'NULL')) "
-    "WHEN fit.contamination IS NULL THEN error('NULL contamination for sample ' || coalesce(smp, 'NULL')) "
-    "ELSE fit.contamination END AS contamination "
-    "FROM (SELECT smp, (SELECT struct_pack(seq_error := CAST(f.seq_error AS DOUBLE), "
-    "contamination := CAST(f.contamination AS DOUBLE)) FROM query_table(fit_table) AS f "
-    "WHERE CAST(f.sample AS VARCHAR) IS NOT DISTINCT FROM samples.smp) AS fit "
-    "FROM (SELECT DISTINCT CAST(sample_id AS VARCHAR) AS smp FROM query_table(counts_table)) AS samples))";
+/* One row per sample of the fit relation, with its number of rows, so that a
+ * duplicate is an error whatever DuckDB's scalar-subquery setting, and a join
+ * cannot repeat a site. A NULL sample is a sample, as in the scalar decode and
+ * the count-error fit, so the joins are NULL-safe. The fit joins the counts
+ * rows before they are collected and its values become keys of the site
+ * lists: joined after collection, DuckDB built its hash table on the site
+ * lists, a second copy of every site. */
+static const char fitted_counts_lists[] =
+    ROH_COUNTS_INPUT
+    "__dht_fit AS (SELECT CAST(sample AS VARCHAR) AS smp, CAST(seq_error AS DOUBLE) AS seq_error, "
+    "CAST(contamination AS DOUBLE) AS contamination, "
+    "count(*) OVER (PARTITION BY CAST(sample AS VARCHAR)) AS fit_rows FROM query_table(fit_table) "
+    "QUALIFY row_number() OVER (PARTITION BY CAST(sample AS VARCHAR)) = 1), "
+    "__dht_lists AS (SELECT c.smp, c.chrom, fit.fit_rows, fit.seq_error, fit.contamination, "
+    "__duckhts_roh_sites(c.pos, c.af, c.ref_count, c.alt_count, NULL::INTEGER, 3, " ROH_LIMIT_ARGUMENTS ") AS s "
+    "FROM __dht_counts AS c LEFT JOIN __dht_fit AS fit ON fit.smp IS NOT DISTINCT FROM c.smp "
+    "GROUP BY c.smp, c.chrom, fit.fit_rows, fit.seq_error, fit.contamination)";
 
 #define ROH_MAX_PARTS 32
 
@@ -391,30 +411,23 @@ static bool register_roh_counts_macro(duckhts_registration_t *registration, bool
           ROH_COUNTS_FITTED_OPTIONS ") AS TABLE ("
         : "CREATE OR REPLACE MACRO duckhts_roh_counts(counts_table, "
           ROH_COUNTS_OPTIONS ") AS TABLE (";
-    parts[count++] = counts_lists;
-    if (fitted) parts[count++] = fitted_counts;
+    parts[count++] = fitted ? fitted_counts_lists : counts_lists;
     parts[count++] = select_head;
-    parts[count++] = counts_model;
+    parts[count++] = fitted ? fitted_counts_model : counts_model;
     parts[count++] = no_map_arguments;
     parts[count++] = decode_end;
-    parts[count++] = fitted
-        ? ") AS r FROM __dht_lists AS l JOIN __dht_fit AS fit ON fit.smp IS NOT DISTINCT FROM l.smp) AS seg"
-        : from_lists;
+    parts[count++] = from_lists;
     parts[count++] = fitted ? fitted_counts_guard : counts_guard;
     parts[count++] = fitted
         ? "), (counts_table, fit_table, genetic_map VARCHAR, " ROH_COUNTS_FITTED_OPTIONS ") AS TABLE ("
         : "), (counts_table, genetic_map VARCHAR, " ROH_COUNTS_OPTIONS ") AS TABLE (";
-    parts[count++] = counts_lists;
-    if (fitted) parts[count++] = fitted_counts;
+    parts[count++] = fitted ? fitted_counts_lists : counts_lists;
     parts[count++] = map_lists;
     parts[count++] = select_head;
-    parts[count++] = counts_model;
+    parts[count++] = fitted ? fitted_counts_model : counts_model;
     parts[count++] = map_arguments;
     parts[count++] = decode_end;
-    parts[count++] = fitted
-        ? ") AS r FROM __dht_lists AS l JOIN __dht_fit AS fit ON fit.smp IS NOT DISTINCT FROM l.smp "
-          "JOIN __dht_map AS m ON m.m_chrom = l.chrom) AS seg"
-        : from_lists_with_map;
+    parts[count++] = from_lists_with_map;
     parts[count++] = fitted ? fitted_counts_guard : counts_guard;
     parts[count++] = ")";
     return duckhts_register_sql_parts(registration, parts, count);

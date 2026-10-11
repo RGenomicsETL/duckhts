@@ -33,7 +33,8 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
 
 - `duckhts_roh_counts_fitted` decodes each sample using a caller-named fit relation's
   `seq_error` and `contamination`; `rduckhts_roh_counts(fit_table = ...)` exposes it
-  in R. Missing fits and NULL parameters are errors; fit status filtering remains
+  in R. A missing fit, a NULL parameter or a duplicate fit row of a decoded sample
+  is an error; fit status filtering remains
   caller SQL, and spreads and artefact weight do not enter the emission model.
 
 - Added `duckhts_count_error_fit()`: the read error, the share of reads of a

@@ -168,8 +168,10 @@ rduckhts_roh <- function(
 #' @param counts_table Name of a table or view of read counts (see Details).
 #' @param fit_table Optional table or view with one row per `sample`, containing
 #'   non-NULL `seq_error` and `contamination`. These replace the scalar arguments
-#'   for each matching `sample_id`. Missing fits are errors. Filter fit status in
-#'   the caller's SQL; spreads and artefact weight are not used.
+#'   for each matching `sample_id`. A sample of `counts_table` with no fit row,
+#'   several fit rows or a NULL value is an error; fit rows of other samples are
+#'   not checked. Filter fit status in the caller's SQL; spreads and artefact
+#'   weight are not used.
 #' @param seq_error Per-read probability of showing the other allele, in
 #'   `(0, 0.5)`.
 #' @param contamination Fraction of reads from a contaminating individual, in
