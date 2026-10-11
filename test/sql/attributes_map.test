@@ -1,0 +1,66 @@
+# name: test/sql/attributes_map.test
+# description: attributes_map pairs from read_gff, read_gtf and read_genbank: repeated keys, empty values and escapes
+# group: [duckhts]
+
+require duckhts
+
+# Each row lists the map size, then its keys and its values in pair order, joined by '|'.
+# array_to_string drops a NULL value, so '||' always marks an empty string.
+
+# GFF3: the first value of a repeated key wins (ID=first, not second; ID=fourth, not
+# later). Keys and values are trimmed. Values keep commas and percent escapes undecoded.
+# `key=` is an empty value. A segment without '=' or with an empty key is skipped. The
+# '.' attribute column is a NULL map.
+query IITT
+SELECT start, cardinality(attributes_map),
+       array_to_string(map_keys(attributes_map), '|'),
+       array_to_string(map_values(attributes_map), '|')
+FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes_map := true)
+ORDER BY seqname, start;
+----
+1	7	ID|Parent|encoded|spaced|empty|odd-key|quote'key	first|p1,p2|a%3Bb%20c|value||x|q
+11	6	Parent|ID|encoded|spaced|empty|odd-key	p3|third|%25|other||y
+21	NULL	NULL	NULL
+1	3	ID|Parent|encoded	fourth||a=b
+11	3	ID|id|trailing	last|lower|value
+
+# GTF: the first value of a repeated key wins. Quotes are removed, a quoted value keeps
+# its semicolon, and text after the closing quote is ignored up to the next ';'.
+# `key ""` and `key ;` are empty values.
+query IITT
+SELECT start, cardinality(attributes_map),
+       array_to_string(map_keys(attributes_map), '|'),
+       array_to_string(map_values(attributes_map), '|')
+FROM read_gtf('__WORKING_DIRECTORY__/test/data/gtf_named_attributes.gtf', attributes_map := true)
+ORDER BY seqname, start;
+----
+1	7	gene_id|transcript_id|encoded|spaced|empty|odd-key|quote'key	first|p1,p2|a%3Bb%20c|value||x|q
+11	6	transcript_id|gene_id|encoded|spaced|empty|odd-key	p3|third|%25|other||y
+21	NULL	NULL	NULL
+1	3	gene_id|transcript_id|encoded	fourth|a;b|a=b
+11	2	gene_id|trailing	last|value
+
+# GenBank: ID and Name come first. Repeated qualifiers share one key with comma-joined
+# values (db_xref). A valueless qualifier is "true" (pseudo). Values are GFF3
+# percent-encoded (note). /translation is dropped.
+query IITT
+SELECT start, cardinality(attributes_map),
+       array_to_string(map_keys(attributes_map), '|'),
+       array_to_string(map_values(attributes_map), '|')
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attributes_map := true);
+----
+1	7	ID|Name|locus_tag|db_xref|product|pseudo|note	CDS-1|protein one|d1|GeneID:1,UniProtKB/Swiss-Prot:P1|protein one|true|he said "hi"%3B then a%3Db%2C and c%26d 100%25 done
+
+# Empty values are empty strings, not NULL.
+query II
+SELECT count(*) FILTER (WHERE attributes_map['empty'] = ''),
+       count(*) FILTER (WHERE attributes_map['Parent'] = '')
+FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes_map := true);
+----
+2	1
+
+query I
+SELECT count(*) FILTER (WHERE attributes_map['empty'] = '')
+FROM read_gtf('__WORKING_DIRECTORY__/test/data/gtf_named_attributes.gtf', attributes_map := true);
+----
+2

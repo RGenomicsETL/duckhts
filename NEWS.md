@@ -4,6 +4,12 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- Internal consolidation, no output change: `read_gff`, `read_gtf` and
+  `read_genbank` (`attributes_map`), `read_bam` (`auxiliary_tags`) and
+  `read_hts_header` (`key_values`) now write their MAP columns through one
+  shared native row writer
+  (https://github.com/RGenomicsETL/duckhts/issues/298).
+
 - The genome-wide drivers of the ROH ancestry evaluation are back in
   `benchmarks/roh_ancestry/`, with the fixes that review asked for in
   https://github.com/RGenomicsETL/duckhts/issues/329. `truth_genome.R` counts

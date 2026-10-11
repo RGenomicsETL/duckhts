@@ -15,6 +15,8 @@ DUCKDB_EXTENSION_EXTERN
 #include "htslib/vcf.h"
 #include "htslib/faidx.h"
 
+#include "include/duckdb_map.h"
+
 // ===============================
 // Helpers
 // ===============================
@@ -713,33 +715,24 @@ static void read_hts_header_scan(duckdb_function_info info, duckdb_data_chunk ou
             }
 
             if (e->n_kv > 0) {
-                duckdb_list_entry entry;
-                entry.offset = duckdb_list_vector_get_size(vec_kv);
-                entry.length = e->n_kv;
-                if (duckdb_list_vector_reserve(vec_kv, entry.offset + entry.length) == DuckDBError ||
-                    duckdb_list_vector_set_size(vec_kv, entry.offset + entry.length) == DuckDBError) {
+                duckhts_map_pairs kv;
+                if (!duckhts_map_pairs_begin(vec_kv, (idx_t)e->n_kv, &kv)) {
                     duckdb_function_set_error(info, "read_hts_header: out of memory reserving key_values map");
                     duckdb_data_chunk_set_size(output, 0);
                     return;
                 }
-
-                duckdb_vector child = duckdb_list_vector_get_child(vec_kv);
-                duckdb_vector key_vec = duckdb_struct_vector_get_child(child, 0);
-                duckdb_vector val_vec = duckdb_struct_vector_get_child(child, 1);
-
                 for (int i = 0; i < e->n_kv; i++) {
-                    duckdb_vector_assign_string_element(key_vec, entry.offset + i, e->kv_keys[i]);
-                    duckdb_vector_assign_string_element(val_vec, entry.offset + i, e->kv_vals[i]);
+                    const char *key = e->kv_keys[i];
+                    const char *val = e->kv_vals[i];
+                    if (!duckhts_map_pairs_put(&kv, key, strlen(key), val, strlen(val))) {
+                        duckdb_function_set_error(info, "read_hts_header: key_values exceeds its reservation");
+                        duckdb_data_chunk_set_size(output, 0);
+                        return;
+                    }
                 }
-
-                duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(vec_kv);
-                list_data[row_count] = entry;
+                duckhts_map_pairs_finish(&kv, row_count);
             } else {
-                duckdb_vector_ensure_validity_writable(vec_kv);
-                duckdb_validity_set_row_invalid(duckdb_vector_get_validity(vec_kv), row_count);
-                duckdb_list_entry entry = {duckdb_list_vector_get_size(vec_kv), 0};
-                duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(vec_kv);
-                list_data[row_count] = entry;
+                duckhts_list_set_null(vec_kv, row_count);
             }
         }
 

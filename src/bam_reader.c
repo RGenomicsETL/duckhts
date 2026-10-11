@@ -40,6 +40,7 @@ DUCKDB_EXTENSION_EXTERN
 #include "include/hts_io_tuning.h"
 #include "include/duckdb_alloc.h"
 #include "include/duckdb_list.h"
+#include "include/duckdb_map.h"
 #include "include/bam_format.h"
 #include "include/region_list.h"
 #include "include/seq_encoding.h"
@@ -1452,26 +1453,15 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                         if (errno != ENOENT) goto format_error;
 
                         if (count == 0) {
-                            duckdb_vector_ensure_validity_writable(vec);
-                            uint64_t *validity = duckdb_vector_get_validity(vec);
-                            duckdb_validity_set_row_invalid(validity, row_count);
-                            duckdb_list_entry entry = {duckdb_list_vector_get_size(vec), 0};
-                            duckdb_list_entry *list_data =
-                                (duckdb_list_entry *)duckdb_vector_get_data(vec);
-                            list_data[row_count] = entry;
+                            duckhts_list_set_null(vec, row_count);
                             break;
                         }
 
-                        duckdb_list_entry entry;
-                        if (!duckhts_list_extend(vec, count, &entry)) goto list_error;
-
-                        duckdb_vector child = duckdb_list_vector_get_child(vec);
-                        duckdb_vector key_vec = duckdb_struct_vector_get_child(child, 0);
-                        duckdb_vector val_vec = duckdb_struct_vector_get_child(child, 1);
+                        duckhts_map_pairs tags;
+                        if (!duckhts_map_pairs_begin(vec, count, &tags)) goto list_error;
 
                         aux = bam_aux_first(b);
-                        idx_t write_idx = 0;
-                        while (aux && write_idx < count) {
+                        while (aux && tags.entry.length < count) {
                             char tagbuf[3] = {0, 0, 0};
                             const char *tag = bam_aux_tag(aux);
                             tagbuf[0] = tag[0];
@@ -1480,8 +1470,6 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                                 aux = bam_aux_next(b, aux);
                                 continue;
                             }
-                            duckdb_vector_assign_string_element(
-                                key_vec, entry.offset + write_idx, tagbuf);
                             size_t capacity, length;
                             if (!duckhts_bam_aux_capacity(aux, b->data + b->l_data, &capacity))
                                 goto format_error;
@@ -1489,15 +1477,13 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                                 goto text_oom;
                             if (!duckhts_bam_aux_format(aux, local->aux_buf,
                                                        local->aux_buf_cap, &length)) goto format_error;
-                            duckdb_vector_assign_string_element_len(
-                                val_vec, entry.offset + write_idx, local->aux_buf, length);
-                            write_idx++;
+                            /* htslib does not validate tag bytes; a NUL ends the key. */
+                            if (!duckhts_map_pairs_put(&tags, tagbuf, strlen(tagbuf),
+                                                       local->aux_buf, length)) goto list_error;
                             aux = bam_aux_next(b, aux);
                         }
 
-                        duckdb_list_entry *list_data =
-                            (duckdb_list_entry *)duckdb_vector_get_data(vec);
-                        list_data[row_count] = entry;
+                        duckhts_map_pairs_finish(&tags, row_count);
                     }
                 }
                 break;
