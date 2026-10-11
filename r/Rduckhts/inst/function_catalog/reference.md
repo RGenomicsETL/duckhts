@@ -2298,6 +2298,44 @@ One worker. Memory does not grow with the alignments read: 36.5 MB of counters, 
 SELECT base_quality, sum(bases) FILTER (WHERE reference_base != read_base) / sum(bases) AS mismatch_rate FROM duckhts_bam_mismatch_counts('sample.bam', 'reference.fa', region := 'chr20:10000000-12000000', mask := 'known_variants.vcf.gz') GROUP BY base_quality ORDER BY base_quality;
 ```
 
+## duckhts_bam_mate_overlap_counts
+
+Count where read 1 and read 2 of one fragment agree and disagree at the positions both align to, by base quality and base, as an estimate of sequencing error.
+
+Signature:
+
+```sql
+duckhts_bam_mate_overlap_counts(path, region := NULL, index_path := NULL, reference := NULL, reference_index_path := NULL, min_mapq := 20, require_flags := 0, exclude_flags := 3844, max_pending := 1000000)
+```
+
+Returns:
+
+```
+table
+```
+
+### Input
+
+path is a paired-end SAM, BAM or CRAM file in coordinate order; alignments out of order are an error. region is a comma-separated list of contigs or intervals and needs an alignment index; without it the whole file is read. reference is an indexed FASTA; fasta_index() builds the index. It is required for CRAM. Its only other use is to resolve a read base stored as '='; without a reference such a base is left out. Alignments are kept when MAPQ is at least min_mapq, every bit of require_flags is set and no bit of exclude_flags is set; the default 3844 leaves out unmapped, secondary, failed, duplicate and supplementary alignments.
+
+### Output
+
+One row for each combination that occurs: read1_quality and read2_quality (the base qualities, NULL when the read stores no qualities), read1_base and read2_base (both on the forward strand of the reference, so a real allele gives equal bases), and positions, the number of shared positions. Read 1 is the mate with flag 0x40 and read 2 the mate with flag 0x80, whichever comes first. Rows with read1_base different from read2_base are the disagreements, so a rate is a ratio of two sums. Rows come in the order of read1_quality, read2_quality, read1_base, read2_base, with a missing quality last.
+
+### What is counted
+
+Each reference position where both mates of a pair have an aligned base (CIGAR M, = or X), once per pair. Both mates are kept primary alignments on the same contig, the pair flag (0x1) is set and the mate-unmapped flag (0x8) is not, each names the other's start, and one is read 1 and the other read 2. Soft-clipped, inserted and deleted bases are not counted, and a position where either base is not A, C, G or T is left out. A real allele sits on the molecule and both mates show it; a sequencing error usually shows in one mate only. So the disagreement rate is about twice the instrument error rate, with no reference, mask or contamination model. Errors made before sequencing, in the library, by PCR or by DNA damage, show in both mates and are not seen. Only fragments shorter than the two reads overlap, so the count leans toward short fragments and read ends. A region selects alignments by overlap, and a pair counts only when both of its mates are selected.
+
+### Limits
+
+One worker. The counters are fixed at 1.2 MB, and a base quality above 93 is counted as 93. The first mate of a pair is held until its mate arrives, with its name, CIGAR, sequence and qualities: about 400 bytes plus 1.5 bytes per read base and 4 bytes per CIGAR operation. A held mate whose mate start the scan has passed without a match is dropped, and a change of contig drops every held mate. More than max_pending (1 to 100,000,000) mates held at once is an error that names the limit. Held entries are reused but kept until the scan ends, so held memory is at most max_pending times the size of the longest alignment held, and in practice follows the most mates held at once.
+
+### Examples
+
+```sql
+SELECT read1_quality, sum(positions) FILTER (WHERE read1_base != read2_base) / sum(positions) AS discordance FROM duckhts_bam_mate_overlap_counts('sample.bam', region := 'chr20:10000000-12000000') GROUP BY read1_quality ORDER BY read1_quality;
+```
+
 ## duckhts_bam_bed_coverage
 
 Compute samtools coverage-like regional summaries for BAM or CRAM input over a BED target set, returning one row per BED interval with DuckHTS-specific pre/post-filter read counts, covered bases, percentage covered, mean depth, mean baseQ, mean mapQ, and strand-specific post-filter summaries in read mode. Indexed BAM/CRAM input is required in the current implementation. decompression_threads controls htslib worker threads for BAM/CRAM decoding; use 0 to disable them.

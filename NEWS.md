@@ -4,6 +4,19 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- Added `duckhts_bam_mate_overlap_counts()`: read 1 and read 2 of one fragment
+  compared at each reference position where both mates have an aligned base,
+  counted by the two base qualities and the two bases. A real allele shows in
+  both mates and a sequencing error usually in one, so the disagreement rate
+  is about twice the instrument error rate, with no reference, mask or
+  contamination model. The scan is one pass over a coordinate-sorted file; the
+  first mate of a pair is held until its mate arrives, at most `max_pending`
+  at once, and the counters are fixed. Held names use the qname table of the
+  BAM site counts, which now exports its steps for this. SQL tests check
+  hand-derived counts and an independent count in SQL from `read_bam()` and
+  `cigar_aligned_blocks()`. This is counting model 3 of
+  https://github.com/RGenomicsETL/duckhts/issues/332.
+
 - `duckhts_somalier_relatedness_all_pairs()` compares pairs on DuckDB's
   threads and caps its output. The checked sketches form one list in
   `sample_id` order, the pairs are numbered so that a run of numbers is a

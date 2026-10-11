@@ -2,6 +2,14 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- Added `rduckhts_bam_mate_overlap_counts()` and the bundled
+  `duckhts_bam_mate_overlap_counts()`: read 1 and read 2 of one fragment
+  compared where both mates align, counted by base quality and base. The
+  disagreement rate is about twice the instrument error rate, with no
+  reference, mask or contamination model. Alignments must be in coordinate
+  order, and `max_pending` bounds the mates held while they wait for their
+  mate.
+
 - `rduckhts_somalier_relatedness()` has a `max_pairs` argument (default
   50,000,000): when it compares all pairs, a sketch relation with more pairs
   is an error before any pair is compared. The bundled

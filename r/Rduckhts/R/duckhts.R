@@ -967,6 +967,93 @@ rduckhts_bam_mismatch_counts <- function(
   DBI::dbGetQuery(con, query)
 }
 
+#' Count Agreement Between Overlapping Mates
+#'
+#' Compares read 1 and read 2 of one fragment at each reference position where
+#' both mates have an aligned base, and counts the pairs of base qualities and
+#' bases. A real allele sits on the molecule and both mates show it; a
+#' sequencing error usually shows in one mate only. So the disagreement rate is
+#' about twice the instrument error rate, with no reference, mask or
+#' contamination model. Errors made before sequencing, such as PCR or damage
+#' errors, show in both mates and are not seen.
+#'
+#' Alignments must be in coordinate order. The first mate of a pair is held
+#' until its mate arrives; more than `max_pending` mates held at once is an
+#' error.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded
+#' @param path Path to the paired-end SAM, BAM or CRAM file
+#' @param region Optional comma-separated contigs or intervals. It needs an
+#'   alignment index and selects alignments by overlap; a pair counts only when
+#'   both mates are selected
+#' @param index_path Optional explicit alignment index path
+#' @param reference Optional indexed reference FASTA. Required for CRAM; it is
+#'   otherwise used only to resolve read bases stored as `=`
+#' @param reference_index_path Optional explicit FASTA index path
+#' @param min_mapq Minimum mapping quality, 0 to 255
+#' @param require_flags,exclude_flags SAM flag masks that both mates must pass.
+#'   The default `exclude_flags` leaves out unmapped, secondary, failed,
+#'   duplicate and supplementary alignments
+#' @param max_pending Most mates held at once while they wait for their mate,
+#'   1 to 100000000
+#'
+#' @return A data frame with `read1_quality` and `read2_quality` (`NA` when the
+#'   read stores no qualities), `read1_base` and `read2_base` on the forward
+#'   strand of the reference, and `positions`. Read 1 is the mate with flag
+#'   0x40. Rows with different bases are the disagreements.
+#'
+#' @examples
+#' library(DBI)
+#' library(duckdb)
+#'
+#' con <- rduckhts_connect()
+#' bam <- system.file("extdata", "empty-tids.bam", package = "Rduckhts")
+#' counts <- rduckhts_bam_mate_overlap_counts(con, bam)
+#' sum(counts$positions[counts$read1_base != counts$read2_base]) / sum(counts$positions)
+#' dbDisconnect(con, shutdown = TRUE)
+#'
+#' @export
+rduckhts_bam_mate_overlap_counts <- function(
+  con,
+  path,
+  region = NULL,
+  index_path = NULL,
+  reference = NULL,
+  reference_index_path = NULL,
+  min_mapq = 20,
+  require_flags = 0,
+  exclude_flags = 3844,
+  max_pending = 1000000
+) {
+  whole_number <- function(value, name, low, high) {
+    if (!is.numeric(value) || length(value) != 1L || is.na(value) ||
+        value != floor(value) || value < low || value > high) {
+      stop(name, " must be one whole number from ", low, " to ",
+           format(high, scientific = FALSE), call. = FALSE)
+    }
+    as.character(as.integer(value))
+  }
+  params <- list(
+    min_mapq = whole_number(min_mapq, "min_mapq", 0, 255),
+    require_flags = whole_number(require_flags, "require_flags", 0, 65535),
+    exclude_flags = whole_number(exclude_flags, "exclude_flags", 0, 65535),
+    max_pending = whole_number(max_pending, "max_pending", 1, 100000000)
+  )
+  paths <- list(
+    region = region, index_path = index_path, reference = reference,
+    reference_index_path = reference_index_path
+  )
+  for (name in names(paths)) {
+    if (!is.null(paths[[name]])) params[[name]] <- sql_quote_string(con, paths[[name]])
+  }
+  query <- sprintf(
+    "SELECT * FROM duckhts_bam_mate_overlap_counts(%s%s)",
+    sql_quote_string(con, path),
+    build_param_str(params)
+  )
+  DBI::dbGetQuery(con, query)
+}
+
 #' Native BAM/CRAM BED Regional Coverage Summary
 #'
 #' Computes samtools coverage-like regional summaries for BAM or CRAM input over
