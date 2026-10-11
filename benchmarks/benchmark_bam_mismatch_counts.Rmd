@@ -535,7 +535,7 @@ previous <- merge(cell_medians(utils::read.csv(text = previous_text, stringsAsFa
 stopifnot(nrow(previous) > 0)
 previous$time_ratio <- previous$seconds_after / previous$seconds_before
 previous$rss_ratio <- previous$rss_mib_after / previous$rss_mib_before
-previous <- previous[do.call(order, previous[c("series", "scale", "threads")]), ]
+previous <- previous[do.call(base::order, previous[c("series", "scale", "threads")]), ]
 rownames(previous) <- NULL
 ```
 
