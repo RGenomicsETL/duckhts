@@ -1798,6 +1798,7 @@ void register_read_hts_header_function(duckdb_connection connection) {
     duckdb_table_function_set_function(tf, read_hts_header_scan);
 
     duckdb_register_table_function(connection, tf);
+    duckdb_destroy_table_function(&tf);
     duckdb_destroy_logical_type(&varchar_type);
 }
 
@@ -1815,6 +1816,7 @@ void register_read_hts_index_function(duckdb_connection connection) {
     duckdb_table_function_set_function(tf, read_hts_index_scan);
 
     duckdb_register_table_function(connection, tf);
+    duckdb_destroy_table_function(&tf);
     duckdb_destroy_logical_type(&varchar_type);
 }
 
@@ -1832,5 +1834,6 @@ void register_read_hts_index_spans_function(duckdb_connection connection) {
     duckdb_table_function_set_function(tf, read_hts_index_spans_scan);
 
     duckdb_register_table_function(connection, tf);
+    duckdb_destroy_table_function(&tf);
     duckdb_destroy_logical_type(&varchar_type);
 }
