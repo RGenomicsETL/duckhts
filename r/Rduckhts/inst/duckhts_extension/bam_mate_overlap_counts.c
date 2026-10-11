@@ -264,15 +264,12 @@ static int pending_clear(mate_pending_t *pending) {
     return duckhts_bam_site_overlap_begin(&pending->table);
 }
 
-/* The held mate with this name, taken out of the table and the heap, or NULL. */
-static mate_held_t *pending_take(mate_pending_t *pending, const char *qname, size_t qname_len, uint64_t hash) {
+/* The held mate with this name, or NULL. It stays held. */
+static mate_held_t *pending_find(const mate_pending_t *pending, const char *qname, size_t qname_len,
+                                 uint64_t hash) {
     size_t slot;
-    mate_held_t *entry;
     if (!duckhts_bam_site_overlap_find(&pending->table, qname, qname_len, hash, &slot)) return NULL;
-    entry = held_from_qname(pending->table.slots[slot].qname);
-    duckhts_bam_site_overlap_remove(&pending->table, slot);
-    heap_remove(pending, entry);
-    return entry;
+    return held_from_qname(pending->table.slots[slot].qname);
 }
 
 /* Double the name table, up to max_pending entries, and insert the held names again. */
@@ -685,9 +682,14 @@ static int count_alignments(const mate_bind_t *bind, uint64_t *cells, char *erro
         if (qname_len >= MATE_QNAME_BYTES) continue;
         hash = duckhts_bam_site_qname_hash(qname, qname_len);
 
-        held = pending_take(&pending, qname, qname_len, hash);
+        held = pending_find(&pending, qname, qname_len, hash);
         if (held) {
-            if (mates_mirror(held, alignment) && alignment_has_bases(alignment)) {
+            /* A record that has the name of a held mate but does not pair with
+             * it is left out. The held mate stays held for its own mate, so a
+             * malformed record does not cost a valid pair. */
+            if (!mates_mirror(held, alignment)) continue;
+            pending_unlink(&pending, held);
+            if (alignment_has_bases(alignment)) {
                 const mate_view_t held_view = view_of_held(held);
                 const mate_view_t alignment_view = view_of_alignment(alignment);
                 const int held_is_read1 = (held->flag & BAM_FREAD1) != 0;

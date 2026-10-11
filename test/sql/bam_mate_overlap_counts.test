@@ -240,8 +240,8 @@ WITH observed AS (
   SELECT * FROM mate_overlap_oracle('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam', 20)
 )
 SELECT (SELECT count(*) FROM expected),
-  (SELECT count(*) FROM (SELECT * FROM observed EXCEPT SELECT * FROM expected)),
-  (SELECT count(*) FROM (SELECT * FROM expected EXCEPT SELECT * FROM observed));
+  (SELECT count(*) FROM (SELECT * FROM observed EXCEPT ALL SELECT * FROM expected)),
+  (SELECT count(*) FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM observed));
 ----
 0	0	0
 
@@ -252,8 +252,8 @@ WITH observed AS (
   SELECT * FROM mate_overlap_oracle('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam', 20)
 )
 SELECT (SELECT sum(positions)::INTEGER FROM expected),
-  (SELECT count(*) FROM (SELECT * FROM observed EXCEPT SELECT * FROM expected)),
-  (SELECT count(*) FROM (SELECT * FROM expected EXCEPT SELECT * FROM observed));
+  (SELECT count(*) FROM (SELECT * FROM observed EXCEPT ALL SELECT * FROM expected)),
+  (SELECT count(*) FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM observed));
 ----
 47	0	0
 
@@ -265,8 +265,8 @@ WITH observed AS (
   SELECT * FROM mate_overlap_oracle('__WORKING_DIRECTORY__/test/data/ovl.bam', 20)
 )
 SELECT (SELECT sum(positions)::INTEGER FROM expected),
-  (SELECT count(*) FROM (SELECT * FROM observed EXCEPT SELECT * FROM expected)),
-  (SELECT count(*) FROM (SELECT * FROM expected EXCEPT SELECT * FROM observed));
+  (SELECT count(*) FROM (SELECT * FROM observed EXCEPT ALL SELECT * FROM expected)),
+  (SELECT count(*) FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM observed));
 ----
 36	0	0
 
@@ -279,8 +279,8 @@ WITH observed AS (
   SELECT * FROM mate_overlap_oracle('__WORKING_DIRECTORY__/test/data/empty-tids.bam', 20)
 )
 SELECT (SELECT sum(positions) > 0 FROM expected),
-  (SELECT count(*) FROM (SELECT * FROM observed EXCEPT SELECT * FROM expected)),
-  (SELECT count(*) FROM (SELECT * FROM expected EXCEPT SELECT * FROM observed));
+  (SELECT count(*) FROM (SELECT * FROM observed EXCEPT ALL SELECT * FROM expected)),
+  (SELECT count(*) FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM observed));
 ----
 true	0	0
 
@@ -291,10 +291,102 @@ WITH observed AS (
   SELECT * FROM mate_overlap_oracle('__WORKING_DIRECTORY__/test/data/empty-tids.bam', 0)
 )
 SELECT (SELECT sum(positions)::INTEGER FROM expected),
-  (SELECT count(*) FROM (SELECT * FROM observed EXCEPT SELECT * FROM expected)),
-  (SELECT count(*) FROM (SELECT * FROM expected EXCEPT SELECT * FROM observed));
+  (SELECT count(*) FROM (SELECT * FROM observed EXCEPT ALL SELECT * FROM expected)),
+  (SELECT count(*) FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM observed));
 ----
 2316	0	0
+
+# A second fixture on the same contigs, for gaps inside the shared span and
+# for mates still held when the contig changes. ref2 repeats ATTGCC from 1.
+#   ins   10/20  5M2I5M at 101 and 10M at 103: 103-110 shared; the inserted TT is not aligned
+#   skip  15/17  5M10N5M at 131 and 15M at 140: 146-150 shared; 140-145 fall in the skip
+#   edge  25/25  read 2 has MAPQ 5, so read 1 is still held when ref1 ends
+#   next  30/30  on ref2, 10M at 11 and 10M at 15: 15-20 shared
+statement ok
+COPY (VALUES
+  (E'@HD\tVN:1.6\tSO:coordinate'),
+  (E'@SQ\tSN:ref1\tLN:260'),
+  (E'@SQ\tSN:ref2\tLN:80'),
+  (E'ins\t99\tref1\t101\t60\t5M2I5M\t=\t103\t12\tAATGGTTCAATG\t++++++++++++'),
+  (E'ins\t147\tref1\t103\t60\t10M\t=\t101\t-12\tTGGCAATGGC\t5555555555'),
+  (E'skip\t99\tref1\t131\t60\t5M10N5M\t=\t140\t24\tAATGGGGCAA\t0000000000'),
+  (E'skip\t147\tref1\t140\t60\t15M\t=\t131\t-24\tGGCAATGGCAATGGC\t222222222222222'),
+  (E'edge\t99\tref1\t241\t60\t10M\t=\t245\t14\tTGGCAATGGC\t::::::::::'),
+  (E'edge\t147\tref1\t245\t5\t10M\t=\t241\t-14\tAATGGCAATG\t::::::::::'),
+  (E'next\t99\tref2\t11\t60\t10M\t=\t15\t14\tCCATTGCCAT\t??????????'),
+  (E'next\t147\tref2\t15\t60\t10M\t=\t11\t-14\tTGCCATTGCC\t??????????'))
+TO '__WORKING_DIRECTORY__/test/tmp_mate_overlap_gaps.sam' (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+# By hand, without the MAPQ floor: ins 8, skip 5, edge 6 and next 6, all
+# agreeing. A query offset that missed the insertion would pair the inserted
+# TT with C and A of read 2.
+query IIII
+SELECT read1_quality, read2_quality, sum(positions)::INTEGER,
+  sum(CASE WHEN read1_base != read2_base THEN positions ELSE 0 END)::INTEGER
+FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap_gaps.sam', min_mapq := 0)
+GROUP BY ALL ORDER BY ALL;
+----
+10	20	8	0
+15	17	5	0
+25	25	6	0
+30	30	6	0
+
+# With the default floor, edge gives nothing and its read 1 is held when ref1
+# ends. The change of contig drops it, so read 1 of next can be held with
+# max_pending := 1.
+query I
+SELECT sum(positions)::INTEGER FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap_gaps.sam',
+  max_pending := 1);
+----
+19
+
+query III
+WITH observed AS (
+  SELECT * FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap_gaps.sam')
+), expected AS (
+  SELECT * FROM mate_overlap_oracle('__WORKING_DIRECTORY__/test/tmp_mate_overlap_gaps.sam', 20)
+)
+SELECT (SELECT sum(positions)::INTEGER FROM expected),
+  (SELECT count(*) FROM (SELECT * FROM observed EXCEPT ALL SELECT * FROM expected)),
+  (SELECT count(*) FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM observed));
+----
+19	0	0
+
+query III
+WITH observed AS (
+  SELECT * FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap_gaps.sam', min_mapq := 0)
+), expected AS (
+  SELECT * FROM mate_overlap_oracle('__WORKING_DIRECTORY__/test/tmp_mate_overlap_gaps.sam', 0)
+)
+SELECT (SELECT sum(positions)::INTEGER FROM expected),
+  (SELECT count(*) FROM (SELECT * FROM observed EXCEPT ALL SELECT * FROM expected)),
+  (SELECT count(*) FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM observed));
+----
+25	0	0
+
+# Two fragments that share the name dup interleave: read 1 at 11 and 13, read 2
+# at 15 and 17. SAM treats the records of one name as one template, so this
+# input is malformed. Read 1 at 11 is held. Read 1 at 13 has its name but does
+# not pair with it, so it is left out, and read 1 at 11 stays held for its mate
+# at 15: 6 positions, at qualities 40/40. The SQL count pairs records by name
+# and start, so it also counts the second fragment, at 20/20: 12 positions.
+statement ok
+COPY (VALUES
+  (E'@HD\tVN:1.6\tSO:coordinate'),
+  (E'@SQ\tSN:ref1\tLN:260'),
+  (E'dup\t99\tref1\t11\t60\t10M\t=\t15\t14\tAATGGCAATG\tIIIIIIIIII'),
+  (E'dup\t99\tref1\t13\t60\t10M\t=\t17\t14\tTGGCAATGGC\t5555555555'),
+  (E'dup\t147\tref1\t15\t60\t10M\t=\t11\t-14\tGCAATGGCAA\tIIIIIIIIII'),
+  (E'dup\t147\tref1\t17\t60\t10M\t=\t13\t-14\tAATGGCAATG\t5555555555'))
+TO '__WORKING_DIRECTORY__/test/tmp_mate_overlap_dup.sam' (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+query IIII
+SELECT read1_quality, read2_quality, sum(positions)::INTEGER,
+  (SELECT sum(positions)::INTEGER FROM mate_overlap_oracle('__WORKING_DIRECTORY__/test/tmp_mate_overlap_dup.sam', 20))
+FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap_dup.sam')
+GROUP BY ALL;
+----
+40	40	6	12
 
 # Regions select alignments by overlap, and a pair counts only when both of
 # its mates are selected. The fixture is compressed and indexed for this.
