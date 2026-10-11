@@ -566,11 +566,11 @@ query I
 SELECT count(*) FROM (
   (SELECT unnest(duckhts_somalier_relatedness(a.sketch, b.sketch, 8))
    FROM somalier_sketches a JOIN somalier_sketches b ON a.sketch.sample_id < b.sketch.sample_id
-   EXCEPT
+   EXCEPT ALL
    SELECT * FROM duckhts_somalier_relatedness_all_pairs('somalier_sketches', max_sites := 8))
   UNION ALL
   (SELECT * FROM duckhts_somalier_relatedness_all_pairs('somalier_sketches', max_sites := 8)
-   EXCEPT
+   EXCEPT ALL
    SELECT unnest(duckhts_somalier_relatedness(a.sketch, b.sketch, 8))
    FROM somalier_sketches a JOIN somalier_sketches b ON a.sketch.sample_id < b.sketch.sample_id));
 ----
@@ -886,6 +886,22 @@ SELECT sketch FROM somalier_cohort_sketches WHERE sketch.sample_id < 'S0101';
 
 query I
 SELECT * FROM somalier_cohort_prefix_differences(101);
+----
+0
+
+# 399 sketches have 79,401 pairs: blocks of two pair indexes, and a last block
+# that holds one.
+statement ok
+CREATE OR REPLACE TEMP VIEW somalier_cohort_prefix AS
+SELECT sketch FROM somalier_cohort_sketches WHERE sketch.sample_id < 'S0399';
+
+query I
+SELECT count(*) FROM duckhts_somalier_relatedness_all_pairs('somalier_cohort_prefix', max_sites := 70);
+----
+79401
+
+query I
+SELECT * FROM somalier_cohort_prefix_differences(399);
 ----
 0
 

@@ -452,8 +452,13 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
      * the materialized block relation in tasks of 2,048 rows, so the blocks
      * of one query run on up to 32 threads. The blocks come from a range of
      * that constant size, so the optimizer estimates them as many rows and
-     * keeps the one-row sketch list on the build side of the cross product:
-     * the pair indexes stream and are never collected. */
+     * keeps the one-row sketch list on the build side of the cross product.
+     * The cross product reads that list again, as a copy, for each chunk of
+     * rows it receives. It therefore joins the block rows, and the pair
+     * indexes of each block are unnested above it, so the list is copied once
+     * per chunk of up to 2,048 blocks and not once per 2,048 pairs; the
+     * unnest passes the list on as a reference. The pair indexes stream and
+     * are never collected. */
 #define DUCKHTS_SOMALIER_PAIR_BLOCKS "65536"
     if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckhts_somalier_relatedness_all_pairs("
@@ -491,10 +496,10 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "least((t.block + 1) * w.block_width, w.pairs) AS end_pair "
         "FROM range(" DUCKHTS_SOMALIER_PAIR_BLOCKS ") AS t(block), __dht_width AS w "
         "WHERE t.block * w.block_width < w.pairs) "
-        "SELECT unnest(__duckhts_somalier_relatedness_cohort_pair(c.sketches, "
+        "SELECT unnest(__duckhts_somalier_relatedness_cohort_pair(p.sketches, "
         "CAST(p.pair_index AS UBIGINT), CAST(max_sites AS UBIGINT))) "
-        "FROM (SELECT unnest(range(first_pair, end_pair)) AS pair_index "
-        "FROM __dht_blocks) AS p, __dht_cohort AS c")) {
+        "FROM (SELECT c.sketches, unnest(range(b.first_pair, b.end_pair)) AS pair_index "
+        "FROM __dht_blocks AS b, __dht_cohort AS c) AS p")) {
         return false;
     }
 #undef DUCKHTS_SOMALIER_PAIR_BLOCKS
