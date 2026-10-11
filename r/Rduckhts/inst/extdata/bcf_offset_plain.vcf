@@ -1,0 +1,15 @@
+##fileformat=VCFv4.2
+##contig=<ID=chr1,length=1000000>
+##contig=<ID=chr2,length=1000000>
+##contig=<ID=chr3,length=1000000>
+##INFO=<ID=PAD,Number=1,Type=String,Description="Filler of varying length">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1	S2
+chr1	1000	r0001	C	G	50	PASS	PAD=ACGT	GT	0/0	0/1
+chr1	2000	r0002	G	T	50	PASS	PAD=ACGT	GT	0/1	0/1
+chr1	3000	r0003	T	A	50	PASS	PAD=ACGT	GT	0/0	1/1
+chr1	4000	r0004	A	C	50	PASS	PAD=ACGT	GT	0/1	0/1
+chr1	5000	r0005	C	G	50	PASS	PAD=ACGT	GT	0/0	0/1
+chr1	6000	r0006	G	T	50	PASS	PAD=ACGT	GT	0/1	1/1
+chr1	7000	r0007	T	A	50	PASS	PAD=ACGT	GT	0/0	0/1
+chr1	8000	r0008	A	C	50	PASS	PAD=ACGT	GT	0/1	0/1

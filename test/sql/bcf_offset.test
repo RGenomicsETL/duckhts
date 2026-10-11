@@ -1,0 +1,242 @@
+# name: test/sql/bcf_offset.test
+# description: read_bcf FILE_OFFSET is the post-record BGZF position, the same in every scan path
+# group: [duckhts]
+
+require duckhts
+
+# The expected positions are read from the BGZF block headers and the record lengths of each
+# file, not from this reader or HTSlib (test/scripts/prepare_bcf_offset_fixtures.R). Each file
+# holds 120 records over three contigs, IDs r0001 to r0120 in file order, two of them at
+# chr2:20000. bcf_offset.vcf.gz (bgzip --binary) splits records across BGZF blocks;
+# bcf_offset.htslib.vcf.gz ends its blocks at record ends; bcf_offset.bcf splits records and
+# has one record that ends exactly at a block end, which reads as the next block's start.
+statement ok
+CREATE TEMP TABLE record_ends AS
+SELECT * FROM read_csv('__WORKING_DIRECTORY__/test/data/bcf_record_ends.tsv', delim = '\t', header = true,
+  columns = {'file': 'VARCHAR', 'ID': 'VARCHAR', 'FILE_OFFSET': 'UBIGINT'});
+
+statement ok
+CREATE TEMP MACRO bgzf_offsets(scan_mode, decompression_threads) AS TABLE
+SELECT 'bcf_offset.vcf.gz' AS file, ID, FILE_OFFSET FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset.vcf.gz',
+  include_file_offset := true, scan_mode := scan_mode, decompression_threads := decompression_threads)
+UNION ALL
+SELECT 'bcf_offset.htslib.vcf.gz', ID, FILE_OFFSET FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset.htslib.vcf.gz',
+  include_file_offset := true, scan_mode := scan_mode, decompression_threads := decompression_threads)
+UNION ALL
+SELECT 'bcf_offset.bcf', ID, FILE_OFFSET FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset.bcf',
+  include_file_offset := true, scan_mode := scan_mode, decompression_threads := decompression_threads);
+
+# The column is opt-in: absent by default, for false and for NULL.
+query I
+SELECT count(*) FROM (DESCRIBE SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset.bcf'))
+WHERE column_name = 'FILE_OFFSET';
+----
+0
+
+query I
+SELECT count(*) FROM (DESCRIBE SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset.bcf', include_file_offset := false))
+WHERE column_name = 'FILE_OFFSET';
+----
+0
+
+query I
+SELECT count(*) FROM (DESCRIBE SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset.bcf', include_file_offset := NULL))
+WHERE column_name = 'FILE_OFFSET';
+----
+0
+
+# Requested, it is a UBIGINT that follows FILTER, in wide and tidy layouts.
+query TT
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset.bcf', include_file_offset := true))
+LIMIT 3 OFFSET 6;
+----
+FILTER	VARCHAR[]
+FILE_OFFSET	UBIGINT
+INFO_PAD	VARCHAR
+
+query TT
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset_tidy.vcf.gz', include_file_offset := true, tidy_format := true))
+LIMIT 3 OFFSET 6;
+----
+FILTER	VARCHAR[]
+FILE_OFFSET	UBIGINT
+VEP_Allele	VARCHAR[]
+
+# Indexed scans of the three contigs run in parallel through HTSlib iterators.
+statement ok
+SET threads=4;
+
+query II
+SELECT (SELECT count(*) FROM bgzf_offsets('auto', 0)), count(*) FROM (
+ (SELECT * FROM bgzf_offsets('auto', 0) EXCEPT ALL SELECT * FROM record_ends WHERE file != 'bcf_offset_tidy.vcf.gz')
+ UNION ALL
+ (SELECT * FROM record_ends WHERE file != 'bcf_offset_tidy.vcf.gz' EXCEPT ALL SELECT * FROM bgzf_offsets('auto', 0)));
+----
+360	0
+
+# Sequential streaming without an index gives the same positions.
+query II
+SELECT (SELECT count(*) FROM bgzf_offsets('sequential', 0)), count(*) FROM (
+ (SELECT * FROM bgzf_offsets('sequential', 0) EXCEPT ALL SELECT * FROM record_ends WHERE file != 'bcf_offset_tidy.vcf.gz')
+ UNION ALL
+ (SELECT * FROM record_ends WHERE file != 'bcf_offset_tidy.vcf.gz' EXCEPT ALL SELECT * FROM bgzf_offsets('sequential', 0)));
+----
+360	0
+
+# HTSlib decompression threads do not change them.
+query I
+SELECT count(*) FROM (
+ (SELECT * FROM bgzf_offsets('auto', 2) EXCEPT ALL SELECT * FROM record_ends WHERE file != 'bcf_offset_tidy.vcf.gz')
+ UNION ALL
+ (SELECT * FROM record_ends WHERE file != 'bcf_offset_tidy.vcf.gz' EXCEPT ALL SELECT * FROM bgzf_offsets('auto', 2)));
+----
+0
+
+query I
+SELECT count(*) FROM (
+ (SELECT * FROM bgzf_offsets('sequential', 2) EXCEPT ALL SELECT * FROM record_ends WHERE file != 'bcf_offset_tidy.vcf.gz')
+ UNION ALL
+ (SELECT * FROM record_ends WHERE file != 'bcf_offset_tidy.vcf.gz' EXCEPT ALL SELECT * FROM bgzf_offsets('sequential', 2)));
+----
+0
+
+# File order: FILE_OFFSET increases strictly with the record ordinal in each file, including
+# across the repeated position chr2:20000.
+query I
+SELECT count(*) FROM (
+  SELECT FILE_OFFSET, lag(FILE_OFFSET) OVER (PARTITION BY file ORDER BY ID) AS previous
+  FROM bgzf_offsets('auto', 0))
+WHERE previous >= FILE_OFFSET;
+----
+0
+
+query TT
+SELECT file, string_agg(ID, ',' ORDER BY FILE_OFFSET) FROM (
+  SELECT 'bcf_offset.bcf' AS file, ID, POS, FILE_OFFSET
+  FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset.bcf', include_file_offset := true, region := 'chr2:20000-20000')
+  UNION ALL
+  SELECT 'bcf_offset.vcf.gz', ID, POS, FILE_OFFSET
+  FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset.vcf.gz', include_file_offset := true, region := 'chr2:20000-20000'))
+GROUP BY file ORDER BY file;
+----
+bcf_offset.bcf	r0060,r0061
+bcf_offset.vcf.gz	r0060,r0061
+
+# A region union and typed regions keep each record's position. The union selects chr3
+# (40 records), chr1:5000-6000 (2) and chr2:20000 (2); the typed regions chr1:1000-3000 (3)
+# and chr2:20000 (2).
+statement ok
+CREATE TEMP TABLE region_offsets AS
+SELECT 'bcf_offset.vcf.gz' AS file, ID, FILE_OFFSET FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset.vcf.gz',
+  include_file_offset := true, region := 'chr3:1-40000,chr1:5000-6000,chr2:20000-20000')
+UNION ALL
+SELECT 'bcf_offset.bcf', ID, FILE_OFFSET FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset.bcf',
+  include_file_offset := true, region := 'chr3:1-40000,chr1:5000-6000,chr2:20000-20000');
+
+statement ok
+CREATE TEMP TABLE typed_region_offsets AS
+SELECT 'bcf_offset.vcf.gz' AS file, ID, FILE_OFFSET FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset.vcf.gz',
+  include_file_offset := true,
+  regions := [{'chrom': 'chr2', 'start': 19999, 'end': 20000}, {'chrom': 'chr1', 'start': 0, 'end': 3000}])
+UNION ALL
+SELECT 'bcf_offset.bcf', ID, FILE_OFFSET FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset.bcf',
+  include_file_offset := true,
+  regions := [{'chrom': 'chr2', 'start': 19999, 'end': 20000}, {'chrom': 'chr1', 'start': 0, 'end': 3000}]);
+
+query III
+SELECT file, count(*), count(*) FILTER (WHERE e.FILE_OFFSET IS DISTINCT FROM r.FILE_OFFSET)
+FROM region_offsets AS r LEFT JOIN record_ends AS e USING (file, ID)
+GROUP BY file ORDER BY file;
+----
+bcf_offset.bcf	44	0
+bcf_offset.vcf.gz	44	0
+
+query III
+SELECT file, count(*), count(*) FILTER (WHERE e.FILE_OFFSET IS DISTINCT FROM r.FILE_OFFSET)
+FROM typed_region_offsets AS r LEFT JOIN record_ends AS e USING (file, ID)
+GROUP BY file ORDER BY file;
+----
+bcf_offset.bcf	5	0
+bcf_offset.vcf.gz	5	0
+
+# Tidy rows share their record's position, also when a record's 2053 rows cross an output
+# chunk.
+query III
+SELECT count(*), count(DISTINCT t.FILE_OFFSET), count(*) FILTER (WHERE e.FILE_OFFSET IS DISTINCT FROM t.FILE_OFFSET)
+FROM (SELECT 'bcf_offset_tidy.vcf.gz' AS file, ID, FILE_OFFSET
+      FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset_tidy.vcf.gz', include_file_offset := true, tidy_format := true)) AS t
+LEFT JOIN record_ends AS e USING (file, ID);
+----
+2053	1	0
+
+query IIII
+SELECT count(*), count(DISTINCT (ID, SAMPLE_ID)), count(*) FILTER (WHERE e.FILE_OFFSET IS DISTINCT FROM t.FILE_OFFSET), count(DISTINCT ID)
+FROM (SELECT 'bcf_offset.bcf' AS file, ID, SAMPLE_ID, FILE_OFFSET
+      FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset.bcf', include_file_offset := true, tidy_format := true)) AS t
+LEFT JOIN record_ends AS e USING (file, ID);
+----
+240	240	0	120
+
+# The column changes no other column, including INFO, CSQ and FORMAT in both layouts.
+query I
+SELECT count(*) FROM (
+ (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset.bcf', include_file_offset := true)
+  EXCEPT ALL SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset.bcf'))
+ UNION ALL
+ (SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset.bcf')
+  EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset.bcf', include_file_offset := true)));
+----
+0
+
+query I
+SELECT count(*) FROM (
+ (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset_tidy.vcf.gz', include_file_offset := true, tidy_format := true)
+  EXCEPT ALL SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset_tidy.vcf.gz', tidy_format := true))
+ UNION ALL
+ (SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset_tidy.vcf.gz', tidy_format := true)
+  EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset_tidy.vcf.gz', include_file_offset := true, tidy_format := true)));
+----
+0
+
+# A projection without the column, and the index count, still work when it is requested.
+query II
+SELECT count(*), count(DISTINCT ID) FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset.vcf.gz', include_file_offset := true);
+----
+120	120
+
+query I
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset.bcf', include_file_offset := true);
+----
+120
+
+# Input that is not BGZF-compressed has no virtual position: an uncompressed VCF, a plain gzip
+# VCF and an uncompressed BCF return NULL for every record, in both scan modes.
+query TII rowsort
+SELECT transport, count(*), count(FILE_OFFSET) FROM (
+  SELECT 'vcf' AS transport, FILE_OFFSET FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset_plain.vcf', include_file_offset := true)
+  UNION ALL
+  SELECT 'vcf-gzip', FILE_OFFSET FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset_gzip.vcf.gz', include_file_offset := true)
+  UNION ALL
+  SELECT 'bcf-uncompressed', FILE_OFFSET FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset_uncompressed.bcf', include_file_offset := true)
+  UNION ALL
+  SELECT 'vcf-sequential', FILE_OFFSET FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset_plain.vcf', include_file_offset := true, scan_mode := 'sequential')
+  UNION ALL
+  SELECT 'bcf-uncompressed-sequential', FILE_OFFSET FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset_uncompressed.bcf', include_file_offset := true, scan_mode := 'sequential'))
+GROUP BY transport;
+----
+bcf-uncompressed	8	0
+bcf-uncompressed-sequential	8	0
+vcf	8	0
+vcf-gzip	8	0
+vcf-sequential	8	0
+
+# The records themselves are the same in every transport.
+query I
+SELECT count(*) FROM (
+ (SELECT * EXCLUDE (FILE_OFFSET) FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset_gzip.vcf.gz', include_file_offset := true)
+  EXCEPT ALL SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset_uncompressed.bcf'))
+ UNION ALL
+ (SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset_plain.vcf')
+  EXCEPT ALL SELECT * EXCLUDE (FILE_OFFSET) FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_offset_uncompressed.bcf', include_file_offset := true)));
+----
+0

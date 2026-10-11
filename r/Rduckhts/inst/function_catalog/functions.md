@@ -31,7 +31,7 @@ This section is generated from `functions.yaml`.
 
 | Function | Kind | R helper | Description |
 | --- | --- | --- | --- |
-| [`read_bcf`](reference.md#read_bcf) | table | `rduckhts_bcf` | Read VCF/BCF with header-typed INFO/FORMAT, typed CSQ/ANN/BCSQ annotations, sample selection and optional tidy sample rows. |
+| [`read_bcf`](reference.md#read_bcf) | table | `rduckhts_bcf` | Read VCF/BCF with header-typed INFO/FORMAT, typed CSQ/ANN/BCSQ annotations, sample selection, optional tidy sample rows and optional record file positions. |
 | [`read_geno`](reference.md#read_geno) | table | `rduckhts_geno` | Read one row per VCF/BCF record with typed arbitrary-ploidy GT/PS calls, selected FORMAT fields and optional original VCF genotype text. |
 | [`read_bcf_samples`](reference.md#read_bcf_samples) | table | `rduckhts_bcf_samples` | Read the typed VCF/BCF sample catalog as sample_index UINTEGER and sample_name VARCHAR without reading records. Indices are zero-based positions in the original header, remain stable under selection and join read_geno calls from the same unchanged file. NULL or '-' selects all; an empty string selects none; comma-separated names include samples; '^' excludes them. Names are validated by HTSlib, selected rows retain header order, and unknown names error. |
 | [`read_bam`](reference.md#read_bam) | table | `rduckhts_bam` | Read SAM/BAM/CRAM alignments with optional typed SAM tags, auxiliary maps and packed sequence, quality or CIGAR output. |

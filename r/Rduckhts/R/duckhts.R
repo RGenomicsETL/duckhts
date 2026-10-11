@@ -68,6 +68,12 @@
 #'   intervals are merged natively. Limits: 1,000,000 intervals and 128 MiB.
 #'   Aggregate with `coalesce(list(...), []::STRUCT(...)[])`: `list()` over no
 #'   rows is `NULL`, which means the ordinary full scan.
+#' @param include_file_offset Logical. If `TRUE`, add a `FILE_OFFSET` column
+#'   after `FILTER`: the BGZF virtual position just after each record. It
+#'   increases strictly in file order and is the same for every scan mode, so
+#'   ordering by it restores file order, also among records at one position.
+#'   Input that is not BGZF-compressed gives `NA`. The default keeps the
+#'   existing schema.
 #'
 #' @return Invisible TRUE on success
 #'
@@ -95,10 +101,16 @@ rduckhts_bcf <- function(
   decode_error_policy = "null",
   overwrite = FALSE,
   samples = NULL,
-  regions_var = NULL
+  regions_var = NULL,
+  include_file_offset = FALSE
 ) {
+  if (!is.logical(include_file_offset) || length(include_file_offset) != 1L ||
+      is.na(include_file_offset)) {
+    stop("include_file_offset must be TRUE or FALSE", call. = FALSE)
+  }
   .duckhts_check_table_target(con, table_name, overwrite)
   params <- list()
+  if (include_file_offset) params$include_file_offset <- "true"
   if (!is.null(samples)) params$samples <- sql_quote_string(con, samples)
   if (!is.null(region)) {
     params$region <- sql_quote_string(con, region)

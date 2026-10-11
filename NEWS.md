@@ -4,6 +4,19 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- `read_bcf(..., include_file_offset := true)` adds a `FILE_OFFSET UBIGINT`
+  column after `FILTER`: the BGZF virtual position just after each record, as
+  `read_bam` defines it. Sequential, indexed, parallel, region and
+  typed-region scans of one file give a record the same value, and it
+  increases strictly in file order, so `ORDER BY FILE_OFFSET` restores file
+  order, also among records at one position, which a hash join does not keep
+  (https://github.com/RGenomicsETL/duckhts/issues/329). Input that is not
+  BGZF-compressed returns NULL; BCF written by `bcftools -Ou` is level-0 BGZF
+  and has positions. The column is absent unless requested.
+  `test/scripts/prepare_bcf_offset_fixtures.R` derives the expected positions
+  of the test fixtures from their BGZF blocks and record lengths, without
+  HTSlib.
+
 - Internal consolidation, no output change: `read_gff`, `read_gtf` and
   `read_genbank` (`attributes_map`), `read_bam` (`auxiliary_tags`) and
   `read_hts_header` (`key_values`) now write their MAP columns through one

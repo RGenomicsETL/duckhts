@@ -2,6 +2,15 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- `rduckhts_bcf(include_file_offset = TRUE)` and the bundled
+  `read_bcf(..., include_file_offset := true)` add a `FILE_OFFSET` column after
+  `FILTER`: the BGZF virtual position just after each record. Every scan mode
+  gives a record the same value, and ordering by it restores file order, also
+  among records at one position. Input that is not BGZF-compressed gives `NA`.
+  The default schema is unchanged. New bundled fixtures (`bcf_offset.bcf`,
+  `bcf_offset.vcf.gz`, `bcf_offset_plain.vcf` and the expected positions in
+  `bcf_record_ends.tsv`) back the tests.
+
 - Headers stored by the Parquet convert functions keep their line breaks; the
   bundled `duckhts_raw_header_text()` joined lines with a literal backslash-n.
 

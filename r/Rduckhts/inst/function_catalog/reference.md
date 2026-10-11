@@ -378,12 +378,12 @@ SELECT duckhts_duckdb_supports_geometry();
 
 ## read_bcf
 
-Read VCF/BCF with header-typed INFO/FORMAT, typed CSQ/ANN/BCSQ annotations, sample selection and optional tidy sample rows.
+Read VCF/BCF with header-typed INFO/FORMAT, typed CSQ/ANN/BCSQ annotations, sample selection, optional tidy sample rows and optional record file positions.
 
 Signature:
 
 ```sql
-read_bcf(path, region := NULL, index_path := NULL, tidy_format := FALSE, additional_csq_column_types := NULL, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null', samples := NULL, regions := NULL)
+read_bcf(path, region := NULL, index_path := NULL, tidy_format := FALSE, additional_csq_column_types := NULL, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null', samples := NULL, regions := NULL, include_file_offset := FALSE)
 ```
 
 Returns:
@@ -420,6 +420,10 @@ Typed regions: regions := STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[] se
 
 scan_mode='sequential' streams without loading an index. auto streams if no usable index was available at bind; region queries require one. Index-only counts do not validate data contents. Automatic/region plans retain the parsed bind-time index, including remote/explicit index_path: subsequent index removal, replacement or corruption does not change the plan. Supply an initially matching pair and keep data/header contents unchanged; this is not a snapshot or validation of an unrelated index. Reprepare to use a new index.
 
+### Offsets
+
+include_file_offset := TRUE adds FILE_OFFSET UBIGINT after FILTER: the BGZF virtual position immediately after each record, not its start, as in read_bam. Sequential, indexed, parallel, region and typed-region scans of one unchanged file give a record the same value, and it increases strictly in file order, so ORDER BY FILE_OFFSET restores file order, also among records at one position. Tidy rows of a record share it. BGZF input includes BCF written by bcftools -Ou, which is level-0 BGZF. Uncompressed VCF, plain gzip VCF and a BCF stream without BGZF blocks return NULL. Values are not comparable across files.
+
 ### Threads
 
 decompression_threads controls per-file HTSlib workers, default 0; it is separate from DuckDB scan parallelism.
@@ -428,6 +432,10 @@ decompression_threads controls per-file HTSlib workers, default 0; it is separat
 
 ```sql
 SELECT CHROM, POS, REF, ALT FROM read_bcf('vcf_file.bcf') LIMIT 5;
+```
+
+```sql
+SELECT CHROM, POS, ID, FILE_OFFSET FROM read_bcf('cohort.vcf.gz', include_file_offset := true) ORDER BY FILE_OFFSET;
 ```
 
 ## read_geno
