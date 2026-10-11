@@ -57,7 +57,7 @@ typedef struct {
     uint32_t *pair_of;          /* cell index -> pair index */
     double *pair_probability;   /* P(alt | depth, g, h): pair index * PAIRS + g * GENOTYPES + h */
     uint16_t max_depth;         /* the deepest pair */
-    double *gamma_table;        /* 3 * (max_depth + 1): lgamma(x + a), lgamma(x + b), lgamma(x + a + b) */
+    double *rising_table;       /* 3 * (max_depth + 1): rising-factorial sums for a, b and a + b */
     duckhts_count_error_relation_t relation;
     int fixed[DUCKHTS_COUNT_ERROR_PARAMETERS]; /* 1 where a parameter is held */
     double held[DUCKHTS_COUNT_ERROR_PARAMETERS];
@@ -113,7 +113,7 @@ static void problem_release(count_problem_t *problem) {
     free(problem->pairs);
     free(problem->pair_of);
     free(problem->pair_probability);
-    free(problem->gamma_table);
+    free(problem->rising_table);
     duckhts_count_bytes_release(problem->charged);
     memset(problem, 0, sizeof(*problem));
 }
@@ -162,10 +162,10 @@ static int problem_init(count_problem_t *problem, const duckhts_count_cell_t *ce
                                                   error, error_length);
     }
     if (problem->pair_probability != NULL) {
-        problem->gamma_table = problem_alloc(problem, 3u * ((uint64_t)problem->max_depth + 1u) * sizeof(double),
+        problem->rising_table = problem_alloc(problem, 3u * ((uint64_t)problem->max_depth + 1u) * sizeof(double),
                                              error, error_length);
     }
-    if (problem->gamma_table == NULL) {
+    if (problem->rising_table == NULL) {
         problem_release(problem);
         return 0;
     }
@@ -178,15 +178,20 @@ static int problem_init(count_problem_t *problem, const duckhts_count_cell_t *ce
 }
 
 /* Fills P(alt | depth, g, h) of every pair: a beta-binomial, or the binomial
- * when the spread is (near) zero. The beta-binomial needs lgamma at alt + a,
- * depth - alt + b and depth + a + b, where a and b depend on (g, h) only, so
- * each (g, h) fills three tables over 0..max_depth once and the pairs read
- * them. */
+ * when the spread is (near) zero. With a = p s, b = (1 - p) s and
+ * s = (1 - rho) / rho, the beta-binomial is the binomial times
+ *   R(alt, a) R(depth - alt, b) / R(depth, a + b),
+ * where log R(x, c) = sum over i < x of log1p(i / c), because
+ * lgamma(x + c) - lgamma(c) = x log c + log R(x, c). Each (g, h) fills the
+ * three log R tables over 0..max_depth once and the pairs read them. The
+ * lgamma differences themselves lose about 1e-6 per term when the spread is
+ * small and a and b are near 1e9, which sums to a likelihood error over many
+ * sites; the log1p terms go to zero there and keep full precision. */
 static void fill_pair_probabilities(count_problem_t *problem, const duckhts_count_error_params_t *params) {
     const double q[GENOTYPES] = {params->seq_error, params->allele_balance, 1 - params->seq_error};
     const double rho[GENOTYPES] = {params->spread_hom, params->spread_het, params->spread_hom};
     const size_t width = problem->max_depth + 1u;
-    double *table_a = problem->gamma_table;
+    double *table_a = problem->rising_table;
     double *table_b = table_a + width;
     double *table_ab = table_b + width;
     for (int g = 0; g < GENOTYPES; g++) {
@@ -195,8 +200,8 @@ static void fill_pair_probabilities(count_problem_t *problem, const duckhts_coun
             const int at = g * GENOTYPES + h;
             if (p < 1e-12) p = 1e-12;
             if (p > 1 - 1e-12) p = 1 - 1e-12;
+            const double log_p = log(p), log_not_p = log1p(-p);
             if (rho[g] < BINOMIAL_SPREAD) {
-                const double log_p = log(p), log_not_p = log1p(-p);
                 for (size_t i = 0; i < problem->pair_count; i++) {
                     const count_pair_t *pair = &problem->pairs[i];
                     problem->pair_probability[i * PAIRS + at] =
@@ -205,17 +210,18 @@ static void fill_pair_probabilities(count_problem_t *problem, const duckhts_coun
             } else {
                 const double scale = (1 - rho[g]) / rho[g];
                 const double a = p * scale, b = (1 - p) * scale;
-                const double constant = lgamma(a + b) - lgamma(a) - lgamma(b);
-                for (size_t x = 0; x < width; x++) {
-                    table_a[x] = lgamma(x + a);
-                    table_b[x] = lgamma(x + b);
-                    table_ab[x] = lgamma(x + a + b);
+                table_a[0] = table_b[0] = table_ab[0] = 0;
+                for (size_t x = 1; x < width; x++) {
+                    const double i = (double)(x - 1);
+                    table_a[x] = table_a[x - 1] + log1p(i / a);
+                    table_b[x] = table_b[x - 1] + log1p(i / b);
+                    table_ab[x] = table_ab[x - 1] + log1p(i / scale);
                 }
                 for (size_t i = 0; i < problem->pair_count; i++) {
                     const count_pair_t *pair = &problem->pairs[i];
                     problem->pair_probability[i * PAIRS + at] =
-                        exp(pair->log_choose + constant + table_a[pair->alt] + table_b[pair->depth - pair->alt] -
-                            table_ab[pair->depth]);
+                        exp(pair->log_choose + pair->alt * log_p + (pair->depth - pair->alt) * log_not_p +
+                            table_a[pair->alt] + table_b[pair->depth - pair->alt] - table_ab[pair->depth]);
                 }
             }
         }
@@ -309,8 +315,13 @@ static int nelder_mead(count_problem_t *problem, double *point, int n, double st
              * working coordinates there can stay wide while nothing moves. */
             double spread = 0;
             for (int i = 0; i < n; i++) {
-                double range = fabs(logistic(simplex[n][i]) - logistic(simplex[0][i]));
-                if (range > spread) spread = range;
+                double low = logistic(simplex[0][i]), high = low;
+                for (int v = 1; v <= n; v++) {
+                    const double at = logistic(simplex[v][i]);
+                    if (at < low) low = at;
+                    if (at > high) high = at;
+                }
+                if (high - low > spread) spread = high - low;
             }
             /* Done when the simplex is small, or when the objective no longer
              * differs across it beyond what the summation resolves: a

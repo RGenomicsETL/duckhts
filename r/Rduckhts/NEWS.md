@@ -2,6 +2,10 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- `rduckhts_count_error_fit()` evaluates the beta-binomial without the
+  rounding error that inflated the log-likelihood near the binomial limit, and
+  its optimizer checks the width of the whole simplex before it stops.
+
 - The bundled `duckhts_bam_mismatch_counts()` (and so
   `rduckhts_bam_mismatch_counts()`) counts a read base written as `=` as a
   match instead of leaving it out, and a VCF mask leaves out the last base of

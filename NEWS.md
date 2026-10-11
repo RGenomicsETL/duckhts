@@ -4,6 +4,15 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- `duckhts_count_error_fit()` evaluates the beta-binomial through sums of
+  `log1p` terms instead of differences of `lgamma` values. Near the binomial
+  limit those differences lost about 1e-6 per term, which over millions of
+  sites inflated the log-likelihood (by 19 on a 10-million-site test) and let
+  the optimizer prefer a spread that only the error supported. The optimizer
+  now measures the width of the simplex over all its vertices, not only the
+  best and worst. The R tests check the native log-likelihood against the
+  independent oracle directly.
+
 - `duckhts_bam_mismatch_counts()` counts a read base written as `=` (the SAM
   sign for the reference base, as `samtools calmd -e` writes it) as a match;
   it was left out. A VCF mask now leaves out the last base of a deletion that
