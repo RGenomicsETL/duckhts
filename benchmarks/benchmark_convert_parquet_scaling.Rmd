@@ -1,0 +1,616 @@
+---
+title: "Parquet conversion scaling"
+output:
+  github_document:
+    html_preview: false
+    pandoc_args: ["--wrap=preserve", "--columns=400"]
+---
+
+This report gives the 1×/2×/4× scaling evidence `STYLE.md` asks for, for the
+COPY statements that the `*_convert_parquet_sql` builders return. Issue
+https://github.com/RGenomicsETL/duckhts/issues/298 lists these executed COPY
+workloads for BAM, VCF and GFF as not measured. A builder only returns SQL;
+the caller executes it, as the R wrappers do through DBI. Here each
+observation builds the statement, untimed, and executes it in a fresh DuckDB
+CLI process. No earlier report measures these workloads; this is their first
+baseline.
+
+## Workloads
+
+Every input is a registry artifact of `r/duckhtsbench`. Before anything is
+measured, each is checked against the identity the registry records: its
+checksum and size, or its counted content. The ONT alignment records neither,
+so the report gives its SHA-256. The builders run with their defaults, plus
+the region or column list that cuts the input and, for the CRAM, the
+reference.
+
+- **BAM, short reads** (`duckhts_bam_convert_parquet_sql`, which reads SAM,
+  BAM and CRAM): the chr1 CRAM slice of the 1000 Genomes 30× sample HG00403
+  (`bam_mismatch_hg00403_chr1_cram`, 150-base reads), with the registered
+  GRCh38 FASTA as the reference (`liftover_grch38_fasta`). The 1×, 2× and 4×
+  regions start at the beginning of chr1 and end at the 12.5%, 25% and 50%
+  quantiles of the alignment start positions, so each holds twice the
+  alignments of the one before.
+- **BAM, long reads**: the minimap2 alignment of an ONT E. coli K-12 run
+  (`ont_ecoli_k12_bam`). Its regions end at the 25% and 50% quantiles of the
+  mapped start positions and at the end of the chromosome. The whole file has
+  fewer reads than one row group holds, so this series measures wide rows
+  that never fill a row group. Its runs take well under 5 s, so it gets a
+  memory verdict only.
+- **VCF, records** (`duckhts_bcf_convert_parquet_sql`): the GIAB HG002 v4.2.1
+  phased benchmark VCF on GRCh38 (`geno_giab_phased_source`, indexed by
+  `geno_giab_phased_source_tbi`), one sample on chr1 to chr22. The 1× and 2×
+  regions list the chromosomes in header order up to the record at the 25%
+  and 50% rank; the 4× region lists all of them.
+- **VCF, samples**: the 1000 Genomes phase 3 chr22 cut of the SQL scaling
+  audit (`sql_scaling_phase3_1x`, biallelic SNVs of 2,504 samples). Its records
+  are fixed. `columns :=` keeps the record columns and the GT columns of the
+  first 626, 1,252 and 2,504 samples in header order. In the builders' layout
+  every sample is one column, so the samples set the width of a row.
+- **GFF** (`duckhts_gff_convert_parquet_sql`): the GENCODE v49 basic
+  annotation (`gencode_v49_basic_gff3`). The 1× input is the file itself; the
+  2× and 4× inputs are two and four copies of it, concatenated at render time.
+  Each copy is a whole gzip member, and the reader decompresses the members in
+  sequence.
+
+The cuts, the concatenated copies and the input denominators (rows and
+decoded bytes) are computed at render time, untimed. Those passes read every
+input in full, so every measured run reads from a warm page cache.
+
+## Observations
+
+Every observation is one fresh DuckDB CLI process under `/usr/bin/time`, which
+gives the peak RSS. The JSON profiler gives the latency of the COPY statement,
+its CPU time, the time of the reader and of the COPY operator, and DuckDB's
+peak buffer and temporary bytes. `max_temp_directory_size` is zero, so a spill
+fails the render; the memory limit is DuckDB's default, which the report
+records. Each run writes its output into a temporary directory and deletes it
+once its size, rows, row groups and DuckHTS metadata are read. The render
+stops if less than 10 GiB is free on that file system before a run. Each cell
+has three repetitions at one thread and at four threads, run in an order that
+alternates sizes. The render command pins the processes to four cores and
+runs them at scheduling priority −15. The builder query that returns the
+statement is run before each observation and is not timed; it reads only the
+header.
+
+## Budget, declared before measuring
+
+The overhead is the median peak RSS of three empty runs that start the CLI,
+load the extension and run no COPY.
+
+The ceiling of each observation is overhead + 3 × the live state below, and it
+is a gate: the render stops if any observation exceeds its ceiling or spills.
+The live state follows the reader contracts and the Parquet writer of DuckDB
+v1.5.1 (`7dbb2e646f`, the CLI used here):
+
+- **One writer.** The generated COPY keeps insertion order, and DuckHTS's
+  table functions, registered through the C API, report no batch index:
+  `src/execution/operator/scan/physical_table_scan.cpp:255` needs
+  `get_partition_data`, which `src/main/capi/table_function-c.cpp` never sets.
+  `ParquetWriteExecutionMode` then picks `REGULAR_COPY_TO_FILE`
+  (`extension/parquet/parquet_extension.cpp:661-668`), whose sink is not
+  parallel
+  (`src/include/duckdb/execution/operator/persistent/physical_copy_to_file.hpp:88-89`).
+  One thread scans and buffers, whatever the `threads` setting.
+- **The row group.** The sink buffers decoded rows until it holds
+  `row_group_size` rows, 100,000 by default in the builders, and checks this
+  after each chunk of 2,048 rows (`parquet_extension.cpp:371-390`). A byte limit
+  applies only when `ROW_GROUP_SIZE_BYTES` is given, and DuckDB refuses that
+  option while insertion order is kept (`parquet_extension.cpp:333-337`). So a
+  row group holds R = min(rows, 102,047) rows of w bytes. w is the decoded
+  width of a row in DuckDB's vector layout: 16 bytes for each string plus its
+  bytes beyond 12, 16 bytes for each list plus its elements, and the fixed
+  width of every other value. Validity bits, under 1%, are left out. w is
+  counted from each input before measuring.
+- **Its encoded pages.** Each page is compressed into a buffer of ZSTD's bound
+  of its plain-encoded size (`extension/parquet/column_writer.cpp:156-163`), and
+  the writer keeps all of them until the row group is written
+  (`extension/parquet/parquet_writer.cpp:512-599` and `637-690`). Plain encoding
+  is never larger than the decoded layout for these column types, so this is
+  at most R × w. The uncompressed buffers of the pages being encoded are freed
+  page by page; the factor of 3 covers them.
+- **Column dictionaries.** The state of each leaf column holds a dictionary of
+  NextPowerOfTwo(2 × ⌊R/5⌋) slots of at most 24 bytes and a target buffer of at
+  most 1 MiB until the row group is written
+  (`extension/parquet/include/writer/templated_column_writer.hpp:66-75`,
+  `src/include/duckdb/common/primitive_dictionary.hpp:37-62`): at most 2.5 MiB
+  per column when R is 102,047.
+- **The reader.** One output chunk of 2,048 rows, 2,048 × w bytes, and the
+  state of htslib 1.24 (`third_party/htslib`):
+  - for a CRAM read with the builders' default of two decompression threads,
+    htslib shares one copy of the reference between the threads and loads the
+    whole contig (`cram/cram_io.c:3253` and `5573-5585`): 248,956,422 bytes for
+    chr1. It decodes slices ahead into a queue of twice the threads and reads
+    one slice past it (`cram/cram_decode.c:3517-3523`), so up to 7 slices of at
+    most 10,000 alignments (`cram/cram_structs.h:87`) are held. For each
+    decoded alignment, with its name, bases, qualities and tags, 1 KiB is
+    allowed;
+  - for BAM, VCF and GFF, 8 MiB is allowed for the file buffers (64 KiB BGZF or
+    gzip blocks, and at most twice the threads in queued decompression jobs:
+    `bgzf.c:1756-1758`), the header and one record.
+
+That is 2 × R × w + leaf columns × the dictionary + 2,048 × w + the htslib
+state.
+
+The render also stops if any output's row count differs from its input's or
+lacks the DuckHTS reader metadata. For every series whose 1× run takes at
+least 5 s on one thread, which is the least that `STYLE.md` accepts for a
+timing verdict, it stops if a time exponent is above 1.25 at either doubling.
+A series under 5 s gets the memory verdict alone.
+
+``` sh
+nice -n -15 taskset -c 16-19 Rscript -e 'rmarkdown::render("benchmarks/benchmark_convert_parquet_scaling.Rmd")'
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r benchmark, echo=FALSE, message=FALSE}
+stopifnot(requireNamespace("duckhtsbench", quietly = TRUE),
+          requireNamespace("jsonlite", quietly = TRUE),
+          requireNamespace("knitr", quietly = TRUE))
+Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath(
+  "r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+extension <- normalizePath(Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension"),
+                           mustWork = TRUE)
+duckdb_cli <- Sys.getenv("DUCKDB_CLI", Sys.which("duckdb"))
+stopifnot(nzchar(duckdb_cli), file.exists("/usr/bin/time"))
+duckdb_runtime <- system2(duckdb_cli, "--version", stdout = TRUE)[[1L]]
+revision <- system2("git", c("rev-parse", "HEAD"), stdout = TRUE)
+src_tree <- system2("git", c("rev-parse", "HEAD:src"), stdout = TRUE)
+if (system2("git", c("diff", "--quiet", "HEAD", "--", "src"), stdout = FALSE, stderr = FALSE) != 0L) {
+  stop("Build source must match the recorded HEAD")
+}
+host_load <- sub(".*load average: ", "", system2("uptime", stdout = TRUE))
+quote_literal <- function(value) paste0("'", gsub("'", "''", value, fixed = TRUE), "'")
+quote_ident <- function(value) paste0('"', gsub('"', '""', value, fixed = TRUE), '"')
+
+# One untimed statement in its own CLI process; its rows come back as a data frame.
+query_untimed <- function(sql) {
+  output <- system2(duckdb_cli, c("-unsigned", "-csv", "-bail"),
+                    input = c(sprintf("LOAD %s;", quote_literal(extension)), sql), stdout = TRUE)
+  status <- attr(output, "status")
+  if (!is.null(status) && status != 0L) stop("untimed query failed (status ", status, ")", call. = FALSE)
+  utils::read.csv(text = output, stringsAsFactors = FALSE, check.names = FALSE)
+}
+memory_limit <- query_untimed("SELECT current_setting('memory_limit') AS memory_limit;")$memory_limit
+
+# The temporary file system takes every output and the concatenated copies.
+disk_floor_bytes <- 10 * 2^30
+free_bytes <- function(path) {
+  report <- system2("df", c("-Pk", shQuote(path)), stdout = TRUE)
+  1024 * as.numeric(strsplit(trimws(report[[length(report)]]), "[[:space:]]+")[[1L]][[4L]])
+}
+check_free_space <- function() {
+  if (free_bytes(tempdir()) < disk_floor_bytes) {
+    stop("less than 10 GiB free on the temporary file system", call. = FALSE)
+  }
+}
+check_free_space()
+
+# Registry inputs, each checked against the identity the registry records.
+artifact <- function(id) {
+  path <- duckhtsbench::duckhts_bench_artifact_path(id)
+  if (!file.exists(path)) stop("registry artifact ", id, " is not staged: ", path, call. = FALSE)
+  duckhtsbench::duckhts_bench_validate_identity(id, path)
+  path
+}
+registered <- function(id) {
+  registry <- duckhtsbench::duckhts_bench_registry()
+  duckhtsbench:::duckhts_bench_identity_fields(registry$supplier_identity[match(id, registry$id)])
+}
+cram <- artifact("bam_mismatch_hg00403_chr1_cram")
+reference <- artifact("liftover_grch38_fasta")
+ont_bam <- artifact("ont_ecoli_k12_bam")
+giab_vcf <- artifact("geno_giab_phased_source")
+stopifnot(identical(artifact("geno_giab_phased_source_tbi"), paste0(giab_vcf, ".tbi")))
+phase3_vcf <- artifact("sql_scaling_phase3_1x")
+gencode_gff <- artifact("gencode_v49_basic_gff3")
+# The ONT alignment registers no checksum; its digest identifies the file read here.
+ont_sha256 <- strsplit(system2("sha256sum", shQuote(ont_bam), stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]
+
+# CRAM: the registered content identity and the start-position quantiles, in one pass.
+cram_fields <- registered("bam_mismatch_hg00403_chr1_cram")
+cram_scan <- query_untimed(sprintf(paste(
+  "SELECT count(*) AS alignments, sum(POS)::BIGINT AS position_sum, sum(len(SEQ))::BIGINT AS base_sum,",
+  "quantile_disc(POS, 0.125) AS q1, quantile_disc(POS, 0.25) AS q2, quantile_disc(POS, 0.5) AS q4",
+  "FROM read_bam(%s, reference := %s);"), quote_literal(cram), quote_literal(reference)))
+stopifnot(cram_scan$alignments == as.numeric(cram_fields[["alignments"]]),
+          cram_scan$position_sum == as.numeric(cram_fields[["position_sum"]]),
+          cram_scan$base_sum == as.numeric(cram_fields[["base_sum"]]),
+          cram_scan$base_sum == 150 * cram_scan$alignments)
+cram_regions <- sprintf("chr1:1-%s", format(c(cram_scan$q1, cram_scan$q2, cram_scan$q4), scientific = FALSE, trim = TRUE))
+# htslib loads the whole contig named by the regions, and holds up to seven slices.
+reference_index <- utils::read.delim(paste0(reference, ".fai"), header = FALSE)
+chr1_length <- reference_index[[2L]][reference_index[[1L]] == "chr1"]
+cram_slices <- length(readLines(gzfile(paste0(cram, ".crai"))))
+stopifnot(length(chr1_length) == 1L, cram_scan$alignments / cram_slices <= 10000)
+cram_htslib_bytes <- chr1_length + 7 * 10000 * 1024
+other_htslib_bytes <- 8 * 2^20
+
+# ONT: one contig; quantiles of the mapped start positions.
+ont_contig <- query_untimed(sprintf(
+  "SELECT id, length FROM read_hts_header(%s) WHERE record_type = 'SQ' ORDER BY idx;", quote_literal(ont_bam)))
+stopifnot(nrow(ont_contig) == 1L)
+ont_scan <- query_untimed(sprintf(paste(
+  "SELECT (SELECT count(*) FROM read_bam(%s)) AS reads, count(*) AS mapped,",
+  "quantile_disc(POS, 0.25) AS q1, quantile_disc(POS, 0.5) AS q2 FROM read_bam(%s) WHERE RNAME = %s;"),
+  quote_literal(ont_bam), quote_literal(ont_bam), quote_literal(ont_contig$id)))
+ont_regions <- sprintf("%s:1-%s", ont_contig$id,
+                       format(c(ont_scan$q1, ont_scan$q2, ont_contig$length), scientific = FALSE, trim = TRUE))
+
+# GIAB: the records at the 25% and 50% rank in header order of contig, then position.
+giab_contigs <- query_untimed(sprintf(paste(
+  "WITH contigs AS (SELECT id AS chrom, idx FROM read_hts_header(%s) WHERE record_type = 'contig')",
+  "SELECT c.chrom, c.idx, count(*) AS records FROM read_bcf(%s) r JOIN contigs c ON c.chrom = r.CHROM",
+  "GROUP BY c.chrom, c.idx ORDER BY c.idx;"), quote_literal(giab_vcf), quote_literal(giab_vcf)))
+giab_cuts <- query_untimed(sprintf(paste(
+  "WITH contigs AS (SELECT id AS chrom, idx FROM read_hts_header(%s) WHERE record_type = 'contig'),",
+  "ranked AS (SELECT c.idx, r.CHROM AS chrom, r.POS AS pos,",
+  "row_number() OVER (ORDER BY c.idx, r.POS) AS k, count(*) OVER () AS n",
+  "FROM read_bcf(%s) r JOIN contigs c ON c.chrom = r.CHROM)",
+  "SELECT k, n, idx, chrom, pos FROM ranked WHERE k IN ((n + 3) // 4, (n + 1) // 2) ORDER BY k;"),
+  quote_literal(giab_vcf), quote_literal(giab_vcf)))
+stopifnot(nrow(giab_cuts) == 2L, giab_cuts$n[[1L]] == sum(giab_contigs$records),
+          identical(giab_contigs$chrom, paste0("chr", 1:22)))
+giab_region <- function(cut) {
+  whole <- giab_contigs$chrom[giab_contigs$idx < cut$idx]
+  paste(c(whole, sprintf("%s:1-%s", cut$chrom, format(cut$pos, scientific = FALSE, trim = TRUE))), collapse = ",")
+}
+giab_regions <- c(giab_region(giab_cuts[1L, ]), giab_region(giab_cuts[2L, ]),
+                  paste(giab_contigs$chrom, collapse = ","))
+
+# Phase 3: the record columns and the GT columns of the first samples in header order.
+phase3_columns <- query_untimed(sprintf(
+  "SELECT column_name FROM (DESCRIBE SELECT * FROM read_bcf(%s));", quote_literal(phase3_vcf)))$column_name
+sample_columns <- phase3_columns[startsWith(phase3_columns, "FORMAT_")]
+record_columns <- phase3_columns[!startsWith(phase3_columns, "FORMAT_")]
+stopifnot(length(sample_columns) == 2504L, all(startsWith(sample_columns, "FORMAT_GT_")))
+sample_counts <- c(626L, 1252L, 2504L)
+columns_argument <- function(samples) {
+  sprintf("columns := [%s]", paste(quote_literal(c(record_columns, sample_columns[seq_len(samples)])), collapse = ", "))
+}
+
+# GFF: the file itself, and two and four copies of it as consecutive gzip members.
+staging <- tempfile("convert-parquet-inputs-")
+dir.create(staging)
+gff_copies <- c(1L, 2L, 4L)
+gff_paths <- vapply(gff_copies, function(copies) {
+  if (copies == 1L) return(gencode_gff)
+  path <- file.path(staging, sprintf("gencode.v49.basic.annotation.%dcopies.gff3.gz", copies))
+  stopifnot(file.copy(gencode_gff, path))
+  for (copy in seq_len(copies - 1L)) stopifnot(file.append(path, gencode_gff))
+  stopifnot(file.size(path) == copies * file.size(gencode_gff))
+  path
+}, character(1L))
+
+cells <- rbind(
+  data.frame(series = "bam_short_reads", macro = "duckhts_bam_convert_parquet_sql", scale = c(1L, 2L, 4L),
+             path = cram, input = cram_regions, samples = NA_integer_, htslib_bytes = cram_htslib_bytes,
+             arguments = sprintf("region := %s, reference := %s", quote_literal(cram_regions), quote_literal(reference)),
+             stringsAsFactors = FALSE),
+  data.frame(series = "bam_long_reads", macro = "duckhts_bam_convert_parquet_sql", scale = c(1L, 2L, 4L),
+             path = ont_bam, input = ont_regions, samples = NA_integer_, htslib_bytes = other_htslib_bytes,
+             arguments = sprintf("region := %s", quote_literal(ont_regions)), stringsAsFactors = FALSE),
+  data.frame(series = "vcf_records", macro = "duckhts_bcf_convert_parquet_sql", scale = c(1L, 2L, 4L),
+             path = giab_vcf, input = giab_regions, samples = 1L, htslib_bytes = other_htslib_bytes,
+             arguments = sprintf("region := %s", quote_literal(giab_regions)), stringsAsFactors = FALSE),
+  data.frame(series = "vcf_samples", macro = "duckhts_bcf_convert_parquet_sql", scale = c(1L, 2L, 4L),
+             path = phase3_vcf, input = sprintf("%s samples", format(sample_counts, big.mark = ",")),
+             samples = sample_counts, htslib_bytes = other_htslib_bytes,
+             arguments = vapply(sample_counts, columns_argument, character(1L)), stringsAsFactors = FALSE),
+  data.frame(series = "gff_records", macro = "duckhts_gff_convert_parquet_sql", scale = c(1L, 2L, 4L),
+             path = gff_paths, input = sprintf("%d %s", gff_copies, ifelse(gff_copies == 1L, "copy", "copies")),
+             samples = NA_integer_, htslib_bytes = other_htslib_bytes, arguments = "", stringsAsFactors = FALSE))
+
+# The COPY statement the builder returns for one cell and output path.
+build_copy_sql <- function(cell, output) {
+  call <- sprintf("SELECT %s(%s, %s%s);", cell$macro, quote_literal(cell$path), quote_literal(output),
+                  if (nzchar(cell$arguments)) paste0(", ", cell$arguments) else "")
+  statement <- system2(duckdb_cli, c("-unsigned", "-list", "-noheader", "-bail"),
+                       input = c(sprintf("LOAD %s;", quote_literal(extension)), call), stdout = TRUE)
+  stopifnot(is.null(attr(statement, "status")), length(statement) == 1L, startsWith(statement, "COPY ("))
+  statement
+}
+# The SELECT inside a generated COPY statement: what the measured run reads.
+copy_select <- function(statement, output) {
+  parts <- strsplit(statement, paste0(") TO ", quote_literal(output), " ("), fixed = TRUE)[[1L]]
+  stopifnot(length(parts) == 2L)
+  substring(parts[[1L]], nchar("COPY (") + 1L)
+}
+
+# Decoded width in DuckDB's vector layout: fixed widths, 16 bytes per string
+# or list, string bytes beyond the 12 that are stored inline, list elements.
+fixed_width <- c(BOOLEAN = 1, TINYINT = 1, UTINYINT = 1, SMALLINT = 2, USMALLINT = 2, INTEGER = 4,
+                 UINTEGER = 4, FLOAT = 4, BIGINT = 8, UBIGINT = 8, DOUBLE = 8)
+heap_bytes_sql <- function(value) sprintf("CASE WHEN strlen(%s) > 12 THEN strlen(%s) ELSE 0 END", value, value)
+variable_bytes_sql <- function(column, type) {
+  if (type == "VARCHAR") return(heap_bytes_sql(column))
+  if (type == "VARCHAR[]") {
+    return(sprintf("coalesce(len(%s), 0) * 16 + coalesce(list_sum(list_transform(%s, lambda x: %s)), 0)",
+                   column, column, heap_bytes_sql("x")))
+  }
+  element <- sub("[]", "", type, fixed = TRUE)
+  if (endsWith(type, "[]") && element %in% names(fixed_width)) {
+    return(sprintf("coalesce(len(%s), 0) * %d", column, fixed_width[[element]]))
+  }
+  stop("no decoded width for column type ", type, call. = FALSE)
+}
+# Rows and decoded bytes of the SELECT that a cell's COPY reads. The COPY is
+# not run here; the output path only completes the builder call.
+count_input <- function(cell) {
+  output <- file.path(staging, "denominator.parquet")
+  select_sql <- copy_select(build_copy_sql(cell, output), output)
+  schema <- query_untimed(sprintf("SELECT column_name, column_type FROM (DESCRIBE %s);", select_sql))
+  fixed <- schema$column_type %in% names(fixed_width)
+  variable <- schema[!fixed, , drop = FALSE]
+  sums <- vapply(seq_len(nrow(variable)), function(i) {
+    sprintf("sum(%s)::BIGINT AS v%d", variable_bytes_sql(quote_ident(variable$column_name[[i]]),
+                                                         variable$column_type[[i]]), i)
+  }, character(1L))
+  counted <- query_untimed(sprintf("SELECT count(*) AS rows, %s FROM (%s);", paste(sums, collapse = ", "), select_sql))
+  row_bytes <- sum(fixed_width[schema$column_type[fixed]]) + 16 * nrow(variable)
+  data.frame(rows = counted$rows, decoded_bytes = counted$rows * row_bytes + sum(unlist(counted[-1L])),
+             leaf_columns = nrow(schema))
+}
+cells <- cbind(cells, do.call(rbind, lapply(seq_len(nrow(cells)), function(k) count_input(cells[k, ]))))
+phase3_records <- unique(cells$rows[cells$series == "vcf_samples"])
+stopifnot(length(phase3_records) == 1L, phase3_records == as.numeric(registered("sql_scaling_phase3_1x")[["records"]]),
+          all(cells$rows[cells$series == "gff_records"] == gff_copies * cells$rows[cells$series == "gff_records"][[1L]]))
+
+# One empty run: start the CLI, load the extension, run no COPY. Returns the
+# peak RSS in KiB.
+run_empty <- function() {
+  scratch <- tempfile("convert-parquet-empty-")
+  dir.create(scratch)
+  on.exit(unlink(scratch, recursive = TRUE), add = TRUE)
+  sql_path <- file.path(scratch, "query.sql")
+  time_path <- file.path(scratch, "time.tsv")
+  writeLines(c("SET threads = 1;", "SET max_temp_directory_size = '0KiB';",
+               sprintf("LOAD %s;", quote_literal(extension)), "SELECT 1;"), sql_path)
+  status <- system2("/usr/bin/time", c("-f", shQuote("%M"), "-o", shQuote(time_path),
+                                       shQuote(duckdb_cli), "-unsigned", "-batch", "-bail"),
+                    stdin = sql_path, stdout = FALSE, stderr = FALSE)
+  if (status != 0L) stop("DuckDB CLI failed (status ", status, ")")
+  as.numeric(readLines(time_path)[[1L]])
+}
+# The operators of a JSON profile tree, one row each.
+profile_operators <- function(node) {
+  own <- if (is.null(node$operator_type)) NULL else
+    data.frame(type = node$operator_type, name = node$operator_name, seconds = node$operator_timing,
+               stringsAsFactors = FALSE)
+  do.call(rbind, c(list(own), lapply(node$children, profile_operators)))
+}
+# Run one generated COPY in a fresh CLI process with the given threads and
+# spill forbidden. The output is read, untimed, and deleted with its directory.
+run_copy <- function(cell, threads) {
+  scratch <- tempfile("convert-parquet-run-")
+  dir.create(scratch)
+  on.exit(unlink(scratch, recursive = TRUE), add = TRUE)
+  output <- file.path(scratch, "output.parquet")
+  sql_path <- file.path(scratch, "query.sql")
+  profile_path <- file.path(scratch, "profile.json")
+  time_path <- file.path(scratch, "time.tsv")
+  statement <- build_copy_sql(cell, output)
+  writeLines(c(
+    sprintf("SET threads = %d;", threads),
+    "SET max_temp_directory_size = '0KiB';",
+    sprintf("LOAD %s;", quote_literal(extension)),
+    "PRAGMA enable_profiling = 'json';",
+    sprintf("PRAGMA profiling_output = %s;", quote_literal(profile_path)),
+    paste0(statement, ";"),
+    "PRAGMA disable_profiling;"
+  ), sql_path)
+  check_free_space()
+  status <- system2("/usr/bin/time", c("-f", shQuote("%M\t%e"), "-o", shQuote(time_path),
+                                       shQuote(duckdb_cli), "-unsigned", "-batch", "-bail"),
+                    stdin = sql_path, stdout = FALSE, stderr = FALSE)
+  if (status != 0L) stop("DuckDB CLI failed (status ", status, ") for ", cell$series, " ", cell$scale, "x")
+  profile <- jsonlite::fromJSON(profile_path, simplifyVector = FALSE)
+  operators <- profile_operators(profile)
+  copy_operator <- operators[operators$type %in% c("COPY_TO_FILE", "BATCH_COPY_TO_FILE"), ]
+  scan_operator <- operators[operators$type == "TABLE_SCAN", ]
+  stopifnot(nrow(copy_operator) == 1L, nrow(scan_operator) == 1L)
+  timing <- utils::read.delim(time_path, header = FALSE, col.names = c("max_rss_kib", "process_seconds"))
+  written <- query_untimed(sprintf(paste(
+    "SELECT m.num_rows AS output_rows, m.num_row_groups AS row_groups,",
+    "(SELECT count(*) FROM parquet_kv_metadata(%s) WHERE decode(key) = 'duckhts_reader') AS reader_metadata",
+    "FROM parquet_file_metadata(%s) m;"), quote_literal(output), quote_literal(output)))
+  data.frame(seconds = as.numeric(profile$latency), cpu_seconds = as.numeric(profile$cpu_time),
+             scan_seconds = scan_operator$seconds, copy_seconds = copy_operator$seconds,
+             copy_operator = copy_operator$name, max_rss_kib = timing$max_rss_kib[[1L]],
+             peak_buffer_bytes = as.numeric(profile$system_peak_buffer_memory),
+             peak_temp_bytes = as.numeric(profile$system_peak_temp_dir_size),
+             output_bytes = file.size(output), written, stringsAsFactors = FALSE)
+}
+
+empty_runs <- vapply(seq_len(3L), function(run) run_empty(), numeric(1L))
+overhead_mib <- median(empty_runs) / 1024
+# Ceilings in MiB: overhead + 3 x the live state declared above.
+row_group_size <- 100000
+vector_size <- 2048
+cells$width <- cells$decoded_bytes / cells$rows
+cells$row_group_rows <- pmin(cells$rows, row_group_size + vector_size - 1)
+dictionary_bytes <- function(rows) 2^ceiling(log2(pmax(2 * floor(rows / 5), 1))) * 24 + 2^20
+cells$live_state_bytes <- 2 * cells$row_group_rows * cells$width +
+  cells$leaf_columns * dictionary_bytes(cells$row_group_rows) + vector_size * cells$width + cells$htslib_bytes
+cells$budget_mib <- overhead_mib + 3 * cells$live_state_bytes / 2^20
+
+series_names <- unique(cells$series)
+observations <- list()
+for (repetition in 1:3) {
+  order <- if (repetition %% 2L == 1L) c(1L, 2L, 4L) else c(4L, 2L, 1L)
+  for (threads in c(1L, 4L)) {
+    for (series in series_names) {
+      for (scale in order) {
+        cell <- cells[cells$series == series & cells$scale == scale, ]
+        observed <- run_copy(cell, threads)
+        observations[[length(observations) + 1L]] <- data.frame(
+          series = series, scale = scale, threads = threads, repetition = repetition,
+          rows = cell$rows, samples = cell$samples, decoded_bytes = cell$decoded_bytes,
+          budget_mib = cell$budget_mib, observed, stringsAsFactors = FALSE)
+      }
+    }
+  }
+}
+runs <- do.call(rbind, observations)
+unlink(staging, recursive = TRUE)
+write.csv(runs, "benchmarks/benchmark_convert_parquet_scaling_runs.csv", row.names = FALSE)
+stopifnot(all(runs$peak_temp_bytes == 0), all(runs$output_rows == runs$rows), all(runs$reader_metadata == 1))
+over_budget <- runs[runs$max_rss_kib / 1024 > runs$budget_mib, ]
+if (nrow(over_budget)) {
+  print(over_budget[c("series", "scale", "threads", "repetition", "max_rss_kib", "budget_mib")])
+  stop("observations exceed their declared memory budget", call. = FALSE)
+}
+
+groups <- split(runs, list(runs$series, runs$scale, runs$threads), drop = TRUE)
+summary <- do.call(rbind, lapply(groups, function(cell) {
+  stopifnot(length(unique(cell$output_rows)) == 1L, length(unique(cell$row_groups)) == 1L)
+  data.frame(series = cell$series[[1L]], scale = cell$scale[[1L]], threads = cell$threads[[1L]],
+             rows = cell$rows[[1L]], row_groups = cell$row_groups[[1L]],
+             output_mib = round(median(cell$output_bytes) / 2^20, 1),
+             median_seconds = median(cell$seconds), min_seconds = min(cell$seconds), max_seconds = max(cell$seconds),
+             scan_share = round(median(cell$scan_seconds / cell$seconds), 2),
+             cpu_per_second = round(median(cell$cpu_seconds / cell$seconds), 2),
+             median_rss_mib = round(median(cell$max_rss_kib) / 1024, 1),
+             max_rss_mib = round(max(cell$max_rss_kib) / 1024, 1),
+             max_buffer_mib = round(max(cell$peak_buffer_bytes) / 2^20, 1),
+             budget_mib = round(cell$budget_mib[[1L]], 1), stringsAsFactors = FALSE)
+}))
+summary <- summary[order(match(summary$series, series_names), summary$threads, summary$scale), ]
+rownames(summary) <- NULL
+
+# Growth of the median time against the dimension the series doubles: the
+# input rows, or the samples of the samples series. An exponent of 1 is linear.
+exponents <- do.call(rbind, lapply(split(summary, list(summary$series, summary$threads), drop = TRUE), function(s) {
+  s <- s[order(s$scale), ]
+  dimension <- if (s$series[[1L]] == "vcf_samples") sample_counts else s$rows
+  growth <- function(low, high) log(s$median_seconds[[high]] / s$median_seconds[[low]]) / log(dimension[[high]] / dimension[[low]])
+  data.frame(series = s$series[[1L]], threads = s$threads[[1L]], one_x_seconds = s$median_seconds[[1L]],
+             ratio_2x = dimension[[2L]] / dimension[[1L]], ratio_4x = dimension[[3L]] / dimension[[2L]],
+             time_exponent_2x = growth(1L, 2L), time_exponent_4x = growth(2L, 3L),
+             rss_ratio_2x = s$median_rss_mib[[2L]] / s$median_rss_mib[[1L]],
+             rss_ratio_4x = s$median_rss_mib[[3L]] / s$median_rss_mib[[1L]], stringsAsFactors = FALSE)
+}))
+exponents <- exponents[order(match(exponents$series, series_names), exponents$threads), ]
+rownames(exponents) <- NULL
+one_thread_one_x <- exponents[exponents$threads == 1L, c("series", "one_x_seconds")]
+timed_series <- one_thread_one_x$series[one_thread_one_x$one_x_seconds >= 5]
+timed <- exponents[exponents$series %in% timed_series, ]
+if (any(timed$time_exponent_2x > 1.25 | timed$time_exponent_4x > 1.25)) {
+  print(timed)
+  stop("a time exponent is above 1.25", call. = FALSE)
+}
+```
+
+Source revision: `r revision`; `src` tree `r src_tree`. DuckDB runtime: `r duckdb_runtime` (CLI). Extension SHA-256: `r strsplit(system2("sha256sum", extension, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`. Host load at start: `r host_load`. DuckDB memory limit: `r memory_limit` (the default); temporary directory limit: 0. Every observation is in [`benchmark_convert_parquet_scaling_runs.csv`](benchmark_convert_parquet_scaling_runs.csv).
+
+Overhead: `r round(overhead_mib, 1)` MiB.
+
+## Inputs
+
+The CRAM slice has `r format(cram_scan$alignments, big.mark = ",")` alignments in `r format(cram_slices, big.mark = ",")` slices; the ONT file has `r format(ont_scan$reads, big.mark = ",")` reads, `r format(ont_scan$mapped, big.mark = ",")` of them mapped, and SHA-256 `r ont_sha256`. `rows` are the rows each builder's SELECT returns, counted untimed; `decoded_mib` and `bytes_per_row` are their decoded size; `row_group_rows` is R, `leaf_columns` the columns of the output, and `live_state_mib` and `budget_mib` follow from the model above.
+
+```{r inputs, echo=FALSE}
+inputs <- cells[c("series", "scale", "input", "rows", "leaf_columns")]
+inputs$decoded_mib <- round(cells$decoded_bytes / 2^20, 1)
+inputs$bytes_per_row <- round(cells$width, 1)
+inputs$row_group_rows <- cells$row_group_rows
+inputs$live_state_mib <- round(cells$live_state_bytes / 2^20, 1)
+inputs$budget_mib <- round(cells$budget_mib, 1)
+knitr::kable(inputs, format.args = list(big.mark = ","))
+```
+
+## Measurements
+
+`seconds` are the latency of the COPY statement over three repetitions. `scan_share` is the share of it spent in the reader, the rest being the Parquet writer. `cpu_per_second` is DuckDB's CPU time per second of latency; htslib's decompression threads are not in it. `row_groups` and `output_mib` describe the Parquet file.
+
+```{r summary, echo=FALSE}
+knitr::kable(summary, digits = 3, format.args = list(big.mark = ","))
+```
+
+Growth of the median time against the input rows, or against the samples of the `vcf_samples` series (an exponent of 1 is linear), the size ratio at each doubling, and peak-RSS ratios to 1×:
+
+```{r exponents, echo=FALSE}
+knitr::kable(exponents, digits = 3)
+```
+
+## Findings
+
+```{r findings, echo=FALSE, results="asis"}
+cell_of <- function(series, scale, threads = 1L) {
+  found <- summary[summary$series == series & summary$scale == scale & summary$threads == threads, ]
+  stopifnot(nrow(found) == 1L)
+  found
+}
+one_writer <- all(runs$copy_operator == "COPY_TO_FILE")
+stopifnot(one_writer)
+thread_ratio <- merge(summary[summary$threads == 1L, c("series", "scale", "median_seconds")],
+                      summary[summary$threads == 4L, c("series", "scale", "median_seconds")],
+                      by = c("series", "scale"), suffixes = c("_one", "_four"))
+thread_ratio <- thread_ratio$median_seconds_four / thread_ratio$median_seconds_one
+records_series <- c("bam_short_reads", "vcf_records", "gff_records")
+flat <- exponents[exponents$series %in% records_series & exponents$threads == 1L, ]
+samples_low <- cell_of("vcf_samples", 1L)
+samples_high <- cell_of("vcf_samples", 4L)
+mib_per_sample <- (samples_high$median_rss_mib - samples_low$median_rss_mib) / (sample_counts[[3L]] - sample_counts[[1L]])
+untimed <- setdiff(series_names, timed_series)
+cat(sprintf(paste(
+  "Every observation is within its ceiling, none spills, and every output has its input's rows and the",
+  "DuckHTS reader metadata; the render enforces all of this. Every COPY ran as one `COPY_TO_FILE`",
+  "operator, the writer that keeps insertion order without batch indexes. DuckDB's CPU time is at most",
+  "%.2f s per second of latency in any run, and four threads change the median time of a cell by a factor",
+  "of %.2f to %.2f, so one DuckDB thread does the work whatever the setting.\n\n"),
+  max(runs$cpu_seconds / runs$seconds), min(thread_ratio), max(thread_ratio)))
+cat(sprintf(paste(
+  "In the three records series the writer flushes a row group at 100,000 rows, so the model gives the",
+  "same live state at every size. On one thread the peak RSS at 4× is %s times the 1× peak for the",
+  "CRAM, %s for the VCF and %s for the GFF. The time exponents of the series with a timing verdict",
+  "(%s) are at most %.2f.%s\n\n"),
+  format(round(flat$rss_ratio_4x[flat$series == "bam_short_reads"], 2), nsmall = 2),
+  format(round(flat$rss_ratio_4x[flat$series == "vcf_records"], 2), nsmall = 2),
+  format(round(flat$rss_ratio_4x[flat$series == "gff_records"], 2), nsmall = 2),
+  paste(sprintf("`%s`", timed_series), collapse = ", "),
+  max(c(timed$time_exponent_2x, timed$time_exponent_4x)),
+  if (length(untimed)) sprintf(" %s %s less than 5 s at 1× and %s no timing verdict.",
+                               paste(sprintf("`%s`", untimed), collapse = ", "),
+                               if (length(untimed) == 1L) "takes" else "take",
+                               if (length(untimed) == 1L) "gets" else "get") else ""))
+short4 <- cell_of("bam_short_reads", 4L)
+vcf4 <- cell_of("vcf_records", 4L)
+gff4 <- cell_of("gff_records", 4L)
+cat(sprintf(paste(
+  "On one thread, %s CRAM alignments convert in %.1f s (%s alignments per second, %.0f%% of the time in",
+  "the reader) at %s MiB peak RSS; the model attributes %s MiB of that to the chr1 reference, which",
+  "htslib loads whole for its decompression threads. %s VCF records take %.1f s (%.0f%% in the reader)",
+  "at %s MiB, and %s GFF features %.1f s (%.0f%% in the reader) at %s MiB.\n\n"),
+  format(short4$rows, big.mark = ","), short4$median_seconds,
+  format(round(short4$rows / short4$median_seconds), big.mark = ","), 100 * short4$scan_share,
+  short4$median_rss_mib, round(chr1_length / 2^20),
+  format(vcf4$rows, big.mark = ","), vcf4$median_seconds, 100 * vcf4$scan_share, vcf4$median_rss_mib,
+  format(gff4$rows, big.mark = ","), gff4$median_seconds, 100 * gff4$scan_share, gff4$median_rss_mib))
+long1 <- cell_of("bam_long_reads", 1L)
+long4 <- cell_of("bam_long_reads", 4L)
+stopifnot(long4$row_groups == 1L)
+cat(sprintf(paste(
+  "Memory grows with the width of a row. In the builders' layout each sample of a VCF is one column,",
+  "and a row group holds the genotypes of every sample for its records: on one thread %s samples take",
+  "%s MiB peak RSS and %s samples %s MiB, about %.1f MiB per sample, for an input file of %s MiB and an",
+  "output of %s MiB. Long reads make wide rows too: at 4× the ONT reads make one row group of %s rows,",
+  "and the peak RSS is %s MiB, %s times the 1× peak.\n\n"),
+  format(sample_counts[[1L]], big.mark = ","), samples_low$median_rss_mib,
+  format(sample_counts[[3L]], big.mark = ","), samples_high$median_rss_mib, mib_per_sample,
+  round(file.size(phase3_vcf) / 2^20, 1), samples_high$output_mib,
+  format(long4$rows, big.mark = ","), long4$median_rss_mib,
+  format(round(long4$median_rss_mib / long1$median_rss_mib, 2), nsmall = 2)))
+cat(sprintf(paste(
+  "The operating scale this report supports is what it measures: %s alignments of one 30× chromosome,",
+  "a whole-genome single-sample VCF of %s records, four copies of a full human annotation (%s features)",
+  "and %s samples of %s records, all with the default row group of 100,000 rows. More samples, wider",
+  "rows or a larger row group need memory in proportion; `row_group_size` is the builders' parameter",
+  "for it, and its effect is not measured here.\n"),
+  format(short4$rows, big.mark = ","), format(vcf4$rows, big.mark = ","), format(gff4$rows, big.mark = ","),
+  format(sample_counts[[3L]], big.mark = ","), format(phase3_records, big.mark = ",")))
+```
