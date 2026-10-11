@@ -1484,6 +1484,38 @@ SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_duplicate_fits'
 ----
 More than one row returned by a subquery
 
+# A NULL sample is a sample: the scalar decode keeps its runs, so the fitted decode
+# must match it with a NULL-sample fit row and must refuse it without one.
+statement ok
+CREATE TEMP TABLE roh_counts_null_sample AS
+SELECT CASE WHEN sample_id = 'S2' THEN NULL ELSE sample_id END AS sample_id,
+       chrom, pos, ref_count, alt_count, af
+FROM roh_counts_clean;
+
+statement ok
+CREATE TEMP TABLE roh_null_sample_fits AS
+SELECT CASE WHEN sample = 'S2' THEN NULL ELSE sample END AS sample, seq_error, contamination
+FROM roh_fits;
+
+query II
+WITH fitted AS (
+  SELECT * FROM duckhts_roh_counts_fitted('roh_counts_null_sample', 'roh_null_sample_fits')),
+scalar AS (
+  SELECT * FROM duckhts_roh_counts('roh_counts_null_sample') WHERE sample = 'S1'
+  UNION ALL
+  SELECT * FROM duckhts_roh_counts('roh_counts_null_sample', seq_error := 0.02,
+                                   contamination := 0.1) WHERE sample IS NULL)
+SELECT (SELECT count(*) FROM fitted WHERE sample IS NULL) > 0, count(*) FROM (
+  (SELECT * FROM fitted EXCEPT ALL SELECT * FROM scalar)
+  UNION ALL (SELECT * FROM scalar EXCEPT ALL SELECT * FROM fitted));
+----
+true	0
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_null_sample', 'roh_fits');
+----
+missing fit row for sample NULL
+
 # Independent transitions (both 0.5) make homozygous sites AZ and balanced sites HW.
 # Lengths 1..9 exercise every two-bit offset and partially filled traceback bytes.
 statement ok

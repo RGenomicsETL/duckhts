@@ -291,21 +291,23 @@ static const char counts_lists[] =
     "FROM __dht_counts GROUP BY smp, chrom)";
 
 /* A scalar subquery admits one fit per sample; DuckDB rejects duplicate rows.
+ * A NULL sample is a sample, as in the scalar decode and the count-error fit,
+ * so both joins are NULL-safe.
  * Materialize the sample lookup, not a fit lookup for every site. The sample
  * set reads the input relation again rather than __dht_counts: a CTE that
  * two branches reference is materialised whole, which held every row of the
  * input in memory. */
 static const char fitted_counts[] =
     ", __dht_fit AS MATERIALIZED (SELECT smp, "
-    "CASE WHEN fit IS NULL THEN error('missing fit row for sample ' || smp) "
-    "WHEN fit.seq_error IS NULL THEN error('NULL seq_error for sample ' || smp) "
+    "CASE WHEN fit IS NULL THEN error('missing fit row for sample ' || coalesce(smp, 'NULL')) "
+    "WHEN fit.seq_error IS NULL THEN error('NULL seq_error for sample ' || coalesce(smp, 'NULL')) "
     "ELSE fit.seq_error END AS seq_error, "
-    "CASE WHEN fit IS NULL THEN error('missing fit row for sample ' || smp) "
-    "WHEN fit.contamination IS NULL THEN error('NULL contamination for sample ' || smp) "
+    "CASE WHEN fit IS NULL THEN error('missing fit row for sample ' || coalesce(smp, 'NULL')) "
+    "WHEN fit.contamination IS NULL THEN error('NULL contamination for sample ' || coalesce(smp, 'NULL')) "
     "ELSE fit.contamination END AS contamination "
     "FROM (SELECT smp, (SELECT struct_pack(seq_error := CAST(f.seq_error AS DOUBLE), "
     "contamination := CAST(f.contamination AS DOUBLE)) FROM query_table(fit_table) AS f "
-    "WHERE CAST(f.sample AS VARCHAR) = samples.smp) AS fit "
+    "WHERE CAST(f.sample AS VARCHAR) IS NOT DISTINCT FROM samples.smp) AS fit "
     "FROM (SELECT DISTINCT CAST(sample_id AS VARCHAR) AS smp FROM query_table(counts_table)) AS samples))";
 
 #define ROH_MAX_PARTS 32
@@ -396,7 +398,7 @@ static bool register_roh_counts_macro(duckhts_registration_t *registration, bool
     parts[count++] = no_map_arguments;
     parts[count++] = decode_end;
     parts[count++] = fitted
-        ? ") AS r FROM __dht_lists AS l JOIN __dht_fit USING (smp)) AS seg"
+        ? ") AS r FROM __dht_lists AS l JOIN __dht_fit AS fit ON fit.smp IS NOT DISTINCT FROM l.smp) AS seg"
         : from_lists;
     parts[count++] = fitted ? fitted_counts_guard : counts_guard;
     parts[count++] = fitted
@@ -410,7 +412,7 @@ static bool register_roh_counts_macro(duckhts_registration_t *registration, bool
     parts[count++] = map_arguments;
     parts[count++] = decode_end;
     parts[count++] = fitted
-        ? ") AS r FROM __dht_lists AS l JOIN __dht_fit USING (smp) "
+        ? ") AS r FROM __dht_lists AS l JOIN __dht_fit AS fit ON fit.smp IS NOT DISTINCT FROM l.smp "
           "JOIN __dht_map AS m ON m.m_chrom = l.chrom) AS seg"
         : from_lists_with_map;
     parts[count++] = fitted ? fitted_counts_guard : counts_guard;
