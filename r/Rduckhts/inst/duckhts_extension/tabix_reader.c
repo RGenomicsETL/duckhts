@@ -42,6 +42,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/tbx.h>
 #include <htslib/kstring.h>
 
+#include "include/duckdb_map.h"
 #include "include/hts_io_tuning.h"
 #include "include/region_list.h"
 #include "include/named_attribute_columns.h"
@@ -779,34 +780,20 @@ static int attr_group_index(char **keys, int *key_lens, int n_keys, const char *
 
 static int fill_attr_map(duckdb_vector vec, idx_t row, const char *s, bool is_gff) {
     if (!s || s[0] == '\0' || (s[0] == '.' && s[1] == '\0')) {
-        duckdb_vector_ensure_validity_writable(vec);
-        uint64_t *validity = duckdb_vector_get_validity(vec);
-        duckdb_validity_set_row_invalid(validity, row);
-        duckdb_list_entry entry = {duckdb_list_vector_get_size(vec), 0};
-        duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(vec);
-        list_data[row] = entry;
+        duckhts_list_set_null(vec, row);
         return 1;
     }
 
+    /* The count includes repeated keys, but only the first occurrence of a key is
+     * written, so the row's entry can be shorter than the reservation. */
     int pair_count = is_gff ? count_gff_pairs(s) : count_gtf_pairs(s);
-    duckdb_list_entry entry;
-    entry.offset = duckdb_list_vector_get_size(vec);
-    entry.length = pair_count;
-
+    duckhts_map_pairs pairs;
+    if (!duckhts_map_pairs_begin(vec, (idx_t)pair_count, &pairs)) return 0;
     if (pair_count == 0) {
-        duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(vec);
-        list_data[row] = entry;
+        duckhts_map_pairs_finish(&pairs, row);
         return 1;
     }
 
-    if (duckdb_list_vector_reserve(vec, entry.offset + entry.length) == DuckDBError ||
-        duckdb_list_vector_set_size(vec, entry.offset + entry.length) == DuckDBError) {
-        return 0;
-    }
-
-    duckdb_vector child = duckdb_list_vector_get_child(vec);
-    duckdb_vector key_vec = duckdb_struct_vector_get_child(child, 0);
-    duckdb_vector val_vec = duckdb_struct_vector_get_child(child, 1);
     char **seen_keys = (char **)calloc((size_t)pair_count, sizeof(char *));
     int *seen_lens = (int *)calloc((size_t)pair_count, sizeof(int));
     if (!seen_keys || !seen_lens) {
@@ -816,9 +803,9 @@ static int fill_attr_map(duckdb_vector vec, idx_t row, const char *s, bool is_gf
     }
 
     const char *p = s;
-    int write_idx = 0;
-    int seen_count = 0;
-    while (*p && write_idx < pair_count) {
+    int seen_count = 0; /* distinct keys, each written once */
+    int ok = 1;
+    while (*p && seen_count < pair_count) {
         while (*p == ';' || *p == ' ' || *p == '\t') p++;
         if (!*p) break;
 
@@ -861,29 +848,26 @@ static int fill_attr_map(duckdb_vector vec, idx_t row, const char *s, bool is_gf
             int stored_key_len = 0;
             char *stored_key = dup_trimmed_span(key, key_len, &stored_key_len);
             if (!stored_key) {
-                for (int i = 0; i < seen_count; i++) free(seen_keys[i]);
-                free(seen_keys);
-                free(seen_lens);
-                return 0;
+                ok = 0;
+                break;
             }
             seen_keys[seen_count] = stored_key;
             seen_lens[seen_count] = stored_key_len;
             seen_count++;
-            duckdb_vector_assign_string_element_len(key_vec, entry.offset + write_idx, key, key_len);
-            duckdb_vector_assign_string_element_len(val_vec, entry.offset + write_idx, val, val_len);
-            write_idx++;
+            if (!duckhts_map_pairs_put(&pairs, key, (size_t)key_len, val, (size_t)val_len)) {
+                ok = 0;
+                break;
+            }
         }
         while (*p && *p != ';') p++;
         if (*p == ';') p++;
     }
 
-    entry.length = write_idx;
-    duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(vec);
-    list_data[row] = entry;
+    if (ok) duckhts_map_pairs_finish(&pairs, row);
     for (int i = 0; i < seen_count; i++) free(seen_keys[i]);
     free(seen_keys);
     free(seen_lens);
-    return 1;
+    return ok;
 }
 
 /* Match the MAP's first occurrence, trimmed key and value, without decoding GFF3. */
@@ -941,15 +925,6 @@ static void find_projected_attributes(duckhts_projected_attribute *projected, id
     }
 }
 
-static void set_null_list_like(duckdb_vector vec, idx_t row) {
-    duckdb_vector_ensure_validity_writable(vec);
-    uint64_t *validity = duckdb_vector_get_validity(vec);
-    duckdb_validity_set_row_invalid(validity, row);
-    duckdb_list_entry entry = {duckdb_list_vector_get_size(vec), 0};
-    duckdb_list_entry *list_data = (duckdb_list_entry *)duckdb_vector_get_data(vec);
-    list_data[row] = entry;
-}
-
 static int attr_group_index(char **keys, int *key_lens, int n_keys, const char *key, int key_len) {
     for (int i = 0; i < n_keys; i++) {
         if (key_lens[i] == key_len && memcmp(keys[i], key, (size_t)key_len) == 0) return i;
@@ -962,7 +937,7 @@ static int fill_attr_list_map(duckdb_vector vec, idx_t row, const char *s, bool 
     int n_pairs = 0;
     if (!parse_attr_pairs(s, is_gff, &pairs, &n_pairs)) return 0;
     if (n_pairs == 0) {
-        set_null_list_like(vec, row);
+        duckhts_list_set_null(vec, row);
         free_attr_pairs(pairs, n_pairs);
         return 1;
     }
@@ -1041,7 +1016,7 @@ static int fill_attr_pairs_list(duckdb_vector vec, idx_t row, const char *s, boo
     int n_pairs = 0;
     if (!parse_attr_pairs(s, is_gff, &pairs, &n_pairs)) return 0;
     if (n_pairs == 0) {
-        set_null_list_like(vec, row);
+        duckhts_list_set_null(vec, row);
         free_attr_pairs(pairs, n_pairs);
         return 1;
     }
