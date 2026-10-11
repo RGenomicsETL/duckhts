@@ -564,6 +564,16 @@ cat(sprintf(paste(
   "%.2f s per second of latency in any run, and four threads change the median time of a cell by a factor",
   "of %.2f to %.2f, so one DuckDB thread does the work whatever the setting.\n\n"),
   max(runs$cpu_seconds / runs$seconds), min(thread_ratio), max(thread_ratio)))
+model_fit <- merge(summary[summary$threads == 1L, c("series", "scale", "median_rss_mib")],
+                   data.frame(series = cells$series, scale = cells$scale, live_mib = cells$live_state_bytes / 2^20),
+                   by = c("series", "scale"))
+model_fit$share <- (model_fit$median_rss_mib - overhead_mib) / model_fit$live_mib
+lowest <- model_fit[which.min(model_fit$share), ]
+highest <- model_fit[which.max(model_fit$share), ]
+cat(sprintf(paste(
+  "On one thread the peak RSS above the overhead is between %.2f (`%s` at %d×) and %.2f (`%s` at %d×)",
+  "times the declared live state, against the factor of 3 that the ceiling allows.\n\n"),
+  lowest$share, lowest$series, lowest$scale, highest$share, highest$series, highest$scale))
 cat(sprintf(paste(
   "In the three records series the writer flushes a row group at 100,000 rows, so the model gives the",
   "same live state at every size. On one thread the peak RSS at 4× is %s times the 1× peak for the",
