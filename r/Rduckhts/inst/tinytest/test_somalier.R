@@ -106,6 +106,25 @@ test_somalier_relatedness_wrappers <- function() {
     con, sketches_table = sketches_name, max_sites = 8
   )
   expect_equal(nrow(all_pairs), 6L)
+  # max_pairs caps all pairs: four sketches have six pairs.
+  expect_equal(nrow(rduckhts_somalier_relatedness(
+    con, sketches_table = sketches_name, max_sites = 8, max_pairs = 6
+  )), 6L)
+  expect_error(
+    rduckhts_somalier_relatedness(
+      con, sketches_table = sketches_name, max_sites = 8, max_pairs = 5
+    ),
+    "more pairs than max_pairs"
+  )
+  for (bad_max_pairs in list(0, -1, 1.5, NA_real_, c(6, 7), "6")) {
+    expect_error(
+      rduckhts_somalier_relatedness(
+        con, sketches_table = sketches_name, max_sites = 8,
+        max_pairs = bad_max_pairs
+      ),
+      "max_pairs must be one positive"
+    )
+  }
   ab <- all_pairs[all_pairs$sample_a == "A" & all_pairs$sample_b == "B's sample", ]
   expect_equal(
     unname(unlist(ab[c("jointly_called", "ibs0", "ibs2", "shared_hets",

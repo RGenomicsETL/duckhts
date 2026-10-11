@@ -365,16 +365,20 @@ rduckhts_somalier_sketches <- function(
 #' @param table_name Optional output table. `NULL` returns a data frame, which
 #'   should be used only for a result small enough to fit in R memory.
 #' @param max_sites Positive per-pair panel capacity, at most 100,000,000.
+#' @param max_pairs Positive cap on the number of pairs when `pairs_table` is
+#'   `NULL`. A sketch relation of N samples has N(N-1)/2 pairs; more pairs
+#'   than `max_pairs` is an error before any pair is compared.
 #' @param overwrite Whether an existing output table may be replaced.
 #' @return A data frame if `table_name` is `NULL`; otherwise invisible `TRUE`.
 #' @export
 rduckhts_somalier_relatedness <- function(
   con, sketches_table = NULL, sketches_parquet = NULL,
   pairs_table = NULL, table_name = NULL, max_sites = 1000000,
-  overwrite = FALSE
+  max_pairs = 50000000, overwrite = FALSE
 ) {
   .somalier_validate_output(con, table_name, overwrite)
   max_sites <- .somalier_whole_number(max_sites, "max_sites", 100000000)
+  max_pairs <- .somalier_whole_number(max_pairs, "max_pairs", 2^53)
   if (!is.null(pairs_table)) {
     .somalier_validate_name(pairs_table, "pairs_table")
   }
@@ -396,9 +400,11 @@ rduckhts_somalier_relatedness <- function(
 
   if (is.null(pairs_table)) {
     query <- sprintf(
-      "SELECT * FROM duckhts_somalier_relatedness_all_pairs(%s, max_sites := %s)",
+      paste0("SELECT * FROM duckhts_somalier_relatedness_all_pairs(%s, ",
+             "max_sites := %s, max_pairs := %s)"),
       sql_quote_string(con, sketches$name),
-      .somalier_quote_number(con, max_sites)
+      .somalier_quote_number(con, max_sites),
+      .somalier_quote_number(con, max_pairs)
     )
   } else {
     pair_relation <- sql_quote_identifier(con, pairs_table)

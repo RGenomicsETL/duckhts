@@ -2,6 +2,12 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- `rduckhts_somalier_relatedness()` has a `max_pairs` argument (default
+  50,000,000): when it compares all pairs, a sketch relation with more pairs
+  is an error before any pair is compared. The bundled
+  `duckhts_somalier_relatedness_all_pairs()` now compares the pairs on
+  DuckDB's threads; the rows do not change with the thread count.
+
 - `rduckhts_count_error_fit()` evaluates the beta-binomial without the
   rounding error that inflated the log-likelihood near the binomial limit, and
   its optimizer checks the width of the whole simplex before it stops.
