@@ -459,7 +459,10 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "CREATE OR REPLACE MACRO duckhts_somalier_relatedness_all_pairs("
         "sketches_table, max_sites := 1000000, max_pairs := 50000000) AS TABLE "
         "WITH __dht_cohort AS MATERIALIZED (SELECT CASE "
-        "WHEN max_pairs IS NULL OR max_pairs < 1 OR max_pairs != trunc(max_pairs) THEN "
+        /* A NaN passes both comparisons below: DuckDB orders NaN above every
+         * number and as equal to itself. */
+        "WHEN max_pairs IS NULL OR NOT isfinite(max_pairs) OR max_pairs < 1 "
+        "OR max_pairs != trunc(max_pairs) THEN "
         "error('duckhts_somalier_relatedness_all_pairs: max_pairs must be a positive "
         "whole number') "
         "WHEN count(*) != count(DISTINCT sketch.sample_id) THEN "

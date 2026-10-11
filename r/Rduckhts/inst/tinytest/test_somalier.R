@@ -116,7 +116,7 @@ test_somalier_relatedness_wrappers <- function() {
     ),
     "more pairs than max_pairs"
   )
-  for (bad_max_pairs in list(0, -1, 1.5, NA_real_, c(6, 7), "6")) {
+  for (bad_max_pairs in list(0, -1, 1.5, NA_real_, NaN, Inf, c(6, 7), "6")) {
     expect_error(
       rduckhts_somalier_relatedness(
         con, sketches_table = sketches_name, max_sites = 8,

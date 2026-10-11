@@ -714,6 +714,21 @@ SELECT * FROM duckhts_somalier_relatedness_all_pairs(
 ----
 max_pairs must be a positive whole number
 
+# DuckDB orders NaN above every number and as equal to itself, so NaN passes
+# the range and whole-number comparisons; a non-finite cap must still fail
+# rather than switch the cap off.
+statement error
+SELECT count(*) FROM duckhts_somalier_relatedness_all_pairs(
+  'somalier_sketches', max_sites := 8, max_pairs := 'nan'::DOUBLE);
+----
+max_pairs must be a positive whole number
+
+statement error
+SELECT count(*) FROM duckhts_somalier_relatedness_all_pairs(
+  'somalier_sketches', max_sites := 8, max_pairs := 'infinity'::DOUBLE);
+----
+max_pairs must be a positive whole number
+
 # The argument is checked even when the relation has no pair.
 statement error
 SELECT count(*) FROM duckhts_somalier_relatedness_all_pairs(
