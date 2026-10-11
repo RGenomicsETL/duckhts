@@ -2,6 +2,11 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- The bundled `duckhts_bam_mismatch_counts()` (and so
+  `rduckhts_bam_mismatch_counts()`) counts a read base written as `=` as a
+  match instead of leaving it out, and a VCF mask leaves out the last base of
+  an SVLEN deletion when a reference window starts there, as a BCF mask did.
+
 - Bundled ROH decoding uses two traceback bits per site, reducing per-thread
   site workspace from 38 to approximately 36.25 bytes per site without changing
   output values. Emissions and forward/posterior probabilities remain doubles.

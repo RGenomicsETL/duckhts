@@ -4,6 +4,15 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- `duckhts_bam_mismatch_counts()` counts a read base written as `=` (the SAM
+  sign for the reference base, as `samtools calmd -e` writes it) as a match;
+  it was left out. A VCF mask now leaves out the last base of a deletion that
+  states its span by SVLEN when a reference window starts at that base:
+  htslib's tabix ends such a record one base before its parsed span, so the
+  mask query starts one base earlier. A BCF mask was not affected. The
+  catalog no longer says that the sample columns of a VCF mask cost nothing:
+  they are not parsed, but each line is read whole.
+
 - ROH decoding packs Viterbi traceback into two bits per site, reducing per-thread
   site workspace from 38 to approximately 36.25 bytes per site. Emissions and
   forward/posterior probabilities remain doubles; output values are unchanged.
