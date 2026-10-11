@@ -29,6 +29,48 @@ FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_long_location.gb',
 ----
 200	200	0
 
+# A 2,500-segment CDS spans more than one 2,048-row output chunk, so its cached values
+# must carry into the next chunk. Its note is present but empty. The next record's CDS
+# has the same feature index, another locus_tag and no note.
+statement ok
+COPY (
+  SELECT line FROM (
+    SELECT 1 AS part, 0 AS k, unnest([
+      'LOCUS       CHUNKA                 10000 bp    DNA     linear   PHG 01-JAN-2000',
+      'ACCESSION   CHUNKA', 'VERSION     CHUNKA.1',
+      'FEATURES             Location/Qualifiers',
+      '     source          1..10000', '                     /organism="probe"',
+      '     CDS             join(1..2,']) AS line
+    UNION ALL
+    SELECT 2, i, '                     ' || (3 * i + 1) || '..' || (3 * i + 2) ||
+                 CASE WHEN i = 2499 THEN ')' ELSE ',' END
+    FROM range(1, 2500) AS t(i)
+    UNION ALL
+    SELECT 3, 0, unnest([
+      '                     /locus_tag="A1"', '                     /note=""',
+      'CONTIG      join(AB000001.1:1..10000)', '//',
+      'LOCUS       CHUNKB                   100 bp    DNA     linear   PHG 01-JAN-2000',
+      'ACCESSION   CHUNKB', 'VERSION     CHUNKB.1',
+      'FEATURES             Location/Qualifiers',
+      '     source          1..100', '                     /organism="probe"',
+      '     CDS             1..30', '                     /locus_tag="B1"',
+      'CONTIG      join(AB000002.1:1..100)', '//'])
+  ) ORDER BY part, k
+) TO '__WORKING_DIRECTORY__/test/tmp_genbank_chunk_edge.gb' (FORMAT csv, HEADER false, QUOTE '', ESCAPE '', DELIMITER '\t');
+
+query TIIIITT
+SELECT seqname, count(*),
+       count(*) FILTER (WHERE locus_tag IS DISTINCT FROM attributes_map['locus_tag']
+                          OR note IS DISTINCT FROM attributes_map['note']
+                          OR missing IS DISTINCT FROM attributes_map['missing']),
+       count(*) FILTER (WHERE note = ''), count(note), min(locus_tag), max(locus_tag)
+FROM read_genbank('__WORKING_DIRECTORY__/test/tmp_genbank_chunk_edge.gb',
+                  attributes_map := true, attributes := ['locus_tag', 'note', 'missing'])
+GROUP BY seqname ORDER BY seqname;
+----
+CHUNKA.1	2500	0	2500	2500	A1	A1
+CHUNKB.1	1	0	0	0	B1	B1
+
 # Feature indexes repeat across records; qualifier values belong to their record.
 query TTI rowsort
 SELECT seqname, locus_tag,
