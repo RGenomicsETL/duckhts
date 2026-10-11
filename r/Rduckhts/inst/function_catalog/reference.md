@@ -1715,7 +1715,7 @@ Compute Somalier-derived relatedness and concordance statistics for every unorde
 Signature:
 
 ```sql
-duckhts_somalier_relatedness_all_pairs(sketches_table, max_sites := 1000000)
+duckhts_somalier_relatedness_all_pairs(sketches_table, max_sites := 1000000, max_pairs := 50000000)
 ```
 
 Returns:
@@ -1734,7 +1734,11 @@ One row per unordered pair with sample_a < sample_b, with the fields of duckhts_
 
 ### Execution
 
-Each sketch is content-checked once and the pairs are compared from the checked sketches, so the content checks grow with the number of samples and the comparisons with pairs times sites. The output has N(N-1)/2 rows for N samples and is not capped. The pair comparison runs in one thread.
+Each sketch is content-checked once and the pairs are compared from the checked sketches, so the content checks grow with the number of samples and the comparisons with pairs times sites. The pairs are split into at most 65,536 blocks of consecutive pairs, and DuckDB compares the blocks on up to 32 of its threads. The rows do not depend on the thread count.
+
+### Limits
+
+The output has N(N-1)/2 rows for N samples. max_pairs is a positive whole number; a relation with more pairs than max_pairs is an error before any pair is compared. The default, 50,000,000, is 400 times the pairs of 500 samples. The checked sketches are held once, as one list in sample_id order, and each pair borrows its two sketches from that list without a copy. Each thread also holds its own copies of the list while it compares pairs, so the workspace grows with threads times samples times sites: in a measured run of 1,000 samples and 17,000 sites, each added thread raised peak DuckDB buffer memory by about 18 MB, about three copies of the 6.5 MB list. The pair indexes stream through fixed 2,048-row vectors and are never collected.
 
 ### Examples
 

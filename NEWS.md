@@ -4,6 +4,18 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- `duckhts_somalier_relatedness_all_pairs()` compares pairs on DuckDB's
+  threads and caps its output. The checked sketches form one list in
+  `sample_id` order, the pairs are numbered so that a run of numbers is a
+  block of pairs, and DuckDB compares up to 65,536 such blocks in parallel; a
+  pair borrows its two sketches from the list, with no copy. The rows do not
+  change with the thread count. `benchmarks/benchmark_somalier_cohort_scaling.md`
+  measures it. The new `max_pairs` argument (default 50,000,000) makes a
+  relation with more pairs an error before any pair is compared. Each thread
+  holds its own copies of the sketch list, so memory grows with threads times
+  samples; the catalog states the measured cost. Open items of the SQL scaling
+  audit, https://github.com/RGenomicsETL/duckhts/issues/298.
+
 - `duckhts_count_error_fit()` evaluates the beta-binomial through sums of
   `log1p` terms instead of differences of `lgamma` values. Near the binomial
   limit those differences lost about 1e-6 per term, which over millions of
