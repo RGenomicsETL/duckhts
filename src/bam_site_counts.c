@@ -75,7 +75,7 @@ static int record_qname(const bam1_t *record,
     return 0;
 }
 
-static uint64_t qname_hash(const char *qname, size_t qname_len) {
+uint64_t duckhts_bam_site_qname_hash(const char *qname, size_t qname_len) {
     uint64_t hash = UINT64_C(14695981039346656037);
     size_t i;
 
@@ -99,7 +99,7 @@ static size_t overlap_probe_distance(size_t home,
     return position >= home ? position - home : capacity - home + position;
 }
 
-static int overlap_begin(duckhts_bam_site_overlap_scratch_t *scratch) {
+int duckhts_bam_site_overlap_begin(duckhts_bam_site_overlap_scratch_t *scratch) {
     size_t required;
 
     if (!scratch ||
@@ -119,11 +119,11 @@ static int overlap_begin(duckhts_bam_site_overlap_scratch_t *scratch) {
     return 1;
 }
 
-static int overlap_find(const duckhts_bam_site_overlap_scratch_t *scratch,
-                        const char *qname,
-                        size_t qname_len,
-                        uint64_t hash,
-                        size_t *found_slot) {
+int duckhts_bam_site_overlap_find(const duckhts_bam_site_overlap_scratch_t *scratch,
+                                  const char *qname,
+                                  size_t qname_len,
+                                  uint64_t hash,
+                                  size_t *found_slot) {
     size_t index;
     size_t scanned;
 
@@ -143,10 +143,10 @@ static int overlap_find(const duckhts_bam_site_overlap_scratch_t *scratch,
     return 0;
 }
 
-static int overlap_insert(duckhts_bam_site_overlap_scratch_t *scratch,
-                          const char *qname,
-                          size_t qname_len,
-                          uint64_t hash) {
+int duckhts_bam_site_overlap_insert(duckhts_bam_site_overlap_scratch_t *scratch,
+                                    const char *qname,
+                                    size_t qname_len,
+                                    uint64_t hash) {
     size_t index;
     size_t scanned;
 
@@ -167,8 +167,8 @@ static int overlap_insert(duckhts_bam_site_overlap_scratch_t *scratch,
     return 0;
 }
 
-static void overlap_remove(duckhts_bam_site_overlap_scratch_t *scratch,
-                           size_t removed_slot) {
+void duckhts_bam_site_overlap_remove(duckhts_bam_site_overlap_scratch_t *scratch,
+                                     size_t removed_slot) {
     size_t hole = removed_slot;
     size_t next = removed_slot;
 
@@ -233,7 +233,7 @@ duckhts_bam_site_status_t duckhts_bam_site_count_pileup(
     }
 #endif
     if (config->overlap_policy == DUCKHTS_BAM_SITE_OVERLAP_HILEUP_V0_1_0) {
-        if (!overlap_begin(overlap_scratch)) {
+        if (!duckhts_bam_site_overlap_begin(overlap_scratch)) {
             return DUCKHTS_BAM_SITE_INVALID_ARGUMENT;
         }
     }
@@ -262,12 +262,12 @@ duckhts_bam_site_status_t duckhts_bam_site_count_pileup(
             if (!record_qname(record, &qname, &qname_len)) {
                 return DUCKHTS_BAM_SITE_INVALID_PILEUP;
             }
-            hash = qname_hash(qname, qname_len);
+            hash = duckhts_bam_site_qname_hash(qname, qname_len);
             if (record->core.tid == record->core.mtid &&
-                overlap_find(overlap_scratch, qname, qname_len,
-                             hash, &found_slot)) {
+                duckhts_bam_site_overlap_find(overlap_scratch, qname, qname_len,
+                                              hash, &found_slot)) {
                 overlap_used--;
-                overlap_remove(overlap_scratch, found_slot);
+                duckhts_bam_site_overlap_remove(overlap_scratch, found_slot);
                 continue;
             }
         }
@@ -304,8 +304,9 @@ duckhts_bam_site_status_t duckhts_bam_site_count_pileup(
             if (!record_qname(record, &qname, &qname_len)) {
                 return DUCKHTS_BAM_SITE_INVALID_PILEUP;
             }
-            hash = qname_hash(qname, qname_len);
-            if (!overlap_insert(overlap_scratch, qname, qname_len, hash)) {
+            hash = duckhts_bam_site_qname_hash(qname, qname_len);
+            if (!duckhts_bam_site_overlap_insert(overlap_scratch, qname,
+                                                 qname_len, hash)) {
                 return DUCKHTS_BAM_SITE_SCRATCH_EXHAUSTED;
             }
             overlap_used++;

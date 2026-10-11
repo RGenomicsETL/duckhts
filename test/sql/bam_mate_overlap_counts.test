@@ -1,0 +1,403 @@
+# name: test/sql/bam_mate_overlap_counts.test
+# description: duckhts_bam_mate_overlap_counts against hand-derived counts and an independent count in SQL
+# group: [duckhts]
+
+require duckhts
+
+# A coordinate-sorted SAM fixture on the contigs of bam_mismatch.fa, where ref1
+# repeats TGGCAA from position 1. Each pair has its own base qualities, so a
+# pair of qualities names a pair of reads:
+#   ovl      40/20  10M at 11 and reverse 10M at 15: 15-20 shared, read 2 shows C for A at 18
+#   cross    --     read 1 on ref1, read 2 on ref2: never compared
+#   apart    40/40  10M at 31 and 10M at 61: nothing shared
+#   lowmate  15/15  read 2 has MAPQ 5, so read 1 waits and is dropped at 61
+#   del      10/30  read 2 (10M at 71) comes first; read 1 is 3M2D5M at 75: 75-77 and 80 shared
+#   clip     7/7    5M5S at 101 and 10M at 103: 103-105 shared; the clipped CCCCC is not aligned
+#   noqual   -/40   read 1 stores no qualities: 145-150 shared
+#   eq       25/25  read 1 has '=' at 166 and N at 167: 165-170 shared less 167, and less 166 without a reference
+#   dup      17/17  flag 1024 on both mates: 185-190 shared
+#   same     27/29  both start at 201: 201-208 shared
+#   outer    32/33  20M at 221 and 10M at 231: 231-240 shared
+#   inner    34/35  10M at 223 and 10M at 227, inside outer: 227-232 shared
+statement ok
+COPY (VALUES
+  (E'@HD\tVN:1.6\tSO:coordinate'),
+  (E'@SQ\tSN:ref1\tLN:260'),
+  (E'@SQ\tSN:ref2\tLN:80'),
+  (E'ovl\t99\tref1\t11\t60\t10M\t=\t15\t14\tAATGGCAATG\tIIIIIIIIII'),
+  (E'cross\t97\tref1\t13\t60\t10M\tref2\t15\t0\tTGGCAATGGC\tIIIIIIIIII'),
+  (E'ovl\t147\tref1\t15\t60\t10M\t=\t11\t-14\tGCACTGGCAA\t5555555555'),
+  (E'apart\t99\tref1\t31\t60\t10M\t=\t61\t40\tTGGCAATGGC\tIIIIIIIIII'),
+  (E'lowmate\t99\tref1\t41\t60\t10M\t=\t45\t14\tAATGGCAATG\t0000000000'),
+  (E'lowmate\t147\tref1\t45\t5\t10M\t=\t41\t-14\tGCAATGGCAA\t0000000000'),
+  (E'apart\t147\tref1\t61\t60\t10M\t=\t31\t-40\tTGGCAATGGC\tIIIIIIIIII'),
+  (E'del\t163\tref1\t71\t60\t10M\t=\t75\t14\tAATGGCAATG\t??????????'),
+  (E'del\t83\tref1\t75\t60\t3M2D5M\t=\t71\t-14\tGCAGGCAA\t++++++++'),
+  (E'clip\t99\tref1\t101\t60\t5M5S\t=\t103\t12\tAATGGCCCCC\t(((((((((('),
+  (E'clip\t147\tref1\t103\t60\t10M\t=\t101\t-12\tTGGCAATGGC\t(((((((((('),
+  (E'noqual\t99\tref1\t141\t60\t10M\t=\t145\t14\tGCAATGGCAA\t*'),
+  (E'noqual\t147\tref1\t145\t60\t10M\t=\t141\t-14\tTGGCAATGGC\tIIIIIIIIII'),
+  (E'eq\t99\tref1\t161\t60\t10M\t=\t165\t14\tAATGG=NATG\t::::::::::'),
+  (E'eq\t147\tref1\t165\t60\t10M\t=\t161\t-14\tGCAATGGCAA\t::::::::::'),
+  (E'dup\t1123\tref1\t181\t60\t10M\t=\t185\t14\tTGGCAATGGC\t2222222222'),
+  (E'dup\t1171\tref1\t185\t60\t10M\t=\t181\t-14\tAATGGCAATG\t2222222222'),
+  (E'same\t99\tref1\t201\t60\t10M\t=\t201\t10\tGCAATGGCAA\t<<<<<<<<<<'),
+  (E'same\t147\tref1\t201\t60\t8M\t=\t201\t-10\tGCAATGGC\t>>>>>>>>'),
+  (E'outer\t99\tref1\t221\t60\t20M\t=\t231\t20\tAATGGCAATGGCAATGGCAA\tAAAAAAAAAAAAAAAAAAAA'),
+  (E'inner\t99\tref1\t223\t60\t10M\t=\t227\t14\tTGGCAATGGC\tCCCCCCCCCC'),
+  (E'inner\t147\tref1\t227\t60\t10M\t=\t223\t-14\tAATGGCAATG\tDDDDDDDDDD'),
+  (E'outer\t147\tref1\t231\t60\t10M\t=\t221\t-20\tGCAATGGCAA\tBBBBBBBBBB'),
+  (E'cross\t145\tref2\t15\t60\t10M\tref1\t13\t0\tTGCCATTGCC\tIIIIIIIIII'))
+TO '__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam' (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+query TT
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM duckhts_bam_mate_overlap_counts(
+  '__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam'));
+----
+read1_quality	TINYINT
+read2_quality	TINYINT
+read1_base	VARCHAR
+read2_base	VARCHAR
+positions	BIGINT
+
+# Default filters, no reference. By hand: ovl 6 with one disagreement, del 4
+# (the deletion leaves out 78-79), clip 3, noqual 6, eq 4, same 8, outer 10,
+# inner 6. cross, apart, lowmate and dup give nothing.
+query IIII
+SELECT read1_quality, read2_quality, sum(positions)::INTEGER,
+  sum(CASE WHEN read1_base != read2_base THEN positions ELSE 0 END)::INTEGER
+FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam')
+GROUP BY ALL ORDER BY read1_quality NULLS LAST, read2_quality;
+----
+7	7	3	0
+10	30	4	0
+25	25	4	0
+27	29	8	0
+32	33	10	0
+34	35	6	0
+40	20	6	1
+NULL	40	6	0
+
+# Bases are on the forward strand of the reference, though read 2 of ovl is
+# reverse: read 1 shows the reference A at 18 and read 2 shows C.
+query IITTI
+SELECT * FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam')
+WHERE read1_base != read2_base;
+----
+40	20	A	C	1
+
+# del: read 1 is the 0x40 mate though read 2 comes first, and both show G at
+# 75 and 80, C at 76 and A at 77.
+query TTI
+SELECT read1_base, read2_base, positions
+FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam')
+WHERE read1_quality = 10 ORDER BY read1_base;
+----
+A	A	1
+C	C	1
+G	G	2
+
+# Rows come in the order of read1_quality, read2_quality, read1_base and
+# read2_base, with a missing quality last.
+query IITT
+SELECT read1_quality, read2_quality, read1_base, read2_base
+FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam') LIMIT 3;
+----
+7	7	G	G
+7	7	T	T
+10	30	A	A
+
+# With the reference the '=' base of eq at 166 is the reference C: eq gives 5.
+query II
+SELECT read1_quality, sum(positions)::INTEGER
+FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam',
+  reference := '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa')
+WHERE read1_quality = 25 GROUP BY ALL;
+----
+25	5
+
+query I
+SELECT positions FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam',
+  reference := '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa')
+WHERE read1_quality = 25 AND read1_base = 'C';
+----
+1
+
+# Filters. Without the MAPQ floor lowmate adds 6; without the flag mask dup adds 6.
+query I
+SELECT sum(positions)::INTEGER FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam');
+----
+47
+
+query I
+SELECT sum(positions)::INTEGER FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam',
+  min_mapq := 0);
+----
+53
+
+query I
+SELECT sum(positions)::INTEGER FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam',
+  exclude_flags := 0);
+----
+53
+
+# Both mates must have every bit of require_flags: 2 (proper pair) keeps all
+# counted pairs; 16 (reverse) keeps none, since one mate of each is forward.
+query I
+SELECT sum(positions)::INTEGER FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam',
+  require_flags := 2);
+----
+47
+
+query I
+SELECT count(*) FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam',
+  require_flags := 16);
+----
+0
+
+# outer waits from 221 to 231 and inner from 223 to 227, so two mates wait at once.
+statement error
+SELECT * FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam', max_pending := 1);
+----
+more than max_pending (1) mates wait for their mate at ref1:223; raise max_pending
+
+query I
+SELECT sum(positions)::INTEGER FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam',
+  max_pending := 2);
+----
+47
+
+# 1,500 pairs whose read 1 (20M at 1) all come before their read 2 (10M at
+# 11): 1,500 mates wait at once, more than the name table holds at first, so
+# it grows. Each pair shares 11-20, AATGGCAATG.
+statement ok
+COPY (
+  SELECT line FROM (
+    SELECT 0 AS part, 0 AS i, E'@SQ\tSN:ref1\tLN:260' AS line
+    UNION ALL
+    SELECT 1, i, 'q' || i || E'\t99\tref1\t1\t60\t20M\t=\t11\t20\tTGGCAATGGCAATGGCAATG\tIIIIIIIIIIIIIIIIIIII'
+    FROM range(1500) t(i)
+    UNION ALL
+    SELECT 2, i, 'q' || i || E'\t147\tref1\t11\t60\t10M\t=\t1\t-20\tAATGGCAATG\t5555555555'
+    FROM range(1500) t(i))
+  ORDER BY part, i)
+TO '__WORKING_DIRECTORY__/test/tmp_mate_overlap_many.sam' (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+query IITTI
+SELECT * FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap_many.sam');
+----
+40	20	A	A	6000
+40	20	C	C	1500
+40	20	G	G	4500
+40	20	T	T	3000
+
+statement error
+SELECT * FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap_many.sam',
+  max_pending := 1499);
+----
+more than max_pending (1499) mates wait for their mate at ref1:1;
+
+query I
+SELECT sum(positions)::INTEGER FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap_many.sam',
+  max_pending := 1500);
+----
+15000
+
+# The same counts made in SQL from read_bam and cigar_aligned_blocks. A pair
+# is read 1 (0x40) and read 2 (0x80) of one name, both primary and kept, with
+# each naming the other's start; a position counts where both have an aligned
+# A, C, G or T. Every row must be equal.
+statement ok
+CREATE TEMP MACRO mate_overlap_oracle(alignment_path, mapq_floor) AS TABLE
+WITH reads AS (
+  SELECT QNAME, FLAG, RNAME, POS, PNEXT, SEQ, QUAL, cigar_aligned_blocks(CIGAR, POS) AS blocks
+  FROM read_bam(alignment_path)
+  WHERE (FLAG & 3844) = 0 AND MAPQ >= mapq_floor AND (FLAG & 1) != 0 AND (FLAG & 8) = 0 AND RNEXT = RNAME
+), aligned AS (
+  SELECT QNAME, FLAG, RNAME, POS, PNEXT, SEQ, QUAL, unnest(blocks.ref_start) AS ref_start,
+    unnest(blocks.query_start) AS query_start, unnest(blocks.width) AS width
+  FROM reads
+), read_bases AS (
+  SELECT QNAME, FLAG, RNAME, POS, PNEXT, ref_start + i AS ref_pos, substr(SEQ, query_start + i + 1, 1) AS base,
+    CASE WHEN QUAL IS NULL OR QUAL = '*' THEN NULL
+         ELSE least(ord(substr(QUAL, query_start + i + 1, 1)) - 33, 93) END AS quality
+  FROM aligned, LATERAL (SELECT unnest(range(width)) AS i)
+)
+SELECT r1.quality AS read1_quality, r2.quality AS read2_quality, r1.base AS read1_base, r2.base AS read2_base,
+  count(*) AS positions
+FROM read_bases r1 JOIN read_bases r2
+  ON r1.QNAME = r2.QNAME AND r1.RNAME = r2.RNAME AND r1.ref_pos = r2.ref_pos
+WHERE (r1.FLAG & 192) = 64 AND (r2.FLAG & 192) = 128 AND r1.PNEXT = r2.POS AND r2.PNEXT = r1.POS
+  AND r1.base IN ('A', 'C', 'G', 'T') AND r2.base IN ('A', 'C', 'G', 'T')
+GROUP BY ALL;
+
+# The committed fixture of duckhts_bam_mismatch_counts has one pair, at 11-30
+# and 41-60: its mates share no position, and both counts are empty.
+query III
+WITH observed AS (
+  SELECT * FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam')
+), expected AS (
+  SELECT * FROM mate_overlap_oracle('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam', 20)
+)
+SELECT (SELECT count(*) FROM expected),
+  (SELECT count(*) FROM (SELECT * FROM observed EXCEPT SELECT * FROM expected)),
+  (SELECT count(*) FROM (SELECT * FROM expected EXCEPT SELECT * FROM observed));
+----
+0	0	0
+
+query III
+WITH observed AS (
+  SELECT * FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam')
+), expected AS (
+  SELECT * FROM mate_overlap_oracle('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam', 20)
+)
+SELECT (SELECT sum(positions)::INTEGER FROM expected),
+  (SELECT count(*) FROM (SELECT * FROM observed EXCEPT SELECT * FROM expected)),
+  (SELECT count(*) FROM (SELECT * FROM expected EXCEPT SELECT * FROM observed));
+----
+47	0	0
+
+# ovl.bam: read 2 comes first with a 32-base soft clip.
+query III
+WITH observed AS (
+  SELECT * FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/data/ovl.bam')
+), expected AS (
+  SELECT * FROM mate_overlap_oracle('__WORKING_DIRECTORY__/test/data/ovl.bam', 20)
+)
+SELECT (SELECT sum(positions)::INTEGER FROM expected),
+  (SELECT count(*) FROM (SELECT * FROM observed EXCEPT SELECT * FROM expected)),
+  (SELECT count(*) FROM (SELECT * FROM expected EXCEPT SELECT * FROM observed));
+----
+36	0	0
+
+# empty-tids.bam: 12,495 paired reads with supplementary alignments, at the
+# default MAPQ floor and without one.
+query III
+WITH observed AS (
+  SELECT * FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/data/empty-tids.bam')
+), expected AS (
+  SELECT * FROM mate_overlap_oracle('__WORKING_DIRECTORY__/test/data/empty-tids.bam', 20)
+)
+SELECT (SELECT sum(positions) > 0 FROM expected),
+  (SELECT count(*) FROM (SELECT * FROM observed EXCEPT SELECT * FROM expected)),
+  (SELECT count(*) FROM (SELECT * FROM expected EXCEPT SELECT * FROM observed));
+----
+true	0	0
+
+query III
+WITH observed AS (
+  SELECT * FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/data/empty-tids.bam', min_mapq := 0)
+), expected AS (
+  SELECT * FROM mate_overlap_oracle('__WORKING_DIRECTORY__/test/data/empty-tids.bam', 0)
+)
+SELECT (SELECT sum(positions)::INTEGER FROM expected),
+  (SELECT count(*) FROM (SELECT * FROM observed EXCEPT SELECT * FROM expected)),
+  (SELECT count(*) FROM (SELECT * FROM expected EXCEPT SELECT * FROM observed));
+----
+2316	0	0
+
+# Regions select alignments by overlap, and a pair counts only when both of
+# its mates are selected. The fixture is compressed and indexed for this.
+statement ok
+SELECT * FROM bgzip('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam',
+  output_path := '__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam.gz');
+
+statement ok
+SELECT * FROM bam_index('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam.gz',
+  index_path := '__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam.gz.csi', min_shift := 14);
+
+# 200-235 selects same, outer and inner: 8 + 10 + 6.
+query I
+SELECT sum(positions)::INTEGER FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam.gz',
+  region := 'ref1:200-235');
+----
+24
+
+# 236-260 selects both mates of outer but only read 2 of inner.
+query I
+SELECT sum(positions)::INTEGER FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam.gz',
+  region := 'ref1:236-260');
+----
+10
+
+# Several items: ovl at 1-20, then 200-235 as above, and ref2 with read 2 of cross.
+query I
+SELECT sum(positions)::INTEGER FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam.gz',
+  region := 'ref1:1-20,ref1:200-235,ref2');
+----
+30
+
+# Before outer and inner, one waiting mate is enough: ovl, del, clip and noqual give 19.
+query I
+SELECT sum(positions)::INTEGER FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam.gz',
+  region := 'ref1:1-150', max_pending := 1);
+----
+19
+
+# Alignments must be in coordinate order.
+statement ok
+COPY (VALUES
+  (E'@SQ\tSN:ref1\tLN:260'),
+  (E'late\t99\tref1\t51\t60\t10M\t=\t55\t14\tTGGCAATGGC\tIIIIIIIIII'),
+  (E'early\t99\tref1\t11\t60\t10M\t=\t15\t14\tAATGGCAATG\tIIIIIIIIII'))
+TO '__WORKING_DIRECTORY__/test/tmp_mate_overlap_unsorted.sam' (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+statement error
+SELECT * FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap_unsorted.sam');
+----
+are not in coordinate order at ref1:11
+
+statement error
+SELECT * FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam', region := 'ref1:1-100');
+----
+region needs an index
+
+statement error
+SELECT * FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam.gz', region := '*');
+----
+region items must name a contig or an interval
+
+# A reference resolves '=' bases; its contig names are compared byte for byte.
+statement error
+SELECT * FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam',
+  reference := '__WORKING_DIRECTORY__/test/data/fixture_ref.fa');
+----
+reference has no contig named ref1
+
+# CRAM needs the reference. Its one pair shares no position.
+statement error
+SELECT * FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.cram');
+----
+needs reference
+
+query I
+SELECT count(*) FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.cram',
+  reference := '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa');
+----
+0
+
+statement error
+SELECT * FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam',
+  reference_index_path := '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa.fai');
+----
+reference_index_path needs reference
+
+statement error
+SELECT * FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam', max_pending := 0);
+----
+max_pending in [1, 100000000]
+
+statement error
+SELECT * FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/tmp_mate_overlap.sam', min_mapq := 256);
+----
+min_mapq must be in [0, 255]
+
+statement error
+SELECT * FROM duckhts_bam_mate_overlap_counts('__WORKING_DIRECTORY__/test/data/no_such_file.bam');
+----
+cannot open
+
+statement error
+SELECT * FROM duckhts_bam_mate_overlap_counts(NULL);
+----
+requires an alignment path
