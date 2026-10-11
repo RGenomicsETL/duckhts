@@ -24,6 +24,17 @@ build_param_str <- function(params) {
   paste0(", ", paste(names(params), ":=", params, collapse = ", "))
 }
 
+# One whole number from low to high as SQL integer text. The error names the
+# argument and its range. high must fit an R integer.
+sql_whole_number <- function(value, name, high, low = 0) {
+  if (!is.numeric(value) || length(value) != 1L || is.na(value) ||
+      value != floor(value) || value < low || value > high) {
+    stop(name, " must be one whole number from ", low, " to ",
+         format(high, scientific = FALSE), call. = FALSE)
+  }
+  as.character(as.integer(value))
+}
+
 # `regions := getvariable('<name>')`, naming a session variable that holds a
 # STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[] value. The name is a
 # quoted SQL string literal; it is never spliced as an identifier.

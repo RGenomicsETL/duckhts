@@ -938,18 +938,11 @@ rduckhts_bam_mismatch_counts <- function(
   exclude_flags = 3844,
   indel_flank = 5
 ) {
-  whole_number <- function(value, name, high) {
-    if (!is.numeric(value) || length(value) != 1L || is.na(value) ||
-        value != floor(value) || value < 0 || value > high) {
-      stop(name, " must be one whole number from 0 to ", high, call. = FALSE)
-    }
-    as.character(as.integer(value))
-  }
   params <- list(
-    min_mapq = whole_number(min_mapq, "min_mapq", 255),
-    require_flags = whole_number(require_flags, "require_flags", 65535),
-    exclude_flags = whole_number(exclude_flags, "exclude_flags", 65535),
-    indel_flank = whole_number(indel_flank, "indel_flank", 1000)
+    min_mapq = sql_whole_number(min_mapq, "min_mapq", 255),
+    require_flags = sql_whole_number(require_flags, "require_flags", 65535),
+    exclude_flags = sql_whole_number(exclude_flags, "exclude_flags", 65535),
+    indel_flank = sql_whole_number(indel_flank, "indel_flank", 1000)
   )
   paths <- list(
     region = region, mask = mask, index_path = index_path,
@@ -1025,19 +1018,11 @@ rduckhts_bam_mate_overlap_counts <- function(
   exclude_flags = 3844,
   max_pending = 1000000
 ) {
-  whole_number <- function(value, name, low, high) {
-    if (!is.numeric(value) || length(value) != 1L || is.na(value) ||
-        value != floor(value) || value < low || value > high) {
-      stop(name, " must be one whole number from ", low, " to ",
-           format(high, scientific = FALSE), call. = FALSE)
-    }
-    as.character(as.integer(value))
-  }
   params <- list(
-    min_mapq = whole_number(min_mapq, "min_mapq", 0, 255),
-    require_flags = whole_number(require_flags, "require_flags", 0, 65535),
-    exclude_flags = whole_number(exclude_flags, "exclude_flags", 0, 65535),
-    max_pending = whole_number(max_pending, "max_pending", 1, 100000000)
+    min_mapq = sql_whole_number(min_mapq, "min_mapq", 255),
+    require_flags = sql_whole_number(require_flags, "require_flags", 65535),
+    exclude_flags = sql_whole_number(exclude_flags, "exclude_flags", 65535),
+    max_pending = sql_whole_number(max_pending, "max_pending", 100000000, low = 1)
   )
   paths <- list(
     region = region, index_path = index_path, reference = reference,
