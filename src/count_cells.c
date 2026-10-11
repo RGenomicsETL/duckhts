@@ -21,12 +21,13 @@
  * ordered-aggregate wrapper does not initialise the states of a C API
  * aggregate (https://github.com/duckdb/duckdb/issues/26109).
  *
- * Measured with DuckDB 1.5.1: when a query fails inside this aggregate with
- * many threads, DuckDB destroys the states of some threads and not others
- * (14 of 14 states of a 20-thread run were never destroyed, 0 of 1 with one
- * thread), not even at process exit. The buffers of such states are leaked
- * and stay charged against max_cell_bytes, so the count stays truthful. The
- * ROH site buffers (roh_sites.c) have the same exposure.
+ * DuckDB 1.5.1 to 1.5.6: when a query fails while a hash aggregate with few
+ * groups is filling, with 5 or more threads, the states of the per-thread
+ * tables are never destroyed, not even at process exit; with 1 to 4 threads
+ * they are (https://github.com/duckdb/duckdb/issues/26871; an ungrouped C API
+ * aggregate runs as a hash aggregate with one group). The buffers of such
+ * states are leaked and stay charged against max_cell_bytes, so the count
+ * stays truthful. The ROH site buffers (roh_sites.c) have the same exposure.
  */
 #if defined(__MINGW32__) && !defined(__USE_MINGW_ANSI_STDIO)
 #define __USE_MINGW_ANSI_STDIO 1
