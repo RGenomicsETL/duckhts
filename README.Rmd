@@ -145,7 +145,7 @@ On DuckDB 1.5.x:
 
 ## Using DuckHTS with a database file
 
-`LOAD` creates the 31 SQL macros only when the default database is writable
+`LOAD` creates the `r local({ k <- rduckhts_connect(); n <- dbGetQuery(k, "SELECT count(*) AS n FROM duckhts_macro_definitions()")$n; dbDisconnect(k, shutdown = TRUE); n })` SQL macros only when the default database is writable
 and in memory. With a file-backed or read-only default database it registers
 native functions and leaves the database file untouched; the macros are then
 installed as connection-local `TEMP` macros. `rduckhts_connect()` does that for

@@ -98,7 +98,7 @@ On DuckDB 1.5.x:
 
 ## Using DuckHTS with a database file
 
-`LOAD` creates the 31 SQL macros only when the default database is
+`LOAD` creates the 42 SQL macros only when the default database is
 writable and in memory. With a file-backed or read-only default database
 it registers native functions and leaves the database file untouched;
 the macros are then installed as connection-local `TEMP` macros.
