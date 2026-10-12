@@ -41,6 +41,8 @@ src/count_error_udf.c|count_error_udf.c
 src/count_error_sql.c|count_error_sql.c
 src/depth_sql.c|depth_sql.c
 src/count_mixture_model.c|count_mixture_model.c
+src/count_mixture_udf.c|count_mixture_udf.c
+src/count_mixture_sql.c|count_mixture_sql.c
 src/somalier_bam_extract_sql.c|somalier_bam_extract_sql.c
 src/somalier_panel_sql.c|somalier_panel_sql.c
 src/somalier_sex_sql.c|somalier_sex_sql.c
