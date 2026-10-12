@@ -31,7 +31,8 @@ rduckhts_roh(
   af_clamp = 0.001,
   max_sites = 2e+07,
   max_site_bytes = 2^32,
-  site_rule = "matching"
+  site_rule = "matching",
+  af_order = NULL
 )
 ```
 
@@ -126,9 +127,19 @@ rduckhts_roh(
   first remaining record claims the position, which is skipped unless
   its alleles equal the row's (also when its first ALT is symbolic,
   which bcftools would decode through the second ALT). It needs one
-  \`af_table\` row per position and a sorted, BGZF-compressed VCF or
-  BCF, and reads the file a second time without samples. Only
-  \`af_table\` takes \`"bcftools"\`.
+  \`af_table\` row per position, unless \`af_order\` gives file order,
+  and a sorted, BGZF-compressed VCF or BCF, and reads the file a second
+  time without samples. Only \`af_table\` takes \`"bcftools"\`.
+
+- af_order:
+
+  Optional name of a column of \`af_table\` that gives file order, for
+  example a line number added by the caller, or \`FILE_OFFSET\` when the
+  frequencies come from \`read_bcf()\`. With \`site_rule = "bcftools"\`
+  only. Several rows may then share a position: the row with the least
+  value is used, as \`bcftools roh –AF-file\` reads the first line of a
+  position. A \`NULL\` value, a value repeated within a position, or a
+  name that is not a column of \`af_table\` is an error.
 
 ## Value
 
@@ -192,9 +203,9 @@ path <- system.file("extdata", "roh_fixture.vcf.gz", package = "Rduckhts")
 roh <- rduckhts_roh(con, path, af_tag = "AF")
 roh[order(roh$sample, roh$chrom, roh$start), ]
 #>   sample chrom   start     end  length n_markers  quality
-#> 1     S1  chr1 1042655 2396807 1354153       113 31.96439
-#> 3     S2  chr2  693881 1722963 1029083       114 32.91658
-#> 4     S4  chr1 1876100 3319712 1443613       131 44.83104
-#> 2     S4  chr2   23420 2400223 2376804       239 46.64399
+#> 3     S1  chr1 1042655 2396807 1354153       113 31.96439
+#> 2     S2  chr2  693881 1722963 1029083       114 32.91658
+#> 1     S4  chr1 1876100 3319712 1443613       131 44.83104
+#> 4     S4  chr2   23420 2400223 2376804       239 46.64399
 DBI::dbDisconnect(con, shutdown = TRUE)
 ```
