@@ -15,9 +15,12 @@ measures four stages, each as its own fresh process:
   self-join of the stored sketches, reduced like `pairs_reduce`. This was the
   only all-pairs form before `duckhts_somalier_relatedness_all_pairs`.
 
-The all-pairs macro checks the contents of each sketch once. The per-pair
-function checks both sketches of every pair. [Before and after](#before-and-after)
-compares both with the observations of revision `a5f3b47a`.
+The all-pairs macro checks the contents of each sketch once and compares the
+pairs on DuckDB’s threads. The per-pair function checks both sketches of every
+pair. [Before and after](#before-and-after) compares both with the observations
+of revision `a5f3b47a`. [Change from the previous render](#change-from-the-previous-render)
+compares this render with the previous one, which ran the macro’s comparisons
+in one thread.
 
 ## What was already measured
 
@@ -50,9 +53,17 @@ The dimensions are samples `N`, panel sites `S` and pairs `P = N (N - 1) / 2`.
   in `N` and does not depend on `S`. No intermediate has `N × S × P` rows: a
   pair is computed from two sketches, not from site rows.
 - Pair work is `P × S / 64` word operations.
+- The macro holds the checked sketches as one list. The pairs are numbered and
+  split into at most 65,536 blocks of consecutive pairs. Each thread that
+  compares pairs copies the list once for each chunk of up to 2,048 blocks
+  that it scans, and reads both sketches of a pair in place from that copy
+  (see [Budgets](#budgets)). Across all threads, a query makes at most 32
+  such copies, whatever `N` is.
 - Caps: `max_sites` bounds `S` per sketch (default 1,000,000; hard limit
-  100,000,000). The SQL has no cap on `P`. The caller chooses the pair
-  relation; a `pairs_table` join gives a linear selection instead of all pairs.
+  100,000,000). `max_pairs` bounds `P` (default 50,000,000): a relation with
+  more pairs is an error before any pair is compared. The caller chooses the
+  pair relation; a `pairs_table` join gives a linear selection instead of all
+  pairs.
 
 The series are:
 
@@ -95,8 +106,11 @@ JSON profiler gives the latency of the measured statement and DuckDB’s peak
 buffer and temporary bytes. `/usr/bin/time` gives peak RSS for the whole
 process. `max_temp_directory_size` is zero, so a spill fails the render.
 `memory_limit` is the DuckDB default. Each cell has three repetitions at one
-thread and at four threads, in an order that alternates sizes. The process is
-pinned to CPUs 0-3. Input Parquet files are read from a warm page cache.
+thread and at four threads, in an order that alternates sizes. The render runs
+at `nice -n -15` under `taskset`, and every CLI process inherits both. This
+host mixes performance and efficiency cores, so the header below records the
+CPU affinity, the kind of core and the nice value; every row of the runs file
+records the affinity. Input Parquet files are read from a warm page cache.
 
 Each statement consumes its output. `sketches` and `pairs_copy` write every
 output column to Parquet; a second, untimed process reads the file back.
@@ -121,15 +135,20 @@ The pair stages read sketches that an untimed process staged with the same
 
 ## Budgets
 
-The budgets were declared before the first measurement, at revision
+The budgets were first declared before the first measurement, at revision
 `a5f3b47a`. That run stopped at its own gate: the real cell of three pairs
 used 42.5 to 44.1 MiB against a ceiling of 41.5 MiB. The first model scaled
 the join output by the number of pairs, so three pairs were budgeted three
 rows. DuckDB allocates whole 2,048-row vectors for the 30-field result in each
-operator, whatever the row count. The model below adds that fixed term, and
-the sketch relation the macro materializes. No other term changed. The
-observations of the first run are kept in
+operator, whatever the row count. The model gained that fixed term, and the
+sketch relation that the macro then materialized. The observations of the
+first run are kept in
 [`benchmark_somalier_cohort_scaling_runs_a5f3b47a.csv`](benchmark_somalier_cohort_scaling_runs_a5f3b47a.csv).
+
+The all-pairs macro now compares pairs on DuckDB’s threads, with a new plan.
+The terms of `pairs_reduce` and `pairs_copy` below follow that plan. They come
+from the macro and the DuckDB 1.5 source, and they were declared before this
+render. The terms of `sketches` and `pairs_scalar` did not change.
 
 The overhead is the median peak RSS of three empty runs per thread count. An
 empty run starts the CLI, loads the extension, and copies a one-row Parquet
@@ -149,17 +168,40 @@ render stops if any observation exceeds its ceiling or spills. `W` is
     `2 × N` sketches;
   - the evidence scan: one Parquet row group (122,880 rows) of 120 decoded
     bytes per row and thread. The evidence itself is streamed.
-- **`pairs_reduce`** and **`pairs_scalar`.** The live state is:
-  - the sketch relation, compressed and decoded, the checked copy the macro
-    materializes, and both sides of the join: `6 × N` sketches;
-  - one join output vector per thread. The join compares `sample_id`, and the
-    pair function receives both sketches of each row:
-    `min(P, threads × 2,048) × 2` sketches;
+- **`pairs_reduce`.** The macro collects the checked sketches into one list in
+  `sample_id` order, in a materialized one-row relation. A cross product joins
+  the block rows with that list, and the pair indexes of each block are
+  unnested above the join; the unnest passes the list on by reference. The
+  pair function reads both sketches of a pair in place from the list. DuckDB
+  1.5 frees an operator’s state only when the query ends, so three copies of
+  the list stay live while the pairs are compared, `3 × N` sketches:
+  - the materialized relation that holds the list;
+  - the copy of the list that the cross product keeps;
+  - the segments of the ordered `list` aggregate: after its sort, the
+    aggregate copies each sketch into segments of its operator’s arena.
+
+  Each thread that compares pairs adds:
+  - two copies of the list’s mask words, `2 × N` sketches. The cross product
+    reads its copy of the list again for each chunk of up to 2,048 block rows.
+    The mask words fill many 2,048-value vectors, so the reader copies them
+    into one new vector. It allocates the new copy before it frees the
+    previous one;
   - the result vectors, fixed per thread: four operators hold one 2,048-row
     vector of the 30-field result at 16 bytes per field,
-    `threads × 4 × 2,048 × 30 × 16` bytes.
+    `4 × 2,048 × 30 × 16` bytes.
+
+  The model counts every thread, also when fewer threads compare pairs. The
+  cohort stage, which builds the list, ends before the first pair is compared.
+  It holds at most four lists at once, at the end of the ordered aggregate:
+  the sorted sketches, the sorted rows that it reads back, the list segments
+  and the result list. That is less than the pair stage holds with one thread.
 - **`pairs_copy`.** The live state of `pairs_reduce`, and the Parquet writer’s
   row group: `min(P, threads × 122,880)` rows of 400 bytes.
+- **`pairs_scalar`.** The per-pair query did not change, and its terms are the
+  ones declared at `a5f3b47a`: `6 × N` sketches for the sketch relation and
+  both sides of the join; one join output vector per thread, which carries
+  both sketches of each row, `min(P, threads × 2,048) × 2` sketches; and the
+  result vectors of `pairs_reduce`.
 
 A time exponent is the log of the median time ratio divided by the log of the
 work ratio, per doubling. The work is `N × S` for `sketches` and `P × S` for
@@ -168,12 +210,10 @@ pairs has exponent 1. An exponent above 1.25 needs an investigation. A series
 whose one-thread 1× run is under 5 seconds gets a memory verdict only.
 
 ``` sh
-taskset -c 0-3 Rscript -e 'rmarkdown::render("benchmarks/benchmark_somalier_cohort_scaling.Rmd")'
+nice -n -15 taskset -c 0-3 Rscript -e 'rmarkdown::render("benchmarks/benchmark_somalier_cohort_scaling.Rmd")'
 ```
 
-    #> NULL
-
-Source revision: 68d865e2c9044aa6362bcf13e7832ac957323697; `src` tree 16e9a40aad728d9cc6396f71a80600581523bc3e. DuckDB runtime: v1.5.1 (Variegata) 7dbb2e646f (CLI). Extension SHA-256: cd1a0c4320967084a42c6f00d11f9a83cdf0dc2476068c7a5bf557d32ad5aefe. CPU affinity: 0-3. Host load before the run: 3.70, 2.05, 2.20; after: 4.97, 4.54, 3.24. Empty-run overhead: 39.5 MiB at one thread and 39.5 MiB at four. Every observation is in [`benchmark_somalier_cohort_scaling_runs.csv`](benchmark_somalier_cohort_scaling_runs.csv).
+Source revision: 57c27de3446a8482d03eae179ce490294f06f4d4; `src` tree fda943b6dcbb090d387fc4a934091e6d17589e62. DuckDB runtime: v1.5.1 (Variegata) 7dbb2e646f (CLI). Extension SHA-256: ea551be30ca37c6e5a672b7cf7c2c48396cc762c3611c2c4a005b6a5ebc5dbdc. CPU affinity: 0-3 (2 physical cores, 2 CPUs per core, 4.8 GHz maximum). Nice value: -15. Host load before the run: 1.39, 1.63, 1.96; after: 1.83, 1.66, 1.92. Empty-run overhead: 39.8 MiB at one thread and 39.8 MiB at four. Every observation is in [`benchmark_somalier_cohort_scaling_runs.csv`](benchmark_somalier_cohort_scaling_runs.csv).
 
 ## Inputs as measured
 
@@ -182,113 +222,113 @@ Source revision: 68d865e2c9044aa6362bcf13e7832ac957323697; `src` tree 16e9a40aad
 | source    | samples |   sites | evidence_rows |   pairs | evidence_kib | sketch_kib | macro_differing_rows |
 |:----------|--------:|--------:|--------------:|--------:|-------------:|-----------:|---------------------:|
 | synthetic |     125 |  17,000 |     2,125,000 |   7,750 |      6,326.6 |       83.9 |                    0 |
-| synthetic |     250 |  17,000 |     4,250,000 |  31,125 |     12,637.5 |      163.0 |                    0 |
-| synthetic |     500 |  17,000 |     8,500,000 | 124,750 |     25,116.3 |      318.8 |                    0 |
-| synthetic |     250 |  34,000 |     8,500,000 |  31,125 |     36,766.0 |      292.9 |                    0 |
-| synthetic |     250 |  68,000 |    17,000,000 |  31,125 |     74,662.7 |      552.2 |                    0 |
-| synthetic |     125 |   4,250 |       531,250 |   7,750 |      1,130.5 |       32.8 |                    0 |
-| synthetic |     250 |   8,500 |     2,125,000 |  31,125 |      4,199.5 |       95.1 |                    0 |
+| synthetic |     250 |  17,000 |     4,250,000 |  31,125 |     12,637.5 |      161.4 |                    0 |
+| synthetic |     500 |  17,000 |     8,500,000 | 124,750 |     25,116.3 |      318.0 |                    0 |
+| synthetic |     250 |  34,000 |     8,500,000 |  31,125 |     36,766.0 |      290.4 |                    0 |
+| synthetic |     250 |  68,000 |    17,000,000 |  31,125 |     74,662.7 |      542.8 |                    0 |
+| synthetic |     125 |   4,250 |       531,250 |   7,750 |      1,130.5 |       32.4 |                    0 |
+| synthetic |     250 |   8,500 |     2,125,000 |  31,125 |      4,199.5 |       95.2 |                    0 |
 | real      |       3 | 108,757 |       326,271 |       3 |      3,527.4 |      113.1 |                    0 |
 
 ## `sketches`: count evidence to sketches, written to Parquet
 
 | dimension | scale | threads | samples |  sites | input_rows | output_rows | output_kib | median_seconds | min_seconds | max_seconds | median_rss_mib | max_rss_mib | peak_buffer_mib | spill_bytes | budget_mib | within_budget |
 |:----------|------:|--------:|--------:|-------:|-----------:|------------:|-----------:|---------------:|------------:|------------:|---------------:|------------:|----------------:|------------:|-----------:|:--------------|
-| samples   |     1 |       1 |     125 |  17000 |    2125000 |         125 |       86.7 |          0.306 |       0.299 |       0.306 |           62.6 |        62.9 |            41.8 |           0 |      121.7 | TRUE          |
-| samples   |     2 |       1 |     250 |  17000 |    4250000 |         250 |      169.4 |          0.579 |       0.576 |       0.581 |           68.4 |        68.6 |            42.2 |           0 |      132.6 | TRUE          |
-| samples   |     4 |       1 |     500 |  17000 |    8500000 |         500 |      333.9 |          1.139 |       1.130 |       2.022 |           81.4 |        81.8 |            52.8 |           0 |      154.3 | TRUE          |
-| samples   |     1 |       4 |     125 |  17000 |    2125000 |         125 |       83.8 |          0.150 |       0.144 |       0.181 |           75.7 |        79.8 |            85.5 |           0 |      257.4 | TRUE          |
-| samples   |     2 |       4 |     250 |  17000 |    4250000 |         250 |      157.8 |          0.258 |       0.256 |       0.260 |           82.6 |        82.7 |            86.8 |           0 |      277.4 | TRUE          |
-| samples   |     4 |       4 |     500 |  17000 |    8500000 |         500 |      301.0 |          0.488 |       0.485 |       0.497 |           96.5 |        96.5 |            87.4 |           0 |      317.3 | TRUE          |
-| sites     |     1 |       1 |     250 |  17000 |    4250000 |         250 |      169.4 |          0.579 |       0.576 |       0.581 |           68.4 |        68.6 |            42.2 |           0 |      132.6 | TRUE          |
-| sites     |     2 |       1 |     250 |  34000 |    8500000 |         250 |      283.5 |          1.185 |       1.183 |       1.435 |           88.2 |        89.8 |            68.1 |           0 |      183.1 | TRUE          |
-| sites     |     4 |       1 |     250 |  68000 |   17000000 |         250 |      542.2 |          2.399 |       2.350 |       2.417 |          128.7 |       128.9 |           124.3 |           0 |      284.0 | TRUE          |
-| sites     |     1 |       4 |     250 |  17000 |    4250000 |         250 |      157.8 |          0.258 |       0.256 |       0.260 |           82.6 |        82.7 |            86.8 |           0 |      277.4 | TRUE          |
-| sites     |     2 |       4 |     250 |  34000 |    8500000 |         250 |      294.4 |          0.501 |       0.501 |       0.501 |          107.8 |       108.8 |           109.3 |           0 |      346.2 | TRUE          |
-| sites     |     4 |       4 |     250 |  68000 |   17000000 |         250 |      555.3 |          0.994 |       0.975 |       1.019 |          152.3 |       153.3 |           143.0 |           0 |      483.5 | TRUE          |
-| joint     |     1 |       1 |     125 |   4250 |     531250 |         125 |       34.5 |          0.083 |       0.082 |       0.083 |           52.5 |        52.6 |            29.8 |           0 |       91.9 | TRUE          |
-| joint     |     2 |       1 |     250 |   8500 |    2125000 |         250 |      100.9 |          0.290 |       0.285 |       0.293 |           59.0 |        59.1 |            35.3 |           0 |      107.3 | TRUE          |
-| joint     |     4 |       1 |     500 |  17000 |    8500000 |         500 |      333.9 |          1.139 |       1.130 |       2.022 |           81.4 |        81.8 |            52.8 |           0 |      154.3 | TRUE          |
-| joint     |     1 |       4 |     125 |   4250 |     531250 |         125 |       32.8 |          0.047 |       0.047 |       0.048 |           61.2 |        62.3 |            60.3 |           0 |      220.7 | TRUE          |
-| joint     |     2 |       4 |     250 |   8500 |    2125000 |         250 |       96.0 |          0.141 |       0.139 |       0.143 |           69.7 |        69.8 |            80.0 |           0 |      243.0 | TRUE          |
-| joint     |     4 |       4 |     500 |  17000 |    8500000 |         500 |      301.0 |          0.488 |       0.485 |       0.497 |           96.5 |        96.5 |            87.4 |           0 |      317.3 | TRUE          |
-| real      |     1 |       1 |       3 | 108757 |     326271 |           3 |      113.1 |          0.172 |       0.170 |       0.174 |          128.9 |       129.1 |           146.7 |           0 |      270.1 | TRUE          |
-| real      |     1 |       4 |       3 | 108757 |     326271 |           3 |      113.1 |          0.106 |       0.100 |       0.117 |          136.5 |       136.9 |           174.3 |           0 |      398.0 | TRUE          |
+| samples   |     1 |       1 |     125 |  17000 |    2125000 |         125 |       86.7 |          0.289 |       0.289 |       0.290 |           62.8 |        63.1 |            41.9 |           0 |      122.0 | TRUE          |
+| samples   |     2 |       1 |     250 |  17000 |    4250000 |         250 |      169.4 |          0.555 |       0.553 |       0.555 |           68.6 |        68.6 |            42.2 |           0 |      132.8 | TRUE          |
+| samples   |     4 |       1 |     500 |  17000 |    8500000 |         500 |      333.9 |          1.079 |       1.077 |       1.084 |           82.5 |        82.6 |            52.8 |           0 |      154.5 | TRUE          |
+| samples   |     1 |       4 |     125 |  17000 |    2125000 |         125 |       84.3 |          0.141 |       0.139 |       0.147 |           76.5 |        76.6 |            86.5 |           0 |      257.7 | TRUE          |
+| samples   |     2 |       4 |     250 |  17000 |    4250000 |         250 |      158.9 |          0.251 |       0.250 |       0.262 |           82.8 |        83.0 |            86.8 |           0 |      277.7 | TRUE          |
+| samples   |     4 |       4 |     500 |  17000 |    8500000 |         500 |      308.8 |          0.471 |       0.462 |       0.481 |           95.5 |        96.2 |            87.4 |           0 |      317.6 | TRUE          |
+| sites     |     1 |       1 |     250 |  17000 |    4250000 |         250 |      169.4 |          0.555 |       0.553 |       0.555 |           68.6 |        68.6 |            42.2 |           0 |      132.8 | TRUE          |
+| sites     |     2 |       1 |     250 |  34000 |    8500000 |         250 |      283.5 |          1.124 |       1.117 |       1.127 |           88.3 |        88.4 |            68.2 |           0 |      183.3 | TRUE          |
+| sites     |     4 |       1 |     250 |  68000 |   17000000 |         250 |      542.2 |          2.246 |       2.245 |       2.255 |          129.4 |       129.6 |           124.3 |           0 |      284.2 | TRUE          |
+| sites     |     1 |       4 |     250 |  17000 |    4250000 |         250 |      158.9 |          0.251 |       0.250 |       0.262 |           82.8 |        83.0 |            86.8 |           0 |      277.7 | TRUE          |
+| sites     |     2 |       4 |     250 |  34000 |    8500000 |         250 |      293.4 |          0.481 |       0.480 |       0.483 |          108.2 |       109.8 |           109.3 |           0 |      346.4 | TRUE          |
+| sites     |     4 |       4 |     250 |  68000 |   17000000 |         250 |      554.1 |          0.944 |       0.938 |       0.948 |          151.9 |       154.1 |           143.0 |           0 |      483.8 | TRUE          |
+| joint     |     1 |       1 |     125 |   4250 |     531250 |         125 |       34.5 |          0.079 |       0.078 |       0.079 |           53.0 |        53.1 |            29.8 |           0 |       92.2 | TRUE          |
+| joint     |     2 |       1 |     250 |   8500 |    2125000 |         250 |      100.9 |          0.279 |       0.277 |       0.280 |           58.5 |        58.6 |            35.3 |           0 |      107.6 | TRUE          |
+| joint     |     4 |       1 |     500 |  17000 |    8500000 |         500 |      333.9 |          1.079 |       1.077 |       1.084 |           82.5 |        82.6 |            52.8 |           0 |      154.5 | TRUE          |
+| joint     |     1 |       4 |     125 |   4250 |     531250 |         125 |       33.0 |          0.043 |       0.043 |       0.045 |           61.1 |        61.5 |            68.3 |           0 |      221.0 | TRUE          |
+| joint     |     2 |       4 |     250 |   8500 |    2125000 |         250 |       95.6 |          0.135 |       0.134 |       0.136 |           70.0 |        70.4 |            80.0 |           0 |      243.3 | TRUE          |
+| joint     |     4 |       4 |     500 |  17000 |    8500000 |         500 |      308.8 |          0.471 |       0.462 |       0.481 |           95.5 |        96.2 |            87.4 |           0 |      317.6 | TRUE          |
+| real      |     1 |       1 |       3 | 108757 |     326271 |           3 |      113.1 |          0.162 |       0.162 |       0.162 |          129.7 |       130.1 |           146.7 |           0 |      270.3 | TRUE          |
+| real      |     1 |       4 |       3 | 108757 |     326271 |           3 |      113.1 |          0.097 |       0.089 |       0.098 |          136.8 |       136.9 |           175.7 |           0 |      398.3 | TRUE          |
 
 ## `pairs_reduce`: all pairs, reduced
 
 |     | dimension | scale | threads | samples |  sites | input_rows | output_rows | output_kib | median_seconds | min_seconds | max_seconds | median_rss_mib | max_rss_mib | peak_buffer_mib | spill_bytes | budget_mib | within_budget |
 |:----|:----------|------:|--------:|--------:|-------:|-----------:|------------:|-----------:|---------------:|------------:|------------:|---------------:|------------:|----------------:|------------:|-----------:|:--------------|
-| 21  | samples   |     1 |       1 |     125 |  17000 |        125 |        7750 |        0.1 |          0.072 |       0.071 |       0.073 |           86.9 |        87.0 |            18.2 |           0 |      142.8 | TRUE          |
-| 22  | samples   |     2 |       1 |     250 |  17000 |        250 |       31125 |        0.1 |          0.208 |       0.206 |       0.211 |          100.2 |       100.4 |            24.7 |           0 |      157.1 | TRUE          |
-| 23  | samples   |     4 |       1 |     500 |  17000 |        500 |      124750 |        0.1 |          0.733 |       0.725 |       0.736 |          114.0 |       114.2 |            36.8 |           0 |      185.6 | TRUE          |
-| 24  | samples   |     1 |       4 |     125 |  17000 |        125 |        7750 |        0.1 |          0.073 |       0.069 |       0.075 |           95.8 |        95.8 |            18.3 |           0 |      393.2 | TRUE          |
-| 25  | samples   |     2 |       4 |     250 |  17000 |        250 |       31125 |        0.1 |          0.213 |       0.206 |       0.225 |          113.2 |       115.4 |            24.9 |           0 |      424.3 | TRUE          |
-| 26  | samples   |     4 |       4 |     500 |  17000 |        500 |      124750 |        0.1 |          0.785 |       0.739 |       0.842 |          135.1 |       136.4 |            36.9 |           0 |      452.8 | TRUE          |
-| 27  | sites     |     1 |       1 |     250 |  17000 |        250 |       31125 |        0.1 |          0.208 |       0.206 |       0.211 |          100.2 |       100.4 |            24.7 |           0 |      157.1 | TRUE          |
-| 28  | sites     |     2 |       1 |     250 |  34000 |        250 |       31125 |        0.1 |          0.385 |       0.382 |       0.389 |          160.8 |       161.0 |            36.8 |           0 |      259.3 | TRUE          |
-| 29  | sites     |     4 |       1 |     250 |  68000 |        250 |       31125 |        0.1 |          1.034 |       1.022 |       1.036 |          205.8 |       205.9 |            61.4 |           0 |      463.3 | TRUE          |
-| 30  | sites     |     1 |       4 |     250 |  17000 |        250 |       31125 |        0.1 |          0.213 |       0.206 |       0.225 |          113.2 |       115.4 |            24.9 |           0 |      424.3 | TRUE          |
-| 31  | sites     |     2 |       4 |     250 |  34000 |        250 |       31125 |        0.1 |          0.396 |       0.386 |       0.396 |          159.7 |       165.6 |            36.9 |           0 |      750.9 | TRUE          |
-| 32  | sites     |     4 |       4 |     250 |  68000 |        250 |       31125 |        0.1 |          1.045 |       1.044 |       1.134 |          211.4 |       217.5 |            61.5 |           0 |     1403.0 | TRUE          |
-| 33  | joint     |     1 |       1 |     125 |   4250 |        125 |        7750 |        0.1 |          0.023 |       0.023 |       0.023 |           59.8 |        59.8 |            13.1 |           0 |       76.6 | TRUE          |
-| 34  | joint     |     2 |       1 |     250 |   8500 |        250 |       31125 |        0.1 |          0.116 |       0.115 |       0.116 |           77.9 |        78.3 |            18.2 |           0 |      106.0 | TRUE          |
-| 35  | joint     |     4 |       1 |     500 |  17000 |        500 |      124750 |        0.1 |          0.733 |       0.725 |       0.736 |          114.0 |       114.2 |            36.8 |           0 |      185.6 | TRUE          |
-| 36  | joint     |     1 |       4 |     125 |   4250 |        125 |        7750 |        0.1 |          0.023 |       0.023 |       0.024 |           58.5 |        58.6 |            13.2 |           0 |      171.2 | TRUE          |
-| 37  | joint     |     2 |       4 |     250 |   8500 |        250 |       31125 |        0.1 |          0.113 |       0.112 |       0.113 |           77.4 |        79.8 |            18.3 |           0 |      260.9 | TRUE          |
-| 38  | joint     |     4 |       4 |     500 |  17000 |        500 |      124750 |        0.1 |          0.785 |       0.739 |       0.842 |          135.1 |       136.4 |            36.9 |           0 |      452.8 | TRUE          |
-| 39  | real      |     1 |       1 |       3 | 108757 |          3 |           3 |        0.1 |          0.005 |       0.005 |       0.005 |           44.9 |        45.0 |            11.6 |           0 |       53.6 | TRUE          |
-| 40  | real      |     1 |       4 |       3 | 108757 |          3 |           3 |        0.1 |          0.004 |       0.004 |       0.005 |           45.4 |        45.5 |            11.5 |           0 |       87.3 | TRUE          |
+| 21  | samples   |     1 |       1 |     125 |  17000 |        125 |        7750 |        0.1 |          0.038 |       0.038 |       0.039 |           50.5 |        50.9 |            22.1 |           0 |       62.9 | TRUE          |
+| 22  | samples   |     2 |       1 |     250 |  17000 |        250 |       31125 |        0.1 |          0.131 |       0.131 |       0.131 |           54.7 |        54.8 |            30.1 |           0 |       74.8 | TRUE          |
+| 23  | samples   |     4 |       1 |     500 |  17000 |        500 |      124750 |        0.1 |          0.486 |       0.486 |       0.489 |           61.9 |        62.1 |            48.2 |           0 |       98.5 | TRUE          |
+| 24  | samples   |     1 |       4 |     125 |  17000 |        125 |        7750 |        0.1 |          0.024 |       0.024 |       0.025 |           58.4 |        59.6 |            44.2 |           0 |      110.9 | TRUE          |
+| 25  | samples   |     2 |       4 |     250 |  17000 |        250 |       31125 |        0.1 |          0.075 |       0.073 |       0.076 |           68.8 |        70.5 |            61.2 |           0 |      137.1 | TRUE          |
+| 26  | samples   |     4 |       4 |     500 |  17000 |        500 |      124750 |        0.1 |          0.256 |       0.255 |       0.264 |           85.7 |        86.1 |            87.8 |           0 |      189.3 | TRUE          |
+| 27  | sites     |     1 |       1 |     250 |  17000 |        250 |       31125 |        0.1 |          0.131 |       0.131 |       0.131 |           54.7 |        54.8 |            30.1 |           0 |       74.8 | TRUE          |
+| 28  | sites     |     2 |       1 |     250 |  34000 |        250 |       31125 |        0.1 |          0.238 |       0.238 |       0.240 |           60.6 |        60.7 |            47.1 |           0 |       97.6 | TRUE          |
+| 29  | sites     |     4 |       1 |     250 |  68000 |        250 |       31125 |        0.1 |          0.456 |       0.454 |       0.457 |           77.8 |        78.1 |            82.2 |           0 |      143.2 | TRUE          |
+| 30  | sites     |     1 |       4 |     250 |  17000 |        250 |       31125 |        0.1 |          0.075 |       0.073 |       0.076 |           68.8 |        70.5 |            61.2 |           0 |      137.1 | TRUE          |
+| 31  | sites     |     2 |       4 |     250 |  34000 |        250 |       31125 |        0.1 |          0.137 |       0.135 |       0.139 |           86.5 |        87.5 |            87.1 |           0 |      187.3 | TRUE          |
+| 32  | sites     |     4 |       4 |     250 |  68000 |        250 |       31125 |        0.1 |          0.262 |       0.250 |       0.266 |          118.0 |       118.1 |           140.4 |           0 |      287.5 | TRUE          |
+| 33  | joint     |     1 |       1 |     125 |   4250 |        125 |        7750 |        0.1 |          0.017 |       0.017 |       0.017 |           47.5 |        47.7 |            16.5 |           0 |       54.4 | TRUE          |
+| 34  | joint     |     2 |       1 |     250 |   8500 |        250 |       31125 |        0.1 |          0.076 |       0.075 |       0.077 |           50.6 |        50.9 |            22.1 |           0 |       63.4 | TRUE          |
+| 35  | joint     |     4 |       1 |     500 |  17000 |        500 |      124750 |        0.1 |          0.486 |       0.486 |       0.489 |           61.9 |        62.1 |            48.2 |           0 |       98.5 | TRUE          |
+| 36  | joint     |     1 |       4 |     125 |   4250 |        125 |        7750 |        0.1 |          0.012 |       0.012 |       0.012 |           54.1 |        54.2 |            33.9 |           0 |       92.1 | TRUE          |
+| 37  | joint     |     2 |       4 |     250 |   8500 |        250 |       31125 |        0.1 |          0.043 |       0.043 |       0.045 |           60.9 |        60.9 |            47.8 |           0 |      111.9 | TRUE          |
+| 38  | joint     |     4 |       4 |     500 |  17000 |        500 |      124750 |        0.1 |          0.256 |       0.255 |       0.264 |           85.7 |        86.1 |            87.8 |           0 |      189.3 | TRUE          |
+| 39  | real      |     1 |       1 |       3 | 108757 |          3 |           3 |        0.1 |          0.006 |       0.006 |       0.006 |           46.1 |        46.2 |            15.1 |           0 |       52.8 | TRUE          |
+| 40  | real      |     1 |       4 |       3 | 108757 |          3 |           3 |        0.1 |          0.006 |       0.005 |       0.006 |           47.9 |        48.0 |            12.3 |           0 |       88.7 | TRUE          |
 
 ## `pairs_copy`: all pairs, written to Parquet
 
 |     | dimension | scale | threads | samples |  sites | input_rows | output_rows | output_kib | median_seconds | min_seconds | max_seconds | median_rss_mib | max_rss_mib | peak_buffer_mib | spill_bytes | budget_mib | within_budget |
 |:----|:----------|------:|--------:|--------:|-------:|-----------:|------------:|-----------:|---------------:|------------:|------------:|---------------:|------------:|----------------:|------------:|-----------:|:--------------|
-| 41  | samples   |     1 |       1 |     125 |  17000 |        125 |        7750 |      111.9 |          0.076 |       0.075 |       0.076 |           90.9 |        90.9 |            20.2 |           0 |      151.7 | TRUE          |
-| 42  | samples   |     2 |       1 |     250 |  17000 |        250 |       31125 |      366.1 |          0.226 |       0.224 |       0.230 |          103.2 |       108.2 |            34.6 |           0 |      192.7 | TRUE          |
-| 43  | samples   |     4 |       1 |     500 |  17000 |        500 |      124750 |     1425.3 |          0.829 |       0.803 |       0.880 |          202.0 |       202.9 |            78.2 |           0 |      326.2 | TRUE          |
-| 44  | samples   |     1 |       4 |     125 |  17000 |        125 |        7750 |      111.9 |          0.079 |       0.077 |       0.109 |           95.4 |        97.4 |            20.4 |           0 |      402.1 | TRUE          |
-| 45  | samples   |     2 |       4 |     250 |  17000 |        250 |       31125 |      366.1 |          0.232 |       0.214 |       0.252 |          116.5 |       125.1 |            34.8 |           0 |      459.9 | TRUE          |
-| 46  | samples   |     4 |       4 |     500 |  17000 |        500 |      124750 |     1425.3 |          0.801 |       0.796 |       0.826 |          196.1 |       203.3 |            78.3 |           0 |      595.5 | TRUE          |
-| 47  | sites     |     1 |       1 |     250 |  17000 |        250 |       31125 |      366.1 |          0.226 |       0.224 |       0.230 |          103.2 |       108.2 |            34.6 |           0 |      192.7 | TRUE          |
-| 48  | sites     |     2 |       1 |     250 |  34000 |        250 |       31125 |      355.1 |          0.434 |       0.432 |       0.541 |          148.6 |       148.9 |            45.2 |           0 |      294.9 | TRUE          |
-| 49  | sites     |     4 |       1 |     250 |  68000 |        250 |       31125 |      351.3 |          1.053 |       1.043 |       1.093 |          214.1 |       214.2 |            66.8 |           0 |      499.0 | TRUE          |
-| 50  | sites     |     1 |       4 |     250 |  17000 |        250 |       31125 |      366.1 |          0.232 |       0.214 |       0.252 |          116.5 |       125.1 |            34.8 |           0 |      459.9 | TRUE          |
-| 51  | sites     |     2 |       4 |     250 |  34000 |        250 |       31125 |      355.1 |          0.422 |       0.412 |       0.437 |          194.7 |       203.3 |            45.3 |           0 |      786.5 | TRUE          |
-| 52  | sites     |     4 |       4 |     250 |  68000 |        250 |       31125 |      351.3 |          1.062 |       1.056 |       1.129 |          214.4 |       219.4 |            66.9 |           0 |     1438.6 | TRUE          |
-| 53  | joint     |     1 |       1 |     125 |   4250 |        125 |        7750 |      116.3 |          0.025 |       0.025 |       0.026 |           60.2 |        61.0 |            15.1 |           0 |       85.5 | TRUE          |
-| 54  | joint     |     2 |       1 |     250 |   8500 |        250 |       31125 |      356.2 |          0.122 |       0.121 |       0.127 |           87.0 |        87.3 |            41.3 |           0 |      141.6 | TRUE          |
-| 55  | joint     |     4 |       1 |     500 |  17000 |        500 |      124750 |     1425.3 |          0.829 |       0.803 |       0.880 |          202.0 |       202.9 |            78.2 |           0 |      326.2 | TRUE          |
-| 56  | joint     |     1 |       4 |     125 |   4250 |        125 |        7750 |      116.3 |          0.028 |       0.028 |       0.039 |           62.0 |        62.2 |            15.2 |           0 |      180.1 | TRUE          |
-| 57  | joint     |     2 |       4 |     250 |   8500 |        250 |       31125 |      356.2 |          0.127 |       0.126 |       0.134 |          100.4 |       103.4 |            41.4 |           0 |      296.6 | TRUE          |
-| 58  | joint     |     4 |       4 |     500 |  17000 |        500 |      124750 |     1425.3 |          0.801 |       0.796 |       0.826 |          196.1 |       203.3 |            78.3 |           0 |      595.5 | TRUE          |
-| 59  | real      |     1 |       1 |       3 | 108757 |          3 |           3 |        4.6 |          0.005 |       0.005 |       0.005 |           44.9 |        45.1 |             9.6 |           0 |       53.6 | TRUE          |
-| 60  | real      |     1 |       4 |       3 | 108757 |          3 |           3 |        4.6 |          0.004 |       0.004 |       0.004 |           46.2 |        46.3 |            10.0 |           0 |       87.3 | TRUE          |
+| 41  | samples   |     1 |       1 |     125 |  17000 |        125 |        7750 |      103.4 |          0.042 |       0.042 |       0.043 |           53.1 |        53.3 |            22.6 |           0 |       71.8 | TRUE          |
+| 42  | samples   |     2 |       1 |     250 |  17000 |        250 |       31125 |      330.8 |          0.145 |       0.145 |       0.145 |           74.0 |        74.0 |            32.2 |           0 |      110.4 | TRUE          |
+| 43  | samples   |     4 |       1 |     500 |  17000 |        500 |      124750 |     1266.1 |          0.548 |       0.545 |       0.548 |          150.0 |       150.1 |           100.8 |           0 |      239.2 | TRUE          |
+| 44  | samples   |     1 |       4 |     125 |  17000 |        125 |        7750 |      103.4 |          0.045 |       0.043 |       0.053 |           58.4 |        58.5 |            22.7 |           0 |      119.8 | TRUE          |
+| 45  | samples   |     2 |       4 |     250 |  17000 |        250 |       31125 |      330.8 |          0.152 |       0.150 |       0.152 |           80.1 |        83.9 |            32.2 |           0 |      172.7 | TRUE          |
+| 46  | samples   |     4 |       4 |     500 |  17000 |        500 |      124750 |     1266.1 |          0.547 |       0.543 |       0.570 |          153.1 |       157.2 |           101.0 |           0 |      332.1 | TRUE          |
+| 47  | sites     |     1 |       1 |     250 |  17000 |        250 |       31125 |      330.8 |          0.145 |       0.145 |       0.145 |           74.0 |        74.0 |            32.2 |           0 |      110.4 | TRUE          |
+| 48  | sites     |     2 |       1 |     250 |  34000 |        250 |       31125 |      319.8 |          0.253 |       0.252 |       0.254 |           81.7 |        81.9 |            49.2 |           0 |      133.2 | TRUE          |
+| 49  | sites     |     4 |       1 |     250 |  68000 |        250 |       31125 |      311.3 |          0.470 |       0.469 |       0.474 |           94.7 |        94.8 |            84.2 |           0 |      178.8 | TRUE          |
+| 50  | sites     |     1 |       4 |     250 |  17000 |        250 |       31125 |      330.8 |          0.152 |       0.150 |       0.152 |           80.1 |        83.9 |            32.2 |           0 |      172.7 | TRUE          |
+| 51  | sites     |     2 |       4 |     250 |  34000 |        250 |       31125 |      319.8 |          0.255 |       0.253 |       0.271 |           94.1 |        95.4 |            49.3 |           0 |      222.9 | TRUE          |
+| 52  | sites     |     4 |       4 |     250 |  68000 |        250 |       31125 |      311.3 |          0.473 |       0.468 |       0.485 |          110.2 |       118.7 |            84.4 |           0 |      323.2 | TRUE          |
+| 53  | joint     |     1 |       1 |     125 |   4250 |        125 |        7750 |      107.1 |          0.020 |       0.020 |       0.021 |           50.3 |        50.3 |            16.6 |           0 |       63.3 | TRUE          |
+| 54  | joint     |     2 |       1 |     250 |   8500 |        250 |       31125 |      317.8 |          0.092 |       0.090 |       0.092 |           70.2 |        70.4 |            45.0 |           0 |       99.0 | TRUE          |
+| 55  | joint     |     4 |       1 |     500 |  17000 |        500 |      124750 |     1266.1 |          0.548 |       0.545 |       0.548 |          150.0 |       150.1 |           100.8 |           0 |      239.2 | TRUE          |
+| 56  | joint     |     1 |       4 |     125 |   4250 |        125 |        7750 |      107.1 |          0.021 |       0.021 |       0.022 |           54.6 |        55.2 |            15.6 |           0 |      101.0 | TRUE          |
+| 57  | joint     |     2 |       4 |     250 |   8500 |        250 |       31125 |      317.8 |          0.095 |       0.092 |       0.105 |           74.5 |        75.9 |            45.1 |           0 |      147.6 | TRUE          |
+| 58  | joint     |     4 |       4 |     500 |  17000 |        500 |      124750 |     1266.1 |          0.547 |       0.543 |       0.570 |          153.1 |       157.2 |           101.0 |           0 |      332.1 | TRUE          |
+| 59  | real      |     1 |       1 |       3 | 108757 |          3 |           3 |        4.6 |          0.006 |       0.006 |       0.006 |           45.9 |        46.1 |            15.0 |           0 |       52.8 | TRUE          |
+| 60  | real      |     1 |       4 |       3 | 108757 |          3 |           3 |        4.6 |          0.006 |       0.006 |       0.006 |           47.8 |        48.3 |            13.4 |           0 |       88.7 | TRUE          |
 
 ## `pairs_scalar`: all pairs through the per-pair function, reduced
 
 |     | dimension | scale | threads | samples |  sites | input_rows | output_rows | output_kib | median_seconds | min_seconds | max_seconds | median_rss_mib | max_rss_mib | peak_buffer_mib | spill_bytes | budget_mib | within_budget |
 |:----|:----------|------:|--------:|--------:|-------:|-----------:|------------:|-----------:|---------------:|------------:|------------:|---------------:|------------:|----------------:|------------:|-----------:|:--------------|
-| 61  | samples   |     1 |       1 |     125 |  17000 |        125 |        7750 |        0.1 |          0.164 |       0.163 |       0.164 |           85.6 |        85.8 |            18.4 |           0 |      142.8 | TRUE          |
-| 62  | samples   |     2 |       1 |     250 |  17000 |        250 |       31125 |        0.1 |          0.583 |       0.575 |       0.587 |           99.7 |       104.5 |            27.4 |           0 |      157.1 | TRUE          |
-| 63  | samples   |     4 |       1 |     500 |  17000 |        500 |      124750 |        0.1 |          2.253 |       2.250 |       2.274 |          114.7 |       114.7 |            45.5 |           0 |      185.6 | TRUE          |
-| 64  | samples   |     1 |       4 |     125 |  17000 |        125 |        7750 |        0.1 |          0.164 |       0.162 |       0.170 |           94.9 |        95.0 |            18.4 |           0 |      393.2 | TRUE          |
-| 65  | samples   |     2 |       4 |     250 |  17000 |        250 |       31125 |        0.1 |          0.580 |       0.579 |       0.584 |           96.9 |        97.5 |            27.8 |           0 |      424.3 | TRUE          |
-| 66  | samples   |     4 |       4 |     500 |  17000 |        500 |      124750 |        0.1 |          2.256 |       2.253 |       2.259 |          116.9 |       121.5 |            45.7 |           0 |      452.8 | TRUE          |
-| 67  | sites     |     1 |       1 |     250 |  17000 |        250 |       31125 |        0.1 |          0.583 |       0.575 |       0.587 |           99.7 |       104.5 |            27.4 |           0 |      157.1 | TRUE          |
-| 68  | sites     |     2 |       1 |     250 |  34000 |        250 |       31125 |        0.1 |          1.137 |       1.135 |       1.138 |          161.3 |       161.4 |            45.7 |           0 |      259.3 | TRUE          |
-| 69  | sites     |     4 |       1 |     250 |  68000 |        250 |       31125 |        0.1 |          2.530 |       2.513 |       2.534 |          202.7 |       202.7 |            81.7 |           0 |      463.3 | TRUE          |
-| 70  | sites     |     1 |       4 |     250 |  17000 |        250 |       31125 |        0.1 |          0.580 |       0.579 |       0.584 |           96.9 |        97.5 |            27.8 |           0 |      424.3 | TRUE          |
-| 71  | sites     |     2 |       4 |     250 |  34000 |        250 |       31125 |        0.1 |          1.140 |       1.136 |       1.143 |          146.9 |       154.1 |            45.4 |           0 |      750.9 | TRUE          |
-| 72  | sites     |     4 |       4 |     250 |  68000 |        250 |       31125 |        0.1 |          2.709 |       2.699 |       2.715 |          209.1 |       209.5 |            81.7 |           0 |     1403.0 | TRUE          |
-| 73  | joint     |     1 |       1 |     125 |   4250 |        125 |        7750 |        0.1 |          0.047 |       0.047 |       0.048 |           54.4 |        54.5 |            10.8 |           0 |       76.6 | TRUE          |
-| 74  | joint     |     2 |       1 |     250 |   8500 |        250 |       31125 |        0.1 |          0.302 |       0.302 |       0.303 |           73.2 |        73.3 |            18.4 |           0 |      106.0 | TRUE          |
-| 75  | joint     |     4 |       1 |     500 |  17000 |        500 |      124750 |        0.1 |          2.253 |       2.250 |       2.274 |          114.7 |       114.7 |            45.5 |           0 |      185.6 | TRUE          |
-| 76  | joint     |     1 |       4 |     125 |   4250 |        125 |        7750 |        0.1 |          0.047 |       0.047 |       0.048 |           55.6 |        56.0 |            10.9 |           0 |      171.2 | TRUE          |
-| 77  | joint     |     2 |       4 |     250 |   8500 |        250 |       31125 |        0.1 |          0.302 |       0.302 |       0.307 |           75.2 |        83.6 |            18.4 |           0 |      260.9 | TRUE          |
-| 78  | joint     |     4 |       4 |     500 |  17000 |        500 |      124750 |        0.1 |          2.256 |       2.253 |       2.259 |          116.9 |       121.5 |            45.7 |           0 |      452.8 | TRUE          |
-| 79  | real      |     1 |       1 |       3 | 108757 |          3 |           3 |        0.1 |          0.003 |       0.003 |       0.003 |           42.2 |        42.6 |             7.4 |           0 |       53.6 | TRUE          |
-| 80  | real      |     1 |       4 |       3 | 108757 |          3 |           3 |        0.1 |          0.003 |       0.003 |       0.003 |           43.1 |        43.2 |             7.4 |           0 |       87.3 | TRUE          |
+| 61  | samples   |     1 |       1 |     125 |  17000 |        125 |        7750 |        0.1 |          0.156 |       0.155 |       0.159 |           86.2 |        86.2 |            18.4 |           0 |      143.1 | TRUE          |
+| 62  | samples   |     2 |       1 |     250 |  17000 |        250 |       31125 |        0.1 |          0.558 |       0.554 |       0.561 |          100.3 |       100.4 |            27.4 |           0 |      157.4 | TRUE          |
+| 63  | samples   |     4 |       1 |     500 |  17000 |        500 |      124750 |        0.1 |          2.147 |       2.134 |       2.156 |          113.0 |       113.0 |            45.7 |           0 |      185.9 | TRUE          |
+| 64  | samples   |     1 |       4 |     125 |  17000 |        125 |        7750 |        0.1 |          0.158 |       0.153 |       0.158 |           94.9 |        95.5 |            18.4 |           0 |      393.5 | TRUE          |
+| 65  | samples   |     2 |       4 |     250 |  17000 |        250 |       31125 |        0.1 |          0.558 |       0.556 |       0.559 |          100.9 |       100.9 |            27.7 |           0 |      424.6 | TRUE          |
+| 66  | samples   |     4 |       4 |     500 |  17000 |        500 |      124750 |        0.1 |          2.147 |       2.146 |       2.153 |          113.3 |       121.8 |            45.5 |           0 |      453.1 | TRUE          |
+| 67  | sites     |     1 |       1 |     250 |  17000 |        250 |       31125 |        0.1 |          0.558 |       0.554 |       0.561 |          100.3 |       100.4 |            27.4 |           0 |      157.4 | TRUE          |
+| 68  | sites     |     2 |       1 |     250 |  34000 |        250 |       31125 |        0.1 |          1.080 |       1.078 |       1.082 |          164.4 |       164.7 |            45.4 |           0 |      259.6 | TRUE          |
+| 69  | sites     |     4 |       1 |     250 |  68000 |        250 |       31125 |        0.1 |          2.409 |       2.401 |       2.411 |          203.0 |       203.1 |            81.7 |           0 |      463.6 | TRUE          |
+| 70  | sites     |     1 |       4 |     250 |  17000 |        250 |       31125 |        0.1 |          0.558 |       0.556 |       0.559 |          100.9 |       100.9 |            27.7 |           0 |      424.6 | TRUE          |
+| 71  | sites     |     2 |       4 |     250 |  34000 |        250 |       31125 |        0.1 |          1.098 |       1.090 |       1.099 |          148.1 |       153.6 |            45.7 |           0 |      751.2 | TRUE          |
+| 72  | sites     |     4 |       4 |     250 |  68000 |        250 |       31125 |        0.1 |          2.607 |       2.410 |       2.624 |          205.9 |       210.0 |            81.5 |           0 |     1403.3 | TRUE          |
+| 73  | joint     |     1 |       1 |     125 |   4250 |        125 |        7750 |        0.1 |          0.045 |       0.044 |       0.045 |           55.1 |        55.1 |            10.9 |           0 |       76.9 | TRUE          |
+| 74  | joint     |     2 |       1 |     250 |   8500 |        250 |       31125 |        0.1 |          0.286 |       0.283 |       0.286 |           73.4 |        73.9 |            18.4 |           0 |      106.3 | TRUE          |
+| 75  | joint     |     4 |       1 |     500 |  17000 |        500 |      124750 |        0.1 |          2.147 |       2.134 |       2.156 |          113.0 |       113.0 |            45.7 |           0 |      185.9 | TRUE          |
+| 76  | joint     |     1 |       4 |     125 |   4250 |        125 |        7750 |        0.1 |          0.046 |       0.045 |       0.046 |           55.4 |        56.0 |            10.9 |           0 |      171.5 | TRUE          |
+| 77  | joint     |     2 |       4 |     250 |   8500 |        250 |       31125 |        0.1 |          0.289 |       0.285 |       0.290 |           75.4 |        76.1 |            18.5 |           0 |      261.2 | TRUE          |
+| 78  | joint     |     4 |       4 |     500 |  17000 |        500 |      124750 |        0.1 |          2.147 |       2.146 |       2.153 |          113.3 |       121.8 |            45.5 |           0 |      453.1 | TRUE          |
+| 79  | real      |     1 |       1 |       3 | 108757 |          3 |           3 |        0.1 |          0.003 |       0.003 |       0.003 |           42.9 |        43.2 |             7.4 |           0 |       53.9 | TRUE          |
+| 80  | real      |     1 |       4 |       3 | 108757 |          3 |           3 |        0.1 |          0.003 |       0.003 |       0.003 |           43.3 |        43.4 |             7.4 |           0 |       87.6 | TRUE          |
 
 ## Before and after
 
@@ -297,26 +337,90 @@ per-pair function over a self-join; its observations are in
 [`benchmark_somalier_cohort_scaling_runs_a5f3b47a.csv`](benchmark_somalier_cohort_scaling_runs_a5f3b47a.csv).
 `per_pair_function` and `all_pairs_macro` are the `pairs_scalar` and
 `pairs_reduce` stages of this revision. All three produce the same rows from
-the same sketches, with the same statement shape, host, CPU set and DuckDB
-CLI. The two runs were made at different times on a shared host, so the
-ratios carry that noise. Times are median seconds of three fresh processes.
+the same sketches, with the same statement shape, host and DuckDB CLI.
+`macro_speedup` is `before` divided by `all_pairs_macro`. Times are median
+seconds of three fresh processes.
 
 | samples |  sites |   pairs | threads | before | per_pair_function | all_pairs_macro | macro_speedup |
 |--------:|-------:|--------:|--------:|-------:|------------------:|----------------:|--------------:|
-|     125 |  4,250 |   7,750 |       1 |  0.081 |             0.047 |           0.023 |         3.550 |
-|     250 |  8,500 |  31,125 |       1 |  0.574 |             0.302 |           0.116 |         4.969 |
-|     125 | 17,000 |   7,750 |       1 |  0.298 |             0.164 |           0.072 |         4.150 |
-|     250 | 17,000 |  31,125 |       1 |  1.121 |             0.583 |           0.208 |         5.399 |
-|     500 | 17,000 | 124,750 |       1 |  4.399 |             2.253 |           0.733 |         6.002 |
-|     250 | 34,000 |  31,125 |       1 |  2.201 |             1.137 |           0.385 |         5.710 |
-|     250 | 68,000 |  31,125 |       1 |  4.633 |             2.530 |           1.034 |         4.481 |
-|     125 |  4,250 |   7,750 |       4 |  0.081 |             0.047 |           0.023 |         3.469 |
-|     250 |  8,500 |  31,125 |       4 |  0.579 |             0.302 |           0.113 |         5.123 |
-|     125 | 17,000 |   7,750 |       4 |  0.295 |             0.164 |           0.073 |         4.045 |
-|     250 | 17,000 |  31,125 |       4 |  1.125 |             0.580 |           0.213 |         5.285 |
-|     500 | 17,000 | 124,750 |       4 |  4.413 |             2.256 |           0.785 |         5.619 |
-|     250 | 34,000 |  31,125 |       4 |  2.204 |             1.140 |           0.396 |         5.568 |
-|     250 | 68,000 |  31,125 |       4 |  4.834 |             2.709 |           1.045 |         4.627 |
+|     125 |  4,250 |   7,750 |       1 |  0.081 |             0.045 |           0.017 |         4.783 |
+|     250 |  8,500 |  31,125 |       1 |  0.574 |             0.286 |           0.076 |         7.524 |
+|     125 | 17,000 |   7,750 |       1 |  0.298 |             0.156 |           0.038 |         7.748 |
+|     250 | 17,000 |  31,125 |       1 |  1.121 |             0.558 |           0.131 |         8.530 |
+|     500 | 17,000 | 124,750 |       1 |  4.399 |             2.147 |           0.486 |         9.045 |
+|     250 | 34,000 |  31,125 |       1 |  2.201 |             1.080 |           0.238 |         9.229 |
+|     250 | 68,000 |  31,125 |       1 |  4.633 |             2.409 |           0.456 |        10.149 |
+|     125 |  4,250 |   7,750 |       4 |  0.081 |             0.046 |           0.012 |         6.905 |
+|     250 |  8,500 |  31,125 |       4 |  0.579 |             0.289 |           0.043 |        13.365 |
+|     125 | 17,000 |   7,750 |       4 |  0.295 |             0.158 |           0.024 |        12.050 |
+|     250 | 17,000 |  31,125 |       4 |  1.125 |             0.558 |           0.075 |        14.931 |
+|     500 | 17,000 | 124,750 |       4 |  4.413 |             2.147 |           0.256 |        17.219 |
+|     250 | 34,000 |  31,125 |       4 |  2.204 |             1.098 |           0.137 |        16.143 |
+|     250 | 68,000 |  31,125 |       4 |  4.834 |             2.607 |           0.262 |        18.416 |
+
+The `a5f3b47a` run and this render both ran on CPUs 0-3 (2 physical cores, 2 CPUs per core, 4.8 GHz maximum). The two runs were made at different times on a shared
+host, so the ratios also carry that noise.
+
+## Change from the previous render
+
+The previous render, of revision 68d865e2 (commit
+bba5b238), measured the same cells with the same driver, inputs and
+DuckDB CLI on the same host. The measured statements and the process driver
+did not change. This render changes the budget terms of the macro stages, the
+recorded host fields and the report text. Host load differs: the previous run
+recorded
+3.70, 2.05, 2.20 before and 4.97, 4.54, 3.24 after, against the
+loads recorded above. Both renders ran on CPUs 0-3 (2 physical cores, 2 CPUs per core, 4.8 GHz maximum). The previous render command sets no nice value; this render ran at nice value -15.
+
+The `sketches` and `pairs_scalar` stages do the same work in both revisions.
+Their median time ratio, this render over the previous one, is
+0.95 at one thread and
+0.96 at four: that is the change of
+load and nice value. `vs_same_work` divides a stage’s median time ratio by that
+value. Peak RSS does not depend on host load or on the kind of core. Each ratio compares the
+medians of three fresh processes in one cell; the summary gives the median,
+minimum and maximum over the cells of a stage:
+
+| stage        | threads | code      | median_time_ratio | min_time_ratio | max_time_ratio | vs_same_work | median_rss_ratio |
+|:-------------|--------:|:----------|------------------:|---------------:|---------------:|-------------:|-----------------:|
+| sketches     |       1 | same work |             0.948 |          0.936 |          0.961 |        0.997 |            1.004 |
+| sketches     |       4 | same work |             0.955 |          0.916 |          0.972 |        0.995 |            1.002 |
+| pairs_reduce |       1 | changed   |             0.647 |          0.441 |          1.218 |        0.680 |            0.564 |
+| pairs_reduce |       4 | changed   |             0.349 |          0.251 |          1.323 |        0.364 |            0.622 |
+| pairs_copy   |       1 | changed   |             0.651 |          0.446 |          1.168 |        0.685 |            0.730 |
+| pairs_copy   |       4 | changed   |             0.669 |          0.445 |          1.306 |        0.696 |            0.715 |
+| pairs_scalar |       1 | same work |             0.952 |          0.946 |          0.965 |        1.002 |            1.007 |
+| pairs_scalar |       4 | same work |             0.961 |          0.927 |          0.965 |        1.000 |            1.002 |
+
+`pairs_reduce`, cell by cell:
+
+| samples |   sites | threads | seconds_before | rss_mib_before | seconds_after | rss_mib_after | time_ratio | rss_ratio |
+|--------:|--------:|--------:|---------------:|---------------:|--------------:|--------------:|-----------:|----------:|
+|     125 |   4,250 |       1 |          0.023 |         59.750 |         0.017 |        47.547 |      0.742 |     0.796 |
+|     250 |   8,500 |       1 |          0.116 |         77.863 |         0.076 |        50.570 |      0.660 |     0.649 |
+|     125 |  17,000 |       1 |          0.072 |         86.930 |         0.038 |        50.535 |      0.536 |     0.581 |
+|     250 |  17,000 |       1 |          0.208 |        100.215 |         0.131 |        54.715 |      0.633 |     0.546 |
+|     500 |  17,000 |       1 |          0.733 |        113.953 |         0.486 |        61.945 |      0.664 |     0.544 |
+|     250 |  34,000 |       1 |          0.385 |        160.840 |         0.238 |        60.633 |      0.619 |     0.377 |
+|     250 |  68,000 |       1 |          1.034 |        205.785 |         0.456 |        77.812 |      0.441 |     0.378 |
+|       3 | 108,757 |       1 |          0.005 |         44.879 |         0.006 |        46.062 |      1.218 |     1.026 |
+|     125 |   4,250 |       4 |          0.023 |         58.453 |         0.012 |        54.059 |      0.502 |     0.925 |
+|     250 |   8,500 |       4 |          0.113 |         77.410 |         0.043 |        60.867 |      0.383 |     0.786 |
+|     125 |  17,000 |       4 |          0.073 |         95.812 |         0.024 |        58.371 |      0.336 |     0.609 |
+|     250 |  17,000 |       4 |          0.213 |        113.250 |         0.075 |        68.789 |      0.354 |     0.607 |
+|     500 |  17,000 |       4 |          0.785 |        135.070 |         0.256 |        85.691 |      0.326 |     0.634 |
+|     250 |  34,000 |       4 |          0.396 |        159.672 |         0.137 |        86.453 |      0.345 |     0.541 |
+|     250 |  68,000 |       4 |          1.045 |        211.387 |         0.262 |       117.996 |      0.251 |     0.558 |
+|       3 | 108,757 |       4 |          0.004 |         45.367 |         0.006 |        47.863 |      1.323 |     1.055 |
+
+On the largest shared cell, 500 samples of
+17,000 sites, `pairs_reduce` went from
+114 to 61.9 MiB
+peak RSS on one thread and from 135.1 to
+85.7 MiB on four. Its time went from
+0.73 to 0.49 s on one
+thread and from 0.79 to
+0.26 s on four.
 
 ## Time exponents and memory ratios
 
@@ -324,67 +428,72 @@ Time exponents per doubling, against the work of each stage, and peak-RSS ratios
 
 | stage        | dimension | threads | time_exponent_2x | time_exponent_4x | rss_ratio_2x | rss_ratio_4x | timing_verdict     | exponent_above_1.25 |
 |:-------------|:----------|--------:|-----------------:|-----------------:|-------------:|-------------:|:-------------------|:--------------------|
-| sketches     | samples   |       1 |            0.923 |            0.975 |        1.093 |        1.300 | none: 1x under 5 s | FALSE               |
-| sketches     | samples   |       4 |            0.779 |            0.919 |        1.091 |        1.275 | none: 1x under 5 s | FALSE               |
-| sketches     | sites     |       1 |            1.032 |            1.018 |        1.289 |        1.882 | none: 1x under 5 s | FALSE               |
-| sketches     | sites     |       4 |            0.956 |            0.990 |        1.305 |        1.844 | none: 1x under 5 s | FALSE               |
-| sketches     | joint     |       1 |            0.905 |            0.986 |        1.124 |        1.550 | none: 1x under 5 s | FALSE               |
-| sketches     | joint     |       4 |            0.789 |            0.897 |        1.139 |        1.577 | none: 1x under 5 s | FALSE               |
-| pairs_reduce | samples   |       1 |            0.764 |            0.909 |        1.153 |        1.312 | none: 1x under 5 s | FALSE               |
-| pairs_reduce | samples   |       4 |            0.771 |            0.940 |        1.182 |        1.410 | none: 1x under 5 s | FALSE               |
-| pairs_reduce | sites     |       1 |            0.892 |            1.424 |        1.605 |        2.054 | none: 1x under 5 s | TRUE                |
-| pairs_reduce | sites     |       4 |            0.894 |            1.400 |        1.411 |        1.867 | none: 1x under 5 s | TRUE                |
-| pairs_reduce | joint     |       1 |            0.777 |            0.888 |        1.303 |        1.906 | none: 1x under 5 s | FALSE               |
-| pairs_reduce | joint     |       4 |            0.756 |            0.931 |        1.323 |        2.309 | none: 1x under 5 s | FALSE               |
-| pairs_copy   | samples   |       1 |            0.787 |            0.936 |        1.135 |        2.222 | none: 1x under 5 s | FALSE               |
-| pairs_copy   | samples   |       4 |            0.776 |            0.893 |        1.221 |        2.056 | none: 1x under 5 s | FALSE               |
-| pairs_copy   | sites     |       1 |            0.940 |            1.279 |        1.440 |        2.075 | none: 1x under 5 s | TRUE                |
-| pairs_copy   | sites     |       4 |            0.865 |            1.332 |        1.671 |        1.840 | none: 1x under 5 s | TRUE                |
-| pairs_copy   | joint     |       1 |            0.751 |            0.922 |        1.445 |        3.355 | none: 1x under 5 s | FALSE               |
-| pairs_copy   | joint     |       4 |            0.719 |            0.886 |        1.619 |        3.163 | none: 1x under 5 s | FALSE               |
-| pairs_scalar | samples   |       1 |            0.913 |            0.974 |        1.165 |        1.340 | none: 1x under 5 s | FALSE               |
-| pairs_scalar | samples   |       4 |            0.908 |            0.978 |        1.021 |        1.232 | none: 1x under 5 s | FALSE               |
-| pairs_scalar | sites     |       1 |            0.964 |            1.154 |        1.618 |        2.033 | none: 1x under 5 s | FALSE               |
-| pairs_scalar | sites     |       4 |            0.974 |            1.249 |        1.516 |        2.158 | none: 1x under 5 s | FALSE               |
-| pairs_scalar | joint     |       1 |            0.893 |            0.966 |        1.346 |        2.108 | none: 1x under 5 s | FALSE               |
-| pairs_scalar | joint     |       4 |            0.889 |            0.966 |        1.353 |        2.103 | none: 1x under 5 s | FALSE               |
+| sketches     | samples   |       1 |            0.941 |            0.960 |        1.092 |        1.314 | none: 1x under 5 s | FALSE               |
+| sketches     | samples   |       4 |            0.834 |            0.909 |        1.082 |        1.248 | none: 1x under 5 s | FALSE               |
+| sketches     | sites     |       1 |            1.019 |            0.998 |        1.287 |        1.886 | none: 1x under 5 s | FALSE               |
+| sketches     | sites     |       4 |            0.941 |            0.972 |        1.307 |        1.835 | none: 1x under 5 s | FALSE               |
+| sketches     | joint     |       1 |            0.914 |            0.976 |        1.104 |        1.557 | none: 1x under 5 s | FALSE               |
+| sketches     | joint     |       4 |            0.824 |            0.900 |        1.146 |        1.563 | none: 1x under 5 s | FALSE               |
+| pairs_reduce | samples   |       1 |            0.884 |            0.943 |        1.083 |        1.226 | none: 1x under 5 s | FALSE               |
+| pairs_reduce | samples   |       4 |            0.810 |            0.882 |        1.178 |        1.467 | none: 1x under 5 s | FALSE               |
+| pairs_reduce | sites     |       1 |            0.859 |            0.937 |        1.108 |        1.422 | none: 1x under 5 s | FALSE               |
+| pairs_reduce | sites     |       4 |            0.857 |            0.943 |        1.257 |        1.715 | none: 1x under 5 s | FALSE               |
+| pairs_reduce | joint     |       1 |            0.721 |            0.890 |        1.065 |        1.303 | none: 1x under 5 s | FALSE               |
+| pairs_reduce | joint     |       4 |            0.627 |            0.854 |        1.126 |        1.584 | none: 1x under 5 s | FALSE               |
+| pairs_copy   | samples   |       1 |            0.897 |            0.957 |        1.394 |        2.825 | none: 1x under 5 s | FALSE               |
+| pairs_copy   | samples   |       4 |            0.876 |            0.924 |        1.372 |        2.622 | none: 1x under 5 s | FALSE               |
+| pairs_copy   | sites     |       1 |            0.800 |            0.894 |        1.104 |        1.280 | none: 1x under 5 s | FALSE               |
+| pairs_copy   | sites     |       4 |            0.754 |            0.888 |        1.175 |        1.376 | none: 1x under 5 s | FALSE               |
+| pairs_copy   | joint     |       1 |            0.724 |            0.858 |        1.396 |        2.982 | none: 1x under 5 s | FALSE               |
+| pairs_copy   | joint     |       4 |            0.718 |            0.842 |        1.364 |        2.804 | none: 1x under 5 s | FALSE               |
+| pairs_scalar | samples   |       1 |            0.915 |            0.971 |        1.164 |        1.311 | none: 1x under 5 s | FALSE               |
+| pairs_scalar | samples   |       4 |            0.910 |            0.970 |        1.063 |        1.194 | none: 1x under 5 s | FALSE               |
+| pairs_scalar | sites     |       1 |            0.953 |            1.157 |        1.639 |        2.024 | none: 1x under 5 s | FALSE               |
+| pairs_scalar | sites     |       4 |            0.976 |            1.247 |        1.468 |        2.041 | none: 1x under 5 s | FALSE               |
+| pairs_scalar | joint     |       1 |            0.891 |            0.969 |        1.332 |        2.051 | none: 1x under 5 s | FALSE               |
+| pairs_scalar | joint     |       4 |            0.884 |            0.964 |        1.361 |        2.045 | none: 1x under 5 s | FALSE               |
 
 ## Findings
 
 Every observation is within its declared budget and none spills; the render
 enforces both. The largest observation uses
-84% of its ceiling.
+88% of its ceiling.
 
-The largest all-pairs cell (500 samples, 17,000 sites, 124,750 pairs) takes
-0.83 s on one thread and
-0.8 s on four when written to Parquet, at
-202 and
-196.1 MiB peak RSS. The Parquet output is
-1425.3 KiB.
+The largest all-pairs cell (500 samples,
+17,000 sites, 124,750 pairs) takes
+0.55 s on one thread and
+0.55 s on four when written to Parquet, at
+150 and
+153.1 MiB peak RSS. The Parquet output is
+1266.1 KiB.
 
 On the real counts, one thread builds three sketches of 108,757 sites in
-0.172 s at
-128.9 MiB peak RSS, and writes the three pairs in
-0.005 s at
-44.9 MiB.
+0.162 s at
+129.7 MiB peak RSS, and writes the three pairs in
+0.006 s at
+45.9 MiB.
 
-For 124,750 pairs of 17,000 sites on one thread, the per-pair function took
-4.4 s at revision `a5f3b47a` and takes
-2.25 s now; the all-pairs macro takes
-0.73 s, 6 times faster than before.
-The pair stages still grow with pairs times sites, which is the size of the
-comparison itself. They do not use more than one thread:
-0.73 s on one thread and
-0.79 s on four. DuckDB splits a
-scan by row groups, and a relation of a few hundred sketches is one row group.
+For 124,750 pairs of 17,000
+sites on one thread, the per-pair function takes
+2.15 s and the all-pairs macro
+0.49 s, 4.4
+times faster on the same cores. At revision `a5f3b47a`, on CPUs 0-3, the
+per-pair function took 4.4 s. The pair stages still
+grow with pairs times sites, which is the size of the comparison itself.
+
+In `pairs_reduce`, the macro compares pairs on DuckDB’s threads: the largest cell takes
+0.49 s on one thread and
+0.26 s on four,
+1.9
+times faster. In `pairs_copy`, written to Parquet, it does not: `COPY` keeps
+insertion order by default, and the relations that feed the pairs give DuckDB
+no batch index, so the copy runs as one task. The macro guarantees no row order. DuckDB’s Parquet
+writer runs in parallel when insertion order is not kept
+(`SET preserve_insertion_order = false`); this report does not measure that
+setting.
 
 24 of the 24 series have a one-thread 1× run under 5 seconds and get a memory verdict only.
-4 series have a time exponent above 1.25 at either doubling.
-The pair stages along sites exceed 1.25 at the second doubling, from 34,000 to
-68,000 sites. The cause is not established. One candidate, not tested, is that
-250 sketches of 68,000 sites no longer fit the CPU cache. Flags on the
-`sketches` stage follow the host load: the minimum times of that stage scale
-linearly in the tables above.
+0 series have a time exponent above 1.25 at either doubling.
 
 ## Limitations
 
@@ -397,8 +506,12 @@ linearly in the tables above.
   samples, 68,000 synthetic sites, 108,757 real sites and 124,750 pairs.
 - Evidence is ordered by sample. Evidence that interleaves samples is not
   measured.
-- The pair comparison runs in one thread, and the number of output pairs is
-  not capped.
+- The macro compares pairs on up to 32 threads. This report measures one and
+  four threads, on the cores named above. `COPY` to Parquet with the default
+  insertion order compares the pairs in one task.
+- `max_pairs` caps the output at 50,000,000 pairs by default, 400 times the
+  largest cell here. Cells between 124,750 pairs and the cap are not
+  measured.
 - Count extraction, sketch verification, CHARR, matched contamination, the R
   wrappers and the reader `*_convert_parquet_sql` COPY statements are not
   measured here.
