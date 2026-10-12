@@ -1403,7 +1403,7 @@ Find runs of homozygosity like duckhts_roh_af_table, choosing the record of a re
 Signature:
 
 ```sql
-duckhts_roh_af_table_bcftools(path, af_table, genetic_map, hw_to_az := 6.7e-8, az_to_hw := 5e-9, gt_error := NULL, rec_rate := NULL, samples := NULL, max_sites := 20000000, max_site_bytes := 4294967296)
+duckhts_roh_af_table_bcftools(path, af_table, genetic_map, hw_to_az := 6.7e-8, az_to_hw := 5e-9, gt_error := NULL, rec_rate := NULL, samples := NULL, max_sites := 20000000, max_site_bytes := 4294967296, af_order := NULL)
 ```
 
 Returns:
@@ -1414,7 +1414,11 @@ table(sample VARCHAR, chrom VARCHAR, start BIGINT, "end" BIGINT, length BIGINT, 
 
 ### Frequencies
 
-af_table is as for duckhts_roh_af_table but must give at most one row per position: more is an error that names the position, since bcftools reads only the first line of a position and a relation has no line order.
+af_table is as for duckhts_roh_af_table. bcftools reads only the first line of a position, and a relation has no line order, so without af_order af_table must give at most one row per position: more is an error that names the position.
+
+### File order
+
+af_order names a column of af_table that gives the order of its lines, for example a line number the caller adds, or FILE_OFFSET when the frequencies come from read_bcf(). The name is matched without case. At each position the row with the least af_order value stands for the first line, and only that row is used. A NULL af_order value, a value repeated within a position (each error names the position), or a name that is not a column of af_table is an error.
 
 ### Site rule
 
@@ -1426,7 +1430,7 @@ path must be a BGZF-compressed VCF or BCF; other compression is an error. It mus
 
 ### Cost
 
-Besides the genotype scan of duckhts_roh_af_table, one more scan without samples reads CHROM, POS, REF, ALT and FILE_OFFSET; records whose POS af_table does not list are only counted per contig, so the extra state is one row per contig and per record at a listed POS. af_table is scanned three times rather than held.
+Besides the genotype scan of duckhts_roh_af_table, one more scan without samples reads CHROM, POS, REF, ALT and FILE_OFFSET; records whose POS af_table does not list are only counted per contig, so the extra state is one row per contig and per record at a listed POS. af_table is scanned three times rather than held; af_order adds its column to two of those scans and no other scan.
 
 ### Otherwise
 
@@ -1436,6 +1440,10 @@ Everything else is as duckhts_roh: the same output, genotype evidence (PL, or GT
 
 ```sql
 SELECT * FROM duckhts_roh_af_table_bcftools('cohort.vcf.gz', 'site_frequencies') ORDER BY sample, chrom, start;
+```
+
+```sql
+SELECT * FROM duckhts_roh_af_table_bcftools('cohort.vcf.gz', 'af_file_lines', af_order := 'line') ORDER BY sample, chrom, start;
 ```
 
 ## duckhts_roh_ancestry

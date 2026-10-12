@@ -2,6 +2,14 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- `rduckhts_roh(site_rule = "bcftools", af_order = ...)` names a column of
+  `af_table` that gives the order of its lines, for example a line number.
+  Several rows may then share a position, and the row with the least value is
+  used, as `bcftools roh --AF-file` reads the first line of a position. A
+  `NULL` value, a value repeated within a position and a name that is not a
+  column are errors. `af_order` must be one nonempty string and needs
+  `site_rule = "bcftools"`.
+
 - `rduckhts_roh_counts()` gains `allele_balance = 0.5` and
   `artefact_weight = 0`, the numbers that `rduckhts_count_error_fit()`
   reports under these names: the share of a heterozygote's reads that show

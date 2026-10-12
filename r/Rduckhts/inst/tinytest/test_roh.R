@@ -394,5 +394,31 @@ test_roh_site_rule <- function() {
                  "site_rule must be \"matching\" or \"bcftools\"")
   }
   expect_error(starts(af_tag = "AF", site_rule = "bcftools"), "site_rule = \"bcftools\" needs af_table")
+
+  # af_order: the least value at a position stands for the first line of the
+  # AF file. `line` is the order of roh_repeated_af.tsv.gz (4000 A,T before
+  # A,G); `line_swapped` swaps its two 4000 lines. bcftools 1.24 gives a run
+  # at 4000 only for the swapped file (see test/sql/roh.test).
+  dbExecute(con, paste(
+    "CREATE TEMP TABLE repeated_af_lines AS SELECT *,",
+    "CASE WHEN pos = 4000 THEN 19 - line ELSE line END AS line_swapped",
+    "FROM (SELECT *, row_number() OVER () AS line FROM repeated_af)"))
+  expect_equal(dbGetQuery(con, "SELECT alt FROM repeated_af_lines WHERE pos = 4000 ORDER BY line")$alt,
+               c("T", "G"))
+  expect_equal(starts(af_table = "repeated_af_lines", site_rule = "bcftools", af_order = "line"),
+               c(500L, 1000L, 5000L, 6000L, 9000L))
+  expect_equal(starts(af_table = "repeated_af_lines", site_rule = "bcftools", af_order = "line_swapped"),
+               c(500L, 1000L, 4000L, 5000L, 6000L, 9000L))
+  expect_error(starts(af_table = "repeated_af_lines", site_rule = "bcftools", af_order = "line_number"),
+               "af_order 'line_number' is not a column of af_table")
+  dbExecute(con, "CREATE TEMP TABLE repeated_af_tied AS SELECT * REPLACE (9 AS line) FROM repeated_af_lines")
+  expect_error(starts(af_table = "repeated_af_tied", site_rule = "bcftools", af_order = "line"),
+               "chr1:4000 repeats a value of line")
+  for (bad in list(NA_character_, "", c("line", "line_swapped"), 1)) {
+    expect_error(starts(af_table = "repeated_af_lines", site_rule = "bcftools", af_order = bad),
+                 "af_order must be one nonempty string")
+  }
+  expect_error(starts(af_table = "repeated_af_lines", af_order = "line"),
+               "af_order needs site_rule = \"bcftools\"")
 }
 test_roh_site_rule()

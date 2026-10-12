@@ -750,19 +750,21 @@
       "name": "duckhts_roh_af_table_bcftools",
       "kind": "table_macro",
       "category": "Variants",
-      "signature": "duckhts_roh_af_table_bcftools(path, af_table, genetic_map, hw_to_az := 6.7e-8, az_to_hw := 5e-9, gt_error := NULL, rec_rate := NULL, samples := NULL, max_sites := 20000000, max_site_bytes := 4294967296)",
+      "signature": "duckhts_roh_af_table_bcftools(path, af_table, genetic_map, hw_to_az := 6.7e-8, az_to_hw := 5e-9, gt_error := NULL, rec_rate := NULL, samples := NULL, max_sites := 20000000, max_site_bytes := 4294967296, af_order := NULL)",
       "returns": "table(sample VARCHAR, chrom VARCHAR, start BIGINT, \"end\" BIGINT, length BIGINT, n_markers INTEGER, quality DOUBLE)",
       "r_wrapper": "rduckhts_roh",
       "description": "Find runs of homozygosity like duckhts_roh_af_table, choosing the record of a repeated listed position as bcftools roh --AF-file does.",
       "details": {
-        "Frequencies": "af_table is as for duckhts_roh_af_table but must give at most one row per position: more is an error that names the position, since bcftools reads only the first line of a position and a relation has no line order.",
+        "Frequencies": "af_table is as for duckhts_roh_af_table. bcftools reads only the first line of a position, and a relation has no line order, so without af_order af_table must give at most one row per position: more is an error that names the position.",
+        "File order": "af_order names a column of af_table that gives the order of its lines, for example a line number the caller adds, or FILE_OFFSET when the frequencies come from read_bcf(). The name is matched without case. At each position the row with the least af_order value stands for the first line, and only that row is used. A NULL af_order value, a value repeated within a position (each error names the position), or a name that is not a column of af_table is an error.",
         "Site rule": "In file order (read_bcf's FILE_OFFSET), as bcftools 1.23 and 1.24 do: a record whose indel class differs from the row's is passed over when the next record of the file has the same POS, on any contig and listed or not, since bcftools compares POS only; the row is an indel when any of its alleles is longer than one character, and a record is one when HTSlib's bcf_get_variant_types() sets VCF_INDEL (an MNP such as AC>GT and a complex ACG>AT are not; duckhts_htslib_is_indel(ref, alts) is the port). A record with no non-symbolic ALT, or several, claims nothing; the first remaining record claims the position, which is skipped unless that record's REF and ALT equal the row's. A claiming record whose first ALT is symbolic (<*>, <NON_REF>) is skipped too, where bcftools would decode its second allele.",
         "Input": "path must be a BGZF-compressed VCF or BCF; other compression is an error. It must also be sorted, as bcftools roh requires, so that the records of a position and of a contig are contiguous in the file; that is not checked.",
-        "Cost": "Besides the genotype scan of duckhts_roh_af_table, one more scan without samples reads CHROM, POS, REF, ALT and FILE_OFFSET; records whose POS af_table does not list are only counted per contig, so the extra state is one row per contig and per record at a listed POS. af_table is scanned three times rather than held.",
+        "Cost": "Besides the genotype scan of duckhts_roh_af_table, one more scan without samples reads CHROM, POS, REF, ALT and FILE_OFFSET; records whose POS af_table does not list are only counted per contig, so the extra state is one row per contig and per record at a listed POS. af_table is scanned three times rather than held; af_order adds its column to two of those scans and no other scan.",
         "Otherwise": "Everything else is as duckhts_roh: the same output, genotype evidence (PL, or GT with gt_error), transition parameters, optional genetic_map overload and memory limits."
       },
       "examples": [
-        "SELECT * FROM duckhts_roh_af_table_bcftools('cohort.vcf.gz', 'site_frequencies') ORDER BY sample, chrom, start;"
+        "SELECT * FROM duckhts_roh_af_table_bcftools('cohort.vcf.gz', 'site_frequencies') ORDER BY sample, chrom, start;",
+        "SELECT * FROM duckhts_roh_af_table_bcftools('cohort.vcf.gz', 'af_file_lines', af_order := 'line') ORDER BY sample, chrom, start;"
       ]
     },
     {

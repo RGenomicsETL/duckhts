@@ -4,6 +4,17 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- `duckhts_roh_af_table_bcftools` takes `af_order := NULL`, the name of a
+  column of `af_table` that gives the order of its lines: a line number the
+  caller adds, or `FILE_OFFSET` when the frequencies come from `read_bcf`.
+  With it, several rows may share a position, and the row with the least
+  value is used, as `bcftools roh --AF-file` reads only the first line of a
+  position. A NULL value, a value repeated within a position (each error names
+  the position) and a name that is not a column of `af_table` are errors.
+  Without it, several rows at a position stay an error, and the plan is
+  unchanged. On `roh_repeated_af.tsv.gz` in its own order and with its two
+  lines at one position swapped, the macro gives the runs of bcftools 1.24.
+
 - The read-count ROH emission takes the allele balance and the artefact weight
   of `duckhts_count_error_fit`
   (https://github.com/RGenomicsETL/duckhts/issues/329,

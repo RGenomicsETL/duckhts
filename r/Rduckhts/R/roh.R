@@ -88,9 +88,17 @@
 #'   non-symbolic ALT, or several, claims nothing; and the first remaining
 #'   record claims the position, which is skipped unless its alleles equal the
 #'   row's (also when its first ALT is symbolic, which bcftools would decode
-#'   through the second ALT). It needs one `af_table` row per position and a
-#'   sorted, BGZF-compressed VCF or BCF, and reads the file a second time
-#'   without samples. Only `af_table` takes `"bcftools"`.
+#'   through the second ALT). It needs one `af_table` row per position, unless
+#'   `af_order` gives file order, and a sorted, BGZF-compressed VCF or BCF, and
+#'   reads the file a second time without samples. Only `af_table` takes
+#'   `"bcftools"`.
+#' @param af_order Optional name of a column of `af_table` that gives file
+#'   order, for example a line number added by the caller, or `FILE_OFFSET`
+#'   when the frequencies come from `read_bcf()`. With `site_rule = "bcftools"`
+#'   only. Several rows may then share a position: the row with the least
+#'   value is used, as `bcftools roh --AF-file` reads the first line of a
+#'   position. A `NULL` value, a value repeated within a position, or a name
+#'   that is not a column of `af_table` is an error.
 #' @return A data frame (or invisible `TRUE` when `table_name` is given) with one
 #'   row per run: `sample`, `chrom`, `start` and `end` (one-based, inclusive,
 #'   the first and last marker), `length` (`end - start + 1`), `n_markers` and
@@ -107,7 +115,8 @@ rduckhts_roh <- function(
   hw_to_az = 6.7e-8, az_to_hw = 5e-9, gt_error = NULL, rec_rate = NULL,
   samples = NULL, table_name = NULL, overwrite = FALSE,
   reference_table = NULL, proportions_table = NULL, af_clamp = 1e-3,
-  max_sites = 2e7, max_site_bytes = 2^32, site_rule = "matching"
+  max_sites = 2e7, max_site_bytes = 2^32, site_rule = "matching",
+  af_order = NULL
 ) {
   .somalier_validate_output(con, table_name, overwrite)
   .somalier_scalar_text(path, "path")
@@ -117,6 +126,12 @@ rduckhts_roh <- function(
   }
   if (site_rule != "matching" && is.null(af_table)) {
     stop("site_rule = \"bcftools\" needs af_table", call. = FALSE)
+  }
+  if (!is.null(af_order)) {
+    .somalier_scalar_text(af_order, "af_order")
+    if (site_rule != "bcftools") {
+      stop("af_order needs site_rule = \"bcftools\"", call. = FALSE)
+    }
   }
   source <- .roh_frequency_source(con, af_tag, af_table, reference_table,
                                   proportions_table, af_clamp)
@@ -133,7 +148,8 @@ rduckhts_roh <- function(
     if (!is.null(options$samples)) {
       paste0("samples := ", sql_quote_string(con, options$samples))
     },
-    .roh_limit_arguments(max_sites, max_site_bytes)
+    .roh_limit_arguments(max_sites, max_site_bytes),
+    if (!is.null(af_order)) paste0("af_order := ", sql_quote_string(con, af_order))
   )
   macro <- if (site_rule == "bcftools") "duckhts_roh_af_table_bcftools" else source$macro
   query <- paste0("SELECT * FROM ", macro, "(",

@@ -22,7 +22,8 @@ rduckhts_roh(
   af_clamp = 0.001,
   max_sites = 2e+07,
   max_site_bytes = 2^32,
-  site_rule = "matching"
+  site_rule = "matching",
+  af_order = NULL
 )
 }
 \arguments{
@@ -80,9 +81,18 @@ next record of the file has the same POS (on any contig); a record with no
 non-symbolic ALT, or several, claims nothing; and the first remaining
 record claims the position, which is skipped unless its alleles equal the
 row's (also when its first ALT is symbolic, which bcftools would decode
-through the second ALT). It needs one `af_table` row per position and a
-sorted, BGZF-compressed VCF or BCF, and reads the file a second time
-without samples. Only `af_table` takes `"bcftools"`.}
+through the second ALT). It needs one `af_table` row per position, unless
+`af_order` gives file order, and a sorted, BGZF-compressed VCF or BCF, and
+reads the file a second time without samples. Only `af_table` takes
+`"bcftools"`.}
+
+\item{af_order}{Optional name of a column of `af_table` that gives file
+order, for example a line number added by the caller, or `FILE_OFFSET`
+when the frequencies come from `read_bcf()`. With `site_rule = "bcftools"`
+only. Several rows may then share a position: the row with the least
+value is used, as `bcftools roh --AF-file` reads the first line of a
+position. A `NULL` value, a value repeated within a position, or a name
+that is not a column of `af_table` is an error.}
 }
 \value{
 A data frame (or invisible `TRUE` when `table_name` is given) with one
