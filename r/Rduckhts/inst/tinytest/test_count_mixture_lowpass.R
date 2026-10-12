@@ -115,12 +115,21 @@ run_lowpass_tests <- function() {
         expect_true(observed$share >= 0 && observed$share <= .5)
         expect_true(is.finite(observed$share_lower) && is.finite(observed$share_upper))
         expect_true(observed$share_lower <= observed$share && observed$share_upper >= observed$share)
+        if (observed$share == 0) {
+          expect_equal(observed$share_lower, 0)
+          expect_true(observed$share_upper > 0)
+        }
         if (model != "other_population" && observed$share > 1e-8) {
           expect_equal(observed$relation_diagnostic, "unresolved")
         }
       }
     }
   }
+  below_floor <- rduckhts_count_mixture_lowpass(con, "counts", .01, .02, 0,
+                                               block_bases = 1024, min_blocks = 33)
+  expect_true(all(below_floor$status == "insufficient_blocks"))
+  expect_true(all(is.finite(below_floor$share)))
+  expect_true(all(is.na(below_floor$share_lower) & is.na(below_floor$share_upper)))
   # The uniform count artefact has discordance 1/3 at every usable depth.
   for (n in c(2, 3, 8)) {
     expect_equal(mean((0:n)*(n-(0:n)))/choose(n, 2), 1/3, tolerance = 1e-15)

@@ -10,6 +10,7 @@ static const char *const duckhts_public_macros[] = {
     "duckhts_bcftools_norm",
     "duckhts_cgranges_from_table",
     "duckhts_count_error_fit",
+    "duckhts_count_mixture_lowpass",
     "duckhts_depth_bins",
     "duckhts_depth_region_fraction",
     "duckhts_depth_sex_fraction",

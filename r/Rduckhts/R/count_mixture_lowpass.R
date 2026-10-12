@@ -39,6 +39,7 @@
 #'   score rank and status. The discordance ratio divides discordant pairs by
 #'   `SUM(choose(depth, 2) * sample_af * (1 - sample_af))`.
 #'   When `table_name` is supplied, returns invisible `TRUE`.
+#' @md
 #' @export
 rduckhts_count_mixture_lowpass <- function(
   con, counts_table, seq_error, artefact_weight, homozygosity_excess,

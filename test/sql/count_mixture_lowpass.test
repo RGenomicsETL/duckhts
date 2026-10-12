@@ -175,6 +175,36 @@ SELECT count(*),min(usable_sites),max(usable_sites) FROM duckhts_count_mixture_l
 ----
 3	3	3
 
+# Enough rows to exercise scan/group pipelines with multiple workers; reversed
+# site storage also tests that per-block sums have a canonical position order.
+statement ok
+CREATE TABLE parallel_lowpass AS SELECT 'parallel' AS sample_id,cand AS candidate,'20' AS chrom,
+i AS pos, (1+(i%3=0)::BIGINT) AS ref_count, (i%7=0)::BIGINT AS alt_count,
+0::BIGINT AS other_count, (1+i%37)/39.0 AS sample_af,
+CASE WHEN cand='matched' THEN (1+i%37)/39.0 ELSE (1+(i*13)%37)/39.0 END AS candidate_af
+FROM range(1,32769) t(i) CROSS JOIN (VALUES ('matched'),('other')) c(cand) ORDER BY i DESC,cand;
+
+statement ok
+SET threads=1;
+
+statement ok
+CREATE TABLE parallel_one AS SELECT * FROM duckhts_count_mixture_lowpass('parallel_lowpass',.01,.02,0,block_bases:=1024);
+
+statement ok
+SET threads=4;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM parallel_one EXCEPT ALL SELECT * FROM duckhts_count_mixture_lowpass('parallel_lowpass',.01,.02,0,block_bases:=1024)) UNION ALL
+(SELECT * FROM duckhts_count_mixture_lowpass('parallel_lowpass',.01,.02,0,block_bases:=1024) EXCEPT ALL SELECT * FROM parallel_one));
+----
+0
+
+statement ok
+DROP TABLE parallel_one;
+
+statement ok
+DROP TABLE parallel_lowpass;
+
 statement ok
 DROP TABLE lowpass;
 

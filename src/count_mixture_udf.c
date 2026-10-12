@@ -51,16 +51,18 @@ static bool reserve(mixture_state_t *s, size_t count, char *error) {
     size_t old_bytes = s->buffer ? bytes(s->capacity) : 0;
     size_t new_bytes = bytes(capacity);
     uint64_t held;
-    if (!duckhts_count_bytes_charge(new_bytes - old_bytes, s->limit, &held)) {
+    /* A moving realloc may temporarily own both allocations. */
+    if (!duckhts_count_bytes_charge(new_bytes, s->limit, &held)) {
         snprintf(error, ERRLEN, "max_state_bytes exceeded by low-pass moment state");
         return false;
     }
     unsigned char *buffer = realloc(s->buffer, new_bytes);
     if (!buffer) {
-        duckhts_count_bytes_release(new_bytes - old_bytes);
+        duckhts_count_bytes_release(new_bytes);
         snprintf(error, ERRLEN, "out of memory for low-pass moment blocks");
         return false;
     }
+    duckhts_count_bytes_release(old_bytes);
     s->buffer = buffer;
     s->capacity = capacity;
     return true;

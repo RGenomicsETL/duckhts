@@ -126,15 +126,15 @@ static double score(const problem_t *p, double m) {
  * constrained fit deterministic even when several minima have equal score. */
 static double minimize(const problem_t *p) {
     double best = 0, value = score(p, 0);
-    for (int k = 1; k <= GRID; k++) {
+    for (int k = 0; k <= GRID; k++) {
         double m = 0.5 * k / GRID, v = score(p, m);
         if (v < value) {
             best = m;
             value = v;
         }
-        if (k == GRID || v > score(p, m - 0.5 / GRID) || v > score(p, m + 0.5 / GRID))
+        if ((k > 0 && v > score(p, m - 0.5 / GRID)) || (k < GRID && v > score(p, m + 0.5 / GRID)))
             continue;
-        double lo = m - 0.5 / GRID, hi = m + 0.5 / GRID;
+        double lo = fmax(0, m - 0.5 / GRID), hi = fmin(0.5, m + 0.5 / GRID);
         double x = hi - (hi - lo) * 0.6180339887498949, y = lo + (hi - lo) * 0.6180339887498949;
         double fx = score(p, x), fy = score(p, y);
         for (int iter = 0; iter < 64; iter++) {
@@ -352,7 +352,9 @@ void duckhts_mixture_fit(const duckhts_mixture_block_t *blocks, size_t count,
     }
     if (sensitivity < 1e-24) {
         fit->share = NAN;
-        fit->status = "nonidentified";
+        fit->status = !p.total.counts[MIX_PAIR_SITES] && !isfinite(fit->singles_share)
+                          ? "no_population_contrast"
+                          : "nonidentified";
         fit->diagnostic = "uninformative";
         return;
     }
@@ -369,8 +371,11 @@ void duckhts_mixture_fit(const duckhts_mixture_block_t *blocks, size_t count,
         double df = p.rank - 1.0;
         double threshold = df + 2 * sqrt(df * log(1000.0)) + 2 * log(1000.0);
         mismatch = fit->score > threshold;
-        if (mismatch && fit->blocks >= cal->min_blocks)
+        if (mismatch && fit->blocks >= cal->min_blocks) {
             fit->status = "model_mismatch";
+            if (!p.total.matched)
+                fit->diagnostic = "model_mismatch";
+        }
     }
     /* Welford spreads for the delete-one-block refits. Each deletion repeats
      * both GMM passes with fixed external calibration. */

@@ -74,6 +74,14 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   so that a sample whose chromosomes the map drops is still checked. The
   runs and the errors are unchanged.
 
+- `duckhts_count_mixture_lowpass` separately estimates a conditional second-genome
+  share from low-pass read and discordant-pair moments, with required external
+  calibration, bounded native block state and block-jackknife/score limits.
+  Matched frequencies admit an IBD1 hypothesis but retain an unresolved
+  relationship diagnostic. Fewer than 30 informative blocks gives NULL limits;
+  `min_blocks` can be lowered for small-fixture checks. Count-error fit outputs
+  are unchanged.
+
 - `duckhts_count_error_fit` reports `artefact_weight_sd`, after
   `artefact_weight`: each block that is refitted for contamination is also
   refitted for the artefact weight alone, the other numbers held at the

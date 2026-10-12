@@ -15,6 +15,14 @@ Preview of 2.0.0, still in development. The sections below describe what 2.0.0 w
   about three times the memory of the call without `fit_table` for 100
   samples. The runs and the errors are unchanged.
 
+- `rduckhts_count_mixture_lowpass()` exposes the bundled extension's separate
+  conditional second-genome share estimator for low-pass counts. Error,
+  artefact and homozygosity calibration are required. Results include bounded
+  block-based limits, QC read/pair totals and an unresolved diagnostic for
+  matched-frequency relationship hypotheses. The default interval floor is
+  30 informative blocks; `min_blocks` supports small-fixture checks. Existing
+  count-error fit results are unchanged.
+
 - `rduckhts_count_error_fit()` returns `artefact_weight_sd` after
   `artefact_weight`: the block interval of the artefact weight, formed as
   `contamination_sd` is, and `NA` with fewer than three blocks. No other

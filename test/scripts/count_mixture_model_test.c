@@ -37,8 +37,35 @@ int main(void) {
     duckhts_mixture_fit_t fit;
     duckhts_mixture_fit(NULL, 0, &c, 0, &fit);
     assert(strcmp(fit.status, "no_sites") == 0 && isnan(fit.share));
+    duckhts_mixture_block_t read_only;
+    memset(&read_only, 0, sizeof(read_only));
+    read_only.matched = 1;
+    assert(duckhts_mixture_add(&read_only, 1, 0, 0, .5, .5, 1, 0));
+    duckhts_mixture_fit(&read_only, 1, &c, 0, &fit);
+    assert(strcmp(fit.status, "no_population_contrast") == 0);
+    assert(isnan(fit.share));
+    /* Read-only integer moments identify shares just inside both bounds. */
+    for (int upper = 0; upper < 2; upper++) {
+        duckhts_mixture_block_t near_bound;
+        memset(&near_bound, 0, sizeof(near_bound));
+        double u[3] = {1, .2, .8};
+        double target = upper ? .4999 : .0001;
+        double alt = upper ? 24997 : 10003;
+        near_bound.counts[MIX_SITES] = 50000;
+        near_bound.counts[MIX_USABLE] = 50000;
+        near_bound.counts[MIX_SINGLETON] = 50000;
+        near_bound.counts[MIX_READS] = 50000;
+        for (int i = 0; i < 3; i++) {
+            near_bound.y[i] = alt * u[i];
+            for (int j = 0; j < 3; j++)
+                near_bound.s[i][j] = 50000 * u[i] * u[j];
+        }
+        duckhts_mixture_fit(&near_bound, 1, &c, 0, &fit);
+        assert(fabs(fit.share - target) < 1e-8);
+        assert(strcmp(fit.status, "no_pairs") == 0);
+    }
     b.counts[MIX_SITES] = INT64_MAX;
     assert(!duckhts_mixture_add(&b, 0, 0, 0, 0.5, 0.5, 1, 0));
-    puts("count mixture model: 17 assertions passed");
+    puts("count mixture model: 24 assertions passed");
     return 0;
 }
