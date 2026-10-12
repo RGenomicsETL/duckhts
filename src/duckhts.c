@@ -826,7 +826,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     }
     if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckhts_raw_header_text(path, format_hint) AS ("
-        "(SELECT coalesce(string_agg(raw, '\\n' ORDER BY idx), '') "
+        "(SELECT coalesce(string_agg(raw, chr(10) ORDER BY idx), '') "
         "FROM read_hts_header(path, format := format_hint, mode := 'raw')))")) {
         return false;
     }

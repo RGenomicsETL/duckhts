@@ -2,6 +2,9 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- Headers stored by the Parquet convert functions keep their line breaks; the
+  bundled `duckhts_raw_header_text()` joined lines with a literal backslash-n.
+
 - Added `rduckhts_bam_mate_overlap_counts()` and the bundled
   `duckhts_bam_mate_overlap_counts()`: read 1 and read 2 of one fragment
   compared where both mates align, counted by base quality and base. The

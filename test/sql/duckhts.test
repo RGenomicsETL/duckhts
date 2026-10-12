@@ -1195,6 +1195,18 @@ SELECT CASE WHEN instr(
 ----
 1
 
+# --- the raw header text joins its lines with newlines ---
+# A DuckDB string literal '\n' is a backslash and an n, not a newline; the
+# header text stored in Parquet metadata must keep the header's line breaks.
+query III
+SELECT position(chr(10) IN h) > 0,
+       position('\n' IN h) = 0,
+       len(string_split(h, chr(10))) =
+         (SELECT count(*) FROM read_hts_header('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz', mode := 'raw'))
+FROM (SELECT duckhts_raw_header_text('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz', 'vcf') AS h);
+----
+true	true	true
+
 # --- raw header mode schema ---
 query T
 SELECT string_agg(column_name, '|')

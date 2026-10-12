@@ -4,6 +4,12 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- The `*_convert_parquet_sql` builders store the header in the Parquet
+  metadata (`vcf_header`, `sam_header`, `gff_header`) with its line breaks.
+  `duckhts_raw_header_text()` joined the header lines with the SQL literal
+  `'\n'`, which DuckDB keeps as a backslash and an n, so the stored header
+  was one line.
+
 - Added `duckhts_bam_mate_overlap_counts()`: read 1 and read 2 of one fragment
   compared at each reference position where both mates have an aligned base,
   counted by the two base qualities and the two bases. A real allele shows in
