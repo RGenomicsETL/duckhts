@@ -56,11 +56,12 @@ call or raise it.}
 
 \item{fit_table}{Optional table or view with one row per `sample`, containing
 non-NULL `seq_error`, `contamination`, `allele_balance` and
-`artefact_weight`, such as the output of [rduckhts_count_error_fit()].
-These replace the scalar arguments for each matching `sample_id`. A sample
-of `counts_table` with no fit row, several fit rows, a NULL value or a value
-out of range is an error; fit rows of other samples are not checked. Filter
-fit status in the caller's SQL; the spreads are not used.}
+`artefact_weight`, and an `artefact_weight_sd` column, such as the output
+of [rduckhts_count_error_fit()]. These replace the scalar arguments for
+each matching `sample_id`. A sample of `counts_table` with no fit row,
+several fit rows, a NULL value or a value out of range is an error; fit
+rows of other samples are not checked. A NULL `artefact_weight_sd` counts
+as 0. Filter fit status in the caller's SQL; the spreads are not used.}
 
 \item{allele_balance}{Share of a heterozygote's reads that show the counted
 allele, in `[0.35, 0.65]`. The default 0.5 assumes no mapping bias.}
@@ -71,7 +72,8 @@ such sites no term. Values outside either range are errors, not clipped.}
 }
 \value{
 A data frame (or invisible `TRUE` when `table_name` is given) with
-  the columns of [rduckhts_roh()]: one row per run, unordered.
+  the columns of [rduckhts_roh()]: one row per run, unordered. With
+  `fit_table` it also has `stable_fraction` (see Details).
 }
 \description{
 Detect runs of homozygosity from allele read counts, for example counts at
@@ -119,6 +121,19 @@ runs than `rduckhts_roh(gt_error = 30)` on the same sample. With
 `artefact_weight = w > 0`, one site at depth `d` changes the odds between
 the two states by a factor of at most `1 + (d + 1) * (1 - w) / w`, as
 `gt_error` caps one called genotype at `10^(gt_error / 10)`.
+
+The runs depend on `artefact_weight` more than on the other fitted numbers.
+With `fit_table`, each sample is therefore decoded three times from one
+collection of its sites: at its `artefact_weight` `w`, and at
+`w - artefact_weight_sd` and `w + artefact_weight_sd`, each kept in
+`[0, 0.05]`. Each run of the decode at `w` gets `stable_fraction`: the share
+of its bases that are also in a run of both other decodes. A run with
+`stable_fraction` 1 does not depend on where `w` lies within one standard
+error. Filter on it to keep the runs, or the run bases, that the interval
+of the fit does not move; a low value marks a run whose call hinges on the
+artefact weight. A NULL `artefact_weight_sd`
+(fewer than three blocks in the fit) counts as 0 and gives 1, so check the
+fit's `blocks` too. The decode then takes about three times as long.
 }
 \examples{
 con <- rduckhts_connect()

@@ -204,15 +204,29 @@ rduckhts_roh <- function(
 #' the two states by a factor of at most `1 + (d + 1) * (1 - w) / w`, as
 #' `gt_error` caps one called genotype at `10^(gt_error / 10)`.
 #'
+#' The runs depend on `artefact_weight` more than on the other fitted numbers.
+#' With `fit_table`, each sample is therefore decoded three times from one
+#' collection of its sites: at its `artefact_weight` `w`, and at
+#' `w - artefact_weight_sd` and `w + artefact_weight_sd`, each kept in
+#' `[0, 0.05]`. Each run of the decode at `w` gets `stable_fraction`: the share
+#' of its bases that are also in a run of both other decodes. A run with
+#' `stable_fraction` 1 does not depend on where `w` lies within one standard
+#' error. Filter on it to keep the runs, or the run bases, that the interval
+#' of the fit does not move; a low value marks a run whose call hinges on the
+#' artefact weight. A NULL `artefact_weight_sd`
+#' (fewer than three blocks in the fit) counts as 0 and gives 1, so check the
+#' fit's `blocks` too. The decode then takes about three times as long.
+#'
 #' @param con A DuckDB connection with DuckHTS loaded.
 #' @param counts_table Name of a table or view of read counts (see Details).
 #' @param fit_table Optional table or view with one row per `sample`, containing
 #'   non-NULL `seq_error`, `contamination`, `allele_balance` and
-#'   `artefact_weight`, such as the output of [rduckhts_count_error_fit()].
-#'   These replace the scalar arguments for each matching `sample_id`. A sample
-#'   of `counts_table` with no fit row, several fit rows, a NULL value or a value
-#'   out of range is an error; fit rows of other samples are not checked. Filter
-#'   fit status in the caller's SQL; the spreads are not used.
+#'   `artefact_weight`, and an `artefact_weight_sd` column, such as the output
+#'   of [rduckhts_count_error_fit()]. These replace the scalar arguments for
+#'   each matching `sample_id`. A sample of `counts_table` with no fit row,
+#'   several fit rows, a NULL value or a value out of range is an error; fit
+#'   rows of other samples are not checked. A NULL `artefact_weight_sd` counts
+#'   as 0. Filter fit status in the caller's SQL; the spreads are not used.
 #' @param seq_error Per-read probability of showing the other allele, in
 #'   `(0, 0.5)`.
 #' @param contamination Fraction of reads from a contaminating individual, in
@@ -224,7 +238,8 @@ rduckhts_roh <- function(
 #'   such sites no term. Values outside either range are errors, not clipped.
 #' @inheritParams rduckhts_roh
 #' @return A data frame (or invisible `TRUE` when `table_name` is given) with
-#'   the columns of [rduckhts_roh()]: one row per run, unordered.
+#'   the columns of [rduckhts_roh()]: one row per run, unordered. With
+#'   `fit_table` it also has `stable_fraction` (see Details).
 #' @examples
 #' con <- rduckhts_connect()
 #' DBI::dbExecute(con, paste(
@@ -365,7 +380,11 @@ rduckhts_roh_counts <- function(
 #' sites is refitted for contamination with the other parameters held, and
 #' `contamination_sd` is the standard deviation of those block estimates
 #' divided by the square root of their number: an interval from the blocks,
-#' not from the likelihood, because sites are linked. The same cells are also
+#' not from the likelihood, because sites are linked. Each such block is also
+#' refitted for the artefact weight alone, and `artefact_weight_sd` is formed
+#' the same way; both are NA with fewer than three blocks.
+#' [rduckhts_roh_counts()] with `fit_table` uses `artefact_weight_sd` for its
+#' `stable_fraction`. The same cells are also
 #' fitted with a parent or child as the second genome
 #' (`contamination_relative`, `log_likelihood_relative`), since the unrelated
 #' model gives a relative about half its share.
@@ -390,7 +409,7 @@ rduckhts_roh_counts <- function(
 #'   one row per sample: `sample`, `sites`, `reads`, `mean_depth`, `blocks`,
 #'   `seq_error`, `contamination`, `contamination_sd`, `homozygosity_excess`,
 #'   `allele_balance`, `spread_hom`, `spread_het`, `artefact_weight`,
-#'   `log_likelihood`, `contamination_relative`, `log_likelihood_relative`,
+#'   `artefact_weight_sd`, `log_likelihood`, `contamination_relative`, `log_likelihood_relative`,
 #'   `status` (`ok`, `no_sites` for a sample whose sites were all skipped,
 #'   `few_sites`, `few_blocks`, `at_bound`, `no_convergence` or
 #'   `no_convergence_relative`) and `method`.

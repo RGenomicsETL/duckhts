@@ -36,6 +36,7 @@ SELECT column_name || ' ' || column_type FROM (DESCRIBE SELECT * FROM duckhts_co
 ----
 allele_balance DOUBLE
 artefact_weight DOUBLE
+artefact_weight_sd DOUBLE
 blocks INTEGER
 contamination DOUBLE
 contamination_relative DOUBLE
@@ -89,6 +90,38 @@ SELECT sample, contamination_sd < 0.003 FROM fit WHERE sample != 'c0.00' ORDER B
 c0.03	true
 c0.10	true
 
+# The artefact weight's block interval. Each block is also refitted for the artefact weight with the
+# other parameters held at the whole-sample fit, and artefact_weight_sd is the standard deviation of
+# those estimates over the square root of their number, as for contamination. A fourth sample keeps
+# the reads of c0.00 except at 2% of its sites, chosen by a hash, whose alternate count is drawn
+# uniform on 0..depth: an artefact weight of 0.02. Declared before the first run: the interval
+# artefact_weight +- 3 * artefact_weight_sd covers 0.02 (six block estimates give the sd five degrees
+# of freedom, whose two-sided 95% t quantile is 2.57), and it is informative: the sd is above 0 and
+# below 0.005, a quarter of the weight. The fit of c0.00 itself has no artefact and an sd below 0.002.
+statement ok
+CREATE TEMP TABLE fit_artefact_counts AS
+SELECT 'w0.02' AS sample_id, chrom, pos, af, depth - alt AS ref_count, alt AS alt_count
+FROM (SELECT chrom, pos, af, ref_count + alt_count AS depth,
+        CASE WHEN fit_u(8, chrom, pos, 0) < 0.02
+             THEN floor(fit_u(9, chrom, pos, 0) * (ref_count + alt_count + 1))::BIGINT
+             ELSE alt_count END AS alt
+      FROM fit_counts WHERE sample_id = 'c0.00');
+
+statement ok
+CREATE TEMP TABLE fit_artefact AS SELECT * FROM duckhts_count_error_fit('fit_artefact_counts');
+
+query TITTTT
+SELECT sample, blocks, status, abs(artefact_weight - 0.02) <= 3 * artefact_weight_sd,
+  artefact_weight_sd > 0, artefact_weight_sd < 0.005
+FROM fit_artefact;
+----
+w0.02	6	ok	true	true	true
+
+query TT
+SELECT sample, artefact_weight_sd < 0.002 FROM fit WHERE sample = 'c0.00';
+----
+c0.00	true
+
 # The histogram is order-free: shuffled rows on one thread give the same fit for each sample. The
 # mean frequency of a cell is a floating-point mean whose rounding depends on the order of its rows,
 # so the numbers are compared within 1e-6 and the rest exactly.
@@ -109,7 +142,8 @@ SELECT count(*) FROM fit a JOIN fit_again b USING (sample)
 WHERE a.sites = b.sites AND a.reads = b.reads AND a.blocks = b.blocks AND a.status = b.status
   AND abs(a.seq_error - b.seq_error) < 1e-6 AND abs(a.contamination - b.contamination) < 1e-6
   AND abs(a.homozygosity_excess - b.homozygosity_excess) < 1e-6 AND abs(a.allele_balance - b.allele_balance) < 1e-6
-  AND abs(a.artefact_weight - b.artefact_weight) < 1e-6 AND abs(a.log_likelihood - b.log_likelihood) < 1e-3;
+  AND abs(a.artefact_weight - b.artefact_weight) < 1e-6 AND abs(a.log_likelihood - b.log_likelihood) < 1e-3
+  AND abs(a.contamination_sd - b.contamination_sd) < 1e-6 AND abs(a.artefact_weight_sd - b.artefact_weight_sd) < 1e-6;
 ----
 3
 
@@ -148,12 +182,12 @@ UNION ALL SELECT 'empty', '1', 7500, 0.4, 2147483647, 1
 UNION ALL SELECT 'empty', '1', 10000, 0.4, 0, 2147483648
 UNION ALL SELECT 'empty', '1', 12500, 0.4, 1, 9223372036854775807;
 
-query TIITTT
-SELECT sample, sites, blocks, status, contamination IS NULL, method FROM duckhts_count_error_fit('fit_unusable')
-ORDER BY sample;
+query TIITTTT
+SELECT sample, sites, blocks, status, contamination IS NULL, artefact_weight_sd IS NULL, method
+FROM duckhts_count_error_fit('fit_unusable') ORDER BY sample;
 ----
-c0.03	20000	6	ok	false	duckhts_count_error_fit v1
-empty	0	0	no_sites	true	duckhts_count_error_fit v1
+c0.03	20000	6	ok	false	false	duckhts_count_error_fit v1
+empty	0	0	no_sites	true	true	duckhts_count_error_fit v1
 
 # A NULL sample_id is one sample and keeps its fit; a frequency that rounds to 1 or 0 in single
 # precision is kept inside (0, 1) and its site is used.
@@ -177,12 +211,14 @@ SELECT sites, status FROM duckhts_count_error_fit('fit_edge');
 
 # pos is one-based: block k holds the positions k * block_bases + 1 to (k + 1) * block_bases. The last
 # site of each chromosome, at 25,000,000, is in the first block of 25,000,000 bases, so each chromosome
-# is one block. A position below 1 is an error.
-query I
-SELECT blocks FROM duckhts_count_error_fit('fit_counts', block_bases := 25000000, min_block_sites := 1)
+# is one block. A position below 1 is an error. With fewer than three blocks neither block interval
+# exists: contamination_sd and artefact_weight_sd are NULL.
+query ITT
+SELECT blocks, contamination_sd IS NULL, artefact_weight_sd IS NULL
+FROM duckhts_count_error_fit('fit_counts', block_bases := 25000000, min_block_sites := 1)
 WHERE sample = 'c0.00';
 ----
-2
+2	true	true
 
 statement ok
 CREATE TEMP VIEW fit_zero_pos AS SELECT * REPLACE (pos - 2500 AS pos) FROM fit_counts;

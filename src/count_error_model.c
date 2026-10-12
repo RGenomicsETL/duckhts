@@ -3,6 +3,7 @@
 #include "include/count_error_model.h"
 
 #include <math.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -427,17 +428,27 @@ int duckhts_count_error_fit(const duckhts_count_cell_t *cells, size_t count,
     return 1;
 }
 
+/* The index of a parameter in the array view of duckhts_count_error_params_t. */
+#define PARAMETER_INDEX(field) (offsetof(duckhts_count_error_params_t, field) / sizeof(double))
+
+/* Fits the parameter at `free_index` only, the others held at `fixed`. */
+static void fit_one(count_problem_t *problem, size_t free_index, const duckhts_count_error_params_t *fixed,
+                    duckhts_count_error_fit_t *fit) {
+    for (int i = 0; i < DUCKHTS_COUNT_ERROR_PARAMETERS; i++) problem->fixed[i] = 1;
+    problem->fixed[free_index] = 0;
+    fit_from(problem, fixed, 400, fit);
+}
+
 int duckhts_count_error_fit_block(const duckhts_count_cell_t *cells, size_t count,
                                   const duckhts_count_error_params_t *fixed, uint64_t max_cell_bytes,
-                                  duckhts_count_error_fit_t *fit, char *error, size_t error_length) {
+                                  duckhts_count_error_block_fit_t *fit, char *error, size_t error_length) {
     count_problem_t problem;
     if (!problem_init(&problem, cells, count, DUCKHTS_COUNT_ERROR_UNRELATED, max_cell_bytes, error,
                       error_length)) {
         return 0;
     }
-    for (int i = 0; i < DUCKHTS_COUNT_ERROR_PARAMETERS; i++) problem.fixed[i] = 1;
-    problem.fixed[1] = 0; /* contamination */
-    fit_from(&problem, fixed, 400, fit);
+    fit_one(&problem, PARAMETER_INDEX(contamination), fixed, &fit->contamination);
+    fit_one(&problem, PARAMETER_INDEX(artefact_weight), fixed, &fit->artefact_weight);
     problem_release(&problem);
     return 1;
 }

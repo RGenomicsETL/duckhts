@@ -4,6 +4,26 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- `duckhts_count_error_fit` reports `artefact_weight_sd`, after
+  `artefact_weight`: each block that is refitted for contamination is also
+  refitted for the artefact weight alone, the other numbers held at the
+  whole-sample fit, and the interval is the standard deviation of the block
+  estimates over the square root of their number, NULL with fewer than three
+  blocks, as for `contamination_sd`. No other output value changes. The fit
+  of a sample does one more one-parameter refit per block.
+  `duckhts_roh_counts_fitted` reads `artefact_weight_sd` from the fit relation
+  (a required column; NULL counts as 0, a negative or non-finite value is an
+  error) and adds `stable_fraction` to each run. Each sample is decoded three
+  times from one collection of its sites, at its artefact weight w and at
+  w - and + `artefact_weight_sd`, kept in [0, 0.05]; `stable_fraction` is the
+  share of the run's bases that both other decodes also call. The run columns
+  are unchanged. The decode takes about three times as long, with the same
+  site lists and kernel workspace. `duckhts_roh_counts` has no interval and
+  keeps its columns. The real-data check of the fitted emission
+  (`benchmarks/benchmark_roh_fitted_emission.md`) found the runs most
+  sensitive to the artefact weight: halving or doubling it moved FROH by up to
+  0.0065 on one chr20 30x sample.
+
 - `duckhts_roh_af_table_bcftools` takes `af_order := NULL`, the name of a
   column of `af_table` that gives the order of its lines: a line number the
   caller adds, or `FILE_OFFSET` when the frequencies come from `read_bcf`.

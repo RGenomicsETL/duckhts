@@ -69,10 +69,17 @@ int duckhts_count_error_fit(const duckhts_count_cell_t *cells, size_t count,
                             duckhts_count_error_relation_t relation, uint64_t max_cell_bytes,
                             duckhts_count_error_fit_t *fit, char *error, size_t error_length);
 
-/* Fits contamination only, the other parameters held at `fixed`, from `fixed`
- * as the start. For the per-block fits. */
+/* The refits of one block. Each fits one parameter, the others held at
+ * `fixed`, from `fixed` as the start. */
+typedef struct {
+    duckhts_count_error_fit_t contamination;   /* contamination free */
+    duckhts_count_error_fit_t artefact_weight; /* artefact_weight free */
+} duckhts_count_error_block_fit_t;
+
+/* Refits one block for contamination and, separately, for the artefact
+ * weight, on one set of working tables. For the per-block intervals. */
 int duckhts_count_error_fit_block(const duckhts_count_cell_t *cells, size_t count,
                                   const duckhts_count_error_params_t *fixed, uint64_t max_cell_bytes,
-                                  duckhts_count_error_fit_t *fit, char *error, size_t error_length);
+                                  duckhts_count_error_block_fit_t *fit, char *error, size_t error_length);
 
 #endif

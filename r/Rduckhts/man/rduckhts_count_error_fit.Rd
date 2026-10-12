@@ -45,7 +45,7 @@ A data frame (or invisible `TRUE` when `table_name` is given) with
   one row per sample: `sample`, `sites`, `reads`, `mean_depth`, `blocks`,
   `seq_error`, `contamination`, `contamination_sd`, `homozygosity_excess`,
   `allele_balance`, `spread_hom`, `spread_het`, `artefact_weight`,
-  `log_likelihood`, `contamination_relative`, `log_likelihood_relative`,
+  `artefact_weight_sd`, `log_likelihood`, `contamination_relative`, `log_likelihood_relative`,
   `status` (`ok`, `no_sites` for a sample whose sites were all skipped,
   `few_sites`, `few_blocks`, `at_bound`, `no_convergence` or
   `no_convergence_relative`) and `method`.
@@ -66,7 +66,11 @@ buffer. Each block of `block_bases` bases with at least `min_block_sites`
 sites is refitted for contamination with the other parameters held, and
 `contamination_sd` is the standard deviation of those block estimates
 divided by the square root of their number: an interval from the blocks,
-not from the likelihood, because sites are linked. The same cells are also
+not from the likelihood, because sites are linked. Each such block is also
+refitted for the artefact weight alone, and `artefact_weight_sd` is formed
+the same way; both are NA with fewer than three blocks.
+[rduckhts_roh_counts()] with `fit_table` uses `artefact_weight_sd` for its
+`stable_fraction`. The same cells are also
 fitted with a parent or child as the second genome
 (`contamination_relative`, `log_likelihood_relative`), since the unrelated
 model gives a relative about half its share.

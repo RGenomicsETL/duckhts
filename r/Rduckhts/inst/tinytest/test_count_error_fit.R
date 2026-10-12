@@ -122,6 +122,41 @@ test_count_error_fit <- function() {
     rho_hom = exact$spread_hom, rho_het = exact$spread_het, w = exact$artefact_weight), counts_exact)
   expect_true(abs(exact$log_likelihood - exact_at_sites) < 1e-6 * abs(exact_at_sites))
 
+  # artefact_weight_sd follows artefact_weight and is formed from block refits
+  # as contamination_sd is. The exact-frequency counts get artefacts: at 2% of
+  # the sites, chosen by a hash, the alternate count is uniform on 0..depth.
+  # The oracle refits each 3 Mb block for the artefact weight alone with
+  # optimize(), the other numbers held at the native whole-sample fit, on the
+  # sites; with exact frequencies the cell and site likelihoods are the same.
+  # The native refit stops when the log-likelihood is flat to 1e-4 across its
+  # simplex, which moves a block estimate by about 6e-5 here (block
+  # information near 1,200 / 0.02 per unit weight squared), against an sd near
+  # 1.8e-3; so the two sds must agree within a tenth of the oracle's.
+  dbExecute(con, paste(
+    "CREATE TABLE counts_artefact AS SELECT sample_id, chrom, pos, af, depth - alt AS ref_count, alt AS alt_count",
+    "FROM (SELECT sample_id, chrom, pos, af, ref_count + alt_count AS depth,",
+    "CASE WHEN fit_u(8, chrom, pos, 0) < 0.02 THEN floor(fit_u(9, chrom, pos, 0) * (ref_count + alt_count + 1))::BIGINT",
+    "ELSE alt_count END AS alt FROM counts_exact)"))
+  artefact <- rduckhts_count_error_fit(con, "counts_artefact", block_bases = 3e6)
+  expect_identical(names(artefact)[match("artefact_weight", names(artefact)) + 1L], "artefact_weight_sd")
+  expect_equal(artefact$blocks, 5L)
+  sites_artefact <- dbGetQuery(con, "SELECT pos, af, ref_count, alt_count FROM counts_artefact")
+  held <- list(e = artefact$seq_error, c = artefact$contamination, F = artefact$homozygosity_excess,
+               b = artefact$allele_balance, rho_hom = artefact$spread_hom, rho_het = artefact$spread_het)
+  block_weights <- vapply(split(sites_artefact, (sites_artefact$pos - 1) %/% 3e6), function(block) {
+    stats::optimize(function(w) oracle_log_likelihood(c(held, w = w), block),
+                    interval = c(0, 0.5), maximum = TRUE, tol = 1e-10)$maximum
+  }, numeric(1))
+  expect_equal(length(block_weights), 5L)
+  oracle_sd <- stats::sd(block_weights) / sqrt(length(block_weights))
+  expect_true(abs(artefact$artefact_weight_sd - oracle_sd) < 0.1 * oracle_sd)
+  expect_true(abs(artefact$artefact_weight - 0.02) <= 3 * artefact$artefact_weight_sd)
+  # Fewer than three blocks: no interval.
+  one_block <- rduckhts_count_error_fit(con, "counts_artefact", block_bases = 2e7)
+  expect_equal(one_block$blocks, 1L)
+  expect_true(is.na(one_block$artefact_weight_sd))
+  expect_true(is.na(one_block$contamination_sd))
+
   # The wrapper publishes a table and validates its arguments.
   expect_true(rduckhts_count_error_fit(con, "counts", block_bases = 3e6, table_name = "fit_table"))
   expect_equal(dbGetQuery(con, "SELECT count(*) AS n FROM fit_table")$n, 1)

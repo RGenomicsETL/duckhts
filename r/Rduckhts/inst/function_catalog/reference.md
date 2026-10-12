@@ -1544,7 +1544,7 @@ SELECT * FROM duckhts_roh_counts('site_counts', contamination := 0.02) ORDER BY 
 
 ## duckhts_roh_counts_fitted
 
-Find runs of homozygosity from allele read counts using per-sample fitted error, contamination, allele balance and artefact weight.
+Find runs of homozygosity from allele read counts using per-sample fitted error, contamination, allele balance and artefact weight, with the share of each run that the artefact weight's interval does not move.
 
 Signature:
 
@@ -1555,21 +1555,29 @@ duckhts_roh_counts_fitted(counts_table, fit_table, genetic_map, hw_to_az := 6.7e
 Returns:
 
 ```
-table(sample VARCHAR, chrom VARCHAR, start BIGINT, "end" BIGINT, length BIGINT, n_markers INTEGER, quality DOUBLE)
+table(sample VARCHAR, chrom VARCHAR, start BIGINT, "end" BIGINT, length BIGINT, n_markers INTEGER, quality DOUBLE, stable_fraction DOUBLE)
 ```
 
 ### Fit relation
 
-fit_table is a caller-named table or view with one row per sample and columns sample, seq_error, contamination, allele_balance and artefact_weight, such as the output of duckhts_count_error_fit; other columns are ignored. sample joins to counts_table.sample_id, with a NULL sample matching a NULL sample_id as in duckhts_roh_counts and duckhts_count_error_fit. For each sample of counts_table, a missing fit row, a NULL parameter or more than one fit row is an explicit error naming the sample and problem, whatever DuckDB's scalar_subquery_error_on_multiple_rows setting. A relation without one of the four columns is a binder error. Fit rows of samples that counts_table does not hold are not checked, so empty counts give no rows; the other arguments are still checked. Each value must be in the range of the scalar argument of duckhts_roh_counts: seq_error in (0, 0.5), contamination in [0, 1), allele_balance in [0.35, 0.65] and artefact_weight in [0, 0.05], finite; a fitted value outside is an error, not clipped. Fit status filtering belongs in the caller's SQL. The spreads are not used.
+fit_table is a caller-named table or view with one row per sample and columns sample, seq_error, contamination, allele_balance, artefact_weight and artefact_weight_sd, such as the output of duckhts_count_error_fit; other columns are ignored. sample joins to counts_table.sample_id, with a NULL sample matching a NULL sample_id as in duckhts_roh_counts and duckhts_count_error_fit. For each sample of counts_table, a missing fit row, a NULL value of one of the four fitted numbers or more than one fit row is an explicit error naming the sample and problem, whatever DuckDB's scalar_subquery_error_on_multiple_rows setting. A relation without one of the five columns is a binder error. Fit rows of samples that counts_table does not hold are not checked, so empty counts give no rows; the other arguments are still checked. Each value must be in the range of the scalar argument of duckhts_roh_counts: seq_error in (0, 0.5), contamination in [0, 1), allele_balance in [0.35, 0.65] and artefact_weight in [0, 0.05], finite; a fitted value outside is an error, not clipped. artefact_weight_sd must be finite and at least 0; a NULL counts as 0. Fit status filtering belongs in the caller's SQL. The spreads are not used.
 
 ### Decode
 
-Counts, emissions, outputs, transitions, optional genetic_map and memory limits are identical to duckhts_roh_counts. Only the four fitted numbers vary by sample. In R, pass fit_table to rduckhts_roh_counts; its scalar seq_error, contamination, allele_balance and artefact_weight arguments are unused.
+Counts, emissions, the run columns, transitions, optional genetic_map and memory limits are identical to duckhts_roh_counts: sample through quality equal its output at each sample's four numbers. Only the four fitted numbers vary by sample. In R, pass fit_table to rduckhts_roh_counts; its scalar seq_error, contamination, allele_balance and artefact_weight arguments are unused.
+
+### Stability
+
+The runs depend on artefact_weight more than on the other fitted numbers, and the fit gives an interval for it. Each sample is decoded three times from one collection of its sites: at its artefact_weight w, and at w - artefact_weight_sd and w + artefact_weight_sd, each kept in [0, 0.05]. The rows are the runs of the decode at w; stable_fraction is the share of a run's bases that are also in a run of both other decodes, from 0 to 1. A run with stable_fraction 1 does not depend on where w lies within one standard error; a low value marks a run whose call hinges on the artefact weight. Filter on it, or weight run bases by it, to report the runs or bases the fit's interval does not move. A NULL artefact_weight_sd (a fit with fewer than three blocks) counts as 0, so every run gets 1; check the fit's blocks or status as well. The two extra decodes share the site lists and the kernel workspace, so memory is that of duckhts_roh_counts plus, for the list a thread decodes, 24 bytes per run of the two extra decodes and 8 per run at w, and decode time is about three times as long.
 
 ### Examples
 
 ```sql
 SELECT * FROM duckhts_roh_counts_fitted('site_counts', 'sample_fits') ORDER BY sample, chrom, start;
+```
+
+```sql
+SELECT sample, sum(length) AS run_bases, sum(length * stable_fraction) AS stable_run_bases FROM duckhts_roh_counts_fitted('site_counts', 'sample_fits') GROUP BY sample;
 ```
 
 ## duckhts_count_error_fit
@@ -1585,7 +1593,7 @@ duckhts_count_error_fit(counts_table, block_bases := 10000000, freq_bins := 64, 
 Returns:
 
 ```
-table(sample VARCHAR, sites BIGINT, reads BIGINT, mean_depth DOUBLE, blocks INTEGER, seq_error DOUBLE, contamination DOUBLE, contamination_sd DOUBLE, homozygosity_excess DOUBLE, allele_balance DOUBLE, spread_hom DOUBLE, spread_het DOUBLE, artefact_weight DOUBLE, log_likelihood DOUBLE, contamination_relative DOUBLE, log_likelihood_relative DOUBLE, status VARCHAR, method VARCHAR)
+table(sample VARCHAR, sites BIGINT, reads BIGINT, mean_depth DOUBLE, blocks INTEGER, seq_error DOUBLE, contamination DOUBLE, contamination_sd DOUBLE, homozygosity_excess DOUBLE, allele_balance DOUBLE, spread_hom DOUBLE, spread_het DOUBLE, artefact_weight DOUBLE, artefact_weight_sd DOUBLE, log_likelihood DOUBLE, contamination_relative DOUBLE, log_likelihood_relative DOUBLE, status VARCHAR, method VARCHAR)
 ```
 
 ### Input
@@ -1598,7 +1606,7 @@ A site's sample genotype has 0, 1 or 2 copies of the counted allele with Hardy-W
 
 ### Output
 
-One row per sample: the fitted seven numbers, the log-likelihood, and contamination_relative with log_likelihood_relative from the same cells with a parent or child as the second genome; the sites and reads used and their mean depth. Each block of block_bases bases with at least min_block_sites sites is refitted for contamination with the other parameters held, and contamination_sd is the standard deviation of those block estimates divided by the square root of their number (NULL with fewer than three blocks). status is ok, no_sites (a sample whose sites were all skipped: sites 0, the numbers NULL), few_sites (under 1,000 sites), few_blocks (under three refitted blocks), at_bound (contamination, seq_error or artefact_weight at its upper bound), no_convergence or no_convergence_relative; method names the fit and its version.
+One row per sample: the fitted seven numbers, the log-likelihood, and contamination_relative with log_likelihood_relative from the same cells with a parent or child as the second genome; the sites and reads used and their mean depth. Each block of block_bases bases with at least min_block_sites sites is refitted for contamination with the other parameters held at the whole-sample fit, and contamination_sd is the standard deviation of those block estimates divided by the square root of their number (NULL with fewer than three blocks). Each such block is also refitted for artefact_weight alone, the other parameters held the same way, and artefact_weight_sd is formed from those estimates as contamination_sd is; duckhts_roh_counts_fitted uses it for stable_fraction. status is ok, no_sites (a sample whose sites were all skipped: sites 0, the numbers NULL), few_sites (under 1,000 sites), few_blocks (under three refitted blocks), at_bound (contamination, seq_error or artefact_weight at its upper bound), no_convergence or no_convergence_relative; method names the fit and its version.
 
 ### What the numbers are
 
