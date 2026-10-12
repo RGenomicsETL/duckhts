@@ -5,6 +5,7 @@
 # Run from the repository root.
 
 source("benchmarks/roh_truth_mixtures/declaration.R")
+source("benchmarks/roh_truth_mixtures/declaration_v2.R")
 source("benchmarks/roh_counts_validation/fitted_emission.R")
 source("benchmarks/bam_mismatch_stage.R")
 

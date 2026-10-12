@@ -4,6 +4,23 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- `benchmarks/benchmark_roh_truth_and_mixtures.md` tests the ROH decodes
+  where the answer is known. Synthetic chr20 children of two unrelated
+  founders of one population (100 children, five populations) carry planted
+  autozygous segments, genotype errors at 1% and read counts simulated with
+  known depth, read error, contamination, allele balance and a 0.3% share of
+  artefactual sites. `duckhts_count_error_fit` recovers the simulated numbers,
+  and `duckhts_roh_counts_fitted` with the fit finds 99.9% of the planted
+  bases, as the true numbers do, against 48% for the scalar defaults of
+  `duckhts_roh_counts`. The background of two unrelated founders still holds
+  long homozygous stretches; a second version of the truth counts them, and
+  both versions' verdicts are reported. Read-level mixtures of two 30x chr20
+  slices (registered as `roh_mixture_*_chr20_cram`) at 1 to 10% give a fitted
+  contamination that rises with the share, and the contamination term keeps
+  FROH within 0.003 of the unmixed receiver where its absence erodes it by up
+  to 0.13. `benchmarks/roh_counts_stage.R` exposes its counting query so that
+  staging and the mixtures count with the same SQL.
+
 - `duckhts_roh_counts_fitted` reads `counts_table` once. It read it a
   second time to check the fit of every sample, and when the relation held a
   join (a view filtered by a long `IN` list, or counts joined to their

@@ -279,11 +279,57 @@ roh_truth_build <- function(con, work, declaration, populations, children_per_po
                paste(c("#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT",
                        children$child), collapse = "\t"),
                body), vcf_path)
+  vcf_sha256 <- roh_truth_sha256(vcf_path)
+  # BGZF with an index: read_bcf reports a row estimate (records times
+  # samples) only for an indexed scan. Without one the planner took the call
+  # rows for the small side of the frequency join and built its hash table on
+  # them, about 16 MiB per sample here, where the declared model of the
+  # genotype decode builds it on the frequency rows.
+  status <- system2(RBCFTools::bgzip_path(), c("-f", shQuote(vcf_path)))
+  if (status != 0L) stop("bgzip failed on the children VCF", call. = FALSE)
+  compressed_path <- paste0(vcf_path, ".gz")
+  DBI::dbGetQuery(con, sprintf("SELECT * FROM bcf_index(%s)", roh_truth_quote(compressed_path)))
   list(children = children, segments = segments, realized = realized, sites = sites,
        positions = positions, heterozygous = heterozygous, background = background,
        span_bases = positions[[sites]] - positions[[1L]] + 1,
-       counts_path = counts_path, frequency_path = frequency_path, vcf_path = vcf_path,
-       counts_sha256 = roh_truth_sha256(counts_path), vcf_sha256 = roh_truth_sha256(vcf_path))
+       counts_path = counts_path, frequency_path = frequency_path, vcf_path = compressed_path,
+       counts_sha256 = roh_truth_sha256(counts_path), vcf_sha256 = vcf_sha256)
+}
+
+# Disjoint intervals covering the union of two interval sets of one child.
+roh_truth_union <- function(a, b) {
+  intervals <- rbind(a[c("start", "end")], b[c("start", "end")])
+  if (!nrow(intervals)) return(data.frame(start = numeric(), end = numeric()))
+  intervals <- intervals[order(intervals$start, intervals$end), , drop = FALSE]
+  starts <- numeric()
+  ends <- numeric()
+  for (k in seq_len(nrow(intervals))) {
+    if (length(ends) && intervals$start[[k]] <= ends[[length(ends)]] + 1) {
+      ends[[length(ends)]] <- max(ends[[length(ends)]], intervals$end[[k]])
+    } else {
+      starts <- c(starts, intervals$start[[k]])
+      ends <- c(ends, intervals$end[[k]])
+    }
+  }
+  data.frame(start = starts, end = ends)
+}
+
+# The true intervals of every child: version 1, the planted segments; version
+# 2 (declaration_v2.R), the planted segments merged with the background
+# stretches.
+roh_truth_sets <- function(children, segments, background) {
+  per_child <- function(version) {
+    do.call(rbind, lapply(children$child, function(child) {
+      planted <- segments[segments$child == child, c("start", "end"), drop = FALSE]
+      intervals <- if (version == "v1") {
+        planted
+      } else {
+        roh_truth_union(planted, background[background$child == child, c("start", "end"), drop = FALSE])
+      }
+      if (nrow(intervals)) data.frame(child = child, intervals)
+    }))
+  }
+  list(v1 = per_child("v1"), v2 = per_child("v2"))
 }
 
 # Intervals (start, end; one-based, inclusive) in both of two disjoint sets.
@@ -295,12 +341,13 @@ roh_truth_intersect <- function(a, b) {
   data.frame(start = first[keep], end = last[keep])
 }
 
-# Bases of each run class of every arm against the planted segments, per child.
-roh_truth_score <- function(runs, arms, children, segments, min_call_bases) {
+# Bases of each run class of every arm against the true intervals of a truth
+# version (roh_truth_sets), per child.
+roh_truth_score <- function(runs, arms, children, truth, min_call_bases) {
   rows <- list()
   for (arm in arms) {
     for (child in children$child) {
-      planted <- segments[segments$child == child, c("start", "end"), drop = FALSE]
+      true_set <- truth[truth$child == child, c("start", "end"), drop = FALSE]
       calls <- runs[runs$arm == arm & runs$sample == child, c("start", "end"), drop = FALSE]
       for (run_class in c("all", "long")) {
         kept <- if (run_class == "long") {
@@ -309,11 +356,11 @@ roh_truth_score <- function(runs, arms, children, segments, min_call_bases) {
           calls
         }
         called <- roh_run_bases(kept)
-        true_bases <- roh_run_overlap_bases(kept, planted)
+        true_bases <- roh_run_overlap_bases(kept, true_set)
         rows[[length(rows) + 1L]] <- data.frame(
           arm = arm, run_class = run_class, child = child,
           population = children$population[children$child == child],
-          planted_bases = roh_run_bases(planted), runs = nrow(kept), called_bases = called,
+          truth_bases = roh_run_bases(true_set), runs = nrow(kept), called_bases = called,
           true_bases = true_bases, false_bases = called - true_bases, stringsAsFactors = FALSE)
       }
     }
@@ -361,7 +408,7 @@ roh_truth_secondary <- function(runs, arms, children, segments, background, hete
 }
 
 roh_truth_pooled <- function(scores) {
-  sensitivity <- sum(scores$true_bases) / sum(scores$planted_bases)
+  sensitivity <- sum(scores$true_bases) / sum(scores$truth_bases)
   called <- sum(scores$called_bases)
   c(sensitivity = sensitivity,
     false_discovery = if (called > 0) sum(scores$false_bases) / called else NA_real_)
@@ -372,7 +419,7 @@ roh_truth_summary <- function(scores, by) {
   result <- do.call(rbind, lapply(groups, function(rows) {
     pooled <- roh_truth_pooled(rows)
     data.frame(rows[1L, by, drop = FALSE], children = nrow(rows), runs = sum(rows$runs),
-               planted_bases = sum(rows$planted_bases), called_bases = sum(rows$called_bases),
+               truth_bases = sum(rows$truth_bases), called_bases = sum(rows$called_bases),
                true_bases = sum(rows$true_bases), false_bases = sum(rows$false_bases),
                sensitivity = pooled[["sensitivity"]], false_discovery = pooled[["false_discovery"]],
                row.names = NULL)
@@ -434,20 +481,21 @@ roh_truth_by_length <- function(runs, arms, segments, min_call_bases) {
   do.call(rbind, rows)
 }
 
-# Where the bases that stable_fraction and gained_bases count lie: in a
-# planted segment (a true call, or a missed planted base that a higher weight
-# recovers) or outside it (a false call). `central` holds the runs of
-# counts_fit with both columns; `low` and `high` the runs at w - sd and w + sd.
-roh_truth_stability <- function(central, low, high, segments, children) {
+# Where the bases that stable_fraction and gained_bases count lie: in the
+# truth (a true call, or a missed true base that a higher weight recovers) or
+# outside it (a false call). `truth` is one version of roh_truth_sets;
+# `central` holds the runs of counts_fit with both columns; `low` and `high`
+# the runs at w - sd and w + sd.
+roh_truth_stability <- function(central, low, high, truth, children) {
   per_child <- list()
   for (child in children$child) {
-    planted <- segments[segments$child == child, c("start", "end"), drop = FALSE]
+    true_set <- truth[truth$child == child, c("start", "end"), drop = FALSE]
     runs <- central[central$sample == child, , drop = FALSE]
     both <- roh_truth_intersect(low[low$sample == child, c("start", "end"), drop = FALSE],
                                 high[high$sample == child, c("start", "end"), drop = FALSE])
     unstable <- 0
-    unstable_planted <- 0
-    run_planted <- 0
+    unstable_true <- 0
+    run_true <- 0
     for (r in seq_len(nrow(runs))) {
       run <- runs[r, c("start", "end")]
       stable_part <- roh_truth_intersect(run, both)
@@ -457,10 +505,10 @@ roh_truth_stability <- function(central, low, high, segments, children) {
         stop("stable_fraction of a run of ", child, " differs from its located bases (",
              reported, " against ", located, ")", call. = FALSE)
       }
-      in_planted <- roh_run_overlap_bases(run, planted)
+      in_truth <- roh_run_overlap_bases(run, true_set)
       unstable <- unstable + located
-      unstable_planted <- unstable_planted + in_planted - roh_run_overlap_bases(stable_part, planted)
-      run_planted <- run_planted + in_planted
+      unstable_true <- unstable_true + in_truth - roh_run_overlap_bases(stable_part, true_set)
+      run_true <- run_true + in_truth
     }
     run_bases <- sum(as.numeric(runs$length))
     child_high <- high[high$sample == child, c("start", "end"), drop = FALSE]
@@ -469,17 +517,17 @@ roh_truth_stability <- function(central, low, high, segments, children) {
     if (sum(as.numeric(runs$gained_bases)) != gained[["attached"]]) {
       stop("gained_bases of ", child, " differ from the decode at w + sd", call. = FALSE)
     }
-    gained_planted <- roh_run_overlap_bases(attached, planted) -
-      roh_run_overlap_bases(roh_truth_intersect(attached, runs[c("start", "end")]), planted)
+    gained_true <- roh_run_overlap_bases(attached, true_set) -
+      roh_run_overlap_bases(roh_truth_intersect(attached, runs[c("start", "end")]), true_set)
     per_child[[child]] <- data.frame(
       child = child, population = children$population[children$child == child],
-      run_bases = run_bases, run_false = run_bases - run_planted,
-      unstable_bases = unstable, unstable_false = unstable - unstable_planted,
+      run_bases = run_bases, run_false = run_bases - run_true,
+      unstable_bases = unstable, unstable_false = unstable - unstable_true,
       stable_bases = run_bases - unstable,
-      stable_false = (run_bases - run_planted) - (unstable - unstable_planted),
-      missed_bases = roh_run_bases(planted) - run_planted,
-      gained_bases = gained[["attached"]], gained_planted = gained_planted,
-      gained_false = gained[["attached"]] - gained_planted, new_run_bases = gained[["isolated"]])
+      stable_false = (run_bases - run_true) - (unstable - unstable_true),
+      missed_bases = roh_run_bases(true_set) - run_true,
+      gained_bases = gained[["attached"]], gained_true = gained_true,
+      gained_false = gained[["attached"]] - gained_true, new_run_bases = gained[["isolated"]])
   }
   result <- do.call(rbind, per_child)
   rownames(result) <- NULL
@@ -604,22 +652,39 @@ roh_truth_run <- function(extension, cli, output_dir, size = c("full", "reduced"
   observations <- recorder$table()
   roh_truth_gate(observations, file.path(output_dir, "truth_observations.csv"))
   runs <- do.call(rbind, all_runs)
-  scores <- roh_truth_score(runs, declaration$arms, children, built$segments, declaration$min_call_bases)
-  pooled <- roh_truth_summary(scores, c("arm", "run_class"))
-  by_population <- roh_truth_summary(scores, c("arm", "run_class", "population"))
-  comparisons <- do.call(rbind, lapply(seq_len(nrow(declaration$comparisons)), function(k) {
-    row <- declaration$comparisons[k, ]
-    do.call(rbind, lapply(c("long", "all"), function(run_class) {
-      data.frame(criterion = row$criterion,
-                 roh_truth_compare(scores, row$test, row$reference, run_class, declaration))
+  # Both truths: version 1 (declaration.R) and version 2 (declaration_v2.R),
+  # whose background stretches have the length bound of the secondary
+  # measures of version 1.
+  stopifnot(roh_truth_declaration_v2$min_stretch_bases == declaration$min_call_bases)
+  truths <- roh_truth_sets(children, built$segments, built$background)
+  versions <- lapply(names(truths), function(version) {
+    scores <- roh_truth_score(runs, declaration$arms, children, truths[[version]],
+                              declaration$min_call_bases)
+    comparisons <- do.call(rbind, lapply(seq_len(nrow(declaration$comparisons)), function(k) {
+      row <- declaration$comparisons[k, ]
+      do.call(rbind, lapply(c("long", "all"), function(run_class) {
+        data.frame(truth = version, criterion = row$criterion,
+                   roh_truth_compare(scores, row$test, row$reference, run_class, declaration))
+      }))
     }))
-  }))
-  long_rows <- comparisons[comparisons$run_class == "long", ]
-  t1 <- long_rows[long_rows$criterion == "T1", ]
-  t2 <- long_rows[long_rows$criterion == "T2", ]
-  t1_pass <- t1$lower[t1$metric == "sensitivity"] > 0 &&
-    t1$upper[t1$metric == "false_discovery"] < declaration$t1_max_fdr_increase
-  t2_pass <- all(t2$lower >= -declaration$t2_margin & t2$upper <= declaration$t2_margin)
+    long_rows <- comparisons[comparisons$run_class == "long", ]
+    t1 <- long_rows[long_rows$criterion == "T1", ]
+    t2 <- long_rows[long_rows$criterion == "T2", ]
+    t1_pass <- t1$lower[t1$metric == "sensitivity"] > 0 &&
+      t1$upper[t1$metric == "false_discovery"] < declaration$t1_max_fdr_increase
+    t2_pass <- all(t2$lower >= -declaration$t2_margin & t2$upper <= declaration$t2_margin)
+    list(scores = data.frame(truth = version, scores),
+         pooled = data.frame(truth = version, roh_truth_summary(scores, c("arm", "run_class"))),
+         by_population = data.frame(truth = version,
+                                    roh_truth_summary(scores, c("arm", "run_class", "population"))),
+         comparisons = comparisons,
+         criteria = data.frame(truth = version, criterion = c("T1", "T2"), pass = c(t1_pass, t2_pass)))
+  })
+  gather <- function(part) do.call(rbind, lapply(versions, `[[`, part))
+  scores <- gather("scores")
+  pooled <- gather("pooled")
+  by_population <- gather("by_population")
+  comparisons <- gather("comparisons")
 
   fit_with_population <- merge(fit, children[c("child", "population")], by.x = "sample", by.y = "child")
   t3 <- do.call(rbind, lapply(split(fit_with_population, fit_with_population$population), function(rows) {
@@ -632,7 +697,7 @@ roh_truth_run <- function(extension, cli, output_dir, size = c("full", "reduced"
   }))
   ok_share <- mean(fit$status == "ok")
   t3_pass <- all(t3$pass) && ok_share >= declaration$t3_min_ok
-  criteria <- data.frame(criterion = c("T1", "T2", "T3"), pass = c(t1_pass, t2_pass, t3_pass))
+  criteria <- rbind(gather("criteria"), data.frame(truth = "either", criterion = "T3", pass = t3_pass))
 
   secondary <- roh_truth_secondary(runs, declaration$arms, children, built$segments, built$background,
                                    built$heterozygous, built$positions, declaration$min_call_bases)
@@ -648,8 +713,10 @@ roh_truth_run <- function(extension, cli, output_dir, size = c("full", "reduced"
     }))
   rownames(secondary_pooled) <- NULL
   by_length <- roh_truth_by_length(runs, declaration$arms, built$segments, declaration$min_call_bases)
-  stability <- roh_truth_stability(central, low, high, built$segments,
-                                   children[children$child %in% usable, , drop = FALSE])
+  decoded_children <- children[children$child %in% usable, , drop = FALSE]
+  stability <- do.call(rbind, lapply(names(truths), function(version) {
+    data.frame(truth = version, roh_truth_stability(central, low, high, truths[[version]], decoded_children))
+  }))
 
   metadata <- data.frame(
     key = c("revision", "src_tree", "extension_sha256", "duckdb_cli", "r_version", "host_load",
@@ -670,6 +737,7 @@ roh_truth_run <- function(extension, cli, output_dir, size = c("full", "reduced"
   write(metadata, "truth_metadata.csv")
   write(children, "truth_children.csv")
   write(built$segments, "truth_segments.csv")
+  write(truths$v2, "truth_v2_intervals.csv")
   write(built$realized, "truth_realized.csv")
   write(fit, "truth_fit.csv")
   write(runs, "truth_runs.csv")

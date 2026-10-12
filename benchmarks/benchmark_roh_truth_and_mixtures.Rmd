@@ -56,8 +56,11 @@ its registry row records. A file that differs stops the render.
 The values are in `benchmarks/roh_truth_mixtures/declaration.R`, committed on
 its own before the driver decoded anything. The secondary measures of the
 planted truth were added in a second commit, after a reduced driver check and
-before the full run; they add reported numbers and change no criterion. This
-section states the design in words.
+before the full run; they add reported numbers and change no criterion. A
+second version of the truth (`declaration_v2.R`, its own commit) followed the
+first full run, which stopped at the memory gate; it is described after the
+first version, whose verdicts the report keeps. This section states the design
+in words.
 
 ### Planted truth
 
@@ -81,7 +84,10 @@ is what the plan says.
 **Evidence.**
 
 - Genotypes: at each site, with chance 1%, the reported genotype is one of
-  the two other genotypes, each with chance 1/2.
+  the two other genotypes, each with chance 1/2. The children are written as
+  a BGZF VCF with an index, so that `read_bcf` reports a row estimate and the
+  frequency join is built on the frequency rows, as the declared memory model
+  of the genotype decode assumes.
 - Read counts: depth is Poisson with mean 30. With chance 0.3% a site's alt
   count is uniform on 0 to depth (an artefactual site). Otherwise it is
   binomial with chance (1 − c) q(g) + c q(g_C), where g is the child's and
@@ -142,8 +148,23 @@ arm, without a verdict:
 
 **Stability**, without a verdict: of the bases of the runs of `counts_fit`
 that `stable_fraction` marks as unstable, how many are false; of the bases
-that `gained_bases` counts, how many are planted (bases that `counts_fit`
+that `gained_bases` counts, how many are true (bases that `counts_fit`
 missed) and how many are false.
+
+**Truth, version 2.** The first full run, with the memory gate recording
+only, showed the premise of version 1 false: the long runs that `counts_fit`
+called outside the planted segments held 0.0038 true heterozygous sites per
+panel site, against about 0.30 for the children's background, and 142 of
+their 270 Mb lay in stretches of at least 500 kb without one true
+heterozygous site. Such bases are homozygous in the constructed child. In
+version 2 a true base is a base of a planted segment, or of a background
+stretch: a maximal set of consecutive panel sites at which the child's true
+genotype (after planting, before the genotype errors and the read simulation)
+is not heterozygous, from the position of its first to that of its last site,
+of at least 500 kb (last − first + 1). The two sets are merged. Arms, run
+classes, metrics, bootstrap, comparisons and the bounds of T1 and T2 are those
+of version 1; T3 does not depend on the truth. Both versions' verdicts are
+reported.
 
 ### Read mixtures
 
@@ -297,53 +318,80 @@ Status: `r paste(sprintf("%s %d", names(statuses), as.integer(statuses)), collap
 
 ### Sensitivity and false discovery
 
-Pooled over all children.
+Pooled over all children, against both truths: version 1 (planted segments)
+and version 2 (planted segments and background stretches).
 
 ```{r pooled, echo=FALSE}
 pooled <- truth$pooled
-pooled <- pooled[order(match(pooled$run_class, c("long", "all")), match(pooled$arm, arm_order)), ]
+side <- function(data, keys) {
+  v1 <- data[data$truth == "v1", ]
+  v2 <- data[data$truth == "v2", ]
+  merge(v1, v2, by = keys, suffixes = c("_v1", "_v2"), sort = FALSE)
+}
+wide <- side(pooled, c("arm", "run_class"))
+wide <- wide[order(match(wide$run_class, c("long", "all")), match(wide$arm, arm_order)), ]
 knitr::kable(data.frame(
-  Runs = ifelse(pooled$run_class == "long", "≥ 500 kb", "all"), Arm = pooled$arm,
-  `Run count` = bases(pooled$runs), `Called bases` = bases(pooled$called_bases),
-  `True` = bases(pooled$true_bases), `False` = bases(pooled$false_bases),
-  Sensitivity = share(pooled$sensitivity), `False discovery` = share(pooled$false_discovery),
-  check.names = FALSE), row.names = FALSE, align = "llrrrrrr")
+  Runs = ifelse(wide$run_class == "long", "≥ 500 kb", "all"), Arm = wide$arm,
+  `Called bases` = bases(wide$called_bases_v1),
+  `Sensitivity v1` = share(wide$sensitivity_v1), `False discovery v1` = share(wide$false_discovery_v1),
+  `Sensitivity v2` = share(wide$sensitivity_v2), `False discovery v2` = share(wide$false_discovery_v2),
+  check.names = FALSE), row.names = FALSE, align = "llrrrrr")
 ```
 
 ### Comparisons
 
-Pooled difference, first arm minus second, with its 95% bootstrap interval.
+Pooled difference, first arm minus second, with its 95% bootstrap interval,
+against each truth.
 
 ```{r comparisons, echo=FALSE}
-comparisons <- truth$comparisons
-comparisons <- comparisons[order(match(comparisons$run_class, c("long", "all"))), ]
+comparisons <- side(truth$comparisons, c("criterion", "test", "reference", "run_class", "metric"))
+comparisons <- comparisons[order(match(comparisons$run_class, c("long", "all")),
+                                 match(paste(comparisons$test, comparisons$reference),
+                                       paste(declared$comparisons$test, declared$comparisons$reference)),
+                                 comparisons$metric), ]
+interval <- function(difference, lower, upper) {
+  sprintf("%+.4f [%+.4f, %+.4f]", difference, lower, upper)
+}
 knitr::kable(data.frame(
   Criterion = comparisons$criterion, Runs = ifelse(comparisons$run_class == "long", "≥ 500 kb", "all"),
   Comparison = paste(comparisons$test, "−", comparisons$reference), Metric = comparisons$metric,
-  Difference = sprintf("%+.4f", comparisons$difference),
-  Interval = sprintf("[%+.4f, %+.4f]", comparisons$lower, comparisons$upper),
-  check.names = FALSE), row.names = FALSE, align = "lllllr")
+  `Version 1` = interval(comparisons$difference_v1, comparisons$lower_v1, comparisons$upper_v1),
+  `Version 2` = interval(comparisons$difference_v2, comparisons$lower_v2, comparisons$upper_v2),
+  check.names = FALSE), row.names = FALSE, align = "llllrr")
 criteria <- truth$criteria
+verdict_of <- function(version, criterion) {
+  row <- criteria[criteria$truth %in% c(version, "either") & criteria$criterion == criterion, ]
+  verdict(row$pass)
+}
 ```
 
 ```{r criteria, echo=FALSE}
-knitr::kable(data.frame(Criterion = criteria$criterion, Verdict = verdict(criteria$pass)),
-             row.names = FALSE)
+knitr::kable(data.frame(
+  Criterion = c("T1", "T2", "T3"),
+  `Version 1` = vapply(c("T1", "T2", "T3"), function(k) verdict_of("v1", k), ""),
+  `Version 2` = vapply(c("T1", "T2", "T3"), function(k) verdict_of("v2", k), ""),
+  check.names = FALSE), row.names = FALSE)
 ```
+
+T3 compares the fit with the simulated numbers and does not depend on the
+truth.
 
 ### By population
 
 Runs of at least 500 kb.
 
 ```{r by-population, echo=FALSE}
-population <- truth$by_population[truth$by_population$run_class == "long", ]
+population <- side(truth$by_population[truth$by_population$run_class == "long", ],
+                   c("arm", "run_class", "population"))
 population <- population[order(match(population$population, declared$populations),
                                match(population$arm, arm_order)), ]
 knitr::kable(data.frame(
   Population = population$population, Arm = population$arm,
-  Sensitivity = share(population$sensitivity), `False discovery` = share(population$false_discovery),
-  `False bases per child` = bases(round(population$false_bases / population$children)),
-  check.names = FALSE), row.names = FALSE, align = "llrrr")
+  `Sensitivity v1` = share(population$sensitivity_v1),
+  `False discovery v1` = share(population$false_discovery_v1),
+  `Sensitivity v2` = share(population$sensitivity_v2),
+  `False discovery v2` = share(population$false_discovery_v2),
+  check.names = FALSE), row.names = FALSE, align = "llrrrr")
 ```
 
 ### By planted length
@@ -364,11 +412,12 @@ knitr::kable(data.frame(
 
 ### The background (secondary)
 
-Background stretches have no heterozygous true genotype over at least 500 kb.
-False bases inside one are homozygous in truth; the declared metrics count
-them false because they are outside the planted segments. The heterozygosity
-columns compare the true heterozygous sites per panel site inside an arm's
-false calls with the child's background as a whole.
+Against version 1 of the truth. Background stretches have no heterozygous
+true genotype over at least 500 kb. Bases inside one are homozygous in the
+child; version 1 counts them false because they are outside the planted
+segments, and version 2 counts them true. The heterozygosity columns compare
+the true heterozygous sites per panel site inside an arm's calls outside the
+planted segments with the child's background as a whole.
 
 ```{r secondary, echo=FALSE}
 secondary <- truth$secondary
@@ -400,23 +449,27 @@ heterozygous sites per panel site.
 Runs of `counts_fit`, all lengths. Unstable bases are the bases of a run that
 `stable_fraction` does not count (not called at both w − sd and w + sd);
 gained bases are those `gained_bases` counts. A false base is outside the
-planted segments; a planted gained base is one that `counts_fit` missed.
+truth; a true gained base is one that `counts_fit` missed.
 
 ```{r stability, echo=FALSE}
 stability <- truth$stability
-totals <- colSums(stability[setdiff(names(stability), c("child", "population"))])
+totals <- do.call(rbind, lapply(split(stability, stability$truth), function(rows) {
+  data.frame(truth = rows$truth[[1L]],
+             t(colSums(rows[setdiff(names(rows), c("truth", "child", "population"))])))
+}))
 knitr::kable(data.frame(
-  `Run bases` = bases(totals[["run_bases"]]),
-  `False share of run bases` = share(totals[["run_false"]] / totals[["run_bases"]]),
-  `Unstable bases` = bases(totals[["unstable_bases"]]),
-  `False share of unstable` = share(if (totals[["unstable_bases"]] > 0) totals[["unstable_false"]] / totals[["unstable_bases"]] else NA),
-  `False share of stable` = share(totals[["stable_false"]] / totals[["stable_bases"]]),
-  `Missed planted bases` = bases(totals[["missed_bases"]]),
-  `Gained bases` = bases(totals[["gained_bases"]]),
-  `Gained, planted` = bases(totals[["gained_planted"]]),
-  `Gained, false` = bases(totals[["gained_false"]]),
-  `Bases of new runs at w + sd` = bases(totals[["new_run_bases"]]),
-  check.names = FALSE), row.names = FALSE, align = "rrrrrrrrrr")
+  Truth = totals$truth, `Run bases` = bases(totals$run_bases),
+  `False share of run bases` = share(totals$run_false / totals$run_bases),
+  `Unstable bases` = bases(totals$unstable_bases),
+  `False share of unstable` = share(ifelse(totals$unstable_bases > 0,
+                                           totals$unstable_false / totals$unstable_bases, NA)),
+  `False share of stable` = share(totals$stable_false / totals$stable_bases),
+  `Missed true bases` = bases(totals$missed_bases),
+  `Gained bases` = bases(totals$gained_bases),
+  `Gained, true` = bases(totals$gained_true),
+  `Gained, false` = bases(totals$gained_false),
+  `Bases of new runs at w + sd` = bases(totals$new_run_bases),
+  check.names = FALSE), row.names = FALSE, align = "lrrrrrrrrrr")
 ```
 
 ## Read mixtures
@@ -508,10 +561,13 @@ knitr::kable(data.frame(
   mapping and sequence context.
 - The population frequencies include the founders of the children, two of
   about 200 haplotypes per site.
-- Calls outside the planted segments count as false, but the background of
-  two unrelated founders is not free of homozygous stretches; the secondary
-  measures show how much of the false bases lie in them. The founders are the
-  pedigree's founders; cryptic relatedness between them is not checked.
+- Version 1 counts calls outside the planted segments as false, but the
+  background of two unrelated founders is not free of homozygous stretches.
+  Version 2 counts stretches of at least 500 kb without a true heterozygous
+  site as true; a call through a longer stretch broken by one or two
+  heterozygous sites, or through a shorter stretch, still counts as false
+  there. The founders are the pedigree's founders; cryptic relatedness
+  between them is not checked.
 - One error rate, one depth and one set of read parameters. Other rates, a
   low depth and a contaminant of another population are not tested here.
 - One mixture pair, of two populations; no related donor is staged. The
