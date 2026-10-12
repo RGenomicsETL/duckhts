@@ -378,12 +378,12 @@ SELECT duckhts_duckdb_supports_geometry();
 
 ## read_bcf
 
-Read VCF/BCF with header-typed INFO/FORMAT, typed CSQ/ANN/BCSQ annotations, sample selection and optional tidy sample rows.
+Read VCF/BCF with header-typed INFO/FORMAT, typed CSQ/ANN/BCSQ annotations, sample selection, optional tidy sample rows and optional record file positions.
 
 Signature:
 
 ```sql
-read_bcf(path, region := NULL, index_path := NULL, tidy_format := FALSE, additional_csq_column_types := NULL, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null', samples := NULL, regions := NULL)
+read_bcf(path, region := NULL, index_path := NULL, tidy_format := FALSE, additional_csq_column_types := NULL, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null', samples := NULL, regions := NULL, include_file_offset := FALSE)
 ```
 
 Returns:
@@ -420,6 +420,10 @@ Typed regions: regions := STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[] se
 
 scan_mode='sequential' streams without loading an index. auto streams if no usable index was available at bind; region queries require one. Index-only counts do not validate data contents. Automatic/region plans retain the parsed bind-time index, including remote/explicit index_path: subsequent index removal, replacement or corruption does not change the plan. Supply an initially matching pair and keep data/header contents unchanged; this is not a snapshot or validation of an unrelated index. Reprepare to use a new index.
 
+### Offsets
+
+include_file_offset := TRUE adds FILE_OFFSET UBIGINT after FILTER: the BGZF virtual position immediately after each record, not its start, as in read_bam. Sequential, indexed, parallel, region and typed-region scans of one unchanged file give a record the same value, and it increases strictly in file order, so ORDER BY FILE_OFFSET restores file order, also among records at one position. Tidy rows of a record share it. BGZF input includes BCF written by bcftools -Ou, which is level-0 BGZF. Uncompressed VCF, plain gzip VCF and a BCF stream without BGZF blocks return NULL. Values are not comparable across files.
+
 ### Threads
 
 decompression_threads controls per-file HTSlib workers, default 0; it is separate from DuckDB scan parallelism.
@@ -428,6 +432,10 @@ decompression_threads controls per-file HTSlib workers, default 0; it is separat
 
 ```sql
 SELECT CHROM, POS, REF, ALT FROM read_bcf('vcf_file.bcf') LIMIT 5;
+```
+
+```sql
+SELECT CHROM, POS, ID, FILE_OFFSET FROM read_bcf('cohort.vcf.gz', include_file_offset := true) ORDER BY FILE_OFFSET;
 ```
 
 ## read_geno
@@ -530,6 +538,10 @@ Returns:
 table
 ```
 
+### Map keys
+
+AUXILIARY_TAGS leaves out a tag whose key is not valid UTF-8, since a MAP key cannot be NULL; a value that is not valid UTF-8 is NULL.
+
 ### Representation
 
 sequence_encoding='nt16' returns SEQ UTINYINT[]; quality_representation='phred' returns QUAL UTINYINT[]; cigar_representation='binary' returns packed BAM CIGAR UINTEGER[] instead of SAM text.
@@ -545,6 +557,14 @@ scan_mode='sequential' streams rather than using indexed count/parallel paths an
 ### Threads
 
 decompression_threads controls per-file HTSlib workers, default 2; use 0 to disable. It does not set DuckDB processing parallelism.
+
+### CRAM fields
+
+A CRAM scan asks htslib only for the fields its projected columns need, and every projected column keeps its value. SEQ and QUAL are decoded only when SEQ, QUAL, CIGAR, MD, NM or AUXILIARY_TAGS is projected, because htslib makes MD and NM from the reference when the file does not store them. Tag data is decoded only when CIGAR, a tag column, AUXILIARY_TAGS, READ_GROUP_ID or SAMPLE_ID is projected; CIGAR needs both because a long CIGAR may be stored as a placeholder with its real value in a CG tag, which htslib restores only from tag data and SEQ. Without SEQ and QUAL, htslib does not load the reference for a slice that covers one reference.
+
+### Limits
+
+With decompression_threads > 0, a CRAM scan that projects tag data keeps htslib's spare record buffers, which only grow: memory rises with the alignments read, toward (2 x decompression_threads + 1) slices x about 10,000 records x the largest record. A CRAM scan that decodes SEQ and QUAL with decompression_threads > 0 loads the whole reference sequence of each contig it reads. decompression_threads := 0 avoids both.
 
 ### Examples
 
@@ -1322,7 +1342,7 @@ hw_to_az and az_to_hw are the per-base-pair transition probabilities (bcftools -
 
 ### Memory
 
-DuckDB manages, and can spill, the scan and the joins. The sites of each sample and chromosome are held in native buffers of 16 bytes per site until that sample and chromosome is decoded, so memory follows samples times sites. max_sites caps one sample and chromosome (default 20,000,000; at most 100,000,000). max_site_bytes (default 4 GiB) bounds the buffers held at once: a decode does not grow a buffer when the bytes held by all ROH decodes in the process would pass its own max_site_bytes. Decodes that run at the same time with different values each apply their own, so the process total can pass the smaller value while the decode with the larger value allocates. Exceeding either limit is an error: decode fewer samples per query with samples, or raise the limit. When a query fails while the sites are being collected with 5 or more threads, DuckDB 1.5.x does not destroy the collecting states (https://github.com/duckdb/duckdb/issues/26871); their buffers stay charged against max_site_bytes until the process ends. Decoding one sample and chromosome also needs approximately 36.25 bytes per site of workspace in each thread: 4 bytes for position, 16 for emissions, 16 for forward/posterior probabilities and two traceback bits. For capacity n, these arrays use 36*n + ceil(n/4) + 16 bytes, excluding fixed tables and output segments. Model parameters and limits are checked even when the input has no record.
+DuckDB manages, and can spill, the scan and the joins. The sites of each sample and chromosome are held in native buffers of 16 bytes per site until that sample and chromosome is decoded, so memory follows samples times sites. max_sites caps one sample and chromosome (default 20,000,000; at most 100,000,000). max_site_bytes (default 4 GiB) bounds the buffers held at once: a decode does not grow a buffer when the bytes held by all ROH decodes in the process would pass its own max_site_bytes. Decodes that run at the same time with different values each apply their own, so the process total can pass the smaller value while the decode with the larger value allocates. Exceeding either limit is an error: decode fewer samples per query with samples, or raise the limit. When a query fails while the sites are being collected with 5 or more threads, DuckDB 1.5.x does not destroy the collecting states (https://github.com/duckdb/duckdb/issues/26871); their buffers stay charged against max_site_bytes until the process ends. On DuckDB 1.5.x, an out-of-memory error while these states, or the ordered genetic_map lists, are held can end the process instead of returning the error (https://github.com/duckdb/duckdb/issues/26441); raise memory_limit or decode fewer samples per query. Decoding one sample and chromosome also needs approximately 36.25 bytes per site of workspace in each thread: 4 bytes for position, 16 for emissions, 16 for forward/posterior probabilities and two traceback bits. For capacity n, these arrays use 36*n + ceil(n/4) + 16 bytes, excluding fixed tables and output segments. Model parameters and limits are checked even when the input has no record.
 
 ### Limits
 
@@ -1360,7 +1380,7 @@ table(sample VARCHAR, chrom VARCHAR, start BIGINT, "end" BIGINT, length BIGINT, 
 
 ### Frequencies
 
-af_table is a table or view name with columns chrom, pos (one-based), ref, alt and af, like a bcftools --AF-file. A record takes the frequency of the row matching its chrom, pos, REF and its ALT alleles joined by commas; a record without a matching row is not used and does not claim a repeated position, and a record whose row has a NULL af is skipped. bcftools roh --AF-file differs at a repeated position: it takes the first record in file order and skips the position when that record's alleles differ from the file's. Give one row per key; af must be in [0, 1], and exactly 0 skips the site. This is the entry point for per-sample frequencies, for example ancestry-tuned ones, by running it once per relation.
+af_table is a table or view name with columns chrom, pos (one-based), ref, alt and af, like a bcftools --AF-file. A record takes the frequency of the row matching its chrom, pos, REF and its ALT alleles joined by commas; a record without a matching row is not used and does not claim a repeated position, and a record whose row has a NULL af is skipped. bcftools roh --AF-file chooses differently at a repeated position; duckhts_roh_af_table_bcftools follows it. Give one row per key; af must be in [0, 1], and exactly 0 skips the site. This is the entry point for per-sample frequencies, for example ancestry-tuned ones, by running it once per relation.
 
 ### Otherwise
 
@@ -1374,6 +1394,48 @@ The chrom of af_table is compared with the VCF's CHROM byte for byte. When the t
 
 ```sql
 SELECT * FROM duckhts_roh_af_table('cohort.vcf.gz', 'site_frequencies') ORDER BY sample, chrom, start;
+```
+
+## duckhts_roh_af_table_bcftools
+
+Find runs of homozygosity like duckhts_roh_af_table, choosing the record of a repeated listed position as bcftools roh --AF-file does.
+
+Signature:
+
+```sql
+duckhts_roh_af_table_bcftools(path, af_table, genetic_map, hw_to_az := 6.7e-8, az_to_hw := 5e-9, gt_error := NULL, rec_rate := NULL, samples := NULL, max_sites := 20000000, max_site_bytes := 4294967296)
+```
+
+Returns:
+
+```
+table(sample VARCHAR, chrom VARCHAR, start BIGINT, "end" BIGINT, length BIGINT, n_markers INTEGER, quality DOUBLE)
+```
+
+### Frequencies
+
+af_table is as for duckhts_roh_af_table but must give at most one row per position: more is an error that names the position, since bcftools reads only the first line of a position and a relation has no line order.
+
+### Site rule
+
+In file order (read_bcf's FILE_OFFSET), as bcftools 1.23 and 1.24 do: a record whose indel class differs from the row's is passed over when the next record of the file has the same POS, on any contig and listed or not, since bcftools compares POS only; the row is an indel when any of its alleles is longer than one character, and a record is one when HTSlib's bcf_get_variant_types() sets VCF_INDEL (an MNP such as AC>GT and a complex ACG>AT are not; duckhts_htslib_is_indel(ref, alts) is the port). A record with no non-symbolic ALT, or several, claims nothing; the first remaining record claims the position, which is skipped unless that record's REF and ALT equal the row's. A claiming record whose first ALT is symbolic (<*>, <NON_REF>) is skipped too, where bcftools would decode its second allele.
+
+### Input
+
+path must be a BGZF-compressed VCF or BCF; other compression is an error. It must also be sorted, as bcftools roh requires, so that the records of a position and of a contig are contiguous in the file; that is not checked.
+
+### Cost
+
+Besides the genotype scan of duckhts_roh_af_table, one more scan without samples reads CHROM, POS, REF, ALT and FILE_OFFSET; records whose POS af_table does not list are only counted per contig, so the extra state is one row per contig and per record at a listed POS. af_table is scanned three times rather than held.
+
+### Otherwise
+
+Everything else is as duckhts_roh: the same output, genotype evidence (PL, or GT with gt_error), transition parameters, optional genetic_map overload and memory limits.
+
+### Examples
+
+```sql
+SELECT * FROM duckhts_roh_af_table_bcftools('cohort.vcf.gz', 'site_frequencies') ORDER BY sample, chrom, start;
 ```
 
 ## duckhts_roh_ancestry
@@ -1528,7 +1590,7 @@ seq_error is the chance that a read shows the other allele at a homozygous site.
 
 ### Limits
 
-Memory: DuckDB builds the histogram and can spill it; the native buffer of a sample holds 16 bytes per cell, at most max_cells cells. max_cell_bytes bounds the native histogram memory of the process at once, each limit with an explicit error: the buffers of the aggregate (16 bytes per cell, up to three times that while a buffer grows) and the working memory of the running fits (24 bytes per cell, 88 bytes per distinct (depth, alt count) pair and 24 bytes per depth up to the deepest). The BLOB that carries a sample's cells from the aggregate to its fit is DuckDB's memory, under its memory_limit. When a query fails while the histogram is being built with 5 or more threads, DuckDB 1.5.x does not destroy the states of the parallel aggregate (https://github.com/duckdb/duckdb/issues/26871); their buffers stay charged against max_cell_bytes until the process ends. A sample has at most 65,536 blocks and 1,024 frequency bins. Depth is capped by max_depth, which bounds the cells; deeper sites are left out. One fit runs on one thread; the fits of a query's samples run in the threads that hold their rows, so more threads fit more samples at once (the report measures the gain at four threads).
+Memory: DuckDB builds the histogram and can spill it; the native buffer of a sample holds 16 bytes per cell, at most max_cells cells. max_cell_bytes bounds the native histogram memory of the process at once, each limit with an explicit error: the buffers of the aggregate (16 bytes per cell, up to three times that while a buffer grows) and the working memory of the running fits (24 bytes per cell, 88 bytes per distinct (depth, alt count) pair and 24 bytes per depth up to the deepest). The BLOB that carries a sample's cells from the aggregate to its fit is DuckDB's memory, under its memory_limit. When a query fails while the histogram is being built with 5 or more threads, DuckDB 1.5.x does not destroy the states of the parallel aggregate (https://github.com/duckdb/duckdb/issues/26871); their buffers stay charged against max_cell_bytes until the process ends. On DuckDB 1.5.x, an out-of-memory error while the histogram states are held can end the process instead of returning the error (https://github.com/duckdb/duckdb/issues/26441); raise memory_limit or fit fewer samples per query. A sample has at most 65,536 blocks and 1,024 frequency bins. Depth is capped by max_depth, which bounds the cells; deeper sites are left out. One fit runs on one thread; the fits of a query's samples run in the threads that hold their rows, so more threads fit more samples at once (the report measures the gain at four threads).
 
 ### Examples
 
@@ -1844,7 +1906,7 @@ The query certifies each distinct measured depth once, then prepares one bounded
 
 ### Limits
 
-Panel assembly and region are each limited to 1,024 bytes. Persisted profiles separately limit sample_id and assembly to 1,024 bytes. A+B depth must not exceed max_depth. max_threshold_work bounds cumulative exact binomial certification steps and is at most 100,000,000; exhaustion errors without publishing profiles. max_sites is at most 100,000,000, and max_evaluations must fit the declared search workspace.
+Panel assembly and region are each limited to 1,024 bytes. Persisted profiles separately limit sample_id and assembly to 1,024 bytes. A+B depth must not exceed max_depth. max_threshold_work bounds cumulative exact binomial certification steps and is at most 100,000,000; exhaustion errors without publishing profiles. max_sites is at most 100,000,000, and max_evaluations must fit the declared search workspace. The site profiles are ordered list aggregates, one per sample: on DuckDB 1.5.x, an out-of-memory error while they are built can end the process instead of returning the error (https://github.com/duckdb/duckdb/issues/26441), and a query that fails while they are built with 5 or more threads keeps their memory until the process ends (https://github.com/duckdb/duckdb/issues/26871); raise memory_limit or pass fewer samples per query.
 
 ### Numerical difference
 
@@ -1940,6 +2002,10 @@ Returns:
 table
 ```
 
+### Map keys
+
+attributes_map leaves out an attribute whose key is not valid UTF-8, since a MAP key cannot be NULL; a value that is not valid UTF-8 is NULL.
+
 ### Missing keys
 
 A requested key absent from every feature yields NULL on every row, exactly as attributes_map[key] does. GFF declares no attribute vocabulary, so binding does not scan the file to validate key presence; that would require a full extra pass. Assert presence with an aggregate, for example: SELECT CASE WHEN count(ID) > 0 THEN true ELSE error('ID is all NULL') END FROM read_gff('annotations.gff', attributes := ['ID']);
@@ -1974,6 +2040,10 @@ Returns:
 table
 ```
 
+### Map keys
+
+attributes_map leaves out an attribute whose key is not valid UTF-8, since a MAP key cannot be NULL; a value that is not valid UTF-8 is NULL.
+
 ### Missing keys
 
 A requested key absent from every feature yields NULL on every row, exactly as attributes_map[key] does. GTF declares no attribute vocabulary, so binding does not scan the file to validate key presence; that would require a full extra pass. Assert presence with an aggregate, for example: SELECT CASE WHEN count(gene_id) > 0 THEN true ELSE error('gene_id is all NULL') END FROM read_gtf('annotations.gtf', attributes := ['gene_id']);
@@ -2007,6 +2077,10 @@ Returns:
 ```
 table
 ```
+
+### Map keys
+
+attributes_map leaves out a qualifier whose key is not valid UTF-8, since a MAP key cannot be NULL; a value that is not valid UTF-8 is NULL.
 
 ### Mapping
 
@@ -2429,6 +2503,10 @@ Returns:
 ```
 table
 ```
+
+### Map keys
+
+key_values leaves out a pair whose key is not valid UTF-8, since a MAP key cannot be NULL; a value that is not valid UTF-8 is NULL.
 
 ### Examples
 

@@ -43,6 +43,7 @@ src/somalier_bam_extract_sql.c|somalier_bam_extract_sql.c
 src/somalier_panel_sql.c|somalier_panel_sql.c
 src/somalier_sex_sql.c|somalier_sex_sql.c
 src/somalier_vcf_extract_sql.c|somalier_vcf_extract_sql.c
+src/bed_line.c|bed_line.c
 src/interval_udf.c|interval_udf.c
 src/genbank_core.c|genbank_core.c
 src/genbank_reader.c|genbank_reader.c

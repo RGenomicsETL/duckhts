@@ -70,7 +70,7 @@ multi-thread condition would time the same scan and is not recorded.
 `DUCKHTS_EXTENSION` the extension build.
 
 ``` sh
-taskset -c 8-11 Rscript -e 'rmarkdown::render("benchmarks/benchmark_genbank_named_attributes.Rmd")'
+taskset -c 16-19 Rscript -e 'rmarkdown::render("benchmarks/benchmark_genbank_named_attributes.Rmd")'
 ```
 
 ```{r setup, include=FALSE}
@@ -409,10 +409,11 @@ and is not directly comparable because its input and workloads differ.
 
 ```{r previous, echo=FALSE}
 # The previous render of this report, read from git: the same driver, inputs
-# and host. Since then the named qualifiers of a feature are resolved once and
-# reused for its other location segments. The host mixes core types, so the
-# comparison needs the same CPU: render with the previous affinity.
-previous_revision <- "b6f799e8"
+# and host. Since then the attributes MAP is written through one shared row
+# writer, which leaves out a pair whose key is not valid UTF-8. The host mixes
+# core types, so the comparison needs the same CPU: render with the previous
+# affinity.
+previous_revision <- "dcda99c7"
 previous_text <- system2("git", c("show", paste0(previous_revision,
                                                   ":benchmarks/benchmark_genbank_named_attributes_runs.csv")),
                          stdout = TRUE)
@@ -434,10 +435,10 @@ rownames(previous) <- NULL
 ```
 
 The previous render, `r previous_revision`, measured the same workloads on the
-same inputs with the same driver, host and CPU (`r cpu_one`), resolving the
-named qualifiers once per output row. The cache saves work only on the rows after a feature's first
-location segment, so the workloads that read named columns are the ones it can
-change. Host load differs between renders. Median seconds of five repetitions:
+same inputs with the same driver, host and CPU (`r cpu_one`), before the
+attributes MAP was written through the shared row writer. The workloads that
+build `attributes_map` (`map_gene`, `map_three`) are the ones the writer can
+change; the others are the control. Host load differs between renders. Median seconds of five repetitions:
 
 ```{r previous_table, echo=FALSE}
 knitr::kable(previous, digits = 3)

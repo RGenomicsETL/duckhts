@@ -1,8 +1,10 @@
 #!/usr/bin/env Rscript
 args <- commandArgs(trailingOnly = TRUE)
-if (length(args) != 4L) {
-  stop("usage: Rscript benchmarks/bed_policy_run.R EXTENSION LABEL REVISION OUTPUT")
+if (!length(args) %in% c(4L, 5L)) {
+  stop("usage: Rscript benchmarks/bed_policy_run.R EXTENSION LABEL REVISION OUTPUT [SCANS]")
 }
+scans <- if (length(args) == 5L) as.integer(args[[5L]]) else 11L
+if (is.na(scans) || scans < 1L) stop("SCANS must be a positive integer")
 source("r/duckhtsbench/R/registry.R")
 Sys.setenv(DUCKHTSBENCH_REGISTRY = "r/duckhtsbench/inst/benchmark_registry.tsv")
 file <- file.path(
@@ -40,7 +42,7 @@ for (threads in c("1", "default")) {
     if (expected$n[[1L]] != input_lines) {
       stop("BED scan did not return every physical row")
     }
-    for (run in seq_len(11L)) {
+    for (run in seq_len(scans)) {
       start <- proc.time()[["elapsed"]]
       observed <- dbGetQuery(con, query)
       seconds <- proc.time()[["elapsed"]] - start

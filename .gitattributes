@@ -7,3 +7,4 @@ test/data/bed_error_policy.bed whitespace=cr-at-eol
 r/Rduckhts/inst/extdata/bed_error_policy.bed whitespace=cr-at-eol
 r/Rduckhts/inst/extdata/*.fa text eol=lf
 r/Rduckhts/inst/extdata/*.fai text eol=lf
+test/data/bed_line_contract.bed -text whitespace=cr-at-eol

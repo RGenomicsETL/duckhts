@@ -1,8 +1,79 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.2.9015
+# duckhts 1.5.2.9016
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
+
+- Documentation: the README and the catalog entries of `duckhts_count_error_fit`,
+  the ROH macros and `duckhts_somalier_matched_contamination` describe two
+  known DuckDB 1.5.x issues. An out-of-memory error in a hash aggregate whose
+  states have a destructor can end the process
+  (https://github.com/duckdb/duckdb/issues/26441), and a query that fails with
+  5 or more threads can keep those states, and their native buffers, until
+  the process ends (https://github.com/duckdb/duckdb/issues/26871). The README
+  says what to do on 1.5.x.
+
+- `read_bam` on a CRAM asks htslib only for the fields that the projected
+  columns need. SEQ and QUAL are decoded only when SEQ, QUAL, CIGAR, MD, NM
+  or `AUXILIARY_TAGS` is projected (htslib makes MD and NM from the
+  reference), and tag data only when CIGAR, a tag column, `READ_GROUP_ID` or
+  `SAMPLE_ID` is projected (a long CIGAR can be stored as a placeholder with
+  a CG tag, which htslib restores only from tag data and SEQ). No projected column changes value. With decompression threads,
+  a projection without SEQ, QUAL and tags no longer grows in memory with the
+  alignments read, and one without SEQ and QUAL loads no reference for a
+  slice that covers one reference. A projection with tag data still grows toward a bound, and one
+  with SEQ and QUAL still loads the whole contig reference;
+  `decompression_threads := 0` avoids both. A CRAM whose slices each cover one
+  reference can now be read without its reference when SEQ, QUAL, CIGAR, MD,
+  NM and `AUXILIARY_TAGS` are not projected.
+
+- Internal consolidation, no output change: `read_bed`, `fasta_nuc`,
+  `duckhts_mosdepth` and `duckhts_bam_bed_coverage` now parse BED lines through
+  one shared native helper
+  (https://github.com/RGenomicsETL/duckhts/issues/298).
+
+- `read_gff`, `read_gtf` and `read_genbank` `attributes_map`, `read_bam`
+  `AUXILIARY_TAGS` and `read_hts_header` `key_values` leave out a pair whose key
+  is not valid UTF-8. Such a key used to become a NULL MAP key, which a DuckDB
+  MAP does not allow. A value that is not valid UTF-8 is still NULL.
+
+- Added `duckhts_roh_af_table_bcftools`, which takes the arguments of
+  `duckhts_roh_af_table` and chooses the record of a repeated listed position
+  as `bcftools roh --AF-file` does
+  (https://github.com/RGenomicsETL/duckhts/issues/329). In file order
+  (`FILE_OFFSET`), a record of the other indel class than the frequency row is
+  passed over when the next record of the file has the same POS, on any
+  contig, since bcftools compares POS only; a record without exactly one
+  non-symbolic ALT claims nothing; and the first remaining record claims the
+  position, which is skipped unless its alleles equal the row's. A claiming
+  record whose first ALT is symbolic is skipped as well, where bcftools would
+  decode its second allele. It needs one frequency row per position (more is
+  an error naming the position) and a sorted BGZF file, which it reads a second
+  time without samples; records at unlisted positions are only counted per
+  contig. `duckhts_roh_af_table` is unchanged. The private macro
+  `duckhts_htslib_is_indel(ref, alts)` ports HTSlib's indel class and is checked
+  against `bcftools query -f '%TYPE'`. On fixtures of repeated positions, one of
+  them across two contigs, the macro gives the runs of bcftools 1.24; the
+  fixtures come from `test/scripts/prepare_roh_repeated_fixture.R`.
+
+- `read_bcf(..., include_file_offset := true)` adds a `FILE_OFFSET UBIGINT`
+  column after `FILTER`: the BGZF virtual position just after each record, as
+  `read_bam` defines it. Sequential, indexed, parallel, region and
+  typed-region scans of one file give a record the same value, and it
+  increases strictly in file order, so `ORDER BY FILE_OFFSET` restores file
+  order, also among records at one position, which a hash join does not keep
+  (https://github.com/RGenomicsETL/duckhts/issues/329). Input that is not
+  BGZF-compressed returns NULL; BCF written by `bcftools -Ou` is level-0 BGZF
+  and has positions. The column is absent unless requested.
+  `test/scripts/prepare_bcf_offset_fixtures.R` derives the expected positions
+  of the test fixtures from their BGZF blocks and record lengths, without
+  HTSlib.
+
+- Internal consolidation, no output change: `read_gff`, `read_gtf` and
+  `read_genbank` (`attributes_map`), `read_bam` (`auxiliary_tags`) and
+  `read_hts_header` (`key_values`) now write their MAP columns through one
+  shared native row writer
+  (https://github.com/RGenomicsETL/duckhts/issues/298).
 
 - The genome-wide drivers of the ROH ancestry evaluation are back in
   `benchmarks/roh_ancestry/`, with the fixes that review asked for in

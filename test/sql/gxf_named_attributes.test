@@ -262,3 +262,20 @@ query I
 SELECT count(*) FROM ((SELECT * FROM gtf_region_seq EXCEPT ALL SELECT * FROM gtf_region_idx) UNION ALL (SELECT * FROM gtf_region_idx EXCEPT ALL SELECT * FROM gtf_region_seq));
 ----
 0
+
+# A MAP key cannot be NULL, so attributes_map leaves out an attribute whose key is not valid
+# UTF-8: the bytes FF FE in feature 1 and the overlong C0 80 in feature 2. A value that is not
+# valid UTF-8 (feature 1's ok) is NULL, and a valid four-byte key (feature 2) is kept.
+query ITT
+SELECT start, map_keys(attributes_map), list_transform(map_values(attributes_map), lambda v: v IS NULL)
+FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_invalid_utf8_key.gff3', attributes_map := true)
+ORDER BY start;
+----
+1	[ID, ok]	[false, true]
+20	[ID, 😀]	[false, false]
+
+query I
+SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_invalid_utf8_key.gff3', attributes_map := true)
+WHERE list_contains(map_keys(attributes_map), NULL);
+----
+0

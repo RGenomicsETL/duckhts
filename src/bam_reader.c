@@ -40,6 +40,7 @@ DUCKDB_EXTENSION_EXTERN
 #include "include/hts_io_tuning.h"
 #include "include/duckdb_alloc.h"
 #include "include/duckdb_list.h"
+#include "include/duckdb_map.h"
 #include "include/bam_format.h"
 #include "include/region_list.h"
 #include "include/seq_encoding.h"
@@ -906,6 +907,68 @@ static int bam_region_scan_begin(const bam_bind_data_t *bind, bam_local_init_dat
 }
 
 /* ================================================================
+ * CRAM required fields
+ *
+ * A CRAM decoder decodes only the data series behind the SAM fields it is
+ * asked for (htslib cram/cram_decode.c:564-616). read_bam always asks for
+ * the fixed SAM fields QNAME to TLEN. It drops two groups when no projected
+ * column reads them:
+ *   - SEQ and QUAL. Without them htslib does not fetch the reference for a
+ *     single-reference slice (cram_decode.c:2452-2458) and returns an empty
+ *     sequence (cram_decode.c:3184-3198).
+ *   - AUX and RGAUX. Without them htslib keeps no tag data in the record
+ *     (cram_decode.c:601-611, 2007-2011).
+ * htslib makes MD and NM from the reference when they are not stored
+ * (cram_decode.c:1105-1107), so a projection that can show MD or NM keeps
+ * SEQ and QUAL as well. RGAUX alone does not restore an RG tag that is
+ * missing from the header (cram/cram_encode.c:2753-2769), so READ_GROUP_ID
+ * and SAMPLE_ID keep AUX.
+ *
+ * htslib restores a CIGAR stored as a placeholder with a CG tag only from
+ * tag data and SEQ (cram_decode.c:3231-3233, sam.c:683-690). htslib's
+ * readers move CG into the CIGAR before a record is written (sam.c:845,
+ * 2826), but a CRAM from another writer may keep the placeholder, so a
+ * projected CIGAR keeps tag data and SEQ as well.
+ * ================================================================ */
+
+static int bam_cram_required_fields(const bam_bind_data_t *bind,
+                                    const idx_t *column_ids, idx_t column_count) {
+    int fields = SAM_QNAME | SAM_FLAG | SAM_RNAME | SAM_POS | SAM_MAPQ |
+                 SAM_CIGAR | SAM_RNEXT | SAM_PNEXT | SAM_TLEN;
+    int need_sequence = 0;
+    int need_tags = 0;
+
+    for (idx_t i = 0; i < column_count; i++) {
+        idx_t col_id = column_ids[i];
+        if (col_id == BAM_COL_SEQ || col_id == BAM_COL_QUAL) {
+            need_sequence = 1;
+        } else if (col_id == BAM_COL_CIGAR) {
+            /* A record may keep BAM's long-CIGAR placeholder with the real
+             * CIGAR in a CG:B:I tag. cram_decode.c restores it (bam_tag2cigar,
+             * after the aux block, line 3231) only when the tags are decoded,
+             * and the placeholder test needs l_qseq (sam.c:688), so a
+             * projected CIGAR asks for both. */
+            need_tags = 1;
+            need_sequence = 1;
+        } else if (col_id == BAM_COL_READ_GROUP_ID || col_id == BAM_COL_SAMPLE_ID) {
+            need_tags = 1;
+        } else if (bind->standard_tags && col_id >= (idx_t)bind->std_col_start &&
+                   col_id < (idx_t)(bind->std_col_start + bind->std_col_count)) {
+            const char *tag = BAM_STD_TAGS[col_id - (idx_t)bind->std_col_start].tag;
+            need_tags = 1;
+            if (strcmp(tag, "MD") == 0 || strcmp(tag, "NM") == 0) need_sequence = 1;
+        } else if (bind->auxiliary_tags && col_id == (idx_t)bind->aux_col_idx) {
+            need_tags = 1;
+            need_sequence = 1;
+        }
+    }
+
+    if (need_sequence) fields |= SAM_SEQ | SAM_QUAL;
+    if (need_tags) fields |= SAM_AUX | SAM_RGAUX;
+    return fields;
+}
+
+/* ================================================================
  * Local Init — per-thread: own file handle, index, iterator
  * ================================================================ */
 
@@ -967,6 +1030,15 @@ static void bam_read_local_init(duckdb_init_info info) {
     if (bind->reference) {
         if (hts_set_opt(local->fp, CRAM_OPT_REFERENCE, bind->reference) < 0) {
             duckdb_init_set_error(info, "Failed to set CRAM reference");
+            destroy_bam_local(local);
+            return;
+        }
+    }
+
+    if (hts_get_format(local->fp)->format == cram) {
+        int fields = bam_cram_required_fields(bind, local->column_ids, local->column_count);
+        if (hts_set_opt(local->fp, CRAM_OPT_REQUIRED_FIELDS, fields) < 0) {
+            duckdb_init_set_error(info, "read_bam: failed to set the CRAM required fields");
             destroy_bam_local(local);
             return;
         }
@@ -1452,26 +1524,15 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                         if (errno != ENOENT) goto format_error;
 
                         if (count == 0) {
-                            duckdb_vector_ensure_validity_writable(vec);
-                            uint64_t *validity = duckdb_vector_get_validity(vec);
-                            duckdb_validity_set_row_invalid(validity, row_count);
-                            duckdb_list_entry entry = {duckdb_list_vector_get_size(vec), 0};
-                            duckdb_list_entry *list_data =
-                                (duckdb_list_entry *)duckdb_vector_get_data(vec);
-                            list_data[row_count] = entry;
+                            duckhts_list_set_null(vec, row_count);
                             break;
                         }
 
-                        duckdb_list_entry entry;
-                        if (!duckhts_list_extend(vec, count, &entry)) goto list_error;
-
-                        duckdb_vector child = duckdb_list_vector_get_child(vec);
-                        duckdb_vector key_vec = duckdb_struct_vector_get_child(child, 0);
-                        duckdb_vector val_vec = duckdb_struct_vector_get_child(child, 1);
+                        duckhts_map_pairs tags;
+                        if (!duckhts_map_pairs_begin(vec, count, &tags)) goto list_error;
 
                         aux = bam_aux_first(b);
-                        idx_t write_idx = 0;
-                        while (aux && write_idx < count) {
+                        while (aux && tags.entry.length < count) {
                             char tagbuf[3] = {0, 0, 0};
                             const char *tag = bam_aux_tag(aux);
                             tagbuf[0] = tag[0];
@@ -1480,8 +1541,6 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                                 aux = bam_aux_next(b, aux);
                                 continue;
                             }
-                            duckdb_vector_assign_string_element(
-                                key_vec, entry.offset + write_idx, tagbuf);
                             size_t capacity, length;
                             if (!duckhts_bam_aux_capacity(aux, b->data + b->l_data, &capacity))
                                 goto format_error;
@@ -1489,15 +1548,13 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                                 goto text_oom;
                             if (!duckhts_bam_aux_format(aux, local->aux_buf,
                                                        local->aux_buf_cap, &length)) goto format_error;
-                            duckdb_vector_assign_string_element_len(
-                                val_vec, entry.offset + write_idx, local->aux_buf, length);
-                            write_idx++;
+                            /* htslib does not validate tag bytes; a NUL ends the key. */
+                            if (!duckhts_map_pairs_put(&tags, tagbuf, strlen(tagbuf),
+                                                       local->aux_buf, length)) goto list_error;
                             aux = bam_aux_next(b, aux);
                         }
 
-                        duckdb_list_entry *list_data =
-                            (duckdb_list_entry *)duckdb_vector_get_data(vec);
-                        list_data[row_count] = entry;
+                        duckhts_map_pairs_finish(&tags, row_count);
                     }
                 }
                 break;

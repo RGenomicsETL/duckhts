@@ -1,0 +1,220 @@
+# name: test/sql/bam_cram_projection.test
+# description: A CRAM scan decodes only the fields its projection needs, and every projected column keeps its value
+# group: [duckhts]
+
+require duckhts
+
+# read_bam asks htslib for SEQ and QUAL only when SEQ, QUAL, MD, NM or
+# AUXILIARY_TAGS is projected, and for tag data only when a tag column,
+# READ_GROUP_ID or SAMPLE_ID is projected. The oracle is a scan of the same
+# file that projects every column, so htslib decodes every field for it.
+#
+# bam_mismatch and fixture_mixed store MD and NM as reference-derived values;
+# range has read groups, samples and other tags; the bam_scan files have
+# unmapped and unplaced reads.
+
+statement ok
+SET threads=4;
+
+statement ok
+CREATE MACRO cram_scan(name, ref) AS TABLE
+SELECT name AS file, *
+FROM read_bam('__WORKING_DIRECTORY__/test/data/' || name || '.cram',
+  reference := ref, standard_tags := true, auxiliary_tags := true);
+
+statement ok
+CREATE MACRO cram_scan_all() AS TABLE
+SELECT * FROM cram_scan('bam_mismatch', '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa')
+UNION ALL
+SELECT * FROM cram_scan('fixture_mixed', '__WORKING_DIRECTORY__/test/data/fixture_ref.fa')
+UNION ALL
+SELECT * FROM cram_scan('range', '__WORKING_DIRECTORY__/test/data/ce.fa')
+UNION ALL
+SELECT * FROM cram_scan('bam_scan_mixed', NULL)
+UNION ALL
+SELECT * FROM cram_scan('bam_scan_all_unplaced', NULL);
+
+statement ok
+CREATE TEMP TABLE cram_full AS SELECT * FROM cram_scan_all();
+
+# The oracle holds every fixture row, and the columns that need SEQ or tag
+# data are populated in it.
+query IIIIIII
+SELECT count(*), count(DISTINCT file), count(MD), count(NM), count(READ_GROUP_ID),
+  count(SAMPLE_ID), sum(cardinality(AUXILIARY_TAGS))
+FROM cram_full;
+----
+2191	5	132	132	112	112	689
+
+# The projection reaches the reader through both macros and UNION ALL: a
+# projection without SEQ, QUAL and tags reads fixture_mixed, whose slices
+# each cover one reference, without its reference. The full projection needs
+# the reference.
+query II
+SELECT count(*), sum(POS) FROM (
+  SELECT * FROM cram_scan('fixture_mixed', NULL)
+  UNION ALL
+  SELECT * FROM cram_scan('fixture_mixed', NULL));
+----
+20	144820
+
+statement error
+SELECT count(SEQ) FROM cram_scan('fixture_mixed', NULL);
+----
+failed to read SAM/BAM/CRAM record
+
+# A projected CIGAR asks for SEQ and tag data, which htslib needs to restore a
+# long CIGAR kept as a placeholder with a CG tag; so it needs the reference here.
+statement error
+SELECT count(CIGAR) FROM cram_scan('fixture_mixed', NULL);
+----
+failed to read SAM/BAM/CRAM record
+
+# Symmetric multiset difference between a projection and the same columns of
+# the oracle.
+statement ok
+CREATE MACRO cram_projection_diff(cols) AS TABLE
+SELECT count(*) AS differing_rows FROM (
+  (SELECT file, COLUMNS(cols) FROM cram_scan_all()
+   EXCEPT ALL SELECT file, COLUMNS(cols) FROM cram_full)
+  UNION ALL
+  (SELECT file, COLUMNS(cols) FROM cram_full
+   EXCEPT ALL SELECT file, COLUMNS(cols) FROM cram_scan_all()));
+
+# Fixed fields only: no SEQ, QUAL or tag data is decoded.
+query I
+SELECT * FROM cram_projection_diff('^(QNAME|FLAG|RNAME|POS|MAPQ|CIGAR|RNEXT|PNEXT|TLEN|FILE_OFFSET)$');
+----
+0
+
+query I
+SELECT * FROM cram_projection_diff('^CIGAR$');
+----
+0
+
+query I
+SELECT * FROM cram_projection_diff('^(RNEXT|PNEXT|TLEN)$');
+----
+0
+
+query I
+SELECT * FROM cram_projection_diff('^QNAME$');
+----
+0
+
+# SEQ or QUAL without tags.
+query I
+SELECT * FROM cram_projection_diff('^SEQ$');
+----
+0
+
+query I
+SELECT * FROM cram_projection_diff('^QUAL$');
+----
+0
+
+query I
+SELECT * FROM cram_projection_diff('^(POS|CIGAR|SEQ|QUAL)$');
+----
+0
+
+# Tags without SEQ and QUAL.
+query I
+SELECT * FROM cram_projection_diff('^READ_GROUP_ID$');
+----
+0
+
+query I
+SELECT * FROM cram_projection_diff('^SAMPLE_ID$');
+----
+0
+
+query I
+SELECT * FROM cram_projection_diff('^(POS|RG|AS)$');
+----
+0
+
+# MD and NM come from the reference when the file does not store them.
+query I
+SELECT * FROM cram_projection_diff('^MD$');
+----
+0
+
+query I
+SELECT * FROM cram_projection_diff('^NM$');
+----
+0
+
+query I
+SELECT * FROM cram_projection_diff('^AUXILIARY_TAGS$');
+----
+0
+
+# With standard_tags := false the AUXILIARY_TAGS map holds MD and NM too.
+statement ok
+CREATE MACRO cram_scan_map(name, ref) AS TABLE
+SELECT name AS file, *
+FROM read_bam('__WORKING_DIRECTORY__/test/data/' || name || '.cram',
+  reference := ref, auxiliary_tags := true);
+
+statement ok
+CREATE TEMP TABLE cram_full_map AS
+SELECT * FROM cram_scan_map('bam_mismatch', '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa')
+UNION ALL
+SELECT * FROM cram_scan_map('fixture_mixed', '__WORKING_DIRECTORY__/test/data/fixture_ref.fa')
+UNION ALL
+SELECT * FROM cram_scan_map('range', '__WORKING_DIRECTORY__/test/data/ce.fa');
+
+query II
+WITH map_scan AS (
+  SELECT 'bam_mismatch' AS file, AUXILIARY_TAGS
+  FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_mismatch.cram',
+    reference := '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa', auxiliary_tags := true)
+  UNION ALL
+  SELECT 'fixture_mixed', AUXILIARY_TAGS
+  FROM read_bam('__WORKING_DIRECTORY__/test/data/fixture_mixed.cram',
+    reference := '__WORKING_DIRECTORY__/test/data/fixture_ref.fa', auxiliary_tags := true)
+  UNION ALL
+  SELECT 'range', AUXILIARY_TAGS
+  FROM read_bam('__WORKING_DIRECTORY__/test/data/range.cram',
+    reference := '__WORKING_DIRECTORY__/test/data/ce.fa', auxiliary_tags := true)),
+oracle AS (SELECT file, AUXILIARY_TAGS FROM cram_full_map)
+SELECT (SELECT count(*) FROM oracle WHERE AUXILIARY_TAGS['MD'] IS NOT NULL), count(*) FROM (
+  (SELECT * FROM map_scan EXCEPT ALL SELECT * FROM oracle)
+  UNION ALL
+  (SELECT * FROM oracle EXCEPT ALL SELECT * FROM map_scan));
+----
+132	0
+
+# Tags with SEQ and QUAL.
+query I
+SELECT * FROM cram_projection_diff('^(SEQ|QUAL|MD|NM|READ_GROUP_ID|AUXILIARY_TAGS)$');
+----
+0
+
+# Without decompression threads, and in a region query, a projection without
+# SEQ, QUAL and tags still gives the oracle values.
+query I
+SELECT count(*) FROM (
+  (SELECT QNAME, FLAG, POS, CIGAR, TLEN FROM read_bam('__WORKING_DIRECTORY__/test/data/range.cram',
+     reference := '__WORKING_DIRECTORY__/test/data/ce.fa', decompression_threads := 0)
+   EXCEPT ALL SELECT QNAME, FLAG, POS, CIGAR, TLEN FROM cram_full WHERE file = 'range')
+  UNION ALL
+  (SELECT QNAME, FLAG, POS, CIGAR, TLEN FROM cram_full WHERE file = 'range'
+   EXCEPT ALL SELECT QNAME, FLAG, POS, CIGAR, TLEN FROM read_bam('__WORKING_DIRECTORY__/test/data/range.cram',
+     reference := '__WORKING_DIRECTORY__/test/data/ce.fa', decompression_threads := 0)));
+----
+0
+
+query III
+WITH region_scan AS (
+  SELECT QNAME, FLAG, POS, CIGAR, TLEN FROM read_bam('__WORKING_DIRECTORY__/test/data/range.cram',
+    reference := '__WORKING_DIRECTORY__/test/data/ce.fa', region := 'CHROMOSOME_I')),
+oracle AS (
+  SELECT QNAME, FLAG, POS, CIGAR, TLEN FROM cram_full WHERE file = 'range' AND RNAME = 'CHROMOSOME_I')
+SELECT (SELECT count(*) FROM region_scan), (SELECT count(*) FROM oracle), count(*) FROM (
+  (SELECT * FROM region_scan EXCEPT ALL SELECT * FROM oracle)
+  UNION ALL
+  (SELECT * FROM oracle EXCEPT ALL SELECT * FROM region_scan));
+----
+18	18	0

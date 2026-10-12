@@ -34,6 +34,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/kstring.h>
 #include <htslib/tbx.h>
 
+#include "include/bed_line.h"
 #include "include/hts_io_tuning.h"
 
 #define INTERVAL_BATCH_SIZE 2048
@@ -166,28 +167,6 @@ static inline void set_null(duckdb_vector vec, idx_t row) {
     v[row / 64] &= ~((uint64_t)1 << (row % 64));
 }
 
-static int parse_int64_span_local(const char *s, int len, int64_t *out) {
-    if (!s || len <= 0) return 0;
-    char *tmp = (char *)malloc((size_t)len + 1);
-    if (!tmp) return 0;
-    memcpy(tmp, s, (size_t)len);
-    tmp[len] = '\0';
-    char *end = NULL;
-    long long v = strtoll(tmp, &end, 10);
-    int ok = (end && *end == '\0');
-    if (ok) *out = (int64_t)v;
-    free(tmp);
-    return ok;
-}
-
-static bool is_meta_bed_line(const char *s) {
-    if (!s || !*s) return true;
-    if (s[0] == '#') return true;
-    if (strncmp(s, "track", 5) == 0) return true;
-    if (strncmp(s, "browser", 7) == 0) return true;
-    return false;
-}
-
 static int bed_parse_scan_mode(const char *mode, int *scan_sequential) {
     if (!scan_sequential) return 0;
     *scan_sequential = 0;
@@ -212,29 +191,6 @@ static int count_tab_fields(const char *s) {
         s++;
     }
     return n;
-}
-
-static const char *get_field_span(const char *s, int idx, int *len) {
-    int cur = 0;
-    const char *start = s;
-    const char *p = s;
-    while (*p) {
-        if (*p == '\t') {
-            if (cur == idx) {
-                *len = (int)(p - start);
-                return start;
-            }
-            cur++;
-            start = p + 1;
-        }
-        p++;
-    }
-    if (cur == idx) {
-        *len = (int)(p - start);
-        return start;
-    }
-    *len = 0;
-    return NULL;
 }
 
 static const char *get_extra_span(const char *s, int start_field, int *len) {
@@ -507,7 +463,7 @@ static inline int next_bed_line(bed_init_data_t *init, bool report) {
             return 0;
         }
         if (report) init->line_number++;
-        if (init->line.l == 0 || is_meta_bed_line(init->line.s)) continue;
+        if (init->line.l == 0 || duckhts_bed_line_is_meta(init->line.s)) continue;
         return 1;
     }
     return 0;
@@ -526,7 +482,7 @@ static inline void bed_write_field(bed_init_data_t *init, duckdb_vector vector,
         case BED_COL_ITEM_RGB:
         case BED_COL_BLOCK_SIZES:
         case BED_COL_BLOCK_STARTS:
-            field = get_field_span(init->line.s, logical_col, &len);
+            field = duckhts_bed_line_field(init->line.s, logical_col, &len);
             if (!field || len == 0) {
                 set_null(vector, row);
             } else {
@@ -538,7 +494,7 @@ static inline void bed_write_field(bed_init_data_t *init, duckdb_vector vector,
         case BED_COL_THICK_START:
         case BED_COL_THICK_END:
         case BED_COL_BLOCK_COUNT:
-            field = get_field_span(
+            field = duckhts_bed_line_field(
                 init->line.s,
                 logical_col == BED_COL_START ? 1 :
                 logical_col == BED_COL_END ? 2 :
@@ -546,7 +502,7 @@ static inline void bed_write_field(bed_init_data_t *init, duckdb_vector vector,
                 logical_col == BED_COL_THICK_END ? 7 : 9,
                 &len
             );
-            if (!field || len == 0 || !parse_int64_span_local(field, len, &ival)) {
+            if (!field || len == 0 || !duckhts_bed_parse_int64_span(field, len, &ival)) {
                 set_null(vector, row);
             } else {
                 int64_t *data = (int64_t *)duckdb_vector_get_data(vector);
@@ -590,7 +546,7 @@ static void read_bed_rows_error(duckdb_function_info info, duckdb_data_chunk out
                 case BED_COL_ITEM_RGB:
                 case BED_COL_BLOCK_SIZES:
                 case BED_COL_BLOCK_STARTS:
-                    field = get_field_span(init->line.s, logical_col, &len);
+                    field = duckhts_bed_line_field(init->line.s, logical_col, &len);
                     if (!field || len == 0) {
                         set_null(vectors[c], row_count);
                     } else {
@@ -602,7 +558,7 @@ static void read_bed_rows_error(duckdb_function_info info, duckdb_data_chunk out
                 case BED_COL_THICK_START:
                 case BED_COL_THICK_END:
                 case BED_COL_BLOCK_COUNT:
-                    field = get_field_span(
+                    field = duckhts_bed_line_field(
                         init->line.s,
                         logical_col == BED_COL_START ? 1 :
                         logical_col == BED_COL_END ? 2 :
@@ -612,7 +568,7 @@ static void read_bed_rows_error(duckdb_function_info info, duckdb_data_chunk out
                     );
                     if (!field || len == 0) {
                         set_null(vectors[c], row_count);
-                    } else if (!parse_int64_span_local(field, len, &ival)) {
+                    } else if (!duckhts_bed_parse_int64_span(field, len, &ival)) {
                         set_null(vectors[c], row_count);
                     } else {
                         int64_t *data = (int64_t *)duckdb_vector_get_data(vectors[c]);
@@ -1024,13 +980,15 @@ static int next_fasta_nuc_bed_interval(fasta_nuc_init_data_t *init, const char *
             init->bed_finished = true;
             return 0;
         }
-        if (init->bed_line.l == 0 || is_meta_bed_line(init->bed_line.s)) continue;
+        if (init->bed_line.l == 0 || duckhts_bed_line_is_meta(init->bed_line.s)) continue;
         int len0 = 0, len1 = 0, len2 = 0;
-        const char *f0 = get_field_span(init->bed_line.s, 0, &len0);
-        const char *f1 = get_field_span(init->bed_line.s, 1, &len1);
-        const char *f2 = get_field_span(init->bed_line.s, 2, &len2);
+        const char *f0 = duckhts_bed_line_field(init->bed_line.s, 0, &len0);
+        const char *f1 = duckhts_bed_line_field(init->bed_line.s, 1, &len1);
+        const char *f2 = duckhts_bed_line_field(init->bed_line.s, 2, &len2);
         int64_t s = 0, e = 0;
-        if (!f0 || !f1 || !f2 || !parse_int64_span_local(f1, len1, &s) || !parse_int64_span_local(f2, len2, &e)) {
+        if (!f0 || !f1 || !f2 ||
+            !duckhts_bed_parse_int64_span(f1, len1, &s) ||
+            !duckhts_bed_parse_int64_span(f2, len2, &e)) {
             continue;
         }
         char *chrom_buf = (char *)malloc((size_t)len0 + 1);

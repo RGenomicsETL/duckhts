@@ -71,7 +71,8 @@ expect_identical(
     "decode_error_policy",
     "overwrite",
     "samples",
-    "regions_var"
+    "regions_var",
+    "include_file_offset" # opt-in FILE_OFFSET column of read_bcf()
   )
 )
 expect_identical(

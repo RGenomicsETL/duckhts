@@ -29,7 +29,7 @@
 DUCKDB_EXTENSION_EXTERN
 
 #include "duckdb_alloc.h"
-#include "duckdb_list.h"
+#include "duckdb_map.h"
 #include "genbank_core.h"
 #include "include/named_attribute_columns.h"
 
@@ -304,17 +304,13 @@ static bool gb_ensure_attributes(gb_init_t *st, size_t feature) {
 
 static bool gb_fill_attr_map(gb_init_t *st, duckdb_vector vec, idx_t row, size_t feature) {
     size_t n = gb_feature_attr_count(&st->parser, feature);
-    duckdb_list_entry entry;
-    if (!duckhts_list_extend(vec, (idx_t)n, &entry)) return false;
-    duckdb_vector child = duckdb_list_vector_get_child(vec);
-    duckdb_vector key_vec = duckdb_struct_vector_get_child(child, 0);
-    duckdb_vector val_vec = duckdb_struct_vector_get_child(child, 1);
+    duckhts_map_pairs pairs;
+    if (!duckhts_map_pairs_begin(vec, (idx_t)n, &pairs)) return false;
     for (size_t i = 0; i < n; i++) {
         if (gb_feature_attr_at(&st->parser, feature, i, &st->key, &st->value) != GB_OK) return false;
-        duckdb_vector_assign_string_element_len(key_vec, entry.offset + i, st->key.s, st->key.l);
-        duckdb_vector_assign_string_element_len(val_vec, entry.offset + i, st->value.s, st->value.l);
+        if (!duckhts_map_pairs_put(&pairs, st->key.s, st->key.l, st->value.s, st->value.l)) return false;
     }
-    ((duckdb_list_entry *)duckdb_vector_get_data(vec))[row] = entry;
+    duckhts_map_pairs_finish(&pairs, row);
     return true;
 }
 

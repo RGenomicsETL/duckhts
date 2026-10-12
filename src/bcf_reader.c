@@ -22,6 +22,7 @@ DUCKDB_EXTENSION_EXTERN
 // htslib headers
 #include <htslib/vcf.h>
 #include <htslib/hts.h>
+#include <htslib/bgzf.h>
 #include <htslib/hts_log.h>
 #include <htslib/tbx.h>
 #include <htslib/kstring.h>
@@ -75,6 +76,7 @@ typedef enum {
     BCF_OUT_ALT,
     BCF_OUT_QUAL,
     BCF_OUT_FILTER,
+    BCF_OUT_FILE_OFFSET,
     BCF_OUT_VEP,
     BCF_OUT_INFO,
     BCF_OUT_SAMPLE_ID,
@@ -128,6 +130,8 @@ typedef struct {
     // Tidy format options
     int tidy_format;           // If true, emit one row per variant-sample with SAMPLE_ID column
     int sample_id_col_idx;     // Column index for SAMPLE_ID (when tidy_format=true)
+
+    int file_offset_col_idx;   // Column index for FILE_OFFSET (include_file_offset), else -1
 
     // Field metadata
     int n_info_fields;
@@ -189,6 +193,13 @@ typedef struct {
     int need_vep;
     int count_only;
     uint64_t count_remaining;
+
+    // FILE_OFFSET: the BGZF virtual position immediately after the current
+    // record, taken when the record is read, so that tidy rows of one record
+    // share it across output chunks. Only BGZF-compressed input has one.
+    int file_offset_projected;
+    int file_offset_bgzf;
+    uint64_t record_end_offset;
 
     // Parallel scan state
     int is_parallel;
@@ -537,6 +548,12 @@ static int bcf_projected_columns_init(bcf_init_data_t *local, const bcf_bind_dat
             continue;
         }
 
+        if (bind->file_offset_col_idx >= 0 && col_id == (idx_t)bind->file_offset_col_idx) {
+            col->kind = BCF_OUT_FILE_OFFSET;
+            local->file_offset_projected = 1;
+            continue;
+        }
+
         if (bind->vep_schema &&
             col_id >= (idx_t)bind->vep_col_start &&
             col_id < (idx_t)(bind->vep_col_start + bind->n_vep_fields)) {
@@ -857,6 +874,14 @@ static void bcf_read_bind(duckdb_bind_info info) {
     }
     if (tidy_val) duckdb_destroy_value(&tidy_val);
 
+    // Optional FILE_OFFSET column (default: false)
+    int include_file_offset = 0;
+    duckdb_value file_offset_val = duckdb_bind_get_named_parameter(info, "include_file_offset");
+    if (file_offset_val && !duckdb_is_null_value(file_offset_val)) {
+        include_file_offset = duckdb_get_bool(file_offset_val);
+    }
+    if (file_offset_val) duckdb_destroy_value(&file_offset_val);
+
     // Optional bcftools-style CSQ/ANN/BCSQ type overrides
     char* additional_csq_column_types = NULL;
     int decompression_threads = 0;
@@ -971,6 +996,7 @@ static void bcf_read_bind(duckdb_bind_info info) {
     bind->sample_names = bind->selected_samples.names;
     bind->tidy_format = tidy_format;
     bind->sample_id_col_idx = -1;  // Will be set if tidy_format=true
+    bind->file_offset_col_idx = -1;  // Will be set if include_file_offset=true
     bind->n_vep_fields = 0;
     bind->vep_col_start = COL_CORE_COUNT;
     bind->info_col_start = COL_CORE_COUNT;
@@ -1018,6 +1044,15 @@ static void bcf_read_bind(duckdb_bind_info info) {
     // FILTER - LIST(VARCHAR) - list of filter names
     duckdb_bind_add_result_column(info, "FILTER", varchar_list_type);
     col_idx++;
+
+    // FILE_OFFSET - UBIGINT, only when requested
+    if (include_file_offset) {
+        duckdb_logical_type ubigint_type = duckdb_create_logical_type(DUCKDB_TYPE_UBIGINT);
+        duckdb_bind_add_result_column(info, "FILE_OFFSET", ubigint_type);
+        duckdb_destroy_logical_type(&ubigint_type);
+        bind->file_offset_col_idx = col_idx;
+        col_idx++;
+    }
 
     // -------------------------------------------------------------------------
     // VEP/CSQ/BCSQ/ANN fields (auto-detected)
@@ -1405,6 +1440,13 @@ static void bcf_read_local_init(duckdb_init_info info) {
         return;
     }
 
+    /* Only BGZF compression gives virtual positions that every scan path of
+     * one file shares. is_bgzf selects the fp union member; a BCF stream
+     * without BGZF blocks and a plain gzip VCF also use it, so the compression
+     * is checked too. */
+    local->file_offset_bgzf = local->scan.fp->is_bgzf &&
+                              hts_get_format(local->scan.fp)->compression == bgzf;
+
     // Allocate record
     local->rec = bcf_init();
     if (!local->rec) {
@@ -1635,6 +1677,14 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 break;
             }
 
+            /* Sequential reads and index iterators (hts_itr_next and
+             * hts_itr_multi_next) all return with the BGZF position just past
+             * the record they return, and an exhausted block reads as the next
+             * block's start, so every scan path gives a record the same value. */
+            if (init->file_offset_projected && init->file_offset_bgzf) {
+                init->record_end_offset = (uint64_t)bgzf_tell(init->scan.fp->fp.bgzf);
+            }
+
             if (init->unpack_mask) {
                 bcf_unpack(init->rec, init->unpack_mask);
             }
@@ -1764,6 +1814,17 @@ static void bcf_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 if (!duckhts_bcf_filter_write(vec, row_idx, init->scan.hdr, init->rec,
                                                scan_err, sizeof(scan_err)))
                     goto materialization_error;
+                break;
+            }
+            case BCF_OUT_FILE_OFFSET: {
+                if (!init->file_offset_bgzf) {
+                    duckdb_vector_ensure_validity_writable(vec);
+                    uint64_t* validity = duckdb_vector_get_validity(vec);
+                    set_validity_bit(validity, row_idx, 0);
+                    break;
+                }
+                uint64_t* data = (uint64_t*)duckdb_vector_get_data(vec);
+                data[row_idx] = init->record_end_offset;
                 break;
             }
             case BCF_OUT_VEP: {
@@ -2067,6 +2128,7 @@ void register_read_bcf_function(duckdb_connection connection) {
     duckdb_table_function_add_named_parameter(tf, "scan_mode", varchar_type);  // 'auto' or 'sequential'
     duckdb_table_function_add_named_parameter(tf, "decode_error_policy", varchar_type);  // 'null', 'warn', or 'error'
     duckdb_table_function_add_named_parameter(tf, "samples", varchar_type);
+    duckdb_table_function_add_named_parameter(tf, "include_file_offset", bool_type);  // optional FILE_OFFSET column
     duckdb_destroy_logical_type(&varchar_type);
     duckdb_destroy_logical_type(&bool_type);
     duckdb_destroy_logical_type(&bigint_type);

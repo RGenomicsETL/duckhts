@@ -30,6 +30,15 @@ render of this report.
   - both together: (8, quarter), (16, half) and (32, all).
 
   A configuration shared by several series is measured once and listed in each.
+- `duckhts_roh_af_table` and `duckhts_roh_af_table_bcftools` over the same BCF,
+  with GT evidence (`gt_error := 30`) and a frequency relation built from the
+  registered matched chr20 sites (`roh_ancestry_chr20_af_sites`, 108,757 rows,
+  one per position; `af` is the first INFO/AF value). Both are measured over
+  8, 16 and 32 samples decoded together. The two macros differ in how they
+  choose the record of a listed position: `duckhts_roh_af_table` takes the
+  record whose alleles match the row, and `duckhts_roh_af_table_bcftools`
+  takes the record bcftools roh `--AF-file` takes, at the cost of a second,
+  sites-only scan with `FILE_OFFSET` and a grouping-sets aggregate.
 
 Every observation is one fresh DuckDB CLI process under `/usr/bin/time`. The
 JSON profiler gives query latency and DuckDB's peak buffer and temporary
@@ -54,6 +63,36 @@ inputs are registry artifacts `roh_ancestry_chr20_children_bcf`,
 `roh_ancestry_chr20_reference_long` and `roh_ancestry_chr20_q`. Their samples
 are the first 8, 16 or 32 sample IDs of the registered proportions, sorted.
 The reference cuts are the 25% and 50% position quantiles of its distinct sites.
+The frequency relation is a view over the registry artifact
+`roh_ancestry_chr20_af_sites`, checked against its registered SHA-256, so
+each scan of it reads the Parquet file and nothing is held between queries.
+
+The two frequency-relation macros return the same runs only where their rules
+choose the same record. Before measuring, one untimed scan of the BCF without
+samples finds, at each listed position, the records in file order
+(`FILE_OFFSET`). The render checks that every such record and every row is a
+single-base substitution with one ALT, so the indel-class skip of bcftools'
+reader cannot act and bcftools' rule reduces to "the first record of the
+position claims it, and the position is skipped unless that record's alleles
+equal the row's". A position where that first record differs from the
+record whose alleles match the row is one where the rules disagree. For each
+sample set, an untimed fresh process then runs both macros over the relation
+without those positions and asserts that they return identical runs, row for
+row; over the full relation it counts the runs that differ and reports the
+count. Every timed observation of these two macros also returns a digest of
+its runs, and the render asserts that each macro's digest is the same at both
+thread counts and in every repetition.
+
+`ROH_SCALING_SIZE=reduced` runs a driver check instead of the report: each
+cell has one repetition instead of three, and the observations go to a
+temporary file instead of `benchmark_roh_scaling_runs.csv`. The inputs keep
+their full sizes, because the budgets leave out costs that do not grow with
+the input: with lists a hundredth as long, the count decodes pass their
+ceilings by a few MiB of fixed cost, and with 2 or 4 samples
+`duckhts_roh_ancestry` takes a plan that peaks higher than with 8 (about 770
+and 990 MiB against 640 MiB at one thread with the full reference). Every gate
+and check still runs. A reduced run is not a measurement. The default is
+`full`.
 
 ## Budgets, declared before measuring
 
@@ -88,9 +127,47 @@ render stops if any observation exceeds its ceiling or spills.
 
   That is samples × reference sites × 16 + records × 128 + reference rows × 64 +
   threads × reference sites × 36.25 bytes.
+- **`duckhts_roh_af_table`.** A record without a matching frequency row is
+  dropped by an inner join before the sites are collected, and a row matches
+  at most one record here, so each sample's list holds at most one site per
+  frequency row. The genotype scan streams into the lists. The live state is:
+  - the packed site lists, 16 bytes per sample and frequency row;
+  - the hash table that joins the frequency relation to the calls, built on
+    the frequency side, 128 bytes per frequency row (the five typed columns,
+    the hash and the table's slots);
+  - the kernel workspace, 36.25 bytes per frequency row and thread.
+
+  That is samples × frequency rows × 16 + frequency rows × 128 +
+  threads × frequency rows × 36.25 bytes.
+- **`duckhts_roh_af_table_bcftools`.** The live state of
+  `duckhts_roh_af_table`, plus the stages that choose each listed position's
+  record. The sites-only scan streams. With L the records at a listed POS
+  (counted by the untimed scan above) the stages hold:
+  - the distinct listed positions and the hash table of the left join that
+    marks the sites-only scan with them, 64 bytes per frequency row each;
+  - the frequency relation grouped per position and the hash table that joins
+    it to the marked records, 128 bytes per frequency row each;
+  - the duplicate-row guard's grouping of the relation, 64 bytes per frequency
+    row;
+  - the grouping-sets aggregate, one group per contig and per record at a
+    listed POS, 256 bytes per group (the hash entry, three offsets, a position,
+    REF and the ALT list); the contig groups are negligible on one contig;
+  - the window stages over that result (the next contig's first POS, the
+    contig's and the position's last offsets, the claiming row per position),
+    each of which materializes its input at about 128 bytes per row, with two
+    consecutive stages live while one feeds the next, so 256 bytes per listed
+    record;
+  - the hash table of the claimed records that the genotype scan probes,
+    64 bytes per listed record.
+
+  That is the `duckhts_roh_af_table` state + frequency rows × 448 + L × 576
+  bytes.
 
 ``` sh
 taskset -c 8-15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_roh_scaling.Rmd")'
+# Driver check only; writes the page outside benchmarks/:
+ROH_SCALING_SIZE=reduced taskset -c 0-3 Rscript -e \
+  'rmarkdown::render("benchmarks/benchmark_roh_scaling.Rmd", output_dir = tempdir())'
 ```
 
 ```{r setup, include=FALSE}
@@ -116,6 +193,19 @@ if (system2("git", c("diff", "--quiet", "HEAD", "--", "src"), stdout = FALSE, st
 }
 host_load <- sub(".*load average: ", "", system2("uptime", stdout = TRUE))
 quote_literal <- function(value) paste0("'", gsub("'", "''", value, fixed = TRUE), "'")
+
+# A reduced run checks the driver: one repetition at the full sizes, and
+# observations kept out of benchmarks/.
+size <- Sys.getenv("ROH_SCALING_SIZE", "full")
+if (!size %in% c("full", "reduced")) stop("ROH_SCALING_SIZE must be full or reduced")
+full_size <- identical(size, "full")
+repetitions <- if (full_size) 3L else 1L
+sample_series <- c(8L, 16L, 32L)
+runs_path <- if (full_size) {
+  "benchmarks/benchmark_roh_scaling_runs.csv"
+} else {
+  tempfile("roh-scaling-runs-", fileext = ".csv")
+}
 
 bcf <- duckhtsbench::duckhts_bench_artifact_path("roh_ancestry_chr20_children_bcf")
 reference_long <- duckhtsbench::duckhts_bench_artifact_path("roh_ancestry_chr20_reference_long")
@@ -164,7 +254,7 @@ dir.create(staging)
 counts_inputs <- data.frame(
   dimension = c(rep("sites", 3L), rep("samples", 3L)),
   scale = rep(c(1L, 2L, 4L), 2L),
-  samples = c(1L, 1L, 1L, 8L, 16L, 32L),
+  samples = c(1L, 1L, 1L, sample_series),
   sites = c(1000000L, 2000000L, 4000000L, 250000L, 250000L, 250000L),
   stringsAsFactors = FALSE)
 counts_inputs$rows <- counts_inputs$samples * counts_inputs$sites
@@ -210,7 +300,7 @@ counts_inputs <- rbind(counts_inputs[c("dimension", "scale", "samples", "sites",
 
 # A fixed, reproducible subset: the registered proportions' sample IDs, sorted.
 children <- sort(unique(utils::read.csv(q_path, stringsAsFactors = FALSE)$sample_id))
-stopifnot(length(children) >= 32L)
+stopifnot(length(children) >= max(sample_series))
 identity <- function(id) {
   plan <- duckhtsbench::duckhts_bench_registry()
   duckhtsbench:::duckhts_bench_identity_fields(plan$supplier_identity[[match(id, plan$id)]])
@@ -226,7 +316,7 @@ stopifnot(length(cuts) == 2L, all(is.finite(cuts)))
 ancestry_series <- data.frame(
   dimension = rep(c("samples", "reference", "joint"), each = 3L),
   scale = rep(c(1L, 2L, 4L), 3L),
-  samples = c(8L, 16L, 32L, 8L, 8L, 8L, 8L, 16L, 32L),
+  samples = sample_series[c(1L, 2L, 3L, 1L, 1L, 1L, 1L, 2L, 3L)],
   fraction = c(1, 1, 1, 0.25, 0.5, 1, 0.25, 0.5, 1),
   stringsAsFactors = FALSE)
 ancestry_inputs <- unique(ancestry_series[c("samples", "fraction")])
@@ -255,6 +345,109 @@ ancestry_budget <- function(k, threads) {
                       ancestry_inputs$reference_rows[[k]] * 64 + threads * reference_sites * 36.25) / 2^20
 }
 
+# The frequency relation of the two frequency-relation macros: a view over the
+# registered matched sites, so every scan of it reads the Parquet file.
+af_path <- duckhtsbench::duckhts_bench_artifact_path("roh_ancestry_chr20_af_sites")
+duckhtsbench::duckhts_bench_validate_identity("roh_ancestry_chr20_af_sites", af_path)
+af_rows <- as.numeric(identity("roh_ancestry_chr20_af_sites")[["sites"]])
+af_view <- sprintf(paste("CREATE TEMP VIEW af_sites AS SELECT chrom, pos, ref, alt,",
+                         "CAST(INFO_AF[1] AS DOUBLE) AS af FROM read_parquet(%s);"),
+                   quote_literal(af_path))
+# Untimed: the records of each listed position in file order. disagree_path
+# receives the positions where bcftools' first record is not the record whose
+# alleles match the row; af_agree is the relation without them.
+disagree_path <- file.path(staging, "af_disagreeing_positions.parquet")
+af_oracle <- run_fresh(c(
+  af_view,
+  sprintf(paste(
+    "CREATE TEMP TABLE listed AS SELECT r.CHROM AS chrom, r.POS AS pos, r.REF AS rec_ref,",
+    "array_to_string(r.ALT, ',') AS rec_alt, len(r.ALT) AS rec_alts, r.FILE_OFFSET AS file_offset,",
+    "f.ref, f.alt FROM read_bcf(%s, samples := '', include_file_offset := true) AS r",
+    "JOIN af_sites AS f ON f.chrom = r.CHROM AND f.pos = r.POS;"), quote_literal(bcf)),
+  paste(
+    "CREATE TEMP TABLE per_position AS SELECT chrom, pos, count(*) AS records,",
+    "count(file_offset) AS offsets, any_value(ref) AS ref, any_value(alt) AS alt,",
+    "arg_min(rec_ref, file_offset) AS first_ref, arg_min(rec_alt, file_offset) AS first_alt,",
+    "bool_or(rec_ref = ref AND rec_alt = alt) AS matched FROM listed GROUP BY chrom, pos;"),
+  sprintf(paste("COPY (SELECT chrom, pos FROM per_position WHERE matched AND",
+                "(first_ref != ref OR first_alt != alt)) TO %s (FORMAT parquet);"),
+          quote_literal(disagree_path))),
+  paste(
+    "SELECT (SELECT count(*) FROM af_sites) AS frequency_rows,",
+    "(SELECT count(DISTINCT (chrom, pos)) FROM af_sites) AS frequency_positions,",
+    "(SELECT count(*) FROM af_sites WHERE length(ref) != 1 OR length(alt) != 1) AS non_snv_rows,",
+    "(SELECT count(*) FROM listed) AS listed_records,",
+    "(SELECT count(*) FROM listed WHERE NOT (length(rec_ref) = 1 AND rec_alts = 1",
+    "AND length(rec_alt) = 1)) AS non_snv_listed_records,",
+    "(SELECT count(DISTINCT chrom) FROM listed) AS listed_contigs,",
+    "count(*) FILTER (WHERE offsets != records) AS positions_without_offsets,",
+    "count(*) FILTER (WHERE records > 1) AS repeated_positions,",
+    "count(*) FILTER (WHERE matched) AS matched_positions,",
+    "count(*) FILTER (WHERE matched AND (first_ref != ref OR first_alt != alt)) AS disagreeing_positions",
+    "FROM per_position"),
+  4L)
+af_oracle <- vapply(af_oracle[c("frequency_rows", "frequency_positions", "non_snv_rows", "listed_records",
+                                "non_snv_listed_records", "listed_contigs", "positions_without_offsets",
+                                "repeated_positions", "matched_positions", "disagreeing_positions")],
+                    as.numeric, numeric(1L))
+# One row per position, as the registry records; single-base substitutions only,
+# so bcftools' indel-class skip cannot act and its rule is "first record claims".
+stopifnot(af_oracle[["frequency_rows"]] == af_rows, af_oracle[["frequency_positions"]] == af_rows,
+          af_oracle[["non_snv_rows"]] == 0, af_oracle[["non_snv_listed_records"]] == 0,
+          af_oracle[["positions_without_offsets"]] == 0, af_oracle[["listed_contigs"]] == 1)
+listed_records <- af_oracle[["listed_records"]]
+af_agree_view <- sprintf(paste(
+  "CREATE TEMP VIEW af_agree AS SELECT f.* FROM af_sites AS f WHERE NOT EXISTS",
+  "(SELECT 1 FROM read_parquet(%s) AS d WHERE d.chrom = f.chrom AND d.pos = f.pos);"),
+  quote_literal(disagree_path))
+af_macros <- c("duckhts_roh_af_table", "duckhts_roh_af_table_bcftools")
+# Ceilings in MiB: overhead + 3 x the live state declared above.
+af_budget <- function(macro, samples, threads) {
+  live <- samples * af_rows * 16 + af_rows * 128 + threads * af_rows * 36.25
+  if (identical(macro, "duckhts_roh_af_table_bcftools")) {
+    live <- live + af_rows * 448 + listed_records * 576
+  }
+  overhead_mib + 3 * live / 2^20
+}
+af_call <- function(macro, relation, ids) {
+  sprintf("%s(%s, %s, gt_error := 30, samples := %s)", macro, quote_literal(bcf),
+          quote_literal(relation), quote_literal(paste(ids, collapse = ",")))
+}
+# The digest is order-free and keeps duplicate runs apart.
+af_query <- function(macro, ids) {
+  sprintf(paste("SELECT count(*) AS n, sum(length) AS len,",
+                "sum(hash(sample, chrom, start, \"end\", n_markers, quality)::HUGEINT) AS digest FROM %s"),
+          af_call(macro, "af_sites", ids))
+}
+# Untimed, per sample set: both macros over the relation without the disagreeing
+# positions must return identical runs; over the full relation the runs that
+# differ are counted.
+af_difference <- function(a, b) {
+  sprintf("(SELECT count(*) FROM (FROM %1$s EXCEPT ALL FROM %2$s)) + (SELECT count(*) FROM (FROM %2$s EXCEPT ALL FROM %1$s))",
+          a, b)
+}
+af_parity <- do.call(rbind, lapply(sample_series, function(n) {
+  ids <- head(children, n)
+  query <- paste(
+    "WITH m_agree AS (SELECT * FROM", af_call(af_macros[[1L]], "af_agree", ids), "),",
+    "b_agree AS (SELECT * FROM", af_call(af_macros[[2L]], "af_agree", ids), "),",
+    "m_full AS (SELECT * FROM", af_call(af_macros[[1L]], "af_sites", ids), "),",
+    "b_full AS (SELECT * FROM", af_call(af_macros[[2L]], "af_sites", ids), ")",
+    "SELECT (SELECT count(*) FROM m_agree) AS agree_runs_matching,",
+    "(SELECT count(*) FROM b_agree) AS agree_runs_bcftools,",
+    af_difference("m_agree", "b_agree"), "AS agree_runs_differing,",
+    "(SELECT count(*) FROM m_full) AS runs_matching, (SELECT count(*) FROM b_full) AS runs_bcftools,",
+    af_difference("m_full", "b_full"), "AS runs_differing")
+  observed <- run_fresh(c(af_view, af_agree_view), query, 4L)
+  data.frame(samples = n, lapply(observed[c("agree_runs_matching", "agree_runs_bcftools", "agree_runs_differing",
+                                            "runs_matching", "runs_bcftools", "runs_differing")], as.numeric))
+}))
+stopifnot(all(af_parity$agree_runs_matching > 0), all(af_parity$agree_runs_differing == 0),
+          identical(af_parity$agree_runs_matching, af_parity$agree_runs_bcftools))
+if (af_oracle[["disagreeing_positions"]] == 0) {
+  stopifnot(all(af_parity$runs_differing == 0))
+}
+
 counts_queries <- c(
   duckhts_roh_counts = "SELECT count(*) AS n, sum(length) AS len FROM duckhts_roh_counts('c')",
   duckhts_roh_counts_fitted =
@@ -271,7 +464,8 @@ ancestry_query <- function(ids) sprintf(paste(
 
 observations <- list()
 ancestry_observations <- list()
-for (repetition in 1:3) {
+af_observations <- list()
+for (repetition in seq_len(repetitions)) {
   order <- if (repetition %% 2L == 1L) 1:3 else 3:1
   for (threads in c(1L, 4L)) {
     for (dimension in c("sites", "samples", "real_samples")) {
@@ -309,6 +503,18 @@ for (repetition in 1:3) {
         input_rows = n * bcf_records, threads = threads, repetition = repetition,
         budget_mib = ancestry_budget(k, threads), observed)
     }
+    af_order <- if (repetition %% 2L == 1L) seq_along(sample_series) else rev(seq_along(sample_series))
+    macro_order <- if (repetition %% 2L == 1L) af_macros else rev(af_macros)
+    for (k in af_order) {
+      n <- sample_series[[k]]
+      for (macro in macro_order) {
+        observed <- run_fresh(af_view, af_query(macro, head(children, n)), threads)
+        af_observations[[length(af_observations) + 1L]] <- data.frame(
+          macro = macro, dimension = "samples", scale = c(1L, 2L, 4L)[[k]], samples = n,
+          input_rows = n * bcf_records, threads = threads, repetition = repetition,
+          budget_mib = af_budget(macro, n, threads), observed)
+      }
+    }
   }
 }
 ancestry_runs <- do.call(rbind, ancestry_observations)
@@ -321,7 +527,25 @@ ancestry_series_runs <- do.call(rbind, lapply(seq_len(nrow(ancestry_series)), fu
              scale = ancestry_series$scale[[j]], cell[setdiff(names(cell), c("fraction", "reference_rows"))])
 }))
 runs <- rbind(do.call(rbind, observations), ancestry_series_runs[names(do.call(rbind, observations))])
+# Only the frequency-relation macros return a run digest.
+runs$digest <- NA_character_
+af_runs <- do.call(rbind, af_observations)
+runs <- rbind(runs, af_runs[names(runs)])
 stopifnot(all(runs$peak_temp_bytes == 0), all(as.numeric(runs$n) > 0))
+# Each frequency-relation macro returns the same runs at both thread counts and
+# in every repetition, and the runs the untimed parity process counted.
+af_digests <- unique(af_runs[c("macro", "samples", "n", "digest")])
+stopifnot(nrow(af_digests) == length(af_macros) * length(sample_series))
+af_counts <- merge(af_digests, af_parity, by = "samples")
+stopifnot(all(as.numeric(af_counts$n[af_counts$macro == af_macros[[1L]]]) ==
+                af_counts$runs_matching[af_counts$macro == af_macros[[1L]]]),
+          all(as.numeric(af_counts$n[af_counts$macro == af_macros[[2L]]]) ==
+                af_counts$runs_bcftools[af_counts$macro == af_macros[[2L]]]))
+if (af_oracle[["disagreeing_positions"]] == 0) {
+  af_pairs <- merge(af_digests[af_digests$macro == af_macros[[1L]], ],
+                    af_digests[af_digests$macro == af_macros[[2L]], ], by = "samples")
+  stopifnot(identical(af_pairs$digest.x, af_pairs$digest.y))
+}
 # The fit relation holds the scalar defaults, so both count decodes return the same runs.
 counts_keys <- c("dimension", "scale", "threads", "repetition")
 fitted_parity <- merge(runs[runs$macro == "duckhts_roh_counts", c(counts_keys, "n", "len")],
@@ -330,11 +554,13 @@ fitted_parity <- merge(runs[runs$macro == "duckhts_roh_counts", c(counts_keys, "
 stopifnot(nrow(fitted_parity) == sum(runs$macro == "duckhts_roh_counts"),
           identical(fitted_parity$n_scalar, fitted_parity$n_fitted),
           identical(fitted_parity$len_scalar, fitted_parity$len_fitted))
-write.csv(runs, "benchmarks/benchmark_roh_scaling_runs.csv", row.names = FALSE)
+write.csv(runs, runs_path, row.names = FALSE)
 over_budget <- runs[runs$max_rss_kib / 1024 > runs$budget_mib, ]
 if (nrow(over_budget)) {
-  print(over_budget[c("macro", "dimension", "scale", "threads", "max_rss_kib", "budget_mib")])
-  stop("observations exceed their declared memory budget", call. = FALSE)
+  # The cells go into the error itself: the chunk hides printed output and messages.
+  stop("observations exceed their declared memory budget:\n", paste(utils::capture.output(print(
+    over_budget[c("macro", "dimension", "scale", "samples", "threads", "max_rss_kib", "budget_mib")])),
+    collapse = "\n"), call. = FALSE)
 }
 
 cells <- split(runs, list(runs$macro, runs$dimension, runs$scale, runs$threads), drop = TRUE)
@@ -379,9 +605,32 @@ exponents <- do.call(rbind, lapply(split(doubling, list(doubling$macro, doubling
                one_x_seconds = s$median_seconds[[1L]], stringsAsFactors = FALSE)
   }))
 rownames(exponents) <- NULL
+# The frequency-relation macros at the largest sample set, one thread.
+af_cell <- function(macro) {
+  cell <- summary[summary$macro == macro & summary$dimension == "samples" &
+                  summary$threads == 1L & summary$scale == 4L, ]
+  stopifnot(nrow(cell) == 1L)
+  cell
+}
+af_matching <- af_cell(af_macros[[1L]])
+af_bcftools <- af_cell(af_macros[[2L]])
+af_difference_text <- if (af_oracle[["disagreeing_positions"]] == 0) {
+  "No listed position has a first record that differs from its matching record, so the two rules choose the same records here and the render asserts that both macros return the same runs over the full relation too."
+} else {
+  sprintf(paste(
+    "At %s of those positions the first record in file order is not the record whose alleles match the row,",
+    "so bcftools' rule skips a position that the matching rule uses. Over the full relation the two macros",
+    "therefore return different runs: %s runs differ (counted in both directions) with %s samples and %s",
+    "with %s samples. The render reports these counts and does not assert equality there."),
+    format(af_oracle[["disagreeing_positions"]], big.mark = ","),
+    format(af_parity$runs_differing[[1L]], big.mark = ","), af_parity$samples[[1L]],
+    format(af_parity$runs_differing[[nrow(af_parity)]], big.mark = ","), af_parity$samples[[nrow(af_parity)]])
+}
 ```
 
-Source revision: `r revision`; `src` tree `r src_tree`. DuckDB runtime: `r duckdb_runtime` (CLI). Extension SHA-256: `r strsplit(system2("sha256sum", extension, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`. Host load before the run: `r host_load`. Empty-run overhead: `r round(overhead_mib, 1)` MiB. Every observation is in [`benchmark_roh_scaling_runs.csv`](benchmark_roh_scaling_runs.csv).
+`r if (!full_size) "**Reduced driver check (ROH_SCALING_SIZE=reduced): one repetition per cell, not a measurement. The observations were written to a temporary file.**"`
+
+Source revision: `r revision`; `src` tree `r src_tree`. DuckDB runtime: `r duckdb_runtime` (CLI). Extension SHA-256: `r strsplit(system2("sha256sum", extension, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`. Host load before the run: `r host_load`. CPU affinity: `r sub("^.*: *", "", system2("taskset", c("-pc", Sys.getpid()), stdout = TRUE))`. Empty-run overhead: `r round(overhead_mib, 1)` MiB. Every observation is in [`benchmark_roh_scaling_runs.csv`](benchmark_roh_scaling_runs.csv).
 
 ```{r summary, echo=FALSE}
 knitr::kable(summary, digits = 3)
@@ -395,7 +644,7 @@ knitr::kable(exponents, digits = 3)
 
 ## Findings
 
-Both macros stay within their declared budgets at every size and thread count,
+Every macro stays within its declared budget at every size and thread count,
 synthetic and real, and the render enforces that.
 
 `duckhts_roh_counts`: its one-thread 1× runs are under the 5-second floor, so
@@ -418,6 +667,28 @@ three: `r fitted_gap("sites")` MiB with 4 million sites of one sample and
 together, because one pass over the BCF needs every sample's sites. Each
 sample now adds 16 bytes per reference site. `samples :=` chooses the batch, and
 `max_sites` and `max_site_bytes` turn an oversized one into an explicit error.
+
+`duckhts_roh_af_table` and `duckhts_roh_af_table_bcftools`: the relation has
+`r format(af_rows, big.mark = ",")` rows, one per position, and the BCF has
+`r format(listed_records, big.mark = ",")` records at those positions; at
+`r format(af_oracle[["repeated_positions"]], big.mark = ",")` positions it has
+more than one record, as where a multiallelic site is written as several
+biallelic records.
+`r af_difference_text` Without the positions where the rules disagree, both
+macros return identical runs for every sample set, which the render asserts:
+
+```{r af_parity, echo=FALSE}
+knitr::kable(af_parity)
+```
+
+With `r af_matching$samples` samples, one thread, median of
+`r repetitions`: `duckhts_roh_af_table` takes
+`r round(af_matching$median_seconds, 3)` s at `r af_matching$median_rss_mib` MiB
+peak RSS (ceiling `r af_matching$budget_mib` MiB), and
+`duckhts_roh_af_table_bcftools` takes `r round(af_bcftools$median_seconds, 3)` s
+at `r af_bcftools$median_rss_mib` MiB (ceiling `r af_bcftools$budget_mib` MiB).
+The difference is the cost of the bcftools site rule: the sites-only scan
+with `FILE_OFFSET` and the stages over the records at listed positions.
 
 ## Change from the previous revision
 
@@ -467,26 +738,31 @@ The segments are unchanged: the chr20 evaluation arms reproduce their 51,083
 
 ```{r previous, echo=FALSE}
 # The previous render of this report, read from git: the same driver, inputs and
-# host. Since then the Viterbi traceback is packed into two bits per site.
-previous_revision <- "d0af7e98"
+# host. Since then read_bcf gained an opt-in FILE_OFFSET column, which only the
+# bcftools-rule macro requests, and the two frequency-relation macros are new.
+previous_revision <- "7d61c878"
 previous_text <- system2("git", c("show", paste0(previous_revision, ":benchmarks/benchmark_roh_scaling_runs.csv")),
                          stdout = TRUE)
 stopifnot(is.null(attr(previous_text, "status")))
-previous <- merge(cell_medians(utils::read.csv(text = previous_text, stringsAsFactors = FALSE)),
-                  cell_medians(runs), by = c("macro", "dimension", "scale", "threads"),
-                  suffixes = c("_before", "_after"))
+previous_runs <- utils::read.csv(text = previous_text, stringsAsFactors = FALSE)
+# The new cells have no earlier observations; they are left out explicitly.
+stopifnot(!any(previous_runs$macro %in% af_macros))
+previous <- merge(cell_medians(previous_runs), cell_medians(runs[!runs$macro %in% af_macros, ]),
+                  by = c("macro", "dimension", "scale", "threads"), suffixes = c("_before", "_after"))
 previous <- previous[previous$threads == 1L, setdiff(names(previous), "threads")]
 previous$time_ratio <- previous$seconds_after / previous$seconds_before
 previous$rss_ratio <- previous$rss_mib_after / previous$rss_mib_before
 previous <- previous[order(previous$macro, previous$dimension, previous$scale), ]
 rownames(previous) <- NULL
-stopifnot(nrow(previous) > 0, !any(previous$macro == "duckhts_roh_counts_fitted"))
+stopifnot(nrow(previous) > 0, !any(previous$macro %in% af_macros))
 ```
 
 The previous render, `r previous_revision`, measured the same cells with the
-same driver on the same host, with the traceback held in two bytes per site.
-The fitted decode is new and has no earlier cells. Host load differs between
-renders. One thread, median of three:
+same driver on the same host, with `taskset -c 8-15`. The macros it measured
+are unchanged since; `read_bcf` gained an opt-in `FILE_OFFSET` column that
+their scans do not request. `duckhts_roh_af_table` and
+`duckhts_roh_af_table_bcftools` are new here and have no earlier cells. Host
+load differs between renders. One thread, median of three:
 
 ```{r previous_table, echo=FALSE}
 knitr::kable(previous, digits = 3)

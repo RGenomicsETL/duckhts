@@ -1,0 +1,687 @@
+---
+title: "read_bam CRAM projection"
+output:
+  github_document:
+    html_preview: false
+    pandoc_args: ["--wrap=preserve", "--columns=400"]
+---
+
+This report measures commit `2c36deb1` ("Ask htslib only for the CRAM fields
+that read_bam projects"). `read_bam()` on a CRAM now sets htslib's
+`CRAM_OPT_REQUIRED_FIELDS` from the projected columns
+(`bam_cram_required_fields()` in `src/bam_reader.c`). It always asks for QNAME
+to TLEN. It adds SEQ and QUAL only when SEQ, QUAL, MD, NM or AUXILIARY_TAGS is
+projected. It adds AUX and RGAUX only when a tag column, READ_GROUP_ID or
+SAMPLE_ID is projected. Before the change, htslib decoded every field of every
+record. The report compares the build of this revision with a baseline build
+that lacks the change, on the same input, in the same render. It gives the
+before/after ratio of time and peak RSS for each projection and size, and the
+1×/2×/4× scaling evidence that `STYLE.md` asks for. No earlier report measures
+`read_bam()` projections on a CRAM; this is their first baseline.
+
+## Workload
+
+The input is chr1 of the 1000 Genomes 30× CRAM of HG00403, staged as a CRAM
+slice (registry artifact `bam_mismatch_hg00403_chr1_cram`, staged by
+`benchmarks/bam_mismatch_stage.R`, 150-base reads). It is read with the
+registered GRCh38 FASTA (`liftover_grch38_fasta`) as its reference. The render
+checks the FASTA against its registered size and MD5. It checks the CRAM
+against its registered content: the alignments, the sum of their positions
+and the sum of their bases. Those checks read both files in full, so every
+measured run reads from a warm page cache.
+
+Three regions double the alignments read: chr1 up to the 25% and the 50%
+quantiles of the alignment start positions, and the whole contig. The cuts
+are the cuts of `benchmark_convert_parquet_scaling.Rmd`: `quantile_disc(POS, f)`
+over every alignment, and the region `chr1:1-<cut>`.
+
+Four queries select four projections. Each reduces its rows to one row, so
+every row is decoded and consumed:
+
+- **fixed**: `count(*)`, `sum(POS)` and `sum(MAPQ)`. The branch build asks for
+  the fixed fields only.
+- **sequence**: `count(*)`, `sum(len(SEQ))` and `sum(len(QUAL))`. The branch
+  build adds SEQ and QUAL.
+- **read_group**: `count(*)`, `count(DISTINCT READ_GROUP_ID)` and
+  `sum(hash(READ_GROUP_ID))`. The branch build adds AUX and RGAUX.
+- **all**: `count(*)` and `sum(hash(COLUMNS(*)))`, one hash sum per column of
+  `read_bam()` with its defaults. Both builds ask for every field, so this
+  projection is the control: its ratios should be near 1.
+
+Each query runs with `decompression_threads := 2`, the default, and with
+`decompression_threads := 0`. DuckDB runs one thread (`SET threads = 1`).
+
+## Builds
+
+- **branch**: the extension built from the source revision of the render,
+  `build/release/duckhts.duckdb_extension` or `DUCKHTS_EXTENSION`.
+- **baseline**: the extension in `CRAM_PROJECTION_BASE_EXTENSION`, built from
+  the revision in `CRAM_PROJECTION_BASE_REVISION`. That revision must be an
+  ancestor of the branch revision, and its `src/bam_reader.c` must lack
+  `bam_cram_required_fields`. DuckDB finds an extension's entry point from its
+  file name, so the render copies the baseline file to a temporary directory
+  as `duckhts.duckdb_extension`. The report lists every commit between the two
+  revisions that changes `src/bam_reader.c`. Only the CRAM change touches the
+  columns these queries project.
+
+## Protocol
+
+Every observation is one fresh DuckDB CLI process under `/usr/bin/time`, which
+gives the peak RSS. The JSON profiler gives the latency of the query, its CPU
+time, and DuckDB's peak buffer and temporary bytes. `max_temp_directory_size`
+is zero, so a spill fails the render. DuckDB's memory limit is left at its
+default, which the report records. Each cell (build, projection, decompression
+threads, size) has three repetitions. Each repetition runs both builds for
+each projection and thread setting. The build order and the size order
+alternate between repetitions. The render command pins the processes to eight
+cores and runs them at scheduling priority −15. The host load at the start is
+recorded.
+
+The render stops unless:
+
+- every cell returns the same result in both builds, at both thread settings
+  and in every repetition;
+- every projection returns the same alignments at a size, and the whole
+  contig returns the registered alignments, position sum (fixed) and base sum
+  (sequence);
+- no observation spills;
+- every observation of the branch build is within its ceiling below;
+- every time exponent of a branch series is at most 1.25 at either doubling,
+  for each series whose 1× run takes at least 5 s on one thread. That is the
+  least `STYLE.md` accepts for a timing verdict. A series under 5 s gets the
+  memory verdict alone.
+
+The baseline build gets no ceiling and no timing gate. It is the before
+state, and its numbers are reported.
+
+A branch series is **flat in memory** when its median peak RSS at 4× is at
+most 10% above its median peak RSS at 1×. This is a finding, not a gate.
+
+## Budget, declared before measuring
+
+The overhead is the median peak RSS of three empty runs that start the CLI,
+load the branch build and run `SELECT 1`. The ceiling of a branch observation
+is overhead + 3 × the live state of its cell. The live state follows htslib
+1.24 (`third_party/htslib`), with T the decompression threads.
+
+**Per-record bytes.** For projection p, a record takes m<sub>p</sub> bytes:
+36 for the BAM core, 4 × ⌈(name length + 1) / 4⌉ for the name, 4 for each
+CIGAR operation, plus 2 × bases when p decodes SEQ and QUAL, plus
+Σ (3 + max(value length + 1, 4)) over the tags when p decodes tags. This
+bounds the BAM record and the slice's decoded blocks. A base takes half a byte
+in BAM and one byte in the slice's sequence block, and a quality takes one
+byte in both. A tag takes 2 bytes of key and 1 of type. A string value takes
+its length and a NUL. An integer, float or character value takes at most 4
+bytes. An array tag would break the bound, so the render stops if any tag
+value has the array form. The tags are those of a scan that decodes every
+field, so MD and NM, which htslib makes from the reference, are counted for
+every projection that decodes tags. D<sub>p</sub> is the largest
+m<sub>p</sub> on the contig. B<sub>p</sub> is the sum of its N largest
+m<sub>p</sub>, where N = 10,000 records per slice (`SEQS_PER_SLICE`,
+`cram/cram_structs.h:87`). The render checks that the CRAM index has at least
+alignments / N slices. A<sub>p</sub> is D<sub>p</sub> rounded up to a power of
+two, plus 32 bytes: the buffer that `sam_realloc_bam_data()` allocates
+(`sam.c:438-444`).
+
+**Slices in flight.** S = 2T + 1 slices with threads, 1 without. With T
+threads, htslib's decode queue has a size of 2T (`cram/cram_io.c:5581`). A
+worker starts a job only while the decoded slices and the slices being decoded
+number fewer than that (`thread_pool.c:537`, `579` and `681`). The slice in
+hand adds one. Each slice in flight holds:
+
+- its compressed container, at most C bytes, the largest container in the
+  CRAM index;
+- N decoded records of 152 bytes (`sizeof(cram_record)` on x86-64,
+  `cram/cram_structs.h:473-513`);
+- its decoded name, CIGAR, sequence, quality and tag blocks
+  (`cram/cram_decode.c:3012-3016`), at most B<sub>p</sub>.
+
+Each of max(T, 1) decoding workers also holds the slice's uncompressed blocks
+until the slice is decoded (`cram/cram_decode.c:2999-3006`), at most
+B<sub>p</sub> more. The base-difference features of a slice, 16 bytes each,
+are not counted; the factor of 3 must cover them.
+
+**Record buffers.** With threads, each slice in flight converts its records
+into a recycled list of N BAM records (`cram/cram_decode.c:2303-2351`), and the
+slice in hand returns its list for reuse (`cram/cram_decode.c:3596-3600`). A
+record's buffer only grows, so each slot keeps the largest record it has held.
+The bound is S × N × A<sub>p</sub>. It is reached only when every slot has
+held a record as large as the largest record; how close the data come grows
+with the slices read. Without threads, htslib converts one record at a time
+into `read_bam()`'s own record: A<sub>p</sub>.
+
+**Reference.** Without SEQ and QUAL, htslib loads no reference for a slice
+that covers one reference (`cram/cram_decode.c:2452-2458`). With SEQ and QUAL
+and threads, htslib shares one copy of the reference between its threads
+(`cram/cram_io.c:5581-5582`) and loads the whole contig (`cram/cram_io.c:3253`):
+248,956,422 bytes for chr1. Without threads, it loads the span of one slice
+(`cram/cram_decode.c:2452-2456`), unless the span is at least half the contig
+(`cram/cram_io.c:3248-3256`). It frees the previous span after it loads the
+next one (`cram/cram_io.c:3340-3347`). The render takes the widest pair of
+consecutive slices that each region reads from the CRAM index.
+
+**DuckDB and the rest.** One output chunk of 2,048 rows, 2,048 × (16 × 14 +
+D<sub>p</sub>) bytes, and an allowance of 8 MiB for the header, the CRAM index
+and the file buffers. The allowance is not derived from the input.
+
+The live state of a cell is the sum: S × (C + 152 N + B<sub>p</sub>) +
+max(T, 1) × B<sub>p</sub> + the record buffers + the reference + the chunk +
+8 MiB. The baseline build decodes every field, so the live state of the
+**all** projection is also the model of every baseline cell; the report shows
+it, but does not enforce it.
+
+## Render
+
+``` sh
+CRAM_PROJECTION_BASE_EXTENSION=/path/to/baseline/duckhts.duckdb_extension \
+CRAM_PROJECTION_BASE_REVISION=<baseline revision> \
+nice -n -15 taskset -c 8-15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_read_bam_cram_projection.Rmd")'
+```
+
+`CRAM_PROJECTION_SIZE=reduced` runs the same code on small regions, to check
+the report end to end: chr1 up to the 0.2%, 0.4% and 0.8% quantiles, with one
+repetition. The identity checks and the quantile pass still read the whole
+contig. That run writes its observations to a temporary directory, so pass
+`output_dir` to keep its report out of `benchmarks/` too; its numbers are not
+evidence.
+
+``` sh
+CRAM_PROJECTION_SIZE=reduced CRAM_PROJECTION_BASE_EXTENSION=... CRAM_PROJECTION_BASE_REVISION=... \
+taskset -c 0-3 Rscript -e 'rmarkdown::render("benchmarks/benchmark_read_bam_cram_projection.Rmd", output_dir = "/tmp")'
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r benchmark, echo=FALSE, message=FALSE}
+stopifnot(requireNamespace("duckhtsbench", quietly = TRUE),
+          requireNamespace("jsonlite", quietly = TRUE),
+          requireNamespace("knitr", quietly = TRUE))
+Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath(
+  "r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+duckdb_cli <- Sys.getenv("DUCKDB_CLI", Sys.which("duckdb"))
+stopifnot(nzchar(duckdb_cli), file.exists("/usr/bin/time"))
+duckdb_runtime <- system2(duckdb_cli, "--version", stdout = TRUE)[[1L]]
+htslib_version <- readLines("third_party/htslib/VERSION", n = 1L)
+git <- function(...) system2("git", c(...), stdout = TRUE)
+revision <- git("rev-parse", "HEAD")
+src_tree <- git("rev-parse", "HEAD:src")
+if (system2("git", c("diff", "--quiet", "HEAD", "--", "src"), stdout = FALSE, stderr = FALSE) != 0L) {
+  stop("Build source must match the recorded HEAD")
+}
+host_load <- sub(".*load average: ", "", system2("uptime", stdout = TRUE))
+affinity <- system2("taskset", c("-pc", Sys.getpid()), stdout = TRUE)
+quote_literal <- function(value) paste0("'", gsub("'", "''", value, fixed = TRUE), "'")
+sha256 <- function(path) strsplit(system2("sha256sum", shQuote(path), stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]
+whole <- function(value) format(value, scientific = FALSE, trim = TRUE, big.mark = ",")
+mib <- function(bytes) bytes / 2^20
+
+# The sizes: the full workload described above, or small regions that check
+# the report end to end and write their observations outside benchmarks/.
+bench_size <- Sys.getenv("CRAM_PROJECTION_SIZE", "full")
+if (!bench_size %in% c("full", "reduced")) {
+  stop("CRAM_PROJECTION_SIZE must be full or reduced", call. = FALSE)
+}
+full_size <- identical(bench_size, "full")
+fractions <- if (full_size) c(0.25, 0.5, 1) else c(0.002, 0.004, 0.008)
+repetitions <- if (full_size) 3L else 1L
+runs_csv <- if (full_size) "benchmarks/benchmark_read_bam_cram_projection_runs.csv" else
+  file.path(tempdir(), "benchmark_read_bam_cram_projection_runs.csv")
+reduced_note <- if (full_size) "" else paste(
+  "**Reduced sizes.** This render ran with `CRAM_PROJECTION_SIZE=reduced`: its regions are smaller",
+  "than the workload above describes, it has one repetition, its observations were written to a",
+  "temporary directory, and its numbers are not evidence.")
+
+# ---- the builds ----
+branch_extension <- normalizePath(Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension"),
+                                  mustWork = TRUE)
+base_source <- Sys.getenv("CRAM_PROJECTION_BASE_EXTENSION")
+base_revision <- Sys.getenv("CRAM_PROJECTION_BASE_REVISION")
+if (!nzchar(base_source) || !nzchar(base_revision)) {
+  stop("set CRAM_PROJECTION_BASE_EXTENSION and CRAM_PROJECTION_BASE_REVISION", call. = FALSE)
+}
+base_source <- normalizePath(base_source, mustWork = TRUE)
+base_revision <- git("rev-parse", "--verify", paste0(base_revision, "^{commit}"))
+if (system2("git", c("merge-base", "--is-ancestor", base_revision, revision)) != 0L) {
+  stop("the baseline revision is not an ancestor of the branch revision", call. = FALSE)
+}
+has_required_fields <- function(rev) {
+  system2("git", c("grep", "-q", "bam_cram_required_fields", rev, "--", "src/bam_reader.c")) == 0L
+}
+stopifnot(has_required_fields(revision), !has_required_fields(base_revision))
+reader_commits <- git("log", shQuote("--format=%h %s"), paste0(base_revision, "..", revision), "--", "src/bam_reader.c")
+# DuckDB derives the entry point from the file name, so the baseline is read
+# under the extension's own name.
+base_dir <- tempfile("cram-projection-base-")
+dir.create(base_dir)
+base_extension <- file.path(base_dir, "duckhts.duckdb_extension")
+stopifnot(file.copy(base_source, base_extension))
+builds <- c(branch = branch_extension, baseline = base_extension)
+build_sha256 <- vapply(builds, sha256, character(1L))
+stopifnot(build_sha256[["branch"]] != build_sha256[["baseline"]])
+
+# One untimed SQL script in its own CLI process, with the branch build; the
+# rows of its last statement come back as a data frame.
+query_untimed <- function(sql) {
+  output <- system2(duckdb_cli, c("-unsigned", "-csv", "-bail"),
+                    input = c(sprintf("LOAD %s;", quote_literal(branch_extension)), sql), stdout = TRUE)
+  status <- attr(output, "status")
+  if (!is.null(status) && status != 0L) stop("untimed query failed (status ", status, ")", call. = FALSE)
+  utils::read.csv(text = output, stringsAsFactors = FALSE, check.names = FALSE)
+}
+memory_limit <- query_untimed("SELECT current_setting('memory_limit') AS memory_limit;")$memory_limit
+
+# ---- the input ----
+artifact <- function(id) {
+  path <- duckhtsbench::duckhts_bench_artifact_path(id)
+  if (!file.exists(path)) stop("registry artifact ", id, " is not staged: ", path, call. = FALSE)
+  duckhtsbench::duckhts_bench_validate_identity(id, path)
+  path
+}
+cram_id <- "bam_mismatch_hg00403_chr1_cram"
+cram <- artifact(cram_id)
+reference <- artifact("liftover_grch38_fasta")
+registry <- duckhtsbench::duckhts_bench_registry()
+cram_fields <- duckhtsbench:::duckhts_bench_identity_fields(registry$supplier_identity[match(cram_id, registry$id)])
+contig <- cram_fields[["region"]]
+reference_index <- utils::read.delim(paste0(reference, ".fai"), header = FALSE)
+contig_length <- reference_index[[2L]][reference_index[[1L]] == contig]
+stopifnot(length(contig_length) == 1L)
+
+# One pass over the contig, with every field decoded: the registered identity,
+# the cuts, and the per-record bytes of each projection (see the budget).
+records_per_slice <- 10000
+cut_fractions <- fractions[fractions < 1]
+fixed_bytes <- paste(
+  "36 + 4 * ceil((strlen(QNAME) + 1) / 4)::BIGINT",
+  "+ 4 * coalesce(length(regexp_replace(CIGAR, '[0-9]', '', 'g')), 0)")
+staging <- query_untimed(sprintf(paste(
+  "WITH r AS (",
+  "  SELECT POS, len(SEQ) AS bases, (%s)::BIGINT AS fixed_bytes, (2 * len(SEQ))::BIGINT AS sequence_bytes,",
+  "    coalesce(list_sum(list_transform(map_values(AUXILIARY_TAGS),",
+  "      lambda v: 3 + greatest(strlen(v) + 1, 4))), 0)::BIGINT AS tag_bytes,",
+  "    coalesce(list_bool_or(list_transform(map_values(AUXILIARY_TAGS),",
+  "      lambda v: regexp_matches(v, '^[cCsSiIf],'))), false) AS array_tag",
+  "  FROM read_bam(%s, reference := %s, region := %s, auxiliary_tags := true, decompression_threads := 4))",
+  "SELECT count(*) AS alignments, sum(POS)::BIGINT AS position_sum, sum(bases)::BIGINT AS base_sum,",
+  "  %s",
+  "  count(*) FILTER (WHERE array_tag) AS array_tags,",
+  "  max(fixed_bytes) AS largest_fixed, max(fixed_bytes + sequence_bytes) AS largest_sequence,",
+  "  max(fixed_bytes + tag_bytes) AS largest_read_group,",
+  "  max(fixed_bytes + sequence_bytes + tag_bytes) AS largest_all,",
+  "  list_sum(max(fixed_bytes, %d)) AS top_fixed,",
+  "  list_sum(max(fixed_bytes + sequence_bytes, %d)) AS top_sequence,",
+  "  list_sum(max(fixed_bytes + tag_bytes, %d)) AS top_read_group,",
+  "  list_sum(max(fixed_bytes + sequence_bytes + tag_bytes, %d)) AS top_all",
+  "FROM r;"),
+  fixed_bytes, quote_literal(cram), quote_literal(reference), quote_literal(contig),
+  paste(sprintf("quantile_disc(POS, %s) AS cut%d,", format(cut_fractions, scientific = FALSE),
+                seq_along(cut_fractions)), collapse = " "),
+  records_per_slice, records_per_slice, records_per_slice, records_per_slice))
+stopifnot(staging$alignments == as.numeric(cram_fields[["alignments"]]),
+          staging$position_sum == as.numeric(cram_fields[["position_sum"]]),
+          staging$base_sum == as.numeric(cram_fields[["base_sum"]]),
+          staging$array_tags == 0)
+cut_positions <- vapply(seq_along(cut_fractions), function(i) staging[[sprintf("cut%d", i)]], numeric(1L))
+region_ends <- c(cut_positions, if (any(fractions == 1)) contig_length)
+regions <- c(sprintf("%s:1-%s", contig, format(cut_positions, scientific = FALSE, trim = TRUE)),
+             if (any(fractions == 1)) contig)
+stopifnot(length(regions) == 3L)
+
+# The CRAM index lists each slice's start, reference span and size, in file order.
+slices <- utils::read.delim(gzfile(paste0(cram, ".crai")), header = FALSE,
+                            col.names = c("sequence", "start", "span", "container", "slice", "size"))
+stopifnot(nrow(slices) >= staging$alignments / records_per_slice)
+largest_container <- max(slices$size)
+consecutive_span <- slices$span + c(0, utils::head(slices$span, -1L))
+# The widest pair of consecutive slices that a region from 1 to `end` reads;
+# a span of half the contig or more loads the whole contig.
+reference_span <- function(end) {
+  span <- max(consecutive_span[slices$start <= end])
+  if (span >= 0.5 * contig_length) contig_length else span
+}
+
+# ---- the projections ----
+projections <- data.frame(
+  projection = c("fixed", "sequence", "read_group", "all"),
+  select = c("count(*) AS alignments, sum(POS)::BIGINT AS position_sum, sum(MAPQ)::BIGINT AS mapq_sum",
+             "count(*) AS alignments, sum(len(SEQ))::BIGINT AS base_sum, sum(len(QUAL))::BIGINT AS quality_sum",
+             paste("count(*) AS alignments, count(DISTINCT READ_GROUP_ID) AS read_groups,",
+                   "sum(hash(READ_GROUP_ID)) AS read_group_hash"),
+             "count(*) AS alignments, sum(hash(COLUMNS(*)))"),
+  decodes_sequence = c(FALSE, TRUE, FALSE, TRUE),
+  stringsAsFactors = FALSE)
+projections$largest_bytes <- unlist(staging[paste0("largest_", projections$projection)])
+projections$top_bytes <- unlist(staging[paste0("top_", projections$projection)])
+projections$record_buffer_bytes <- 2^ceiling(log2(projections$largest_bytes)) + 32
+projection_names <- projections$projection
+thread_settings <- c(2L, 0L)
+
+# ---- the empty runs and the ceilings ----
+run_empty <- function(extension) {
+  scratch <- tempfile("cram-projection-empty-")
+  dir.create(scratch)
+  on.exit(unlink(scratch, recursive = TRUE), add = TRUE)
+  sql_path <- file.path(scratch, "query.sql")
+  time_path <- file.path(scratch, "time.tsv")
+  writeLines(c("SET threads = 1;", "SET max_temp_directory_size = '0KiB';",
+               sprintf("LOAD %s;", quote_literal(extension)), "SELECT 1;"), sql_path)
+  status <- system2("/usr/bin/time", c("-f", shQuote("%M"), "-o", shQuote(time_path),
+                                       shQuote(duckdb_cli), "-unsigned", "-batch", "-bail"),
+                    stdin = sql_path, stdout = FALSE, stderr = FALSE)
+  if (status != 0L) stop("DuckDB CLI failed (status ", status, ")")
+  as.numeric(readLines(time_path)[[1L]])
+}
+empty_kib <- vapply(builds, function(extension) median(vapply(1:3, function(i) run_empty(extension), 0)), 0)
+overhead_mib <- empty_kib[["branch"]] / 1024
+
+cells <- expand.grid(scale = c(1L, 2L, 4L), threads = thread_settings, projection = projection_names,
+                     stringsAsFactors = FALSE)
+cells$region <- regions[match(cells$scale, c(1L, 2L, 4L))]
+cells <- merge(cells, projections[c("projection", "decodes_sequence", "largest_bytes", "top_bytes",
+                                    "record_buffer_bytes")], by = "projection")
+region_end <- region_ends[match(cells$scale, c(1L, 2L, 4L))]
+cells$slices_in_flight <- ifelse(cells$threads > 0L, 2L * cells$threads + 1L, 1L)
+cells$slice_bytes <- cells$slices_in_flight * (largest_container + 152 * records_per_slice + cells$top_bytes) +
+  pmax(cells$threads, 1L) * cells$top_bytes
+cells$record_bytes <- ifelse(cells$threads > 0L,
+                             cells$slices_in_flight * records_per_slice * cells$record_buffer_bytes,
+                             cells$record_buffer_bytes)
+cells$reference_bytes <- ifelse(!cells$decodes_sequence, 0,
+                                ifelse(cells$threads > 0L, contig_length,
+                                       vapply(region_end, reference_span, 0)))
+cells$chunk_bytes <- 2048 * (16 * 14 + cells$largest_bytes) + 8 * 2^20
+cells$live_state_bytes <- cells$slice_bytes + cells$record_bytes + cells$reference_bytes + cells$chunk_bytes
+cells$budget_mib <- overhead_mib + 3 * mib(cells$live_state_bytes)
+cells <- cells[order(match(cells$projection, projection_names), -cells$threads, cells$scale), ]
+rownames(cells) <- NULL
+
+# ---- the observations ----
+profile_value <- function(profile, name) {
+  value <- profile[[name]]
+  if (is.null(value)) NA_real_ else as.numeric(value)
+}
+run_query <- function(build, cell) {
+  scratch <- tempfile("cram-projection-run-")
+  dir.create(scratch)
+  on.exit(unlink(scratch, recursive = TRUE), add = TRUE)
+  sql_path <- file.path(scratch, "query.sql")
+  profile_path <- file.path(scratch, "profile.json")
+  time_path <- file.path(scratch, "time.tsv")
+  result_path <- file.path(scratch, "result.csv")
+  select <- projections$select[projections$projection == cell$projection]
+  writeLines(c(
+    "SET threads = 1;",
+    "SET max_temp_directory_size = '0KiB';",
+    sprintf("LOAD %s;", quote_literal(builds[[build]])),
+    "PRAGMA enable_profiling = 'json';",
+    sprintf("PRAGMA profiling_output = %s;", quote_literal(profile_path)),
+    sprintf("SELECT %s FROM read_bam(%s, reference := %s, region := %s, decompression_threads := %d);",
+            select, quote_literal(cram), quote_literal(reference), quote_literal(cell$region), cell$threads)
+  ), sql_path)
+  status <- system2("/usr/bin/time", c("-f", shQuote("%M\t%e"), "-o", shQuote(time_path),
+                                       shQuote(duckdb_cli), "-unsigned", "-csv", "-bail"),
+                    stdin = sql_path, stdout = result_path, stderr = FALSE)
+  if (status != 0L) {
+    stop("DuckDB CLI failed (status ", status, ") for ", build, " ", cell$projection, " ", cell$scale, "x")
+  }
+  result <- readLines(result_path)
+  stopifnot(length(result) == 2L)
+  profile <- jsonlite::fromJSON(profile_path, simplifyVector = FALSE)
+  timing <- utils::read.delim(time_path, header = FALSE, col.names = c("max_rss_kib", "process_seconds"))
+  data.frame(seconds = profile_value(profile, "latency"), cpu_seconds = profile_value(profile, "cpu_time"),
+             max_rss_kib = timing$max_rss_kib[[1L]],
+             peak_buffer_bytes = profile_value(profile, "system_peak_buffer_memory"),
+             peak_temp_bytes = profile_value(profile, "system_peak_temp_dir_size"),
+             alignments = as.numeric(strsplit(result[[2L]], ",", fixed = TRUE)[[1L]][[1L]]),
+             result = paste(result, collapse = "\n"), stringsAsFactors = FALSE)
+}
+
+observations <- list()
+for (repetition in seq_len(repetitions)) {
+  build_order <- if (repetition %% 2L == 1L) c("baseline", "branch") else c("branch", "baseline")
+  size_order <- if (repetition %% 2L == 1L) c(1L, 2L, 4L) else c(4L, 2L, 1L)
+  for (threads in thread_settings) {
+    for (projection in projection_names) {
+      for (build in build_order) {
+        for (scale in size_order) {
+          cell <- cells[cells$projection == projection & cells$threads == threads & cells$scale == scale, ]
+          observed <- run_query(build, cell)
+          observations[[length(observations) + 1L]] <- data.frame(
+            build = build, projection = projection, threads = threads, scale = scale,
+            repetition = repetition, region = cell$region,
+            budget_mib = if (build == "branch") cell$budget_mib else NA_real_,
+            observed, stringsAsFactors = FALSE)
+        }
+      }
+    }
+  }
+}
+runs <- do.call(rbind, observations)
+unlink(base_dir, recursive = TRUE)
+write.csv(runs[names(runs) != "result"], runs_csv, row.names = FALSE)
+
+# ---- the gates ----
+stopifnot(all(runs$peak_temp_bytes == 0))
+same_result <- vapply(split(runs$result, list(runs$projection, runs$scale), drop = TRUE),
+                      function(results) length(unique(results)) == 1L, logical(1L))
+if (!all(same_result)) {
+  print(names(same_result)[!same_result])
+  stop("a cell's result differs between builds, thread settings or repetitions", call. = FALSE)
+}
+size_rows <- vapply(split(runs$alignments, runs$scale), function(rows) {
+  stopifnot(length(unique(rows)) == 1L)
+  rows[[1L]]
+}, numeric(1L))
+stopifnot(all(diff(size_rows) > 0))
+result_field <- function(projection, scale, field) {
+  text <- runs$result[runs$projection == projection & runs$scale == scale][[1L]]
+  utils::read.csv(text = text, check.names = FALSE)[[field]]
+}
+if (full_size) {
+  stopifnot(size_rows[["4"]] == staging$alignments,
+            result_field("fixed", 4L, "position_sum") == staging$position_sum,
+            result_field("sequence", 4L, "base_sum") == staging$base_sum)
+}
+branch_runs <- runs[runs$build == "branch", ]
+over_budget <- branch_runs[branch_runs$max_rss_kib / 1024 > branch_runs$budget_mib, ]
+if (nrow(over_budget)) {
+  print(over_budget[c("projection", "threads", "scale", "repetition", "max_rss_kib", "budget_mib")])
+  stop("branch observations exceed their declared memory budget", call. = FALSE)
+}
+
+groups <- split(runs, list(runs$build, runs$projection, runs$threads, runs$scale), drop = TRUE)
+summary <- do.call(rbind, lapply(groups, function(cell) {
+  data.frame(build = cell$build[[1L]], projection = cell$projection[[1L]], threads = cell$threads[[1L]],
+             scale = cell$scale[[1L]], alignments = cell$alignments[[1L]],
+             median_seconds = median(cell$seconds), min_seconds = min(cell$seconds),
+             max_seconds = max(cell$seconds),
+             cpu_per_second = round(median(cell$cpu_seconds / cell$seconds), 2),
+             median_rss_mib = round(median(cell$max_rss_kib) / 1024, 1),
+             max_rss_mib = round(max(cell$max_rss_kib) / 1024, 1),
+             max_buffer_mib = round(mib(max(cell$peak_buffer_bytes)), 1),
+             budget_mib = round(cell$budget_mib[[1L]], 1), stringsAsFactors = FALSE)
+}))
+summary <- summary[order(match(summary$projection, projection_names), -summary$threads,
+                         match(summary$build, c("baseline", "branch")), summary$scale), ]
+rownames(summary) <- NULL
+
+# Before/after: the baseline median over the branch median, per cell.
+before <- summary[summary$build == "baseline", c("projection", "threads", "scale", "median_seconds", "median_rss_mib")]
+after <- summary[summary$build == "branch", c("projection", "threads", "scale", "median_seconds", "median_rss_mib")]
+ratios <- merge(before, after, by = c("projection", "threads", "scale"), suffixes = c("_before", "_after"))
+ratios$time_ratio <- ratios$median_seconds_before / ratios$median_seconds_after
+ratios$rss_ratio <- ratios$median_rss_mib_before / ratios$median_rss_mib_after
+ratios$rss_saved_mib <- ratios$median_rss_mib_before - ratios$median_rss_mib_after
+ratios <- ratios[order(match(ratios$projection, projection_names), -ratios$threads, ratios$scale), ]
+rownames(ratios) <- NULL
+
+# Growth of the median time against the alignments read; an exponent of 1 is linear.
+exponents <- do.call(rbind, lapply(split(summary, list(summary$build, summary$projection, summary$threads),
+                                         drop = TRUE), function(s) {
+  s <- s[order(s$scale), ]
+  growth <- function(low, high) {
+    log(s$median_seconds[[high]] / s$median_seconds[[low]]) / log(s$alignments[[high]] / s$alignments[[low]])
+  }
+  data.frame(build = s$build[[1L]], projection = s$projection[[1L]], threads = s$threads[[1L]],
+             one_x_seconds = s$median_seconds[[1L]],
+             ratio_2x = s$alignments[[2L]] / s$alignments[[1L]], ratio_4x = s$alignments[[3L]] / s$alignments[[2L]],
+             time_exponent_2x = growth(1L, 2L), time_exponent_4x = growth(2L, 3L),
+             rss_ratio_2x = s$median_rss_mib[[2L]] / s$median_rss_mib[[1L]],
+             rss_ratio_4x = s$median_rss_mib[[3L]] / s$median_rss_mib[[1L]],
+             rss_growth_mib = s$median_rss_mib[[3L]] - s$median_rss_mib[[1L]],
+             flat = s$median_rss_mib[[3L]] <= 1.1 * s$median_rss_mib[[1L]], stringsAsFactors = FALSE)
+}))
+exponents$timed <- exponents$one_x_seconds >= 5
+exponents <- exponents[order(match(exponents$build, c("branch", "baseline")),
+                             match(exponents$projection, projection_names), -exponents$threads), ]
+rownames(exponents) <- NULL
+timed_branch <- exponents[exponents$build == "branch" & exponents$timed, ]
+if (any(timed_branch$time_exponent_2x > 1.25 | timed_branch$time_exponent_4x > 1.25)) {
+  print(timed_branch)
+  stop("a time exponent of a branch series is above 1.25", call. = FALSE)
+}
+```
+
+`r reduced_note`
+
+Source revision: `r revision`; `src` tree `r src_tree`. Baseline revision: `r base_revision`. DuckDB runtime: `r duckdb_runtime` (CLI). htslib `r htslib_version`. Host load at start: `r host_load`. CPU affinity: `r affinity`. DuckDB memory limit: `r memory_limit` (the default); temporary directory limit: 0. Every observation is in [`benchmark_read_bam_cram_projection_runs.csv`](benchmark_read_bam_cram_projection_runs.csv).
+
+```{r identity, echo=FALSE}
+knitr::kable(data.frame(
+  build = names(builds), sha256 = unname(build_sha256),
+  empty_run_mib = round(unname(empty_kib) / 1024, 1), stringsAsFactors = FALSE))
+```
+
+Commits between the baseline and the branch revision that change `src/bam_reader.c`:
+
+```{r reader-commits, echo=FALSE, comment=""}
+writeLines(reader_commits)
+```
+
+## Input
+
+The CRAM slice has `r whole(staging$alignments)` alignments (position sum `r format(staging$position_sum, scientific = FALSE)`, `r whole(staging$base_sum)` bases) in `r whole(nrow(slices))` slices. Its largest container is `r whole(largest_container)` bytes. No tag value has the array form.
+
+```{r regions, echo=FALSE}
+knitr::kable(data.frame(scale = c(1L, 2L, 4L), region = regions, alignments = unname(size_rows),
+                        widest_slice_pair = vapply(region_ends, reference_span, 0)),
+             format.args = list(big.mark = ","))
+```
+
+Per-record bytes of each projection, from the pass that decodes every field: `largest_bytes` is D<sub>p</sub>, `top_bytes` B<sub>p</sub>, the sum of the 10,000 largest, and `record_buffer_bytes` A<sub>p</sub>.
+
+```{r record-bytes, echo=FALSE}
+knitr::kable(projections[c("projection", "largest_bytes", "top_bytes", "record_buffer_bytes")],
+             format.args = list(big.mark = ","))
+```
+
+The live state and the ceiling of each branch cell, in MiB:
+
+```{r budget, echo=FALSE}
+budget <- cells[c("projection", "threads", "scale", "slices_in_flight")]
+budget$slices_mib <- round(mib(cells$slice_bytes), 1)
+budget$record_buffers_mib <- round(mib(cells$record_bytes), 1)
+budget$reference_mib <- round(mib(cells$reference_bytes), 1)
+budget$live_state_mib <- round(mib(cells$live_state_bytes), 1)
+budget$budget_mib <- round(cells$budget_mib, 1)
+knitr::kable(budget)
+```
+
+## Measurements
+
+`seconds` are the latency of the query over the repetitions. `cpu_per_second` is DuckDB's CPU time per second of latency; htslib's decompression threads are not in it. `budget_mib` is the ceiling of a branch cell.
+
+```{r summary, echo=FALSE}
+knitr::kable(summary, digits = 3, format.args = list(big.mark = ","))
+```
+
+Before/after: `time_ratio` is the baseline median time over the branch median time, `rss_ratio` the baseline median peak RSS over the branch's, and `rss_saved_mib` their difference.
+
+```{r ratios, echo=FALSE}
+knitr::kable(ratios, digits = 2)
+```
+
+Growth of the median time against the alignments read (an exponent of 1 is linear), the size ratio at each doubling, and peak-RSS ratios to 1×. `timed` marks a series whose 1× run takes at least 5 s; only the branch series that are timed have a gate.
+
+```{r exponents, echo=FALSE}
+knitr::kable(exponents, digits = 3)
+```
+
+## Findings
+
+```{r findings, echo=FALSE, results="asis"}
+ratio_of <- function(projection, threads, scale = 4L) {
+  found <- ratios[ratios$projection == projection & ratios$threads == threads & ratios$scale == scale, ]
+  stopifnot(nrow(found) == 1L)
+  found
+}
+series_of <- function(build, projection, threads) {
+  found <- exponents[exponents$build == build & exponents$projection == projection & exponents$threads == threads, ]
+  stopifnot(nrow(found) == 1L)
+  found
+}
+range_text <- function(values) sprintf("%.2f to %.2f", min(values), max(values))
+cat(paste(
+  "Every cell returns the same result in both builds, at both thread settings and in every repetition.",
+  "No observation spills, and every branch observation is within its ceiling. The render enforces all",
+  "of this.\n\n"))
+for (projection in projection_names) {
+  rows <- ratios[ratios$projection == projection, ]
+  cat(sprintf(paste(
+    "**%s.** Over the three sizes, the baseline takes %s times the branch's time with two decompression",
+    "threads and %s times without them. Its peak RSS is %s times the branch's with two threads",
+    "(baseline minus branch: %+.1f MiB at 4×) and %s times without them (%+.1f MiB at 4×).\n\n"),
+    projection, range_text(rows$time_ratio[rows$threads == 2L]), range_text(rows$time_ratio[rows$threads == 0L]),
+    range_text(rows$rss_ratio[rows$threads == 2L]), ratio_of(projection, 2L)$rss_saved_mib,
+    range_text(rows$rss_ratio[rows$threads == 0L]), ratio_of(projection, 0L)$rss_saved_mib))
+}
+branch_series <- exponents[exponents$build == "branch", ]
+flat_text <- function(flat) {
+  s <- branch_series[branch_series$flat == flat, ]
+  if (!nrow(s)) return("none")
+  paste(sprintf("`%s` with %d threads (%.1f MiB from 1× to 4×, a ratio of %.2f)", s$projection, s$threads,
+                s$rss_growth_mib, s$rss_ratio_4x), collapse = "; ")
+}
+cat(sprintf(paste(
+  "Flat in memory (at most 10%% more peak RSS at 4× than at 1×), branch build: %s.\n\n",
+  "Not flat, branch build: %s.\n\n"), flat_text(TRUE), flat_text(FALSE)))
+model_fit <- merge(summary[summary$build == "branch", c("projection", "threads", "scale", "median_rss_mib")],
+                   cells[c("projection", "threads", "scale", "live_state_bytes")],
+                   by = c("projection", "threads", "scale"))
+model_fit$share <- (model_fit$median_rss_mib - overhead_mib) / mib(model_fit$live_state_bytes)
+lowest <- model_fit[which.min(model_fit$share), ]
+highest <- model_fit[which.max(model_fit$share), ]
+cat(sprintf(paste(
+  "The peak RSS of the branch build above the overhead is between %.2f (`%s`, %d threads, %d×) and",
+  "%.2f (`%s`, %d threads, %d×) times the declared live state, against the factor of 3 that the",
+  "ceiling allows. The record-buffer and slice terms use the largest records of the contig, so the",
+  "model is an upper bound, not a prediction.\n\n"),
+  lowest$share, lowest$projection, lowest$threads, lowest$scale,
+  highest$share, highest$projection, highest$threads, highest$scale))
+timed <- exponents[exponents$timed, ]
+timed_text <- if (nrow(timed[timed$build == "branch", ])) {
+  s <- timed[timed$build == "branch", ]
+  sprintf("The branch series with a timing verdict (%s) have time exponents of at most %.2f.",
+          paste(sprintf("`%s` with %d threads", s$projection, s$threads), collapse = ", "),
+          max(c(s$time_exponent_2x, s$time_exponent_4x)))
+} else {
+  "No branch series has a timing verdict at these sizes."
+}
+untimed <- exponents[exponents$build == "branch" & !exponents$timed, ]
+untimed_text <- if (nrow(untimed)) {
+  sprintf(" %s take less than 5 s at 1× and get no timing verdict.",
+          paste(sprintf("`%s` with %d threads", untimed$projection, untimed$threads), collapse = ", "))
+} else {
+  ""
+}
+cat(timed_text, untimed_text, "\n\n", sep = "")
+all4 <- ratio_of("all", 2L)
+cat(sprintf(paste(
+  "The `all` projection asks htslib for every field in both builds. At 4× with two threads, its",
+  "baseline-to-branch time ratio is %.2f and its peak-RSS ratio %.2f; these show how far the two",
+  "builds differ when the projection does not change what htslib decodes.\n"),
+  all4$time_ratio, all4$rss_ratio))
+```

@@ -22,6 +22,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/kstring.h>
 #include <htslib/sam.h>
 
+#include "include/bed_line.h"
 #include "include/hts_io_tuning.h"
 
 #define DUCKHTS_BEDCOV_DEFAULT_EXCLUDE_FLAGS 1796
@@ -131,49 +132,14 @@ static inline void set_null(duckdb_vector vec, idx_t row) {
     validity[row / 64] &= ~((uint64_t)1 << (row % 64));
 }
 
-static int is_meta_bed_line_bedcov(const char *s) {
-    if (!s || !*s) return 1;
-    if (s[0] == '#') return 1;
-    if (strncmp(s, "track", 5) == 0) return 1;
-    if (strncmp(s, "browser", 7) == 0) return 1;
-    return 0;
-}
+/* This loader rejects a coordinate field of 64 or more bytes. read_bed,
+ * fasta_nuc and duckhts_mosdepth accept any length. */
+#define BEDCOV_COORD_FIELD_MAX_BYTES 63
 
 static int64_t parse_i64_field(const char *s, int len, int *ok) {
-    char buf[64];
-    char *end = NULL;
-    long long v;
-    if (ok) *ok = 0;
-    if (!s || len <= 0 || (size_t)len >= sizeof(buf)) return 0;
-    memcpy(buf, s, (size_t)len);
-    buf[len] = '\0';
-    v = strtoll(buf, &end, 10);
-    if (!end || *end != '\0') return 0;
-    if (ok) *ok = 1;
-    return (int64_t)v;
-}
-
-static const char *field_span(const char *s, int idx, int *len) {
-    int cur = 0;
-    const char *start = s;
-    const char *p = s;
-    while (*p) {
-        if (*p == '\t') {
-            if (cur == idx) {
-                *len = (int)(p - start);
-                return start;
-            }
-            cur++;
-            start = p + 1;
-        }
-        p++;
-    }
-    if (cur == idx) {
-        *len = (int)(p - start);
-        return start;
-    }
-    *len = 0;
-    return NULL;
+    int64_t v = 0;
+    *ok = len <= BEDCOV_COORD_FIELD_MAX_BYTES && duckhts_bed_parse_int64_span(s, len, &v);
+    return *ok ? v : 0;
 }
 
 static void destroy_region_depth_arrays(bedcov_region_t *region) {
@@ -342,11 +308,11 @@ static int load_bed_regions(const char *path, bedcov_region_t **out_regions, siz
         while (linelen > 0 && (line.s[linelen - 1] == '\n' || line.s[linelen - 1] == '\r')) {
             line.s[--linelen] = '\0';
         }
-        if (linelen == 0 || is_meta_bed_line_bedcov(line.s)) continue;
+        if (linelen == 0 || duckhts_bed_line_is_meta(line.s)) continue;
 
-        chrom = field_span(line.s, 0, &chrom_len);
-        (void)field_span(line.s, 1, &start_len);
-        (void)field_span(line.s, 2, &end_len);
+        chrom = duckhts_bed_line_field(line.s, 0, &chrom_len);
+        (void)duckhts_bed_line_field(line.s, 1, &start_len);
+        (void)duckhts_bed_line_field(line.s, 2, &end_len);
         if (!chrom || chrom_len <= 0 || start_len <= 0 || end_len <= 0) {
             snprintf(err, errlen, "duckhts_bam_bed_coverage: BED line has fewer than 3 tab-delimited fields");
             hts_close(fp);
@@ -354,14 +320,14 @@ static int load_bed_regions(const char *path, bedcov_region_t **out_regions, siz
             return -1;
         }
 
-        start = parse_i64_field(field_span(line.s, 1, &start_len), start_len, &ok);
+        start = parse_i64_field(duckhts_bed_line_field(line.s, 1, &start_len), start_len, &ok);
         if (!ok) {
             snprintf(err, errlen, "duckhts_bam_bed_coverage: invalid BED start coordinate");
             hts_close(fp);
             free(line.s);
             return -1;
         }
-        end = parse_i64_field(field_span(line.s, 2, &end_len), end_len, &ok);
+        end = parse_i64_field(duckhts_bed_line_field(line.s, 2, &end_len), end_len, &ok);
         if (!ok || end < start) {
             snprintf(err, errlen, "duckhts_bam_bed_coverage: invalid BED end coordinate");
             hts_close(fp);
@@ -399,7 +365,7 @@ static int load_bed_regions(const char *path, bedcov_region_t **out_regions, siz
         r->len = end - start;
         r->tid = -1;
 
-        name = field_span(line.s, 3, &name_len);
+        name = duckhts_bed_line_field(line.s, 3, &name_len);
         if (name && name_len > 0) {
             r->name = (char *)duckdb_malloc((size_t)name_len + 1);
             if (!r->name) {

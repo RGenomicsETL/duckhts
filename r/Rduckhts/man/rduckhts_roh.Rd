@@ -21,7 +21,8 @@ rduckhts_roh(
   proportions_table = NULL,
   af_clamp = 0.001,
   max_sites = 2e+07,
-  max_site_bytes = 2^32
+  max_site_bytes = 2^32,
+  site_rule = "matching"
 )
 }
 \arguments{
@@ -69,6 +70,19 @@ the bytes held by all ROH decodes in the process would pass its own
 `max_site_bytes`; decodes that run at the same time with different values
 each apply their own. Exceeding it is an error: decode fewer samples per
 call or raise it.}
+
+\item{site_rule}{Which record of a position listed in `af_table` gives its
+site. `"matching"` (the default) uses a record whose REF and ALT match a
+row of `af_table` (`duckhts_roh_af_table`). `"bcftools"` follows
+`bcftools roh --AF-file` (`duckhts_roh_af_table_bcftools`): in file order,
+a record of the other indel class than the row is passed over when the
+next record of the file has the same POS (on any contig); a record with no
+non-symbolic ALT, or several, claims nothing; and the first remaining
+record claims the position, which is skipped unless its alleles equal the
+row's (also when its first ALT is symbolic, which bcftools would decode
+through the second ALT). It needs one `af_table` row per position and a
+sorted, BGZF-compressed VCF or BCF, and reads the file a second time
+without samples. Only `af_table` takes `"bcftools"`.}
 }
 \value{
 A data frame (or invisible `TRUE` when `table_name` is given) with one
@@ -91,7 +105,9 @@ must be declared `Type=Float,Number=A`) or from a relation (`af_table`, like
 `--AF-file`) with columns `chrom`, `pos`, `ref`, `alt` and `af`, matched to
 each record by chromosome, position, REF and its ALT alleles joined by commas.
 Sites without a usable frequency (absent, missing or exactly 0) are skipped,
-as are records with more than one ALT or none.
+as are records with more than one ALT or none. With `af_table`,
+`site_rule = "bcftools"` chooses the record of a repeated position as
+`bcftools roh --AF-file` does (see the argument).
 
 Alternatively, `reference_table` and `proportions_table` select the
 ancestry-tuned path. The reference is long-format with columns `chromosome`,
