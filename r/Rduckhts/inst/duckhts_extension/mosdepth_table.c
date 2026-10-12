@@ -40,6 +40,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/sam.h>
 #include <htslib/tbx.h>
 
+#include "include/bed_line.h"
 #include "include/hts_io_tuning.h"
 #include "include/duckhts_output_file.h"
 
@@ -170,51 +171,6 @@ static int is_digits_only(const char *s) {
         if (!isdigit(*p)) return 0;
     }
     return 1;
-}
-
-static int parse_int64_span_local(const char *s, int len, int64_t *out) {
-    if (!s || len <= 0 || !out) return 0;
-    char *tmp = (char *)malloc((size_t)len + 1);
-    if (!tmp) return 0;
-    memcpy(tmp, s, (size_t)len);
-    tmp[len] = '\0';
-    char *end = NULL;
-    long long v = strtoll(tmp, &end, 10);
-    int ok = (end && *end == '\0');
-    if (ok) *out = (int64_t)v;
-    free(tmp);
-    return ok;
-}
-
-static int is_meta_bed_line(const char *s) {
-    if (!s || !*s) return 1;
-    if (s[0] == '#') return 1;
-    if (strncmp(s, "track", 5) == 0) return 1;
-    if (strncmp(s, "browser", 7) == 0) return 1;
-    return 0;
-}
-
-static const char *get_field_span(const char *s, int idx, int *len) {
-    int cur = 0;
-    const char *start = s;
-    const char *p = s;
-    while (*p) {
-        if (*p == '\t') {
-            if (cur == idx) {
-                *len = (int)(p - start);
-                return start;
-            }
-            cur++;
-            start = p + 1;
-        }
-        p++;
-    }
-    if (cur == idx) {
-        *len = (int)(p - start);
-        return start;
-    }
-    *len = 0;
-    return NULL;
 }
 
 static void stat_clear(mosdepth_stat_t *stat) {
@@ -994,21 +950,21 @@ static int parse_bed_regions(const char *path, sam_hdr_t *hdr,
     }
 
     while (hts_getline(fp, '\n', &line) >= 0) {
-        if (line.l == 0 || is_meta_bed_line(line.s)) continue;
+        if (line.l == 0 || duckhts_bed_line_is_meta(line.s)) continue;
 
         int len0 = 0, len1 = 0, len2 = 0, len3 = 0;
-        const char *f0 = get_field_span(line.s, 0, &len0);
-        const char *f1 = get_field_span(line.s, 1, &len1);
-        const char *f2 = get_field_span(line.s, 2, &len2);
-        const char *f3 = get_field_span(line.s, 3, &len3);
+        const char *f0 = duckhts_bed_line_field(line.s, 0, &len0);
+        const char *f1 = duckhts_bed_line_field(line.s, 1, &len1);
+        const char *f2 = duckhts_bed_line_field(line.s, 2, &len2);
+        const char *f3 = duckhts_bed_line_field(line.s, 3, &len3);
         int64_t start = 0, stop = 0;
 
         if (!f0 || !f1 || !f2) {
             snprintf(err, errlen, "duckhts_mosdepth: BED line has fewer than 3 tab-delimited fields");
             goto cleanup;
         }
-        if (!parse_int64_span_local(f1, len1, &start) ||
-            !parse_int64_span_local(f2, len2, &stop) ||
+        if (!duckhts_bed_parse_int64_span(f1, len1, &start) ||
+            !duckhts_bed_parse_int64_span(f2, len2, &stop) ||
             start < 0 || stop < start) {
             snprintf(err, errlen, "duckhts_mosdepth: invalid BED coordinates");
             goto cleanup;
