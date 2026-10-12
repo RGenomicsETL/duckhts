@@ -1487,7 +1487,7 @@ Find runs of homozygosity from allele read counts, with sequencing error, option
 Signature:
 
 ```sql
-duckhts_roh_counts(counts_table, genetic_map, seq_error := 1e-3, contamination := 0.0, allele_balance := 0.5, artefact_weight := 0.0, hw_to_az := 6.7e-8, az_to_hw := 5e-9, rec_rate := NULL, max_sites := 20000000, max_site_bytes := 4294967296)
+duckhts_roh_counts(counts_table, genetic_map, seq_error := 1e-3, contamination := 0.0, hw_to_az := 6.7e-8, az_to_hw := 5e-9, rec_rate := NULL, max_sites := 20000000, max_site_bytes := 4294967296, allele_balance := 0.5, artefact_weight := 0.0)
 ```
 
 Returns:

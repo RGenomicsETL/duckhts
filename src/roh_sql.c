@@ -509,9 +509,11 @@ static const char ancestry_frequencies[] =
  * af_table or ancestry-weighted frequencies. */
 #define ROH_COUNTS_FITTED_OPTIONS \
     "hw_to_az := 6.7e-8, az_to_hw := 5e-9, rec_rate := NULL, " ROH_LIMITS
+/* New options go after the existing ones: a macro's options can be given by
+ * position, so inserting one would shift every later positional value. */
 #define ROH_COUNTS_OPTIONS \
-    "seq_error := 1e-3, contamination := 0.0, allele_balance := 0.5, artefact_weight := 0.0, " \
-    ROH_COUNTS_FITTED_OPTIONS
+    "seq_error := 1e-3, contamination := 0.0, " ROH_COUNTS_FITTED_OPTIONS \
+    ", allele_balance := 0.5, artefact_weight := 0.0"
 
 #define ROH_COUNTS_INPUT \
     "WITH __dht_counts AS (SELECT CAST(sample_id AS VARCHAR) AS smp, " \

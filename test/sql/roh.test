@@ -1565,6 +1565,18 @@ SELECT * FROM duckhts_roh_counts('roh_counts_bad_af');
 ----
 af must be in [0, 1] (position 50000 is 1.5)
 
+# Options keep their positions: the fourth positional value is still hw_to_az, as
+# before allele_balance and artefact_weight were added at the end.
+query I
+SELECT count(*) FROM (
+  (SELECT * FROM duckhts_roh_counts('roh_counts_clean', 0.001, 0.0, 0.4)
+   EXCEPT ALL SELECT * FROM duckhts_roh_counts('roh_counts_clean', hw_to_az := 0.4))
+  UNION ALL
+  (SELECT * FROM duckhts_roh_counts('roh_counts_clean', hw_to_az := 0.4)
+   EXCEPT ALL SELECT * FROM duckhts_roh_counts('roh_counts_clean', 0.001, 0.0, 0.4)));
+----
+0
+
 # Per-sample fits use exactly the scalar emission parameters, including quality bits. The fit
 # relation names the four numbers of duckhts_count_error_fit() and artefact_weight_sd; other
 # columns (status here) are ignored. (artefact_weight was an ignored column, set to 123, until

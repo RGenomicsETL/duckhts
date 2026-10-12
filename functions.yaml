@@ -788,7 +788,7 @@
       "name": "duckhts_roh_counts",
       "kind": "table_macro",
       "category": "Variants",
-      "signature": "duckhts_roh_counts(counts_table, genetic_map, seq_error := 1e-3, contamination := 0.0, allele_balance := 0.5, artefact_weight := 0.0, hw_to_az := 6.7e-8, az_to_hw := 5e-9, rec_rate := NULL, max_sites := 20000000, max_site_bytes := 4294967296)",
+      "signature": "duckhts_roh_counts(counts_table, genetic_map, seq_error := 1e-3, contamination := 0.0, hw_to_az := 6.7e-8, az_to_hw := 5e-9, rec_rate := NULL, max_sites := 20000000, max_site_bytes := 4294967296, allele_balance := 0.5, artefact_weight := 0.0)",
       "returns": "table(sample VARCHAR, chrom VARCHAR, start BIGINT, \"end\" BIGINT, length BIGINT, n_markers INTEGER, quality DOUBLE)",
       "r_wrapper": "rduckhts_roh_counts",
       "description": "Find runs of homozygosity from allele read counts, with sequencing error, optional contamination, allele balance and a site artefact term.",
