@@ -109,12 +109,37 @@ static const char sites_from_relation[] =
     "FROM __dht_calls AS c JOIN __dht_freq AS f ON f.f_chrom = c.chrom "
     "AND f.f_pos = c.pos AND f.f_ref = c.ref AND f.f_alt = c.alt), ";
 
-/* The caller's frequency relation, typed. Each use scans it again, rather
- * than holding it for several readers (a CTE read twice is materialized). */
+/* af_order names a column of af_table that gives the line order of a position.
+ * A macro can select a column only by a pattern, and a pattern that matches no
+ * column is a bind error, so the column is matched together with a NULL
+ * sentinel column added last: the list holds [order value, NULL] when af_order
+ * names a column (in any case, as SQL identifiers), and [NULL] when it does not
+ * or is NULL. The list length tells the two apart, also on an empty relation. */
+#define ROH_AF_ORDER_SENTINEL "__dht_no_af_order"
+#define ROH_AF_ORDER_VALUES \
+    "list_value(*COLUMNS(lambda c: lower(c) = lower(af_order) OR c = '" ROH_AF_ORDER_SENTINEL "'))"
+#define ROH_AF_ORDER_UNKNOWN \
+    "error('duckhts_roh_af_table_bcftools: af_order ''' || af_order || ''' is not a column of af_table')"
+
+/* The caller's frequency relation, typed, with f_order the af_order value of
+ * each row (NULL when af_order is NULL). Each use scans it again, rather than
+ * holding it for several readers (a CTE read twice is materialized). When
+ * af_order is NULL the order columns fold to constants and are pruned, so the
+ * plan reads only chrom, pos, ref, alt and af. */
 #define ROH_FREQ_ROWS \
     "(SELECT CAST(chrom AS VARCHAR) AS f_chrom, CAST(pos AS BIGINT) AS f_pos, " \
-    "CAST(ref AS VARCHAR) AS f_ref, CAST(alt AS VARCHAR) AS f_alt, CAST(af AS DOUBLE) AS f_af " \
-    "FROM query_table(af_table))"
+    "CAST(ref AS VARCHAR) AS f_ref, CAST(alt AS VARCHAR) AS f_alt, CAST(af AS DOUBLE) AS f_af, " \
+    "CASE WHEN af_order IS NOT NULL AND len(__dht_af_order) = 1 THEN " ROH_AF_ORDER_UNKNOWN " " \
+    "ELSE __dht_af_order[1] END AS f_order " \
+    "FROM (SELECT *, " ROH_AF_ORDER_VALUES " AS __dht_af_order " \
+    "FROM (SELECT *, NULL AS " ROH_AF_ORDER_SENTINEL " FROM query_table(af_table))))"
+
+/* The value of `column` in the row that bcftools reads at a position: any row
+ * when af_order is NULL (the guard allows one), else the row with the least
+ * f_order, as bcftools keeps the first line. arg_min_null, unlike arg_min,
+ * returns that row's value even when it is NULL. */
+#define ROH_FREQ_FIRST(column) \
+    "CASE WHEN af_order IS NULL THEN any_value(" column ") ELSE arg_min_null(" column ", f_order) END"
 
 /* duckhts_roh_af_table_bcftools: the record of a listed position as bcftools
  * roh --AF-file chooses it. HTSlib functions are cited with lines of the
@@ -131,8 +156,10 @@ static const char sites_from_relation[] =
  * _bcf_sr_regions_overlap() (1793) advances only past lines that end before
  * the record (`while ( iseq==reg->iseq && reg->end < start )`, 1815), and
  * _regions_match_alleles() (1725) parses the alleles of that current line only
- * (reg->line.s, 1738). So bcftools reads the first line of a position, and a
- * relation must give one row per position (the guard below). The row is an
+ * (reg->line.s, 1738). So bcftools reads the first line of a position. A
+ * relation has no line order: without af_order it must give one row per
+ * position, and with af_order the row with the least af_order value stands for
+ * the first line (ROH_FREQ_FIRST; the guard below checks both). The row is an
  * indel when any of its alleles is longer than one character. At a listed
  * position, in file order (FILE_OFFSET), bcf_sr_next_line() (1001) passes over
  * a record whose indel class differs from the row's (the allele match, 1014)
@@ -183,16 +210,19 @@ static const char sites_from_relation_bcftools[] =
     "max(next_first_pos) OVER (PARTITION BY chrom) AS next_first_pos, "
     "max(CASE WHEN per_contig = 1 THEN last_offset END) OVER (PARTITION BY chrom) AS contig_last_offset, "
     "max(listed_offset) OVER (PARTITION BY chrom, pos) AS position_last_offset "
-    "FROM __dht_contig_next), "
+    "FROM __dht_contig_next), ";
+/* The second part of sites_from_relation_bcftools (C99 bounds one string literal). */
+static const char sites_from_relation_bcftools_claims[] =
     "__dht_bcftools_records AS NOT MATERIALIZED (SELECT m.chrom, m.pos, m.ref, m.alts, "
     "m.listed_offset AS file_offset, t.t_ref, t.t_alt, t.t_af, t.t_indel, "
     "m.listed_offset < m.position_last_offset OR (m.listed_offset = m.contig_last_offset "
     "AND m.next_first_pos = m.pos) AS followed_at_pos "
     "FROM __dht_marked AS m "
     "JOIN (SELECT f_chrom AS t_chrom, f_pos AS t_pos, "
-    "any_value(f_ref) AS t_ref, any_value(f_alt) AS t_alt, any_value(f_af) AS t_af, "
-    "coalesce(length(any_value(f_ref)) > 1 OR "
-    "list_bool_or(list_transform(string_split(any_value(f_alt), ','), lambda a: length(a) > 1)), "
+    ROH_FREQ_FIRST("f_ref") " AS t_ref, " ROH_FREQ_FIRST("f_alt") " AS t_alt, "
+    ROH_FREQ_FIRST("f_af") " AS t_af, "
+    "coalesce(length(" ROH_FREQ_FIRST("f_ref") ") > 1 OR "
+    "list_bool_or(list_transform(string_split(" ROH_FREQ_FIRST("f_alt") ", ','), lambda a: length(a) > 1)), "
     "false) AS t_indel FROM " ROH_FREQ_ROWS " AS f WHERE f_chrom IS NOT NULL AND f_pos IS NOT NULL "
     "GROUP BY f_chrom, f_pos) AS t ON t.t_chrom = m.chrom AND t.t_pos = m.pos "
     "WHERE m.per_contig = 0), "
@@ -230,17 +260,30 @@ static const char no_map_arguments[] = "NULL::BIGINT[], NULL::DOUBLE[]";
 static const char map_arguments[] =
     "list_transform(m.m, lambda x: x.pos), list_transform(m.m, lambda x: x.cm)";
 
-/* __duckhts_roh_decode(sites, gt_error, seq_error, contamination, map_pos,
- * map_cm, rec_rate, hw_to_az, az_to_hw): the model parameters of the evidence
- * kind, then the map arguments, then the transitions. */
+/* __duckhts_roh_decode(sites, gt_error, seq_error, contamination,
+ * allele_balance, artefact_weight, map_pos, map_cm, rec_rate, hw_to_az,
+ * az_to_hw): the model parameters of the evidence kind, then the map
+ * arguments, then the transitions. duckhts_roh_counts_fitted calls
+ * __duckhts_roh_decode_stable, which takes artefact_weight_sd after
+ * artefact_weight and gives each run a stable_fraction and gained_bases. */
+#define ROH_RUN_COLUMNS \
+    " SELECT seg.smp AS \"sample\", seg.chrom AS chrom, seg.r.start AS start, " \
+    "seg.r.\"end\" AS \"end\", seg.r.\"end\" - seg.r.start + 1 AS length, " \
+    "seg.r.n_markers AS n_markers, seg.r.quality AS quality"
 static const char select_head[] =
-    " SELECT seg.smp AS \"sample\", seg.chrom AS chrom, seg.r.start AS start, "
-    "seg.r.\"end\" AS \"end\", seg.r.\"end\" - seg.r.start + 1 AS length, "
-    "seg.r.n_markers AS n_markers, seg.r.quality AS quality "
-    "FROM (SELECT l.smp, l.chrom, unnest(__duckhts_roh_decode(l.s, ";
-static const char genotype_model[] = "CAST(gt_error AS DOUBLE), NULL::DOUBLE, NULL::DOUBLE, ";
-static const char counts_model[] =
-    "NULL::DOUBLE, CAST(seq_error AS DOUBLE), CAST(contamination AS DOUBLE), ";
+    ROH_RUN_COLUMNS " FROM (SELECT l.smp, l.chrom, unnest(__duckhts_roh_decode(l.s, ";
+static const char fitted_select_head[] =
+    ROH_RUN_COLUMNS ", seg.r.stable_fraction AS stable_fraction, seg.r.gained_bases AS gained_bases "
+    "FROM (SELECT l.smp, l.chrom, unnest(__duckhts_roh_decode_stable(l.s, ";
+#define ROH_NO_COUNT_MODEL "NULL::DOUBLE, NULL::DOUBLE, NULL::DOUBLE, NULL::DOUBLE"
+#define ROH_COUNT_MODEL \
+    "CAST(seq_error AS DOUBLE), CAST(contamination AS DOUBLE), " \
+    "CAST(allele_balance AS DOUBLE), CAST(artefact_weight AS DOUBLE)"
+/* The artefact_weight_sd of __duckhts_roh_valid_args() for a macro without
+ * an interval. */
+#define ROH_NO_INTERVAL "NULL::DOUBLE"
+static const char genotype_model[] = "CAST(gt_error AS DOUBLE), " ROH_NO_COUNT_MODEL ", ";
+static const char counts_model[] = "NULL::DOUBLE, " ROH_COUNT_MODEL ", ";
 static const char decode_end[] =
     ", CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE))";
 static const char from_lists[] = ") AS r FROM __dht_lists AS l) AS seg";
@@ -253,29 +296,45 @@ static const char from_lists_with_map[] =
 #define ROH_GUARD_COLUMNS \
     " UNION ALL SELECT NULL::VARCHAR, NULL::VARCHAR, NULL::BIGINT, NULL::BIGINT, NULL::BIGINT, " \
     "NULL::INTEGER, NULL::DOUBLE "
+#define ROH_FITTED_GUARD_COLUMNS ROH_GUARD_COLUMNS ", NULL::DOUBLE, NULL::BIGINT "
 #define ROH_GENOTYPE_ARGUMENTS_VALID \
-    "__duckhts_roh_valid_args(" ROH_KIND ", CAST(gt_error AS DOUBLE), NULL::DOUBLE, NULL::DOUBLE, " \
-    "CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE), " \
+    "__duckhts_roh_valid_args(" ROH_KIND ", CAST(gt_error AS DOUBLE), " ROH_NO_COUNT_MODEL ", " \
+    ROH_NO_INTERVAL ", CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE), " \
     ROH_LIMIT_ARGUMENTS ")"
 static const char genotype_guard[] = ROH_GUARD_COLUMNS "WHERE NOT " ROH_GENOTYPE_ARGUMENTS_VALID;
-/* duckhts_roh_af_table_bcftools also checks that the relation gives at most one
- * row per position, naming the first such position, whether or not a record is
- * listed. */
+/* duckhts_roh_af_table_bcftools also checks the rows of each position, naming
+ * the first failing position, whether or not a record is listed: without
+ * af_order, at most one row; with it, a non-NULL af_order value in every row and
+ * no value twice within a position. When af_order is NULL the CASE expressions
+ * fold to the one-row check. A second arm checks that af_order names a column
+ * even when af_table is empty: it joins a one-row sentinel relation to no row
+ * of af_table, so the list of matched columns has its length without data. */
 static const char af_table_bcftools_guard[] =
-    ROH_GUARD_COLUMNS "FROM (SELECT f_chrom, f_pos, count(*) AS n FROM " ROH_FREQ_ROWS " AS f "
-    "WHERE f_chrom IS NOT NULL AND f_pos IS NOT NULL "
-    "GROUP BY f_chrom, f_pos HAVING count(*) > 1 ORDER BY f_chrom, f_pos LIMIT 1) AS d "
-    "WHERE error('duckhts_roh_af_table_bcftools needs one af_table row per position, but ' || "
+    ROH_GUARD_COLUMNS "FROM (SELECT f_chrom, f_pos, count(*) AS n, count(f_order) AS n_ordered "
+    "FROM " ROH_FREQ_ROWS " AS f WHERE f_chrom IS NOT NULL AND f_pos IS NOT NULL "
+    "GROUP BY f_chrom, f_pos HAVING CASE WHEN af_order IS NULL THEN count(*) > 1 "
+    "ELSE count(f_order) < count(*) OR count(DISTINCT f_order) < count(*) END "
+    "ORDER BY f_chrom, f_pos LIMIT 1) AS d "
+    "WHERE error(CASE WHEN af_order IS NULL THEN "
+    "'duckhts_roh_af_table_bcftools needs one af_table row per position, but ' || "
     "d.f_chrom || ':' || d.f_pos || ' has ' || d.n || ' rows; bcftools reads the first line "
-    "of a position, and a relation has no line order') IS NULL";
+    "of a position, and a relation has no line order; give af_order to choose it' "
+    "WHEN d.n_ordered < d.n THEN 'duckhts_roh_af_table_bcftools needs an af_order value in every "
+    "af_table row, but ' || d.f_chrom || ':' || d.f_pos || ' has a row with NULL ' || af_order "
+    "ELSE 'duckhts_roh_af_table_bcftools needs distinct af_order values within a position, but ' || "
+    "d.f_chrom || ':' || d.f_pos || ' repeats a value of ' || af_order END) IS NULL"
+    ROH_GUARD_COLUMNS "FROM (SELECT len(" ROH_AF_ORDER_VALUES ") AS n "
+    "FROM (SELECT NULL AS " ROH_AF_ORDER_SENTINEL ") AS s "
+    "LEFT JOIN (SELECT * FROM query_table(af_table) LIMIT 0) AS f ON true) AS k "
+    "WHERE CASE WHEN af_order IS NOT NULL AND k.n = 1 THEN " ROH_AF_ORDER_UNKNOWN " END IS NOT NULL";
 /* The ancestry macro also runs its relation checks (__dht_group_guard) here,
  * so they do not depend on a call matching a reference site. */
 static const char ancestry_guard[] =
     ROH_GUARD_COLUMNS "FROM __dht_group_guard AS g WHERE NOT (g.valid AND "
     ROH_GENOTYPE_ARGUMENTS_VALID ")";
 #define ROH_COUNTS_ARGUMENTS_VALID \
-    "__duckhts_roh_valid_args(3, NULL::DOUBLE, CAST(seq_error AS DOUBLE), " \
-    "CAST(contamination AS DOUBLE), CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), " \
+    "__duckhts_roh_valid_args(3, NULL::DOUBLE, " ROH_COUNT_MODEL ", " ROH_NO_INTERVAL ", " \
+    "CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), " \
     "CAST(az_to_hw AS DOUBLE), " ROH_LIMIT_ARGUMENTS ")"
 static const char counts_guard[] = ROH_GUARD_COLUMNS "WHERE NOT " ROH_COUNTS_ARGUMENTS_VALID;
 
@@ -287,19 +346,27 @@ static const char counts_guard[] = ROH_GUARD_COLUMNS "WHERE NOT " ROH_COUNTS_ARG
     "WHEN " from ".fit_rows > 1 THEN error('duplicate fit rows for sample ' || coalesce(" sample ", 'NULL')) " \
     "WHEN " from "." column " IS NULL THEN error('NULL " column " for sample ' || coalesce(" sample ", 'NULL')) " \
     "ELSE " from "." column " END"
-static const char fitted_counts_model[] =
-    "NULL::DOUBLE, " ROH_FIT_VALUE("l", "seq_error", "l.smp") ", " ROH_FIT_VALUE("l", "contamination", "l.smp") ", ";
+/* The four fitted numbers of the sample `sample` and the artefact weight's
+ * interval, in the order of __duckhts_roh_decode_stable() and
+ * __duckhts_roh_valid_args(). A NULL artefact_weight_sd (fewer than three
+ * blocks in the fit) counts as 0: the perturbed decodes equal the central
+ * one, so every stable_fraction is 1 and every gained_bases 0. */
+#define ROH_FIT_MODEL(from, sample) \
+    ROH_FIT_VALUE(from, "seq_error", sample) ", " ROH_FIT_VALUE(from, "contamination", sample) ", " \
+    ROH_FIT_VALUE(from, "allele_balance", sample) ", " ROH_FIT_VALUE(from, "artefact_weight", sample) ", " \
+    "coalesce(" from ".artefact_weight_sd, 0.0)"
+static const char fitted_counts_model[] = "NULL::DOUBLE, " ROH_FIT_MODEL("l", "l.smp") ", ";
 /* Every sample of the counts relation is checked against its fit, also one
  * whose chromosomes the genetic map drops from the decode; the second arm
  * checks the other arguments when there is no sample. */
 static const char fitted_counts_guard[] =
-    ROH_GUARD_COLUMNS "FROM (SELECT DISTINCT CAST(sample_id AS VARCHAR) AS smp FROM query_table(counts_table)) AS s "
+    ROH_FITTED_GUARD_COLUMNS "FROM (SELECT DISTINCT CAST(sample_id AS VARCHAR) AS smp "
+    "FROM query_table(counts_table)) AS s "
     "LEFT JOIN __dht_fit AS fit ON fit.smp IS NOT DISTINCT FROM s.smp "
-    "WHERE NOT __duckhts_roh_valid_args(3, NULL::DOUBLE, " ROH_FIT_VALUE("fit", "seq_error", "s.smp") ", "
-    ROH_FIT_VALUE("fit", "contamination", "s.smp") ", CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), "
-    "CAST(az_to_hw AS DOUBLE), " ROH_LIMIT_ARGUMENTS ")"
-    ROH_GUARD_COLUMNS "FROM (SELECT 0.001 AS seq_error, 0.0 AS contamination) AS defaults "
-    "WHERE NOT " ROH_COUNTS_ARGUMENTS_VALID;
+    "WHERE NOT __duckhts_roh_valid_args(3, NULL::DOUBLE, " ROH_FIT_MODEL("fit", "s.smp") ", "
+    "CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE), " ROH_LIMIT_ARGUMENTS ")"
+    ROH_FITTED_GUARD_COLUMNS "FROM (SELECT 0.001 AS seq_error, 0.0 AS contamination, 0.5 AS allele_balance, "
+    "0.0 AS artefact_weight) AS defaults WHERE NOT " ROH_COUNTS_ARGUMENTS_VALID;
 
 static const char ancestry_sites[] =
     /* The long reference (sites x groups rows) is read where it is used rather
@@ -442,8 +509,11 @@ static const char ancestry_frequencies[] =
  * af_table or ancestry-weighted frequencies. */
 #define ROH_COUNTS_FITTED_OPTIONS \
     "hw_to_az := 6.7e-8, az_to_hw := 5e-9, rec_rate := NULL, " ROH_LIMITS
+/* New options go after the existing ones: a macro's options can be given by
+ * position, so inserting one would shift every later positional value. */
 #define ROH_COUNTS_OPTIONS \
-    "seq_error := 1e-3, contamination := 0.0, " ROH_COUNTS_FITTED_OPTIONS
+    "seq_error := 1e-3, contamination := 0.0, " ROH_COUNTS_FITTED_OPTIONS \
+    ", allele_balance := 0.5, artefact_weight := 0.0"
 
 #define ROH_COUNTS_INPUT \
     "WITH __dht_counts AS (SELECT CAST(sample_id AS VARCHAR) AS smp, " \
@@ -467,21 +537,26 @@ static const char counts_lists[] =
 static const char fitted_counts_lists[] =
     ROH_COUNTS_INPUT
     "__dht_fit AS (SELECT CAST(sample AS VARCHAR) AS smp, CAST(seq_error AS DOUBLE) AS seq_error, "
-    "CAST(contamination AS DOUBLE) AS contamination, "
+    "CAST(contamination AS DOUBLE) AS contamination, CAST(allele_balance AS DOUBLE) AS allele_balance, "
+    "CAST(artefact_weight AS DOUBLE) AS artefact_weight, "
+    "CAST(artefact_weight_sd AS DOUBLE) AS artefact_weight_sd, "
     "count(*) OVER (PARTITION BY CAST(sample AS VARCHAR)) AS fit_rows FROM query_table(fit_table) "
     "QUALIFY row_number() OVER (PARTITION BY CAST(sample AS VARCHAR)) = 1), "
     "__dht_lists AS (SELECT c.smp, c.chrom, fit.fit_rows, fit.seq_error, fit.contamination, "
+    "fit.allele_balance, fit.artefact_weight, fit.artefact_weight_sd, "
     "__duckhts_roh_sites(c.pos, c.af, c.ref_count, c.alt_count, NULL::INTEGER, 3, " ROH_LIMIT_ARGUMENTS ") AS s "
     "FROM __dht_counts AS c LEFT JOIN __dht_fit AS fit ON fit.smp IS NOT DISTINCT FROM c.smp "
-    "GROUP BY c.smp, c.chrom, fit.fit_rows, fit.seq_error, fit.contamination)";
+    "GROUP BY c.smp, c.chrom, fit.fit_rows, fit.seq_error, fit.contamination, fit.allele_balance, "
+    "fit.artefact_weight, fit.artefact_weight_sd)";
 
-#define ROH_MAX_PARTS 32
+#define ROH_MAX_PARTS 40
 
 typedef struct {
     const char *name;
     const char *source_parameter;
     const char *options;      /* the named parameters after the source, with their defaults */
     const char *sites;
+    const char *sites_continued; /* the rest of sites when one literal is too long; may be empty */
     const char *source_guard; /* checks of the source's own options; may be empty */
 } roh_source_t;
 
@@ -497,6 +572,7 @@ static bool register_roh_macro(duckhts_registration_t *registration, const roh_s
     parts[count++] = source->options;
     parts[count++] = ") AS TABLE (";
     parts[count++] = source->sites;
+    parts[count++] = source->sites_continued;
     parts[count++] = site_lists;
     parts[count++] = select_head;
     parts[count++] = genotype_model;
@@ -511,6 +587,7 @@ static bool register_roh_macro(duckhts_registration_t *registration, const roh_s
     parts[count++] = source->options;
     parts[count++] = ") AS TABLE (";
     parts[count++] = source->sites;
+    parts[count++] = source->sites_continued;
     parts[count++] = site_lists;
     parts[count++] = map_lists;
     parts[count++] = select_head;
@@ -565,7 +642,7 @@ static bool register_roh_counts_macro(duckhts_registration_t *registration, bool
         : "CREATE OR REPLACE MACRO duckhts_roh_counts(counts_table, "
           ROH_COUNTS_OPTIONS ") AS TABLE (";
     parts[count++] = fitted ? fitted_counts_lists : counts_lists;
-    parts[count++] = select_head;
+    parts[count++] = fitted ? fitted_select_head : select_head;
     parts[count++] = fitted ? fitted_counts_model : counts_model;
     parts[count++] = no_map_arguments;
     parts[count++] = decode_end;
@@ -576,7 +653,7 @@ static bool register_roh_counts_macro(duckhts_registration_t *registration, bool
         : "), (counts_table, genetic_map VARCHAR, " ROH_COUNTS_OPTIONS ") AS TABLE (";
     parts[count++] = fitted ? fitted_counts_lists : counts_lists;
     parts[count++] = map_lists;
-    parts[count++] = select_head;
+    parts[count++] = fitted ? fitted_select_head : select_head;
     parts[count++] = fitted ? fitted_counts_model : counts_model;
     parts[count++] = map_arguments;
     parts[count++] = decode_end;
@@ -588,12 +665,13 @@ static bool register_roh_counts_macro(duckhts_registration_t *registration, bool
 
 bool register_duckhts_roh_sql(duckhts_registration_t *registration) {
     static const roh_source_t from_info_tag = {"duckhts_roh", "af_tag", ROH_OPTIONS,
-                                               sites_from_info_tag, ""};
+                                               sites_from_info_tag, "", ""};
     static const roh_source_t from_relation = {"duckhts_roh_af_table", "af_table", ROH_OPTIONS,
-                                               sites_from_relation, ""};
+                                               sites_from_relation, "", ""};
     static const roh_source_t from_relation_bcftools = {
-        "duckhts_roh_af_table_bcftools", "af_table", ROH_OPTIONS,
-        sites_from_relation_bcftools, af_table_bcftools_guard};
+        "duckhts_roh_af_table_bcftools", "af_table", ROH_OPTIONS ", af_order := NULL",
+        sites_from_relation_bcftools, sites_from_relation_bcftools_claims,
+        af_table_bcftools_guard};
     const char *classifier[] = {htslib_is_indel_macro};
     return duckhts_register_sql_parts(registration, classifier, 1) &&
            register_roh_macro(registration, &from_info_tag) &&

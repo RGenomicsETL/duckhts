@@ -1,0 +1,427 @@
+---
+title: "ROH from read counts: the fitted emission on chr20"
+output:
+  github_document:
+    html_preview: false
+    pandoc_args: ["--wrap=preserve", "--columns=400"]
+---
+
+`duckhts_roh_counts` takes `allele_balance` and `artefact_weight`, and
+`duckhts_roh_counts_fitted` reads them, with `seq_error` and
+`contamination`, from the output of `duckhts_count_error_fit`
+(<https://github.com/RGenomicsETL/duckhts/issues/329>,
+<https://github.com/RGenomicsETL/duckhts/issues/332>). The SQL tests check the
+emission against an independent oracle and on a synthetic fixture. This
+report checks it on real data, with two questions:
+
+- **Agreement.** Does the full fit bring the read-count decode closer to the
+  genotype decode than the scalar defaults or the fitted error and
+  contamination alone?
+- **Sensitivity.** Does a change of one fitted number, within a range tied to
+  its uncertainty, move the runs?
+
+The scope is small on purpose: chr20, three samples. The report makes no
+timing or scaling claim; it measures memory only to gate it.
+
+## Inputs
+
+The inputs are those of `benchmark_roh_counts_validation.md`, from the
+`r/duckhtsbench` registry:
+
+- the read counts of NA18507, HG00403 and HG00188 at the 108,757 chr20
+  evaluation sites (`roh_counts_chr20_na18507`, `roh_counts_chr20_hg00403`,
+  `roh_counts_chr20_hg00188`), from the 1000 Genomes 30× CRAMs, with the
+  site's `af`;
+- the genotypes of the same samples at the same sites
+  (`roh_counts_validation_chr20_genotypes`), FORMAT/GT only.
+
+Before anything is decoded, the render compares each file with the identity
+its registry row records (`benchmarks/roh_counts_validation/inputs.R`). A
+file that differs stops the render. The genotype decode takes the `af` of the
+first sample's counts as its frequency relation, as in the validation report.
+
+## Design, declared before any fitted decode
+
+The values below are in `benchmarks/roh_counts_validation/fitted_declaration.R`,
+committed on its own before any decode with a fitted `allele_balance` or
+`artefact_weight` was run, and before this report. This section states them
+in words.
+
+**Fit.** `duckhts_count_error_fit` with its default options, on the counts of
+all decoded samples. A sample whose `status` is not `ok` is not decoded with
+its fit.
+
+**Decodes.** Every count decode is `duckhts_roh_counts_fitted` with a fit
+relation of four numbers per sample:
+
+| Decode | `seq_error` | `contamination` | `allele_balance` | `artefact_weight` |
+|:-------|:------------|:----------------|:-----------------|:------------------|
+| (a) scalar defaults | 0.001 | 0 | 0.5 | 0 |
+| (b) fitted error and contamination | fit | fit | 0.5 | 0 |
+| (c) full fit | fit | fit | fit | fit |
+
+Decode (a) must equal `duckhts_roh_counts` with its scalar defaults, run for
+run; the render stops otherwise. The genotype decodes are
+`duckhts_roh_af_table(..., gt_error := 30)` and `gt_error := 100`, as in the
+validation report.
+
+**Metrics**, per sample, all runs, as in the validation report: FROH (bases in
+runs over the span from the first to the last site), the FROH difference test
+minus reference, and the Jaccard index of run bases (bases in the runs of both
+decodes over bases in the runs of either). Runs of at least 1 Mb are in the
+CSV files.
+
+**Criterion.** On every sample, the full fit (c) is at least as close to the
+genotype decode at `gt_error := 30` as (a) and as (b), by the absolute
+difference of bases in runs (the absolute FROH difference times the span). It
+is a verdict of the report, not a stop of the render. The comparison at
+`gt_error := 100` is reported without a criterion. Each row also shows the
+validation report's tolerance (absolute FROH difference at most 0.01, Jaccard
+index at least 0.7); it is not the criterion here.
+
+**Sensitivity.** Decode (c) is repeated with one fitted number changed and the
+three others kept:
+
+- `allele_balance` −0.01, −0.005, +0.005 and +0.01;
+- `artefact_weight` × 0.5 and × 2;
+- `seq_error` × 0.5 and × 2;
+- `contamination` − and + `contamination_sd` (0.001 when it is NULL).
+
+A changed value outside the range that `duckhts_roh_counts` accepts is set to
+the end of that range and the row is marked. For each sample and change, the
+reference is decode (c):
+
+- the FROH change and the change of bases in runs;
+- the changed share: bases in the runs of exactly one of the two decodes,
+  over the bases in the runs of (c).
+
+**Bound**, declared: on every sample and change, the absolute FROH change is
+below 0.005 and the changed share is below 2%. A row that exceeds it is
+reported with the number that drives it. The bound is a verdict, not a stop of
+the render, and it is not changed after the run.
+
+**Stability**, declared after the first render (it found the runs most
+sensitive to `artefact_weight`) in its own commit, and before any decode with
+an `artefact_weight_sd`. `duckhts_count_error_fit` now reports
+`artefact_weight_sd`, and `duckhts_roh_counts_fitted` gives each run
+`stable_fraction`: the share of its bases that are also in a run when the
+sample is decoded at `artefact_weight` − and + `artefact_weight_sd` (kept in
+[0, 0.05]). Decode (c) passes each sample's fitted `artefact_weight_sd`; every
+other count decode, the perturbed ones included, passes 0. The report gives,
+per sample and without a verdict:
+
+- `artefact_weight_sd` and the two weights it gives, beside the declared × 0.5
+  and × 2;
+- the `stable_fraction` of the runs of (c): the runs, the runs at 1, its
+  quantiles, and the stable bases (run length times `stable_fraction`,
+  summed) over the run bases;
+- for the `artefact_weight` × 0.5 and × 2 rows: the lost bases (in runs of (c)
+  that the changed decode does not call), split by whether the run that holds
+  them has `stable_fraction` 1 or below 1, and the gained bases (called by the
+  changed decode outside any run of (c)), which no `stable_fraction` covers.
+  The FROH change is gained minus lost over the span; the changed bases of
+  the sensitivity table are gained plus lost.
+
+**Gained bases**, declared after the stability render and before any decode
+that reports `gained_bases`, in its own commit. `duckhts_roh_counts_fitted`
+now also gives each run `gained_bases`: the bases that its decode at
+w + `artefact_weight_sd` calls in runs that meet the run (share a base or
+abut) but outside every run at w. Runs at w + sd that meet no run at w have
+no row. The driver decodes once more at w + `artefact_weight_sd` with
+`artefact_weight_sd` 0 to count them. The report gives, per sample and
+without a verdict:
+
+- the `gained_bases` of the runs of (c), summed, and the bases of the w + sd
+  decode in runs that meet no run of (c). The summed column must equal the
+  bases of that extra decode outside the runs of (c) in runs that meet one,
+  or the render stops;
+- for the `artefact_weight` × 2 rows: the gained bases of the decomposition,
+  split into those in runs that meet a run of (c) and those in new runs that
+  meet none.
+
+**Gates.** Each query (the fit, every decode, three empty runs) runs in a
+fresh DuckDB CLI process under `/usr/bin/time`, with the JSON profiler and
+`max_temp_directory_size` set to zero, at two threads. The render stops if an
+input differs from its registry identity, if any query spills, or if its peak
+RSS exceeds its ceiling. Each ceiling is the overhead (the median peak RSS of
+the three empty runs) plus 3 × the live state of the query, as the scaling
+reports declare it:
+
+- **count decode**, `benchmark_roh_scaling.md`: decoded samples × sites × 24
+  bytes for the packed site lists, plus threads × sites × 36.25 bytes for the
+  kernel workspace;
+- **genotype decode** (`duckhts_roh_af_table`), the same report: samples ×
+  frequency rows × 16 + frequency rows × 128 + threads × frequency rows ×
+  36.25 bytes;
+- **fit**, `benchmark_count_error_fit.md`: histogram cells × 312 + distinct
+  (depth, alt count) pairs × 88 + samples × 1,001 × 24 bytes, with the cells
+  and pairs counted untimed from the input.
+
+`ROH_FITTED_SIZE=reduced` checks the driver: it decodes one sample
+(NA18507) instead of three and writes its observations to a temporary
+directory instead of `benchmarks/results/roh-fitted-emission/`. Every input
+check and gate still runs. A reduced run is not evidence. The default is
+`full`.
+
+``` sh
+nice -n -15 taskset -c 8-15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_roh_fitted_emission.Rmd")'
+# Driver check only; writes the page outside benchmarks/:
+ROH_FITTED_SIZE=reduced taskset -c 0-3 Rscript -e \
+  'rmarkdown::render("benchmarks/benchmark_roh_fitted_emission.Rmd", output_dir = tempdir())'
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r run, include=FALSE}
+stopifnot(requireNamespace("duckhtsbench", quietly = TRUE),
+          requireNamespace("jsonlite", quietly = TRUE),
+          file.exists("/usr/bin/time"))
+Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath(
+  "r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+if (system2("git", c("diff", "--quiet", "HEAD", "--", "src"), stdout = FALSE, stderr = FALSE) != 0L) {
+  stop("Build source must match the recorded HEAD")
+}
+size <- Sys.getenv("ROH_FITTED_SIZE", "full")
+if (!size %in% c("full", "reduced")) stop("ROH_FITTED_SIZE must be full or reduced")
+full_size <- identical(size, "full")
+source("benchmarks/roh_counts_validation/fitted_emission.R")
+duckdb_cli <- Sys.getenv("DUCKDB_CLI", Sys.which("duckdb"))
+stopifnot(nzchar(duckdb_cli))
+samples <- if (full_size) roh_validation_declaration$samples else roh_validation_declaration$samples[[1L]]
+output_dir <- if (full_size) "benchmarks/results/roh-fitted-emission" else tempfile("roh-fitted-emission-")
+results <- roh_fitted_run(
+  extension = Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension"),
+  cli = duckdb_cli, output_dir = output_dir, samples = samples)
+declaration <- roh_fitted_declaration
+observations <- results$observations
+# The gates: no spill, every peak RSS within its ceiling, and decode (a)
+# equal to the scalar defaults run for run.
+stopifnot(all(observations$no_spill), all(observations$within_ceiling),
+          isTRUE(results$defaults_identical))
+verdict <- function(pass) ifelse(pass, "pass", "fail")
+number <- function(x, digits = 6) formatC(x, digits = digits, format = "g")
+```
+
+## Run
+
+```{r metadata, echo=FALSE}
+knitr::kable(results$metadata, col.names = c("Item", "Value"))
+```
+
+`r if (!full_size) "**This is a reduced run of one sample. It checks the driver and is not evidence.**"`
+
+## Fit
+
+```{r fit, echo=FALSE}
+fit <- results$fit
+knitr::kable(data.frame(
+  Sample = fit$sample, Sites = format(fit$sites, big.mark = ","),
+  Depth = sprintf("%.1f", fit$mean_depth),
+  seq_error = number(fit$seq_error), contamination = number(fit$contamination),
+  contamination_sd = ifelse(is.na(fit$contamination_sd), "NULL", number(fit$contamination_sd)),
+  allele_balance = number(fit$allele_balance), artefact_weight = number(fit$artefact_weight),
+  artefact_weight_sd = ifelse(is.na(fit$artefact_weight_sd), "NULL", number(fit$artefact_weight_sd)),
+  status = fit$status, check.names = FALSE), align = "lrrrrrrrrl")
+```
+
+## Agreement with the genotype decode
+
+`reference` is the genotype decode at the `gt_error` of the row and `test` is
+the count decode; all runs.
+
+```{r agreement, echo=FALSE}
+comparisons <- results$comparisons
+rows <- comparisons[comparisons$run_class == "all", ]
+rows <- rows[order(rows$gt_error, match(rows$sample, roh_validation_declaration$samples), rows$decode), ]
+decode_label <- stats::setNames(paste0("(", declaration$decodes$decode, ") ", declaration$decodes$label),
+                                declaration$decodes$decode)
+knitr::kable(data.frame(
+  gt_error = rows$gt_error, Sample = rows$sample, Decode = decode_label[rows$decode],
+  `Genotype FROH` = sprintf("%.4f", rows$reference_froh),
+  `Count FROH` = sprintf("%.4f", rows$test_froh),
+  `FROH difference` = sprintf("%+.4f", rows$froh_difference),
+  Jaccard = ifelse(is.na(rows$jaccard), "none", sprintf("%.3f", rows$jaccard)),
+  `Validation tolerance` = verdict(rows$pass),
+  check.names = FALSE), row.names = FALSE, align = "rllrrrrl")
+```
+
+### Criterion
+
+The gap is the absolute difference of bases in runs between the count decode
+and the genotype decode at `gt_error := 30`.
+
+```{r criterion, echo=FALSE}
+criterion <- results$criterion
+knitr::kable(data.frame(
+  Sample = criterion$sample,
+  `Gap (a)` = format(criterion$gap_a, big.mark = ","),
+  `Gap (b)` = format(criterion$gap_b, big.mark = ","),
+  `Gap (c)` = format(criterion$gap_c, big.mark = ","),
+  Verdict = verdict(criterion$pass), check.names = FALSE), row.names = FALSE, align = "lrrrl")
+```
+
+The criterion holds on `r sum(criterion$pass)` of `r nrow(criterion)`
+samples: it `r if (all(criterion$pass)) "holds" else "does not hold"`.
+
+## Sensitivity of the full fit
+
+Each row changes one number of decode (c) for one sample. The reference is
+decode (c) itself.
+
+```{r sensitivity, echo=FALSE}
+sensitivity <- results$sensitivity
+sensitivity <- sensitivity[order(match(sensitivity$parameter, unique(declaration$perturbations$parameter)),
+                                 sensitivity$operation, sensitivity$value,
+                                 match(sensitivity$sample, roh_validation_declaration$samples)), ]
+change_label <- ifelse(sensitivity$operation == "add", sprintf("%+g", sensitivity$value),
+                ifelse(sensitivity$operation == "scale", sprintf("× %g", sensitivity$value),
+                       sprintf("%+g sd", sensitivity$value)))
+knitr::kable(data.frame(
+  Number = sensitivity$parameter, Change = change_label, Sample = sensitivity$sample,
+  Fitted = number(sensitivity$fitted_value), Changed = number(sensitivity$perturbed_value),
+  `At guard` = ifelse(sensitivity$at_guard, "yes", ""),
+  `FROH change` = sprintf("%+.5f", sensitivity$froh_difference),
+  `Bases change` = format(sensitivity$bases_change, big.mark = ","),
+  `Changed bases` = format(sensitivity$changed_bases, big.mark = ","),
+  `Changed share` = sprintf("%.2f%%", 100 * sensitivity$changed_share),
+  Verdict = verdict(sensitivity$pass), check.names = FALSE),
+  row.names = FALSE, align = "lllrrlrrrrl")
+```
+
+```{r sensitivity-summary, echo=FALSE}
+by_parameter <- do.call(rbind, lapply(split(sensitivity, sensitivity$parameter), function(rows) {
+  data.frame(Number = rows$parameter[[1L]],
+             `Largest FROH change` = sprintf("%.5f", max(abs(rows$froh_difference))),
+             `Largest changed share` = sprintf("%.2f%%", 100 * max(rows$changed_share)),
+             `Rows within the bound` = sprintf("%d of %d", sum(rows$pass), nrow(rows)),
+             check.names = FALSE)
+}))
+by_parameter <- by_parameter[order(match(by_parameter$Number, unique(declaration$perturbations$parameter))), ]
+knitr::kable(by_parameter, row.names = FALSE, align = "lrrr")
+failing <- unique(sensitivity$parameter[!sensitivity$pass])
+```
+
+`r sum(sensitivity$pass)` of `r nrow(sensitivity)` rows are within the
+declared bound (absolute FROH change below `r declaration$max_froh_change`,
+changed share below `r 100 * declaration$max_changed_share`%).
+`r if (length(failing)) paste0("The rows outside it change: ", paste0("\x60", failing, "\x60", collapse = ", "), ".") else "The bound holds for every number."`
+
+## Stability of the full fit
+
+`stable_fraction` of the runs of decode (c), from its fitted
+`artefact_weight_sd`. The two weights are those of the stability decodes; the
+declared perturbations are × 0.5 and × 2.
+
+```{r stability, echo=FALSE}
+stability <- results$stability
+quantile_columns <- sprintf("quantile_%g", declaration$stability$quantiles)
+knitr::kable(data.frame(
+  Sample = stability$sample, artefact_weight = number(stability$artefact_weight),
+  artefact_weight_sd = ifelse(is.na(stability$artefact_weight_sd), "NULL",
+                              number(stability$artefact_weight_sd)),
+  `w − sd` = number(stability$low_weight), `w + sd` = number(stability$high_weight),
+  `× 0.5` = number(0.5 * stability$artefact_weight), `× 2` = number(2 * stability$artefact_weight),
+  Runs = stability$runs, `Runs at 1` = stability$runs_at_one,
+  stats::setNames(lapply(quantile_columns, function(column) sprintf("%.3f", stability[[column]])),
+                  sprintf("q%g", declaration$stability$quantiles)),
+  `Stable bases` = sprintf("%.1f%%", 100 * stability$stable_share),
+  check.names = FALSE), row.names = FALSE)
+```
+
+How the changed bases of the `artefact_weight` rows of the sensitivity table
+split. Lost bases are in runs of (c) that the changed decode does not call;
+gained bases are called outside any run of (c).
+
+```{r stability-decomposition, echo=FALSE}
+decomposition <- results$decomposition
+decomposition <- decomposition[order(decomposition$value,
+                                     match(decomposition$sample, roh_validation_declaration$samples)), ]
+share <- function(x) ifelse(is.na(x), "none", sprintf("%.1f%%", 100 * x))
+knitr::kable(data.frame(
+  Change = sprintf("× %g", decomposition$value), Sample = decomposition$sample,
+  `FROH change` = sprintf("%+.5f", decomposition$froh_difference),
+  Lost = format(decomposition$lost_bases, big.mark = ","),
+  `Lost, stable_fraction 1` = format(decomposition$lost_in_stable, big.mark = ","),
+  `Lost, stable_fraction < 1` = format(decomposition$lost_in_unstable, big.mark = ","),
+  Gained = format(decomposition$gained_bases, big.mark = ","),
+  `Lost share below 1` = share(decomposition$lost_unstable_share),
+  `Changed share below 1` = share(decomposition$changed_unstable_share),
+  check.names = FALSE), row.names = FALSE, align = "llrrrrrrr")
+```
+
+### Gained bases
+
+`gained_bases` of the runs of (c), from its decode at w + `artefact_weight_sd`,
+and the bases of that decode in runs that meet no run of (c), which no row
+reports.
+
+```{r gained, echo=FALSE}
+gained <- results$gained
+knitr::kable(data.frame(
+  Sample = gained$sample, `w + sd` = number(gained$high_weight),
+  `Runs with a gain` = gained$runs_with_gain,
+  `gained_bases, summed` = format(gained$gained_bases, big.mark = ","),
+  `In new runs, not reported` = format(gained$isolated_bases, big.mark = ","),
+  check.names = FALSE), row.names = FALSE, align = "lrrrr")
+```
+
+The gained bases of the `artefact_weight` × 2 rows, by whether their run at
+× 2 meets a run of (c).
+
+```{r gained-perturbed, echo=FALSE}
+gained_perturbed <- results$gained_perturbed
+gained_perturbed <- gained_perturbed[order(match(gained_perturbed$sample, roh_validation_declaration$samples)), ]
+knitr::kable(data.frame(
+  Change = sprintf("× %g", gained_perturbed$value), Sample = gained_perturbed$sample,
+  Weight = number(gained_perturbed$perturbed_value),
+  Gained = format(gained_perturbed$gained_bases, big.mark = ","),
+  `Next to a run of (c)` = format(gained_perturbed$attached_bases, big.mark = ","),
+  `In new runs` = format(gained_perturbed$isolated_bases, big.mark = ","),
+  `Share next to a run` = share(gained_perturbed$attached_share),
+  check.names = FALSE), row.names = FALSE, align = "llrrrrr")
+```
+
+## Gates
+
+Every query, with its latency, peak RSS, DuckDB's peak buffer memory, its
+ceiling and its temporary bytes. The render stops on any spill or any peak
+RSS above its ceiling, and it reached this table.
+
+```{r gates, echo=FALSE}
+knitr::kable(data.frame(
+  Query = observations$observation, Kind = observations$kind,
+  Seconds = sprintf("%.3f", observations$seconds),
+  `Peak RSS MiB` = sprintf("%.1f", observations$max_rss_mib),
+  `Peak buffer MiB` = sprintf("%.1f", observations$peak_buffer_mib),
+  `Ceiling MiB` = ifelse(is.na(observations$ceiling_mib), "", sprintf("%.1f", observations$ceiling_mib)),
+  `Temporary bytes` = format(observations$peak_temp_bytes),
+  check.names = FALSE), row.names = FALSE, align = "llrrrrr")
+```
+
+`r if (full_size) "Every observation is in \x60benchmarks/results/roh-fitted-emission/\x60: the fit, the four numbers of every decode, every run, the metrics and the queries." else ""`
+
+## Limitations
+
+- One chromosome and three samples. The rows are observations, not rates.
+- The genotype decode is a reference, not the truth: its genotypes come from
+  the same sequencing, with joint calling and phasing behind them. The
+  criterion asks whether the fit moves the read-count decode toward it, not
+  whether either is right.
+- The fit and the decode use the same counts. The fitted numbers are not
+  tested on data they were not fitted on.
+- The perturbations change one number at a time. They do not test changes of
+  several numbers together.
+- `contamination` and `artefact_weight` have intervals from the fit
+  (`contamination_sd`, `artefact_weight_sd`). The ranges of the other two
+  numbers (± 0.005 and ± 0.01, × 0.5 and × 2) are declared, not derived from
+  an interval of the fit, and the × 0.5 and × 2 of `artefact_weight` were
+  declared before its interval existed.
+- `stable_fraction` measures only the bases of a run that a change of the
+  artefact weight would lose. `gained_bases` counts the bases that the higher
+  weight of the interval adds next to a run; bases it calls in new runs that
+  meet no run have no row, and this report counts them separately.
+- The spreads of the fit (`spread_hom`, `spread_het`) are not used by the
+  decode.

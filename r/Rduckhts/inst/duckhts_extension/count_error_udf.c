@@ -7,8 +7,9 @@
  *
  * The pooled fit uses every cell; the relative fit refits the same cells with
  * a parent or child as the second genome. Each block is refitted for
- * contamination with the other parameters held at the pooled values, and the
- * spread of the block estimates gives contamination_sd. Memory: one sorted
+ * contamination with the other parameters held at the pooled values, and
+ * again for the artefact weight; the spread of the block estimates gives
+ * contamination_sd and artefact_weight_sd. Memory: one sorted
  * copy of the cells (16 bytes each) for the whole fit, and the working memory
  * of one problem at a time (count_error_model.h), all charged against
  * max_cell_bytes with the aggregate's buffers (count_cells.c); the BLOB the
@@ -50,6 +51,7 @@ enum {
     OUT_SPREAD_HOM,
     OUT_SPREAD_HET,
     OUT_ARTEFACT_WEIGHT,
+    OUT_ARTEFACT_WEIGHT_SD,
     OUT_LOG_LIKELIHOOD,
     OUT_CONTAMINATION_RELATIVE,
     OUT_LOG_LIKELIHOOD_RELATIVE,
@@ -61,7 +63,7 @@ enum {
 static const char *output_names[OUT_COUNT] = {
     "sites", "reads", "mean_depth", "blocks", "seq_error", "contamination", "contamination_sd",
     "homozygosity_excess", "allele_balance", "spread_hom", "spread_het", "artefact_weight",
-    "log_likelihood", "contamination_relative", "log_likelihood_relative", "status", "method"};
+    "artefact_weight_sd", "log_likelihood", "contamination_relative", "log_likelihood_relative", "status", "method"};
 
 static void fit_error(duckdb_function_info info, const char *message) {
     char full[320];
@@ -164,17 +166,41 @@ typedef struct {
     int blocks;
     duckhts_count_error_fit_t pooled;
     duckhts_count_error_fit_t relative;
-    double contamination_sd; /* NAN without enough blocks */
+    double contamination_sd;   /* NAN without enough blocks */
+    double artefact_weight_sd; /* NAN without enough blocks */
     const char *status;
 } fit_result_t;
+
+/* The block estimates of one parameter, summed as they arrive. */
+typedef struct {
+    double sum;
+    double sum_squares;
+} block_spread_t;
+
+static void block_spread_add(block_spread_t *spread, double estimate) {
+    spread->sum += estimate;
+    spread->sum_squares += estimate * estimate;
+}
+
+/* The standard deviation of `blocks` estimates divided by the square root of
+ * their number, or NAN with fewer than FIT_FEW_BLOCKS. */
+static double block_spread_interval(const block_spread_t *spread, int blocks) {
+    double mean, variance;
+    if (blocks < FIT_FEW_BLOCKS) return NAN;
+    mean = spread->sum / blocks;
+    variance = (spread->sum_squares - blocks * mean * mean) / (blocks - 1);
+    return sqrt((variance > 0 ? variance : 0) / blocks);
+}
 
 /* The whole fit of one sample. Returns 1, or 0 with `error` written. */
 static int fit_sample(duckhts_count_cell_t *cells, size_t count, int64_t min_block_sites,
                       uint64_t max_cell_bytes, fit_result_t *result, char *error) {
     size_t at = 0;
-    double sum = 0, sum_squares = 0;
+    block_spread_t contamination = {0, 0};
+    block_spread_t artefact_weight = {0, 0};
     memset(result, 0, sizeof(*result));
     result->contamination_sd = NAN;
+    result->artefact_weight_sd = NAN;
     qsort(cells, count, sizeof(*cells), compare_cells);
     for (size_t i = 0; i < count; i++) {
         /* sites * depth is below 2^48 per cell; the sums are reported as
@@ -197,24 +223,21 @@ static int fit_sample(duckhts_count_cell_t *cells, size_t count, int64_t min_blo
     while (at < count) {
         size_t end = at;
         uint64_t block_sites = 0;
-        duckhts_count_error_fit_t fit;
+        duckhts_count_error_block_fit_t fit;
         while (end < count && cells[end].block == cells[at].block) block_sites += cells[end++].sites;
         if (block_sites >= (uint64_t)min_block_sites) {
             if (!duckhts_count_error_fit_block(cells + at, end - at, &result->pooled.params, max_cell_bytes, &fit,
                                                error, FIT_ERRLEN)) {
                 return 0;
             }
-            sum += fit.params.contamination;
-            sum_squares += fit.params.contamination * fit.params.contamination;
+            block_spread_add(&contamination, fit.contamination.params.contamination);
+            block_spread_add(&artefact_weight, fit.artefact_weight.params.artefact_weight);
             result->blocks++;
         }
         at = end;
     }
-    if (result->blocks >= FIT_FEW_BLOCKS) {
-        double mean = sum / result->blocks;
-        double variance = (sum_squares - result->blocks * mean * mean) / (result->blocks - 1);
-        result->contamination_sd = sqrt((variance > 0 ? variance : 0) / result->blocks);
-    }
+    result->contamination_sd = block_spread_interval(&contamination, result->blocks);
+    result->artefact_weight_sd = block_spread_interval(&artefact_weight, result->blocks);
     if (!result->pooled.converged) {
         result->status = "no_convergence";
     } else if (!result->relative.converged) {
@@ -240,6 +263,7 @@ static void no_sites_result(fit_result_t *result) {
     result->pooled.log_likelihood = NAN;
     result->relative.log_likelihood = NAN;
     result->contamination_sd = NAN;
+    result->artefact_weight_sd = NAN;
     result->status = "no_sites";
 }
 
@@ -305,6 +329,7 @@ static void count_error_fit_scalar(duckdb_function_info info, duckdb_data_chunk 
         set_double(out[OUT_SPREAD_HOM], row, result.pooled.params.spread_hom);
         set_double(out[OUT_SPREAD_HET], row, result.pooled.params.spread_het);
         set_double(out[OUT_ARTEFACT_WEIGHT], row, result.pooled.params.artefact_weight);
+        set_double(out[OUT_ARTEFACT_WEIGHT_SD], row, result.artefact_weight_sd);
         set_double(out[OUT_LOG_LIKELIHOOD], row, result.pooled.log_likelihood);
         set_double(out[OUT_CONTAMINATION_RELATIVE], row, result.relative.params.contamination);
         set_double(out[OUT_LOG_LIKELIHOOD_RELATIVE], row, result.relative.log_likelihood);

@@ -82,21 +82,33 @@ void duckhts_roh_pdg_from_capped_pl(const duckhts_roh_t *roh, const uint8_t pl[3
  * (bcftools -G). Returns 0 for an unusable dosage. */
 int duckhts_roh_pdg_from_gt(double gt_error, int dosage, double pdg[3]);
 
+/* The read model of one sample: the four numbers duckhts_count_error_fit()
+ * reports under these names. */
+typedef struct {
+    double seq_error;       /* a read shows the other allele at a homozygous site */
+    double contamination;   /* share of reads from a second genome of af's population */
+    double allele_balance;  /* share of a heterozygote's reads that show the counted allele */
+    double artefact_weight; /* chance that a site's counts are uniform on 0..depth */
+} duckhts_roh_count_model_t;
+
 /* P(D|genotype) from allele read counts at a biallelic site. This is a DuckHTS
  * extension, not part of bcftools roh. Reads are independent; each shows the
  * counted allele (the one af refers to) with probability
  *   (1 - contamination) * q_g + contamination * c,
- * where q_g is seq_error, 1/2 and 1 - seq_error for the genotypes with zero,
- * one and two copies, and c = af * (1 - seq_error) + (1 - af) * seq_error is
- * the chance that a read from a contaminating individual of the same
- * population shows it. The binomial coefficient is common to the three
+ * where q_g is seq_error, allele_balance and 1 - seq_error for the genotypes
+ * with zero, one and two copies, and c is the mean of q_h over a contaminating
+ * genotype h in Hardy-Weinberg proportions at af. With chance artefact_weight
+ * the counted reads are instead uniform on 0..depth, whatever the genotype:
+ *   P(D|g) = (1 - artefact_weight) * Binomial(counted; depth, p_g)
+ *            + artefact_weight / (depth + 1).
+ * With artefact_weight 0 the binomial coefficient is common to the three
  * genotypes and omitted. Relative likelihoods are floored at 10^(-25.5), the
  * PL path's cap of 255, so a site whose frequency is 1 cannot zero both
  * emissions. The caller guarantees counts >= 0, 0 < seq_error < 1/2,
- * 0 <= contamination < 1 and 0 < af <= 1. Returns 0 when the site has no
- * reads. */
-int duckhts_roh_pdg_from_counts(int32_t other_count, int32_t counted_count, double seq_error,
-                                double contamination, double af, double pdg[3]);
+ * 0 <= contamination < 1, 0 < allele_balance < 1, 0 <= artefact_weight < 1
+ * and 0 < af <= 1. Returns 0 when the site has no reads. */
+int duckhts_roh_pdg_from_counts(int32_t other_count, int32_t counted_count,
+                                const duckhts_roh_count_model_t *model, double af, double pdg[3]);
 
 /* Appends a usable site: the pdg values are normalised here, as bcftools
  * does, then the emission probabilities for the allele frequency af follow. */

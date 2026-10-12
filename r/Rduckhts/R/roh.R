@@ -88,9 +88,17 @@
 #'   non-symbolic ALT, or several, claims nothing; and the first remaining
 #'   record claims the position, which is skipped unless its alleles equal the
 #'   row's (also when its first ALT is symbolic, which bcftools would decode
-#'   through the second ALT). It needs one `af_table` row per position and a
-#'   sorted, BGZF-compressed VCF or BCF, and reads the file a second time
-#'   without samples. Only `af_table` takes `"bcftools"`.
+#'   through the second ALT). It needs one `af_table` row per position, unless
+#'   `af_order` gives file order, and a sorted, BGZF-compressed VCF or BCF, and
+#'   reads the file a second time without samples. Only `af_table` takes
+#'   `"bcftools"`.
+#' @param af_order Optional name of a column of `af_table` that gives file
+#'   order, for example a line number added by the caller, or `FILE_OFFSET`
+#'   when the frequencies come from `read_bcf()`. With `site_rule = "bcftools"`
+#'   only. Several rows may then share a position: the row with the least
+#'   value is used, as `bcftools roh --AF-file` reads the first line of a
+#'   position. A `NULL` value, a value repeated within a position, or a name
+#'   that is not a column of `af_table` is an error.
 #' @return A data frame (or invisible `TRUE` when `table_name` is given) with one
 #'   row per run: `sample`, `chrom`, `start` and `end` (one-based, inclusive,
 #'   the first and last marker), `length` (`end - start + 1`), `n_markers` and
@@ -107,7 +115,8 @@ rduckhts_roh <- function(
   hw_to_az = 6.7e-8, az_to_hw = 5e-9, gt_error = NULL, rec_rate = NULL,
   samples = NULL, table_name = NULL, overwrite = FALSE,
   reference_table = NULL, proportions_table = NULL, af_clamp = 1e-3,
-  max_sites = 2e7, max_site_bytes = 2^32, site_rule = "matching"
+  max_sites = 2e7, max_site_bytes = 2^32, site_rule = "matching",
+  af_order = NULL
 ) {
   .somalier_validate_output(con, table_name, overwrite)
   .somalier_scalar_text(path, "path")
@@ -117,6 +126,12 @@ rduckhts_roh <- function(
   }
   if (site_rule != "matching" && is.null(af_table)) {
     stop("site_rule = \"bcftools\" needs af_table", call. = FALSE)
+  }
+  if (!is.null(af_order)) {
+    .somalier_scalar_text(af_order, "af_order")
+    if (site_rule != "bcftools") {
+      stop("af_order needs site_rule = \"bcftools\"", call. = FALSE)
+    }
   }
   source <- .roh_frequency_source(con, af_tag, af_table, reference_table,
                                   proportions_table, af_clamp)
@@ -133,7 +148,8 @@ rduckhts_roh <- function(
     if (!is.null(options$samples)) {
       paste0("samples := ", sql_quote_string(con, options$samples))
     },
-    .roh_limit_arguments(max_sites, max_site_bytes)
+    .roh_limit_arguments(max_sites, max_site_bytes),
+    if (!is.null(af_order)) paste0("af_order := ", sql_quote_string(con, af_order))
   )
   macro <- if (site_rule == "bcftools") "duckhts_roh_af_table_bcftools" else source$macro
   query <- paste0("SELECT * FROM ", macro, "(",
@@ -160,47 +176,83 @@ rduckhts_roh <- function(
 #'
 #' Each read shows the counted allele with probability
 #' `(1 - contamination) * q + contamination * c`, where `q` is `seq_error`,
-#' `1/2` or `1 - seq_error` for zero, one or two copies, and
-#' `c = af * (1 - seq_error) + (1 - af) * seq_error` is the chance that a read
-#' from a contaminating individual of the same population shows it. Without the
-#' contamination term, contaminant reads at homozygous sites look like
-#' heterozygous evidence, which shortens runs and lowers FROH.
+#' `allele_balance` or `1 - seq_error` for zero, one or two copies, and `c` is
+#' the mean of `q` over the genotype of a contaminating individual of the same
+#' population (Hardy-Weinberg at `af`). With chance `artefact_weight` a site's
+#' counted reads are instead uniform on `0..depth`, whatever its genotype. The
+#' four numbers mean what [rduckhts_count_error_fit()] reports under these
+#' names. Without the contamination term, contaminant reads at homozygous sites
+#' look like heterozygous evidence, which shortens runs and lowers FROH.
 #'
 #' Sites with no reads, a NULL count, or an `af` that is NULL, NaN or 0 are
 #' skipped; a repeated position keeps one row. Negative counts are an error.
 #' The model assumes biallelic sites, independent reads (no duplicate or
-#' strand modelling) and one error rate for all reads. A heterozygote is assumed
-#' to show each allele in half its reads; reference-biased mapping makes the
-#' other allele rarer, more so where flanking heterozygosity is high, so such
-#' heterozygotes can look homozygous and lengthen runs in divergent regions.
-#' The contamination
-#' fraction is supplied by the caller, for example from a separate estimate;
-#' it is not estimated here. A contaminant from a different population than
-#' `af` describes is approximated by `af`.
+#' strand modelling) and one error rate for all reads. Reference-biased
+#' mapping makes the other allele of a heterozygote rarer; `allele_balance`
+#' takes one value per sample, while the bias is stronger where flanking
+#' heterozygosity is high, so such heterozygotes can still look homozygous and
+#' lengthen runs in divergent regions. The contamination fraction is supplied
+#' by the caller, for example from [rduckhts_count_error_fit()]. A contaminant
+#' from a different population than `af` describes is approximated by `af`.
 #'
-#' `seq_error` is an error of one read, and the reads of a site multiply. A
-#' site with balanced reads excludes both homozygous genotypes whatever
-#' `seq_error` is. The `gt_error` of [rduckhts_roh()] is an error of the site,
-#' so a run can continue through one heterozygous call. The read-count decode
-#' therefore corresponds to the genotype decode with no tolerated genotype
-#' error, and reports fewer bases in runs than `rduckhts_roh(gt_error = 30)`
-#' on the same sample.
+#' `seq_error` is an error of one read, and the reads of a site multiply. With
+#' `artefact_weight = 0`, a site with balanced reads excludes both homozygous
+#' genotypes whatever `seq_error` is: the decode then corresponds to the
+#' genotype decode with no tolerated genotype error, and reports fewer bases in
+#' runs than `rduckhts_roh(gt_error = 30)` on the same sample. With
+#' `artefact_weight = w > 0`, one site at depth `d` changes the odds between
+#' the two states by a factor of at most `1 + (d + 1) * (1 - w) / w`, as
+#' `gt_error` caps one called genotype at `10^(gt_error / 10)`.
+#'
+#' The runs depend on `artefact_weight` more than on the other fitted numbers.
+#' With `fit_table`, each sample is therefore decoded three times from one
+#' collection of its sites: at its `artefact_weight` `w`, and at
+#' `w - artefact_weight_sd` and `w + artefact_weight_sd`, each kept in
+#' `[0, 0.05]`. Each run of the decode at `w` gets `stable_fraction`: the share
+#' of its bases that are also in a run of both other decodes. A run with
+#' `stable_fraction` 1 does not depend on where `w` lies within one standard
+#' error. Filter on it to keep the runs, or the run bases, that the interval
+#' of the fit does not move; a low value marks a run whose call hinges on the
+#' artefact weight.
+#'
+#' `gained_bases` guards the other direction: the bases that the decode at
+#' `w + artefact_weight_sd` calls next to the run but outside every run at
+#' `w`. A run at `w + sd` meets a run at `w` when they share a base or abut. A
+#' base of such a run before the first run at `w` it meets counts for that run;
+#' any other counts for the run at `w` before it, so a gap that the higher
+#' weight closes between two runs counts once, for the run before the gap. A
+#' run at `w + sd` that meets no run at `w` has no row, so its bases are not
+#' reported. A high `gained_bases` marks a run that a higher weight would
+#' extend or join to its neighbour.
+#'
+#' A NULL `artefact_weight_sd` (fewer than three blocks in the fit) counts as
+#' 0 and gives `stable_fraction` 1 and `gained_bases` 0, so check the fit's
+#' `blocks` too. The decode then takes about three times as long.
 #'
 #' @param con A DuckDB connection with DuckHTS loaded.
 #' @param counts_table Name of a table or view of read counts (see Details).
 #' @param fit_table Optional table or view with one row per `sample`, containing
-#'   non-NULL `seq_error` and `contamination`. These replace the scalar arguments
-#'   for each matching `sample_id`. A sample of `counts_table` with no fit row,
-#'   several fit rows or a NULL value is an error; fit rows of other samples are
-#'   not checked. Filter fit status in the caller's SQL; spreads and artefact
-#'   weight are not used.
+#'   non-NULL `seq_error`, `contamination`, `allele_balance` and
+#'   `artefact_weight`, and an `artefact_weight_sd` column, such as the output
+#'   of [rduckhts_count_error_fit()]. These replace the scalar arguments for
+#'   each matching `sample_id`. A sample of `counts_table` with no fit row,
+#'   several fit rows, a NULL value or a value out of range is an error; fit
+#'   rows of other samples are not checked. A NULL `artefact_weight_sd` counts
+#'   as 0. Filter fit status in the caller's SQL; the spreads are not used.
 #' @param seq_error Per-read probability of showing the other allele, in
 #'   `(0, 0.5)`.
 #' @param contamination Fraction of reads from a contaminating individual, in
 #'   `[0, 1)`.
+#' @param allele_balance Share of a heterozygote's reads that show the counted
+#'   allele, in `[0.35, 0.65]`. The default 0.5 assumes no mapping bias.
+#' @param artefact_weight Chance that a site's counts are uniform on
+#'   `0..depth` whatever its genotype, in `[0, 0.05]`. The default 0 gives
+#'   such sites no term. Values outside either range are errors, not clipped.
 #' @inheritParams rduckhts_roh
 #' @return A data frame (or invisible `TRUE` when `table_name` is given) with
-#'   the columns of [rduckhts_roh()]: one row per run, unordered.
+#'   the columns of [rduckhts_roh()]: one row per run, unordered. With
+#'   `fit_table` it also has `stable_fraction` and `gained_bases` (see
+#'   Details).
 #' @examples
 #' con <- rduckhts_connect()
 #' DBI::dbExecute(con, paste(
@@ -217,7 +269,7 @@ rduckhts_roh_counts <- function(
   con, counts_table, seq_error = 1e-3, contamination = 0, genetic_map = NULL,
   hw_to_az = 6.7e-8, az_to_hw = 5e-9, rec_rate = NULL,
   table_name = NULL, overwrite = FALSE, max_sites = 2e7, max_site_bytes = 2^32,
-  fit_table = NULL
+  fit_table = NULL, allele_balance = 0.5, artefact_weight = 0
 ) {
   .somalier_validate_output(con, table_name, overwrite)
   .somalier_validate_name(counts_table, "counts_table")
@@ -230,6 +282,14 @@ rduckhts_roh_counts <- function(
       !is.finite(contamination) || contamination < 0 || contamination >= 1)) {
     stop("contamination must be one finite number in [0, 1)", call. = FALSE)
   }
+  if (is.null(fit_table) && (!is.numeric(allele_balance) || length(allele_balance) != 1L ||
+      !is.finite(allele_balance) || allele_balance < 0.35 || allele_balance > 0.65)) {
+    stop("allele_balance must be one finite number in [0.35, 0.65]", call. = FALSE)
+  }
+  if (is.null(fit_table) && (!is.numeric(artefact_weight) || length(artefact_weight) != 1L ||
+      !is.finite(artefact_weight) || artefact_weight < 0 || artefact_weight > 0.05)) {
+    stop("artefact_weight must be one finite number in [0, 0.05]", call. = FALSE)
+  }
   options <- .roh_validated_options(genetic_map, hw_to_az, az_to_hw, NULL,
                                    rec_rate, NULL)
   arguments <- c(
@@ -238,7 +298,9 @@ rduckhts_roh_counts <- function(
     if (!is.null(options$genetic_map)) sql_quote_string(con, options$genetic_map),
     if (is.null(fit_table)) c(
       paste0("seq_error := ", sprintf("%.17g", seq_error)),
-      paste0("contamination := ", sprintf("%.17g", contamination))
+      paste0("contamination := ", sprintf("%.17g", contamination)),
+      paste0("allele_balance := ", sprintf("%.17g", allele_balance)),
+      paste0("artefact_weight := ", sprintf("%.17g", artefact_weight))
     ),
     paste0("hw_to_az := ", options$hw_to_az),
     paste0("az_to_hw := ", options$az_to_hw),
@@ -331,7 +393,11 @@ rduckhts_roh_counts <- function(
 #' sites is refitted for contamination with the other parameters held, and
 #' `contamination_sd` is the standard deviation of those block estimates
 #' divided by the square root of their number: an interval from the blocks,
-#' not from the likelihood, because sites are linked. The same cells are also
+#' not from the likelihood, because sites are linked. Each such block is also
+#' refitted for the artefact weight alone, and `artefact_weight_sd` is formed
+#' the same way; both are NA with fewer than three blocks.
+#' [rduckhts_roh_counts()] with `fit_table` uses `artefact_weight_sd` for its
+#' `stable_fraction`. The same cells are also
 #' fitted with a parent or child as the second genome
 #' (`contamination_relative`, `log_likelihood_relative`), since the unrelated
 #' model gives a relative about half its share.
@@ -356,7 +422,7 @@ rduckhts_roh_counts <- function(
 #'   one row per sample: `sample`, `sites`, `reads`, `mean_depth`, `blocks`,
 #'   `seq_error`, `contamination`, `contamination_sd`, `homozygosity_excess`,
 #'   `allele_balance`, `spread_hom`, `spread_het`, `artefact_weight`,
-#'   `log_likelihood`, `contamination_relative`, `log_likelihood_relative`,
+#'   `artefact_weight_sd`, `log_likelihood`, `contamination_relative`, `log_likelihood_relative`,
 #'   `status` (`ok`, `no_sites` for a sample whose sites were all skipped,
 #'   `few_sites`, `few_blocks`, `at_bound`, `no_convergence` or
 #'   `no_convergence_relative`) and `method`.

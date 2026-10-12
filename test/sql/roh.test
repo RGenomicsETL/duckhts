@@ -1011,6 +1011,146 @@ SELECT
 ----
 0	true	true
 
+# allele_balance and artefact_weight: the share of a heterozygote's reads that show the
+# counted allele, and the chance that a site's counts are uniform on 0..depth whatever its
+# genotype, as duckhts_count_error_fit() defines them. Their oracle is the read model computed
+# again in SQL, now with the binomial coefficient and the artefact term, rounded to PL as
+# above. The contaminant's chance of showing the counted allele is written here as the
+# Hardy-Weinberg mean over its genotype, a different form from the kernel's.
+statement ok
+CREATE MACRO roh_counts_mixture_oracle_pl(counts_name, alpha, e, b, w) AS TABLE
+WITH p AS (SELECT *, ref_count + alt_count AS d,
+    (1 - af) * (1 - af) * e + 2 * af * (1 - af) * b + af * af * (1 - e) AS contaminant
+  FROM query_table(counts_name)),
+ll AS (SELECT *, list_transform([e, b, 1 - e], lambda q:
+    ln((1 - w) * exp(lgamma(d + 1) - lgamma(alt_count + 1) - lgamma(ref_count + 1)
+        + alt_count * ln((1 - alpha) * q + alpha * contaminant)
+        + ref_count * ln(1 - ((1 - alpha) * q + alpha * contaminant))) + w / (d + 1))) AS l
+  FROM p)
+SELECT sample_id, chrom, pos, af,
+  list_transform(l, lambda x: least(255, round(-10 * (x - list_max(l)) / ln(10))::INTEGER)) AS pl
+FROM ll;
+
+# Three sites inside every planted run get balanced reads, as a mapping artefact would give.
+statement ok
+CREATE TEMP TABLE roh_counts_planted AS
+SELECT sample_id, chrom, pos, af,
+  CASE WHEN pos IN (2000000, 2500000, 3000000) THEN (ref_count + alt_count) - (ref_count + alt_count) // 2
+       ELSE ref_count END AS ref_count,
+  CASE WHEN pos IN (2000000, 2500000, 3000000) THEN (ref_count + alt_count) // 2 ELSE alt_count END AS alt_count
+FROM roh_counts_clean;
+
+# With 10% contamination, both numbers moved away from their defaults: runs equal the oracle's,
+# qualities within 0.05 as above. The second case decodes with contamination 0.40 and
+# allele_balance 0.35, where the contaminant's heterozygotes move the qualities by up to 0.7,
+# so the allele balance of the contaminant term is checked too.
+statement ok
+CREATE TEMP TABLE roh_counts_dirty_mixture_pl AS
+SELECT * FROM roh_counts_mixture_oracle_pl('roh_counts_dirty', 0.10, 1e-3, 0.51, 0.004);
+
+statement ok
+CREATE TEMP TABLE roh_counts_dirty_balance_pl AS
+SELECT * FROM roh_counts_mixture_oracle_pl('roh_counts_dirty', 0.40, 1e-3, 0.35, 0.0);
+
+query II
+WITH c AS (
+  SELECT 'mixture' AS k, * FROM duckhts_roh_counts('roh_counts_dirty', contamination := 0.10,
+                                                   allele_balance := 0.51, artefact_weight := 0.004)
+  UNION ALL
+  SELECT 'balance', * FROM duckhts_roh_counts('roh_counts_dirty', contamination := 0.40,
+                                              allele_balance := 0.35)),
+o AS (SELECT 'mixture' AS k, * FROM roh_counts_pl_runs('roh_counts_dirty_mixture_pl')
+  UNION ALL SELECT 'balance', * FROM roh_counts_pl_runs('roh_counts_dirty_balance_pl'))
+SELECT (SELECT count(*) FROM c),
+  (SELECT count(*) FROM c FULL JOIN o USING (k, sample, chrom, start, "end", n_markers)
+   WHERE c.quality IS NULL OR o.quality IS NULL OR abs(c.quality - o.quality) > 0.05);
+----
+8	0
+
+# On the planted data the runs equal the oracle's in coordinates and marker counts. Qualities
+# are not compared here: the planted sites' PL fall between 33.2 and 34.0, where rounding to an
+# integer PL changes a site's likelihood ratio by up to 12% and the qualities near those sites
+# by about 0.1, which is the oracle's resolution, not the kernel's.
+statement ok
+CREATE TEMP TABLE roh_counts_planted_pl AS
+SELECT * FROM roh_counts_mixture_oracle_pl('roh_counts_planted', 0.0, 1e-3, 0.49, 0.002);
+
+query II
+WITH c AS (SELECT sample, chrom, start, "end", n_markers FROM duckhts_roh_counts('roh_counts_planted',
+             allele_balance := 0.49, artefact_weight := 0.002)),
+o AS (SELECT sample, chrom, start, "end", n_markers FROM roh_counts_pl_runs('roh_counts_planted_pl'))
+SELECT (SELECT count(*) FROM c),
+  (SELECT count(*) FROM ((SELECT * FROM c EXCEPT ALL SELECT * FROM o)
+   UNION ALL (SELECT * FROM o EXCEPT ALL SELECT * FROM c)));
+----
+4	0
+
+# The artefact term bounds what one site can do to a run. Without it the three balanced sites
+# exclude homozygosity at any seq_error, and no run is left. With artefact_weight w each site's
+# likelihood ratio between the two states is at most 1 + (d + 1)(1 - w) / w (about 5,200 to
+# 20,500 here, for depth 20 to 40 and w = 0.004 or 0.002), and the runs of the data without the
+# planted sites come back: same coordinates and marker counts.
+query II
+WITH clean AS (SELECT sample, chrom, start, "end", n_markers FROM duckhts_roh_counts('roh_counts_clean')),
+weighted AS (
+  SELECT 0.002 AS w, sample, chrom, start, "end", n_markers
+  FROM duckhts_roh_counts('roh_counts_planted', artefact_weight := 0.002)
+  UNION ALL
+  SELECT 0.004, sample, chrom, start, "end", n_markers
+  FROM duckhts_roh_counts('roh_counts_planted', artefact_weight := 0.004)),
+expected AS (SELECT w, clean.* FROM clean, (VALUES (0.002), (0.004)) AS v(w))
+SELECT (SELECT count(*) FROM duckhts_roh_counts('roh_counts_planted')),
+  (SELECT count(*) FROM ((SELECT * FROM weighted EXCEPT ALL SELECT * FROM expected)
+   UNION ALL (SELECT * FROM expected EXCEPT ALL SELECT * FROM weighted)));
+----
+0	0
+
+# Sensitivity contract. A fit gives allele_balance and artefact_weight with some error, so the
+# runs must not hinge on their exact values. Each case decodes the titration data at its true
+# values (allele_balance 1/2, artefact_weight 0; contamination 0 or 0.10) and at
+# allele_balance +-0.01, artefact_weight 0.002 and 0.004, and both together.
+#
+# Declared bound: the total called length moves by at most one site spacing (25 kb) per end of
+# each run at the true values, 2 * 25,000 * 4 = 200,000 bp (2.5% of the 8.05 Mb called). A run
+# end lies between a homozygous and a heterozygous site, and these perturbations leave every
+# site's evidence on the same side: allele_balance +-0.01 changes the log-likelihood of a
+# heterozygote by at most 40 * ln(0.51 / 0.49), about 1.6 nats, at the fixture's largest depth,
+# and with artefact_weight <= 0.004 a site with balanced reads still has a heterozygous
+# likelihood at least 800 times its homozygous ones at depth 20 to 40, with or without the
+# contamination. So the contract lets an
+# end move to the neighbouring site and no further.
+#
+# Measured when this test was written: no perturbation changes a run's coordinates or marker
+# count, so every total changes by 0 bp; run qualities move by at most 0.021 without
+# contamination and 0.059 with it.
+statement ok
+CREATE MACRO roh_counts_total(counts_name, c, b, w) AS TABLE
+SELECT counts_name AS name, b AS allele_balance, w AS artefact_weight, count(*) AS runs,
+  coalesce(sum(length), 0) AS total
+FROM duckhts_roh_counts(counts_name, contamination := c, allele_balance := b, artefact_weight := w);
+
+query III
+WITH truth AS (
+  SELECT * FROM roh_counts_total('roh_counts_clean', 0.0, 0.5, 0.0)
+  UNION ALL SELECT * FROM roh_counts_total('roh_counts_dirty', 0.10, 0.5, 0.0)),
+perturbed AS (
+  SELECT * FROM roh_counts_total('roh_counts_clean', 0.0, 0.49, 0.0)
+  UNION ALL SELECT * FROM roh_counts_total('roh_counts_clean', 0.0, 0.51, 0.0)
+  UNION ALL SELECT * FROM roh_counts_total('roh_counts_clean', 0.0, 0.5, 0.002)
+  UNION ALL SELECT * FROM roh_counts_total('roh_counts_clean', 0.0, 0.5, 0.004)
+  UNION ALL SELECT * FROM roh_counts_total('roh_counts_clean', 0.0, 0.49, 0.004)
+  UNION ALL SELECT * FROM roh_counts_total('roh_counts_clean', 0.0, 0.51, 0.004)
+  UNION ALL SELECT * FROM roh_counts_total('roh_counts_dirty', 0.10, 0.49, 0.0)
+  UNION ALL SELECT * FROM roh_counts_total('roh_counts_dirty', 0.10, 0.51, 0.0)
+  UNION ALL SELECT * FROM roh_counts_total('roh_counts_dirty', 0.10, 0.5, 0.002)
+  UNION ALL SELECT * FROM roh_counts_total('roh_counts_dirty', 0.10, 0.5, 0.004)
+  UNION ALL SELECT * FROM roh_counts_total('roh_counts_dirty', 0.10, 0.49, 0.004)
+  UNION ALL SELECT * FROM roh_counts_total('roh_counts_dirty', 0.10, 0.51, 0.004))
+SELECT count(*), bool_and(t.runs = 4), bool_and(abs(p.total - t.total) <= 2 * 25000 * t.runs)
+FROM perturbed AS p JOIN truth AS t USING (name);
+----
+12	true	true
+
 # Rows without usable evidence are skipped, not errors: NULL or zero-depth counts, and a
 # NULL, NaN or zero frequency. Adding such rows leaves the runs unchanged.
 statement ok
@@ -1060,6 +1200,41 @@ statement error
 SELECT * FROM duckhts_roh_counts('roh_counts_clean', contamination := -0.01);
 ----
 contamination must be in [0, 1)
+
+# allele_balance and artefact_weight outside their ranges are errors, never clipped.
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_clean', allele_balance := 0.349);
+----
+allele_balance must be in [0.35, 0.65]
+
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_clean', allele_balance := 0.651);
+----
+allele_balance must be in [0.35, 0.65]
+
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_clean', allele_balance := 'NaN'::DOUBLE);
+----
+allele_balance must be in [0.35, 0.65]
+
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_clean', artefact_weight := -1e-9);
+----
+artefact_weight must be in [0, 0.05]
+
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_clean', artefact_weight := 0.0501);
+----
+artefact_weight must be in [0, 0.05]
+
+# The ends of both ranges are accepted.
+query I
+SELECT count(*) > 0 FROM (
+  SELECT * FROM duckhts_roh_counts('roh_counts_clean', allele_balance := 0.35, artefact_weight := 0.05)
+  UNION ALL
+  SELECT * FROM duckhts_roh_counts('roh_counts_clean', allele_balance := 0.65, artefact_weight := 0.0));
+----
+true
 
 statement error
 SELECT duckhts_roh_segments([100, 200], [0.3, 0.3], [30, -1], [0, 0], 1e-3, 0.0,
@@ -1153,7 +1328,7 @@ WITH lists AS (SELECT list(pos ORDER BY pos, rowid) AS p, list(af ORDER BY pos, 
 reference AS (SELECT duckhts_roh_segments(p, f, pl, NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9) AS r FROM lists),
 packed AS (SELECT __duckhts_roh_decode(
     __duckhts_roh_sites(pos, af, rr, ra, aa, 1, 1000, 1000000),
-    NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9) AS r FROM roh_packed_pl)
+    NULL, NULL, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9) AS r FROM roh_packed_pl)
 SELECT (SELECT len(r) FROM reference) > 0, (SELECT r FROM reference) = (SELECT r FROM packed);
 ----
 true	true
@@ -1165,7 +1340,7 @@ WITH data AS (SELECT pos, af, CASE WHEN rr IS NULL THEN NULL WHEN rr = 0 AND ra 
 reference AS (SELECT duckhts_roh_segments(list(pos ORDER BY pos), list(af ORDER BY pos),
     list(dosage ORDER BY pos), 30.0, NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9) AS r FROM data),
 packed AS (SELECT __duckhts_roh_decode(__duckhts_roh_sites(pos, af, dosage, NULL, NULL, 2, 1000, 1000000),
-    30.0, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9) AS r FROM data)
+    30.0, NULL, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9) AS r FROM data)
 SELECT (SELECT len(r) FROM reference) > 0, (SELECT r FROM reference) = (SELECT r FROM packed);
 ----
 true	true
@@ -1284,6 +1459,16 @@ SELECT * FROM duckhts_roh_counts('roh_counts_none', contamination := 1);
 contamination must be in [0, 1)
 
 statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_none', allele_balance := 0.3);
+----
+allele_balance must be in [0.35, 0.65]
+
+statement error
+SELECT * FROM duckhts_roh_counts('roh_counts_none', 'roh_counts_map', artefact_weight := 0.06);
+----
+artefact_weight must be in [0, 0.05]
+
+statement error
 SELECT * FROM duckhts_roh_counts('roh_counts_none', max_sites := 0);
 ----
 max_sites must be between 1 and 100000000
@@ -1333,6 +1518,12 @@ SELECT count(*) FROM duckhts_roh_counts('roh_counts_clean', seq_error := NULL);
 ----
 0
 
+query II
+SELECT (SELECT count(*) FROM duckhts_roh_counts('roh_counts_clean', allele_balance := NULL)),
+  (SELECT count(*) FROM duckhts_roh_counts('roh_counts_clean', artefact_weight := NULL));
+----
+0	0
+
 # Read counts must be whole numbers: a fractional count is an error, never rounded.
 statement ok
 CREATE TEMP TABLE roh_counts_fractional AS
@@ -1374,15 +1565,33 @@ SELECT * FROM duckhts_roh_counts('roh_counts_bad_af');
 ----
 af must be in [0, 1] (position 50000 is 1.5)
 
-# Per-sample fits use exactly the scalar emission parameters, including quality bits.
+# Options keep their positions: the fourth positional value is still hw_to_az, as
+# before allele_balance and artefact_weight were added at the end.
+query I
+SELECT count(*) FROM (
+  (SELECT * FROM duckhts_roh_counts('roh_counts_clean', 0.001, 0.0, 0.4)
+   EXCEPT ALL SELECT * FROM duckhts_roh_counts('roh_counts_clean', hw_to_az := 0.4))
+  UNION ALL
+  (SELECT * FROM duckhts_roh_counts('roh_counts_clean', hw_to_az := 0.4)
+   EXCEPT ALL SELECT * FROM duckhts_roh_counts('roh_counts_clean', 0.001, 0.0, 0.4)));
+----
+0
+
+# Per-sample fits use exactly the scalar emission parameters, including quality bits. The fit
+# relation names the four numbers of duckhts_count_error_fit() and artefact_weight_sd; other
+# columns (status here) are ignored. (artefact_weight was an ignored column, set to 123, until
+# the decode used it.) The fitted decode has two more columns than the scalar one,
+# stable_fraction and gained_bases, tested below; the oracles here compare every column of the
+# scalar decode.
 statement ok
 CREATE TEMP TABLE roh_fits AS
 SELECT sample_id AS sample, 0.001::DOUBLE AS seq_error, 0.0::DOUBLE AS contamination,
-       'caller_selected' AS status, 123.0 AS artefact_weight
+       'caller_selected' AS status, 0.5::DOUBLE AS allele_balance, 0.0::DOUBLE AS artefact_weight,
+       0.0::DOUBLE AS artefact_weight_sd
 FROM roh_counts_clean GROUP BY sample_id;
 
 query I
-WITH fitted AS (SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits')),
+WITH fitted AS (SELECT * EXCLUDE (stable_fraction, gained_bases) FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits')),
 scalar AS (SELECT * FROM duckhts_roh_counts('roh_counts_clean'))
 SELECT count(*) FROM ((SELECT * FROM fitted EXCEPT ALL SELECT * FROM scalar)
 UNION ALL (SELECT * FROM scalar EXCEPT ALL SELECT * FROM fitted));
@@ -1390,15 +1599,17 @@ UNION ALL (SELECT * FROM scalar EXCEPT ALL SELECT * FROM fitted));
 0
 
 statement ok
-UPDATE roh_fits SET seq_error = 0.02, contamination = 0.1 WHERE sample = 'S2';
+UPDATE roh_fits SET seq_error = 0.02, contamination = 0.1, allele_balance = 0.49, artefact_weight = 0.002
+WHERE sample = 'S2';
 
 # Separate scalar calls are the oracle; both samples must produce runs.
 query II
-WITH fitted AS (SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits')),
+WITH fitted AS (SELECT * EXCLUDE (stable_fraction, gained_bases) FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits')),
 scalar AS (
   SELECT * FROM duckhts_roh_counts('roh_counts_clean') WHERE sample = 'S1'
   UNION ALL
-  SELECT * FROM duckhts_roh_counts('roh_counts_clean', seq_error := 0.02, contamination := 0.1)
+  SELECT * FROM duckhts_roh_counts('roh_counts_clean', seq_error := 0.02, contamination := 0.1,
+                                   allele_balance := 0.49, artefact_weight := 0.002)
   WHERE sample = 'S2')
 SELECT (SELECT count(DISTINCT sample) FROM fitted), count(*) FROM (
   (SELECT * FROM fitted EXCEPT ALL SELECT * FROM scalar)
@@ -1408,12 +1619,13 @@ SELECT (SELECT count(DISTINCT sample) FROM fitted), count(*) FROM (
 
 query I
 WITH fitted AS (
-  SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits', 'roh_counts_map')),
+  SELECT * EXCLUDE (stable_fraction, gained_bases) FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits', 'roh_counts_map')),
 scalar AS (
   SELECT * FROM duckhts_roh_counts('roh_counts_clean', 'roh_counts_map') WHERE sample = 'S1'
   UNION ALL
   SELECT * FROM duckhts_roh_counts('roh_counts_clean', 'roh_counts_map',
-                                 seq_error := 0.02, contamination := 0.1) WHERE sample = 'S2')
+                                 seq_error := 0.02, contamination := 0.1, allele_balance := 0.49,
+                                 artefact_weight := 0.002) WHERE sample = 'S2')
 SELECT count(*) FROM ((SELECT * FROM fitted EXCEPT ALL SELECT * FROM scalar)
 UNION ALL (SELECT * FROM scalar EXCEPT ALL SELECT * FROM fitted));
 ----
@@ -1471,6 +1683,81 @@ SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits', 'roh
 ----
 contamination must be in [0, 1)
 
+# allele_balance and artefact_weight are read and checked like the other two.
+statement ok
+UPDATE roh_bad_fits SET contamination = 0.0, allele_balance = NULL WHERE sample = 'S2';
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits');
+----
+NULL allele_balance for sample S2
+
+statement ok
+UPDATE roh_bad_fits SET allele_balance = 0.5, artefact_weight = NULL WHERE sample = 'S2';
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits');
+----
+NULL artefact_weight for sample S2
+
+statement ok
+UPDATE roh_bad_fits SET allele_balance = 0.34, artefact_weight = 0.0 WHERE sample = 'S2';
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits', 'roh_no_map');
+----
+allele_balance must be in [0.35, 0.65]
+
+statement ok
+UPDATE roh_bad_fits SET allele_balance = 0.5, artefact_weight = 0.051 WHERE sample = 'S2';
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits');
+----
+artefact_weight must be in [0, 0.05]
+
+# A fit relation without the two columns, such as one written for the previous contract,
+# is a binder error that names the column.
+statement ok
+CREATE TEMP TABLE roh_two_column_fits AS SELECT sample, seq_error, contamination FROM roh_fits;
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_two_column_fits');
+----
+allele_balance
+
+# artefact_weight_sd is a required column too: a fit relation written before it is a binder
+# error that names it. A NULL value is not an error (see stable_fraction below); a negative or
+# non-finite one is, also for a sample the genetic map drops.
+statement ok
+CREATE TEMP TABLE roh_four_number_fits AS SELECT * EXCLUDE (artefact_weight_sd) FROM roh_fits;
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_four_number_fits');
+----
+artefact_weight_sd
+
+statement ok
+UPDATE roh_bad_fits SET artefact_weight = 0.002, artefact_weight_sd = -1e-9 WHERE sample = 'S2';
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits');
+----
+artefact_weight_sd must be finite and at least 0
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits', 'roh_no_map');
+----
+artefact_weight_sd must be finite and at least 0
+
+statement ok
+UPDATE roh_bad_fits SET artefact_weight_sd = 'Infinity'::DOUBLE WHERE sample = 'S2';
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits');
+----
+artefact_weight_sd must be finite and at least 0
+
 statement error
 SELECT * FROM duckhts_roh_counts_fitted('roh_counts_none', 'roh_fits', max_sites := 0);
 ----
@@ -1501,7 +1788,9 @@ RESET scalar_subquery_error_on_multiple_rows;
 # there is no sample to check, so a malformed fit gives no rows; the other
 # arguments are still checked.
 statement ok
-CREATE TEMP TABLE roh_null_fits AS SELECT sample, NULL::DOUBLE AS seq_error, contamination FROM roh_fits;
+CREATE TEMP TABLE roh_null_fits AS
+SELECT sample, NULL::DOUBLE AS seq_error, contamination, NULL::DOUBLE AS allele_balance,
+  NULL::DOUBLE AS artefact_weight, NULL::DOUBLE AS artefact_weight_sd FROM roh_fits;
 
 query I
 SELECT count(*) FROM duckhts_roh_counts_fitted('roh_counts_none', 'roh_null_fits');
@@ -1523,17 +1812,19 @@ FROM roh_counts_clean;
 
 statement ok
 CREATE TEMP TABLE roh_null_sample_fits AS
-SELECT CASE WHEN sample = 'S2' THEN NULL ELSE sample END AS sample, seq_error, contamination
+SELECT CASE WHEN sample = 'S2' THEN NULL ELSE sample END AS sample, seq_error, contamination,
+  allele_balance, artefact_weight, artefact_weight_sd
 FROM roh_fits;
 
 query II
 WITH fitted AS (
-  SELECT * FROM duckhts_roh_counts_fitted('roh_counts_null_sample', 'roh_null_sample_fits')),
+  SELECT * EXCLUDE (stable_fraction, gained_bases) FROM duckhts_roh_counts_fitted('roh_counts_null_sample', 'roh_null_sample_fits')),
 scalar AS (
   SELECT * FROM duckhts_roh_counts('roh_counts_null_sample') WHERE sample = 'S1'
   UNION ALL
   SELECT * FROM duckhts_roh_counts('roh_counts_null_sample', seq_error := 0.02,
-                                   contamination := 0.1) WHERE sample IS NULL)
+                                   contamination := 0.1, allele_balance := 0.49,
+                                   artefact_weight := 0.002) WHERE sample IS NULL)
 SELECT (SELECT count(*) FROM fitted WHERE sample IS NULL) > 0, count(*) FROM (
   (SELECT * FROM fitted EXCEPT ALL SELECT * FROM scalar)
   UNION ALL (SELECT * FROM scalar EXCEPT ALL SELECT * FROM fitted));
@@ -1544,6 +1835,228 @@ statement error
 SELECT * FROM duckhts_roh_counts_fitted('roh_counts_null_sample', 'roh_fits');
 ----
 missing fit row for sample NULL
+
+# stable_fraction. duckhts_roh_counts_fitted decodes each sample three times on one collection of
+# its sites: at its artefact_weight w, at w - artefact_weight_sd and at w + artefact_weight_sd,
+# each kept in [0, 0.05]. A run of the decode at w gets the share of its bases that are in a run of
+# both perturbed decodes. With artefact_weight_sd 0 the three decodes are the same, so every run
+# has stable_fraction 1. A NULL artefact_weight_sd (a fit of fewer than three blocks) counts as 0.
+# gained_bases counts the bases that the decode at w + sd calls next to a run but outside every run
+# at w (tested on fixtures below); with sd 0 it is 0.
+query III
+SELECT count(*) > 0, bool_and(stable_fraction = 1.0), bool_and(gained_bases = 0)
+FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits');
+----
+true	true	true
+
+statement ok
+CREATE TEMP TABLE roh_null_sd_fits AS
+SELECT * REPLACE (0.002::DOUBLE AS artefact_weight, NULL::DOUBLE AS artefact_weight_sd) FROM roh_fits;
+
+query III
+SELECT count(*) > 0, bool_and(stable_fraction = 1.0), bool_and(gained_bases = 0)
+FROM duckhts_roh_counts_fitted('roh_counts_planted', 'roh_null_sd_fits');
+----
+true	true	true
+
+# On the planted fixture the runs exist only with an artefact term (see above), so w and its
+# interval decide them. Each sample is decoded at w = 0.002 with several values of
+# artefact_weight_sd, given as copies of the planted counts under one sample name per value. The
+# oracle decodes the planted counts with duckhts_roh_counts at w, w - sd and w + sd (clamped as
+# the contract states) and sums, for each run at w, the bases where it meets a run of each
+# perturbed decode, with a join over all pairs instead of the kernel's merge. For gained_bases
+# it joins each run at w to every run at w + sd that shares a base with it or abuts it, and counts
+# the bases of that run before the run at w (only when the run at w before it does not meet that
+# run at w + sd) and after it up to the next run at w; window functions give the neighbours, where
+# the kernel walks the lists. Runs, qualities, stable_fraction and gained_bases must be equal: the
+# fractions divide the same two whole numbers.
+statement ok
+CREATE TEMP TABLE roh_stable_cases AS
+SELECT * FROM (VALUES ('zero', 0.0), ('small', 0.0005), ('mid', 0.001), ('near', 0.0019), ('wide', 0.06))
+  AS v(label, sd);
+
+statement ok
+CREATE TEMP TABLE roh_stable_counts AS
+SELECT c.sample_id || '/' || v.label AS sample_id, c.chrom, c.pos, c.af, c.ref_count, c.alt_count
+FROM roh_counts_planted AS c, roh_stable_cases AS v;
+
+statement ok
+CREATE TEMP TABLE roh_stable_fits AS
+SELECT DISTINCT c.sample_id || '/' || v.label AS sample, 0.001::DOUBLE AS seq_error,
+  0.0::DOUBLE AS contamination, 0.5::DOUBLE AS allele_balance, 0.002::DOUBLE AS artefact_weight,
+  v.sd::DOUBLE AS artefact_weight_sd
+FROM roh_counts_planted AS c, roh_stable_cases AS v;
+
+statement ok
+CREATE MACRO roh_stable_oracle(counts_name, case_label, w, sd) AS TABLE
+WITH central AS (SELECT * FROM duckhts_roh_counts(counts_name, artefact_weight := w)),
+low AS (SELECT sample, chrom, start, "end"
+  FROM duckhts_roh_counts(counts_name, artefact_weight := greatest(0.0, w - sd))),
+high AS (SELECT sample, chrom, start, "end"
+  FROM duckhts_roh_counts(counts_name, artefact_weight := least(0.05, w + sd))),
+shared AS (SELECT c.sample, c.chrom, c.start,
+    sum(greatest(0, least(c."end", l."end", h."end") - greatest(c.start, l.start, h.start) + 1)) AS bases
+  FROM central AS c JOIN low AS l ON l.sample = c.sample AND l.chrom = c.chrom
+  JOIN high AS h ON h.sample = c.sample AND h.chrom = c.chrom
+  GROUP BY c.sample, c.chrom, c.start),
+neighbours AS (SELECT sample, chrom, start, "end",
+    lag("end") OVER (PARTITION BY sample, chrom ORDER BY start) AS previous_end,
+    lead(start) OVER (PARTITION BY sample, chrom ORDER BY start) AS next_start
+  FROM central),
+gained AS (SELECT c.sample, c.chrom, c.start,
+    sum(CASE WHEN c.previous_end IS NULL OR c.previous_end + 1 < h.start
+             THEN greatest(0, c.start - h.start) ELSE 0 END
+        + greatest(0, least(h."end", coalesce(c.next_start - 1, h."end")) - c."end")) AS bases
+  FROM neighbours AS c JOIN high AS h ON h.sample = c.sample AND h.chrom = c.chrom
+    AND h.start <= c."end" + 1 AND h."end" >= c.start - 1
+  GROUP BY c.sample, c.chrom, c.start)
+SELECT c.sample || '/' || case_label AS sample, c.chrom, c.start, c."end", c.length, c.n_markers, c.quality,
+  coalesce(s.bases, 0) / c.length AS stable_fraction, coalesce(g.bases, 0)::BIGINT AS gained_bases
+FROM central AS c LEFT JOIN shared AS s USING (sample, chrom, start)
+LEFT JOIN gained AS g USING (sample, chrom, start);
+
+statement ok
+CREATE TEMP TABLE roh_stable_fitted AS
+SELECT * FROM duckhts_roh_counts_fitted('roh_stable_counts', 'roh_stable_fits');
+
+statement ok
+CREATE TEMP TABLE roh_stable_expected AS
+SELECT * FROM roh_stable_oracle('roh_counts_planted', 'zero', 0.002, 0.0)
+UNION ALL SELECT * FROM roh_stable_oracle('roh_counts_planted', 'small', 0.002, 0.0005)
+UNION ALL SELECT * FROM roh_stable_oracle('roh_counts_planted', 'mid', 0.002, 0.001)
+UNION ALL SELECT * FROM roh_stable_oracle('roh_counts_planted', 'near', 0.002, 0.0019)
+UNION ALL SELECT * FROM roh_stable_oracle('roh_counts_planted', 'wide', 0.002, 0.06);
+
+query III
+SELECT (SELECT count(*) FROM roh_stable_fitted),
+  (SELECT bool_and(stable_fraction >= 0 AND stable_fraction <= 1) FROM roh_stable_fitted),
+  (SELECT count(*) FROM ((SELECT * FROM roh_stable_fitted EXCEPT ALL SELECT * FROM roh_stable_expected)
+   UNION ALL (SELECT * FROM roh_stable_expected EXCEPT ALL SELECT * FROM roh_stable_fitted)));
+----
+20	true	0
+
+# Values derived by hand. With sd 0 every run has 1. With sd 0.06 the perturbed weights are
+# clamped to 0 and 0.05, not an error; at weight 0 the planted sites leave no run (see above), so
+# no base is in a run of both perturbed decodes and every run has 0. Every weight from 0.002 to
+# 0.05 gives the same planted runs (1,475,000 or 1,450,000 to 3,475,000), so no case gains a base.
+query IITTT
+SELECT count(*) FILTER (WHERE sample LIKE '%/zero'), count(*) FILTER (WHERE sample LIKE '%/wide'),
+  bool_and(stable_fraction = 1.0) FILTER (WHERE sample LIKE '%/zero'),
+  bool_and(stable_fraction = 0.0) FILTER (WHERE sample LIKE '%/wide'),
+  bool_and(gained_bases = 0)
+FROM roh_stable_fitted;
+----
+4	4	true	true	true
+
+# Decoded at w = 0 the planted sites leave no run, while the decode at w + sd = 0.002 has the four
+# runs. Those runs meet no run at w, so no row carries their bases: gained runs that touch no run
+# at w are not reported.
+statement ok
+CREATE TEMP TABLE roh_planted_zero_fits AS
+SELECT DISTINCT sample_id AS sample, 0.001::DOUBLE AS seq_error, 0.0::DOUBLE AS contamination,
+  0.5::DOUBLE AS allele_balance, 0.0::DOUBLE AS artefact_weight, 0.002::DOUBLE AS artefact_weight_sd
+FROM roh_counts_planted;
+
+query II
+SELECT (SELECT count(*) FROM duckhts_roh_counts_fitted('roh_counts_planted', 'roh_planted_zero_fits')),
+  (SELECT count(*) FROM duckhts_roh_counts('roh_counts_planted', artefact_weight := 0.002));
+----
+0	4
+
+# The planted runs come back whole or not at all, so they never give a share strictly between 0
+# and 1. One balanced site does: at artefact_weight 0 a site at 2,500,000 on chromosome 1 splits
+# the run there, and a site at 3,150,000 on chromosome 2 ends it at 3,125,000; at 0.0002 the
+# first site no longer acts and the second still does; from 0.002 up neither acts. (Measured with
+# duckhts_roh_counts when the test was written.) S1 is decoded at w = 0.002 with sd 0.002, so its
+# perturbed weights are 0 and 0.004; S2 with sd 0.0018, so 0.0002 and 0.0038. The shares, by
+# hand from those runs:
+#   S1 chromosome 1, run 1,475,000-3,475,000: (1,000,001 + 950,001) / 2,000,001;
+#   S1 chromosome 2, run 1,450,000-3,475,000: 1,675,001 / 2,025,001;
+#   S2 chromosome 1: 1;
+#   S2 chromosome 2, run 1,475,000-3,475,000: 1,650,001 / 2,000,001.
+# The decodes at w + sd (0.004 and 0.0038) call the same runs as at w, so gained_bases is 0.
+statement ok
+CREATE TEMP TABLE roh_counts_split AS
+SELECT sample_id, chrom, pos, af,
+  CASE WHEN (chrom, pos) IN (('1', 2500000), ('2', 3150000))
+       THEN (ref_count + alt_count) - (ref_count + alt_count) // 2 ELSE ref_count END AS ref_count,
+  CASE WHEN (chrom, pos) IN (('1', 2500000), ('2', 3150000))
+       THEN (ref_count + alt_count) // 2 ELSE alt_count END AS alt_count
+FROM roh_counts_clean;
+
+statement ok
+CREATE TEMP TABLE roh_split_fits AS
+SELECT sample, 0.001::DOUBLE AS seq_error, 0.0::DOUBLE AS contamination, 0.5::DOUBLE AS allele_balance,
+  0.002::DOUBLE AS artefact_weight, sd::DOUBLE AS artefact_weight_sd
+FROM (VALUES ('S1', 0.002), ('S2', 0.0018)) AS v(sample, sd);
+
+query TTIITI
+SELECT sample, chrom, start, "end",
+  stable_fraction = CASE sample || chrom WHEN 'S11' THEN (1000001 + 950001) / 2000001
+                                         WHEN 'S12' THEN 1675001 / 2025001
+                                         WHEN 'S21' THEN 1.0
+                                         WHEN 'S22' THEN 1650001 / 2000001 END,
+  gained_bases
+FROM duckhts_roh_counts_fitted('roh_counts_split', 'roh_split_fits') ORDER BY sample, chrom;
+----
+S1	1	1475000	3475000	true	0
+S1	2	1450000	3475000	true	0
+S2	1	1450000	3475000	true	0
+S2	2	1475000	3475000	true	0
+
+# The same against the oracle.
+query II
+WITH fitted AS (SELECT * FROM duckhts_roh_counts_fitted('roh_counts_split', 'roh_split_fits')),
+expected AS (
+  SELECT * REPLACE (replace(sample, '/x', '') AS sample)
+  FROM roh_stable_oracle('roh_counts_split', 'x', 0.002, 0.002) WHERE sample = 'S1/x'
+  UNION ALL
+  SELECT * REPLACE (replace(sample, '/x', '') AS sample)
+  FROM roh_stable_oracle('roh_counts_split', 'x', 0.002, 0.0018) WHERE sample = 'S2/x')
+SELECT (SELECT count(*) FROM fitted),
+  (SELECT count(*) FROM ((SELECT * FROM fitted EXCEPT ALL SELECT * FROM expected)
+   UNION ALL (SELECT * FROM expected EXCEPT ALL SELECT * FROM fitted)));
+----
+4	0
+
+# gained_bases, the other direction. Decoded at w = 0, the balanced site at 2,500,000 splits each
+# chromosome 1 run in two, and the site at 3,150,000 ends each chromosome 2 run at 3,125,000. S1
+# has sd 0.002, so its decode at w + sd (0.002) calls whole runs again: the one run on chromosome 1
+# meets both runs at w and covers the gap 2,475,001-2,524,999 between them, 49,999 bases, which go
+# to the run at w before the gap; the run on chromosome 2 goes on to 3,475,000, 3,125,001-3,475,000,
+# 350,000 bases. S2 has sd 0.0002: at 0.0002 the first site no longer acts and the second still
+# does, so it gains the 49,999 bases on chromosome 1 and none on chromosome 2. Below w no run
+# changes (the low decode is at 0 for both), so every stable_fraction is 1.
+statement ok
+CREATE TEMP TABLE roh_split_zero_fits AS
+SELECT * REPLACE (0.0::DOUBLE AS artefact_weight,
+  CASE sample WHEN 'S1' THEN 0.002 ELSE 0.0002 END::DOUBLE AS artefact_weight_sd)
+FROM roh_split_fits;
+
+query TTIIRI
+SELECT sample, chrom, start, "end", stable_fraction, gained_bases
+FROM duckhts_roh_counts_fitted('roh_counts_split', 'roh_split_zero_fits') ORDER BY sample, chrom, start;
+----
+S1	1	1475000	2475000	1.0	49999
+S1	1	2525000	3475000	1.0	0
+S1	2	1450000	3125000	1.0	350000
+S2	1	1450000	2475000	1.0	49999
+S2	1	2525000	3475000	1.0	0
+S2	2	1475000	3125000	1.0	0
+
+query II
+WITH fitted AS (SELECT * FROM duckhts_roh_counts_fitted('roh_counts_split', 'roh_split_zero_fits')),
+expected AS (
+  SELECT * REPLACE (replace(sample, '/x', '') AS sample)
+  FROM roh_stable_oracle('roh_counts_split', 'x', 0.0, 0.002) WHERE sample = 'S1/x'
+  UNION ALL
+  SELECT * REPLACE (replace(sample, '/x', '') AS sample)
+  FROM roh_stable_oracle('roh_counts_split', 'x', 0.0, 0.0002) WHERE sample = 'S2/x')
+SELECT (SELECT count(*) FROM fitted),
+  (SELECT count(*) FROM ((SELECT * FROM fitted EXCEPT ALL SELECT * FROM expected)
+   UNION ALL (SELECT * FROM expected EXCEPT ALL SELECT * FROM fitted)));
+----
+6	0
 
 # Independent transitions (both 0.5) make homozygous sites AZ and balanced sites HW.
 # Lengths 1..9 exercise every two-bit offset and partially filled traceback bytes.
@@ -1569,35 +2082,35 @@ SELECT (SELECT count(*) FROM observed), count(*) FROM (
 
 # __duckhts_roh_decode checks its input: any BLOB may be passed to it.
 statement error
-SELECT __duckhts_roh_decode('abc'::BLOB, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9);
+SELECT __duckhts_roh_decode('abc'::BLOB, NULL, NULL, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9);
 ----
 sites is not a packed site list
 
 # A header followed by part of a record.
 statement error
-SELECT __duckhts_roh_decode('DHRS\x01\x00\x00\x00\x00\x00\x00\x00\x00'::BLOB, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9);
+SELECT __duckhts_roh_decode('DHRS\x01\x00\x00\x00\x00\x00\x00\x00\x00'::BLOB, NULL, NULL, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9);
 ----
 sites is not a packed site list
 
 # An unknown evidence kind.
 statement error
-SELECT __duckhts_roh_decode('DHRS\x09\x00\x00\x00'::BLOB, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9);
+SELECT __duckhts_roh_decode('DHRS\x09\x00\x00\x00'::BLOB, NULL, NULL, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9);
 ----
 sites is not a packed site list
 
 # A header without records is a list of no sites.
 query I
-SELECT len(__duckhts_roh_decode('DHRS\x01\x00\x00\x00'::BLOB, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9));
+SELECT len(__duckhts_roh_decode('DHRS\x01\x00\x00\x00'::BLOB, NULL, NULL, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9));
 ----
 0
 
 statement error
-SELECT __duckhts_roh_decode(('DHRS\x01\x00\x00\x00' || repeat('\x00', 16))::BLOB, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9);
+SELECT __duckhts_roh_decode(('DHRS\x01\x00\x00\x00' || repeat('\x00', 16))::BLOB, NULL, NULL, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9);
 ----
 packed site 1 is out of order or out of range
 
 query I
-SELECT __duckhts_roh_decode(NULL::BLOB, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9) IS NULL;
+SELECT __duckhts_roh_decode(NULL::BLOB, NULL, NULL, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9) IS NULL;
 ----
 true
 
@@ -1754,6 +2267,138 @@ SELECT * FROM duckhts_roh_af_table_bcftools('__WORKING_DIRECTORY__/test/data/roh
   'roh_map');
 ----
 duckhts_roh_af_table_bcftools needs one af_table row per position, but chr1:4000 has 2 rows
+
+# af_order names a column of af_table that gives file order; at each position the row with the
+# least value stands for the first line, the one bcftools reads. `line` numbers the lines of
+# roh_repeated_af.tsv.gz; the check below pins it to the file, where 4000 A,T is line 9 and
+# 4000 A,G line 10. `line_swapped` gives the order of that file with its two 4000 lines swapped.
+statement ok
+CREATE TEMP TABLE roh_repeated_af_lines AS SELECT *, CASE WHEN pos = 4000 THEN 19 - line ELSE line END AS line_swapped
+FROM (SELECT *, row_number() OVER () AS line FROM roh_repeated_af);
+
+query TTI
+SELECT ref, alt, line FROM roh_repeated_af_lines WHERE pos = 4000 ORDER BY line;
+----
+A	T	9
+A	G	10
+
+# File order: the RG lines of (bcftools 1.24, RBCFTools)
+#   bcftools roh --AF-file test/data/roh_repeated_af.tsv.gz -a 0.01 -H 0.01 test/data/roh_repeated.vcf.gz
+# 4000 reads its first line, A,T, whose alleles differ from the record's A>G, so it has no site.
+query I
+WITH expected(sample, chrom, start, "end", length, n_markers, quality) AS (VALUES
+('S1', 'chr1', 500, 500, 1, 1, 3.8),
+ ('S1', 'chr1', 1000, 1000, 1, 1, 3.8),
+ ('S1', 'chr1', 5000, 5000, 1, 1, 3.9),
+ ('S1', 'chr1', 6000, 6000, 1, 1, 3.9),
+ ('S1', 'chr1', 9000, 9000, 1, 1, 3.9)
+), observed AS (
+  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh_af_table_bcftools(
+    '__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz', 'roh_repeated_af_lines',
+    hw_to_az := 0.01, az_to_hw := 0.01, af_order := 'line')
+)
+SELECT count(*) FROM (
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected)
+  UNION ALL
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed));
+----
+0
+
+# The two 4000 lines swapped: the RG lines of (bcftools 1.24, RBCFTools)
+#   zcat test/data/roh_repeated_af.tsv.gz | awk 'BEGIN{OFS="\t"} $2==4000 && $3=="A,T"{held=$0; next}
+#     {print} $2==4000 && $3=="A,G"{print held}' | bgzip > swapped.tsv.gz && tabix -s1 -b2 -e2 swapped.tsv.gz
+#   bcftools roh --AF-file swapped.tsv.gz -a 0.01 -H 0.01 test/data/roh_repeated.vcf.gz
+# 4000 now reads A,G, the record's alleles, and is a run of one marker.
+query I
+WITH expected(sample, chrom, start, "end", length, n_markers, quality) AS (VALUES
+('S1', 'chr1', 500, 500, 1, 1, 3.8),
+ ('S1', 'chr1', 1000, 1000, 1, 1, 3.8),
+ ('S1', 'chr1', 4000, 4000, 1, 1, 3.9),
+ ('S1', 'chr1', 5000, 5000, 1, 1, 3.9),
+ ('S1', 'chr1', 6000, 6000, 1, 1, 3.9),
+ ('S1', 'chr1', 9000, 9000, 1, 1, 3.9)
+), observed AS (
+  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh_af_table_bcftools(
+    '__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz', 'roh_repeated_af_lines',
+    hw_to_az := 0.01, az_to_hw := 0.01, af_order := 'line_swapped')
+)
+SELECT count(*) FROM (
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected)
+  UNION ALL
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed));
+----
+0
+
+# The name is matched as an SQL identifier, without case, and the genetic_map overload takes
+# af_order too.
+query T
+SELECT list(start ORDER BY start) FROM duckhts_roh_af_table_bcftools('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz',
+  'roh_repeated_af_lines', hw_to_az := 0.01, az_to_hw := 0.01, af_order := 'LINE_SWAPPED');
+----
+[500, 1000, 4000, 5000, 6000, 9000]
+
+statement ok
+SELECT * FROM duckhts_roh_af_table_bcftools('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz',
+  'roh_repeated_af_lines', 'roh_map', af_order := 'line');
+
+# A NULL or repeated af_order value at a position, and a name that is not a column of af_table,
+# are errors, in both overloads; the column check also holds for an empty af_table.
+statement ok
+CREATE TEMP TABLE roh_repeated_af_null_line AS SELECT * REPLACE (CASE WHEN pos = 4000 AND alt = 'G' THEN NULL ELSE line END AS line)
+FROM roh_repeated_af_lines;
+
+statement error
+SELECT * FROM duckhts_roh_af_table_bcftools('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz',
+  'roh_repeated_af_null_line', af_order := 'line');
+----
+duckhts_roh_af_table_bcftools needs an af_order value in every af_table row, but chr1:4000 has a row with NULL line
+
+statement ok
+CREATE TEMP TABLE roh_repeated_af_tied_line AS SELECT * REPLACE (CASE WHEN pos = 4000 THEN 9 ELSE line END AS line)
+FROM roh_repeated_af_lines;
+
+statement error
+SELECT * FROM duckhts_roh_af_table_bcftools('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz',
+  'roh_repeated_af_tied_line', af_order := 'line');
+----
+duckhts_roh_af_table_bcftools needs distinct af_order values within a position, but chr1:4000 repeats a value of line
+
+statement error
+SELECT * FROM duckhts_roh_af_table_bcftools('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz',
+  'roh_repeated_af_tied_line', 'roh_map', af_order := 'line');
+----
+duckhts_roh_af_table_bcftools needs distinct af_order values within a position, but chr1:4000 repeats a value of line
+
+statement error
+SELECT * FROM duckhts_roh_af_table_bcftools('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz',
+  'roh_repeated_af_lines', af_order := 'line_number');
+----
+duckhts_roh_af_table_bcftools: af_order 'line_number' is not a column of af_table
+
+statement error
+SELECT * FROM duckhts_roh_af_table_bcftools('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz',
+  'roh_repeated_af_lines', 'roh_map', af_order := 'line_number');
+----
+duckhts_roh_af_table_bcftools: af_order 'line_number' is not a column of af_table
+
+statement ok
+CREATE TEMP TABLE roh_repeated_af_no_rows AS SELECT * FROM roh_repeated_af_lines LIMIT 0;
+
+statement error
+SELECT * FROM duckhts_roh_af_table_bcftools('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz',
+  'roh_repeated_af_no_rows', af_order := 'line_number');
+----
+duckhts_roh_af_table_bcftools: af_order 'line_number' is not a column of af_table
+
+query I
+SELECT count(*) FROM duckhts_roh_af_table_bcftools('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz',
+  'roh_repeated_af_no_rows', af_order := 'line');
+----
+0
 
 # The bcftools rule needs file order, which only BGZF input gives; the default rule does not.
 statement ok

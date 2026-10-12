@@ -1,6 +1,37 @@
-# Rduckhts 1.5.2.9016.0.1.5
+# Rduckhts 1.5.2.9017.0.1.5
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
+
+- `rduckhts_count_error_fit()` returns `artefact_weight_sd` after
+  `artefact_weight`: the block interval of the artefact weight, formed as
+  `contamination_sd` is, and `NA` with fewer than three blocks. No other
+  value changes. `rduckhts_roh_counts(fit_table = ...)` needs an
+  `artefact_weight_sd` column in the fit relation (`NA` counts as 0) and
+  returns `stable_fraction` for each run: the share of the run's bases that
+  are also called when the artefact weight moves down and up by
+  `artefact_weight_sd`, and `gained_bases`: the bases that the higher weight
+  calls next to the run but outside every run. The other columns are unchanged, and the decode takes
+  about three times as long. Without `fit_table` the columns are unchanged.
+
+- `rduckhts_roh(site_rule = "bcftools", af_order = ...)` names a column of
+  `af_table` that gives the order of its lines, for example a line number.
+  Several rows may then share a position, and the row with the least value is
+  used, as `bcftools roh --AF-file` reads the first line of a position. A
+  `NULL` value, a value repeated within a position and a name that is not a
+  column are errors. `af_order` must be one nonempty string and needs
+  `site_rule = "bcftools"`.
+
+- `rduckhts_roh_counts()` gains `allele_balance = 0.5` and
+  `artefact_weight = 0`, the numbers that `rduckhts_count_error_fit()`
+  reports under these names: the share of a heterozygote's reads that show
+  the counted allele, and the chance that a site's counts are uniform on 0 to
+  depth whatever its genotype. With a positive `artefact_weight`, one site can
+  change the odds between the two states only by a bounded factor, as
+  `gt_error` does in `rduckhts_roh()`. The defaults give the previous runs
+  and qualities. Both are validated in R (`allele_balance` in [0.35, 0.65],
+  `artefact_weight` in [0, 0.05]); with `fit_table`, the two are read from the
+  fit relation, which must now hold `allele_balance` and `artefact_weight`
+  columns.
 
 - The README describes two known DuckDB 1.5.x issues that affect
   `rduckhts_roh()`, `rduckhts_roh_counts()`, `rduckhts_count_error_fit()` and

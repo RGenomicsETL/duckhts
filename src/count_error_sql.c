@@ -86,11 +86,11 @@ static const char *const count_error_fit_sql[] = {
     "FROM __dht_samples s LEFT JOIN __dht_hist h ON s.smp IS NOT DISTINCT FROM h.smp) ",
     "SELECT smp AS \"sample\", f.sites, f.reads, f.mean_depth, f.blocks, f.seq_error, f.contamination, "
     "f.contamination_sd, f.homozygosity_excess, f.allele_balance, f.spread_hom, f.spread_het, "
-    "f.artefact_weight, f.log_likelihood, f.contamination_relative, f.log_likelihood_relative, "
-    "f.status, f.method FROM __dht_fit ",
+    "f.artefact_weight, f.artefact_weight_sd, f.log_likelihood, f.contamination_relative, "
+    "f.log_likelihood_relative, f.status, f.method FROM __dht_fit ",
     "UNION ALL SELECT NULL::VARCHAR, NULL::BIGINT, NULL::BIGINT, NULL::DOUBLE, NULL::INTEGER, NULL::DOUBLE, "
     "NULL::DOUBLE, NULL::DOUBLE, NULL::DOUBLE, NULL::DOUBLE, NULL::DOUBLE, NULL::DOUBLE, NULL::DOUBLE, "
-    "NULL::DOUBLE, NULL::DOUBLE, NULL::DOUBLE, NULL::VARCHAR, NULL::VARCHAR "
+    "NULL::DOUBLE, NULL::DOUBLE, NULL::DOUBLE, NULL::DOUBLE, NULL::VARCHAR, NULL::VARCHAR "
     "WHERE NOT __duckhts_count_error_valid_args(" FIT_ARGUMENTS ")",
     ")",
 };

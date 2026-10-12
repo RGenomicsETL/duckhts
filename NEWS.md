@@ -1,8 +1,64 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.2.9016
+# duckhts 1.5.2.9017
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
+
+- `duckhts_count_error_fit` reports `artefact_weight_sd`, after
+  `artefact_weight`: each block that is refitted for contamination is also
+  refitted for the artefact weight alone, the other numbers held at the
+  whole-sample fit, and the interval is the standard deviation of the block
+  estimates over the square root of their number, NULL with fewer than three
+  blocks, as for `contamination_sd`. No other output value changes. The fit
+  of a sample does one more one-parameter refit per block.
+  `duckhts_roh_counts_fitted` reads `artefact_weight_sd` from the fit relation
+  (a required column; NULL counts as 0, a negative or non-finite value is an
+  error) and adds `stable_fraction` to each run. Each sample is decoded three
+  times from one collection of its sites, at its artefact weight w and at
+  w - and + `artefact_weight_sd`, kept in [0, 0.05]; `stable_fraction` is the
+  share of the run's bases that both other decodes also call. `gained_bases`
+  guards the other direction: the bases that the decode at
+  w + `artefact_weight_sd` calls next to the run (in a run that shares a base
+  with it or abuts it) but outside every run at w, each counted once. Runs
+  that the higher weight calls apart from every run at w have no row and are
+  not reported. The run columns are unchanged. The decode takes about three times as long, with the same
+  site lists and kernel workspace. `duckhts_roh_counts` has no interval and
+  keeps its columns. The real-data check of the fitted emission
+  (`benchmarks/benchmark_roh_fitted_emission.md`) found the runs most
+  sensitive to the artefact weight: halving or doubling it moved FROH by up to
+  0.0065 on one chr20 30x sample.
+
+- `duckhts_roh_af_table_bcftools` takes `af_order := NULL`, the name of a
+  column of `af_table` that gives the order of its lines: a line number the
+  caller adds, or `FILE_OFFSET` when the frequencies come from `read_bcf`.
+  With it, several rows may share a position, and the row with the least
+  value is used, as `bcftools roh --AF-file` reads only the first line of a
+  position. A NULL value, a value repeated within a position (each error names
+  the position) and a name that is not a column of `af_table` are errors.
+  Without it, several rows at a position stay an error, and the plan is
+  unchanged. On `roh_repeated_af.tsv.gz` in its own order and with its two
+  lines at one position swapped, the macro gives the runs of bcftools 1.24.
+
+- The read-count ROH emission takes the allele balance and the artefact weight
+  of `duckhts_count_error_fit`
+  (https://github.com/RGenomicsETL/duckhts/issues/329,
+  https://github.com/RGenomicsETL/duckhts/issues/332).
+  `duckhts_roh_counts` gains `allele_balance := 0.5` (the share of a
+  heterozygote's reads that show the counted allele) and
+  `artefact_weight := 0.0` (the chance that a site's counts are uniform on 0
+  to depth, whatever its genotype). Each genotype's likelihood is then
+  `(1 - artefact_weight) * binomial + artefact_weight / (depth + 1)`, the form
+  of the fit, so one site at depth d changes the odds between the two states
+  by at most `1 + (d + 1)(1 - w) / w`, as `gt_error` bounds one genotype call.
+  The defaults give the previous runs and qualities bit for bit.
+  `duckhts_roh_counts_fitted` now reads `allele_balance` and `artefact_weight`
+  from the fit relation as well; a fit relation without them is an error.
+  `allele_balance` outside [0.35, 0.65] and `artefact_weight` outside
+  [0, 0.05] are errors, never clipped, also for empty input. New SQL tests
+  check the emission against an independent SQL oracle and bound how far the
+  runs of the titration fixture move under allele balance +-0.01 and artefact
+  weight up to 0.004 (they do not move). The counts overload of
+  `duckhts_roh_segments` keeps 0.5 and 0.
 
 - Documentation: the README and the catalog entries of `duckhts_count_error_fit`,
   the ROH macros and `duckhts_somalier_matched_contamination` describe two

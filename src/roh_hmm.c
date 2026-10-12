@@ -249,19 +249,63 @@ int duckhts_roh_pdg_from_gt(double gt_error, int dosage, double pdg[3]) {
  * emissions become zero. */
 #define ROH_COUNTS_LIKELIHOOD_FLOOR 3.1622776601683794e-26
 
-/* DuckHTS extension: read-count emissions with sequencing error and
- * contamination (see roh_hmm.h). The probabilities that a read shows the
- * counted allele and the other allele are both formed as sums of nonnegative
- * terms, so neither cancels to zero when seq_error is tiny, and terms with no
- * reads are skipped. Log likelihoods relative to the largest keep deep sites
- * from underflowing; push() normalises the three values. */
-int duckhts_roh_pdg_from_counts(int32_t other_count, int32_t counted_count, double seq_error,
-                                double contamination, double af, double pdg[3]) {
-    if ((int64_t)other_count + counted_count == 0) return 0;
-    double contaminant_counted = af * (1 - seq_error) + (1 - af) * seq_error;
-    double contaminant_other = af * seq_error + (1 - af) * (1 - seq_error);
-    double sample_counted[3] = {seq_error, 0.5, 1 - seq_error};
-    double sample_other[3] = {1 - seq_error, 0.5, seq_error};
+/* DuckHTS extension: read-count emissions (see roh_hmm.h). The terms follow
+ * the likelihood of duckhts_count_error_fit() in src/count_error_model.c, so
+ * that its four fitted numbers mean the same here:
+ *
+ *   - q_g = {seq_error, allele_balance, 1 - seq_error} is the chance that a
+ *     read of genotype g shows the counted allele (count_error_model.c:191).
+ *   - A read comes from the second genome with chance contamination, and then
+ *     shows the counted allele with chance q_h (count_error_model.c:199), h in
+ *     Hardy-Weinberg proportions at af (count_error_model.c:249). The fit mixes
+ *     over h once per site; this emission takes the mean over h for each read,
+ *     as the decode always has. Both give a read the same chance; they differ
+ *     only in how reads of one site co-vary.
+ *     The mean is af * (1 - e) + (1 - af) * e + 2 af (1 - af) (allele_balance - 1/2);
+ *     the last term is exactly 0 at allele_balance 1/2.
+ *   - The counts are binomial: the fit with both spreads 0
+ *     (count_error_model.c:204). The spreads are not used here.
+ *   - With chance w = artefact_weight the alt count is uniform on 0..depth
+ *     (count_error_model.c:263). The fit applies the term to the genotype
+ *     mixture of a site; here it is applied to each genotype, and since the
+ *     genotype weights of each HMM state sum to one, each state's emission is
+ *     (1 - w) * sum_g weight_g * Binomial_g + w / (depth + 1), the fit's form.
+ *     The binomial coefficient is that of count_error_model.c:153.
+ *
+ * Bound on one site. Each Binomial_g is a probability, at most 1, so each
+ * genotype likelihood lies in [w / (d + 1), 1 - w + w / (d + 1)] for depth d
+ * and w > 0. Each state's emission is a weighted mean of the
+ * three (push() normalises them by a common factor), so the ratio of the two
+ * states' emissions at one site is at most
+ *   (1 - w + w / (d + 1)) / (w / (d + 1)) = 1 + (d + 1)(1 - w) / w,
+ * and never more than 10^25.5, the floor below. Without the term, balanced
+ * reads at a deep site exclude homozygosity by a factor that grows
+ * exponentially with depth, so one site can end any run; with it, the factor
+ * grows only linearly with depth, as gt_error caps one called genotype at
+ * 10^(gt_error / 10). At d = 30 and w = 0.003 the bound is about 1.03e4,
+ * the cap of gt_error 40.
+ *
+ * The probabilities that a read shows the counted allele and the other allele
+ * are both formed as sums of nonnegative terms, so neither cancels to zero
+ * when seq_error is tiny, and terms with no reads are skipped. Log
+ * likelihoods relative to the largest keep deep sites from underflowing;
+ * push() normalises the three values. With allele_balance 1/2 and
+ * artefact_weight 0, het_shift is exactly 0, 1 - allele_balance is exactly
+ * 1/2 and the artefact branch is skipped, so the values are bit-identical to
+ * those of the decode before these two numbers existed. */
+int duckhts_roh_pdg_from_counts(int32_t other_count, int32_t counted_count,
+                                const duckhts_roh_count_model_t *model, double af, double pdg[3]) {
+    int64_t depth = (int64_t)other_count + counted_count;
+    if (depth == 0) return 0;
+    double seq_error = model->seq_error;
+    double contamination = model->contamination;
+    double balance = model->allele_balance;
+    double artefact_weight = model->artefact_weight;
+    double het_shift = 2 * af * (1 - af) * (balance - 0.5);
+    double contaminant_counted = af * (1 - seq_error) + (1 - af) * seq_error + het_shift;
+    double contaminant_other = af * seq_error + (1 - af) * (1 - seq_error) - het_shift;
+    double sample_counted[3] = {seq_error, balance, 1 - seq_error};
+    double sample_other[3] = {1 - seq_error, 1 - balance, seq_error};
     double log_likelihood[3];
     double best = -INFINITY;
     for (int g = 0; g < 3; g++) {
@@ -272,6 +316,20 @@ int duckhts_roh_pdg_from_counts(int32_t other_count, int32_t counted_count, doub
         if (other_count > 0) ll += other_count * log(other);
         log_likelihood[g] = ll;
         if (ll > best) best = ll;
+    }
+    if (artefact_weight > 0) {
+        double log_choose = lgamma((double)depth + 1.0) - lgamma(counted_count + 1.0) -
+                            lgamma(other_count + 1.0);
+        double log_model = log1p(-artefact_weight) + log_choose;
+        double log_artefact = log(artefact_weight) - log((double)depth + 1.0);
+        best = -INFINITY;
+        for (int g = 0; g < 3; g++) {
+            double a = log_model + log_likelihood[g];
+            double high = a > log_artefact ? a : log_artefact;
+            double low = a > log_artefact ? log_artefact : a;
+            log_likelihood[g] = high + log1p(exp(low - high));
+            if (log_likelihood[g] > best) best = log_likelihood[g];
+        }
     }
     for (int g = 0; g < 3; g++) {
         double relative = exp(log_likelihood[g] - best);
