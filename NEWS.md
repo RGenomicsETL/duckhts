@@ -4,6 +4,11 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- Internal consolidation, no output change: `read_bed`, `fasta_nuc`,
+  `duckhts_mosdepth` and `duckhts_bam_bed_coverage` now parse BED lines through
+  one shared native helper
+  (https://github.com/RGenomicsETL/duckhts/issues/298).
+
 - `duckhts_roh_af_table(..., site_rule := 'bcftools')` chooses the record of a
   repeated listed position as `bcftools roh --AF-file` does
   (https://github.com/RGenomicsETL/duckhts/issues/329). In file order

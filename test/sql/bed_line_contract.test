@@ -1,0 +1,207 @@
+# name: test/sql/bed_line_contract.test
+# description: Shared BED line helpers across read_bed, fasta_nuc, duckhts_bam_bed_coverage and duckhts_mosdepth
+# group: [duckhts]
+
+require duckhts
+
+# bed_line_contract.bed has four metadata lines ("#comment", "track name=...",
+# "trackline<TAB>is<TAB>meta", "browser position ...") and three intervals on
+# contig 11. The dup_only line ends in CRLF. The .bed.gz copy is BGZF (bgzip -c
+# from RBCFTools 1.24.0.0.3.1, htslib 1.24) and the .bed.gzip copy is plain gzip
+# (gzip -n -c). htslib decodes all three and strips
+# the "\r" before the helpers see the line, so all three inputs give the same
+# rows, and no name keeps a trailing carriage return.
+
+query TIITI
+SELECT chrom, start, "end", name, length(name)
+FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_line_contract.bed')
+ORDER BY start;
+----
+11	1000	1200	cluster	7
+11	6000	6200	dup_only	8
+11	20000	20100	zero	4
+
+query III
+SELECT
+  (SELECT count(*) FROM (
+     SELECT * FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_line_contract.bed')
+     EXCEPT ALL
+     SELECT * FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_line_contract.bed.gz'))),
+  (SELECT count(*) FROM (
+     SELECT * FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_line_contract.bed')
+     EXCEPT ALL
+     SELECT * FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_line_contract.bed.gzip'))),
+  (SELECT count(*) FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_line_contract.bed.gzip'));
+----
+0	0	3
+
+query TIII
+SELECT chrom, start, "end", seq_len
+FROM fasta_nuc(
+  '__WORKING_DIRECTORY__/test/data/fixture_ref.fa',
+  bed_path := '__WORKING_DIRECTORY__/test/data/bed_line_contract.bed.gz'
+)
+ORDER BY start;
+----
+11	1000	1200	200
+11	6000	6200	200
+11	20000	20100	100
+
+query TIII
+SELECT chrom, start, "end", seq_len
+FROM fasta_nuc(
+  '__WORKING_DIRECTORY__/test/data/fixture_ref.fa',
+  bed_path := '__WORKING_DIRECTORY__/test/data/bed_line_contract.bed.gzip'
+)
+ORDER BY start;
+----
+11	1000	1200	200
+11	6000	6200	200
+11	20000	20100	100
+
+query TIII
+SELECT name, start, "end", numreads_pre
+FROM duckhts_bam_bed_coverage(
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed.bam',
+  '__WORKING_DIRECTORY__/test/data/bed_line_contract.bed'
+)
+ORDER BY start;
+----
+cluster	1000	1200	4
+dup_only	6000	6200	2
+zero	20000	20100	0
+
+query TIII
+SELECT name, start, "end", numreads_pre
+FROM duckhts_bam_bed_coverage(
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed.bam',
+  '__WORKING_DIRECTORY__/test/data/bed_line_contract.bed.gzip'
+)
+ORDER BY start;
+----
+cluster	1000	1200	4
+dup_only	6000	6200	2
+zero	20000	20100	0
+
+statement ok
+SELECT * FROM duckhts_mosdepth(
+  '__WORKING_DIRECTORY__/mosdepth_bed_line_bgzf_sqltest',
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed.bam',
+  by := '__WORKING_DIRECTORY__/test/data/bed_line_contract.bed.gz',
+  no_per_base := TRUE,
+  overwrite := TRUE
+);
+
+query TIIT
+SELECT chrom, start, "end", name
+FROM read_bed('__WORKING_DIRECTORY__/mosdepth_bed_line_bgzf_sqltest.regions.bed.gz')
+ORDER BY start;
+----
+11	1000	1200	cluster
+11	6000	6200	dup_only
+11	20000	20100	zero
+
+# An empty BED file opens and yields no intervals in every consumer.
+
+query III
+SELECT
+  (SELECT count(*) FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_line_empty.bed')),
+  (SELECT count(*) FROM fasta_nuc(
+     '__WORKING_DIRECTORY__/test/data/fixture_ref.fa',
+     bed_path := '__WORKING_DIRECTORY__/test/data/bed_line_empty.bed')),
+  (SELECT count(*) FROM duckhts_bam_bed_coverage(
+     '__WORKING_DIRECTORY__/test/data/fixture_mixed.bam',
+     '__WORKING_DIRECTORY__/test/data/bed_line_empty.bed'));
+----
+0	0	0
+
+statement ok
+SELECT * FROM duckhts_mosdepth(
+  '__WORKING_DIRECTORY__/mosdepth_bed_line_empty_sqltest',
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed.bam',
+  by := '__WORKING_DIRECTORY__/test/data/bed_line_empty.bed',
+  no_per_base := TRUE,
+  overwrite := TRUE
+);
+
+query I
+SELECT count(*)
+FROM read_bed('__WORKING_DIRECTORY__/mosdepth_bed_line_empty_sqltest.regions.bed.gz');
+----
+0
+
+# A missing BED file is an error. Each consumer keeps its own message.
+
+statement error
+SELECT count(*) FROM read_bed('__WORKING_DIRECTORY__/test/data/does_not_exist.bed');
+----
+read_bed: failed to open file:
+
+statement error
+SELECT count(*) FROM fasta_nuc(
+  '__WORKING_DIRECTORY__/test/data/fixture_ref.fa',
+  bed_path := '__WORKING_DIRECTORY__/test/data/does_not_exist.bed'
+);
+----
+fasta_nuc: failed to open BED file
+
+statement error
+SELECT count(*) FROM duckhts_bam_bed_coverage(
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed.bam',
+  '__WORKING_DIRECTORY__/test/data/does_not_exist.bed'
+);
+----
+duckhts_bam_bed_coverage: failed to open BED file
+
+statement error
+SELECT * FROM duckhts_mosdepth(
+  '__WORKING_DIRECTORY__/mosdepth_bed_line_missing_sqltest',
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed.bam',
+  by := '__WORKING_DIRECTORY__/test/data/does_not_exist.bed',
+  no_per_base := TRUE,
+  overwrite := TRUE
+);
+----
+duckhts_mosdepth: failed to open BED file
+
+# bed_line_long_coord.bed has a 66-byte start field, "000...0001000". The
+# shared integer parser has no length limit. duckhts_bam_bed_coverage keeps
+# its own limit of 63 bytes per coordinate field and rejects the line.
+
+query TIIT
+SELECT chrom, start, "end", name
+FROM read_bed('__WORKING_DIRECTORY__/test/data/bed_line_long_coord.bed');
+----
+11	1000	1200	long_start
+
+query III
+SELECT start, "end", seq_len
+FROM fasta_nuc(
+  '__WORKING_DIRECTORY__/test/data/fixture_ref.fa',
+  bed_path := '__WORKING_DIRECTORY__/test/data/bed_line_long_coord.bed'
+);
+----
+1000	1200	200
+
+statement ok
+SELECT * FROM duckhts_mosdepth(
+  '__WORKING_DIRECTORY__/mosdepth_bed_line_long_sqltest',
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed.bam',
+  by := '__WORKING_DIRECTORY__/test/data/bed_line_long_coord.bed',
+  no_per_base := TRUE,
+  overwrite := TRUE
+);
+
+query TIIT
+SELECT chrom, start, "end", name
+FROM read_bed('__WORKING_DIRECTORY__/mosdepth_bed_line_long_sqltest.regions.bed.gz');
+----
+11	1000	1200	long_start
+
+statement error
+SELECT count(*) FROM duckhts_bam_bed_coverage(
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed.bam',
+  '__WORKING_DIRECTORY__/test/data/bed_line_long_coord.bed'
+);
+----
+duckhts_bam_bed_coverage: invalid BED start coordinate

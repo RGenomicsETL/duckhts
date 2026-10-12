@@ -1,0 +1,7 @@
+#comment
+track name=contract
+trackline	is	meta
+browser position 11:1-10
+11	1000	1200	cluster
+11	6000	6200	dup_only
+11	20000	20100	zero
