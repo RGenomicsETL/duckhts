@@ -148,9 +148,9 @@ its report out of `benchmarks/` too; its numbers are not evidence.
 CONVERT_PARQUET_BENCH_SIZE=reduced taskset -c 0-3 Rscript -e 'rmarkdown::render("benchmarks/benchmark_convert_parquet_scaling.Rmd", output_dir = "/tmp")'
 ```
 
-Source revision: 5e44a8dd49f3cad7f70ea288ddd7bec6f0582f13; `src` tree 9ada6d903f188bc52198290590ce9b0599c765ca. DuckDB runtime: v1.5.1 (Variegata) 7dbb2e646f (CLI). Extension SHA-256: 0682f5dded2dda4a5a3a720e615769d250029ad1a02449cb5d192ae959e61ce5. Host load at start: 1.08, 1.24, 1.47. DuckDB memory limit: 50.0 GiB (the default); temporary directory limit: 0. Every observation is in [`benchmark_convert_parquet_scaling_runs.csv`](benchmark_convert_parquet_scaling_runs.csv).
+Source revision: 68dfa0332ad9ea34eea556eddea231cd83d842f6; `src` tree 2de704e472ceeda276caa0eeef7093221378f3c4. DuckDB runtime: v1.5.1 (Variegata) 7dbb2e646f (CLI). Extension SHA-256: 66598566776aa44faffb68a8e0ba62961346c11db160962d115c30291d33586e. Host load at start: 2.31, 2.24, 1.89. DuckDB memory limit: 50.0 GiB (the default); temporary directory limit: 0. Every observation is in [`benchmark_convert_parquet_scaling_runs.csv`](benchmark_convert_parquet_scaling_runs.csv).
 
-Overhead: 38.9 MiB.
+Overhead: 39 MiB.
 
 ## Inputs
 
@@ -158,21 +158,21 @@ The CRAM slice has 62,660,978 alignments in 6,270 slices; the ONT file has 27,37
 
 | series          | scale | input                                                                                                                      |       rows | leaf_columns | decoded_mib | bytes_per_row | row_group_rows | live_state_mib | budget_mib |
 |:----------------|------:|:---------------------------------------------------------------------------------------------------------------------------|-----------:|-------------:|------------:|--------------:|---------------:|---------------:|-----------:|
-| bam_short_reads |     1 | chr1:1-29661267                                                                                                            |  7,832,623 |           14 |     4,059.9 |         543.5 |        102,047 |          447.6 |    1,381.8 |
-| bam_short_reads |     2 | chr1:1-61075319                                                                                                            | 15,665,245 |           14 |     8,119.6 |         543.5 |        102,047 |          447.6 |    1,381.8 |
-| bam_short_reads |     4 | chr1:1-123524417                                                                                                           | 31,330,489 |           14 |    16,239.1 |         543.5 |        102,047 |          447.6 |    1,381.8 |
-| bam_long_reads  |     1 | NC_000913.3:1-1175904                                                                                                      |      6,423 |           14 |        30.5 |       4,974.3 |          6,423 |           94.0 |      320.8 |
-| bam_long_reads  |     2 | NC_000913.3:1-2502986                                                                                                      |     12,845 |           14 |        61.3 |       5,005.2 |         12,845 |          157.0 |      510.0 |
-| bam_long_reads  |     4 | NC_000913.3:1-4641652                                                                                                      |     25,689 |           14 |       121.1 |       4,941.7 |         25,689 |          279.0 |      876.0 |
-| vcf_records     |     1 | chr1,chr2,chr3,chr4:1-47831439                                                                                             |  1,012,086 |           31 |     1,262.3 |       1,307.8 |        102,047 |          342.6 |    1,066.7 |
-| vcf_records     |     2 | chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8:1-10303467                                                                         |  2,024,171 |           31 |     2,500.9 |       1,295.5 |        102,047 |          340.2 |    1,059.5 |
-| vcf_records     |     4 | chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8,chr9,chr10,chr11,chr12,chr13,chr14,chr15,chr16,chr17,chr18,chr19,chr20,chr21,chr22 |  4,048,342 |           31 |     5,019.9 |       1,300.2 |        102,047 |          341.1 |    1,062.3 |
-| vcf_samples     |     1 | 626 samples                                                                                                                |    124,658 |          660 |     1,247.2 |      10,491.0 |        102,047 |        3,720.5 |   11,200.3 |
-| vcf_samples     |     2 | 1,252 samples                                                                                                              |    124,658 |        1,286 |     2,437.9 |      20,507.0 |        102,047 |        7,254.5 |   21,802.5 |
-| vcf_samples     |     4 | 2,504 samples                                                                                                              |    124,658 |        2,538 |     4,819.4 |      40,539.0 |        102,047 |       14,322.7 |   43,006.9 |
-| gff_records     |     1 | 1 copy                                                                                                                     |  5,866,158 |            9 |     2,876.4 |         514.2 |        102,047 |          131.6 |      433.7 |
-| gff_records     |     2 | 2 copies                                                                                                                   | 11,732,316 |            9 |     5,752.7 |         514.2 |        102,047 |          131.6 |      433.7 |
-| gff_records     |     4 | 4 copies                                                                                                                   | 23,464,632 |            9 |    11,505.5 |         514.2 |        102,047 |          131.6 |      433.7 |
+| bam_short_reads |     1 | chr1:1-29661267                                                                                                            |  7,832,623 |           14 |     4,059.9 |         543.5 |        102,047 |          447.6 |    1,381.9 |
+| bam_short_reads |     2 | chr1:1-61075319                                                                                                            | 15,665,245 |           14 |     8,119.6 |         543.5 |        102,047 |          447.6 |    1,381.9 |
+| bam_short_reads |     4 | chr1:1-123524417                                                                                                           | 31,330,489 |           14 |    16,239.1 |         543.5 |        102,047 |          447.6 |    1,381.9 |
+| bam_long_reads  |     1 | NC_000913.3:1-1175904                                                                                                      |      6,423 |           14 |        30.5 |       4,974.3 |          6,423 |           94.0 |      320.9 |
+| bam_long_reads  |     2 | NC_000913.3:1-2502986                                                                                                      |     12,845 |           14 |        61.3 |       5,005.2 |         12,845 |          157.0 |      510.1 |
+| bam_long_reads  |     4 | NC_000913.3:1-4641652                                                                                                      |     25,689 |           14 |       121.1 |       4,941.7 |         25,689 |          279.0 |      876.1 |
+| vcf_records     |     1 | chr1,chr2,chr3,chr4:1-47831439                                                                                             |  1,012,086 |           31 |     1,262.3 |       1,307.8 |        102,047 |          342.6 |    1,066.8 |
+| vcf_records     |     2 | chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8:1-10303467                                                                         |  2,024,171 |           31 |     2,500.9 |       1,295.5 |        102,047 |          340.2 |    1,059.6 |
+| vcf_records     |     4 | chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8,chr9,chr10,chr11,chr12,chr13,chr14,chr15,chr16,chr17,chr18,chr19,chr20,chr21,chr22 |  4,048,342 |           31 |     5,019.9 |       1,300.2 |        102,047 |          341.1 |    1,062.4 |
+| vcf_samples     |     1 | 626 samples                                                                                                                |    124,658 |          660 |     1,247.2 |      10,491.0 |        102,047 |        3,720.5 |   11,200.4 |
+| vcf_samples     |     2 | 1,252 samples                                                                                                              |    124,658 |        1,286 |     2,437.9 |      20,507.0 |        102,047 |        7,254.5 |   21,802.6 |
+| vcf_samples     |     4 | 2,504 samples                                                                                                              |    124,658 |        2,538 |     4,819.4 |      40,539.0 |        102,047 |       14,322.7 |   43,007.0 |
+| gff_records     |     1 | 1 copy                                                                                                                     |  5,866,158 |            9 |     2,876.4 |         514.2 |        102,047 |          131.6 |      433.8 |
+| gff_records     |     2 | 2 copies                                                                                                                   | 11,732,316 |            9 |     5,752.7 |         514.2 |        102,047 |          131.6 |      433.8 |
+| gff_records     |     4 | 4 copies                                                                                                                   | 23,464,632 |            9 |    11,505.5 |         514.2 |        102,047 |          131.6 |      433.8 |
 
 ## Measurements
 
@@ -180,64 +180,64 @@ The CRAM slice has 62,660,978 alignments in 6,270 slices; the ONT file has 27,37
 
 | series          | scale | threads |       rows | row_groups | output_mib | median_seconds | min_seconds | max_seconds | scan_share | cpu_per_second | median_rss_mib | max_rss_mib | max_buffer_mib | budget_mib |
 |:----------------|------:|--------:|-----------:|-----------:|-----------:|---------------:|------------:|------------:|-----------:|---------------:|---------------:|------------:|---------------:|-----------:|
-| bam_short_reads |     1 |       1 |  7,832,623 |         79 |      245.6 |         16.185 |      16.173 |      16.194 |       0.41 |           0.99 |          613.0 |       614.4 |          142.8 |    1,381.8 |
-| bam_short_reads |     2 |       1 | 15,665,245 |        157 |      482.7 |         31.852 |      31.820 |      31.993 |       0.42 |           1.00 |          654.9 |       661.8 |          142.8 |    1,381.8 |
-| bam_short_reads |     4 |       1 | 31,330,489 |        313 |      951.5 |         64.270 |      64.160 |      65.245 |       0.42 |           1.00 |          728.4 |       732.7 |          142.8 |    1,381.8 |
-| bam_short_reads |     1 |       4 |  7,832,623 |         79 |      245.6 |         16.196 |      16.156 |      16.583 |       0.41 |           0.99 |          611.5 |       613.8 |          142.8 |    1,381.8 |
-| bam_short_reads |     2 |       4 | 15,665,245 |        157 |      482.7 |         31.933 |      31.916 |      32.028 |       0.42 |           1.00 |          660.7 |       667.6 |          142.9 |    1,381.8 |
-| bam_short_reads |     4 |       4 | 31,330,489 |        313 |      951.5 |         65.231 |      64.004 |      65.500 |       0.41 |           1.00 |          734.5 |       734.5 |          142.9 |    1,381.8 |
-| bam_long_reads  |     1 |       1 |      6,423 |          1 |       11.5 |          0.244 |       0.244 |       0.245 |       0.16 |           0.21 |          112.2 |       112.3 |           64.4 |      320.8 |
-| bam_long_reads  |     2 |       1 |     12,845 |          1 |       23.1 |          0.486 |       0.484 |       0.495 |       0.15 |           0.20 |          179.0 |       179.1 |          133.6 |      510.0 |
-| bam_long_reads  |     4 |       1 |     25,689 |          1 |       45.5 |          0.944 |       0.942 |       0.968 |       0.15 |           0.20 |          293.6 |       293.7 |          273.2 |      876.0 |
-| bam_long_reads  |     1 |       4 |      6,423 |          1 |       11.5 |          0.243 |       0.243 |       0.244 |       0.16 |           0.21 |          115.3 |       115.4 |           64.5 |      320.8 |
-| bam_long_reads  |     2 |       4 |     12,845 |          1 |       23.1 |          0.493 |       0.485 |       0.501 |       0.15 |           0.20 |          183.9 |       184.0 |          133.6 |      510.0 |
-| bam_long_reads  |     4 |       4 |     25,689 |          1 |       45.5 |          0.960 |       0.952 |       0.995 |       0.15 |           0.20 |          299.6 |       299.9 |          273.2 |      876.0 |
-| vcf_records     |     1 |       1 |  1,012,086 |         11 |       18.1 |          8.796 |       8.760 |       8.811 |       0.69 |           0.99 |          316.3 |       318.2 |          296.0 |    1,066.7 |
-| vcf_records     |     2 |       1 |  2,024,171 |         21 |       35.7 |         17.226 |      17.206 |      17.275 |       0.69 |           0.99 |          316.8 |       317.1 |          296.0 |    1,059.5 |
-| vcf_records     |     4 |       1 |  4,048,342 |         41 |       72.0 |         34.418 |      34.352 |      34.593 |       0.69 |           0.99 |          321.3 |       321.4 |          296.0 |    1,062.3 |
-| vcf_records     |     1 |       4 |  1,012,086 |         11 |       18.1 |          8.834 |       8.774 |       8.852 |       0.68 |           0.99 |          314.6 |       322.1 |          296.2 |    1,066.7 |
-| vcf_records     |     2 |       4 |  2,024,171 |         21 |       35.7 |         17.266 |      17.184 |      17.301 |       0.69 |           0.99 |          328.0 |       328.3 |          296.2 |    1,059.5 |
-| vcf_records     |     4 |       4 |  4,048,342 |         41 |       72.0 |         34.477 |      34.454 |      34.525 |       0.69 |           0.99 |          344.6 |       352.2 |          296.1 |    1,062.3 |
-| vcf_samples     |     1 |       1 |    124,658 |          2 |        7.1 |         15.891 |      15.835 |      15.922 |       0.72 |           0.95 |        2,268.8 |     2,269.1 |        1,859.7 |   11,200.3 |
-| vcf_samples     |     2 |       1 |    124,658 |          2 |       13.5 |         24.552 |      24.434 |      24.650 |       0.60 |           0.93 |        4,301.1 |     4,431.5 |        3,630.5 |   21,802.5 |
-| vcf_samples     |     4 |       1 |    124,658 |          2 |       25.8 |         45.730 |      45.628 |      46.142 |       0.47 |           0.91 |        8,850.4 |     8,850.6 |        7,174.0 |   43,006.9 |
-| vcf_samples     |     1 |       4 |    124,658 |          2 |        7.1 |         15.940 |      15.886 |      15.964 |       0.71 |           0.95 |        2,455.5 |     2,482.0 |        1,859.9 |   11,200.3 |
-| vcf_samples     |     2 |       4 |    124,658 |          2 |       13.5 |         24.618 |      24.610 |      24.761 |       0.59 |           0.93 |        4,536.6 |     4,813.6 |        3,630.7 |   21,802.5 |
-| vcf_samples     |     4 |       4 |    124,658 |          2 |       25.8 |         45.952 |      45.738 |      46.008 |       0.47 |           0.91 |        9,614.3 |     9,615.1 |        7,174.2 |   43,006.9 |
-| gff_records     |     1 |       1 |  5,866,158 |         59 |       84.9 |          9.860 |       9.857 |       9.878 |       0.48 |           1.00 |          176.0 |       176.1 |           90.9 |      433.7 |
-| gff_records     |     2 |       1 | 11,732,316 |        117 |      169.8 |         19.737 |      19.666 |      19.756 |       0.48 |           0.99 |          180.7 |       180.7 |           90.9 |      433.7 |
-| gff_records     |     4 |       1 | 23,464,632 |        234 |      339.6 |         39.365 |      39.316 |      39.422 |       0.48 |           1.00 |          186.1 |       187.6 |           90.9 |      433.7 |
-| gff_records     |     1 |       4 |  5,866,158 |         59 |       84.9 |          9.841 |       9.840 |       9.871 |       0.48 |           1.00 |          179.1 |       179.8 |           96.8 |      433.7 |
-| gff_records     |     2 |       4 | 11,732,316 |        117 |      169.8 |         19.719 |      19.706 |      19.733 |       0.48 |           0.99 |          182.5 |       183.5 |           96.9 |      433.7 |
-| gff_records     |     4 |       4 | 23,464,632 |        234 |      339.6 |         39.451 |      39.214 |      39.510 |       0.48 |           1.00 |          190.9 |       191.3 |           96.8 |      433.7 |
+| bam_short_reads |     1 |       1 |  7,832,623 |         79 |      245.6 |         16.876 |      16.135 |      16.887 |       0.40 |           0.99 |          604.9 |       610.5 |          142.8 |    1,381.9 |
+| bam_short_reads |     2 |       1 | 15,665,245 |        157 |      482.7 |         32.008 |      31.941 |      33.104 |       0.42 |           1.00 |          651.3 |       654.0 |          142.8 |    1,381.9 |
+| bam_short_reads |     4 |       1 | 31,330,489 |        313 |      951.5 |         64.796 |      64.655 |      65.677 |       0.42 |           1.00 |          729.7 |       731.0 |          142.8 |    1,381.9 |
+| bam_short_reads |     1 |       4 |  7,832,623 |         79 |      245.6 |         16.127 |      16.088 |      16.134 |       0.42 |           0.99 |          610.6 |       615.4 |          142.9 |    1,381.9 |
+| bam_short_reads |     2 |       4 | 15,665,245 |        157 |      482.7 |         32.318 |      32.005 |      32.355 |       0.41 |           1.00 |          654.2 |       659.2 |          142.9 |    1,381.9 |
+| bam_short_reads |     4 |       4 | 31,330,489 |        313 |      951.5 |         65.379 |      64.196 |      65.667 |       0.41 |           1.00 |          732.2 |       743.3 |          142.8 |    1,381.9 |
+| bam_long_reads  |     1 |       1 |      6,423 |          1 |       11.5 |          0.252 |       0.250 |       0.253 |       0.16 |           0.20 |          112.4 |       112.4 |           64.5 |      320.9 |
+| bam_long_reads  |     2 |       1 |     12,845 |          1 |       23.1 |          0.500 |       0.497 |       0.503 |       0.15 |           0.20 |          178.8 |       179.0 |          133.6 |      510.1 |
+| bam_long_reads  |     4 |       1 |     25,689 |          1 |       45.5 |          0.950 |       0.940 |       0.982 |       0.15 |           0.20 |          293.5 |       293.8 |          273.2 |      876.1 |
+| bam_long_reads  |     1 |       4 |      6,423 |          1 |       11.5 |          0.248 |       0.248 |       0.249 |       0.16 |           0.21 |          115.3 |       115.4 |           64.5 |      320.9 |
+| bam_long_reads  |     2 |       4 |     12,845 |          1 |       23.1 |          0.487 |       0.485 |       0.488 |       0.15 |           0.20 |          183.5 |       183.7 |          133.6 |      510.1 |
+| bam_long_reads  |     4 |       4 |     25,689 |          1 |       45.5 |          0.963 |       0.954 |       0.990 |       0.14 |           0.20 |          299.5 |       299.7 |          273.3 |      876.1 |
+| vcf_records     |     1 |       1 |  1,012,086 |         11 |       18.1 |          8.784 |       8.779 |       8.789 |       0.68 |           0.99 |          316.8 |       316.9 |          296.0 |    1,066.8 |
+| vcf_records     |     2 |       1 |  2,024,171 |         21 |       35.7 |         17.228 |      17.214 |      17.236 |       0.69 |           0.99 |          314.2 |       314.3 |          296.0 |    1,059.6 |
+| vcf_records     |     4 |       1 |  4,048,342 |         41 |       72.0 |         34.460 |      34.382 |      34.505 |       0.69 |           0.99 |          323.6 |       324.0 |          296.0 |    1,062.4 |
+| vcf_records     |     1 |       4 |  1,012,086 |         11 |       18.1 |          8.817 |       8.802 |       8.878 |       0.68 |           0.99 |          322.4 |       323.7 |          296.2 |    1,066.8 |
+| vcf_records     |     2 |       4 |  2,024,171 |         21 |       35.7 |         17.299 |      17.068 |      17.304 |       0.69 |           0.99 |          320.8 |       328.2 |          296.2 |    1,059.6 |
+| vcf_records     |     4 |       4 |  4,048,342 |         41 |       72.0 |         34.520 |      34.459 |      34.600 |       0.69 |           0.99 |          349.2 |       349.7 |          296.4 |    1,062.4 |
+| vcf_samples     |     1 |       1 |    124,658 |          2 |        7.1 |         15.903 |      15.903 |      15.943 |       0.72 |           0.95 |        2,265.4 |     2,268.5 |        1,859.7 |   11,200.4 |
+| vcf_samples     |     2 |       1 |    124,658 |          2 |       13.5 |         24.751 |      24.543 |      24.986 |       0.60 |           0.93 |        4,301.1 |     4,303.3 |        3,630.5 |   21,802.6 |
+| vcf_samples     |     4 |       1 |    124,658 |          2 |       25.8 |         46.109 |      45.962 |      47.204 |       0.48 |           0.91 |        8,817.5 |     8,817.5 |        7,174.0 |   43,007.0 |
+| vcf_samples     |     1 |       4 |    124,658 |          2 |        7.1 |         15.953 |      15.909 |      16.095 |       0.71 |           0.95 |        2,481.9 |     2,481.9 |        1,859.7 |   11,200.4 |
+| vcf_samples     |     2 |       4 |    124,658 |          2 |       13.5 |         24.661 |      24.651 |      24.718 |       0.59 |           0.93 |        4,537.2 |     4,537.3 |        3,630.7 |   21,802.6 |
+| vcf_samples     |     4 |       4 |    124,658 |          2 |       25.8 |         46.425 |      46.238 |      46.929 |       0.47 |           0.91 |        9,618.7 |     9,636.2 |        7,174.2 |   43,007.0 |
+| gff_records     |     1 |       1 |  5,866,158 |         59 |       84.9 |          9.862 |       9.835 |       9.864 |       0.49 |           1.00 |          176.6 |       176.7 |           90.9 |      433.8 |
+| gff_records     |     2 |       1 | 11,732,316 |        117 |      169.8 |         19.785 |      19.762 |      19.851 |       0.49 |           0.99 |          182.4 |       182.4 |           90.9 |      433.8 |
+| gff_records     |     4 |       1 | 23,464,632 |        234 |      339.6 |         39.368 |      39.327 |      39.371 |       0.48 |           1.00 |          186.6 |       186.8 |           90.9 |      433.8 |
+| gff_records     |     1 |       4 |  5,866,158 |         59 |       84.9 |          9.846 |       9.835 |       9.928 |       0.48 |           1.00 |          180.0 |       183.6 |           96.8 |      433.8 |
+| gff_records     |     2 |       4 | 11,732,316 |        117 |      169.8 |         19.673 |      19.671 |      19.767 |       0.48 |           0.99 |          181.7 |       183.0 |           96.8 |      433.8 |
+| gff_records     |     4 |       4 | 23,464,632 |        234 |      339.6 |         39.390 |      39.341 |      40.256 |       0.48 |           1.00 |          187.6 |       190.3 |           96.8 |      433.8 |
 
 Growth of the median time against the input rows, or against the samples of the `vcf_samples` series (an exponent of 1 is linear), the size ratio at each doubling, and peak-RSS ratios to 1×:
 
 | series          | threads | one_x_seconds | ratio_2x | ratio_4x | time_exponent_2x | time_exponent_4x | rss_ratio_2x | rss_ratio_4x |
 |:----------------|--------:|--------------:|---------:|---------:|-----------------:|-----------------:|-------------:|-------------:|
-| bam_short_reads |       1 |        16.185 |        2 |        2 |            0.977 |            1.013 |        1.068 |        1.188 |
-| bam_short_reads |       4 |        16.196 |        2 |        2 |            0.979 |            1.030 |        1.080 |        1.201 |
-| bam_long_reads  |       1 |         0.244 |        2 |        2 |            0.993 |            0.956 |        1.595 |        2.617 |
-| bam_long_reads  |       4 |         0.243 |        2 |        2 |            1.018 |            0.962 |        1.595 |        2.598 |
-| vcf_records     |       1 |         8.796 |        2 |        2 |            0.970 |            0.999 |        1.002 |        1.016 |
-| vcf_records     |       4 |         8.834 |        2 |        2 |            0.967 |            0.998 |        1.043 |        1.095 |
-| vcf_samples     |       1 |        15.891 |        2 |        2 |            0.628 |            0.897 |        1.896 |        3.901 |
-| vcf_samples     |       4 |        15.940 |        2 |        2 |            0.627 |            0.900 |        1.848 |        3.915 |
-| gff_records     |       1 |         9.860 |        2 |        2 |            1.001 |            0.996 |        1.027 |        1.057 |
-| gff_records     |       4 |         9.841 |        2 |        2 |            1.003 |            1.000 |        1.019 |        1.066 |
+| bam_short_reads |       1 |        16.876 |        2 |        2 |            0.923 |            1.017 |        1.077 |        1.206 |
+| bam_short_reads |       4 |        16.127 |        2 |        2 |            1.003 |            1.016 |        1.071 |        1.199 |
+| bam_long_reads  |       1 |         0.252 |        2 |        2 |            0.991 |            0.926 |        1.591 |        2.611 |
+| bam_long_reads  |       4 |         0.248 |        2 |        2 |            0.970 |            0.985 |        1.592 |        2.598 |
+| vcf_records     |       1 |         8.784 |        2 |        2 |            0.972 |            1.000 |        0.992 |        1.021 |
+| vcf_records     |       4 |         8.817 |        2 |        2 |            0.972 |            0.997 |        0.995 |        1.083 |
+| vcf_samples     |       1 |        15.903 |        2 |        2 |            0.638 |            0.898 |        1.899 |        3.892 |
+| vcf_samples     |       4 |        15.953 |        2 |        2 |            0.628 |            0.913 |        1.828 |        3.876 |
+| gff_records     |       1 |         9.862 |        2 |        2 |            1.004 |            0.993 |        1.033 |        1.057 |
+| gff_records     |       4 |         9.846 |        2 |        2 |            0.999 |            1.002 |        1.009 |        1.042 |
 
 ## Findings
 
-Every observation is within its ceiling, none spills, and every output has its input’s rows and the DuckHTS reader metadata; the render enforces all of this. Every COPY ran as one `COPY_TO_FILE` operator, the writer that keeps insertion order without batch indexes. DuckDB’s CPU time is at most 1.00 s per second of latency in any run, and four threads change the median time of a cell by a factor of 1.00 to 1.02, so one DuckDB thread does the work whatever the setting.
+Every observation is within its ceiling, none spills, and every output has its input’s rows and the DuckHTS reader metadata; the render enforces all of this. Every COPY ran as one `COPY_TO_FILE` operator, the writer that keeps insertion order without batch indexes. DuckDB’s CPU time is at most 1.00 s per second of latency in any run, and four threads change the median time of a cell by a factor of 0.96 to 1.01, so one DuckDB thread does the work whatever the setting.
 
 On one thread the peak RSS above the overhead is between 0.59 (`vcf_samples` at 2×) and 1.54 (`bam_short_reads` at 4×) times the declared live state, against the factor of 3 that the ceiling allows.
 
-In the three records series the writer flushes a row group at 100,000 rows, so the model holds no state that grows with the input, and DuckDB’s peak buffer differs by at most 0.0 MiB between the sizes of a series. From 1× to 4× on one thread the peak RSS changes by +115.4 MiB (a ratio of 1.19) for the CRAM, +5.0 MiB (1.02) for the VCF and +10.1 MiB (1.06) for the GFF; the model does not account for that change, and it is not memory that DuckDB’s buffer manager holds.
+In the three records series the writer flushes a row group at 100,000 rows, so the model holds no state that grows with the input, and DuckDB’s peak buffer differs by at most 0.0 MiB between the sizes of a series. From 1× to 4× on one thread the peak RSS changes by +124.8 MiB (a ratio of 1.21) for the CRAM, +6.8 MiB (1.02) for the VCF and +10.0 MiB (1.06) for the GFF; the model does not account for that change, and it is not memory that DuckDB’s buffer manager holds.
 
-The time exponents of the series with a timing verdict (`bam_short_reads`, `vcf_records`, `vcf_samples`, `gff_records`) are at most 1.03. `bam_long_reads` takes less than 5 s at 1× and gets no timing verdict.
+The time exponents of the series with a timing verdict (`bam_short_reads`, `vcf_records`, `vcf_samples`, `gff_records`) are at most 1.02. `bam_long_reads` takes less than 5 s at 1× and gets no timing verdict.
 
-On one thread, 31,330,489 CRAM alignments convert in 64.3 s (487,485 alignments per second, 42% of the time in the reader) at 728.4 MiB peak RSS; the model attributes 237 MiB of that to the chr1 reference, which htslib loads whole for its decompression threads. 4,048,342 VCF records take 34.4 s (69% in the reader) at 321.3 MiB, and 23,464,632 GFF features 39.4 s (48% in the reader) at 186.1 MiB.
+On one thread, 31,330,489 CRAM alignments convert in 64.8 s (483,523 alignments per second, 42% of the time in the reader) at 729.7 MiB peak RSS; the model attributes 237 MiB of that to the chr1 reference, which htslib loads whole for its decompression threads. 4,048,342 VCF records take 34.5 s (69% in the reader) at 323.6 MiB, and 23,464,632 GFF features 39.4 s (48% in the reader) at 186.6 MiB.
 
-Memory grows with the width of a row. In the builders’ layout each sample of a VCF is one column, and a row group holds the genotypes of every sample for its records: on one thread 626 samples take 2268.8 MiB peak RSS and 2,504 samples 8850.4 MiB, about 3.5 MiB per sample, for an input file of 21 MiB and an output of 25.8 MiB. Long reads make wide rows too: at 4× the ONT reads make one row group of 25,689 rows, and the peak RSS is 293.6 MiB, 2.62 times the 1× peak.
+Memory grows with the width of a row. In the builders’ layout each sample of a VCF is one column, and a row group holds the genotypes of every sample for its records: on one thread 626 samples take 2265.4 MiB peak RSS and 2,504 samples 8817.5 MiB, about 3.5 MiB per sample, for an input file of 21 MiB and an output of 25.8 MiB. Long reads make wide rows too: at 4× the ONT reads make one row group of 25,689 rows, and the peak RSS is 293.5 MiB, 2.61 times the 1× peak.
 
 The operating scale this report supports is what it measures: 31,330,489 alignments of one 30× chromosome, a whole-genome single-sample VCF of 4,048,342 records, four copies of a full human annotation (23,464,632 features) and 2,504 samples of 124,658 records, all with the default row group of 100,000 rows. More samples, wider rows or a larger row group need memory in proportion; `row_group_size` is the builders’ parameter for it, and its effect is not measured here.

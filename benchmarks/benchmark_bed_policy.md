@@ -7,7 +7,7 @@ The public DuckBedQC `duckbedqc_118fc21` corpus supplies
 22,802,546 bytes). Stage it with `scripts/stage_duckbedqc_data.sh`. The
 baseline is an independent `origin/develop` worktree at a5ab5147
 (`BED_POLICY_BASE`, its extension build); the candidate source is
-3624158b5141082af6545e19a1be9e8f03f06a81 (`BED_POLICY_BRANCH`, its
+68dfa0332ad9ea34eea556eddea231cd83d842f6 (`BED_POLICY_BRANCH`, its
 extension build). Both revisions are available in this repository. The
 query forces a full scan with `scan_mode := 'sequential'` and aggregates
 `count(*)`, `sum(start)`, and `sum("end")`. Both numeric sums are
@@ -82,20 +82,20 @@ knitr::kable(summary, caption = sprintf("Median wall seconds over %d independent
 
 | revision                                 | build     | threads | effective_threads | policy | input_lines | output_rows | seconds |
 |:-----------------------------------------|:----------|:--------|------------------:|:-------|------------:|------------:|--------:|
-| a5ab5147                                 | baseline  | 1       |                 1 | error  |      389852 |      389852 |   0.039 |
-| 3624158b5141082af6545e19a1be9e8f03f06a81 | candidate | 1       |                 1 | error  |      389852 |      389852 |   0.038 |
+| a5ab5147                                 | baseline  | 1       |                 1 | error  |      389852 |      389852 |   0.038 |
+| 68dfa0332ad9ea34eea556eddea231cd83d842f6 | candidate | 1       |                 1 | error  |      389852 |      389852 |   0.038 |
 | a5ab5147                                 | baseline  | default |                20 | error  |      389852 |      389852 |   0.039 |
-| 3624158b5141082af6545e19a1be9e8f03f06a81 | candidate | default |                20 | error  |      389852 |      389852 |   0.039 |
-| 3624158b5141082af6545e19a1be9e8f03f06a81 | candidate | 1       |                 1 | report |      389852 |      389852 |   0.039 |
-| 3624158b5141082af6545e19a1be9e8f03f06a81 | candidate | default |                20 | report |      389852 |      389852 |   0.041 |
-| 3624158b5141082af6545e19a1be9e8f03f06a81 | candidate | 1       |                 1 | skip   |      389852 |      389852 |   0.041 |
-| 3624158b5141082af6545e19a1be9e8f03f06a81 | candidate | default |                20 | skip   |      389852 |      389852 |   0.040 |
+| 68dfa0332ad9ea34eea556eddea231cd83d842f6 | candidate | default |                20 | error  |      389852 |      389852 |   0.038 |
+| 68dfa0332ad9ea34eea556eddea231cd83d842f6 | candidate | 1       |                 1 | report |      389852 |      389852 |   0.039 |
+| 68dfa0332ad9ea34eea556eddea231cd83d842f6 | candidate | default |                20 | report |      389852 |      389852 |   0.039 |
+| 68dfa0332ad9ea34eea556eddea231cd83d842f6 | candidate | 1       |                 1 | skip   |      389852 |      389852 |   0.039 |
+| 68dfa0332ad9ea34eea556eddea231cd83d842f6 | candidate | default |                20 | skip   |      389852 |      389852 |   0.039 |
 
 Median wall seconds over 11 independent scans per policy/thread/build
 
-Default policy, 1 threads: 0.039 s to 0.038 s (-2.6%).
+Default policy, 1 threads: 0.038 s to 0.038 s (+0.0%).
 
-Default policy, default threads: 0.039 s to 0.039 s (+0.0%).
+Default policy, default threads: 0.039 s to 0.038 s (-2.6%).
 
 The alternating comparison runs the exact default-policy aggregate with
 one DuckDB thread in a fresh R process per observation. The baseline and
@@ -136,12 +136,12 @@ knitr::kable(alternating_summary,
 | build     |   min | median |
 |:----------|------:|-------:|
 | baseline  | 0.038 |  0.039 |
-| candidate | 0.038 |  0.039 |
+| candidate | 0.039 |  0.040 |
 
 Alternating fresh-process scans (15 per build, one thread)
 
-Host load before alternating scans: 12:00:04 up 369 days, 20:54, 19
-users, load average: 1.24, 1.25, 1.36. CPU affinity: 8-11.
+Host load before alternating scans: 14:42:11 up 369 days, 23:36, 19
+users, load average: 1.18, 1.29, 0.98. CPU affinity: 8-11.
 
 The reader’s only fatal data-line check is fewer than three
 tab-delimited fields. Numeric parse failures yield NULL and reversed
@@ -161,18 +161,18 @@ renders. Median wall seconds per cell:
 
 | build     | threads | policy | effective_threads_before | seconds_before | effective_threads_after | seconds_after | time_ratio |
 |:----------|:--------|:-------|:-------------------------|---------------:|------------------------:|--------------:|-----------:|
-| baseline  | 1       | error  | 1                        |          0.039 |                       1 |         0.039 |     1.0000 |
+| baseline  | 1       | error  | 1                        |          0.039 |                       1 |         0.038 |     0.9744 |
 | baseline  | default | error  | 20                       |          0.040 |                      20 |         0.039 |     0.9750 |
 | candidate | 1       | error  | 1                        |          0.039 |                       1 |         0.038 |     0.9744 |
 | candidate | 1       | report | 1                        |          0.039 |                       1 |         0.039 |     1.0000 |
-| candidate | 1       | skip   | 1                        |          0.039 |                       1 |         0.041 |     1.0513 |
-| candidate | default | error  | 20                       |          0.039 |                      20 |         0.039 |     1.0000 |
-| candidate | default | report | 20                       |          0.040 |                      20 |         0.041 |     1.0250 |
-| candidate | default | skip   | 20                       |          0.040 |                      20 |         0.040 |     1.0000 |
+| candidate | 1       | skip   | 1                        |          0.039 |                       1 |         0.039 |     1.0000 |
+| candidate | default | error  | 20                       |          0.039 |                      20 |         0.038 |     0.9744 |
+| candidate | default | report | 20                       |          0.040 |                      20 |         0.039 |     0.9750 |
+| candidate | default | skip   | 20                       |          0.040 |                      20 |         0.039 |     0.9750 |
 
 Alternating fresh-process scans, median per build:
 
 | build     | seconds_before | seconds_after | time_ratio |
 |:----------|---------------:|--------------:|-----------:|
 | baseline  |          0.041 |         0.039 |     0.9512 |
-| candidate |          0.040 |         0.039 |     0.9750 |
+| candidate |          0.040 |         0.040 |     1.0000 |

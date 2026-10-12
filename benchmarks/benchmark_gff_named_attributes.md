@@ -21,29 +21,29 @@ of `benchmark_gff_named_attributes_runs.csv`; it is not a measurement.
 taskset -c 8-11 Rscript -e 'rmarkdown::render("benchmarks/benchmark_gff_named_attributes.Rmd")'
 ```
 
-Source revision: 3d7fb282cc9d9f79c187ddf573c1eb5b3cee1a5c. DuckDB
-runtime: 1.5.5. Host load before the run: 1.55, 1.76, 1.53. CPU
+Source revision: 68dfa0332ad9ea34eea556eddea231cd83d842f6. DuckDB
+runtime: 1.5.5. Host load before the run: 1.36, 1.36, 0.95. CPU
 affinity: 8-11. Extension SHA-256:
-0682f5dded2dda4a5a3a720e615769d250029ad1a02449cb5d192ae959e61ce5. Input
+66598566776aa44faffb68a8e0ba62961346c11db160962d115c30291d33586e. Input
 SHA-256:
 e8ed48bef6a44fdf0db7c10a551d4398aa341318d00fbd9efd69530593106846.
 
 | threads      | workload             | input_rows | output_rows | metric          | median_seconds | runs |
 |:-------------|:---------------------|-----------:|------------:|:----------------|---------------:|-----:|
-| 1            | plain_columns        |    1299172 |           1 | 193775078663005 |          0.480 |    5 |
-| 1            | named_none_projected |    1299172 |           1 | 193775078663005 |          0.479 |    5 |
-| 1            | attributes_string    |    1299172 |           1 | 577618955       |          0.690 |    5 |
-| 1            | map_parent           |    1299172 |           1 | 1243771         |          2.578 |    5 |
-| 1            | regexp_three         |    1299172 |           1 | 76627121        |          2.365 |    5 |
-| 1            | named_three          |    1299172 |           1 | 76627121        |          0.846 |    5 |
-| 1            | named_one_projected  |    1299172 |           1 | 25136049        |          0.728 |    5 |
-| default (20) | plain_columns        |    1299172 |           1 | 193775078663005 |          0.479 |    5 |
-| default (20) | named_none_projected |    1299172 |           1 | 193775078663005 |          0.485 |    5 |
-| default (20) | attributes_string    |    1299172 |           1 | 577618955       |          0.689 |    5 |
-| default (20) | map_parent           |    1299172 |           1 | 1243771         |          2.577 |    5 |
-| default (20) | regexp_three         |    1299172 |           1 | 76627121        |          2.373 |    5 |
-| default (20) | named_three          |    1299172 |           1 | 76627121        |          0.846 |    5 |
-| default (20) | named_one_projected  |    1299172 |           1 | 25136049        |          0.732 |    5 |
+| 1            | plain_columns        |    1299172 |           1 | 193775078663005 |          0.479 |    5 |
+| 1            | named_none_projected |    1299172 |           1 | 193775078663005 |          0.480 |    5 |
+| 1            | attributes_string    |    1299172 |           1 | 577618955       |          0.692 |    5 |
+| 1            | map_parent           |    1299172 |           1 | 1243771         |          2.588 |    5 |
+| 1            | regexp_three         |    1299172 |           1 | 76627121        |          2.373 |    5 |
+| 1            | named_three          |    1299172 |           1 | 76627121        |          0.842 |    5 |
+| 1            | named_one_projected  |    1299172 |           1 | 25136049        |          0.732 |    5 |
+| default (20) | plain_columns        |    1299172 |           1 | 193775078663005 |          0.482 |    5 |
+| default (20) | named_none_projected |    1299172 |           1 | 193775078663005 |          0.479 |    5 |
+| default (20) | attributes_string    |    1299172 |           1 | 577618955       |          0.688 |    5 |
+| default (20) | map_parent           |    1299172 |           1 | 1243771         |          2.582 |    5 |
+| default (20) | regexp_three         |    1299172 |           1 | 76627121        |          2.376 |    5 |
+| default (20) | named_three          |    1299172 |           1 | 76627121        |          0.845 |    5 |
+| default (20) | named_one_projected  |    1299172 |           1 | 25136049        |          0.725 |    5 |
 
 The one-key projection requests three keys at bind but scans only
 `Parent`. `named_none_projected` requests three keys at bind but reads
@@ -65,17 +65,17 @@ per cell:
 
 | setting | workload             | seconds_before | seconds_after | time_ratio |
 |:--------|:---------------------|---------------:|--------------:|-----------:|
-| 1       | plain_columns        |          0.479 |         0.480 |      1.002 |
-| 1       | named_none_projected |          0.479 |         0.479 |      1.000 |
-| 1       | attributes_string    |          0.692 |         0.690 |      0.997 |
-| 1       | map_parent           |          2.242 |         2.578 |      1.150 |
-| 1       | regexp_three         |          2.358 |         2.365 |      1.003 |
-| 1       | named_three          |          0.850 |         0.846 |      0.995 |
-| 1       | named_one_projected  |          0.731 |         0.728 |      0.996 |
-| default | plain_columns        |          0.485 |         0.479 |      0.988 |
-| default | named_none_projected |          0.480 |         0.485 |      1.010 |
-| default | attributes_string    |          0.688 |         0.689 |      1.001 |
-| default | map_parent           |          2.262 |         2.577 |      1.139 |
-| default | regexp_three         |          2.392 |         2.373 |      0.992 |
-| default | named_three          |          0.853 |         0.846 |      0.992 |
-| default | named_one_projected  |          0.732 |         0.732 |      1.000 |
+| 1       | plain_columns        |          0.479 |         0.479 |      1.000 |
+| 1       | named_none_projected |          0.479 |         0.480 |      1.002 |
+| 1       | attributes_string    |          0.692 |         0.692 |      1.000 |
+| 1       | map_parent           |          2.242 |         2.588 |      1.154 |
+| 1       | regexp_three         |          2.358 |         2.373 |      1.006 |
+| 1       | named_three          |          0.850 |         0.842 |      0.991 |
+| 1       | named_one_projected  |          0.731 |         0.732 |      1.001 |
+| default | plain_columns        |          0.485 |         0.482 |      0.994 |
+| default | named_none_projected |          0.480 |         0.479 |      0.998 |
+| default | attributes_string    |          0.688 |         0.688 |      1.000 |
+| default | map_parent           |          2.262 |         2.582 |      1.141 |
+| default | regexp_three         |          2.392 |         2.376 |      0.993 |
+| default | named_three          |          0.853 |         0.845 |      0.991 |
+| default | named_one_projected  |          0.732 |         0.725 |      0.990 |

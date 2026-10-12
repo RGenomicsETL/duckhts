@@ -165,99 +165,99 @@ ROH_SCALING_SIZE=reduced taskset -c 0-3 Rscript -e \
   'rmarkdown::render("benchmarks/benchmark_roh_scaling.Rmd", output_dir = tempdir())'
 ```
 
-Source revision: 2355ab28d18b9ab5ccaf6dad934087cea1b08488; `src` tree 9ada6d903f188bc52198290590ce9b0599c765ca. DuckDB runtime: v1.5.1 (Variegata) 7dbb2e646f (CLI). Extension SHA-256: 0682f5dded2dda4a5a3a720e615769d250029ad1a02449cb5d192ae959e61ce5. Host load before the run: 0.71, 1.03, 1.15. CPU affinity: 8-15. Empty-run overhead: 39.3 MiB. Every observation is in [`benchmark_roh_scaling_runs.csv`](benchmark_roh_scaling_runs.csv).
+Source revision: 68dfa0332ad9ea34eea556eddea231cd83d842f6; `src` tree 2de704e472ceeda276caa0eeef7093221378f3c4. DuckDB runtime: v1.5.1 (Variegata) 7dbb2e646f (CLI). Extension SHA-256: 66598566776aa44faffb68a8e0ba62961346c11db160962d115c30291d33586e. Host load before the run: 1.95, 1.08, 0.60. CPU affinity: 8-15. Empty-run overhead: 39.5 MiB. Every observation is in [`benchmark_roh_scaling_runs.csv`](benchmark_roh_scaling_runs.csv).
 
 | macro                         | dimension    | scale | threads | samples | input_rows | runs_out | median_seconds | min_seconds | max_seconds | median_rss_mib | max_rss_mib | budget_mib | within_budget |
 |:------------------------------|:-------------|------:|--------:|--------:|-----------:|:---------|---------------:|------------:|------------:|---------------:|------------:|-----------:|:--------------|
-| duckhts_roh_af_table          | samples      |     1 |       1 |       8 |    6793144 | 1553     |          2.589 |       2.557 |       2.621 |           73.1 |        73.5 |      130.2 | TRUE          |
-| duckhts_roh_af_table          | samples      |     2 |       1 |      16 |   13586288 | 3112     |          3.789 |       3.777 |       3.970 |           89.2 |        89.2 |      170.0 | TRUE          |
-| duckhts_roh_af_table          | samples      |     4 |       1 |      32 |   27172576 | 6037     |          6.300 |       6.285 |       6.427 |          134.9 |       134.9 |      249.7 | TRUE          |
-| duckhts_roh_af_table          | samples      |     1 |       4 |       8 |    6793144 | 1553     |          2.535 |       2.532 |       2.579 |           82.7 |        86.9 |      164.0 | TRUE          |
-| duckhts_roh_af_table          | samples      |     2 |       4 |      16 |   13586288 | 3112     |          3.770 |       3.738 |       3.818 |          120.2 |       120.6 |      203.9 | TRUE          |
-| duckhts_roh_af_table          | samples      |     4 |       4 |      32 |   27172576 | 6037     |          6.117 |       6.067 |       6.246 |          166.3 |       166.9 |      283.5 | TRUE          |
-| duckhts_roh_af_table_bcftools | samples      |     1 |       1 |       8 |    6793144 | 1553     |          3.543 |       3.537 |       3.667 |          109.4 |       112.0 |      449.4 | TRUE          |
-| duckhts_roh_af_table_bcftools | samples      |     2 |       1 |      16 |   13586288 | 3112     |          4.488 |       4.477 |       4.549 |          136.1 |       137.3 |      489.2 | TRUE          |
-| duckhts_roh_af_table_bcftools | samples      |     4 |       1 |      32 |   27172576 | 6037     |          6.458 |       6.410 |       6.472 |          172.5 |       174.1 |      568.9 | TRUE          |
-| duckhts_roh_af_table_bcftools | samples      |     1 |       4 |       8 |    6793144 | 1553     |          3.490 |       3.488 |       3.556 |          141.4 |       146.0 |      483.2 | TRUE          |
-| duckhts_roh_af_table_bcftools | samples      |     2 |       4 |      16 |   13586288 | 3112     |          4.514 |       4.422 |       4.518 |          167.4 |       174.5 |      523.1 | TRUE          |
-| duckhts_roh_af_table_bcftools | samples      |     4 |       4 |      32 |   27172576 | 6037     |          6.341 |       6.308 |       6.497 |          232.1 |       244.9 |      602.7 | TRUE          |
-| duckhts_roh_ancestry          | joint        |     1 |       1 |       8 |    6793144 | 356      |          3.746 |       3.740 |       3.756 |          243.2 |       244.1 |      470.0 | TRUE          |
-| duckhts_roh_ancestry          | joint        |     2 |       1 |      16 |   13586288 | 1256     |          5.119 |       5.118 |       5.350 |          382.6 |       382.9 |      610.2 | TRUE          |
-| duckhts_roh_ancestry          | joint        |     4 |       1 |      32 |   27172576 | 5120     |          8.244 |       8.239 |       8.278 |          686.1 |       694.9 |      951.5 | TRUE          |
-| duckhts_roh_ancestry          | joint        |     1 |       4 |       8 |    6793144 | 356      |          3.684 |       3.654 |       3.703 |          270.8 |       277.2 |      478.7 | TRUE          |
-| duckhts_roh_ancestry          | joint        |     2 |       4 |      16 |   13586288 | 1256     |          5.088 |       5.037 |       5.098 |          478.8 |       479.0 |      627.5 | TRUE          |
-| duckhts_roh_ancestry          | joint        |     4 |       4 |      32 |   27172576 | 5120     |          8.125 |       8.031 |       8.193 |          794.4 |       837.9 |      986.0 | TRUE          |
-| duckhts_roh_ancestry          | reference    |     1 |       1 |       8 |    6793144 | 356      |          3.746 |       3.740 |       3.756 |          243.2 |       244.1 |      470.0 | TRUE          |
-| duckhts_roh_ancestry          | reference    |     2 |       1 |       8 |    6793144 | 641      |          3.996 |       3.976 |       3.998 |          374.5 |       376.7 |      589.9 | TRUE          |
-| duckhts_roh_ancestry          | reference    |     4 |       1 |       8 |    6793144 | 1337     |          4.549 |       4.506 |       4.637 |          617.0 |       632.3 |      829.5 | TRUE          |
-| duckhts_roh_ancestry          | reference    |     1 |       4 |       8 |    6793144 | 356      |          3.684 |       3.654 |       3.703 |          270.8 |       277.2 |      478.7 | TRUE          |
-| duckhts_roh_ancestry          | reference    |     2 |       4 |       8 |    6793144 | 641      |          3.984 |       3.942 |       4.003 |          474.3 |       490.8 |      607.1 | TRUE          |
-| duckhts_roh_ancestry          | reference    |     4 |       4 |       8 |    6793144 | 1337     |          4.494 |       4.454 |       4.505 |          775.5 |       810.6 |      864.0 | TRUE          |
-| duckhts_roh_ancestry          | samples      |     1 |       1 |       8 |    6793144 | 1337     |          4.549 |       4.506 |       4.637 |          617.0 |       632.3 |      829.5 | TRUE          |
-| duckhts_roh_ancestry          | samples      |     2 |       1 |      16 |   13586288 | 2637     |          5.830 |       5.774 |       5.885 |          659.7 |       661.4 |      870.1 | TRUE          |
-| duckhts_roh_ancestry          | samples      |     4 |       1 |      32 |   27172576 | 5120     |          8.244 |       8.239 |       8.278 |          686.1 |       694.9 |      951.5 | TRUE          |
-| duckhts_roh_ancestry          | samples      |     1 |       4 |       8 |    6793144 | 1337     |          4.494 |       4.454 |       4.505 |          775.5 |       810.6 |      864.0 | TRUE          |
-| duckhts_roh_ancestry          | samples      |     2 |       4 |      16 |   13586288 | 2637     |          5.702 |       5.701 |       5.718 |          757.0 |       762.3 |      904.7 | TRUE          |
-| duckhts_roh_ancestry          | samples      |     4 |       4 |      32 |   27172576 | 5120     |          8.125 |       8.031 |       8.193 |          794.4 |       837.9 |      986.0 | TRUE          |
-| duckhts_roh_counts            | real_samples |     1 |       1 |       1 |     108757 | 154      |          0.019 |       0.019 |       0.019 |           49.9 |        50.1 |       58.0 | TRUE          |
-| duckhts_roh_counts            | real_samples |     2 |       1 |       2 |     217514 | 387      |          0.034 |       0.032 |       0.034 |           52.0 |        52.1 |       65.5 | TRUE          |
-| duckhts_roh_counts            | real_samples |     3 |       1 |       3 |     326271 | 602      |          0.048 |       0.047 |       0.054 |           53.5 |        53.6 |       73.0 | TRUE          |
-| duckhts_roh_counts            | real_samples |     1 |       4 |       1 |     108757 | 154      |          0.031 |       0.020 |       0.034 |           50.9 |        50.9 |       91.9 | TRUE          |
-| duckhts_roh_counts            | real_samples |     2 |       4 |       2 |     217514 | 387      |          0.027 |       0.021 |       0.030 |           60.4 |        60.7 |       99.3 | TRUE          |
-| duckhts_roh_counts            | real_samples |     3 |       4 |       3 |     326271 | 602      |          0.034 |       0.032 |       0.037 |           63.5 |        64.8 |      106.8 | TRUE          |
-| duckhts_roh_counts            | samples      |     1 |       1 |       8 |    2000000 | 200      |          0.256 |       0.256 |       0.263 |           96.2 |        96.5 |      202.5 | TRUE          |
-| duckhts_roh_counts            | samples      |     2 |       1 |      16 |    4000000 | 400      |          0.509 |       0.500 |       0.510 |          143.5 |       143.7 |      339.9 | TRUE          |
-| duckhts_roh_counts            | samples      |     4 |       1 |      32 |    8000000 | 800      |          0.999 |       0.998 |       1.003 |          237.6 |       237.6 |      614.5 | TRUE          |
-| duckhts_roh_counts            | samples      |     1 |       4 |       8 |    2000000 | 200      |          0.139 |       0.133 |       0.140 |          148.4 |       150.8 |      280.3 | TRUE          |
-| duckhts_roh_counts            | samples      |     2 |       4 |      16 |    4000000 | 400      |          0.262 |       0.262 |       0.268 |          210.5 |       232.8 |      417.6 | TRUE          |
-| duckhts_roh_counts            | samples      |     4 |       4 |      32 |    8000000 | 800      |          0.489 |       0.445 |       0.489 |          334.3 |       351.3 |      692.3 | TRUE          |
-| duckhts_roh_counts            | sites        |     1 |       1 |       1 |    1000000 | 100      |          0.150 |       0.149 |       0.151 |          122.3 |       122.4 |      211.6 | TRUE          |
-| duckhts_roh_counts            | sites        |     2 |       1 |       1 |    2000000 | 200      |          0.311 |       0.307 |       0.315 |          187.5 |       187.5 |      384.0 | TRUE          |
-| duckhts_roh_counts            | sites        |     4 |       1 |       1 |    4000000 | 400      |          0.616 |       0.614 |       0.623 |          334.2 |       334.4 |      728.8 | TRUE          |
-| duckhts_roh_counts            | sites        |     1 |       4 |       1 |    1000000 | 100      |          0.148 |       0.146 |       0.149 |          129.8 |       129.8 |      522.8 | TRUE          |
-| duckhts_roh_counts            | sites        |     2 |       4 |       1 |    2000000 | 200      |          0.310 |       0.303 |       0.313 |          196.2 |       200.1 |     1006.3 | TRUE          |
-| duckhts_roh_counts            | sites        |     4 |       4 |       1 |    4000000 | 400      |          0.602 |       0.586 |       0.626 |          337.3 |       342.8 |     1973.3 | TRUE          |
-| duckhts_roh_counts_fitted     | real_samples |     1 |       1 |       1 |     108757 | 154      |          0.023 |       0.022 |       0.023 |           56.2 |        56.3 |       58.0 | TRUE          |
-| duckhts_roh_counts_fitted     | real_samples |     2 |       1 |       2 |     217514 | 387      |          0.038 |       0.037 |       0.040 |           58.9 |        58.9 |       65.5 | TRUE          |
-| duckhts_roh_counts_fitted     | real_samples |     3 |       1 |       3 |     326271 | 602      |          0.055 |       0.054 |       0.055 |           61.9 |        61.9 |       73.0 | TRUE          |
-| duckhts_roh_counts_fitted     | real_samples |     1 |       4 |       1 |     108757 | 154      |          0.025 |       0.024 |       0.032 |           56.1 |        56.1 |       91.9 | TRUE          |
-| duckhts_roh_counts_fitted     | real_samples |     2 |       4 |       2 |     217514 | 387      |          0.040 |       0.038 |       0.040 |           63.2 |        63.5 |       99.3 | TRUE          |
-| duckhts_roh_counts_fitted     | real_samples |     3 |       4 |       3 |     326271 | 602      |          0.039 |       0.037 |       0.040 |           73.6 |        75.4 |      106.8 | TRUE          |
-| duckhts_roh_counts_fitted     | samples      |     1 |       1 |       8 |    2000000 | 200      |          0.291 |       0.290 |       0.292 |          106.1 |       106.2 |      202.5 | TRUE          |
-| duckhts_roh_counts_fitted     | samples      |     2 |       1 |      16 |    4000000 | 400      |          0.568 |       0.568 |       0.579 |          163.0 |       163.1 |      339.9 | TRUE          |
-| duckhts_roh_counts_fitted     | samples      |     4 |       1 |      32 |    8000000 | 800      |          1.129 |       1.124 |       1.137 |          262.9 |       263.1 |      614.5 | TRUE          |
-| duckhts_roh_counts_fitted     | samples      |     1 |       4 |       8 |    2000000 | 200      |          0.199 |       0.194 |       0.215 |          144.6 |       152.7 |      280.3 | TRUE          |
-| duckhts_roh_counts_fitted     | samples      |     2 |       4 |      16 |    4000000 | 400      |          0.313 |       0.306 |       0.342 |          223.4 |       226.6 |      417.6 | TRUE          |
-| duckhts_roh_counts_fitted     | samples      |     4 |       4 |      32 |    8000000 | 800      |          0.597 |       0.578 |       0.616 |          372.6 |       378.4 |      692.3 | TRUE          |
-| duckhts_roh_counts_fitted     | sites        |     1 |       1 |       1 |    1000000 | 100      |          0.169 |       0.165 |       0.170 |          127.6 |       127.7 |      211.6 | TRUE          |
-| duckhts_roh_counts_fitted     | sites        |     2 |       1 |       1 |    2000000 | 200      |          0.351 |       0.346 |       0.352 |          192.7 |       192.7 |      384.0 | TRUE          |
-| duckhts_roh_counts_fitted     | sites        |     4 |       1 |       1 |    4000000 | 400      |          0.692 |       0.692 |       0.701 |          338.9 |       339.2 |      728.8 | TRUE          |
-| duckhts_roh_counts_fitted     | sites        |     1 |       4 |       1 |    1000000 | 100      |          0.157 |       0.155 |       0.160 |          137.6 |       138.8 |      522.8 | TRUE          |
-| duckhts_roh_counts_fitted     | sites        |     2 |       4 |       1 |    2000000 | 200      |          0.328 |       0.317 |       0.334 |          201.2 |       205.7 |     1006.3 | TRUE          |
-| duckhts_roh_counts_fitted     | sites        |     4 |       4 |       1 |    4000000 | 400      |          0.623 |       0.618 |       0.626 |          347.5 |       350.3 |     1973.3 | TRUE          |
+| duckhts_roh_af_table          | samples      |     1 |       1 |       8 |    6793144 | 1553     |          2.531 |       2.520 |       2.534 |           73.2 |        73.5 |      130.4 | TRUE          |
+| duckhts_roh_af_table          | samples      |     2 |       1 |      16 |   13586288 | 3112     |          3.794 |       3.783 |       3.804 |           89.7 |        89.8 |      170.2 | TRUE          |
+| duckhts_roh_af_table          | samples      |     4 |       1 |      32 |   27172576 | 6037     |          6.248 |       6.238 |       6.351 |          133.3 |       133.4 |      249.9 | TRUE          |
+| duckhts_roh_af_table          | samples      |     1 |       4 |       8 |    6793144 | 1553     |          2.529 |       2.518 |       2.530 |           82.5 |        85.2 |      164.2 | TRUE          |
+| duckhts_roh_af_table          | samples      |     2 |       4 |      16 |   13586288 | 3112     |          3.730 |       3.725 |       3.771 |          113.3 |       114.4 |      204.1 | TRUE          |
+| duckhts_roh_af_table          | samples      |     4 |       4 |      32 |   27172576 | 6037     |          6.162 |       6.108 |       6.176 |          176.5 |       180.0 |      283.7 | TRUE          |
+| duckhts_roh_af_table_bcftools | samples      |     1 |       1 |       8 |    6793144 | 1553     |          3.524 |       3.509 |       3.529 |          108.1 |       109.2 |      449.6 | TRUE          |
+| duckhts_roh_af_table_bcftools | samples      |     2 |       1 |      16 |   13586288 | 3112     |          4.512 |       4.471 |       4.533 |          135.8 |       136.3 |      489.4 | TRUE          |
+| duckhts_roh_af_table_bcftools | samples      |     4 |       1 |      32 |   27172576 | 6037     |          6.433 |       6.413 |       6.442 |          171.5 |       183.1 |      569.1 | TRUE          |
+| duckhts_roh_af_table_bcftools | samples      |     1 |       4 |       8 |    6793144 | 1553     |          3.489 |       3.483 |       3.499 |          144.6 |       145.6 |      483.4 | TRUE          |
+| duckhts_roh_af_table_bcftools | samples      |     2 |       4 |      16 |   13586288 | 3112     |          4.450 |       4.422 |       4.462 |          184.6 |       188.6 |      523.3 | TRUE          |
+| duckhts_roh_af_table_bcftools | samples      |     4 |       4 |      32 |   27172576 | 6037     |          6.312 |       6.289 |       6.348 |          244.0 |       259.2 |      602.9 | TRUE          |
+| duckhts_roh_ancestry          | joint        |     1 |       1 |       8 |    6793144 | 356      |          3.725 |       3.720 |       3.736 |          244.6 |       245.0 |      470.2 | TRUE          |
+| duckhts_roh_ancestry          | joint        |     2 |       1 |      16 |   13586288 | 1256     |          5.101 |       5.091 |       5.109 |          382.5 |       382.9 |      610.4 | TRUE          |
+| duckhts_roh_ancestry          | joint        |     4 |       1 |      32 |   27172576 | 5120     |          8.195 |       8.128 |       8.216 |          698.5 |       699.3 |      951.7 | TRUE          |
+| duckhts_roh_ancestry          | joint        |     1 |       4 |       8 |    6793144 | 356      |          3.693 |       3.665 |       3.716 |          276.1 |       290.4 |      478.9 | TRUE          |
+| duckhts_roh_ancestry          | joint        |     2 |       4 |      16 |   13586288 | 1256     |          5.083 |       5.038 |       5.100 |          478.1 |       481.2 |      627.6 | TRUE          |
+| duckhts_roh_ancestry          | joint        |     4 |       4 |      32 |   27172576 | 5120     |          8.123 |       8.118 |       8.203 |          788.0 |       820.3 |      986.2 | TRUE          |
+| duckhts_roh_ancestry          | reference    |     1 |       1 |       8 |    6793144 | 356      |          3.725 |       3.720 |       3.736 |          244.6 |       245.0 |      470.2 | TRUE          |
+| duckhts_roh_ancestry          | reference    |     2 |       1 |       8 |    6793144 | 641      |          3.987 |       3.986 |       3.999 |          373.0 |       376.1 |      590.0 | TRUE          |
+| duckhts_roh_ancestry          | reference    |     4 |       1 |       8 |    6793144 | 1337     |          4.482 |       4.477 |       4.497 |          631.0 |       631.2 |      829.6 | TRUE          |
+| duckhts_roh_ancestry          | reference    |     1 |       4 |       8 |    6793144 | 356      |          3.693 |       3.665 |       3.716 |          276.1 |       290.4 |      478.9 | TRUE          |
+| duckhts_roh_ancestry          | reference    |     2 |       4 |       8 |    6793144 | 641      |          3.971 |       3.919 |       3.981 |          482.8 |       484.5 |      607.3 | TRUE          |
+| duckhts_roh_ancestry          | reference    |     4 |       4 |       8 |    6793144 | 1337     |          4.489 |       4.474 |       4.549 |          767.1 |       812.1 |      864.2 | TRUE          |
+| duckhts_roh_ancestry          | samples      |     1 |       1 |       8 |    6793144 | 1337     |          4.482 |       4.477 |       4.497 |          631.0 |       631.2 |      829.6 | TRUE          |
+| duckhts_roh_ancestry          | samples      |     2 |       1 |      16 |   13586288 | 2637     |          5.713 |       5.705 |       5.758 |          659.7 |       660.9 |      870.3 | TRUE          |
+| duckhts_roh_ancestry          | samples      |     4 |       1 |      32 |   27172576 | 5120     |          8.195 |       8.128 |       8.216 |          698.5 |       699.3 |      951.7 | TRUE          |
+| duckhts_roh_ancestry          | samples      |     1 |       4 |       8 |    6793144 | 1337     |          4.489 |       4.474 |       4.549 |          767.1 |       812.1 |      864.2 | TRUE          |
+| duckhts_roh_ancestry          | samples      |     2 |       4 |      16 |   13586288 | 2637     |          5.697 |       5.661 |       5.717 |          763.4 |       783.6 |      904.9 | TRUE          |
+| duckhts_roh_ancestry          | samples      |     4 |       4 |      32 |   27172576 | 5120     |          8.123 |       8.118 |       8.203 |          788.0 |       820.3 |      986.2 | TRUE          |
+| duckhts_roh_counts            | real_samples |     1 |       1 |       1 |     108757 | 154      |          0.019 |       0.018 |       0.020 |           49.9 |        49.9 |       58.2 | TRUE          |
+| duckhts_roh_counts            | real_samples |     2 |       1 |       2 |     217514 | 387      |          0.033 |       0.032 |       0.034 |           51.9 |        52.1 |       65.7 | TRUE          |
+| duckhts_roh_counts            | real_samples |     3 |       1 |       3 |     326271 | 602      |          0.048 |       0.047 |       0.048 |           53.6 |        53.6 |       73.1 | TRUE          |
+| duckhts_roh_counts            | real_samples |     1 |       4 |       1 |     108757 | 154      |          0.026 |       0.020 |       0.033 |           52.1 |        52.4 |       92.0 | TRUE          |
+| duckhts_roh_counts            | real_samples |     2 |       4 |       2 |     217514 | 387      |          0.034 |       0.030 |       0.034 |           58.7 |        60.4 |       99.5 | TRUE          |
+| duckhts_roh_counts            | real_samples |     3 |       4 |       3 |     326271 | 602      |          0.034 |       0.034 |       0.035 |           63.4 |        63.6 |      107.0 | TRUE          |
+| duckhts_roh_counts            | samples      |     1 |       1 |       8 |    2000000 | 200      |          0.254 |       0.254 |       0.254 |           96.5 |        96.7 |      202.7 | TRUE          |
+| duckhts_roh_counts            | samples      |     2 |       1 |      16 |    4000000 | 400      |          0.500 |       0.500 |       0.503 |          143.4 |       143.6 |      340.0 | TRUE          |
+| duckhts_roh_counts            | samples      |     4 |       1 |      32 |    8000000 | 800      |          0.998 |       0.995 |       0.999 |          237.2 |       237.3 |      614.7 | TRUE          |
+| duckhts_roh_counts            | samples      |     1 |       4 |       8 |    2000000 | 200      |          0.141 |       0.137 |       0.148 |          142.5 |       143.5 |      280.5 | TRUE          |
+| duckhts_roh_counts            | samples      |     2 |       4 |      16 |    4000000 | 400      |          0.276 |       0.270 |       0.292 |          209.4 |       240.5 |      417.8 | TRUE          |
+| duckhts_roh_counts            | samples      |     4 |       4 |      32 |    8000000 | 800      |          0.489 |       0.463 |       0.492 |          326.5 |       328.8 |      692.5 | TRUE          |
+| duckhts_roh_counts            | sites        |     1 |       1 |       1 |    1000000 | 100      |          0.149 |       0.148 |       0.149 |          122.2 |       122.3 |      211.8 | TRUE          |
+| duckhts_roh_counts            | sites        |     2 |       1 |       1 |    2000000 | 200      |          0.306 |       0.304 |       0.310 |          187.5 |       187.5 |      384.2 | TRUE          |
+| duckhts_roh_counts            | sites        |     4 |       1 |       1 |    4000000 | 400      |          0.613 |       0.610 |       0.615 |          334.5 |       334.6 |      729.0 | TRUE          |
+| duckhts_roh_counts            | sites        |     1 |       4 |       1 |    1000000 | 100      |          0.145 |       0.144 |       0.146 |          131.2 |       132.3 |      523.0 | TRUE          |
+| duckhts_roh_counts            | sites        |     2 |       4 |       1 |    2000000 | 200      |          0.310 |       0.307 |       0.316 |          196.2 |       196.2 |     1006.5 | TRUE          |
+| duckhts_roh_counts            | sites        |     4 |       4 |       1 |    4000000 | 400      |          0.607 |       0.597 |       0.610 |          338.7 |       346.3 |     1973.5 | TRUE          |
+| duckhts_roh_counts_fitted     | real_samples |     1 |       1 |       1 |     108757 | 154      |          0.023 |       0.022 |       0.023 |           56.1 |        56.1 |       58.2 | TRUE          |
+| duckhts_roh_counts_fitted     | real_samples |     2 |       1 |       2 |     217514 | 387      |          0.038 |       0.038 |       0.039 |           58.9 |        58.9 |       65.7 | TRUE          |
+| duckhts_roh_counts_fitted     | real_samples |     3 |       1 |       3 |     326271 | 602      |          0.054 |       0.054 |       0.054 |           61.7 |        61.7 |       73.1 | TRUE          |
+| duckhts_roh_counts_fitted     | real_samples |     1 |       4 |       1 |     108757 | 154      |          0.025 |       0.025 |       0.027 |           56.4 |        56.9 |       92.0 | TRUE          |
+| duckhts_roh_counts_fitted     | real_samples |     2 |       4 |       2 |     217514 | 387      |          0.026 |       0.024 |       0.040 |           66.4 |        67.1 |       99.5 | TRUE          |
+| duckhts_roh_counts_fitted     | real_samples |     3 |       4 |       3 |     326271 | 602      |          0.036 |       0.035 |       0.039 |           70.0 |        71.4 |      107.0 | TRUE          |
+| duckhts_roh_counts_fitted     | samples      |     1 |       1 |       8 |    2000000 | 200      |          0.290 |       0.290 |       0.291 |          104.5 |       104.7 |      202.7 | TRUE          |
+| duckhts_roh_counts_fitted     | samples      |     2 |       1 |      16 |    4000000 | 400      |          0.570 |       0.570 |       0.571 |          163.7 |       164.0 |      340.0 | TRUE          |
+| duckhts_roh_counts_fitted     | samples      |     4 |       1 |      32 |    8000000 | 800      |          1.133 |       1.126 |       1.138 |          262.8 |       263.2 |      614.7 | TRUE          |
+| duckhts_roh_counts_fitted     | samples      |     1 |       4 |       8 |    2000000 | 200      |          0.194 |       0.190 |       0.197 |          145.6 |       149.5 |      280.5 | TRUE          |
+| duckhts_roh_counts_fitted     | samples      |     2 |       4 |      16 |    4000000 | 400      |          0.337 |       0.304 |       0.342 |          226.7 |       232.8 |      417.8 | TRUE          |
+| duckhts_roh_counts_fitted     | samples      |     4 |       4 |      32 |    8000000 | 800      |          0.581 |       0.577 |       0.624 |          362.2 |       365.9 |      692.5 | TRUE          |
+| duckhts_roh_counts_fitted     | sites        |     1 |       1 |       1 |    1000000 | 100      |          0.169 |       0.167 |       0.169 |          127.9 |       128.0 |      211.8 | TRUE          |
+| duckhts_roh_counts_fitted     | sites        |     2 |       1 |       1 |    2000000 | 200      |          0.350 |       0.349 |       0.351 |          193.1 |       193.2 |      384.2 | TRUE          |
+| duckhts_roh_counts_fitted     | sites        |     4 |       1 |       1 |    4000000 | 400      |          0.691 |       0.689 |       0.694 |          339.1 |       339.1 |      729.0 | TRUE          |
+| duckhts_roh_counts_fitted     | sites        |     1 |       4 |       1 |    1000000 | 100      |          0.157 |       0.157 |       0.157 |          138.7 |       138.7 |      523.0 | TRUE          |
+| duckhts_roh_counts_fitted     | sites        |     2 |       4 |       1 |    2000000 | 200      |          0.317 |       0.311 |       0.321 |          203.7 |       205.5 |     1006.5 | TRUE          |
+| duckhts_roh_counts_fitted     | sites        |     4 |       4 |       1 |    4000000 | 400      |          0.630 |       0.618 |       0.631 |          347.0 |       348.3 |     1973.5 | TRUE          |
 
 Time exponents per doubling (log2 of the median ratio) and peak-RSS ratios to 1×:
 
 | macro                         | dimension | threads | time_exponent_2x | time_exponent_4x | rss_ratio_2x | rss_ratio_4x | one_x_seconds |
 |:------------------------------|:----------|--------:|-----------------:|-----------------:|-------------:|-------------:|--------------:|
-| duckhts_roh_ancestry          | joint     |       1 |            0.451 |            0.687 |        1.573 |        2.821 |         3.746 |
-| duckhts_roh_ancestry          | reference |       1 |            0.093 |            0.187 |        1.540 |        2.537 |         3.746 |
-| duckhts_roh_af_table          | samples   |       1 |            0.550 |            0.733 |        1.220 |        1.845 |         2.589 |
-| duckhts_roh_af_table_bcftools | samples   |       1 |            0.341 |            0.525 |        1.244 |        1.577 |         3.543 |
-| duckhts_roh_ancestry          | samples   |       1 |            0.358 |            0.500 |        1.069 |        1.112 |         4.549 |
-| duckhts_roh_counts            | samples   |       1 |            0.992 |            0.972 |        1.492 |        2.470 |         0.256 |
-| duckhts_roh_counts_fitted     | samples   |       1 |            0.964 |            0.990 |        1.536 |        2.478 |         0.291 |
-| duckhts_roh_counts            | sites     |       1 |            1.053 |            0.988 |        1.533 |        2.733 |         0.150 |
-| duckhts_roh_counts_fitted     | sites     |       1 |            1.050 |            0.982 |        1.510 |        2.656 |         0.169 |
-| duckhts_roh_ancestry          | joint     |       4 |            0.466 |            0.675 |        1.768 |        2.934 |         3.684 |
-| duckhts_roh_ancestry          | reference |       4 |            0.113 |            0.174 |        1.751 |        2.864 |         3.684 |
-| duckhts_roh_af_table          | samples   |       4 |            0.573 |            0.698 |        1.453 |        2.011 |         2.535 |
-| duckhts_roh_af_table_bcftools | samples   |       4 |            0.371 |            0.490 |        1.184 |        1.641 |         3.490 |
-| duckhts_roh_ancestry          | samples   |       4 |            0.344 |            0.511 |        0.976 |        1.024 |         4.494 |
-| duckhts_roh_counts            | samples   |       4 |            0.920 |            0.899 |        1.418 |        2.253 |         0.139 |
-| duckhts_roh_counts_fitted     | samples   |       4 |            0.653 |            0.932 |        1.545 |        2.577 |         0.199 |
-| duckhts_roh_counts            | sites     |       4 |            1.065 |            0.957 |        1.512 |        2.599 |         0.148 |
-| duckhts_roh_counts_fitted     | sites     |       4 |            1.059 |            0.928 |        1.462 |        2.525 |         0.157 |
+| duckhts_roh_ancestry          | joint     |       1 |            0.454 |            0.684 |        1.564 |        2.856 |         3.725 |
+| duckhts_roh_ancestry          | reference |       1 |            0.098 |            0.169 |        1.525 |        2.580 |         3.725 |
+| duckhts_roh_af_table          | samples   |       1 |            0.584 |            0.720 |        1.225 |        1.821 |         2.531 |
+| duckhts_roh_af_table_bcftools | samples   |       1 |            0.357 |            0.512 |        1.256 |        1.586 |         3.524 |
+| duckhts_roh_ancestry          | samples   |       1 |            0.350 |            0.520 |        1.045 |        1.107 |         4.482 |
+| duckhts_roh_counts            | samples   |       1 |            0.978 |            0.996 |        1.486 |        2.458 |         0.254 |
+| duckhts_roh_counts_fitted     | samples   |       1 |            0.976 |            0.989 |        1.567 |        2.515 |         0.290 |
+| duckhts_roh_counts            | sites     |       1 |            1.040 |            1.001 |        1.534 |        2.737 |         0.149 |
+| duckhts_roh_counts_fitted     | sites     |       1 |            1.054 |            0.981 |        1.510 |        2.651 |         0.169 |
+| duckhts_roh_ancestry          | joint     |       4 |            0.461 |            0.676 |        1.732 |        2.854 |         3.693 |
+| duckhts_roh_ancestry          | reference |       4 |            0.105 |            0.177 |        1.749 |        2.778 |         3.693 |
+| duckhts_roh_af_table          | samples   |       4 |            0.561 |            0.724 |        1.373 |        2.139 |         2.529 |
+| duckhts_roh_af_table_bcftools | samples   |       4 |            0.351 |            0.504 |        1.277 |        1.687 |         3.489 |
+| duckhts_roh_ancestry          | samples   |       4 |            0.344 |            0.512 |        0.995 |        1.027 |         4.489 |
+| duckhts_roh_counts            | samples   |       4 |            0.971 |            0.824 |        1.469 |        2.291 |         0.141 |
+| duckhts_roh_counts_fitted     | samples   |       4 |            0.796 |            0.786 |        1.557 |        2.488 |         0.194 |
+| duckhts_roh_counts            | sites     |       4 |            1.095 |            0.969 |        1.495 |        2.582 |         0.145 |
+| duckhts_roh_counts_fitted     | sites     |       4 |            1.018 |            0.989 |        1.469 |        2.502 |         0.157 |
 
 ## Findings
 
@@ -269,7 +269,7 @@ it gets a memory verdict, not a timing verdict. On the real workload, one
 thread decodes one sample’s 108,757 chr20 sites in
 0.019 s at 49.9 MiB
 peak RSS and three samples in 0.048 s at
-53.5 MiB. The operating scale this report supports
+53.6 MiB. The operating scale this report supports
 is what it measures: per-chromosome lists of up to 4 million synthetic sites,
 up to 32 synthetic samples, and three real 30× samples at 108,757 sites;
 larger panels and cohorts are not measured here.
@@ -277,8 +277,8 @@ larger panels and cohorts are not measured here.
 `duckhts_roh_counts_fitted` returns the same runs as `duckhts_roh_counts` in
 every cell, which the render checks, and stays within the same budget. Its
 peak RSS over the scalar decode at the largest inputs, one thread, median of
-three: 4.7 MiB with 4 million sites of one sample and
-25.3 MiB with 32 samples of 250,000 sites.
+three: 4.6 MiB with 4 million sites of one sample and
+25.6 MiB with 32 samples of 250,000 sites.
 
 `duckhts_roh_ancestry`: memory still grows with the number of samples decoded
 together, because one pass over the BCF needs every sample’s sites. Each
@@ -302,10 +302,10 @@ macros return identical runs for every sample set, which the render asserts:
 
 With 32 samples, one thread, median of
 3: `duckhts_roh_af_table` takes
-6.3 s at 134.9 MiB
-peak RSS (ceiling 249.7 MiB), and
-`duckhts_roh_af_table_bcftools` takes 6.458 s
-at 172.5 MiB (ceiling 568.9 MiB).
+6.248 s at 133.3 MiB
+peak RSS (ceiling 249.9 MiB), and
+`duckhts_roh_af_table_bcftools` takes 6.433 s
+at 171.5 MiB (ceiling 569.1 MiB).
 The difference is the cost of the bcftools site rule: the sites-only scan
 with `FILE_OFFSET` and the stages over the records at listed positions.
 
@@ -320,27 +320,27 @@ on the same host. One thread, median of three:
 
 | macro                | dimension    | scale | seconds_before | rss_mib_before | seconds_after | rss_mib_after | time_ratio | rss_ratio |
 |:---------------------|:-------------|------:|---------------:|---------------:|--------------:|--------------:|-----------:|----------:|
-| duckhts_roh_ancestry | joint        |     1 |          6.247 |       1780.504 |         3.746 |       243.215 |      0.600 |     0.137 |
-| duckhts_roh_ancestry | joint        |     2 |         10.128 |       3440.414 |         5.119 |       382.574 |      0.505 |     0.111 |
-| duckhts_roh_ancestry | joint        |     4 |         18.219 |       6601.320 |         8.244 |       686.117 |      0.453 |     0.104 |
-| duckhts_roh_ancestry | reference    |     1 |          6.247 |       1780.504 |         3.746 |       243.215 |      0.600 |     0.137 |
-| duckhts_roh_ancestry | reference    |     2 |          6.551 |       2156.871 |         3.996 |       374.543 |      0.610 |     0.174 |
-| duckhts_roh_ancestry | reference    |     4 |          7.254 |       2717.016 |         4.549 |       616.977 |      0.627 |     0.227 |
-| duckhts_roh_ancestry | samples      |     1 |          7.254 |       2717.016 |         4.549 |       616.977 |      0.627 |     0.227 |
-| duckhts_roh_ancestry | samples      |     2 |         10.858 |       4040.809 |         5.830 |       659.711 |      0.537 |     0.163 |
-| duckhts_roh_ancestry | samples      |     4 |         18.219 |       6601.320 |         8.244 |       686.117 |      0.453 |     0.104 |
-| duckhts_roh_counts   | real_samples |     1 |          0.022 |         54.445 |         0.019 |        49.941 |      0.863 |     0.917 |
-| duckhts_roh_counts   | real_samples |     2 |          0.040 |         65.332 |         0.034 |        51.992 |      0.837 |     0.796 |
-| duckhts_roh_counts   | real_samples |     3 |          0.060 |         79.270 |         0.048 |        53.516 |      0.802 |     0.675 |
-| duckhts_roh_counts   | samples      |     1 |          0.329 |        254.898 |         0.256 |        96.223 |      0.779 |     0.377 |
-| duckhts_roh_counts   | samples      |     2 |          0.661 |        466.645 |         0.509 |       143.492 |      0.771 |     0.307 |
-| duckhts_roh_counts   | samples      |     4 |          1.337 |        903.488 |         0.999 |       237.574 |      0.747 |     0.263 |
-| duckhts_roh_counts   | sites        |     1 |          0.177 |        162.422 |         0.150 |       122.316 |      0.844 |     0.753 |
-| duckhts_roh_counts   | sites        |     2 |          0.338 |        310.410 |         0.311 |       187.453 |      0.919 |     0.604 |
-| duckhts_roh_counts   | sites        |     4 |          0.702 |        702.176 |         0.616 |       334.234 |      0.877 |     0.476 |
+| duckhts_roh_ancestry | joint        |     1 |          6.247 |       1780.504 |         3.725 |       244.605 |      0.596 |     0.137 |
+| duckhts_roh_ancestry | joint        |     2 |         10.128 |       3440.414 |         5.101 |       382.531 |      0.504 |     0.111 |
+| duckhts_roh_ancestry | joint        |     4 |         18.219 |       6601.320 |         8.195 |       698.543 |      0.450 |     0.106 |
+| duckhts_roh_ancestry | reference    |     1 |          6.247 |       1780.504 |         3.725 |       244.605 |      0.596 |     0.137 |
+| duckhts_roh_ancestry | reference    |     2 |          6.551 |       2156.871 |         3.987 |       372.992 |      0.609 |     0.173 |
+| duckhts_roh_ancestry | reference    |     4 |          7.254 |       2717.016 |         4.482 |       630.973 |      0.618 |     0.232 |
+| duckhts_roh_ancestry | samples      |     1 |          7.254 |       2717.016 |         4.482 |       630.973 |      0.618 |     0.232 |
+| duckhts_roh_ancestry | samples      |     2 |         10.858 |       4040.809 |         5.713 |       659.734 |      0.526 |     0.163 |
+| duckhts_roh_ancestry | samples      |     4 |         18.219 |       6601.320 |         8.195 |       698.543 |      0.450 |     0.106 |
+| duckhts_roh_counts   | real_samples |     1 |          0.022 |         54.445 |         0.019 |        49.863 |      0.856 |     0.916 |
+| duckhts_roh_counts   | real_samples |     2 |          0.040 |         65.332 |         0.033 |        51.945 |      0.813 |     0.795 |
+| duckhts_roh_counts   | real_samples |     3 |          0.060 |         79.270 |         0.048 |        53.637 |      0.797 |     0.677 |
+| duckhts_roh_counts   | samples      |     1 |          0.329 |        254.898 |         0.254 |        96.520 |      0.773 |     0.379 |
+| duckhts_roh_counts   | samples      |     2 |          0.661 |        466.645 |         0.500 |       143.387 |      0.757 |     0.307 |
+| duckhts_roh_counts   | samples      |     4 |          1.337 |        903.488 |         0.998 |       237.227 |      0.746 |     0.263 |
+| duckhts_roh_counts   | sites        |     1 |          0.177 |        162.422 |         0.149 |       122.207 |      0.839 |     0.752 |
+| duckhts_roh_counts   | sites        |     2 |          0.338 |        310.410 |         0.306 |       187.488 |      0.906 |     0.604 |
+| duckhts_roh_counts   | sites        |     4 |          0.702 |        702.176 |         0.613 |       334.520 |      0.872 |     0.476 |
 
 With 32 samples and the full reference, `duckhts_roh_ancestry` went from
-6601 MiB to 686 MiB and
+6601 MiB to 699 MiB and
 from 18.2 s to 8.2 s.
 The segments are unchanged: the chr20 evaluation arms reproduce their 51,083
 (ancestry) and 60,204 (pooled) segments exactly.
@@ -356,30 +356,30 @@ load differs between renders. One thread, median of three:
 
 | macro                     | dimension    | scale | seconds_before | rss_mib_before | seconds_after | rss_mib_after | time_ratio | rss_ratio |
 |:--------------------------|:-------------|------:|---------------:|---------------:|--------------:|--------------:|-----------:|----------:|
-| duckhts_roh_ancestry      | joint        |     1 |          3.698 |        244.484 |         3.746 |       243.215 |      1.013 |     0.995 |
-| duckhts_roh_ancestry      | joint        |     2 |          5.060 |        385.195 |         5.119 |       382.574 |      1.012 |     0.993 |
-| duckhts_roh_ancestry      | joint        |     4 |          8.205 |        698.496 |         8.244 |       686.117 |      1.005 |     0.982 |
-| duckhts_roh_ancestry      | reference    |     1 |          3.698 |        244.484 |         3.746 |       243.215 |      1.013 |     0.995 |
-| duckhts_roh_ancestry      | reference    |     2 |          3.966 |        372.727 |         3.996 |       374.543 |      1.007 |     1.005 |
-| duckhts_roh_ancestry      | reference    |     4 |          4.487 |        629.414 |         4.549 |       616.977 |      1.014 |     0.980 |
-| duckhts_roh_ancestry      | samples      |     1 |          4.487 |        629.414 |         4.549 |       616.977 |      1.014 |     0.980 |
-| duckhts_roh_ancestry      | samples      |     2 |          5.729 |        647.402 |         5.830 |       659.711 |      1.018 |     1.019 |
-| duckhts_roh_ancestry      | samples      |     4 |          8.205 |        698.496 |         8.244 |       686.117 |      1.005 |     0.982 |
-| duckhts_roh_counts        | real_samples |     1 |          0.019 |         49.262 |         0.019 |        49.941 |      0.979 |     1.014 |
-| duckhts_roh_counts        | real_samples |     2 |          0.033 |         51.418 |         0.034 |        51.992 |      1.020 |     1.011 |
-| duckhts_roh_counts        | real_samples |     3 |          0.048 |         52.871 |         0.048 |        53.516 |      0.996 |     1.012 |
-| duckhts_roh_counts        | samples      |     1 |          0.253 |         96.043 |         0.256 |        96.223 |      1.013 |     1.002 |
-| duckhts_roh_counts        | samples      |     2 |          0.499 |        142.938 |         0.509 |       143.492 |      1.021 |     1.004 |
-| duckhts_roh_counts        | samples      |     4 |          0.991 |        236.582 |         0.999 |       237.574 |      1.008 |     1.004 |
-| duckhts_roh_counts        | sites        |     1 |          0.150 |        121.785 |         0.150 |       122.316 |      1.000 |     1.004 |
-| duckhts_roh_counts        | sites        |     2 |          0.306 |        186.762 |         0.311 |       187.453 |      1.014 |     1.004 |
-| duckhts_roh_counts        | sites        |     4 |          0.612 |        333.688 |         0.616 |       334.234 |      1.006 |     1.002 |
-| duckhts_roh_counts_fitted | real_samples |     1 |          0.022 |         55.723 |         0.023 |        56.238 |      1.015 |     1.009 |
-| duckhts_roh_counts_fitted | real_samples |     2 |          0.038 |         58.586 |         0.038 |        58.871 |      0.996 |     1.005 |
-| duckhts_roh_counts_fitted | real_samples |     3 |          0.054 |         61.102 |         0.055 |        61.855 |      1.013 |     1.012 |
-| duckhts_roh_counts_fitted | samples      |     1 |          0.291 |        103.973 |         0.291 |       106.109 |      1.002 |     1.021 |
-| duckhts_roh_counts_fitted | samples      |     2 |          0.570 |        159.020 |         0.568 |       162.965 |      0.998 |     1.025 |
-| duckhts_roh_counts_fitted | samples      |     4 |          1.126 |        266.082 |         1.129 |       262.879 |      1.002 |     0.988 |
-| duckhts_roh_counts_fitted | sites        |     1 |          0.170 |        127.102 |         0.169 |       127.586 |      0.998 |     1.004 |
-| duckhts_roh_counts_fitted | sites        |     2 |          0.348 |        192.742 |         0.351 |       192.664 |      1.007 |     1.000 |
-| duckhts_roh_counts_fitted | sites        |     4 |          0.688 |        338.613 |         0.692 |       338.945 |      1.007 |     1.001 |
+| duckhts_roh_ancestry      | joint        |     1 |          3.698 |        244.484 |         3.725 |       244.605 |      1.007 |     1.000 |
+| duckhts_roh_ancestry      | joint        |     2 |          5.060 |        385.195 |         5.101 |       382.531 |      1.008 |     0.993 |
+| duckhts_roh_ancestry      | joint        |     4 |          8.205 |        698.496 |         8.195 |       698.543 |      0.999 |     1.000 |
+| duckhts_roh_ancestry      | reference    |     1 |          3.698 |        244.484 |         3.725 |       244.605 |      1.007 |     1.000 |
+| duckhts_roh_ancestry      | reference    |     2 |          3.966 |        372.727 |         3.987 |       372.992 |      1.005 |     1.001 |
+| duckhts_roh_ancestry      | reference    |     4 |          4.487 |        629.414 |         4.482 |       630.973 |      0.999 |     1.002 |
+| duckhts_roh_ancestry      | samples      |     1 |          4.487 |        629.414 |         4.482 |       630.973 |      0.999 |     1.002 |
+| duckhts_roh_ancestry      | samples      |     2 |          5.729 |        647.402 |         5.713 |       659.734 |      0.997 |     1.019 |
+| duckhts_roh_ancestry      | samples      |     4 |          8.205 |        698.496 |         8.195 |       698.543 |      0.999 |     1.000 |
+| duckhts_roh_counts        | real_samples |     1 |          0.019 |         49.262 |         0.019 |        49.863 |      0.971 |     1.012 |
+| duckhts_roh_counts        | real_samples |     2 |          0.033 |         51.418 |         0.033 |        51.945 |      0.991 |     1.010 |
+| duckhts_roh_counts        | real_samples |     3 |          0.048 |         52.871 |         0.048 |        53.637 |      0.990 |     1.014 |
+| duckhts_roh_counts        | samples      |     1 |          0.253 |         96.043 |         0.254 |        96.520 |      1.004 |     1.005 |
+| duckhts_roh_counts        | samples      |     2 |          0.499 |        142.938 |         0.500 |       143.387 |      1.003 |     1.003 |
+| duckhts_roh_counts        | samples      |     4 |          0.991 |        236.582 |         0.998 |       237.227 |      1.007 |     1.003 |
+| duckhts_roh_counts        | sites        |     1 |          0.150 |        121.785 |         0.149 |       122.207 |      0.994 |     1.003 |
+| duckhts_roh_counts        | sites        |     2 |          0.306 |        186.762 |         0.306 |       187.488 |      0.999 |     1.004 |
+| duckhts_roh_counts        | sites        |     4 |          0.612 |        333.688 |         0.613 |       334.520 |      1.001 |     1.002 |
+| duckhts_roh_counts_fitted | real_samples |     1 |          0.022 |         55.723 |         0.023 |        56.129 |      1.011 |     1.007 |
+| duckhts_roh_counts_fitted | real_samples |     2 |          0.038 |         58.586 |         0.038 |        58.879 |      0.981 |     1.005 |
+| duckhts_roh_counts_fitted | real_samples |     3 |          0.054 |         61.102 |         0.054 |        61.699 |      1.007 |     1.010 |
+| duckhts_roh_counts_fitted | samples      |     1 |          0.291 |        103.973 |         0.290 |       104.520 |      0.998 |     1.005 |
+| duckhts_roh_counts_fitted | samples      |     2 |          0.570 |        159.020 |         0.570 |       163.703 |      1.001 |     1.029 |
+| duckhts_roh_counts_fitted | samples      |     4 |          1.126 |        266.082 |         1.133 |       262.789 |      1.005 |     0.988 |
+| duckhts_roh_counts_fitted | sites        |     1 |          0.170 |        127.102 |         0.169 |       127.895 |      0.993 |     1.006 |
+| duckhts_roh_counts_fitted | sites        |     2 |          0.348 |        192.742 |         0.350 |       193.117 |      1.006 |     1.002 |
+| duckhts_roh_counts_fitted | sites        |     4 |          0.688 |        338.613 |         0.691 |       339.062 |      1.005 |     1.001 |
