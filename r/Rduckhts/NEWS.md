@@ -2,6 +2,11 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- `rduckhts_roh_counts(fit_table = ...)` reads the counts relation once.
+  A counts relation that held a join was kept in full in memory by DuckDB,
+  about three times the memory of the call without `fit_table` for 100
+  samples. The runs and the errors are unchanged.
+
 - `rduckhts_count_error_fit()` returns `artefact_weight_sd` after
   `artefact_weight`: the block interval of the artefact weight, formed as
   `contamination_sd` is, and `NA` with fewer than three blocks. No other

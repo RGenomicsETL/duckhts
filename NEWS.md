@@ -4,6 +4,16 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- `duckhts_roh_counts_fitted` reads `counts_table` once. It read it a
+  second time to check the fit of every sample, and when the relation held a
+  join (a view filtered by a long `IN` list, or counts joined to their
+  frequencies) DuckDB kept every row and column of it as a materialized CTE:
+  1.8 GiB of buffer for 100 samples of 108,757 sites, against 0.5 GiB for
+  `duckhts_roh_counts`. Each site list now checks its sample's fit before
+  it is decoded, and the genetic-map overload joins the map with a left join
+  so that a sample whose chromosomes the map drops is still checked. The
+  runs and the errors are unchanged.
+
 - `duckhts_count_error_fit` reports `artefact_weight_sd`, after
   `artefact_weight`: each block that is refitted for contamination is also
   refitted for the artefact weight alone, the other numbers held at the

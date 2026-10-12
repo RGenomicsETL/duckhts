@@ -272,9 +272,6 @@ static const char map_arguments[] =
     "seg.r.n_markers AS n_markers, seg.r.quality AS quality"
 static const char select_head[] =
     ROH_RUN_COLUMNS " FROM (SELECT l.smp, l.chrom, unnest(__duckhts_roh_decode(l.s, ";
-static const char fitted_select_head[] =
-    ROH_RUN_COLUMNS ", seg.r.stable_fraction AS stable_fraction, seg.r.gained_bases AS gained_bases "
-    "FROM (SELECT l.smp, l.chrom, unnest(__duckhts_roh_decode_stable(l.s, ";
 #define ROH_NO_COUNT_MODEL "NULL::DOUBLE, NULL::DOUBLE, NULL::DOUBLE, NULL::DOUBLE"
 #define ROH_COUNT_MODEL \
     "CAST(seq_error AS DOUBLE), CAST(contamination AS DOUBLE), " \
@@ -357,14 +354,33 @@ static const char counts_guard[] = ROH_GUARD_COLUMNS "WHERE NOT " ROH_COUNTS_ARG
     "coalesce(" from ".artefact_weight_sd, 0.0)"
 static const char fitted_counts_model[] = "NULL::DOUBLE, " ROH_FIT_MODEL("l", "l.smp") ", ";
 /* Every sample of the counts relation is checked against its fit, also one
- * whose chromosomes the genetic map drops from the decode; the second arm
- * checks the other arguments when there is no sample. */
+ * whose sites are all skipped or whose chromosomes the genetic map drops from
+ * the decode. The check runs on every site list, before the decode, so the
+ * counts relation is read once: read a second time for the check, a relation
+ * that holds a join (a view filtered by an IN list, or counts joined to
+ * frequencies) is a common subplan that DuckDB materializes with every row
+ * and column. __duckhts_roh_valid_args() is TRUE or raises the error, and a
+ * NULL fitted number raises in ROH_FIT_VALUE. The map overload joins the map
+ * with a LEFT JOIN and decodes only the lists with map nodes, so a list whose
+ * chromosome has none is checked and gives no run. */
+#define ROH_FITTED_VALID \
+    "__duckhts_roh_valid_args(3, NULL::DOUBLE, " ROH_FIT_MODEL("l", "l.smp") ", " \
+    "CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE), " \
+    ROH_LIMIT_ARGUMENTS ")"
+static const char fitted_select_head[] =
+    ROH_RUN_COLUMNS ", seg.r.stable_fraction AS stable_fraction, seg.r.gained_bases AS gained_bases "
+    "FROM (SELECT l.smp, l.chrom, unnest(CASE WHEN NOT " ROH_FITTED_VALID " THEN NULL "
+    "ELSE __duckhts_roh_decode_stable(l.s, ";
+static const char fitted_select_head_with_map[] =
+    ROH_RUN_COLUMNS ", seg.r.stable_fraction AS stable_fraction, seg.r.gained_bases AS gained_bases "
+    "FROM (SELECT l.smp, l.chrom, unnest(CASE WHEN NOT " ROH_FITTED_VALID " THEN NULL "
+    "WHEN m.m_chrom IS NULL THEN NULL ELSE __duckhts_roh_decode_stable(l.s, ";
+static const char fitted_decode_end[] =
+    ", CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE)) END";
+static const char fitted_from_lists_with_map[] =
+    ") AS r FROM __dht_lists AS l LEFT JOIN __dht_map AS m ON m.m_chrom = l.chrom) AS seg";
+/* The other arguments, checked also when there is no sample. */
 static const char fitted_counts_guard[] =
-    ROH_FITTED_GUARD_COLUMNS "FROM (SELECT DISTINCT CAST(sample_id AS VARCHAR) AS smp "
-    "FROM query_table(counts_table)) AS s "
-    "LEFT JOIN __dht_fit AS fit ON fit.smp IS NOT DISTINCT FROM s.smp "
-    "WHERE NOT __duckhts_roh_valid_args(3, NULL::DOUBLE, " ROH_FIT_MODEL("fit", "s.smp") ", "
-    "CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE), " ROH_LIMIT_ARGUMENTS ")"
     ROH_FITTED_GUARD_COLUMNS "FROM (SELECT 0.001 AS seq_error, 0.0 AS contamination, 0.5 AS allele_balance, "
     "0.0 AS artefact_weight) AS defaults WHERE NOT " ROH_COUNTS_ARGUMENTS_VALID;
 
@@ -645,7 +661,7 @@ static bool register_roh_counts_macro(duckhts_registration_t *registration, bool
     parts[count++] = fitted ? fitted_select_head : select_head;
     parts[count++] = fitted ? fitted_counts_model : counts_model;
     parts[count++] = no_map_arguments;
-    parts[count++] = decode_end;
+    parts[count++] = fitted ? fitted_decode_end : decode_end;
     parts[count++] = from_lists;
     parts[count++] = fitted ? fitted_counts_guard : counts_guard;
     parts[count++] = fitted
@@ -653,11 +669,11 @@ static bool register_roh_counts_macro(duckhts_registration_t *registration, bool
         : "), (counts_table, genetic_map VARCHAR, " ROH_COUNTS_OPTIONS ") AS TABLE (";
     parts[count++] = fitted ? fitted_counts_lists : counts_lists;
     parts[count++] = map_lists;
-    parts[count++] = fitted ? fitted_select_head : select_head;
+    parts[count++] = fitted ? fitted_select_head_with_map : select_head;
     parts[count++] = fitted ? fitted_counts_model : counts_model;
     parts[count++] = map_arguments;
-    parts[count++] = decode_end;
-    parts[count++] = from_lists_with_map;
+    parts[count++] = fitted ? fitted_decode_end : decode_end;
+    parts[count++] = fitted ? fitted_from_lists_with_map : from_lists_with_map;
     parts[count++] = fitted ? fitted_counts_guard : counts_guard;
     parts[count++] = ")";
     return duckhts_register_sql_parts(registration, parts, count);

@@ -1631,6 +1631,36 @@ UNION ALL (SELECT * FROM scalar EXCEPT ALL SELECT * FROM fitted));
 ----
 0
 
+# The counts relation is read once. A relation that holds a join, such as counts joined to
+# their samples or frequencies, read a second time is a common subplan that DuckDB
+# materializes as a CTE with every row and column of the counts; on 100 synthetic chr20
+# samples that tripled the peak buffer (benchmark_roh_truth_and_mixtures.md). The fit
+# relation is read once too, so the plan holds no CTE at all.
+statement ok
+CREATE TEMP VIEW roh_counts_joined AS
+SELECT c.* FROM roh_counts_clean AS c JOIN (SELECT DISTINCT sample_id FROM roh_counts_clean) AS s
+USING (sample_id);
+
+query II
+EXPLAIN (FORMAT json)
+SELECT count(*) FROM duckhts_roh_counts_fitted('roh_counts_joined', 'roh_fits');
+----
+physical_plan	<!REGEX>:.*"name": "CTE".*
+
+query II
+EXPLAIN (FORMAT json)
+SELECT count(*) FROM duckhts_roh_counts_fitted('roh_counts_joined', 'roh_fits', 'roh_counts_map');
+----
+physical_plan	<!REGEX>:.*"name": "CTE".*
+
+query I
+WITH joined AS (SELECT * FROM duckhts_roh_counts_fitted('roh_counts_joined', 'roh_fits')),
+direct AS (SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits'))
+SELECT count(*) FROM ((SELECT * FROM joined EXCEPT ALL SELECT * FROM direct)
+UNION ALL (SELECT * FROM direct EXCEPT ALL SELECT * FROM joined));
+----
+0
+
 statement ok
 CREATE TEMP TABLE roh_bad_fits AS SELECT * FROM roh_fits WHERE sample = 'S1';
 
