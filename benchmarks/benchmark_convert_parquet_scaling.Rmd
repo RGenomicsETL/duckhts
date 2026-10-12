@@ -343,7 +343,10 @@ build_copy_sql <- function(cell, output) {
                   if (nzchar(cell$arguments)) paste0(", ", cell$arguments) else "")
   statement <- system2(duckdb_cli, c("-unsigned", "-list", "-noheader", "-bail"),
                        input = c(sprintf("LOAD %s;", quote_literal(extension)), call), stdout = TRUE)
-  stopifnot(is.null(attr(statement, "status")), length(statement) == 1L, startsWith(statement, "COPY ("))
+  stopifnot(is.null(attr(statement, "status")), length(statement) >= 1L)
+  # The stored header keeps its line breaks, so the statement can span lines.
+  statement <- paste(statement, collapse = "\n")
+  stopifnot(startsWith(statement, "COPY ("))
   statement
 }
 # The SELECT inside a generated COPY statement: what the measured run reads.
