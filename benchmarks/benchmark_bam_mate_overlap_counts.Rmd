@@ -1,0 +1,922 @@
+---
+title: "Mate overlap count scaling"
+output:
+  github_document:
+    html_preview: false
+    pandoc_args: ["--wrap=preserve", "--columns=400"]
+params:
+  reduced: false
+---
+
+`r if (isTRUE(params$reduced)) "**Reduced render: this is not the report.** It runs every step on less data and gives no timing verdict." else ""`
+
+This report gives the 1×/2×/4× scaling evidence `STYLE.md` asks for, for
+`duckhts_bam_mate_overlap_counts()`. The function reads coordinate-sorted
+alignments once, on one worker. It holds the first mate of a pair whose mate
+starts inside it until the mate arrives, and it counts the positions that both
+mates align to in fixed counters. So its work grows with the alignments it
+reads, and its memory grows with the mates it holds at once. No earlier report
+measures this function; this is its first baseline.
+
+## Workloads
+
+- **Real.** chr1 of the 1000 Genomes 30× CRAM of HG00403, staged as a CRAM
+  slice (registry artifact `bam_mismatch_hg00403_chr1_cram`, staged by
+  `benchmarks/bam_mismatch_stage.R`), read with the registered GRCh38 FASTA
+  (`liftover_grch38_fasta`) as its reference. The render checks the slice
+  against its registered identity and the FASTA against its registered size
+  and MD5 before it measures. Those checks read both files in full, so every
+  measured run reads from a warm page cache. Three regions double the
+  alignments: chr1 up to the 25% and the 50% quantiles of the alignment start
+  positions, and the whole contig. The mates held at once are what the data
+  give. The render derives them, and they are not fixed.
+- **Synthetic.** Generated at render time, untimed: DuckDB writes SAM text, and
+  the samtools that the RBCFTools package bundles sorts it and indexes it as
+  BAM. A contig holds fragment families 1,000 bases apart. A family is P pairs
+  of 150-base reads whose read 1s all start at one position. Read 2 of pair j
+  starts d = 1 + (97 j mod 149) bases after its read 1. So it shares 150 − d
+  positions (1 to 149) with its read 1, and every read 1 is held until its
+  read 2 arrives. All P read 1s of a family are held at once: the held-mate
+  count of a contig is P, and the contig has 2 × families × P alignments. One
+  pair in 16 has one substituted read-2 base, a known disagreement. One pair
+  in 16 has a read 2 with MAPQ 10, which the default `min_mapq` of 20 leaves
+  out; its read 1 is held and then dropped when the scan passes its mate's
+  start. Seven contigs give three series that share the 1× contig
+  (families × P):
+  - alignments at a fixed held-mate count: 4 × 100,000, 8 × 100,000 and
+    16 × 100,000;
+  - held mates at fixed alignments: 4 × 100,000, 2 × 200,000 and
+    1 × 400,000;
+  - both: 4 × 100,000, 4 × 200,000 and 4 × 400,000.
+
+  A family stands for a deep amplicon, or a deep pileup of short fragments:
+  the stress shape for held mates. The amplicon sequence and the base
+  qualities are fixed, so this BAM compresses far better than real data.
+
+## Held mates, derived from the input
+
+The function holds a kept alignment when its mate starts inside it and no
+mate of the same name is held. It releases the held mate when its mate
+arrives, or when the scan passes the mate's start without it. A record with
+the name of a held mate that does not pair with it is left out, and the held
+mate stays held. The render derives the number of mates held at once from
+each input, with SQL over `read_bam()` and without the function:
+
+- an alignment is kept by the function's default filters: MAPQ at least 20, no
+  flag of 3844, paired, mate mapped, and mate on the same contig;
+- the first kept alignment of a name, by position, is held when its mate
+  starts inside it (`PNEXT` from `POS` up to its reference end);
+- the held alignment is released at its mate's position when the name has
+  two kept alignments that pair: one is read 1 and the other read 2, and each
+  names the other's start. Otherwise it is dropped before the first alignment
+  past the position it names.
+
+A drop comes before every hold at its position. A hold and a release by an
+arriving mate at one position come in file order, which `read_bam()` does not
+give for CRAM. So the derived count is bounded. The lower bound is the most
+mates held after all the alignments of a position. The upper bound adds back
+the mates that arriving mates release at that position, as if every hold
+there came first. The render also runs the function untimed with
+`max_pending` at the upper bound, which must succeed, and at one below the
+lower bound, which must fail with its limit error. The budget uses the upper
+bound. The derivation assumes that no name has more than two kept alignments
+and that every kept alignment has a CIGAR that matches its sequence; the
+render checks both.
+
+## Budget, declared before measuring
+
+The overhead is the median peak RSS of three empty runs that start the CLI,
+load the extension and scan nothing.
+
+The ceiling of each input is overhead + 3 × its live state. It is a gate on
+the peak RSS: the render stops if any observation exceeds its ceiling or
+spills. The live state is:
+
+- the counters: 95 × 95 × 16 cells of 8 bytes, 1,155,200 bytes;
+- the held mates, from the held-mate count H of the input (its upper bound)
+  and D, the bytes of CIGAR, sequence and qualities of its longest kept
+  alignment:
+  - the entries, 320 bytes each and allocated 1,024 at a time, each with
+    16 bytes in the heap and the free list: 1,024 × ⌈H / 1,024⌉ × 336 bytes;
+  - the name table, 2 × C + 1 slots of 24 bytes, where C is the smallest
+    1,024 × 2<sup>k</sup> that is at least H. While the table doubles, the
+    half-size table it replaces is live too, so 24 × (3 C + 2) bytes, or
+    24 × 2,049 bytes when C is 1,024;
+  - the CIGAR, sequence and qualities of each held mate, H × (D + 24) bytes;
+    the 24 bytes cover the allocator's header and rounding. An entry is
+    reused and keeps its largest buffer, so D is the longest kept alignment;
+- htslib's state for the file. For the CRAM, 32 MiB is allowed for the
+  container in hand (its compressed and uncompressed blocks and its decoded
+  records); this part is an allowance, not derived from the input. The
+  reference of the slice in hand and of the slice before it is added to it.
+  Without decoder threads, htslib asks for the reference of one slice's span
+  (`third_party/htslib/cram/cram_decode.c` lines 2452–2456).
+  `cram_get_ref()` loads only that span, unless the span is at least half the
+  contig (`third_party/htslib/cram/cram_io.c` lines 3248–3256). It frees the
+  previous span after it loads the next one (lines 3340–3347). The render
+  takes the widest pair of consecutive slices in each region from the CRAM
+  index. For the BAM, 4 MiB is allowed for its blocks, the record and the
+  index.
+
+The render also stops if a time exponent of the real series is above 1.25 at
+either doubling, or if its 1× run on one thread takes less than 5 s, the least
+that `STYLE.md` accepts for a timing verdict. The synthetic series read their
+1× contig in well under 5 s. So they get the memory verdict in full, and their
+times are reported without a verdict, as `STYLE.md` provides.
+
+## Protocol
+
+Every observation is one fresh DuckDB CLI process under `/usr/bin/time`. The
+JSON profiler gives the query latency and DuckDB's peak buffer and temporary
+bytes, and `/usr/bin/time` gives the peak RSS. The host is shared, so the
+render is pinned to eight cores (8 to 15) and runs at scheduling priority −15
+(`nice`), which every measured process inherits. The host load at the start
+is recorded, and the spread of the repetitions shows what interference
+remained. `max_temp_directory_size` is zero, so a spill fails the render;
+DuckDB's memory limit is left at its default, which the report records. Each
+cell has three repetitions at one thread and at four threads, in an order
+that alternates sizes. The function has one worker, so the thread setting
+should not change it, and the four-thread cells show whether that holds. Each
+query reduces the rows of the function to their number, the shared positions
+and the disagreements, so every row is produced and consumed. The R wrapper
+only builds this SQL call; it is not timed here.
+
+The render also checks the counts. On each synthetic contig, every row of the
+output must equal the counts that follow from the design, which R computes
+from the amplicon, the qualities and the pair rules alone. On the real data,
+every row of the output in the 400 kb around the position with the most held
+mates must equal the same count made in SQL from `read_bam()` and
+`cigar_aligned_blocks()`, as the SQL tests make it. That SQL count keeps only
+alignments that can share a position with their mate: each mate must start
+before the other ends.
+
+``` sh
+nice -n -15 taskset -c 8-15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_bam_mate_overlap_counts.Rmd")'
+```
+
+The render needs RBCFTools 1.24-1.1.0 or later for its samtools. The
+parameter `reduced` (`params = list(reduced = TRUE)`, with an `output_dir`
+outside the repository) runs every step on less data: a 2 Mb window of the
+CRAM around the most held mates (chr1:124,000,001–126,000,000) and synthetic
+families of a hundredth of the pairs. It keeps every gate except the timing
+verdict, writes its runs to a temporary file and says at its top that it is
+not the report. It checks the code end to end in a few minutes.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r benchmark, echo=FALSE, message=FALSE}
+stopifnot(requireNamespace("duckhtsbench", quietly = TRUE),
+          requireNamespace("jsonlite", quietly = TRUE),
+          requireNamespace("knitr", quietly = TRUE))
+# A reduced render checks every step on less data; see the render command.
+reduced <- isTRUE(params$reduced)
+Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath(
+  "r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+extension <- normalizePath(Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension"),
+                           mustWork = TRUE)
+duckdb_cli <- Sys.getenv("DUCKDB_CLI", Sys.which("duckdb"))
+stopifnot(nzchar(duckdb_cli), file.exists("/usr/bin/time"))
+duckdb_runtime <- system2(duckdb_cli, "--version", stdout = TRUE)[[1L]]
+revision <- system2("git", c("rev-parse", "HEAD"), stdout = TRUE)
+src_tree <- system2("git", c("rev-parse", "HEAD:src"), stdout = TRUE)
+if (system2("git", c("diff", "--quiet", "HEAD", "--", "src"), stdout = FALSE, stderr = FALSE) != 0L) {
+  stop("Build source must match the recorded HEAD")
+}
+host_load <- sub(".*load average: ", "", system2("uptime", stdout = TRUE))
+quote_literal <- function(value) paste0("'", gsub("'", "''", value, fixed = TRUE), "'")
+mib <- function(bytes) bytes / 2^20
+whole <- function(value) format(value, scientific = FALSE, trim = TRUE, big.mark = ",")
+
+source("benchmarks/bam_mismatch_stage.R")
+# Stop before any staging when RBCFTools is too old to bundle samtools.
+bam_mismatch_tool("samtools")
+samtools_version <- RBCFTools::samtools_version()
+rbcftools_version <- as.character(utils::packageVersion("RBCFTools"))
+
+# One untimed SQL script in its own CLI process; the rows of its last
+# statement come back, as numbers unless `numeric` is FALSE.
+query_untimed <- function(sql, numeric = TRUE) {
+  output <- suppressWarnings(system2(duckdb_cli, c("-unsigned", "-csv", "-bail"),
+                                     input = c(sprintf("LOAD %s;", quote_literal(extension)), sql),
+                                     stdout = TRUE))
+  if (!is.null(attr(output, "status"))) stop("DuckDB CLI failed on an untimed query", call. = FALSE)
+  utils::read.csv(text = output, colClasses = if (numeric) "numeric" else "character")
+}
+
+reference_argument <- function(reference) {
+  if (is.null(reference) || is.na(reference)) "" else paste0(", reference := ", quote_literal(reference))
+}
+
+# Run one query in a fresh CLI process with the given threads and spill
+# forbidden; its single row comes back with latency and memory.
+run_fresh <- function(query, threads) {
+  scratch <- tempfile("mate-overlap-scaling-")
+  dir.create(scratch)
+  on.exit(unlink(scratch, recursive = TRUE), add = TRUE)
+  sql_path <- file.path(scratch, "query.sql")
+  result_path <- file.path(scratch, "result.csv")
+  profile_path <- file.path(scratch, "profile.json")
+  time_path <- file.path(scratch, "time.tsv")
+  writeLines(c(
+    sprintf("SET threads = %d;", threads),
+    "SET max_temp_directory_size = '0KiB';",
+    sprintf("LOAD %s;", quote_literal(extension)),
+    "PRAGMA enable_profiling = 'json';",
+    sprintf("PRAGMA profiling_output = %s;", quote_literal(profile_path)),
+    sprintf("COPY (%s) TO %s (HEADER);", query, quote_literal(result_path)),
+    "PRAGMA disable_profiling;"
+  ), sql_path)
+  status <- system2("/usr/bin/time", c("-f", shQuote("%M\t%e"), "-o", shQuote(time_path),
+                                       shQuote(duckdb_cli), "-unsigned", "-batch", "-bail"),
+                    stdin = sql_path, stdout = FALSE, stderr = FALSE)
+  if (status != 0L) stop("DuckDB CLI failed (status ", status, ")")
+  profile <- jsonlite::fromJSON(profile_path, simplifyVector = TRUE)
+  timing <- utils::read.delim(time_path, header = FALSE, col.names = c("max_rss_kib", "process_seconds"))
+  data.frame(utils::read.csv(result_path, colClasses = "numeric"),
+             seconds = as.numeric(profile$latency), max_rss_kib = timing$max_rss_kib[[1L]],
+             peak_buffer_bytes = as.numeric(profile$system_peak_buffer_memory),
+             peak_temp_bytes = as.numeric(profile$system_peak_temp_dir_size))
+}
+
+count_query <- function(path, region, reference) sprintf(paste(
+  "SELECT count(*) AS output_rows, sum(positions)::BIGINT AS positions,",
+  "coalesce(sum(positions) FILTER (WHERE read1_base != read2_base), 0)::BIGINT AS disagreements",
+  "FROM duckhts_bam_mate_overlap_counts(%s, region := %s%s)"),
+  quote_literal(path), quote_literal(region), reference_argument(reference))
+
+# The held-mate derivation described above. `source` is a read_bam() call;
+# each row of `regions` names a label, a contig and the last position of the
+# region. Each region gets both bounds, the position where the lower bound is
+# reached, the pairs held, the kept alignments, the kept alignments without a
+# matching CIGAR and sequence, the longest kept alignment's CIGAR, sequence
+# and qualities in bytes, the names with two kept alignments that do not
+# pair, and the most kept alignments of one name in the input. The
+# derivation holds only for names with at most two kept alignments and for
+# kept alignments whose CIGAR matches their sequence; callers check.
+held_replay <- function(source, regions) {
+  region_values <- paste(sprintf("(%s, %s, %.0f)", quote_literal(regions$label), quote_literal(regions$contig),
+                                 regions$region_end), collapse = ", ")
+  # `paired`: the two kept alignments of a name pair as the function requires,
+  # one read 1 and one read 2, each naming the other's start. With two rows,
+  # PNEXT + POS is then the same on both and equals min(POS) + max(POS).
+  sql <- c(
+    "CREATE TEMP TABLE names AS",
+    "SELECT RNAME, QNAME, count(*) AS kept_mates, count(*) FILTER (WHERE NOT has_bases) AS without_bases,",
+    "  min(POS) AS first_pos, max(POS) AS last_pos,",
+    "  arg_min(PNEXT, POS) AS first_mate_pos, arg_min(span, POS) AS first_span, max(bytes) AS bytes,",
+    "  count(*) = 2 AND count(*) FILTER (WHERE mate_bits = 64) = 1 AND count(*) FILTER (WHERE mate_bits = 128) = 1",
+    "    AND min(PNEXT + POS) = max(PNEXT + POS) AND min(PNEXT + POS) = min(POS) + max(POS) AS paired",
+    "FROM (",
+    "  SELECT RNAME, QNAME, POS, PNEXT, FLAG & 192 AS mate_bits, cigar_reference_length(CIGAR) AS span,",
+    "    coalesce(len(SEQ) > 0 AND cigar_query_length(CIGAR) = len(SEQ), false) AS has_bases,",
+    "    4 * len(regexp_extract_all(CIGAR, '[0-9]+[MIDNSHP=X]')) + (len(SEQ) + 1) // 2 + len(SEQ) AS bytes",
+    sprintf("  FROM %s", source),
+    "  WHERE (FLAG & 3844) = 0 AND MAPQ >= 20 AND (FLAG & 1) != 0 AND (FLAG & 8) = 0 AND RNEXT = RNAME",
+    ") kept",
+    "GROUP BY RNAME, QNAME;",
+    "CREATE TEMP TABLE holds AS",
+    "SELECT RNAME, first_pos AS hold_pos,",
+    "  CASE WHEN paired THEN last_pos ELSE first_mate_pos + 1 END AS release_pos, paired AS taken",
+    "FROM names",
+    "WHERE first_mate_pos >= first_pos AND first_mate_pos < first_pos + first_span;",
+    "CREATE TEMP TABLE trajectory AS",
+    "WITH events AS (",
+    "  SELECT RNAME, hold_pos AS pos, 1 AS holds, 0 AS takes, 0 AS drops FROM holds",
+    "  UNION ALL",
+    "  SELECT RNAME, release_pos, 0, CASE WHEN taken THEN 1 ELSE 0 END, CASE WHEN taken THEN 0 ELSE 1 END",
+    "  FROM holds",
+    "), per_position AS (",
+    "  SELECT RNAME, pos, sum(holds) AS holds, sum(takes) AS takes, sum(drops) AS drops",
+    "  FROM events GROUP BY RNAME, pos",
+    ")",
+    "SELECT RNAME, pos, takes,",
+    "  sum(holds - takes - drops) OVER (PARTITION BY RNAME ORDER BY pos ROWS UNBOUNDED PRECEDING) AS held_after",
+    "FROM per_position;",
+    sprintf("WITH regions(label, contig, region_end) AS (VALUES %s),", region_values),
+    "held AS (",
+    "  SELECT r.label, max(t.held_after) AS held_lower, max(t.held_after + t.takes) AS held_upper,",
+    "    arg_max(t.pos, t.held_after) AS peak_pos",
+    "  FROM regions r JOIN trajectory t ON t.RNAME = r.contig AND t.pos <= r.region_end",
+    "  GROUP BY r.label",
+    "), held_pairs AS (",
+    "  SELECT r.label, count(*) AS pairs_held",
+    "  FROM regions r JOIN holds h ON h.RNAME = r.contig AND h.hold_pos <= r.region_end",
+    "  GROUP BY r.label",
+    "), kept AS (",
+    "  SELECT r.label,",
+    "    sum(CASE WHEN n.first_pos <= r.region_end THEN 1 ELSE 0 END +",
+    "        CASE WHEN n.kept_mates = 2 AND n.last_pos <= r.region_end THEN 1 ELSE 0 END) AS kept_alignments,",
+    "    sum(n.without_bases) AS without_bases, max(n.bytes) AS longest_bytes,",
+    "    count(*) FILTER (WHERE n.kept_mates = 2 AND NOT n.paired) AS unpaired_names",
+    "  FROM regions r JOIN names n ON n.RNAME = r.contig AND n.first_pos <= r.region_end",
+    "  GROUP BY r.label",
+    ")",
+    "SELECT label, held_lower, held_upper, peak_pos, pairs_held, kept_alignments, without_bases, longest_bytes,",
+    "  unpaired_names, (SELECT max(kept_mates) FROM names) AS most_kept_per_name",
+    "FROM held JOIN held_pairs USING (label) JOIN kept USING (label) ORDER BY label;")
+  replay <- query_untimed(sql, numeric = FALSE)
+  for (column in setdiff(names(replay), "label")) replay[[column]] <- as.numeric(replay[[column]])
+  replay <- replay[match(regions$label, replay$label), ]
+  rownames(replay) <- NULL
+  replay
+}
+
+# Run the function untimed with `max_pending` set; it succeeds or returns the
+# error text.
+run_with_limit <- function(path, region, reference, max_pending) {
+  sql <- c(sprintf("LOAD %s;", quote_literal(extension)),
+           sprintf(paste("SELECT count(*) AS output_rows FROM duckhts_bam_mate_overlap_counts(%s, region := %s%s,",
+                         "max_pending := %.0f);"),
+                   quote_literal(path), quote_literal(region), reference_argument(reference), max_pending))
+  output <- suppressWarnings(system2(duckdb_cli, c("-unsigned", "-batch", "-bail", "-csv"), input = sql,
+                                     stdout = TRUE, stderr = TRUE))
+  list(succeeded = is.null(attr(output, "status")), text = paste(output, collapse = "\n"))
+}
+
+# The function holds at most `upper` mates of this input and more than
+# `lower` - 1: it succeeds at the first limit and fails at the second.
+held_limit_agrees <- function(path, region, reference, lower, upper) {
+  at_upper <- run_with_limit(path, region, reference, upper)
+  below_lower <- run_with_limit(path, region, reference, lower - 1)
+  limit_error <- sprintf("more than max_pending (%.0f) mates wait for their mate", lower - 1)
+  at_upper$succeeded && !below_lower$succeeded && grepl(limit_error, below_lower$text, fixed = TRUE)
+}
+
+# The live state of the budget, in bytes.
+counter_bytes <- 95 * 95 * 16 * 8
+held_state_bytes <- function(held, longest_bytes) {
+  entries <- 1024 * ceiling(held / 1024)
+  table_entries <- 1024 * 2^pmax(0, ceiling(log2(pmax(held, 1) / 1024)))
+  table_bytes <- ifelse(table_entries > 1024, 24 * (3 * table_entries + 2), 24 * (2 * 1024 + 1))
+  entries * (320 + 16) + table_bytes + held * (longest_bytes + 24)
+}
+
+# ---- the real input ----
+slice_id <- "bam_mismatch_hg00403_chr1_cram"
+slice_identity <- bam_mismatch_check_staged(slice_id, extension)
+cram <- duckhtsbench::duckhts_bench_artifact_path(slice_id)
+reference <- duckhtsbench::duckhts_bench_artifact_path("liftover_grch38_fasta")
+duckhtsbench::duckhts_bench_validate_identity("liftover_grch38_fasta", reference)
+# The slice is one whole contig; its length comes from the reference index.
+contig <- bam_mismatch_registry_row(slice_id)$fields[["region"]]
+reference_index <- utils::read.delim(paste0(reference, ".fai"), header = FALSE)
+contig_length <- reference_index[[2L]][reference_index[[1L]] == contig]
+stopifnot(length(contig_length) == 1L)
+# The real series reads the whole contig; a reduced render reads a 2 Mb
+# window around the most held mates instead.
+window <- if (reduced) c(124000001, 126000000) else c(1, contig_length)
+window_region <- sprintf("%s:%.0f-%.0f", contig, window[[1L]], window[[2L]])
+# The CRAM index lists each slice's start and reference span, in file order.
+slices <- utils::read.delim(gzfile(paste0(cram, ".crai")), header = FALSE,
+                            col.names = c("sequence", "start", "span", "container", "slice", "size"))
+consecutive_span <- slices$span + c(0, utils::head(slices$span, -1L))
+# The slices that a region from the window start to `region_end` reads.
+slices_read <- function(region_end) slices$start <= region_end & slices$start + slices$span > window[[1L]]
+
+# Untimed staging: the region ends at which a quarter and a half of the
+# alignments of the window have started, and the alignments of each region.
+cuts <- query_untimed(c(
+  sprintf("CREATE TEMP TABLE starts AS SELECT POS FROM read_bam(%s, reference := %s, region := %s);",
+          quote_literal(cram), quote_literal(reference), quote_literal(window_region)),
+  "CREATE TEMP TABLE cuts AS",
+  "SELECT quantile_disc(POS, 0.25)::BIGINT AS quarter, quantile_disc(POS, 0.5)::BIGINT AS half FROM starts;",
+  "SELECT quarter, half, (SELECT count(*) FROM starts WHERE POS <= quarter) AS alignments_1x,",
+  "  (SELECT count(*) FROM starts WHERE POS <= half) AS alignments_2x,",
+  "  (SELECT count(*) FROM starts) AS alignments_4x FROM cuts;"))
+stopifnot(nrow(cuts) == 1L, cuts$quarter < cuts$half, cuts$half < window[[2L]])
+# The whole contig holds every alignment of the slice.
+if (!reduced) stopifnot(cuts$alignments_4x == slice_identity$alignments)
+real <- data.frame(cell = c("1", "2", "4"), scale = c(1L, 2L, 4L),
+                   region_end = c(cuts$quarter, cuts$half, window[[2L]]),
+                   alignments = c(cuts$alignments_1x, cuts$alignments_2x, cuts$alignments_4x))
+real$region <- sprintf("%s:%.0f-%.0f", contig, window[[1L]], real$region_end)
+real$reference_span <- vapply(real$region_end, function(end) max(consecutive_span[slices_read(end)]), 0)
+
+real_held <- held_replay(sprintf("read_bam(%s, reference := %s, region := %s)", quote_literal(cram),
+                                 quote_literal(reference), quote_literal(window_region)),
+                         data.frame(label = real$cell, contig = contig, region_end = real$region_end))
+stopifnot(all(real_held$without_bases == 0), all(real_held$most_kept_per_name <= 2),
+          all(real_held$held_lower >= 2), all(real_held$held_lower <= real_held$held_upper))
+real <- cbind(real, real_held[setdiff(names(real_held), "label")])
+real$limit_agrees <- vapply(seq_len(nrow(real)), function(k) {
+  held_limit_agrees(cram, real$region[[k]], reference, real$held_lower[[k]], real$held_upper[[k]])
+}, logical(1L))
+stopifnot(all(real$limit_agrees))
+real$htslib_bytes <- 32 * 2^20 + real$reference_span
+
+# The counts of the function in the 400 kb around the position where the most
+# mates are held, against the same count made in SQL. A pair shares a
+# position only if each mate starts before the other ends, so the SQL count
+# keeps the alignments that can: the mate starts before this one ends, and
+# this one starts within the longest kept span after the mate.
+peak_pos <- real$peak_pos[real$scale == 4L]
+oracle_start <- max(window[[1L]], peak_pos - 2e5)
+oracle_end <- min(window[[2L]], peak_pos + 2e5)
+oracle_region <- sprintf("%s:%.0f-%.0f", contig, oracle_start, oracle_end)
+oracle <- query_untimed(c(
+  "CREATE TEMP TABLE observed AS",
+  sprintf("SELECT * FROM duckhts_bam_mate_overlap_counts(%s, reference := %s, region := %s);",
+          quote_literal(cram), quote_literal(reference), quote_literal(oracle_region)),
+  "CREATE TEMP TABLE expected AS",
+  "WITH filtered AS (",
+  "  SELECT QNAME, FLAG, RNAME, POS, PNEXT, SEQ, QUAL, CIGAR, cigar_reference_length(CIGAR) AS span",
+  sprintf("  FROM read_bam(%s, reference := %s, region := %s)",
+          quote_literal(cram), quote_literal(reference), quote_literal(oracle_region)),
+  "  WHERE (FLAG & 3844) = 0 AND MAPQ >= 20 AND (FLAG & 1) != 0 AND (FLAG & 8) = 0 AND RNEXT = RNAME",
+  "), reads AS (",
+  "  SELECT QNAME, FLAG, RNAME, POS, PNEXT, SEQ, QUAL, cigar_aligned_blocks(CIGAR, POS) AS blocks",
+  "  FROM filtered",
+  "  WHERE PNEXT < POS + span AND POS < PNEXT + (SELECT max(span) FROM filtered)",
+  "), aligned AS (",
+  "  SELECT QNAME, FLAG, RNAME, POS, PNEXT, SEQ, QUAL, unnest(blocks.ref_start) AS ref_start,",
+  "    unnest(blocks.query_start) AS query_start, unnest(blocks.width) AS width",
+  "  FROM reads",
+  "), read_bases AS (",
+  "  SELECT QNAME, FLAG, RNAME, POS, PNEXT, ref_start + i AS ref_pos, substr(SEQ, query_start + i + 1, 1) AS base,",
+  "    CASE WHEN QUAL IS NULL OR QUAL = '*' THEN NULL",
+  "         ELSE least(ord(substr(QUAL, query_start + i + 1, 1)) - 33, 93) END AS quality",
+  "  FROM aligned, LATERAL (SELECT unnest(range(width)) AS i)",
+  ")",
+  "SELECT r1.quality AS read1_quality, r2.quality AS read2_quality, r1.base AS read1_base, r2.base AS read2_base,",
+  "  count(*) AS positions",
+  "FROM read_bases r1 JOIN read_bases r2",
+  "  ON r1.QNAME = r2.QNAME AND r1.RNAME = r2.RNAME AND r1.ref_pos = r2.ref_pos",
+  "WHERE (r1.FLAG & 192) = 64 AND (r2.FLAG & 192) = 128 AND r1.PNEXT = r2.POS AND r2.PNEXT = r1.POS",
+  "  AND r1.base IN ('A', 'C', 'G', 'T') AND r2.base IN ('A', 'C', 'G', 'T')",
+  "GROUP BY ALL;",
+  "SELECT (SELECT count(*) FROM observed) AS observed_rows, (SELECT count(*) FROM expected) AS expected_rows,",
+  "  (SELECT sum(positions) FROM expected) AS expected_positions,",
+  "  (SELECT count(*) FROM (SELECT * FROM observed EXCEPT ALL SELECT * FROM expected)) AS extra_rows,",
+  "  (SELECT count(*) FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM observed)) AS missing_rows,",
+  "  region_alignments, region_bases,",
+  sprintf("  %.0f AS region_length", oracle_end - oracle_start + 1),
+  "FROM (SELECT count(*) AS region_alignments, sum(len(SEQ)) AS region_bases",
+  sprintf("      FROM read_bam(%s, reference := %s, region := %s));",
+          quote_literal(cram), quote_literal(reference), quote_literal(oracle_region))))
+stopifnot(oracle$expected_rows > 0, oracle$observed_rows == oracle$expected_rows,
+          oracle$extra_rows == 0, oracle$missing_rows == 0)
+
+# ---- the synthetic input ----
+read_length <- 150L
+amplicon_length <- 2L * read_length
+family_spacing <- 1000L
+first_start <- 1001L
+# A fixed amplicon from the Park-Miller generator; every product is exact in a double.
+amplicon <- local({
+  state <- 20261012
+  bases <- character(amplicon_length)
+  for (i in seq_len(amplicon_length)) {
+    state <- (16807 * state) %% 2147483647
+    bases[[i]] <- c("A", "C", "G", "T")[state %/% 536870912 + 1]
+  }
+  paste(bases, collapse = "")
+})
+amplicon_bases <- strsplit(amplicon, "", fixed = TRUE)[[1L]]
+read1_quality <- ifelse(seq_len(read_length) %% 4L == 0L, 23L, 37L)
+read2_quality <- ifelse(seq_len(read_length) %% 3L == 0L, 12L, 37L)
+quality_text <- function(quality) intToUtf8(quality + 33L)
+# A reduced render keeps the families and holds a hundredth of the pairs.
+pair_scale <- if (reduced) 0.01 else 1
+synthetic <- data.frame(cell = c("c11", "c21", "c41", "c12", "c14", "c22", "c44"),
+                        families = c(4L, 8L, 16L, 2L, 1L, 4L, 4L),
+                        pairs = c(1e5, 1e5, 1e5, 2e5, 4e5, 2e5, 4e5) * pair_scale, stringsAsFactors = FALSE)
+synthetic$alignments <- 2 * synthetic$families * synthetic$pairs
+synthetic$length <- first_start + family_spacing * synthetic$families + family_spacing
+series <- data.frame(series = rep(c("alignments", "held mates", "both"), each = 3L),
+                     scale = rep(c(1L, 2L, 4L), times = 3L),
+                     cell = c("c11", "c21", "c41", "c11", "c12", "c14", "c11", "c22", "c44"),
+                     stringsAsFactors = FALSE)
+
+synthetic_dir <- tempfile("mate-overlap-synthetic-")
+dir.create(synthetic_dir)
+sam <- file.path(synthetic_dir, "synthetic.sam")
+body <- file.path(synthetic_dir, "body.sam")
+bam <- file.path(synthetic_dir, "synthetic.bam")
+writeLines(c("@HD\tVN:1.6\tSO:unsorted", sprintf("@SQ\tSN:%s\tLN:%d", synthetic$cell, synthetic$length)), sam)
+contig_values <- paste(sprintf("(%s, %d, %.0f)", quote_literal(synthetic$cell), synthetic$families,
+                               synthetic$pairs), collapse = ", ")
+generate <- c(
+  sprintf("COPY (WITH contigs(contig, families, pairs) AS (VALUES %s),", contig_values),
+  "fragments AS (",
+  sprintf("  SELECT contig, f, j, %d + %d * f AS start, 1 + (97 * j) %% 149 AS d", first_start, family_spacing),
+  "  FROM contigs, LATERAL range(families) family(f), LATERAL range(pairs) pair(j)",
+  "), mates AS (",
+  sprintf("  SELECT *, substr(%s, d + 1, %d) AS read2, (j // 16) %% (%d - d) AS o FROM fragments",
+          quote_literal(amplicon), read_length, read_length),
+  ")",
+  "SELECT concat_ws(chr(9), contig || ':' || f || ':' || j, '99', contig, start, '60', '150M', '=', start + d,",
+  sprintf("  d + 150, %s, %s)", quote_literal(substr(amplicon, 1L, read_length)),
+          quote_literal(quality_text(read1_quality))),
+  "FROM mates",
+  "UNION ALL",
+  "SELECT concat_ws(chr(9), contig || ':' || f || ':' || j, '147', contig, start + d,",
+  "  CASE WHEN j % 16 = 15 THEN '10' ELSE '60' END, '150M', '=', start, -(d + 150),",
+  "  CASE WHEN j % 16 = 7",
+  "       THEN substr(read2, 1, o) || translate(substr(read2, o + 1, 1), 'ACGT', 'CGTA') || substr(read2, o + 2)",
+  "       ELSE read2 END,",
+  sprintf("  %s)", quote_literal(quality_text(read2_quality))),
+  sprintf("FROM mates) TO %s (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');", quote_literal(body)))
+status <- system2(duckdb_cli, c("-batch", "-bail"), input = generate)
+if (status != 0L) stop("could not write the synthetic SAM", call. = FALSE)
+stopifnot(file.append(sam, body))
+unlink(body)
+bam_mismatch_run("samtools", c("sort", "--no-PG", "-@", "3", "-m", "512M", "-T", file.path(synthetic_dir, "sort"),
+                               "-o", bam, sam))
+bam_mismatch_run("samtools", c("index", bam))
+unlink(sam)
+
+# The BAM has the alignments and positions of the design.
+synthetic_identity <- query_untimed(sprintf(
+  "SELECT RNAME AS cell, count(*) AS alignments, sum(POS) AS position_sum FROM read_bam(%s) GROUP BY RNAME;",
+  quote_literal(bam)), numeric = FALSE)
+synthetic_identity <- synthetic_identity[match(synthetic$cell, synthetic_identity$cell), ]
+offset_sum <- function(pairs) sum(1 + (97 * (seq_len(pairs) - 1)) %% 149)
+design_position_sum <- vapply(seq_len(nrow(synthetic)), function(k) {
+  families <- synthetic$families[[k]]
+  family_starts <- first_start + family_spacing * (seq_len(families) - 1)
+  2 * synthetic$pairs[[k]] * sum(family_starts) + families * offset_sum(synthetic$pairs[[k]])
+}, numeric(1L))
+stopifnot(identical(as.numeric(synthetic_identity$alignments), synthetic$alignments),
+          identical(as.numeric(synthetic_identity$position_sum), design_position_sum))
+
+# The counts that follow from the design: each counted pair shares amplicon
+# offsets d to 149 (zero-based) with its read 1; a pair with j mod 16 = 15 is
+# not counted; a pair with j mod 16 = 7 has read 2's base at shared offset
+# (j div 16) mod (150 - d) moved one step along A, C, G, T.
+substitute_base <- c(A = "C", C = "G", G = "T", T = "A")
+design_counts <- function(families, pairs) {
+  j <- seq_len(pairs) - 1
+  d <- 1 + (97 * j) %% 149
+  counted <- j %% 16 != 15
+  shared <- do.call(rbind, lapply(seq_len(149L), function(offset) data.frame(d = offset, a = offset:149)))
+  shared$pairs <- tabulate(d[counted], nbins = 149L)[shared$d]
+  agreeing <- data.frame(read1_quality = read1_quality[shared$a + 1], read2_quality = read2_quality[shared$a - shared$d + 1],
+                         read1_base = amplicon_bases[shared$a + 1], read2_base = amplicon_bases[shared$a + 1],
+                         positions = shared$pairs)
+  changed <- j %% 16 == 7
+  o <- (j[changed] %/% 16) %% (150 - d[changed])
+  a <- d[changed] + o
+  moved <- data.frame(read1_quality = read1_quality[a + 1], read2_quality = read2_quality[o + 1],
+                      read1_base = amplicon_bases[a + 1], read2_base = amplicon_bases[a + 1], positions = -1)
+  substituted <- moved
+  substituted$read2_base <- unname(substitute_base[moved$read1_base])
+  substituted$positions <- 1
+  counts <- stats::aggregate(positions ~ read1_quality + read2_quality + read1_base + read2_base,
+                             data = rbind(agreeing, moved, substituted), FUN = sum)
+  counts <- counts[counts$positions > 0, ]
+  counts$positions <- counts$positions * families
+  counts
+}
+row_keys <- function(rows) {
+  sort(paste(rows$read1_quality, rows$read2_quality, rows$read1_base, rows$read2_base,
+             format(as.numeric(rows$positions), scientific = FALSE, trim = TRUE)))
+}
+synthetic_checks <- do.call(rbind, lapply(seq_len(nrow(synthetic)), function(k) {
+  expected <- design_counts(synthetic$families[[k]], synthetic$pairs[[k]])
+  observed <- query_untimed(sprintf("SELECT * FROM duckhts_bam_mate_overlap_counts(%s, region := %s);",
+                                    quote_literal(bam), quote_literal(synthetic$cell[[k]])), numeric = FALSE)
+  data.frame(cell = synthetic$cell[[k]], expected_rows = nrow(expected), observed_rows = nrow(observed),
+             expected_positions = sum(expected$positions),
+             expected_disagreements = sum(expected$positions[expected$read1_base != expected$read2_base]),
+             rows_equal = identical(row_keys(observed), row_keys(expected)), stringsAsFactors = FALSE)
+}))
+stopifnot(all(synthetic_checks$rows_equal))
+
+synthetic_held <- held_replay(sprintf("read_bam(%s)", quote_literal(bam)),
+                              data.frame(label = synthetic$cell, contig = synthetic$cell,
+                                         region_end = synthetic$length))
+stopifnot(all(synthetic_held$without_bases == 0), all(synthetic_held$most_kept_per_name <= 2),
+          all(synthetic_held$held_lower == synthetic$pairs), all(synthetic_held$held_upper == synthetic$pairs))
+synthetic <- cbind(synthetic, synthetic_held[setdiff(names(synthetic_held), "label")])
+synthetic$limit_agrees <- vapply(seq_len(nrow(synthetic)), function(k) {
+  held_limit_agrees(bam, synthetic$cell[[k]], NULL, synthetic$held_lower[[k]], synthetic$held_upper[[k]])
+}, logical(1L))
+stopifnot(all(synthetic$limit_agrees))
+synthetic$htslib_bytes <- 4 * 2^20
+
+# ---- the budget, before any measurement ----
+empty_runs <- vapply(seq_len(3L), function(run) run_fresh("SELECT 1 AS output_rows", 1L)$max_rss_kib, numeric(1L))
+overhead_mib <- median(empty_runs) / 1024
+memory_limit <- system2(duckdb_cli, c("-list", "-noheader"),
+                        input = "SELECT current_setting('memory_limit');", stdout = TRUE)[[1L]]
+budget <- function(cells) {
+  cells$held_mib <- mib(held_state_bytes(cells$held_upper, cells$longest_bytes))
+  cells$live_mib <- mib(counter_bytes) + cells$held_mib + mib(cells$htslib_bytes)
+  cells$model_mib <- overhead_mib + cells$live_mib
+  cells$ceiling_mib <- overhead_mib + 3 * cells$live_mib
+  cells
+}
+real <- budget(real)
+synthetic <- budget(synthetic)
+
+# ---- the measurements ----
+cells <- rbind(
+  data.frame(workload = "real", cell = real$cell, path = cram, region = real$region, reference = reference,
+             model_mib = real$model_mib, ceiling_mib = real$ceiling_mib, stringsAsFactors = FALSE),
+  data.frame(workload = "synthetic", cell = synthetic$cell, path = bam, region = synthetic$cell, reference = NA,
+             model_mib = synthetic$model_mib, ceiling_mib = synthetic$ceiling_mib, stringsAsFactors = FALSE))
+observations <- list()
+for (repetition in 1:3) {
+  order <- if (repetition %% 2L == 1L) seq_len(nrow(cells)) else rev(seq_len(nrow(cells)))
+  for (threads in c(1L, 4L)) {
+    for (k in order) {
+      observed <- run_fresh(count_query(cells$path[[k]], cells$region[[k]], cells$reference[[k]]), threads)
+      observations[[length(observations) + 1L]] <- data.frame(
+        workload = cells$workload[[k]], cell = cells$cell[[k]], region = cells$region[[k]], threads = threads,
+        repetition = repetition, observed, model_mib = cells$model_mib[[k]], ceiling_mib = cells$ceiling_mib[[k]],
+        stringsAsFactors = FALSE)
+    }
+  }
+}
+runs <- do.call(rbind, observations)
+unlink(synthetic_dir, recursive = TRUE)
+stopifnot(all(runs$peak_temp_bytes == 0), all(runs$positions > 0))
+runs_path <- if (reduced) {
+  tempfile("mate-overlap-runs-", fileext = ".csv")
+} else {
+  "benchmarks/benchmark_bam_mate_overlap_counts_runs.csv"
+}
+write.csv(runs, runs_path, row.names = FALSE)
+over_budget <- runs[runs$max_rss_kib / 1024 > runs$ceiling_mib, ]
+if (nrow(over_budget)) {
+  print(over_budget[c("workload", "cell", "threads", "max_rss_kib", "ceiling_mib")])
+  stop("observations exceed the declared memory budget", call. = FALSE)
+}
+# Reported, not gated: observations whose peak RSS is above overhead + live state.
+above_model <- runs[runs$max_rss_kib / 1024 > runs$model_mib, ]
+
+summarise_cells <- function(rows) {
+  groups <- split(rows, list(rows$cell, rows$threads), drop = TRUE)
+  out <- do.call(rbind, lapply(groups, function(group) {
+    # Every repetition of a cell must give the same counts.
+    stopifnot(length(unique(group$output_rows)) == 1L, length(unique(group$positions)) == 1L,
+              length(unique(group$disagreements)) == 1L)
+    data.frame(cell = group$cell[[1L]], threads = group$threads[[1L]], output_rows = group$output_rows[[1L]],
+               positions = group$positions[[1L]], disagreements = group$disagreements[[1L]],
+               median_seconds = median(group$seconds), min_seconds = min(group$seconds),
+               max_seconds = max(group$seconds), median_rss_mib = round(median(group$max_rss_kib) / 1024, 1),
+               max_rss_mib = round(max(group$max_rss_kib) / 1024, 1),
+               max_buffer_mib = round(max(group$peak_buffer_bytes) / 2^20, 1), stringsAsFactors = FALSE)
+  }))
+  rownames(out) <- NULL
+  out
+}
+# The counts of a cell must be the same at both thread settings.
+same_at_both_thread_settings <- function(summary) {
+  counted <- c("cell", "output_rows", "positions", "disagreements")
+  one <- summary[summary$threads == 1L, counted]
+  four <- summary[summary$threads == 4L, counted]
+  isTRUE(all.equal(one[order(one$cell), ], four[order(four$cell), ], check.attributes = FALSE))
+}
+
+real_summary <- summarise_cells(runs[runs$workload == "real", ])
+stopifnot(same_at_both_thread_settings(real_summary))
+real_summary <- merge(real[c("cell", "scale", "alignments", "held_upper", "model_mib", "ceiling_mib")], real_summary,
+                      by = "cell")
+real_summary <- real_summary[order(real_summary$threads, real_summary$scale), ]
+real_summary$model_mib <- round(real_summary$model_mib, 1)
+real_summary$ceiling_mib <- round(real_summary$ceiling_mib, 1)
+rownames(real_summary) <- NULL
+real_exponents <- do.call(rbind, lapply(split(real_summary, real_summary$threads), function(s) {
+  s <- s[order(s$scale), ]
+  growth <- function(low, high) {
+    log(s$median_seconds[[high]] / s$median_seconds[[low]]) / log(s$alignments[[high]] / s$alignments[[low]])
+  }
+  data.frame(threads = s$threads[[1L]], one_x_seconds = s$median_seconds[[1L]],
+             alignments_ratio_2x = s$alignments[[2L]] / s$alignments[[1L]],
+             alignments_ratio_4x = s$alignments[[3L]] / s$alignments[[2L]],
+             time_exponent_2x = growth(1L, 2L), time_exponent_4x = growth(2L, 3L),
+             rss_ratio_2x = s$median_rss_mib[[2L]] / s$median_rss_mib[[1L]],
+             rss_ratio_4x = s$median_rss_mib[[3L]] / s$median_rss_mib[[1L]])
+}))
+rownames(real_exponents) <- NULL
+real_one <- real_summary[real_summary$threads == 1L, ]
+# The timing verdict; a reduced render is too short to give one.
+if (!reduced) {
+  stopifnot(real_one$median_seconds[real_one$scale == 1L] >= 5,
+            all(real_exponents$time_exponent_2x <= 1.25), all(real_exponents$time_exponent_4x <= 1.25))
+}
+
+synthetic_summary <- summarise_cells(runs[runs$workload == "synthetic", ])
+stopifnot(same_at_both_thread_settings(synthetic_summary))
+checked <- merge(synthetic_summary, synthetic_checks, by = "cell")
+stopifnot(all(checked$output_rows == checked$expected_rows), all(checked$positions == checked$expected_positions),
+          all(checked$disagreements == checked$expected_disagreements))
+synthetic_series <- merge(series, synthetic[c("cell", "families", "pairs", "alignments", "held_upper", "model_mib",
+                                              "ceiling_mib")], by = "cell")
+synthetic_series <- merge(synthetic_series, synthetic_summary, by = "cell")
+synthetic_series$series <- factor(synthetic_series$series, levels = c("alignments", "held mates", "both"))
+synthetic_series <- synthetic_series[order(synthetic_series$series, synthetic_series$threads, synthetic_series$scale), ]
+synthetic_series$series <- as.character(synthetic_series$series)
+synthetic_series$model_mib <- round(synthetic_series$model_mib, 1)
+synthetic_series$ceiling_mib <- round(synthetic_series$ceiling_mib, 1)
+rownames(synthetic_series) <- NULL
+synthetic_growth <- do.call(rbind, lapply(split(synthetic_series, list(synthetic_series$series, synthetic_series$threads),
+                                                drop = TRUE), function(s) {
+  s <- s[order(s$scale), ]
+  data.frame(series = s$series[[1L]], threads = s$threads[[1L]], one_x_seconds = s$median_seconds[[1L]],
+             time_ratio_2x = s$median_seconds[[2L]] / s$median_seconds[[1L]],
+             time_ratio_4x = s$median_seconds[[3L]] / s$median_seconds[[2L]],
+             rss_mib_1x = s$median_rss_mib[[1L]], rss_mib_2x = s$median_rss_mib[[2L]],
+             rss_mib_4x = s$median_rss_mib[[3L]], stringsAsFactors = FALSE)
+}))
+synthetic_growth$series <- factor(synthetic_growth$series, levels = c("alignments", "held mates", "both"))
+synthetic_growth <- synthetic_growth[order(synthetic_growth$series, synthetic_growth$threads), ]
+synthetic_growth$series <- as.character(synthetic_growth$series)
+rownames(synthetic_growth) <- NULL
+
+# What one more held mate costs: the peak RSS of the held-mates series on one
+# thread against its held-mate count, beside the same slope of the model.
+held_ends <- series$cell[series$series == "held mates" & series$scale %in% c(1L, 4L)]
+held_rss <- synthetic_summary[synthetic_summary$threads == 1L, ]
+held_rss_mib <- held_rss$median_rss_mib[match(held_ends, held_rss$cell)]
+held_model <- synthetic[match(held_ends, synthetic$cell), ]
+held_added <- held_model$held_upper[[2L]] - held_model$held_upper[[1L]]
+measured_bytes_per_mate <- (held_rss_mib[[2L]] - held_rss_mib[[1L]]) * 2^20 / held_added
+model_bytes_per_mate <- (held_model$model_mib[[2L]] - held_model$model_mib[[1L]]) * 2^20 / held_added
+# The real series: what the model charges at 4x for the held mates and for
+# the reference of the widest pair of consecutive slices; the widest slice
+# that the 4x region reads, and whether the 2x region reads it too.
+real_largest <- real[real$scale == 4L, ]
+slices_4x <- slices[slices_read(real_largest$region_end), ]
+widest_slice <- slices_4x[which.max(slices_4x$span), ]
+widest_read_at_2x <- widest_slice$start <= real$region_end[real$scale == 2L]
+peak_past_2x <- peak_pos > real$region_end[real$scale == 2L]
+
+# Untimed: the 4x region by the lower of the two base qualities.
+by_quality <- query_untimed(sprintf(paste(
+  "SELECT least(read1_quality, read2_quality) AS lower_quality, sum(positions)::BIGINT AS positions,",
+  "coalesce(sum(positions) FILTER (WHERE read1_base != read2_base), 0)::BIGINT AS disagreements",
+  "FROM duckhts_bam_mate_overlap_counts(%s, reference := %s, region := %s)",
+  "GROUP BY ALL ORDER BY lower_quality NULLS LAST;"),
+  quote_literal(cram), quote_literal(reference), quote_literal(real$region[real$scale == 4L])))
+largest <- real_one[real_one$scale == 4L, ]
+stopifnot(sum(by_quality$positions) == largest$positions, sum(by_quality$disagreements) == largest$disagreements)
+by_quality$disagreement_rate <- by_quality$disagreements / by_quality$positions
+by_quality$share_of_positions <- by_quality$positions / sum(by_quality$positions)
+```
+
+Source revision: `r revision`; `src` tree `r src_tree`. DuckDB runtime: `r duckdb_runtime` (CLI). Extension SHA-256: `r strsplit(system2("sha256sum", extension, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`. samtools `r samtools_version` from RBCFTools `r rbcftools_version`. Host load at start: `r host_load`. DuckDB memory limit: `r memory_limit` (the default); temporary directory limit: 0.
+
+Staged input: the slice has `r whole(slice_identity$alignments)` alignments (position sum `r format(slice_identity$position_sum, scientific = FALSE)`, `r whole(slice_identity$base_sum)` stored bases) in `r whole(nrow(slices))` CRAM slices. Its widest slice starts at `r whole(slices$start[which.max(slices$span)])` and spans `r whole(max(slices$span))` reference bases.
+
+Overhead: `r round(overhead_mib, 1)` MiB.
+
+## Inputs and budgets
+
+Real regions. `alignments` are what the region selects, before the function's
+filters; `kept_alignments` pass them. `pairs_held` are the pairs whose first
+mate is held, and `unpaired_names` the names with two kept alignments that do
+not pair. `held_lower` and `held_upper` bound the mates held at once, and
+`limit_agrees` is TRUE when the function succeeds with `max_pending` at the
+upper bound and fails one below the lower bound. `peak_pos` is where the most
+mates are held. `longest_bytes` is D, `reference_span` the bases of the widest
+pair of consecutive slices, and the last columns the budget in MiB: the held
+mates' share, the live state, overhead + live state (`model_mib`) and the
+ceiling.
+
+```{r real-inputs, echo=FALSE}
+knitr::kable(real[c("scale", "region", "alignments", "kept_alignments", "pairs_held", "unpaired_names",
+                    "held_lower", "held_upper", "limit_agrees", "peak_pos", "longest_bytes", "reference_span",
+                    "held_mib", "live_mib", "model_mib", "ceiling_mib")],
+             digits = 1, format.args = list(big.mark = ","))
+```
+
+Synthetic contigs, with the same columns. The derivation finds P mates held at
+once on every contig, as the design says.
+
+```{r synthetic-inputs, echo=FALSE}
+knitr::kable(synthetic[c("cell", "families", "pairs", "alignments", "kept_alignments", "pairs_held",
+                         "unpaired_names", "held_lower", "held_upper", "limit_agrees", "longest_bytes", "held_mib",
+                         "live_mib", "model_mib", "ceiling_mib")],
+             digits = 1, format.args = list(big.mark = ","))
+```
+
+## Count checks
+
+Each synthetic contig against the counts that follow from its design; the
+measured runs reproduce the same totals:
+
+```{r synthetic-checks, echo=FALSE}
+knitr::kable(synthetic_checks, format.args = list(big.mark = ","))
+```
+
+The real data in `r oracle_region`, the `r whole(oracle$region_length)` bases
+around the position with the most held mates: the function gives
+`r whole(oracle$observed_rows)` rows and
+the SQL count `r whole(oracle$expected_rows)` rows of
+`r whole(oracle$expected_positions)` shared positions, with
+`r oracle$extra_rows` rows only in the function's output and
+`r oracle$missing_rows` only in the SQL count.
+
+## Measurements
+
+The real series. `positions`, `disagreements` and `output_rows` are the result
+of the query. Times are the query latency of three repetitions.
+
+```{r real-summary, echo=FALSE}
+knitr::kable(real_summary[c("scale", "threads", "alignments", "held_upper", "output_rows", "positions",
+                            "disagreements", "median_seconds", "min_seconds", "max_seconds", "median_rss_mib",
+                            "max_rss_mib", "max_buffer_mib", "model_mib", "ceiling_mib")],
+             digits = 3, format.args = list(big.mark = ","))
+```
+
+Growth of the median time against the alignments (an exponent of 1 is
+linear), and peak-RSS ratios to 1×:
+
+```{r real-exponents, echo=FALSE}
+knitr::kable(real_exponents, digits = 3)
+```
+
+The synthetic series:
+
+```{r synthetic-summary, echo=FALSE}
+knitr::kable(synthetic_series[c("series", "scale", "cell", "threads", "alignments", "held_upper", "output_rows",
+                                "positions", "disagreements", "median_seconds", "min_seconds", "max_seconds",
+                                "median_rss_mib", "max_rss_mib", "max_buffer_mib", "model_mib", "ceiling_mib")],
+             digits = 3, format.args = list(big.mark = ","))
+```
+
+Their time ratios between doublings, reported without a verdict, and their
+median peak RSS:
+
+```{r synthetic-growth, echo=FALSE}
+knitr::kable(synthetic_growth, digits = 3)
+```
+
+## Findings
+
+Every observation is within its ceiling and none spills.
+`r if (reduced) "A reduced render does not check the timing; the full render also stops if the 1× run of the real series on one thread takes less than 5 s or one of its time exponents is above 1.25." else "The 1× run of the real series on one thread takes at least 5 s, and none of its time exponents is above 1.25."`
+The render enforces all of this. It also stops unless a cell gives the same
+rows, positions and disagreements in every repetition and at both thread
+settings, unless the synthetic counts equal the design's, and unless the real
+counts around the most held mates equal the SQL count.
+
+Real data: the 4× region, `r real_largest$region`, takes
+`r round(largest$median_seconds, 1)` s on one thread for
+`r whole(largest$alignments)` alignments, which is
+`r round(largest$alignments / largest$median_seconds / 1e6, 2)` million
+alignments a second, and compares `r whole(largest$positions)` shared
+positions at `r largest$median_rss_mib` MiB peak RSS. The 1× region takes
+`r round(real_one$median_seconds[[1L]], 1)` s at
+`r real_one$median_rss_mib[[1L]]` MiB. The time exponents at one thread are
+`r round(real_exponents$time_exponent_2x[real_exponents$threads == 1L], 2)` and
+`r round(real_exponents$time_exponent_4x[real_exponents$threads == 1L], 2)`.
+
+The held-mate count is not fixed in this series: it is at most
+`r whole(real$held_upper[[1L]])`, `r whole(real$held_upper[[2L]])` and
+`r whole(real$held_upper[[3L]])` in the three regions. The most are held at
+`r whole(peak_pos)`, `r if (peak_past_2x) "past" else "before"` the end of
+the 2× region, where the `r whole(oracle$region_length)` bases of the count
+check hold `r whole(oracle$region_alignments)` alignments, a depth of about
+`r round(oracle$region_bases / oracle$region_length)`×. At 4× the model charges
+`r round(real_largest$held_mib, 1)` MiB for the held mates, and
+`r round(mib(real_largest$reference_span), 1)` MiB for the reference of the
+widest pair of consecutive slices. The widest slice spans
+`r whole(widest_slice$span)` reference bases from
+`r whole(widest_slice$start)`; `r if (widest_read_at_2x) "the 2× region reads it too" else "of the three regions, only the 4× region reads it"`.
+On one thread, the median peak RSS rises by
+`r round(real_one$median_rss_mib[[3L]] - real_one$median_rss_mib[[2L]], 1)` MiB
+from 2× to 4×.
+
+Synthetic data: at a fixed held-mate count of
+`r whole(synthetic$pairs[[1L]])`, four times the alignments take the median
+peak RSS on one thread from
+`r synthetic_growth$rss_mib_1x[synthetic_growth$series == "alignments" & synthetic_growth$threads == 1L]` to
+`r synthetic_growth$rss_mib_4x[synthetic_growth$series == "alignments" & synthetic_growth$threads == 1L]` MiB.
+At fixed alignments, four times the held mates take it from
+`r synthetic_growth$rss_mib_1x[synthetic_growth$series == "held mates" & synthetic_growth$threads == 1L]` to
+`r synthetic_growth$rss_mib_4x[synthetic_growth$series == "held mates" & synthetic_growth$threads == 1L]` MiB.
+Each further held mate costs `r round(measured_bytes_per_mate)` bytes of peak
+RSS, and the model charges `r round(model_bytes_per_mate)` bytes.
+`r if (nrow(above_model) == 0L) "No observation, real or synthetic, has a peak RSS above overhead + live state." else sprintf("%d of %d observations have a peak RSS above overhead + live state; all are within their ceiling.", nrow(above_model), nrow(runs))`
+The synthetic runs take `r round(min(synthetic_summary$median_seconds), 2)` to
+`r round(max(synthetic_summary$median_seconds), 2)` s, so their times carry no
+verdict.
+
+The operating scale this report supports is what it measures: one contig of
+one 30× short-read sample from CRAM, and up to
+`r whole(max(synthetic$pairs))` mates held at once from BAM, under the default
+`max_pending` of 1,000,000. It does not measure a whole genome in one call,
+long reads, or more held mates than that. The synthetic times are too short to
+show whether the time per alignment grows with the held mates.
+
+## What the counts say
+
+The 4× region by the lower of the two base qualities of a shared position,
+from one untimed run:
+
+```{r quality, echo=FALSE}
+knitr::kable(by_quality, digits = c(0, 0, 0, 6, 4), format.args = list(big.mark = ","))
+```
+
+A real allele sits on the molecule and both mates show it; a sequencing error
+usually shows in one mate. So the disagreement rate is about twice the
+instrument error rate. Errors made before sequencing, in the library, by PCR
+or by DNA damage, show in both mates and are not seen. Only fragments shorter
+than the two reads overlap, so the count leans toward short fragments and read
+ends.
