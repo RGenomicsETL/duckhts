@@ -113,6 +113,6 @@ DBI::dbExecute(con, paste(
 #> [1] 4000
 rduckhts_count_error_fit(con, "counts")[, c("sample", "seq_error", "contamination", "status")]
 #>   sample    seq_error contamination     status
-#> 1     S1 1.618094e-20  7.092081e-28 few_blocks
+#> 1     S1 8.400157e-22  1.191516e-29 few_blocks
 DBI::dbDisconnect(con, shutdown = TRUE)
 ```

@@ -17,7 +17,7 @@ read-count mode."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9013.0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9014.0.1.5</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -72,7 +72,8 @@ read-count mode.</p>
 <span>  table_name <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  max_sites <span class="op">=</span> <span class="fl">2e+07</span>,</span>
-<span>  max_site_bytes <span class="op">=</span> <span class="fl">2</span><span class="op">^</span><span class="fl">32</span></span>
+<span>  max_site_bytes <span class="op">=</span> <span class="fl">2</span><span class="op">^</span><span class="fl">32</span>,</span>
+<span>  fit_table <span class="op">=</span> <span class="cn">NULL</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -131,6 +132,15 @@ the bytes held by all ROH decodes in the process would pass its own
 `max_site_bytes`; decodes that run at the same time with different values
 each apply their own. Exceeding it is an error: decode fewer samples per
 call or raise it.</p></dd>
+
+
+<dt id="arg-fit-table">fit_table<a class="anchor" aria-label="anchor" href="#arg-fit-table"></a></dt>
+<dd><p>Optional table or view with one row per `sample`, containing
+non-NULL `seq_error` and `contamination`. These replace the scalar arguments
+for each matching `sample_id`. A sample of `counts_table` with no fit row,
+several fit rows or a NULL value is an error; fit rows of other samples are
+not checked. Filter fit status in the caller's SQL; spreads and artefact
+weight are not used.</p></dd>
 
 </dl></div>
     <div class="section level2">

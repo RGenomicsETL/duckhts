@@ -173,9 +173,9 @@ path <- system.file("extdata", "roh_fixture.vcf.gz", package = "Rduckhts")
 roh <- rduckhts_roh(con, path, af_tag = "AF")
 roh[order(roh$sample, roh$chrom, roh$start), ]
 #>   sample chrom   start     end  length n_markers  quality
-#> 1     S1  chr1 1042655 2396807 1354153       113 31.96439
+#> 2     S1  chr1 1042655 2396807 1354153       113 31.96439
 #> 4     S2  chr2  693881 1722963 1029083       114 32.91658
-#> 3     S4  chr1 1876100 3319712 1443613       131 44.83104
-#> 2     S4  chr2   23420 2400223 2376804       239 46.64399
+#> 1     S4  chr1 1876100 3319712 1443613       131 44.83104
+#> 3     S4  chr2   23420 2400223 2376804       239 46.64399
 DBI::dbDisconnect(con, shutdown = TRUE)
 ```
