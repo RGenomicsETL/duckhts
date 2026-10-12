@@ -8,12 +8,10 @@ The public DuckBedQC `duckbedqc_118fc21` corpus supplies
 `75b120e20be18497716c81d81648bb919574b34b90cc15abc474e06f09924073`,
 22,802,546 bytes). Stage it with `scripts/stage_duckbedqc_data.sh`.
 The baseline is an independent `origin/develop` worktree at
-`f741354dc5012f94f59229e922ed5317c07e04fc` built with
-`make configure && make release -j4`; the candidate source is
-`1d87d9e38155596a1cb751e76cfdcbdf203fa2ef` (`HEAD:src` tree
-`33c6d888a382ad81d34f2a7313a117dd715d472d`) built with `make release -j4`.
-Both revisions and the source tree are available in this repository. The candidate
-passes `make test-extension-symbols`.
+`r Sys.getenv("BED_POLICY_BASE_REV")` (`BED_POLICY_BASE`, its extension
+build); the candidate source is `r Sys.getenv("BED_POLICY_REV")`
+(`BED_POLICY_BRANCH`, its extension build). Both revisions are available in
+this repository.
 The query forces a full scan with `scan_mode := 'sequential'` and aggregates
 `count(*)`, `sum(start)`, and `sum("end")`. Both numeric sums are checked across
 policies and builds. Each run reads the 22 MB file and returns one aggregate
@@ -22,15 +20,45 @@ DuckDB R 1.5.5 loads the extension in a fresh R process for each build. The unin
 file is clean under the reader's short-row rule. "default" is the engine's
 unmodified thread setting, recorded alongside the single-thread runs.
 
+The host mixes two core types, so the render records the CPU affinity of its
+process, which every child R process inherits, in both observation files, and
+compares with the previous render only on the same CPUs. Choose them with
+`taskset -c`. `BED_POLICY_SIZE=reduced` runs a driver check: two scans per
+cell and two alternating pairs, written to temporary files instead of
+`bed_policy_observations.tsv` and `bed_policy_alternating.tsv`; it is not a
+measurement.
+
+``` sh
+BED_POLICY_BASE=<baseline extension> BED_POLICY_BASE_REV=<baseline revision> \
+BED_POLICY_BRANCH=<candidate extension> BED_POLICY_REV=<candidate revision> \
+taskset -c 8-11 Rscript -e 'rmarkdown::render("benchmarks/benchmark_bed_policy.Rmd")'
+```
+
+```{r setup, include=FALSE}
+# The helper scripts and output paths are relative to the repository root.
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
 ```{r, echo=TRUE}
 stopifnot(nzchar(Sys.getenv("BED_POLICY_BASE")),
           nzchar(Sys.getenv("BED_POLICY_BRANCH")),
           nzchar(Sys.getenv("BED_POLICY_REV")),
           nzchar(Sys.getenv("BED_POLICY_BASE_REV")))
+size <- Sys.getenv("BED_POLICY_SIZE", "full")
+if (!size %in% c("full", "reduced")) stop("BED_POLICY_SIZE must be full or reduced")
+full_size <- identical(size, "full")
+scans_per_cell <- if (full_size) 11L else 2L
+alternating_pairs <- if (full_size) 15L else 2L
+observations_path <- if (full_size) "benchmarks/bed_policy_observations.tsv" else tempfile(fileext = ".tsv")
+alternating_path <- if (full_size) "benchmarks/bed_policy_alternating.tsv" else tempfile(fileext = ".tsv")
+# The CPUs this process may run on, as taskset prints them; child processes
+# inherit the mask.
+affinity_line <- system2("taskset", c("-pc", Sys.getpid()), stdout = TRUE)
+affinity <- sub("^.*: *", "", affinity_line[[length(affinity_line)]])
 run_benchmark <- function(extension, label, revision) {
   output <- tempfile(fileext = ".tsv")
   result <- system2("Rscript", c("benchmarks/bed_policy_run.R", extension,
-                                   label, revision, output))
+                                   label, revision, output, scans_per_cell))
   if (!is.null(attr(result, "status")) && attr(result, "status") != 0L) {
     stop("benchmark failed: ", label)
   }
@@ -47,14 +75,16 @@ stopifnot(length(unique(observations$input_lines)) == 1L,
           length(unique(observations$start_sum)) == 1L,
           length(unique(observations$end_sum)) == 1L,
           all(table(interaction(observations$build, observations$threads,
-                                observations$policy, drop = TRUE)) == 11L))
-write.table(observations, "benchmarks/bed_policy_observations.tsv",
+                                observations$policy, drop = TRUE)) == scans_per_cell))
+observations$affinity <- affinity
+write.table(observations, observations_path,
             sep = "\t", row.names = FALSE, quote = FALSE)
 summary <- aggregate(seconds ~ revision + build + threads + effective_threads +
                        policy + input_lines + output_rows,
                      observations, median)
 summary$seconds <- round(summary$seconds, 4)
-knitr::kable(summary, caption = "Median wall seconds over eleven independent scans per policy/thread/build")
+knitr::kable(summary, caption = sprintf("Median wall seconds over %d independent scans per policy/thread/build",
+                                        scans_per_cell))
 ```
 
 ```{r, echo=FALSE, results='asis'}
@@ -70,8 +100,8 @@ for (thread_setting in c("1", "default")) {
 
 The alternating comparison runs the exact default-policy aggregate with
 one DuckDB thread in a fresh R process per observation. The baseline and
-candidate alternate fifteen times each; process startup is outside the
-reported query wall time.
+candidate alternate fifteen times each (twice in a reduced run); process
+startup is outside the reported query wall time.
 
 ```{r alternating}
 load_at_start <- system("uptime", intern = TRUE)
@@ -83,14 +113,15 @@ run_single <- function(extension, label, run) {
   }
   read.delim(text = paste(lines, collapse = "\n"), check.names = FALSE)
 }
-alternating <- do.call(rbind, lapply(seq_len(15L), function(run) {
+alternating <- do.call(rbind, lapply(seq_len(alternating_pairs), function(run) {
   rbind(run_single(Sys.getenv("BED_POLICY_BASE"), "baseline", run),
         run_single(Sys.getenv("BED_POLICY_BRANCH"), "candidate", run))
 }))
-stopifnot(nrow(alternating) == 30L,
+stopifnot(nrow(alternating) == 2L * alternating_pairs,
           length(unique(alternating$result)) == 1L,
-          all(table(alternating$build) == 15L))
-write.table(alternating, "benchmarks/bed_policy_alternating.tsv",
+          all(table(alternating$build) == alternating_pairs))
+alternating$affinity <- affinity
+write.table(alternating, alternating_path,
             sep = "\t", row.names = FALSE, quote = FALSE)
 alternating_summary <- aggregate(seconds ~ build, alternating,
                                  function(x) c(min = min(x), median = median(x)))
@@ -100,11 +131,73 @@ alternating_summary <- data.frame(
   median = round(alternating_summary$seconds[, "median"], 4)
 )
 knitr::kable(alternating_summary,
-             caption = "Alternating fresh-process scans (15 per build, one thread)")
+             caption = sprintf("Alternating fresh-process scans (%d per build, one thread)", alternating_pairs))
 ```
 
-Host load before alternating scans: `r load_at_start`.
+Host load before alternating scans: `r load_at_start`. CPU affinity: `r affinity`.
+`r if (!full_size) "**Reduced driver check (BED_POLICY_SIZE=reduced): not a measurement.**"`
 
 The reader's only fatal data-line check is fewer than three tab-delimited
 fields. Numeric parse failures yield NULL and reversed intervals are not
 rejected. This workload does not measure malformed-row reporting or remote I/O.
+
+## Change from the previous render
+
+```{r previous, echo=FALSE}
+# The previous render of this report, read from git. Its candidate was the
+# BED error-policy branch; since then read_bed, the fasta_nuc BED input,
+# mosdepth --by and duckhts_bam_bed_coverage parse BED lines through one shared
+# helper. The host mixes core types, so the comparison needs the same CPUs.
+previous_revision <- "8ca12e37"
+read_previous <- function(file) {
+  text <- system2("git", c("show", paste0(previous_revision, ":benchmarks/", file)), stdout = TRUE)
+  stopifnot(is.null(attr(text, "status")))
+  utils::read.delim(text = paste(text, collapse = "\n"), check.names = FALSE,
+                    colClasses = "character")
+}
+previous_observations <- read_previous("bed_policy_observations.tsv")
+previous_alternating <- read_previous("bed_policy_alternating.tsv")
+previous_affinity <- unique(c(previous_observations$affinity, previous_alternating$affinity))
+if (length(previous_affinity) && !identical(previous_affinity, affinity)) {
+  stop("The previous render ran on CPUs ", paste(previous_affinity, collapse = ", "),
+       " and this one on CPUs ", affinity, "; render with taskset -c ", previous_affinity[[1L]])
+}
+# The default thread count follows the host; compare by setting and show it.
+cell_medians <- function(x) {
+  x$seconds <- as.numeric(x$seconds)
+  aggregate(seconds ~ build + threads + effective_threads + policy, x, median)
+}
+previous_scans <- merge(cell_medians(previous_observations), cell_medians(observations),
+                        by = c("build", "threads", "policy"), suffixes = c("_before", "_after"))
+stopifnot(nrow(previous_scans) > 0)
+previous_scans$time_ratio <- previous_scans$seconds_after / previous_scans$seconds_before
+previous_scans <- previous_scans[order(previous_scans$build, previous_scans$threads, previous_scans$policy), ]
+rownames(previous_scans) <- NULL
+previous_pairs <- merge(aggregate(seconds ~ build, transform(previous_alternating, seconds = as.numeric(seconds)), median),
+                        aggregate(seconds ~ build, alternating, median),
+                        by = "build", suffixes = c("_before", "_after"))
+stopifnot(nrow(previous_pairs) == 2L)
+previous_pairs$time_ratio <- previous_pairs$seconds_after / previous_pairs$seconds_before
+cpu_note <- if (!length(previous_affinity)) {
+  "The previous render recorded no CPU affinity, so the CPUs it ran on are unknown and the ratios may include a change of core type."
+} else {
+  paste0("Both renders ran on CPUs ", affinity, ".")
+}
+```
+
+The previous render, `r previous_revision`, ran the same scans of the same
+file with the same driver and host, with candidate
+`r unique(previous_observations$revision[previous_observations$build == "candidate"])` and baseline
+`r unique(previous_observations$revision[previous_observations$build == "baseline"])`;
+"candidate" and "baseline" name different revisions in the two renders.
+`r cpu_note` Host load differs between renders. Median wall seconds per cell:
+
+```{r previous_scans, echo=FALSE}
+knitr::kable(previous_scans, digits = 4)
+```
+
+Alternating fresh-process scans, median per build:
+
+```{r previous_pairs, echo=FALSE}
+knitr::kable(previous_pairs, digits = 4)
+```

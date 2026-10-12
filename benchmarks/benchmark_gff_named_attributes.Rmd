@@ -11,8 +11,16 @@ aggregates of the stated columns, not `count(*)` shortcuts. Five measured runs
 follow one warm-up per workload and thread setting. Times include gzip decode,
 row scan, aggregation and R/DBI query execution. Default threads are the
 runtime's own default; the GFF reader uses one worker in either setting.
-The host is a 13th Gen Intel Core i5-13500 (20 logical CPUs); `uptime` before
-the run reported load averages of 1.51, 1.09, and 0.79.
+The host is a 13th Gen Intel Core i5-13500 (20 logical CPUs) with two core
+types, so the render records the CPU affinity of its process in the runs file
+and compares with the previous render only on the same CPUs. Choose them with
+`taskset -c`. `GFF_NAMED_SIZE=reduced` runs a driver check with one measured
+run per cell, and writes its runs to a temporary file instead of
+`benchmark_gff_named_attributes_runs.csv`; it is not a measurement.
+
+``` sh
+taskset -c 8-11 Rscript -e 'rmarkdown::render("benchmarks/benchmark_gff_named_attributes.Rmd")'
+```
 
 ```{r setup, include=FALSE}
 knitr::opts_knit$set(root.dir = normalizePath(".."))
@@ -30,6 +38,20 @@ input <- duckhtsbench::duckhts_bench_artifact_path("tabix_split_gff3")
 duckhtsbench::duckhts_bench_validate_identity("tabix_split_gff3", input)
 input <- normalizePath(input, mustWork = TRUE)
 extension <- normalizePath("build/release/duckhts.duckdb_extension", mustWork = TRUE)
+size <- Sys.getenv("GFF_NAMED_SIZE", "full")
+if (!size %in% c("full", "reduced")) stop("GFF_NAMED_SIZE must be full or reduced")
+full_size <- identical(size, "full")
+measured_runs_per_cell <- if (full_size) 5L else 1L
+runs_path <- if (full_size) {
+  "benchmarks/benchmark_gff_named_attributes_runs.csv"
+} else {
+  tempfile("gff-named-runs-", fileext = ".csv")
+}
+# The CPUs this process may run on, as taskset prints them; DuckDB's threads
+# inherit the mask.
+affinity_line <- system2("taskset", c("-pc", Sys.getpid()), stdout = TRUE)
+affinity <- sub("^.*: *", "", affinity_line[[length(affinity_line)]])
+host_load <- sub(".*load average: ", "", system2("uptime", stdout = TRUE))
 quote_sql <- function(value) paste0("'", gsub("'", "''", value, fixed = TRUE), "'")
 revision <- system2("git", c("rev-parse", "HEAD"), stdout = TRUE)
 if (system2("git", c("diff", "--quiet", "HEAD", "--", "src"),
@@ -60,7 +82,7 @@ for (threads in c(1L, default_threads)) {
   for (kind in names(queries)) {
     sql <- queries[[kind]]
     invisible(DBI::dbGetQuery(con, sql))
-    elapsed <- numeric(5L)
+    elapsed <- numeric(measured_runs_per_cell)
     result <- NULL
     for (run in seq_along(elapsed)) {
       start <- proc.time()[["elapsed"]]
@@ -72,7 +94,7 @@ for (threads in c(1L, default_threads)) {
     measured_runs[[length(measured_runs) + 1L]] <- data.frame(
       threads = thread_label, workload = kind, run = seq_along(elapsed),
       seconds = elapsed, input_rows = result$n[[1L]], output_rows = 1L,
-      metric = as.character(result$metric[[1L]])
+      metric = as.character(result$metric[[1L]]), affinity = affinity
     )
     rows[[length(rows) + 1L]] <- data.frame(
       threads = thread_label,
@@ -83,18 +105,16 @@ for (threads in c(1L, default_threads)) {
   }
 }
 results <- do.call(rbind, rows)
-previous <- c(0.540, 0.542, 0.690, 2.326, 2.371, 0.900, 0.788,
-              0.542, 0.543, 0.691, 2.327, 2.376, 0.905, 0.784)
 stopifnot(identical(results$workload, rep(names(queries), 2L)))
-results$previous_median_seconds <- previous
-write.csv(do.call(rbind, measured_runs),
-          "benchmarks/benchmark_gff_named_attributes_runs.csv", row.names = FALSE)
+runs <- do.call(rbind, measured_runs)
+write.csv(runs, runs_path, row.names = FALSE)
 DBI::dbDisconnect(con, shutdown = TRUE)
 ```
 
+`r if (!full_size) "**Reduced driver check (GFF_NAMED_SIZE=reduced): one measured run per cell, not a measurement.**"`
+
 Source revision: `r revision`. DuckDB runtime: `r as.character(packageVersion("duckdb"))`.
-Previous medians: source revision c4728030d2770b591f0875206aac0af9be9d2c26;
-extension SHA-256 1d868ba87527209147d86dfdbf796f00ee29ecd0cbc5d81951e8ee21a8331421.
+Host load before the run: `r host_load`. CPU affinity: `r affinity`.
 Extension SHA-256: `r strsplit(system2("sha256sum", extension, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`.
 Input SHA-256: `r strsplit(system2("sha256sum", input, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`.
 
@@ -109,3 +129,47 @@ workloads reflect different aggregation and expression costs, not isolated
 parsing cycles. `make wasm-playwright-test` built the extension from this
 checkout for duckdb-wasm 1.31.0; all six Chromium tests passed, including
 `test/wasm/gff-attributes.spec.ts`. Browser wasm timings were not measured.
+
+## Change from the previous render
+
+```{r previous, echo=FALSE}
+# The previous render of this report, read from git: the same queries and
+# input. Since then the attributes_map rows are written through one shared
+# MAP helper that also checks each key is valid UTF-8; only map_parent builds
+# the MAP. The host mixes core types, so the comparison needs the same CPUs.
+previous_revision <- "60b36911"
+previous_text <- system2("git", c("show", paste0(previous_revision,
+                                                  ":benchmarks/benchmark_gff_named_attributes_runs.csv")),
+                         stdout = TRUE)
+stopifnot(is.null(attr(previous_text, "status")))
+previous_runs <- utils::read.csv(text = previous_text, stringsAsFactors = FALSE)
+previous_affinity <- if ("affinity" %in% names(previous_runs)) unique(as.character(previous_runs$affinity)) else NULL
+if (!is.null(previous_affinity) && !identical(previous_affinity, affinity)) {
+  stop("The previous render ran on CPUs ", paste(previous_affinity, collapse = ", "),
+       " and this one on CPUs ", affinity, "; render with taskset -c ", previous_affinity[[1L]])
+}
+# The default thread count is part of the label; compare by setting.
+thread_setting <- function(label) ifelse(label == "1", "1", "default")
+previous_runs$setting <- thread_setting(previous_runs$threads)
+runs$setting <- thread_setting(runs$threads)
+previous <- merge(aggregate(seconds ~ setting + workload, previous_runs, median),
+                  aggregate(seconds ~ setting + workload, runs, median),
+                  by = c("setting", "workload"), suffixes = c("_before", "_after"))
+stopifnot(nrow(previous) == nrow(results))
+previous$time_ratio <- previous$seconds_after / previous$seconds_before
+previous <- previous[order(previous$setting, match(previous$workload, names(queries))), ]
+rownames(previous) <- NULL
+cpu_note <- if (is.null(previous_affinity)) {
+  "The previous render recorded no CPU affinity, so the CPUs it ran on are unknown and the ratios may include a change of core type."
+} else {
+  paste0("Both renders ran on CPUs ", affinity, ".")
+}
+```
+
+The previous render, `r previous_revision`, ran the same queries on the same
+input with the same driver and host. `r cpu_note` Host load differs between
+renders. Median seconds per cell:
+
+```{r previous_table, echo=FALSE}
+knitr::kable(previous, digits = 3)
+```
