@@ -151,7 +151,7 @@ metadata_preview
     ## 2               duckhts_reader                                  read_bcf
     ## 3 duckhts_write_format_version                                         1
     ## 4                      project                               demo-cohort
-    ## 5                   vcf_header ##fileformat=VCFv4.1\\x5Cn##FILTER=<ID=PA
+    ## 5                   vcf_header ##fileformat=VCFv4.1\\x0A##FILTER=<ID=PAS
 
 ``` r
 # The same converter helpers support partitioned output for DuckLake-style
@@ -1517,7 +1517,7 @@ rduckhts_simd_info(con)[, c("backend", "selectable", "compiled", "cpu_supported"
     ## 2         sse2      FALSE    FALSE          TRUE     FALSE    FALSE
     ## 3        sse41      FALSE    FALSE          TRUE     FALSE    FALSE
     ## 4         avx2       TRUE     TRUE          TRUE      TRUE     TRUE
-    ## 5       avx512       TRUE     TRUE         FALSE     FALSE    FALSE
+    ## 5       avx512       TRUE     TRUE          TRUE      TRUE     TRUE
     ## 6         neon       TRUE    FALSE         FALSE     FALSE    FALSE
     ## 7 wasm_simd128       TRUE    FALSE         FALSE     FALSE    FALSE
 
@@ -1526,7 +1526,7 @@ rduckhts_simd_kernel_info(con)[, c("kernel", "selected_backend", "scalar_fallbac
 ```
 
     ##            kernel selected_backend scalar_fallback
-    ## 1 seq_base_counts             avx2           FALSE
+    ## 1 seq_base_counts           avx512           FALSE
     ## 2 bam_nt16_counts             avx2           FALSE
     ## 3  nt16_gc_counts             avx2           FALSE
     ## 4        fastq_qc             avx2           FALSE

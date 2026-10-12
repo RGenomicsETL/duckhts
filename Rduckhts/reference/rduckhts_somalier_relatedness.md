@@ -22,6 +22,7 @@ rduckhts_somalier_relatedness(
   pairs_table = NULL,
   table_name = NULL,
   max_sites = 1e+06,
+  max_pairs = 5e+07,
   overwrite = FALSE
 )
 ```
@@ -54,6 +55,12 @@ rduckhts_somalier_relatedness(
 - max_sites:
 
   Positive per-pair panel capacity, at most 100,000,000.
+
+- max_pairs:
+
+  Positive cap on the number of pairs when \`pairs_table\` is \`NULL\`.
+  A sketch relation of N samples has N(N-1)/2 pairs; more pairs than
+  \`max_pairs\` is an error before any pair is compared.
 
 - overwrite:
 

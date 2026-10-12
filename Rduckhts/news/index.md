@@ -1,9 +1,29 @@
 # Changelog
 
-## Rduckhts 1.5.2.9014.0.1.5
+## Rduckhts 1.5.2.9015.0.1.5
 
 Preview of 2.0.0, still in development. The sections below describe what
 2.0.0 will contain.
+
+- Headers stored by the Parquet convert functions keep their line
+  breaks; the bundled `duckhts_raw_header_text()` joined lines with a
+  literal backslash-n.
+
+- Added
+  [`rduckhts_bam_mate_overlap_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_mate_overlap_counts.md)
+  and the bundled `duckhts_bam_mate_overlap_counts()`: read 1 and read 2
+  of one fragment compared where both mates align, counted by base
+  quality and base. The disagreement rate is about twice the instrument
+  error rate, with no reference, mask or contamination model. Alignments
+  must be in coordinate order, and `max_pending` bounds the mates held
+  while they wait for their mate.
+
+- [`rduckhts_somalier_relatedness()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_relatedness.md)
+  has a `max_pairs` argument (default 50,000,000): when it compares all
+  pairs, a sketch relation with more pairs is an error before any pair
+  is compared. The bundled `duckhts_somalier_relatedness_all_pairs()`
+  now compares the pairs on DuckDB’s threads; the rows do not change
+  with the thread count.
 
 - [`rduckhts_count_error_fit()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_count_error_fit.md)
   evaluates the beta-binomial without the rounding error that inflated

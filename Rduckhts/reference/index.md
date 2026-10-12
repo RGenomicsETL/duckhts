@@ -37,6 +37,8 @@
   : Convert SAM/BAM/CRAM reader output to Parquet with DuckHTS metadata
 - [`rduckhts_bam_index()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_index.md)
   : Build BAM or CRAM Index
+- [`rduckhts_bam_mate_overlap_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_mate_overlap_counts.md)
+  : Count Agreement Between Overlapping Mates
 - [`rduckhts_bam_mismatch_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_mismatch_counts.md)
   : Count Aligned Bases Against the Reference
 - [`rduckhts_bam_multi()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_multi.md)
