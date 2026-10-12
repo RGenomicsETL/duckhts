@@ -1568,8 +1568,9 @@ af must be in [0, 1] (position 50000 is 1.5)
 # Per-sample fits use exactly the scalar emission parameters, including quality bits. The fit
 # relation names the four numbers of duckhts_count_error_fit() and artefact_weight_sd; other
 # columns (status here) are ignored. (artefact_weight was an ignored column, set to 123, until
-# the decode used it.) The fitted decode has one more column than the scalar one,
-# stable_fraction, tested below; the oracles here compare every column of the scalar decode.
+# the decode used it.) The fitted decode has two more columns than the scalar one,
+# stable_fraction and gained_bases, tested below; the oracles here compare every column of the
+# scalar decode.
 statement ok
 CREATE TEMP TABLE roh_fits AS
 SELECT sample_id AS sample, 0.001::DOUBLE AS seq_error, 0.0::DOUBLE AS contamination,
@@ -1578,7 +1579,7 @@ SELECT sample_id AS sample, 0.001::DOUBLE AS seq_error, 0.0::DOUBLE AS contamina
 FROM roh_counts_clean GROUP BY sample_id;
 
 query I
-WITH fitted AS (SELECT * EXCLUDE (stable_fraction) FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits')),
+WITH fitted AS (SELECT * EXCLUDE (stable_fraction, gained_bases) FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits')),
 scalar AS (SELECT * FROM duckhts_roh_counts('roh_counts_clean'))
 SELECT count(*) FROM ((SELECT * FROM fitted EXCEPT ALL SELECT * FROM scalar)
 UNION ALL (SELECT * FROM scalar EXCEPT ALL SELECT * FROM fitted));
@@ -1591,7 +1592,7 @@ WHERE sample = 'S2';
 
 # Separate scalar calls are the oracle; both samples must produce runs.
 query II
-WITH fitted AS (SELECT * EXCLUDE (stable_fraction) FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits')),
+WITH fitted AS (SELECT * EXCLUDE (stable_fraction, gained_bases) FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits')),
 scalar AS (
   SELECT * FROM duckhts_roh_counts('roh_counts_clean') WHERE sample = 'S1'
   UNION ALL
@@ -1606,7 +1607,7 @@ SELECT (SELECT count(DISTINCT sample) FROM fitted), count(*) FROM (
 
 query I
 WITH fitted AS (
-  SELECT * EXCLUDE (stable_fraction) FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits', 'roh_counts_map')),
+  SELECT * EXCLUDE (stable_fraction, gained_bases) FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits', 'roh_counts_map')),
 scalar AS (
   SELECT * FROM duckhts_roh_counts('roh_counts_clean', 'roh_counts_map') WHERE sample = 'S1'
   UNION ALL
@@ -1805,7 +1806,7 @@ FROM roh_fits;
 
 query II
 WITH fitted AS (
-  SELECT * EXCLUDE (stable_fraction) FROM duckhts_roh_counts_fitted('roh_counts_null_sample', 'roh_null_sample_fits')),
+  SELECT * EXCLUDE (stable_fraction, gained_bases) FROM duckhts_roh_counts_fitted('roh_counts_null_sample', 'roh_null_sample_fits')),
 scalar AS (
   SELECT * FROM duckhts_roh_counts('roh_counts_null_sample') WHERE sample = 'S1'
   UNION ALL
@@ -1828,28 +1829,35 @@ missing fit row for sample NULL
 # each kept in [0, 0.05]. A run of the decode at w gets the share of its bases that are in a run of
 # both perturbed decodes. With artefact_weight_sd 0 the three decodes are the same, so every run
 # has stable_fraction 1. A NULL artefact_weight_sd (a fit of fewer than three blocks) counts as 0.
-query II
-SELECT count(*) > 0, bool_and(stable_fraction = 1.0) FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits');
+# gained_bases counts the bases that the decode at w + sd calls next to a run but outside every run
+# at w (tested on fixtures below); with sd 0 it is 0.
+query III
+SELECT count(*) > 0, bool_and(stable_fraction = 1.0), bool_and(gained_bases = 0)
+FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits');
 ----
-true	true
+true	true	true
 
 statement ok
 CREATE TEMP TABLE roh_null_sd_fits AS
 SELECT * REPLACE (0.002::DOUBLE AS artefact_weight, NULL::DOUBLE AS artefact_weight_sd) FROM roh_fits;
 
-query II
-SELECT count(*) > 0, bool_and(stable_fraction = 1.0)
+query III
+SELECT count(*) > 0, bool_and(stable_fraction = 1.0), bool_and(gained_bases = 0)
 FROM duckhts_roh_counts_fitted('roh_counts_planted', 'roh_null_sd_fits');
 ----
-true	true
+true	true	true
 
 # On the planted fixture the runs exist only with an artefact term (see above), so w and its
 # interval decide them. Each sample is decoded at w = 0.002 with several values of
 # artefact_weight_sd, given as copies of the planted counts under one sample name per value. The
 # oracle decodes the planted counts with duckhts_roh_counts at w, w - sd and w + sd (clamped as
 # the contract states) and sums, for each run at w, the bases where it meets a run of each
-# perturbed decode, with a join over all pairs instead of the kernel's merge. Runs, qualities and
-# stable_fraction must be equal: both divide the same two whole numbers.
+# perturbed decode, with a join over all pairs instead of the kernel's merge. For gained_bases
+# it joins each run at w to every run at w + sd that shares a base with it or abuts it, and counts
+# the bases of that run before the run at w (only when the run at w before it does not meet that
+# run at w + sd) and after it up to the next run at w; window functions give the neighbours, where
+# the kernel walks the lists. Runs, qualities, stable_fraction and gained_bases must be equal: the
+# fractions divide the same two whole numbers.
 statement ok
 CREATE TEMP TABLE roh_stable_cases AS
 SELECT * FROM (VALUES ('zero', 0.0), ('small', 0.0005), ('mid', 0.001), ('near', 0.0019), ('wide', 0.06))
@@ -1878,10 +1886,22 @@ shared AS (SELECT c.sample, c.chrom, c.start,
     sum(greatest(0, least(c."end", l."end", h."end") - greatest(c.start, l.start, h.start) + 1)) AS bases
   FROM central AS c JOIN low AS l ON l.sample = c.sample AND l.chrom = c.chrom
   JOIN high AS h ON h.sample = c.sample AND h.chrom = c.chrom
+  GROUP BY c.sample, c.chrom, c.start),
+neighbours AS (SELECT sample, chrom, start, "end",
+    lag("end") OVER (PARTITION BY sample, chrom ORDER BY start) AS previous_end,
+    lead(start) OVER (PARTITION BY sample, chrom ORDER BY start) AS next_start
+  FROM central),
+gained AS (SELECT c.sample, c.chrom, c.start,
+    sum(CASE WHEN c.previous_end IS NULL OR c.previous_end + 1 < h.start
+             THEN greatest(0, c.start - h.start) ELSE 0 END
+        + greatest(0, least(h."end", coalesce(c.next_start - 1, h."end")) - c."end")) AS bases
+  FROM neighbours AS c JOIN high AS h ON h.sample = c.sample AND h.chrom = c.chrom
+    AND h.start <= c."end" + 1 AND h."end" >= c.start - 1
   GROUP BY c.sample, c.chrom, c.start)
 SELECT c.sample || '/' || case_label AS sample, c.chrom, c.start, c."end", c.length, c.n_markers, c.quality,
-  coalesce(s.bases, 0) / c.length AS stable_fraction
-FROM central AS c LEFT JOIN shared AS s USING (sample, chrom, start);
+  coalesce(s.bases, 0) / c.length AS stable_fraction, coalesce(g.bases, 0)::BIGINT AS gained_bases
+FROM central AS c LEFT JOIN shared AS s USING (sample, chrom, start)
+LEFT JOIN gained AS g USING (sample, chrom, start);
 
 statement ok
 CREATE TEMP TABLE roh_stable_fitted AS
@@ -1905,14 +1925,31 @@ SELECT (SELECT count(*) FROM roh_stable_fitted),
 
 # Values derived by hand. With sd 0 every run has 1. With sd 0.06 the perturbed weights are
 # clamped to 0 and 0.05, not an error; at weight 0 the planted sites leave no run (see above), so
-# no base is in a run of both perturbed decodes and every run has 0.
-query IITT
+# no base is in a run of both perturbed decodes and every run has 0. Every weight from 0.002 to
+# 0.05 gives the same planted runs (1,475,000 or 1,450,000 to 3,475,000), so no case gains a base.
+query IITTT
 SELECT count(*) FILTER (WHERE sample LIKE '%/zero'), count(*) FILTER (WHERE sample LIKE '%/wide'),
   bool_and(stable_fraction = 1.0) FILTER (WHERE sample LIKE '%/zero'),
-  bool_and(stable_fraction = 0.0) FILTER (WHERE sample LIKE '%/wide')
+  bool_and(stable_fraction = 0.0) FILTER (WHERE sample LIKE '%/wide'),
+  bool_and(gained_bases = 0)
 FROM roh_stable_fitted;
 ----
-4	4	true	true
+4	4	true	true	true
+
+# Decoded at w = 0 the planted sites leave no run, while the decode at w + sd = 0.002 has the four
+# runs. Those runs meet no run at w, so no row carries their bases: gained runs that touch no run
+# at w are not reported.
+statement ok
+CREATE TEMP TABLE roh_planted_zero_fits AS
+SELECT DISTINCT sample_id AS sample, 0.001::DOUBLE AS seq_error, 0.0::DOUBLE AS contamination,
+  0.5::DOUBLE AS allele_balance, 0.0::DOUBLE AS artefact_weight, 0.002::DOUBLE AS artefact_weight_sd
+FROM roh_counts_planted;
+
+query II
+SELECT (SELECT count(*) FROM duckhts_roh_counts_fitted('roh_counts_planted', 'roh_planted_zero_fits')),
+  (SELECT count(*) FROM duckhts_roh_counts('roh_counts_planted', artefact_weight := 0.002));
+----
+0	4
 
 # The planted runs come back whole or not at all, so they never give a share strictly between 0
 # and 1. One balanced site does: at artefact_weight 0 a site at 2,500,000 on chromosome 1 splits
@@ -1925,6 +1962,7 @@ FROM roh_stable_fitted;
 #   S1 chromosome 2, run 1,450,000-3,475,000: 1,675,001 / 2,025,001;
 #   S2 chromosome 1: 1;
 #   S2 chromosome 2, run 1,475,000-3,475,000: 1,650,001 / 2,000,001.
+# The decodes at w + sd (0.004 and 0.0038) call the same runs as at w, so gained_bases is 0.
 statement ok
 CREATE TEMP TABLE roh_counts_split AS
 SELECT sample_id, chrom, pos, af,
@@ -1940,18 +1978,19 @@ SELECT sample, 0.001::DOUBLE AS seq_error, 0.0::DOUBLE AS contamination, 0.5::DO
   0.002::DOUBLE AS artefact_weight, sd::DOUBLE AS artefact_weight_sd
 FROM (VALUES ('S1', 0.002), ('S2', 0.0018)) AS v(sample, sd);
 
-query TTIIT
+query TTIITI
 SELECT sample, chrom, start, "end",
   stable_fraction = CASE sample || chrom WHEN 'S11' THEN (1000001 + 950001) / 2000001
                                          WHEN 'S12' THEN 1675001 / 2025001
                                          WHEN 'S21' THEN 1.0
-                                         WHEN 'S22' THEN 1650001 / 2000001 END
+                                         WHEN 'S22' THEN 1650001 / 2000001 END,
+  gained_bases
 FROM duckhts_roh_counts_fitted('roh_counts_split', 'roh_split_fits') ORDER BY sample, chrom;
 ----
-S1	1	1475000	3475000	true
-S1	2	1450000	3475000	true
-S2	1	1450000	3475000	true
-S2	2	1475000	3475000	true
+S1	1	1475000	3475000	true	0
+S1	2	1450000	3475000	true	0
+S2	1	1450000	3475000	true	0
+S2	2	1475000	3475000	true	0
 
 # The same against the oracle.
 query II
@@ -1967,6 +2006,45 @@ SELECT (SELECT count(*) FROM fitted),
    UNION ALL (SELECT * FROM expected EXCEPT ALL SELECT * FROM fitted)));
 ----
 4	0
+
+# gained_bases, the other direction. Decoded at w = 0, the balanced site at 2,500,000 splits each
+# chromosome 1 run in two, and the site at 3,150,000 ends each chromosome 2 run at 3,125,000. S1
+# has sd 0.002, so its decode at w + sd (0.002) calls whole runs again: the one run on chromosome 1
+# meets both runs at w and covers the gap 2,475,001-2,524,999 between them, 49,999 bases, which go
+# to the run at w before the gap; the run on chromosome 2 goes on to 3,475,000, 3,125,001-3,475,000,
+# 350,000 bases. S2 has sd 0.0002: at 0.0002 the first site no longer acts and the second still
+# does, so it gains the 49,999 bases on chromosome 1 and none on chromosome 2. Below w no run
+# changes (the low decode is at 0 for both), so every stable_fraction is 1.
+statement ok
+CREATE TEMP TABLE roh_split_zero_fits AS
+SELECT * REPLACE (0.0::DOUBLE AS artefact_weight,
+  CASE sample WHEN 'S1' THEN 0.002 ELSE 0.0002 END::DOUBLE AS artefact_weight_sd)
+FROM roh_split_fits;
+
+query TTIIRI
+SELECT sample, chrom, start, "end", stable_fraction, gained_bases
+FROM duckhts_roh_counts_fitted('roh_counts_split', 'roh_split_zero_fits') ORDER BY sample, chrom, start;
+----
+S1	1	1475000	2475000	1.0	49999
+S1	1	2525000	3475000	1.0	0
+S1	2	1450000	3125000	1.0	350000
+S2	1	1450000	2475000	1.0	49999
+S2	1	2525000	3475000	1.0	0
+S2	2	1475000	3125000	1.0	0
+
+query II
+WITH fitted AS (SELECT * FROM duckhts_roh_counts_fitted('roh_counts_split', 'roh_split_zero_fits')),
+expected AS (
+  SELECT * REPLACE (replace(sample, '/x', '') AS sample)
+  FROM roh_stable_oracle('roh_counts_split', 'x', 0.0, 0.002) WHERE sample = 'S1/x'
+  UNION ALL
+  SELECT * REPLACE (replace(sample, '/x', '') AS sample)
+  FROM roh_stable_oracle('roh_counts_split', 'x', 0.0, 0.0002) WHERE sample = 'S2/x')
+SELECT (SELECT count(*) FROM fitted),
+  (SELECT count(*) FROM ((SELECT * FROM fitted EXCEPT ALL SELECT * FROM expected)
+   UNION ALL (SELECT * FROM expected EXCEPT ALL SELECT * FROM fitted)));
+----
+6	0
 
 # Independent transitions (both 0.5) make homozygous sites AZ and balanced sites HW.
 # Lengths 1..9 exercise every two-bit offset and partially filled traceback bytes.

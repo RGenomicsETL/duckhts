@@ -16,8 +16,12 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   error) and adds `stable_fraction` to each run. Each sample is decoded three
   times from one collection of its sites, at its artefact weight w and at
   w - and + `artefact_weight_sd`, kept in [0, 0.05]; `stable_fraction` is the
-  share of the run's bases that both other decodes also call. The run columns
-  are unchanged. The decode takes about three times as long, with the same
+  share of the run's bases that both other decodes also call. `gained_bases`
+  guards the other direction: the bases that the decode at
+  w + `artefact_weight_sd` calls next to the run (in a run that shares a base
+  with it or abuts it) but outside every run at w, each counted once. Runs
+  that the higher weight calls apart from every run at w have no row and are
+  not reported. The run columns are unchanged. The decode takes about three times as long, with the same
   site lists and kernel workspace. `duckhts_roh_counts` has no interval and
   keeps its columns. The real-data check of the fitted emission
   (`benchmarks/benchmark_roh_fitted_emission.md`) found the runs most

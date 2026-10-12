@@ -9,7 +9,8 @@ Preview of 2.0.0, still in development. The sections below describe what 2.0.0 w
   `artefact_weight_sd` column in the fit relation (`NA` counts as 0) and
   returns `stable_fraction` for each run: the share of the run's bases that
   are also called when the artefact weight moves down and up by
-  `artefact_weight_sd`. The other columns are unchanged, and the decode takes
+  `artefact_weight_sd`, and `gained_bases`: the bases that the higher weight
+  calls next to the run but outside every run. The other columns are unchanged, and the decode takes
   about three times as long. Without `fit_table` the columns are unchanged.
 
 - `rduckhts_roh(site_rule = "bcftools", af_order = ...)` names a column of

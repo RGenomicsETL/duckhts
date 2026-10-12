@@ -265,7 +265,7 @@ static const char map_arguments[] =
  * az_to_hw): the model parameters of the evidence kind, then the map
  * arguments, then the transitions. duckhts_roh_counts_fitted calls
  * __duckhts_roh_decode_stable, which takes artefact_weight_sd after
- * artefact_weight and gives each run a stable_fraction. */
+ * artefact_weight and gives each run a stable_fraction and gained_bases. */
 #define ROH_RUN_COLUMNS \
     " SELECT seg.smp AS \"sample\", seg.chrom AS chrom, seg.r.start AS start, " \
     "seg.r.\"end\" AS \"end\", seg.r.\"end\" - seg.r.start + 1 AS length, " \
@@ -273,7 +273,7 @@ static const char map_arguments[] =
 static const char select_head[] =
     ROH_RUN_COLUMNS " FROM (SELECT l.smp, l.chrom, unnest(__duckhts_roh_decode(l.s, ";
 static const char fitted_select_head[] =
-    ROH_RUN_COLUMNS ", seg.r.stable_fraction AS stable_fraction "
+    ROH_RUN_COLUMNS ", seg.r.stable_fraction AS stable_fraction, seg.r.gained_bases AS gained_bases "
     "FROM (SELECT l.smp, l.chrom, unnest(__duckhts_roh_decode_stable(l.s, ";
 #define ROH_NO_COUNT_MODEL "NULL::DOUBLE, NULL::DOUBLE, NULL::DOUBLE, NULL::DOUBLE"
 #define ROH_COUNT_MODEL \
@@ -296,7 +296,7 @@ static const char from_lists_with_map[] =
 #define ROH_GUARD_COLUMNS \
     " UNION ALL SELECT NULL::VARCHAR, NULL::VARCHAR, NULL::BIGINT, NULL::BIGINT, NULL::BIGINT, " \
     "NULL::INTEGER, NULL::DOUBLE "
-#define ROH_FITTED_GUARD_COLUMNS ROH_GUARD_COLUMNS ", NULL::DOUBLE "
+#define ROH_FITTED_GUARD_COLUMNS ROH_GUARD_COLUMNS ", NULL::DOUBLE, NULL::BIGINT "
 #define ROH_GENOTYPE_ARGUMENTS_VALID \
     "__duckhts_roh_valid_args(" ROH_KIND ", CAST(gt_error AS DOUBLE), " ROH_NO_COUNT_MODEL ", " \
     ROH_NO_INTERVAL ", CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE), " \
@@ -350,7 +350,7 @@ static const char counts_guard[] = ROH_GUARD_COLUMNS "WHERE NOT " ROH_COUNTS_ARG
  * interval, in the order of __duckhts_roh_decode_stable() and
  * __duckhts_roh_valid_args(). A NULL artefact_weight_sd (fewer than three
  * blocks in the fit) counts as 0: the perturbed decodes equal the central
- * one and every stable_fraction is 1. */
+ * one, so every stable_fraction is 1 and every gained_bases 0. */
 #define ROH_FIT_MODEL(from, sample) \
     ROH_FIT_VALUE(from, "seq_error", sample) ", " ROH_FIT_VALUE(from, "contamination", sample) ", " \
     ROH_FIT_VALUE(from, "allele_balance", sample) ", " ROH_FIT_VALUE(from, "artefact_weight", sample) ", " \

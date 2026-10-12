@@ -289,20 +289,21 @@ test_roh_counts_fitted <- function() {
                      status = "caller_selected", allele_balance = 0.5, artefact_weight = 0,
                      artefact_weight_sd = 0)
   dbWriteTable(con, "fits", fits)
-  # The fitted decode adds stable_fraction to the columns of the scalar one;
+  # The fitted decode adds stable_fraction and gained_bases to the columns of the scalar one;
   # the run columns are compared without it.
   ordered <- function(rows) {
-    rows <- rows[order(rows$sample, rows$chrom, rows$start), setdiff(names(rows), "stable_fraction")]
+    rows <- rows[order(rows$sample, rows$chrom, rows$start), setdiff(names(rows), c("stable_fraction", "gained_bases"))]
     rownames(rows) <- NULL
     rows
   }
   scalar <- rduckhts_roh_counts(con, "counts", contamination = 0.1)
   fitted <- rduckhts_roh_counts(con, "counts", fit_table = "fits")
-  expect_identical(names(fitted), c(names(scalar), "stable_fraction"))
+  expect_identical(names(fitted), c(names(scalar), "stable_fraction", "gained_bases"))
   expect_identical(ordered(fitted), ordered(scalar))
   # With artefact_weight_sd 0 the three decodes are the same: every run has 1.
   expect_true(nrow(fitted) > 0)
   expect_true(all(fitted$stable_fraction == 1))
+  expect_true(all(fitted$gained_bases == 0))
   # Unused scalar arguments do not constrain fitted parameters.
   expect_identical(ordered(rduckhts_roh_counts(
     con, "counts", fit_table = "fits", seq_error = NA, contamination = -1,
@@ -329,12 +330,15 @@ test_roh_counts_fitted <- function() {
     expect_equal(length(unique(fitted$sample)), 2L)
     expect_identical(ordered(fitted), ordered(do.call(rbind, scalar)))
     expect_true(all(fitted$stable_fraction >= 0 & fitted$stable_fraction <= 1))
+    expect_true(all(fitted$gained_bases >= 0))
   }
   # A NULL artefact_weight_sd counts as 0; a negative one is an error.
   no_interval <- fits
   no_interval$artefact_weight_sd <- NA_real_
   dbWriteTable(con, "no_interval_fits", no_interval)
-  expect_true(all(rduckhts_roh_counts(con, "counts", fit_table = "no_interval_fits")$stable_fraction == 1))
+  no_interval_runs <- rduckhts_roh_counts(con, "counts", fit_table = "no_interval_fits")
+  expect_true(all(no_interval_runs$stable_fraction == 1))
+  expect_true(all(no_interval_runs$gained_bases == 0))
   no_interval$artefact_weight_sd[[2]] <- -0.001
   dbWriteTable(con, "no_interval_fits", no_interval, overwrite = TRUE)
   expect_error(rduckhts_roh_counts(con, "counts", fit_table = "no_interval_fits"),

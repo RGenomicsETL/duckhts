@@ -73,7 +73,8 @@ such sites no term. Values outside either range are errors, not clipped.}
 \value{
 A data frame (or invisible `TRUE` when `table_name` is given) with
   the columns of [rduckhts_roh()]: one row per run, unordered. With
-  `fit_table` it also has `stable_fraction` (see Details).
+  `fit_table` it also has `stable_fraction` and `gained_bases` (see
+  Details).
 }
 \description{
 Detect runs of homozygosity from allele read counts, for example counts at
@@ -131,9 +132,21 @@ of its bases that are also in a run of both other decodes. A run with
 `stable_fraction` 1 does not depend on where `w` lies within one standard
 error. Filter on it to keep the runs, or the run bases, that the interval
 of the fit does not move; a low value marks a run whose call hinges on the
-artefact weight. A NULL `artefact_weight_sd`
-(fewer than three blocks in the fit) counts as 0 and gives 1, so check the
-fit's `blocks` too. The decode then takes about three times as long.
+artefact weight.
+
+`gained_bases` guards the other direction: the bases that the decode at
+`w + artefact_weight_sd` calls next to the run but outside every run at
+`w`. A run at `w + sd` meets a run at `w` when they share a base or abut. A
+base of such a run before the first run at `w` it meets counts for that run;
+any other counts for the run at `w` before it, so a gap that the higher
+weight closes between two runs counts once, for the run before the gap. A
+run at `w + sd` that meets no run at `w` has no row, so its bases are not
+reported. A high `gained_bases` marks a run that a higher weight would
+extend or join to its neighbour.
+
+A NULL `artefact_weight_sd` (fewer than three blocks in the fit) counts as
+0 and gives `stable_fraction` 1 and `gained_bases` 0, so check the fit's
+`blocks` too. The decode then takes about three times as long.
 }
 \examples{
 con <- rduckhts_connect()

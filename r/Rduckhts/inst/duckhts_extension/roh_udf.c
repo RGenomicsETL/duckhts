@@ -5,7 +5,8 @@
  *     list that __duckhts_roh_sites() builds (roh_sites.h).
  *   - __duckhts_roh_decode_stable(), used by duckhts_roh_counts_fitted, also
  *     decodes a read-count list at artefact_weight -/+ artefact_weight_sd
- *     and gives each run the share of its bases that both decodes call.
+ *     and gives each run the share of its bases that both decodes call, and
+ *     the bases that the decode at + artefact_weight_sd adds next to it.
  *   - __duckhts_roh_valid_args() checks the model parameters and memory limits
  *     of a macro call without reading a site, so that invalid arguments fail
  *     on empty input too.
@@ -614,21 +615,39 @@ typedef struct {
 } roh_run_copy_t;
 
 /* Work space of the stability decode, reused across rows: the runs of the two
- * perturbed decodes and one fraction per run of the central decode. Each
- * array holds at most one entry per site of the longest list, so the site
- * limits bound it. */
+ * perturbed decodes, and one fraction and one gained-bases count per run of
+ * the central decode. Each array holds at most one entry per site of the
+ * longest list, so the site limits bound it. */
 typedef struct {
     roh_run_copy_t low;
     roh_run_copy_t high;
     double *fractions;
-    size_t fraction_capacity;
-    bool active; /* the row's runs have fractions */
+    int64_t *gained;
+    size_t run_capacity; /* entries of fractions and of gained */
+    bool active;         /* the row's runs have fractions and gained bases */
 } roh_stability_t;
 
 static void free_stability(roh_stability_t *stability) {
     free(stability->low.items);
     free(stability->high.items);
     free(stability->fractions);
+    free(stability->gained);
+}
+
+/* Makes room for one fraction and one gained count per central run. Returns
+ * false after reporting an error. */
+static bool reserve_run_values(duckdb_function_info info, roh_stability_t *stability, size_t count) {
+    if (count <= stability->run_capacity) return true;
+    double *fractions = realloc(stability->fractions, count * sizeof(*fractions));
+    if (fractions != NULL) stability->fractions = fractions;
+    int64_t *gained = fractions != NULL ? realloc(stability->gained, count * sizeof(*gained)) : NULL;
+    if (gained == NULL) {
+        roh_error(info, "out of memory for %llu runs", (unsigned long long)count);
+        return false;
+    }
+    stability->gained = gained;
+    stability->run_capacity = count;
+    return true;
 }
 
 /* Copies the runs of the last decode. Returns false after reporting an error. */
@@ -690,6 +709,34 @@ static void stable_fractions(const duckhts_roh_segment_t *central, size_t count,
     }
 }
 
+/* For each run of `central`, the bases that runs of `high` add next to it.
+ * A run of high meets a run of central when they share a base or abut (no
+ * base between them). Each base of a run of high that meets some run of
+ * central, and that lies outside every run of central, is given to one run
+ * of central: a base before the first run of central the high run meets goes
+ * to that run; any other goes to the last run of central before it. A run of
+ * high that meets no run of central gives its bases to no run. Both lists are
+ * in position order and their runs do not overlap, so one pass with a
+ * pointer into central serves every run of high. */
+static void gained_bases(const duckhts_roh_segment_t *central, size_t count, const roh_run_copy_t *high,
+                         int64_t *gained) {
+    size_t first = 0;
+    for (size_t r = 0; r < count; r++) gained[r] = 0;
+    for (size_t k = 0; k < high->count; k++) {
+        const int64_t start = high->items[k].start_pos1, end = high->items[k].end_pos1;
+        /* Central runs that end more than one base before this run meet
+         * neither it nor a later one. */
+        while (first < count && (int64_t)central[first].end_pos1 + 1 < start) first++;
+        if (first == count || (int64_t)central[first].start_pos1 - 1 > end) continue;
+        if (central[first].start_pos1 > start) gained[first] += central[first].start_pos1 - start;
+        for (size_t r = first; r < count && (int64_t)central[r].start_pos1 - 1 <= end; r++) {
+            const bool next_meets = r + 1 < count && (int64_t)central[r + 1].start_pos1 - 1 <= end;
+            const int64_t until = next_meets ? (int64_t)central[r + 1].start_pos1 - 1 : end;
+            if (until > central[r].end_pos1) gained[r] += until - central[r].end_pos1;
+        }
+    }
+}
+
 /* An artefact weight moved by `shift`, kept in the range check_model accepts. */
 static double shifted_artefact_weight(double weight, double shift) {
     const double value = weight + shift;
@@ -701,9 +748,10 @@ static double shifted_artefact_weight(double weight, double shift) {
 /* The stability decode of one list: the sites decoded at artefact_weight
  * - and + artefact_weight_sd (each kept in [0, 0.05]), then at
  * artefact_weight, so that the central runs are in `roh` and each has the
- * share of its bases that both perturbed decodes also call. The three decodes
- * share the list and the kernel workspace. Returns false after reporting an
- * error. */
+ * share of its bases that both perturbed decodes also call
+ * (stable_fractions) and the bases the decode at + artefact_weight_sd adds
+ * next to it (gained_bases). The three decodes share the list and the kernel
+ * workspace. Returns false after reporting an error. */
 static bool stability_decode(duckdb_function_info info, const roh_packed_list_t *list, const roh_model_t *model,
                              const duckhts_roh_params_t *params, duckhts_roh_t *roh,
                              roh_stability_t *stability) {
@@ -721,16 +769,9 @@ static bool stability_decode(duckdb_function_info info, const roh_packed_list_t 
 
     size_t count;
     const duckhts_roh_segment_t *central = duckhts_roh_segments(roh, &count);
-    if (count > stability->fraction_capacity) {
-        double *grown = realloc(stability->fractions, count * sizeof(*grown));
-        if (grown == NULL) {
-            roh_error(info, "out of memory for %llu runs", (unsigned long long)count);
-            return false;
-        }
-        stability->fractions = grown;
-        stability->fraction_capacity = count;
-    }
+    if (!reserve_run_values(info, stability, count)) return false;
     stable_fractions(central, count, &stability->low, &stability->high, stability->fractions);
+    gained_bases(central, count, &stability->high, stability->gained);
     return true;
 }
 
@@ -757,11 +798,11 @@ static int decode_packed_row(duckdb_function_info info, const roh_packed_args_t 
 }
 
 /* Writes the runs of the last decode as the list of `row`. With
- * `fraction_member` the run struct has a fifth member
- * (__duckhts_roh_decode_stable), which gets `fractions`, or NULL when that is
- * NULL. */
+ * `stability_members` the run struct has a fifth and sixth member
+ * (__duckhts_roh_decode_stable), stable_fraction and gained_bases, which get
+ * the values of `stability`, or NULL when that is NULL. */
 static bool write_segments(duckdb_function_info info, duckdb_vector output, idx_t row,
-                           const duckhts_roh_t *roh, bool fraction_member, const double *fractions) {
+                           const duckhts_roh_t *roh, bool stability_members, const roh_stability_t *stability) {
     size_t count;
     const duckhts_roh_segment_t *segments = duckhts_roh_segments(roh, &count);
     duckdb_list_entry entry;
@@ -780,15 +821,22 @@ static bool write_segments(duckdb_function_info info, duckdb_vector output, idx_
         markers[entry.offset + i] = segments[i].n_markers;
         quality[entry.offset + i] = segments[i].quality;
     }
-    if (fraction_member) {
+    if (stability_members) {
         duckdb_vector stable = duckdb_struct_vector_get_child(child, 4);
-        double *values = duckdb_vector_get_data(stable);
-        if (fractions == NULL && count > 0) duckdb_vector_ensure_validity_writable(stable);
+        duckdb_vector gained = duckdb_struct_vector_get_child(child, 5);
+        double *fractions = duckdb_vector_get_data(stable);
+        int64_t *bases = duckdb_vector_get_data(gained);
+        if (stability == NULL && count > 0) {
+            duckdb_vector_ensure_validity_writable(stable);
+            duckdb_vector_ensure_validity_writable(gained);
+        }
         for (size_t i = 0; i < count; i++) {
-            if (fractions != NULL) {
-                values[entry.offset + i] = fractions[i];
+            if (stability != NULL) {
+                fractions[entry.offset + i] = stability->fractions[i];
+                bases[entry.offset + i] = stability->gained[i];
             } else {
                 duckdb_validity_set_row_invalid(duckdb_vector_get_validity(stable), entry.offset + i);
+                duckdb_validity_set_row_invalid(duckdb_vector_get_validity(gained), entry.offset + i);
             }
         }
     }
@@ -884,7 +932,7 @@ static void roh_packed_scalar(duckdb_function_info info, duckdb_data_chunk input
             set_row_null(output, row);
             continue;
         }
-        if (!write_segments(info, output, row, roh, stable, stability.active ? stability.fractions : NULL)) break;
+        if (!write_segments(info, output, row, roh, stable, stability.active ? &stability : NULL)) break;
     }
     free_stability(&stability);
     free_map(&map);
@@ -1000,14 +1048,14 @@ static bool register_overload(duckdb_connection connection, duckhts_roh_sites_ki
 
 /* The runs of __duckhts_roh_decode, those of duckhts_roh_segments; with
  * `stable`, the runs of __duckhts_roh_decode_stable, which add
- * stable_fraction (write_segments). */
+ * stable_fraction and gained_bases (write_segments). */
 static duckdb_logical_type segments_type(bool stable) {
     duckdb_logical_type bigint = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
     duckdb_logical_type integer = duckdb_create_logical_type(DUCKDB_TYPE_INTEGER);
     duckdb_logical_type real = duckdb_create_logical_type(DUCKDB_TYPE_DOUBLE);
-    duckdb_logical_type member_types[5] = {bigint, bigint, integer, real, real};
-    const char *member_names[5] = {"start", "end", "n_markers", "quality", "stable_fraction"};
-    duckdb_logical_type segment = duckdb_create_struct_type(member_types, member_names, stable ? 5 : 4);
+    duckdb_logical_type member_types[6] = {bigint, bigint, integer, real, real, bigint};
+    const char *member_names[6] = {"start", "end", "n_markers", "quality", "stable_fraction", "gained_bases"};
+    duckdb_logical_type segment = duckdb_create_struct_type(member_types, member_names, stable ? 6 : 4);
     duckdb_logical_type segments = duckdb_create_list_type(segment);
     duckdb_destroy_logical_type(&segment);
     duckdb_destroy_logical_type(&real);

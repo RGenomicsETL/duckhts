@@ -1544,7 +1544,7 @@ SELECT * FROM duckhts_roh_counts('site_counts', contamination := 0.02) ORDER BY 
 
 ## duckhts_roh_counts_fitted
 
-Find runs of homozygosity from allele read counts using per-sample fitted error, contamination, allele balance and artefact weight, with the share of each run that the artefact weight's interval does not move.
+Find runs of homozygosity from allele read counts using per-sample fitted error, contamination, allele balance and artefact weight, with the share of each run that the artefact weight's interval does not move and the bases a higher weight would add next to it.
 
 Signature:
 
@@ -1555,7 +1555,7 @@ duckhts_roh_counts_fitted(counts_table, fit_table, genetic_map, hw_to_az := 6.7e
 Returns:
 
 ```
-table(sample VARCHAR, chrom VARCHAR, start BIGINT, "end" BIGINT, length BIGINT, n_markers INTEGER, quality DOUBLE, stable_fraction DOUBLE)
+table(sample VARCHAR, chrom VARCHAR, start BIGINT, "end" BIGINT, length BIGINT, n_markers INTEGER, quality DOUBLE, stable_fraction DOUBLE, gained_bases BIGINT)
 ```
 
 ### Fit relation
@@ -1568,7 +1568,11 @@ Counts, emissions, the run columns, transitions, optional genetic_map and memory
 
 ### Stability
 
-The runs depend on artefact_weight more than on the other fitted numbers, and the fit gives an interval for it. Each sample is decoded three times from one collection of its sites: at its artefact_weight w, and at w - artefact_weight_sd and w + artefact_weight_sd, each kept in [0, 0.05]. The rows are the runs of the decode at w; stable_fraction is the share of a run's bases that are also in a run of both other decodes, from 0 to 1. A run with stable_fraction 1 does not depend on where w lies within one standard error; a low value marks a run whose call hinges on the artefact weight. Filter on it, or weight run bases by it, to report the runs or bases the fit's interval does not move. A NULL artefact_weight_sd (a fit with fewer than three blocks) counts as 0, so every run gets 1; check the fit's blocks or status as well. The two extra decodes share the site lists and the kernel workspace, so memory is that of duckhts_roh_counts plus, for the list a thread decodes, 24 bytes per run of the two extra decodes and 8 per run at w, and decode time is about three times as long.
+The runs depend on artefact_weight more than on the other fitted numbers, and the fit gives an interval for it. Each sample is decoded three times from one collection of its sites: at its artefact_weight w, and at w - artefact_weight_sd and w + artefact_weight_sd, each kept in [0, 0.05]. The rows are the runs of the decode at w; stable_fraction is the share of a run's bases that are also in a run of both other decodes, from 0 to 1. A run with stable_fraction 1 does not depend on where w lies within one standard error; a low value marks a run whose call hinges on the artefact weight. Filter on it, or weight run bases by it, to report the runs or bases the fit's interval does not move. stable_fraction sees only bases a run would lose; gained_bases guards the other direction (see Gained bases). A NULL artefact_weight_sd (a fit with fewer than three blocks) counts as 0, so every run gets stable_fraction 1 and gained_bases 0; check the fit's blocks or status as well. The two extra decodes share the site lists and the kernel workspace, so memory is that of duckhts_roh_counts plus, for the list a thread decodes, 24 bytes per run of the two extra decodes and 16 per run at w, and decode time is about three times as long.
+
+### Gained bases
+
+gained_bases is the number of bases that the decode at w + artefact_weight_sd calls next to a run at w but outside every run at w, from the same decode as stable_fraction. A run at w + sd meets a run at w when the two share a base or abut (the end of one is one base before the start of the other). Each base of a run at w + sd that meets some run at w, and that lies outside every run at w, counts for exactly one run at w: a base before the first run at w that the run at w + sd meets counts for that run; any other base counts for the last run at w before it. So a gap that the higher weight closes between two runs counts once, for the run before the gap, and an extension past a run's end counts for that run. Bases of a run at w + sd that meets no run at w belong to no row and are not reported; a higher weight can call such new runs. A high gained_bases marks a run that a higher weight would extend or join to its neighbour.
 
 ### Examples
 
