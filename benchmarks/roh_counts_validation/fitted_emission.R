@@ -96,6 +96,25 @@ roh_fitted_runs_of <- function(runs, sample) {
   runs[runs$sample == sample, , drop = FALSE]
 }
 
+# Whether each run of `runs` meets a run of `reference`: they share a base or
+# abut, as duckhts_roh_counts_fitted defines it for gained_bases.
+roh_fitted_meets <- function(runs, reference) {
+  vapply(seq_len(nrow(runs)), function(i) {
+    any(as.numeric(reference$start) <= as.numeric(runs$end[[i]]) + 1 &
+        as.numeric(reference$end) >= as.numeric(runs$start[[i]]) - 1)
+  }, logical(1L))
+}
+
+# The bases of `runs` outside every run of `reference`, split by whether their
+# run meets a run of `reference` (attached) or meets none (isolated).
+roh_fitted_gained_split <- function(runs, reference) {
+  meets <- roh_fitted_meets(runs, reference)
+  outside <- vapply(seq_len(nrow(runs)), function(i) {
+    roh_run_bases(runs[i, ]) - roh_run_overlap_bases(runs[i, ], reference)
+  }, numeric(1L))
+  c(attached = sum(outside[meets]), isolated = sum(outside[!meets]))
+}
+
 roh_fitted_run <- function(extension, cli, output_dir, samples,
                            validation = roh_validation_declaration,
                            declaration = roh_fitted_declaration) {
@@ -203,7 +222,8 @@ roh_fitted_run <- function(extension, cli, output_dir, samples,
   }
 
   # Count decodes. Each fit relation is a Parquet file of exactly the numbers
-  # in `parameters`. With `stability` the runs keep stable_fraction.
+  # in `parameters`. With `stability` the runs keep stable_fraction and
+  # gained_bases.
   decode_counts <- function(name, parameters, stability = FALSE) {
     fit_file <- file.path(work, sprintf("fit_%s.parquet", name))
     DBI::dbWriteTable(con, "decode_fit", parameters[c("sample", "seq_error", "contamination",
@@ -213,7 +233,11 @@ roh_fitted_run <- function(extension, cli, output_dir, samples,
     DBI::dbExecute(con, sprintf("COPY decode_fit TO %s (FORMAT parquet)",
                                 roh_fitted_quote(fit_file)))
     output <- file.path(work, sprintf("counts_%s.csv", name))
-    columns <- if (stability) paste(runs_columns, "stable_fraction", sep = ", ") else runs_columns
+    columns <- if (stability) {
+      paste(runs_columns, "stable_fraction", "gained_bases", sep = ", ")
+    } else {
+      runs_columns
+    }
     measure(name, "count_decode", sprintf(paste(
       "SELECT %s FROM duckhts_roh_counts_fitted('fitted_counts', 'decode_fit')",
       "ORDER BY sample, chrom, start"), columns), output,
@@ -237,7 +261,7 @@ roh_fitted_run <- function(extension, cli, output_dir, samples,
     runs <- decode_counts(paste0("decode_", name), decode_parameters[[name]], stability = interval)
     if (interval) {
       stable_runs <- runs
-      runs <- runs[setdiff(names(runs), "stable_fraction")]
+      runs <- runs[setdiff(names(runs), c("stable_fraction", "gained_bases"))]
     }
     count_runs[[name]] <- runs
   }
@@ -375,6 +399,51 @@ roh_fitted_run <- function(extension, cli, output_dir, samples,
   }
   decomposition <- do.call(rbind, decomposition)
 
+  # Gained bases (fitted_declaration.R, `gained`). One more decode, at
+  # w + artefact_weight_sd with artefact_weight_sd 0, gives the runs of the
+  # stability decode's w + sd decode, so that the bases in runs that meet no
+  # run of the stability decode can be counted.
+  high_parameters <- roh_fitted_parameters(fitted, full, declaration = declaration)
+  high_sd <- ifelse(is.na(fitted$artefact_weight_sd), 0, as.numeric(fitted$artefact_weight_sd))
+  high_parameters$artefact_weight <- pmin(guard[[2L]], pmax(guard[[1L]], high_parameters$artefact_weight + high_sd))
+  high_runs <- decode_counts("stability_high", high_parameters)
+  gained <- do.call(rbind, lapply(decoded, function(sample) {
+    central <- roh_fitted_runs_of(stable_runs, sample)
+    split <- roh_fitted_gained_split(roh_fitted_runs_of(high_runs, sample), central)
+    column <- sum(as.numeric(central$gained_bases))
+    # The column must count exactly the bases of runs that meet a run at w.
+    if (column != split[["attached"]]) {
+      stop("gained_bases of ", sample, " (", column, ") differs from the decode at w + sd (",
+           split[["attached"]], ")", call. = FALSE)
+    }
+    data.frame(sample = sample,
+               high_weight = high_parameters$artefact_weight[high_parameters$sample == sample],
+               runs_with_gain = sum(central$gained_bases > 0), gained_bases = column,
+               isolated_bases = split[["isolated"]], row.names = NULL)
+  }))
+  gained_perturbed <- list()
+  scaled_up <- which(perturbations$parameter == declaration$stability$perturbed_parameter &
+                     perturbations$operation == "scale" &
+                     perturbations$value > declaration$gained$scale_above)
+  for (index in scaled_up) {
+    for (sample in decoded) {
+      split <- roh_fitted_gained_split(roh_fitted_runs_of(perturbed_raw[[index]], sample),
+                                       roh_fitted_runs_of(stable_runs, sample))
+      row <- decomposition[decomposition$perturbation == perturbations$perturbation[[index]] &
+                           decomposition$sample == sample, ]
+      if (split[["attached"]] + split[["isolated"]] != row$gained_bases) {
+        stop("the gained bases of ", sample, " do not add up", call. = FALSE)
+      }
+      gained_perturbed[[length(gained_perturbed) + 1L]] <- data.frame(
+        perturbation = perturbations$perturbation[[index]], value = perturbations$value[[index]],
+        sample = sample, perturbed_value = row$perturbed_value, gained_bases = row$gained_bases,
+        attached_bases = split[["attached"]], isolated_bases = split[["isolated"]],
+        attached_share = if (row$gained_bases > 0) split[["attached"]] / row$gained_bases else NA_real_,
+        row.names = NULL)
+    }
+  }
+  gained_perturbed <- do.call(rbind, gained_perturbed)
+
   observations <- do.call(rbind, observations)
   observations$within_ceiling <- is.na(observations$ceiling_mib) |
     observations$max_rss_mib <= observations$ceiling_mib
@@ -399,7 +468,8 @@ roh_fitted_run <- function(extension, cli, output_dir, samples,
               sprintf("%.1f", overhead_mib), defaults_identical),
     stringsAsFactors = FALSE)
 
-  all_parameters <- rbind(do.call(rbind, decode_parameters), do.call(rbind, perturbed_parameters))
+  all_parameters <- rbind(do.call(rbind, decode_parameters), do.call(rbind, perturbed_parameters),
+                          data.frame(decode = "stability_high", high_parameters))
   all_runs <- rbind(
     do.call(rbind, lapply(names(genotype_runs), function(gt_error) {
       if (nrow(genotype_runs[[gt_error]])) {
@@ -423,9 +493,12 @@ roh_fitted_run <- function(extension, cli, output_dir, samples,
   write(stable_runs, "stability_runs.csv")
   write(stability, "stability.csv")
   write(decomposition, "stability_decomposition.csv")
+  write(gained, "gained.csv")
+  write(gained_perturbed, "gained_perturbed.csv")
   write(observations, "observations.csv")
   list(metadata = metadata, fit = fit, parameters = all_parameters, comparisons = comparisons,
        criterion = criterion, sensitivity = sensitivity, stability = stability,
-       decomposition = decomposition, observations = observations,
+       decomposition = decomposition, gained = gained, gained_perturbed = gained_perturbed,
+       observations = observations,
        defaults_identical = defaults_identical, span_bases = span_bases)
 }

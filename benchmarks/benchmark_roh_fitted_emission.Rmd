@@ -122,6 +122,23 @@ per sample and without a verdict:
   The FROH change is gained minus lost over the span; the changed bases of
   the sensitivity table are gained plus lost.
 
+**Gained bases**, declared after the stability render and before any decode
+that reports `gained_bases`, in its own commit. `duckhts_roh_counts_fitted`
+now also gives each run `gained_bases`: the bases that its decode at
+w + `artefact_weight_sd` calls in runs that meet the run (share a base or
+abut) but outside every run at w. Runs at w + sd that meet no run at w have
+no row. The driver decodes once more at w + `artefact_weight_sd` with
+`artefact_weight_sd` 0 to count them. The report gives, per sample and
+without a verdict:
+
+- the `gained_bases` of the runs of (c), summed, and the bases of the w + sd
+  decode in runs that meet no run of (c). The summed column must equal the
+  bases of that extra decode outside the runs of (c) in runs that meet one,
+  or the render stops;
+- for the `artefact_weight` × 2 rows: the gained bases of the decomposition,
+  split into those in runs that meet a run of (c) and those in new runs that
+  meet none.
+
 **Gates.** Each query (the fit, every decode, three empty runs) runs in a
 fresh DuckDB CLI process under `/usr/bin/time`, with the JSON profiler and
 `max_temp_directory_size` set to zero, at two threads. The render stops if an
@@ -335,6 +352,38 @@ knitr::kable(data.frame(
   check.names = FALSE), row.names = FALSE, align = "llrrrrrrr")
 ```
 
+### Gained bases
+
+`gained_bases` of the runs of (c), from its decode at w + `artefact_weight_sd`,
+and the bases of that decode in runs that meet no run of (c), which no row
+reports.
+
+```{r gained, echo=FALSE}
+gained <- results$gained
+knitr::kable(data.frame(
+  Sample = gained$sample, `w + sd` = number(gained$high_weight),
+  `Runs with a gain` = gained$runs_with_gain,
+  `gained_bases, summed` = format(gained$gained_bases, big.mark = ","),
+  `In new runs, not reported` = format(gained$isolated_bases, big.mark = ","),
+  check.names = FALSE), row.names = FALSE, align = "lrrrr")
+```
+
+The gained bases of the `artefact_weight` × 2 rows, by whether their run at
+× 2 meets a run of (c).
+
+```{r gained-perturbed, echo=FALSE}
+gained_perturbed <- results$gained_perturbed
+gained_perturbed <- gained_perturbed[order(match(gained_perturbed$sample, roh_validation_declaration$samples)), ]
+knitr::kable(data.frame(
+  Change = sprintf("× %g", gained_perturbed$value), Sample = gained_perturbed$sample,
+  Weight = number(gained_perturbed$perturbed_value),
+  Gained = format(gained_perturbed$gained_bases, big.mark = ","),
+  `Next to a run of (c)` = format(gained_perturbed$attached_bases, big.mark = ","),
+  `In new runs` = format(gained_perturbed$isolated_bases, big.mark = ","),
+  `Share next to a run` = share(gained_perturbed$attached_share),
+  check.names = FALSE), row.names = FALSE, align = "llrrrrr")
+```
+
 ## Gates
 
 Every query, with its latency, peak RSS, DuckDB's peak buffer memory, its
@@ -371,7 +420,8 @@ knitr::kable(data.frame(
   an interval of the fit, and the × 0.5 and × 2 of `artefact_weight` were
   declared before its interval existed.
 - `stable_fraction` measures only the bases of a run that a change of the
-  artefact weight would lose. Bases that a change would add outside the runs
-  have no `stable_fraction`; the decomposition counts them as gained.
+  artefact weight would lose. `gained_bases` counts the bases that the higher
+  weight of the interval adds next to a run; bases it calls in new runs that
+  meet no run have no row, and this report counts them separately.
 - The spreads of the fit (`spread_hom`, `spread_het`) are not used by the
   decode.
