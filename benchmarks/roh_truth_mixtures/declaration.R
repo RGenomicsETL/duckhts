@@ -103,6 +103,21 @@ roh_truth_declaration <- list(
   t3_tolerance = c(seq_error = 2e-4, contamination = 3e-3, allele_balance = 3e-3,
                    artefact_weight = 1e-3),
   t3_min_ok = 0.9,
+  # Secondary measures, added after the reduced driver check (one population,
+  # four children, not evidence) and before the full run. That check showed
+  # every arm, the genotype decode at gt_error 30 included, calling runs of at
+  # least min_call_bases outside the planted segments, so the background of
+  # two unrelated founders still holds homozygous stretches. The criteria and
+  # the metrics above are unchanged. Reported per arm and run class, without a
+  # verdict:
+  #   - background stretches: the maximal sets of consecutive panel sites at
+  #     which the child's true genotype is not heterozygous, from the first to
+  #     the last site, of at least min_call_bases, with their bases outside
+  #     the planted segments;
+  #   - the false called bases split into those inside a background stretch
+  #     and the rest;
+  #   - the true heterozygous sites inside called runs, and the panel sites
+  #     inside called runs outside the planted segments.
   # DuckDB threads of every decode and of the fit.
   threads = 2L)
 
