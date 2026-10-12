@@ -165,17 +165,14 @@ duckhts_bench_stage_roh_ancestry_references <- function(chromosomes, extension_p
     stored <- utils::read.delim(receipt, colClasses = "character")
     as.numeric(stored$value[stored$field == "rows"])
   }
+  # Output and receipt are published together, replacing stale copies; on a
+  # failure the previous pair is restored (file.rename does not replace an
+  # existing file on Windows).
   publish <- function(temporary, output, fields, receipt) {
     temporary_receipt <- paste0(receipt, ".partial-", Sys.getpid())
     on.exit(unlink(temporary_receipt), add = TRUE)
     utils::write.table(fields, temporary_receipt, sep = "\t", row.names = FALSE, quote = FALSE)
-    if (!file.rename(temporary, output)) {
-      stop("cannot publish ", output, call. = FALSE)
-    }
-    if (!file.rename(temporary_receipt, receipt)) {
-      unlink(output)
-      stop("cannot publish the receipt of ", output, call. = FALSE)
-    }
+    duckhts_bench_publish_files(c(temporary, temporary_receipt), c(output, receipt))
   }
   count_fields <- function(names, values) {
     data.frame(field = names, value = as.character(values), stringsAsFactors = FALSE)
