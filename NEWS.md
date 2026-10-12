@@ -21,7 +21,13 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   optional reference set of XX and XY samples that calibrates the copy levels.
   SQL tests plant a GC bias, one-copy changes in 10% to 30% of cells and
   mixtures of XX and XY genomes at 10% and 20%, and recover them within the
-  declared tolerances. The state model of the issue is not implemented.
+  declared tolerances. `benchmarks/benchmark_depth_fraction.md` measures the
+  three macros at 1x/2x/4x samples and bins (linear in time; the correction
+  holds about 290 bytes a bin in memory, the sex estimator streams) and checks
+  them on 0.1x, 0.4x and 1x read-name subsamples of three 1000 Genomes 30x
+  genomes, with planted chr18 gains and emulated XX/XY mixtures, against a
+  leave-one-out reference of the other genomes. The state model of the issue
+  is not implemented.
 
 - `benchmarks/benchmark_roh_truth_and_mixtures.md` tests the ROH decodes
   where the answer is known. Synthetic chr20 children of two unrelated
