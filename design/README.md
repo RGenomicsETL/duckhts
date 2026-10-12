@@ -9,6 +9,7 @@ replaced them.
 | [`duckhts_parquet_lake.md`](duckhts_parquet_lake.md) | Parquet write-format contract and open DuckLake/native-writer work. |
 | [`fastq_throughput.md`](fastq_throughput.md) | Current direct-reader contract and open FASTQ parsing/QC throughput investigation. |
 | [`packed_state_kernels.md`](packed_state_kernels.md) | Open investigation for richer packed-state classifiers. |
+| [`depth_fraction_lane.md`](depth_fraction_lane.md) | Copy-number fractions from read depth: current phase 1 contract, open phase 2 state model. |
 | [`ancestry_reference.md`](ancestry_reference.md) | Ancestry reference-product identity and panel contract; public data staging remains open. |
 | [`simd_dispatch_matrix.md`](simd_dispatch_matrix.md) | Current SIMD dispatch contract. |
 | [`better_scans.md`](better_scans.md) | Open scan-planning work. |
