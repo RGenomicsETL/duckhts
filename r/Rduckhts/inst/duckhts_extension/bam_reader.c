@@ -927,7 +927,8 @@ static int bam_region_scan_begin(const bam_bind_data_t *bind, bam_local_init_dat
  * htslib restores a CIGAR stored as a placeholder with a CG tag only from
  * tag data and SEQ (cram_decode.c:3231-3233, sam.c:683-690). htslib's
  * readers move CG into the CIGAR before a record is written (sam.c:845,
- * 2826), so a CRAM written from htslib records stores the real CIGAR.
+ * 2826), but a CRAM from another writer may keep the placeholder, so a
+ * projected CIGAR keeps tag data and SEQ as well.
  * ================================================================ */
 
 static int bam_cram_required_fields(const bam_bind_data_t *bind,
@@ -940,6 +941,14 @@ static int bam_cram_required_fields(const bam_bind_data_t *bind,
     for (idx_t i = 0; i < column_count; i++) {
         idx_t col_id = column_ids[i];
         if (col_id == BAM_COL_SEQ || col_id == BAM_COL_QUAL) {
+            need_sequence = 1;
+        } else if (col_id == BAM_COL_CIGAR) {
+            /* A record may keep BAM's long-CIGAR placeholder with the real
+             * CIGAR in a CG:B:I tag. cram_decode.c restores it (bam_tag2cigar,
+             * after the aux block, line 3231) only when the tags are decoded,
+             * and the placeholder test needs l_qseq (sam.c:688), so a
+             * projected CIGAR asks for both. */
+            need_tags = 1;
             need_sequence = 1;
         } else if (col_id == BAM_COL_READ_GROUP_ID || col_id == BAM_COL_SAMPLE_ID) {
             need_tags = 1;

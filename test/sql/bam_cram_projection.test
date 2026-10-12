@@ -63,6 +63,13 @@ SELECT count(SEQ) FROM cram_scan('fixture_mixed', NULL);
 ----
 failed to read SAM/BAM/CRAM record
 
+# A projected CIGAR asks for SEQ and tag data, which htslib needs to restore a
+# long CIGAR kept as a placeholder with a CG tag; so it needs the reference here.
+statement error
+SELECT count(CIGAR) FROM cram_scan('fixture_mixed', NULL);
+----
+failed to read SAM/BAM/CRAM record
+
 # Symmetric multiset difference between a projection and the same columns of
 # the oracle.
 statement ok

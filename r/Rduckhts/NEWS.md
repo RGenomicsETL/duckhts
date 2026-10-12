@@ -13,7 +13,7 @@ Preview of 2.0.0, still in development. The sections below describe what 2.0.0 w
 
 - The bundled `read_bam()` decodes from a CRAM only the fields that the
   selected columns need, with the same values. With decompression threads, a
-  query without SEQ, QUAL and tag columns no longer grows in memory with the
+  query without SEQ, QUAL, CIGAR and tag columns no longer grows in memory with the
   alignments read, and one without SEQ and QUAL loads no reference for a
   slice that covers one reference. Tag columns with threads still grow
   toward a bound, and SEQ or QUAL with threads still load the whole contig

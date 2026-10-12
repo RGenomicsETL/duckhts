@@ -560,7 +560,7 @@ decompression_threads controls per-file HTSlib workers, default 2; use 0 to disa
 
 ### CRAM fields
 
-A CRAM scan asks htslib only for the fields its projected columns need, and every projected column keeps its value. SEQ and QUAL are decoded only when SEQ, QUAL, MD, NM or AUXILIARY_TAGS is projected, because htslib makes MD and NM from the reference when the file does not store them. Tag data is decoded only when a tag column, AUXILIARY_TAGS, READ_GROUP_ID or SAMPLE_ID is projected. Without SEQ and QUAL, htslib does not load the reference for a slice that covers one reference.
+A CRAM scan asks htslib only for the fields its projected columns need, and every projected column keeps its value. SEQ and QUAL are decoded only when SEQ, QUAL, CIGAR, MD, NM or AUXILIARY_TAGS is projected, because htslib makes MD and NM from the reference when the file does not store them. Tag data is decoded only when CIGAR, a tag column, AUXILIARY_TAGS, READ_GROUP_ID or SAMPLE_ID is projected; CIGAR needs both because a long CIGAR may be stored as a placeholder with its real value in a CG tag, which htslib restores only from tag data and SEQ. Without SEQ and QUAL, htslib does not load the reference for a slice that covers one reference.
 
 ### Limits
 
