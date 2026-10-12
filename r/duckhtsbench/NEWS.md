@@ -1,5 +1,23 @@
 # duckhtsbench 0.0.0.9001
 
+- register `roh_ancestry_chr<N>_reference_long` and
+  `roh_ancestry_chr<N>_af_sites` for the 21 autosomes other than chr20: the
+  long ancestry reference of each chromosome, derived from
+  `ancestry_reference_grch38_parquet`, and its matched AF sites, derived from
+  that reference and the chromosome's children BCF. They are the inputs of the
+  genome-wide ROH ancestry drivers. `duckhts_bench_stage_roh_ancestry_references()`
+  stages them: it checks the children BCF against its registered SHA-256 and
+  the reference against its receipt, writes sorted Parquet, and gives each
+  output a receipt that binds the source, extension and derivation SHA-256
+  values, the DuckDB version, the output SHA-256 and the row counts. A cached
+  output is reused only when its receipt matches, and a failed derivation
+  publishes nothing. The chr20 artifacts keep their rows. The network-free test
+  stages a synthetic two-chromosome input. The identity of
+  `roh_ancestry_chr20_af_sites` held a bare flag, `all_five_AF_fields_nonnull`,
+  that `duckhts_bench_validate_identity()` rejects; it is now
+  `all_five_AF_fields=nonnull`, with the same SHA-256, and the test checks that
+  every roh-ancestry identity parses.
+
 - register the `bam-mismatch` workload for
   `benchmark_bam_mismatch_counts.Rmd`: `bam_mismatch_hg00403_chr1_cram`, the
   chr1 alignments of the public 30× CRAM `ancestry_30x_hg00403` as a CRAM

@@ -20,9 +20,12 @@ measures four stages, each as its own fresh process:
   self-join of the stored sketches, reduced like `pairs_reduce`. This was the
   only all-pairs form before `duckhts_somalier_relatedness_all_pairs`.
 
-The all-pairs macro checks the contents of each sketch once. The per-pair
-function checks both sketches of every pair. [Before and after](#before-and-after)
-compares both with the observations of revision `a5f3b47a`.
+The all-pairs macro checks the contents of each sketch once and compares the
+pairs on DuckDB's threads. The per-pair function checks both sketches of every
+pair. [Before and after](#before-and-after) compares both with the observations
+of revision `a5f3b47a`. [Change from the previous render](#change-from-the-previous-render)
+compares this render with the previous one, which ran the macro's comparisons
+in one thread.
 
 ## What was already measured
 
@@ -55,9 +58,17 @@ The dimensions are samples `N`, panel sites `S` and pairs `P = N (N - 1) / 2`.
   in `N` and does not depend on `S`. No intermediate has `N × S × P` rows: a
   pair is computed from two sketches, not from site rows.
 - Pair work is `P × S / 64` word operations.
+- The macro holds the checked sketches as one list. The pairs are numbered and
+  split into at most 65,536 blocks of consecutive pairs. Each thread that
+  compares pairs copies the list once for each chunk of up to 2,048 blocks
+  that it scans, and reads both sketches of a pair in place from that copy
+  (see [Budgets](#budgets)). Across all threads, a query makes at most 32
+  such copies, whatever `N` is.
 - Caps: `max_sites` bounds `S` per sketch (default 1,000,000; hard limit
-  100,000,000). The SQL has no cap on `P`. The caller chooses the pair
-  relation; a `pairs_table` join gives a linear selection instead of all pairs.
+  100,000,000). `max_pairs` bounds `P` (default 50,000,000): a relation with
+  more pairs is an error before any pair is compared. The caller chooses the
+  pair relation; a `pairs_table` join gives a linear selection instead of all
+  pairs.
 
 The series are:
 
@@ -100,8 +111,11 @@ JSON profiler gives the latency of the measured statement and DuckDB's peak
 buffer and temporary bytes. `/usr/bin/time` gives peak RSS for the whole
 process. `max_temp_directory_size` is zero, so a spill fails the render.
 `memory_limit` is the DuckDB default. Each cell has three repetitions at one
-thread and at four threads, in an order that alternates sizes. The process is
-pinned to CPUs 0-3. Input Parquet files are read from a warm page cache.
+thread and at four threads, in an order that alternates sizes. The render runs
+at `nice -n -15` under `taskset`, and every CLI process inherits both. This
+host mixes performance and efficiency cores, so the header below records the
+CPU affinity, the kind of core and the nice value; every row of the runs file
+records the affinity. Input Parquet files are read from a warm page cache.
 
 Each statement consumes its output. `sketches` and `pairs_copy` write every
 output column to Parquet; a second, untimed process reads the file back.
@@ -126,15 +140,20 @@ The pair stages read sketches that an untimed process staged with the same
 
 ## Budgets
 
-The budgets were declared before the first measurement, at revision
+The budgets were first declared before the first measurement, at revision
 `a5f3b47a`. That run stopped at its own gate: the real cell of three pairs
 used 42.5 to 44.1 MiB against a ceiling of 41.5 MiB. The first model scaled
 the join output by the number of pairs, so three pairs were budgeted three
 rows. DuckDB allocates whole 2,048-row vectors for the 30-field result in each
-operator, whatever the row count. The model below adds that fixed term, and
-the sketch relation the macro materializes. No other term changed. The
-observations of the first run are kept in
+operator, whatever the row count. The model gained that fixed term, and the
+sketch relation that the macro then materialized. The observations of the
+first run are kept in
 [`benchmark_somalier_cohort_scaling_runs_a5f3b47a.csv`](benchmark_somalier_cohort_scaling_runs_a5f3b47a.csv).
+
+The all-pairs macro now compares pairs on DuckDB's threads, with a new plan.
+The terms of `pairs_reduce` and `pairs_copy` below follow that plan. They come
+from the macro and the DuckDB 1.5 source, and they were declared before this
+render. The terms of `sketches` and `pairs_scalar` did not change.
 
 The overhead is the median peak RSS of three empty runs per thread count. An
 empty run starts the CLI, loads the extension, and copies a one-row Parquet
@@ -154,17 +173,40 @@ render stops if any observation exceeds its ceiling or spills. `W` is
     `2 × N` sketches;
   - the evidence scan: one Parquet row group (122,880 rows) of 120 decoded
     bytes per row and thread. The evidence itself is streamed.
-- **`pairs_reduce`** and **`pairs_scalar`.** The live state is:
-  - the sketch relation, compressed and decoded, the checked copy the macro
-    materializes, and both sides of the join: `6 × N` sketches;
-  - one join output vector per thread. The join compares `sample_id`, and the
-    pair function receives both sketches of each row:
-    `min(P, threads × 2,048) × 2` sketches;
+- **`pairs_reduce`.** The macro collects the checked sketches into one list in
+  `sample_id` order, in a materialized one-row relation. A cross product joins
+  the block rows with that list, and the pair indexes of each block are
+  unnested above the join; the unnest passes the list on by reference. The
+  pair function reads both sketches of a pair in place from the list. DuckDB
+  1.5 frees an operator's state only when the query ends, so three copies of
+  the list stay live while the pairs are compared, `3 × N` sketches:
+  - the materialized relation that holds the list;
+  - the copy of the list that the cross product keeps;
+  - the segments of the ordered `list` aggregate: after its sort, the
+    aggregate copies each sketch into segments of its operator's arena.
+
+  Each thread that compares pairs adds:
+  - two copies of the list's mask words, `2 × N` sketches. The cross product
+    reads its copy of the list again for each chunk of up to 2,048 block rows.
+    The mask words fill many 2,048-value vectors, so the reader copies them
+    into one new vector. It allocates the new copy before it frees the
+    previous one;
   - the result vectors, fixed per thread: four operators hold one 2,048-row
     vector of the 30-field result at 16 bytes per field,
-    `threads × 4 × 2,048 × 30 × 16` bytes.
+    `4 × 2,048 × 30 × 16` bytes.
+
+  The model counts every thread, also when fewer threads compare pairs. The
+  cohort stage, which builds the list, ends before the first pair is compared.
+  It holds at most four lists at once, at the end of the ordered aggregate:
+  the sorted sketches, the sorted rows that it reads back, the list segments
+  and the result list. That is less than the pair stage holds with one thread.
 - **`pairs_copy`.** The live state of `pairs_reduce`, and the Parquet writer's
   row group: `min(P, threads × 122,880)` rows of 400 bytes.
+- **`pairs_scalar`.** The per-pair query did not change, and its terms are the
+  ones declared at `a5f3b47a`: `6 × N` sketches for the sketch relation and
+  both sides of the join; one join output vector per thread, which carries
+  both sketches of each row, `min(P, threads × 2,048) × 2` sketches; and the
+  result vectors of `pairs_reduce`.
 
 A time exponent is the log of the median time ratio divided by the log of the
 work ratio, per doubling. The work is `N × S` for `sketches` and `P × S` for
@@ -173,7 +215,7 @@ pairs has exponent 1. An exponent above 1.25 needs an investigation. A series
 whose one-thread 1× run is under 5 seconds gets a memory verdict only.
 
 ``` sh
-taskset -c 0-3 Rscript -e 'rmarkdown::render("benchmarks/benchmark_somalier_cohort_scaling.Rmd")'
+nice -n -15 taskset -c 0-3 Rscript -e 'rmarkdown::render("benchmarks/benchmark_somalier_cohort_scaling.Rmd")'
 ```
 
 ```{r setup, include=FALSE}
@@ -200,6 +242,24 @@ if (system2("git", c("diff", "--quiet", "HEAD", "--", "src"), stdout = FALSE, st
 host_load <- function() sub(".*load average: ", "", system2("uptime", stdout = TRUE))
 load_before <- host_load()
 cpu_affinity <- sub(".*: ", "", system2("taskset", c("-cp", Sys.getpid()), stdout = TRUE))
+niceness <- trimws(system2("ps", c("-o", "ni=", "-p", Sys.getpid()), stdout = TRUE))
+# The physical core and maximum clock of every CPU of this host. They name the
+# kind of core behind an affinity list such as "12-15".
+host_cpus <- utils::read.csv(
+  text = grep("^#", system2("lscpu", "-p=CPU,CORE,MAXMHZ", stdout = TRUE), value = TRUE, invert = TRUE),
+  header = FALSE, col.names = c("cpu", "core", "max_mhz"))
+affinity_cpus <- function(affinity) {
+  ranges <- strsplit(strsplit(affinity, ",", fixed = TRUE)[[1L]], "-", fixed = TRUE)
+  unlist(lapply(ranges, function(range) seq(as.integer(range[[1L]]), as.integer(range[[length(range)]]))))
+}
+describe_affinity <- function(affinity) {
+  cpus <- host_cpus[host_cpus$cpu %in% affinity_cpus(affinity), ]
+  stopifnot(nrow(cpus) == length(affinity_cpus(affinity)))
+  cores <- length(unique(cpus$core))
+  cpus_per_core <- nrow(cpus) / cores
+  sprintf("%d physical cores, %s CPU%s per core, %s GHz maximum", cores, format(cpus_per_core),
+          if (cpus_per_core == 1) "" else "s", paste(sort(unique(cpus$max_mhz / 1000)), collapse = " and "))
+}
 quote_literal <- function(value) paste0("'", gsub("'", "''", value, fixed = TRUE), "'")
 
 # Run untimed SQL in a CLI process; the last statement's rows are returned.
@@ -240,12 +300,23 @@ run_fresh <- function(setup, statement, threads) {
              peak_temp_bytes = as.numeric(profile$system_peak_temp_dir_size))
 }
 
+# SOMALIER_COHORT_SIZES=reduced selects small series for a check of the driver.
+# Their 4x samples and joint cells, (125, 17,000) and (125, 4,250), are cells of
+# the full design, so the comparisons with earlier renders still have cells to
+# compare. A reduced run writes its observations to a temporary file.
+sizes <- Sys.getenv("SOMALIER_COHORT_SIZES", "full")
+stopifnot(sizes %in% c("full", "reduced"))
+full_size <- identical(sizes, "full")
 series <- data.frame(
   dimension = rep(c("samples", "sites", "joint"), each = 3L),
   scale = rep(c(1L, 2L, 4L), 3L),
-  samples = c(125L, 250L, 500L, 250L, 250L, 250L, 125L, 250L, 500L),
-  sites = c(17000L, 17000L, 17000L, 17000L, 34000L, 68000L, 4250L, 8500L, 17000L),
+  samples = if (full_size) c(125L, 250L, 500L, 250L, 250L, 250L, 125L, 250L, 500L)
+            else c(31L, 62L, 125L, 31L, 31L, 31L, 31L, 62L, 125L),
+  sites = if (full_size) c(17000L, 17000L, 17000L, 17000L, 34000L, 68000L, 4250L, 8500L, 17000L)
+          else c(17000L, 17000L, 17000L, 4250L, 8500L, 17000L, 1062L, 2125L, 4250L),
   stringsAsFactors = FALSE)
+runs_path <- if (full_size) "benchmarks/benchmark_somalier_cohort_scaling_runs.csv" else
+  tempfile("benchmark_somalier_cohort_scaling_runs_reduced_", fileext = ".csv")
 real_sites <- 108757L
 series <- rbind(series, data.frame(dimension = "real", scale = 1L, samples = 3L, sites = real_sites,
                                    stringsAsFactors = FALSE))
@@ -383,18 +454,23 @@ sketch_size <- function(k) 3 * words(k) * 8 + 256
 live_bytes <- function(stage, k, threads) {
   n <- configs$samples[[k]]
   pairs <- configs$pairs[[k]]
-  pair_state <- 6 * n * sketch_size(k) + min(pairs, threads * 2048) * 2 * sketch_size(k) +
-    threads * 4 * 2048 * 30 * 16
+  result_vectors <- threads * 4 * 2048 * 30 * 16
+  # The all-pairs macro: three lists live until the query ends, and two copies
+  # of the mask words per thread.
+  macro_state <- (3 + 2 * threads) * n * sketch_size(k) + result_vectors
+  # The per-pair self-join, as declared at a5f3b47a.
+  self_join_state <- 6 * n * sketch_size(k) + min(pairs, threads * 2048) * 2 * sketch_size(k) +
+    result_vectors
   switch(stage,
     sketches = configs$sites[[k]] * 600 + (threads + 1) * n * 4 * words(k) * 8 +
       2 * n * sketch_size(k) + threads * 122880 * 120,
-    pairs_reduce = pair_state,
-    pairs_scalar = pair_state,
-    pairs_copy = pair_state + min(pairs, threads * 122880) * 400)
+    pairs_reduce = macro_state,
+    pairs_scalar = self_join_state,
+    pairs_copy = macro_state + min(pairs, threads * 122880) * 400)
 }
 
 empty_input <- file.path(staging, "empty.parquet")
-run_untimed(sprintf("COPY (SELECT 1 AS n) TO %s (FORMAT parquet);", quote_literal(empty_input)))
+invisible(run_untimed(sprintf("COPY (SELECT 1 AS n) TO %s (FORMAT parquet);", quote_literal(empty_input))))
 thread_counts <- c(1L, 4L)
 empty_runs <- do.call(rbind, lapply(thread_counts, function(threads) {
   do.call(rbind, lapply(seq_len(3L), function(run) {
@@ -480,7 +556,8 @@ runs <- do.call(rbind, lapply(seq_len(nrow(series)), function(j) {
   cell <- config_runs[config_runs$samples == series$samples[[j]] & config_runs$sites == series$sites[[j]], ]
   data.frame(dimension = series$dimension[[j]], scale = series$scale[[j]], cell)
 }))
-write.csv(runs, "benchmarks/benchmark_somalier_cohort_scaling_runs.csv", row.names = FALSE)
+runs$affinity <- cpu_affinity
+write.csv(runs, runs_path, row.names = FALSE)
 if (any(config_runs$peak_temp_bytes != 0)) stop("observations spilled", call. = FALSE)
 over_budget <- config_runs[config_runs$max_rss_kib / 1024 > config_runs$budget_mib, ]
 if (nrow(over_budget)) {
@@ -542,10 +619,16 @@ cell_of <- function(stage, dimension, scale, threads) {
   cell
 }
 largest_fraction <- max(summary$max_rss_mib / summary$budget_mib)
+# The cell with the most pairs: the 4x cell of the samples series.
+largest_cell <- cell_of("pairs_copy", "samples", 4L, 1L)
+largest_cell_pairs <- largest_cell$samples * (largest_cell$samples - 1) / 2
+size_note <- if (full_size) "" else
+  sprintf("**This is a reduced check run** (`SOMALIER_COHORT_SIZES=reduced`): its sizes are not the ones described above, and its observations are in `%s`.",
+          runs_path)
 unlink(staging, recursive = TRUE)
 ```
 
-Source revision: `r revision`; `src` tree `r src_tree`. DuckDB runtime: `r duckdb_runtime` (CLI). Extension SHA-256: `r strsplit(system2("sha256sum", extension, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`. CPU affinity: `r cpu_affinity`. Host load before the run: `r load_before`; after: `r load_after`. Empty-run overhead: `r round(overhead_mib[["1"]], 1)` MiB at one thread and `r round(overhead_mib[["4"]], 1)` MiB at four. Every observation is in [`benchmark_somalier_cohort_scaling_runs.csv`](benchmark_somalier_cohort_scaling_runs.csv).
+Source revision: `r revision`; `src` tree `r src_tree`. DuckDB runtime: `r duckdb_runtime` (CLI). Extension SHA-256: `r strsplit(system2("sha256sum", extension, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`. CPU affinity: `r cpu_affinity` (`r describe_affinity(cpu_affinity)`). Nice value: `r niceness`. Host load before the run: `r load_before`; after: `r load_after`. Empty-run overhead: `r round(overhead_mib[["1"]], 1)` MiB at one thread and `r round(overhead_mib[["4"]], 1)` MiB at four. Every observation is in [`benchmark_somalier_cohort_scaling_runs.csv`](benchmark_somalier_cohort_scaling_runs.csv). `r size_note`
 
 ## Inputs as measured
 
@@ -591,9 +674,9 @@ per-pair function over a self-join; its observations are in
 [`benchmark_somalier_cohort_scaling_runs_a5f3b47a.csv`](benchmark_somalier_cohort_scaling_runs_a5f3b47a.csv).
 `per_pair_function` and `all_pairs_macro` are the `pairs_scalar` and
 `pairs_reduce` stages of this revision. All three produce the same rows from
-the same sketches, with the same statement shape, host, CPU set and DuckDB
-CLI. The two runs were made at different times on a shared host, so the
-ratios carry that noise. Times are median seconds of three fresh processes.
+the same sketches, with the same statement shape, host and DuckDB CLI.
+`macro_speedup` is `before` divided by `all_pairs_macro`. Times are median
+seconds of three fresh processes.
 
 ```{r before-after, echo=FALSE}
 before_runs <- utils::read.csv("benchmarks/benchmark_somalier_cohort_scaling_runs_a5f3b47a.csv")
@@ -611,16 +694,171 @@ names(comparison) <- sub("^seconds$", "before", sub("^seconds_", "", names(compa
 comparison$macro_speedup <- comparison$before / comparison$all_pairs_macro
 comparison <- comparison[order(comparison$threads, comparison$sites, comparison$samples), ]
 rownames(comparison) <- NULL
-stopifnot(nrow(comparison) == 2L * sum(configs$source == "synthetic"))
-largest <- comparison[comparison$samples == 500L & comparison$sites == 17000L & comparison$threads == 1L, ]
+# Every synthetic cell of the full design has a5f3b47a observations; a reduced
+# run shares only some of its cells with them.
+stopifnot(if (full_size) nrow(comparison) == 2L * sum(configs$source == "synthetic") else nrow(comparison) > 0L)
+# The shared cell with the most pairs, on one thread.
+largest <- comparison[comparison$threads == 1L, ]
+largest <- largest[order(-largest$pairs, -largest$sites), ][1L, ]
+# The driver of the a5f3b47a run pinned it to CPUs 0-3.
+before_affinity <- "0-3"
+before_cores_note <- if (identical(before_affinity, cpu_affinity)) {
+  sprintf("The `a5f3b47a` run and this render both ran on CPUs %s (%s).", cpu_affinity,
+          describe_affinity(cpu_affinity))
+} else {
+  sprintf(paste("The driver of the `a5f3b47a` run pinned it to CPUs %s (%s). This render ran on CPUs %s (%s),",
+                "so `macro_speedup` also carries that change of core."),
+          before_affinity, describe_affinity(before_affinity), cpu_affinity, describe_affinity(cpu_affinity))
+}
 knitr::kable(comparison, digits = 3, format.args = list(big.mark = ","))
 ```
+
+`r before_cores_note` The two runs were made at different times on a shared
+host, so the ratios also carry that noise.
+
+## Change from the previous render
+
+```{r previous, echo=FALSE}
+# The previous render of this report, read from git: the same driver, inputs,
+# host and DuckDB CLI. Since then the all-pairs macro compares pairs on
+# DuckDB's threads. Its runs file has no affinity column, so the affinity,
+# load and runtime come from the header of the previous report.
+previous_commit <- "bba5b238"
+previous_runs_text <- system2("git", c("show", paste0(previous_commit,
+                                                      ":benchmarks/benchmark_somalier_cohort_scaling_runs.csv")),
+                              stdout = TRUE)
+previous_report <- system2("git", c("show", paste0(previous_commit, ":benchmarks/benchmark_somalier_cohort_scaling.md")),
+                           stdout = TRUE)
+stopifnot(is.null(attr(previous_runs_text, "status")), is.null(attr(previous_report, "status")))
+previous_header <- grep("^Source revision: ", previous_report, value = TRUE)
+stopifnot(length(previous_header) == 1L)
+header_field <- function(pattern) {
+  stopifnot(grepl(pattern, previous_header))
+  sub(paste0(".*", pattern, ".*"), "\\1", previous_header)
+}
+previous_revision <- substr(header_field("Source revision: ([0-9a-f]+);"), 1L, 8L)
+previous_affinity <- header_field("CPU affinity: ([0-9,-]+)\\.")
+previous_load_before <- header_field("Host load before the run: ([0-9., ]+); after")
+previous_load_after <- header_field("; after: ([0-9.]+, [0-9.]+, [0-9.]+)\\.")
+stopifnot(identical(header_field("DuckDB runtime: (.+) \\(CLI\\)"), duckdb_runtime))
+previous_niced <- any(grepl("^nice ", previous_report))
+
+# Median time and peak RSS of each cell. A runs file lists an observation once
+# for every series that contains its cell.
+cell_medians <- function(runs_data) {
+  observations <- unique(runs_data[c("stage", "samples", "sites", "threads", "repetition", "seconds", "max_rss_kib")])
+  observations$rss_mib <- observations$max_rss_kib / 1024
+  stats::aggregate(cbind(seconds, rss_mib) ~ stage + samples + sites + threads, observations, stats::median)
+}
+previous_change <- merge(cell_medians(utils::read.csv(text = previous_runs_text)), cell_medians(config_runs),
+                         by = c("stage", "samples", "sites", "threads"), suffixes = c("_before", "_after"))
+# The previous render measured every cell of the full design; a reduced run
+# shares only some of its cells with it.
+stopifnot(if (full_size) nrow(previous_change) == nrow(configs) * length(stages) * length(thread_counts)
+          else nrow(previous_change) > 0L)
+previous_change$time_ratio <- previous_change$seconds_after / previous_change$seconds_before
+previous_change$rss_ratio <- previous_change$rss_mib_after / previous_change$rss_mib_before
+
+# The sketches and pairs_scalar stages do the same work in both revisions, so
+# their time ratios measure the change of host conditions.
+changed_stages <- c("pairs_reduce", "pairs_copy")
+same_work <- previous_change[!previous_change$stage %in% changed_stages, ]
+same_work_ratio <- vapply(thread_counts, function(threads) {
+  stats::median(same_work$time_ratio[same_work$threads == threads])
+}, numeric(1L))
+names(same_work_ratio) <- thread_counts
+change_summary <- do.call(rbind, lapply(
+  split(previous_change, list(previous_change$stage, previous_change$threads), drop = TRUE), function(cell) {
+    threads <- cell$threads[[1L]]
+    data.frame(stage = cell$stage[[1L]], threads = threads,
+               code = if (cell$stage[[1L]] %in% changed_stages) "changed" else "same work",
+               median_time_ratio = stats::median(cell$time_ratio),
+               min_time_ratio = min(cell$time_ratio), max_time_ratio = max(cell$time_ratio),
+               vs_same_work = stats::median(cell$time_ratio) / same_work_ratio[[as.character(threads)]],
+               median_rss_ratio = stats::median(cell$rss_ratio), stringsAsFactors = FALSE)
+  }))
+change_summary$stage <- factor(change_summary$stage, levels = stages)
+change_summary <- change_summary[order(change_summary$stage, change_summary$threads), ]
+rownames(change_summary) <- NULL
+reduce_change <- previous_change[previous_change$stage == "pairs_reduce", setdiff(names(previous_change), "stage")]
+reduce_change <- reduce_change[order(reduce_change$threads, reduce_change$sites, reduce_change$samples), ]
+rownames(reduce_change) <- NULL
+change_of <- function(stage, samples, sites, threads) {
+  cell <- previous_change[previous_change$stage == stage & previous_change$samples == samples &
+                          previous_change$sites == sites & previous_change$threads == threads, ]
+  stopifnot(nrow(cell) == 1L)
+  cell
+}
+# The shared cell with the most pairs.
+shared_reduce <- reduce_change[reduce_change$threads == 1L, ]
+shared_reduce <- shared_reduce[order(-shared_reduce$samples, -shared_reduce$sites), ][1L, ]
+largest_reduce_1 <- change_of("pairs_reduce", shared_reduce$samples, shared_reduce$sites, 1L)
+largest_reduce_4 <- change_of("pairs_reduce", shared_reduce$samples, shared_reduce$sites, 4L)
+same_cores <- identical(previous_affinity, cpu_affinity)
+affinity_note <- if (same_cores) {
+  sprintf("Both renders ran on CPUs %s (%s).", cpu_affinity, describe_affinity(cpu_affinity))
+} else {
+  sprintf(paste("The CPU affinity differs. The previous render ran on CPUs %s (%s), and this render on",
+                "CPUs %s (%s). The kinds of core can run at different speeds, so a time ratio alone",
+                "does not measure the change."),
+          previous_affinity, describe_affinity(previous_affinity), cpu_affinity, describe_affinity(cpu_affinity))
+}
+nice_note <- if (previous_niced) "" else
+  sprintf("The previous render command sets no nice value; this render ran at nice value %s.", niceness)
+host_change <- if (same_cores) "load and nice value" else "cores, load and nice value"
+```
+
+The previous render, of revision `r previous_revision` (commit
+`r previous_commit`), measured the same cells with the same driver, inputs and
+DuckDB CLI on the same host. The measured statements and the process driver
+did not change. This render changes the budget terms of the macro stages, the
+recorded host fields and the report text. Host load differs: the previous run
+recorded
+`r previous_load_before` before and `r previous_load_after` after, against the
+loads recorded above. `r affinity_note` `r nice_note`
+
+The `sketches` and `pairs_scalar` stages do the same work in both revisions.
+Their median time ratio, this render over the previous one, is
+`r round(same_work_ratio[["1"]], 2)` at one thread and
+`r round(same_work_ratio[["4"]], 2)` at four: that is the change of
+`r host_change`. `vs_same_work` divides a stage's median time ratio by that
+value. Peak RSS does not depend on host load or on the kind of core. Each ratio compares the
+medians of three fresh processes in one cell; the summary gives the median,
+minimum and maximum over the cells of a stage:
+
+```{r previous-summary, echo=FALSE}
+knitr::kable(change_summary, digits = 3)
+```
+
+`pairs_reduce`, cell by cell:
+
+```{r previous-reduce, echo=FALSE}
+knitr::kable(reduce_change, digits = 3, format.args = list(big.mark = ","))
+```
+
+On the largest shared cell, `r shared_reduce$samples` samples of
+`r format(shared_reduce$sites, big.mark = ",")` sites, `pairs_reduce` went from
+`r round(largest_reduce_1$rss_mib_before, 1)` to `r round(largest_reduce_1$rss_mib_after, 1)` MiB
+peak RSS on one thread and from `r round(largest_reduce_4$rss_mib_before, 1)` to
+`r round(largest_reduce_4$rss_mib_after, 1)` MiB on four. Its time went from
+`r round(largest_reduce_1$seconds_before, 2)` to `r round(largest_reduce_1$seconds_after, 2)` s on one
+thread and from `r round(largest_reduce_4$seconds_before, 2)` to
+`r round(largest_reduce_4$seconds_after, 2)` s on four.
 
 ## Time exponents and memory ratios
 
 Time exponents per doubling, against the work of each stage, and peak-RSS ratios to 1×:
 
 ```{r exponents, echo=FALSE}
+flagged <- exponents[exponents$exponent_above_1.25, ]
+flagged_text <- if (nrow(flagged)) {
+  paste0(": ", paste(sprintf("%s along %s at %d thread%s (%.2f, then %.2f)", flagged$stage, flagged$dimension,
+                             flagged$threads, ifelse(flagged$threads == 1L, "", "s"),
+                             flagged$time_exponent_2x, flagged$time_exponent_4x), collapse = "; "),
+         if (all(flagged$timing_verdict == "none: 1x under 5 s")) ". None of them has a timing verdict" else "")
+} else {
+  ""
+}
 knitr::kable(exponents[setdiff(names(exponents), "one_thread_1x_seconds")], digits = 3)
 ```
 
@@ -630,7 +868,8 @@ Every observation is within its declared budget and none spills; the render
 enforces both. The largest observation uses
 `r round(100 * largest_fraction)`% of its ceiling.
 
-The largest all-pairs cell (500 samples, 17,000 sites, 124,750 pairs) takes
+The largest all-pairs cell (`r format(largest_cell$samples, big.mark = ",")` samples,
+`r format(largest_cell$sites, big.mark = ",")` sites, `r format(largest_cell_pairs, big.mark = ",")` pairs) takes
 `r round(cell_of("pairs_copy", "samples", 4L, 1L)$median_seconds, 2)` s on one thread and
 `r round(cell_of("pairs_copy", "samples", 4L, 4L)$median_seconds, 2)` s on four when written to Parquet, at
 `r cell_of("pairs_copy", "samples", 4L, 1L)$median_rss_mib` and
@@ -643,23 +882,27 @@ On the real counts, one thread builds three sketches of 108,757 sites in
 `r round(cell_of("pairs_copy", "real", 1L, 1L)$median_seconds, 3)` s at
 `r cell_of("pairs_copy", "real", 1L, 1L)$median_rss_mib` MiB.
 
-For 124,750 pairs of 17,000 sites on one thread, the per-pair function took
-`r round(largest$before, 2)` s at revision `a5f3b47a` and takes
-`r round(largest$per_pair_function, 2)` s now; the all-pairs macro takes
-`r round(largest$all_pairs_macro, 2)` s, `r round(largest$macro_speedup, 1)` times faster than before.
-The pair stages still grow with pairs times sites, which is the size of the
-comparison itself. They do not use more than one thread:
+For `r format(largest$pairs, big.mark = ",")` pairs of `r format(largest$sites, big.mark = ",")`
+sites on one thread, the per-pair function takes
+`r round(largest$per_pair_function, 2)` s and the all-pairs macro
+`r round(largest$all_pairs_macro, 2)` s, `r round(largest$per_pair_function / largest$all_pairs_macro, 1)`
+times faster on the same cores. At revision `a5f3b47a`, on CPUs 0-3, the
+per-pair function took `r round(largest$before, 2)` s. The pair stages still
+grow with pairs times sites, which is the size of the comparison itself.
+
+In `pairs_reduce`, the macro compares pairs on DuckDB's threads: the largest cell takes
 `r round(cell_of("pairs_reduce", "samples", 4L, 1L)$median_seconds, 2)` s on one thread and
-`r round(cell_of("pairs_reduce", "samples", 4L, 4L)$median_seconds, 2)` s on four. DuckDB splits a
-scan by row groups, and a relation of a few hundred sketches is one row group.
+`r round(cell_of("pairs_reduce", "samples", 4L, 4L)$median_seconds, 2)` s on four,
+`r round(cell_of("pairs_reduce", "samples", 4L, 1L)$median_seconds / cell_of("pairs_reduce", "samples", 4L, 4L)$median_seconds, 1)`
+times faster. In `pairs_copy`, written to Parquet, it does not: `COPY` keeps
+insertion order by default, and the relations that feed the pairs give DuckDB
+no batch index, so the copy runs as one task. The macro guarantees no row order. DuckDB's Parquet
+writer runs in parallel when insertion order is not kept
+(`SET preserve_insertion_order = false`); this report does not measure that
+setting.
 
 `r sum(exponents$timing_verdict == "none: 1x under 5 s")` of the `r nrow(exponents)` series have a one-thread 1× run under 5 seconds and get a memory verdict only.
-`r sum(exponents$exponent_above_1.25)` series have a time exponent above 1.25 at either doubling.
-The pair stages along sites exceed 1.25 at the second doubling, from 34,000 to
-68,000 sites. The cause is not established. One candidate, not tested, is that
-250 sketches of 68,000 sites no longer fit the CPU cache. Flags on the
-`sketches` stage follow the host load: the minimum times of that stage scale
-linearly in the tables above.
+`r sum(exponents$exponent_above_1.25)` series have a time exponent above 1.25 at either doubling`r flagged_text`.
 
 ## Limitations
 
@@ -672,8 +915,12 @@ linearly in the tables above.
   samples, 68,000 synthetic sites, 108,757 real sites and 124,750 pairs.
 - Evidence is ordered by sample. Evidence that interleaves samples is not
   measured.
-- The pair comparison runs in one thread, and the number of output pairs is
-  not capped.
+- The macro compares pairs on up to 32 threads. This report measures one and
+  four threads, on the cores named above. `COPY` to Parquet with the default
+  insertion order compares the pairs in one task.
+- `max_pairs` caps the output at 50,000,000 pairs by default, 400 times the
+  largest cell here. Cells between 124,750 pairs and the cap are not
+  measured.
 - Count extraction, sketch verification, CHARR, matched contamination, the R
   wrappers and the reader `*_convert_parquet_sql` COPY statements are not
   measured here.

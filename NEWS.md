@@ -1,8 +1,61 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.2.9014
+# duckhts 1.5.2.9015
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
+
+- The genome-wide drivers of the ROH ancestry evaluation are back in
+  `benchmarks/roh_ancestry/`, with the fixes that review asked for in
+  https://github.com/RGenomicsETL/duckhts/issues/329. `truth_genome.R` counts
+  the called genotypes of each 100 kb window and uses the chr20 rule, so a
+  window without one breaks a run: on chr21 and chr22 the withdrawn truth gave
+  every child a run over the short arm, 762 and 761 intervals, and the fixed
+  truth has 7 on each. `q_genome.R` and `truth_genome.R` reuse a cached batch
+  or window table only when its marker records the same SHA-256 for every
+  input, the extension and the driver. The per-chromosome long references and
+  AF sites are `r/duckhtsbench` artifacts, staged by
+  `duckhts_bench_stage_roh_ancestry_references()` with a network-free test.
+  No callable-base mask is registered, so FROH is reported as
+  `froh_assembly`, a fraction of the whole GRCh38 autosome length.
+  `run_autosome_arm.R` decodes one chromosome per query with the shipped
+  macros, and every arm decodes chr20 itself instead of reading the chr20
+  evaluation's outputs. `ROH_GENOME_CHROMOSOMES` limits a smoke run to some
+  autosomes; a run on chr20 alone reproduces the chr20 evaluation's segments,
+  child metrics and criterion exactly. The genome-wide evaluation itself has
+  not been rerun, so no genome-wide result is reported.
+
+- The `*_convert_parquet_sql` builders store the header in the Parquet
+  metadata (`vcf_header`, `sam_header`, `gff_header`) with its line breaks.
+  `duckhts_raw_header_text()` joined the header lines with the SQL literal
+  `'\n'`, which DuckDB keeps as a backslash and an n, so the stored header
+  was one line.
+
+- Added `duckhts_bam_mate_overlap_counts()`: read 1 and read 2 of one fragment
+  compared at each reference position where both mates have an aligned base,
+  counted by the two base qualities and the two bases. A real allele shows in
+  both mates and a sequencing error usually in one, so the disagreement rate
+  is about twice the instrument error rate, with no reference, mask or
+  contamination model. The scan is one pass over a coordinate-sorted file; the
+  first mate of a pair is held until its mate arrives, at most `max_pending`
+  at once, and the counters are fixed. Held names use the qname table of the
+  BAM site counts, which now exports its steps for this. SQL tests check
+  hand-derived counts and an independent count in SQL from `read_bam()` and
+  `cigar_aligned_blocks()`. This is counting model 3 of
+  https://github.com/RGenomicsETL/duckhts/issues/332.
+
+- `duckhts_somalier_relatedness_all_pairs()` compares pairs on DuckDB's
+  threads and caps its output. The checked sketches form one list in
+  `sample_id` order, and the pairs are numbered so that a run of numbers is a
+  block of pairs. DuckDB scans at most 65,536 blocks in chunks of 2,048, one
+  chunk per task, so up to 32 threads compare pairs. Each thread copies the
+  sketch list once per chunk of blocks and reads both sketches of a pair in
+  place from that copy, so its workspace grows with samples times sites and
+  not with pairs. The rows do not change with the thread count.
+  `benchmarks/benchmark_somalier_cohort_scaling.md` measures time and memory.
+  The new `max_pairs` argument (default 50,000,000) makes a relation with
+  more pairs an error before any pair is compared; it must be a positive,
+  finite whole number. Open items of the SQL scaling audit,
+  https://github.com/RGenomicsETL/duckhts/issues/298.
 
 - `duckhts_count_error_fit()` evaluates the beta-binomial through sums of
   `log1p` terms instead of differences of `lgamma` values. Near the binomial

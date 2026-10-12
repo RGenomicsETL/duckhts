@@ -47,8 +47,9 @@ typedef struct duckhts_bam_site_counts {
     uint32_t other;
 } duckhts_bam_site_counts_t;
 
-/* Slots borrow qname storage from pileup records. The caller owns the hash
- * table and keeps every input bam1_t alive until reduction returns. */
+/* Slots borrow qname storage from the caller: from pileup records during one
+ * duckhts_bam_site_count_pileup call, or from the caller's own entries when it
+ * uses the table directly. The caller owns the hash table. */
 typedef struct duckhts_bam_site_overlap_slot {
     const char *qname;
     uint64_t qname_hash;
@@ -67,6 +68,30 @@ typedef struct duckhts_bam_site_overlap_scratch {
  * qnames, or zero when 2 * max_entries + 1 overflows size_t. */
 int duckhts_bam_site_overlap_slot_capacity(size_t max_entries,
                                            size_t *slot_capacity);
+
+/* The qname table on its own, for callers that track mates across records.
+ * The caller counts live entries and inserts no more than max_entries.
+ *
+ * begin empties the table in O(1) by moving to the next generation; it fails
+ * when the slot table is smaller than slot_capacity(max_entries). find stores
+ * the slot of a live qname in found_slot and returns 1, or returns 0. insert
+ * returns 0 only when the table is full or qname_len exceeds UINT32_MAX.
+ * remove frees a slot that find returned; it moves other live slots, so a
+ * slot index is valid only until the next insert or remove. Every inserted
+ * qname stays borrowed until it is removed or the table is begun again. */
+uint64_t duckhts_bam_site_qname_hash(const char *qname, size_t qname_len);
+int duckhts_bam_site_overlap_begin(duckhts_bam_site_overlap_scratch_t *scratch);
+int duckhts_bam_site_overlap_find(const duckhts_bam_site_overlap_scratch_t *scratch,
+                                  const char *qname,
+                                  size_t qname_len,
+                                  uint64_t hash,
+                                  size_t *found_slot);
+int duckhts_bam_site_overlap_insert(duckhts_bam_site_overlap_scratch_t *scratch,
+                                    const char *qname,
+                                    size_t qname_len,
+                                    uint64_t hash);
+void duckhts_bam_site_overlap_remove(duckhts_bam_site_overlap_scratch_t *scratch,
+                                     size_t removed_slot);
 
 /* MAPQ and general SAM-flag filtering belong to the reader adapter. This
  * kernel skips deletion/refskip entries, applies base quality, uppercases the

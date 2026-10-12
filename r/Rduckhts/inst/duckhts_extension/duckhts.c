@@ -99,6 +99,8 @@ extern void register_duckhts_mosdepth_function(duckdb_connection connection);
 /* bam_bin_counts.c */
 extern void register_bam_bin_counts_function(duckdb_connection connection);
 extern void register_duckhts_bam_mismatch_counts_function(duckdb_connection connection);
+/* bam_mate_overlap_counts.c */
+extern void register_duckhts_bam_mate_overlap_counts_function(duckdb_connection connection);
 /* samtools_idxstats_table.c */
 extern void register_duckhts_samtools_idxstats_function(duckdb_connection connection);
 /* bam_bed_coverage.c */
@@ -273,6 +275,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_duckhts_mosdepth_function(connection);
     register_bam_bin_counts_function(connection);
     register_duckhts_bam_mismatch_counts_function(connection);
+    register_duckhts_bam_mate_overlap_counts_function(connection);
     register_duckhts_samtools_idxstats_function(connection);
     register_duckhts_bam_bed_coverage_function(connection);
     if (!register_variantkey_functions(connection)) {
@@ -441,15 +444,32 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         return false;
     }
     /* All unordered sample pairs of one sketch relation. Each sketch passes
-     * the content check once, in a materialized relation; the pair function
-     * then compares checked sketches without repeating that check, so the
-     * content checks grow with samples and not with pairs. */
+     * the content check once; the checked sketches form one list in sample_id
+     * order, and the pair function compares two of them by pair index without
+     * repeating that check, so the content checks grow with samples and not
+     * with pairs. The pair indexes are split into at most
+     * DUCKHTS_SOMALIER_PAIR_BLOCKS runs of consecutive indexes. DuckDB scans
+     * the materialized block relation in tasks of 2,048 rows, so the blocks
+     * of one query run on up to 32 threads. The blocks come from a range of
+     * that constant size, so the optimizer estimates them as many rows and
+     * keeps the one-row sketch list on the build side of the cross product.
+     * The cross product reads that list again, as a copy, for each chunk of
+     * rows it receives. It therefore joins the block rows, and the pair
+     * indexes of each block are unnested above it, so the list is copied once
+     * per chunk of up to 2,048 blocks and not once per 2,048 pairs; the
+     * unnest passes the list on as a reference. The pair indexes stream and
+     * are never collected. */
+#define DUCKHTS_SOMALIER_PAIR_BLOCKS "65536"
     if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckhts_somalier_relatedness_all_pairs("
-        "sketches_table, max_sites := 1000000) AS TABLE "
-        "WITH __dht_checked AS MATERIALIZED (SELECT sketch FROM query_table(sketches_table) "
-        "WHERE __duckhts_somalier_sketch_valid(sketch, CAST(max_sites AS UBIGINT))), "
-        "__dht_guard AS MATERIALIZED (SELECT CASE "
+        "sketches_table, max_sites := 1000000, max_pairs := 50000000) AS TABLE "
+        "WITH __dht_cohort AS MATERIALIZED (SELECT CASE "
+        /* A NaN passes both comparisons below: DuckDB orders NaN above every
+         * number and as equal to itself. */
+        "WHEN max_pairs IS NULL OR NOT isfinite(max_pairs) OR max_pairs < 1 "
+        "OR max_pairs != trunc(max_pairs) THEN "
+        "error('duckhts_somalier_relatedness_all_pairs: max_pairs must be a positive "
+        "whole number') "
         "WHEN count(*) != count(DISTINCT sketch.sample_id) THEN "
         "error('duckhts_somalier_relatedness_all_pairs: sketches must have one sketch "
         "per distinct sample') "
@@ -461,13 +481,28 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "hom_balance_cutoff := sketch.hom_balance_cutoff)) > 1 THEN "
         "error('duckhts_somalier_relatedness_all_pairs: sketches must share one assembly, "
         "panel digest, site count and classification settings') "
-        "ELSE true END AS valid FROM __dht_checked) "
-        "SELECT unnest(__duckhts_somalier_relatedness_checked(a.sketch, b.sketch, "
-        "CAST(max_sites AS UBIGINT))) "
-        "FROM __dht_guard AS g JOIN __dht_checked AS a ON g.valid "
-        "JOIN __dht_checked AS b ON a.sketch.sample_id < b.sketch.sample_id")) {
+        /* The cap is checked before the first pair is compared. */
+        "WHEN CAST(count(*) AS HUGEINT) * (count(*) - 1) // 2 > max_pairs THEN "
+        "error('duckhts_somalier_relatedness_all_pairs: the sketches have more pairs "
+        "than max_pairs') "
+        "ELSE CAST(count(*) AS BIGINT) * (count(*) - 1) // 2 END AS pairs, "
+        "list(sketch ORDER BY sketch.sample_id) AS sketches "
+        "FROM query_table(sketches_table) "
+        "WHERE __duckhts_somalier_sketch_valid(sketch, CAST(max_sites AS UBIGINT))), "
+        "__dht_width AS MATERIALIZED (SELECT pairs, "
+        "greatest(1, (pairs + " DUCKHTS_SOMALIER_PAIR_BLOCKS " - 1) // "
+        DUCKHTS_SOMALIER_PAIR_BLOCKS ") AS block_width FROM __dht_cohort), "
+        "__dht_blocks AS MATERIALIZED (SELECT t.block * w.block_width AS first_pair, "
+        "least((t.block + 1) * w.block_width, w.pairs) AS end_pair "
+        "FROM range(" DUCKHTS_SOMALIER_PAIR_BLOCKS ") AS t(block), __dht_width AS w "
+        "WHERE t.block * w.block_width < w.pairs) "
+        "SELECT unnest(__duckhts_somalier_relatedness_cohort_pair(p.sketches, "
+        "CAST(p.pair_index AS UBIGINT), CAST(max_sites AS UBIGINT))) "
+        "FROM (SELECT c.sketches, unnest(range(b.first_pair, b.end_pair)) AS pair_index "
+        "FROM __dht_blocks AS b, __dht_cohort AS c) AS p")) {
         return false;
     }
+#undef DUCKHTS_SOMALIER_PAIR_BLOCKS
     if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckhts_somalier_frequency_sha256("
         "frequency_table, panel_table) AS ("
@@ -791,7 +826,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     }
     if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckhts_raw_header_text(path, format_hint) AS ("
-        "(SELECT coalesce(string_agg(raw, '\\n' ORDER BY idx), '') "
+        "(SELECT coalesce(string_agg(raw, chr(10) ORDER BY idx), '') "
         "FROM read_hts_header(path, format := format_hint, mode := 'raw')))")) {
         return false;
     }

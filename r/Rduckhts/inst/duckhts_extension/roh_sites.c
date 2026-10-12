@@ -20,6 +20,11 @@
  * The sort is stable: sites of one position keep their arrival order, so the
  * first record of a repeated position stays first, as bcftools sees the file.
  *
+ * DuckDB 1.5.1 to 1.5.6 does not destroy the states of this aggregate when a
+ * query fails while it is filling with 5 or more threads
+ * (https://github.com/duckdb/duckdb/issues/26871). The buffers of those states
+ * leak and stay charged against max_site_bytes until the process ends.
+ *
  * Never call this aggregate with ORDER BY: DuckDB's ordered-aggregate wrapper
  * does not initialise the states of a C API aggregate
  * (https://github.com/duckdb/duckdb/issues/26109). The sort here makes it

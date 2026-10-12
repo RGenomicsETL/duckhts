@@ -1322,7 +1322,7 @@ hw_to_az and az_to_hw are the per-base-pair transition probabilities (bcftools -
 
 ### Memory
 
-DuckDB manages, and can spill, the scan and the joins. The sites of each sample and chromosome are held in native buffers of 16 bytes per site until that sample and chromosome is decoded, so memory follows samples times sites. max_sites caps one sample and chromosome (default 20,000,000; at most 100,000,000). max_site_bytes (default 4 GiB) bounds the buffers held at once: a decode does not grow a buffer when the bytes held by all ROH decodes in the process would pass its own max_site_bytes. Decodes that run at the same time with different values each apply their own, so the process total can pass the smaller value while the decode with the larger value allocates. Exceeding either limit is an error: decode fewer samples per query with samples, or raise the limit. Decoding one sample and chromosome also needs approximately 36.25 bytes per site of workspace in each thread: 4 bytes for position, 16 for emissions, 16 for forward/posterior probabilities and two traceback bits. For capacity n, these arrays use 36*n + ceil(n/4) + 16 bytes, excluding fixed tables and output segments. Model parameters and limits are checked even when the input has no record.
+DuckDB manages, and can spill, the scan and the joins. The sites of each sample and chromosome are held in native buffers of 16 bytes per site until that sample and chromosome is decoded, so memory follows samples times sites. max_sites caps one sample and chromosome (default 20,000,000; at most 100,000,000). max_site_bytes (default 4 GiB) bounds the buffers held at once: a decode does not grow a buffer when the bytes held by all ROH decodes in the process would pass its own max_site_bytes. Decodes that run at the same time with different values each apply their own, so the process total can pass the smaller value while the decode with the larger value allocates. Exceeding either limit is an error: decode fewer samples per query with samples, or raise the limit. When a query fails while the sites are being collected with 5 or more threads, DuckDB 1.5.x does not destroy the collecting states (https://github.com/duckdb/duckdb/issues/26871); their buffers stay charged against max_site_bytes until the process ends. Decoding one sample and chromosome also needs approximately 36.25 bytes per site of workspace in each thread: 4 bytes for position, 16 for emissions, 16 for forward/posterior probabilities and two traceback bits. For capacity n, these arrays use 36*n + ceil(n/4) + 16 bytes, excluding fixed tables and output segments. Model parameters and limits are checked even when the input has no record.
 
 ### Limits
 
@@ -1528,7 +1528,7 @@ seq_error is the chance that a read shows the other allele at a homozygous site.
 
 ### Limits
 
-Memory: DuckDB builds the histogram and can spill it; the native buffer of a sample holds 16 bytes per cell, at most max_cells cells. max_cell_bytes bounds the native histogram memory of the process at once, each limit with an explicit error: the buffers of the aggregate (16 bytes per cell, up to three times that while a buffer grows) and the working memory of the running fits (24 bytes per cell, 88 bytes per distinct (depth, alt count) pair and 24 bytes per depth up to the deepest). The BLOB that carries a sample's cells from the aggregate to its fit is DuckDB's memory, under its memory_limit. When a query fails while the histogram is being built, DuckDB (1.5.1) does not destroy every state of the parallel aggregate; the buffers of the states it keeps stay charged against max_cell_bytes until the process ends. A sample has at most 65,536 blocks and 1,024 frequency bins. Depth is capped by max_depth, which bounds the cells; deeper sites are left out. One fit runs on one thread; the fits of a query's samples run in the threads that hold their rows, so more threads fit more samples at once (the report measures the gain at four threads).
+Memory: DuckDB builds the histogram and can spill it; the native buffer of a sample holds 16 bytes per cell, at most max_cells cells. max_cell_bytes bounds the native histogram memory of the process at once, each limit with an explicit error: the buffers of the aggregate (16 bytes per cell, up to three times that while a buffer grows) and the working memory of the running fits (24 bytes per cell, 88 bytes per distinct (depth, alt count) pair and 24 bytes per depth up to the deepest). The BLOB that carries a sample's cells from the aggregate to its fit is DuckDB's memory, under its memory_limit. When a query fails while the histogram is being built with 5 or more threads, DuckDB 1.5.x does not destroy the states of the parallel aggregate (https://github.com/duckdb/duckdb/issues/26871); their buffers stay charged against max_cell_bytes until the process ends. A sample has at most 65,536 blocks and 1,024 frequency bins. Depth is capped by max_depth, which bounds the cells; deeper sites are left out. One fit runs on one thread; the fits of a query's samples run in the threads that hold their rows, so more threads fit more samples at once (the report measures the gain at four threads).
 
 ### Examples
 
@@ -1715,7 +1715,7 @@ Compute Somalier-derived relatedness and concordance statistics for every unorde
 Signature:
 
 ```sql
-duckhts_somalier_relatedness_all_pairs(sketches_table, max_sites := 1000000)
+duckhts_somalier_relatedness_all_pairs(sketches_table, max_sites := 1000000, max_pairs := 50000000)
 ```
 
 Returns:
@@ -1734,7 +1734,11 @@ One row per unordered pair with sample_a < sample_b, with the fields of duckhts_
 
 ### Execution
 
-Each sketch is content-checked once and the pairs are compared from the checked sketches, so the content checks grow with the number of samples and the comparisons with pairs times sites. The output has N(N-1)/2 rows for N samples and is not capped. The pair comparison runs in one thread.
+Each sketch is content-checked once and the pairs are compared from the checked sketches, so the content checks grow with the number of samples and the comparisons with pairs times sites. The pair indexes are split into at most 65,536 blocks of consecutive indexes. DuckDB scans the blocks in chunks of up to 2,048, one chunk per task, so at most 32 of its threads compare pairs. The rows do not depend on the thread count.
+
+### Limits
+
+The output has N(N-1)/2 rows for N samples. max_pairs must be a positive, finite whole number; a relation with more pairs than max_pairs is an error before any pair is compared. The default, 50,000,000, is 400 times the pairs of 500 samples. Memory model for N sketches of S sites, each with three masks of ceil(S/64) 64-bit words: the checked sketches form one list in sample_id order, which the query holds in a few shared copies. Each thread copies the list once for each chunk of blocks it scans and reads both sketches of every pair of that chunk in place from its copy. The workspace of a thread is therefore one copy of the list plus fixed 2,048-row vectors of pair indexes and results: it grows with N times S, not with the pairs, and the pair indexes are never collected. See benchmarks/benchmark_somalier_cohort_scaling.md for measured time and memory.
 
 ### Examples
 
@@ -2292,6 +2296,44 @@ One worker. Memory does not grow with the alignments read: 36.5 MB of counters, 
 
 ```sql
 SELECT base_quality, sum(bases) FILTER (WHERE reference_base != read_base) / sum(bases) AS mismatch_rate FROM duckhts_bam_mismatch_counts('sample.bam', 'reference.fa', region := 'chr20:10000000-12000000', mask := 'known_variants.vcf.gz') GROUP BY base_quality ORDER BY base_quality;
+```
+
+## duckhts_bam_mate_overlap_counts
+
+Count where read 1 and read 2 of one fragment agree and disagree at the positions both align to, by base quality and base, as an estimate of sequencing error.
+
+Signature:
+
+```sql
+duckhts_bam_mate_overlap_counts(path, region := NULL, index_path := NULL, reference := NULL, reference_index_path := NULL, min_mapq := 20, require_flags := 0, exclude_flags := 3844, max_pending := 1000000)
+```
+
+Returns:
+
+```
+table
+```
+
+### Input
+
+path is a paired-end SAM, BAM or CRAM file in coordinate order; alignments out of order are an error. region is a comma-separated list of contigs or intervals and needs an alignment index; without it the whole file is read. reference is an indexed FASTA; fasta_index() builds the index. It is required for CRAM. Its only other use is to resolve a read base stored as '='; without a reference such a base is left out. Alignments are kept when MAPQ is at least min_mapq, every bit of require_flags is set and no bit of exclude_flags is set; the default 3844 leaves out unmapped, secondary, failed, duplicate and supplementary alignments.
+
+### Output
+
+One row for each combination that occurs: read1_quality and read2_quality (the base qualities, NULL when the read stores no qualities), read1_base and read2_base (both on the forward strand of the reference, so a real allele gives equal bases), and positions, the number of shared positions. Read 1 is the mate with flag 0x40 and read 2 the mate with flag 0x80, whichever comes first. Rows with read1_base different from read2_base are the disagreements, so a rate is a ratio of two sums. Rows come in the order of read1_quality, read2_quality, read1_base, read2_base, with a missing quality last.
+
+### What is counted
+
+Each reference position where both mates of a pair have an aligned base (CIGAR M, = or X), once per pair. Both mates are kept primary alignments on the same contig, the pair flag (0x1) is set and the mate-unmapped flag (0x8) is not, each names the other's start, and one is read 1 and the other read 2. Soft-clipped and inserted bases are not counted, nor are deleted or skipped (CIGAR N) positions, and a position where either base is not A, C, G or T is left out. A real allele sits on the molecule and both mates show it; a sequencing error usually shows in one mate only. So the disagreement rate is about twice the instrument error rate, with no reference, mask or contamination model. Errors made before sequencing, in the library, by PCR or by DNA damage, show in both mates and are not seen. Only fragments shorter than the two reads overlap, so the count leans toward short fragments and read ends. A region selects alignments by overlap, and a pair counts only when both of its mates are selected.
+
+### Limits
+
+One worker. The counters are fixed at 1.2 MB, and a base quality above 93 is counted as 93. The first mate of a pair is held until its mate arrives, with its name, CIGAR, sequence and qualities: about 400 bytes plus 1.5 bytes per read base and 4 bytes per CIGAR operation. A held mate whose mate start the scan has passed without a match is dropped, and a change of contig drops every held mate. Mates are matched by read name. A record that has the name of a held mate but does not pair with it is left out, and the held mate stays held for its own mate. SAM gives one name to one template, so such a record occurs only in a malformed file. More than max_pending (1 to 100,000,000) mates held at once is an error that names the limit. Held entries are reused but kept until the scan ends, so held memory is at most max_pending times the size of the longest alignment held, and in practice follows the most mates held at once.
+
+### Examples
+
+```sql
+SELECT read1_quality, sum(positions) FILTER (WHERE read1_base != read2_base) / sum(positions) AS discordance FROM duckhts_bam_mate_overlap_counts('sample.bam', region := 'chr20:10000000-12000000') GROUP BY read1_quality ORDER BY read1_quality;
 ```
 
 ## duckhts_bam_bed_coverage

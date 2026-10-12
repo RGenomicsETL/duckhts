@@ -881,17 +881,97 @@ static void pair_write_double(duckdb_vector vector, idx_t row, double value) {
     ((double *)duckdb_vector_get_data(vector))[row] = value;
 }
 
-/* Whether a pair scalar checks the content of each sketch it reads. */
-static const bool pair_checks_content = true;
-static const bool pair_trusts_content = false;
+/* The result columns of a pair scalar. The floating columns are NULL for a
+ * pair without evidence, so their validity is made writable. */
+static void pair_result_fields(duckdb_vector output,
+                               duckdb_vector result_fields[PAIR_FIELD_COUNT]) {
+    for (unsigned i = 0u; i < PAIR_FIELD_COUNT; i++) {
+        result_fields[i] = duckdb_struct_vector_get_child(output, i);
+    }
+    for (unsigned i = PAIR_RELATEDNESS; i < PAIR_FIELD_COUNT; i++) {
+        duckdb_vector_ensure_validity_writable(result_fields[i]);
+    }
+}
 
-/* duckhts_somalier_relatedness checks the content of both sketches for every
- * pair. __duckhts_somalier_relatedness_checked does not: the all-pairs macro
- * passes every sketch through __duckhts_somalier_sketch_valid once and then
- * compares each one with many others. */
+/* Compares two read sketches and writes result row `row`. On an identity or
+ * mask error it sets the scalar error and returns false. */
+static bool pair_write_row(duckdb_function_info info,
+                           duckdb_vector result_fields[PAIR_FIELD_COUNT], idx_t row,
+                           const somalier_sql_sketch_t *a, const somalier_sql_sketch_t *b) {
+    duckhts_somalier_pair_stats_t stats;
+    duckhts_somalier_status_t status;
+    bool no_evidence;
+
+    if (string_equal(a->sample_id, b->sample_id)) {
+        duckdb_scalar_function_set_error(info,
+            "duckhts_somalier_relatedness: sample identities must differ");
+        return false;
+    }
+    if (!string_equal(a->assembly, b->assembly)) {
+        duckdb_scalar_function_set_error(info,
+            "duckhts_somalier_relatedness: assembly identity mismatch");
+        return false;
+    }
+    status = duckhts_somalier_pair_stats_validated(&a->masks, &b->masks, &stats);
+    if (status != DUCKHTS_SOMALIER_OK) {
+        duckdb_scalar_function_set_error(info,
+            status == DUCKHTS_SOMALIER_IDENTITY_MISMATCH
+                ? "duckhts_somalier_relatedness: ordered panel or classification settings mismatch"
+                : "duckhts_somalier_relatedness: invalid paired masks");
+        return false;
+    }
+    no_evidence = stats.jointly_called == 0u;
+    pair_write_string(result_fields[PAIR_SAMPLE_A], row, a->sample_id);
+    pair_write_string(result_fields[PAIR_SAMPLE_B], row, b->sample_id);
+    pair_write_string(result_fields[PAIR_ASSEMBLY], row, a->assembly);
+    pair_write_string(result_fields[PAIR_PANEL_SHA256], row, a->panel_sha256);
+    duckdb_vector_assign_string_element(result_fields[PAIR_METHOD_VERSION], row,
+        SOMALIER_METHOD_VERSION);
+    duckdb_vector_assign_string_element(result_fields[PAIR_STATUS], row,
+        no_evidence ? "no_evidence" : "ok");
+    pair_write_u64(result_fields[PAIR_SITE_COUNT], row, a->masks.site_count);
+    pair_write_u64(result_fields[PAIR_JOINTLY_CALLED], row, stats.jointly_called);
+    pair_write_u64(result_fields[PAIR_IBS0], row, stats.ibs0);
+    pair_write_u64(result_fields[PAIR_IBS2], row, stats.ibs2);
+    pair_write_u64(result_fields[PAIR_SHARED_HETS], row, stats.shared_hets);
+    pair_write_u64(result_fields[PAIR_HET_AB], row, stats.het_ab);
+    pair_write_u64(result_fields[PAIR_SHARED_HOM_B], row, stats.shared_hom_b);
+    pair_write_u64(result_fields[PAIR_HET_COUNT_A], row, stats.het_count_a);
+    pair_write_u64(result_fields[PAIR_HET_COUNT_B], row, stats.het_count_b);
+    pair_write_u64(result_fields[PAIR_HOM_B_COUNT_A], row, stats.hom_b_count_a);
+    pair_write_u64(result_fields[PAIR_HOM_B_COUNT_B], row, stats.hom_b_count_b);
+    pair_write_u64(result_fields[PAIR_CALLABLE_HOM_COUNT_A], row, stats.callable_hom_count_a);
+    pair_write_u64(result_fields[PAIR_CALLABLE_HOM_COUNT_B], row, stats.callable_hom_count_b);
+    pair_write_u64(result_fields[PAIR_MATCHING_HOM_COUNT], row, stats.matching_hom_count);
+    pair_write_u64(result_fields[PAIR_MIDDLING_COUNT_A], row, a->masks.middling_balance_count);
+    pair_write_u64(result_fields[PAIR_MIDDLING_COUNT_B], row, b->masks.middling_balance_count);
+    pair_write_u64(result_fields[PAIR_UNAVAILABLE_COUNT_A], row, a->masks.unavailable_count);
+    pair_write_u64(result_fields[PAIR_UNAVAILABLE_COUNT_B], row, b->masks.unavailable_count);
+    if (no_evidence) {
+        for (unsigned i = PAIR_RELATEDNESS; i < PAIR_FIELD_COUNT; i++) {
+            duckdb_validity_set_row_invalid(duckdb_vector_get_validity(result_fields[i]), row);
+        }
+        return true;
+    }
+    for (unsigned i = PAIR_RELATEDNESS; i < PAIR_FIELD_COUNT; i++) {
+        duckdb_validity_set_row_valid(duckdb_vector_get_validity(result_fields[i]), row);
+    }
+    pair_write_double(result_fields[PAIR_RELATEDNESS], row, stats.relatedness);
+    pair_write_double(result_fields[PAIR_INFERRED_HOM_CONCORDANCE], row,
+        stats.inferred_hom_concordance);
+    pair_write_double(result_fields[PAIR_RAW_HOM_B_CONCORDANCE], row,
+        stats.raw_hom_b_concordance);
+    pair_write_double(result_fields[PAIR_P_MIDDLING_A], row, stats.p_middling_a);
+    pair_write_double(result_fields[PAIR_P_MIDDLING_B], row, stats.p_middling_b);
+    pair_write_double(result_fields[PAIR_ADJUSTED_CONCORDANCE], row,
+        stats.adjusted_concordance);
+    return true;
+}
+
+/* duckhts_somalier_relatedness(sketch_a, sketch_b, max_sites) checks the
+ * content of both sketches for every pair. */
 static void somalier_pair_scalar(duckdb_function_info info,
                                  duckdb_data_chunk input, duckdb_vector output) {
-    const bool check_content = *(const bool *)duckdb_scalar_function_get_extra_info(info);
     duckdb_vector left = duckdb_data_chunk_get_vector(input, 0);
     duckdb_vector right = duckdb_data_chunk_get_vector(input, 1);
     duckdb_vector limit = duckdb_data_chunk_get_vector(input, 2);
@@ -899,22 +979,10 @@ static void somalier_pair_scalar(duckdb_function_info info,
     uint64_t *max_sites = duckdb_vector_get_data(limit);
     idx_t rows = duckdb_data_chunk_get_size(input);
 
-    for (unsigned i = 0u; i < PAIR_FIELD_COUNT; i++) {
-        result_fields[i] = duckdb_struct_vector_get_child(output, i);
-    }
-    duckdb_vector_ensure_validity_writable(result_fields[PAIR_RELATEDNESS]);
-    duckdb_vector_ensure_validity_writable(result_fields[PAIR_INFERRED_HOM_CONCORDANCE]);
-    duckdb_vector_ensure_validity_writable(result_fields[PAIR_RAW_HOM_B_CONCORDANCE]);
-    duckdb_vector_ensure_validity_writable(result_fields[PAIR_P_MIDDLING_A]);
-    duckdb_vector_ensure_validity_writable(result_fields[PAIR_P_MIDDLING_B]);
-    duckdb_vector_ensure_validity_writable(result_fields[PAIR_ADJUSTED_CONCORDANCE]);
-
+    pair_result_fields(output, result_fields);
     for (idx_t row = 0u; row < rows; row++) {
         somalier_sql_sketch_t a = {0}, b = {0};
-        duckhts_somalier_pair_stats_t stats;
-        duckhts_somalier_status_t status;
         const char *error = NULL;
-        bool no_evidence;
 
         if (!sql_valid(left, row) || !sql_valid(right, row) ||
             !sql_valid(limit, row) || max_sites[row] == 0u ||
@@ -923,74 +991,94 @@ static void somalier_pair_scalar(duckdb_function_info info,
                 "duckhts_somalier_relatedness: sketches and max_sites must be non-NULL; max_sites is 1..100000000");
             return;
         }
-        if (!read_sketch(left, row, max_sites[row], check_content, &a, &error) ||
-            !read_sketch(right, row, max_sites[row], check_content, &b, &error)) {
+        if (!read_sketch(left, row, max_sites[row], true, &a, &error) ||
+            !read_sketch(right, row, max_sites[row], true, &b, &error)) {
             duckdb_scalar_function_set_error(info, error);
             return;
         }
-        if (string_equal(a.sample_id, b.sample_id)) {
+        if (!pair_write_row(info, result_fields, row, &a, &b)) return;
+    }
+}
+
+/* The all-pairs macro numbers the unordered pairs of n ranked sketches from 0
+ * to n(n-1)/2 - 1 by rotation. Index k below n * floor((n-1)/2) pairs rank
+ * k mod n with the rank floor(k / n) + 1 places after it, counted modulo n.
+ * For even n, the n/2 indexes that remain pair rank i with rank i + n/2. Each
+ * unordered pair has one index, and an index decodes with arithmetic alone,
+ * so any run of indexes is a block of pairs that one thread can compare.
+ * The lower rank is returned first. Returns false for an index outside the
+ * pairs. */
+static bool cohort_pair_ranks(uint64_t samples, uint64_t pair_index,
+                              uint64_t *rank_a, uint64_t *rank_b) {
+    uint64_t rotated, first, second;
+
+    if (samples < 2u || samples > UINT32_MAX) return false;
+    if (pair_index >= samples * (samples - 1u) / 2u) return false;
+    rotated = samples * ((samples - 1u) / 2u);
+    if (pair_index < rotated) {
+        first = pair_index % samples;
+        second = (first + pair_index / samples + 1u) % samples;
+    } else {
+        first = pair_index - rotated;
+        second = first + samples / 2u;
+    }
+    *rank_a = first < second ? first : second;
+    *rank_b = first < second ? second : first;
+    return true;
+}
+
+/* __duckhts_somalier_relatedness_cohort_pair(sketches, pair_index, max_sites)
+ * compares the two sketches of pair `pair_index` of a ranked sketch list. The
+ * all-pairs macro builds the list in sample_id order from sketches that passed
+ * __duckhts_somalier_sketch_valid in the same query, so their contents are not
+ * checked again. The masks are borrowed from the list: no sketch is copied for
+ * a pair. */
+static void somalier_cohort_pair_scalar(duckdb_function_info info,
+                                        duckdb_data_chunk input, duckdb_vector output) {
+    duckdb_vector list = duckdb_data_chunk_get_vector(input, 0);
+    duckdb_vector index = duckdb_data_chunk_get_vector(input, 1);
+    duckdb_vector limit = duckdb_data_chunk_get_vector(input, 2);
+    duckdb_vector sketches = duckdb_list_vector_get_child(list);
+    duckdb_list_entry *entries = duckdb_vector_get_data(list);
+    uint64_t *pair_index = duckdb_vector_get_data(index);
+    uint64_t *max_sites = duckdb_vector_get_data(limit);
+    idx_t child_size = duckdb_list_vector_get_size(list);
+    idx_t rows = duckdb_data_chunk_get_size(input);
+    duckdb_vector result_fields[PAIR_FIELD_COUNT];
+
+    pair_result_fields(output, result_fields);
+    for (idx_t row = 0u; row < rows; row++) {
+        somalier_sql_sketch_t a = {0}, b = {0};
+        duckdb_list_entry entry;
+        uint64_t rank_a, rank_b;
+        const char *error = NULL;
+
+        if (!sql_valid(list, row) || !sql_valid(index, row) ||
+            !sql_valid(limit, row) || max_sites[row] == 0u ||
+            max_sites[row] > SOMALIER_SQL_MAX_SITES) {
             duckdb_scalar_function_set_error(info,
-                "duckhts_somalier_relatedness: sample identities must differ");
+                "duckhts_somalier_relatedness_all_pairs: sketch list, pair index and max_sites must be non-NULL; max_sites is 1..100000000");
             return;
         }
-        if (!string_equal(a.assembly, b.assembly)) {
+        entry = entries[row];
+        if (entry.offset > child_size || entry.length > child_size - entry.offset ||
+            !cohort_pair_ranks(entry.length, pair_index[row], &rank_a, &rank_b)) {
             duckdb_scalar_function_set_error(info,
-                "duckhts_somalier_relatedness: assembly identity mismatch");
+                "duckhts_somalier_relatedness_all_pairs: pair index is outside the sketch list");
             return;
         }
-        status = duckhts_somalier_pair_stats_validated(&a.masks, &b.masks, &stats);
-        if (status != DUCKHTS_SOMALIER_OK) {
+        if (!sql_valid(sketches, entry.offset + rank_a) ||
+            !sql_valid(sketches, entry.offset + rank_b)) {
             duckdb_scalar_function_set_error(info,
-                status == DUCKHTS_SOMALIER_IDENTITY_MISMATCH
-                    ? "duckhts_somalier_relatedness: ordered panel or classification settings mismatch"
-                    : "duckhts_somalier_relatedness: invalid paired masks");
+                "duckhts_somalier_relatedness_all_pairs: sketches cannot be NULL");
             return;
         }
-        no_evidence = stats.jointly_called == 0u;
-        pair_write_string(result_fields[PAIR_SAMPLE_A], row, a.sample_id);
-        pair_write_string(result_fields[PAIR_SAMPLE_B], row, b.sample_id);
-        pair_write_string(result_fields[PAIR_ASSEMBLY], row, a.assembly);
-        pair_write_string(result_fields[PAIR_PANEL_SHA256], row, a.panel_sha256);
-        duckdb_vector_assign_string_element(result_fields[PAIR_METHOD_VERSION], row,
-            SOMALIER_METHOD_VERSION);
-        duckdb_vector_assign_string_element(result_fields[PAIR_STATUS], row,
-            no_evidence ? "no_evidence" : "ok");
-        pair_write_u64(result_fields[PAIR_SITE_COUNT], row, a.masks.site_count);
-        pair_write_u64(result_fields[PAIR_JOINTLY_CALLED], row, stats.jointly_called);
-        pair_write_u64(result_fields[PAIR_IBS0], row, stats.ibs0);
-        pair_write_u64(result_fields[PAIR_IBS2], row, stats.ibs2);
-        pair_write_u64(result_fields[PAIR_SHARED_HETS], row, stats.shared_hets);
-        pair_write_u64(result_fields[PAIR_HET_AB], row, stats.het_ab);
-        pair_write_u64(result_fields[PAIR_SHARED_HOM_B], row, stats.shared_hom_b);
-        pair_write_u64(result_fields[PAIR_HET_COUNT_A], row, stats.het_count_a);
-        pair_write_u64(result_fields[PAIR_HET_COUNT_B], row, stats.het_count_b);
-        pair_write_u64(result_fields[PAIR_HOM_B_COUNT_A], row, stats.hom_b_count_a);
-        pair_write_u64(result_fields[PAIR_HOM_B_COUNT_B], row, stats.hom_b_count_b);
-        pair_write_u64(result_fields[PAIR_CALLABLE_HOM_COUNT_A], row, stats.callable_hom_count_a);
-        pair_write_u64(result_fields[PAIR_CALLABLE_HOM_COUNT_B], row, stats.callable_hom_count_b);
-        pair_write_u64(result_fields[PAIR_MATCHING_HOM_COUNT], row, stats.matching_hom_count);
-        pair_write_u64(result_fields[PAIR_MIDDLING_COUNT_A], row, a.masks.middling_balance_count);
-        pair_write_u64(result_fields[PAIR_MIDDLING_COUNT_B], row, b.masks.middling_balance_count);
-        pair_write_u64(result_fields[PAIR_UNAVAILABLE_COUNT_A], row, a.masks.unavailable_count);
-        pair_write_u64(result_fields[PAIR_UNAVAILABLE_COUNT_B], row, b.masks.unavailable_count);
-        if (no_evidence) {
-            for (unsigned i = PAIR_RELATEDNESS; i < PAIR_FIELD_COUNT; i++) {
-                duckdb_validity_set_row_invalid(duckdb_vector_get_validity(result_fields[i]), row);
-            }
-        } else {
-            for (unsigned i = PAIR_RELATEDNESS; i < PAIR_FIELD_COUNT; i++) {
-                duckdb_validity_set_row_valid(duckdb_vector_get_validity(result_fields[i]), row);
-            }
-            pair_write_double(result_fields[PAIR_RELATEDNESS], row, stats.relatedness);
-            pair_write_double(result_fields[PAIR_INFERRED_HOM_CONCORDANCE], row,
-                stats.inferred_hom_concordance);
-            pair_write_double(result_fields[PAIR_RAW_HOM_B_CONCORDANCE], row,
-                stats.raw_hom_b_concordance);
-            pair_write_double(result_fields[PAIR_P_MIDDLING_A], row, stats.p_middling_a);
-            pair_write_double(result_fields[PAIR_P_MIDDLING_B], row, stats.p_middling_b);
-            pair_write_double(result_fields[PAIR_ADJUSTED_CONCORDANCE], row,
-                stats.adjusted_concordance);
+        if (!read_sketch(sketches, entry.offset + rank_a, max_sites[row], false, &a, &error) ||
+            !read_sketch(sketches, entry.offset + rank_b, max_sites[row], false, &b, &error)) {
+            duckdb_scalar_function_set_error(info, error);
+            return;
         }
+        if (!pair_write_row(info, result_fields, row, &a, &b)) return;
     }
 }
 
@@ -1226,20 +1314,22 @@ void register_duckhts_somalier_functions(duckdb_connection connection) {
     duckdb_scalar_function_add_parameter(function, bigint);
     duckdb_scalar_function_set_return_type(function, pair);
     duckdb_scalar_function_set_special_handling(function);
-    duckdb_scalar_function_set_extra_info(function, (void *)&pair_checks_content, NULL);
     duckdb_scalar_function_set_function(function, somalier_pair_scalar);
     duckdb_register_scalar_function(connection, function);
     duckdb_destroy_scalar_function(&function);
 
     function = duckdb_create_scalar_function();
-    duckdb_scalar_function_set_name(function, "__duckhts_somalier_relatedness_checked");
-    duckdb_scalar_function_add_parameter(function, sketch);
-    duckdb_scalar_function_add_parameter(function, sketch);
+    duckdb_scalar_function_set_name(function, "__duckhts_somalier_relatedness_cohort_pair");
+    {
+        duckdb_logical_type sketch_list = duckdb_create_list_type(sketch);
+        duckdb_scalar_function_add_parameter(function, sketch_list);
+        duckdb_destroy_logical_type(&sketch_list);
+    }
+    duckdb_scalar_function_add_parameter(function, bigint);
     duckdb_scalar_function_add_parameter(function, bigint);
     duckdb_scalar_function_set_return_type(function, pair);
     duckdb_scalar_function_set_special_handling(function);
-    duckdb_scalar_function_set_extra_info(function, (void *)&pair_trusts_content, NULL);
-    duckdb_scalar_function_set_function(function, somalier_pair_scalar);
+    duckdb_scalar_function_set_function(function, somalier_cohort_pair_scalar);
     duckdb_register_scalar_function(connection, function);
     duckdb_destroy_scalar_function(&function);
 

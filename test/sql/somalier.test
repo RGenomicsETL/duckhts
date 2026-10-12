@@ -566,11 +566,11 @@ query I
 SELECT count(*) FROM (
   (SELECT unnest(duckhts_somalier_relatedness(a.sketch, b.sketch, 8))
    FROM somalier_sketches a JOIN somalier_sketches b ON a.sketch.sample_id < b.sketch.sample_id
-   EXCEPT
+   EXCEPT ALL
    SELECT * FROM duckhts_somalier_relatedness_all_pairs('somalier_sketches', max_sites := 8))
   UNION ALL
   (SELECT * FROM duckhts_somalier_relatedness_all_pairs('somalier_sketches', max_sites := 8)
-   EXCEPT
+   EXCEPT ALL
    SELECT unnest(duckhts_somalier_relatedness(a.sketch, b.sketch, 8))
    FROM somalier_sketches a JOIN somalier_sketches b ON a.sketch.sample_id < b.sketch.sample_id));
 ----
@@ -669,6 +669,244 @@ statement error
 SELECT count(*) FROM duckhts_somalier_relatedness_all_pairs('somalier_repeated_sketch', max_sites := 8);
 ----
 one sketch per distinct sample
+
+# max_pairs caps the output. The four fixture sketches have six pairs.
+query I
+SELECT count(*) FROM duckhts_somalier_relatedness_all_pairs(
+  'somalier_sketches', max_sites := 8, max_pairs := 6);
+----
+6
+
+statement error
+SELECT * FROM duckhts_somalier_relatedness_all_pairs(
+  'somalier_sketches', max_sites := 8, max_pairs := 5);
+----
+the sketches have more pairs than max_pairs
+
+# The cap holds for a query that reads no pair column.
+statement error
+SELECT count(*) FROM duckhts_somalier_relatedness_all_pairs(
+  'somalier_sketches', max_sites := 8, max_pairs := 5);
+----
+the sketches have more pairs than max_pairs
+
+statement error
+SELECT * FROM duckhts_somalier_relatedness_all_pairs(
+  'somalier_sketches', max_sites := 8, max_pairs := NULL);
+----
+max_pairs must be a positive whole number
+
+statement error
+SELECT * FROM duckhts_somalier_relatedness_all_pairs(
+  'somalier_sketches', max_sites := 8, max_pairs := 0);
+----
+max_pairs must be a positive whole number
+
+statement error
+SELECT * FROM duckhts_somalier_relatedness_all_pairs(
+  'somalier_sketches', max_sites := 8, max_pairs := -1);
+----
+max_pairs must be a positive whole number
+
+statement error
+SELECT * FROM duckhts_somalier_relatedness_all_pairs(
+  'somalier_sketches', max_sites := 8, max_pairs := 6.5);
+----
+max_pairs must be a positive whole number
+
+# DuckDB orders NaN above every number and as equal to itself, so NaN passes
+# the range and whole-number comparisons; a non-finite cap must still fail
+# rather than switch the cap off.
+statement error
+SELECT count(*) FROM duckhts_somalier_relatedness_all_pairs(
+  'somalier_sketches', max_sites := 8, max_pairs := 'nan'::DOUBLE);
+----
+max_pairs must be a positive whole number
+
+statement error
+SELECT count(*) FROM duckhts_somalier_relatedness_all_pairs(
+  'somalier_sketches', max_sites := 8, max_pairs := 'infinity'::DOUBLE);
+----
+max_pairs must be a positive whole number
+
+# The argument is checked even when the relation has no pair.
+statement error
+SELECT count(*) FROM duckhts_somalier_relatedness_all_pairs(
+  'somalier_single_sketch', max_sites := 8, max_pairs := 0);
+----
+max_pairs must be a positive whole number
+
+# The internal pair function rejects an index outside the pairs of its list.
+statement error
+SELECT __duckhts_somalier_relatedness_cohort_pair(
+  (SELECT list(sketch ORDER BY sketch.sample_id) FROM somalier_sketches), 6::UBIGINT, 8::UBIGINT);
+----
+pair index is outside the sketch list
+
+# A cohort of 400 sketches has 79,800 pairs: more than one 2,048-row block
+# task, and two pair indexes per block. The pairs are compared on several
+# threads; the rows equal those of one thread and of the per-pair function.
+statement ok
+CREATE TEMP TABLE somalier_cohort_panel AS
+SELECT 'GRCh38' AS assembly, i::UBIGINT AS site_index,
+       'chr1' AS region, (1000 + 10 * i)::UBIGINT AS position,
+       CASE WHEN i % 2 = 0 THEN 'A' ELSE 'C' END AS allele_a,
+       CASE WHEN i % 2 = 0 THEN 'G' ELSE 'T' END AS allele_b
+FROM range(70) sites(i);
+
+statement ok
+CREATE TEMP TABLE somalier_cohort_evidence AS
+SELECT printf('S%04d', n) AS sample_id, p.assembly, p.site_index, p.region,
+       p.position, p.allele_a, p.allele_b,
+       CASE WHEN unavailable THEN NULL WHEN genotype <= 3 THEN 30 - minor
+            WHEN genotype <= 6 THEN 15 ELSE minor END::UBIGINT AS a,
+       CASE WHEN unavailable THEN NULL WHEN genotype <= 3 THEN minor
+            WHEN genotype <= 6 THEN 15 ELSE 30 - minor END::UBIGINT AS b,
+       CASE WHEN unavailable THEN NULL ELSE 0 END::UBIGINT AS other
+FROM (SELECT p.*, n, (p.site_index * 7 + n * 13) % 10 AS genotype,
+             (p.site_index + n * 17) % 97 = 0 AS unavailable,
+             ((p.site_index + n * 11) % 23 = 0)::INTEGER AS minor
+      FROM range(400) s(n), somalier_cohort_panel p) AS p;
+
+statement ok
+CREATE TEMP TABLE somalier_cohort_sketches AS
+SELECT * FROM duckhts_somalier_prepare_sketches(
+  'somalier_cohort_evidence', 'somalier_cohort_panel',
+  7, 0.3, 0.01, max_sites := 70);
+
+statement ok
+CREATE TEMP TABLE somalier_cohort_reference AS
+SELECT unnest(duckhts_somalier_relatedness(a.sketch, b.sketch, 70))
+FROM somalier_cohort_sketches a
+JOIN somalier_cohort_sketches b ON a.sketch.sample_id < b.sketch.sample_id;
+
+statement ok
+SET threads = 1;
+
+statement ok
+CREATE TEMP TABLE somalier_cohort_one_thread AS
+SELECT * FROM duckhts_somalier_relatedness_all_pairs('somalier_cohort_sketches', max_sites := 70);
+
+statement ok
+SET threads = 4;
+
+statement ok
+CREATE TEMP TABLE somalier_cohort_four_threads AS
+SELECT * FROM duckhts_somalier_relatedness_all_pairs('somalier_cohort_sketches', max_sites := 70);
+
+query IIII
+SELECT count(*), count(DISTINCT struct_pack(sample_a, sample_b)),
+       count(*) FILTER (WHERE sample_a >= sample_b), count(DISTINCT status)
+FROM somalier_cohort_four_threads;
+----
+79800	79800	0	1
+
+query I
+SELECT count(*) FROM (
+  (SELECT * FROM somalier_cohort_one_thread EXCEPT ALL SELECT * FROM somalier_cohort_four_threads)
+  UNION ALL
+  (SELECT * FROM somalier_cohort_four_threads EXCEPT ALL SELECT * FROM somalier_cohort_one_thread));
+----
+0
+
+query I
+SELECT count(*) FROM (
+  (SELECT * FROM somalier_cohort_reference EXCEPT ALL SELECT * FROM somalier_cohort_four_threads)
+  UNION ALL
+  (SELECT * FROM somalier_cohort_four_threads EXCEPT ALL SELECT * FROM somalier_cohort_reference));
+----
+0
+
+query I
+SELECT count(*) FROM duckhts_somalier_relatedness_all_pairs(
+  'somalier_cohort_sketches', max_sites := 70, max_pairs := 79800);
+----
+79800
+
+statement error
+SELECT count(*) FROM duckhts_somalier_relatedness_all_pairs(
+  'somalier_cohort_sketches', max_sites := 70, max_pairs := 79799);
+----
+the sketches have more pairs than max_pairs
+
+# Pair indexes decode differently for odd and even sample counts; an even
+# count pairs each sample with the one half the cohort away. No cohort size
+# may produce a pair of one sample with itself, which the pair function
+# rejects with "sample identities must differ", or omit or repeat a pair.
+statement ok
+CREATE TEMP VIEW somalier_cohort_prefix AS
+SELECT sketch FROM somalier_cohort_sketches WHERE sketch.sample_id < 'S0002';
+
+statement ok
+CREATE TEMP MACRO somalier_cohort_prefix_differences(sample_count) AS TABLE
+SELECT count(*) AS differing FROM (
+  (SELECT * FROM duckhts_somalier_relatedness_all_pairs('somalier_cohort_prefix', max_sites := 70)
+   EXCEPT ALL
+   SELECT * FROM somalier_cohort_reference WHERE sample_b < printf('S%04d', sample_count))
+  UNION ALL
+  (SELECT * FROM somalier_cohort_reference WHERE sample_b < printf('S%04d', sample_count)
+   EXCEPT ALL
+   SELECT * FROM duckhts_somalier_relatedness_all_pairs('somalier_cohort_prefix', max_sites := 70)));
+
+query I
+SELECT * FROM somalier_cohort_prefix_differences(2);
+----
+0
+
+statement ok
+CREATE OR REPLACE TEMP VIEW somalier_cohort_prefix AS
+SELECT sketch FROM somalier_cohort_sketches WHERE sketch.sample_id < 'S0003';
+
+query I
+SELECT * FROM somalier_cohort_prefix_differences(3);
+----
+0
+
+statement ok
+CREATE OR REPLACE TEMP VIEW somalier_cohort_prefix AS
+SELECT sketch FROM somalier_cohort_sketches WHERE sketch.sample_id < 'S0004';
+
+query I
+SELECT * FROM somalier_cohort_prefix_differences(4);
+----
+0
+
+statement ok
+CREATE OR REPLACE TEMP VIEW somalier_cohort_prefix AS
+SELECT sketch FROM somalier_cohort_sketches WHERE sketch.sample_id < 'S0005';
+
+query I
+SELECT * FROM somalier_cohort_prefix_differences(5);
+----
+0
+
+statement ok
+CREATE OR REPLACE TEMP VIEW somalier_cohort_prefix AS
+SELECT sketch FROM somalier_cohort_sketches WHERE sketch.sample_id < 'S0101';
+
+query I
+SELECT * FROM somalier_cohort_prefix_differences(101);
+----
+0
+
+# 399 sketches have 79,401 pairs: blocks of two pair indexes, and a last block
+# that holds one.
+statement ok
+CREATE OR REPLACE TEMP VIEW somalier_cohort_prefix AS
+SELECT sketch FROM somalier_cohort_sketches WHERE sketch.sample_id < 'S0399';
+
+query I
+SELECT count(*) FROM duckhts_somalier_relatedness_all_pairs('somalier_cohort_prefix', max_sites := 70);
+----
+79401
+
+query I
+SELECT * FROM somalier_cohort_prefix_differences(399);
+----
+0
+
+statement ok
+RESET threads;
 
 # Preparation must not silently omit a physical panel observation or accept a
 # malformed count tuple. The internal aggregate is tested separately for its
