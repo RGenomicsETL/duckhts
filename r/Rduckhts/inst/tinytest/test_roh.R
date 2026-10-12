@@ -245,6 +245,29 @@ test_roh_counts <- function() {
   expect_error(rduckhts_roh_counts(con, "roh_counts", contamination = 1), "contamination must be")
   expect_error(rduckhts_roh_counts(con, "roh_counts", contamination = -0.1), "contamination must be")
   expect_error(rduckhts_roh_counts(con, "roh_counts", contamination = NA_real_), "contamination must be")
+  # allele_balance and artefact_weight pass through to the macro and are validated in R.
+  sql <- dbGetQuery(con, paste("SELECT * FROM duckhts_roh_counts('roh_counts', contamination := 0.1,",
+                               "allele_balance := 0.48, artefact_weight := 0.003)"))
+  wrapped <- rduckhts_roh_counts(con, "roh_counts", contamination = 0.1,
+                                 allele_balance = 0.48, artefact_weight = 0.003)
+  expect_true(nrow(wrapped) > 0)
+  expect_equal(.roh_observed(wrapped), .roh_observed(sql))
+  # The defaults are the decode without the two terms, quality bits included.
+  sorted <- function(rows) {
+    rows <- rows[order(rows$sample, rows$chrom, rows$start), ]
+    rownames(rows) <- NULL
+    rows
+  }
+  expect_identical(sorted(rduckhts_roh_counts(con, "roh_counts", allele_balance = 0.5,
+                                              artefact_weight = 0)),
+                   sorted(dbGetQuery(con, paste("SELECT * FROM duckhts_roh_counts('roh_counts',",
+                                                "seq_error := 1e-3, contamination := 0.0)"))))
+  for (bad in list(0.349, 0.651, NA_real_, c(0.5, 0.5), "0.5")) {
+    expect_error(rduckhts_roh_counts(con, "roh_counts", allele_balance = bad), "allele_balance must be")
+  }
+  for (bad in list(-1e-9, 0.0501, NA_real_, c(0, 0), "0")) {
+    expect_error(rduckhts_roh_counts(con, "roh_counts", artefact_weight = bad), "artefact_weight must be")
+  }
   expect_error(rduckhts_roh_counts(con, NA_character_), "counts_table")
   expect_error(rduckhts_roh_counts(con, "roh_counts", max_sites = 0), "max_sites must be")
   expect_error(rduckhts_roh_counts(con, "roh_counts", max_sites = 5), "max_sites")
@@ -260,8 +283,9 @@ test_roh_counts_fitted <- function() {
   second <- counts
   second$sample_id <- "S2"
   dbWriteTable(con, "counts", rbind(counts, second))
+  # Columns other than the four fitted numbers (status here) are ignored.
   fits <- data.frame(sample = c("S1", "S2"), seq_error = 0.001, contamination = 0.1,
-                     status = "caller_selected", artefact_weight = 123)
+                     status = "caller_selected", allele_balance = 0.5, artefact_weight = 0)
   dbWriteTable(con, "fits", fits)
   ordered <- function(rows) {
     rows <- rows[order(rows$sample, rows$chrom, rows$start), ]
@@ -273,11 +297,14 @@ test_roh_counts_fitted <- function() {
   expect_identical(ordered(fitted), ordered(scalar))
   # Unused scalar arguments do not constrain fitted parameters.
   expect_identical(ordered(rduckhts_roh_counts(
-    con, "counts", fit_table = "fits", seq_error = NA, contamination = -1
+    con, "counts", fit_table = "fits", seq_error = NA, contamination = -1,
+    allele_balance = 2, artefact_weight = -1
   )), ordered(scalar))
 
   fits$seq_error[[2]] <- 0.02
   fits$contamination[[2]] <- 0.2
+  fits$allele_balance[[2]] <- 0.48
+  fits$artefact_weight[[2]] <- 0.003
   dbWriteTable(con, "fits", fits, overwrite = TRUE)
   dbWriteTable(con, "map", data.frame(chrom = "1", pos = c(1, 5000000), cm = c(0, 5)))
   for (map in list(NULL, "map")) {
@@ -285,7 +312,9 @@ test_roh_counts_fitted <- function() {
     scalar <- lapply(seq_len(nrow(fits)), function(i) {
       rows <- rduckhts_roh_counts(con, "counts", genetic_map = map,
                                   seq_error = fits$seq_error[[i]],
-                                  contamination = fits$contamination[[i]])
+                                  contamination = fits$contamination[[i]],
+                                  allele_balance = fits$allele_balance[[i]],
+                                  artefact_weight = fits$artefact_weight[[i]])
       rows[rows$sample == fits$sample[[i]], ]
     })
     expect_equal(length(unique(fitted$sample)), 2L)
@@ -296,13 +325,14 @@ test_roh_counts_fitted <- function() {
   dbWriteTable(con, "bad_fits", fits[1, ], overwrite = TRUE)
   expect_error(rduckhts_roh_counts(con, "counts", fit_table = "bad_fits"),
                "missing fit row for sample S2")
-  for (parameter in c("seq_error", "contamination")) {
+  out_of_range <- c(seq_error = 0.5, contamination = 1, allele_balance = 0.34, artefact_weight = 0.06)
+  for (parameter in names(out_of_range)) {
     bad <- fits
     bad[[parameter]][[2]] <- NA_real_
     dbWriteTable(con, "bad_fits", bad, overwrite = TRUE)
     expect_error(rduckhts_roh_counts(con, "counts", fit_table = "bad_fits"),
                  paste("NULL", parameter, "for sample S2"))
-    bad[[parameter]][[2]] <- if (parameter == "seq_error") 0.5 else 1
+    bad[[parameter]][[2]] <- out_of_range[[parameter]]
     dbWriteTable(con, "bad_fits", bad, overwrite = TRUE)
     expect_error(rduckhts_roh_counts(con, "counts", fit_table = "bad_fits"),
                  paste(parameter, "must be in"))

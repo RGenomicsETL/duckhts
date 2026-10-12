@@ -17,7 +17,9 @@ rduckhts_roh_counts(
   overwrite = FALSE,
   max_sites = 2e+07,
   max_site_bytes = 2^32,
-  fit_table = NULL
+  fit_table = NULL,
+  allele_balance = 0.5,
+  artefact_weight = 0
 )
 }
 \arguments{
@@ -53,11 +55,19 @@ each apply their own. Exceeding it is an error: decode fewer samples per
 call or raise it.}
 
 \item{fit_table}{Optional table or view with one row per `sample`, containing
-non-NULL `seq_error` and `contamination`. These replace the scalar arguments
-for each matching `sample_id`. A sample of `counts_table` with no fit row,
-several fit rows or a NULL value is an error; fit rows of other samples are
-not checked. Filter fit status in the caller's SQL; spreads and artefact
-weight are not used.}
+non-NULL `seq_error`, `contamination`, `allele_balance` and
+`artefact_weight`, such as the output of [rduckhts_count_error_fit()].
+These replace the scalar arguments for each matching `sample_id`. A sample
+of `counts_table` with no fit row, several fit rows, a NULL value or a value
+out of range is an error; fit rows of other samples are not checked. Filter
+fit status in the caller's SQL; the spreads are not used.}
+
+\item{allele_balance}{Share of a heterozygote's reads that show the counted
+allele, in `[0.35, 0.65]`. The default 0.5 assumes no mapping bias.}
+
+\item{artefact_weight}{Chance that a site's counts are uniform on
+`0..depth` whatever its genotype, in `[0, 0.05]`. The default 0 gives
+such sites no term. Values outside either range are errors, not clipped.}
 }
 \value{
 A data frame (or invisible `TRUE` when `table_name` is given) with
@@ -82,31 +92,33 @@ table or ancestry-weighted frequencies. Somalier site counts map as
 
 Each read shows the counted allele with probability
 `(1 - contamination) * q + contamination * c`, where `q` is `seq_error`,
-`1/2` or `1 - seq_error` for zero, one or two copies, and
-`c = af * (1 - seq_error) + (1 - af) * seq_error` is the chance that a read
-from a contaminating individual of the same population shows it. Without the
-contamination term, contaminant reads at homozygous sites look like
-heterozygous evidence, which shortens runs and lowers FROH.
+`allele_balance` or `1 - seq_error` for zero, one or two copies, and `c` is
+the mean of `q` over the genotype of a contaminating individual of the same
+population (Hardy-Weinberg at `af`). With chance `artefact_weight` a site's
+counted reads are instead uniform on `0..depth`, whatever its genotype. The
+four numbers mean what [rduckhts_count_error_fit()] reports under these
+names. Without the contamination term, contaminant reads at homozygous sites
+look like heterozygous evidence, which shortens runs and lowers FROH.
 
 Sites with no reads, a NULL count, or an `af` that is NULL, NaN or 0 are
 skipped; a repeated position keeps one row. Negative counts are an error.
 The model assumes biallelic sites, independent reads (no duplicate or
-strand modelling) and one error rate for all reads. A heterozygote is assumed
-to show each allele in half its reads; reference-biased mapping makes the
-other allele rarer, more so where flanking heterozygosity is high, so such
-heterozygotes can look homozygous and lengthen runs in divergent regions.
-The contamination
-fraction is supplied by the caller, for example from a separate estimate;
-it is not estimated here. A contaminant from a different population than
-`af` describes is approximated by `af`.
+strand modelling) and one error rate for all reads. Reference-biased
+mapping makes the other allele of a heterozygote rarer; `allele_balance`
+takes one value per sample, while the bias is stronger where flanking
+heterozygosity is high, so such heterozygotes can still look homozygous and
+lengthen runs in divergent regions. The contamination fraction is supplied
+by the caller, for example from [rduckhts_count_error_fit()]. A contaminant
+from a different population than `af` describes is approximated by `af`.
 
-`seq_error` is an error of one read, and the reads of a site multiply. A
-site with balanced reads excludes both homozygous genotypes whatever
-`seq_error` is. The `gt_error` of [rduckhts_roh()] is an error of the site,
-so a run can continue through one heterozygous call. The read-count decode
-therefore corresponds to the genotype decode with no tolerated genotype
-error, and reports fewer bases in runs than `rduckhts_roh(gt_error = 30)`
-on the same sample.
+`seq_error` is an error of one read, and the reads of a site multiply. With
+`artefact_weight = 0`, a site with balanced reads excludes both homozygous
+genotypes whatever `seq_error` is: the decode then corresponds to the
+genotype decode with no tolerated genotype error, and reports fewer bases in
+runs than `rduckhts_roh(gt_error = 30)` on the same sample. With
+`artefact_weight = w > 0`, one site at depth `d` changes the odds between
+the two states by a factor of at most `1 + (d + 1) * (1 - w) / w`, as
+`gt_error` caps one called genotype at `10^(gt_error / 10)`.
 }
 \examples{
 con <- rduckhts_connect()

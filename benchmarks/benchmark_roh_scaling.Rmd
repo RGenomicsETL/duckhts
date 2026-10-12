@@ -19,8 +19,9 @@ render of this report.
   workload adds read counts from three 1000 Genomes 30× CRAMs at the 108,757
   chr20 sites of the ROH ancestry evaluation, decoded for 1, 2 and 3 samples.
 - `duckhts_roh_counts_fitted` over the same inputs, with a fit relation that
-  gives every sample `seq_error` 0.001 and `contamination` 0, the scalar
-  defaults. It is measured on the same series as `duckhts_roh_counts`.
+  gives every sample `seq_error` 0.001, `contamination` 0, `allele_balance`
+  0.5 and `artefact_weight` 0, the scalar defaults. It is measured on the same
+  series as `duckhts_roh_counts`.
 - `duckhts_roh_ancestry` over the registered chr20 children BCF of the ROH
   ancestry evaluation (849,143 records). It is measured along three series:
   - the number of samples decoded together (8, 16, 32) with the full reference;
@@ -476,7 +477,8 @@ for (repetition in seq_len(repetitions)) {
           if (macro == "duckhts_roh_counts_fitted") {
             setup <- c(setup, sprintf(paste(
               "CREATE TEMP TABLE fits AS SELECT sample, 0.001::DOUBLE AS seq_error,",
-              "0.0::DOUBLE AS contamination FROM (%s);"), counts_inputs$fits_sql[[k]]))
+              "0.0::DOUBLE AS contamination, 0.5::DOUBLE AS allele_balance,",
+              "0.0::DOUBLE AS artefact_weight FROM (%s);"), counts_inputs$fits_sql[[k]]))
           }
           observed <- run_fresh(setup, counts_queries[[macro]], threads)
           observations[[length(observations) + 1L]] <- data.frame(

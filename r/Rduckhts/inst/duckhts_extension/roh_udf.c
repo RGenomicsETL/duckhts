@@ -33,15 +33,24 @@ DUCKDB_EXTENSION_EXTERN
 #define ROH_MAX_POS1 INT32_MAX
 
 /* Model parameters: the vectors of a call, and the values of one row. A
- * parameter the evidence kind does not use has no vector and stays 0. */
+ * parameter the evidence kind does not use has no vector and stays 0. The
+ * read-count overload of duckhts_roh_segments has no allele_balance or
+ * artefact_weight vector and uses 1/2 and 0. */
 typedef struct {
-    duckdb_vector gt_error, seq_error, contamination;
+    duckdb_vector gt_error, seq_error, contamination, allele_balance, artefact_weight;
     duckdb_vector map_pos, map_cm, rec_rate, hw_to_az, az_to_hw;
 } roh_model_args_t;
 
 typedef struct {
-    double hw_to_az, az_to_hw, gt_error, seq_error, contamination, rec_rate;
+    double hw_to_az, az_to_hw, gt_error, rec_rate;
+    duckhts_roh_count_model_t counts;
 } roh_model_t;
+
+/* Accepted ranges of the two fitted numbers that only move the read-count
+ * emission (see check_model). */
+#define ROH_ALLELE_BALANCE_MIN 0.35
+#define ROH_ALLELE_BALANCE_MAX 0.65
+#define ROH_ARTEFACT_WEIGHT_MAX 0.05
 
 /* Arguments of duckhts_roh_segments. The evidence kind of an overload is
  * attached to it as extra info: PL lists (INTEGER[][]), dosages with a phred
@@ -134,9 +143,17 @@ static bool read_model(duckhts_roh_sites_kind_t kind, const roh_model_args_t *ar
     if (kind == DUCKHTS_ROH_SITES_GT && !read_double_arg(args->gt_error, row, &model->gt_error)) {
         return false;
     }
-    if (kind == DUCKHTS_ROH_SITES_COUNTS &&
-        (!read_double_arg(args->seq_error, row, &model->seq_error) ||
-         !read_double_arg(args->contamination, row, &model->contamination))) return false;
+    if (kind == DUCKHTS_ROH_SITES_COUNTS) {
+        duckhts_roh_count_model_t *counts = &model->counts;
+        if (!read_double_arg(args->seq_error, row, &counts->seq_error) ||
+            !read_double_arg(args->contamination, row, &counts->contamination)) return false;
+        counts->allele_balance = 0.5;
+        counts->artefact_weight = 0.0;
+        if (args->allele_balance != NULL &&
+            !read_double_arg(args->allele_balance, row, &counts->allele_balance)) return false;
+        if (args->artefact_weight != NULL &&
+            !read_double_arg(args->artefact_weight, row, &counts->artefact_weight)) return false;
+    }
     if (!read_double_arg(args->rec_rate, row, &model->rec_rate)) model->rec_rate = 0;
     return true;
 }
@@ -153,12 +170,33 @@ static const char *check_model(duckhts_roh_sites_kind_t kind, const roh_model_t 
         return "gt_error must be a finite phred value of at least 0";
     }
     if (kind == DUCKHTS_ROH_SITES_COUNTS) {
-        if (!isfinite(model->seq_error) || model->seq_error <= 0 || model->seq_error >= 0.5) {
+        const duckhts_roh_count_model_t *counts = &model->counts;
+        if (!isfinite(counts->seq_error) || counts->seq_error <= 0 || counts->seq_error >= 0.5) {
             return "seq_error must be in (0, 0.5)";
         }
-        if (!isfinite(model->contamination) || model->contamination < 0 ||
-            model->contamination >= 1) {
+        if (!isfinite(counts->contamination) || counts->contamination < 0 ||
+            counts->contamination >= 1) {
             return "contamination must be in [0, 1)";
+        }
+        /* The fit measures allele_balance 0.4974 to 0.4984 and artefact_weight
+         * 0.0018 to 0.0030 on 30x samples, and 0.4960 and 0.0046 with a fifth
+         * of the reads from another genome (benchmarks/benchmark_count_error_fit.md).
+         * The ranges hold those values with wide margins and exclude what the
+         * emission cannot take as a per-sample constant: an allele balance
+         * beyond 0.35 or 0.65 is 50 times the mapping bias the fit measures
+         * and points to copy number, a mixture or a broken panel, which one
+         * number per sample does not describe; and an artefact weight
+         * above 0.05 caps one site's likelihood ratio (see
+         * duckhts_roh_pdg_from_counts) below 1 + 19 (d + 1) at depth d, so
+         * that depth barely informs a site. Out-of-range values are errors,
+         * not clipped. */
+        if (!isfinite(counts->allele_balance) || counts->allele_balance < ROH_ALLELE_BALANCE_MIN ||
+            counts->allele_balance > ROH_ALLELE_BALANCE_MAX) {
+            return "allele_balance must be in [0.35, 0.65]";
+        }
+        if (!isfinite(counts->artefact_weight) || counts->artefact_weight < 0 ||
+            counts->artefact_weight > ROH_ARTEFACT_WEIGHT_MAX) {
+            return "artefact_weight must be in [0, 0.05]";
         }
     }
     if (!isfinite(model->rec_rate) || model->rec_rate < 0) return "rec_rate must be finite and at least 0";
@@ -400,8 +438,8 @@ static int decode_row(duckdb_function_info info, const roh_args_t *args, idx_t r
                 /* The read model needs the site's frequency; sites without a
                  * usable one are skipped below before the emission is used. */
                 usable = has_af && !isnan(alt_freq) && alt_freq > 0 &&
-                         duckhts_roh_pdg_from_counts(other_count, counted_count, model.seq_error,
-                                                     model.contamination, alt_freq, pdg);
+                         duckhts_roh_pdg_from_counts(other_count, counted_count, &model.counts,
+                                                     alt_freq, pdg);
             }
         } else {
             idx_t at = ev_offset + i;
@@ -511,7 +549,7 @@ static int decode_packed_row(duckdb_function_info info, const roh_packed_args_t 
             /* The read model needs the site's frequency. */
             usable = count_site.usable && !isnan(af) && af > 0 &&
                      duckhts_roh_pdg_from_counts(count_site.other, count_site.counted,
-                                                 model.seq_error, model.contamination, af, pdg);
+                                                 &model.counts, af, pdg);
         } else {
             usable = site.usable != 0;
             if (usable) duckhts_roh_pdg_from_capped_pl(roh, site.evidence, pdg);
@@ -598,8 +636,9 @@ static void roh_scalar(duckdb_function_info info, duckdb_data_chunk input, duckd
     duckhts_roh_destroy(roh);
 }
 
-/* __duckhts_roh_decode(sites, gt_error, seq_error, contamination, map_pos,
- * map_cm, rec_rate, hw_to_az, az_to_hw). The evidence kind is in the site list. */
+/* __duckhts_roh_decode(sites, gt_error, seq_error, contamination,
+ * allele_balance, artefact_weight, map_pos, map_cm, rec_rate, hw_to_az,
+ * az_to_hw). The evidence kind is in the site list. */
 static void roh_packed_scalar(duckdb_function_info info, duckdb_data_chunk input,
                               duckdb_vector output) {
     roh_packed_args_t args = {0};
@@ -608,6 +647,8 @@ static void roh_packed_scalar(duckdb_function_info info, duckdb_data_chunk input
     args.model.gt_error = duckdb_data_chunk_get_vector(input, at++);
     args.model.seq_error = duckdb_data_chunk_get_vector(input, at++);
     args.model.contamination = duckdb_data_chunk_get_vector(input, at++);
+    args.model.allele_balance = duckdb_data_chunk_get_vector(input, at++);
+    args.model.artefact_weight = duckdb_data_chunk_get_vector(input, at++);
     args.model.map_pos = duckdb_data_chunk_get_vector(input, at++);
     args.model.map_cm = duckdb_data_chunk_get_vector(input, at++);
     args.model.rec_rate = duckdb_data_chunk_get_vector(input, at++);
@@ -635,9 +676,10 @@ static void roh_packed_scalar(duckdb_function_info info, duckdb_data_chunk input
     duckhts_roh_destroy(roh);
 }
 
-/* __duckhts_roh_valid_args(kind, gt_error, seq_error, contamination, rec_rate,
- * hw_to_az, az_to_hw, max_sites, max_site_bytes): TRUE, or the error the decode
- * would raise. A NULL model parameter is not an error: the decode returns NULL. */
+/* __duckhts_roh_valid_args(kind, gt_error, seq_error, contamination,
+ * allele_balance, artefact_weight, rec_rate, hw_to_az, az_to_hw, max_sites,
+ * max_site_bytes): TRUE, or the error the decode would raise. A NULL model
+ * parameter is not an error: the decode returns NULL. */
 static void roh_valid_args_scalar(duckdb_function_info info, duckdb_data_chunk input,
                                   duckdb_vector output) {
     roh_model_args_t args = {0};
@@ -646,6 +688,8 @@ static void roh_valid_args_scalar(duckdb_function_info info, duckdb_data_chunk i
     args.gt_error = duckdb_data_chunk_get_vector(input, at++);
     args.seq_error = duckdb_data_chunk_get_vector(input, at++);
     args.contamination = duckdb_data_chunk_get_vector(input, at++);
+    args.allele_balance = duckdb_data_chunk_get_vector(input, at++);
+    args.artefact_weight = duckdb_data_chunk_get_vector(input, at++);
     args.rec_rate = duckdb_data_chunk_get_vector(input, at++);
     args.hw_to_az = duckdb_data_chunk_get_vector(input, at++);
     args.az_to_hw = duckdb_data_chunk_get_vector(input, at++);
@@ -766,6 +810,8 @@ static bool register_packed_decode(duckdb_connection connection) {
     duckdb_scalar_function_add_parameter(function, real);        /* gt_error */
     duckdb_scalar_function_add_parameter(function, real);        /* seq_error */
     duckdb_scalar_function_add_parameter(function, real);        /* contamination */
+    duckdb_scalar_function_add_parameter(function, real);        /* allele_balance */
+    duckdb_scalar_function_add_parameter(function, real);        /* artefact_weight */
     duckdb_scalar_function_add_parameter(function, bigint_list); /* map_pos */
     duckdb_scalar_function_add_parameter(function, real_list);   /* map_cm */
     duckdb_scalar_function_add_parameter(function, real);        /* rec_rate */
@@ -795,8 +841,9 @@ static bool register_valid_args(duckdb_connection connection) {
     duckdb_scalar_function function = duckdb_create_scalar_function();
     duckdb_scalar_function_set_name(function, "__duckhts_roh_valid_args");
     duckdb_scalar_function_add_parameter(function, integer); /* kind */
-    /* gt_error, seq_error, contamination, rec_rate, hw_to_az, az_to_hw */
-    for (int i = 0; i < 6; i++) duckdb_scalar_function_add_parameter(function, real);
+    /* gt_error, seq_error, contamination, allele_balance, artefact_weight,
+     * rec_rate, hw_to_az, az_to_hw */
+    for (int i = 0; i < 8; i++) duckdb_scalar_function_add_parameter(function, real);
     duckdb_scalar_function_add_parameter(function, bigint); /* max_sites */
     duckdb_scalar_function_add_parameter(function, bigint); /* max_site_bytes */
     duckdb_scalar_function_set_return_type(function, boolean);

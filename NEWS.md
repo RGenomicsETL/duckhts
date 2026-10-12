@@ -4,6 +4,27 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- The read-count ROH emission takes the allele balance and the artefact weight
+  of `duckhts_count_error_fit`
+  (https://github.com/RGenomicsETL/duckhts/issues/329,
+  https://github.com/RGenomicsETL/duckhts/issues/332).
+  `duckhts_roh_counts` gains `allele_balance := 0.5` (the share of a
+  heterozygote's reads that show the counted allele) and
+  `artefact_weight := 0.0` (the chance that a site's counts are uniform on 0
+  to depth, whatever its genotype). Each genotype's likelihood is then
+  `(1 - artefact_weight) * binomial + artefact_weight / (depth + 1)`, the form
+  of the fit, so one site at depth d changes the odds between the two states
+  by at most `1 + (d + 1)(1 - w) / w`, as `gt_error` bounds one genotype call.
+  The defaults give the previous runs and qualities bit for bit.
+  `duckhts_roh_counts_fitted` now reads `allele_balance` and `artefact_weight`
+  from the fit relation as well; a fit relation without them is an error.
+  `allele_balance` outside [0.35, 0.65] and `artefact_weight` outside
+  [0, 0.05] are errors, never clipped, also for empty input. New SQL tests
+  check the emission against an independent SQL oracle and bound how far the
+  runs of the titration fixture move under allele balance +-0.01 and artefact
+  weight up to 0.004 (they do not move). The counts overload of
+  `duckhts_roh_segments` keeps 0.5 and 0.
+
 - Documentation: the README and the catalog entries of `duckhts_count_error_fit`,
   the ROH macros and `duckhts_somalier_matched_contamination` describe two
   known DuckDB 1.5.x issues. An out-of-memory error in a hash aggregate whose

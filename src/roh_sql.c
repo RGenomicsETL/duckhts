@@ -230,17 +230,21 @@ static const char no_map_arguments[] = "NULL::BIGINT[], NULL::DOUBLE[]";
 static const char map_arguments[] =
     "list_transform(m.m, lambda x: x.pos), list_transform(m.m, lambda x: x.cm)";
 
-/* __duckhts_roh_decode(sites, gt_error, seq_error, contamination, map_pos,
- * map_cm, rec_rate, hw_to_az, az_to_hw): the model parameters of the evidence
- * kind, then the map arguments, then the transitions. */
+/* __duckhts_roh_decode(sites, gt_error, seq_error, contamination,
+ * allele_balance, artefact_weight, map_pos, map_cm, rec_rate, hw_to_az,
+ * az_to_hw): the model parameters of the evidence kind, then the map
+ * arguments, then the transitions. */
 static const char select_head[] =
     " SELECT seg.smp AS \"sample\", seg.chrom AS chrom, seg.r.start AS start, "
     "seg.r.\"end\" AS \"end\", seg.r.\"end\" - seg.r.start + 1 AS length, "
     "seg.r.n_markers AS n_markers, seg.r.quality AS quality "
     "FROM (SELECT l.smp, l.chrom, unnest(__duckhts_roh_decode(l.s, ";
-static const char genotype_model[] = "CAST(gt_error AS DOUBLE), NULL::DOUBLE, NULL::DOUBLE, ";
-static const char counts_model[] =
-    "NULL::DOUBLE, CAST(seq_error AS DOUBLE), CAST(contamination AS DOUBLE), ";
+#define ROH_NO_COUNT_MODEL "NULL::DOUBLE, NULL::DOUBLE, NULL::DOUBLE, NULL::DOUBLE"
+#define ROH_COUNT_MODEL \
+    "CAST(seq_error AS DOUBLE), CAST(contamination AS DOUBLE), " \
+    "CAST(allele_balance AS DOUBLE), CAST(artefact_weight AS DOUBLE)"
+static const char genotype_model[] = "CAST(gt_error AS DOUBLE), " ROH_NO_COUNT_MODEL ", ";
+static const char counts_model[] = "NULL::DOUBLE, " ROH_COUNT_MODEL ", ";
 static const char decode_end[] =
     ", CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE))";
 static const char from_lists[] = ") AS r FROM __dht_lists AS l) AS seg";
@@ -254,7 +258,7 @@ static const char from_lists_with_map[] =
     " UNION ALL SELECT NULL::VARCHAR, NULL::VARCHAR, NULL::BIGINT, NULL::BIGINT, NULL::BIGINT, " \
     "NULL::INTEGER, NULL::DOUBLE "
 #define ROH_GENOTYPE_ARGUMENTS_VALID \
-    "__duckhts_roh_valid_args(" ROH_KIND ", CAST(gt_error AS DOUBLE), NULL::DOUBLE, NULL::DOUBLE, " \
+    "__duckhts_roh_valid_args(" ROH_KIND ", CAST(gt_error AS DOUBLE), " ROH_NO_COUNT_MODEL ", " \
     "CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE), " \
     ROH_LIMIT_ARGUMENTS ")"
 static const char genotype_guard[] = ROH_GUARD_COLUMNS "WHERE NOT " ROH_GENOTYPE_ARGUMENTS_VALID;
@@ -274,8 +278,8 @@ static const char ancestry_guard[] =
     ROH_GUARD_COLUMNS "FROM __dht_group_guard AS g WHERE NOT (g.valid AND "
     ROH_GENOTYPE_ARGUMENTS_VALID ")";
 #define ROH_COUNTS_ARGUMENTS_VALID \
-    "__duckhts_roh_valid_args(3, NULL::DOUBLE, CAST(seq_error AS DOUBLE), " \
-    "CAST(contamination AS DOUBLE), CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), " \
+    "__duckhts_roh_valid_args(3, NULL::DOUBLE, " ROH_COUNT_MODEL ", " \
+    "CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), " \
     "CAST(az_to_hw AS DOUBLE), " ROH_LIMIT_ARGUMENTS ")"
 static const char counts_guard[] = ROH_GUARD_COLUMNS "WHERE NOT " ROH_COUNTS_ARGUMENTS_VALID;
 
@@ -287,19 +291,22 @@ static const char counts_guard[] = ROH_GUARD_COLUMNS "WHERE NOT " ROH_COUNTS_ARG
     "WHEN " from ".fit_rows > 1 THEN error('duplicate fit rows for sample ' || coalesce(" sample ", 'NULL')) " \
     "WHEN " from "." column " IS NULL THEN error('NULL " column " for sample ' || coalesce(" sample ", 'NULL')) " \
     "ELSE " from "." column " END"
-static const char fitted_counts_model[] =
-    "NULL::DOUBLE, " ROH_FIT_VALUE("l", "seq_error", "l.smp") ", " ROH_FIT_VALUE("l", "contamination", "l.smp") ", ";
+/* The four fitted numbers of the sample `sample`, in the order of
+ * __duckhts_roh_decode() and __duckhts_roh_valid_args(). */
+#define ROH_FIT_MODEL(from, sample) \
+    ROH_FIT_VALUE(from, "seq_error", sample) ", " ROH_FIT_VALUE(from, "contamination", sample) ", " \
+    ROH_FIT_VALUE(from, "allele_balance", sample) ", " ROH_FIT_VALUE(from, "artefact_weight", sample)
+static const char fitted_counts_model[] = "NULL::DOUBLE, " ROH_FIT_MODEL("l", "l.smp") ", ";
 /* Every sample of the counts relation is checked against its fit, also one
  * whose chromosomes the genetic map drops from the decode; the second arm
  * checks the other arguments when there is no sample. */
 static const char fitted_counts_guard[] =
     ROH_GUARD_COLUMNS "FROM (SELECT DISTINCT CAST(sample_id AS VARCHAR) AS smp FROM query_table(counts_table)) AS s "
     "LEFT JOIN __dht_fit AS fit ON fit.smp IS NOT DISTINCT FROM s.smp "
-    "WHERE NOT __duckhts_roh_valid_args(3, NULL::DOUBLE, " ROH_FIT_VALUE("fit", "seq_error", "s.smp") ", "
-    ROH_FIT_VALUE("fit", "contamination", "s.smp") ", CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), "
-    "CAST(az_to_hw AS DOUBLE), " ROH_LIMIT_ARGUMENTS ")"
-    ROH_GUARD_COLUMNS "FROM (SELECT 0.001 AS seq_error, 0.0 AS contamination) AS defaults "
-    "WHERE NOT " ROH_COUNTS_ARGUMENTS_VALID;
+    "WHERE NOT __duckhts_roh_valid_args(3, NULL::DOUBLE, " ROH_FIT_MODEL("fit", "s.smp") ", "
+    "CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE), " ROH_LIMIT_ARGUMENTS ")"
+    ROH_GUARD_COLUMNS "FROM (SELECT 0.001 AS seq_error, 0.0 AS contamination, 0.5 AS allele_balance, "
+    "0.0 AS artefact_weight) AS defaults WHERE NOT " ROH_COUNTS_ARGUMENTS_VALID;
 
 static const char ancestry_sites[] =
     /* The long reference (sites x groups rows) is read where it is used rather
@@ -443,7 +450,8 @@ static const char ancestry_frequencies[] =
 #define ROH_COUNTS_FITTED_OPTIONS \
     "hw_to_az := 6.7e-8, az_to_hw := 5e-9, rec_rate := NULL, " ROH_LIMITS
 #define ROH_COUNTS_OPTIONS \
-    "seq_error := 1e-3, contamination := 0.0, " ROH_COUNTS_FITTED_OPTIONS
+    "seq_error := 1e-3, contamination := 0.0, allele_balance := 0.5, artefact_weight := 0.0, " \
+    ROH_COUNTS_FITTED_OPTIONS
 
 #define ROH_COUNTS_INPUT \
     "WITH __dht_counts AS (SELECT CAST(sample_id AS VARCHAR) AS smp, " \
@@ -467,13 +475,16 @@ static const char counts_lists[] =
 static const char fitted_counts_lists[] =
     ROH_COUNTS_INPUT
     "__dht_fit AS (SELECT CAST(sample AS VARCHAR) AS smp, CAST(seq_error AS DOUBLE) AS seq_error, "
-    "CAST(contamination AS DOUBLE) AS contamination, "
+    "CAST(contamination AS DOUBLE) AS contamination, CAST(allele_balance AS DOUBLE) AS allele_balance, "
+    "CAST(artefact_weight AS DOUBLE) AS artefact_weight, "
     "count(*) OVER (PARTITION BY CAST(sample AS VARCHAR)) AS fit_rows FROM query_table(fit_table) "
     "QUALIFY row_number() OVER (PARTITION BY CAST(sample AS VARCHAR)) = 1), "
     "__dht_lists AS (SELECT c.smp, c.chrom, fit.fit_rows, fit.seq_error, fit.contamination, "
+    "fit.allele_balance, fit.artefact_weight, "
     "__duckhts_roh_sites(c.pos, c.af, c.ref_count, c.alt_count, NULL::INTEGER, 3, " ROH_LIMIT_ARGUMENTS ") AS s "
     "FROM __dht_counts AS c LEFT JOIN __dht_fit AS fit ON fit.smp IS NOT DISTINCT FROM c.smp "
-    "GROUP BY c.smp, c.chrom, fit.fit_rows, fit.seq_error, fit.contamination)";
+    "GROUP BY c.smp, c.chrom, fit.fit_rows, fit.seq_error, fit.contamination, fit.allele_balance, "
+    "fit.artefact_weight)";
 
 #define ROH_MAX_PARTS 32
 
