@@ -54,5 +54,27 @@ roh_fitted_declaration <- list(
   # otherwise.
   max_froh_change = 0.005,
   max_changed_share = 0.02,
+  # Stability, declared after the first render and before any decode with an
+  # artefact_weight_sd. Decode `decode` passes each sample's fitted
+  # artefact_weight_sd to duckhts_roh_counts_fitted (a NULL, from a fit with
+  # fewer than three blocks, counts as 0 there), so its runs carry
+  # stable_fraction; every other count decode, perturbed ones included,
+  # passes 0. Reported per sample, with no verdict:
+  #   - artefact_weight_sd, and w - sd and w + sd (kept in [0, 0.05]) beside
+  #     the declared x 0.5 and x 2 of the artefact_weight perturbations;
+  #   - the stable_fraction of the runs of `decode`: the runs, the runs at 1,
+  #     the quantiles below, and the stable bases (run length times
+  #     stable_fraction, summed) over the run bases;
+  #   - for each perturbation of `perturbed_parameter`: the lost bases, those
+  #     in runs of `decode` that the perturbed decode does not call, split by
+  #     the stable_fraction of the run that holds them (1, or below 1); and the
+  #     gained bases, called by the perturbed decode outside any run of
+  #     `decode`, which no stable_fraction covers. The FROH change is the
+  #     gained minus the lost bases over the span, and the changed bases of
+  #     the sensitivity rows are the gained plus the lost bases. The report
+  #     gives the share of the lost bases, and of the changed bases, that lies
+  #     in runs with stable_fraction below 1.
+  stability = list(decode = "c", perturbed_parameter = "artefact_weight",
+                   quantiles = c(0, 0.25, 0.5, 0.75, 1)),
   # DuckDB threads of every decode and of the fit.
   threads = 2L)
