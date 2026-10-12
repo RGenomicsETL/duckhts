@@ -4,6 +4,15 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- Documentation: the README and the catalog entries of `duckhts_count_error_fit`,
+  the ROH macros and `duckhts_somalier_matched_contamination` describe two
+  known DuckDB 1.5.x issues. An out-of-memory error in a hash aggregate whose
+  states have a destructor can end the process
+  (https://github.com/duckdb/duckdb/issues/26441), and a query that fails with
+  5 or more threads can keep those states, and their native buffers, until
+  the process ends (https://github.com/duckdb/duckdb/issues/26871). The README
+  says what to do on 1.5.x.
+
 - `read_bam` on a CRAM asks htslib only for the fields that the projected
   columns need. SEQ and QUAL are decoded only when SEQ, QUAL, MD, NM or
   `AUXILIARY_TAGS` is projected (htslib makes MD and NM from the reference),

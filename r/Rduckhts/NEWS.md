@@ -2,6 +2,15 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- The README describes two known DuckDB 1.5.x issues that affect
+  `rduckhts_roh()`, `rduckhts_roh_counts()`, `rduckhts_count_error_fit()` and
+  `rduckhts_somalier_matched_contamination()` with `duckdb` 1.5.x: an
+  out-of-memory error can end the R session
+  (https://github.com/duckdb/duckdb/issues/26441), and a failed query with 5
+  or more threads can keep its native memory until the session ends
+  (https://github.com/duckdb/duckdb/issues/26871). The bundled function
+  catalog notes them for the same functions.
+
 - The bundled `read_bam()` decodes from a CRAM only the fields that the
   selected columns need, with the same values. With decompression threads, a
   query without SEQ, QUAL and tag columns no longer grows in memory with the

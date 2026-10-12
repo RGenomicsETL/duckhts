@@ -109,6 +109,40 @@ separate interface version; it does not imply support for DuckDB 1.2 SQL.
 For duckdb-wasm, check the embedded DuckDB engine version rather than comparing
 npm package version numbers with DuckDB release numbers.
 
+### Known DuckDB 1.5.x issues
+
+Two DuckDB 1.5.x bugs affect a hash aggregate whose states have a destructor.
+In DuckHTS, these states are:
+
+- the native aggregates behind `duckhts_count_error_fit` and the ROH macros
+  (`duckhts_roh`, `duckhts_roh_af_table`, `duckhts_roh_af_table_bcftools`,
+  `duckhts_roh_ancestry`, `duckhts_roh_counts`, `duckhts_roh_counts_fitted`);
+- the ordered `list(... ORDER BY ...)` site profiles of
+  `duckhts_somalier_matched_contamination`, and the ordered genetic-map lists
+  of the ROH macros.
+
+These states grow with the input. The two bugs are:
+
+- **An out-of-memory error can end the process.** DuckDB must read spilled
+  states back to destroy them. When the query is already out of memory, that
+  read fails inside a destructor, and the process aborts instead of returning
+  the error (https://github.com/duckdb/duckdb/issues/26441). The fix
+  (https://github.com/duckdb/duckdb/pull/26847) is in the DuckDB 2.0 branch
+  only.
+- **A failed query can keep its memory.** On DuckDB 1.5.1 to 1.5.6, when a
+  query fails while a hash aggregate with few groups fills, with 5 or more
+  threads, DuckDB never destroys the states, not even at process exit
+  (https://github.com/duckdb/duckdb/issues/26871). Their native buffers stay
+  allocated, and stay charged against `max_cell_bytes` or `max_site_bytes`,
+  until the process ends. DuckDB 2.0 development builds destroy them.
+
+On DuckDB 1.5.x:
+
+- raise `memory_limit`, or make the batch smaller, for example fewer samples
+  per query;
+- restart the process after a failed query that held large native buffers;
+- or use DuckDB 2.0 once it is released. DuckHTS 2.0.0 targets it.
+
 ## Using DuckHTS with a database file
 
 `LOAD` creates the 31 SQL macros only when the default database is writable

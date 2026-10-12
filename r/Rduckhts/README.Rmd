@@ -61,6 +61,16 @@ install.packages("Rduckhts", repos = c("https://rgenomicsetl.r-universe.dev",
 
 Rduckhts needs the `duckdb` R package, version 1.5.0 or newer.
 
+With `duckdb` 1.5.x, two DuckDB bugs affect `rduckhts_roh()`,
+`rduckhts_roh_counts()`, `rduckhts_count_error_fit()` and
+`rduckhts_somalier_matched_contamination()`. An out-of-memory error can end
+the R session instead of returning an error
+(https://github.com/duckdb/duckdb/issues/26441). A failed query with 5 or more
+threads can keep its native memory until the R session ends
+(https://github.com/duckdb/duckdb/issues/26871). Raise `memory_limit` or pass
+fewer samples per query, and restart R after such a failure. The DuckDB 2.0
+branch fixes the first bug, and its development builds do not show the second.
+
 ## Quick start
 
 Every reader has the same shape, `rduckhts_<format>(con, table_name, path, ...)`.
