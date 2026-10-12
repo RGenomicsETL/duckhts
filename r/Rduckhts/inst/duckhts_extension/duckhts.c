@@ -49,6 +49,7 @@ extern bool register_duckhts_roh_functions(duckdb_connection connection);
 extern bool register_duckhts_roh_sql(duckhts_registration_t *registration);
 extern bool register_duckhts_count_error_functions(duckdb_connection connection);
 extern bool register_duckhts_count_error_sql(duckhts_registration_t *registration);
+extern bool register_duckhts_depth_sql(duckhts_registration_t *registration);
 extern void register_duckhts_somalier_contamination_functions(
     duckdb_connection connection);
 extern void register_duckhts_somalier_matched_functions(
@@ -1218,7 +1219,8 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     if (!register_duckhts_somalier_vcf_extract_sql(&registration) ||
         !register_duckhts_somalier_sex_sql(&registration) ||
         !register_duckhts_roh_sql(&registration) ||
-        !register_duckhts_count_error_sql(&registration)) {
+        !register_duckhts_count_error_sql(&registration) ||
+        !register_duckhts_depth_sql(&registration)) {
         return false;
     }
     return duckhts_macro_registration_end(&registration);

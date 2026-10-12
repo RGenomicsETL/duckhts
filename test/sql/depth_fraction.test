@@ -1,0 +1,500 @@
+# name: test/sql/depth_fraction.test
+# description: duckhts_depth_bins, duckhts_depth_region_fraction and duckhts_depth_sex_fraction on synthetic bins with a known truth
+# group: [duckhts]
+
+require duckhts
+
+# A synthetic genome of 1 Mb bins: 22 autosomes of 150 bins, X of 150 and Y of 25. Every draw is a
+# hash of its coordinates, so the data are deterministic. The GC share of a bin is uniform on
+# [0.35, 0.60]. The expected reads of a bin are 670 times a GC bias that ranges from 0.5 to 1.07,
+# times half its copy number; the count is that mean plus a normal draw with the Poisson standard
+# deviation, rounded. With about 600 reads a bin, the standard error of a whole-chromosome shift is
+# about 0.007 and that of a sex-chromosome fraction about 0.005; the tolerances below are 0.03 for
+# a shift (four standard errors) and 0.02 for a fraction.
+statement ok
+CREATE MACRO depth_u(salt, sample_id, chrom, bin) AS (hash(salt, sample_id, chrom, bin) % 1000003 + 0.5) / 1000003.0;
+
+statement ok
+CREATE TEMP TABLE depth_genome AS
+SELECT chrom, b AS bin, b * 1000000 AS start, (b + 1) * 1000000 AS "end",
+       0.35 + 0.25 * depth_u('gc', '', chrom, b) AS gc
+FROM (SELECT CAST(c AS VARCHAR) AS chrom, 150 AS bins FROM range(1, 23) t(c)
+      UNION ALL SELECT 'X', 150 UNION ALL SELECT 'Y', 25) g, range(0, g.bins) r(b);
+
+# Copies of X, Y and chromosome 8 in each sample. A second genome of the other sex at share f
+# gives X = 2 - f and Y = f under an XX major genome, X = 1 + f and Y = 1 - f under an XY one. A
+# one-copy gain of chromosome 8 in a share m of cells gives 2 + m copies.
+statement ok
+CREATE TEMP TABLE depth_design AS SELECT * FROM (VALUES
+  ('xx', 2.0, 0.0, 2.0), ('xy', 1.0, 1.0, 2.0),
+  ('xx_with_xy_10', 1.9, 0.1, 2.0), ('xy_with_xx_20', 1.2, 0.8, 2.0),
+  ('gain8_10', 2.0, 0.0, 2.1), ('gain8_30', 2.0, 0.0, 2.3), ('loss8_20', 1.0, 1.0, 1.8),
+  ('ref_xx_1', 2.0, 0.0, 2.0), ('ref_xx_2', 2.0, 0.0, 2.0), ('ref_xx_3', 2.0, 0.0, 2.0),
+  ('ref_xy_1', 1.0, 1.0, 2.0), ('ref_xy_2', 1.0, 1.0, 2.0), ('ref_xy_3', 1.0, 1.0, 2.0)
+) d(sample_id, x_copies, y_copies, chr8_copies);
+
+statement ok
+CREATE TEMP TABLE depth_raw AS
+SELECT sample_id, chrom, start, "end", gc,
+       CAST(greatest(0, round(mean + sqrt(mean) * sqrt(-2 * ln(u1)) * cos(2 * pi() * u2))) AS BIGINT) AS reads
+FROM (SELECT d.sample_id, g.chrom, g.start, g."end", g.gc,
+             670 * (1 + 3 * (g.gc - 0.45) - 20 * (g.gc - 0.45) ^ 2)
+               * CASE g.chrom WHEN 'X' THEN d.x_copies WHEN 'Y' THEN d.y_copies
+                              WHEN '8' THEN d.chr8_copies ELSE 2 END / 2 AS mean,
+             depth_u('u1', d.sample_id, g.chrom, g.bin) AS u1,
+             depth_u('u2', d.sample_id, g.chrom, g.bin) AS u2
+      FROM depth_design d CROSS JOIN depth_genome g);
+
+statement ok
+CREATE TEMP TABLE depth_corrected AS SELECT * FROM duckhts_depth_bins('depth_raw');
+
+statement ok
+CREATE TEMP VIEW depth_tests AS SELECT * FROM depth_corrected WHERE sample_id NOT LIKE 'ref_%';
+
+statement ok
+CREATE TEMP VIEW depth_references AS
+SELECT c.*, CASE WHEN c.sample_id LIKE 'ref_xy_%' THEN 'XY' ELSE 'XX' END AS sex
+FROM depth_corrected c WHERE c.sample_id LIKE 'ref_%';
+
+statement ok
+CREATE TEMP TABLE depth_chromosomes AS
+SELECT CAST(c AS VARCHAR) AS region, CAST(c AS VARCHAR) AS chrom, 0 AS start, 150000000 AS "end"
+FROM range(1, 23) t(c);
+
+# ---- Corrected bins ------------------------------------------------------------------------------
+
+query I
+SELECT column_name || ' ' || column_type FROM (DESCRIBE SELECT * FROM duckhts_depth_bins('depth_raw'));
+----
+sample_id VARCHAR
+chrom VARCHAR
+start BIGINT
+end BIGINT
+reads BIGINT
+gc DOUBLE
+mappability DOUBLE
+gc_stratum INTEGER
+stratum_bins BIGINT
+expected DOUBLE
+ratio DOUBLE
+log2_ratio DOUBLE
+reason VARCHAR
+kept BOOLEAN
+method VARCHAR
+
+# One row per input row; every synthetic bin is kept, including the Y bins without reads of the
+# XX genomes, because no rule but max_ratio looks at a bin's count.
+query IIII
+SELECT count(*), count(*) FILTER (WHERE kept), count(*) FILTER (WHERE chrom = 'Y' AND reads = 0 AND kept),
+       count(DISTINCT method)
+FROM depth_corrected;
+----
+45175	45175	150	1
+
+# The planted GC bias is strong in the counts and gone from the ratios: for the autosomes other
+# than 8 the correlation of the count with GC is above 0.7 and that of the ratio below 0.1, and the
+# mean ratio of every GC quintile is within 0.01 of 1 while the mean count ranges by more than a
+# third.
+query I
+SELECT count(*) FROM (
+  SELECT sample_id, corr(reads, gc) AS raw, corr(ratio, gc) AS corrected
+  FROM depth_corrected WHERE chrom NOT IN ('X', 'Y', '8') GROUP BY sample_id)
+WHERE raw > 0.7 AND abs(corrected) < 0.1;
+----
+13
+
+query II
+SELECT bool_and(abs(mean_ratio - 1) < 0.01), max(mean_reads) / min(mean_reads) > 1.33
+FROM (SELECT quintile, avg(ratio) AS mean_ratio, avg(reads) AS mean_reads
+      FROM (SELECT ntile(5) OVER (ORDER BY gc) AS quintile, ratio, reads
+            FROM depth_corrected WHERE sample_id = 'xx' AND chrom NOT IN ('X', 'Y', '8'))
+      GROUP BY quintile);
+----
+true	true
+
+# The median ratio of the kept autosomal bins is 1, and the log2 ratio is log2 of the ratio.
+query II
+SELECT bool_and(abs(m - 1) < 1e-12), bool_and(d < 1e-12)
+FROM (SELECT sample_id, median(ratio) AS m, max(abs(log2_ratio - log2(ratio))) AS d
+      FROM depth_corrected WHERE kept AND chrom NOT IN ('X', 'Y') GROUP BY sample_id);
+----
+true	true
+
+# mappability is optional: a column of ones gives the same rows as no column.
+statement ok
+CREATE TEMP VIEW depth_raw_mappable AS SELECT *, 1.0 AS mappability FROM depth_raw;
+
+query I
+SELECT count(*) FROM (
+  SELECT sample_id, chrom, start, expected, ratio, reason FROM depth_corrected
+  EXCEPT
+  SELECT sample_id, chrom, start, expected, ratio, reason FROM duckhts_depth_bins('depth_raw_mappable'));
+----
+0
+
+# The reasons a bin is not kept. A bin below min_mappability, a bin without GC, a bin without a
+# count, a bin in a GC stratum with too few training bins, and a bin above max_ratio. A bin above
+# max_ratio still has a ratio; bins that fail a bin rule have none.
+statement ok
+CREATE TEMP TABLE depth_rules AS
+SELECT sample_id, chrom, start, "end", reads, gc, 1.0 AS mappability FROM depth_raw WHERE sample_id = 'xx'
+UNION ALL SELECT 'xx', '1', 200000000, 201000000, 600, 0.45, 0.5
+UNION ALL SELECT 'xx', '1', 201000000, 202000000, 600, NULL, 1.0
+UNION ALL SELECT 'xx', '1', 202000000, 203000000, NULL, 0.45, 1.0
+UNION ALL SELECT 'xx', '1', 203000000, 204000000, 600, 0.95, 1.0
+UNION ALL SELECT 'xx', '1', 204000000, 205000000, 6000, 0.45, 1.0;
+
+query IIII
+SELECT start, reason, kept, ratio IS NOT NULL FROM duckhts_depth_bins('depth_rules')
+WHERE start >= 200000000 ORDER BY start;
+----
+200000000	low_mappability	false	false
+201000000	no_gc	false	false
+202000000	no_reads	false	false
+203000000	sparse_stratum	false	false
+204000000	high_ratio	false	true
+
+# A shorter bin (the end of a contig) is expected to hold proportionally fewer reads.
+statement ok
+CREATE TEMP TABLE depth_half_bin AS
+SELECT sample_id, chrom, start, CASE WHEN chrom = '2' AND start = 149000000 THEN 149500000 ELSE "end" END AS "end",
+       CASE WHEN chrom = '2' AND start = 149000000 THEN reads // 2 ELSE reads END AS reads, gc
+FROM depth_raw WHERE sample_id = 'xx';
+
+query I
+SELECT abs(b.expected - 0.5 * a.expected) < 1e-6 * a.expected
+FROM duckhts_depth_bins('depth_half_bin') b
+JOIN depth_corrected a USING (sample_id, chrom, start)
+WHERE b.chrom = '2' AND b.start = 149000000;
+----
+true
+
+# Option and row errors. Options are checked also when the relation is empty.
+statement ok
+CREATE TEMP TABLE depth_empty AS SELECT * FROM depth_raw WHERE false;
+
+query I
+SELECT count(*) FROM duckhts_depth_bins('depth_empty');
+----
+0
+
+statement error
+SELECT * FROM duckhts_depth_bins('depth_empty', gc_step := 0);
+----
+gc_step must be in (0, 1]
+
+statement error
+SELECT * FROM duckhts_depth_bins('depth_raw', min_mappability := 1.5);
+----
+min_mappability must be in [0, 1]
+
+statement error
+SELECT * FROM duckhts_depth_bins('depth_raw', min_stratum_bins := 2.5);
+----
+min_stratum_bins must be a whole number
+
+statement error
+SELECT * FROM duckhts_depth_bins('depth_raw', outlier_quantile := 0.5);
+----
+outlier_quantile must be in [0, 0.5)
+
+statement error
+SELECT * FROM duckhts_depth_bins('depth_raw', max_ratio := 1);
+----
+max_ratio must be finite and above 1
+
+statement ok
+CREATE TEMP VIEW depth_percent_gc AS SELECT sample_id, chrom, start, "end", reads, gc * 100 AS gc FROM depth_raw;
+
+statement error
+SELECT * FROM duckhts_depth_bins('depth_percent_gc');
+----
+gc must be a share in [0, 1]
+
+statement ok
+CREATE TEMP VIEW depth_negative AS SELECT sample_id, chrom, start, "end", -reads AS reads, gc FROM depth_raw;
+
+statement error
+SELECT * FROM duckhts_depth_bins('depth_negative');
+----
+reads must not be negative
+
+statement ok
+CREATE TEMP VIEW depth_fractional AS SELECT sample_id, chrom, start, "end", reads + 0.5 AS reads, gc FROM depth_raw;
+
+statement error
+SELECT * FROM duckhts_depth_bins('depth_fractional');
+----
+reads must be whole numbers
+
+statement ok
+CREATE TEMP VIEW depth_null_sample AS SELECT NULL::VARCHAR AS sample_id, chrom, start, "end", reads, gc FROM depth_raw;
+
+statement error
+SELECT * FROM duckhts_depth_bins('depth_null_sample');
+----
+sample_id must not be NULL
+
+statement ok
+CREATE TEMP VIEW depth_reversed AS SELECT sample_id, chrom, "end" AS start, start AS "end", reads, gc FROM depth_raw;
+
+statement error
+SELECT * FROM duckhts_depth_bins('depth_reversed');
+----
+bins need 0 <= start < end
+
+statement ok
+CREATE TEMP VIEW depth_no_gc AS SELECT sample_id, chrom, start, "end", reads FROM depth_raw;
+
+statement error
+SELECT * FROM duckhts_depth_bins('depth_no_gc');
+----
+gc
+
+# ---- Region fraction -----------------------------------------------------------------------------
+
+query I
+SELECT column_name || ' ' || column_type
+FROM (DESCRIBE SELECT * FROM duckhts_depth_region_fraction('depth_tests', 'depth_chromosomes'));
+----
+sample_id VARCHAR
+region VARCHAR
+bins BIGINT
+baseline_bins BIGINT
+ratio DOUBLE
+shift DOUBLE
+shift_se DOUBLE
+shift_low DOUBLE
+shift_high DOUBLE
+dispersion DOUBLE
+reference_shift DOUBLE
+reference_samples BIGINT
+status VARCHAR
+method VARCHAR
+
+# The planted one-copy changes of chromosome 8 are recovered within 0.03, and their intervals hold
+# the truth: a gain in 10% and 30% of cells, and a loss in 20%.
+query IIII
+SELECT sample_id, abs(shift - truth) < 0.03, shift_low <= truth AND truth <= shift_high, status
+FROM duckhts_depth_region_fraction('depth_tests', 'depth_chromosomes')
+JOIN (VALUES ('gain8_10', 0.1), ('gain8_30', 0.3), ('loss8_20', -0.2)) t(sample_id, truth) USING (sample_id)
+WHERE region = '8' ORDER BY sample_id;
+----
+gain8_10	true	true	ok
+gain8_30	true	true	ok
+loss8_20	true	true	ok
+
+# The same with the reference set.
+query IIIII
+SELECT sample_id, abs(shift - truth) < 0.03, shift_low <= truth AND truth <= shift_high,
+       reference_samples, status
+FROM duckhts_depth_region_fraction('depth_tests', 'depth_chromosomes', 'depth_references')
+JOIN (VALUES ('gain8_10', 0.1), ('gain8_30', 0.3), ('loss8_20', -0.2)) t(sample_id, truth) USING (sample_id)
+WHERE region = '8' ORDER BY sample_id;
+----
+gain8_10	true	true	6	ok
+gain8_30	true	true	6	ok
+loss8_20	true	true	6	ok
+
+# Unchanged chromosomes: every estimate within 0.03 of 0. In the four samples without a change of
+# chromosome 8, the standard errors are calibrated: over the 84 sample-chromosome pairs the standard
+# deviation of shift / shift_se is in [0.8, 1.25] (its own relative standard error is about 8%) and
+# the 95% intervals hold 0 at least 85% of the time.
+query I
+SELECT bool_and(abs(shift) < 0.03)
+FROM duckhts_depth_region_fraction('depth_tests', 'depth_chromosomes')
+WHERE region != '8';
+----
+true
+
+query II
+SELECT stddev_pop(shift / shift_se) BETWEEN 0.8 AND 1.25,
+       avg(CAST(shift_low <= 0 AND 0 <= shift_high AS DOUBLE)) >= 0.85
+FROM duckhts_depth_region_fraction('depth_tests', 'depth_chromosomes')
+WHERE region != '8' AND sample_id IN ('xx', 'xy', 'xx_with_xy_10', 'xy_with_xx_20');
+----
+true	true
+
+# A change elsewhere moves the baseline: with chromosome 8 gained in 30% of cells, the baseline
+# holds 150 of 3,150 bins at a ratio of 1.15, and every other chromosome shifts by about -0.014.
+query I
+SELECT abs(avg(shift) + 0.014) < 0.005
+FROM duckhts_depth_region_fraction('depth_tests', 'depth_chromosomes')
+WHERE region != '8' AND sample_id = 'gain8_30';
+----
+true
+
+# The X of an XY genome is a one-copy loss in every cell.
+statement ok
+CREATE TEMP TABLE depth_x_region AS SELECT 'X' AS region, 'X' AS chrom, 0 AS start, 150000000 AS "end";
+
+query II
+SELECT sample_id, abs(shift + 1) < 0.03 FROM duckhts_depth_region_fraction('depth_tests', 'depth_x_region')
+WHERE sample_id = 'xy';
+----
+xy	true
+
+# A region of several intervals counts each bin once, by its midpoint: chromosome 8 given as two
+# overlapping halves equals chromosome 8 given once.
+statement ok
+CREATE TEMP TABLE depth_two_halves AS
+SELECT * FROM (VALUES ('8', '8', 0, 80000000), ('8', '8', 70000000, 150000000), ('empty', '8', 400000000, 500000000))
+  t(region, chrom, start, "end");
+
+query IIII
+SELECT a.sample_id, a.bins = b.bins, abs(a.shift - b.shift) < 1e-12, c.status
+FROM duckhts_depth_region_fraction('depth_tests', 'depth_two_halves') a
+JOIN duckhts_depth_region_fraction('depth_tests', 'depth_chromosomes') b USING (sample_id, region)
+JOIN duckhts_depth_region_fraction('depth_tests', 'depth_two_halves') c ON c.sample_id = a.sample_id AND c.region = 'empty'
+WHERE a.region = '8' AND a.sample_id = 'gain8_10';
+----
+gain8_10	true	true	no_bins
+
+# Without a reference the interval is the estimate +- 1.959964 standard errors. With a reference
+# the tested sample is left out of its own reference, and the interval uses the t quantile with one
+# degree of freedom fewer than the reference samples: 4.302653 for three.
+query II
+SELECT round((shift_high - shift) / shift_se, 6), reference_samples IS NULL
+FROM duckhts_depth_region_fraction('depth_tests', 'depth_chromosomes')
+WHERE sample_id = 'xx' AND region = '1';
+----
+1.959964	true
+
+statement ok
+CREATE TEMP VIEW depth_three_references AS SELECT * FROM depth_references WHERE sample_id LIKE 'ref_xx_%' OR sample_id = 'ref_xy_1';
+
+query III
+SELECT sample_id, reference_samples, round((shift_high - shift) / shift_se, 6)
+FROM duckhts_depth_region_fraction('depth_three_references', 'depth_chromosomes', 'depth_three_references')
+WHERE region = '1' ORDER BY sample_id;
+----
+ref_xx_1	3	4.302653
+ref_xx_2	3	4.302653
+ref_xx_3	3	4.302653
+ref_xy_1	3	4.302653
+
+statement ok
+CREATE TEMP VIEW depth_one_reference AS SELECT * FROM depth_references WHERE sample_id = 'ref_xx_1';
+
+query III
+SELECT reference_samples, shift_se IS NULL, status
+FROM duckhts_depth_region_fraction('depth_tests', 'depth_chromosomes', 'depth_one_reference')
+WHERE sample_id = 'xx' AND region = '1';
+----
+1	true	few_reference_samples
+
+statement ok
+CREATE TEMP VIEW depth_bad_kept AS SELECT sample_id, chrom, start, "end", reads, 0.0 AS expected, true AS kept FROM depth_corrected;
+
+statement error
+SELECT * FROM duckhts_depth_region_fraction('depth_bad_kept', 'depth_chromosomes');
+----
+kept bins need reads >= 0 and a finite expected > 0
+
+statement ok
+CREATE TEMP TABLE depth_bad_region AS SELECT '1' AS region, '1' AS chrom, 10 AS start, 5 AS "end";
+
+statement error
+SELECT * FROM duckhts_depth_region_fraction('depth_tests', 'depth_bad_region');
+----
+regions need 0 <= start < end
+
+# ---- Sex-chromosome fraction ---------------------------------------------------------------------
+
+query I
+SELECT column_name || ' ' || column_type FROM (DESCRIBE SELECT * FROM duckhts_depth_sex_fraction('depth_tests'));
+----
+sample_id VARCHAR
+autosomal_bins BIGINT
+x_bins BIGINT
+y_bins BIGINT
+dispersion DOUBLE
+x_copies DOUBLE
+x_copies_se DOUBLE
+y_copies DOUBLE
+y_copies_se DOUBLE
+major_sex VARCHAR
+fraction_x DOUBLE
+fraction_x_se DOUBLE
+fraction_y DOUBLE
+fraction_y_se DOUBLE
+fraction DOUBLE
+fraction_se DOUBLE
+fraction_low DOUBLE
+fraction_high DOUBLE
+agreement_z DOUBLE
+reference_samples BIGINT
+status VARCHAR
+method VARCHAR
+
+# Pure genomes and the two mixtures: the major genome and the fraction within 0.02 of the truth,
+# from X alone, from Y alone and combined.
+query IIIIII
+SELECT sample_id, major_sex, abs(fraction_x - truth) < 0.02, abs(fraction_y - truth) < 0.02,
+       abs(fraction - truth) < 0.02, status
+FROM duckhts_depth_sex_fraction('depth_tests')
+JOIN (VALUES ('xx', 'XX', 0.0), ('xy', 'XY', 0.0), ('xx_with_xy_10', 'XX', 0.1), ('xy_with_xx_20', 'XY', 0.2))
+  t(sample_id, sex, truth) USING (sample_id)
+WHERE major_sex = sex ORDER BY sample_id;
+----
+xx	XX	true	true	true	ok
+xx_with_xy_10	XX	true	true	true	ok
+xy	XY	true	true	true	ok
+xy_with_xx_20	XY	true	true	true	ok
+
+# The same with a reference set of three XX and three XY genomes.
+query IIII
+SELECT sample_id, major_sex, abs(fraction - truth) < 0.02, reference_samples
+FROM duckhts_depth_sex_fraction('depth_tests', 'depth_references')
+JOIN (VALUES ('xx', 0.0), ('xy', 0.0), ('xx_with_xy_10', 0.1), ('xy_with_xx_20', 0.2))
+  t(sample_id, truth) USING (sample_id)
+ORDER BY sample_id;
+----
+xx	XX	true	6
+xx_with_xy_10	XX	true	6
+xy	XY	true	6
+xy_with_xx_20	XY	true	6
+
+# A reference sample tested against the reference set is left out of it.
+query II
+SELECT count(*), bool_and(reference_samples = 5) FROM duckhts_depth_sex_fraction('depth_references', 'depth_references');
+----
+6	true
+
+# Without XX references, two X copies are twice one and the Y background is 0; without an XY
+# reference there are no levels.
+statement ok
+CREATE TEMP VIEW depth_xy_references AS SELECT * FROM depth_references WHERE sex = 'XY';
+
+statement ok
+CREATE TEMP VIEW depth_xx_references AS SELECT * FROM depth_references WHERE sex = 'XX';
+
+query III
+SELECT sample_id, abs(fraction - 0.1) < 0.02, status FROM duckhts_depth_sex_fraction('depth_tests', 'depth_xy_references')
+WHERE sample_id = 'xx_with_xy_10';
+----
+xx_with_xy_10	true	ok
+
+query III
+SELECT sample_id, fraction IS NULL, status FROM duckhts_depth_sex_fraction('depth_tests', 'depth_xx_references')
+WHERE sample_id = 'xx_with_xy_10';
+----
+xx_with_xy_10	true	no_xy_reference
+
+# Missing X or Y bins: the estimate comes from the other chromosome.
+statement ok
+CREATE TEMP VIEW depth_no_y AS SELECT * FROM depth_tests WHERE chrom != 'Y';
+
+query IIII
+SELECT sample_id, fraction_y IS NULL, abs(fraction - 0.1) < 0.02, status
+FROM duckhts_depth_sex_fraction('depth_no_y') WHERE sample_id = 'xx_with_xy_10';
+----
+xx_with_xy_10	true	true	no_y_bins
+
+statement ok
+CREATE TEMP VIEW depth_bad_sex AS SELECT *, 'XXY' AS sex FROM depth_corrected WHERE sample_id LIKE 'ref_%';
+
+statement error
+SELECT * FROM duckhts_depth_sex_fraction('depth_tests', 'depth_bad_sex');
+----
+reference sex must be XX or XY

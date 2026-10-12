@@ -4,6 +4,25 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- Copy-number fractions from read depth in fixed bins
+  (https://github.com/RGenomicsETL/duckhts/issues/343, phase 1; contract in
+  `design/depth_fraction_lane.md`). Three table macros over caller-named
+  relations, for low-pass, cell-free DNA and mosaic uses:
+  `duckhts_depth_bins` corrects bin counts (for example from `bam_bin_counts`,
+  with GC from `fasta_nuc`) by the median read rate of each GC stratum and
+  returns each bin's expected count, depth ratio, log2 ratio and whether it is
+  kept, with the reason when not; an optional `mappability` column filters
+  bins. `duckhts_depth_region_fraction` estimates the share of cells with a
+  one-copy gain or loss of each named region as twice the relative depth
+  shift against the other autosomes, with a quasi-Poisson interval from the
+  bins or, with a reference set, a leave-one-out t interval.
+  `duckhts_depth_sex_fraction` estimates the share of a second genome of the
+  other sex from X and Y depth, from each chromosome and combined, with an
+  optional reference set of XX and XY samples that calibrates the copy levels.
+  SQL tests plant a GC bias, one-copy changes in 10% to 30% of cells and
+  mixtures of XX and XY genomes at 10% and 20%, and recover them within the
+  declared tolerances. The state model of the issue is not implemented.
+
 - `benchmarks/benchmark_roh_truth_and_mixtures.md` tests the ROH decodes
   where the answer is known. Synthetic chr20 children of two unrelated
   founders of one population (100 children, five populations) carry planted

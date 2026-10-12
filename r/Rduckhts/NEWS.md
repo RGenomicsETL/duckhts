@@ -2,6 +2,14 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- `rduckhts_depth_bins()`, `rduckhts_depth_region_fraction()` and
+  `rduckhts_depth_sex_fraction()` wrap the new depth macros: GC-corrected bin
+  ratios from bin counts, the share of cells with a one-copy change of each
+  named region, and the share of a second genome of the other sex from X and
+  Y depth, each estimator with an optional reference set. The tests compare
+  every value with an independent base R implementation of the same formulas
+  and recover a planted gain and an XX/XY mixture.
+
 - `rduckhts_roh_counts(fit_table = ...)` reads the counts relation once.
   A counts relation that held a join was kept in full in memory by DuckDB,
   about three times the memory of the call without `fit_table` for 100
