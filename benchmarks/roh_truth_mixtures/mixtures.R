@@ -188,7 +188,7 @@ roh_mixture_run <- function(extension, cli, output_dir, size = c("full", "reduce
   runs <- rbind(decode("with_term", with_term), decode("without_term", without_term))
 
   observations <- recorder$table()
-  roh_truth_gate(observations)
+  roh_truth_gate(observations, file.path(output_dir, "mixture_observations.csv"))
 
   reference_runs <- runs[runs$decode == "with_term" & runs$sample == roh_mixture_label(0), , drop = FALSE]
   froh <- do.call(rbind, lapply(c("with_term", "without_term"), function(name) {

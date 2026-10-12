@@ -602,7 +602,7 @@ roh_truth_run <- function(extension, cli, output_dir, size = c("full", "reduced"
   high <- roh_truth_read_runs(decode_fitted("fit_high", shifted(1)))
 
   observations <- recorder$table()
-  roh_truth_gate(observations)
+  roh_truth_gate(observations, file.path(output_dir, "truth_observations.csv"))
   runs <- do.call(rbind, all_runs)
   scores <- roh_truth_score(runs, declaration$arms, children, built$segments, declaration$min_call_bases)
   pooled <- roh_truth_summary(scores, c("arm", "run_class"))

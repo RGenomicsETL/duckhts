@@ -83,12 +83,16 @@ roh_truth_recorder <- function(cli, extension, work) {
   list(record = record, overhead = overhead, table = table)
 }
 
-# Stop when any recorded query spilled or passed its ceiling.
-roh_truth_gate <- function(observations) {
+# Stop when any recorded query spilled or passed its ceiling. The
+# observations are written to `path` first, so a stopped render keeps them.
+roh_truth_gate <- function(observations, path) {
+  utils::write.csv(observations, path, row.names = FALSE)
   bad <- observations[!observations$no_spill | !observations$within_ceiling, , drop = FALSE]
   if (nrow(bad)) {
-    print(bad[c("observation", "max_rss_mib", "ceiling_mib", "peak_temp_bytes")])
-    stop("a query spilled or passed its memory ceiling", call. = FALSE)
+    stop("a query spilled or passed its memory ceiling: ",
+         paste(sprintf("%s (peak RSS %.1f MiB, ceiling %.1f MiB, temporary bytes %.0f)",
+                       bad$observation, bad$max_rss_mib, bad$ceiling_mib, bad$peak_temp_bytes),
+               collapse = "; "), call. = FALSE)
   }
   invisible(TRUE)
 }
