@@ -117,6 +117,23 @@ per sample and without a verdict:
   The FROH change is gained minus lost over the span; the changed bases of
   the sensitivity table are gained plus lost.
 
+**Gained bases**, declared after the stability render and before any decode
+that reports `gained_bases`, in its own commit. `duckhts_roh_counts_fitted`
+now also gives each run `gained_bases`: the bases that its decode at
+w + `artefact_weight_sd` calls in runs that meet the run (share a base or
+abut) but outside every run at w. Runs at w + sd that meet no run at w have
+no row. The driver decodes once more at w + `artefact_weight_sd` with
+`artefact_weight_sd` 0 to count them. The report gives, per sample and
+without a verdict:
+
+- the `gained_bases` of the runs of (c), summed, and the bases of the w + sd
+  decode in runs that meet no run of (c). The summed column must equal the
+  bases of that extra decode outside the runs of (c) in runs that meet one,
+  or the render stops;
+- for the `artefact_weight` × 2 rows: the gained bases of the decomposition,
+  split into those in runs that meet a run of (c) and those in new runs that
+  meet none.
+
 **Gates.** Each query (the fit, every decode, three empty runs) runs in a
 fresh DuckDB CLI process under `/usr/bin/time`, with the JSON profiler and
 `max_temp_directory_size` set to zero, at two threads. The render stops if an
@@ -152,13 +169,13 @@ ROH_FITTED_SIZE=reduced taskset -c 0-3 Rscript -e \
 
 | Item                         | Value                                                            |
 |:-----------------------------|:-----------------------------------------------------------------|
-| revision                     | e7667ff353725f27c1dc1c64732239fdd5a9ec21                         |
-| src_tree                     | 0340e562109701f322a733450b16be60a5daba10                         |
+| revision                     | bc2bc025074df976ebcdacafd458e3c54197f358                         |
+| src_tree                     | d8d9a75ea2378d58e4524438db2e204272c6b76f                         |
 | input_identities             | match the registry                                               |
-| extension_sha256             | cfcb1394601761f2a5ebd1a0d6745fea6099fc6b13232b388accb88938decf97 |
+| extension_sha256             | e983edbbe3c312f6e8eac9fef495a0bb060cfa711bf2f9e1c2b2d6f885de48d3 |
 | duckdb_cli                   | v1.5.1 (Variegata) 7dbb2e646f                                    |
 | r_version                    | R version 4.6.0 (2026-04-24)                                     |
-| host_load                    | 2.90, 1.90, 1.72                                                 |
+| host_load                    | 1.11, 1.18, 0.88                                                 |
 | cpu_affinity                 | 8-15                                                             |
 | threads                      | 2                                                                |
 | samples                      | NA18507,HG00403,HG00188                                          |
@@ -293,6 +310,27 @@ gained bases are called outside any run of (c).
 | × 2    | HG00403 |    +0.00280 |       0 |                       0 |                          0 | 179,992 |               none |                  0.0% |
 | × 2    | HG00188 |    +0.00294 |       0 |                       0 |                          0 | 188,954 |               none |                  0.0% |
 
+### Gained bases
+
+`gained_bases` of the runs of (c), from its decode at w + `artefact_weight_sd`,
+and the bases of that decode in runs that meet no run of (c), which no row
+reports.
+
+| Sample  |     w + sd | Runs with a gain | gained_bases, summed | In new runs, not reported |
+|:--------|-----------:|-----------------:|---------------------:|--------------------------:|
+| HG00188 | 0.00276426 |                6 |               66,465 |                         0 |
+| HG00403 | 0.00351822 |                3 |               19,185 |                         0 |
+| NA18507 | 0.00400122 |                8 |              111,976 |                    65,969 |
+
+The gained bases of the `artefact_weight` × 2 rows, by whether their run at
+× 2 meets a run of (c).
+
+| Change | Sample  |     Weight |  Gained | Next to a run of (c) | In new runs | Share next to a run |
+|:-------|:--------|-----------:|--------:|---------------------:|------------:|--------------------:|
+| × 2    | NA18507 | 0.00531439 | 318,363 |              189,073 |     129,290 |               59.4% |
+| × 2    | HG00403 | 0.00591011 | 179,992 |              179,992 |           0 |              100.0% |
+| × 2    | HG00188 | 0.00365029 | 188,954 |              124,361 |      64,593 |               65.8% |
+
 ## Gates
 
 Every query, with its latency, peak RSS, DuckDB’s peak buffer memory, its
@@ -301,26 +339,27 @@ RSS above its ceiling, and it reached this table.
 
 | Query           | Kind            | Seconds | Peak RSS MiB | Peak buffer MiB | Ceiling MiB | Temporary bytes |
 |:----------------|:----------------|--------:|-------------:|----------------:|------------:|----------------:|
-| empty_1         | empty           |   0.000 |         39.6 |             0.2 |             |               0 |
+| empty_1         | empty           |   0.000 |         39.7 |             0.2 |             |               0 |
 | empty_2         | empty           |   0.007 |         39.8 |             0.2 |             |               0 |
-| empty_3         | empty           |   0.002 |         40.1 |             0.2 |             |               0 |
-| fit             | fit             |   3.319 |         70.5 |            40.9 |       153.9 |               0 |
-| genotype_gt30   | genotype_decode |   0.166 |         93.4 |            97.1 |       117.1 |               0 |
-| genotype_gt100  | genotype_decode |   0.161 |         93.0 |            97.1 |       117.1 |               0 |
-| decode_a        | count_decode    |   0.077 |         67.2 |            40.3 |        84.8 |               0 |
-| decode_b        | count_decode    |   0.089 |         72.1 |            40.3 |        84.8 |               0 |
-| decode_c        | count_decode    |   0.109 |         70.0 |            40.2 |        84.8 |               0 |
-| scalar_defaults | count_decode    |   0.043 |         60.8 |            36.9 |        84.8 |               0 |
-| perturbed_1     | count_decode    |   0.109 |         69.2 |            40.3 |        84.8 |               0 |
-| perturbed_2     | count_decode    |   0.107 |         67.0 |            40.3 |        84.8 |               0 |
-| perturbed_3     | count_decode    |   0.108 |         69.8 |            40.3 |        84.8 |               0 |
-| perturbed_4     | count_decode    |   0.150 |         70.2 |            29.3 |        84.8 |               0 |
-| perturbed_5     | count_decode    |   0.149 |         66.8 |            29.3 |        84.8 |               0 |
-| perturbed_6     | count_decode    |   0.149 |         69.7 |            29.2 |        84.8 |               0 |
-| perturbed_7     | count_decode    |   0.108 |         70.1 |            40.3 |        84.8 |               0 |
-| perturbed_8     | count_decode    |   0.108 |         68.6 |            40.3 |        84.8 |               0 |
-| perturbed_9     | count_decode    |   0.108 |         68.9 |            40.3 |        84.8 |               0 |
-| perturbed_10    | count_decode    |   0.124 |         70.5 |            40.3 |        84.8 |               0 |
+| empty_3         | empty           |   0.000 |         39.9 |             0.2 |             |               0 |
+| fit             | fit             |   3.328 |         69.3 |            39.8 |       153.9 |               0 |
+| genotype_gt30   | genotype_decode |   0.178 |         93.2 |            97.1 |       117.1 |               0 |
+| genotype_gt100  | genotype_decode |   0.165 |         93.5 |            97.1 |       117.1 |               0 |
+| decode_a        | count_decode    |   0.077 |         66.7 |            40.5 |        84.7 |               0 |
+| decode_b        | count_decode    |   0.078 |         70.7 |            40.5 |        84.7 |               0 |
+| decode_c        | count_decode    |   0.109 |         70.9 |            39.9 |        84.7 |               0 |
+| scalar_defaults | count_decode    |   0.037 |         61.0 |            36.9 |        84.7 |               0 |
+| perturbed_1     | count_decode    |   0.113 |         67.5 |            40.5 |        84.7 |               0 |
+| perturbed_2     | count_decode    |   0.113 |         65.8 |            41.0 |        84.7 |               0 |
+| perturbed_3     | count_decode    |   0.109 |         67.2 |            40.5 |        84.7 |               0 |
+| perturbed_4     | count_decode    |   0.148 |         69.6 |            29.4 |        84.7 |               0 |
+| perturbed_5     | count_decode    |   0.155 |         65.7 |            29.4 |        84.7 |               0 |
+| perturbed_6     | count_decode    |   0.155 |         65.2 |            29.4 |        84.7 |               0 |
+| perturbed_7     | count_decode    |   0.109 |         70.0 |            40.5 |        84.7 |               0 |
+| perturbed_8     | count_decode    |   0.109 |         71.5 |            40.5 |        84.7 |               0 |
+| perturbed_9     | count_decode    |   0.112 |         70.8 |            40.5 |        84.7 |               0 |
+| perturbed_10    | count_decode    |   0.149 |         67.7 |            41.1 |        84.7 |               0 |
+| stability_high  | count_decode    |   0.151 |         68.4 |            29.4 |        84.7 |               0 |
 
 Every observation is in `benchmarks/results/roh-fitted-emission/`: the fit, the four numbers of every decode, every run, the metrics and the queries.
 
@@ -341,7 +380,8 @@ Every observation is in `benchmarks/results/roh-fitted-emission/`: the fit, the 
   an interval of the fit, and the × 0.5 and × 2 of `artefact_weight` were
   declared before its interval existed.
 - `stable_fraction` measures only the bases of a run that a change of the
-  artefact weight would lose. Bases that a change would add outside the runs
-  have no `stable_fraction`; the decomposition counts them as gained.
+  artefact weight would lose. `gained_bases` counts the bases that the higher
+  weight of the interval adds next to a run; bases it calls in new runs that
+  meet no run have no row, and this report counts them separately.
 - The spreads of the fit (`spread_hom`, `spread_het`) are not used by the
   decode.
