@@ -76,5 +76,22 @@ roh_fitted_declaration <- list(
   #     in runs with stable_fraction below 1.
   stability = list(decode = "c", perturbed_parameter = "artefact_weight",
                    quantiles = c(0, 0.25, 0.5, 0.75, 1)),
+  # Gained bases, declared before any decode that reports gained_bases. A run
+  # of one decode meets a run of another when they share a base or abut, as
+  # duckhts_roh_counts_fitted defines it. Reported per sample, with no
+  # verdict:
+  #   - the gained_bases of the runs of the stability decode, summed, and the
+  #     bases of its w + sd decode in runs that meet no run of it, which no
+  #     row reports. For that count the driver decodes once more at
+  #     w + artefact_weight_sd (kept in [0, 0.05]) with artefact_weight_sd 0.
+  #     The bases of that decode outside the runs of the stability decode, in
+  #     runs that meet one, must equal the summed gained_bases, or the render
+  #     stops: a real-data check of the column;
+  #   - for each perturbation of `perturbed_parameter` that scales by more
+  #     than `scale_above` (the x 2 rows): its gained bases, split into those
+  #     in runs that meet a run of the stability decode (the bases a
+  #     gained_bases at that weight would count) and those in runs that meet
+  #     none (new runs, not reported by any row).
+  gained = list(scale_above = 1),
   # DuckDB threads of every decode and of the fit.
   threads = 2L)
