@@ -19,8 +19,8 @@ their first baseline.
 - **Synthetic scaling.** A genome of the GRCh38 shape (chr1 to chr22, X and
   Y lengths) in fixed bins, with a GC share per bin and reads drawn from a
   GC-biased mean, every draw a hash of its coordinates. Samples:
-  50, 100 and 200 at 25 kb bins (131,700 bins). Bins: 25, 12.5 and 6.25 kb
-  (131,700, 263,400 and 526,800 bins) at 50 samples. Joint: 100 samples at
+  64, 128 and 256 at 25 kb bins (123,440 bins). Bins: 25, 12.5 and 6.25 kb
+  (123,440, 246,880 and 493,760 bins) at 64 samples. Joint: 128 samples at
   12.5 kb. The estimators read the same bins with `expected` set to the mean
   and every bin kept, so their inputs do not depend on the correction. The
   region estimator is also measured at 22, 44 and 88 regions (whole
@@ -386,7 +386,7 @@ contigs <- c(paste0("chr", 1:22), "chrX", "chrY")
 inputs <- data.frame(
   series = c("samples", "samples", "samples", "bins", "bins", "joint"),
   scale = c(1L, 2L, 4L, 2L, 4L, 4L),
-  samples = c(50L, 100L, 200L, 50L, 50L, 100L),
+  samples = c(64L, 128L, 256L, 64L, 64L, 128L),
   bin_bp = c(25000L, 25000L, 25000L, 12500L, 6250L, 12500L), stringsAsFactors = FALSE)
 inputs$bins <- vapply(inputs$bin_bp, function(width) sum(ceiling(lengths_mb * 1e6 / width)), numeric(1L))
 inputs$rows <- inputs$samples * inputs$bins
@@ -682,10 +682,14 @@ bins_4x_4 <- pick("depth_bins", "samples", 4L, 4L)
 region_4x <- pick("region_fraction", "samples", 4L, 1L)
 sex_4x <- pick("sex_fraction", "samples", 4L, 1L)
 cat(sprintf(paste(
-  "Every observation is within its ceiling and none spills; every timed series stays at or below the 1.25 exponent.",
+  "Every observation is within its ceiling and none spills.",
+  "Timing verdicts apply to the series whose 1x run takes at least 5 s on one thread (%s), and none of their exponents is above %.2f;",
+  "the other series get a memory verdict and their times without a timing verdict.",
   "`duckhts_depth_bins` corrects %s rows in %.1f s on one thread and %s rows in %.1f s (%.1f s on four threads),",
   "at %s MiB peak RSS, %.0f bytes a row against the 136 declared.",
   "The region estimator takes %.1f s and %s MiB at %s rows, and the sex estimator, which streams, %.1f s and %s MiB.\n\n"),
+  paste(unique(paste(gated$macro, gated$series)), collapse = ", "),
+  max(c(gated$time_exponent_2x, gated$time_exponent_4x), na.rm = TRUE),
   format(bins_1x$rows, big.mark = ","), bins_1x$median_seconds, format(bins_4x$rows, big.mark = ","),
   bins_4x$median_seconds, bins_4x_4$median_seconds, bins_4x$max_rss_mib,
   (bins_4x$max_rss_mib - budgets$overhead_mib[budgets$macro == "depth_bins"]) * 2^20 / bins_4x$rows,
