@@ -266,6 +266,13 @@ extension <- Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_exten
 output_dir <- if (full_size) "benchmarks/results/roh-truth-mixtures" else tempfile("roh-truth-mixtures-")
 truth <- roh_truth_run(extension, duckdb_cli, output_dir, size)
 mixture <- roh_mixture_run(extension, duckdb_cli, output_dir, size)
+# The run tables are kept gzip-compressed; each must read back with every run.
+read_compressed <- function(name) {
+  utils::read.csv(gzfile(file.path(output_dir, name)), stringsAsFactors = FALSE,
+                  colClasses = c(sample = "character", chrom = "character"))
+}
+stopifnot(nrow(read_compressed("truth_runs.csv.gz")) == nrow(truth$runs),
+          nrow(read_compressed("truth_counts_fit_runs.csv.gz")) == nrow(truth$counts_fit_runs))
 declared <- roh_truth_declaration
 mixing <- roh_mixture_declaration
 verdict <- function(pass) ifelse(pass, "pass", "fail")
@@ -550,7 +557,7 @@ knitr::kable(data.frame(
   check.names = FALSE), row.names = FALSE, align = "lllrrrrrr")
 ```
 
-`r if (full_size) "Every observation is in \x60benchmarks/results/roh-truth-mixtures/\x60: the children, the planted segments, the fits, every run, the per-child scores and the queries." else ""`
+`r if (full_size) "Every observation is in \x60benchmarks/results/roh-truth-mixtures/\x60: the children, the planted segments, the fits, every run (gzip-compressed), the per-child scores and the queries." else ""`
 
 ## Limitations
 

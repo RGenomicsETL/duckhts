@@ -740,8 +740,14 @@ roh_truth_run <- function(extension, cli, output_dir, size = c("full", "reduced"
   write(truths$v2, "truth_v2_intervals.csv")
   write(built$realized, "truth_realized.csv")
   write(fit, "truth_fit.csv")
-  write(runs, "truth_runs.csv")
-  write(central, "truth_counts_fit_runs.csv")
+  # The two run tables are the large outputs; they are written compressed.
+  write_compressed <- function(data, name) {
+    connection <- gzfile(file.path(output_dir, name), "w")
+    on.exit(close(connection))
+    utils::write.csv(data, connection, row.names = FALSE)
+  }
+  write_compressed(runs, "truth_runs.csv.gz")
+  write_compressed(central, "truth_counts_fit_runs.csv.gz")
   write(scores, "truth_child_scores.csv")
   write(pooled, "truth_pooled.csv")
   write(by_population, "truth_by_population.csv")
@@ -758,5 +764,6 @@ roh_truth_run <- function(extension, cli, output_dir, size = c("full", "reduced"
        fit = fit, pooled = pooled, by_population = by_population, comparisons = comparisons,
        by_length = by_length, secondary = secondary_pooled, background = built$background,
        t3 = t3, ok_share = ok_share, criteria = criteria,
-       stability = stability, observations = observations, span_bases = built$span_bases)
+       stability = stability, observations = observations, span_bases = built$span_bases,
+       runs = runs, counts_fit_runs = central)
 }
