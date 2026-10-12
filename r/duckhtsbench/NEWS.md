@@ -2,7 +2,7 @@
 
 - register `depth_fraction_hg00403_buckets`, `depth_fraction_na18507_buckets`
   and `depth_fraction_hg00188_buckets`, the inputs of
-  `benchmark_depth_fraction.Rmd`: reads in 100 kb bins of chr18 to chr22, X
+  `benchmark_depth_fraction.Rmd`: reads in 100 kb bins of chr1 to chr22, X
   and Y of three registered 30x CRAMs, split into 300 of 3,000 read-name
   buckets (the MD5 of the read name modulo 3,000), so that sums of disjoint
   bucket sets give read-name hash subsamples of 0.01x steps and mixtures at
