@@ -10,34 +10,40 @@ shortcuts. Five measured runs follow one warm-up per workload and thread
 setting. Times include gzip decode, row scan, aggregation and R/DBI
 query execution. Default threads are the runtime’s own default; the GFF
 reader uses one worker in either setting. The host is a 13th Gen Intel
-Core i5-13500 (20 logical CPUs); `uptime` before the run reported load
-averages of 1.51, 1.09, and 0.79.
+Core i5-13500 (20 logical CPUs) with two core types, so the render
+records the CPU affinity of its process in the runs file and compares
+with the previous render only on the same CPUs. Choose them with
+`taskset -c`. `GFF_NAMED_SIZE=reduced` runs a driver check with one
+measured run per cell, and writes its runs to a temporary file instead
+of `benchmark_gff_named_attributes_runs.csv`; it is not a measurement.
 
-Source revision: 58e6e2b1ea404e246df84e55ee589e14c3048aeb. DuckDB
-runtime: 1.5.5. Previous medians: source revision
-c4728030d2770b591f0875206aac0af9be9d2c26; extension SHA-256
-1d868ba87527209147d86dfdbf796f00ee29ecd0cbc5d81951e8ee21a8331421.
-Extension SHA-256:
-4e0997a92ef2cfc6dd7a6777dba4b6a9b6edce80e32b3be9c523bedfcdcb2e82. Input
+``` sh
+taskset -c 8-11 Rscript -e 'rmarkdown::render("benchmarks/benchmark_gff_named_attributes.Rmd")'
+```
+
+Source revision: 3d7fb282cc9d9f79c187ddf573c1eb5b3cee1a5c. DuckDB
+runtime: 1.5.5. Host load before the run: 1.55, 1.76, 1.53. CPU
+affinity: 8-11. Extension SHA-256:
+0682f5dded2dda4a5a3a720e615769d250029ad1a02449cb5d192ae959e61ce5. Input
 SHA-256:
 e8ed48bef6a44fdf0db7c10a551d4398aa341318d00fbd9efd69530593106846.
 
-| threads      | workload             | input_rows | output_rows | metric          | median_seconds | runs | previous_median_seconds |
-|:-------------|:---------------------|-----------:|------------:|:----------------|---------------:|-----:|------------------------:|
-| 1            | plain_columns        |    1299172 |           1 | 193775078663005 |          0.479 |    5 |                   0.540 |
-| 1            | named_none_projected |    1299172 |           1 | 193775078663005 |          0.479 |    5 |                   0.542 |
-| 1            | attributes_string    |    1299172 |           1 | 577618955       |          0.692 |    5 |                   0.690 |
-| 1            | map_parent           |    1299172 |           1 | 1243771         |          2.242 |    5 |                   2.326 |
-| 1            | regexp_three         |    1299172 |           1 | 76627121        |          2.358 |    5 |                   2.371 |
-| 1            | named_three          |    1299172 |           1 | 76627121        |          0.850 |    5 |                   0.900 |
-| 1            | named_one_projected  |    1299172 |           1 | 25136049        |          0.731 |    5 |                   0.788 |
-| default (20) | plain_columns        |    1299172 |           1 | 193775078663005 |          0.485 |    5 |                   0.542 |
-| default (20) | named_none_projected |    1299172 |           1 | 193775078663005 |          0.480 |    5 |                   0.543 |
-| default (20) | attributes_string    |    1299172 |           1 | 577618955       |          0.688 |    5 |                   0.691 |
-| default (20) | map_parent           |    1299172 |           1 | 1243771         |          2.262 |    5 |                   2.327 |
-| default (20) | regexp_three         |    1299172 |           1 | 76627121        |          2.392 |    5 |                   2.376 |
-| default (20) | named_three          |    1299172 |           1 | 76627121        |          0.853 |    5 |                   0.905 |
-| default (20) | named_one_projected  |    1299172 |           1 | 25136049        |          0.732 |    5 |                   0.784 |
+| threads      | workload             | input_rows | output_rows | metric          | median_seconds | runs |
+|:-------------|:---------------------|-----------:|------------:|:----------------|---------------:|-----:|
+| 1            | plain_columns        |    1299172 |           1 | 193775078663005 |          0.480 |    5 |
+| 1            | named_none_projected |    1299172 |           1 | 193775078663005 |          0.479 |    5 |
+| 1            | attributes_string    |    1299172 |           1 | 577618955       |          0.690 |    5 |
+| 1            | map_parent           |    1299172 |           1 | 1243771         |          2.578 |    5 |
+| 1            | regexp_three         |    1299172 |           1 | 76627121        |          2.365 |    5 |
+| 1            | named_three          |    1299172 |           1 | 76627121        |          0.846 |    5 |
+| 1            | named_one_projected  |    1299172 |           1 | 25136049        |          0.728 |    5 |
+| default (20) | plain_columns        |    1299172 |           1 | 193775078663005 |          0.479 |    5 |
+| default (20) | named_none_projected |    1299172 |           1 | 193775078663005 |          0.485 |    5 |
+| default (20) | attributes_string    |    1299172 |           1 | 577618955       |          0.689 |    5 |
+| default (20) | map_parent           |    1299172 |           1 | 1243771         |          2.577 |    5 |
+| default (20) | regexp_three         |    1299172 |           1 | 76627121        |          2.373 |    5 |
+| default (20) | named_three          |    1299172 |           1 | 76627121        |          0.846 |    5 |
+| default (20) | named_one_projected  |    1299172 |           1 | 25136049        |          0.732 |    5 |
 
 The one-key projection requests three keys at bind but scans only
 `Parent`. `named_none_projected` requests three keys at bind but reads
@@ -48,3 +54,28 @@ expression costs, not isolated parsing cycles.
 duckdb-wasm 1.31.0; all six Chromium tests passed, including
 `test/wasm/gff-attributes.spec.ts`. Browser wasm timings were not
 measured.
+
+## Change from the previous render
+
+The previous render, 60b36911, ran the same queries on the same input
+with the same driver and host. The previous render recorded no CPU
+affinity, so the CPUs it ran on are unknown and the ratios may include a
+change of core type. Host load differs between renders. Median seconds
+per cell:
+
+| setting | workload             | seconds_before | seconds_after | time_ratio |
+|:--------|:---------------------|---------------:|--------------:|-----------:|
+| 1       | plain_columns        |          0.479 |         0.480 |      1.002 |
+| 1       | named_none_projected |          0.479 |         0.479 |      1.000 |
+| 1       | attributes_string    |          0.692 |         0.690 |      0.997 |
+| 1       | map_parent           |          2.242 |         2.578 |      1.150 |
+| 1       | regexp_three         |          2.358 |         2.365 |      1.003 |
+| 1       | named_three          |          0.850 |         0.846 |      0.995 |
+| 1       | named_one_projected  |          0.731 |         0.728 |      0.996 |
+| default | plain_columns        |          0.485 |         0.479 |      0.988 |
+| default | named_none_projected |          0.480 |         0.485 |      1.010 |
+| default | attributes_string    |          0.688 |         0.689 |      1.001 |
+| default | map_parent           |          2.262 |         2.577 |      1.139 |
+| default | regexp_three         |          2.392 |         2.373 |      0.992 |
+| default | named_three          |          0.853 |         0.846 |      0.992 |
+| default | named_one_projected  |          0.732 |         0.732 |      1.000 |

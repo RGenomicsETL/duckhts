@@ -65,12 +65,12 @@ multi-thread condition would time the same scan and is not recorded.
 `DUCKHTS_EXTENSION` the extension build.
 
 ``` sh
-taskset -c 8-11 Rscript -e 'rmarkdown::render("benchmarks/benchmark_genbank_named_attributes.Rmd")'
+taskset -c 16-19 Rscript -e 'rmarkdown::render("benchmarks/benchmark_genbank_named_attributes.Rmd")'
 ```
 
-Source revision: c4a73210ab8461465ffe306e5e5cac0541c04971; measured `src` tree: b0474026510f692da693fe57fd8d1c56d79cd70b (compare with `git rev-parse HEAD:src` at the reviewed head, since committing this render moves the commit hash but not the tree). DuckDB runtime: v1.5.1 (Variegata) 7dbb2e646f (CLI).
-Extension SHA-256: 5fd33730e8af91c365ac3dcf58091e3faf3b2d49c7849ef283a8db8450bf4bfe.
-Host load before the run: 0.62, 0.32, 0.22. One thread, affinity 19, 5 timed fresh-process repetitions per cell; `seconds` is the profiler’s query latency, and every observation is in [`benchmark_genbank_named_attributes_runs.csv`](benchmark_genbank_named_attributes_runs.csv).
+Source revision: 3d7fb282cc9d9f79c187ddf573c1eb5b3cee1a5c; measured `src` tree: 9ada6d903f188bc52198290590ce9b0599c765ca (compare with `git rev-parse HEAD:src` at the reviewed head, since committing this render moves the commit hash but not the tree). DuckDB runtime: v1.5.1 (Variegata) 7dbb2e646f (CLI).
+Extension SHA-256: 0682f5dded2dda4a5a3a720e615769d250029ad1a02449cb5d192ae959e61ce5.
+Host load before the run: 1.29, 1.59, 1.49. One thread, affinity 19, 5 timed fresh-process repetitions per cell; `seconds` is the profiler’s query latency, and every observation is in [`benchmark_genbank_named_attributes_runs.csv`](benchmark_genbank_named_attributes_runs.csv).
 
 Inputs, with the registered byte sizes and the feature rows each emits:
 
@@ -82,27 +82,27 @@ Inputs, with the registered byte sizes and the feature rows each emits:
 
 | parts | records | workload             | input_rows | output_rows | metric        | min_seconds | median_seconds | max_seconds | repetitions |
 |------:|--------:|:---------------------|-----------:|------------:|:--------------|------------:|---------------:|------------:|------------:|
-|     1 |   23713 | plain_columns        |    2563736 |           1 | 1301781980348 |       6.085 |          6.458 |       6.647 |           5 |
-|     1 |   23713 | named_none_projected |    2563736 |           1 | 1301781980348 |       6.132 |          6.480 |       6.843 |           5 |
-|     1 |   23713 | attributes_string    |    2563736 |           1 | 712833807     |       8.254 |          8.310 |       8.571 |           5 |
-|     1 |   23713 | map_gene             |    2563736 |           1 | 422264        |       8.997 |          9.082 |       9.375 |           5 |
-|     1 |   23713 | map_three            |    2563736 |           1 | 77807365      |       9.419 |          9.456 |       9.635 |           5 |
-|     1 |   23713 | named_three          |    2563736 |           1 | 77807365      |       7.062 |          7.139 |       8.143 |           5 |
-|     1 |   23713 | named_one_projected  |    2563736 |           1 | 1714086       |       6.477 |          6.687 |       7.909 |           5 |
-|     2 |   43922 | plain_columns        |    5263269 |           1 | 2542095936640 |      12.271 |         12.661 |      12.994 |           5 |
-|     2 |   43922 | named_none_projected |    5263269 |           1 | 2542095936640 |      12.435 |         13.056 |      13.404 |           5 |
-|     2 |   43922 | attributes_string    |    5263269 |           1 | 1440737469    |      16.549 |         16.628 |      17.210 |           5 |
-|     2 |   43922 | map_gene             |    5263269 |           1 | 849114        |      18.017 |         18.145 |      18.234 |           5 |
-|     2 |   43922 | map_three            |    5263269 |           1 | 159110522     |      18.954 |         19.479 |      19.728 |           5 |
-|     2 |   43922 | named_three          |    5263269 |           1 | 159110522     |      14.151 |         14.254 |      14.634 |           5 |
-|     2 |   43922 | named_one_projected  |    5263269 |           1 | 3461839       |      13.240 |         13.690 |      14.734 |           5 |
-|     4 |   71677 | plain_columns        |   10670134 |           1 | 4287043938404 |      24.352 |         25.715 |      27.183 |           5 |
-|     4 |   71677 | named_none_projected |   10670134 |           1 | 4287043938404 |      24.065 |         24.349 |      26.493 |           5 |
-|     4 |   71677 | attributes_string    |   10670134 |           1 | 2840780134    |      32.355 |         32.545 |      35.403 |           5 |
-|     4 |   71677 | map_gene             |   10670134 |           1 | 1829615       |      35.443 |         35.684 |      36.326 |           5 |
-|     4 |   71677 | map_three            |   10670134 |           1 | 320600172     |      37.059 |         37.267 |      37.912 |           5 |
-|     4 |   71677 | named_three          |   10670134 |           1 | 320600172     |      27.852 |         27.974 |      30.172 |           5 |
-|     4 |   71677 | named_one_projected  |   10670134 |           1 | 7548571       |      25.961 |         27.358 |      27.700 |           5 |
+|     1 |   23713 | plain_columns        |    2563736 |           1 | 1301781980348 |       6.124 |          6.195 |       6.536 |           5 |
+|     1 |   23713 | named_none_projected |    2563736 |           1 | 1301781980348 |       6.053 |          6.364 |       6.693 |           5 |
+|     1 |   23713 | attributes_string    |    2563736 |           1 | 712833807     |       8.244 |          8.289 |       8.591 |           5 |
+|     1 |   23713 | map_gene             |    2563736 |           1 | 422264        |       9.173 |          9.205 |       9.516 |           5 |
+|     1 |   23713 | map_three            |    2563736 |           1 | 77807365      |       9.751 |          9.776 |       9.935 |           5 |
+|     1 |   23713 | named_three          |    2563736 |           1 | 77807365      |       7.062 |          7.090 |       7.148 |           5 |
+|     1 |   23713 | named_one_projected  |    2563736 |           1 | 1714086       |       6.433 |          6.457 |       6.556 |           5 |
+|     2 |   43922 | plain_columns        |    5263269 |           1 | 2542095936640 |      12.201 |         12.551 |      12.860 |           5 |
+|     2 |   43922 | named_none_projected |    5263269 |           1 | 2542095936640 |      12.124 |         12.289 |      13.036 |           5 |
+|     2 |   43922 | attributes_string    |    5263269 |           1 | 1440737469    |      16.593 |         16.644 |      17.094 |           5 |
+|     2 |   43922 | map_gene             |    5263269 |           1 | 849114        |      18.510 |         18.595 |      19.448 |           5 |
+|     2 |   43922 | map_three            |    5263269 |           1 | 159110522     |      19.180 |         19.706 |      20.150 |           5 |
+|     2 |   43922 | named_three          |    5263269 |           1 | 159110522     |      14.265 |         14.296 |      14.529 |           5 |
+|     2 |   43922 | named_one_projected  |    5263269 |           1 | 3461839       |      12.855 |         13.241 |      14.254 |           5 |
+|     4 |   71677 | plain_columns        |   10670134 |           1 | 4287043938404 |      23.485 |         23.719 |      25.329 |           5 |
+|     4 |   71677 | named_none_projected |   10670134 |           1 | 4287043938404 |      23.721 |         24.302 |      25.474 |           5 |
+|     4 |   71677 | attributes_string    |   10670134 |           1 | 2840780134    |      31.989 |         32.339 |      33.055 |           5 |
+|     4 |   71677 | map_gene             |   10670134 |           1 | 1829615       |      36.139 |         36.266 |      38.272 |           5 |
+|     4 |   71677 | map_three            |   10670134 |           1 | 320600172     |      37.995 |         38.158 |      38.573 |           5 |
+|     4 |   71677 | named_three          |   10670134 |           1 | 320600172     |      27.753 |         27.877 |      28.690 |           5 |
+|     4 |   71677 | named_one_projected  |   10670134 |           1 | 7548571       |      25.301 |         25.618 |      25.653 |           5 |
 
 Row-level parity of the three named columns against `attributes_map`, asserted before timing:
 
@@ -116,35 +116,35 @@ Growth with input size: the ratio of the two- and four-part medians to the one-p
 
 | workload      | seconds_1_part | time_ratio_2_parts | rows_ratio_2_parts | bytes_ratio_2_parts | time_ratio_4_parts | rows_ratio_4_parts | bytes_ratio_4_parts |
 |:--------------|---------------:|-------------------:|-------------------:|--------------------:|-------------------:|-------------------:|--------------------:|
-| named_three   |          7.139 |              1.997 |              2.053 |               2.003 |              3.918 |              4.162 |                3.89 |
-| map_three     |          9.456 |              2.060 |              2.053 |               2.003 |              3.941 |              4.162 |                3.89 |
-| plain_columns |          6.458 |              1.961 |              2.053 |               2.003 |              3.982 |              4.162 |                3.89 |
+| named_three   |          7.090 |              2.016 |              2.053 |               2.003 |              3.932 |              4.162 |                3.89 |
+| map_three     |          9.776 |              2.016 |              2.053 |               2.003 |              3.903 |              4.162 |                3.89 |
+| plain_columns |          6.195 |              2.026 |              2.053 |               2.003 |              3.829 |              4.162 |                3.89 |
 
-Memory over the same fresh-process observations, spill forbidden. The peak-RSS ceiling, declared before measuring, is 124.1 MiB: 39 MiB fixed overhead (median of three empty runs) plus three times a live state of 28.4 MiB (four times the largest record, 7,176,865 bytes, plus one 1 MiB output chunk). The render stops if any observation exceeds it or spills:
+Memory over the same fresh-process observations, spill forbidden. The peak-RSS ceiling, declared before measuring, is 124.7 MiB: 39.6 MiB fixed overhead (median of three empty runs) plus three times a live state of 28.4 MiB (four times the largest record, 7,176,865 bytes, plus one 1 MiB output chunk). The render stops if any observation exceeds it or spills:
 
 | parts | workload             | observations | min_max_rss_mib | median_max_rss_mib | max_max_rss_mib | max_duckdb_peak_buffer_mib | max_duckdb_peak_temp_bytes |
 |------:|:---------------------|-------------:|----------------:|-------------------:|----------------:|---------------------------:|---------------------------:|
-|     1 | plain_columns        |            5 |            46.0 |               46.2 |            46.3 |                       0.25 |                          0 |
-|     1 | named_none_projected |            5 |            46.0 |               46.2 |            46.2 |                       0.25 |                          0 |
-|     1 | attributes_string    |            5 |            48.4 |               48.4 |            49.6 |                       2.56 |                          0 |
-|     1 | map_gene             |            5 |            48.1 |               48.1 |            48.1 |                       1.66 |                          0 |
-|     1 | map_three            |            5 |            48.6 |               48.7 |            48.7 |                       1.62 |                          0 |
-|     1 | named_three          |            5 |            46.9 |               47.1 |            47.1 |                       0.49 |                          0 |
-|     1 | named_one_projected  |            5 |            46.4 |               46.4 |            46.6 |                       0.25 |                          0 |
-|     2 | plain_columns        |            5 |            47.7 |               47.9 |            47.9 |                       0.25 |                          0 |
-|     2 | named_none_projected |            5 |            47.9 |               47.9 |            47.9 |                       0.25 |                          0 |
-|     2 | attributes_string    |            5 |            49.8 |               49.8 |            49.9 |                       2.56 |                          0 |
-|     2 | map_gene             |            5 |            50.0 |               50.2 |            50.3 |                       3.34 |                          0 |
-|     2 | map_three            |            5 |            50.3 |               50.9 |            51.1 |                       3.28 |                          0 |
-|     2 | named_three          |            5 |            48.9 |               48.9 |            48.9 |                       0.49 |                          0 |
-|     2 | named_one_projected  |            5 |            48.0 |               48.1 |            48.1 |                       0.25 |                          0 |
-|     4 | plain_columns        |            5 |            49.0 |               49.0 |            49.1 |                       0.25 |                          0 |
-|     4 | named_none_projected |            5 |            49.0 |               49.1 |            49.1 |                       0.25 |                          0 |
-|     4 | attributes_string    |            5 |            51.0 |               51.0 |            51.2 |                       2.56 |                          0 |
-|     4 | map_gene             |            5 |            51.1 |               51.2 |            51.3 |                       3.34 |                          0 |
-|     4 | map_three            |            5 |            52.3 |               52.3 |            52.5 |                       3.28 |                          0 |
-|     4 | named_three          |            5 |            49.7 |               49.9 |            49.9 |                       0.49 |                          0 |
-|     4 | named_one_projected  |            5 |            48.9 |               49.1 |            49.3 |                       0.25 |                          0 |
+|     1 | plain_columns        |            5 |            46.9 |               46.9 |            47.1 |                       0.25 |                          0 |
+|     1 | named_none_projected |            5 |            46.9 |               47.1 |            47.1 |                       0.25 |                          0 |
+|     1 | attributes_string    |            5 |            47.7 |               47.9 |            47.9 |                       2.56 |                          0 |
+|     1 | map_gene             |            5 |            48.4 |               48.6 |            48.7 |                       1.66 |                          0 |
+|     1 | map_three            |            5 |            49.2 |               49.2 |            49.2 |                       1.62 |                          0 |
+|     1 | named_three          |            5 |            46.8 |               46.8 |            47.0 |                       0.49 |                          0 |
+|     1 | named_one_projected  |            5 |            46.5 |               46.5 |            46.5 |                       0.25 |                          0 |
+|     2 | plain_columns        |            5 |            48.1 |               48.2 |            48.3 |                       0.25 |                          0 |
+|     2 | named_none_projected |            5 |            48.1 |               48.1 |            48.2 |                       0.25 |                          0 |
+|     2 | attributes_string    |            5 |            49.9 |               50.1 |            50.7 |                       2.56 |                          0 |
+|     2 | map_gene             |            5 |            50.6 |               50.7 |            50.8 |                       3.34 |                          0 |
+|     2 | map_three            |            5 |            51.0 |               51.2 |            51.8 |                       3.28 |                          0 |
+|     2 | named_three          |            5 |            48.6 |               48.7 |            48.7 |                       0.49 |                          0 |
+|     2 | named_one_projected  |            5 |            48.2 |               48.2 |            48.2 |                       0.25 |                          0 |
+|     4 | plain_columns        |            5 |            49.1 |               49.2 |            49.3 |                       0.25 |                          0 |
+|     4 | named_none_projected |            5 |            49.3 |               49.3 |            49.3 |                       0.25 |                          0 |
+|     4 | attributes_string    |            5 |            51.0 |               51.1 |            51.2 |                       2.56 |                          0 |
+|     4 | map_gene             |            5 |            51.4 |               52.0 |            52.0 |                       3.34 |                          0 |
+|     4 | map_three            |            5 |            52.2 |               52.2 |            52.8 |                       3.28 |                          0 |
+|     4 | named_three          |            5 |            49.7 |               49.7 |            49.8 |                       0.49 |                          0 |
+|     4 | named_one_projected  |            5 |            49.5 |               49.6 |            49.6 |                       0.25 |                          0 |
 
 `named_none_projected` requests three keys at bind but reads only the
 coordinate columns; its scan resolves no qualifiers. `named_one_projected`
@@ -158,32 +158,32 @@ and is not directly comparable because its input and workloads differ.
 
 ## Change from the previous render
 
-The previous render, b6f799e8, measured the same workloads on the
-same inputs with the same driver, host and CPU (19), resolving the
-named qualifiers once per output row. The cache saves work only on the rows after a feature’s first
-location segment, so the workloads that read named columns are the ones it can
-change. Host load differs between renders. Median seconds of five repetitions:
+The previous render, dcda99c7, measured the same workloads on the
+same inputs with the same driver, host and CPU (19), before the
+attributes MAP was written through the shared row writer. The workloads that
+build `attributes_map` (`map_gene`, `map_three`) are the ones the writer can
+change; the others are the control. Host load differs between renders. Median seconds of five repetitions:
 
 | parts | workload             | seconds_before | seconds_after | time_ratio |
 |------:|:---------------------|---------------:|--------------:|-----------:|
-|     1 | plain_columns        |          6.509 |         6.458 |      0.992 |
-|     1 | named_none_projected |          6.004 |         6.480 |      1.079 |
-|     1 | attributes_string    |          8.236 |         8.310 |      1.009 |
-|     1 | map_gene             |          8.912 |         9.082 |      1.019 |
-|     1 | map_three            |          9.359 |         9.456 |      1.010 |
-|     1 | named_three          |          7.128 |         7.139 |      1.001 |
-|     1 | named_one_projected  |          6.678 |         6.687 |      1.001 |
-|     2 | plain_columns        |         12.421 |        12.661 |      1.019 |
-|     2 | named_none_projected |         12.111 |        13.056 |      1.078 |
-|     2 | attributes_string    |         16.227 |        16.628 |      1.025 |
-|     2 | map_gene             |         18.002 |        18.145 |      1.008 |
-|     2 | map_three            |         18.756 |        19.479 |      1.039 |
-|     2 | named_three          |         14.094 |        14.254 |      1.011 |
-|     2 | named_one_projected  |         13.082 |        13.690 |      1.046 |
-|     4 | plain_columns        |         23.671 |        25.715 |      1.086 |
-|     4 | named_none_projected |         23.878 |        24.349 |      1.020 |
-|     4 | attributes_string    |         31.522 |        32.545 |      1.032 |
-|     4 | map_gene             |         34.779 |        35.684 |      1.026 |
-|     4 | map_three            |         36.601 |        37.267 |      1.018 |
-|     4 | named_three          |         27.319 |        27.974 |      1.024 |
-|     4 | named_one_projected  |         25.233 |        27.358 |      1.084 |
+|     1 | plain_columns        |          6.458 |         6.195 |      0.959 |
+|     1 | named_none_projected |          6.480 |         6.364 |      0.982 |
+|     1 | attributes_string    |          8.310 |         8.289 |      0.997 |
+|     1 | map_gene             |          9.082 |         9.205 |      1.014 |
+|     1 | map_three            |          9.456 |         9.776 |      1.034 |
+|     1 | named_three          |          7.139 |         7.090 |      0.993 |
+|     1 | named_one_projected  |          6.687 |         6.457 |      0.966 |
+|     2 | plain_columns        |         12.661 |        12.551 |      0.991 |
+|     2 | named_none_projected |         13.056 |        12.289 |      0.941 |
+|     2 | attributes_string    |         16.628 |        16.644 |      1.001 |
+|     2 | map_gene             |         18.145 |        18.595 |      1.025 |
+|     2 | map_three            |         19.479 |        19.706 |      1.012 |
+|     2 | named_three          |         14.254 |        14.296 |      1.003 |
+|     2 | named_one_projected  |         13.690 |        13.241 |      0.967 |
+|     4 | plain_columns        |         25.715 |        23.719 |      0.922 |
+|     4 | named_none_projected |         24.349 |        24.302 |      0.998 |
+|     4 | attributes_string    |         32.545 |        32.339 |      0.994 |
+|     4 | map_gene             |         35.684 |        36.266 |      1.016 |
+|     4 | map_three            |         37.267 |        38.158 |      1.024 |
+|     4 | named_three          |         27.974 |        27.877 |      0.997 |
+|     4 | named_one_projected  |         27.358 |        25.618 |      0.936 |
