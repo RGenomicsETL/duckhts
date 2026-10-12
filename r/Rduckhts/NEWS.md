@@ -2,6 +2,16 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- The bundled `read_bam()` decodes from a CRAM only the fields that the
+  selected columns need, with the same values. With decompression threads, a
+  query without SEQ, QUAL and tag columns no longer grows in memory with the
+  alignments read, and one without SEQ and QUAL loads no reference for a
+  slice that covers one reference. Tag columns with threads still grow
+  toward a bound, and SEQ or QUAL with threads still load the whole contig
+  reference; `decompression_threads := 0` avoids both. A table made by
+  `rduckhts_bam()` reads every column and is unchanged; queries on its
+  `bam_data` view gain the change.
+
 - The bundled readers leave out a MAP pair whose key is not valid UTF-8
   (`attributes_map` of `rduckhts_gff()`, `rduckhts_gtf()` and
   `rduckhts_genbank()`, `AUXILIARY_TAGS` of `rduckhts_bam()`, `key_values` of

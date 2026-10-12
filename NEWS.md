@@ -4,6 +4,19 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- `read_bam` on a CRAM asks htslib only for the fields that the projected
+  columns need. SEQ and QUAL are decoded only when SEQ, QUAL, MD, NM or
+  `AUXILIARY_TAGS` is projected (htslib makes MD and NM from the reference),
+  and tag data only when a tag column, `READ_GROUP_ID` or `SAMPLE_ID` is
+  projected. No projected column changes value. With decompression threads,
+  a projection without SEQ, QUAL and tags no longer grows in memory with the
+  alignments read, and one without SEQ and QUAL loads no reference for a
+  slice that covers one reference. A projection with tag data still grows toward a bound, and one
+  with SEQ and QUAL still loads the whole contig reference;
+  `decompression_threads := 0` avoids both. A CRAM whose slices each cover one
+  reference can now be read without its reference when SEQ, QUAL, MD, NM and
+  `AUXILIARY_TAGS` are not projected.
+
 - Internal consolidation, no output change: `read_bed`, `fasta_nuc`,
   `duckhts_mosdepth` and `duckhts_bam_bed_coverage` now parse BED lines through
   one shared native helper

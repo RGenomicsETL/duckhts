@@ -558,6 +558,14 @@ scan_mode='sequential' streams rather than using indexed count/parallel paths an
 
 decompression_threads controls per-file HTSlib workers, default 2; use 0 to disable. It does not set DuckDB processing parallelism.
 
+### CRAM fields
+
+A CRAM scan asks htslib only for the fields its projected columns need, and every projected column keeps its value. SEQ and QUAL are decoded only when SEQ, QUAL, MD, NM or AUXILIARY_TAGS is projected, because htslib makes MD and NM from the reference when the file does not store them. Tag data is decoded only when a tag column, AUXILIARY_TAGS, READ_GROUP_ID or SAMPLE_ID is projected. Without SEQ and QUAL, htslib does not load the reference for a slice that covers one reference.
+
+### Limits
+
+With decompression_threads > 0, a CRAM scan that projects tag data keeps htslib's spare record buffers, which only grow: memory rises with the alignments read, toward (2 x decompression_threads + 1) slices x about 10,000 records x the largest record. A CRAM scan that decodes SEQ and QUAL with decompression_threads > 0 loads the whole reference sequence of each contig it reads. decompression_threads := 0 avoids both.
+
 ### Examples
 
 ```sql
