@@ -133,7 +133,15 @@ test: test_debug
 test_debug test_release: test-function-catalog
 test_debug: test-cache-paths test-simd-kernels test-genbank-core test-liftover-property test-liftover-fuzz-debug test-sqllogictest-debug test-writer-no-clobber-debug
 test_release: test-cache-paths test-simd-kernels test-genbank-core test-genbank-oracle test-somalier-native test-bam-site-counts test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom test-hts-region-ownership test-writer-no-clobber-release test-macro-catalog test-database-lifetime
-test_release: test-reference-cache test-sql-lambda-syntax
+test_release: test-reference-cache test-sql-lambda-syntax test-count-mixture-model
+
+.PHONY: test-count-mixture-model
+test-count-mixture-model:
+	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+		$(CC) -std=c99 -O2 -g -Wall -Wextra -Werror -pedantic \
+			-Isrc/include src/count_mixture_model.c test/scripts/count_mixture_model_test.c \
+			-lm -o "$$tmp/count_mixture_model_test"; \
+		"$$tmp/count_mixture_model_test"
 
 .PHONY: test-sql-lambda-syntax test-duckdb-v2 test-macro-catalog test-database-lifetime
 test-macro-catalog:
