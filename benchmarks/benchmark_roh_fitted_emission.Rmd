@@ -100,6 +100,28 @@ below 0.005 and the changed share is below 2%. A row that exceeds it is
 reported with the number that drives it. The bound is a verdict, not a stop of
 the render, and it is not changed after the run.
 
+**Stability**, declared after the first render (it found the runs most
+sensitive to `artefact_weight`) in its own commit, and before any decode with
+an `artefact_weight_sd`. `duckhts_count_error_fit` now reports
+`artefact_weight_sd`, and `duckhts_roh_counts_fitted` gives each run
+`stable_fraction`: the share of its bases that are also in a run when the
+sample is decoded at `artefact_weight` − and + `artefact_weight_sd` (kept in
+[0, 0.05]). Decode (c) passes each sample's fitted `artefact_weight_sd`; every
+other count decode, the perturbed ones included, passes 0. The report gives,
+per sample and without a verdict:
+
+- `artefact_weight_sd` and the two weights it gives, beside the declared × 0.5
+  and × 2;
+- the `stable_fraction` of the runs of (c): the runs, the runs at 1, its
+  quantiles, and the stable bases (run length times `stable_fraction`,
+  summed) over the run bases;
+- for the `artefact_weight` × 0.5 and × 2 rows: the lost bases (in runs of (c)
+  that the changed decode does not call), split by whether the run that holds
+  them has `stable_fraction` 1 or below 1, and the gained bases (called by the
+  changed decode outside any run of (c)), which no `stable_fraction` covers.
+  The FROH change is gained minus lost over the span; the changed bases of
+  the sensitivity table are gained plus lost.
+
 **Gates.** Each query (the fit, every decode, three empty runs) runs in a
 fresh DuckDB CLI process under `/usr/bin/time`, with the JSON profiler and
 `max_temp_directory_size` set to zero, at two threads. The render stops if an
@@ -184,7 +206,8 @@ knitr::kable(data.frame(
   seq_error = number(fit$seq_error), contamination = number(fit$contamination),
   contamination_sd = ifelse(is.na(fit$contamination_sd), "NULL", number(fit$contamination_sd)),
   allele_balance = number(fit$allele_balance), artefact_weight = number(fit$artefact_weight),
-  status = fit$status, check.names = FALSE), align = "lrrrrrrrl")
+  artefact_weight_sd = ifelse(is.na(fit$artefact_weight_sd), "NULL", number(fit$artefact_weight_sd)),
+  status = fit$status, check.names = FALSE), align = "lrrrrrrrrl")
 ```
 
 ## Agreement with the genotype decode
@@ -269,6 +292,49 @@ declared bound (absolute FROH change below `r declaration$max_froh_change`,
 changed share below `r 100 * declaration$max_changed_share`%).
 `r if (length(failing)) paste0("The rows outside it change: ", paste0("\x60", failing, "\x60", collapse = ", "), ".") else "The bound holds for every number."`
 
+## Stability of the full fit
+
+`stable_fraction` of the runs of decode (c), from its fitted
+`artefact_weight_sd`. The two weights are those of the stability decodes; the
+declared perturbations are × 0.5 and × 2.
+
+```{r stability, echo=FALSE}
+stability <- results$stability
+quantile_columns <- sprintf("quantile_%g", declaration$stability$quantiles)
+knitr::kable(data.frame(
+  Sample = stability$sample, artefact_weight = number(stability$artefact_weight),
+  artefact_weight_sd = ifelse(is.na(stability$artefact_weight_sd), "NULL",
+                              number(stability$artefact_weight_sd)),
+  `w − sd` = number(stability$low_weight), `w + sd` = number(stability$high_weight),
+  `× 0.5` = number(0.5 * stability$artefact_weight), `× 2` = number(2 * stability$artefact_weight),
+  Runs = stability$runs, `Runs at 1` = stability$runs_at_one,
+  stats::setNames(lapply(quantile_columns, function(column) sprintf("%.3f", stability[[column]])),
+                  sprintf("q%g", declaration$stability$quantiles)),
+  `Stable bases` = sprintf("%.1f%%", 100 * stability$stable_share),
+  check.names = FALSE), row.names = FALSE)
+```
+
+How the changed bases of the `artefact_weight` rows of the sensitivity table
+split. Lost bases are in runs of (c) that the changed decode does not call;
+gained bases are called outside any run of (c).
+
+```{r stability-decomposition, echo=FALSE}
+decomposition <- results$decomposition
+decomposition <- decomposition[order(decomposition$value,
+                                     match(decomposition$sample, roh_validation_declaration$samples)), ]
+share <- function(x) ifelse(is.na(x), "none", sprintf("%.1f%%", 100 * x))
+knitr::kable(data.frame(
+  Change = sprintf("× %g", decomposition$value), Sample = decomposition$sample,
+  `FROH change` = sprintf("%+.5f", decomposition$froh_difference),
+  Lost = format(decomposition$lost_bases, big.mark = ","),
+  `Lost, stable_fraction 1` = format(decomposition$lost_in_stable, big.mark = ","),
+  `Lost, stable_fraction < 1` = format(decomposition$lost_in_unstable, big.mark = ","),
+  Gained = format(decomposition$gained_bases, big.mark = ","),
+  `Lost share below 1` = share(decomposition$lost_unstable_share),
+  `Changed share below 1` = share(decomposition$changed_unstable_share),
+  check.names = FALSE), row.names = FALSE, align = "llrrrrrrr")
+```
+
 ## Gates
 
 Every query, with its latency, peak RSS, DuckDB's peak buffer memory, its
@@ -299,8 +365,13 @@ knitr::kable(data.frame(
   tested on data they were not fitted on.
 - The perturbations change one number at a time. They do not test changes of
   several numbers together.
-- Only `contamination` has an interval from the fit (`contamination_sd`). The
-  ranges of the other three numbers (± 0.005 and ± 0.01, × 0.5 and × 2) are
-  declared, not derived from an interval of the fit.
+- `contamination` and `artefact_weight` have intervals from the fit
+  (`contamination_sd`, `artefact_weight_sd`). The ranges of the other two
+  numbers (± 0.005 and ± 0.01, × 0.5 and × 2) are declared, not derived from
+  an interval of the fit, and the × 0.5 and × 2 of `artefact_weight` were
+  declared before its interval existed.
+- `stable_fraction` measures only the bases of a run that a change of the
+  artefact weight would lose. Bases that a change would add outside the runs
+  have no `stable_fraction`; the decomposition counts them as gained.
 - The spreads of the fit (`spread_hom`, `spread_het`) are not used by the
   decode.

@@ -56,12 +56,15 @@ roh_fitted_run_fresh <- function(cli, extension, setup, query, threads, output,
              peak_temp_bytes = as.numeric(profile$system_peak_temp_dir_size))
 }
 
-# The four numbers of one count decode for each fitted sample. `spec` names
-# the source of each number ("default" or "fit"); `perturbation` is NULL or
-# one row of roh_fitted_declaration$perturbations. Returns the values and
-# whether a value was set to the end of its guard range.
+# The four numbers of one count decode for each fitted sample, and the
+# artefact_weight_sd the decode passes. `spec` names the source of each number
+# ("default" or "fit"); `perturbation` is NULL or one row of
+# roh_fitted_declaration$perturbations; with `interval` the decode passes the
+# sample's fitted artefact_weight_sd (NA stays NA, a NULL that the macro
+# counts as 0), else 0. Returns the values and whether a value was set to the
+# end of its guard range.
 roh_fitted_parameters <- function(fit, spec, perturbation = NULL,
-                                  declaration = roh_fitted_declaration) {
+                                  declaration = roh_fitted_declaration, interval = FALSE) {
   parameters <- c("seq_error", "contamination", "allele_balance", "artefact_weight")
   values <- data.frame(sample = fit$sample, stringsAsFactors = FALSE)
   for (parameter in parameters) {
@@ -71,6 +74,7 @@ roh_fitted_parameters <- function(fit, spec, perturbation = NULL,
       rep(declaration$defaults[[parameter]], nrow(fit))
     }
   }
+  values$artefact_weight_sd <- if (interval) as.numeric(fit$artefact_weight_sd) else 0
   values$at_guard <- FALSE
   if (!is.null(perturbation)) {
     parameter <- perturbation$parameter
@@ -199,18 +203,20 @@ roh_fitted_run <- function(extension, cli, output_dir, samples,
   }
 
   # Count decodes. Each fit relation is a Parquet file of exactly the numbers
-  # in `parameters`.
-  decode_counts <- function(name, parameters) {
+  # in `parameters`. With `stability` the runs keep stable_fraction.
+  decode_counts <- function(name, parameters, stability = FALSE) {
     fit_file <- file.path(work, sprintf("fit_%s.parquet", name))
     DBI::dbWriteTable(con, "decode_fit", parameters[c("sample", "seq_error", "contamination",
-                                                       "allele_balance", "artefact_weight")],
+                                                       "allele_balance", "artefact_weight",
+                                                       "artefact_weight_sd")],
                       overwrite = TRUE)
     DBI::dbExecute(con, sprintf("COPY decode_fit TO %s (FORMAT parquet)",
                                 roh_fitted_quote(fit_file)))
     output <- file.path(work, sprintf("counts_%s.csv", name))
+    columns <- if (stability) paste(runs_columns, "stable_fraction", sep = ", ") else runs_columns
     measure(name, "count_decode", sprintf(paste(
       "SELECT %s FROM duckhts_roh_counts_fitted('fitted_counts', 'decode_fit')",
-      "ORDER BY sample, chrom, start"), runs_columns), output,
+      "ORDER BY sample, chrom, start"), columns), output,
       ceiling_mib = counts_ceiling(length(decoded)), extra_setup = c(
         fitted_setup,
         sprintf("CREATE TEMP VIEW decode_fit AS SELECT * FROM read_parquet(%s);",
@@ -218,13 +224,22 @@ roh_fitted_run <- function(extension, cli, output_dir, samples,
     read_runs(output)
   }
   decodes <- declaration$decodes
+  stability_decode <- declaration$stability$decode
   decode_parameters <- list()
   count_runs <- list()
+  stable_runs <- NULL
   for (index in seq_len(nrow(decodes))) {
     name <- decodes$decode[[index]]
+    interval <- identical(name, stability_decode)
     decode_parameters[[name]] <- data.frame(
-      decode = name, roh_fitted_parameters(fitted, decodes[index, ], declaration = declaration))
-    count_runs[[name]] <- decode_counts(paste0("decode_", name), decode_parameters[[name]])
+      decode = name, roh_fitted_parameters(fitted, decodes[index, ], declaration = declaration,
+                                           interval = interval))
+    runs <- decode_counts(paste0("decode_", name), decode_parameters[[name]], stability = interval)
+    if (interval) {
+      stable_runs <- runs
+      runs <- runs[setdiff(names(runs), "stable_fraction")]
+    }
+    count_runs[[name]] <- runs
   }
   # Decode a goes through the fit relation with the scalar defaults; it must
   # equal duckhts_roh_counts with its scalar defaults, run for run.
@@ -269,11 +284,13 @@ roh_fitted_run <- function(extension, cli, output_dir, samples,
   sensitivity <- list()
   perturbed_parameters <- list()
   perturbed_runs <- list()
+  perturbed_raw <- list()
   for (index in seq_len(nrow(perturbations))) {
     perturbation <- perturbations[index, ]
     parameters <- roh_fitted_parameters(fitted, full, perturbation, declaration)
     perturbed_parameters[[index]] <- data.frame(decode = perturbation$perturbation, parameters)
     runs <- decode_counts(paste0("perturbed_", index), parameters)
+    perturbed_raw[[index]] <- runs
     perturbed_runs[[index]] <- if (nrow(runs)) data.frame(decode = perturbation$perturbation, runs)
     for (sample in decoded) {
       metrics <- roh_run_comparison_by_class(roh_fitted_runs_of(runs, sample),
@@ -300,6 +317,63 @@ roh_fitted_run <- function(extension, cli, output_dir, samples,
   sensitivity$froh_pass <- abs(sensitivity$froh_difference) < declaration$max_froh_change
   sensitivity$share_pass <- sensitivity$changed_share < declaration$max_changed_share
   sensitivity$pass <- sensitivity$froh_pass & sensitivity$share_pass
+
+  # Stability (fitted_declaration.R, `stability`), on the runs of the
+  # stability decode, which the comparisons above use without stable_fraction.
+  guard <- declaration$guard_ranges$artefact_weight
+  stability <- do.call(rbind, lapply(decoded, function(sample) {
+    runs <- roh_fitted_runs_of(stable_runs, sample)
+    row <- fitted[fitted$sample == sample, ]
+    weight <- as.numeric(row$artefact_weight)
+    sd <- as.numeric(row$artefact_weight_sd)
+    quantiles <- if (nrow(runs)) {
+      stats::quantile(runs$stable_fraction, declaration$stability$quantiles, names = FALSE)
+    } else {
+      rep(NA_real_, length(declaration$stability$quantiles))
+    }
+    run_bases <- sum(as.numeric(runs$length))
+    stable_bases <- sum(as.numeric(runs$length) * runs$stable_fraction)
+    data.frame(
+      sample = sample, artefact_weight = weight, artefact_weight_sd = sd,
+      low_weight = max(guard[[1L]], weight - ifelse(is.na(sd), 0, sd)),
+      high_weight = min(guard[[2L]], weight + ifelse(is.na(sd), 0, sd)),
+      runs = nrow(runs), runs_at_one = sum(runs$stable_fraction == 1),
+      stats::setNames(as.list(quantiles), sprintf("quantile_%g", declaration$stability$quantiles)),
+      run_bases = run_bases, stable_bases = stable_bases,
+      stable_share = if (run_bases > 0) stable_bases / run_bases else NA_real_,
+      check.names = FALSE, row.names = NULL)
+  }))
+  # Lost and gained bases of each perturbation of the declared number, against
+  # the stability decode's runs.
+  decomposition <- list()
+  for (index in which(perturbations$parameter == declaration$stability$perturbed_parameter)) {
+    for (sample in decoded) {
+      central <- roh_fitted_runs_of(stable_runs, sample)
+      perturbed <- roh_fitted_runs_of(perturbed_raw[[index]], sample)
+      lost_by_run <- vapply(seq_len(nrow(central)), function(run) {
+        as.numeric(central$length[[run]]) - roh_run_overlap_bases(central[run, ], perturbed)
+      }, numeric(1L))
+      lost <- sum(lost_by_run)
+      lost_unstable <- sum(lost_by_run[central$stable_fraction < 1])
+      gained <- roh_run_bases(perturbed) - roh_run_overlap_bases(central, perturbed)
+      row <- sensitivity[sensitivity$perturbation == perturbations$perturbation[[index]] &
+                         sensitivity$sample == sample, ]
+      # The split must add up to the sensitivity row's own counts.
+      if (lost + gained != row$changed_bases || gained - lost != row$bases_change) {
+        stop("the lost and gained bases do not add up for ", sample, call. = FALSE)
+      }
+      decomposition[[length(decomposition) + 1L]] <- data.frame(
+        perturbation = perturbations$perturbation[[index]], operation = perturbations$operation[[index]],
+        value = perturbations$value[[index]], sample = sample,
+        perturbed_value = row$perturbed_value, froh_difference = row$froh_difference,
+        lost_bases = lost, lost_in_stable = lost - lost_unstable, lost_in_unstable = lost_unstable,
+        gained_bases = gained, changed_bases = lost + gained,
+        lost_unstable_share = if (lost > 0) lost_unstable / lost else NA_real_,
+        changed_unstable_share = if (lost + gained > 0) lost_unstable / (lost + gained) else NA_real_,
+        row.names = NULL)
+    }
+  }
+  decomposition <- do.call(rbind, decomposition)
 
   observations <- do.call(rbind, observations)
   observations$within_ceiling <- is.na(observations$ceiling_mib) |
@@ -346,8 +420,12 @@ roh_fitted_run <- function(extension, cli, output_dir, samples,
   write(comparisons, "agreement_metrics.csv")
   write(criterion, "criterion.csv")
   write(sensitivity, "sensitivity.csv")
+  write(stable_runs, "stability_runs.csv")
+  write(stability, "stability.csv")
+  write(decomposition, "stability_decomposition.csv")
   write(observations, "observations.csv")
   list(metadata = metadata, fit = fit, parameters = all_parameters, comparisons = comparisons,
-       criterion = criterion, sensitivity = sensitivity, observations = observations,
+       criterion = criterion, sensitivity = sensitivity, stability = stability,
+       decomposition = decomposition, observations = observations,
        defaults_identical = defaults_identical, span_bases = span_bases)
 }
