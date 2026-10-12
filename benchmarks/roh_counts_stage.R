@@ -29,14 +29,55 @@ roh_counts_identity <- function(con, path) {
   list(rows = as.numeric(identity$rows[[1L]]), counts_sha256 = identity$counts_sha256[[1L]])
 }
 
-stage_roh_counts <- function(source, sample_id, af_sites, reference, output, extension,
-                             assembly, min_mapq, min_baseq, exclude_flags,
-                             overlap_policy, worker_count = 4L, expected = NULL) {
+roh_counts_quote <- function(value) paste0("'", gsub("'", "''", value, fixed = TRUE), "'")
+
+roh_counts_check_settings <- function(min_mapq, min_baseq, exclude_flags, worker_count) {
   integers <- c(min_mapq = min_mapq, min_baseq = min_baseq,
                 exclude_flags = exclude_flags, worker_count = worker_count)
   if (anyNA(integers) || any(integers < 0) || any(integers != round(integers))) {
     stop("count settings must be non-negative integers", call. = FALSE)
   }
+}
+
+# The statement that writes the somalier panel of the AF sites to `panel`.
+roh_counts_panel_sql <- function(af_sites, assembly, panel) {
+  q <- roh_counts_quote
+  sprintf(paste0(
+    "COPY (SELECT %s AS assembly, ",
+    "(row_number() OVER (ORDER BY chrom, pos) - 1)::UBIGINT AS site_index, ",
+    "chrom AS region, pos::UBIGINT AS position, least(ref, alt) AS allele_a, ",
+    "greatest(ref, alt) AS allele_b FROM read_parquet(%s) ORDER BY chrom, pos) ",
+    "TO %s (FORMAT PARQUET)"), q(assembly), q(af_sites), q(panel))
+}
+
+# The query that counts `source` at the sites of `panel` and orients the counts
+# to the AF sites. Staging and the read-mixture evaluation share it, so both
+# count with the same SQL.
+roh_counts_query_sql <- function(source, sample_id, reference, panel, af_sites, min_mapq,
+                                 min_baseq, exclude_flags, overlap_policy, worker_count) {
+  roh_counts_check_settings(min_mapq, min_baseq, exclude_flags, worker_count)
+  q <- roh_counts_quote
+  sprintf(paste0(
+    "WITH counts AS (SELECT * FROM duckhts_somalier_bam_counts(%s, NULL, %s, %s, ",
+    "panel_parquet := %s, min_mapq := %d, min_baseq := %d, exclude_flags := %d, ",
+    "overlap_policy := %s, worker_count := %d)), ",
+    "sites AS (SELECT chrom, pos, ref, alt, ",
+    "greatest(1e-3, least(0.999, INFO_AF[1]))::DOUBLE AS af FROM read_parquet(%s)) ",
+    "SELECT c.sample_id, s.chrom, s.pos, s.ref, s.alt, ",
+    "(CASE WHEN s.alt = c.allele_b THEN c.a ELSE c.b END)::INTEGER AS ref_count, ",
+    "(CASE WHEN s.alt = c.allele_b THEN c.b ELSE c.a END)::INTEGER AS alt_count, ",
+    "c.other::INTEGER AS other_count, s.af, c.status ",
+    "FROM counts AS c JOIN sites AS s ON s.chrom = c.region AND s.pos = c.position ",
+    "ORDER BY s.chrom, s.pos"),
+    q(source), q(sample_id), q(reference), q(panel), as.integer(min_mapq),
+    as.integer(min_baseq), as.integer(exclude_flags), q(overlap_policy),
+    as.integer(worker_count), q(af_sites))
+}
+
+stage_roh_counts <- function(source, sample_id, af_sites, reference, output, extension,
+                             assembly, min_mapq, min_baseq, exclude_flags,
+                             overlap_policy, worker_count = 4L, expected = NULL) {
+  roh_counts_check_settings(min_mapq, min_baseq, exclude_flags, worker_count)
   for (path in c(af_sites, reference)) {
     if (!file.exists(path)) stop("missing staging input: ", path, call. = FALSE)
   }
@@ -48,27 +89,10 @@ stage_roh_counts <- function(source, sample_id, af_sites, reference, output, ext
   temporary <- paste0(output, ".partial-", Sys.getpid(), ".parquet")
   on.exit(unlink(c(panel, temporary), force = TRUE), add = TRUE)
 
-  DBI::dbExecute(con, sprintf(paste0(
-    "COPY (SELECT %s AS assembly, ",
-    "(row_number() OVER (ORDER BY chrom, pos) - 1)::UBIGINT AS site_index, ",
-    "chrom AS region, pos::UBIGINT AS position, least(ref, alt) AS allele_a, ",
-    "greatest(ref, alt) AS allele_b FROM read_parquet(%s) ORDER BY chrom, pos) ",
-    "TO %s (FORMAT PARQUET)"), q(assembly), q(af_sites), q(panel)))
-  DBI::dbExecute(con, sprintf(paste0(
-    "COPY (WITH counts AS (SELECT * FROM duckhts_somalier_bam_counts(%s, NULL, %s, %s, ",
-    "panel_parquet := %s, min_mapq := %d, min_baseq := %d, exclude_flags := %d, ",
-    "overlap_policy := %s, worker_count := %d)), ",
-    "sites AS (SELECT chrom, pos, ref, alt, ",
-    "greatest(1e-3, least(0.999, INFO_AF[1]))::DOUBLE AS af FROM read_parquet(%s)) ",
-    "SELECT c.sample_id, s.chrom, s.pos, s.ref, s.alt, ",
-    "(CASE WHEN s.alt = c.allele_b THEN c.a ELSE c.b END)::INTEGER AS ref_count, ",
-    "(CASE WHEN s.alt = c.allele_b THEN c.b ELSE c.a END)::INTEGER AS alt_count, ",
-    "c.other::INTEGER AS other_count, s.af, c.status ",
-    "FROM counts AS c JOIN sites AS s ON s.chrom = c.region AND s.pos = c.position ",
-    "ORDER BY s.chrom, s.pos) TO %s (FORMAT PARQUET)"),
-    q(source), q(sample_id), q(reference), q(panel), as.integer(min_mapq),
-    as.integer(min_baseq), as.integer(exclude_flags), q(overlap_policy),
-    as.integer(worker_count), q(af_sites), q(temporary)))
+  DBI::dbExecute(con, roh_counts_panel_sql(af_sites, assembly, panel))
+  DBI::dbExecute(con, sprintf("COPY (%s) TO %s (FORMAT PARQUET)", roh_counts_query_sql(
+    source, sample_id, reference, panel, af_sites, min_mapq, min_baseq, exclude_flags,
+    overlap_policy, worker_count), q(temporary)))
 
   identity <- roh_counts_identity(con, temporary)
   sites <- DBI::dbGetQuery(con, sprintf("SELECT count(*) AS n FROM read_parquet(%s)", q(af_sites)))$n
