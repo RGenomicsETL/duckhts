@@ -1,0 +1,6 @@
+"truth","criterion","pass"
+"v1","T1",FALSE
+"v1","T2",TRUE
+"v2","T1",FALSE
+"v2","T2",TRUE
+"either","T3",TRUE
