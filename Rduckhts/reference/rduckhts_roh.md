@@ -30,7 +30,8 @@ rduckhts_roh(
   proportions_table = NULL,
   af_clamp = 0.001,
   max_sites = 2e+07,
-  max_site_bytes = 2^32
+  max_site_bytes = 2^32,
+  site_rule = "matching"
 )
 ```
 
@@ -113,6 +114,22 @@ rduckhts_roh(
   values each apply their own. Exceeding it is an error: decode fewer
   samples per call or raise it.
 
+- site_rule:
+
+  Which record of a position listed in \`af_table\` gives its site.
+  \`"matching"\` (the default) uses a record whose REF and ALT match a
+  row of \`af_table\` (\`duckhts_roh_af_table\`). \`"bcftools"\` follows
+  \`bcftools roh –AF-file\` (\`duckhts_roh_af_table_bcftools\`): in file
+  order, a record of the other indel class than the row is passed over
+  when the next record of the file has the same POS (on any contig); a
+  record with no non-symbolic ALT, or several, claims nothing; and the
+  first remaining record claims the position, which is skipped unless
+  its alleles equal the row's (also when its first ALT is symbolic,
+  which bcftools would decode through the second ALT). It needs one
+  \`af_table\` row per position and a sorted, BGZF-compressed VCF or
+  BCF, and reads the file a second time without samples. Only
+  \`af_table\` takes \`"bcftools"\`.
+
 ## Value
 
 A data frame (or invisible \`TRUE\` when \`table_name\` is given) with
@@ -128,7 +145,9 @@ which must be declared \`Type=Float,Number=A\`) or from a relation
 \`ref\`, \`alt\` and \`af\`, matched to each record by chromosome,
 position, REF and its ALT alleles joined by commas. Sites without a
 usable frequency (absent, missing or exactly 0) are skipped, as are
-records with more than one ALT or none.
+records with more than one ALT or none. With \`af_table\`, \`site_rule =
+"bcftools"\` chooses the record of a repeated position as \`bcftools roh
+–AF-file\` does (see the argument).
 
 Alternatively, \`reference_table\` and \`proportions_table\` select the
 ancestry-tuned path. The reference is long-format with columns
@@ -173,9 +192,9 @@ path <- system.file("extdata", "roh_fixture.vcf.gz", package = "Rduckhts")
 roh <- rduckhts_roh(con, path, af_tag = "AF")
 roh[order(roh$sample, roh$chrom, roh$start), ]
 #>   sample chrom   start     end  length n_markers  quality
-#> 3     S1  chr1 1042655 2396807 1354153       113 31.96439
-#> 1     S2  chr2  693881 1722963 1029083       114 32.91658
-#> 2     S4  chr1 1876100 3319712 1443613       131 44.83104
-#> 4     S4  chr2   23420 2400223 2376804       239 46.64399
+#> 1     S1  chr1 1042655 2396807 1354153       113 31.96439
+#> 3     S2  chr2  693881 1722963 1029083       114 32.91658
+#> 4     S4  chr1 1876100 3319712 1443613       131 44.83104
+#> 2     S4  chr2   23420 2400223 2376804       239 46.64399
 DBI::dbDisconnect(con, shutdown = TRUE)
 ```

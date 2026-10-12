@@ -22,7 +22,7 @@
 
     <a class="navbar-brand me-2" href="index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9015.0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9016.0.1.5</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -80,6 +80,7 @@
 <span><span class="fu"><a href="https://rdrr.io/r/utils/install.packages.html" class="external-link">install.packages</a></span><span class="op">(</span><span class="st">"Rduckhts"</span>, repos <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"https://rgenomicsetl.r-universe.dev"</span>,</span>
 <span>                                       <span class="st">"https://cloud.r-project.org"</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
 <p>Rduckhts needs the <code>duckdb</code> R package, version 1.5.0 or newer.</p>
+<p>With <code>duckdb</code> 1.5.x, two DuckDB bugs affect <code><a href="reference/rduckhts_roh.html">rduckhts_roh()</a></code>, <code><a href="reference/rduckhts_roh_counts.html">rduckhts_roh_counts()</a></code>, <code><a href="reference/rduckhts_count_error_fit.html">rduckhts_count_error_fit()</a></code> and <code><a href="reference/rduckhts_somalier_matched_contamination.html">rduckhts_somalier_matched_contamination()</a></code>. An out-of-memory error can end the R session instead of returning an error (<a href="https://github.com/duckdb/duckdb/issues/26441" class="external-link uri">https://github.com/duckdb/duckdb/issues/26441</a>). A failed query with 5 or more threads can keep its native memory until the R session ends (<a href="https://github.com/duckdb/duckdb/issues/26871" class="external-link uri">https://github.com/duckdb/duckdb/issues/26871</a>). Raise <code>memory_limit</code> or pass fewer samples per query, and restart R after such a failure. The DuckDB 2.0 branch fixes the first bug, and its development builds do not show the second.</p>
 </div>
 <div class="section level2">
 <h2 id="quick-start">Quick start<a class="anchor" aria-label="anchor" href="#quick-start"></a>

@@ -1,9 +1,65 @@
 # Changelog
 
-## Rduckhts 1.5.2.9015.0.1.5
+## Rduckhts 1.5.2.9016.0.1.5
 
 Preview of 2.0.0, still in development. The sections below describe what
 2.0.0 will contain.
+
+- The README describes two known DuckDB 1.5.x issues that affect
+  [`rduckhts_roh()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_roh.md),
+  [`rduckhts_roh_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_roh_counts.md),
+  [`rduckhts_count_error_fit()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_count_error_fit.md)
+  and
+  [`rduckhts_somalier_matched_contamination()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_matched_contamination.md)
+  with `duckdb` 1.5.x: an out-of-memory error can end the R session
+  (<https://github.com/duckdb/duckdb/issues/26441>), and a failed query
+  with 5 or more threads can keep its native memory until the session
+  ends (<https://github.com/duckdb/duckdb/issues/26871>). The bundled
+  function catalog notes them for the same functions.
+
+- The bundled `read_bam()` decodes from a CRAM only the fields that the
+  selected columns need, with the same values. With decompression
+  threads, a query without SEQ, QUAL, CIGAR and tag columns no longer
+  grows in memory with the alignments read, and one without SEQ and QUAL
+  loads no reference for a slice that covers one reference. Tag columns
+  with threads still grow toward a bound, and SEQ or QUAL with threads
+  still load the whole contig reference; `decompression_threads := 0`
+  avoids both. A table made by
+  [`rduckhts_bam()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam.md)
+  reads every column and is unchanged; queries on its `bam_data` view
+  gain the change.
+
+- The bundled readers leave out a MAP pair whose key is not valid UTF-8
+  (`attributes_map` of
+  [`rduckhts_gff()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_gff.md),
+  [`rduckhts_gtf()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_gtf.md)
+  and
+  [`rduckhts_genbank()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_genbank.md),
+  `AUXILIARY_TAGS` of
+  [`rduckhts_bam()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam.md),
+  `key_values` of
+  [`rduckhts_hts_header()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_hts_header.md));
+  such a key used to become a NULL MAP key. A value that is not valid
+  UTF-8 is still `NA`.
+
+- `rduckhts_roh(af_table = ..., site_rule = "bcftools")` uses the
+  bundled `duckhts_roh_af_table_bcftools` macro, which chooses the
+  record of a repeated listed position as `bcftools roh --AF-file` does:
+  file order, indel class, the next record’s POS on any contig, the
+  first claiming record, and its alleles. It needs one `af_table` row
+  per position and a sorted, BGZF-compressed VCF or BCF. The default
+  `"matching"` is unchanged. New bundled fixtures `roh_repeated.vcf.gz`
+  and `roh_repeated_af.tsv.gz` back the tests.
+
+- `rduckhts_bcf(include_file_offset = TRUE)` and the bundled
+  `read_bcf(..., include_file_offset := true)` add a `FILE_OFFSET`
+  column after `FILTER`: the BGZF virtual position just after each
+  record. Every scan mode gives a record the same value, and ordering by
+  it restores file order, also among records at one position. Input that
+  is not BGZF-compressed gives `NA`. The default schema is unchanged.
+  New bundled fixtures (`bcf_offset.bcf`, `bcf_offset.vcf.gz`,
+  `bcf_offset_plain.vcf` and the expected positions in
+  `bcf_record_ends.tsv`) back the tests.
 
 - Headers stored by the Parquet convert functions keep their line
   breaks; the bundled `duckhts_raw_header_text()` joined lines with a

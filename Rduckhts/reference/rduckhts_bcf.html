@@ -9,7 +9,7 @@ This follows the RBCFTools pattern of creating a table that can be queried."></h
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9015.0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.2.9016.0.1.5</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -61,7 +61,8 @@ This follows the RBCFTools pattern of creating a table that can be queried.</p>
 <span>  decode_error_policy <span class="op">=</span> <span class="st">"null"</span>,</span>
 <span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  samples <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  regions_var <span class="op">=</span> <span class="cn">NULL</span></span>
+<span>  regions_var <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  include_file_offset <span class="op">=</span> <span class="cn">FALSE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -142,6 +143,15 @@ names are literal (not region expressions); overlapping and adjacent
 intervals are merged natively. Limits: 1,000,000 intervals and 128 MiB.
 Aggregate with `coalesce(list(...), []::STRUCT(...)[])`: `list()` over no
 rows is `NULL`, which means the ordinary full scan.</p></dd>
+
+
+<dt id="arg-include-file-offset">include_file_offset<a class="anchor" aria-label="anchor" href="#arg-include-file-offset"></a></dt>
+<dd><p>Logical. If `TRUE`, add a `FILE_OFFSET` column
+after `FILTER`: the BGZF virtual position just after each record. It
+increases strictly in file order and is the same for every scan mode, so
+ordering by it restores file order, also among records at one position.
+Input that is not BGZF-compressed gives `NA`. The default keeps the
+existing schema.</p></dd>
 
 </dl></div>
     <div class="section level2">

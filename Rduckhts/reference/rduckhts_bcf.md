@@ -20,7 +20,8 @@ rduckhts_bcf(
   decode_error_policy = "null",
   overwrite = FALSE,
   samples = NULL,
-  regions_var = NULL
+  regions_var = NULL,
+  include_file_offset = FALSE
 )
 ```
 
@@ -104,6 +105,15 @@ rduckhts_bcf(
   1,000,000 intervals and 128 MiB. Aggregate with \`coalesce(list(...),
   \[\]::STRUCT(...)\[\])\`: \`list()\` over no rows is \`NULL\`, which
   means the ordinary full scan.
+
+- include_file_offset:
+
+  Logical. If \`TRUE\`, add a \`FILE_OFFSET\` column after \`FILTER\`:
+  the BGZF virtual position just after each record. It increases
+  strictly in file order and is the same for every scan mode, so
+  ordering by it restores file order, also among records at one
+  position. Input that is not BGZF-compressed gives \`NA\`. The default
+  keeps the existing schema.
 
 ## Value
 
