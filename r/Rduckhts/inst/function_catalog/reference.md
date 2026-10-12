@@ -1357,7 +1357,7 @@ Find runs of homozygosity in a VCF/BCF with the bcftools roh model, using allele
 Signature:
 
 ```sql
-duckhts_roh_af_table(path, af_table, genetic_map, hw_to_az := 6.7e-8, az_to_hw := 5e-9, gt_error := NULL, rec_rate := NULL, samples := NULL, max_sites := 20000000, max_site_bytes := 4294967296)
+duckhts_roh_af_table(path, af_table, genetic_map, hw_to_az := 6.7e-8, az_to_hw := 5e-9, gt_error := NULL, rec_rate := NULL, samples := NULL, max_sites := 20000000, max_site_bytes := 4294967296, site_rule := 'matching')
 ```
 
 Returns:
@@ -1368,7 +1368,11 @@ table(sample VARCHAR, chrom VARCHAR, start BIGINT, "end" BIGINT, length BIGINT, 
 
 ### Frequencies
 
-af_table is a table or view name with columns chrom, pos (one-based), ref, alt and af, like a bcftools --AF-file. A record takes the frequency of the row matching its chrom, pos, REF and its ALT alleles joined by commas; a record without a matching row is not used and does not claim a repeated position, and a record whose row has a NULL af is skipped. bcftools roh --AF-file differs at a repeated position: it takes the first record in file order and skips the position when that record's alleles differ from the file's. Give one row per key; af must be in [0, 1], and exactly 0 skips the site. This is the entry point for per-sample frequencies, for example ancestry-tuned ones, by running it once per relation.
+af_table is a table or view name with columns chrom, pos (one-based), ref, alt and af, like a bcftools --AF-file. alt holds the ALT alleles joined by commas. af must be in [0, 1]; exactly 0 or NULL skips the site. site_rule chooses which record of a listed position gives its site. This is the entry point for per-sample frequencies, for example ancestry-tuned ones, by running it once per relation.
+
+### Site rule
+
+site_rule := 'matching' (the default): a record takes the frequency of the row matching its chrom, pos, REF and ALT; a record without a matching row is not used and does not claim a repeated position. Give one row per key. site_rule := 'bcftools' follows bcftools roh --AF-file (1.23 and 1.24) at a repeated position, using read_bcf's FILE_OFFSET for file order: af_table must give at most one row per position, else an error names the position, since bcftools reads only the first line of a position and a relation has no line order. In file order, a record whose indel class differs from the row's is passed over while another record of the position follows; the row is an indel when any of its alleles is longer than one character, and a record is one when HTSlib's bcf_get_variant_types() sets VCF_INDEL (an MNP such as AC>GT and a complex ACG>AT are not; duckhts_htslib_is_indel(ref, alts) is the port). A record with no non-symbolic ALT, or several, claims nothing; the first remaining record claims the position, which is skipped unless that record's REF and ALT equal the row's. A claiming record whose first ALT is symbolic (<*>, <NON_REF>) is skipped too, where bcftools would decode its second allele. The bcftools rule needs a BGZF-compressed VCF or BCF, reads the file a second time without samples, and rejects other values of site_rule.
 
 ### Otherwise
 

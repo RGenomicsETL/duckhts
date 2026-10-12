@@ -1,0 +1,37 @@
+##fileformat=VCFv4.2
+##contig=<ID=chr1,length=100000>
+##contig=<ID=chr2,length=100000>
+##ALT=<ID=DEL,Description="Deletion">
+##ALT=<ID=*,Description="Any other allele">
+##ALT=<ID=NON_REF,Description="Any other allele">
+##ALT=<ID=X,Description="Any other allele">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chr1	100	snp	A	G	.	.	.
+chr1	200	snp_case	A	a	.	.	.
+chr1	300	mnp	AC	GT	.	.	.
+chr1	400	mnp_shared_suffix	ACG	TCG	.	.	.
+chr1	500	mnp_long	ACGTA	TCGTT	.	.	.
+chr1	600	del	AC	A	.	.	.
+chr1	700	del_after_suffix	ACGT	AT	.	.	.
+chr1	800	del_left	ATG	G	.	.	.
+chr1	900	ins	A	AT	.	.	.
+chr1	1000	ins_long	A	ATTTT	.	.	.
+chr1	1100	ins_left	G	ATG	.	.	.
+chr1	1200	ins_lower_ref	a	AT	.	.	.
+chr1	1300	complex	ACG	AT	.	.	.
+chr1	1400	complex_two	AT	GCC	.	.	.
+chr1	1500	complex_suffix	ACG	TG	.	.	.
+chr1	1600	symbolic_del	A	<DEL>	.	.	.
+chr1	1700	symbolic_star	A	<*>	.	.	.
+chr1	1800	symbolic_non_ref	A	<NON_REF>	.	.	.
+chr1	1900	symbolic_x	A	<X>	.	.	.
+chr1	2000	overlap	A	*	.	.	.
+chr1	2100	bnd_after	A	A[chr2:100[	.	.	.
+chr1	2200	bnd_before	A	]chr2:100]A	.	.	.
+chr1	2300	no_alt	A	.	.	.	.
+chr1	2400	multi_snp_indel	A	G,AT	.	.	.
+chr1	2500	multi_snp_symbolic	A	G,<*>	.	.	.
+chr1	2600	multi_mnp_complex	AC	GT,G	.	.	.
+chr1	2700	multi_indel_overlap	ATT	A,*	.	.	.
+chr1	2800	multi_symbolic_first	A	<*>,AT	.	.	.
+chr1	2900	ref_case	ac	AC	.	.	.

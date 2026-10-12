@@ -13,7 +13,9 @@
 #' `--AF-file`) with columns `chrom`, `pos`, `ref`, `alt` and `af`, matched to
 #' each record by chromosome, position, REF and its ALT alleles joined by commas.
 #' Sites without a usable frequency (absent, missing or exactly 0) are skipped,
-#' as are records with more than one ALT or none.
+#' as are records with more than one ALT or none. With `af_table`,
+#' `site_rule = "bcftools"` chooses the record of a repeated position as
+#' `bcftools roh --AF-file` does (see the argument).
 #'
 #' Alternatively, `reference_table` and `proportions_table` select the
 #' ancestry-tuned path. The reference is long-format with columns `chromosome`,
@@ -77,6 +79,16 @@
 #'   `max_site_bytes`; decodes that run at the same time with different values
 #'   each apply their own. Exceeding it is an error: decode fewer samples per
 #'   call or raise it.
+#' @param site_rule Which record of a position listed in `af_table` gives its
+#'   site. `"matching"` (the default) uses a record whose REF and ALT match a
+#'   row of `af_table`. `"bcftools"` follows `bcftools roh --AF-file`: in file
+#'   order, a record of the other indel class than the row is passed over
+#'   while another record of the position follows, a record with more than one
+#'   ALT claims nothing, and the first remaining record claims the position,
+#'   which is skipped unless its alleles equal the row's (also when its first
+#'   ALT is symbolic, which bcftools would decode through the second ALT). It
+#'   needs one `af_table` row per position and a BGZF-compressed VCF or BCF.
+#'   Only `af_table` takes `"bcftools"`.
 #' @return A data frame (or invisible `TRUE` when `table_name` is given) with one
 #'   row per run: `sample`, `chrom`, `start` and `end` (one-based, inclusive,
 #'   the first and last marker), `length` (`end - start + 1`), `n_markers` and
@@ -93,10 +105,17 @@ rduckhts_roh <- function(
   hw_to_az = 6.7e-8, az_to_hw = 5e-9, gt_error = NULL, rec_rate = NULL,
   samples = NULL, table_name = NULL, overwrite = FALSE,
   reference_table = NULL, proportions_table = NULL, af_clamp = 1e-3,
-  max_sites = 2e7, max_site_bytes = 2^32
+  max_sites = 2e7, max_site_bytes = 2^32, site_rule = "matching"
 ) {
   .somalier_validate_output(con, table_name, overwrite)
   .somalier_scalar_text(path, "path")
+  if (!is.character(site_rule) || length(site_rule) != 1L || is.na(site_rule) ||
+      !site_rule %in% c("matching", "bcftools")) {
+    stop("site_rule must be \"matching\" or \"bcftools\"", call. = FALSE)
+  }
+  if (site_rule != "matching" && is.null(af_table)) {
+    stop("site_rule = \"bcftools\" needs af_table", call. = FALSE)
+  }
   source <- .roh_frequency_source(con, af_tag, af_table, reference_table,
                                   proportions_table, af_clamp)
   options <- .roh_validated_options(genetic_map, hw_to_az, az_to_hw, gt_error,
@@ -112,7 +131,8 @@ rduckhts_roh <- function(
     if (!is.null(options$samples)) {
       paste0("samples := ", sql_quote_string(con, options$samples))
     },
-    .roh_limit_arguments(max_sites, max_site_bytes)
+    .roh_limit_arguments(max_sites, max_site_bytes),
+    if (site_rule != "matching") paste0("site_rule := ", sql_quote_string(con, site_rule))
   )
   query <- paste0("SELECT * FROM ", source$macro, "(",
                   paste(arguments, collapse = ", "), ")")

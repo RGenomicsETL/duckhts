@@ -4,6 +4,22 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- `duckhts_roh_af_table(..., site_rule := 'bcftools')` chooses the record of a
+  repeated listed position as `bcftools roh --AF-file` does
+  (https://github.com/RGenomicsETL/duckhts/issues/329). In file order
+  (`FILE_OFFSET`), a record of the other indel class than the frequency row is
+  passed over while another record of the position follows, a record without
+  exactly one non-symbolic ALT claims nothing, and the first remaining record
+  claims the position, which is skipped unless its alleles equal the row's. A
+  claiming record whose first ALT is symbolic is skipped as well, where
+  bcftools would decode its second allele. The rule needs one frequency row per
+  position (more is an error naming the position) and BGZF input. The default
+  `site_rule := 'matching'` keeps the current behaviour. The private macro
+  `duckhts_htslib_is_indel(ref, alts)` ports HTSlib's indel class and is checked
+  against `bcftools query -f '%TYPE'`. On a fixture of repeated positions the
+  bcftools rule gives the runs of bcftools 1.24; the new fixtures come from
+  `test/scripts/prepare_roh_repeated_fixture.R`.
+
 - `read_bcf(..., include_file_offset := true)` adds a `FILE_OFFSET UBIGINT`
   column after `FILTER`: the BGZF virtual position just after each record, as
   `read_bam` defines it. Sequential, indexed, parallel, region and

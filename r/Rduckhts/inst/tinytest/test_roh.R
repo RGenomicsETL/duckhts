@@ -335,3 +335,34 @@ test_roh_short_traceback <- function() {
   }
 }
 test_roh_short_traceback()
+
+# site_rule on roh_repeated.vcf.gz: each used test position is a run of one
+# marker. "bcftools" gives the runs of bcftools roh 1.24 --AF-file -a 0.01
+# -H 0.01 (see test/sql/roh.test); the default keeps matching records.
+test_roh_site_rule <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  path <- system.file("extdata", "roh_repeated.vcf.gz", package = "Rduckhts")
+  af_file <- system.file("extdata", "roh_repeated_af.tsv.gz", package = "Rduckhts")
+  expect_true(nzchar(path) && nzchar(af_file))
+  dbExecute(con, sprintf(paste(
+    "CREATE TEMP TABLE repeated_af AS SELECT chrom, pos, split_part(alleles, ',', 1) AS ref,",
+    "split_part(alleles, ',', 2) AS alt, af FROM read_csv(%s, delim = '\t', header = false,",
+    "columns = {'chrom': 'VARCHAR', 'pos': 'BIGINT', 'alleles': 'VARCHAR', 'af': 'DOUBLE'})"),
+    dbQuoteString(con, af_file)))
+  dbExecute(con, "CREATE TEMP TABLE repeated_af_first AS SELECT * FROM repeated_af WHERE NOT (pos = 4000 AND alt = 'G')")
+
+  starts <- function(...) sort(as.integer(rduckhts_roh(con, path, hw_to_az = 0.01, az_to_hw = 0.01, ...)$start))
+  expect_equal(starts(af_table = "repeated_af_first", site_rule = "bcftools"),
+               c(500L, 1000L, 5000L, 6000L, 9000L))
+  expect_equal(starts(af_table = "repeated_af"),
+               c(500L, 1000L, 2000L, 4000L, 5000L, 6000L, 7000L, 8000L, 9000L, 10000L))
+  expect_error(starts(af_table = "repeated_af", site_rule = "bcftools"),
+               "needs one af_table row per position, but chr1:4000 has 2 rows")
+  for (bad in list("first", NA_character_, c("matching", "bcftools"), 1)) {
+    expect_error(starts(af_table = "repeated_af_first", site_rule = bad),
+                 "site_rule must be \"matching\" or \"bcftools\"")
+  }
+  expect_error(starts(af_tag = "AF", site_rule = "bcftools"), "site_rule = \"bcftools\" needs af_table")
+}
+test_roh_site_rule()

@@ -47,6 +47,7 @@ _Static_assert(DUCKHTS_ROH_MAX_SITES >= 20000000, "the default max_sites is with
 #define ROH_RECORDS \
     "FROM read_bcf(path, tidy_format := true, samples := samples, " \
     "decode_error_policy := 'error') " ROH_ALT_FILTER
+#define ROH_SYMBOLIC "('<*>', '<NON_REF>')"
 
 static const char sites_from_info_tag[] =
     "WITH __dht_sites AS NOT MATERIALIZED (SELECT CHROM AS chrom, POS AS pos, "
@@ -54,22 +55,105 @@ static const char sites_from_info_tag[] =
     "CAST(list_extract(COLUMNS(lambda c: c = 'INFO_' || af_tag), 1) AS DOUBLE) AS af, "
     ROH_EVIDENCE " AS evidence " ROH_RECORDS "), ";
 
-/* A record without a matching frequency row is dropped here, before the sites
- * are collected, so it never claims a repeated position. With a left join it
- * would arrive before or after the matching record of its position as the
- * hash join happens to emit them, and the record kept would depend on the plan.
- * (bcftools roh --AF-file instead takes the first record at a listed position
- * in file order and skips the position when its alleles differ.) */
+/* duckhts_htslib_is_indel(ref, alts): whether HTSlib's bcf_get_variant_types()
+ * sets VCF_INDEL for a record with these alleles, a port of
+ * bcf_set_variant_type() (htslib vcf.c:5361-5428 in 1.23, unchanged in 1.24).
+ * An allele is an indel when, after the common prefix (compared without case),
+ * one allele is used up and the other is not and does not end in a breakend
+ * bracket; or when both remain and, after the common suffix, one shrinks to
+ * its first base and the base where the other stops equals it. '*', symbolic
+ * and breakend alleles and a single-base pair are never indels, so an MNP such
+ * as AC>GT and a complex substitution such as ACG>AT are not. The record is an
+ * indel when any ALT is. ind_p is the common prefix length; ind_s the common
+ * suffix length of the rest, leaving at least one base of each. */
+static const char htslib_is_indel_macro[] =
+    "CREATE OR REPLACE MACRO duckhts_htslib_is_indel(ref, alts) AS "
+    "coalesce(list_bool_or(list_transform(alts, lambda ind_x: "
+    "CASE WHEN ind_x = '*' OR starts_with(ind_x, '<') OR starts_with(ind_x, '[') "
+    "OR starts_with(ind_x, ']') OR (length(ref) = 1 AND length(ind_x) = 1) THEN false "
+    "ELSE list_transform([struct_pack(r := upper(ref), a := upper(ind_x))], lambda ind_v: "
+    "list_transform([coalesce(list_position(list_transform("
+    "range(1, least(length(ind_v.r), length(ind_v.a)) + 1), "
+    "lambda ind_i: substr(ind_v.r, ind_i, 1) != substr(ind_v.a, ind_i, 1)), true) - 1, "
+    "least(length(ind_v.r), length(ind_v.a)))], lambda ind_p: "
+    "CASE WHEN ind_p = length(ind_v.r) AND ind_p = length(ind_v.a) THEN false "
+    "WHEN ind_p = length(ind_v.r) THEN NOT (ends_with(ind_v.a, ']') OR ends_with(ind_v.a, '[')) "
+    "WHEN ind_p = length(ind_v.a) THEN true "
+    "WHEN ends_with(ind_v.a, ']') OR ends_with(ind_v.a, '[') THEN false "
+    "ELSE list_transform([coalesce(list_position(list_transform("
+    "range(0, least(length(ind_v.r), length(ind_v.a)) - ind_p - 1), "
+    "lambda ind_j: substr(ind_v.r, length(ind_v.r) - ind_j, 1) != "
+    "substr(ind_v.a, length(ind_v.a) - ind_j, 1)), true) - 1, "
+    "least(length(ind_v.r), length(ind_v.a)) - ind_p - 1)], lambda ind_s: "
+    "CASE WHEN ind_s = length(ind_v.a) - ind_p - 1 AND ind_s = length(ind_v.r) - ind_p - 1 THEN false "
+    "WHEN ind_s = length(ind_v.a) - ind_p - 1 "
+    "THEN substr(ind_v.r, length(ind_v.r) - ind_s, 1) = substr(ind_v.a, ind_p + 1, 1) "
+    "WHEN ind_s = length(ind_v.r) - ind_p - 1 "
+    "THEN substr(ind_v.r, ind_p + 1, 1) = substr(ind_v.a, length(ind_v.a) - ind_s, 1) "
+    "ELSE false END)[1] END)[1])[1] END)), false)";
+
+/* site_rule chooses the record that gives a listed position its site. Both
+ * arms are written out; the macro argument is a constant, so DuckDB removes
+ * the arm whose site_rule test is false before running it.
+ *
+ * 'matching': a record without a matching frequency row is dropped before the
+ * sites are collected, so it never claims a repeated position. With a left
+ * join it would arrive before or after the matching record of its position as
+ * the hash join happens to emit them, and the record kept would depend on the
+ * plan.
+ *
+ * 'bcftools': bcftools roh --AF-file (bcftools 1.23 vcfroh.c and htslib
+ * synced_bcf_reader.c). The frequency file is a target list with alleles
+ * (vcfroh.c:1272-1276), and bcftools reads only the first line of a position
+ * (synced_bcf_reader.c:1525-1551), so a relation must give one row per
+ * position (the guard below). At a listed position, in file order (FILE_OFFSET):
+ * a record whose indel class differs from the frequency row's is passed over
+ * while another record of the position follows; the last record is always
+ * seen (synced_bcf_reader.c:865-886). The row is an indel when any of its
+ * alleles is longer than one character (1466-1518). A record with no
+ * non-symbolic ALT, or several, claims nothing (vcfroh.c:1010-1027); the first
+ * remaining record claims the position (1036-1065), and the position is
+ * skipped unless that record's alleles equal the row's (read_AF, 661-686). A
+ * claiming record whose first ALT is symbolic is skipped as well: bcftools
+ * would decode its second allele, and the evidence here is that of the first
+ * ALT. File order needs BGZF input. */
 static const char sites_from_relation[] =
-    "WITH __dht_freq AS (SELECT CAST(chrom AS VARCHAR) AS f_chrom, CAST(pos AS BIGINT) AS f_pos, "
-    "CAST(ref AS VARCHAR) AS f_ref, CAST(alt AS VARCHAR) AS f_alt, CAST(af AS DOUBLE) AS f_af "
-    "FROM query_table(af_table)), "
+    "WITH __dht_freq AS NOT MATERIALIZED (SELECT CAST(chrom AS VARCHAR) AS f_chrom, "
+    "CAST(pos AS BIGINT) AS f_pos, CAST(ref AS VARCHAR) AS f_ref, CAST(alt AS VARCHAR) AS f_alt, "
+    "CAST(af AS DOUBLE) AS f_af FROM query_table(af_table)), "
     "__dht_calls AS NOT MATERIALIZED (SELECT CHROM AS chrom, POS AS pos, REF AS ref, "
-    "array_to_string(ALT, ',') AS alt, SAMPLE_ID AS smp, " ROH_EVIDENCE " AS evidence "
-    ROH_RECORDS "), "
+    "array_to_string(ALT, ',') AS alt, FILE_OFFSET AS file_offset, SAMPLE_ID AS smp, "
+    ROH_EVIDENCE " AS evidence FROM read_bcf(path, tidy_format := true, samples := samples, "
+    "decode_error_policy := 'error', include_file_offset := true) " ROH_ALT_FILTER "), "
+    "__dht_bcftools_targets AS NOT MATERIALIZED (SELECT f_chrom AS t_chrom, f_pos AS t_pos, "
+    "any_value(f_ref) AS t_ref, any_value(f_alt) AS t_alt, any_value(f_af) AS t_af, "
+    "coalesce(length(any_value(f_ref)) > 1 OR "
+    "list_bool_or(list_transform(string_split(any_value(f_alt), ','), lambda a: length(a) > 1)), "
+    "false) AS t_indel "
+    "FROM __dht_freq WHERE site_rule = 'bcftools' AND f_chrom IS NOT NULL AND f_pos IS NOT NULL "
+    "GROUP BY f_chrom, f_pos), "
+    /* Every record at a listed position, from a scan without samples. */
+    "__dht_bcftools_records AS NOT MATERIALIZED (SELECT r.CHROM AS chrom, r.POS AS pos, "
+    "r.REF AS ref, r.ALT AS alts, CASE WHEN r.FILE_OFFSET IS NULL THEN "
+    "error('site_rule := ''bcftools'' needs file order: use a BGZF-compressed VCF or BCF') "
+    "ELSE r.FILE_OFFSET END AS file_offset, "
+    "max(r.FILE_OFFSET) OVER (PARTITION BY r.CHROM, r.POS) AS last_offset, "
+    "t.t_ref, t.t_alt, t.t_af, t.t_indel "
+    "FROM read_bcf(path, samples := '', decode_error_policy := 'error', include_file_offset := true) AS r "
+    "JOIN __dht_bcftools_targets AS t ON t.t_chrom = r.CHROM AND t.t_pos = r.POS), "
+    "__dht_bcftools_claims AS NOT MATERIALIZED (SELECT chrom, pos, file_offset, t_af, "
+    "coalesce(ref = t_ref AND array_to_string(alts, ',') = t_alt AND alts[1] NOT IN " ROH_SYMBOLIC ", "
+    "false) AS usable FROM __dht_bcftools_records "
+    "WHERE (file_offset = last_offset OR duckhts_htslib_is_indel(ref, alts) = t_indel) "
+    "AND len(list_filter(alts, lambda a: a NOT IN " ROH_SYMBOLIC ")) = 1 "
+    "QUALIFY row_number() OVER (PARTITION BY chrom, pos ORDER BY file_offset) = 1), "
     "__dht_sites AS NOT MATERIALIZED (SELECT c.chrom, c.pos, c.smp, f.f_af AS af, c.evidence "
     "FROM __dht_calls AS c JOIN __dht_freq AS f ON f.f_chrom = c.chrom "
-    "AND f.f_pos = c.pos AND f.f_ref = c.ref AND f.f_alt = c.alt), ";
+    "AND f.f_pos = c.pos AND f.f_ref = c.ref AND f.f_alt = c.alt WHERE site_rule = 'matching' "
+    "UNION ALL SELECT c.chrom, c.pos, c.smp, k.t_af, c.evidence "
+    "FROM __dht_calls AS c JOIN __dht_bcftools_claims AS k ON k.chrom = c.chrom "
+    "AND k.pos = c.pos AND k.file_offset = c.file_offset "
+    "WHERE k.usable AND site_rule = 'bcftools'), ";
 
 /* One packed site list per sample and chromosome. The evidence column is
  * FORMAT_PL or FORMAT_GT, chosen at bind time, and only the branch of that
@@ -123,6 +207,17 @@ static const char from_lists_with_map[] =
     "CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE), " \
     ROH_LIMIT_ARGUMENTS ")"
 static const char genotype_guard[] = ROH_GUARD_COLUMNS "WHERE NOT " ROH_GENOTYPE_ARGUMENTS_VALID;
+/* duckhts_roh_af_table also checks site_rule, and under 'bcftools' that the
+ * relation gives at most one row per position, naming the first such position. */
+static const char af_table_guard[] =
+    ROH_GUARD_COLUMNS "WHERE CASE WHEN site_rule IN ('matching', 'bcftools') THEN false "
+    "ELSE error('site_rule must be ''matching'' or ''bcftools''') IS NULL END"
+    ROH_GUARD_COLUMNS "FROM (SELECT f_chrom, f_pos, count(*) AS n FROM __dht_freq "
+    "WHERE site_rule = 'bcftools' AND f_chrom IS NOT NULL AND f_pos IS NOT NULL "
+    "GROUP BY f_chrom, f_pos HAVING count(*) > 1 ORDER BY f_chrom, f_pos LIMIT 1) AS d "
+    "WHERE error('site_rule := ''bcftools'' needs one af_table row per position, but ' || "
+    "d.f_chrom || ':' || d.f_pos || ' has ' || d.n || ' rows; bcftools reads the first line "
+    "of a position, and a relation has no line order') IS NULL";
 /* The ancestry macro also runs its relation checks (__dht_group_guard) here,
  * so they do not depend on a call matching a reference site. */
 static const char ancestry_guard[] =
@@ -335,7 +430,9 @@ static const char fitted_counts_lists[] =
 typedef struct {
     const char *name;
     const char *source_parameter;
+    const char *options;      /* the named parameters after the source, with their defaults */
     const char *sites;
+    const char *source_guard; /* checks of the source's own options; may be empty */
 } roh_source_t;
 
 /* Both overloads of one macro: the plain body and the body with a genetic map. */
@@ -346,7 +443,9 @@ static bool register_roh_macro(duckhts_registration_t *registration, const roh_s
     parts[count++] = source->name;
     parts[count++] = "(path, ";
     parts[count++] = source->source_parameter;
-    parts[count++] = ", " ROH_OPTIONS ") AS TABLE (";
+    parts[count++] = ", ";
+    parts[count++] = source->options;
+    parts[count++] = ") AS TABLE (";
     parts[count++] = source->sites;
     parts[count++] = site_lists;
     parts[count++] = select_head;
@@ -355,9 +454,12 @@ static bool register_roh_macro(duckhts_registration_t *registration, const roh_s
     parts[count++] = decode_end;
     parts[count++] = from_lists;
     parts[count++] = genotype_guard;
+    parts[count++] = source->source_guard;
     parts[count++] = "), (path, ";
     parts[count++] = source->source_parameter;
-    parts[count++] = ", genetic_map VARCHAR, " ROH_OPTIONS ") AS TABLE (";
+    parts[count++] = ", genetic_map VARCHAR, ";
+    parts[count++] = source->options;
+    parts[count++] = ") AS TABLE (";
     parts[count++] = source->sites;
     parts[count++] = site_lists;
     parts[count++] = map_lists;
@@ -367,6 +469,7 @@ static bool register_roh_macro(duckhts_registration_t *registration, const roh_s
     parts[count++] = decode_end;
     parts[count++] = from_lists_with_map;
     parts[count++] = genotype_guard;
+    parts[count++] = source->source_guard;
     parts[count++] = ")";
     return duckhts_register_sql_parts(registration, parts, count);
 }
@@ -434,10 +537,14 @@ static bool register_roh_counts_macro(duckhts_registration_t *registration, bool
 }
 
 bool register_duckhts_roh_sql(duckhts_registration_t *registration) {
-    static const roh_source_t from_info_tag = {"duckhts_roh", "af_tag", sites_from_info_tag};
+    static const roh_source_t from_info_tag = {"duckhts_roh", "af_tag", ROH_OPTIONS,
+                                               sites_from_info_tag, ""};
     static const roh_source_t from_relation = {"duckhts_roh_af_table", "af_table",
-                                               sites_from_relation};
-    return register_roh_macro(registration, &from_info_tag) &&
+                                               ROH_OPTIONS ", site_rule := 'matching'",
+                                               sites_from_relation, af_table_guard};
+    const char *classifier[] = {htslib_is_indel_macro};
+    return duckhts_register_sql_parts(registration, classifier, 1) &&
+           register_roh_macro(registration, &from_info_tag) &&
            register_roh_macro(registration, &from_relation) &&
            register_roh_ancestry_macro(registration) &&
            register_roh_counts_macro(registration, false) &&
