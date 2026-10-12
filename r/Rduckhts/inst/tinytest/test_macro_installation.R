@@ -49,9 +49,8 @@ writable <- run_phase(file, c(
   "result$temp_after <- length(macro_catalog(con, 'temp'))",
   "dbDisconnect(con, shutdown = TRUE)"
 ))
-# The inventory includes the separate fitted-count ROH macro and the private
-# duckhts_htslib_is_indel classifier of duckhts_roh_af_table_bcftools, and that macro.
-expect_equal(writable$temp, 45L)
+# Public and private macros share one inventory.
+expect_equal(writable$temp, 46L)
 expect_equal(writable$persistent, 0L)
 expect_equal(writable$quoted, '"a"')
 expect_false(writable$second_before)
@@ -60,7 +59,7 @@ expect_equal(writable$second_installed, 1L)
 expect_equal(writable$second_quoted, '"a"')
 expect_equal(writable$cte, '"b"')
 expect_equal(writable$reinstalled, 1L)
-expect_equal(writable$temp_after, 45L)
+expect_equal(writable$temp_after, 46L)
 
 # A read-only file: LOAD succeeds, installation works inside a transaction that is
 # rolled back, and the file is left byte-identical.
@@ -76,9 +75,9 @@ readonly <- run_phase(file, c(
   "result$temp_after <- length(macro_catalog(con, 'temp'))",
   "dbDisconnect(con, shutdown = TRUE)"
 ))
-expect_equal(readonly$temp, 45L)
+expect_equal(readonly$temp, 46L)
 expect_equal(readonly$persistent, 0L)
-expect_equal(readonly$temp_after, 45L)
+expect_equal(readonly$temp_after, 46L)
 expect_identical(unname(tools::md5sum(file)), readonly_before)
 
 # Installation inside a caller transaction is rolled back with that transaction.
