@@ -142,6 +142,17 @@ A series under 5 s gets the memory verdict alone.
 nice -n -15 taskset -c 16-19 Rscript -e 'rmarkdown::render("benchmarks/benchmark_convert_parquet_scaling.Rmd")'
 ```
 
+`CONVERT_PARQUET_BENCH_SIZE=reduced` runs the same code on small inputs, to
+check the report end to end: CRAM regions of 0.2% to 0.8% of the alignments,
+VCF regions of 1/64 to 1/16 of the records, 8 to 32 samples, and copies of
+the MANE annotation (`mane_v15_ensembl_gff3`) instead of GENCODE. That run
+writes its observations to a temporary directory, so pass `output_dir` to keep
+its report out of `benchmarks/` too; its numbers are not evidence.
+
+``` sh
+CONVERT_PARQUET_BENCH_SIZE=reduced taskset -c 0-3 Rscript -e 'rmarkdown::render("benchmarks/benchmark_convert_parquet_scaling.Rmd", output_dir = "/tmp")'
+```
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 knitr::opts_knit$set(root.dir = normalizePath(".."))
@@ -166,6 +177,24 @@ if (system2("git", c("diff", "--quiet", "HEAD", "--", "src"), stdout = FALSE, st
 host_load <- sub(".*load average: ", "", system2("uptime", stdout = TRUE))
 quote_literal <- function(value) paste0("'", gsub("'", "''", value, fixed = TRUE), "'")
 quote_ident <- function(value) paste0('"', gsub('"', '""', value, fixed = TRUE), '"')
+
+# The sizes: the full workloads described above, or small inputs that check
+# the report end to end and write their observations outside benchmarks/.
+bench_size <- Sys.getenv("CONVERT_PARQUET_BENCH_SIZE", "full")
+if (!bench_size %in% c("full", "reduced")) {
+  stop("CONVERT_PARQUET_BENCH_SIZE must be full or reduced", call. = FALSE)
+}
+full_size <- identical(bench_size, "full")
+cram_fractions <- if (full_size) c(0.125, 0.25, 0.5) else c(0.002, 0.004, 0.008)
+giab_fractions <- if (full_size) c(0.25, 0.5, 1) else c(1, 2, 4) / 64
+sample_counts <- if (full_size) c(626L, 1252L, 2504L) else c(8L, 16L, 32L)
+gff_id <- if (full_size) "gencode_v49_basic_gff3" else "mane_v15_ensembl_gff3"
+runs_csv <- if (full_size) "benchmarks/benchmark_convert_parquet_scaling_runs.csv" else
+  file.path(tempdir(), "benchmark_convert_parquet_scaling_runs.csv")
+reduced_note <- if (full_size) "" else paste(
+  "**Reduced sizes.** This render ran with `CONVERT_PARQUET_BENCH_SIZE=reduced`: its inputs are smaller",
+  "than the workloads above describe, its observations were written to a temporary directory, and its",
+  "numbers are not evidence.")
 
 # One untimed statement in its own CLI process; its rows come back as a data frame.
 query_untimed <- function(sql) {
@@ -207,7 +236,7 @@ ont_bam <- artifact("ont_ecoli_k12_bam")
 giab_vcf <- artifact("geno_giab_phased_source")
 stopifnot(identical(artifact("geno_giab_phased_source_tbi"), paste0(giab_vcf, ".tbi")))
 phase3_vcf <- artifact("sql_scaling_phase3_1x")
-gencode_gff <- artifact("gencode_v49_basic_gff3")
+gff_source <- artifact(gff_id)
 # The ONT alignment registers no checksum; its digest identifies the file read here.
 ont_sha256 <- strsplit(system2("sha256sum", shQuote(ont_bam), stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]
 
@@ -215,8 +244,10 @@ ont_sha256 <- strsplit(system2("sha256sum", shQuote(ont_bam), stdout = TRUE), " 
 cram_fields <- registered("bam_mismatch_hg00403_chr1_cram")
 cram_scan <- query_untimed(sprintf(paste(
   "SELECT count(*) AS alignments, sum(POS)::BIGINT AS position_sum, sum(len(SEQ))::BIGINT AS base_sum,",
-  "quantile_disc(POS, 0.125) AS q1, quantile_disc(POS, 0.25) AS q2, quantile_disc(POS, 0.5) AS q4",
-  "FROM read_bam(%s, reference := %s);"), quote_literal(cram), quote_literal(reference)))
+  "quantile_disc(POS, %s) AS q1, quantile_disc(POS, %s) AS q2, quantile_disc(POS, %s) AS q4",
+  "FROM read_bam(%s, reference := %s);"), format(cram_fractions[[1L]], scientific = FALSE),
+  format(cram_fractions[[2L]], scientific = FALSE), format(cram_fractions[[3L]], scientific = FALSE),
+  quote_literal(cram), quote_literal(reference)))
 stopifnot(cram_scan$alignments == as.numeric(cram_fields[["alignments"]]),
           cram_scan$position_sum == as.numeric(cram_fields[["position_sum"]]),
           cram_scan$base_sum == as.numeric(cram_fields[["base_sum"]]),
@@ -241,26 +272,28 @@ ont_scan <- query_untimed(sprintf(paste(
 ont_regions <- sprintf("%s:1-%s", ont_contig$id,
                        format(c(ont_scan$q1, ont_scan$q2, ont_contig$length), scientific = FALSE, trim = TRUE))
 
-# GIAB: the records at the 25% and 50% rank in header order of contig, then position.
+# GIAB: the record at each cut rank in header order of contig, then position.
+# A cut of the whole file lists every contig instead.
 giab_contigs <- query_untimed(sprintf(paste(
   "WITH contigs AS (SELECT id AS chrom, idx FROM read_hts_header(%s) WHERE record_type = 'contig')",
   "SELECT c.chrom, c.idx, count(*) AS records FROM read_bcf(%s) r JOIN contigs c ON c.chrom = r.CHROM",
   "GROUP BY c.chrom, c.idx ORDER BY c.idx;"), quote_literal(giab_vcf), quote_literal(giab_vcf)))
+stopifnot(identical(giab_contigs$chrom, paste0("chr", 1:22)))
+giab_ranks <- ceiling(sum(giab_contigs$records) * giab_fractions[giab_fractions < 1])
 giab_cuts <- query_untimed(sprintf(paste(
   "WITH contigs AS (SELECT id AS chrom, idx FROM read_hts_header(%s) WHERE record_type = 'contig'),",
-  "ranked AS (SELECT c.idx, r.CHROM AS chrom, r.POS AS pos,",
-  "row_number() OVER (ORDER BY c.idx, r.POS) AS k, count(*) OVER () AS n",
+  "ranked AS (SELECT c.idx, r.CHROM AS chrom, r.POS AS pos, row_number() OVER (ORDER BY c.idx, r.POS) AS k",
   "FROM read_bcf(%s) r JOIN contigs c ON c.chrom = r.CHROM)",
-  "SELECT k, n, idx, chrom, pos FROM ranked WHERE k IN ((n + 3) // 4, (n + 1) // 2) ORDER BY k;"),
-  quote_literal(giab_vcf), quote_literal(giab_vcf)))
-stopifnot(nrow(giab_cuts) == 2L, giab_cuts$n[[1L]] == sum(giab_contigs$records),
-          identical(giab_contigs$chrom, paste0("chr", 1:22)))
+  "SELECT k, idx, chrom, pos FROM ranked WHERE k IN (%s) ORDER BY k;"),
+  quote_literal(giab_vcf), quote_literal(giab_vcf), paste(format(giab_ranks, scientific = FALSE), collapse = ", ")))
+stopifnot(nrow(giab_cuts) == length(giab_ranks))
 giab_region <- function(cut) {
   whole <- giab_contigs$chrom[giab_contigs$idx < cut$idx]
   paste(c(whole, sprintf("%s:1-%s", cut$chrom, format(cut$pos, scientific = FALSE, trim = TRUE))), collapse = ",")
 }
-giab_regions <- c(giab_region(giab_cuts[1L, ]), giab_region(giab_cuts[2L, ]),
-                  paste(giab_contigs$chrom, collapse = ","))
+giab_regions <- c(vapply(seq_len(nrow(giab_cuts)), function(i) giab_region(giab_cuts[i, ]), character(1L)),
+                  if (any(giab_fractions == 1)) paste(giab_contigs$chrom, collapse = ","))
+stopifnot(length(giab_regions) == 3L)
 
 # Phase 3: the record columns and the GT columns of the first samples in header order.
 phase3_columns <- query_untimed(sprintf(
@@ -268,7 +301,6 @@ phase3_columns <- query_untimed(sprintf(
 sample_columns <- phase3_columns[startsWith(phase3_columns, "FORMAT_")]
 record_columns <- phase3_columns[!startsWith(phase3_columns, "FORMAT_")]
 stopifnot(length(sample_columns) == 2504L, all(startsWith(sample_columns, "FORMAT_GT_")))
-sample_counts <- c(626L, 1252L, 2504L)
 columns_argument <- function(samples) {
   sprintf("columns := [%s]", paste(quote_literal(c(record_columns, sample_columns[seq_len(samples)])), collapse = ", "))
 }
@@ -278,11 +310,11 @@ staging <- tempfile("convert-parquet-inputs-")
 dir.create(staging)
 gff_copies <- c(1L, 2L, 4L)
 gff_paths <- vapply(gff_copies, function(copies) {
-  if (copies == 1L) return(gencode_gff)
-  path <- file.path(staging, sprintf("gencode.v49.basic.annotation.%dcopies.gff3.gz", copies))
-  stopifnot(file.copy(gencode_gff, path))
-  for (copy in seq_len(copies - 1L)) stopifnot(file.append(path, gencode_gff))
-  stopifnot(file.size(path) == copies * file.size(gencode_gff))
+  if (copies == 1L) return(gff_source)
+  path <- file.path(staging, sprintf("%dcopies-%s", copies, basename(gff_source)))
+  stopifnot(file.copy(gff_source, path))
+  for (copy in seq_len(copies - 1L)) stopifnot(file.append(path, gff_source))
+  stopifnot(file.size(path) == copies * file.size(gff_source))
   path
 }, character(1L))
 
@@ -457,7 +489,7 @@ for (repetition in 1:3) {
 }
 runs <- do.call(rbind, observations)
 unlink(staging, recursive = TRUE)
-write.csv(runs, "benchmarks/benchmark_convert_parquet_scaling_runs.csv", row.names = FALSE)
+write.csv(runs, runs_csv, row.names = FALSE)
 stopifnot(all(runs$peak_temp_bytes == 0), all(runs$output_rows == runs$rows), all(runs$reader_metadata == 1))
 over_budget <- runs[runs$max_rss_kib / 1024 > runs$budget_mib, ]
 if (nrow(over_budget)) {
@@ -504,6 +536,8 @@ if (any(timed$time_exponent_2x > 1.25 | timed$time_exponent_4x > 1.25)) {
   stop("a time exponent is above 1.25", call. = FALSE)
 }
 ```
+
+`r reduced_note`
 
 Source revision: `r revision`; `src` tree `r src_tree`. DuckDB runtime: `r duckdb_runtime` (CLI). Extension SHA-256: `r strsplit(system2("sha256sum", extension, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`. Host load at start: `r host_load`. DuckDB memory limit: `r memory_limit` (the default); temporary directory limit: 0. Every observation is in [`benchmark_convert_parquet_scaling_runs.csv`](benchmark_convert_parquet_scaling_runs.csv).
 
@@ -574,20 +608,43 @@ cat(sprintf(paste(
   "On one thread the peak RSS above the overhead is between %.2f (`%s` at %d×) and %.2f (`%s` at %d×)",
   "times the declared live state, against the factor of 3 that the ceiling allows.\n\n"),
   lowest$share, lowest$series, lowest$scale, highest$share, highest$series, highest$scale))
+rss_growth <- function(series) cell_of(series, 4L)$median_rss_mib - cell_of(series, 1L)$median_rss_mib
+buffer_spread <- max(vapply(records_series, function(series) {
+  diff(range(summary$max_buffer_mib[summary$series == series & summary$threads == 1L]))
+}, numeric(1L)))
+# Every input of these series fills a row group at the full sizes, not at the reduced ones.
+rows_fill_row_group <- all(cells$rows[cells$series %in% records_series] >= row_group_size + vector_size - 1)
+model_growth <- if (rows_fill_row_group) "the model holds no state that grows with the input" else
+  "the model's live state grows only until an input fills one row group"
+unexplained <- if (!rows_fill_row_group) "" else paste0(
+  "; the model does not account for that change",
+  if (buffer_spread <= 1) ", and it is not memory that DuckDB's buffer manager holds" else "")
 cat(sprintf(paste(
-  "In the three records series the writer flushes a row group at 100,000 rows, so the model gives the",
-  "same live state at every size. On one thread the peak RSS at 4× is %s times the 1× peak for the",
-  "CRAM, %s for the VCF and %s for the GFF. The time exponents of the series with a timing verdict",
-  "(%s) are at most %.2f.%s\n\n"),
-  format(round(flat$rss_ratio_4x[flat$series == "bam_short_reads"], 2), nsmall = 2),
-  format(round(flat$rss_ratio_4x[flat$series == "vcf_records"], 2), nsmall = 2),
-  format(round(flat$rss_ratio_4x[flat$series == "gff_records"], 2), nsmall = 2),
-  paste(sprintf("`%s`", timed_series), collapse = ", "),
-  max(c(timed$time_exponent_2x, timed$time_exponent_4x)),
-  if (length(untimed)) sprintf(" %s %s less than 5 s at 1× and %s no timing verdict.",
-                               paste(sprintf("`%s`", untimed), collapse = ", "),
-                               if (length(untimed) == 1L) "takes" else "take",
-                               if (length(untimed) == 1L) "gets" else "get") else ""))
+  "In the three records series the writer flushes a row group at 100,000 rows, so %s, and DuckDB's peak",
+  "buffer differs by at most %.1f MiB between the sizes of a series. From 1× to 4× on one thread the peak",
+  "RSS changes by %+.1f MiB (a ratio of %s) for the CRAM, %+.1f MiB (%s) for the VCF and %+.1f MiB (%s)",
+  "for the GFF%s.\n\n"),
+  model_growth, buffer_spread,
+  rss_growth("bam_short_reads"), format(round(flat$rss_ratio_4x[flat$series == "bam_short_reads"], 2), nsmall = 2),
+  rss_growth("vcf_records"), format(round(flat$rss_ratio_4x[flat$series == "vcf_records"], 2), nsmall = 2),
+  rss_growth("gff_records"), format(round(flat$rss_ratio_4x[flat$series == "gff_records"], 2), nsmall = 2),
+  unexplained))
+timed_sentence <- if (length(timed_series)) {
+  sprintf("The time exponents of the series with a timing verdict (%s) are at most %.2f.",
+          paste(sprintf("`%s`", timed_series), collapse = ", "),
+          max(c(timed$time_exponent_2x, timed$time_exponent_4x)))
+} else {
+  "No series has a timing verdict at these sizes."
+}
+untimed_sentence <- if (length(untimed)) {
+  sprintf(" %s %s less than 5 s at 1× and %s no timing verdict.",
+          paste(sprintf("`%s`", untimed), collapse = ", "),
+          if (length(untimed) == 1L) "takes" else "take",
+          if (length(untimed) == 1L) "gets" else "get")
+} else {
+  ""
+}
+cat(timed_sentence, untimed_sentence, "\n\n", sep = "")
 short4 <- cell_of("bam_short_reads", 4L)
 vcf4 <- cell_of("vcf_records", 4L)
 gff4 <- cell_of("gff_records", 4L)
@@ -617,10 +674,11 @@ cat(sprintf(paste(
   format(round(long4$median_rss_mib / long1$median_rss_mib, 2), nsmall = 2)))
 cat(sprintf(paste(
   "The operating scale this report supports is what it measures: %s alignments of one 30× chromosome,",
-  "a whole-genome single-sample VCF of %s records, four copies of a full human annotation (%s features)",
+  "a %ssingle-sample VCF of %s records, four copies of a full human annotation (%s features)",
   "and %s samples of %s records, all with the default row group of 100,000 rows. More samples, wider",
   "rows or a larger row group need memory in proportion; `row_group_size` is the builders' parameter",
   "for it, and its effect is not measured here.\n"),
-  format(short4$rows, big.mark = ","), format(vcf4$rows, big.mark = ","), format(gff4$rows, big.mark = ","),
+  format(short4$rows, big.mark = ","), if (any(giab_fractions == 1)) "whole-genome " else "",
+  format(vcf4$rows, big.mark = ","), format(gff4$rows, big.mark = ","),
   format(sample_counts[[3L]], big.mark = ","), format(phase3_records, big.mark = ",")))
 ```
