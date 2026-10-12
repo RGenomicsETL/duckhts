@@ -4,6 +4,26 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- The genome-wide drivers of the ROH ancestry evaluation are back in
+  `benchmarks/roh_ancestry/`, with the fixes that review asked for in
+  https://github.com/RGenomicsETL/duckhts/issues/329. `truth_genome.R` counts
+  the called genotypes of each 100 kb window and uses the chr20 rule, so a
+  window without one breaks a run: on chr21 and chr22 the withdrawn truth gave
+  every child a run over the short arm, 762 and 761 intervals, and the fixed
+  truth has 7 on each. `q_genome.R` and `truth_genome.R` reuse a cached batch
+  or window table only when its marker records the same SHA-256 for every
+  input, the extension and the driver. The per-chromosome long references and
+  AF sites are `r/duckhtsbench` artifacts, staged by
+  `duckhts_bench_stage_roh_ancestry_references()` with a network-free test.
+  No callable-base mask is registered, so FROH is reported as
+  `froh_assembly`, a fraction of the whole GRCh38 autosome length.
+  `run_autosome_arm.R` decodes one chromosome per query with the shipped
+  macros, and every arm decodes chr20 itself instead of reading the chr20
+  evaluation's outputs. `ROH_GENOME_CHROMOSOMES` limits a smoke run to some
+  autosomes; a run on chr20 alone reproduces the chr20 evaluation's segments,
+  child metrics and criterion exactly. The genome-wide evaluation itself has
+  not been rerun, so no genome-wide result is reported.
+
 - The `*_convert_parquet_sql` builders store the header in the Parquet
   metadata (`vcf_header`, `sam_header`, `gff_header`) with its line breaks.
   `duckhts_raw_header_text()` joined the header lines with the SQL literal

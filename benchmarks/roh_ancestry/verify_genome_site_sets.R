@@ -1,12 +1,17 @@
-cache <- file.path(duckhtsbench::duckhts_bench_cache_dir(), "benchmarks", "roh-ancestry")
+# Check, per autosome of the run, that the AF arms and the ancestry arm can use
+# the same sites: the children BCF sites that match a non-palindromic reference
+# site form the same set with and without the requirement that all five INFO/AF
+# fields are present.
+source("benchmarks/roh_ancestry/genome_common.R")
+chromosomes <- genome_chromosomes()
 connection <- Rduckhts::rduckhts_connect(
-  extension_path = normalizePath("build/release/duckhts.duckdb_extension"),
+  extension_path = normalizePath("build/release/duckhts.duckdb_extension", mustWork = TRUE),
   config = list(memory_limit = "12GB", threads = "4",
-                temp_directory = file.path(cache, "duckdb-tmp")))
+                temp_directory = file.path(genome_cache, "duckdb-tmp")))
 quote_string <- function(value) as.character(DBI::dbQuoteString(connection, value))
-results <- lapply(1:22, function(chromosome) {
-  bcf_path <- file.path(cache, sprintf("chr%d.children.bcf", chromosome))
-  reference_path <- file.path(cache, sprintf("chr%d.reference_long.parquet", chromosome))
+results <- lapply(chromosomes, function(chromosome) {
+  bcf_path <- genome_children_bcf(chromosome)
+  reference_path <- genome_reference_long(chromosome)
   sql <- sprintf(paste0(
     "WITH bcf_sites AS (SELECT DISTINCT regexp_replace(CHROM, '^chr', '')::VARCHAR AS chrom, ",
     "POS::BIGINT AS pos, REF::VARCHAR AS ref, ALT[1]::VARCHAR AS alt, ",
@@ -41,10 +46,9 @@ if (any(result$af_only_count != 0L) || any(result$ancestry_only_count != 0L) ||
     any(result$af_site_count != result$ancestry_site_count)) {
   stop("AF and ancestry site keys differ on one or more autosomes", call. = FALSE)
 }
-utils::write.csv(result,
-  "benchmarks/results/roh-ancestry/autosome_site_set_equivalence.csv",
-  row.names = FALSE)
-cat("all autosomes have identical AF and ancestry site keys;",
+utils::write.csv(result, file.path(genome_results, "autosome_site_set_equivalence.csv"),
+                 row.names = FALSE)
+cat("autosomes", paste(chromosomes, collapse = ","), "have identical AF and ancestry site keys;",
     sum(result$af_site_count), "sites total\n")
 print(result)
 DBI::dbDisconnect(connection, shutdown = TRUE)

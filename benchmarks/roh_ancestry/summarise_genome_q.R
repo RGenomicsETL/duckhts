@@ -1,9 +1,13 @@
-cache <- file.path(duckhtsbench::duckhts_bench_cache_dir(), "benchmarks", "roh-ancestry")
-results_dir <- "benchmarks/results/roh-ancestry"
-q <- utils::read.csv(file.path(cache, "autosome.q.csv"), stringsAsFactors = FALSE)
-pedigree <- read.table(file.path(cache, "pedigree.txt"), header = TRUE,
-                       stringsAsFactors = FALSE)
-children <- readLines(file.path(cache, "chr20.children.present.txt"))
+# Summaries of the genome-wide proportions written by q_genome.R for the
+# autosomes of the run.
+source("benchmarks/roh_ancestry/genome_common.R")
+results_dir <- genome_results
+q_path <- file.path(genome_cache, "autosome.q.csv")
+genome_check_output(q_path, genome_chromosomes())
+q <- utils::read.csv(q_path, stringsAsFactors = FALSE)
+pedigree <- read.table(duckhtsbench::duckhts_bench_artifact_path("roh_ancestry_pedigree"),
+                       header = TRUE, stringsAsFactors = FALSE)
+children <- readLines(genome_children_list)
 metadata <- pedigree[pedigree$SampleID %in% children,
                      c("SampleID", "Population", "Superpopulation"), drop = FALSE]
 if (nrow(metadata) != 377L || anyDuplicated(metadata$SampleID) ||

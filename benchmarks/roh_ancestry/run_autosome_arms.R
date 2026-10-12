@@ -3,41 +3,43 @@
 # The accuracy arms are deterministic, so one repetition (the default) answers the
 # criterion; summarise_genome.R requires any further repetitions to match the first.
 # A completed repetition (output, timing receipt and .ok marker) is reused only
-# when its marker records the same SHA-256 for every input the arms read: the
-# extension, the arm script, the pedigree, the children list, the proportions,
-# and each autosome's children BCF, AF sites and long reference.
+# when its marker records the same SHA-256 for every input the arms read (the
+# extension, the arm script, the shared helpers, the pedigree, the children
+# list, the proportions, and each autosome's children BCF, AF sites and long
+# reference), the same chromosome set and duckdb version, and the output's
+# current SHA-256. The arm processes inherit ROH_GENOME_CHROMOSOMES.
+source("benchmarks/roh_ancestry/genome_common.R")
 args <- commandArgs(trailingOnly = TRUE)
 repetitions <- if (length(args)) as.integer(args[[1L]]) else 1L
 if (length(repetitions) != 1L || is.na(repetitions) || repetitions < 1L || repetitions > 3L) {
   stop("REPETITIONS must be 1, 2 or 3", call. = FALSE)
 }
-cache <- file.path(duckhtsbench::duckhts_bench_cache_dir(), "benchmarks", "roh-ancestry")
+chromosomes <- genome_chromosomes()
 script <- normalizePath("benchmarks/roh_ancestry/run_autosome_arm.R", mustWork = TRUE)
 arms <- c("pooled", "single_AFR", "single_AMR", "single_EUR", "single_EAS", "ancestry")
-sha256 <- function(path) strsplit(system2("sha256sum", shQuote(path), stdout = TRUE), " ")[[1L]][[1L]]
-inputs <- c(
-  extension = normalizePath("build/release/duckhts.duckdb_extension", mustWork = TRUE),
-  arm_script = script,
-  pedigree = file.path(cache, "pedigree.txt"),
-  children = file.path(cache, "chr20.children.present.txt"),
-  proportions = file.path(cache, "autosome.q.csv"),
-  unlist(lapply(1:22, function(chromosome) {
-    stats::setNames(file.path(cache, sprintf(
-      c("chr%d.children.bcf", "chr%d.af_reference_sites.parquet", "chr%d.reference_long.parquet"),
-      chromosome)), paste0(c("bcf_", "af_sites_", "reference_"), chromosome))
-  })))
-missing <- inputs[!file.exists(inputs)]
-if (length(missing)) stop("missing arm inputs: ", paste(missing, collapse = ", "), call. = FALSE)
-identity_lines <- paste0(names(inputs), "=", vapply(inputs, sha256, character(1L)))
+per_chromosome <- unlist(lapply(chromosomes, function(chromosome) {
+  stats::setNames(c(genome_children_bcf(chromosome), genome_af_sites(chromosome),
+                    genome_reference_long(chromosome)),
+                  paste0(c("bcf_", "af_sites_", "reference_"), chromosome))
+}))
+identity <- c(genome_set_line(chromosomes), genome_identity(
+  c(extension = normalizePath("build/release/duckhts.duckdb_extension", mustWork = TRUE),
+    arm_script = script,
+    helpers = normalizePath("benchmarks/roh_ancestry/genome_common.R", mustWork = TRUE),
+    pedigree = duckhtsbench::duckhts_bench_artifact_path("roh_ancestry_pedigree"),
+    children = genome_children_list,
+    proportions = file.path(genome_cache, "autosome.q.csv"),
+    per_chromosome),
+  c(duckdb_r = as.character(utils::packageVersion("duckdb")))))
+genome_check_output(file.path(genome_cache, "autosome.q.csv"), chromosomes)
 
 for (arm in arms) {
   for (repetition in seq_len(repetitions)) {
-    stem <- file.path(cache, sprintf("autosome.arm_%s_%d", arm, repetition))
+    stem <- file.path(genome_cache, sprintf("autosome.arm_%s_%d", arm, repetition))
     output <- paste0(stem, ".csv")
     timing <- paste0(stem, ".time.txt")
     success <- paste0(stem, ".ok")
-    if (file.exists(success) && file.size(output) > 0 && file.size(timing) > 0 &&
-        identical(readLines(success), identity_lines)) {
+    if (genome_current(output, identity, success) && isTRUE(file.size(timing) > 0)) {
       message("reuse ", arm, " repetition ", repetition)
       next
     }
@@ -51,6 +53,6 @@ for (arm in arms) {
       stop("arm ", arm, " repetition ", repetition, " failed with status ", status,
            call. = FALSE)
     }
-    writeLines(identity_lines, success)
+    genome_record(output, identity, success)
   }
 }

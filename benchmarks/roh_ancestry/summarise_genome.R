@@ -1,30 +1,31 @@
-# GRCh38 autosome lengths: lines 1-22 of the Ensembl 116 primary-assembly FASTA index
-# (Homo_sapiens.GRCh38.dna.primary_assembly.fa.fai, SHA-256
-# 0998f61682f4041b11f0d156e1db6dae3e4c743e26643a3f45ea7faea70cb604), committed so the
-# truth windows and FROH denominators do not depend on an unregistered local file.
-cache <- file.path(duckhtsbench::duckhts_bench_cache_dir(), "benchmarks", "roh-ancestry")
-results_dir <- "benchmarks/results/roh-ancestry"
-pedigree <- read.table(file.path(cache, "pedigree.txt"), header = TRUE,
-                       stringsAsFactors = FALSE)
-children <- readLines(file.path(cache, "chr20.children.present.txt"))
+# Genome-wide accuracy of the ROH arms against the truth of truth_genome.R,
+# over the autosomes of the run, and the acceptance criterion per population.
+# The truth marks runs of low heterozygosity, not autozygosity, so truth
+# length and FROH compare arms within a population, not across populations.
+# froh_assembly is called ROH length over the summed FAI length of the run's
+# autosomes, gaps and centromeres included: no callable-base mask is
+# registered, so it is a whole-assembly fraction and smaller than a FROH over
+# callable bases. Every input must have been written for the run's
+# chromosome set, as its marker records.
+source("benchmarks/roh_ancestry/genome_common.R")
+results_dir <- genome_results
+chromosomes <- genome_chromosomes()
+pedigree <- read.table(duckhtsbench::duckhts_bench_artifact_path("roh_ancestry_pedigree"),
+                       header = TRUE, stringsAsFactors = FALSE)
+children <- readLines(genome_children_list)
 population_children <- pedigree[
   pedigree$FatherID != "0" & pedigree$MotherID != "0" &
     pedigree$SampleID %in% children, c("SampleID", "Population"), drop = FALSE]
 if (nrow(population_children) != 377L || anyDuplicated(population_children$SampleID)) {
   stop("pedigree does not uniquely identify all 377 children", call. = FALSE)
 }
-truth <- read.csv(file.path(cache, "autosome.truth_intervals.csv"),
-                  stringsAsFactors = FALSE)
+# truth_genome.R checked these intervals' chr20 part against the amended chr20
+# truth when it wrote them; the marker check confirms they are that file.
+truth_path <- file.path(genome_cache, "autosome.truth_intervals.csv")
+genome_check_output(truth_path, chromosomes)
+truth <- read.csv(truth_path, stringsAsFactors = FALSE)
 if (anyDuplicated(truth[c("chromosome", "sample_id", "start", "end")])) {
   stop("truth intervals contain duplicate keys", call. = FALSE)
-}
-previous_chr20 <- read.csv(file.path(cache, "chr20.truth_intervals.csv"),
-                           stringsAsFactors = FALSE)
-current_chr20 <- truth[truth$chromosome == 20L, ]
-truth_keys <- c("sample_id", "start_window", "end_window", "windows", "start", "end")
-if (!isTRUE(all.equal(previous_chr20[truth_keys], current_chr20[truth_keys],
-                      check.attributes = FALSE))) {
-  stop("genome truth intervals changed the completed chr20 set", call. = FALSE)
 }
 thresholds <- c(1000000L, 2000000L, 5000000L)
 mode_for_population <- c(ACB = "single_AFR", ASW = "single_AFR", ESN = "single_AFR",
@@ -47,17 +48,17 @@ eligible_ids <- list(
   single_EUR = population_children$SampleID[population_children$Population == "CEU"],
   single_EAS = population_children$SampleID[population_children$Population == "CHS"]
 )
+# Every arm decodes every autosome of the run, chr20 included.
 read_repetition <- function(arm, repetition) {
-  current <- read.csv(file.path(cache,
-    sprintf("autosome.arm_%s_%d.csv", arm, repetition)), stringsAsFactors = FALSE)
-  if (arm != "ancestry") {
-    chr20 <- read.csv(file.path(cache,
-      sprintf("chr20.arm_%s_%d.csv", arm, repetition)), stringsAsFactors = FALSE)
-    current <- rbind(current, chr20)
-  }
+  stem <- file.path(genome_cache, sprintf("autosome.arm_%s_%d", arm, repetition))
+  genome_check_output(paste0(stem, ".csv"), chromosomes, paste0(stem, ".ok"))
+  current <- read.csv(paste0(stem, ".csv"), stringsAsFactors = FALSE)
   observed <- current$sample
   if (anyNA(observed) || any(!observed %in% eligible_ids[[arm]])) {
     stop("arm output contains an ineligible child for ", arm, call. = FALSE)
+  }
+  if (any(!sub("^chr", "", current$chrom) %in% as.character(chromosomes))) {
+    stop("arm output contains a chromosome outside the run for ", arm, call. = FALSE)
   }
   current
 }
@@ -65,7 +66,7 @@ read_repetition <- function(arm, repetition) {
 # further completed repetitions must reproduce the first exactly.
 completed_repetitions <- function(arm) {
   repetitions <- 1:3
-  repetitions[file.exists(file.path(cache,
+  repetitions[file.exists(file.path(genome_cache,
     sprintf("autosome.arm_%s_%d.ok", arm, repetitions)))]
 }
 arm_segments <- setNames(vector("list", length(arm_names)), arm_names)
@@ -91,7 +92,7 @@ for (arm in arm_names) {
 runtime <- do.call(rbind, lapply(arm_names, function(arm) {
   data.frame(arm = arm, repetition = completed_repetitions(arm), stringsAsFactors = FALSE)
 }))
-runtime$time_file <- file.path(cache,
+runtime$time_file <- file.path(genome_cache,
   sprintf("autosome.arm_%s_%d.time.txt", runtime$arm, runtime$repetition))
 if (any(!file.exists(runtime$time_file))) {
   stop("missing a completed autosome arm timing receipt", call. = FALSE)
@@ -135,12 +136,7 @@ for (arm in names(segments)) {
     }
   }
 }
-fai <- utils::read.delim(
-  "benchmarks/roh_ancestry/grch38_autosomes.fai",
-  header = FALSE, stringsAsFactors = FALSE,
-  colClasses = c("character", "integer", "NULL", "NULL", "NULL"))
-autosome_length <- sum(fai$V2[match(as.character(1:22), fai$V1)])
-if (is.na(autosome_length)) stop("GRCh38 FAI is incomplete", call. = FALSE)
+assembly_bp <- sum(genome_lengths(chromosomes)$length_bp)
 truth_by_child <- split(truth, truth$sample_id)
 child_metrics <- do.call(rbind, lapply(names(segments), function(arm) {
   data <- segments[[arm]]
@@ -170,7 +166,7 @@ child_metrics <- do.call(rbind, lapply(names(segments), function(arm) {
     }
     supported <- support_bp / calls$length >= 0.9
     row <- data.frame(sample_id = id, arm = arm,
-      total_roh_bp = sum(calls$length), froh = sum(calls$length) / autosome_length,
+      total_roh_bp = sum(calls$length), froh_assembly = sum(calls$length) / assembly_bp,
       supported_count_1mb = sum(calls$length >= thresholds[[1L]] & supported),
       supported_length_1mb = sum(calls$length[calls$length >= thresholds[[1L]] & supported]),
       truth_bp = sum(truth_calls$end - truth_calls$start + 1),
@@ -204,7 +200,7 @@ summary_rows <- do.call(rbind, lapply(arm_order, function(arm) {
         paste(formatC(unsupported_length, digits = 0, format = "f"), collapse = "; "),
       `Supported count / child` = formatC(mean(x$supported_count_1mb), digits = 3, format = "f"),
       `Supported length / child` = formatC(mean(x$supported_length_1mb), digits = 0, format = "f"),
-      FROH = formatC(mean(x$froh), digits = 6, format = "f"),
+      `FROH (whole assembly)` = formatC(mean(x$froh_assembly), digits = 6, format = "f"),
       `Truth-run length covered` = if (sum(x$truth_bp) > 0) {
         formatC(sum(x$truth_covered_bp) / sum(x$truth_bp) * 100,
                 digits = 2, format = "f")
@@ -220,11 +216,16 @@ write.csv(summary_rows[order(summary_rows$Population, summary_rows$Arm), ],
   row.names = FALSE, quote = TRUE)
 admixed <- c("ACB", "ASW", "CLM", "MXL", "PEL", "PUR")
 controls <- c("YRI", "ESN", "CEU", "CHS")
+# As in criterion_chr20.R: a population without truth length has no truth
+# coverage, so its coverage check is NA, not evaluable, and never counts as a
+# pass. A failed count check still fails.
 within_five_percent <- function(value, reference) {
+  if (is.na(value) || is.na(reference)) return(NA)
   if (reference == 0) return(value == 0)
   abs(value - reference) <= 0.05 * abs(reference)
 }
 no_material_coverage_loss <- function(value, reference) {
+  if (is.na(value) || is.na(reference)) return(NA)
   if (reference == 0) return(value == 0)
   value >= 0.95 * reference
 }
@@ -234,6 +235,7 @@ criterion <- do.call(rbind, lapply(populations, function(population) {
   average <- function(arm, field) mean(x[[field]][x$arm == arm])
   coverage <- function(arm) {
     selected <- x[x$arm == arm, , drop = FALSE]
+    if (sum(selected$truth_bp) == 0) return(NA_real_)
     sum(selected$truth_covered_bp) / sum(selected$truth_bp)
   }
   ancestry_count <- average("ancestry_tuned", "unsupported_count_1mb")
@@ -271,6 +273,13 @@ criterion <- do.call(rbind, lapply(populations, function(population) {
 }))
 write.csv(criterion, file.path(results_dir, "autosome_criterion_by_population.csv"),
           row.names = FALSE)
-cat("children", nrow(child_metrics) / length(arm_order), "truth runs", nrow(truth),
-    "criterion", if (all(criterion$criterion_pass)) "held" else "did not hold", "\n")
+verdict <- if (any(criterion$criterion_pass %in% FALSE)) {
+  "not held"
+} else if (anyNA(criterion$criterion_pass)) {
+  "not evaluable in every population"
+} else {
+  "held"
+}
+cat("children", nrow(child_metrics) / length(arm_order), "chromosomes", length(chromosomes),
+    "truth runs", nrow(truth), "criterion", verdict, "\n")
 print(criterion)
