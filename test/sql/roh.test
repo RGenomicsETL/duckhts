@@ -1602,8 +1602,9 @@ SELECT __duckhts_roh_decode(NULL::BLOB, NULL, NULL, NULL, NULL::BIGINT[], NULL::
 true
 
 # ---------------------------------------------------------------------------------------------
-# site_rule chooses the record of a listed position in duckhts_roh_af_table. HTSlib's indel
-# class of a record decides which records bcftools passes over; duckhts_htslib_is_indel ports it.
+# duckhts_roh_af_table_bcftools chooses the record of a listed position as bcftools roh --AF-file
+# does. HTSlib's indel class of a record decides which records bcftools passes over;
+# duckhts_htslib_is_indel ports it.
 # The expected classes are the INDEL flag of bcftools 1.24 (RBCFTools) on the fixture:
 #   bcftools query -f '%ID\t%TYPE\n' test/data/roh_variant_class.vcf
 query II
@@ -1639,7 +1640,7 @@ FROM read_csv('__WORKING_DIRECTORY__/test/data/roh_repeated_af.tsv.gz', delim = 
 statement ok
 CREATE TEMP TABLE roh_repeated_af_first AS SELECT * FROM roh_repeated_af WHERE NOT (pos = 4000 AND alt = 'G');
 
-# site_rule := 'bcftools' gives the RG lines of
+# duckhts_roh_af_table_bcftools gives the RG lines of
 #   bcftools roh --AF-file test/data/roh_repeated_af.tsv.gz -a 0.01 -H 0.01 test/data/roh_repeated.vcf.gz
 # (bcftools 1.24): runs at 500, 1000, 5000, 6000 and 9000. 1000 and 6000 use their second record,
 # because the first is of the other indel class; at 2000, 7000 and 8000 a first record whose
@@ -1654,9 +1655,9 @@ WITH expected(sample, chrom, start, "end", length, n_markers, quality) AS (VALUE
  ('S1', 'chr1', 6000, 6000, 1, 1, 3.9),
  ('S1', 'chr1', 9000, 9000, 1, 1, 3.9)
 ), observed AS (
-  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh_af_table(
+  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh_af_table_bcftools(
     '__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz', 'roh_repeated_af_first',
-    hw_to_az := 0.01, az_to_hw := 0.01, site_rule := 'bcftools')
+    hw_to_az := 0.01, az_to_hw := 0.01)
 )
 SELECT count(*) FROM (
   (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed
@@ -1675,11 +1676,6 @@ SELECT list(start ORDER BY start) FROM duckhts_roh_af_table('__WORKING_DIRECTORY
 ----
 [500, 1000, 2000, 4000, 5000, 6000, 7000, 8000, 9000, 10000]
 
-query T
-SELECT list(start ORDER BY start) FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz',
-  'roh_repeated_af', hw_to_az := 0.01, az_to_hw := 0.01, site_rule := 'matching');
-----
-[500, 1000, 2000, 4000, 5000, 6000, 7000, 8000, 9000, 10000]
 
 # 11000 holds only A><*>,G. Listed with those alleles, it claims the position under the bcftools
 # rule and is skipped, since the evidence used here is that of the first ALT. bcftools decodes it
@@ -1689,8 +1685,8 @@ CREATE TEMP TABLE roh_repeated_af_symbolic AS SELECT * FROM roh_repeated_af_firs
 UNION ALL SELECT 'chr1', 11000, 'A', '<*>,G', 0.3;
 
 query T
-SELECT list(start ORDER BY start) FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz',
-  'roh_repeated_af_symbolic', hw_to_az := 0.01, az_to_hw := 0.01, site_rule := 'bcftools');
+SELECT list(start ORDER BY start) FROM duckhts_roh_af_table_bcftools('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz',
+  'roh_repeated_af_symbolic', hw_to_az := 0.01, az_to_hw := 0.01);
 ----
 [500, 1000, 5000, 6000, 9000]
 
@@ -1703,8 +1699,39 @@ WITH expected(sample, chrom, start, "end", length, n_markers, quality) AS (VALUE
  ('S2', 'chr2', 693881, 1722963, 1029083, 114, 33.2),
  ('S4', 'chr2', 23420, 2400223, 2376804, 238, 46.5)
 ), observed AS (
-  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh_af_table(
-    '__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'roh_af', site_rule := 'bcftools')
+  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh_af_table_bcftools(
+    '__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'roh_af')
+)
+SELECT count(*) FROM (
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected)
+  UNION ALL
+  (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM expected
+   EXCEPT ALL SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed));
+----
+0
+
+# Whether another record follows at the position is a test of the next record in the file, on
+# POS only. In roh_cross_contig.vcf.gz the last record at chr1:1000 is an MNP while its row is
+# of the indel class, and the next record is chr2:1000, so bcftools passes the MNP over and
+# chr1:1000 has no site; a test within the contig would let the MNP claim it. The expected
+# rows are the RG lines of (bcftools 1.24)
+#   bcftools roh --AF-file test/data/roh_cross_contig_af.tsv.gz -a 0.01 -H 0.01 test/data/roh_cross_contig.vcf.gz
+statement ok
+CREATE TEMP TABLE roh_cross_contig_af AS SELECT chrom, pos, split_part(alleles, ',', 1) AS ref,
+  substr(alleles, length(split_part(alleles, ',', 1)) + 2) AS alt, af
+FROM read_csv('__WORKING_DIRECTORY__/test/data/roh_cross_contig_af.tsv.gz', delim = '\t', header = false,
+  columns = {'chrom': 'VARCHAR', 'pos': 'BIGINT', 'alleles': 'VARCHAR', 'af': 'DOUBLE'});
+
+query I
+WITH expected(sample, chrom, start, "end", length, n_markers, quality) AS (VALUES
+('S1', 'chr1', 500, 500, 1, 1, 0.1),
+ ('S1', 'chr2', 1000, 1000, 1, 1, 3.8),
+ ('S1', 'chr2', 1500, 1500, 1, 1, 3.8)
+), observed AS (
+  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh_af_table_bcftools(
+    '__WORKING_DIRECTORY__/test/data/roh_cross_contig.vcf.gz', 'roh_cross_contig_af',
+    hw_to_az := 0.01, az_to_hw := 0.01)
 )
 SELECT count(*) FROM (
   (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed
@@ -1718,41 +1745,26 @@ SELECT count(*) FROM (
 # Several frequency rows at one position are an error under the bcftools rule, in both
 # overloads: bcftools reads the first line of a position, and a relation has no line order.
 statement error
-SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz', 'roh_repeated_af',
-  site_rule := 'bcftools');
+SELECT * FROM duckhts_roh_af_table_bcftools('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz', 'roh_repeated_af');
 ----
-site_rule := 'bcftools' needs one af_table row per position, but chr1:4000 has 2 rows
+duckhts_roh_af_table_bcftools needs one af_table row per position, but chr1:4000 has 2 rows
 
 statement error
-SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz', 'roh_repeated_af',
-  'roh_map', site_rule := 'bcftools');
+SELECT * FROM duckhts_roh_af_table_bcftools('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz', 'roh_repeated_af',
+  'roh_map');
 ----
-site_rule := 'bcftools' needs one af_table row per position, but chr1:4000 has 2 rows
+duckhts_roh_af_table_bcftools needs one af_table row per position, but chr1:4000 has 2 rows
 
 # The bcftools rule needs file order, which only BGZF input gives; the default rule does not.
 statement ok
 CREATE TEMP TABLE roh_single_site_af AS SELECT 'chr1' AS chrom, 5000 AS pos, 'A' AS ref, 'C' AS alt, 0.05 AS af;
 
 statement error
-SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_single_site.vcf', 'roh_single_site_af',
-  site_rule := 'bcftools');
+SELECT * FROM duckhts_roh_af_table_bcftools('__WORKING_DIRECTORY__/test/data/roh_single_site.vcf', 'roh_single_site_af');
 ----
-site_rule := 'bcftools' needs file order: use a BGZF-compressed VCF or BCF
+duckhts_roh_af_table_bcftools needs file order: use a BGZF-compressed VCF or BCF
 
 query I
 SELECT count(*) FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_single_site.vcf', 'roh_single_site_af');
 ----
 1
-
-# Any other value is an error, also when no record is listed.
-statement error
-SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz', 'roh_repeated_af_first',
-  site_rule := 'first');
-----
-site_rule must be 'matching' or 'bcftools'
-
-statement error
-SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_empty.vcf', 'roh_repeated_af_first',
-  site_rule := NULL);
-----
-site_rule must be 'matching' or 'bcftools'

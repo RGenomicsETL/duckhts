@@ -73,14 +73,16 @@ call or raise it.}
 
 \item{site_rule}{Which record of a position listed in `af_table` gives its
 site. `"matching"` (the default) uses a record whose REF and ALT match a
-row of `af_table`. `"bcftools"` follows `bcftools roh --AF-file`: in file
-order, a record of the other indel class than the row is passed over
-while another record of the position follows, a record with more than one
-ALT claims nothing, and the first remaining record claims the position,
-which is skipped unless its alleles equal the row's (also when its first
-ALT is symbolic, which bcftools would decode through the second ALT). It
-needs one `af_table` row per position and a BGZF-compressed VCF or BCF.
-Only `af_table` takes `"bcftools"`.}
+row of `af_table` (`duckhts_roh_af_table`). `"bcftools"` follows
+`bcftools roh --AF-file` (`duckhts_roh_af_table_bcftools`): in file order,
+a record of the other indel class than the row is passed over when the
+next record of the file has the same POS (on any contig); a record with no
+non-symbolic ALT, or several, claims nothing; and the first remaining
+record claims the position, which is skipped unless its alleles equal the
+row's (also when its first ALT is symbolic, which bcftools would decode
+through the second ALT). It needs one `af_table` row per position and a
+sorted, BGZF-compressed VCF or BCF, and reads the file a second time
+without samples. Only `af_table` takes `"bcftools"`.}
 }
 \value{
 A data frame (or invisible `TRUE` when `table_name` is given) with one

@@ -131,6 +131,7 @@ This section is generated from `functions.yaml`.
 | [`duckhts_roh_segments`](reference.md#duckhts_roh_segments) | scalar |  | Decode runs of homozygosity from one sample's sorted per-chromosome site lists, reproducing bcftools roh. |
 | [`duckhts_roh`](reference.md#duckhts_roh) | table_macro | `rduckhts_roh` | Find runs of homozygosity in a VCF/BCF with the bcftools roh model, using allele frequencies from an INFO tag. |
 | [`duckhts_roh_af_table`](reference.md#duckhts_roh_af_table) | table_macro | `rduckhts_roh` | Find runs of homozygosity in a VCF/BCF with the bcftools roh model, using allele frequencies from a caller relation. |
+| [`duckhts_roh_af_table_bcftools`](reference.md#duckhts_roh_af_table_bcftools) | table_macro | `rduckhts_roh` | Find runs of homozygosity like duckhts_roh_af_table, choosing the record of a repeated listed position as bcftools roh --AF-file does. |
 | [`duckhts_roh_ancestry`](reference.md#duckhts_roh_ancestry) | table_macro | `rduckhts_roh` | Find runs of homozygosity using each sample's ancestry-weighted allele frequencies. |
 | [`duckhts_roh_counts`](reference.md#duckhts_roh_counts) | table_macro | `rduckhts_roh_counts` | Find runs of homozygosity from allele read counts, with sequencing error and optional contamination. |
 | [`duckhts_roh_counts_fitted`](reference.md#duckhts_roh_counts_fitted) | table_macro | `rduckhts_roh_counts` | Find runs of homozygosity from allele read counts using per-sample fitted error and contamination. |

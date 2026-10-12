@@ -37,8 +37,8 @@ def definitions(con):
         "FROM duckhts_macro_definitions() ORDER BY install_order"
     ).fetchall()
     # The inventory includes the separate fitted-count ROH macro and the private
-    # duckhts_htslib_is_indel classifier of the ROH bcftools site rule.
-    assert len(rows) == 41
+    # duckhts_htslib_is_indel classifier of duckhts_roh_af_table_bcftools, and that macro.
+    assert len(rows) == 42
     assert len({row[3] for row in rows}) == 1
     ordered = b"".join(
         bytes([int(exposed)]) +
@@ -178,7 +178,7 @@ def main():
         subprocess.run([sys.executable, __file__, "attached", str(path)], check=True)
         assert digest(path) == before
         subprocess.run([sys.executable, __file__, "rollback", str(path)], check=True)
-        print("macro catalog: 41 definitions, 31 public, file/readonly/rollback/two connections OK")
+        print("macro catalog: 42 definitions, 32 public, file/readonly/rollback/two connections OK")
 
 
 if __name__ == "__main__":

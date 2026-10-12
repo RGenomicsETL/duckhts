@@ -57,7 +57,7 @@ static const char sites_from_info_tag[] =
 
 /* duckhts_htslib_is_indel(ref, alts): whether HTSlib's bcf_get_variant_types()
  * sets VCF_INDEL for a record with these alleles, a port of
- * bcf_set_variant_type() (htslib vcf.c:5361-5428 in 1.23, unchanged in 1.24).
+ * bcf_set_variant_type() (third_party/htslib vcf.c:5415, HTSlib 1.24).
  * An allele is an indel when, after the common prefix (compared without case),
  * one allele is used up and the other is not and does not end in a breakend
  * bracket; or when both remain and, after the common suffix, one shrinks to
@@ -92,68 +92,119 @@ static const char htslib_is_indel_macro[] =
     "THEN substr(ind_v.r, ind_p + 1, 1) = substr(ind_v.a, length(ind_v.a) - ind_s, 1) "
     "ELSE false END)[1] END)[1])[1] END)), false)";
 
-/* site_rule chooses the record that gives a listed position its site. Both
- * arms are written out; the macro argument is a constant, so DuckDB removes
- * the arm whose site_rule test is false before running it.
- *
- * 'matching': a record without a matching frequency row is dropped before the
- * sites are collected, so it never claims a repeated position. With a left
- * join it would arrive before or after the matching record of its position as
- * the hash join happens to emit them, and the record kept would depend on the
- * plan.
- *
- * 'bcftools': bcftools roh --AF-file (bcftools 1.23 vcfroh.c and htslib
- * synced_bcf_reader.c). The frequency file is a target list with alleles
- * (vcfroh.c:1272-1276), and bcftools reads only the first line of a position
- * (synced_bcf_reader.c:1525-1551), so a relation must give one row per
- * position (the guard below). At a listed position, in file order (FILE_OFFSET):
- * a record whose indel class differs from the frequency row's is passed over
- * while another record of the position follows; the last record is always
- * seen (synced_bcf_reader.c:865-886). The row is an indel when any of its
- * alleles is longer than one character (1466-1518). A record with no
- * non-symbolic ALT, or several, claims nothing (vcfroh.c:1010-1027); the first
- * remaining record claims the position (1036-1065), and the position is
- * skipped unless that record's alleles equal the row's (read_AF, 661-686). A
- * claiming record whose first ALT is symbolic is skipped as well: bcftools
- * would decode its second allele, and the evidence here is that of the first
- * ALT. File order needs BGZF input. */
+/* duckhts_roh_af_table: a record without a matching frequency row is dropped
+ * here, before the sites are collected, so it never claims a repeated position.
+ * With a left join it would arrive before or after the matching record of its
+ * position as the hash join happens to emit them, and the record kept would
+ * depend on the plan. (bcftools roh --AF-file chooses differently at a repeated
+ * position; duckhts_roh_af_table_bcftools below follows it.) */
 static const char sites_from_relation[] =
-    "WITH __dht_freq AS NOT MATERIALIZED (SELECT CAST(chrom AS VARCHAR) AS f_chrom, "
-    "CAST(pos AS BIGINT) AS f_pos, CAST(ref AS VARCHAR) AS f_ref, CAST(alt AS VARCHAR) AS f_alt, "
-    "CAST(af AS DOUBLE) AS f_af FROM query_table(af_table)), "
+    "WITH __dht_freq AS (SELECT CAST(chrom AS VARCHAR) AS f_chrom, CAST(pos AS BIGINT) AS f_pos, "
+    "CAST(ref AS VARCHAR) AS f_ref, CAST(alt AS VARCHAR) AS f_alt, CAST(af AS DOUBLE) AS f_af "
+    "FROM query_table(af_table)), "
     "__dht_calls AS NOT MATERIALIZED (SELECT CHROM AS chrom, POS AS pos, REF AS ref, "
-    "array_to_string(ALT, ',') AS alt, FILE_OFFSET AS file_offset, SAMPLE_ID AS smp, "
-    ROH_EVIDENCE " AS evidence FROM read_bcf(path, tidy_format := true, samples := samples, "
+    "array_to_string(ALT, ',') AS alt, SAMPLE_ID AS smp, " ROH_EVIDENCE " AS evidence "
+    ROH_RECORDS "), "
+    "__dht_sites AS NOT MATERIALIZED (SELECT c.chrom, c.pos, c.smp, f.f_af AS af, c.evidence "
+    "FROM __dht_calls AS c JOIN __dht_freq AS f ON f.f_chrom = c.chrom "
+    "AND f.f_pos = c.pos AND f.f_ref = c.ref AND f.f_alt = c.alt), ";
+
+/* The caller's frequency relation, typed. Each use scans it again, rather
+ * than holding it for several readers (a CTE read twice is materialized). */
+#define ROH_FREQ_ROWS \
+    "(SELECT CAST(chrom AS VARCHAR) AS f_chrom, CAST(pos AS BIGINT) AS f_pos, " \
+    "CAST(ref AS VARCHAR) AS f_ref, CAST(alt AS VARCHAR) AS f_alt, CAST(af AS DOUBLE) AS f_af " \
+    "FROM query_table(af_table))"
+
+/* duckhts_roh_af_table_bcftools: the record of a listed position as bcftools
+ * roh --AF-file chooses it. HTSlib functions are cited with lines of the
+ * vendored third_party/htslib/synced_bcf_reader.c (HTSlib 1.24); bcftools is
+ * not vendored, so vcfroh.c lines are those of the bcftools 1.23 mirror under
+ * .sync/RBCFTools, and the tests compare with bcftools 1.24. Checked against
+ * htslib develop 613169c1 (2026-10-08), where these targets paths are
+ * unchanged; its new region merging (bcf_sr_regions_next_ with aux,
+ * multi-region iterators) applies to -r/-R regions only.
+ *
+ * vcfroh's main() makes the frequency file a target list with alleles in its
+ * third column (bcf_sr_set_targets(..., 1, 3), vcfroh.c:1272-1276). The
+ * first target line at a position stays current, since
+ * _bcf_sr_regions_overlap() (1793) advances only past lines that end before
+ * the record (`while ( iseq==reg->iseq && reg->end < start )`, 1815), and
+ * _regions_match_alleles() (1725) parses the alleles of that current line only
+ * (reg->line.s, 1738). So bcftools reads the first line of a position, and a
+ * relation must give one row per position (the guard below). The row is an
+ * indel when any of its alleles is longer than one character. At a listed
+ * position, in file order (FILE_OFFSET), bcf_sr_next_line() (1001) passes over
+ * a record whose indel class differs from the row's (the allele match, 1014)
+ * when the next record of the file has the same POS
+ * (`buffer[1]->pos!=buffer[0]->pos`, 1022); otherwise the record is seen. In
+ * vcfroh(), a record with no non-symbolic ALT, or several, claims nothing
+ * (vcfroh.c:1010-1027); the first remaining record claims the position
+ * (prev_pos, 1036-1065), and process_line() skips the position unless that
+ * record's alleles equal the row's (read_AF(), 661-686). A claiming record
+ * whose first ALT is symbolic is skipped as well: bcftools would decode its
+ * second allele, and the evidence here is that of the first ALT.
+ *
+ * The next record of the file. In a sorted file the records of one position
+ * are contiguous, so the record after a record at (chrom, pos) has the same POS
+ * when another record of (chrom, pos) follows it, or, since the test compares
+ * POS only, when it is the last record of its contig and the next contig's
+ * first record has that POS. One scan without samples, projecting CHROM, POS,
+ * REF, ALT and FILE_OFFSET, feeds one aggregate with two grouping sets: one
+ * row per contig (its first and last record) and one row per record whose POS
+ * the frequency relation lists (all other records of a contig fall into one
+ * group). Windows then run over that small result, never over the file.
+ * File order needs BGZF input. */
+static const char sites_from_relation_bcftools[] =
+    "WITH __dht_calls AS NOT MATERIALIZED (SELECT CHROM AS chrom, POS AS pos, "
+    "FILE_OFFSET AS file_offset, SAMPLE_ID AS smp, " ROH_EVIDENCE " AS evidence "
+    "FROM read_bcf(path, tidy_format := true, samples := samples, "
     "decode_error_policy := 'error', include_file_offset := true) " ROH_ALT_FILTER "), "
-    "__dht_bcftools_targets AS NOT MATERIALIZED (SELECT f_chrom AS t_chrom, f_pos AS t_pos, "
+    "__dht_listed_pos AS NOT MATERIALIZED (SELECT DISTINCT f_pos AS pos FROM " ROH_FREQ_ROWS " AS f "
+    "WHERE f_pos IS NOT NULL), "
+    "__dht_scan AS NOT MATERIALIZED (SELECT r.CHROM AS chrom, r.POS AS pos, r.REF AS ref, "
+    "r.ALT AS alts, CASE WHEN r.FILE_OFFSET IS NULL THEN "
+    "error('duckhts_roh_af_table_bcftools needs file order: use a BGZF-compressed VCF or BCF') "
+    "ELSE r.FILE_OFFSET END AS file_offset, "
+    "CASE WHEN p.pos IS NOT NULL THEN r.FILE_OFFSET END AS listed_offset "
+    "FROM read_bcf(path, samples := '', decode_error_policy := 'error', include_file_offset := true) AS r "
+    "LEFT JOIN __dht_listed_pos AS p ON p.pos = r.POS), "
+    "__dht_groups AS NOT MATERIALIZED (SELECT chrom, listed_offset, "
+    "GROUPING(listed_offset) AS per_contig, min(file_offset) AS first_offset, "
+    "arg_min(pos, file_offset) AS first_pos, max(file_offset) AS last_offset, "
+    "any_value(pos) AS pos, any_value(ref) AS ref, any_value(alts) AS alts "
+    "FROM __dht_scan GROUP BY GROUPING SETS ((chrom), (chrom, listed_offset))), "
+    /* Per contig, the first POS of the next contig in file order (lead over the
+     * contig rows), then spread with the contig's last offset to its records. */
+    "__dht_contig_next AS NOT MATERIALIZED (SELECT *, CASE WHEN per_contig = 1 THEN "
+    "lead(first_pos) OVER (PARTITION BY per_contig ORDER BY first_offset) END AS next_first_pos "
+    "FROM __dht_groups WHERE per_contig = 1 OR listed_offset IS NOT NULL), "
+    "__dht_marked AS NOT MATERIALIZED (SELECT chrom, listed_offset, per_contig, pos, ref, alts, "
+    "max(next_first_pos) OVER (PARTITION BY chrom) AS next_first_pos, "
+    "max(CASE WHEN per_contig = 1 THEN last_offset END) OVER (PARTITION BY chrom) AS contig_last_offset, "
+    "max(listed_offset) OVER (PARTITION BY chrom, pos) AS position_last_offset "
+    "FROM __dht_contig_next), "
+    "__dht_bcftools_records AS NOT MATERIALIZED (SELECT m.chrom, m.pos, m.ref, m.alts, "
+    "m.listed_offset AS file_offset, t.t_ref, t.t_alt, t.t_af, t.t_indel, "
+    "m.listed_offset < m.position_last_offset OR (m.listed_offset = m.contig_last_offset "
+    "AND m.next_first_pos = m.pos) AS followed_at_pos "
+    "FROM __dht_marked AS m "
+    "JOIN (SELECT f_chrom AS t_chrom, f_pos AS t_pos, "
     "any_value(f_ref) AS t_ref, any_value(f_alt) AS t_alt, any_value(f_af) AS t_af, "
     "coalesce(length(any_value(f_ref)) > 1 OR "
     "list_bool_or(list_transform(string_split(any_value(f_alt), ','), lambda a: length(a) > 1)), "
-    "false) AS t_indel "
-    "FROM __dht_freq WHERE site_rule = 'bcftools' AND f_chrom IS NOT NULL AND f_pos IS NOT NULL "
-    "GROUP BY f_chrom, f_pos), "
-    /* Every record at a listed position, from a scan without samples. */
-    "__dht_bcftools_records AS NOT MATERIALIZED (SELECT r.CHROM AS chrom, r.POS AS pos, "
-    "r.REF AS ref, r.ALT AS alts, CASE WHEN r.FILE_OFFSET IS NULL THEN "
-    "error('site_rule := ''bcftools'' needs file order: use a BGZF-compressed VCF or BCF') "
-    "ELSE r.FILE_OFFSET END AS file_offset, "
-    "max(r.FILE_OFFSET) OVER (PARTITION BY r.CHROM, r.POS) AS last_offset, "
-    "t.t_ref, t.t_alt, t.t_af, t.t_indel "
-    "FROM read_bcf(path, samples := '', decode_error_policy := 'error', include_file_offset := true) AS r "
-    "JOIN __dht_bcftools_targets AS t ON t.t_chrom = r.CHROM AND t.t_pos = r.POS), "
+    "false) AS t_indel FROM " ROH_FREQ_ROWS " AS f WHERE f_chrom IS NOT NULL AND f_pos IS NOT NULL "
+    "GROUP BY f_chrom, f_pos) AS t ON t.t_chrom = m.chrom AND t.t_pos = m.pos "
+    "WHERE m.per_contig = 0), "
     "__dht_bcftools_claims AS NOT MATERIALIZED (SELECT chrom, pos, file_offset, t_af, "
     "coalesce(ref = t_ref AND array_to_string(alts, ',') = t_alt AND alts[1] NOT IN " ROH_SYMBOLIC ", "
     "false) AS usable FROM __dht_bcftools_records "
-    "WHERE (file_offset = last_offset OR duckhts_htslib_is_indel(ref, alts) = t_indel) "
+    "WHERE CASE WHEN followed_at_pos THEN duckhts_htslib_is_indel(ref, alts) = t_indel ELSE true END "
     "AND len(list_filter(alts, lambda a: a NOT IN " ROH_SYMBOLIC ")) = 1 "
     "QUALIFY row_number() OVER (PARTITION BY chrom, pos ORDER BY file_offset) = 1), "
-    "__dht_sites AS NOT MATERIALIZED (SELECT c.chrom, c.pos, c.smp, f.f_af AS af, c.evidence "
-    "FROM __dht_calls AS c JOIN __dht_freq AS f ON f.f_chrom = c.chrom "
-    "AND f.f_pos = c.pos AND f.f_ref = c.ref AND f.f_alt = c.alt WHERE site_rule = 'matching' "
-    "UNION ALL SELECT c.chrom, c.pos, c.smp, k.t_af, c.evidence "
+    "__dht_sites AS NOT MATERIALIZED (SELECT c.chrom, c.pos, c.smp, k.t_af AS af, c.evidence "
     "FROM __dht_calls AS c JOIN __dht_bcftools_claims AS k ON k.chrom = c.chrom "
-    "AND k.pos = c.pos AND k.file_offset = c.file_offset "
-    "WHERE k.usable AND site_rule = 'bcftools'), ";
+    "AND k.pos = c.pos AND k.file_offset = c.file_offset WHERE k.usable), ";
 
 /* One packed site list per sample and chromosome. The evidence column is
  * FORMAT_PL or FORMAT_GT, chosen at bind time, and only the branch of that
@@ -207,15 +258,14 @@ static const char from_lists_with_map[] =
     "CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE), " \
     ROH_LIMIT_ARGUMENTS ")"
 static const char genotype_guard[] = ROH_GUARD_COLUMNS "WHERE NOT " ROH_GENOTYPE_ARGUMENTS_VALID;
-/* duckhts_roh_af_table also checks site_rule, and under 'bcftools' that the
- * relation gives at most one row per position, naming the first such position. */
-static const char af_table_guard[] =
-    ROH_GUARD_COLUMNS "WHERE CASE WHEN site_rule IN ('matching', 'bcftools') THEN false "
-    "ELSE error('site_rule must be ''matching'' or ''bcftools''') IS NULL END"
-    ROH_GUARD_COLUMNS "FROM (SELECT f_chrom, f_pos, count(*) AS n FROM __dht_freq "
-    "WHERE site_rule = 'bcftools' AND f_chrom IS NOT NULL AND f_pos IS NOT NULL "
+/* duckhts_roh_af_table_bcftools also checks that the relation gives at most one
+ * row per position, naming the first such position, whether or not a record is
+ * listed. */
+static const char af_table_bcftools_guard[] =
+    ROH_GUARD_COLUMNS "FROM (SELECT f_chrom, f_pos, count(*) AS n FROM " ROH_FREQ_ROWS " AS f "
+    "WHERE f_chrom IS NOT NULL AND f_pos IS NOT NULL "
     "GROUP BY f_chrom, f_pos HAVING count(*) > 1 ORDER BY f_chrom, f_pos LIMIT 1) AS d "
-    "WHERE error('site_rule := ''bcftools'' needs one af_table row per position, but ' || "
+    "WHERE error('duckhts_roh_af_table_bcftools needs one af_table row per position, but ' || "
     "d.f_chrom || ':' || d.f_pos || ' has ' || d.n || ' rows; bcftools reads the first line "
     "of a position, and a relation has no line order') IS NULL";
 /* The ancestry macro also runs its relation checks (__dht_group_guard) here,
@@ -539,13 +589,16 @@ static bool register_roh_counts_macro(duckhts_registration_t *registration, bool
 bool register_duckhts_roh_sql(duckhts_registration_t *registration) {
     static const roh_source_t from_info_tag = {"duckhts_roh", "af_tag", ROH_OPTIONS,
                                                sites_from_info_tag, ""};
-    static const roh_source_t from_relation = {"duckhts_roh_af_table", "af_table",
-                                               ROH_OPTIONS ", site_rule := 'matching'",
-                                               sites_from_relation, af_table_guard};
+    static const roh_source_t from_relation = {"duckhts_roh_af_table", "af_table", ROH_OPTIONS,
+                                               sites_from_relation, ""};
+    static const roh_source_t from_relation_bcftools = {
+        "duckhts_roh_af_table_bcftools", "af_table", ROH_OPTIONS,
+        sites_from_relation_bcftools, af_table_bcftools_guard};
     const char *classifier[] = {htslib_is_indel_macro};
     return duckhts_register_sql_parts(registration, classifier, 1) &&
            register_roh_macro(registration, &from_info_tag) &&
            register_roh_macro(registration, &from_relation) &&
+           register_roh_macro(registration, &from_relation_bcftools) &&
            register_roh_ancestry_macro(registration) &&
            register_roh_counts_macro(registration, false) &&
            register_roh_counts_macro(registration, true);

@@ -8,13 +8,14 @@ Preview of 2.0.0, still in development. The sections below describe what 2.0.0 w
   `rduckhts_hts_header()`); such a key used to become a NULL MAP key. A value
   that is not valid UTF-8 is still `NA`.
 
-- `rduckhts_roh(af_table = ..., site_rule = "bcftools")` and the bundled
-  `duckhts_roh_af_table(..., site_rule := 'bcftools')` choose the record of a
-  repeated listed position as `bcftools roh --AF-file` does: file order, indel
-  class, the first claiming record, and its alleles. It needs one `af_table`
-  row per position and a BGZF-compressed VCF or BCF. The default `"matching"`
-  is unchanged. New bundled fixtures `roh_repeated.vcf.gz` and
-  `roh_repeated_af.tsv.gz` back the tests.
+- `rduckhts_roh(af_table = ..., site_rule = "bcftools")` uses the bundled
+  `duckhts_roh_af_table_bcftools` macro, which chooses the record of a repeated
+  listed position as `bcftools roh --AF-file` does: file order, indel class,
+  the next record's POS on any contig, the first claiming record, and its
+  alleles. It needs one `af_table` row per position and a sorted,
+  BGZF-compressed VCF or BCF. The default `"matching"` is unchanged. New
+  bundled fixtures `roh_repeated.vcf.gz` and `roh_repeated_af.tsv.gz` back the
+  tests.
 
 - `rduckhts_bcf(include_file_offset = TRUE)` and the bundled
   `read_bcf(..., include_file_offset := true)` add a `FILE_OFFSET` column after

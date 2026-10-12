@@ -78,3 +78,29 @@ stopifnot(system2(bgzip, c("-c", shQuote(af_text)), stdout = af) == 0L,
 unlink(c(text, af_text))
 outputs <- c(vcf, paste0(vcf, ".tbi"), af, paste0(af, ".tbi"))
 stopifnot(all(file.copy(outputs, package_dir, overwrite = TRUE)))
+
+# roh_cross_contig.vcf.gz: the last record at chr1:1000 (an MNP, while its
+# frequency row is of the indel class) is followed in the file by chr2:1000.
+# bcftools compares only POS when it asks whether another record follows at the
+# position, so it passes the chr1 record over.
+cross <- c(
+  lines[1:2], "##contig=<ID=chr2,length=100000>", lines[4:6],
+  record(500, "a", "C", "T", hom), record(750, "b", "C", "T", het),
+  record(1000, "mnp", "AC", "GT", hom),
+  sub("^chr1", "chr2", record(1000, "snp", "A", "G", hom)),
+  sub("^chr1", "chr2", record(1250, "c", "C", "T", het)),
+  sub("^chr1", "chr2", record(1500, "d", "C", "T", hom))
+)
+cross_af <- c("chr1\t500\tC,T\t0.3", "chr1\t750\tC,T\t0.5", "chr1\t1000\tAC,GT\t0.3",
+              "chr2\t1000\tA,G\t0.3", "chr2\t1250\tC,T\t0.5", "chr2\t1500\tC,T\t0.3")
+text <- tempfile(fileext = ".vcf")
+writeLines(cross, text)
+vcf <- file.path(out_dir, "roh_cross_contig.vcf.gz")
+stopifnot(system2(bgzip, c("-c", shQuote(text)), stdout = vcf) == 0L,
+          system2(tabix, c("-f", "-p", "vcf", shQuote(vcf))) == 0L)
+af_text <- tempfile(fileext = ".tsv")
+writeLines(cross_af, af_text)
+af <- file.path(out_dir, "roh_cross_contig_af.tsv.gz")
+stopifnot(system2(bgzip, c("-c", shQuote(af_text)), stdout = af) == 0L,
+          system2(tabix, c("-f", "-s1", "-b2", "-e2", shQuote(af))) == 0L)
+unlink(c(text, af_text))

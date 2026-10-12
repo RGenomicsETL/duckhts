@@ -14,21 +14,24 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   is not valid UTF-8. Such a key used to become a NULL MAP key, which a DuckDB
   MAP does not allow. A value that is not valid UTF-8 is still NULL.
 
-- `duckhts_roh_af_table(..., site_rule := 'bcftools')` chooses the record of a
-  repeated listed position as `bcftools roh --AF-file` does
+- Added `duckhts_roh_af_table_bcftools`, which takes the arguments of
+  `duckhts_roh_af_table` and chooses the record of a repeated listed position
+  as `bcftools roh --AF-file` does
   (https://github.com/RGenomicsETL/duckhts/issues/329). In file order
   (`FILE_OFFSET`), a record of the other indel class than the frequency row is
-  passed over while another record of the position follows, a record without
-  exactly one non-symbolic ALT claims nothing, and the first remaining record
-  claims the position, which is skipped unless its alleles equal the row's. A
-  claiming record whose first ALT is symbolic is skipped as well, where
-  bcftools would decode its second allele. The rule needs one frequency row per
-  position (more is an error naming the position) and BGZF input. The default
-  `site_rule := 'matching'` keeps the current behaviour. The private macro
+  passed over when the next record of the file has the same POS, on any
+  contig, since bcftools compares POS only; a record without exactly one
+  non-symbolic ALT claims nothing; and the first remaining record claims the
+  position, which is skipped unless its alleles equal the row's. A claiming
+  record whose first ALT is symbolic is skipped as well, where bcftools would
+  decode its second allele. It needs one frequency row per position (more is
+  an error naming the position) and a sorted BGZF file, which it reads a second
+  time without samples; records at unlisted positions are only counted per
+  contig. `duckhts_roh_af_table` is unchanged. The private macro
   `duckhts_htslib_is_indel(ref, alts)` ports HTSlib's indel class and is checked
-  against `bcftools query -f '%TYPE'`. On a fixture of repeated positions the
-  bcftools rule gives the runs of bcftools 1.24; the new fixtures come from
-  `test/scripts/prepare_roh_repeated_fixture.R`.
+  against `bcftools query -f '%TYPE'`. On fixtures of repeated positions, one of
+  them across two contigs, the macro gives the runs of bcftools 1.24; the
+  fixtures come from `test/scripts/prepare_roh_repeated_fixture.R`.
 
 - `read_bcf(..., include_file_offset := true)` adds a `FILE_OFFSET UBIGINT`
   column after `FILTER`: the BGZF virtual position just after each record, as

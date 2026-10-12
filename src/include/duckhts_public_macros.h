@@ -16,6 +16,7 @@ static const char *const duckhts_public_macros[] = {
     "duckhts_gff_convert_parquet_sql",
     "duckhts_roh",
     "duckhts_roh_af_table",
+    "duckhts_roh_af_table_bcftools",
     "duckhts_roh_ancestry",
     "duckhts_roh_counts",
     "duckhts_roh_counts_fitted",
