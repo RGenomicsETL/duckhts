@@ -15,8 +15,9 @@
  * to it.
  *
  * The caller owns the pair policy: which pairs to write and in what order, repeated
- * keys, escaping, empty values, and NULL versus empty rows. DuckDB stores a NULL key
- * or value for a span that is not valid UTF-8.
+ * keys, escaping, empty values, and NULL versus empty rows. A MAP key may not be
+ * NULL, so put leaves out a pair whose key is not valid UTF-8 (the slot stays
+ * unused); DuckDB stores a NULL value for a value that is not valid UTF-8.
  *
  * The vectors are borrowed from the output chunk. Use a duckhts_map_pairs only
  * between its begin and its finish. */
@@ -43,10 +44,47 @@ static inline int duckhts_map_pairs_begin(duckdb_vector map, idx_t capacity,
     return 1;
 }
 
-/* 1 on success. 0 without writing when every reserved slot already holds a pair. */
+/* 1 when the bytes are UTF-8 as RFC 3629 defines it, which is what DuckDB accepts:
+ * no overlong form, no surrogate, nothing above U+10FFFF. NUL bytes are valid. */
+static inline int duckhts_utf8_valid(const char *text, size_t len) {
+    const unsigned char *s = (const unsigned char *)text;
+    size_t i = 0;
+    while (i < len) {
+        unsigned char c = s[i];
+        size_t extra;
+        unsigned char low = 0x80, high = 0xBF; /* range of the second byte */
+        if (c < 0x80) {
+            i++;
+            continue;
+        } else if (c >= 0xC2 && c <= 0xDF) {
+            extra = 1;
+        } else if (c >= 0xE0 && c <= 0xEF) {
+            extra = 2;
+            if (c == 0xE0) low = 0xA0;  /* overlong */
+            if (c == 0xED) high = 0x9F; /* surrogates */
+        } else if (c >= 0xF0 && c <= 0xF4) {
+            extra = 3;
+            if (c == 0xF0) low = 0x90;  /* overlong */
+            if (c == 0xF4) high = 0x8F; /* above U+10FFFF */
+        } else {
+            return 0;
+        }
+        if (len - i <= extra) return 0;
+        if (s[i + 1] < low || s[i + 1] > high) return 0;
+        for (size_t k = 2; k <= extra; k++) {
+            if (s[i + k] < 0x80 || s[i + k] > 0xBF) return 0;
+        }
+        i += extra + 1;
+    }
+    return 1;
+}
+
+/* 1 on success, including a pair left out because its key is not valid UTF-8.
+ * 0 without writing when every reserved slot already holds a pair. */
 static inline int duckhts_map_pairs_put(duckhts_map_pairs *pairs, const char *key,
                                         size_t key_len, const char *value,
                                         size_t value_len) {
+    if (!duckhts_utf8_valid(key, key_len)) return 1;
     if (pairs->entry.length == pairs->capacity) return 0;
     idx_t slot = pairs->entry.offset + pairs->entry.length;
     duckdb_vector_assign_string_element_len(pairs->keys, slot, key, (idx_t)key_len);

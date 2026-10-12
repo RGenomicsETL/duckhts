@@ -2,6 +2,12 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- The bundled readers leave out a MAP pair whose key is not valid UTF-8
+  (`attributes_map` of `rduckhts_gff()`, `rduckhts_gtf()` and
+  `rduckhts_genbank()`, `AUXILIARY_TAGS` of `rduckhts_bam()`, `key_values` of
+  `rduckhts_hts_header()`); such a key used to become a NULL MAP key. A value
+  that is not valid UTF-8 is still `NA`.
+
 - `rduckhts_roh(af_table = ..., site_rule = "bcftools")` and the bundled
   `duckhts_roh_af_table(..., site_rule := 'bcftools')` choose the record of a
   repeated listed position as `bcftools roh --AF-file` does: file order, indel

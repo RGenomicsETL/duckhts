@@ -538,6 +538,10 @@ Returns:
 table
 ```
 
+### Map keys
+
+AUXILIARY_TAGS leaves out a tag whose key is not valid UTF-8, since a MAP key cannot be NULL; a value that is not valid UTF-8 is NULL.
+
 ### Representation
 
 sequence_encoding='nt16' returns SEQ UTINYINT[]; quality_representation='phred' returns QUAL UTINYINT[]; cigar_representation='binary' returns packed BAM CIGAR UINTEGER[] instead of SAM text.
@@ -1952,6 +1956,10 @@ Returns:
 table
 ```
 
+### Map keys
+
+attributes_map leaves out an attribute whose key is not valid UTF-8, since a MAP key cannot be NULL; a value that is not valid UTF-8 is NULL.
+
 ### Missing keys
 
 A requested key absent from every feature yields NULL on every row, exactly as attributes_map[key] does. GFF declares no attribute vocabulary, so binding does not scan the file to validate key presence; that would require a full extra pass. Assert presence with an aggregate, for example: SELECT CASE WHEN count(ID) > 0 THEN true ELSE error('ID is all NULL') END FROM read_gff('annotations.gff', attributes := ['ID']);
@@ -1986,6 +1994,10 @@ Returns:
 table
 ```
 
+### Map keys
+
+attributes_map leaves out an attribute whose key is not valid UTF-8, since a MAP key cannot be NULL; a value that is not valid UTF-8 is NULL.
+
 ### Missing keys
 
 A requested key absent from every feature yields NULL on every row, exactly as attributes_map[key] does. GTF declares no attribute vocabulary, so binding does not scan the file to validate key presence; that would require a full extra pass. Assert presence with an aggregate, for example: SELECT CASE WHEN count(gene_id) > 0 THEN true ELSE error('gene_id is all NULL') END FROM read_gtf('annotations.gtf', attributes := ['gene_id']);
@@ -2019,6 +2031,10 @@ Returns:
 ```
 table
 ```
+
+### Map keys
+
+attributes_map leaves out a qualifier whose key is not valid UTF-8, since a MAP key cannot be NULL; a value that is not valid UTF-8 is NULL.
 
 ### Mapping
 
@@ -2441,6 +2457,10 @@ Returns:
 ```
 table
 ```
+
+### Map keys
+
+key_values leaves out a pair whose key is not valid UTF-8, since a MAP key cannot be NULL; a value that is not valid UTF-8 is NULL.
 
 ### Examples
 

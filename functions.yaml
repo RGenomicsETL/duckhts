@@ -312,6 +312,7 @@
       "r_wrapper": "rduckhts_bam",
       "description": "Read SAM/BAM/CRAM alignments with optional typed SAM tags, auxiliary maps and packed sequence, quality or CIGAR output.",
       "details": {
+        "Map keys": "AUXILIARY_TAGS leaves out a tag whose key is not valid UTF-8, since a MAP key cannot be NULL; a value that is not valid UTF-8 is NULL.",
         "Representation": "sequence_encoding='nt16' returns SEQ UTINYINT[]; quality_representation='phred' returns QUAL UTINYINT[]; cigar_representation='binary' returns packed BAM CIGAR UINTEGER[] instead of SAM text.",
         "Offsets": "FILE_OFFSET is the BGZF virtual position immediately after each compressed BAM record, not its start. SAM (including compressed SAM), CRAM and non-BGZF BAM return NULL. ORDER BY FILE_OFFSET orders one unchanged BGZF BAM; arrival order is not guaranteed and offsets are not comparable across files.",
         "Scanning": "scan_mode='sequential' streams rather than using indexed count/parallel paths and rejects region. NULL/empty region means no filter; empty comma-separated items and malformed known-contig intervals error. Unknown contigs follow HTSlib's skip policy. An indexed full-file scan is split by reference across DuckDB threads and reports the index's row total to the planner as an estimate. Both need the optional per-reference statistics of a BAI or CSI: when a reference has alignments and no statistics, the scan is one sequential stream and no estimate is reported. A CRAM scan is split by reference and reports no estimate. In a region list, '.' is the whole file and '*' is the reads without coordinates. htslib locates both from the same optional statistics; for a BAM whose index lacks them, read_bam reads those two items sequentially, so the result does not depend on the index statistics.",
@@ -1024,6 +1025,7 @@
       "r_wrapper": "rduckhts_gff",
       "description": "Read GFF annotations with optional parsed attributes, strict GFF3 validation and indexed region selection.",
       "details": {
+        "Map keys": "attributes_map leaves out an attribute whose key is not valid UTF-8, since a MAP key cannot be NULL; a value that is not valid UTF-8 is NULL.",
         "Missing keys": "A requested key absent from every feature yields NULL on every row, exactly as attributes_map[key] does. GFF declares no attribute vocabulary, so binding does not scan the file to validate key presence; that would require a full extra pass. Assert presence with an aggregate, for example: SELECT CASE WHEN count(ID) > 0 THEN true ELSE error('ID is all NULL') END FROM read_gff('annotations.gff', attributes := ['ID']);",
         "Attributes": "attributes := ['Parent', 'ID'] appends VARCHAR columns named for the requested keys. Each value equals attributes_map[key], including NULL for absent keys; repeated keys use the first value and GFF3 percent encoding is retained. Key lookup is case-sensitive, as GFF3 tags are: attributes := ['id'] on a file that uses ID returns a column of NULLs. Keys must be nonempty and distinct from fixed and optional attribute column names; because column names ignore case, two keys that differ only in case are rejected. Only projected keys are parsed during scanning.",
         "Scanning": "Comma-separated indexed regions emit each row once across overlaps. scan_mode='sequential' streams/counts instead of using indexed count paths and rejects region. NULL/empty region means no filter; empty comma-separated items and malformed known-contig intervals error. Unknown contigs follow HTSlib's skip policy."
@@ -1041,6 +1043,7 @@
       "r_wrapper": "rduckhts_gtf",
       "description": "Read GTF annotations with optional parsed attributes and indexed region selection.",
       "details": {
+        "Map keys": "attributes_map leaves out an attribute whose key is not valid UTF-8, since a MAP key cannot be NULL; a value that is not valid UTF-8 is NULL.",
         "Missing keys": "A requested key absent from every feature yields NULL on every row, exactly as attributes_map[key] does. GTF declares no attribute vocabulary, so binding does not scan the file to validate key presence; that would require a full extra pass. Assert presence with an aggregate, for example: SELECT CASE WHEN count(gene_id) > 0 THEN true ELSE error('gene_id is all NULL') END FROM read_gtf('annotations.gtf', attributes := ['gene_id']);",
         "Attributes": "attributes := ['gene_id', 'transcript_id'] appends VARCHAR columns named for the requested keys. Each value equals attributes_map[key], including NULL for absent keys; repeated keys use the first value. Key lookup is case-sensitive: attributes := ['Gene_ID'] on a file that uses gene_id returns a column of NULLs. Keys must be nonempty and distinct from fixed and optional attribute column names; because column names ignore case, two keys that differ only in case are rejected. Only projected keys are parsed during scanning.",
         "Scanning": "Comma-separated indexed regions emit each row once across overlaps. scan_mode='sequential' streams/counts instead of using indexed count paths and rejects region. NULL/empty region means no filter; empty comma-separated items and malformed known-contig intervals error. Unknown contigs follow HTSlib's skip policy."
@@ -1058,6 +1061,7 @@
       "r_wrapper": "rduckhts_genbank",
       "description": "Read GenBank flat-file features in read_gff's column shape, with optional parsed qualifier MAP.",
       "details": {
+        "Map keys": "attributes_map leaves out a qualifier whose key is not valid UTF-8, since a MAP key cannot be NULL; a value that is not valid UTF-8 is NULL.",
         "Mapping": "seqname is VERSION, else ACCESSION, else the LOCUS name; a segment on a remote accession (ACC.1:5..40) is reported under that accession. source is 'GenBank'. join()/order() give one row per segment in biological order, complement(...) sets strand '-', and the GFF3 phase of each CDS segment is carried from /codon_start across segments (absent means 1). A span whose end precedes its start on a circular record wraps the origin into two segments, and a between site n^m is the zero-length site at n. The record-level source feature is dropped, and /translation is omitted as redundant with ORIGIN.",
         "Attributes": "Synthesized GFF3 keys ID, Name and Parent accompany the original qualifiers. ID is gene-<locus_tag> for genes and <key>-<n> otherwise, with n the feature's 0-based position in the file. Parent links a feature to the gene sharing its /locus_tag (or /gene) anywhere in the record. Repeated qualifiers become one key with comma-joined values, valueless qualifiers read 'true', and ; = & , % are percent-encoded. attributes_map := TRUE adds the same pairs as a MAP.",
         "Missing keys": "A requested key absent from every feature yields NULL on every row, exactly as attributes_map[key] does. GenBank declares no qualifier vocabulary, so binding does not scan the file to validate key presence; that would require a full extra pass. Assert presence with an aggregate, for example: SELECT CASE WHEN count(product) > 0 THEN true ELSE error('product is all NULL') END FROM read_genbank('phix174.gb', attributes := ['product']);",
@@ -1274,6 +1278,9 @@
       "returns": "table",
       "r_wrapper": "rduckhts_hts_header",
       "description": "Inspect HTS headers in parsed, raw, or combined form across supported formats. Raw VCF/BCF mode includes the final `#CHROM` sample header line so the returned text is suitable for Parquet metadata and future VCF/BCF regeneration.",
+      "details": {
+        "Map keys": "key_values leaves out a pair whose key is not valid UTF-8, since a MAP key cannot be NULL; a value that is not valid UTF-8 is NULL."
+      },
       "examples": [
         "SELECT record_type, id FROM read_hts_header('formatcols.vcf.gz') LIMIT 10;"
       ]

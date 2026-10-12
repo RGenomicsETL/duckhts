@@ -9,6 +9,11 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   one shared native helper
   (https://github.com/RGenomicsETL/duckhts/issues/298).
 
+- `read_gff`, `read_gtf` and `read_genbank` `attributes_map`, `read_bam`
+  `AUXILIARY_TAGS` and `read_hts_header` `key_values` leave out a pair whose key
+  is not valid UTF-8. Such a key used to become a NULL MAP key, which a DuckDB
+  MAP does not allow. A value that is not valid UTF-8 is still NULL.
+
 - `duckhts_roh_af_table(..., site_rule := 'bcftools')` chooses the record of a
   repeated listed position as `bcftools roh --AF-file` does
   (https://github.com/RGenomicsETL/duckhts/issues/329). In file order
