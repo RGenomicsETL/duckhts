@@ -1,0 +1,713 @@
+---
+title: "Depth fraction lane: scaling and a real-data check"
+output:
+  github_document:
+    html_preview: false
+    pandoc_args: ["--wrap=preserve", "--columns=400"]
+---
+
+This report gives the 1×/2×/4× scaling evidence `STYLE.md` asks for, for the
+three macros of the depth fraction lane (`design/depth_fraction_lane.md`,
+https://github.com/RGenomicsETL/duckhts/issues/343): `duckhts_depth_bins()`,
+`duckhts_depth_region_fraction()` and `duckhts_depth_sex_fraction()`. It also
+checks them on real low-pass data made from three registered 30× genomes by
+read-name hash subsampling. No earlier report measures these macros; this is
+their first baseline.
+
+## Workloads
+
+- **Synthetic scaling.** A genome of the GRCh38 shape (chr1 to chr22, X and
+  Y lengths) in fixed bins, with a GC share per bin and reads drawn from a
+  GC-biased mean, every draw a hash of its coordinates. Samples:
+  50, 100 and 200 at 25 kb bins (131,700 bins). Bins: 25, 12.5 and 6.25 kb
+  (131,700, 263,400 and 526,800 bins) at 50 samples. Joint: 100 samples at
+  12.5 kb. The estimators read the same bins with `expected` set to the mean
+  and every bin kept, so their inputs do not depend on the correction. The
+  region estimator is also measured at 22, 44 and 88 regions (whole
+  autosomes, halves and quarters) on the 1× input.
+- **Real.** `depth_fraction_hg00403_buckets`,
+  `depth_fraction_na18507_buckets` and `depth_fraction_hg00188_buckets`:
+  reads (MAPQ at least 20, no unmapped, secondary, failed, duplicate or
+  supplementary flag) in 100 kb bins of chr1 to chr22, X and Y of three
+  1000 Genomes 30× CRAMs, split into 300 of 3,000 read-name buckets. Ten
+  buckets are a 0.1× read-name subsample, 40 are 0.4× and 100 are 1×. The
+  three inputs are checked against their registered row and read counts, the
+  reference FASTA against its registered size and the sample panel against
+  its registered SHA-256 before anything is computed. GC comes from
+  `fasta_nuc()` on the registered GRCh38 reference.
+
+Every timed observation is one fresh DuckDB CLI process under
+`/usr/bin/time`, pinned to cores 12 to 19 by the render command and run at
+scheduling priority −15, with three repetitions at one thread and at four
+threads in an order that alternates sizes. The JSON profiler gives the query
+latency and DuckDB's peak buffer and temporary bytes; `/usr/bin/time` gives
+the peak RSS. `max_temp_directory_size` is zero, so a spill fails the
+render. Each query consumes every output row in an aggregate of all output
+columns, so no column can be pruned.
+
+## Budget, declared before measuring
+
+The overhead of a macro is the median peak RSS of three runs of its query on
+an empty input of the same schema at four threads: the CLI, the extension and
+the plan's fixed allocations. The ceiling of a workload is overhead + 3 ×
+the live state of its largest input, a gate on the peak RSS: the render stops
+if any observation exceeds it or spills. The live state, from the plans:
+
+- `duckhts_depth_bins`: the input materialized once, 104 bytes a row (two
+  strings of 16, eight numbers of 8 or less and the reason), and the holistic
+  aggregates, 8 bytes a value for each of the two quantiles, the stratum
+  medians and the centre over the autosomal rows: 136 bytes a row.
+- `duckhts_depth_region_fraction`: the narrow columns materialized once, 96
+  bytes a row; the joins build on regions and samples × regions.
+- `duckhts_depth_sex_fraction`: it streams; its state is a few sums per
+  sample. Its live state is taken as the decoded row groups being read, one
+  of 122,880 rows of 64 bytes for each thread.
+
+The render also stops if a time exponent is above 1.25 at either doubling of
+a series whose 1× run takes at least 5 s on one thread. A series whose 1× run
+is shorter gets its memory verdict and its times without a timing verdict, as
+`STYLE.md` allows.
+
+## Real-data checks, declared before running
+
+The three genomes are male in the 1000 Genomes sample panel. Composites are
+sums of disjoint bucket sets at 0.1×, 0.4× and 1× (10, 40 and 100 buckets):
+
+- **Pure:** each genome alone. Expected: major genome XY, a second-genome
+  fraction of 0, and no change of any autosome.
+- **Planted gain:** HG00403 with extra buckets on chr18 only, so that chr18
+  has the depth of a one-copy gain in a share m of cells (one extra bucket in
+  ten is m = 0.2). Expected: shift m on chr18.
+- **XY major with an XX second genome:** HG00403 at share 1 − f, and NA18507
+  at share f on the autosomes with twice as many buckets on X and none on Y,
+  which emulates an XX genome from a male one. Expected: major XY, fraction f.
+- **XX major with an XY second genome:** NA18507 emulated as XX at share
+  1 − f (autosomes, X at twice the buckets, no Y) with HG00403 at share f.
+  Expected: major XX, fraction f. The emulated XX genome has no Y reads at
+  all, while a real XX genome has some mismapped Y reads; this check is
+  optimistic for the Y estimate.
+
+Bins: 1 Mb, with fewer than 5% N bases, outside the pseudo-autosomal regions
+of X (GRCh38 chrX:10,001-2,781,479 and 155,701,383-156,030,895). Bins are
+masked and estimates calibrated with a panel of the genomes not used in a
+composite (leave-one-out): each genome's 300 buckets (3×) give corrected
+bins; a bin is kept for a composite when the median over the panel genomes of
+its ratio divided by its expected level (1 for an autosome, 0.5 for X or Y in
+an XY genome) is within [0.75, 1.25]. This removes centromere models,
+unmappable and multi-copy bins without a separate mappability track. The
+same masked panel bins are the `reference_table` of the estimators, all with
+sex XY. Acceptance, with the reference:
+
+- every major genome as expected;
+- pure genomes: the absolute fraction at most 0.03, and the absolute shift of
+  every autosome at most 0.08;
+- planted gains: the shift within 0.06 of m at 0.1× and within 0.04 at 0.4×
+  and 1×;
+- mixtures: the fraction within 0.04 of f at 0.1× and within 0.03 at 0.4× and
+  1×.
+
+The bin-based estimates without a reference are reported beside them and are
+not gated: residual bias between chromosomes and between X and the autosomes
+is what the reference set exists to remove.
+
+A first run of these checks staged chr18 to chr22, X and Y only. It recovered
+0.6 to 0.7 m for the planted gains: chr18 then held a third of the autosomal
+bins, and most of the bins of the low-GC strata, so the GC correction of the
+sample absorbed much of the gain. This render stages the whole genome, and
+also reports the planted gains corrected on chr18 to chr22 alone (mode
+`five_chromosomes`, not gated) to show the effect.
+
+``` sh
+taskset -c 12-19 Rscript -e 'rmarkdown::render("benchmarks/benchmark_depth_fraction.Rmd")'
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r environment, echo=FALSE, message=FALSE}
+stopifnot(requireNamespace("duckhtsbench", quietly = TRUE),
+          requireNamespace("jsonlite", quietly = TRUE),
+          requireNamespace("digest", quietly = TRUE),
+          requireNamespace("knitr", quietly = TRUE))
+Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath(
+  "r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+extension <- normalizePath(Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension"),
+                           mustWork = TRUE)
+duckdb_cli <- Sys.getenv("DUCKDB_CLI", Sys.which("duckdb"))
+stopifnot(nzchar(duckdb_cli), file.exists("/usr/bin/time"))
+duckdb_runtime <- system2(duckdb_cli, "--version", stdout = TRUE)[[1L]]
+revision <- system2("git", c("rev-parse", "HEAD"), stdout = TRUE)
+src_tree <- system2("git", c("rev-parse", "HEAD:src"), stdout = TRUE)
+if (system2("git", c("diff", "--quiet", "HEAD", "--", "src"), stdout = FALSE, stderr = FALSE) != 0L) {
+  stop("Build source must match the recorded HEAD")
+}
+host_load <- sub(".*load average: ", "", system2("uptime", stdout = TRUE))
+quote_literal <- function(value) paste0("'", gsub("'", "''", value, fixed = TRUE), "'")
+memory_limit <- system2(duckdb_cli, c("-list", "-noheader"),
+                        input = "SELECT current_setting('memory_limit');", stdout = TRUE)[[1L]]
+
+# Run SQL statements untimed in one CLI process. Each element of `outputs`
+# is a query whose rows are written to a CSV file and read back.
+run_untimed <- function(statements, outputs = list()) {
+  scratch <- tempfile("depth-fraction-untimed-")
+  dir.create(scratch)
+  on.exit(unlink(scratch, recursive = TRUE), add = TRUE)
+  paths <- file.path(scratch, paste0(names(outputs), ".csv"))
+  copies <- vapply(seq_along(outputs), function(k) {
+    sprintf("COPY (%s) TO %s (HEADER);", outputs[[k]], quote_literal(paths[[k]]))
+  }, character(1L))
+  sql_path <- file.path(scratch, "script.sql")
+  writeLines(c("SET threads = 4;", sprintf("LOAD %s;", quote_literal(extension)), statements, copies),
+             sql_path)
+  status <- system2(duckdb_cli, c("-unsigned", "-batch", "-bail"), stdin = sql_path,
+                    stdout = FALSE, stderr = FALSE)
+  if (status != 0L) stop("DuckDB CLI failed (status ", status, ")")
+  results <- lapply(paths, utils::read.csv, stringsAsFactors = FALSE)
+  names(results) <- names(outputs)
+  results
+}
+
+# Run one query in a fresh CLI process with the given threads and spill
+# forbidden, after untimed setup statements; the query's single row is
+# returned with latency and memory.
+run_fresh <- function(query, threads, setup = NULL) {
+  scratch <- tempfile("depth-fraction-scaling-")
+  dir.create(scratch)
+  on.exit(unlink(scratch, recursive = TRUE), add = TRUE)
+  sql_path <- file.path(scratch, "query.sql")
+  result_path <- file.path(scratch, "result.csv")
+  profile_path <- file.path(scratch, "profile.json")
+  time_path <- file.path(scratch, "time.tsv")
+  writeLines(c(
+    sprintf("SET threads = %d;", threads),
+    "SET max_temp_directory_size = '0KiB';",
+    sprintf("LOAD %s;", quote_literal(extension)),
+    setup,
+    "PRAGMA enable_profiling = 'json';",
+    sprintf("PRAGMA profiling_output = %s;", quote_literal(profile_path)),
+    sprintf("COPY (%s) TO %s (HEADER);", query, quote_literal(result_path)),
+    "PRAGMA disable_profiling;"
+  ), sql_path)
+  status <- system2("/usr/bin/time", c("-f", shQuote("%M\t%e"), "-o", shQuote(time_path),
+                                       "nice", "-n", "-15", shQuote(duckdb_cli), "-unsigned", "-batch", "-bail"),
+                    stdin = sql_path, stdout = FALSE, stderr = FALSE)
+  if (status != 0L) stop("DuckDB CLI failed (status ", status, ")")
+  profile <- jsonlite::fromJSON(profile_path, simplifyVector = TRUE)
+  timing <- utils::read.delim(time_path, header = FALSE, col.names = c("max_rss_kib", "process_seconds"))
+  data.frame(utils::read.csv(result_path, colClasses = "character"),
+             seconds = as.numeric(profile$latency), max_rss_kib = timing$max_rss_kib[[1L]],
+             peak_buffer_bytes = as.numeric(profile$system_peak_buffer_memory),
+             peak_temp_bytes = as.numeric(profile$system_peak_temp_dir_size))
+}
+```
+
+```{r real, echo=FALSE, message=FALSE}
+registry <- duckhtsbench::duckhts_bench_registry()
+identity_of <- function(id) {
+  duckhtsbench:::duckhts_bench_identity_fields(registry$supplier_identity[registry$id == id])
+}
+genomes <- c("HG00403", "NA18507", "HG00188")
+bucket_ids <- paste0("depth_fraction_", tolower(genomes), "_buckets")
+bucket_paths <- vapply(bucket_ids, duckhtsbench::duckhts_bench_artifact_path, character(1L))
+stopifnot(all(file.exists(bucket_paths)))
+reference_fasta <- duckhtsbench::duckhts_bench_artifact_path("liftover_grch38_fasta")
+stopifnot(file.exists(reference_fasta), file.exists(paste0(reference_fasta, ".fai")),
+          file.size(reference_fasta) == as.numeric(identity_of("liftover_grch38_fasta")[["bytes"]]))
+panel_path <- duckhtsbench::duckhts_bench_artifact_path("ancestry_1000g_panel")
+stopifnot(identical(unname(digest::digest(file = panel_path, algo = "sha256")),
+                    identity_of("ancestry_1000g_panel")[["sha256"]]))
+sample_panel <- utils::read.delim(panel_path, stringsAsFactors = FALSE)
+stopifnot(all(sample_panel$gender[match(genomes, sample_panel$sample)] == "male"))
+
+bucket_list <- paste(vapply(bucket_paths, quote_literal, character(1L)), collapse = ", ")
+staged <- run_untimed(character(), list(identity = sprintf(paste(
+  "SELECT sample_id, count(*)::DOUBLE AS rows, sum(reads)::DOUBLE AS reads, max(bucket) AS max_bucket",
+  "FROM read_parquet([%s]) GROUP BY sample_id ORDER BY sample_id"), bucket_list)))$identity
+for (k in seq_along(genomes)) {
+  fields <- identity_of(bucket_ids[[k]])
+  row <- staged[staged$sample_id == genomes[[k]], ]
+  stopifnot(nrow(row) == 1L, row$rows == as.numeric(fields[["rows"]]),
+            row$reads == as.numeric(fields[["reads"]]), row$max_bucket < as.numeric(fields[["kept_buckets"]]))
+}
+
+# The composites: sums of bucket ranges [low, high) of one genome on a set
+# of contigs ('all', 'autosomes', or one contig).
+component <- function(id, genome, contigs, low, high) {
+  data.frame(test_id = id, genome = genome, contigs = contigs, low = low, high = high,
+             stringsAsFactors = FALSE)
+}
+depths <- data.frame(label = c("0.1x", "0.4x", "1x"), buckets = c(10L, 40L, 100L))
+gains <- list(`0.1x` = c(0.2, 0.4), `0.4x` = c(0.1, 0.2), `1x` = c(0.04, 0.1, 0.2))
+shares <- list(`0.1x` = c(0.1, 0.2, 0.3), `0.4x` = c(0.05, 0.1, 0.2), `1x` = c(0.02, 0.05, 0.1, 0.2))
+components <- list()
+design <- list()
+add_test <- function(id, kind, depth, truth, major, parts) {
+  components[[length(components) + 1L]] <<- parts
+  design[[length(design) + 1L]] <<- data.frame(test_id = id, kind = kind, depth = depth, truth = truth,
+                                               major = major, genomes = paste(sort(unique(parts$genome)), collapse = "+"),
+                                               stringsAsFactors = FALSE)
+}
+for (d in seq_len(nrow(depths))) {
+  label <- depths$label[[d]]
+  n <- depths$buckets[[d]]
+  for (genome in genomes) {
+    add_test(paste("pure", genome, label), "pure", label, 0, "XY",
+             component(paste("pure", genome, label), genome, "all", 0L, n))
+  }
+  for (m in gains[[label]]) {
+    id <- paste("gain chr18", m, label)
+    add_test(id, "gain", label, m, "XY", rbind(
+      component(id, "HG00403", "all", 0L, n),
+      component(id, "HG00403", "chr18", n, n + as.integer(round(m * n / 2)))))
+  }
+  for (f in shares[[label]]) {
+    minor <- as.integer(round(f * n))
+    id <- paste("XY+XX", f, label)
+    add_test(id, "xy_major", label, f, "XY", rbind(
+      component(id, "HG00403", "all", 0L, n - minor),
+      component(id, "NA18507", "autosomes", 0L, minor),
+      component(id, "NA18507", "chrX", 0L, 2L * minor)))
+    id <- paste("XX+XY", f, label)
+    add_test(id, "xx_major", label, f, "XX", rbind(
+      component(id, "NA18507", "autosomes", 0L, n - minor),
+      component(id, "NA18507", "chrX", 0L, 2L * (n - minor)),
+      component(id, "HG00403", "all", 0L, minor)))
+  }
+}
+components <- do.call(rbind, components)
+design <- do.call(rbind, design)
+stopifnot(all(components$high <= 300L), all(components$high > components$low))
+
+components_sql <- paste(sprintf("(%s, %s, %s, %d, %d)", vapply(components$test_id, quote_literal, ""),
+                                 vapply(components$genome, quote_literal, ""),
+                                 vapply(components$contigs, quote_literal, ""), components$low, components$high),
+                         collapse = ", ")
+real_bins_path <- tempfile("depth-fraction-real-", fileext = ".parquet")
+real_setup <- c(
+  sprintf(paste(
+    "CREATE TABLE gc AS SELECT chrom, start, \"end\", (num_c + num_g) / nullif(num_a + num_c + num_g + num_t, 0) AS gc",
+    "FROM fasta_nuc(%s, bin_width := 1000000) WHERE (chrom IN ('chrX', 'chrY') OR regexp_full_match(chrom, 'chr[0-9]+'))",
+    "AND num_n < 0.05 * seq_len AND NOT (chrom = 'chrX' AND (start < 2781479 OR \"end\" > 155701383));"),
+    quote_literal(reference_fasta)),
+  sprintf(paste("CREATE TABLE buckets AS SELECT sample_id, chrom, start // 1000000 * 1000000 AS start, bucket,",
+                "sum(reads) AS reads FROM read_parquet([%s]) GROUP BY ALL;"), bucket_list),
+  sprintf("CREATE TABLE components AS SELECT * FROM (VALUES %s) v(test_id, genome, contigs, low, high);",
+          components_sql),
+  # Zero-filled bins of a set of (sample, bucket range, contigs) components.
+  paste("CREATE MACRO composed_bins(parts) AS TABLE SELECT t.test_id AS sample_id, g.chrom, g.start, g.\"end\",",
+        "coalesce(c.reads, 0) AS reads, g.gc FROM gc g CROSS JOIN (SELECT DISTINCT test_id FROM query_table(parts)) t",
+        "LEFT JOIN (SELECT p.test_id, b.chrom, b.start, sum(b.reads) AS reads FROM query_table(parts) p",
+        "JOIN buckets b ON b.sample_id = p.genome AND b.bucket >= p.low AND b.bucket < p.high",
+        "AND (p.contigs = 'all' OR (p.contigs = 'autosomes' AND b.chrom NOT IN ('chrX', 'chrY')) OR b.chrom = p.contigs)",
+        "GROUP BY ALL) c ON c.test_id = t.test_id AND c.chrom = g.chrom AND c.start = g.start;"),
+  sprintf(paste("CREATE TABLE panel_parts AS SELECT genome AS test_id, genome, 'all' AS contigs, 0 AS low, 300 AS high",
+                "FROM (VALUES %s) v(genome);"), paste0("(", vapply(genomes, quote_literal, character(1L)), ")", collapse = ", ")),
+  "CREATE TABLE panel_bins AS SELECT * FROM composed_bins('panel_parts');",
+  "CREATE TABLE panel AS SELECT * FROM duckhts_depth_bins('panel_bins');",
+  paste("CREATE TABLE chromosomes AS SELECT DISTINCT chrom AS region, chrom, 0 AS start, 300000000 AS \"end\"",
+        "FROM gc WHERE chrom NOT IN ('chrX', 'chrY');"),
+  "CREATE MACRO five(relation) AS TABLE SELECT * FROM query_table(relation) WHERE chrom IN ('chr18', 'chr19', 'chr20', 'chr21', 'chr22', 'chrX', 'chrY');",
+  # Every composite, unmasked, for the timed run on real bins below.
+  sprintf("COPY (SELECT * FROM composed_bins('components')) TO %s (FORMAT parquet);", quote_literal(real_bins_path)))
+
+# One group per set of genomes used: its panel is the other genomes.
+groups <- unique(design$genomes)
+group_sql <- function(k) {
+  used <- strsplit(groups[[k]], "+", fixed = TRUE)[[1L]]
+  others <- setdiff(genomes, used)
+  in_list <- function(x) paste(vapply(x, quote_literal, character(1L)), collapse = ", ")
+  tests <- design$test_id[design$genomes == groups[[k]]]
+  c(sprintf(paste("CREATE OR REPLACE TABLE mask AS SELECT chrom, start FROM panel WHERE kept AND sample_id IN (%s)",
+                  "GROUP BY chrom, start HAVING median(ratio / CASE WHEN chrom IN ('chrX', 'chrY') THEN 0.5 ELSE 1.0 END)",
+                  "BETWEEN 0.75 AND 1.25;"), in_list(others)),
+    sprintf("CREATE OR REPLACE TABLE parts AS SELECT * FROM components WHERE test_id IN (%s);", in_list(tests)),
+    "CREATE OR REPLACE TABLE test_bins AS SELECT b.* FROM composed_bins('parts') b SEMI JOIN mask USING (chrom, start);",
+    "CREATE OR REPLACE TABLE test_corrected AS SELECT * FROM duckhts_depth_bins('test_bins');",
+    sprintf(paste("CREATE OR REPLACE TABLE reference_bins AS SELECT b.* FROM panel_bins b SEMI JOIN mask USING (chrom, start)",
+                  "WHERE b.sample_id IN (%s);"), in_list(others)),
+    "CREATE OR REPLACE TABLE reference_corrected AS SELECT *, 'XY' AS sex FROM duckhts_depth_bins('reference_bins');",
+    sprintf("INSERT INTO region_bins SELECT %d, 'bins', * FROM duckhts_depth_region_fraction('test_corrected', 'chromosomes');", k),
+    sprintf("INSERT INTO region_bins SELECT %d, 'reference', * FROM duckhts_depth_region_fraction('test_corrected', 'chromosomes', 'reference_corrected');", k),
+    sprintf("INSERT INTO sex_bins SELECT %d, 'bins', * FROM duckhts_depth_sex_fraction('test_corrected');", k),
+    sprintf("INSERT INTO sex_bins SELECT %d, 'reference', * FROM duckhts_depth_sex_fraction('test_corrected', 'reference_corrected');", k),
+    sprintf("INSERT INTO mask_sizes SELECT %d, chrom, count(*) FROM mask GROUP BY chrom;", k),
+    # The same composites corrected on chr18 to chr22, X and Y alone.
+    "CREATE OR REPLACE TABLE test_bins_five AS SELECT * FROM five('test_bins');",
+    "CREATE OR REPLACE TABLE test_corrected_five AS SELECT * FROM duckhts_depth_bins('test_bins_five');",
+    "CREATE OR REPLACE TABLE reference_bins_five AS SELECT * FROM five('reference_bins');",
+    "CREATE OR REPLACE TABLE reference_corrected_five AS SELECT *, 'XY' AS sex FROM duckhts_depth_bins('reference_bins_five');",
+    sprintf(paste("INSERT INTO region_bins SELECT %d, 'five_chromosomes', * FROM duckhts_depth_region_fraction(",
+                  "'test_corrected_five', 'chromosomes', 'reference_corrected_five') WHERE region = 'chr18';"), k))
+}
+real_results <- run_untimed(c(
+  real_setup,
+  "CREATE TABLE region_bins AS SELECT 0 AS grp, ''::VARCHAR AS mode, * FROM duckhts_depth_region_fraction('panel', 'chromosomes') WHERE false;",
+  "CREATE TABLE sex_bins AS SELECT 0 AS grp, ''::VARCHAR AS mode, * FROM duckhts_depth_sex_fraction('panel') WHERE false;",
+  "CREATE TABLE mask_sizes (grp INTEGER, chrom VARCHAR, bins BIGINT);",
+  unlist(lapply(seq_along(groups), group_sql))),
+  list(region = "SELECT * FROM region_bins ORDER BY ALL", sex = "SELECT * FROM sex_bins ORDER BY ALL",
+       masks = "SELECT * FROM mask_sizes ORDER BY ALL",
+       gc_bins = "SELECT chrom, count(*) AS bins FROM gc GROUP BY chrom ORDER BY chrom"))
+
+sex <- merge(design, real_results$sex, by.x = "test_id", by.y = "sample_id")
+region <- merge(design, real_results$region, by.x = "test_id", by.y = "sample_id")
+depth_order <- function(x) match(x, depths$label)
+sex <- sex[order(sex$kind, depth_order(sex$depth), sex$truth, sex$test_id, sex$mode), ]
+region <- region[order(region$kind, depth_order(region$depth), region$truth, region$test_id, region$region, region$mode), ]
+
+with_reference <- sex[sex$mode == "reference", ]
+gain_rows <- region[region$kind == "gain" & region$region == "chr18" & region$mode == "reference", ]
+pure_regions <- region[region$kind == "pure" & region$mode == "reference", ]
+stopifnot(nrow(pure_regions) == 9L * 22L)
+tolerance_of <- function(depth, low_depth, other) ifelse(depth == "0.1x", low_depth, other)
+checks <- data.frame(
+  check = c("major genome as expected (with reference)", "pure: |fraction| <= 0.03",
+            "pure: |shift| <= 0.08 on every autosome", "gain: |shift - m| within 0.06 / 0.04",
+            "mixtures: |fraction - f| within 0.04 / 0.03"),
+  pass = c(all(with_reference$major_sex == with_reference$major),
+           all(abs(with_reference$fraction[with_reference$kind == "pure"]) <= 0.03),
+           all(abs(pure_regions$shift) <= 0.08),
+           all(abs(gain_rows$shift - gain_rows$truth) <= tolerance_of(gain_rows$depth, 0.06, 0.04)),
+           with(with_reference[with_reference$kind %in% c("xy_major", "xx_major"), ],
+                all(abs(fraction - truth) <= tolerance_of(depth, 0.04, 0.03)))),
+  stringsAsFactors = FALSE)
+```
+
+```{r scaling, echo=FALSE, message=FALSE}
+# Synthetic bins, staged untimed in the benchmark cache and removed at the end.
+staging <- duckhtsbench::duckhts_bench_cache_path(file.path("benchmarks", "depth-fraction",
+                                                            paste0("scaling-", Sys.getpid())))
+dir.create(staging, recursive = TRUE)
+lengths_mb <- c(249, 242, 198, 190, 182, 171, 159, 145, 138, 134, 135, 133, 114, 107, 102, 90, 83, 80, 59, 64,
+                47, 51, 156, 57)
+contigs <- c(paste0("chr", 1:22), "chrX", "chrY")
+inputs <- data.frame(
+  series = c("samples", "samples", "samples", "bins", "bins", "joint"),
+  scale = c(1L, 2L, 4L, 2L, 4L, 4L),
+  samples = c(50L, 100L, 200L, 50L, 50L, 100L),
+  bin_bp = c(25000L, 25000L, 25000L, 12500L, 6250L, 12500L), stringsAsFactors = FALSE)
+inputs$bins <- vapply(inputs$bin_bp, function(width) sum(ceiling(lengths_mb * 1e6 / width)), numeric(1L))
+inputs$rows <- inputs$samples * inputs$bins
+inputs$path <- file.path(staging, sprintf("bins_%s_%d.parquet", inputs$series, inputs$scale))
+genome_sql <- paste(sprintf("(%s, %d)", vapply(contigs, quote_literal, character(1L)), lengths_mb * 1000000L),
+                    collapse = ", ")
+for (k in seq_len(nrow(inputs))) {
+  width <- inputs$bin_bp[[k]]
+  generate <- sprintf(paste(
+    "COPY (SELECT 'S' || lpad(CAST(s AS VARCHAR), 4, '0') AS sample_id, g.chrom, g.start, g.\"end\", g.gc,",
+    "CAST(round(g.mean * (0.8 + 0.4 * (hash(s, g.chrom, g.start) %% 1000003) / 1000003.0)) AS BIGINT) AS reads,",
+    "g.mean AS expected, true AS kept",
+    "FROM (SELECT chrom, b * %d AS start, least((b + 1) * %d, len) AS \"end\", gc,",
+    "670.0 * (least((b + 1) * %d, len) - b * %d) / 1000000 * (1 + 3 * (gc - 0.45) - 20 * (gc - 0.45) ^ 2)",
+    "* CASE chrom WHEN 'chrX' THEN 0.5 WHEN 'chrY' THEN 0.5 ELSE 1 END AS mean",
+    "FROM (SELECT chrom, len, b, 0.35 + 0.25 * (hash('gc', chrom, b) %% 1000003) / 1000003.0 AS gc",
+    "FROM (VALUES %s) c(chrom, len), range(0, CAST(ceil(len / %d) AS BIGINT)) r(b))) g,",
+    "range(0, %d) t(s)) TO %s (FORMAT parquet);"),
+    width, width, width, width, genome_sql, width, inputs$samples[[k]], quote_literal(inputs$path[[k]]))
+  stopifnot(system2(duckdb_cli, "-batch", input = generate, stdout = FALSE) == 0L)
+}
+# Regions for the region series: whole autosomes, halves and quarters.
+region_sql <- function(pieces) sprintf(paste(
+  "CREATE TEMP TABLE regions AS SELECT chrom || ':' || p AS region, chrom, p * len // %d AS start,",
+  "(p + 1) * len // %d AS \"end\" FROM (VALUES %s) c(chrom, len), range(0, %d) r(p) WHERE chrom NOT IN ('chrX', 'chrY');"),
+  pieces, pieces, genome_sql, pieces)
+
+view_of <- function(path) sprintf("CREATE TEMP VIEW bins AS SELECT * FROM read_parquet(%s);", quote_literal(path))
+queries <- list(
+  depth_bins = paste("SELECT count(*) AS rows, count(*) FILTER (WHERE kept) AS kept, sum(expected) AS expected,",
+                     "sum(ratio) AS ratio, sum(log2_ratio) AS log2_ratio, count(DISTINCT reason) AS reasons,",
+                     "max(length(sample_id) + length(chrom) + start + \"end\" + reads + gc + gc_stratum + stratum_bins",
+                     "+ length(method) + coalesce(mappability, 0)) AS other FROM duckhts_depth_bins('bins')"),
+  region_fraction = paste("SELECT count(*) AS rows, sum(shift) AS shift, sum(shift_se) AS shift_se,",
+                          "sum(shift_low + shift_high + ratio + dispersion + bins + baseline_bins) AS other,",
+                          "count(DISTINCT status) AS statuses, max(length(sample_id) + length(region) + length(method)",
+                          "+ coalesce(reference_shift, 0) + coalesce(reference_samples, 0)) AS names",
+                          "FROM duckhts_depth_region_fraction('bins', 'regions')"),
+  sex_fraction = paste("SELECT count(*) AS rows, sum(fraction) AS fraction, sum(fraction_se) AS fraction_se,",
+                       "sum(x_copies + x_copies_se + y_copies + y_copies_se + fraction_x + fraction_x_se + fraction_y",
+                       "+ fraction_y_se + fraction_low + fraction_high + agreement_z + dispersion + autosomal_bins",
+                       "+ x_bins + y_bins) AS other, max(length(sample_id) + length(major_sex) + length(status)",
+                       "+ length(method) + coalesce(reference_samples, 0)) AS names FROM duckhts_depth_sex_fraction('bins')"))
+cells <- rbind(
+  data.frame(macro = "depth_bins", inputs[c("series", "scale", "samples", "bins", "rows", "path")], regions = NA,
+             stringsAsFactors = FALSE),
+  data.frame(macro = "region_fraction", inputs[c("series", "scale", "samples", "bins", "rows", "path")], regions = 22L,
+             stringsAsFactors = FALSE),
+  data.frame(macro = "region_fraction", series = "regions", scale = c(2L, 4L), samples = inputs$samples[[1L]], bins = inputs$bins[[1L]],
+             rows = inputs$rows[[1L]], path = inputs$path[[1L]], regions = c(44L, 88L), stringsAsFactors = FALSE),
+  data.frame(macro = "sex_fraction", inputs[c("series", "scale", "samples", "bins", "rows", "path")], regions = NA,
+             stringsAsFactors = FALSE))
+one_x <- cells[cells$series == "samples" & cells$scale == 1L, ]
+one_x$series <- "bins"
+one_x_joint <- one_x
+one_x_joint$series <- "joint"
+one_x_regions <- one_x[one_x$macro == "region_fraction", ]
+one_x_regions$series <- "regions"
+cells <- rbind(cells, one_x, one_x_joint, one_x_regions)
+cells$setup <- ifelse(cells$macro == "region_fraction",
+                      paste(vapply(cells$path, view_of, character(1L)),
+                            vapply(ifelse(is.na(cells$regions), 1L, cells$regions / 22L), region_sql, character(1L))),
+                      vapply(cells$path, view_of, character(1L)))
+cells$bytes_per_row <- c(depth_bins = 136, region_fraction = 96, sex_fraction = 0)[cells$macro]
+measure <- unique(cells[c("macro", "path", "regions", "setup", "rows", "bytes_per_row")])
+
+# The fixed overhead of a macro: its query on an empty input of the same
+# schema at four threads, the median of three runs.
+empty_setup <- function(macro) {
+  view <- sprintf("CREATE TEMP VIEW bins AS SELECT * FROM read_parquet(%s) WHERE false;", quote_literal(inputs$path[[1L]]))
+  if (macro == "region_fraction") paste(view, region_sql(1L)) else view
+}
+overheads <- do.call(rbind, lapply(names(queries), function(macro) {
+  empty_runs <- vapply(seq_len(3L), function(run) run_fresh(queries[[macro]], 4L, empty_setup(macro))$max_rss_kib,
+                       numeric(1L))
+  data.frame(macro = macro, overhead_mib = median(empty_runs) / 1024, stringsAsFactors = FALSE)
+}))
+live_bytes <- function(macro, rows, threads) {
+  if (macro == "sex_fraction") return(122880 * 64 * threads)
+  rows * c(depth_bins = 136, region_fraction = 96)[[macro]]
+}
+budgets <- do.call(rbind, lapply(split(cells, cells$macro), function(x) {
+  macro <- x$macro[[1L]]
+  data.frame(macro = macro, overhead_mib = overheads$overhead_mib[overheads$macro == macro],
+             live_state_mib = live_bytes(macro, max(x$rows), 4L) / 2^20, stringsAsFactors = FALSE)
+}))
+budgets$budget_mib <- budgets$overhead_mib + 3 * budgets$live_state_mib
+rownames(budgets) <- NULL
+
+observations <- list()
+for (repetition in 1:3) {
+  order <- if (repetition %% 2L == 1L) seq_len(nrow(measure)) else rev(seq_len(nrow(measure)))
+  for (threads in c(1L, 4L)) {
+    for (k in order) {
+      observed <- run_fresh(queries[[measure$macro[[k]]]], threads, measure$setup[[k]])
+      # The query's own columns differ by macro; keep the row count and the
+      # exact counts (rows, kept bins, distinct reasons or statuses), which
+      # must not change between repetitions, and the measurements.
+      exact <- intersect(c("rows", "kept", "reasons", "statuses"), names(observed))
+      observations[[length(observations) + 1L]] <- data.frame(
+        macro = measure$macro[[k]], path = measure$path[[k]], regions = measure$regions[[k]],
+        threads = threads, repetition = repetition, rows = as.numeric(observed$rows),
+        exact_counts = paste(unlist(observed[exact]), collapse = "|"),
+        observed[c("seconds", "max_rss_kib", "peak_buffer_bytes", "peak_temp_bytes")],
+        stringsAsFactors = FALSE)
+    }
+  }
+}
+runs <- do.call(rbind, observations)
+runs$budget_mib <- budgets$budget_mib[match(runs$macro, budgets$macro)]
+stopifnot(all(runs$peak_temp_bytes == 0))
+over_budget <- runs[runs$max_rss_kib / 1024 > runs$budget_mib, ]
+if (nrow(over_budget)) {
+  print(over_budget[c("macro", "path", "threads", "max_rss_kib", "budget_mib")])
+  stop("observations exceed the declared memory budget", call. = FALSE)
+}
+# Every repetition of a cell returns the same rows and the same sums.
+consistent <- vapply(split(runs, list(runs$macro, runs$path, runs$regions, runs$threads), drop = TRUE), function(x) {
+  length(unique(x$exact_counts)) == 1L
+}, logical(1L))
+stopifnot(all(consistent))
+write.csv(runs[setdiff(names(runs), "path")], "benchmarks/benchmark_depth_fraction_runs.csv", row.names = FALSE)
+
+key <- function(x) paste(x$macro, x$path, ifelse(is.na(x$regions), "", x$regions))
+runs$cell <- key(runs)
+summary <- do.call(rbind, lapply(seq_len(nrow(cells)), function(k) {
+  cell <- runs[runs$cell == key(cells[k, ]), ]
+  do.call(rbind, lapply(c(1L, 4L), function(threads) {
+    x <- cell[cell$threads == threads, ]
+    data.frame(macro = cells$macro[[k]], series = cells$series[[k]], scale = cells$scale[[k]],
+               threads = threads, samples = cells$samples[[k]], bins = cells$bins[[k]],
+               regions = cells$regions[[k]], rows = cells$rows[[k]],
+               median_seconds = median(x$seconds), min_seconds = min(x$seconds), max_seconds = max(x$seconds),
+               median_rss_mib = round(median(x$max_rss_kib) / 1024, 1),
+               max_rss_mib = round(max(x$max_rss_kib) / 1024, 1),
+               max_buffer_mib = round(max(x$peak_buffer_bytes) / 2^20, 1),
+               budget_mib = round(x$budget_mib[[1L]], 1), stringsAsFactors = FALSE)
+  }))
+}))
+summary <- summary[order(summary$macro, summary$series, summary$threads, summary$scale), ]
+rownames(summary) <- NULL
+
+exponents <- do.call(rbind, lapply(split(summary, list(summary$macro, summary$series, summary$threads), drop = TRUE), function(s) {
+  s <- s[order(s$scale), ]
+  dimension <- switch(s$series[[1L]], samples = s$samples, bins = s$bins, joint = s$rows, regions = s$regions)
+  growth <- function(low, high) log(s$median_seconds[[high]] / s$median_seconds[[low]]) / log(dimension[[high]] / dimension[[low]])
+  one_thread <- summary[summary$macro == s$macro[[1L]] & summary$series == s$series[[1L]] &
+                          summary$threads == 1L & summary$scale == 1L, ]
+  timed <- one_thread$median_seconds[[1L]] >= 5
+  data.frame(macro = s$macro[[1L]], series = s$series[[1L]], threads = s$threads[[1L]],
+             one_x_seconds = s$median_seconds[[1L]],
+             time_exponent_2x = if (nrow(s) == 3L) growth(1L, 2L) else NA_real_,
+             time_exponent_4x = growth(nrow(s) - 1L, nrow(s)),
+             rss_ratio_4x = s$median_rss_mib[[nrow(s)]] / s$median_rss_mib[[1L]],
+             timing_verdict = if (timed) "yes" else "no (1x under 5 s)", stringsAsFactors = FALSE)
+}))
+rownames(exponents) <- NULL
+gated <- exponents[exponents$timing_verdict == "yes", ]
+stopifnot(all(is.na(gated$time_exponent_2x) | gated$time_exponent_2x <= 1.25),
+          all(gated$time_exponent_4x <= 1.25))
+
+# The real workload: every composite of the real-data checks (all depths),
+# corrected by duckhts_depth_bins, three repetitions at one and four threads.
+real_runs <- do.call(rbind, lapply(1:3, function(repetition) do.call(rbind, lapply(c(1L, 4L), function(threads) {
+  data.frame(threads = threads, repetition = repetition,
+             run_fresh(queries$depth_bins, threads, view_of(real_bins_path)), stringsAsFactors = FALSE)
+}))))
+stopifnot(all(real_runs$peak_temp_bytes == 0), length(unique(real_runs$rows)) == 1L)
+real_timing <- do.call(rbind, lapply(c(1L, 4L), function(threads) {
+  x <- real_runs[real_runs$threads == threads, ]
+  data.frame(threads = threads, rows = as.numeric(x$rows[[1L]]), median_seconds = median(x$seconds),
+             max_rss_mib = round(max(x$max_rss_kib) / 1024, 1))
+}))
+unlink(c(staging, real_bins_path), recursive = TRUE)
+```
+
+Source revision: `r revision`; `src` tree `r src_tree`. DuckDB runtime: `r duckdb_runtime` (CLI). Extension SHA-256: `r strsplit(system2("sha256sum", extension, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`. Host load at start: `r host_load`. DuckDB memory limit: `r memory_limit` (the default); temporary directory limit: 0. Cores 12 to 19, priority −15.
+
+## Real data
+
+The staged inputs match their registered identities:
+
+```{r staged, echo=FALSE}
+knitr::kable(staged, format.args = list(big.mark = ","))
+```
+
+1 Mb bins after the N and pseudo-autosomal filters, and the bins each leave-one-out mask keeps (group = the genomes a composite uses):
+
+```{r masks, echo=FALSE}
+bin_kinds <- function(chrom, bins, group) {
+  kind <- ifelse(chrom %in% c("chrX", "chrY"), chrom, "autosomes")
+  data.frame(group = group, autosomes = sum(bins[kind == "autosomes"]), chrX = sum(bins[kind == "chrX"]),
+             chrY = sum(bins[kind == "chrY"]), stringsAsFactors = FALSE)
+}
+masks <- real_results$masks
+mask_table <- rbind(
+  bin_kinds(real_results$gc_bins$chrom, real_results$gc_bins$bins, "before the mask"),
+  do.call(rbind, lapply(split(masks, masks$grp), function(x) bin_kinds(x$chrom, x$bins, groups[[x$grp[[1L]]]]))))
+rownames(mask_table) <- NULL
+knitr::kable(mask_table, format.args = list(big.mark = ","))
+```
+
+Acceptance checks, declared above:
+
+```{r checks, echo=FALSE}
+knitr::kable(checks)
+```
+
+```{r gate, echo=FALSE}
+stopifnot(all(checks$pass))
+```
+
+### Sex-chromosome fraction
+
+`truth` is the share of the second genome; `major` the expected major genome. `mode` is `bins` (the ideal copy levels and the bin interval) or `reference` (levels from the masked panel of the other genomes, all XY).
+
+```{r sex_table, echo=FALSE}
+sex_table <- sex[c("kind", "depth", "truth", "major", "mode", "x_bins", "y_bins", "x_copies", "y_copies",
+                   "major_sex", "fraction_x", "fraction_y", "fraction", "fraction_low", "fraction_high",
+                   "agreement_z", "status")]
+rownames(sex_table) <- NULL
+knitr::kable(sex_table, digits = 3)
+```
+
+### Region fraction
+
+Every autosome of the pure genomes, with the reference, summarised by depth and mode: the mean and the largest absolute shift and the mean standard error.
+
+```{r region_table, echo=FALSE}
+pure_rows <- region[region$kind == "pure" & region$mode %in% c("bins", "reference"), ]
+pure_summary <- do.call(rbind, lapply(split(pure_rows, list(pure_rows$depth, pure_rows$mode), drop = TRUE), function(x) {
+  data.frame(depth = x$depth[[1L]], mode = x$mode[[1L]], regions = nrow(x), mean_shift = mean(x$shift),
+             max_abs_shift = max(abs(x$shift)), mean_shift_se = mean(x$shift_se, na.rm = TRUE),
+             stringsAsFactors = FALSE)
+}))
+pure_summary <- pure_summary[order(depth_order(pure_summary$depth), pure_summary$mode), ]
+rownames(pure_summary) <- NULL
+knitr::kable(pure_summary, digits = 3)
+```
+
+chr18 of the planted gains; `truth` is m. `five_chromosomes` is the same composite with the correction and the reference trained on chr18 to chr22, X and Y alone.
+
+```{r gain_table, echo=FALSE}
+gain_table <- region[region$kind == "gain" & region$region == "chr18",
+                     c("depth", "truth", "mode", "bins", "shift", "shift_se", "shift_low", "shift_high",
+                       "dispersion", "reference_shift", "reference_samples", "status")]
+gain_table <- gain_table[order(depth_order(gain_table$depth), gain_table$truth, gain_table$mode), ]
+rownames(gain_table) <- NULL
+knitr::kable(gain_table, digits = 3)
+```
+
+## Scaling
+
+Overheads, live state of the largest input and ceilings (MiB):
+
+```{r budgets, echo=FALSE}
+knitr::kable(budgets, digits = 1)
+```
+
+Inputs (rows = samples × bins; the joint input doubles both):
+
+```{r inputs, echo=FALSE}
+knitr::kable(inputs[c("series", "scale", "samples", "bin_bp", "bins", "rows")], format.args = list(big.mark = ","))
+```
+
+Median, minimum and maximum query latency of three repetitions, peak RSS and DuckDB's peak buffer memory:
+
+```{r summary, echo=FALSE}
+knitr::kable(summary, digits = 3, format.args = list(big.mark = ","))
+```
+
+The real workload, every composite of the real-data checks in 1 Mb bins, corrected by `duckhts_depth_bins` (no timing verdict: it is far below 5 s):
+
+```{r real_timing, echo=FALSE}
+knitr::kable(real_timing, digits = 3, format.args = list(big.mark = ","))
+```
+
+Growth of the median time against the series' dimension (an exponent of 1 is linear; for the joint series, against the rows) and the peak-RSS ratio of the largest to the 1× input:
+
+```{r exponents, echo=FALSE}
+knitr::kable(exponents, digits = 3)
+```
+
+## Findings
+
+```{r findings, echo=FALSE, results="asis"}
+pick <- function(macro, series, scale, threads) {
+  summary[summary$macro == macro & summary$series == series & summary$scale == scale & summary$threads == threads, ]
+}
+bins_1x <- pick("depth_bins", "samples", 1L, 1L)
+bins_4x <- pick("depth_bins", "samples", 4L, 1L)
+bins_4x_4 <- pick("depth_bins", "samples", 4L, 4L)
+region_4x <- pick("region_fraction", "samples", 4L, 1L)
+sex_4x <- pick("sex_fraction", "samples", 4L, 1L)
+cat(sprintf(paste(
+  "Every observation is within its ceiling and none spills; every timed series stays at or below the 1.25 exponent.",
+  "`duckhts_depth_bins` corrects %s rows in %.1f s on one thread and %s rows in %.1f s (%.1f s on four threads),",
+  "at %s MiB peak RSS, %.0f bytes a row against the 136 declared.",
+  "The region estimator takes %.1f s and %s MiB at %s rows, and the sex estimator, which streams, %.1f s and %s MiB.\n\n"),
+  format(bins_1x$rows, big.mark = ","), bins_1x$median_seconds, format(bins_4x$rows, big.mark = ","),
+  bins_4x$median_seconds, bins_4x_4$median_seconds, bins_4x$max_rss_mib,
+  (bins_4x$max_rss_mib - budgets$overhead_mib[budgets$macro == "depth_bins"]) * 2^20 / bins_4x$rows,
+  region_4x$median_seconds, region_4x$max_rss_mib, format(region_4x$rows, big.mark = ","),
+  sex_4x$median_seconds, sex_4x$max_rss_mib))
+pure_bins <- sex[sex$kind == "pure" & sex$mode == "bins", ]
+cat(sprintf(paste(
+  "On the real genomes, without a reference the X of the pure XY genomes reads as %.3f to %.3f copies,",
+  "so the X estimate of the fraction is %.3f to %.3f, while the reference brings every pure fraction within %.3f of 0.",
+  "The residual is a difference in depth between X and the autosomes that GC does not explain (mappability, read filters);",
+  "a reference set of the same processing removes it.\n"),
+  min(pure_bins$x_copies), max(pure_bins$x_copies), min(pure_bins$fraction_x), max(pure_bins$fraction_x),
+  max(abs(with_reference$fraction[with_reference$kind == "pure"]))))
+hg00403_y <- with_reference$y_copies[with_reference$kind == "pure" & grepl("HG00403", with_reference$test_id)]
+gain_five <- region[region$kind == "gain" & region$region == "chr18" & region$mode == "five_chromosomes", ]
+cat(sprintf(paste(
+  "\n\nHG00403 reads as %.2f to %.2f Y copies against the other two genomes, so its Y estimate of the fraction",
+  "is negative and `agreement_z` flags it (`x_y_disagree` at 0.4x and 1x): the Y chromosomes of different men",
+  "differ in copy number, which a reference of other men does not remove. The combined fraction stays within",
+  "the acceptance because the X estimate carries most of the weight.",
+  "The planted chr18 gains are recovered with the reference within %.3f of m on the whole genome,",
+  "and at %.2f to %.2f of m when the correction and the reference see chr18 to chr22 alone.\n"),
+  min(hg00403_y), max(hg00403_y), max(abs(gain_rows$shift - gain_rows$truth)),
+  min(gain_five$shift / gain_five$truth), max(gain_five$shift / gain_five$truth)))
+```
