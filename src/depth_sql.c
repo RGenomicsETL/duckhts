@@ -6,9 +6,12 @@
  * a one-copy change of a region, and the share of a second genome of the
  * other sex. Each estimator has an overload with a reference set.
  *
- * All three are SQL over caller-named relations. The holistic aggregates
- * (median, quantile) hold one value per autosomal bin and sample; every other
- * state is a few sums per sample, per sample and region, or per GC stratum.
+ * All three are SQL over caller-named relations. duckhts_depth_bins
+ * materializes its input once and its holistic aggregates (median, quantile)
+ * hold one value per autosomal bin and sample. The region estimator
+ * materializes the narrow input columns once; the sex estimator streams its
+ * input. Every other state is a few sums per sample, per sample and region,
+ * or per GC stratum.
  */
 #include "duckhts_registration.h"
 
@@ -104,7 +107,10 @@ static const char *const depth_bins_sql[] = {
     "count(*) AS stratum_bins FROM __dht_bins b JOIN __dht_limits l ON b.sample_id = l.sample_id "
     "WHERE b.reason IS NULL AND b.autosomal AND b.reads > 0 "
     "AND b.rate >= l.rate_low AND b.rate <= l.rate_high GROUP BY b.sample_id, b.gc_stratum), ",
-    "__dht_stratified AS (SELECT b.*, s.stratum_rate, coalesce(s.stratum_bins, 0) AS stratum_bins, "
+    /* Read twice, by the centre and by the output: joining the small strata
+     * table again costs less than a second copy of the bins. */
+    "__dht_stratified AS NOT MATERIALIZED (SELECT b.*, s.stratum_rate, "
+    "coalesce(s.stratum_bins, 0) AS stratum_bins, "
     "coalesce(b.reason, CASE WHEN coalesce(s.stratum_bins, 0) < min_stratum_bins "
     "THEN 'sparse_stratum' END) AS stratum_reason "
     "FROM __dht_bins b LEFT JOIN __dht_strata s "
@@ -141,44 +147,50 @@ static const char *const depth_bins_sql[] = {
     "CAST(\"end\" AS BIGINT) AS \"end\", CAST(reads AS DOUBLE) AS reads, " \
     "CAST(expected AS DOUBLE) AS expected, CAST(kept AS BOOLEAN) AS kept FROM query_table(" table ")"
 
-static const char region_kept[] =
-    "__dht_kept AS MATERIALIZED (SELECT role, "
+/* One materialized copy of the input's narrow columns: the per-sample sums
+ * and the bin-region join both read it. A NULL kept counts as not kept. */
+static const char region_rows[] =
+    "__dht_rows AS MATERIALIZED (SELECT role, "
     "CASE WHEN sample_id IS NULL THEN error('duckhts_depth_region_fraction: sample_id must not be NULL') "
-    "ELSE sample_id END AS sample_id, chrom, start, \"end\", "
-    "CASE WHEN NOT (reads >= 0 AND expected > 0 AND isfinite(expected)) THEN "
+    "ELSE sample_id END AS sample_id, chrom, start, \"end\", coalesce(kept, false) AS kept, "
+    "CASE WHEN kept AND NOT (reads >= 0 AND expected > 0 AND isfinite(expected)) THEN "
     "error('duckhts_depth_region_fraction: kept bins need reads >= 0 and a finite expected > 0') "
     "ELSE reads END AS reads, expected, " DEPTH_AUTOSOMAL("chrom") " AS autosomal, "
-    "(start + \"end\") / 2.0 AS midpoint FROM __dht_input WHERE kept), "
+    "(start + \"end\") / 2.0 AS midpoint FROM __dht_input), "
     /* Sums over each sample's kept autosomal bins; a sample with no kept bin
      * keeps a row of zeros. */
-    "__dht_samples AS (SELECT role, sample_id, count(*) FILTER (WHERE autosomal) AS n_a, "
-    "coalesce(sum(reads) FILTER (WHERE autosomal), 0) AS c_a, "
-    "coalesce(sum(expected) FILTER (WHERE autosomal), 0) AS e_a, "
-    "coalesce(sum(reads * reads / expected) FILTER (WHERE autosomal), 0) AS q_a "
-    "FROM __dht_kept GROUP BY role, sample_id "
-    "UNION ALL SELECT role, sample_id, 0, 0, 0, 0 FROM __dht_input GROUP BY role, sample_id "
-    "HAVING count(*) FILTER (WHERE kept) = 0), ";
+    "__dht_samples AS (SELECT role, sample_id, count(*) FILTER (WHERE kept AND autosomal) AS n_a, "
+    "coalesce(sum(reads) FILTER (WHERE kept AND autosomal), 0) AS c_a, "
+    "coalesce(sum(expected) FILTER (WHERE kept AND autosomal), 0) AS e_a, "
+    "coalesce(sum(reads * reads / expected) FILTER (WHERE kept AND autosomal), 0) AS q_a "
+    "FROM __dht_rows GROUP BY role, sample_id), ";
 
+/* The intervals of a region are merged first, so that a bin whose midpoint
+ * lies in two overlapping intervals of one region joins it once. */
 static const char region_members[] =
-    "__dht_regions AS MATERIALIZED (SELECT "
+    "__dht_region_rows AS (SELECT "
     "CASE WHEN region IS NULL THEN error('duckhts_depth_region_fraction: region must not be NULL') "
     "ELSE CAST(region AS VARCHAR) END AS region, CAST(chrom AS VARCHAR) AS chrom, "
     "CASE WHEN start IS NULL OR \"end\" IS NULL OR start < 0 OR \"end\" <= start THEN "
     "error('duckhts_depth_region_fraction: regions need 0 <= start < end') "
     "ELSE CAST(start AS BIGINT) END AS start, CAST(\"end\" AS BIGINT) AS \"end\" "
     "FROM query_table(regions_table)), "
+    "__dht_region_pieces AS (SELECT *, sum(CASE WHEN start <= reached THEN 0 ELSE 1 END) OVER ("
+    "PARTITION BY region, chrom ORDER BY start, \"end\" ROWS UNBOUNDED PRECEDING) AS piece FROM ("
+    "SELECT *, max(\"end\") OVER (PARTITION BY region, chrom ORDER BY start, \"end\" "
+    "ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS reached FROM __dht_region_rows)), "
+    "__dht_regions AS MATERIALIZED (SELECT region, chrom, min(start) AS start, max(\"end\") AS \"end\" "
+    "FROM __dht_region_pieces GROUP BY region, chrom, piece), "
     /* A bin belongs to a region when its midpoint lies in one of the region's
-     * intervals; DISTINCT counts it once when two intervals of one region
-     * overlap. */
-    "__dht_members AS (SELECT DISTINCT r.region, k.role, k.sample_id, k.chrom, k.start, k.\"end\", "
-    "k.reads, k.expected, k.autosomal FROM __dht_kept k JOIN __dht_regions r "
-    "ON k.chrom = r.chrom AND k.midpoint >= r.start AND k.midpoint < r.\"end\"), "
-    "__dht_region_sums AS (SELECT role, sample_id, region, count(*) AS n_r, sum(reads) AS c_r, "
-    "sum(expected) AS e_r, count(*) FILTER (WHERE autosomal) AS n_ra, "
-    "coalesce(sum(reads) FILTER (WHERE autosomal), 0) AS c_ra, "
-    "coalesce(sum(expected) FILTER (WHERE autosomal), 0) AS e_ra, "
-    "coalesce(sum(reads * reads / expected) FILTER (WHERE autosomal), 0) AS q_ra "
-    "FROM __dht_members GROUP BY role, sample_id, region), ";
+     * intervals. */
+    "__dht_region_sums AS (SELECT k.role, k.sample_id, r.region, count(*) AS n_r, "
+    "sum(k.reads) AS c_r, sum(k.expected) AS e_r, count(*) FILTER (WHERE k.autosomal) AS n_ra, "
+    "coalesce(sum(k.reads) FILTER (WHERE k.autosomal), 0) AS c_ra, "
+    "coalesce(sum(k.expected) FILTER (WHERE k.autosomal), 0) AS e_ra, "
+    "coalesce(sum(k.reads * k.reads / k.expected) FILTER (WHERE k.autosomal), 0) AS q_ra "
+    "FROM __dht_rows k JOIN __dht_regions r "
+    "ON k.chrom = r.chrom AND k.midpoint >= r.start AND k.midpoint < r.\"end\" "
+    "WHERE k.kept GROUP BY k.role, k.sample_id, r.region), ";
 
 static const char region_estimate[] =
     /* The baseline of a region is the sample's kept autosomal bins outside it. */
@@ -247,14 +259,14 @@ static const char region_select_reference[] =
 static const char *const depth_region_sql[] = {
     "CREATE OR REPLACE MACRO duckhts_depth_region_fraction(bins_table, regions_table) AS TABLE ("
     "WITH __dht_input AS (" REGION_INPUT("sample", "bins_table") "), ",
-    region_kept,
+    region_rows,
     region_members,
     region_estimate,
     region_select_bins,
     "), (bins_table, regions_table, reference_table) AS TABLE ("
     "WITH __dht_input AS (" REGION_INPUT("sample", "bins_table") " UNION ALL "
     REGION_INPUT("reference", "reference_table") "), ",
-    region_kept,
+    region_rows,
     region_members,
     region_estimate,
     region_select_reference,
@@ -268,25 +280,30 @@ static const char *const depth_region_sql[] = {
     "CAST(chrom AS VARCHAR) AS chrom, CAST(reads AS DOUBLE) AS reads, " \
     "CAST(expected AS DOUBLE) AS expected, CAST(kept AS BOOLEAN) AS kept FROM query_table(" table ")"
 
+/* One pass over the input: each sample's sums of kept autosomal, X and Y
+ * bins. A NULL kept counts as not kept. */
 static const char sex_copies[] =
-    "__dht_kept AS (SELECT role, CASE WHEN sample_id IS NULL THEN "
+    "__dht_rows AS (SELECT role, CASE WHEN sample_id IS NULL THEN "
     "error('duckhts_depth_sex_fraction: sample_id must not be NULL') ELSE sample_id END AS sample_id, "
-    "sex, CASE WHEN NOT (reads >= 0 AND expected > 0 AND isfinite(expected)) THEN "
+    "sex, coalesce(kept, false) AS kept, CASE WHEN kept AND NOT (reads >= 0 AND expected > 0 "
+    "AND isfinite(expected)) THEN "
     "error('duckhts_depth_sex_fraction: kept bins need reads >= 0 and a finite expected > 0') "
     "ELSE reads END AS reads, expected, "
     "CASE duckhts_contig_key(chrom) WHEN 'X' THEN 'X' WHEN 'Y' THEN 'Y' WHEN 'MT' THEN NULL "
-    "ELSE 'A' END AS kind FROM __dht_input WHERE kept), "
+    "ELSE 'A' END AS kind FROM __dht_input), "
     "__dht_sums AS (SELECT role, sample_id, CASE WHEN min(sex) IS DISTINCT FROM max(sex) THEN "
     "error('duckhts_depth_sex_fraction: a reference sample must have one sex') ELSE min(sex) END AS sex, "
-    "count(*) FILTER (WHERE kind = 'A') AS n_a, sum(reads) FILTER (WHERE kind = 'A') AS c_a, "
-    "sum(expected) FILTER (WHERE kind = 'A') AS e_a, "
-    "sum(reads * reads / expected) FILTER (WHERE kind = 'A') AS q_a, "
-    "count(*) FILTER (WHERE kind = 'X') AS n_x, sum(reads) FILTER (WHERE kind = 'X') AS c_x, "
-    "sum(expected) FILTER (WHERE kind = 'X') AS e_x, "
-    "count(*) FILTER (WHERE kind = 'Y') AS n_y, sum(reads) FILTER (WHERE kind = 'Y') AS c_y, "
-    "sum(expected) FILTER (WHERE kind = 'Y') AS e_y FROM __dht_kept GROUP BY role, sample_id "
-    "UNION ALL SELECT role, sample_id, min(sex), 0, NULL, NULL, NULL, 0, NULL, NULL, 0, NULL, NULL "
-    "FROM __dht_input GROUP BY role, sample_id HAVING count(*) FILTER (WHERE kept) = 0), "
+    "count(*) FILTER (WHERE kept AND kind = 'A') AS n_a, "
+    "sum(reads) FILTER (WHERE kept AND kind = 'A') AS c_a, "
+    "sum(expected) FILTER (WHERE kept AND kind = 'A') AS e_a, "
+    "sum(reads * reads / expected) FILTER (WHERE kept AND kind = 'A') AS q_a, "
+    "count(*) FILTER (WHERE kept AND kind = 'X') AS n_x, "
+    "sum(reads) FILTER (WHERE kept AND kind = 'X') AS c_x, "
+    "sum(expected) FILTER (WHERE kept AND kind = 'X') AS e_x, "
+    "count(*) FILTER (WHERE kept AND kind = 'Y') AS n_y, "
+    "sum(reads) FILTER (WHERE kept AND kind = 'Y') AS c_y, "
+    "sum(expected) FILTER (WHERE kept AND kind = 'Y') AS e_y "
+    "FROM __dht_rows GROUP BY role, sample_id), "
     /* Dispersion and depth of the autosomal bins, as in the region estimator. */
     "__dht_dispersion AS (SELECT *, CASE WHEN n_a >= 2 AND c_a > 0 THEN "
     "greatest(1.0, ((e_a / c_a) * q_a - c_a) / (n_a - 1)) END AS dispersion, "

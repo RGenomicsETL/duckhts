@@ -2376,7 +2376,7 @@ bins_table is a caller-named table or view with one row per sample and bin: samp
 
 ### Model
 
-A bin's read rate is reads / (end - start). Its GC stratum is floor(gc / gc_step). The training bins of a sample are its autosomal bins that pass the bin rules, have at least one read and a read rate inside the outlier_quantile and 1 - outlier_quantile quantiles of those bins' rates. expected is the bin's length times the median rate of the training bins of its sample and stratum, scaled so that the median ratio of the sample's kept autosomal bins is 1. ratio = reads / expected is then about 1 for two copies, 0.5 for one and 1.5 for three; log2_ratio is NULL for a bin without reads. Autosomal means a contig whose duckhts_contig_key is not X, Y or MT.
+A bin's read rate is reads / (end - start). Its GC stratum is floor(gc / gc_step). The training bins of a sample are its autosomal bins that pass the bin rules, have at least one read and a read rate inside the outlier_quantile and 1 - outlier_quantile quantiles of those bins' rates. expected is the bin's length times the median rate of the training bins of its sample and stratum, scaled so that the median ratio of the sample's kept autosomal bins is 1. ratio = reads / expected is then about 1 for two copies, 0.5 for one and 1.5 for three; log2_ratio is NULL for a bin without reads. Autosomal means a contig whose duckhts_contig_key is not X, Y or MT. The strata are fitted on the sample's own autosomal bins, so a change that holds a large share of the training bins of some GC strata is partly absorbed by the correction: correct a whole genome rather than a few chromosomes (on five chromosomes, a planted chr18 gain was recovered at about 0.6 of its size; benchmarks/benchmark_depth_fraction.md), or give the estimators expected counts from a reference panel instead.
 
 ### Kept bins
 
@@ -2403,7 +2403,7 @@ Estimate the share of cells with a one-copy gain or loss of each named region fr
 Signature:
 
 ```sql
-duckhts_depth_region_fraction(bins_table, regions_table[, reference_table])
+duckhts_depth_region_fraction(bins_table, regions_table, reference_table)
 ```
 
 Returns:
@@ -2414,7 +2414,7 @@ table(sample_id VARCHAR, region VARCHAR, bins BIGINT, baseline_bins BIGINT, rati
 
 ### Input
 
-bins_table holds corrected bins, such as the output of duckhts_depth_bins: sample_id, chrom, start, end, reads, expected and kept. Only kept bins are used; a kept bin needs reads >= 0 and a finite expected > 0. regions_table has region, chrom, start and end (zero-based, half-open); several rows with one region name form one region. A bin belongs to a region when its midpoint lies in one of the region's intervals, and counts once. Contig names are compared byte for byte.
+reference_table is optional: the overload without it gives the interval from the bins. bins_table holds corrected bins, such as the output of duckhts_depth_bins: sample_id, chrom, start, end, reads, expected and kept. Only kept bins are used; a kept bin needs reads >= 0 and a finite expected > 0. regions_table has region, chrom, start and end (zero-based, half-open); several rows with one region name form one region, and its overlapping or abutting intervals are merged. A bin belongs to a region when its midpoint lies in one of the region's intervals. A NULL kept counts as not kept. Contig names are compared byte for byte.
 
 ### Estimator
 
@@ -2434,7 +2434,7 @@ One row per sample of bins_table and region. status is ok, no_bins (no kept bin 
 
 ### Limits
 
-The bin-region join has one candidate pair per kept bin and region interval on the same contig; the state per sample and region is a few sums. Depth does not see copy-neutral changes, and a constitutional copy-number variant looks like a change in every cell.
+The narrow input columns (sample, contig, coordinates, reads, expected, kept) are materialized once, in DuckDB's buffer manager; the per-sample sums and the bin-region join read that copy. The join matches each kept bin to the merged intervals of its contig and keeps the pairs whose interval holds the bin's midpoint; the state per sample and region is a few sums, and the output has one row per sample and region. Depth does not see copy-neutral changes, and a constitutional copy-number variant looks like a change in every cell.
 
 ### Examples
 
@@ -2453,7 +2453,7 @@ Estimate the share of a second genome of the other sex from the depth of X and Y
 Signature:
 
 ```sql
-duckhts_depth_sex_fraction(bins_table[, reference_table])
+duckhts_depth_sex_fraction(bins_table, reference_table)
 ```
 
 Returns:
@@ -2464,7 +2464,7 @@ table(sample_id VARCHAR, autosomal_bins BIGINT, x_bins BIGINT, y_bins BIGINT, di
 
 ### Input
 
-bins_table holds corrected bins as for duckhts_depth_region_fraction. X, Y and MT are the contigs whose duckhts_contig_key is X, Y or MT; every other contig is autosomal. Remove the pseudo-autosomal regions of X, and any Y bins that are not single-copy in an XY genome, in SQL first: they are not one X or one Y copy.
+reference_table is optional: the overload without it uses the ideal copy levels. bins_table holds corrected bins as for duckhts_depth_region_fraction. X, Y and MT are the contigs whose duckhts_contig_key is X, Y or MT; every other contig is autosomal. Remove the pseudo-autosomal regions of X, and any Y bins that are not single-copy in an XY genome, in SQL first: they are not one X or one Y copy. A NULL kept counts as not kept.
 
 ### Model
 
@@ -2484,7 +2484,7 @@ One row per sample of bins_table. status is ok, no_autosomal_bins, no_xy_referen
 
 ### Limits
 
-A few sums per sample. The estimate is evidence of X and Y dosage, not a determination of sex.
+One pass over the input into a few sums per sample. The estimate is evidence of X and Y dosage, not a determination of sex.
 
 ### Examples
 

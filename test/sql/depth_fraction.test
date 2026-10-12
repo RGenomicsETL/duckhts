@@ -350,6 +350,22 @@ WHERE a.region = '8' AND a.sample_id = 'gain8_10';
 ----
 gain8_10	true	true	no_bins
 
+# A NULL kept counts as not kept, in both estimators.
+statement ok
+CREATE TEMP VIEW depth_null_kept AS
+SELECT * REPLACE (CASE WHEN chrom IN ('8', 'Y') THEN NULL ELSE kept END AS kept) FROM depth_tests;
+
+query II
+SELECT bins, status FROM duckhts_depth_region_fraction('depth_null_kept', 'depth_chromosomes')
+WHERE sample_id = 'xx' AND region = '8';
+----
+0	no_bins
+
+query II
+SELECT y_bins, status FROM duckhts_depth_sex_fraction('depth_null_kept') WHERE sample_id = 'xx';
+----
+0	no_y_bins
+
 # Without a reference the interval is the estimate +- 1.959964 standard errors. With a reference
 # the tested sample is left out of its own reference, and the interval uses the t quantile with one
 # degree of freedom fewer than the reference samples: 4.302653 for three.

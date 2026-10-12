@@ -68,7 +68,10 @@ at the sample's typical autosomal depth, about 0.5 for one copy and 1.5 for thre
   (centromeres, gaps, pseudo-autosomal regions on X where that matters) with SQL first.
 
 Mappability only filters bins; it is not a second correction. Bins are not normalised
-against a reference set here.
+against a reference set here. Because the strata are fitted on the sample itself, a change
+that holds a large share of some strata's training bins is partly absorbed: correct a whole
+genome, or give the estimators `expected` counts from a reference panel, which they accept
+from any source.
 
 ### `duckhts_depth_region_fraction(bins_table, regions_table[, reference_table])`
 
@@ -119,12 +122,13 @@ reference.
 
 ## Bounds
 
-- Corrected bins: the quantile and median aggregates hold one value per autosomal bin and
-  sample; the output has one row per input row. Joins build on samples x GC strata and on
-  samples.
-- Region fraction: the bin-region join has one candidate per bin and region on the same
-  contig; the state per sample and region is a few sums.
-- Sex fraction: a few sums per sample.
+- Corrected bins: the input is materialized once, and the quantile and median aggregates
+  hold one value per autosomal bin and sample; the output has one row per input row. Joins
+  build on samples x GC strata and on samples.
+- Region fraction: the narrow input columns are materialized once. A region's intervals
+  are merged, and the join matches each kept bin to the merged intervals of its contig;
+  the state per sample and region is a few sums.
+- Sex fraction: one pass over the input into a few sums per sample.
 
 ## Phase 2 contract: the state model
 
