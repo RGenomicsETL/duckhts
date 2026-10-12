@@ -46,7 +46,7 @@ source composes: `bam_bin_counts`, `fasta_nuc` for GC, `read_bigwig` for mappabi
 ### `duckhts_depth_bins(bins_table, ...)`: corrected bins
 
 Input: one row for each sample and bin with `sample_id`, `chrom`, `start`, `end`
-(zero-based, half-open), `count` (reads in the bin) and `gc` (G+C share of the A/C/G/T
+(zero-based, half-open), `reads` (reads in the bin) and `gc` (G+C share of the A/C/G/T
 reference bases of the bin, from 0 to 1). An optional `mappability` column (0 to 1) is
 used when present.
 
@@ -75,7 +75,7 @@ from any source.
 
 ### `duckhts_depth_region_fraction(bins_table, regions_table[, reference_table])`
 
-`bins_table` is corrected bins: `sample_id`, `chrom`, `start`, `end`, `count`,
+`bins_table` is corrected bins: `sample_id`, `chrom`, `start`, `end`, `reads`,
 `expected`, `kept`. `regions_table` has `region`, `chrom`, `start`, `end`; several rows
 with one name form one region, and a bin belongs to a region when its midpoint lies in
 one of the region's intervals.
