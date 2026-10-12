@@ -1322,7 +1322,7 @@ hw_to_az and az_to_hw are the per-base-pair transition probabilities (bcftools -
 
 ### Memory
 
-DuckDB manages, and can spill, the scan and the joins. The sites of each sample and chromosome are held in native buffers of 16 bytes per site until that sample and chromosome is decoded, so memory follows samples times sites. max_sites caps one sample and chromosome (default 20,000,000; at most 100,000,000). max_site_bytes (default 4 GiB) bounds the buffers held at once: a decode does not grow a buffer when the bytes held by all ROH decodes in the process would pass its own max_site_bytes. Decodes that run at the same time with different values each apply their own, so the process total can pass the smaller value while the decode with the larger value allocates. Exceeding either limit is an error: decode fewer samples per query with samples, or raise the limit. Decoding one sample and chromosome also needs 38 bytes per site of workspace in each thread. Model parameters and limits are checked even when the input has no record.
+DuckDB manages, and can spill, the scan and the joins. The sites of each sample and chromosome are held in native buffers of 16 bytes per site until that sample and chromosome is decoded, so memory follows samples times sites. max_sites caps one sample and chromosome (default 20,000,000; at most 100,000,000). max_site_bytes (default 4 GiB) bounds the buffers held at once: a decode does not grow a buffer when the bytes held by all ROH decodes in the process would pass its own max_site_bytes. Decodes that run at the same time with different values each apply their own, so the process total can pass the smaller value while the decode with the larger value allocates. Exceeding either limit is an error: decode fewer samples per query with samples, or raise the limit. Decoding one sample and chromosome also needs approximately 36.25 bytes per site of workspace in each thread: 4 bytes for position, 16 for emissions, 16 for forward/posterior probabilities and two traceback bits. For capacity n, these arrays use 36*n + ceil(n/4) + 16 bytes, excluding fixed tables and output segments. Model parameters and limits are checked even when the input has no record.
 
 ### Limits
 
@@ -1430,6 +1430,10 @@ table(sample VARCHAR, chrom VARCHAR, start BIGINT, "end" BIGINT, length BIGINT, 
 
 counts_table is a table or view with sample_id, chrom, pos (one-based), ref_count, alt_count and af, one row per sample and site. alt_count counts reads showing the allele whose population frequency is af; ref_count counts reads showing the other allele. Any frequency source composes in SQL first: an INFO tag, a frequency table or ancestry-weighted frequencies. Somalier site counts map as ref_count = a, alt_count = b and af = frequency of allele_b.
 
+### Fitted parameters
+
+Use duckhts_roh_counts_fitted(counts_table, fit_table, ...) to supply one seq_error and contamination per sample from a caller-named relation; in R, pass fit_table to rduckhts_roh_counts.
+
 ### Read model
 
 Each read shows the counted allele with probability (1 - contamination) * q + contamination * c, where q is seq_error, 1/2 or 1 - seq_error for zero, one or two copies, and c = af * (1 - seq_error) + (1 - af) * seq_error is the chance that a read from a contaminating individual of the same population shows it. Reads are independent and the binomial coefficient is omitted. The resulting genotype likelihoods enter the bcftools roh model in place of PL. This emission is a DuckHTS extension; bcftools roh has no read-count mode.
@@ -1458,6 +1462,36 @@ The chrom of genetic_map is compared byte for byte with the contig names of the 
 
 ```sql
 SELECT * FROM duckhts_roh_counts('site_counts', contamination := 0.02) ORDER BY sample, chrom, start;
+```
+
+## duckhts_roh_counts_fitted
+
+Find runs of homozygosity from allele read counts using per-sample fitted error and contamination.
+
+Signature:
+
+```sql
+duckhts_roh_counts_fitted(counts_table, fit_table, genetic_map, hw_to_az := 6.7e-8, az_to_hw := 5e-9, rec_rate := NULL, max_sites := 20000000, max_site_bytes := 4294967296)
+```
+
+Returns:
+
+```
+table(sample VARCHAR, chrom VARCHAR, start BIGINT, "end" BIGINT, length BIGINT, n_markers INTEGER, quality DOUBLE)
+```
+
+### Fit relation
+
+fit_table is a caller-named table or view with one row per sample and columns sample, seq_error and contamination, such as the output of duckhts_count_error_fit. sample joins to counts_table.sample_id, with a NULL sample matching a NULL sample_id as in duckhts_roh_counts and duckhts_count_error_fit. For each sample of counts_table, a missing fit row, a NULL parameter or more than one fit row is an explicit error naming the sample and problem, whatever DuckDB's scalar_subquery_error_on_multiple_rows setting. Fit rows of samples that counts_table does not hold are not checked, so empty counts give no rows; the other arguments are still checked. seq_error must be finite and in (0, 0.5); contamination must be finite and in [0, 1), as for the scalar arguments of duckhts_roh_counts. Fit status filtering belongs in the caller's SQL. Spreads and artefact weight are not used.
+
+### Decode
+
+Counts, emissions, outputs, transitions, optional genetic_map and memory limits are identical to duckhts_roh_counts. Only seq_error and contamination vary by sample. In R, pass fit_table to rduckhts_roh_counts; its scalar seq_error and contamination arguments are unused.
+
+### Examples
+
+```sql
+SELECT * FROM duckhts_roh_counts_fitted('site_counts', 'sample_fits') ORDER BY sample, chrom, start;
 ```
 
 ## duckhts_count_error_fit
@@ -1902,6 +1936,10 @@ Returns:
 table
 ```
 
+### Missing keys
+
+A requested key absent from every feature yields NULL on every row, exactly as attributes_map[key] does. GFF declares no attribute vocabulary, so binding does not scan the file to validate key presence; that would require a full extra pass. Assert presence with an aggregate, for example: SELECT CASE WHEN count(ID) > 0 THEN true ELSE error('ID is all NULL') END FROM read_gff('annotations.gff', attributes := ['ID']);
+
 ### Attributes
 
 attributes := ['Parent', 'ID'] appends VARCHAR columns named for the requested keys. Each value equals attributes_map[key], including NULL for absent keys; repeated keys use the first value and GFF3 percent encoding is retained. Key lookup is case-sensitive, as GFF3 tags are: attributes := ['id'] on a file that uses ID returns a column of NULLs. Keys must be nonempty and distinct from fixed and optional attribute column names; because column names ignore case, two keys that differ only in case are rejected. Only projected keys are parsed during scanning.
@@ -1931,6 +1969,10 @@ Returns:
 ```
 table
 ```
+
+### Missing keys
+
+A requested key absent from every feature yields NULL on every row, exactly as attributes_map[key] does. GTF declares no attribute vocabulary, so binding does not scan the file to validate key presence; that would require a full extra pass. Assert presence with an aggregate, for example: SELECT CASE WHEN count(gene_id) > 0 THEN true ELSE error('gene_id is all NULL') END FROM read_gtf('annotations.gtf', attributes := ['gene_id']);
 
 ### Attributes
 
@@ -1969,6 +2011,10 @@ seqname is VERSION, else ACCESSION, else the LOCUS name; a segment on a remote a
 ### Attributes
 
 Synthesized GFF3 keys ID, Name and Parent accompany the original qualifiers. ID is gene-<locus_tag> for genes and <key>-<n> otherwise, with n the feature's 0-based position in the file. Parent links a feature to the gene sharing its /locus_tag (or /gene) anywhere in the record. Repeated qualifiers become one key with comma-joined values, valueless qualifiers read 'true', and ; = & , % are percent-encoded. attributes_map := TRUE adds the same pairs as a MAP.
+
+### Missing keys
+
+A requested key absent from every feature yields NULL on every row, exactly as attributes_map[key] does. GenBank declares no qualifier vocabulary, so binding does not scan the file to validate key presence; that would require a full extra pass. Assert presence with an aggregate, for example: SELECT CASE WHEN count(product) > 0 THEN true ELSE error('product is all NULL') END FROM read_genbank('phix174.gb', attributes := ['product']);
 
 ### Named attributes
 
@@ -2228,11 +2274,11 @@ One row for each combination that occurs: mate (1 or 2 for a paired read, 0 othe
 
 ### What is counted
 
-Every aligned base (CIGAR M, = or X) of a kept alignment whose read base and reference base are both A, C, G or T. A base within indel_flank read bases of an insertion, a deletion, a reference skip or a soft clip is left out, because bases next to a gap are often misaligned. A region selects alignments by overlap; all aligned bases of a selected alignment are counted, also those outside the region.
+Every aligned base (CIGAR M, = or X) of a kept alignment whose read base and reference base are both A, C, G or T. A read base written as = (the SAM sign for the reference base) is the reference base. A base within indel_flank read bases of an insertion, a deletion, a reference skip or a soft clip is left out, because bases next to a gap are often misaligned. A region selects alignments by overlap; all aligned bases of a selected alignment are counted, also those outside the region.
 
 ### Mask
 
-mask is an indexed BCF or a bgzip-compressed VCF with a tabix index, for example known variants. Every reference position of a mask record is left out. A record with an indel or a symbolic allele also leaves out indel_flank bases on each side. The span of a record is the one htslib gives it, the same for a BCF and a VCF mask: the longest of REF, INFO/END, INFO/SVLEN of a deletion, duplication or copy-number allele, and FORMAT/LEN of a reference block. A VCF mask line is read up to INFO unless its FORMAT names LEN, so the sample columns of a population VCF cost nothing. The mask removes the variants it holds and no others: a variant of the sample that the mask does not hold, such as a private, de novo or somatic variant or an allele of a second genome, is still counted as a mismatch. So with a mask of known variants the mismatches that remain are mostly errors of the read, the library or the alignment, and their rate is an upper bound on the error rate; it is the error rate only when the mask holds every variant site of the genomes in the sample.
+mask is an indexed BCF or a bgzip-compressed VCF with a tabix index, for example known variants. Every reference position of a mask record is left out. A record with an indel or a symbolic allele also leaves out indel_flank bases on each side. The span of a record is the one htslib gives it, the same for a BCF and a VCF mask: the longest of REF, INFO/END, INFO/SVLEN of a deletion, duplication or copy-number allele, and FORMAT/LEN of a reference block. A VCF mask line is parsed up to INFO unless its FORMAT names LEN, so the genotypes of a population VCF are not parsed; each line is still decompressed and read whole into one buffer. The mask removes the variants it holds and no others: a variant of the sample that the mask does not hold, such as a private, de novo or somatic variant or an allele of a second genome, is still counted as a mismatch. So with a mask of known variants the mismatches that remain are mostly errors of the read, the library or the alignment, and their rate is an upper bound on the error rate; it is the error rate only when the mask holds every variant site of the genomes in the sample.
 
 ### Contig names
 
@@ -2240,7 +2286,7 @@ The contig names of the alignment header, the reference and the mask are compare
 
 ### Limits
 
-One worker. Memory is fixed: 36.5 MB of counters, one reference window of 1 MiB with its mask, and the alignment in hand, plus htslib's state for the file. For CRAM that includes the reference of the slice being decoded; a slice over a sparse region can span many megabases. A cycle above 1000 is counted as 1000 and a base quality above 93 as 93. The window moves along an alignment that reaches past it, so no alignment needs more reference in memory; an alignment with a reference skip of more than 1 MiB fetches a window on each side of the skip, and many such alignments are slow. Alignments are expected in coordinate order; an unsorted file is counted correctly but fetches a reference window for each alignment.
+One worker. Memory does not grow with the alignments read: 36.5 MB of counters, one reference window of 1 MiB with its mask, the alignment in hand and the longest mask line read, plus htslib's state for the file. For CRAM that includes the reference of the slice being decoded; a slice over a sparse region can span many megabases. A cycle above 1000 is counted as 1000 and a base quality above 93 as 93. The window moves along an alignment that reaches past it, so no alignment needs more reference in memory; an alignment with a reference skip of more than 1 MiB fetches a window on each side of the skip, and many such alignments are slow. Alignments are expected in coordinate order; an unsorted file is counted correctly but fetches a reference window for each alignment.
 
 ### Examples
 

@@ -16,7 +16,8 @@ rduckhts_roh_counts(
   table_name = NULL,
   overwrite = FALSE,
   max_sites = 2e+07,
-  max_site_bytes = 2^32
+  max_site_bytes = 2^32,
+  fit_table = NULL
 )
 }
 \arguments{
@@ -50,6 +51,13 @@ the bytes held by all ROH decodes in the process would pass its own
 `max_site_bytes`; decodes that run at the same time with different values
 each apply their own. Exceeding it is an error: decode fewer samples per
 call or raise it.}
+
+\item{fit_table}{Optional table or view with one row per `sample`, containing
+non-NULL `seq_error` and `contamination`. These replace the scalar arguments
+for each matching `sample_id`. A sample of `counts_table` with no fit row,
+several fit rows or a NULL value is an error; fit rows of other samples are
+not checked. Filter fit status in the caller's SQL; spreads and artefact
+weight are not used.}
 }
 \value{
 A data frame (or invisible `TRUE` when `table_name` is given) with

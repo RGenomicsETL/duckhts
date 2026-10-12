@@ -288,6 +288,20 @@ test_genbank_named_attributes <- function() {
   ))
   expect_equal(ncol(dbGetQuery(con, "SELECT * FROM phix_no_keys LIMIT 1")), 9L)
 
+  # Each segment of a joined location has the same named values as its map.
+  joined_path <- system.file("extdata", "genbank_phase.gb", package = "Rduckhts")
+  rduckhts_genbank(con, "joined", joined_path, attributes_map = TRUE,
+                  attributes = c("locus_tag", "codon_start", "missing"))
+  joined <- dbGetQuery(con, paste(
+    "SELECT count(*)::INTEGER AS rows, count(*) FILTER (WHERE codon_start IS NULL)::INTEGER AS absent,",
+    "count(*) FILTER (WHERE locus_tag IS DISTINCT FROM attributes_map['locus_tag']",
+    "OR codon_start IS DISTINCT FROM attributes_map['codon_start']",
+    "OR missing IS DISTINCT FROM attributes_map['missing'])::INTEGER AS mismatches FROM joined"
+  ))
+  expect_equal(joined$rows, 10L)
+  expect_equal(joined$absent, 4L)
+  expect_equal(joined$mismatches, 0L)
+
   expect_error(rduckhts_genbank(con, "bad", genbank_path, attributes = 1), "character vector")
   expect_error(rduckhts_genbank(con, "bad", genbank_path, attributes = NA_character_), "NA")
   expect_error(rduckhts_genbank(con, "bad", genbank_path, attributes = ""), "empty")

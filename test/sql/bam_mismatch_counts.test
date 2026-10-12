@@ -290,6 +290,94 @@ GROUP BY mask ORDER BY mask;
 bcf	106	5
 vcf	106	5
 
+# The same SVLEN record masks a window whose first base is its last (188), and
+# with the default flank one whose first base is the flank's last (193). Each
+# read is alone in its file, so the window starts at its one aligned base.
+# htslib's tabix ends the record one base short of its VCF span, so the VCF
+# query starts one base early. Without a mask each read gives its one base.
+statement ok
+COPY (SELECT unnest(['@HD' || chr(9) || 'VN:1.6' || chr(9) || 'SO:coordinate',
+                     '@SQ' || chr(9) || 'SN:ref1' || chr(9) || 'LN:260',
+                     '@SQ' || chr(9) || 'SN:ref2' || chr(9) || 'LN:80',
+                     concat_ws(chr(9), 'at188', '0', 'ref1', '188', '60', '1M', '*', '0', '0', 'G', 'I')]))
+TO '__WORKING_DIRECTORY__/test/tmp_mismatch_at188.sam' (FORMAT csv, HEADER false, QUOTE '', ESCAPE '', DELIMITER '|');
+
+statement ok
+COPY (SELECT unnest(['@HD' || chr(9) || 'VN:1.6' || chr(9) || 'SO:coordinate',
+                     '@SQ' || chr(9) || 'SN:ref1' || chr(9) || 'LN:260',
+                     '@SQ' || chr(9) || 'SN:ref2' || chr(9) || 'LN:80',
+                     concat_ws(chr(9), 'at193', '0', 'ref1', '193', '60', '1M', '*', '0', '0', 'T', 'I')]))
+TO '__WORKING_DIRECTORY__/test/tmp_mismatch_at193.sam' (FORMAT csv, HEADER false, QUOTE '', ESCAPE '', DELIMITER '|');
+
+statement ok
+CREATE TEMP MACRO mismatch_one_base(sam, mask_path, flank) AS TABLE
+SELECT coalesce(sum(bases), 0) AS bases
+FROM duckhts_bam_mismatch_counts(sam, '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa',
+                                 mask := mask_path, indel_flank := flank);
+
+query TTI
+SELECT 'at188', 'none', bases FROM mismatch_one_base('__WORKING_DIRECTORY__/test/tmp_mismatch_at188.sam', NULL, 0)
+UNION ALL
+SELECT 'at188', 'vcf', bases FROM mismatch_one_base('__WORKING_DIRECTORY__/test/tmp_mismatch_at188.sam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.svlen.vcf.gz', 0)
+UNION ALL
+SELECT 'at188', 'bcf', bases FROM mismatch_one_base('__WORKING_DIRECTORY__/test/tmp_mismatch_at188.sam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.svlen.bcf', 0)
+UNION ALL
+SELECT 'at193', 'none', bases FROM mismatch_one_base('__WORKING_DIRECTORY__/test/tmp_mismatch_at193.sam', NULL, 5)
+UNION ALL
+SELECT 'at193', 'vcf', bases FROM mismatch_one_base('__WORKING_DIRECTORY__/test/tmp_mismatch_at193.sam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.svlen.vcf.gz', 5)
+UNION ALL
+SELECT 'at193', 'bcf', bases FROM mismatch_one_base('__WORKING_DIRECTORY__/test/tmp_mismatch_at193.sam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.svlen.bcf', 5);
+----
+at188	none	1
+at188	vcf	0
+at188	bcf	0
+at193	none	1
+at193	vcf	0
+at193	bcf	0
+
+# The SAM base = is the reference base (samtools calmd -e writes it). The same two
+# reads, one forward and one reverse, each with one mismatch, written with literal
+# bases and with = give the same rows: 40 bases and 2 mismatches.
+statement ok
+COPY (SELECT unnest(['@HD' || chr(9) || 'VN:1.6' || chr(9) || 'SO:coordinate',
+                     '@SQ' || chr(9) || 'SN:ref1' || chr(9) || 'LN:260',
+                     '@SQ' || chr(9) || 'SN:ref2' || chr(9) || 'LN:80',
+                     concat_ws(chr(9), 'fwd', '0', 'ref1', '1', '60', '20M', '*', '0', '0',
+                               'TGGCCATGGCAATGGCAATG', repeat('I', 20)),
+                     concat_ws(chr(9), 'rev', '16', 'ref1', '41', '60', '20M', '*', '0', '0',
+                               'AAGGGCAATGGCAATGGCAA', repeat('5', 20))]))
+TO '__WORKING_DIRECTORY__/test/tmp_mismatch_literal.sam' (FORMAT csv, HEADER false, QUOTE '', ESCAPE '', DELIMITER '|');
+
+statement ok
+COPY (SELECT unnest(['@HD' || chr(9) || 'VN:1.6' || chr(9) || 'SO:coordinate',
+                     '@SQ' || chr(9) || 'SN:ref1' || chr(9) || 'LN:260',
+                     '@SQ' || chr(9) || 'SN:ref2' || chr(9) || 'LN:80',
+                     concat_ws(chr(9), 'fwd', '0', 'ref1', '1', '60', '20M', '*', '0', '0',
+                               '====C===============', repeat('I', 20)),
+                     concat_ws(chr(9), 'rev', '16', 'ref1', '41', '60', '20M', '*', '0', '0',
+                               '==G=================', repeat('5', 20))]))
+TO '__WORKING_DIRECTORY__/test/tmp_mismatch_equals.sam' (FORMAT csv, HEADER false, QUOTE '', ESCAPE '', DELIMITER '|');
+
+query IIII
+WITH literal AS (
+  SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/tmp_mismatch_literal.sam',
+    '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa')),
+equals AS (
+  SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/tmp_mismatch_equals.sam',
+    '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa'))
+SELECT (SELECT sum(bases) FROM equals),
+       (SELECT sum(bases) FILTER (WHERE reference_base != read_base) FROM equals),
+       (SELECT sum(bases) FILTER (WHERE reference_base != read_base AND base_quality = 20) FROM equals),
+       count(*)
+FROM ((SELECT * FROM literal EXCEPT ALL SELECT * FROM equals)
+      UNION ALL (SELECT * FROM equals EXCEPT ALL SELECT * FROM literal));
+----
+40	2	1	0
+
 # A reference block at 186 that states its span only in FORMAT/LEN (3), as a
 # gVCF does, masks 186-188 as a VCF and as a BCF: the VCF mask reads FORMAT
 # when it names LEN. The counts are those of the SVLEN record above.

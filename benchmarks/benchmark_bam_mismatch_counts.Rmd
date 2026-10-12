@@ -515,3 +515,34 @@ the panel's samples. So these mismatches are errors of the read, the library
 or the alignment, together with the variants of the sample that the panel
 does not hold. Their rate is an upper bound on the error rate, not the error
 rate.
+
+
+## Change from the previous render
+
+```{r previous, echo=FALSE}
+# The previous render of this report, read from git: the same driver, inputs and
+# host, pinned to the same cores. Since then a read base '=' counts as the reference base, and a VCF mask query starts one base earlier.
+previous_revision <- "66899c92"
+previous_text <- system2("git", c("show", paste0(previous_revision, ":benchmarks/benchmark_bam_mismatch_counts_runs.csv")),
+                         stdout = TRUE)
+stopifnot(is.null(attr(previous_text, "status")))
+cell_medians <- function(x) {
+  x$rss_mib <- x$max_rss_kib / 1024
+  aggregate(cbind(seconds, rss_mib) ~ series + scale + threads, x, median)
+}
+previous <- merge(cell_medians(utils::read.csv(text = previous_text, stringsAsFactors = FALSE)),
+                  cell_medians(runs), by = c("series", "scale", "threads"), suffixes = c("_before", "_after"))
+stopifnot(nrow(previous) > 0)
+previous$time_ratio <- previous$seconds_after / previous$seconds_before
+previous$rss_ratio <- previous$rss_mib_after / previous$rss_mib_before
+previous <- previous[do.call(base::order, previous[c("series", "scale", "threads")]), ]
+rownames(previous) <- NULL
+```
+
+The previous render, `r previous_revision`, measured the same cells with the
+same driver on the same host and cores. Host load differs between renders.
+Median of the repetitions:
+
+```{r previous_table, echo=FALSE}
+knitr::kable(previous, digits = 3)
+```

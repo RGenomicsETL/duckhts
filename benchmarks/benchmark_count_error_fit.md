@@ -80,9 +80,9 @@ which is the least that `STYLE.md` accepts for a timing verdict.
 taskset -c 8-15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_count_error_fit.Rmd")'
 ```
 
-Source revision: 10a3f79a8985ddf9251c4c350de27dc2b68a2ddc; `src` tree 2583c180efe532cb5e6dd7fce906dca3197cb01e. DuckDB runtime: v1.5.1 (Variegata) 7dbb2e646f (CLI). Extension SHA-256: e35c024e95604025e3e94ba4389803c62b6c574aec9fb04c57e77bfec381082c. Host load at start: 0.92, 0.34, 0.23. DuckDB memory limit: 50.0 GiB (the default); temporary directory limit: 0.
+Source revision: f6478e71f533937ea4736beba16949409b7c38f4; `src` tree b0474026510f692da693fe57fd8d1c56d79cd70b. DuckDB runtime: v1.5.1 (Variegata) 7dbb2e646f (CLI). Extension SHA-256: 5fd33730e8af91c365ac3dcf58091e3faf3b2d49c7849ef283a8db8450bf4bfe. Host load at start: 2.39, 4.96, 4.99. DuckDB memory limit: 50.0 GiB (the default); temporary directory limit: 0.
 
-Overhead: 38.3 MiB. Ceilings: real 152.4 MiB, samples 1342.1 MiB, sites 1189.7 MiB.
+Overhead: 38.5 MiB. Ceilings: real 152.5 MiB, samples 1342.3 MiB, sites 1189.9 MiB.
 
 ## Inputs
 
@@ -90,13 +90,13 @@ Overhead: 38.3 MiB. Ceilings: real 152.4 MiB, samples 1342.1 MiB, sites 1189.7 M
 
 | workload | scale | samples |     sites | rows_used |     cells |  pairs | budget_mib |
 |:---------|------:|--------:|----------:|----------:|----------:|-------:|-----------:|
-| sites    |     1 |       1 | 2,000,000 | 2,000,000 |   322,483 |    642 |    1,189.7 |
-| sites    |     2 |       1 | 4,000,000 | 4,000,000 |   644,876 |    649 |    1,189.7 |
-| sites    |     4 |       1 | 8,000,000 | 8,000,000 | 1,289,659 |    650 |    1,189.7 |
-| samples  |     1 |       8 |   250,000 | 2,000,000 |   363,259 |  4,878 |    1,342.1 |
-| samples  |     2 |      16 |   250,000 | 4,000,000 |   726,273 |  9,770 |    1,342.1 |
-| samples  |     4 |      32 |   250,000 | 8,000,000 | 1,452,666 | 19,553 |    1,342.1 |
-| real     |     1 |       3 |   108,738 |   326,214 |   126,676 |  3,124 |      152.4 |
+| sites    |     1 |       1 | 2,000,000 | 2,000,000 |   322,483 |    642 |    1,189.9 |
+| sites    |     2 |       1 | 4,000,000 | 4,000,000 |   644,876 |    649 |    1,189.9 |
+| sites    |     4 |       1 | 8,000,000 | 8,000,000 | 1,289,659 |    650 |    1,189.9 |
+| samples  |     1 |       8 |   250,000 | 2,000,000 |   363,259 |  4,878 |    1,342.3 |
+| samples  |     2 |      16 |   250,000 | 4,000,000 |   726,273 |  9,770 |    1,342.3 |
+| samples  |     4 |      32 |   250,000 | 8,000,000 | 1,452,666 | 19,553 |    1,342.3 |
+| real     |     1 |       3 |   108,738 |   326,214 |   126,676 |  3,124 |      152.5 |
 
 ## Measurements
 
@@ -104,35 +104,35 @@ Overhead: 38.3 MiB. Ceilings: real 152.4 MiB, samples 1342.1 MiB, sites 1189.7 M
 
 | workload | scale | threads | samples |      rows |     cells | mean_contamination | median_seconds | min_seconds | max_seconds | median_rss_mib | max_rss_mib | max_buffer_mib | budget_mib |
 |:---------|------:|--------:|--------:|----------:|----------:|-------------------:|---------------:|------------:|------------:|---------------:|------------:|---------------:|-----------:|
-| real     |     1 |       1 |       3 |   326,214 |   126,676 |               0.00 |          3.267 |       3.261 |       3.269 |           60.4 |        60.4 |           33.3 |      152.4 |
-| real     |     1 |       4 |       3 |   326,214 |   126,676 |               0.00 |          2.264 |       2.240 |       2.269 |           77.2 |        80.6 |           57.4 |      152.4 |
-| samples  |     1 |       1 |       8 | 2,000,000 |   363,259 |               0.02 |          8.596 |       8.539 |       8.618 |           91.4 |        91.7 |           78.2 |    1,342.1 |
-| samples  |     2 |       1 |      16 | 4,000,000 |   726,273 |               0.02 |         17.301 |      17.244 |      17.397 |          133.1 |       133.1 |          150.3 |    1,342.1 |
-| samples  |     4 |       1 |      32 | 8,000,000 | 1,452,666 |               0.02 |         34.681 |      34.579 |      34.682 |          224.2 |       224.2 |          297.9 |    1,342.1 |
-| samples  |     1 |       4 |       8 | 2,000,000 |   363,259 |               0.02 |          6.410 |       6.342 |       6.475 |          223.1 |       223.2 |          363.1 |    1,342.1 |
-| samples  |     2 |       4 |      16 | 4,000,000 |   726,273 |               0.02 |         11.272 |      11.174 |      11.994 |          401.1 |       405.1 |          730.4 |    1,342.1 |
-| samples  |     4 |       4 |      32 | 8,000,000 | 1,452,666 |               0.02 |         19.251 |      17.823 |      19.290 |          617.0 |       692.6 |        1,283.7 |    1,342.1 |
-| sites    |     1 |       1 |       1 | 2,000,000 |   322,483 |               0.02 |          8.185 |       8.171 |       8.202 |          100.0 |       100.1 |           77.7 |    1,189.7 |
-| sites    |     2 |       1 |       1 | 4,000,000 |   644,876 |               0.02 |         13.992 |      13.988 |      14.024 |          153.3 |       153.3 |          141.2 |    1,189.7 |
-| sites    |     4 |       1 |       1 | 8,000,000 | 1,289,659 |               0.02 |         26.689 |      26.611 |      26.747 |          259.8 |       259.9 |          283.2 |    1,189.7 |
-| sites    |     1 |       4 |       1 | 2,000,000 |   322,483 |               0.02 |          8.076 |       7.973 |       8.091 |          134.1 |       140.1 |          192.6 |    1,189.7 |
-| sites    |     2 |       4 |       1 | 4,000,000 |   644,876 |               0.02 |         13.867 |      13.794 |      13.868 |          233.5 |       245.6 |          354.6 |    1,189.7 |
-| sites    |     4 |       4 |       1 | 8,000,000 | 1,289,659 |               0.02 |         26.156 |      26.063 |      26.286 |          393.0 |       414.5 |          558.0 |    1,189.7 |
+| real     |     1 |       1 |       3 |   326,214 |   126,676 |               0.00 |          3.355 |       3.335 |       3.378 |           59.6 |        60.6 |           32.4 |      152.5 |
+| real     |     1 |       4 |       3 |   326,214 |   126,676 |               0.00 |          2.276 |       2.247 |       2.358 |           78.9 |        80.6 |           58.9 |      152.5 |
+| samples  |     1 |       1 |       8 | 2,000,000 |   363,259 |               0.02 |          9.418 |       9.404 |       9.528 |           91.9 |        92.1 |           78.2 |    1,342.3 |
+| samples  |     2 |       1 |      16 | 4,000,000 |   726,273 |               0.02 |         19.018 |      18.904 |      19.049 |          133.5 |       133.6 |          150.3 |    1,342.3 |
+| samples  |     4 |       1 |      32 | 8,000,000 | 1,452,666 |               0.02 |         37.994 |      37.733 |      38.765 |          224.7 |       224.7 |          298.0 |    1,342.3 |
+| samples  |     1 |       4 |       8 | 2,000,000 |   363,259 |               0.02 |          7.219 |       7.098 |       8.165 |          218.3 |       222.9 |          399.3 |    1,342.3 |
+| samples  |     2 |       4 |      16 | 4,000,000 |   726,273 |               0.02 |         10.267 |      10.258 |      13.095 |          400.0 |       402.4 |          730.5 |    1,342.3 |
+| samples  |     4 |       4 |      32 | 8,000,000 | 1,452,666 |               0.02 |         18.256 |      16.469 |      20.169 |          619.1 |       687.3 |        1,287.8 |    1,342.3 |
+| sites    |     1 |       1 |       1 | 2,000,000 |   322,483 |               0.02 |          9.206 |       9.160 |      10.098 |          100.5 |       101.1 |           77.8 |    1,189.9 |
+| sites    |     2 |       1 |       1 | 4,000,000 |   644,876 |               0.02 |         16.461 |      16.118 |      16.625 |          153.3 |       153.6 |          140.9 |    1,189.9 |
+| sites    |     4 |       1 |       1 | 8,000,000 | 1,289,659 |               0.02 |         30.360 |      30.050 |      30.595 |          260.3 |       260.5 |          280.4 |    1,189.9 |
+| sites    |     1 |       4 |       1 | 2,000,000 |   322,483 |               0.02 |          9.357 |       9.185 |       9.579 |          142.8 |       143.6 |          191.2 |    1,189.9 |
+| sites    |     2 |       4 |       1 | 4,000,000 |   644,876 |               0.02 |         17.203 |      16.578 |      17.800 |          232.0 |       248.4 |          352.5 |    1,189.9 |
+| sites    |     4 |       4 |       1 | 8,000,000 | 1,289,659 |               0.02 |         30.327 |      30.011 |      31.953 |          402.5 |       402.8 |          560.3 |    1,189.9 |
 
 Growth of the median time of the synthetic workloads against the rows (sites) or the samples (an exponent of 1 is linear), and peak-RSS ratios to 1×:
 
 | workload | threads | one_x_seconds | time_exponent_2x | time_exponent_4x | rss_ratio_2x | rss_ratio_4x |
 |:---------|--------:|--------------:|-----------------:|-----------------:|-------------:|-------------:|
-| samples  |       1 |         8.596 |            1.009 |            1.003 |        1.456 |        2.453 |
-| samples  |       4 |         6.410 |            0.814 |            0.772 |        1.798 |        2.766 |
-| sites    |       1 |         8.185 |            0.774 |            0.932 |        1.533 |        2.598 |
-| sites    |       4 |         8.076 |            0.780 |            0.916 |        1.741 |        2.931 |
+| samples  |       1 |         9.418 |            1.014 |            0.998 |        1.453 |        2.445 |
+| samples  |       4 |         7.219 |            0.508 |            0.830 |        1.832 |        2.836 |
+| sites    |       1 |         9.206 |            0.838 |            0.883 |        1.525 |        2.590 |
+| sites    |       4 |         9.357 |            0.879 |            0.818 |        1.625 |        2.819 |
 
 ## Findings
 
 Every observation is within its ceiling and none spills; every synthetic 1× run on one thread takes at least 5 s and no time exponent is above 1.25. The render enforces all of this, and that every fit of every run reports `ok` and the same estimates in every repetition.
 
-One sample of 2,000,000 sites takes 8.2 s on one thread (26.7 s at 8,000,000 sites) at 259.9 MiB peak RSS; 32 samples of 250,000 sites take 34.7 s on one thread and 19.3 s on four, at 224.2 MiB and 692.6 MiB. Four threads do not speed up one sample’s fit, and spread the fits of 32 samples over the threads. The three real chr20 samples take 3.3 s on one thread at 60.4 MiB.
+One sample of 2,000,000 sites takes 9.2 s on one thread (30.4 s at 8,000,000 sites) at 260.5 MiB peak RSS; 32 samples of 250,000 sites take 38.0 s on one thread and 18.3 s on four, at 224.7 MiB and 687.3 MiB. Four threads do not speed up one sample’s fit, and spread the fits of 32 samples over the threads. The three real chr20 samples take 3.4 s on one thread at 60.6 MiB.
 
 ## The real samples
 
@@ -151,6 +151,29 @@ The same function on a count-level mixture of two of those samples, untimed: HG0
 | share |  sites | depth | seq_error | contamination | contamination_sd | homozygosity_excess | allele_balance | artefact_weight | contamination_relative | relative_minus_unrelated | status |
 |------:|-------:|------:|----------:|--------------:|-----------------:|--------------------:|---------------:|----------------:|-----------------------:|-------------------------:|:-------|
 |  0.00 | 108736 |  31.9 |  0.000129 |      0.000319 |         0.000066 |            0.121353 |       0.497970 |        0.002955 |               0.000639 |                      0.1 | ok     |
-|  0.02 | 108742 |  31.9 |  0.000147 |      0.023466 |         0.000612 |            0.121175 |       0.498203 |        0.003116 |               0.040766 |                   -198.0 | ok     |
-|  0.05 | 108751 |  32.0 |  0.000293 |      0.057623 |         0.001196 |            0.120443 |       0.498053 |        0.003568 |               0.092063 |                   -853.8 | ok     |
-|  0.20 | 108756 |  32.1 |  0.000343 |      0.220912 |         0.001562 |            0.109416 |       0.496043 |        0.004612 |               0.243869 |                  -4610.0 | ok     |
+|  0.02 | 108742 |  31.9 |  0.000147 |      0.023461 |         0.000614 |            0.121221 |       0.498188 |        0.003131 |               0.040744 |                   -198.0 | ok     |
+|  0.05 | 108751 |  32.0 |  0.000295 |      0.057636 |         0.001187 |            0.120789 |       0.498108 |        0.003545 |               0.092059 |                   -853.7 | ok     |
+|  0.20 | 108756 |  32.1 |  0.000343 |      0.220912 |         0.001562 |            0.109416 |       0.496043 |        0.004612 |               0.243859 |                  -4610.0 | ok     |
+
+## Change from the previous render
+
+The previous render, 14c810a2, measured the same cells with the
+same driver on the same host and cores. Host load differs between renders.
+Median of the repetitions:
+
+| workload | scale | threads | seconds_before | rss_mib_before | seconds_after | rss_mib_after | time_ratio | rss_ratio |
+|:---------|------:|--------:|---------------:|---------------:|--------------:|--------------:|-----------:|----------:|
+| real     |     1 |       1 |          3.267 |         60.387 |         3.355 |        59.633 |      1.027 |     0.988 |
+| real     |     1 |       4 |          2.264 |         77.156 |         2.276 |        78.887 |      1.005 |     1.022 |
+| samples  |     1 |       1 |          8.596 |         91.445 |         9.418 |        91.879 |      1.096 |     1.005 |
+| samples  |     1 |       4 |          6.410 |        223.066 |         7.219 |       218.348 |      1.126 |     0.979 |
+| samples  |     2 |       1 |         17.301 |        133.109 |        19.018 |       133.516 |      1.099 |     1.003 |
+| samples  |     2 |       4 |         11.272 |        401.102 |        10.267 |       400.016 |      0.911 |     0.997 |
+| samples  |     4 |       1 |         34.681 |        224.156 |        37.994 |       224.660 |      1.096 |     1.002 |
+| samples  |     4 |       4 |         19.251 |        617.016 |        18.256 |       619.113 |      0.948 |     1.003 |
+| sites    |     1 |       1 |          8.185 |         99.961 |         9.206 |       100.535 |      1.125 |     1.006 |
+| sites    |     1 |       4 |          8.076 |        134.055 |         9.357 |       142.848 |      1.159 |     1.066 |
+| sites    |     2 |       1 |         13.992 |        153.297 |        16.461 |       153.348 |      1.176 |     1.000 |
+| sites    |     2 |       4 |         13.867 |        233.477 |        17.203 |       231.984 |      1.241 |     0.994 |
+| sites    |     4 |       1 |         26.689 |        259.844 |        30.360 |       260.305 |      1.138 |     1.002 |
+| sites    |     4 |       4 |         26.156 |        393.004 |        30.327 |       402.500 |      1.159 |     1.024 |

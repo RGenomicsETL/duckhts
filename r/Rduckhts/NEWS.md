@@ -1,6 +1,29 @@
-# Rduckhts 1.5.2.9013.0.1.5
+# Rduckhts 1.5.2.9014.0.1.5
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
+
+- `rduckhts_count_error_fit()` evaluates the beta-binomial without the
+  rounding error that inflated the log-likelihood near the binomial limit, and
+  its optimizer checks the width of the whole simplex before it stops.
+
+- The bundled `duckhts_bam_mismatch_counts()` (and so
+  `rduckhts_bam_mismatch_counts()`) counts a read base written as `=` as a
+  match instead of leaving it out, and a VCF mask leaves out the last base of
+  an SVLEN deletion when a reference window starts there, as a BCF mask did.
+
+- Bundled ROH decoding uses two traceback bits per site, reducing per-thread
+  site workspace from 38 to approximately 36.25 bytes per site without changing
+  output values. Emissions and forward/posterior probabilities remain doubles.
+
+- The bundled GenBank reader reuses named qualifier values across a feature's
+  joined-location segments. The function reference documents all-NULL columns
+  for requested keys absent from every GenBank, GFF or GTF feature, with SQL
+  examples for asserting key presence.
+
+- `rduckhts_roh_counts(fit_table = ...)` uses each sample's fitted `seq_error` and
+  `contamination` through the bundled `duckhts_roh_counts_fitted` macro. A missing
+  fit, a NULL parameter or a duplicate fit row is an error; fit status filtering remains caller SQL,
+  and spreads and artefact weight do not enter the emission model.
 
 - Added `rduckhts_count_error_fit()` and the bundled
   `duckhts_count_error_fit()`: read error, the share of reads of a second

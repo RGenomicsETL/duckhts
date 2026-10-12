@@ -6,16 +6,21 @@ output:
     pandoc_args: ["--wrap=preserve", "--columns=400"]
 ---
 
-This report gives the 1×/2×/4× scaling evidence `STYLE.md` asks for, for the two
-runs-of-homozygosity entry points added for #318. Since #329 the sites of each
-sample and chromosome are held in native buffers that DuckHTS bounds, instead
-of DuckDB lists; the last section compares this revision with the one before.
+This report gives the 1×/2×/4× scaling evidence `STYLE.md` asks for, for the
+runs-of-homozygosity entry points added for #318 and the per-sample fitted
+count decode. Since #329 the sites of each sample and chromosome are held in
+native buffers that DuckHTS bounds, instead of DuckDB lists; the last sections
+compare this revision with the list-aggregate revision and with the previous
+render of this report.
 
 - `duckhts_roh_counts` over a relation of read counts. Its growth dimensions are
   the sites per sample and chromosome (the length of one kernel list) and the
   number of samples. Synthetic counts give the 1×/2×/4× series. A real public
   workload adds read counts from three 1000 Genomes 30× CRAMs at the 108,757
   chr20 sites of the ROH ancestry evaluation, decoded for 1, 2 and 3 samples.
+- `duckhts_roh_counts_fitted` over the same inputs, with a fit relation that
+  gives every sample `seq_error` 0.001 and `contamination` 0, the scalar
+  defaults. It is measured on the same series as `duckhts_roh_counts`.
 - `duckhts_roh_ancestry` over the registered chr20 children BCF of the ROH
   ancestry evaluation (849,143 records). It is measured along three series:
   - the number of samples decoded together (8, 16, 32) with the full reference;
@@ -62,10 +67,14 @@ render stops if any observation exceeds its ceiling or spills.
   - every sample's packed site list, 24 bytes per row (position, frequency and
     two counts), held natively until the scan ends and then by DuckDB as one
     BLOB per sample and chromosome;
-  - the kernel workspace of each thread for the longest list, 38 bytes per site
-    (position, two emissions, the Viterbi path and the forward-backward values).
+  - the kernel workspace of each thread for the longest list, 36.25 bytes per
+    site (position, two emissions, the forward-backward values and two
+    traceback bits).
 
-  That is rows × 24 + threads × sites per list × 38 bytes.
+  That is rows × 24 + threads × sites per list × 36.25 bytes.
+- **`duckhts_roh_counts_fitted`.** The same live state as `duckhts_roh_counts`.
+  The fit lookup holds one row per sample, and the sample set is a second scan
+  of the input that keeps one row per sample, so neither grows with the sites.
 - **`duckhts_roh_ancestry`.** A record without a reference site is dropped
   before the sites are collected, so the lists hold reference sites only: the
   reference rows divided by its number of groups. The live state is:
@@ -75,10 +84,10 @@ render stops if any observation exceeds its ceiling or spills.
     them, 64 bytes per BCF record each;
   - the reference join and the per-site frequency lists, 64 bytes per reference
     row;
-  - the kernel workspace, 38 bytes per reference site and thread.
+  - the kernel workspace, 36.25 bytes per reference site and thread.
 
   That is samples × reference sites × 16 + records × 128 + reference rows × 64 +
-  threads × reference sites × 38 bytes.
+  threads × reference sites × 36.25 bytes.
 
 ``` sh
 taskset -c 8-15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_roh_scaling.Rmd")'
@@ -235,7 +244,7 @@ empty_runs <- vapply(seq_len(3L), function(run) {
 overhead_mib <- median(empty_runs) / 1024
 # Ceilings in MiB: overhead + 3 x the live state declared above.
 counts_budget <- function(k, threads) {
-  overhead_mib + 3 * (counts_inputs$rows[[k]] * 24 + threads * counts_inputs$sites[[k]] * 38) / 2^20
+  overhead_mib + 3 * (counts_inputs$rows[[k]] * 24 + threads * counts_inputs$sites[[k]] * 36.25) / 2^20
 }
 reference_groups <- as.numeric(system2(duckdb_cli, c("-list", "-noheader"), input = sprintf(
   "SELECT count(DISTINCT group_id) FROM read_parquet(%s);", quote_literal(reference_long)), stdout = TRUE))
@@ -243,10 +252,19 @@ stopifnot(length(reference_groups) == 1L, is.finite(reference_groups), reference
 ancestry_budget <- function(k, threads) {
   reference_sites <- ancestry_inputs$reference_rows[[k]] / reference_groups
   overhead_mib + 3 * (ancestry_inputs$samples[[k]] * reference_sites * 16 + bcf_records * 128 +
-                      ancestry_inputs$reference_rows[[k]] * 64 + threads * reference_sites * 38) / 2^20
+                      ancestry_inputs$reference_rows[[k]] * 64 + threads * reference_sites * 36.25) / 2^20
 }
 
-counts_query <- "SELECT count(*) AS n, sum(length) AS len FROM duckhts_roh_counts('c')"
+counts_queries <- c(
+  duckhts_roh_counts = "SELECT count(*) AS n, sum(length) AS len FROM duckhts_roh_counts('c')",
+  duckhts_roh_counts_fitted =
+    "SELECT count(*) AS n, sum(length) AS len FROM duckhts_roh_counts_fitted('c', 'fits')")
+# The fit relation holds the scalar defaults, built from the sample names without a scan
+# of the synthetic inputs; the real inputs are small and give their names by a scan.
+counts_inputs$fits_sql <- ifelse(
+  counts_inputs$dimension == "real_samples",
+  "SELECT DISTINCT sample_id AS sample FROM c",
+  sprintf("SELECT 'S' || s AS sample FROM range(0, %d) AS a(s)", counts_inputs$samples))
 ancestry_query <- function(ids) sprintf(paste(
   "SELECT count(*) AS n, sum(length) AS len FROM duckhts_roh_ancestry(%s, 'ref_long', 'q_table',",
   "af_clamp := 1e-3, gt_error := 30, samples := %s)"), quote_literal(bcf), quote_literal(paste(ids, collapse = ",")))
@@ -259,12 +277,19 @@ for (repetition in 1:3) {
     for (dimension in c("sites", "samples", "real_samples")) {
       for (scale_index in order) {
         k <- which(counts_inputs$dimension == dimension)[[scale_index]]
-        setup <- sprintf("CREATE TEMP VIEW c AS SELECT * FROM %s;", counts_inputs$source_sql[[k]])
-        observed <- run_fresh(setup, counts_query, threads)
-        observations[[length(observations) + 1L]] <- data.frame(
-          macro = "duckhts_roh_counts", dimension = dimension, scale = counts_inputs$scale[[k]],
-          samples = counts_inputs$samples[[k]], input_rows = counts_inputs$rows[[k]],
-          threads = threads, repetition = repetition, budget_mib = counts_budget(k, threads), observed)
+        for (macro in names(counts_queries)) {
+          setup <- sprintf("CREATE TEMP VIEW c AS SELECT * FROM %s;", counts_inputs$source_sql[[k]])
+          if (macro == "duckhts_roh_counts_fitted") {
+            setup <- c(setup, sprintf(paste(
+              "CREATE TEMP TABLE fits AS SELECT sample, 0.001::DOUBLE AS seq_error,",
+              "0.0::DOUBLE AS contamination FROM (%s);"), counts_inputs$fits_sql[[k]]))
+          }
+          observed <- run_fresh(setup, counts_queries[[macro]], threads)
+          observations[[length(observations) + 1L]] <- data.frame(
+            macro = macro, dimension = dimension, scale = counts_inputs$scale[[k]],
+            samples = counts_inputs$samples[[k]], input_rows = counts_inputs$rows[[k]],
+            threads = threads, repetition = repetition, budget_mib = counts_budget(k, threads), observed)
+        }
       }
     }
     config_order <- if (repetition %% 2L == 1L) seq_len(nrow(ancestry_inputs)) else rev(seq_len(nrow(ancestry_inputs)))
@@ -297,6 +322,14 @@ ancestry_series_runs <- do.call(rbind, lapply(seq_len(nrow(ancestry_series)), fu
 }))
 runs <- rbind(do.call(rbind, observations), ancestry_series_runs[names(do.call(rbind, observations))])
 stopifnot(all(runs$peak_temp_bytes == 0), all(as.numeric(runs$n) > 0))
+# The fit relation holds the scalar defaults, so both count decodes return the same runs.
+counts_keys <- c("dimension", "scale", "threads", "repetition")
+fitted_parity <- merge(runs[runs$macro == "duckhts_roh_counts", c(counts_keys, "n", "len")],
+                       runs[runs$macro == "duckhts_roh_counts_fitted", c(counts_keys, "n", "len")],
+                       by = counts_keys, suffixes = c("_scalar", "_fitted"))
+stopifnot(nrow(fitted_parity) == sum(runs$macro == "duckhts_roh_counts"),
+          identical(fitted_parity$n_scalar, fitted_parity$n_fitted),
+          identical(fitted_parity$len_scalar, fitted_parity$len_fitted))
 write.csv(runs, "benchmarks/benchmark_roh_scaling_runs.csv", row.names = FALSE)
 over_budget <- runs[runs$max_rss_kib / 1024 > runs$budget_mib, ]
 if (nrow(over_budget)) {
@@ -318,8 +351,18 @@ summary <- do.call(rbind, lapply(cells, function(cell) {
 }))
 summary <- summary[order(summary$macro, summary$dimension, summary$threads, summary$scale), ]
 rownames(summary) <- NULL
+fitted_gap <- function(dimension) {
+  cell <- function(macro) {
+    found <- summary[summary$macro == macro & summary$dimension == dimension &
+                     summary$threads == 1L & summary$scale == 4L, ]
+    stopifnot(nrow(found) == 1L)
+    found$median_rss_mib
+  }
+  round(cell("duckhts_roh_counts_fitted") - cell("duckhts_roh_counts"), 1)
+}
 real_cell <- function(n) {
-  cell <- summary[summary$dimension == "real_samples" & summary$threads == 1L & summary$scale == n, ]
+  cell <- summary[summary$macro == "duckhts_roh_counts" & summary$dimension == "real_samples" &
+                  summary$threads == 1L & summary$scale == n, ]
   stopifnot(nrow(cell) == 1L)
   cell
 }
@@ -364,6 +407,12 @@ peak RSS and three samples in `r round(real_cell(3)$median_seconds, 3)` s at
 is what it measures: per-chromosome lists of up to 4 million synthetic sites,
 up to 32 synthetic samples, and three real 30× samples at 108,757 sites;
 larger panels and cohorts are not measured here.
+
+`duckhts_roh_counts_fitted` returns the same runs as `duckhts_roh_counts` in
+every cell, which the render checks, and stays within the same budget. Its
+peak RSS over the scalar decode at the largest inputs, one thread, median of
+three: `r fitted_gap("sites")` MiB with 4 million sites of one sample and
+`r fitted_gap("samples")` MiB with 32 samples of 250,000 sites.
 
 `duckhts_roh_ancestry`: memory still grows with the number of samples decoded
 together, because one pass over the BCF needs every sample's sites. Each
@@ -413,3 +462,32 @@ With 32 samples and the full reference, `duckhts_roh_ancestry` went from
 from `r round(largest$seconds_before, 1)` s to `r round(largest$seconds_after, 1)` s.
 The segments are unchanged: the chr20 evaluation arms reproduce their 51,083
 (ancestry) and 60,204 (pooled) segments exactly.
+
+## Change from the previous render
+
+```{r previous, echo=FALSE}
+# The previous render of this report, read from git: the same driver, inputs and
+# host. Since then the Viterbi traceback is packed into two bits per site.
+previous_revision <- "d0af7e98"
+previous_text <- system2("git", c("show", paste0(previous_revision, ":benchmarks/benchmark_roh_scaling_runs.csv")),
+                         stdout = TRUE)
+stopifnot(is.null(attr(previous_text, "status")))
+previous <- merge(cell_medians(utils::read.csv(text = previous_text, stringsAsFactors = FALSE)),
+                  cell_medians(runs), by = c("macro", "dimension", "scale", "threads"),
+                  suffixes = c("_before", "_after"))
+previous <- previous[previous$threads == 1L, setdiff(names(previous), "threads")]
+previous$time_ratio <- previous$seconds_after / previous$seconds_before
+previous$rss_ratio <- previous$rss_mib_after / previous$rss_mib_before
+previous <- previous[order(previous$macro, previous$dimension, previous$scale), ]
+rownames(previous) <- NULL
+stopifnot(nrow(previous) > 0, !any(previous$macro == "duckhts_roh_counts_fitted"))
+```
+
+The previous render, `r previous_revision`, measured the same cells with the
+same driver on the same host, with the traceback held in two bytes per site.
+The fitted decode is new and has no earlier cells. Host load differs between
+renders. One thread, median of three:
+
+```{r previous_table, echo=FALSE}
+knitr::kable(previous, digits = 3)
+```

@@ -1374,6 +1374,199 @@ SELECT * FROM duckhts_roh_counts('roh_counts_bad_af');
 ----
 af must be in [0, 1] (position 50000 is 1.5)
 
+# Per-sample fits use exactly the scalar emission parameters, including quality bits.
+statement ok
+CREATE TEMP TABLE roh_fits AS
+SELECT sample_id AS sample, 0.001::DOUBLE AS seq_error, 0.0::DOUBLE AS contamination,
+       'caller_selected' AS status, 123.0 AS artefact_weight
+FROM roh_counts_clean GROUP BY sample_id;
+
+query I
+WITH fitted AS (SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits')),
+scalar AS (SELECT * FROM duckhts_roh_counts('roh_counts_clean'))
+SELECT count(*) FROM ((SELECT * FROM fitted EXCEPT ALL SELECT * FROM scalar)
+UNION ALL (SELECT * FROM scalar EXCEPT ALL SELECT * FROM fitted));
+----
+0
+
+statement ok
+UPDATE roh_fits SET seq_error = 0.02, contamination = 0.1 WHERE sample = 'S2';
+
+# Separate scalar calls are the oracle; both samples must produce runs.
+query II
+WITH fitted AS (SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits')),
+scalar AS (
+  SELECT * FROM duckhts_roh_counts('roh_counts_clean') WHERE sample = 'S1'
+  UNION ALL
+  SELECT * FROM duckhts_roh_counts('roh_counts_clean', seq_error := 0.02, contamination := 0.1)
+  WHERE sample = 'S2')
+SELECT (SELECT count(DISTINCT sample) FROM fitted), count(*) FROM (
+  (SELECT * FROM fitted EXCEPT ALL SELECT * FROM scalar)
+  UNION ALL (SELECT * FROM scalar EXCEPT ALL SELECT * FROM fitted));
+----
+2	0
+
+query I
+WITH fitted AS (
+  SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits', 'roh_counts_map')),
+scalar AS (
+  SELECT * FROM duckhts_roh_counts('roh_counts_clean', 'roh_counts_map') WHERE sample = 'S1'
+  UNION ALL
+  SELECT * FROM duckhts_roh_counts('roh_counts_clean', 'roh_counts_map',
+                                 seq_error := 0.02, contamination := 0.1) WHERE sample = 'S2')
+SELECT count(*) FROM ((SELECT * FROM fitted EXCEPT ALL SELECT * FROM scalar)
+UNION ALL (SELECT * FROM scalar EXCEPT ALL SELECT * FROM fitted));
+----
+0
+
+statement ok
+CREATE TEMP TABLE roh_bad_fits AS SELECT * FROM roh_fits WHERE sample = 'S1';
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits');
+----
+missing fit row for sample S2
+
+statement ok
+INSERT INTO roh_bad_fits SELECT * FROM roh_fits WHERE sample = 'S2';
+
+statement ok
+UPDATE roh_bad_fits SET seq_error = NULL WHERE sample = 'S2';
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits');
+----
+NULL seq_error for sample S2
+
+statement ok
+UPDATE roh_bad_fits SET seq_error = 0.001, contamination = NULL WHERE sample = 'S2';
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits');
+----
+NULL contamination for sample S2
+
+statement ok
+UPDATE roh_bad_fits SET seq_error = 0.5, contamination = 0.0 WHERE sample = 'S2';
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits');
+----
+seq_error must be in (0, 0.5)
+
+statement ok
+UPDATE roh_bad_fits SET seq_error = 0.001, contamination = 1.0 WHERE sample = 'S2';
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits');
+----
+contamination must be in [0, 1)
+
+# Validation also visits samples whose chromosomes have no map nodes.
+statement ok
+CREATE TEMP VIEW roh_no_map AS SELECT * FROM roh_counts_map WHERE false;
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits', 'roh_no_map');
+----
+contamination must be in [0, 1)
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_none', 'roh_fits', max_sites := 0);
+----
+max_sites must be
+
+statement ok
+CREATE TEMP VIEW roh_duplicate_fits AS SELECT * FROM roh_fits UNION ALL SELECT * FROM roh_fits;
+
+# Duplicates are counted explicitly, so the error does not depend on DuckDB's
+# scalar_subquery_error_on_multiple_rows setting.
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_duplicate_fits');
+----
+duplicate fit rows for sample
+
+statement ok
+SET scalar_subquery_error_on_multiple_rows = false;
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_duplicate_fits', 'roh_counts_map');
+----
+duplicate fit rows for sample
+
+statement ok
+RESET scalar_subquery_error_on_multiple_rows;
+
+# Fit rows are checked for the samples of the counts relation. With no counts
+# there is no sample to check, so a malformed fit gives no rows; the other
+# arguments are still checked.
+statement ok
+CREATE TEMP TABLE roh_null_fits AS SELECT sample, NULL::DOUBLE AS seq_error, contamination FROM roh_fits;
+
+query I
+SELECT count(*) FROM duckhts_roh_counts_fitted('roh_counts_none', 'roh_null_fits');
+----
+0
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_none', 'roh_null_fits', hw_to_az := 2.0);
+----
+hw_to_az must be in [0, 1]
+
+# A NULL sample is a sample: the scalar decode keeps its runs, so the fitted decode
+# must match it with a NULL-sample fit row and must refuse it without one.
+statement ok
+CREATE TEMP TABLE roh_counts_null_sample AS
+SELECT CASE WHEN sample_id = 'S2' THEN NULL ELSE sample_id END AS sample_id,
+       chrom, pos, ref_count, alt_count, af
+FROM roh_counts_clean;
+
+statement ok
+CREATE TEMP TABLE roh_null_sample_fits AS
+SELECT CASE WHEN sample = 'S2' THEN NULL ELSE sample END AS sample, seq_error, contamination
+FROM roh_fits;
+
+query II
+WITH fitted AS (
+  SELECT * FROM duckhts_roh_counts_fitted('roh_counts_null_sample', 'roh_null_sample_fits')),
+scalar AS (
+  SELECT * FROM duckhts_roh_counts('roh_counts_null_sample') WHERE sample = 'S1'
+  UNION ALL
+  SELECT * FROM duckhts_roh_counts('roh_counts_null_sample', seq_error := 0.02,
+                                   contamination := 0.1) WHERE sample IS NULL)
+SELECT (SELECT count(*) FROM fitted WHERE sample IS NULL) > 0, count(*) FROM (
+  (SELECT * FROM fitted EXCEPT ALL SELECT * FROM scalar)
+  UNION ALL (SELECT * FROM scalar EXCEPT ALL SELECT * FROM fitted));
+----
+true	0
+
+statement error
+SELECT * FROM duckhts_roh_counts_fitted('roh_counts_null_sample', 'roh_fits');
+----
+missing fit row for sample NULL
+
+# Independent transitions (both 0.5) make homozygous sites AZ and balanced sites HW.
+# Lengths 1..9 exercise every two-bit offset and partially filled traceback bytes.
+statement ok
+CREATE TEMP TABLE roh_short_counts AS
+SELECT CAST(n AS VARCHAR) AS sample_id, '1' AS chrom, i::BIGINT AS pos,
+       CASE WHEN i % 3 = 0 THEN 15 ELSE 30 END::BIGINT AS ref_count,
+       CASE WHEN i % 3 = 0 THEN 15 ELSE 0 END::BIGINT AS alt_count, 0.5 AS af
+FROM range(1, 10) AS samples(n), LATERAL range(1, n + 1) AS sites(i);
+
+query II
+WITH observed AS (
+  SELECT sample, start, "end", n_markers
+  FROM duckhts_roh_counts('roh_short_counts', hw_to_az := 0.5, az_to_hw := 0.5)),
+expected AS (
+  SELECT sample_id AS sample, min(pos) AS start, max(pos) AS "end", count(*)::INTEGER AS n_markers
+  FROM roh_short_counts WHERE pos % 3 != 0 GROUP BY sample_id, (pos - 1) // 3)
+SELECT (SELECT count(*) FROM observed), count(*) FROM (
+  (SELECT * FROM observed EXCEPT ALL SELECT * FROM expected)
+  UNION ALL (SELECT * FROM expected EXCEPT ALL SELECT * FROM observed));
+----
+18	0
+
 # __duckhts_roh_decode checks its input: any BLOB may be passed to it.
 statement error
 SELECT __duckhts_roh_decode('abc'::BLOB, NULL, NULL, NULL, NULL::BIGINT[], NULL::DOUBLE[], NULL, 6.7e-8, 5e-9);

@@ -99,7 +99,8 @@ static int base_code(char base) {
     }
 }
 
-/* htslib 4-bit base (1, 2, 4, 8 for A, C, G, T) to 0..3, or -1. */
+/* htslib 4-bit base (1, 2, 4, 8 for A, C, G, T) to 0..3, or -1. The SAM base
+ * '=' (code 0) means the reference base and is resolved by the caller. */
 static int nt16_code(int nt16) {
     switch (nt16) {
     case 1: return 0;
@@ -246,7 +247,12 @@ static int window_fill_mask(mismatch_window_t *window, mismatch_mask_t *mask, co
             if (header_id < 0) goto unknown_contig;
             return 1; /* a header contig without records */
         }
-        iterator = tbx_itr_queryi(mask->tabix, tabix_id, beg0, end0);
+        /* htslib 1.24 tabix ends a record with SVLEN one base before the rlen
+         * that vcf_parse() gives it (tbx.c adds |SVLEN| to POS, vcf.c adds
+         * |SVLEN| + 1), so a query from beg0 would miss a deletion whose last
+         * base is the window's first. Start one base earlier; marks are
+         * clipped to the window. */
+        iterator = tbx_itr_queryi(mask->tabix, tabix_id, beg0 > 0 ? beg0 - 1 : 0, end0);
         if (!iterator) goto failed;
         while ((status = tbx_itr_next(mask->file, mask->tabix, iterator, &mask->line)) >= 0) {
             /* htslib parses the span fields of the line, so a VCF record has
@@ -413,7 +419,7 @@ static int count_alignment(const bam1_t *alignment, const char *contig, int flan
             for (int64_t step = 0; step < length; step++) {
                 const int64_t at = query + step;
                 const hts_pos_t pos0 = reference + step;
-                int quality, from, to;
+                int quality, from, to, read_base;
                 int64_t cycle;
                 if (at < left_out_until || at >= left_out_from) continue;
                 if (pos0 < window->beg0 || pos0 >= window->end0) {
@@ -424,7 +430,8 @@ static int count_alignment(const bam1_t *alignment, const char *contig, int flan
                 }
                 if (window->masked[pos0 - window->beg0]) continue;
                 from = base_code(window->bases[pos0 - window->beg0]);
-                to = nt16_code(bam_seqi(sequence, at));
+                read_base = bam_seqi(sequence, at);
+                to = read_base == 0 ? from : nt16_code(read_base); /* '=' is the reference base */
                 if (from < 0 || to < 0) continue;
                 if (reverse) {
                     from = 3 - from;

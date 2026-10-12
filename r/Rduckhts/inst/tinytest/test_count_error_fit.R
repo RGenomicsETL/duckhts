@@ -23,10 +23,15 @@ oracle_log_likelihood <- function(par, counts, relation = c("unrelated", "relati
     s <- (1 - rho) / rho
     exp(lchoose(depth, alt) + lbeta(alt + p * s, depth - alt + (1 - p) * s) - lbeta(p * s, (1 - p) * s))
   }
+  # A relative carries one allele of the sample, alt with chance (g - 1) / 2 for
+  # g - 1 alt copies, and one allele drawn at f.
+  relative_given <- function(g) {
+    t <- (g - 1) / 2
+    cbind((1 - t) * (1 - f), t * (1 - f) + (1 - t) * f, t * f)
+  }
   mixture <- 0
   for (g in 1:3) {
-    given_g <- if (relation == "unrelated") hwe else
-      switch(g, cbind(1 - f, f, 0), cbind((1 - f) / 2, 0.5, f / 2), cbind(0, 1 - f, f))
+    given_g <- if (relation == "unrelated") hwe else relative_given(g)
     for (h in 1:3) {
       p <- (1 - c) * q[[g]] + c * q[[h]]
       mixture <- mixture + prior[, g] * given_g[, h] * count_probability(p, rho[[g]])
@@ -102,6 +107,20 @@ test_count_error_fit <- function() {
   relative <- oracle_fit(counts, "relative")
   expect_true(abs(fit$contamination_relative - relative$estimate[["c"]]) < 0.005)
   expect_true(fit$log_likelihood_relative < fit$log_likelihood)
+
+  # The native log-likelihood itself. With frequencies that are exact in single
+  # precision and one per frequency bin, each cell holds the exact frequency
+  # of its sites, so the native value at its optimum must equal the oracle's
+  # log-likelihood on the sites at the same parameters.
+  dbExecute(con, paste(
+    "CREATE TABLE counts_exact AS SELECT sample_id, chrom, pos,",
+    "greatest(1, least(7, round(af * 8))) / 8.0 AS af, ref_count, alt_count FROM counts"))
+  counts_exact <- dbGetQuery(con, "SELECT af, ref_count, alt_count FROM counts_exact")
+  exact <- rduckhts_count_error_fit(con, "counts_exact", block_bases = 3e6)
+  exact_at_sites <- oracle_log_likelihood(list(
+    e = exact$seq_error, c = exact$contamination, F = exact$homozygosity_excess, b = exact$allele_balance,
+    rho_hom = exact$spread_hom, rho_het = exact$spread_het, w = exact$artefact_weight), counts_exact)
+  expect_true(abs(exact$log_likelihood - exact_at_sites) < 1e-6 * abs(exact_at_sites))
 
   # The wrapper publishes a table and validates its arguments.
   expect_true(rduckhts_count_error_fit(con, "counts", block_bases = 3e6, table_name = "fit_table"))

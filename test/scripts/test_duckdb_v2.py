@@ -48,4 +48,26 @@ ORDER BY source_sample_index, site_index
     ("S2", 1, 0, 10, 5, "measured"),
     ("S2", 2, None, None, None, "unavailable_no_record"),
 ])
-print(f"DuckDB {duckdb.__version__}: LOAD, read_bcf, Somalier passed")
+
+
+# A DuckHTS scalar that reports an error must raise its own error. DuckDB 2.0
+# builds before duckdb/duckdb#25664 turned it into an INTERNAL error, because
+# C API v1 cannot mark a function fallible. Each case gets its own connection:
+# on such a build the error also invalidated the database.
+def check_error(sql, message):
+    case = duckdb.connect(config={"allow_unsigned_extensions": "true"})
+    case.execute(f"LOAD '{extension}'")
+    try:
+        case.execute(sql).fetchall()
+    except duckdb.InvalidInputException as error:
+        if message not in str(error):
+            raise AssertionError(f"{sql}\nexpected {message!r}; got {error}") from error
+    else:
+        raise AssertionError(f"{sql}\nexpected an InvalidInputException")
+    finally:
+        case.close()
+
+
+check_error("SELECT duckhts_somalier_spacing([100, 110]::UBIGINT[], 0)", "duckhts_somalier_spacing")
+check_error("SELECT duckhts_cgranges_index('no_such_index')", "unknown index name")
+print(f"DuckDB {duckdb.__version__}: LOAD, read_bcf, Somalier and scalar errors passed")

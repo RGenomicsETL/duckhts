@@ -404,3 +404,41 @@ The nearest recorded GenBank measurements are in
 [`benchmark_genbank_reader.md`](benchmark_genbank_reader.md), which times the
 plain-column and MAP scans of a single E. coli record without named columns
 and is not directly comparable because its input and workloads differ.
+
+## Change from the previous render
+
+```{r previous, echo=FALSE}
+# The previous render of this report, read from git: the same driver, inputs
+# and host. Since then the named qualifiers of a feature are resolved once and
+# reused for its other location segments. The host mixes core types, so the
+# comparison needs the same CPU: render with the previous affinity.
+previous_revision <- "b6f799e8"
+previous_text <- system2("git", c("show", paste0(previous_revision,
+                                                  ":benchmarks/benchmark_genbank_named_attributes_runs.csv")),
+                         stdout = TRUE)
+stopifnot(is.null(attr(previous_text, "status")))
+previous_runs <- utils::read.csv(text = previous_text, stringsAsFactors = FALSE)
+previous_affinity <- unique(as.character(previous_runs$affinity))
+if (!identical(previous_affinity, cpu_one)) {
+  stop("The previous render ran on CPU ", paste(previous_affinity, collapse = ", "),
+       " and this one on CPU ", cpu_one, "; render with that CPU as the highest in the affinity mask")
+}
+previous_medians <- aggregate(seconds ~ parts + workload, previous_runs, median)
+current_medians <- aggregate(seconds ~ parts + workload, runs, median)
+previous <- merge(previous_medians, current_medians, by = c("parts", "workload"),
+                  suffixes = c("_before", "_after"))
+stopifnot(nrow(previous) == nrow(current_medians))
+previous$time_ratio <- previous$seconds_after / previous$seconds_before
+previous <- previous[order(previous$parts, match(previous$workload, workloads)), ]
+rownames(previous) <- NULL
+```
+
+The previous render, `r previous_revision`, measured the same workloads on the
+same inputs with the same driver, host and CPU (`r cpu_one`), resolving the
+named qualifiers once per output row. The cache saves work only on the rows after a feature's first
+location segment, so the workloads that read named columns are the ones it can
+change. Host load differs between renders. Median seconds of five repetitions:
+
+```{r previous_table, echo=FALSE}
+knitr::kable(previous, digits = 3)
+```

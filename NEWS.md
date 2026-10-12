@@ -1,8 +1,41 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.2.9013
+# duckhts 1.5.2.9014
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
+
+- `duckhts_count_error_fit()` evaluates the beta-binomial through sums of
+  `log1p` terms instead of differences of `lgamma` values. Near the binomial
+  limit those differences lost about 1e-6 per term, which over millions of
+  sites inflated the log-likelihood (by 19 on a 10-million-site test) and let
+  the optimizer prefer a spread that only the error supported. The optimizer
+  now measures the width of the simplex over all its vertices, not only the
+  best and worst. The R tests check the native log-likelihood against the
+  independent oracle directly.
+
+- `duckhts_bam_mismatch_counts()` counts a read base written as `=` (the SAM
+  sign for the reference base, as `samtools calmd -e` writes it) as a match;
+  it was left out. A VCF mask now leaves out the last base of a deletion that
+  states its span by SVLEN when a reference window starts at that base:
+  htslib's tabix ends such a record one base before its parsed span, so the
+  mask query starts one base earlier. A BCF mask was not affected. The
+  catalog no longer says that the sample columns of a VCF mask cost nothing:
+  they are not parsed, but each line is read whole.
+
+- ROH decoding packs Viterbi traceback into two bits per site, reducing per-thread
+  site workspace from 38 to approximately 36.25 bytes per site. Emissions and
+  forward/posterior probabilities remain doubles; output values are unchanged.
+
+- GenBank named qualifiers are resolved once per feature, reusing their values
+  across joined-location segments. Reader documentation explains that requested
+  keys absent from every feature yield all-NULL columns in GenBank, GFF and GTF,
+  and shows how to assert key presence without a bind-time scan.
+
+- `duckhts_roh_counts_fitted` decodes each sample using a caller-named fit relation's
+  `seq_error` and `contamination`; `rduckhts_roh_counts(fit_table = ...)` exposes it
+  in R. A missing fit, a NULL parameter or a duplicate fit row of a decoded sample
+  is an error; fit status filtering remains
+  caller SQL, and spreads and artefact weight do not enter the emission model.
 
 - Added `duckhts_count_error_fit()`: the read error, the share of reads of a
   second genome, the allele balance at heterozygous sites, two spreads, an
