@@ -169,13 +169,13 @@ ROH_FITTED_SIZE=reduced taskset -c 0-3 Rscript -e \
 
 | Item                         | Value                                                            |
 |:-----------------------------|:-----------------------------------------------------------------|
-| revision                     | bc2bc025074df976ebcdacafd458e3c54197f358                         |
-| src_tree                     | d8d9a75ea2378d58e4524438db2e204272c6b76f                         |
+| revision                     | 6a651f6aa1cdbc03d4d9692ee5d05b9150be8be5                         |
+| src_tree                     | 0f829a860b92dbf98069944479775481bf9d43e8                         |
 | input_identities             | match the registry                                               |
-| extension_sha256             | e983edbbe3c312f6e8eac9fef495a0bb060cfa711bf2f9e1c2b2d6f885de48d3 |
+| extension_sha256             | 2693fbb5f1b4d7c2b7f6ae7b08aec19919d3f1864dfae4051c68cb79987a2dc2 |
 | duckdb_cli                   | v1.5.1 (Variegata) 7dbb2e646f                                    |
 | r_version                    | R version 4.6.0 (2026-04-24)                                     |
-| host_load                    | 1.11, 1.18, 0.88                                                 |
+| host_load                    | 2.91, 2.12, 1.95                                                 |
 | cpu_affinity                 | 8-15                                                             |
 | threads                      | 2                                                                |
 | samples                      | NA18507,HG00403,HG00188                                          |
@@ -339,27 +339,27 @@ RSS above its ceiling, and it reached this table.
 
 | Query           | Kind            | Seconds | Peak RSS MiB | Peak buffer MiB | Ceiling MiB | Temporary bytes |
 |:----------------|:----------------|--------:|-------------:|----------------:|------------:|----------------:|
-| empty_1         | empty           |   0.000 |         39.7 |             0.2 |             |               0 |
-| empty_2         | empty           |   0.007 |         39.8 |             0.2 |             |               0 |
-| empty_3         | empty           |   0.000 |         39.9 |             0.2 |             |               0 |
-| fit             | fit             |   3.328 |         69.3 |            39.8 |       153.9 |               0 |
-| genotype_gt30   | genotype_decode |   0.178 |         93.2 |            97.1 |       117.1 |               0 |
-| genotype_gt100  | genotype_decode |   0.165 |         93.5 |            97.1 |       117.1 |               0 |
-| decode_a        | count_decode    |   0.077 |         66.7 |            40.5 |        84.7 |               0 |
-| decode_b        | count_decode    |   0.078 |         70.7 |            40.5 |        84.7 |               0 |
-| decode_c        | count_decode    |   0.109 |         70.9 |            39.9 |        84.7 |               0 |
-| scalar_defaults | count_decode    |   0.037 |         61.0 |            36.9 |        84.7 |               0 |
-| perturbed_1     | count_decode    |   0.113 |         67.5 |            40.5 |        84.7 |               0 |
-| perturbed_2     | count_decode    |   0.113 |         65.8 |            41.0 |        84.7 |               0 |
-| perturbed_3     | count_decode    |   0.109 |         67.2 |            40.5 |        84.7 |               0 |
-| perturbed_4     | count_decode    |   0.148 |         69.6 |            29.4 |        84.7 |               0 |
-| perturbed_5     | count_decode    |   0.155 |         65.7 |            29.4 |        84.7 |               0 |
-| perturbed_6     | count_decode    |   0.155 |         65.2 |            29.4 |        84.7 |               0 |
-| perturbed_7     | count_decode    |   0.109 |         70.0 |            40.5 |        84.7 |               0 |
-| perturbed_8     | count_decode    |   0.109 |         71.5 |            40.5 |        84.7 |               0 |
-| perturbed_9     | count_decode    |   0.112 |         70.8 |            40.5 |        84.7 |               0 |
-| perturbed_10    | count_decode    |   0.149 |         67.7 |            41.1 |        84.7 |               0 |
-| stability_high  | count_decode    |   0.151 |         68.4 |            29.4 |        84.7 |               0 |
+| empty_1         | empty           |   0.000 |         39.6 |             0.2 |             |               0 |
+| empty_2         | empty           |   0.006 |         39.8 |             0.2 |             |               0 |
+| empty_3         | empty           |   0.000 |         40.0 |             0.2 |             |               0 |
+| fit             | fit             |   3.319 |         70.6 |            43.3 |       153.9 |               0 |
+| genotype_gt30   | genotype_decode |   0.182 |         94.8 |            97.1 |       117.2 |               0 |
+| genotype_gt100  | genotype_decode |   0.160 |         93.4 |            97.1 |       117.2 |               0 |
+| decode_a        | count_decode    |   0.078 |         72.2 |            40.4 |        84.8 |               0 |
+| decode_b        | count_decode    |   0.112 |         68.7 |            40.5 |        84.8 |               0 |
+| decode_c        | count_decode    |   0.107 |         70.3 |            40.0 |        84.8 |               0 |
+| scalar_defaults | count_decode    |   0.037 |         62.0 |            36.9 |        84.8 |               0 |
+| perturbed_1     | count_decode    |   0.117 |         70.7 |            40.5 |        84.8 |               0 |
+| perturbed_2     | count_decode    |   0.107 |         70.8 |            40.5 |        84.8 |               0 |
+| perturbed_3     | count_decode    |   0.108 |         71.0 |            41.5 |        84.8 |               0 |
+| perturbed_4     | count_decode    |   0.147 |         65.9 |            29.5 |        84.8 |               0 |
+| perturbed_5     | count_decode    |   0.152 |         65.8 |            30.4 |        84.8 |               0 |
+| perturbed_6     | count_decode    |   0.150 |         65.5 |            29.3 |        84.8 |               0 |
+| perturbed_7     | count_decode    |   0.109 |         67.4 |            40.5 |        84.8 |               0 |
+| perturbed_8     | count_decode    |   0.108 |         66.8 |            40.5 |        84.8 |               0 |
+| perturbed_9     | count_decode    |   0.108 |         70.9 |            40.4 |        84.8 |               0 |
+| perturbed_10    | count_decode    |   0.110 |         66.8 |            41.1 |        84.8 |               0 |
+| stability_high  | count_decode    |   0.148 |         69.8 |            29.4 |        84.8 |               0 |
 
 Every observation is in `benchmarks/results/roh-fitted-emission/`: the fit, the four numbers of every decode, every run, the metrics and the queries.
 
