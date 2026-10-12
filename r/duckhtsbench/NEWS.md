@@ -1,5 +1,20 @@
 # duckhtsbench 0.0.0.9001
 
+- register `depth_fraction_hg00403_buckets`, `depth_fraction_na18507_buckets`
+  and `depth_fraction_hg00188_buckets`, the inputs of
+  `benchmark_depth_fraction.Rmd`: reads in 100 kb bins of chr18 to chr22, X
+  and Y of three registered 30x CRAMs, split into 300 of 3,000 read-name
+  buckets (the MD5 of the read name modulo 3,000), so that sums of disjoint
+  bucket sets give read-name hash subsamples of 0.01x steps and mixtures at
+  known shares. `duckhts_bench_stage_depth_fraction()` stages them with range
+  requests on the registered URLs, checks the registered row and read counts,
+  and writes a receipt that binds the derivation parameters, the derivation
+  SQL, the DuckDB version and the output SHA-256. The network-free test stages
+  the bundled CRAM fixture of Rduckhts through a private registry and checks
+  the counts against an independent read of the same file. The report is
+  added to the consumers of the three CRAMs, the GRCh38 reference and the
+  1000 Genomes sample panel.
+
 - register `roh_ancestry_chr<N>_reference_long` and
   `roh_ancestry_chr<N>_af_sites` for the 21 autosomes other than chr20: the
   long ancestry reference of each chromosome, derived from
