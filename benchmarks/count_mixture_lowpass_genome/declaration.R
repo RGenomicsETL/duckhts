@@ -5,14 +5,13 @@ genome_declaration <- list(
   shares = c(0, .02, .05, .10, .20),
   depths = c(.1, .4, .2),
   relationships = c("same", "other", "ibd1"),
-  errors = .0001,
+  errors = c(.0001, .0002),
   artefact_weight = .002,
   replicates = 200L,
-  workers = 8L,
-  threads = 1L,
+  workers = 2L,
+  threads = 7L,
   cores = "0-5,12-19",
-  wall_budget_hours = 8,
-  planned_seconds_per_replicate = 24,
+  wall_budget_hours = 1.5,
   memory_limit = "6GB",
   block_bases = 10000000L,
   min_blocks = 30L,
@@ -29,7 +28,7 @@ genome_declaration <- list(
   thread_share_tolerance = 1e-5,
   primary_depths = c(.1, .4),
   secondary_depths = .2,
-  deferred_errors = .0002,
+  additional_primary_error = .0002,
   bias_limits = c(`0.1` = .005, `0.2` = .0035, `0.4` = .0025),
   accuracy_limits = list(
     same = c(`0.1` = .025, `0.2` = .015, `0.4` = .008),
@@ -48,7 +47,8 @@ genome_strata <- function() {
     depth = genome_declaration$depths, error = genome_declaration$errors,
     stringsAsFactors = FALSE)
   grid$stratum <- seq_len(nrow(grid))
-  grid$primary <- grid$depth %in% genome_declaration$primary_depths
+  grid$primary <- grid$depth %in% genome_declaration$primary_depths |
+    grid$error == genome_declaration$additional_primary_error
   grid$replicates <- genome_declaration$replicates
   grid
 }
@@ -69,6 +69,17 @@ genome_strata <- function() {
 # pair + native 256 MiB cap), applied separately to RSS and reported DuckDB
 # peak buffer. Fixed-block 1x/2x/4x timings use strides 4/2/1 across all autosomes.
 # Test the endpoint exponent only if the smallest end-to-end timing is >= 5 s.
-# Budget: 9,000 fits * 24 s / 8 workers = 7.5 hours, leaving 30 minutes for
-# probes/oracles and orchestration. Defer e=2e-4: another 6,000 primary fits
-# would require five additional hours at that conservative throughput.
+# Campaign execution uses long-lived workers, one input-identity verification
+# at startup, and one panel load per chromosome per worker. All 200 replicates
+# of a stratum share one bulk counts relation and one macro invocation, with
+# sample_id '<stratum>-<replicate>'. Simulation remains independent of the
+# fitting implementation; each replicate's seed is derived from campaign seed,
+# stratum and replicate. Sampled solo refits must be bit-identical to batch rows.
+# Independent moments and one/four-thread checks retain the tolerances above.
+# Fresh-process timing and memory measurements belong to the separate scaling
+# series. First measure one batched stratum; the campaign target is 1.5 hours
+# on the declared cores, not an assumed measured throughput.
+# The existing 45 strata, their 200 replicates, simulation model, calibration
+# and release criteria are unchanged. The same 45-stratum grid at e=2e-4 is
+# additionally primary, with 200 replicates each and identical release gates.
+# Total: 18,000 replicates, 90 strata, of which 75 are primary.
