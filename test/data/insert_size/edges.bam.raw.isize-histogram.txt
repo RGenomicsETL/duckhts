@@ -1,0 +1,8 @@
+sample	insert_size	fr_count	rf_count	tandem_count
+edges	1	1	1	0
+edges	10	0	0	1
+edges	20	0	0	1
+edges	100	5	1	0
+edges	200	3	0	0
+edges	1000	1	0	0
+edges	2147483648	0	0	1

@@ -2,6 +2,17 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- `rduckhts_bam_insert_size_counts()` exposes bundled BAM/CRAM insert-size
+  counts and `duckhts_insert_size_metrics()` summarizes counts in SQL.
+  Semantics credit Fulcrum Genomics riker 0.4.1 (MIT), the executable oracle:
+  reject first-segment and QC-fail records, use POS + TLEN for the forward
+  read's mate end, and label equal strands `TANDEM`. These upstream rules
+  supersede the design note's draft rules. Picard is context only.
+
+- The bundled function catalog documents chr20 validation limits of the
+  low-pass mixture estimator, including weak small-share detection and
+  unvalidated genome-wide precision.
+
 - The bundled function catalog documents autosomal low-pass validation across
   90 strata with 200 replicates each. At 5% share, positive interval limits
   occur in 199–200/200 unrelated and 160–165/200 IBD1 replicates at 0.1x,

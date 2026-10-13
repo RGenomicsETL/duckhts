@@ -102,6 +102,8 @@ extern void register_duckhts_mosdepth_function(duckdb_connection connection);
 /* bam_bin_counts.c */
 extern void register_bam_bin_counts_function(duckdb_connection connection);
 extern void register_duckhts_bam_mismatch_counts_function(duckdb_connection connection);
+extern void register_duckhts_bam_insert_size_counts_function(duckdb_connection connection);
+extern bool register_duckhts_insert_size_sql(duckhts_registration_t *registration);
 /* bam_mate_overlap_counts.c */
 extern void register_duckhts_bam_mate_overlap_counts_function(duckdb_connection connection);
 /* samtools_idxstats_table.c */
@@ -282,6 +284,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     }
     register_bam_bin_counts_function(connection);
     register_duckhts_bam_mismatch_counts_function(connection);
+    register_duckhts_bam_insert_size_counts_function(connection);
     register_duckhts_bam_mate_overlap_counts_function(connection);
     register_duckhts_samtools_idxstats_function(connection);
     register_duckhts_bam_bed_coverage_function(connection);
@@ -1231,6 +1234,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         !register_duckhts_roh_sql(&registration) ||
         !register_duckhts_count_error_sql(&registration) ||
         !register_duckhts_depth_sql(&registration) ||
+        !register_duckhts_insert_size_sql(&registration) ||
         !register_duckhts_count_mixture_sql(&registration)) {
         return false;
     }

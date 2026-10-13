@@ -1,0 +1,132 @@
+---
+title: "Insert-size counts: riker 0.4.1, native and projected SQL"
+output: github_document
+params:
+  smoke: true
+  repo: "."
+  extension: "build/release/duckhts.duckdb_extension"
+  riker: !r Sys.getenv("RIKER_BIN")
+---
+
+## Contract and declared targets
+
+Fulcrum Genomics **riker 0.4.1** (MIT), tag
+`40d5e3260c5b1b9d210c28f7c90a75387013b4ce`, is the external oracle.
+Picard is context only. Integer counts must match exactly; mean, population
+standard deviation, median and MAD must match riker's serialized two decimal
+places exactly. Both directions of each relation comparison are checked.
+
+Targets are declared before any timed run:
+
+- Every BAM/CRAM, arm, thread count and scale must satisfy exact parity.
+- At 1×, native median elapsed time must be at most half projected SQL's
+  and at most 1.20 times riker's, independently for each format/thread count.
+- For each arm/format/thread count whose 1× median is at least 5 seconds,
+  the 1×/2×/4× log-time/log-input exponent must be **<= 1.25**.
+- Peak process RSS must be **<= 256 MiB overhead + 3× declared live state**.
+  Live state includes worst-case overlapping per-worker sparse hash tables
+  (16.25 bytes/slot, power-of-two capacity at <= .77 load), 8 MiB decoder
+  state per handle, one merged hash table and 24 bytes per output count bin.
+  This is a hypothesis to test, not an assertion about measured htslib usage.
+- No spill is allowed. DuckDB has a 2 GiB buffer limit and zero temporary
+  storage allowance; a worker error is a failed run, not a discarded trial.
+
+Full workloads use registry artifacts `roh_mixture_hg00403_chr20_cram` and
+`insert_size_hg00403_chr20_bam`; the latter is a network-free BAM transcode of
+that CRAM using `liftover_grch38_fasta` and RBCFTools' bundled samtools. Stage
+with `benchmarks/insert_size_stage.R` after checking disk space; the function
+also checks the 8 GiB free-space floor with a 6 GiB staging reserve. No full
+HG00188 BAM is staged. The smoke workload and SQL reference are checksum-pinned
+committed fixtures staged through `insert-size-smoke` in the same registry.
+
+Each arm runs in a fresh R process (a fresh DuckDB process for native/SQL),
+with thread settings 1/2/4/8. Native settings are histogram workers, projected
+SQL settings are DuckDB processing threads, and riker settings are its own
+`--threads` semantics; these are not identical worker models. Native/SQL use
+zero additional htslib decompression workers. The full matrix has three
+replicates and 1×/2×/4× complete file scans, with output materialization on each
+scan; scales do not change bin cardinality. This measures scaling in records,
+not scaling in distinct insert sizes. `/usr/bin/time` measures end-to-end
+worker wall time and maximum RSS, including R startup, input decoding,
+reduction, metrics and output materialization. riker also writes its plot;
+DuckHTS emits counts/metrics/histogram relations, not a plot. This output-cost
+difference must accompany any speed comparison.
+
+Independent riker raw and default outputs are prepared outside measured
+workers. All worker results are compared against them; no failed comparison is
+filtered. Record denominators come from registry identities, retained pair
+and bin denominators from riker's untrimmed histogram. Summary moments trim
+tails without changing original pair counts. Smoke runs invoke all 24
+format/arm/thread combinations with **no clock or RSS measurement**.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+repo <- normalizePath(params$repo, mustWork = TRUE)
+source(file.path(repo, "benchmarks/insert_size_driver.R"))
+result <- run_insert_size_benchmark(repo, params$extension, params$riker, params$smoke)
+```
+
+## Revision and runtime
+
+```{r provenance, results='asis'}
+cat("Source revision: `", result$revision, "`.\n\n", sep = "")
+cat("Oracle: `", result$riker_version, "`; SHA-256 `", result$riker_sha256, "`.\n\n", sep = "")
+cat("Runtime: ", result$runtime, ".\n\n", sep = "")
+cat("CPU affinity and niceness are supplied by the launcher; this smoke uses cores 16–19, nice 10.\n\n")
+```
+
+## Results
+
+```{r results, results='asis'}
+rows <- result$rows
+if (result$smoke) {
+  cat("**Reduced smoke only; no timed comparison was run.**\n\n")
+  cat(sum(rows$parity), "fresh-process checks passed; exact raw integer counts and rounded metrics/histograms agree.\n\n")
+  print(knitr::kable(rows[, c("format", "arm", "threads", "records", "read_pairs", "bins",
+                             "metric_rows", "histogram_rows", "parity")]))
+  cat("\nSpeed, RSS and scaling criteria: **not measured**. Spill: disabled for native/SQL.\n")
+} else {
+  print(knitr::kable(rows))
+  cat("\nRSS criterion:", if (all(rows$peak_rss_mib <= rows$rss_budget_mib)) "PASS" else "FAIL", "\n\n")
+  medians <- aggregate(seconds ~ format + arm + threads + scale, rows, median)
+  gates <- list()
+  for (format in unique(rows$format)) {
+    for (threads in unique(rows$threads)) {
+      selected <- medians[medians$format == format & medians$threads == threads, ]
+      one <- selected[selected$scale == 1, ]
+      times <- setNames(one$seconds, one$arm)
+      gates[[length(gates) + 1L]] <- data.frame(format, threads,
+        native_vs_sql = times[["native"]] <= times[["projected_sql"]] / 2,
+        native_vs_riker = times[["native"]] <= times[["riker"]] * 1.20)
+      for (arm in unique(selected$arm)) {
+        arm_rows <- selected[selected$arm == arm, ]
+        if (times[[arm]] >= 5) {
+          exponent <- unname(coef(lm(log(seconds) ~ log(scale), arm_rows))[[2L]])
+          cat(format, threads, arm, "scaling exponent", exponent,
+              if (exponent <= 1.25) "PASS" else "FAIL", "\n\n")
+        } else cat(format, threads, arm, "scaling gate not applicable (1x < 5 s).\n\n")
+      }
+    }
+  }
+  print(knitr::kable(do.call(rbind, gates)))
+}
+```
+
+## Interpretation and next measurement
+
+The native reducer is expected to beat projected SQL because it avoids emitting
+one DuckDB row and one CIGAR string per alignment, SQL flag/orientation
+expressions, and the per-record hash aggregate. The same HTS decoding and CRAM
+reference I/O remain. This is an expectation, not measured performance evidence.
+The nearest recorded BAM-reduction baseline is
+`benchmarks/benchmark_bam_mismatch_counts.md`; it exercises a different kernel
+and cannot establish insert-size throughput or regression status.
+
+Profile scan/decode time, CRAM reference fetches, task-window overlap decoding,
+histogram hash operations and merge time separately. At multiple threads,
+inspect storage throughput and per-handle decompression before changing task
+sizes or adding SIMD. Compare an explicitly sequential native scan against
+indexed scans to quantify index and repeated-overlap costs. Very short inputs
+will be dominated by fresh-process startup and riker plotting. The full chr20
+matrix, 1×/2×/4× measurements and RSS ceilings remain for the quiet-host run;
+none can be inferred from this smoke.

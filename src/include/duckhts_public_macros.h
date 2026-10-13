@@ -18,6 +18,7 @@ static const char *const duckhts_public_macros[] = {
     "duckhts_duckdb_supports_variant",
     "duckhts_duckdb_type_supported",
     "duckhts_gff_convert_parquet_sql",
+    "duckhts_insert_size_metrics",
     "duckhts_liftover",
     "duckhts_munge",
     "duckhts_munge_metal",

@@ -2,6 +2,13 @@
 
 # duckhts 1.5.2.9017
 
+- `duckhts_bam_insert_size_counts()` reduces BAM/CRAM insert sizes to sparse
+  orientation counts; `duckhts_insert_size_metrics()` summarizes them in SQL.
+  Semantics credit Fulcrum Genomics riker 0.4.1 (MIT), the executable oracle:
+  reject first-segment and QC-fail records, use POS + TLEN for the forward
+  read's mate end, and label equal strands `TANDEM`. These upstream rules
+  supersede the design note's draft rules. Picard is context only.
+
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
 - `benchmarks/benchmark_count_mixture_lowpass_genome.md` evaluates 90 autosomal

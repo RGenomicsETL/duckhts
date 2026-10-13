@@ -1371,6 +1371,44 @@
       ]
     },
     {
+      "name": "duckhts_bam_insert_size_counts",
+      "kind": "table",
+      "category": "Coverage",
+      "signature": "duckhts_bam_insert_size_counts(path, reference := NULL, include_duplicates := FALSE, threads := 1, decompression_threads := 0, scan_mode := 'auto', index_path := NULL, reference_index_path := NULL)",
+      "returns": "table(pair_orientation VARCHAR, insert_size BIGINT, read_pairs UBIGINT)",
+      "r_wrapper": "rduckhts_bam_insert_size_counts",
+      "description": "Reduce BAM/CRAM records to sparse insert-size counts using riker 0.4.1 semantics.",
+      "details": {
+        "Authority and attribution": "Fulcrum Genomics riker 0.4.1 (MIT), tag 40d5e3260c5b1b9d210c28f7c90a75387013b4ce, is the executable oracle. Its rules supersede the design note's draft first-segment, QC-fail, POS + TLEN - 1 and mixed-case orientation rules. Picard InsertSizeMetricsCollector is context only, not the oracle.",
+        "Selection": "riker src/commands/isize.rs:197-206: paired, read and mate mapped, primary (not secondary or supplementary), not first-segment or QC-fail, nonzero TLEN, and no duplicate flag unless include_duplicates is true. Neither MAPQ (including 0 and 255) nor proper-pair status is a predicate. Rejecting first segments does not require a second-segment flag. No QNAME matching is performed.",
+        "Orientation and size": "riker src/sam/pair_orientation.rs:30-59: require the same reference; equal strands are TANDEM. For a reverse read compare mate alignment start with inclusive CIGAR reference end; for a forward read compare alignment start with alignment start + TLEN (no minus one). Forward end strictly before reverse end is FR; equality is RF. Missing CIGAR spans one reference base, as in noodles alignment_end (riker src/sam/pair_orientation.rs:49). riker src/commands/isize.rs:211-218 counts unsigned absolute TLEN, including INT32_MIN as 2147483648.",
+        "Execution and limits": "Unordered sparse rows; absent bins are omitted. Indexed scans use per-worker file handles and histograms (threads 1..8), with one-million-base task windows and read-start ownership so overlapping reads count once. auto falls back to a single sequential worker if no index exists; indexed requires an index; sequential streams the file explicitly. SEQ, QUAL and tags are not decoded. decompression_threads is htslib workers per handle, independent of histogram workers. Each worker and the merged result are capped at one million distinct orientation/size bins; exceeding the cap is an error. Counts are checked for UBIGINT overflow. The reduction runs during table-function initialization; the stable C API offers no interrupt polling inside that scan. On wasm use threads=1 and decompression_threads=0.",
+        "Scope": "Counts are over the whole file, not grouped by read group or sample. reference supplies the FASTA for CRAM. Sample labels and provenance belong in SQL; no riker text files or plots are written. SAM TLEN is a signed 32-bit value."
+      },
+      "examples": [
+        "CREATE TABLE insert_counts AS SELECT * FROM duckhts_bam_insert_size_counts('sample.bam');",
+        "SELECT * FROM duckhts_insert_size_metrics('insert_counts', sample_name := 'S1');"
+      ]
+    },
+    {
+      "name": "duckhts_insert_size_metrics",
+      "r_wrapper": "",
+      "kind": "table_macro",
+      "category": "Coverage",
+      "signature": "duckhts_insert_size_metrics(counts_table, deviations := 10.0, min_frac := 0.05, sample_name := NULL)",
+      "returns": "table(sample VARCHAR, pair_orientation VARCHAR, read_pairs HUGEINT, median_insert_size DOUBLE, median_absolute_deviation DOUBLE, mean_insert_size DOUBLE, standard_deviation DOUBLE, mode_insert_size BIGINT, min_insert_size BIGINT, max_insert_size BIGINT, histogram_cutoff BIGINT)",
+      "description": "Compute riker 0.4.1 weighted insert-size metrics from a named sparse counts relation.",
+      "details": {
+        "Authority and attribution": "Fulcrum Genomics riker 0.4.1 (MIT), tag 40d5e326, is the oracle; Picard is context only. The executable rules supersede the design note's draft rules (see duckhts_bam_insert_size_counts).",
+        "Input": "counts_table names a table or view with pair_orientation (FR, RF, TANDEM), insert_size (whole 1..UINT32_MAX) and positive whole read_pairs. Duplicate orientation/size rows are summed. Empty input returns no rows. deviations and min_frac must be finite and nonnegative. min_frac greater than 1 yields no metric rows, as in riker; sample_name is caller supplied, not inferred from tags.",
+        "Weighted statistics": "riker src/counter.rs:110-115 selects the largest mode on ties; :180-210 interpolates the two middle observations for even totals; :226-240 stores doubled absolute deviations as rounded, saturating u32 keys and halves their median. src/commands/isize.rs:245-277 retains orientations whose count is at least total * min_frac; original counts, median, MAD and min/max use every size. Only mean and population standard deviation trim to sizes <= median + deviations * MAD (src/counter.rs:154-175). No read-pair expansion is used; intermediates scale with distinct bins. Values are numeric; printf('%.2f', value) reproduces riker's two-decimal serialization (src/commands/isize.rs:328-340).",
+        "Histogram cutoff": "riker src/commands/isize.rs:236-290 uses the floor of the largest median + deviations * MAD among retained orientations. histogram_cutoff repeats that shared value. To reproduce the histogram, pivot all orientations' counts at sizes <= this cutoff, not just retained orientations, filling missing counts with zero. If no orientation passes min_frac, riker emits the entire raw histogram; use the counts relation without trimming. Empty input has neither metrics nor histogram rows."
+      },
+      "examples": [
+        "SELECT * FROM duckhts_insert_size_metrics('insert_counts', deviations := 10, min_frac := 0.05, sample_name := 'S1');"
+      ]
+    },
+    {
       "name": "bam_bin_counts",
       "kind": "table",
       "category": "Coverage",

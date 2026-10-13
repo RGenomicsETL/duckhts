@@ -1,0 +1,173 @@
+# name: test/sql/insert_size_counts.test
+# description: riker 0.4.1 insert-size counts, projected SQL and rounded metrics.
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+SET VARIABLE insert_reference = 'test/data/insert_size/reference.fa';
+
+statement ok
+SET threads = 1;
+
+statement ok
+SET VARIABLE reference_sql = (SELECT content FROM read_text('test/sql/insert_size_reference.sql'));
+
+foreach format bam cram
+
+foreach fixture edges singleton task_overlap long_cigar even mad_zero minority
+
+foreach duplicates false true
+
+statement ok
+SET VARIABLE insert_path = 'test/data/insert_size/${fixture}.${format}';
+
+statement ok
+SET VARIABLE insert_duplicates = ${duplicates};
+
+statement ok
+CREATE OR REPLACE TEMP TABLE counts AS
+SELECT * FROM duckhts_bam_insert_size_counts('test/data/insert_size/${fixture}.${format}',
+ reference := 'test/data/insert_size/reference.fa', include_duplicates := ${duplicates});
+
+query I
+SELECT count(*) FROM (
+ (SELECT * FROM counts EXCEPT ALL SELECT * FROM query(getvariable('reference_sql')))
+ UNION ALL
+ (SELECT * FROM query(getvariable('reference_sql')) EXCEPT ALL SELECT * FROM counts)
+);
+----
+0
+
+statement ok
+SET VARIABLE raw_path = 'test/data/insert_size/${fixture}.${format}.' ||
+ CASE WHEN ${duplicates} THEN 'raw_duplicates' ELSE 'raw' END || '.isize-histogram.txt';
+
+statement ok
+CREATE OR REPLACE TEMP TABLE raw AS
+SELECT pair_orientation, insert_size::BIGINT AS insert_size, read_pairs::UBIGINT AS read_pairs
+FROM (UNPIVOT (SELECT * EXCLUDE(sample) FROM read_csv(getvariable('raw_path'), delim='\t', header=true))
+ ON fr_count AS 'FR', rf_count AS 'RF', tandem_count AS 'TANDEM'
+ INTO NAME pair_orientation VALUE read_pairs) WHERE read_pairs > 0;
+
+query I
+SELECT count(*) FROM (
+ (SELECT * FROM counts EXCEPT ALL SELECT * FROM raw)
+ UNION ALL (SELECT * FROM raw EXCEPT ALL SELECT * FROM counts)
+);
+----
+0
+
+foreach threads 1 2 4 8
+
+foreach mode indexed sequential
+
+query I
+SELECT count(*) FROM (
+ (SELECT * FROM counts EXCEPT ALL SELECT * FROM duckhts_bam_insert_size_counts(
+  'test/data/insert_size/${fixture}.${format}', reference := 'test/data/insert_size/reference.fa',
+  threads := ${threads}, scan_mode := '${mode}', include_duplicates := ${duplicates}))
+ UNION ALL
+ (SELECT * FROM duckhts_bam_insert_size_counts(
+  'test/data/insert_size/${fixture}.${format}', reference := 'test/data/insert_size/reference.fa',
+  threads := ${threads}, scan_mode := '${mode}', include_duplicates := ${duplicates})
+  EXCEPT ALL SELECT * FROM counts)
+);
+----
+0
+
+endloop
+
+endloop
+
+endloop
+
+# Default metrics include original ranges/counts but trimmed population moments.
+statement ok
+CREATE OR REPLACE TEMP TABLE counts AS SELECT * FROM duckhts_bam_insert_size_counts(
+ 'test/data/insert_size/${fixture}.${format}', reference := 'test/data/insert_size/reference.fa');
+
+query I
+WITH actual AS (
+ SELECT sample,pair_orientation,read_pairs,
+ printf('%.2f',mean_insert_size) AS mean_insert_size,
+ printf('%.2f',standard_deviation) AS standard_deviation,
+ printf('%.2f',median_insert_size) AS median_insert_size,
+ printf('%.2f',median_absolute_deviation) AS median_absolute_deviation,
+ mode_insert_size,min_insert_size,max_insert_size
+ FROM duckhts_insert_size_metrics('counts', sample_name := 'edges')
+), expected AS (
+ SELECT * FROM read_csv('test/data/insert_size/${fixture}.${format}.default.isize-metrics.txt',
+ delim='\t', header=true, columns={'sample':'VARCHAR','pair_orientation':'VARCHAR','read_pairs':'HUGEINT',
+ 'mean_insert_size':'VARCHAR','standard_deviation':'VARCHAR','median_insert_size':'VARCHAR',
+ 'median_absolute_deviation':'VARCHAR','mode_insert_size':'BIGINT','min_insert_size':'BIGINT','max_insert_size':'BIGINT'})
+)
+SELECT count(*) FROM ((SELECT * FROM actual EXCEPT ALL SELECT * FROM expected)
+ UNION ALL (SELECT * FROM expected EXCEPT ALL SELECT * FROM actual));
+----
+0
+
+endloop
+
+query I
+SELECT count(*) FROM duckhts_bam_insert_size_counts('test/data/insert_size/empty.${format}',
+ reference := 'test/data/insert_size/reference.fa');
+----
+0
+
+endloop
+
+query TTTTTT
+DESCRIBE SELECT * FROM duckhts_bam_insert_size_counts('test/data/insert_size/empty.bam');
+----
+pair_orientation	VARCHAR	YES	NULL	NULL	NULL
+insert_size	BIGINT	YES	NULL	NULL	NULL
+read_pairs	UBIGINT	YES	NULL	NULL	NULL
+
+statement error
+SELECT * FROM duckhts_bam_insert_size_counts('test/data/insert_size/edges.bam', threads := 0);
+----
+threads
+
+statement error
+SELECT * FROM duckhts_bam_insert_size_counts('test/data/insert_size/edges.bam', threads := 9);
+----
+threads
+
+statement error
+SELECT * FROM duckhts_bam_insert_size_counts('test/data/insert_size/edges.bam', scan_mode := 'other');
+----
+scan_mode
+
+statement error
+SELECT * FROM duckhts_bam_insert_size_counts('missing.bam');
+----
+open
+
+query I
+SELECT count(*) FROM (
+ (SELECT * FROM duckhts_bam_insert_size_counts('test/data/insert_size/unindexed.bam')
+ EXCEPT ALL SELECT * FROM duckhts_bam_insert_size_counts('test/data/insert_size/edges.bam'))
+ UNION ALL
+ (SELECT * FROM duckhts_bam_insert_size_counts('test/data/insert_size/edges.bam')
+ EXCEPT ALL SELECT * FROM duckhts_bam_insert_size_counts('test/data/insert_size/unindexed.bam')));
+----
+0
+
+statement error
+SELECT * FROM duckhts_bam_insert_size_counts('test/data/insert_size/unindexed.bam', scan_mode := 'indexed');
+----
+cannot load required index
+
+statement error
+SELECT * FROM duckhts_insert_size_metrics('counts', deviations := -1);
+----
+nonnegative
+
+statement ok
+CREATE OR REPLACE TEMP TABLE invalid_counts AS SELECT 'FR' AS pair_orientation, 0 AS insert_size, 1 AS read_pairs;
+
+statement error
+SELECT * FROM duckhts_insert_size_metrics('invalid_counts');
+----
+counts require
