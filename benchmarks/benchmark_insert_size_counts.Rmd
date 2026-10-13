@@ -19,8 +19,11 @@ places exactly. Both directions of each relation comparison are checked.
 Targets are declared before any timed run:
 
 - Every BAM/CRAM, arm, thread count and scale must satisfy exact parity.
-- At 1×, native median elapsed time must be at most half projected SQL's
-  and at most 1.20 times riker's, independently for each format/thread count.
+- At 1×, each DuckHTS arm's median elapsed time divided by riker's must be
+  **<= 1.05 at 1 thread, <= 1.00 at 2, and <= 0.90 at 4 and 8**, independently
+  for BAM and CRAM. Apply these targets to native and projected SQL separately.
+- Report the native/projected-SQL elapsed-time ratio without a pass/fail gate;
+  this comparison informs the supervisor's final public-name decision.
 - For each arm/format/thread count whose 1× median is at least 5 seconds,
   the 1×/2×/4× log-time/log-input exponent must be **<= 1.25**.
 - Peak process RSS must be **<= 256 MiB overhead + 3× declared live state**.
@@ -95,9 +98,13 @@ if (result$smoke) {
       selected <- medians[medians$format == format & medians$threads == threads, ]
       one <- selected[selected$scale == 1, ]
       times <- setNames(one$seconds, one$arm)
-      gates[[length(gates) + 1L]] <- data.frame(format, threads,
-        native_vs_sql = times[["native"]] <= times[["projected_sql"]] / 2,
-        native_vs_riker = times[["native"]] <= times[["riker"]] * 1.20)
+      target <- c(`1` = 1.05, `2` = 1.00, `4` = .90, `8` = .90)[[as.character(threads)]]
+      gates[[length(gates) + 1L]] <- data.frame(format, threads, target,
+        native_sql_ratio = times[["native"]] / times[["projected_sql"]],
+        native_riker_ratio = times[["native"]] / times[["riker"]],
+        sql_riker_ratio = times[["projected_sql"]] / times[["riker"]],
+        native_pass = times[["native"]] / times[["riker"]] <= target,
+        sql_pass = times[["projected_sql"]] / times[["riker"]] <= target)
       for (arm in unique(selected$arm)) {
         arm_rows <- selected[selected$arm == arm, ]
         if (times[[arm]] >= 5) {
