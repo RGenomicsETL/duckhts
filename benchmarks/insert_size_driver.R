@@ -29,8 +29,8 @@ insert_size_worker <- function(config) {
     }
     return(result)
   }
-  con <- DBI::dbConnect(duckdb::duckdb(), config = list(allow_unsigned_extensions = "true",
-    autoinstall_known_extensions = "false", autoload_known_extensions = "false"))
+  con <- DBI::dbConnect(duckdb::duckdb(config = list(allow_unsigned_extensions = "true",
+    autoinstall_known_extensions = "false", autoload_known_extensions = "false"), shared_home = FALSE))
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE))
   quote <- function(x) as.character(DBI::dbQuoteString(con, x))
   DBI::dbExecute(con, paste("LOAD", quote(config$extension)))
