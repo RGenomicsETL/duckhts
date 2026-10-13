@@ -9,9 +9,9 @@
     DUCKHTS_WHOLE_OPTION("max_candidates") ", " DUCKHTS_WHOLE_OPTION("max_state_bytes")
 #define FIT_ARGS CAL ", " DUCKHTS_WHOLE_OPTION("min_blocks") ", model = 'ibd1', " DUCKHTS_WHOLE_OPTION("max_state_bytes")
 
-/* Ordered built-in sums avoid the constant-state limitation of ordered C
- * aggregates in DuckDB 1.5.2. Native aggregation receives one row per block. */
-#define SUM(expr) "CAST(coalesce(sum(" expr " ORDER BY bp), 0) AS DOUBLE)"
+/* Compensated sums keep one accumulator per moment and block. Native
+ * aggregation receives one row per block, independent of panel site count. */
+#define SUM(expr) "CAST(coalesce(fsum(" expr "), 0) AS DOUBLE)"
 #define S(a,b) SUM("n*(" a ")*(" b ")")
 #define T(a,b) SUM("p*(" a ")*(" b ")")
 #define TROW(a) T(a,"1") "," T(a,"ff") "," T(a,"gg") "," T(a,"ff*ff") "," T(a,"ff*gg") "," T(a,"gg*gg")
@@ -19,7 +19,7 @@ static const char *const mixture_sql[] = {
     "CREATE OR REPLACE MACRO duckhts_count_mixture_lowpass(counts_table, seq_error, artefact_weight, "
     "homozygosity_excess, block_bases := 10000000, max_depth := 8, min_blocks := 30, "
     "max_blocks := 512, max_candidates := 16, max_state_bytes := 268435456) AS TABLE (",
-    "WITH raw AS MATERIALIZED (SELECT "
+    "WITH raw AS NOT MATERIALIZED (SELECT "
     "CASE WHEN sample_id IS NULL OR CAST(sample_id AS VARCHAR) = '' THEN error('sample_id must not be empty') "
     "ELSE CAST(sample_id AS VARCHAR) END AS smp, "
     "CASE WHEN candidate IS NULL OR CAST(candidate AS VARCHAR) = '' THEN error('candidate must not be empty') "
@@ -46,9 +46,7 @@ static const char *const mixture_sql[] = {
     "ELSE count(g) END AS nf FROM raw GROUP BY smp, chr, bp), ",
     "prepared AS (SELECT s.smp, c.cand, s.chr, s.bp, s.r, s.a, s.o, s.f, r.g, "
     "s.nf = n.nc AND s.f IS NOT NULL AND s.r IS NOT NULL AND s.a IS NOT NULL AND s.o IS NOT NULL AS usable, "
-    "coalesce(s.r > " DUCKHTS_WHOLE_OPTION("max_depth") " OR s.a > " DUCKHTS_WHOLE_OPTION("max_depth")
-    " OR (s.r <= " DUCKHTS_WHOLE_OPTION("max_depth") " AND s.a <= " DUCKHTS_WHOLE_OPTION("max_depth")
-    " AND s.r+s.a > " DUCKHTS_WHOLE_OPTION("max_depth") "), false) AS excluded, "
+    "coalesce(s.r+s.a > " DUCKHTS_WHOLE_OPTION("max_depth") ", false) AS excluded, "
     "dense_rank() OVER (PARTITION BY s.smp ORDER BY s.chr, (s.bp-1)//"
     DUCKHTS_WHOLE_OPTION("block_bases") ")-1 AS block "
     "FROM site_data s JOIN candidates c ON s.smp = c.smp JOIN candidate_sizes n ON s.smp = n.smp "

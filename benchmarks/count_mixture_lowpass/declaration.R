@@ -51,3 +51,18 @@ lowpass_strata <- function() {
   x$seed <- lowpass_declaration$seed + x$id
   x
 }
+
+lowpass_thinning_strata <- function() {
+  samples <- lowpass_declaration$count_samples
+  single <- expand.grid(receiver = samples, probability = lowpass_declaration$thinning_probabilities,
+                        stringsAsFactors = FALSE)
+  single$donor <- single$receiver
+  single$share <- 0
+  mixture <- expand.grid(receiver = samples, donor = samples,
+                         probability = lowpass_declaration$thinning_probabilities,
+                         share = lowpass_declaration$shares[-1L], stringsAsFactors = FALSE)
+  mixture <- mixture[mixture$receiver != mixture$donor, ]
+  x <- rbind(single[names(mixture)], mixture)
+  x$id <- seq_len(nrow(x))
+  x
+}

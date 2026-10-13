@@ -169,5 +169,26 @@ run_lowpass_tests <- function() {
   expect_error(rduckhts_count_mixture_lowpass(con, "counts", 0, 0, 0, max_candidates = 65), "max_candidates")
   expect_error(rduckhts_count_mixture_lowpass(con, "counts", 0, 0, 0, max_state_bytes = .5), "max_state_bytes")
   expect_error(rduckhts_count_mixture_lowpass(con, "counts", 0, 0, 0, max_depth = 8.5), "max_depth")
+
+  # Parallel reduction preserves fits and statuses at vector-sized input.
+  set.seed(332)
+  parallel_counts <- data.frame(
+    sample_id = "parallel", candidate = "cross", chrom = "20", pos = seq_len(20000),
+    ref_count = sample.int(3L, 20000, replace = TRUE) - 1L,
+    alt_count = sample.int(3L, 20000, replace = TRUE) - 1L,
+    other_count = 0L, sample_af = runif(20000, .01, .99),
+    candidate_af = runif(20000, .01, .99)
+  )
+  dbWriteTable(con, "mixture_parallel", parallel_counts, overwrite = TRUE)
+  dbExecute(con, "SET threads=1")
+  one <- rduckhts_count_mixture_lowpass(con, "mixture_parallel", .0001, .002, 0,
+                                      block_bases = 500, min_blocks = 30)
+  dbExecute(con, "SET threads=4")
+  four <- rduckhts_count_mixture_lowpass(con, "mixture_parallel", .0001, .002, 0,
+                                       block_bases = 500, min_blocks = 30)
+  expect_identical(one$status, four$status)
+  expect_identical(is.na(one$share), is.na(four$share))
+  expect_equal(one$share, four$share, tolerance = 1e-10)
+  expect_equal(one$pair_denominator, four$pair_denominator, tolerance = 1e-10)
 }
 run_lowpass_tests()

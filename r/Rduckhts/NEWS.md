@@ -2,6 +2,10 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- The bundled low-pass mixture estimator uses compensated unordered sums
+  with fixed-size per-block accumulators. SQL validation and join memory is
+  controlled by DuckDB, separately from the native byte budget.
+
 - `rduckhts_depth_bins()`, `rduckhts_depth_region_fraction()` and
   `rduckhts_depth_sex_fraction()` wrap the new depth macros: GC-corrected bin
   ratios from bin counts, the share of cells with a one-copy change of each

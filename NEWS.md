@@ -4,6 +4,11 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- Low-pass mixture moments use compensated unordered sums with fixed-size
+  per-block accumulators. SQL validation and join memory remains input-sized;
+  the native byte budget does not cover DuckDB's SQL workspace.
+
+
 - Add a declared parent/child read-mixture benchmark for a related second
   genome, comparing relative and unrelated count fits and FROH erosion, with
   a registered public 30x donor slice and network-free staging checks.
