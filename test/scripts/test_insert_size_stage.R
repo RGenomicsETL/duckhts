@@ -14,7 +14,7 @@ local({
   on.exit(if (is.na(old_cache)) Sys.unsetenv("DUCKHTS_CACHE_DIR") else
     Sys.setenv(DUCKHTS_CACHE_DIR = old_cache), add = TRUE)
   paths <- duckhtsbench::duckhts_bench_stage_repository_fixtures(root, "insert-size-smoke")
-  stopifnot(length(paths) == 7L, all(file.exists(paths)))
+  stopifnot(length(paths) == 8L, all(file.exists(paths)))
   extension <- normalizePath("build/release/duckhts.duckdb_extension")
   original <- getFromNamespace("duckhts_bench_registry", "duckhtsbench")
   registry <- original()
@@ -31,5 +31,5 @@ local({
   stopifnot(identical(stage_insert_size_bam_from_registry(extension), output))
   observed <- bam_mismatch_slice_identity(output, paths[["insert_size_smoke_reference_fa"]], extension)
   stopifnot(identical(observed, identity))
-  cat("PASS: 7 fixture artifacts; derived BAM, index, provenance, identity and idempotence\n")
+  cat("PASS: 8 fixture artifacts; derived BAM, index, provenance, identity and idempotence\n")
 })

@@ -2,8 +2,11 @@
 
 # duckhts 1.5.2.9017
 
-- `duckhts_bam_insert_size_counts()` reduces BAM/CRAM insert sizes to sparse
-  orientation counts; `duckhts_insert_size_metrics()` summarizes them in SQL.
+- `duckhts_bam_insert_size_counts()` composes projected binary-CIGAR reads and
+  flag/length kernels in SQL; `duckhts_bam_insert_size_counts_native()` uses
+  per-worker native reducers. Both return sparse BAM/CRAM orientation counts;
+  `duckhts_insert_size_metrics()` summarizes them in SQL. The benchmark report
+  declares per-format/thread targets for both arms; final naming awaits timing.
   Semantics credit Fulcrum Genomics riker 0.4.1 (MIT), the executable oracle:
   reject first-segment and QC-fail records, use POS + TLEN for the forward
   read's mate end, and label equal strands `TANDEM`. These upstream rules

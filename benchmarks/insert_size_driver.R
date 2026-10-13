@@ -43,8 +43,10 @@ insert_size_worker <- function(config) {
   DBI::dbExecute(con, "SET VARIABLE insert_duplicates = false")
   for (pass in seq_len(config$scale)) {
     query <- if (config$arm == "native") sprintf(
-      "SELECT * FROM duckhts_bam_insert_size_counts(%s, reference := %s, threads := %d)",
-      quote(config$path), quote(config$reference), config$threads) else config$reference_sql
+      "SELECT * FROM duckhts_bam_insert_size_counts_native(%s, reference := %s, threads := %d)",
+      quote(config$path), quote(config$reference), config$threads) else sprintf(
+      "SELECT * FROM duckhts_bam_insert_size_counts(%s, reference := %s)",
+      quote(config$path), quote(config$reference))
     DBI::dbExecute(con, paste("CREATE OR REPLACE TEMP TABLE counts AS", sub(";[[:space:]]*$", "", query)))
     metrics <- DBI::dbGetQuery(con, sprintf(
       "SELECT * FROM duckhts_insert_size_metrics('counts', sample_name := %s)", quote(config$sample)))
@@ -77,7 +79,6 @@ run_insert_size_benchmark <- function(repo, extension, riker, smoke = TRUE) {
     BAM = duckhtsbench::duckhts_bench_artifact_path("insert_size_hg00403_chr20_bam"),
     CRAM = duckhtsbench::duckhts_bench_artifact_path("roh_mixture_hg00403_chr20_cram"))
   stopifnot(all(file.exists(c(paths, reference))))
-  reference_sql <- paste(readLines(staged[["insert_size_smoke_insert_size_reference_sql"]]), collapse = "\n")
   scratch <- tempfile("insert-size-benchmark-")
   dir.create(scratch)
   on.exit(unlink(scratch, recursive = TRUE))
@@ -88,7 +89,7 @@ run_insert_size_benchmark <- function(repo, extension, riker, smoke = TRUE) {
   rows <- list()
   for (format in names(paths)) {
     config <- list(path = paths[[format]], reference = reference, extension = extension,
-      riker = riker, threads = 1L, scratch = scratch, reference_sql = reference_sql)
+      riker = riker, threads = 1L, scratch = scratch)
     expected <- insert_size_riker(config, file.path(scratch, "expected"))
     raw <- insert_size_riker(config, file.path(scratch, "raw"), raw = TRUE)$histogram
     config$sample <- unique(expected$metrics$sample)

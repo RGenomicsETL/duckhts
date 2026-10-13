@@ -324,7 +324,7 @@ static void *isize_worker_main(void *ptr) {
             }
             while ((status = sam_itr_next(fp, iterator, record)) >= 0) {
                 /* Overlapping alignments belong only to the window containing
-                 * their start. This preserves exactly-once first-segment counts. */
+                 * their start. This preserves exactly-once eligible-record counts. */
                 if (record->core.pos < beg || record->core.pos >= end) continue;
                 if (!isize_count(worker, record)) goto cleanup;
             }
@@ -420,7 +420,7 @@ static void isize_scan(duckdb_function_info info, duckdb_data_chunk output) {
 
 void register_duckhts_bam_insert_size_counts_function(duckdb_connection connection) {
     duckdb_table_function function = duckdb_create_table_function();
-    duckdb_table_function_set_name(function, "duckhts_bam_insert_size_counts");
+    duckdb_table_function_set_name(function, "duckhts_bam_insert_size_counts_native");
     duckdb_logical_type text = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_logical_type integer = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
     duckdb_logical_type boolean = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);

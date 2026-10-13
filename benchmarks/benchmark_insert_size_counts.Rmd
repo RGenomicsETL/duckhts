@@ -41,6 +41,9 @@ with `benchmarks/insert_size_stage.R` after checking disk space; the function
 also checks the 8 GiB free-space floor with a 6 GiB staging reserve. No full
 HG00188 BAM is staged. The smoke workload and SQL reference are checksum-pinned
 committed fixtures staged through `insert-size-smoke` in the same registry.
+The SQL arm is the public `duckhts_bam_insert_size_counts` macro over packed
+CIGAR, existing flag predicates and `cigar_reference_length`; the native arm
+is `duckhts_bam_insert_size_counts_native`.
 
 Each arm runs in a fresh R process (a fresh DuckDB process for native/SQL),
 with thread settings 1/2/4/8. Native settings are histogram workers, projected
@@ -119,12 +122,46 @@ if (result$smoke) {
 }
 ```
 
+## Fixture footprint
+
+The corpus retains all eight alignment cases and all seven riker argument cases
+in keyed `metrics.tsv`/`histograms.tsv` files, including exact upstream decimal
+text. BAM and CRAM have separate oracle keys. The R package ships only edges/
+empty wrapper fixtures and their oracle subset, not the full corpus. File
+payload sizes exclude directory allocation:
+
+```{r fixture-sizes}
+fixture_dirs <- c(repository = "test/data/insert_size",
+                  package = "r/Rduckhts/inst/extdata/insert_size")
+fixture_sizes <- lapply(names(fixture_dirs), function(location) {
+  files <- list.files(file.path(repo, fixture_dirs[[location]]), full.names = TRUE)
+  data.frame(location, files = length(files), bytes = sum(file.info(files)$size))
+})
+knitr::kable(do.call(rbind, fixture_sizes))
+```
+
 ## Interpretation and next measurement
 
 The native reducer is expected to beat projected SQL because it avoids emitting
-one DuckDB row and one CIGAR string per alignment, SQL flag/orientation
-expressions, and the per-record hash aggregate. The same HTS decoding and CRAM
-reference I/O remain. This is an expectation, not measured performance evidence.
+one DuckDB row and packed CIGAR per alignment, SQL flag/orientation expressions,
+and the per-record hash aggregate. This is an expectation, not measured evidence.
+No building-block bottleneck has been identified with a profile, so no block
+optimization is justified here.
+
+Known CRAM cost: `src/bam_reader.c:bam_cram_required_fields` adds `SAM_SEQ`,
+`SAM_QUAL`, `SAM_AUX` and `SAM_RGAUX` when CIGAR is projected, for
+long-CIGAR CG restoration. Native requests CIGAR but omits SEQ, QUAL and AUX. The extra
+decoding's wall-time and RSS effects are unmeasured. Profile CRAM `sam_read1`/
+decompression separately from SQL flag predicates, `cigar_reference_length`
+and packed-CIGAR vector materialization before attributing an arm difference.
+
+If that decoding dominates, investigate a reader-projection change separately:
+htslib 1.24 `sam.c:682-706` (`bam_tag2cigar`) tests the fake soft-clip length
+against `l_qseq` before consulting CG; `cram/cram_decode.c:3231-3233` calls it
+after constructing the aux block. Any narrower request must preserve read length and CG
+restoration, retaining the long-CIGAR BAM/CRAM fixture. No reader projection
+change is made here. The native/SQL ratio informs the supervisor's naming
+decision; the unsuffixed name remains SQL pending timing.
 The nearest recorded BAM-reduction baseline is
 `benchmarks/benchmark_bam_mismatch_counts.md`; it exercises a different kernel
 and cannot establish insert-size throughput or regression status.

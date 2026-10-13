@@ -46,7 +46,7 @@ def definitions(con):
         "FROM duckhts_macro_definitions() ORDER BY install_order"
     ).fetchall()
     # Public and private macro definitions have one ordered inventory.
-    assert len(rows) == 56
+    assert len(rows) == 58
     assert sum(exposed for _, exposed, _, _ in rows) == 45
     assert not any(name.startswith("duckdb_") for name, exposed, _, _ in rows if exposed)
     assert len({row[3] for row in rows}) == 1

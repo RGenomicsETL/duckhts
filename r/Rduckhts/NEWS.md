@@ -2,8 +2,11 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
-- `rduckhts_bam_insert_size_counts()` exposes bundled BAM/CRAM insert-size
-  counts and `duckhts_insert_size_metrics()` summarizes counts in SQL.
+- `rduckhts_bam_insert_size_counts()` exposes SQL-composed BAM/CRAM insert-size
+  counts, temporarily setting and restoring DuckDB threads;
+  `rduckhts_bam_insert_size_counts_native()` exposes the native reducer.
+  `duckhts_insert_size_metrics()` summarizes either counts relation in SQL.
+  Bundled wrapper fixtures retain BAM/CRAM and riker parity in 17 files (15.6 KB).
   Semantics credit Fulcrum Genomics riker 0.4.1 (MIT), the executable oracle:
   reject first-segment and QC-fail records, use POS + TLEN for the forward
   read's mate end, and label equal strands `TANDEM`. These upstream rules

@@ -1372,21 +1372,42 @@
     },
     {
       "name": "duckhts_bam_insert_size_counts",
-      "kind": "table",
+      "kind": "table_macro",
       "category": "Coverage",
-      "signature": "duckhts_bam_insert_size_counts(path, reference := NULL, include_duplicates := FALSE, threads := 1, decompression_threads := 0, scan_mode := 'auto', index_path := NULL, reference_index_path := NULL)",
+      "signature": "duckhts_bam_insert_size_counts(path, reference := NULL, include_duplicates := FALSE, decompression_threads := 0, scan_mode := 'auto', index_path := NULL)",
       "returns": "table(pair_orientation VARCHAR, insert_size BIGINT, read_pairs UBIGINT)",
       "r_wrapper": "rduckhts_bam_insert_size_counts",
-      "description": "Reduce BAM/CRAM records to sparse insert-size counts using riker 0.4.1 semantics.",
+      "description": "Compose projected BAM/CRAM reads, flag predicates and packed-CIGAR lengths into riker 0.4.1 insert-size counts.",
+      "details": {
+        "Authority and attribution": "Fulcrum Genomics riker 0.4.1 (MIT), tag 40d5e3260c5b1b9d210c28f7c90a75387013b4ce, is the oracle. Its executable rules supersede the design note's draft rules; Picard is context only.",
+        "Selection": "riker src/commands/isize.rs:197-218: paired, read and mate mapped, primary (not secondary or supplementary), not first-segment or QC-fail, nonzero TLEN, same reference, and no duplicate flag unless include_duplicates is true. No MAPQ, proper-pair or QNAME predicate; a second-segment flag is not required. Absolute signed-32-bit TLEN includes INT32_MIN as 2147483648.",
+        "Orientation": "riker src/sam/pair_orientation.rs:30-59: equal strands are TANDEM. For reverse reads compare mate alignment start with inclusive CIGAR reference end; for forward reads compare POS with POS + TLEN (no minus one). Strictly earlier forward end is FR; equality is RF. Missing CIGAR spans one reference base (noodles alignment_end, called at :49).",
+        "Execution": "Unordered sparse rows; absent bins are omitted. read_bam projects only FLAG, RNAME, RNEXT, POS, PNEXT, TLEN and binary CIGAR. DuckDB's threads setting controls SQL processing; scan_mode is auto or sequential as in read_bam. decompression_threads controls htslib workers per handle. No SEQ/QUAL/tags/QNAME columns are emitted, but CRAM CIGAR projection currently requests SEQ/QUAL and AUX internally for long-CIGAR CG restoration (src/bam_reader.c bam_cram_required_fields).",
+        "Alternative and benchmark": "duckhts_bam_insert_size_counts_native implements the same counts with per-worker sparse histograms. benchmarks/benchmark_insert_size_counts.md records the smoke; the full per-format/thread timed comparison remains pending. SQL owns the unsuffixed public name until the supervisor evaluates both arms against the declared riker targets."
+      },
+      "examples": [
+        "CREATE TABLE insert_counts AS SELECT * FROM duckhts_bam_insert_size_counts('sample.bam');",
+        "SELECT * FROM duckhts_insert_size_metrics('insert_counts', sample_name := 'S1');"
+      ]
+    },
+    {
+      "name": "duckhts_bam_insert_size_counts_native",
+      "kind": "table",
+      "category": "Coverage",
+      "signature": "duckhts_bam_insert_size_counts_native(path, reference := NULL, include_duplicates := FALSE, threads := 1, decompression_threads := 0, scan_mode := 'auto', index_path := NULL, reference_index_path := NULL)",
+      "returns": "table(pair_orientation VARCHAR, insert_size BIGINT, read_pairs UBIGINT)",
+      "r_wrapper": "rduckhts_bam_insert_size_counts_native",
+      "description": "Reduce BAM/CRAM records to sparse insert-size counts using a native riker 0.4.1 kernel.",
       "details": {
         "Authority and attribution": "Fulcrum Genomics riker 0.4.1 (MIT), tag 40d5e3260c5b1b9d210c28f7c90a75387013b4ce, is the executable oracle. Its rules supersede the design note's draft first-segment, QC-fail, POS + TLEN - 1 and mixed-case orientation rules. Picard InsertSizeMetricsCollector is context only, not the oracle.",
         "Selection": "riker src/commands/isize.rs:197-206: paired, read and mate mapped, primary (not secondary or supplementary), not first-segment or QC-fail, nonzero TLEN, and no duplicate flag unless include_duplicates is true. Neither MAPQ (including 0 and 255) nor proper-pair status is a predicate. Rejecting first segments does not require a second-segment flag. No QNAME matching is performed.",
         "Orientation and size": "riker src/sam/pair_orientation.rs:30-59: require the same reference; equal strands are TANDEM. For a reverse read compare mate alignment start with inclusive CIGAR reference end; for a forward read compare alignment start with alignment start + TLEN (no minus one). Forward end strictly before reverse end is FR; equality is RF. Missing CIGAR spans one reference base, as in noodles alignment_end (riker src/sam/pair_orientation.rs:49). riker src/commands/isize.rs:211-218 counts unsigned absolute TLEN, including INT32_MIN as 2147483648.",
         "Execution and limits": "Unordered sparse rows; absent bins are omitted. Indexed scans use per-worker file handles and histograms (threads 1..8), with one-million-base task windows and read-start ownership so overlapping reads count once. auto falls back to a single sequential worker if no index exists; indexed requires an index; sequential streams the file explicitly. SEQ, QUAL and tags are not decoded. decompression_threads is htslib workers per handle, independent of histogram workers. Each worker and the merged result are capped at one million distinct orientation/size bins; exceeding the cap is an error. Counts are checked for UBIGINT overflow. The reduction runs during table-function initialization; the stable C API offers no interrupt polling inside that scan. On wasm use threads=1 and decompression_threads=0.",
-        "Scope": "Counts are over the whole file, not grouped by read group or sample. reference supplies the FASTA for CRAM. Sample labels and provenance belong in SQL; no riker text files or plots are written. SAM TLEN is a signed 32-bit value."
+        "Scope": "Counts are over the whole file, not grouped by read group or sample. reference supplies the FASTA for CRAM. Sample labels and provenance belong in SQL; no riker text files or plots are written. SAM TLEN is a signed 32-bit value.",
+        "Alternative and benchmark": "duckhts_bam_insert_size_counts composes projected read_bam, flag predicates and packed-CIGAR lengths in SQL. benchmarks/benchmark_insert_size_counts.md records the smoke; the full timed comparison remains pending. Both arms face the same declared riker targets, and the supervisor will settle the public name after that comparison."
       },
       "examples": [
-        "CREATE TABLE insert_counts AS SELECT * FROM duckhts_bam_insert_size_counts('sample.bam');",
+        "CREATE TABLE insert_counts AS SELECT * FROM duckhts_bam_insert_size_counts_native('sample.bam');",
         "SELECT * FROM duckhts_insert_size_metrics('insert_counts', sample_name := 'S1');"
       ]
     },

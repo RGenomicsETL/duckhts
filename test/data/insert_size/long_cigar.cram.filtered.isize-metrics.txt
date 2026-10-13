@@ -1,2 +1,0 @@
-sample	pair_orientation	read_pairs	mean_insert_size	standard_deviation	median_insert_size	median_absolute_deviation	mode_insert_size	min_insert_size	max_insert_size
-edges	FR	1	65536.00	0.00	65536.00	0.00	65536	65536	65536

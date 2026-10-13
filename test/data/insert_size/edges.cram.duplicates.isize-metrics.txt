@@ -1,4 +1,0 @@
-sample	pair_orientation	read_pairs	mean_insert_size	standard_deviation	median_insert_size	median_absolute_deviation	mode_insert_size	min_insert_size	max_insert_size
-edges	FR	12	136.45	76.98	100.00	49.50	100	1	1000
-edges	RF	2	50.50	49.50	50.50	49.50	100	1	100
-edges	TANDEM	3	15.00	5.00	20.00	10.00	2147483648	10	2147483648

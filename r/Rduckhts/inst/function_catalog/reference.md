@@ -2726,12 +2726,58 @@ SELECT * FROM tabix_index('gff_file.gff.gz', preset := 'gff');
 
 ## duckhts_bam_insert_size_counts
 
-Reduce BAM/CRAM records to sparse insert-size counts using riker 0.4.1 semantics.
+Compose projected BAM/CRAM reads, flag predicates and packed-CIGAR lengths into riker 0.4.1 insert-size counts.
 
 Signature:
 
 ```sql
-duckhts_bam_insert_size_counts(path, reference := NULL, include_duplicates := FALSE, threads := 1, decompression_threads := 0, scan_mode := 'auto', index_path := NULL, reference_index_path := NULL)
+duckhts_bam_insert_size_counts(path, reference := NULL, include_duplicates := FALSE, decompression_threads := 0, scan_mode := 'auto', index_path := NULL)
+```
+
+Returns:
+
+```
+table(pair_orientation VARCHAR, insert_size BIGINT, read_pairs UBIGINT)
+```
+
+### Authority and attribution
+
+Fulcrum Genomics riker 0.4.1 (MIT), tag 40d5e3260c5b1b9d210c28f7c90a75387013b4ce, is the oracle. Its executable rules supersede the design note's draft rules; Picard is context only.
+
+### Selection
+
+riker src/commands/isize.rs:197-218: paired, read and mate mapped, primary (not secondary or supplementary), not first-segment or QC-fail, nonzero TLEN, same reference, and no duplicate flag unless include_duplicates is true. No MAPQ, proper-pair or QNAME predicate; a second-segment flag is not required. Absolute signed-32-bit TLEN includes INT32_MIN as 2147483648.
+
+### Orientation
+
+riker src/sam/pair_orientation.rs:30-59: equal strands are TANDEM. For reverse reads compare mate alignment start with inclusive CIGAR reference end; for forward reads compare POS with POS + TLEN (no minus one). Strictly earlier forward end is FR; equality is RF. Missing CIGAR spans one reference base (noodles alignment_end, called at :49).
+
+### Execution
+
+Unordered sparse rows; absent bins are omitted. read_bam projects only FLAG, RNAME, RNEXT, POS, PNEXT, TLEN and binary CIGAR. DuckDB's threads setting controls SQL processing; scan_mode is auto or sequential as in read_bam. decompression_threads controls htslib workers per handle. No SEQ/QUAL/tags/QNAME columns are emitted, but CRAM CIGAR projection currently requests SEQ/QUAL and AUX internally for long-CIGAR CG restoration (src/bam_reader.c bam_cram_required_fields).
+
+### Alternative and benchmark
+
+duckhts_bam_insert_size_counts_native implements the same counts with per-worker sparse histograms. benchmarks/benchmark_insert_size_counts.md records the smoke; the full per-format/thread timed comparison remains pending. SQL owns the unsuffixed public name until the supervisor evaluates both arms against the declared riker targets.
+
+### Examples
+
+```sql
+CREATE TABLE insert_counts AS SELECT * FROM duckhts_bam_insert_size_counts('sample.bam');
+```
+
+```sql
+SELECT * FROM duckhts_insert_size_metrics('insert_counts', sample_name := 'S1');
+```
+
+## duckhts_bam_insert_size_counts_native
+
+Reduce BAM/CRAM records to sparse insert-size counts using a native riker 0.4.1 kernel.
+
+Signature:
+
+```sql
+duckhts_bam_insert_size_counts_native(path, reference := NULL, include_duplicates := FALSE, threads := 1, decompression_threads := 0, scan_mode := 'auto', index_path := NULL, reference_index_path := NULL)
 ```
 
 Returns:
@@ -2760,10 +2806,14 @@ Unordered sparse rows; absent bins are omitted. Indexed scans use per-worker fil
 
 Counts are over the whole file, not grouped by read group or sample. reference supplies the FASTA for CRAM. Sample labels and provenance belong in SQL; no riker text files or plots are written. SAM TLEN is a signed 32-bit value.
 
+### Alternative and benchmark
+
+duckhts_bam_insert_size_counts composes projected read_bam, flag predicates and packed-CIGAR lengths in SQL. benchmarks/benchmark_insert_size_counts.md records the smoke; the full timed comparison remains pending. Both arms face the same declared riker targets, and the supervisor will settle the public name after that comparison.
+
 ### Examples
 
 ```sql
-CREATE TABLE insert_counts AS SELECT * FROM duckhts_bam_insert_size_counts('sample.bam');
+CREATE TABLE insert_counts AS SELECT * FROM duckhts_bam_insert_size_counts_native('sample.bam');
 ```
 
 ```sql

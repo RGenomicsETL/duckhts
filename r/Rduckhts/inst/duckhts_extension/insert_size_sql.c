@@ -6,6 +6,37 @@
 #include "duckhts_registration.h"
 
 bool register_duckhts_insert_size_sql(duckhts_registration_t *registration) {
+    /* riker 0.4.1 isize.rs:197-218 filters/counts;
+     * sam/pair_orientation.rs:30-59 compares inclusive alignment ends. */
+    if (!duckhts_register_sql(registration,
+        "CREATE OR REPLACE MACRO duckhts_bam_insert_size_counts("
+        "path, reference := NULL, include_duplicates := false, "
+        "decompression_threads := 0, scan_mode := 'auto', index_path := NULL) AS TABLE "
+        "WITH projected AS ("
+        " SELECT FLAG, RNAME, RNEXT, POS::BIGINT AS pos, PNEXT::BIGINT AS pnext, "
+        " TLEN::BIGINT AS tlen, CIGAR FROM read_bam(path, reference := reference, "
+        " cigar_representation := 'binary', decompression_threads := decompression_threads, "
+        " scan_mode := scan_mode, index_path := index_path)"
+        "), eligible AS ("
+        " SELECT *, is_reverse_complemented(FLAG) AS rev, "
+        " is_next_segment_reverse_complemented(FLAG) AS mate_rev "
+        " FROM projected WHERE is_paired(FLAG) AND NOT is_unmapped(FLAG) "
+        " AND NOT is_next_segment_unmapped(FLAG) AND NOT is_first_segment(FLAG) "
+        " AND NOT is_secondary(FLAG) AND NOT is_supplementary(FLAG) "
+        " AND NOT is_qc_fail(FLAG) "
+        " AND (include_duplicates OR NOT is_duplicate(FLAG)) "
+        " AND tlen <> 0 AND (RNEXT = '=' OR RNEXT = RNAME)"
+        "), oriented AS ("
+        " SELECT CASE WHEN rev = mate_rev THEN 'TANDEM' "
+        " WHEN rev THEN CASE WHEN pnext < pos + "
+        " greatest(coalesce(cigar_reference_length(CIGAR), 0), 1) - 1 "
+        " THEN 'FR' ELSE 'RF' END "
+        " ELSE CASE WHEN pos < pos + tlen THEN 'FR' ELSE 'RF' END END AS pair_orientation, "
+        " abs(tlen) AS insert_size FROM eligible"
+        ") SELECT pair_orientation, insert_size, count(*)::UBIGINT AS read_pairs "
+        "FROM oriented GROUP BY pair_orientation, insert_size")) {
+        return false;
+    }
     return duckhts_register_sql(registration,
         "CREATE OR REPLACE MACRO duckhts_insert_size_metrics(counts_table, "
         "deviations := 10.0, min_frac := 0.05, sample_name := NULL) AS TABLE ("

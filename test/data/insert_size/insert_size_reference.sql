@@ -1,30 +1,33 @@
--- Independent projected-read_bam oracle: Fulcrum Genomics riker v0.4.1
--- (MIT), tag 40d5e326. Picard is context only, not the oracle.
--- Caller sets insert_path, insert_reference and insert_duplicates; DuckDB's
--- threads setting controls the projected reader's processing parallelism.
+-- Fulcrum Genomics riker 0.4.1 (MIT), tag 40d5e326, is the oracle.
+-- src/commands/isize.rs:197-218: non-first, primary, mapped pair, no QC-fail,
+-- optional duplicates, same reference and nonzero TLEN; absolute TLEN counts.
+-- src/sam/pair_orientation.rs:30-59: equal strands TANDEM; compare inclusive
+-- ends, with forward mate end POS + TLEN (not minus one); ties are RF.
+-- Missing CIGAR spans one base (noodles alignment_end, called at :49).
 WITH projected AS (
-    SELECT flag, rname, pos,
-           pos + greatest(coalesce(cigar_reference_length(cigar), 0), 1) - 1 AS end_pos,
-           rnext, pnext, tlen::BIGINT AS tlen
-    FROM read_bam(getvariable('insert_path'),
-                  reference := getvariable('insert_reference'))
+  SELECT FLAG, RNAME, RNEXT, POS::BIGINT AS pos, PNEXT::BIGINT AS pnext,
+         TLEN::BIGINT AS tlen, CIGAR
+  FROM read_bam(getvariable('insert_path'), reference := getvariable('insert_reference'),
+                cigar_representation := 'binary')
 ), eligible AS (
-    -- commands/isize.rs:197-206: no MAPQ or proper-pair predicate; reject
-    -- first segments rather than requiring the second-segment flag.
-    SELECT * FROM projected
-    WHERE (flag & 1) != 0 AND (flag & (4 | 8 | 64 | 256 | 512 | 2048)) = 0
-      AND (getvariable('insert_duplicates') OR (flag & 1024) = 0)
-      AND tlen != 0 AND rname = rnext
+  SELECT *, is_reverse_complemented(FLAG) AS rev,
+         is_next_segment_reverse_complemented(FLAG) AS mate_rev
+  FROM projected
+  WHERE is_paired(FLAG) AND NOT is_unmapped(FLAG)
+    AND NOT is_next_segment_unmapped(FLAG) AND NOT is_first_segment(FLAG)
+    AND NOT is_secondary(FLAG) AND NOT is_supplementary(FLAG)
+    AND NOT is_qc_fail(FLAG)
+    AND (getvariable('insert_duplicates') OR NOT is_duplicate(FLAG))
+    AND tlen <> 0 AND (RNEXT = '=' OR RNEXT = RNAME)
 ), oriented AS (
-    -- sam/pair_orientation.rs:30-59: equal strands TANDEM; reverse end
-    -- is inclusive end_pos; forward mate reverse end is POS + TLEN.
-    SELECT CASE
-        WHEN ((flag & 16) != 0) = ((flag & 32) != 0) THEN 'TANDEM'
-        WHEN (flag & 16) != 0 THEN CASE WHEN pnext < end_pos THEN 'FR' ELSE 'RF' END
-        ELSE CASE WHEN pos < pos + tlen THEN 'FR' ELSE 'RF' END
-    END AS pair_orientation, abs(tlen) AS insert_size
-    FROM eligible
+  SELECT CASE WHEN rev = mate_rev THEN 'TANDEM'
+              WHEN rev THEN CASE WHEN pnext < pos + greatest(coalesce(cigar_reference_length(CIGAR), 0), 1) - 1
+                                 THEN 'FR' ELSE 'RF' END
+              ELSE CASE WHEN pos < pos + tlen THEN 'FR' ELSE 'RF' END
+         END AS pair_orientation,
+         abs(tlen) AS insert_size
+  FROM eligible
 )
--- commands/isize.rs:211-218: count unsigned absolute TLEN by orientation.
 SELECT pair_orientation, insert_size, count(*)::UBIGINT AS read_pairs
-FROM oriented GROUP BY pair_orientation, insert_size;
+FROM oriented
+GROUP BY pair_orientation, insert_size;
