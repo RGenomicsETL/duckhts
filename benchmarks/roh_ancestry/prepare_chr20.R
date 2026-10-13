@@ -38,7 +38,7 @@ DBI::dbExecute(con, sprintf(paste0(
   "WHERE len(v.ALT) = 1 AND NOT ((r.allele_a IN ('A','T') AND r.allele_b IN ('A','T')) OR ",
   "(r.allele_a IN ('C','G') AND r.allele_b IN ('C','G'))) ",
   "AND v.INFO_AF IS NOT NULL AND v.INFO_AF_AFR IS NOT NULL AND v.INFO_AF_AMR IS NOT NULL ",
-  "AND v.INFO_AF_EAS IS NOT NULL AND v.INFO_AF_EUR IS NOT NULL) TO %s ",
+  "AND v.INFO_AF_EAS IS NOT NULL AND v.INFO_AF_EUR IS NOT NULL ORDER BY pos, ref, alt) TO %s ",
   "(FORMAT PARQUET, COMPRESSION ZSTD)"), q(bcf_path), q(af_output)))
 cat("reference rows:", DBI::dbGetQuery(con, sprintf("SELECT count(*) n FROM read_parquet(%s)", q(long_output)))$n, "\n")
 cat("eligible reference sites:", DBI::dbGetQuery(con, sprintf("SELECT count(*) n FROM read_parquet(%s)", q(af_output)))$n, "\n")
