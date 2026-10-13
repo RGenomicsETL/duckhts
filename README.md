@@ -98,7 +98,7 @@ On DuckDB 1.5.x:
 
 ## Using DuckHTS with a database file
 
-`LOAD` creates the 42 SQL macros only when the default database is
+`LOAD` creates the 46 SQL macros only when the default database is
 writable and in memory. With a file-backed or read-only default database
 it registers native functions and leaves the database file untouched;
 the macros are then installed as connection-local `TEMP` macros.
@@ -114,7 +114,7 @@ dbGetQuery(con, "
   WHERE function_name IN (SELECT name FROM duckhts_macro_definitions())
   GROUP BY ALL")
 #>   database_name duckhts_macros
-#> 1          temp             49
+#> 1          temp             55
 dbGetQuery(con, "SELECT duckhts_quote_ident('my column') AS quoted")
 #>        quoted
 #> 1 "my column"

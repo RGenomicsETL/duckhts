@@ -10,8 +10,9 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   release targets remain unevaluated. The catalog documents these limits.
 
 - Low-pass mixture moments use exact binary sums with fixed-size
-  per-block accumulators, preserving results across input and worker order. SQL validation and join memory remains input-sized;
-  the native byte budget does not cover DuckDB's SQL workspace.
+  per-block accumulators, preserving results across input and worker order.
+  SQL validation and join memory remains input-sized; the native byte budget
+  does not cover DuckDB's SQL workspace.
 
 
 - Add a declared parent/child read-mixture benchmark for a related second

@@ -36,6 +36,14 @@ for (axis in c("sites", "groups")) {
     }
   }
 }
+for (repeat_id in seq_len(lowpass_declaration$scaling_repeats)) {
+  output <- file.path(scratch, sprintf("empty-%d.rds", repeat_id))
+  status <- system2("/usr/bin/time", c("-f", shQuote("%M"), "-o", shQuote(sub("\\.rds$", ".rss", output)),
+    "Rscript", shQuote(c("benchmarks/count_mixture_lowpass/memory_worker.R", "empty", 0L,
+                        lowpass_declaration$threads, output, extension))),
+    stdout = paste0(output, ".log"), stderr = paste0(output, ".log"))
+  if (status != 0L) stop("Empty process probe failed")
+}
 metadata <- list(source_revision = system2("git", c("rev-parse", "HEAD"), stdout = TRUE),
   extension_sha256 = system2("sha256sum", extension, stdout = TRUE),
   dirty = system2("git", c("status", "--porcelain"), stdout = TRUE),
@@ -44,5 +52,7 @@ metadata <- list(source_revision = system2("git", c("rev-parse", "HEAD"), stdout
   computational_sha256 = system2("sha256sum", c("src/count_mixture_model.c", "src/count_mixture_sql.c",
     "src/count_mixture_udf.c", "benchmarks/count_mixture_lowpass/worker.R",
     "benchmarks/count_mixture_lowpass/declaration.R"), stdout = TRUE),
-  declaration_commit = "6e23123c", cache = "warm registered inputs; each DuckDB process fresh")
+  declaration_commit = system2("git", c("log", "--follow", "--diff-filter=A", "--format=%H", "--",
+    "benchmarks/count_mixture_lowpass/declaration.R"), stdout = TRUE),
+  cache = "warm registered inputs; each DuckDB process fresh")
 saveRDS(metadata, file.path(scratch, "metadata.rds"))

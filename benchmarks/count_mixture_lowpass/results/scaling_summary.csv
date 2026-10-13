@@ -1,0 +1,7 @@
+"axis","factor","input_rows","output_rows","median_seconds","min_seconds","max_seconds","max_rss_MiB","max_buffer_MiB","ceiling_MiB","spill_MiB","exponent","exponent_verdict"
+"groups",1,100000,1,0.171,0.17,0.175,179.71484375,90.546875,731.7294921875,0,NA,"not evaluated: 1x < 5 seconds"
+"groups",2,200000,2,0.329,0.327,0.333,252.55859375,205.03125,951.458984375,0,0.944091258849344,"not evaluated: 1x < 5 seconds"
+"groups",4,400000,4,0.546,0.543,0.549,272.30078125,237.34375,1390.91796875,0,0.730813367184611,"not evaluated: 1x < 5 seconds"
+"sites",1,100000,1,0.172,0.171,0.174,180.01953125,90.60546875,731.7294921875,0,NA,"not evaluated: 1x < 5 seconds"
+"sites",2,200000,1,0.346,0.343,0.351,236.26953125,174.623046875,951.4560546875,0,1.00836347293463,"not evaluated: 1x < 5 seconds"
+"sites",4,400000,1,0.686,0.682,0.688,348.30078125,338.234375,1390.9091796875,0,0.987436538536087,"not evaluated: 1x < 5 seconds"

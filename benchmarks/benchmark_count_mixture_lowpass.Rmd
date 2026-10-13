@@ -82,18 +82,218 @@ separately from the declared campaign. Same-population relationship
 ambiguity, weak pairs, frequency mismatch and calibration transfer are
 limitations, not reasons to drop observations.
 
-## Execution and results
+## Execution and provenance
+
+The campaign uses registered inputs only. From the repository root, with a
+private library containing the current `duckhtsbench` registry:
+
+```sh
+taskset -c 0-5 Rscript benchmarks/count_mixture_lowpass/stage.R build/release/duckhts.duckdb_extension
+taskset -c 0-5 Rscript benchmarks/count_mixture_lowpass/run.R build/release/duckhts.duckdb_extension /tmp/lowpass-campaign
+```
+
+`collect.R` reads the campaign, retained compensated-sum campaign and
+exploratory memory probes, then writes the checked-in results. Recovery
+workers run in three fresh R/DuckDB processes at a time, with one DuckDB
+thread except the explicit four-thread comparison. Recovery timings are
+not performance evidence. Scaling runs alone in fresh processes, one
+DuckDB thread, three repetitions, six assigned CPU cores (0–5). Inputs
+are warm cached; query elapsed time excludes startup, extension loading
+and view creation. RSS includes those costs. DuckDB 3 GB memory limit and
+no spill apply to the measured scaling queries. Source acquisition and
+haplotype staging are outside measured queries.
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
 source("count_mixture_lowpass/declaration.R")
 results_dir <- "count_mixture_lowpass/results"
+read_result <- function(name) read.csv(file.path(results_dir, name))
+metadata <- dget(file.path(results_dir, "metadata.txt"))
+strata <- read_result("strata.csv")
+primary <- strata[strata$kind == "synthetic", ]
+thinning <- strata[strata$kind == "thinning", ]
 ```
 
-```{r results}
-if (!file.exists(file.path(results_dir, "summary.csv"))) {
-  cat("Campaign results have not been collected. No criterion has a passing verdict.\n")
-} else {
-  knitr::kable(read.csv(file.path(results_dir, "summary.csv")))
-}
+```{r provenance, results='asis'}
+cat("Campaign source revision: `", metadata$source_revision, "`.\n\n", sep = "")
+cat(metadata$R, "; DuckDB R ", metadata$duckdb, ".\n\n", sep = "")
+cat(paste(grep("Model name:|Socket\\(s\\):|CPU\\(s\\):", metadata$cpu_details, value = TRUE), collapse = "\n"), "\n\n")
+cat("Native source and driver SHA-256 hashes and the loaded extension hash are retained in ",
+    "[metadata.txt](count_mixture_lowpass/results/metadata.txt). The declaration was committed as `",
+    metadata$declaration_commit, "` before the campaign.\n\n", sep = "")
+cat("Synthetic: ", sum(primary$replicates), " replicates / ", nrow(primary), " strata; count thinning: ",
+    sum(thinning$replicates), " replicates / ", nrow(thinning), " strata.\n", sep = "")
 ```
+
+The phased source is the 1000G 3202-sample GRCh38 release of 2020-10-28,
+chr20. Raw source and founder pedigree identities are pinned in the
+registry. There are 108,757 matched sites and 120 selected founders in the
+derived artifact `count_mixture_lowpass_chr20_haplotypes`. The three count
+tables each contain 87,867 common chr20 sites; their canonical count hashes
+are pinned in the registry. The network-free staging test checks temporary
+cache isolation, phased decoding, population frequencies, repeat staging,
+and failure on a missing raw input. Pedigree and phase are checked;
+cryptic relatedness and individual-frequency agreement are not established.
+
+## Criteria and numerical invariants
+
+```{r criteria}
+knitr::kable(read_result("summary.csv"))
+```
+
+The R oracle forms weighted cross-products and ALT/discordance moments from
+the generated counts and frequencies, independently of the macro's SQL
+expressions. It compares every block and every moment supplied to the
+native fitter. Integer QC counters compare exactly. Native integer-limb
+sum tests independently cover dyadic integer oracles, subnormals, merges,
+round-to-even ties, sticky rounding, invalid inputs and capacity errors.
+
+```{r numerical}
+x <- read_result("oracle_and_threads.csv")
+knitr::kable(data.frame(
+  datasets = nrow(x), max_R_relative_moment_error = max(x$moment_error),
+  integer_counter_failures = sum(!x$counters_exact), status_failures = sum(!x$status_equal),
+  max_thread_share_error = max(x$share_error), max_thread_moment_error = max(x$thread_moment_error)))
+```
+
+## Linked chr20 recovery
+
+The primary point below is the conditional whole-fit `share`, not a
+relationship selected by its score. Every stratum has 50 independent
+random draws conditional on this fixed panel. Opposite conditional models
+are also retained in the compressed replicate table. `conditional` counts
+`ok_conditional` statuses; other statuses remain denominators. Mean bias
+uses all finite reported shares (its count is retained in `strata.csv`). A
+missing or non-conditional fit is a point-accuracy failure, and a missing
+interval is uncovered. Wide or disconnected confidence sets are not
+removed. `singles_mean`, `singles_bias` and `singles_within_limit_fraction`
+retain the separate anchored read-only diagnostic for other-population
+strata; they do not replace the declared whole-fit comparator.
+
+```{r observed}
+criteria_names <- c(bias = "bias_observed", accuracy = "accuracy_observed",
+                    coverage = "coverage_observed", null = "null_observed")
+observed <- do.call(rbind, lapply(names(criteria_names), function(name) {
+  verdicts <- primary[[criteria_names[[name]]]]
+  eligible <- verdicts != "not applicable"
+  data.frame(criterion = name, strata = sum(eligible), met = sum(verdicts == "met"),
+             failed = sum(verdicts == "fail"), incomplete = sum(verdicts == "incomplete"),
+             release_verdict = "not evaluated: chr20, 50 < 200")
+}))
+knitr::kable(observed)
+```
+
+These numerical thresholds mostly **fail for point accuracy** on chr20.
+Adequate-looking coverage can reflect wide intervals, not accurate shares.
+At 0.1x this evidence does not establish dependable 1–2% share detection.
+No universal detection limit is inferred. In particular, the matched IBD1
+branch can have uninformative confidence sets and positive null estimates.
+The 200-replicate genome-wide criteria are not passed by pooling depths,
+errors, relationships or small-share strata. The whole-genome reference
+has more sites and linkage blocks; chr20 results neither certify nor
+refute its numerical targets.
+
+```{r primary-strata}
+knitr::kable(primary[c("id", "relationship", "depth", "seq_error", "truth", "conditional",
+                       "mean_share", "bias", "accurate_fraction", "interval_coverage", "positive_claims")], digits = 4)
+```
+
+All per-stratum verdicts, missing-interval counts and exact one-sided null
+bounds are in [strata.csv](count_mixture_lowpass/results/strata.csv).
+The 50-draw binomial uncertainty is material: even zero observed positive
+null claims has a one-sided 95% upper bound of about 0.058. Missing
+intervals make the null verdict incomplete, rather than certifying the null criterion.
+
+## Registered count thinning
+
+```{r single-source}
+knitr::kable(thinning[thinning$truth == 0,
+  c("receiver", "depth", "replicates", "mean_share", "intervals", "positive_claims")], digits = 5)
+```
+
+Single-source offsets and missing intervals are retained. The largest
+single-source mean share is about 0.0031 at nominal 0.1x. At higher depth,
+several baseline fits concentrate at zero while intervals are unavailable.
+These counts have empirical error and allele-specific depth, not the
+synthetic generating calibration. The two-source share is nominal and
+cannot be treated as exact truth without correcting for source coverage.
+Thus two-source bias and coverage are diagnostics, not release gate passes.
+
+```{r two-source}
+knitr::kable(thinning[thinning$truth > 0,
+  c("id", "receiver", "donor", "depth", "truth", "mean_share", "intervals", "positive_claims")], digits = 4)
+```
+
+## Scaling and memory
+
+Each input row has two frequencies, three counts, position, sample,
+candidate and chromosome. Sites use a generated numeric panel. Group
+scaling is (samples,candidates) = (1,1), (2,1), (2,2), with shared counts
+validated across candidates. The ranges fit within one 1 Mb block per
+group: this measures SQL input scaling and bounded aggregation, **not**
+chr20 interval fitting or scaling in the number of jackknife blocks.
+Output denominators are conditional rows, not raw sites. The live-state
+model and ceiling were frozen before the run. The 512 MiB overhead
+allowance is conservative relative to the measured empty-process RSS:
+
+```{r empty-process}
+knitr::kable(read_result("empty_process.csv"), digits = 3)
+```
+
+```{r scaling}
+knitr::kable(read_result("scaling_summary.csv"), digits = 3)
+```
+
+All 18 scaling runs satisfy RSS and DuckDB buffer ceilings without spill.
+The 1x runs are shorter than five seconds, so the exponent gate is **not
+evaluated**. The apparent exponents are descriptive, not a passed timing
+criterion. Longer identical workloads and a multi-block timing workload
+are still missing. Individual repetitions and modeled live-state bytes
+are in [scaling.csv](count_mixture_lowpass/results/scaling.csv).
+
+### Exploratory aggregate comparison
+
+```{r exploratory-memory}
+knitr::kable(read_result("exploratory_memory.csv"), digits = 3)
+```
+
+The ordered implementation was measured at `1c30c875`; its native sources
+are unchanged in the current rebased counterpart `6e017d1c`.
+These one-thread, single-run probes use the same numeric range workload as
+scaling, but short identifier labels and one repetition rather than three;
+they are exploratory comparisons, not a no-regression timing claim.
+`unordered` is compensated `fsum` without raw materialization;
+`materialized` is `fsum` with it. Explicit materialization increased peak
+buffers and RSS in this comparison, so the macro uses `NOT MATERIALIZED`.
+It still scans the relation repeatedly and SQL memory remains input-sized.
+
+Ordered aggregates retained rows: at 400k sites their peak buffers were
+855 MiB and RSS 578 MiB. The final exact-sum range workload uses fixed
+152-byte integer-limb accumulators, rounded once to double; final peak
+buffers and RSS are in the three-repeat table above. Native moments do not
+retain sites. This is **not** a constant-memory claim for validation,
+joins, window ordering or the entire query.
+
+Compensated sums pass the moment tolerance but did not preserve the share
+criterion near a floating objective minimum. The retained
+[compensated-sum counterexamples](count_mixture_lowpass/results/compensated_sum_counterexamples.csv)
+contain all 207 dataset checks, including 69 failed share comparisons
+(maximum about 1.6e-7). They are not discarded to certify the final sums.
+Exact sums preserve the fitter and the unchanged bitwise SQL regression.
+
+## Retained evidence and scope
+
+* [replicates.csv.gz](count_mixture_lowpass/results/replicates.csv.gz): all
+  conditional fits, statuses, primary-model flags and principal diagnostics.
+* [replicate_qc.csv.gz](count_mixture_lowpass/results/replicate_qc.csv.gz):
+  all replicate input/output counters, pair denominators and shared singles,
+  pair-residual and leverage diagnostics. Join on `(kind,id,replicate)`.
+* [oracle_and_threads.csv](count_mixture_lowpass/results/oracle_and_threads.csv):
+  every independently checked stratum, not only passing examples.
+
+The approximately 1.3 MB result bundle retains failures as well as successes.
+This campaign checks calibrated chr20 simulations and real count-thinning
+transfer. It does not establish a genome-wide precision or detection limit,
+arbitrary calibration robustness, sample-specific excess homozygosity,
+relationship classification, or error calibration for arbitrary low-pass
+inputs. No criterion is widened to obtain a pass.
