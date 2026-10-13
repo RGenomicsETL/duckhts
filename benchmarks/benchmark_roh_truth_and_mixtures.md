@@ -161,11 +161,11 @@ classes, metrics, bootstrap, comparisons and the bounds of T1 and T2 are those
 of version 1; T3 does not depend on the truth. Both versions’ verdicts are
 reported.
 
-### Read mixtures
+### Unrelated read mixtures
 
-The receiver is HG00403 and the donor NA18507: the two staged slices, of
-different populations. No related pair is staged, so `contamination_relative`
-is reported under its hypothesis only, with no related donor to test it.
+The receiver is HG00403 and the donor NA18507: two staged slices of
+different populations. This arm reports `contamination_relative` under its
+hypothesis; the parent/child arm below tests it with a related donor.
 
 A template (read pair) of the receiver is kept with chance 1 − α and one of
 the donor with chance α, by `samtools view --subsample` with
@@ -192,6 +192,39 @@ runs; erosion is a decode’s FROH minus that of α = 0 with the term.
 - **M1**: the fitted `contamination` increases strictly with α over 0 and
   the four shares.
 - **M2**: at every α, \|erosion with term\| ≤ \|erosion without term\| + 0.002.
+
+### Related second genome
+
+The registered 1000 Genomes pedigree identifies HG00403 and HG00404 as
+parents of HG00405 (family SH001, CHS). HG00403 receives reads from its child
+HG00405. The parents have CRAMs at the existing 2504-sample S3 locator family;
+HG00405’s corresponding S3 key is absent. The child is in the
+[698-related-sample 30x release](https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/README_2504_plus_additional_698_related_samples.txt),
+with a range-readable ENA CRAM (ERR3988761) and index. The registry names that
+public source and the chr20 slice derived by the same staging function as
+the unrelated arm. Its independently registered counts must also match.
+
+`benchmarks/roh_truth_mixtures/declaration_related.R` declares the criteria
+before this arm runs. The alpha grid, read-name hash seed (mates together),
+counting settings, frequencies and decoder are the same as the unrelated arm.
+Nominal alpha is a sampling fraction, not necessarily the realised donor
+share at unequal source depths; both are reported.
+
+- **M3**: `contamination_relative` is within max(0.005, 0.25 × α) of α at
+  every nonzero α. The relative log-likelihood exceeds the unrelated one at
+  α = 0.05 and 0.10. At 0.01/0.02 the likelihood sign is descriptive, not a
+  gate: the earlier count-level result separated at 5%, not at 2%.
+- **M4**: unrelated `contamination` is within max(0.003, 0.25 × α/2) of α/2
+  at every nonzero α, as expected for a parent/child donor under that model.
+- **R1**: at every α, \|erosion with the relative-fit term\| ≤ \|erosion without
+  it\| + 0.002. Erosion is relative to α = 0 with the relative-fit term.
+
+The with-term decode substitutes `contamination_relative` for `contamination`
+in the fit table. Other nuisance estimates remain those exposed by the public
+fit, from its unrelated hypothesis. This is a plug-in population-frequency
+emission, not a relationship-aware ROH emission. The tolerance floors and
+25% relative errors allow read sampling and nuisance fitting; they are not
+confidence intervals. No unrelated criterion is changed.
 
 ### Gates
 
@@ -228,7 +261,7 @@ is not evidence. The default is `full`. The bundled samtools needs RBCFTools
 1.24-1.1.0 or later on the library path.
 
 ``` sh
-nice -n -15 taskset -c 8-15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_roh_truth_and_mixtures.Rmd")'
+R_LIBS=/tmp/RBCFTools-release-lib taskset -c 12-15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_roh_truth_and_mixtures.Rmd")'
 # Driver check only; writes the page outside benchmarks/:
 ROH_TRUTH_SIZE=reduced taskset -c 0-3 Rscript -e \
   'rmarkdown::render("benchmarks/benchmark_roh_truth_and_mixtures.Rmd", output_dir = tempdir())'
@@ -238,13 +271,13 @@ ROH_TRUTH_SIZE=reduced taskset -c 0-3 Rscript -e \
 
 | Item                     | Value                                                            |
 |:-------------------------|:-----------------------------------------------------------------|
-| revision                 | 4014bcadc85f4fcfbd4eab5111cd0b200841be21                         |
-| src_tree                 | a51ca52c34c6356b2f4185b9371da257096b39bb                         |
-| extension_sha256         | 15e0f6815a545b14df2c8beacf5de2f96c83ec0be1367aee6f00d16f8586a8fd |
+| revision                 | 4d09d23ef2e59b10f394e976d382ed8055674817                         |
+| src_tree                 | e724eb4f772457c455d8dd4610c4d7555c0e8876                         |
+| extension_sha256         | fd5bff50d6d33fadbc692e472e2e9059c119014fbb29730d757894a20da2a5f5 |
 | duckdb_cli               | v1.5.1 (Variegata) 7dbb2e646f                                    |
 | r_version                | R version 4.6.0 (2026-04-24)                                     |
-| host_load                | 7.31, 7.94, 7.51                                                 |
-| cpu_affinity             | 8-15                                                             |
+| host_load                | 4.59, 6.31, 5.63                                                 |
+| cpu_affinity             | 12-15                                                            |
 | threads                  | 2                                                                |
 | size                     | full                                                             |
 | populations              | YRI,CEU,CHS,GIH,PEL                                              |
@@ -254,7 +287,7 @@ ROH_TRUTH_SIZE=reduced taskset -c 0-3 Rscript -e \
 | counts_rows              | 10875700                                                         |
 | fit_cells                | 4228633                                                          |
 | fit_pairs                | 90885                                                            |
-| overhead_mib             | 39.1                                                             |
+| overhead_mib             | 40.2                                                             |
 | counts_sha256            | ac858137459611400981e25fcf04e71efb49301bccfd3f40fa816f2ab73004e8 |
 | vcf_sha256               | 0c9a26a117056d3071c1dbde9581eb9fd1f302891e89db77cbcfb136b3226cae |
 | children_with_usable_fit | 100                                                              |
@@ -268,8 +301,8 @@ ROH_TRUTH_SIZE=reduced taskset -c 0-3 Rscript -e \
 | rbcftools                | 1.24.1.1.0                                                       |
 | fit_cells                | 252355                                                           |
 | fit_pairs                | 6079                                                             |
-| overhead_decode_mib      | 39.3                                                             |
-| overhead_count_mib       | 39.2                                                             |
+| overhead_decode_mib      | 40.2                                                             |
+| overhead_count_mib       | 40.2                                                             |
 
 ## Planted truth
 
@@ -516,6 +549,68 @@ truth; a true gained base is one that `counts_fit` missed.
 | M1        | pass    |
 | M2        | pass    |
 
+## Related-donor read mixtures
+
+Receiver HG00403, child donor HG00405. Alpha 0 is the receiver-only control.
+
+| Slice   | Rows    | Counts SHA-256                                                   | Equals registered |
+|:--------|:--------|:-----------------------------------------------------------------|:------------------|
+| HG00403 | 108,757 | c0698ddc47beccecb3bf68177450ad6507e5edab9d318df4bc3680b7b6adc6da | yes               |
+| HG00405 | 108,757 | 993e802bf4a03df1c838035f7874edb089ff3458fa42347caf709722ba4abfaa | yes               |
+
+|    α | Receiver alignments | Donor alignments | Donor share of alignments |
+|-----:|:--------------------|:-----------------|:--------------------------|
+| 0.01 | 16,647,490          | 169,581          | 0.0101                    |
+| 0.02 | 16,479,939          | 338,044          | 0.0201                    |
+| 0.05 | 15,975,052          | 846,591          | 0.0503                    |
+| 0.10 | 15,135,131          | 1,696,197        | 0.1008                    |
+
+### Relative and unrelated fits
+
+|    α | contamination_relative | Relative error | M3 tolerance | M3 recovery | contamination | α/2   | M4 tolerance | M4 recovery | status |
+|-----:|:-----------------------|:---------------|:-------------|:------------|:--------------|:------|:-------------|:------------|:-------|
+| 0.00 | 0.0006385              | 0.0006385      | 0.005        | control     | 0.0003186     | 0     | 0.003        | control     | ok     |
+| 0.01 | 0.00812                | -0.00188       | 0.005        | pass        | 0.004083      | 0.005 | 0.003        | pass        | ok     |
+| 0.02 | 0.01558                | -0.004416      | 0.005        | pass        | 0.007824      | 0.01  | 0.003        | pass        | ok     |
+| 0.05 | 0.0403                 | -0.009696      | 0.0125       | pass        | 0.02026       | 0.025 | 0.00625      | pass        | ok     |
+| 0.10 | 0.08458                | -0.01542       | 0.025        | pass        | 0.04297       | 0.05  | 0.0125       | pass        | ok     |
+
+|    α | Relative log-likelihood | Unrelated log-likelihood | Relative − unrelated | Likelihood gate |
+|-----:|:------------------------|:-------------------------|:---------------------|:----------------|
+| 0.00 | -170943.3               | -170943.4                | +0.076               | descriptive     |
+| 0.01 | -180685.9               | -180686.6                | +0.701               | descriptive     |
+| 0.02 | -187397.3               | -187405.6                | +8.321               | descriptive     |
+| 0.05 | -203016.3               | -203089.3                | +72.964              | pass            |
+| 0.10 | -219205.4               | -219605.2                | +399.819             | pass            |
+
+### FROH with the relative-fit term and without
+
+| Decode       |    α | Runs | FROH   | Erosion | Jaccard |
+|:-------------|-----:|-----:|:-------|:--------|:--------|
+| with_term    | 0.00 |  189 | 0.3446 | +0.0000 | 1.000   |
+| with_term    | 0.01 |  189 | 0.3449 | +0.0003 | 0.999   |
+| with_term    | 0.02 |  189 | 0.3423 | -0.0023 | 0.991   |
+| with_term    | 0.05 |  189 | 0.3287 | -0.0158 | 0.953   |
+| with_term    | 0.10 |  189 | 0.3237 | -0.0208 | 0.938   |
+| without_term | 0.00 |  189 | 0.3446 | +0.0000 | 1.000   |
+| without_term | 0.01 |  188 | 0.3438 | -0.0008 | 0.997   |
+| without_term | 0.02 |  186 | 0.3398 | -0.0048 | 0.986   |
+| without_term | 0.05 |  178 | 0.3225 | -0.0221 | 0.936   |
+| without_term | 0.10 |  154 | 0.2587 | -0.0858 | 0.751   |
+
+|    α | Erosion with relative term | Erosion without term | R1   |
+|-----:|:---------------------------|:---------------------|:-----|
+| 0.01 | +0.0003                    | -0.0008              | pass |
+| 0.02 | -0.0023                    | -0.0048              | pass |
+| 0.05 | -0.0158                    | -0.0221              | pass |
+| 0.10 | -0.0208                    | -0.0858              | pass |
+
+| Criterion | Verdict |
+|:----------|:--------|
+| M3        | pass    |
+| M4        | pass    |
+| R1        | pass    |
+
 ## Gates
 
 Every DuckDB query, with its latency, peak RSS, DuckDB’s peak buffer memory,
@@ -524,42 +619,57 @@ peak RSS above its ceiling, and it reached this table.
 
 | Part     | Query             | Kind            | Threads | Seconds | Peak RSS MiB | Peak buffer MiB | Ceiling MiB | Temporary bytes |
 |:---------|:------------------|:----------------|--------:|--------:|-------------:|----------------:|------------:|----------------:|
-| truth    | empty_1_threads_2 | empty           |       2 |   0.001 |         39.0 |             0.3 |             |               0 |
-| truth    | empty_2_threads_2 | empty           |       2 |   0.007 |         39.1 |             0.2 |             |               0 |
-| truth    | empty_3_threads_2 | empty           |       2 |   0.002 |         39.4 |             0.3 |             |               0 |
-| truth    | gt30_YRI          | genotype_decode |       2 |   1.358 |        126.1 |           124.7 |       201.1 |               0 |
-| truth    | gt30_CEU          | genotype_decode |       2 |   1.182 |        123.6 |            92.7 |       201.1 |               0 |
-| truth    | gt30_CHS          | genotype_decode |       2 |   1.396 |        121.0 |           124.7 |       201.1 |               0 |
-| truth    | gt30_GIH          | genotype_decode |       2 |   1.369 |        123.7 |           124.7 |       201.1 |               0 |
-| truth    | gt30_PEL          | genotype_decode |       2 |   1.385 |        118.8 |           124.7 |       201.1 |               0 |
-| truth    | gt100_YRI         | genotype_decode |       2 |   1.275 |        118.2 |           124.7 |       201.1 |               0 |
-| truth    | gt100_CEU         | genotype_decode |       2 |   1.402 |        119.8 |            92.7 |       201.1 |               0 |
-| truth    | gt100_CHS         | genotype_decode |       2 |   1.375 |        116.9 |           124.7 |       201.1 |               0 |
-| truth    | gt100_GIH         | genotype_decode |       2 |   1.397 |        113.5 |           124.7 |       201.1 |               0 |
-| truth    | gt100_PEL         | genotype_decode |       2 |   1.379 |        119.8 |           124.7 |       201.1 |               0 |
-| truth    | counts_default    | count_decode    |       2 |   1.608 |        454.3 |           572.4 |       808.4 |               0 |
-| truth    | fit               | fit             |       2 | 154.810 |        629.1 |           986.8 |      3843.5 |               0 |
-| truth    | counts_truth      | count_decode    |       2 |   4.339 |        501.0 |           607.1 |       808.4 |               0 |
-| truth    | counts_fit        | count_decode    |       2 |   5.117 |        471.5 |           575.4 |       808.4 |               0 |
-| truth    | fit_low           | count_decode    |       2 |   4.389 |        466.4 |           607.2 |       808.4 |               0 |
-| truth    | fit_high          | count_decode    |       2 |   4.211 |        466.1 |           575.1 |       808.4 |               0 |
-| mixtures | empty_1_threads_2 | empty           |       2 |   0.001 |         39.3 |             0.3 |             |               0 |
-| mixtures | empty_2_threads_2 | empty           |       2 |   0.022 |         39.1 |             0.3 |             |               0 |
-| mixtures | empty_3_threads_2 | empty           |       2 |   0.001 |         39.4 |             0.3 |             |               0 |
-| mixtures | empty_1_threads_4 | empty           |       4 |   0.001 |         39.2 |             0.2 |             |               0 |
-| mixtures | empty_2_threads_4 | empty           |       4 |   0.002 |         39.2 |             0.3 |             |               0 |
-| mixtures | empty_3_threads_4 | empty           |       4 |   0.002 |         39.5 |             0.3 |             |               0 |
-| mixtures | count_HG00403     | read_counting   |       4 |   5.313 |        162.4 |            50.8 |      3252.1 |               0 |
-| mixtures | count_NA18507     | read_counting   |       4 |   6.024 |        169.9 |            49.5 |      3252.1 |               0 |
-| mixtures | count_alpha_0.01  | read_counting   |       4 |   5.780 |        165.1 |            50.3 |      3252.1 |               0 |
-| mixtures | count_alpha_0.02  | read_counting   |       4 |   6.234 |        163.9 |            49.3 |      3252.1 |               0 |
-| mixtures | count_alpha_0.05  | read_counting   |       4 |   4.465 |        167.3 |            49.3 |      3252.1 |               0 |
-| mixtures | count_alpha_0.10  | read_counting   |       4 |   5.328 |        166.6 |            50.0 |      3252.1 |               0 |
-| mixtures | mixture_fit       | fit             |       2 |   9.388 |         85.7 |            67.1 |       266.5 |               0 |
-| mixtures | with_term         | count_decode    |       2 |   0.227 |         75.4 |            55.3 |        99.2 |               0 |
-| mixtures | without_term      | count_decode    |       2 |   0.380 |         76.8 |            39.3 |        99.2 |               0 |
+| truth    | empty_1_threads_2 | empty           |       2 |   0.001 |         40.2 |             0.2 |             |               0 |
+| truth    | empty_2_threads_2 | empty           |       2 |   0.005 |         40.3 |             0.3 |             |               0 |
+| truth    | empty_3_threads_2 | empty           |       2 |   0.001 |         40.1 |             0.2 |             |               0 |
+| truth    | gt30_YRI          | genotype_decode |       2 |   1.316 |        119.0 |           124.7 |       202.2 |               0 |
+| truth    | gt30_CEU          | genotype_decode |       2 |   1.357 |        119.6 |            92.7 |       202.2 |               0 |
+| truth    | gt30_CHS          | genotype_decode |       2 |   1.401 |        120.5 |           124.7 |       202.2 |               0 |
+| truth    | gt30_GIH          | genotype_decode |       2 |   1.347 |        111.7 |           124.7 |       202.2 |               0 |
+| truth    | gt30_PEL          | genotype_decode |       2 |   1.351 |        117.1 |           124.7 |       202.2 |               0 |
+| truth    | gt100_YRI         | genotype_decode |       2 |   1.360 |        121.4 |           124.6 |       202.2 |               0 |
+| truth    | gt100_CEU         | genotype_decode |       2 |   1.415 |        128.9 |            92.7 |       202.2 |               0 |
+| truth    | gt100_CHS         | genotype_decode |       2 |   1.403 |        118.1 |           124.6 |       202.2 |               0 |
+| truth    | gt100_GIH         | genotype_decode |       2 |   1.392 |        116.2 |           124.7 |       202.2 |               0 |
+| truth    | gt100_PEL         | genotype_decode |       2 |   1.392 |        122.8 |           124.7 |       202.2 |               0 |
+| truth    | counts_default    | count_decode    |       2 |   1.633 |        464.1 |           572.4 |       809.6 |               0 |
+| truth    | fit               | fit             |       2 | 176.537 |        632.2 |           986.5 |      3844.6 |               0 |
+| truth    | counts_truth      | count_decode    |       2 |   5.771 |        470.4 |           607.1 |       809.6 |               0 |
+| truth    | counts_fit        | count_decode    |       2 |   5.126 |        480.6 |           575.4 |       809.6 |               0 |
+| truth    | fit_low           | count_decode    |       2 |   5.156 |        472.5 |           607.1 |       809.6 |               0 |
+| truth    | fit_high          | count_decode    |       2 |   5.101 |        460.2 |           575.1 |       809.6 |               0 |
+| mixtures | empty_1_threads_2 | empty           |       2 |   0.001 |         40.2 |             0.3 |             |               0 |
+| mixtures | empty_2_threads_2 | empty           |       2 |   0.025 |         40.3 |             0.3 |             |               0 |
+| mixtures | empty_3_threads_2 | empty           |       2 |   0.002 |         40.2 |             0.3 |             |               0 |
+| mixtures | empty_1_threads_4 | empty           |       4 |   0.002 |         40.1 |             0.3 |             |               0 |
+| mixtures | empty_2_threads_4 | empty           |       4 |   0.001 |         40.2 |             0.2 |             |               0 |
+| mixtures | empty_3_threads_4 | empty           |       4 |   0.001 |         40.4 |             0.3 |             |               0 |
+| mixtures | count_HG00403     | read_counting   |       4 |   5.390 |        162.9 |            43.8 |      3253.0 |               0 |
+| mixtures | count_NA18507     | read_counting   |       4 |   5.689 |        169.6 |            43.8 |      3253.0 |               0 |
+| mixtures | count_alpha_0.01  | read_counting   |       4 |   5.106 |        164.7 |            43.8 |      3253.0 |               0 |
+| mixtures | count_alpha_0.02  | read_counting   |       4 |   5.110 |        168.0 |            43.8 |      3253.0 |               0 |
+| mixtures | count_alpha_0.05  | read_counting   |       4 |   5.159 |        171.0 |            43.8 |      3253.0 |               0 |
+| mixtures | count_alpha_0.10  | read_counting   |       4 |   5.216 |        170.1 |            43.8 |      3253.0 |               0 |
+| mixtures | mixture_fit       | fit             |       2 |   9.625 |         87.3 |            69.3 |       267.3 |               0 |
+| mixtures | with_term         | count_decode    |       2 |   0.304 |         72.6 |            55.4 |       100.1 |               0 |
+| mixtures | without_term      | count_decode    |       2 |   0.379 |         79.9 |            39.3 |       100.1 |               0 |
+| related  | empty_1_threads_2 | empty           |       2 |   0.001 |         40.3 |             0.3 |             |               0 |
+| related  | empty_2_threads_2 | empty           |       2 |   0.004 |         40.3 |             0.3 |             |               0 |
+| related  | empty_3_threads_2 | empty           |       2 |   0.002 |         40.1 |             0.3 |             |               0 |
+| related  | empty_1_threads_4 | empty           |       4 |   0.003 |         40.5 |             0.3 |             |               0 |
+| related  | empty_2_threads_4 | empty           |       4 |   0.002 |         40.2 |             0.3 |             |               0 |
+| related  | empty_3_threads_4 | empty           |       4 |   0.001 |         40.4 |             0.2 |             |               0 |
+| related  | count_HG00403     | read_counting   |       4 |   5.227 |        168.8 |            43.8 |      3253.2 |               0 |
+| related  | count_HG00405     | read_counting   |       4 |   5.145 |        162.2 |            43.8 |      3253.2 |               0 |
+| related  | count_alpha_0.01  | read_counting   |       4 |   5.098 |        168.5 |            43.8 |      3253.2 |               0 |
+| related  | count_alpha_0.02  | read_counting   |       4 |   5.115 |        165.5 |            43.8 |      3253.2 |               0 |
+| related  | count_alpha_0.05  | read_counting   |       4 |   5.054 |        159.8 |            43.8 |      3253.2 |               0 |
+| related  | count_alpha_0.10  | read_counting   |       4 |   5.142 |        169.6 |            43.8 |      3253.2 |               0 |
+| related  | mixture_fit       | fit             |       2 |   7.751 |         85.9 |            64.9 |       249.2 |               0 |
+| related  | with_term         | count_decode    |       2 |   0.296 |         73.2 |            55.3 |       100.2 |               0 |
+| related  | without_term      | count_decode    |       2 |   0.295 |         77.1 |            55.3 |       100.2 |               0 |
 
-Every observation is in `benchmarks/results/roh-truth-mixtures/`: the children, the planted segments, the fits, every run, the per-child scores and the queries.
+Every observation is in `benchmarks/results/roh-truth-mixtures/`: the children, the planted segments, the fits, every run (gzip-compressed), the per-child scores and the queries.
 
 ## Limitations
 
@@ -579,8 +689,9 @@ Every observation is in `benchmarks/results/roh-truth-mixtures/`: the children, 
   between them is not checked.
 - One error rate, one depth and one set of read parameters. Other rates, a
   low depth and a contaminant of another population are not tested here.
-- One mixture pair, of two populations; no related donor is staged. The
-  receiver’s frequencies are the panel’s pooled frequencies, not its
-  population’s, so a donor of another population biases the fitted
-  contamination upward, as the count-level mixture of
-  `benchmark_count_error_fit.md` shows.
+- Two mixture pairs: one unrelated pair of two populations and one
+  parent/child pair. The receiver’s frequencies are the panel’s pooled
+  frequencies, not its population’s, so a donor of another population biases
+  the fitted contamination upward, as the count-level mixture of
+  `benchmark_count_error_fit.md` shows. The relative fit’s term is tested as a
+  plug-in to the existing emission; a relationship-aware decode is not tested.
