@@ -4,6 +4,21 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- `benchmarks/benchmark_roh_ancestry.md` has the genome-wide evaluation
+  (#349): the six ROH arms over the 22 autosomes for the 377 trio children,
+  one chromosome per query. The truth marks runs of low heterozygosity, so
+  the report compares arms within each population only, and FROH is
+  `froh_assembly`, a fraction of the whole assembly. The declared criterion
+  does not hold genome-wide: against single-population frequencies,
+  ancestry-tuned frequencies do not give fewer unsupported runs of at least
+  1 Mb in ACB, CLM, MXL, PEL and PUR, and ASW fails against pooled
+  frequencies and on truth coverage. The four controls pass. The 42
+  per-chromosome reference rows of the benchmark registry are pinned to the
+  SHA-256 of their staged outputs, and `prepare_genome_references.R` checks
+  every autosome against them. `summarise_genome.R` writes a receipt with
+  the SHA-256 of every result table, and the report reads a table only when
+  it matches.
+
 - Copy-number fractions from read depth in fixed bins
   (https://github.com/RGenomicsETL/duckhts/issues/343, phase 1; contract in
   `design/depth_fraction_lane.md`). Three table macros over caller-named

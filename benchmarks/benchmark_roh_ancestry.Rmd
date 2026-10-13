@@ -28,7 +28,7 @@ The phased high-coverage VCF source is `https://ftp.1000genomes.ebi.ac.uk/vol1/f
 
 The planned trio counts are ACB 20, ASW 13, CLM 35, MXL 32, PEL 35 and PUR 35 (admixed), and YRI 56, ESN 43, CEU 57 and CHS 51 (controls). Single-population AF uses AFR for ACB, ASW, YRI and ESN; AMR for CLM, MXL, PEL and PUR; EUR for CEU; and EAS for CHS.
 
-This report evaluates chr20, with its complete chromosome-specific truth, q and arms. The genome-wide comparison is not part of this report. Its drivers and partial results were withdrawn after review found that their truth windows, cached-batch reuse and FROH denominator need the same correction as chr20 and more; they are recoverable from revision `68951a25` and continue in #329, together with the per-chromosome rerun of the ancestry arm. The 22 autosome BCFs are staged and recorded below for that work. The population child counts match the declared expectations: ACB 20, ASW 13, CLM 35, MXL 32, PEL 35, PUR 35, YRI 56, ESN 43, CEU 57 and CHS 51. The chr20 source VCF was copied from the supplied local file after its checksum was verified; its remote metadata is recorded above. bcftools reported `1.23.1-70-g6dbd8fef`; the source header had 3,202 samples and the children BCF has 377. The arm segments were first produced on builds of the `src` tree of revision `86f53052`. Every later build reproduces them exactly, last the build of `src` tree `5908c1ad` (#329), where all six arms were rerun three times each; so the evaluated outputs are those of the shipped macros. The remote chr1 input was streamed through bcftools; its ETag, Last-Modified value, record count and output SHA-256 are recorded in [its receipt](results/roh-ancestry/chr1/input_receipt.tsv).
+This report evaluates chr20, with its complete chromosome-specific truth, q and arms. The genome-wide comparison over the 22 autosomes is in *Genome-wide evaluation*, with its own truth, q and arms. The 22 autosome BCFs are staged and recorded below for that work. The population child counts match the declared expectations: ACB 20, ASW 13, CLM 35, MXL 32, PEL 35, PUR 35, YRI 56, ESN 43, CEU 57 and CHS 51. The chr20 source VCF was copied from the supplied local file after its checksum was verified; its remote metadata is recorded above. bcftools reported `1.23.1-70-g6dbd8fef`; the source header had 3,202 samples and the children BCF has 377. The arm segments were first produced on builds of the `src` tree of revision `86f53052`. Every later build reproduces them exactly, last the build of `src` tree `5908c1ad` (#329), where all six arms were rerun three times each; so the evaluated outputs are those of the shipped macros. The remote chr1 input was streamed through bcftools; its ETag, Last-Modified value, record count and output SHA-256 are recorded in [its receipt](results/roh-ancestry/chr1/input_receipt.tsv).
 
 ## Autosome BCF staging
 
@@ -132,10 +132,113 @@ knitr::kable(change, digits = 2, row.names = FALSE)
 
 The 1×/2×/4× scaling evidence and the gated memory budgets of both macros are in `benchmark_roh_scaling.md`.
 
+## Genome-wide evaluation
+
+```{r, include=FALSE}
+# Every genome-wide table is read only when its SHA-256 matches the receipt
+# that summarise_genome.R wrote for the 22-autosome run.
+genome_dir <- "results/roh-ancestry"
+genome_receipt <- utils::read.delim(file.path(genome_dir, "autosome_receipt.tsv"),
+                                    colClasses = "character")
+genome_field <- function(name) genome_receipt$value[genome_receipt$field == name]
+stopifnot(identical(genome_field("chromosomes"), paste(1:22, collapse = ",")))
+genome_table <- function(name, ...) {
+  path <- file.path(genome_dir, name)
+  if (!identical(unname(digest::digest(file = path, algo = "sha256")), genome_field(name))) {
+    stop("genome-wide result table differs from its receipt: ", name, call. = FALSE)
+  }
+  utils::read.csv(path, ...)
+}
+genome_evidence <- genome_table("autosome_truth_window_evidence.csv")
+genome_distribution <- genome_table("autosome_truth_window_distribution.csv")
+genome_truth_population <- genome_table("autosome_truth_by_population.csv")
+genome_sites <- genome_table("autosome_site_set_equivalence.csv")
+genome_q_quality <- genome_table("autosome_q_quality_by_population.csv")
+genome_summary <- genome_table("autosome_population_arm_summary.csv", check.names = FALSE)
+genome_criterion <- genome_table("autosome_criterion_by_population.csv")
+genome_runtime <- genome_table("autosome_arm_runtime.csv")
+genome_verdict <- if (any(genome_criterion$criterion_pass %in% FALSE)) {
+  "did not hold"
+} else if (anyNA(genome_criterion$criterion_pass)) {
+  "could not be evaluated in every population"
+} else {
+  "held"
+}
+stopifnot(identical(genome_field("criterion"),
+                    c("did not hold" = "not held", "held" = "held",
+                      "could not be evaluated in every population" =
+                        "not evaluable in every population")[[genome_verdict]]))
+fai <- utils::read.delim("roh_ancestry/grch38_autosomes.fai", header = FALSE)
+stopifnot(identical(as.character(fai$V1), as.character(1:22)))
+assembly_bp <- sum(as.numeric(fai$V2))
+called_genome <- sum(genome_distribution$child_windows)
+eligible_genome <- sum(genome_distribution$child_windows[genome_distribution$heterozygotes <= 1])
+population_order <- c("ACB", "ASW", "CLM", "MXL", "PEL", "PUR", "YRI", "ESN", "CEU", "CHS")
+by_population <- function(x, column = "Population") {
+  x[order(match(x[[column]], population_order)), , drop = FALSE]
+}
+```
+
+The same six arms ran over the 22 autosomes, with the same children, frequencies, emission settings and batch sizes as on chr20. Each query decodes one chromosome for one batch of children with the shipped macro, `duckhts_roh_af_table` or `duckhts_roh_ancestry`. The extension has SHA-256 `r genome_field("extension_sha256")`, built from `develop` at `378d8b82`, with duckdb R `r genome_field("duckdb_r")`. The drivers record the SHA-256 of every input and of each output, and [the receipt](results/roh-ancestry/autosome_receipt.tsv) binds every table below to those outputs; this section reads a table only when its SHA-256 matches the receipt. The per-chromosome reference relations are registry artifacts pinned to their SHA-256.
+
+**The truth marks runs of low heterozygosity.** It is the amended chr20 rule on every autosome: 100 kb windows with at most one heterozygous call and at least one called genotype, merged into runs of at least 1 Mb. It uses no allele frequencies, so it does not separate autozygosity from population-common low diversity. Truth length and FROH are therefore compared between arms within one population, never across populations. Its chr20 part equals the amended chr20 truth above. Of `r fmt(called_genome)` child-windows with a called genotype, `r fmt(eligible_genome)` (`r sprintf("%.2f%%", 100 * eligible_genome / called_genome)`) are eligible; `r fmt(sum(genome_evidence$child_windows_without_called_genotype))` child-windows have no called genotype and break runs. The per-chromosome evidence is [here](results/roh-ancestry/autosome_truth_window_evidence.csv), the heterozygote distribution [here](results/roh-ancestry/autosome_truth_window_distribution.csv) and the runs of low heterozygosity per child [here](results/roh-ancestry/autosome_truth_by_child.csv).
+
+`froh_assembly` is called length over the summed GRCh38 length of the 22 autosomes, `r fmt(assembly_bp)` bp, gaps and centromeres included. No callable-base mask is registered, so this whole-assembly fraction replaces the callable-length denominator that the protocol names, and it is smaller than a FROH over callable bases. The runs of low heterozygosity per population, to be read within each population only:
+
+```{r, echo=FALSE}
+truth_table <- by_population(genome_truth_population, "population")
+names(truth_table) <- c("Population", "Children", "Runs of low heterozygosity",
+                        "Run length (bp)", "Mean froh_assembly", "Runs >= 2 Mb", "Runs >= 5 Mb")
+knitr::kable(truth_table, digits = 5, row.names = FALSE)
+```
+
+Genome-wide proportions come from dosages at `r fmt(sum(genome_sites$ancestry_site_count))` matched, non-palindromic reference sites of the 22 autosomes. The AF arms and the ancestry arm use the same site keys on every autosome ([comparison](results/roh-ancestry/autosome_site_set_equivalence.csv)). Every child has `status=ok`; the per-child proportions are [here](results/roh-ancestry/autosome_q_by_child.csv) and the population means [here](results/roh-ancestry/autosome_q_summary_by_population.csv).
+
+```{r, echo=FALSE}
+knitr::kable(by_population(genome_q_quality), digits = 4, row.names = FALSE)
+```
+
+The arm results per population, with FROH as `froh_assembly`. An arm's `froh_assembly` sums every call of any length, while the truth above counts only runs of at least 1 Mb, so the two are not on one scale:
+
+```{r, echo=FALSE}
+genome_summary$Arm <- factor(genome_summary$Arm, levels = arm_order)
+genome_summary <- by_population(genome_summary[order(genome_summary$Arm), ])
+genome_summary$Arm <- c(pooled = "Pooled", single_population = "Single population",
+                        ancestry_tuned = "Ancestry tuned")[as.character(genome_summary$Arm)]
+names(genome_summary)[names(genome_summary) == "FROH (whole assembly)"] <- "froh_assembly"
+knitr::kable(genome_summary, row.names = FALSE)
+```
+
+```{r, include=FALSE}
+admixed_rows <- genome_criterion[genome_criterion$Population %in%
+  c("ACB", "ASW", "CLM", "MXL", "PEL", "PUR"), ]
+failed <- function(comparison, check) {
+  rows <- admixed_rows[admixed_rows$comparison == comparison &
+                         admixed_rows[[check]] %in% FALSE, ]
+  if (!nrow(rows)) return("no admixed population")
+  knitr::combine_words(by_population(rows)$Population, oxford_comma = FALSE)
+}
+controls_pass <- all(genome_criterion$criterion_pass[genome_criterion$Population %in%
+  c("YRI", "ESN", "CEU", "CHS")])
+```
+
+The declared criterion, unchanged, applied to the genome-wide truth and arms: it **`r genome_verdict`** genome-wide. Against single-population AF, ancestry-tuned AF does not give fewer unsupported runs of at least 1 Mb in `r failed("single_population", "count_pass")`: the counts are equal or higher. Against pooled AF, the count check fails in `r failed("pooled", "count_pass")`. The truth-coverage check fails in `r failed("single_population", "truth_coverage_pass")` against single-population AF and in `r failed("pooled", "truth_coverage_pass")` against pooled AF. The four controls `r if (controls_pass) "all pass" else "do not all pass"`. The comparison for each population:
+
+```{r, echo=FALSE}
+knitr::kable(by_population(genome_criterion), digits = 4, row.names = FALSE)
+```
+
+Each arm ran once in a fresh R process with four DuckDB threads and a 12 GB DuckDB memory limit; the arms are deterministic, as the three chr20 repetitions show.
+
+```{r, echo=FALSE}
+knitr::kable(genome_runtime, digits = 2, row.names = FALSE)
+```
+
 ## Reproducing the evaluation
 
 The drivers are in `benchmarks/roh_ancestry/` and run from the repository root. They resolve inputs through `r/duckhtsbench`: registry artifacts by identifier, and the cache directory with `duckhts_bench_cache_dir()`. They use the installed Rduckhts and the extension at `build/release/`; none compiles the package in place. The order is:
 
 1. staging: `stage_remote_chromosome.R` per autosome and `summarise_staging.R`. They take each source URL, the pedigree and the destination from the registry, and use `benchmarks/roh_ancestry_stage.R`. The evaluation's chr20 input was a verified local copy of its registered source; the same script stages it remotely.
 2. chr20: `prepare_chr20.R` (writes the children list and the chr20 reference relations), `truth_chr20.R`, `truth_intervals.R`, `q_chr20.R`, `sitecheck_chr20.R`, `verify_site_sets.R`, `run_chr20_arm.R` (per arm and repetition), `summarise_chr20.R`, `criterion_chr20.R` and `summarise_runtime.R`.
-3. render this report.
+3. genome-wide: `prepare_genome_references.R` (stages and checks the per-chromosome reference relations), `verify_genome_site_sets.R`, `truth_genome.R`, `q_genome.R`, `run_autosome_arms.R`, `summarise_genome_q.R` and `summarise_genome.R` (writes the receipt last). `ROH_GENOME_CHROMOSOMES` restricts a smoke run to some autosomes; its outputs are refused by the summaries of another set.
+4. render this report.
