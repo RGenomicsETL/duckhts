@@ -25,13 +25,23 @@ roh_mixture_free_bytes <- function(directory) {
 roh_mixture_label <- function(alpha) sprintf("alpha_%.2f", alpha)
 
 roh_mixture_run <- function(extension, cli, output_dir, size = c("full", "reduced"),
-                            declaration = roh_mixture_declaration) {
+                            declaration = roh_mixture_declaration, related = NULL) {
   size <- match.arg(size)
   alphas <- if (size == "full") declaration$alphas else declaration$reduced_alphas
   extension <- normalizePath(extension, mustWork = TRUE)
   work <- tempfile("roh-mixtures-")
   dir.create(work)
   on.exit(unlink(work, recursive = TRUE), add = TRUE)
+  if (!is.null(related)) {
+    output_dir <- file.path(output_dir, "related")
+    pedigree <- utils::read.table(roh_truth_check_file("roh_ancestry_pedigree"),
+      header = TRUE, colClasses = "character")
+    child <- pedigree[pedigree$SampleID == declaration$donor, , drop = FALSE]
+    if (nrow(child) != 1L ||
+        !declaration$receiver %in% c(child$FatherID, child$MotherID)) {
+      stop("related donor is not the receiver's child in the pedigree", call. = FALSE)
+    }
+  }
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
   con <- roh_truth_connect(extension)
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
@@ -183,6 +193,9 @@ roh_mixture_run <- function(extension, cli, output_dir, size = c("full", "reduce
     data.frame(decode = name, roh_truth_read_runs(output))
   }
   with_term <- data.frame(fit[c("sample", numbers)], artefact_weight_sd = 0)
+  if (!is.null(related)) {
+    with_term$contamination <- fit$contamination_relative
+  }
   without_term <- with_term
   without_term$contamination <- 0
   runs <- rbind(decode("with_term", with_term), decode("without_term", without_term))
@@ -209,6 +222,11 @@ roh_mixture_run <- function(extension, cli, output_dir, size = c("full", "reduce
                pass = abs(with_erosion) <= abs(without_erosion) + declaration$m2_tolerance)
   }))
   criteria <- data.frame(criterion = c("M1", "M2"), pass = c(m1_pass, all(m2$pass)))
+  if (!is.null(related)) {
+    scored <- roh_related_mixture_score(fit, m2, related)
+    fit <- scored$fit
+    criteria <- scored$criteria
+  }
 
   metadata <- data.frame(
     key = c("receiver", "donor", "alphas", "size", "sites", "span_bases", "samtools",
@@ -231,4 +249,39 @@ roh_mixture_run <- function(extension, cli, output_dir, size = c("full", "reduce
   write(observations, "mixture_observations.csv")
   list(metadata = metadata, slice_identities = slice_identities, identities = identities, reads = reads,
        fit = fit, froh = froh, m2 = m2, criteria = criteria, observations = observations)
+}
+
+roh_related_mixture_score <- function(fit, erosion, declaration) {
+  nonzero <- fit$alpha > 0
+  fit$relative_error <- fit$contamination_relative - fit$alpha
+  fit$relative_tolerance <- pmax(declaration$m3_absolute_floor,
+    declaration$m3_relative_tolerance * fit$alpha)
+  fit$relative_within_tolerance <- abs(fit$relative_error) <= fit$relative_tolerance
+  fit$half_share_error <- fit$contamination - fit$alpha / 2
+  fit$half_share_tolerance <- pmax(declaration$m4_absolute_floor,
+    declaration$m4_relative_tolerance * fit$alpha / 2)
+  fit$half_share_within_tolerance <- abs(fit$half_share_error) <= fit$half_share_tolerance
+  fit$relative_loglik_gain <- fit$log_likelihood_relative - fit$log_likelihood
+  identified <- fit$alpha >= declaration$likelihood_min_alpha
+  criteria <- data.frame(
+    criterion = c("M3", "M4", "R1"),
+    pass = c(isTRUE(all(fit$relative_within_tolerance[nonzero])) &&
+               isTRUE(all(fit$relative_loglik_gain[identified] > 0)),
+             isTRUE(all(fit$half_share_within_tolerance[nonzero])),
+             isTRUE(all(erosion$pass))))
+  list(fit = fit, criteria = criteria)
+}
+
+roh_related_mixture_run <- function(extension, cli, output_dir, size = c("full", "reduced"),
+                                     related = roh_related_declaration) {
+  samples <- c(related$receiver, related$donor)
+  declaration <- utils::modifyList(roh_mixture_declaration, list(
+    receiver = related$receiver, donor = related$donor,
+    alphas = related$alphas,
+    slice_artifacts = stats::setNames(c("roh_mixture_hg00403_chr20_cram",
+      related$slice_artifact), samples),
+    count_artifacts = stats::setNames(c("roh_counts_chr20_hg00403",
+      "roh_counts_chr20_hg00405"), samples),
+    m2_tolerance = related$erosion_tolerance))
+  roh_mixture_run(extension, cli, output_dir, size, declaration, related)
 }

@@ -166,11 +166,11 @@ classes, metrics, bootstrap, comparisons and the bounds of T1 and T2 are those
 of version 1; T3 does not depend on the truth. Both versions' verdicts are
 reported.
 
-### Read mixtures
+### Unrelated read mixtures
 
-The receiver is HG00403 and the donor NA18507: the two staged slices, of
-different populations. No related pair is staged, so `contamination_relative`
-is reported under its hypothesis only, with no related donor to test it.
+The receiver is HG00403 and the donor NA18507: two staged slices of
+different populations. This arm reports `contamination_relative` under its
+hypothesis; the parent/child arm below tests it with a related donor.
 
 A template (read pair) of the receiver is kept with chance 1 − α and one of
 the donor with chance α, by `samtools view --subsample` with
@@ -197,6 +197,39 @@ runs; erosion is a decode's FROH minus that of α = 0 with the term.
 - **M1**: the fitted `contamination` increases strictly with α over 0 and
   the four shares.
 - **M2**: at every α, |erosion with term| ≤ |erosion without term| + 0.002.
+
+### Related second genome
+
+The registered 1000 Genomes pedigree identifies HG00403 and HG00404 as
+parents of HG00405 (family SH001, CHS). HG00403 receives reads from its child
+HG00405. The parents have CRAMs at the existing 2504-sample S3 locator family;
+HG00405's corresponding S3 key is absent. The child is in the
+[698-related-sample 30x release](https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/README_2504_plus_additional_698_related_samples.txt),
+with a range-readable ENA CRAM (ERR3988761) and index. The registry names that
+public source and the chr20 slice derived by the same staging function as
+the unrelated arm. Its independently registered counts must also match.
+
+`benchmarks/roh_truth_mixtures/declaration_related.R` declares the criteria
+before this arm runs. The alpha grid, read-name hash seed (mates together),
+counting settings, frequencies and decoder are the same as the unrelated arm.
+Nominal alpha is a sampling fraction, not necessarily the realised donor
+share at unequal source depths; both are reported.
+
+- **M3**: `contamination_relative` is within max(0.005, 0.25 × α) of α at
+  every nonzero α. The relative log-likelihood exceeds the unrelated one at
+  α = 0.05 and 0.10. At 0.01/0.02 the likelihood sign is descriptive, not a
+  gate: the earlier count-level result separated at 5%, not at 2%.
+- **M4**: unrelated `contamination` is within max(0.003, 0.25 × α/2) of α/2
+  at every nonzero α, as expected for a parent/child donor under that model.
+- **R1**: at every α, |erosion with the relative-fit term| ≤ |erosion without
+  it| + 0.002. Erosion is relative to α = 0 with the relative-fit term.
+
+The with-term decode substitutes `contamination_relative` for `contamination`
+in the fit table. Other nuisance estimates remain those exposed by the public
+fit, from its unrelated hypothesis. This is a plug-in population-frequency
+emission, not a relationship-aware ROH emission. The tolerance floors and
+25% relative errors allow read sampling and nuisance fitting; they are not
+confidence intervals. No unrelated criterion is changed.
 
 ### Gates
 
@@ -233,7 +266,7 @@ is not evidence. The default is `full`. The bundled samtools needs RBCFTools
 1.24-1.1.0 or later on the library path.
 
 ``` sh
-nice -n -15 taskset -c 8-15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_roh_truth_and_mixtures.Rmd")'
+R_LIBS=/tmp/RBCFTools-release-lib taskset -c 12-15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_roh_truth_and_mixtures.Rmd")'
 # Driver check only; writes the page outside benchmarks/:
 ROH_TRUTH_SIZE=reduced taskset -c 0-3 Rscript -e \
   'rmarkdown::render("benchmarks/benchmark_roh_truth_and_mixtures.Rmd", output_dir = tempdir())'
@@ -266,6 +299,7 @@ extension <- Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_exten
 output_dir <- if (full_size) "benchmarks/results/roh-truth-mixtures" else tempfile("roh-truth-mixtures-")
 truth <- roh_truth_run(extension, duckdb_cli, output_dir, size)
 mixture <- roh_mixture_run(extension, duckdb_cli, output_dir, size)
+related <- roh_related_mixture_run(extension, duckdb_cli, output_dir, size)
 # The run tables are kept gzip-compressed; each must read back with every run.
 read_compressed <- function(name) {
   utils::read.csv(gzfile(file.path(output_dir, name)), stringsAsFactors = FALSE,
@@ -538,6 +572,65 @@ knitr::kable(data.frame(Criterion = mixture$criteria$criterion, Verdict = verdic
              row.names = FALSE)
 ```
 
+## Related-donor read mixtures
+
+Receiver HG00403, child donor HG00405. Alpha 0 is the receiver-only control.
+
+```{r related-identities, echo=FALSE}
+identities <- related$identities
+knitr::kable(data.frame(
+  Slice = identities$sample, Rows = bases(identities$rows),
+  `Counts SHA-256` = identities$counts_sha256,
+  `Equals registered` = ifelse(identities$identical, "yes", "no"), check.names = FALSE),
+  row.names = FALSE)
+reads <- related$reads
+knitr::kable(data.frame(
+  α = reads$alpha, `Receiver alignments` = bases(reads$receiver_alignments),
+  `Donor alignments` = bases(reads$donor_alignments),
+  `Donor share of alignments` = sprintf("%.4f", reads$read_share), check.names = FALSE),
+  row.names = FALSE)
+```
+
+### Relative and unrelated fits
+
+```{r related-fit, echo=FALSE}
+fit <- related$fit
+knitr::kable(data.frame(
+  α = fit$alpha, contamination_relative = number(fit$contamination_relative),
+  `Relative error` = number(fit$relative_error),
+  `M3 tolerance` = number(fit$relative_tolerance),
+  `M3 recovery` = ifelse(fit$alpha == 0, "control", verdict(fit$relative_within_tolerance)),
+  contamination = number(fit$contamination), `α/2` = number(fit$alpha / 2),
+  `M4 tolerance` = number(fit$half_share_tolerance),
+  `M4 recovery` = ifelse(fit$alpha == 0, "control", verdict(fit$half_share_within_tolerance)),
+  status = fit$status, check.names = FALSE), row.names = FALSE)
+knitr::kable(data.frame(
+  α = fit$alpha, `Relative log-likelihood` = number(fit$log_likelihood_relative, 7),
+  `Unrelated log-likelihood` = number(fit$log_likelihood, 7),
+  `Relative − unrelated` = sprintf("%+.3f", fit$relative_loglik_gain),
+  `Likelihood gate` = ifelse(fit$alpha < roh_related_declaration$likelihood_min_alpha,
+    "descriptive", verdict(fit$relative_loglik_gain > 0)), check.names = FALSE),
+  row.names = FALSE)
+```
+
+### FROH with the relative-fit term and without
+
+```{r related-froh, echo=FALSE}
+froh <- related$froh
+froh <- froh[order(froh$decode, froh$alpha), ]
+knitr::kable(data.frame(
+  Decode = froh$decode, α = froh$alpha, Runs = froh$runs,
+  FROH = sprintf("%.4f", froh$froh), Erosion = sprintf("%+.4f", froh$erosion),
+  Jaccard = sprintf("%.3f", froh$jaccard), check.names = FALSE), row.names = FALSE)
+erosion <- related$m2
+knitr::kable(data.frame(
+  α = erosion$alpha, `Erosion with relative term` = sprintf("%+.4f", erosion$erosion_with_term),
+  `Erosion without term` = sprintf("%+.4f", erosion$erosion_without_term),
+  R1 = verdict(erosion$pass), check.names = FALSE), row.names = FALSE)
+knitr::kable(data.frame(Criterion = related$criteria$criterion,
+  Verdict = verdict(related$criteria$pass)), row.names = FALSE)
+```
+
 ## Gates
 
 Every DuckDB query, with its latency, peak RSS, DuckDB's peak buffer memory,
@@ -546,7 +639,8 @@ peak RSS above its ceiling, and it reached this table.
 
 ```{r gates, echo=FALSE}
 observations <- rbind(data.frame(part = "truth", truth$observations),
-                      data.frame(part = "mixtures", mixture$observations))
+                      data.frame(part = "mixtures", mixture$observations),
+                      data.frame(part = "related", related$observations))
 knitr::kable(data.frame(
   Part = observations$part, Query = observations$observation, Kind = observations$kind,
   Threads = observations$threads, Seconds = sprintf("%.3f", observations$seconds),
@@ -577,8 +671,9 @@ knitr::kable(data.frame(
   between them is not checked.
 - One error rate, one depth and one set of read parameters. Other rates, a
   low depth and a contaminant of another population are not tested here.
-- One mixture pair, of two populations; no related donor is staged. The
-  receiver's frequencies are the panel's pooled frequencies, not its
-  population's, so a donor of another population biases the fitted
-  contamination upward, as the count-level mixture of
-  `benchmark_count_error_fit.md` shows.
+- Two mixture pairs: one unrelated pair of two populations and one
+  parent/child pair. The receiver's frequencies are the panel's pooled
+  frequencies, not its population's, so a donor of another population biases
+  the fitted contamination upward, as the count-level mixture of
+  `benchmark_count_error_fit.md` shows. The relative fit's term is tested as a
+  plug-in to the existing emission; a relationship-aware decode is not tested.

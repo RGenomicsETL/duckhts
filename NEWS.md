@@ -4,6 +4,9 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- Add a declared parent/child read-mixture benchmark for a related second
+  genome, comparing relative and unrelated count fits and FROH erosion, with
+  a registered public 30x donor slice and network-free staging checks.
 - `benchmarks/benchmark_roh_ancestry.md` has the genome-wide evaluation
   (#349): the six ROH arms over the 22 autosomes for the 377 trio children,
   one chromosome per query. The truth marks runs of low heterozygosity, so
