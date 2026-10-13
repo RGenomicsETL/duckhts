@@ -283,3 +283,34 @@ verdict <- if (any(criterion$criterion_pass %in% FALSE)) {
 cat("children", nrow(child_metrics) / length(arm_order), "chromosomes", length(chromosomes),
     "truth runs", nrow(truth), "criterion", verdict, "\n")
 print(criterion)
+
+# The receipt of the genome-wide results: the chromosome set, the extension
+# and the cache outputs the summaries read (each checked against its marker
+# above or in summarise_genome_q.R), then the SHA-256 of every result table
+# that truth_genome.R, verify_genome_site_sets.R, summarise_genome_q.R and this
+# script wrote. The report reads a table only when its SHA-256 matches here.
+arm_marker <- readLines(file.path(genome_cache, "autosome.arm_pooled_1.ok"))
+q_path <- file.path(genome_cache, "autosome.q.csv")
+genome_check_output(q_path, chromosomes)
+cache_outputs <- c(truth_intervals = truth_path, q = q_path, stats::setNames(
+  file.path(genome_cache, sprintf("autosome.arm_%s_1.csv", arm_names)),
+  paste0("arm_", arm_names)))
+result_tables <- c(
+  "autosome_truth_window_distribution.csv", "autosome_truth_window_evidence.csv",
+  "autosome_truth_by_child.csv", "autosome_truth_by_population.csv",
+  "autosome_site_set_equivalence.csv", "autosome_q_by_child.csv",
+  "autosome_q_summary_by_population.csv", "autosome_q_quality_by_population.csv",
+  "autosome_q_site_counts_by_child.csv", "autosome_arm_runtime.csv",
+  "autosome_child_metrics.csv", "autosome_population_arm_summary.csv",
+  "autosome_criterion_by_population.csv")
+receipt <- data.frame(
+  field = c("chromosomes", "extension_sha256", "duckdb_r", "criterion",
+            paste0("cache_", names(cache_outputs)), result_tables),
+  value = c(paste(chromosomes, collapse = ","),
+            sub("^extension=", "", arm_marker[startsWith(arm_marker, "extension=")]),
+            sub("^duckdb_r=", "", arm_marker[startsWith(arm_marker, "duckdb_r=")]),
+            verdict, vapply(cache_outputs, genome_sha256, character(1L)),
+            vapply(file.path(results_dir, result_tables), genome_sha256, character(1L))),
+  stringsAsFactors = FALSE)
+utils::write.table(receipt, file.path(results_dir, "autosome_receipt.tsv"), sep = "\t",
+                   row.names = FALSE, quote = FALSE)
