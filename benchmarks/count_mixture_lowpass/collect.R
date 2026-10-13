@@ -189,7 +189,8 @@ close(connection)
 stopifnot(identical(lowpass_declaration, declared$lowpass_declaration))
 metadata$declaration_recorded_commit <- original
 metadata$declaration_commit <- creation
-writeLines(capture.output(dput(metadata)), file.path(output, "metadata.txt"))
+metadata_lines <- trimws(capture.output(dput(metadata)), which = "right")
+writeLines(metadata_lines, file.path(output, "metadata.txt"))
 cat("Results bytes:", sum(file.info(list.files(output, full.names = TRUE))$size), "\n")
 cat("Primary observed threshold counts:\n")
 for (name in c("bias_observed", "accuracy_observed", "coverage_observed", "null_observed")) print(table(summary[[name]]))
