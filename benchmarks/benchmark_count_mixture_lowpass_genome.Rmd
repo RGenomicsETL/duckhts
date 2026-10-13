@@ -307,15 +307,19 @@ Input artifacts are warm cached. No disk spill is allowed.
 ```{r scaling}
 show_table(scaling[c("depth", "stride", "repetition", "sites", "output_rows", "wall_seconds",
                      "simulation_seconds", "fit_seconds", "rss_bytes", "peak_buffer_bytes", "spill_bytes")])
+```
+
+```{r scaling_exponents, results = "asis"}
 for (depth in unique(scaling$depth)) {
   x <- scaling[scaling$depth == depth, ]
   med <- aggregate(wall_seconds ~ sites, x, median)
   exponent <- log(tail(med$wall_seconds, 1) / med$wall_seconds[[1L]]) /
     log(tail(med$sites, 1) / med$sites[[1L]])
-  cat("\nDepth ", depth, ": endpoint exponent ", round(exponent, 4),
+  cat("- Depth ", depth, ": endpoint exponent ", round(exponent, 4),
       if (med$wall_seconds[[1L]] >= 5) paste0("; gate ", if (exponent <= 1.25) "met" else "FAIL")
       else "; timing gate not evaluated (smallest run < 5 seconds)", ".\n", sep = "")
 }
+cat("\n")
 ```
 
 ```{r memory}

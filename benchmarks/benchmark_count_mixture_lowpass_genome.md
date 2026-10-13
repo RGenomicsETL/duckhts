@@ -694,10 +694,8 @@ are warm cached. No disk spill is allowed.
 |   0.4 |      1 |          2 | 4883749 |           2 |        14.13 |              4.346 |       9.137 | 4304101376 |        8378167296 |           0 |
 |   0.4 |      1 |          3 | 4883749 |           2 |        14.17 |              4.372 |       9.146 | 4310396928 |        8378167296 |           0 |
 
-    ## 
-    ## Depth 0.1: endpoint exponent 0.5989; gate met.
-    ## 
-    ## Depth 0.4: endpoint exponent 0.6247; gate met.
+- Depth 0.1: endpoint exponent 0.5989; gate met.
+- Depth 0.4: endpoint exponent 0.6247; gate met.
 
 | workload         | observations | max_RSS_GiB | max_buffer_GiB | max_spill_bytes | RSS_ceiling_failures | buffer_ceiling_failures |
 |:-----------------|-------------:|------------:|---------------:|----------------:|---------------------:|------------------------:|
