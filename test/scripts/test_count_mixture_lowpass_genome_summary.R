@@ -57,3 +57,18 @@ x$relation_diagnostic[2L] <- NA_character_
 summary <- genome_summarize(x, setting)
 expect_equal(summary$failed_status, 1L)
 expect_false(summary$diagnostic_pass)
+
+archive <- tempfile(fileext = ".rds.gz")
+rows <- data.frame(seed = c(1L, 2L, 3L), share = c(.1 + 1e-16, NA_real_, 1e-12),
+  status = c("ok_conditional", NA_character_, "weak_pairs"))
+genome_write_rds(rows, archive)
+stored <- readRDS(archive)
+expect_identical(stored$seed, rows$seed)
+expect_identical(stored$share, rows$share)
+expect_identical(as.character(stored$status), rows$status)
+expect_identical(names(stored), names(rows))
+expect_identical(nrow(stored), nrow(rows))
+connection <- file(archive, "rb")
+expect_identical(readBin(connection, "raw", n = 2L), as.raw(c(0x1f, 0x8b)))
+close(connection)
+unlink(archive)

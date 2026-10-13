@@ -66,10 +66,12 @@ genome_log_metrics <- function(path) {
   c(rss_bytes = rss, wall_seconds = wall)
 }
 
-genome_write_csv <- function(x, path) {
-  con <- gzfile(path, "wt", compression = 9L)
+genome_write_rds <- function(x, path) {
+  text <- vapply(x, is.character, logical(1L))
+  x[text] <- lapply(x[text], factor)
+  con <- gzfile(path, "wb", compression = 9L)
   on.exit(close(con))
-  write.csv(x, con, row.names = FALSE)
+  saveRDS(x, con)
 }
 
 genome_collect <- function(root, destination) {
@@ -96,8 +98,7 @@ genome_collect <- function(root, destination) {
     )
     x <- saved$fit
     fields <- c(
-      "relationship_model", "share", "share_lower", "share_upper", "share_se",
-      "singles_share", "pair_residual", "status",
+      "relationship_model", "share", "share_lower", "share_upper", "status",
       "relation_diagnostic", "jackknife_failed_refits", "at_bound", "interval_hull",
       "reads", "positive_pair_sites", "blocks", "pair_blocks"
     )
@@ -149,8 +150,8 @@ genome_collect <- function(root, destination) {
     genome_summarize(x, setting)
   })
   dir.create(destination, recursive = TRUE, showWarnings = FALSE)
-  genome_write_csv(fits, file.path(destination, "replicates.csv.gz"))
-  genome_write_csv(performance, file.path(destination, "performance.csv.gz"))
+  genome_write_rds(fits, file.path(destination, "replicates.rds.gz"))
+  genome_write_rds(performance, file.path(destination, "performance.rds.gz"))
   write.csv(do.call(rbind, summaries), file.path(destination, "strata.csv"), row.names = FALSE)
   write.csv(checks, file.path(destination, "oracle_and_threads.csv"), row.names = FALSE)
   status_fields <- fits[c("stratum", "relationship_model", "status", "relation_diagnostic")]
