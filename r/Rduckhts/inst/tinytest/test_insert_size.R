@@ -3,9 +3,8 @@ library(DBI)
 library(Rduckhts)
 
 local({
-  con <- dbConnect(duckdb::duckdb())
+  con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE))
-  duckhts_load(con)
   fixtures <- system.file("extdata", "insert_size", package = "Rduckhts")
   reference <- file.path(fixtures, "reference.fa")
   oracle_sql <- paste(readLines(file.path(fixtures, "insert_size_reference.sql")), collapse = "\n")

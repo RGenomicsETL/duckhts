@@ -29,7 +29,7 @@ rduckhts_bam_insert_size_counts <- function(
   }
   scan_mode <- match.arg(scan_mode)
   params <- list(
-    include_duplicates = sql_bool(include_duplicates),
+    include_duplicates = if (include_duplicates) "TRUE" else "FALSE",
     threads = sql_whole_number(threads, "threads", 8, low = 1),
     decompression_threads = sql_whole_number(
       decompression_threads, "decompression_threads", .Machine$integer.max),
