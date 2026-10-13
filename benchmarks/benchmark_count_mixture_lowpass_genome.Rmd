@@ -1,0 +1,356 @@
+---
+title: "Genome-wide low-pass second-genome campaign"
+output:
+  github_document:
+    toc: true
+---
+
+## Declaration and scope
+
+The frozen declaration is
+[`count_mixture_lowpass_genome/declaration.R`](count_mixture_lowpass_genome/declaration.R),
+with its pre-run
+[execution declaration](count_mixture_lowpass_genome/execution_declaration.md).
+It commits 200 replicates in each of 90 strata: shares 0/0.02/0.05/0.10/0.20,
+same-superpopulation unrelated, other-superpopulation unrelated and IBD1,
+at 0.1x, 0.2x and 0.4x, with sequencing error 0.0001 and 0.0002.
+Seventy-five strata are primary: 0.1x/0.4x at error 0.0001, and all depths
+at error 0.0002. The 15 error-0.0001 strata at 0.2x are secondary.
+All 18,000 replicates use site artefact probability 0.002 and fitted excess
+homozygosity zero. Statistical criteria and the calibration grid are unchanged;
+an incomplete stratum is not evaluated against release targets.
+
+This report is separate from the
+[chr20 report](benchmark_count_mixture_lowpass.md); its sections and verdicts
+are unchanged. These are phased-genome simulations, not real count-table
+calibration-transfer measurements. Correct generating relationships select
+which conditional fit is judged; the algorithm does not learn that relationship.
+
+### Frozen release targets
+
+* At shares >= 0.05, absolute mean bias <= 0.005/0.0035/0.0025 at
+  0.1/0.2/0.4x. At least 90% of replicates have absolute error <=
+  0.025/0.015/0.008 for matched unrelated, 0.020/0.014/0.010 for
+  anchored other-population unrelated, or 0.050/0.025/0.015 for matched IBD1.
+* Coverage >= 92%, with the exact two-sided 95% binomial interval containing
+  the nominal 95% coverage. Null positive claims use `share_lower > 0`;
+  their exact one-sided 95% binomial upper bound must be <= 0.075.
+* Failed statuses, missing shares and missing/invalid intervals remain in
+  denominators. A recovery pass also requires every fit to be `ok_conditional`
+  with a finite share and interval. Strata below 200 completions have no verdict.
+* Interval width mean/median/90th percentile/maximum and full-range intervals
+  are reported. Matched-frequency diagnostics must remain `unresolved`,
+  including IBD1; relative scores do not choose a relationship.
+* Replicate 1 of each stratum has an independent R moment oracle, exact integer
+  counters, and relative moment error <= 1e-10 (absolute near zero). One/four
+  DuckDB threads must agree on statuses, missingness and diagnostics; share
+  and interval differences must be <= 1e-5, moment differences <= 1e-10.
+* No spill. RSS and reported DuckDB peak buffer each have the frozen ceiling
+  768 MiB + 3 times (512 bytes per input counts row + live R panels/counts
+  + native 256 MiB cap). For the fresh-process scaling series, live R state is
+  the largest chromosome panel/count pair. This is a modeled SQL preparation
+  allowance, not a measurement of native live state. Native moments are
+  bounded independently; joins, validation and ordered preparation dominate
+  these SQL workloads. The DuckDB memory setting is 6 GB; measured peak buffer
+  is reported separately, not assumed to equal that setting.
+* Fixed-block site scaling uses all autosomes at strides 4/2/1 (1x/2x/4x),
+  in fresh processes. The end-to-end endpoint timing exponent must be <= 1.25
+  if the smallest run takes >= 5 seconds. Query-only timings are also retained.
+
+## Inputs, simulation and provenance
+
+Each autosome's children BCF and matched AF Parquet is resolved and SHA-256
+verified through `r/duckhtsbench`. The chr20 AF identity is the ordered rebuild
+pinned to `b862fc7d`. Each derived chromosome artifact is registered as
+`count_mixture_lowpass_chr<N>_children_haplotypes`; its source identities and
+settings are embedded, and the run manifest pins the derived bytes again.
+No download is needed. The network-free staging fixture covers allele order,
+all four diploid encodings, repeat staging, family-disjoint donors, rejection
+of unphased GTs and checksum failure. A full BCF audit checks all children for
+unphased GTs, independently of the panel join.
+
+Thirty-six CEU and 56 YRI children remain after selecting one child per family.
+Every replicate draws one CEU child as the sample, a distinct CEU child for
+same-superpopulation or IBD1, or a YRI child for other-superpopulation.
+Different families supply the unrelated genomes; cryptic relatedness is not
+independently screened. These are actual phased diploid children, rather than
+the chr20 driver's diploids assembled from separate founders. Sample and donor
+identity is fixed across all 22 autosomes. IBD1 takes one phased sample
+haplotype and one phased donor haplotype, with fixed haplotype labels within
+each chromosome and no crossover simulation, matching the chr20 simplification.
+
+The provided `AF_EUR`/`AF_AFR` anchors are used directly, without re-estimation
+or clamping. These 1000G AFs include the simulated genomes in their full
+2504/3202-genome frequency source: there is no leave-two-out exclusion.
+This induces finite-panel dependence between genotypes and frequencies and
+can make alignment optimistic relative to held-out transfer. It can alter
+baseline heterozygosity, bias and interval calibration; its direction and
+size are not isolated here. CEU/YRI are narrower populations than EUR/AFR,
+so this campaign does not remove within-superpopulation frequency mismatch.
+
+Depth is Poisson; ALT conditional on depth is binomial with probability
+`e + (1 - 2e) * ((1-share)*sample_dosage/2 + share*donor_dosage/2)`.
+With probability 0.002 a site's ALT count is uniform on 0..depth. Every site's
+depth and the same random draws are retained. Only covered sites enter the
+bulk-loaded counts table; full-panel sites, zero-depth sites, excluded sites
+and unavailable sites are reported separately per replicate. Macro-native QC
+therefore describes covered input rows, not all simulated sites. The macro uses
+`block_bases := 10000000`, `min_blocks := 30`, default
+maximum depth 8, and the same error/artefact calibration used to generate counts.
+The native extension and every `src/` file are unchanged.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+result_dir <- "count_mixture_lowpass_genome/results"
+read_result <- function(name) {
+  path <- file.path(result_dir, name)
+  if (endsWith(name, ".rds.gz")) readRDS(path) else read.csv(path)
+}
+metadata <- jsonlite::fromJSON(file.path(result_dir, "metadata.json"), simplifyVector = FALSE)
+strata <- read_result("strata.csv")
+fits <- read_result("replicates.rds.gz")
+performance <- read_result("performance.rds.gz")
+checks <- read_result("oracle_and_threads.csv")
+scaling <- read_result("scaling.csv")
+phase <- read_result("phase.csv")
+campaign_timing <- read_result("campaign_timing.csv")
+primary <- strata[strata$primary, ]
+stopifnot(nrow(strata) == 90L, all(strata$replicates == 200L),
+          nrow(performance) == 18000L, nrow(fits) == 30000L, nrow(checks) == 90L)
+show_table <- function(x, digits = 4) knitr::kable(x, digits = digits)
+```
+
+```{r provenance, results='asis'}
+cat("Declaration commit: `", metadata$declaration_commit, "`; batching amendment: `",
+    metadata$batching_amendment_commit, "`; execution amendment: `",
+    metadata$execution_amendment_commit, "`. Campaign driver revision: `",
+    metadata$sources$revision, "`.\n\n", sep = "")
+cat(metadata$sources$runtime$R, "; DuckDB R ", metadata$sources$runtime$duckdb, ".\n\n", sep = "")
+cat("Input/extension/driver hashes: [metadata.json](count_mixture_lowpass_genome/results/metadata.json).\n\n")
+cat("Completed ", sum(strata$replicates), " replicates in ", nrow(strata), " strata; ",
+    sum(primary$replicates), " primary replicates. Native output rows retained: ", nrow(fits), ".\n\n", sep = "")
+cat("All ", nrow(phase), " autosome BCFs have zero unphased records. Derived artifacts total ",
+    round(sum(vapply(metadata$sources$artifacts, function(x) x$bytes, numeric(1L))) / 1024^2, 2),
+    " MiB; the limit is 4 GiB. All full-depth inputs contain ", unique(performance$sites), " panel sites.\n", sep = "")
+```
+
+### Execution
+
+Run from the worktree root with RBCFTools' bundled bcftools in the private R
+library, not a PATH executable. Staging and identity verification are outside
+timed simulations. Recovery uses fourteen long-lived R/DuckDB workers,
+`nice -n 10`, on CPU IDs **0–5,12–19**, with one DuckDB thread per worker;
+explicit identity probes also use four threads. Each worker loads chromosome
+panels once. Microbatches contain 4/2/1 replicates at depths 0.1/0.2/0.4,
+with one macro call grouping by sample identity. BLAS/OpenMP are limited to
+one thread. Input identities and all-child phase are verified once at startup.
+Per-seed outputs are atomically written under the manifest SHA-256, and resumed
+only when source/input identities and settings match.
+
+```sh
+taskset -c 0-5,12-19 env R_LIBS=/tmp/RBCFTools-release-lib \
+  Rscript benchmarks/count_mixture_lowpass_genome/stage.R 1 build/release/duckhts.duckdb_extension
+# Repeat staging for chromosomes 2–22.
+taskset -c 0-5,12-19 nice -n 10 env R_LIBS=/tmp/RBCFTools-release-lib \
+  Rscript benchmarks/count_mixture_lowpass_genome/run.R build/release/duckhts.duckdb_extension /tmp/lowpass-genome
+```
+
+Full per-replicate native outputs and process logs are retained by the runner;
+checked-in gzip RDS tables preserve every seed, conditional share/interval/status,
+family-disjoint identity and performance denominator, with lossless doubles and
+categorical text labels. Read them with `readRDS()`. Missing results are not
+replaced by successful draws. Native outputs can be reconstructed from the
+registered artifacts, manifest, declaration and seeds.
+
+### Covered-site and microbatch checks
+
+```{r covered_checks}
+equivalence <- read_result("covered_equivalence.csv")
+probe <- read_result("microbatch_probe.csv")
+control_fits <- read_result("covered_control_fits.rds.gz")
+strict_exact <- vapply(control_fits$controls, function(x) {
+  identical(x$full[control_fits$fields], x$covered[control_fits$fields],
+            num.eq = FALSE, single.NA = FALSE)
+}, logical(1L))
+stopifnot(length(strict_exact) == 9L, all(strict_exact))
+show_table(equivalence[c("depth", "replicate", "seed", "exact", "sites", "zero_depth_sites",
+                        "excluded_sites", "unavailable_sites")])
+show_table(probe)
+```
+
+All-site and covered-site shares, interval endpoints, standard errors,
+singles shares, pair residuals, statuses, diagnostics, blocks and pair blocks
+must be bit-identical in all nine controls before using the shortcut. Covered
+count rows and QC also match the original simulator exactly. The declaration
+retains the full-site controls' peak-buffer caveat; campaign batches are chosen
+from the covered-input measurements, not from the configured memory setting.
+The native control tables are retained for direct IEEE-bit comparison.
+
+## Release outcomes
+
+```{r gates}
+interior <- primary[primary$truth >= .05, ]
+null <- primary[primary$truth == 0, ]
+show_table(data.frame(
+  criterion = c("Interior bias", "90% absolute error", "Coverage and binomial compatibility",
+                "Null false-positive upper bound", "Matched diagnostic", "All release criteria"),
+  evaluated_strata = c(nrow(interior), nrow(interior), nrow(primary), nrow(null),
+                       sum(primary$relationship != "other"), nrow(primary)),
+  passing_strata = c(sum(interior$bias_pass, na.rm = TRUE), sum(interior$accuracy_pass, na.rm = TRUE),
+                    sum(primary$coverage_pass, na.rm = TRUE), sum(null$null_pass, na.rm = TRUE),
+                    sum(primary$diagnostic_pass[primary$relationship != "other"]),
+                    sum(primary$release_pass, na.rm = TRUE))))
+```
+
+### Detection and recovery
+
+Positive-call rates below mean `share_lower > 0` under the supplied generating
+relationship. They are observations, not a separate release gate or relationship
+classification. Null positive calls are subject to the declared binomial gate.
+
+```{r primary_results}
+show_table(primary[c("relationship", "depth", "error", "truth", "replicates", "mean_share", "bias",
+                     "absolute_error_90", "accuracy", "coverage", "detection", "release_pass")])
+```
+
+```{r nulls}
+show_table(primary[primary$truth == 0, c("relationship", "depth", "error", "replicates", "mean_share",
+                                      "detection", "null_upper", "null_pass")])
+```
+
+### Intervals, statuses and ambiguous relationships
+
+```{r intervals}
+show_table(primary[c("relationship", "depth", "error", "truth", "interval_mean", "interval_median",
+                     "interval_90", "interval_max", "full_range_intervals", "missing_interval")])
+```
+
+```{r statuses}
+status <- read_result("statuses.csv")
+show_table(aggregate(count ~ relationship_model + status + relation_diagnostic, status, sum))
+show_table(data.frame(failed_statuses = sum(strata$failed_status),
+                     missing_shares = sum(strata$missing_share),
+                     missing_intervals = sum(strata$missing_interval),
+                     failed_jackknife_refits = sum(fits$jackknife_failed_refits)))
+```
+
+Both matched conditional models remain in the gzip table. Their existence and
+numerically successful statuses do not resolve the same-superpopulation
+relationship or establish calibrated confidence intervals. Across all matched
+native rows, 21,684 diagnostics are `unresolved` and 2,316 are `uninformative`;
+the strict all-replicates-`unresolved` criterion passes in 31/50 primary matched
+strata. The criterion is not broadened to include `uninformative`.
+
+### Secondary depth
+
+```{r secondary}
+show_table(strata[!strata$primary, c("relationship", "depth", "error", "truth", "replicates", "mean_share",
+                                   "bias", "accuracy", "coverage", "detection", "release_pass")])
+```
+
+## Independent numerical checks
+
+```{r oracle}
+show_table(data.frame(checked_strata = nrow(checks),
+  max_R_moment_error = max(checks$moment_error), counter_failures = sum(!checks$counters_exact),
+  status_failures = sum(!checks$status_equal), share_missingness_failures = sum(!checks$share_missing_equal),
+  interval_missingness_failures = sum(!checks$interval_missing_equal),
+  diagnostic_failures = sum(!checks$diagnostic_equal),
+  max_thread_share_error = max(checks$share_error), max_thread_interval_error = max(checks$interval_error),
+  max_thread_moment_error = max(checks$thread_moment_error),
+  solo_batch_failures = sum(!checks$batch_exact),
+  bit_identical_thread_checks = sum(checks$bit_identical)), digits = 14)
+```
+
+The R oracle reconstructs all moments and covered-input QC counters for every
+physical chromosome/10 Mb block, using direct weighted cross-products, not the
+SQL expressions. Full-panel and zero-depth QC are retained separately for every
+seed; zero-depth rows contribute no moments. The SQL probe exposes the actual
+moment rows passed to the native aggregate. No implementation output is used as its own oracle.
+
+## Performance and scaling
+
+```{r campaign_timing}
+show_table(campaign_timing)
+cat("Simulated site exposures: ", format(sum(performance$sites), scientific = FALSE),
+    "; covered counts rows: ", format(sum(performance$covered_sites), scientific = FALSE),
+    "; output rows: ", nrow(fits), ".\n", sep = "")
+```
+
+The 200-replicate pilot took 243.3 seconds (1.216 seconds per replicate).
+The concurrent campaign took 10,373.5 seconds (2.88 hours); the whole command,
+including startup identity/phase audits and the pilot, took 3:08:37.
+The original eight-hour budget is met, but the roughly 1.5-hour target is missed.
+The assigned fourteen logical CPUs comprise three SMT core pairs and eight
+other cores on an Intel i5-13500; a single-worker probe did not predict
+concurrent throughput. No strata or replicates are dropped to meet the target.
+
+Campaign timings are amortized within each microbatch and include neither
+per-replicate process startup nor repeated panel reading. Worker RSS is a
+long-lived-process high-water mark, not an isolated per-replicate measurement.
+
+```{r campaign_performance}
+show_table(aggregate(cbind(simulation_seconds, loading_seconds, fit_seconds, wall_seconds) ~ stratum,
+                     performance, mean))
+show_table(aggregate(cbind(sites, covered_sites, zero_depth_sites, excluded_sites,
+                          unavailable_sites) ~ stratum, performance, mean))
+```
+
+Fresh isolated process timings below include process startup, extension load,
+artifact reading, count simulation, ingestion and fitting in the wall total.
+The simulation column covers chromosome reading/simulation/ingestion; fit time
+covers only the macro query. Peak RSS covers the entire process. These runs
+exclude the R oracle and thread probes. Scaling retains all autosomes and
+physical blocks while using strides 4/2/1, repeated three times at each depth.
+Input artifacts are warm cached. No disk spill is allowed.
+
+```{r scaling}
+show_table(scaling[c("depth", "stride", "repetition", "sites", "output_rows", "wall_seconds",
+                     "simulation_seconds", "fit_seconds", "rss_bytes", "peak_buffer_bytes", "spill_bytes")])
+for (depth in unique(scaling$depth)) {
+  x <- scaling[scaling$depth == depth, ]
+  med <- aggregate(wall_seconds ~ sites, x, median)
+  exponent <- log(tail(med$wall_seconds, 1) / med$wall_seconds[[1L]]) /
+    log(tail(med$sites, 1) / med$sites[[1L]])
+  cat("\nDepth ", depth, ": endpoint exponent ", round(exponent, 4),
+      if (med$wall_seconds[[1L]] >= 5) paste0("; gate ", if (exponent <= 1.25) "met" else "FAIL")
+      else "; timing gate not evaluated (smallest run < 5 seconds)", ".\n", sep = "")
+}
+```
+
+```{r memory}
+show_table(data.frame(
+  workload = c("Campaign/probes", "Isolated scaling"),
+  observations = c(nrow(performance), nrow(scaling)),
+  max_RSS_GiB = c(max(performance$rss_bytes), max(scaling$rss_bytes)) / 1024^3,
+  max_buffer_GiB = c(max(performance$peak_buffer_bytes), max(scaling$peak_buffer_bytes)) / 1024^3,
+  max_spill_bytes = c(max(performance$spill_bytes, checks$spill_bytes), max(scaling$spill_bytes)),
+  RSS_ceiling_failures = c(sum(performance$rss_bytes > performance$memory_ceiling_bytes),
+                           sum(scaling$rss_bytes > scaling$memory_ceiling_bytes)),
+  buffer_ceiling_failures = c(sum(performance$peak_buffer_bytes > performance$memory_ceiling_bytes),
+                              sum(scaling$peak_buffer_bytes > scaling$memory_ceiling_bytes))))
+```
+
+The nearest checked-in baseline is the chr20 report's fixed-site/fixed-group
+scaling experiment. It has different site counts, blocks, population-frequency
+construction and workload; these results do not establish a performance
+regression or absence of one. The production SQL/native path is unchanged.
+
+## Interpretation
+
+Only 30/75 primary strata meet every declared release criterion. At a 5% share,
+0.1x gives positive interval lower limits in 199–200/200 unrelated replicates
+and 160–165/200 IBD1 replicates; at 0.4x all tested relationships give 200/200.
+Those call rates are not a calibrated detection limit. Five of fifteen primary
+null strata fail the false-positive upper-bound criterion, and no primary null
+stratum meets every criterion. Bias passes in 40/45 interior strata, point
+accuracy in 37/45, and coverage in 53/75 primary strata. Ten generating-model
+fits lack intervals; no missing intervals or failed statuses are filtered.
+
+Release criteria are assessed only for completed 200-replicate strata, under
+the provided frequency anchors and generating relationship. Detection, point
+recovery and calibrated coverage are distinct outcomes. An `ok_conditional`
+status is a numerical fit status, not a release-validation verdict. In-panel
+frequencies, linked finite genomes, within-superpopulation mismatch and fixed
+IBD1 haplotypes limit transfer to independent low-pass datasets. Real-count
+genome-wide calibration transfer is not evaluated.

@@ -1,0 +1,5 @@
+"component","seconds","replicates","workers","threads_per_worker"
+"Startup and orchestration remainder",700.219999999999,0,1,1
+"200-replicate pilot",243.28,200,1,1
+"Concurrent campaign",10373.5,17800,14,1
+"Total command",11317,18000,14,1

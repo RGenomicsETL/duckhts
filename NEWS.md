@@ -4,10 +4,19 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- `benchmarks/benchmark_count_mixture_lowpass_genome.md` evaluates 90 autosomal
+  low-pass strata with 200 replicates each and both error calibrations. At 5%
+  share, positive interval limits occur in 199–200/200 unrelated and
+  160–165/200 IBD1 replicates at 0.1x, and 200/200 across tested relationships
+  at 0.4x. Only 30/75 primary strata meet every unchanged release criterion;
+  null calibration and matched-diagnostic failures preclude a universal
+  detection-limit claim. Independent oracles, zero-depth QC and lossless
+  per-replicate tables are retained. Native code is unchanged.
+
 - `benchmarks/benchmark_count_mixture_lowpass.md` records linked chr20
-  recovery, count thinning and fresh-process scaling. The 50-replicate
-  strata expose point-accuracy and null-calibration failures; genome-wide
-  release targets remain unevaluated. The catalog documents these limits.
+  recovery, count thinning and fresh-process scaling. Its 50-replicate strata
+  expose point-accuracy and null-calibration failures. The catalog documents
+  both regional and autosomal validation limits.
 
 - Low-pass mixture moments use exact binary sums with fixed-size
   per-block accumulators, preserving results across input and worker order.

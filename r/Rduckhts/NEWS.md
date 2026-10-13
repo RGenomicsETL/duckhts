@@ -2,9 +2,12 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
-- The bundled function catalog documents chr20 validation limits of the
-  low-pass mixture estimator, including weak small-share detection and
-  unvalidated genome-wide precision.
+- The bundled function catalog documents autosomal low-pass validation across
+  90 strata with 200 replicates each. At 5% share, positive interval limits
+  occur in 199–200/200 unrelated and 160–165/200 IBD1 replicates at 0.1x,
+  and 200/200 across tested relationships at 0.4x. Only 30/75 primary strata
+  meet every declared criterion, so a universal detection limit is not
+  established. The catalog also describes chr20 small-share validation limits.
 
 - The bundled low-pass mixture estimator uses exact binary sums
   with fixed-size per-block accumulators and reproducible parallel results.

@@ -1,0 +1,27 @@
+"replicates","threads","rows","query_seconds","error"
+200,1,976749800,6.244,"Invalid Error: Out of Memory Error: failed to offload data block of size 256.0 KiB (0 bytes/0 bytes used).
+This limit was set by the 'max_temp_directory_size' setting.
+By default, this setting utilizes the available disk space on the drive where the 'temp_directory' is located.
+You can adjust this setting, by using (for example) PRAGMA max_temp_directory_size='10GiB'
+
+Possible solutions:
+* Reducing the number of threads (SET threads=X)
+* Disabling insertion-order preservation (SET preserve_insertion_order=false)
+* Increasing the memory limit (SET memory_limit='...GB')
+
+See also https://duckdb.org/docs/stable/guides/performance/how_to_tune_workloads
+ℹ Context: rapi_execute
+ℹ Error type: INVALID"
+200,7,976749800,1.468,"Invalid Error: Out of Memory Error: failed to offload data block of size 256.0 KiB (0 bytes/0 bytes used).
+This limit was set by the 'max_temp_directory_size' setting.
+By default, this setting utilizes the available disk space on the drive where the 'temp_directory' is located.
+You can adjust this setting, by using (for example) PRAGMA max_temp_directory_size='10GiB'
+
+Possible solutions:
+* Reducing the number of threads (SET threads=X)
+* Disabling insertion-order preservation (SET preserve_insertion_order=false)
+* Increasing the memory limit (SET memory_limit='...GB')
+
+See also https://duckdb.org/docs/stable/guides/performance/how_to_tune_workloads
+ℹ Context: rapi_execute
+ℹ Error type: INVALID"
