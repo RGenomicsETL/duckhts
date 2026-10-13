@@ -82,7 +82,7 @@ genome_collect <- function(root, destination) {
   fits <- performance <- checks <- list()
   for (i in seq_along(files)) {
     saved <- readRDS(files[[i]])
-    stopifnot(identical(saved$manifest_sha256, key), saved$threads == 1L, saved$stride == 1L)
+    stopifnot(identical(saved$manifest_sha256, key), saved$threads == genome_declaration$threads, saved$stride == 1L)
     stratum <- strata$stratum[vapply(seq_len(nrow(strata)), function(j) {
       identical(as.list(strata[j, c("depth", "share", "relationship", "error")]), saved$setting)
     }, logical(1L))]
@@ -96,7 +96,8 @@ genome_collect <- function(root, destination) {
     )
     x <- saved$fit
     fields <- c(
-      "relationship_model", "share", "share_lower", "share_upper", "status",
+      "relationship_model", "share", "share_lower", "share_upper", "share_se",
+      "singles_share", "pair_residual", "status",
       "relation_diagnostic", "jackknife_failed_refits", "at_bound", "interval_hull",
       "reads", "positive_pair_sites", "blocks", "pair_blocks"
     )
@@ -106,15 +107,20 @@ genome_collect <- function(root, destination) {
       sample_haplotype = saved$identity$sample_haplotype,
       donor_haplotype = saved$identity$donor_haplotype
     ), x[fields])
-    measured <- genome_log_metrics(sub("\\.rds$", ".log", files[[i]]))
     ceiling <- genome_declaration$memory_overhead_bytes + genome_declaration$live_memory_multiplier *
-      (genome_declaration$sql_live_bytes_per_site * max(x$sites) + saved$live_bytes +
+      (genome_declaration$sql_live_bytes_per_site * saved$batch_input_rows + saved$live_bytes +
         genome_declaration$max_state_bytes)
     performance[[i]] <- data.frame(
       stratum = stratum, seed = saved$seed,
-      sites = max(x$sites), output_rows = nrow(x), simulation_seconds = saved$simulation_seconds,
-      fit_seconds = saved$fit_seconds, wall_seconds = measured[["wall_seconds"]],
-      oracle_included = !is.null(saved$oracle), rss_bytes = measured[["rss_bytes"]],
+      sites = saved$qc[["sites"]], covered_sites = max(x$sites),
+      zero_depth_sites = saved$qc[["zero_depth_sites"]], excluded_sites = saved$qc[["excluded_sites"]],
+      unavailable_sites = saved$qc[["unavailable_sites"]],
+      output_rows = nrow(x), simulation_seconds = saved$simulation_seconds,
+      loading_seconds = saved$loading_seconds, fit_seconds = saved$fit_seconds,
+      wall_seconds = saved$batch_wall_seconds / saved$batch_replicates,
+      batch_first_seed = saved$batch_first_seed, batch_replicates = saved$batch_replicates,
+      batch_input_rows = saved$batch_input_rows,
+      oracle_included = !is.null(saved$oracle), rss_bytes = saved$process_rss_bytes,
       peak_buffer_bytes = max(saved$peak_buffer_bytes, saved$thread_check$peak_buffer_bytes),
       spill_bytes = max(saved$spill_bytes, saved$thread_check$spill_bytes),
       live_R_bytes = saved$live_bytes, memory_ceiling_bytes = ceiling
@@ -155,6 +161,9 @@ genome_collect <- function(root, destination) {
   saveRDS(manifest, file.path(destination, "manifest.rds"))
   metadata <- list(
     declaration_commit = system2("git", c("rev-parse", "1735221a"), stdout = TRUE),
+    batching_amendment_commit = system2("git", c("rev-parse", "957d03c9"), stdout = TRUE),
+    execution_amendment_commit = system2("git", c("log", "-1", "--format=%H", "--",
+      "benchmarks/count_mixture_lowpass_genome/execution_declaration.md"), stdout = TRUE),
     collection_revision = system2("git", c("rev-parse", "HEAD"), stdout = TRUE),
     manifest_sha256 = key, sources = manifest,
     collection_driver_sha256 = digest::digest(file = "benchmarks/count_mixture_lowpass_genome/collect.R", algo = "sha256"),

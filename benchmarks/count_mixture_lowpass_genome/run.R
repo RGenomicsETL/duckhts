@@ -17,48 +17,40 @@ for (path in names(manifest$driver_sha256)) {
 key <- digest::digest(file = manifest_path, algo = "sha256")
 run_root <- file.path(root, key)
 dir.create(run_root, showWarnings = FALSE)
-progress <- Sys.getenv("SOL_D_PROGRESS")
-strata <- genome_strata()
-worker <- normalizePath("benchmarks/count_mixture_lowpass_genome/worker.R")
+worker <- normalizePath("benchmarks/count_mixture_lowpass_genome/batch_worker.R")
 Sys.setenv(OPENBLAS_NUM_THREADS = "1", OMP_NUM_THREADS = "1")
 
-run_one <- function(setting, replicate) {
-  seed <- genome_declaration$seed + setting$stratum * 1000L + replicate
-  output <- file.path(run_root, sprintf("stratum%02d-seed%d.rds", setting$stratum, seed))
-  if (file.exists(output)) {
-    saved <- readRDS(output)
-    stopifnot(
-      identical(saved$manifest_sha256, key), saved$seed == seed,
-      identical(saved$setting, as.list(setting[c("depth", "share", "relationship", "error")]))
-    )
-    return(invisible(output))
-  }
-  available <- as.numeric(strsplit(trimws(tail(system2("df", c("-B1", "--output=avail", "/"),
-    stdout = TRUE
-  ), 1L)), "[[:space:]]+")[[1L]][[1L]])
-  if (available < 8 * 1024^3 + 16 * 1024^2) stop("Disk reserve below 8 GiB")
-  log <- sub("\\.rds$", ".log", output)
-  command <- c(
-    "-v", "Rscript", shQuote(worker), shQuote(extension), shQuote(output),
-    setting$depth, setting$share, setting$relationship, setting$error, seed,
-    replicate == 1L, genome_declaration$threads, 1L, shQuote(manifest_path)
-  )
-  status <- system2("/usr/bin/time", command, stdout = log, stderr = log)
-  if (status != 0L || !file.exists(output)) stop("Replicate failed: ", output, "; inspect ", log)
-  invisible(output)
+run_worker <- function(ids, label) {
+  available <- as.numeric(trimws(tail(system2("df", c("-B1", "--output=avail", "/"), stdout = TRUE), 1L)))
+  if (available < 8 * 1024^3 + 64 * 1024^2) stop("Disk reserve below 8 GiB")
+  log <- file.path(root, paste0(label, ".log"))
+  status <- system2("/usr/bin/time", c(
+    "-v", "Rscript", shQuote(worker), shQuote(extension), shQuote(manifest_path),
+    shQuote(run_root), paste(ids, collapse = ",")
+  ), stdout = log, stderr = log)
+  if (status != 0L) stop("Worker failed: inspect ", log)
+  invisible(log)
 }
 
-for (i in seq_len(nrow(strata))) {
-  setting <- strata[i, ]
-  result <- parallel::mclapply(seq_len(setting$replicates), function(replicate) run_one(setting, replicate),
-    mc.cores = genome_declaration$workers, mc.preschedule = FALSE
-  )
-  if (any(vapply(result, inherits, logical(1L), "try-error"))) stop("Stratum failed: ", i)
-  line <- sprintf(
-    "Completed genome stratum %d/%d: share=%g depth=%g relationship=%s; 200 seeded outputs retained.",
-    i, nrow(strata), setting$share, setting$depth, setting$relationship
-  )
-  cat(line, "\n")
-  if (nzchar(progress)) cat(line, "\n", file = progress, append = TRUE)
-}
-cat("Completed campaign at", run_root, "\n")
+# Retain the first complete stratum as a throughput pilot before concurrency.
+started <- proc.time()[["elapsed"]]
+run_worker(4L, "pilot-stratum04")
+pilot_seconds <- proc.time()[["elapsed"]] - started
+expected <- 18000 * pilot_seconds / 200 / genome_declaration$workers
+line <- sprintf("200-replicate depth .1 throughput pilot: %.1f s, %.3f s/replicate. Depth-weighted probe predicts about 1-1.5 hours on 14 workers; pilot-only lower-depth projection %.2f hours.",
+  pilot_seconds, pilot_seconds / 200, expected / 3600)
+cat(line, "\n")
+progress <- Sys.getenv("SOL_D_PROGRESS")
+if (nzchar(progress)) cat(line, "\n", file = progress, append = TRUE)
+
+ids <- setdiff(genome_strata()$stratum, 4L)
+groups <- split(ids, rep(seq_len(genome_declaration$workers), length.out = length(ids)))
+started <- proc.time()[["elapsed"]]
+result <- parallel::mclapply(seq_along(groups), function(i) {
+  run_worker(groups[[i]], sprintf("worker%02d", i))
+}, mc.cores = genome_declaration$workers, mc.preschedule = TRUE)
+if (any(vapply(result, inherits, logical(1L), "try-error"))) stop("Campaign worker failed")
+line <- sprintf("Completed campaign at %s; concurrent phase %.1f seconds; 90 strata, 18,000 replicates.",
+  run_root, proc.time()[["elapsed"]] - started)
+cat(line, "\n")
+if (nzchar(progress)) cat(line, "\n", file = progress, append = TRUE)
