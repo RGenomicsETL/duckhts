@@ -1,0 +1,99 @@
+---
+title: "Low-pass conditional mixture moments: chr20 calibration and scaling"
+output:
+  github_document:
+    toc: true
+---
+
+## Declaration
+
+The executable declaration is `count_mixture_lowpass/declaration.R`. It is
+committed before the campaign it judges. This is a **chr20 point-estimation
+and interval-calibration check**, not whole-genome release evidence.
+
+The registered phased 1000G chr20 source, founder pedigree and matched sites
+supply linked haplotypes. Sixty CEU and sixty YRI founders are drawn without
+replacement with seed 332202610. Each replicate draws distinct founders:
+two CEU haplotypes form the sample, two other CEU haplotypes form a
+same-population second genome, or two YRI haplotypes form an other-population
+second genome. An IBD1 second genome transmits one complete phased haplotype
+of the sample and takes its other haplotype from a distinct CEU founder.
+Frequencies are the called phased allele frequencies among all founders of
+the corresponding population, clamped to [0.001, 0.999]. Founder labels
+exclude pedigree descendants; residual relatedness is not independently
+screened. Linkage is retained across sites; no genotype-independent SNP
+simulation substitutes for phased genomes.
+
+There are 50 replicates in each of 108 primary strata: three relationships,
+shares 0/0.01/0.02/0.05/0.10/0.20, depths 0.1/0.2/0.4, and fixed errors
+0.0001/0.0002. Depth is Poisson. A fragment independently chooses a source,
+then one of its alleles, then has symmetric sequencing error. Equivalently,
+ALT is binomial conditional on the two phased dosages. With probability
+0.002 a site's ALT count is uniform on 0..depth. Excess homozygosity is zero.
+The fitting calibration equals these generating parameters. Matched IBD1
+and unrelated hypotheses remain separate conditional fits, not relationship
+classification. Blocks are **1 Mb on chr20**, to reach the unchanged
+30-informative-block interval floor; no 10 Mb whole-genome precision claim
+is made. All statuses, missing intervals and failed fits remain denominators.
+
+The three registered 30x chr20 count tables are thinned at 1/300, 1/150 and
+1/75, both as single sources and as ordered two-source combinations at each
+nonzero share. Ref and ALT counts are independently binomial-thinned, not
+reads or templates. The nominal share is the thinning probability share,
+not necessarily the realized fragment share when source depths differ.
+Each stratum has 50 draws, fixed error 0.00015, artefact weight 0.002 and
+zero excess homozygosity. These are calibration-transfer diagnostics, not
+known-truth accuracy gates. Single-source baseline offsets are retained.
+
+### Frozen criteria
+
+Release targets from the design require at least 200 independent replicates
+per primary stratum on a genome-wide linked reference. With 50 chr20 draws
+these targets are **not evaluated as release gates**, even where a numerical
+threshold is met. Observed thresholds are shown separately:
+
+* For correctly specified interior shares at least 0.05: absolute mean bias
+  <= 0.005/0.0035/0.0025 at 0.1/0.2/0.4x.
+* At least 90% have absolute error <= 0.020/0.014/0.010 for anchored
+  other-population singles, <= 0.025/0.015/0.008 for matched unrelated,
+  <= 0.050/0.025/0.015 for matched IBD1. Missing fits count as failures.
+* Interior 95% interval coverage is 90–98%, counting missing intervals as
+  uncovered. Zero-share positive claims use lower limit > 0; their one-sided
+  exact 95% binomial upper bound must be <= 0.075. Missing intervals also
+  have a separately reported denominator, not an inferred null claim.
+* At least one replicate in every synthetic and thinning stratum has all
+  native-input block moment sums independently reconstructed in R, with
+  exact integer counters and relative error <= 1e-10 (absolute 1e-10 near
+  zero). Every primary stratum's first replicate is also fitted at one and
+  four threads: statuses must agree and shares and moments must agree to
+  the same tolerance.
+* Fresh processes, three repetitions each, scale sites 100k/200k/400k and
+  sample-by-candidate groups 1/2/4. Peak RSS and DuckDB peak buffers must be
+  <= 512 MiB overhead + 3 times modeled live state: 768 bytes per SQL input
+  row plus 1024 bytes per physical native block and group. This explicitly
+  includes SQL validation/join/sort state, not just bounded native moments.
+  Memory limit is 3 GB, no spill. Timing exponent <= 1.25 at each doubling
+  is evaluated only if the 1x query takes at least five seconds; smaller
+  workloads report timing without a verdict. Input rows, output rows,
+  elapsed time, spreads, buffers, RSS and spill remain visible.
+
+The exploratory ordered/unordered/materialization comparison is reported
+separately from the declared campaign. Same-population relationship
+ambiguity, weak pairs, frequency mismatch and calibration transfer are
+limitations, not reasons to drop observations.
+
+## Execution and results
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+source("count_mixture_lowpass/declaration.R")
+results_dir <- "count_mixture_lowpass/results"
+```
+
+```{r results}
+if (!file.exists(file.path(results_dir, "summary.csv"))) {
+  cat("Campaign results have not been collected. No criterion has a passing verdict.\n")
+} else {
+  knitr::kable(read.csv(file.path(results_dir, "summary.csv")))
+}
+```
