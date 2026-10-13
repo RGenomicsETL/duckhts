@@ -8,8 +8,10 @@ genome_declaration <- list(
   errors = c(.0001, .0002),
   artefact_weight = .002,
   replicates = 200L,
-  workers = 2L,
-  threads = 7L,
+  workers = 14L,
+  threads = 1L,
+  microbatch_replicates = c(`0.1` = 4L, `0.2` = 2L, `0.4` = 1L),
+  covered_only = TRUE,
   cores = "0-5,12-19",
   wall_budget_hours = 1.5,
   memory_limit = "6GB",
@@ -70,9 +72,12 @@ genome_strata <- function() {
 # peak buffer. Fixed-block 1x/2x/4x timings use strides 4/2/1 across all autosomes.
 # Test the endpoint exponent only if the smallest end-to-end timing is >= 5 s.
 # Campaign execution uses long-lived workers, one input-identity verification
-# at startup, and one panel load per chromosome per worker. All 200 replicates
-# of a stratum share one bulk counts relation and one macro invocation, with
-# sample_id '<stratum>-<replicate>'. Simulation remains independent of the
+# at startup, and one panel load per chromosome per worker. Depth-specific
+# microbatches of 4/2/1 replicates at depths .1/.2/.4 share a bulk counts relation
+# and one macro invocation, with sample_id '<stratum>-<replicate>'. Only covered
+# sites enter that relation; full-panel sites, zero-depth, excluded and
+# unavailable counts are retained separately for every replicate. Simulation
+# remains independent of the
 # fitting implementation; each replicate's seed is derived from campaign seed,
 # stratum and replicate. Sampled solo refits must be bit-identical to batch rows.
 # Independent moments and one/four-thread checks retain the tolerances above.
