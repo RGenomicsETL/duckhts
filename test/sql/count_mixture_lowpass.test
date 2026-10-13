@@ -234,3 +234,51 @@ DROP TABLE invalid_af;
 
 statement ok
 DROP TABLE missing_candidate;
+
+# Binary tie rounding and the maximum per-site pair moment.
+query III
+SELECT __duckhts_mixture_sum(x)=nextafter(1.0,2.0),
+__duckhts_mixture_sum(x)=1.0+power(2.0,-52),
+(SELECT __duckhts_mixture_sum(32640.0))=32640.0
+FROM (VALUES (1.0), (power(2.0,-53)), (power(2.0,-1074))) t(x);
+----
+1	1	1
+
+statement error
+SELECT __duckhts_mixture_sum(-1.0);
+----
+Invalid or overflowing low-pass moment sum
+
+statement error
+SELECT __duckhts_mixture_sum(2147483649.0);
+----
+Invalid or overflowing low-pass moment sum
+
+# The public max_depth range includes the maximum uint16 depth.
+statement ok
+CREATE TABLE deepest_lowpass AS SELECT 'deep' AS sample_id,'same' AS candidate,'20' AS chrom,
+1 AS pos,32767::BIGINT AS ref_count,32768::BIGINT AS alt_count,0::BIGINT AS other_count,
+.25 AS sample_af,.25 AS candidate_af;
+
+query II
+SELECT min(reads),min(positive_pair_sites)
+FROM duckhts_count_mixture_lowpass('deepest_lowpass',0,0,0,max_depth:=65535);
+----
+65535	1
+
+statement ok
+DROP TABLE deepest_lowpass;
+
+statement ok
+CREATE TABLE overdepth_lowpass AS SELECT 'deep' AS sample_id,'same' AS candidate,'20' AS chrom,
+1 AS pos,9223372036854775807::BIGINT AS ref_count,9223372036854775807::BIGINT AS alt_count,
+0::BIGINT AS other_count,.25 AS sample_af,.25 AS candidate_af;
+
+query III
+SELECT min(sites),min(excluded_sites),min(reads)
+FROM duckhts_count_mixture_lowpass('overdepth_lowpass',0,0,0);
+----
+1	1	0
+
+statement ok
+DROP TABLE overdepth_lowpass;

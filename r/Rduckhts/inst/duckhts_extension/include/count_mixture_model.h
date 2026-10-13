@@ -45,10 +45,11 @@ typedef struct {
 } duckhts_mixture_fit_t;
 
 /* Exact non-negative binary64 moment sums. Nineteen 64-bit limbs cover
- * subnormals through UINT64_MAX operands <= 32768, without retained rows.
+ * subnormals through UINT64_MAX operands <= 2^31, without retained rows.
  * Finalization rounds once to nearest, ties to even. Add/merge return zero
  * for invalid operands or capacity overflow. Initialize the state to zero. */
 #define DUCKHTS_MIXTURE_SUM_LIMBS 19
+#define DUCKHTS_MIXTURE_SUM_MAX_OPERAND 2147483648.0
 typedef struct {
     uint64_t limbs[DUCKHTS_MIXTURE_SUM_LIMBS];
 } duckhts_mixture_sum_t;

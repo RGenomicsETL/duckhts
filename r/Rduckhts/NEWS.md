@@ -2,6 +2,10 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- The bundled function catalog documents chr20 validation limits of the
+  low-pass mixture estimator, including weak small-share detection and
+  unvalidated genome-wide precision.
+
 - The bundled low-pass mixture estimator uses exact binary sums
   with fixed-size per-block accumulators and reproducible parallel results. SQL validation and join memory is
   controlled by DuckDB, separately from the native byte budget.

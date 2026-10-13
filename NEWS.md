@@ -4,6 +4,11 @@
 
 Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
+- `benchmarks/benchmark_count_mixture_lowpass.md` records linked chr20
+  recovery, count thinning and fresh-process scaling. The 50-replicate
+  strata expose point-accuracy and null-calibration failures; genome-wide
+  release targets remain unevaluated. The catalog documents these limits.
+
 - Low-pass mixture moments use exact binary sums with fixed-size
   per-block accumulators, preserving results across input and worker order. SQL validation and join memory remains input-sized;
   the native byte budget does not cover DuckDB's SQL workspace.

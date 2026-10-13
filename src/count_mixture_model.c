@@ -20,7 +20,7 @@ static int sum_word(duckhts_mixture_sum_t *sum, size_t limb, uint64_t word) {
 }
 
 int duckhts_mixture_sum_add(duckhts_mixture_sum_t *sum, double value) {
-    if (!isfinite(value) || value < 0 || value > 32768)
+    if (!isfinite(value) || value < 0 || value > DUCKHTS_MIXTURE_SUM_MAX_OPERAND)
         return 0;
     uint64_t bits;
     memcpy(&bits, &value, sizeof(bits));

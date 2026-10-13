@@ -26,7 +26,8 @@ static void test_exact_sums(void) {
     sum_check(!duckhts_mixture_sum_add(&sum, -1), &checks);
     sum_check(!duckhts_mixture_sum_add(&sum, INFINITY), &checks);
     sum_check(!duckhts_mixture_sum_add(&sum, NAN), &checks);
-    sum_check(!duckhts_mixture_sum_add(&sum, 32769), &checks);
+    sum_check(!duckhts_mixture_sum_add(&sum, 2147483649.0), &checks);
+    sum_check(duckhts_mixture_sum_add(&sum, 2147483648.0), &checks);
     memset(&sum, 0, sizeof(sum));
     sum_check(duckhts_mixture_sum_add(&sum, 32768), &checks);
     for (int i = 0; i < 64; i++) {

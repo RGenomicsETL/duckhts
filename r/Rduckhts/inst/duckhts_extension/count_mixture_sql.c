@@ -46,7 +46,7 @@ static const char *const mixture_sql[] = {
     "ELSE count(g) END AS nf FROM raw GROUP BY smp, chr, bp), ",
     "prepared AS (SELECT s.smp, c.cand, s.chr, s.bp, s.r, s.a, s.o, s.f, r.g, "
     "s.nf = n.nc AND s.f IS NOT NULL AND s.r IS NOT NULL AND s.a IS NOT NULL AND s.o IS NOT NULL AS usable, "
-    "coalesce(s.r+s.a > " DUCKHTS_WHOLE_OPTION("max_depth") ", false) AS excluded, "
+    "coalesce(s.r::HUGEINT+s.a::HUGEINT > " DUCKHTS_WHOLE_OPTION("max_depth") ", false) AS excluded, "
     "dense_rank() OVER (PARTITION BY s.smp ORDER BY s.chr, (s.bp-1)//"
     DUCKHTS_WHOLE_OPTION("block_bases") ")-1 AS block "
     "FROM site_data s JOIN candidates c ON s.smp = c.smp JOIN candidate_sizes n ON s.smp = n.smp "
