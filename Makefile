@@ -138,7 +138,7 @@ test_release: test-reference-cache test-sql-lambda-syntax test-count-mixture-mod
 .PHONY: test-count-mixture-model
 test-count-mixture-model:
 	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
-		$(CC) -std=c99 -O2 -g -Wall -Wextra -Werror -pedantic \
+		$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror -pedantic \
 			-Isrc/include src/count_mixture_model.c test/scripts/count_mixture_model_test.c \
 			-lm -o "$$tmp/count_mixture_model_test"; \
 		"$$tmp/count_mixture_model_test"
