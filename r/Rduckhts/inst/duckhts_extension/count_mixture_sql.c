@@ -9,9 +9,9 @@
     DUCKHTS_WHOLE_OPTION("max_candidates") ", " DUCKHTS_WHOLE_OPTION("max_state_bytes")
 #define FIT_ARGS CAL ", " DUCKHTS_WHOLE_OPTION("min_blocks") ", model = 'ibd1', " DUCKHTS_WHOLE_OPTION("max_state_bytes")
 
-/* Compensated sums keep one accumulator per moment and block. Native
- * aggregation receives one row per block, independent of panel site count. */
-#define SUM(expr) "CAST(coalesce(fsum(" expr "), 0) AS DOUBLE)"
+/* Exact binary sums keep fixed-size state per moment and block. Native
+ * fitting receives one row per block, independent of panel site count. */
+#define SUM(expr) "CAST(coalesce(__duckhts_mixture_sum(" expr "), 0) AS DOUBLE)"
 #define S(a,b) SUM("n*(" a ")*(" b ")")
 #define T(a,b) SUM("p*(" a ")*(" b ")")
 #define TROW(a) T(a,"1") "," T(a,"ff") "," T(a,"gg") "," T(a,"ff*ff") "," T(a,"ff*gg") "," T(a,"gg*gg")

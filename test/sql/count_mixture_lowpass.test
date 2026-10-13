@@ -175,8 +175,8 @@ SELECT count(*),min(usable_sites),max(usable_sites) FROM duckhts_count_mixture_l
 ----
 3	3	3
 
-# Enough rows to exercise scan/group pipelines with multiple workers; reversed
-# site storage also tests that per-block sums have a canonical position order.
+# Vector-sized input exercises exact block sums across worker counts and
+# reversed site storage. The entire conditional result is reproducible.
 statement ok
 CREATE TABLE parallel_lowpass AS SELECT 'parallel' AS sample_id,cand AS candidate,'20' AS chrom,
 i AS pos, (1+(i%3=0)::BIGINT) AS ref_count, (i%7=0)::BIGINT AS alt_count,

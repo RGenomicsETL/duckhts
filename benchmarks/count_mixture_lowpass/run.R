@@ -40,6 +40,9 @@ metadata <- list(source_revision = system2("git", c("rev-parse", "HEAD"), stdout
   extension_sha256 = system2("sha256sum", extension, stdout = TRUE),
   dirty = system2("git", c("status", "--porcelain"), stdout = TRUE),
   R = R.version.string, duckdb = as.character(packageVersion("duckdb")),
-  cpu = Sys.info(), cores = "0-5", fresh_processes = TRUE,
+  cpu = Sys.info(), cpu_details = system2("lscpu", stdout = TRUE), cores = "0-5", fresh_processes = TRUE,
+  computational_sha256 = system2("sha256sum", c("src/count_mixture_model.c", "src/count_mixture_sql.c",
+    "src/count_mixture_udf.c", "benchmarks/count_mixture_lowpass/worker.R",
+    "benchmarks/count_mixture_lowpass/declaration.R"), stdout = TRUE),
   declaration_commit = "6e23123c", cache = "warm registered inputs; each DuckDB process fresh")
 saveRDS(metadata, file.path(scratch, "metadata.rds"))

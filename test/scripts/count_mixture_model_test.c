@@ -4,7 +4,59 @@
 #include <stdio.h>
 #include <string.h>
 
+static void sum_check(int condition, int *checks) {
+    assert(condition);
+    (*checks)++;
+}
+
+static void test_exact_sums(void) {
+    int checks = 0;
+    duckhts_mixture_sum_t sum = {{0}};
+    sum_check(sizeof(sum) == 152, &checks);
+    sum_check(duckhts_mixture_sum_value(&sum) == 0, &checks);
+    sum_check(duckhts_mixture_sum_add(&sum, 1), &checks);
+    sum_check(duckhts_mixture_sum_add(&sum, ldexp(1, -53)), &checks);
+    sum_check(duckhts_mixture_sum_value(&sum) == 1, &checks);
+    sum_check(duckhts_mixture_sum_add(&sum, ldexp(1, -1074)), &checks);
+    sum_check(duckhts_mixture_sum_value(&sum) == nextafter(1, 2), &checks);
+    memset(&sum, 0, sizeof(sum));
+    sum_check(duckhts_mixture_sum_add(&sum, nextafter(1, 2)), &checks);
+    sum_check(duckhts_mixture_sum_add(&sum, ldexp(1, -53)), &checks);
+    sum_check(duckhts_mixture_sum_value(&sum) == 1 + ldexp(1, -51), &checks);
+    sum_check(!duckhts_mixture_sum_add(&sum, -1), &checks);
+    sum_check(!duckhts_mixture_sum_add(&sum, INFINITY), &checks);
+    sum_check(!duckhts_mixture_sum_add(&sum, NAN), &checks);
+    sum_check(!duckhts_mixture_sum_add(&sum, 32769), &checks);
+    memset(&sum, 0, sizeof(sum));
+    sum_check(duckhts_mixture_sum_add(&sum, 32768), &checks);
+    for (int i = 0; i < 64; i++) {
+        duckhts_mixture_sum_t copy = sum;
+        sum_check(duckhts_mixture_sum_merge(&sum, &copy), &checks);
+    }
+    sum_check(duckhts_mixture_sum_value(&sum) == ldexp(1, 79), &checks);
+    for (int exponent = -1074; exponent <= 0; exponent += 358) {
+        uint64_t units = 0, random = 332;
+        duckhts_mixture_sum_t parts[8] = {{{0}}};
+        memset(&sum, 0, sizeof(sum));
+        for (int i = 0; i < 10000; i++) {
+            random = random * UINT64_C(6364136223846793005) + 1;
+            uint64_t term = (random >> 32) % 1024;
+            units += term;
+            sum_check(duckhts_mixture_sum_add(&parts[i % 8], ldexp((double)term, exponent)), &checks);
+        }
+        for (int i = 7; i >= 0; i--)
+            sum_check(duckhts_mixture_sum_merge(&sum, &parts[i]), &checks);
+        sum_check(duckhts_mixture_sum_value(&sum) == ldexp((double)units, exponent), &checks);
+    }
+    sum.limbs[DUCKHTS_MIXTURE_SUM_LIMBS - 1] = UINT64_MAX;
+    duckhts_mixture_sum_t high = {{0}};
+    high.limbs[DUCKHTS_MIXTURE_SUM_LIMBS - 1] = 1;
+    sum_check(!duckhts_mixture_sum_merge(&sum, &high), &checks);
+    printf("count mixture exact sums: %d checks passed\n", checks);
+}
+
 int main(void) {
+    test_exact_sums();
     duckhts_mixture_block_t b;
     memset(&b, 0, sizeof(b));
     b.matched = 1;

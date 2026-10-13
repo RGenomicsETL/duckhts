@@ -500,6 +500,49 @@ static void fit_scalar(duckdb_function_info info, duckdb_data_chunk input, duckd
     }
 }
 
+static idx_t exact_sum_size(duckdb_function_info info) {
+    (void)info;
+    return sizeof(duckhts_mixture_sum_t);
+}
+
+static void exact_sum_init(duckdb_function_info info, duckdb_aggregate_state state) {
+    (void)info;
+    memset(state, 0, sizeof(duckhts_mixture_sum_t));
+}
+
+static void exact_sum_update(duckdb_function_info info, duckdb_data_chunk input,
+                             duckdb_aggregate_state *states) {
+    duckdb_vector vector = duckdb_data_chunk_get_vector(input, 0);
+    double *values = duckdb_vector_get_data(vector);
+    idx_t count = duckdb_data_chunk_get_size(input);
+    for (idx_t i = 0; i < count; i++) {
+        if (valid(vector, i) &&
+            !duckhts_mixture_sum_add((duckhts_mixture_sum_t *)states[i], values[i])) {
+            aggregate_error(info, "Invalid or overflowing low-pass moment sum");
+            return;
+        }
+    }
+}
+
+static void exact_sum_combine(duckdb_function_info info, duckdb_aggregate_state *source,
+                              duckdb_aggregate_state *target, idx_t count) {
+    for (idx_t i = 0; i < count; i++) {
+        if (!duckhts_mixture_sum_merge((duckhts_mixture_sum_t *)target[i],
+                                       (duckhts_mixture_sum_t *)source[i])) {
+            aggregate_error(info, "Low-pass moment sum capacity exceeded");
+            return;
+        }
+    }
+}
+
+static void exact_sum_finalize(duckdb_function_info info, duckdb_aggregate_state *states,
+                               duckdb_vector result, idx_t count, idx_t offset) {
+    (void)info;
+    double *values = duckdb_vector_get_data(result);
+    for (idx_t i = 0; i < count; i++)
+        values[offset + i] = duckhts_mixture_sum_value((duckhts_mixture_sum_t *)states[i]);
+}
+
 bool register_duckhts_count_mixture_functions(duckdb_connection connection) {
     duckdb_logical_type bigint = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
     duckdb_logical_type real = duckdb_create_logical_type(DUCKDB_TYPE_DOUBLE);
@@ -520,6 +563,14 @@ bool register_duckhts_count_mixture_functions(duckdb_connection connection) {
                                             finalize);
     duckdb_aggregate_function_set_destructor(aggregate, state_destroy);
     bool ok = duckdb_register_aggregate_function(connection, aggregate) == DuckDBSuccess;
+    duckdb_destroy_aggregate_function(&aggregate);
+    aggregate = duckdb_create_aggregate_function();
+    duckdb_aggregate_function_set_name(aggregate, "__duckhts_mixture_sum");
+    duckdb_aggregate_function_add_parameter(aggregate, real);
+    duckdb_aggregate_function_set_return_type(aggregate, real);
+    duckdb_aggregate_function_set_functions(aggregate, exact_sum_size, exact_sum_init,
+                                            exact_sum_update, exact_sum_combine, exact_sum_finalize);
+    ok = ok && duckdb_register_aggregate_function(connection, aggregate) == DuckDBSuccess;
     duckdb_destroy_aggregate_function(&aggregate);
     duckdb_scalar_function scalar = duckdb_create_scalar_function();
     duckdb_scalar_function_set_name(scalar, "__duckhts_mixture_fit");

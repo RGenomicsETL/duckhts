@@ -44,6 +44,18 @@ typedef struct {
     const char *status, *diagnostic;
 } duckhts_mixture_fit_t;
 
+/* Exact non-negative binary64 moment sums. Nineteen 64-bit limbs cover
+ * subnormals through UINT64_MAX operands <= 32768, without retained rows.
+ * Finalization rounds once to nearest, ties to even. Add/merge return zero
+ * for invalid operands or capacity overflow. Initialize the state to zero. */
+#define DUCKHTS_MIXTURE_SUM_LIMBS 19
+typedef struct {
+    uint64_t limbs[DUCKHTS_MIXTURE_SUM_LIMBS];
+} duckhts_mixture_sum_t;
+int duckhts_mixture_sum_add(duckhts_mixture_sum_t *sum, double value);
+int duckhts_mixture_sum_merge(duckhts_mixture_sum_t *sum, const duckhts_mixture_sum_t *from);
+double duckhts_mixture_sum_value(const duckhts_mixture_sum_t *sum);
+
 /* Returns zero on count overflow. Inputs are validated by the admission layer.
  * Missing sites and over-depth sites contribute QC counts but no moments. */
 int duckhts_mixture_add(duckhts_mixture_block_t *block, uint64_t ref, uint64_t alt, uint64_t other,

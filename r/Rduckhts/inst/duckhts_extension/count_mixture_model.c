@@ -2,6 +2,78 @@
 #include <math.h>
 #include <string.h>
 #include <limits.h>
+#include <float.h>
+
+_Static_assert(FLT_RADIX == 2 && DBL_MANT_DIG == 53 && DBL_MAX_EXP == 1024 &&
+               sizeof(double) == sizeof(uint64_t), "Mixture sums require binary64 doubles");
+
+static int sum_word(duckhts_mixture_sum_t *sum, size_t limb, uint64_t word) {
+    while (word) {
+        if (limb >= DUCKHTS_MIXTURE_SUM_LIMBS)
+            return 0;
+        uint64_t previous = sum->limbs[limb];
+        sum->limbs[limb] += word;
+        word = sum->limbs[limb] < previous;
+        limb++;
+    }
+    return 1;
+}
+
+int duckhts_mixture_sum_add(duckhts_mixture_sum_t *sum, double value) {
+    if (!isfinite(value) || value < 0 || value > 32768)
+        return 0;
+    uint64_t bits;
+    memcpy(&bits, &value, sizeof(bits));
+    uint64_t mantissa = bits & ((UINT64_C(1) << 52) - 1);
+    unsigned exponent = (unsigned)((bits >> 52) & 2047);
+    unsigned offset = 0;
+    if (exponent) {
+        mantissa |= UINT64_C(1) << 52;
+        offset = exponent - 1;
+    }
+    unsigned shift = offset % 64;
+    size_t limb = offset / 64;
+    if (!sum_word(sum, limb, mantissa << shift))
+        return 0;
+    return !shift || sum_word(sum, limb + 1, mantissa >> (64 - shift));
+}
+
+int duckhts_mixture_sum_merge(duckhts_mixture_sum_t *sum, const duckhts_mixture_sum_t *from) {
+    for (size_t i = 0; i < DUCKHTS_MIXTURE_SUM_LIMBS; i++) {
+        if (!sum_word(sum, i, from->limbs[i]))
+            return 0;
+    }
+    return 1;
+}
+
+double duckhts_mixture_sum_value(const duckhts_mixture_sum_t *sum) {
+    size_t limb = DUCKHTS_MIXTURE_SUM_LIMBS;
+    while (limb && !sum->limbs[limb - 1])
+        limb--;
+    if (!limb)
+        return 0;
+    unsigned high = 0;
+    uint64_t word = sum->limbs[limb - 1];
+    while (word >>= 1)
+        high++;
+    unsigned top = (unsigned)((limb - 1) * 64) + high;
+    if (top <= 52)
+        return ldexp((double)sum->limbs[0], -1074);
+    unsigned offset = top - 52, shift = offset % 64;
+    limb = offset / 64;
+    uint64_t mantissa = sum->limbs[limb] >> shift;
+    if (shift && limb + 1 < DUCKHTS_MIXTURE_SUM_LIMBS)
+        mantissa |= sum->limbs[limb + 1] << (64 - shift);
+    unsigned guard_shift = (offset - 1) % 64;
+    size_t guard_limb = (offset - 1) / 64;
+    int guard = (sum->limbs[guard_limb] >> guard_shift) & 1;
+    int sticky = (sum->limbs[guard_limb] & ((UINT64_C(1) << guard_shift) - 1)) != 0;
+    for (size_t i = 0; i < guard_limb; i++)
+        sticky |= sum->limbs[i] != 0;
+    if (guard && (sticky || (mantissa & 1)))
+        mantissa++;
+    return ldexp((double)mantissa, (int)offset - 1074);
+}
 
 #define DIM DUCKHTS_MIXTURE_SCORE_DIM
 #define GRID 128
