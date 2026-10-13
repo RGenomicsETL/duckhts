@@ -34,8 +34,8 @@ lowpass_moment_macro <- function(con) {
     prefix, " SELECT smp, cand, block, moments.* FROM block_rows ORDER BY smp, cand, block"))
 }
 
-lowpass_moments <- function(con) {
-  dbGetQuery(con, "SELECT * FROM benchmark_moments('counts')")
+lowpass_moments <- function(con, block_bases = lowpass_declaration$block_bases) {
+  dbGetQuery(con, sprintf("SELECT * FROM benchmark_moments('counts', block_bases := %d)", block_bases))
 }
 
 lowpass_relative_error <- function(actual, expected) {
@@ -43,15 +43,16 @@ lowpass_relative_error <- function(actual, expected) {
   max(abs(actual - expected) / pmax(1, abs(expected)))
 }
 
-lowpass_oracle <- function(counts, native) {
+lowpass_oracle <- function(counts, native, block_bases = lowpass_declaration$block_bases) {
   errors <- numeric()
   counter_ok <- TRUE
   for (candidate in unique(counts$candidate)) {
     x <- counts[counts$candidate == candidate, ]
-    physical <- floor((x$pos - 1) / lowpass_declaration$block_bases)
-    blocks <- sort(unique(physical))
-    for (b in seq_along(blocks)) {
-      d <- x[physical == blocks[[b]], ]
+    physical <- data.frame(chrom = x$chrom, index = floor((x$pos - 1) / block_bases))
+    blocks <- unique(physical)
+    blocks <- blocks[order(blocks$chrom, blocks$index), ]
+    for (b in seq_len(nrow(blocks))) {
+      d <- x[physical$chrom == blocks$chrom[[b]] & physical$index == blocks$index[[b]], ]
       n <- d$ref_count + d$alt_count
       usable <- complete.cases(d) & n <= lowpass_declaration$max_depth
       n[!usable] <- 0
