@@ -88,7 +88,8 @@ if (requireNamespace("DBI", quietly = TRUE) && requireNamespace("duckdb", quietl
   expect_true(one_bucket$reads <= sum(passing$reads))
   receipt <- utils::read.delim(paste0(staged$path[[1L]], ".sources.tsv"), colClasses = "character")
   expect_equal(receipt$field, c("artifact_id", "supplier_identity", "source", "derivation_sha256",
-                                "duckdb_version", "output_sha256", "rows", "reads"))
+                                "duckdb_version", "extension_sha256", "alignments_identity",
+                                "reference_identity", "output_sha256", "rows", "reads"))
   expect_equal(receipt$value[receipt$field == "output_sha256"],
                unname(digest::digest(file = staged$path[[1L]], algo = "sha256")))
 
@@ -97,6 +98,13 @@ if (requireNamespace("DBI", quietly = TRUE) && requireNamespace("duckdb", quietl
     sprintf(parameters, 3L), ";rows=", staged$rows[[1L]], ";reads=", staged$reads[[1L]])
   write_registry(plan)
   expect_equal(duckhts_bench_stage_depth_fraction(ids = "all_buckets")$reused, TRUE)
+  # A changed registered identity of either input rebuilds the output.
+  for (input in c("fixture_cram", "fixture_reference")) {
+    plan[plan[, "id"] == input, "supplier_identity"] <- "revision=2"
+    write_registry(plan)
+    expect_equal(duckhts_bench_stage_depth_fraction(ids = "all_buckets")$reused, FALSE)
+    expect_equal(duckhts_bench_stage_depth_fraction(ids = "all_buckets")$reused, TRUE)
+  }
   plan[plan[, "id"] == "all_buckets", "supplier_identity"] <- paste0(
     sprintf(parameters, 3L), ";rows=", staged$rows[[1L]], ";reads=", staged$reads[[1L]] + 1)
   write_registry(plan)

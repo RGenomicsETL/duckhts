@@ -50,7 +50,8 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   with GC from `fasta_nuc`) by the median read rate of each GC stratum and
   returns each bin's expected count, depth ratio, log2 ratio and whether it is
   kept, with the reason when not; an optional `mappability` column filters
-  bins. `duckhts_depth_region_fraction` estimates the share of cells with a
+  bins. The outlier quantiles that select its training bins are taken over
+  autosomal bins with at least one read, so empty bins do not move them. `duckhts_depth_region_fraction` estimates the share of cells with a
   one-copy gain or loss of each named region as twice the relative depth
   shift against the other autosomes, with a quasi-Poisson interval from the
   bins or, with a reference set, a leave-one-out t interval.

@@ -9,7 +9,9 @@
   known shares. `duckhts_bench_stage_depth_fraction()` stages them with range
   requests on the registered URLs, checks the registered row and read counts,
   and writes a receipt that binds the derivation parameters, the derivation
-  SQL, the DuckDB version and the output SHA-256. The network-free test stages
+  SQL, the DuckDB version, the SHA-256 of the DuckHTS extension that made the
+  counts, the registered identities of the alignments and the reference, and
+  the output SHA-256, so a changed producer or input rebuilds the output. The network-free test stages
   the bundled CRAM fixture of Rduckhts through a private registry and checks
   the counts against an independent read of the same file. The report is
   added to the consumers of the three CRAMs, the GRCh38 reference and the

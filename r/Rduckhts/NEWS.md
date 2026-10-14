@@ -18,7 +18,8 @@ Preview of 2.0.0, still in development. The sections below describe what 2.0.0 w
   `rduckhts_depth_sex_fraction()` wrap the new depth macros: GC-corrected bin
   ratios from bin counts, the share of cells with a one-copy change of each
   named region, and the share of a second genome of the other sex from X and
-  Y depth, each estimator with an optional reference set. The tests compare
+  Y depth, each estimator with an optional reference set. Empty bins do not
+  enter the outlier quantiles that select the training bins. The tests compare
   every value with an independent base R implementation of the same formulas
   and recover a planted gain and an XX/XY mixture.
 

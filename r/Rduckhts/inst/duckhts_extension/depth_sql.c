@@ -102,7 +102,7 @@ static const char *const depth_bins_sql[] = {
     "__dht_limits AS MATERIALIZED (SELECT sample_id, "
     "quantile_cont(rate, CAST(outlier_quantile AS DOUBLE)) AS rate_low, "
     "quantile_cont(rate, 1 - CAST(outlier_quantile AS DOUBLE)) AS rate_high "
-    "FROM __dht_bins WHERE reason IS NULL AND autosomal GROUP BY sample_id), "
+    "FROM __dht_bins WHERE reason IS NULL AND autosomal AND reads > 0 GROUP BY sample_id), "
     "__dht_strata AS MATERIALIZED (SELECT b.sample_id, b.gc_stratum, median(b.rate) AS stratum_rate, "
     "count(*) AS stratum_bins FROM __dht_bins b JOIN __dht_limits l ON b.sample_id = l.sample_id "
     "WHERE b.reason IS NULL AND b.autosomal AND b.reads > 0 "

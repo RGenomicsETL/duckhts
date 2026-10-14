@@ -48,6 +48,32 @@ FROM (SELECT d.sample_id, g.chrom, g.start, g."end", g.gc,
 statement ok
 CREATE TEMP TABLE depth_corrected AS SELECT * FROM duckhts_depth_bins('depth_raw');
 
+# The outlier quantiles are taken over training bins with at least one read. With 40% of the
+# autosomal bins empty, quantiles over all bins would put the lower limit at 0 and pull the upper
+# one down. The training-bin count of each GC stratum must equal an independent count that takes
+# the 1% and 99% quantiles of the non-empty autosomal bins' rates only.
+statement ok
+CREATE TEMP TABLE depth_zeroed AS
+SELECT 'zeroed' AS sample_id, chrom, start, "end", gc,
+       CASE WHEN chrom NOT IN ('X', 'Y') AND hash('zero', chrom, start) % 5 < 2 THEN 0 ELSE reads END AS reads
+FROM depth_raw WHERE sample_id = 'xx';
+
+query II
+WITH rated AS (
+  SELECT CAST(floor(gc / 0.01) AS INTEGER) AS stratum, CAST(reads AS DOUBLE) / ("end" - start) AS rate
+  FROM depth_zeroed WHERE chrom NOT IN ('X', 'Y') AND reads > 0),
+limits AS (SELECT quantile_cont(rate, 0.01) AS lo, quantile_cont(rate, 0.99) AS hi FROM rated),
+expected AS (
+  SELECT stratum, count(*) AS bins FROM rated, limits WHERE rate >= lo AND rate <= hi GROUP BY stratum),
+got AS (
+  SELECT DISTINCT gc_stratum AS stratum, stratum_bins AS bins FROM duckhts_depth_bins('depth_zeroed')
+  WHERE chrom NOT IN ('X', 'Y') AND stratum_bins > 0)
+SELECT (SELECT count(*) FROM depth_zeroed WHERE chrom NOT IN ('X', 'Y') AND reads = 0) > 1000,
+       (SELECT count(*) FROM ((SELECT * FROM expected EXCEPT SELECT * FROM got)
+                              UNION ALL (SELECT * FROM got EXCEPT SELECT * FROM expected)));
+----
+true	0
+
 statement ok
 CREATE TEMP VIEW depth_tests AS SELECT * FROM depth_corrected WHERE sample_id NOT LIKE 'ref_%';
 

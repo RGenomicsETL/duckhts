@@ -45,7 +45,9 @@ staged file must have them before it is published.
 
 Each output gets a receipt, \verb{<output>.sources.tsv} with columns \code{field} and
 \code{value}, binding the artifact identity, the derivation SQL, the DuckDB
-version, the output SHA-256 and the counts. A cached output is reused when
+version, the SHA-256 of the DuckHTS extension that made the counts, the
+registered identities of the alignments and the reference, the output
+SHA-256 and the counts. A cached output is reused when
 its receipt matches; otherwise it is rebuilt. A failed derivation publishes
 nothing.
 }

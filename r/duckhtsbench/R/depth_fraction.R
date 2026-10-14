@@ -21,7 +21,9 @@
 #'
 #' Each output gets a receipt, `<output>.sources.tsv` with columns `field` and
 #' `value`, binding the artifact identity, the derivation SQL, the DuckDB
-#' version, the output SHA-256 and the counts. A cached output is reused when
+#' version, the SHA-256 of the DuckHTS extension that made the counts, the
+#' registered identities of the alignments and the reference, the output
+#' SHA-256 and the counts. A cached output is reused when
 #' its receipt matches; otherwise it is rebuilt. A failed derivation publishes
 #' nothing.
 #'
@@ -100,6 +102,9 @@ duckhts_bench_stage_depth_fraction <- function(ids = NULL, extension_path = NULL
     stop("DuckHTS extension not found: ", extension_path, call. = FALSE)
   }
   extension_path <- normalizePath(extension_path)
+  # The producer is part of every receipt: counts made by another build of the
+  # reader are not reused.
+  extension_sha256 <- sha256(extension_path)
 
   con <- Rduckhts::rduckhts_connect(extension_path = extension_path)
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
@@ -169,10 +174,15 @@ duckhts_bench_stage_depth_fraction <- function(ids = NULL, extension_path = NULL
     # The receipt binds the derivation parameters, not the expected counts, so
     # that recording the counts in the registry does not rebuild the output.
     parameters <- paste0(required, "=", fields[required], collapse = ";")
+    # It also binds the producer and the registered identities of both inputs,
+    # so a changed extension, alignment file or reference rebuilds the output.
     expected <- field_frame(
-      c("artifact_id", "supplier_identity", "source", "derivation_sha256", "duckdb_version"),
+      c("artifact_id", "supplier_identity", "source", "derivation_sha256", "duckdb_version",
+        "extension_sha256", "alignments_identity", "reference_identity"),
       c(item$id, parameters, registry$locator[registry$id == item$alignments], derivation_sha256,
-        duckdb_version))
+        duckdb_version, extension_sha256,
+        registry$supplier_identity[registry$id == item$alignments],
+        registry$supplier_identity[registry$id == item$reference]))
     reused <- receipt_current(output, receipt, expected)
     if (reused) {
       counts <- data.frame(rows = receipt_value(receipt, "rows"),
