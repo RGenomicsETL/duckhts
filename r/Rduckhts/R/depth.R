@@ -138,8 +138,9 @@ rduckhts_depth_region_fraction <- function(con, bins_table, regions_table, refer
     .somalier_validate_name(reference_table, "reference_table")
     arguments <- c(arguments, sql_quote_string(con, reference_table))
   }
-  query <- paste0("SELECT * FROM duckhts_depth_region_fraction(",
-                  paste(arguments, collapse = ", "), ")")
+  macro <- if (is.null(reference_table)) "duckhts_depth_region_fraction" else
+    "duckhts_depth_region_fraction_ref"
+  query <- paste0("SELECT * FROM ", macro, "(", paste(arguments, collapse = ", "), ")")
   .somalier_publish_query(con, query, table_name, overwrite)
 }
 
@@ -200,7 +201,8 @@ rduckhts_depth_sex_fraction <- function(con, bins_table, reference_table = NULL,
     .somalier_validate_name(reference_table, "reference_table")
     arguments <- c(arguments, sql_quote_string(con, reference_table))
   }
-  query <- paste0("SELECT * FROM duckhts_depth_sex_fraction(",
-                  paste(arguments, collapse = ", "), ")")
+  macro <- if (is.null(reference_table)) "duckhts_depth_sex_fraction" else
+    "duckhts_depth_sex_fraction_ref"
+  query <- paste0("SELECT * FROM ", macro, "(", paste(arguments, collapse = ", "), ")")
   .somalier_publish_query(con, query, table_name, overwrite)
 }

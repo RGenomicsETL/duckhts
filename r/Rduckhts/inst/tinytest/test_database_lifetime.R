@@ -21,7 +21,7 @@ test_database_lifetime <- function() {
   ))
   expect_equal(
     dbGetQuery(con, paste(
-      "SELECT * FROM duckhts_cgranges_from_table('lifetime_idx',",
+      "SELECT * FROM duckhts_cgranges_from_table_labelled('lifetime_idx',",
       "'lifetime_targets', 'chrom', 'start', 'end', 'label') AS t(ok)"
     ))$ok[1],
     TRUE

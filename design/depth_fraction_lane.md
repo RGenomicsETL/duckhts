@@ -30,7 +30,7 @@ The issue lists seven open choices. They are settled as follows.
 4. **Home of the decoder.** Inside DuckHTS first, as a native kernel behind a table macro
    like the ROH decode, with a kernel interface that the segmentation engine of
    https://github.com/RGenomicsETL/duckhts/issues/255 can take over.
-5. **Reference set.** Optional. Each estimator has an overload with a `reference_table`.
+5. **Reference set.** Optional. Each estimator has a `_ref` macro taking `reference_table`.
    A per-bin panel median is one SQL aggregate the caller can write; it is not a separate
    function.
 6. **Fragment length.** Later. Phase 1 counts read starts only.
@@ -73,7 +73,11 @@ that holds a large share of some strata's training bins is partly absorbed: corr
 genome, or give the estimators `expected` counts from a reference panel, which they accept
 from any source.
 
-### `duckhts_depth_region_fraction(bins_table, regions_table[, reference_table])`
+### Regional estimators
+
+`duckhts_depth_region_fraction(bins_table, regions_table)` uses the bin model;
+`duckhts_depth_region_fraction_ref(bins_table, regions_table, reference_table)`
+uses reference samples.
 
 `bins_table` is corrected bins: `sample_id`, `chrom`, `start`, `end`, `reads`,
 `expected`, `kept`. `regions_table` has `region`, `chrom`, `start`, `end`; several rows
@@ -98,7 +102,10 @@ standard error is the reference standard deviation times `sqrt(1 + 1/n)`, and th
 interval uses the 97.5% t quantile with `n - 1` degrees of freedom. The reference set
 absorbs region-specific bias and correlated noise that the bin model ignores.
 
-### `duckhts_depth_sex_fraction(bins_table[, reference_table])`
+### Sex-copy estimators
+
+`duckhts_depth_sex_fraction(bins_table)` uses ideal copy levels;
+`duckhts_depth_sex_fraction_ref(bins_table, reference_table)` uses reference samples.
 
 Model. A major genome and a second genome of the other sex with DNA share `f` < 0.5.
 With `c_X` and `c_Y` the X and Y copy numbers implied by depth (twice the depth ratio to

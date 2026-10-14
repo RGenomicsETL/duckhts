@@ -244,6 +244,15 @@ Preview of 2.0.0, still in development. The sections below describe what 2.0.0 w
 
 ## Breaking changes
 
+- Direct SQL calls supplying `genetic_map` now use `duckhts_roh_map`,
+  `duckhts_roh_af_table_map`, `duckhts_roh_af_table_bcftools_map`,
+  `duckhts_roh_ancestry_map`, `duckhts_roh_counts_map`, or
+  `duckhts_roh_counts_fitted_map`; calls supplying `reference_table` use
+  `duckhts_depth_region_fraction_ref` or `duckhts_depth_sex_fraction_ref`;
+  labelled table-index builds use `duckhts_cgranges_from_table_labelled`.
+  These replace the corresponding extra-positional-argument calls under the
+  base names. R wrappers retain their signatures and select the SQL name internally.
+
 - Bundled private SQL helpers are renamed:
   `duckdb_munge_preset_map` -> `duckhts__munge_preset_map`,
   `duckdb_munge_resolved_map` -> `duckhts__munge_resolved_map`,

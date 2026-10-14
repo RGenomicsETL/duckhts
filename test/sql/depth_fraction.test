@@ -314,7 +314,7 @@ loss8_20	true	true	ok
 query IIIII
 SELECT sample_id, abs(shift - truth) < 0.03, shift_low <= truth AND truth <= shift_high,
        reference_samples, status
-FROM duckhts_depth_region_fraction('depth_tests', 'depth_chromosomes', 'depth_references')
+FROM duckhts_depth_region_fraction_ref('depth_tests', 'depth_chromosomes', 'depth_references')
 JOIN (VALUES ('gain8_10', 0.1), ('gain8_30', 0.3), ('loss8_20', -0.2)) t(sample_id, truth) USING (sample_id)
 WHERE region = '8' ORDER BY sample_id;
 ----
@@ -407,7 +407,7 @@ CREATE TEMP VIEW depth_three_references AS SELECT * FROM depth_references WHERE 
 
 query III
 SELECT sample_id, reference_samples, round((shift_high - shift) / shift_se, 6)
-FROM duckhts_depth_region_fraction('depth_three_references', 'depth_chromosomes', 'depth_three_references')
+FROM duckhts_depth_region_fraction_ref('depth_three_references', 'depth_chromosomes', 'depth_three_references')
 WHERE region = '1' ORDER BY sample_id;
 ----
 ref_xx_1	3	4.302653
@@ -420,7 +420,7 @@ CREATE TEMP VIEW depth_one_reference AS SELECT * FROM depth_references WHERE sam
 
 query III
 SELECT reference_samples, shift_se IS NULL, status
-FROM duckhts_depth_region_fraction('depth_tests', 'depth_chromosomes', 'depth_one_reference')
+FROM duckhts_depth_region_fraction_ref('depth_tests', 'depth_chromosomes', 'depth_one_reference')
 WHERE sample_id = 'xx' AND region = '1';
 ----
 1	true	few_reference_samples
@@ -487,7 +487,7 @@ xy_with_xx_20	XY	true	true	true	ok
 # The same with a reference set of three XX and three XY genomes.
 query IIII
 SELECT sample_id, major_sex, abs(fraction - truth) < 0.02, reference_samples
-FROM duckhts_depth_sex_fraction('depth_tests', 'depth_references')
+FROM duckhts_depth_sex_fraction_ref('depth_tests', 'depth_references')
 JOIN (VALUES ('xx', 0.0), ('xy', 0.0), ('xx_with_xy_10', 0.1), ('xy_with_xx_20', 0.2))
   t(sample_id, truth) USING (sample_id)
 ORDER BY sample_id;
@@ -499,7 +499,7 @@ xy_with_xx_20	XY	true	6
 
 # A reference sample tested against the reference set is left out of it.
 query II
-SELECT count(*), bool_and(reference_samples = 5) FROM duckhts_depth_sex_fraction('depth_references', 'depth_references');
+SELECT count(*), bool_and(reference_samples = 5) FROM duckhts_depth_sex_fraction_ref('depth_references', 'depth_references');
 ----
 6	true
 
@@ -512,13 +512,13 @@ statement ok
 CREATE TEMP VIEW depth_xx_references AS SELECT * FROM depth_references WHERE sex = 'XX';
 
 query III
-SELECT sample_id, abs(fraction - 0.1) < 0.02, status FROM duckhts_depth_sex_fraction('depth_tests', 'depth_xy_references')
+SELECT sample_id, abs(fraction - 0.1) < 0.02, status FROM duckhts_depth_sex_fraction_ref('depth_tests', 'depth_xy_references')
 WHERE sample_id = 'xx_with_xy_10';
 ----
 xx_with_xy_10	true	ok
 
 query III
-SELECT sample_id, fraction IS NULL, status FROM duckhts_depth_sex_fraction('depth_tests', 'depth_xx_references')
+SELECT sample_id, fraction IS NULL, status FROM duckhts_depth_sex_fraction_ref('depth_tests', 'depth_xx_references')
 WHERE sample_id = 'xx_with_xy_10';
 ----
 xx_with_xy_10	true	no_xy_reference
@@ -537,6 +537,6 @@ statement ok
 CREATE TEMP VIEW depth_bad_sex AS SELECT *, 'XXY' AS sex FROM depth_corrected WHERE sample_id LIKE 'ref_%';
 
 statement error
-SELECT * FROM duckhts_depth_sex_fraction('depth_tests', 'depth_bad_sex');
+SELECT * FROM duckhts_depth_sex_fraction_ref('depth_tests', 'depth_bad_sex');
 ----
 reference sex must be XX or XY

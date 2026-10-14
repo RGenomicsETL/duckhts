@@ -12,7 +12,7 @@ SELECT count(*)::INTEGER, count(DISTINCT install_order)::INTEGER,
        count(*) FILTER (WHERE length(definitions_sha256) = 64)::INTEGER
 FROM duckhts_macro_definitions();
 ----
-46	46	1	46	46
+55	55	1	55	55
 
 query II
 SELECT count(DISTINCT d.name)::INTEGER,
@@ -20,7 +20,23 @@ SELECT count(DISTINCT d.name)::INTEGER,
 FROM duckhts_macro_definitions() d
 JOIN duckdb_functions() f ON f.function_name = d.name AND f.function_type IN ('macro', 'table_macro');
 ----
-46	46
+55	55
+
+# Each DuckHTS macro name has exactly one overload.
+query I
+SELECT count(*) FROM (
+  SELECT function_name, count(*) FROM duckdb_functions()
+  WHERE function_type IN ('macro', 'table_macro')
+    AND starts_with(function_name, 'duckhts_')
+  GROUP BY function_name HAVING count(*) > 1
+);
+----
+0
+
+query I
+SELECT count(*) FROM duckhts_macro_definitions() WHERE public;
+----
+45
 
 # DuckHTS contributes no public function or macro in DuckDB's namespace.
 query I
@@ -28,6 +44,22 @@ SELECT count(*) FROM duckhts_macro_definitions()
 WHERE public AND starts_with(name, 'duckdb_');
 ----
 0
+
+# Depth and interval base signatures reject extra positional table inputs.
+statement error
+SELECT * FROM duckhts_depth_region_fraction('bins', 'regions', 'reference');
+----
+Binder Error
+
+statement error
+SELECT * FROM duckhts_depth_sex_fraction('bins', 'reference');
+----
+Binder Error
+
+statement error
+SELECT * FROM duckhts_cgranges_from_table('idx', 'table', 'chrom', 'start', 'end', 'label');
+----
+Binder Error
 
 query I
 SELECT duckhts__quote_ident('a"b');

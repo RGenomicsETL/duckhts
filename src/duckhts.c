@@ -339,8 +339,12 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "__dht_added AS MATERIALIZED (SELECT count(duckhts_cgranges_add("
         "name, t[chrom_col], t[start_col], t[end_col])) AS added "
         "FROM query_table(table_name) AS t CROSS JOIN __dht_created) "
-        "SELECT duckhts_cgranges_index(name) AS indexed FROM __dht_added), "
-        "(name, table_name, chrom_col, start_col, end_col, label_col) AS TABLE ("
+        "SELECT duckhts_cgranges_index(name) AS indexed FROM __dht_added)")) {
+        return false;
+    }
+    if (!duckhts_register_sql(&registration,
+        "CREATE OR REPLACE MACRO duckhts_cgranges_from_table_labelled("
+        "name, table_name, chrom_col, start_col, end_col, label_col) AS TABLE ("
         "WITH __dht_created AS MATERIALIZED (SELECT duckhts_cgranges_create(name) AS created), "
         "__dht_added AS MATERIALIZED (SELECT count(duckhts_cgranges_add("
         "name, t[chrom_col], t[start_col], t[end_col], t[label_col])) AS added "

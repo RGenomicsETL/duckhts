@@ -342,7 +342,7 @@ FROM duckhts_cgranges_overlaps('readme_idx', 'chr1', 35, 36, query_row_id := 7);
 CREATE TEMP VIEW readme_targets AS
 SELECT * FROM (VALUES ('chr2', 100, 110, 'alpha'), ('chr2', 150, 170, 'beta'))
   AS t(chrom, start, "end", label);
-SELECT * FROM duckhts_cgranges_from_table(
+SELECT * FROM duckhts_cgranges_from_table_labelled(
   'readme_qry_idx', 'readme_targets', 'chrom', 'start', 'end', 'label'
 );
 

@@ -41,7 +41,7 @@ def use_registered_functions(con, work):
         "AS t(chrom, start, \"end\", label)"
     )
     indexed = con.execute(
-        "SELECT * FROM duckhts_cgranges_from_table("
+        "SELECT * FROM duckhts_cgranges_from_table_labelled("
         "'lifetime_idx', 'targets', 'chrom', 'start', 'end', 'label')"
     ).fetchone()
     assert indexed == (True,), indexed

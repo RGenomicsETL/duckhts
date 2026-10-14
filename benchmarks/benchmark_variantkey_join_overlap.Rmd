@@ -263,7 +263,7 @@ try(DBI::dbGetQuery(con, sprintf("SELECT duckhts_cgranges_destroy('%s') AS ok", 
 DBI::dbGetQuery(
   con,
   paste0(
-    "SELECT * FROM duckhts_cgranges_from_table(",
+    "SELECT * FROM duckhts_cgranges_from_table_labelled(",
     sql_string(idx_name), ", ",
     sql_string("ov_subject"), ", ",
     sql_string("chrom"), ", ",

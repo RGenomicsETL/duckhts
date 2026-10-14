@@ -263,7 +263,11 @@ static const char *const depth_region_sql[] = {
     region_members,
     region_estimate,
     region_select_bins,
-    "), (bins_table, regions_table, reference_table) AS TABLE ("
+    ")",
+};
+
+static const char *const depth_region_ref_sql[] = {
+    "CREATE OR REPLACE MACRO duckhts_depth_region_fraction_ref(bins_table, regions_table, reference_table) AS TABLE ("
     "WITH __dht_input AS (" REGION_INPUT("sample", "bins_table") " UNION ALL "
     REGION_INPUT("reference", "reference_table") "), ",
     region_rows,
@@ -397,8 +401,11 @@ static const char *const depth_sex_sql[] = {
     sex_levels_ideal,
     sex_estimate,
     sex_select,
-    "'duckhts_depth_sex_fraction bins v1' AS method FROM __dht_combined",
-    "), (bins_table, reference_table) AS TABLE ("
+    "'duckhts_depth_sex_fraction bins v1' AS method FROM __dht_combined)",
+};
+
+static const char *const depth_sex_ref_sql[] = {
+    "CREATE OR REPLACE MACRO duckhts_depth_sex_fraction_ref(bins_table, reference_table) AS TABLE ("
     "WITH __dht_input AS (" SEX_INPUT("sample", "bins_table", "NULL::VARCHAR") " UNION ALL "
     SEX_INPUT("reference", "reference_table",
               "CASE WHEN CAST(sex AS VARCHAR) IN ('XX', 'XY') THEN CAST(sex AS VARCHAR) "
@@ -416,6 +423,10 @@ bool register_duckhts_depth_sql(duckhts_registration_t *registration) {
                                       sizeof(depth_bins_sql) / sizeof(depth_bins_sql[0])) &&
            duckhts_register_sql_parts(registration, depth_region_sql,
                                       sizeof(depth_region_sql) / sizeof(depth_region_sql[0])) &&
+           duckhts_register_sql_parts(registration, depth_region_ref_sql,
+                                      sizeof(depth_region_ref_sql) / sizeof(depth_region_ref_sql[0])) &&
            duckhts_register_sql_parts(registration, depth_sex_sql,
-                                      sizeof(depth_sex_sql) / sizeof(depth_sex_sql[0]));
+                                      sizeof(depth_sex_sql) / sizeof(depth_sex_sql[0])) &&
+           duckhts_register_sql_parts(registration, depth_sex_ref_sql,
+                                      sizeof(depth_sex_ref_sql) / sizeof(depth_sex_ref_sql[0]));
 }

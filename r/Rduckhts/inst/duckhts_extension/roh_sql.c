@@ -6,7 +6,7 @@
  * aggregate, and decode each packed site list with __duckhts_roh_decode.
  * Relations (frequencies, genetic map) are passed by table name through
  * query_table, as in duckhts_cgranges_from_table. A macro cannot take an
- * absent relation, so the genetic map is a separate overload and the frequency
+ * absent relation, so the genetic map uses a separate _map macro and the frequency
  * source is chosen by macro name.
  *
  * Memory. DuckDB manages and can spill the scans, joins and reference stages.
@@ -360,7 +360,7 @@ static const char fitted_counts_model[] = "NULL::DOUBLE, " ROH_FIT_MODEL("l", "l
  * that holds a join (a view filtered by an IN list, or counts joined to
  * frequencies) is a common subplan that DuckDB materializes with every row
  * and column. __duckhts_roh_valid_args() is TRUE or raises the error, and a
- * NULL fitted number raises in ROH_FIT_VALUE. The map overload joins the map
+ * NULL fitted number raises in ROH_FIT_VALUE. The _map macro joins the map
  * with a LEFT JOIN and decodes only the lists with map nodes, so a list whose
  * chromosome has none is checked and gives no run. */
 #define ROH_FITTED_VALID \
@@ -576,7 +576,7 @@ typedef struct {
     const char *source_guard; /* checks of the source's own options; may be empty */
 } roh_source_t;
 
-/* Both overloads of one macro: the plain body and the body with a genetic map. */
+/* Register the base macro and its genetic-map form under separate names. */
 static bool register_roh_macro(duckhts_registration_t *registration, const roh_source_t *source) {
     const char *parts[ROH_MAX_PARTS];
     size_t count = 0;
@@ -597,7 +597,14 @@ static bool register_roh_macro(duckhts_registration_t *registration, const roh_s
     parts[count++] = from_lists;
     parts[count++] = genotype_guard;
     parts[count++] = source->source_guard;
-    parts[count++] = "), (path, ";
+    parts[count++] = ")";
+    if (!duckhts_register_sql_parts(registration, parts, count)) {
+        return false;
+    }
+    count = 0;
+    parts[count++] = "CREATE OR REPLACE MACRO ";
+    parts[count++] = source->name;
+    parts[count++] = "_map(path, ";
     parts[count++] = source->source_parameter;
     parts[count++] = ", genetic_map VARCHAR, ";
     parts[count++] = source->options;
@@ -632,7 +639,13 @@ static bool register_roh_ancestry_macro(duckhts_registration_t *registration) {
     parts[count++] = decode_end;
     parts[count++] = from_lists;
     parts[count++] = ancestry_guard;
-    parts[count++] = "), (path, reference_table, proportions_table, genetic_map VARCHAR, "
+    parts[count++] = ")";
+    if (!duckhts_register_sql_parts(registration, parts, count)) {
+        return false;
+    }
+    count = 0;
+    parts[count++] = "CREATE OR REPLACE MACRO duckhts_roh_ancestry_map("
+                     "path, reference_table, proportions_table, genetic_map VARCHAR, "
                      "af_clamp := 1e-3, " ROH_OPTIONS ") AS TABLE (";
     parts[count++] = ancestry_sites;
     parts[count++] = ancestry_validations;
@@ -664,9 +677,16 @@ static bool register_roh_counts_macro(duckhts_registration_t *registration, bool
     parts[count++] = fitted ? fitted_decode_end : decode_end;
     parts[count++] = from_lists;
     parts[count++] = fitted ? fitted_counts_guard : counts_guard;
+    parts[count++] = ")";
+    if (!duckhts_register_sql_parts(registration, parts, count)) {
+        return false;
+    }
+    count = 0;
     parts[count++] = fitted
-        ? "), (counts_table, fit_table, genetic_map VARCHAR, " ROH_COUNTS_FITTED_OPTIONS ") AS TABLE ("
-        : "), (counts_table, genetic_map VARCHAR, " ROH_COUNTS_OPTIONS ") AS TABLE (";
+        ? "CREATE OR REPLACE MACRO duckhts_roh_counts_fitted_map("
+          "counts_table, fit_table, genetic_map VARCHAR, " ROH_COUNTS_FITTED_OPTIONS ") AS TABLE ("
+        : "CREATE OR REPLACE MACRO duckhts_roh_counts_map("
+          "counts_table, genetic_map VARCHAR, " ROH_COUNTS_OPTIONS ") AS TABLE (";
     parts[count++] = fitted ? fitted_counts_lists : counts_lists;
     parts[count++] = map_lists;
     parts[count++] = fitted ? fitted_select_head_with_map : select_head;

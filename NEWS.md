@@ -456,6 +456,20 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
 
 ## Breaking changes
 
+- Each SQL macro name has one signature. Calls with an extra positional table
+  argument move to explicit names, with all named options unchanged:
+  `duckhts_roh(path, af_tag, genetic_map, ...)` -> `duckhts_roh_map(...)`,
+  `duckhts_roh_af_table(path, af_table, genetic_map, ...)` -> `duckhts_roh_af_table_map(...)`,
+  `duckhts_roh_af_table_bcftools(path, af_table, genetic_map, ...)` -> `duckhts_roh_af_table_bcftools_map(...)`,
+  `duckhts_roh_ancestry(path, reference_table, proportions_table, genetic_map, ...)` -> `duckhts_roh_ancestry_map(...)`,
+  `duckhts_roh_counts(counts_table, genetic_map, ...)` -> `duckhts_roh_counts_map(...)`,
+  `duckhts_roh_counts_fitted(counts_table, fit_table, genetic_map, ...)` -> `duckhts_roh_counts_fitted_map(...)`,
+  `duckhts_depth_region_fraction(bins_table, regions_table, reference_table)` -> `duckhts_depth_region_fraction_ref(...)`,
+  `duckhts_depth_sex_fraction(bins_table, reference_table)` -> `duckhts_depth_sex_fraction_ref(...)`, and
+  `duckhts_cgranges_from_table(name, table_name, chrom_col, start_col, end_col, label_col)` -> `duckhts_cgranges_from_table_labelled(...)`.
+  Base signatures remain under their original names; R wrapper signatures and
+  behavior are unchanged.
+
 - Private SQL helpers use the `duckhts__` prefix:
   `duckdb_munge_preset_map` -> `duckhts__munge_preset_map`,
   `duckdb_munge_resolved_map` -> `duckhts__munge_resolved_map`,
