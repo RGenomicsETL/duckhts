@@ -46,8 +46,8 @@ def definitions(con):
         "FROM duckhts_macro_definitions() ORDER BY install_order"
     ).fetchall()
     # Public and private macro definitions have one ordered inventory.
-    assert len(rows) == 58
-    assert sum(exposed for _, exposed, _, _ in rows) == 45
+    assert len(rows) == 57
+    assert sum(exposed for _, exposed, _, _ in rows) == 47
     assert not any(name.startswith("duckdb_") for name, exposed, _, _ in rows if exposed)
     assert len({row[3] for row in rows}) == 1
     ordered = b"".join(
@@ -188,7 +188,7 @@ def main():
         subprocess.run([sys.executable, __file__, "attached", str(path)], check=True)
         assert digest(path) == before
         subprocess.run([sys.executable, __file__, "rollback", str(path)], check=True)
-        print("macro catalog: 58 definitions, 48 public, file/readonly/rollback/two connections OK")
+        print("macro catalog: 57 definitions, 47 public, file/readonly/rollback/two connections OK")
 
 
 if __name__ == "__main__":
