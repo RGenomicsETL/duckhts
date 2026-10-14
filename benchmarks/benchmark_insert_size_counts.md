@@ -18,6 +18,307 @@ Targets are declared before any timed run:
   independently for BAM and CRAM. Apply these targets to native and
   projected SQL separately.
 - Report the native/projected-SQL elapsed-time ratio without a pass/fail
+  gate; native owns the unsuffixed public name by the recorded
+  comparison.
+- For each arm/format/thread count whose 1× median is at least 5
+  seconds, the 1×/2×/4× log-time/log-input exponent must be **\<=
+  1.25**.
+- Peak process RSS must be **\<= 256 MiB overhead + 3× declared live
+  state**. Live state includes worst-case overlapping per-worker sparse
+  hash tables (16.25 bytes/slot, power-of-two capacity at \<= .77 load),
+  8 MiB decoder state per handle, one merged hash table and 24 bytes per
+  output count bin. This is a hypothesis to test, not an assertion about
+  measured htslib usage.
+- No spill is allowed. DuckDB has a 2 GiB buffer limit and zero
+  temporary storage allowance; a worker error is a failed run, not a
+  discarded trial.
+
+Full workloads use registry artifacts `roh_mixture_hg00403_chr20_cram`
+and `insert_size_hg00403_chr20_bam`; the latter is a network-free BAM
+transcode of that CRAM using `liftover_grch38_fasta` and RBCFTools’
+bundled samtools. Stage with `benchmarks/insert_size_stage.R` after
+checking disk space; the function also checks the 8 GiB free-space floor
+with a 6 GiB staging reserve. No full HG00188 BAM is staged. The smoke
+workload and SQL reference are checksum-pinned committed fixtures staged
+through `insert-size-smoke` in the same registry. The SQL arm is
+`duckhts_bam_insert_size_counts_sql`, a macro over packed CIGAR,
+existing flag predicates and `cigar_reference_length`; the native arm is
+`duckhts_bam_insert_size_counts`. Both arms remain public.
+
+## Measurement amendment: direct tool processes
+
+This amendment replaces the timing method, not the targets. The first
+timed race at commit `676f3a8d` is retained below as **R-worker
+harness**, including its original results and verdicts. Those timings
+are not pooled with direct-tool timings or corrected by subtraction.
+
+The supervisor measured startup on CPUs 12–15 on 2026-10-14:
+
+| Process                     |       Wall seconds | Peak RSS (MB, as supplied) |
+|-----------------------------|-------------------:|---------------------------:|
+| `Rscript -e NULL`           |               0.14 |                         63 |
+| R + duckdb-R connect        |               0.44 |                        103 |
+| R + duckdb-R + LOAD duckhts |               0.51 |                        119 |
+| DuckDB CLI + LOAD duckhts   |               0.08 |                         41 |
+| riker binary                | approximately 0.00 |                          6 |
+
+Every old arm paid R startup, but only DuckHTS paid duckdb-R package
+load and connection setup. The approximately 0.37-second differential
+confounds the BAM reducer comparison. Subtracting it estimates
+native/riker ratios of 1.00/0.61/0.86/0.70 at 1/2/4/8 threads; these
+estimates are diagnostic context, not measurements under this amendment
+and not replacement verdicts.
+
+`/usr/bin/time` now wraps tool processes directly, with no R inside the
+timed process. DuckHTS runs one `duckdb -unsigned` process and SQL
+script per run: LOAD, SET threads, a 2 GiB memory limit, zero spill
+allowance, then a temporary counts table, metrics macro and histogram
+for every scale pass. COPY writes counts, metrics and histogram TSVs on
+each pass. riker runs its binary directly once per complete file scan;
+at scales 2×/4× the reported wall time is the sum of those process
+timings and peak RSS is their maximum. Thus riker pays its startup on
+each pass, while DuckDB reuses one process for the scale; the unchanged
+acceptance criterion uses 1× only. riker writes metrics, histogram and
+its plot on each pass. DuckHTS does not write a plot and additionally
+writes raw counts; retain these output-cost differences in comparisons.
+
+The CLI version is recorded with the extension’s stable C API target and
+header version. A version difference is stated explicitly, including
+against the old duckdb-R 1.5.5 runtime; results across runtime versions
+do not isolate the harness effect. The available CLI is v1.5.1, the
+stable API target is v1.2.0, and build headers are v1.5.3. Loading the
+extension is checked before the matrix.
+
+A second, reported-only DuckDB duration uses SQL timestamps after
+LOAD/SET and before the first counts query through the last output COPY.
+It excludes process startup and extension loading but includes
+input/index opening, reduction, summary and serialization on every pass.
+It is not an acceptance criterion. Parity is checked after timing in R
+by reading each pass’s TSVs; no R deserialization or comparison
+contributes to tool wall time or RSS. Targets, exact parity rules,
+scales (1×/2×/4×), thread settings (1/2/4/8), three replicates, scaling
+and RSS gates are unchanged. Smoke is untimed.
+
+Each arm runs in a fresh tool process, with thread settings 1/2/4/8.
+Native settings are histogram workers, projected SQL settings are DuckDB
+processing threads, and riker settings are its own `--threads`
+semantics; these are not identical worker models. Native/SQL use zero
+additional htslib decompression workers. The full matrix has three
+replicates and 1×/2×/4× complete file scans, with output materialization
+on each scan; scales do not change bin cardinality. This measures
+scaling in records, not scaling in distinct insert sizes.
+`/usr/bin/time` measures end-to-end tool wall time and maximum RSS,
+including tool startup, input decoding, reduction, metrics and output
+files, but excluding the R controller.
+
+Independent riker raw and default outputs are prepared outside measured
+tool processes. All tool results are compared against them; no failed
+comparison is filtered. Record denominators come from registry
+identities, retained pair and bin denominators from riker’s untrimmed
+histogram. Summary moments trim tails without changing original pair
+counts. Smoke runs invoke all 24 format/arm/thread combinations with
+**no clock or RSS measurement**.
+
+## Revision and runtime
+
+Source revision: `13d7841a3a4a1959ecba84adab1789f3e41576d2`; working
+tree changed: `TRUE`; driver SHA-256:
+`1405c8947695d536f064772c7dfdfca02defba6a79daf099db7b7b0ac2b6651c`.
+
+Oracle: `riker 0.4.1`; SHA-256
+`806e0c05ce5993c7fac416cf1e237a13557ca7e7e419832002a31de91ca519e6`.
+
+Runtime: R controller: R version 4.6.0 (2026-04-24) ; timed DuckDB CLI:
+v1.5.1 (Variegata) 7dbb2e646f.
+
+CLI executable: `/root/.duckdb/cli/1.5.1/duckdb`. CLI version:
+`v1.5.1 (Variegata) 7dbb2e646f`. Repository build defaults: stable C API
+target `v1.2.0`, headers `v1.5.3`.
+
+The CLI differs from those versions and from the retained R-worker
+runtime (DuckDB 1.5.5). Successful LOAD verifies compatibility, not
+identical performance across releases.
+
+Launcher affinity: `pid 1781363's current affinity list: 12-19`;
+niceness: `10`.
+
+## Results
+
+**Reduced smoke only; no timed comparison was run.**
+
+24 fresh-process checks passed; exact raw integer counts and rounded
+metrics/histograms agree.
+
+| format | arm                                | threads | records | read_pairs | bins | metric_rows | histogram_rows | parity |
+|:-------|:-----------------------------------|--------:|--------:|-----------:|-----:|------------:|---------------:|:-------|
+| BAM    | riker                              |       1 |      26 |         15 |    9 |           3 |              5 | TRUE   |
+| BAM    | duckhts_bam_insert_size_counts     |       1 |      26 |         15 |    9 |           3 |              5 | TRUE   |
+| BAM    | duckhts_bam_insert_size_counts_sql |       1 |      26 |         15 |    9 |           3 |              5 | TRUE   |
+| BAM    | riker                              |       2 |      26 |         15 |    9 |           3 |              5 | TRUE   |
+| BAM    | duckhts_bam_insert_size_counts     |       2 |      26 |         15 |    9 |           3 |              5 | TRUE   |
+| BAM    | duckhts_bam_insert_size_counts_sql |       2 |      26 |         15 |    9 |           3 |              5 | TRUE   |
+| BAM    | riker                              |       4 |      26 |         15 |    9 |           3 |              5 | TRUE   |
+| BAM    | duckhts_bam_insert_size_counts     |       4 |      26 |         15 |    9 |           3 |              5 | TRUE   |
+| BAM    | duckhts_bam_insert_size_counts_sql |       4 |      26 |         15 |    9 |           3 |              5 | TRUE   |
+| BAM    | riker                              |       8 |      26 |         15 |    9 |           3 |              5 | TRUE   |
+| BAM    | duckhts_bam_insert_size_counts     |       8 |      26 |         15 |    9 |           3 |              5 | TRUE   |
+| BAM    | duckhts_bam_insert_size_counts_sql |       8 |      26 |         15 |    9 |           3 |              5 | TRUE   |
+| CRAM   | riker                              |       1 |      26 |         16 |    9 |           3 |              5 | TRUE   |
+| CRAM   | duckhts_bam_insert_size_counts     |       1 |      26 |         16 |    9 |           3 |              5 | TRUE   |
+| CRAM   | duckhts_bam_insert_size_counts_sql |       1 |      26 |         16 |    9 |           3 |              5 | TRUE   |
+| CRAM   | riker                              |       2 |      26 |         16 |    9 |           3 |              5 | TRUE   |
+| CRAM   | duckhts_bam_insert_size_counts     |       2 |      26 |         16 |    9 |           3 |              5 | TRUE   |
+| CRAM   | duckhts_bam_insert_size_counts_sql |       2 |      26 |         16 |    9 |           3 |              5 | TRUE   |
+| CRAM   | riker                              |       4 |      26 |         16 |    9 |           3 |              5 | TRUE   |
+| CRAM   | duckhts_bam_insert_size_counts     |       4 |      26 |         16 |    9 |           3 |              5 | TRUE   |
+| CRAM   | duckhts_bam_insert_size_counts_sql |       4 |      26 |         16 |    9 |           3 |              5 | TRUE   |
+| CRAM   | riker                              |       8 |      26 |         16 |    9 |           3 |              5 | TRUE   |
+| CRAM   | duckhts_bam_insert_size_counts     |       8 |      26 |         16 |    9 |           3 |              5 | TRUE   |
+| CRAM   | duckhts_bam_insert_size_counts_sql |       8 |      26 |         16 |    9 |           3 |              5 | TRUE   |
+
+Speed, RSS and scaling criteria: **not measured**. Spill: disabled for
+native/SQL.
+
+## Reported-only in-process context
+
+`work_seconds` excludes CLI startup and LOAD/SET, retaining all scale
+passes and TSV output. The remainder includes startup/setup and
+end-of-process work; it is not an isolated startup measurement or a
+pass/fail criterion.
+
+Untimed smoke: no process or in-process durations recorded.
+
+## Fixture footprint
+
+The corpus retains all eight alignment cases and all seven riker
+argument cases in keyed `metrics.tsv`/`histograms.tsv` files, including
+exact upstream decimal text. BAM and CRAM have separate oracle keys. The
+R package ships only edges/ empty wrapper fixtures and their oracle
+subset, not the full corpus. File payload sizes exclude directory
+allocation:
+
+| location   | files | bytes |
+|:-----------|------:|------:|
+| repository |    42 | 33667 |
+| package    |    17 | 15594 |
+
+## Timing verdicts and scale context
+
+The declared timing criterion is the **1× median ratio** against riker,
+per format, arm and thread count. The 4× and marginal ratios are
+reported context, not alternative acceptance criteria. Marginal cost is
+`(4× median - 1× median) / 3` for each arm; its ratio divides by riker’s
+corresponding marginal cost.
+
+| format | arm                                | threads | ratio_1x | target | verdict      | ratio_4x | marginal_ratio |
+|:-------|:-----------------------------------|--------:|---------:|-------:|:-------------|---------:|---------------:|
+| BAM    | duckhts_bam_insert_size_counts     |       1 |       NA |   1.05 | not measured |       NA |             NA |
+| BAM    | duckhts_bam_insert_size_counts_sql |       1 |       NA |   1.05 | not measured |       NA |             NA |
+| BAM    | duckhts_bam_insert_size_counts     |       2 |       NA |   1.00 | not measured |       NA |             NA |
+| BAM    | duckhts_bam_insert_size_counts_sql |       2 |       NA |   1.00 | not measured |       NA |             NA |
+| BAM    | duckhts_bam_insert_size_counts     |       4 |       NA |   0.90 | not measured |       NA |             NA |
+| BAM    | duckhts_bam_insert_size_counts_sql |       4 |       NA |   0.90 | not measured |       NA |             NA |
+| BAM    | duckhts_bam_insert_size_counts     |       8 |       NA |   0.90 | not measured |       NA |             NA |
+| BAM    | duckhts_bam_insert_size_counts_sql |       8 |       NA |   0.90 | not measured |       NA |             NA |
+| CRAM   | duckhts_bam_insert_size_counts     |       1 |       NA |   1.05 | not measured |       NA |             NA |
+| CRAM   | duckhts_bam_insert_size_counts_sql |       1 |       NA |   1.05 | not measured |       NA |             NA |
+| CRAM   | duckhts_bam_insert_size_counts     |       2 |       NA |   1.00 | not measured |       NA |             NA |
+| CRAM   | duckhts_bam_insert_size_counts_sql |       2 |       NA |   1.00 | not measured |       NA |             NA |
+| CRAM   | duckhts_bam_insert_size_counts     |       4 |       NA |   0.90 | not measured |       NA |             NA |
+| CRAM   | duckhts_bam_insert_size_counts_sql |       4 |       NA |   0.90 | not measured |       NA |             NA |
+| CRAM   | duckhts_bam_insert_size_counts     |       8 |       NA |   0.90 | not measured |       NA |             NA |
+| CRAM   | duckhts_bam_insert_size_counts_sql |       8 |       NA |   0.90 | not measured |       NA |             NA |
+
+Native/SQL comparison (reported, not a pass/fail gate):
+
+| format | threads | native_seconds_1x | sql_seconds_1x | native_sql_ratio_1x |
+|:-------|--------:|------------------:|---------------:|--------------------:|
+| BAM    |       1 |                NA |             NA |                  NA |
+| BAM    |       2 |                NA |             NA |                  NA |
+| BAM    |       4 |                NA |             NA |                  NA |
+| BAM    |       8 |                NA |             NA |                  NA |
+| CRAM   |       1 |                NA |             NA |                  NA |
+| CRAM   |       2 |                NA |             NA |                  NA |
+| CRAM   |       4 |                NA |             NA |                  NA |
+| CRAM   |       8 |                NA |             NA |                  NA |
+
+## SQL thread scaling and the next building block
+
+| format | threads | seconds | speedup_vs_1_thread |
+|:-------|--------:|--------:|--------------------:|
+| BAM    |       1 |      NA |                  NA |
+| BAM    |       2 |      NA |                  NA |
+| BAM    |       4 |      NA |                  NA |
+| BAM    |       8 |      NA |                  NA |
+| CRAM   |       1 |      NA |                  NA |
+| CRAM   |       2 |      NA |                  NA |
+| CRAM   |       4 |      NA |                  NA |
+| CRAM   |       8 |      NA |                  NA |
+
+The [`read_bam` catalog,
+“Scanning”](../r/Rduckhts/inst/function_catalog/reference.md#read_bam)
+specifies: “An indexed full-file scan is split by reference across
+DuckDB threads”; “A CRAM scan is split by reference”. The full chr20
+workload has one reference, so that split supplies only one scan worker
+regardless of the SQL thread setting. Within-reference splitting of
+`read_bam` is the next building block to optimise. It is not implemented
+here. This scan constraint does not identify the relative costs of flag
+predicates, packed-CIGAR materialization or `cigar_reference_length`;
+those need a profile.
+
+## CRAM projection context
+
+The comparison table reports native and SQL wall times separately. SQL
+projects CIGAR; `src/bam_reader.c:bam_cram_required_fields` consequently
+requests `SAM_SEQ`, `SAM_QUAL`, `SAM_AUX` and `SAM_RGAUX` for long-CIGAR
+CG restoration. Native requests CIGAR without SEQ/QUAL/AUX. This is a
+known difference in work, not a measured attribution of the CRAM timing
+gap. Its isolated cost has not been measured. Direct-tool timings also
+include raw counts TSV output, unlike riker’s default output, and riker
+alone writes a plot.
+
+A narrower reader projection must preserve read length and CG
+restoration: htslib 1.24 `sam.c:682-706` (`bam_tag2cigar`) tests the
+fake soft-clip length against `l_qseq` before consulting CG;
+`cram/cram_decode.c:3231-3233` calls it after constructing the aux
+block. Retain the long-CIGAR BAM/CRAM fixture when investigating that
+projection separately.
+
+## Startup context
+
+The amendment’s startup measurements identify an asymmetric R-worker
+cost. The direct-tool table and reported-only in-process duration keep
+tool startup visible without replacing the declared 1× criterion.
+Neither 4× nor marginal ratios replace that criterion. Scan/decode,
+task-window overlap decoding, histogram updates and merge costs still
+require profiling. Smoke results provide no timing or memory evidence.
+
+## Retained R-worker harness
+
+The following is the first timed report, preserved byte-for-byte from
+`676f3a8d` in `benchmark_insert_size_counts_r_worker.md`. Its arm names
+and verdicts describe that revision and that harness, not the amended
+method.
+
+# Insert-size counts: riker 0.4.1, native and projected SQL
+
+## Contract and declared targets
+
+Fulcrum Genomics **riker 0.4.1** (MIT), tag
+`40d5e3260c5b1b9d210c28f7c90a75387013b4ce`, is the external oracle.
+Picard is context only. Integer counts must match exactly; mean,
+population standard deviation, median and MAD must match riker’s
+serialized two decimal places exactly. Both directions of each relation
+comparison are checked.
+
+Targets are declared before any timed run:
+
+- Every BAM/CRAM, arm, thread count and scale must satisfy exact parity.
+- At 1×, each DuckHTS arm’s median elapsed time divided by riker’s must
+  be **\<= 1.05 at 1 thread, \<= 1.00 at 2, and \<= 0.90 at 4 and 8**,
+  independently for BAM and CRAM. Apply these targets to native and
+  projected SQL separately.
+- Report the native/projected-SQL elapsed-time ratio without a pass/fail
   gate; this comparison informs the supervisor’s final public-name
   decision.
 - For each arm/format/thread count whose 1× median is at least 5

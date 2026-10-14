@@ -2,13 +2,21 @@
 
 # duckhts 1.5.2.9017
 
+- The insert-size benchmark times tool processes directly: DuckDB CLI and
+  riker, with outputs written to disk and parity checked afterward in R.
+  A reported-only DuckDB work duration separates process setup from queries.
+  The first R-worker race and its verdicts remain retained evidence; targets
+  are unchanged. The available CLI v1.5.1 differs from the first race's
+  duckdb-R v1.5.5, so cross-race differences cannot isolate harness overhead.
+
 - `duckhts_bam_insert_size_counts()` uses per-worker native reducers;
   `duckhts_bam_insert_size_counts_sql()` composes projected binary-CIGAR reads
   and flag/length kernels in SQL. Both return sparse BAM/CRAM orientation counts;
   `duckhts_insert_size_metrics()` summarizes them in SQL. Native takes the
   unsuffixed name by measurement in `benchmarks/benchmark_insert_size_counts.md`.
-  Native CRAM meets all declared 1× timing targets; native BAM meets only the
-  2-thread target. SQL misses all timing targets on this single-reference workload.
+  In the retained R-worker race, native CRAM meets all declared 1× timing
+  targets; native BAM meets only the 2-thread target. SQL misses all timing
+  targets on this single-reference workload.
   Semantics credit Fulcrum Genomics riker 0.4.1 (MIT), the executable oracle:
   reject first-segment and QC-fail records, use POS + TLEN for the forward
   read's mate end, and label equal strands `TANDEM`. These upstream rules
