@@ -103,7 +103,7 @@ COPY (
     lp,
     af,
     ac
-  FROM duckdb_munge(
+  FROM duckhts_munge(
     'munge_input',
     column_map := map(
       ['SNP','CHR','BP','A1','A2','P','BETA','FRQ','SE','N'],
