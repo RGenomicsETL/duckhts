@@ -6,6 +6,7 @@ params:
   repo: "."
   extension: "build/release/duckhts.duckdb_extension"
   riker: !r Sys.getenv("RIKER_BIN")
+  duckdb: !r Sys.getenv("DUCKDB_BIN", "duckdb")
 ---
 
 ## Contract and declared targets
@@ -45,18 +46,66 @@ The SQL arm is `duckhts_bam_insert_size_counts_sql`, a macro over packed
 CIGAR, existing flag predicates and `cigar_reference_length`; the native arm
 is `duckhts_bam_insert_size_counts`. Both arms remain public.
 
-Each arm runs in a fresh R process (a fresh DuckDB process for native/SQL),
-with thread settings 1/2/4/8. Native settings are histogram workers, projected
+## Measurement amendment: direct tool processes
+
+This amendment replaces the timing method, not the targets. The first timed
+race at commit `676f3a8d` is retained below as **R-worker harness**, including
+its original results and verdicts. Those timings are not pooled with direct-tool
+timings or corrected by subtraction.
+
+The supervisor measured startup on CPUs 12–15 on 2026-10-14:
+
+| Process | Wall seconds | Peak RSS (MB, as supplied) |
+| --- | ---: | ---: |
+| `Rscript -e NULL` | 0.14 | 63 |
+| R + duckdb-R connect | 0.44 | 103 |
+| R + duckdb-R + LOAD duckhts | 0.51 | 119 |
+| DuckDB CLI + LOAD duckhts | 0.08 | 41 |
+| riker binary | approximately 0.00 | 6 |
+
+Every old arm paid R startup, but only DuckHTS paid duckdb-R package load and
+connection setup. The approximately 0.37-second differential confounds the
+BAM reducer comparison. Subtracting it estimates native/riker ratios of
+1.00/0.61/0.86/0.70 at 1/2/4/8 threads; these estimates are diagnostic context,
+not measurements under this amendment and not replacement verdicts.
+
+`/usr/bin/time` now wraps tool processes directly, with no R inside the timed
+process. DuckHTS runs one `duckdb -unsigned` process and SQL script per run:
+LOAD, SET threads, a 2 GiB memory limit, zero spill allowance, then a temporary
+counts table, metrics macro and histogram for every scale pass. COPY writes
+counts, metrics and histogram TSVs on each pass. riker runs its binary directly
+once per complete file scan; at scales 2×/4× the reported wall time is the sum
+of those process timings and peak RSS is their maximum. Thus riker pays its
+startup on each pass, while DuckDB reuses one process for the scale; the
+unchanged acceptance criterion uses 1× only. riker writes metrics, histogram
+and its plot on each pass. DuckHTS does not write a plot and additionally writes
+raw counts; retain these output-cost differences in comparisons.
+
+The CLI version is recorded with the extension's stable C API target and
+header version. A version difference is stated explicitly, including against
+the old duckdb-R 1.5.5 runtime; results across runtime versions do not isolate
+the harness effect. The available CLI is v1.5.1, the stable API target is
+v1.2.0, and build headers are v1.5.3. Loading the extension is checked before
+the matrix.
+
+A second, reported-only DuckDB duration uses SQL timestamps after LOAD/SET
+and before the first counts query through the last output COPY. It excludes
+process startup and extension loading but includes input/index opening,
+reduction, summary and serialization on every pass. It is not an acceptance
+criterion. Parity is checked after timing in R by reading each pass's TSVs;
+no R deserialization or comparison contributes to tool wall time or RSS.
+Targets, exact parity rules, scales (1×/2×/4×), thread settings (1/2/4/8),
+three replicates, scaling and RSS gates are unchanged. Smoke is untimed.
+
+Each arm runs in a fresh tool process, with thread settings 1/2/4/8. Native settings are histogram workers, projected
 SQL settings are DuckDB processing threads, and riker settings are its own
 `--threads` semantics; these are not identical worker models. Native/SQL use
 zero additional htslib decompression workers. The full matrix has three
 replicates and 1×/2×/4× complete file scans, with output materialization on each
 scan; scales do not change bin cardinality. This measures scaling in records,
-not scaling in distinct insert sizes. `/usr/bin/time` measures end-to-end
-worker wall time and maximum RSS, including R startup, input decoding,
-reduction, metrics and output materialization. riker also writes its plot;
-DuckHTS emits counts/metrics/histogram relations, not a plot. This output-cost
-difference must accompany any speed comparison.
+not scaling in distinct insert sizes. `/usr/bin/time` measures end-to-end tool wall time and
+maximum RSS, including tool startup, input decoding, reduction, metrics and
+output files, but excluding the R controller.
 
 Independent riker raw and default outputs are prepared outside measured
 workers. All worker results are compared against them; no failed comparison is
@@ -69,7 +118,8 @@ format/arm/thread combinations with **no clock or RSS measurement**.
 knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 repo <- normalizePath(params$repo, mustWork = TRUE)
 source(file.path(repo, "benchmarks/insert_size_driver.R"))
-result <- run_insert_size_benchmark(repo, params$extension, params$riker, params$smoke)
+result <- run_insert_size_benchmark(repo, params$extension, params$riker, params$smoke,
+                                    duckdb = params$duckdb)
 ```
 
 ## Revision and runtime
@@ -226,12 +276,22 @@ against `l_qseq` before consulting CG; `cram/cram_decode.c:3231-3233` calls it
 after constructing the aux block. Retain the long-CIGAR BAM/CRAM fixture when
 investigating that projection separately.
 
-## BAM misses and unmeasured startup
+## Startup context
 
-For any BAM 1× miss in the verdict table, fixed per-process startup (R, DuckDB,
-extension load and index setup) remains an unmeasured contribution, not an
-explanation. End-to-end timings include these costs, but they have not been
-isolated. Neither 4× nor marginal ratios replace the declared 1× criterion.
-Measure startup separately before attributing the misses; also profile scan/
-decode, task-window overlap decoding, histogram updates and merge costs.
-Smoke results provide no timing or memory evidence.
+The amendment's startup measurements identify an asymmetric R-worker cost.
+The direct-tool table and reported-only in-process duration keep tool startup
+visible without replacing the declared 1× criterion. Neither 4× nor marginal
+ratios replace that criterion. Scan/decode, task-window overlap decoding,
+histogram updates and merge costs still require profiling. Smoke results
+provide no timing or memory evidence.
+
+## Retained R-worker harness
+
+The following is the first timed report, preserved byte-for-byte from
+`676f3a8d` in `benchmark_insert_size_counts_r_worker.md`. Its arm names and
+verdicts describe that revision and that harness, not the amended method.
+
+```{r retained-r-worker, results='asis'}
+cat(readLines(file.path(repo, "benchmarks/benchmark_insert_size_counts_r_worker.md")),
+    sep = "\n")
+```
