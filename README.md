@@ -115,7 +115,7 @@ dbGetQuery(con, "
   GROUP BY ALL")
 #>   database_name duckhts_macros
 #> 1          temp             55
-dbGetQuery(con, "SELECT duckhts_quote_ident('my column') AS quoted")
+dbGetQuery(con, "SELECT duckhts__quote_ident('my column') AS quoted")
 #>        quoted
 #> 1 "my column"
 dbDisconnect(con, shutdown = TRUE)
@@ -131,7 +131,7 @@ cd "$(mktemp -d)"
   LOAD '$DUCKHTS_EXTENSION';
   COPY (SELECT sql || ';' FROM duckhts_macro_definitions() ORDER BY install_order)
     TO 'duckhts_macros.sql' (HEADER false, QUOTE '', ESCAPE '');"
-printf "SET allow_extensions_metadata_mismatch = true;\nLOAD '%s';\n.read duckhts_macros.sql\nSELECT duckhts_quote_ident('my column') AS quoted;\n" \
+printf "SET allow_extensions_metadata_mismatch = true;\nLOAD '%s';\n.read duckhts_macros.sql\nSELECT duckhts__quote_ident('my column') AS quoted;\n" \
   "$DUCKHTS_EXTENSION" | "$DUCKDB" -unsigned example.duckdb
 #> ┌─────────────┐
 #> │   quoted    │

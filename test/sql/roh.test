@@ -2147,7 +2147,7 @@ true
 # ---------------------------------------------------------------------------------------------
 # duckhts_roh_af_table_bcftools chooses the record of a listed position as bcftools roh --AF-file
 # does. HTSlib's indel class of a record decides which records bcftools passes over;
-# duckhts_htslib_is_indel ports it.
+# duckhts__htslib_is_indel ports it.
 # The expected classes are the INDEL flag of bcftools 1.24 (RBCFTools) on the fixture:
 #   bcftools query -f '%ID\t%TYPE\n' test/data/roh_variant_class.vcf
 query II
@@ -2162,7 +2162,7 @@ WITH bcftools(id, type) AS (VALUES
  ('multi_mnp_complex', 'MNP,OTHER'), ('multi_indel_overlap', 'INDEL,OVERLAP'),
  ('multi_symbolic_first', 'INDEL'), ('ref_case', 'REF')
 )
-SELECT count(*), count(*) FILTER (WHERE duckhts_htslib_is_indel(v.REF, v.ALT) IS DISTINCT FROM
+SELECT count(*), count(*) FILTER (WHERE duckhts__htslib_is_indel(v.REF, v.ALT) IS DISTINCT FROM
   list_contains(string_split(b.type, ','), 'INDEL'))
 FROM read_bcf('__WORKING_DIRECTORY__/test/data/roh_variant_class.vcf') AS v
 JOIN bcftools AS b ON b.id = v.ID;

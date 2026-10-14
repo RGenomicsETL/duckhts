@@ -30,6 +30,6 @@ WHERE public AND starts_with(name, 'duckdb_');
 0
 
 query I
-SELECT duckhts_quote_ident('a"b');
+SELECT duckhts__quote_ident('a"b');
 ----
 "a""b"

@@ -244,6 +244,19 @@ Preview of 2.0.0, still in development. The sections below describe what 2.0.0 w
 
 ## Breaking changes
 
+- Bundled private SQL helpers are renamed:
+  `duckdb_munge_preset_map` -> `duckhts__munge_preset_map`,
+  `duckdb_munge_resolved_map` -> `duckhts__munge_resolved_map`,
+  `duckhts_htslib_is_indel` -> `duckhts__htslib_is_indel`,
+  `duckhts_json_path_key` -> `duckhts__json_path_key`,
+  `duckhts_parquet_copy_sql` -> `duckhts__parquet_copy_sql`,
+  `duckhts_parquet_ident_list` -> `duckhts__parquet_ident_list`,
+  `duckhts_parquet_metadata_args` -> `duckhts__parquet_metadata_args`,
+  `duckhts_quote_ident` -> `duckhts__quote_ident`,
+  `duckhts_quote_string` -> `duckhts__quote_string`, and
+  `duckhts_raw_header_text` -> `duckhts__raw_header_text`.
+  R wrapper names and arguments are unchanged.
+
 - Bundled SQL macros `duckdb_liftover`, `duckdb_munge`, and `duckdb_munge_metal`
   become `duckhts_liftover`, `duckhts_munge`, and `duckhts_munge_metal`,
   respectively, without aliases; R wrapper names and arguments are unchanged.

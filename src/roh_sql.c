@@ -55,7 +55,7 @@ static const char sites_from_info_tag[] =
     "CAST(list_extract(COLUMNS(lambda c: c = 'INFO_' || af_tag), 1) AS DOUBLE) AS af, "
     ROH_EVIDENCE " AS evidence " ROH_RECORDS "), ";
 
-/* duckhts_htslib_is_indel(ref, alts): whether HTSlib's bcf_get_variant_types()
+/* duckhts__htslib_is_indel(ref, alts): whether HTSlib's bcf_get_variant_types()
  * sets VCF_INDEL for a record with these alleles, a port of
  * bcf_set_variant_type() (third_party/htslib vcf.c:5415, HTSlib 1.24).
  * An allele is an indel when, after the common prefix (compared without case),
@@ -67,7 +67,7 @@ static const char sites_from_info_tag[] =
  * indel when any ALT is. ind_p is the common prefix length; ind_s the common
  * suffix length of the rest, leaving at least one base of each. */
 static const char htslib_is_indel_macro[] =
-    "CREATE OR REPLACE MACRO duckhts_htslib_is_indel(ref, alts) AS "
+    "CREATE OR REPLACE MACRO duckhts__htslib_is_indel(ref, alts) AS "
     "coalesce(list_bool_or(list_transform(alts, lambda ind_x: "
     "CASE WHEN ind_x = '*' OR starts_with(ind_x, '<') OR starts_with(ind_x, '[') "
     "OR starts_with(ind_x, ']') OR (length(ref) = 1 AND length(ind_x) = 1) THEN false "
@@ -229,7 +229,7 @@ static const char sites_from_relation_bcftools_claims[] =
     "__dht_bcftools_claims AS NOT MATERIALIZED (SELECT chrom, pos, file_offset, t_af, "
     "coalesce(ref = t_ref AND array_to_string(alts, ',') = t_alt AND alts[1] NOT IN " ROH_SYMBOLIC ", "
     "false) AS usable FROM __dht_bcftools_records "
-    "WHERE CASE WHEN followed_at_pos THEN duckhts_htslib_is_indel(ref, alts) = t_indel ELSE true END "
+    "WHERE CASE WHEN followed_at_pos THEN duckhts__htslib_is_indel(ref, alts) = t_indel ELSE true END "
     "AND len(list_filter(alts, lambda a: a NOT IN " ROH_SYMBOLIC ")) = 1 "
     "QUALIFY row_number() OVER (PARTITION BY chrom, pos ORDER BY file_offset) = 1), "
     "__dht_sites AS NOT MATERIALIZED (SELECT c.chrom, c.pos, c.smp, k.t_af AS af, c.evidence "

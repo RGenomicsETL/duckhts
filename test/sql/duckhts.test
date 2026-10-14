@@ -1203,7 +1203,7 @@ SELECT position(chr(10) IN h) > 0,
        position('\n' IN h) = 0,
        len(string_split(h, chr(10))) =
          (SELECT count(*) FROM read_hts_header('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz', mode := 'raw'))
-FROM (SELECT duckhts_raw_header_text('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz', 'vcf') AS h);
+FROM (SELECT duckhts__raw_header_text('__WORKING_DIRECTORY__/test/data/formatcols.vcf.gz', 'vcf') AS h);
 ----
 true	true	true
 

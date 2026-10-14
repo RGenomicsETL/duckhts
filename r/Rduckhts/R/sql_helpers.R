@@ -191,7 +191,7 @@ resolve_munge_column_map <- function(raw_map, available_columns) {
 read_munge_preset_map <- function(con, preset) {
   out <- DBI::dbGetQuery(
     con,
-    sprintf("SELECT duckdb_munge_preset_map(%s) AS m", sql_quote_string(con, preset))
+    sprintf("SELECT duckhts__munge_preset_map(%s) AS m", sql_quote_string(con, preset))
   )
   if (nrow(out) != 1 || is.null(out$m[[1]])) {
     stop("duckhts_munge: unknown preset", call. = FALSE)

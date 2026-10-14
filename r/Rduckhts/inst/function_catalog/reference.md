@@ -1422,7 +1422,7 @@ af_order names a column of af_table that gives the order of its lines, for examp
 
 ### Site rule
 
-In file order (read_bcf's FILE_OFFSET), as bcftools 1.23 and 1.24 do: a record whose indel class differs from the row's is passed over when the next record of the file has the same POS, on any contig and listed or not, since bcftools compares POS only; the row is an indel when any of its alleles is longer than one character, and a record is one when HTSlib's bcf_get_variant_types() sets VCF_INDEL (an MNP such as AC>GT and a complex ACG>AT are not; duckhts_htslib_is_indel(ref, alts) is the port). A record with no non-symbolic ALT, or several, claims nothing; the first remaining record claims the position, which is skipped unless that record's REF and ALT equal the row's. A claiming record whose first ALT is symbolic (<*>, <NON_REF>) is skipped too, where bcftools would decode its second allele.
+In file order (read_bcf's FILE_OFFSET), as bcftools 1.23 and 1.24 do: a record whose indel class differs from the row's is passed over when the next record of the file has the same POS, on any contig and listed or not, since bcftools compares POS only; the row is an indel when any of its alleles is longer than one character, and a record is one when HTSlib's bcf_get_variant_types() sets VCF_INDEL (an MNP such as AC>GT and a complex ACG>AT are not; duckhts__htslib_is_indel(ref, alts) is the port). A record with no non-symbolic ALT, or several, claims nothing; the first remaining record claims the position, which is skipped unless that record's REF and ALT equal the row's. A claiming record whose first ALT is symbolic (<*>, <NON_REF>) is skipped too, where bcftools would decode its second allele.
 
 ### Input
 

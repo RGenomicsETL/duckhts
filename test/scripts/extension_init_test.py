@@ -35,7 +35,7 @@ class ExtensionInitialization(unittest.TestCase):
                 )
                 self.assertEqual(
                     connection.execute(
-                        "SELECT cigar_query_length('5M2I'), duckhts_quote_ident('two words')"
+                        "SELECT cigar_query_length('5M2I'), duckhts__quote_ident('two words')"
                     ).fetchone(),
                     (7, '"two words"'),
                 )
