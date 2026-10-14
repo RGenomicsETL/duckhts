@@ -420,7 +420,7 @@ static void isize_scan(duckdb_function_info info, duckdb_data_chunk output) {
 
 void register_duckhts_bam_insert_size_counts_function(duckdb_connection connection) {
     duckdb_table_function function = duckdb_create_table_function();
-    duckdb_table_function_set_name(function, "duckhts_bam_insert_size_counts_native");
+    duckdb_table_function_set_name(function, "duckhts_bam_insert_size_counts");
     duckdb_logical_type text = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_logical_type integer = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
     duckdb_logical_type boolean = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);

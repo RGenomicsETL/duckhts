@@ -2,11 +2,13 @@
 
 # duckhts 1.5.2.9017
 
-- `duckhts_bam_insert_size_counts()` composes projected binary-CIGAR reads and
-  flag/length kernels in SQL; `duckhts_bam_insert_size_counts_native()` uses
-  per-worker native reducers. Both return sparse BAM/CRAM orientation counts;
-  `duckhts_insert_size_metrics()` summarizes them in SQL. The benchmark report
-  declares per-format/thread targets for both arms; final naming awaits timing.
+- `duckhts_bam_insert_size_counts()` uses per-worker native reducers;
+  `duckhts_bam_insert_size_counts_sql()` composes projected binary-CIGAR reads
+  and flag/length kernels in SQL. Both return sparse BAM/CRAM orientation counts;
+  `duckhts_insert_size_metrics()` summarizes them in SQL. Native takes the
+  unsuffixed name by measurement in `benchmarks/benchmark_insert_size_counts.md`.
+  Native CRAM meets all declared 1× timing targets; native BAM meets only the
+  2-thread target. SQL misses all timing targets on this single-reference workload.
   Semantics credit Fulcrum Genomics riker 0.4.1 (MIT), the executable oracle:
   reject first-segment and QC-fail records, use POS + TLEN for the forward
   read's mate end, and label equal strands `TANDEM`. These upstream rules

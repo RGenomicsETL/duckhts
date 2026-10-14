@@ -42,10 +42,10 @@ insert_size_worker <- function(config) {
   DBI::dbExecute(con, paste("SET VARIABLE insert_reference =", quote(config$reference)))
   DBI::dbExecute(con, "SET VARIABLE insert_duplicates = false")
   for (pass in seq_len(config$scale)) {
-    query <- if (config$arm == "native") sprintf(
-      "SELECT * FROM duckhts_bam_insert_size_counts_native(%s, reference := %s, threads := %d)",
+    query <- if (config$arm == "duckhts_bam_insert_size_counts") sprintf(
+      "SELECT * FROM duckhts_bam_insert_size_counts(%s, reference := %s, threads := %d)",
       quote(config$path), quote(config$reference), config$threads) else sprintf(
-      "SELECT * FROM duckhts_bam_insert_size_counts(%s, reference := %s)",
+      "SELECT * FROM duckhts_bam_insert_size_counts_sql(%s, reference := %s)",
       quote(config$path), quote(config$reference))
     DBI::dbExecute(con, paste("CREATE OR REPLACE TEMP TABLE counts AS", sub(";[[:space:]]*$", "", query)))
     metrics <- DBI::dbGetQuery(con, sprintf(
@@ -106,7 +106,8 @@ run_insert_size_benchmark <- function(repo, extension, riker, smoke = TRUE) {
     stopifnot(length(records) == 1L, is.finite(records), records > 0)
     for (threads in c(1L, 2L, 4L, 8L)) {
       for (scale in if (smoke) 1L else c(1L, 2L, 4L)) {
-        for (arm in c("riker", "native", "projected_sql")) {
+        for (arm in c("riker", "duckhts_bam_insert_size_counts",
+                      "duckhts_bam_insert_size_counts_sql")) {
           for (replicate in seq_len(if (smoke) 1L else 3L)) {
             config$threads <- threads
             config$scale <- scale

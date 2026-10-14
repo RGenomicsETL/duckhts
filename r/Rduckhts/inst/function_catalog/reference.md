@@ -2724,14 +2724,14 @@ table
 SELECT * FROM tabix_index('gff_file.gff.gz', preset := 'gff');
 ```
 
-## duckhts_bam_insert_size_counts
+## duckhts_bam_insert_size_counts_sql
 
 Compose projected BAM/CRAM reads, flag predicates and packed-CIGAR lengths into riker 0.4.1 insert-size counts.
 
 Signature:
 
 ```sql
-duckhts_bam_insert_size_counts(path, reference := NULL, include_duplicates := FALSE, decompression_threads := 0, scan_mode := 'auto', index_path := NULL)
+duckhts_bam_insert_size_counts_sql(path, reference := NULL, include_duplicates := FALSE, decompression_threads := 0, scan_mode := 'auto', index_path := NULL)
 ```
 
 Returns:
@@ -2758,26 +2758,26 @@ Unordered sparse rows; absent bins are omitted. read_bam projects only FLAG, RNA
 
 ### Alternative and benchmark
 
-duckhts_bam_insert_size_counts_native implements the same counts with per-worker sparse histograms. benchmarks/benchmark_insert_size_counts.md records the smoke; the full per-format/thread timed comparison remains pending. SQL owns the unsuffixed public name until the supervisor evaluates both arms against the declared riker targets.
+duckhts_bam_insert_size_counts implements the same counts with native per-worker sparse histograms. benchmarks/benchmark_insert_size_counts.md records both arms against riker; native takes the unsuffixed name by measurement. SQL misses every declared 1x target on that workload. Both arms remain public.
 
 ### Examples
 
 ```sql
-CREATE TABLE insert_counts AS SELECT * FROM duckhts_bam_insert_size_counts('sample.bam');
+CREATE TABLE insert_counts AS SELECT * FROM duckhts_bam_insert_size_counts_sql('sample.bam');
 ```
 
 ```sql
 SELECT * FROM duckhts_insert_size_metrics('insert_counts', sample_name := 'S1');
 ```
 
-## duckhts_bam_insert_size_counts_native
+## duckhts_bam_insert_size_counts
 
 Reduce BAM/CRAM records to sparse insert-size counts using a native riker 0.4.1 kernel.
 
 Signature:
 
 ```sql
-duckhts_bam_insert_size_counts_native(path, reference := NULL, include_duplicates := FALSE, threads := 1, decompression_threads := 0, scan_mode := 'auto', index_path := NULL, reference_index_path := NULL)
+duckhts_bam_insert_size_counts(path, reference := NULL, include_duplicates := FALSE, threads := 1, decompression_threads := 0, scan_mode := 'auto', index_path := NULL, reference_index_path := NULL)
 ```
 
 Returns:
@@ -2808,12 +2808,12 @@ Counts are over the whole file, not grouped by read group or sample. reference s
 
 ### Alternative and benchmark
 
-duckhts_bam_insert_size_counts composes projected read_bam, flag predicates and packed-CIGAR lengths in SQL. benchmarks/benchmark_insert_size_counts.md records the smoke; the full timed comparison remains pending. Both arms face the same declared riker targets, and the supervisor will settle the public name after that comparison.
+duckhts_bam_insert_size_counts_sql composes projected read_bam, flag predicates and packed-CIGAR lengths in SQL. benchmarks/benchmark_insert_size_counts.md records both arms against riker; native takes the unsuffixed name by measurement. Native BAM misses the declared 1x targets at 1, 4 and 8 threads; native CRAM meets all four. Both arms remain public and face the same targets.
 
 ### Examples
 
 ```sql
-CREATE TABLE insert_counts AS SELECT * FROM duckhts_bam_insert_size_counts_native('sample.bam');
+CREATE TABLE insert_counts AS SELECT * FROM duckhts_bam_insert_size_counts('sample.bam');
 ```
 
 ```sql

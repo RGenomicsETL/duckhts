@@ -9,7 +9,7 @@ bool register_duckhts_insert_size_sql(duckhts_registration_t *registration) {
     /* riker 0.4.1 isize.rs:197-218 filters/counts;
      * sam/pair_orientation.rs:30-59 compares inclusive alignment ends. */
     if (!duckhts_register_sql(registration,
-        "CREATE OR REPLACE MACRO duckhts_bam_insert_size_counts("
+        "CREATE OR REPLACE MACRO duckhts_bam_insert_size_counts_sql("
         "path, reference := NULL, include_duplicates := false, "
         "decompression_threads := 0, scan_mode := 'auto', index_path := NULL) AS TABLE "
         "WITH projected AS ("

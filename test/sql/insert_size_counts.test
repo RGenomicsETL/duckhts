@@ -20,7 +20,7 @@ foreach format bam cram
 
 foreach fixture edges empty singleton task_overlap long_cigar even mad_zero minority
 
-foreach arm duckhts_bam_insert_size_counts duckhts_bam_insert_size_counts_native
+foreach arm duckhts_bam_insert_size_counts duckhts_bam_insert_size_counts_sql
 
 foreach duplicates false true
 
@@ -73,11 +73,11 @@ foreach mode auto sequential
 
 query I
 SELECT count(*) FROM (
- (SELECT * FROM counts EXCEPT ALL SELECT * FROM duckhts_bam_insert_size_counts(
+ (SELECT * FROM counts EXCEPT ALL SELECT * FROM duckhts_bam_insert_size_counts_sql(
   'test/data/insert_size/${fixture}.${format}', reference := 'test/data/insert_size/reference.fa.gz',
   scan_mode := '${mode}', include_duplicates := ${duplicates}))
  UNION ALL
- (SELECT * FROM duckhts_bam_insert_size_counts(
+ (SELECT * FROM duckhts_bam_insert_size_counts_sql(
   'test/data/insert_size/${fixture}.${format}', reference := 'test/data/insert_size/reference.fa.gz',
   scan_mode := '${mode}', include_duplicates := ${duplicates}) EXCEPT ALL SELECT * FROM counts)
 );
@@ -90,11 +90,11 @@ foreach mode auto indexed sequential
 
 query I
 SELECT count(*) FROM (
- (SELECT * FROM counts EXCEPT ALL SELECT * FROM duckhts_bam_insert_size_counts_native(
+ (SELECT * FROM counts EXCEPT ALL SELECT * FROM duckhts_bam_insert_size_counts(
   'test/data/insert_size/${fixture}.${format}', reference := 'test/data/insert_size/reference.fa.gz',
   threads := ${threads}, scan_mode := '${mode}', include_duplicates := ${duplicates}))
  UNION ALL
- (SELECT * FROM duckhts_bam_insert_size_counts_native(
+ (SELECT * FROM duckhts_bam_insert_size_counts(
   'test/data/insert_size/${fixture}.${format}', reference := 'test/data/insert_size/reference.fa.gz',
   threads := ${threads}, scan_mode := '${mode}', include_duplicates := ${duplicates})
   EXCEPT ALL SELECT * FROM counts)
@@ -171,7 +171,7 @@ endloop
 
 endloop
 
-foreach arm duckhts_bam_insert_size_counts duckhts_bam_insert_size_counts_native
+foreach arm duckhts_bam_insert_size_counts duckhts_bam_insert_size_counts_sql
 
 query TTTTTT
 DESCRIBE SELECT * FROM ${arm}('test/data/insert_size/empty.bam');
@@ -205,14 +205,14 @@ endloop
 foreach threads 0 9
 
 statement error
-SELECT * FROM duckhts_bam_insert_size_counts_native('test/data/insert_size/edges.bam', threads := ${threads});
+SELECT * FROM duckhts_bam_insert_size_counts('test/data/insert_size/edges.bam', threads := ${threads});
 ----
 threads
 
 endloop
 
 statement error
-SELECT * FROM duckhts_bam_insert_size_counts_native('test/data/insert_size/unindexed.bam', scan_mode := 'indexed');
+SELECT * FROM duckhts_bam_insert_size_counts('test/data/insert_size/unindexed.bam', scan_mode := 'indexed');
 ----
 cannot load required index
 

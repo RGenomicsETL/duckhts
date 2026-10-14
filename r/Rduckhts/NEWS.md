@@ -2,9 +2,10 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
-- `rduckhts_bam_insert_size_counts()` exposes SQL-composed BAM/CRAM insert-size
-  counts, temporarily setting and restoring DuckDB threads;
-  `rduckhts_bam_insert_size_counts_native()` exposes the native reducer.
+- `rduckhts_bam_insert_size_counts()` exposes native BAM/CRAM insert-size counts;
+  `rduckhts_bam_insert_size_counts_sql()` exposes the SQL composition, temporarily
+  setting and restoring DuckDB threads. Both arms remain available; native takes
+  the unsuffixed name by measurement in `benchmarks/benchmark_insert_size_counts.md`.
   `duckhts_insert_size_metrics()` summarizes either counts relation in SQL.
   Bundled wrapper fixtures retain BAM/CRAM and riker parity in 17 files (15.6 KB).
   Semantics credit Fulcrum Genomics riker 0.4.1 (MIT), the executable oracle:

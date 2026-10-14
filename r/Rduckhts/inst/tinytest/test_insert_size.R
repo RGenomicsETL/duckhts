@@ -43,8 +43,8 @@ local({
         raw_counts$pair_orientation <- rep(c("FR", "RF", "TANDEM"), each = nrow(raw))
         raw_counts <- raw_counts[as.numeric(raw_counts$read_pairs) > 0, , drop = FALSE]
         for (arm in c("sql", "native")) {
-          reader <- if (arm == "sql") rduckhts_bam_insert_size_counts else
-            rduckhts_bam_insert_size_counts_native
+          reader <- if (arm == "sql") rduckhts_bam_insert_size_counts_sql else
+            rduckhts_bam_insert_size_counts
           counts <- reader(con, path, reference, include_duplicates = duplicates)
           expect_identical(normalize(counts, columns, key), normalize(baseline, columns, key),
                            info = paste(fixture, format, duplicates, arm, "projected SQL"))
@@ -91,7 +91,7 @@ local({
     }
   }
   path <- file.path(fixtures, "edges.bam")
-  for (reader in list(rduckhts_bam_insert_size_counts, rduckhts_bam_insert_size_counts_native)) {
+  for (reader in list(rduckhts_bam_insert_size_counts, rduckhts_bam_insert_size_counts_sql)) {
     expect_error(reader(con, path, threads = 0), "threads")
     expect_error(reader(con, path, threads = 9), "threads")
     expect_error(reader(con, path, include_duplicates = NA), "include_duplicates")
@@ -100,7 +100,7 @@ local({
     expect_identical(normalize(reader(con, file.path(fixtures, "unindexed.bam")), columns, key),
                      normalize(reader(con, path), columns, key))
   }
-  expect_error(rduckhts_bam_insert_size_counts_native(con, file.path(fixtures, "unindexed.bam"),
+  expect_error(rduckhts_bam_insert_size_counts(con, file.path(fixtures, "unindexed.bam"),
                                                     scan_mode = "indexed"), "index")
   expect_error(dbGetQuery(con, "SELECT * FROM duckhts_insert_size_metrics('counts', deviations := -1)"), "nonnegative")
 })

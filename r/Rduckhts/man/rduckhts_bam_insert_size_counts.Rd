@@ -2,10 +2,10 @@
 % Please edit documentation in R/insert_size.R
 \name{rduckhts_bam_insert_size_counts}
 \alias{rduckhts_bam_insert_size_counts}
-\alias{rduckhts_bam_insert_size_counts_native}
+\alias{rduckhts_bam_insert_size_counts_sql}
 \title{BAM/CRAM Insert-Size Counts}
 \usage{
-rduckhts_bam_insert_size_counts_native(
+rduckhts_bam_insert_size_counts(
   con,
   path,
   reference = NULL,
@@ -17,7 +17,7 @@ rduckhts_bam_insert_size_counts_native(
   reference_index_path = NULL
 )
 
-rduckhts_bam_insert_size_counts(
+rduckhts_bam_insert_size_counts_sql(
   con,
   path,
   reference = NULL,
@@ -57,7 +57,8 @@ Data frame with pair_orientation, insert_size and read_pairs.
 \description{
 Reduces eligible records into sparse orientation and absolute-TLEN counts
 using Fulcrum Genomics riker 0.4.1 semantics (MIT). Only non-first segments
-count; QC-fail records are excluded. The SQL arm projects binary CIGAR and
+count; QC-fail records are excluded. The unsuffixed wrapper uses the native
+reducer; the `_sql` wrapper uses the SQL macro. The SQL arm projects binary CIGAR and
 flag/coordinate columns only; CRAM decoding also requests sequence and tags
 internally for long-CIGAR restoration. The native arm avoids these fields.
 For weighted metrics, materialize the counts and call

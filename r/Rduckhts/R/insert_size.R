@@ -2,7 +2,8 @@
 #'
 #' Reduces eligible records into sparse orientation and absolute-TLEN counts
 #' using Fulcrum Genomics riker 0.4.1 semantics (MIT). Only non-first segments
-#' count; QC-fail records are excluded. The SQL arm projects binary CIGAR and
+#' count; QC-fail records are excluded. The unsuffixed wrapper uses the native
+#' reducer; the `_sql` wrapper uses the SQL macro. The SQL arm projects binary CIGAR and
 #' flag/coordinate columns only; CRAM decoding also requests sequence and tags
 #' internally for long-CIGAR restoration. The native arm avoids these fields.
 #' For weighted metrics, materialize the counts and call
@@ -24,7 +25,7 @@
 #' @return Data frame with pair_orientation, insert_size and read_pairs.
 #'   Rows are unordered; absent bins are omitted.
 #' @export
-rduckhts_bam_insert_size_counts_native <- function(
+rduckhts_bam_insert_size_counts <- function(
   con, path, reference = NULL, include_duplicates = FALSE, threads = 1,
   decompression_threads = 0, scan_mode = c("auto", "indexed", "sequential"),
   index_path = NULL, reference_index_path = NULL
@@ -47,13 +48,13 @@ rduckhts_bam_insert_size_counts_native <- function(
     if (!is.null(paths[[name]])) params[[name]] <- sql_quote_string(con, paths[[name]])
   }
   DBI::dbGetQuery(con, sprintf(
-    "SELECT * FROM duckhts_bam_insert_size_counts_native(%s%s)",
+    "SELECT * FROM duckhts_bam_insert_size_counts(%s%s)",
     sql_quote_string(con, path), build_param_str(params)))
 }
 
 #' @rdname rduckhts_bam_insert_size_counts
 #' @export
-rduckhts_bam_insert_size_counts <- function(
+rduckhts_bam_insert_size_counts_sql <- function(
   con, path, reference = NULL, include_duplicates = FALSE, threads = 1,
   decompression_threads = 0, scan_mode = c("auto", "sequential"),
   index_path = NULL
@@ -77,6 +78,6 @@ rduckhts_bam_insert_size_counts <- function(
   on.exit(DBI::dbExecute(con, paste("SET threads =", previous)), add = TRUE)
   DBI::dbExecute(con, paste("SET threads =", threads))
   DBI::dbGetQuery(con, sprintf(
-    "SELECT * FROM duckhts_bam_insert_size_counts(%s%s)",
+    "SELECT * FROM duckhts_bam_insert_size_counts_sql(%s%s)",
     sql_quote_string(con, path), build_param_str(params)))
 }
