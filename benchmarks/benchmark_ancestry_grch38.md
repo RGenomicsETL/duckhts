@@ -2,7 +2,7 @@ Ancestry projection: GRCh38 reference product and 30x CRAM acceptance
 ================
 
 The GRCh38 ancestry reference is derived from the keyed GRCh37 product
-by `duckdb_liftover` and checked here against the GRCh37 phased
+by `duckhts_liftover` and checked here against the GRCh37 phased
 genotypes of the same 1000 Genomes individuals. Revision:
 9eeb223eb30d051c515e72e361667aac0145c2f1.
 

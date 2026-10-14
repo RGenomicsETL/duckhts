@@ -1052,25 +1052,25 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "WHEN upper(preset) = 'METAL' THEN map(['SNP','BP','CHR','A1','A2','P','Z','BETA','N','FRQ','SE','LP','NEFF','HET_I2','HET_P','HET_LP','DIRE'], ['MarkerName','Position','Chromosome','Allele1','Allele2','P-value','Zscore','Effect','N','Freq1','StdErr','log(P)','Weight','HetISq','HetPVal','logHetP','Direction']) "
         "WHEN upper(preset) = 'PGS' THEN map(['CHR','BP','SNP','A1','A2','OR','BETA','FRQ'], ['chr_name','chr_position','rsID','effect_allele','other_allele','OR','effect_weight','allelefrequency_effect']) "
         "WHEN upper(preset) = 'SSF' OR upper(preset) = 'GWAS-SSF' THEN map(['CHR','BP','SNP','A1','A2','P','OR','BETA','N','INFO','FRQ','SE'], ['chromosome','base_pair_location','variant_id','effect_allele','other_allele','p_value','odds_ratio','beta','n','info','effect_allele_frequency','standard_error']) "
-        "ELSE error('duckdb_munge: unknown preset') END")) {
+        "ELSE error('duckhts_munge: unknown preset') END")) {
         return false;
     }
     if (!duckhts_register_sql(&registration,
         "CREATE OR REPLACE MACRO duckdb_munge_resolved_map(preset, column_map, column_map_file) AS "
         "CASE "
-        "WHEN preset <> '' AND map_extract_value(column_map, '') IS NULL THEN error('duckdb_munge: specify only one of preset, column_map, or column_map_file') "
-        "WHEN preset <> '' AND column_map_file <> '' THEN error('duckdb_munge: specify only one of preset, column_map, or column_map_file') "
-        "WHEN map_extract_value(column_map, '') IS NULL AND column_map_file <> '' THEN error('duckdb_munge: specify only one of preset, column_map, or column_map_file') "
+        "WHEN preset <> '' AND map_extract_value(column_map, '') IS NULL THEN error('duckhts_munge: specify only one of preset, column_map, or column_map_file') "
+        "WHEN preset <> '' AND column_map_file <> '' THEN error('duckhts_munge: specify only one of preset, column_map, or column_map_file') "
+        "WHEN map_extract_value(column_map, '') IS NULL AND column_map_file <> '' THEN error('duckhts_munge: specify only one of preset, column_map, or column_map_file') "
         "WHEN map_extract_value(column_map, '') IS NULL THEN column_map "
-        "WHEN column_map_file <> '' THEN error('duckdb_munge: column_map_file is not supported directly in SQL; use column_map or the R wrapper') "
+        "WHEN column_map_file <> '' THEN error('duckhts_munge: column_map_file is not supported directly in SQL; use column_map or the R wrapper') "
         "WHEN preset <> '' THEN duckdb_munge_preset_map(preset) "
-        "ELSE error('duckdb_munge: one of preset, column_map, or column_map_file is required') "
+        "ELSE error('duckhts_munge: one of preset, column_map, or column_map_file is required') "
         "END")) {
         return false;
     }
     {
-        static const char *const duckdb_munge_sql[] = {
-            "CREATE OR REPLACE MACRO duckdb_munge(table_name, preset := '', column_map := map([''], ['']), column_map_file := '', ",
+        static const char *const duckhts_munge_sql[] = {
+            "CREATE OR REPLACE MACRO duckhts_munge(table_name, preset := '', column_map := map([''], ['']), column_map_file := '', ",
             "fasta_ref := NULL, iffy_tag := 'IFFY', mismatch_tag := 'REF_MISMATCH', ns := NULL, nc := NULL, ne := NULL) AS TABLE ",
             "SELECT mu.chrom, mu.pos, mu.id, mu.ref, mu.alt, mu.alleles_swapped, mu.filter, ",
             "mu.ns, mu.ez, mu.nc, mu.es, mu.se, mu.lp, mu.af, mu.ac, mu.ne ",
@@ -1107,14 +1107,14 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             "  fasta_ref, iffy_tag, mismatch_tag, ns, nc, ne",
             ") AS mu) q"
         };
-        if (!duckhts_register_sql_parts(&registration, duckdb_munge_sql, sizeof(duckdb_munge_sql) / sizeof(duckdb_munge_sql[0]))) {
+        if (!duckhts_register_sql_parts(&registration, duckhts_munge_sql, sizeof(duckhts_munge_sql) / sizeof(duckhts_munge_sql[0]))) {
             return false;
         }
     }
     /* Variant with METAL/heterogeneity output columns (SI, I2, CQ, ED) */
     {
-        static const char *const duckdb_munge_metal_sql[] = {
-            "CREATE OR REPLACE MACRO duckdb_munge_metal(table_name, preset := '', column_map := map([''], ['']), column_map_file := '', ",
+        static const char *const duckhts_munge_metal_sql[] = {
+            "CREATE OR REPLACE MACRO duckhts_munge_metal(table_name, preset := '', column_map := map([''], ['']), column_map_file := '', ",
             "fasta_ref := NULL, iffy_tag := 'IFFY', mismatch_tag := 'REF_MISMATCH', ns := NULL, nc := NULL, ne := NULL) AS TABLE ",
             "SELECT mu.chrom, mu.pos, mu.id, mu.ref, mu.alt, mu.alleles_swapped, mu.filter, ",
             "mu.ns, mu.ez, mu.nc, mu.es, mu.se, mu.lp, mu.af, mu.ac, mu.ne, mu.si, mu.i2, mu.cq, mu.ed ",
@@ -1151,8 +1151,8 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             "  fasta_ref, iffy_tag, mismatch_tag, ns, nc, ne",
             ") AS mu) q"
         };
-        if (!duckhts_register_sql_parts(&registration, duckdb_munge_metal_sql,
-                                   sizeof(duckdb_munge_metal_sql) / sizeof(duckdb_munge_metal_sql[0]))) {
+        if (!duckhts_register_sql_parts(&registration, duckhts_munge_metal_sql,
+                                   sizeof(duckhts_munge_metal_sql) / sizeof(duckhts_munge_metal_sql[0]))) {
             return false;
         }
     }
@@ -1166,7 +1166,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         return false;
     }
     if (!duckhts_register_sql(&registration,
-        "CREATE OR REPLACE MACRO duckdb_liftover(table_name, chrom_col, pos_col, ref_col := NULL, alt_col := NULL, "
+        "CREATE OR REPLACE MACRO duckhts_liftover(table_name, chrom_col, pos_col, ref_col := NULL, alt_col := NULL, "
         "chain_path := NULL, dst_fasta_ref := NULL, src_fasta_ref := NULL, max_snp_gap := 1, max_indel_inc := 250, "
         "lift_mt := false, end_pos_col := NULL, no_left_align := false) AS TABLE "
         "SELECT lo.* "

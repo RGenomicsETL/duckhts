@@ -20,7 +20,16 @@ def connect(path, read_only=False):
 
 
 def load(con):
+    duckdb_names_before = {row[0] for row in con.execute(
+        "SELECT function_name FROM duckdb_functions() "
+        "WHERE starts_with(function_name, 'duckdb_')"
+    ).fetchall()}
     con.execute(f"LOAD '{EXTENSION}'")
+    duckdb_names_after = {row[0] for row in con.execute(
+        "SELECT function_name FROM duckdb_functions() "
+        "WHERE starts_with(function_name, 'duckdb_')"
+    ).fetchall()}
+    assert duckdb_names_after == duckdb_names_before
 
 
 def names(con, database):
@@ -38,6 +47,7 @@ def definitions(con):
     ).fetchall()
     # Public and private macro definitions have one ordered inventory.
     assert len(rows) == 46
+    assert not any(name.startswith("duckdb_") for name, exposed, _, _ in rows if exposed)
     assert len({row[3] for row in rows}) == 1
     ordered = b"".join(
         bytes([int(exposed)]) +

@@ -1,7 +1,7 @@
 #' Stage the GRCh38 derivation of the keyed ancestry reference as Parquet.
 #'
 #' Every locus of the keyed GRCh37 product (see
-#' [duckhts_bench_stage_ancestry_parquet()]) is lifted with `duckdb_liftover`
+#' [duckhts_bench_stage_ancestry_parquet()]) is lifted with `duckhts_liftover`
 #' using the registered GRCh37-to-GRCh38 chain and the registered source and
 #' destination FASTAs. The coded allele of a locus is the source `allele_b`, the
 #' allele that the group frequencies and PC loadings describe. Its destination
@@ -120,7 +120,7 @@ duckhts_bench_stage_ancestry_grch38_parquet <- function() {
     "CREATE TEMP TABLE lift_input AS SELECT chromosome::VARCHAR AS chrom, ",
     "position::BIGINT AS pos, allele_a AS ref, allele_b AS alt FROM ", source))
   DBI::dbExecute(con, paste0(
-    "CREATE TEMP TABLE lifted AS SELECT * FROM duckdb_liftover('lift_input', ",
+    "CREATE TEMP TABLE lifted AS SELECT * FROM duckhts_liftover('lift_input', ",
     "'chrom', 'pos', ref_col := 'ref', alt_col := 'alt', chain_path := ",
     quote_str(chain), ", dst_fasta_ref := ", quote_str(destination_fasta),
     ", src_fasta_ref := ", quote_str(source_fasta), ")"))

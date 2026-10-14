@@ -22,6 +22,13 @@ JOIN duckdb_functions() f ON f.function_name = d.name AND f.function_type IN ('m
 ----
 46	46
 
+# DuckHTS contributes no public function or macro in DuckDB's namespace.
+query I
+SELECT count(*) FROM duckhts_macro_definitions()
+WHERE public AND starts_with(name, 'duckdb_');
+----
+0
+
 query I
 SELECT duckhts_quote_ident('a"b');
 ----

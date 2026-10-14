@@ -6,7 +6,7 @@ require duckhts
 
 statement error
 SELECT sum(dest_pos)
-FROM duckdb_liftover(
+FROM duckhts_liftover(
   '(SELECT ''chrF'' AS chrom, 0 AS pos, ''C'' AS ref, ''T'' AS alt FROM range(1000000)) AS t',
   'chrom',
   'pos',
@@ -21,7 +21,7 @@ Invalid Input Error: bcftools_liftover: pos must be >= 1
 
 statement error
 SELECT sum(dest_pos)
-FROM duckdb_liftover(
+FROM duckhts_liftover(
   '(SELECT NULL::VARCHAR AS chrom, 2 AS pos, ''C'' AS ref, ''T'' AS alt FROM range(1000000)) AS t',
   'chrom',
   'pos',

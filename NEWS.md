@@ -456,6 +456,10 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
 
 ## Breaking changes
 
+- SQL macros `duckdb_liftover`, `duckdb_munge`, and `duckdb_munge_metal` are
+  renamed to `duckhts_liftover`, `duckhts_munge`, and `duckhts_munge_metal`,
+  respectively, without aliases. R wrapper names and arguments are unchanged.
+
 - DuckHTS supports DuckDB 1.5.0 or newer, and `LOAD` now fails on older runtimes
   (it used to admit 1.4). The stable C API target `C_STRUCT` v1.2.0 recorded in
   the extension metadata is an ABI floor, not a statement of supported DuckDB

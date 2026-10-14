@@ -2,9 +2,6 @@
 #ifndef DUCKHTS_PUBLIC_MACROS_H
 #define DUCKHTS_PUBLIC_MACROS_H
 static const char *const duckhts_public_macros[] = {
-    "duckdb_liftover",
-    "duckdb_munge",
-    "duckdb_munge_metal",
     "duckhts_bam_convert_parquet_sql",
     "duckhts_bcf_convert_parquet_sql",
     "duckhts_bcftools_norm",
@@ -18,6 +15,9 @@ static const char *const duckhts_public_macros[] = {
     "duckhts_duckdb_supports_variant",
     "duckhts_duckdb_type_supported",
     "duckhts_gff_convert_parquet_sql",
+    "duckhts_liftover",
+    "duckhts_munge",
+    "duckhts_munge_metal",
     "duckhts_roh",
     "duckhts_roh_af_table",
     "duckhts_roh_af_table_bcftools",

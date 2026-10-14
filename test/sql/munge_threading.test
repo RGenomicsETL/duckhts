@@ -21,7 +21,7 @@ SELECT
   count(*),
   sum(CASE WHEN alleles_swapped THEN 1 ELSE 0 END),
   sum(CASE WHEN filter IS NULL THEN 1 ELSE 0 END)
-FROM duckdb_munge(
+FROM duckhts_munge(
   '(SELECT ''chrF'' AS CHR,
            2::BIGINT AS BP,
            CASE WHEN i % 2 = 0 THEN ''A'' ELSE ''C'' END AS A1,

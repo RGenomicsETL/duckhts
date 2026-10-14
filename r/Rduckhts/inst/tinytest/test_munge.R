@@ -199,7 +199,7 @@ test_munge <- function() {
   ## ---- METAL preset: SI/I2/CQ/ED output columns ----
 
   # METAL preset with heterogeneity fields: the R wrapper should detect
-  # HET_I2/HET_P/HET_LP/DIRE keys and dispatch to duckdb_munge_metal,
+  # HET_I2/HET_P/HET_LP/DIRE keys and dispatch to duckhts_munge_metal,
   # returning SI, I2, CQ, ED columns.
   # At pos 2 on chrF (ref=C): Allele1=A (effect allele, A1) != ref,
   # Allele2=C (other allele, A2) = ref => no swap.
@@ -278,7 +278,7 @@ test_munge <- function() {
   expect_false("cq" %in% names(plink_out))
   expect_false("ed" %in% names(plink_out))
 
-  # Custom column_map with metal keys should dispatch to duckdb_munge_metal
+  # Custom column_map with metal keys should dispatch to duckhts_munge_metal
   # A1=A (effect allele), A2=C (other allele) at pos 2 (ref=C): A1 != ref => no swap
   custom_metal <- rduckhts_munge(
     con,

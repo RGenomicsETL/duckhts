@@ -124,7 +124,7 @@ duckdb_munge_sql <- function(score_path, fasta_path) {
   )
   paste0(
     "SELECT chrom, pos, ref, alt, coalesce(filter, 'PASS') AS filter, COUNT(*) AS n ",
-    "FROM duckdb_munge(", sql_string(table_expr), ", ",
+    "FROM duckhts_munge(", sql_string(table_expr), ", ",
     "preset := 'PLINK', ",
     "fasta_ref := ", sql_string(fasta_path), ") ",
     "GROUP BY ALL ",

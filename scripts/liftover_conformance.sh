@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Liftover conformance test: compare DuckHTS duckdb_liftover() against
+# Liftover conformance test: compare DuckHTS duckhts_liftover() against
 # upstream bcftools +liftover on the same input VCF/BCF.
 #
 # Usage:
@@ -109,7 +109,7 @@ echo "[1/5] Materialize comparison slice -> $INPUT_SLICE_GZ"
 "$BCFTOOLS_BIN" view "${VIEW_ARGS[@]}" -Oz -o "$INPUT_SLICE_GZ" "$INPUT_VCF"
 "$BCFTOOLS_BIN" index -f -t "$INPUT_SLICE_GZ"
 
-echo "[2/5] DuckHTS duckdb_liftover -> $DUCK_TSV"
+echo "[2/5] DuckHTS duckhts_liftover -> $DUCK_TSV"
 duckdb -unsigned <<SQL
 LOAD '${DUCKHTS_EXT}';
 
@@ -122,7 +122,7 @@ FROM read_bcf('${INPUT_SLICE_GZ}');
 
 CREATE TEMP TABLE lifted AS
 SELECT *
-FROM duckdb_liftover(
+FROM duckhts_liftover(
   'src', 'chrom', 'pos',
   ref_col := 'ref',
   alt_col := 'alt',

@@ -2154,7 +2154,7 @@ rduckhts_hts_index_raw <- function(
 
 #' Lift Over Variant Coordinates Against a Query
 #'
-#' Applies the DuckHTS `duckdb_liftover(...)` table macro to rows from a SQL query or
+#' Applies the DuckHTS `duckhts_liftover(...)` table macro to rows from a SQL query or
 #' table expression with chromosome and position columns, plus optional reference
 #' and alternate alleles.
 #'
@@ -2265,7 +2265,7 @@ rduckhts_liftover <- function(
     sprintf("no_left_align := %s", tolower(as.character(no_left_align)))
   )
   sql <- sprintf(
-    "SELECT * FROM duckdb_liftover(%s)",
+    "SELECT * FROM duckhts_liftover(%s)",
     paste(params, collapse = ", ")
   )
   DBI::dbGetQuery(con, sql)
@@ -2394,7 +2394,7 @@ rduckhts_bcftools_norm <- function(
 
 #' Munge Summary Statistics Rows
 #'
-#' Applies the DuckHTS `duckdb_munge(...)` table macro to rows from a SQL query or
+#' Applies the DuckHTS `duckhts_munge(...)` table macro to rows from a SQL query or
 #' table expression, using either an upstream-style preset, a named column map,
 #' or a two-column mapping file. When no mapping mode is provided, the bundled
 #' `colheaders.tsv` alias file is used by default.
@@ -2439,7 +2439,7 @@ rduckhts_munge <- function(
   )
   if (provided_modes > 1) {
     stop(
-      "duckdb_munge: specify only one of preset, column_map, or column_map_file",
+      "duckhts_munge: specify only one of preset, column_map, or column_map_file",
       call. = FALSE
     )
   }
@@ -2545,7 +2545,7 @@ rduckhts_munge <- function(
   }
   metal_keys <- c("INFO", "HET_I2", "HET_P", "HET_LP", "DIRE")
   has_metal <- !is.null(column_map) && any(metal_keys %in% names(column_map))
-  macro_name <- if (has_metal) "duckdb_munge_metal" else "duckdb_munge"
+  macro_name <- if (has_metal) "duckhts_munge_metal" else "duckhts_munge"
   sql <- sprintf(
     "SELECT * FROM %s(%s)",
     macro_name,

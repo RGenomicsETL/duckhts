@@ -240,7 +240,7 @@ prepare_duckdb_input_table <- function(input_path) {
 duckdb_liftover_sql <- function(chain_path, src_fasta, dst_fasta) {
   paste0(
     "SELECT dest_chrom, dest_pos, dest_ref, dest_alt, COUNT(*) AS n ",
-    "FROM duckdb_liftover(",
+    "FROM duckhts_liftover(",
     "'bench_input', 'chrom', 'pos', ref_col := 'ref', alt_col := 'alt', ",
     "chain_path := ", sql_string(chain_path), ", ",
     "dst_fasta_ref := ", sql_string(dst_fasta), ", ",

@@ -11,7 +11,7 @@ The cached Parquet path.
 }
 \description{
 Every locus of the keyed GRCh37 product (see
-\code{\link[=duckhts_bench_stage_ancestry_parquet]{duckhts_bench_stage_ancestry_parquet()}}) is lifted with \code{duckdb_liftover}
+\code{\link[=duckhts_bench_stage_ancestry_parquet]{duckhts_bench_stage_ancestry_parquet()}}) is lifted with \code{duckhts_liftover}
 using the registered GRCh37-to-GRCh38 chain and the registered source and
 destination FASTAs. The coded allele of a locus is the source \code{allele_b}, the
 allele that the group frequencies and PC loadings describe. Its destination

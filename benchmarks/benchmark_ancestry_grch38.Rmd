@@ -54,7 +54,7 @@ sample_panel <- utils::read.table(duckhts_bench_fetch("ancestry_1000g_panel"), h
 ```
 
 The GRCh38 ancestry reference is derived from the keyed GRCh37 product by
-`duckdb_liftover` and checked here against the GRCh37 phased genotypes of the
+`duckhts_liftover` and checked here against the GRCh37 phased genotypes of the
 same 1000 Genomes individuals. Revision: `r source_revision`.
 
 ## GRCh38 reference product

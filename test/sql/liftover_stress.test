@@ -39,7 +39,7 @@ SELECT
   count(*),
   sum(CASE WHEN mapped THEN 1 ELSE 0 END),
   sum(CASE WHEN reverse_complemented THEN 1 ELSE 0 END)
-FROM duckdb_liftover(
+FROM duckhts_liftover(
   'liftover_stress_input',
   'chrom',
   'pos',

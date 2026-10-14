@@ -244,6 +244,10 @@ Preview of 2.0.0, still in development. The sections below describe what 2.0.0 w
 
 ## Breaking changes
 
+- Bundled SQL macros `duckdb_liftover`, `duckdb_munge`, and `duckdb_munge_metal`
+  become `duckhts_liftover`, `duckhts_munge`, and `duckhts_munge_metal`,
+  respectively, without aliases; R wrapper names and arguments are unchanged.
+
 - Requires duckdb 1.5.0 or newer; loading the bundled extension on an older
   DuckDB now fails. Its stable C API target (v1.2.0) is an ABI floor and does not
   imply support for older DuckDB releases.
