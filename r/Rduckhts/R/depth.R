@@ -120,7 +120,8 @@ rduckhts_depth_bins <- function(con, bins_table, min_mappability = 0.9, gc_step 
 #'   "CREATE TEMP TABLE bins AS SELECT 'S1' AS sample_id, CAST(c AS VARCHAR) AS chrom,",
 #'   "b * 1000000 AS start, (b + 1) * 1000000 AS \"end\",",
 #'   "0.35 + 0.25 * ((b * 37 + c * 11) % 100) / 100.0 AS gc,",
-#'   "CAST((600 + 4 * ((b * 13 + c * 7) % 11)) * CASE WHEN c = 8 THEN 1.1 ELSE 1 END AS BIGINT) AS reads",
+#'   "CAST((600 + 4 * ((b * 13 + c * 7) % 11)) *",
+#'   "CASE WHEN c = 8 THEN 1.1 ELSE 1 END AS BIGINT) AS reads",
 #'   "FROM range(1, 23) t(c), range(0, 100) r(b)"
 #' ))
 #' rduckhts_depth_bins(con, "bins", table_name = "corrected")

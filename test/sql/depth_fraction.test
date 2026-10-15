@@ -224,6 +224,25 @@ WHERE b.chrom = '2' AND b.start = 149000000;
 ----
 true
 
+# Integer region endpoints preserve half-open membership at large coordinates.
+statement ok
+CREATE TEMP TABLE depth_large_positions AS
+SELECT 'S1' AS sample_id, chrom, start, "end", reads, 100.0 AS expected, true AS kept
+FROM (VALUES ('1', 0::BIGINT, 2::BIGINT, 100.0), ('1', 2, 4, 100.0),
+             ('2', 9223372036854775804, 9223372036854775807, 110.0)) t(chrom, start, "end", reads);
+
+statement ok
+CREATE TEMP TABLE depth_large_regions AS
+SELECT * FROM (VALUES ('inside', '2', 9223372036854775805::BIGINT, 9223372036854775806::BIGINT),
+                     ('outside', '2', 9223372036854775806, 9223372036854775807)) t(region, chrom, start, "end");
+
+query TITI
+SELECT region, bins, status, round(shift * 10)
+FROM duckhts_depth_region_fraction('depth_large_positions', 'depth_large_regions') ORDER BY region;
+----
+inside	1	ok	2
+outside	0	no_bins	NULL
+
 # Option and row errors. Options are checked also when the relation is empty.
 statement ok
 CREATE TEMP TABLE depth_empty AS SELECT * FROM depth_raw WHERE false;
@@ -552,6 +571,30 @@ query II
 SELECT count(*), bool_and(reference_samples = 5) FROM duckhts_depth_sex_fraction_ref('depth_references', 'depth_references');
 ----
 6	true
+
+statement ok
+CREATE TEMP VIEW depth_mixed_references AS
+SELECT * FROM depth_references UNION ALL
+SELECT d.* REPLACE(s.id AS sample_id, kept AND CASE s.id
+  WHEN 'unusable_no_autosomes' THEN chrom IN ('X', 'Y')
+  WHEN 'unusable_no_sex' THEN chrom NOT IN ('X', 'Y')
+  WHEN 'x_only' THEN chrom != 'Y' WHEN 'y_only' THEN chrom != 'X' END AS kept)
+FROM depth_references d CROSS JOIN
+  (VALUES ('unusable_no_autosomes'), ('unusable_no_sex'), ('x_only'), ('y_only')) s(id)
+WHERE d.sample_id = 'ref_xy_1';
+
+query II
+SELECT count(*), bool_and(reference_samples = 8)
+FROM duckhts_depth_sex_fraction_ref('depth_tests', 'depth_mixed_references');
+----
+7	true
+
+query II
+SELECT count(*), bool_and(reference_samples =
+  CASE WHEN sample_id LIKE 'unusable_%' THEN 8 ELSE 7 END)
+FROM duckhts_depth_sex_fraction_ref('depth_mixed_references', 'depth_mixed_references');
+----
+10	true
 
 # Without XX references, two X copies are twice one and the Y background is 0; without an XY
 # reference there are no levels.

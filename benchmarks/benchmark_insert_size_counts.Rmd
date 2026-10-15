@@ -129,6 +129,9 @@ format/arm/thread combinations with **no clock or RSS measurement**.
 knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 repo <- normalizePath(params$repo, mustWork = TRUE)
 source(file.path(repo, "benchmarks/insert_size_driver.R"))
+host_info <- paste(Sys.info()[c("sysname", "release", "machine")], collapse = "; ")
+host_load_at_start <- system2("uptime", stdout = TRUE)
+concurrent_work <- Sys.getenv("DUCKHTS_BENCH_CONCURRENT_WORK", "none declared")
 result <- run_insert_size_benchmark(repo, params$extension, params$riker, params$smoke,
                                     duckdb = params$duckdb)
 ```
@@ -148,6 +151,9 @@ cat("The CLI differs from those versions and from the retained R-worker runtime 
 cat("Launcher affinity: `", system2("taskset", c("-pc", Sys.getpid()), stdout = TRUE),
     "`; niceness: `", trimws(system2("ps", c("-o", "ni=", "-p", Sys.getpid()), stdout = TRUE)),
     "`.\n\n", sep = "")
+cat("Host: `", host_info, "`; load at start: `", host_load_at_start, "`.\n\n", sep = "")
+cat("Cache condition: warm; each input is scanned for independent oracle outputs before timing. ",
+    "Page cache is not flushed. Concurrent work declared by launcher: ", concurrent_work, ".\n\n", sep = "")
 ```
 
 ## Results

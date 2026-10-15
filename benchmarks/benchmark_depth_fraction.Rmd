@@ -31,14 +31,16 @@ their first baseline.
   supplementary flag) in 100 kb bins of chr1 to chr22, X and Y of three
   1000 Genomes 30× CRAMs, split into 300 of 3,000 read-name buckets. Ten
   buckets are a 0.1× read-name subsample, 40 are 0.4× and 100 are 1×. The
-  three inputs are checked against their registered row and read counts, the
-  reference FASTA against its registered size and the sample panel against
-  its registered SHA-256 before anything is computed. GC comes from
+  three inputs are checked against their registered row and read counts and
+  receipt SHA-256 values. Staging validates each full CRAM against its supplier
+  MD5; receipts retain the producer and actual input hashes. The reference
+  FASTA and sample panel are checked against their registered checksums before
+  anything is computed. GC comes from
   `fasta_nuc()` on the registered GRCh38 reference.
 
 Every timed observation is one fresh DuckDB CLI process under
-`/usr/bin/time`, pinned to cores 12 to 19 by the render command and run at
-scheduling priority −15, with three repetitions at one thread and at four
+`/usr/bin/time`, with its launcher's actual CPU affinity and scheduling
+priority recorded below, with three repetitions at one thread and at four
 threads in an order that alternates sizes. The JSON profiler gives the query
 latency and DuckDB's peak buffer and temporary bytes; `/usr/bin/time` gives
 the peak RSS. `max_temp_directory_size` is zero, so a spill fails the
@@ -214,9 +216,24 @@ genomes <- c("HG00403", "NA18507", "HG00188")
 bucket_ids <- paste0("depth_fraction_", tolower(genomes), "_buckets")
 bucket_paths <- vapply(bucket_ids, duckhtsbench::duckhts_bench_artifact_path, character(1L))
 stopifnot(all(file.exists(bucket_paths)))
+bucket_provenance <- lapply(seq_along(bucket_ids), function(k) {
+  receipt <- utils::read.delim(paste0(bucket_paths[[k]], ".sources.tsv"), colClasses = "character")
+  stopifnot(!anyDuplicated(receipt$field))
+  value <- setNames(receipt$value, receipt$field)
+  inputs <- sub("^artifact:", "", strsplit(
+    registry$locator[registry$id == bucket_ids[[k]]], ";", fixed = TRUE)[[1L]])
+  stopifnot(value[["artifact_id"]] == bucket_ids[[k]],
+            value[["alignments_identity"]] == registry$supplier_identity[registry$id == inputs[[1L]]],
+            value[["reference_identity"]] == registry$supplier_identity[registry$id == inputs[[2L]]],
+            value[["output_sha256"]] == unname(digest::digest(file = bucket_paths[[k]], algo = "sha256")))
+  data.frame(artifact = bucket_ids[[k]], producer_sha256 = value[["extension_sha256"]],
+             alignments_sha256 = value[["alignments_sha256"]], output_sha256 = value[["output_sha256"]])
+})
+knitr::kable(do.call(rbind, bucket_provenance))
 reference_fasta <- duckhtsbench::duckhts_bench_artifact_path("liftover_grch38_fasta")
 stopifnot(file.exists(reference_fasta), file.exists(paste0(reference_fasta, ".fai")),
           file.size(reference_fasta) == as.numeric(identity_of("liftover_grch38_fasta")[["bytes"]]))
+duckhtsbench::duckhts_bench_validate_identity("liftover_grch38_fasta", reference_fasta)
 panel_path <- duckhtsbench::duckhts_bench_artifact_path("ancestry_1000g_panel")
 stopifnot(identical(unname(digest::digest(file = panel_path, algo = "sha256")),
                     identity_of("ancestry_1000g_panel")[["sha256"]]))

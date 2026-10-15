@@ -2,6 +2,11 @@
 
 # duckhts 1.5.2.9018
 
+- Regional depth fractions test bin midpoints without integer overflow or
+  loss of precision at large coordinates. Sex-depth calibration counts only
+  reference samples contributing an X or Y level, including when leaving
+  the tested sample out of its own reference set.
+
 - Insert-size metrics clamp the histogram cutoff to the maximum supported
   insert size before integer conversion, accepting large finite deviations
   without overflow.

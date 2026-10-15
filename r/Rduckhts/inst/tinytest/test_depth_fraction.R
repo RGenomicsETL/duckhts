@@ -207,6 +207,39 @@ with_sex_reference <- rduckhts_depth_sex_fraction(con, "depth_tests", reference_
 expect_true(all(with_sex_reference$reference_samples == 6))
 expect_true(abs(with_sex_reference$fraction[with_sex_reference$sample_id == "xx_with_xy_10"] - 0.1) < 0.03)
 
+DBI::dbExecute(con, paste(
+  "CREATE TEMP VIEW depth_mixed_references AS SELECT * FROM depth_references UNION ALL",
+  "SELECT d.* REPLACE(s.id AS sample_id, kept AND CASE s.id",
+  "WHEN 'unusable_no_autosomes' THEN chrom IN ('X', 'Y')",
+  "WHEN 'unusable_no_sex' THEN chrom NOT IN ('X', 'Y')",
+  "WHEN 'x_only' THEN chrom != 'Y' WHEN 'y_only' THEN chrom != 'X' END AS kept)",
+  "FROM depth_references d CROSS JOIN (VALUES ('unusable_no_autosomes'),",
+  "('unusable_no_sex'), ('x_only'), ('y_only')) s(id) WHERE d.sample_id = 'ref_xy_1'"
+))
+mixed_reference <- rduckhts_depth_sex_fraction(con, "depth_tests", reference_table = "depth_mixed_references")
+expect_true(all(mixed_reference$reference_samples == 8))
+self_reference <- rduckhts_depth_sex_fraction(con, "depth_mixed_references",
+                                            reference_table = "depth_mixed_references")
+expect_equal(nrow(self_reference), 10L)
+expect_equal(as.numeric(self_reference$reference_samples),
+             ifelse(startsWith(self_reference$sample_id, "unusable_"), 8, 7))
+
+DBI::dbExecute(con, paste(
+  "CREATE TEMP TABLE depth_large_positions AS SELECT 'S1' AS sample_id, chrom, start, \"end\",",
+  "reads, 100.0 AS expected, true AS kept FROM (VALUES ('1', 0::BIGINT, 2::BIGINT, 100.0),",
+  "('1', 2, 4, 100.0), ('2', 9223372036854775804, 9223372036854775807, 110.0))",
+  "t(chrom, start, \"end\", reads)"
+))
+DBI::dbExecute(con, paste(
+  "CREATE TEMP TABLE depth_large_regions AS SELECT * FROM (VALUES",
+  "('inside', '2', 9223372036854775805::BIGINT, 9223372036854775806::BIGINT),",
+  "('outside', '2', 9223372036854775806, 9223372036854775807)) t(region, chrom, start, \"end\")"
+))
+large <- rduckhts_depth_region_fraction(con, "depth_large_positions", "depth_large_regions")
+expect_equal(as.numeric(large$bins[large$region == "inside"]), 1)
+expect_equal(large$shift[large$region == "inside"], 0.2)
+expect_equal(as.numeric(large$bins[large$region == "outside"]), 0)
+
 # Argument checks at the wrapper boundary, and DuckDB's errors preserved.
 expect_error(rduckhts_depth_bins(con, "depth_raw", gc_step = 0), "gc_step")
 expect_error(rduckhts_depth_bins(con, "depth_raw", gc_step = 1e-10), "gc_step")

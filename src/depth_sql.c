@@ -165,7 +165,9 @@ static const char region_rows[] =
     "CASE WHEN kept AND NOT (reads >= 0 AND expected > 0 AND isfinite(expected)) THEN "
     "error('duckhts_depth_region_fraction: kept bins need reads >= 0 and a finite expected > 0') "
     "ELSE reads END AS reads, expected, " DEPTH_AUTOSOMAL("chrom") " AS autosomal, "
-    "(start + \"end\") / 2.0 AS midpoint FROM __dht_input), "
+    /* Region endpoints are integers: floor(midpoint) gives the same half-open
+     * membership without overflowing start + end or rounding large positions. */
+    "start + (\"end\" - start) // 2 AS midpoint FROM __dht_input), "
     /* Sums over each sample's kept autosomal bins; a sample with no kept bin
      * keeps a row of zeros. */
     "__dht_samples AS (SELECT role, sample_id, count(*) FILTER (WHERE kept AND autosomal) AS n_a, "
@@ -341,7 +343,8 @@ static const char sex_levels_ideal[] =
  * left out of its own reference. */
 static const char sex_levels_reference[] =
     "__dht_reference AS (SELECT sex, count(x_raw) AS nx, sum(x_raw) AS sx, count(y_raw) AS ny, "
-    "sum(y_raw) AS sy, count(*) AS samples FROM __dht_copies WHERE role = 'reference' GROUP BY sex), "
+    "sum(y_raw) AS sy, count(*) FILTER (WHERE x_raw IS NOT NULL OR y_raw IS NOT NULL) AS samples "
+    "FROM __dht_copies WHERE role = 'reference' GROUP BY sex), "
     "__dht_reference_sums AS (SELECT t.sample_id, "
     "coalesce(xy.nx, 0) - CAST(o.sex = 'XY' AND o.x_raw IS NOT NULL AS BIGINT) AS xy_nx, "
     "coalesce(xy.sx, 0) - CASE WHEN o.sex = 'XY' THEN coalesce(o.x_raw, 0) ELSE 0 END AS xy_sx, "
@@ -351,7 +354,8 @@ static const char sex_levels_reference[] =
     "coalesce(xx.sx, 0) - CASE WHEN o.sex = 'XX' THEN coalesce(o.x_raw, 0) ELSE 0 END AS xx_sx, "
     "coalesce(xx.ny, 0) - CAST(o.sex = 'XX' AND o.y_raw IS NOT NULL AS BIGINT) AS xx_ny, "
     "coalesce(xx.sy, 0) - CASE WHEN o.sex = 'XX' THEN coalesce(o.y_raw, 0) ELSE 0 END AS xx_sy, "
-    "coalesce(xy.samples, 0) + coalesce(xx.samples, 0) - CAST(o.sample_id IS NOT NULL AS BIGINT) "
+    "coalesce(xy.samples, 0) + coalesce(xx.samples, 0) "
+    "- CAST(o.x_raw IS NOT NULL OR o.y_raw IS NOT NULL AS BIGINT) "
     "AS reference_samples "
     "FROM __dht_copies t LEFT JOIN (SELECT * FROM __dht_reference WHERE sex = 'XY') xy ON true "
     "LEFT JOIN (SELECT * FROM __dht_reference WHERE sex = 'XX') xx ON true "

@@ -21,8 +21,8 @@ Targets are declared before any timed run:
   gate; native owns the unsuffixed public name by the recorded
   comparison.
 - For each arm/format/thread count whose 1× median is at least 5
-  seconds, the 1×/2×/4× log-time/log-input exponent must be **\<=
-  1.25**.
+  seconds, each adjacent doubling’s log-time/log-input exponent must be
+  **\<= 1.25**.
 - Peak process RSS must be **\<= 256 MiB overhead + 3× declared live
   state**. Live state includes worst-case overlapping per-worker sparse
   hash tables (16.25 bytes/slot, power-of-two capacity at \<= .77 load),
@@ -40,7 +40,16 @@ bundled samtools. Stage with `benchmarks/insert_size_stage.R` after
 checking disk space; the function also checks the 8 GiB free-space floor
 with a 6 GiB staging reserve. No full HG00188 BAM is staged. The smoke
 workload and SQL reference are checksum-pinned committed fixtures staged
-through `insert-size-smoke` in the same registry. The SQL arm is
+through `insert-size-smoke` in the same registry. The
+`insert-size-scale` registry workload names 2×/4× BAM and CRAM inputs.
+`stage_insert_size_scale_from_registry()` coordinate-merges two or four
+copies of the corresponding 1× input with samtools
+`merge -c -p --no-PG`, preserving record flags, read names and RG/PG
+identifiers, then indexes the result. It checks alignment counts,
+position sums and read-length sums against the registry before
+publication. Receipts bind actual input/output hashes and the samtools
+version. Scale staging requires 8 GiB free plus 1.2 times the expanded
+input bytes. Staging is outside the timed runs. The SQL arm is
 `duckhts_bam_insert_size_counts_sql`, a macro over packed CIGAR,
 existing flag predicates and `cigar_reference_length`; the native arm is
 `duckhts_bam_insert_size_counts`. Both arms remain public.
@@ -72,14 +81,11 @@ and not replacement verdicts.
 `/usr/bin/time` now wraps tool processes directly, with no R inside the
 timed process. DuckHTS runs one `duckdb -unsigned` process and SQL
 script per run: LOAD, SET threads, a 2 GiB memory limit, zero spill
-allowance, then a temporary counts table, metrics macro and histogram
-for every scale pass. COPY writes counts, metrics and histogram TSVs on
-each pass. riker runs its binary directly once per complete file scan;
-at scales 2×/4× the reported wall time is the sum of those process
-timings and peak RSS is their maximum. Thus riker pays its startup on
-each pass, while DuckDB reuses one process for the scale; the unchanged
-acceptance criterion uses 1× only. riker writes metrics, histogram and
-its plot on each pass. DuckHTS does not write a plot and additionally
+allowance, then one temporary counts table, metrics macro and histogram.
+COPY writes counts, metrics and histogram TSVs. Every scale uses one
+public invocation on one staged file of the corresponding size, in a
+fresh tool process for both riker and DuckDB. riker writes metrics,
+histogram and its plot. DuckHTS does not write a plot and additionally
 writes raw counts; retain these output-cost differences in comparisons.
 
 The CLI version is recorded with the extension’s stable C API target and
@@ -92,20 +98,26 @@ extension is checked before the matrix.
 A second, reported-only DuckDB duration uses SQL timestamps after
 LOAD/SET and before the first counts query through the last output COPY.
 It excludes process startup and extension loading but includes
-input/index opening, reduction, summary and serialization on every pass.
-It is not an acceptance criterion. Parity is checked after timing in R
-by reading each pass’s TSVs; no R deserialization or comparison
-contributes to tool wall time or RSS. Targets, exact parity rules,
-scales (1×/2×/4×), thread settings (1/2/4/8), three replicates, scaling
-and RSS gates are unchanged. Smoke is untimed.
+input/index opening, reduction, summary and serialization. It is not an
+acceptance criterion. Parity is checked after timing in R by reading the
+output TSVs; no R deserialization or comparison contributes to tool wall
+time or RSS. Targets, exact parity rules, scales (1×/2×/4×), thread
+settings (1/2/4/8), three replicates and RSS gates are unchanged.
+Scaling exponents are checked at both adjacent doublings, as required by
+`STYLE.md`. Smoke is untimed. For timed DuckDB runs, JSON profiles of
+both temporary-table queries and all three output queries record peak
+buffer memory and spill; profiler setup and file-writing costs are
+included in elapsed time. Peak RSS remains the process memory gate.
+Completed rows and a failed run’s files are retained if execution or
+parity fails.
 
 Each arm runs in a fresh tool process, with thread settings 1/2/4/8.
 Native settings are histogram workers, projected SQL settings are DuckDB
 processing threads, and riker settings are its own `--threads`
 semantics; these are not identical worker models. Native/SQL use zero
 additional htslib decompression workers. The full matrix has three
-replicates and 1×/2×/4× complete file scans, with output materialization
-on each scan; scales do not change bin cardinality. This measures
+replicates and one scan of each 1×/2×/4× file, with output
+materialization; scales do not change bin cardinality. This measures
 scaling in records, not scaling in distinct insert sizes.
 `/usr/bin/time` measures end-to-end tool wall time and maximum RSS,
 including tool startup, input decoding, reduction, metrics and output
@@ -121,9 +133,9 @@ counts. Smoke runs invoke all 24 format/arm/thread combinations with
 
 ## Revision and runtime
 
-Source revision: `13d7841a3a4a1959ecba84adab1789f3e41576d2`; working
+Source revision: `a6575fe2b25bd37c749ed023527c5cdce8b30115`; working
 tree changed: `TRUE`; driver SHA-256:
-`1405c8947695d536f064772c7dfdfca02defba6a79daf099db7b7b0ac2b6651c`.
+`38b78f3a30b07809e43c40a4f04aa84bd373c4a0df79694a8ff19185a4b24c6c`.
 
 Oracle: `riker 0.4.1`; SHA-256
 `806e0c05ce5993c7fac416cf1e237a13557ca7e7e419832002a31de91ca519e6`.
@@ -139,8 +151,14 @@ The CLI differs from those versions and from the retained R-worker
 runtime (DuckDB 1.5.5). Successful LOAD verifies compatibility, not
 identical performance across releases.
 
-Launcher affinity: `pid 1781363's current affinity list: 12-19`;
-niceness: `10`.
+Launcher affinity: `pid 3's current affinity list: 0-19`; niceness: `0`.
+
+Host: `Linux; 6.8.0-78-generic; x86_64`; load at start:
+`23:13:41 up 373 days,  8:07, 19 users,  load average: 4.58, 3.82, 3.37`.
+
+Cache condition: warm; each input is scanned for independent oracle
+outputs before timing. Page cache is not flushed. Concurrent work
+declared by launcher: none declared.
 
 ## Results
 
@@ -181,8 +199,8 @@ native/SQL.
 
 ## Reported-only in-process context
 
-`work_seconds` excludes CLI startup and LOAD/SET, retaining all scale
-passes and TSV output. The remainder includes startup/setup and
+`work_seconds` excludes CLI startup and LOAD/SET, retaining the query,
+profiling and TSV output. The remainder includes startup/setup and
 end-of-process work; it is not an isolated startup measurement or a
 pass/fail criterion.
 

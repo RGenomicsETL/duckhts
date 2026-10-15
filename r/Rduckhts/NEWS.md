@@ -2,6 +2,10 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- Bundled regional depth fractions handle large-coordinate bin midpoints
+  without overflow or rounding. Sex-depth reference counts exclude samples
+  with no usable calibration level and correctly leave out the tested sample.
+
 - Bundled insert-size metrics accept large finite deviation settings without
   an integer overflow when computing the histogram cutoff.
 
