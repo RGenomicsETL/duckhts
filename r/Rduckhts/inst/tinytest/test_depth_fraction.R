@@ -209,6 +209,13 @@ expect_true(abs(with_sex_reference$fraction[with_sex_reference$sample_id == "xx_
 
 # Argument checks at the wrapper boundary, and DuckDB's errors preserved.
 expect_error(rduckhts_depth_bins(con, "depth_raw", gc_step = 0), "gc_step")
+expect_error(rduckhts_depth_bins(con, "depth_raw", gc_step = 1e-10), "gc_step")
+DBI::dbExecute(con, paste(
+  "CREATE TEMP TABLE depth_gc_limit AS SELECT 'S1' AS sample_id, '1' AS chrom,",
+  "0::BIGINT AS start, 100::BIGINT AS \"end\", 10::BIGINT AS reads, 1.0 AS gc"
+))
+expect_equal(rduckhts_depth_bins(con, "depth_gc_limit", gc_step = 1 / .Machine$integer.max,
+                               min_stratum_bins = 1)$gc_stratum, .Machine$integer.max)
 expect_error(rduckhts_depth_bins(con, "depth_raw", min_stratum_bins = 2.5), "min_stratum_bins")
 expect_error(rduckhts_depth_bins(con, "depth_raw", outlier_quantile = 0.5), "outlier_quantile")
 expect_error(rduckhts_depth_bins(con, "depth_raw", max_ratio = 1), "max_ratio")

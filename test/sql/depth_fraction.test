@@ -236,7 +236,28 @@ SELECT count(*) FROM duckhts_depth_bins('depth_empty');
 statement error
 SELECT * FROM duckhts_depth_bins('depth_empty', gc_step := 0);
 ----
-gc_step must be in (0, 1]
+gc_step must be in [1/2147483647, 1]
+
+statement error
+SELECT * FROM duckhts_depth_bins('depth_empty', gc_step := 1e-10);
+----
+gc_step must be in [1/2147483647, 1]
+
+statement ok
+CREATE TEMP TABLE depth_gc_limit AS
+SELECT 'S1' AS sample_id, '1' AS chrom, 0::BIGINT AS start,
+       100::BIGINT AS "end", 10::BIGINT AS reads, 1.0 AS gc;
+
+statement error
+SELECT * FROM duckhts_depth_bins('depth_gc_limit', gc_step := 1e-10);
+----
+gc_step must be in [1/2147483647, 1]
+
+query I
+SELECT gc_stratum FROM duckhts_depth_bins('depth_gc_limit',
+  gc_step := 1.0 / 2147483647, min_stratum_bins := 1);
+----
+2147483647
 
 statement error
 SELECT * FROM duckhts_depth_bins('depth_raw', min_mappability := 1.5);

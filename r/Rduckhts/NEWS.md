@@ -2,6 +2,9 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- The depth wrapper and bundled SQL reject `gc_step` below `1/2147483647`,
+  keeping GC stratum numbers within the integer output range.
+
 - The bundled depth correction centers on eligible autosomal bins with positive
   reads. Samples with at least half their bins empty keep valid normalization;
   empty bins retain zero ratios when their bin and stratum rules pass. Training

@@ -26,7 +26,8 @@ the A, C, G and T reference bases, from 0 to 1), and optionally
 
 \item{min_mappability}{Bins with a lower mappability are not kept.}
 
-\item{gc_step}{Width of a GC stratum, in (0, 1].}
+\item{gc_step}{Width of a GC stratum, in \[1/2147483647, 1\], so the
+stratum number fits the integer output column.}
 
 \item{min_stratum_bins}{Training bins a stratum needs, a whole number.}
 

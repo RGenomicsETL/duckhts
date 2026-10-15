@@ -2,13 +2,16 @@
 
 # duckhts 1.5.2.9018
 
+- Depth correction rejects `gc_step` below `1/2147483647` before processing
+  bins, including empty inputs, so GC stratum numbers fit the integer output.
+
 - Depth normalization centers on eligible autosomal bins with positive reads.
   Empty bins retain zero ratios instead of collapsing the normalization when
   at least half the autosomal bins are empty. Training quantiles stay within
   the observed rate range, so interpolation rounding cannot discard all bins
-  of a constant-rate sample. Depth benchmark staging validates
-  cached alignment and reference bytes against their registered identities
-  before deriving counts.
+  of a constant-rate sample. Depth benchmark staging requires cached alignment
+  and reference bytes, validates their registered identities before deriving
+  counts, and records their actual SHA-256 values in the receipt.
 
 - The insert-size benchmark times tool processes directly: DuckDB CLI and
   riker, with outputs written to disk and parity checked afterward in R.

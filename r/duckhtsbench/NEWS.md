@@ -1,9 +1,12 @@
 # duckhtsbench 0.0.0.9001
 
-- Depth-fraction staging validates cached alignments and reference files against
-  their registered byte counts and checksums before deriving counts. The
+- Depth-fraction staging requires cached alignments and reference files and
+  validates them against registered byte counts and checksums before deriving counts. The
   network-free test retains corruption cases for both inputs and checks that a
-  rejected rebuild leaves the published output and receipt intact.
+  rejected rebuild leaves the published output and receipt intact. Receipts
+  record the actual SHA-256 values of both inputs; uncached remote URLs are rejected.
+  The three public CRAM inputs now carry supplier MD5 checksums from the
+  1000 Genomes high-coverage sequence index.
 
 - register `depth_fraction_hg00403_buckets`, `depth_fraction_na18507_buckets`
   and `depth_fraction_hg00188_buckets`, the inputs of
@@ -11,8 +14,8 @@
   and Y of three registered 30x CRAMs, split into 300 of 3,000 read-name
   buckets (the MD5 of the read name modulo 3,000), so that sums of disjoint
   bucket sets give read-name hash subsamples of 0.01x steps and mixtures at
-  known shares. `duckhts_bench_stage_depth_fraction()` stages them with range
-  requests on the registered URLs, checks the registered row and read counts,
+  known shares. `duckhts_bench_stage_depth_fraction()` stages them from verified
+  cached inputs, checks the registered row and read counts,
   and writes a receipt that binds the derivation parameters, the derivation
   SQL, the DuckDB version, the SHA-256 of the DuckHTS extension that made the
   counts, the registered identities of the alignments and the reference, and

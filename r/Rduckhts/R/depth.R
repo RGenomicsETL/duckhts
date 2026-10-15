@@ -32,7 +32,8 @@
 #'   the A, C, G and T reference bases, from 0 to 1), and optionally
 #'   `mappability` (0 to 1).
 #' @param min_mappability Bins with a lower mappability are not kept.
-#' @param gc_step Width of a GC stratum, in (0, 1].
+#' @param gc_step Width of a GC stratum, in \[1/2147483647, 1\], so the
+#'   stratum number fits the integer output column.
 #' @param min_stratum_bins Training bins a stratum needs, a whole number.
 #' @param outlier_quantile Training bins outside this quantile of the read
 #'   rate, and its complement, set no stratum median; in \[0, 0.5).
@@ -67,7 +68,8 @@ rduckhts_depth_bins <- function(con, bins_table, min_mappability = 0.9, gc_step 
     paste0("min_mappability := ", .depth_number(
       min_mappability, "min_mappability", function(x) x >= 0 && x <= 1, "a number in [0, 1]")),
     paste0("gc_step := ", .depth_number(
-      gc_step, "gc_step", function(x) x > 0 && x <= 1, "a number in (0, 1]")),
+      gc_step, "gc_step", function(x) x >= 1 / .Machine$integer.max && x <= 1,
+      "a number in [1/2147483647, 1]")),
     paste0("min_stratum_bins := ", .depth_number(
       min_stratum_bins, "min_stratum_bins", function(x) x == floor(x) && x >= 1 && x <= 1e9,
       "a whole number in [1, 1e9]")),

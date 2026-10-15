@@ -57,7 +57,8 @@ and retain zero ratios when their bin and stratum rules pass. The corrected rati
 `count / expected`; it is 1 at the sample's typical autosomal depth, about 0.5 for one
 copy and 1.5 for three.
 
-- GC stratum: `floor(gc / gc_step)`.
+- GC stratum: `floor(gc / gc_step)`; `gc_step` is in `[1/2147483647, 1]`
+  so the stratum fits the public integer column at `gc = 1`.
 - Training bins: autosomal, mappable, with a GC value and a read rate inside the
   `outlier_quantile` and `1 - outlier_quantile` quantiles of the sample's autosomal rates,
   and at least one read. Only training bins set the stratum medians.

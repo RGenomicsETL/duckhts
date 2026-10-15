@@ -36,9 +36,9 @@ shares without reading the alignments again.
 }
 \details{
 The row's \code{locator} names the alignment artifact and the reference FASTA
-(\verb{artifact:<alignments>;artifact:<reference>}). The alignment file is read
-from its cached copy when there is one, otherwise from its registered URL
-with range requests. The row's \code{supplier_identity} names \code{sample},
+(\verb{artifact:<alignments>;artifact:<reference>}). Both inputs must be staged
+in the cache first, using \code{\link[=duckhts_bench_fetch]{duckhts_bench_fetch()}} for direct downloads.
+The row's \code{supplier_identity} names \code{sample},
 \code{regions} (comma-separated), \code{bin_width}, \code{buckets}, \code{kept_buckets},
 \code{min_mapq} and \code{exclude_flags}; when it also names \code{rows} and \code{reads}, the
 staged file must have them before it is published.
@@ -48,7 +48,7 @@ byte counts and checksums before they are used.
 Each output gets a receipt, \verb{<output>.sources.tsv} with columns \code{field} and
 \code{value}, binding the artifact identity, the derivation SQL, the DuckDB
 version, the SHA-256 of the DuckHTS extension that made the counts, the
-registered identities of the alignments and the reference, the output
+registered identities and actual SHA-256 values of both inputs, the output
 SHA-256 and the counts. A cached output is reused when
 its receipt matches; otherwise it is rebuilt. A failed derivation publishes
 nothing.

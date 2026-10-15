@@ -40,6 +40,9 @@
 /* Autosomal means a contig whose join key is not X, Y or MT. */
 #define DEPTH_AUTOSOMAL(chrom) "duckhts_contig_key(" chrom ") NOT IN ('X', 'Y', 'MT')"
 
+/* floor(gc / gc_step) must fit the public INTEGER stratum column at gc = 1. */
+#define DEPTH_GC_STEP_MIN "(1.0 / 2147483647)"
+
 #define DEPTH_BINS_OPTIONS \
     "min_mappability := 0.9, gc_step := 0.01, min_stratum_bins := 10, " \
     "outlier_quantile := 0.01, max_ratio := 4.0"
@@ -53,8 +56,8 @@ static const char *const depth_bins_sql[] = {
     "WITH __dht_args AS MATERIALIZED (SELECT CASE "
     "WHEN min_mappability IS NULL OR NOT (CAST(min_mappability AS DOUBLE) BETWEEN 0 AND 1) THEN "
     "error('duckhts_depth_bins: min_mappability must be in [0, 1]') "
-    "WHEN gc_step IS NULL OR NOT (CAST(gc_step AS DOUBLE) > 0 AND CAST(gc_step AS DOUBLE) <= 1) THEN "
-    "error('duckhts_depth_bins: gc_step must be in (0, 1]') "
+    "WHEN gc_step IS NULL OR NOT (CAST(gc_step AS DOUBLE) BETWEEN " DEPTH_GC_STEP_MIN " AND 1) THEN "
+    "error('duckhts_depth_bins: gc_step must be in [1/2147483647, 1]') "
     "WHEN min_stratum_bins IS NULL OR min_stratum_bins != trunc(min_stratum_bins) "
     "OR min_stratum_bins < 1 OR min_stratum_bins > 1000000000 THEN "
     "error('duckhts_depth_bins: min_stratum_bins must be a whole number in [1, 1000000000]') "

@@ -2914,7 +2914,7 @@ kept is true when reason is NULL. reason names the first rule a bin fails: no_re
 
 ### Limits
 
-The median and quantile aggregates hold one value per autosomal bin of each sample; the joins build on samples x GC strata and on samples; the input is materialized once and the output has one row per input row, in no particular order. Bins are not normalised against a reference set; the estimators take one.
+gc_step must be in [1/2147483647, 1], so floor(gc / gc_step) fits the INTEGER gc_stratum output even at gc = 1. The median and quantile aggregates hold one value per autosomal bin of each sample; the joins build on samples x GC strata and on samples; the input is materialized once and the output has one row per input row, in no particular order. Bins are not normalised against a reference set; the estimators take one.
 
 ### Examples
 

@@ -14,6 +14,11 @@ for (identity in rows$supplier_identity) {
   expect_true(all(c("sample", "regions", "bin_width", "buckets", "kept_buckets", "min_mapq",
                     "exclude_flags", "rows", "reads") %in% names(fields)))
 }
+for (id in sub("^artifact:([^;]+);.*$", "\\1", rows$locator)) {
+  fields <- identity_fields(registry$supplier_identity[registry$id == id])
+  expect_true(grepl("^[0-9a-f]{32}$", fields[["md5"]]))
+  expect_true(endsWith(fields[["sequence_index"]], "1000G_2504_high_coverage.sequence.index"))
+}
 for (id in c(sub("^artifact:([^;]+);.*$", "\\1", rows$locator), "liftover_grch38_fasta",
              "ancestry_1000g_panel")) {
   expect_true(grepl("benchmark_depth_fraction.Rmd", registry$consumer[registry$id == id], fixed = TRUE))
@@ -94,7 +99,14 @@ if (requireNamespace("DBI", quietly = TRUE) && requireNamespace("duckdb", quietl
   receipt <- utils::read.delim(paste0(staged$path[[1L]], ".sources.tsv"), colClasses = "character")
   expect_equal(receipt$field, c("artifact_id", "supplier_identity", "source", "derivation_sha256",
                                 "duckdb_version", "extension_sha256", "alignments_identity",
-                                "reference_identity", "output_sha256", "rows", "reads"))
+                                "reference_identity", "alignments_sha256", "reference_sha256",
+                                "output_sha256", "rows", "reads"))
+  input_hash_fields <- c(fixture_cram = "alignments_sha256", fixture_reference = "reference_sha256")
+  for (id in names(input_hash_fields)) {
+    path <- file.path(root, "cache", plan[plan[, "id"] == id, "cache_relpath"])
+    expect_equal(receipt$value[receipt$field == input_hash_fields[[id]]],
+                 unname(digest::digest(file = path, algo = "sha256")))
+  }
   expect_equal(receipt$value[receipt$field == "output_sha256"],
                unname(digest::digest(file = staged$path[[1L]], algo = "sha256")))
 
@@ -133,6 +145,22 @@ if (requireNamespace("DBI", quietly = TRUE) && requireNamespace("duckdb", quietl
     writeBin(original, path)
     expect_equal(duckhts_bench_stage_depth_fraction(ids = "all_buckets")$reused, FALSE)
   }
+  # An uncached URL must fail before attempting a remote read or publishing
+  # a receipt claiming that unverified bytes have the registered identity.
+  input_path <- file.path(root, "cache", "fixture", "bam_mismatch.cram")
+  saved_path <- paste0(input_path, ".saved")
+  stopifnot(file.rename(input_path, saved_path))
+  plan[plan[, "id"] == "fixture_cram", "locator"] <- "https://invalid.example/input.cram"
+  write_registry(plan)
+  output_digest <- unname(digest::digest(file = staged$path[[1L]], algo = "sha256"))
+  receipt_path <- paste0(staged$path[[1L]], ".sources.tsv")
+  receipt_digest <- unname(digest::digest(file = receipt_path, algo = "sha256"))
+  expect_error(duckhts_bench_stage_depth_fraction(ids = "all_buckets"),
+               "stage fixture_cram first so its bytes can be verified")
+  expect_equal(unname(digest::digest(file = staged$path[[1L]], algo = "sha256")), output_digest)
+  expect_equal(unname(digest::digest(file = receipt_path, algo = "sha256")), receipt_digest)
+  expect_equal(length(list.files(dirname(staged$path[[1L]]), pattern = "[.]partial-")), 0L)
+  stopifnot(file.rename(saved_path, input_path))
   plan[plan[, "id"] == "all_buckets", "supplier_identity"] <- paste0(
     sprintf(parameters, 3L), ";rows=", staged$rows[[1L]], ";reads=", staged$reads[[1L]] + 1)
   write_registry(plan)

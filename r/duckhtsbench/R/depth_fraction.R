@@ -12,9 +12,9 @@
 #' shares without reading the alignments again.
 #'
 #' The row's `locator` names the alignment artifact and the reference FASTA
-#' (`artifact:<alignments>;artifact:<reference>`). The alignment file is read
-#' from its cached copy when there is one, otherwise from its registered URL
-#' with range requests. The row's `supplier_identity` names `sample`,
+#' (`artifact:<alignments>;artifact:<reference>`). Both inputs must be staged
+#' in the cache first, using [duckhts_bench_fetch()] for direct downloads.
+#' The row's `supplier_identity` names `sample`,
 #' `regions` (comma-separated), `bin_width`, `buckets`, `kept_buckets`,
 #' `min_mapq` and `exclude_flags`; when it also names `rows` and `reads`, the
 #' staged file must have them before it is published.
@@ -24,7 +24,7 @@
 #' Each output gets a receipt, `<output>.sources.tsv` with columns `field` and
 #' `value`, binding the artifact identity, the derivation SQL, the DuckDB
 #' version, the SHA-256 of the DuckHTS extension that made the counts, the
-#' registered identities of the alignments and the reference, the output
+#' registered identities and actual SHA-256 values of both inputs, the output
 #' SHA-256 and the counts. A cached output is reused when
 #' its receipt matches; otherwise it is rebuilt. A failed derivation publishes
 #' nothing.
@@ -86,18 +86,13 @@ duckhts_bench_stage_depth_fraction <- function(ids = NULL, extension_path = NULL
   })
 
   sha256 <- function(path) unname(digest::digest(file = path, algo = "sha256"))
-  is_url <- function(path) grepl("^[A-Za-z][A-Za-z0-9+.-]*://", path)
   source_of <- function(id) {
     cached <- duckhts_bench_artifact_path(id)
-    if (file.exists(cached)) {
-      duckhts_bench_validate_identity(id, cached)
-      return(normalizePath(cached))
+    if (!file.exists(cached)) {
+      stop("stage ", id, " first so its bytes can be verified: ", cached, call. = FALSE)
     }
-    locator <- registry$locator[registry$id == id]
-    if (!is_url(locator)) {
-      stop("stage ", id, " first, or register a URL for it: ", cached, call. = FALSE)
-    }
-    locator
+    duckhts_bench_validate_identity(id, cached)
+    normalizePath(cached)
   }
   if (is.null(extension_path)) {
     extension_path <- system.file("duckhts_extension", "build", "duckhts.duckdb_extension",
@@ -184,11 +179,12 @@ duckhts_bench_stage_depth_fraction <- function(ids = NULL, extension_path = NULL
     # so a changed extension, alignment file or reference rebuilds the output.
     expected <- field_frame(
       c("artifact_id", "supplier_identity", "source", "derivation_sha256", "duckdb_version",
-        "extension_sha256", "alignments_identity", "reference_identity"),
+        "extension_sha256", "alignments_identity", "reference_identity",
+        "alignments_sha256", "reference_sha256"),
       c(item$id, parameters, registry$locator[registry$id == item$alignments], derivation_sha256,
         duckdb_version, extension_sha256,
         registry$supplier_identity[registry$id == item$alignments],
-        registry$supplier_identity[registry$id == item$reference]))
+        registry$supplier_identity[registry$id == item$reference], sha256(source), sha256(reference)))
     reused <- receipt_current(output, receipt, expected)
     if (reused) {
       counts <- data.frame(rows = receipt_value(receipt, "rows"),
