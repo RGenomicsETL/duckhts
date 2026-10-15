@@ -71,7 +71,7 @@ bool register_duckhts_insert_size_sql(duckhts_registration_t *registration) {
         "coalesce(sx/trimmed_n::DOUBLE,0) AS mean_insert_size, "
         "sqrt(greatest(0,coalesce(sx2/trimmed_n::DOUBLE-pow(sx/trimmed_n::DOUBLE,2),0))) AS standard_deviation, "
         "mode AS mode_insert_size,lo AS min_insert_size,hi AS max_insert_size, "
-        "floor(max(median+deviations*mad) OVER ())::BIGINT AS histogram_cutoff FROM selected) "
+        "floor(least(4294967295,max(median+deviations*mad) OVER ()))::BIGINT AS histogram_cutoff FROM selected) "
         "SELECT * FROM result WHERE (SELECT ok FROM options)=1 "
         "UNION ALL SELECT NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL "
         "WHERE (SELECT ok FROM options)=0)"

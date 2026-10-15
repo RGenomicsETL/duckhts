@@ -2850,7 +2850,7 @@ riker src/counter.rs:110-115 selects the largest mode on ties; :180-210 interpol
 
 ### Histogram cutoff
 
-riker src/commands/isize.rs:236-290 uses the floor of the largest median + deviations * MAD among retained orientations. histogram_cutoff repeats that shared value. To reproduce the histogram, pivot all orientations' counts at sizes <= this cutoff, not just retained orientations, filling missing counts with zero. If no orientation passes min_frac, riker emits the entire raw histogram; use the counts relation without trimming. Empty input has neither metrics nor histogram rows.
+riker src/commands/isize.rs:236-290 uses the floor of the largest median + deviations * MAD among retained orientations. histogram_cutoff repeats that shared value, clamped to UINT32_MAX because larger cutoffs admit the same supported insert sizes. To reproduce the histogram, pivot all orientations' counts at sizes <= this cutoff, not just retained orientations, filling missing counts with zero. If no orientation passes min_frac, riker emits the entire raw histogram; use the counts relation without trimming. Empty input has neither metrics nor histogram rows.
 
 ### Examples
 

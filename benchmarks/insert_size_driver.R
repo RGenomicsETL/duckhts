@@ -37,18 +37,15 @@ insert_size_riker <- function(config, prefix, raw = FALSE) {
 }
 
 insert_size_tool_run <- function(config, duckdb, smoke) {
-  prefixes <- file.path(config$scratch, paste0("pass-", seq_len(config$scale)))
+  prefix <- file.path(config$scratch, "output")
   if (config$arm == "riker") {
-    timings <- vapply(prefixes, function(prefix) {
-      insert_size_run_tool(config$riker,
-        c("isize", "-i", config$path, "-r", config$reference, "-o", prefix,
-          "--threads", config$threads, "--min-frac", 0.05), config$scratch, smoke)
-    }, numeric(2))
-    measured <- c(sum(timings[1L, ]), max(timings[2L, ]))
-    passes <- lapply(prefixes, function(prefix) list(
+    measured <- insert_size_run_tool(config$riker,
+      c("isize", "-i", config$path, "-r", config$reference, "-o", prefix,
+        "--threads", config$threads, "--min-frac", 0.05), config$scratch, smoke)
+    output <- list(
       metrics = insert_size_read_tsv(paste0(prefix, ".isize-metrics.txt")),
-      histogram = insert_size_read_tsv(paste0(prefix, ".isize-histogram.txt"))))
-    return(list(passes = passes, measured = measured, work_seconds = NA_real_))
+      histogram = insert_size_read_tsv(paste0(prefix, ".isize-histogram.txt")))
+    return(list(output = output, measured = measured, work_seconds = NA_real_))
   }
   quote <- function(x) paste0("'", gsub("'", "''", x, fixed = TRUE), "'")
   copy <- function(query, path) sprintf(
@@ -61,26 +58,33 @@ insert_size_tool_run <- function(config, duckdb, smoke) {
     paste0("SET temp_directory = ", quote(file.path(config$scratch, "spill")), ";"))
   if (!smoke) sql <- c(sql,
     "SET VARIABLE work_start_ns = (SELECT epoch_ns(current_timestamp));")
-  for (prefix in prefixes) {
-    query <- if (config$arm == "duckhts_bam_insert_size_counts") sprintf(
-      "SELECT * FROM duckhts_bam_insert_size_counts(%s, reference := %s, threads := %d)",
-      quote(config$path), quote(config$reference), config$threads) else sprintf(
-      "SELECT * FROM duckhts_bam_insert_size_counts_sql(%s, reference := %s)",
-      quote(config$path), quote(config$reference))
-    sql <- c(sql, paste0("CREATE OR REPLACE TEMP TABLE counts AS ", query, ";"),
-      sprintf(paste0("CREATE OR REPLACE TEMP TABLE metrics AS ",
-        "SELECT * FROM duckhts_insert_size_metrics('counts', sample_name := %s);"),
-        quote(config$sample)),
-      copy("SELECT * FROM counts", paste0(prefix, ".counts.tsv")),
-      copy("SELECT * FROM metrics", paste0(prefix, ".metrics.tsv")),
-      copy("SELECT insert_size,
-        coalesce(sum(read_pairs) FILTER (WHERE pair_orientation='FR'),0) AS fr_count,
-        coalesce(sum(read_pairs) FILTER (WHERE pair_orientation='RF'),0) AS rf_count,
-        coalesce(sum(read_pairs) FILTER (WHERE pair_orientation='TANDEM'),0) AS tandem_count
-        FROM counts WHERE insert_size <=
-          (SELECT coalesce(max(histogram_cutoff), 4294967295) FROM metrics)
-        GROUP BY insert_size", paste0(prefix, ".histogram.tsv")))
+  profiles <- character()
+  profile_query <- function(statement, label) {
+    if (smoke) return(statement)
+    path <- file.path(config$scratch, paste0(label, ".json"))
+    profiles <<- c(profiles, path)
+    c("PRAGMA enable_profiling = 'json';",
+      paste0("PRAGMA profiling_output = ", quote(path), ";"), statement,
+      "PRAGMA disable_profiling;")
   }
+  query <- if (config$arm == "duckhts_bam_insert_size_counts") sprintf(
+    "SELECT * FROM duckhts_bam_insert_size_counts(%s, reference := %s, threads := %d)",
+    quote(config$path), quote(config$reference), config$threads) else sprintf(
+    "SELECT * FROM duckhts_bam_insert_size_counts_sql(%s, reference := %s)",
+    quote(config$path), quote(config$reference))
+  sql <- c(sql, profile_query(paste0("CREATE OR REPLACE TEMP TABLE counts AS ", query, ";"), "counts"),
+    profile_query(sprintf(paste0("CREATE OR REPLACE TEMP TABLE metrics AS ",
+      "SELECT * FROM duckhts_insert_size_metrics('counts', sample_name := %s);"),
+      quote(config$sample)), "metrics"),
+    profile_query(copy("SELECT * FROM counts", paste0(prefix, ".counts.tsv")), "counts-output"),
+    profile_query(copy("SELECT * FROM metrics", paste0(prefix, ".metrics.tsv")), "metrics-output"),
+    profile_query(copy("SELECT insert_size,
+      coalesce(sum(read_pairs) FILTER (WHERE pair_orientation='FR'),0) AS fr_count,
+      coalesce(sum(read_pairs) FILTER (WHERE pair_orientation='RF'),0) AS rf_count,
+      coalesce(sum(read_pairs) FILTER (WHERE pair_orientation='TANDEM'),0) AS tandem_count
+      FROM counts WHERE insert_size <=
+        (SELECT coalesce(max(histogram_cutoff), 4294967295) FROM metrics)
+      GROUP BY insert_size", paste0(prefix, ".histogram.tsv")), "histogram-output"))
   work_path <- file.path(config$scratch, "work.tsv")
   if (!smoke) sql <- c(sql, copy(
     "SELECT (epoch_ns(current_timestamp) - getvariable('work_start_ns')) / 1e9 AS seconds",
@@ -92,13 +96,22 @@ insert_size_tool_run <- function(config, duckdb, smoke) {
   if (length(list.files(file.path(config$scratch, "spill"), recursive = TRUE)) > 0L) {
     stop("undeclared spill", call. = FALSE)
   }
-  passes <- lapply(prefixes, function(prefix) list(
+  output <- list(
     counts = insert_size_read_tsv(paste0(prefix, ".counts.tsv")),
     metrics = insert_size_read_tsv(paste0(prefix, ".metrics.tsv")),
-    histogram = insert_size_read_tsv(paste0(prefix, ".histogram.tsv"))))
+    histogram = insert_size_read_tsv(paste0(prefix, ".histogram.tsv")))
   work_seconds <- if (smoke) NA_real_ else as.numeric(insert_size_read_tsv(work_path)$seconds)
   if (!smoke) stopifnot(length(work_seconds) == 1L, is.finite(work_seconds), work_seconds >= 0)
-  list(passes = passes, measured = measured, work_seconds = work_seconds)
+  memory <- c(buffer_bytes = NA_real_, spill_bytes = NA_real_)
+  if (!smoke) {
+    reports <- lapply(profiles, jsonlite::fromJSON, simplifyVector = FALSE)
+    memory <- c(buffer_bytes = max(vapply(reports, function(report) report$system_peak_buffer_memory,
+                                         numeric(1))),
+                spill_bytes = max(vapply(reports, function(report) report$system_peak_temp_dir_size,
+                                        numeric(1))))
+    stopifnot(memory[["spill_bytes"]] == 0)
+  }
+  list(output = output, measured = measured, work_seconds = work_seconds, memory = memory)
 }
 
 run_insert_size_benchmark <- function(repo, extension, riker, smoke = TRUE, duckdb = "duckdb") {
@@ -124,61 +137,66 @@ run_insert_size_benchmark <- function(repo, extension, riker, smoke = TRUE, duck
     BAM = duckhtsbench::duckhts_bench_artifact_path("insert_size_hg00403_chr20_bam"),
     CRAM = duckhtsbench::duckhts_bench_artifact_path("roh_mixture_hg00403_chr20_cram"))
   stopifnot(all(file.exists(c(paths, reference))))
-  scratch <- tempfile("insert-size-benchmark-")
+  # Use the parent of R's session directory so a failed Rscript does not erase
+  # the tool logs, profiles and completed rows during its automatic cleanup.
+  scratch <- tempfile("insert-size-benchmark-", tmpdir = dirname(tempdir()))
   dir.create(scratch)
-  on.exit(unlink(scratch, recursive = TRUE))
+  completed <- FALSE
+  on.exit(if (completed) unlink(scratch, recursive = TRUE) else
+    message("Failed benchmark evidence retained at ", scratch))
   metrics_columns <- c("sample", "pair_orientation", "read_pairs", "mean_insert_size",
     "standard_deviation", "median_insert_size", "median_absolute_deviation",
     "mode_insert_size", "min_insert_size", "max_insert_size")
   histogram_columns <- c("insert_size", "fr_count", "rf_count", "tandem_count")
   rows <- list()
   for (format in names(paths)) {
-    config <- list(path = paths[[format]], reference = reference, extension = extension,
-      riker = riker, threads = 1L, scratch = scratch)
-    expected <- insert_size_riker(config, file.path(scratch, "expected"))
-    raw <- insert_size_riker(config, file.path(scratch, "raw"), raw = TRUE)$histogram
-    config$sample <- unique(expected$metrics$sample)
-    stopifnot(length(config$sample) == 1L)
-    pairs <- sum(as.numeric(as.matrix(raw[c("fr_count", "rf_count", "tandem_count")])))
-    bins <- sum(as.numeric(as.matrix(raw[c("fr_count", "rf_count", "tandem_count")])) > 0)
-    # Identity denominators come from the committed SAM fixture or registry.
-    registry <- duckhtsbench::duckhts_bench_registry()
-    identity_id <- if (smoke) paste0("insert_size_smoke_edges_", tolower(format)) else
-      if (format == "BAM") "insert_size_hg00403_chr20_bam" else "roh_mixture_hg00403_chr20_cram"
-    identity <- getFromNamespace("duckhts_bench_identity_fields", "duckhtsbench")(
-      registry$supplier_identity[registry$id == identity_id])
-    records <- as.numeric(identity[["alignments"]])
-    stopifnot(length(records) == 1L, is.finite(records), records > 0)
-    for (threads in c(1L, 2L, 4L, 8L)) {
-      for (scale in if (smoke) 1L else c(1L, 2L, 4L)) {
+    for (scale in if (smoke) 1L else c(1L, 2L, 4L)) {
+      identity_id <- if (smoke) paste0("insert_size_smoke_edges_", tolower(format)) else
+        if (scale > 1L) paste0("insert_size_hg00403_chr20_", tolower(format), "_", scale, "x") else
+          if (format == "BAM") "insert_size_hg00403_chr20_bam" else "roh_mixture_hg00403_chr20_cram"
+      path <- duckhtsbench::duckhts_bench_artifact_path(identity_id)
+      if (!file.exists(path)) stop("stage benchmark input first: ", identity_id, call. = FALSE)
+      config <- list(path = path, reference = reference, extension = extension,
+        riker = riker, threads = 1L, scratch = scratch)
+      # Independent oracle outputs are regenerated for each actual input size.
+      expected <- insert_size_riker(config, file.path(scratch, "expected"))
+      raw <- insert_size_riker(config, file.path(scratch, "raw"), raw = TRUE)$histogram
+      config$sample <- unique(expected$metrics$sample)
+      stopifnot(length(config$sample) == 1L)
+      pairs <- sum(as.numeric(as.matrix(raw[c("fr_count", "rf_count", "tandem_count")])))
+      bins <- sum(as.numeric(as.matrix(raw[c("fr_count", "rf_count", "tandem_count")])) > 0)
+      registry <- duckhtsbench::duckhts_bench_registry()
+      identity <- getFromNamespace("duckhts_bench_identity_fields", "duckhtsbench")(
+        registry$supplier_identity[registry$id == identity_id])
+      records <- as.numeric(identity[["alignments"]])
+      stopifnot(length(records) == 1L, is.finite(records), records > 0)
+      for (threads in c(1L, 2L, 4L, 8L)) {
         for (arm in c("riker", "duckhts_bam_insert_size_counts",
                       "duckhts_bam_insert_size_counts_sql")) {
           for (replicate in seq_len(if (smoke) 1L else 3L)) {
             config$threads <- threads
-            config$scale <- scale
             config$arm <- arm
             config$scratch <- tempfile("run-", tmpdir = scratch)
             dir.create(config$scratch)
             run <- insert_size_tool_run(config, duckdb, smoke)
-            for (result in run$passes) {
-              stopifnot(identical(
-                insert_size_normalize(result$metrics, metrics_columns, "pair_orientation"),
-                insert_size_normalize(expected$metrics, metrics_columns, "pair_orientation")),
-                identical(insert_size_normalize(result$histogram, histogram_columns, "insert_size"),
-                  insert_size_normalize(expected$histogram, histogram_columns, "insert_size")))
-              if (arm != "riker") {
-                actual_raw <- data.frame(insert_size = raw$insert_size,
-                  fr_count = "0", rf_count = "0", tandem_count = "0")
-                labels <- c(FR = "fr_count", RF = "rf_count", TANDEM = "tandem_count")
-                for (i in seq_len(nrow(result$counts))) {
-                  index <- match(as.character(result$counts$insert_size[[i]]), actual_raw$insert_size)
-                  stopifnot(!is.na(index))
-                  actual_raw[[labels[[result$counts$pair_orientation[[i]]]]]][[index]] <-
-                    as.character(result$counts$read_pairs[[i]])
-                }
-                stopifnot(identical(insert_size_normalize(actual_raw, histogram_columns, "insert_size"),
-                  insert_size_normalize(raw, histogram_columns, "insert_size")))
+            result <- run$output
+            stopifnot(identical(
+              insert_size_normalize(result$metrics, metrics_columns, "pair_orientation"),
+              insert_size_normalize(expected$metrics, metrics_columns, "pair_orientation")),
+              identical(insert_size_normalize(result$histogram, histogram_columns, "insert_size"),
+                insert_size_normalize(expected$histogram, histogram_columns, "insert_size")))
+            if (arm != "riker") {
+              actual_raw <- data.frame(insert_size = raw$insert_size,
+                fr_count = "0", rf_count = "0", tandem_count = "0")
+              labels <- c(FR = "fr_count", RF = "rf_count", TANDEM = "tandem_count")
+              for (i in seq_len(nrow(result$counts))) {
+                index <- match(as.character(result$counts$insert_size[[i]]), actual_raw$insert_size)
+                stopifnot(!is.na(index))
+                actual_raw[[labels[[result$counts$pair_orientation[[i]]]]]][[index]] <-
+                  as.character(result$counts$read_pairs[[i]])
               }
+              stopifnot(identical(insert_size_normalize(actual_raw, histogram_columns, "insert_size"),
+                insert_size_normalize(raw, histogram_columns, "insert_size")))
             }
             measured <- run$measured
             # Hash keys/values/flags: 16.25 bytes per allocated slot; load <= .77.
@@ -188,17 +206,22 @@ run_insert_size_benchmark <- function(repo, extension, riker, smoke = TRUE, duck
             live <- threads * (16.25 * capacity + 8 * 1024^2) +
                     16.25 * capacity + 24 * bins
             rows[[length(rows) + 1L]] <- data.frame(format, arm, threads, scale, replicate,
-              records = records * scale, read_pairs = pairs * scale, bins,
+              records, read_pairs = pairs, bins,
               metric_rows = nrow(result$metrics), histogram_rows = nrow(result$histogram),
               seconds = measured[[1L]], work_seconds = run$work_seconds,
               peak_rss_mib = measured[[2L]] / 1024,
+              buffer_mib = if (is.null(run$memory)) NA_real_ else run$memory[["buffer_bytes"]] / 1024^2,
+              spill_bytes = if (is.null(run$memory)) NA_real_ else run$memory[["spill_bytes"]],
               rss_budget_mib = 256 + 3 * live / 1024^2, parity = TRUE)
+            utils::write.table(do.call(rbind, rows), file.path(scratch, "completed-runs.tsv"),
+                               sep = "\t", row.names = FALSE, quote = FALSE)
             unlink(config$scratch, recursive = TRUE)
           }
         }
       }
     }
   }
+  completed <- TRUE
   list(revision = system2("git", c("rev-parse", "HEAD"), stdout = TRUE),
        dirty = system2("git", c("diff", "--quiet", "HEAD")) != 0L,
        driver_sha256 = sub(" .*", "", system2("sha256sum",

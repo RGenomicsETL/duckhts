@@ -2,6 +2,10 @@
 
 # duckhts 1.5.2.9018
 
+- Insert-size metrics clamp the histogram cutoff to the maximum supported
+  insert size before integer conversion, accepting large finite deviations
+  without overflow.
+
 - Depth correction rejects `gc_step` below `1/2147483647` before processing
   bins, including empty inputs, so GC stratum numbers fit the integer output.
 
@@ -15,6 +19,9 @@
 
 - The insert-size benchmark times tool processes directly: DuckDB CLI and
   riker, with outputs written to disk and parity checked afterward in R.
+  Scaling uses single invocations on registered 1×/2×/4× BAM and CRAM inputs,
+  with independent oracle outputs for each size and both doubling exponents.
+  Timed DuckDB runs report buffer memory and spill from JSON profiles.
   A reported-only DuckDB work duration separates process setup from queries.
   The first R-worker race and its verdicts remain retained evidence; targets
   are unchanged. The available CLI v1.5.1 differs from the first race's

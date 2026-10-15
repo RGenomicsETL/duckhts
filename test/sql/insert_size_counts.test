@@ -222,6 +222,21 @@ SELECT * FROM duckhts_insert_size_metrics('counts', deviations := -1);
 nonnegative
 
 statement ok
+CREATE TEMP TABLE cutoff_counts AS
+SELECT 'FR' AS pair_orientation, x AS insert_size, 1::BIGINT AS read_pairs
+FROM (VALUES (1::BIGINT), (3::BIGINT), (5::BIGINT)) t(x);
+
+foreach deviations 1e20 1e308
+
+query III
+SELECT read_pairs, mean_insert_size, histogram_cutoff
+FROM duckhts_insert_size_metrics('cutoff_counts', deviations := ${deviations});
+----
+3	3	4294967295
+
+endloop
+
+statement ok
 CREATE OR REPLACE TEMP TABLE invalid_counts AS SELECT 'FR' AS pair_orientation, 0 AS insert_size, 1 AS read_pairs;
 
 statement error

@@ -103,4 +103,15 @@ local({
   expect_error(rduckhts_bam_insert_size_counts(con, file.path(fixtures, "unindexed.bam"),
                                                     scan_mode = "indexed"), "index")
   expect_error(dbGetQuery(con, "SELECT * FROM duckhts_insert_size_metrics('counts', deviations := -1)"), "nonnegative")
+  dbExecute(con, paste(
+    "CREATE TEMP TABLE cutoff_counts AS SELECT 'FR' AS pair_orientation, x AS insert_size,",
+    "1::BIGINT AS read_pairs FROM (VALUES (1::BIGINT), (3::BIGINT), (5::BIGINT)) t(x)"
+  ))
+  for (deviations in c(1e20, 1e308)) {
+    metrics <- dbGetQuery(con, sprintf(
+      "SELECT * FROM duckhts_insert_size_metrics('cutoff_counts', deviations := %.17g)", deviations))
+    expect_equal(as.numeric(metrics$read_pairs), 3)
+    expect_equal(metrics$mean_insert_size, 3)
+    expect_equal(as.numeric(metrics$histogram_cutoff), 4294967295)
+  }
 })

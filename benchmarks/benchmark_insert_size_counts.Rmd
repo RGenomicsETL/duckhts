@@ -26,7 +26,7 @@ Targets are declared before any timed run:
 - Report the native/projected-SQL elapsed-time ratio without a pass/fail gate;
   native owns the unsuffixed public name by the recorded comparison.
 - For each arm/format/thread count whose 1× median is at least 5 seconds,
-  the 1×/2×/4× log-time/log-input exponent must be **<= 1.25**.
+  each adjacent doubling's log-time/log-input exponent must be **<= 1.25**.
 - Peak process RSS must be **<= 256 MiB overhead + 3× declared live state**.
   Live state includes worst-case overlapping per-worker sparse hash tables
   (16.25 bytes/slot, power-of-two capacity at <= .77 load), 8 MiB decoder
@@ -42,6 +42,14 @@ with `benchmarks/insert_size_stage.R` after checking disk space; the function
 also checks the 8 GiB free-space floor with a 6 GiB staging reserve. No full
 HG00188 BAM is staged. The smoke workload and SQL reference are checksum-pinned
 committed fixtures staged through `insert-size-smoke` in the same registry.
+The `insert-size-scale` registry workload names 2×/4× BAM and CRAM inputs.
+`stage_insert_size_scale_from_registry()` coordinate-merges two or four copies
+of the corresponding 1× input with samtools `merge -c -p --no-PG`, preserving
+record flags, read names and RG/PG identifiers, then indexes the result. It
+checks alignment counts, position sums and read-length sums against the
+registry before publication. Receipts bind actual input/output hashes and the
+samtools version. Scale staging requires 8 GiB free plus 1.2 times the expanded
+input bytes. Staging is outside the timed runs.
 The SQL arm is `duckhts_bam_insert_size_counts_sql`, a macro over packed
 CIGAR, existing flag predicates and `cigar_reference_length`; the native arm
 is `duckhts_bam_insert_size_counts`. Both arms remain public.
@@ -71,14 +79,11 @@ not measurements under this amendment and not replacement verdicts.
 
 `/usr/bin/time` now wraps tool processes directly, with no R inside the timed
 process. DuckHTS runs one `duckdb -unsigned` process and SQL script per run:
-LOAD, SET threads, a 2 GiB memory limit, zero spill allowance, then a temporary
-counts table, metrics macro and histogram for every scale pass. COPY writes
-counts, metrics and histogram TSVs on each pass. riker runs its binary directly
-once per complete file scan; at scales 2×/4× the reported wall time is the sum
-of those process timings and peak RSS is their maximum. Thus riker pays its
-startup on each pass, while DuckDB reuses one process for the scale; the
-unchanged acceptance criterion uses 1× only. riker writes metrics, histogram
-and its plot on each pass. DuckHTS does not write a plot and additionally writes
+LOAD, SET threads, a 2 GiB memory limit, zero spill allowance, then one temporary
+counts table, metrics macro and histogram. COPY writes counts, metrics and
+histogram TSVs. Every scale uses one public invocation on one staged file of
+the corresponding size, in a fresh tool process for both riker and DuckDB.
+riker writes metrics, histogram and its plot. DuckHTS does not write a plot and additionally writes
 raw counts; retain these output-cost differences in comparisons.
 
 The CLI version is recorded with the extension's stable C API target and
@@ -91,18 +96,24 @@ the matrix.
 A second, reported-only DuckDB duration uses SQL timestamps after LOAD/SET
 and before the first counts query through the last output COPY. It excludes
 process startup and extension loading but includes input/index opening,
-reduction, summary and serialization on every pass. It is not an acceptance
-criterion. Parity is checked after timing in R by reading each pass's TSVs;
+reduction, summary and serialization. It is not an acceptance
+criterion. Parity is checked after timing in R by reading the output TSVs;
 no R deserialization or comparison contributes to tool wall time or RSS.
 Targets, exact parity rules, scales (1×/2×/4×), thread settings (1/2/4/8),
-three replicates, scaling and RSS gates are unchanged. Smoke is untimed.
+three replicates and RSS gates are unchanged. Scaling exponents are checked
+at both adjacent doublings, as required by `STYLE.md`. Smoke is untimed.
+For timed DuckDB runs, JSON profiles of both temporary-table queries and all
+three output queries record peak buffer memory and spill; profiler setup and
+file-writing costs are included in elapsed time. Peak RSS remains the process
+memory gate. Completed rows and a failed run's files are retained if execution
+or parity fails.
 
 Each arm runs in a fresh tool process, with thread settings 1/2/4/8. Native settings are histogram workers, projected
 SQL settings are DuckDB processing threads, and riker settings are its own
 `--threads` semantics; these are not identical worker models. Native/SQL use
 zero additional htslib decompression workers. The full matrix has three
-replicates and 1×/2×/4× complete file scans, with output materialization on each
-scan; scales do not change bin cardinality. This measures scaling in records,
+replicates and one scan of each 1×/2×/4× file, with output materialization;
+scales do not change bin cardinality. This measures scaling in records,
 not scaling in distinct insert sizes. `/usr/bin/time` measures end-to-end tool wall time and
 maximum RSS, including tool startup, input decoding, reduction, metrics and
 output files, but excluding the R controller.
@@ -161,9 +172,14 @@ if (result$smoke) {
       for (arm in unique(selected$arm)) {
         arm_rows <- selected[selected$arm == arm, ]
         if (times[[arm]] >= 5) {
-          exponent <- unname(coef(lm(log(seconds) ~ log(scale), arm_rows))[[2L]])
-          cat(format, threads, arm, "scaling exponent", exponent,
-              if (exponent <= 1.25) "PASS" else "FAIL", "\n\n")
+          arm_rows <- arm_rows[order(arm_rows$scale), ]
+          exponents <- diff(log(arm_rows$seconds)) / diff(log(arm_rows$scale))
+          for (doubling in seq_along(exponents)) {
+            cat(format, threads, arm,
+                paste0(arm_rows$scale[[doubling]], "x to ", arm_rows$scale[[doubling + 1L]], "x"),
+                "scaling exponent", exponents[[doubling]],
+                if (exponents[[doubling]] <= 1.25) "PASS" else "FAIL", "\n\n")
+          }
         } else cat(format, threads, arm, "scaling gate not applicable (1x < 5 s).\n\n")
       }
     }
@@ -173,7 +189,7 @@ if (result$smoke) {
 
 ## Reported-only in-process context
 
-`work_seconds` excludes CLI startup and LOAD/SET, retaining all scale passes
+`work_seconds` excludes CLI startup and LOAD/SET, retaining the query, profiling
 and TSV output. The remainder includes startup/setup and end-of-process work;
 it is not an isolated startup measurement or a pass/fail criterion.
 

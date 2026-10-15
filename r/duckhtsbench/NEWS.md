@@ -1,5 +1,10 @@
 # duckhtsbench 0.0.0.9001
 
+- Register 2×/4× insert-size BAM and CRAM inputs, coordinate-merged from the
+  registered chr20 inputs. Staging verifies alignment denominators and records
+  input/output hashes and samtools version. A network-free fixture test checks
+  both formats and scales, reuse and corruption rejection.
+
 - Depth-fraction staging requires cached alignments and reference files and
   validates them against registered byte counts and checksums before deriving counts. The
   network-free test retains corruption cases for both inputs and checks that a

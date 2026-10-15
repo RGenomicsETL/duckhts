@@ -2,6 +2,9 @@
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
 
+- Bundled insert-size metrics accept large finite deviation settings without
+  an integer overflow when computing the histogram cutoff.
+
 - The depth wrapper and bundled SQL reject `gc_step` below `1/2147483647`,
   keeping GC stratum numbers within the integer output range.
 
