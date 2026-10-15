@@ -98,10 +98,15 @@ static const char *const depth_bins_sql[] = {
     "WHEN mappability < CAST(min_mappability AS DOUBLE) THEN 'low_mappability' END AS reason "
     "FROM __dht_in CROSS JOIN __dht_args WHERE __dht_args.valid), ",
     /* Training bins: autosomal, passing the bin rules, with at least one read
-     * and a read rate inside the sample's outlier quantiles. */
+     * and a read rate inside the sample's outlier quantiles.
+     * Continuous quantiles lie within the observed range. Floating-point
+     * interpolation can exceed a constant rate by one ULP; clamping keeps
+     * such a sample's positive bins eligible without a comparison tolerance. */
     "__dht_limits AS MATERIALIZED (SELECT sample_id, "
-    "quantile_cont(rate, CAST(outlier_quantile AS DOUBLE)) AS rate_low, "
-    "quantile_cont(rate, 1 - CAST(outlier_quantile AS DOUBLE)) AS rate_high "
+    "least(max(rate), greatest(min(rate), "
+    "quantile_cont(rate, CAST(outlier_quantile AS DOUBLE)))) AS rate_low, "
+    "least(max(rate), greatest(min(rate), "
+    "quantile_cont(rate, 1 - CAST(outlier_quantile AS DOUBLE)))) AS rate_high "
     "FROM __dht_bins WHERE reason IS NULL AND autosomal AND reads > 0 GROUP BY sample_id), "
     "__dht_strata AS MATERIALIZED (SELECT b.sample_id, b.gc_stratum, median(b.rate) AS stratum_rate, "
     "count(*) AS stratum_bins FROM __dht_bins b JOIN __dht_limits l ON b.sample_id = l.sample_id "
@@ -115,10 +120,11 @@ static const char *const depth_bins_sql[] = {
     "THEN 'sparse_stratum' END) AS stratum_reason "
     "FROM __dht_bins b LEFT JOIN __dht_strata s "
     "ON b.sample_id = s.sample_id AND b.gc_stratum = s.gc_stratum), ",
-    /* The ratio is scaled so that the median of the sample's autosomal bins
-     * that pass the bin and stratum rules is 1. */
+    /* The ratio is scaled so that the median of the sample's positive-read
+     * autosomal bins that pass the bin and stratum rules is 1. Empty bins
+     * retain their output rows and zero ratios without setting the scale. */
     "__dht_centre AS MATERIALIZED (SELECT sample_id, median(rate / stratum_rate) AS centre "
-    "FROM __dht_stratified WHERE stratum_reason IS NULL AND autosomal GROUP BY sample_id), "
+    "FROM __dht_stratified WHERE stratum_reason IS NULL AND autosomal AND reads > 0 GROUP BY sample_id), "
     "__dht_expected AS (SELECT s.*, CASE WHEN s.stratum_reason IS NULL AND c.centre > 0 THEN "
     "s.stratum_rate * c.centre * CAST(s.\"end\" - s.start AS DOUBLE) END AS expected, "
     "coalesce(s.stratum_reason, CASE WHEN c.centre IS NULL OR c.centre <= 0 "

@@ -144,6 +144,8 @@ if (system2("git", c("diff", "--quiet", "HEAD", "--", "src"), stdout = FALSE, st
   stop("Build source must match the recorded HEAD")
 }
 host_load <- sub(".*load average: ", "", system2("uptime", stdout = TRUE))
+launcher_affinity <- system2("taskset", c("-pc", Sys.getpid()), stdout = TRUE)
+launcher_niceness <- trimws(system2("ps", c("-o", "ni=", "-p", Sys.getpid()), stdout = TRUE))
 quote_literal <- function(value) paste0("'", gsub("'", "''", value, fixed = TRUE), "'")
 memory_limit <- system2(duckdb_cli, c("-list", "-noheader"),
                         input = "SELECT current_setting('memory_limit');", stdout = TRUE)[[1L]]
@@ -563,7 +565,7 @@ real_timing <- do.call(rbind, lapply(c(1L, 4L), function(threads) {
 unlink(c(staging, real_bins_path), recursive = TRUE)
 ```
 
-Source revision: `r revision`; `src` tree `r src_tree`. DuckDB runtime: `r duckdb_runtime` (CLI). Extension SHA-256: `r strsplit(system2("sha256sum", extension, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`. Host load at start: `r host_load`. DuckDB memory limit: `r memory_limit` (the default); temporary directory limit: 0. Cores 12 to 19, priority −15.
+Source revision: `r revision`; `src` tree `r src_tree`. DuckDB runtime: `r duckdb_runtime` (CLI). Extension SHA-256: `r strsplit(system2("sha256sum", extension, stdout = TRUE), " ", fixed = TRUE)[[1L]][[1L]]`. Host load at start: `r host_load`. DuckDB memory limit: `r memory_limit` (the default); temporary directory limit: 0. Launcher affinity: `r launcher_affinity`; niceness: `r launcher_niceness`.
 
 ## Real data
 

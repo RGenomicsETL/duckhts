@@ -52,8 +52,10 @@ used when present.
 
 Model. The expected count of a bin is its length times the median read rate (count per
 base) of the training bins of the same sample and GC stratum, scaled so that the median
-ratio of the kept autosomal bins is 1. The corrected ratio is `count / expected`; it is 1
-at the sample's typical autosomal depth, about 0.5 for one copy and 1.5 for three.
+ratio of the kept positive-read autosomal bins is 1. Empty bins do not set this scale
+and retain zero ratios when their bin and stratum rules pass. The corrected ratio is
+`count / expected`; it is 1 at the sample's typical autosomal depth, about 0.5 for one
+copy and 1.5 for three.
 
 - GC stratum: `floor(gc / gc_step)`.
 - Training bins: autosomal, mappable, with a GC value and a read rate inside the

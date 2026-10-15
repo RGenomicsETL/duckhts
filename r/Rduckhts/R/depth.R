@@ -12,6 +12,8 @@
 #' `ratio = reads / expected` is about 1 for two copies, 0.5 for one and 1.5
 #' for three. The output feeds [rduckhts_depth_region_fraction()] and
 #' [rduckhts_depth_sex_fraction()].
+#' Normalization uses eligible autosomal bins with positive reads; empty bins
+#' retain zero ratios when their bin and stratum rules pass.
 #'
 #' The GC stratum of a bin is `floor(gc / gc_step)`. Training bins are
 #' autosomal bins that pass the bin rules, hold at least one read and have a

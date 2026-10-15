@@ -44,16 +44,16 @@ oracle_bins <- function(raw, gc_step = 0.01, min_stratum_bins = 10, q = 0.01, ma
   raw$rate <- raw$reads / (raw$end - raw$start)
   raw$reason <- ifelse(is.na(raw$reads), "no_reads", ifelse(is.na(raw$gc), "no_gc", NA))
   out <- lapply(split(raw, raw$sample_id), function(s) {
-    pool <- s[is.na(s$reason) & s$autosomal, ]
+    pool <- s[is.na(s$reason) & s$autosomal & s$reads > 0, ]
     limits <- stats::quantile(pool$rate, c(q, 1 - q), type = 7, names = FALSE)
     training <- pool[pool$reads > 0 & pool$rate >= limits[[1L]] & pool$rate <= limits[[2L]], ]
     strata <- tapply(training$rate, training$stratum, stats::median)
     sizes <- tapply(training$rate, training$stratum, length)
     key <- as.character(s$stratum)
-    s$stratum_bins <- ifelse(is.na(s$stratum) | is.na(sizes[key]), 0, sizes[key])
+    s$stratum_bins <- as.numeric(ifelse(is.na(s$stratum) | is.na(sizes[key]), 0, sizes[key]))
     s$reason <- ifelse(is.na(s$reason) & s$stratum_bins < min_stratum_bins, "sparse_stratum", s$reason)
-    stratum_rate <- unname(strata[key])
-    centred <- is.na(s$reason) & s$autosomal
+    stratum_rate <- as.numeric(strata[key])
+    centred <- is.na(s$reason) & s$autosomal & s$reads > 0
     centre <- stats::median(s$rate[centred] / stratum_rate[centred])
     s$expected <- ifelse(is.na(s$reason), stratum_rate * centre * (s$end - s$start), NA)
     s$ratio <- s$reads / s$expected
@@ -82,6 +82,26 @@ expect_equal(corrected$expected, oracle$expected, tolerance = 1e-9)
 expect_equal(corrected$ratio, oracle$ratio, tolerance = 1e-9)
 rejected <- corrected[corrected$sample_id == "xx" & corrected$start >= 100e6, ]
 expect_equal(rejected$reason[order(rejected$start)], c("no_gc", "no_reads", "sparse_stratum", "high_ratio"))
+
+# Hand-derived sparse samples: every positive bin has 100 reads and the
+# same length and GC, so its expected count is 100 and its ratio is 1.
+# Zero-read bins still have ratio 0 and remain available to estimators.
+for (empty_bins in c(49L, 50L, 80L)) {
+  sparse <- data.frame(sample_id = "sparse", chrom = "1", start = (0:99) * 1000,
+                       end = (1:100) * 1000, gc = 0.4,
+                       reads = c(rep(0L, empty_bins), rep(100L, 100L - empty_bins)))
+  dbWriteTable(con, "depth_sparse", sparse, overwrite = TRUE)
+  actual <- rduckhts_depth_bins(con, "depth_sparse")
+  expected <- oracle_bins(sparse)
+  expected <- expected[match(key(actual), key(expected)), ]
+  expect_equal(nrow(actual), 100L)
+  expect_true(all(actual$kept))
+  expect_equal(actual$expected, rep(100, 100))
+  expect_equal(actual$ratio, actual$reads / 100)
+  expect_true(all(is.na(actual$log2_ratio[actual$reads == 0])))
+  expect_equal(actual$expected, expected$expected, tolerance = 1e-9)
+  expect_equal(actual$ratio, expected$ratio, tolerance = 1e-9)
+}
 
 # The same rows with a mappability column, and the table_name output.
 dbWriteTable(con, "depth_raw_mappable", transform(raw, mappability = 1))

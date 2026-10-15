@@ -1,6 +1,14 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.2.9017
+# duckhts 1.5.2.9018
+
+- Depth normalization centers on eligible autosomal bins with positive reads.
+  Empty bins retain zero ratios instead of collapsing the normalization when
+  at least half the autosomal bins are empty. Training quantiles stay within
+  the observed rate range, so interpolation rounding cannot discard all bins
+  of a constant-rate sample. Depth benchmark staging validates
+  cached alignment and reference bytes against their registered identities
+  before deriving counts.
 
 - The insert-size benchmark times tool processes directly: DuckDB CLI and
   riker, with outputs written to disk and parity checked afterward in R.

@@ -1,6 +1,12 @@
-# Rduckhts 1.5.2.9017.0.1.5
+# Rduckhts 1.5.2.9018.0.1.5
 
 Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
+
+- The bundled depth correction centers on eligible autosomal bins with positive
+  reads. Samples with at least half their bins empty keep valid normalization;
+  empty bins retain zero ratios when their bin and stratum rules pass. Training
+  quantiles stay within the observed rate range, preserving constant-rate samples
+  when continuous-quantile interpolation rounds beyond that range.
 
 - `rduckhts_bam_insert_size_counts()` exposes native BAM/CRAM insert-size counts;
   `rduckhts_bam_insert_size_counts_sql()` exposes the SQL composition, temporarily

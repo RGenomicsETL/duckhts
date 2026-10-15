@@ -48,6 +48,11 @@ if (requireNamespace("DBI", quietly = TRUE) && requireNamespace("duckdb", quietl
       "direct_download", "tinytest", "1", ""),
     plan_row("all_buckets", 3L), plan_row("one_bucket", 1L))
   colnames(plan) <- names(registry)
+  for (input in c("fixture_cram", "fixture_reference")) {
+    source <- file.path(root, "cache", plan[plan[, "id"] == input, "cache_relpath"])
+    plan[plan[, "id"] == input, "supplier_identity"] <- paste0(
+      "sha256=", unname(digest::digest(file = source, algo = "sha256")))
+  }
   registry_path <- file.path(root, "registry.tsv")
   write_registry <- function(plan) {
     utils::write.table(plan, registry_path, sep = "\t", row.names = FALSE, quote = FALSE)
@@ -100,10 +105,33 @@ if (requireNamespace("DBI", quietly = TRUE) && requireNamespace("duckdb", quietl
   expect_equal(duckhts_bench_stage_depth_fraction(ids = "all_buckets")$reused, TRUE)
   # A changed registered identity of either input rebuilds the output.
   for (input in c("fixture_cram", "fixture_reference")) {
-    plan[plan[, "id"] == input, "supplier_identity"] <- "revision=2"
+    plan[plan[, "id"] == input, "supplier_identity"] <- paste0(
+      plan[plan[, "id"] == input, "supplier_identity"], ";revision=2")
     write_registry(plan)
     expect_equal(duckhts_bench_stage_depth_fraction(ids = "all_buckets")$reused, FALSE)
     expect_equal(duckhts_bench_stage_depth_fraction(ids = "all_buckets")$reused, TRUE)
+  }
+  # A forced rebuild must verify the actual cached inputs before recording
+  # their registered identities. Corruption leaves the published output
+  # and receipt intact, and no partial artifact is published.
+  for (input in c("fixture_cram", "fixture_reference")) {
+    path <- file.path(root, "cache", plan[plan[, "id"] == input, "cache_relpath"])
+    original <- readBin(path, "raw", n = file.size(path))
+    output_digest <- unname(digest::digest(file = staged$path[[1L]], algo = "sha256"))
+    receipt_path <- paste0(staged$path[[1L]], ".sources.tsv")
+    receipt_digest <- unname(digest::digest(file = receipt_path, algo = "sha256"))
+    plan[plan[, "id"] == input, "supplier_identity"] <- paste0(
+      plan[plan[, "id"] == input, "supplier_identity"], ";corruption_check=1")
+    write_registry(plan)
+    damaged <- original
+    damaged[[1L]] <- as.raw(bitwXor(as.integer(damaged[[1L]]), 1L))
+    writeBin(damaged, path)
+    expect_error(duckhts_bench_stage_depth_fraction(ids = "all_buckets"), "supplier SHA-256 identity")
+    expect_equal(unname(digest::digest(file = staged$path[[1L]], algo = "sha256")), output_digest)
+    expect_equal(unname(digest::digest(file = receipt_path, algo = "sha256")), receipt_digest)
+    expect_equal(length(list.files(dirname(staged$path[[1L]]), pattern = "[.]partial-")), 0L)
+    writeBin(original, path)
+    expect_equal(duckhts_bench_stage_depth_fraction(ids = "all_buckets")$reused, FALSE)
   }
   plan[plan[, "id"] == "all_buckets", "supplier_identity"] <- paste0(
     sprintf(parameters, 3L), ";rows=", staged$rows[[1L]], ";reads=", staged$reads[[1L]] + 1)

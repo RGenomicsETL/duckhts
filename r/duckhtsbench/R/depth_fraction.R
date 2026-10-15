@@ -18,6 +18,8 @@
 #' `regions` (comma-separated), `bin_width`, `buckets`, `kept_buckets`,
 #' `min_mapq` and `exclude_flags`; when it also names `rows` and `reads`, the
 #' staged file must have them before it is published.
+#' Cached alignment and reference files are checked against their registered
+#' byte counts and checksums before they are used.
 #'
 #' Each output gets a receipt, `<output>.sources.tsv` with columns `field` and
 #' `value`, binding the artifact identity, the derivation SQL, the DuckDB
@@ -87,7 +89,10 @@ duckhts_bench_stage_depth_fraction <- function(ids = NULL, extension_path = NULL
   is_url <- function(path) grepl("^[A-Za-z][A-Za-z0-9+.-]*://", path)
   source_of <- function(id) {
     cached <- duckhts_bench_artifact_path(id)
-    if (file.exists(cached)) return(normalizePath(cached))
+    if (file.exists(cached)) {
+      duckhts_bench_validate_identity(id, cached)
+      return(normalizePath(cached))
+    }
     locator <- registry$locator[registry$id == id]
     if (!is_url(locator)) {
       stop("stage ", id, " first, or register a URL for it: ", cached, call. = FALSE)
@@ -167,6 +172,7 @@ duckhts_bench_stage_depth_fraction <- function(ids = NULL, extension_path = NULL
     if (!file.exists(reference)) {
       stop("stage ", item$reference, " first: ", reference, call. = FALSE)
     }
+    duckhts_bench_validate_identity(item$reference, reference)
     reference <- normalizePath(reference)
     source <- source_of(item$alignments)
     output <- duckhts_bench_artifact_path(item$id)

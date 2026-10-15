@@ -1,5 +1,10 @@
 # duckhtsbench 0.0.0.9001
 
+- Depth-fraction staging validates cached alignments and reference files against
+  their registered byte counts and checksums before deriving counts. The
+  network-free test retains corruption cases for both inputs and checks that a
+  rejected rebuild leaves the published output and receipt intact.
+
 - register `depth_fraction_hg00403_buckets`, `depth_fraction_na18507_buckets`
   and `depth_fraction_hg00188_buckets`, the inputs of
   `benchmark_depth_fraction.Rmd`: reads in 100 kb bins of chr1 to chr22, X

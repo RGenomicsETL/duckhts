@@ -74,6 +74,35 @@ SELECT (SELECT count(*) FROM depth_zeroed WHERE chrom NOT IN ('X', 'Y') AND read
 ----
 true	0
 
+# Empty autosomal bins remain in the output, but do not determine the
+# normalization centre. Constant positive counts have expected count 100
+# even when at least half of the autosomal bins have no reads. Their rate
+# of 0.1 also retains the continuous-quantile rounding counterexample:
+# DuckDB 1.5.1 interpolates the 20 positive bins' 1% quantile above 0.1.
+statement ok
+CREATE TEMP TABLE depth_sparse AS
+SELECT z::VARCHAR AS sample_id, '1' AS chrom, b * 1000 AS start,
+       (b + 1) * 1000 AS "end", 0.4::DOUBLE AS gc,
+       CASE WHEN b < z THEN 0 ELSE 100 END::BIGINT AS reads
+FROM (VALUES (49), (50), (80), (100)) t(z), range(100) r(b);
+
+query TIIIRI rowsort
+SELECT sample_id, count(*), count(*) FILTER (WHERE kept),
+       bool_and(expected = 100), median(ratio) FILTER (WHERE reads > 0),
+       count(*) FILTER (WHERE reads = 0 AND ratio = 0 AND log2_ratio IS NULL)
+FROM duckhts_depth_bins('depth_sparse') WHERE sample_id <> '100' GROUP BY sample_id;
+----
+49	100	100	true	1.0	49
+50	100	100	true	1.0	50
+80	100	100	true	1.0	80
+
+query III
+SELECT count(*), count(*) FILTER (WHERE kept),
+       count(*) FILTER (WHERE reason = 'sparse_stratum' AND expected IS NULL)
+FROM duckhts_depth_bins('depth_sparse') WHERE sample_id = '100';
+----
+100	0	100
+
 statement ok
 CREATE TEMP VIEW depth_tests AS SELECT * FROM depth_corrected WHERE sample_id NOT LIKE 'ref_%';
 

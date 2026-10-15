@@ -42,6 +42,8 @@ with range requests. The row's \code{supplier_identity} names \code{sample},
 \code{regions} (comma-separated), \code{bin_width}, \code{buckets}, \code{kept_buckets},
 \code{min_mapq} and \code{exclude_flags}; when it also names \code{rows} and \code{reads}, the
 staged file must have them before it is published.
+Cached alignment and reference files are checked against their registered
+byte counts and checksums before they are used.
 
 Each output gets a receipt, \verb{<output>.sources.tsv} with columns \code{field} and
 \code{value}, binding the artifact identity, the derivation SQL, the DuckDB
