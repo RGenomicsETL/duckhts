@@ -26,6 +26,21 @@ insert_size_normalize <- function(frame, columns, keys) {
   frame
 }
 
+insert_size_check_raw <- function(actual, raw) {
+  orientations <- c(fr_count = "FR", rf_count = "RF", tandem_count = "TANDEM")
+  expected <- do.call(rbind, lapply(names(orientations), function(column) {
+    data.frame(pair_orientation = orientations[[column]], insert_size = raw$insert_size,
+               read_pairs = raw[[column]], stringsAsFactors = FALSE)
+  }))
+  # The public counts relation is sparse and contains positive counts only.
+  # Keep every actual row, so duplicate, extra and zero-count rows cannot hide.
+  expected <- expected[expected$read_pairs != "0", , drop = FALSE]
+  columns <- c("pair_orientation", "insert_size", "read_pairs")
+  keys <- c("pair_orientation", "insert_size")
+  stopifnot(identical(insert_size_normalize(actual, columns, keys),
+                      insert_size_normalize(expected, columns, keys)))
+}
+
 insert_size_riker <- function(config, prefix, raw = FALSE) {
   args <- c("isize", "-i", config$path, "-r", config$reference, "-o", prefix,
             "--threads", config$threads, "--min-frac", if (raw) 1.1 else 0.05)
@@ -186,17 +201,7 @@ run_insert_size_benchmark <- function(repo, extension, riker, smoke = TRUE, duck
               identical(insert_size_normalize(result$histogram, histogram_columns, "insert_size"),
                 insert_size_normalize(expected$histogram, histogram_columns, "insert_size")))
             if (arm != "riker") {
-              actual_raw <- data.frame(insert_size = raw$insert_size,
-                fr_count = "0", rf_count = "0", tandem_count = "0")
-              labels <- c(FR = "fr_count", RF = "rf_count", TANDEM = "tandem_count")
-              for (i in seq_len(nrow(result$counts))) {
-                index <- match(as.character(result$counts$insert_size[[i]]), actual_raw$insert_size)
-                stopifnot(!is.na(index))
-                actual_raw[[labels[[result$counts$pair_orientation[[i]]]]]][[index]] <-
-                  as.character(result$counts$read_pairs[[i]])
-              }
-              stopifnot(identical(insert_size_normalize(actual_raw, histogram_columns, "insert_size"),
-                insert_size_normalize(raw, histogram_columns, "insert_size")))
+              insert_size_check_raw(result$counts, raw)
             }
             measured <- run$measured
             # Hash keys/values/flags: 16.25 bytes per allocated slot; load <= .77.

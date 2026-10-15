@@ -27,6 +27,8 @@
   Scaling uses single invocations on registered 1×/2×/4× BAM and CRAM inputs,
   with independent oracle outputs for each size and both doubling exponents.
   Timed DuckDB runs report buffer memory and spill from JSON profiles.
+  The untimed keyed parity check retains every actual count row and rejects
+  duplicates, missing/extra rows and changed counts.
   A reported-only DuckDB work duration separates process setup from queries.
   The first R-worker race and its verdicts remain retained evidence; targets
   are unchanged. The available CLI v1.5.1 differs from the first race's

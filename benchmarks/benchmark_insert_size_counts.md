@@ -109,7 +109,11 @@ both temporary-table queries and all three output queries record peak
 buffer memory and spill; profiler setup and file-writing costs are
 included in elapsed time. Peak RSS remains the process memory gate.
 Completed rows and a failed run’s files are retained if execution or
-parity fails.
+parity fails. Raw parity compares every actual sparse count row against
+riker’s positive orientation/size cells by key; duplicate, missing,
+extra and changed rows fail. The comparison runs outside measured
+processes and does not copy a whole histogram for each individual count
+row.
 
 Each arm runs in a fresh tool process, with thread settings 1/2/4/8.
 Native settings are histogram workers, projected SQL settings are DuckDB
@@ -133,9 +137,9 @@ counts. Smoke runs invoke all 24 format/arm/thread combinations with
 
 ## Revision and runtime
 
-Source revision: `a6575fe2b25bd37c749ed023527c5cdce8b30115`; working
+Source revision: `5abf84a5f0624c92d5b19169b8855a59140ac0d6`; working
 tree changed: `TRUE`; driver SHA-256:
-`38b78f3a30b07809e43c40a4f04aa84bd373c4a0df79694a8ff19185a4b24c6c`.
+`bdb649ff5acdb4c7d85ad886dfaa467b85b436bce3c73f0f5fd474cee9f20f28`.
 
 Oracle: `riker 0.4.1`; SHA-256
 `806e0c05ce5993c7fac416cf1e237a13557ca7e7e419832002a31de91ca519e6`.
@@ -154,7 +158,7 @@ identical performance across releases.
 Launcher affinity: `pid 3's current affinity list: 0-19`; niceness: `0`.
 
 Host: `Linux; 6.8.0-78-generic; x86_64`; load at start:
-`23:13:41 up 373 days,  8:07, 19 users,  load average: 4.58, 3.82, 3.37`.
+`23:20:15 up 373 days,  8:14, 19 users,  load average: 4.04, 3.61, 3.36`.
 
 Cache condition: warm; each input is scanned for independent oracle
 outputs before timing. Page cache is not flushed. Concurrent work

@@ -107,6 +107,10 @@ three output queries record peak buffer memory and spill; profiler setup and
 file-writing costs are included in elapsed time. Peak RSS remains the process
 memory gate. Completed rows and a failed run's files are retained if execution
 or parity fails.
+Raw parity compares every actual sparse count row against riker's positive
+orientation/size cells by key; duplicate, missing, extra and changed rows fail.
+The comparison runs outside measured processes and does not copy a whole
+histogram for each individual count row.
 
 Each arm runs in a fresh tool process, with thread settings 1/2/4/8. Native settings are histogram workers, projected
 SQL settings are DuckDB processing threads, and riker settings are its own
