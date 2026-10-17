@@ -37,6 +37,9 @@
   : Convert SAM/BAM/CRAM reader output to Parquet with DuckHTS metadata
 - [`rduckhts_bam_index()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_index.md)
   : Build BAM or CRAM Index
+- [`rduckhts_bam_insert_size_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_insert_size_counts.md)
+  [`rduckhts_bam_insert_size_counts_sql()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_insert_size_counts.md)
+  : BAM/CRAM Insert-Size Counts
 - [`rduckhts_bam_mate_overlap_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_mate_overlap_counts.md)
   : Count Agreement Between Overlapping Mates
 - [`rduckhts_bam_mismatch_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_mismatch_counts.md)
@@ -69,6 +72,15 @@
   : Create a DuckDB connection with bundled DuckHTS loaded
 - [`rduckhts_count_error_fit()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_count_error_fit.md)
   : Fit Read Error and Contamination from Allele Read Counts
+- [`rduckhts_count_mixture_lowpass()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_count_mixture_lowpass.md)
+  : Estimate a Conditional Second-Genome Share from Low-Pass Counts
+- [`rduckhts_depth_bins()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_depth_bins.md)
+  : Correct Bin Read Counts for GC Content
+- [`rduckhts_depth_region_fraction()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_depth_region_fraction.md)
+  : Estimate the Share of Cells with a One-Copy Change of a Region
+- [`rduckhts_depth_sex_fraction()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_depth_sex_fraction.md)
+  : Estimate the Share of a Second Genome of the Other Sex from X and Y
+  Depth
 - [`rduckhts_detect_quality_encoding()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_detect_quality_encoding.md)
   : Detect FASTQ Quality Encoding
 - [`rduckhts_fasta()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_fasta.md)

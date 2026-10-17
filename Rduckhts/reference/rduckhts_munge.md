@@ -1,7 +1,7 @@
 # Munge Summary Statistics Rows
 
-Applies the DuckHTS \`duckdb_munge(...)\` table macro to rows from a SQL
-query or table expression, using either an upstream-style preset, a
+Applies the DuckHTS \`duckhts_munge(...)\` table macro to rows from a
+SQL query or table expression, using either an upstream-style preset, a
 named column map, or a two-column mapping file. When no mapping mode is
 provided, the bundled \`colheaders.tsv\` alias file is used by default.
 

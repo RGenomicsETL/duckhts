@@ -1,6 +1,6 @@
 # Lift Over Variant Coordinates Against a Query
 
-Applies the DuckHTS \`duckdb_liftover(...)\` table macro to rows from a
+Applies the DuckHTS \`duckhts_liftover(...)\` table macro to rows from a
 SQL query or table expression with chromosome and position columns, plus
 optional reference and alternate alleles.
 

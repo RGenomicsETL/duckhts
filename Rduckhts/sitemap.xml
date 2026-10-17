@@ -25,6 +25,7 @@
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_bin_counts.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_convert_parquet.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_index.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_insert_size_counts.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_mate_overlap_counts.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_mismatch_counts.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_multi.html</loc></url>
@@ -41,6 +42,10 @@
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bigwig.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_connect.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_count_error_fit.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_count_mixture_lowpass.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_depth_bins.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_depth_region_fraction.html</loc></url>
+<url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_depth_sex_fraction.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_detect_quality_encoding.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_fasta.html</loc></url>
 <url><loc>https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_fasta_index.html</loc></url>
