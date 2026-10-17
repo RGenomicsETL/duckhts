@@ -39,6 +39,10 @@
   and flag/length kernels in SQL. Both return sparse BAM/CRAM orientation counts;
   `duckhts_insert_size_metrics()` summarizes them in SQL. Native takes the
   unsuffixed name by measurement in `benchmarks/benchmark_insert_size_counts.md`.
+  In the direct-tool race at `d29b378f`, native meets every declared 1× timing
+  target for BAM and CRAM at 1/2/4/8 threads; projected SQL matches the oracle
+  but misses every timing target. All 216 parity checks and RSS budgets pass,
+  with zero DuckDB spill; evaluated doubling exponents are at most 1.002.
   In the retained R-worker race, native CRAM meets all declared 1× timing
   targets; native BAM meets only the 2-thread target. SQL misses all timing
   targets on this single-reference workload.
