@@ -461,6 +461,25 @@ SELECT y_bins, status FROM duckhts_depth_sex_fraction('depth_null_kept') WHERE s
 ----
 0	no_y_bins
 
+# Sex-chromosome classification requires a contig for sample and reference bins.
+statement ok
+CREATE TEMP VIEW depth_null_chrom AS
+SELECT * REPLACE (CASE WHEN chrom = '8' THEN NULL ELSE chrom END AS chrom) FROM depth_tests;
+
+statement error
+SELECT * FROM duckhts_depth_sex_fraction('depth_null_chrom');
+----
+chrom must not be NULL
+
+statement ok
+CREATE TEMP VIEW depth_null_reference_chrom AS
+SELECT * REPLACE (CASE WHEN chrom = '8' THEN NULL ELSE chrom END AS chrom) FROM depth_references;
+
+statement error
+SELECT * FROM duckhts_depth_sex_fraction_ref('depth_tests', 'depth_null_reference_chrom');
+----
+chrom must not be NULL
+
 # Without a reference the interval is the estimate +- 1.959964 standard errors. With a reference
 # the tested sample is left out of its own reference, and the interval uses the t quantile with one
 # degree of freedom fewer than the reference samples: 4.302653 for three.

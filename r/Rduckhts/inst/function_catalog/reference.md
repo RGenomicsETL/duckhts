@@ -3044,7 +3044,7 @@ table(sample_id VARCHAR, autosomal_bins BIGINT, x_bins BIGINT, y_bins BIGINT, di
 
 ### Input
 
-duckhts_depth_sex_fraction uses the ideal copy levels; duckhts_depth_sex_fraction_ref takes reference_table. bins_table holds corrected bins as for duckhts_depth_region_fraction. X, Y and MT are the contigs whose duckhts_contig_key is X, Y or MT; every other contig is autosomal. Remove the pseudo-autosomal regions of X, and any Y bins that are not single-copy in an XY genome, in SQL first: they are not one X or one Y copy. A NULL kept counts as not kept.
+duckhts_depth_sex_fraction uses the ideal copy levels; duckhts_depth_sex_fraction_ref takes reference_table. bins_table holds corrected bins as for duckhts_depth_region_fraction. X, Y and MT are the contigs whose duckhts_contig_key is X, Y or MT; every other contig is autosomal. Remove the pseudo-autosomal regions of X, and any Y bins that are not single-copy in an XY genome, in SQL first: they are not one X or one Y copy. A NULL kept counts as not kept; a NULL chrom is an error.
 
 ### Model
 
@@ -3094,7 +3094,7 @@ table(sample_id VARCHAR, autosomal_bins BIGINT, x_bins BIGINT, y_bins BIGINT, di
 
 ### Input
 
-duckhts_depth_sex_fraction uses the ideal copy levels; duckhts_depth_sex_fraction_ref takes reference_table. bins_table holds corrected bins as for duckhts_depth_region_fraction. X, Y and MT are the contigs whose duckhts_contig_key is X, Y or MT; every other contig is autosomal. Remove the pseudo-autosomal regions of X, and any Y bins that are not single-copy in an XY genome, in SQL first: they are not one X or one Y copy. A NULL kept counts as not kept.
+duckhts_depth_sex_fraction uses the ideal copy levels; duckhts_depth_sex_fraction_ref takes reference_table. bins_table holds corrected bins as for duckhts_depth_region_fraction. X, Y and MT are the contigs whose duckhts_contig_key is X, Y or MT; every other contig is autosomal. Remove the pseudo-autosomal regions of X, and any Y bins that are not single-copy in an XY genome, in SQL first: they are not one X or one Y copy. A NULL kept counts as not kept; a NULL chrom is an error.
 
 ### Model
 

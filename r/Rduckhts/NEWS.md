@@ -2,7 +2,8 @@
 
 - Bundled regional depth fractions handle large-coordinate bin midpoints
   without overflow or rounding. Sex-depth reference counts exclude samples
-  with no usable calibration level and correctly leave out the tested sample.
+  with no usable calibration level, correctly leave out the tested sample,
+  and reject NULL contigs instead of including them in the autosomal baseline.
 
 - Bundled insert-size metrics accept large finite deviation settings without
   an integer overflow when computing the histogram cutoff.

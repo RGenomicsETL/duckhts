@@ -256,6 +256,18 @@ expect_error(rduckhts_depth_bins(con, "depth_raw", min_mappability = NA), "min_m
 expect_error(rduckhts_depth_bins(con, c("a", "b")), "bins_table")
 expect_error(rduckhts_depth_region_fraction(con, "depth_tests", NA_character_), "regions_table")
 expect_error(rduckhts_depth_sex_fraction(con, "depth_tests", reference_table = 1), "reference_table")
+dbExecute(con, paste(
+  "CREATE TEMP VIEW depth_null_chrom AS SELECT * REPLACE",
+  "(CASE WHEN chrom = '8' THEN NULL ELSE chrom END AS chrom) FROM depth_tests"
+))
+expect_error(rduckhts_depth_sex_fraction(con, "depth_null_chrom"), "chrom must not be NULL")
+dbExecute(con, paste(
+  "CREATE TEMP VIEW depth_null_reference_chrom AS SELECT * REPLACE",
+  "(CASE WHEN chrom = '8' THEN NULL ELSE chrom END AS chrom) FROM depth_references"
+))
+expect_error(rduckhts_depth_sex_fraction(con, "depth_tests",
+                                        reference_table = "depth_null_reference_chrom"),
+             "chrom must not be NULL")
 dbExecute(con, "CREATE TEMP VIEW depth_percent AS SELECT sample_id, chrom, start, \"end\", reads, gc * 100 AS gc FROM depth_raw")
 expect_error(rduckhts_depth_bins(con, "depth_percent"), "gc must be a share")
 dbExecute(con, "CREATE TEMP VIEW depth_bad_sex AS SELECT *, 'XXY' AS sex FROM depth_corrected WHERE sample_id LIKE 'ref_%'")
