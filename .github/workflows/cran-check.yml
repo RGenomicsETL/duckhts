@@ -71,6 +71,7 @@ jobs:
         config:
           - {os: macos-latest,   r: 'release'}
           - {os: windows-latest, r: 'release', rtools: '45'}
+          - {os: windows-2022,   r: 'devel', rtools: '45'}
           - {os: ubuntu-latest,   r: 'devel', http-user-agent: 'release'}
           - {os: ubuntu-latest,   r: 'release'}
          # - {os: ubuntu-latest,   r: 'oldrel-1'}
@@ -107,6 +108,20 @@ jobs:
         shell: bash
         run: echo "DUCKHTS_STRICT_WARNINGS=1" >> "$GITHUB_ENV"
 
+      - name: Enable Windows R-devel crash dumps
+        if: runner.os == 'Windows' && matrix.config.r == 'devel'
+        shell: pwsh
+        run: |
+          $dumpDir = Join-Path $env:RUNNER_TEMP "r-crash-dumps"
+          New-Item -ItemType Directory -Force -Path $dumpDir | Out-Null
+          foreach ($executable in @("R.exe", "Rterm.exe")) {
+            $key = "HKCU:\Software\Microsoft\Windows\Windows Error Reporting\LocalDumps\$executable"
+            New-Item -Force -Path $key | Out-Null
+            New-ItemProperty -Force -Path $key -Name DumpFolder -PropertyType ExpandString -Value $dumpDir | Out-Null
+            New-ItemProperty -Force -Path $key -Name DumpType -PropertyType DWord -Value 2 | Out-Null
+            New-ItemProperty -Force -Path $key -Name DumpCount -PropertyType DWord -Value 10 | Out-Null
+          }
+
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           extra-packages: |
@@ -126,6 +141,17 @@ jobs:
           build_args: 'c("--no-manual","--compact-vignettes=gs+qpdf")'
           error-on: '"warning"'
           working-directory: r/Rduckhts
+
+      - name: Upload Windows R-devel crash evidence
+        if: failure() && runner.os == 'Windows' && matrix.config.r == 'devel'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-r-devel-crash-evidence
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/r-crash-dumps
+            r/Rduckhts/check
 
       - name: Verify htslib header diagnostics stay outside DuckHTS compilation
         if: runner.os == 'macOS'
