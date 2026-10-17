@@ -20,7 +20,16 @@ def connect(path, read_only=False):
 
 
 def load(con):
+    duckdb_names_before = {row[0] for row in con.execute(
+        "SELECT function_name FROM duckdb_functions() "
+        "WHERE starts_with(function_name, 'duckdb_')"
+    ).fetchall()}
     con.execute(f"LOAD '{EXTENSION}'")
+    duckdb_names_after = {row[0] for row in con.execute(
+        "SELECT function_name FROM duckdb_functions() "
+        "WHERE starts_with(function_name, 'duckdb_')"
+    ).fetchall()}
+    assert duckdb_names_after == duckdb_names_before
 
 
 def names(con, database):
@@ -36,9 +45,10 @@ def definitions(con):
         "SELECT name, public, sql, definitions_sha256 "
         "FROM duckhts_macro_definitions() ORDER BY install_order"
     ).fetchall()
-    # The inventory includes the separate fitted-count ROH macro and the private
-    # duckhts_htslib_is_indel classifier of duckhts_roh_af_table_bcftools, and that macro.
-    assert len(rows) == 42
+    # Public and private macro definitions have one ordered inventory.
+    assert len(rows) == 57
+    assert sum(exposed for _, exposed, _, _ in rows) == 47
+    assert not any(name.startswith("duckdb_") for name, exposed, _, _ in rows if exposed)
     assert len({row[3] for row in rows}) == 1
     ordered = b"".join(
         bytes([int(exposed)]) +
@@ -80,7 +90,7 @@ def clean_reopened(path):
 
 def writable(path):
     con = connect(path)
-    con.execute("CREATE MACRO duckhts_quote_ident(x) AS 'old'")
+    con.execute("CREATE MACRO duckhts__quote_ident(x) AS 'old'")
     con.close()
 
     first = connect(path)
@@ -94,14 +104,14 @@ def writable(path):
                 if entry["kind"] in ("scalar_macro", "table_macro")}
     assert public == declared
     catalog = first.execute("SELECT current_database()").fetchone()[0]
-    assert names(first, catalog) & {row[0] for row in rows} == {"duckhts_quote_ident"}
+    assert names(first, catalog) & {row[0] for row in rows} == {"duckhts__quote_ident"}
     assert names(first, "temp") & public == set()
     assert first.execute("SELECT duckhts_htslib_version()").fetchone()[0]
     install(first)
     install(first)
     assert names(first, "temp") & public == public
-    assert first.execute("SELECT duckhts_quote_ident('a')").fetchone()[0] == '"a"'
-    assert second.execute("SELECT duckhts_quote_ident('a')").fetchone()[0] == "old"
+    assert first.execute("SELECT duckhts__quote_ident('a')").fetchone()[0] == '"a"'
+    assert second.execute("SELECT duckhts__quote_ident('a')").fetchone()[0] == "old"
     assert names(second, "temp") & public == set()
     second.execute("CREATE TEMP TABLE inputs AS SELECT 'a' AS column_name")
     install(second)
@@ -115,7 +125,7 @@ def writable(path):
     ).fetchone()[0] == 1
     assert second.execute(
         "WITH columns AS (SELECT column_name FROM inputs) "
-        "SELECT duckhts_quote_ident(column_name) FROM columns"
+        "SELECT duckhts__quote_ident(column_name) FROM columns"
     ).fetchone()[0] == '"a"'
     first.close()
     second.close()
@@ -126,7 +136,7 @@ def reopened(path):
     load(con)
     rows = definitions(con)
     catalog = con.execute("SELECT current_database()").fetchone()[0]
-    assert names(con, catalog) & {row[0] for row in rows} == {"duckhts_quote_ident"}
+    assert names(con, catalog) & {row[0] for row in rows} == {"duckhts__quote_ident"}
     assert names(con, "temp") & {row[0] for row in rows} == set()
     assert con.execute("SELECT duckhts_htslib_version()").fetchone()[0]
     install(con)
@@ -144,9 +154,9 @@ def attached(path):
     load(con)
     quoted = str(path).replace("'", "''")
     con.execute(f"ATTACH '{quoted}' AS attached (READ_ONLY)")
-    assert "duckhts_quote_ident" in names(con, "memory")
+    assert "duckhts__quote_ident" in names(con, "memory")
     assert names(con, "attached") & {row[0] for row in definitions(con)} == {
-        "duckhts_quote_ident"
+        "duckhts__quote_ident"
     }
     con.close()
 
@@ -178,7 +188,7 @@ def main():
         subprocess.run([sys.executable, __file__, "attached", str(path)], check=True)
         assert digest(path) == before
         subprocess.run([sys.executable, __file__, "rollback", str(path)], check=True)
-        print("macro catalog: 42 definitions, 32 public, file/readonly/rollback/two connections OK")
+        print("macro catalog: 57 definitions, 47 public, file/readonly/rollback/two connections OK")
 
 
 if __name__ == "__main__":

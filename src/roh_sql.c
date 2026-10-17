@@ -6,7 +6,7 @@
  * aggregate, and decode each packed site list with __duckhts_roh_decode.
  * Relations (frequencies, genetic map) are passed by table name through
  * query_table, as in duckhts_cgranges_from_table. A macro cannot take an
- * absent relation, so the genetic map is a separate overload and the frequency
+ * absent relation, so the genetic map uses a separate _map macro and the frequency
  * source is chosen by macro name.
  *
  * Memory. DuckDB manages and can spill the scans, joins and reference stages.
@@ -55,7 +55,7 @@ static const char sites_from_info_tag[] =
     "CAST(list_extract(COLUMNS(lambda c: c = 'INFO_' || af_tag), 1) AS DOUBLE) AS af, "
     ROH_EVIDENCE " AS evidence " ROH_RECORDS "), ";
 
-/* duckhts_htslib_is_indel(ref, alts): whether HTSlib's bcf_get_variant_types()
+/* duckhts__htslib_is_indel(ref, alts): whether HTSlib's bcf_get_variant_types()
  * sets VCF_INDEL for a record with these alleles, a port of
  * bcf_set_variant_type() (third_party/htslib vcf.c:5415, HTSlib 1.24).
  * An allele is an indel when, after the common prefix (compared without case),
@@ -67,7 +67,7 @@ static const char sites_from_info_tag[] =
  * indel when any ALT is. ind_p is the common prefix length; ind_s the common
  * suffix length of the rest, leaving at least one base of each. */
 static const char htslib_is_indel_macro[] =
-    "CREATE OR REPLACE MACRO duckhts_htslib_is_indel(ref, alts) AS "
+    "CREATE OR REPLACE MACRO duckhts__htslib_is_indel(ref, alts) AS "
     "coalesce(list_bool_or(list_transform(alts, lambda ind_x: "
     "CASE WHEN ind_x = '*' OR starts_with(ind_x, '<') OR starts_with(ind_x, '[') "
     "OR starts_with(ind_x, ']') OR (length(ref) = 1 AND length(ind_x) = 1) THEN false "
@@ -229,7 +229,7 @@ static const char sites_from_relation_bcftools_claims[] =
     "__dht_bcftools_claims AS NOT MATERIALIZED (SELECT chrom, pos, file_offset, t_af, "
     "coalesce(ref = t_ref AND array_to_string(alts, ',') = t_alt AND alts[1] NOT IN " ROH_SYMBOLIC ", "
     "false) AS usable FROM __dht_bcftools_records "
-    "WHERE CASE WHEN followed_at_pos THEN duckhts_htslib_is_indel(ref, alts) = t_indel ELSE true END "
+    "WHERE CASE WHEN followed_at_pos THEN duckhts__htslib_is_indel(ref, alts) = t_indel ELSE true END "
     "AND len(list_filter(alts, lambda a: a NOT IN " ROH_SYMBOLIC ")) = 1 "
     "QUALIFY row_number() OVER (PARTITION BY chrom, pos ORDER BY file_offset) = 1), "
     "__dht_sites AS NOT MATERIALIZED (SELECT c.chrom, c.pos, c.smp, k.t_af AS af, c.evidence "
@@ -272,9 +272,6 @@ static const char map_arguments[] =
     "seg.r.n_markers AS n_markers, seg.r.quality AS quality"
 static const char select_head[] =
     ROH_RUN_COLUMNS " FROM (SELECT l.smp, l.chrom, unnest(__duckhts_roh_decode(l.s, ";
-static const char fitted_select_head[] =
-    ROH_RUN_COLUMNS ", seg.r.stable_fraction AS stable_fraction, seg.r.gained_bases AS gained_bases "
-    "FROM (SELECT l.smp, l.chrom, unnest(__duckhts_roh_decode_stable(l.s, ";
 #define ROH_NO_COUNT_MODEL "NULL::DOUBLE, NULL::DOUBLE, NULL::DOUBLE, NULL::DOUBLE"
 #define ROH_COUNT_MODEL \
     "CAST(seq_error AS DOUBLE), CAST(contamination AS DOUBLE), " \
@@ -357,14 +354,33 @@ static const char counts_guard[] = ROH_GUARD_COLUMNS "WHERE NOT " ROH_COUNTS_ARG
     "coalesce(" from ".artefact_weight_sd, 0.0)"
 static const char fitted_counts_model[] = "NULL::DOUBLE, " ROH_FIT_MODEL("l", "l.smp") ", ";
 /* Every sample of the counts relation is checked against its fit, also one
- * whose chromosomes the genetic map drops from the decode; the second arm
- * checks the other arguments when there is no sample. */
+ * whose sites are all skipped or whose chromosomes the genetic map drops from
+ * the decode. The check runs on every site list, before the decode, so the
+ * counts relation is read once: read a second time for the check, a relation
+ * that holds a join (a view filtered by an IN list, or counts joined to
+ * frequencies) is a common subplan that DuckDB materializes with every row
+ * and column. __duckhts_roh_valid_args() is TRUE or raises the error, and a
+ * NULL fitted number raises in ROH_FIT_VALUE. The _map macro joins the map
+ * with a LEFT JOIN and decodes only the lists with map nodes, so a list whose
+ * chromosome has none is checked and gives no run. */
+#define ROH_FITTED_VALID \
+    "__duckhts_roh_valid_args(3, NULL::DOUBLE, " ROH_FIT_MODEL("l", "l.smp") ", " \
+    "CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE), " \
+    ROH_LIMIT_ARGUMENTS ")"
+static const char fitted_select_head[] =
+    ROH_RUN_COLUMNS ", seg.r.stable_fraction AS stable_fraction, seg.r.gained_bases AS gained_bases "
+    "FROM (SELECT l.smp, l.chrom, unnest(CASE WHEN NOT " ROH_FITTED_VALID " THEN NULL "
+    "ELSE __duckhts_roh_decode_stable(l.s, ";
+static const char fitted_select_head_with_map[] =
+    ROH_RUN_COLUMNS ", seg.r.stable_fraction AS stable_fraction, seg.r.gained_bases AS gained_bases "
+    "FROM (SELECT l.smp, l.chrom, unnest(CASE WHEN NOT " ROH_FITTED_VALID " THEN NULL "
+    "WHEN m.m_chrom IS NULL THEN NULL ELSE __duckhts_roh_decode_stable(l.s, ";
+static const char fitted_decode_end[] =
+    ", CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE)) END";
+static const char fitted_from_lists_with_map[] =
+    ") AS r FROM __dht_lists AS l LEFT JOIN __dht_map AS m ON m.m_chrom = l.chrom) AS seg";
+/* The other arguments, checked also when there is no sample. */
 static const char fitted_counts_guard[] =
-    ROH_FITTED_GUARD_COLUMNS "FROM (SELECT DISTINCT CAST(sample_id AS VARCHAR) AS smp "
-    "FROM query_table(counts_table)) AS s "
-    "LEFT JOIN __dht_fit AS fit ON fit.smp IS NOT DISTINCT FROM s.smp "
-    "WHERE NOT __duckhts_roh_valid_args(3, NULL::DOUBLE, " ROH_FIT_MODEL("fit", "s.smp") ", "
-    "CAST(rec_rate AS DOUBLE), CAST(hw_to_az AS DOUBLE), CAST(az_to_hw AS DOUBLE), " ROH_LIMIT_ARGUMENTS ")"
     ROH_FITTED_GUARD_COLUMNS "FROM (SELECT 0.001 AS seq_error, 0.0 AS contamination, 0.5 AS allele_balance, "
     "0.0 AS artefact_weight) AS defaults WHERE NOT " ROH_COUNTS_ARGUMENTS_VALID;
 
@@ -560,7 +576,7 @@ typedef struct {
     const char *source_guard; /* checks of the source's own options; may be empty */
 } roh_source_t;
 
-/* Both overloads of one macro: the plain body and the body with a genetic map. */
+/* Register the base macro and its genetic-map form under separate names. */
 static bool register_roh_macro(duckhts_registration_t *registration, const roh_source_t *source) {
     const char *parts[ROH_MAX_PARTS];
     size_t count = 0;
@@ -581,7 +597,14 @@ static bool register_roh_macro(duckhts_registration_t *registration, const roh_s
     parts[count++] = from_lists;
     parts[count++] = genotype_guard;
     parts[count++] = source->source_guard;
-    parts[count++] = "), (path, ";
+    parts[count++] = ")";
+    if (!duckhts_register_sql_parts(registration, parts, count)) {
+        return false;
+    }
+    count = 0;
+    parts[count++] = "CREATE OR REPLACE MACRO ";
+    parts[count++] = source->name;
+    parts[count++] = "_map(path, ";
     parts[count++] = source->source_parameter;
     parts[count++] = ", genetic_map VARCHAR, ";
     parts[count++] = source->options;
@@ -616,7 +639,13 @@ static bool register_roh_ancestry_macro(duckhts_registration_t *registration) {
     parts[count++] = decode_end;
     parts[count++] = from_lists;
     parts[count++] = ancestry_guard;
-    parts[count++] = "), (path, reference_table, proportions_table, genetic_map VARCHAR, "
+    parts[count++] = ")";
+    if (!duckhts_register_sql_parts(registration, parts, count)) {
+        return false;
+    }
+    count = 0;
+    parts[count++] = "CREATE OR REPLACE MACRO duckhts_roh_ancestry_map("
+                     "path, reference_table, proportions_table, genetic_map VARCHAR, "
                      "af_clamp := 1e-3, " ROH_OPTIONS ") AS TABLE (";
     parts[count++] = ancestry_sites;
     parts[count++] = ancestry_validations;
@@ -645,19 +674,26 @@ static bool register_roh_counts_macro(duckhts_registration_t *registration, bool
     parts[count++] = fitted ? fitted_select_head : select_head;
     parts[count++] = fitted ? fitted_counts_model : counts_model;
     parts[count++] = no_map_arguments;
-    parts[count++] = decode_end;
+    parts[count++] = fitted ? fitted_decode_end : decode_end;
     parts[count++] = from_lists;
     parts[count++] = fitted ? fitted_counts_guard : counts_guard;
+    parts[count++] = ")";
+    if (!duckhts_register_sql_parts(registration, parts, count)) {
+        return false;
+    }
+    count = 0;
     parts[count++] = fitted
-        ? "), (counts_table, fit_table, genetic_map VARCHAR, " ROH_COUNTS_FITTED_OPTIONS ") AS TABLE ("
-        : "), (counts_table, genetic_map VARCHAR, " ROH_COUNTS_OPTIONS ") AS TABLE (";
+        ? "CREATE OR REPLACE MACRO duckhts_roh_counts_fitted_map("
+          "counts_table, fit_table, genetic_map VARCHAR, " ROH_COUNTS_FITTED_OPTIONS ") AS TABLE ("
+        : "CREATE OR REPLACE MACRO duckhts_roh_counts_map("
+          "counts_table, genetic_map VARCHAR, " ROH_COUNTS_OPTIONS ") AS TABLE (";
     parts[count++] = fitted ? fitted_counts_lists : counts_lists;
     parts[count++] = map_lists;
-    parts[count++] = fitted ? fitted_select_head : select_head;
+    parts[count++] = fitted ? fitted_select_head_with_map : select_head;
     parts[count++] = fitted ? fitted_counts_model : counts_model;
     parts[count++] = map_arguments;
-    parts[count++] = decode_end;
-    parts[count++] = from_lists_with_map;
+    parts[count++] = fitted ? fitted_decode_end : decode_end;
+    parts[count++] = fitted ? fitted_from_lists_with_map : from_lists_with_map;
     parts[count++] = fitted ? fitted_counts_guard : counts_guard;
     parts[count++] = ")";
     return duckhts_register_sql_parts(registration, parts, count);

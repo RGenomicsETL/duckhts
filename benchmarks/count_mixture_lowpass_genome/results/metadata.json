@@ -1,0 +1,658 @@
+{
+  "declaration_commit": "1735221a64bea0f49813090625e75cd7ea0d6acb",
+  "batching_amendment_commit": "957d03c91bfb3a49a0ae48286ae3275af6f446f2",
+  "execution_amendment_commit": "7fa78dc6ebdc371166e1551e15d3c1a46ac23112",
+  "collection_revision": "c12d666c0686fbc22ed63e27802f7afe2e22d20c",
+  "manifest_sha256": "14233c377fe8b6a710cfdf4d2f2b4dc021db5930b10577afbbba044a810b0cff",
+  "sources": {
+    "revision": "fd2573193d2d1b1f82eb2098a0214352445fe0e4",
+    "extension_sha256": "d2720a084c2dc8928976dacb1aa06cf8b09000fb3bd8ae04ce84ecba612d0677",
+    "settings": {
+      "seed": 332202611,
+      "chromosomes": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22
+      ],
+      "populations": [
+        "CEU",
+        "YRI"
+      ],
+      "block_bases": 10000000,
+      "min_blocks": 30,
+      "max_depth": 8,
+      "artefact_weight": 0.002
+    },
+    "input_identity": [
+      {
+        "id": "roh_ancestry_pedigree",
+        "release": "1000G_2504_high_coverage_20130606",
+        "supplier_identity": "bytes=97483;sha256=4e164b717433fc9bfc16e29b20e5b4659b4216185b3275322d421fe3d323c132"
+      },
+      {
+        "id": "roh_ancestry_chr1_children_bcf",
+        "release": "1000G_20201028_3202_phased_chr1",
+        "supplier_identity": "records=2930166;samples=377;records_sha256=d3a87b39d67927c5f3914bc85e483609a9865af62ab494277c0126eca3e3440c;bcftools=1.23.1-70-g6dbd8fef;sha256=96a9c74a3e3051f74ac1b46b4acf716983ba16713c1e18c000ac0b92eed1fe43"
+      },
+      {
+        "id": "roh_ancestry_chr1_af_sites",
+        "release": "1000G_20201028_3202_phased_chr1",
+        "supplier_identity": "sites=376549;reference_sites=386094;receipt=reference_sha256+children_bcf_sha256+extension_sha256+derivation_sha256+duckdb_version+output_sha256+rows+reference_sites;duckdb=v1.5.5;sha256=6512672642d92e612bd75b983f9b3f907315e988f2723e2046ea7f74ec00edec"
+      },
+      {
+        "id": "roh_ancestry_chr2_children_bcf",
+        "release": "1000G_20201028_3202_phased_chr2",
+        "supplier_identity": "records=3139480;samples=377;records_sha256=a1569f5211683ede7865afaf5d7f5d1dad7a936ff7788aa0f34d3b1508a854e3;bcftools=1.23.1-70-g6dbd8fef;sha256=1ce29c20d828e99420f5f8488c928cc487d309e3aea41f7482dfc75221c46485"
+      },
+      {
+        "id": "roh_ancestry_chr2_af_sites",
+        "release": "1000G_20201028_3202_phased_chr2",
+        "supplier_identity": "sites=404206;reference_sites=413936;receipt=reference_sha256+children_bcf_sha256+extension_sha256+derivation_sha256+duckdb_version+output_sha256+rows+reference_sites;duckdb=v1.5.5;sha256=6a5fe32268cf7def8ddc764f2722086b2f151658cc9dd9a2d96845d6edbad2ae"
+      },
+      {
+        "id": "roh_ancestry_chr3_children_bcf",
+        "release": "1000G_20201028_3202_phased_chr3",
+        "supplier_identity": "records=2598706;samples=377;records_sha256=3dcba141cf1eed8212c9196a1116d1bdc5a8be222b01b694caec6cb75a6ab1fb;bcftools=1.23.1-70-g6dbd8fef;sha256=c9c6c3da847123e437ebb99fd5b10e53c45019ababd4f938ef26e394bb834cc3"
+      },
+      {
+        "id": "roh_ancestry_chr3_af_sites",
+        "release": "1000G_20201028_3202_phased_chr3",
+        "supplier_identity": "sites=352971;reference_sites=359875;receipt=reference_sha256+children_bcf_sha256+extension_sha256+derivation_sha256+duckdb_version+output_sha256+rows+reference_sites;duckdb=v1.5.5;sha256=e385c6718081f970664db8cca6ee9c3ec8d2ed728189228f7b0200059f5e9315"
+      },
+      {
+        "id": "roh_ancestry_chr4_children_bcf",
+        "release": "1000G_20201028_3202_phased_chr4",
+        "supplier_identity": "records=2575009;samples=377;records_sha256=6b9a362ff255629f9b8259dcf52f2d49c56084a54bcfa7ff03b3c8f4bd602a22;bcftools=1.23.1-70-g6dbd8fef;sha256=93127e17f01d424696804b47e996544f524d3113a704e6dcc47f102d3418b067"
+      },
+      {
+        "id": "roh_ancestry_chr4_af_sites",
+        "release": "1000G_20201028_3202_phased_chr4",
+        "supplier_identity": "sites=361939;reference_sites=371219;receipt=reference_sha256+children_bcf_sha256+extension_sha256+derivation_sha256+duckdb_version+output_sha256+rows+reference_sites;duckdb=v1.5.5;sha256=f312b5f799af62e6dc9b0330b61c6d4bffc482fe8d115eab4dc0bb66355dc6a8"
+      },
+      {
+        "id": "roh_ancestry_chr5_children_bcf",
+        "release": "1000G_20201028_3202_phased_chr5",
+        "supplier_identity": "records=2387322;samples=377;records_sha256=86425dc231c450b810638df659211f4b2612d30a455e3ed9420b8c810c5d4e16;bcftools=1.23.1-70-g6dbd8fef;sha256=359132848a57db194347242dc78ea9ca0360ea9cd68ba0af61373886c8be9b4d"
+      },
+      {
+        "id": "roh_ancestry_chr5_af_sites",
+        "release": "1000G_20201028_3202_phased_chr5",
+        "supplier_identity": "sites=310401;reference_sites=317087;receipt=reference_sha256+children_bcf_sha256+extension_sha256+derivation_sha256+duckdb_version+output_sha256+rows+reference_sites;duckdb=v1.5.5;sha256=78aa4583d4bdca4a8f4c514a27f6d1095558b115d9813530e12f796645c1c063"
+      },
+      {
+        "id": "roh_ancestry_chr6_children_bcf",
+        "release": "1000G_20201028_3202_phased_chr6",
+        "supplier_identity": "records=2265577;samples=377;records_sha256=139760cd608312873972b2f9b385a8624f54ad85bae1fd5a74d370ae720a9bfd;bcftools=1.23.1-70-g6dbd8fef;sha256=32b17e13e0239131c980cbd879ea686d11ea857e69c6f45b59815c73917152db"
+      },
+      {
+        "id": "roh_ancestry_chr6_af_sites",
+        "release": "1000G_20201028_3202_phased_chr6",
+        "supplier_identity": "sites=331298;reference_sites=343218;receipt=reference_sha256+children_bcf_sha256+extension_sha256+derivation_sha256+duckdb_version+output_sha256+rows+reference_sites;duckdb=v1.5.5;sha256=67e640a591aa7f6404092c6202ea5588e96757a45958508c5404ddce66a3ff4e"
+      },
+      {
+        "id": "roh_ancestry_chr7_children_bcf",
+        "release": "1000G_20201028_3202_phased_chr7",
+        "supplier_identity": "records=2149504;samples=377;records_sha256=f596956648c02389ac635c5c38ebb9f9242abbe107f37ac28b4357ce8d02bf9d;bcftools=1.23.1-70-g6dbd8fef;sha256=7ba8639570bd38b44bee9935fcd4eba3f9f2948b25e3c3646fe1e10389893550"
+      },
+      {
+        "id": "roh_ancestry_chr7_af_sites",
+        "release": "1000G_20201028_3202_phased_chr7",
+        "supplier_identity": "sites=290391;reference_sites=299345;receipt=reference_sha256+children_bcf_sha256+extension_sha256+derivation_sha256+duckdb_version+output_sha256+rows+reference_sites;duckdb=v1.5.5;sha256=c895a713f5f7943fa62c0d3e6325504fc6ee26ddf7d001ec28ace23275b9f254"
+      },
+      {
+        "id": "roh_ancestry_chr8_children_bcf",
+        "release": "1000G_20201028_3202_phased_chr8",
+        "supplier_identity": "records=2036799;samples=377;records_sha256=d7d12a50fc440c4908f347b0bd36f262ad3f1f1c7374b0586ceaa00d78b0143b;bcftools=1.23.1-70-g6dbd8fef;sha256=74c65b9f3dc65d110be11abc0927813260c5410c2609f14a2f731d2a46a935da"
+      },
+      {
+        "id": "roh_ancestry_chr8_af_sites",
+        "release": "1000G_20201028_3202_phased_chr8",
+        "supplier_identity": "sites=265510;reference_sites=272158;receipt=reference_sha256+children_bcf_sha256+extension_sha256+derivation_sha256+duckdb_version+output_sha256+rows+reference_sites;duckdb=v1.5.5;sha256=8c3cc3658c91d8682fe01e0a21e289ac9759e05e46765015d3ef3f5acdc76c99"
+      },
+      {
+        "id": "roh_ancestry_chr9_children_bcf",
+        "release": "1000G_20201028_3202_phased_chr9",
+        "supplier_identity": "records=1651537;samples=377;records_sha256=966a5c80b203765664685e67b390a6e4d3d650ca0bb711249468bc6b8e9f5c45;bcftools=1.23.1-70-g6dbd8fef;sha256=bc7ce3156c2561c43c2126e1622d0637c92355222596d4ed25f428e9eb9e501d"
+      },
+      {
+        "id": "roh_ancestry_chr9_af_sites",
+        "release": "1000G_20201028_3202_phased_chr9",
+        "supplier_identity": "sites=208413;reference_sites=213012;receipt=reference_sha256+children_bcf_sha256+extension_sha256+derivation_sha256+duckdb_version+output_sha256+rows+reference_sites;duckdb=v1.5.5;sha256=7a034af931a481651bdde95ef525984b50f8f660989510c07574b687b96abb11"
+      },
+      {
+        "id": "roh_ancestry_chr10_children_bcf",
+        "release": "1000G_20201028_3202_phased_chr10",
+        "supplier_identity": "records=1823834;samples=377;records_sha256=29f334954ebef86fbdebdb32645b84e2428d9abad083817c83f8b60d74b6564e;bcftools=1.23.1-70-g6dbd8fef;sha256=05938cee249d0c17acc96d1de0ec0a03d7e84a6a6a4d22a4a0d7ad164082c83a"
+      },
+      {
+        "id": "roh_ancestry_chr10_af_sites",
+        "release": "1000G_20201028_3202_phased_chr10",
+        "supplier_identity": "sites=247518;reference_sites=254053;receipt=reference_sha256+children_bcf_sha256+extension_sha256+derivation_sha256+duckdb_version+output_sha256+rows+reference_sites;duckdb=v1.5.5;sha256=ea375c4c51577f21526bd03350e18de4e42fea4d500c11f23b5bfb2384e2fd00"
+      },
+      {
+        "id": "roh_ancestry_chr11_children_bcf",
+        "release": "1000G_20201028_3202_phased_chr11",
+        "supplier_identity": "records=1798385;samples=377;records_sha256=97e0eb62e06db43bc9bd44f0710602d5294967dfc9d46a90b46f2432853722fc;bcftools=1.23.1-70-g6dbd8fef;sha256=63f1a70b3dcfa65cf06ae485600478fa695be0706a87fd071cecdc590f3711a9"
+      },
+      {
+        "id": "roh_ancestry_chr11_af_sites",
+        "release": "1000G_20201028_3202_phased_chr11",
+        "supplier_identity": "sites=242240;reference_sites=248003;receipt=reference_sha256+children_bcf_sha256+extension_sha256+derivation_sha256+duckdb_version+output_sha256+rows+reference_sites;duckdb=v1.5.5;sha256=037d00b133830837ef9995c58394432be219c5a48f57bca058df0725d4b2fcfa"
+      },
+      {
+        "id": "roh_ancestry_chr12_children_bcf",
+        "release": "1000G_20201028_3202_phased_chr12",
+        "supplier_identity": "records=1729266;samples=377;records_sha256=437e264e1a22a1d72143e921df261e311fd852a27004ace19e44d12485dfb2a2;bcftools=1.23.1-70-g6dbd8fef;sha256=f071c7dae1c6c76bb29fe06a2bd91d36d101e74522fd45d9dca123b8479075e4"
+      },
+      {
+        "id": "roh_ancestry_chr12_af_sites",
+        "release": "1000G_20201028_3202_phased_chr12",
+        "supplier_identity": "sites=235053;reference_sites=240691;receipt=reference_sha256+children_bcf_sha256+extension_sha256+derivation_sha256+duckdb_version+output_sha256+rows+reference_sites;duckdb=v1.5.5;sha256=6531017adf3ba35a84d7fb976f28d2a6b0cf8d1264131deb2ba191dea65073d9"
+      },
+      {
+        "id": "roh_ancestry_chr13_children_bcf",
+        "release": "1000G_20201028_3202_phased_chr13",
+        "supplier_identity": "records=1303393;samples=377;records_sha256=44bfd1c6905529e9446c6a03e87d67577d2708c073a24ca6c57ed8c63dea4be3;bcftools=1.23.1-70-g6dbd8fef;sha256=19c980ecbd9ef1e2dfb1fcae6aa442ccd74502b48f42a0d30b3705f9e22b3afc"
+      },
+      {
+        "id": "roh_ancestry_chr13_af_sites",
+        "release": "1000G_20201028_3202_phased_chr13",
+        "supplier_identity": "sites=182042;reference_sites=185938;receipt=reference_sha256+children_bcf_sha256+extension_sha256+derivation_sha256+duckdb_version+output_sha256+rows+reference_sites;duckdb=v1.5.5;sha256=8f3354b0beaa17e970232c9dbfd17f71e357d1df75facb6f41d719e6dedf72ce"
+      },
+      {
+        "id": "roh_ancestry_chr14_children_bcf",
+        "release": "1000G_20201028_3202_phased_chr14",
+        "supplier_identity": "records=1188783;samples=377;records_sha256=942d86065daae90cf23e5c35fe3feb5b383c947a4c95304dccbcc060bde44555;bcftools=1.23.1-70-g6dbd8fef;sha256=167df8da0f3b365fc84fb8328ddb4eecf82c430375c824de15d31d0be1f7fcf5"
+      },
+      {
+        "id": "roh_ancestry_chr14_af_sites",
+        "release": "1000G_20201028_3202_phased_chr14",
+        "supplier_identity": "sites=157853;reference_sites=162444;receipt=reference_sha256+children_bcf_sha256+extension_sha256+derivation_sha256+duckdb_version+output_sha256+rows+reference_sites;duckdb=v1.5.5;sha256=119f791f2235f0004a361ce2cb566265e9d242b5c737dbad62900bd78880a0dc"
+      },
+      {
+        "id": "roh_ancestry_chr15_children_bcf",
+        "release": "1000G_20201028_3202_phased_chr15",
+        "supplier_identity": "records=1091118;samples=377;records_sha256=df864bbeda8fafadc6ecd998dd1d9d3f11824d81f6903f82678b431c0ffb09f7;bcftools=1.23.1-70-g6dbd8fef;sha256=3f14c31a2b5e21dff79b80301f1fb970e0d90570b55d1caaa8968e96dda838a9"
+      },
+      {
+        "id": "roh_ancestry_chr15_af_sites",
+        "release": "1000G_20201028_3202_phased_chr15",
+        "supplier_identity": "sites=139275;reference_sites=142752;receipt=reference_sha256+children_bcf_sha256+extension_sha256+derivation_sha256+duckdb_version+output_sha256+rows+reference_sites;duckdb=v1.5.5;sha256=2fa24d7945609e98df1fd8acb393ca659e99d411e521b0c01d3afe81ad671a7d"
+      },
+      {
+        "id": "roh_ancestry_chr16_children_bcf",
+        "release": "1000G_20201028_3202_phased_chr16",
+        "supplier_identity": "records=1212714;samples=377;records_sha256=f266de1cc7657379f6abf386429a3b7017f8215d8baebafc85253a249662390c;bcftools=1.23.1-70-g6dbd8fef;sha256=9f365903619abcdd476bfa0766812ba02e878191f36cbe5a6e2b642dfbdc2940"
+      },
+      {
+        "id": "roh_ancestry_chr16_af_sites",
+        "release": "1000G_20201028_3202_phased_chr16",
+        "supplier_identity": "sites=145409;reference_sites=149975;receipt=reference_sha256+children_bcf_sha256+extension_sha256+derivation_sha256+duckdb_version+output_sha256+rows+reference_sites;duckdb=v1.5.5;sha256=5adb4f324657dfccfe8d9d7cc339b1652aa73537dc390aa333fe74a6250ba265"
+      },
+      {
+        "id": "roh_ancestry_chr17_children_bcf",
+        "release": "1000G_20201028_3202_phased_chr17",
+        "supplier_identity": "records=1041119;samples=377;records_sha256=8ac1b0866cb106e35bfe99498ffd55fe464f727b8e54d352172ceb796738fc70;bcftools=1.23.1-70-g6dbd8fef;sha256=18aa70829e5ee0dbf9086bfffb7265dd9abd1fc9edee5e7c51520b3d3160946b"
+      },
+      {
+        "id": "roh_ancestry_chr17_af_sites",
+        "release": "1000G_20201028_3202_phased_chr17",
+        "supplier_identity": "sites=127000;reference_sites=131237;receipt=reference_sha256+children_bcf_sha256+extension_sha256+derivation_sha256+duckdb_version+output_sha256+rows+reference_sites;duckdb=v1.5.5;sha256=1c9fc31b24ef11ddc2f1ddc8ddc219074eea76aa1b108f6cd4940b9e46d2cde7"
+      },
+      {
+        "id": "roh_ancestry_chr18_children_bcf",
+        "release": "1000G_20201028_3202_phased_chr18",
+        "supplier_identity": "records=1028543;samples=377;records_sha256=4efe63cfc6142d5e143e501e00c7d8cbb46dc1efe2f1f13707f5d97b50fbbb5b;bcftools=1.23.1-70-g6dbd8fef;sha256=e681322da2b28d9c6d13a308ea1fb99fbe5774c6ef5a3103f86db73e9e915859"
+      },
+      {
+        "id": "roh_ancestry_chr18_af_sites",
+        "release": "1000G_20201028_3202_phased_chr18",
+        "supplier_identity": "sites=144036;reference_sites=147174;receipt=reference_sha256+children_bcf_sha256+extension_sha256+derivation_sha256+duckdb_version+output_sha256+rows+reference_sites;duckdb=v1.5.5;sha256=951dfc8346b849e34b53349e5cf17d5f5dd133a2a3163c08a4c04b9dcaf62932"
+      },
+      {
+        "id": "roh_ancestry_chr19_children_bcf",
+        "release": "1000G_20201028_3202_phased_chr19",
+        "supplier_identity": "records=838108;samples=377;records_sha256=abaf50988809692907094f29cd67c3c30209e322f6798defda61b9e7044ad830;bcftools=1.23.1-70-g6dbd8fef;sha256=892ae4ab2d21b19fb2564edf8b752d1e13b7a55bcf4b31697c722131df5da456"
+      },
+      {
+        "id": "roh_ancestry_chr19_af_sites",
+        "release": "1000G_20201028_3202_phased_chr19",
+        "supplier_identity": "sites=115997;reference_sites=120763;receipt=reference_sha256+children_bcf_sha256+extension_sha256+derivation_sha256+duckdb_version+output_sha256+rows+reference_sites;duckdb=v1.5.5;sha256=62bcf7c925808880719fda68413530bc87a8608709a5bc8ab0942e8d3f51c5fd"
+      },
+      {
+        "id": "roh_ancestry_chr20_children_bcf",
+        "release": "1000G_20201028_3202_phased_chr20",
+        "supplier_identity": "records=849143;samples=377;records_sha256=a10defdaae8adf4e429baacf43934f51aeb8bd5643b0a304c3f6ce0d4bee673e;bcftools=1.23.1-70-g6dbd8fef;sha256=a53f83cebd7de6fb4661c14ecd93e5346022ff453392095a085e0b7cda116541"
+      },
+      {
+        "id": "roh_ancestry_chr20_af_sites",
+        "release": "1000G_20201028_3202_phased_chr20",
+        "supplier_identity": "sites=108757;all_five_AF_fields=nonnull;sha256=b862fc7db2020ea91c1d8a706d22b8d3fb8949620829037f9e3245083f5eda63"
+      },
+      {
+        "id": "roh_ancestry_chr21_children_bcf",
+        "release": "1000G_20201028_3202_phased_chr21",
+        "supplier_identity": "records=526031;samples=377;records_sha256=7d993691464401ea6413b6d56a7f1ec7e1da2cac1edd79acd29cdd1f961c5782;bcftools=1.23.1-70-g6dbd8fef;sha256=576c8232cbddf3a6dff5f3daa7a402f5b5a91cfb125446f84bcd04db1858dfe1"
+      },
+      {
+        "id": "roh_ancestry_chr21_af_sites",
+        "release": "1000G_20201028_3202_phased_chr21",
+        "supplier_identity": "sites=69521;reference_sites=72493;receipt=reference_sha256+children_bcf_sha256+extension_sha256+derivation_sha256+duckdb_version+output_sha256+rows+reference_sites;duckdb=v1.5.5;sha256=a3e1be1eb443e8b193ad01fc1ea4edd7ac06095cbeb82bad289b26650c9406d8"
+      },
+      {
+        "id": "roh_ancestry_chr22_children_bcf",
+        "release": "1000G_20201028_3202_phased_chr22",
+        "supplier_identity": "records=540617;samples=377;records_sha256=b5e88e652043dbbd764e8ee0432d6be867efa0d382179b80abc66754b1f655d1;bcftools=1.23.1-70-g6dbd8fef;sha256=8f6129e3587be10a8ca11dd2904d5e5a8931c2deeef37548a002353261f0be7b"
+      },
+      {
+        "id": "roh_ancestry_chr22_af_sites",
+        "release": "1000G_20201028_3202_phased_chr22",
+        "supplier_identity": "sites=67370;reference_sites=70301;receipt=reference_sha256+children_bcf_sha256+extension_sha256+derivation_sha256+duckdb_version+output_sha256+rows+reference_sites;duckdb=v1.5.5;sha256=522954ac326e33b7678686624e5d7b2eba6447f264ec16fcc5aab2e9237a8bca"
+      }
+    ],
+    "artifacts": [
+      {
+        "chrom": 1,
+        "artifact": "count_mixture_lowpass_chr1_children_haplotypes",
+        "sha256": "090af20659489566191a6c130602d8ca58f877708d884e617db5d67d2b6124ee",
+        "sites": 376549,
+        "bytes": 10553962
+      },
+      {
+        "chrom": 2,
+        "artifact": "count_mixture_lowpass_chr2_children_haplotypes",
+        "sha256": "ef5a28dbcb3c388b3444e48edf4327b8b2e0af2815341e6bb498b42d85504f02",
+        "sites": 404206,
+        "bytes": 11325563
+      },
+      {
+        "chrom": 3,
+        "artifact": "count_mixture_lowpass_chr3_children_haplotypes",
+        "sha256": "aafe42a4e10233a64162ccedc55acac165c1135de44ddc8b46f651208c5164da",
+        "sites": 352971,
+        "bytes": 9888217
+      },
+      {
+        "chrom": 4,
+        "artifact": "count_mixture_lowpass_chr4_children_haplotypes",
+        "sha256": "15c1be15182e940544ee2d6eb153ec0c0c372604f3cd5d12cc9094d74305e4ab",
+        "sites": 361939,
+        "bytes": 10012559
+      },
+      {
+        "chrom": 5,
+        "artifact": "count_mixture_lowpass_chr5_children_haplotypes",
+        "sha256": "ceb1582927eb6502913cb2e46d62468911775cba49de758297febdabab01d449",
+        "sites": 310401,
+        "bytes": 8714285
+      },
+      {
+        "chrom": 6,
+        "artifact": "count_mixture_lowpass_chr6_children_haplotypes",
+        "sha256": "9ed771f59b9015b365ffa883fea89e59d49d7f60441d6119321eeb050c662d4e",
+        "sites": 331298,
+        "bytes": 9171100
+      },
+      {
+        "chrom": 7,
+        "artifact": "count_mixture_lowpass_chr7_children_haplotypes",
+        "sha256": "b5bc41be4ea4a9bced20ad8fb496915c857deaff8e5712eed093711bed5da8f9",
+        "sites": 290391,
+        "bytes": 8152350
+      },
+      {
+        "chrom": 8,
+        "artifact": "count_mixture_lowpass_chr8_children_haplotypes",
+        "sha256": "e4cf9248e7813a91b928fc3d6e0e1802b285e9548801992c767178166d014b8d",
+        "sites": 265510,
+        "bytes": 7431028
+      },
+      {
+        "chrom": 9,
+        "artifact": "count_mixture_lowpass_chr9_children_haplotypes",
+        "sha256": "fb57ecbccffa7a42ed2100820ccc2840d12f74297a48e131448461df0f383fd9",
+        "sites": 208413,
+        "bytes": 5910641
+      },
+      {
+        "chrom": 10,
+        "artifact": "count_mixture_lowpass_chr10_children_haplotypes",
+        "sha256": "9f4392960057853ee994e51d6b08cb42ad7f51484c687e0bac46115c3427b39f",
+        "sites": 247518,
+        "bytes": 6904788
+      },
+      {
+        "chrom": 11,
+        "artifact": "count_mixture_lowpass_chr11_children_haplotypes",
+        "sha256": "9472c8a43b0224acb5939fbd23072110355f2be90d76f07efd75f928e56971be",
+        "sites": 242240,
+        "bytes": 6837267
+      },
+      {
+        "chrom": 12,
+        "artifact": "count_mixture_lowpass_chr12_children_haplotypes",
+        "sha256": "05db3eeccde84bd46333141c8256c5b6e9bf20f2419685c21856f2c9061760fa",
+        "sites": 235053,
+        "bytes": 6595166
+      },
+      {
+        "chrom": 13,
+        "artifact": "count_mixture_lowpass_chr13_children_haplotypes",
+        "sha256": "76bd11b424ca3d73199acb2c9b82cfe68072793575c11cca0866c869d6f3577c",
+        "sites": 182042,
+        "bytes": 5125594
+      },
+      {
+        "chrom": 14,
+        "artifact": "count_mixture_lowpass_chr14_children_haplotypes",
+        "sha256": "6cd9bd75bb31921a134065155f4ad0e9be03a1a588cb35c6c24bbd3d9d3048a2",
+        "sites": 157853,
+        "bytes": 4478492
+      },
+      {
+        "chrom": 15,
+        "artifact": "count_mixture_lowpass_chr15_children_haplotypes",
+        "sha256": "56e3bf7c3e0d0001055bb18f14be079078565b8a368aa0852cd8c4bd6c2e5ac4",
+        "sites": 139275,
+        "bytes": 3981586
+      },
+      {
+        "chrom": 16,
+        "artifact": "count_mixture_lowpass_chr16_children_haplotypes",
+        "sha256": "c98fbd57cdb418682d11c4018724b2f6285f3c382e3d1088ffe8420f514429e1",
+        "sites": 145409,
+        "bytes": 4176550
+      },
+      {
+        "chrom": 17,
+        "artifact": "count_mixture_lowpass_chr17_children_haplotypes",
+        "sha256": "2f6c8322542879e4b95a1092bcda5f7032dae36918a78d157545db125d69038b",
+        "sites": 127000,
+        "bytes": 3623642
+      },
+      {
+        "chrom": 18,
+        "artifact": "count_mixture_lowpass_chr18_children_haplotypes",
+        "sha256": "bded0f1e562f80383e056b9ae7cd6c2328e041b4495e5d4d394e42913f4129b4",
+        "sites": 144036,
+        "bytes": 4090070
+      },
+      {
+        "chrom": 19,
+        "artifact": "count_mixture_lowpass_chr19_children_haplotypes",
+        "sha256": "a45cbe2e02ded2b56ce65790308422fe121c2c9de2b55c7319a786a57fee2a7b",
+        "sites": 115997,
+        "bytes": 3246827
+      },
+      {
+        "chrom": 20,
+        "artifact": "count_mixture_lowpass_chr20_children_haplotypes",
+        "sha256": "1099c7865dd62cfa6d4ea30d5be94aa570e1a2c51c4589539dc3f4633b1a7b8b",
+        "sites": 108757,
+        "bytes": 3079688
+      },
+      {
+        "chrom": 21,
+        "artifact": "count_mixture_lowpass_chr21_children_haplotypes",
+        "sha256": "cd2925c897925b03c3c34ca016be4dc036545aefd25e04360a2293c3f81ed2f9",
+        "sites": 69521,
+        "bytes": 2005806
+      },
+      {
+        "chrom": 22,
+        "artifact": "count_mixture_lowpass_chr22_children_haplotypes",
+        "sha256": "8706a384df5a4197e2534b00ab4eb2d0a22db0b791ae4134d7d965a279bb00ef",
+        "sites": 67370,
+        "bytes": 1935594
+      }
+    ],
+    "phase": [
+      {
+        "chrom": 1,
+        "artifact": "roh_ancestry_chr1_children_bcf",
+        "unphased_records": 0
+      },
+      {
+        "chrom": 2,
+        "artifact": "roh_ancestry_chr2_children_bcf",
+        "unphased_records": 0
+      },
+      {
+        "chrom": 3,
+        "artifact": "roh_ancestry_chr3_children_bcf",
+        "unphased_records": 0
+      },
+      {
+        "chrom": 4,
+        "artifact": "roh_ancestry_chr4_children_bcf",
+        "unphased_records": 0
+      },
+      {
+        "chrom": 5,
+        "artifact": "roh_ancestry_chr5_children_bcf",
+        "unphased_records": 0
+      },
+      {
+        "chrom": 6,
+        "artifact": "roh_ancestry_chr6_children_bcf",
+        "unphased_records": 0
+      },
+      {
+        "chrom": 7,
+        "artifact": "roh_ancestry_chr7_children_bcf",
+        "unphased_records": 0
+      },
+      {
+        "chrom": 8,
+        "artifact": "roh_ancestry_chr8_children_bcf",
+        "unphased_records": 0
+      },
+      {
+        "chrom": 9,
+        "artifact": "roh_ancestry_chr9_children_bcf",
+        "unphased_records": 0
+      },
+      {
+        "chrom": 10,
+        "artifact": "roh_ancestry_chr10_children_bcf",
+        "unphased_records": 0
+      },
+      {
+        "chrom": 11,
+        "artifact": "roh_ancestry_chr11_children_bcf",
+        "unphased_records": 0
+      },
+      {
+        "chrom": 12,
+        "artifact": "roh_ancestry_chr12_children_bcf",
+        "unphased_records": 0
+      },
+      {
+        "chrom": 13,
+        "artifact": "roh_ancestry_chr13_children_bcf",
+        "unphased_records": 0
+      },
+      {
+        "chrom": 14,
+        "artifact": "roh_ancestry_chr14_children_bcf",
+        "unphased_records": 0
+      },
+      {
+        "chrom": 15,
+        "artifact": "roh_ancestry_chr15_children_bcf",
+        "unphased_records": 0
+      },
+      {
+        "chrom": 16,
+        "artifact": "roh_ancestry_chr16_children_bcf",
+        "unphased_records": 0
+      },
+      {
+        "chrom": 17,
+        "artifact": "roh_ancestry_chr17_children_bcf",
+        "unphased_records": 0
+      },
+      {
+        "chrom": 18,
+        "artifact": "roh_ancestry_chr18_children_bcf",
+        "unphased_records": 0
+      },
+      {
+        "chrom": 19,
+        "artifact": "roh_ancestry_chr19_children_bcf",
+        "unphased_records": 0
+      },
+      {
+        "chrom": 20,
+        "artifact": "roh_ancestry_chr20_children_bcf",
+        "unphased_records": 0
+      },
+      {
+        "chrom": 21,
+        "artifact": "roh_ancestry_chr21_children_bcf",
+        "unphased_records": 0
+      },
+      {
+        "chrom": 22,
+        "artifact": "roh_ancestry_chr22_children_bcf",
+        "unphased_records": 0
+      }
+    ],
+    "driver_sha256": [
+      "f0aa8c86f445a77f139ba6b5d5cce0965e2d9ea6a89ce58f02dd3d32a53aa2db",
+      "d965f1373a9d6bd53605139c60ca1ae411a463a2838eea2caeaeab05e4483932",
+      "7880abe9ab728637d9146822f1157142f8af0a16faaad82bffd41125e1c5b386",
+      "f701a47d184c62b7a60f750a1d5a323bc7f375487f6f4c18cc01b0f5f5bdf213",
+      "e327c00ec7e18eaae5aec6cbbb60d98420e9715607206a1cbc163899f838cf05",
+      "ad8f0d779cb7558d5c3591e3f1d282aab28e581f17d973887c26e1f88d7e963a",
+      "17e1e79335d74a5bb10bc5bebad0b4da25235746173f4db857fc32026c3022ec",
+      "07ea64ac7eb1028cf4122d021ac24080b0c65b86fd6a24a090a311d68e380f09",
+      "1605807acd713aeca0e693b87770c12fb508f1e78260c0fd88c4be497efe2cbe",
+      "b7791c463529d0030b12cf2d1eef9293ac3ab560671a8ccdb90367f66ae307c8",
+      "b2ed38e59a22391ec9cf134135fbed65193aeb773533ee1fb124977c6301321e",
+      "3069d6daae67811f12934d7b8ae5826ddf17505aa02fc2881cac406160d55324",
+      "50091bf67dca42f071a99dcade06437419eeb83ec8a65d08b6657d2c08937ca3"
+    ],
+    "runtime": {
+      "R": "R version 4.6.0 (2026-04-24)",
+      "duckdb": "1.5.5"
+    }
+  },
+  "collection_driver_sha256": "4b95657dbc4c82bba304b23c939c36048395a2951a90a41389e7be92aa19005e",
+  "cpu": [
+    "Architecture:                         x86_64",
+    "CPU op-mode(s):                       32-bit, 64-bit",
+    "Address sizes:                        46 bits physical, 48 bits virtual",
+    "Byte Order:                           Little Endian",
+    "CPU(s):                               20",
+    "On-line CPU(s) list:                  0-19",
+    "Vendor ID:                            GenuineIntel",
+    "BIOS Vendor ID:                       Intel(R) Corporation",
+    "Model name:                           13th Gen Intel(R) Core(TM) i5-13500",
+    "BIOS Model name:                      13th Gen Intel(R) Core(TM) i5-13500 To Be Filled By O.E.M. CPU @ 2.4GHz",
+    "BIOS CPU family:                      205",
+    "CPU family:                           6",
+    "Model:                                191",
+    "Thread(s) per core:                   2",
+    "Core(s) per socket:                   14",
+    "Socket(s):                            1",
+    "Stepping:                             2",
+    "CPU(s) scaling MHz:                   38%",
+    "CPU max MHz:                          4800.0000",
+    "CPU min MHz:                          800.0000",
+    "BogoMIPS:                             4992.00",
+    "Flags:                                fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts acpi mmx fxsr sse sse2 ss ht tm pbe syscall nx pdpe1gb rdtscp lm constant_tsc art arch_perfmon pebs bts rep_good nopl xtopology nonstop_tsc cpuid aperfmperf tsc_known_freq pni pclmulqdq dtes64 monitor ds_cpl vmx smx est tm2 ssse3 sdbg fma cx16 xtpr pdcm sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand lahf_lm abm 3dnowprefetch cpuid_fault epb ssbd ibrs ibpb stibp ibrs_enhanced tpr_shadow flexpriority ept vpid ept_ad fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid rdseed adx smap clflushopt clwb intel_pt sha_ni xsaveopt xsavec xgetbv1 xsaves split_lock_detect user_shstk avx_vnni dtherm ida arat pln pts hwp hwp_notify hwp_act_window hwp_epp hwp_pkg_req hfi vnmi umip pku ospke waitpkg gfni vaes vpclmulqdq tme rdpid movdiri movdir64b fsrm md_clear serialize pconfig arch_lbr ibt flush_l1d arch_capabilities",
+    "Virtualization:                       VT-x",
+    "L1d cache:                            544 KiB (14 instances)",
+    "L1i cache:                            704 KiB (14 instances)",
+    "L2 cache:                             11.5 MiB (8 instances)",
+    "L3 cache:                             24 MiB (1 instance)",
+    "NUMA node(s):                         1",
+    "NUMA node0 CPU(s):                    0-19",
+    "Vulnerability Gather data sampling:   Not affected",
+    "Vulnerability Itlb multihit:          Not affected",
+    "Vulnerability L1tf:                   Not affected",
+    "Vulnerability Mds:                    Not affected",
+    "Vulnerability Meltdown:               Not affected",
+    "Vulnerability Mmio stale data:        Not affected",
+    "Vulnerability Reg file data sampling: Mitigation; Clear Register File",
+    "Vulnerability Retbleed:               Not affected",
+    "Vulnerability Spec rstack overflow:   Not affected",
+    "Vulnerability Spec store bypass:      Mitigation; Speculative Store Bypass disabled via prctl",
+    "Vulnerability Spectre v1:             Mitigation; usercopy/swapgs barriers and __user pointer sanitization",
+    "Vulnerability Spectre v2:             Mitigation; Enhanced / Automatic IBRS; IBPB conditional; RSB filling; PBRSB-eIBRS SW sequence; BHI BHI_DIS_S",
+    "Vulnerability Srbds:                  Not affected",
+    "Vulnerability Tsx async abort:        Not affected"
+  ],
+  "date": "2026-10-13 23:30:04",
+  "result_sha256": {
+    "allocation_failures.csv": "2b537339bdf2f5669be97b6785ef558cd9d648172f670a141e4bc47e5b75daa9",
+    "campaign_timing.csv": "49719ae1b13e9d0b9af64a3376422ec797adbe52e5677188d28635fef08d0f42",
+    "covered_control_fits.rds.gz": "04996b0c458834365e3f1de37bef4d2861568a731e8fd875a4472d93f721bd5c",
+    "covered_equivalence.csv": "0b59a3990219b4330cc09cd4476691e0ea2fd41e4f97094804d8a4c7011b8f4e",
+    "manifest.rds": "14233c377fe8b6a710cfdf4d2f2b4dc021db5930b10577afbbba044a810b0cff",
+    "microbatch_probe.csv": "dce7bca69c2e3f5b2e0b7258e566b9289e3b8822cc9637d6d2c630145423dc3d",
+    "oracle_and_threads.csv": "2ae3abfb645f9dbee1cdba652579a23ccf9ade81690201c5d5b3ea55645eb447",
+    "performance.rds.gz": "3db0b02e9f0ac545b48820c204161636c09f366ff6eefb2dfdd6dc8c210ccb9d",
+    "phase.csv": "857fefbf9e805531f7404e38a0ac004d4706589f798c68d8a94acf9fe6158fb8",
+    "replicates.rds.gz": "0b8f62535e34c3ab323588f0c7c1f8f2a8841c0cbf068381d26adabdb6f6e59a",
+    "scaling.csv": "8e02b821f6094b81bab638709d1697fe86fc9107bc214c49ca0de56327bd99f9",
+    "statuses.csv": "20c1a106001b95ca40ace53a1cb0da52d559340b414031bf043914f97ced6b99",
+    "strata.csv": "e2d61c5b3eef1378e707045cfa96a88531127fffb4ce25701b05c6551d6b3873"
+  },
+  "receipt_sha256": {
+    "campaign.log": "616988ce92dbb628584962abfd1cc29f8d9272c2d1e2832e9b175ac1f4d8c7aa",
+    "pilot-stratum04.log": "1797a7d8b6b60ce7545770138336b774b35a80d2e82bf5e92252a42272532ec1",
+    "worker01.log": "c74f967a164ce433230c4b5616402c78fd3d0597ab907d9b39874f75b11df59c",
+    "worker02.log": "d48fb3f6e06f82e112377f8a635f09822f302c01396a11207b24fdaa771b4ee9",
+    "worker03.log": "cac8d403619b962dd98bfd4fffee2e69b90aee3d246d6b1dbd31806be858be5e",
+    "worker04.log": "8846c0ab48ddb4ec5d10876a9e8856ba32ab44004a03eb1793de54ba216dcfe7",
+    "worker05.log": "19a91cebe9911a54aaffc4c4d8473fb3f9e2a965ef63533e9dcf85817e795f18",
+    "worker06.log": "885442524de915b111a3ebb5513c312464cbcdbd6aed520803090fac81f18c1f",
+    "worker07.log": "49c86ef5e2e0f43630f544c8f110af198397b3764981433a11e2a7f5a128236b",
+    "worker08.log": "e0339e319c9d63967fc0fd32d52f0a2e94fd7761cc00daa436d0531f8a7cbcb2",
+    "worker09.log": "1d738efd1bc1523b7542a1070ed28fbad72097a4e63127858461da2b94e288db",
+    "worker10.log": "4625a7e1f90d2f59d2f05c979dd90abe8c42ebfdcb078d850ec0ae33a7b574e5",
+    "worker11.log": "60c060434fc9d4a39f218d702d8481077115d747112f184a1618b8c5f853011d",
+    "worker12.log": "5dbaa8a0d0e7fe289c3d1b71624f9acfc4a12f8290500a5f080ef9e175fd1235",
+    "worker13.log": "2adc21b933353c040a1f55e2772c1a8799b1ba4ab9c331be1d8c3ad2761e81d0",
+    "worker14.log": "a22d11b3efe9f97098363ccef5e9eb5ee335da24ecaab7d878359c6bb10ffe58",
+    "depth0.1-stride1-rep1.log": "48cf20eff18921bc2238915815c36a5560a6b2a93e7a3ca086d826f8fe1c48d7",
+    "depth0.1-stride1-rep2.log": "fb5ef3ba5fc1ec2a7834de3b1eab58581750cb58e4422daf8a3422227406c42c",
+    "depth0.1-stride1-rep3.log": "ece3c795632617e75c3eaf47fabc556b80ef8ca99801d8bd9123c2c7cfedaf64",
+    "depth0.1-stride2-rep1.log": "a277c5acf47048cb18e740075144a9ac3c03889ce8150da6a92acfea316c4a17",
+    "depth0.1-stride2-rep2.log": "6c035b5c4dab86612e6a7deb0ae9e9ecf89b537c5f4674878705db72de34f45d",
+    "depth0.1-stride2-rep3.log": "e60a039755f3e3cfe9f0665a307cbef829b217d1427f8fa7f938e1e0bcbf0a8b",
+    "depth0.1-stride4-rep1.log": "2f375dfbabad770c4127ada23efa7c0dce4d35316c9a46aa6edc4bc7cbcc937b",
+    "depth0.1-stride4-rep2.log": "41653d7a058412e38d8f9982533967074e7bbffad76a8800362c112e772ec7f4",
+    "depth0.1-stride4-rep3.log": "9c4d94547cf96095eb67e1613f7779934513847e6ed9661dd61da0a28d6862f1",
+    "depth0.4-stride1-rep1.log": "e2521ea71dabd1a56ad6ae733f34e205f8b350aa73ff504d53a52dc7a9571f21",
+    "depth0.4-stride1-rep2.log": "e87a810fccf195303f7ebea1ffc2b5fac4895910aafb6036859b3e78bf679b07",
+    "depth0.4-stride1-rep3.log": "326bc1679d28ea1634d773f7d1ae372bf58b43214f25356866ed7858cf976ea4",
+    "depth0.4-stride2-rep1.log": "bf5b6baa5efecb52784f1f5fb261fafb3c9cedf41ad33655cedaa96771c0f3c8",
+    "depth0.4-stride2-rep2.log": "3d22a1440526717507632e4d47504560c0c83d784a320d1787b1e4e5bb561bd4",
+    "depth0.4-stride2-rep3.log": "602c7c5ea5d3145fe65b838a8325b4618914b99a698df43a090efe110cccc990",
+    "depth0.4-stride4-rep1.log": "e446a94edcd5999da0b4d08b8083fbe3002da6d39364afdc3674f5be925f08be",
+    "depth0.4-stride4-rep2.log": "3c0aabe476cb2fc852134e3084b9a46385902e4aa92bf21782427dc6899da31d",
+    "depth0.4-stride4-rep3.log": "ec818e499e5da57fc77a2b482fe8e005a13598c3c1c840a4db77475238302f40"
+  }
+}

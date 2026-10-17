@@ -1,0 +1,6 @@
+riker 0.4.1
+source: fulcrumgenomics/riker tag v0.4.1, 40d5e3260c5b1b9d210c28f7c90a75387013b4ce (MIT)
+riker_binary_sha256: 806e0c05ce5993c7fac416cf1e237a13557ca7e7e419832002a31de91ca519e6
+samtools: samtools 1.24
+Input: synthetic SAM records from test/scripts/prepare_insert_size_fixtures.R
+BAM: samtools sort --no-PG; CRAM: samtools view --no-PG -C -T reference.fa.gz; both indexed.

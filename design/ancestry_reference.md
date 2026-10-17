@@ -40,7 +40,7 @@ failures.
 
 `ancestry_reference_grch38_parquet` is the GRCh38 derivation of the keyed
 Parquet product, made by `duckhts_bench_stage_ancestry_grch38_parquet()` with
-`duckdb_liftover`, the registered GRCh37-to-GRCh38 chain and the registered
+`duckhts_liftover`, the registered GRCh37-to-GRCh38 chain and the registered
 source and destination FASTAs. Its layout is that of the GRCh37 product, so the
 panel builder and `rduckhts_ancestry_proportions()` consume it unchanged.
 

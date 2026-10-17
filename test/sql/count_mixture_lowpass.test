@@ -1,0 +1,284 @@
+# name: test/sql/count_mixture_lowpass.test
+# description: Low-pass moment QC, admission, exact matching and deterministic block fits.
+
+require duckhts
+
+statement ok
+CREATE TABLE lowpass(sample_id VARCHAR, candidate VARCHAR, chrom VARCHAR, pos BIGINT,
+                     ref_count BIGINT, alt_count BIGINT, other_count BIGINT,
+                     sample_af DOUBLE, candidate_af DOUBLE);
+
+statement ok
+INSERT INTO lowpass VALUES
+('s','other','20',1,2,1,1,.25,.75),
+('s','other','20',2,0,2,2,.5,.25),
+('s','other','20',3,1,0,3,0,1),
+('s','other','20',4,0,0,4,1,0),
+('s','other','20',5,10,0,5,.5,.25),
+('s','other','20',6,NULL,NULL,6,.5,.5);
+
+statement ok
+INSERT INTO lowpass SELECT sample_id,'matched',chrom,pos,ref_count,alt_count,other_count,sample_af,sample_af FROM lowpass;
+
+query TTTIIIIIIIIIIII
+SELECT candidate,relationship_model,status,sites,usable_sites,zero_depth_sites,singleton_sites,
+reads,other_reads,positive_pair_sites,excluded_sites,unavailable_sites,
+concordant_ref_pairs,discordant_pairs,concordant_alt_pairs FROM
+ duckhts_count_mixture_lowpass('lowpass',0,0,0,block_bases:=2)
+ORDER BY candidate,relationship_model;
+----
+matched	ibd1	insufficient_blocks	6	4	1	1	6	21	2	1	1	1	2	1
+matched	unrelated	insufficient_blocks	6	4	1	1	6	21	2	1	1	1	2	1
+other	unrelated	insufficient_blocks	6	4	1	1	6	21	2	1	1	1	2	1
+
+query I
+SELECT bool_and(pair_denominator=.8125 AND abs(discordance_ratio-32.0/13)<1e-12
+ AND share IS NOT NULL AND share_lower IS NULL AND share_upper IS NULL)
+FROM duckhts_count_mixture_lowpass('lowpass',0,0,0,block_bases:=2);
+----
+true
+
+# A one-ulp-scale difference is not a matched frequency, including a zero-read site.
+statement ok
+CREATE TABLE almost AS SELECT * REPLACE ('almost' AS candidate,
+CASE WHEN pos=4 THEN sample_af-1e-15 ELSE sample_af END AS candidate_af) FROM lowpass WHERE candidate='matched';
+
+query I
+SELECT count(*) FROM duckhts_count_mixture_lowpass('almost',0,0,0);
+----
+1
+
+statement ok
+SET threads=1;
+
+statement ok
+CREATE TABLE lowpass_one AS SELECT * FROM duckhts_count_mixture_lowpass('lowpass',.01,.02,.1,block_bases:=2,min_blocks:=2);
+
+statement ok
+SET threads=4;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM lowpass_one EXCEPT ALL SELECT * FROM duckhts_count_mixture_lowpass('lowpass',.01,.02,.1,block_bases:=2,min_blocks:=2)) UNION ALL
+(SELECT * FROM duckhts_count_mixture_lowpass('lowpass',.01,.02,.1,block_bases:=2,min_blocks:=2) EXCEPT ALL SELECT * FROM lowpass_one));
+----
+0
+
+statement ok
+CREATE TABLE empty_sample AS SELECT * REPLACE (0::BIGINT AS ref_count,0::BIGINT AS alt_count) FROM lowpass WHERE candidate='matched';
+
+query TTII
+SELECT relationship_model,status,reads,share IS NULL FROM duckhts_count_mixture_lowpass('empty_sample',0,0,0) ORDER BY relationship_model;
+----
+ibd1	no_sites	0	true
+unrelated	no_sites	0	true
+
+statement ok
+CREATE TABLE no_rows AS SELECT * FROM lowpass WHERE false;
+
+query I
+SELECT count(*) FROM duckhts_count_mixture_lowpass('no_rows',0,0,0);
+----
+0
+
+statement error
+SELECT * FROM duckhts_count_mixture_lowpass('no_rows','NaN'::DOUBLE,0,0);
+----
+seq_error
+
+statement error
+SELECT * FROM duckhts_count_mixture_lowpass('lowpass',.5,0,0);
+----
+seq_error
+
+statement error
+SELECT * FROM duckhts_count_mixture_lowpass('lowpass',0,1,0);
+----
+artefact_weight
+
+statement error
+SELECT * FROM duckhts_count_mixture_lowpass('lowpass',0,'Infinity'::DOUBLE,0);
+----
+artefact_weight
+
+statement error
+SELECT * FROM duckhts_count_mixture_lowpass('lowpass',0,0,-.1);
+----
+homozygosity_excess
+
+statement error
+SELECT * FROM duckhts_count_mixture_lowpass('lowpass',0,0,1.1);
+----
+homozygosity_excess
+
+statement error
+SELECT * FROM duckhts_count_mixture_lowpass('lowpass',NULL,0,0);
+----
+must not be NULL
+
+statement error
+SELECT * FROM duckhts_count_mixture_lowpass('lowpass',0,0,0,max_candidates:=1);
+----
+max_candidates exceeded
+
+statement error
+SELECT * FROM duckhts_count_mixture_lowpass('lowpass',0,0,0,max_state_bytes:=1);
+----
+max_state_bytes
+
+statement error
+SELECT * FROM duckhts_count_mixture_lowpass('lowpass',0,0,0,block_bases:=1,max_blocks:=1);
+----
+max_blocks
+
+statement error
+SELECT * FROM duckhts_count_mixture_lowpass('lowpass',0,0,0,min_blocks:=2.5);
+----
+whole number
+
+statement ok
+CREATE TABLE duplicate AS SELECT * FROM lowpass UNION ALL SELECT * FROM lowpass WHERE pos=1;
+
+statement error
+SELECT * FROM duckhts_count_mixture_lowpass('duplicate',0,0,0);
+----
+duplicate site keys
+
+statement ok
+CREATE TABLE negative AS SELECT * REPLACE (-1::BIGINT AS other_count) FROM lowpass;
+
+statement error
+SELECT * FROM duckhts_count_mixture_lowpass('negative',0,0,0);
+----
+read counts must not be negative
+
+statement ok
+CREATE TABLE inconsistent AS SELECT * REPLACE (CASE WHEN candidate='other' THEN .4 ELSE sample_af END AS sample_af) FROM lowpass;
+
+statement error
+SELECT * FROM duckhts_count_mixture_lowpass('inconsistent',0,0,0);
+----
+must agree
+
+statement ok
+CREATE TABLE invalid_af AS SELECT * REPLACE (2::DOUBLE AS candidate_af) FROM lowpass;
+
+statement error
+SELECT * FROM duckhts_count_mixture_lowpass('invalid_af',0,0,0);
+----
+frequencies must be finite
+
+statement ok
+CREATE TABLE missing_candidate AS SELECT * FROM lowpass WHERE NOT (candidate='other' AND pos=1);
+
+query III
+SELECT count(*),min(usable_sites),max(usable_sites) FROM duckhts_count_mixture_lowpass('missing_candidate',0,0,0);
+----
+3	3	3
+
+# Vector-sized input exercises exact block sums across worker counts and
+# reversed site storage. The entire conditional result is reproducible.
+statement ok
+CREATE TABLE parallel_lowpass AS SELECT 'parallel' AS sample_id,cand AS candidate,'20' AS chrom,
+i AS pos, (1+(i%3=0)::BIGINT) AS ref_count, (i%7=0)::BIGINT AS alt_count,
+0::BIGINT AS other_count, (1+i%37)/39.0 AS sample_af,
+CASE WHEN cand='matched' THEN (1+i%37)/39.0 ELSE (1+(i*13)%37)/39.0 END AS candidate_af
+FROM range(1,32769) t(i) CROSS JOIN (VALUES ('matched'),('other')) c(cand) ORDER BY i DESC,cand;
+
+statement ok
+SET threads=1;
+
+statement ok
+CREATE TABLE parallel_one AS SELECT * FROM duckhts_count_mixture_lowpass('parallel_lowpass',.01,.02,0,block_bases:=1024);
+
+statement ok
+SET threads=4;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM parallel_one EXCEPT ALL SELECT * FROM duckhts_count_mixture_lowpass('parallel_lowpass',.01,.02,0,block_bases:=1024)) UNION ALL
+(SELECT * FROM duckhts_count_mixture_lowpass('parallel_lowpass',.01,.02,0,block_bases:=1024) EXCEPT ALL SELECT * FROM parallel_one));
+----
+0
+
+statement ok
+DROP TABLE parallel_one;
+
+statement ok
+DROP TABLE parallel_lowpass;
+
+statement ok
+DROP TABLE lowpass;
+
+statement ok
+DROP TABLE almost;
+
+statement ok
+DROP TABLE lowpass_one;
+
+statement ok
+DROP TABLE empty_sample;
+
+statement ok
+DROP TABLE no_rows;
+
+statement ok
+DROP TABLE duplicate;
+
+statement ok
+DROP TABLE negative;
+
+statement ok
+DROP TABLE inconsistent;
+
+statement ok
+DROP TABLE invalid_af;
+
+statement ok
+DROP TABLE missing_candidate;
+
+# Binary tie rounding and the maximum per-site pair moment.
+query III
+SELECT __duckhts_mixture_sum(x)=nextafter(1.0,2.0),
+__duckhts_mixture_sum(x)=1.0+power(2.0,-52),
+(SELECT __duckhts_mixture_sum(32640.0))=32640.0
+FROM (VALUES (1.0), (power(2.0,-53)), (power(2.0,-1074))) t(x);
+----
+1	1	1
+
+statement error
+SELECT __duckhts_mixture_sum(-1.0);
+----
+Invalid or overflowing low-pass moment sum
+
+statement error
+SELECT __duckhts_mixture_sum(2147483649.0);
+----
+Invalid or overflowing low-pass moment sum
+
+# The public max_depth range includes the maximum uint16 depth.
+statement ok
+CREATE TABLE deepest_lowpass AS SELECT 'deep' AS sample_id,'same' AS candidate,'20' AS chrom,
+1 AS pos,32767::BIGINT AS ref_count,32768::BIGINT AS alt_count,0::BIGINT AS other_count,
+.25 AS sample_af,.25 AS candidate_af;
+
+query II
+SELECT min(reads),min(positive_pair_sites)
+FROM duckhts_count_mixture_lowpass('deepest_lowpass',0,0,0,max_depth:=65535);
+----
+65535	1
+
+statement ok
+DROP TABLE deepest_lowpass;
+
+statement ok
+CREATE TABLE overdepth_lowpass AS SELECT 'deep' AS sample_id,'same' AS candidate,'20' AS chrom,
+1 AS pos,9223372036854775807::BIGINT AS ref_count,9223372036854775807::BIGINT AS alt_count,
+0::BIGINT AS other_count,.25 AS sample_af,.25 AS candidate_af;
+
+query III
+SELECT min(sites),min(excluded_sites),min(reads)
+FROM duckhts_count_mixture_lowpass('overdepth_lowpass',0,0,0);
+----
+1	1	0
+
+statement ok
+DROP TABLE overdepth_lowpass;

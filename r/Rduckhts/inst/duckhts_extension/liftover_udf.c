@@ -2388,7 +2388,7 @@ void register_liftover_functions(duckdb_connection connection) {
     struct_type = duckdb_create_struct_type(fields, LIFTOVER_FIELD_NAMES, OUT_COUNT);
 
     /* Register only the 12-param overload; no_left_align defaults to false in
-       the duckdb_liftover SQL macro wrapper for callers that don't need it. */
+       the duckhts_liftover SQL macro wrapper for callers that don't need it. */
     fn12 = build_liftover_overload(varchar_type, bigint_type, int_type, bool_type, struct_type, 1);
     duckdb_scalar_function_set_name(fn12, "bcftools_liftover");
     duckdb_register_scalar_function(connection, fn12);

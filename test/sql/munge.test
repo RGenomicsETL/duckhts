@@ -235,12 +235,12 @@ FROM (
 ----
 chrF	2	A	C	0	PASS
 
-# M-M9: fai-only mode via duckdb_munge macro (no fasta_ref parameter)
+# M-M9: fai-only mode via duckhts_munge macro (no fasta_ref parameter)
 query TITTIT
 SELECT chrom, pos, ref, alt,
        CASE WHEN alleles_swapped THEN 1 ELSE 0 END,
        CASE WHEN filter IS NULL THEN 'PASS' ELSE filter END
-FROM duckdb_munge(
+FROM duckhts_munge(
   '(VALUES (''chrF'', 2, ''A'', ''C'', ''rs_fai2'', 0.01)) AS t("CHR", "BP", "A1", "A2", "SNP", "P")',
   column_map := map(['CHR','BP','A1','A2','SNP','P'], ['CHR','BP','A1','A2','SNP','P'])
 );

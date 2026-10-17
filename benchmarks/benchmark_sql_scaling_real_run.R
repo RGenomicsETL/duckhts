@@ -546,7 +546,7 @@ if (length(args) == 5L && args[[1L]] == "--vcf-counts-matrix-child") {
       "map(['CHR','BP','SNP','A1','A2','P','Z','FRQ','NEFF','HET_I2',",
       "'HET_P','DIRE'], ['CHR','BP','MarkerName','Allele1','Allele2',",
       "'P-value','Zscore','Freq1','Weight','HetISq','HetPVal','Direction'])")
-    macro <- if (case %in% c("munge", "r_munge")) "duckdb_munge" else "duckdb_munge_metal"
+    macro <- if (case %in% c("munge", "r_munge")) "duckhts_munge" else "duckhts_munge_metal"
     fasta <- duckhts_bench_artifact_path("liftover_grch37_fasta")
     stopifnot(file.exists(fasta))
     query <- paste0("CREATE TEMP TABLE result AS SELECT * FROM ", macro,
@@ -563,7 +563,7 @@ if (length(args) == 5L && args[[1L]] == "--vcf-counts-matrix-child") {
       "REF AS ref, ALT[1] AS alt FROM read_bcf(", quote_string(input),
       ", samples := '', scan_mode := 'sequential') LIMIT ", limit))
     query <- paste0(
-      "CREATE TEMP TABLE result AS SELECT * FROM duckdb_liftover(",
+      "CREATE TEMP TABLE result AS SELECT * FROM duckhts_liftover(",
       "'source', 'chrom', 'pos', ref_col := 'ref', alt_col := 'alt', ",
       "chain_path := ", quote_string(chain), ", dst_fasta_ref := ",
       quote_string(dst), ", src_fasta_ref := ", quote_string(src), ")")

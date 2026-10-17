@@ -90,7 +90,7 @@ SELECT dest_chrom, dest_pos, dest_ref, dest_alt,
        swap,
        coalesce(reject_reason, 'OK'),
        coalesce(note, 'OK')
-FROM duckdb_liftover(
+FROM duckhts_liftover(
   '(VALUES (''chrR'', 2, ''A'', ''G'')) AS t(chrom, pos, ref, alt)',
   'chrom',
   'pos',
@@ -197,12 +197,12 @@ FROM (
 ----
 chrM	5	1	MitochondriaPassthrough
 
-# MT passthrough via duckdb_liftover macro with lift_mt parameter
+# MT passthrough via duckhts_liftover macro with lift_mt parameter
 query TITT
 SELECT dest_chrom, dest_pos,
        CASE WHEN mapped THEN 1 ELSE 0 END,
        coalesce(note, 'OK')
-FROM duckdb_liftover(
+FROM duckhts_liftover(
   '(VALUES (''MT'', 5, ''G'', ''A'')) AS t(chrom, pos, ref, alt)',
   'chrom', 'pos',
   ref_col := 'ref', alt_col := 'alt',
@@ -263,11 +263,11 @@ FROM (
 ----
 chrM	5	8	MitochondriaPassthrough
 
-# L-M2: INFO/END liftover via duckdb_liftover macro with end_pos_col
+# L-M2: INFO/END liftover via duckhts_liftover macro with end_pos_col
 query TIIT
 SELECT dest_chrom, dest_pos, dest_end,
        coalesce(note, 'OK')
-FROM duckdb_liftover(
+FROM duckhts_liftover(
   '(VALUES (''chrF'', 2, ''C'', ''T'', 5)) AS t(chrom, pos, ref, alt, end_pos)',
   'chrom', 'pos',
   ref_col := 'ref', alt_col := 'alt',
@@ -488,7 +488,7 @@ FROM (
 ----
 chrLiftF	2	C	T	1	0	0	OK	OK
 
-# no_left_align via duckdb_liftover macro
+# no_left_align via duckhts_liftover macro
 query TITTIIITT
 SELECT dest_chrom, dest_pos, dest_ref, dest_alt,
        CASE WHEN mapped THEN 1 ELSE 0 END,
@@ -496,7 +496,7 @@ SELECT dest_chrom, dest_pos, dest_ref, dest_alt,
        swap,
        coalesce(reject_reason, 'OK'),
        coalesce(note, 'OK')
-FROM duckdb_liftover(
+FROM duckhts_liftover(
   '(VALUES (''chrF'', 2, ''C'', ''T'')) AS t(chrom, pos, ref, alt)',
   'chrom',
   'pos',

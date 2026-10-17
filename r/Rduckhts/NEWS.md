@@ -1,6 +1,70 @@
-# Rduckhts 1.5.2.9017.0.1.5
+# Rduckhts 2.0.0.0.1.5
 
-Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
+- Bundled regional depth fractions handle large-coordinate bin midpoints
+  without overflow or rounding. Sex-depth reference counts exclude samples
+  with no usable calibration level, correctly leave out the tested sample,
+  and reject NULL contigs instead of including them in the autosomal baseline.
+
+- Bundled insert-size metrics accept large finite deviation settings without
+  an integer overflow when computing the histogram cutoff.
+
+- The depth wrapper and bundled SQL reject `gc_step` below `1/2147483647`,
+  keeping GC stratum numbers within the integer output range.
+
+- The bundled depth correction centers on eligible autosomal bins with positive
+  reads. Samples with at least half their bins empty keep valid normalization;
+  empty bins retain zero ratios when their bin and stratum rules pass. Training
+  quantiles stay within the observed rate range, preserving constant-rate samples
+  when continuous-quantile interpolation rounds beyond that range.
+
+- `rduckhts_bam_insert_size_counts()` exposes native BAM/CRAM insert-size counts;
+  `rduckhts_bam_insert_size_counts_sql()` exposes the SQL composition, temporarily
+  setting and restoring DuckDB threads. Both arms remain available; native takes
+  the unsuffixed name by measurement in `benchmarks/benchmark_insert_size_counts.md`.
+  `duckhts_insert_size_metrics()` summarizes either counts relation in SQL.
+  Bundled wrapper fixtures retain BAM/CRAM and riker parity in 17 files (15.6 KB).
+  Semantics credit Fulcrum Genomics riker 0.4.1 (MIT), the executable oracle:
+  reject first-segment and QC-fail records, use POS + TLEN for the forward
+  read's mate end, and label equal strands `TANDEM`. These upstream rules
+  supersede the design note's draft rules. Picard is context only.
+
+- The bundled function catalog documents chr20 validation limits of the
+  low-pass mixture estimator, including weak small-share detection and
+  unvalidated genome-wide precision.
+
+- The bundled function catalog documents autosomal low-pass validation across
+  90 strata with 200 replicates each. At 5% share, positive interval limits
+  occur in 199–200/200 unrelated and 160–165/200 IBD1 replicates at 0.1x,
+  and 200/200 across tested relationships at 0.4x. Only 30/75 primary strata
+  meet every declared criterion, so a universal detection limit is not
+  established. The catalog also describes chr20 small-share validation limits.
+
+- The bundled low-pass mixture estimator uses exact binary sums
+  with fixed-size per-block accumulators and reproducible parallel results.
+  SQL validation and join memory is controlled by DuckDB, separately from
+  the native byte budget.
+
+- `rduckhts_depth_bins()`, `rduckhts_depth_region_fraction()` and
+  `rduckhts_depth_sex_fraction()` wrap the new depth macros: GC-corrected bin
+  ratios from bin counts, the share of cells with a one-copy change of each
+  named region, and the share of a second genome of the other sex from X and
+  Y depth, each estimator with an optional reference set. Empty bins do not
+  enter the outlier quantiles that select the training bins. The tests compare
+  every value with an independent base R implementation of the same formulas
+  and recover a planted gain and an XX/XY mixture.
+
+- `rduckhts_roh_counts(fit_table = ...)` reads the counts relation once.
+  A counts relation that held a join was kept in full in memory by DuckDB,
+  about three times the memory of the call without `fit_table` for 100
+  samples. The runs and the errors are unchanged.
+
+- `rduckhts_count_mixture_lowpass()` exposes the bundled extension's separate
+  conditional second-genome share estimator for low-pass counts. Error,
+  artefact and homozygosity calibration are required. Results include bounded
+  block-based limits, QC read/pair totals and an unresolved diagnostic for
+  matched-frequency relationship hypotheses. The default interval floor is
+  30 informative blocks; `min_blocks` supports small-fixture checks. Existing
+  count-error fit results are unchanged.
 
 - `rduckhts_count_error_fit()` returns `artefact_weight_sd` after
   `artefact_weight`: the block interval of the artefact weight, formed as
@@ -209,6 +273,32 @@ Preview of 2.0.0, still in development. The sections below describe what 2.0.0 w
   input has no record.
 
 ## Breaking changes
+
+- Direct SQL calls supplying `genetic_map` now use `duckhts_roh_map`,
+  `duckhts_roh_af_table_map`, `duckhts_roh_af_table_bcftools_map`,
+  `duckhts_roh_ancestry_map`, `duckhts_roh_counts_map`, or
+  `duckhts_roh_counts_fitted_map`; calls supplying `reference_table` use
+  `duckhts_depth_region_fraction_ref` or `duckhts_depth_sex_fraction_ref`;
+  labelled table-index builds use `duckhts_cgranges_from_table_labelled`.
+  These replace the corresponding extra-positional-argument calls under the
+  base names. R wrappers retain their signatures and select the SQL name internally.
+
+- Bundled private SQL helpers are renamed:
+  `duckdb_munge_preset_map` -> `duckhts__munge_preset_map`,
+  `duckdb_munge_resolved_map` -> `duckhts__munge_resolved_map`,
+  `duckhts_htslib_is_indel` -> `duckhts__htslib_is_indel`,
+  `duckhts_json_path_key` -> `duckhts__json_path_key`,
+  `duckhts_parquet_copy_sql` -> `duckhts__parquet_copy_sql`,
+  `duckhts_parquet_ident_list` -> `duckhts__parquet_ident_list`,
+  `duckhts_parquet_metadata_args` -> `duckhts__parquet_metadata_args`,
+  `duckhts_quote_ident` -> `duckhts__quote_ident`,
+  `duckhts_quote_string` -> `duckhts__quote_string`, and
+  `duckhts_raw_header_text` -> `duckhts__raw_header_text`.
+  R wrapper names and arguments are unchanged.
+
+- Bundled SQL macros `duckdb_liftover`, `duckdb_munge`, and `duckdb_munge_metal`
+  become `duckhts_liftover`, `duckhts_munge`, and `duckhts_munge_metal`,
+  respectively, without aliases; R wrapper names and arguments are unchanged.
 
 - Requires duckdb 1.5.0 or newer; loading the bundled extension on an older
   DuckDB now fails. Its stable C API target (v1.2.0) is an ABI floor and does not

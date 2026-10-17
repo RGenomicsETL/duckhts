@@ -13,6 +13,13 @@ DuckHTS DuckDB extension
 	inst/duckhts_extension/include/vep_parser.h records "Ported from RBCFTools"; both are part of
 	the MIT-licensed extension sources.
 
+riker insert-size semantics
+	Source: inst/duckhts_extension/bam_insert_size_counts.c and insert_size_sql.c
+	Holder: Fulcrum Genomics LLC (Copyright (c) 2026)
+	License: MIT; permission notice reproduced in bam_insert_size_counts.c
+	Note: Independently implemented semantics from riker v0.4.1, tag 40d5e326;
+	no Rust code is bundled. Picard is context only, not the compatibility oracle.
+
 HTSlib
 	Source: inst/duckhts_extension/htslib
 	Holders: Genome Research Ltd (files carry "Copyright (C) 2008-2026 Genome Research Ltd" and

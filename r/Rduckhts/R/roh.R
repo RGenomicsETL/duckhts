@@ -152,6 +152,7 @@ rduckhts_roh <- function(
     if (!is.null(af_order)) paste0("af_order := ", sql_quote_string(con, af_order))
   )
   macro <- if (site_rule == "bcftools") "duckhts_roh_af_table_bcftools" else source$macro
+  if (!is.null(options$genetic_map)) macro <- paste0(macro, "_map")
   query <- paste0("SELECT * FROM ", macro, "(",
                   paste(arguments, collapse = ", "), ")")
   .somalier_publish_query(con, query, table_name, overwrite)
@@ -308,6 +309,7 @@ rduckhts_roh_counts <- function(
     .roh_limit_arguments(max_sites, max_site_bytes)
   )
   macro <- if (is.null(fit_table)) "duckhts_roh_counts" else "duckhts_roh_counts_fitted"
+  if (!is.null(options$genetic_map)) macro <- paste0(macro, "_map")
   query <- paste0("SELECT * FROM ", macro, "(", paste(arguments, collapse = ", "), ")")
   .somalier_publish_query(con, query, table_name, overwrite)
 }

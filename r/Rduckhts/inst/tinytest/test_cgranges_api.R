@@ -98,7 +98,7 @@ test_cgranges_api <- function() {
     DBI::dbGetQuery(
       con,
       paste(
-        "SELECT * FROM duckhts_cgranges_from_table(",
+        "SELECT * FROM duckhts_cgranges_from_table_labelled(",
         "  'qry_idx', 'cgr_src', 'chrom', 'start', 'end', 'label'",
         ") AS t(ok)"
       )

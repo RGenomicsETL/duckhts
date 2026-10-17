@@ -1,0 +1,7 @@
+contract	description
+oracle	Fulcrum Genomics riker 0.4.1 (MIT); pinned tag and binary SHA-256 in provenance.txt
+counts	Raw histogram cases (min_frac=1.1) retain every absolute-TLEN integer bin
+summary	metrics.tsv and histograms.tsv retain upstream text values keyed by fixture, format and case_name; cases.tsv records arguments; absent keys represent empty upstream outputs
+fixtures	Eight BAM/CRAM cases exercise filters, orientations, weighted statistics, missing/long CIGAR, INT32_MIN TLEN and indexed task overlap; reference.fa.gz is BGZF-compressed
+package	Only edges and empty alignments, their indexes, an unindexed BAM, compressed reference/indexes, SQL reference and subset oracle TSVs are bundled (17 files, 15594 bytes)
+regeneration	R_LIBS=/tmp/RBCFTools-release-lib RIKER_BIN=/path/to/riker-0.4.1 Rscript test/scripts/prepare_insert_size_fixtures.R /path/to/worktree

@@ -24,6 +24,13 @@ expect_false(any(registry$transform[registry$id %in% c(
 # The genome-wide drivers validate roh-ancestry files against these
 # identities, so each must parse as key=value fields.
 identity_fields <- getFromNamespace("duckhts_bench_identity_fields", "duckhtsbench")
+# Every autosome's two reference relations are pinned to the SHA-256 of the
+# staged output, which prepare_genome_references.R checks after staging.
+for (id in sprintf(c("roh_ancestry_chr%d_reference_long", "roh_ancestry_chr%d_af_sites"),
+                   rep(1:22, each = 2L))) {
+  fields <- identity_fields(registry$supplier_identity[registry$id == id])
+  expect_true(grepl("^[0-9a-f]{64}$", fields["sha256"]), info = id)
+}
 for (identity in registry$supplier_identity[registry$workload == "roh-ancestry"]) {
   expect_silent(identity_fields(identity))
 }

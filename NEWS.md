@@ -1,8 +1,156 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.2.9017
+# duckhts 2.0.0
 
-Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
+- Regional depth fractions test bin midpoints without integer overflow or
+  loss of precision at large coordinates. Sex-depth calibration counts only
+  reference samples contributing an X or Y level, including when leaving
+  the tested sample out of its own reference set, and rejects NULL contigs
+  instead of including them in the autosomal baseline.
+
+- Insert-size metrics clamp the histogram cutoff to the maximum supported
+  insert size before integer conversion, accepting large finite deviations
+  without overflow.
+
+- Depth correction rejects `gc_step` below `1/2147483647` before processing
+  bins, including empty inputs, so GC stratum numbers fit the integer output.
+
+- Depth normalization centers on eligible autosomal bins with positive reads.
+  Empty bins retain zero ratios instead of collapsing the normalization when
+  at least half the autosomal bins are empty. Training quantiles stay within
+  the observed rate range, so interpolation rounding cannot discard all bins
+  of a constant-rate sample. Depth benchmark staging requires cached alignment
+  and reference bytes, validates their registered identities before deriving
+  counts, and records their actual SHA-256 values in the receipt.
+
+- The insert-size benchmark times tool processes directly: DuckDB CLI and
+  riker, with outputs written to disk and parity checked afterward in R.
+  Scaling uses single invocations on registered 1×/2×/4× BAM and CRAM inputs,
+  with independent oracle outputs for each size and both doubling exponents.
+  Timed DuckDB runs report buffer memory and spill from JSON profiles.
+  The untimed keyed parity check retains every actual count row and rejects
+  duplicates, missing/extra rows and changed counts.
+  A reported-only DuckDB work duration separates process setup from queries.
+  The first R-worker race and its verdicts remain retained evidence; targets
+  are unchanged. The available CLI v1.5.1 differs from the first race's
+  duckdb-R v1.5.5, so cross-race differences cannot isolate harness overhead.
+
+- `duckhts_bam_insert_size_counts()` uses per-worker native reducers;
+  `duckhts_bam_insert_size_counts_sql()` composes projected binary-CIGAR reads
+  and flag/length kernels in SQL. Both return sparse BAM/CRAM orientation counts;
+  `duckhts_insert_size_metrics()` summarizes them in SQL. Native takes the
+  unsuffixed name by measurement in `benchmarks/benchmark_insert_size_counts.md`.
+  In the direct-tool race at `d29b378f`, native meets every declared 1× timing
+  target for BAM and CRAM at 1/2/4/8 threads; projected SQL matches the oracle
+  but misses every timing target. All 216 parity checks and RSS budgets pass,
+  with zero DuckDB spill; evaluated doubling exponents are at most 1.002.
+  In the retained R-worker race, native CRAM meets all declared 1× timing
+  targets; native BAM meets only the 2-thread target. SQL misses all timing
+  targets on this single-reference workload.
+  Semantics credit Fulcrum Genomics riker 0.4.1 (MIT), the executable oracle:
+  reject first-segment and QC-fail records, use POS + TLEN for the forward
+  read's mate end, and label equal strands `TANDEM`. These upstream rules
+  supersede the design note's draft rules. Picard is context only.
+
+- `benchmarks/benchmark_count_mixture_lowpass_genome.md` evaluates 90 autosomal
+  low-pass strata with 200 replicates each and both error calibrations. At 5%
+  share, positive interval limits occur in 199–200/200 unrelated and
+  160–165/200 IBD1 replicates at 0.1x, and 200/200 across tested relationships
+  at 0.4x. Only 30/75 primary strata meet every unchanged release criterion;
+  null calibration and matched-diagnostic failures preclude a universal
+  detection-limit claim. Independent oracles, zero-depth QC and lossless
+  per-replicate tables are retained. Native code is unchanged.
+
+- `benchmarks/benchmark_count_mixture_lowpass.md` records linked chr20
+  recovery, count thinning and fresh-process scaling. Its 50-replicate strata
+  expose point-accuracy and null-calibration failures. The catalog documents
+  both regional and autosomal validation limits.
+
+- Low-pass mixture moments use exact binary sums with fixed-size
+  per-block accumulators, preserving results across input and worker order.
+  SQL validation and join memory remains input-sized; the native byte budget
+  does not cover DuckDB's SQL workspace.
+
+
+- Add a declared parent/child read-mixture benchmark for a related second
+  genome, comparing relative and unrelated count fits and FROH erosion, with
+  a registered public 30x donor slice and network-free staging checks.
+- `benchmarks/benchmark_roh_ancestry.md` has the genome-wide evaluation
+  (#349): the six ROH arms over the 22 autosomes for the 377 trio children,
+  one chromosome per query. The truth marks runs of low heterozygosity, so
+  the report compares arms within each population only, and FROH is
+  `froh_assembly`, a fraction of the whole assembly. The declared criterion
+  does not hold genome-wide: against single-population frequencies,
+  ancestry-tuned frequencies do not give fewer unsupported runs of at least
+  1 Mb in ACB, CLM, MXL, PEL and PUR, and ASW fails against pooled
+  frequencies and on truth coverage. The four controls pass. The 42
+  per-chromosome reference rows of the benchmark registry are pinned to the
+  SHA-256 of their staged outputs, and `prepare_genome_references.R` checks
+  every autosome against them. `summarise_genome.R` writes a receipt with
+  the SHA-256 of every result table, and the report reads a table only when
+  it matches.
+
+- Copy-number fractions from read depth in fixed bins
+  (https://github.com/RGenomicsETL/duckhts/issues/343, phase 1; contract in
+  `design/depth_fraction_lane.md`). Three table macros over caller-named
+  relations, for low-pass, cell-free DNA and mosaic uses:
+  `duckhts_depth_bins` corrects bin counts (for example from `bam_bin_counts`,
+  with GC from `fasta_nuc`) by the median read rate of each GC stratum and
+  returns each bin's expected count, depth ratio, log2 ratio and whether it is
+  kept, with the reason when not; an optional `mappability` column filters
+  bins. The outlier quantiles that select its training bins are taken over
+  autosomal bins with at least one read, so empty bins do not move them. `duckhts_depth_region_fraction` estimates the share of cells with a
+  one-copy gain or loss of each named region as twice the relative depth
+  shift against the other autosomes, with a quasi-Poisson interval from the
+  bins or, with a reference set, a leave-one-out t interval.
+  `duckhts_depth_sex_fraction` estimates the share of a second genome of the
+  other sex from X and Y depth, from each chromosome and combined, with an
+  optional reference set of XX and XY samples that calibrates the copy levels.
+  SQL tests plant a GC bias, one-copy changes in 10% to 30% of cells and
+  mixtures of XX and XY genomes at 10% and 20%, and recover them within the
+  declared tolerances. `benchmarks/benchmark_depth_fraction.md` measures the
+  three macros at 1x/2x/4x samples and bins (linear in time; the correction
+  holds about 290 bytes a bin in memory, the sex estimator streams) and checks
+  them on 0.1x, 0.4x and 1x read-name subsamples of three 1000 Genomes 30x
+  genomes, with planted chr18 gains and emulated XX/XY mixtures, against a
+  leave-one-out reference of the other genomes. The benchmark invokes the
+  named reference macro and reports DuckDB CLI failures directly. The state
+  model of the issue is not implemented.
+
+- `benchmarks/benchmark_roh_truth_and_mixtures.md` tests the ROH decodes
+  where the answer is known. Synthetic chr20 children of two unrelated
+  founders of one population (100 children, five populations) carry planted
+  autozygous segments, genotype errors at 1% and read counts simulated with
+  known depth, read error, contamination, allele balance and a 0.3% share of
+  artefactual sites. `duckhts_count_error_fit` recovers the simulated numbers,
+  and `duckhts_roh_counts_fitted` with the fit finds 99.9% of the planted
+  bases, as the true numbers do, against 48% for the scalar defaults of
+  `duckhts_roh_counts`. The background of two unrelated founders still holds
+  long homozygous stretches; a second version of the truth counts them, and
+  both versions' verdicts are reported. Read-level mixtures of two 30x chr20
+  slices (registered as `roh_mixture_*_chr20_cram`) at 1 to 10% give a fitted
+  contamination that rises with the share, and the contamination term keeps
+  FROH within 0.003 of the unmixed receiver where its absence erodes it by up
+  to 0.13. `benchmarks/roh_counts_stage.R` exposes its counting query so that
+  staging and the mixtures count with the same SQL.
+
+- `duckhts_roh_counts_fitted` reads `counts_table` once. It read it a
+  second time to check the fit of every sample, and when the relation held a
+  join (a view filtered by a long `IN` list, or counts joined to their
+  frequencies) DuckDB kept every row and column of it as a materialized CTE:
+  1.8 GiB of buffer for 100 samples of 108,757 sites, against 0.5 GiB for
+  `duckhts_roh_counts`. Each site list now checks its sample's fit before
+  it is decoded, and the genetic-map overload joins the map with a left join
+  so that a sample whose chromosomes the map drops is still checked. The
+  runs and the errors are unchanged.
+
+- `duckhts_count_mixture_lowpass` separately estimates a conditional second-genome
+  share from low-pass read and discordant-pair moments, with required external
+  calibration, bounded native block state and block-jackknife/score limits.
+  Matched frequencies admit an IBD1 hypothesis but retain an unresolved
+  relationship diagnostic. Fewer than 30 informative blocks gives NULL limits;
+  `min_blocks` can be lowered for small-fixture checks. Count-error fit outputs
+  are unchanged.
 
 - `duckhts_count_error_fit` reports `artefact_weight_sd`, after
   `artefact_weight`: each block that is refitted for contamination is also
@@ -356,6 +504,36 @@ Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible k
   `gt_error := 150`, and the function documentation now states this relation.
 
 ## Breaking changes
+
+- Each SQL macro name has one signature. Calls with an extra positional table
+  argument move to explicit names, with all named options unchanged:
+  `duckhts_roh(path, af_tag, genetic_map, ...)` -> `duckhts_roh_map(...)`,
+  `duckhts_roh_af_table(path, af_table, genetic_map, ...)` -> `duckhts_roh_af_table_map(...)`,
+  `duckhts_roh_af_table_bcftools(path, af_table, genetic_map, ...)` -> `duckhts_roh_af_table_bcftools_map(...)`,
+  `duckhts_roh_ancestry(path, reference_table, proportions_table, genetic_map, ...)` -> `duckhts_roh_ancestry_map(...)`,
+  `duckhts_roh_counts(counts_table, genetic_map, ...)` -> `duckhts_roh_counts_map(...)`,
+  `duckhts_roh_counts_fitted(counts_table, fit_table, genetic_map, ...)` -> `duckhts_roh_counts_fitted_map(...)`,
+  `duckhts_depth_region_fraction(bins_table, regions_table, reference_table)` -> `duckhts_depth_region_fraction_ref(...)`,
+  `duckhts_depth_sex_fraction(bins_table, reference_table)` -> `duckhts_depth_sex_fraction_ref(...)`, and
+  `duckhts_cgranges_from_table(name, table_name, chrom_col, start_col, end_col, label_col)` -> `duckhts_cgranges_from_table_labelled(...)`.
+  Base signatures remain under their original names; R wrapper signatures and
+  behavior are unchanged.
+
+- Private SQL helpers use the `duckhts__` prefix:
+  `duckdb_munge_preset_map` -> `duckhts__munge_preset_map`,
+  `duckdb_munge_resolved_map` -> `duckhts__munge_resolved_map`,
+  `duckhts_htslib_is_indel` -> `duckhts__htslib_is_indel`,
+  `duckhts_json_path_key` -> `duckhts__json_path_key`,
+  `duckhts_parquet_copy_sql` -> `duckhts__parquet_copy_sql`,
+  `duckhts_parquet_ident_list` -> `duckhts__parquet_ident_list`,
+  `duckhts_parquet_metadata_args` -> `duckhts__parquet_metadata_args`,
+  `duckhts_quote_ident` -> `duckhts__quote_ident`,
+  `duckhts_quote_string` -> `duckhts__quote_string`, and
+  `duckhts_raw_header_text` -> `duckhts__raw_header_text`.
+
+- SQL macros `duckdb_liftover`, `duckdb_munge`, and `duckdb_munge_metal` are
+  renamed to `duckhts_liftover`, `duckhts_munge`, and `duckhts_munge_metal`,
+  respectively, without aliases. R wrapper names and arguments are unchanged.
 
 - DuckHTS supports DuckDB 1.5.0 or newer, and `LOAD` now fails on older runtimes
   (it used to admit 1.4). The stable C API target `C_STRUCT` v1.2.0 recorded in

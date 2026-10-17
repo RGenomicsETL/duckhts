@@ -3,8 +3,8 @@
 # roh_ancestry_chr<N>_af_sites, through
 # duckhtsbench::duckhts_bench_stage_roh_ancestry_references(). It reuses an
 # output only when its receipt matches the current sources. chr20's two
-# artifacts are made by prepare_chr20.R and are checked against their
-# registered SHA-256 here.
+# artifacts are made by prepare_chr20.R. Every chromosome's two artifacts are
+# then checked against the SHA-256 pinned in the registry.
 source("benchmarks/roh_ancestry/genome_common.R")
 chromosomes <- genome_chromosomes()
 staged <- setdiff(chromosomes, 20L)
@@ -14,8 +14,9 @@ if (length(staged)) {
                                            mustWork = TRUE))
   print(result[c("chromosome", "id", "rows", "reused")], row.names = FALSE)
 }
-if (20L %in% chromosomes) {
-  for (id in c("roh_ancestry_chr20_reference_long", "roh_ancestry_chr20_af_sites")) {
+for (chromosome in chromosomes) {
+  for (id in sprintf(c("roh_ancestry_chr%d_reference_long", "roh_ancestry_chr%d_af_sites"),
+                     chromosome)) {
     duckhtsbench::duckhts_bench_validate_identity(id)
     cat(id, "matches its registered SHA-256\n")
   }

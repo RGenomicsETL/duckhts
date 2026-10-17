@@ -39,6 +39,10 @@ src/count_cells.c|count_cells.c
 src/count_error_model.c|count_error_model.c
 src/count_error_udf.c|count_error_udf.c
 src/count_error_sql.c|count_error_sql.c
+src/depth_sql.c|depth_sql.c
+src/count_mixture_model.c|count_mixture_model.c
+src/count_mixture_udf.c|count_mixture_udf.c
+src/count_mixture_sql.c|count_mixture_sql.c
 src/somalier_bam_extract_sql.c|somalier_bam_extract_sql.c
 src/somalier_panel_sql.c|somalier_panel_sql.c
 src/somalier_sex_sql.c|somalier_sex_sql.c
@@ -60,6 +64,8 @@ src/score_udf.c|score_udf.c
 src/mosdepth_table.c|mosdepth_table.c
 src/bam_bin_counts.c|bam_bin_counts.c
 src/bam_mismatch_counts.c|bam_mismatch_counts.c
+src/bam_insert_size_counts.c|bam_insert_size_counts.c
+src/insert_size_sql.c|insert_size_sql.c
 src/bam_mate_overlap_counts.c|bam_mate_overlap_counts.c
 src/samtools_idxstats_table.c|samtools_idxstats_table.c
 src/bam_bed_coverage.c|bam_bed_coverage.c

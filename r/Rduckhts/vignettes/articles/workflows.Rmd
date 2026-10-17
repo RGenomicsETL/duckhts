@@ -749,7 +749,7 @@ DBI::dbExecute(
 DBI::dbGetQuery(
   con,
   paste(
-    "SELECT * FROM duckhts_cgranges_from_table(",
+    "SELECT * FROM duckhts_cgranges_from_table_labelled(",
     "'readme_qry_idx', 'readme_targets', 'chrom', 'start', 'end', 'label')"
   )
 )

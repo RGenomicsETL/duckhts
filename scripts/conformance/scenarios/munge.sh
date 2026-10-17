@@ -41,7 +41,7 @@ SELECT * FROM read_csv_auto('${core_input}', delim := '\t', header := true);
 COPY (
   SELECT chrom, pos, id, ref, alt, coalesce(filter, 'PASS') AS filter,
          ns, es, se, lp, af
-  FROM duckdb_munge(
+  FROM duckhts_munge(
     'munge_input',
     column_map := map(
       ['SNP','CHR','BP','A1','A2','P','BETA','FRQ','SE','N'],
@@ -170,7 +170,7 @@ duckdb -unsigned >"${OUT_DIR}/raw/bolt.duck.stderr" 2>&1 <<SQL
 LOAD '${DUCKHTS_EXT}';
 CREATE OR REPLACE TEMP TABLE bolt_input AS
 SELECT * FROM read_csv_auto('${bolt_input}', delim := '\t', header := true);
-SELECT * FROM duckdb_munge('bolt_input', preset := 'BOLT', fasta_ref := '${REF_FASTA}');
+SELECT * FROM duckhts_munge('bolt_input', preset := 'BOLT', fasta_ref := '${REF_FASTA}');
 SQL
 duck_status=$?
 set -e
@@ -202,7 +202,7 @@ CREATE OR REPLACE TEMP TABLE missing_input AS
 SELECT * FROM read_csv_auto('${missing_input}', delim := '\t', header := true);
 COPY (
   SELECT chrom, pos, id, ref, alt, filter
-  FROM duckdb_munge(
+  FROM duckhts_munge(
     'missing_input',
     column_map := map(
       ['SNP','CHR','BP','A1','A2','P','BETA','FRQ','SE','N'],

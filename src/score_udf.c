@@ -1763,7 +1763,7 @@ static int score_write_log(const score_bind_t *bind,
     fprintf(fp, "# genotype_path\t%s\n", bind->bcf_path ? bind->bcf_path : "");
     fprintf(fp, "# use\t%s\n", score_use_tag_label(bind->use_tag));
     fprintf(fp, "# samples\t%d\n", n_samples);
-    fprintf(fp, "# allele_flipping\tnot_performed_by_bcftools_score; use duckdb_munge/bcftools_munge_row outputs to audit REF/ALT swaps before scoring\n");
+    fprintf(fp, "# allele_flipping\tnot_performed_by_bcftools_score; use duckhts_munge/bcftools_munge_row outputs to audit REF/ALT swaps before scoring\n");
     fprintf(fp, "summary_name\tsummary_path\tsummary_mode\tmatching_by\tloaded_markers\tall_markers\tmatched_markers\tallele_mismatch_markers\tduplicate_markers\n");
     for (pi = 0; pi < bind->n_prs; pi++) {
         const score_summary_t *summary = summaries[pi];

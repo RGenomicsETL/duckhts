@@ -1,0 +1,679 @@
+---
+title: "ROH against planted truth and read mixtures"
+output:
+  github_document:
+    html_preview: false
+    pandoc_args: ["--wrap=preserve", "--columns=400"]
+---
+
+Two follow-ups of <https://github.com/RGenomicsETL/duckhts/issues/349> test
+the ROH decodes where the answer is known:
+
+- **Planted truth.** Synthetic chr20 children carry autozygous segments of
+  known lengths, genotype errors at a known rate and read counts simulated
+  with known depth, read error, contamination, allele balance and artefact
+  share. How much of the planted segments does each decode find, and how much
+  does it call outside them? Does `duckhts_count_error_fit` recover the
+  simulated numbers, and do the runs it decodes match the runs of the true
+  numbers? Where do the bases that `stable_fraction` and `gained_bases`
+  count lie?
+- **Read mixtures.** Reads of a second 30× sample are mixed into a receiver's
+  chr20 reads at 1, 2, 5 and 10%. Does the fitted `contamination` follow the
+  share, and does the contamination term of the read-count decode keep the
+  receiver's runs?
+
+An earlier planted design
+(<https://github.com/RGenomicsETL/duckhts/issues/329>, comment "Synthetic
+planted truth") used real children as the background: their own runs had no
+truth, and the planted segments had no genotype error, so every arm found
+them. Here the background is built from two unrelated founders and the
+evidence carries errors and artefacts.
+
+The scope is chr20. The report makes no timing or scaling claim; it measures
+memory only to gate it.
+
+## Inputs
+
+From the `r/duckhtsbench` registry:
+
+- the phased 1000 Genomes chr20 panel (`roh_ancestry_chr20_source`) and its
+  pedigree (`roh_ancestry_pedigree`);
+- the 108,757 chr20 evaluation sites (`roh_ancestry_chr20_af_sites`);
+- chr20 CRAM slices of the 30× CRAMs of HG00403 and NA18507
+  (`roh_mixture_hg00403_chr20_cram`, `roh_mixture_na18507_chr20_cram`), cut
+  from the registered public CRAMs by the staging function of the BAM
+  mismatch slices (`benchmarks/bam_mismatch_stage.R`), with the GRCh38
+  reference (`liftover_grch38_fasta`);
+- the registered read counts of the same two samples
+  (`roh_counts_chr20_hg00403`, `roh_counts_chr20_na18507`), whose settings
+  the mixture counts reuse.
+
+Before anything is decoded, the render compares each input with the identity
+its registry row records. A file that differs stops the render.
+
+## Design, declared before any arm ran
+
+The values are in `benchmarks/roh_truth_mixtures/declaration.R`, committed on
+its own before the driver decoded anything. The secondary measures of the
+planted truth were added in a second commit, after a reduced driver check and
+before the full run; they add reported numbers and change no criterion. A
+second version of the truth (`declaration_v2.R`, its own commit) followed the
+first full run, which stopped at the memory gate; it is described after the
+first version, whose verdicts the report keeps. This section states the design
+in words.
+
+### Planted truth
+
+**Children.** Five populations (YRI, CEU, CHS, GIH, PEL), 20 children each.
+The founders of a population are its pedigree rows without parents. For each
+child, three founders are drawn without replacement: A and B give one
+haplotype each, drawn at random, and C is the second genome of the read
+counts. No two children share a founder. The frequencies are the ALT allele
+frequencies among all founders of the child's population, clamped to
+[0.001, 0.999] as the staged read counts clamp theirs.
+
+**Planted segments.** Each child gets one segment of 5, 3, 2 and 1 Mb. A start
+is uniform over the positions that keep the segment between the first and the
+last site; a draw is rejected when the segment overlaps a 100 kb window with
+fewer than 20 panel sites, or lies within 1 Mb of another segment of the
+child. Inside a segment, B's haplotype is replaced by A's, so the child is
+homozygous there. The render checks in SQL, from the founder haplotypes and
+independent of the R code that builds the children, that every true genotype
+is what the plan says.
+
+**Evidence.**
+
+- Genotypes: at each site, with chance 1%, the reported genotype is one of
+  the two other genotypes, each with chance 1/2. The children are written as
+  a BGZF VCF with an index, so that `read_bcf` reports a row estimate and the
+  frequency join is built on the frequency rows, as the declared memory model
+  of the genotype decode assumes.
+- Read counts: depth is Poisson with mean 30. With chance 0.3% a site's alt
+  count is uniform on 0 to depth (an artefactual site). Otherwise it is
+  binomial with chance (1 − c) q(g) + c q(g_C), where g is the child's and
+  g_C founder C's ALT dosage, c = 0.02 and q = 0.0005, 0.48 and 0.9995 for 0,
+  1 and 2 copies. So `seq_error` is 0.0005, `contamination` 0.02,
+  `allele_balance` 0.48 and `artefact_weight` 0.003.
+
+**Arms.**
+
+| Arm | Decode |
+|:----|:-------|
+| `gt30`, `gt100` | `duckhts_roh_af_table` on the reported genotypes with the population frequencies, `gt_error := 30` and `100`, one query per population |
+| `counts_default` | `duckhts_roh_counts` with its scalar defaults |
+| `counts_truth` | `duckhts_roh_counts_fitted` with the four simulated numbers |
+| `counts_fit` | `duckhts_roh_counts_fitted` with each child's row of `duckhts_count_error_fit` (default options), `artefact_weight_sd` included |
+
+A child whose fit has a NULL among the four numbers is not decoded by
+`counts_fit` and counts as a child with no runs. Two more decodes, at the
+fitted `artefact_weight` w − and + `artefact_weight_sd` (kept in [0, 0.05]),
+locate the bases that `stable_fraction` and `gained_bases` count.
+
+**Metrics.** Per child and arm: a called base is in a run of the arm; it is
+true when it is in a planted segment and false otherwise. Sensitivity is true
+called bases over planted bases; false discovery is false called bases over
+called bases. Pooled values sum over children before the ratio. The criteria
+use runs of at least 500 kb ("long"); all runs are reported too. Intervals are
+95% percentile intervals of 2,000 paired bootstrap draws of the pooled
+difference, resampling children within each population.
+
+**Criteria.**
+
+- **T1**, the artefact and fit terms help: on long runs, the interval of
+  `counts_fit` − `counts_default` lies above 0 for sensitivity and below
+  0.01 for false discovery.
+- **T2**, the fit decodes as well as the truth: both intervals of
+  `counts_fit` − `counts_truth` lie in [−0.01, 0.01].
+- **T3**, the fit recovers the simulated numbers: in every population, the
+  median fitted value lies within 0.0002 of `seq_error`, 0.003 of
+  `contamination`, 0.003 of `allele_balance` and 0.001 of `artefact_weight`,
+  and at least 90% of the children have status `ok`.
+
+`gt30` − `gt100` and `counts_fit` − `gt30` are reported with intervals and no
+verdict.
+
+**Secondary measures**, declared after the reduced driver check (CEU, four
+children; not evidence) and before the full run. That check showed every
+arm, `gt30` included, calling long runs outside the planted segments, so the
+background of two unrelated founders still holds homozygous stretches. Per
+arm, without a verdict:
+
+- the background stretches: maximal sets of consecutive panel sites at which
+  the child's true genotype is not heterozygous, from their first to their
+  last site, of at least 500 kb, and their bases outside the planted
+  segments;
+- the false called bases inside a background stretch and elsewhere;
+- the true heterozygous sites inside called runs, and the panel sites inside
+  called runs outside the planted segments.
+
+**Stability**, without a verdict: of the bases of the runs of `counts_fit`
+that `stable_fraction` marks as unstable, how many are false; of the bases
+that `gained_bases` counts, how many are true (bases that `counts_fit`
+missed) and how many are false.
+
+**Truth, version 2.** The first full run, with the memory gate recording
+only, showed the premise of version 1 false: the long runs that `counts_fit`
+called outside the planted segments held 0.0038 true heterozygous sites per
+panel site, against about 0.30 for the children's background, and 142 of
+their 270 Mb lay in stretches of at least 500 kb without one true
+heterozygous site. Such bases are homozygous in the constructed child. In
+version 2 a true base is a base of a planted segment, or of a background
+stretch: a maximal set of consecutive panel sites at which the child's true
+genotype (after planting, before the genotype errors and the read simulation)
+is not heterozygous, from the position of its first to that of its last site,
+of at least 500 kb (last − first + 1). The two sets are merged. Arms, run
+classes, metrics, bootstrap, comparisons and the bounds of T1 and T2 are those
+of version 1; T3 does not depend on the truth. Both versions' verdicts are
+reported.
+
+### Unrelated read mixtures
+
+The receiver is HG00403 and the donor NA18507: two staged slices of
+different populations. This arm reports `contamination_relative` under its
+hypothesis; the parent/child arm below tests it with a related donor.
+
+A template (read pair) of the receiver is kept with chance 1 − α and one of
+the donor with chance α, by `samtools view --subsample` with
+`--subsample-seed 0`. samtools keeps a record when a hash of its read name is
+below the share (`sam_view.c` lines 177-179 of samtools 1.23 in `.sync/`; the
+1.24 binary bundled by RBCFTools has the same rule and, with an explicit
+seed, the same seed handling), so mates stay together. The two sets are
+merged into one indexed CRAM, counted and deleted before the next α. α is
+0.01, 0.02, 0.05 and 0.10; α = 0 is the receiver slice alone.
+
+The counts use the query that staged the registered counts
+(`roh_counts_query_sql` in `benchmarks/roh_counts_stage.R`) with their
+settings: `duckhts_somalier_bam_counts`, MAPQ ≥ 20, base quality ≥ 13,
+excluded flags 1796, mate-overlap suppression `hileup_v0.1.0`, the panel's
+`INFO_AF` clamped to [0.001, 0.999]. The counts of each slice alone must equal
+its registered counts, or the render stops.
+
+`duckhts_count_error_fit` (default options) fits α = 0 and every mixture in
+one query. Each is decoded by `duckhts_roh_counts_fitted` with its fit
+("with term") and with `contamination` 0 and the other three numbers fitted
+("without term"). FROH is run bases over the span of the panel sites, all
+runs; erosion is a decode's FROH minus that of α = 0 with the term.
+
+- **M1**: the fitted `contamination` increases strictly with α over 0 and
+  the four shares.
+- **M2**: at every α, |erosion with term| ≤ |erosion without term| + 0.002.
+
+### Related second genome
+
+The registered 1000 Genomes pedigree identifies HG00403 and HG00404 as
+parents of HG00405 (family SH001, CHS). HG00403 receives reads from its child
+HG00405. The parents have CRAMs at the existing 2504-sample S3 locator family;
+HG00405's corresponding S3 key is absent. The child is in the
+[698-related-sample 30x release](https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/README_2504_plus_additional_698_related_samples.txt),
+with a range-readable ENA CRAM (ERR3988761) and index. The registry names that
+public source and the chr20 slice derived by the same staging function as
+the unrelated arm. Its independently registered counts must also match.
+
+`benchmarks/roh_truth_mixtures/declaration_related.R` declares the criteria
+before this arm runs. The alpha grid, read-name hash seed (mates together),
+counting settings, frequencies and decoder are the same as the unrelated arm.
+Nominal alpha is a sampling fraction, not necessarily the realised donor
+share at unequal source depths; both are reported.
+
+- **M3**: `contamination_relative` is within max(0.005, 0.25 × α) of α at
+  every nonzero α. The relative log-likelihood exceeds the unrelated one at
+  α = 0.05 and 0.10. At 0.01/0.02 the likelihood sign is descriptive, not a
+  gate: the earlier count-level result separated at 5%, not at 2%.
+- **M4**: unrelated `contamination` is within max(0.003, 0.25 × α/2) of α/2
+  at every nonzero α, as expected for a parent/child donor under that model.
+- **R1**: at every α, |erosion with the relative-fit term| ≤ |erosion without
+  it| + 0.002. Erosion is relative to α = 0 with the relative-fit term.
+
+The with-term decode substitutes `contamination_relative` for `contamination`
+in the fit table. Other nuisance estimates remain those exposed by the public
+fit, from its unrelated hypothesis. This is a plug-in population-frequency
+emission, not a relationship-aware ROH emission. The tolerance floors and
+25% relative errors allow read sampling and nuisance fitting; they are not
+confidence intervals. No unrelated criterion is changed.
+
+### Gates
+
+The render stops when an input differs from its registered identity, when a
+child differs from its plan, when a slice's counts differ from its registered
+counts, when a mixture would leave less than 8 GiB free, when the bases that
+`stable_fraction` or `gained_bases` count differ from those the two extra
+decodes locate, or when a DuckDB query spills or passes its ceiling. Each
+query runs in a fresh DuckDB CLI process under `/usr/bin/time`, with the JSON
+profiler and `max_temp_directory_size` zero. The ceiling is the overhead (the
+median peak RSS of three empty runs at the query's threads) plus 3 × its live
+state:
+
+- count decode (`benchmark_roh_scaling.md`): rows × 24 + threads × sites ×
+  36.25 bytes;
+- genotype decode (`duckhts_roh_af_table`, the same report): samples ×
+  sites × 16 + sites × 128 + threads × sites × 36.25 bytes;
+- fit (`benchmark_count_error_fit.md`): cells × 312 + distinct (depth, alt
+  count) pairs × 88 + samples × 1,001 × 24 bytes, with the cells and pairs
+  counted untimed;
+- read counting: workers × (`max_region_bytes` + `reference_cache_bytes` +
+  `remote_cache_bytes` + `remote_block_bytes` + the chr20 reference length)
+  + sites × 512 bytes, from the per-job bounds of the catalog entry of
+  `duckhts_somalier_bam_counts` at its defaults, the contig being the CRAM
+  decoder's copy of the reference.
+
+Decodes and fits run at two threads; counting at four threads and four
+workers.
+
+`ROH_TRUTH_SIZE=reduced` checks the driver: CEU only with four children, and
+the mixture at α = 0.05 only, written to a temporary directory instead of
+`benchmarks/results/roh-truth-mixtures/`. Every gate still runs. A reduced run
+is not evidence. The default is `full`. The bundled samtools needs RBCFTools
+1.24-1.1.0 or later on the library path.
+
+``` sh
+R_LIBS=/tmp/RBCFTools-release-lib taskset -c 12-15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_roh_truth_and_mixtures.Rmd")'
+# Driver check only; writes the page outside benchmarks/:
+ROH_TRUTH_SIZE=reduced taskset -c 0-3 Rscript -e \
+  'rmarkdown::render("benchmarks/benchmark_roh_truth_and_mixtures.Rmd", output_dir = tempdir())'
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r run, include=FALSE}
+stopifnot(requireNamespace("duckhtsbench", quietly = TRUE),
+          requireNamespace("jsonlite", quietly = TRUE),
+          requireNamespace("RBCFTools", quietly = TRUE),
+          file.exists("/usr/bin/time"))
+Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath(
+  "r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+if (system2("git", c("diff", "--quiet", "HEAD", "--", "src"), stdout = FALSE, stderr = FALSE) != 0L) {
+  stop("Build source must match the recorded HEAD")
+}
+size <- Sys.getenv("ROH_TRUTH_SIZE", "full")
+if (!size %in% c("full", "reduced")) stop("ROH_TRUTH_SIZE must be full or reduced")
+full_size <- identical(size, "full")
+source("benchmarks/roh_truth_mixtures/common.R")
+source("benchmarks/roh_truth_mixtures/truth.R")
+source("benchmarks/roh_truth_mixtures/mixtures.R")
+duckdb_cli <- Sys.getenv("DUCKDB_CLI", Sys.which("duckdb"))
+stopifnot(nzchar(duckdb_cli))
+extension <- Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension")
+output_dir <- if (full_size) "benchmarks/results/roh-truth-mixtures" else tempfile("roh-truth-mixtures-")
+truth <- roh_truth_run(extension, duckdb_cli, output_dir, size)
+mixture <- roh_mixture_run(extension, duckdb_cli, output_dir, size)
+related <- roh_related_mixture_run(extension, duckdb_cli, output_dir, size)
+# The run tables are kept gzip-compressed; each must read back with every run.
+read_compressed <- function(name) {
+  utils::read.csv(gzfile(file.path(output_dir, name)), stringsAsFactors = FALSE,
+                  colClasses = c(sample = "character", chrom = "character"))
+}
+stopifnot(nrow(read_compressed("truth_runs.csv.gz")) == nrow(truth$runs),
+          nrow(read_compressed("truth_counts_fit_runs.csv.gz")) == nrow(truth$counts_fit_runs))
+declared <- roh_truth_declaration
+mixing <- roh_mixture_declaration
+verdict <- function(pass) ifelse(pass, "pass", "fail")
+number <- function(x, digits = 4) formatC(x, digits = digits, format = "g")
+share <- function(x) ifelse(is.na(x), "none", sprintf("%.4f", x))
+bases <- function(x) format(x, big.mark = ",", scientific = FALSE, trim = TRUE)
+arm_order <- c("gt30", "gt100", "counts_default", "counts_truth", "counts_fit")
+```
+
+## Run
+
+```{r metadata, echo=FALSE}
+knitr::kable(rbind(truth$metadata, mixture$metadata), col.names = c("Item", "Value"))
+```
+
+`r if (!full_size) "**This is a reduced run. It checks the driver and is not evidence.**"`
+
+## Planted truth
+
+### The children
+
+```{r realized, echo=FALSE}
+realized <- truth$realized
+segments <- truth$segments
+knitr::kable(data.frame(
+  Children = nrow(realized), `Planted segments` = nrow(segments),
+  `Planted bases per child` = bases(sum(segments$length) / nrow(realized)),
+  `Planted sites` = bases(sum(realized$planted_sites)),
+  `Heterozygous planted sites` = sum(realized$planted_heterozygous),
+  `Genotype error share` = sprintf("%.4f", sum(realized$genotype_errors) / (nrow(realized) * as.numeric(truth$metadata$value[truth$metadata$key == "sites"]))),
+  `Artefact site share` = sprintf("%.4f", sum(realized$artefact_sites) / (nrow(realized) * as.numeric(truth$metadata$value[truth$metadata$key == "sites"]))),
+  `Mean depth` = sprintf("%.2f", mean(realized$mean_depth)),
+  check.names = FALSE), align = "rrrrrrrr")
+```
+
+### Fit against the simulated numbers (T3)
+
+The median over each population's children of each fitted number.
+
+```{r recovery, echo=FALSE}
+t3 <- truth$t3
+knitr::kable(data.frame(
+  Population = t3$population, Number = t3$number, Simulated = number(t3$simulated),
+  `Median fit` = number(t3$median, 5), Tolerance = number(t3$tolerance),
+  Verdict = verdict(t3$pass), check.names = FALSE), row.names = FALSE, align = "llrrrl")
+statuses <- table(truth$fit$status)
+```
+
+Status: `r paste(sprintf("%s %d", names(statuses), as.integer(statuses)), collapse = ", ")` of `r nrow(truth$fit)` children (`ok` share `r sprintf("%.2f", truth$ok_share)`, at least `r declared$t3_min_ok` required).
+
+### Sensitivity and false discovery
+
+Pooled over all children, against both truths: version 1 (planted segments)
+and version 2 (planted segments and background stretches).
+
+```{r pooled, echo=FALSE}
+pooled <- truth$pooled
+side <- function(data, keys) {
+  v1 <- data[data$truth == "v1", ]
+  v2 <- data[data$truth == "v2", ]
+  merge(v1, v2, by = keys, suffixes = c("_v1", "_v2"), sort = FALSE)
+}
+wide <- side(pooled, c("arm", "run_class"))
+wide <- wide[order(match(wide$run_class, c("long", "all")), match(wide$arm, arm_order)), ]
+knitr::kable(data.frame(
+  Runs = ifelse(wide$run_class == "long", "≥ 500 kb", "all"), Arm = wide$arm,
+  `Called bases` = bases(wide$called_bases_v1),
+  `Sensitivity v1` = share(wide$sensitivity_v1), `False discovery v1` = share(wide$false_discovery_v1),
+  `Sensitivity v2` = share(wide$sensitivity_v2), `False discovery v2` = share(wide$false_discovery_v2),
+  check.names = FALSE), row.names = FALSE, align = "llrrrrr")
+```
+
+### Comparisons
+
+Pooled difference, first arm minus second, with its 95% bootstrap interval,
+against each truth.
+
+```{r comparisons, echo=FALSE}
+comparisons <- side(truth$comparisons, c("criterion", "test", "reference", "run_class", "metric"))
+comparisons <- comparisons[order(match(comparisons$run_class, c("long", "all")),
+                                 match(paste(comparisons$test, comparisons$reference),
+                                       paste(declared$comparisons$test, declared$comparisons$reference)),
+                                 comparisons$metric), ]
+interval <- function(difference, lower, upper) {
+  sprintf("%+.4f [%+.4f, %+.4f]", difference, lower, upper)
+}
+knitr::kable(data.frame(
+  Criterion = comparisons$criterion, Runs = ifelse(comparisons$run_class == "long", "≥ 500 kb", "all"),
+  Comparison = paste(comparisons$test, "−", comparisons$reference), Metric = comparisons$metric,
+  `Version 1` = interval(comparisons$difference_v1, comparisons$lower_v1, comparisons$upper_v1),
+  `Version 2` = interval(comparisons$difference_v2, comparisons$lower_v2, comparisons$upper_v2),
+  check.names = FALSE), row.names = FALSE, align = "llllrr")
+criteria <- truth$criteria
+verdict_of <- function(version, criterion) {
+  row <- criteria[criteria$truth %in% c(version, "either") & criteria$criterion == criterion, ]
+  verdict(row$pass)
+}
+```
+
+```{r criteria, echo=FALSE}
+knitr::kable(data.frame(
+  Criterion = c("T1", "T2", "T3"),
+  `Version 1` = vapply(c("T1", "T2", "T3"), function(k) verdict_of("v1", k), ""),
+  `Version 2` = vapply(c("T1", "T2", "T3"), function(k) verdict_of("v2", k), ""),
+  check.names = FALSE), row.names = FALSE)
+```
+
+T3 compares the fit with the simulated numbers and does not depend on the
+truth.
+
+### By population
+
+Runs of at least 500 kb.
+
+```{r by-population, echo=FALSE}
+population <- side(truth$by_population[truth$by_population$run_class == "long", ],
+                   c("arm", "run_class", "population"))
+population <- population[order(match(population$population, declared$populations),
+                               match(population$arm, arm_order)), ]
+knitr::kable(data.frame(
+  Population = population$population, Arm = population$arm,
+  `Sensitivity v1` = share(population$sensitivity_v1),
+  `False discovery v1` = share(population$false_discovery_v1),
+  `Sensitivity v2` = share(population$sensitivity_v2),
+  `False discovery v2` = share(population$false_discovery_v2),
+  check.names = FALSE), row.names = FALSE, align = "llrrrr")
+```
+
+### By planted length
+
+The share of each planted segment that the runs of at least 500 kb cover,
+averaged over the segments of one length; "complete" counts segments covered
+to at least 99%, "missed" those not covered at all.
+
+```{r by-length, echo=FALSE}
+by_length <- truth$by_length
+by_length <- by_length[order(match(by_length$arm, arm_order), by_length$length), ]
+knitr::kable(data.frame(
+  Arm = by_length$arm, `Length (Mb)` = by_length$length / 1e6, Segments = by_length$segments,
+  `Mean covered` = sprintf("%.3f", by_length$mean_covered),
+  Complete = sprintf("%.2f", by_length$fully_covered), Missed = sprintf("%.2f", by_length$missed),
+  check.names = FALSE), row.names = FALSE, align = "lrrrrr")
+```
+
+### The background (secondary)
+
+Against version 1 of the truth. Background stretches have no heterozygous
+true genotype over at least 500 kb. Bases inside one are homozygous in the
+child; version 1 counts them false because they are outside the planted
+segments, and version 2 counts them true. The heterozygosity columns compare
+the true heterozygous sites per panel site inside an arm's calls outside the
+planted segments with the child's background as a whole.
+
+```{r secondary, echo=FALSE}
+secondary <- truth$secondary
+secondary <- secondary[order(match(secondary$run_class, c("long", "all")), match(secondary$arm, arm_order)), ]
+background_sites <- nrow(truth$children) * as.numeric(truth$metadata$value[truth$metadata$key == "sites"]) -
+  sum(truth$realized$planted_sites)
+knitr::kable(data.frame(
+  Runs = ifelse(secondary$run_class == "long", "≥ 500 kb", "all"), Arm = secondary$arm,
+  `False bases` = bases(secondary$false_bases),
+  `In background stretches` = bases(secondary$false_in_background),
+  Elsewhere = bases(secondary$false_elsewhere),
+  `Heterozygous sites in calls` = bases(secondary$heterozygous_in_calls),
+  `Background sites in calls` = bases(secondary$background_sites_in_calls),
+  `Heterozygosity in calls` = sprintf("%.4f", ifelse(secondary$background_sites_in_calls > 0,
+    secondary$heterozygous_in_calls / secondary$background_sites_in_calls, NA)),
+  check.names = FALSE), row.names = FALSE, align = "llrrrrrr")
+background_bases <- secondary$background_bases[[1L]]
+```
+
+The background stretches hold `r bases(background_bases)` bases outside the
+planted segments over `r nrow(truth$children)` children
+(`r bases(round(background_bases / nrow(truth$children)))` per child). The
+heterozygosity of the background as a whole is
+`r sprintf("%.4f", secondary$heterozygous_sites[[1L]] / background_sites)`
+heterozygous sites per panel site.
+
+### Stability and gained bases against truth
+
+Runs of `counts_fit`, all lengths. Unstable bases are the bases of a run that
+`stable_fraction` does not count (not called at both w − sd and w + sd);
+gained bases are those `gained_bases` counts. A false base is outside the
+truth; a true gained base is one that `counts_fit` missed.
+
+```{r stability, echo=FALSE}
+stability <- truth$stability
+totals <- do.call(rbind, lapply(split(stability, stability$truth), function(rows) {
+  data.frame(truth = rows$truth[[1L]],
+             t(colSums(rows[setdiff(names(rows), c("truth", "child", "population"))])))
+}))
+knitr::kable(data.frame(
+  Truth = totals$truth, `Run bases` = bases(totals$run_bases),
+  `False share of run bases` = share(totals$run_false / totals$run_bases),
+  `Unstable bases` = bases(totals$unstable_bases),
+  `False share of unstable` = share(ifelse(totals$unstable_bases > 0,
+                                           totals$unstable_false / totals$unstable_bases, NA)),
+  `False share of stable` = share(totals$stable_false / totals$stable_bases),
+  `Missed true bases` = bases(totals$missed_bases),
+  `Gained bases` = bases(totals$gained_bases),
+  `Gained, true` = bases(totals$gained_true),
+  `Gained, false` = bases(totals$gained_false),
+  `Bases of new runs at w + sd` = bases(totals$new_run_bases),
+  check.names = FALSE), row.names = FALSE, align = "lrrrrrrrrrr")
+```
+
+## Read mixtures
+
+### Identities
+
+```{r mixture-identities, echo=FALSE}
+identities <- mixture$identities
+knitr::kable(data.frame(
+  Slice = identities$sample, Rows = bases(identities$rows), `Counts SHA-256` = identities$counts_sha256,
+  `Equals registered` = ifelse(identities$identical, "yes", "no"), check.names = FALSE),
+  row.names = FALSE)
+```
+
+### Mixtures
+
+```{r mixture-reads, echo=FALSE}
+reads <- mixture$reads
+knitr::kable(data.frame(
+  α = reads$alpha, `Receiver alignments` = bases(reads$receiver_alignments),
+  `Donor alignments` = bases(reads$donor_alignments),
+  `Donor share of alignments` = sprintf("%.4f", reads$read_share), check.names = FALSE),
+  row.names = FALSE, align = "rrrr")
+```
+
+### Fit
+
+```{r mixture-fit, echo=FALSE}
+fit <- mixture$fit
+knitr::kable(data.frame(
+  α = fit$alpha, contamination = number(fit$contamination),
+  contamination_sd = ifelse(is.na(fit$contamination_sd), "NULL", number(fit$contamination_sd)),
+  `contamination / α` = ifelse(fit$alpha > 0, sprintf("%.2f", fit$contamination / fit$alpha), ""),
+  contamination_relative = number(fit$contamination_relative),
+  `relative − unrelated log-likelihood` = sprintf("%.1f", fit$log_likelihood_relative - fit$log_likelihood),
+  seq_error = number(fit$seq_error), allele_balance = number(fit$allele_balance),
+  artefact_weight = number(fit$artefact_weight), status = fit$status, check.names = FALSE),
+  row.names = FALSE, align = "rrrrrrrrrl")
+```
+
+### FROH erosion
+
+```{r mixture-froh, echo=FALSE}
+froh <- mixture$froh
+froh <- froh[order(froh$decode, froh$alpha), ]
+knitr::kable(data.frame(
+  Decode = froh$decode, α = froh$alpha, Runs = froh$runs, FROH = sprintf("%.4f", froh$froh),
+  Erosion = sprintf("%+.4f", froh$erosion), Jaccard = sprintf("%.3f", froh$jaccard),
+  check.names = FALSE), row.names = FALSE, align = "lrrrrr")
+m2 <- mixture$m2
+```
+
+```{r mixture-criteria, echo=FALSE}
+knitr::kable(data.frame(
+  α = m2$alpha, `Erosion with term` = sprintf("%+.4f", m2$erosion_with_term),
+  `Erosion without term` = sprintf("%+.4f", m2$erosion_without_term),
+  `M2` = verdict(m2$pass), check.names = FALSE), row.names = FALSE, align = "rrrl")
+knitr::kable(data.frame(Criterion = mixture$criteria$criterion, Verdict = verdict(mixture$criteria$pass)),
+             row.names = FALSE)
+```
+
+## Related-donor read mixtures
+
+Receiver HG00403, child donor HG00405. Alpha 0 is the receiver-only control.
+
+```{r related-identities, echo=FALSE}
+identities <- related$identities
+knitr::kable(data.frame(
+  Slice = identities$sample, Rows = bases(identities$rows),
+  `Counts SHA-256` = identities$counts_sha256,
+  `Equals registered` = ifelse(identities$identical, "yes", "no"), check.names = FALSE),
+  row.names = FALSE)
+reads <- related$reads
+knitr::kable(data.frame(
+  α = reads$alpha, `Receiver alignments` = bases(reads$receiver_alignments),
+  `Donor alignments` = bases(reads$donor_alignments),
+  `Donor share of alignments` = sprintf("%.4f", reads$read_share), check.names = FALSE),
+  row.names = FALSE)
+```
+
+### Relative and unrelated fits
+
+```{r related-fit, echo=FALSE}
+fit <- related$fit
+knitr::kable(data.frame(
+  α = fit$alpha, contamination_relative = number(fit$contamination_relative),
+  `Relative error` = number(fit$relative_error),
+  `M3 tolerance` = number(fit$relative_tolerance),
+  `M3 recovery` = ifelse(fit$alpha == 0, "control", verdict(fit$relative_within_tolerance)),
+  contamination = number(fit$contamination), `α/2` = number(fit$alpha / 2),
+  `M4 tolerance` = number(fit$half_share_tolerance),
+  `M4 recovery` = ifelse(fit$alpha == 0, "control", verdict(fit$half_share_within_tolerance)),
+  status = fit$status, check.names = FALSE), row.names = FALSE)
+knitr::kable(data.frame(
+  α = fit$alpha, `Relative log-likelihood` = number(fit$log_likelihood_relative, 7),
+  `Unrelated log-likelihood` = number(fit$log_likelihood, 7),
+  `Relative − unrelated` = sprintf("%+.3f", fit$relative_loglik_gain),
+  `Likelihood gate` = ifelse(fit$alpha < roh_related_declaration$likelihood_min_alpha,
+    "descriptive", verdict(fit$relative_loglik_gain > 0)), check.names = FALSE),
+  row.names = FALSE)
+```
+
+### FROH with the relative-fit term and without
+
+```{r related-froh, echo=FALSE}
+froh <- related$froh
+froh <- froh[order(froh$decode, froh$alpha), ]
+knitr::kable(data.frame(
+  Decode = froh$decode, α = froh$alpha, Runs = froh$runs,
+  FROH = sprintf("%.4f", froh$froh), Erosion = sprintf("%+.4f", froh$erosion),
+  Jaccard = sprintf("%.3f", froh$jaccard), check.names = FALSE), row.names = FALSE)
+erosion <- related$m2
+knitr::kable(data.frame(
+  α = erosion$alpha, `Erosion with relative term` = sprintf("%+.4f", erosion$erosion_with_term),
+  `Erosion without term` = sprintf("%+.4f", erosion$erosion_without_term),
+  R1 = verdict(erosion$pass), check.names = FALSE), row.names = FALSE)
+knitr::kable(data.frame(Criterion = related$criteria$criterion,
+  Verdict = verdict(related$criteria$pass)), row.names = FALSE)
+```
+
+## Gates
+
+Every DuckDB query, with its latency, peak RSS, DuckDB's peak buffer memory,
+its ceiling and its temporary bytes. The render stops on any spill or any
+peak RSS above its ceiling, and it reached this table.
+
+```{r gates, echo=FALSE}
+observations <- rbind(data.frame(part = "truth", truth$observations),
+                      data.frame(part = "mixtures", mixture$observations),
+                      data.frame(part = "related", related$observations))
+knitr::kable(data.frame(
+  Part = observations$part, Query = observations$observation, Kind = observations$kind,
+  Threads = observations$threads, Seconds = sprintf("%.3f", observations$seconds),
+  `Peak RSS MiB` = sprintf("%.1f", observations$max_rss_mib),
+  `Peak buffer MiB` = sprintf("%.1f", observations$peak_buffer_mib),
+  `Ceiling MiB` = ifelse(is.na(observations$ceiling_mib), "", sprintf("%.1f", observations$ceiling_mib)),
+  `Temporary bytes` = format(observations$peak_temp_bytes),
+  check.names = FALSE), row.names = FALSE, align = "lllrrrrrr")
+```
+
+`r if (full_size) "Every observation is in \x60benchmarks/results/roh-truth-mixtures/\x60: the children, the planted segments, the fits, every run (gzip-compressed), the per-child scores and the queries." else ""`
+
+## Limitations
+
+- One chromosome. The children are synthetic: real haplotypes, simulated
+  errors and reads. The read model of the simulation is the model of the fit
+  and of the decode, apart from the depth distribution and the second genome
+  being a real founder; real reads have errors that depend on base quality,
+  mapping and sequence context.
+- The population frequencies include the founders of the children, two of
+  about 200 haplotypes per site.
+- Version 1 counts calls outside the planted segments as false, but the
+  background of two unrelated founders is not free of homozygous stretches.
+  Version 2 counts stretches of at least 500 kb without a true heterozygous
+  site as true; a call through a longer stretch broken by one or two
+  heterozygous sites, or through a shorter stretch, still counts as false
+  there. The founders are the pedigree's founders; cryptic relatedness
+  between them is not checked.
+- One error rate, one depth and one set of read parameters. Other rates, a
+  low depth and a contaminant of another population are not tested here.
+- Two mixture pairs: one unrelated pair of two populations and one
+  parent/child pair. The receiver's frequencies are the panel's pooled
+  frequencies, not its population's, so a donor of another population biases
+  the fitted contamination upward, as the count-level mixture of
+  `benchmark_count_error_fit.md` shows. The relative fit's term is tested as a
+  plug-in to the existing emission; a relationship-aware decode is not tested.

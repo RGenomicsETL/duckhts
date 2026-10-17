@@ -99,6 +99,15 @@ test_roh_parity <- function() {
                                  gt_error = 30, samples = "S1")
   .roh_compare(.roh_observed(ancestry_map), .roh_observed(equivalent_map))
 
+  # bcftools 1.24: roh --AF-file roh_af.tsv.gz -m roh_map_{CHROM}.txt.
+  .roh_compare(.roh_observed(rduckhts_roh(
+    con, vcf, af_table = "roh_af", site_rule = "bcftools", genetic_map = "roh_map"
+  )), .roh_expected(list(
+    list("S1", "chr1", 1432927, 2396807, 963881, 95, 42.4),
+    list("S4", "chr1", 2246017, 3319712, 1073696, 121, 77.4),
+    list("S2", "chr2", 693881, 1722963, 1029083, 114, 18.6),
+    list("S4", "chr2", 23420, 2400223, 2376804, 238, 94.0))))
+
   # Constant recombination rate (-M 1e-6).
   .roh_compare(.roh_observed(rduckhts_roh(con, vcf, af_tag = "AF", rec_rate = 1e-6)), .roh_expected(list(
     list("S1", "chr1", 1432927, 2396807, 963881, 95, 49.7),

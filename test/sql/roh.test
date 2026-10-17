@@ -259,9 +259,9 @@ UNION ALL (SELECT * FROM pooled EXCEPT ALL SELECT * FROM tuned));
 0
 
 query I
-WITH tuned AS (SELECT * FROM duckhts_roh_ancestry('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+WITH tuned AS (SELECT * FROM duckhts_roh_ancestry_map('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
   'roh_ancestry_reference', 'roh_ancestry_proportions', 'roh_map', gt_error := 30, samples := 'S1')),
-pooled AS (SELECT * FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
+pooled AS (SELECT * FROM duckhts_roh_af_table_map('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz',
   'roh_ancestry_af', 'roh_map', gt_error := 30, samples := 'S1'))
 SELECT count(*) FROM ((SELECT * FROM tuned EXCEPT ALL SELECT * FROM pooled)
 UNION ALL (SELECT * FROM pooled EXCEPT ALL SELECT * FROM tuned));
@@ -323,7 +323,7 @@ WITH expected(sample, chrom, start, "end", length, n_markers, quality) AS (VALUE
  ('S2', 'chr2', 693881, 1722963, 1029083, 114, 17.7),
  ('S4', 'chr2', 23420, 2400223, 2376804, 239, 94.4)
 ), observed AS (
-  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_map')
+  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh_map('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_map')
 )
 SELECT count(*) FROM (
   (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed
@@ -335,7 +335,7 @@ SELECT count(*) FROM (
 0
 
 query I
-SELECT count(*) FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_map');
+SELECT count(*) FROM duckhts_roh_map('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_map');
 ----
 4
 
@@ -348,7 +348,7 @@ WITH expected(sample, chrom, start, "end", length, n_markers, quality) AS (VALUE
  ('S2', 'chr2', 693881, 1722963, 1029083, 114, 13.1),
  ('S4', 'chr2', 23420, 2400223, 2376804, 239, 95.3)
 ), observed AS (
-  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_map', rec_rate := 0.5)
+  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh_map('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_map', rec_rate := 0.5)
 )
 SELECT count(*) FROM (
   (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed
@@ -360,7 +360,7 @@ SELECT count(*) FROM (
 0
 
 query I
-SELECT count(*) FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_map', rec_rate := 0.5);
+SELECT count(*) FROM duckhts_roh_map('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_map', rec_rate := 0.5);
 ----
 4
 
@@ -371,7 +371,7 @@ WITH expected(sample, chrom, start, "end", length, n_markers, quality) AS (VALUE
 ('S1', 'chr1', 1432927, 2396807, 963881, 95, 41.4),
  ('S4', 'chr1', 2246017, 3319712, 1073696, 121, 77.5)
 ), observed AS (
-  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_map_chr1')
+  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh_map('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_map_chr1')
 )
 SELECT count(*) FROM (
   (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed
@@ -383,7 +383,7 @@ SELECT count(*) FROM (
 0
 
 query I
-SELECT count(*) FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_map_chr1');
+SELECT count(*) FROM duckhts_roh_map('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_map_chr1');
 ----
 2
 
@@ -433,7 +433,7 @@ WITH expected(sample, chrom, start, "end", length, n_markers, quality) AS (VALUE
  ('S2', 'chr2', 693881, 1722963, 1029083, 114, 37.2),
  ('S4', 'chr2', 23420, 2400223, 2376804, 238, 96.6)
 ), observed AS (
-  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'roh_af', 'roh_map', gt_error := 30)
+  SELECT sample, chrom, start, "end", length, n_markers, quality FROM duckhts_roh_af_table_map('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'roh_af', 'roh_map', gt_error := 30)
 )
 SELECT count(*) FROM (
   (SELECT sample, chrom, start, "end", length, n_markers, CAST(quality AS DECIMAL(6, 1)) FROM observed
@@ -445,7 +445,7 @@ SELECT count(*) FROM (
 0
 
 query I
-SELECT count(*) FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'roh_af', 'roh_map', gt_error := 30);
+SELECT count(*) FROM duckhts_roh_af_table_map('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'roh_af', 'roh_map', gt_error := 30);
 ----
 4
 
@@ -494,7 +494,7 @@ SELECT count(*) FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_empty.vcf'
 0
 
 query I
-SELECT count(*) FROM duckhts_roh_af_table('__WORKING_DIRECTORY__/test/data/roh_empty.vcf', 'roh_af', 'roh_map');
+SELECT count(*) FROM duckhts_roh_af_table_map('__WORKING_DIRECTORY__/test/data/roh_empty.vcf', 'roh_af', 'roh_map');
 ----
 0
 
@@ -755,13 +755,13 @@ statement ok
 CREATE TEMP TABLE roh_bad_map AS SELECT 'chr1' AS chrom, 1000 AS pos, 0.0 AS cm UNION ALL SELECT 'chr1', 1000, 0.1;
 
 statement error
-SELECT * FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_bad_map');
+SELECT * FROM duckhts_roh_map('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_bad_map');
 ----
 genetic map positions must be strictly ascending
 
-# Overloads: a string third argument is the genetic map, a number is hw_to_az.
+# The map macro takes the table name; the base macro retains numeric transition arguments.
 query I
-SELECT count(*) FROM duckhts_roh('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_map', az_to_hw := 5e-9);
+SELECT count(*) FROM duckhts_roh_map('__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'AF', 'roh_map', az_to_hw := 5e-9);
 ----
 4
 
@@ -1170,13 +1170,13 @@ UNION ALL (SELECT * FROM duckhts_roh_counts('roh_counts_clean')
 ----
 0
 
-# The genetic-map overload decodes only chromosomes the map covers.
+# The genetic-map macro decodes only chromosomes the map covers.
 statement ok
 CREATE TEMP TABLE roh_counts_map AS
 SELECT '1' AS chrom, p AS pos, p / 1e6 AS cm FROM range(1, 5000002, 500000) AS t(p);
 
 query I
-SELECT list_sort(list(DISTINCT chrom)) FROM duckhts_roh_counts('roh_counts_clean', 'roh_counts_map');
+SELECT list_sort(list(DISTINCT chrom)) FROM duckhts_roh_counts_map('roh_counts_clean', 'roh_counts_map');
 ----
 [1]
 
@@ -1464,7 +1464,7 @@ SELECT * FROM duckhts_roh_counts('roh_counts_none', allele_balance := 0.3);
 allele_balance must be in [0.35, 0.65]
 
 statement error
-SELECT * FROM duckhts_roh_counts('roh_counts_none', 'roh_counts_map', artefact_weight := 0.06);
+SELECT * FROM duckhts_roh_counts_map('roh_counts_none', 'roh_counts_map', artefact_weight := 0.06);
 ----
 artefact_weight must be in [0, 0.05]
 
@@ -1619,15 +1619,45 @@ SELECT (SELECT count(DISTINCT sample) FROM fitted), count(*) FROM (
 
 query I
 WITH fitted AS (
-  SELECT * EXCLUDE (stable_fraction, gained_bases) FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits', 'roh_counts_map')),
+  SELECT * EXCLUDE (stable_fraction, gained_bases) FROM duckhts_roh_counts_fitted_map('roh_counts_clean', 'roh_fits', 'roh_counts_map')),
 scalar AS (
-  SELECT * FROM duckhts_roh_counts('roh_counts_clean', 'roh_counts_map') WHERE sample = 'S1'
+  SELECT * FROM duckhts_roh_counts_map('roh_counts_clean', 'roh_counts_map') WHERE sample = 'S1'
   UNION ALL
-  SELECT * FROM duckhts_roh_counts('roh_counts_clean', 'roh_counts_map',
+  SELECT * FROM duckhts_roh_counts_map('roh_counts_clean', 'roh_counts_map',
                                  seq_error := 0.02, contamination := 0.1, allele_balance := 0.49,
                                  artefact_weight := 0.002) WHERE sample = 'S2')
 SELECT count(*) FROM ((SELECT * FROM fitted EXCEPT ALL SELECT * FROM scalar)
 UNION ALL (SELECT * FROM scalar EXCEPT ALL SELECT * FROM fitted));
+----
+0
+
+# The counts relation is read once. A relation that holds a join, such as counts joined to
+# their samples or frequencies, read a second time is a common subplan that DuckDB
+# materializes as a CTE with every row and column of the counts; on 100 synthetic chr20
+# samples that tripled the peak buffer (benchmark_roh_truth_and_mixtures.md). The fit
+# relation is read once too, so the plan holds no CTE at all.
+statement ok
+CREATE TEMP VIEW roh_counts_joined AS
+SELECT c.* FROM roh_counts_clean AS c JOIN (SELECT DISTINCT sample_id FROM roh_counts_clean) AS s
+USING (sample_id);
+
+query II
+EXPLAIN (FORMAT json)
+SELECT count(*) FROM duckhts_roh_counts_fitted('roh_counts_joined', 'roh_fits');
+----
+physical_plan	<!REGEX>:.*"name": "CTE".*
+
+query II
+EXPLAIN (FORMAT json)
+SELECT count(*) FROM duckhts_roh_counts_fitted_map('roh_counts_joined', 'roh_fits', 'roh_counts_map');
+----
+physical_plan	<!REGEX>:.*"name": "CTE".*
+
+query I
+WITH joined AS (SELECT * FROM duckhts_roh_counts_fitted('roh_counts_joined', 'roh_fits')),
+direct AS (SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_fits'))
+SELECT count(*) FROM ((SELECT * FROM joined EXCEPT ALL SELECT * FROM direct)
+UNION ALL (SELECT * FROM direct EXCEPT ALL SELECT * FROM joined));
 ----
 0
 
@@ -1679,7 +1709,7 @@ statement ok
 CREATE TEMP VIEW roh_no_map AS SELECT * FROM roh_counts_map WHERE false;
 
 statement error
-SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits', 'roh_no_map');
+SELECT * FROM duckhts_roh_counts_fitted_map('roh_counts_clean', 'roh_bad_fits', 'roh_no_map');
 ----
 contamination must be in [0, 1)
 
@@ -1704,7 +1734,7 @@ statement ok
 UPDATE roh_bad_fits SET allele_balance = 0.34, artefact_weight = 0.0 WHERE sample = 'S2';
 
 statement error
-SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits', 'roh_no_map');
+SELECT * FROM duckhts_roh_counts_fitted_map('roh_counts_clean', 'roh_bad_fits', 'roh_no_map');
 ----
 allele_balance must be in [0.35, 0.65]
 
@@ -1746,7 +1776,7 @@ SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits');
 artefact_weight_sd must be finite and at least 0
 
 statement error
-SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_bad_fits', 'roh_no_map');
+SELECT * FROM duckhts_roh_counts_fitted_map('roh_counts_clean', 'roh_bad_fits', 'roh_no_map');
 ----
 artefact_weight_sd must be finite and at least 0
 
@@ -1777,7 +1807,7 @@ statement ok
 SET scalar_subquery_error_on_multiple_rows = false;
 
 statement error
-SELECT * FROM duckhts_roh_counts_fitted('roh_counts_clean', 'roh_duplicate_fits', 'roh_counts_map');
+SELECT * FROM duckhts_roh_counts_fitted_map('roh_counts_clean', 'roh_duplicate_fits', 'roh_counts_map');
 ----
 duplicate fit rows for sample
 
@@ -2117,7 +2147,7 @@ true
 # ---------------------------------------------------------------------------------------------
 # duckhts_roh_af_table_bcftools chooses the record of a listed position as bcftools roh --AF-file
 # does. HTSlib's indel class of a record decides which records bcftools passes over;
-# duckhts_htslib_is_indel ports it.
+# duckhts__htslib_is_indel ports it.
 # The expected classes are the INDEL flag of bcftools 1.24 (RBCFTools) on the fixture:
 #   bcftools query -f '%ID\t%TYPE\n' test/data/roh_variant_class.vcf
 query II
@@ -2132,7 +2162,7 @@ WITH bcftools(id, type) AS (VALUES
  ('multi_mnp_complex', 'MNP,OTHER'), ('multi_indel_overlap', 'INDEL,OVERLAP'),
  ('multi_symbolic_first', 'INDEL'), ('ref_case', 'REF')
 )
-SELECT count(*), count(*) FILTER (WHERE duckhts_htslib_is_indel(v.REF, v.ALT) IS DISTINCT FROM
+SELECT count(*), count(*) FILTER (WHERE duckhts__htslib_is_indel(v.REF, v.ALT) IS DISTINCT FROM
   list_contains(string_split(b.type, ','), 'INDEL'))
 FROM read_bcf('__WORKING_DIRECTORY__/test/data/roh_variant_class.vcf') AS v
 JOIN bcftools AS b ON b.id = v.ID;
@@ -2256,14 +2286,14 @@ SELECT count(*) FROM (
 0
 
 # Several frequency rows at one position are an error under the bcftools rule, in both
-# overloads: bcftools reads the first line of a position, and a relation has no line order.
+# forms: bcftools reads the first line of a position, and a relation has no line order.
 statement error
 SELECT * FROM duckhts_roh_af_table_bcftools('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz', 'roh_repeated_af');
 ----
 duckhts_roh_af_table_bcftools needs one af_table row per position, but chr1:4000 has 2 rows
 
 statement error
-SELECT * FROM duckhts_roh_af_table_bcftools('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz', 'roh_repeated_af',
+SELECT * FROM duckhts_roh_af_table_bcftools_map('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz', 'roh_repeated_af',
   'roh_map');
 ----
 duckhts_roh_af_table_bcftools needs one af_table row per position, but chr1:4000 has 2 rows
@@ -2333,7 +2363,7 @@ SELECT count(*) FROM (
 ----
 0
 
-# The name is matched as an SQL identifier, without case, and the genetic_map overload takes
+# The name is matched as an SQL identifier, without case, and the genetic-map macro takes
 # af_order too.
 query T
 SELECT list(start ORDER BY start) FROM duckhts_roh_af_table_bcftools('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz',
@@ -2341,12 +2371,33 @@ SELECT list(start ORDER BY start) FROM duckhts_roh_af_table_bcftools('__WORKING_
 ----
 [500, 1000, 4000, 5000, 6000, 9000]
 
+# bcftools 1.24: roh --AF-file test/data/roh_af.tsv.gz
+#   -m test/data/roh_map_{CHROM}.txt test/data/roh_fixture.vcf.gz
+query I
+WITH expected(sample, chrom, start, "end", length, n_markers, quality) AS (VALUES
+  ('S1', 'chr1', 1432927, 2396807, 963881, 95, 42.4),
+  ('S4', 'chr1', 2246017, 3319712, 1073696, 121, 77.4),
+  ('S2', 'chr2', 693881, 1722963, 1029083, 114, 18.6),
+  ('S4', 'chr2', 23420, 2400223, 2376804, 238, 94.0)
+), observed AS (
+  SELECT sample, chrom, start, "end", length, n_markers,
+         CAST(quality AS DECIMAL(6, 1)) AS quality
+  FROM duckhts_roh_af_table_bcftools_map(
+    '__WORKING_DIRECTORY__/test/data/roh_fixture.vcf.gz', 'roh_af', 'roh_map')
+)
+SELECT count(*) FROM (
+  (SELECT * FROM observed EXCEPT ALL SELECT * FROM expected)
+  UNION ALL (SELECT * FROM expected EXCEPT ALL SELECT * FROM observed)
+);
+----
+0
+
 statement ok
-SELECT * FROM duckhts_roh_af_table_bcftools('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz',
+SELECT * FROM duckhts_roh_af_table_bcftools_map('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz',
   'roh_repeated_af_lines', 'roh_map', af_order := 'line');
 
 # A NULL or repeated af_order value at a position, and a name that is not a column of af_table,
-# are errors, in both overloads; the column check also holds for an empty af_table.
+# are errors, in both macro forms; the column check also holds for an empty af_table.
 statement ok
 CREATE TEMP TABLE roh_repeated_af_null_line AS SELECT * REPLACE (CASE WHEN pos = 4000 AND alt = 'G' THEN NULL ELSE line END AS line)
 FROM roh_repeated_af_lines;
@@ -2368,7 +2419,7 @@ SELECT * FROM duckhts_roh_af_table_bcftools('__WORKING_DIRECTORY__/test/data/roh
 duckhts_roh_af_table_bcftools needs distinct af_order values within a position, but chr1:4000 repeats a value of line
 
 statement error
-SELECT * FROM duckhts_roh_af_table_bcftools('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz',
+SELECT * FROM duckhts_roh_af_table_bcftools_map('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz',
   'roh_repeated_af_tied_line', 'roh_map', af_order := 'line');
 ----
 duckhts_roh_af_table_bcftools needs distinct af_order values within a position, but chr1:4000 repeats a value of line
@@ -2380,7 +2431,7 @@ SELECT * FROM duckhts_roh_af_table_bcftools('__WORKING_DIRECTORY__/test/data/roh
 duckhts_roh_af_table_bcftools: af_order 'line_number' is not a column of af_table
 
 statement error
-SELECT * FROM duckhts_roh_af_table_bcftools('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz',
+SELECT * FROM duckhts_roh_af_table_bcftools_map('__WORKING_DIRECTORY__/test/data/roh_repeated.vcf.gz',
   'roh_repeated_af_lines', 'roh_map', af_order := 'line_number');
 ----
 duckhts_roh_af_table_bcftools: af_order 'line_number' is not a column of af_table

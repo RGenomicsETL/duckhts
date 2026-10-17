@@ -4,8 +4,7 @@
 
 require duckhts
 
-# The inventory includes the separate fitted-count ROH macro and the private
-# duckhts_htslib_is_indel classifier of duckhts_roh_af_table_bcftools, and that macro.
+# Public and private macro definitions have one ordered inventory.
 query IIIII
 SELECT count(*)::INTEGER, count(DISTINCT install_order)::INTEGER,
        count(DISTINCT definitions_sha256)::INTEGER,
@@ -13,7 +12,7 @@ SELECT count(*)::INTEGER, count(DISTINCT install_order)::INTEGER,
        count(*) FILTER (WHERE length(definitions_sha256) = 64)::INTEGER
 FROM duckhts_macro_definitions();
 ----
-42	42	1	42	42
+57	57	1	57	57
 
 query II
 SELECT count(DISTINCT d.name)::INTEGER,
@@ -21,9 +20,48 @@ SELECT count(DISTINCT d.name)::INTEGER,
 FROM duckhts_macro_definitions() d
 JOIN duckdb_functions() f ON f.function_name = d.name AND f.function_type IN ('macro', 'table_macro');
 ----
-42	42
+57	57
+
+# Each DuckHTS macro name has exactly one overload.
+query I
+SELECT count(*) FROM (
+  SELECT function_name, count(*) FROM duckdb_functions()
+  WHERE function_type IN ('macro', 'table_macro')
+    AND starts_with(function_name, 'duckhts_')
+  GROUP BY function_name HAVING count(*) > 1
+);
+----
+0
 
 query I
-SELECT duckhts_quote_ident('a"b');
+SELECT count(*) FROM duckhts_macro_definitions() WHERE public;
+----
+47
+
+# DuckHTS contributes no public function or macro in DuckDB's namespace.
+query I
+SELECT count(*) FROM duckhts_macro_definitions()
+WHERE public AND starts_with(name, 'duckdb_');
+----
+0
+
+# Depth and interval base signatures reject extra positional table inputs.
+statement error
+SELECT * FROM duckhts_depth_region_fraction('bins', 'regions', 'reference');
+----
+Binder Error
+
+statement error
+SELECT * FROM duckhts_depth_sex_fraction('bins', 'reference');
+----
+Binder Error
+
+statement error
+SELECT * FROM duckhts_cgranges_from_table('idx', 'table', 'chrom', 'start', 'end', 'label');
+----
+Binder Error
+
+query I
+SELECT duckhts__quote_ident('a"b');
 ----
 "a""b"

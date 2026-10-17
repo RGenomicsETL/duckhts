@@ -60,7 +60,7 @@ SELECT (bcftools_liftover(
 Invalid Input Error: bcftools_liftover: pos must be >= 1
 
 statement error
-SELECT * FROM duckdb_liftover(
+SELECT * FROM duckhts_liftover(
   '(VALUES ('''' , 2, ''C'', ''T'')) AS t(chrom, pos, ref, alt)',
   'chrom',
   'pos',
@@ -74,7 +74,7 @@ SELECT * FROM duckdb_liftover(
 Invalid Input Error: bcftools_liftover: chrom must be non-empty
 
 statement error
-SELECT * FROM duckdb_liftover(
+SELECT * FROM duckhts_liftover(
   '(VALUES (NULL, 2, ''C'', ''T'')) AS t(chrom, pos, ref, alt)',
   'chrom',
   'pos',
@@ -88,7 +88,7 @@ SELECT * FROM duckdb_liftover(
 Invalid Input Error: bcftools_liftover: chrom must be non-null
 
 statement error
-SELECT * FROM duckdb_liftover(
+SELECT * FROM duckhts_liftover(
   '(VALUES (''chrF'', NULL, ''C'', ''T'')) AS t(chrom, pos, ref, alt)',
   'chrom',
   'pos',
@@ -102,7 +102,7 @@ SELECT * FROM duckdb_liftover(
 Invalid Input Error: bcftools_liftover: pos must be non-null
 
 statement error
-SELECT * FROM duckdb_liftover(
+SELECT * FROM duckhts_liftover(
   '(VALUES (''chrF'', 0, ''C'', ''T'')) AS t(chrom, pos, ref, alt)',
   'chrom',
   'pos',

@@ -49,6 +49,9 @@ extern bool register_duckhts_roh_functions(duckdb_connection connection);
 extern bool register_duckhts_roh_sql(duckhts_registration_t *registration);
 extern bool register_duckhts_count_error_functions(duckdb_connection connection);
 extern bool register_duckhts_count_error_sql(duckhts_registration_t *registration);
+extern bool register_duckhts_depth_sql(duckhts_registration_t *registration);
+extern bool register_duckhts_count_mixture_functions(duckdb_connection connection);
+extern bool register_duckhts_count_mixture_sql(duckhts_registration_t *registration);
 extern void register_duckhts_somalier_contamination_functions(
     duckdb_connection connection);
 extern void register_duckhts_somalier_matched_functions(
@@ -99,6 +102,8 @@ extern void register_duckhts_mosdepth_function(duckdb_connection connection);
 /* bam_bin_counts.c */
 extern void register_bam_bin_counts_function(duckdb_connection connection);
 extern void register_duckhts_bam_mismatch_counts_function(duckdb_connection connection);
+extern void register_duckhts_bam_insert_size_counts_function(duckdb_connection connection);
+extern bool register_duckhts_insert_size_sql(duckhts_registration_t *registration);
 /* bam_mate_overlap_counts.c */
 extern void register_duckhts_bam_mate_overlap_counts_function(duckdb_connection connection);
 /* samtools_idxstats_table.c */
@@ -273,8 +278,13 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     register_detect_quality_encoding_function(connection);
     register_bcftools_score_function(connection);
     register_duckhts_mosdepth_function(connection);
+    if (!register_duckhts_count_mixture_functions(connection)) {
+        return duckhts_registration_error(&registration,
+            "DuckHTS could not register duckhts_count_mixture_lowpass");
+    }
     register_bam_bin_counts_function(connection);
     register_duckhts_bam_mismatch_counts_function(connection);
+    register_duckhts_bam_insert_size_counts_function(connection);
     register_duckhts_bam_mate_overlap_counts_function(connection);
     register_duckhts_samtools_idxstats_function(connection);
     register_duckhts_bam_bed_coverage_function(connection);
@@ -295,17 +305,17 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         return false;
     }
     if (!duckhts_register_sql(&registration,
-        "CREATE OR REPLACE MACRO duckhts_quote_ident(x) AS "
+        "CREATE OR REPLACE MACRO duckhts__quote_ident(x) AS "
         "CASE WHEN x IS NULL THEN NULL ELSE '\"' || replace(x, '\"', '\"\"') || '\"' END")) {
         return false;
     }
     if (!duckhts_register_sql(&registration,
-        "CREATE OR REPLACE MACRO duckhts_quote_string(x) AS "
+        "CREATE OR REPLACE MACRO duckhts__quote_string(x) AS "
         "CASE WHEN x IS NULL THEN NULL ELSE '''' || replace(x, '''', '''''') || '''' END")) {
         return false;
     }
     if (!duckhts_register_sql(&registration,
-        "CREATE OR REPLACE MACRO duckhts_json_path_key(x) AS "
+        "CREATE OR REPLACE MACRO duckhts__json_path_key(x) AS "
         "'$.\"' || replace(replace(x, '\\', '\\\\'), '\"', '\\\"') || '\"'")) {
         return false;
     }
@@ -332,8 +342,12 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "__dht_added AS MATERIALIZED (SELECT count(duckhts_cgranges_add("
         "name, t[chrom_col], t[start_col], t[end_col])) AS added "
         "FROM query_table(table_name) AS t CROSS JOIN __dht_created) "
-        "SELECT duckhts_cgranges_index(name) AS indexed FROM __dht_added), "
-        "(name, table_name, chrom_col, start_col, end_col, label_col) AS TABLE ("
+        "SELECT duckhts_cgranges_index(name) AS indexed FROM __dht_added)")) {
+        return false;
+    }
+    if (!duckhts_register_sql(&registration,
+        "CREATE OR REPLACE MACRO duckhts_cgranges_from_table_labelled("
+        "name, table_name, chrom_col, start_col, end_col, label_col) AS TABLE ("
         "WITH __dht_created AS MATERIALIZED (SELECT duckhts_cgranges_create(name) AS created), "
         "__dht_added AS MATERIALIZED (SELECT count(duckhts_cgranges_add("
         "name, t[chrom_col], t[start_col], t[end_col], t[label_col])) AS added "
@@ -819,24 +833,24 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         }
     }
     if (!duckhts_register_sql(&registration,
-        "CREATE OR REPLACE MACRO duckhts_parquet_ident_list(cols) AS ("
+        "CREATE OR REPLACE MACRO duckhts__parquet_ident_list(cols) AS ("
         "CASE WHEN len(cols) = 0 THEN '*' "
-        "ELSE (SELECT string_agg(duckhts_quote_ident(x), ', ') FROM unnest(cols) AS t(x)) END)")) {
+        "ELSE (SELECT string_agg(duckhts__quote_ident(x), ', ') FROM unnest(cols) AS t(x)) END)")) {
         return false;
     }
     if (!duckhts_register_sql(&registration,
-        "CREATE OR REPLACE MACRO duckhts_raw_header_text(path, format_hint) AS ("
+        "CREATE OR REPLACE MACRO duckhts__raw_header_text(path, format_hint) AS ("
         "(SELECT coalesce(string_agg(raw, chr(10) ORDER BY idx), '') "
         "FROM read_hts_header(path, format := format_hint, mode := 'raw')))")) {
         return false;
     }
     {
         static const char *const parquet_metadata_sql[] = {
-            "CREATE OR REPLACE MACRO duckhts_parquet_metadata_args(",
+            "CREATE OR REPLACE MACRO duckhts__parquet_metadata_args(",
             "source_format, reader, source_path, header_key, header_value, header_corrected, ",
             "columns, partition_by, filter_sql, layout_metadata := map([]::VARCHAR[], []::VARCHAR[]), ",
             "metadata := map([]::VARCHAR[], []::VARCHAR[]), metadata_json_file := NULL, write_format_version := '1') AS (",
-            "SELECT string_agg(duckhts_quote_ident(key) || ' := ' || duckhts_quote_string(value), ', ' ORDER BY key) ",
+            "SELECT string_agg(duckhts__quote_ident(key) || ' := ' || duckhts__quote_string(value), ', ' ORDER BY key) ",
             "FROM (SELECT key, value, row_number() OVER (PARTITION BY key ORDER BY priority DESC) AS rn ",
             "FROM (",
             "SELECT * FROM (VALUES ",
@@ -853,10 +867,10 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             "UNION ALL SELECT key, value, 30 FROM query(CASE WHEN metadata_json_file IS NULL THEN ",
             "'SELECT NULL::VARCHAR AS key, NULL::VARCHAR AS value WHERE false' ELSE ",
             "'SELECT key, CASE ",
-            "WHEN json_type(json_extract(content, duckhts_json_path_key(key))) IN (''OBJECT'', ''ARRAY'') THEN CAST(json_extract(content, duckhts_json_path_key(key)) AS VARCHAR) ",
-            "WHEN json_type(json_extract(content, duckhts_json_path_key(key))) = ''NULL'' THEN '''' ",
-            "ELSE json_extract_string(content, duckhts_json_path_key(key)) END AS value ",
-            "FROM read_text(' || duckhts_quote_string(metadata_json_file) || '), ",
+            "WHEN json_type(json_extract(content, duckhts__json_path_key(key))) IN (''OBJECT'', ''ARRAY'') THEN CAST(json_extract(content, duckhts__json_path_key(key)) AS VARCHAR) ",
+            "WHEN json_type(json_extract(content, duckhts__json_path_key(key))) = ''NULL'' THEN '''' ",
+            "ELSE json_extract_string(content, duckhts__json_path_key(key)) END AS value ",
+            "FROM read_text(' || duckhts__quote_string(metadata_json_file) || '), ",
             "unnest(CASE WHEN json_type(content) = ''OBJECT'' THEN json_keys(content) ",
             "ELSE error(''metadata_json_file must contain a top-level JSON object'') END) AS q(key)' END) ",
             "UNION ALL SELECT e.key, e.value, 40 FROM unnest(map_entries(metadata)) AS t(e)",
@@ -869,20 +883,20 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     }
     {
         static const char *const parquet_copy_sql[] = {
-            "CREATE OR REPLACE MACRO duckhts_parquet_copy_sql(reader, path, output, reader_args := '', ",
+            "CREATE OR REPLACE MACRO duckhts__parquet_copy_sql(reader, path, output, reader_args := '', ",
             "source_format := '', header_key := '', header_value := '', header_corrected := 'false', ",
             "columns := []::VARCHAR[], partition_by := []::VARCHAR[], filter_sql := NULL, ",
             "layout_metadata := map([]::VARCHAR[], []::VARCHAR[]), metadata := map([]::VARCHAR[], []::VARCHAR[]), ",
             "metadata_json_file := NULL, compression := 'zstd', row_group_size := 100000, include_metadata := true, overwrite := false, ",
             "write_format_version := '1') AS (",
-            "'COPY (SELECT ' || duckhts_parquet_ident_list(columns) || ' FROM ' || reader || '(' || duckhts_quote_string(path) || ",
+            "'COPY (SELECT ' || duckhts__parquet_ident_list(columns) || ' FROM ' || reader || '(' || duckhts__quote_string(path) || ",
             "CASE WHEN length(reader_args) > 0 THEN ', ' || reader_args ELSE '' END || ')' || ",
             "CASE WHEN filter_sql IS NULL OR length(filter_sql) = 0 THEN '' ELSE ' WHERE (' || filter_sql || ')' END || ",
-            "') TO ' || duckhts_quote_string(output) || ' (FORMAT PARQUET, COMPRESSION ' || duckhts_quote_string(upper(compression)) || ",
+            "') TO ' || duckhts__quote_string(output) || ' (FORMAT PARQUET, COMPRESSION ' || duckhts__quote_string(upper(compression)) || ",
             "', ROW_GROUP_SIZE ' || CAST(row_group_size AS VARCHAR) || ', OVERWRITE ' || CASE WHEN overwrite THEN 'true' ELSE 'false' END || ",
-            "CASE WHEN len(partition_by) = 0 THEN '' ELSE ', PARTITION_BY (' || duckhts_parquet_ident_list(partition_by) || ')' END || ",
+            "CASE WHEN len(partition_by) = 0 THEN '' ELSE ', PARTITION_BY (' || duckhts__parquet_ident_list(partition_by) || ')' END || ",
             "CASE WHEN include_metadata THEN ', KV_METADATA struct_pack(' || ",
-            "duckhts_parquet_metadata_args(source_format, reader, path, header_key, header_value, header_corrected, columns, partition_by, filter_sql, layout_metadata, metadata, metadata_json_file, write_format_version) || ')' ",
+            "duckhts__parquet_metadata_args(source_format, reader, path, header_key, header_value, header_corrected, columns, partition_by, filter_sql, layout_metadata, metadata, metadata_json_file, write_format_version) || ')' ",
             "ELSE '' END || ')' )"
         };
         if (!duckhts_register_sql_parts(&registration, parquet_copy_sql,
@@ -896,14 +910,14 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             "tidy_format := false, additional_csq_column_types := NULL, decompression_threads := 0, where_sql := NULL, compression := 'zstd', ",
             "row_group_size := 100000, partition_by := []::VARCHAR[], include_metadata := true, header_text := NULL, ",
             "metadata := map([]::VARCHAR[], []::VARCHAR[]), metadata_json_file := NULL, overwrite := false, write_format_version := '1') AS (",
-            "duckhts_parquet_copy_sql('read_bcf', path, output, reader_args := ltrim(",
-            "(CASE WHEN region IS NULL THEN '' ELSE ', region := ' || duckhts_quote_string(region) END) || ",
-            "(CASE WHEN index_path IS NULL THEN '' ELSE ', index_path := ' || duckhts_quote_string(index_path) END) || ",
+            "duckhts__parquet_copy_sql('read_bcf', path, output, reader_args := ltrim(",
+            "(CASE WHEN region IS NULL THEN '' ELSE ', region := ' || duckhts__quote_string(region) END) || ",
+            "(CASE WHEN index_path IS NULL THEN '' ELSE ', index_path := ' || duckhts__quote_string(index_path) END) || ",
             "', tidy_format := ' || CASE WHEN tidy_format THEN 'true' ELSE 'false' END || ",
-            "(CASE WHEN additional_csq_column_types IS NULL THEN '' ELSE ', additional_csq_column_types := ' || duckhts_quote_string(additional_csq_column_types) END) || ",
+            "(CASE WHEN additional_csq_column_types IS NULL THEN '' ELSE ', additional_csq_column_types := ' || duckhts__quote_string(additional_csq_column_types) END) || ",
             "', decompression_threads := ' || CAST(decompression_threads AS VARCHAR), ', '), ",
             "source_format := 'vcf_bcf', header_key := 'vcf_header', ",
-            "header_value := coalesce(header_text, duckhts_raw_header_text(path, 'bcf')), ",
+            "header_value := coalesce(header_text, duckhts__raw_header_text(path, 'bcf')), ",
             "header_corrected := CASE WHEN header_text IS NULL THEN 'false' ELSE 'true' END, ",
             "columns := columns, partition_by := partition_by, filter_sql := where_sql, ",
             "layout_metadata := map(['duckhts_tidy_format', 'duckhts_region'], [CASE WHEN tidy_format THEN 'true' ELSE 'false' END, coalesce(region, '')]), ",
@@ -922,18 +936,18 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             "cigar_representation := NULL, decompression_threads := 2, where_sql := NULL, compression := 'zstd', row_group_size := 100000, ",
             "partition_by := []::VARCHAR[], include_metadata := true, header_text := NULL, metadata := map([]::VARCHAR[], []::VARCHAR[]), ",
             "metadata_json_file := NULL, overwrite := false, write_format_version := '1') AS (",
-            "duckhts_parquet_copy_sql('read_bam', path, output, reader_args := ltrim(",
-            "(CASE WHEN region IS NULL THEN '' ELSE ', region := ' || duckhts_quote_string(region) END) || ",
-            "(CASE WHEN index_path IS NULL THEN '' ELSE ', index_path := ' || duckhts_quote_string(index_path) END) || ",
-            "(CASE WHEN reference IS NULL THEN '' ELSE ', reference := ' || duckhts_quote_string(reference) END) || ",
+            "duckhts__parquet_copy_sql('read_bam', path, output, reader_args := ltrim(",
+            "(CASE WHEN region IS NULL THEN '' ELSE ', region := ' || duckhts__quote_string(region) END) || ",
+            "(CASE WHEN index_path IS NULL THEN '' ELSE ', index_path := ' || duckhts__quote_string(index_path) END) || ",
+            "(CASE WHEN reference IS NULL THEN '' ELSE ', reference := ' || duckhts__quote_string(reference) END) || ",
             "', standard_tags := ' || CASE WHEN standard_tags THEN 'true' ELSE 'false' END || ",
             "', auxiliary_tags := ' || CASE WHEN auxiliary_tags THEN 'true' ELSE 'false' END || ",
-            "(CASE WHEN sequence_encoding IS NULL THEN '' ELSE ', sequence_encoding := ' || duckhts_quote_string(sequence_encoding) END) || ",
-            "(CASE WHEN quality_representation IS NULL THEN '' ELSE ', quality_representation := ' || duckhts_quote_string(quality_representation) END) || ",
-            "(CASE WHEN cigar_representation IS NULL THEN '' ELSE ', cigar_representation := ' || duckhts_quote_string(cigar_representation) END) || ",
+            "(CASE WHEN sequence_encoding IS NULL THEN '' ELSE ', sequence_encoding := ' || duckhts__quote_string(sequence_encoding) END) || ",
+            "(CASE WHEN quality_representation IS NULL THEN '' ELSE ', quality_representation := ' || duckhts__quote_string(quality_representation) END) || ",
+            "(CASE WHEN cigar_representation IS NULL THEN '' ELSE ', cigar_representation := ' || duckhts__quote_string(cigar_representation) END) || ",
             "', decompression_threads := ' || CAST(decompression_threads AS VARCHAR), ', '), ",
             "source_format := 'sam_bam_cram', header_key := 'sam_header', ",
-            "header_value := coalesce(header_text, duckhts_raw_header_text(path, 'bam')), ",
+            "header_value := coalesce(header_text, duckhts__raw_header_text(path, 'bam')), ",
             "header_corrected := CASE WHEN header_text IS NULL THEN 'false' ELSE 'true' END, ",
             "columns := columns, partition_by := partition_by, filter_sql := where_sql, ",
             "layout_metadata := map(['duckhts_region', 'duckhts_standard_tags', 'duckhts_auxiliary_tags', 'duckhts_sequence_encoding', 'duckhts_quality_representation', 'duckhts_cigar_representation'], ",
@@ -952,18 +966,18 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             "header := NULL, header_names := []::VARCHAR[], auto_detect := NULL, column_types := []::VARCHAR[], attributes_map := false, ",
             "attributes_list := false, attributes_pairs := false, strict := false, where_sql := NULL, compression := 'zstd', row_group_size := 100000, ",
             "partition_by := []::VARCHAR[], include_metadata := true, header_text := NULL, metadata := map([]::VARCHAR[], []::VARCHAR[]), metadata_json_file := NULL, overwrite := false, write_format_version := '1') AS (",
-            "duckhts_parquet_copy_sql('read_gff', path, output, reader_args := ltrim(",
-            "(CASE WHEN region IS NULL THEN '' ELSE ', region := ' || duckhts_quote_string(region) END) || ",
-            "(CASE WHEN index_path IS NULL THEN '' ELSE ', index_path := ' || duckhts_quote_string(index_path) END) || ",
+            "duckhts__parquet_copy_sql('read_gff', path, output, reader_args := ltrim(",
+            "(CASE WHEN region IS NULL THEN '' ELSE ', region := ' || duckhts__quote_string(region) END) || ",
+            "(CASE WHEN index_path IS NULL THEN '' ELSE ', index_path := ' || duckhts__quote_string(index_path) END) || ",
             "(CASE WHEN header IS NULL THEN '' ELSE ', header := ' || CASE WHEN header THEN 'true' ELSE 'false' END END) || ",
-            "(CASE WHEN len(header_names) = 0 THEN '' ELSE ', header_names := [' || (SELECT string_agg(duckhts_quote_string(x), ', ') FROM unnest(header_names) AS t(x)) || ']' END) || ",
+            "(CASE WHEN len(header_names) = 0 THEN '' ELSE ', header_names := [' || (SELECT string_agg(duckhts__quote_string(x), ', ') FROM unnest(header_names) AS t(x)) || ']' END) || ",
             "(CASE WHEN auto_detect IS NULL THEN '' ELSE ', auto_detect := ' || CASE WHEN auto_detect THEN 'true' ELSE 'false' END END) || ",
-            "(CASE WHEN len(column_types) = 0 THEN '' ELSE ', column_types := [' || (SELECT string_agg(duckhts_quote_string(x), ', ') FROM unnest(column_types) AS t(x)) || ']' END) || ",
+            "(CASE WHEN len(column_types) = 0 THEN '' ELSE ', column_types := [' || (SELECT string_agg(duckhts__quote_string(x), ', ') FROM unnest(column_types) AS t(x)) || ']' END) || ",
             "', attributes_map := ' || CASE WHEN attributes_map THEN 'true' ELSE 'false' END || ",
             "', attributes_list := ' || CASE WHEN attributes_list THEN 'true' ELSE 'false' END || ",
             "', attributes_pairs := ' || CASE WHEN attributes_pairs THEN 'true' ELSE 'false' END || ",
             "', strict := ' || CASE WHEN strict THEN 'true' ELSE 'false' END, ', '), ",
-            "source_format := 'gff', header_key := 'gff_header', header_value := coalesce(header_text, duckhts_raw_header_text(path, 'tabix')), ",
+            "source_format := 'gff', header_key := 'gff_header', header_value := coalesce(header_text, duckhts__raw_header_text(path, 'tabix')), ",
             "header_corrected := CASE WHEN header_text IS NULL THEN 'false' ELSE 'true' END, columns := columns, partition_by := partition_by, filter_sql := where_sql, ",
             "layout_metadata := map(['duckhts_region', 'duckhts_header', 'duckhts_header_names', 'duckhts_auto_detect', 'duckhts_column_types', 'duckhts_attributes_map', 'duckhts_attributes_list', 'duckhts_attributes_pairs', 'duckhts_strict'], ",
             "[coalesce(region, ''), CASE WHEN header IS NULL THEN '' WHEN header THEN 'true' ELSE 'false' END, array_to_string(header_names, ','), CASE WHEN auto_detect IS NULL THEN '' WHEN auto_detect THEN 'true' ELSE 'false' END, array_to_string(column_types, ','), CASE WHEN attributes_map THEN 'true' ELSE 'false' END, CASE WHEN attributes_list THEN 'true' ELSE 'false' END, CASE WHEN attributes_pairs THEN 'true' ELSE 'false' END, CASE WHEN strict THEN 'true' ELSE 'false' END]), ",
@@ -979,14 +993,14 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             "CREATE OR REPLACE MACRO duckhts_tabix_convert_parquet_sql(path, output, columns := []::VARCHAR[], region := NULL, index_path := NULL, ",
             "header := NULL, header_names := []::VARCHAR[], auto_detect := NULL, column_types := []::VARCHAR[], where_sql := NULL, compression := 'zstd', row_group_size := 100000, ",
             "partition_by := []::VARCHAR[], include_metadata := true, header_text := NULL, metadata := map([]::VARCHAR[], []::VARCHAR[]), metadata_json_file := NULL, overwrite := false, write_format_version := '1') AS (",
-            "duckhts_parquet_copy_sql('read_tabix', path, output, reader_args := ltrim(",
-            "(CASE WHEN region IS NULL THEN '' ELSE ', region := ' || duckhts_quote_string(region) END) || ",
-            "(CASE WHEN index_path IS NULL THEN '' ELSE ', index_path := ' || duckhts_quote_string(index_path) END) || ",
+            "duckhts__parquet_copy_sql('read_tabix', path, output, reader_args := ltrim(",
+            "(CASE WHEN region IS NULL THEN '' ELSE ', region := ' || duckhts__quote_string(region) END) || ",
+            "(CASE WHEN index_path IS NULL THEN '' ELSE ', index_path := ' || duckhts__quote_string(index_path) END) || ",
             "(CASE WHEN header IS NULL THEN '' ELSE ', header := ' || CASE WHEN header THEN 'true' ELSE 'false' END END) || ",
-            "(CASE WHEN len(header_names) = 0 THEN '' ELSE ', header_names := [' || (SELECT string_agg(duckhts_quote_string(x), ', ') FROM unnest(header_names) AS t(x)) || ']' END) || ",
+            "(CASE WHEN len(header_names) = 0 THEN '' ELSE ', header_names := [' || (SELECT string_agg(duckhts__quote_string(x), ', ') FROM unnest(header_names) AS t(x)) || ']' END) || ",
             "(CASE WHEN auto_detect IS NULL THEN '' ELSE ', auto_detect := ' || CASE WHEN auto_detect THEN 'true' ELSE 'false' END END) || ",
-            "(CASE WHEN len(column_types) = 0 THEN '' ELSE ', column_types := [' || (SELECT string_agg(duckhts_quote_string(x), ', ') FROM unnest(column_types) AS t(x)) || ']' END), ', '), ",
-            "source_format := 'tabix', header_key := 'tabix_header', header_value := coalesce(header_text, duckhts_raw_header_text(path, 'tabix')), ",
+            "(CASE WHEN len(column_types) = 0 THEN '' ELSE ', column_types := [' || (SELECT string_agg(duckhts__quote_string(x), ', ') FROM unnest(column_types) AS t(x)) || ']' END), ', '), ",
+            "source_format := 'tabix', header_key := 'tabix_header', header_value := coalesce(header_text, duckhts__raw_header_text(path, 'tabix')), ",
             "header_corrected := CASE WHEN header_text IS NULL THEN 'false' ELSE 'true' END, columns := columns, partition_by := partition_by, filter_sql := where_sql, ",
             "layout_metadata := map(['duckhts_region', 'duckhts_header', 'duckhts_header_names', 'duckhts_auto_detect', 'duckhts_column_types'], ",
             "[coalesce(region, ''), CASE WHEN header IS NULL THEN '' WHEN header THEN 'true' ELSE 'false' END, array_to_string(header_names, ','), CASE WHEN auto_detect IS NULL THEN '' WHEN auto_detect THEN 'true' ELSE 'false' END, array_to_string(column_types, ',')]), ",
@@ -1019,10 +1033,10 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             "CREATE OR REPLACE MACRO hts_region_union_query(reader, path, regions, params := '') AS (",
             "(SELECT string_agg(",
             "'SELECT ' || CAST(ord AS VARCHAR) || ' AS duckhts_region_shard_id, ' ",
-            "|| duckhts_quote_string(region) || ' AS duckhts_region_shard, ' ",
-            "|| duckhts_quote_string(path) || ' AS filename, * FROM ' ",
-            "|| reader || '(' || duckhts_quote_string(path) ",
-            "|| ', region := ' || duckhts_quote_string(region) ",
+            "|| duckhts__quote_string(region) || ' AS duckhts_region_shard, ' ",
+            "|| duckhts__quote_string(path) || ' AS filename, * FROM ' ",
+            "|| reader || '(' || duckhts__quote_string(path) ",
+            "|| ', region := ' || duckhts__quote_string(region) ",
             "|| CASE WHEN length(params) > 0 THEN ', ' || params ELSE '' END ",
             "|| ')', ",
             "' UNION ALL BY NAME ' ORDER BY ord",
@@ -1035,7 +1049,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         }
     }
     if (!duckhts_register_sql(&registration,
-        "CREATE OR REPLACE MACRO duckdb_munge_preset_map(preset) AS "
+        "CREATE OR REPLACE MACRO duckhts__munge_preset_map(preset) AS "
         "CASE "
         "WHEN upper(preset) = 'PLINK' THEN map(['SNP','BP','CHR','A1','A2','P','OR','BETA','INFO','FRQ','SE'], ['SNP','BP','CHR','A1','A2','P','OR','BETA','INFO','FRQ','SE']) "
         "WHEN upper(preset) = 'PLINK2' THEN map(['SNP','BP','CHR','A1','A2','P','Z','OR','BETA','INFO','FRQ','SE','LP'], ['ID','POS','CHROM','A1','AX','P','Z_STAT','OR','BETA','MACH_R2','A1_FREQ','SE','LOG10_P']) "
@@ -1045,54 +1059,54 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         "WHEN upper(preset) = 'METAL' THEN map(['SNP','BP','CHR','A1','A2','P','Z','BETA','N','FRQ','SE','LP','NEFF','HET_I2','HET_P','HET_LP','DIRE'], ['MarkerName','Position','Chromosome','Allele1','Allele2','P-value','Zscore','Effect','N','Freq1','StdErr','log(P)','Weight','HetISq','HetPVal','logHetP','Direction']) "
         "WHEN upper(preset) = 'PGS' THEN map(['CHR','BP','SNP','A1','A2','OR','BETA','FRQ'], ['chr_name','chr_position','rsID','effect_allele','other_allele','OR','effect_weight','allelefrequency_effect']) "
         "WHEN upper(preset) = 'SSF' OR upper(preset) = 'GWAS-SSF' THEN map(['CHR','BP','SNP','A1','A2','P','OR','BETA','N','INFO','FRQ','SE'], ['chromosome','base_pair_location','variant_id','effect_allele','other_allele','p_value','odds_ratio','beta','n','info','effect_allele_frequency','standard_error']) "
-        "ELSE error('duckdb_munge: unknown preset') END")) {
+        "ELSE error('duckhts_munge: unknown preset') END")) {
         return false;
     }
     if (!duckhts_register_sql(&registration,
-        "CREATE OR REPLACE MACRO duckdb_munge_resolved_map(preset, column_map, column_map_file) AS "
+        "CREATE OR REPLACE MACRO duckhts__munge_resolved_map(preset, column_map, column_map_file) AS "
         "CASE "
-        "WHEN preset <> '' AND map_extract_value(column_map, '') IS NULL THEN error('duckdb_munge: specify only one of preset, column_map, or column_map_file') "
-        "WHEN preset <> '' AND column_map_file <> '' THEN error('duckdb_munge: specify only one of preset, column_map, or column_map_file') "
-        "WHEN map_extract_value(column_map, '') IS NULL AND column_map_file <> '' THEN error('duckdb_munge: specify only one of preset, column_map, or column_map_file') "
+        "WHEN preset <> '' AND map_extract_value(column_map, '') IS NULL THEN error('duckhts_munge: specify only one of preset, column_map, or column_map_file') "
+        "WHEN preset <> '' AND column_map_file <> '' THEN error('duckhts_munge: specify only one of preset, column_map, or column_map_file') "
+        "WHEN map_extract_value(column_map, '') IS NULL AND column_map_file <> '' THEN error('duckhts_munge: specify only one of preset, column_map, or column_map_file') "
         "WHEN map_extract_value(column_map, '') IS NULL THEN column_map "
-        "WHEN column_map_file <> '' THEN error('duckdb_munge: column_map_file is not supported directly in SQL; use column_map or the R wrapper') "
-        "WHEN preset <> '' THEN duckdb_munge_preset_map(preset) "
-        "ELSE error('duckdb_munge: one of preset, column_map, or column_map_file is required') "
+        "WHEN column_map_file <> '' THEN error('duckhts_munge: column_map_file is not supported directly in SQL; use column_map or the R wrapper') "
+        "WHEN preset <> '' THEN duckhts__munge_preset_map(preset) "
+        "ELSE error('duckhts_munge: one of preset, column_map, or column_map_file is required') "
         "END")) {
         return false;
     }
     {
-        static const char *const duckdb_munge_sql[] = {
-            "CREATE OR REPLACE MACRO duckdb_munge(table_name, preset := '', column_map := map([''], ['']), column_map_file := '', ",
+        static const char *const duckhts_munge_sql[] = {
+            "CREATE OR REPLACE MACRO duckhts_munge(table_name, preset := '', column_map := map([''], ['']), column_map_file := '', ",
             "fasta_ref := NULL, iffy_tag := 'IFFY', mismatch_tag := 'REF_MISMATCH', ns := NULL, nc := NULL, ne := NULL) AS TABLE ",
             "SELECT mu.chrom, mu.pos, mu.id, mu.ref, mu.alt, mu.alleles_swapped, mu.filter, ",
             "mu.ns, mu.ez, mu.nc, mu.es, mu.se, mu.lp, mu.af, mu.ac, mu.ne ",
             "FROM ",
             "query(",
             "  'SELECT ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'CHR')), 'NULL') || ' AS __chrom, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'BP')), 'NULL') || ' AS __pos, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'A1')), 'NULL') || ' AS __a1, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'A2')), 'NULL') || ' AS __a2, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'SNP')), 'NULL') || ' AS __id, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'P')), 'NULL') || ' AS __p, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'Z')), 'NULL') || ' AS __z, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'OR')), 'NULL') || ' AS __or, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'BETA')), 'NULL') || ' AS __beta, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'N')), 'NULL') || ' AS __n, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'N_CAS')), 'NULL') || ' AS __n_cas, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'N_CON')), 'NULL') || ' AS __n_con, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'INFO')), 'NULL') || ' AS __info, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'FRQ')), 'NULL') || ' AS __frq, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'SE')), 'NULL') || ' AS __se, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'LP')), 'NULL') || ' AS __lp, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'AC')), 'NULL') || ' AS __ac, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'NEFF')), 'NULL') || ' AS __neff, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'NEFFDIV2')), 'NULL') || ' AS __neffdiv2, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'HET_I2')), 'NULL') || ' AS __het_i2, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'HET_P')), 'NULL') || ' AS __het_p, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'HET_LP')), 'NULL') || ' AS __het_lp, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'DIRE')), 'NULL') || ' AS __dire FROM ' || table_name",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'CHR')), 'NULL') || ' AS __chrom, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'BP')), 'NULL') || ' AS __pos, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'A1')), 'NULL') || ' AS __a1, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'A2')), 'NULL') || ' AS __a2, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'SNP')), 'NULL') || ' AS __id, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'P')), 'NULL') || ' AS __p, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'Z')), 'NULL') || ' AS __z, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'OR')), 'NULL') || ' AS __or, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'BETA')), 'NULL') || ' AS __beta, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'N')), 'NULL') || ' AS __n, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'N_CAS')), 'NULL') || ' AS __n_cas, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'N_CON')), 'NULL') || ' AS __n_con, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'INFO')), 'NULL') || ' AS __info, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'FRQ')), 'NULL') || ' AS __frq, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'SE')), 'NULL') || ' AS __se, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'LP')), 'NULL') || ' AS __lp, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'AC')), 'NULL') || ' AS __ac, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'NEFF')), 'NULL') || ' AS __neff, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'NEFFDIV2')), 'NULL') || ' AS __neffdiv2, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'HET_I2')), 'NULL') || ' AS __het_i2, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'HET_P')), 'NULL') || ' AS __het_p, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'HET_LP')), 'NULL') || ' AS __het_lp, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'DIRE')), 'NULL') || ' AS __dire FROM ' || table_name",
             ") src, ",
             "LATERAL (SELECT bcftools_munge_row(",
             "  src.__chrom, src.__pos, src.__a1, src.__a2, src.__id, src.__p, src.__z, src.__or, src.__beta, src.__n, src.__n_cas, src.__n_con, ",
@@ -1100,43 +1114,43 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             "  fasta_ref, iffy_tag, mismatch_tag, ns, nc, ne",
             ") AS mu) q"
         };
-        if (!duckhts_register_sql_parts(&registration, duckdb_munge_sql, sizeof(duckdb_munge_sql) / sizeof(duckdb_munge_sql[0]))) {
+        if (!duckhts_register_sql_parts(&registration, duckhts_munge_sql, sizeof(duckhts_munge_sql) / sizeof(duckhts_munge_sql[0]))) {
             return false;
         }
     }
     /* Variant with METAL/heterogeneity output columns (SI, I2, CQ, ED) */
     {
-        static const char *const duckdb_munge_metal_sql[] = {
-            "CREATE OR REPLACE MACRO duckdb_munge_metal(table_name, preset := '', column_map := map([''], ['']), column_map_file := '', ",
+        static const char *const duckhts_munge_metal_sql[] = {
+            "CREATE OR REPLACE MACRO duckhts_munge_metal(table_name, preset := '', column_map := map([''], ['']), column_map_file := '', ",
             "fasta_ref := NULL, iffy_tag := 'IFFY', mismatch_tag := 'REF_MISMATCH', ns := NULL, nc := NULL, ne := NULL) AS TABLE ",
             "SELECT mu.chrom, mu.pos, mu.id, mu.ref, mu.alt, mu.alleles_swapped, mu.filter, ",
             "mu.ns, mu.ez, mu.nc, mu.es, mu.se, mu.lp, mu.af, mu.ac, mu.ne, mu.si, mu.i2, mu.cq, mu.ed ",
             "FROM ",
             "query(",
             "  'SELECT ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'CHR')), 'NULL') || ' AS __chrom, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'BP')), 'NULL') || ' AS __pos, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'A1')), 'NULL') || ' AS __a1, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'A2')), 'NULL') || ' AS __a2, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'SNP')), 'NULL') || ' AS __id, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'P')), 'NULL') || ' AS __p, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'Z')), 'NULL') || ' AS __z, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'OR')), 'NULL') || ' AS __or, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'BETA')), 'NULL') || ' AS __beta, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'N')), 'NULL') || ' AS __n, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'N_CAS')), 'NULL') || ' AS __n_cas, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'N_CON')), 'NULL') || ' AS __n_con, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'INFO')), 'NULL') || ' AS __info, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'FRQ')), 'NULL') || ' AS __frq, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'SE')), 'NULL') || ' AS __se, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'LP')), 'NULL') || ' AS __lp, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'AC')), 'NULL') || ' AS __ac, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'NEFF')), 'NULL') || ' AS __neff, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'NEFFDIV2')), 'NULL') || ' AS __neffdiv2, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'HET_I2')), 'NULL') || ' AS __het_i2, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'HET_P')), 'NULL') || ' AS __het_p, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'HET_LP')), 'NULL') || ' AS __het_lp, ' || ",
-            "  coalesce(duckhts_quote_ident(map_extract_value(duckdb_munge_resolved_map(preset, column_map, column_map_file), 'DIRE')), 'NULL') || ' AS __dire FROM ' || table_name",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'CHR')), 'NULL') || ' AS __chrom, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'BP')), 'NULL') || ' AS __pos, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'A1')), 'NULL') || ' AS __a1, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'A2')), 'NULL') || ' AS __a2, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'SNP')), 'NULL') || ' AS __id, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'P')), 'NULL') || ' AS __p, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'Z')), 'NULL') || ' AS __z, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'OR')), 'NULL') || ' AS __or, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'BETA')), 'NULL') || ' AS __beta, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'N')), 'NULL') || ' AS __n, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'N_CAS')), 'NULL') || ' AS __n_cas, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'N_CON')), 'NULL') || ' AS __n_con, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'INFO')), 'NULL') || ' AS __info, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'FRQ')), 'NULL') || ' AS __frq, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'SE')), 'NULL') || ' AS __se, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'LP')), 'NULL') || ' AS __lp, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'AC')), 'NULL') || ' AS __ac, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'NEFF')), 'NULL') || ' AS __neff, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'NEFFDIV2')), 'NULL') || ' AS __neffdiv2, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'HET_I2')), 'NULL') || ' AS __het_i2, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'HET_P')), 'NULL') || ' AS __het_p, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'HET_LP')), 'NULL') || ' AS __het_lp, ' || ",
+            "  coalesce(duckhts__quote_ident(map_extract_value(duckhts__munge_resolved_map(preset, column_map, column_map_file), 'DIRE')), 'NULL') || ' AS __dire FROM ' || table_name",
             ") src, ",
             "LATERAL (SELECT bcftools_munge_row(",
             "  src.__chrom, src.__pos, src.__a1, src.__a2, src.__id, src.__p, src.__z, src.__or, src.__beta, src.__n, src.__n_cas, src.__n_con, ",
@@ -1144,8 +1158,8 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             "  fasta_ref, iffy_tag, mismatch_tag, ns, nc, ne",
             ") AS mu) q"
         };
-        if (!duckhts_register_sql_parts(&registration, duckdb_munge_metal_sql,
-                                   sizeof(duckdb_munge_metal_sql) / sizeof(duckdb_munge_metal_sql[0]))) {
+        if (!duckhts_register_sql_parts(&registration, duckhts_munge_metal_sql,
+                                   sizeof(duckhts_munge_metal_sql) / sizeof(duckhts_munge_metal_sql[0]))) {
             return false;
         }
     }
@@ -1159,7 +1173,7 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         return false;
     }
     if (!duckhts_register_sql(&registration,
-        "CREATE OR REPLACE MACRO duckdb_liftover(table_name, chrom_col, pos_col, ref_col := NULL, alt_col := NULL, "
+        "CREATE OR REPLACE MACRO duckhts_liftover(table_name, chrom_col, pos_col, ref_col := NULL, alt_col := NULL, "
         "chain_path := NULL, dst_fasta_ref := NULL, src_fasta_ref := NULL, max_snp_gap := 1, max_indel_inc := 250, "
         "lift_mt := false, end_pos_col := NULL, no_left_align := false) AS TABLE "
         "SELECT lo.* "
@@ -1182,30 +1196,30 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
             "split_multiallelic := false, end_pos_col := NULL, svlen_col := NULL, fasta_index_path := NULL, gzi_path := NULL) AS TABLE ",
             "FROM query(CASE WHEN split_multiallelic THEN ",
             "'SELECT src.*, ' || ",
-            "'(bcftools_norm_row(src.' || duckhts_quote_ident(chrom_col) || ', src.' || duckhts_quote_ident(pos_col) || ', src.' || duckhts_quote_ident(ref_col) || ', CASE WHEN u0.alt_index IS NULL THEN NULL::VARCHAR[] ELSE list_value(u0.alt_item) END, ' || ",
-            "duckhts_quote_string(fasta_ref) || ', ' || coalesce('src.' || duckhts_quote_ident(end_pos_col), 'NULL::BIGINT') || ', ' || coalesce('src.' || duckhts_quote_ident(svlen_col), 'NULL::BIGINT') || ', ' || ",
-            "coalesce(duckhts_quote_string(fasta_index_path), 'NULL') || ', ' || coalesce(duckhts_quote_string(gzi_path), 'NULL') || ')).pos_normed AS pos_normed, ' || ",
-            "'(bcftools_norm_row(src.' || duckhts_quote_ident(chrom_col) || ', src.' || duckhts_quote_ident(pos_col) || ', src.' || duckhts_quote_ident(ref_col) || ', CASE WHEN u0.alt_index IS NULL THEN NULL::VARCHAR[] ELSE list_value(u0.alt_item) END, ' || ",
-            "duckhts_quote_string(fasta_ref) || ', ' || coalesce('src.' || duckhts_quote_ident(end_pos_col), 'NULL::BIGINT') || ', ' || coalesce('src.' || duckhts_quote_ident(svlen_col), 'NULL::BIGINT') || ', ' || ",
-            "coalesce(duckhts_quote_string(fasta_index_path), 'NULL') || ', ' || coalesce(duckhts_quote_string(gzi_path), 'NULL') || ')).end_pos_normed AS end_pos_normed, ' || ",
-            "'(bcftools_norm_row(src.' || duckhts_quote_ident(chrom_col) || ', src.' || duckhts_quote_ident(pos_col) || ', src.' || duckhts_quote_ident(ref_col) || ', CASE WHEN u0.alt_index IS NULL THEN NULL::VARCHAR[] ELSE list_value(u0.alt_item) END, ' || ",
-            "duckhts_quote_string(fasta_ref) || ', ' || coalesce('src.' || duckhts_quote_ident(end_pos_col), 'NULL::BIGINT') || ', ' || coalesce('src.' || duckhts_quote_ident(svlen_col), 'NULL::BIGINT') || ', ' || ",
-            "coalesce(duckhts_quote_string(fasta_index_path), 'NULL') || ', ' || coalesce(duckhts_quote_string(gzi_path), 'NULL') || ')).ref_normed AS ref_normed, ' || ",
-            "'(bcftools_norm_row(src.' || duckhts_quote_ident(chrom_col) || ', src.' || duckhts_quote_ident(pos_col) || ', src.' || duckhts_quote_ident(ref_col) || ', CASE WHEN u0.alt_index IS NULL THEN NULL::VARCHAR[] ELSE list_value(u0.alt_item) END, ' || ",
-            "duckhts_quote_string(fasta_ref) || ', ' || coalesce('src.' || duckhts_quote_ident(end_pos_col), 'NULL::BIGINT') || ', ' || coalesce('src.' || duckhts_quote_ident(svlen_col), 'NULL::BIGINT') || ', ' || ",
-            "coalesce(duckhts_quote_string(fasta_index_path), 'NULL') || ', ' || coalesce(duckhts_quote_string(gzi_path), 'NULL') || ')).alt_normed[1] AS alt_normed, ' || ",
-            "'(bcftools_norm_row(src.' || duckhts_quote_ident(chrom_col) || ', src.' || duckhts_quote_ident(pos_col) || ', src.' || duckhts_quote_ident(ref_col) || ', CASE WHEN u0.alt_index IS NULL THEN NULL::VARCHAR[] ELSE list_value(u0.alt_item) END, ' || ",
-            "duckhts_quote_string(fasta_ref) || ', ' || coalesce('src.' || duckhts_quote_ident(end_pos_col), 'NULL::BIGINT') || ', ' || coalesce('src.' || duckhts_quote_ident(svlen_col), 'NULL::BIGINT') || ', ' || ",
-            "coalesce(duckhts_quote_string(fasta_index_path), 'NULL') || ', ' || coalesce(duckhts_quote_string(gzi_path), 'NULL') || ')).normed AS normed, ' || ",
-            "'(bcftools_norm_row(src.' || duckhts_quote_ident(chrom_col) || ', src.' || duckhts_quote_ident(pos_col) || ', src.' || duckhts_quote_ident(ref_col) || ', CASE WHEN u0.alt_index IS NULL THEN NULL::VARCHAR[] ELSE list_value(u0.alt_item) END, ' || ",
-            "duckhts_quote_string(fasta_ref) || ', ' || coalesce('src.' || duckhts_quote_ident(end_pos_col), 'NULL::BIGINT') || ', ' || coalesce('src.' || duckhts_quote_ident(svlen_col), 'NULL::BIGINT') || ', ' || ",
-            "coalesce(duckhts_quote_string(fasta_index_path), 'NULL') || ', ' || coalesce(duckhts_quote_string(gzi_path), 'NULL') || ')).norm_status AS norm_status, u0.alt_index AS alt_index ' || ",
+            "'(bcftools_norm_row(src.' || duckhts__quote_ident(chrom_col) || ', src.' || duckhts__quote_ident(pos_col) || ', src.' || duckhts__quote_ident(ref_col) || ', CASE WHEN u0.alt_index IS NULL THEN NULL::VARCHAR[] ELSE list_value(u0.alt_item) END, ' || ",
+            "duckhts__quote_string(fasta_ref) || ', ' || coalesce('src.' || duckhts__quote_ident(end_pos_col), 'NULL::BIGINT') || ', ' || coalesce('src.' || duckhts__quote_ident(svlen_col), 'NULL::BIGINT') || ', ' || ",
+            "coalesce(duckhts__quote_string(fasta_index_path), 'NULL') || ', ' || coalesce(duckhts__quote_string(gzi_path), 'NULL') || ')).pos_normed AS pos_normed, ' || ",
+            "'(bcftools_norm_row(src.' || duckhts__quote_ident(chrom_col) || ', src.' || duckhts__quote_ident(pos_col) || ', src.' || duckhts__quote_ident(ref_col) || ', CASE WHEN u0.alt_index IS NULL THEN NULL::VARCHAR[] ELSE list_value(u0.alt_item) END, ' || ",
+            "duckhts__quote_string(fasta_ref) || ', ' || coalesce('src.' || duckhts__quote_ident(end_pos_col), 'NULL::BIGINT') || ', ' || coalesce('src.' || duckhts__quote_ident(svlen_col), 'NULL::BIGINT') || ', ' || ",
+            "coalesce(duckhts__quote_string(fasta_index_path), 'NULL') || ', ' || coalesce(duckhts__quote_string(gzi_path), 'NULL') || ')).end_pos_normed AS end_pos_normed, ' || ",
+            "'(bcftools_norm_row(src.' || duckhts__quote_ident(chrom_col) || ', src.' || duckhts__quote_ident(pos_col) || ', src.' || duckhts__quote_ident(ref_col) || ', CASE WHEN u0.alt_index IS NULL THEN NULL::VARCHAR[] ELSE list_value(u0.alt_item) END, ' || ",
+            "duckhts__quote_string(fasta_ref) || ', ' || coalesce('src.' || duckhts__quote_ident(end_pos_col), 'NULL::BIGINT') || ', ' || coalesce('src.' || duckhts__quote_ident(svlen_col), 'NULL::BIGINT') || ', ' || ",
+            "coalesce(duckhts__quote_string(fasta_index_path), 'NULL') || ', ' || coalesce(duckhts__quote_string(gzi_path), 'NULL') || ')).ref_normed AS ref_normed, ' || ",
+            "'(bcftools_norm_row(src.' || duckhts__quote_ident(chrom_col) || ', src.' || duckhts__quote_ident(pos_col) || ', src.' || duckhts__quote_ident(ref_col) || ', CASE WHEN u0.alt_index IS NULL THEN NULL::VARCHAR[] ELSE list_value(u0.alt_item) END, ' || ",
+            "duckhts__quote_string(fasta_ref) || ', ' || coalesce('src.' || duckhts__quote_ident(end_pos_col), 'NULL::BIGINT') || ', ' || coalesce('src.' || duckhts__quote_ident(svlen_col), 'NULL::BIGINT') || ', ' || ",
+            "coalesce(duckhts__quote_string(fasta_index_path), 'NULL') || ', ' || coalesce(duckhts__quote_string(gzi_path), 'NULL') || ')).alt_normed[1] AS alt_normed, ' || ",
+            "'(bcftools_norm_row(src.' || duckhts__quote_ident(chrom_col) || ', src.' || duckhts__quote_ident(pos_col) || ', src.' || duckhts__quote_ident(ref_col) || ', CASE WHEN u0.alt_index IS NULL THEN NULL::VARCHAR[] ELSE list_value(u0.alt_item) END, ' || ",
+            "duckhts__quote_string(fasta_ref) || ', ' || coalesce('src.' || duckhts__quote_ident(end_pos_col), 'NULL::BIGINT') || ', ' || coalesce('src.' || duckhts__quote_ident(svlen_col), 'NULL::BIGINT') || ', ' || ",
+            "coalesce(duckhts__quote_string(fasta_index_path), 'NULL') || ', ' || coalesce(duckhts__quote_string(gzi_path), 'NULL') || ')).normed AS normed, ' || ",
+            "'(bcftools_norm_row(src.' || duckhts__quote_ident(chrom_col) || ', src.' || duckhts__quote_ident(pos_col) || ', src.' || duckhts__quote_ident(ref_col) || ', CASE WHEN u0.alt_index IS NULL THEN NULL::VARCHAR[] ELSE list_value(u0.alt_item) END, ' || ",
+            "duckhts__quote_string(fasta_ref) || ', ' || coalesce('src.' || duckhts__quote_ident(end_pos_col), 'NULL::BIGINT') || ', ' || coalesce('src.' || duckhts__quote_ident(svlen_col), 'NULL::BIGINT') || ', ' || ",
+            "coalesce(duckhts__quote_string(fasta_index_path), 'NULL') || ', ' || coalesce(duckhts__quote_string(gzi_path), 'NULL') || ')).norm_status AS norm_status, u0.alt_index AS alt_index ' || ",
             "'FROM (SELECT * FROM ' || table_name || ') src ' || ",
-            "'LEFT JOIN LATERAL UNNEST(duckhts_alt_to_list(src.' || duckhts_quote_ident(alt_col) || ')) WITH ORDINALITY AS u0(alt_item, alt_index) ON TRUE' ",
+            "'LEFT JOIN LATERAL UNNEST(duckhts_alt_to_list(src.' || duckhts__quote_ident(alt_col) || ')) WITH ORDINALITY AS u0(alt_item, alt_index) ON TRUE' ",
             "ELSE ",
-            "'SELECT src.*, unnest(bcftools_norm_row(src.' || duckhts_quote_ident(chrom_col) || ', src.' || duckhts_quote_ident(pos_col) || ', src.' || duckhts_quote_ident(ref_col) || ', src.' || duckhts_quote_ident(alt_col) || ', ' || ",
-            "duckhts_quote_string(fasta_ref) || ', ' || coalesce('src.' || duckhts_quote_ident(end_pos_col), 'NULL::BIGINT') || ', ' || coalesce('src.' || duckhts_quote_ident(svlen_col), 'NULL::BIGINT') || ', ' || ",
-            "coalesce(duckhts_quote_string(fasta_index_path), 'NULL') || ', ' || coalesce(duckhts_quote_string(gzi_path), 'NULL') || ')) ' || ",
+            "'SELECT src.*, unnest(bcftools_norm_row(src.' || duckhts__quote_ident(chrom_col) || ', src.' || duckhts__quote_ident(pos_col) || ', src.' || duckhts__quote_ident(ref_col) || ', src.' || duckhts__quote_ident(alt_col) || ', ' || ",
+            "duckhts__quote_string(fasta_ref) || ', ' || coalesce('src.' || duckhts__quote_ident(end_pos_col), 'NULL::BIGINT') || ', ' || coalesce('src.' || duckhts__quote_ident(svlen_col), 'NULL::BIGINT') || ', ' || ",
+            "coalesce(duckhts__quote_string(fasta_index_path), 'NULL') || ', ' || coalesce(duckhts__quote_string(gzi_path), 'NULL') || ')) ' || ",
             "'FROM (SELECT * FROM ' || table_name || ') src' ",
             "END)"
         };
@@ -1218,7 +1232,10 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     if (!register_duckhts_somalier_vcf_extract_sql(&registration) ||
         !register_duckhts_somalier_sex_sql(&registration) ||
         !register_duckhts_roh_sql(&registration) ||
-        !register_duckhts_count_error_sql(&registration)) {
+        !register_duckhts_count_error_sql(&registration) ||
+        !register_duckhts_depth_sql(&registration) ||
+        !register_duckhts_insert_size_sql(&registration) ||
+        !register_duckhts_count_mixture_sql(&registration)) {
         return false;
     }
     return duckhts_macro_registration_end(&registration);

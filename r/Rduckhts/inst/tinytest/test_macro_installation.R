@@ -35,23 +35,22 @@ writable <- run_phase(file, c(
   "result <- list(catalog = catalog,",
   "  temp = length(macro_catalog(con, 'temp')),",
   "  persistent = length(macro_catalog(con, catalog)),",
-  "  quoted = dbGetQuery(con, \"SELECT duckhts_quote_ident('a') AS value\")$value)",
+  "  quoted = dbGetQuery(con, \"SELECT duckhts__quote_ident('a') AS value\")$value)",
   "second <- dbConnect(methods::slot(con, 'driver'))",
-  "result$second_before <- 'duckhts_quote_ident' %in% macro_catalog(second, 'temp')",
+  "result$second_before <- 'duckhts__quote_ident' %in% macro_catalog(second, 'temp')",
   "result$second_loaded <- rduckhts_load(second)",
   "result$second_installed <- length(rduckhts_install_macros(second))",
-  "result$second_quoted <- dbGetQuery(second, \"SELECT duckhts_quote_ident('a') AS value\")$value",
+  "result$second_quoted <- dbGetQuery(second, \"SELECT duckhts__quote_ident('a') AS value\")$value",
   "dbExecute(second, \"CREATE TEMP TABLE inputs AS SELECT 'b' AS label\")",
   "result$cte <- dbGetQuery(second, paste('WITH cte AS (SELECT label FROM inputs)',",
-  "  'SELECT duckhts_quote_ident(label) AS value FROM cte'))$value",
+  "  'SELECT duckhts__quote_ident(label) AS value FROM cte'))$value",
   "dbDisconnect(second)",
   "result$reinstalled <- length(rduckhts_install_macros(con))",
   "result$temp_after <- length(macro_catalog(con, 'temp'))",
   "dbDisconnect(con, shutdown = TRUE)"
 ))
-# The inventory includes the separate fitted-count ROH macro and the private
-# duckhts_htslib_is_indel classifier of duckhts_roh_af_table_bcftools, and that macro.
-expect_equal(writable$temp, 42L)
+# Public and private macros share one inventory.
+expect_equal(writable$temp, 57L)
 expect_equal(writable$persistent, 0L)
 expect_equal(writable$quoted, '"a"')
 expect_false(writable$second_before)
@@ -60,7 +59,7 @@ expect_equal(writable$second_installed, 1L)
 expect_equal(writable$second_quoted, '"a"')
 expect_equal(writable$cte, '"b"')
 expect_equal(writable$reinstalled, 1L)
-expect_equal(writable$temp_after, 42L)
+expect_equal(writable$temp_after, 57L)
 
 # A read-only file: LOAD succeeds, installation works inside a transaction that is
 # rolled back, and the file is left byte-identical.
@@ -76,23 +75,23 @@ readonly <- run_phase(file, c(
   "result$temp_after <- length(macro_catalog(con, 'temp'))",
   "dbDisconnect(con, shutdown = TRUE)"
 ))
-expect_equal(readonly$temp, 42L)
+expect_equal(readonly$temp, 57L)
 expect_equal(readonly$persistent, 0L)
-expect_equal(readonly$temp_after, 42L)
+expect_equal(readonly$temp_after, 57L)
 expect_identical(unname(tools::md5sum(file)), readonly_before)
 
 # Installation inside a caller transaction is rolled back with that transaction.
 rollback <- run_phase(file, c(
   "con <- rduckhts_connect(dbdir = file)",
-  "dbExecute(con, 'DROP MACRO IF EXISTS temp.duckhts_quote_ident')",
-  "result <- list(dropped = 'duckhts_quote_ident' %in% macro_catalog(con, 'temp'))",
+  "dbExecute(con, 'DROP MACRO IF EXISTS temp.duckhts__quote_ident')",
+  "result <- list(dropped = 'duckhts__quote_ident' %in% macro_catalog(con, 'temp'))",
   "dbBegin(con)",
   "rduckhts_install_macros(con)",
-  "result$inside <- 'duckhts_quote_ident' %in% macro_catalog(con, 'temp')",
+  "result$inside <- 'duckhts__quote_ident' %in% macro_catalog(con, 'temp')",
   "dbRollback(con)",
-  "result$rolled_back <- 'duckhts_quote_ident' %in% macro_catalog(con, 'temp')",
+  "result$rolled_back <- 'duckhts__quote_ident' %in% macro_catalog(con, 'temp')",
   "rduckhts_install_macros(con)",
-  "result$reinstalled <- 'duckhts_quote_ident' %in% macro_catalog(con, 'temp')",
+  "result$reinstalled <- 'duckhts__quote_ident' %in% macro_catalog(con, 'temp')",
   "dbDisconnect(con, shutdown = TRUE)"
 ))
 expect_false(rollback$dropped)

@@ -159,7 +159,7 @@ dbGetQuery(con, "
   FROM duckdb_functions()
   WHERE function_name IN (SELECT name FROM duckhts_macro_definitions())
   GROUP BY ALL")
-dbGetQuery(con, "SELECT duckhts_quote_ident('my column') AS quoted")
+dbGetQuery(con, "SELECT duckhts__quote_ident('my column') AS quoted")
 dbDisconnect(con, shutdown = TRUE)
 ```
 
@@ -173,7 +173,7 @@ cd "$(mktemp -d)"
   LOAD '$DUCKHTS_EXTENSION';
   COPY (SELECT sql || ';' FROM duckhts_macro_definitions() ORDER BY install_order)
     TO 'duckhts_macros.sql' (HEADER false, QUOTE '', ESCAPE '');"
-printf "SET allow_extensions_metadata_mismatch = true;\nLOAD '%s';\n.read duckhts_macros.sql\nSELECT duckhts_quote_ident('my column') AS quoted;\n" \
+printf "SET allow_extensions_metadata_mismatch = true;\nLOAD '%s';\n.read duckhts_macros.sql\nSELECT duckhts__quote_ident('my column') AS quoted;\n" \
   "$DUCKHTS_EXTENSION" | "$DUCKDB" -unsigned example.duckdb
 ```
 
@@ -342,7 +342,7 @@ FROM duckhts_cgranges_overlaps('readme_idx', 'chr1', 35, 36, query_row_id := 7);
 CREATE TEMP VIEW readme_targets AS
 SELECT * FROM (VALUES ('chr2', 100, 110, 'alpha'), ('chr2', 150, 170, 'beta'))
   AS t(chrom, start, "end", label);
-SELECT * FROM duckhts_cgranges_from_table(
+SELECT * FROM duckhts_cgranges_from_table_labelled(
   'readme_qry_idx', 'readme_targets', 'chrom', 'start', 'end', 'label'
 );
 
@@ -490,7 +490,7 @@ FROM bcftools_score(
 ```{sql eval=TRUE, collapse=FALSE, comment=""}
 SELECT src_chrom, src_pos, dest_chrom, dest_pos, dest_ref, dest_alt,
        mapped, reverse_complemented, reject_reason, note
-FROM duckdb_liftover(
+FROM duckhts_liftover(
   '(VALUES
      (''chrF'', 2, ''C'', ''T''),
      (''chrR'', 2, ''A'', ''G''),

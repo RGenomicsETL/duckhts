@@ -60,7 +60,7 @@ SELECT * FROM (VALUES
 ) AS t(chrom, start, "end", label);
 
 query I
-SELECT * FROM duckhts_cgranges_from_table('tbl_idx', 'cgr_src', 'chrom', 'start', 'end', 'label');
+SELECT * FROM duckhts_cgranges_from_table_labelled('tbl_idx', 'cgr_src', 'chrom', 'start', 'end', 'label');
 ----
 1
 
@@ -71,7 +71,7 @@ FROM duckhts_cgranges_overlaps('tbl_idx', 'chr2', 105, 106);
 0	alpha	chr2	100	110
 
 statement error
-SELECT * FROM duckhts_cgranges_from_table('tbl_idx', 'cgr_src', 'chrom', 'start', 'end', 'label');
+SELECT * FROM duckhts_cgranges_from_table_labelled('tbl_idx', 'cgr_src', 'chrom', 'start', 'end', 'label');
 ----
 duckhts_cgranges_create: index already exists in this session
 
@@ -79,7 +79,7 @@ statement ok
 CREATE TEMP VIEW cgr_beta AS SELECT chrom, start, "end", label FROM cgr_src WHERE label = 'beta';
 
 query I
-SELECT * FROM duckhts_cgranges_from_table('qry_idx', 'cgr_beta', 'chrom', 'start', 'end', 'label');
+SELECT * FROM duckhts_cgranges_from_table_labelled('qry_idx', 'cgr_beta', 'chrom', 'start', 'end', 'label');
 ----
 1
 
@@ -309,7 +309,7 @@ SELECT * FROM (VALUES
 ) AS t(chrom, start, "end", label_i64, label_f64, label_bool);
 
 query I
-SELECT * FROM duckhts_cgranges_from_table('qry_i64', 'cgr_num_src', 'chrom', 'start', 'end', 'label_i64');
+SELECT * FROM duckhts_cgranges_from_table_labelled('qry_i64', 'cgr_num_src', 'chrom', 'start', 'end', 'label_i64');
 ----
 1
 
@@ -343,7 +343,7 @@ FROM UNNEST(duckhts_cgranges_overlaps_list('qry_i64', 'chr3', 22, 24)) AS u(hit)
 1	NULL	BIGINT	20	35
 
 query I
-SELECT * FROM duckhts_cgranges_from_table('qry_f64', 'cgr_num_src', 'chrom', 'start', 'end', 'label_f64');
+SELECT * FROM duckhts_cgranges_from_table_labelled('qry_f64', 'cgr_num_src', 'chrom', 'start', 'end', 'label_f64');
 ----
 1
 
@@ -359,7 +359,7 @@ FROM duckhts_cgranges_overlaps('qry_f64', 'chr3', 10, 12);
 0	1.5	chr3	5	15
 
 query I
-SELECT * FROM duckhts_cgranges_from_table('qry_bool', 'cgr_num_src', 'chrom', 'start', 'end', 'label_bool');
+SELECT * FROM duckhts_cgranges_from_table_labelled('qry_bool', 'cgr_num_src', 'chrom', 'start', 'end', 'label_bool');
 ----
 1
 
@@ -406,7 +406,7 @@ CREATE TEMP VIEW cgr_bad_label AS
 SELECT chrom, start, "end", [1, 2] AS label FROM cgr_num_src LIMIT 1;
 
 statement error
-SELECT * FROM duckhts_cgranges_from_table('qry_bad_label', 'cgr_bad_label', 'chrom', 'start', 'end', 'label');
+SELECT * FROM duckhts_cgranges_from_table_labelled('qry_bad_label', 'cgr_bad_label', 'chrom', 'start', 'end', 'label');
 ----
 No function matches the given name and argument types
 
