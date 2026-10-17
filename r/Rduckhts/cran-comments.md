@@ -1,5 +1,6 @@
-This submission updates Rduckhts to 2.0.0.0.1.5 and the bundled DuckHTS
-extension from 1.5.2 to 2.0.0.
+This submission updates Rduckhts to 2.0.0.0.1.6 and the bundled DuckHTS
+extension from 1.5.2 to 2.0.0. The packaging revision also keeps webR
+builds on the bundled htslib headers.
 
 This is a major release. Consequence prediction has moved to the separate
 DuckVEP extension and Rduckvep package, and the old bundled DuckVEP interfaces

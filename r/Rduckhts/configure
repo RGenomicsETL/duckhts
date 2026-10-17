@@ -466,6 +466,13 @@ if [ ! -s "${SOURCE_MANIFEST}" ]; then
 fi
 C_SOURCES=`awk -F'|' 'NF >= 2 && $1 !~ /^#/ {print $2}' "${SOURCE_MANIFEST}"`
 INCLUDES="-I./include -I./duckdb_capi -isystem ./htslib -I./libBigWig"
+COMPILE_CPPFLAGS="${CPPFLAGS} ${INCLUDES}"
+if [ "${WASM_BUILD}" = "yes" ]; then
+  # r-universe/webR may put another htslib in CPPFLAGS. The extension links the
+  # bundled archive, so its matching headers must precede toolchain includes.
+  INCLUDES="-I./include -I./duckdb_capi -I./htslib -I./libBigWig"
+  COMPILE_CPPFLAGS="${INCLUDES} ${CPPFLAGS}"
+fi
 
 echo "Compiling extension sources..."
 OBJECT_FILES=""
@@ -476,7 +483,7 @@ for src_file in $C_SOURCES; do
   case "$src_file" in
     cgranges.c|bcftools_filter.c) src_cflags="${UPSTREAM_CFLAGS}" ;;
   esac
-  ${CC} ${src_cflags} ${CPPFLAGS} ${INCLUDES} -c "$src_file" -o "$obj_file"
+  ${CC} ${src_cflags} ${COMPILE_CPPFLAGS} -c "$src_file" -o "$obj_file"
     if [ $? -ne 0 ]; then
         echo "ERROR: Failed to compile $src_file"
         exit 1

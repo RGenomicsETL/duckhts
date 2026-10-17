@@ -2,6 +2,10 @@
 
 # duckhts 2.0.0
 
+- Rduckhts webR and r-universe builds put the bundled htslib 1.24 headers
+  ahead of toolchain include paths, matching the static htslib archive linked
+  into the bundled extension.
+
 - Regional depth fractions test bin midpoints without integer overflow or
   loss of precision at large coordinates. Sex-depth calibration counts only
   reference samples contributing an X or Y level, including when leaving
