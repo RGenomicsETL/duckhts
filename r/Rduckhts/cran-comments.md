@@ -1,78 +1,22 @@
-## Submission
+This submission updates Rduckhts to 2.0.0.0.1.5 and the bundled DuckHTS
+extension from 1.5.2 to 2.0.0.
 
-Rduckhts 2.0.0.0.1.5 packages DuckHTS 2.0.0. It is a major release with
-breaking changes; details are in `NEWS.md`.
-
-- Requires `duckdb` 1.5.0 or newer (previously 1.4.0).
-- Consequence prediction has moved to the separate DuckVEP extension and its
-  R package, Rduckvep. `rduckhts_haplotypes()` and the DuckVEP functions are
-  removed from this package; CSQ, ANN and BCSQ parsing in `rduckhts_bcf()` is
-  unchanged.
-- The bundled extension installs SQL macros into the database catalog only for
-  a writable in-memory database. `rduckhts_connect()` and `rduckhts_load()`
-  install connection-local macros for database files, including read-only
-  files, without modifying them.
-- `duckhts_cgranges_from_query()` and `duckhts_cgranges_overlaps_bulk()` are
-  removed; `duckhts_cgranges_from_table()` is a table macro.
-- The `duckdb_liftover()`, `duckdb_munge()` and `duckdb_munge_metal()` SQL
-  functions are renamed with the `duckhts_` prefix.
-- The Somalier panel now carries X/Y sites, which changes panel, frequency and
-  sketch digests; `panel_table` is exported to a scratch Parquet file for
-  `rduckhts_somalier_bam_counts()` and `rduckhts_ancestry_bam()`.
-
-New features include indexed interval reads (`regions_var`,
-`rduckhts_geno_sites()`), `rduckhts_somalier_sex()`, ancestry proportion
-estimation, Somalier panel selection, named attribute columns for GenBank,
-GFF and GTF, and `error_policy` for BED. A closed database file is now
-released, which fixes reopening a database file in the same process on Windows.
-
-`inst/COPYRIGHT` now inventories every bundled third-party component, and
-`Authors@R` lists the copyright holders named in the bundled sources.
+This is a major release. Consequence prediction has moved to the separate
+DuckVEP extension and Rduckvep package, and the old bundled DuckVEP interfaces
+are removed. It adds genotype, depth, ancestry and sequencing-QC workflows,
+and connection-local macro loading for database files. It also replaces the
+deprecated SQL lambda syntax, addressing the DuckDB 2.0 reverse-dependency
+failure reported in https://github.com/RGenomicsETL/duckhts/issues/352. Full
+details are in NEWS.md.
 
 ## Test environments
 
-- Local source-tarball installation and `R CMD check --as-cran`: Ubuntu
-  24.04, x86_64, R 4.6.0 (2026-04-24), GCC 13.3.0, `duckdb` R 1.5.5.
-- The installed package loaded with `ENABLE_SINGLE_ARROW=false`, exercising
-  the explicit lambda syntax required by DuckDB 2.0. The extension also passed
-  its default `LOAD` test with the pinned DuckDB 2.0 development wheel.
+The exact source tarball passed `R CMD check --as-cran` on Ubuntu 24.04 with
+R 4.6.0: 0 errors, 0 warnings and 1 note. The note reports
+`-mno-omit-leaf-frame-pointer`, which is supplied by R rather than the package.
 
-- GitHub Actions R-CMD-check matrix on the release candidate:
-  - Ubuntu 24.04, R 4.6.1 and R-devel (4.7.0): passed.
-  - macOS 26 (aarch64), R 4.6.1: passed.
-  - Windows Server 2022, R 4.6.1 (ucrt): passed.
-  - Fedora 44, clang 22, R 4.6.1, CRAN-like with warnings as errors: 2 NOTEs.
-    One is the update count; the URL check also could not connect from the
-    container. The other lists compiler flags that Fedora's R configuration
-    supplies (`-march=x86-64`, `-mtls-dialect=gnu2`, `-D_FORTIFY_SOURCE=3`
-    and others), not flags the package adds.
-  - Fedora, GCC 16, R-devel (2026-09-29 r90598): 1 NOTE, the update count.
-  - Linux ARM64 and Windows ARM64 package contract checks: passed.
+GitHub Actions checked Ubuntu R-release and R-devel, Fedora 44 with GCC and
+Clang, Windows x86_64 and ARM64, macOS ARM64, Linux ARM64, sanitizers,
+webR/duckdb-wasm and DuckDB 2.0.
 
-## R CMD check results
-
-0 errors, 0 warnings, 1 note:
-
-- The local R installation supplies `-mno-omit-leaf-frame-pointer`, which the
-  compilation-flags check reports as non-portable. Rduckhts does not add this
-  flag; it preserves the installation's compiler settings.
-
-CRAN records seven Rduckhts updates in the preceding six months. This major
-release is coordinated with the DuckDB community-extension release and fixes
-the DuckDB 2.0 reverse-dependency failure reported at
-https://github.com/RGenomicsETL/duckhts/issues/352.
-
-The check also reports an installed size of 33.1 Mb (`duckhts_extension`
-26.8 Mb, `extdata` 4.2 Mb) as information. The source tarball is 3.6 MB. Both
-are large because the package compiles the DuckHTS extension together with the
-bundled HTSlib (with htscodecs), libBigWig, cgranges, the bcftools filter
-engine and VariantKey sources during installation, and ships test fixtures.
-Each component and its licence is listed in `inst/COPYRIGHT`. If the CRAN
-incoming check reports a size NOTE on other platforms, this is the reason.
-
-## Reverse dependencies
-
-There are no reverse dependencies on CRAN. This was checked with
-`tools::package_dependencies("Rduckhts", reverse = TRUE, db =
-available.packages(repos = "https://cloud.r-project.org"))`, which returned
-`character(0)` (also with `which = "all"`).
+There are no reverse dependencies on CRAN.
