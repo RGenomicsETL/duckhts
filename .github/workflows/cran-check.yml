@@ -114,8 +114,8 @@ jobs:
         run: |
           $dumpDir = Join-Path $env:RUNNER_TEMP "r-crash-dumps"
           New-Item -ItemType Directory -Force -Path $dumpDir | Out-Null
-          foreach ($executable in @("R.exe", "Rterm.exe")) {
-            $key = "HKCU:\Software\Microsoft\Windows\Windows Error Reporting\LocalDumps\$executable"
+          foreach ($executable in @("R.exe", "Rterm.exe", "Rscript.exe")) {
+            $key = "HKLM:\Software\Microsoft\Windows\Windows Error Reporting\LocalDumps\$executable"
             New-Item -Force -Path $key | Out-Null
             New-ItemProperty -Force -Path $key -Name DumpFolder -PropertyType ExpandString -Value $dumpDir | Out-Null
             New-ItemProperty -Force -Path $key -Name DumpType -PropertyType DWord -Value 2 | Out-Null
@@ -141,6 +141,31 @@ jobs:
           build_args: 'c("--no-manual","--compact-vignettes=gs+qpdf")'
           error-on: '"warning"'
           working-directory: r/Rduckhts
+
+      - name: Trace Windows R-devel BAM extraction after check failure
+        if: failure() && runner.os == 'Windows' && matrix.config.r == 'devel'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $checkLibrary = (Resolve-Path "r/Rduckhts/check/Rduckhts.Rcheck").Path
+          $env:R_LIBS = $checkLibrary
+          Rscript --vanilla scripts/diagnose_bam_extraction.R
+          $code = $LASTEXITCODE
+          Write-Host ("BAM diagnostic exit code: {0} (0x{1:X8})" -f $code, ($code -band [long]0xFFFFFFFF))
+          exit $code
+
+      - name: Collect Windows application crash events
+        if: failure() && runner.os == 'Windows' && matrix.config.r == 'devel'
+        shell: pwsh
+        run: |
+          $dumpDir = Join-Path $env:RUNNER_TEMP "r-crash-dumps"
+          Get-WinEvent -FilterHashtable @{
+            LogName = "Application"
+            Id = 1000, 1001
+            StartTime = (Get-Date).AddHours(-2)
+          } -ErrorAction SilentlyContinue |
+            Format-List TimeCreated, Id, ProviderName, Message |
+            Out-File (Join-Path $dumpDir "application-events.txt")
 
       - name: Upload Windows R-devel crash evidence
         if: failure() && runner.os == 'Windows' && matrix.config.r == 'devel'
