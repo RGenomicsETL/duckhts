@@ -1,5 +1,12 @@
 # Changelog
 
+## Rduckhts 2.0.0.0.1.6
+
+- webR and r-universe builds compile the bundled extension against its
+  bundled htslib 1.24 headers even when toolchain include flags expose
+  another htslib, keeping the compiled declarations aligned with the
+  linked static archive.
+
 ## Rduckhts 2.0.0.0.1.5
 
 - Bundled regional depth fractions handle large-coordinate bin midpoints

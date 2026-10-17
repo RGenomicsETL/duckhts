@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">2.0.0.0.1.5</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">2.0.0.0.1.6</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -38,6 +38,10 @@
       <small>Source: <a href="https://github.com/RGenomicsETL/duckhts/blob/main/NEWS.md" class="external-link"><code>NEWS.md</code></a></small>
     </div>
 
+    <div class="section level2">
+<h2 class="pkg-version" data-toc-text="2.0.0.0.1.6" id="rduckhts-200016">Rduckhts 2.0.0.0.1.6<a class="anchor" aria-label="anchor" href="#rduckhts-200016"></a></h2>
+<ul><li>webR and r-universe builds compile the bundled extension against its bundled htslib 1.24 headers even when toolchain include flags expose another htslib, keeping the compiled declarations aligned with the linked static archive.</li>
+</ul></div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="2.0.0.0.1.5" id="rduckhts-200015">Rduckhts 2.0.0.0.1.5<a class="anchor" aria-label="anchor" href="#rduckhts-200015"></a></h2>
 <ul><li><p>Bundled regional depth fractions handle large-coordinate bin midpoints without overflow or rounding. Sex-depth reference counts exclude samples with no usable calibration level, correctly leave out the tested sample, and reject NULL contigs instead of including them in the autosomal baseline.</p></li>
