@@ -1,6 +1,6 @@
 # DuckHTS Extension News
 
-# duckhts 1.5.2.9018
+# duckhts 2.0.0
 
 - Regional depth fractions test bin midpoints without integer overflow or
   loss of precision at large coordinates. Sex-depth calibration counts only
@@ -50,8 +50,6 @@
   reject first-segment and QC-fail records, use POS + TLEN for the forward
   read's mate end, and label equal strands `TANDEM`. These upstream rules
   supersede the design note's draft rules. Picard is context only.
-
-Preview of 2.0.0, still in development: ROH (#318) has its bcftools-compatible kernel, ancestry-tuned frequencies and read-count emissions with contamination, and bounded native site buffers (#329). The sections below describe what 2.0.0 will contain.
 
 - `benchmarks/benchmark_count_mixture_lowpass_genome.md` evaluates 90 autosomal
   low-pass strata with 200 replicates each and both error calibrations. At 5%

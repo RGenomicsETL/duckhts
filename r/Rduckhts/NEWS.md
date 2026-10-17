@@ -1,6 +1,4 @@
-# Rduckhts 1.5.2.9018.0.1.5
-
-Preview of 2.0.0, still in development. The sections below describe what 2.0.0 will contain.
+# Rduckhts 2.0.0.0.1.5
 
 - Bundled regional depth fractions handle large-coordinate bin midpoints
   without overflow or rounding. Sex-depth reference counts exclude samples

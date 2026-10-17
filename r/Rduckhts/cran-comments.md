@@ -1,7 +1,5 @@
 ## Submission
 
-<!-- Draft for the 2.0.0 submission. The package is 1.5.2.9017.0.1.5, a 2.0.0 preview, until release. -->
-
 Rduckhts 2.0.0.0.1.5 packages DuckHTS 2.0.0. It is a major release with
 breaking changes; details are in `NEWS.md`.
 
@@ -16,6 +14,8 @@ breaking changes; details are in `NEWS.md`.
   files, without modifying them.
 - `duckhts_cgranges_from_query()` and `duckhts_cgranges_overlaps_bulk()` are
   removed; `duckhts_cgranges_from_table()` is a table macro.
+- The `duckdb_liftover()`, `duckdb_munge()` and `duckdb_munge_metal()` SQL
+  functions are renamed with the `duckhts_` prefix.
 - The Somalier panel now carries X/Y sites, which changes panel, frequency and
   sketch digests; `panel_table` is exported to a scratch Parquet file for
   `rduckhts_somalier_bam_counts()` and `rduckhts_ancestry_bam()`.
@@ -31,11 +31,13 @@ released, which fixes reopening a database file in the same process on Windows.
 
 ## Test environments
 
-- Local source-tarball installation (private library) and
-  `R CMD check --as-cran --no-manual` with `_R_CHECK_FORCE_SUGGESTS_=false`:
-  Ubuntu 24.04, x86_64, R 4.6.0 (2026-04-24), GCC 13.3.0, `duckdb` R 1.5.5.
+- Local source-tarball installation and `R CMD check --as-cran`: Ubuntu
+  24.04, x86_64, R 4.6.0 (2026-04-24), GCC 13.3.0, `duckdb` R 1.5.5.
+- The installed package loaded with `ENABLE_SINGLE_ARROW=false`, exercising
+  the explicit lambda syntax required by DuckDB 2.0. The extension also passed
+  its default `LOAD` test with the pinned DuckDB 2.0 development wheel.
 
-- GitHub Actions, R-CMD-check run 36750177321 on the release-preparation head:
+- GitHub Actions R-CMD-check matrix on the release candidate:
   - Ubuntu 24.04, R 4.6.1 and R-devel (4.7.0): passed.
   - macOS 26 (aarch64), R 4.6.1: passed.
   - Windows Server 2022, R 4.6.1 (ucrt): passed.
@@ -49,17 +51,19 @@ released, which fixes reopening a database file in the same process on Windows.
 
 ## R CMD check results
 
-0 errors, 0 warnings, 2 notes:
+0 errors, 0 warnings, 1 note:
 
-- CRAN incoming feasibility reports the maintainer and "Number of updates in
-  past 6 months: 7". This is a coordinated major release with the DuckDB
-  community-extension release.
 - The local R installation supplies `-mno-omit-leaf-frame-pointer`, which the
   compilation-flags check reports as non-portable. Rduckhts does not add this
   flag; it preserves the installation's compiler settings.
 
-The check also reports an installed size of 31.3 Mb (`duckhts_extension`
-25.7 Mb, `extdata` 4.0 Mb) as information. The source tarball is 3.4 MB. Both
+CRAN records seven Rduckhts updates in the preceding six months. This major
+release is coordinated with the DuckDB community-extension release and fixes
+the DuckDB 2.0 reverse-dependency failure reported at
+https://github.com/RGenomicsETL/duckhts/issues/352.
+
+The check also reports an installed size of 33.1 Mb (`duckhts_extension`
+26.8 Mb, `extdata` 4.2 Mb) as information. The source tarball is 3.6 MB. Both
 are large because the package compiles the DuckHTS extension together with the
 bundled HTSlib (with htscodecs), libBigWig, cgranges, the bcftools filter
 engine and VariantKey sources during installation, and ships test fixtures.
