@@ -112,8 +112,9 @@
   holds about 290 bytes a bin in memory, the sex estimator streams) and checks
   them on 0.1x, 0.4x and 1x read-name subsamples of three 1000 Genomes 30x
   genomes, with planted chr18 gains and emulated XX/XY mixtures, against a
-  leave-one-out reference of the other genomes. The state model of the issue
-  is not implemented.
+  leave-one-out reference of the other genomes. The benchmark invokes the
+  named reference macro and reports DuckDB CLI failures directly. The state
+  model of the issue is not implemented.
 
 - `benchmarks/benchmark_roh_truth_and_mixtures.md` tests the ROH decodes
   where the answer is known. Synthetic chr20 children of two unrelated

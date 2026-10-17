@@ -166,7 +166,7 @@ run_untimed <- function(statements, outputs = list()) {
   writeLines(c("SET threads = 4;", sprintf("LOAD %s;", quote_literal(extension)), statements, copies),
              sql_path)
   status <- system2(duckdb_cli, c("-unsigned", "-batch", "-bail"), stdin = sql_path,
-                    stdout = FALSE, stderr = FALSE)
+                    stdout = "", stderr = "")
   if (status != 0L) stop("DuckDB CLI failed (status ", status, ")")
   results <- lapply(paths, utils::read.csv, stringsAsFactors = FALSE)
   names(results) <- names(outputs)
@@ -357,7 +357,7 @@ group_sql <- function(k) {
     "CREATE OR REPLACE TABLE test_corrected_five AS SELECT * FROM duckhts_depth_bins('test_bins_five');",
     "CREATE OR REPLACE TABLE reference_bins_five AS SELECT * FROM five('reference_bins');",
     "CREATE OR REPLACE TABLE reference_corrected_five AS SELECT *, 'XY' AS sex FROM duckhts_depth_bins('reference_bins_five');",
-    sprintf(paste("INSERT INTO region_bins SELECT %d, 'five_chromosomes', * FROM duckhts_depth_region_fraction(",
+    sprintf(paste("INSERT INTO region_bins SELECT %d, 'five_chromosomes', * FROM duckhts_depth_region_fraction_ref(",
                   "'test_corrected_five', 'chromosomes', 'reference_corrected_five') WHERE region = 'chr18';"), k))
 }
 real_results <- run_untimed(c(

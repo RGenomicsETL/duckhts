@@ -26,14 +26,16 @@ their first baseline.
   supplementary flag) in 100 kb bins of chr1 to chr22, X and Y of three
   1000 Genomes 30× CRAMs, split into 300 of 3,000 read-name buckets. Ten
   buckets are a 0.1× read-name subsample, 40 are 0.4× and 100 are 1×. The
-  three inputs are checked against their registered row and read counts, the
-  reference FASTA against its registered size and the sample panel against
-  its registered SHA-256 before anything is computed. GC comes from
+  three inputs are checked against their registered row and read counts and
+  receipt SHA-256 values. Staging validates each full CRAM against its supplier
+  MD5; receipts retain the producer and actual input hashes. The reference
+  FASTA and sample panel are checked against their registered checksums before
+  anything is computed. GC comes from
   `fasta_nuc()` on the registered GRCh38 reference.
 
 Every timed observation is one fresh DuckDB CLI process under
-`/usr/bin/time`, pinned to cores 12 to 19 by the render command and run at
-scheduling priority −15, with three repetitions at one thread and at four
+`/usr/bin/time`, with its launcher’s actual CPU affinity and scheduling
+priority recorded below, with three repetitions at one thread and at four
 threads in an order that alternates sizes. The JSON profiler gives the query
 latency and DuckDB’s peak buffer and temporary bytes; `/usr/bin/time` gives
 the peak RSS. `max_temp_directory_size` is zero, so a spill fails the
@@ -116,7 +118,13 @@ also reports the planted gains corrected on chr18 to chr22 alone (mode
 taskset -c 12-19 Rscript -e 'rmarkdown::render("benchmarks/benchmark_depth_fraction.Rmd")'
 ```
 
-Source revision: 949f5ab0e9e19531ac7c2a83e20107088d1e769c; `src` tree d1a7d32f271763dbbc7a9c4fe693bdcff7c041c1. DuckDB runtime: v1.5.1 (Variegata) 7dbb2e646f (CLI). Extension SHA-256: 2494437603f3ecca63dbe8b5b64ef7fddc6bab433d9d47aad06bf5bbb78e4e50. Host load at start: 2.78, 3.53, 4.89. DuckDB memory limit: 50.0 GiB (the default); temporary directory limit: 0. Cores 12 to 19, priority −15.
+| artifact                       | producer_sha256                                                  | alignments_sha256                                                | output_sha256                                                    |
+|:-------------------------------|:-----------------------------------------------------------------|:-----------------------------------------------------------------|:-----------------------------------------------------------------|
+| depth_fraction_hg00403_buckets | ef335aaf51f413b09365cecec55417c7b1efe860cd2db58ff5243c997976daa8 | fd85e89918bf47a7378761eb925fd654557b782e9eab896f290af43b3c2c7b15 | 6ee4a25bb1ce08469aae1003761ad7123860a924dc10f44b21d84fb7bb63c55b |
+| depth_fraction_na18507_buckets | d8d601db566efafd7ae5e09650f32bd7c930a4d060e715405eb36209e2aaab88 | d4ae010de22e991805b91e95ad4352fe1658970fa577b11e696c94b737313cb8 | 7cf2438544588eaf8a9707b434f2b613de4ae692650c401ca67f79fca6513147 |
+| depth_fraction_hg00188_buckets | 17b1a43a2216db7505d1323467900b5638608086664ab44d9aaef5213097c22e | 1ac3e97343325b497929e2e65a21ff96c7168f559cc28c915274e41aae0116ca | 1dbd8f70ad3d7b7e5ce8e72e1d608ac445de51a3509b472e9fbcff3c54819103 |
+
+Source revision: 53ced276f90af2ec4352e6b528aa5cc51a6bc4f5; `src` tree d79a118e8c83e3977b7503f1f90d722019028bb6. DuckDB runtime: v1.5.1 (Variegata) 7dbb2e646f (CLI). Extension SHA-256: 7683031d3ad8bc08b9e489011e43efb60bca55b2cd08308b382684ddc56507f6. Host load at start: 0.36, 0.81, 0.69. DuckDB memory limit: 50.0 GiB (the default); temporary directory limit: 0. Launcher affinity: pid 3670909’s current affinity list: 12-19; niceness: 0.
 
 ## Real data
 
@@ -272,9 +280,9 @@ Overheads, live state of the largest input and ceilings (MiB):
 
 | macro           | overhead_mib | live_state_mib | budget_mib |
 |:----------------|-------------:|---------------:|-----------:|
-| depth_bins      |         45.7 |         4098.6 |    12341.5 |
-| region_fraction |         52.6 |         2893.1 |     8732.0 |
-| sex_fraction    |         44.2 |           30.0 |      134.2 |
+| depth_bins      |         46.2 |         4098.6 |    12342.0 |
+| region_fraction |         53.8 |         2893.1 |     8733.1 |
+| sex_fraction    |         44.1 |           30.0 |      134.1 |
 
 Inputs (rows = samples × bins; the joint input doubles both):
 
@@ -291,96 +299,96 @@ Median, minimum and maximum query latency of three repetitions, peak RSS and Duc
 
 | macro           | series  | scale | threads | samples |    bins | regions |       rows | median_seconds | min_seconds | max_seconds | median_rss_mib | max_rss_mib | max_buffer_mib | budget_mib |
 |:----------------|:--------|------:|--------:|--------:|--------:|--------:|-----------:|---------------:|------------:|------------:|---------------:|------------:|---------------:|-----------:|
-| depth_bins      | bins    |     1 |       1 |      64 | 123,440 |      NA |  7,900,160 |          6.108 |       6.102 |       6.162 |        2,230.0 |     2,230.4 |        4,709.1 |   12,341.5 |
-| depth_bins      | bins    |     2 |       1 |      64 | 246,880 |      NA | 15,800,320 |         12.240 |      12.240 |      12.316 |        4,406.6 |     4,406.6 |        9,392.7 |   12,341.5 |
-| depth_bins      | bins    |     4 |       1 |      64 | 493,760 |      NA | 31,600,640 |         24.736 |      24.587 |      24.736 |        8,758.4 |     8,758.5 |       18,763.5 |   12,341.5 |
-| depth_bins      | bins    |     1 |       4 |      64 | 123,440 |      NA |  7,900,160 |          1.831 |       1.816 |       2.002 |        2,242.6 |     2,242.8 |        4,754.6 |   12,341.5 |
-| depth_bins      | bins    |     2 |       4 |      64 | 246,880 |      NA | 15,800,320 |          3.526 |       3.510 |       3.565 |        4,419.9 |     4,420.2 |        9,440.7 |   12,341.5 |
-| depth_bins      | bins    |     4 |       4 |      64 | 493,760 |      NA | 31,600,640 |          6.907 |       6.860 |       6.909 |        8,769.2 |     8,784.0 |       18,810.4 |   12,341.5 |
-| depth_bins      | joint   |     1 |       1 |      64 | 123,440 |      NA |  7,900,160 |          6.108 |       6.102 |       6.162 |        2,230.0 |     2,230.4 |        4,709.1 |   12,341.5 |
-| depth_bins      | joint   |     4 |       1 |     128 | 246,880 |      NA | 31,600,640 |         24.787 |      24.723 |      24.902 |        8,758.6 |     8,758.8 |       18,762.0 |   12,341.5 |
-| depth_bins      | joint   |     1 |       4 |      64 | 123,440 |      NA |  7,900,160 |          1.831 |       1.816 |       2.002 |        2,242.6 |     2,242.8 |        4,754.6 |   12,341.5 |
-| depth_bins      | joint   |     4 |       4 |     128 | 246,880 |      NA | 31,600,640 |          6.949 |       6.938 |       7.002 |        8,773.1 |     8,777.4 |       18,810.1 |   12,341.5 |
-| depth_bins      | samples |     1 |       1 |      64 | 123,440 |      NA |  7,900,160 |          6.108 |       6.102 |       6.162 |        2,230.0 |     2,230.4 |        4,709.1 |   12,341.5 |
-| depth_bins      | samples |     2 |       1 |     128 | 123,440 |      NA | 15,800,320 |         12.418 |      12.383 |      12.421 |        4,409.2 |     4,409.8 |        9,393.2 |   12,341.5 |
-| depth_bins      | samples |     4 |       1 |     256 | 123,440 |      NA | 31,600,640 |         24.995 |      24.827 |      25.142 |        8,758.9 |     8,759.0 |       18,762.6 |   12,341.5 |
-| depth_bins      | samples |     1 |       4 |      64 | 123,440 |      NA |  7,900,160 |          1.831 |       1.816 |       2.002 |        2,242.6 |     2,242.8 |        4,754.6 |   12,341.5 |
-| depth_bins      | samples |     2 |       4 |     128 | 123,440 |      NA | 15,800,320 |          3.532 |       3.521 |       3.589 |        4,421.0 |     4,423.2 |        9,440.1 |   12,341.5 |
-| depth_bins      | samples |     4 |       4 |     256 | 123,440 |      NA | 31,600,640 |          7.391 |       7.283 |       7.516 |        8,775.9 |     8,784.0 |       18,817.0 |   12,341.5 |
-| region_fraction | bins    |     1 |       1 |      64 | 123,440 |      22 |  7,900,160 |          1.712 |       1.706 |       1.714 |          635.9 |       636.4 |        1,231.1 |    8,732.0 |
-| region_fraction | bins    |     2 |       1 |      64 | 246,880 |      22 | 15,800,320 |          3.394 |       3.394 |       3.404 |        1,219.4 |     1,219.6 |        2,442.7 |    8,732.0 |
-| region_fraction | bins    |     4 |       1 |      64 | 493,760 |      22 | 31,600,640 |          6.754 |       6.750 |       6.760 |        2,385.3 |     2,385.3 |        4,867.0 |    8,732.0 |
-| region_fraction | bins    |     1 |       4 |      64 | 123,440 |      22 |  7,900,160 |          0.499 |       0.498 |       0.500 |          643.1 |       643.2 |        1,251.6 |    8,732.0 |
-| region_fraction | bins    |     2 |       4 |      64 | 246,880 |      22 | 15,800,320 |          0.937 |       0.937 |       1.006 |        1,225.0 |     1,225.8 |        2,463.9 |    8,732.0 |
-| region_fraction | bins    |     4 |       4 |      64 | 493,760 |      22 | 31,600,640 |          1.808 |       1.808 |       1.813 |        2,390.4 |     2,390.9 |        4,887.4 |    8,732.0 |
-| region_fraction | joint   |     1 |       1 |      64 | 123,440 |      22 |  7,900,160 |          1.712 |       1.706 |       1.714 |          635.9 |       636.4 |        1,231.1 |    8,732.0 |
-| region_fraction | joint   |     4 |       1 |     128 | 246,880 |      22 | 31,600,640 |          6.758 |       6.739 |       6.764 |        2,385.2 |     2,385.2 |        4,867.8 |    8,732.0 |
-| region_fraction | joint   |     1 |       4 |      64 | 123,440 |      22 |  7,900,160 |          0.499 |       0.498 |       0.500 |          643.1 |       643.2 |        1,251.6 |    8,732.0 |
-| region_fraction | joint   |     4 |       4 |     128 | 246,880 |      22 | 31,600,640 |          1.807 |       1.802 |       1.813 |        2,391.0 |     2,391.1 |        4,887.7 |    8,732.0 |
-| region_fraction | regions |     1 |       1 |      64 | 123,440 |      22 |  7,900,160 |          1.712 |       1.706 |       1.714 |          635.9 |       636.4 |        1,231.1 |    8,732.0 |
-| region_fraction | regions |     2 |       1 |      64 | 123,440 |      44 |  7,900,160 |          1.793 |       1.792 |       1.794 |          637.8 |       638.1 |        1,232.0 |    8,732.0 |
-| region_fraction | regions |     4 |       1 |      64 | 123,440 |      88 |  7,900,160 |          1.943 |       1.937 |       1.947 |          638.0 |       638.3 |        1,232.4 |    8,732.0 |
-| region_fraction | regions |     1 |       4 |      64 | 123,440 |      22 |  7,900,160 |          0.499 |       0.498 |       0.500 |          643.1 |       643.2 |        1,251.6 |    8,732.0 |
-| region_fraction | regions |     2 |       4 |      64 | 123,440 |      44 |  7,900,160 |          0.524 |       0.523 |       0.524 |          643.9 |       644.1 |        1,249.5 |    8,732.0 |
-| region_fraction | regions |     4 |       4 |      64 | 123,440 |      88 |  7,900,160 |          0.563 |       0.561 |       0.568 |          645.1 |       645.9 |        1,257.2 |    8,732.0 |
-| region_fraction | samples |     1 |       1 |      64 | 123,440 |      22 |  7,900,160 |          1.712 |       1.706 |       1.714 |          635.9 |       636.4 |        1,231.1 |    8,732.0 |
-| region_fraction | samples |     2 |       1 |     128 | 123,440 |      22 | 15,800,320 |          3.389 |       3.385 |       3.403 |        1,219.8 |     1,220.0 |        2,443.5 |    8,732.0 |
-| region_fraction | samples |     4 |       1 |     256 | 123,440 |      22 | 31,600,640 |          6.740 |       6.730 |       6.747 |        2,385.4 |     2,385.5 |        4,867.9 |    8,732.0 |
-| region_fraction | samples |     1 |       4 |      64 | 123,440 |      22 |  7,900,160 |          0.499 |       0.498 |       0.500 |          643.1 |       643.2 |        1,251.6 |    8,732.0 |
-| region_fraction | samples |     2 |       4 |     128 | 123,440 |      22 | 15,800,320 |          0.935 |       0.932 |       0.936 |        1,226.1 |     1,226.4 |        2,463.5 |    8,732.0 |
-| region_fraction | samples |     4 |       4 |     256 | 123,440 |      22 | 31,600,640 |          1.809 |       1.807 |       1.809 |        2,393.6 |     2,393.8 |        4,888.9 |    8,732.0 |
-| sex_fraction    | bins    |     1 |       1 |      64 | 123,440 |      NA |  7,900,160 |          0.640 |       0.639 |       0.641 |           49.2 |        49.3 |           10.7 |      134.2 |
-| sex_fraction    | bins    |     2 |       1 |      64 | 246,880 |      NA | 15,800,320 |          1.268 |       1.267 |       1.270 |           52.6 |        52.8 |           15.1 |      134.2 |
-| sex_fraction    | bins    |     4 |       1 |      64 | 493,760 |      NA | 31,600,640 |          2.539 |       2.535 |       2.553 |           59.8 |        59.9 |           21.9 |      134.2 |
-| sex_fraction    | bins    |     1 |       4 |      64 | 123,440 |      NA |  7,900,160 |          0.203 |       0.202 |       0.210 |           63.2 |        64.1 |           25.6 |      134.2 |
-| sex_fraction    | bins    |     2 |       4 |      64 | 246,880 |      NA | 15,800,320 |          0.376 |       0.373 |       0.381 |           65.7 |        65.8 |           29.6 |      134.2 |
-| sex_fraction    | bins    |     4 |       4 |      64 | 493,760 |      NA | 31,600,640 |          0.708 |       0.705 |       0.716 |           71.7 |        72.6 |           56.1 |      134.2 |
-| sex_fraction    | joint   |     1 |       1 |      64 | 123,440 |      NA |  7,900,160 |          0.640 |       0.639 |       0.641 |           49.2 |        49.3 |           10.7 |      134.2 |
-| sex_fraction    | joint   |     4 |       1 |     128 | 246,880 |      NA | 31,600,640 |          2.537 |       2.519 |       2.538 |           59.9 |        60.0 |           21.9 |      134.2 |
-| sex_fraction    | joint   |     1 |       4 |      64 | 123,440 |      NA |  7,900,160 |          0.203 |       0.202 |       0.210 |           63.2 |        64.1 |           25.6 |      134.2 |
-| sex_fraction    | joint   |     4 |       4 |     128 | 246,880 |      NA | 31,600,640 |          0.706 |       0.701 |       0.716 |           71.8 |        72.0 |           55.6 |      134.2 |
-| sex_fraction    | samples |     1 |       1 |      64 | 123,440 |      NA |  7,900,160 |          0.640 |       0.639 |       0.641 |           49.2 |        49.3 |           10.7 |      134.2 |
-| sex_fraction    | samples |     2 |       1 |     128 | 123,440 |      NA | 15,800,320 |          1.277 |       1.277 |       1.277 |           52.6 |        52.6 |           15.4 |      134.2 |
-| sex_fraction    | samples |     4 |       1 |     256 | 123,440 |      NA | 31,600,640 |          2.538 |       2.530 |       2.544 |           59.8 |        59.9 |           22.4 |      134.2 |
-| sex_fraction    | samples |     1 |       4 |      64 | 123,440 |      NA |  7,900,160 |          0.203 |       0.202 |       0.210 |           63.2 |        64.1 |           25.6 |      134.2 |
-| sex_fraction    | samples |     2 |       4 |     128 | 123,440 |      NA | 15,800,320 |          0.371 |       0.371 |       0.377 |           66.3 |        67.1 |           30.0 |      134.2 |
-| sex_fraction    | samples |     4 |       4 |     256 | 123,440 |      NA | 31,600,640 |          0.710 |       0.706 |       0.710 |           72.1 |        72.1 |           55.8 |      134.2 |
+| depth_bins      | bins    |     1 |       1 |      64 | 123,440 |      NA |  7,900,160 |          6.204 |       6.198 |       6.279 |        2,230.8 |     2,230.9 |        4,709.1 |   12,342.0 |
+| depth_bins      | bins    |     2 |       1 |      64 | 246,880 |      NA | 15,800,320 |         12.460 |      12.459 |      12.503 |        4,407.3 |     4,407.4 |        9,392.7 |   12,342.0 |
+| depth_bins      | bins    |     4 |       1 |      64 | 493,760 |      NA | 31,600,640 |         25.002 |      24.999 |      25.359 |        8,758.8 |     8,758.9 |       18,763.5 |   12,342.0 |
+| depth_bins      | bins    |     1 |       4 |      64 | 123,440 |      NA |  7,900,160 |          1.856 |       1.853 |       1.856 |        2,242.7 |     2,243.1 |        4,754.7 |   12,342.0 |
+| depth_bins      | bins    |     2 |       4 |      64 | 246,880 |      NA | 15,800,320 |          3.588 |       3.565 |       3.594 |        4,427.2 |     4,428.8 |        9,438.2 |   12,342.0 |
+| depth_bins      | bins    |     4 |       4 |      64 | 493,760 |      NA | 31,600,640 |          6.975 |       6.945 |       7.041 |        8,773.2 |     8,784.4 |       18,806.6 |   12,342.0 |
+| depth_bins      | joint   |     1 |       1 |      64 | 123,440 |      NA |  7,900,160 |          6.204 |       6.198 |       6.279 |        2,230.8 |     2,230.9 |        4,709.1 |   12,342.0 |
+| depth_bins      | joint   |     4 |       1 |     128 | 246,880 |      NA | 31,600,640 |         25.289 |      24.981 |      25.378 |        8,759.2 |     8,759.3 |       18,762.0 |   12,342.0 |
+| depth_bins      | joint   |     1 |       4 |      64 | 123,440 |      NA |  7,900,160 |          1.856 |       1.853 |       1.856 |        2,242.7 |     2,243.1 |        4,754.7 |   12,342.0 |
+| depth_bins      | joint   |     4 |       4 |     128 | 246,880 |      NA | 31,600,640 |          7.089 |       7.030 |       7.106 |        8,787.8 |     8,796.1 |       18,806.9 |   12,342.0 |
+| depth_bins      | samples |     1 |       1 |      64 | 123,440 |      NA |  7,900,160 |          6.204 |       6.198 |       6.279 |        2,230.8 |     2,230.9 |        4,709.1 |   12,342.0 |
+| depth_bins      | samples |     2 |       1 |     128 | 123,440 |      NA | 15,800,320 |         12.637 |      12.564 |      12.643 |        4,409.3 |     4,409.5 |        9,393.2 |   12,342.0 |
+| depth_bins      | samples |     4 |       1 |     256 | 123,440 |      NA | 31,600,640 |         25.415 |      25.394 |      25.591 |        8,759.4 |     8,759.5 |       18,762.6 |   12,342.0 |
+| depth_bins      | samples |     1 |       4 |      64 | 123,440 |      NA |  7,900,160 |          1.856 |       1.853 |       1.856 |        2,242.7 |     2,243.1 |        4,754.7 |   12,342.0 |
+| depth_bins      | samples |     2 |       4 |     128 | 123,440 |      NA | 15,800,320 |          3.596 |       3.585 |       3.605 |        4,423.6 |     4,425.9 |        9,439.5 |   12,342.0 |
+| depth_bins      | samples |     4 |       4 |     256 | 123,440 |      NA | 31,600,640 |          7.437 |       7.427 |       7.544 |        8,774.1 |     8,776.4 |       18,810.3 |   12,342.0 |
+| region_fraction | bins    |     1 |       1 |      64 | 123,440 |      22 |  7,900,160 |          1.689 |       1.685 |       1.693 |          637.0 |       637.0 |        1,231.1 |    8,733.1 |
+| region_fraction | bins    |     2 |       1 |      64 | 246,880 |      22 | 15,800,320 |          3.366 |       3.357 |       3.366 |        1,220.1 |     1,220.1 |        2,442.7 |    8,733.1 |
+| region_fraction | bins    |     4 |       1 |      64 | 493,760 |      22 | 31,600,640 |          6.683 |       6.683 |       6.685 |        2,385.8 |     2,385.9 |        4,867.0 |    8,733.1 |
+| region_fraction | bins    |     1 |       4 |      64 | 123,440 |      22 |  7,900,160 |          0.493 |       0.493 |       0.493 |          642.9 |       644.2 |        1,251.8 |    8,733.1 |
+| region_fraction | bins    |     2 |       4 |      64 | 246,880 |      22 | 15,800,320 |          0.923 |       0.922 |       0.928 |        1,225.4 |     1,225.6 |        2,463.9 |    8,733.1 |
+| region_fraction | bins    |     4 |       4 |      64 | 493,760 |      22 | 31,600,640 |          1.789 |       1.785 |       1.790 |        2,390.8 |     2,391.1 |        4,886.6 |    8,733.1 |
+| region_fraction | joint   |     1 |       1 |      64 | 123,440 |      22 |  7,900,160 |          1.689 |       1.685 |       1.693 |          637.0 |       637.0 |        1,231.1 |    8,733.1 |
+| region_fraction | joint   |     4 |       1 |     128 | 246,880 |      22 | 31,600,640 |          6.685 |       6.671 |       6.842 |        2,384.9 |     2,385.4 |        4,867.8 |    8,733.1 |
+| region_fraction | joint   |     1 |       4 |      64 | 123,440 |      22 |  7,900,160 |          0.493 |       0.493 |       0.493 |          642.9 |       644.2 |        1,251.8 |    8,733.1 |
+| region_fraction | joint   |     4 |       4 |     128 | 246,880 |      22 | 31,600,640 |          1.786 |       1.782 |       1.787 |        2,391.5 |     2,392.4 |        4,887.3 |    8,733.1 |
+| region_fraction | regions |     1 |       1 |      64 | 123,440 |      22 |  7,900,160 |          1.689 |       1.685 |       1.693 |          637.0 |       637.0 |        1,231.1 |    8,733.1 |
+| region_fraction | regions |     2 |       1 |      64 | 123,440 |      44 |  7,900,160 |          1.725 |       1.724 |       1.740 |          638.1 |       638.2 |        1,232.0 |    8,733.1 |
+| region_fraction | regions |     4 |       1 |      64 | 123,440 |      88 |  7,900,160 |          1.789 |       1.789 |       1.792 |          637.7 |       637.8 |        1,232.4 |    8,733.1 |
+| region_fraction | regions |     1 |       4 |      64 | 123,440 |      22 |  7,900,160 |          0.493 |       0.493 |       0.493 |          642.9 |       644.2 |        1,251.8 |    8,733.1 |
+| region_fraction | regions |     2 |       4 |      64 | 123,440 |      44 |  7,900,160 |          0.507 |       0.504 |       0.507 |          644.7 |       644.9 |        1,250.8 |    8,733.1 |
+| region_fraction | regions |     4 |       4 |      64 | 123,440 |      88 |  7,900,160 |          0.524 |       0.523 |       0.524 |          645.4 |       645.9 |        1,252.7 |    8,733.1 |
+| region_fraction | samples |     1 |       1 |      64 | 123,440 |      22 |  7,900,160 |          1.689 |       1.685 |       1.693 |          637.0 |       637.0 |        1,231.1 |    8,733.1 |
+| region_fraction | samples |     2 |       1 |     128 | 123,440 |      22 | 15,800,320 |          3.359 |       3.356 |       3.364 |        1,220.2 |     1,220.3 |        2,443.5 |    8,733.1 |
+| region_fraction | samples |     4 |       1 |     256 | 123,440 |      22 | 31,600,640 |          6.685 |       6.682 |       6.707 |        2,385.0 |     2,385.9 |        4,867.9 |    8,733.1 |
+| region_fraction | samples |     1 |       4 |      64 | 123,440 |      22 |  7,900,160 |          0.493 |       0.493 |       0.493 |          642.9 |       644.2 |        1,251.8 |    8,733.1 |
+| region_fraction | samples |     2 |       4 |     128 | 123,440 |      22 | 15,800,320 |          0.926 |       0.925 |       0.926 |        1,226.5 |     1,227.5 |        2,458.3 |    8,733.1 |
+| region_fraction | samples |     4 |       4 |     256 | 123,440 |      22 | 31,600,640 |          1.787 |       1.784 |       1.789 |        2,393.7 |     2,393.8 |        4,888.5 |    8,733.1 |
+| sex_fraction    | bins    |     1 |       1 |      64 | 123,440 |      NA |  7,900,160 |          0.642 |       0.641 |       0.645 |           49.6 |        49.6 |           10.7 |      134.1 |
+| sex_fraction    | bins    |     2 |       1 |      64 | 246,880 |      NA | 15,800,320 |          1.276 |       1.272 |       1.276 |           52.9 |        52.9 |           15.1 |      134.1 |
+| sex_fraction    | bins    |     4 |       1 |      64 | 493,760 |      NA | 31,600,640 |          2.536 |       2.530 |       2.540 |           60.2 |        60.4 |           21.9 |      134.1 |
+| sex_fraction    | bins    |     1 |       4 |      64 | 123,440 |      NA |  7,900,160 |          0.207 |       0.206 |       0.213 |           64.2 |        64.4 |           25.4 |      134.1 |
+| sex_fraction    | bins    |     2 |       4 |      64 | 246,880 |      NA | 15,800,320 |          0.374 |       0.372 |       0.377 |           66.6 |        66.8 |           29.6 |      134.1 |
+| sex_fraction    | bins    |     4 |       4 |      64 | 493,760 |      NA | 31,600,640 |          0.716 |       0.713 |       0.736 |           72.7 |        72.8 |           55.9 |      134.1 |
+| sex_fraction    | joint   |     1 |       1 |      64 | 123,440 |      NA |  7,900,160 |          0.642 |       0.641 |       0.645 |           49.6 |        49.6 |           10.7 |      134.1 |
+| sex_fraction    | joint   |     4 |       1 |     128 | 246,880 |      NA | 31,600,640 |          2.532 |       2.527 |       2.539 |           60.1 |        60.1 |           21.9 |      134.1 |
+| sex_fraction    | joint   |     1 |       4 |      64 | 123,440 |      NA |  7,900,160 |          0.207 |       0.206 |       0.213 |           64.2 |        64.4 |           25.4 |      134.1 |
+| sex_fraction    | joint   |     4 |       4 |     128 | 246,880 |      NA | 31,600,640 |          0.710 |       0.708 |       0.715 |           72.4 |        72.6 |           56.2 |      134.1 |
+| sex_fraction    | samples |     1 |       1 |      64 | 123,440 |      NA |  7,900,160 |          0.642 |       0.641 |       0.645 |           49.6 |        49.6 |           10.7 |      134.1 |
+| sex_fraction    | samples |     2 |       1 |     128 | 123,440 |      NA | 15,800,320 |          1.274 |       1.271 |       1.277 |           53.0 |        53.0 |           15.4 |      134.1 |
+| sex_fraction    | samples |     4 |       1 |     256 | 123,440 |      NA | 31,600,640 |          2.534 |       2.527 |       2.551 |           60.1 |        60.2 |           22.4 |      134.1 |
+| sex_fraction    | samples |     1 |       4 |      64 | 123,440 |      NA |  7,900,160 |          0.207 |       0.206 |       0.213 |           64.2 |        64.4 |           25.4 |      134.1 |
+| sex_fraction    | samples |     2 |       4 |     128 | 123,440 |      NA | 15,800,320 |          0.377 |       0.369 |       0.379 |           66.3 |        67.1 |           29.8 |      134.1 |
+| sex_fraction    | samples |     4 |       4 |     256 | 123,440 |      NA | 31,600,640 |          0.716 |       0.710 |       0.716 |           72.6 |        73.4 |           56.0 |      134.1 |
 
 The real workload, every composite of the real-data checks in 1 Mb bins, corrected by `duckhts_depth_bins` (no timing verdict: it is far below 5 s):
 
 | threads |    rows | median_seconds | max_rss_mib |
 |--------:|--------:|---------------:|------------:|
-|       1 | 101,592 |          0.092 |        86.4 |
-|       4 | 101,592 |          0.049 |        92.0 |
+|       1 | 101,592 |          0.093 |        86.6 |
+|       4 | 101,592 |          0.050 |        93.0 |
 
 Growth of the median time against the series’ dimension (an exponent of 1 is linear; for the joint series, against the rows) and the peak-RSS ratio of the largest to the 1× input:
 
 | macro           | series  | threads | one_x_seconds | time_exponent_2x | time_exponent_4x | rss_ratio_4x | timing_verdict    |
 |:----------------|:--------|--------:|--------------:|-----------------:|-----------------:|-------------:|:------------------|
-| depth_bins      | bins    |       1 |         6.108 |            1.003 |            1.015 |        3.928 | yes               |
-| region_fraction | bins    |       1 |         1.712 |            0.987 |            0.993 |        3.751 | no (1x under 5 s) |
-| sex_fraction    | bins    |       1 |         0.640 |            0.986 |            1.001 |        1.215 | no (1x under 5 s) |
-| depth_bins      | joint   |       1 |         6.108 |               NA |            1.010 |        3.928 | yes               |
-| region_fraction | joint   |       1 |         1.712 |               NA |            0.990 |        3.751 | no (1x under 5 s) |
-| sex_fraction    | joint   |       1 |         0.640 |               NA |            0.993 |        1.217 | no (1x under 5 s) |
-| region_fraction | regions |       1 |         1.712 |            0.066 |            0.116 |        1.003 | no (1x under 5 s) |
-| depth_bins      | samples |       1 |         6.108 |            1.024 |            1.009 |        3.928 | yes               |
-| region_fraction | samples |       1 |         1.712 |            0.985 |            0.992 |        3.751 | no (1x under 5 s) |
-| sex_fraction    | samples |       1 |         0.640 |            0.996 |            0.991 |        1.215 | no (1x under 5 s) |
-| depth_bins      | bins    |       4 |         1.831 |            0.945 |            0.970 |        3.910 | yes               |
-| region_fraction | bins    |       4 |         0.499 |            0.910 |            0.948 |        3.717 | no (1x under 5 s) |
-| sex_fraction    | bins    |       4 |         0.203 |            0.886 |            0.914 |        1.134 | no (1x under 5 s) |
-| depth_bins      | joint   |       4 |         1.831 |               NA |            0.962 |        3.912 | yes               |
-| region_fraction | joint   |       4 |         0.499 |               NA |            0.928 |        3.718 | no (1x under 5 s) |
-| sex_fraction    | joint   |       4 |         0.203 |               NA |            0.898 |        1.136 | no (1x under 5 s) |
-| region_fraction | regions |       4 |         0.499 |            0.070 |            0.104 |        1.003 | no (1x under 5 s) |
-| depth_bins      | samples |       4 |         1.831 |            0.948 |            1.065 |        3.913 | yes               |
-| region_fraction | samples |       4 |         0.499 |            0.906 |            0.953 |        3.722 | no (1x under 5 s) |
-| sex_fraction    | samples |       4 |         0.203 |            0.869 |            0.936 |        1.141 | no (1x under 5 s) |
+| depth_bins      | bins    |       1 |         6.204 |            1.006 |            1.005 |        3.926 | yes               |
+| region_fraction | bins    |       1 |         1.689 |            0.995 |            0.990 |        3.745 | no (1x under 5 s) |
+| sex_fraction    | bins    |       1 |         0.642 |            0.991 |            0.992 |        1.214 | no (1x under 5 s) |
+| depth_bins      | joint   |       1 |         6.204 |               NA |            1.014 |        3.926 | yes               |
+| region_fraction | joint   |       1 |         1.689 |               NA |            0.992 |        3.744 | no (1x under 5 s) |
+| sex_fraction    | joint   |       1 |         0.642 |               NA |            0.990 |        1.212 | no (1x under 5 s) |
+| region_fraction | regions |       1 |         1.689 |            0.030 |            0.053 |        1.001 | no (1x under 5 s) |
+| depth_bins      | samples |       1 |         6.204 |            1.026 |            1.008 |        3.927 | yes               |
+| region_fraction | samples |       1 |         1.689 |            0.991 |            0.993 |        3.744 | no (1x under 5 s) |
+| sex_fraction    | samples |       1 |         0.642 |            0.989 |            0.992 |        1.212 | no (1x under 5 s) |
+| depth_bins      | bins    |       4 |         1.856 |            0.951 |            0.959 |        3.912 | yes               |
+| region_fraction | bins    |       4 |         0.493 |            0.904 |            0.954 |        3.719 | no (1x under 5 s) |
+| sex_fraction    | bins    |       4 |         0.207 |            0.855 |            0.938 |        1.132 | no (1x under 5 s) |
+| depth_bins      | joint   |       4 |         1.856 |               NA |            0.967 |        3.918 | yes               |
+| region_fraction | joint   |       4 |         0.493 |               NA |            0.928 |        3.720 | no (1x under 5 s) |
+| sex_fraction    | joint   |       4 |         0.207 |               NA |            0.890 |        1.128 | no (1x under 5 s) |
+| region_fraction | regions |       4 |         0.493 |            0.038 |            0.049 |        1.004 | no (1x under 5 s) |
+| depth_bins      | samples |       4 |         1.856 |            0.954 |            1.048 |        3.912 | yes               |
+| region_fraction | samples |       4 |         0.493 |            0.908 |            0.949 |        3.723 | no (1x under 5 s) |
+| sex_fraction    | samples |       4 |         0.207 |            0.868 |            0.923 |        1.131 | no (1x under 5 s) |
 
 ## Findings
 
-Every observation is within its ceiling and none spills. Timing verdicts apply to the series whose 1x run takes at least 5 s on one thread (depth_bins bins, depth_bins joint, depth_bins samples), and none of their exponents is above 1.07; the other series get a memory verdict and their times without a timing verdict. `duckhts_depth_bins` corrects 7,900,160 rows in 6.1 s on one thread and 31,600,640 rows in 25.0 s (7.4 s on four threads), at 8759 MiB peak RSS, 289 bytes a row against the 136 declared. The region estimator takes 6.7 s and 2385.5 MiB at 31,600,640 rows, and the sex estimator, which streams, 2.5 s and 59.9 MiB.
+Every observation is within its ceiling and none spills. Timing verdicts apply to the series whose 1x run takes at least 5 s on one thread (depth_bins bins, depth_bins joint, depth_bins samples), and none of their exponents is above 1.05; the other series get a memory verdict and their times without a timing verdict. `duckhts_depth_bins` corrects 7,900,160 rows in 6.2 s on one thread and 31,600,640 rows in 25.4 s (7.4 s on four threads), at 8759.5 MiB peak RSS, 289 bytes a row against the 136 declared. The region estimator takes 6.7 s and 2385.9 MiB at 31,600,640 rows, and the sex estimator, which streams, 2.5 s and 60.2 MiB.
 
 On the real genomes, without a reference the X of the pure XY genomes reads as 0.967 to 0.975 copies, so the X estimate of the fraction is -0.033 to -0.025, while the reference brings every pure fraction within 0.009 of 0. The residual is a difference in depth between X and the autosomes that GC does not explain (mappability, read filters); a reference set of the same processing removes it.
 
