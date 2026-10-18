@@ -95,6 +95,6 @@ DBI::dbExecute(con, paste(
 fractions <- rduckhts_depth_region_fraction(con, "corrected", "chromosomes")
 fractions[fractions$region == "8", c("region", "shift", "shift_low", "shift_high")]
 #>   region     shift shift_low shift_high
-#> 5      8 0.1993923 0.1824568  0.2163279
+#> 4      8 0.1993923 0.1824568  0.2163279
 DBI::dbDisconnect(con, shutdown = TRUE)
 ```
