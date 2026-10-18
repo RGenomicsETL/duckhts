@@ -2,9 +2,10 @@
 
 # duckhts 2.0.0
 
-- Windows R-devel CI configures crash dumps in the machine-wide WER registry,
-  retains application crash events, and traces BAM/CRAM extraction statements
-  after a failed package check without replacing the full test suite.
+- Windows Server 2022 CI checks R-devel and R 4.5.3, configures crash dumps
+  in the machine-wide WER registry, retains application crash events, and
+  traces BAM/CRAM extraction statements after a failed package check without
+  replacing the full test suite.
 
 - Rduckhts webR and r-universe builds put the bundled htslib 1.24 headers
   ahead of toolchain include paths, matching the static htslib archive linked
