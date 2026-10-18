@@ -29,12 +29,25 @@ for (file in names(targets)) {
   statements <- as.list(body(test_function))[-1L]
   traced <- list(as.name("{"))
   for (i in seq_along(statements)) {
-    label <- paste(name, i, deparse(statements[[i]])[1L])
+    statement <- statements[[i]]
+    if (is.call(statement) && identical(statement[[1L]], as.name("on.exit"))) {
+      cleanup <- statement[[2L]]
+      if (is.call(cleanup) && identical(cleanup[[1L]], as.name("dbDisconnect"))) {
+        statement[[2L]] <- substitute({
+          cat(NAME, "starting dbDisconnect\n")
+          flush(stdout())
+          DISCONNECT
+          cat(NAME, "finished dbDisconnect\n")
+          flush(stdout())
+        }, list(NAME = name, DISCONNECT = cleanup))
+      }
+    }
+    label <- paste(name, i, deparse(statement)[1L])
     marker <- substitute({
       cat(format(Sys.time(), "%Y-%m-%d %H:%M:%OS3"), LABEL, "\n")
       flush(stdout())
     }, list(LABEL = label))
-    traced <- c(traced, list(marker, statements[[i]]))
+    traced <- c(traced, list(marker, statement))
   }
   body(test_function) <- as.call(traced)
   definitions[[index]] <- substitute(NAME <- FUN, list(
