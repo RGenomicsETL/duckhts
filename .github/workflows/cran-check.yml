@@ -182,6 +182,7 @@ jobs:
           Write-Host "Crash probe captured (ProcDump exit $probeCode)"
           Remove-Item -Path $probeDump.FullName
           "GITHUB_PAT=" | Add-Content -Path $env:GITHUB_ENV
+          exit 0
 
       - name: Verify crash-check environment
         if: matrix.config.os == 'windows-2022'
