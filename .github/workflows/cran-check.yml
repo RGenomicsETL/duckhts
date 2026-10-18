@@ -213,6 +213,22 @@ jobs:
           Remove-Item -Path $marker -ErrorAction SilentlyContinue
           $dumpDir = Join-Path $env:RUNNER_TEMP "r-crash-dumps"
           $procdump = Join-Path $env:RUNNER_TEMP "duckhts-procdump/procdump64.exe"
+          $exitSource = Join-Path $env:RUNNER_TEMP "duckhts_exit_probe.c"
+          $exitProbe = Join-Path $env:RUNNER_TEMP "duckhts_exit_probe.exe"
+          @'
+          #include <windows.h>
+          int main(void) {
+              ExitProcess(0xC0000005u);
+          }
+          '@ | Set-Content -Path $exitSource
+          & gcc.exe -O0 $exitSource -o $exitProbe
+          if ($LASTEXITCODE -ne 0) { throw "Could not compile the process-exit probe" }
+          & $procdump -accepteula -t -x $dumpDir $exitProbe
+          $exitDump = Get-ChildItem -Path $dumpDir -Filter "duckhts_exit_probe*.dmp" | Select-Object -First 1
+          $terminationCaptureWorks = [bool]$exitDump
+          Write-Host "Termination dump captured: $terminationCaptureWorks"
+          if ($exitDump) { Remove-Item -Path $exitDump.FullName }
+
           $rscript = (Get-Command Rscript.exe).Source
           $replay = Join-Path $env:RUNNER_TEMP "duckhts-tinytest-replay.R"
           @'
@@ -222,10 +238,17 @@ jobs:
           source("r/Rduckhts/tests/tinytest.R")
           writeLines("complete", Sys.getenv("DUCKHTS_REPLAY_MARKER"))
           '@ | Set-Content -Path $replay
-          & $procdump -accepteula -e 1 -f '*C0000005*' -x $dumpDir $rscript --vanilla $replay
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $marker) -or
-              (Get-ChildItem -Path $dumpDir -Filter "Rscript*.dmp")) {
+          & $procdump -accepteula -e 1 -f '*C0000005*' -t -n 2 -x $dumpDir $rscript --vanilla $replay
+          $replayCode = $LASTEXITCODE
+          $replayDumps = @(Get-ChildItem -Path $dumpDir -Filter "Rscript*.dmp")
+          if (-not (Test-Path $marker) -or
+              $replayDumps.Count -gt 1 -or
+              ($replayDumps.Count -eq 1 -and -not $terminationCaptureWorks) -or
+              ($replayCode -ne 0 -and $replayDumps.Count -eq 0)) {
             throw "Full tinytest replay failed or crashed; inspect the check output and native dump"
+          }
+          if ($replayDumps.Count -eq 1) {
+            Remove-Item -Path $replayDumps[0].FullName
           }
 
       - name: Trace Windows Server 2022 BAM extraction after check failure
