@@ -232,18 +232,11 @@ jobs:
           if (-not (Test-Path $cdb)) { throw "Windows SDK debugger is unavailable" }
           $debuggerCommands = Join-Path $env:RUNNER_TEMP "duckhts-exit-debugger.txt"
           $debuggerLog = Join-Path $dumpDir "duckhts-exit-debugger.log"
-          $breakpointCommands = Join-Path $env:RUNNER_TEMP "duckhts-exit-breakpoint.txt"
           $debuggerDump = Join-Path $dumpDir "duckhts-exit-before-unload.dmp"
           $debuggerDumpArgument = $debuggerDump.Replace("\", "/")
+          $onExit = 'j (@edx == 0xc0000005) ".echo DUCKHTS_EXIT_STATUS; k; .dump /m ' + $debuggerDumpArgument + '; gc"; "gc"'
           @(
-            '.echo DUCKHTS_EXIT_STATUS',
-            'k',
-            ".dump /m $debuggerDumpArgument",
-            'gc'
-          ) | Set-Content -Path $breakpointCommands
-          $breakpointArgument = $breakpointCommands.Replace("\", "/")
-          @(
-            'bu /w "@edx == 0xc0000005" ntdll!NtTerminateProcess "$$>a<' + $breakpointArgument + '"',
+            'bu ntdll!NtTerminateProcess "' + $onExit + '"',
             'g'
           ) | Set-Content -Path $debuggerCommands
           & $cdb -G -logou $debuggerLog -cf $debuggerCommands $exitProbe
