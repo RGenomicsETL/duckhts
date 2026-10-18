@@ -233,7 +233,8 @@ jobs:
           $debuggerCommands = Join-Path $env:RUNNER_TEMP "duckhts-exit-debugger.txt"
           $debuggerLog = Join-Path $dumpDir "duckhts-exit-debugger.log"
           $debuggerDump = Join-Path $dumpDir "duckhts-exit-before-unload.dmp"
-          $onExit = '.if (@edx == 0xc0000005) { .echo DUCKHTS_EXIT_STATUS; k; .dump /m ' + $debuggerDump + '; gc } .else { gc }'
+          $debuggerDumpArgument = $debuggerDump.Replace("\", "\\")
+          $onExit = '.if (@edx == 0xc0000005) { .echo DUCKHTS_EXIT_STATUS; k; .dump /m ' + $debuggerDumpArgument + '; gc } .else { gc }'
           @(
             'bu ntdll!NtTerminateProcess "' + $onExit + '"',
             'g'
