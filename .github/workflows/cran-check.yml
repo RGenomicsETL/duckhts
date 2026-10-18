@@ -158,9 +158,22 @@ jobs:
         run: |
           $checkLibrary = (Resolve-Path "r/Rduckhts/check/Rduckhts.Rcheck").Path
           $env:R_LIBS = $checkLibrary
-          Rscript --vanilla scripts/diagnose_bam_extraction.R
+          $env:GITHUB_PAT = ""
+          $dumpDir = Join-Path $env:RUNNER_TEMP "r-crash-dumps"
+          $toolsDir = Join-Path $env:RUNNER_TEMP "duckhts-procdump"
+          $archive = Join-Path $env:RUNNER_TEMP "Procdump.zip"
+          Invoke-WebRequest -Uri "https://download.sysinternals.com/files/Procdump.zip" -OutFile $archive
+          $expectedHash = "5FE68E81632F13188930AFFFF20A9A9910170BAE654360850D3108CEAD708A2D"
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne $expectedHash) {
+            throw "ProcDump download checksum mismatch"
+          }
+          Expand-Archive -Path $archive -DestinationPath $toolsDir
+          $procdump = Join-Path $toolsDir "procdump64.exe"
+          $rscript = (Get-Command Rscript.exe).Source
+          & $procdump -accepteula -e -x $dumpDir $rscript --vanilla scripts/diagnose_bam_extraction.R
           $code = $LASTEXITCODE
-          Write-Host ("BAM diagnostic exit code: {0} (0x{1:X8})" -f $code, ($code -band [long]0xFFFFFFFF))
+          Write-Host ("ProcDump exit code: {0} (0x{1:X8})" -f $code, ($code -band [long]0xFFFFFFFF))
+          Get-ChildItem -Path $dumpDir -Filter "*.dmp" | Select-Object Name, Length
           exit $code
 
       - name: Collect Windows application crash events
