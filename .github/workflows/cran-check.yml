@@ -160,11 +160,6 @@ jobs:
           }
           Expand-Archive -Path $archive -DestinationPath $toolsDir
           $procdump = Join-Path $toolsDir "procdump64.exe"
-          & $procdump -accepteula -i $dumpDir -mm
-          if ($LASTEXITCODE -ne 0) { throw "ProcDump registration failed" }
-          $debugger = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\AeDebug").Debugger
-          if ($debugger -notlike "*$procdump*") { throw "ProcDump is not the postmortem debugger" }
-
           $probeSource = Join-Path $env:RUNNER_TEMP "duckhts_crash_probe.c"
           $probe = Join-Path $env:RUNNER_TEMP "duckhts_crash_probe.exe"
           @'
@@ -175,15 +170,16 @@ jobs:
           }
           '@ | Set-Content -Path $probeSource
           & gcc.exe -O0 $probeSource -o $probe
-          if ($LASTEXITCODE -ne 0) { throw "Could not compile the postmortem dump probe" }
-          $process = Start-Process -FilePath $probe -NoNewWindow -Wait -PassThru
-          if ($process.ExitCode -ne -1073741819) { throw "Crash probe did not raise an access violation" }
+          if ($LASTEXITCODE -ne 0) { throw "Could not compile the native crash probe" }
+          & $procdump -accepteula -e -x $dumpDir $probe
+          $probeCode = $LASTEXITCODE
           for ($attempt = 0; $attempt -lt 10; $attempt++) {
             $probeDump = Get-ChildItem -Path $dumpDir -Filter "duckhts_crash_probe*.dmp" | Select-Object -First 1
             if ($probeDump) { break }
             Start-Sleep -Milliseconds 500
           }
-          if (-not $probeDump) { throw "Postmortem debugger did not create a crash probe dump" }
+          if (-not $probeDump) { throw "ProcDump did not capture the crash probe (exit $probeCode)" }
+          Write-Host "Crash probe captured (ProcDump exit $probeCode)"
           Remove-Item -Path $probeDump.FullName
           "GITHUB_PAT=" | Add-Content -Path $env:GITHUB_ENV
 
@@ -200,13 +196,48 @@ jobs:
           error-on: '"warning"'
           working-directory: r/Rduckhts
 
+      - name: Replay full R 4.5.3 tinytest suite under ProcDump
+        if: always() && matrix.config.os == 'windows-2022' && matrix.config.r == '4.5.3'
+        timeout-minutes: 12
+        shell: pwsh
+        run: |
+          $checkLibrary = "r/Rduckhts/check/Rduckhts.Rcheck"
+          if (-not (Test-Path (Join-Path $checkLibrary "Rduckhts"))) {
+            throw "No installed check library to replay"
+          }
+          $env:R_LIBS = (Resolve-Path $checkLibrary).Path
+          $env:GITHUB_PAT = ""
+          $marker = Join-Path $env:RUNNER_TEMP "duckhts-tinytest-replay-complete.txt"
+          $env:DUCKHTS_REPLAY_MARKER = $marker
+          Remove-Item -Path $marker -ErrorAction SilentlyContinue
+          $dumpDir = Join-Path $env:RUNNER_TEMP "r-crash-dumps"
+          $procdump = Join-Path $env:RUNNER_TEMP "duckhts-procdump/procdump64.exe"
+          $rscript = (Get-Command Rscript.exe).Source
+          $replay = Join-Path $env:RUNNER_TEMP "duckhts-tinytest-replay.R"
+          @'
+          if (!requireNamespace("tinytest", quietly = TRUE)) {
+            stop("tinytest unavailable")
+          }
+          source("r/Rduckhts/tests/tinytest.R")
+          writeLines("complete", Sys.getenv("DUCKHTS_REPLAY_MARKER"))
+          '@ | Set-Content -Path $replay
+          & $procdump -accepteula -e -x $dumpDir $rscript --vanilla $replay
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $marker) -or
+              (Get-ChildItem -Path $dumpDir -Filter "Rscript*.dmp")) {
+            throw "Full tinytest replay failed or crashed; inspect the check output and native dump"
+          }
+
       - name: Trace Windows Server 2022 BAM extraction after check failure
         if: failure() && matrix.config.os == 'windows-2022'
         timeout-minutes: 10
         shell: pwsh
         run: |
-          $checkLibrary = (Resolve-Path "r/Rduckhts/check/Rduckhts.Rcheck").Path
-          $env:R_LIBS = $checkLibrary
+          $checkLibrary = "r/Rduckhts/check/Rduckhts.Rcheck"
+          if (-not (Test-Path (Join-Path $checkLibrary "Rduckhts"))) {
+            Write-Host "No installed check library for BAM extraction trace"
+            return
+          }
+          $env:R_LIBS = (Resolve-Path $checkLibrary).Path
           $env:GITHUB_PAT = ""
           $dumpDir = Join-Path $env:RUNNER_TEMP "r-crash-dumps"
           $procdump = Join-Path $env:RUNNER_TEMP "duckhts-procdump/procdump64.exe"
@@ -244,19 +275,6 @@ jobs:
             ${{ runner.temp }}/r-crash-dumps/R_*.dmp
             ${{ runner.temp }}/r-crash-dumps/application-events.txt
             r/Rduckhts/check
-
-      - name: Restore Windows postmortem debugger
-        if: always() && matrix.config.os == 'windows-2022'
-        shell: pwsh
-        run: |
-          $procdump = Join-Path $env:RUNNER_TEMP "duckhts-procdump/procdump64.exe"
-          if (Test-Path $procdump) {
-            $debugger = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\AeDebug" -ErrorAction SilentlyContinue
-            if ($debugger.Debugger -like "*$procdump*") {
-              & $procdump -u
-              if ($LASTEXITCODE -ne 0) { throw "Could not restore the postmortem debugger" }
-            }
-          }
 
       - name: Verify htslib header diagnostics stay outside DuckHTS compilation
         if: runner.os == 'macOS'

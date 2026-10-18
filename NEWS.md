@@ -2,10 +2,10 @@
 
 # duckhts 2.0.0
 
-- Windows Server 2022 CI checks R-devel and R 4.5.3 with a postmortem
-  debugger verified by a native crash probe. It collects R-process minidumps
-  if the full package check crashes; failed checks also retain BAM/CRAM
-  extraction and connection shutdown traces without replacing the test suite.
+- Windows Server 2022 CI checks R-devel and R 4.5.3 and verifies native
+  exception capture with a disposable crash probe. The full R 4.5.3 tinytest
+  suite also runs under ProcDump to retain minidumps from native failures;
+  failed checks retain BAM/CRAM extraction and connection shutdown traces.
 
 - Rduckhts webR and r-universe builds put the bundled htslib 1.24 headers
   ahead of toolchain include paths, matching the static htslib archive linked
