@@ -234,7 +234,7 @@ jobs:
           $debuggerLog = Join-Path $dumpDir "duckhts-exit-debugger.log"
           $debuggerDump = Join-Path $dumpDir "duckhts-exit-before-unload.dmp"
           $debuggerDumpArgument = $debuggerDump.Replace("\", "/")
-          $onExit = 'j (@edx == 0xc0000005) ".echo DUCKHTS_EXIT_STATUS; k; .dump /m ' + $debuggerDumpArgument + '; gc"; "gc"'
+          $onExit = 'j (@edx == 0xc0000005) \".echo DUCKHTS_EXIT_STATUS; k; .dump /m ' + $debuggerDumpArgument + '; gc\"; \"gc\"'
           @(
             'bu ntdll!NtTerminateProcess "' + $onExit + '"',
             'g'
