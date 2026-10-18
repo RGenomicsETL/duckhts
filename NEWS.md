@@ -4,7 +4,7 @@
 
 - Windows Server 2022 CI checks R-devel and R 4.5.3 and verifies native
   exception capture with a disposable crash probe. The full R 4.5.3 tinytest
-  suite also runs under ProcDump to retain minidumps from native failures;
+  suite also runs under a debugger to retain exit stacks and minidumps;
   failed checks retain BAM/CRAM extraction and connection shutdown traces.
 
 - Rduckhts webR and r-universe builds put the bundled htslib 1.24 headers

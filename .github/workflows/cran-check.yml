@@ -197,18 +197,7 @@ jobs:
           error-on: '"warning"'
           working-directory: r/Rduckhts
 
-      - name: Check installed live debuggers on R 4.5.3
-        if: always() && matrix.config.os == 'windows-2022' && matrix.config.r == '4.5.3'
-        shell: pwsh
-        run: |
-          foreach ($name in @("gdb.exe", "lldb.exe", "cdb.exe")) {
-            $tool = Get-Command $name -ErrorAction SilentlyContinue
-            if ($tool) { Write-Host "$name : $($tool.Source)" }
-          }
-          $cdb = "C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe"
-          if (Test-Path $cdb) { Write-Host "Windows SDK debugger: $cdb" }
-
-      - name: Replay full R 4.5.3 tinytest suite under ProcDump
+      - name: Replay full R 4.5.3 tinytest suite under CDB
         if: always() && matrix.config.os == 'windows-2022' && matrix.config.r == '4.5.3'
         timeout-minutes: 12
         shell: pwsh
@@ -236,9 +225,26 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Could not compile the process-exit probe" }
           & $procdump -accepteula -t -x $dumpDir $exitProbe
           $exitDump = Get-ChildItem -Path $dumpDir -Filter "duckhts_exit_probe*.dmp" | Select-Object -First 1
-          $terminationCaptureWorks = [bool]$exitDump
-          Write-Host "Termination dump captured: $terminationCaptureWorks"
+          Write-Host "Termination dump captured: $([bool]$exitDump)"
           if ($exitDump) { Remove-Item -Path $exitDump.FullName }
+
+          $cdb = "C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe"
+          if (-not (Test-Path $cdb)) { throw "Windows SDK debugger is unavailable" }
+          $debuggerCommands = Join-Path $env:RUNNER_TEMP "duckhts-exit-debugger.txt"
+          $debuggerLog = Join-Path $dumpDir "duckhts-exit-debugger.log"
+          $debuggerDump = Join-Path $dumpDir "duckhts-exit-before-unload.dmp"
+          $onExit = '.if (@edx == 0xc0000005) { .echo DUCKHTS_EXIT_STATUS; k; .dump /m "' + $debuggerDump + '"; gc } .else { gc }'
+          @(
+            'bu ntdll!NtTerminateProcess "' + $onExit + '"',
+            'g'
+          ) | Set-Content -Path $debuggerCommands
+          & $cdb -G -logou $debuggerLog -cf $debuggerCommands $exitProbe
+          if (-not (Test-Path $debuggerDump) -or
+              -not (Select-String -Path $debuggerLog -Pattern "DUCKHTS_EXIT_STATUS" -Quiet)) {
+            throw "Live debugger did not capture the explicit process-exit probe"
+          }
+          Remove-Item -Path $debuggerDump
+          Remove-Item -Path $debuggerLog
 
           $rscript = (Get-Command Rscript.exe).Source
           $replay = Join-Path $env:RUNNER_TEMP "duckhts-tinytest-replay.R"
@@ -249,17 +255,12 @@ jobs:
           source("r/Rduckhts/tests/tinytest.R")
           writeLines("complete", Sys.getenv("DUCKHTS_REPLAY_MARKER"))
           '@ | Set-Content -Path $replay
-          & $procdump -accepteula -e 1 -f '*C0000005*' -t -n 2 -x $dumpDir $rscript --vanilla $replay
-          $replayCode = $LASTEXITCODE
-          $replayDumps = @(Get-ChildItem -Path $dumpDir -Filter "Rscript*.dmp")
-          if (-not (Test-Path $marker) -or
-              $replayDumps.Count -gt 1 -or
-              ($replayDumps.Count -eq 1 -and -not $terminationCaptureWorks) -or
-              ($replayCode -ne 0 -and $replayDumps.Count -eq 0)) {
-            throw "Full tinytest replay failed or crashed; inspect the check output and native dump"
+          & $cdb -G -logou $debuggerLog -cf $debuggerCommands $rscript --vanilla $replay
+          if (-not (Test-Path $marker)) {
+            throw "Full tinytest replay failed or exited early; inspect the debugger log and dump"
           }
-          if ($replayDumps.Count -eq 1) {
-            Remove-Item -Path $replayDumps[0].FullName
+          if (Test-Path $debuggerDump) {
+            throw "Full tinytest replay reached the access-violation exit status"
           }
 
       - name: Trace Windows Server 2022 BAM extraction after check failure
@@ -308,6 +309,8 @@ jobs:
             ${{ runner.temp }}/r-crash-dumps/Rscript*.dmp
             ${{ runner.temp }}/r-crash-dumps/R.exe*.dmp
             ${{ runner.temp }}/r-crash-dumps/R_*.dmp
+            ${{ runner.temp }}/r-crash-dumps/duckhts-exit-before-unload.dmp
+            ${{ runner.temp }}/r-crash-dumps/duckhts-exit-debugger.log
             ${{ runner.temp }}/r-crash-dumps/application-events.txt
             r/Rduckhts/check
 
