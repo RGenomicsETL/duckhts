@@ -222,7 +222,7 @@ jobs:
           source("r/Rduckhts/tests/tinytest.R")
           writeLines("complete", Sys.getenv("DUCKHTS_REPLAY_MARKER"))
           '@ | Set-Content -Path $replay
-          & $procdump -accepteula -e -x $dumpDir $rscript --vanilla $replay
+          & $procdump -accepteula -e 1 -f '*C0000005*' -x $dumpDir $rscript --vanilla $replay
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path $marker) -or
               (Get-ChildItem -Path $dumpDir -Filter "Rscript*.dmp")) {
             throw "Full tinytest replay failed or crashed; inspect the check output and native dump"
