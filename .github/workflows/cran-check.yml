@@ -232,14 +232,26 @@ jobs:
           if (-not (Test-Path $cdb)) { throw "Windows SDK debugger is unavailable" }
           $debuggerCommands = Join-Path $env:RUNNER_TEMP "duckhts-exit-debugger.txt"
           $debuggerLog = Join-Path $dumpDir "duckhts-exit-debugger.log"
+          $breakpointCommands = Join-Path $env:RUNNER_TEMP "duckhts-exit-breakpoint.txt"
+          $debuggerDump = Join-Path $dumpDir "duckhts-exit-before-unload.dmp"
+          $debuggerDumpArgument = $debuggerDump.Replace("\", "/")
           @(
-            'bu /w "@edx == 0xc0000005" ntdll!NtTerminateProcess',
+            '.echo DUCKHTS_EXIT_STATUS',
+            'k',
+            ".dump /m $debuggerDumpArgument",
+            'gc'
+          ) | Set-Content -Path $breakpointCommands
+          $breakpointArgument = $breakpointCommands.Replace("\", "/")
+          @(
+            'bu /w "@edx == 0xc0000005" ntdll!NtTerminateProcess "$$>a<' + $breakpointArgument + '"',
             'g'
           ) | Set-Content -Path $debuggerCommands
           & $cdb -G -logou $debuggerLog -cf $debuggerCommands $exitProbe
-          if (-not (Select-String -Path $debuggerLog -Pattern "ntdll!NtTerminateProcess" -Quiet)) {
-            throw "Live debugger did not reach the explicit process-exit probe"
+          if (-not (Test-Path $debuggerDump) -or
+              -not (Select-String -Path $debuggerLog -Pattern "DUCKHTS_EXIT_STATUS" -Quiet)) {
+            throw "Live debugger did not capture the explicit process-exit probe"
           }
+          Remove-Item -Path $debuggerDump
           Remove-Item -Path $debuggerLog
 
           $rscript = (Get-Command Rscript.exe).Source
@@ -253,7 +265,10 @@ jobs:
           '@ | Set-Content -Path $replay
           & $cdb -G -logou $debuggerLog -cf $debuggerCommands $rscript --vanilla $replay
           if (-not (Test-Path $marker)) {
-            throw "Full tinytest replay failed or exited early; inspect the debugger log"
+            throw "Full tinytest replay failed or exited early; inspect the debugger log and dump"
+          }
+          if (Test-Path $debuggerDump) {
+            throw "Full tinytest replay reached the access-violation exit status"
           }
 
       - name: Trace Windows Server 2022 BAM extraction after check failure
@@ -302,6 +317,7 @@ jobs:
             ${{ runner.temp }}/r-crash-dumps/Rscript*.dmp
             ${{ runner.temp }}/r-crash-dumps/R.exe*.dmp
             ${{ runner.temp }}/r-crash-dumps/R_*.dmp
+            ${{ runner.temp }}/r-crash-dumps/duckhts-exit-before-unload.dmp
             ${{ runner.temp }}/r-crash-dumps/duckhts-exit-debugger.log
             ${{ runner.temp }}/r-crash-dumps/application-events.txt
             r/Rduckhts/check
